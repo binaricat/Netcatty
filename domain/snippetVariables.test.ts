@@ -82,6 +82,41 @@ test("applySnippetVariables preserves Docker Go template assignment action block
   if (result.ok) assert.equal(result.command, command);
 });
 
+test("applySnippetVariables preserves Docker Go template assigned variables", () => {
+  const cases = [
+    "docker inspect --format='{{$p := .LogPath}}{{$p}}' moviepilot",
+    "docker inspect --format='{{$p := .LogPath}}{{printf \"%s\" $p}}' moviepilot",
+    "docker inspect --format='{{$p := .LogPath}}{{if $p}}{{$p}}{{end}}' moviepilot",
+    "docker inspect --format='{{range $k, $v := .NetworkSettings.Networks}}{{$k}}={{$v.IPAddress}}{{end}}' moviepilot",
+  ];
+
+  for (const command of cases) {
+    const result = applySnippetVariables(command, {});
+
+    assert.equal(snippetHasVariables(command), false);
+    assert.deepEqual(parseSnippetVariables(command), []);
+    assert.equal(result.ok, true);
+    if (result.ok) assert.equal(result.command, command);
+  }
+});
+
+test("applySnippetVariables preserves Docker Go template helper actions", () => {
+  const cases = [
+    "docker inspect --format='{{json .}}' moviepilot",
+    "docker inspect --format='{{printf \"%s\" .}}' moviepilot",
+    "docker inspect --format='{{println .}}' moviepilot",
+  ];
+
+  for (const command of cases) {
+    const result = applySnippetVariables(command, {});
+
+    assert.equal(snippetHasVariables(command), false);
+    assert.deepEqual(parseSnippetVariables(command), []);
+    assert.equal(result.ok, true);
+    if (result.ok) assert.equal(result.command, command);
+  }
+});
+
 test("applySnippetVariables can mix script variables with Docker Go template field literals", () => {
   const result = applySnippetVariables(
     "ls -lh $(docker inspect --format='{{.LogPath}}' {{container:moviepilot}})",
@@ -132,6 +167,18 @@ test("applySnippetVariables keeps regular variables named like Go template contr
   const result = applySnippetVariables(
     "docker inspect --format='{{.LogPath}}' {{end:done}}",
     {},
+  );
+
+  assert.equal(result.ok, true);
+  if (result.ok) {
+    assert.equal(result.command, "docker inspect --format='{{.LogPath}}' done");
+  }
+});
+
+test("applySnippetVariables keeps required variables named like Go template controls near Go template context", () => {
+  const result = applySnippetVariables(
+    "docker inspect --format='{{.LogPath}}' {{end}}",
+    { end: "done" },
   );
 
   assert.equal(result.ok, true);

@@ -26,20 +26,64 @@ function templateActionBody(match: RegExpMatchArray): string {
 
 function collectVariableMatches(text: string): {
   matches: RegExpMatchArray[];
-  hasGoTemplateContext: boolean;
+  goTemplateOffsets: Set<number>;
 } {
   const matches = Array.from(text.matchAll(variablePattern()));
-  const hasGoTemplateContext = matches.some((match) => (
-    hasGoTemplateFieldReference(templateActionBody(match))
-  ));
-  return { matches, hasGoTemplateContext };
+  const goTemplateOffsets = new Set<number>();
+  const goTemplateVariables = new Set<string>();
+  let blockDepth = 0;
+
+  for (const match of matches) {
+    const action = normalizeGoTemplateAction(templateActionBody(match));
+    const firstWord = action.split(/\s+/, 1)[0] ?? "";
+    const hasFieldReference = hasGoTemplateFieldReference(action);
+    const hasKnownVariableReference = hasGoTemplateVariableReference(action, goTemplateVariables);
+    const insideBlock = blockDepth > 0;
+    const isBlockStart = (firstWord === "if" || firstWord === "range" || firstWord === "with")
+      && (hasFieldReference || hasKnownVariableReference);
+    const isBlockEnd = action === "end";
+    const isGoTemplateToken = hasFieldReference
+      || hasKnownVariableReference
+      || isBlockStart
+      || (insideBlock && isGoTemplateControlAction(action));
+
+    if (isGoTemplateToken && match.index !== undefined) {
+      goTemplateOffsets.add(match.index);
+    }
+    if (isGoTemplateToken) {
+      for (const variable of action.matchAll(/\$[A-Za-z_][A-Za-z0-9_]*(?=\s*(?:,|:?=))/g)) {
+        goTemplateVariables.add(variable[0]);
+      }
+    }
+    if (isBlockStart) {
+      blockDepth += 1;
+    } else if (isBlockEnd && insideBlock) {
+      blockDepth -= 1;
+    }
+  }
+
+  return { matches, goTemplateOffsets };
 }
 
 function hasGoTemplateFieldReference(name: string): boolean {
   const action = normalizeGoTemplateAction(name);
   return action === "."
     || /(?:^|[\s(])\.[A-Za-z_]/.test(action)
+    || /(?:^|[\s(])\.(?:$|[\s),|])/.test(action)
     || /(?:^|[\s(])\$[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_]/.test(action);
+}
+
+function hasGoTemplateVariableReference(action: string, variables: Set<string>): boolean {
+  for (const variable of variables) {
+    if (new RegExp(`(?:^|[^A-Za-z0-9_])${escapeRegExp(variable)}(?:$|[^A-Za-z0-9_])`).test(action)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function isGoTemplateControlAction(name: string): boolean {
@@ -53,12 +97,8 @@ function isGoTemplateControlAction(name: string): boolean {
 
 function isSnippetVariableName(
   name: string,
-  tokenBody: string,
-  hasGoTemplateContext = false,
 ): boolean {
-  return name !== ""
-    && !hasGoTemplateFieldReference(tokenBody)
-    && !(hasGoTemplateContext && isGoTemplateControlAction(tokenBody));
+  return name !== "";
 }
 
 function replaceSnippetVariableTokens(
@@ -66,10 +106,10 @@ function replaceSnippetVariableTokens(
   replacementFor: (name: string, token: string) => string,
 ): string {
   const text = String(command ?? "");
-  const { hasGoTemplateContext } = collectVariableMatches(text);
-  return text.replace(variablePattern(), (token: string, rawName: string) => {
+  const { goTemplateOffsets } = collectVariableMatches(text);
+  return text.replace(variablePattern(), (token: string, rawName: string, _defaultRaw: string | undefined, offset: number) => {
     const name = String(rawName ?? "").trim();
-    if (!isSnippetVariableName(name, token.slice(2, -2), hasGoTemplateContext)) {
+    if (goTemplateOffsets.has(offset) || !isSnippetVariableName(name)) {
       return token;
     }
     return replacementFor(name, token);
@@ -89,11 +129,11 @@ export function parseSnippetVariables(command: string): SnippetVariableDef[] {
   const text = String(command ?? "");
   const seen = new Set<string>();
   const result: SnippetVariableDef[] = [];
-  const { matches, hasGoTemplateContext } = collectVariableMatches(text);
+  const { matches, goTemplateOffsets } = collectVariableMatches(text);
 
   for (const match of matches) {
     const name = match[1]?.trim() ?? "";
-    if (!isSnippetVariableName(name, templateActionBody(match), hasGoTemplateContext) || seen.has(name)) continue;
+    if ((match.index !== undefined && goTemplateOffsets.has(match.index)) || !isSnippetVariableName(name) || seen.has(name)) continue;
     seen.add(name);
     const defaultRaw = match[2];
     result.push({
