@@ -370,6 +370,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
       const startAttempt = async (attempt: {
         password?: string;
         key?: SSHKey;
+        useIdentityFiles?: boolean;
       }): Promise<string> => {
         // Resolve keepalive per-host: a host can opt into its own values
         // (e.g. set interval=0 on an embedded device whose SSH stack
@@ -410,7 +411,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
           keepaliveCountMax: keepalive.countMax,
           sessionLog: ctx.sessionLog?.enabled ? ctx.sessionLog : undefined,
           sshDebugLogEnabled: ctx.sshDebugLogEnabled,
-          identityFilePaths: attempt.key ? targetIdentityFilePaths : undefined,
+          identityFilePaths: attempt.useIdentityFiles ? targetIdentityFilePaths : undefined,
           knownHosts: ctx.knownHosts,
           sudoAutofillPassword: resolveSavedSudoAutofillPassword(),
           // Ask the bridge to reuse the source tab's authenticated connection
@@ -466,7 +467,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
 
       if (hasKeyMaterial) {
         try {
-          id = await startAttempt({ key, password: hasPassword ? effectivePassword : undefined });
+          id = await startAttempt({ key, password: hasPassword ? effectivePassword : undefined, useIdentityFiles: true });
         } catch (err) {
           if (isAuthError(err) && hasPassword) {
             ctx.setProgressLogs((prev) => [

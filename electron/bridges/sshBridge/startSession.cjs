@@ -738,9 +738,7 @@ function createStartSessionApi(ctx) {
             // This prevents reusing the same key when server requires multiple publickey auth steps
             // and also prevents re-attempting failed methods
             let attemptedMethodIds = new Set();
-            // Methods that actually contributed a *successful* factor (partial success).
-            // These must never be retried, but everything else becomes eligible again
-            // after each MFA stage — see the partialSuccess branch below.
+            // Methods that contributed a successful factor; never retried.
             const succeededMethodIds = new Set();
             // Track the first successful method for caching (not the last one in multi-step flows)
             let firstSuccessfulMethod = null;
@@ -779,17 +777,9 @@ function createStartSessionApi(ctx) {
                   firstSuccessfulMethod = lastTriedMethod;
                   log("Recorded first successful method for caching", { method: firstSuccessfulMethod });
                 }
-                // The factor that just succeeded must not be retried. But methods
-                // that were merely REJECTED in an earlier stage have to become
-                // eligible again for this next MFA stage: an MFA server
-                // (AuthenticationMethods password,publickey) offers
-                // "publickey,password", so we try the user key first, the server
-                // rejects it because the password factor isn't satisfied yet, then
-                // password partially succeeds and the server asks for publickey
-                // again. Without re-allowing it, the required key can never be
-                // re-offered and the whole login fails with "All configured
-                // authentication methods failed". Track only the methods that
-                // truly succeeded and reset the per-stage attempted set to those.
+                // Keep only the succeeded factors as "attempted" so a method
+                // rejected in an earlier stage can be re-offered for the next
+                // required factor (publickey+password MFA).
                 if (lastTriedMethod) {
                   succeededMethodIds.add(lastTriedMethod);
                   log("Recorded successful auth factor (partial success)", { method: lastTriedMethod });
