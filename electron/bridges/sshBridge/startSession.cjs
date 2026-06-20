@@ -737,7 +737,11 @@ function createStartSessionApi(ctx) {
             // Track methods that have been attempted (to avoid re-trying on failure)
             // This prevents reusing the same key when server requires multiple publickey auth steps
             // and also prevents re-attempting failed methods
-            const attemptedMethodIds = new Set();
+            let attemptedMethodIds = new Set();
+            // Methods that actually contributed a *successful* factor (partial success).
+            // These must never be retried, but everything else becomes eligible again
+            // after each MFA stage — see the partialSuccess branch below.
+            const succeededMethodIds = new Set();
             // Track the first successful method for caching (not the last one in multi-step flows)
             let firstSuccessfulMethod = null;
             // Track if we've gone through a partialSuccess flow (multi-step auth)
@@ -775,13 +779,24 @@ function createStartSessionApi(ctx) {
                   firstSuccessfulMethod = lastTriedMethod;
                   log("Recorded first successful method for caching", { method: firstSuccessfulMethod });
                 }
-                // Mark the last tried method as attempted (it succeeded, so we shouldn't retry it)
+                // The factor that just succeeded must not be retried. But methods
+                // that were merely REJECTED in an earlier stage have to become
+                // eligible again for this next MFA stage: an MFA server
+                // (AuthenticationMethods password,publickey) offers
+                // "publickey,password", so we try the user key first, the server
+                // rejects it because the password factor isn't satisfied yet, then
+                // password partially succeeds and the server asks for publickey
+                // again. Without re-allowing it, the required key can never be
+                // re-offered and the whole login fails with "All configured
+                // authentication methods failed". Track only the methods that
+                // truly succeeded and reset the per-stage attempted set to those.
                 if (lastTriedMethod) {
-                  attemptedMethodIds.add(lastTriedMethod);
-                  log("Marked method as attempted (partial success)", { method: lastTriedMethod });
+                  succeededMethodIds.add(lastTriedMethod);
+                  log("Recorded successful auth factor (partial success)", { method: lastTriedMethod });
                 }
+                attemptedMethodIds = new Set(succeededMethodIds);
 
-                log("Partial success - server requires additional auth", { methodsLeft, attemptedMethodIds: Array.from(attemptedMethodIds) });
+                log("Partial success - server requires additional auth", { methodsLeft, succeeded: Array.from(succeededMethodIds), attemptedMethodIds: Array.from(attemptedMethodIds) });
 
                 // Find a method from our list that matches what the server wants
                 // Skip methods that have already been attempted

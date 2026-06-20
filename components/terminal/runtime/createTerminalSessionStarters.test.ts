@@ -162,6 +162,90 @@ test("startSSH forwards custom ProxyCommand to the SSH bridge", async () => {
   });
 });
 
+test("startSSH sends key and password together in one connection for publickey+password MFA hosts", async () => {
+  let capturedOptions: Record<string, unknown> | null = null;
+  let startCalls = 0;
+  const terminalBackend = {
+    backendAvailable: () => true,
+    telnetAvailable: () => true,
+    moshAvailable: () => true,
+    localAvailable: () => true,
+    serialAvailable: () => true,
+    execAvailable: () => true,
+    startSSHSession: async (options: Record<string, unknown>) => {
+      startCalls += 1;
+      capturedOptions = options;
+      return "ssh-session";
+    },
+    startTelnetSession: async () => "telnet-session",
+    startMoshSession: async () => "mosh-session",
+    startLocalSession: async () => "local-session",
+    startSerialSession: async () => "serial-session",
+    execCommand: async () => ({}),
+    onSessionData: () => noop,
+    onSessionExit: () => noop,
+    onChainProgress: () => noop,
+    writeToSession: noop,
+    resizeSession: noop,
+  };
+  const ctx = {
+    host: {
+      id: "host-1",
+      label: "Target",
+      hostname: "target.example.test",
+      username: "alice",
+      port: 22,
+      authMethod: "key",
+      identityFileId: "key-1",
+      password: "login-secret",
+      savePassword: true,
+    },
+    keys: [
+      {
+        id: "key-1",
+        label: "saved-key",
+        source: "reference",
+        filePath: "/Users/me/.ssh/key",
+      },
+    ],
+    identities: [],
+    resolvedChainHosts: [],
+    sessionId: "session-1",
+    terminalSettings: {},
+    terminalBackend,
+    sessionRef: { current: null },
+    hasConnectedRef: { current: false },
+    hasRunStartupCommandRef: { current: false },
+    disposeDataRef: { current: null },
+    disposeExitRef: { current: null },
+    fitAddonRef: { current: null },
+    serializeAddonRef: { current: null },
+    pendingAuthRef: { current: null },
+    updateStatus: noop,
+    setStatus: noop,
+    setError: noop,
+    setNeedsAuth: noop,
+    setAuthRetryMessage: noop,
+    setAuthPassword: noop,
+    setProgressLogs: noop,
+    setProgressValue: noop,
+    setChainProgress: noop,
+  };
+  const term = {
+    cols: 120,
+    rows: 32,
+    write: (_data: string, callback?: () => void) => callback?.(),
+    writeln: noop,
+    scrollToBottom: noop,
+  };
+
+  await createTerminalSessionStarters(ctx as never).startSSH(term as never);
+
+  assert.equal(startCalls, 1, "credentials must go in a single connection, not separate per-factor attempts");
+  assert.equal(capturedOptions?.password, "login-secret");
+  assert.deepEqual(capturedOptions?.identityFilePaths, ["/Users/me/.ssh/key"]);
+});
+
 test("startSSH forwards the saved sudo autofill password to the SSH bridge", async () => {
   let capturedOptions: Record<string, unknown> | null = null;
   const terminalBackend = {
