@@ -1749,7 +1749,7 @@ test("startSSH omits jump host identity file paths when password auth is selecte
   assert.equal(jumpHosts[0]?.identityFilePaths, undefined);
 });
 
-test("startSSH tries local identity file paths before saved passwords for key auth", async () => {
+test("startSSH sends local identity file paths with saved passwords for key auth", async () => {
   let capturedOptions: Record<string, unknown> | null = null;
 
   const terminalBackend = {
@@ -1820,6 +1820,6 @@ test("startSSH tries local identity file paths before saved passwords for key au
   await createTerminalSessionStarters(ctx as never).startSSH(term as never);
 
   assert.ok(capturedOptions);
-  assert.equal(capturedOptions.password, undefined);
+  assert.equal(capturedOptions.password, "saved-password");
   assert.deepEqual(capturedOptions.identityFilePaths, ["/Users/alice/.ssh/id_ed25519"]);
 });
