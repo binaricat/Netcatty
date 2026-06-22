@@ -11,6 +11,13 @@ import {
   thematicBreakPlugin,
 } from "@mdxeditor/editor";
 import { ExternalLink } from "lucide-react";
+import {
+  $createRangeSelection,
+  $getNearestNodeFromDOMNode,
+  $isTextNode,
+  $setSelection,
+  getNearestEditorFromDOMNode,
+} from "lexical";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { resolveRenderedMarkdownLinkHref } from "../../domain/notes";
 import { buildSshNoteLinkOpenHost } from "../../domain/sshDeepLink";
@@ -42,6 +49,9 @@ type LinkActionState = {
   top: number;
 };
 
+const LINK_ACTION_SIZE = 28;
+const LINK_ACTION_HOVER_PADDING = 10;
+
 const isSshCandidateHost = (host: Host): boolean =>
   Boolean(host.hostname?.trim()) && (host.protocol === undefined || host.protocol === "ssh");
 
@@ -54,20 +64,6 @@ const formatSshDeepLinkForHost = (host: Host): string => {
   const username = host.username?.trim() ? `${encodeURIComponent(host.username.trim())}@` : "";
   const port = host.port && host.port !== 22 ? `:${host.port}` : "";
   return `ssh://${username}${hostPart}${port}`;
-};
-
-const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
-const removeHostPickerTriggerBeforeLink = (
-  markdown: string,
-  link: string,
-  trigger: "@" | "/",
-  query: string,
-): string => {
-  const triggerText = `${trigger}${query}`;
-  const withQuery = new RegExp(`${escapeRegExp(triggerText)}(?=${escapeRegExp(link)})`);
-  const withoutQuery = new RegExp(`${escapeRegExp(trigger)}(?=${escapeRegExp(link)})`);
-  return markdown.replace(withQuery, "").replace(withoutQuery, "");
 };
 
 const openExternalLink = async (
@@ -88,6 +84,55 @@ const openExternalLink = async (
     return;
   }
   window.open(url.toString(), "_blank", "noopener,noreferrer");
+};
+
+export const shouldHandleHostPickerNavigationKey = (
+  pickerOpen: boolean,
+  key: string,
+  availableHostCount: number,
+): boolean => {
+  if (!pickerOpen) return false;
+  if (key === "Escape") return true;
+  if (availableHostCount <= 0) return false;
+  return key === "ArrowDown" || key === "ArrowUp" || key === "Enter" || key === "Tab";
+};
+
+export const isPointerInsideLinkActionHoverZone = (
+  action: LinkActionState | null,
+  x: number,
+  y: number,
+): boolean => {
+  if (!action) return false;
+  return x >= action.left - LINK_ACTION_HOVER_PADDING
+    && x <= action.left + LINK_ACTION_SIZE + LINK_ACTION_HOVER_PADDING
+    && y >= action.top - LINK_ACTION_HOVER_PADDING
+    && y <= action.top + LINK_ACTION_SIZE + LINK_ACTION_HOVER_PADDING;
+};
+
+const deleteLexicalTextRange = (range: Range, onUpdate: () => void): boolean => {
+  const rangeContainer = range.startContainer.nodeType === Node.TEXT_NODE
+    ? range.startContainer.parentElement
+    : range.startContainer;
+  const lexicalEditor = getNearestEditorFromDOMNode(rangeContainer);
+  if (!lexicalEditor) return false;
+
+  let didDelete = false;
+  lexicalEditor.update(
+    () => {
+      const startNode = $getNearestNodeFromDOMNode(range.startContainer);
+      const endNode = $getNearestNodeFromDOMNode(range.endContainer);
+      if (!$isTextNode(startNode) || !$isTextNode(endNode)) return;
+
+      const selection = $createRangeSelection();
+      selection.anchor.set(startNode.getKey(), range.startOffset, "text");
+      selection.focus.set(endNode.getKey(), range.endOffset, "text");
+      $setSelection(selection);
+      selection.removeText();
+      didDelete = true;
+    },
+    { onUpdate },
+  );
+  return didDelete;
 };
 
 export function InlineMarkdownEditor({
@@ -203,7 +248,7 @@ export function InlineMarkdownEditor({
       return;
     }
 
-    hostPickerRangeRef.current = context.range;
+    hostPickerRangeRef.current = context.range.cloneRange();
     setHostPicker((current) => ({
       open: true,
       query: context.query,
@@ -256,31 +301,19 @@ export function InlineMarkdownEditor({
   const insertHostLink = useCallback((host: Host) => {
     const link = `[${getHostLinkLabel(host)}](${formatSshDeepLinkForHost(host)})`;
     const editor = editorRef.current;
-    const replacementRange = hostPickerRangeRef.current;
-    const trigger = hostPicker.trigger;
-    const query = hostPicker.query;
+    const replacementRange = getHostPickerContext()?.range ?? hostPickerRangeRef.current;
     setHostPicker((current) => ({ ...current, open: false, query: "", selectedIndex: 0 }));
     hostPickerRangeRef.current = null;
 
     if (editor) {
+      editor.focus();
       if (replacementRange) {
-        const selection = window.getSelection();
-        selection?.removeAllRanges();
-        selection?.addRange(replacementRange);
-      } else {
-        editor.focus();
+        const didDeleteTrigger = deleteLexicalTextRange(replacementRange, () => {
+          editor.insertMarkdown(link);
+        });
+        if (didDeleteTrigger) return;
       }
       editor.insertMarkdown(link);
-      const cleanedMarkdown = removeHostPickerTriggerBeforeLink(
-        editor.getMarkdown(),
-        link,
-        trigger,
-        query,
-      );
-      if (cleanedMarkdown !== editor.getMarkdown()) {
-        editor.setMarkdown(cleanedMarkdown);
-      }
-      commitMarkdown(cleanedMarkdown);
       return;
     }
 
@@ -288,52 +321,44 @@ export function InlineMarkdownEditor({
       ? `${latestMarkdownRef.current}\n${link}`
       : link;
     commitMarkdown(next);
-  }, [commitMarkdown, hostPicker.query, hostPicker.trigger]);
+  }, [commitMarkdown, getHostPickerContext]);
 
   const handleKeyDownCapture = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
-    if (!hostPicker.open) return;
-    const shouldUsePickerKeyboard = hostPicker.query.trim().length > 0;
+    if (!shouldHandleHostPickerNavigationKey(hostPicker.open, event.key, filteredHosts.length)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.nativeEvent.stopImmediatePropagation?.();
 
     if (event.key === "Escape") {
-      event.preventDefault();
       setHostPicker((current) => ({ ...current, open: false, query: "", selectedIndex: 0 }));
       return;
     }
 
-    if (shouldUsePickerKeyboard && event.key === "ArrowDown") {
-      event.preventDefault();
+    if (event.key === "ArrowDown") {
       setHostPicker((current) => ({
         ...current,
-        selectedIndex: filteredHosts.length === 0
-          ? 0
-          : (current.selectedIndex + 1) % filteredHosts.length,
+        selectedIndex: (current.selectedIndex + 1) % filteredHosts.length,
       }));
       return;
     }
 
-    if (shouldUsePickerKeyboard && event.key === "ArrowUp") {
-      event.preventDefault();
+    if (event.key === "ArrowUp") {
       setHostPicker((current) => ({
         ...current,
-        selectedIndex: filteredHosts.length === 0
-          ? 0
-          : (current.selectedIndex - 1 + filteredHosts.length) % filteredHosts.length,
+        selectedIndex: (current.selectedIndex - 1 + filteredHosts.length) % filteredHosts.length,
       }));
       return;
     }
 
-    if (shouldUsePickerKeyboard && (event.key === "Enter" || event.key === "Tab")) {
+    if (event.key === "Enter" || event.key === "Tab") {
       const selectedHost = filteredHosts[hostPicker.selectedIndex];
       if (!selectedHost) return;
-      event.preventDefault();
       insertHostLink(selectedHost);
       return;
     }
-
   }, [
     filteredHosts,
     hostPicker.open,
-    hostPicker.query,
     hostPicker.selectedIndex,
     insertHostLink,
   ]);
@@ -384,7 +409,15 @@ export function InlineMarkdownEditor({
     const link = target.closest<HTMLAnchorElement>("a[href]");
     const renderedHref = link?.getAttribute("href") || link?.href;
     const container = containerRef.current;
-    if (!link || !renderedHref || !container) {
+    if (!container) return;
+    const containerRect = container.getBoundingClientRect();
+    const pointerX = event.clientX - containerRect.left;
+    const pointerY = event.clientY - containerRect.top;
+
+    if (!link || !renderedHref) {
+      if (!isPointerInsideLinkActionHoverZone(linkAction, pointerX, pointerY)) {
+        setLinkAction(null);
+      }
       return;
     }
 
@@ -395,14 +428,13 @@ export function InlineMarkdownEditor({
       renderedHref,
     );
     const linkRect = link.getBoundingClientRect();
-    const containerRect = container.getBoundingClientRect();
     setLinkAction({
       href,
       label,
-      left: Math.max(0, Math.min(containerRect.width - 34, linkRect.right - containerRect.left + 6)),
+      left: Math.max(0, Math.min(containerRect.width - LINK_ACTION_SIZE - 6, linkRect.right - containerRect.left + 2)),
       top: Math.max(0, linkRect.top - containerRect.top - 2),
     });
-  }, []);
+  }, [linkAction]);
 
   const handleBlurCapture = useCallback((event: React.FocusEvent<HTMLDivElement>) => {
     const nextTarget = event.relatedTarget;

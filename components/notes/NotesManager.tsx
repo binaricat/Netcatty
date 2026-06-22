@@ -231,7 +231,6 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
   const [isTreeResizing, setIsTreeResizing] = useState(false);
   const [draggingNoteId, setDraggingNoteId] = useState<string | null>(null);
   const [draggingGroupPath, setDraggingGroupPath] = useState<string | null>(null);
-  const [rootDropActive, setRootDropActive] = useState(false);
   const [treeWidth, setTreeWidth, persistTreeWidth] = useStoredNumber(
     STORAGE_KEY_VAULT_NOTES_TREE_WIDTH,
     NOTES_TREE_DEFAULT_WIDTH,
@@ -430,7 +429,6 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
   const resetTreeDragState = () => {
     setDraggingNoteId(null);
     setDraggingGroupPath(null);
-    setRootDropActive(false);
     clearVaultDropIndicator();
   };
 
@@ -663,14 +661,12 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
             onDragOver={(event) => {
               const sourceNoteId = draggingNoteId || getDraggedNoteId(event.dataTransfer);
               if (!sourceNoteId || sourceNoteId === note.id) {
-                setRootDropActive(false);
                 clearVaultDropIndicator();
                 return;
               }
               event.preventDefault();
               event.stopPropagation();
               event.dataTransfer.dropEffect = "move";
-              setRootDropActive(false);
               markVaultDropIndicator(
                 event.currentTarget,
                 getVaultDropPosition(event.currentTarget, event.clientX, event.clientY),
@@ -744,19 +740,16 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
                 const sourceNoteId = draggingNoteId || getDraggedNoteId(event.dataTransfer);
                 const sourceGroupPath = draggingGroupPath || getDraggedGroupPath(event.dataTransfer);
                 if (!sourceNoteId && !sourceGroupPath) {
-                  setRootDropActive(false);
                   clearVaultDropIndicator();
                   return;
                 }
                 if (sourceGroupPath && (sourceGroupPath === node.path || node.path.startsWith(`${sourceGroupPath}/`))) {
-                  setRootDropActive(false);
                   clearVaultDropIndicator();
                   return;
                 }
                 event.preventDefault();
                 event.stopPropagation();
                 event.dataTransfer.dropEffect = "move";
-                setRootDropActive(false);
                 markVaultInsideDropIndicator(event.currentTarget);
               }}
               onDragLeave={handleTreeRowDragLeave}
@@ -961,21 +954,12 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
           </div>
           <ScrollArea className="flex-1">
             <div
-              className={cn(
-                "min-h-full space-y-1 px-1.5 pb-4 transition-colors",
-                rootDropActive && "rounded-md bg-primary/5 outline outline-1 outline-primary/40",
-              )}
+              className="min-h-full space-y-1 px-1.5 pb-4"
               data-notes-drop-zone="root"
               onDragOver={(event) => {
                 if (!hasNotesTreeDrag(event.dataTransfer)) return;
                 event.preventDefault();
                 event.dataTransfer.dropEffect = "move";
-                setRootDropActive(true);
-              }}
-              onDragLeave={(event) => {
-                const relatedTarget = event.relatedTarget;
-                if (relatedTarget instanceof Node && event.currentTarget.contains(relatedTarget)) return;
-                setRootDropActive(false);
               }}
               onDrop={(event) => handleGroupDrop(null, event)}
             >
