@@ -21,6 +21,12 @@ import { STORAGE_KEY_VAULT_NOTES_TREE_WIDTH } from "../../infrastructure/config/
 import { cn } from "../../lib/utils";
 import type { Host, VaultNote } from "../../types";
 import { Button } from "../ui/button";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from "../ui/context-menu";
 import { Dropdown, DropdownContent, DropdownTrigger } from "../ui/dropdown";
 import { Input } from "../ui/input";
 import { ScrollArea } from "../ui/scroll-area";
@@ -30,6 +36,13 @@ import {
   VaultTreeInlineRenameInput,
   VaultTreeItemRow,
 } from "../vault/VaultTreeRow";
+import {
+  clearVaultDropIndicator,
+  getVaultDropPosition,
+  hasVaultDragType,
+  markVaultDropIndicator,
+  markVaultInsideDropIndicator,
+} from "../vault/vaultReorderDrag";
 import { InlineMarkdownEditor } from "./InlineMarkdownEditor";
 
 interface NoteFolderNode {
@@ -46,6 +59,8 @@ const menuItemClass = "flex h-8 w-full items-center rounded-md px-3 text-left te
 const NOTES_TREE_DEFAULT_WIDTH = 300;
 const NOTES_TREE_MIN_WIDTH = 220;
 const NOTES_TREE_MAX_WIDTH = 520;
+const NOTE_DRAG_TYPE = "application/x-netcatty-note-id";
+const NOTE_GROUP_DRAG_TYPE = "application/x-netcatty-note-group-path";
 
 export interface NotesManagerProps {
   notes: VaultNote[];
@@ -162,11 +177,6 @@ const replaceGroupPrefix = (path: string | undefined, from: string, to: string):
   return path;
 };
 
-const getDropPosition = (element: HTMLElement, clientY: number): "before" | "after" => {
-  const rect = element.getBoundingClientRect();
-  return clientY < rect.top + rect.height / 2 ? "before" : "after";
-};
-
 const sortNoteItems = (items: VaultNote[]): VaultNote[] => sortByVaultOrder(items);
 
 const sortFolderNodes = (items: NoteFolderNode[]): NoteFolderNode[] =>
@@ -243,6 +253,9 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
   const [editingGroupPath, setEditingGroupPath] = useState<string | null>(null);
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
   const [isTreeResizing, setIsTreeResizing] = useState(false);
+  const [draggingNoteId, setDraggingNoteId] = useState<string | null>(null);
+  const [draggingGroupPath, setDraggingGroupPath] = useState<string | null>(null);
+  const [rootDropActive, setRootDropActive] = useState(false);
   const [treeWidth, setTreeWidth, persistTreeWidth] = useStoredNumber(
     STORAGE_KEY_VAULT_NOTES_TREE_WIDTH,
     NOTES_TREE_DEFAULT_WIDTH,
@@ -438,6 +451,33 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
     setEditingGroupPath(null);
   };
 
+  const resetTreeDragState = () => {
+    setDraggingNoteId(null);
+    setDraggingGroupPath(null);
+    setRootDropActive(false);
+    clearVaultDropIndicator();
+  };
+
+  const getDraggedNoteId = (dataTransfer: DataTransfer) =>
+    dataTransfer.getData(NOTE_DRAG_TYPE) || dataTransfer.getData("note-id");
+
+  const getDraggedGroupPath = (dataTransfer: DataTransfer) =>
+    dataTransfer.getData(NOTE_GROUP_DRAG_TYPE) || dataTransfer.getData("note-group-path");
+
+  const hasNotesTreeDrag = (dataTransfer: DataTransfer) =>
+    draggingNoteId
+    || draggingGroupPath
+    || hasVaultDragType(dataTransfer, NOTE_DRAG_TYPE)
+    || hasVaultDragType(dataTransfer, NOTE_GROUP_DRAG_TYPE)
+    || hasVaultDragType(dataTransfer, "note-id")
+    || hasVaultDragType(dataTransfer, "note-group-path");
+
+  const handleTreeRowDragLeave = (event: React.DragEvent<HTMLElement>) => {
+    const relatedTarget = event.relatedTarget;
+    if (relatedTarget instanceof Node && event.currentTarget.contains(relatedTarget)) return;
+    clearVaultDropIndicator();
+  };
+
   const moveNoteToGroup = (noteId: string, group: string | null) => {
     onUpdateNotes(normalizeVaultNotes(sortedNotes.map((note) => (
       note.id === noteId ? { ...note, group: group || undefined, updatedAt: Date.now() } : note
@@ -446,7 +486,7 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
 
   const reorderNoteToNote = (sourceId: string, targetNote: VaultNote, event: React.DragEvent<HTMLElement>) => {
     if (!sourceId || sourceId === targetNote.id) return;
-    const position = getDropPosition(event.currentTarget, event.clientY);
+    const position = getVaultDropPosition(event.currentTarget, event.clientX, event.clientY);
     const movedNotes = sortedNotes.map((note) => (
       note.id === sourceId
         ? { ...note, group: targetNote.group, updatedAt: Date.now() }
@@ -475,10 +515,112 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
   const handleGroupDrop = (targetGroup: string | null, event: React.DragEvent) => {
     event.preventDefault();
     event.stopPropagation();
-    const noteId = event.dataTransfer.getData("note-id");
-    const groupPath = event.dataTransfer.getData("note-group-path");
+    const noteId = getDraggedNoteId(event.dataTransfer);
+    const groupPath = getDraggedGroupPath(event.dataTransfer);
     if (noteId) moveNoteToGroup(noteId, targetGroup);
     if (groupPath) moveGroupToParent(groupPath, targetGroup);
+    resetTreeDragState();
+  };
+
+  const renderNoteActions = (note: VaultNote, mode: "dropdown" | "context") => {
+    const actions = [
+      {
+        label: t("common.rename"),
+        action: () => setEditingNoteId(note.id),
+      },
+      {
+        label: t("action.copy"),
+        action: () => duplicateNoteById(note.id),
+      },
+      {
+        label: t("action.delete"),
+        action: () => deleteNoteById(note.id),
+        destructive: true,
+      },
+    ];
+
+    if (mode === "context") {
+      return actions.map((action) => (
+        <ContextMenuItem
+          key={action.label}
+          className={action.destructive ? "text-destructive focus:text-destructive" : undefined}
+          onSelect={(event) => {
+            event.preventDefault();
+            action.action();
+          }}
+        >
+          {action.label}
+        </ContextMenuItem>
+      ));
+    }
+
+    return actions.map((action) => (
+      <button
+        key={action.label}
+        type="button"
+        className={cn(menuItemClass, action.destructive && "text-destructive hover:bg-destructive/10")}
+        onClick={(event) => {
+          event.stopPropagation();
+          action.action();
+        }}
+      >
+        {action.label}
+      </button>
+    ));
+  };
+
+  const renderGroupActions = (groupPath: string, mode: "dropdown" | "context") => {
+    const actions = [
+      {
+        label: t("notes.action.newNote"),
+        action: () => addNoteToGroup(groupPath),
+      },
+      {
+        label: t("notes.action.newGroup"),
+        action: () => {
+          setCreatingGroupParent(groupPath);
+          expandPath(groupPath);
+        },
+      },
+      {
+        label: t("common.rename"),
+        action: () => setEditingGroupPath(groupPath),
+      },
+      {
+        label: t("action.delete"),
+        action: () => deleteGroup(groupPath),
+        destructive: true,
+      },
+    ];
+
+    if (mode === "context") {
+      return actions.map((action) => (
+        <ContextMenuItem
+          key={action.label}
+          className={action.destructive ? "text-destructive focus:text-destructive" : undefined}
+          onSelect={(event) => {
+            event.preventDefault();
+            action.action();
+          }}
+        >
+          {action.label}
+        </ContextMenuItem>
+      ));
+    }
+
+    return actions.map((action) => (
+      <button
+        key={action.label}
+        type="button"
+        className={cn(menuItemClass, action.destructive && "text-destructive hover:bg-destructive/10")}
+        onClick={(event) => {
+          event.stopPropagation();
+          action.action();
+        }}
+      >
+        {action.label}
+      </button>
+    ));
   };
 
   const renderCreateGroupRow = (parent: string | null, depth: number) => {
@@ -505,76 +647,68 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
   const renderNoteRow = (note: VaultNote, depth: number) => {
     if (!noteMatches(note)) return null;
     return (
-      <VaultTreeItemRow
-        key={note.id}
-        label={note.title}
-        depth={depth}
-        selected={selectedNote?.id === note.id}
-        editing={editingNoteId === note.id}
-        editingInitialName={note.title}
-        onRenameCommit={(name) => {
-          setEditingNoteId(null);
-          const title = name.trim();
-          if (!title) return;
-          saveNote({ ...note, title, updatedAt: Date.now() });
-        }}
-        onRenameCancel={() => setEditingNoteId(null)}
-        icon={<FileText size={14} className="mr-2 shrink-0 text-muted-foreground" />}
-        data-note-id={note.id}
-        draggable={editingNoteId !== note.id}
-        onDragStart={(event) => {
-          event.dataTransfer.setData("note-id", note.id);
-          event.dataTransfer.effectAllowed = "move";
-        }}
-        onDragOver={(event) => {
-          event.preventDefault();
-          event.stopPropagation();
-        }}
-        onDrop={(event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          reorderNoteToNote(event.dataTransfer.getData("note-id"), note, event);
-        }}
-        onClick={() => {
-          setSelectedNoteId(note.id);
-          setSelectedGroup(note.group || null);
-          if (isSidebarMode) setOverlayNoteId(note.id);
-        }}
-        actions={(
-          <HoverActionMenu>
-            <button
-              type="button"
-              className={menuItemClass}
-              onClick={(event) => {
-                event.stopPropagation();
-                setEditingNoteId(note.id);
-              }}
-            >
-              {t("common.rename")}
-            </button>
-            <button
-              type="button"
-              className={menuItemClass}
-              onClick={(event) => {
-                event.stopPropagation();
-                duplicateNoteById(note.id);
-              }}
-            >
-              {t("action.copy")}
-            </button>
-            <button
-              type="button"
-              className={cn(menuItemClass, "text-destructive hover:bg-destructive/10")}
-              onClick={(event) => {
-                event.stopPropagation();
-                deleteNoteById(note.id);
-              }}
-            >
-              {t("action.delete")}
-            </button>
-          </HoverActionMenu>
-        )}
-      />
+      <ContextMenu key={note.id}>
+        <ContextMenuTrigger asChild>
+          <VaultTreeItemRow
+            label={note.title}
+            depth={depth}
+            selected={selectedNote?.id === note.id}
+            editing={editingNoteId === note.id}
+            editingInitialName={note.title}
+            onRenameCommit={(name) => {
+              setEditingNoteId(null);
+              const title = name.trim();
+              if (!title) return;
+              saveNote({ ...note, title, updatedAt: Date.now() });
+            }}
+            onRenameCancel={() => setEditingNoteId(null)}
+            icon={<FileText size={14} className="mr-2 shrink-0 text-muted-foreground" />}
+            data-note-id={note.id}
+            data-notes-drag-kind="note"
+            data-notes-context-menu="note"
+            data-vault-reorder-dragging={draggingNoteId === note.id ? "true" : undefined}
+            draggable={editingNoteId !== note.id}
+            onDragStart={(event) => {
+              event.dataTransfer.setData(NOTE_DRAG_TYPE, note.id);
+              event.dataTransfer.setData("note-id", note.id);
+              event.dataTransfer.effectAllowed = "move";
+              setDraggingNoteId(note.id);
+            }}
+            onDragOver={(event) => {
+              const sourceNoteId = draggingNoteId || getDraggedNoteId(event.dataTransfer);
+              if (!sourceNoteId || sourceNoteId === note.id) return;
+              event.preventDefault();
+              event.stopPropagation();
+              event.dataTransfer.dropEffect = "move";
+              markVaultDropIndicator(
+                event.currentTarget,
+                getVaultDropPosition(event.currentTarget, event.clientX, event.clientY),
+              );
+            }}
+            onDragLeave={handleTreeRowDragLeave}
+            onDrop={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              reorderNoteToNote(draggingNoteId || getDraggedNoteId(event.dataTransfer), note, event);
+              resetTreeDragState();
+            }}
+            onDragEnd={resetTreeDragState}
+            onClick={() => {
+              setSelectedNoteId(note.id);
+              setSelectedGroup(note.group || null);
+              if (isSidebarMode) setOverlayNoteId(note.id);
+            }}
+            actions={(
+              <HoverActionMenu>
+                {renderNoteActions(note, "dropdown")}
+              </HoverActionMenu>
+            )}
+          />
+        </ContextMenuTrigger>
+        <ContextMenuContent data-notes-context-menu="note">
+          {renderNoteActions(note, "context")}
+        </ContextMenuContent>
+      </ContextMenu>
     );
   };
 
@@ -592,76 +726,57 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
     const hasChildren = node.children.length > 0 || node.notes.length > 0;
     return (
       <React.Fragment key={node.path}>
-        <VaultTreeGroupRow
-          name={node.name}
-          depth={depth}
-          expanded={expanded}
-          selected={selectedGroup === node.path}
-          hasChildren={hasChildren}
-          editing={editingGroupPath === node.path}
-          editingInitialName={node.name}
-          onRenameCommit={(name) => renameGroup(node.path, name)}
-          onRenameCancel={() => setEditingGroupPath(null)}
-          data-note-group-path={node.path}
-          draggable={editingGroupPath !== node.path}
-          onDragStart={(event) => {
-            event.dataTransfer.setData("note-group-path", node.path);
-          }}
-          onDragOver={(event) => {
-            event.preventDefault();
-            event.stopPropagation();
-          }}
-          onDrop={(event) => handleGroupDrop(node.path, event)}
-          onClick={() => {
-            setSelectedGroup(node.path);
-            if (hasChildren) toggleGroup(node.path);
-          }}
-          actions={(
-            <HoverActionMenu>
-              <button
-                type="button"
-                className={menuItemClass}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  addNoteToGroup(node.path);
-                }}
-              >
-                {t("notes.action.newNote")}
-              </button>
-              <button
-                type="button"
-                className={menuItemClass}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  setCreatingGroupParent(node.path);
-                  expandPath(node.path);
-                }}
-              >
-                {t("notes.action.newGroup")}
-              </button>
-              <button
-                type="button"
-                className={menuItemClass}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  setEditingGroupPath(node.path);
-                }}
-              >
-                {t("common.rename")}
-              </button>
-              <button
-                type="button"
-                className={cn(menuItemClass, "text-destructive hover:bg-destructive/10")}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  deleteGroup(node.path);
-                }}
-              >
-                {t("action.delete")}
-              </button>
-            </HoverActionMenu>
-          )}
-        />
+        <ContextMenu>
+          <ContextMenuTrigger asChild>
+            <VaultTreeGroupRow
+              name={node.name}
+              depth={depth}
+              expanded={expanded}
+              selected={selectedGroup === node.path}
+              hasChildren={hasChildren}
+              editing={editingGroupPath === node.path}
+              editingInitialName={node.name}
+              onRenameCommit={(name) => renameGroup(node.path, name)}
+              onRenameCancel={() => setEditingGroupPath(null)}
+              data-note-group-path={node.path}
+              data-notes-drag-kind="group"
+              data-notes-context-menu="group"
+              data-vault-reorder-dragging={draggingGroupPath === node.path ? "true" : undefined}
+              draggable={editingGroupPath !== node.path}
+              onDragStart={(event) => {
+                event.dataTransfer.setData(NOTE_GROUP_DRAG_TYPE, node.path);
+                event.dataTransfer.setData("note-group-path", node.path);
+                event.dataTransfer.effectAllowed = "move";
+                setDraggingGroupPath(node.path);
+              }}
+              onDragOver={(event) => {
+                const sourceNoteId = draggingNoteId || getDraggedNoteId(event.dataTransfer);
+                const sourceGroupPath = draggingGroupPath || getDraggedGroupPath(event.dataTransfer);
+                if (!sourceNoteId && !sourceGroupPath) return;
+                if (sourceGroupPath && (sourceGroupPath === node.path || node.path.startsWith(`${sourceGroupPath}/`))) return;
+                event.preventDefault();
+                event.stopPropagation();
+                event.dataTransfer.dropEffect = "move";
+                markVaultInsideDropIndicator(event.currentTarget);
+              }}
+              onDragLeave={handleTreeRowDragLeave}
+              onDrop={(event) => handleGroupDrop(node.path, event)}
+              onDragEnd={resetTreeDragState}
+              onClick={() => {
+                setSelectedGroup(node.path);
+                if (hasChildren) toggleGroup(node.path);
+              }}
+              actions={(
+                <HoverActionMenu>
+                  {renderGroupActions(node.path, "dropdown")}
+                </HoverActionMenu>
+              )}
+            />
+          </ContextMenuTrigger>
+          <ContextMenuContent data-notes-context-menu="group">
+            {renderGroupActions(node.path, "context")}
+          </ContextMenuContent>
+        </ContextMenu>
         {expanded && (
           <>
             {renderCreateGroupRow(node.path, depth + 1)}
@@ -846,9 +961,21 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
           </div>
           <ScrollArea className="flex-1">
             <div
-              className="space-y-1 px-1.5 pb-4"
+              className={cn(
+                "min-h-full space-y-1 px-1.5 pb-4 transition-colors",
+                rootDropActive && "rounded-md bg-primary/5 outline outline-1 outline-primary/40",
+              )}
+              data-notes-drop-zone="root"
               onDragOver={(event) => {
+                if (!hasNotesTreeDrag(event.dataTransfer)) return;
                 event.preventDefault();
+                event.dataTransfer.dropEffect = "move";
+                setRootDropActive(true);
+              }}
+              onDragLeave={(event) => {
+                const relatedTarget = event.relatedTarget;
+                if (relatedTarget instanceof Node && event.currentTarget.contains(relatedTarget)) return;
+                setRootDropActive(false);
               }}
               onDrop={(event) => handleGroupDrop(null, event)}
             >

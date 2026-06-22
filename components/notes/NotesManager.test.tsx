@@ -53,6 +53,16 @@ test("NotesManager marks selected notebook rows with shared tree state", () => {
   assert.match(markup, /data-selected="true"/);
 });
 
+test("NotesManager exposes shared tree drag targets and context menus", () => {
+  const markup = renderNotes();
+
+  assert.match(markup, /data-notes-drop-zone="root"/);
+  assert.match(markup, /data-notes-drag-kind="group"/);
+  assert.match(markup, /data-notes-drag-kind="note"/);
+  assert.match(markup, /data-notes-context-menu="group"/);
+  assert.match(markup, /data-notes-context-menu="note"/);
+});
+
 test("NotesManager renders nested notebook folders", () => {
   const markup = renderNotes([
     note({
