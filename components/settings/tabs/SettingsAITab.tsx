@@ -334,7 +334,12 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
   const resolveAgentPath = useCallback(async (
     agentKey: ManagedAgentKey,
     customPath = "",
-    options?: { apiKeyPresent?: boolean; refreshShellEnv?: boolean; commandSource?: "manual" | "auto" },
+    options?: {
+      apiKeyPresent?: boolean;
+      refreshShellEnv?: boolean;
+      commandSource?: "manual" | "auto";
+      removeUnavailableManualPath?: boolean;
+    },
   ) => {
     const bridge = getBridge();
     if (!bridge?.aiResolveCli) return null;
@@ -364,6 +369,24 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
         ...(agentKey === "cursor" ? { apiKeyPresent: Boolean(options?.apiKeyPresent ?? cursorApiKeyEncrypted) } : {}),
       });
       if (!isCurrentRequest()) return null;
+      if (
+        options?.commandSource === "manual"
+        && customPath.trim()
+        && !result?.available
+        && !options.removeUnavailableManualPath
+      ) {
+        const setInfo = agentKey === "codex"
+          ? setCodexPathInfo
+          : agentKey === "claude"
+            ? setClaudePathInfo
+            : agentKey === "copilot"
+              ? setCopilotPathInfo
+              : agentKey === "cursor"
+                ? setCursorPathInfo
+                : setCodebuddyPathInfo;
+        setInfo(result);
+        return result;
+      }
       applyResolvedAgentPath(agentKey, result, options?.commandSource ?? "auto");
 
       return result;
@@ -405,6 +428,7 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
         void resolveAgentPath(task.key, task.path, {
           ...task.options,
           commandSource: task.path ? "manual" : "auto",
+          removeUnavailableManualPath: Boolean(task.path),
         }).finally(() => {
           autoResolvedAgentStateRef.current[task.key] = "done";
         });

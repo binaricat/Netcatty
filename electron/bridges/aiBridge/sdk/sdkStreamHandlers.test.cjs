@@ -46,13 +46,82 @@ test("SDK resume only uses the current backend/path session key", () => {
   ]);
 
   assert.equal(
-    resolveSdkResumeSessionId(sessions, buildSdkSessionKey("chat-1", "codex", "/new/codex")),
+    resolveSdkResumeSessionId({
+      sdkSessionIds: sessions,
+      sdkSessionKey: buildSdkSessionKey("chat-1", "codex", "/new/codex"),
+      backendKey: "codex",
+      binPath: "/new/codex",
+      hasConfiguredCommand: true,
+    }),
     undefined,
   );
   sessions.set(buildSdkSessionKey("chat-1", "codex", "/new/codex"), "new-session");
   assert.equal(
-    resolveSdkResumeSessionId(sessions, buildSdkSessionKey("chat-1", "codex", "/new/codex")),
+    resolveSdkResumeSessionId({
+      sdkSessionIds: sessions,
+      sdkSessionKey: buildSdkSessionKey("chat-1", "codex", "/new/codex"),
+      backendKey: "codex",
+      binPath: "/new/codex",
+      hasConfiguredCommand: true,
+    }),
     "new-session",
+  );
+});
+
+test("SDK resume uses persisted session identity only when backend and path match", () => {
+  const persisted = `netcatty-sdk-session:${encodeURIComponent(JSON.stringify({
+    v: 1,
+    id: "persisted-session",
+    backend: "codex",
+    binPath: "/opt/homebrew/bin/codex",
+  }))}`;
+
+  assert.equal(
+    resolveSdkResumeSessionId({
+      sdkSessionIds: new Map(),
+      sdkSessionKey: buildSdkSessionKey("chat-1", "codex", "/opt/homebrew/bin/codex"),
+      existingSessionId: persisted,
+      backendKey: "codex",
+      binPath: "/opt/homebrew/bin/codex",
+      hasConfiguredCommand: true,
+    }),
+    "persisted-session",
+  );
+  assert.equal(
+    resolveSdkResumeSessionId({
+      sdkSessionIds: new Map(),
+      sdkSessionKey: buildSdkSessionKey("chat-1", "codex", "/other/codex"),
+      existingSessionId: persisted,
+      backendKey: "codex",
+      binPath: "/other/codex",
+      hasConfiguredCommand: true,
+    }),
+    undefined,
+  );
+});
+
+test("SDK resume keeps legacy session ids only when no manual command is configured", () => {
+  assert.equal(
+    resolveSdkResumeSessionId({
+      sdkSessionIds: new Map(),
+      sdkSessionKey: buildSdkSessionKey("chat-1", "codex", "/usr/bin/codex"),
+      existingSessionId: "legacy-session",
+      backendKey: "codex",
+      binPath: "/usr/bin/codex",
+      hasConfiguredCommand: false,
+    }),
+    "legacy-session",
+  );
+  assert.equal(
+    resolveSdkResumeSessionId({
+      sdkSessionIds: new Map(),
+      sdkSessionKey: buildSdkSessionKey("chat-1", "codex", "/manual/codex"),
+      existingSessionId: "legacy-session",
+      backendKey: "codex",
+      binPath: "/manual/codex",
+      hasConfiguredCommand: true,
+    }),
+    undefined,
   );
 });
 

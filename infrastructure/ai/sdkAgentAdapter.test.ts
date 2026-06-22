@@ -145,12 +145,99 @@ test('runSdkAgentTurn forwards the configured agent command path', async () => {
     {
       ...sdkConfig,
       command: '/opt/homebrew/bin/codex',
+      commandSource: 'manual',
     },
     'hello',
     createCallbacks([]),
   );
 
   assert.equal(streamArgs.at(-1), '/opt/homebrew/bin/codex');
+});
+
+test('runSdkAgentTurn does not forward auto-detected command paths', async () => {
+  let streamArgs: unknown[] = [];
+  let done: (() => void) | null = null;
+  const bridge: Record<string, (...args: unknown[]) => unknown> = {
+    aiSdkAgentStream: async (...args: unknown[]) => {
+      streamArgs = args;
+      queueMicrotask(() => done?.());
+      return { ok: true };
+    },
+    aiSdkAgentCancel: async () => ({ ok: true }),
+    onAiSdkAgentEvent: () => () => {},
+    onAiSdkAgentDone: (_requestId: unknown, cb: unknown) => {
+      done = cb as () => void;
+      return () => {};
+    },
+    onAiSdkAgentError: () => () => {},
+  };
+
+  await runSdkAgentTurn(
+    bridge,
+    'request-auto-command',
+    'chat-auto-command',
+    {
+      ...sdkConfig,
+      command: '/opt/homebrew/bin/codex',
+      commandSource: 'auto',
+    },
+    'hello',
+    createCallbacks([]),
+  );
+
+  assert.equal(streamArgs.at(-1), undefined);
+});
+
+test('runSdkAgentTurn stores SDK session ids with backend and path metadata', async () => {
+  const sessionIds: string[] = [];
+  let onEvent: ((event: unknown) => void) | null = null;
+  let done: (() => void) | null = null;
+  const bridge: Record<string, (...args: unknown[]) => unknown> = {
+    aiSdkAgentStream: async () => {
+      queueMicrotask(() => {
+        onEvent?.({
+          type: 'session-id',
+          sessionId: 'thread-1',
+          sdkBackend: 'codex',
+          binPath: '/opt/homebrew/bin/codex',
+        });
+        done?.();
+      });
+      return { ok: true };
+    },
+    aiSdkAgentCancel: async () => ({ ok: true }),
+    onAiSdkAgentEvent: (_requestId: unknown, cb: unknown) => {
+      onEvent = cb as (event: unknown) => void;
+      return () => {};
+    },
+    onAiSdkAgentDone: (_requestId: unknown, cb: unknown) => {
+      done = cb as () => void;
+      return () => {};
+    },
+    onAiSdkAgentError: () => () => {},
+  };
+
+  await runSdkAgentTurn(
+    bridge,
+    'request-session-metadata',
+    'chat-session-metadata',
+    sdkConfig,
+    'hello',
+    {
+      ...createCallbacks([]),
+      onSessionId: (sessionId) => sessionIds.push(sessionId),
+    },
+  );
+
+  assert.equal(sessionIds.length, 1);
+  assert.match(sessionIds[0], /^netcatty-sdk-session:/);
+  const payload = JSON.parse(decodeURIComponent(sessionIds[0].replace(/^netcatty-sdk-session:/, '')));
+  assert.deepEqual(payload, {
+    v: 1,
+    id: 'thread-1',
+    backend: 'codex',
+    binPath: '/opt/homebrew/bin/codex',
+  });
 });
 
 test('runSdkAgentTurn forwards Cursor API key as agent environment', async () => {

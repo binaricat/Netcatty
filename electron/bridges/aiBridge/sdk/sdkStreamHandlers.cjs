@@ -14,6 +14,7 @@ const VALID_BACKENDS = new Set(listBackends());
 const MODEL_CACHE_TTL_MS = 5 * 60 * 1000;
 const MODEL_LIST_TIMEOUT_MS = 10000;
 const sdkModelCache = new Map();
+const SDK_SESSION_ID_PREFIX = "netcatty-sdk-session:";
 
 function buildSdkSessionKey(chatSessionId, backendKey, binPath) {
   return [
@@ -27,6 +28,29 @@ function buildSdkModelCacheKey(backendKey, binPath) {
   return [String(backendKey || ""), String(binPath || "")].join("\u0000");
 }
 
+function isPathLikeCommand(command) {
+  const raw = String(command || "").trim();
+  return Boolean(raw && (raw.includes("/") || raw.includes("\\") || /^[a-z]:/i.test(raw)));
+}
+
+function parseSdkSessionIdentity(value) {
+  const raw = String(value || "");
+  if (!raw.startsWith(SDK_SESSION_ID_PREFIX)) return null;
+  try {
+    const parsed = JSON.parse(decodeURIComponent(raw.slice(SDK_SESSION_ID_PREFIX.length)));
+    const sessionId = String(parsed?.id || "").trim();
+    const backendKey = String(parsed?.backend || "").trim();
+    if (!sessionId || !backendKey) return null;
+    return {
+      sessionId,
+      backendKey,
+      binPath: String(parsed?.binPath || ""),
+    };
+  } catch {
+    return null;
+  }
+}
+
 function deleteSdkSessionKeysForChat(sdkSessionIds, chatSessionId) {
   const prefix = `${String(chatSessionId || "")}\u0000`;
   for (const key of sdkSessionIds.keys()) {
@@ -36,8 +60,25 @@ function deleteSdkSessionKeysForChat(sdkSessionIds, chatSessionId) {
   }
 }
 
-function resolveSdkResumeSessionId(sdkSessionIds, sdkSessionKey) {
-  return sdkSessionIds.get(sdkSessionKey) || undefined;
+function resolveSdkResumeSessionId({
+  sdkSessionIds,
+  sdkSessionKey,
+  existingSessionId,
+  backendKey,
+  binPath,
+  hasConfiguredCommand,
+}) {
+  const inMemorySessionId = sdkSessionIds.get(sdkSessionKey);
+  if (inMemorySessionId) return inMemorySessionId;
+
+  const persisted = parseSdkSessionIdentity(existingSessionId);
+  if (persisted) {
+    return persisted.backendKey === backendKey && persisted.binPath === String(binPath || "")
+      ? persisted.sessionId
+      : undefined;
+  }
+
+  return existingSessionId && !hasConfiguredCommand ? existingSessionId : undefined;
 }
 
 function withTimeout(promise, ms) {
@@ -298,9 +339,17 @@ function registerSdkStreamHandlers(ctx) {
             env = addCodexExecutableEnvForSdk(env, binPath);
           }
 
+          const hasConfiguredCommand = isPathLikeCommand(agentCommand);
           const sdkSessionKey = buildSdkSessionKey(chatSessionId, backendKey, binPath);
           const hasInMemorySession = sdkSessionIds.has(sdkSessionKey);
-          const resumeSessionId = resolveSdkResumeSessionId(sdkSessionIds, sdkSessionKey);
+          const resumeSessionId = resolveSdkResumeSessionId({
+            sdkSessionIds,
+            sdkSessionKey,
+            existingSessionId,
+            backendKey,
+            binPath,
+            hasConfiguredCommand,
+          });
           const stagedAttachments = [];
           const turnPrompt = buildSdkTurnPrompt({
             prompt,
@@ -320,6 +369,19 @@ function registerSdkStreamHandlers(ctx) {
           });
 
           const driver = getDriver(backendKey);
+          const driverEmitter = {
+            ...emitter,
+            sessionId(sessionId) {
+              if (sessionId) {
+                emitter.emitEvent({
+                  type: "session-id",
+                  sessionId,
+                  sdkBackend: backendKey,
+                  binPath: binPath || "",
+                });
+              }
+            },
+          };
           const result = await driver.runTurn({
             prompt: contextualPrompt,
             cwd: cwd || process.cwd(),
@@ -329,7 +391,7 @@ function registerSdkStreamHandlers(ctx) {
             injectedMcpServers,
             claudeSettings,
             toolIntegrationMode: effectiveMode,
-            emitter,
+            emitter: driverEmitter,
             signal: abortController.signal,
             abortController,
             resumeSessionId,

@@ -10,6 +10,7 @@ import type {
   AgentModelPreset,
   AISessionScope,
   DiscoveredAgent,
+  ExternalAgentConfig,
 } from '../infrastructure/ai/types';
 import type { ExecutorContext } from '../infrastructure/ai/cattyAgent/executor';
 import { getAgentModelPresets } from '../infrastructure/ai/types';
@@ -86,6 +87,11 @@ function invalidateUserSkillsStatusCache() {
 
 if (typeof window !== 'undefined') {
   subscribeUserSkillsStatusChanged(invalidateUserSkillsStatusCache);
+}
+
+function getManualAgentCommand(config: ExternalAgentConfig | null | undefined): string | undefined {
+  const command = String(config?.command || '').trim();
+  return config?.commandSource === 'manual' && command ? command : undefined;
 }
 
 function loadUserSkillsStatus(
@@ -621,7 +627,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     if (!bridge?.aiCodexGetIntegration) return;
     let cancelled = false;
     void Promise.resolve(
-      bridge.aiCodexGetIntegration({ codexPath: currentAgentConfig?.command }) as Promise<CodexIntegrationStatus>,
+      bridge.aiCodexGetIntegration({ codexPath: getManualAgentCommand(currentAgentConfig) }) as Promise<CodexIntegrationStatus>,
     ).then((info) => {
       if (cancelled) return;
       const hasCustom = info?.state === 'connected_custom_config';
@@ -634,7 +640,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
       }
     });
     return () => { cancelled = true; };
-  }, [isVisible, isCodexManagedAgent, currentAgentId, currentAgentConfig?.command]);
+  }, [isVisible, isCodexManagedAgent, currentAgentId, currentAgentConfig]);
 
   const agentModelMapRef = useRef(agentModelMap);
   agentModelMapRef.current = agentModelMap;
@@ -655,7 +661,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
       undefined,
       `models_${currentAgentId}`,
       currentAgentConfig.env,
-      currentAgentConfig.command,
+      getManualAgentCommand(currentAgentConfig),
     ).then((result) => {
       if (cancelled || !result?.ok || !Array.isArray(result.models)) return;
       if (result.models.length === 0) {
