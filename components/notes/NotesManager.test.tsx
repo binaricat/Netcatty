@@ -6,7 +6,16 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { I18nProvider } from "../../application/i18n/I18nProvider.tsx";
 import type { VaultNote } from "../../types.ts";
 import { TooltipProvider } from "../ui/tooltip.tsx";
-import { NotesManager } from "./NotesManager.tsx";
+import {
+  getFallbackNoteSelectionState,
+  getNoteActionTargetGroup,
+  getNoteGroupSelectionState,
+  getNotesGroupDropAction,
+  getNoteSelectionState,
+  getSelectedVaultNote,
+  isNoteFolderTreeSelected,
+  NotesManager,
+} from "./NotesManager.tsx";
 
 const note = (overrides: Partial<VaultNote> = {}): VaultNote => ({
   id: "note-1",
@@ -23,6 +32,7 @@ const renderNotes = (
   notes: VaultNote[] = [note()],
   displayMode: React.ComponentProps<typeof NotesManager>["displayMode"] = "full",
   noteGroups: string[] = ["Ops"],
+  openNoteId: string | null = null,
 ) => renderToStaticMarkup(
   <I18nProvider locale="en">
     <TooltipProvider>
@@ -33,6 +43,7 @@ const renderNotes = (
         onUpdateNotes={() => undefined}
         onUpdateNoteGroups={() => undefined}
         displayMode={displayMode}
+        openNoteId={openNoteId}
       />
     </TooltipProvider>
   </I18nProvider>,
@@ -51,7 +62,76 @@ test("NotesManager marks selected notebook rows with shared tree state", () => {
 
   assert.match(markup, /data-vault-tree-row="group"/);
   assert.match(markup, /data-vault-tree-row="item"/);
-  assert.match(markup, /data-selected="true"/);
+  assert.equal(markup.match(/data-selected="true"/g)?.length, 1);
+  assert.match(markup, /data-vault-tree-row="group"[^>]*data-selected="false"/);
+  assert.match(markup, /data-vault-tree-row="item"[^>]*data-selected="true"/);
+});
+
+test("NotesManager selection helpers keep note and folder selection exclusive", () => {
+  const notes = [note(), note({ id: "note-2", title: "Deploy", group: "Deploy" })];
+  const noteSelection = getNoteSelectionState(notes[0], false);
+  const sidebarNoteSelection = getNoteSelectionState(notes[0], true);
+  const groupSelection = getNoteGroupSelectionState("Ops");
+
+  assert.equal(getSelectedVaultNote(notes, "note-1")?.title, "Postgres failover checklist");
+  assert.equal(getSelectedVaultNote(notes, null), null);
+  assert.deepEqual(noteSelection, {
+    selectedNoteId: "note-1",
+    selectedGroup: null,
+    overlayNoteId: null,
+  });
+  assert.deepEqual(sidebarNoteSelection, {
+    selectedNoteId: "note-1",
+    selectedGroup: null,
+    overlayNoteId: "note-1",
+  });
+  assert.deepEqual(groupSelection, {
+    selectedNoteId: null,
+    selectedGroup: "Ops",
+    overlayNoteId: null,
+  });
+  assert.equal(isNoteFolderTreeSelected("Ops", "note-1", "Ops"), false);
+  assert.equal(isNoteFolderTreeSelected("Ops", null, "Ops"), true);
+  assert.equal(getNoteActionTargetGroup(notes[0], "Deploy"), "Ops");
+  assert.equal(getNoteActionTargetGroup(null, "Deploy"), "Deploy");
+});
+
+test("NotesManager note creation, duplicate, and delete fallback selections stay exclusive", () => {
+  const notes = [
+    note(),
+    note({ id: "note-2", title: "Deploy", group: "Deploy", order: 2000 }),
+  ];
+  const createdOrDuplicated = note({ id: "new-note", group: "Ops" });
+
+  assert.deepEqual(getNoteSelectionState(createdOrDuplicated, false), {
+    selectedNoteId: "new-note",
+    selectedGroup: null,
+    overlayNoteId: null,
+  });
+  assert.deepEqual(getNoteSelectionState(createdOrDuplicated, true), {
+    selectedNoteId: "new-note",
+    selectedGroup: null,
+    overlayNoteId: "new-note",
+  });
+  assert.deepEqual(getFallbackNoteSelectionState(notes.slice(1), false), {
+    selectedNoteId: "note-2",
+    selectedGroup: null,
+    overlayNoteId: null,
+  });
+  assert.deepEqual(getFallbackNoteSelectionState(notes.slice(1), true), {
+    selectedNoteId: null,
+    selectedGroup: null,
+    overlayNoteId: null,
+  });
+});
+
+test("NotesManager group drop helper separates reorder, inside, and ignored drops", () => {
+  assert.equal(getNotesGroupDropAction("Ops", "Deploy", "before"), "reorder");
+  assert.equal(getNotesGroupDropAction("Ops", "Deploy", "after"), "reorder");
+  assert.equal(getNotesGroupDropAction("Ops", "Deploy", "inside"), "inside");
+  assert.equal(getNotesGroupDropAction("Ops", "Ops", "before"), "ignore");
+  assert.equal(getNotesGroupDropAction("Ops", "Ops/DB", "inside"), "ignore");
+  assert.equal(getNotesGroupDropAction(null, "Deploy", "before"), "ignore");
 });
 
 test("NotesManager exposes shared tree drag targets and context menus", () => {
@@ -62,6 +142,9 @@ test("NotesManager exposes shared tree drag targets and context menus", () => {
   assert.match(markup, /data-notes-drag-kind="note"/);
   assert.match(markup, /data-notes-context-menu="group"/);
   assert.match(markup, /data-notes-context-menu="note"/);
+  assert.match(markup, /draggable="true"/);
+  assert.match(markup, /data-open="false"/);
+  assert.match(markup, /role="separator"/);
 });
 
 test("NotesManager renders nested notebook folders", () => {
@@ -105,4 +188,28 @@ test("NotesManager sidebar mode renders list without editor by default", () => {
   assert.match(markup, /Ops/);
   assert.match(markup, /Postgres failover checklist/);
   assert.doesNotMatch(markup, /editable markdown/);
+});
+
+test("NotesManager sidebar mode opens the requested note without selecting its folder", () => {
+  const markup = renderNotes(
+    [
+      note(),
+      note({
+        id: "note-2",
+        title: "Deploy overlay",
+        content: "Deploy overlay content",
+        group: "Ops",
+        order: 2000,
+      }),
+    ],
+    "sidebar",
+    ["Ops"],
+    "note-2",
+  );
+
+  assert.match(markup, /Deploy overlay/);
+  assert.match(markup, /editable markdown/);
+  assert.equal(markup.match(/data-selected="true"/g)?.length, 1);
+  assert.match(markup, /data-vault-tree-row="group"[^>]*data-selected="false"/);
+  assert.match(markup, /data-vault-tree-row="item"[^>]*data-selected="true"[^>]*data-note-id="note-2"/);
 });

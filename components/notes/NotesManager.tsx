@@ -223,6 +223,57 @@ const buildNoteTree = (groups: string[], notes: VaultNote[]): { children: NoteFo
   };
 };
 
+export const getSelectedVaultNote = (notes: VaultNote[], selectedNoteId: string | null): VaultNote | null =>
+  selectedNoteId ? notes.find((note) => note.id === selectedNoteId) ?? null : null;
+
+export const isNoteFolderTreeSelected = (
+  selectedGroup: string | null,
+  selectedNoteId: string | null,
+  groupPath: string,
+): boolean => selectedNoteId === null && selectedGroup === groupPath;
+
+export const getNoteActionTargetGroup = (
+  selectedNote: VaultNote | null,
+  selectedGroup: string | null,
+): string | null => selectedNote?.group || selectedGroup || null;
+
+export const getNoteSelectionState = (
+  note: VaultNote,
+  isSidebarMode: boolean,
+): { selectedNoteId: string; selectedGroup: null; overlayNoteId: string | null } => ({
+  selectedNoteId: note.id,
+  selectedGroup: null,
+  overlayNoteId: isSidebarMode ? note.id : null,
+});
+
+export const getNoteGroupSelectionState = (
+  groupPath: string,
+): { selectedNoteId: null; selectedGroup: string; overlayNoteId: null } => ({
+  selectedNoteId: null,
+  selectedGroup: groupPath,
+  overlayNoteId: null,
+});
+
+export const getFallbackNoteSelectionState = (
+  remainingNotes: VaultNote[],
+  isSidebarMode: boolean,
+): { selectedNoteId: string | null; selectedGroup: null; overlayNoteId: null } => ({
+  selectedNoteId: isSidebarMode ? null : remainingNotes[0]?.id ?? null,
+  selectedGroup: null,
+  overlayNoteId: null,
+});
+
+export const getNotesGroupDropAction = (
+  sourceGroup: string | null,
+  targetGroup: string,
+  intent: VaultDropPosition | "inside",
+): "ignore" | "inside" | "reorder" => {
+  if (!sourceGroup || sourceGroup === targetGroup || targetGroup.startsWith(`${sourceGroup}/`)) {
+    return "ignore";
+  }
+  return intent === "inside" ? "inside" : "reorder";
+};
+
 export const NotesManager: React.FC<NotesManagerProps> = ({
   notes,
   noteGroups,
@@ -236,10 +287,13 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
   const { t } = useI18n();
   const { openExternal } = useApplicationBackend();
   const isSidebarMode = displayMode === "sidebar";
+  const initialOpenNoteId = isSidebarMode && openNoteId && notes.some((note) => note.id === openNoteId)
+    ? openNoteId
+    : null;
   const [query, setQuery] = useState("");
-  const [selectedGroup, setSelectedGroup] = useState<string | null>(() => notes[0]?.group ?? null);
-  const [selectedNoteId, setSelectedNoteId] = useState<string | null>(() => isSidebarMode ? null : notes[0]?.id ?? null);
-  const [overlayNoteId, setOverlayNoteId] = useState<string | null>(null);
+  const [selectedGroup, setSelectedGroup] = useState<string | null>(null);
+  const [selectedNoteId, setSelectedNoteId] = useState<string | null>(() => initialOpenNoteId ?? (isSidebarMode ? null : notes[0]?.id ?? null));
+  const [overlayNoteId, setOverlayNoteId] = useState<string | null>(() => initialOpenNoteId);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(
     () => new Set(notes.flatMap((note) => note.group ? ancestorNoteGroupPaths(note.group) : [])),
   );
@@ -270,8 +324,7 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
       rootNotes: sortNoteItems(tree.rootNotes),
     };
   }, [groupOrderByPath, groups, sortedNotes]);
-  const selectedNote = sortedNotes.find((note) => note.id === selectedNoteId)
-    ?? (isSidebarMode ? null : sortedNotes[0] ?? null);
+  const selectedNote = getSelectedVaultNote(sortedNotes, selectedNoteId);
   const overlayNote = sortedNotes.find((note) => note.id === overlayNoteId) ?? null;
 
   const queryText = query.trim();
@@ -282,7 +335,10 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
 
   useEffect(() => {
     if (!selectedNoteId || sortedNotes.some((note) => note.id === selectedNoteId)) return;
-    setSelectedNoteId(isSidebarMode ? null : sortedNotes[0]?.id ?? null);
+    const nextSelection = getFallbackNoteSelectionState(sortedNotes, isSidebarMode);
+    setSelectedNoteId(nextSelection.selectedNoteId);
+    setSelectedGroup(nextSelection.selectedGroup);
+    setOverlayNoteId(nextSelection.overlayNoteId);
   }, [isSidebarMode, selectedNoteId, sortedNotes]);
 
   useEffect(() => {
@@ -299,9 +355,10 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
     if (!isSidebarMode || !openNoteId) return;
     const note = sortedNotes.find((item) => item.id === openNoteId);
     if (!note) return;
-    setSelectedNoteId(note.id);
-    setOverlayNoteId(note.id);
-    setSelectedGroup(note.group || null);
+    const nextSelection = getNoteSelectionState(note, true);
+    setSelectedNoteId(nextSelection.selectedNoteId);
+    setSelectedGroup(nextSelection.selectedGroup);
+    setOverlayNoteId(nextSelection.overlayNoteId);
     if (note.group) {
       setExpandedGroups((current) => new Set([...current, ...ancestorNoteGroupPaths(note.group || "")]));
     }
@@ -361,13 +418,14 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
     const note = createNote(group, getNextVaultOrder(sortedNotes));
     onUpdateNotes(normalizeVaultNotes([...sortedNotes, note]));
     if (group) expandPath(group);
-    setSelectedNoteId(note.id);
-    if (isSidebarMode) setOverlayNoteId(note.id);
-    setSelectedGroup(group);
+    const nextSelection = getNoteSelectionState(note, isSidebarMode);
+    setSelectedNoteId(nextSelection.selectedNoteId);
+    setSelectedGroup(nextSelection.selectedGroup);
+    setOverlayNoteId(nextSelection.overlayNoteId);
   };
 
   const addNote = () => {
-    addNoteToGroup(selectedGroup);
+    addNoteToGroup(getNoteActionTargetGroup(selectedNote, selectedGroup));
   };
 
   const duplicateNoteById = (noteId: string) => {
@@ -384,23 +442,29 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
     };
     onUpdateNotes(normalizeVaultNotes([...sortedNotes, copy]));
     if (copy.group) expandPath(copy.group);
-    setSelectedNoteId(copy.id);
-    if (isSidebarMode) setOverlayNoteId(copy.id);
+    const nextSelection = getNoteSelectionState(copy, isSidebarMode);
+    setSelectedNoteId(nextSelection.selectedNoteId);
+    setSelectedGroup(nextSelection.selectedGroup);
+    setOverlayNoteId(nextSelection.overlayNoteId);
   };
 
   const deleteNoteById = (noteId: string) => {
     const next = sortedNotes.filter((note) => note.id !== noteId);
     onUpdateNotes(next);
     if (selectedNoteId === noteId) {
-      setSelectedNoteId(isSidebarMode ? null : next[0]?.id ?? null);
+      const nextSelection = getFallbackNoteSelectionState(next, isSidebarMode);
+      setSelectedNoteId(nextSelection.selectedNoteId);
+      setSelectedGroup(nextSelection.selectedGroup);
+      setOverlayNoteId(nextSelection.overlayNoteId);
       setEditingNoteId(null);
     }
     if (overlayNoteId === noteId) setOverlayNoteId(null);
   };
 
   const startCreateGroup = () => {
-    setCreatingGroupParent(selectedGroup);
-    if (selectedGroup) expandPath(selectedGroup);
+    const targetGroup = getNoteActionTargetGroup(selectedNote, selectedGroup);
+    setCreatingGroupParent(targetGroup);
+    if (targetGroup) expandPath(targetGroup);
   };
 
   const commitCreateGroup = (name: string) => {
@@ -411,7 +475,10 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
     const next = normalizeNoteGroups([...groups, ...ancestorNoteGroupPaths(nextPath)]);
     onUpdateNoteGroups(next);
     expandPath(nextPath);
-    setSelectedGroup(nextPath);
+    const nextSelection = getNoteGroupSelectionState(nextPath);
+    setSelectedNoteId(nextSelection.selectedNoteId);
+    setSelectedGroup(nextSelection.selectedGroup);
+    setOverlayNoteId(nextSelection.overlayNoteId);
   };
 
   const renameGroup = (group: string, nextName: string) => {
@@ -484,7 +551,6 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
     onUpdateNotes(normalizeVaultNotes(sortedNotes.map((note) => (
       note.id === noteId ? { ...note, group: nextGroup, updatedAt: Date.now() } : note
     ))));
-    if (selectedNoteId === noteId) setSelectedGroup(group);
     if (group) expandPath(group);
   };
 
@@ -497,7 +563,6 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
         : note
     ));
     onUpdateNotes(normalizeVaultNotes(reorderVaultItems(movedNotes, sourceId, targetNote.id, position)));
-    if (selectedNoteId === sourceId) setSelectedGroup(targetNote.group || null);
     if (targetNote.group) expandPath(targetNote.group);
   };
 
@@ -705,7 +770,7 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
           <VaultTreeItemRow
             label={note.title}
             depth={depth}
-            selected={selectedNote?.id === note.id}
+            selected={selectedNoteId === note.id}
             editing={editingNoteId === note.id}
             editingInitialName={note.title}
             onRenameCommit={(name) => {
@@ -750,9 +815,10 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
             }}
             onDragEnd={resetTreeDragState}
             onClick={() => {
-              setSelectedNoteId(note.id);
-              setSelectedGroup(note.group || null);
-              if (isSidebarMode) setOverlayNoteId(note.id);
+              const nextSelection = getNoteSelectionState(note, isSidebarMode);
+              setSelectedNoteId(nextSelection.selectedNoteId);
+              setSelectedGroup(nextSelection.selectedGroup);
+              setOverlayNoteId(nextSelection.overlayNoteId);
             }}
             actions={(
               <HoverActionMenu>
@@ -788,7 +854,7 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
               name={node.name}
               depth={depth}
               expanded={expanded}
-              selected={selectedGroup === node.path}
+              selected={isNoteFolderTreeSelected(selectedGroup, selectedNoteId, node.path)}
               hasChildren={hasChildren}
               editing={editingGroupPath === node.path}
               editingInitialName={node.name}
@@ -833,21 +899,26 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
               onDragLeave={handleTreeRowDragLeave}
               onDrop={(event) => {
                 const sourceGroupPath = draggingGroupPath || getDraggedGroupPath(event.dataTransfer);
-                if (sourceGroupPath && sourceGroupPath !== node.path && !node.path.startsWith(`${sourceGroupPath}/`)) {
+                if (sourceGroupPath) {
                   const intent = getVaultDropIntent(event.currentTarget, event.clientX, event.clientY, false);
-                  if (intent !== "inside") {
+                  const dropAction = getNotesGroupDropAction(sourceGroupPath, node.path, intent);
+                  if (dropAction === "reorder" && intent !== "inside") {
                     event.preventDefault();
                     event.stopPropagation();
                     reorderGroupToGroup(sourceGroupPath, node.path, intent);
                     resetTreeDragState();
                     return;
                   }
+                  if (dropAction === "ignore") return;
                 }
                 handleGroupDrop(node.path, event);
               }}
               onDragEnd={resetTreeDragState}
               onClick={() => {
-                setSelectedGroup(node.path);
+                const nextSelection = getNoteGroupSelectionState(node.path);
+                setSelectedNoteId(nextSelection.selectedNoteId);
+                setSelectedGroup(nextSelection.selectedGroup);
+                setOverlayNoteId(nextSelection.overlayNoteId);
                 if (hasChildren) toggleGroup(node.path);
               }}
               actions={(
