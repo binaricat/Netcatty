@@ -277,12 +277,21 @@ const stripDeviceBoundApiKey = <T extends Record<string, unknown>>(value: T): T 
   return next;
 };
 
+const getApiKeyLabel = (value: Record<string, unknown>): string => {
+  if (typeof value.name === 'string' && value.name.trim()) return value.name;
+  if (typeof value.id === 'string' && value.id.trim()) return value.id;
+  if (typeof value.providerId === 'string' && value.providerId.trim()) return value.providerId;
+  return 'configured provider';
+};
+
 const withPortableApiKey = async <T extends Record<string, unknown>>(value: T): Promise<T> => {
   const apiKey = value.apiKey;
   if (typeof apiKey !== 'string' || !isEncryptedCredentialPlaceholder(apiKey)) return value;
 
   const decrypted = await decryptField(apiKey).catch(() => undefined);
-  if (!decrypted || decrypted === apiKey) return stripDeviceBoundApiKey(value);
+  if (!decrypted || decrypted === apiKey || isEncryptedCredentialPlaceholder(decrypted)) {
+    throw new Error(`Unable to decrypt AI API key for ${getApiKeyLabel(value)}. Sync was stopped to avoid removing the key from cloud sync.`);
+  }
   return { ...value, apiKey: decrypted };
 };
 

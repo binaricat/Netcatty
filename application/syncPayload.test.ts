@@ -232,6 +232,30 @@ test("buildCloudSyncPayload includes decrypted AI API keys for portable cloud sy
   assert.equal(payload.settings?.ai?.webSearchConfig?.apiKey, "sk-web");
 });
 
+test("buildCloudSyncPayload fails instead of deleting API keys when decrypt fails", async () => {
+  Object.defineProperty(globalThis, "window", {
+    value: {
+      netcatty: {
+        credentialsDecrypt: async (value: string) => value,
+      },
+    },
+    configurable: true,
+  });
+
+  localStorage.setItem(storageKeys.STORAGE_KEY_AI_PROVIDERS, JSON.stringify([{
+    id: "openai-main",
+    providerId: "openai",
+    name: "OpenAI",
+    apiKey: "enc:v1:djEwPROVIDER",
+    enabled: true,
+  }]));
+
+  await assert.rejects(
+    () => buildCloudSyncPayload(vault([])),
+    /Unable to decrypt AI API key/,
+  );
+});
+
 test("applySyncPayload restores AI configuration settings", async () => {
   const providers = [{
     id: "anthropic-main",
