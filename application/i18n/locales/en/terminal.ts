@@ -103,7 +103,7 @@ export const enTerminalMessages: Messages = {
   'terminal.search.nextMatch': 'Next match (Enter)',
   'terminal.menu.copy': 'Copy',
   'terminal.menu.paste': 'Paste',
-  'terminal.menu.uploadClipboardImage': 'Upload clipboard image and insert path',
+  'terminal.menu.uploadClipboardImage': 'Upload clipboard image',
   'terminal.menu.addSelectionToAI': 'Add to Conversation',
   'terminal.menu.pasteSelection': 'Paste Selection',
   'terminal.menu.selectAll': 'Select All',

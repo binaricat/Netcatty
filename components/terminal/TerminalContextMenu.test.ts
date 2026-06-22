@@ -116,9 +116,9 @@ test("localizes the upload clipboard image context menu label", () => {
     }
   }
 
-  assert.equal(en["terminal.menu.uploadClipboardImage"], "Upload clipboard image and insert path");
-  assert.equal(zhCN["terminal.menu.uploadClipboardImage"], "上传剪贴板图片并插入路径");
-  assert.equal(ru["terminal.menu.uploadClipboardImage"], "Загрузить изображение из буфера обмена и вставить путь");
+  assert.equal(en["terminal.menu.uploadClipboardImage"], "Upload clipboard image");
+  assert.equal(zhCN["terminal.menu.uploadClipboardImage"], "上传剪贴板图片");
+  assert.equal(ru["terminal.menu.uploadClipboardImage"], "Загрузить изображение из буфера");
 });
 
 test("localizes the YMODEM serial send actions", () => {

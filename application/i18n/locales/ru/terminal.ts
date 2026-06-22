@@ -124,7 +124,7 @@ export const ruTerminalMessages: Messages = {
   'terminal.search.nextMatch': 'Следующее совпадение (Enter)',
   'terminal.menu.copy': 'Копировать',
   'terminal.menu.paste': 'Вставить',
-  'terminal.menu.uploadClipboardImage': 'Загрузить изображение из буфера обмена и вставить путь',
+  'terminal.menu.uploadClipboardImage': 'Загрузить изображение из буфера',
   'terminal.menu.addSelectionToAI': 'Добавить в чат',
   'terminal.menu.pasteSelection': 'Вставить выделенное',
   'terminal.menu.selectAll': 'Выбрать всё',
