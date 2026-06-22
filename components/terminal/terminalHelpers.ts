@@ -313,44 +313,58 @@ function buildPosixSnippetRestoreCommand(encodedCommand: string): string {
 
 function buildPortableCurrentShellSnippetRestoreCommand(command: string): string | null {
   const suffix = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-  const stateFile = `/tmp/.netcatty-stty-${suffix}`;
-  const statusFile = `/tmp/.netcatty-status-${suffix}`;
-  const commandFile = `/tmp/.netcatty-cmd-${suffix}`;
+  const tempDir = `/tmp/.netcatty-${suffix}`;
   const encodedCommand = encodeUtf8Base64(command);
-  const writeCommand = `sh -c 'printf %s "$1" | base64 -d > ${commandFile} 2>/dev/null || printf %s "$1" | base64 -D > ${commandFile} 2>/dev/null' sh '${encodedCommand}'`;
-  const saveState = `sh -c 'stty -g > ${stateFile} 2>/dev/null || true'`;
-  const restoreState = `sh -c 'xargs stty < ${stateFile} 2>/dev/null || stty sane 2>/dev/null || true'; rm -f ${stateFile}`;
-  const trapCleanup = `${restoreState}; rm -f ${statusFile} ${commandFile}`;
-  const exitWithStatus = `sh -c 'code=$(cat ${statusFile} 2>/dev/null || printf 1); rm -f ${statusFile}; exit "$code"'`;
+  const createTempDir = `sh -c 'mkdir -m 700 ${tempDir} 2>/dev/null || exit 1'`;
+  const safeTempDirCheck = "dir=$1; parent=${dir%/*}; base=${dir##*/}; parent_real=$(cd -P \"$parent\" 2>/dev/null && pwd -P) && expected=$parent_real/$base && cd -P \"$dir\" 2>/dev/null && actual=$(pwd -P) && test \"$actual\" = \"$expected\"";
+  const saveState = `sh -c '${safeTempDirCheck} || exit 1; stty -g > stty 2>/dev/null || true' sh ${tempDir}`;
+  const restoreState = `sh -c '${safeTempDirCheck} || { stty sane 2>/dev/null || true; exit 0; }; xargs stty < stty 2>/dev/null || stty sane 2>/dev/null || true; rm -f stty' sh ${tempDir}`;
+  const trapCleanup = `sh -c '${safeTempDirCheck} || { stty sane 2>/dev/null || true; exit 0; }; xargs stty < stty 2>/dev/null || stty sane 2>/dev/null || true; rm -f stty status; cd /; rmdir "$1" 2>/dev/null || true' sh ${tempDir}`;
+  const writeStatus = `sh -c '${safeTempDirCheck} || exit 1; printf %s "$2" > status' sh ${tempDir}`;
+  const statusGuard = `sh -c '${safeTempDirCheck} || exit 1; test -f status' sh ${tempDir}`;
+  const exitWithStatus = `sh -c '${safeTempDirCheck} || exit 1; code=$(cat status 2>/dev/null || printf 1); rm -f status; cd /; rmdir "$1" 2>/dev/null || true; exit "$code"' sh ${tempDir}`;
   const fishRunner = [
-    `source ${commandFile}`,
+    `set __netcatty_cmd (printf %s '${encodedCommand}' | base64 -d 2>/dev/null; or printf %s '${encodedCommand}' | base64 -D 2>/dev/null)`,
+    "set __netcatty_decode_status $status",
+    "if test $__netcatty_decode_status -eq 0",
+    "eval $__netcatty_cmd",
     "set __netcatty_status $status",
-    `sh -c 'printf %s "$1" > ${statusFile}' sh "$__netcatty_status"`,
-    "set -e __netcatty_status",
+    "else",
+    "printf '%s\\n' 'Netcatty: failed to decode protected snippet command' >&2",
+    "set __netcatty_status 127",
+    "end",
+    `${writeStatus} "$__netcatty_status"`,
+    "set -e __netcatty_cmd __netcatty_decode_status __netcatty_status",
     "true",
   ].join("; ");
   const posixRunner = [
-    `. ${commandFile}`,
-    "__netcatty_status=$?",
-    `sh -c 'printf %s "$1" > ${statusFile}' sh "$__netcatty_status"`,
-    "unset __netcatty_status",
+    `__netcatty_cmd="$(printf %s '${encodedCommand}' | base64 -d 2>/dev/null || printf %s '${encodedCommand}' | base64 -D 2>/dev/null)"`,
+    "__netcatty_decode_status=$?",
+    "if [ \"$__netcatty_decode_status\" -eq 0 ]; then eval \"$__netcatty_cmd\"; __netcatty_status=$?; else printf '%s\\n' 'Netcatty: failed to decode protected snippet command' >&2; __netcatty_status=127; fi",
+    `${writeStatus} "$__netcatty_status"`,
+    "unset __netcatty_cmd __netcatty_decode_status __netcatty_status",
     "true",
   ].join("; ");
+  const tempDirGuard = `sh -c '${safeTempDirCheck}' sh ${tempDir}`;
+  const runFailure = [
+    "printf '%s\\n' 'Netcatty: failed to create private temp directory' >&2",
+    "false",
+  ].join("; ");
   const runInCurrentShell = [
-    `sh -c 'test -n "$1"' sh "$FISH_VERSION" && eval ${doubleQuoteFishAndPosix(fishRunner)}`,
-    `eval ${doubleQuoteFishAndPosix(posixRunner)}`,
+    `${tempDirGuard} && sh -c 'test -n "$1"' sh "$FISH_VERSION" && eval ${doubleQuoteFishAndPosix(fishRunner)}`,
+    `${tempDirGuard} && sh -c 'test -z "$1"' sh "$FISH_VERSION" && eval ${doubleQuoteFishAndPosix(posixRunner)}`,
+    `${statusGuard} || eval ${doubleQuoteFishAndPosix(runFailure)}`,
   ].join(" || ");
 
   return [
-    writeCommand,
+    createTempDir,
     saveState,
     `trap ${doubleQuoteFishAndPosix(trapCleanup)} INT TERM EXIT`,
-    runInCurrentShell,
+    `eval ${doubleQuoteFishAndPosix(runInCurrentShell)}`,
     restoreState,
     "trap - INT TERM EXIT",
-    `rm -f ${commandFile}`,
     exitWithStatus,
-  ].join("; ");
+  ].join(" && ");
 }
 
 export function prepareAutoRunSnippetCommand(

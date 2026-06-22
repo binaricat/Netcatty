@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, rmSync } from "node:fs";
 
 import type { Host } from "../domain/models";
 import {
@@ -160,16 +161,28 @@ test("auto-run snippets with unknown remote shell use a portable current-shell w
     noAutoRun: false,
   });
 
-  assert.match(wrapped, /^sh -c 'printf %s "\$1" \| base64 -d > \/tmp\/\.netcatty-cmd-/);
-  assert.match(wrapped, /sh -c 'stty -g > \/tmp\/\.netcatty-stty-/);
-  assert.match(wrapped, /trap "sh -c 'xargs stty < \/tmp\/\.netcatty-stty-/);
-  assert.match(wrapped, /source \/tmp\/\.netcatty-cmd-/);
-  assert.match(wrapped, /\. \/tmp\/\.netcatty-cmd-/);
+  assert.match(wrapped, /^sh -c 'mkdir -m 700 \/tmp\/\.netcatty-/);
+  assert.match(wrapped, /^sh -c 'mkdir -m 700 \/tmp\/\.netcatty-[^']+' && sh -c 'dir=\$1;/);
+  assert.doesNotMatch(wrapped, /^sh -c 'mkdir -m 700 \/tmp\/\.netcatty-[^']+'; sh -c 'dir=\$1;/);
+  assert.match(wrapped, /set __netcatty_cmd \(printf %s '/);
+  assert.match(wrapped, /__netcatty_cmd=.*printf %s '/);
+  assert.match(wrapped, /test -z .*FISH_VERSION/);
+  assert.match(wrapped, /cd -P "\$dir"/);
+  assert.match(wrapped, /stty -g > stty/);
+  assert.match(wrapped, /trap "sh -c 'dir=/);
+  assert.match(wrapped, /xargs stty < stty/);
+  assert.match(wrapped, /failed to create private temp directory/);
   assert.match(wrapped, /set __netcatty_status/);
-  assert.match(wrapped, /__netcatty_status=\\\$\?/);
-  assert.match(wrapped, /\/tmp\/\.netcatty-status-/);
+  assert.match(wrapped, /__netcatty_status=.*\?/);
+  assert.match(wrapped, /printf %s .*status/);
+  assert.match(wrapped, /rmdir/);
   assert.match(wrapped, /trap - INT TERM EXIT/);
   assert.doesNotMatch(wrapped, /\$[{]SHELL:-sh[}]/);
+  assert.doesNotMatch(wrapped, /\/cmd/);
+  assert.doesNotMatch(wrapped, /rm -f \/tmp\/\.netcatty-[^/]+\/(?:stty|status)/);
+  assert.doesNotMatch(wrapped, /source \/tmp\/\.netcatty-/);
+  assert.doesNotMatch(wrapped, /\. \/tmp\/\.netcatty-/);
+  assert.doesNotMatch(wrapped, /rm -rf \/tmp\/\.netcatty-/);
 });
 
 test("auto-run snippets with unknown remote shell preserve failure status", () => {
@@ -180,6 +193,43 @@ test("auto-run snippets with unknown remote shell preserve failure status", () =
 
   const result = spawnSync("bash", ["-lc", wrapped], { encoding: "utf8" });
   assert.equal(result.status, 42);
+});
+
+test("auto-run snippets with unknown remote shell execute through fish", (t) => {
+  const fishVersion = spawnSync("fish", ["--version"], { encoding: "utf8" });
+  if (fishVersion.error || fishVersion.status !== 0) {
+    t.skip("fish is not installed");
+    return;
+  }
+
+  const wrapped = prepareAutoRunSnippetCommand("set -l fish_marker fish-ok; printf $fish_marker; sh -c 'exit 42'", {
+    host: host({ protocol: "ssh", os: "linux", distro: "centos" }),
+    noAutoRun: false,
+  });
+
+  const result = spawnSync("fish", ["-c", wrapped], { encoding: "utf8" });
+  assert.equal(result.status, 42);
+  assert.equal(result.stdout.includes("fish-ok"), true);
+});
+
+test("auto-run snippets with unknown remote shell stop if the private temp dir already exists", () => {
+  const wrapped = prepareAutoRunSnippetCommand("printf should-not-run", {
+    host: host({ protocol: "ssh", os: "linux", distro: "centos" }),
+    noAutoRun: false,
+  });
+  const tempDir = wrapped.match(/mkdir -m 700 (\/tmp\/\.netcatty-[^ ]+)/)?.[1];
+  assert.ok(tempDir);
+
+  mkdirSync(tempDir, { mode: 0o777 });
+  try {
+    const result = spawnSync("bash", ["-lc", wrapped], { encoding: "utf8" });
+    assert.equal(result.status, 1);
+    assert.equal(result.stdout.includes("should-not-run"), false);
+    assert.equal(existsSync(`${tempDir}/status`), false);
+    assert.equal(existsSync(`${tempDir}/stty`), false);
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true });
+  }
 });
 
 test("auto-run snippets keep multi-line commands as terminal input", () => {
