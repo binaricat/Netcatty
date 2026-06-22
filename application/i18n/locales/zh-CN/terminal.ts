@@ -3,6 +3,9 @@ import type { Messages } from '../types';
 export const zhCNTerminalMessages: Messages = {
   'terminal.sudoHint.pressEnter': '按 Enter 粘贴 sudo 密码',
   'terminal.menu.rename': '重命名',
+  'terminal.menu.uploadClipboardImage': '上传剪贴板图片并插入路径',
+  'terminal.clipboardImageUpload.noImage': '剪贴板中没有图片',
+  'terminal.clipboardImageUpload.failed': '无法上传剪贴板图片',
   'terminal.toolbar.configureOsc7': '配置目录追踪',
   'terminal.toolbar.detach': '移出到独立标签',
   'terminal.menu.detach': '从工作区移出',

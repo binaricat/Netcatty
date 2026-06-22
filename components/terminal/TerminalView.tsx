@@ -130,6 +130,7 @@ function TerminalViewInner({ ctx }: { ctx: TerminalViewContext }) {
       isAlternateScreen={hasMouseTracking}
       onCopy={terminalContextActions.onCopy}
       onPaste={terminalContextActions.onPaste}
+      onUploadClipboardImage={status === "connected" ? terminalContextActions.onUploadClipboardImage : undefined}
       onPasteSelection={terminalContextActions.onPasteSelection}
       onSelectAll={terminalContextActions.onSelectAll}
       onClear={terminalContextActions.onClear}

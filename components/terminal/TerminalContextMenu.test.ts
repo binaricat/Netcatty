@@ -28,6 +28,11 @@ const shouldShowAddSelectionToAIContextMenuAction = (
     shouldShowAddSelectionToAIContextMenuAction?: (onAddSelectionToAI?: () => void) => boolean;
   }
 ).shouldShowAddSelectionToAIContextMenuAction;
+const shouldShowUploadClipboardImageContextMenuAction = (
+  terminalContextMenu as {
+    shouldShowUploadClipboardImageContextMenuAction?: (onUploadClipboardImage?: () => void) => boolean;
+  }
+).shouldShowUploadClipboardImageContextMenuAction;
 const shouldOpenTerminalContextMenu = (
   terminalContextMenu as {
     shouldOpenTerminalContextMenu?: (options: {
@@ -80,6 +85,19 @@ test("shows add selection to AI context menu action when a handler exists", () =
 
   assert.equal(shouldShowAddSelectionToAIContextMenuAction(() => {}), true);
   assert.equal(shouldShowAddSelectionToAIContextMenuAction(), false);
+});
+
+test("shows upload clipboard image context menu action when a handler exists", () => {
+  assert.equal(typeof shouldShowUploadClipboardImageContextMenuAction, "function");
+  if (typeof shouldShowUploadClipboardImageContextMenuAction !== "function") return;
+
+  assert.equal(shouldShowUploadClipboardImageContextMenuAction(() => {}), true);
+  assert.equal(shouldShowUploadClipboardImageContextMenuAction(), false);
+});
+
+test("localizes the upload clipboard image context menu label", () => {
+  assert.equal(en["terminal.menu.uploadClipboardImage"], "Upload clipboard image and insert path");
+  assert.equal(zhCN["terminal.menu.uploadClipboardImage"], "上传剪贴板图片并插入路径");
 });
 
 test("localizes the YMODEM serial send actions", () => {

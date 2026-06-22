@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   buildRemoteClipboardImagePath,
+  handleRemoteClipboardImageUpload,
   handleRemoteClipboardImagePaste,
   quoteRemotePathForShell,
 } from "./clipboardImagePaste";
@@ -117,6 +118,25 @@ test("remote clipboard image paste reports unhandled when no image exists", asyn
   assert.equal(handled, false);
 });
 
+test("remote clipboard image upload reports no image without inserting a path", async () => {
+  const result = await handleRemoteClipboardImageUpload({
+    bridge: {
+      readClipboardImage: async () => null,
+      openSftpForSession: async () => {
+        assert.fail("should not open SFTP without an image");
+      },
+      startStreamTransfer: async (options) => ({ transferId: options.transferId }),
+    },
+    getRemoteCwd: async () => "/home/alice",
+    sessionId: "session-1",
+    terminalBackend: {
+      writeToSession: () => assert.fail("should not paste without an image"),
+    },
+  });
+
+  assert.deepEqual(result, { ok: false, reason: "no-image" });
+});
+
 test("remote clipboard image paste skips upload without a reliable cwd", async () => {
   const transferPayloads: unknown[] = [];
   let deletedTempFile: string | undefined;
@@ -185,4 +205,26 @@ test("remote clipboard image paste does not insert a path when upload returns an
   assert.equal(handled, false);
   assert.equal(closedSftpId, "sftp-1");
   assert.equal(deletedTempFile, "/tmp/netcatty/shot.png");
+});
+
+test("remote clipboard image upload reports transfer failures without inserting a path", async () => {
+  const result = await handleRemoteClipboardImageUpload({
+    bridge: {
+      readClipboardImage: async () => ({
+        path: "/tmp/netcatty/shot.png",
+        name: "shot.png",
+        mediaType: "image/png",
+        size: 12,
+      }),
+      openSftpForSession: async () => "sftp-1",
+      startStreamTransfer: async (options) => ({ transferId: options.transferId, error: "disk full" }),
+    },
+    getRemoteCwd: async () => "/home/alice",
+    sessionId: "session-1",
+    terminalBackend: {
+      writeToSession: () => assert.fail("should not paste failed upload path"),
+    },
+  });
+
+  assert.deepEqual(result, { ok: false, reason: "upload-failed" });
 });

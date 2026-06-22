@@ -38,6 +38,7 @@ export interface TerminalContextMenuProps {
   isAlternateScreen?: boolean;
   onCopy?: () => void;
   onPaste?: () => void;
+  onUploadClipboardImage?: () => void;
   onPasteSelection?: () => void;
   onSelectAll?: () => void;
   onClear?: () => void;
@@ -73,6 +74,10 @@ export const shouldSuppressMouseTrackingContextMenu = ({
 export const shouldShowAddSelectionToAIContextMenuAction = (
   onAddSelectionToAI?: () => void,
 ): boolean => Boolean(onAddSelectionToAI);
+
+export const shouldShowUploadClipboardImageContextMenuAction = (
+  onUploadClipboardImage?: () => void,
+): boolean => Boolean(onUploadClipboardImage);
 
 export const shouldRenderTerminalContextMenuContent = ({
   isAlternateScreen,
@@ -117,6 +122,7 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
   isAlternateScreen = false,
   onCopy,
   onPaste,
+  onUploadClipboardImage,
   onPasteSelection,
   onSelectAll,
   onClear,
@@ -237,6 +243,12 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
             {t('terminal.menu.paste')}
             <ContextMenuShortcut>{pasteShortcut}</ContextMenuShortcut>
           </ContextMenuItem>
+          {shouldShowUploadClipboardImageContextMenuAction(onUploadClipboardImage) && (
+            <ContextMenuItem onClick={onUploadClipboardImage}>
+              <Upload size={14} className="mr-2" />
+              {t('terminal.menu.uploadClipboardImage')}
+            </ContextMenuItem>
+          )}
           {shouldShowAddSelectionToAIContextMenuAction(onAddSelectionToAI) && (
             <ContextMenuItem onClick={onAddSelectionToAI} disabled={!hasSelection}>
               <Sparkles size={14} className="mr-2" />
