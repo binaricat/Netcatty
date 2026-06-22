@@ -3,7 +3,7 @@ import type { Terminal as XTerm } from "@xterm/xterm";
 import { extractRootPathsFromClipboardFiles } from "./terminalHelpers";
 import { pasteTextIntoTerminal } from "./runtime/terminalUserPaste";
 
-type ClipboardFileBridge = Pick<Partial<NetcattyBridge>, "readClipboardFiles" | "readClipboardImage">;
+type ClipboardFileBridge = Pick<Partial<NetcattyBridge>, "readClipboardFiles">;
 
 type TerminalClipboardPasteOptions = {
   bridge?: ClipboardFileBridge;

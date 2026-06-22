@@ -78,7 +78,10 @@ import { useTerminalDragDrop } from "./terminal/hooks/useTerminalDragDrop";
 import { useTerminalFilePaste } from "./terminal/hooks/useTerminalFilePaste";
 import { TerminalAutocomplete } from "./terminal/TerminalAutocomplete";
 import { buildOsc7SetupCommand, shouldOfferOsc7SetupAction } from "./terminal/osc7Setup";
-import type { RemoteClipboardImageUploadResult } from "./terminal/clipboardImagePaste";
+import {
+  getRemoteClipboardImageUploadErrorMessageKey,
+  type RemoteClipboardImageUploadResult,
+} from "./terminal/clipboardImagePaste";
 import { createTerminalCwdTracker, resolvePreferredTerminalCwd } from "./terminal/sftpCwd";
 import { useTerminalEffects } from "./terminal/useTerminalEffects";
 import { TerminalView } from "./terminal/TerminalView";
@@ -960,12 +963,8 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   onSnippetShortkeyRef.current = executeSnippet;
 
   const handleClipboardImageUploadResult = useCallback((result: RemoteClipboardImageUploadResult) => {
-    if (result.ok) return;
-    toast.error(
-      result.reason === "no-image"
-        ? t("terminal.clipboardImageUpload.noImage")
-        : t("terminal.clipboardImageUpload.failed"),
-    );
+    const messageKey = getRemoteClipboardImageUploadErrorMessageKey(result);
+    if (messageKey) toast.error(t(messageKey));
   }, [t]);
 
   const terminalContextActions = useTerminalContextActions({

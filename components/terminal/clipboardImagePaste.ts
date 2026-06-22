@@ -32,6 +32,15 @@ export type RemoteClipboardImageUploadResult =
   | { ok: true; remotePath: string; pastedPath: string }
   | { ok: false; reason: "unsupported" | "no-session" | "no-image" | "no-cwd" | "upload-failed" };
 
+export function getRemoteClipboardImageUploadErrorMessageKey(
+  result: RemoteClipboardImageUploadResult,
+): "terminal.clipboardImageUpload.noImage" | "terminal.clipboardImageUpload.failed" | null {
+  if (result.ok === true) return null;
+  return result.reason === "no-image"
+    ? "terminal.clipboardImageUpload.noImage"
+    : "terminal.clipboardImageUpload.failed";
+}
+
 const shellSafePathPattern = /^[A-Za-z0-9_./~:@%+=,-]+$/;
 
 export function sanitizeRemoteClipboardImageName(name: string): string {
@@ -67,13 +76,6 @@ export function quoteRemotePathForShell(remotePath: string): string {
 function defaultTransferId(): string {
   const uuid = globalThis.crypto?.randomUUID?.();
   return uuid ? `clipboard-image-${uuid}` : `clipboard-image-${Date.now()}`;
-}
-
-export async function handleRemoteClipboardImagePaste(
-  options: HandleRemoteClipboardImagePasteOptions,
-): Promise<boolean> {
-  const result = await handleRemoteClipboardImageUpload(options);
-  return result.ok;
 }
 
 export async function handleRemoteClipboardImageUpload({

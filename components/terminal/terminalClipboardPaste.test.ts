@@ -6,12 +6,13 @@ import { handleTerminalClipboardPaste } from "./terminalClipboardPaste";
 test("terminal user paste does not inspect or upload remote clipboard images", async () => {
   const pasted: string[] = [];
   const readTextCalls: string[] = [];
+  const bridge = {
+    readClipboardImage: async () => assert.fail("user paste must not read clipboard images"),
+    readClipboardFiles: async () => [],
+  };
 
   await handleTerminalClipboardPaste({
-    bridge: {
-      readClipboardImage: async () => assert.fail("user paste must not read clipboard images"),
-      readClipboardFiles: async () => [],
-    },
+    bridge,
     isLocalConnection: false,
     readClipboardText: async () => {
       readTextCalls.push("read");
