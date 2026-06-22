@@ -6,7 +6,26 @@ export const OSC7_SETUP_TARGETS = [
   "~/.config/fish/config.fish",
 ] as const;
 
+export type Osc7SetupActionContext = {
+  protocol?: string;
+  isLocalConnection?: boolean;
+  isSerialConnection?: boolean;
+  isNetworkDevice?: boolean;
+};
+
+export const shouldOfferOsc7SetupAction = ({
+  protocol,
+  isLocalConnection,
+  isSerialConnection,
+  isNetworkDevice,
+}: Osc7SetupActionContext): boolean =>
+  !isLocalConnection
+  && !isSerialConnection
+  && !isNetworkDevice
+  && protocol !== "telnet";
+
 const DOLLAR = "$";
+const ESCAPED_DOLLAR = "\\$";
 
 const POSIX_SETUP_SCRIPT = String.raw`set -eu
 marker="# >>> Netcatty OSC 7 cwd tracking >>>"
@@ -19,8 +38,8 @@ esac
 
 case "$shell_name" in
   bash) config="$HOME/.bashrc" ;;
-  zsh) config="${DOLLAR}{ZDOTDIR:-$HOME}/.zshrc" ;;
-  fish) config="${DOLLAR}{XDG_CONFIG_HOME:-$HOME/.config}/fish/config.fish" ;;
+  zsh) config="${DOLLAR}{NETCATTY_ZDOTDIR:-$HOME}/.zshrc" ;;
+  fish) config="${DOLLAR}{NETCATTY_XDG_CONFIG_HOME:-$HOME/.config}/fish/config.fish" ;;
   *)
     printf "Netcatty OSC 7 setup: unsupported shell %s\n" "$shell_name" >&2
     printf "Supported shells: bash, zsh, fish\n" >&2
@@ -39,10 +58,10 @@ else
         "" \
         "# >>> Netcatty OSC 7 cwd tracking >>>" \
         "osc7_cwd() {" \
-        '  printf "\033]7;file://%s%s\033\\" "${DOLLAR}{HOSTNAME:-localhost}" "$PWD"' \
+        "  printf '\\033]7;file://%s%s\\033\\\\' \"${ESCAPED_DOLLAR}{HOSTNAME:-localhost}\" \"${ESCAPED_DOLLAR}PWD\"" \
         "}" \
-        'case ";${DOLLAR}{PROMPT_COMMAND:-};" in' \
-        '  *";osc7_cwd;"*) ;;' \
+        'case "${DOLLAR}{PROMPT_COMMAND:-}" in' \
+        '  *osc7_cwd*) ;;' \
         "  *)" \
         '    if [ -n "${DOLLAR}{PROMPT_COMMAND:-}" ]; then' \
         '      PROMPT_COMMAND="${DOLLAR}{PROMPT_COMMAND}' \
@@ -59,7 +78,7 @@ else
         "" \
         "# >>> Netcatty OSC 7 cwd tracking >>>" \
         "osc7_cwd() {" \
-        '  printf "\033]7;file://%s%s\033\\" "${DOLLAR}{HOST:-${DOLLAR}{HOSTNAME:-localhost}}" "$PWD"' \
+        "  printf '\\033]7;file://%s%s\\033\\\\' \"${ESCAPED_DOLLAR}{HOST:-${ESCAPED_DOLLAR}{HOSTNAME:-localhost}}\" \"${ESCAPED_DOLLAR}PWD\"" \
         "}" \
         'case " ${DOLLAR}{precmd_functions[*]} " in' \
         '  *" osc7_cwd "*) ;;' \
@@ -72,7 +91,7 @@ else
         "" \
         "# >>> Netcatty OSC 7 cwd tracking >>>" \
         "function __netcatty_osc7_cwd --on-event fish_prompt" \
-        '    printf "\033]7;file://%s%s\033\\" (hostname 2>/dev/null; or printf localhost) "$PWD"' \
+        "    printf '\\033]7;file://%s%s\\033\\\\' (hostname 2>/dev/null; or printf localhost) \"${ESCAPED_DOLLAR}PWD\"" \
         "end" \
         "# <<< Netcatty OSC 7 cwd tracking <<<" >> "$config"
       ;;
@@ -81,11 +100,11 @@ else
 fi
 
 host=$(hostname 2>/dev/null || printf localhost)
-printf "\033]7;file://%s%s\033\\" "$host" "$PWD"
+printf '\033]7;file://%s%s\033\\' "$host" "$PWD"
 printf "\nRestart this shell, or open a new one, to keep tracking future directory changes.\n"`;
 
 const quoteForSingleQuotedShellString = (value: string): string =>
   `'${value.replace(/'/g, `'\\''`)}'`;
 
 export const buildOsc7SetupCommand = (): string =>
-  `printf "%s\\n" ${quoteForSingleQuotedShellString(POSIX_SETUP_SCRIPT)} | sh\n`;
+  `printf "%s\\n" ${quoteForSingleQuotedShellString(POSIX_SETUP_SCRIPT)} | env NETCATTY_ZDOTDIR="$ZDOTDIR" NETCATTY_XDG_CONFIG_HOME="$XDG_CONFIG_HOME" sh\n`;
