@@ -25,7 +25,32 @@ export const shouldOfferOsc7SetupAction = ({
   && protocol !== "telnet";
 
 const DOLLAR = "$";
-const ESCAPED_DOLLAR = "\\$";
+
+const URL_PATH_AWK_SCRIPT = String.raw`BEGIN {
+  for (i = 0; i < 256; i++) {
+    c = sprintf("%c", i)
+    ord[c] = i
+  }
+}
+{
+  if (NR > 1) encode("\n")
+  for (i = 1; i <= length($0); i++) {
+    encode(substr($0, i, 1))
+  }
+}
+function encode(c, o) {
+  o = ord[c]
+  if ((o >= 48 && o <= 57) || (o >= 65 && o <= 90) || (o >= 97 && o <= 122) || c == "/" || c == "-" || c == "." || c == "_" || c == "~") {
+    printf "%s", c
+  } else {
+    printf "%%%02X", o
+  }
+}`;
+
+const quoteForSingleQuotedShellString = (value: string): string =>
+  `'${value.replace(/'/g, `'\\''`)}'`;
+
+const URL_PATH_AWK_SCRIPT_QUOTED = quoteForSingleQuotedShellString(URL_PATH_AWK_SCRIPT);
 
 const POSIX_SETUP_SCRIPT = String.raw`set -eu
 marker="# >>> Netcatty OSC 7 cwd tracking >>>"
@@ -47,6 +72,10 @@ case "$shell_name" in
     ;;
 esac
 
+__netcatty_osc7_url_path() {
+  printf "%s" "$1" | LC_ALL=C awk ${URL_PATH_AWK_SCRIPT_QUOTED}
+}
+
 mkdir -p "$(dirname "$config")"
 touch "$config"
 if grep -F "$marker" "$config" >/dev/null 2>&1; then
@@ -54,57 +83,66 @@ if grep -F "$marker" "$config" >/dev/null 2>&1; then
 else
   case "$shell_name" in
     bash)
-      printf "%s\n" \
-        "" \
-        "# >>> Netcatty OSC 7 cwd tracking >>>" \
-        "osc7_cwd() {" \
-        "  printf '\\033]7;file://%s%s\\033\\\\' \"${ESCAPED_DOLLAR}{HOSTNAME:-localhost}\" \"${ESCAPED_DOLLAR}PWD\"" \
-        "}" \
-        'case "${DOLLAR}{PROMPT_COMMAND:-}" in' \
-        '  *osc7_cwd*) ;;' \
-        "  *)" \
-        '    if [ -n "${DOLLAR}{PROMPT_COMMAND:-}" ]; then' \
-        '      PROMPT_COMMAND="${DOLLAR}{PROMPT_COMMAND}' \
-        'osc7_cwd"' \
-        "    else" \
-        '      PROMPT_COMMAND="osc7_cwd"' \
-        "    fi" \
-        "    ;;" \
-        "esac" \
-        "# <<< Netcatty OSC 7 cwd tracking <<<" >> "$config"
+      cat >> "$config" <<'NETCATTY_OSC7_BASH'
+
+# >>> Netcatty OSC 7 cwd tracking >>>
+__netcatty_osc7_url_path() {
+  printf "%s" "$1" | LC_ALL=C awk '${URL_PATH_AWK_SCRIPT}'
+}
+osc7_cwd() {
+  printf '\033]7;file://%s%s\033\\' "${DOLLAR}{HOSTNAME:-localhost}" "$(__netcatty_osc7_url_path "$PWD")"
+}
+case "${DOLLAR}{PROMPT_COMMAND:-}" in
+  *osc7_cwd*) ;;
+  *)
+    if [ -n "${DOLLAR}{PROMPT_COMMAND:-}" ]; then
+      PROMPT_COMMAND="${DOLLAR}{PROMPT_COMMAND}
+osc7_cwd"
+    else
+      PROMPT_COMMAND="osc7_cwd"
+    fi
+    ;;
+esac
+# <<< Netcatty OSC 7 cwd tracking <<<
+NETCATTY_OSC7_BASH
       ;;
     zsh)
-      printf "%s\n" \
-        "" \
-        "# >>> Netcatty OSC 7 cwd tracking >>>" \
-        "osc7_cwd() {" \
-        "  printf '\\033]7;file://%s%s\\033\\\\' \"${ESCAPED_DOLLAR}{HOST:-${ESCAPED_DOLLAR}{HOSTNAME:-localhost}}\" \"${ESCAPED_DOLLAR}PWD\"" \
-        "}" \
-        'case " ${DOLLAR}{precmd_functions[*]} " in' \
-        '  *" osc7_cwd "*) ;;' \
-        '  *) precmd_functions+=(osc7_cwd) ;;' \
-        "esac" \
-        "# <<< Netcatty OSC 7 cwd tracking <<<" >> "$config"
+      cat >> "$config" <<'NETCATTY_OSC7_ZSH'
+
+# >>> Netcatty OSC 7 cwd tracking >>>
+__netcatty_osc7_url_path() {
+  printf "%s" "$1" | LC_ALL=C awk '${URL_PATH_AWK_SCRIPT}'
+}
+osc7_cwd() {
+  printf '\033]7;file://%s%s\033\\' "${DOLLAR}{HOST:-${DOLLAR}{HOSTNAME:-localhost}}" "$(__netcatty_osc7_url_path "$PWD")"
+}
+case " ${DOLLAR}{precmd_functions[*]} " in
+  *" osc7_cwd "*) ;;
+  *) precmd_functions+=(osc7_cwd) ;;
+esac
+# <<< Netcatty OSC 7 cwd tracking <<<
+NETCATTY_OSC7_ZSH
       ;;
     fish)
-      printf "%s\n" \
-        "" \
-        "# >>> Netcatty OSC 7 cwd tracking >>>" \
-        "function __netcatty_osc7_cwd --on-event fish_prompt" \
-        "    printf '\\033]7;file://%s%s\\033\\\\' (hostname 2>/dev/null; or printf localhost) \"${ESCAPED_DOLLAR}PWD\"" \
-        "end" \
-        "# <<< Netcatty OSC 7 cwd tracking <<<" >> "$config"
+      cat >> "$config" <<'NETCATTY_OSC7_FISH'
+
+# >>> Netcatty OSC 7 cwd tracking >>>
+function __netcatty_osc7_url_path
+    printf "%s" "$argv[1]" | LC_ALL=C awk '${URL_PATH_AWK_SCRIPT}'
+end
+function __netcatty_osc7_cwd --on-event fish_prompt
+    printf '\033]7;file://%s%s\033\\' (hostname 2>/dev/null; or printf localhost) (__netcatty_osc7_url_path "$PWD")
+end
+# <<< Netcatty OSC 7 cwd tracking <<<
+NETCATTY_OSC7_FISH
       ;;
   esac
   printf "Netcatty OSC 7 cwd tracking configured in %s\n" "$config"
 fi
 
 host=$(hostname 2>/dev/null || printf localhost)
-printf '\033]7;file://%s%s\033\\' "$host" "$PWD"
+printf '\033]7;file://%s%s\033\\' "$host" "$(__netcatty_osc7_url_path "$PWD")"
 printf "\nRestart this shell, or open a new one, to keep tracking future directory changes.\n"`;
 
-const quoteForSingleQuotedShellString = (value: string): string =>
-  `'${value.replace(/'/g, `'\\''`)}'`;
-
 export const buildOsc7SetupCommand = (): string =>
-  `printf "%s\\n" ${quoteForSingleQuotedShellString(POSIX_SETUP_SCRIPT)} | env NETCATTY_ZDOTDIR="$ZDOTDIR" NETCATTY_XDG_CONFIG_HOME="$XDG_CONFIG_HOME" sh\n`;
+  `{ set +u 2>/dev/null || true; printf "%s\\n" ${quoteForSingleQuotedShellString(POSIX_SETUP_SCRIPT)} | env NETCATTY_ZDOTDIR="$ZDOTDIR" NETCATTY_XDG_CONFIG_HOME="$XDG_CONFIG_HOME" sh; }\n`;

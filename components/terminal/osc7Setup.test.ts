@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 
@@ -26,6 +26,21 @@ const withTempHome = (prefix: string, fn: (home: string) => void) => {
 const markerCount = (content: string) => content.split(OSC7_MARKER).length - 1;
 
 const existingShells = (paths: string[]) => Array.from(new Set(paths.filter(existsSync)));
+
+const extractOsc7Path = (output: string) => {
+  const escape = String.fromCharCode(0x1b);
+  const bell = String.fromCharCode(0x07);
+  const payloadStart = output.indexOf(`${escape}]7;`);
+  assert.notEqual(payloadStart, -1, "expected OSC 7 output");
+
+  const payload = output.slice(payloadStart + `${escape}]7;`.length);
+  const terminators = [payload.indexOf(escape), payload.indexOf(bell)].filter((index) => index >= 0);
+  const payloadEnd = terminators.length > 0 ? Math.min(...terminators) : payload.length;
+  const fileUrl = payload.slice(0, payloadEnd);
+  assert.ok(fileUrl.startsWith("file://"), "expected OSC 7 file URL");
+
+  return decodeURIComponent(new URL(fileUrl).pathname);
+};
 
 test("shouldOfferOsc7SetupAction only allows remote shell-style sessions", () => {
   assert.equal(shouldOfferOsc7SetupAction({ protocol: "ssh" }), true);
@@ -97,8 +112,11 @@ test("buildOsc7SetupCommand can be pasted into supported shells", () => {
     withTempHome(`netcatty-osc7-${basename(shellPath)}-`, (home) => {
       const zdotdir = join(home, "zdot");
       const xdgConfigHome = join(home, "xdg");
+      const specialCwd = join(home, "space dir#frag?query%pct");
+      mkdirSync(specialCwd, { recursive: true });
 
-      execFileSync(shellPath, ["-c", buildOsc7SetupCommand()], {
+      const output = execFileSync(shellPath, ["-c", buildOsc7SetupCommand()], {
+        cwd: specialCwd,
         env: {
           ...process.env,
           HOME: home,
@@ -107,7 +125,7 @@ test("buildOsc7SetupCommand can be pasted into supported shells", () => {
           XDG_CONFIG_HOME: xdgConfigHome,
         },
         stdio: "pipe",
-      });
+      }).toString("utf8");
 
       const shellName = basename(shellPath);
       const configPath = shellName === "bash"
@@ -118,6 +136,24 @@ test("buildOsc7SetupCommand can be pasted into supported shells", () => {
 
       const config = readFileSync(configPath, "utf8");
       assert.equal(markerCount(config), 2, shellPath);
+      assert.equal(realpathSync(extractOsc7Path(output)), realpathSync(specialCwd), shellPath);
+    });
+  }
+});
+
+test("buildOsc7SetupCommand runs under strict unset-variable mode", () => {
+  for (const shellPath of existingShells(["/bin/bash", "/bin/zsh"])) {
+    withTempHome(`netcatty-osc7-strict-${basename(shellPath)}-`, (home) => {
+      execFileSync(shellPath, ["-uc", buildOsc7SetupCommand()], {
+        env: {
+          ...process.env,
+          HOME: home,
+          SHELL: shellPath,
+          ZDOTDIR: undefined,
+          XDG_CONFIG_HOME: undefined,
+        },
+        stdio: "pipe",
+      });
     });
   }
 });
