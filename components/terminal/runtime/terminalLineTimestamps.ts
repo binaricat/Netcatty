@@ -7,6 +7,7 @@ export type TerminalLineTimestampSegment =
 export type TerminalLineTimestampSegmenter = {
   append: (data: string) => TerminalLineTimestampSegment[];
   reset: () => void;
+  flushPendingEscapeSequence: () => string;
   setAlternateScreenActive: (active: boolean) => void;
 };
 
@@ -31,6 +32,7 @@ type TimestampStore = {
   segmenter: TerminalLineTimestampSegmenter;
   entries: TimestampEntry[];
   listeners: Set<() => void>;
+  timestampOnlyPrefix: string;
 };
 
 export type TerminalTimestampGutterEntry = {
@@ -52,6 +54,34 @@ export const formatTerminalLineTimestamp = (date: Date): string => (
 );
 
 const isCsiFinalByte = (char: string): boolean => char >= "@" && char <= "~";
+const STRING_TERMINATOR = "\u009c";
+
+const readStringTerminatedSequence = (
+  data: string,
+  startIndex: number,
+): { sequence: string; endIndex: number; complete: boolean } => {
+  for (let index = startIndex + 2; index < data.length; index += 1) {
+    if (data[index] === "\u0007" || data[index] === STRING_TERMINATOR) {
+      return {
+        sequence: data.slice(startIndex, index + 1),
+        endIndex: index,
+        complete: true,
+      };
+    }
+    if (data[index] === "\x1b" && data[index + 1] === "\\") {
+      return {
+        sequence: data.slice(startIndex, index + 2),
+        endIndex: index + 1,
+        complete: true,
+      };
+    }
+  }
+  return {
+    sequence: data.slice(startIndex),
+    endIndex: data.length - 1,
+    complete: false,
+  };
+};
 
 const readEscapeSequence = (
   data: string,
@@ -81,44 +111,11 @@ const readEscapeSequence = (
   }
 
   if (next === "]") {
-    for (let index = startIndex + 2; index < data.length; index += 1) {
-      if (data[index] === "\u0007") {
-        return {
-          sequence: data.slice(startIndex, index + 1),
-          endIndex: index,
-          complete: true,
-        };
-      }
-      if (data[index] === "\x1b" && data[index + 1] === "\\") {
-        return {
-          sequence: data.slice(startIndex, index + 2),
-          endIndex: index + 1,
-          complete: true,
-        };
-      }
-    }
-    return {
-      sequence: data.slice(startIndex),
-      endIndex: data.length - 1,
-      complete: false,
-    };
+    return readStringTerminatedSequence(data, startIndex);
   }
 
   if (next === "P" || next === "^" || next === "_" || next === "X") {
-    for (let index = startIndex + 2; index < data.length; index += 1) {
-      if (data[index] === "\x1b" && data[index + 1] === "\\") {
-        return {
-          sequence: data.slice(startIndex, index + 2),
-          endIndex: index + 1,
-          complete: true,
-        };
-      }
-    }
-    return {
-      sequence: data.slice(startIndex),
-      endIndex: data.length - 1,
-      complete: false,
-    };
+    return readStringTerminatedSequence(data, startIndex);
   }
 
   return {
@@ -153,10 +150,24 @@ const getAlternateScreenAction = (sequence: string): "enter" | "leave" | null =>
   return final === "h" ? "enter" : "leave";
 };
 
+const isPotentialAlternateScreenSequence = (sequence: string): boolean => {
+  if (!sequence.startsWith("\x1b[?")) return false;
+
+  const params = sequence.slice(3).split(";");
+  const alternateScreenModes = ["47", "1047", "1049"];
+  return params.some((part) => (
+    part === ""
+    || alternateScreenModes.some((mode) => mode.startsWith(part) || part.startsWith(mode))
+  ));
+};
+
 const isPrintableOutput = (char: string): boolean => {
   if (char === "\t") return true;
   const code = char.codePointAt(0);
-  return code !== undefined && code >= 0x20 && code !== 0x7f;
+  return code !== undefined
+    && code >= 0x20
+    && code !== 0x7f
+    && (code < 0x80 || code > 0x9f);
 };
 
 const pushDataSegment = (
@@ -257,6 +268,11 @@ export const createTerminalLineTimestampSegmenter = (
       pendingEscapeSequence = "";
       suspendedForAlternateScreen = false;
     },
+    flushPendingEscapeSequence() {
+      const sequence = pendingEscapeSequence;
+      pendingEscapeSequence = "";
+      return sequence;
+    },
     setAlternateScreenActive(active: boolean) {
       suspendedForAlternateScreen = active;
       if (active) {
@@ -279,6 +295,7 @@ const getTimestampStore = (term: XTerm): TimestampStore => {
       segmenter: createTerminalLineTimestampSegmenter(),
       entries: [],
       listeners: new Set(),
+      timestampOnlyPrefix: "",
     };
     stores.set(term, store);
   }
@@ -296,6 +313,7 @@ const resetTimestampStore = (store: TimestampStore) => {
   }
   store.entries = [];
   store.segmenter.reset();
+  store.timestampOnlyPrefix = "";
   notifyTimestampStore(store);
 };
 
@@ -406,31 +424,70 @@ export const writeTerminalDataWithLineTimestamps = (
   store.segmenter.setAlternateScreenActive(
     ((term.buffer?.active as { type?: string } | undefined)?.type) === "alternate",
   );
-  const segments = store.segmenter.append(data);
-  let index = 0;
+  const timestampOnlyPrefix = store.timestampOnlyPrefix;
+  store.timestampOnlyPrefix = "";
+  const dataForTimestamps = `${timestampOnlyPrefix}${data}`;
+  const segments = store.segmenter.append(dataForTimestamps);
+  const parsedData = segments
+    .filter((segment): segment is { kind: "data"; data: string } => segment.kind === "data")
+    .map((segment) => segment.data)
+    .join("");
+  const writeSegments = (
+    onComplete: () => void,
+    skipLeadingDataLength = 0,
+  ) => {
+    let index = 0;
+    let remainingSkipLength = skipLeadingDataLength;
 
-  const writeNext = () => {
-    const segment = segments[index];
-    index += 1;
+    const writeNext = () => {
+      const segment = segments[index];
+      index += 1;
 
-    if (!segment) {
-      done();
-      return;
-    }
+      if (!segment) {
+        onComplete();
+        return;
+      }
 
-    if (segment.kind === "timestamp") {
-      recordTerminalLineTimestamp(term, store, segment.label);
-      writeNext();
-      return;
-    }
+      if (segment.kind === "timestamp") {
+        recordTerminalLineTimestamp(term, store, segment.label);
+        writeNext();
+        return;
+      }
 
-    if (!segment.data) {
-      writeNext();
-      return;
-    }
+      let segmentData = segment.data;
+      if (remainingSkipLength > 0) {
+        const skippedLength = Math.min(remainingSkipLength, segmentData.length);
+        segmentData = segmentData.slice(skippedLength);
+        remainingSkipLength -= skippedLength;
+      }
 
-    term.write(segment.data, writeNext);
+      if (!segmentData) {
+        writeNext();
+        return;
+      }
+
+      term.write(segmentData, writeNext);
+    };
+
+    writeNext();
   };
 
-  writeNext();
+  if (parsedData !== dataForTimestamps) {
+    const pendingEscapeSequence = store.segmenter.flushPendingEscapeSequence();
+    if (isPotentialAlternateScreenSequence(pendingEscapeSequence)) {
+      store.timestampOnlyPrefix = pendingEscapeSequence;
+    }
+    if (!parsedData || !dataForTimestamps.startsWith(parsedData)) {
+      term.write(data, done);
+      return;
+    }
+
+    const parsedCurrentDataLength = Math.max(0, parsedData.length - timestampOnlyPrefix.length);
+    writeSegments(
+      () => term.write(data.slice(parsedCurrentDataLength), done),
+      timestampOnlyPrefix.length,
+    );
+    return;
+  }
+  writeSegments(done, timestampOnlyPrefix.length);
 };

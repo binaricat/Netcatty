@@ -73,6 +73,31 @@ test("does not create timestamp markers for alternate screen output", () => {
   ]);
 });
 
+test("preserves OSC prompt prefixes terminated by C1 string terminator", () => {
+  const segmenter = createTerminalLineTimestampSegmenter({
+    now: () => new Date(2026, 5, 6, 9, 8, 7),
+  });
+
+  assert.deepEqual(segmenter.append("\x1b]0;server\u009calice@server:~$ "), [
+    { kind: "data", data: "\x1b]0;server\u009c" },
+    { kind: "timestamp", label: "09:08:07" },
+    { kind: "data", data: "alice@server:~$ " },
+  ]);
+});
+
+test("preserves split OSC prompt prefixes terminated by C1 string terminator", () => {
+  const segmenter = createTerminalLineTimestampSegmenter({
+    now: () => new Date(2026, 5, 6, 9, 8, 7),
+  });
+
+  assert.deepEqual(segmenter.append("\x1b]7;file://server/home/alice"), []);
+  assert.deepEqual(segmenter.append("\u009calice@server:~$ "), [
+    { kind: "data", data: "\x1b]7;file://server/home/alice\u009c" },
+    { kind: "timestamp", label: "09:08:07" },
+    { kind: "data", data: "alice@server:~$ " },
+  ]);
+});
+
 test("resolves visible timestamp rows from marker lines", () => {
   assert.deepEqual(
     resolveTerminalTimestampGutterRows({
@@ -132,4 +157,92 @@ test("keeps recording and preserves existing timestamps when the gutter is hidde
 
   assert.deepEqual(markerLines, [0, 1, 2]);
   assert.deepEqual(disposedMarkerLines, []);
+});
+
+test("does not withhold output when an OSC sequence is split across chunks", () => {
+  const { term, writes, markerLines } = createFakeTerm();
+  const callbacks: string[] = [];
+
+  writeTerminalDataWithLineTimestamps(
+    term as never,
+    "\x1b]7;file://server/home/alice",
+    () => callbacks.push("first"),
+  );
+  writeTerminalDataWithLineTimestamps(
+    term as never,
+    "\u009calice@server:~$ ",
+    () => callbacks.push("second"),
+  );
+
+  assert.equal(writes.join(""), "\x1b]7;file://server/home/alice\u009calice@server:~$ ");
+  assert.deepEqual(callbacks, ["first", "second"]);
+  assert.deepEqual(markerLines, [0]);
+});
+
+test("keeps timestamps for visible text before a split OSC sequence", () => {
+  const { term, writes, markerLines } = createFakeTerm();
+
+  writeTerminalDataWithLineTimestamps(
+    term as never,
+    "hello \x1b]7;file://server/home/alice",
+    () => {},
+  );
+
+  assert.equal(writes.join(""), "hello \x1b]7;file://server/home/alice");
+  assert.deepEqual(markerLines, [0]);
+});
+
+test("keeps fallback timestamps on the matching multiline rows", () => {
+  const { term, writes, markerLines } = createFakeTerm();
+
+  writeTerminalDataWithLineTimestamps(
+    term as never,
+    "one\r\ntwo \x1b]7;file://server/home/alice",
+    () => {},
+  );
+
+  assert.equal(writes.join(""), "one\r\ntwo \x1b]7;file://server/home/alice");
+  assert.deepEqual(markerLines, [0, 1]);
+});
+
+test("does not duplicate a line timestamp after a split OSC fallback", () => {
+  const { term, writes, markerLines } = createFakeTerm();
+
+  writeTerminalDataWithLineTimestamps(
+    term as never,
+    "hello \x1b]7;file://server/home/alice",
+    () => {},
+  );
+  writeTerminalDataWithLineTimestamps(
+    term as never,
+    "\u009cworld",
+    () => {},
+  );
+
+  assert.equal(writes.join(""), "hello \x1b]7;file://server/home/alice\u009cworld");
+  assert.deepEqual(markerLines, [0]);
+});
+
+test("does not timestamp the next chunk after a split alternate-screen sequence", () => {
+  const { term, writes, markerLines } = createFakeTerm();
+
+  writeTerminalDataWithLineTimestamps(term as never, "\x1b[?1049", () => {});
+  writeTerminalDataWithLineTimestamps(term as never, "hvim screen", () => {});
+
+  assert.equal(writes.join(""), "\x1b[?1049hvim screen");
+  assert.deepEqual(markerLines, []);
+});
+
+test("timestamps a prompt after split alternate-screen enter and leave in one chunk", () => {
+  const { term, writes, markerLines } = createFakeTerm();
+
+  writeTerminalDataWithLineTimestamps(term as never, "\x1b[?1049", () => {});
+  writeTerminalDataWithLineTimestamps(
+    term as never,
+    "hvim screen\x1b[?1049lprompt",
+    () => {},
+  );
+
+  assert.equal(writes.join(""), "\x1b[?1049hvim screen\x1b[?1049lprompt");
+  assert.deepEqual(markerLines, [0]);
 });

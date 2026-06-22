@@ -73,12 +73,12 @@ test("writeSessionData records terminal output timestamps without changing outpu
   assert.deepEqual(markerLines, [0, 1]);
 });
 
-test("writeSessionData records timestamps independently of display settings", () => {
+test("writeSessionData skips timestamps when the host gutter is disabled", () => {
   const { term, writes, markerLines } = createFakeTerm();
   writeSessionData(createContext(true, { showLineTimestamps: false }) as never, term, "hello");
 
   assert.deepEqual(writes, ["hello"]);
-  assert.deepEqual(markerLines, [0]);
+  assert.deepEqual(markerLines, []);
 });
 
 test("writeSessionData records timestamps for hosts with timestamps enabled", () => {
@@ -113,7 +113,7 @@ test("writeSessionData resumes timestamps after leaving alternate screen in the 
   assert.deepEqual(markerLines, [0]);
 });
 
-test("writeSessionData keeps recording while the latest host display setting changes", () => {
+test("writeSessionData records timestamps only while the latest host setting is enabled", () => {
   const { term, writes, markerLines, disposedMarkerLines } = createFakeTerm();
   const ctx = createContext(false, { showLineTimestamps: false });
 
@@ -124,7 +124,7 @@ test("writeSessionData keeps recording while the latest host display setting cha
   writeSessionData(ctx as never, term, "disabled");
 
   assert.equal(writes.join(""), "before\r\nenabled\r\ndisabled");
-  assert.deepEqual(markerLines, [0, 1, 2]);
+  assert.deepEqual(markerLines, [1]);
   assert.deepEqual(disposedMarkerLines, []);
 });
 
