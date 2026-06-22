@@ -109,6 +109,20 @@ export const isPointerInsideLinkActionHoverZone = (
     && y <= action.top + LINK_ACTION_SIZE + LINK_ACTION_HOVER_PADDING;
 };
 
+export const getHostPickerTriggerRange = (textBeforeCursor: string): {
+  query: string;
+  startOffset: number;
+  trigger: "@" | "/";
+} | null => {
+  const triggerMatch = /(^|\s)([@/])([^\s@/]*)$/.exec(textBeforeCursor);
+  if (!triggerMatch) return null;
+  return {
+    query: triggerMatch[3],
+    startOffset: triggerMatch.index + triggerMatch[1].length,
+    trigger: triggerMatch[2] as "@" | "/",
+  };
+};
+
 const deleteLexicalTextRange = (range: Range, onUpdate: () => void): boolean => {
   const rangeContainer = range.startContainer.nodeType === Node.TEXT_NODE
     ? range.startContainer.parentElement
@@ -213,13 +227,11 @@ export function InlineMarkdownEditor({
 
     const textNode = range.startContainer as Text;
     const textBeforeCursor = textNode.data.slice(0, range.startOffset);
-    const triggerMatch = /(^|\s)([@/])([^\s@/]*)$/.exec(textBeforeCursor);
-    if (!triggerMatch) return null;
+    const triggerRangeInfo = getHostPickerTriggerRange(textBeforeCursor);
+    if (!triggerRangeInfo) return null;
 
-    const triggerStart = triggerMatch.index + triggerMatch[1].length;
-    const query = triggerMatch[3];
     const triggerRange = document.createRange();
-    triggerRange.setStart(textNode, triggerStart);
+    triggerRange.setStart(textNode, triggerRangeInfo.startOffset);
     triggerRange.setEnd(textNode, range.startOffset);
 
     const caretRect = range.getBoundingClientRect();
@@ -231,9 +243,9 @@ export function InlineMarkdownEditor({
 
     return {
       left,
-      query,
+      query: triggerRangeInfo.query,
       range: triggerRange,
-      trigger: triggerMatch[2] as "@" | "/",
+      trigger: triggerRangeInfo.trigger,
       top,
     };
   }, []);

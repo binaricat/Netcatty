@@ -22,12 +22,13 @@ const note = (overrides: Partial<VaultNote> = {}): VaultNote => ({
 const renderNotes = (
   notes: VaultNote[] = [note()],
   displayMode: React.ComponentProps<typeof NotesManager>["displayMode"] = "full",
+  noteGroups: string[] = ["Ops"],
 ) => renderToStaticMarkup(
   <I18nProvider locale="en">
     <TooltipProvider>
       <NotesManager
         notes={notes}
-        noteGroups={["Ops"]}
+        noteGroups={noteGroups}
         hosts={[]}
         onUpdateNotes={() => undefined}
         onUpdateNoteGroups={() => undefined}
@@ -76,6 +77,19 @@ test("NotesManager renders nested notebook folders", () => {
   assert.match(markup, /DB/);
   assert.match(markup, /Failover/);
   assert.match(markup, /Replica promotion/);
+});
+
+test("NotesManager keeps saved notebook folder order", () => {
+  const markup = renderNotes(
+    [
+      note({ id: "alpha-note", title: "Alpha note", group: "Alpha" }),
+      note({ id: "beta-note", title: "Beta note", group: "Beta" }),
+    ],
+    "full",
+    ["Beta", "Alpha"],
+  );
+
+  assert.ok(markup.indexOf("Beta") < markup.indexOf("Alpha"));
 });
 
 test("NotesManager renders empty state", () => {

@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  getHostPickerTriggerRange,
   isPointerInsideLinkActionHoverZone,
   shouldHandleHostPickerNavigationKey,
 } from "./InlineMarkdownEditor.tsx";
@@ -32,4 +33,25 @@ test("link action hover zone keeps the open button reachable but not sticky", ()
   assert.equal(isPointerInsideLinkActionHoverZone(action, 95, 45), true);
   assert.equal(isPointerInsideLinkActionHoverZone(action, 160, 55), false);
   assert.equal(isPointerInsideLinkActionHoverZone(null, 105, 55), false);
+});
+
+test("host picker trigger range only covers the typed trigger and query", () => {
+  const text = "before\n\n@10.2.0.32";
+  const range = getHostPickerTriggerRange(text);
+
+  assert.deepEqual(range, {
+    query: "10.2.0.32",
+    startOffset: "before\n\n".length,
+    trigger: "@",
+  });
+  assert.equal(text.slice(0, range?.startOffset), "before\n\n");
+});
+
+test("host picker trigger range supports slash without stealing ordinary text", () => {
+  assert.deepEqual(getHostPickerTriggerRange("run /prod"), {
+    query: "prod",
+    startOffset: "run ".length,
+    trigger: "/",
+  });
+  assert.equal(getHostPickerTriggerRange("email foo@bar"), null);
 });

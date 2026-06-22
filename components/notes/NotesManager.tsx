@@ -28,7 +28,7 @@ import {
   replaceNoteGroupPrefix,
   resolveMovedNoteGroupPath,
 } from "../../domain/notes";
-import { getNextVaultOrder, reorderVaultItems, sortByVaultOrder } from "../../domain/vaultOrder";
+import { getNextVaultOrder, reorderVaultItems, reorderVaultStrings, sortByVaultOrder } from "../../domain/vaultOrder";
 import { STORAGE_KEY_VAULT_NOTES_TREE_WIDTH } from "../../infrastructure/config/storageKeys";
 import { cn } from "../../lib/utils";
 import type { Host, VaultNote } from "../../types";
@@ -50,7 +50,9 @@ import {
 } from "../vault/VaultTreeRow";
 import {
   clearVaultDropIndicator,
+  getVaultDropIntent,
   getVaultDropPosition,
+  type VaultDropPosition,
   hasVaultDragType,
   markVaultDropIndicator,
   markVaultInsideDropIndicator,
@@ -110,7 +112,7 @@ const HoverActionMenu: React.FC<HoverActionMenuProps> = ({ children, className }
 
   return (
     <Dropdown open={open} onOpenChange={setOpen}>
-      <DropdownTrigger asChild>
+      <DropdownTrigger asChild toggleOnClick={false}>
         <button
           type="button"
           className={cn(
@@ -123,7 +125,12 @@ const HoverActionMenu: React.FC<HoverActionMenuProps> = ({ children, className }
             setOpen(true);
           }}
           onMouseLeave={scheduleClose}
-          onClick={(event) => event.stopPropagation()}
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            cancelClose();
+            setOpen(true);
+          }}
         >
           <MoreHorizontal size={14} />
         </button>
@@ -155,12 +162,24 @@ const createNote = (group: string | null, order: number): VaultNote => {
 
 const sortNoteItems = (items: VaultNote[]): VaultNote[] => sortByVaultOrder(items);
 
-const sortFolderNodes = (items: NoteFolderNode[]): NoteFolderNode[] =>
+const sortFolderNodes = (
+  items: NoteFolderNode[],
+  groupOrderByPath: ReadonlyMap<string, number>,
+): NoteFolderNode[] =>
   [...items]
-    .sort((a, b) => a.name.localeCompare(b.name))
+    .sort((a, b) => {
+      const orderA = groupOrderByPath.get(a.path);
+      const orderB = groupOrderByPath.get(b.path);
+      if (typeof orderA === "number" && typeof orderB === "number" && orderA !== orderB) {
+        return orderA - orderB;
+      }
+      if (typeof orderA === "number") return -1;
+      if (typeof orderB === "number") return 1;
+      return a.name.localeCompare(b.name);
+    })
     .map((node) => ({
       ...node,
-      children: sortFolderNodes(node.children),
+      children: sortFolderNodes(node.children, groupOrderByPath),
       notes: sortNoteItems(node.notes),
     }));
 
@@ -239,14 +258,18 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   const groups = useMemo(() => normalizeNoteGroups(noteGroups), [noteGroups]);
+  const groupOrderByPath = useMemo(
+    () => new Map(groups.map((group, index) => [group, index])),
+    [groups],
+  );
   const sortedNotes = useMemo(() => sortNoteItems(normalizeVaultNotes(notes)), [notes]);
   const noteTree = useMemo(() => {
     const tree = buildNoteTree(groups, sortedNotes);
     return {
-      children: sortFolderNodes(tree.children),
+      children: sortFolderNodes(tree.children, groupOrderByPath),
       rootNotes: sortNoteItems(tree.rootNotes),
     };
-  }, [groups, sortedNotes]);
+  }, [groupOrderByPath, groups, sortedNotes]);
   const selectedNote = sortedNotes.find((note) => note.id === selectedNoteId)
     ?? (isSidebarMode ? null : sortedNotes[0] ?? null);
   const overlayNote = sortedNotes.find((note) => note.id === overlayNoteId) ?? null;
@@ -495,6 +518,52 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
     setExpandedGroups((current) => remapExpandedNoteGroupPaths(current, group, nextPath));
     if (selectedGroup && isNoteGroupInside(selectedGroup, group)) {
       setSelectedGroup(replaceNoteGroupPrefix(selectedGroup, group, nextPath) ?? null);
+    }
+  };
+
+  const reorderGroupToGroup = (
+    sourceGroup: string,
+    targetGroup: string,
+    position: VaultDropPosition,
+  ) => {
+    if (!sourceGroup || !targetGroup || sourceGroup === targetGroup) return;
+    if (targetGroup.startsWith(`${sourceGroup}/`)) return;
+
+    const targetParent = getNoteGroupParentPath(targetGroup);
+    const knownGroups = normalizeNoteGroups([
+      ...groups,
+      ...sortedNotes.map((note) => note.group).filter((item): item is string => Boolean(item)),
+    ]);
+    const nextSourceGroup = getNoteGroupParentPath(sourceGroup) === targetParent
+      ? cleanNoteGroupPath(sourceGroup)
+      : resolveMovedNoteGroupPath(sourceGroup, targetParent, knownGroups);
+    if (!nextSourceGroup) return;
+
+    const nextGroupsBeforeReorder = normalizeNoteGroups([
+      ...groups.map((item) => replaceNoteGroupPrefix(item, sourceGroup, nextSourceGroup) || ""),
+      ...ancestorNoteGroupPaths(nextSourceGroup),
+      ...ancestorNoteGroupPaths(targetGroup),
+    ]);
+    const nextGroups = reorderVaultStrings(
+      nextGroupsBeforeReorder,
+      nextSourceGroup,
+      targetGroup,
+      position,
+    );
+    const nextNotes = nextSourceGroup === sourceGroup
+      ? sortedNotes
+      : sortedNotes.map((note) => ({
+        ...note,
+        group: replaceNoteGroupPrefix(note.group, sourceGroup, nextSourceGroup),
+      }));
+
+    onUpdateNoteGroups(nextGroups);
+    if (nextSourceGroup !== sourceGroup) {
+      onUpdateNotes(normalizeVaultNotes(nextNotes));
+      setExpandedGroups((current) => remapExpandedNoteGroupPaths(current, sourceGroup, nextSourceGroup));
+      if (selectedGroup && isNoteGroupInside(selectedGroup, sourceGroup)) {
+        setSelectedGroup(replaceNoteGroupPrefix(selectedGroup, sourceGroup, nextSourceGroup) ?? null);
+      }
     }
   };
 
@@ -750,10 +819,32 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
                 event.preventDefault();
                 event.stopPropagation();
                 event.dataTransfer.dropEffect = "move";
+                if (sourceGroupPath) {
+                  const intent = getVaultDropIntent(event.currentTarget, event.clientX, event.clientY, false);
+                  if (intent === "inside") {
+                    markVaultInsideDropIndicator(event.currentTarget);
+                  } else {
+                    markVaultDropIndicator(event.currentTarget, intent);
+                  }
+                  return;
+                }
                 markVaultInsideDropIndicator(event.currentTarget);
               }}
               onDragLeave={handleTreeRowDragLeave}
-              onDrop={(event) => handleGroupDrop(node.path, event)}
+              onDrop={(event) => {
+                const sourceGroupPath = draggingGroupPath || getDraggedGroupPath(event.dataTransfer);
+                if (sourceGroupPath && sourceGroupPath !== node.path && !node.path.startsWith(`${sourceGroupPath}/`)) {
+                  const intent = getVaultDropIntent(event.currentTarget, event.clientX, event.clientY, false);
+                  if (intent !== "inside") {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    reorderGroupToGroup(sourceGroupPath, node.path, intent);
+                    resetTreeDragState();
+                    return;
+                  }
+                }
+                handleGroupDrop(node.path, event);
+              }}
               onDragEnd={resetTreeDragState}
               onClick={() => {
                 setSelectedGroup(node.path);

@@ -60,11 +60,13 @@ const Dropdown: React.FC<DropdownProps> = ({
 interface DropdownTriggerProps {
   children: React.ReactElement;
   asChild?: boolean;
+  toggleOnClick?: boolean;
 }
 
 const DropdownTrigger: React.FC<DropdownTriggerProps> = ({
   children,
   asChild,
+  toggleOnClick = true,
 }) => {
   const { open, setOpen, triggerRef } = useDropdown();
 
@@ -82,11 +84,13 @@ const DropdownTrigger: React.FC<DropdownTriggerProps> = ({
       {
         ref: triggerRef,
         onClick: (e: React.MouseEvent) => {
-          handleClick(e);
           const childProps = children.props as {
             onClick?: (e: React.MouseEvent) => void;
           };
           childProps?.onClick?.(e);
+          if (toggleOnClick && !e.defaultPrevented) {
+            handleClick(e);
+          }
         },
       },
     );
