@@ -4,6 +4,8 @@ import {
   matchesVaultNoteSearch,
   normalizeNoteGroups,
   normalizeVaultNotes,
+  remapExpandedNoteGroupPaths,
+  resolveMovedNoteGroupPath,
   resolveRenderedMarkdownLinkHref,
   sanitizeVaultNote,
 } from "./notes";
@@ -36,6 +38,47 @@ test("normalizeVaultNotes trims group and de-duplicates tags", () => {
 
 test("normalizeNoteGroups trims and de-duplicates groups", () => {
   assert.deepEqual(normalizeNoteGroups([" Ops ", "Ops", "", 1]), ["Ops"]);
+});
+
+test("resolveMovedNoteGroupPath avoids merging with an existing target folder", () => {
+  assert.equal(
+    resolveMovedNoteGroupPath("Archive/DB", "Ops", [
+      "Ops",
+      "Ops/DB",
+      "Archive/DB",
+      "Archive/DB/Runbooks",
+    ]),
+    "Ops/DB 2",
+  );
+});
+
+test("resolveMovedNoteGroupPath normalizes existing paths before detecting conflicts", () => {
+  assert.equal(
+    resolveMovedNoteGroupPath("Archive/DB", "Ops", [
+      "Ops",
+      "Ops / DB",
+      "Archive/DB",
+    ]),
+    "Ops/DB 2",
+  );
+});
+
+test("resolveMovedNoteGroupPath rejects moving a folder into itself", () => {
+  assert.equal(
+    resolveMovedNoteGroupPath("Ops", "Ops/DB", ["Ops", "Ops/DB"]),
+    null,
+  );
+});
+
+test("remapExpandedNoteGroupPaths preserves expanded descendants after folder moves", () => {
+  assert.deepEqual(
+    [...remapExpandedNoteGroupPaths(
+      new Set(["Archive", "Archive/DB", "Archive/DB/Runbooks", "Ops"]),
+      "Archive/DB",
+      "Ops/DB 2",
+    )].sort(),
+    ["Archive", "Ops", "Ops/DB 2", "Ops/DB 2/Runbooks"],
+  );
 });
 
 test("matchesVaultNoteSearch checks title, body, tags, group, and linked hosts", () => {

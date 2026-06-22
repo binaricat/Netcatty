@@ -52,11 +52,98 @@ export const normalizeNoteGroups = (groups: unknown): string[] =>
       new Set(
         groups
           .filter((value): value is string => typeof value === "string")
-          .map((value) => value.trim())
+          .map((value) => cleanNoteGroupPath(value))
           .filter(Boolean),
       ),
     )
     : [];
+
+export const cleanNoteGroupPath = (value: string): string =>
+  value
+    .split("/")
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .join("/");
+
+export const ancestorNoteGroupPaths = (path: string): string[] => {
+  const parts = cleanNoteGroupPath(path).split("/").filter(Boolean);
+  return parts.map((_, index) => parts.slice(0, index + 1).join("/"));
+};
+
+export const getNoteGroupLeafName = (path: string): string =>
+  cleanNoteGroupPath(path).split("/").pop() || cleanNoteGroupPath(path);
+
+export const getNoteGroupParentPath = (path: string): string | null => {
+  const parts = cleanNoteGroupPath(path).split("/").filter(Boolean);
+  if (parts.length <= 1) return null;
+  return parts.slice(0, -1).join("/");
+};
+
+export const joinNoteGroupPath = (parent: string | null, name: string): string => {
+  const cleanName = cleanNoteGroupPath(name);
+  if (!cleanName) return "";
+  const cleanParent = parent ? cleanNoteGroupPath(parent) : "";
+  return cleanParent ? `${cleanParent}/${cleanName}` : cleanName;
+};
+
+export const isNoteGroupInside = (path: string | undefined, group: string): boolean => {
+  const cleanPath = path ? cleanNoteGroupPath(path) : "";
+  const cleanGroup = cleanNoteGroupPath(group);
+  return cleanPath === cleanGroup || Boolean(cleanPath.startsWith(`${cleanGroup}/`));
+};
+
+export const replaceNoteGroupPrefix = (path: string | undefined, from: string, to: string): string | undefined => {
+  if (!path) return path;
+  const cleanPath = cleanNoteGroupPath(path);
+  const cleanFrom = cleanNoteGroupPath(from);
+  const cleanTo = cleanNoteGroupPath(to);
+  if (cleanPath === cleanFrom) return cleanTo || undefined;
+  if (cleanPath.startsWith(`${cleanFrom}/`)) return cleanTo ? `${cleanTo}/${cleanPath.slice(cleanFrom.length + 1)}` : undefined;
+  return cleanPath;
+};
+
+export const resolveMovedNoteGroupPath = (
+  group: string,
+  parent: string | null,
+  groups: string[],
+): string | null => {
+  const source = cleanNoteGroupPath(group);
+  const targetParent = parent ? cleanNoteGroupPath(parent) : null;
+  if (!source) return null;
+  if (targetParent && (targetParent === source || targetParent.startsWith(`${source}/`))) return null;
+
+  const leafName = getNoteGroupLeafName(source);
+  const basePath = joinNoteGroupPath(targetParent, leafName);
+  if (!basePath || basePath === source) return null;
+
+  const existingGroups = normalizeNoteGroups(groups)
+    .filter((item) => !isNoteGroupInside(item, source));
+  const hasConflict = (candidate: string) =>
+    existingGroups.some((item) => item === candidate || item.startsWith(`${candidate}/`));
+
+  if (!hasConflict(basePath)) return basePath;
+
+  for (let index = 2; index < 1000; index += 1) {
+    const candidate = joinNoteGroupPath(targetParent, `${leafName} ${index}`);
+    if (!hasConflict(candidate)) return candidate;
+  }
+
+  return null;
+};
+
+export const remapExpandedNoteGroupPaths = (
+  expandedPaths: Set<string>,
+  from: string,
+  to: string,
+): Set<string> => {
+  const next = new Set<string>();
+  expandedPaths.forEach((item) => {
+    const replaced = replaceNoteGroupPrefix(item, from, to);
+    if (replaced) next.add(replaced);
+  });
+  ancestorNoteGroupPaths(to).forEach((path) => next.add(path));
+  return next;
+};
 
 export const sortVaultNotes = (notes: VaultNote[]): VaultNote[] => sortByVaultOrder(notes);
 

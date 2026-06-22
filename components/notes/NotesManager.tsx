@@ -15,7 +15,19 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useI18n } from "../../application/i18n/I18nProvider";
 import { useApplicationBackend } from "../../application/state/useApplicationBackend";
 import { useStoredNumber } from "../../application/state/useStoredNumber";
-import { matchesVaultNoteSearch, normalizeNoteGroups, normalizeVaultNotes } from "../../domain/notes";
+import {
+  ancestorNoteGroupPaths,
+  cleanNoteGroupPath,
+  getNoteGroupParentPath,
+  isNoteGroupInside,
+  joinNoteGroupPath,
+  matchesVaultNoteSearch,
+  normalizeNoteGroups,
+  normalizeVaultNotes,
+  remapExpandedNoteGroupPaths,
+  replaceNoteGroupPrefix,
+  resolveMovedNoteGroupPath,
+} from "../../domain/notes";
 import { getNextVaultOrder, reorderVaultItems, sortByVaultOrder } from "../../domain/vaultOrder";
 import { STORAGE_KEY_VAULT_NOTES_TREE_WIDTH } from "../../infrastructure/config/storageKeys";
 import { cn } from "../../lib/utils";
@@ -141,42 +153,6 @@ const createNote = (group: string | null, order: number): VaultNote => {
   };
 };
 
-const cleanGroupPath = (value: string): string =>
-  value
-    .split("/")
-    .map((part) => part.trim())
-    .filter(Boolean)
-    .join("/");
-
-const ancestorPaths = (path: string): string[] => {
-  const parts = cleanGroupPath(path).split("/").filter(Boolean);
-  return parts.map((_, index) => parts.slice(0, index + 1).join("/"));
-};
-
-const getLeafName = (path: string): string => cleanGroupPath(path).split("/").pop() || cleanGroupPath(path);
-
-const getParentPath = (path: string): string | null => {
-  const parts = cleanGroupPath(path).split("/").filter(Boolean);
-  if (parts.length <= 1) return null;
-  return parts.slice(0, -1).join("/");
-};
-
-const joinGroupPath = (parent: string | null, name: string): string => {
-  const cleanName = cleanGroupPath(name);
-  if (!cleanName) return "";
-  return parent ? `${cleanGroupPath(parent)}/${cleanName}` : cleanName;
-};
-
-const isInsideGroup = (path: string | undefined, group: string): boolean =>
-  path === group || Boolean(path?.startsWith(`${group}/`));
-
-const replaceGroupPrefix = (path: string | undefined, from: string, to: string): string | undefined => {
-  if (!path) return path;
-  if (path === from) return to || undefined;
-  if (path.startsWith(`${from}/`)) return `${to}/${path.slice(from.length + 1)}`;
-  return path;
-};
-
 const sortNoteItems = (items: VaultNote[]): VaultNote[] => sortByVaultOrder(items);
 
 const sortFolderNodes = (items: NoteFolderNode[]): NoteFolderNode[] =>
@@ -191,7 +167,7 @@ const sortFolderNodes = (items: NoteFolderNode[]): NoteFolderNode[] =>
 const buildNoteTree = (groups: string[], notes: VaultNote[]): { children: NoteFolderNode[]; rootNotes: VaultNote[] } => {
   const nodes = new Map<string, NoteFolderNode>();
   const ensureNode = (path: string): NoteFolderNode => {
-    const cleanPath = cleanGroupPath(path);
+    const cleanPath = cleanNoteGroupPath(path);
     const existing = nodes.get(cleanPath);
     if (existing) return existing;
 
@@ -210,11 +186,11 @@ const buildNoteTree = (groups: string[], notes: VaultNote[]): { children: NoteFo
     ...groups,
     ...notes.map((note) => note.group).filter((group): group is string => Boolean(group)),
   ]);
-  allGroups.flatMap(ancestorPaths).forEach(ensureNode);
+  allGroups.flatMap(ancestorNoteGroupPaths).forEach(ensureNode);
 
   const rootNotes: VaultNote[] = [];
   notes.forEach((note) => {
-    const group = note.group ? cleanGroupPath(note.group) : "";
+    const group = note.group ? cleanNoteGroupPath(note.group) : "";
     if (!group) {
       rootNotes.push(note);
       return;
@@ -246,7 +222,7 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(() => isSidebarMode ? null : notes[0]?.id ?? null);
   const [overlayNoteId, setOverlayNoteId] = useState<string | null>(null);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(
-    () => new Set(notes.flatMap((note) => note.group ? ancestorPaths(note.group) : [])),
+    () => new Set(notes.flatMap((note) => note.group ? ancestorNoteGroupPaths(note.group) : [])),
   );
   const [expandedPanel, setExpandedPanel] = useState<NotesToolbarPanel>(null);
   const [creatingGroupParent, setCreatingGroupParent] = useState<string | null | undefined>(undefined);
@@ -294,7 +270,7 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
 
   useEffect(() => {
     if (!selectedNote?.group) return;
-    setExpandedGroups((current) => new Set([...current, ...ancestorPaths(selectedNote.group || "")]));
+    setExpandedGroups((current) => new Set([...current, ...ancestorNoteGroupPaths(selectedNote.group || "")]));
   }, [selectedNote?.group]);
 
   useEffect(() => {
@@ -305,7 +281,7 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
     setOverlayNoteId(note.id);
     setSelectedGroup(note.group || null);
     if (note.group) {
-      setExpandedGroups((current) => new Set([...current, ...ancestorPaths(note.group || "")]));
+      setExpandedGroups((current) => new Set([...current, ...ancestorNoteGroupPaths(note.group || "")]));
     }
   }, [isSidebarMode, openNoteId, sortedNotes]);
 
@@ -318,7 +294,7 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
   }, [expandedPanel]);
 
   const expandPath = (path: string) => {
-    setExpandedGroups((current) => new Set([...current, ...ancestorPaths(path)]));
+    setExpandedGroups((current) => new Set([...current, ...ancestorNoteGroupPaths(path)]));
   };
 
   const toggleGroup = (path: string) => {
@@ -406,11 +382,11 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
   };
 
   const commitCreateGroup = (name: string) => {
-    const nextPath = joinGroupPath(creatingGroupParent ?? null, name);
+    const nextPath = joinNoteGroupPath(creatingGroupParent ?? null, name);
     setCreatingGroupParent(undefined);
     if (!nextPath) return;
 
-    const next = normalizeNoteGroups([...groups, ...ancestorPaths(nextPath)]);
+    const next = normalizeNoteGroups([...groups, ...ancestorNoteGroupPaths(nextPath)]);
     onUpdateNoteGroups(next);
     expandPath(nextPath);
     setSelectedGroup(nextPath);
@@ -418,36 +394,36 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
 
   const renameGroup = (group: string, nextName: string) => {
     setEditingGroupPath(null);
-    const nextPath = joinGroupPath(getParentPath(group), nextName);
+    const nextPath = joinNoteGroupPath(getNoteGroupParentPath(group), nextName);
     if (!nextPath || nextPath === group) return;
 
     const nextGroups = normalizeNoteGroups(
-      groups.map((item) => replaceGroupPrefix(item, group, nextPath) || ""),
+      groups.map((item) => replaceNoteGroupPrefix(item, group, nextPath) || ""),
     );
     const nextNotes = sortedNotes.map((note) => ({
       ...note,
-      group: replaceGroupPrefix(note.group, group, nextPath),
+      group: replaceNoteGroupPrefix(note.group, group, nextPath),
     }));
     onUpdateNoteGroups(nextGroups);
     onUpdateNotes(normalizeVaultNotes(nextNotes));
     setExpandedGroups((current) => {
       const next = new Set<string>();
       current.forEach((item) => {
-        const renamed = replaceGroupPrefix(item, group, nextPath);
+        const renamed = replaceNoteGroupPrefix(item, group, nextPath);
         if (renamed) next.add(renamed);
       });
-      ancestorPaths(nextPath).forEach((path) => next.add(path));
+      ancestorNoteGroupPaths(nextPath).forEach((path) => next.add(path));
       return next;
     });
-    if (selectedGroup && isInsideGroup(selectedGroup, group)) {
-      setSelectedGroup(replaceGroupPrefix(selectedGroup, group, nextPath) ?? null);
+    if (selectedGroup && isNoteGroupInside(selectedGroup, group)) {
+      setSelectedGroup(replaceNoteGroupPrefix(selectedGroup, group, nextPath) ?? null);
     }
   };
 
   const deleteGroup = (group: string) => {
-    onUpdateNoteGroups(groups.filter((item) => !isInsideGroup(item, group)));
-    onUpdateNotes(sortedNotes.map((note) => isInsideGroup(note.group, group) ? { ...note, group: undefined } : note));
-    if (selectedGroup && isInsideGroup(selectedGroup, group)) setSelectedGroup(null);
+    onUpdateNoteGroups(groups.filter((item) => !isNoteGroupInside(item, group)));
+    onUpdateNotes(sortedNotes.map((note) => isNoteGroupInside(note.group, group) ? { ...note, group: undefined } : note));
+    if (selectedGroup && isNoteGroupInside(selectedGroup, group)) setSelectedGroup(null);
     setEditingGroupPath(null);
   };
 
@@ -479,9 +455,16 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
   };
 
   const moveNoteToGroup = (noteId: string, group: string | null) => {
+    const source = sortedNotes.find((note) => note.id === noteId);
+    if (!source) return;
+    const nextGroup = group || undefined;
+    if ((source.group || undefined) === nextGroup) return;
+
     onUpdateNotes(normalizeVaultNotes(sortedNotes.map((note) => (
-      note.id === noteId ? { ...note, group: group || undefined, updatedAt: Date.now() } : note
+      note.id === noteId ? { ...note, group: nextGroup, updatedAt: Date.now() } : note
     ))));
+    if (selectedNoteId === noteId) setSelectedGroup(group);
+    if (group) expandPath(group);
   };
 
   const reorderNoteToNote = (sourceId: string, targetNote: VaultNote, event: React.DragEvent<HTMLElement>) => {
@@ -493,22 +476,27 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
         : note
     ));
     onUpdateNotes(normalizeVaultNotes(reorderVaultItems(movedNotes, sourceId, targetNote.id, position)));
+    if (selectedNoteId === sourceId) setSelectedGroup(targetNote.group || null);
+    if (targetNote.group) expandPath(targetNote.group);
   };
 
   const moveGroupToParent = (group: string, parent: string | null) => {
-    if (parent && (parent === group || parent.startsWith(`${group}/`))) return;
-    const nextPath = joinGroupPath(parent, getLeafName(group));
-    if (!nextPath || nextPath === group) return;
-    const nextGroups = normalizeNoteGroups(groups.map((item) => replaceGroupPrefix(item, group, nextPath) || ""));
+    const knownGroups = normalizeNoteGroups([
+      ...groups,
+      ...sortedNotes.map((note) => note.group).filter((item): item is string => Boolean(item)),
+    ]);
+    const nextPath = resolveMovedNoteGroupPath(group, parent, knownGroups);
+    if (!nextPath) return;
+    const nextGroups = normalizeNoteGroups(groups.map((item) => replaceNoteGroupPrefix(item, group, nextPath) || ""));
     const nextNotes = sortedNotes.map((note) => ({
       ...note,
-      group: replaceGroupPrefix(note.group, group, nextPath),
+      group: replaceNoteGroupPrefix(note.group, group, nextPath),
     }));
     onUpdateNoteGroups(nextGroups);
     onUpdateNotes(normalizeVaultNotes(nextNotes));
-    expandPath(nextPath);
-    if (selectedGroup && isInsideGroup(selectedGroup, group)) {
-      setSelectedGroup(replaceGroupPrefix(selectedGroup, group, nextPath) ?? null);
+    setExpandedGroups((current) => remapExpandedNoteGroupPaths(current, group, nextPath));
+    if (selectedGroup && isNoteGroupInside(selectedGroup, group)) {
+      setSelectedGroup(replaceNoteGroupPrefix(selectedGroup, group, nextPath) ?? null);
     }
   };
 
@@ -544,8 +532,7 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
         <ContextMenuItem
           key={action.label}
           className={action.destructive ? "text-destructive focus:text-destructive" : undefined}
-          onSelect={(event) => {
-            event.preventDefault();
+          onSelect={() => {
             action.action();
           }}
         >
@@ -598,8 +585,7 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
         <ContextMenuItem
           key={action.label}
           className={action.destructive ? "text-destructive focus:text-destructive" : undefined}
-          onSelect={(event) => {
-            event.preventDefault();
+          onSelect={() => {
             action.action();
           }}
         >
@@ -676,10 +662,15 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
             }}
             onDragOver={(event) => {
               const sourceNoteId = draggingNoteId || getDraggedNoteId(event.dataTransfer);
-              if (!sourceNoteId || sourceNoteId === note.id) return;
+              if (!sourceNoteId || sourceNoteId === note.id) {
+                setRootDropActive(false);
+                clearVaultDropIndicator();
+                return;
+              }
               event.preventDefault();
               event.stopPropagation();
               event.dataTransfer.dropEffect = "move";
+              setRootDropActive(false);
               markVaultDropIndicator(
                 event.currentTarget,
                 getVaultDropPosition(event.currentTarget, event.clientX, event.clientY),
@@ -752,11 +743,20 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
               onDragOver={(event) => {
                 const sourceNoteId = draggingNoteId || getDraggedNoteId(event.dataTransfer);
                 const sourceGroupPath = draggingGroupPath || getDraggedGroupPath(event.dataTransfer);
-                if (!sourceNoteId && !sourceGroupPath) return;
-                if (sourceGroupPath && (sourceGroupPath === node.path || node.path.startsWith(`${sourceGroupPath}/`))) return;
+                if (!sourceNoteId && !sourceGroupPath) {
+                  setRootDropActive(false);
+                  clearVaultDropIndicator();
+                  return;
+                }
+                if (sourceGroupPath && (sourceGroupPath === node.path || node.path.startsWith(`${sourceGroupPath}/`))) {
+                  setRootDropActive(false);
+                  clearVaultDropIndicator();
+                  return;
+                }
                 event.preventDefault();
                 event.stopPropagation();
                 event.dataTransfer.dropEffect = "move";
+                setRootDropActive(false);
                 markVaultInsideDropIndicator(event.currentTarget);
               }}
               onDragLeave={handleTreeRowDragLeave}
