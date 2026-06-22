@@ -583,24 +583,22 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     termRef.current?.focus();
   }, []);
 
-  const handleOsc7SetupConfirm = useCallback(() => {
-    if (status !== "connected") {
-      setOsc7SetupOpen(false);
-      termRef.current?.focus();
-      return;
-    }
-    terminalBackend.writeToSession(sessionId, osc7SetupCommand, { automated: true });
-    setOsc7SetupOpen(false);
-    termRef.current?.focus();
-    toast.success(t("terminal.osc7Setup.sent"));
-  }, [osc7SetupCommand, sessionId, status, t, terminalBackend]);
-
   const handleOsc7SetupOpenChange = useCallback((open: boolean) => {
     setOsc7SetupOpen(open);
     if (!open) {
       queueMicrotask(() => termRef.current?.focus());
     }
   }, []);
+
+  const handleOsc7SetupConfirm = useCallback(() => {
+    if (status !== "connected") {
+      handleOsc7SetupOpenChange(false);
+      return;
+    }
+    terminalBackend.writeToSession(sessionId, osc7SetupCommand, { automated: true });
+    handleOsc7SetupOpenChange(false);
+    toast.success(t("terminal.osc7Setup.sent"));
+  }, [handleOsc7SetupOpenChange, osc7SetupCommand, sessionId, status, t, terminalBackend]);
 
   const handleTopOverlayMouseDownCapture = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     if (e.button !== 0) return;

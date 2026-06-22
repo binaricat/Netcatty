@@ -27,6 +27,8 @@ const markerCount = (content: string) => content.split(OSC7_MARKER).length - 1;
 
 const existingShells = (paths: string[]) => Array.from(new Set(paths.filter(existsSync)));
 
+const supportedShells = () => existingShells(["/bin/bash", "/bin/zsh", "/opt/homebrew/bin/fish", "/usr/bin/fish"]);
+
 const extractOsc7Path = (output: string) => {
   const escape = String.fromCharCode(0x1b);
   const bell = String.fromCharCode(0x07);
@@ -86,27 +88,41 @@ test("buildOsc7SetupCommand honors zsh ZDOTDIR captured from the current shell",
     assert.equal(markerCount(zshrc), 2);
     assert.match(zshrc, /precmd_functions/);
     assert.equal(existsSync(join(home, ".zshrc")), false);
+
+    execFileSync("/bin/zsh", ["-uc", `source ${JSON.stringify(zshrcPath)}; print -r -- "\${precmd_functions[*]}"`], {
+      env: { ...process.env, HOME: home, ZDOTDIR: zdotdir },
+      stdio: "pipe",
+    });
   });
 });
 
 test("buildOsc7SetupCommand configures fish once with valid fish syntax", () => {
   withTempHome("netcatty-osc7-fish-", (home) => {
-    runSetup({ HOME: home, SHELL: "/usr/bin/fish" });
-    runSetup({ HOME: home, SHELL: "/usr/bin/fish" });
+    const fishPath = existingShells(["/opt/homebrew/bin/fish", "/usr/bin/fish"])[0] ?? "/usr/bin/fish";
+    runSetup({ HOME: home, SHELL: fishPath });
+    runSetup({ HOME: home, SHELL: fishPath });
 
     const fishConfigPath = join(home, ".config", "fish", "config.fish");
     const fishConfig = readFileSync(fishConfigPath, "utf8");
     assert.equal(markerCount(fishConfig), 2);
     assert.match(fishConfig, /fish_prompt/);
 
-    if (existsSync("/opt/homebrew/bin/fish") || existsSync("/usr/bin/fish")) {
-      execFileSync("fish", ["-n", fishConfigPath], { stdio: "pipe" });
+    if (existsSync(fishPath)) {
+      execFileSync(fishPath, ["-n", fishConfigPath], { stdio: "pipe" });
+      execFileSync(fishPath, ["-c", `source ${JSON.stringify(fishConfigPath)}; functions -q __netcatty_osc7_cwd`], {
+        env: { ...process.env, HOME: home },
+        stdio: "pipe",
+      });
     }
   });
 });
 
 test("buildOsc7SetupCommand can be pasted into supported shells", () => {
-  const shells = existingShells(["/bin/bash", "/bin/zsh", "/opt/homebrew/bin/fish", "/usr/bin/fish"]);
+  const shells = supportedShells();
+
+  if (process.env.CI) {
+    assert.ok(shells.some((shellPath) => basename(shellPath) === "fish"), "CI must exercise fish");
+  }
 
   for (const shellPath of shells) {
     withTempHome(`netcatty-osc7-${basename(shellPath)}-`, (home) => {

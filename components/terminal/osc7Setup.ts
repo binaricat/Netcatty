@@ -90,7 +90,7 @@ __netcatty_osc7_url_path() {
   printf "%s" "$1" | LC_ALL=C awk '${URL_PATH_AWK_SCRIPT}'
 }
 osc7_cwd() {
-  printf '\033]7;file://%s%s\033\\' "${DOLLAR}{HOSTNAME:-localhost}" "$(__netcatty_osc7_url_path "$PWD")"
+  printf '\033]7;file://%s%s\a' "${DOLLAR}{HOSTNAME:-localhost}" "$(__netcatty_osc7_url_path "$PWD")"
 }
 case "${DOLLAR}{PROMPT_COMMAND:-}" in
   *osc7_cwd*) ;;
@@ -114,12 +114,16 @@ __netcatty_osc7_url_path() {
   printf "%s" "$1" | LC_ALL=C awk '${URL_PATH_AWK_SCRIPT}'
 }
 osc7_cwd() {
-  printf '\033]7;file://%s%s\033\\' "${DOLLAR}{HOST:-${DOLLAR}{HOSTNAME:-localhost}}" "$(__netcatty_osc7_url_path "$PWD")"
+  printf '\033]7;file://%s%s\a' "${DOLLAR}{HOST:-${DOLLAR}{HOSTNAME:-localhost}}" "$(__netcatty_osc7_url_path "$PWD")"
 }
-case " ${DOLLAR}{precmd_functions[*]} " in
-  *" osc7_cwd "*) ;;
-  *) precmd_functions+=(osc7_cwd) ;;
-esac
+if (( ${DOLLAR}{+precmd_functions} )); then
+  case " ${DOLLAR}{precmd_functions[*]} " in
+    *" osc7_cwd "*) ;;
+    *) precmd_functions+=(osc7_cwd) ;;
+  esac
+else
+  precmd_functions=(osc7_cwd)
+fi
 # <<< Netcatty OSC 7 cwd tracking <<<
 NETCATTY_OSC7_ZSH
       ;;
@@ -131,7 +135,7 @@ function __netcatty_osc7_url_path
     printf "%s" "$argv[1]" | LC_ALL=C awk '${URL_PATH_AWK_SCRIPT}'
 end
 function __netcatty_osc7_cwd --on-event fish_prompt
-    printf '\033]7;file://%s%s\033\\' (hostname 2>/dev/null; or printf localhost) (__netcatty_osc7_url_path "$PWD")
+    printf '\033]7;file://%s%s\a' (hostname 2>/dev/null; or printf localhost) (__netcatty_osc7_url_path "$PWD")
 end
 # <<< Netcatty OSC 7 cwd tracking <<<
 NETCATTY_OSC7_FISH
@@ -141,7 +145,7 @@ NETCATTY_OSC7_FISH
 fi
 
 host=$(hostname 2>/dev/null || printf localhost)
-printf '\033]7;file://%s%s\033\\' "$host" "$(__netcatty_osc7_url_path "$PWD")"
+printf '\033]7;file://%s%s\a' "$host" "$(__netcatty_osc7_url_path "$PWD")"
 printf "\nRestart this shell, or open a new one, to keep tracking future directory changes.\n"`;
 
 export const buildOsc7SetupCommand = (): string =>
