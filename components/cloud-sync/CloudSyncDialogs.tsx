@@ -126,7 +126,7 @@ interface CloudSyncDialogsProps {
   setIsUnlocking: BooleanSetter;
   showClearLocalDialog: boolean;
   setShowClearLocalDialog: BooleanSetter;
-  onBuildPayload: () => SyncPayload;
+  onBuildPayload: () => SyncPayload | Promise<SyncPayload>;
   onApplyPayload: (payload: SyncPayload) => void | Promise<void>;
   onClearLocalData?: () => void;
   ensureSyncablePayload: (payload: SyncPayload) => boolean;
@@ -687,7 +687,7 @@ export const CloudSyncDialogs: React.FC<CloudSyncDialogsProps> = ({
 
                                 let payloadForReencrypt: SyncPayload | null = null;
                                 if (sync.hasAnyConnectedProvider) {
-                                    const payload = onBuildPayload();
+                                    const payload = await onBuildPayload();
                                     if (!ensureSyncablePayload(payload)) {
                                         setChangeKeyError(t('sync.credentialsUnavailable'));
                                         return;
@@ -857,7 +857,7 @@ export const CloudSyncDialogs: React.FC<CloudSyncDialogsProps> = ({
                             <Button
                                 variant="destructive"
                                 onClick={async () => {
-                                    const localPayload = onBuildPayload();
+                                    const localPayload = await onBuildPayload();
                                     if (!ensureSyncablePayload(localPayload)) {
                                         setShowForcePushConfirm(false);
                                         return;

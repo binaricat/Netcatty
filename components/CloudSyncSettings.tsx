@@ -32,7 +32,7 @@ import { LocalBackupsPanel } from './cloud-sync/CloudSyncLocalBackupsPanel';
 import { CloudSyncDialogs } from './cloud-sync/CloudSyncDialogs';
 import { CloudSyncDashboardTabs } from './cloud-sync/CloudSyncDashboardTabs';
 interface SyncDashboardProps {
-    onBuildPayload: () => SyncPayload;
+    onBuildPayload: () => SyncPayload | Promise<SyncPayload>;
     onApplyPayload: (payload: SyncPayload) => void | Promise<void>;
     onApplyLocalPayload?: (payload: SyncPayload) => void | Promise<void>;
     onClearLocalData?: () => void;
@@ -519,7 +519,7 @@ const SyncDashboard: React.FC<SyncDashboardProps> = ({
     // Sync to provider
     const handleSync = async (provider: CloudProvider) => {
         try {
-            const payload = onBuildPayload();
+            const payload = await onBuildPayload();
             if (!ensureSyncablePayload(payload)) return;
             const result = await sync.syncToProvider(provider, payload);
 
@@ -572,7 +572,7 @@ const SyncDashboard: React.FC<SyncDashboardProps> = ({
                 // renderer's in-memory state (no onApplyPayload call), so
                 // the barrier is belt-and-suspenders against the other
                 // window's push, not ours.
-                const localPayload = onBuildPayload();
+                const localPayload = await onBuildPayload();
                 if (!ensureSyncablePayload(localPayload)) return;
 
                 let results: Map<CloudProvider, SyncResult> | null = null;
@@ -858,7 +858,7 @@ const SyncDashboard: React.FC<SyncDashboardProps> = ({
 // ============================================================================
 
 interface CloudSyncSettingsProps {
-    onBuildPayload: () => SyncPayload;
+    onBuildPayload: () => SyncPayload | Promise<SyncPayload>;
     onApplyPayload: (payload: SyncPayload) => void | Promise<void>;
     onApplyLocalPayload?: (payload: SyncPayload) => void | Promise<void>;
     onClearLocalData?: () => void;

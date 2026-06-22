@@ -20,7 +20,7 @@ import { mergeSyncPayloads } from '../../domain/syncMerge';
 import { resolveCloudSyncConflictAction } from '../../domain/syncStrategy';
 import {
   SYNCABLE_SETTING_STORAGE_KEYS,
-  collectSyncableSettings,
+  collectCloudSyncableSettings,
   getEffectivePortForwardingRulesForSync,
   hasMeaningfulCloudSyncData,
   shouldPromptCloudVaultRecovery,
@@ -199,17 +199,17 @@ export const useAutoSync = (config: AutoSyncConfig) => {
   ]);
 
   // Build sync payload
-  const buildPayload = useCallback((): SyncPayload => {
+  const buildPayload = useCallback(async (): Promise<SyncPayload> => {
     return {
       ...getSyncSnapshot(),
-      settings: collectSyncableSettings(),
+      settings: await collectCloudSyncableSettings(),
       syncedAt: Date.now(),
     };
   }, [getSyncSnapshot]);
   
   // Create a hash of current data for comparison (includes settings)
-  const getDataHash = useCallback(() => {
-    return JSON.stringify({ ...getSyncSnapshot(), settings: collectSyncableSettings() });
+  const getDataHash = useCallback(async () => {
+    return JSON.stringify({ ...getSyncSnapshot(), settings: await collectCloudSyncableSettings() });
   }, [getSyncSnapshot]);
   
   // Sync now handler - get fresh state directly from manager
@@ -298,8 +298,8 @@ export const useAutoSync = (config: AutoSyncConfig) => {
         throw new Error(t('sync.autoSync.vaultLocked'));
       }
 
-      const dataHash = getDataHash();
-      const payload = buildPayload();
+      const dataHash = await getDataHash();
+      const payload = await buildPayload();
       const encryptedCredentialPaths = findSyncPayloadEncryptedCredentialPaths(payload);
       if (encryptedCredentialPaths.length > 0) {
         console.warn('[AutoSync] Blocked: encrypted credential placeholders found at:', encryptedCredentialPaths.join(', '));
@@ -494,7 +494,7 @@ export const useAutoSync = (config: AutoSyncConfig) => {
 
       const remoteFile = inspection.remoteFile;
       const remotePayload = inspection.payload;
-      const localPayload = buildPayloadRef.current();
+      const localPayload = await buildPayloadRef.current();
 
       // If local vault is empty but cloud has data, this almost certainly
       // means the user's data was lost (update, storage corruption, etc.).
@@ -666,7 +666,7 @@ export const useAutoSync = (config: AutoSyncConfig) => {
           isInitializedRef.current = true;
         }
         if (markCurrentDataSynced) {
-          lastSyncedDataRef.current = getDataHashRef.current();
+          lastSyncedDataRef.current = await getDataHashRef.current();
         } else {
           lastSyncedDataRef.current = '';
         }
@@ -713,62 +713,67 @@ export const useAutoSync = (config: AutoSyncConfig) => {
       return;
     }
 
-    // Skip initial render
-    if (!isInitializedRef.current) {
-      isInitializedRef.current = true;
-      lastSyncedDataRef.current = getDataHash();
-      return;
-    }
-    
-    const currentHash = getDataHash();
+    let cancelled = false;
+    void (async () => {
+      const currentHash = await getDataHash();
+      if (cancelled) return;
 
-    // After a merge, onApplyPayload changes local state which triggers
-    // this effect. Skip that cycle and just update the hash baseline.
-    if (skipNextSyncRef.current) {
-      skipNextSyncRef.current = false;
-      lastSyncedDataRef.current = currentHash;
-      return;
-    }
+      // Skip initial render
+      if (!isInitializedRef.current) {
+        isInitializedRef.current = true;
+        lastSyncedDataRef.current = currentHash;
+        return;
+      }
 
-    // Skip if data hasn't changed
-    if (currentHash === lastSyncedDataRef.current) {
-      return;
-    }
+      // After a merge, onApplyPayload changes local state which triggers
+      // this effect. Skip that cycle and just update the hash baseline.
+      if (skipNextSyncRef.current) {
+        skipNextSyncRef.current = false;
+        lastSyncedDataRef.current = currentHash;
+        return;
+      }
 
-    // Wait for the current sync to finish, then this effect will re-run
-    // because sync.isSyncing changed.
-    if (sync.isSyncing || isSyncRunningRef.current) {
-      return;
-    }
+      // Skip if data hasn't changed
+      if (currentHash === lastSyncedDataRef.current) {
+        return;
+      }
 
-    // Hold off on scheduling a new push while another window is applying
-    // a restore — the restore is about to land via localStorage and the
-    // debounce-fired syncNow would otherwise race it. The next data-
-    // change tick after the restore barrier clears will re-enter here.
-    if (isRestoreInProgress()) {
-      return;
-    }
+      // Wait for the current sync to finish, then this effect will re-run
+      // because sync.isSyncing changed.
+      if (sync.isSyncing || isSyncRunningRef.current) {
+        return;
+      }
 
-    // Don't even schedule a push while the apply-in-progress sentinel
-    // is held. The syncNow path re-checks and refuses too, but dropping
-    // the debounced schedule here avoids spinning a 3-second timer for
-    // every keystroke while the user is in the Restore UI working
-    // through recovery.
-    if (readInterruptedVaultApply()) {
-      return;
-    }
-    
-    // Clear existing timeout
-    if (syncTimeoutRef.current) {
-      clearTimeout(syncTimeoutRef.current);
-    }
-    
-    // Debounce sync by 3 seconds
-    syncTimeoutRef.current = setTimeout(() => {
-      syncNow();
-    }, 3000);
+      // Hold off on scheduling a new push while another window is applying
+      // a restore — the restore is about to land via localStorage and the
+      // debounce-fired syncNow would otherwise race it. The next data-
+      // change tick after the restore barrier clears will re-enter here.
+      if (isRestoreInProgress()) {
+        return;
+      }
+
+      // Don't even schedule a push while the apply-in-progress sentinel
+      // is held. The syncNow path re-checks and refuses too, but dropping
+      // the debounced schedule here avoids spinning a 3-second timer for
+      // every keystroke while the user is in the Restore UI working
+      // through recovery.
+      if (readInterruptedVaultApply()) {
+        return;
+      }
+
+      // Clear existing timeout
+      if (syncTimeoutRef.current) {
+        clearTimeout(syncTimeoutRef.current);
+      }
+
+      // Debounce sync by 3 seconds
+      syncTimeoutRef.current = setTimeout(() => {
+        void syncNow();
+      }, 3000);
+    })();
     
     return () => {
+      cancelled = true;
       if (syncTimeoutRef.current) {
         clearTimeout(syncTimeoutRef.current);
       }

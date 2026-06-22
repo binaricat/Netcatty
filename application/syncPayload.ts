@@ -32,6 +32,7 @@ import {
 } from '../domain/customKeyBindings';
 import { isEncryptedCredentialPlaceholder } from '../domain/credentials';
 import { localStorageAdapter } from '../infrastructure/persistence/localStorageAdapter';
+import { decryptField, encryptField } from '../infrastructure/persistence/secureFieldAdapter';
 import { sanitizeQuickMessages } from '../infrastructure/ai/quickMessages';
 import { emitAIStateChanged } from './state/aiStateEvents';
 import { rehydrateGlobalSftpBookmarks } from './state/sftp/globalSftpBookmarks';
@@ -276,6 +277,23 @@ const stripDeviceBoundApiKey = <T extends Record<string, unknown>>(value: T): T 
   return next;
 };
 
+const withPortableApiKey = async <T extends Record<string, unknown>>(value: T): Promise<T> => {
+  const apiKey = value.apiKey;
+  if (typeof apiKey !== 'string' || !isEncryptedCredentialPlaceholder(apiKey)) return value;
+
+  const decrypted = await decryptField(apiKey).catch(() => undefined);
+  if (!decrypted || decrypted === apiKey) return stripDeviceBoundApiKey(value);
+  return { ...value, apiKey: decrypted };
+};
+
+const withLocalEncryptedApiKey = async <T extends Record<string, unknown>>(value: T): Promise<T> => {
+  const apiKey = value.apiKey;
+  if (typeof apiKey !== 'string' || isEncryptedCredentialPlaceholder(apiKey)) return value;
+
+  const encrypted = await encryptField(apiKey).catch(() => undefined);
+  return { ...value, apiKey: encrypted ?? apiKey };
+};
+
 /**
  * `collectSyncableSettings` strips device-bound encrypted apiKeys before upload,
  * so an incoming providers array typically has no apiKey for providers that
@@ -461,7 +479,7 @@ export function collectSyncableSettings(): SyncPayload['settings'] {
   const webSearchConfig = readRecordSetting(STORAGE_KEY_AI_WEB_SEARCH);
   if (webSearchConfig) ai.webSearchConfig = stripDeviceBoundApiKey(webSearchConfig);
   const quickMessages = readArraySetting(STORAGE_KEY_AI_QUICK_MESSAGES);
-  if (quickMessages) ai.quickMessages = sanitizeQuickMessages(quickMessages);
+  if (quickMessages) ai.quickMessages = sanitizeQuickMessages(quickMessages) as unknown as Array<Record<string, unknown>>;
   const showTerminalSelectionAction = localStorageAdapter.readBoolean(STORAGE_KEY_AI_SHOW_TERMINAL_SELECTION_ACTION);
   if (showTerminalSelectionAction != null) {
     ai.showTerminalSelectionAction = showTerminalSelectionAction;
@@ -471,11 +489,34 @@ export function collectSyncableSettings(): SyncPayload['settings'] {
   return Object.keys(settings).length > 0 ? settings : undefined;
 }
 
+export async function collectCloudSyncableSettings(): Promise<SyncPayload['settings']> {
+  const settings = collectSyncableSettings();
+
+  const providers = readArraySetting(STORAGE_KEY_AI_PROVIDERS);
+  const webSearchConfig = readRecordSetting(STORAGE_KEY_AI_WEB_SEARCH);
+  if (!providers && !webSearchConfig) return settings;
+
+  const nextSettings: SyncPayload['settings'] = settings ? { ...settings } : {};
+  const ai: NonNullable<SyncPayload['settings']>['ai'] = {
+    ...(settings?.ai ?? {}),
+  };
+
+  if (providers) {
+    ai.providers = await Promise.all(providers.map(withPortableApiKey));
+  }
+  if (webSearchConfig) {
+    ai.webSearchConfig = await withPortableApiKey(webSearchConfig);
+  }
+
+  nextSettings.ai = ai;
+  return Object.keys(nextSettings).length > 0 ? nextSettings : undefined;
+}
+
 /**
  * Apply synced settings to localStorage. Merges terminal settings
  * to preserve platform-specific fields.
  */
-function applySyncableSettings(settings: NonNullable<SyncPayload['settings']>): void {
+async function applySyncableSettings(settings: NonNullable<SyncPayload['settings']>): Promise<void> {
   // Theme & Appearance
   if (settings.theme != null) localStorageAdapter.writeString(STORAGE_KEY_THEME, settings.theme);
   if (settings.lightUiThemeId != null) localStorageAdapter.writeString(STORAGE_KEY_UI_THEME_LIGHT, settings.lightUiThemeId);
@@ -591,9 +632,10 @@ function applySyncableSettings(settings: NonNullable<SyncPayload['settings']>): 
   const ai = settings.ai;
   if (ai) {
     if (ai.providers != null) {
+      const providers = await Promise.all(ai.providers.map(withLocalEncryptedApiKey));
       localStorageAdapter.write(
         STORAGE_KEY_AI_PROVIDERS,
-        mergeAiProvidersPreservingLocalApiKeys(ai.providers),
+        mergeAiProvidersPreservingLocalApiKeys(providers),
       );
     }
     if (ai.activeProviderId != null) localStorageAdapter.writeString(STORAGE_KEY_AI_ACTIVE_PROVIDER, ai.activeProviderId);
@@ -613,9 +655,10 @@ function applySyncableSettings(settings: NonNullable<SyncPayload['settings']>): 
       if (ai.webSearchConfig === null) {
         localStorageAdapter.remove(STORAGE_KEY_AI_WEB_SEARCH);
       } else {
+        const webSearchConfig = await withLocalEncryptedApiKey(ai.webSearchConfig);
         localStorageAdapter.write(
           STORAGE_KEY_AI_WEB_SEARCH,
-          mergeWebSearchConfigPreservingLocalApiKey(ai.webSearchConfig),
+          mergeWebSearchConfigPreservingLocalApiKey(webSearchConfig),
         );
       }
     }
@@ -742,6 +785,25 @@ export function buildSyncPayload(
   };
 }
 
+export async function buildCloudSyncPayload(
+  vault: SyncableVaultData,
+  portForwardingRules?: PortForwardingRule[],
+): Promise<SyncPayload> {
+  return {
+    hosts: vault.hosts,
+    keys: vault.keys,
+    identities: vault.identities,
+    proxyProfiles: vault.proxyProfiles,
+    snippets: vault.snippets,
+    customGroups: vault.customGroups,
+    snippetPackages: vault.snippetPackages,
+    groupConfigs: vault.groupConfigs,
+    portForwardingRules: sanitizePortForwardingRulesForSync(portForwardingRules),
+    settings: await collectCloudSyncableSettings(),
+    syncedAt: Date.now(),
+  };
+}
+
 /** Build a local backup/restore payload, including local-only trust records. */
 export function buildLocalVaultPayload(
   vault: SyncableVaultData,
@@ -785,7 +847,7 @@ function applyPayload(
     vaultImport.groupConfigs = payload.groupConfigs;
   }
 
-  return Promise.resolve(importers.importVaultData(JSON.stringify(vaultImport))).then(() => {
+  return Promise.resolve(importers.importVaultData(JSON.stringify(vaultImport))).then(async () => {
     // Only import port-forwarding rules when the payload explicitly carries
     // them.  Absent field = "payload was created before this feature existed",
     // so local rules are preserved.  Explicitly present [] = "remote has no
@@ -796,7 +858,7 @@ function applyPayload(
 
     // Apply synced settings
     if (payload.settings) {
-      applySyncableSettings(payload.settings);
+      await applySyncableSettings(payload.settings);
       // Rehydrate in-memory bookmark snapshot after localStorage was updated
       if (payload.settings.sftpGlobalBookmarks != null) rehydrateGlobalSftpBookmarks();
       importers.onSettingsApplied?.();
