@@ -15,6 +15,31 @@ const MODEL_CACHE_TTL_MS = 5 * 60 * 1000;
 const MODEL_LIST_TIMEOUT_MS = 10000;
 const sdkModelCache = new Map();
 
+function buildSdkSessionKey(chatSessionId, backendKey, binPath) {
+  return [
+    String(chatSessionId || ""),
+    String(backendKey || ""),
+    String(binPath || ""),
+  ].join("\u0000");
+}
+
+function buildSdkModelCacheKey(backendKey, binPath) {
+  return [String(backendKey || ""), String(binPath || "")].join("\u0000");
+}
+
+function deleteSdkSessionKeysForChat(sdkSessionIds, chatSessionId) {
+  const prefix = `${String(chatSessionId || "")}\u0000`;
+  for (const key of sdkSessionIds.keys()) {
+    if (key.startsWith(prefix)) {
+      sdkSessionIds.delete(key);
+    }
+  }
+}
+
+function resolveSdkResumeSessionId(sdkSessionIds, sdkSessionKey) {
+  return sdkSessionIds.get(sdkSessionKey) || undefined;
+}
+
 function withTimeout(promise, ms) {
   let timer;
   const timeout = new Promise((_, reject) => {
@@ -62,13 +87,60 @@ function resolveRealCliPath(cliPath, realpath = realpathSync) {
   try { return realpath(cliPath); } catch { return cliPath; }
 }
 
-function resolveSdkBackendBinPath({
-  backendKey, shellEnv, env, resolveCliFromPath, normalizeCliPathForPlatform,
-  resolveSdkBinPath, resolveCodebuddyExecutableForSdk, realpath = realpathSync,
+function normalizeConfiguredCommandPath(command, normalizeCliPathForPlatform) {
+  const raw = String(command || "").trim();
+  const pathLike = raw.includes("/") || raw.includes("\\") || /^[a-z]:/i.test(raw);
+  if (!raw || !pathLike) {
+    return null;
+  }
+  const normalized = typeof normalizeCliPathForPlatform === "function"
+    ? normalizeCliPathForPlatform(raw)
+    : raw;
+  if (!normalized) {
+    throw new Error(`Agent CLI path not found: ${raw}`);
+  }
+  return normalized;
+}
+
+function resolveConfiguredSdkPath({
+  backendKey, configuredPath, realpath,
+  resolveClaudeCodeExecutableForSdk,
+  resolveCodexExecutableForSdk,
+  resolveCodebuddyExecutableForSdk,
 }) {
+  const realPath = resolveRealCliPath(configuredPath, realpath);
+  if (backendKey === "claude" && typeof resolveClaudeCodeExecutableForSdk === "function") {
+    return resolveClaudeCodeExecutableForSdk(realPath) || undefined;
+  }
+  if (backendKey === "codex" && typeof resolveCodexExecutableForSdk === "function") {
+    return resolveCodexExecutableForSdk(realPath) || undefined;
+  }
+  if (backendKey === "codebuddy" && typeof resolveCodebuddyExecutableForSdk === "function") {
+    return resolveCodebuddyExecutableForSdk(realPath) || undefined;
+  }
+  return realPath;
+}
+
+function resolveSdkBackendBinPath({
+  backendKey, configuredCommand, shellEnv, env, resolveCliFromPath, normalizeCliPathForPlatform,
+  resolveSdkBinPath, resolveClaudeCodeExecutableForSdk, resolveCodexExecutableForSdk,
+  resolveCodebuddyExecutableForSdk, realpath = realpathSync,
+}) {
+  const configuredPath = normalizeConfiguredCommandPath(configuredCommand, normalizeCliPathForPlatform);
+  if (configuredPath) {
+    return resolveConfiguredSdkPath({
+      backendKey,
+      configuredPath,
+      realpath,
+      resolveClaudeCodeExecutableForSdk,
+      resolveCodexExecutableForSdk,
+      resolveCodebuddyExecutableForSdk,
+    });
+  }
+
   if (backendKey === "codebuddy") {
-    const configuredPath = normalizeCliPathForPlatform?.(env?.CODEBUDDY_CODE_PATH);
-    const rawPath = configuredPath || resolveCliFromPath(backendKey, shellEnv) || undefined;
+    const configuredEnvPath = normalizeCliPathForPlatform?.(env?.CODEBUDDY_CODE_PATH);
+    const rawPath = configuredEnvPath || resolveCliFromPath(backendKey, shellEnv) || undefined;
     if (!rawPath) return undefined;
     const realPath = resolveRealCliPath(rawPath, realpath);
     // On Windows the discovered path is an npm shim (codebuddy.cmd/.ps1) that the
@@ -164,7 +236,7 @@ function registerSdkStreamHandlers(ctx) {
         const {
           requestId, chatSessionId, sdkBackend, prompt, cwd,
           model, existingSessionId, toolIntegrationMode,
-          defaultTargetSession, userSkillsContext, agentEnv: requestedAgentEnv,
+          defaultTargetSession, userSkillsContext, agentEnv: requestedAgentEnv, agentCommand,
         } = payload;
 
         const backendKey = resolveBackendKey(sdkBackend);
@@ -212,19 +284,23 @@ function registerSdkStreamHandlers(ctx) {
 
           const binPath = resolveSdkBackendBinPath({
             backendKey,
+            configuredCommand: agentCommand,
             shellEnv,
             env,
             resolveCliFromPath,
             normalizeCliPathForPlatform,
             resolveSdkBinPath,
+            resolveClaudeCodeExecutableForSdk,
+            resolveCodexExecutableForSdk,
             resolveCodebuddyExecutableForSdk,
           });
           if (backendKey === "codex") {
             env = addCodexExecutableEnvForSdk(env, binPath);
           }
 
-          const hasInMemorySession = sdkSessionIds.has(chatSessionId);
-          const resumeSessionId = sdkSessionIds.get(chatSessionId) || existingSessionId || undefined;
+          const sdkSessionKey = buildSdkSessionKey(chatSessionId, backendKey, binPath);
+          const hasInMemorySession = sdkSessionIds.has(sdkSessionKey);
+          const resumeSessionId = resolveSdkResumeSessionId(sdkSessionIds, sdkSessionKey);
           const stagedAttachments = [];
           const turnPrompt = buildSdkTurnPrompt({
             prompt,
@@ -262,7 +338,7 @@ function registerSdkStreamHandlers(ctx) {
 
           // Persist any new session id for resume on the next turn.
           const newSessionId = result?.sessionId || result?.threadId;
-          if (newSessionId) sdkSessionIds.set(chatSessionId, newSessionId);
+          if (newSessionId) sdkSessionIds.set(sdkSessionKey, newSessionId);
 
           return { ok: true };
         } catch (err) {
@@ -277,16 +353,10 @@ function registerSdkStreamHandlers(ctx) {
 
     ipcMain.handle("netcatty:ai:sdk-agent:list-models", async (event, payload) => {
       if (!validateSender(event)) return { ok: false, error: "Unauthorized IPC sender" };
-      const { sdkBackend, agentEnv: requestedAgentEnv } = payload || {};
+      const { sdkBackend, agentEnv: requestedAgentEnv, agentCommand } = payload || {};
       const backendKey = resolveBackendKey(sdkBackend);
       if (!backendKey) return { ok: false, error: `Unknown SDK backend: ${sdkBackend}` };
 
-      // claude/copilot enumerate models via the SDK; codex has no catalog (its
-      // driver returns []), so the renderer falls back to curated presets.
-      const cached = sdkModelCache.get(backendKey);
-      if (cached && Date.now() - cached.at < MODEL_CACHE_TTL_MS) {
-        return { ok: true, currentModelId: null, models: cached.models };
-      }
       try {
         const driver = getDriver(backendKey);
         if (typeof driver.listModels !== "function") {
@@ -301,16 +371,26 @@ function registerSdkStreamHandlers(ctx) {
         });
         const binPath = resolveSdkBackendBinPath({
           backendKey,
+          configuredCommand: agentCommand,
           shellEnv,
           env,
           resolveCliFromPath,
           normalizeCliPathForPlatform,
           resolveSdkBinPath,
+          resolveClaudeCodeExecutableForSdk,
+          resolveCodexExecutableForSdk,
           resolveCodebuddyExecutableForSdk,
         });
+        // claude/copilot enumerate models via the SDK; codex has no catalog (its
+        // driver returns []), so the renderer falls back to curated presets.
+        const cacheKey = buildSdkModelCacheKey(backendKey, binPath);
+        const cached = sdkModelCache.get(cacheKey);
+        if (cached && Date.now() - cached.at < MODEL_CACHE_TTL_MS) {
+          return { ok: true, currentModelId: null, models: cached.models };
+        }
         const raw = await withTimeout(driver.listModels({ binPath, env }), MODEL_LIST_TIMEOUT_MS);
         const models = Array.isArray(raw) ? raw.filter((m) => m && m.id) : [];
-        sdkModelCache.set(backendKey, { at: Date.now(), models });
+        sdkModelCache.set(cacheKey, { at: Date.now(), models });
         return { ok: true, currentModelId: null, models };
       } catch (err) {
         // Degrade to [] so the renderer keeps its curated presets (never empty).
@@ -338,7 +418,7 @@ function registerSdkStreamHandlers(ctx) {
       if (!validateSender(event)) return { ok: false, error: "Unauthorized IPC sender" };
       mcpServerBridge.setChatSessionCancelled?.(chatSessionId, true);
       mcpServerBridge.cancelPtyExecsForSession(chatSessionId);
-      sdkSessionIds.delete(chatSessionId);
+      deleteSdkSessionKeysForChat(sdkSessionIds, chatSessionId);
       await mcpServerBridge.cleanupScopedMetadata(chatSessionId);
       return { ok: true };
     });
@@ -352,6 +432,9 @@ module.exports = {
   registerSdkStreamHandlers,
   resolveBackendKey,
   resolveSdkBackendBinPath,
+  buildSdkSessionKey,
+  buildSdkModelCacheKey,
+  resolveSdkResumeSessionId,
   normalizeHistoryMessages,
   buildSdkTurnPrompt,
 };

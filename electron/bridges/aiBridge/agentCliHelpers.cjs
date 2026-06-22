@@ -117,7 +117,12 @@ function createAgentCliHelpers(ctx) {
 
   async function runCodexCli(args, options) {
     const shellEnv = await getShellEnv();
-    const codexCliPath = await resolveCliFromPathAsync("codex", shellEnv) || "codex";
+    const requestedPath = String(options?.codexPath || "").trim();
+    const configuredPath = requestedPath ? normalizeCliPathForPlatform?.(requestedPath) : null;
+    if (requestedPath && !configuredPath) {
+      throw new Error(`Codex CLI path not found: ${requestedPath}`);
+    }
+    const codexCliPath = configuredPath || await resolveCliFromPathAsync("codex", shellEnv) || "codex";
     return await runCommand(codexCliPath, args, {
       cwd: options?.cwd?.trim() || undefined,
       env: shellEnv,
@@ -140,13 +145,29 @@ function createAgentCliHelpers(ctx) {
   async function validateCodexChatGptAuth(options) {
     const maxAgeMs = options?.maxAgeMs ?? 30000;
     const now = Date.now();
+    const rawRequestedCodexPath = String(options?.codexPath || "").trim();
+    const requestedCodexPath = rawRequestedCodexPath ? normalizeCliPathForPlatform?.(rawRequestedCodexPath) : null;
+    if (rawRequestedCodexPath && !requestedCodexPath) {
+      const result = {
+        ok: false,
+        checkedAt: now,
+        codexPath: null,
+        error: `Codex CLI path not found: ${rawRequestedCodexPath}`,
+        code: "ENOENT",
+      };
+      setCodexValidationCache(result);
+      return result;
+    }
     const cached = getCodexValidationCache();
-    if (cached && now - cached.checkedAt < maxAgeMs) return cached;
+    if (cached && now - cached.checkedAt < maxAgeMs && (cached.codexPath || null) === requestedCodexPath) return cached;
 
     const shellEnv = await getShellEnv();
-    const codexPath = await resolveSdkBinPathAsync("codex", shellEnv);
+    const rawCodexPath = requestedCodexPath || await resolveSdkBinPathAsync("codex", shellEnv);
+    const codexPath = rawCodexPath && typeof resolveCodexExecutableForSdk === "function"
+      ? resolveCodexExecutableForSdk(rawCodexPath) || null
+      : rawCodexPath;
     if (!codexPath) {
-      const result = { ok: false, checkedAt: now, error: "codex binary not found", code: "ENOENT" };
+      const result = { ok: false, checkedAt: now, codexPath: requestedCodexPath, error: "codex binary not found", code: "ENOENT" };
       setCodexValidationCache(result);
       return result;
     }
@@ -165,16 +186,16 @@ function createAgentCliHelpers(ctx) {
         if (event?.type === "item.completed") break; // got a response, auth fine
       }
       if (failed) {
-        const result = { ok: false, checkedAt: now, error: failed.message || "Codex auth failed", code: undefined };
+        const result = { ok: false, checkedAt: now, codexPath, error: failed.message || "Codex auth failed", code: undefined };
         setCodexValidationCache(result);
         return result;
       }
-      const result = { ok: true, checkedAt: now, error: null };
+      const result = { ok: true, checkedAt: now, codexPath, error: null };
       setCodexValidationCache(result);
       return result;
     } catch (error) {
       const normalized = extractCodexError(error);
-      const result = { ok: false, checkedAt: now, error: normalized.message, code: normalized.code };
+      const result = { ok: false, checkedAt: now, codexPath, error: normalized.message, code: normalized.code };
       setCodexValidationCache(result);
       return result;
     }

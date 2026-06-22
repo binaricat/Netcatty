@@ -109,6 +109,15 @@ function getSavedManagedAgentPathInfo(
   };
 }
 
+function getManagedAgentCommandPath(
+  agents: ExternalAgentConfig[],
+  agentKey: ManagedAgentKey,
+): string {
+  const managed = agents.find((agent) => agent.id === `discovered_${agentKey}`);
+  const command = typeof managed?.command === "string" ? managed.command.trim() : "";
+  return command && (command.includes("/") || command.includes("\\")) ? command : "";
+}
+
 // ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
@@ -291,7 +300,11 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
     }
   }, []);
 
-  const applyResolvedAgentPath = useCallback((agentKey: ManagedAgentKey, result: AgentPathInfo | null) => {
+  const applyResolvedAgentPath = useCallback((
+    agentKey: ManagedAgentKey,
+    result: AgentPathInfo | null,
+    commandSource: "manual" | "auto" = "auto",
+  ) => {
     const setInfo = agentKey === "codex"
       ? setCodexPathInfo
       : agentKey === "claude"
@@ -306,7 +319,7 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
 
     let nextDefaultId: string | null = null;
     setExternalAgents((prev) => {
-      const state = buildManagedAgentState(prev, defaultAgentIdRef.current, agentKey, result);
+      const state = buildManagedAgentState(prev, defaultAgentIdRef.current, agentKey, result, commandSource);
       if (state.defaultAgentId !== defaultAgentIdRef.current) {
         nextDefaultId = state.defaultAgentId;
         defaultAgentIdRef.current = state.defaultAgentId;
@@ -321,7 +334,7 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
   const resolveAgentPath = useCallback(async (
     agentKey: ManagedAgentKey,
     customPath = "",
-    options?: { apiKeyPresent?: boolean; refreshShellEnv?: boolean },
+    options?: { apiKeyPresent?: boolean; refreshShellEnv?: boolean; commandSource?: "manual" | "auto" },
   ) => {
     const bridge = getBridge();
     if (!bridge?.aiResolveCli) return null;
@@ -351,7 +364,7 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
         ...(agentKey === "cursor" ? { apiKeyPresent: Boolean(options?.apiKeyPresent ?? cursorApiKeyEncrypted) } : {}),
       });
       if (!isCurrentRequest()) return null;
-      applyResolvedAgentPath(agentKey, result);
+      applyResolvedAgentPath(agentKey, result, options?.commandSource ?? "auto");
 
       return result;
     } catch (err) {
@@ -389,7 +402,10 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
       .filter((task) => !autoResolvedAgentStateRef.current[task.key])
       .map((task) => scheduleAfterFirstPaint(() => {
         autoResolvedAgentStateRef.current[task.key] = "pending";
-        void resolveAgentPath(task.key, task.path, task.options).finally(() => {
+        void resolveAgentPath(task.key, task.path, {
+          ...task.options,
+          commandSource: task.path ? "manual" : "auto",
+        }).finally(() => {
           autoResolvedAgentStateRef.current[task.key] = "done";
         });
       }, task.delayMs));
@@ -397,20 +413,6 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
       for (const cancel of cancelTasks) cancel();
     };
   }, [activeSubTab, cursorApiKeyEncrypted, resolveAgentPath]);
-
-  // Validate a custom path for an agent
-  const handleCheckCustomPath = useCallback(async (agentKey: ManagedAgentKey) => {
-    const customPath = agentKey === "codex"
-      ? codexCustomPath
-      : agentKey === "claude"
-        ? claudeCustomPath
-        : agentKey === "copilot"
-          ? copilotCustomPath
-          : agentKey === "codebuddy"
-            ? codebuddyCustomPath
-            : "";
-    await resolveAgentPath(agentKey, customPath, { refreshShellEnv: true });
-  }, [claudeCustomPath, codexCustomPath, copilotCustomPath, codebuddyCustomPath, resolveAgentPath]);
 
   const handleSaveCursorApiKey = useCallback(async (apiKey: string) => {
     const trimmed = apiKey.trim();
@@ -497,7 +499,7 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
     }, 900);
   }, []);
 
-  const refreshCodexIntegration = useCallback(async (opts?: { refreshShellEnv?: boolean; validateChatGptAuth?: boolean }) => {
+  const refreshCodexIntegration = useCallback(async (opts?: { refreshShellEnv?: boolean; validateChatGptAuth?: boolean; codexPath?: string }) => {
     const bridge = getBridge();
     if (!bridge?.aiCodexGetIntegration) return;
 
@@ -521,14 +523,76 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
     }
   }, []);
 
+  const codexCommittedPath = useMemo(
+    () => getManagedAgentCommandPath(externalAgents, "codex") || codexPathInfo?.path || undefined,
+    [externalAgents, codexPathInfo?.path],
+  );
+  const hasPendingCodexCustomPath = Boolean(
+    codexCustomPath.trim()
+    && codexCustomPath.trim() !== codexCommittedPath,
+  );
+
+  const getCodexPathOverride = useCallback(() => (
+    codexCommittedPath
+  ), [codexCommittedPath]);
+
+  // Validate a custom path for an agent.
+  const handleCheckCustomPath = useCallback(async (agentKey: ManagedAgentKey) => {
+    const customPath = agentKey === "codex"
+      ? codexCustomPath
+      : agentKey === "claude"
+        ? claudeCustomPath
+        : agentKey === "copilot"
+          ? copilotCustomPath
+          : agentKey === "codebuddy"
+            ? codebuddyCustomPath
+            : "";
+    const result = await resolveAgentPath(agentKey, customPath, {
+      refreshShellEnv: true,
+      commandSource: customPath.trim() ? "manual" : "auto",
+    });
+    if (agentKey === "codex") {
+      await refreshCodexIntegration({
+        refreshShellEnv: true,
+        validateChatGptAuth: true,
+        codexPath: result?.path || customPath.trim() || undefined,
+      });
+    }
+  }, [claudeCustomPath, codexCustomPath, copilotCustomPath, codebuddyCustomPath, resolveAgentPath, refreshCodexIntegration]);
+
+  const handleResetCustomPath = useCallback(async (agentKey: ManagedAgentKey) => {
+    if (agentKey === "codex") {
+      setCodexCustomPath("");
+    } else if (agentKey === "claude") {
+      setClaudeCustomPath("");
+    } else if (agentKey === "copilot") {
+      setCopilotCustomPath("");
+    } else if (agentKey === "codebuddy") {
+      setCodebuddyCustomPath("");
+    }
+
+    const result = await resolveAgentPath(agentKey, "", {
+      refreshShellEnv: true,
+      commandSource: "auto",
+      ...(agentKey === "cursor" ? { apiKeyPresent: Boolean(cursorApiKeyEncrypted) } : {}),
+    });
+    if (agentKey === "codex") {
+      await refreshCodexIntegration({
+        refreshShellEnv: true,
+        validateChatGptAuth: true,
+        codexPath: result?.path || undefined,
+      });
+    }
+  }, [cursorApiKeyEncrypted, resolveAgentPath, refreshCodexIntegration]);
+
   useEffect(() => {
     if (activeSubTab !== "agents") return;
     if (codexIntegrationLoadedRef.current) return;
     return scheduleAfterFirstPaint(() => {
       codexIntegrationLoadedRef.current = true;
-      void refreshCodexIntegration();
+      void refreshCodexIntegration({ codexPath: getCodexPathOverride() });
     }, 620);
-  }, [activeSubTab, refreshCodexIntegration]);
+  }, [activeSubTab, getCodexPathOverride, refreshCodexIntegration]);
 
   useEffect(() => {
     if (!codexLoginSession || codexLoginSession.state !== "running") {
@@ -548,7 +612,10 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
         setCodexLoginSession(result.session);
         if (result.session.state !== "running") {
           if (result.session.state === "success") {
-            void refreshCodexIntegration({ validateChatGptAuth: true });
+            void refreshCodexIntegration({
+              validateChatGptAuth: true,
+              codexPath: result.session.codexPath || getCodexPathOverride(),
+            });
           }
         }
       }).catch((err) => {
@@ -562,7 +629,7 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
       cancelled = true;
       window.clearInterval(intervalId);
     };
-  }, [codexLoginSession, refreshCodexIntegration]);
+  }, [codexLoginSession, getCodexPathOverride, refreshCodexIntegration]);
 
   const handleStartCodexLogin = useCallback(async () => {
     const bridge = getBridge();
@@ -574,7 +641,7 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
     setCodexError(null);
     setIsCodexLoading(true);
     try {
-      const result = await bridge.aiCodexStartLogin();
+      const result = await bridge.aiCodexStartLogin({ codexPath: getCodexPathOverride() });
       if (!isCurrentRequest()) return;
       if (!result.ok || !result.session) {
         throw new Error(result.error || "Failed to start Codex login");
@@ -589,7 +656,7 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
         setIsCodexLoading(false);
       }
     }
-  }, []);
+  }, [getCodexPathOverride]);
 
   const handleCancelCodexLogin = useCallback(async () => {
     const bridge = getBridge();
@@ -625,13 +692,13 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
     setCodexError(null);
     setIsCodexLoading(true);
     try {
-      const result = await bridge.aiCodexLogout();
+      const result = await bridge.aiCodexLogout({ codexPath: getCodexPathOverride() });
       if (!isCurrentRequest()) return;
       if (!result.ok) {
         throw new Error(result.error || "Failed to log out from Codex");
       }
       setCodexLoginSession(null);
-      await refreshCodexIntegration({ refreshShellEnv: true, validateChatGptAuth: true });
+      await refreshCodexIntegration({ refreshShellEnv: true, validateChatGptAuth: true, codexPath: getCodexPathOverride() });
     } catch (err) {
       if (isCurrentRequest()) {
         setCodexError(normalizeCodexBridgeError(err));
@@ -641,7 +708,7 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
         setIsCodexLoading(false);
       }
     }
-  }, [refreshCodexIntegration]);
+  }, [getCodexPathOverride, refreshCodexIntegration]);
 
   const refreshUserSkillsStatus = useCallback(async () => {
     const bridge = getBridge();
@@ -784,11 +851,13 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
               customPath={codexCustomPath}
               onCustomPathChange={setCodexCustomPath}
               onRecheckPath={() => void handleCheckCustomPath("codex")}
+              onResetPath={() => void handleResetCustomPath("codex")}
               integration={codexIntegration}
               loginSession={codexLoginSession}
               isLoading={isCodexLoading}
+              hasPendingCustomPath={hasPendingCodexCustomPath}
               error={codexError}
-              onRefresh={() => void refreshCodexIntegration({ refreshShellEnv: true, validateChatGptAuth: true })}
+              onRefresh={() => void refreshCodexIntegration({ refreshShellEnv: true, validateChatGptAuth: true, codexPath: getCodexPathOverride() })}
               onConnect={() => void handleStartCodexLogin()}
               onCancel={() => void handleCancelCodexLogin()}
               onOpenUrl={handleOpenCodexLoginUrl}
@@ -806,6 +875,7 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
               customPath={claudeCustomPath}
               onCustomPathChange={setClaudeCustomPath}
               onRecheckPath={() => void handleCheckCustomPath("claude")}
+              onResetPath={() => void handleResetCustomPath("claude")}
               configDir={claudeConfigDir}
               onConfigDirChange={(v) => updateClaudeEnv(v, claudeSettingsPath, claudeEnvText)}
               settingsPath={claudeSettingsPath}
@@ -825,6 +895,7 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
               customPath={copilotCustomPath}
               onCustomPathChange={setCopilotCustomPath}
               onRecheckPath={() => void handleCheckCustomPath("copilot")}
+              onResetPath={() => void handleResetCustomPath("copilot")}
             />
           </SettingsSection>
 
@@ -851,6 +922,7 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
               customPath={codebuddyCustomPath}
               onCustomPathChange={setCodebuddyCustomPath}
               onRecheckPath={() => void handleCheckCustomPath("codebuddy")}
+              onResetPath={() => void handleResetCustomPath("codebuddy")}
               internetEnv={codebuddyInternetEnv}
               onInternetEnvChange={(v) => updateCodebuddyEnv(v, codebuddyEnvText)}
               envText={codebuddyEnvText}

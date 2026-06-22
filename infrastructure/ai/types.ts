@@ -235,6 +235,8 @@ export interface ExternalAgentConfig {
   available?: boolean;
   /** SDK backend key for managed agents (claude|codex|copilot|cursor|codebuddy). */
   sdkBackend?: string;
+  /** Internal: whether the managed command was set manually or auto-detected. */
+  commandSource?: "manual" | "auto";
   /** @deprecated Legacy persisted field from the pre-SDK migration. Read only for compatibility. */
   acpCommand?: string;
   /** @deprecated Legacy persisted field from the pre-SDK migration. */

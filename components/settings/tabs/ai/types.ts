@@ -43,6 +43,7 @@ export interface CodexLoginSession {
   output: string;
   error: string | null;
   exitCode: number | null;
+  codexPath?: string | null;
 }
 
 export interface AgentPathInfo {
@@ -105,11 +106,11 @@ export interface FetchBridge {
 export interface NetcattyAiBridge {
   aiDiscoverAgents?: (options?: { refreshShellEnv?: boolean; apiKeyPresent?: boolean }) => Promise<Array<AgentPathInfo & { command: string }>>;
   aiPrewarmShellEnv?: () => Promise<{ ok: boolean; error?: string }>;
-  aiCodexGetIntegration?: (options?: { refreshShellEnv?: boolean; validateChatGptAuth?: boolean }) => Promise<CodexIntegrationStatus>;
-  aiCodexStartLogin?: () => Promise<{ ok: boolean; session?: CodexLoginSession; error?: string }>;
+  aiCodexGetIntegration?: (options?: { refreshShellEnv?: boolean; validateChatGptAuth?: boolean; codexPath?: string }) => Promise<CodexIntegrationStatus>;
+  aiCodexStartLogin?: (options?: { codexPath?: string }) => Promise<{ ok: boolean; session?: CodexLoginSession; error?: string }>;
   aiCodexGetLoginSession?: (sessionId: string) => Promise<{ ok: boolean; session?: CodexLoginSession; error?: string }>;
   aiCodexCancelLogin?: (sessionId: string) => Promise<{ ok: boolean; found?: boolean; session?: CodexLoginSession; error?: string }>;
-  aiCodexLogout?: () => Promise<{ ok: boolean; state?: CodexIntegrationState; isConnected?: boolean; rawOutput?: string; logoutOutput?: string; error?: string }>;
+  aiCodexLogout?: (options?: { codexPath?: string }) => Promise<{ ok: boolean; state?: CodexIntegrationState; isConnected?: boolean; rawOutput?: string; logoutOutput?: string; error?: string }>;
   aiResolveCli?: (params: { command: string; customPath?: string; refreshShellEnv?: boolean; apiKeyPresent?: boolean }) => Promise<AgentPathInfo>;
   aiUserSkillsGetStatus?: () => Promise<UserSkillsStatusResult>;
   aiUserSkillsOpenFolder?: () => Promise<UserSkillsStatusResult>;

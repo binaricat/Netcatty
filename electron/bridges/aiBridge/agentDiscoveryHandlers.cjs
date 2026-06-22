@@ -139,9 +139,9 @@ function registerAgentDiscoveryHandlers(ctx) {
     let resolvedPath;
     if (hasCustomPath) {
       // Normalize Windows shim paths like `codex` -> `codex.cmd` when present.
-      // Fall back to PATH search if the stored path no longer exists
-      // (e.g. CLI reinstalled to a different location).
-      resolvedPath = normalizeCliPathForPlatform(customPath) || await resolveCliFromPathAsync(command, shellEnv);
+      // A user-supplied path must be validated as-is; falling back to PATH would
+      // make Settings appear to accept one binary while actually using another.
+      resolvedPath = normalizeCliPathForPlatform(customPath);
     } else {
       resolvedPath = await resolveCliFromPathAsync(command, shellEnv);
     }
@@ -186,7 +186,8 @@ function registerAgentDiscoveryHandlers(ctx) {
       invalidateShellEnvCache();
     }
     try {
-      const result = await runCodexCli(["login", "status"]);
+      const codexCliOptions = { codexPath: options?.codexPath };
+      const result = await runCodexCli(["login", "status"], codexCliOptions);
       const rawOutput = [result.stdout, result.stderr]
         .filter((chunk) => chunk.trim().length > 0)
         .join("\n")
@@ -195,11 +196,11 @@ function registerAgentDiscoveryHandlers(ctx) {
       let effectiveRawOutput = rawOutput;
 
       if (state === "connected_chatgpt" && options?.validateChatGptAuth === true) {
-        const validation = await validateCodexChatGptAuth({ maxAgeMs: 10000 });
+        const validation = await validateCodexChatGptAuth({ maxAgeMs: 10000, codexPath: options?.codexPath });
         if (!validation.ok) {
           if (isCodexAuthError(validation)) {
             try {
-              await runCodexCli(["logout"]);
+              await runCodexCli(["logout"], codexCliOptions);
             } catch {
               // Ignore logout failures; we still want to surface the invalid state.
             }
@@ -257,16 +258,28 @@ function registerAgentDiscoveryHandlers(ctx) {
     }
   });
 
-  ipcMain.handle("netcatty:ai:codex:start-login", async (event) => {
+  ipcMain.handle("netcatty:ai:codex:start-login", async (event, options = {}) => {
     if (!validateSenderOrSettings(event)) return { ok: false, error: "Unauthorized IPC sender" };
-    const existingSession = getActiveCodexLoginSession();
-    if (existingSession) {
-      return { ok: true, session: toCodexLoginSessionResponse(existingSession) };
+    const requestedPath = String(options?.codexPath || "").trim();
+    const requestedCodexPath = requestedPath ? normalizeCliPathForPlatform?.(requestedPath) : null;
+    if (requestedPath && !requestedCodexPath) {
+      return { ok: false, error: `Codex CLI path not found: ${requestedPath}` };
     }
 
     try {
       const shellEnv = await getShellEnv();
-      const codexCliPath = await resolveCliFromPathAsync("codex", shellEnv) || "codex";
+      const codexCliPath = requestedCodexPath
+        || await resolveCliFromPathAsync("codex", shellEnv)
+        || "codex";
+      const existingSession = getActiveCodexLoginSession();
+      if (existingSession) {
+        const existingPath = existingSession.codexPath || null;
+        if (existingPath && codexCliPath !== existingPath) {
+          return { ok: false, error: "A Codex login is already running for a different CLI path." };
+        }
+        return { ok: true, session: toCodexLoginSessionResponse(existingSession) };
+      }
+
       const sessionId = `codex_login_${randomUUID()}`;
       const spawnSpec = prepareCommandForSpawn(codexCliPath, ["login"]);
       const child = spawn(spawnSpec.command, spawnSpec.args, {
@@ -284,6 +297,7 @@ function registerAgentDiscoveryHandlers(ctx) {
         url: null,
         error: null,
         exitCode: null,
+        codexPath: codexCliPath,
       };
 
       const handleChunk = (chunk) => {
@@ -350,12 +364,13 @@ function registerAgentDiscoveryHandlers(ctx) {
     return { ok: true, found: true, session: toCodexLoginSessionResponse(session) };
   });
 
-  ipcMain.handle("netcatty:ai:codex:logout", async (event) => {
+  ipcMain.handle("netcatty:ai:codex:logout", async (event, options = {}) => {
     if (!validateSenderOrSettings(event)) return { ok: false, error: "Unauthorized IPC sender" };
     try {
-      const logoutResult = await runCodexCli(["logout"]);
+      const codexCliOptions = { codexPath: options?.codexPath };
+      const logoutResult = await runCodexCli(["logout"], codexCliOptions);
       invalidateCodexValidationCache();
-      const statusResult = await runCodexCli(["login", "status"]);
+      const statusResult = await runCodexCli(["login", "status"], codexCliOptions);
       const rawOutput = [statusResult.stdout, statusResult.stderr]
         .filter((chunk) => chunk.trim().length > 0)
         .join("\n")

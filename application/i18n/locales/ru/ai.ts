@@ -71,6 +71,7 @@ export const ruAiMessages: Messages = {
   'ai.codex.notFoundHint': 'Не удалось найти codex в PATH. Установите его или укажите путь к исполняемому файлу ниже.',
   'ai.codex.customPathPlaceholder': 'например, /usr/local/bin/codex',
   'ai.codex.check': 'Проверить',
+  'ai.codex.resetPath': 'Сбросить',
   'ai.codex.openLogin': 'Открыть вход',
   'ai.codex.logout': 'Выйти',
   'ai.codex.connectChatGPT': 'Подключить ChatGPT',
@@ -96,6 +97,7 @@ export const ruAiMessages: Messages = {
   'ai.claude.envVars.placeholder': 'ANTHROPIC_BASE_URL=https://...\nANTHROPIC_MODEL=...',
   'ai.claude.envVars.hint': 'По одному KEY=VALUE в строке, передаётся агенту Claude. Хранится локально в открытом виде — для API-ключей и учётных данных используйте «Каталог конфигурации» выше (вход `claude`).',
   'ai.claude.check': 'Проверить',
+  'ai.claude.resetPath': 'Сбросить',
 
   // AI GitHub Copilot CLI
   'ai.copilot.title': 'GitHub Copilot CLI',
@@ -107,6 +109,7 @@ export const ruAiMessages: Messages = {
   'ai.copilot.notFoundHint': 'Не удалось найти copilot в PATH. Установите его или укажите путь к исполняемому файлу ниже.',
   'ai.copilot.customPathPlaceholder': 'например, /usr/local/bin/copilot',
   'ai.copilot.check': 'Проверить',
+  'ai.copilot.resetPath': 'Сбросить',
 
   // AI Cursor SDK
   'ai.cursor.title': 'Cursor',
@@ -146,6 +149,7 @@ export const ruAiMessages: Messages = {
   'ai.codebuddy.notFoundHint': 'Не удалось найти codebuddy в PATH. Установите его или укажите путь к исполняемому файлу ниже.',
   'ai.codebuddy.customPathPlaceholder': 'например, /usr/local/bin/codebuddy',
   'ai.codebuddy.check': 'Проверить',
+  'ai.codebuddy.resetPath': 'Сбросить',
   'ai.codebuddy.configSection': 'Аутентификация и конфигурация (необязательно)',
   'ai.codebuddy.internetEnv': 'Сетевая среда',
   'ai.codebuddy.internetEnv.default': 'По умолчанию (зарубежная)',

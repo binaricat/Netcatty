@@ -16,6 +16,7 @@ function getAutoManagedAgentStoredPath(
   agentKey: ManagedAgentKey,
 ): string | null {
   const managed = agents.find((agent) => agent.id === `discovered_${agentKey}`);
+  if (managed?.commandSource === "auto") return null;
   return isPathLikeCommand(managed?.command) ? managed?.command ?? null : null;
 }
 
@@ -32,6 +33,7 @@ export function buildManagedAgentState(
   defaultAgentId: string,
   agentKey: ManagedAgentKey,
   pathInfo: AgentPathInfo | null,
+  commandSource: "manual" | "auto" = "auto",
 ): { agents: ExternalAgentConfig[]; defaultAgentId: string } {
   const managedId = `discovered_${agentKey}`;
   const managedAgents = prevAgents.filter((agent) => agent.id === managedId);
@@ -105,6 +107,7 @@ export function buildManagedAgentState(
     ...defaults,
     id: managedId,
     command: pathInfo.path,
+    commandSource,
     ...(managedEnv ? { env: managedEnv } : {}),
     available: true,
     enabled: managedAgents.length === 0

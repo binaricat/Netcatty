@@ -924,8 +924,8 @@ function createPreloadApi(ctx) {
   aiCodexGetIntegration: async (options) => {
     return ipcRenderer.invoke("netcatty:ai:codex:get-integration", options);
   },
-  aiCodexStartLogin: async () => {
-    return ipcRenderer.invoke("netcatty:ai:codex:start-login");
+  aiCodexStartLogin: async (options) => {
+    return ipcRenderer.invoke("netcatty:ai:codex:start-login", options);
   },
   aiCodexGetLoginSession: async (sessionId) => {
     return ipcRenderer.invoke("netcatty:ai:codex:get-login-session", { sessionId });
@@ -933,8 +933,8 @@ function createPreloadApi(ctx) {
   aiCodexCancelLogin: async (sessionId) => {
     return ipcRenderer.invoke("netcatty:ai:codex:cancel-login", { sessionId });
   },
-  aiCodexLogout: async () => {
-    return ipcRenderer.invoke("netcatty:ai:codex:logout");
+  aiCodexLogout: async (options) => {
+    return ipcRenderer.invoke("netcatty:ai:codex:logout", options);
   },
   // MCP Server session metadata
   aiMcpUpdateSessions: async (sessions, chatSessionId) => {
@@ -980,11 +980,11 @@ function createPreloadApi(ctx) {
     return () => ipcRenderer.removeListener("netcatty:ai:mcp:approval-cleared", handler);
   },
   // SDK external agent streaming
-  aiSdkAgentStream: async (requestId, chatSessionId, sdkBackend, prompt, cwd, providerId, model, existingSessionId, historyMessages, images, toolIntegrationMode, defaultTargetSession, userSkillsContext, agentEnv) => {
-    return ipcRenderer.invoke("netcatty:ai:sdk-agent:stream", { requestId, chatSessionId, sdkBackend, prompt, cwd, providerId, model, existingSessionId, historyMessages, images, toolIntegrationMode, defaultTargetSession, userSkillsContext, agentEnv });
+  aiSdkAgentStream: async (requestId, chatSessionId, sdkBackend, prompt, cwd, providerId, model, existingSessionId, historyMessages, images, toolIntegrationMode, defaultTargetSession, userSkillsContext, agentEnv, agentCommand) => {
+    return ipcRenderer.invoke("netcatty:ai:sdk-agent:stream", { requestId, chatSessionId, sdkBackend, prompt, cwd, providerId, model, existingSessionId, historyMessages, images, toolIntegrationMode, defaultTargetSession, userSkillsContext, agentEnv, agentCommand });
   },
-  aiSdkAgentListModels: async (sdkBackend, cwd, providerId, chatSessionId, agentEnv) => {
-    return ipcRenderer.invoke("netcatty:ai:sdk-agent:list-models", { sdkBackend, cwd, providerId, chatSessionId, agentEnv });
+  aiSdkAgentListModels: async (sdkBackend, cwd, providerId, chatSessionId, agentEnv, agentCommand) => {
+    return ipcRenderer.invoke("netcatty:ai:sdk-agent:list-models", { sdkBackend, cwd, providerId, chatSessionId, agentEnv, agentCommand });
   },
   aiSdkAgentCancel: async (requestId, chatSessionId) => {
     return ipcRenderer.invoke("netcatty:ai:sdk-agent:cancel", { requestId, chatSessionId });

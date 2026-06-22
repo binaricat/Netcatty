@@ -50,6 +50,7 @@ interface SdkAgentBridge {
     defaultTargetSession?: DefaultTargetSessionHint,
     userSkillsContext?: string,
     agentEnv?: Record<string, string>,
+    agentCommand?: string,
   ): Promise<{ ok: boolean; error?: unknown }>;
   aiSdkAgentCancel(requestId: string, chatSessionId?: string): Promise<{ ok: boolean }>;
   onAiSdkAgentEvent(requestId: string, cb: (event: StreamEvent) => void): () => void;
@@ -240,6 +241,7 @@ export async function runSdkAgentTurn(
     defaultTargetSession,
     userSkillsContext,
     agentEnv,
+    config.command,
   ).then((result) => {
     if (result?.ok === false) {
       settle(() => {

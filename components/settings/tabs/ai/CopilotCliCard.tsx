@@ -1,5 +1,5 @@
 import React from "react";
-import { RefreshCw } from "lucide-react";
+import { RefreshCw, RotateCcw } from "lucide-react";
 import { useI18n } from "../../../../application/i18n/I18nProvider";
 import { Button } from "../../../ui/button";
 import { cn } from "../../../../lib/utils";
@@ -11,6 +11,7 @@ export const CopilotCliCard: React.FC<{
   customPath: string;
   onCustomPathChange: (path: string) => void;
   onRecheckPath: () => void;
+  onResetPath?: () => void;
   i18nPrefix?: "ai.copilot" | "ai.cursor";
   allowEmptyCheck?: boolean;
   showCustomPathInput?: boolean;
@@ -20,6 +21,7 @@ export const CopilotCliCard: React.FC<{
   customPath,
   onCustomPathChange,
   onRecheckPath,
+  onResetPath,
   i18nPrefix = "ai.copilot",
   allowEmptyCheck = false,
   showCustomPathInput = true,
@@ -50,7 +52,7 @@ export const CopilotCliCard: React.FC<{
         </div>
       </div>
 
-      {found ? (
+      {found && (
         <div className="flex items-center gap-2 text-xs">
           <span className="text-muted-foreground">{t(`${i18nPrefix}.path`)}</span>
           <span className="font-mono text-foreground truncate">{pathInfo.path}</span>
@@ -61,11 +63,15 @@ export const CopilotCliCard: React.FC<{
             </>
           )}
         </div>
-      ) : !isResolvingPath ? (
+      )}
+
+      {!isResolvingPath && (
         <div className="space-y-2">
-          <p className="text-xs text-amber-500">
-            {t(`${i18nPrefix}.notFoundHint`)}
-          </p>
+          {!found && (
+            <p className="text-xs text-amber-500">
+              {t(`${i18nPrefix}.notFoundHint`)}
+            </p>
+          )}
           <div className={cn("flex items-center gap-2", showCustomPathInput ? "" : "justify-end")}>
             {showCustomPathInput && (
               <input
@@ -80,9 +86,15 @@ export const CopilotCliCard: React.FC<{
               <RefreshCw size={14} className="mr-1.5" />
               {t(`${i18nPrefix}.check`)}
             </Button>
+            {showCustomPathInput && onResetPath && (
+              <Button variant="ghost" size="sm" onClick={onResetPath} disabled={!customPath.trim()}>
+                <RotateCcw size={14} className="mr-1.5" />
+                {t(`${i18nPrefix}.resetPath`)}
+              </Button>
+            )}
           </div>
         </div>
-      ) : null}
+      )}
     </div>
   );
 };

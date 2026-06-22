@@ -28,7 +28,7 @@ declare global {
       acpArgs?: string[];
     }>>;
     aiPrewarmShellEnv?(): Promise<{ ok: boolean; error?: string }>;
-    aiCodexGetIntegration?(options?: { refreshShellEnv?: boolean; validateChatGptAuth?: boolean }): Promise<{
+    aiCodexGetIntegration?(options?: { refreshShellEnv?: boolean; validateChatGptAuth?: boolean; codexPath?: string }): Promise<{
       state: 'connected_chatgpt' | 'connected_api_key' | 'connected_custom_config' | 'not_logged_in' | 'unknown';
       isConnected: boolean;
       rawOutput: string;
@@ -44,7 +44,7 @@ declare global {
         authHash: string | null;
       } | null;
     }>;
-    aiCodexStartLogin?(): Promise<{
+    aiCodexStartLogin?(options?: { codexPath?: string }): Promise<{
       ok: boolean;
       session?: {
         sessionId: string;
@@ -53,6 +53,7 @@ declare global {
         output: string;
         error: string | null;
         exitCode: number | null;
+        codexPath?: string | null;
       };
       error?: string;
     }>;
@@ -65,6 +66,7 @@ declare global {
         output: string;
         error: string | null;
         exitCode: number | null;
+        codexPath?: string | null;
       };
       error?: string;
     }>;
@@ -78,12 +80,13 @@ declare global {
         output: string;
         error: string | null;
         exitCode: number | null;
+        codexPath?: string | null;
       };
       error?: string;
     }>;
-    aiCodexLogout?(): Promise<{
+    aiCodexLogout?(options?: { codexPath?: string }): Promise<{
       ok: boolean;
-      state?: 'connected_chatgpt' | 'connected_api_key' | 'not_logged_in' | 'unknown';
+      state?: 'connected_chatgpt' | 'connected_api_key' | 'connected_custom_config' | 'not_logged_in' | 'unknown';
       isConnected?: boolean;
       rawOutput?: string;
       logoutOutput?: string;
@@ -144,8 +147,8 @@ declare global {
       context?: string;
       error?: string;
     }>;
-    aiSdkAgentStream?(requestId: string, chatSessionId: string, sdkBackend: string, prompt: string, cwd?: string, providerId?: string, model?: string, existingSessionId?: string, historyMessages?: Array<{ role: 'user' | 'assistant'; content: string }>, images?: Array<{ base64Data: string; mediaType: string; filename?: string; filePath?: string }>, toolIntegrationMode?: 'mcp' | 'skills', defaultTargetSession?: { sessionId: string; hostname: string; label: string; os?: string; username?: string; protocol?: string; shellType?: string; deviceType?: string; connected: boolean; source: 'scope-target' | 'only-connected-in-scope' }, userSkillsContext?: string, agentEnv?: Record<string, string>): Promise<{ ok: boolean; error?: string }>;
-    aiSdkAgentListModels?(sdkBackend: string, cwd?: string, providerId?: string, chatSessionId?: string, agentEnv?: Record<string, string>): Promise<{ ok: boolean; models?: Array<{ id: string; name: string; description?: string; thinkingLevels?: string[] }>; currentModelId?: string | null; error?: string }>;
+    aiSdkAgentStream?(requestId: string, chatSessionId: string, sdkBackend: string, prompt: string, cwd?: string, providerId?: string, model?: string, existingSessionId?: string, historyMessages?: Array<{ role: 'user' | 'assistant'; content: string }>, images?: Array<{ base64Data: string; mediaType: string; filename?: string; filePath?: string }>, toolIntegrationMode?: 'mcp' | 'skills', defaultTargetSession?: { sessionId: string; hostname: string; label: string; os?: string; username?: string; protocol?: string; shellType?: string; deviceType?: string; connected: boolean; source: 'scope-target' | 'only-connected-in-scope' }, userSkillsContext?: string, agentEnv?: Record<string, string>, agentCommand?: string): Promise<{ ok: boolean; error?: string }>;
+    aiSdkAgentListModels?(sdkBackend: string, cwd?: string, providerId?: string, chatSessionId?: string, agentEnv?: Record<string, string>, agentCommand?: string): Promise<{ ok: boolean; models?: Array<{ id: string; name: string; description?: string; thinkingLevels?: string[] }>; currentModelId?: string | null; error?: string }>;
     aiSdkAgentCancel?(requestId: string, chatSessionId?: string): Promise<{ ok: boolean; error?: string }>;
     aiSdkAgentCleanup?(chatSessionId: string): Promise<{ ok: boolean }>;
     onAiSdkAgentEvent?(requestId: string, cb: (event: Record<string, unknown>) => void): () => void;

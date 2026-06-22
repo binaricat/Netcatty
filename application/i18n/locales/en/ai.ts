@@ -71,6 +71,7 @@ export const enAiMessages: Messages = {
   'ai.codex.notFoundHint': 'Could not find codex in PATH. Install it or specify the executable path below.',
   'ai.codex.customPathPlaceholder': 'e.g. /usr/local/bin/codex',
   'ai.codex.check': 'Check',
+  'ai.codex.resetPath': 'Reset',
   'ai.codex.openLogin': 'Open Login',
   'ai.codex.logout': 'Logout',
   'ai.codex.connectChatGPT': 'Connect ChatGPT',
@@ -96,6 +97,7 @@ export const enAiMessages: Messages = {
   'ai.claude.envVars.placeholder': 'ANTHROPIC_BASE_URL=https://...\nANTHROPIC_MODEL=...',
   'ai.claude.envVars.hint': 'One KEY=VALUE per line, passed to the Claude agent. Stored locally in plaintext — for API keys / credentials, prefer the config directory above (a `claude` login).',
   'ai.claude.check': 'Check',
+  'ai.claude.resetPath': 'Reset',
 
   // AI GitHub Copilot CLI
   'ai.copilot.title': 'GitHub Copilot CLI',
@@ -107,6 +109,7 @@ export const enAiMessages: Messages = {
   'ai.copilot.notFoundHint': 'Could not find copilot in PATH. Install it or specify the executable path below.',
   'ai.copilot.customPathPlaceholder': 'e.g. /usr/local/bin/copilot',
   'ai.copilot.check': 'Check',
+  'ai.copilot.resetPath': 'Reset',
 
   // AI Cursor SDK
   'ai.cursor.title': 'Cursor',
@@ -146,6 +149,7 @@ export const enAiMessages: Messages = {
   'ai.codebuddy.notFoundHint': 'Could not find codebuddy in PATH. Install it or specify the executable path below.',
   'ai.codebuddy.customPathPlaceholder': 'e.g. /usr/local/bin/codebuddy',
   'ai.codebuddy.check': 'Check',
+  'ai.codebuddy.resetPath': 'Reset',
   'ai.codebuddy.configSection': 'Authentication & config (optional)',
   'ai.codebuddy.internetEnv': 'Internet Environment',
   'ai.codebuddy.internetEnv.default': 'Default (overseas)',

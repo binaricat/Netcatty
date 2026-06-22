@@ -71,6 +71,7 @@ export const zhCNAiMessages: Messages = {
   'ai.codex.notFoundHint': '在 PATH 中未找到 codex。请安装或在下方指定可执行文件路径。',
   'ai.codex.customPathPlaceholder': '例如 /usr/local/bin/codex',
   'ai.codex.check': '检查',
+  'ai.codex.resetPath': '重置',
   'ai.codex.openLogin': '打开登录',
   'ai.codex.logout': '退出登录',
   'ai.codex.connectChatGPT': '连接 ChatGPT',
@@ -96,6 +97,7 @@ export const zhCNAiMessages: Messages = {
   'ai.claude.envVars.placeholder': 'ANTHROPIC_BASE_URL=https://...\nANTHROPIC_MODEL=...',
   'ai.claude.envVars.hint': '每行一个 KEY=VALUE，传给 Claude agent。明文存在本地——API key／凭据建议用上面的「配置目录」（claude 登录），不要放这里。',
   'ai.claude.check': '检查',
+  'ai.claude.resetPath': '重置',
 
   // AI GitHub Copilot CLI
   'ai.copilot.title': 'GitHub Copilot CLI',
@@ -107,6 +109,7 @@ export const zhCNAiMessages: Messages = {
   'ai.copilot.notFoundHint': '在 PATH 中未找到 copilot。请安装或在下方指定可执行文件路径。',
   'ai.copilot.customPathPlaceholder': '例如 /usr/local/bin/copilot',
   'ai.copilot.check': '检查',
+  'ai.copilot.resetPath': '重置',
 
   // AI Cursor SDK
   'ai.cursor.title': 'Cursor',
@@ -146,6 +149,7 @@ export const zhCNAiMessages: Messages = {
   'ai.codebuddy.notFoundHint': '在 PATH 中未找到 codebuddy。请安装或在下方指定可执行文件路径。',
   'ai.codebuddy.customPathPlaceholder': '例如 /usr/local/bin/codebuddy',
   'ai.codebuddy.check': '检查',
+  'ai.codebuddy.resetPath': '重置',
   'ai.codebuddy.configSection': '认证与配置（可选）',
   'ai.codebuddy.internetEnv': '网络环境',
   'ai.codebuddy.internetEnv.default': '默认（海外）',

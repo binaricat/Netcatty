@@ -621,7 +621,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     if (!bridge?.aiCodexGetIntegration) return;
     let cancelled = false;
     void Promise.resolve(
-      bridge.aiCodexGetIntegration() as Promise<CodexIntegrationStatus>,
+      bridge.aiCodexGetIntegration({ codexPath: currentAgentConfig?.command }) as Promise<CodexIntegrationStatus>,
     ).then((info) => {
       if (cancelled) return;
       const hasCustom = info?.state === 'connected_custom_config';
@@ -634,7 +634,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
       }
     });
     return () => { cancelled = true; };
-  }, [isVisible, isCodexManagedAgent, currentAgentId]);
+  }, [isVisible, isCodexManagedAgent, currentAgentId, currentAgentConfig?.command]);
 
   const agentModelMapRef = useRef(agentModelMap);
   agentModelMapRef.current = agentModelMap;
@@ -655,6 +655,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
       undefined,
       `models_${currentAgentId}`,
       currentAgentConfig.env,
+      currentAgentConfig.command,
     ).then((result) => {
       if (cancelled || !result?.ok || !Array.isArray(result.models)) return;
       if (result.models.length === 0) {

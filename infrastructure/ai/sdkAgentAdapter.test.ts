@@ -114,10 +114,43 @@ test('runSdkAgentTurn forwards configured SDK agent environment', async () => {
     createCallbacks([]),
   );
 
-  assert.deepEqual(streamArgs.at(-1), {
+  assert.deepEqual(streamArgs.at(-2), {
     CLAUDE_CODE_EXECUTABLE: '/opt/homebrew/bin/claude',
   });
   assert.equal(streamArgs[2], 'codex');
+});
+
+test('runSdkAgentTurn forwards the configured agent command path', async () => {
+  let streamArgs: unknown[] = [];
+  let done: (() => void) | null = null;
+  const bridge: Record<string, (...args: unknown[]) => unknown> = {
+    aiSdkAgentStream: async (...args: unknown[]) => {
+      streamArgs = args;
+      queueMicrotask(() => done?.());
+      return { ok: true };
+    },
+    aiSdkAgentCancel: async () => ({ ok: true }),
+    onAiSdkAgentEvent: () => () => {},
+    onAiSdkAgentDone: (_requestId: unknown, cb: unknown) => {
+      done = cb as () => void;
+      return () => {};
+    },
+    onAiSdkAgentError: () => () => {},
+  };
+
+  await runSdkAgentTurn(
+    bridge,
+    'request-command',
+    'chat-command',
+    {
+      ...sdkConfig,
+      command: '/opt/homebrew/bin/codex',
+    },
+    'hello',
+    createCallbacks([]),
+  );
+
+  assert.equal(streamArgs.at(-1), '/opt/homebrew/bin/codex');
 });
 
 test('runSdkAgentTurn forwards Cursor API key as agent environment', async () => {
@@ -154,7 +187,7 @@ test('runSdkAgentTurn forwards Cursor API key as agent environment', async () =>
     createCallbacks([]),
   );
 
-  assert.deepEqual(streamArgs.at(-1), {
+  assert.deepEqual(streamArgs.at(-2), {
     CURSOR_API_KEY: 'cur-test-key',
   });
   assert.equal(streamArgs[2], 'cursor');

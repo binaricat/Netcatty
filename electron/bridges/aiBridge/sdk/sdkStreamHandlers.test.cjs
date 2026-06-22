@@ -1,6 +1,13 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { buildSdkTurnPrompt, resolveBackendKey, resolveSdkBackendBinPath } = require("./sdkStreamHandlers.cjs");
+const {
+  buildSdkTurnPrompt,
+  buildSdkModelCacheKey,
+  buildSdkSessionKey,
+  resolveSdkResumeSessionId,
+  resolveBackendKey,
+  resolveSdkBackendBinPath,
+} = require("./sdkStreamHandlers.cjs");
 
 test("resolveBackendKey maps backend command/value to registry key", () => {
   assert.equal(resolveBackendKey("claude"), "claude");
@@ -13,6 +20,40 @@ test("resolveBackendKey returns null for unknown", () => {
   assert.equal(resolveBackendKey("claude-agent-acp"), null);
   assert.equal(resolveBackendKey(""), null);
   assert.equal(resolveBackendKey(undefined), null);
+});
+
+test("SDK session keys include backend and resolved CLI path", () => {
+  assert.notEqual(
+    buildSdkSessionKey("chat-1", "codex", "/usr/local/bin/codex"),
+    buildSdkSessionKey("chat-1", "codex", "/opt/homebrew/bin/codex"),
+  );
+  assert.notEqual(
+    buildSdkSessionKey("chat-1", "codex", "/usr/local/bin/codex"),
+    buildSdkSessionKey("chat-1", "claude", "/usr/local/bin/codex"),
+  );
+});
+
+test("SDK model cache keys include resolved CLI path", () => {
+  assert.notEqual(
+    buildSdkModelCacheKey("claude", "/usr/local/bin/claude"),
+    buildSdkModelCacheKey("claude", "/opt/homebrew/bin/claude"),
+  );
+});
+
+test("SDK resume only uses the current backend/path session key", () => {
+  const sessions = new Map([
+    [buildSdkSessionKey("chat-1", "codex", "/old/codex"), "old-session"],
+  ]);
+
+  assert.equal(
+    resolveSdkResumeSessionId(sessions, buildSdkSessionKey("chat-1", "codex", "/new/codex")),
+    undefined,
+  );
+  sessions.set(buildSdkSessionKey("chat-1", "codex", "/new/codex"), "new-session");
+  assert.equal(
+    resolveSdkResumeSessionId(sessions, buildSdkSessionKey("chat-1", "codex", "/new/codex")),
+    "new-session",
+  );
 });
 
 test("buildSdkTurnPrompt replays history only when requested", () => {
@@ -72,6 +113,75 @@ test("resolveSdkBackendBinPath prefers configured CodeBuddy path", () => {
     realpath: () => "/opt/codebuddy/bin/codebuddy",
   });
   assert.equal(out, "/opt/codebuddy/bin/codebuddy");
+});
+
+test("resolveSdkBackendBinPath prefers the renderer-configured command path", () => {
+  const out = resolveSdkBackendBinPath({
+    backendKey: "codex",
+    configuredCommand: "/opt/homebrew/bin/codex",
+    shellEnv: { PATH: "/usr/bin" },
+    env: {},
+    resolveCliFromPath: () => "/usr/bin/codex",
+    normalizeCliPathForPlatform: (value) => value,
+    resolveSdkBinPath: () => "/usr/bin/codex",
+    realpath: () => "/opt/homebrew/bin/codex",
+  });
+  assert.equal(out, "/opt/homebrew/bin/codex");
+});
+
+test("resolveSdkBackendBinPath rejects invalid renderer-configured command paths", () => {
+  assert.throws(
+    () => resolveSdkBackendBinPath({
+      backendKey: "codex",
+      configuredCommand: "/missing/codex",
+      shellEnv: { PATH: "/usr/bin" },
+      env: {},
+      resolveCliFromPath: () => "/usr/bin/codex",
+      normalizeCliPathForPlatform: () => null,
+      resolveSdkBinPath: () => "/usr/bin/codex",
+    }),
+    /Agent CLI path not found: \/missing\/codex/,
+  );
+});
+
+test("resolveSdkBackendBinPath applies Codex SDK normalization to configured command paths", () => {
+  const out = resolveSdkBackendBinPath({
+    backendKey: "codex",
+    configuredCommand: "C:\\Users\\me\\AppData\\Roaming\\npm\\codex.cmd",
+    shellEnv: { Path: "C:\\Windows\\System32" },
+    env: {},
+    resolveCliFromPath: () => "C:\\Windows\\System32\\codex.cmd",
+    normalizeCliPathForPlatform: (value) => value,
+    resolveCodexExecutableForSdk: (p) =>
+      p.endsWith("codex.cmd")
+        ? "C:\\Users\\me\\AppData\\Roaming\\npm\\node_modules\\@openai\\codex-win32-x64\\vendor\\x86_64-pc-windows-msvc\\bin\\codex.exe"
+        : p,
+    realpath: (p) => p,
+  });
+  assert.equal(
+    out,
+    "C:\\Users\\me\\AppData\\Roaming\\npm\\node_modules\\@openai\\codex-win32-x64\\vendor\\x86_64-pc-windows-msvc\\bin\\codex.exe",
+  );
+});
+
+test("resolveSdkBackendBinPath applies CodeBuddy SDK normalization to configured command paths", () => {
+  const out = resolveSdkBackendBinPath({
+    backendKey: "codebuddy",
+    configuredCommand: "C:\\Users\\me\\AppData\\Roaming\\npm\\codebuddy.cmd",
+    shellEnv: { Path: "C:\\Windows\\System32" },
+    env: {},
+    resolveCliFromPath: () => "C:\\Windows\\System32\\codebuddy.cmd",
+    normalizeCliPathForPlatform: (value) => value,
+    resolveCodebuddyExecutableForSdk: (p) =>
+      p.endsWith("codebuddy.cmd")
+        ? "C:\\Users\\me\\AppData\\Roaming\\npm\\node_modules\\@tencent-ai\\codebuddy-code\\bin\\codebuddy"
+        : p,
+    realpath: (p) => p,
+  });
+  assert.equal(
+    out,
+    "C:\\Users\\me\\AppData\\Roaming\\npm\\node_modules\\@tencent-ai\\codebuddy-code\\bin\\codebuddy",
+  );
 });
 
 test("resolveSdkBackendBinPath falls back to PATH when CodeBuddy path is invalid", () => {
