@@ -512,6 +512,29 @@ export async function collectCloudSyncableSettings(): Promise<SyncPayload['setti
   return Object.keys(nextSettings).length > 0 ? nextSettings : undefined;
 }
 
+function collectLocalBackupSettings(): SyncPayload['settings'] {
+  const settings = collectSyncableSettings();
+
+  const providers = readArraySetting(STORAGE_KEY_AI_PROVIDERS);
+  const webSearchConfig = readRecordSetting(STORAGE_KEY_AI_WEB_SEARCH);
+  if (!providers && !webSearchConfig) return settings;
+
+  const nextSettings: SyncPayload['settings'] = settings ? { ...settings } : {};
+  const ai: NonNullable<SyncPayload['settings']>['ai'] = {
+    ...(settings?.ai ?? {}),
+  };
+
+  if (providers) {
+    ai.providers = providers;
+  }
+  if (webSearchConfig) {
+    ai.webSearchConfig = webSearchConfig;
+  }
+
+  nextSettings.ai = ai;
+  return Object.keys(nextSettings).length > 0 ? nextSettings : undefined;
+}
+
 /**
  * Apply synced settings to localStorage. Merges terminal settings
  * to preserve platform-specific fields.
@@ -811,6 +834,7 @@ export function buildLocalVaultPayload(
 ): SyncPayload {
   return {
     ...buildSyncPayload(vault, portForwardingRules),
+    settings: collectLocalBackupSettings(),
     knownHosts: vault.knownHosts,
   };
 }

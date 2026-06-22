@@ -691,6 +691,26 @@ test("buildLocalVaultPayload preserves known hosts for local backups", () => {
   assert.deepEqual(payload.knownHosts, [knownHost("kh-local")]);
 });
 
+test("buildLocalVaultPayload preserves local AI API keys for protective backups", () => {
+  localStorage.setItem(storageKeys.STORAGE_KEY_AI_PROVIDERS, JSON.stringify([{
+    id: "openai-main",
+    providerId: "openai",
+    name: "OpenAI",
+    apiKey: "enc:v1:djEwPROVIDER",
+    enabled: true,
+  }]));
+  localStorage.setItem(storageKeys.STORAGE_KEY_AI_WEB_SEARCH, JSON.stringify({
+    providerId: "tavily",
+    apiKey: "enc:v1:djEwWEB",
+    enabled: true,
+  }));
+
+  const payload = buildLocalVaultPayload(vault([]));
+
+  assert.equal(payload.settings?.ai?.providers?.[0]?.apiKey, "enc:v1:djEwPROVIDER");
+  assert.equal(payload.settings?.ai?.webSearchConfig?.apiKey, "enc:v1:djEwWEB");
+});
+
 test("applySyncPayload ignores legacy cloud known hosts", async () => {
   let imported: Record<string, unknown> | null = null;
   const proxyProfiles = [
