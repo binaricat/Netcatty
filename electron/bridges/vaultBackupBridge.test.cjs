@@ -107,10 +107,38 @@ test("vault backups round-trip and dedupe identical payloads", async () => {
     const listed = await service.listBackups();
     assert.equal(listed.length, 1);
     assert.equal(listed[0].preview.hostCount, 1);
+    assert.equal(listed[0].preview.noteCount, 0);
 
     const restored = await service.readBackup({ id: first.backup.id });
     assert.equal(restored.backup.id, first.backup.id);
     assert.equal(restored.payload.hosts[0].label, "prod");
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("createBackup preview includes notes", async () => {
+  const rootDir = createTempRoot();
+  const service = createService(rootDir);
+
+  try {
+    const ok = await service.createBackup({
+      payload: samplePayload({
+        notes: [
+          {
+            id: "n1",
+            title: "Runbook",
+            content: "# Deploy",
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          },
+        ],
+      }),
+      reason: "before_restore",
+    });
+
+    assert.equal(ok.created, true);
+    assert.equal(ok.backup.preview.noteCount, 1);
   } finally {
     fs.rmSync(rootDir, { recursive: true, force: true });
   }

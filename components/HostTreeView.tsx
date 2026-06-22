@@ -1,4 +1,4 @@
-import { CheckSquare, ChevronRight, Edit2, FileSymlink, Folder, FolderOpen, Server, Square, Expand, Minimize2 } from 'lucide-react';
+import { CheckSquare, Edit2, FileSymlink, Server, Square, Expand, Minimize2 } from 'lucide-react';
 import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useI18n } from '../application/i18n/I18nProvider';
 import {
@@ -11,15 +11,14 @@ import { applyGroupDefaults, resolveGroupDefaults } from '../domain/groupConfig'
 import { resolveTelnetPort, resolveTelnetUsername, sanitizeHost } from '../domain/host';
 import { sortByVaultOrder } from '../domain/vaultOrder';
 import { STORAGE_KEY_VAULT_HOSTS_TREE_EXPANDED } from '../infrastructure/config/storageKeys';
-import { cn } from '../lib/utils';
 import { GroupConfig, GroupNode, Host } from '../types';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from './ui/collapsible';
 import { HostTreeGroupContextMenuContent, HostTreeHostContextMenuContent } from './host/HostTreeContextMenus';
-import { HostTreeGroupInlineRenameInput } from './host/HostTreeGroupInlineRenameInput';
 import { ContextMenu, ContextMenuTrigger } from './ui/context-menu';
 import { DistroAvatar } from './DistroAvatar';
 import { HostNotesIndicator } from './host/HostNotesIndicator';
 import { Button } from './ui/button';
+import { VaultTreeGroupRow, VaultTreeItemRow } from './vault/VaultTreeRow';
 
 const getTreeGroupDropIntent = (
   element: HTMLElement,
@@ -144,7 +143,6 @@ const TreeNode: React.FC<TreeNodeProps> = ({
     return () => cancelAnimationFrame(frame);
   }, [inlineEdit?.groupPath, inlineEdit?.shouldScrollIntoView, isInlineEditing]);
   const hasChildren = node.children && Object.keys(node.children).length > 0;
-  const paddingLeft = `${depth * 20 + 12}px`;
   const isManaged = managedGroupPaths?.has(node.path) ?? false;
   const hostsCountInNode = node.totalHostCount ?? node.hosts.length;
 
@@ -216,13 +214,18 @@ const TreeNode: React.FC<TreeNodeProps> = ({
         <ContextMenu>
           <ContextMenuTrigger>
             <CollapsibleTrigger asChild>
-              <div
-                ref={groupRowRef}
-                className={cn(
-                  "vault-drop-indicator-row flex items-center py-2 pr-3 text-sm font-medium cursor-pointer transition-colors select-none group hover:bg-secondary/60 rounded-lg",
-                  getDropTargetClasses?.(node.path),
-                )}
-                style={{ paddingLeft }}
+              <VaultTreeGroupRow
+                rowRef={groupRowRef}
+                name={node.name}
+                depth={depth}
+                expanded={isExpanded}
+                hasChildren={hasChildren || node.hosts.length > 0}
+                count={hostsCountInNode}
+                editing={isInlineEditing}
+                editingInitialName={inlineEdit?.initialName}
+                onRenameCommit={commitRename}
+                onRenameCancel={cancelRename}
+                className={getDropTargetClasses?.(node.path)}
                 data-section="host-tree-row"
                 data-row-type="group"
                 data-group-path={node.path}
@@ -261,52 +264,24 @@ const TreeNode: React.FC<TreeNodeProps> = ({
                     moveGroup(groupPath, node.path);
                   }
                 }}
-              >
-                <div className="mr-2 flex-shrink-0 w-4 h-4 flex items-center justify-center">
-                  {(hasChildren || node.hosts.length > 0) && (
-                    <div className={cn("transition-transform duration-200", isExpanded ? "rotate-90" : "")}>
-                      <ChevronRight size={14} />
-                    </div>
-                  )}
-                </div>
-                <div className="mr-3 flex h-8 w-8 shrink-0 items-center justify-center text-primary transition-colors dark:text-primary">
-                  {isExpanded ? (
-                    <FolderOpen size={21} strokeWidth={2.35} />
-                  ) : (
-                    <Folder size={21} strokeWidth={2.35} />
-                  )}
-                </div>
-                {isInlineEditing && commitRename && cancelRename ? (
-                  <HostTreeGroupInlineRenameInput
-                    initialName={inlineEdit.initialName}
-                    onCommit={commitRename}
-                    onCancel={cancelRename}
-                    className="flex-1 font-semibold"
-                  />
-                ) : (
-                  <span className="truncate flex-1 font-semibold">{node.name}</span>
-                )}
-                {isManaged && (
-                  <span className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-primary/15 text-primary shrink-0 mr-1.5">
+                meta={isManaged && (
+                  <span className="mr-1.5 inline-flex shrink-0 items-center gap-1 rounded bg-primary/15 px-1.5 py-0.5 text-[10px] font-medium text-primary">
                     <FileSymlink size={10} />
                     Managed
                   </span>
                 )}
-                {(node.hosts.length > 0 || hasChildren) && (
-                  <span className="text-xs opacity-70 bg-background/50 px-2 py-0.5 rounded-full border border-border">
-                    {hostsCountInNode}
-                  </span>
+                actions={(
+                  <button
+                    className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md opacity-0 transition-colors hover:bg-secondary/80 group-hover:opacity-100"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onEditGroup(node.path);
+                    }}
+                  >
+                    <Edit2 size={13} />
+                  </button>
                 )}
-                <button
-                  className="h-7 w-7 flex items-center justify-center rounded-md hover:bg-secondary/80 transition-colors opacity-0 group-hover:opacity-100 shrink-0"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onEditGroup(node.path);
-                  }}
-                >
-                  <Edit2 size={13} />
-                </button>
-              </div>
+              />
             </CollapsibleTrigger>
           </ContextMenuTrigger>
           <HostTreeGroupContextMenuContent
@@ -429,7 +404,6 @@ const HostTreeItem: React.FC<HostTreeItemProps> = ({
   toggleHostSelection,
   groupConfigs,
 }) => {
-  const paddingLeft = `${depth * 20 + 12}px`;
   const safeHost = sanitizeHost(host);
   const tags = host.tags || [];
   const displayDetails = useMemo(
@@ -444,12 +418,10 @@ const HostTreeItem: React.FC<HostTreeItemProps> = ({
   return (
     <ContextMenu>
       <ContextMenuTrigger>
-        <div
-          className={cn(
-            "vault-drop-indicator-row flex items-center py-2 pr-3 text-sm cursor-pointer transition-colors select-none group hover:bg-secondary/40 rounded-lg",
-            isSelected ? "bg-primary/10" : "",
-          )}
-          style={{ paddingLeft }}
+        <VaultTreeItemRow
+          label={host.label}
+          depth={depth}
+          selected={Boolean(isSelected)}
           data-section="host-tree-row"
           data-row-type="host"
           data-host-id={host.id}
@@ -462,8 +434,7 @@ const HostTreeItem: React.FC<HostTreeItemProps> = ({
               onConnect(safeHost);
             }
           }}
-        >
-          {isMultiSelectMode && (
+          leading={isMultiSelectMode ? (
             <div className="mr-2 flex-shrink-0" onClick={(e) => {
               e.stopPropagation();
               toggleHostSelection?.(host.id);
@@ -474,43 +445,50 @@ const HostTreeItem: React.FC<HostTreeItemProps> = ({
                 <Square size={18} className="text-muted-foreground" />
               )}
             </div>
+          ) : (
+            <div className="mr-2 h-4 w-4 flex-shrink-0" />
           )}
-          {!isMultiSelectMode && <div className="mr-2 flex-shrink-0 w-4 h-4" />}
-          <div className="mr-3 flex-shrink-0">
+          icon={(
+            <div className="mr-3 flex-shrink-0">
             <DistroAvatar host={host} fallback={(host.os || "L")[0].toUpperCase()} size="tree" />
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="font-medium truncate flex items-center gap-1.5">
-              <span className="truncate">{host.label}</span>
-              <HostNotesIndicator notes={host.notes} />
             </div>
-            <div className="text-xs text-muted-foreground truncate">
-              {displayUsername}@{host.hostname}:{displayPort}
+          )}
+          content={(
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-1.5 truncate font-medium">
+                <span className="truncate">{host.label}</span>
+                <HostNotesIndicator notes={host.notes} />
+              </div>
+              <div className="truncate text-xs text-muted-foreground">
+                {displayUsername}@{host.hostname}:{displayPort}
+              </div>
             </div>
-          </div>
-          <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-	            {displayProtocol && displayProtocol !== 'ssh' && (
-	              <span className="text-xs px-1.5 py-0.5 bg-primary/10 text-primary rounded">
-	                {displayProtocol.toUpperCase()}
-	              </span>
-	            )}
-            {tags.length > 0 && (
-              <span className="text-xs opacity-60">
-                {tags.slice(0, 2).join(', ')}
-                {tags.length > 2 && '...'}
-              </span>
-            )}
-            <button
-              className="h-7 w-7 flex items-center justify-center rounded-md hover:bg-secondary/80 transition-colors"
-              onClick={(e) => {
-                e.stopPropagation();
-                onEditHost(host);
-              }}
-            >
-              <Edit2 size={13} />
-            </button>
-          </div>
-        </div>
+          )}
+          actions={(
+            <div className="flex items-center gap-2 opacity-0 transition-opacity group-hover:opacity-100">
+              {displayProtocol && displayProtocol !== 'ssh' && (
+                <span className="rounded bg-primary/10 px-1.5 py-0.5 text-xs text-primary">
+                  {displayProtocol.toUpperCase()}
+                </span>
+              )}
+              {tags.length > 0 && (
+                <span className="text-xs opacity-60">
+                  {tags.slice(0, 2).join(', ')}
+                  {tags.length > 2 && '...'}
+                </span>
+              )}
+              <button
+                className="flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-secondary/80"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onEditHost(host);
+                }}
+              >
+                <Edit2 size={13} />
+              </button>
+            </div>
+          )}
+        />
       </ContextMenuTrigger>
       <HostTreeHostContextMenuContent
         host={host}

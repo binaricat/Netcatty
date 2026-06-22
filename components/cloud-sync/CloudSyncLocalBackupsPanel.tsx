@@ -320,6 +320,7 @@ export const LocalBackupsPanel: React.FC<LocalBackupsPanelProps> = ({
                                             hosts: String(backup.preview.hostCount),
                                             keys: String(backup.preview.keyCount),
                                             snippets: String(backup.preview.snippetCount),
+                                            notes: String(backup.preview.noteCount ?? 0),
                                         })}
                                     </div>
                                 </div>
@@ -406,6 +407,7 @@ export const LocalBackupsPanel: React.FC<LocalBackupsPanelProps> = ({
                                     hosts: String(pendingRestoreBackup.preview.hostCount),
                                     keys: String(pendingRestoreBackup.preview.keyCount),
                                     snippets: String(pendingRestoreBackup.preview.snippetCount),
+                                    notes: String(pendingRestoreBackup.preview.noteCount ?? 0),
                                 })}
                             </div>
                         </div>

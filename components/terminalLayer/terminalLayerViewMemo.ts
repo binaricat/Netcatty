@@ -120,6 +120,8 @@ function sidePanelCtxKeyEqual(prev: Ctx, next: Ctx, key: string): boolean {
 const SIDE_PANEL_CTX_KEYS = [
   'mountedSftpTabIds',
   'mountedAiTabIds',
+  'notesMountedTabIds',
+  'notesOpenNoteByTab',
   'scriptsMountedTabIds',
   'systemMountedTabIds',
   'themeMountedTabIds',
@@ -198,6 +200,9 @@ const SIDE_PANEL_CTX_KEYS = [
   'handleOpenScripts',
   'handleOpenTheme',
   'handleOpenAI',
+  'handleOpenNotes',
+  'handleBackFromNotes',
+  'handleOpenHostFromNotes',
   'handleOpenSystem',
   'handleCloseSidePanel',
   'setSidePanelPosition',
@@ -205,6 +210,11 @@ const SIDE_PANEL_CTX_KEYS = [
   'handlePendingUploadHandled',
   'validAIScopeTargetIds',
   'AISidePanelStateRoot',
+  'NotesManager',
+  'notes',
+  'noteGroups',
+  'updateNotes',
+  'updateNoteGroups',
   't',
 ] as const;
 

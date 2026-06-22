@@ -12,7 +12,7 @@ import { KeyBinding, TerminalSettings } from '../../domain/models';
 import { STORAGE_KEY_AI_SHOW_TERMINAL_SELECTION_ACTION } from '../../infrastructure/config/storageKeys';
 import { cn } from '../../lib/utils';
 import type { DropEntry } from '../../lib/sftpFileUtils';
-import type { GroupConfig, Host, Identity, KnownHost, ProxyProfile, SSHKey, Snippet, TerminalSession, TerminalTheme, Workspace } from '../../types';
+import type { GroupConfig, Host, Identity, KnownHost, ProxyProfile, SSHKey, Snippet, TerminalSession, TerminalTheme, VaultNote, Workspace } from '../../types';
 import type { ExecutorContext } from '../../infrastructure/ai/cattyAgent/executor';
 import { AIChatSidePanel } from '../AIChatSidePanel';
 import Terminal from '../Terminal';
@@ -23,7 +23,7 @@ import {
   parseTerminalPaneRenderSnapshot,
 } from '../terminalPaneVisibility';
 
-export type SidePanelTab = 'sftp' | 'scripts' | 'history' | 'theme' | 'ai' | 'system';
+export type SidePanelTab = 'sftp' | 'scripts' | 'history' | 'theme' | 'ai' | 'system' | 'notes';
 
 export type WorkspaceRect = { x: number; y: number; w: number; h: number };
 
@@ -466,6 +466,9 @@ export interface TerminalLayerProps {
   identities: Identity[];
   snippets: Snippet[];
   snippetPackages: string[];
+  notes: VaultNote[];
+  noteGroups: string[];
+  openNoteRequest?: { tabId: string; noteId: string; requestId: number } | null;
   sessions: TerminalSession[];
   workspaces: Workspace[];
   knownHosts?: KnownHost[];
@@ -513,7 +516,7 @@ export interface TerminalLayerProps {
     tabInsertionTarget?: { tabId: string; position: 'before' | 'after'; additionalTabIds?: readonly string[] },
   ) => void;
   onSplitSession?: (sessionId: string, direction: SplitDirection) => void;
-  onConnectToHost: (host: Host) => void;
+  onConnectToHost: (host: Host) => string | void;
   onCreateLocalTerminal?: () => void;
   // Broadcast mode
   isBroadcastEnabled?: (workspaceId: string) => boolean;
@@ -522,6 +525,8 @@ export interface TerminalLayerProps {
   updateHosts: (hosts: Host[]) => void;
   updateSnippets?: (snippets: Snippet[]) => void;
   updateSnippetPackages?: (packages: string[]) => void;
+  updateNotes: (notes: VaultNote[]) => void;
+  updateNoteGroups: (groups: string[]) => void;
   sftpDefaultViewMode: 'list' | 'tree';
   sftpDoubleClickBehavior: 'open' | 'transfer';
   sftpAutoSync: boolean;

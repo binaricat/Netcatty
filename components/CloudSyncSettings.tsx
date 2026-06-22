@@ -138,7 +138,7 @@ const SyncDashboard: React.FC<SyncDashboardProps> = ({
     const [historyPreview, setHistoryPreview] = useState<{
       sha: string;
       payload: SyncPayload;
-      preview: { hostCount: number; keyCount: number; snippetCount: number; identityCount: number; portForwardingRuleCount: number };
+      preview: { hostCount: number; keyCount: number; snippetCount: number; noteCount: number; identityCount: number; portForwardingRuleCount: number };
       deviceName?: string;
       version?: number;
     } | null>(null);

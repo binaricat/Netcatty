@@ -49,6 +49,8 @@ interface AutoSyncConfig {
   snippets: SyncPayload['snippets'];
   customGroups: SyncPayload['customGroups'];
   snippetPackages?: SyncPayload['snippetPackages'];
+  notes?: SyncPayload['notes'];
+  noteGroups?: SyncPayload['noteGroups'];
   portForwardingRules?: SyncPayload['portForwardingRules'];
   groupConfigs?: SyncPayload['groupConfigs'];
   /** Opaque token that changes whenever a synced setting changes. */
@@ -140,6 +142,7 @@ export const useAutoSync = (config: AutoSyncConfig) => {
     keyCount: number;
     proxyProfileCount: number;
     snippetCount: number;
+    noteCount: number;
   } | null>(null);
   const emptyVaultResolveRef = useRef<((action: 'restore' | 'keep-empty') => void) | null>(null);
 
@@ -183,6 +186,8 @@ export const useAutoSync = (config: AutoSyncConfig) => {
       snippets: config.snippets,
       customGroups: config.customGroups,
       snippetPackages: config.snippetPackages,
+      notes: config.notes,
+      noteGroups: config.noteGroups,
       portForwardingRules: getEffectivePortForwardingRulesForSync(config.portForwardingRules),
       groupConfigs: config.groupConfigs,
     };
@@ -194,6 +199,8 @@ export const useAutoSync = (config: AutoSyncConfig) => {
     config.snippets,
     config.customGroups,
     config.snippetPackages,
+    config.notes,
+    config.noteGroups,
     config.portForwardingRules,
     config.groupConfigs,
   ]);
@@ -508,6 +515,7 @@ export const useAutoSync = (config: AutoSyncConfig) => {
             keyCount: remotePayload.keys?.length ?? 0,
             proxyProfileCount: remotePayload.proxyProfiles?.length ?? 0,
             snippetCount: remotePayload.snippets?.length ?? 0,
+            noteCount: remotePayload.notes?.length ?? 0,
           });
         });
         setEmptyVaultConflict(null);

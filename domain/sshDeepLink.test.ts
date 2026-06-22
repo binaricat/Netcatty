@@ -4,6 +4,8 @@ import type { Host } from "./models";
 import {
   buildSshDeepLinkConnectionHost,
   buildSshDeepLinkHostDraft,
+  buildSshDeepLinkOpenHost,
+  buildSshNoteLinkOpenHost,
   findSshDeepLinkHost,
   parseSshDeepLink,
   shouldHandleSshDeepLink,
@@ -122,4 +124,68 @@ test("buildSshDeepLinkHostDraft prepares an editable new ssh host", () => {
     protocol: "ssh",
     createdAt: 123,
   });
+});
+
+test("buildSshDeepLinkOpenHost falls back to a draft host when no saved host matches", () => {
+  const openHost = buildSshDeepLinkOpenHost(
+    [],
+    parseSshDeepLink("ssh://root@missing.example.com:2200")!,
+    { id: "draft-id", now: 456 },
+  );
+
+  assert.equal(openHost.id, "draft-id");
+  assert.equal(openHost.hostname, "missing.example.com");
+  assert.equal(openHost.username, "root");
+  assert.equal(openHost.port, 2200);
+  assert.equal(openHost.protocol, "ssh");
+  assert.equal(openHost.moshEnabled, false);
+  assert.equal(openHost.etEnabled, false);
+});
+
+test("buildSshNoteLinkOpenHost opens an existing ssh link host", () => {
+  const openHost = buildSshNoteLinkOpenHost(
+    [host({ id: "match", hostname: "10.2.0.32", username: "root" })],
+    "ssh://10.2.0.32",
+    "10.2.0.32",
+    { id: "draft-id", now: 456 },
+  );
+
+  assert.equal(openHost?.id, "match");
+  assert.equal(openHost?.protocol, "ssh");
+  assert.equal(openHost?.moshEnabled, false);
+  assert.equal(openHost?.etEnabled, false);
+});
+
+test("buildSshNoteLinkOpenHost treats a bare host link as an existing ssh host reference", () => {
+  const openHost = buildSshNoteLinkOpenHost(
+    [host({ id: "match", hostname: "10.2.0.32", username: "root" })],
+    "10.2.0.32",
+    "10.2.0.32",
+    { id: "draft-id", now: 456 },
+  );
+
+  assert.equal(openHost?.id, "match");
+  assert.equal(openHost?.protocol, "ssh");
+});
+
+test("buildSshNoteLinkOpenHost does not treat sanitized editor links as hosts", () => {
+  const openHost = buildSshNoteLinkOpenHost(
+    [host({ id: "match", hostname: "10.2.0.32", username: "root" })],
+    "about:blank",
+    "10.2.0.32",
+    { id: "draft-id", now: 456 },
+  );
+
+  assert.equal(openHost, null);
+});
+
+test("buildSshNoteLinkOpenHost ignores unrelated external links", () => {
+  const openHost = buildSshNoteLinkOpenHost(
+    [host({ id: "match", hostname: "10.2.0.32", username: "root" })],
+    "https://example.com",
+    "Example",
+    { id: "draft-id", now: 456 },
+  );
+
+  assert.equal(openHost, null);
 });

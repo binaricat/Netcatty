@@ -1,6 +1,26 @@
 import type { Messages } from '../types';
 
 export const enVaultMessages: Messages = {
+  // Notes
+  'notes.search.placeholder': 'Search notes, hosts, tags...',
+  'notes.action.newNote': 'New Note',
+  'notes.action.newGroup': 'New Folder',
+  'notes.group.prompt': 'Folder path',
+  'notes.group.all': 'Notebook',
+  'notes.group.ungrouped': 'Ungrouped',
+  'notes.section.notebooks': 'Notebook',
+  'notes.section.notes': 'Notes',
+  'notes.mode.edit': 'Edit',
+  'notes.mode.split': 'Split',
+  'notes.mode.preview': 'Preview',
+  'notes.title.placeholder': 'Note title',
+  'notes.editor.placeholder': 'Write Markdown notes here...',
+  'notes.preview.empty': 'Nothing to preview yet.',
+  'notes.empty.title': 'No notes yet',
+  'notes.empty.desc': 'Create Markdown notes for runbooks, reminders, and server handoff details.',
+  'notes.empty.group': 'No notes in this notebook.',
+  'notes.search.noResults': 'No notes found.',
+
   // Vault import
   'vault.import.title': 'Add data to your vault',
   'vault.import.desc':

@@ -321,7 +321,7 @@ export const zhCNCoreMessages: Messages = {
   'sync.autoSync.emptyVaultConflict.restoreDesc': '推荐 — 从云端备份恢复主机、密钥和代码片段',
   'sync.autoSync.emptyVaultConflict.keepEmpty': '保持为空',
   'sync.autoSync.emptyVaultConflict.keepEmptyDesc': '从头开始，使用空的主机库',
-  'sync.autoSync.emptyVaultConflict.cloudSummary': '{hosts} 台主机，{keys} 个密钥，{snippets} 个代码片段，{proxyProfiles} 个代理',
+  'sync.autoSync.emptyVaultConflict.cloudSummary': '{hosts} 台主机，{keys} 个密钥，{snippets} 个代码片段，{notes} 条笔记，{proxyProfiles} 个代理',
   'sync.autoSync.emptyVaultManual': '无法同步：本地 vault 为空。请先从本地备份恢复，或在同步面板里使用"强制推送"。',
 
   'sync.blocked.title': '同步已暂停',
@@ -358,6 +358,7 @@ export const zhCNCoreMessages: Messages = {
   'vault.nav.proxies': '代理',
   'vault.nav.portForwarding': '端口转发',
   'vault.nav.snippets': '代码片段',
+  'vault.nav.notes': '笔记',
   'vault.nav.knownHosts': '已知主机',
   'vault.nav.logs': '日志',
 

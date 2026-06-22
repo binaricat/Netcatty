@@ -1,6 +1,26 @@
 import type { Messages } from '../types';
 
 export const ruVaultMessages: Messages = {
+  // Notes
+  'notes.search.placeholder': 'Поиск заметок, хостов, тегов...',
+  'notes.action.newNote': 'Новая заметка',
+  'notes.action.newGroup': 'Новая папка',
+  'notes.group.prompt': 'Путь папки',
+  'notes.group.all': 'Блокнот',
+  'notes.group.ungrouped': 'Без группы',
+  'notes.section.notebooks': 'Блокнот',
+  'notes.section.notes': 'Заметки',
+  'notes.mode.edit': 'Правка',
+  'notes.mode.split': 'Разделить',
+  'notes.mode.preview': 'Просмотр',
+  'notes.title.placeholder': 'Заголовок заметки',
+  'notes.editor.placeholder': 'Пишите Markdown-заметки здесь...',
+  'notes.preview.empty': 'Пока нечего просматривать.',
+  'notes.empty.title': 'Заметок пока нет',
+  'notes.empty.desc': 'Создавайте Markdown-заметки для инструкций, напоминаний и передачи серверов.',
+  'notes.empty.group': 'В этом блокноте пока нет заметок.',
+  'notes.search.noResults': 'Заметки не найдены.',
+
   // Vault hosts header/actions
   'vault.hosts.search.placeholder': 'Найти хост или ssh user@hostname / ssh -p 2222 user@hostname...',
   'vault.hosts.connect': 'Подключиться',

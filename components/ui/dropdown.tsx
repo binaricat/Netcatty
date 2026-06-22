@@ -107,6 +107,8 @@ interface DropdownContentProps {
   side?: "top" | "bottom";
   /** If true, align to the trigger's parent element instead of the trigger itself */
   alignToParent?: boolean;
+  onMouseEnter?: React.MouseEventHandler<HTMLDivElement>;
+  onMouseLeave?: React.MouseEventHandler<HTMLDivElement>;
 }
 
 const DropdownContent: React.FC<DropdownContentProps> = ({
@@ -116,6 +118,8 @@ const DropdownContent: React.FC<DropdownContentProps> = ({
   sideOffset = 4,
   side = "bottom",
   alignToParent = false,
+  onMouseEnter,
+  onMouseLeave,
 }) => {
   const { open, setOpen, triggerRef } = useDropdown();
   const contentRef = useRef<HTMLDivElement>(null);
@@ -245,6 +249,8 @@ const DropdownContent: React.FC<DropdownContentProps> = ({
         "fixed z-[999999] rounded-md border border-border/60 bg-popover p-1 text-popover-foreground shadow-md",
         className,
       )}
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
       style={{
         top: position?.top ?? -9999,
         left: position?.left ?? -9999,

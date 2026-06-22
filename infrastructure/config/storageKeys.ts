@@ -4,6 +4,8 @@ export const STORAGE_KEY_GROUPS = 'netcatty_groups_v1';
 export const STORAGE_KEY_CUSTOM_GROUPS = STORAGE_KEY_GROUPS;
 export const STORAGE_KEY_SNIPPETS = 'netcatty_snippets_v1';
 export const STORAGE_KEY_SNIPPET_PACKAGES = 'netcatty_snippet_packages_v1';
+export const STORAGE_KEY_NOTES = 'netcatty_notes_v1';
+export const STORAGE_KEY_NOTE_GROUPS = 'netcatty_note_groups_v1';
 /** Last-filled values per snippet id for {{variable}} placeholders. */
 export const STORAGE_KEY_SNIPPET_VAR_VALUES = 'netcatty_snippet_var_values_v1';
 export const STORAGE_KEY_THEME = 'netcatty_theme_v1';
@@ -44,6 +46,9 @@ export const STORAGE_KEY_VAULT_SIDEBAR_WIDTH = 'netcatty_vault_sidebar_width_v1'
 export const STORAGE_KEY_VAULT_KEYS_VIEW_MODE = 'netcatty_vault_keys_view_mode_v1';
 export const STORAGE_KEY_VAULT_PROXY_PROFILES_VIEW_MODE = 'netcatty_vault_proxy_profiles_view_mode_v1';
 export const STORAGE_KEY_VAULT_SNIPPETS_VIEW_MODE = 'netcatty_vault_snippets_view_mode_v1';
+export const STORAGE_KEY_VAULT_NOTES_VIEW_MODE = 'netcatty_vault_notes_view_mode_v1';
+export const STORAGE_KEY_VAULT_NOTES_SELECTED_GROUP = 'netcatty_vault_notes_selected_group_v1';
+export const STORAGE_KEY_VAULT_NOTES_TREE_WIDTH = 'netcatty_vault_notes_tree_width_v1';
 /** Inline snippet script editor height (px) in vault edit panel. */
 export const STORAGE_KEY_SNIPPET_SCRIPT_EDITOR_HEIGHT = 'netcatty_snippet_script_editor_height_v1';
 /** Terminal compose bar total height (px). */

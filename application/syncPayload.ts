@@ -17,6 +17,7 @@ import type {
   SftpBookmark,
   Snippet,
   SSHKey,
+  VaultNote,
 } from '../domain/models';
 import {
   CLOUD_SYNC_PAYLOAD_ENTITY_KEYS,
@@ -103,6 +104,8 @@ export interface SyncableVaultData {
   snippets: Snippet[];
   customGroups: string[];
   snippetPackages?: string[];
+  notes?: VaultNote[];
+  noteGroups?: string[];
   /** Local trust records. Kept in local backups, excluded from cloud sync. */
   knownHosts: KnownHost[];
   groupConfigs?: GroupConfig[];
@@ -810,6 +813,8 @@ export function buildSyncPayload(
     snippets: vault.snippets,
     customGroups: vault.customGroups,
     snippetPackages: vault.snippetPackages,
+    notes: vault.notes,
+    noteGroups: vault.noteGroups,
     groupConfigs: vault.groupConfigs,
     portForwardingRules: sanitizePortForwardingRulesForSync(portForwardingRules),
     settings: collectSyncableSettings(),
@@ -829,6 +834,8 @@ export async function buildCloudSyncPayload(
     snippets: vault.snippets,
     customGroups: vault.customGroups,
     snippetPackages: vault.snippetPackages,
+    notes: vault.notes,
+    noteGroups: vault.noteGroups,
     groupConfigs: vault.groupConfigs,
     portForwardingRules: sanitizePortForwardingRulesForSync(portForwardingRules),
     settings: await collectCloudSyncableSettings(),
@@ -872,6 +879,12 @@ function applyPayload(
   };
   if (payload.snippetPackages !== undefined) {
     vaultImport.snippetPackages = payload.snippetPackages;
+  }
+  if (payload.notes !== undefined) {
+    vaultImport.notes = payload.notes;
+  }
+  if (payload.noteGroups !== undefined) {
+    vaultImport.noteGroups = payload.noteGroups;
   }
   if (options.includeLocalOnlyData && payload.knownHosts !== undefined) {
     vaultImport.knownHosts = payload.knownHosts;

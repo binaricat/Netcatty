@@ -44,6 +44,7 @@
     "@aws-sdk/client-s3": "^3.956.0",
     "@fontsource/jetbrains-mono": "^5.2.8",
     "@fontsource/space-grotesk": "^5.2.10",
+    "@mdxeditor/editor": "^4.0.4",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@monaco-editor/react": "^4.7.0",
     "@openai/codex-sdk": "^0.136.0",

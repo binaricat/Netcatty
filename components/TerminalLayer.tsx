@@ -14,7 +14,6 @@ import { sessionCapabilitiesStore } from '../application/state/sessionCapabiliti
 import { useTerminalBackend } from '../application/state/useTerminalBackend';
 import { collectSessionIds } from '../domain/workspace';
 
-
 import { cn, normalizeLineEndings } from '../lib/utils';
 import { detectLocalOs } from '../lib/localShell';
 import { useStoredString } from '../application/state/useStoredString';
@@ -37,6 +36,7 @@ import { useI18n } from '../application/i18n/I18nProvider';
 import { SftpSidePanel } from './SftpSidePanel';
 import { ScriptsSidePanel } from './ScriptsSidePanel';
 import { HistorySidePanel } from './HistorySidePanel';
+import { NotesManager } from './notes/NotesManager';
 import { useRemoteHistoryState } from '../application/state/useRemoteHistoryState';
 import { resolveSnippetCommand } from './SnippetExecutionProvider';
 import type { Snippet } from '../types';
@@ -98,6 +98,9 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   identities,
   snippets,
   snippetPackages,
+  notes,
+  noteGroups,
+  openNoteRequest,
   sessions,
   workspaces,
   knownHosts = [],
@@ -148,6 +151,8 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   updateHosts,
   updateSnippets,
   updateSnippetPackages,
+  updateNotes,
+  updateNoteGroups,
   sftpDefaultViewMode,
   sftpDoubleClickBehavior,
   sftpAutoSync,
@@ -332,6 +337,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   const [scriptsMountedTabIds, setScriptsMountedTabIds] = useState<string[]>([]);
   const [systemMountedTabIds, setSystemMountedTabIds] = useState<string[]>([]);
   const [themeMountedTabIds, setThemeMountedTabIds] = useState<string[]>([]);
+  const [notesMountedTabIds, setNotesMountedTabIds] = useState<string[]>([]);
   const [sidePanelWidth, setSidePanelWidth, persistSidePanelWidth] = useStoredNumber(
     STORAGE_KEY_SIDE_PANEL_WIDTH, 420, { min: 280, max: 800 },
   );
@@ -346,6 +352,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   // Remember the last sub-panel shown per tab so the toggle shortcut can
   // restore it after a close. Overwritten on open, never cleared on close.
   const lastSidePanelTabRef = useRef<Map<string, SidePanelTab>>(new Map());
+  const notesReturnTabRef = useRef<Map<string, SidePanelTab>>(new Map());
 
   // The host to pass to the SFTP panel - stored when the user opens SFTP
   const [sftpHostForTab, setSftpHostForTab] = useState<Map<string, Host>>(new Map());
@@ -357,6 +364,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   >(new Map());
   const [pendingTerminalSelectionForAI, setPendingTerminalSelectionForAI] =
     useState<PendingTerminalSelectionForAI | null>(null);
+  const [notesOpenNoteByTab, setNotesOpenNoteByTab] = useState<Map<string, string>>(new Map());
   const sftpHostForTabRef = useRef(sftpHostForTab);
   sftpHostForTabRef.current = sftpHostForTab;
 
@@ -698,6 +706,10 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     }
     if (panel === 'system') {
       setSystemMountedTabIds((prev) => addMountedSidePanelTabId(prev, tabId));
+      return;
+    }
+    if (panel === 'notes') {
+      setNotesMountedTabIds((prev) => addMountedSidePanelTabId(prev, tabId));
     }
   }, []);
 
@@ -774,6 +786,13 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     setScriptsMountedTabIds((prev) => removeMountedSidePanelTabId(prev, activeTabId));
     setThemeMountedTabIds((prev) => removeMountedSidePanelTabId(prev, activeTabId));
     setSystemMountedTabIds((prev) => removeMountedSidePanelTabId(prev, activeTabId));
+    setNotesMountedTabIds((prev) => removeMountedSidePanelTabId(prev, activeTabId));
+    setNotesOpenNoteByTab((prev) => {
+      const next = new Map(prev);
+      next.delete(activeTabId);
+      return next;
+    });
+    notesReturnTabRef.current.delete(activeTabId);
     refocusTerminalSession(sessionIdToRefocus);
   }, [getActiveTerminalSessionId, refocusTerminalSession, syncWorkspaceFocusIfNeeded]);
 
@@ -900,6 +919,73 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   const handleOpenSystem = useCallback(() => {
     handleSwitchSidePanelTab('system');
   }, [handleSwitchSidePanelTab]);
+
+  const handleOpenNotes = useCallback(() => {
+    const tabId = activeTabIdRef.current;
+    if (!tabId) return;
+    const currentPanel = sidePanelOpenTabsRef.current.get(tabId) ?? null;
+    if (currentPanel && currentPanel !== 'notes') {
+      notesReturnTabRef.current.set(tabId, currentPanel);
+    }
+    handleSwitchSidePanelTab('notes');
+  }, [handleSwitchSidePanelTab]);
+
+  const handleBackFromNotes = useCallback(() => {
+    const tabId = activeTabIdRef.current;
+    if (!tabId) return;
+    const fallback: SidePanelTab = resolveSftpHostForTab(tabId) ? 'sftp' : 'scripts';
+    const remembered = notesReturnTabRef.current.get(tabId) ?? fallback;
+    const target = remembered === 'notes'
+      ? fallback
+      : (remembered === 'sftp' && !resolveSftpHostForTab(tabId) ? 'scripts' : remembered);
+    handleSwitchSidePanelTab(target);
+  }, [handleSwitchSidePanelTab, resolveSftpHostForTab]);
+
+  const openNotesPanelForSourceNote = useCallback((tabId: string, noteId: string) => {
+    setNotesOpenNoteByTab((prev) => {
+      const next = new Map(prev);
+      next.set(tabId, noteId);
+      return next;
+    });
+    setNotesMountedTabIds((prev) => addMountedSidePanelTabId(prev, tabId));
+    setSidePanelOpenTabs((prev) => {
+      const next = new Map(prev);
+      next.set(tabId, 'notes');
+      return next;
+    });
+  }, []);
+
+  const handleOpenHostFromNotes = useCallback((host: Host, source?: { noteId?: string }) => {
+    const sourceNoteId = source?.noteId;
+    const previousTabId = activeTabStore.getActiveTabId();
+    const connectedTabId = onConnectToHost(host);
+    if (!sourceNoteId) return;
+
+    if (typeof connectedTabId === 'string' && connectedTabId) {
+      openNotesPanelForSourceNote(connectedTabId, sourceNoteId);
+      return;
+    }
+
+    const openWhenTabIsReady = (attempt = 0) => {
+      const tabId = activeTabStore.getActiveTabId();
+      if (tabId && tabId !== previousTabId) {
+        openNotesPanelForSourceNote(tabId, sourceNoteId);
+        return;
+      }
+      if (attempt >= 8) {
+        if (tabId) openNotesPanelForSourceNote(tabId, sourceNoteId);
+        return;
+      }
+      window.setTimeout(() => openWhenTabIsReady(attempt + 1), 16);
+    };
+
+    openWhenTabIsReady();
+  }, [onConnectToHost, openNotesPanelForSourceNote]);
+
+  useEffect(() => {
+    if (!openNoteRequest) return;
+    openNotesPanelForSourceNote(openNoteRequest.tabId, openNoteRequest.noteId);
+  }, [openNoteRequest, openNotesPanelForSourceNote]);
 
   const handleAddSelectionToAI = useCallback((sourceSessionId: string, selection: string) => {
     const text = selection.trim();
@@ -1057,6 +1143,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     History,
     HistorySidePanel,
     MessageSquare,
+    NotesManager,
     Palette,
     PanelLeft,
     PanelRight,
@@ -1088,6 +1175,9 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     handleOpenTheme,
     handleOpenAI,
     handleOpenSystem,
+    handleOpenNotes,
+    handleBackFromNotes,
+    handleOpenHostFromNotes,
     handleOsDetected,
     handlePendingTerminalSelectionConsumed,
     handlePendingUploadHandled,
@@ -1123,6 +1213,8 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     lastSidePanelTabRef,
     mountedAiTabIds: aiMountedTabIds,
     mountedSftpTabIds,
+    notesMountedTabIds,
+    notesOpenNoteByTab,
     scriptsMountedTabIds,
     systemMountedTabIds,
     themeMountedTabIds,
@@ -1177,6 +1269,8 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     setIsComposeBarOpen,
     setPendingTerminalSelectionForAI,
     setAiMountedTabIds,
+    setNotesMountedTabIds,
+    setNotesOpenNoteByTab,
     setScriptsMountedTabIds,
     setSystemMountedTabIds,
     setThemeMountedTabIds,
@@ -1205,6 +1299,8 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     snippetExecutorsRef,
     snippetPackages,
     snippets,
+    noteGroups,
+    notes,
     splitHorizontalHandlersRef,
     splitVerticalHandlersRef,
     sshDebugLogsEnabled,
@@ -1223,6 +1319,8 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     TooltipContent,
     TooltipTrigger,
     updateHosts,
+    updateNoteGroups,
+    updateNotes,
     updateSnippetPackages,
     updateSnippets,
     X,

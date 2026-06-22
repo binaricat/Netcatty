@@ -572,7 +572,7 @@ export const enCoreMessages: Messages = {
   'sync.autoSync.emptyVaultConflict.restoreDesc': 'Recommended — recover your hosts, keys, and snippets from the cloud backup',
   'sync.autoSync.emptyVaultConflict.keepEmpty': 'Keep Empty',
   'sync.autoSync.emptyVaultConflict.keepEmptyDesc': 'Start fresh with an empty vault',
-  'sync.autoSync.emptyVaultConflict.cloudSummary': '{hosts} hosts, {keys} keys, {snippets} snippets, {proxyProfiles} proxies',
+  'sync.autoSync.emptyVaultConflict.cloudSummary': '{hosts} hosts, {keys} keys, {snippets} snippets, {notes} notes, {proxyProfiles} proxies',
   'sync.autoSync.emptyVaultManual': 'Cannot sync: the local vault is empty. Restore from a local backup or enable Force Push in the sync panel first.',
 
   'sync.blocked.title': 'Sync paused',
@@ -609,6 +609,7 @@ export const enCoreMessages: Messages = {
   'vault.nav.proxies': 'Proxies',
   'vault.nav.portForwarding': 'Port Forwarding',
   'vault.nav.snippets': 'Snippets',
+  'vault.nav.notes': 'Notes',
   'vault.nav.knownHosts': 'Known Hosts',
   'vault.nav.logs': 'Logs',
 

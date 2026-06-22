@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { Activity, FolderTree, History, MessageSquare, Palette, PanelLeft, PanelRight, X, Zap } from 'lucide-react';
+import { Activity, FolderTree, History, MessageSquare, NotebookText, Palette, PanelLeft, PanelRight, X, Zap } from 'lucide-react';
 import { SystemManagerSidePanel } from '../systemManager/SystemManagerSidePanel';
 import React, { memo, useCallback, useState } from 'react';
 
@@ -36,6 +36,7 @@ function TerminalLayerSidePanelShell({ ctx }: { ctx: SidePanelContext }) {
   const {
     mountedAiTabIds,
     mountedSftpTabIds,
+    notesMountedTabIds,
     scriptsMountedTabIds,
     systemMountedTabIds,
     themeMountedTabIds,
@@ -44,14 +45,18 @@ function TerminalLayerSidePanelShell({ ctx }: { ctx: SidePanelContext }) {
 
   const anyHistoryOpen = sidePanelOpenTabs instanceof Map
     && Array.from((sidePanelOpenTabs as Map<string, SidePanelTab>).values()).includes('history');
+  const anyNotesOpen = sidePanelOpenTabs instanceof Map
+    && Array.from((sidePanelOpenTabs as Map<string, SidePanelTab>).values()).includes('notes');
 
   if (
     mountedSftpTabIds.length === 0
     && mountedAiTabIds.length === 0
+    && notesMountedTabIds.length === 0
     && scriptsMountedTabIds.length === 0
     && systemMountedTabIds.length === 0
     && themeMountedTabIds.length === 0
     && !anyHistoryOpen
+    && !anyNotesOpen
   ) {
     return null;
   }
@@ -98,6 +103,8 @@ function TerminalLayerSidePanelTabBody({ ctx }: { ctx: SidePanelContext }) {
     handleFontWeightChangeForFocusedSession,
     handleFontWeightResetForFocusedSession,
     handleOpenAI,
+    handleOpenNotes,
+    handleOpenHostFromNotes,
     handleOpenScripts,
     handleOpenSystem,
     handleOpenTheme,
@@ -120,6 +127,11 @@ function TerminalLayerSidePanelTabBody({ ctx }: { ctx: SidePanelContext }) {
     knownHosts,
     mountedAiTabIds,
     mountedSftpTabIds,
+    notesMountedTabIds,
+    notesOpenNoteByTab,
+    NotesManager,
+    noteGroups,
+    notes,
     scriptsMountedTabIds,
     systemMountedTabIds,
     themeMountedTabIds,
@@ -157,6 +169,8 @@ function TerminalLayerSidePanelTabBody({ ctx }: { ctx: SidePanelContext }) {
     terminalTheme,
     ThemeSidePanel,
     updateHosts,
+    updateNoteGroups,
+    updateNotes,
     updateSnippetPackages,
     updateSnippets,
     validAIScopeTargetIds,
@@ -389,6 +403,30 @@ function TerminalLayerSidePanelTabBody({ ctx }: { ctx: SidePanelContext }) {
                   <Btn
                     variant="ghost"
                     size="icon"
+                    data-tab-id="notes"
+                    data-tab-type="sidepanel"
+                    data-state={activeSidePanelTab === 'notes' ? 'active' : 'inactive'}
+                    className="netcatty-tab h-7 w-7 rounded-md p-0 hover:bg-transparent"
+                    style={{
+                      backgroundColor: activeSidePanelTab === 'notes'
+                        ? 'color-mix(in srgb, var(--terminal-sidepanel-accent) 24%, transparent)'
+                        : 'transparent',
+                      color: activeSidePanelTab === 'notes'
+                        ? 'var(--terminal-sidepanel-fg)'
+                        : 'var(--terminal-sidepanel-muted)',
+                    }}
+                    onClick={handleOpenNotes}
+                  >
+                    <NotebookText size={15} />
+                  </Btn>
+                </TooltipTrigger>
+                <TooltipContent>{t('terminal.layer.notes')}</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Btn
+                    variant="ghost"
+                    size="icon"
                     data-tab-id="ai"
                     data-tab-type="sidepanel"
                     data-state={activeSidePanelTab === 'ai' ? 'active' : 'inactive'}
@@ -582,6 +620,28 @@ function TerminalLayerSidePanelTabBody({ ctx }: { ctx: SidePanelContext }) {
                     onFontWeightReset={handleFontWeightResetForFocusedSession}
                     previewColors={resolvedPreviewTheme.colors}
                     isVisible={isVisibleThemePanel}
+                  />
+                </div>
+              );
+            })}
+
+            {notesMountedTabIds.map((tabId: string) => {
+              const isVisibleNotesPanel = activeTabId === tabId && activeSidePanelTab === 'notes';
+              return (
+                <div
+                  key={`notes-${tabId}`}
+                  className={cn('absolute inset-0 z-20 bg-background text-foreground', !isVisibleNotesPanel && 'hidden')}
+                  data-section={isVisibleNotesPanel ? 'terminal-notes-panel' : undefined}
+                >
+                  <NotesManager
+                    notes={notes}
+                    noteGroups={noteGroups}
+                    hosts={hosts}
+                    onUpdateNotes={updateNotes}
+                    onUpdateNoteGroups={updateNoteGroups}
+                    onOpenHost={handleOpenHostFromNotes}
+                    displayMode="sidebar"
+                    openNoteId={notesOpenNoteByTab.get(tabId) ?? null}
                   />
                 </div>
               );

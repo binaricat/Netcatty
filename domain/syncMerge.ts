@@ -43,6 +43,8 @@ const OPTIONAL_ENTITY_KEYS = new Set<CloudSyncPayloadEntityKey>([
   'identities',
   'proxyProfiles',
   'snippetPackages',
+  'notes',
+  'noteGroups',
   'portForwardingRules',
   'groupConfigs',
 ]);
@@ -385,6 +387,8 @@ export function mergeSyncPayloads(
     snippets: [],
     customGroups: [],
     snippetPackages: [],
+    notes: [],
+    noteGroups: [],
     portForwardingRules: [],
     settings: undefined,
     syncedAt: 0,
@@ -419,6 +423,13 @@ export function mergeSyncPayloads(
     tombstones('proxyProfiles'),
   );
   const snippets = mergeEntityArrays(b.snippets ?? [], local.snippets ?? [], remote.snippets ?? [], tombstones('snippets'));
+  const baseNotes = b.notes ?? [];
+  const notes = mergeEntityArrays(
+    baseNotes,
+    entityArray(local, 'notes', baseNotes),
+    entityArray(remote, 'notes', baseNotes),
+    tombstones('notes'),
+  );
   const basePortForwardingRules = b.portForwardingRules ?? [];
   const portForwardingRules = mergeEntityArrays(
     basePortForwardingRules,
@@ -443,7 +454,7 @@ export function mergeSyncPayloads(
 
   // Aggregate stats
   const entityResults: Pick<EntityMergeResult<unknown>, 'added' | 'deleted' | 'modified' | 'conflicts'>[] =
-    [hosts, keys, identities, proxyProfiles, snippets, portForwardingRules, groupConfigsResult];
+    [hosts, keys, identities, proxyProfiles, snippets, notes, portForwardingRules, groupConfigsResult];
   for (const r of entityResults) {
     summary.added.local += r.added.local;
     summary.added.remote += r.added.remote;
@@ -467,6 +478,13 @@ export function mergeSyncPayloads(
     entityArray<string>(local, 'snippetPackages', baseSnippetPackages),
     entityArray<string>(remote, 'snippetPackages', baseSnippetPackages),
     tombstones('snippetPackages'),
+  );
+  const baseNoteGroups = b.noteGroups ?? [];
+  const noteGroups = mergeStringArrays(
+    baseNoteGroups,
+    entityArray<string>(local, 'noteGroups', baseNoteGroups),
+    entityArray<string>(remote, 'noteGroups', baseNoteGroups),
+    tombstones('noteGroups'),
   );
 
   // Merge settings
@@ -492,6 +510,8 @@ export function mergeSyncPayloads(
     snippets: snippets.merged,
     customGroups,
     snippetPackages,
+    notes: notes.merged,
+    noteGroups,
     portForwardingRules: portForwardingRules.merged,
     groupConfigs,
     settings,

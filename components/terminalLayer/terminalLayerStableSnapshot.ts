@@ -12,6 +12,7 @@ import type {
   Snippet,
   TerminalSession,
   TerminalTheme,
+  VaultNote,
   Workspace,
 } from '../../types';
 import type {
@@ -67,6 +68,10 @@ export type TerminalLayerStableSnapshot = {
   pendingTerminalSelectionForAI: PendingTerminalSelectionForAI | null;
   setPendingTerminalSelectionForAI: React.Dispatch<React.SetStateAction<PendingTerminalSelectionForAI | null>>;
   lastSidePanelTabRef: React.MutableRefObject<Map<string, SidePanelTab>>;
+  notesMountedTabIds: string[];
+  setNotesMountedTabIds: React.Dispatch<React.SetStateAction<string[]>>;
+  notesOpenNoteByTab: Map<string, string>;
+  setNotesOpenNoteByTab: React.Dispatch<React.SetStateAction<Map<string, string>>>;
   isComposeBarOpen: boolean;
   setIsComposeBarOpen: React.Dispatch<React.SetStateAction<boolean>>;
   splitHorizontalHandlersRef: React.MutableRefObject<Map<string, () => void>>;
@@ -106,6 +111,9 @@ export type TerminalLayerStableSnapshot = {
   handleOpenTheme: () => void;
   handleOpenAI: () => void;
   handleOpenSystem: () => void;
+  handleOpenNotes: () => void;
+  handleBackFromNotes: () => void;
+  handleOpenHostFromNotes: (host: Host, source?: { noteId?: string }) => void;
   handleAddSelectionToAI: (sourceSessionId: string, selection: string) => void;
   handlePendingTerminalSelectionConsumed: (requestId: string) => void;
   handleToggleAiFromTopBar: () => void;
@@ -130,6 +138,8 @@ export type TerminalLayerStableSnapshot = {
   identities: Identity[];
   snippets: Snippet[];
   snippetPackages: string[];
+  notes: VaultNote[];
+  noteGroups: string[];
   knownHosts: KnownHost[];
   hotkeyScheme: TerminalLayerProps['hotkeyScheme'];
   disableTerminalFontZoom: TerminalLayerProps['disableTerminalFontZoom'];
@@ -151,6 +161,8 @@ export type TerminalLayerStableSnapshot = {
   updateHosts: TerminalLayerProps['updateHosts'];
   updateSnippets: TerminalLayerProps['updateSnippets'];
   updateSnippetPackages: TerminalLayerProps['updateSnippetPackages'];
+  updateNotes: TerminalLayerProps['updateNotes'];
+  updateNoteGroups: TerminalLayerProps['updateNoteGroups'];
   sftpDefaultViewMode: TerminalLayerProps['sftpDefaultViewMode'];
   sftpDoubleClickBehavior: TerminalLayerProps['sftpDoubleClickBehavior'];
   sftpAutoSync: TerminalLayerProps['sftpAutoSync'];

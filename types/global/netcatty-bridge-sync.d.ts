@@ -91,6 +91,7 @@ declare global {
       reason: 'app_version_change' | 'before_restore';
       sourceAppVersion?: string;
       targetAppVersion?: string;
+      syncDataVersion?: number;
       maxCount?: number;
     }): Promise<{
       created: boolean;
@@ -105,6 +106,7 @@ declare global {
           hostCount: number;
           keyCount: number;
           snippetCount: number;
+          noteCount: number;
           identityCount: number;
           portForwardingRuleCount: number;
         };
@@ -121,6 +123,7 @@ declare global {
         hostCount: number;
         keyCount: number;
         snippetCount: number;
+        noteCount: number;
         identityCount: number;
         portForwardingRuleCount: number;
       };
@@ -137,6 +140,7 @@ declare global {
           hostCount: number;
           keyCount: number;
           snippetCount: number;
+          noteCount: number;
           identityCount: number;
           portForwardingRuleCount: number;
         };

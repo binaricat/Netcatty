@@ -166,6 +166,8 @@ function App({ settings }: { settings: SettingsState }) {
     snippets,
     customGroups,
     snippetPackages,
+    notes,
+    noteGroups,
     knownHosts,
     shellHistory,
     connectionLogs,
@@ -177,6 +179,8 @@ function App({ settings }: { settings: SettingsState }) {
     updateProxyProfiles,
     updateSnippets,
     updateSnippetPackages,
+    updateNotes,
+    updateNoteGroups,
     updateCustomGroups,
     updateKnownHosts,
     updateManagedSources,
@@ -359,6 +363,8 @@ function App({ settings }: { settings: SettingsState }) {
         snippets,
         customGroups,
         snippetPackages,
+        notes,
+        noteGroups,
         knownHosts: getEffectiveKnownHosts(knownHosts),
         groupConfigs,
       },
@@ -372,6 +378,8 @@ function App({ settings }: { settings: SettingsState }) {
     keys,
     proxyProfiles,
     knownHosts,
+    noteGroups,
+    notes,
     portForwardingRulesForSync,
     snippetPackages,
     snippets,
@@ -431,7 +439,7 @@ function App({ settings }: { settings: SettingsState }) {
     return () => {
       cancelled = true;
     };
-  }, [isPeerSessionWindow, isVaultInitialized, hosts, keys, identities, proxyProfiles, snippets, customGroups, snippetPackages, knownHosts]);
+  }, [isPeerSessionWindow, isVaultInitialized, hosts, keys, identities, proxyProfiles, snippets, customGroups, snippetPackages, notes, noteGroups, knownHosts]);
 
   // Memoized "apply a remote payload safely" callback. Stable identity
   // across renders so useAutoSync's `syncNow` useCallback doesn't rebuild
@@ -469,6 +477,8 @@ function App({ settings }: { settings: SettingsState }) {
     snippets,
     customGroups,
     snippetPackages,
+    notes,
+    noteGroups,
     portForwardingRules: portForwardingRulesForSync,
     groupConfigs,
     settingsVersion: settings.settingsVersion,
@@ -679,6 +689,12 @@ function App({ settings }: { settings: SettingsState }) {
 
   const toggleScriptsSidePanelRef = useRef<(() => void) | null>(null);
   const toggleSidePanelRef = useRef<(() => void) | null>(null);
+  const openNoteRequestIdRef = useRef(0);
+  const [openNoteRequest, setOpenNoteRequest] = useState<{
+    tabId: string;
+    noteId: string;
+    requestId: number;
+  } | null>(null);
   // Populated below so the hotkey dispatcher can open the Settings window
   // even though `handleOpenSettings` is declared further down in the file.
   const handleOpenSettingsRef = useRef<() => void>(() => {});
@@ -914,6 +930,19 @@ function App({ settings }: { settings: SettingsState }) {
     });
   }, [isPeerSessionWindow]);
 
+  const handleOpenHostFromVaultNote = useCallback((host: Host, source?: { noteId?: string }) => {
+    const tabId = handleConnectToHost(host);
+    if (source?.noteId && typeof tabId === 'string' && tabId) {
+      openNoteRequestIdRef.current += 1;
+      setOpenNoteRequest({
+        tabId,
+        noteId: source.noteId,
+        requestId: openNoteRequestIdRef.current,
+      });
+    }
+    return tabId;
+  }, [handleConnectToHost]);
+
   // Wrap updateSessionStatus to track lastConnectedAt on successful connection
   const handleSessionStatusChange = useCallback((sessionId: string, status: TerminalSession['status']) => {
     updateSessionStatus(sessionId, status);
@@ -1038,7 +1067,7 @@ function App({ settings }: { settings: SettingsState }) {
         logViews={logViews}
         t={t}
       />
-      <AppView ctx={{ accentMode, addShellHistoryEntry, addSessionToWorkspace, addToWorkspaceDialog, appendHostToWorkspace, appendLocalTerminalToWorkspace, clearAndRemoveSource, clearAndRemoveSources, clearUnsavedConnectionLogs, clearSessionFontSizeOverride, closeLogView, closeSession, closeTabsBatch, copySessionWithCurrentShell, copySessionToNewWindowWithCurrentShell, closeWorkspace, connectionLogs, convertKnownHostToHost, createWorkspaceFromSessions, createWorkspaceFromTargets, createWorkspaceWithHosts, customAccent, customGroups, currentTerminalTheme, deepLinkHostDraft, deleteConnectionLog, draggingSessionId, effectiveKnownHosts, editorTabs, editorWordWrap, emptyVaultConflict, followAppTerminalTheme, groupConfigs, handleAddKnownHost, handleConnectSerial, handleConnectToHost, handleCreateLocalTerminal, handleDeleteHost, handleEndSessionDrag, handleHostConnectWithProtocolCheck, handleHotkeyAction, handleKeyboardInteractiveCancel, handleKeyboardInteractiveSubmit, handleOpenQuickSwitcher, handleOpenSettings, handleRootContextMenu, handlePassphraseCancel, handlePassphraseSkip, handlePassphraseSubmit, handleProtocolSelect, handleRequestCloseEditorTabRef, handleSessionStatusChange, handleSyncNowManual, handleTerminalDataCapture, handleToggleTheme, handleUpdateHostFromTerminal, hostById, hosts, hotkeyScheme, identities, importOrReuseKey, isBroadcastEnabled, isCreateWorkspaceOpen, isMacClient, isQuickSwitcherOpen, keyBindings, keyboardInteractiveQueue, keys, logViews, managedSources, navigateToSection, openLogView, orderedTabsWithEditors, orphanSessions, passphraseQueue, protocolSelectHost, proxyProfiles, quickResults, quickSearch, removeSessionFromWorkspace, reorderWorkTabs, reorderWorkspaceSessions, resetSessionRename, resetWorkspaceRename, resolveEmptyVaultConflict, resolvedTheme, runSnippet: handleRunSnippet, sessionLogsDir, sessionLogsEnabled, sessionLogsFormat, sessionLogsTimestampsEnabled, sessionRenameTarget, sessionRenameValue, sessions, setActiveTabId, setAddToWorkspaceDialog, setDeepLinkHostDraft, setDraggingSessionId, setEditorWordWrap, setIsCreateWorkspaceOpen, setIsQuickSwitcherOpen, setNavigateToSection, setProtocolSelectHost, setQuickSearch, setSessionRenameValue, setTerminalFontFamilyId, setTerminalFontSize, setTerminalThemeId, setWorkspaceFocusedSession, setWorkspaceRenameValue, settings, sftpAutoOpenSidebar, sftpFollowTerminalCwd, setSftpFollowTerminalCwd, sftpAutoSync, sftpDefaultViewMode, sftpDoubleClickBehavior, sftpShowHiddenFiles, sftpUseCompressedUpload, shellHistory, snippetPackages, snippets, splitSessionWithCurrentShell, sshDebugLogsEnabled: settings.sshDebugLogsEnabled, startSessionRename, renameSessionInline, startWorkspaceRename, submitSessionRename, submitWorkspaceRename, t, terminalFontFamilyId, terminalFontSize, terminalSettings, terminalThemeId, themeById, toggleBroadcast, toggleConnectionLogSaved, toggleScriptsSidePanelRef, toggleSidePanelRef, toggleWorkspaceViewMode, unmanageSource, updateConnectionLog, updateCustomGroups, updateGroupConfigs, updateHostDistro, updateHosts, updateIdentities, updateKeys, updateKnownHosts, updateManagedSources, updateProxyProfiles, updateSnippetPackages, updateSnippets, updateSplitSizes, updateSessionFontSize, updateSessionRestoreCwd, updateTerminalSetting, workspaceRenameTarget, workspaceRenameValue, workspaces, VaultViewContainer, SftpViewMount, TerminalLayerMount, LogViewWrapper }} />
+      <AppView ctx={{ accentMode, addShellHistoryEntry, addSessionToWorkspace, addToWorkspaceDialog, appendHostToWorkspace, appendLocalTerminalToWorkspace, clearAndRemoveSource, clearAndRemoveSources, clearUnsavedConnectionLogs, clearSessionFontSizeOverride, closeLogView, closeSession, closeTabsBatch, copySessionWithCurrentShell, copySessionToNewWindowWithCurrentShell, closeWorkspace, connectionLogs, convertKnownHostToHost, createWorkspaceFromSessions, createWorkspaceFromTargets, createWorkspaceWithHosts, customAccent, customGroups, currentTerminalTheme, deepLinkHostDraft, deleteConnectionLog, draggingSessionId, effectiveKnownHosts, editorTabs, editorWordWrap, emptyVaultConflict, followAppTerminalTheme, groupConfigs, handleAddKnownHost, handleConnectSerial, handleConnectToHost, handleCreateLocalTerminal, handleDeleteHost, handleEndSessionDrag, handleHostConnectWithProtocolCheck, handleHotkeyAction, handleOpenHostFromVaultNote, handleKeyboardInteractiveCancel, handleKeyboardInteractiveSubmit, handleOpenQuickSwitcher, handleOpenSettings, handleRootContextMenu, handlePassphraseCancel, handlePassphraseSkip, handlePassphraseSubmit, handleProtocolSelect, handleRequestCloseEditorTabRef, handleSessionStatusChange, handleSyncNowManual, handleTerminalDataCapture, handleToggleTheme, handleUpdateHostFromTerminal, hostById, hosts, hotkeyScheme, identities, importOrReuseKey, isBroadcastEnabled, isCreateWorkspaceOpen, isMacClient, isQuickSwitcherOpen, keyBindings, keyboardInteractiveQueue, keys, logViews, managedSources, navigateToSection, noteGroups, notes, openLogView, openNoteRequest, orderedTabsWithEditors, orphanSessions, passphraseQueue, protocolSelectHost, proxyProfiles, quickResults, quickSearch, removeSessionFromWorkspace, reorderWorkTabs, reorderWorkspaceSessions, resetSessionRename, resetWorkspaceRename, resolveEmptyVaultConflict, resolvedTheme, runSnippet: handleRunSnippet, sessionLogsDir, sessionLogsEnabled, sessionLogsFormat, sessionLogsTimestampsEnabled, sessionRenameTarget, sessionRenameValue, sessions, setActiveTabId, setAddToWorkspaceDialog, setDeepLinkHostDraft, setDraggingSessionId, setEditorWordWrap, setIsCreateWorkspaceOpen, setIsQuickSwitcherOpen, setNavigateToSection, setProtocolSelectHost, setQuickSearch, setSessionRenameValue, setTerminalFontFamilyId, setTerminalFontSize, setTerminalThemeId, setWorkspaceFocusedSession, setWorkspaceRenameValue, settings, sftpAutoOpenSidebar, sftpFollowTerminalCwd, setSftpFollowTerminalCwd, sftpAutoSync, sftpDefaultViewMode, sftpDoubleClickBehavior, sftpShowHiddenFiles, sftpUseCompressedUpload, shellHistory, snippetPackages, snippets, splitSessionWithCurrentShell, sshDebugLogsEnabled: settings.sshDebugLogsEnabled, startSessionRename, renameSessionInline, startWorkspaceRename, submitSessionRename, submitWorkspaceRename, t, terminalFontFamilyId, terminalFontSize, terminalSettings, terminalThemeId, themeById, toggleBroadcast, toggleConnectionLogSaved, toggleScriptsSidePanelRef, toggleSidePanelRef, toggleWorkspaceViewMode, unmanageSource, updateConnectionLog, updateCustomGroups, updateGroupConfigs, updateHostDistro, updateHosts, updateIdentities, updateKeys, updateKnownHosts, updateManagedSources, updateNoteGroups, updateNotes, updateProxyProfiles, updateSnippetPackages, updateSnippets, updateSplitSizes, updateSessionFontSize, updateSessionRestoreCwd, updateTerminalSetting, workspaceRenameTarget, workspaceRenameValue, workspaces, VaultViewContainer, SftpViewMount, TerminalLayerMount, LogViewWrapper }} />
     </>
   );
 }

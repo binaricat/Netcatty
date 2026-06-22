@@ -65,6 +65,8 @@ const vault = (knownHosts: KnownHost[] = [knownHost()]): SyncableVaultData => ({
   snippets: [],
   customGroups: [],
   snippetPackages: [],
+  notes: [],
+  noteGroups: [],
   knownHosts,
   groupConfigs: [],
 });
@@ -102,6 +104,24 @@ test("buildSyncPayload includes reusable proxy profiles", () => {
   } as SyncableVaultData & { proxyProfiles: typeof proxyProfiles });
 
   assert.deepEqual(payload.proxyProfiles, proxyProfiles);
+});
+
+test("buildCloudSyncPayload includes notes and note groups", async () => {
+  const payload = await buildCloudSyncPayload({
+    ...vault([]),
+    notes: [{
+      id: "note-1",
+      title: "Runbook",
+      content: "# Runbook",
+      createdAt: 1,
+      updatedAt: 1,
+    }],
+    noteGroups: ["Ops"],
+  });
+
+  assert.equal(payload.notes?.length, 1);
+  assert.equal(payload.notes?.[0]?.title, "Runbook");
+  assert.deepEqual(payload.noteGroups, ["Ops"]);
 });
 
 test("buildSyncPayload includes AI configuration settings", () => {

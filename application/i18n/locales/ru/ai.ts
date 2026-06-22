@@ -320,6 +320,7 @@ export const ruAiMessages: Messages = {
   'terminal.layer.scripts': 'Скрипты',
   'terminal.layer.history': 'История',
   'terminal.layer.theme': 'Тема',
+  'terminal.layer.notes': 'Заметки',
   'terminal.layer.aiChat': 'AI-чат',
   'terminal.layer.movePanelLeft': 'Переместить панель влево',
   'terminal.layer.movePanelRight': 'Переместить панель вправо',

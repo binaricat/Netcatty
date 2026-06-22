@@ -87,7 +87,7 @@ export function handleTrayPanelConnectImpl(getCtx: AppContextGetter, hostId: str
         localHostname: localHost,
         saved: false,
       });
-      return;
+      return sessionId;
     }
 
     const protocol = effectiveHost.etEnabled ? 'et' : effectiveHost.moshEnabled ? 'mosh' : (effectiveHost.protocol || 'ssh');
@@ -106,6 +106,7 @@ export function handleTrayPanelConnectImpl(getCtx: AppContextGetter, hostId: str
       localHostname: localHost,
       saved: false,
     });
+    return sessionId;
   }
 }
 
@@ -787,7 +788,7 @@ export function handleConnectToHostImpl(getCtx: AppContextGetter, host: Host) {
         localHostname: localHost,
         saved: false,
       });
-      return;
+      return sessionId;
     }
 
     const protocol = effectiveHost.etEnabled ? 'et' : effectiveHost.moshEnabled ? 'mosh' : (effectiveHost.protocol || 'ssh');
@@ -806,6 +807,7 @@ export function handleConnectToHostImpl(getCtx: AppContextGetter, host: Host) {
       localHostname: localHost,
       saved: false,
     });
+    return sessionId;
   }
 }
 

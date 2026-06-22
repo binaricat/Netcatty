@@ -320,6 +320,7 @@ export const enAiMessages: Messages = {
   'terminal.layer.scripts': 'Scripts',
   'terminal.layer.history': 'History',
   'terminal.layer.theme': 'Theme',
+  'terminal.layer.notes': 'Notes',
   'terminal.layer.aiChat': 'AI Chat',
   'terminal.layer.movePanelLeft': 'Move panel to left',
   'terminal.layer.movePanelRight': 'Move panel to right',

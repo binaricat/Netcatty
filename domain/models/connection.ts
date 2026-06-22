@@ -281,6 +281,18 @@ export interface Snippet {
   order?: number;
 }
 
+export interface VaultNote {
+  id: string;
+  title: string;
+  content: string;
+  group?: string;
+  tags?: string[];
+  linkedHostIds?: string[];
+  createdAt: number;
+  updatedAt: number;
+  order?: number;
+}
+
 export interface ChatMessage {
   role: 'user' | 'model';
   text: string;

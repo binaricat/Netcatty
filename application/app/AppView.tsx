@@ -38,10 +38,10 @@ export function AppView({ ctx }: { ctx: AppViewContext }) {
     customGroups, currentTerminalTheme, deepLinkHostDraft, deleteConnectionLog, draggingSessionId, effectiveKnownHosts, editorTabs, editorWordWrap, emptyVaultConflict,
     followAppTerminalTheme, groupConfigs, handleAddKnownHost, handleConnectSerial, handleConnectToHost, handleCreateLocalTerminal, handleDeleteHost,
     handleEndSessionDrag, handleHostConnectWithProtocolCheck, handleHotkeyAction, handleKeyboardInteractiveCancel, handleKeyboardInteractiveSubmit,
-    handleOpenQuickSwitcher, handleOpenSettings, handleRootContextMenu, handlePassphraseCancel, handlePassphraseSkip, handlePassphraseSubmit, handleProtocolSelect,
+    handleOpenHostFromVaultNote, handleOpenQuickSwitcher, handleOpenSettings, handleRootContextMenu, handlePassphraseCancel, handlePassphraseSkip, handlePassphraseSubmit, handleProtocolSelect,
     handleRequestCloseEditorTabRef, handleSessionStatusChange, handleSyncNowManual, handleTerminalDataCapture, handleToggleTheme, handleUpdateHostFromTerminal,
     hostById, hosts, hotkeyScheme, identities, importOrReuseKey, isBroadcastEnabled, isCreateWorkspaceOpen, isMacClient, isQuickSwitcherOpen,
-    keyBindings, keyboardInteractiveQueue, keys, logViews, managedSources, navigateToSection, openLogView, orderedTabsWithEditors, orphanSessions,
+    keyBindings, keyboardInteractiveQueue, keys, logViews, managedSources, navigateToSection, noteGroups, notes, openLogView, openNoteRequest, orderedTabsWithEditors, orphanSessions,
     passphraseQueue, protocolSelectHost, proxyProfiles, quickResults, quickSearch, removeSessionFromWorkspace, reorderWorkTabs, reorderWorkspaceSessions, resetSessionRename,
     resetWorkspaceRename, resolveEmptyVaultConflict, resolvedTheme, runSnippet, sessionLogsDir, sessionLogsEnabled, sessionLogsFormat, sessionLogsTimestampsEnabled, sessionRenameTarget, sshDebugLogsEnabled,
     sessionRenameValue, sessions, setActiveTabId, setAddToWorkspaceDialog, setDeepLinkHostDraft, setDraggingSessionId, setEditorWordWrap, setIsCreateWorkspaceOpen, setIsQuickSwitcherOpen,
@@ -51,7 +51,7 @@ export function AppView({ ctx }: { ctx: AppViewContext }) {
     startWorkspaceRename, submitSessionRename, submitWorkspaceRename, t, terminalFontFamilyId, terminalFontSize, terminalSettings, terminalThemeId, themeById,
     toggleBroadcast, toggleConnectionLogSaved, toggleScriptsSidePanelRef, toggleSidePanelRef, toggleWorkspaceViewMode, unmanageSource, updateConnectionLog,
     updateCustomGroups, updateGroupConfigs, updateHostDistro, updateHosts, updateIdentities, updateKeys, updateKnownHosts, updateManagedSources,
-    updateProxyProfiles, updateSnippetPackages, updateSnippets, updateSplitSizes, updateTerminalSetting, workspaceRenameTarget, workspaceRenameValue, workspaces,
+    updateNoteGroups, updateNotes, updateProxyProfiles, updateSnippetPackages, updateSnippets, updateSplitSizes, updateTerminalSetting, workspaceRenameTarget, workspaceRenameValue, workspaces,
     VaultViewContainer, SftpViewMount, TerminalLayerMount, LogViewWrapper,
   } = ctx;
 
@@ -171,6 +171,8 @@ export function AppView({ ctx }: { ctx: AppViewContext }) {
             proxyProfiles={proxyProfiles}
             snippets={snippets}
             snippetPackages={snippetPackages}
+            notes={notes}
+            noteGroups={noteGroups}
             customGroups={customGroups}
             knownHosts={effectiveKnownHosts}
             shellHistory={shellHistory}
@@ -187,6 +189,7 @@ export function AppView({ ctx }: { ctx: AppViewContext }) {
             onConnectSerial={handleConnectSerial}
             onDeleteHost={handleDeleteHost}
             onConnect={handleConnectToHost}
+            onOpenHostFromNote={handleOpenHostFromVaultNote}
             groupConfigs={groupConfigs}
             onUpdateGroupConfigs={updateGroupConfigs}
             onUpdateHosts={updateHosts}
@@ -196,6 +199,8 @@ export function AppView({ ctx }: { ctx: AppViewContext }) {
             onUpdateProxyProfiles={updateProxyProfiles}
             onUpdateSnippets={updateSnippets}
             onUpdateSnippetPackages={updateSnippetPackages}
+            onUpdateNotes={updateNotes}
+            onUpdateNoteGroups={updateNoteGroups}
             onUpdateCustomGroups={updateCustomGroups}
             onUpdateKnownHosts={updateKnownHosts}
             onUpdateManagedSources={updateManagedSources}
@@ -248,6 +253,8 @@ export function AppView({ ctx }: { ctx: AppViewContext }) {
           identities={identities}
           snippets={snippets}
           snippetPackages={snippetPackages}
+          notes={notes}
+          noteGroups={noteGroups}
           sessions={sessions}
           workspaces={workspaces}
           knownHosts={effectiveKnownHosts}
@@ -296,12 +303,15 @@ export function AppView({ ctx }: { ctx: AppViewContext }) {
           onCopySessionToNewWindow={copySessionToNewWindowWithCurrentShell}
           onSplitSession={splitSessionWithCurrentShell}
           onConnectToHost={handleConnectToHost}
+          openNoteRequest={openNoteRequest}
           onCreateLocalTerminal={handleCreateLocalTerminal}
           isBroadcastEnabled={isBroadcastEnabled}
           onToggleBroadcast={toggleBroadcast}
           updateHosts={updateHosts}
           updateSnippets={updateSnippets}
           updateSnippetPackages={updateSnippetPackages}
+          updateNotes={updateNotes}
+          updateNoteGroups={updateNoteGroups}
           sftpDefaultViewMode={sftpDefaultViewMode}
           sftpDoubleClickBehavior={sftpDoubleClickBehavior}
           sftpAutoSync={sftpAutoSync}
@@ -569,6 +579,7 @@ export function AppView({ ctx }: { ctx: AppViewContext }) {
                 hosts: emptyVaultConflict.hostCount,
                 keys: emptyVaultConflict.keyCount,
                 snippets: emptyVaultConflict.snippetCount,
+                notes: emptyVaultConflict.noteCount,
                 proxyProfiles: emptyVaultConflict.proxyProfileCount,
               })}</div>
             </div>

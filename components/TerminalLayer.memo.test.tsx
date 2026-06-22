@@ -153,3 +153,13 @@ test("TerminalLayer re-renders when SSH debug logging changes", () => {
     false,
   );
 });
+
+test("TerminalLayer re-renders when a note open request changes", () => {
+  assert.equal(
+    terminalLayerAreEqual(
+      baseProps as never,
+      { ...baseProps, openNoteRequest: { tabId: "session-1", noteId: "note-1", requestId: 1 } } as never,
+    ),
+    false,
+  );
+});

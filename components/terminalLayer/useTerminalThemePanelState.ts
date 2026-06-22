@@ -23,12 +23,13 @@ import { getScopedTopTabsThemeId } from '../terminalTopTabsTheme';
 import {
   clearTerminalPreviewVars,
   clearTopTabsPreviewVars,
+  type SidePanelTab,
 } from './TerminalLayerSupport';
 
 interface UseTerminalThemePanelStateOptions {
   accentMode: 'theme' | 'custom';
   activeSession: TerminalSession | undefined;
-  activeSidePanelTab: 'sftp' | 'scripts' | 'theme' | 'ai' | null;
+  activeSidePanelTab: SidePanelTab | null;
   activeWorkspace: Workspace | undefined;
   customAccent: string;
   followAppTerminalTheme: boolean;

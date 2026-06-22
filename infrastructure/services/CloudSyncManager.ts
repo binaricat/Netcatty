@@ -702,6 +702,7 @@ export class CloudSyncManager {
       hostCount: number;
       keyCount: number;
       snippetCount: number;
+      noteCount: number;
       identityCount: number;
       portForwardingRuleCount: number;
     };

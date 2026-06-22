@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "@mdxeditor/editor/style.css";
 
 /* Bundled icon-only fallback so terminals show Nerd Font glyphs (powerline,
    devicons, etc.) regardless of which base font the user picks. The font is
@@ -780,4 +781,221 @@ html[data-theme-transition] *::after {
 .ai-chat-message-content[data-role="assistant"] [data-streamdown="table-wrapper"] > div:first-child > button,
 .ai-chat-message-content[data-role="assistant"] [data-streamdown="table-wrapper"] > div:first-child > div > button {
   padding: 3px !important;
+}
+
+.netcatty-mdx-editor {
+  --basePageBg: hsl(var(--background));
+  --baseBase: hsl(var(--background));
+  --baseBgSubtle: hsl(var(--secondary) / 0.45);
+  --baseBg: hsl(var(--secondary) / 0.7);
+  --baseBgHover: hsl(var(--secondary));
+  --baseBgActive: hsl(var(--secondary));
+  --baseLine: hsl(var(--border) / 0.45);
+  --baseBorder: hsl(var(--border) / 0.6);
+  --baseBorderHover: hsl(var(--border));
+  --baseSolid: hsl(var(--muted-foreground));
+  --baseText: hsl(var(--muted-foreground));
+  --baseTextContrast: hsl(var(--foreground));
+  --accentText: hsl(var(--primary));
+  --accentSolid: hsl(var(--primary));
+  --accentSolidHover: hsl(var(--primary) / 0.9);
+  background: transparent;
+  color: hsl(var(--foreground));
+}
+
+.netcatty-mdx-editor,
+.netcatty-mdx-editor .mdxeditor-root-contenteditable {
+  min-height: 100%;
+  overflow: visible;
+}
+
+.mdxeditor-popup-container.netcatty-mdx-editor {
+  position: fixed;
+  inset: 0;
+  z-index: 200000;
+  min-height: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.mdxeditor-popup-container.netcatty-mdx-editor [data-radix-popper-content-wrapper],
+.mdxeditor-popup-container.netcatty-mdx-editor [role="dialog"],
+.mdxeditor-popup-container.netcatty-mdx-editor [class*="_tableColumnEditorPopoverContent_"] {
+  pointer-events: auto;
+}
+
+.netcatty-mdx-content {
+  min-height: calc(100vh - 15rem);
+  padding: 0;
+  color: hsl(var(--foreground) / 0.9);
+  font-size: 15px;
+  line-height: 1.75;
+  outline: none;
+}
+
+.netcatty-mdx-content:focus {
+  outline: none;
+}
+
+.netcatty-mdx-content p {
+  margin: 0.55rem 0;
+}
+
+.netcatty-mdx-content[contenteditable="true"] > p:first-child {
+  min-height: 1.85em;
+}
+
+.netcatty-mdx-editor .mdxeditor-root-contenteditable > .netcatty-mdx-content:not([contenteditable]) {
+  top: 0;
+  padding: 0 !important;
+  color: hsl(var(--muted-foreground));
+  line-height: 1.75;
+}
+
+.netcatty-mdx-editor .mdxeditor-root-contenteditable > .netcatty-mdx-content:not([contenteditable]) p {
+  margin: 0;
+}
+
+.netcatty-mdx-content h1,
+.netcatty-mdx-content h2,
+.netcatty-mdx-content h3 {
+  color: hsl(var(--foreground));
+  font-weight: 650;
+  letter-spacing: 0;
+}
+
+.netcatty-mdx-content h1 {
+  margin: 1.1rem 0 0.7rem;
+  font-size: 1.7rem;
+  line-height: 1.2;
+}
+
+.netcatty-mdx-content h2 {
+  margin: 1rem 0 0.6rem;
+  font-size: 1.3rem;
+  line-height: 1.25;
+}
+
+.netcatty-mdx-content h3 {
+  margin: 0.85rem 0 0.5rem;
+  font-size: 1.05rem;
+  line-height: 1.35;
+}
+
+.netcatty-mdx-content ul,
+.netcatty-mdx-content ol {
+  margin: 0.55rem 0;
+  padding-left: 1.35rem;
+}
+
+.netcatty-mdx-content li {
+  margin: 0.25rem 0;
+}
+
+.netcatty-mdx-content code {
+  border-radius: 4px;
+  background: hsl(var(--secondary) / 0.8);
+  padding: 0.12rem 0.3rem;
+  font-family: var(--font-mono);
+  font-size: 0.86em;
+}
+
+.netcatty-mdx-content pre {
+  border: 1px solid hsl(var(--border) / 0.45);
+  border-radius: 6px;
+  background: hsl(var(--secondary) / 0.35);
+  padding: 0.75rem;
+}
+
+.netcatty-mdx-content blockquote {
+  margin: 0.7rem 0;
+  border-left: 2px solid hsl(var(--border));
+  padding-left: 0.85rem;
+  color: hsl(var(--muted-foreground));
+}
+
+.netcatty-mdx-content hr {
+  margin: 1.35rem 0;
+  border-color: hsl(var(--border) / 0.45);
+}
+
+.netcatty-mdx-content table:not([class*="_tableEditor_"]) {
+  margin: 0.9rem 0;
+  width: max-content;
+  max-width: 100%;
+  border-collapse: collapse;
+  border: 1px solid hsl(var(--border));
+}
+
+.netcatty-mdx-content table:not([class*="_tableEditor_"]) th,
+.netcatty-mdx-content table:not([class*="_tableEditor_"]) td {
+  border: 1px solid hsl(var(--border) / 0.45);
+  padding: 0.42rem 0.65rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+.netcatty-mdx-content table:not([class*="_tableEditor_"]) th {
+  font-weight: 650;
+}
+
+.netcatty-mdx-content a {
+  color: hsl(var(--primary));
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
+}
+
+.netcatty-mdx-content a[data-netcatty-host-link="true"] {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.28em;
+}
+
+.netcatty-mdx-content a[data-netcatty-host-link="true"]::before {
+  content: "";
+  display: inline-block;
+  width: 0.92em;
+  height: 0.92em;
+  flex: 0 0 auto;
+  background-color: currentColor;
+  transform: translateY(0.12em);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect width='16' height='10' x='4' y='5' rx='2'/%3E%3Cpath d='M12 15v4'/%3E%3Cpath d='M8 19h8'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect width='16' height='10' x='4' y='5' rx='2'/%3E%3Cpath d='M12 15v4'/%3E%3Cpath d='M8 19h8'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+
+.dark .netcatty-mdx-content table:not([class*="_tableEditor_"]) {
+  border-color: hsl(var(--foreground) / 0.32);
+}
+
+.dark .netcatty-mdx-content table:not([class*="_tableEditor_"]) th,
+.dark .netcatty-mdx-content table:not([class*="_tableEditor_"]) td {
+  border-color: hsl(var(--foreground) / 0.18);
+}
+
+.netcatty-mdx-editor [class*="_tableColumnEditorTrigger_"],
+.netcatty-mdx-editor [class*="_tableRowEditorTrigger_"],
+.netcatty-mdx-editor [class*="_addRowButton_"],
+.netcatty-mdx-editor [class*="_addColumnButton_"],
+.netcatty-mdx-editor [class*="_tableColumnEditorToolbar_"] button {
+  cursor: pointer !important;
+}
+
+.netcatty-mdx-editor [class*="_tableColumnEditorPopoverContent_"] {
+  z-index: 80;
+  background: hsl(var(--popover));
+  color: hsl(var(--popover-foreground));
+}
+
+.netcatty-mdx-editor [data-radix-popper-content-wrapper] {
+  z-index: 90 !important;
+}
+
+.netcatty-mdx-editor [class*="_tableEditor_"] > tbody > tr > td:not([class*="_toolCell_"]),
+.netcatty-mdx-editor [class*="_tableEditor_"] > tbody > tr > th:not([class*="_toolCell_"]):not([data-tool-cell="true"]) {
+  border-color: hsl(var(--border)) !important;
+}
+
+.dark .netcatty-mdx-editor [class*="_tableEditor_"] > tbody > tr > td:not([class*="_toolCell_"]),
+.dark .netcatty-mdx-editor [class*="_tableEditor_"] > tbody > tr > th:not([class*="_toolCell_"]):not([data-tool-cell="true"]) {
+  border-color: hsl(var(--foreground) / 0.3) !important;
 }

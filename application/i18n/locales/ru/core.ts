@@ -603,7 +603,7 @@ export const ruCoreMessages: Messages = {
   'sync.autoSync.emptyVaultConflict.restoreDesc': 'Рекомендуется — восстановить ваши хосты, ключи и сниппеты из облачной резервной копии',
   'sync.autoSync.emptyVaultConflict.keepEmpty': 'Оставить пустым',
   'sync.autoSync.emptyVaultConflict.keepEmptyDesc': 'Начать заново с пустым хранилищем',
-  'sync.autoSync.emptyVaultConflict.cloudSummary': '{hosts} хостов, {keys} ключей, {snippets} сниппетов, {proxyProfiles} прокси',
+  'sync.autoSync.emptyVaultConflict.cloudSummary': '{hosts} хостов, {keys} ключей, {snippets} сниппетов, {notes} заметок, {proxyProfiles} прокси',
   'sync.autoSync.emptyVaultManual': 'Синхронизация невозможна: локальное хранилище пусто. Сначала восстановите его из локальной резервной копии или включите принудительную отправку в панели синхронизации.',
 
   'sync.blocked.title': 'Синхронизация приостановлена',
@@ -640,6 +640,7 @@ export const ruCoreMessages: Messages = {
   'vault.nav.proxies': 'Прокси',
   'vault.nav.portForwarding': 'Проброс портов',
   'vault.nav.snippets': 'Сниппеты',
+  'vault.nav.notes': 'Заметки',
   'vault.nav.knownHosts': 'Известные хосты',
   'vault.nav.logs': 'Журналы',
 

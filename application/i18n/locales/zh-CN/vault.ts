@@ -1,6 +1,26 @@
 import type { Messages } from '../types';
 
 export const zhCNVaultMessages: Messages = {
+  // Notes
+  'notes.search.placeholder': '搜索笔记、主机、标签...',
+  'notes.action.newNote': '新建笔记',
+  'notes.action.newGroup': '新建文件夹',
+  'notes.group.prompt': '文件夹路径',
+  'notes.group.all': '笔记本',
+  'notes.group.ungrouped': '未分组',
+  'notes.section.notebooks': '笔记本',
+  'notes.section.notes': '笔记',
+  'notes.mode.edit': '编辑',
+  'notes.mode.split': '分屏',
+  'notes.mode.preview': '预览',
+  'notes.title.placeholder': '笔记标题',
+  'notes.editor.placeholder': '在这里写 Markdown 笔记...',
+  'notes.preview.empty': '暂无内容可预览。',
+  'notes.empty.title': '还没有笔记',
+  'notes.empty.desc': '可以记录运维手册、临时备忘、服务器交接信息。',
+  'notes.empty.group': '这个笔记本里还没有笔记。',
+  'notes.search.noResults': '没有找到笔记。',
+
   // Select Host panel
   'selectHost.title': '选择主机',
   'selectHost.noHostsFound': '未找到主机',
@@ -582,7 +602,7 @@ export const zhCNVaultMessages: Messages = {
   'cloudSync.localBackups.reason.appVersionChange': '版本变化前',
   'cloudSync.localBackups.reason.beforeRestore': '恢复前',
   'cloudSync.localBackups.versionChange': '{from} -> {to}',
-  'cloudSync.localBackups.counts': '{hosts} 台主机，{keys} 个密钥，{snippets} 个代码片段',
+  'cloudSync.localBackups.counts': '{hosts} 台主机，{keys} 个密钥，{snippets} 个代码片段，{notes} 条笔记',
   'cloudSync.localBackups.restore': '恢复',
   'cloudSync.localBackups.restoreSuccess': '已恢复本地备份。',
   'cloudSync.localBackups.restoreFailedTitle': '恢复失败',
@@ -607,6 +627,7 @@ export const zhCNVaultMessages: Messages = {
   'cloudSync.revisionHistory.hosts': '主机',
   'cloudSync.revisionHistory.keys': '密钥',
   'cloudSync.revisionHistory.snippets': '代码片段',
+  'cloudSync.revisionHistory.notes': '笔记',
   'cloudSync.revisionHistory.identities': '身份',
   'cloudSync.revisionHistory.restoreButton': '恢复此版本',
   'cloudSync.revisionHistory.restored': '已从选中的修订恢复主机库数据。',
@@ -659,6 +680,8 @@ export const zhCNVaultMessages: Messages = {
   'cloudSync.conflict.entity.identities': '身份',
   'cloudSync.conflict.entity.proxyProfiles': '代理配置',
   'cloudSync.conflict.entity.snippets': '片段',
+  'cloudSync.conflict.entity.notes': '笔记',
+  'cloudSync.conflict.entity.noteGroups': '笔记分组',
   'cloudSync.conflict.entity.customGroups': '分组',
   'cloudSync.conflict.entity.snippetPackages': '片段包',
   'cloudSync.conflict.entity.portForwardingRules': '端口转发',

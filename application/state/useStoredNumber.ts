@@ -14,6 +14,7 @@ export const useStoredNumber = (
     clamp?: { min: number; max: number },
 ) => {
     const [value, setValue] = useState<number>(() => {
+        if (typeof globalThis.localStorage === "undefined") return fallback;
         const stored = localStorageAdapter.readNumber(storageKey);
         if (stored === null) return fallback;
         if (clamp) return Math.max(clamp.min, Math.min(clamp.max, stored));
@@ -21,7 +22,10 @@ export const useStoredNumber = (
     });
 
     const persist = useCallback(
-        (v: number) => localStorageAdapter.writeNumber(storageKey, v),
+        (v: number) => {
+            if (typeof globalThis.localStorage === "undefined") return false;
+            return localStorageAdapter.writeNumber(storageKey, v);
+        },
         [storageKey],
     );
 

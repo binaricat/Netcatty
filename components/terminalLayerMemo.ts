@@ -9,6 +9,9 @@ export const terminalLayerAreEqual = (
   prev.keys === next.keys &&
   prev.snippets === next.snippets &&
   prev.snippetPackages === next.snippetPackages &&
+  prev.notes === next.notes &&
+  prev.noteGroups === next.noteGroups &&
+  prev.openNoteRequest === next.openNoteRequest &&
   prev.sessions === next.sessions &&
   prev.workspaces === next.workspaces &&
   prev.knownHosts === next.knownHosts &&
@@ -49,6 +52,8 @@ export const terminalLayerAreEqual = (
   prev.onToggleBroadcast === next.onToggleBroadcast &&
   prev.updateSnippets === next.updateSnippets &&
   prev.updateSnippetPackages === next.updateSnippetPackages &&
+  prev.updateNotes === next.updateNotes &&
+  prev.updateNoteGroups === next.updateNoteGroups &&
   prev.toggleScriptsSidePanelRef === next.toggleScriptsSidePanelRef &&
   prev.toggleSidePanelRef === next.toggleSidePanelRef &&
   prev.identities === next.identities &&

@@ -25,6 +25,7 @@ type HistoryPreview = {
     hostCount: number;
     keyCount: number;
     snippetCount: number;
+    noteCount: number;
     identityCount: number;
     portForwardingRuleCount: number;
   };
@@ -306,6 +307,10 @@ export const CloudSyncDialogs: React.FC<CloudSyncDialogsProps> = ({
                                     <div className="flex justify-between px-2 py-1 bg-muted/30 rounded">
                                         <span className="text-muted-foreground">{t('cloudSync.revisionHistory.snippets')}</span>
                                         <span className="font-medium">{historyPreview.preview.snippetCount}</span>
+                                    </div>
+                                    <div className="flex justify-between px-2 py-1 bg-muted/30 rounded">
+                                        <span className="text-muted-foreground">{t('cloudSync.revisionHistory.notes')}</span>
+                                        <span className="font-medium">{historyPreview.preview.noteCount}</span>
                                     </div>
                                     <div className="flex justify-between px-2 py-1 bg-muted/30 rounded">
                                         <span className="text-muted-foreground">{t('cloudSync.revisionHistory.identities')}</span>
