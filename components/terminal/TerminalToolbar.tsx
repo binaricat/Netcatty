@@ -2,7 +2,7 @@
  * Terminal Toolbar
  * Displays high-frequency terminal actions and close button in the terminal status bar.
  */
-import { Check, ChevronRight, Download, FolderInput, History, Languages, MoreVertical, X, Zap, Palette, Search, TextCursorInput, Upload } from 'lucide-react';
+import { Check, ChevronRight, Download, FolderInput, FolderSync, History, Languages, MoreVertical, X, Zap, Palette, Search, TextCursorInput, Upload } from 'lucide-react';
 import React, { useState } from 'react';
 import { useI18n } from '../../application/i18n/I18nProvider';
 import { Host, Snippet } from '../../types';
@@ -27,6 +27,7 @@ export interface TerminalToolbarProps {
     onOpenScripts: () => void;
     onOpenHistory?: () => void;
     onOpenTheme: () => void;
+    onConfigureOsc7?: () => void;
     onUpdateHost?: (host: Host) => void;
     showClose?: boolean;
     onClose?: () => void;
@@ -54,6 +55,7 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
     onOpenScripts,
     onOpenHistory,
     onOpenTheme,
+    onConfigureOsc7,
     onUpdateHost,
     showClose,
     onClose,
@@ -328,6 +330,21 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
                                 <History size={12} className="shrink-0" />
                                 <span className="flex-1 text-left truncate">
                                     {status === 'connected' ? t("terminal.toolbar.history") : t("terminal.toolbar.availableAfterConnect")}
+                                </span>
+                            </button>
+                        </PopoverClose>
+                    )}
+                    {onConfigureOsc7 && !hidesSftp && (
+                        <PopoverClose asChild>
+                            <button
+                                type="button"
+                                className={menuItemClass}
+                                disabled={status !== 'connected'}
+                                onClick={onConfigureOsc7}
+                            >
+                                <FolderSync size={12} className="shrink-0" />
+                                <span className="flex-1 text-left truncate">
+                                    {status === 'connected' ? t("terminal.toolbar.configureOsc7") : t("terminal.toolbar.availableAfterConnect")}
                                 </span>
                             </button>
                         </PopoverClose>
