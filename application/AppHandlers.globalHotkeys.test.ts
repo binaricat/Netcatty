@@ -189,6 +189,7 @@ test('connection log host snapshot includes custom host icon fields', () => {
       hostDistro: 'ubuntu',
       hostIconMode: 'custom',
       hostIconId: 'database',
+      hostIconColorMode: 'manual',
       hostIconColor: 'blue',
     },
   );

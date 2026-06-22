@@ -1,5 +1,5 @@
 // Known Hosts - discovered from system SSH known_hosts file
-import type { HostIconColorId, HostIconId, HostIconMode } from './connection';
+import type { HostIconColorId, HostIconColorMode, HostIconId, HostIconMode } from './connection';
 
 export interface KnownHost {
   id: string;
@@ -50,7 +50,9 @@ export interface ConnectionLog {
   hostDistro?: string; // Snapshot of the connected host distro/vendor icon id
   hostIconMode?: HostIconMode; // Snapshot of the host icon mode for log icons
   hostIconId?: HostIconId; // Snapshot of the built-in host icon id
+  hostIconColorMode?: HostIconColorMode; // Snapshot of the host icon color source
   hostIconColor?: HostIconColorId; // Snapshot of the host icon color id
+  hostIconColorCustom?: string; // Snapshot of the custom host icon color
   startTime: number; // Connection start timestamp
   endTime?: number; // Connection end timestamp (undefined if still active)
   localUsername: string; // System username of the local user

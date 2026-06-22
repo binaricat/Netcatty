@@ -338,7 +338,9 @@ export const sanitizeHost = (host: Host): Host => {
     manualDistro: cleanManualDistro || undefined,
     iconMode: undefined,
     iconId: undefined,
+    iconColorMode: undefined,
     iconColor: undefined,
+    iconColorCustom: undefined,
     ...cleanHostIcon,
     notes: cleanNotes,
   };

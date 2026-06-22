@@ -17,7 +17,9 @@ export const getLogHostVisualSnapshot = (host: Host) => {
     hostDistro: getEffectiveHostDistro(host) || undefined,
     hostIconMode: icon.iconMode,
     hostIconId: icon.iconId,
-    hostIconColor: icon.iconColor,
+    ...(icon.iconColorMode ? { hostIconColorMode: icon.iconColorMode } : {}),
+    ...(icon.iconColor ? { hostIconColor: icon.iconColor } : {}),
+    ...(icon.iconColorCustom ? { hostIconColorCustom: icon.iconColorCustom } : {}),
   };
 };
 

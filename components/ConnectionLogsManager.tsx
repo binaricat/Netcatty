@@ -71,7 +71,9 @@ const LogItem = memo<LogItemProps>(({ log, onToggleSaved, onDelete, onClick }) =
     const customHostIcon = resolveHostIconAppearance({
         iconMode: log.hostIconMode,
         iconId: log.hostIconId,
+        iconColorMode: log.hostIconColorMode,
         iconColor: log.hostIconColor,
+        iconColorCustom: log.hostIconColorCustom,
     });
     const hasPersistedHostIcon = !isLocal && !isSerial && (!!log.hostDistro || !!customHostIcon);
 
@@ -109,7 +111,9 @@ const LogItem = memo<LogItemProps>(({ log, onToggleSaved, onDelete, onClick }) =
                             distroMode: "auto",
                             iconMode: log.hostIconMode,
                             iconId: log.hostIconId,
+                            iconColorMode: log.hostIconColorMode,
                             iconColor: log.hostIconColor,
+                            iconColorCustom: log.hostIconColorCustom,
                         }}
                         fallback={(log.hostOs ?? "linux")[0].toUpperCase()}
                         size="log"

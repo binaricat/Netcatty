@@ -50,6 +50,7 @@ export interface EnvVar {
 // Protocol type for connections
 export type HostProtocol = 'ssh' | 'telnet' | 'mosh' | 'et' | 'local' | 'serial';
 export type HostIconMode = 'auto' | 'custom';
+export type HostIconColorMode = 'auto' | 'manual';
 export type HostIconId =
   | 'server'
   | 'terminal'
@@ -172,7 +173,9 @@ export interface Host {
   manualDistro?: string; // manually selected distro id when distroMode='manual'
   iconMode?: HostIconMode; // Optional host icon mode. Missing/auto preserves distro detection.
   iconId?: HostIconId; // Curated icon override used when iconMode='custom'
-  iconColor?: HostIconColorId; // Palette color used with automatic or custom host icons
+  iconColorMode?: HostIconColorMode; // Whether icon color follows the icon default or a manual override
+  iconColor?: HostIconColorId; // Palette color used when iconColorMode='manual'
+  iconColorCustom?: string; // Custom hex color used when iconColorMode='manual'
   // Multi-protocol support
   protocols?: ProtocolConfig[]; // Multiple protocol configurations
   telnetPort?: number; // Telnet-specific port (for quick access)

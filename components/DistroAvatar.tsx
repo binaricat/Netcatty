@@ -73,7 +73,7 @@ export const DISTRO_COLORS: Record<string, string> = {
 
 type DistroAvatarProps = {
   host: Pick<Host, "distro" | "manualDistro" | "distroMode" | "os"> &
-    Partial<Pick<Host, "protocol" | "iconMode" | "iconId" | "iconColor">>;
+    Partial<Pick<Host, "protocol" | "iconMode" | "iconId" | "iconColorMode" | "iconColor" | "iconColorCustom">>;
   fallback: string;
   className?: string;
   /** xs matches top tab bar icons (h-4 rounded rect) */

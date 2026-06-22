@@ -21,7 +21,7 @@ const availableKey: SSHKey = {
   created: 1,
 };
 
-const renderConnectionSections = () =>
+const renderConnectionSections = (formOverrides: Record<string, unknown> = {}) =>
   renderToStaticMarkup(
     React.createElement(
       TooltipProvider,
@@ -38,6 +38,7 @@ const renderConnectionSections = () =>
           os: "linux",
           authMethod: "key",
           identityFileId: availableKey.id,
+          ...formOverrides,
         },
         update: () => {},
         groupDefaults: undefined,
@@ -79,4 +80,17 @@ test("selected host credential keeps the remove button visible with a long name"
   );
   assert.match(markup, /class="text-sm min-w-0 flex-1 truncate"/);
   assert.match(markup, /class="[^"]*h-6 w-6 shrink-0[^"]*"/);
+});
+
+test("color and icon settings render for non-Linux hosts", () => {
+  const markup = renderConnectionSections({
+    os: "macos",
+    distro: "macos",
+    iconMode: "custom",
+    iconId: "terminal",
+  });
+
+  assert.match(markup, /hostDetails\.icon\.sectionTitle/);
+  assert.match(markup, /hostDetails\.icon\.colorLabel/);
+  assert.match(markup, /hostDetails\.icon\.manualLabel/);
 });

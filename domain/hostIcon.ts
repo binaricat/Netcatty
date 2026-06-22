@@ -1,4 +1,4 @@
-import type { Host, HostIconColorId, HostIconId, HostIconMode } from "./models";
+import type { Host, HostIconColorId, HostIconColorMode, HostIconId, HostIconMode } from "./models";
 
 export const DEFAULT_HOST_ICON_ID: HostIconId = "server";
 export const DEFAULT_HOST_ICON_COLOR: HostIconColorId = "blue";
@@ -45,14 +45,37 @@ export const HOST_ICON_COLORS = [
   { id: "zinc", hex: "#52525B" },
 ] as const satisfies readonly { id: HostIconColorId; hex: string }[];
 
+export const HOST_ICON_DEFAULT_COLORS = {
+  "server": "blue",
+  "terminal": "slate",
+  "database": "cyan",
+  "cloud": "sky",
+  "router": "orange",
+  "shield": "green",
+  "code": "violet",
+  "box": "amber",
+  "globe": "teal",
+  "cpu": "indigo",
+  "hard-drive": "zinc",
+  "network": "lime",
+  "wifi": "purple",
+  "lock": "rose",
+  "key": "amber",
+  "monitor": "sky",
+  "container": "teal",
+  "activity": "red",
+  "zap": "orange",
+  "server-cog": "slate",
+} as const satisfies Record<HostIconId, HostIconColorId>;
+
 export type HostIconAppearance = {
   iconId: HostIconId;
-  colorId: HostIconColorId;
+  colorId?: HostIconColorId;
   colorHex: string;
 };
 
 export type HostIconColorAppearance = {
-  colorId: HostIconColorId;
+  colorId?: HostIconColorId;
   colorHex: string;
 };
 
@@ -65,56 +88,100 @@ export const isHostIconId = (value: unknown): value is HostIconId =>
 export const isHostIconColorId = (value: unknown): value is HostIconColorId =>
   typeof value === "string" && HOST_ICON_COLORS.some((color) => color.id === value);
 
+export const isHostIconColorMode = (value: unknown): value is HostIconColorMode =>
+  value === "auto" || value === "manual";
+
+export const isHostIconCustomColor = (value: unknown): value is string =>
+  typeof value === "string" && /^#[0-9a-fA-F]{6}$/.test(value);
+
 const resolveColorHex = (colorId: HostIconColorId): string =>
   HOST_ICON_COLORS.find((color) => color.id === colorId)?.hex || HOST_ICON_COLORS[0].hex;
 
+export const resolveHostIconDefaultColorHex = (iconId: HostIconId): string =>
+  resolveColorHex(HOST_ICON_DEFAULT_COLORS[iconId] || DEFAULT_HOST_ICON_COLOR);
+
 export const resolveHostIconColorAppearance = (
-  host: Partial<Pick<Host, "iconColor">>,
+  host: Partial<Pick<Host, "iconColorMode" | "iconColor" | "iconColorCustom">>,
 ): HostIconColorAppearance | null => {
-  if (!isHostIconColorId(host.iconColor)) return null;
+  const manualColor = host.iconColorMode === "manual" ||
+    (host.iconColorMode !== "auto" && (isHostIconColorId(host.iconColor) || isHostIconCustomColor(host.iconColorCustom)));
+  if (!manualColor) return null;
+  if (isHostIconCustomColor(host.iconColorCustom)) {
+    return {
+      colorHex: host.iconColorCustom,
+    };
+  }
   return {
-    colorId: host.iconColor,
-    colorHex: resolveColorHex(host.iconColor),
+    colorId: isHostIconColorId(host.iconColor) ? host.iconColor : DEFAULT_HOST_ICON_COLOR,
+    colorHex: resolveColorHex(isHostIconColorId(host.iconColor) ? host.iconColor : DEFAULT_HOST_ICON_COLOR),
   };
 };
 
 export const resolveHostIconAppearance = (
-  host: Partial<Pick<Host, "iconMode" | "iconId" | "iconColor">>,
+  host: Partial<Pick<Host, "iconMode" | "iconId" | "iconColorMode" | "iconColor" | "iconColorCustom">>,
 ): HostIconAppearance | null => {
   if (host.iconMode !== "custom") return null;
-  if (!isHostIconId(host.iconId) || !isHostIconColorId(host.iconColor)) return null;
+  if (!isHostIconId(host.iconId)) return null;
+  const color = resolveHostIconColorAppearance(host);
   return {
     iconId: host.iconId,
-    colorId: host.iconColor,
-    colorHex: resolveColorHex(host.iconColor),
+    ...(color?.colorId ? { colorId: color.colorId } : {}),
+    colorHex: color?.colorHex || resolveHostIconDefaultColorHex(host.iconId),
   };
 };
 
-export const normalizeHostIconSelection = <T extends Partial<Pick<Host, "iconMode" | "iconId" | "iconColor">>>(
+export const normalizeHostIconSelection = <T extends Partial<Pick<Host, "iconMode" | "iconId" | "iconColorMode" | "iconColor" | "iconColorCustom">>>(
   host: T,
-): Pick<Host, "iconMode" | "iconId" | "iconColor"> => {
+): Pick<Host, "iconMode" | "iconId" | "iconColorMode" | "iconColor" | "iconColorCustom"> => {
+  const iconColorMode = host.iconColorMode === "manual" ||
+    (host.iconColorMode !== "auto" && (isHostIconColorId(host.iconColor) || isHostIconCustomColor(host.iconColorCustom)))
+    ? "manual"
+    : undefined;
+  const iconColor = iconColorMode === "manual" && isHostIconColorId(host.iconColor) ? host.iconColor : undefined;
+  const iconColorCustom = iconColorMode === "manual" && isHostIconCustomColor(host.iconColorCustom) ? host.iconColorCustom : undefined;
+  const colorFields = {
+    ...(iconColorMode ? { iconColorMode } : {}),
+    ...(iconColor ? { iconColor } : {}),
+    ...(iconColorCustom ? { iconColorCustom } : {}),
+  };
   if (host.iconMode !== "custom") {
-    const iconColor = isHostIconColorId(host.iconColor) ? host.iconColor : undefined;
-    return iconColor ? { iconMode: "auto", iconColor } : {};
+    return iconColorMode ? { iconMode: "auto", ...colorFields } : {};
   }
   const iconId = isHostIconId(host.iconId) ? host.iconId : DEFAULT_HOST_ICON_ID;
-  const iconColor = isHostIconColorId(host.iconColor) ? host.iconColor : DEFAULT_HOST_ICON_COLOR;
-  return { iconMode: "custom", iconId, iconColor };
+  return { iconMode: "custom", iconId, ...colorFields };
 };
 
-export const sanitizeHostIconFields = <T extends Partial<Pick<Host, "iconMode" | "iconId" | "iconColor">>>(
+export const sanitizeHostIconFields = <T extends Partial<Pick<Host, "iconMode" | "iconId" | "iconColorMode" | "iconColor" | "iconColorCustom">>>(
   host: T,
-): Pick<Host, "iconMode" | "iconId" | "iconColor"> => {
+): Pick<Host, "iconMode" | "iconId" | "iconColorMode" | "iconColor" | "iconColorCustom"> => {
+  const iconColorMode = host.iconColorMode === "manual" ||
+    (host.iconColorMode !== "auto" && (isHostIconColorId(host.iconColor) || isHostIconCustomColor(host.iconColorCustom)))
+    ? "manual"
+    : undefined;
+  const iconColor = iconColorMode === "manual" && isHostIconColorId(host.iconColor) ? host.iconColor : undefined;
+  const iconColorCustom = iconColorMode === "manual" && isHostIconCustomColor(host.iconColorCustom) ? host.iconColorCustom : undefined;
+  const colorFields = {
+    ...(iconColorMode ? { iconColorMode } : {}),
+    ...(iconColor ? { iconColor } : {}),
+    ...(iconColorCustom ? { iconColorCustom } : {}),
+  };
   if (host.iconMode !== "custom") {
-    return isHostIconColorId(host.iconColor) ? { iconMode: "auto", iconColor: host.iconColor } : {};
+    return iconColorMode ? { iconMode: "auto", ...colorFields } : {};
   }
-  if (!isHostIconId(host.iconId) || !isHostIconColorId(host.iconColor)) return {};
-  return { iconMode: "custom", iconId: host.iconId, iconColor: host.iconColor };
+  if (!isHostIconId(host.iconId)) return {};
+  return { iconMode: "custom", iconId: host.iconId, ...colorFields };
 };
 
 export const clearHostIconAppearance = <T extends Record<string, unknown>>(
   host: T,
-): Omit<T, "iconMode" | "iconId" | "iconColor"> => {
-  const { iconMode: _iconMode, iconId: _iconId, iconColor: _iconColor, ...rest } = host;
+): Omit<T, "iconMode" | "iconId" | "iconColorMode" | "iconColor" | "iconColorCustom"> => {
+  const {
+    iconMode: _iconMode,
+    iconId: _iconId,
+    iconColorMode: _iconColorMode,
+    iconColor: _iconColor,
+    iconColorCustom: _iconColorCustom,
+    ...rest
+  } = host;
   return rest;
 };

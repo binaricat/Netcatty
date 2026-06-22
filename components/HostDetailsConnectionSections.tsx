@@ -1,7 +1,6 @@
 import React from "react";
 import { ChevronDown, Eye, EyeOff, FileKey, FolderLock, FolderOpen, Key, KeyRound, MapPin, Plus, Shield, Trash2, User, X } from "lucide-react";
 import type { Host } from "../types";
-import { cn } from "../lib/utils";
 import { DistroAvatar } from "./DistroAvatar";
 import { HostIconPicker } from "./HostIconPicker";
 import { Button } from "./ui/button";
@@ -42,7 +41,6 @@ export const HostDetailsConnectionSections: React.FC<HostDetailsConnectionSectio
   newKeyFilePath,
   setNewKeyFilePath,
   addLocalKeyFilePath,
-  handleDistroModeChange,
   distroOptions,
   effectiveFormDistro,
   getDistroOptionLabel,
@@ -70,28 +68,6 @@ export const HostDetailsConnectionSections: React.FC<HostDetailsConnectionSectio
               className="h-10 flex-1"
             />
           </div>
-        </HostDetailsSection>
-
-        <HostDetailsSection
-          icon={<DistroAvatar host={form as Host} fallback="H" size="sm" />}
-          title={t("hostDetails.icon.title")}
-          hint={t("hostDetails.icon.desc")}
-        >
-          <HostIconPicker
-            iconMode={form.iconMode}
-            iconId={form.iconId}
-            iconColor={form.iconColor}
-            onChange={(next) => {
-              update("iconMode", next.iconMode);
-              update("iconId", next.iconId);
-              update("iconColor", next.iconColor);
-            }}
-            onReset={() => {
-              update("iconMode", undefined);
-              update("iconId", undefined);
-              update("iconColor", undefined);
-            }}
-          />
         </HostDetailsSection>
 
         <HostDetailsSection
@@ -653,108 +629,33 @@ export const HostDetailsConnectionSections: React.FC<HostDetailsConnectionSectio
           </HostDetailsSettingRow>
         </HostDetailsSection>
 
-        {form.os === "linux" && (
-          <HostDetailsSection
-            icon={<img src="/distro/linux.svg" alt="Linux" className="h-3.5 w-3.5 opacity-70 dark:invert" />}
-            title={t("hostDetails.distro.title")}
-            hint={t("hostDetails.distro.desc")}
-          >
-            <div className="grid gap-2 md:grid-cols-2">
-              <div className="space-y-1">
-                <span className="text-xs text-muted-foreground">{t("hostDetails.distro.mode")}</span>
-                <Select
-                  value={form.distroMode || "auto"}
-                  onValueChange={(val) => handleDistroModeChange(val as "auto" | "manual")}
-                >
-                  <SelectTrigger className="h-8" aria-label={t("hostDetails.distro.mode")}>
-                    <span className="truncate whitespace-nowrap pr-2 text-left">
-                      {form.distroMode === "manual"
-                        ? t("hostDetails.distro.mode.manual")
-                        : t("hostDetails.distro.mode.auto")}
-                    </span>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="auto">{t("hostDetails.distro.mode.auto")}</SelectItem>
-                    <SelectItem value="manual">{t("hostDetails.distro.mode.manual")}</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {form.distroMode === "manual" ? (
-                <div className="space-y-1">
-                  <span className="text-xs text-muted-foreground">{t("hostDetails.distro.manualLabel")}</span>
-                  <Select
-                    value={form.manualDistro}
-                    onValueChange={(val) => update("manualDistro", val)}
-                  >
-                    <SelectTrigger className="h-8" aria-label={t("hostDetails.distro.manualLabel")}>
-                      {(() => {
-                        const selectedOption = distroOptions.find((option) => option.value === form.manualDistro);
-                        return selectedOption ? (
-                          <div className="flex min-w-0 items-center gap-2 pr-2">
-                            <div
-                              className={cn(
-                                "flex h-4 w-4 shrink-0 items-center justify-center overflow-hidden rounded-[2px]",
-                                selectedOption.bgClass,
-                              )}
-                            >
-                              {selectedOption.icon ? (
-                                <img
-                                  src={selectedOption.icon}
-                                  alt={selectedOption.label}
-                                  className="h-3 w-3 object-contain invert brightness-0"
-                                />
-                              ) : (
-                                <div className="h-2 w-2 rounded-full bg-white/70" />
-                              )}
-                            </div>
-                            <span className="truncate whitespace-nowrap">{selectedOption.label}</span>
-                          </div>
-                        ) : (
-                          <SelectValue placeholder={t("hostDetails.distro.unknown")} />
-                        );
-                      })()}
-                    </SelectTrigger>
-                    <SelectContent className="min-w-[14rem]">
-                      {distroOptions.map((option) => (
-                        <SelectItem key={option.value} value={option.value}>
-                          <div className="flex items-center gap-2">
-                            <div
-                              className={cn(
-                                "flex h-4 w-4 shrink-0 items-center justify-center overflow-hidden rounded-[2px]",
-                                option.bgClass,
-                              )}
-                            >
-                              {option.icon ? (
-                                <img
-                                  src={option.icon}
-                                  alt={option.label}
-                                  className="h-3 w-3 object-contain invert brightness-0"
-                                />
-                              ) : (
-                                <div className="h-2 w-2 rounded-full bg-white/70" />
-                              )}
-                            </div>
-                            <span className="whitespace-nowrap">{option.label}</span>
-                          </div>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              ) : (
-                <div className="space-y-1">
-                  <span className="text-xs text-muted-foreground">{t("hostDetails.distro.detectedLabel")}</span>
-                  <div className="flex h-8 items-center rounded-md border border-border/60 bg-background/50 px-3 text-sm">
-                    {effectiveFormDistro
-                      ? getDistroOptionLabel(effectiveFormDistro)
-                      : t("hostDetails.distro.unknown")}
-                  </div>
-                </div>
-              )}
-            </div>
-          </HostDetailsSection>
-        )}
+        <HostDetailsSection
+          icon={<DistroAvatar host={form as Host} fallback="H" size="sm" />}
+          title={t("hostDetails.icon.sectionTitle")}
+          hint={t("hostDetails.icon.desc")}
+        >
+          <HostIconPicker
+            distroMode={form.distroMode}
+            manualDistro={form.manualDistro}
+            effectiveDistro={effectiveFormDistro}
+            distroOptions={distroOptions}
+            getDistroOptionLabel={getDistroOptionLabel}
+            iconMode={form.iconMode}
+            iconId={form.iconId}
+            iconColorMode={form.iconColorMode}
+            iconColor={form.iconColor}
+            iconColorCustom={form.iconColorCustom}
+            onChange={(next) => {
+              if ("distroMode" in next) update("distroMode", next.distroMode);
+              if ("manualDistro" in next) update("manualDistro", next.manualDistro);
+              if ("iconMode" in next) update("iconMode", next.iconMode);
+              if ("iconId" in next) update("iconId", next.iconId);
+              if ("iconColorMode" in next) update("iconColorMode", next.iconColorMode);
+              if ("iconColor" in next) update("iconColor", next.iconColor);
+              if ("iconColorCustom" in next) update("iconColorCustom", next.iconColorCustom);
+            }}
+          />
+        </HostDetailsSection>
   </>
   );
 };
