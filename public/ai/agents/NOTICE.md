@@ -15,3 +15,8 @@
   `Factory.factory-vscode-extension` marketplace package
   (`extension/resources/icons/droid.svg`). The mark remains the property of
   Factory.ai and is used here only to identify Droid CLI sessions in the UI.
+
+## From [opencode](https://github.com/sst/opencode)
+
+- `opencode.svg` — copied from the official OpenCode brand asset
+  `packages/console/app/src/asset/brand/opencode-logo-light-square.svg`.

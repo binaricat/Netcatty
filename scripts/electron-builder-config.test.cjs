@@ -26,6 +26,8 @@ test("build.files excludes per-platform agent binaries", () => {
     "!node_modules/@openai/codex-{darwin,linux,linuxmusl,win32}-*/**/*",
     "!node_modules/@github/copilot-{darwin,linux,linuxmusl,win32}-*/**/*",
     "!node_modules/@github/copilot/**/*",
+    "!node_modules/opencode-{darwin,linux,linuxmusl,windows}-*/**/*",
+    "!node_modules/opencode-ai/**/*",
   ];
   for (const glob of expectExclusions) {
     assert.ok(

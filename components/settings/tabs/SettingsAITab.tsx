@@ -199,6 +199,7 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
     copilot: string;
     cursor: string;
     codebuddy: string;
+    opencode: string;
   } | null>(null);
   if (!initialManagedPathsRef.current) {
     initialManagedPathsRef.current = getInitialManagedAgentPaths(externalAgents);
@@ -258,6 +259,12 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
   const [codebuddyCustomPath, setCodebuddyCustomPath] = useState(() => initialManagedPathsRef.current?.codebuddy ?? "");
   const [isResolvingCodebuddy, setIsResolvingCodebuddy] = useState(false);
 
+  const [opencodePathInfo, setOpencodePathInfo] = useState<AgentPathInfo | null>(
+    () => getSavedManagedAgentPathInfo(externalAgents, "opencode"),
+  );
+  const [opencodeCustomPath, setOpencodeCustomPath] = useState(() => initialManagedPathsRef.current?.opencode ?? "");
+  const [isResolvingOpencode, setIsResolvingOpencode] = useState(false);
+
   const codebuddyManagedEnv = useMemo(
     () => externalAgents.find((a) => a.id === "discovered_codebuddy")?.env,
     [externalAgents],
@@ -295,7 +302,7 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
   useEffect(() => () => {
     mountedRef.current = false;
     codexRequestIdRef.current += 1;
-    for (const key of ["codex", "claude", "copilot", "cursor", "codebuddy"] as ManagedAgentKey[]) {
+    for (const key of ["codex", "claude", "copilot", "cursor", "codebuddy", "opencode"] as ManagedAgentKey[]) {
       agentPathRequestIdRef.current[key] = (agentPathRequestIdRef.current[key] ?? 0) + 1;
     }
   }, []);
@@ -313,7 +320,9 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
           ? setCopilotPathInfo
           : agentKey === "cursor"
             ? setCursorPathInfo
-            : setCodebuddyPathInfo;
+            : agentKey === "codebuddy"
+              ? setCodebuddyPathInfo
+              : setOpencodePathInfo;
 
     setInfo(result);
 
@@ -352,7 +361,9 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
           ? setIsResolvingCopilot
           : agentKey === "cursor"
             ? setIsResolvingCursor
-            : setIsResolvingCodebuddy;
+            : agentKey === "codebuddy"
+              ? setIsResolvingCodebuddy
+              : setIsResolvingOpencode;
 
     setResolving(true);
     const requestId = (agentPathRequestIdRef.current[agentKey] ?? 0) + 1;
@@ -383,7 +394,9 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
               ? setCopilotPathInfo
               : agentKey === "cursor"
                 ? setCursorPathInfo
-                : setCodebuddyPathInfo;
+                : agentKey === "codebuddy"
+                  ? setCodebuddyPathInfo
+                  : setOpencodePathInfo;
         setInfo(result);
         return result;
       }
@@ -420,6 +433,7 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
         options: { apiKeyPresent: Boolean(cursorApiKeyEncrypted) },
       },
       { key: "codebuddy", delayMs: 1280, path: initialPaths?.codebuddy ?? "" },
+      { key: "opencode", delayMs: 1560, path: initialPaths?.opencode ?? "" },
     ];
     const cancelTasks = tasks
       .filter((task) => !autoResolvedAgentStateRef.current[task.key])
@@ -570,7 +584,9 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
           ? copilotCustomPath
           : agentKey === "codebuddy"
             ? codebuddyCustomPath
-            : "";
+            : agentKey === "opencode"
+              ? opencodeCustomPath
+              : "";
     const result = await resolveAgentPath(agentKey, customPath, {
       refreshShellEnv: true,
       commandSource: customPath.trim() ? "manual" : "auto",
@@ -582,7 +598,7 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
         codexPath: result?.path || customPath.trim() || undefined,
       });
     }
-  }, [claudeCustomPath, codexCustomPath, copilotCustomPath, codebuddyCustomPath, resolveAgentPath, refreshCodexIntegration]);
+  }, [claudeCustomPath, codexCustomPath, copilotCustomPath, codebuddyCustomPath, opencodeCustomPath, resolveAgentPath, refreshCodexIntegration]);
 
   const handleResetCustomPath = useCallback(async (agentKey: ManagedAgentKey) => {
     if (agentKey === "codex") {
@@ -593,6 +609,8 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
       setCopilotCustomPath("");
     } else if (agentKey === "codebuddy") {
       setCodebuddyCustomPath("");
+    } else if (agentKey === "opencode") {
+      setOpencodeCustomPath("");
     }
 
     const result = await resolveAgentPath(agentKey, "", {
@@ -951,6 +969,21 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
               onInternetEnvChange={(v) => updateCodebuddyEnv(v, codebuddyEnvText)}
               envText={codebuddyEnvText}
               onEnvTextChange={(v) => updateCodebuddyEnv(codebuddyInternetEnv, v)}
+            />
+          </SettingsSection>
+
+          <SettingsSection
+            title={t('ai.opencode.title')}
+            leading={<AgentIconBadge agent={{ id: "opencode", icon: "opencode", name: "OpenCode" }} variant="plain" className="h-5 w-5 text-muted-foreground/90" />}
+          >
+            <CopilotCliCard
+              pathInfo={opencodePathInfo}
+              isResolvingPath={isResolvingOpencode}
+              customPath={opencodeCustomPath}
+              onCustomPathChange={setOpencodeCustomPath}
+              onRecheckPath={() => void handleCheckCustomPath("opencode")}
+              onResetPath={() => void handleResetCustomPath("opencode")}
+              i18nPrefix="ai.opencode"
             />
           </SettingsSection>
 

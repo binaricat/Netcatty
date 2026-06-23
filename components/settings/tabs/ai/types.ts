@@ -149,6 +149,12 @@ export const AGENT_DEFAULTS: Record<string, Omit<ExternalAgentConfig, "id" | "co
     icon: "codebuddy",
     sdkBackend: "codebuddy",
   },
+  opencode: {
+    name: "OpenCode",
+    args: [],
+    icon: "opencode",
+    sdkBackend: "opencode",
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -175,7 +181,7 @@ export function normalizeCodexBridgeError(error: unknown): string {
 // Provider icon helper
 // ---------------------------------------------------------------------------
 
-export type SettingsIconId = AIProviderId | "claude" | "copilot" | "codebuddy";
+export type SettingsIconId = AIProviderId | "claude" | "copilot" | "codebuddy" | "opencode";
 
 export const SETTINGS_ICON_PATHS: Record<SettingsIconId, string> = {
   openai: "/ai/providers/openai.svg",
@@ -183,6 +189,7 @@ export const SETTINGS_ICON_PATHS: Record<SettingsIconId, string> = {
   claude: "/ai/agents/claude.svg",
   copilot: "/ai/agents/copilot.svg",
   codebuddy: "/ai/agents/codebuddy.svg",
+  opencode: "/ai/agents/opencode.svg",
   google: "/ai/providers/google.svg",
   ollama: "/ai/providers/ollama.svg",
   openrouter: "/ai/providers/openrouter.svg",
@@ -201,6 +208,7 @@ export const SETTINGS_ICON_COLORS: Record<SettingsIconId, string> = {
   claude: "bg-orange-600",
   copilot: "border border-zinc-300 bg-white",
   codebuddy: "bg-indigo-600",
+  opencode: "bg-teal-600",
   google: "bg-blue-600",
   ollama: "bg-purple-600",
   openrouter: "bg-pink-600",

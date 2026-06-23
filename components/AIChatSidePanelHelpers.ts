@@ -30,7 +30,40 @@ export function isCopilotAgentConfig(agent?: ExternalAgentConfig): boolean {
 
 export function shouldLoadSdkRuntimeModels(agent?: ExternalAgentConfig): boolean {
   const sdkBackend = getExternalAgentSdkBackend(agent);
-  return sdkBackend === 'claude' || sdkBackend === 'copilot' || sdkBackend === 'codebuddy';
+  return sdkBackend === 'claude'
+    || sdkBackend === 'copilot'
+    || sdkBackend === 'codebuddy'
+    || sdkBackend === 'opencode';
+}
+
+export function shouldAdoptSdkCurrentModel(
+  currentModelId: string | null | undefined,
+  storedModelId: string | null | undefined,
+  runtimePresets: AgentModelPreset[],
+): boolean {
+  if (!currentModelId) return false;
+  return !storedModelId
+    || runtimePresets.length === 0
+    || !modelPresetsContainId(runtimePresets, storedModelId);
+}
+
+export function normalizeSdkRuntimeModelPresets(
+  models: AgentModelPreset[],
+  currentModelId: string | null | undefined,
+): AgentModelPreset[] {
+  if (models.length > 0) return models;
+  if (!currentModelId) return [];
+  return [{ id: currentModelId, name: currentModelId }];
+}
+
+export function shouldUseStoredAgentModel(
+  storedModelId: string | null | undefined,
+  presets: AgentModelPreset[],
+  agent?: ExternalAgentConfig,
+): boolean {
+  if (!storedModelId) return false;
+  return modelPresetsContainId(presets, storedModelId)
+    || (presets.length === 0 && shouldLoadSdkRuntimeModels(agent));
 }
 
 export function generateId(): string {

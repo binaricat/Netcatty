@@ -160,6 +160,18 @@ export const enAiMessages: Messages = {
   'ai.codebuddy.envVars.placeholder': 'CODEBUDDY_API_KEY=...\nCODEBUDDY_AUTH_TOKEN=...\nOTHER_VAR=...',
   'ai.codebuddy.envVars.hint': 'One KEY=VALUE per line, passed to the CodeBuddy agent. Set CODEBUDDY_API_KEY or CODEBUDDY_AUTH_TOKEN here for authentication. Stored locally in plaintext.',
 
+  // AI OpenCode
+  'ai.opencode.title': 'OpenCode',
+  'ai.opencode.description': 'Uses OpenCode via the official SDK. Configure providers and keys in OpenCode, then select it as an external coding agent.',
+  'ai.opencode.detecting': 'Detecting...',
+  'ai.opencode.detected': 'Detected',
+  'ai.opencode.notFound': 'Not found',
+  'ai.opencode.path': 'Path:',
+  'ai.opencode.notFoundHint': 'Could not find opencode in PATH. Install it or specify the executable path below.',
+  'ai.opencode.customPathPlaceholder': 'e.g. /usr/local/bin/opencode',
+  'ai.opencode.check': 'Check',
+  'ai.opencode.resetPath': 'Reset',
+
   // AI Default Agent
   'ai.defaultAgent': 'Default Agent',
   'ai.defaultAgent.description': 'Agent to use when starting a new AI session',

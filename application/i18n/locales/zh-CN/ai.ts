@@ -160,6 +160,18 @@ export const zhCNAiMessages: Messages = {
   'ai.codebuddy.envVars.placeholder': 'CODEBUDDY_API_KEY=...\nCODEBUDDY_AUTH_TOKEN=...\nOTHER_VAR=...',
   'ai.codebuddy.envVars.hint': '每行一个 KEY=VALUE，传给 CodeBuddy agent。可在此设置 CODEBUDDY_API_KEY 或 CODEBUDDY_AUTH_TOKEN 完成认证。明文存在本地。',
 
+  // AI OpenCode
+  'ai.opencode.title': 'OpenCode',
+  'ai.opencode.description': '通过官方 SDK 接入 OpenCode。先在 OpenCode 里配置 provider 和密钥，检测到后即可作为外部编程 Agent 使用。',
+  'ai.opencode.detecting': '检测中...',
+  'ai.opencode.detected': '已检测到',
+  'ai.opencode.notFound': '未找到',
+  'ai.opencode.path': '路径：',
+  'ai.opencode.notFoundHint': '在 PATH 中未找到 opencode。请安装或在下方指定可执行文件路径。',
+  'ai.opencode.customPathPlaceholder': '例如 /usr/local/bin/opencode',
+  'ai.opencode.check': '检查',
+  'ai.opencode.resetPath': '重置',
+
   // AI Default Agent
   'ai.defaultAgent': '默认 Agent',
   'ai.defaultAgent.description': '创建新 AI 会话时使用的 Agent',

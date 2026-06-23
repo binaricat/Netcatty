@@ -50,6 +50,8 @@ function registerAgentDiscoveryHandlers(ctx) {
         description: "Cursor's coding agent via Cursor SDK", sdkBackend: "cursor", args: [] },
       { command: "codebuddy", name: "CodeBuddy Code", icon: "codebuddy",
         description: "Tencent's coding agent CLI (Agent SDK)", sdkBackend: "codebuddy", args: [] },
+      { command: "opencode", name: "OpenCode", icon: "opencode",
+        description: "Open source coding agent via the official OpenCode SDK", sdkBackend: "opencode", args: [] },
     ];
 
     const shellEnv = await getShellEnv();
@@ -93,6 +95,8 @@ function registerAgentDiscoveryHandlers(ctx) {
           };
         } else if (agent.command === "codebuddy") {
           auth = probeCodebuddyAuth({ env: shellEnv });
+        } else if (agent.command === "opencode") {
+          auth = { authenticated: true, authSource: "opencode-config" };
         }
       } catch { /* auth probe is best-effort */ }
 

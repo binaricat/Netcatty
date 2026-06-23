@@ -60,6 +60,14 @@ test("resolveSftpFollowTerminalCwdTargetHost prefers the visible SFTP host", () 
   );
 });
 
+test("visible SFTP host override can enable follow when terminal host inherits global off", () => {
+  const terminalHost = { id: "terminal-host", sftpFollowTerminalCwd: undefined };
+  const visibleHost = { id: "visible-sftp-host", sftpFollowTerminalCwd: true };
+  const followHost = resolveSftpFollowTerminalCwdTargetHost(visibleHost, terminalHost);
+
+  assert.equal(resolveHostFollowTerminalCwd(followHost?.sftpFollowTerminalCwd, false), true);
+});
+
 test("mergeLatestFollowTerminalCwdHostSetting refreshes the follow flag without losing display overrides", () => {
   const connectedHost = {
     id: "host-1",

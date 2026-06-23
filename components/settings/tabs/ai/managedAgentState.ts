@@ -101,7 +101,9 @@ export function buildManagedAgentState(
       ? { ...(existingManaged?.env ?? {}), CLAUDE_CODE_EXECUTABLE: pathInfo.path }
       : agentKey === "codebuddy"
         ? { ...(existingManaged?.env ?? {}), CODEBUDDY_CODE_PATH: pathInfo.path }
-        : existingManaged?.env;
+        : agentKey === "opencode"
+          ? { ...(existingManaged?.env ?? {}), OPENCODE_BIN: pathInfo.path }
+          : existingManaged?.env;
   const nextManagedAgent: ExternalAgentConfig = {
     ...existingManagedWithoutLegacy,
     ...defaults,
@@ -165,5 +167,6 @@ export function getInitialManagedAgentPaths(agents: ExternalAgentConfig[]) {
     copilot: getAutoManagedAgentStoredPath(agents, "copilot") ?? "",
     cursor: getAutoManagedAgentStoredPath(agents, "cursor") ?? "",
     codebuddy: getAutoManagedAgentStoredPath(agents, "codebuddy") ?? "",
+    opencode: getAutoManagedAgentStoredPath(agents, "opencode") ?? "",
   };
 }

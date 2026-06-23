@@ -119,7 +119,7 @@ function getSkillsCliInvocation() {
   };
 }
 
-function buildExternalAgentContextualPrompt({ mode, prompt, chatSessionId, defaultTargetSession, userSkillsContext }) {
+function buildExternalAgentSystemContext({ mode, chatSessionId, defaultTargetSession, userSkillsContext }) {
   const userSkillsPreamble = userSkillsContext ? `${userSkillsContext}\n\n` : "";
   if (mode === "skills") {
     const { commandPrefix: cliCommandPrefix, launcherPath, usesLauncher } = getSkillsCliInvocation();
@@ -183,7 +183,7 @@ function buildExternalAgentContextualPrompt({ mode, prompt, chatSessionId, defau
       `Do not spend time narrating intent before every CLI call for routine read-only checks. Execute the minimal command sequence and then report the result. ` +
       `Only after that confirmation step should you call \`${cliCommandPrefix} exec --session <id> --json${chatSessionId ? ` --chat-session ${chatSessionId}` : ""} -- <command>\` for command execution. ` +
       `If the user stops the run or asks to abort outstanding Netcatty work, use \`${cliCommandPrefix} cancel --chat-session ${chatSessionId || "<chat-session-id>"} --json\`, and use \`resume\` to re-enable execs for that scope if needed. ` +
-      `For serial/raw sessions and network device sessions (deviceType: network), commands are sent as-is without shell wrapping and exit codes are unavailable. Use vendor CLI commands directly.]\n\n${prompt}`
+      `For serial/raw sessions and network device sessions (deviceType: network), commands are sent as-is without shell wrapping and exit codes are unavailable. Use vendor CLI commands directly.]`
     );
   }
 
@@ -197,8 +197,18 @@ function buildExternalAgentContextualPrompt({ mode, prompt, chatSessionId, defau
     `Use terminal_execute only for commands likely to finish within about 60 seconds. ` +
     `For long-running commands such as builds, scans, follow/log streaming, watch commands, or anything likely to exceed 60 seconds on PTY-backed shell sessions, use terminal_start, then terminal_poll until completed is true. Reuse the returned nextOffset for the next poll. If terminal_poll reports outputTruncated=true, only the retained tail starting at outputBaseOffset is still available. Do not poll aggressively: wait at least about 30 seconds between polls, and increase the interval further when there is no new output, to avoid wasting tokens. As soon as completed is true, stop polling and analyze the result immediately. ` +
     `Use terminal_stop if you need to interrupt a started long-running command. Note: terminal_start requires a PTY-backed session; for sessions that only support exec-channel execution (no writable PTY), use terminal_execute instead. ` +
-    `For serial/raw sessions and network device sessions (deviceType: network), commands are sent as-is without shell wrapping and exit codes are unavailable. Use vendor CLI commands directly.]\n\n${prompt}`
+    `For serial/raw sessions and network device sessions (deviceType: network), commands are sent as-is without shell wrapping and exit codes are unavailable. Use vendor CLI commands directly.]`
   );
+}
+
+function buildExternalAgentContextualPrompt({ mode, prompt, chatSessionId, defaultTargetSession, userSkillsContext }) {
+  const systemContext = buildExternalAgentSystemContext({
+    mode,
+    chatSessionId,
+    defaultTargetSession,
+    userSkillsContext,
+  });
+  return `${systemContext}\n\n${prompt}`;
 }
 
 const { execViaPty } = require("./ai/ptyExec.cjs");
@@ -687,6 +697,7 @@ function createHandlerContext(ipcMain) {
     ensureSkillsCliHost,
     getSkillsCliInvocation,
     buildExternalAgentContextualPrompt,
+    buildExternalAgentSystemContext,
     execViaPty,
     get sessions() { return sessions; },
     set sessions(value) { sessions = value; },

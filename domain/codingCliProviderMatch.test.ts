@@ -35,6 +35,10 @@ test('matchCodingCliProviderFromTitle detects Claude Code and Codex titles', () 
     matchCodingCliProviderFromTitle('Factory Droid · auth flow')?.id,
     'droid',
   );
+  assert.equal(
+    matchCodingCliProviderFromTitle('android@pixel:~'),
+    undefined,
+  );
 });
 
 test('resolveSessionCodingCliProvider honors disabled dynamic titles', () => {

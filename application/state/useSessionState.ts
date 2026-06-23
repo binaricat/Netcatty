@@ -43,6 +43,7 @@ import {
 } from './sessionRestoreState';
 import { resolveRestorePreviousSessionSetting } from './sessionRestoreSettings';
 import type { CodingCliProviderId } from '../../domain/codingCliProviders';
+import { normalizeCodingCliDynamicTitleForStorage } from '../../domain/codingCliTitleParse';
 
 
 export const useSessionState = ({
@@ -220,7 +221,8 @@ export const useSessionState = ({
   }, []);
 
   const updateSessionDynamicTitle = useCallback((sessionId: string, title: string | null) => {
-    const nextTitle = title && title.trim().length > 0 ? title.trim() : null;
+    const normalizedTitle = title ? normalizeCodingCliDynamicTitleForStorage(title) : '';
+    const nextTitle = normalizedTitle.length > 0 ? normalizedTitle : null;
     setSessions((prev) => {
       const session = prev.find((candidate) => candidate.id === sessionId);
       if (!session) return prev;

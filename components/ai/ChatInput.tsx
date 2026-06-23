@@ -893,7 +893,9 @@ const ChatInput: React.FC<ChatInputProps> = ({
                         );
                       })}
                     </div>
-                  ) : modelPresets.map(preset => {
+                  ) : (
+                    <div className="min-w-[260px] max-h-[320px] overflow-y-auto">
+                      {modelPresets.map(preset => {
                     const isSelected = preset.id === selectedBaseModelId;
                     const hasThinking = preset.thinkingLevels && preset.thinkingLevels.length > 0;
                     return (
@@ -958,7 +960,9 @@ const ChatInput: React.FC<ChatInputProps> = ({
                         )}
                       </div>
                     );
-                  })}
+                      })}
+                    </div>
+                  )}
                 </div>
               </>,
               document.body,

@@ -233,7 +233,7 @@ export interface ExternalAgentConfig {
   icon?: string;
   enabled: boolean;
   available?: boolean;
-  /** SDK backend key for managed agents (claude|codex|copilot|cursor|codebuddy). */
+  /** SDK backend key for managed agents (claude|codex|copilot|cursor|codebuddy|opencode). */
   sdkBackend?: string;
   /** Internal: whether the managed command was set manually or auto-detected. */
   commandSource?: "manual" | "auto";
@@ -258,8 +258,8 @@ export interface DiscoveredAgent {
   /** @deprecated Legacy discovery field from the pre-SDK migration. */
   acpCommand?: string;
   acpArgs?: string[];
-  /** SDK backend key (claude|codex|copilot|cursor|codebuddy) — the routing value. */
-  sdkBackend?: 'claude' | 'codex' | 'copilot' | 'cursor' | 'codebuddy';
+  /** SDK backend key (claude|codex|copilot|cursor|codebuddy|opencode) — the routing value. */
+  sdkBackend?: 'claude' | 'codex' | 'copilot' | 'cursor' | 'codebuddy' | 'opencode';
   /** Absolute resolved CLI path (preferred over `path`). */
   binPath?: string;
   installed?: boolean;
@@ -477,6 +477,14 @@ export const CODEBUDDY_MODEL_PRESETS: AgentModelPreset[] = [
   { id: 'hy3-preview', name: 'Hy3 Preview' },
 ];
 
+export const OPENCODE_MODEL_PRESETS: AgentModelPreset[] = [
+  { id: 'openai/gpt-5.1', name: 'OpenAI GPT-5.1' },
+  { id: 'anthropic/claude-sonnet-4-6', name: 'Claude Sonnet 4.6' },
+  { id: 'deepseek/deepseek-chat', name: 'DeepSeek Chat' },
+  { id: 'openrouter/openai/gpt-5.1', name: 'OpenRouter GPT-5.1' },
+  { id: 'ollama/llama3.3', name: 'Ollama Llama 3.3' },
+];
+
 export function getAgentModelPresets(agentCommand?: string): AgentModelPreset[] {
   if (!agentCommand) return [];
   // Split on both POSIX (/) and Windows (\) separators so command paths like
@@ -488,6 +496,7 @@ export function getAgentModelPresets(agentCommand?: string): AgentModelPreset[] 
   if (basename.startsWith('codex')) return CODEX_MODEL_PRESETS;
   if (basename.startsWith('cursor')) return CURSOR_MODEL_PRESETS;
   if (basename.startsWith('codebuddy')) return CODEBUDDY_MODEL_PRESETS;
+  if (basename.startsWith('opencode')) return OPENCODE_MODEL_PRESETS;
   return [];
 }
 

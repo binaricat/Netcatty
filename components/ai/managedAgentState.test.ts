@@ -195,6 +195,23 @@ test('buildManagedAgentState stores CODEBUDDY_CODE_PATH for codebuddy', () => {
   });
 });
 
+test('buildManagedAgentState stores OPENCODE_BIN for opencode', () => {
+  const state = buildManagedAgentState(
+    [],
+    'catty',
+    'opencode',
+    { path: '/opt/homebrew/bin/opencode', version: '1.0.0', available: true },
+  );
+
+  assert.equal(state.agents.length, 1);
+  assert.equal(state.agents[0].id, 'discovered_opencode');
+  assert.equal(state.agents[0].command, '/opt/homebrew/bin/opencode');
+  assert.equal(state.agents[0].sdkBackend, 'opencode');
+  assert.deepEqual(state.agents[0].env, {
+    OPENCODE_BIN: '/opt/homebrew/bin/opencode',
+  });
+});
+
 test('updateCodebuddyManagedEnv creates a disabled managed entry before CLI detection', () => {
   const state = updateCodebuddyManagedEnv([], 'internal', 'CODEBUDDY_API_KEY=secret');
 

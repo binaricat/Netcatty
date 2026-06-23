@@ -23,6 +23,12 @@ export function normalizeCodingCliTitle(title: string): string {
   return normalized;
 }
 
+export function normalizeCodingCliDynamicTitleForStorage(title: string): string {
+  let normalized = title.trim().replace(BRAILLE_SPINNER_RE, '').trim();
+  normalized = normalized.replace(LEADING_SEPARATOR_RE, '').trim();
+  return normalized;
+}
+
 export function titleHasBrailleSpinner(title: string): boolean {
   return CODING_CLI_BRAILLE_SPINNER_FRAMES.some((frame) => title.includes(frame));
 }
@@ -31,7 +37,6 @@ export function titleIncludesPhrase(title: string, phrase: string): boolean {
   const normalized = title.toLowerCase();
   const needle = phrase.toLowerCase().trim();
   if (!needle) return false;
-  if (normalized.includes(needle)) return true;
   const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   return new RegExp(`(?:^|[^a-z0-9])${escaped}(?:[^a-z0-9]|$)`, 'i').test(normalized);
 }
@@ -94,6 +99,7 @@ export function resolveCodingCliActivityPhase(
 }
 
 const SHELL_TITLE_RE = /^(?:bash|zsh|fish|pwsh|powershell|sh|nu|xonsh|cmd)(?:\s|$|[(@])/i;
+const SHELL_PATH_TITLE_RE = /^(?:(?:[^@\s:]+@)?[^:\s]+:)?(?:~(?:\/|$)|\/|[A-Za-z]:[\\/])/;
 
 /** Whether a shell-reported title no longer reflects an active coding CLI session. */
 export function shouldClearCodingCliProviderForTitle(
@@ -107,6 +113,7 @@ export function shouldClearCodingCliProviderForTitle(
   if (inferredId === providerId) return false;
   if (inferredId) return true;
   if (SHELL_TITLE_RE.test(trimmed)) return true;
+  if (SHELL_PATH_TITLE_RE.test(trimmed)) return true;
 
   // Ambiguous titles (e.g. Codex project names) may still be an active agent session.
   return false;

@@ -1,4 +1,4 @@
-import { ChevronDown, Clock, Copy, Edit2, FileCode, FolderPlus, LayoutGrid, List as ListIcon, Package, Play, Plus, Search, Trash2 } from 'lucide-react';
+import { CheckSquare, ChevronDown, Clock, Copy, Download, Edit2, FileCode, FolderPlus, LayoutGrid, List as ListIcon, Package, Play, Plus, Search, Square, Trash2, Upload, X } from 'lucide-react';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useI18n } from '../application/i18n/I18nProvider';
 import { useStoredViewMode } from '../application/state/useStoredViewMode';
@@ -6,12 +6,22 @@ import { STORAGE_KEY_VAULT_SNIPPETS_VIEW_MODE } from '../infrastructure/config/s
 import { cn, isMacPlatform } from '../lib/utils';
 import { Host, ProxyProfile, ShellHistoryEntry, Snippet, SSHKey } from '../types';
 import { HotkeyScheme, KeyBinding, keyEventToString, ManagedSource, matchesKeyBinding, parseKeyCombo } from '../domain/models';
+import {
+  buildSnippetExportPayload,
+  combineSnippetImportPayloads,
+  mergeSnippetImportPayload,
+  parseSnippetImportPayload,
+  type SnippetExportPayload,
+  type SnippetImportConflictAction,
+} from '../domain/snippetTransfer';
 import { reorderVaultItems, reorderVaultStrings, sortByVaultOrder } from '../domain/vaultOrder';
 import { Button } from './ui/button';
 import { ComboboxOption } from './ui/combobox';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from './ui/context-menu';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog';
 import { Dropdown, DropdownContent, DropdownTrigger } from './ui/dropdown';
 import { SortDropdown, SortMode } from './ui/sort-dropdown';
+import { toast } from './ui/toast';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/tooltip';
 import { SnippetsRightPanel } from './SnippetsRightPanel';
 import { SnippetsPackageDialogs } from './SnippetsPackageDialogs';
@@ -61,6 +71,366 @@ type RightPanelMode = 'none' | 'edit-snippet' | 'history' | 'select-targets';
 
 const HISTORY_PAGE_SIZE = 30;
 
+type PendingSnippetImport = {
+  fileName: string;
+  fileCount: number;
+  payload: SnippetExportPayload;
+  conflicts: number;
+};
+
+export const SNIPPET_IMPORT_EXAMPLE_JSON = `{
+  "kind": "netcatty.snippets",
+  "version": 1,
+  "snippets": [
+    {
+      "label": "Check Disk Space",
+      "command": "df -h",
+      "package": "ops"
+    }
+  ]
+}`;
+
+export type SnippetImportSampleFile = {
+  name: string;
+  content: string;
+};
+
+const stringifySample = (value: unknown) => JSON.stringify(value, null, 2);
+
+export const SNIPPET_IMPORT_SAMPLE_FILES: SnippetImportSampleFile[] = [
+  {
+    name: "01-standard-netcatty-object.json",
+    content: stringifySample({
+      kind: "netcatty.snippets",
+      version: 1,
+      exportedAt: "2026-06-23T00:00:00.000Z",
+      snippetPackages: ["ops", "ops/linux"],
+      snippets: [
+        {
+          label: "Show Kernel",
+          command: "uname -a",
+          package: "ops/linux",
+          tags: ["linux", "system"],
+        },
+        {
+          label: "Memory Usage",
+          command: "free -h",
+          package: "ops/linux",
+          tags: ["linux"],
+        },
+      ],
+    }),
+  },
+  {
+    name: "02-plain-snippet-array.json",
+    content: stringifySample([
+      {
+        label: "List Listening Ports",
+        command: "ss -lntp",
+        package: "network",
+        tags: ["network"],
+      },
+      {
+        label: "Current Directory",
+        command: "pwd",
+      },
+    ]),
+  },
+  {
+    name: "03-more-snippets-for-multi-select.json",
+    content: stringifySample({
+      kind: "netcatty.snippets",
+      version: 1,
+      exportedAt: "2026-06-23T00:00:00.000Z",
+      snippetPackages: ["containers", "logs"],
+      snippets: [
+        {
+          label: "Docker Containers",
+          command: "docker ps --format 'table {{.Names}}\\t{{.Status}}\\t{{.Ports}}'",
+          package: "containers",
+          tags: ["docker"],
+        },
+        {
+          label: "Journal Errors",
+          command: "journalctl -p err -n 50 --no-pager",
+          package: "logs",
+          tags: ["logs"],
+        },
+      ],
+    }),
+  },
+  {
+    name: "04-duplicate-command-conflict.json",
+    content: stringifySample({
+      kind: "netcatty.snippets",
+      version: 1,
+      exportedAt: "2026-06-23T00:00:00.000Z",
+      snippetPackages: ["conflicts"],
+      snippets: [
+        {
+          label: "Duplicate Check Disk Space",
+          command: "df -h",
+          package: "conflicts",
+          tags: ["duplicate"],
+        },
+      ],
+    }),
+  },
+  {
+    name: "05-host-bindings-ignored.json",
+    content: stringifySample({
+      kind: "netcatty.snippets",
+      version: 1,
+      exportedAt: "2026-06-23T00:00:00.000Z",
+      snippetPackages: ["security"],
+      snippets: [
+        {
+          label: "Who Is Logged In",
+          command: "who",
+          package: "security",
+          tags: ["audit"],
+          targets: ["host-that-should-not-import"],
+        },
+      ],
+    }),
+  },
+];
+
+const crcTable = Array.from({ length: 256 }, (_, index) => {
+  let value = index;
+  for (let bit = 0; bit < 8; bit += 1) {
+    value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
+  }
+  return value >>> 0;
+});
+
+const crc32 = (bytes: Uint8Array): number => {
+  let crc = 0xffffffff;
+  bytes.forEach((byte) => {
+    crc = crcTable[(crc ^ byte) & 0xff] ^ (crc >>> 8);
+  });
+  return (crc ^ 0xffffffff) >>> 0;
+};
+
+const pushUint16 = (parts: number[], value: number) => {
+  parts.push(value & 0xff, (value >>> 8) & 0xff);
+};
+
+const pushUint32 = (parts: number[], value: number) => {
+  parts.push(value & 0xff, (value >>> 8) & 0xff, (value >>> 16) & 0xff, (value >>> 24) & 0xff);
+};
+
+export const buildSnippetImportSamplesZip = (files: SnippetImportSampleFile[] = SNIPPET_IMPORT_SAMPLE_FILES): Blob => {
+  const encoder = new TextEncoder();
+  const chunks: Array<Uint8Array> = [];
+  const centralDirectory: Uint8Array[] = [];
+  let offset = 0;
+
+  files.forEach((file) => {
+    const nameBytes = encoder.encode(file.name);
+    const contentBytes = encoder.encode(`${file.content}\n`);
+    const checksum = crc32(contentBytes);
+
+    const localHeader: number[] = [];
+    pushUint32(localHeader, 0x04034b50);
+    pushUint16(localHeader, 20);
+    pushUint16(localHeader, 0);
+    pushUint16(localHeader, 0);
+    pushUint16(localHeader, 0);
+    pushUint16(localHeader, 0);
+    pushUint32(localHeader, checksum);
+    pushUint32(localHeader, contentBytes.length);
+    pushUint32(localHeader, contentBytes.length);
+    pushUint16(localHeader, nameBytes.length);
+    pushUint16(localHeader, 0);
+    const localChunk = new Uint8Array([...localHeader, ...nameBytes, ...contentBytes]);
+    chunks.push(localChunk);
+
+    const centralHeader: number[] = [];
+    pushUint32(centralHeader, 0x02014b50);
+    pushUint16(centralHeader, 20);
+    pushUint16(centralHeader, 20);
+    pushUint16(centralHeader, 0);
+    pushUint16(centralHeader, 0);
+    pushUint16(centralHeader, 0);
+    pushUint16(centralHeader, 0);
+    pushUint32(centralHeader, checksum);
+    pushUint32(centralHeader, contentBytes.length);
+    pushUint32(centralHeader, contentBytes.length);
+    pushUint16(centralHeader, nameBytes.length);
+    pushUint16(centralHeader, 0);
+    pushUint16(centralHeader, 0);
+    pushUint16(centralHeader, 0);
+    pushUint16(centralHeader, 0);
+    pushUint32(centralHeader, 0);
+    pushUint32(centralHeader, offset);
+    centralDirectory.push(new Uint8Array([...centralHeader, ...nameBytes]));
+
+    offset += localChunk.length;
+  });
+
+  const centralDirectorySize = centralDirectory.reduce((total, chunk) => total + chunk.length, 0);
+  const endRecord: number[] = [];
+  pushUint32(endRecord, 0x06054b50);
+  pushUint16(endRecord, 0);
+  pushUint16(endRecord, 0);
+  pushUint16(endRecord, files.length);
+  pushUint16(endRecord, files.length);
+  pushUint32(endRecord, centralDirectorySize);
+  pushUint32(endRecord, offset);
+  pushUint16(endRecord, 0);
+
+  return new Blob([...chunks, ...centralDirectory, new Uint8Array(endRecord)], {
+    type: "application/zip",
+  });
+};
+
+type SnippetsT = ReturnType<typeof useI18n>['t'];
+
+type SnippetImportDialogProps = {
+  open: boolean;
+  pendingImport: PendingSnippetImport | null;
+  t: SnippetsT;
+  fileInputRef: React.RefObject<HTMLInputElement | null>;
+  onOpenChange: (open: boolean) => void;
+  onFileSelected: (event: React.ChangeEvent<HTMLInputElement>) => void;
+  onChooseFile: () => void;
+  onDownloadExamples: () => void;
+  onConfirmSkip: () => void;
+  onConfirmOverwrite: () => void;
+};
+
+type SnippetImportDialogContentProps = Omit<SnippetImportDialogProps, "open" | "onOpenChange"> & {
+  onCancel: () => void;
+};
+
+export const SnippetImportDialogContent: React.FC<SnippetImportDialogContentProps> = ({
+  pendingImport,
+  t,
+  fileInputRef,
+  onFileSelected,
+  onChooseFile,
+  onDownloadExamples,
+  onConfirmSkip,
+  onConfirmOverwrite,
+  onCancel,
+}) => (
+  <>
+    <DialogHeader>
+      <DialogTitle>{t('snippets.import.modal.title')}</DialogTitle>
+      <DialogDescription>{t('snippets.import.modal.desc')}</DialogDescription>
+    </DialogHeader>
+
+      <input
+        ref={fileInputRef}
+        type="file"
+        className="hidden"
+        accept=".json,application/json"
+        multiple
+        onChange={onFileSelected}
+      />
+
+    <div className="space-y-3">
+      <div className="rounded-lg border border-border/60 bg-muted/25 p-3">
+        <div className="mb-2 flex items-center justify-between gap-3">
+          <div className="text-xs font-medium text-muted-foreground">
+            {t('snippets.import.modal.exampleTitle')}
+          </div>
+          <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={onDownloadExamples}>
+            <Download size={12} className="mr-1" /> {t('snippets.import.modal.downloadExamples')}
+          </Button>
+        </div>
+        <pre className="max-h-48 overflow-auto rounded-md bg-background/80 p-3 text-xs leading-relaxed text-muted-foreground">
+          <code>{SNIPPET_IMPORT_EXAMPLE_JSON}</code>
+        </pre>
+      </div>
+
+      <div className="rounded-lg border border-border/60 p-3">
+        {pendingImport ? (
+          <div className="space-y-1 text-sm">
+            <div className="font-medium">{pendingImport.fileName}</div>
+            <div className="text-xs text-muted-foreground">
+              {t('snippets.import.modal.parsedSummary', {
+                files: pendingImport.fileCount,
+                total: pendingImport.payload.snippets.length,
+                packages: pendingImport.payload.snippetPackages.length,
+                conflicts: pendingImport.conflicts,
+              })}
+            </div>
+          </div>
+        ) : (
+          <div className="text-sm text-muted-foreground">
+            {t('snippets.import.modal.noFile')}
+          </div>
+        )}
+      </div>
+    </div>
+
+    <DialogFooter>
+      <Button variant="ghost" onClick={onCancel}>
+        {t('common.cancel')}
+      </Button>
+      <Button variant="secondary" onClick={onChooseFile}>
+        <Upload size={14} className="mr-1" /> {t('snippets.import.modal.chooseFile')}
+      </Button>
+      {pendingImport?.conflicts ? (
+        <>
+          <Button variant="secondary" onClick={onConfirmSkip}>
+            {t('snippets.import.conflict.skip')}
+          </Button>
+          <Button onClick={onConfirmOverwrite}>
+            {t('snippets.import.conflict.overwrite')}
+          </Button>
+        </>
+      ) : (
+        <Button disabled={!pendingImport} onClick={onConfirmSkip}>
+          {t('snippets.import.modal.confirm')}
+        </Button>
+      )}
+    </DialogFooter>
+  </>
+);
+
+export const SnippetImportDialog: React.FC<SnippetImportDialogProps> = ({
+  open,
+  pendingImport,
+  t,
+  fileInputRef,
+  onOpenChange,
+  onFileSelected,
+  onChooseFile,
+  onDownloadExamples,
+  onConfirmSkip,
+  onConfirmOverwrite,
+}) => (
+  <Dialog open={open} onOpenChange={onOpenChange}>
+    <DialogContent className="max-w-2xl">
+      <SnippetImportDialogContent
+        pendingImport={pendingImport}
+        t={t}
+        fileInputRef={fileInputRef}
+        onFileSelected={onFileSelected}
+        onChooseFile={onChooseFile}
+        onDownloadExamples={onDownloadExamples}
+        onConfirmSkip={onConfirmSkip}
+        onConfirmOverwrite={onConfirmOverwrite}
+        onCancel={() => onOpenChange(false)}
+      />
+    </DialogContent>
+  </Dialog>
+);
+
+const sanitizeTransferFileNamePart = (value: string): string => {
+  const normalized = value
+    .trim()
+    .replace(/[\\/:*?"<>|]+/g, '-')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .toLowerCase();
+  return normalized.slice(0, 80) || 'snippets';
+};
+
 const SnippetsManager: React.FC<SnippetsManagerProps> = ({
   snippets,
   packages,
@@ -106,11 +476,16 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
   );
   const [sortMode, setSortMode] = useState<SortMode>('manual');
   const listRef = useRef<HTMLDivElement | null>(null);
+  const snippetImportInputRef = useRef<HTMLInputElement | null>(null);
   const lastPreviewReorderRef = useRef<string | null>(null);
   const draggingSnippetIdRef = useRef<string | null>(null);
   const draggingPackagePathRef = useRef<string | null>(null);
   const [draggingSnippetId, setDraggingSnippetId] = useState<string | null>(null);
   const [draggingPackagePath, setDraggingPackagePath] = useState<string | null>(null);
+  const [isMultiSelectMode, setIsMultiSelectMode] = useState(false);
+  const [selectedSnippetIds, setSelectedSnippetIds] = useState<Set<string>>(new Set());
+  const [isSnippetImportDialogOpen, setIsSnippetImportDialogOpen] = useState(false);
+  const [pendingImport, setPendingImport] = useState<PendingSnippetImport | null>(null);
   const prepareGridLayoutAnimation = useVaultGridLayoutAnimation(listRef);
 
   const [historyVisibleCount, setHistoryVisibleCount] = useState(HISTORY_PAGE_SIZE);
@@ -473,6 +848,165 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
   }, [snippets, selectedPackage, search, sortMode]);
 
   const isSearchActive = search.trim().length > 0;
+
+  useEffect(() => {
+    setSelectedSnippetIds((prev) => {
+      const existingIds = new Set(snippets.map((snippet) => snippet.id));
+      const next = new Set(Array.from(prev).filter((id) => existingIds.has(id)));
+      if (next.size === prev.size) return prev;
+      return next;
+    });
+  }, [snippets]);
+
+  const clearSnippetSelection = useCallback(() => {
+    setSelectedSnippetIds(new Set());
+    setIsMultiSelectMode(false);
+  }, []);
+
+  const toggleSnippetSelection = useCallback((id: string) => {
+    setSelectedSnippetIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  }, []);
+
+  const selectVisibleSnippets = useCallback(() => {
+    setSelectedSnippetIds(new Set(displayedSnippets.map((snippet) => snippet.id)));
+  }, [displayedSnippets]);
+
+  const getSnippetsInPackage = useCallback(
+    (path: string) => (
+      snippets.filter((snippet) => {
+        const packagePath = snippet.package || '';
+        return packagePath === path || packagePath.startsWith(`${path}/`);
+      })
+    ),
+    [snippets],
+  );
+
+  const downloadSnippetPayload = useCallback((payload: SnippetExportPayload, fileNamePart: string) => {
+    const blob = new Blob([JSON.stringify(payload, null, 2)], {
+      type: 'application/json;charset=utf-8',
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `netcatty-snippets-${sanitizeTransferFileNamePart(fileNamePart)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, []);
+
+  const downloadSnippetImportExamples = useCallback(() => {
+    const blob = buildSnippetImportSamplesZip();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'netcatty-snippet-import-samples.zip';
+    a.click();
+    URL.revokeObjectURL(url);
+  }, []);
+
+  const exportSnippetList = useCallback(
+    (items: Snippet[], fileNamePart: string) => {
+      if (items.length === 0) {
+        toast.warning(t('snippets.export.toast.empty'));
+        return;
+      }
+      const payload = buildSnippetExportPayload({
+        snippets: items,
+        snippetPackages: packages,
+      });
+      downloadSnippetPayload(payload, fileNamePart);
+      toast.success(
+        t('snippets.export.toast.success', { count: items.length }),
+        t('snippets.export.toast.successTitle'),
+      );
+    },
+    [downloadSnippetPayload, packages, t],
+  );
+
+  const exportSingleSnippet = useCallback(
+    (snippet: Snippet) => {
+      exportSnippetList([snippet], snippet.label);
+    },
+    [exportSnippetList],
+  );
+
+  const exportPackageSnippets = useCallback(
+    (path: string) => {
+      exportSnippetList(getSnippetsInPackage(path), path);
+    },
+    [exportSnippetList, getSnippetsInPackage],
+  );
+
+  const exportSelectedSnippets = useCallback(() => {
+    const selected = snippets.filter((snippet) => selectedSnippetIds.has(snippet.id));
+    exportSnippetList(selected, `selected-${selected.length}`);
+  }, [exportSnippetList, selectedSnippetIds, snippets]);
+
+  const applySnippetImport = useCallback(
+    (payload: SnippetExportPayload, conflictAction: SnippetImportConflictAction) => {
+      const result = mergeSnippetImportPayload({
+        existingSnippets: snippets,
+        existingSnippetPackages: packages,
+        payload,
+        conflictAction,
+        createId: () => crypto.randomUUID(),
+      });
+      onBulkSave(result.snippets);
+      onPackagesChange(result.snippetPackages);
+      setPendingImport(null);
+      setIsSnippetImportDialogOpen(false);
+      toast.success(
+        t('snippets.import.toast.summary', {
+          imported: result.stats.imported,
+          overwritten: result.stats.overwritten,
+          skipped: result.stats.skipped,
+        }),
+        t('snippets.import.toast.successTitle'),
+      );
+    },
+    [onBulkSave, onPackagesChange, packages, snippets, t],
+  );
+
+  const handleSnippetImportFileSelected = useCallback(
+    async (event: React.ChangeEvent<HTMLInputElement>) => {
+      const files = Array.from(event.target.files || []);
+      event.target.value = '';
+      if (files.length === 0) return;
+
+      try {
+        const payloads = await Promise.all(
+          files.map(async (file) => parseSnippetImportPayload(await file.text())),
+        );
+        const payload = combineSnippetImportPayloads(payloads);
+        if (payload.snippets.length === 0) {
+          toast.warning(t('snippets.import.toast.empty'));
+          setPendingImport(null);
+          return;
+        }
+
+        const existingCommands = new Set(snippets.map((snippet) => snippet.command));
+        const conflicts = payload.snippets.filter((snippet) => existingCommands.has(snippet.command)).length;
+        const fileName = files.length === 1
+          ? files[0].name
+          : t('snippets.import.modal.multipleFiles', { count: files.length });
+        setPendingImport({ fileName, fileCount: files.length, payload, conflicts });
+      } catch {
+        setPendingImport(null);
+        toast.error(
+          t('snippets.import.toast.invalidDesc'),
+          t('snippets.import.toast.failedTitle'),
+        );
+      }
+    },
+    [snippets, t],
+  );
 
   const breadcrumb = useMemo(() => {
     if (!selectedPackage) return [];
@@ -960,6 +1494,17 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
             <Button
               variant="secondary"
               size="sm"
+              className={vaultHeaderSecondaryButtonClass}
+              onClick={() => {
+                setPendingImport(null);
+                setIsSnippetImportDialogOpen(true);
+              }}
+            >
+              <Upload size={14} className="mr-1" /> {t('snippets.action.import')}
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
               className={cn(
                 vaultHeaderSecondaryButtonClass,
                 rightPanelMode === 'history' && "bg-foreground/10 hover:bg-foreground/15",
@@ -998,8 +1543,71 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
                 onChange={setSortMode}
                 className={vaultHeaderIconButtonClass}
               />
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant={isMultiSelectMode ? "secondary" : "ghost"}
+                    size="icon"
+                    className={vaultHeaderIconButtonClass}
+                    aria-label={t('snippets.action.selectSnippets')}
+                    onClick={() => {
+                      if (isMultiSelectMode) {
+                        clearSnippetSelection();
+                      } else {
+                        setIsMultiSelectMode(true);
+                      }
+                    }}
+                  >
+                    <CheckSquare size={16} />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>{t('snippets.action.selectSnippets')}</TooltipContent>
+              </Tooltip>
             </div>
         </VaultPageHeader>
+
+        {isMultiSelectMode && (
+          <div className="px-4 py-1.5 bg-background border-b border-border/40 flex items-center gap-2">
+            <span className="flex items-center h-7 text-xs text-muted-foreground leading-none">
+              {t('snippets.selection.selected', { count: selectedSnippetIds.size })}
+            </span>
+            <div className="flex-1" />
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 px-2 text-xs"
+              onClick={selectVisibleSnippets}
+            >
+              {t('snippets.selection.selectVisible')}
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 px-2 text-xs"
+              onClick={clearSnippetSelection}
+            >
+              {t('snippets.selection.deselectAll')}
+            </Button>
+            <Button
+              variant="default"
+              size="sm"
+              className="h-7 px-2 text-xs"
+              disabled={selectedSnippetIds.size === 0}
+              onClick={exportSelectedSnippets}
+            >
+              <Download size={12} className="mr-1" />
+              {t('snippets.selection.exportSelected', { count: selectedSnippetIds.size })}
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              onClick={clearSnippetSelection}
+            >
+              <X size={12} />
+            </Button>
+          </div>
+        )}
         <div className="flex items-center gap-2 text-sm font-semibold px-4 py-2">
           <button className="text-primary hover:underline" onClick={() => setSelectedPackage(null)}>{t('snippets.breadcrumb.allPackages')}</button>
           {breadcrumb.map((b) => (
@@ -1090,6 +1698,12 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
                     </ContextMenuTrigger>
                     <ContextMenuContent>
                       <ContextMenuItem onClick={() => setSelectedPackage(pkg.path)}>{t('action.open')}</ContextMenuItem>
+                      <ContextMenuItem
+                        onClick={() => exportPackageSnippets(pkg.path)}
+                        disabled={getSnippetsInPackage(pkg.path).length === 0}
+                      >
+                        <Download className="mr-2 h-4 w-4" /> {t('snippets.export.package')}
+                      </ContextMenuItem>
                       <ContextMenuItem onClick={() => openRenameDialog(pkg.path)}>{t('common.rename')}</ContextMenuItem>
                       <ContextMenuItem className="text-destructive" onClick={() => deletePackage(pkg.path)}>{t('action.delete')}</ContextMenuItem>
                     </ContextMenuContent>
@@ -1107,12 +1721,15 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
                   ? "grid gap-3 grid-cols-1 md:grid-cols-2 xl:grid-cols-3"
                   : "flex flex-col gap-0"
               )}>
-                {displayedSnippets.map((snippet) => (
+                {displayedSnippets.map((snippet) => {
+                  const isSelected = selectedSnippetIds.has(snippet.id);
+                  return (
                   <ContextMenu key={snippet.id}>
                     <ContextMenuTrigger>
                       <div
                         className={cn(
                           "vault-drop-indicator-row group cursor-pointer overflow-hidden",
+                          isSelected && (viewMode === 'grid' ? "ring-2 ring-primary/45 bg-primary/5" : "bg-primary/5"),
                           viewMode === 'grid'
                             ? "soft-card elevate rounded-xl h-[68px] px-3 py-2"
                             : "h-14 px-3 py-2 hover:bg-secondary/60 rounded-lg transition-colors"
@@ -1121,7 +1738,7 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
                         data-vault-grid-item={`snippet:${snippet.id}`}
                         data-vault-reorder-grid={viewMode === 'grid' ? 'true' : undefined}
                         data-vault-reorder-dragging={draggingSnippetId === snippet.id ? 'true' : undefined}
-                        draggable={!isSearchActive}
+                        draggable={!isSearchActive && !isMultiSelectMode}
                         onDragStart={(e) => {
                           e.dataTransfer.effectAllowed = 'move';
                           e.dataTransfer.setData('snippet-id', snippet.id);
@@ -1129,9 +1746,30 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
                           setDraggingSnippetId(snippet.id);
                           lastPreviewReorderRef.current = null;
                         }}
-                        onClick={() => handleEdit(snippet)}
+                        onClick={() => {
+                          if (isMultiSelectMode) {
+                            toggleSnippetSelection(snippet.id);
+                          } else {
+                            handleEdit(snippet);
+                          }
+                        }}
                       >
                         <div className="flex items-center gap-3 h-full min-w-0">
+                          {isMultiSelectMode && (
+                            <div
+                              className="shrink-0"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleSnippetSelection(snippet.id);
+                              }}
+                            >
+                              {isSelected ? (
+                                <CheckSquare size={18} className="text-primary" />
+                              ) : (
+                                <Square size={18} className="text-muted-foreground" />
+                              )}
+                            </div>
+                          )}
                           <VaultEntityIcon
                             className={vaultSnippetIconClass}
                             icon={<FileCode size={18} />}
@@ -1154,7 +1792,7 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
                               {snippet.shortkey}
                             </div>
                           )}
-                          {viewMode === 'list' && (
+                          {viewMode === 'list' && !isMultiSelectMode && (
                             <Button
                               variant="ghost"
                               size="icon"
@@ -1188,12 +1826,16 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
                       <ContextMenuItem onClick={() => handleCopy(snippet.id, snippet.command)}>
                         <Copy className="mr-2 h-4 w-4" /> {t('action.copy')}
                       </ContextMenuItem>
+                      <ContextMenuItem onClick={() => exportSingleSnippet(snippet)}>
+                        <Download className="mr-2 h-4 w-4" /> {t('snippets.export.snippet')}
+                      </ContextMenuItem>
                       <ContextMenuItem className="text-destructive" onClick={() => onDelete(snippet.id)}>
                         <Trash2 className="mr-2 h-4 w-4" /> {t('action.delete')}
                       </ContextMenuItem>
                     </ContextMenuContent>
                   </ContextMenu>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}
@@ -1229,6 +1871,26 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
         renamePackage={renamePackage}
         renameError={renameError}
         setIsRenameDialogOpen={setIsRenameDialogOpen}
+      />
+
+      <SnippetImportDialog
+        open={isSnippetImportDialogOpen}
+        pendingImport={pendingImport}
+        t={t}
+        fileInputRef={snippetImportInputRef}
+        onOpenChange={(open) => {
+          setIsSnippetImportDialogOpen(open);
+          if (!open) setPendingImport(null);
+        }}
+        onFileSelected={handleSnippetImportFileSelected}
+        onChooseFile={() => snippetImportInputRef.current?.click()}
+        onDownloadExamples={downloadSnippetImportExamples}
+        onConfirmSkip={() => {
+          if (pendingImport) applySnippetImport(pendingImport.payload, 'skip');
+        }}
+        onConfirmOverwrite={() => {
+          if (pendingImport) applySnippetImport(pendingImport.payload, 'overwrite');
+        }}
       />
 
       {renderRightPanel()}

@@ -4,9 +4,11 @@ const {
   buildSdkTurnPrompt,
   buildSdkModelCacheKey,
   buildSdkSessionKey,
+  normalizeSdkListModelsResult,
   resolveSdkResumeSessionId,
   resolveBackendKey,
   resolveSdkBackendBinPath,
+  shouldCacheSdkRuntimeModels,
 } = require("./sdkStreamHandlers.cjs");
 
 test("resolveBackendKey maps backend command/value to registry key", () => {
@@ -14,6 +16,7 @@ test("resolveBackendKey maps backend command/value to registry key", () => {
   assert.equal(resolveBackendKey("codex"), "codex");
   assert.equal(resolveBackendKey("copilot"), "copilot");
   assert.equal(resolveBackendKey("codebuddy"), "codebuddy");
+  assert.equal(resolveBackendKey("opencode"), "opencode");
 });
 
 test("resolveBackendKey returns null for unknown", () => {
@@ -38,6 +41,26 @@ test("SDK model cache keys include resolved CLI path", () => {
     buildSdkModelCacheKey("claude", "/usr/local/bin/claude"),
     buildSdkModelCacheKey("claude", "/opt/homebrew/bin/claude"),
   );
+});
+
+test("normalizeSdkListModelsResult preserves current model ids from object results", () => {
+  assert.deepEqual(normalizeSdkListModelsResult({
+    currentModelId: "openai/gpt-5.1",
+    models: [{ id: "openai/gpt-5.1" }, null, { name: "missing-id" }],
+  }), {
+    currentModelId: "openai/gpt-5.1",
+    models: [{ id: "openai/gpt-5.1" }],
+  });
+  assert.deepEqual(normalizeSdkListModelsResult([{ id: "claude-sonnet" }]), {
+    currentModelId: null,
+    models: [{ id: "claude-sonnet" }],
+  });
+});
+
+test("shouldCacheSdkRuntimeModels skips OpenCode model catalogs", () => {
+  assert.equal(shouldCacheSdkRuntimeModels("opencode"), false);
+  assert.equal(shouldCacheSdkRuntimeModels("claude"), true);
+  assert.equal(shouldCacheSdkRuntimeModels("codebuddy"), true);
 });
 
 test("SDK resume only uses the current backend/path session key", () => {
