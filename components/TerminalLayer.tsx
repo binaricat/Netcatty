@@ -48,9 +48,11 @@ import { ThemeSidePanel } from './terminal/ThemeSidePanel';
 import { focusTerminalSessionInput } from './terminal/focusTerminalSession';
 import { TerminalComposeBar } from './terminal/TerminalComposeBar';
 import {
+  AUTO_RUN_SNIPPET_LINE_DELAY_MS,
   createProtectedSnippetLogRewriteForPreparedCommand,
   prepareAutoRunSnippetCommand,
   prepareProtectedBroadcastSnippetWrite,
+  shouldDelayAutoRunSnippetInput,
   type TerminalBroadcastInputOptions,
 } from './terminal/terminalHelpers';
 import type { ProgrammaticCommandLogRewrite } from './terminal/programmaticCommandLog';
@@ -691,7 +693,15 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       if (logRewrite) {
         programmaticCommandLogRewriteHandlersRef.current.get(session.id)?.(logRewrite);
       }
-      terminalBackend.writeToSession(session.id, targetData, logRewrite ? { logRewrite } : undefined);
+      const lineDelayMs = options?.lineDelayMs
+        ?? (shouldDelayAutoRunSnippetInput(targetData, { noAutoRun: options?.noAutoRun })
+          ? AUTO_RUN_SNIPPET_LINE_DELAY_MS
+          : undefined);
+      terminalBackend.writeToSession(session.id, targetData, {
+        automated: true,
+        ...(lineDelayMs ? { lineDelayMs } : {}),
+        ...(logRewrite ? { logRewrite } : {}),
+      });
     }
   }, [terminalBackend]);
 
@@ -1187,10 +1197,17 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       : null;
     let data = normalizeLineEndings(commandToSend);
     if (!noAutoRun) data = `${data}\r`;
+    const lineDelayMs = shouldDelayAutoRunSnippetInput(data, { noAutoRun })
+      ? AUTO_RUN_SNIPPET_LINE_DELAY_MS
+      : undefined;
     if (logRewrite) {
       programmaticCommandLogRewriteHandlersRef.current.get(sessionId)?.(logRewrite);
     }
-    terminalBackend.writeToSession(sessionId, data, logRewrite ? { logRewrite } : undefined);
+    terminalBackend.writeToSession(sessionId, data, {
+      automated: true,
+      ...(lineDelayMs ? { lineDelayMs } : {}),
+      ...(logRewrite ? { logRewrite } : {}),
+    });
     // Re-focus the terminal so the user can interact immediately
     const pane = document.querySelector(`[data-session-id="${sessionId}"]`);
     const textarea = pane?.querySelector('textarea.xterm-helper-textarea') as HTMLTextAreaElement | null;

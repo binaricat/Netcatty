@@ -64,7 +64,7 @@ export type TerminalBackendApi = {
   onConnectionReuseFallback?: (
     cb: (sessionId: string, sourceSessionId?: string) => void,
   ) => (() => void) | undefined;
-  writeToSession: (sessionId: string, data: string, options?: { automated?: boolean; logRewrite?: ProgrammaticCommandLogRewrite }) => void;
+  writeToSession: (sessionId: string, data: string, options?: { automated?: boolean; lineDelayMs?: number; logRewrite?: ProgrammaticCommandLogRewrite }) => void;
   resizeSession: (sessionId: string, cols: number, rows: number) => void;
   /** Pause/resume the source stream for output back-pressure (optional). */
   setSessionFlowPaused?: (sessionId: string, paused: boolean) => void;

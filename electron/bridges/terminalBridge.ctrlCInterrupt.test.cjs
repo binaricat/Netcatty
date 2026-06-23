@@ -14,6 +14,10 @@ function initBridge(sessions) {
   });
 }
 
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 test("SSH Ctrl+C signals INT immediately and still writes the original byte", () => {
   const calls = [];
   const sessions = new Map();
@@ -133,4 +137,60 @@ test("serial Ctrl+C behavior is unchanged", () => {
   terminalBridge.writeToSession({ sender: {} }, { sessionId: "serial-1", data: "\x03" });
 
   assert.deepEqual(calls, [["write", "\x03"]]);
+});
+
+test("automated multi-line input is written one line at a time", async () => {
+  const calls = [];
+  const sessions = new Map();
+  sessions.set("telnet-1", {
+    type: "telnet-native",
+    socket: {
+      write(data) {
+        calls.push(data);
+      },
+    },
+  });
+  initBridge(sessions);
+
+  terminalBridge.writeToSession(
+    { sender: {} },
+    {
+      sessionId: "telnet-1",
+      data: "tthdf 0 2323\nadmin\ntest123\n\r",
+      automated: true,
+      lineDelayMs: 5,
+    },
+  );
+
+  assert.deepEqual(calls, ["tthdf 0 2323\r"]);
+  await delay(30);
+  assert.deepEqual(calls, ["tthdf 0 2323\r", "admin\r", "test123\r", "\r"]);
+});
+
+test("manual input cancels pending automated lines", async () => {
+  const calls = [];
+  const sessions = new Map();
+  sessions.set("telnet-1", {
+    type: "telnet-native",
+    socket: {
+      write(data) {
+        calls.push(data);
+      },
+    },
+  });
+  initBridge(sessions);
+
+  terminalBridge.writeToSession(
+    { sender: {} },
+    {
+      sessionId: "telnet-1",
+      data: "first\nsecond\nthird\r",
+      automated: true,
+      lineDelayMs: 20,
+    },
+  );
+  terminalBridge.writeToSession({ sender: {} }, { sessionId: "telnet-1", data: "\x03" });
+
+  await delay(60);
+  assert.deepEqual(calls, ["first\r", "\x03"]);
 });

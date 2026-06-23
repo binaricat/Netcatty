@@ -694,24 +694,62 @@ function signalSshInterruptIfNeeded(session, data) {
   }
 }
 
-function writeToSession(event, payload) {
-  const session = sessions.get(payload.sessionId);
-  if (!session) return;
+function clearPendingAutomatedWrites(session) {
+  const timers = session?.pendingAutomatedWriteTimers;
+  if (!Array.isArray(timers) || timers.length === 0) return;
+  for (const timer of timers) clearTimeout(timer);
+  session.pendingAutomatedWriteTimers = [];
+}
 
+function splitTerminalInputIntoLineWrites(data) {
+  if (typeof data !== "string") return [data];
+  const chunks = [];
+  let line = "";
+
+  for (let index = 0; index < data.length; index += 1) {
+    const char = data[index];
+    if (char === "\r" || char === "\n") {
+      if (char === "\r" && data[index + 1] === "\n") index += 1;
+      chunks.push(`${line}\r`);
+      line = "";
+      continue;
+    }
+    line += char;
+  }
+
+  if (line.length > 0) chunks.push(line);
+  return chunks.length > 0 ? chunks : [data];
+}
+
+function getAutomatedLineDelayMs(payload) {
+  if (!payload?.automated) return 0;
+  const lineDelayMs = Number(payload.lineDelayMs);
+  return Number.isFinite(lineDelayMs) && lineDelayMs > 0 ? Math.min(lineDelayMs, 2000) : 0;
+}
+
+function shouldBlockSessionInput(session, data) {
   if (session.ymodemActive) {
-    if (payload.data === '\x03') {
+    if (data === '\x03') {
       cancelActiveYmodemSession(session);
     }
-    return;
+    return true;
   }
 
   // During ZMODEM transfer, block terminal input (Ctrl+C cancels the transfer)
   if (session.zmodemSentry?.isActive()) {
-    if (payload.data === '\x03') {
+    if (data === '\x03') {
       session.zmodemSentry.cancel();
     }
-    return;
+    return true;
   }
+
+  return false;
+}
+
+function writeToSessionNow(payload, data, logRewrite = payload.logRewrite) {
+  const session = sessions.get(payload.sessionId);
+  if (!session) return;
+  if (shouldBlockSessionInput(session, data)) return;
 
   try {
     if (session.type === 'telnet-native' && !payload.automated) {
@@ -725,12 +763,12 @@ function writeToSession(event, payload) {
     // local PTY leave it unset, so encodeTerminalInput returns the original
     // UTF-8 string for them. For UTF-8 it also returns the string unchanged, so
     // the transport's native string serialization keeps handling that case.
-    sessionLogStreamManager.registerSudoAutofillInput(payload.sessionId, payload.data);
-    sessionLogStreamManager.registerProgrammaticCommandLogRewrite(payload.sessionId, payload.logRewrite);
-    const outgoing = encodeTerminalInput(payload.data, session.encoding);
+    sessionLogStreamManager.registerSudoAutofillInput(payload.sessionId, data);
+    sessionLogStreamManager.registerProgrammaticCommandLogRewrite(payload.sessionId, logRewrite);
+    const outgoing = encodeTerminalInput(data, session.encoding);
 
     if (session.stream) {
-      signalSshInterruptIfNeeded(session, payload.data);
+      signalSshInterruptIfNeeded(session, data);
       session.stream.write(outgoing);
     } else if (session.proc) {
       session.proc.write(outgoing);
@@ -756,6 +794,43 @@ function writeToSession(event, payload) {
       console.warn("Write failed", err);
     }
   }
+}
+
+function writeToSession(event, payload) {
+  const session = sessions.get(payload.sessionId);
+  if (!session) return;
+
+  if (!payload.automated) clearPendingAutomatedWrites(session);
+  if (shouldBlockSessionInput(session, payload.data)) {
+    return;
+  }
+
+  const lineDelayMs = getAutomatedLineDelayMs(payload);
+  const lineChunks = lineDelayMs > 0 ? splitTerminalInputIntoLineWrites(payload.data) : [payload.data];
+  if (lineDelayMs > 0 && lineChunks.length > 1) {
+    clearPendingAutomatedWrites(session);
+    session.pendingAutomatedWriteTimers = [];
+    lineChunks.forEach((chunk, index) => {
+      const sendChunk = () => {
+        const current = sessions.get(payload.sessionId);
+        if (!current) return;
+        writeToSessionNow(
+          { ...payload, lineDelayMs: undefined },
+          chunk,
+          index === 0 ? payload.logRewrite : undefined,
+        );
+      };
+      if (index === 0) {
+        sendChunk();
+        return;
+      }
+      const timer = setTimeout(sendChunk, index * lineDelayMs);
+      session.pendingAutomatedWriteTimers.push(timer);
+    });
+    return;
+  }
+
+  writeToSessionNow(payload, payload.data);
 }
 
 async function sendSerialYmodem(_event, payload) {
@@ -909,6 +984,7 @@ function closeSession(event, payload) {
   
   try {
     cancelActiveYmodemSession(session);
+    clearPendingAutomatedWrites(session);
     session.zmodemSentry?.cancel();
     session.flushPendingData?.();
     cleanupSessionExternalAuthArtifacts(session);
@@ -1113,6 +1189,7 @@ function cleanupAllSessions() {
     try {
       session.zmodemSentry?.cancel();
       cancelActiveYmodemSession(session);
+      clearPendingAutomatedWrites(session);
       cleanupSessionExternalAuthArtifacts(session);
       if (session.stream) {
         session.stream.close();

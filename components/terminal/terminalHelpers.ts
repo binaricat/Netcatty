@@ -21,12 +21,14 @@ import type {
 } from "../../types";
 
 export const MAX_CONNECTION_LOG_DATA_CHARS = 1_000_000;
+export const AUTO_RUN_SNIPPET_LINE_DELAY_MS = 250;
 
 export interface TerminalBroadcastInputOptions {
   protectTerminalMode?: boolean;
   rawCommand?: string;
   fallbackData?: string;
   noAutoRun?: boolean;
+  lineDelayMs?: number;
 }
 
 /**
@@ -295,6 +297,16 @@ function encodeUtf8Base64(text: string): string {
 
 function hasMultipleCommandLines(command: string): boolean {
   return command.includes("\n") || command.includes("\r");
+}
+
+export function shouldDelayAutoRunSnippetInput(
+  data: string,
+  opts: { noAutoRun?: boolean },
+): boolean {
+  if (opts.noAutoRun) return false;
+  const normalized = normalizeLineEndings(String(data ?? "")).replace(/\r/g, "\n");
+  const withoutSubmitEnter = normalized.endsWith("\n") ? normalized.slice(0, -1) : normalized;
+  return withoutSubmitEnter.includes("\n");
 }
 
 function doubleQuoteFishAndPosix(value: string): string {

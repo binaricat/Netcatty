@@ -231,6 +231,7 @@ declare global {
       data: string,
       options?: {
         automated?: boolean;
+        lineDelayMs?: number;
         logRewrite?: { sentCommand: string; displayCommand: string };
       },
     ): void;

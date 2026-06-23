@@ -56,10 +56,12 @@ function createPreloadApi(ctx) {
     return ipcRenderer.invoke("netcatty:local:validatePath", { path, type });
   },
   writeToSession: (sessionId, data, options) => {
+    const lineDelayMs = Number(options?.lineDelayMs);
     ipcRenderer.send("netcatty:write", {
       sessionId,
       data,
       automated: Boolean(options?.automated),
+      lineDelayMs: Number.isFinite(lineDelayMs) && lineDelayMs > 0 ? lineDelayMs : undefined,
       logRewrite: options?.logRewrite && typeof options.logRewrite === "object"
         ? {
             sentCommand: String(options.logRewrite.sentCommand ?? ""),

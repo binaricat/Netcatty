@@ -5,9 +5,11 @@ import { existsSync, mkdirSync, rmSync } from "node:fs";
 
 import type { Host } from "../domain/models";
 import {
+  AUTO_RUN_SNIPPET_LINE_DELAY_MS,
   prepareAutoRunSnippetCommand,
   prepareProtectedBroadcastSnippetWrite,
   shouldHideConnectingDialogForConnectionReuse,
+  shouldDelayAutoRunSnippetInput,
   shouldShowTerminalConnectionDialog,
 } from "./terminal/terminalHelpers";
 
@@ -245,6 +247,14 @@ test("auto-run snippets keep multi-line commands as terminal input", () => {
     noAutoRun: false,
     shellType: "posix",
   }), command);
+});
+
+test("auto-run snippets delay multi-line input but paste-only snippets do not", () => {
+  assert.equal(AUTO_RUN_SNIPPET_LINE_DELAY_MS > 0, true);
+  assert.equal(shouldDelayAutoRunSnippetInput("tthdf 0 2323\nadmin\ntest123", { noAutoRun: false }), true);
+  assert.equal(shouldDelayAutoRunSnippetInput("tthdf 0 2323\nadmin\ntest123", { noAutoRun: true }), false);
+  assert.equal(shouldDelayAutoRunSnippetInput("show version", { noAutoRun: false }), false);
+  assert.equal(shouldDelayAutoRunSnippetInput("show version\r", { noAutoRun: false }), false);
 });
 
 test("snippet terminal mode restore is skipped for paste-only and non-shell targets", () => {
