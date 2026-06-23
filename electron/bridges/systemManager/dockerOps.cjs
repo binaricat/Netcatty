@@ -46,6 +46,10 @@ function buildDockerCommand(args) {
   return `docker ${args}`.trim();
 }
 
+function buildPasswordlessSudoDockerCommand(args) {
+  return `sudo ${buildDockerCommand(args)}`;
+}
+
 function buildSudoDockerCommand(args) {
   return `sudo -S -p '' ${buildDockerCommand(args)}`;
 }
@@ -169,21 +173,35 @@ function createDockerOpsApi({ execOnSession, getSession }) {
     const result = await execOnSession(event, sessionId, cmd, timeoutMs);
     if (isSuccessfulCommandResult(result)) return result;
 
-    const sudoPassword = getSessionSudoPassword(getSession?.(sessionId));
+    if (isDockerSocketPermissionError(result)) {
+      const sudoPassword = getSessionSudoPassword(getSession?.(sessionId));
+      let lastSudoResult = null;
 
-    if (sudoPassword && isDockerSocketPermissionError(result)) {
-      const sudoResult = await execOnSession(
+      const nopasswdResult = await execOnSession(
         event,
         sessionId,
-        buildSudoDockerCommand(args),
+        buildPasswordlessSudoDockerCommand(args),
         timeoutMs,
-        { stdin: `${sudoPassword}\n` },
       );
-      if (isSuccessfulCommandResult(sudoResult)) return sudoResult;
+      if (isSuccessfulCommandResult(nopasswdResult)) return nopasswdResult;
+      lastSudoResult = nopasswdResult;
+
+      if (sudoPassword) {
+        const sudoResult = await execOnSession(
+          event,
+          sessionId,
+          buildSudoDockerCommand(args),
+          timeoutMs,
+          { stdin: `${sudoPassword}\n` },
+        );
+        if (isSuccessfulCommandResult(sudoResult)) return sudoResult;
+        lastSudoResult = sudoResult;
+      }
+
       return {
         success: false,
-        error: dockerCommandError(sudoResult, `sudo docker exited with code ${sudoResult?.code}`),
-        stderr: sudoResult?.stderr,
+        error: dockerCommandError(lastSudoResult, `sudo docker exited with code ${lastSudoResult?.code}`),
+        stderr: lastSudoResult?.stderr,
       };
     }
 
