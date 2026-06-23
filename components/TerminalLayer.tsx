@@ -693,10 +693,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       if (logRewrite) {
         programmaticCommandLogRewriteHandlersRef.current.get(session.id)?.(logRewrite);
       }
-      const lineDelayMs = options?.lineDelayMs
-        ?? (shouldDelayAutoRunSnippetInput(targetData, { noAutoRun: options?.noAutoRun })
-          ? AUTO_RUN_SNIPPET_LINE_DELAY_MS
-          : undefined);
+      const lineDelayMs = options?.lineDelayMs;
       terminalBackend.writeToSession(session.id, targetData, {
         automated: true,
         ...(lineDelayMs ? { lineDelayMs } : {}),

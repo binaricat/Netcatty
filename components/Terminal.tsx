@@ -1010,15 +1010,17 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     // broadcast mode would clear peer input (the clear keystrokes already go
     // through the broadcast-aware path) but never send the command.
     if (options?.broadcast !== false && isBroadcastEnabledRef.current && onBroadcastInputRef.current) {
-      onBroadcastInputRef.current(data, sessionId, options?.protectTerminalMode
-        ? {
-            protectTerminalMode: true,
-            rawCommand: command,
-            fallbackData: fallbackBroadcastData,
-            noAutoRun,
-            lineDelayMs,
-          }
-        : undefined);
+      onBroadcastInputRef.current(data, sessionId, {
+        ...(options?.protectTerminalMode
+          ? {
+              protectTerminalMode: true,
+              rawCommand: command,
+              fallbackData: fallbackBroadcastData,
+            }
+          : {}),
+        noAutoRun,
+        ...(lineDelayMs ? { lineDelayMs } : {}),
+      });
     }
 
     data = prepareProgrammaticSudoInput(data);
