@@ -4,6 +4,7 @@ import {
   mergeLatestFollowTerminalCwdHostSetting,
   resolveHostFollowTerminalCwd,
   resolveSftpFollowTerminalCwdTargetHost,
+  shouldClearBlockedFollowOnReach,
   shouldFollowTerminalCwdNavigate,
 } from "./sftpFollowTerminalCwd";
 
@@ -141,5 +142,29 @@ test("mergeLatestFollowTerminalCwdHostSetting keeps optimistic session override 
       hostname: "session.example.com",
       sftpFollowTerminalCwd: false,
     },
+  );
+});
+
+test("shouldClearBlockedFollowOnReach clears when the active connection reaches the blocked cwd", () => {
+  assert.equal(
+    shouldClearBlockedFollowOnReach(
+      { connectionId: "conn-1", terminalCwd: "/home/user/project" },
+      "conn-1",
+      "/home/user/project",
+      false,
+    ),
+    true,
+  );
+});
+
+test("shouldClearBlockedFollowOnReach keeps block while navigation is still loading", () => {
+  assert.equal(
+    shouldClearBlockedFollowOnReach(
+      { connectionId: "conn-1", terminalCwd: "/home/user/project" },
+      "conn-1",
+      "/home/user/project",
+      true,
+    ),
+    false,
   );
 });

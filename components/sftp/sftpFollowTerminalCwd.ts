@@ -44,6 +44,20 @@ export const mergeLatestFollowTerminalCwdHostSetting = <
   };
 };
 
+/** Clear a follow block once the user reaches the blocked cwd through any navigation. */
+export const shouldClearBlockedFollowOnReach = (
+  blockedFollow: SftpFollowTerminalCwdBlock | null | undefined,
+  connectionId: string | null | undefined,
+  currentPath: string | null | undefined,
+  loading: boolean,
+): boolean => {
+  if (loading || !blockedFollow || !connectionId || !currentPath) return false;
+  return (
+    blockedFollow.connectionId === connectionId
+    && blockedFollow.terminalCwd === currentPath
+  );
+};
+
 /** Whether SFTP should auto-navigate to match the linked terminal cwd. */
 export const shouldFollowTerminalCwdNavigate = ({
   followEnabled,

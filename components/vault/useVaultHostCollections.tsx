@@ -2,6 +2,7 @@ import React, { useCallback, useMemo } from "react";
 
 import { upsertKnownHost } from "../../domain/knownHosts";
 import { sortByVaultOrder, sortVaultStringsByOrder } from "../../domain/vaultOrder";
+import { matchesHostSearchQuery, matchesSearchQuery } from "../../lib/searchMatcher";
 import type { GroupConfig, GroupNode, Host, KnownHost } from "../../types";
 import KnownHostsManager from "../KnownHostsManager";
 import type { SortMode } from "../ui/sort-dropdown";
@@ -47,17 +48,15 @@ export function useVaultHostCollections({
     );
   }, [groupConfigs]);
 
-  const searchTerm = useMemo(() => search.trim().toLowerCase(), [search]);
+  const searchTerm = useMemo(() => search.trim(), [search]);
   const selectedTagSet = useMemo(() => new Set(selectedTags), [selectedTags]);
   const hasSelectedTags = selectedTags.length > 0;
 
   const hostMatchesSearchAndTags = useCallback((host: Host): boolean => {
     if (searchTerm) {
       const matchesSearch =
-        host.label.toLowerCase().includes(searchTerm) ||
-        host.hostname.toLowerCase().includes(searchTerm) ||
-        host.tags.some((tag) => tag.toLowerCase().includes(searchTerm)) ||
-        (host.notes?.toLowerCase().includes(searchTerm) ?? false);
+        matchesHostSearchQuery(searchTerm, host) ||
+        matchesSearchQuery(searchTerm, host.username, host.notes);
       if (!matchesSearch) return false;
     }
     if (hasSelectedTags && !host.tags?.some((tag) => selectedTagSet.has(tag))) {

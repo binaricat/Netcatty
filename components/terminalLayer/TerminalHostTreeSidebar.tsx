@@ -37,6 +37,7 @@ import {
   STORAGE_KEY_VAULT_HOSTS_TREE_EXPANDED,
 } from '../../infrastructure/config/storageKeys';
 import { cn } from '../../lib/utils';
+import { matchesHostSearchQuery, matchesSearchQuery } from '../../lib/searchMatcher';
 import type { GroupConfig, GroupNode, Host, TerminalTheme } from '../../types';
 import { HostTreeGroupContextMenuContent, HostTreeHostContextMenuContent } from '../host/HostTreeContextMenus';
 import { HostTreeGroupInlineRenameInput } from '../host/HostTreeGroupInlineRenameInput';
@@ -199,13 +200,8 @@ export function getTerminalHostTreeMeasuredLayoutWidth(
 }
 
 function hostMatchesSearch(host: Host, search: string): boolean {
-  const s = search.toLowerCase();
-  return (
-    host.label.toLowerCase().includes(s)
-    || host.hostname.toLowerCase().includes(s)
-    || host.tags.some((tag) => tag.toLowerCase().includes(s))
-    || (host.notes?.toLowerCase().includes(s) ?? false)
-  );
+  return matchesHostSearchQuery(search, host)
+    || matchesSearchQuery(search, host.username, host.notes);
 }
 
 function filterGroupNode(

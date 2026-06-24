@@ -484,6 +484,22 @@ async function getAvailableAgentSocket() {
 }
 
 /**
+ * True when the session options carry an explicit user key choice — either
+ * inline private key material or identity file paths from a Keychain reference
+ * key (issue #1614).
+ * @param {Object} options
+ * @param {string} [options.privateKey]
+ * @param {string[]} [options.identityFilePaths]
+ * @returns {boolean}
+ */
+function hasUserConfiguredKey(options) {
+  if (typeof options?.privateKey === "string" && options.privateKey.trim().length > 0) {
+    return true;
+  }
+  return Array.isArray(options?.identityFilePaths) && options.identityFilePaths.length > 0;
+}
+
+/**
  * Build authentication handler with default key fallback support
  * @param {Object} options
  * @param {string} [options.privateKey] - Explicitly configured private key
@@ -1012,6 +1028,7 @@ module.exports = {
   preparePrivateKeyForAuth,
   loadIdentityFileForAuth,
   loadFirstIdentityFileForAuth,
+  hasUserConfiguredKey,
   PassphraseCancelledError,
   isPassphraseCancelledError,
 };

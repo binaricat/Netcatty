@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import React, { useMemo, useState } from "react";
 import { cn } from "../lib/utils";
+import { matchesHostSearchQuery, matchesSearchQuery } from "../lib/searchMatcher";
 import { useI18n } from "../application/i18n/I18nProvider";
 import { Host, ProxyProfile, SSHKey } from "../types";
 import { ManagedSource } from "../domain/models";
@@ -169,13 +170,10 @@ const SelectHostPanel: React.FC<SelectHostPanelProps> = ({
 
     // Filter by search
     if (searchQuery) {
-      const q = searchQuery.toLowerCase();
       result = result.filter(
         (h) =>
-          h.label.toLowerCase().includes(q) ||
-          h.hostname.toLowerCase().includes(q) ||
-          h.username.toLowerCase().includes(q) ||
-          (h.notes?.toLowerCase().includes(q) ?? false),
+          matchesHostSearchQuery(searchQuery, h) ||
+          matchesSearchQuery(searchQuery, h.username, h.notes),
       );
     }
 

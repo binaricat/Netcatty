@@ -74,6 +74,7 @@
     "lucide-react": "0.560.0",
     "monaco-editor": "^0.55.1",
     "node-pty": "1.1.0",
+    "pinyin-pro": "^3.28.1",
     "react": "^19.2.1",
     "react-dom": "^19.2.1",
     "serialport": "^13.0.0",

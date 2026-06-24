@@ -59,6 +59,7 @@ import { VaultSection } from './components/VaultView';
 import { KeyboardInteractiveRequest } from './components/KeyboardInteractiveModal';
 import { PassphraseRequest } from './components/PassphraseModal';
 import { classifyLocalShellType } from './lib/localShell';
+import { getHostSearchMatch } from './lib/searchMatcher';
 import { useDiscoveredShells, resolveShellSetting } from './lib/useDiscoveredShells';
 import { Host, HostProtocol, KnownHost, SerialConfig, Snippet, SSHKey, TerminalSession } from './types';
 import { resolveSnippetCommand } from './components/SnippetExecutionProvider';
@@ -825,15 +826,18 @@ function App({ settings }: { settings: SettingsState }) {
 
   const quickResults = useMemo(() => {
     if (!isQuickSwitcherOpen) return [];
-    const term = quickSearch.trim().toLowerCase();
-    const filtered = term
-      ? hosts.filter(h =>
-        h.label.toLowerCase().includes(term) ||
-        h.hostname.toLowerCase().includes(term) ||
-        (h.group || '').toLowerCase().includes(term)
-      )
-      : hosts;
-    return filtered;
+    const term = quickSearch.trim();
+    if (!term) return hosts;
+    return hosts
+      .map((host) => ({ host, match: getHostSearchMatch(term, host) }))
+      .filter((entry) => entry.match.matched)
+      .sort((left, right) => {
+        if (left.match.score !== right.match.score) {
+          return right.match.score - left.match.score;
+        }
+        return left.host.label.localeCompare(right.host.label);
+      })
+      .map((entry) => entry.host);
   }, [quickSearch, hosts, isQuickSwitcherOpen]);
 
   const handleDeleteHost = useCallback((hostId: string) => {
