@@ -47,7 +47,7 @@ const SFTP_CAPABILITIES = [
   sftpCapability(
     "sftp.write",
     "Write a remote file over SFTP.",
-    { write: true, bypassesApproval: false },
+    { write: true, bypassesApproval: false, bypassesChatCancel: false },
     {
       builtin: { rpcMethod: "netcatty/sftp/write" },
       public: { rpcMethod: "public/sftp/writeFile", mcpTool: "sftp_write_file" },
@@ -57,7 +57,7 @@ const SFTP_CAPABILITIES = [
   sftpCapability(
     "sftp.download",
     "Download a remote file to a local path.",
-    { write: true, bypassesApproval: false },
+    { write: true, bypassesApproval: false, bypassesChatCancel: false },
     {
       builtin: { rpcMethod: "netcatty/sftp/download" },
       cli: { command: ["sftp", "download"] },
@@ -66,7 +66,7 @@ const SFTP_CAPABILITIES = [
   sftpCapability(
     "sftp.upload",
     "Upload a local file to a remote path.",
-    { write: true, bypassesApproval: false },
+    { write: true, bypassesApproval: false, bypassesChatCancel: false },
     {
       builtin: { rpcMethod: "netcatty/sftp/upload" },
       cli: { command: ["sftp", "upload"] },
@@ -85,7 +85,7 @@ const SFTP_CAPABILITIES = [
   sftpCapability(
     "sftp.home",
     "Get the remote home directory for a session.",
-    { sensitiveRead: true, longRunning: false },
+    { sensitiveRead: true },
     {
       builtin: { rpcMethod: "netcatty/sftp/home" },
       public: { rpcMethod: "public/sftp/home", mcpTool: "sftp_home", confirmInConfirmMode: true },
@@ -95,7 +95,7 @@ const SFTP_CAPABILITIES = [
   sftpCapability(
     "sftp.mkdir",
     "Create a remote directory over SFTP.",
-    { write: true, bypassesApproval: false },
+    { write: true, bypassesApproval: false, bypassesChatCancel: false },
     {
       builtin: { rpcMethod: "netcatty/sftp/mkdir" },
       public: { rpcMethod: "public/sftp/mkdir", mcpTool: "sftp_mkdir" },
@@ -105,7 +105,7 @@ const SFTP_CAPABILITIES = [
   sftpCapability(
     "sftp.delete",
     "Delete a remote file or directory over SFTP.",
-    { write: true, bypassesApproval: false },
+    { write: true, bypassesApproval: false, bypassesChatCancel: false },
     {
       builtin: { rpcMethod: "netcatty/sftp/delete" },
       public: { rpcMethod: "public/sftp/delete", mcpTool: "sftp_delete" },
@@ -115,7 +115,7 @@ const SFTP_CAPABILITIES = [
   sftpCapability(
     "sftp.rename",
     "Rename a remote file or directory over SFTP.",
-    { write: true, bypassesApproval: false },
+    { write: true, bypassesApproval: false, bypassesChatCancel: false },
     {
       builtin: { rpcMethod: "netcatty/sftp/rename" },
       public: { rpcMethod: "public/sftp/rename", mcpTool: "sftp_rename" },
@@ -125,7 +125,7 @@ const SFTP_CAPABILITIES = [
   sftpCapability(
     "sftp.chmod",
     "Change remote file permissions over SFTP.",
-    { write: true, bypassesApproval: false },
+    { write: true, bypassesApproval: false, bypassesChatCancel: false },
     {
       builtin: { rpcMethod: "netcatty/sftp/chmod" },
       public: { rpcMethod: "public/sftp/chmod", mcpTool: "sftp_chmod" },

@@ -93,7 +93,7 @@ test("write operations require chatSessionId on builtin surface", () => {
   assert.match(decision.error, /chatSessionId/i);
 });
 
-test("cancelled chat sessions block writes", () => {
+test("cancelled chat sessions block terminal writes", () => {
   const decision = evaluateRpcPermission({
     rpcMethod: "netcatty/exec",
     permissionMode: PERMISSION_MODES.AUTONOMOUS,
@@ -102,6 +102,27 @@ test("cancelled chat sessions block writes", () => {
   });
   assert.equal(decision.allowed, false);
   assert.match(decision.error, /cancelled/i);
+});
+
+test("cancelled chat sessions block sftp writes", () => {
+  const decision = evaluateRpcPermission({
+    rpcMethod: "netcatty/sftp/write",
+    permissionMode: PERMISSION_MODES.AUTONOMOUS,
+    params: { chatSessionId: "chat-1" },
+    context: { chatSessionCancelled: true },
+  });
+  assert.equal(decision.allowed, false);
+  assert.match(decision.error, /cancelled/i);
+});
+
+test("cancelled chat sessions still allow sftp reads", () => {
+  const decision = evaluateRpcPermission({
+    rpcMethod: "netcatty/sftp/list",
+    permissionMode: PERMISSION_MODES.AUTONOMOUS,
+    params: { chatSessionId: "chat-1" },
+    context: { chatSessionCancelled: true },
+  });
+  assert.equal(decision.allowed, true);
 });
 
 test("jobStop bypasses observer and cancelled chat checks", () => {

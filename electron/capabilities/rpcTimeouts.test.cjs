@@ -6,9 +6,10 @@ const assert = require("node:assert/strict");
 const { resolveRpcTimeoutMs, isLongRunningRpcMethod, isApprovalWaitRpcMethod } = require("./rpcTimeouts.cjs");
 const { CAPABILITY_SURFACES, PERMISSION_MODES, RPC_TIMEOUT_DEFAULTS } = require("./constants.cjs");
 
-test("long-running rpc methods include exec and sftp read", () => {
+test("long-running rpc methods include exec and sftp home", () => {
   assert.equal(isLongRunningRpcMethod("netcatty/exec"), true);
   assert.equal(isLongRunningRpcMethod("netcatty/sftp/read"), true);
+  assert.equal(isLongRunningRpcMethod("netcatty/sftp/home"), true);
   assert.equal(isLongRunningRpcMethod("netcatty/jobPoll"), false);
 });
 
