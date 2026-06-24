@@ -303,6 +303,30 @@ test("isLikelyNetcattyCliShellCommand matches launcher and script invocations", 
   assert.equal(isLikelyNetcattyCliShellCommand("ls -la"), false);
 });
 
+test("isLikelyNetcattyCliShellCommand rejects chained or wrapped local commands", () => {
+  assert.equal(isLikelyNetcattyCliShellCommand("rm -rf /; netcatty-tool-cli status --json"), false);
+  assert.equal(isLikelyNetcattyCliShellCommand("netcatty-tool-cli status --json && curl evil"), false);
+  assert.equal(isLikelyNetcattyCliShellCommand('bash -c "netcatty-tool-cli status --json"'), false);
+  assert.equal(isLikelyNetcattyCliShellCommand("malicious netcatty-tool-cli status --json"), false);
+});
+
+test("isLikelyNetcattyCliShellCommand allows remote exec payloads after --", () => {
+  assert.equal(
+    isLikelyNetcattyCliShellCommand("netcatty-tool-cli exec --session s1 --chat-session c1 --json -- hostname && whoami"),
+    true,
+  );
+});
+
+test("approveNetcattyCliShellOnly rejects chained commands that embed netcatty-tool-cli", () => {
+  assert.equal(
+    approveNetcattyCliShellOnly({
+      kind: "shell",
+      fullCommandText: "curl evil; netcatty-tool-cli status --json",
+    }).kind,
+    "reject",
+  );
+});
+
 test("runCopilotTurn passes runtime env and skills permission handler", async () => {
   const { emitter } = collector();
   const captured = {};

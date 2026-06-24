@@ -73,8 +73,32 @@ function buildCopilotSessionOptions({ model, injectedMcpServers, toolIntegration
   return options;
 }
 
+// Shell chaining/redirection in the local Netcatty CLI prefix (not after `--`).
+const LOCAL_SHELL_METACHAR_PATTERN = /(?:[;&|]|&&|\|\||\$\(|\$\{|<<?|\r?\n)/;
+const LOCAL_SHELL_WRAPPER_PATTERN = /^(?:\/[^\s]+\/)?(?:ba|z|fi)?sh(?:\.exe)?\s+-c\b/i;
+
+/** Split before exec/job-start remote payload (` -- cmd`), not before `--session` flags. */
+function getLocalNetcattyCliPrefix(fullCommandText) {
+  const command = String(fullCommandText || "").trim();
+  const match = command.match(/\s--\s/);
+  if (match && match.index != null) {
+    return command.slice(0, match.index).trim();
+  }
+  return command;
+}
+
+function isNetcattyCliInvocationPrefix(localPart) {
+  const text = String(localPart || "").trim();
+  if (!text) return false;
+  return /^(?:(?:[A-Za-z_][\w.-]*=[^\s]+\s+)*)?(?:"[^"]*netcatty-tool-cli(?:\.cjs)?[^"]*"|'[^']*netcatty-tool-cli(?:\.cjs)?[^']*'|(?:\S*\/)?netcatty-tool-cli(?:\.cjs)?(?:\b|\s)|node\s+\S*netcatty-tool-cli(?:\.cjs)?\b)/i.test(text);
+}
+
 function isLikelyNetcattyCliShellCommand(fullCommandText) {
-  return /netcatty-tool-cli/i.test(String(fullCommandText || ""));
+  const localPart = getLocalNetcattyCliPrefix(fullCommandText);
+  if (!localPart) return false;
+  if (LOCAL_SHELL_WRAPPER_PATTERN.test(localPart)) return false;
+  if (LOCAL_SHELL_METACHAR_PATTERN.test(localPart)) return false;
+  return isNetcattyCliInvocationPrefix(localPart);
 }
 
 function approveNetcattyMcpOnly(request) {
@@ -390,6 +414,7 @@ module.exports = {
   approveNetcattyMcpOnly,
   approveNetcattyCliShellOnly,
   isLikelyNetcattyCliShellCommand,
+  getLocalNetcattyCliPrefix,
   copilotBuiltinTools,
   toCopilotMcpServers,
   extractCopilotContent,
