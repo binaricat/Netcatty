@@ -601,7 +601,9 @@ function createStartSessionApi(ctx) {
           });
         }
 
-        // If no primary auth method configured, try ssh-agent first, then ALL default keys
+        // If no primary auth method configured, try ssh-agent first, then ALL default keys.
+        // Skip default-key primaries when the user explicitly chose a key (inline or
+        // identityFilePaths) even if loading that key failed (issue #1614).
         if (!connectOpts.privateKey && !connectOpts.password && !connectOpts.agent) {
           // First, try to use ssh-agent if available (this is what regular SSH does)
           const sshAgentSocket = await getAvailableAgentSocket();
@@ -612,12 +614,12 @@ function createStartSessionApi(ctx) {
           }
 
           // Mark that we need to try all default keys (handled in authMethods below)
-          if (allDefaultKeys.length > 0) {
+          if (!hasUserConfiguredKey(options) && allDefaultKeys.length > 0) {
             log("Will try all default SSH keys as fallback", { count: allDefaultKeys.length, keyNames: allDefaultKeys.map(k => k.keyName) });
             // Set first key for connectOpts.privateKey (required for ssh2 to allow publickey auth)
             connectOpts.privateKey = allDefaultKeys[0].privateKey;
             usedDefaultKeyAsPrimary = true;
-          } else {
+          } else if (allDefaultKeys.length === 0) {
             log("No default SSH key found in ~/.ssh directory");
           }
         }
