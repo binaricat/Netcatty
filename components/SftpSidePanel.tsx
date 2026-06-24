@@ -754,8 +754,18 @@ const SftpSidePanelInteractiveBody: React.FC<SftpSidePanelInteractiveBodyProps> 
     || (sftp.activeFileWatchCountRef?.current ?? 0) > 0;
 
   const blockedFollowRef = useRef<SftpFollowTerminalCwdBlock | null>(null);
+  const followSyncGenerationRef = useRef(0);
+  const effectiveFollowTerminalCwdRef = useRef(effectiveFollowTerminalCwd);
+  const canFollowTerminalCwdRef = useRef(canFollowTerminalCwd);
+  effectiveFollowTerminalCwdRef.current = effectiveFollowTerminalCwd;
+  canFollowTerminalCwdRef.current = canFollowTerminalCwd;
   const connectionId = sftp.leftPane.connection?.id ?? null;
   const connectionPath = sftp.leftPane.connection?.currentPath ?? null;
+
+  const invalidateInFlightFollowSync = useCallback(() => {
+    followSyncGenerationRef.current += 1;
+    blockedFollowRef.current = null;
+  }, []);
 
   useEffect(() => {
     blockedFollowRef.current = null;
@@ -767,8 +777,8 @@ const SftpSidePanelInteractiveBody: React.FC<SftpSidePanelInteractiveBodyProps> 
 
   useEffect(() => {
     if (effectiveFollowTerminalCwd) return;
-    blockedFollowRef.current = null;
-  }, [effectiveFollowTerminalCwd]);
+    invalidateInFlightFollowSync();
+  }, [effectiveFollowTerminalCwd, invalidateInFlightFollowSync]);
 
   useEffect(() => {
     if (
@@ -798,15 +808,24 @@ const SftpSidePanelInteractiveBody: React.FC<SftpSidePanelInteractiveBodyProps> 
       return;
     }
 
+    const syncGeneration = followSyncGenerationRef.current;
+
     let terminalCwd = activeTerminalCwd;
     if (!terminalCwd) {
       terminalCwd = await onGetTerminalCwd({ preferFreshBackend: true });
     }
     if (!terminalCwd) return;
+    if (
+      syncGeneration !== followSyncGenerationRef.current
+      || !effectiveFollowTerminalCwdRef.current
+      || !canFollowTerminalCwdRef.current
+    ) {
+      return;
+    }
 
     const connection = sftpRef.current.leftPane.connection;
     if (!shouldFollowTerminalCwdNavigate({
-      followEnabled: effectiveFollowTerminalCwd,
+      followEnabled: effectiveFollowTerminalCwdRef.current,
       isVisible,
       terminalCwd,
       currentPath: connection?.currentPath,
@@ -819,8 +838,21 @@ const SftpSidePanelInteractiveBody: React.FC<SftpSidePanelInteractiveBodyProps> 
     }
 
     const navigateResult = await sftpRef.current.navigateTo("left", terminalCwd);
-    if (navigateResult === "failed" && connection?.id) {
-      blockedFollowRef.current = { connectionId: connection.id, terminalCwd };
+    if (
+      syncGeneration !== followSyncGenerationRef.current
+      || !effectiveFollowTerminalCwdRef.current
+      || !canFollowTerminalCwdRef.current
+    ) {
+      return;
+    }
+
+    const currentConnection = sftpRef.current.leftPane.connection;
+    if (!currentConnection || currentConnection.id !== connection?.id) {
+      return;
+    }
+
+    if (navigateResult === "failed" && currentConnection.id) {
+      blockedFollowRef.current = { connectionId: currentConnection.id, terminalCwd };
     } else if (navigateResult === "reached") {
       blockedFollowRef.current = null;
     }
@@ -837,13 +869,13 @@ const SftpSidePanelInteractiveBody: React.FC<SftpSidePanelInteractiveBodyProps> 
   const handleToggleFollowTerminalCwd = useCallback(() => {
     const nextEnabled = !effectiveFollowTerminalCwd;
     if (!nextEnabled) {
-      blockedFollowRef.current = null;
+      invalidateInFlightFollowSync();
     }
     if (followTerminalCwdHost?.id) {
       setPendingFollowOverride({ hostId: followTerminalCwdHost.id, value: nextEnabled });
     }
     onSftpFollowTerminalCwdChange?.(nextEnabled, followTerminalCwdHost);
-  }, [effectiveFollowTerminalCwd, followTerminalCwdHost, onSftpFollowTerminalCwdChange]);
+  }, [effectiveFollowTerminalCwd, followTerminalCwdHost, invalidateInFlightFollowSync, onSftpFollowTerminalCwdChange]);
 
   useEffect(() => {
     if (!effectiveFollowTerminalCwd || !canFollowTerminalCwd || !isVisible || hasActiveWork) return;
