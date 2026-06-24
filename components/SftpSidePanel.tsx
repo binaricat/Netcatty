@@ -713,8 +713,10 @@ const SftpSidePanelInteractiveBody: React.FC<SftpSidePanelInteractiveBodyProps> 
   const handleGoToTerminalCwd = useCallback(async () => {
     if (!onGetTerminalCwd) return;
     const cwd = await onGetTerminalCwd({ preferFreshBackend: true });
-    if (cwd) {
-      sftpRef.current.navigateTo("left", cwd);
+    if (!cwd) return;
+    const navigated = await sftpRef.current.navigateTo("left", cwd);
+    if (navigated) {
+      blockedFollowRef.current = null;
     }
   }, [onGetTerminalCwd, sftpRef]);
 
