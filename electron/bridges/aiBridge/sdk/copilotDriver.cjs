@@ -14,7 +14,9 @@
  * - MCP mode: side effects route through the injected netcatty MCP server
  *   (stdio). The permission handler rejects local Copilot tools and allows
  *   only MCP requests; netcatty MCP then enforces approval/scope/blocklist.
- * - Skills mode: only builtin bash (+ skill) are exposed. Shell permission
+ * - Skills mode: only builtin bash is exposed (CLI instructions are injected via
+ *   the host prompt; the skill builtin is omitted because its read/custom-tool
+ *   permission kinds are not shell-safe to auto-approve). Shell permission
  *   requests are approved only for Netcatty CLI invocations; discovery env is
  *   passed to the Copilot runtime so `netcatty-tool-cli` can reach the host.
  *
@@ -51,7 +53,7 @@ function toCopilotMcpServers(injectedMcpServers) {
   return map;
 }
 
-const COPILOT_SKILLS_AVAILABLE_TOOLS = ["builtin:bash", "builtin:skill"];
+const COPILOT_SKILLS_AVAILABLE_TOOLS = ["builtin:bash"];
 
 function copilotBuiltinTools(toolIntegrationMode) {
   return toolIntegrationMode === "skills" ? [...COPILOT_SKILLS_AVAILABLE_TOOLS] : null;
@@ -74,7 +76,7 @@ function buildCopilotSessionOptions({ model, injectedMcpServers, toolIntegration
 }
 
 // Shell chaining/redirection in the local Netcatty CLI prefix (not after `--`).
-const LOCAL_SHELL_METACHAR_PATTERN = /(?:[;&|]|&&|\|\||\$\(|\$\{|<<?|\r?\n)/;
+const LOCAL_SHELL_METACHAR_PATTERN = /(?:[;&|`]|&&|\|\||\$\(|\$\{|<<?|\r?\n)/;
 const LOCAL_SHELL_WRAPPER_PATTERN = /^(?:\/[^\s]+\/)?(?:ba|z|fi)?sh(?:\.exe)?\s+-c\b/i;
 
 /** Split before exec/job-start remote payload (` -- cmd`), not before `--session` flags. */

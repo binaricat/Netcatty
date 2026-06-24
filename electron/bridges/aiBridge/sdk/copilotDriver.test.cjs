@@ -263,9 +263,9 @@ test("runCopilotTurn aborts the active Copilot session when the signal aborts", 
   assert.equal(events.some((event) => event.k === "done"), false);
 });
 
-test("copilotBuiltinTools exposes bash+skill only in skills mode", () => {
+test("copilotBuiltinTools exposes bash only in skills mode", () => {
   assert.equal(copilotBuiltinTools("mcp"), null);
-  assert.deepEqual(copilotBuiltinTools("skills"), ["builtin:bash", "builtin:skill"]);
+  assert.deepEqual(copilotBuiltinTools("skills"), ["builtin:bash"]);
 });
 
 test("buildCopilotSessionOptions whitelists bash in skills mode", () => {
@@ -274,7 +274,7 @@ test("buildCopilotSessionOptions whitelists bash in skills mode", () => {
     injectedMcpServers: [],
     toolIntegrationMode: "skills",
   });
-  assert.deepEqual(skills.availableTools, ["builtin:bash", "builtin:skill"]);
+  assert.deepEqual(skills.availableTools, ["builtin:bash"]);
   assert.deepEqual(skills.mcpServers, {});
 });
 
@@ -308,6 +308,7 @@ test("isLikelyNetcattyCliShellCommand rejects chained or wrapped local commands"
   assert.equal(isLikelyNetcattyCliShellCommand("netcatty-tool-cli status --json && curl evil"), false);
   assert.equal(isLikelyNetcattyCliShellCommand('bash -c "netcatty-tool-cli status --json"'), false);
   assert.equal(isLikelyNetcattyCliShellCommand("malicious netcatty-tool-cli status --json"), false);
+  assert.equal(isLikelyNetcattyCliShellCommand("netcatty-tool-cli status `id` --json"), false);
 });
 
 test("isLikelyNetcattyCliShellCommand allows remote exec payloads after --", () => {
