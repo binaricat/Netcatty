@@ -104,12 +104,26 @@ export const XTERM_PERFORMANCE_CONFIG = {
   highlighting: {
     // Debounce time for viewport scanning (ms)
     // Higher values = better scrolling performance, but slower highlight "catch up"
-    debounceMs: 200,
+    debounceMs: 100,
     // Minimum interval between immediate (rAF) refreshes in ms.
     // Prevents heavy output (e.g. tail -f) from refreshing every frame.
-    immediateMinIntervalMs: 50,
+    immediateMinIntervalMs: 16,
     // Number of unique line scan results to keep cached.
     cacheEntries: 1200,
+    // Keep decorations for lines just outside the viewport so small scrolls
+    // don't constantly dispose/recreate them. Scales with current terminal rows.
+    overscanViewportRatio: 2.0,
+    // Dirty scan padding around cursor/viewport deltas for write bursts.
+    dirtyScanPadding: 2,
+    // Dynamic dirty-line cap scales with viewport rows.
+    dirtyLinesPerViewportRow: 6,
+    // Clamp the dynamic dirty-line cap to avoid extremes.
+    minDirtyLines: 200,
+    maxDirtyLines: 1200,
+    // Max processing time per refresh pass when handling dirty lines (ms).
+    writeRefreshBudgetMs: 4,
+    // Process dirty contiguous lines in chunks so budget checks can preempt.
+    dirtySegmentChunkSize: 48,
   },
 };
 
