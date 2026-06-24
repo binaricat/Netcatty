@@ -115,6 +115,11 @@ function findExecPayloadSeparatorIndex(command) {
   return lastIndex;
 }
 
+function matchesShellMetacharAt(text, index) {
+  const match = LOCAL_SHELL_METACHAR_PATTERN.exec(String(text || "").slice(index));
+  return Boolean(match && match.index === 0);
+}
+
 function containsUnsafeShellMetachar(text) {
   let inSingle = false;
   let inDouble = false;
@@ -143,7 +148,7 @@ function containsUnsafeShellMetachar(text) {
       if (text.startsWith("$(", i) || ch === "`") return true;
       continue;
     }
-    if (LOCAL_SHELL_METACHAR_PATTERN.test(text.slice(i))) return true;
+    if (matchesShellMetacharAt(text, i)) return true;
   }
   return false;
 }
@@ -194,6 +199,9 @@ function isLikelyNetcattyCliShellCommand(fullCommandText) {
   if (remotePayload) {
     if (!hasExecPayloadSubcommand(localPart)) return false;
     if (containsUnsafeShellMetachar(localPart)) return false;
+    // The runtime executes fullCommandText in a local shell; scan all of it so
+    // tokens after `--` cannot chain additional local commands unless quoted.
+    if (containsUnsafeShellMetachar(command)) return false;
     return true;
   }
 
@@ -516,6 +524,7 @@ module.exports = {
   getLocalNetcattyCliPrefix,
   findExecPayloadSeparatorIndex,
   containsUnsafeShellMetachar,
+  matchesShellMetacharAt,
   hasExecPayloadSubcommand,
   copilotBuiltinTools,
   toCopilotMcpServers,

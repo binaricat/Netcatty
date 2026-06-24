@@ -311,10 +311,14 @@ test("isLikelyNetcattyCliShellCommand rejects chained or wrapped local commands"
   assert.equal(isLikelyNetcattyCliShellCommand("netcatty-tool-cli status `id` --json"), false);
 });
 
-test("isLikelyNetcattyCliShellCommand allows remote exec payloads after --", () => {
+test("isLikelyNetcattyCliShellCommand allows quoted remote exec payloads after --", () => {
+  assert.equal(
+    isLikelyNetcattyCliShellCommand('netcatty-tool-cli exec --session s1 --chat-session c1 --json -- "hostname && whoami"'),
+    true,
+  );
   assert.equal(
     isLikelyNetcattyCliShellCommand("netcatty-tool-cli exec --session s1 --chat-session c1 --json -- hostname && whoami"),
-    true,
+    false,
   );
 });
 
