@@ -13,6 +13,8 @@ function payload(overrides: Partial<SyncPayload> = {}): SyncPayload {
     snippets: [],
     customGroups: [],
     snippetPackages: [],
+    notes: [],
+    noteGroups: [],
     portForwardingRules: [],
     groupConfigs: [],
     settings: undefined,
@@ -67,6 +69,35 @@ test("mergeSyncPayloads merges reusable proxy profiles by id", () => {
     "proxy-local",
     "proxy-remote",
   ]);
+});
+
+test("mergeSyncPayloads keeps local and remote notes", () => {
+  const result = mergeSyncPayloads(
+    payload(),
+    payload({
+      notes: [{
+        id: "local",
+        title: "Local",
+        content: "",
+        createdAt: 1,
+        updatedAt: 2,
+      }],
+      noteGroups: ["Local"],
+    }),
+    payload({
+      notes: [{
+        id: "remote",
+        title: "Remote",
+        content: "",
+        createdAt: 1,
+        updatedAt: 3,
+      }],
+      noteGroups: ["Remote"],
+    }),
+  );
+
+  assert.deepEqual(result.payload.notes?.map((note) => note.id).sort(), ["local", "remote"]);
+  assert.deepEqual(result.payload.noteGroups?.sort(), ["Local", "Remote"]);
 });
 
 test("mergeSyncPayloads preserves proxy profiles when remote payload predates them", () => {

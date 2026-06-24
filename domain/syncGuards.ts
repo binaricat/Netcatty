@@ -9,16 +9,7 @@ export type ShrinkFinding =
   | {
       suspicious: true;
       reason: 'bulk-shrink' | 'large-shrink';
-      entityType:
-        | 'hosts'
-        | 'keys'
-        | 'identities'
-        | 'proxyProfiles'
-        | 'snippets'
-        | 'customGroups'
-        | 'snippetPackages'
-        | 'portForwardingRules'
-        | 'groupConfigs';
+      entityType: CloudSyncPayloadEntityKey;
       baseCount: number;
       outgoingCount: number;
       lost: number;

@@ -1,6 +1,8 @@
 const path = require("node:path");
 const fs = require("node:fs");
 
+const frontendBackgroundColorCache = new Map();
+
 function hslToHex(h, s, l) {
   const hue = ((h % 360) + 360) % 360;
   const sat = Math.max(0, Math.min(100, s)) / 100;
@@ -79,12 +81,26 @@ function resolveIndexHtmlPath(electronDir) {
   return dist;
 }
 
+function trimFrontendBackgroundColorCache() {
+  if (frontendBackgroundColorCache.size <= 8) return;
+  const firstKey = frontendBackgroundColorCache.keys().next().value;
+  if (firstKey) frontendBackgroundColorCache.delete(firstKey);
+}
+
 function resolveFrontendBackgroundColor(electronDir, theme) {
   try {
     const htmlPath = resolveIndexHtmlPath(electronDir);
     if (!htmlPath || !fs.existsSync(htmlPath)) return null;
+    const stat = fs.statSync(htmlPath);
+    const cacheKey = `${htmlPath}:${stat.mtimeMs}:${theme || "default"}`;
+    if (frontendBackgroundColorCache.has(cacheKey)) {
+      return frontendBackgroundColorCache.get(cacheKey);
+    }
     const indexHtml = fs.readFileSync(htmlPath, "utf8");
-    return parseBackgroundFromIndexHtml(indexHtml, theme);
+    const color = parseBackgroundFromIndexHtml(indexHtml, theme);
+    frontendBackgroundColorCache.set(cacheKey, color);
+    trimFrontendBackgroundColorCache();
+    return color;
   } catch {
     return null;
   }

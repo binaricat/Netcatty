@@ -11,3 +11,12 @@ test('terminal layer bridge does not dock the shared host tree', () => {
 test('terminal layer is visible only for terminal sessions or workspaces', () => {
   assert.match(source, /const isVisible = Boolean\(activeSession \|\| activeWorkspace \|\| s\.draggingSessionId\)/);
 });
+
+test('terminal panes can gate cwd restore per session host resolution', () => {
+  const supportSource = readFileSync(new URL('./TerminalLayerSupport.tsx', import.meta.url), 'utf8');
+  const layerSource = readFileSync(new URL('../TerminalLayer.tsx', import.meta.url), 'utf8');
+
+  assert.match(supportSource, /sessionHostResolved: boolean/);
+  assert.match(supportSource, /restoreTerminalCwd=\{restoreTerminalCwd && sessionHostResolved\}/);
+  assert.match(layerSource, /session\.protocol === 'local'/);
+});

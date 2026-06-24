@@ -538,6 +538,8 @@ const CONFLICT_ENTITY_LABEL_KEYS: Record<SyncChangeEntityKey, string> = {
     identities: 'cloudSync.conflict.entity.identities',
     proxyProfiles: 'cloudSync.conflict.entity.proxyProfiles',
     snippets: 'cloudSync.conflict.entity.snippets',
+    notes: 'cloudSync.conflict.entity.notes',
+    noteGroups: 'cloudSync.conflict.entity.noteGroups',
     customGroups: 'cloudSync.conflict.entity.customGroups',
     snippetPackages: 'cloudSync.conflict.entity.snippetPackages',
     portForwardingRules: 'cloudSync.conflict.entity.portForwardingRules',

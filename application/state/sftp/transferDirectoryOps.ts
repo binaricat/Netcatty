@@ -4,6 +4,7 @@ import { STORAGE_KEY_SFTP_TRANSFER_CONCURRENCY } from "../../../infrastructure/c
 import { localStorageAdapter } from "../../../infrastructure/persistence/localStorageAdapter";
 import { netcattyBridge } from "../../../infrastructure/services/netcattyBridge";
 import { logger } from "../../../lib/logger";
+import { runSftpTransferWorkers } from "./transferConcurrency";
 import { joinPath } from "./utils";
 
 interface UseSftpDirectoryTransferOpsParams {
@@ -185,11 +186,6 @@ export function useSftpDirectoryTransferOps({
     });
   };
 
-  const getTransferConcurrency = () => {
-    const stored = localStorageAdapter.readNumber(STORAGE_KEY_SFTP_TRANSFER_CONCURRENCY);
-    return stored != null && stored >= 1 && stored <= 16 ? stored : 4;
-  };
-
   /** Recursively count all files under a directory (for progress display). */
   const countDirectoryFiles = async (
     sourcePath: string,
@@ -308,8 +304,8 @@ export function useSftpDirectoryTransferOps({
 
     // Process subdirectories sequentially to avoid unbounded concurrent SFTP
     // requests from nested Promise.all + worker pools across the tree.
-    // File-level concurrency within each directory is still governed by
-    // getTransferConcurrency().
+    // File-level concurrency within each directory is still governed by the
+    // shared SFTP transfer worker scheduler below.
     for (const dir of dirs) {
       if (cancelledTasksRef.current.has(task.id) || cancelledTasksRef.current.has(rootTaskId)) {
         throw new Error("Transfer cancelled");
@@ -346,17 +342,16 @@ export function useSftpDirectoryTransferOps({
 
     // Transfer files in parallel with concurrency limit
     if (regularFiles.length > 0) {
-      let fileIndex = 0;
       const errors: Error[] = [];
 
-      const worker = async () => {
-        while (fileIndex < regularFiles.length) {
+      await runSftpTransferWorkers(
+        regularFiles,
+        () => localStorageAdapter.readNumber(STORAGE_KEY_SFTP_TRANSFER_CONCURRENCY),
+        async (file) => {
           if (cancelledTasksRef.current.has(task.id) || cancelledTasksRef.current.has(rootTaskId)) {
             throw new Error("Transfer cancelled");
           }
 
-          const idx = fileIndex++;
-          const file = regularFiles[idx];
           const fileId = crypto.randomUUID();
           const fileSize = getEntrySize(file);
 
@@ -431,15 +426,8 @@ export function useSftpDirectoryTransferOps({
             if (err instanceof Error && err.message === "Transfer cancelled") throw err;
             errors.push(err instanceof Error ? err : new Error(String(err)));
           }
-        }
-      };
-
-      const concurrency = getTransferConcurrency();
-      const workers = Array.from(
-        { length: Math.min(concurrency, regularFiles.length) },
-        () => worker(),
+        },
       );
-      await Promise.all(workers);
 
       totalErrors += errors.length;
       if (errors.length > 0) {

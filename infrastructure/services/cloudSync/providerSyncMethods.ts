@@ -577,6 +577,7 @@ export async function downloadGistRevisionImpl(this: any,sha: string): Promise<{
     hostCount: number;
     keyCount: number;
     snippetCount: number;
+    noteCount: number;
     identityCount: number;
     portForwardingRuleCount: number;
   };
@@ -602,6 +603,7 @@ export async function downloadGistRevisionImpl(this: any,sha: string): Promise<{
         hostCount: payload.hosts?.length ?? 0,
         keyCount: payload.keys?.length ?? 0,
         snippetCount: payload.snippets?.length ?? 0,
+        noteCount: payload.notes?.length ?? 0,
         identityCount: payload.identities?.length ?? 0,
         portForwardingRuleCount: payload.portForwardingRules?.length ?? 0,
       },

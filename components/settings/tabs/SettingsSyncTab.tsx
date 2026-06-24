@@ -3,8 +3,8 @@ import type { PortForwardingRule } from "../../../domain/models";
 import type { SyncPayload } from "../../../domain/sync";
 import {
   applyLocalVaultPayload,
+  buildCloudSyncPayload,
   buildLocalVaultPayload,
-  buildSyncPayload,
   applySyncPayload,
   getEffectivePortForwardingRulesForSync,
 } from "../../../application/syncPayload";
@@ -37,8 +37,8 @@ export default function SettingsSyncTab(props: {
     return getEffectivePortForwardingRulesForSync(portForwardingRules) ?? [];
   }, [portForwardingRules]);
 
-  const onBuildPayload = useCallback((): SyncPayload => {
-    return buildSyncPayload(vault, getEffectivePortForwardingRules());
+  const onBuildPayload = useCallback((): Promise<SyncPayload> => {
+    return buildCloudSyncPayload(vault, getEffectivePortForwardingRules());
   }, [vault, getEffectivePortForwardingRules]);
 
   const onBuildLocalPayload = useCallback((): SyncPayload => {

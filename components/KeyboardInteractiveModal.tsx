@@ -25,6 +25,7 @@ export interface KeyboardInteractivePrompt {
 export interface KeyboardInteractiveRequest {
   requestId: string;
   sessionId?: string;
+  scope?: "terminal" | "external";
   name: string;
   instructions: string;
   prompts: KeyboardInteractivePrompt[];

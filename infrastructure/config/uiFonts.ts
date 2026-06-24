@@ -9,6 +9,22 @@ export interface UIFont {
   family: string;
 }
 
+export type UiPlatform = 'darwin' | 'win32' | 'linux';
+
+/**
+ * Bundled Noto Color Emoji subset (regional indicators U+1F1E6–1F1FF).
+ * Windows system fonts omit flag glyphs and show ISO country codes instead —
+ * see #1589, #1604.
+ */
+export const WINDOWS_FLAG_EMOJI_FONT = '"Noto Color Emoji Flags"';
+
+/**
+ * Windows bundles UI fonts via @font-face. Their regional-indicator glyphs
+ * render as separate letters instead of composed flag emoji unless a color
+ * emoji font is consulted first — see #1589.
+ */
+export const WINDOWS_UI_EMOJI_FONTS = `${WINDOWS_FLAG_EMOJI_FONT}, "Segoe UI Emoji", "Segoe UI Symbol"`;
+
 /**
  * Fallback fonts for CJK (Chinese, Japanese, Korean) support
  */
@@ -32,6 +48,26 @@ export const withUiCjkFallback = (family: string) => {
   }
   return `${trimmed}, ${CJK_FALLBACK_STACK}`;
 };
+
+export function detectUiPlatform(userAgent: string): UiPlatform {
+  if (/Win/i.test(userAgent)) return 'win32';
+  if (/Mac|iPod|iPhone|iPad/i.test(userAgent)) return 'darwin';
+  return 'linux';
+}
+
+export function withWindowsEmojiFallback(
+  family: string,
+  platform: UiPlatform = typeof navigator !== 'undefined'
+    ? detectUiPlatform(navigator.userAgent)
+    : 'linux',
+): string {
+  if (platform !== 'win32') return family;
+  const trimmed = family.trim();
+  if (trimmed.includes('Noto Color Emoji Flags') || trimmed.includes('Segoe UI Emoji')) {
+    return trimmed;
+  }
+  return `${WINDOWS_UI_EMOJI_FONTS}, ${trimmed}`;
+}
 
 const BASE_UI_FONTS: UIFont[] = [
   {

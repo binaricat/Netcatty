@@ -8,6 +8,12 @@ module.exports = {
     appId: 'com.netcatty.app',
     productName: 'Netcatty',
     artifactName: '${productName}-${version}-${os}-${arch}.${ext}',
+    protocols: [
+        {
+            name: 'SSH URL',
+            schemes: ['ssh']
+        }
+    ],
     electronLanguages: ['en', 'en-US', 'zh_CN', 'zh-CN', 'ru'],
     // Give the macOS build a unique Mach-O LC_UUID before signing, so macOS
     // Local Network privacy treats Netcatty distinctly from every other
@@ -103,6 +109,8 @@ module.exports = {
         '!node_modules/@openai/codex-{darwin,linux,linuxmusl,win32}-*/**/*',
         '!node_modules/@github/copilot-{darwin,linux,linuxmusl,win32}-*/**/*',
         '!node_modules/@github/copilot/**/*',
+        '!node_modules/opencode-{darwin,linux,linuxmusl,windows}-*/**/*',
+        '!node_modules/opencode-ai/**/*',
         // CodeBuddy follows the same first-party integration model as the
         // other coding agents: Netcatty discovers and passes the user's
         // installed CLI path to the SDK. Keep the small SDK wrapper, but do not

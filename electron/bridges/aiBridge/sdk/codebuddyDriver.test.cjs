@@ -53,7 +53,9 @@ test("buildCodebuddyQueryOptions wires SDK options in isolated mode", () => {
   assert.equal(opts.abortController, ac);
   assert.equal(opts.resume, "sess-1");
   assert.deepEqual(opts.tools, []);
-  assert.deepEqual(opts.allowedTools, []);
+  // allowedTools must stay unset in mcp mode: tools:[] disables built-ins, while
+  // allowedTools:[] would prevent injected Netcatty MCP tools from running.
+  assert.ok(!("allowedTools" in opts));
   assert.ok(opts.disallowedTools.includes("AskUserQuestion"));
   assert.equal(opts.mcpServers["netcatty-remote-hosts"].type, "stdio");
   assert.deepEqual(opts.mcpServers["netcatty-remote-hosts"].env, { NETCATTY_MCP_PORT: "1" });
@@ -212,10 +214,13 @@ test("buildCodebuddyPromptInput sends supported images as native image blocks", 
 
 test("mapCodebuddyModels maps model ids and drops invalid entries", () => {
   assert.deepEqual(mapCodebuddyModels([
+    // Real CLI wire shape ({id,name}) — must NOT be dropped.
+    { id: "glm-5.1", name: "GLM-5.1" },
     { modelId: "cb-1", name: "CodeBuddy 1", description: "default" },
     { value: "cb-2", displayName: "CodeBuddy 2" },
     { name: "missing id" },
   ]), [
+    { id: "glm-5.1", name: "GLM-5.1", description: undefined },
     { id: "cb-1", name: "CodeBuddy 1", description: "default" },
     { id: "cb-2", name: "CodeBuddy 2", description: undefined },
   ]);

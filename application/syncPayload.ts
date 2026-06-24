@@ -17,6 +17,7 @@ import type {
   SftpBookmark,
   Snippet,
   SSHKey,
+  VaultNote,
 } from '../domain/models';
 import {
   CLOUD_SYNC_PAYLOAD_ENTITY_KEYS,
@@ -32,6 +33,7 @@ import {
 } from '../domain/customKeyBindings';
 import { isEncryptedCredentialPlaceholder } from '../domain/credentials';
 import { localStorageAdapter } from '../infrastructure/persistence/localStorageAdapter';
+import { decryptField, encryptField } from '../infrastructure/persistence/secureFieldAdapter';
 import { sanitizeQuickMessages } from '../infrastructure/ai/quickMessages';
 import { emitAIStateChanged } from './state/aiStateEvents';
 import { rehydrateGlobalSftpBookmarks } from './state/sftp/globalSftpBookmarks';
@@ -102,6 +104,8 @@ export interface SyncableVaultData {
   snippets: Snippet[];
   customGroups: string[];
   snippetPackages?: string[];
+  notes?: VaultNote[];
+  noteGroups?: string[];
   /** Local trust records. Kept in local backups, excluded from cloud sync. */
   knownHosts: KnownHost[];
   groupConfigs?: GroupConfig[];
@@ -191,7 +195,7 @@ interface SyncPayloadImporters {
 const SYNCABLE_TERMINAL_KEYS = [
   'startupCommandDelayMs',
   'scrollback', 'drawBoldInBrightColors', 'terminalEmulationType',
-  'fontLigatures', 'fontWeight', 'fontWeightBold', 'fallbackFont',
+  'fontLigatures', 'fontSmoothing', 'fontWeight', 'fontWeightBold', 'fallbackFont',
   'linePadding', 'cursorShape', 'cursorBlink', 'minimumContrastRatio',
   'altAsMeta', 'optionArrowWordJump', 'scrollOnInput', 'scrollOnOutput', 'scrollOnKeyPress', 'scrollOnPaste',
   'smoothScrolling',
@@ -274,6 +278,32 @@ const stripDeviceBoundApiKey = <T extends Record<string, unknown>>(value: T): T 
   const next = { ...value };
   delete next.apiKey;
   return next;
+};
+
+const getApiKeyLabel = (value: Record<string, unknown>): string => {
+  if (typeof value.name === 'string' && value.name.trim()) return value.name;
+  if (typeof value.id === 'string' && value.id.trim()) return value.id;
+  if (typeof value.providerId === 'string' && value.providerId.trim()) return value.providerId;
+  return 'configured provider';
+};
+
+const withPortableApiKey = async <T extends Record<string, unknown>>(value: T): Promise<T> => {
+  const apiKey = value.apiKey;
+  if (typeof apiKey !== 'string' || !isEncryptedCredentialPlaceholder(apiKey)) return value;
+
+  const decrypted = await decryptField(apiKey).catch(() => undefined);
+  if (!decrypted || decrypted === apiKey || isEncryptedCredentialPlaceholder(decrypted)) {
+    throw new Error(`Unable to decrypt AI API key for ${getApiKeyLabel(value)}. Sync was stopped to avoid removing the key from cloud sync.`);
+  }
+  return { ...value, apiKey: decrypted };
+};
+
+const withLocalEncryptedApiKey = async <T extends Record<string, unknown>>(value: T): Promise<T> => {
+  const apiKey = value.apiKey;
+  if (typeof apiKey !== 'string' || isEncryptedCredentialPlaceholder(apiKey)) return value;
+
+  const encrypted = await encryptField(apiKey).catch(() => undefined);
+  return { ...value, apiKey: encrypted ?? apiKey };
 };
 
 /**
@@ -461,7 +491,7 @@ export function collectSyncableSettings(): SyncPayload['settings'] {
   const webSearchConfig = readRecordSetting(STORAGE_KEY_AI_WEB_SEARCH);
   if (webSearchConfig) ai.webSearchConfig = stripDeviceBoundApiKey(webSearchConfig);
   const quickMessages = readArraySetting(STORAGE_KEY_AI_QUICK_MESSAGES);
-  if (quickMessages) ai.quickMessages = sanitizeQuickMessages(quickMessages);
+  if (quickMessages) ai.quickMessages = sanitizeQuickMessages(quickMessages) as unknown as Array<Record<string, unknown>>;
   const showTerminalSelectionAction = localStorageAdapter.readBoolean(STORAGE_KEY_AI_SHOW_TERMINAL_SELECTION_ACTION);
   if (showTerminalSelectionAction != null) {
     ai.showTerminalSelectionAction = showTerminalSelectionAction;
@@ -471,11 +501,57 @@ export function collectSyncableSettings(): SyncPayload['settings'] {
   return Object.keys(settings).length > 0 ? settings : undefined;
 }
 
+export async function collectCloudSyncableSettings(): Promise<SyncPayload['settings']> {
+  const settings = collectSyncableSettings();
+
+  const providers = readArraySetting(STORAGE_KEY_AI_PROVIDERS);
+  const webSearchConfig = readRecordSetting(STORAGE_KEY_AI_WEB_SEARCH);
+  if (!providers && !webSearchConfig) return settings;
+
+  const nextSettings: SyncPayload['settings'] = settings ? { ...settings } : {};
+  const ai: NonNullable<SyncPayload['settings']>['ai'] = {
+    ...(settings?.ai ?? {}),
+  };
+
+  if (providers) {
+    ai.providers = await Promise.all(providers.map(withPortableApiKey));
+  }
+  if (webSearchConfig) {
+    ai.webSearchConfig = await withPortableApiKey(webSearchConfig);
+  }
+
+  nextSettings.ai = ai;
+  return Object.keys(nextSettings).length > 0 ? nextSettings : undefined;
+}
+
+function collectLocalBackupSettings(): SyncPayload['settings'] {
+  const settings = collectSyncableSettings();
+
+  const providers = readArraySetting(STORAGE_KEY_AI_PROVIDERS);
+  const webSearchConfig = readRecordSetting(STORAGE_KEY_AI_WEB_SEARCH);
+  if (!providers && !webSearchConfig) return settings;
+
+  const nextSettings: SyncPayload['settings'] = settings ? { ...settings } : {};
+  const ai: NonNullable<SyncPayload['settings']>['ai'] = {
+    ...(settings?.ai ?? {}),
+  };
+
+  if (providers) {
+    ai.providers = providers;
+  }
+  if (webSearchConfig) {
+    ai.webSearchConfig = webSearchConfig;
+  }
+
+  nextSettings.ai = ai;
+  return Object.keys(nextSettings).length > 0 ? nextSettings : undefined;
+}
+
 /**
  * Apply synced settings to localStorage. Merges terminal settings
  * to preserve platform-specific fields.
  */
-function applySyncableSettings(settings: NonNullable<SyncPayload['settings']>): void {
+async function applySyncableSettings(settings: NonNullable<SyncPayload['settings']>): Promise<void> {
   // Theme & Appearance
   if (settings.theme != null) localStorageAdapter.writeString(STORAGE_KEY_THEME, settings.theme);
   if (settings.lightUiThemeId != null) localStorageAdapter.writeString(STORAGE_KEY_UI_THEME_LIGHT, settings.lightUiThemeId);
@@ -591,9 +667,10 @@ function applySyncableSettings(settings: NonNullable<SyncPayload['settings']>): 
   const ai = settings.ai;
   if (ai) {
     if (ai.providers != null) {
+      const providers = await Promise.all(ai.providers.map(withLocalEncryptedApiKey));
       localStorageAdapter.write(
         STORAGE_KEY_AI_PROVIDERS,
-        mergeAiProvidersPreservingLocalApiKeys(ai.providers),
+        mergeAiProvidersPreservingLocalApiKeys(providers),
       );
     }
     if (ai.activeProviderId != null) localStorageAdapter.writeString(STORAGE_KEY_AI_ACTIVE_PROVIDER, ai.activeProviderId);
@@ -613,9 +690,10 @@ function applySyncableSettings(settings: NonNullable<SyncPayload['settings']>): 
       if (ai.webSearchConfig === null) {
         localStorageAdapter.remove(STORAGE_KEY_AI_WEB_SEARCH);
       } else {
+        const webSearchConfig = await withLocalEncryptedApiKey(ai.webSearchConfig);
         localStorageAdapter.write(
           STORAGE_KEY_AI_WEB_SEARCH,
-          mergeWebSearchConfigPreservingLocalApiKey(ai.webSearchConfig),
+          mergeWebSearchConfigPreservingLocalApiKey(webSearchConfig),
         );
       }
     }
@@ -735,9 +813,32 @@ export function buildSyncPayload(
     snippets: vault.snippets,
     customGroups: vault.customGroups,
     snippetPackages: vault.snippetPackages,
+    notes: vault.notes,
+    noteGroups: vault.noteGroups,
     groupConfigs: vault.groupConfigs,
     portForwardingRules: sanitizePortForwardingRulesForSync(portForwardingRules),
     settings: collectSyncableSettings(),
+    syncedAt: Date.now(),
+  };
+}
+
+export async function buildCloudSyncPayload(
+  vault: SyncableVaultData,
+  portForwardingRules?: PortForwardingRule[],
+): Promise<SyncPayload> {
+  return {
+    hosts: vault.hosts,
+    keys: vault.keys,
+    identities: vault.identities,
+    proxyProfiles: vault.proxyProfiles,
+    snippets: vault.snippets,
+    customGroups: vault.customGroups,
+    snippetPackages: vault.snippetPackages,
+    notes: vault.notes,
+    noteGroups: vault.noteGroups,
+    groupConfigs: vault.groupConfigs,
+    portForwardingRules: sanitizePortForwardingRulesForSync(portForwardingRules),
+    settings: await collectCloudSyncableSettings(),
     syncedAt: Date.now(),
   };
 }
@@ -749,6 +850,7 @@ export function buildLocalVaultPayload(
 ): SyncPayload {
   return {
     ...buildSyncPayload(vault, portForwardingRules),
+    settings: collectLocalBackupSettings(),
     knownHosts: vault.knownHosts,
   };
 }
@@ -778,6 +880,12 @@ function applyPayload(
   if (payload.snippetPackages !== undefined) {
     vaultImport.snippetPackages = payload.snippetPackages;
   }
+  if (payload.notes !== undefined) {
+    vaultImport.notes = payload.notes;
+  }
+  if (payload.noteGroups !== undefined) {
+    vaultImport.noteGroups = payload.noteGroups;
+  }
   if (options.includeLocalOnlyData && payload.knownHosts !== undefined) {
     vaultImport.knownHosts = payload.knownHosts;
   }
@@ -785,7 +893,7 @@ function applyPayload(
     vaultImport.groupConfigs = payload.groupConfigs;
   }
 
-  return Promise.resolve(importers.importVaultData(JSON.stringify(vaultImport))).then(() => {
+  return Promise.resolve(importers.importVaultData(JSON.stringify(vaultImport))).then(async () => {
     // Only import port-forwarding rules when the payload explicitly carries
     // them.  Absent field = "payload was created before this feature existed",
     // so local rules are preserved.  Explicitly present [] = "remote has no
@@ -796,7 +904,7 @@ function applyPayload(
 
     // Apply synced settings
     if (payload.settings) {
-      applySyncableSettings(payload.settings);
+      await applySyncableSettings(payload.settings);
       // Rehydrate in-memory bookmark snapshot after localStorage was updated
       if (payload.settings.sftpGlobalBookmarks != null) rehydrateGlobalSftpBookmarks();
       importers.onSettingsApplied?.();

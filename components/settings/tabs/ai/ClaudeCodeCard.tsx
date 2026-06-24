@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { ChevronDown, RefreshCw } from "lucide-react";
+import { ChevronDown, RefreshCw, RotateCcw } from "lucide-react";
 import { useI18n } from "../../../../application/i18n/I18nProvider";
 import { Button } from "../../../ui/button";
 import { cn } from "../../../../lib/utils";
@@ -12,6 +12,7 @@ export const ClaudeCodeCard: React.FC<{
   customPath: string;
   onCustomPathChange: (path: string) => void;
   onRecheckPath: () => void;
+  onResetPath: () => void;
   configDir: string;
   onConfigDirChange: (value: string) => void;
   settingsPath: string;
@@ -24,6 +25,7 @@ export const ClaudeCodeCard: React.FC<{
   customPath,
   onCustomPathChange,
   onRecheckPath,
+  onResetPath,
   configDir,
   onConfigDirChange,
   settingsPath,
@@ -74,8 +76,7 @@ export const ClaudeCodeCard: React.FC<{
         </div>
       </div>
 
-      {/* Path detection info */}
-      {found ? (
+      {found && (
         <div className="flex items-center gap-2 text-xs">
           <span className="text-muted-foreground">{t('ai.claude.path')}</span>
           <span className="font-mono text-foreground truncate">{pathInfo.path}</span>
@@ -86,11 +87,15 @@ export const ClaudeCodeCard: React.FC<{
             </>
           )}
         </div>
-      ) : !isResolvingPath ? (
+      )}
+
+      {!isResolvingPath && (
         <div className="space-y-2">
-          <p className="text-xs text-amber-500">
-            {t('ai.claude.notFoundHint')}
-          </p>
+          {!found && (
+            <p className="text-xs text-amber-500">
+              {t('ai.claude.notFoundHint')}
+            </p>
+          )}
           <div className="flex items-center gap-2">
             <input
               type="text"
@@ -103,9 +108,13 @@ export const ClaudeCodeCard: React.FC<{
               <RefreshCw size={14} className="mr-1.5" />
               {t('ai.claude.check')}
             </Button>
+            <Button variant="ghost" size="sm" onClick={onResetPath} disabled={!customPath.trim()}>
+              <RotateCcw size={14} className="mr-1.5" />
+              {t('ai.claude.resetPath')}
+            </Button>
           </div>
         </div>
-      ) : null}
+      )}
 
       {/* Authentication & config (optional, collapsible) */}
       <div className="border-t border-border/60 pt-3">

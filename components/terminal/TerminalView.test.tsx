@@ -70,3 +70,21 @@ test("popup terminals disable line timestamp controls", () => {
 
   assert.match(source, /lineTimestampsAvailable=\{false\}/);
 });
+
+test("terminal body keeps a slight inset from the surrounding chrome", () => {
+  const source = readFileSync(new URL("./TerminalView.tsx", import.meta.url), "utf8");
+
+  assert.match(source, /const terminalBodyInset = 4/);
+  assert.match(source, /left: activeLineTimestampGutterWidth \+ terminalBodyInset/);
+  assert.match(source, /right: terminalBodyInset/);
+  assert.match(source, /bottom: terminalBodyInset/);
+  assert.match(source, /left=\{terminalBodyInset\}/);
+  assert.match(source, /bottom=\{terminalBodyInset\}/);
+});
+
+test("terminal theme updates force xterm renderer to repaint immediately", () => {
+  const source = readFileSync(new URL("./useTerminalEffects.ts", import.meta.url), "utf8");
+
+  assert.match(source, /term\.options\.theme = \{/);
+  assert.match(source, /forceSyncRenderAfterResize\(term\)/);
+});

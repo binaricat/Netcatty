@@ -40,6 +40,7 @@ const {
   applyLocalVaultPayload,
   applySyncPayload,
   buildLocalVaultPayload,
+  buildCloudSyncPayload,
   buildSyncPayload,
   hasCloudSyncEntityData,
   hasMeaningfulCloudSyncData,
@@ -64,12 +65,20 @@ const vault = (knownHosts: KnownHost[] = [knownHost()]): SyncableVaultData => ({
   snippets: [],
   customGroups: [],
   snippetPackages: [],
+  notes: [],
+  noteGroups: [],
   knownHosts,
   groupConfigs: [],
 });
 
 test.beforeEach(() => {
   localStorage.clear();
+  Object.defineProperty(globalThis, "window", {
+    value: {
+      dispatchEvent: () => true,
+    },
+    configurable: true,
+  });
 });
 
 test("buildSyncPayload treats known hosts as local-only data", () => {
@@ -95,6 +104,24 @@ test("buildSyncPayload includes reusable proxy profiles", () => {
   } as SyncableVaultData & { proxyProfiles: typeof proxyProfiles });
 
   assert.deepEqual(payload.proxyProfiles, proxyProfiles);
+});
+
+test("buildCloudSyncPayload includes notes and note groups", async () => {
+  const payload = await buildCloudSyncPayload({
+    ...vault([]),
+    notes: [{
+      id: "note-1",
+      title: "Runbook",
+      content: "# Runbook",
+      createdAt: 1,
+      updatedAt: 1,
+    }],
+    noteGroups: ["Ops"],
+  });
+
+  assert.equal(payload.notes?.length, 1);
+  assert.equal(payload.notes?.[0]?.title, "Runbook");
+  assert.deepEqual(payload.noteGroups, ["Ops"]);
 });
 
 test("buildSyncPayload includes AI configuration settings", () => {
@@ -192,6 +219,63 @@ test("buildSyncPayload omits device-bound encrypted AI API keys", () => {
   assert.equal("apiKey" in (payload.settings?.ai?.webSearchConfig ?? {}), false);
 });
 
+test("buildCloudSyncPayload includes decrypted AI API keys for portable cloud sync", async () => {
+  Object.defineProperty(globalThis, "window", {
+    value: {
+      netcatty: {
+        credentialsDecrypt: async (value: string) => {
+          if (value === "enc:v1:djEwPROVIDER") return "sk-provider";
+          if (value === "enc:v1:djEwWEB") return "sk-web";
+          return value;
+        },
+      },
+    },
+    configurable: true,
+  });
+
+  localStorage.setItem(storageKeys.STORAGE_KEY_AI_PROVIDERS, JSON.stringify([{
+    id: "openai-main",
+    providerId: "openai",
+    name: "OpenAI",
+    apiKey: "enc:v1:djEwPROVIDER",
+    enabled: true,
+  }]));
+  localStorage.setItem(storageKeys.STORAGE_KEY_AI_WEB_SEARCH, JSON.stringify({
+    providerId: "tavily",
+    apiKey: "enc:v1:djEwWEB",
+    enabled: true,
+  }));
+
+  const payload = await buildCloudSyncPayload(vault([]));
+
+  assert.equal(payload.settings?.ai?.providers?.[0]?.apiKey, "sk-provider");
+  assert.equal(payload.settings?.ai?.webSearchConfig?.apiKey, "sk-web");
+});
+
+test("buildCloudSyncPayload fails instead of deleting API keys when decrypt fails", async () => {
+  Object.defineProperty(globalThis, "window", {
+    value: {
+      netcatty: {
+        credentialsDecrypt: async (value: string) => value,
+      },
+    },
+    configurable: true,
+  });
+
+  localStorage.setItem(storageKeys.STORAGE_KEY_AI_PROVIDERS, JSON.stringify([{
+    id: "openai-main",
+    providerId: "openai",
+    name: "OpenAI",
+    apiKey: "enc:v1:djEwPROVIDER",
+    enabled: true,
+  }]));
+
+  await assert.rejects(
+    () => buildCloudSyncPayload(vault([])),
+    /Unable to decrypt AI API key/,
+  );
+});
+
 test("applySyncPayload restores AI configuration settings", async () => {
   const providers = [{
     id: "anthropic-main",
@@ -247,6 +331,42 @@ test("applySyncPayload restores AI configuration settings", async () => {
   assert.deepEqual(JSON.parse(localStorage.getItem(storageKeys.STORAGE_KEY_AI_AGENT_PROVIDER_MAP)!), { catty: "anthropic-main" });
   assert.deepEqual(JSON.parse(localStorage.getItem(storageKeys.STORAGE_KEY_AI_WEB_SEARCH)!), webSearch);
   assert.equal(localStorage.getItem(storageKeys.STORAGE_KEY_AI_SHOW_TERMINAL_SELECTION_ACTION), "false");
+});
+
+test("applySyncPayload encrypts synced plaintext AI API keys before saving locally", async () => {
+  Object.defineProperty(globalThis, "window", {
+    value: {
+      netcatty: {
+        credentialsEncrypt: async (value: string) => `enc:v1:djEwLOCAL_${value}`,
+      },
+      dispatchEvent: () => true,
+    },
+    configurable: true,
+  });
+
+  const payload: SyncPayload = {
+    hosts: [],
+    keys: [],
+    identities: [],
+    snippets: [],
+    customGroups: [],
+    settings: {
+      ai: {
+        providers: [
+          { id: "openai-main", providerId: "openai", name: "OpenAI", apiKey: "sk-provider", enabled: true },
+        ],
+        webSearchConfig: { providerId: "tavily", apiKey: "sk-web", enabled: true },
+      },
+    },
+    syncedAt: 1,
+  } as SyncPayload;
+
+  await applySyncPayload(payload, { importVaultData: () => {} });
+
+  const provider = JSON.parse(localStorage.getItem(storageKeys.STORAGE_KEY_AI_PROVIDERS)!)[0];
+  const webSearch = JSON.parse(localStorage.getItem(storageKeys.STORAGE_KEY_AI_WEB_SEARCH)!);
+  assert.equal(provider.apiKey, "enc:v1:djEwLOCAL_sk-provider");
+  assert.equal(webSearch.apiKey, "enc:v1:djEwLOCAL_sk-web");
 });
 
 test("applySyncPayload restores host tree sidebar visibility setting", async () => {
@@ -543,6 +663,7 @@ test("buildSyncPayload includes syncable terminal options from settings", () => 
     terminalEmulationType: "vt100",
     altAsMeta: true,
     middleClickBehavior: "context-menu",
+    fontSmoothing: false,
     showServerStats: false,
     serverStatsRefreshInterval: 12,
     rendererType: "dom",
@@ -556,6 +677,7 @@ test("buildSyncPayload includes syncable terminal options from settings", () => 
     terminalEmulationType: "vt100",
     altAsMeta: true,
     middleClickBehavior: "context-menu",
+    fontSmoothing: false,
     showServerStats: false,
     serverStatsRefreshInterval: 12,
     rendererType: "dom",
@@ -613,6 +735,26 @@ test("buildLocalVaultPayload preserves known hosts for local backups", () => {
   const payload = buildLocalVaultPayload(vault([knownHost("kh-local")]));
 
   assert.deepEqual(payload.knownHosts, [knownHost("kh-local")]);
+});
+
+test("buildLocalVaultPayload preserves local AI API keys for protective backups", () => {
+  localStorage.setItem(storageKeys.STORAGE_KEY_AI_PROVIDERS, JSON.stringify([{
+    id: "openai-main",
+    providerId: "openai",
+    name: "OpenAI",
+    apiKey: "enc:v1:djEwPROVIDER",
+    enabled: true,
+  }]));
+  localStorage.setItem(storageKeys.STORAGE_KEY_AI_WEB_SEARCH, JSON.stringify({
+    providerId: "tavily",
+    apiKey: "enc:v1:djEwWEB",
+    enabled: true,
+  }));
+
+  const payload = buildLocalVaultPayload(vault([]));
+
+  assert.equal(payload.settings?.ai?.providers?.[0]?.apiKey, "enc:v1:djEwPROVIDER");
+  assert.equal(payload.settings?.ai?.webSearchConfig?.apiKey, "enc:v1:djEwWEB");
 });
 
 test("applySyncPayload ignores legacy cloud known hosts", async () => {

@@ -9,17 +9,23 @@ export const terminalLayerAreEqual = (
   prev.keys === next.keys &&
   prev.snippets === next.snippets &&
   prev.snippetPackages === next.snippetPackages &&
+  prev.notes === next.notes &&
+  prev.noteGroups === next.noteGroups &&
+  prev.openNoteRequest === next.openNoteRequest &&
   prev.sessions === next.sessions &&
   prev.workspaces === next.workspaces &&
   prev.knownHosts === next.knownHosts &&
   prev.draggingSessionId === next.draggingSessionId &&
   prev.terminalTheme === next.terminalTheme &&
+  prev.terminalThemeId === next.terminalThemeId &&
+  prev.followAppTerminalTheme === next.followAppTerminalTheme &&
   prev.accentMode === next.accentMode &&
   prev.customAccent === next.customAccent &&
   prev.terminalSettings === next.terminalSettings &&
   prev.fontSize === next.fontSize &&
   prev.hotkeyScheme === next.hotkeyScheme &&
   prev.disableTerminalFontZoom === next.disableTerminalFontZoom &&
+  prev.restoreTerminalCwd === next.restoreTerminalCwd &&
   prev.keyBindings === next.keyBindings &&
   prev.sftpDefaultViewMode === next.sftpDefaultViewMode &&
   prev.sftpDoubleClickBehavior === next.sftpDoubleClickBehavior &&
@@ -34,7 +40,9 @@ export const terminalLayerAreEqual = (
   prev.showHostTreeSidebar === next.showHostTreeSidebar &&
   prev.setEditorWordWrap === next.setEditorWordWrap &&
   prev.onHotkeyAction === next.onHotkeyAction &&
+  prev.onUpdateSessionRestoreCwd === next.onUpdateSessionRestoreCwd &&
   prev.onUpdateHost === next.onUpdateHost &&
+  prev.onUpdateFollowAppTerminalThemeId === next.onUpdateFollowAppTerminalThemeId &&
   prev.onAddKnownHost === next.onAddKnownHost &&
   prev.onToggleWorkspaceViewMode === next.onToggleWorkspaceViewMode &&
   prev.onSetWorkspaceFocusedSession === next.onSetWorkspaceFocusedSession &&
@@ -47,6 +55,8 @@ export const terminalLayerAreEqual = (
   prev.onToggleBroadcast === next.onToggleBroadcast &&
   prev.updateSnippets === next.updateSnippets &&
   prev.updateSnippetPackages === next.updateSnippetPackages &&
+  prev.updateNotes === next.updateNotes &&
+  prev.updateNoteGroups === next.updateNoteGroups &&
   prev.toggleScriptsSidePanelRef === next.toggleScriptsSidePanelRef &&
   prev.toggleSidePanelRef === next.toggleSidePanelRef &&
   prev.identities === next.identities &&

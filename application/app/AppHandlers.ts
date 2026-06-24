@@ -3,16 +3,25 @@ import type React from 'react';
 import type { Host, HostProtocol } from '../../types';
 import type { PassphraseRequest } from '../../components/PassphraseModal';
 import { getEffectiveHostDistro } from '../../domain/host';
+import { sanitizeHostIconFields } from '../../domain/hostIcon';
 import { getTerminalPassthroughActions } from '../state/useGlobalHotkeys';
 import { buildNumberShortcutTabTargets } from './tabShortcutTargets';
 
 type AppContextGetter = () => Record<string, any>;
 const TERMINAL_PASSTHROUGH_ACTIONS = getTerminalPassthroughActions();
 
-const getLogHostVisualSnapshot = (host: Host) => ({
-  hostOs: host.os,
-  hostDistro: getEffectiveHostDistro(host) || undefined,
-});
+export const getLogHostVisualSnapshot = (host: Host) => {
+  const icon = sanitizeHostIconFields(host);
+  return {
+    hostOs: host.os,
+    hostDistro: getEffectiveHostDistro(host) || undefined,
+    hostIconMode: icon.iconMode,
+    hostIconId: icon.iconId,
+    ...(icon.iconColorMode ? { hostIconColorMode: icon.iconColorMode } : {}),
+    ...(icon.iconColor ? { hostIconColor: icon.iconColor } : {}),
+    ...(icon.iconColorCustom ? { hostIconColorCustom: icon.iconColorCustom } : {}),
+  };
+};
 
 export function handleTrayJumpToSessionImpl(getCtx: AppContextGetter, sessionId: string) {
   const { sessions, setActiveTabId, setWorkspaceFocusedSession } = getCtx();
@@ -78,7 +87,7 @@ export function handleTrayPanelConnectImpl(getCtx: AppContextGetter, hostId: str
         localHostname: localHost,
         saved: false,
       });
-      return;
+      return sessionId;
     }
 
     const protocol = effectiveHost.etEnabled ? 'et' : effectiveHost.moshEnabled ? 'mosh' : (effectiveHost.protocol || 'ssh');
@@ -97,6 +106,7 @@ export function handleTrayPanelConnectImpl(getCtx: AppContextGetter, hostId: str
       localHostname: localHost,
       saved: false,
     });
+    return sessionId;
   }
 }
 
@@ -778,7 +788,7 @@ export function handleConnectToHostImpl(getCtx: AppContextGetter, host: Host) {
         localHostname: localHost,
         saved: false,
       });
-      return;
+      return sessionId;
     }
 
     const protocol = effectiveHost.etEnabled ? 'et' : effectiveHost.moshEnabled ? 'mosh' : (effectiveHost.protocol || 'ssh');
@@ -797,6 +807,7 @@ export function handleConnectToHostImpl(getCtx: AppContextGetter, host: Host) {
       localHostname: localHost,
       saved: false,
     });
+    return sessionId;
   }
 }
 

@@ -65,7 +65,7 @@ test("pruneInactiveScopedTransientState removes closed workspace and terminal sc
   });
 });
 
-test("pruneInactiveScopedSessions preserves restorable terminal external session ids across reconnects", () => {
+test("pruneInactiveScopedSessions reports inactive targets without deleting persisted history", () => {
   const sessions = [
     createSession("terminal-restorable", {
       type: "terminal",
@@ -98,10 +98,32 @@ test("pruneInactiveScopedSessions preserves restorable terminal external session
     "terminal-local",
     "workspace-closed",
   ]);
-  assert.deepEqual(next.sessions, [
-    sessions[0],
-    sessions[3],
+  assert.equal(next.sessions, sessions);
+});
+
+test("pruneInactiveScopedSessions preserves inactive workspace and local terminal history after restart", () => {
+  const sessions = [
+    createSession("terminal-local", {
+      type: "terminal",
+      targetId: "closed-local",
+      hostIds: ["local-shell"],
+    }, "ext-local"),
+    createSession("workspace-closed", {
+      type: "workspace",
+      targetId: "closed-workspace",
+    }, "ext-workspace"),
+  ];
+
+  const next = pruneInactiveScopedSessions(
+    sessions,
+    new Set(),
+  );
+
+  assert.deepEqual(next.orphanedSessionIds, [
+    "terminal-local",
+    "workspace-closed",
   ]);
+  assert.equal(next.sessions, sessions);
 });
 
 test("pruneInactiveScopedSessions preserves original sessions when orphaned restorable chats are already detached", () => {

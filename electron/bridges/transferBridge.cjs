@@ -7,6 +7,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const os = require("node:os");
 const { encodePathForSession, ensureRemoteDirForSession, requireSftpChannel, resolveEncodingForRequest } = require("./sftpBridge.cjs");
+const { TRANSFER_CHUNK_SIZE, TRANSFER_CONCURRENCY } = require("./transferLimits.cjs");
 
 /**
  * Safely ensure a local directory exists.
@@ -27,13 +28,6 @@ async function ensureLocalDir(dir) {
 }
 
 // ── Transfer performance tuning ──────────────────────────────────────────────
-// ssh2's fastPut/fastGet send multiple SFTP read/write requests in parallel,
-// dramatically improving throughput over sequential stream piping.
-// Note: High concurrency (e.g. 64) can overwhelm SFTP servers, causing
-// extreme delays before the first chunk arrives. 8 balances throughput
-// on fast connections with responsiveness on slower servers.
-const TRANSFER_CHUNK_SIZE = 512 * 1024;   // 512KB per SFTP request
-const TRANSFER_CONCURRENCY = 8;           // 8 parallel SFTP requests
 // Progress IPC throttle: sending too many IPC messages bogs down the event loop
 const PROGRESS_THROTTLE_MS = 100;         // Send IPC at most every 100ms
 const PROGRESS_THROTTLE_BYTES = 256 * 1024; // Or every 256KB of progress

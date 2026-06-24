@@ -24,6 +24,7 @@ export interface ChainProgress {
 export interface TerminalConnectionDialogProps {
     host: Host;
     status: 'connecting' | 'connected' | 'disconnected';
+    restoreState?: 'restored-disconnected';
     error: string | null;
     progressValue: number;
     chainProgress: ChainProgress | null;
@@ -78,6 +79,7 @@ const getProtocolInfo = (host: Host): { i18nKey: string; showPort: boolean; port
 export const TerminalConnectionDialog: React.FC<TerminalConnectionDialogProps> = ({
     host,
     status,
+    restoreState,
     error,
     progressValue,
     chainProgress,
@@ -92,6 +94,7 @@ export const TerminalConnectionDialog: React.FC<TerminalConnectionDialogProps> =
 }) => {
     const { t } = useI18n();
     const hasError = Boolean(error);
+    const isRestoredDisconnected = status === 'disconnected' && restoreState === 'restored-disconnected';
     const isConnecting = status === 'connecting';
     const canDismissDisconnected = status === 'disconnected' && !needsAuth && !!onDismissDisconnected;
     const protocolInfo = getProtocolInfo(host);
@@ -301,12 +304,26 @@ export const TerminalConnectionDialog: React.FC<TerminalConnectionDialogProps> =
                         onAddAndContinue={hostKeyVerification.onAddAndContinue}
                     />
                 ) : (
-                    <TerminalConnectionProgress
-                        status={status}
-                        error={error}
-                        showLogs={showLogs}
-                        {...progressProps}
-                    />
+                    <>
+                        {isRestoredDisconnected && (
+                            <div className="rounded-md border border-border/35 bg-background/35 p-3 text-xs leading-5">
+                                <div className="font-semibold">{t('terminal.restore.placeholder.title')}</div>
+                                <div
+                                    className="mt-1"
+                                    style={{ color: 'color-mix(in srgb, var(--terminal-ui-fg, var(--foreground)) 68%, transparent)' }}
+                                >
+                                    {t('terminal.restore.placeholder.desc')}
+                                </div>
+                            </div>
+                        )}
+                        <TerminalConnectionProgress
+                            status={status}
+                            error={error}
+                            showLogs={showLogs}
+                            reconnectLabel={isRestoredDisconnected ? t('terminal.restore.placeholder.reconnect') : undefined}
+                            {...progressProps}
+                        />
+                    </>
                 )}
             </div>
         </div>

@@ -229,6 +229,7 @@ function createOpenConnectionApi(ctx) {
               hostname: hopLabel,
               password: jump.password,
               logPrefix: `[SFTP Chain] Hop ${i + 1}/${jumpHosts.length}`,
+              scope: "external",
             });
             conn.on('keyboard-interactive', (name, instructions, lang, prompts, finish) => {
               if (prompts && prompts.length > 0) {
@@ -775,6 +776,7 @@ function createOpenConnectionApi(ctx) {
         hostname: options.hostname,
         password: options.password,
         logPrefix: "[SFTP]",
+        scope: "external",
       });
     
       // Add keyboard-interactive listener BEFORE connecting

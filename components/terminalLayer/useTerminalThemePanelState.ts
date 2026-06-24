@@ -21,14 +21,18 @@ import { useCustomThemes } from '../../application/state/customThemeStore';
 import { applyTopTabsChromeThemeVars } from '../../application/app/topTabsChromeTheme';
 import { getScopedTopTabsThemeId } from '../terminalTopTabsTheme';
 import {
+  applyHostTreePreviewThemeVars,
+  clearHostTreePreviewVars,
   clearTerminalPreviewVars,
   clearTopTabsPreviewVars,
+  setStylePropertyIfChanged,
+  type SidePanelTab,
 } from './TerminalLayerSupport';
 
 interface UseTerminalThemePanelStateOptions {
   accentMode: 'theme' | 'custom';
   activeSession: TerminalSession | undefined;
-  activeSidePanelTab: 'sftp' | 'scripts' | 'theme' | 'ai' | null;
+  activeSidePanelTab: SidePanelTab | null;
   activeWorkspace: Workspace | undefined;
   customAccent: string;
   followAppTerminalTheme: boolean;
@@ -37,6 +41,7 @@ interface UseTerminalThemePanelStateOptions {
   hostMap: Map<string, Host>;
   isVisible: boolean;
   onUpdateHost: (host: Host) => void;
+  onUpdateFollowAppTerminalThemeId?: (themeId: string) => void;
   onUpdateTerminalFontFamilyId?: (fontFamilyId: string) => void;
   onUpdateTerminalFontSize?: (fontSize: number) => void;
   onUpdateTerminalFontWeight?: (fontWeight: number) => void;
@@ -61,6 +66,7 @@ export function useTerminalThemePanelState({
   hostMap,
   isVisible,
   onUpdateHost,
+  onUpdateFollowAppTerminalThemeId,
   onUpdateTerminalFontFamilyId,
   onUpdateTerminalFontSize,
   onUpdateTerminalFontWeight,
@@ -180,12 +186,27 @@ export function useTerminalThemePanelState({
       }
       const theme = applyCustomAccentToTerminalTheme(baseTheme, accentMode, customAccent);
   
-      pane.style.setProperty('--terminal-preview-bg', theme.colors.background);
-      pane.style.setProperty('--terminal-preview-fg', theme.colors.foreground);
-      pane.style.setProperty('--terminal-preview-border', `color-mix(in srgb, ${theme.colors.foreground} 8%, ${theme.colors.background} 92%)`);
-      pane.style.setProperty('--terminal-preview-toolbar-btn', `color-mix(in srgb, ${theme.colors.background} 88%, ${theme.colors.foreground} 12%)`);
-      pane.style.setProperty('--terminal-preview-toolbar-btn-hover', `color-mix(in srgb, ${theme.colors.background} 78%, ${theme.colors.foreground} 22%)`);
-      pane.style.setProperty('--terminal-preview-toolbar-btn-active', `color-mix(in srgb, ${theme.colors.cursor} 78%, ${theme.colors.background} 22%)`);
+      setStylePropertyIfChanged(pane, '--terminal-preview-bg', theme.colors.background);
+      setStylePropertyIfChanged(pane, '--terminal-preview-fg', theme.colors.foreground);
+      setStylePropertyIfChanged(pane, '--terminal-preview-border', `color-mix(in srgb, ${theme.colors.foreground} 8%, ${theme.colors.background} 92%)`);
+      setStylePropertyIfChanged(pane, '--terminal-preview-toolbar-btn', `color-mix(in srgb, ${theme.colors.background} 88%, ${theme.colors.foreground} 12%)`);
+      setStylePropertyIfChanged(pane, '--terminal-preview-toolbar-btn-hover', `color-mix(in srgb, ${theme.colors.background} 78%, ${theme.colors.foreground} 22%)`);
+      setStylePropertyIfChanged(pane, '--terminal-preview-toolbar-btn-active', `color-mix(in srgb, ${theme.colors.cursor} 78%, ${theme.colors.background} 22%)`);
+    }, [accentMode, customAccent, customThemes]);
+
+  const applyHostTreePreviewVars = useCallback((themeId: string | null) => {
+      if (!themeId || typeof document === 'undefined') {
+        clearHostTreePreviewVars();
+        return;
+      }
+      const baseTheme = TERMINAL_THEMES.find((entry) => entry.id === themeId)
+        || customThemes.find((entry) => entry.id === themeId);
+      if (!baseTheme) {
+        clearHostTreePreviewVars();
+        return;
+      }
+      const theme = applyCustomAccentToTerminalTheme(baseTheme, accentMode, customAccent);
+      applyHostTreePreviewThemeVars(theme);
     }, [accentMode, customAccent, customThemes]);
   
   const applyTopTabsPreviewVars = useCallback((themeId: string | null) => {
@@ -205,13 +226,25 @@ export function useTerminalThemePanelState({
     }, [accentMode, customAccent, customThemes]);
   
   const handleThemeChangeForFocusedSession = useCallback((themeId: string) => {
-      if (!focusedHost || themeId === previewedOrVisibleThemeId) return;
-      applyTerminalPreviewVars(previewTargetSessionId, themeId);
-      applyTopTabsPreviewVars(themeId);
-      setThemePreview({ targetSessionId: previewTargetSessionId, themeId });
+      if (themeId === previewedOrVisibleThemeId) return;
+      if (!focusedHost && !followAppTerminalTheme) return;
       if (themeCommitTimerRef.current) {
         clearTimeout(themeCommitTimerRef.current);
+        themeCommitTimerRef.current = null;
       }
+      if (followAppTerminalTheme) {
+        clearTerminalPreviewVars(previewTargetSessionId);
+        clearHostTreePreviewVars();
+        clearTopTabsPreviewVars();
+        setThemePreview({ targetSessionId: null, themeId: null });
+        onUpdateFollowAppTerminalThemeId?.(themeId);
+        return;
+      }
+
+      applyTopTabsPreviewVars(themeId);
+      applyHostTreePreviewVars(themeId);
+      applyTerminalPreviewVars(previewTargetSessionId, themeId);
+      setThemePreview({ targetSessionId: previewTargetSessionId, themeId });
       themeCommitTimerRef.current = setTimeout(() => {
         startTransition(() => {
           if (isFocusedHostEphemeral) {
@@ -223,13 +256,14 @@ export function useTerminalThemePanelState({
           }
         });
       }, 160);
-    }, [applyTerminalPreviewVars, applyTopTabsPreviewVars, focusedHost, isFocusedHostEphemeral, onUpdateTerminalThemeId, onUpdateHost, previewTargetSessionId, previewedOrVisibleThemeId, rawFocusedHost]);
+    }, [applyHostTreePreviewVars, applyTerminalPreviewVars, applyTopTabsPreviewVars, focusedHost, followAppTerminalTheme, isFocusedHostEphemeral, onUpdateFollowAppTerminalThemeId, onUpdateTerminalThemeId, onUpdateHost, previewTargetSessionId, previewedOrVisibleThemeId, rawFocusedHost]);
   
   const handleThemeResetForFocusedSession = useCallback(() => {
       if (themeCommitTimerRef.current) {
         clearTimeout(themeCommitTimerRef.current);
       }
       clearTerminalPreviewVars(previewTargetSessionId);
+      clearHostTreePreviewVars();
       setThemePreview({ targetSessionId: null, themeId: null });
       if (!focusedHost || isFocusedHostEphemeral || !rawFocusedHost) return;
       onUpdateHost(clearHostThemeOverride(rawFocusedHost));
@@ -320,6 +354,7 @@ export function useTerminalThemePanelState({
   return {
     activeTopTabsThemeId,
     appliedPreviewSessionRef,
+    applyHostTreePreviewVars,
     applyTerminalPreviewVars,
     applyTopTabsPreviewVars,
     composeBarThemeColors,

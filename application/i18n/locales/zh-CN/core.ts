@@ -128,6 +128,17 @@ export const zhCNCoreMessages: Messages = {
   'settings.update.autoUpdateEnabled': '自动更新',
   'settings.update.autoUpdateEnabledDesc': '有新版本时自动检查并下载更新。',
 
+  // Settings > Session Restore
+  'settings.sessionRestore.title': '会话恢复',
+  'settings.sessionRestore.restorePreviousSession': '恢复上次的标签页和工作区',
+  'settings.sessionRestore.restorePreviousSessionDesc': '启动时重新打开上次的终端标签页和工作区布局。',
+  'settings.sessionRestore.restoreTerminalCwd': '恢复终端工作目录',
+  'settings.sessionRestore.restoreTerminalCwdDesc': '重新连接恢复的终端时，尝试回到上次记录的目录；失败时不会阻塞连接。',
+  'terminal.restore.placeholder.title': '已恢复的会话',
+  'terminal.restore.placeholder.desc': '此终端当前已断开。准备好后可以重新连接，为这个标签页启动新的 shell。',
+  'terminal.restore.placeholder.reconnect': '重新连接',
+  'terminal.restore.cwdLog': '正在恢复工作目录：{cwd}',
+
   // Settings > Session Logs
   'settings.sessionLogs.title': '会话日志',
   'settings.sessionLogs.description': '配置会话日志导出和自动保存设置。',
@@ -310,7 +321,7 @@ export const zhCNCoreMessages: Messages = {
   'sync.autoSync.emptyVaultConflict.restoreDesc': '推荐 — 从云端备份恢复主机、密钥和代码片段',
   'sync.autoSync.emptyVaultConflict.keepEmpty': '保持为空',
   'sync.autoSync.emptyVaultConflict.keepEmptyDesc': '从头开始，使用空的主机库',
-  'sync.autoSync.emptyVaultConflict.cloudSummary': '{hosts} 台主机，{keys} 个密钥，{snippets} 个代码片段，{proxyProfiles} 个代理',
+  'sync.autoSync.emptyVaultConflict.cloudSummary': '{hosts} 台主机，{keys} 个密钥，{snippets} 个代码片段，{notes} 条笔记，{proxyProfiles} 个代理',
   'sync.autoSync.emptyVaultManual': '无法同步：本地 vault 为空。请先从本地备份恢复，或在同步面板里使用"强制推送"。',
 
   'sync.blocked.title': '同步已暂停',
@@ -347,6 +358,7 @@ export const zhCNCoreMessages: Messages = {
   'vault.nav.proxies': '代理',
   'vault.nav.portForwarding': '端口转发',
   'vault.nav.snippets': '代码片段',
+  'vault.nav.notes': '笔记',
   'vault.nav.knownHosts': '已知主机',
   'vault.nav.logs': '日志',
 
@@ -447,6 +459,7 @@ export const zhCNCoreMessages: Messages = {
   'vault.hosts.errors.nameRequired': '主机名称不能为空。',
   'vault.hosts.empty.title': '设置你的主机',
   'vault.hosts.empty.desc': '保存主机以快速连接到你的服务器、虚拟机和容器。',
+  'deepLink.ssh.invalid': '无效的 ssh:// 链接',
 
   // Vault import
   'vault.import.title': '添加数据到你的 Vault',
@@ -573,6 +586,9 @@ export const zhCNCoreMessages: Messages = {
   'sftp.moveTo.pathNotFound': '目录不存在或无法访问',
   'sftp.context.download': '下载',
   'sftp.context.copyToOtherPane': '复制到另一侧',
+  'sftp.copyCurrentPath': '复制当前路径',
+  'sftp.copyCurrentPath.success': '已复制当前路径',
+  'sftp.copyCurrentPath.error': '无法复制当前路径',
   'sftp.viewMode.label': '视图模式',
   'sftp.viewMode.list': '列表视图',
   'sftp.viewMode.tree': '树形视图',

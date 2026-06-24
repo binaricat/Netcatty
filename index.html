@@ -68,6 +68,10 @@
       color: hsl(var(--foreground));
     }
 
+    html.platform-win32 body {
+      font-family: 'Noto Color Emoji Flags', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Space Grotesk', system-ui, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    }
+
     /* Global Modern Scrollbar */
     ::-webkit-scrollbar {
       width: 10px;
@@ -182,6 +186,11 @@
         }
 
         if (lang) root.lang = lang;
+
+        var ua = navigator.userAgent || '';
+        if (/Win/i.test(ua)) {
+          root.classList.add('platform-win32');
+        }
       } catch (e) {
         // ignore
       }

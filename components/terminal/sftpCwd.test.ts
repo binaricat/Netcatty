@@ -93,12 +93,12 @@ test("terminal cwd tracker clears stale renderer cwd before falling back to back
   assert.equal(cwd, "/home/fresh-session");
 });
 
-test("probeBackendSessionCwdAfterCommand skips when cwd revision already advanced", async () => {
+test("probeBackendSessionCwdAfterCommand skips when OSC 7 already reported after command", async () => {
   let backendCalls = 0;
   const cwd = await probeBackendSessionCwdAfterCommand({
     sessionId: "session-1",
-    cwdRevisionAtCommand: 1,
-    getCwdRevision: () => 2,
+    osc7SignalAtCommand: 1,
+    getOsc7Signal: () => 2,
     getSessionPwd: async () => {
       backendCalls += 1;
       return { success: true, cwd: "/tmp" };
@@ -109,11 +109,11 @@ test("probeBackendSessionCwdAfterCommand skips when cwd revision already advance
   assert.equal(backendCalls, 0);
 });
 
-test("probeBackendSessionCwdAfterCommand probes backend when revision is unchanged", async () => {
+test("probeBackendSessionCwdAfterCommand probes backend when OSC 7 did not report", async () => {
   const cwd = await probeBackendSessionCwdAfterCommand({
     sessionId: "session-1",
-    cwdRevisionAtCommand: 3,
-    getCwdRevision: () => 3,
+    osc7SignalAtCommand: 3,
+    getOsc7Signal: () => 3,
     getSessionPwd: async (sessionId) => {
       assert.equal(sessionId, "session-1");
       return { success: true, cwd: "/var/log" };
@@ -121,4 +121,31 @@ test("probeBackendSessionCwdAfterCommand probes backend when revision is unchang
   });
 
   assert.equal(cwd, "/var/log");
+});
+
+test("probeBackendSessionCwdAfterCommand skips when OSC 7 confirms unchanged cwd after command", async () => {
+  let backendCalls = 0;
+  const cwd = await probeBackendSessionCwdAfterCommand({
+    sessionId: "session-1",
+    osc7SignalAtCommand: 2,
+    getOsc7Signal: () => 3,
+    getSessionPwd: async () => {
+      backendCalls += 1;
+      return { success: true, cwd: "/home/user" };
+    },
+  });
+
+  assert.equal(cwd, null);
+  assert.equal(backendCalls, 0);
+});
+
+test("probeBackendSessionCwdAfterCommand still probes when cwd path is unchanged but OSC 7 did not fire", async () => {
+  const cwd = await probeBackendSessionCwdAfterCommand({
+    sessionId: "session-1",
+    osc7SignalAtCommand: 5,
+    getOsc7Signal: () => 5,
+    getSessionPwd: async () => ({ success: true, cwd: "/srv/app" }),
+  });
+
+  assert.equal(cwd, "/srv/app");
 });

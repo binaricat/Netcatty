@@ -231,8 +231,8 @@ function createStartSessionApi(ctx) {
       // (Terminal.tsx) so behavior for other/arbitrary charsets is unchanged:
       // the renderer pushes the effective encoding via setEncoding on attach,
       // and that handler keeps both halves in sync.
-      const gbCharset = options.charset && /^gb/i.test(String(options.charset).trim());
-      if (gbCharset) {
+      const initialEncoding = normalizeTerminalEncoding(options.charset);
+      if (initialEncoding === "gb18030") {
         sessionEncodings.set(sessionId, "gb18030");
         session.encoding = "gb18030";
       }
@@ -737,7 +737,9 @@ function createStartSessionApi(ctx) {
             // Track methods that have been attempted (to avoid re-trying on failure)
             // This prevents reusing the same key when server requires multiple publickey auth steps
             // and also prevents re-attempting failed methods
-            const attemptedMethodIds = new Set();
+            let attemptedMethodIds = new Set();
+            // Methods that contributed a successful factor; never retried.
+            const succeededMethodIds = new Set();
             // Track the first successful method for caching (not the last one in multi-step flows)
             let firstSuccessfulMethod = null;
             // Track if we've gone through a partialSuccess flow (multi-step auth)
@@ -775,13 +777,16 @@ function createStartSessionApi(ctx) {
                   firstSuccessfulMethod = lastTriedMethod;
                   log("Recorded first successful method for caching", { method: firstSuccessfulMethod });
                 }
-                // Mark the last tried method as attempted (it succeeded, so we shouldn't retry it)
+                // Keep only the succeeded factors as "attempted" so a method
+                // rejected in an earlier stage can be re-offered for the next
+                // required factor (publickey+password MFA).
                 if (lastTriedMethod) {
-                  attemptedMethodIds.add(lastTriedMethod);
-                  log("Marked method as attempted (partial success)", { method: lastTriedMethod });
+                  succeededMethodIds.add(lastTriedMethod);
+                  log("Recorded successful auth factor (partial success)", { method: lastTriedMethod });
                 }
+                attemptedMethodIds = new Set(succeededMethodIds);
 
-                log("Partial success - server requires additional auth", { methodsLeft, attemptedMethodIds: Array.from(attemptedMethodIds) });
+                log("Partial success - server requires additional auth", { methodsLeft, succeeded: Array.from(succeededMethodIds), attemptedMethodIds: Array.from(attemptedMethodIds) });
 
                 // Find a method from our list that matches what the server wants
                 // Skip methods that have already been attempted
@@ -1260,6 +1265,7 @@ function createStartSessionApi(ctx) {
             hostname: options.hostname,
             password: options.password,
             logPrefix,
+            scope: "terminal",
             onAutoFill: () => sendProgress(
               totalHops, totalHops, options.hostname, 'auth-attempt', 'using saved password',
             ),

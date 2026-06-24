@@ -23,7 +23,9 @@ const makeHost = (overrides: Partial<Host> = {}): Host => ({
   hostname: "127.0.0.1",
   port: 22,
   username: "root",
-  authType: "password",
+  authMethod: "password",
+  tags: [],
+  os: "linux",
   createdAt: 1,
   protocol: "ssh",
   ...overrides,
@@ -136,6 +138,41 @@ test("migrateHostsFromLegacyLineTimestamps fills only missing host choices", () 
   ]);
 });
 
+test("sanitizeHost preserves valid custom host icon fields", () => {
+  const sanitized = sanitizeHost(makeHost({
+    iconMode: "custom",
+    iconId: "database",
+    iconColor: "blue",
+  }));
+
+  assert.equal(sanitized.iconMode, "custom");
+  assert.equal(sanitized.iconId, "database");
+  assert.equal(sanitized.iconColor, "blue");
+});
+
+test("sanitizeHost preserves automatic host icon color fields", () => {
+  const sanitized = sanitizeHost(makeHost({
+    iconMode: "auto",
+    iconColor: "violet",
+  }));
+
+  assert.equal(sanitized.iconMode, "auto");
+  assert.equal(sanitized.iconId, undefined);
+  assert.equal(sanitized.iconColor, "violet");
+});
+
+test("sanitizeHost removes invalid custom host icon fields", () => {
+  const sanitized = sanitizeHost(makeHost({
+    iconMode: "custom",
+    iconId: "bad",
+    iconColor: "blue",
+  } as unknown as Partial<Host>));
+
+  assert.equal(sanitized.iconMode, undefined);
+  assert.equal(sanitized.iconId, undefined);
+  assert.equal(sanitized.iconColor, undefined);
+});
+
 test("preserves a concurrent terminal timestamp toggle when host details did not edit it", () => {
   const openedHost = makeHost({ showLineTimestamps: false });
   const latestHost = makeHost({ showLineTimestamps: true });
@@ -154,6 +191,28 @@ test("keeps host details timestamp value when the details form edits it", () => 
 
   assert.equal(
     preserveConcurrentHostLineTimestampUpdate({ draft, openedHost, latestHost }).showLineTimestamps,
+    true,
+  );
+});
+
+test("preserves a concurrent SFTP follow-terminal-directory toggle when host details did not edit it", () => {
+  const openedHost = makeHost({ sftpFollowTerminalCwd: undefined });
+  const latestHost = makeHost({ sftpFollowTerminalCwd: true });
+  const draft = makeHost({ label: "Edited label", sftpFollowTerminalCwd: undefined });
+
+  assert.deepEqual(
+    preserveConcurrentHostLineTimestampUpdate({ draft, openedHost, latestHost }),
+    { ...draft, sftpFollowTerminalCwd: true },
+  );
+});
+
+test("keeps host details SFTP follow-terminal-directory value when the details form edits it", () => {
+  const openedHost = makeHost({ sftpFollowTerminalCwd: false });
+  const latestHost = makeHost({ sftpFollowTerminalCwd: false });
+  const draft = makeHost({ sftpFollowTerminalCwd: true });
+
+  assert.equal(
+    preserveConcurrentHostLineTimestampUpdate({ draft, openedHost, latestHost }).sftpFollowTerminalCwd,
     true,
   );
 });

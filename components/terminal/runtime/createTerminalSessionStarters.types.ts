@@ -4,6 +4,7 @@ import type { Dispatch, RefObject, SetStateAction } from "react";
 import type { Host, Identity, KnownHost, SerialConfig, SSHKey, TerminalSession, TerminalSettings } from "../../../types";
 import type { PromptLineBreakState } from "./promptLineBreak";
 import type { SudoPasswordAutofill } from "./terminalSudoAutofill";
+import type { ProgrammaticCommandLogRewrite } from "../programmaticCommandLog";
 
 export type TerminalBackendApi = {
   backendAvailable: () => boolean;
@@ -63,7 +64,7 @@ export type TerminalBackendApi = {
   onConnectionReuseFallback?: (
     cb: (sessionId: string, sourceSessionId?: string) => void,
   ) => (() => void) | undefined;
-  writeToSession: (sessionId: string, data: string, options?: { automated?: boolean }) => void;
+  writeToSession: (sessionId: string, data: string, options?: { automated?: boolean; lineDelayMs?: number; logRewrite?: ProgrammaticCommandLogRewrite }) => void;
   resizeSession: (sessionId: string, cols: number, rows: number) => void;
   /** Pause/resume the source stream for output back-pressure (optional). */
   setSessionFlowPaused?: (sessionId: string, paused: boolean) => void;
@@ -103,6 +104,8 @@ export type TerminalSessionStartersContext = {
   reuseConnectionFromSessionId?: string;
   startupCommand?: string;
   noAutoRun?: boolean;
+  shellType?: TerminalSession["shellType"];
+  suppressHostStartupCommandRef?: RefObject<boolean>;
   terminalSettings?: TerminalSettings;
   terminalSettingsRef?: RefObject<TerminalSettings | undefined>;
   terminalBackend: TerminalBackendApi;
@@ -127,6 +130,7 @@ export type TerminalSessionStartersContext = {
   pendingAuthRef: RefObject<PendingAuth>;
   promptLineBreakStateRef?: RefObject<PromptLineBreakState>;
   sudoAutofillRef?: RefObject<SudoPasswordAutofill | null>;
+  restoreCwdIntentRef?: RefObject<{ cwd: string; command: string } | null>;
 
   updateStatus: (next: TerminalSession["status"]) => void;
   setStatus: Dispatch<SetStateAction<TerminalSession["status"]>>;
@@ -143,8 +147,16 @@ export type TerminalSessionStartersContext = {
   onSessionExit?: (sessionId: string, evt: { exitCode?: number; signal?: number; error?: string; reason?: "exited" | "error" | "timeout" | "closed" }) => void;
   onTerminalDataCapture?: (sessionId: string, data: string) => void;
   onTerminalLogData?: (data: string) => void;
+  onProgrammaticCommandLogRewrite?: (rewrite: ProgrammaticCommandLogRewrite) => void;
+  onTerminalOutput?: (chunk: string) => void;
   onOsDetected?: (hostId: string, distro: string) => void;
   onCommandExecuted?: (
+    command: string,
+    hostId: string,
+    hostLabel: string,
+    sessionId: string,
+  ) => void;
+  onCommandSubmitted?: (
     command: string,
     hostId: string,
     hostLabel: string,

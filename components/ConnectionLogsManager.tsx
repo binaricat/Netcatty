@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import React, { memo, useCallback, useMemo, useState } from "react";
 import { useI18n } from "../application/i18n/I18nProvider";
+import { resolveHostIconAppearance } from "../domain/hostIcon";
 import { cn } from "../lib/utils";
 import { ConnectionLog, Host } from "../types";
 import { DistroAvatar } from "./DistroAvatar";
@@ -67,7 +68,14 @@ const LogItem = memo<LogItemProps>(({ log, onToggleSaved, onDelete, onClick }) =
     const { t, resolvedLocale } = useI18n();
     const isLocal = log.protocol === "local" || log.hostname === "localhost";
     const isSerial = log.protocol === "serial";
-    const hasPersistedHostIcon = !isLocal && !isSerial && !!log.hostDistro;
+    const customHostIcon = resolveHostIconAppearance({
+        iconMode: log.hostIconMode,
+        iconId: log.hostIconId,
+        iconColorMode: log.hostIconColorMode,
+        iconColor: log.hostIconColor,
+        iconColorCustom: log.hostIconColorCustom,
+    });
+    const hasPersistedHostIcon = !isLocal && !isSerial && (!!log.hostDistro || !!customHostIcon);
 
     return (
         <div
@@ -101,6 +109,11 @@ const LogItem = memo<LogItemProps>(({ log, onToggleSaved, onDelete, onClick }) =
                             os: log.hostOs ?? "linux",
                             distro: log.hostDistro,
                             distroMode: "auto",
+                            iconMode: log.hostIconMode,
+                            iconId: log.hostIconId,
+                            iconColorMode: log.hostIconColorMode,
+                            iconColor: log.hostIconColor,
+                            iconColorCustom: log.hostIconColorCustom,
                         }}
                         fallback={(log.hostOs ?? "linux")[0].toUpperCase()}
                         size="log"

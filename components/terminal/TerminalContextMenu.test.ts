@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import en from "../../application/i18n/locales/en.ts";
+import ru from "../../application/i18n/locales/ru.ts";
 import zhCN from "../../application/i18n/locales/zh-CN.ts";
 import { markMiddleClickContextMenuEvent } from "./runtime/middleClickBehavior.ts";
 import * as terminalContextMenu from "./TerminalContextMenu.tsx";
@@ -28,6 +29,11 @@ const shouldShowAddSelectionToAIContextMenuAction = (
     shouldShowAddSelectionToAIContextMenuAction?: (onAddSelectionToAI?: () => void) => boolean;
   }
 ).shouldShowAddSelectionToAIContextMenuAction;
+const shouldShowUploadClipboardImageContextMenuAction = (
+  terminalContextMenu as {
+    shouldShowUploadClipboardImageContextMenuAction?: (onUploadClipboardImage?: () => void) => boolean;
+  }
+).shouldShowUploadClipboardImageContextMenuAction;
 const shouldOpenTerminalContextMenu = (
   terminalContextMenu as {
     shouldOpenTerminalContextMenu?: (options: {
@@ -80,6 +86,39 @@ test("shows add selection to AI context menu action when a handler exists", () =
 
   assert.equal(shouldShowAddSelectionToAIContextMenuAction(() => {}), true);
   assert.equal(shouldShowAddSelectionToAIContextMenuAction(), false);
+});
+
+test("shows upload clipboard image context menu action when a handler exists", () => {
+  assert.equal(typeof shouldShowUploadClipboardImageContextMenuAction, "function");
+  if (typeof shouldShowUploadClipboardImageContextMenuAction !== "function") return;
+
+  assert.equal(shouldShowUploadClipboardImageContextMenuAction(() => {}), true);
+  assert.equal(shouldShowUploadClipboardImageContextMenuAction(), false);
+});
+
+test("localizes the upload clipboard image context menu label", () => {
+  const locales = { en, ru, "zh-CN": zhCN };
+  const keys = [
+    "terminal.menu.uploadClipboardImage",
+    "terminal.clipboardImageUpload.noImage",
+    "terminal.clipboardImageUpload.failed",
+  ] as const;
+
+  for (const [locale, messages] of Object.entries(locales)) {
+    for (const key of keys) {
+      assert.equal(
+        typeof messages[key],
+        "string",
+        `${locale} should include ${key}`,
+      );
+      assert.notEqual(messages[key], "", `${locale} should not leave ${key} empty`);
+      assert.notEqual(messages[key], key, `${locale} should translate ${key}`);
+    }
+  }
+
+  assert.equal(en["terminal.menu.uploadClipboardImage"], "Upload clipboard image");
+  assert.equal(zhCN["terminal.menu.uploadClipboardImage"], "上传剪贴板图片");
+  assert.equal(ru["terminal.menu.uploadClipboardImage"], "Загрузить изображение из буфера");
 });
 
 test("localizes the YMODEM serial send actions", () => {

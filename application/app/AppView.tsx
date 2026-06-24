@@ -1,24 +1,27 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import React, { Suspense, lazy } from 'react';
+import React, { Suspense, lazy, useMemo } from 'react';
 import { AlertTriangle, Download, Trash2 } from 'lucide-react';
-import { activeTabStore, toEditorTabId } from '../state/activeTabStore';
+import { activeTabStore, toEditorTabId, useIsEditorTabActive } from '../state/activeTabStore';
 import { editorTabStore } from '../state/editorTabStore';
 import { releaseEditorTabSaveCoordinator, saveEditorTab } from '../state/editorTabSave';
+import { useTerminalHostTreeLayoutWidth } from '../state/terminalHostTreeStore';
 import { TopTabs } from '../../components/TopTabs';
 import { VaultView } from '../../components/VaultView';
 import { QuickAddSnippetDialog } from '../../components/QuickAddSnippetDialog';
 import { AddToWorkspaceDialog } from '../../components/workspace/AddToWorkspaceDialog';
 import { KeyboardInteractiveModal } from '../../components/KeyboardInteractiveModal';
 import { PassphraseModal } from '../../components/PassphraseModal';
-import { TextEditorTabView } from '../../components/editor/TextEditorTabView';
 import { UnsavedChangesProvider } from '../../components/editor/UnsavedChangesDialog';
 import { SnippetExecutionProvider } from '../../components/SnippetExecutionProvider';
 import { Button } from '../../components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../../components/ui/dialog';
 import { Input } from '../../components/ui/input';
 import { Label } from '../../components/ui/label';
+import { LazyLoadBoundary } from '../../components/ui/lazy-load-boundary';
 import { toast } from '../../components/ui/toast';
 import { AppHostTreeLayer } from './AppHostTreeLayer';
+import { getUiThemeById } from '../../infrastructure/config/uiThemes';
+import { buildAppThemeCssVars } from '../state/settingsStateDefaults';
 
 const LazyProtocolSelectDialog = lazy(() => import('../../components/ProtocolSelectDialog'));
 const LazyQuickSwitcher = lazy(() =>
@@ -27,6 +30,25 @@ const LazyQuickSwitcher = lazy(() =>
 const LazyCreateWorkspaceDialog = lazy(() =>
   import('../../components/CreateWorkspaceDialog').then((m) => ({ default: m.CreateWorkspaceDialog })),
 );
+const LazyTextEditorTabView = lazy(() =>
+  import('../../components/editor/TextEditorTabView').then((m) => ({ default: m.TextEditorTabView })),
+);
+
+const TextEditorTabFallback = ({ tabId }: { tabId: string }) => {
+  const isVisible = useIsEditorTabActive(tabId);
+  const hostTreeLayoutWidth = useTerminalHostTreeLayoutWidth();
+  return (
+    <div
+      style={{
+        ...(isVisible ? null : { pointerEvents: 'none', visibility: 'hidden' }),
+        zIndex: 20,
+        left: hostTreeLayoutWidth,
+      }}
+      className="netcatty-lazy-fade-in absolute top-0 right-0 bottom-0 min-h-0 flex flex-col bg-background"
+      aria-hidden="true"
+    />
+  );
+};
 
 type AppViewContext = Record<string, any>;
 
@@ -35,25 +57,36 @@ export function AppView({ ctx }: { ctx: AppViewContext }) {
     accentMode, addShellHistoryEntry, addSessionToWorkspace, addToWorkspaceDialog, appendHostToWorkspace, appendLocalTerminalToWorkspace,
     clearAndRemoveSource, clearAndRemoveSources, clearUnsavedConnectionLogs, closeLogView, closeSession, closeTabsBatch, closeWorkspace, copySessionToNewWindowWithCurrentShell, copySessionWithCurrentShell,
     connectionLogs, convertKnownHostToHost, createWorkspaceFromSessions, createWorkspaceFromTargets, createWorkspaceWithHosts, customAccent,
-    customGroups, currentTerminalTheme, deleteConnectionLog, draggingSessionId, effectiveKnownHosts, editorTabs, editorWordWrap, emptyVaultConflict,
+    customGroups, currentTerminalTheme, deepLinkHostDraft, deleteConnectionLog, draggingSessionId, effectiveKnownHosts, editorTabs, editorWordWrap, emptyVaultConflict,
     followAppTerminalTheme, groupConfigs, handleAddKnownHost, handleConnectSerial, handleConnectToHost, handleCreateLocalTerminal, handleDeleteHost,
-    handleEndSessionDrag, handleHostConnectWithProtocolCheck, handleHotkeyAction, handleKeyboardInteractiveCancel, handleKeyboardInteractiveSubmit,
-    handleOpenQuickSwitcher, handleOpenSettings, handleRootContextMenu, handlePassphraseCancel, handlePassphraseSkip, handlePassphraseSubmit, handleProtocolSelect,
+    handleEndSessionDrag, handleFollowAppTerminalThemeChange, handleHostConnectWithProtocolCheck, handleHotkeyAction, handleKeyboardInteractiveCancel, handleKeyboardInteractiveSubmit,
+    handleOpenHostFromVaultNote, handleOpenQuickSwitcher, handleOpenSettings, handleRootContextMenu, handlePassphraseCancel, handlePassphraseSkip, handlePassphraseSubmit, handleProtocolSelect,
     handleRequestCloseEditorTabRef, handleSessionStatusChange, handleSyncNowManual, handleTerminalDataCapture, handleToggleTheme, handleUpdateHostFromTerminal,
     hostById, hosts, hotkeyScheme, identities, importOrReuseKey, isBroadcastEnabled, isCreateWorkspaceOpen, isMacClient, isQuickSwitcherOpen,
-    keyBindings, keyboardInteractiveQueue, keys, logViews, managedSources, navigateToSection, openLogView, orderedTabsWithEditors, orphanSessions,
+    keyBindings, keyboardInteractiveQueue, keys, logViews, managedSources, navigateToSection, noteGroups, notes, openLogView, openNoteRequest, orderedTabsWithEditors, orphanSessions,
     passphraseQueue, protocolSelectHost, proxyProfiles, publicMcpToggle, quickResults, quickSearch, removeSessionFromWorkspace, reorderWorkTabs, reorderWorkspaceSessions, resetSessionRename,
     resetWorkspaceRename, resolveEmptyVaultConflict, resolvedTheme, runSnippet, sessionLogsDir, sessionLogsEnabled, sessionLogsFormat, sessionLogsTimestampsEnabled, sessionRenameTarget, sshDebugLogsEnabled,
-    sessionRenameValue, sessions, setActiveTabId, setAddToWorkspaceDialog, setDraggingSessionId, setEditorWordWrap, setIsCreateWorkspaceOpen, setIsQuickSwitcherOpen,
-    setNavigateToSection, setProtocolSelectHost, setQuickSearch, setSessionRenameValue, setTerminalFontFamilyId, setTerminalFontSize, setTerminalThemeId, updateSessionFontSize, clearSessionFontSizeOverride,
+    sessionRenameValue, sessions, setActiveTabId, setAddToWorkspaceDialog, setDeepLinkHostDraft, setDraggingSessionId, setEditorWordWrap, setIsCreateWorkspaceOpen, setIsQuickSwitcherOpen,
+    setNavigateToSection, setProtocolSelectHost, setQuickSearch, setSessionRenameValue, setTerminalFontFamilyId, setTerminalFontSize, setTerminalThemeId, updateSessionFontSize, updateSessionRestoreCwd, updateSessionDynamicTitle, updateSessionCodingCliProvider, clearSessionFontSizeOverride,
     setWorkspaceFocusedSession, setWorkspaceRenameValue, settings, sftpAutoOpenSidebar, sftpFollowTerminalCwd, setSftpFollowTerminalCwd, sftpAutoSync, sftpDefaultViewMode, sftpDoubleClickBehavior,
     sftpShowHiddenFiles, sftpUseCompressedUpload, shellHistory, snippetPackages, snippets, splitSessionWithCurrentShell, startSessionRename,
     startWorkspaceRename, submitSessionRename, submitWorkspaceRename, t, terminalFontFamilyId, terminalFontSize, terminalSettings, terminalThemeId, themeById,
     toggleBroadcast, toggleConnectionLogSaved, toggleScriptsSidePanelRef, toggleSidePanelRef, toggleWorkspaceViewMode, unmanageSource, updateConnectionLog,
     updateCustomGroups, updateGroupConfigs, updateHostDistro, updateHosts, updateIdentities, updateKeys, updateKnownHosts, updateManagedSources,
-    updateProxyProfiles, updateSnippetPackages, updateSnippets, updateSplitSizes, updateTerminalSetting, workspaceRenameTarget, workspaceRenameValue, workspaces,
+    updateNoteGroups, updateNotes, updateProxyProfiles, updateSnippetPackages, updateSnippets, updateSplitSizes, updateTerminalSetting, workspaceRenameTarget, workspaceRenameValue, workspaces,
     VaultViewContainer, SftpViewMount, TerminalLayerMount, LogViewWrapper,
   } = ctx;
+
+  const appThemeStyle = useMemo(() => {
+    const tokens = getUiThemeById(
+      resolvedTheme,
+      resolvedTheme === 'dark' ? settings.darkUiThemeId : settings.lightUiThemeId,
+    ).tokens;
+    return {
+      ...buildAppThemeCssVars(tokens, accentMode, customAccent),
+      colorScheme: resolvedTheme,
+    } as React.CSSProperties;
+  }, [accentMode, customAccent, resolvedTheme, settings.darkUiThemeId, settings.lightUiThemeId]);
 
   return (
     <SnippetExecutionProvider>
@@ -165,7 +198,7 @@ export function AppView({ ctx }: { ctx: AppViewContext }) {
           onCreateLocalTerminal={handleCreateLocalTerminal}
         />
 
-        <VaultViewContainer>
+        <VaultViewContainer appThemeStyle={appThemeStyle}>
           <VaultView
             hosts={hosts}
             keys={keys}
@@ -173,6 +206,8 @@ export function AppView({ ctx }: { ctx: AppViewContext }) {
             proxyProfiles={proxyProfiles}
             snippets={snippets}
             snippetPackages={snippetPackages}
+            notes={notes}
+            noteGroups={noteGroups}
             customGroups={customGroups}
             knownHosts={effectiveKnownHosts}
             shellHistory={shellHistory}
@@ -189,6 +224,7 @@ export function AppView({ ctx }: { ctx: AppViewContext }) {
             onConnectSerial={handleConnectSerial}
             onDeleteHost={handleDeleteHost}
             onConnect={handleConnectToHost}
+            onOpenHostFromNote={handleOpenHostFromVaultNote}
             groupConfigs={groupConfigs}
             onUpdateGroupConfigs={updateGroupConfigs}
             onUpdateHosts={updateHosts}
@@ -198,6 +234,8 @@ export function AppView({ ctx }: { ctx: AppViewContext }) {
             onUpdateProxyProfiles={updateProxyProfiles}
             onUpdateSnippets={updateSnippets}
             onUpdateSnippetPackages={updateSnippetPackages}
+            onUpdateNotes={updateNotes}
+            onUpdateNoteGroups={updateNoteGroups}
             onUpdateCustomGroups={updateCustomGroups}
             onUpdateKnownHosts={updateKnownHosts}
             onUpdateManagedSources={updateManagedSources}
@@ -214,6 +252,8 @@ export function AppView({ ctx }: { ctx: AppViewContext }) {
             showOnlyUngroupedHostsInRoot={settings.showOnlyUngroupedHostsInRoot}
             navigateToSection={navigateToSection}
             onNavigateToSectionHandled={() => setNavigateToSection(null)}
+            deepLinkHostDraft={deepLinkHostDraft}
+            onDeepLinkHostDraftHandled={() => setDeepLinkHostDraft(null)}
             terminalSettings={terminalSettings}
           />
         </VaultViewContainer>
@@ -248,11 +288,14 @@ export function AppView({ ctx }: { ctx: AppViewContext }) {
           identities={identities}
           snippets={snippets}
           snippetPackages={snippetPackages}
+          notes={notes}
+          noteGroups={noteGroups}
           sessions={sessions}
           workspaces={workspaces}
           knownHosts={effectiveKnownHosts}
           draggingSessionId={draggingSessionId}
           terminalTheme={currentTerminalTheme}
+          terminalThemeId={terminalThemeId}
           followAppTerminalTheme={followAppTerminalTheme}
           accentMode={accentMode}
           customAccent={customAccent}
@@ -261,12 +304,17 @@ export function AppView({ ctx }: { ctx: AppViewContext }) {
           fontSize={terminalFontSize}
           hotkeyScheme={hotkeyScheme}
           disableTerminalFontZoom={settings.disableTerminalFontZoom}
+          restoreTerminalCwd={settings.restoreTerminalCwd}
           keyBindings={keyBindings}
           onHotkeyAction={handleHotkeyAction}
           onUpdateTerminalThemeId={setTerminalThemeId}
+          onUpdateFollowAppTerminalThemeId={handleFollowAppTerminalThemeChange}
           onUpdateTerminalFontFamilyId={setTerminalFontFamilyId}
           onUpdateTerminalFontSize={setTerminalFontSize}
           onUpdateSessionFontSize={updateSessionFontSize}
+          onUpdateSessionRestoreCwd={updateSessionRestoreCwd}
+          onUpdateSessionDynamicTitle={updateSessionDynamicTitle}
+          onUpdateSessionCodingCliProvider={updateSessionCodingCliProvider}
           onClearSessionFontSizeOverride={clearSessionFontSizeOverride}
           onUpdateTerminalFontWeight={(w) => updateTerminalSetting('fontWeight', w)}
           onCloseSession={closeSession}
@@ -294,12 +342,15 @@ export function AppView({ ctx }: { ctx: AppViewContext }) {
           onCopySessionToNewWindow={copySessionToNewWindowWithCurrentShell}
           onSplitSession={splitSessionWithCurrentShell}
           onConnectToHost={handleConnectToHost}
+          openNoteRequest={openNoteRequest}
           onCreateLocalTerminal={handleCreateLocalTerminal}
           isBroadcastEnabled={isBroadcastEnabled}
           onToggleBroadcast={toggleBroadcast}
           updateHosts={updateHosts}
           updateSnippets={updateSnippets}
           updateSnippetPackages={updateSnippetPackages}
+          updateNotes={updateNotes}
+          updateNoteGroups={updateNoteGroups}
           sftpDefaultViewMode={sftpDefaultViewMode}
           sftpDoubleClickBehavior={sftpDoubleClickBehavior}
           sftpAutoSync={sftpAutoSync}
@@ -341,14 +392,17 @@ export function AppView({ ctx }: { ctx: AppViewContext }) {
 
         {/* Editor Tabs — kept mounted for Monaco instance persistence; visibility toggled via CSS */}
         {editorTabs.map((tab) => (
-          <TextEditorTabView
-            key={tab.id}
-            tabId={tab.id}
-            hotkeyScheme={hotkeyScheme}
-            keyBindings={keyBindings}
-            hostById={hostById}
-            onRequestClose={(id) => handleRequestCloseEditorTabRef.current(id)}
-          />
+          <LazyLoadBoundary key={tab.id} name="Editor" resetKey={tab.id}>
+            <Suspense fallback={<TextEditorTabFallback tabId={tab.id} />}>
+              <LazyTextEditorTabView
+                tabId={tab.id}
+                hotkeyScheme={hotkeyScheme}
+                keyBindings={keyBindings}
+                hostById={hostById}
+                onRequestClose={(id) => handleRequestCloseEditorTabRef.current(id)}
+              />
+            </Suspense>
+          </LazyLoadBoundary>
         ))}
       </div>
 
@@ -412,38 +466,40 @@ export function AppView({ ctx }: { ctx: AppViewContext }) {
       )}
 
       {isQuickSwitcherOpen && (
-        <Suspense fallback={null}>
-          <LazyQuickSwitcher
-            isOpen={isQuickSwitcherOpen}
-            query={quickSearch}
-            results={quickResults}
-            sessions={sessions}
-            workspaces={workspaces}
-            showSftpTab={settings.showSftpTab}
-            onQueryChange={setQuickSearch}
-            onSelect={handleHostConnectWithProtocolCheck}
-            onSelectTab={(tabId) => {
-              setActiveTabId(tabId);
-              setIsQuickSwitcherOpen(false);
-              setQuickSearch('');
-            }}
-            onCreateLocalTerminal={(shell) => {
-              handleCreateLocalTerminal(shell);
-              setIsQuickSwitcherOpen(false);
-              setQuickSearch('');
-            }}
-            onCreateWorkspace={() => {
-              setIsQuickSwitcherOpen(false);
-              setQuickSearch('');
-              setAddToWorkspaceDialog({ mode: 'create' });
-            }}
-            onClose={() => {
-              setIsQuickSwitcherOpen(false);
-              setQuickSearch('');
-            }}
-            keyBindings={keyBindings}
-          />
-        </Suspense>
+        <LazyLoadBoundary name="Quick switcher" resetKey={quickSearch}>
+          <Suspense fallback={null}>
+            <LazyQuickSwitcher
+              isOpen={isQuickSwitcherOpen}
+              query={quickSearch}
+              results={quickResults}
+              sessions={sessions}
+              workspaces={workspaces}
+              showSftpTab={settings.showSftpTab}
+              onQueryChange={setQuickSearch}
+              onSelect={handleHostConnectWithProtocolCheck}
+              onSelectTab={(tabId) => {
+                setActiveTabId(tabId);
+                setIsQuickSwitcherOpen(false);
+                setQuickSearch('');
+              }}
+              onCreateLocalTerminal={(shell) => {
+                handleCreateLocalTerminal(shell);
+                setIsQuickSwitcherOpen(false);
+                setQuickSearch('');
+              }}
+              onCreateWorkspace={() => {
+                setIsQuickSwitcherOpen(false);
+                setQuickSearch('');
+                setAddToWorkspaceDialog({ mode: 'create' });
+              }}
+              onClose={() => {
+                setIsQuickSwitcherOpen(false);
+                setQuickSearch('');
+              }}
+              keyBindings={keyBindings}
+            />
+          </Suspense>
+        </LazyLoadBoundary>
       )}
 
       <Dialog open={!!sessionRenameTarget} onOpenChange={(open) => {
@@ -501,25 +557,29 @@ export function AppView({ ctx }: { ctx: AppViewContext }) {
       </Dialog>
 
       {isCreateWorkspaceOpen && (
-        <Suspense fallback={null}>
-          <LazyCreateWorkspaceDialog
-            isOpen={isCreateWorkspaceOpen}
-            onClose={() => setIsCreateWorkspaceOpen(false)}
-            hosts={hosts}
-            onCreate={createWorkspaceWithHosts}
-          />
-        </Suspense>
+        <LazyLoadBoundary name="Create workspace" resetKey="create-workspace">
+          <Suspense fallback={null}>
+            <LazyCreateWorkspaceDialog
+              isOpen={isCreateWorkspaceOpen}
+              onClose={() => setIsCreateWorkspaceOpen(false)}
+              hosts={hosts}
+              onCreate={createWorkspaceWithHosts}
+            />
+          </Suspense>
+        </LazyLoadBoundary>
       )}
 
       {/* Protocol Select Dialog for QuickSwitcher */}
       {protocolSelectHost && (
-        <Suspense fallback={null}>
-          <LazyProtocolSelectDialog
-            host={protocolSelectHost}
-            onSelect={handleProtocolSelect}
-            onCancel={() => setProtocolSelectHost(null)}
-          />
-        </Suspense>
+        <LazyLoadBoundary name="Protocol selector" resetKey={protocolSelectHost.id}>
+          <Suspense fallback={null}>
+            <LazyProtocolSelectDialog
+              host={protocolSelectHost}
+              onSelect={handleProtocolSelect}
+              onCancel={() => setProtocolSelectHost(null)}
+            />
+          </Suspense>
+        </LazyLoadBoundary>
       )}
 
       {/* Global Keyboard-Interactive Authentication Modal (2FA/MFA) - processes queue */}
@@ -567,6 +627,7 @@ export function AppView({ ctx }: { ctx: AppViewContext }) {
                 hosts: emptyVaultConflict.hostCount,
                 keys: emptyVaultConflict.keyCount,
                 snippets: emptyVaultConflict.snippetCount,
+                notes: emptyVaultConflict.noteCount,
                 proxyProfiles: emptyVaultConflict.proxyProfileCount,
               })}</div>
             </div>

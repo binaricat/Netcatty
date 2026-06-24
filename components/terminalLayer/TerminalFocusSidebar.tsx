@@ -3,6 +3,7 @@ import React, { memo, useCallback, useMemo, useState, type DragEvent, type Mouse
 
 import { useStoredNumber } from '../../application/state/useStoredNumber';
 import { resolveWorkspaceFocusSessionOrder } from '../../domain/workspace';
+import { resolveSessionTabTitle } from '../../domain/sessionTabTitle';
 import { STORAGE_KEY_WORKSPACE_FOCUS_SIDEBAR_WIDTH } from '../../infrastructure/config/storageKeys';
 import { cn } from '../../lib/utils';
 import type { Host, TerminalSession, TerminalTheme, Workspace } from '../../types';
@@ -183,7 +184,7 @@ const WorkspaceFocusSessionRow = memo<WorkspaceFocusSessionRowProps>(({
                     onStartRename(session.id);
                   }}
                 >
-                  {session.customName || session.hostLabel}
+                  {resolveSessionTabTitle(session, host)}
                 </div>
                 <div className="mt-0.5 truncate text-[10px] leading-none" style={{ color: mutedFg }}>
                   {session.username}@{session.hostname}
@@ -287,6 +288,7 @@ const TerminalFocusSidebarInner: React.FC<TerminalFocusSidebarProps> = ({
     return workspaceSessions.filter((session) => (
       session.customName?.toLowerCase().includes(term)
       || session.hostLabel?.toLowerCase().includes(term)
+      || session.dynamicTitle?.toLowerCase().includes(term)
       || session.hostname?.toLowerCase().includes(term)
       || session.username?.toLowerCase().includes(term)
     ));

@@ -1,7 +1,7 @@
 import { FileText } from "lucide-react";
 import React, { useEffect, useState } from "react";
 import { useI18n } from "../../application/i18n/I18nProvider";
-import { MessageResponse } from "../ai-elements/message";
+import { LazyMessageResponse } from "../ai-elements/LazyMessageResponse";
 import { ScrollArea } from "../ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
 import { Textarea } from "../ui/textarea";
@@ -76,7 +76,7 @@ export const HostNotesEditor: React.FC<HostNotesEditorProps> = ({
         <TabsContent value="preview" className="mt-2">
           <ScrollArea className="h-[120px] rounded-md border border-border/60 bg-muted/20 p-3">
             {trimmed ? (
-              <MessageResponse className={PREVIEW_PROSE_CLASS}>{trimmed}</MessageResponse>
+              <LazyMessageResponse className={PREVIEW_PROSE_CLASS}>{trimmed}</LazyMessageResponse>
             ) : (
               <p className="text-sm text-muted-foreground">
                 {t("hostDetails.notes.preview.empty")}

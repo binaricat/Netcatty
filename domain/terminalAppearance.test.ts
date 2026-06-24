@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   applyCustomAccentToTerminalTheme,
   applySessionFontSizeToHost,
+  getFollowAppTerminalThemeSelectionUpdate,
   mergeTerminalHostUpdate,
   resolveFollowedTerminalThemeId,
   TERMINAL_THEME_AUTO,
@@ -253,6 +254,23 @@ test("follow-theme resolver: explicit light override wins over auto-matching", (
       fallbackThemeId: "netcatty-dark",
     }),
     "solarized-light",
+  );
+});
+
+test("follow-app theme selection updates the matching mode and app theme", () => {
+  assert.deepEqual(
+    getFollowAppTerminalThemeSelectionUpdate({ id: "snow", type: "light" }),
+    {
+      appTheme: "light",
+      terminalThemeLightId: "snow",
+    },
+  );
+  assert.deepEqual(
+    getFollowAppTerminalThemeSelectionUpdate({ id: "midnight", type: "dark" }),
+    {
+      appTheme: "dark",
+      terminalThemeDarkId: "midnight",
+    },
   );
 });
 

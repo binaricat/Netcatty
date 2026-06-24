@@ -74,7 +74,7 @@ export const useTerminalBackend = () => {
     return bridge.execCommand(options);
   }, []);
 
-  const writeToSession = useCallback((sessionId: string, data: string, options?: { automated?: boolean }) => {
+  const writeToSession = useCallback((sessionId: string, data: string, options?: Parameters<NonNullable<NetcattyBridge["writeToSession"]>>[2]) => {
     const bridge = netcattyBridge.get();
     bridge?.writeToSession?.(sessionId, data, options);
   }, []);

@@ -1,6 +1,7 @@
 import { useCallback } from "react";
 
 import { sanitizeHost } from "../../domain/host";
+import { readTextFile } from "../../lib/readTextFile";
 import { importVaultHostsFromText, type VaultImportFormat } from "../../domain/vaultImport";
 import type { Host, ManagedSource } from "../../types";
 import type { ImportOptions } from "./ImportVaultDialog";
@@ -27,33 +28,6 @@ export function useVaultImportHandlers({
   setIsImportOpen,
   t,
 }: UseVaultImportHandlersOptions) {
-  const readTextFile = useCallback(async (file: File): Promise<string> => {
-      const buf = await file.arrayBuffer();
-      const bytes = new Uint8Array(buf);
-  
-      let encoding: string = "utf-8";
-      let offset = 0;
-  
-      if (bytes.length >= 2 && bytes[0] === 0xff && bytes[1] === 0xfe) {
-        encoding = "utf-16le";
-        offset = 2;
-      } else if (bytes.length >= 2 && bytes[0] === 0xfe && bytes[1] === 0xff) {
-        encoding = "utf-16be";
-        offset = 2;
-      } else if (
-        bytes.length >= 3 &&
-        bytes[0] === 0xef &&
-        bytes[1] === 0xbb &&
-        bytes[2] === 0xbf
-      ) {
-        encoding = "utf-8";
-        offset = 3;
-      }
-  
-      const decoder = new TextDecoder(encoding);
-      return decoder.decode(bytes.slice(offset));
-    }, []);
-  
   const handleImportFileSelected = useCallback(
       async (format: VaultImportFormat, file: File, options?: ImportOptions) => {
         setIsImportOpen(false);
@@ -249,7 +223,6 @@ export function useVaultImportHandlers({
         onUpdateCustomGroups,
         onUpdateHosts,
         onUpdateManagedSources,
-        readTextFile,
         setIsImportOpen,
         t,
       ],

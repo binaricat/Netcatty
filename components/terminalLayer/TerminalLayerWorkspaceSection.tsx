@@ -20,6 +20,7 @@ function TerminalLayerWorkspaceSectionInner({ ctx }: { ctx: WorkspaceContext }) 
     sessionHostsMap,
     sessionChainHostsMap,
     sessionSudoAutofillPasswordsMap,
+    resolvedSessionHostIds,
     workspaceById,
     workspaceRectsById,
     isTerminalLayerVisible,
@@ -41,6 +42,7 @@ function TerminalLayerWorkspaceSectionInner({ ctx }: { ctx: WorkspaceContext }) 
     terminalSettings,
     hotkeyScheme,
     disableTerminalFontZoom,
+    restoreTerminalCwd,
     keyBindings,
     resizing,
     isComposeBarOpen,
@@ -50,6 +52,9 @@ function TerminalLayerWorkspaceSectionInner({ ctx }: { ctx: WorkspaceContext }) 
     handleTerminalFontSizeChange,
     handleOpenSftp,
     handleTerminalCwdChange,
+    handleTerminalTitleChange,
+    handleTerminalBell,
+    handleTerminalOutput,
     handleOpenScripts,
     handleOpenHistory,
     handleOpenSystem,
@@ -69,6 +74,7 @@ function TerminalLayerWorkspaceSectionInner({ ctx }: { ctx: WorkspaceContext }) 
     handleBroadcastInput,
     handleToggleWorkspaceComposeBar,
     handleSnippetExecutorChange,
+    handleProgrammaticCommandLogRewriteChange,
     handleAddSelectionToAI,
     activeResizers,
     activeWorkspace,
@@ -135,6 +141,7 @@ function TerminalLayerWorkspaceSectionInner({ ctx }: { ctx: WorkspaceContext }) 
           sessionHostsMap={sessionHostsMap}
           sessionChainHostsMap={sessionChainHostsMap}
           sessionSudoAutofillPasswordsMap={sessionSudoAutofillPasswordsMap}
+          resolvedSessionHostIds={resolvedSessionHostIds}
           workspaceById={workspaceById}
           workspaceRectsById={workspaceRectsById}
           isTerminalLayerVisible={isTerminalLayerVisible}
@@ -156,6 +163,7 @@ function TerminalLayerWorkspaceSectionInner({ ctx }: { ctx: WorkspaceContext }) 
           terminalSettings={terminalSettings}
           hotkeyScheme={hotkeyScheme}
           disableTerminalFontZoom={disableTerminalFontZoom}
+          restoreTerminalCwd={restoreTerminalCwd}
           keyBindings={keyBindings}
           isResizing={!!resizing}
           isComposeBarOpen={isComposeBarOpen}
@@ -165,6 +173,9 @@ function TerminalLayerWorkspaceSectionInner({ ctx }: { ctx: WorkspaceContext }) 
           onTerminalFontSizeChange={handleTerminalFontSizeChange}
           onOpenSftp={handleOpenSftp}
           onTerminalCwdChange={handleTerminalCwdChange}
+          onTerminalTitleChange={handleTerminalTitleChange}
+          onTerminalBell={handleTerminalBell}
+          onTerminalOutput={handleTerminalOutput}
           onOpenScripts={handleOpenScripts}
           onOpenHistory={handleOpenHistory}
           onOpenSystem={handleOpenSystem}
@@ -184,6 +195,7 @@ function TerminalLayerWorkspaceSectionInner({ ctx }: { ctx: WorkspaceContext }) 
           onBroadcastInput={handleBroadcastInput}
           onToggleWorkspaceComposeBar={handleToggleWorkspaceComposeBar}
           onSnippetExecutorChange={handleSnippetExecutorChange}
+          onProgrammaticCommandLogRewriteChange={handleProgrammaticCommandLogRewriteChange}
           onAddSelectionToAI={handleAddSelectionToAI}
           onStartSessionRename={onStartSessionRename}
           onRemoveSessionFromWorkspace={onRemoveSessionFromWorkspace}

@@ -323,6 +323,8 @@ export const ruCoreMessages: Messages = {
   'settings.terminal.font.weight.black': 'Максимально жирный',
   'settings.terminal.font.weightBold': 'Толщина жирного шрифта',
   'settings.terminal.font.weightBold.desc': 'Толщина жирного текста (100-900)',
+  'settings.terminal.font.smoothing': 'Сглаживание шрифта',
+  'settings.terminal.font.smoothing.desc': 'Использовать родное сглаживание шрифтов macOS',
   'settings.terminal.font.linePadding': 'Межстрочный отступ',
   'settings.terminal.font.linePadding.desc': 'Дополнительное пространство между строками (0-10)',
   'settings.terminal.font.emulationType': 'Тип эмуляции терминала',
@@ -603,7 +605,7 @@ export const ruCoreMessages: Messages = {
   'sync.autoSync.emptyVaultConflict.restoreDesc': 'Рекомендуется — восстановить ваши хосты, ключи и сниппеты из облачной резервной копии',
   'sync.autoSync.emptyVaultConflict.keepEmpty': 'Оставить пустым',
   'sync.autoSync.emptyVaultConflict.keepEmptyDesc': 'Начать заново с пустым хранилищем',
-  'sync.autoSync.emptyVaultConflict.cloudSummary': '{hosts} хостов, {keys} ключей, {snippets} сниппетов, {proxyProfiles} прокси',
+  'sync.autoSync.emptyVaultConflict.cloudSummary': '{hosts} хостов, {keys} ключей, {snippets} сниппетов, {notes} заметок, {proxyProfiles} прокси',
   'sync.autoSync.emptyVaultManual': 'Синхронизация невозможна: локальное хранилище пусто. Сначала восстановите его из локальной резервной копии или включите принудительную отправку в панели синхронизации.',
 
   'sync.blocked.title': 'Синхронизация приостановлена',
@@ -640,6 +642,7 @@ export const ruCoreMessages: Messages = {
   'vault.nav.proxies': 'Прокси',
   'vault.nav.portForwarding': 'Проброс портов',
   'vault.nav.snippets': 'Сниппеты',
+  'vault.nav.notes': 'Заметки',
   'vault.nav.knownHosts': 'Известные хосты',
   'vault.nav.logs': 'Журналы',
 
@@ -703,5 +706,6 @@ export const ruCoreMessages: Messages = {
 
   'vault.hosts.header.entries': 'Записей: {count}',
   'vault.hosts.header.live': 'Активных: {count}',
+  'deepLink.ssh.invalid': 'Недопустимая ссылка ssh://',
 
 };

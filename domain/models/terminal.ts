@@ -1,4 +1,6 @@
 import type { SerialConfig } from './connection';
+import type { CodingCliProviderId } from '../codingCliProviders';
+import { normalizeHibernateHiddenTabsDelaySec } from '../terminalHibernate';
 
 // Terminal appearance settings
 export type CursorShape = 'block' | 'bar' | 'underline';
@@ -31,6 +33,7 @@ export interface TerminalSettings {
 
   // Font
   fontLigatures: boolean; // Enable font ligatures
+  fontSmoothing: boolean; // Use native macOS/WebKit font anti-aliasing
   fontWeight: number; // Normal font weight (100-900)
   fontWeightBold: number; // Bold font weight (100-900)
   linePadding: number; // Additional space between lines
@@ -115,6 +118,10 @@ export interface TerminalSettings {
 
   // Rendering
   rendererType: 'auto' | 'webgl' | 'dom'; // Terminal renderer: auto (detect based on hardware), webgl, or dom
+  /** Dispose xterm for hidden tabs after a delay to save renderer memory; SSH stays connected. */
+  hibernateHiddenTabs: boolean;
+  /** Seconds after a tab leaves view before hibernating (see hibernateHiddenTabs). */
+  hibernateHiddenTabsDelaySec: number;
   showLineTimestamps: boolean; // Show output timestamps in a side gutter
 
   // Autocomplete
@@ -259,6 +266,9 @@ export const normalizeTerminalSettings = (
   return {
     ...mergedSettings,
     rendererType,
+    hibernateHiddenTabsDelaySec: normalizeHibernateHiddenTabsDelaySec(
+      mergedSettings.hibernateHiddenTabsDelaySec,
+    ),
     autocompleteGhostText: mergedSettings.autocompletePopupMenu
       ? false
       : mergedSettings.autocompleteGhostText,
@@ -274,6 +284,7 @@ const DEFAULT_TERMINAL_SETTINGS: TerminalSettings = {
   terminalEmulationType: 'xterm-256color',
   startupCommandDelayMs: 600,
   fontLigatures: true,
+  fontSmoothing: true,
   fontWeight: 400,
   fontWeightBold: 700,
   linePadding: 0,
@@ -320,6 +331,8 @@ const DEFAULT_TERMINAL_SETTINGS: TerminalSettings = {
   forcePromptNewLine: false, // Opt-in: keep the next shell prompt visually separated from unterminated final output lines
   osc52Clipboard: 'write-only', // OSC-52: allow remote programs to write clipboard by default
   rendererType: 'auto', // Auto-detect best renderer based on hardware
+  hibernateHiddenTabs: true,
+  hibernateHiddenTabsDelaySec: 5,
   showLineTimestamps: false, // Opt-in: shows output timestamps beside terminal lines
   autocompleteEnabled: true, // Autocomplete enabled by default
   autocompleteGhostText: false, // Mutually exclusive with popup menu
@@ -393,4 +406,12 @@ export interface TerminalSession {
   fontSizeOverride?: boolean;
   /** User-assigned display name for this terminal session (overrides hostLabel in UI) */
   customName?: string;
+  /** Runtime shell-reported window title (OSC 0/2), shown on tabs when enabled */
+  dynamicTitle?: string;
+  /** Sticky coding CLI provider detected from launch command or window title */
+  codingCliProviderId?: CodingCliProviderId;
+  /** Runtime marker for sessions reconstructed from startup restore. */
+  restoreState?: 'restored-disconnected';
+  /** Latest known working directory captured from terminal cwd tracking. */
+  lastCwd?: string;
 }

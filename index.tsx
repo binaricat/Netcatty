@@ -128,6 +128,9 @@ const getRoute = () => {
   if (hash === '#/terminal-popup' || hash.startsWith('#/terminal-popup')) {
     return 'terminal-popup';
   }
+  if (hash === '#/session-window' || hash.startsWith('#/session-window')) {
+    return 'main';
+  }
   return 'main';
 };
 

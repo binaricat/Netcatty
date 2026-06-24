@@ -55,6 +55,7 @@ function toCodexLoginSessionResponse(session) {
     output: session.output,
     error: session.error,
     exitCode: session.exitCode,
+    codexPath: session.codexPath || null,
   };
 }
 

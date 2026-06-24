@@ -166,6 +166,7 @@ function createExecCommandApi(ctx) {
             hostname: payload.hostname,
             password: payload.password,
             logPrefix: "[SSH Exec]",
+            scope: "external",
           }));
         } else if (authAgent) {
           const order = ["agent"];

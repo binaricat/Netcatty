@@ -21,12 +21,12 @@ const createSender = () => {
 
 // Settles any modal requests that the handler queued via storeRequest so the
 // 5-minute TTL timer doesn't keep the test process alive.
-const drainPendingRequests = (sent) => {
+const drainPendingRequests = (sent, senderId = 42) => {
   for (const event of sent) {
     if (event.channel !== "netcatty:keyboard-interactive") continue;
     const requestId = event.payload?.requestId;
     if (requestId) {
-      keyboardInteractiveHandler.handleResponse(null, { requestId, cancelled: true });
+      keyboardInteractiveHandler.handleResponse({ sender: { id: senderId } }, { requestId, cancelled: true });
     }
   }
 };
@@ -195,6 +195,25 @@ test("createKeyboardInteractiveHandler shows the modal when the challenge is rea
   assert.deepEqual(promptEvents, ["prompt-shown"]);
   assert.equal(sent.length, 1);
   assert.equal(sent[0].payload.prompts.length, 2);
+
+  drainPendingRequests(sent);
+});
+
+test("createKeyboardInteractiveHandler includes the request scope in modal payloads", () => {
+  const { sender, sent } = createSender();
+
+  const handler = createKeyboardInteractiveHandler({
+    sender,
+    sessionId: "session-1",
+    hostname: "vps-1.example.com",
+    password: "hunter2",
+    scope: "terminal",
+  });
+
+  handler("Two-factor", "", "", [passwordPrompt, verificationCodePrompt], () => {});
+
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].payload.scope, "terminal");
 
   drainPendingRequests(sent);
 });

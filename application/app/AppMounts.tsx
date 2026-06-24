@@ -1,22 +1,56 @@
-import React, { Suspense, lazy, useEffect, useMemo, useState } from 'react';
+import React, { Suspense, lazy, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useActiveTabId, useIsSftpActive, useIsVaultActive } from '../state/activeTabStore';
 import { useTerminalHostTreeLayoutWidth } from '../state/terminalHostTreeStore';
 import { isTerminalContentTabSurface } from './workTabSurface';
 import { cn } from '../../lib/utils';
 import { ConnectionLog, TerminalTheme } from '../../types';
+import { LazyLoadBoundary } from '../../components/ui/lazy-load-boundary';
 import type { LogView as LogViewType } from '../state/logViewState';
 import type { SftpView as SftpViewComponent } from '../../components/SftpView';
 import type { TerminalLayer as TerminalLayerComponent } from '../../components/TerminalLayer';
 
 // Visibility container for VaultView - isolates isActive subscription
-export const VaultViewContainer: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+export const VaultViewContainer: React.FC<{
+  children: React.ReactNode;
+  appThemeStyle?: React.CSSProperties;
+}> = ({ children, appThemeStyle }) => {
   const isActive = useIsVaultActive();
+  const wasActiveRef = useRef(isActive);
+  const [suppressActiveTransition, setSuppressActiveTransition] = useState(false);
+  const isActivating = isActive && !wasActiveRef.current;
+  const shouldSuppressTransition = isActivating || suppressActiveTransition;
   const containerStyle: React.CSSProperties = isActive
     ? {}
     : { visibility: 'hidden', pointerEvents: 'none', position: 'absolute', zIndex: -1 };
 
+  useLayoutEffect(() => {
+    const wasActive = wasActiveRef.current;
+    wasActiveRef.current = isActive;
+    if (!isActive || wasActive) return;
+
+    setSuppressActiveTransition(true);
+    const view = window;
+    let firstFrame = 0;
+    let secondFrame = 0;
+    firstFrame = view.requestAnimationFrame(() => {
+      secondFrame = view.requestAnimationFrame(() => {
+        setSuppressActiveTransition(false);
+      });
+    });
+
+    return () => {
+      view.cancelAnimationFrame(firstFrame);
+      view.cancelAnimationFrame(secondFrame);
+    };
+  }, [isActive]);
+
   return (
-    <div className={cn("absolute inset-0", isActive ? "z-20" : "")} style={containerStyle}>
+    <div
+      className={cn("absolute inset-0", isActive ? "z-20" : "")}
+      data-inactive-app-surface={isActive ? undefined : "true"}
+      data-app-surface-transition-suppressed={shouldSuppressTransition ? "true" : undefined}
+      style={{ ...appThemeStyle, ...containerStyle }}
+    >
       {children}
     </div>
   );
@@ -51,17 +85,23 @@ export const LogViewWrapper: React.FC<LogViewWrapperProps> = ({ logView, default
   const containerStyle = getLogViewWrapperStyle(isVisible, hostTreeLayoutWidth);
 
   return (
-    <div className={cn("absolute inset-0", isVisible ? "z-20" : "")} style={containerStyle}>
-      <Suspense fallback={null}>
-        <LazyLogView
-          log={logView.log}
-          defaultTerminalTheme={defaultTerminalTheme}
-          defaultFontSize={defaultFontSize}
-          isVisible={isVisible}
-          onClose={onClose}
-          onUpdateLog={onUpdateLog}
-        />
-      </Suspense>
+    <div
+      className={cn("absolute inset-0", isVisible ? "z-20" : "")}
+      data-inactive-app-surface={isVisible ? undefined : "true"}
+      style={containerStyle}
+    >
+      <LazyLoadBoundary name="Log view" resetKey={logView.id}>
+        <Suspense fallback={<LogViewFallback />}>
+          <LazyLogView
+            log={logView.log}
+            defaultTerminalTheme={defaultTerminalTheme}
+            defaultFontSize={defaultFontSize}
+            isVisible={isVisible}
+            onClose={onClose}
+            onUpdateLog={onUpdateLog}
+          />
+        </Suspense>
+      </LazyLoadBoundary>
     </div>
   );
 };
@@ -78,6 +118,24 @@ const LazyTerminalLayer = lazy(() =>
 
 type SftpViewProps = React.ComponentProps<typeof SftpViewComponent>;
 type TerminalLayerProps = React.ComponentProps<typeof TerminalLayerComponent>;
+
+const LogViewFallback = () => (
+  <div className="netcatty-lazy-fade-in h-full min-h-0 bg-background" aria-hidden="true" />
+);
+
+const SftpViewFallback = ({ visible }: { visible: boolean }) => {
+  if (!visible) return null;
+  return (
+    <div className="netcatty-lazy-fade-in absolute inset-0 z-20 bg-background" aria-hidden="true" />
+  );
+};
+
+const TerminalLayerFallback = ({ visible }: { visible: boolean }) => {
+  if (!visible) return null;
+  return (
+    <div className="netcatty-lazy-fade-in absolute inset-0 z-20 bg-background" aria-hidden="true" />
+  );
+};
 
 export function shouldRenderTerminalLayerMount(
   isVisible: boolean,
@@ -97,9 +155,11 @@ export const SftpViewMount: React.FC<SftpViewProps> = (props) => {
   if (!shouldMount) return null;
 
   return (
-    <Suspense fallback={null}>
-      <LazySftpView {...props} />
-    </Suspense>
+    <LazyLoadBoundary name="SFTP" resetKey={isActive ? "active" : "idle"}>
+      <Suspense fallback={<SftpViewFallback visible={isActive} />}>
+        <LazySftpView {...props} />
+      </Suspense>
+    </LazyLoadBoundary>
   );
 };
 
@@ -138,8 +198,10 @@ export const TerminalLayerMount: React.FC<TerminalLayerProps> = (props) => {
   if (!shouldRender) return null;
 
   return (
-    <Suspense fallback={null}>
-      <LazyTerminalLayer {...props} />
-    </Suspense>
+    <LazyLoadBoundary name="Terminal" resetKey={activeTabId}>
+      <Suspense fallback={<TerminalLayerFallback visible={isVisible} />}>
+        <LazyTerminalLayer {...props} />
+      </Suspense>
+    </LazyLoadBoundary>
   );
 };

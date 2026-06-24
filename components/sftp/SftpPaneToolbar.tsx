@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Bookmark, Check, Eye, EyeOff, FilePlus, Folder, FolderPlus, FolderSync, Globe, Home, Languages, List, ListTree, MoreHorizontal, RefreshCw, Search, TerminalSquare, Trash2, X } from "lucide-react";
+import { Bookmark, Check, ClipboardCopy, Eye, EyeOff, FilePlus, Folder, FolderPlus, FolderSync, Globe, Home, Languages, List, ListTree, MoreHorizontal, RefreshCw, Search, TerminalSquare, Trash2, X } from "lucide-react";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Popover, PopoverClose, PopoverContent, PopoverTrigger } from "../ui/popover";
@@ -10,6 +10,7 @@ import { SftpBreadcrumb } from "./SftpBreadcrumb";
 import type { SftpFilenameEncoding } from "../../types";
 import type { SftpPane } from "../../application/state/sftp/types";
 import type { SftpBookmark } from "../../domain/models";
+import { toast } from "../ui/toast";
 
 type SftpPaneViewMode = "list" | "tree";
 
@@ -42,6 +43,46 @@ export const getSftpBookmarkButtonLabelKey = ({
   shouldToggleSftpBookmarkFromButton({ bookmarkCount, isCurrentPathBookmarked })
     ? "sftp.bookmark.add"
     : "sftp.bookmark.list";
+
+export const copySftpCurrentPathToClipboard = async ({
+  currentPath,
+  writeText,
+  onSuccess,
+  onError,
+  t,
+}: {
+  currentPath: string;
+  writeText: (text: string) => Promise<void>;
+  onSuccess: (message: string) => void;
+  onError: (message: string) => void;
+  t: (key: string) => string;
+}) => {
+  if (!currentPath) return;
+
+  try {
+    await writeText(currentPath);
+    onSuccess(t("sftp.copyCurrentPath.success"));
+  } catch {
+    onError(t("sftp.copyCurrentPath.error"));
+  }
+};
+
+export const getNextSftpToolbarDisplayPath = ({
+  previousDisplayPath,
+  previousConnectionId,
+  connectionId,
+  currentPath,
+  loading,
+}: {
+  previousDisplayPath: string;
+  previousConnectionId: string | undefined;
+  connectionId: string | undefined;
+  currentPath: string | undefined;
+  loading: boolean;
+}): string => {
+  const connectionChanged = connectionId !== previousConnectionId;
+  return connectionChanged || !loading ? currentPath ?? "" : previousDisplayPath;
+};
 
 interface SftpPaneToolbarProps {
   t: (key: string, params?: Record<string, unknown>) => string;
@@ -208,12 +249,17 @@ export const SftpPaneToolbar: React.FC<SftpPaneToolbarProps> = React.memo(({
   const prevDisplayConnectionIdRef = useRef(pane.connection?.id);
 
   useEffect(() => {
-    const connectionChanged = pane.connection?.id !== prevDisplayConnectionIdRef.current;
+    const previousConnectionId = prevDisplayConnectionIdRef.current;
     prevDisplayConnectionIdRef.current = pane.connection?.id;
-    // Sync immediately on connection change; otherwise defer until loading completes
-    if (connectionChanged || !pane.loading) {
-      setDisplayPath(pane.connection?.currentPath ?? "");
-    }
+    setDisplayPath((previousDisplayPath) =>
+      getNextSftpToolbarDisplayPath({
+        previousDisplayPath,
+        previousConnectionId,
+        connectionId: pane.connection?.id,
+        currentPath: pane.connection?.currentPath,
+        loading: pane.loading,
+      })
+    );
   }, [pane.connection?.currentPath, pane.connection?.id, pane.loading]);
 
   // Observe the overall toolbar width to decide whether to collapse action buttons
@@ -247,6 +293,16 @@ export const SftpPaneToolbar: React.FC<SftpPaneToolbarProps> = React.memo(({
       setTimeout(() => filterInputRef.current?.focus(), 0);
     }
   }, [showFilterBar, setShowFilterBar, filterInputRef]);
+
+  const handleCopyCurrentPath = useCallback(async () => {
+    await copySftpCurrentPathToClipboard({
+      currentPath: displayPath,
+      writeText: (text) => navigator.clipboard.writeText(text),
+      onSuccess: (message) => toast.success(message, "SFTP"),
+      onError: (message) => toast.error(message, "SFTP"),
+      t,
+    });
+  }, [displayPath, t]);
 
   const isRemote = !pane.connection?.isLocal;
   const viewModeToggleTarget = getSftpViewModeToggleTarget(viewMode);
@@ -297,6 +353,21 @@ export const SftpPaneToolbar: React.FC<SftpPaneToolbarProps> = React.memo(({
           </TooltipContent>
         </Tooltip>
       )}
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-6 w-6"
+            aria-label={t("sftp.copyCurrentPath")}
+            disabled={!displayPath}
+            onClick={handleCopyCurrentPath}
+          >
+            <ClipboardCopy size={14} />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>{t("sftp.copyCurrentPath")}</TooltipContent>
+      </Tooltip>
       <Tooltip>
         <TooltipTrigger asChild>
           <Button

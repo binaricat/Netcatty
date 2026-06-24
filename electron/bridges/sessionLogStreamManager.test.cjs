@@ -5,6 +5,7 @@ const path = require("node:path");
 const {
   appendData,
   hasStream,
+  registerProgrammaticCommandLogRewrite,
   registerSudoAutofillInput,
   startStream,
   stopStream,
@@ -167,6 +168,77 @@ test("raw stream hides sudo autofill prompt markers and rewritten command echoes
     assert.ok(!content.includes("sudo -p"));
   } finally {
     await stopStream(sessionId);
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("raw stream rewrites protected snippet command echoes", async () => {
+  const directory = path.join(TEMP_ROOT, `stream-protected-snippet-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+  const sessionId = `session-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const sentCommand = "sh -c 'private setup' && eval 'wrapped command'";
+  const displayCommand = "sudo apt update && sudo apt upgrade -y";
+
+  try {
+    startStream(sessionId, {
+      hostLabel: "host",
+      hostname: "host.example",
+      directory,
+      format: "raw",
+      startTime: Date.UTC(2026, 0, 2, 3, 4, 5),
+    });
+    registerProgrammaticCommandLogRewrite(sessionId, { sentCommand, displayCommand });
+    appendData(sessionId, sentCommand.slice(0, 12));
+    appendData(sessionId, `${sentCommand.slice(12)}\r\nok\r\n`);
+
+    const finalPath = await stopStream(sessionId);
+    const content = fs.readFileSync(finalPath, "utf8");
+
+    assert.equal(content, `${displayCommand}\r\nok\r\n`);
+    assert.ok(!content.includes("private setup"));
+    assert.ok(!content.includes("wrapped command"));
+  } finally {
+    await stopStream(sessionId);
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("raw stream keeps programmatic command rewrites isolated per session", async () => {
+  const directory = path.join(TEMP_ROOT, `stream-protected-snippet-isolated-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+  const rewrittenSessionId = `session-a-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const plainSessionId = `session-b-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const sentCommand = "sh -c 'private setup' && eval 'wrapped command'";
+  const displayCommand = "sudo apt update && sudo apt upgrade -y";
+
+  try {
+    startStream(rewrittenSessionId, {
+      hostLabel: "host-a",
+      hostname: "host-a.example",
+      directory,
+      format: "raw",
+      startTime: Date.UTC(2026, 0, 2, 3, 4, 5),
+    });
+    startStream(plainSessionId, {
+      hostLabel: "host-b",
+      hostname: "host-b.example",
+      directory,
+      format: "raw",
+      startTime: Date.UTC(2026, 0, 2, 3, 4, 6),
+    });
+    registerProgrammaticCommandLogRewrite(rewrittenSessionId, { sentCommand, displayCommand });
+
+    appendData(rewrittenSessionId, `${sentCommand}\r\nok-a\r\n`);
+    appendData(plainSessionId, `${sentCommand}\r\nok-b\r\n`);
+
+    const rewrittenPath = await stopStream(rewrittenSessionId);
+    const plainPath = await stopStream(plainSessionId);
+    const rewrittenContent = fs.readFileSync(rewrittenPath, "utf8");
+    const plainContent = fs.readFileSync(plainPath, "utf8");
+
+    assert.equal(rewrittenContent, `${displayCommand}\r\nok-a\r\n`);
+    assert.equal(plainContent, `${sentCommand}\r\nok-b\r\n`);
+  } finally {
+    await stopStream(rewrittenSessionId);
+    await stopStream(plainSessionId);
     fs.rmSync(directory, { recursive: true, force: true });
   }
 });

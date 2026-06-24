@@ -296,3 +296,21 @@ test("HostDetailsPanel does not offer to disable telnet when telnet is the prima
   assert.ok(telnetHeader);
   assert.doesNotMatch(telnetHeader[0], /hover:text-destructive/);
 });
+
+test("HostDetailsPanel shows color and icon controls in the connection settings", () => {
+  const markup = renderHostDetails({
+    ...hostWithMissingProxyProfile,
+    proxyProfileId: undefined,
+    distroMode: "manual",
+    manualDistro: "linux",
+    iconColorMode: "manual",
+    iconColor: "blue",
+  });
+
+  assert.match(markup, /Color &amp; Icon/);
+  assert.match(markup, /Manual icon/);
+  assert.match(markup, /Generic Linux/);
+  assert.match(markup, /Icon color/);
+  assert.match(markup, /Blue/);
+  assert.match(markup, /IP or Hostname/);
+});

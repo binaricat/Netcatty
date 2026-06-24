@@ -54,7 +54,7 @@ try {
   electronModule = require("electron");
 }
 
-const { app, BrowserWindow, Menu, protocol, shell, clipboard, session } = electronModule || {};
+const { app, BrowserWindow, Menu, protocol, shell, clipboard, session, ipcMain } = electronModule || {};
 if (!app || !BrowserWindow) {
   throw new Error("Failed to load Electron runtime. Ensure the app is launched with the Electron binary.");
 }
@@ -63,6 +63,17 @@ const path = require("node:path");
 const os = require("node:os");
 const fs = require("node:fs");
 const { getCliDiscoveryFilePath } = require("./cli/discoveryPath.cjs");
+const {
+  SSH_DEEP_LINK_CHANNEL,
+  applyInitialSshDeepLinkPreference,
+  applySshProtocolClientPreference,
+  collectSshDeepLinkUrls,
+  isSshDeepLinkUrl,
+  readSshDeepLinkEnabledPreference,
+  shouldDeliverSshDeepLink,
+  updateSshDeepLinkEnabledPreference,
+  writeSshDeepLinkEnabledPreference,
+} = require("./deepLink.cjs");
 
 try {
   protocol?.registerSchemesAsPrivileged?.([
@@ -219,9 +230,41 @@ const DIST_MIME_TYPES = {
   ".wasm": "application/wasm",
 };
 
+const APP_PROTOCOL_LONG_CACHE_EXTENSIONS = new Set([
+  ".js",
+  ".mjs",
+  ".css",
+  ".json",
+  ".png",
+  ".jpg",
+  ".jpeg",
+  ".gif",
+  ".svg",
+  ".ico",
+  ".woff",
+  ".woff2",
+  ".ttf",
+  ".eot",
+  ".wav",
+  ".mp3",
+  ".mp4",
+  ".webm",
+  ".wasm",
+]);
+
 function resolveContentType(filePath) {
   const ext = path.extname(filePath).toLowerCase();
   return DIST_MIME_TYPES[ext] || "application/octet-stream";
+}
+
+function resolveAppProtocolCacheControl(filePath, distPath) {
+  const relativePath = path.relative(distPath, filePath).replace(/\\/g, "/");
+  if (relativePath === "index.html") return "no-store";
+  const ext = path.extname(filePath).toLowerCase();
+  if (relativePath.startsWith("assets/") && APP_PROTOCOL_LONG_CACHE_EXTENSIONS.has(ext)) {
+    return "public, max-age=31536000, immutable";
+  }
+  return "no-cache";
 }
 
 function isPathInside(parentPath, childPath) {
@@ -278,6 +321,7 @@ function registerAppProtocol() {
           status: 200,
           headers: {
             ...APP_PROTOCOL_HEADERS,
+            "Cache-Control": resolveAppProtocolCacheControl(fullPath, distPath),
             "Content-Type": resolveContentType(fullPath),
           },
         });
@@ -490,6 +534,90 @@ async function createAndShowMainWindow() {
   return mainWindowStartupPromise;
 }
 
+let sshDeepLinkEnabled = readSshDeepLinkEnabledPreference({ app });
+const pendingSshDeepLinkUrls = sshDeepLinkEnabled ? collectSshDeepLinkUrls(process.argv) : [];
+let flushingSshDeepLinks = false;
+let sshDeepLinkDeliveryGeneration = 0;
+
+function queueSshDeepLink(rawUrl) {
+  if (!sshDeepLinkEnabled) return;
+  if (!isSshDeepLinkUrl(rawUrl)) return;
+  pendingSshDeepLinkUrls.push(rawUrl);
+  if (app.isReady?.()) {
+    void flushPendingSshDeepLinks();
+  }
+}
+
+ipcMain?.handle?.("netcatty:deepLink:ssh:setEnabled", async (_event, payload) => {
+  const enabled = payload?.enabled !== false;
+  const result = updateSshDeepLinkEnabledPreference({
+    currentEnabled: sshDeepLinkEnabled,
+    enabled,
+    applyPreference: (nextEnabled) => applySshProtocolClientPreference({ app, enabled: nextEnabled, isDev }),
+    writePreference: (nextEnabled) => writeSshDeepLinkEnabledPreference({ app, enabled: nextEnabled }),
+    clearPending: () => {
+      pendingSshDeepLinkUrls.length = 0;
+      sshDeepLinkDeliveryGeneration += 1;
+    },
+  });
+  sshDeepLinkEnabled = result.enabled;
+  return result;
+});
+
+ipcMain?.handle?.("netcatty:deepLink:ssh:getEnabled", async () => sshDeepLinkEnabled);
+
+async function deliverSshDeepLink(rawUrl, expectedGeneration = sshDeepLinkDeliveryGeneration) {
+  if (!shouldDeliverSshDeepLink({
+    enabled: sshDeepLinkEnabled,
+    deliveryGeneration: sshDeepLinkDeliveryGeneration,
+    expectedGeneration,
+  })) return;
+  const win = await createAndShowMainWindow();
+  if (!shouldDeliverSshDeepLink({
+    enabled: sshDeepLinkEnabled,
+    deliveryGeneration: sshDeepLinkDeliveryGeneration,
+    expectedGeneration,
+  })) return;
+  focusMainWindow();
+  const windowManager = getWindowManager();
+  const result = await windowManager.sendWhenRendererReady?.(
+    win,
+    SSH_DEEP_LINK_CHANNEL,
+    { url: rawUrl },
+    {
+      timeoutMs: isDev ? 30000 : 15000,
+      shouldSend: () => shouldDeliverSshDeepLink({
+        enabled: sshDeepLinkEnabled,
+        deliveryGeneration: sshDeepLinkDeliveryGeneration,
+        expectedGeneration,
+      }),
+      cancelReason: "ssh-deep-link-disabled",
+    },
+  );
+  if (result && result.success === false && result.reason !== "ssh-deep-link-disabled") {
+    console.warn("[Main] Failed to deliver ssh:// deep link:", result.error || result.reason);
+  }
+}
+
+async function flushPendingSshDeepLinks() {
+  if (flushingSshDeepLinks) return;
+  flushingSshDeepLinks = true;
+  try {
+    while (sshDeepLinkEnabled && pendingSshDeepLinkUrls.length > 0) {
+      const rawUrl = pendingSshDeepLinkUrls.shift();
+      if (!rawUrl) continue;
+      await deliverSshDeepLink(rawUrl, sshDeepLinkDeliveryGeneration);
+    }
+  } catch (err) {
+    console.warn("[Main] Failed to process ssh:// deep link:", err);
+  } finally {
+    flushingSshDeepLinks = false;
+    if (sshDeepLinkEnabled && pendingSshDeepLinkUrls.length > 0) {
+      void flushPendingSshDeepLinks();
+    }
+  }
+}
+
 function hasUsableWindow() {
   try {
     const windowManager = getWindowManager();
@@ -522,7 +650,19 @@ const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
   app.quit();
 } else {
-  app.on("second-instance", () => {
+  app.on("open-url", (event, rawUrl) => {
+    event.preventDefault();
+    queueSshDeepLink(rawUrl);
+  });
+
+  app.on("second-instance", (_event, argv) => {
+    const deepLinkUrls = collectSshDeepLinkUrls(argv);
+    if (deepLinkUrls.length > 0) {
+      if (sshDeepLinkEnabled) {
+        deepLinkUrls.forEach(queueSshDeepLink);
+      }
+      return;
+    }
     if (!focusMainWindow()) {
       // Window is missing or crashed — try to recreate it
       void createAndShowMainWindow().catch((err) => {
@@ -538,6 +678,15 @@ if (!gotLock) {
   // Application lifecycle
   app.whenReady().then(() => {
     registerAppProtocol();
+    const initialSshDeepLinkPreference = applyInitialSshDeepLinkPreference({
+      enabled: sshDeepLinkEnabled,
+      applyPreference: (enabled) => applySshProtocolClientPreference({ app, enabled, isDev }),
+      clearPending: () => {
+        pendingSshDeepLinkUrls.length = 0;
+        sshDeepLinkDeliveryGeneration += 1;
+      },
+    });
+    sshDeepLinkEnabled = initialSshDeepLinkPreference.enabled;
 
     // Grant only the Chromium permissions the app actually uses, and only
     // to the app's own origin. The default session is shared with in-app
@@ -641,6 +790,8 @@ if (!gotLock) {
 
     // Create the main window
     void createAndShowMainWindow().then(() => {
+      void flushPendingSshDeepLinks();
+
       // Trigger auto-update check 5 s after window creation.
       // startAutoCheck() is a no-op on unsupported platforms (Linux deb/rpm/snap).
       getAutoUpdateBridge().startAutoCheck(5000);
@@ -773,31 +924,32 @@ if (!gotLock) {
     }
 
     const { ipcMain: _ipcMain } = electronModule;
-    // Target all visible/recoverable main windows explicitly. Falling back to
+    // Target app-content windows explicitly. Falling back to
     // BrowserWindow.getAllWindows() could pick tray/settings windows whose
     // renderers don't listen for app:query-dirty-editors and would force the
     // timeout fallback on every quit.
-    const mainWindows = typeof getWindowManager().getMainWindows === "function"
-      ? getWindowManager().getMainWindows()
-      : [getWindowManager().getMainWindow()].filter(Boolean);
-
-    // No reachable main window (tray-panel "Quit" path) — there's no visible
-    // UI to surface a "save first" toast on, so skip the round-trip and quit
-    // directly. A minimized window is still reachable via taskbar/Dock.
-    const reachableMainWindows = mainWindows.filter((candidate) => (
-      candidate && !candidate.isDestroyed?.() &&
-      (candidate.isVisible?.() || candidate.isMinimized?.())
-    ));
-    if (reachableMainWindows.length === 0) {
-      commitQuit(event);
-      return;
-    }
+    const appContentWindows = typeof getWindowManager().getAppContentWindows === "function"
+      ? getWindowManager().getAppContentWindows()
+      : null;
+    const mainWindows = Array.isArray(appContentWindows)
+      ? appContentWindows
+      : typeof getWindowManager().getMainWindows === "function"
+        ? getWindowManager().getMainWindows()
+        : [getWindowManager().getMainWindow()].filter(Boolean);
 
     // The renderer needs to be alive for the IPC roundtrip to make sense.
     // Crashed/dead renderers are skipped; there is no usable UI to warn from.
-    const queryableWebContents = reachableMainWindows
+    // Hidden-to-tray windows are still queried because their renderer can own
+    // dirty SFTP editor tabs.
+    const queryableWindows = mainWindows.filter((candidate) => (
+      candidate && !candidate.isDestroyed?.() &&
+      candidate.webContents &&
+      !candidate.webContents.isDestroyed?.() &&
+      !candidate.webContents.isCrashed?.()
+    ));
+    const queryableWebContents = queryableWindows
       .map((candidate) => candidate.webContents)
-      .filter((wc) => wc && !wc.isDestroyed?.() && !wc.isCrashed?.());
+      .filter(Boolean);
     if (queryableWebContents.length === 0) {
       commitQuit(event);
       return;
@@ -812,14 +964,24 @@ if (!gotLock) {
     // one place. It fails open (resolves false) on timeout / dead renderer, so
     // a hung renderer can never strand the quit.
     Promise.all(
-      queryableWebContents.map((wc) => queryDirtyEditors(wc, QUIT_GUARD_TIMEOUT_MS, { ipcMain: _ipcMain })),
+      queryableWindows.map((win) => queryDirtyEditors(win.webContents, QUIT_GUARD_TIMEOUT_MS, { ipcMain: _ipcMain })
+        .then((hasDirty) => ({ win, hasDirty }))),
     )
       .then((dirtyResults) => {
         quitGuardChannelBusy = false;
-        const hasDirty = dirtyResults.some(Boolean);
+        const dirtyWindows = dirtyResults.filter((result) => result.hasDirty).map((result) => result.win);
+        const hasDirty = dirtyWindows.length > 0;
         if (!hasDirty) {
           commitQuit(event);
           return;
+        }
+        for (const win of dirtyWindows) {
+          try {
+            if (typeof win.show === "function" && !win.isVisible?.()) win.show();
+            if (typeof win.focus === "function") win.focus();
+          } catch {
+            // ignore
+          }
         }
         // hasDirty: the renderer showed a toast for dirty editors and the user
         // is saving instead of quitting.

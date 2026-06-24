@@ -833,6 +833,7 @@ function isAutoFillablePasswordChallenge(prompts, password) {
  *   one-click fill button payload and as the auto-fill for the single-
  *   password-prompt fast path (#969).
  * @param {string} [options.logPrefix] - Log prefix for debugging
+ * @param {"terminal"|"external"} [options.scope] - Renderer-side routing scope
  * @param {Function} [options.onAutoFill] - Called when the saved password is
  *   auto-filled into the challenge (no modal shown). Lets callers emit a
  *   different progress message than the user-prompt flow.
@@ -849,6 +850,7 @@ function createKeyboardInteractiveHandler(options) {
     hostname,
     password,
     logPrefix = "[SSH]",
+    scope = "external",
     onAutoFill,
     onPromptShown,
     onUserResponded,
@@ -905,6 +907,7 @@ function createKeyboardInteractiveHandler(options) {
       prompts: promptsData,
       hostname: hostname,
       savedPassword: password || null,
+      scope,
     });
   };
 }

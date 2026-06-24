@@ -53,6 +53,7 @@ coverage
 
 # AI / Superpowers generated docs (local only)
 /docs/superpowers/
+/.superpowers/
 
 # Dev-only electron-updater test config (not for production)
 /dev-app-update.yml

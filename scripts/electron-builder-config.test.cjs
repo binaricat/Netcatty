@@ -26,6 +26,8 @@ test("build.files excludes per-platform agent binaries", () => {
     "!node_modules/@openai/codex-{darwin,linux,linuxmusl,win32}-*/**/*",
     "!node_modules/@github/copilot-{darwin,linux,linuxmusl,win32}-*/**/*",
     "!node_modules/@github/copilot/**/*",
+    "!node_modules/opencode-{darwin,linux,linuxmusl,windows}-*/**/*",
+    "!node_modules/opencode-ai/**/*",
   ];
   for (const glob of expectExclusions) {
     assert.ok(
@@ -65,6 +67,15 @@ test("asarUnpack keeps Cursor SDK runtime deps unpacked", () => {
 
 test("beforePack installs missing Cursor SDK platform runtime packages", () => {
   assert.equal(config.beforePack, "./scripts/beforePackCursorSdk.cjs");
+});
+
+test("packaged app declares ssh URL protocol support", () => {
+  assert.deepEqual(config.protocols, [
+    {
+      name: "SSH URL",
+      schemes: ["ssh"],
+    },
+  ]);
 });
 
 test("build.files trims release-only dependency payloads", () => {

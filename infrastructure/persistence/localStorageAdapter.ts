@@ -50,6 +50,9 @@ function emitLocalStorageAdapterChanged(key: string): void {
  */
 function safeSetItem(key: string, value: string): boolean {
   try {
+    if (localStorage.getItem(key) === value) {
+      return true;
+    }
     localStorage.setItem(key, value);
     emitLocalStorageAdapterChanged(key);
     return true;
@@ -101,6 +104,7 @@ export const localStorageAdapter = {
     return safeSetItem(key, String(value));
   },
   remove(key: string) {
+    if (localStorage.getItem(key) === null) return;
     localStorage.removeItem(key);
     emitLocalStorageAdapterChanged(key);
   },

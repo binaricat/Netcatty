@@ -1,28 +1,105 @@
-import { useEffect, useState } from "react";
-import { localStorageAdapter } from "../../infrastructure/persistence/localStorageAdapter";
+import { useCallback, useEffect, useState } from "react";
+import {
+  LOCAL_STORAGE_ADAPTER_CHANGED_EVENT,
+  localStorageAdapter,
+} from "../../infrastructure/persistence/localStorageAdapter";
 
-/**
- * Hook for persisting a string value to localStorage.
- * @param storageKey - The key to use for localStorage
- * @param fallback - The default value if no stored value exists
- * @param validate - Optional function to validate stored value; returns fallback if invalid
- * @returns A tuple of [value, setValue] similar to useState
- */
-export const useStoredString = <T extends string = string>(
-    storageKey: string,
-    fallback: T,
-    validate?: (value: string) => value is T,
+type StoredStringSetter<T extends string> = (nextValue: T | ((currentValue: T) => T)) => void;
+
+const canUseLocalStorage = () => typeof globalThis.localStorage !== "undefined";
+
+export const readStoredStringValue = <T extends string>(
+  storageKey: string,
+  fallback: T,
+  isAllowedValue: (value: string | null) => value is T,
+): T => {
+  if (!canUseLocalStorage()) return fallback;
+  const stored = localStorageAdapter.readString(storageKey);
+  return isAllowedValue(stored) ? stored : fallback;
+};
+
+export const resolveStoredStringUpdate = <T extends string>(
+  currentValue: T,
+  nextValue: T | ((currentValue: T) => T),
+): T => (typeof nextValue === "function" ? nextValue(currentValue) : nextValue);
+
+export const shouldSyncStoredStringEvent = (storageKey: string, event: Event): boolean => {
+  const changedKey = event.type === "storage"
+    ? (event as StorageEvent).key
+    : (event as CustomEvent<{ key?: string }>).detail?.key;
+  return changedKey === storageKey;
+};
+
+export const createStoredStringSyncHandlers = <T extends string>({
+  storageKey,
+  fallback,
+  isAllowedValue,
+  onValue,
+}: {
+  storageKey: string;
+  fallback: T;
+  isAllowedValue: (value: string | null) => value is T;
+  onValue: (value: T) => void;
+}) => {
+  const syncFromStorage = () => {
+    onValue(readStoredStringValue(storageKey, fallback, isAllowedValue));
+  };
+
+  return {
+    handleAdapterChange(event: Event) {
+      if (shouldSyncStoredStringEvent(storageKey, event)) syncFromStorage();
+    },
+    handleBrowserStorage(event: Event) {
+      if (shouldSyncStoredStringEvent(storageKey, event)) syncFromStorage();
+    },
+  };
+};
+
+export const useStoredString = <T extends string>(
+  storageKey: string,
+  fallback: T,
+  isAllowedValue: (value: string | null) => value is T,
 ) => {
-    const [value, setValue] = useState<T>(() => {
-        const stored = localStorageAdapter.readString(storageKey);
-        if (stored === null) return fallback;
-        if (validate) return validate(stored) ? stored : fallback;
-        return stored as T;
+  const [value, setValue] = useState<T>(() => readStoredStringValue(
+    storageKey,
+    fallback,
+    isAllowedValue,
+  ));
+
+  const setAndPersist = useCallback<StoredStringSetter<T>>((nextValue) => {
+    setValue((currentValue) => {
+      const resolvedValue = resolveStoredStringUpdate(currentValue, nextValue);
+      if (canUseLocalStorage()) {
+        localStorageAdapter.writeString(storageKey, resolvedValue);
+      }
+      return resolvedValue;
+    });
+  }, [storageKey]);
+
+  useEffect(() => {
+    const target = globalThis as typeof globalThis & {
+      addEventListener?: (type: string, listener: EventListener) => void;
+      removeEventListener?: (type: string, listener: EventListener) => void;
+    };
+    if (typeof target.addEventListener !== "function") return;
+
+    const {
+      handleAdapterChange,
+      handleBrowserStorage,
+    } = createStoredStringSyncHandlers({
+      storageKey,
+      fallback,
+      isAllowedValue,
+      onValue: setValue,
     });
 
-    useEffect(() => {
-        localStorageAdapter.writeString(storageKey, value);
-    }, [storageKey, value]);
+    target.addEventListener(LOCAL_STORAGE_ADAPTER_CHANGED_EVENT, handleAdapterChange);
+    target.addEventListener("storage", handleBrowserStorage);
+    return () => {
+      target.removeEventListener?.(LOCAL_STORAGE_ADAPTER_CHANGED_EVENT, handleAdapterChange);
+      target.removeEventListener?.("storage", handleBrowserStorage);
+    };
+  }, [fallback, isAllowedValue, storageKey]);
 
-    return [value, setValue] as const;
+  return [value, setAndPersist] as const;
 };

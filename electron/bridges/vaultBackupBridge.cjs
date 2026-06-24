@@ -87,6 +87,7 @@ function buildPreview(payload) {
     hostCount: Array.isArray(payload?.hosts) ? payload.hosts.length : 0,
     keyCount: Array.isArray(payload?.keys) ? payload.keys.length : 0,
     snippetCount: Array.isArray(payload?.snippets) ? payload.snippets.length : 0,
+    noteCount: Array.isArray(payload?.notes) ? payload.notes.length : 0,
     identityCount: Array.isArray(payload?.identities) ? payload.identities.length : 0,
     portForwardingRuleCount: Array.isArray(payload?.portForwardingRules) ? payload.portForwardingRules.length : 0,
   };

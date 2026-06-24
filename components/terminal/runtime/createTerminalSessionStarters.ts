@@ -5,6 +5,7 @@ import type { TerminalSessionStartersContext } from "./createTerminalSessionStar
 export type { PendingAuth, SessionLogConfig, TerminalSessionStartersContext } from "./createTerminalSessionStarters.types";
 export { normalizeStartupCommandDelay, splitStartupCommandLines } from "./terminalStartupCommands";
 import {
+  attachSessionToTerminal,
   buildTermEnv,
   closeOrphanBackendSession,
   getFlowController,
@@ -15,7 +16,8 @@ import {
   writeTerminalLine,
 } from "./terminalSessionAttachment";
 import { isConnectionTokenCurrent, registerConnectionToken, runDistroDetection } from "./terminalDistroDetection";
-import { scheduleStartupCommand } from "./terminalStartupCommands";
+import { resolveStartupCommand, scheduleStartupCommand } from "./terminalStartupCommands";
+import { markPromptLineBreakCommandPending } from "./promptLineBreak";
 import {
   isEncryptedCredentialPlaceholder,
   sanitizeCredentialValue,
@@ -50,6 +52,16 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
     ctx.updateStatus("disconnected");
     ctx.setProgressValue(0);
     ctx.setChainProgress(null);
+  };
+
+  const consumeRestoreCwdIntent = (term: XTerm, id: string): void => {
+    const intent = ctx.restoreCwdIntentRef?.current;
+    if (!intent) return;
+    ctx.restoreCwdIntentRef.current = null;
+    ctx.setProgressLogs((prev) => [...prev, tr("terminal.restore.cwdLog", `Restoring working directory: ${intent.cwd}`)
+      .replace("{cwd}", intent.cwd)]);
+    ctx.terminalBackend.writeToSession(id, `${intent.command}\r`, { automated: true });
+    markPromptLineBreakCommandPending(ctx.promptLineBreakStateRef, term, intent.command);
   };
 
   const resolveSavedSudoAutofillPassword = (): string | undefined => {
@@ -359,6 +371,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
       const startAttempt = async (attempt: {
         password?: string;
         key?: SSHKey;
+        useIdentityFiles?: boolean;
       }): Promise<string> => {
         // Resolve keepalive per-host: a host can opt into its own values
         // (e.g. set interval=0 on an embedded device whose SSH stack
@@ -399,7 +412,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
           keepaliveCountMax: keepalive.countMax,
           sessionLog: ctx.sessionLog?.enabled ? ctx.sessionLog : undefined,
           sshDebugLogEnabled: ctx.sshDebugLogEnabled,
-          identityFilePaths: attempt.password ? undefined : targetIdentityFilePaths,
+          identityFilePaths: attempt.useIdentityFiles ? targetIdentityFilePaths : undefined,
           knownHosts: ctx.knownHosts,
           sudoAutofillPassword: resolveSavedSudoAutofillPassword(),
           // Ask the bridge to reuse the source tab's authenticated connection
@@ -455,7 +468,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
 
       if (hasKeyMaterial) {
         try {
-          id = await startAttempt({ key });
+          id = await startAttempt({ key, password: hasPassword ? effectivePassword : undefined, useIdentityFiles: true });
         } catch (err) {
           if (isAuthError(err) && hasPassword) {
             ctx.setProgressLogs((prev) => [
@@ -483,6 +496,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         return;
       }
 
+      consumeRestoreCwdIntent(term, id);
       scheduleStartupCommand(ctx, term, id);
 
       // Run OS detection only after successful connection. Mint a fresh
@@ -584,7 +598,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         ctx.updateStatus("disconnected");
         return;
       }
-      const commandToRun = ctx.startupCommand || ctx.host.startupCommand;
+      const commandToRun = resolveStartupCommand(ctx);
       const waitsForAutoLogin = Boolean(
         commandToRun &&
         (telnetUsername || hasTelnetPasswordForAutoLogin) &&
@@ -1085,6 +1099,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
       resetTerminalLineTimestampState(term);
       ctx.disposeDataRef.current = ctx.terminalBackend.onSessionData(id, (chunk) => {
         writeSessionData(ctx, term, chunk);
+        ctx.onTerminalOutput?.(chunk);
         if (!ctx.hasConnectedRef.current) {
           ctx.updateStatus("connected");
           setTimeout(() => {
@@ -1129,6 +1144,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
       });
 
       ctx.onSessionAttached?.(id);
+      consumeRestoreCwdIntent(term, id);
       scheduleStartupCommand(ctx, term, id);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -1187,5 +1203,21 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
     }
   };
 
-  return { startSSH, startTelnet, startMosh, startEt, startLocal, startSerial };
+  const reattachSession = (term: XTerm) => {
+    const id = ctx.sessionRef.current;
+    if (!id) return false;
+    ctx.disposeDataRef.current?.();
+    ctx.disposeDataRef.current = null;
+    ctx.disposeExitRef.current?.();
+    ctx.disposeExitRef.current = null;
+    const isSerial = ctx.host.protocol === "serial" || ctx.host.id?.startsWith("serial-");
+    attachSessionToTerminal(ctx, term, id, {
+      convertLfToCrlf: isSerial,
+      sudoAutofillPassword: ctx.sudoAutofillPassword,
+    });
+    ctx.hasConnectedRef.current = true;
+    return true;
+  };
+
+  return { startSSH, startTelnet, startMosh, startEt, startLocal, startSerial, reattachSession };
 };

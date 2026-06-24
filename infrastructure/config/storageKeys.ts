@@ -4,6 +4,8 @@ export const STORAGE_KEY_GROUPS = 'netcatty_groups_v1';
 export const STORAGE_KEY_CUSTOM_GROUPS = STORAGE_KEY_GROUPS;
 export const STORAGE_KEY_SNIPPETS = 'netcatty_snippets_v1';
 export const STORAGE_KEY_SNIPPET_PACKAGES = 'netcatty_snippet_packages_v1';
+export const STORAGE_KEY_NOTES = 'netcatty_notes_v1';
+export const STORAGE_KEY_NOTE_GROUPS = 'netcatty_note_groups_v1';
 /** Last-filled values per snippet id for {{variable}} placeholders. */
 export const STORAGE_KEY_SNIPPET_VAR_VALUES = 'netcatty_snippet_var_values_v1';
 export const STORAGE_KEY_THEME = 'netcatty_theme_v1';
@@ -31,6 +33,9 @@ export const STORAGE_KEY_PF_VIEW_MODE = 'netcatty_pf_view_mode_v1';
 export const STORAGE_KEY_KNOWN_HOSTS = 'netcatty_known_hosts_v1';
 export const STORAGE_KEY_SHELL_HISTORY = 'netcatty_shell_history_v1';
 export const STORAGE_KEY_CONNECTION_LOGS = 'netcatty_connection_logs_v1';
+export const STORAGE_KEY_SESSION_RESTORE = 'netcatty_session_restore_v1';
+export const STORAGE_KEY_RESTORE_PREVIOUS_SESSION = 'netcatty_restore_previous_session_v1';
+export const STORAGE_KEY_RESTORE_TERMINAL_CWD = 'netcatty_restore_terminal_cwd_v1';
 export const STORAGE_KEY_IDENTITIES = 'netcatty_identities_v1';
 export const STORAGE_KEY_PROXY_PROFILES = 'netcatty_proxy_profiles_v1';
 export const STORAGE_KEY_VAULT_HOSTS_VIEW_MODE = 'netcatty_vault_hosts_view_mode_v1';
@@ -41,6 +46,10 @@ export const STORAGE_KEY_VAULT_SIDEBAR_WIDTH = 'netcatty_vault_sidebar_width_v1'
 export const STORAGE_KEY_VAULT_KEYS_VIEW_MODE = 'netcatty_vault_keys_view_mode_v1';
 export const STORAGE_KEY_VAULT_PROXY_PROFILES_VIEW_MODE = 'netcatty_vault_proxy_profiles_view_mode_v1';
 export const STORAGE_KEY_VAULT_SNIPPETS_VIEW_MODE = 'netcatty_vault_snippets_view_mode_v1';
+export const STORAGE_KEY_VAULT_NOTES_VIEW_MODE = 'netcatty_vault_notes_view_mode_v1';
+export const STORAGE_KEY_VAULT_NOTES_EDITOR_MODE = 'netcatty_vault_notes_editor_mode_v1';
+export const STORAGE_KEY_VAULT_NOTES_SELECTED_GROUP = 'netcatty_vault_notes_selected_group_v1';
+export const STORAGE_KEY_VAULT_NOTES_TREE_WIDTH = 'netcatty_vault_notes_tree_width_v1';
 /** Inline snippet script editor height (px) in vault edit panel. */
 export const STORAGE_KEY_SNIPPET_SCRIPT_EDITOR_HEIGHT = 'netcatty_snippet_script_editor_height_v1';
 /** Terminal compose bar total height (px). */
@@ -113,6 +122,7 @@ export const STORAGE_KEY_SESSION_LOGS_DIR = 'netcatty_session_logs_dir_v1';
 export const STORAGE_KEY_SESSION_LOGS_FORMAT = 'netcatty_session_logs_format_v1';
 export const STORAGE_KEY_SESSION_LOGS_TIMESTAMPS_ENABLED = 'netcatty_session_logs_timestamps_enabled_v1';
 export const STORAGE_KEY_SSH_DEBUG_LOGS_ENABLED = 'netcatty_ssh_debug_logs_enabled_v1';
+export const STORAGE_KEY_SSH_DEEP_LINK_ENABLED = 'netcatty_ssh_deep_link_enabled_v1';
 
 // Archived legacy key records that are no longer supported by the app (e.g. biometric/WebAuthn/FIDO2 experiments).
 export const STORAGE_KEY_LEGACY_KEYS = 'netcatty_legacy_keys_v1';
@@ -176,6 +186,7 @@ export const STORAGE_KEY_GROUP_CONFIGS = 'netcatty_group_configs_v1';
 
 // Side Panel
 export const STORAGE_KEY_SIDE_PANEL_WIDTH = 'netcatty_side_panel_width';
+export const STORAGE_KEY_TERMINAL_SIDE_PANEL_TAB_ORDER = 'netcatty_terminal_side_panel_tab_order_v1';
 export const STORAGE_KEY_WORKSPACE_FOCUS_SIDEBAR_WIDTH = 'netcatty_workspace_focus_sidebar_width';
 export const STORAGE_KEY_TERMINAL_HOST_TREE_WIDTH = 'netcatty_terminal_host_tree_width_v1';
 export const STORAGE_KEY_TERMINAL_HOST_TREE_COLLAPSED = 'netcatty_terminal_host_tree_collapsed_v1';

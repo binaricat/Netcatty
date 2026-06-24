@@ -32,6 +32,7 @@ import {
 } from "./remotePathCompleter";
 import { getSnippetSuggestions } from "./snippetCompleter";
 import type { Snippet } from "../../../domain/models";
+import type { AutocompleteCwdSource } from "./terminalAutocompleteLayout";
 
 /** Source indicator for where a suggestion came from */
 export type SuggestionSource = "history" | "command" | "subcommand" | "option" | "arg" | "path" | "snippet";
@@ -172,6 +173,7 @@ export async function getCompletions(
     protocol?: string;
     /** Current working directory (from OSC 7) */
     cwd?: string;
+    cwdSource?: AutocompleteCwdSource;
     /** Custom snippets to surface at the command position */
     snippets?: Snippet[];
   } = {},
@@ -246,6 +248,7 @@ export async function getCompletions(
       protocol: options.protocol,
       os: options.os,
       cwd: options.cwd,
+      cwdSource: options.cwdSource,
       foldersOnly: pathCheck.foldersOnly,
     })
     : [];

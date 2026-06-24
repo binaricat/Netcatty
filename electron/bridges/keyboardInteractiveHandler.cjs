@@ -65,6 +65,11 @@ function handleResponse(_event, payload) {
     return { success: false, error: 'Request not found' };
   }
 
+  if (_event?.sender?.id !== pending.webContentsId) {
+    console.warn(`[KeyboardInteractive] Wrong sender for request ${requestId}`);
+    return { success: false, error: 'Wrong sender' };
+  }
+
   // Clear the TTL timeout since we received a response
   if (pending.timeoutId) {
     clearTimeout(pending.timeoutId);

@@ -49,7 +49,8 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
   return <div
           ref={hostListScrollRef}
           className={cn(
-            "flex-1 overflow-auto px-4 py-4 space-y-6",
+            "flex-1 overflow-auto px-4 pb-4 space-y-3",
+            viewMode === "tree" ? "pt-1.5" : "pt-0",
             !isHostsSectionActive && "hidden",
           )}
           data-section="vault-host-list"
@@ -139,8 +140,8 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
             resetHostDragState();
           }}
         >
-                <section className="space-y-2">
-                  {viewMode !== "tree" && (
+                {viewMode !== "tree" && (
+                  <section className="space-y-2">
                     <div className="flex items-center gap-2 text-sm font-semibold">
                       <button
                         className={cn(
@@ -201,7 +202,8 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
                             );
                           })}
                     </div>
-                  )}
+                  </section>
+                )}
                   {/* Pinned hosts section - only at root level */}
                   {viewMode !== "tree" && !selectedGroupPath && pinnedHosts.length > 0 && (
                     <section className="space-y-2 mb-4">
@@ -580,10 +582,9 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
                             </ContextMenuItem>
                           </ContextMenuContent>
                         </ContextMenu>
-                      ))}
+                        ))}
                     </div>
                   )}
-                </section>
 
                 {!shouldHideEmptyRootHostsSection && (
                 <section className="space-y-2">

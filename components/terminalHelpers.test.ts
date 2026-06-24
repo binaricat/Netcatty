@@ -3,7 +3,9 @@ import assert from "node:assert/strict";
 
 import type { Host } from "../domain/models";
 import {
+  AUTO_RUN_SNIPPET_LINE_DELAY_MS,
   shouldHideConnectingDialogForConnectionReuse,
+  shouldDelayAutoRunSnippetInput,
   shouldShowTerminalConnectionDialog,
 } from "./terminal/terminalHelpers";
 
@@ -125,4 +127,12 @@ test("connection reuse hides connecting dialog only while reuse is still possibl
     }),
     false,
   );
+});
+
+test("auto-run snippets delay multi-line input but paste-only snippets do not", () => {
+  assert.equal(AUTO_RUN_SNIPPET_LINE_DELAY_MS > 0, true);
+  assert.equal(shouldDelayAutoRunSnippetInput("tthdf 0 2323\nadmin\ntest123", { noAutoRun: false }), true);
+  assert.equal(shouldDelayAutoRunSnippetInput("tthdf 0 2323\nadmin\ntest123", { noAutoRun: true }), false);
+  assert.equal(shouldDelayAutoRunSnippetInput("show version", { noAutoRun: false }), false);
+  assert.equal(shouldDelayAutoRunSnippetInput("show version\r", { noAutoRun: false }), false);
 });

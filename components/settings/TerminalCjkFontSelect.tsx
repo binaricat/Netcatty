@@ -90,6 +90,7 @@ export const TerminalCjkFontSelect: React.FC<Props> = ({
     }
     return filtered;
   }, [value, availabilityVersion, t]);
+  const fitSelectedText = typeof className !== 'string' || !className.includes('w-full');
 
   return (
     <SelectPrimitive.Root
@@ -99,17 +100,18 @@ export const TerminalCjkFontSelect: React.FC<Props> = ({
     >
       <SelectPrimitive.Trigger
         className={cn(
-          'flex h-9 items-center justify-between rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 [&>span]:line-clamp-1',
+          'flex h-9 max-w-full items-center justify-between rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 [&>span]:min-w-0 [&>span]:truncate [&>span]:whitespace-nowrap',
+          fitSelectedText && 'min-w-max',
           className,
         )}
       >
         <SelectPrimitive.Value>
-          <span style={{ fontFamily: value ? `"${value}", monospace` : undefined }}>
+          <span className="block truncate whitespace-nowrap" style={{ fontFamily: value ? `"${value}", monospace` : undefined }}>
             {triggerLabel}
           </span>
         </SelectPrimitive.Value>
         <SelectPrimitive.Icon asChild>
-          <ChevronDown className="ml-2 h-4 w-4 opacity-50" />
+          <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
         </SelectPrimitive.Icon>
       </SelectPrimitive.Trigger>
       <SelectPrimitive.Portal>

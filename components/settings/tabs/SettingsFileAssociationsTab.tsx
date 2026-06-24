@@ -15,8 +15,8 @@ import {
   SettingCard,
   SettingsTabContent,
   SettingRow,
-  Select,
   Toggle,
+  Select,
 } from "../settings-ui";
 
 const getOpenerLabel = (

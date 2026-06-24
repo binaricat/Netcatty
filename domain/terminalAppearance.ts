@@ -124,6 +124,16 @@ export const resolveFollowedTerminalThemeId = (args: {
   return getTerminalThemeForUiTheme(activeUiThemeId) ?? args.fallbackThemeId;
 };
 
+export const getFollowAppTerminalThemeSelectionUpdate = (
+  theme: Pick<TerminalTheme, 'id' | 'type'>,
+): {
+  appTheme: TerminalTheme['type'];
+  terminalThemeDarkId?: string;
+  terminalThemeLightId?: string;
+} => theme.type === 'dark'
+  ? { appTheme: 'dark', terminalThemeDarkId: theme.id }
+  : { appTheme: 'light', terminalThemeLightId: theme.id };
+
 type ParsedHslToken = {
   hue: number;
   saturation: number;

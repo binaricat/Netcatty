@@ -1,17 +1,26 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { Activity, FolderTree, History, MessageSquare, Palette, PanelLeft, PanelRight, X, Zap } from 'lucide-react';
+import { Activity, FolderTree, History, MessageSquare, NotebookText, Palette, PanelLeft, PanelRight, X, Zap } from 'lucide-react';
 import { SystemManagerSidePanel } from '../systemManager/SystemManagerSidePanel';
-import React, { memo, useCallback, useState } from 'react';
+import React, { memo, useCallback, useRef, useState } from 'react';
 
 import { useActiveTabId } from '../../application/state/activeTabStore';
+import {
+  reorderTerminalSidePanelTab,
+  TERMINAL_SIDE_PANEL_TAB_IDS,
+  type TerminalSidePanelTabId,
+  useTerminalSidePanelTabOrder,
+} from '../../application/state/terminalSidePanelTabs';
 import { terminalLayoutSuppressStore } from '../../application/state/terminalLayoutSuppressStore';
 import { AI_PANEL_FORCE_HIDE_SHELL } from '../ai/aiPanelDiagnostics';
 
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 import type { SidePanelTab } from './TerminalLayerSupport';
 import { terminalLayerSidePanelCtxEqual } from './terminalLayerViewMemo';
+import { resolveSftpFollowTerminalCwdTargetHost } from '../sftp/sftpFollowTerminalCwd';
+import type { Host } from '../../types';
 
 type SidePanelContext = Record<string, any>;
+const SIDE_PANEL_TAB_DRAG_MIME = 'application/x-netcatty-sidepanel-tab';
 
 export function getTerminalSidePanelShellWidth({
   activeSidePanelTab,
@@ -36,6 +45,7 @@ function TerminalLayerSidePanelShell({ ctx }: { ctx: SidePanelContext }) {
   const {
     mountedAiTabIds,
     mountedSftpTabIds,
+    notesMountedTabIds,
     scriptsMountedTabIds,
     systemMountedTabIds,
     themeMountedTabIds,
@@ -44,14 +54,18 @@ function TerminalLayerSidePanelShell({ ctx }: { ctx: SidePanelContext }) {
 
   const anyHistoryOpen = sidePanelOpenTabs instanceof Map
     && Array.from((sidePanelOpenTabs as Map<string, SidePanelTab>).values()).includes('history');
+  const anyNotesOpen = sidePanelOpenTabs instanceof Map
+    && Array.from((sidePanelOpenTabs as Map<string, SidePanelTab>).values()).includes('notes');
 
   if (
     mountedSftpTabIds.length === 0
     && mountedAiTabIds.length === 0
+    && notesMountedTabIds.length === 0
     && scriptsMountedTabIds.length === 0
     && systemMountedTabIds.length === 0
     && themeMountedTabIds.length === 0
     && !anyHistoryOpen
+    && !anyNotesOpen
   ) {
     return null;
   }
@@ -98,6 +112,8 @@ function TerminalLayerSidePanelTabBody({ ctx }: { ctx: SidePanelContext }) {
     handleFontWeightChangeForFocusedSession,
     handleFontWeightResetForFocusedSession,
     handleOpenAI,
+    handleOpenNotes,
+    handleOpenHostFromNotes,
     handleOpenScripts,
     handleOpenSystem,
     handleOpenTheme,
@@ -120,6 +136,11 @@ function TerminalLayerSidePanelTabBody({ ctx }: { ctx: SidePanelContext }) {
     knownHosts,
     mountedAiTabIds,
     mountedSftpTabIds,
+    notesMountedTabIds,
+    notesOpenNoteByTab,
+    NotesManager,
+    noteGroups,
+    notes,
     scriptsMountedTabIds,
     systemMountedTabIds,
     themeMountedTabIds,
@@ -155,14 +176,23 @@ function TerminalLayerSidePanelTabBody({ ctx }: { ctx: SidePanelContext }) {
     terminalFontFamilyId,
     terminalSettings,
     terminalTheme,
+    terminalThemeId,
     ThemeSidePanel,
     updateHosts,
+    updateNoteGroups,
+    updateNotes,
     updateSnippetPackages,
     updateSnippets,
     validAIScopeTargetIds,
   } = ctx;
 
   const [resizePreviewWidth, setResizePreviewWidth] = useState<number | null>(null);
+  const { sidePanelTabOrder, setSidePanelTabOrder } = useTerminalSidePanelTabOrder();
+  const [dragOverSidePanelTab, setDragOverSidePanelTab] = useState<{
+    tab: TerminalSidePanelTabId;
+    placement: 'before' | 'after';
+  } | null>(null);
+  const draggedSidePanelTabRef = useRef<TerminalSidePanelTabId | null>(null);
   const isAiShellForceHidden = AI_PANEL_FORCE_HIDE_SHELL && activeSidePanelTab === 'ai';
   const shouldRenderAiPanels = mountedAiTabIds.length > 0 && !isAiShellForceHidden;
   const shellWidth = getTerminalSidePanelShellWidth({
@@ -212,6 +242,104 @@ function TerminalLayerSidePanelTabBody({ ctx }: { ctx: SidePanelContext }) {
     sidePanelPosition,
     sidePanelWidth,
   ]);
+
+  const handleSidePanelTabDragStart = useCallback((event: React.DragEvent, tab: TerminalSidePanelTabId) => {
+    draggedSidePanelTabRef.current = tab;
+    setDragOverSidePanelTab(null);
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData(SIDE_PANEL_TAB_DRAG_MIME, tab);
+    event.dataTransfer.setData('text/plain', tab);
+  }, []);
+
+  const handleSidePanelTabDrop = useCallback((event: React.DragEvent, targetTab: TerminalSidePanelTabId) => {
+    if (!Array.from(event.dataTransfer.types).includes(SIDE_PANEL_TAB_DRAG_MIME)) return;
+    event.preventDefault();
+    const transferredTab = event.dataTransfer.getData(SIDE_PANEL_TAB_DRAG_MIME) as TerminalSidePanelTabId;
+    const draggedTab = draggedSidePanelTabRef.current ?? transferredTab;
+    draggedSidePanelTabRef.current = null;
+    setDragOverSidePanelTab(null);
+    if (!TERMINAL_SIDE_PANEL_TAB_IDS.has(draggedTab)) return;
+
+    const nextOrder = reorderTerminalSidePanelTab(
+      sidePanelTabOrder,
+      draggedTab,
+      targetTab,
+      dragOverSidePanelTab?.tab === targetTab ? dragOverSidePanelTab.placement : 'before',
+    );
+    if (nextOrder !== sidePanelTabOrder) {
+      setSidePanelTabOrder(nextOrder);
+    }
+  }, [dragOverSidePanelTab, setSidePanelTabOrder, sidePanelTabOrder]);
+
+  const handleSidePanelTabDragOver = useCallback((event: React.DragEvent, targetTab: TerminalSidePanelTabId) => {
+    if (!Array.from(event.dataTransfer.types).includes(SIDE_PANEL_TAB_DRAG_MIME)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+    const rect = event.currentTarget.getBoundingClientRect();
+    const placement = event.clientX > rect.left + (rect.width / 2) ? 'after' : 'before';
+    setDragOverSidePanelTab((current) => {
+      if (current?.tab === targetTab && current.placement === placement) return current;
+      return { tab: targetTab, placement };
+    });
+  }, []);
+
+  const handleSidePanelTabDragLeave = useCallback((event: React.DragEvent, targetTab: TerminalSidePanelTabId) => {
+    if (dragOverSidePanelTab?.tab !== targetTab) return;
+    const nextTarget = event.relatedTarget as Node | null;
+    if (nextTarget && event.currentTarget.contains(nextTarget)) return;
+    setDragOverSidePanelTab(null);
+  }, [dragOverSidePanelTab]);
+
+  const sidePanelTabItems: Array<{
+    id: TerminalSidePanelTabId;
+    label: string;
+    icon: React.ReactNode;
+    onClick: () => void;
+  }> = [
+    {
+      id: 'sftp',
+      label: t('terminal.layer.sftp'),
+      icon: <FolderTree size={15} />,
+      onClick: handleToggleSftpFromBar,
+    },
+    {
+      id: 'scripts',
+      label: t('terminal.layer.scripts'),
+      icon: <Zap size={15} />,
+      onClick: handleOpenScripts,
+    },
+    {
+      id: 'history',
+      label: t('terminal.layer.history'),
+      icon: <History size={15} />,
+      onClick: handleOpenHistory,
+    },
+    {
+      id: 'theme',
+      label: t('terminal.layer.theme'),
+      icon: <Palette size={15} />,
+      onClick: handleOpenTheme,
+    },
+    {
+      id: 'system',
+      label: t('terminal.layer.system'),
+      icon: <Activity size={15} />,
+      onClick: handleOpenSystem,
+    },
+    {
+      id: 'notes',
+      label: t('terminal.layer.notes'),
+      icon: <NotebookText size={15} />,
+      onClick: handleOpenNotes,
+    },
+    {
+      id: 'ai',
+      label: t('terminal.layer.aiChat'),
+      icon: <MessageSquare size={15} />,
+      onClick: handleOpenAI,
+    },
+  ];
+  const sidePanelTabItemById = new Map(sidePanelTabItems.map((item) => [item.id, item]));
 
   return (
     <>
@@ -264,150 +392,59 @@ function TerminalLayerSidePanelTabBody({ ctx }: { ctx: SidePanelContext }) {
                 borderBottom: '1px solid var(--terminal-sidepanel-border)',
               }}
             >
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Btn
-                    variant="ghost"
-                    size="icon"
-                    data-tab-id="sftp"
-                    data-tab-type="sidepanel"
-                    data-state={activeSidePanelTab === 'sftp' ? 'active' : 'inactive'}
-                    className="netcatty-tab h-7 w-7 rounded-md p-0 hover:bg-transparent"
-                    style={{
-                      backgroundColor: activeSidePanelTab === 'sftp'
-                        ? 'color-mix(in srgb, var(--terminal-sidepanel-accent) 24%, transparent)'
-                        : 'transparent',
-                      color: activeSidePanelTab === 'sftp'
-                        ? 'var(--terminal-sidepanel-fg)'
-                        : 'var(--terminal-sidepanel-muted)',
-                    }}
-                    onClick={handleToggleSftpFromBar}
-                  >
-                    <FolderTree size={15} />
-                  </Btn>
-                </TooltipTrigger>
-                <TooltipContent>{t('terminal.layer.sftp')}</TooltipContent>
-              </Tooltip>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Btn
-                    variant="ghost"
-                    size="icon"
-                    data-tab-id="scripts"
-                    data-tab-type="sidepanel"
-                    data-state={activeSidePanelTab === 'scripts' ? 'active' : 'inactive'}
-                    className="netcatty-tab h-7 w-7 rounded-md p-0 hover:bg-transparent"
-                    style={{
-                      backgroundColor: activeSidePanelTab === 'scripts'
-                        ? 'color-mix(in srgb, var(--terminal-sidepanel-accent) 24%, transparent)'
-                        : 'transparent',
-                      color: activeSidePanelTab === 'scripts'
-                        ? 'var(--terminal-sidepanel-fg)'
-                        : 'var(--terminal-sidepanel-muted)',
-                    }}
-                    onClick={handleOpenScripts}
-                  >
-                    <Zap size={15} />
-                  </Btn>
-                </TooltipTrigger>
-                <TooltipContent>{t('terminal.layer.scripts')}</TooltipContent>
-              </Tooltip>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Btn
-                    variant="ghost"
-                    size="icon"
-                    data-tab-id="history"
-                    data-tab-type="sidepanel"
-                    data-state={activeSidePanelTab === 'history' ? 'active' : 'inactive'}
-                    className="netcatty-tab h-7 w-7 rounded-md p-0 hover:bg-transparent"
-                    style={{
-                      backgroundColor: activeSidePanelTab === 'history'
-                        ? 'color-mix(in srgb, var(--terminal-sidepanel-accent) 24%, transparent)'
-                        : 'transparent',
-                      color: activeSidePanelTab === 'history'
-                        ? 'var(--terminal-sidepanel-fg)'
-                        : 'var(--terminal-sidepanel-muted)',
-                    }}
-                    onClick={handleOpenHistory}
-                  >
-                    <History size={15} />
-                  </Btn>
-                </TooltipTrigger>
-                <TooltipContent>{t('terminal.layer.history')}</TooltipContent>
-              </Tooltip>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Btn
-                    variant="ghost"
-                    size="icon"
-                    data-tab-id="theme"
-                    data-tab-type="sidepanel"
-                    data-state={activeSidePanelTab === 'theme' ? 'active' : 'inactive'}
-                    className="netcatty-tab h-7 w-7 rounded-md p-0 hover:bg-transparent"
-                    style={{
-                      backgroundColor: activeSidePanelTab === 'theme'
-                        ? 'color-mix(in srgb, var(--terminal-sidepanel-accent) 24%, transparent)'
-                        : 'transparent',
-                      color: activeSidePanelTab === 'theme'
-                        ? 'var(--terminal-sidepanel-fg)'
-                        : 'var(--terminal-sidepanel-muted)',
-                    }}
-                    onClick={handleOpenTheme}
-                  >
-                    <Palette size={15} />
-                  </Btn>
-                </TooltipTrigger>
-                <TooltipContent>{t('terminal.layer.theme')}</TooltipContent>
-              </Tooltip>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Btn
-                    variant="ghost"
-                    size="icon"
-                    data-tab-id="system"
-                    data-tab-type="sidepanel"
-                    data-state={activeSidePanelTab === 'system' ? 'active' : 'inactive'}
-                    className="netcatty-tab h-7 w-7 rounded-md p-0 hover:bg-transparent"
-                    style={{
-                      backgroundColor: activeSidePanelTab === 'system'
-                        ? 'color-mix(in srgb, var(--terminal-sidepanel-accent) 24%, transparent)'
-                        : 'transparent',
-                      color: activeSidePanelTab === 'system'
-                        ? 'var(--terminal-sidepanel-fg)'
-                        : 'var(--terminal-sidepanel-muted)',
-                    }}
-                    onClick={handleOpenSystem}
-                  >
-                    <Activity size={15} />
-                  </Btn>
-                </TooltipTrigger>
-                <TooltipContent>{t('terminal.layer.system')}</TooltipContent>
-              </Tooltip>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Btn
-                    variant="ghost"
-                    size="icon"
-                    data-tab-id="ai"
-                    data-tab-type="sidepanel"
-                    data-state={activeSidePanelTab === 'ai' ? 'active' : 'inactive'}
-                    className="netcatty-tab h-7 w-7 rounded-md p-0 hover:bg-transparent"
-                    style={{
-                      backgroundColor: activeSidePanelTab === 'ai'
-                        ? 'color-mix(in srgb, var(--terminal-sidepanel-accent) 24%, transparent)'
-                        : 'transparent',
-                      color: activeSidePanelTab === 'ai'
-                        ? 'var(--terminal-sidepanel-fg)'
-                        : 'var(--terminal-sidepanel-muted)',
-                    }}
-                    onClick={handleOpenAI}
-                  >
-                    <MessageSquare size={15} />
-                  </Btn>
-                </TooltipTrigger>
-                <TooltipContent>{t('terminal.layer.aiChat')}</TooltipContent>
-              </Tooltip>
+              {sidePanelTabOrder.map((tabId) => {
+                const item = sidePanelTabItemById.get(tabId);
+                if (!item) return null;
+                const isActive = activeSidePanelTab === item.id;
+                const showDropIndicator = dragOverSidePanelTab?.tab === item.id
+                  && draggedSidePanelTabRef.current !== null
+                  && draggedSidePanelTabRef.current !== item.id;
+                return (
+                  <Tooltip key={item.id}>
+                    <TooltipTrigger asChild>
+                      <Btn
+                        variant="ghost"
+                        size="icon"
+                        draggable
+                        data-tab-id={item.id}
+                        data-tab-type="sidepanel"
+                        data-state={isActive ? 'active' : 'inactive'}
+                        className="netcatty-tab relative h-7 w-7 rounded-md p-0 hover:bg-transparent"
+                        style={{
+                          backgroundColor: isActive
+                            ? 'color-mix(in srgb, var(--terminal-sidepanel-accent) 24%, transparent)'
+                            : 'transparent',
+                          color: isActive
+                            ? 'var(--terminal-sidepanel-fg)'
+                            : 'var(--terminal-sidepanel-muted)',
+                        }}
+                        onClick={item.onClick}
+                        onDragStart={(event: React.DragEvent) => handleSidePanelTabDragStart(event, item.id)}
+                        onDragOver={(event: React.DragEvent) => handleSidePanelTabDragOver(event, item.id)}
+                        onDragLeave={(event: React.DragEvent) => handleSidePanelTabDragLeave(event, item.id)}
+                        onDrop={(event: React.DragEvent) => handleSidePanelTabDrop(event, item.id)}
+                        onDragEnd={() => {
+                          draggedSidePanelTabRef.current = null;
+                          setDragOverSidePanelTab(null);
+                        }}
+                      >
+                        {showDropIndicator && (
+                          <span
+                            aria-hidden="true"
+                            className={cn(
+                              'pointer-events-none absolute top-1 bottom-1 w-0.5 rounded-none',
+                              dragOverSidePanelTab?.placement === 'after' ? 'right-0' : 'left-0',
+                            )}
+                            style={{ backgroundColor: 'var(--terminal-sidepanel-accent)' }}
+                          />
+                        )}
+                        {item.icon}
+                      </Btn>
+                    </TooltipTrigger>
+                    <TooltipContent>{item.label}</TooltipContent>
+                  </Tooltip>
+                );
+              })}
               <div className="flex-1" />
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -452,6 +489,24 @@ function TerminalLayerSidePanelTabBody({ ctx }: { ctx: SidePanelContext }) {
               const panelActiveHost = isVisibleSftpPanel
                 ? (sftpActiveHost ?? storedSftpHost)
                 : storedSftpHost;
+              const handlePanelFollowTerminalCwdChange = (enabled: boolean, visibleHost?: Host | null) => {
+                const targetHost = resolveSftpFollowTerminalCwdTargetHost(visibleHost, panelActiveHost);
+                if (!targetHost?.id) {
+                  setSftpFollowTerminalCwd(enabled);
+                  return;
+                }
+                let updated = false;
+                const nextHosts = (hosts as Host[]).map((host) => {
+                  if (host.id !== targetHost.id) return host;
+                  updated = true;
+                  return { ...host, sftpFollowTerminalCwd: enabled };
+                });
+                if (updated) {
+                  updateHosts(nextHosts);
+                } else {
+                  setSftpFollowTerminalCwd(enabled);
+                }
+              };
               return (
                 <div
                   key={tabId}
@@ -488,9 +543,9 @@ function TerminalLayerSidePanelTabBody({ ctx }: { ctx: SidePanelContext }) {
                   editorWordWrap={editorWordWrap}
                   setEditorWordWrap={setEditorWordWrap}
                   onGetTerminalCwd={getTerminalCwd}
-                  activeTerminalCwd={isVisibleSftpPanel && sftpFollowTerminalCwd ? activeTerminalCwd : null}
+                  activeTerminalCwd={isVisibleSftpPanel ? activeTerminalCwd : null}
                   sftpFollowTerminalCwd={sftpFollowTerminalCwd}
-                  onSftpFollowTerminalCwdChange={setSftpFollowTerminalCwd}
+                  onSftpFollowTerminalCwdChange={handlePanelFollowTerminalCwdChange}
                   onRequestTerminalFocus={refocusActiveTerminalSession}
                   terminalSettings={terminalSettings}
                 />
@@ -513,6 +568,7 @@ function TerminalLayerSidePanelTabBody({ ctx }: { ctx: SidePanelContext }) {
                     isVisible={isVisibleSystemPanel}
                     terminalSettings={terminalSettings}
                     snippets={snippets}
+                    onRequestTerminalFocus={refocusActiveTerminalSession}
                   />
                 </div>
               );
@@ -562,12 +618,12 @@ function TerminalLayerSidePanelTabBody({ ctx }: { ctx: SidePanelContext }) {
                   <ThemeSidePanel
                     followAppTerminalTheme={followAppTerminalTheme}
                     currentThemeId={previewedOrVisibleThemeId}
-                    globalThemeId={terminalTheme.id}
+                    globalThemeId={terminalThemeId ?? terminalTheme.id}
                     currentFontFamilyId={focusedFontFamilyId}
                     globalFontFamilyId={terminalFontFamilyId}
                     currentFontSize={focusedFontSize}
                     currentFontWeight={focusedFontWeight}
-                    canResetTheme={focusedThemeOverridden}
+                    canResetTheme={followAppTerminalTheme ? false : focusedThemeOverridden}
                     canResetFontFamily={focusedFontFamilyOverridden}
                     canResetFontSize={focusedFontSizeOverridden}
                     canResetFontWeight={focusedFontWeightOverridden}
@@ -581,6 +637,28 @@ function TerminalLayerSidePanelTabBody({ ctx }: { ctx: SidePanelContext }) {
                     onFontWeightReset={handleFontWeightResetForFocusedSession}
                     previewColors={resolvedPreviewTheme.colors}
                     isVisible={isVisibleThemePanel}
+                  />
+                </div>
+              );
+            })}
+
+            {notesMountedTabIds.map((tabId: string) => {
+              const isVisibleNotesPanel = activeTabId === tabId && activeSidePanelTab === 'notes';
+              return (
+                <div
+                  key={`notes-${tabId}`}
+                  className={cn('absolute inset-0 z-20 bg-background text-foreground', !isVisibleNotesPanel && 'hidden')}
+                  data-section={isVisibleNotesPanel ? 'terminal-notes-panel' : undefined}
+                >
+                  <NotesManager
+                    notes={notes}
+                    noteGroups={noteGroups}
+                    hosts={hosts}
+                    onUpdateNotes={updateNotes}
+                    onUpdateNoteGroups={updateNoteGroups}
+                    onOpenHost={handleOpenHostFromNotes}
+                    displayMode="sidebar"
+                    openNoteId={notesOpenNoteByTab.get(tabId) ?? null}
                   />
                 </div>
               );

@@ -540,7 +540,7 @@ echo $3 >> "$FILE"`);
   );
 
   return (
-    <div className="h-full flex relative">
+    <div className="h-full min-w-0 w-full overflow-hidden flex relative">
       {/* Hidden file input */}
       <input
         ref={fileInputRef}
@@ -553,7 +553,7 @@ echo $3 >> "$FILE"`);
       {/* Main Content */}
       <div
         className={cn(
-          "flex-1 flex flex-col min-h-0 transition-all duration-200",
+          "flex-1 min-w-0 flex flex-col min-h-0 transition-all duration-200",
           panel.type !== "closed" && "mr-[380px]",
         )}
       >
@@ -705,7 +705,7 @@ echo $3 >> "$FILE"`);
         {/* Scrollable Content */}
         <div
           ref={listRef}
-          className="flex-1 overflow-y-auto"
+          className="flex-1 min-w-0 w-full overflow-y-auto"
           onDragOverCapture={(event) => {
             keyReorder.handleDragOverCapture(event);
             identityReorder.handleDragOverCapture(event);
@@ -724,15 +724,15 @@ echo $3 >> "$FILE"`);
           }}
         >
           {/* Keys Section */}
-          <div className="space-y-3 p-3">
-          <div className="flex items-center justify-between">
-            <h2 className={vaultSectionTitleClass}>
-              {t("keychain.section.keys")}
-            </h2>
-            <span className="text-xs text-muted-foreground">
-              {t("keychain.count.items", { count: filteredKeys.length })}
-            </span>
-          </div>
+          <div className="min-w-0 w-full space-y-3 p-3">
+            <div className="flex items-center justify-between">
+              <h2 className={vaultSectionTitleClass}>
+                {t("keychain.section.keys")}
+              </h2>
+              <span className="text-xs text-muted-foreground">
+                {t("keychain.count.items", { count: filteredKeys.length })}
+              </span>
+            </div>
 
           {filteredKeys.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-64 text-muted-foreground">
@@ -762,8 +762,8 @@ echo $3 >> "$FILE"`);
             <div
               className={
                 viewMode === "grid"
-                  ? "grid gap-3 grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
-                  : "flex flex-col gap-0"
+                  ? "grid min-w-0 w-full max-w-full gap-3 grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+                  : "flex min-w-0 w-full max-w-full flex-col gap-0"
               }
             >
               {filteredKeys.map((key) => (
@@ -790,7 +790,7 @@ echo $3 >> "$FILE"`);
 
         {/* Identities Section */}
         {activeFilter === "key" && filteredIdentities.length > 0 && (
-          <div className="space-y-3 px-3 pb-3">
+          <div className="min-w-0 w-full space-y-3 px-3 pb-3">
             <div className="flex items-center justify-between">
               <h2 className={vaultSectionTitleClass}>
                 {t("keychain.section.identities")}
@@ -802,13 +802,13 @@ echo $3 >> "$FILE"`);
             <div
               className={
                 viewMode === "grid"
-                  ? "grid gap-3 grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
-                  : "flex flex-col gap-0"
+                  ? "grid min-w-0 w-full max-w-full gap-3 grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+                  : "flex min-w-0 w-full max-w-full flex-col gap-0"
               }
             >
               {filteredIdentities.map((identity) => (
                 <ContextMenu key={identity.id}>
-                  <ContextMenuTrigger>
+                  <ContextMenuTrigger className="block min-w-0 w-full max-w-full">
                     <IdentityCard
                       identity={identity}
                       viewMode={viewMode}

@@ -23,10 +23,19 @@ const iconv = require("iconv-lite");
 function normalizeTerminalEncoding(charset) {
   if (!charset) return "utf-8";
   const raw = String(charset).trim().toLowerCase();
-  const normalized = raw.replace(/[^a-z0-9]/g, "");
-  if (["utf8", "utf-8"].includes(normalized)) return "utf-8";
-  if (normalized === "gb18030" || normalized === "gbk" || normalized === "gb2312") return "gb18030";
-  return iconv.encodingExists(raw) ? raw : "utf-8";
+  const localeCodeset = raw.match(/\.([^@]+)(?:@.*)?$/)?.[1];
+  const candidates = [raw, localeCodeset].filter(Boolean);
+
+  for (const candidate of candidates) {
+    const normalized = candidate.replace(/[^a-z0-9]/g, "");
+    if (normalized === "utf8") return "utf-8";
+    if (["gb18030", "gbk", "gb2312", "cp936", "ms936"].includes(normalized)) {
+      return "gb18030";
+    }
+    if (iconv.encodingExists(candidate)) return candidate;
+  }
+
+  return "utf-8";
 }
 
 // True when the encoding is UTF-8 (the JS/Node default for string → bytes).

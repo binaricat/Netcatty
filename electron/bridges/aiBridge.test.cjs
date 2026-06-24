@@ -96,8 +96,11 @@ function loadBridgeWithMocks(options = {}) {
     "./ai/codexHelpers.cjs": {
       codexLoginSessions: new Map(),
       appendCodexLoginOutput() {},
-      toCodexLoginSessionResponse: () => ({}),
-      getActiveCodexLoginSession: () => null,
+      toCodexLoginSessionResponse: (session) => ({ sessionId: session.id, codexPath: session.codexPath }),
+      getActiveCodexLoginSession: () =>
+        typeof options.getActiveCodexLoginSession === "function"
+          ? options.getActiveCodexLoginSession()
+          : null,
       normalizeCodexIntegrationState: () => ({}),
       readCodexCustomProviderConfig: () => null,
       getCodexCustomConfigPreflightError: () => null,
@@ -203,6 +206,66 @@ test("discover returns the 3-layer contract for an installed, authenticated agen
     assert.equal(claude.available, true);
     assert.equal(claude.authenticated, true);
     assert.equal(claude.authSource, "env");
+  } finally {
+    restore();
+  }
+});
+
+test("resolve-cli does not fall back to PATH when a custom path is invalid", async () => {
+  const { bridge, restore } = loadBridgeWithMocks({
+    normalizeCliPathForPlatform: () => null,
+    resolveCliFromPath: (command) => (command === "codex" ? "/usr/local/bin/codex" : null),
+  });
+  const ipcMain = createIpcMainStub();
+
+  bridge.init({
+    sessions: new Map(),
+    sftpClients: new Map(),
+    electronModule: { app: { getPath: () => process.cwd() } },
+  });
+  bridge.registerHandlers(ipcMain);
+
+  try {
+    const resolveCli = ipcMain.handlers.get("netcatty:ai:resolve-cli");
+    const result = await resolveCli({ sender: { id: 1 } }, {
+      command: "codex",
+      customPath: "/missing/codex",
+      refreshShellEnv: true,
+    });
+
+    assert.equal(result.path, null);
+    assert.equal(result.available, false);
+    assert.equal(result.installed, false);
+  } finally {
+    restore();
+  }
+});
+
+test("codex login does not reuse an active session from a different resolved path", async () => {
+  const { bridge, restore } = loadBridgeWithMocks({
+    resolveCliFromPathAsync: (command) => (command === "codex" ? "/usr/bin/codex" : null),
+    getActiveCodexLoginSession: () => ({
+      id: "codex_login_custom",
+      state: "running",
+      process: { killed: false },
+      codexPath: "/custom/codex",
+    }),
+  });
+  const ipcMain = createIpcMainStub();
+
+  bridge.init({
+    sessions: new Map(),
+    sftpClients: new Map(),
+    electronModule: { app: { getPath: () => process.cwd() } },
+  });
+  bridge.registerHandlers(ipcMain);
+
+  try {
+    const startLogin = ipcMain.handlers.get("netcatty:ai:codex:start-login");
+    const result = await startLogin({ sender: { id: 1 } }, {});
+
+    assert.equal(result.ok, false);
+    assert.match(result.error, /different CLI path/);
   } finally {
     restore();
   }

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   buildManagedAgentState,
+  getInitialManagedAgentPaths,
   updateCodebuddyManagedEnv,
 } from '../settings/tabs/ai/managedAgentState';
 import type { ExternalAgentConfig } from '../../infrastructure/ai/types';
@@ -104,6 +105,39 @@ test('buildManagedAgentState stores SDK backend keys for discovered managed agen
   assert.equal(copilotState.agents[0].acpArgs, undefined);
 });
 
+test('getInitialManagedAgentPaths ignores auto-detected command paths', () => {
+  const state = buildManagedAgentState(
+    [],
+    'catty',
+    'codex',
+    { path: '/opt/homebrew/bin/codex', version: '1.0.0', available: true },
+    'auto',
+  );
+
+  assert.equal(state.agents[0].commandSource, 'auto');
+  assert.equal(getInitialManagedAgentPaths(state.agents).codex, '');
+});
+
+test('getInitialManagedAgentPaths keeps manual and legacy command paths', () => {
+  const manualState = buildManagedAgentState(
+    [],
+    'catty',
+    'codex',
+    { path: '/opt/homebrew/bin/codex', version: '1.0.0', available: true },
+    'manual',
+  );
+
+  assert.equal(getInitialManagedAgentPaths(manualState.agents).codex, '/opt/homebrew/bin/codex');
+  assert.equal(getInitialManagedAgentPaths([{
+    id: 'discovered_codex',
+    name: 'Codex CLI',
+    command: '/legacy/bin/codex',
+    enabled: true,
+    available: true,
+    sdkBackend: 'codex',
+  }]).codex, '/legacy/bin/codex');
+});
+
 test('buildManagedAgentState stores SDK backend key for discovered Cursor', () => {
   const state = buildManagedAgentState(
     [],
@@ -158,6 +192,23 @@ test('buildManagedAgentState stores CODEBUDDY_CODE_PATH for codebuddy', () => {
   assert.equal(state.agents[0].sdkBackend, 'codebuddy');
   assert.deepEqual(state.agents[0].env, {
     CODEBUDDY_CODE_PATH: '/opt/homebrew/bin/codebuddy',
+  });
+});
+
+test('buildManagedAgentState stores OPENCODE_BIN for opencode', () => {
+  const state = buildManagedAgentState(
+    [],
+    'catty',
+    'opencode',
+    { path: '/opt/homebrew/bin/opencode', version: '1.0.0', available: true },
+  );
+
+  assert.equal(state.agents.length, 1);
+  assert.equal(state.agents[0].id, 'discovered_opencode');
+  assert.equal(state.agents[0].command, '/opt/homebrew/bin/opencode');
+  assert.equal(state.agents[0].sdkBackend, 'opencode');
+  assert.deepEqual(state.agents[0].env, {
+    OPENCODE_BIN: '/opt/homebrew/bin/opencode',
   });
 });
 

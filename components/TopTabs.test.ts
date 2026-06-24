@@ -103,6 +103,15 @@ test("quick switcher plus button exposes a custom CSS hook", () => {
   assert.match(topTabsSource, /data-section="top-tabs-quick-switcher-toggle"/);
 });
 
+test("SessionTabIcon checks custom host icon appearance before distro logos", () => {
+  const source = readFileSync(new URL("./top-tabs/TopTabItems.tsx", import.meta.url), "utf8");
+  assert.match(source, /resolveHostIconAppearance\(host\)/);
+  assert.ok(
+    source.indexOf("resolveHostIconAppearance(host)") < source.indexOf("getEffectiveHostDistro(host)"),
+    "custom host icon should be checked before distro fallback",
+  );
+});
+
 test("workspace session drag data is recognized with a dedicated drag type", () => {
   const data = new Map([
     [WORKSPACE_SESSION_DRAG_TYPE, "session-1"],

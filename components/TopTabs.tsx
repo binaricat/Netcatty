@@ -5,6 +5,7 @@ import { isHostTreeWorkTabSurface } from '../application/app/workTabSurface';
 import type { EditorTab } from '../application/state/editorTabStore';
 import { buildWorkspaceActivityMap } from '../application/state/sessionActivity';
 import { collectSessionIds } from '../domain/workspace';
+import { resolveSessionTabTitle } from '../domain/sessionTabTitle';
 import { useSessionActivityMap } from '../application/state/sessionActivityStore';
 import { getTopTabInsertionTarget, getWorkspaceSessionDragId, hasWorkspaceSessionDrag } from '../application/state/terminalDragData';
 import {
@@ -777,7 +778,10 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
         for (const sessionId of workspaceSessionIds) {
           const wsSession = sessions.find((s) => s.id === sessionId);
           if (wsSession) {
-            workspaceSessionLabels[sessionId] = wsSession.customName || wsSession.hostLabel;
+            workspaceSessionLabels[sessionId] = resolveSessionTabTitle(
+              wsSession,
+              hostMap.get(wsSession.hostId),
+            );
           }
         }
 

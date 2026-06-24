@@ -392,7 +392,7 @@ const sessionEncodings = new Map();
 // Per-session stateful iconv decoders (keyed by sessionId, value: { stdout, stderr })
 const sessionDecoders = new Map();
 const iconv = require("iconv-lite");
-const { encodeTerminalInput } = require("./terminalEncoding.cjs");
+const { encodeTerminalInput, normalizeTerminalEncoding } = require("./terminalEncoding.cjs");
 
 function getSessionDecoder(sessionId, stream) {
   let decoders = sessionDecoders.get(sessionId);
@@ -446,6 +446,9 @@ function resolveLangFromCharset(charset) {
   const trimmed = String(charset).trim();
   if (/^utf-?8$/i.test(trimmed) || /^utf8$/i.test(trimmed)) {
     return "en_US.UTF-8";
+  }
+  if (normalizeTerminalEncoding(trimmed) === "gb18030" && !trimmed.includes(".")) {
+    return "zh_CN.GB18030";
   }
   return trimmed;
 }
@@ -723,6 +726,7 @@ async function connectThroughChain(event, options, jumpHosts, targetHost, target
           hostname: hopLabel,
           password: jump.password,
           logPrefix: `[Chain] Hop ${i + 1}/${totalHops}`,
+          scope: "terminal",
           onAutoFill: () => sendProgress(
             i + 1, totalHops + 1, hopLabel, 'auth-attempt', 'using saved password',
           ),
@@ -801,6 +805,7 @@ const startSessionApi = createStartSessionApi({
   createProxySocket, attachX11Forwarding, createPtyOutputBuffer, sessionLogStreamManager,
   trackSessionIdlePrompt, looksLikeIdleAutoLogout, createZmodemSentry, enableSshNoDelay, enableTcpNoDelay,
   iconv, getSessionDecoder, resetSessionDecoders, sessionEncodings, sessionDecoders, encodeTerminalInput,
+  normalizeTerminalEncoding,
   connectThroughChain, getAvailableAgentSocket, getCachedAuthMethod, setCachedAuthMethod, clearCachedAuthMethod,
   attachSshDebugLogger, logSshAlgorithms, resolveLangFromCharset, safeSend, zmodemOverwritePending,
   shouldLogSshDebugMessage, log, createSshDiagnosticLogger,
@@ -1009,7 +1014,8 @@ const sessionOpsApi = createSessionOpsApi({
   get sessions() { return sessions; },
   get electronModule() { return electronModule; },
   fs, path, os, exec, randomUUID, iconv, Buffer, process, console, setTimeout, clearTimeout,
-  getSessionDecoder, resetSessionDecoders, sessionEncodings, resolveLangFromCharset, safeSend,
+  getSessionDecoder, resetSessionDecoders, sessionEncodings, normalizeTerminalEncoding,
+  resolveLangFromCharset, safeSend,
   quoteShellArg, log, ensureMoshStatsConnection, ensureEtStatsConnection,
   execOnEtSession: (...args) => require("./terminalBridge.cjs").execOnEtSession(...args),
   getServerStats: undefined,

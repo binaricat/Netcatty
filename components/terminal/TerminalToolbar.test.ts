@@ -56,6 +56,19 @@ test("keeps SFTP visible before the terminal overflow menu for SSH sessions", ()
   assert.ok(sftpIndex < moreIndex);
 });
 
+test("keeps Scripts visible before the terminal overflow menu", () => {
+  const markup = renderToolbar(sshHost);
+
+  const scriptsIndex = markup.indexOf('aria-label="Scripts"');
+  const moreIndex = markup.indexOf('aria-label="More actions"');
+
+  assert.notEqual(scriptsIndex, -1);
+  assert.notEqual(moreIndex, -1);
+  assert.ok(scriptsIndex < moreIndex);
+  assert.equal(markup.match(/Scripts/g)?.length, 1);
+  assert.match(markup, /type="button"[^>]*aria-label="Scripts"/);
+});
+
 test("hides SFTP for local terminal sessions", () => {
   const markup = renderToolbar({
     ...sshHost,

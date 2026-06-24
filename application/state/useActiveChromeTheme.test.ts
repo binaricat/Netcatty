@@ -7,6 +7,7 @@ import {
   themeFingerprint,
 } from "./useActiveChromeTheme.ts";
 import { TERMINAL_THEMES } from "../../infrastructure/config/terminalThemes.ts";
+import { readFileSync } from "node:fs";
 
 function createInlineStyle() {
   const values = new Map<string, string>();
@@ -92,4 +93,11 @@ test("syncActiveChromeTheme refreshes top tabs when the active theme fingerprint
       delete globalWithDocument.document;
     }
   }
+});
+
+test("active chrome theme foreground uses contrast calculation", () => {
+  const source = readFileSync(new URL("./useActiveChromeTheme.ts", import.meta.url), "utf8");
+
+  assert.match(source, /resolveReadableForegroundForHsl\(cursor\)/);
+  assert.doesNotMatch(source, /cursorLightness > 55/);
 });

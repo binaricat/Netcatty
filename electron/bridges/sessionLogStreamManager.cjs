@@ -12,6 +12,7 @@ const {
   wrapTerminalHtmlContent,
 } = require("./sessionLogsBridge.cjs");
 const { createTerminalTextRenderer } = require("./terminalLogSanitizer.cjs");
+const { createProgrammaticCommandLogRewriter } = require("./programmaticCommandLog.cjs");
 
 // Active log streams keyed by sessionId
 const activeStreams = new Map();
@@ -202,6 +203,7 @@ function startStream(sessionId, opts) {
       hostLabel: hostLabel || hostname || "unknown",
       startTime: startTime || Date.now(),
       buffer: "",
+      programmaticCommandLogRewriter: createProgrammaticCommandLogRewriter(),
       sudoAutofillRewrites: [],
       sudoAutofillPending: "",
       flushTimer: null,
@@ -260,6 +262,12 @@ function registerSudoAutofillInput(sessionId, input) {
   entry.sudoAutofillRewrites = entry.sudoAutofillRewrites.slice(0, 8);
 }
 
+function registerProgrammaticCommandLogRewrite(sessionId, rewrite) {
+  const entry = activeStreams.get(sessionId);
+  if (!entry || entry.disabled) return;
+  entry.programmaticCommandLogRewriter?.queueRewrite(rewrite);
+}
+
 function renderSnapshotContent(entry, { finalize = false } = {}) {
   if (finalize) entry.renderer.finish();
   const renderOptions = finalize ? undefined : { includePendingClearedScreen: true };
@@ -315,7 +323,10 @@ function appendData(sessionId, dataChunk) {
   const entry = activeStreams.get(sessionId);
   if (!entry || entry.disabled) return;
 
-  entry.buffer += sanitizeSudoAutofillLogData(entry, dataChunk);
+  const readableData = entry.programmaticCommandLogRewriter
+    ? entry.programmaticCommandLogRewriter.append(dataChunk)
+    : dataChunk;
+  entry.buffer += sanitizeSudoAutofillLogData(entry, readableData);
 
   // Immediate flush if buffer is large
   if (entry.buffer.length + entry.sudoAutofillPending.length >= MAX_BUFFER_SIZE) {
@@ -358,6 +369,10 @@ async function stopStream(sessionId, expectedToken) {
   }
 
   // Flush remaining buffer
+  const readablePending = entry.programmaticCommandLogRewriter?.finish();
+  if (readablePending) {
+    entry.buffer += sanitizeSudoAutofillLogData(entry, readablePending);
+  }
   entry.buffer += sanitizeSudoAutofillLogData(entry, "", { final: true });
   flushBuffer(entry);
   await waitForSnapshotIdle(entry);
@@ -405,6 +420,7 @@ module.exports = {
   startStream,
   appendData,
   registerSudoAutofillInput,
+  registerProgrammaticCommandLogRewrite,
   stopStream,
   hasStream,
   cleanupAll,

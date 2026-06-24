@@ -237,18 +237,20 @@ function setQuittingForUpdate(enabled) {
 }
 
 /**
- * The webContents for usable main windows. Used by the install handler to ask
+ * The webContents for usable app-content windows. Used by the install handler to ask
  * every renderer that can own editor tabs about unsaved work before committing
- * to a quit. Targets registered main windows specifically (not
+ * to a quit. Targets registered app-content windows specifically (not
  * getAllWindows()[0]) so we never query tray/settings windows, whose renderers
  * don't participate in the dirty-editor protocol.
  */
-function getMainWebContentsList() {
+function getAppContentWebContentsList() {
   try {
     const windowManager = require("./windowManager.cjs");
-    const windows = typeof windowManager.getMainWindows === "function"
-      ? windowManager.getMainWindows()
-      : [windowManager.getMainWindow?.()].filter(Boolean);
+    const windows = typeof windowManager.getAppContentWindows === "function"
+      ? windowManager.getAppContentWindows()
+      : typeof windowManager.getMainWindows === "function"
+        ? windowManager.getMainWindows()
+        : [windowManager.getMainWindow?.()].filter(Boolean);
     return windows
       .filter((win) => win && !win.isDestroyed?.())
       .map((win) => win.webContents)
@@ -492,7 +494,7 @@ function registerHandlers(ipcMain) {
     // afterwards. If no main window is reachable (no window / crashed
     // renderer) there's no user to ask, so we install directly — matching the
     // before-quit fail-open path.
-    const mainWebContents = getMainWebContentsList();
+    const mainWebContents = getAppContentWebContentsList();
     if (mainWebContents.length > 0) {
       const dirtyResults = await Promise.all(
         mainWebContents.map((webContents) => queryDirtyEditorsSafe(webContents, ipcMain)),

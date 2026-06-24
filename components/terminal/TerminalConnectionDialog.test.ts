@@ -171,3 +171,15 @@ test("defaults the displayed ET port to 2022 when no etPort is set", () => {
   assert.match(markup, /10\.2\.0\.32:2022/);
   assert.equal(markup.includes("10.2.0.32:22"), false);
 });
+
+test("shows restored session copy for disconnected restored placeholders", () => {
+  const markup = renderDialog({
+    status: "disconnected",
+    error: null,
+    restoreState: "restored-disconnected",
+  } as Partial<React.ComponentProps<typeof TerminalConnectionDialog>>);
+
+  assert.match(markup, /Restored session/);
+  assert.match(markup, /This terminal is disconnected/);
+  assert.match(markup, /Reconnect/);
+});

@@ -12,6 +12,10 @@ test("normalizeTerminalEncoding maps GB variants onto the gb18030 superset", () 
   assert.equal(normalizeTerminalEncoding("gbk"), "gb18030");
   assert.equal(normalizeTerminalEncoding("GB2312"), "gb18030");
   assert.equal(normalizeTerminalEncoding("gb-18030"), "gb18030");
+  assert.equal(normalizeTerminalEncoding("zh_CN.GB18030"), "gb18030");
+  assert.equal(normalizeTerminalEncoding("zh_CN.GBK"), "gb18030");
+  assert.equal(normalizeTerminalEncoding("zh_CN.cp936"), "gb18030");
+  assert.equal(normalizeTerminalEncoding("zh_CN.GB18030@custom"), "gb18030");
 });
 
 test("normalizeTerminalEncoding normalizes utf-8 spellings and defaults", () => {

@@ -16,6 +16,8 @@ type TerminalTimestampGutterProps = {
   containerRef: RefObject<HTMLDivElement | null>;
   enabled: boolean;
   top: string;
+  left?: number;
+  bottom?: number;
   sessionId: string;
   color: string;
   fontFamily: string;
@@ -100,6 +102,8 @@ export function TerminalTimestampGutter({
   containerRef,
   enabled,
   top,
+  left = 0,
+  bottom = 0,
   sessionId,
   color,
   fontFamily,
@@ -157,13 +161,19 @@ export function TerminalTimestampGutter({
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
     let disposables: DisposableLike[] = [];
     let resizeObserver: ResizeObserver | null = null;
+    let lastRenderSignature = "";
+
+    const clearGutter = () => {
+      lastRenderSignature = "";
+      clearElement(gutter);
+    };
 
     const render = () => {
       rafId = null;
       const term = termRef.current;
       const container = containerRef.current;
       if (!enabled || !term || !container) {
-        clearElement(gutter);
+        clearGutter();
         return;
       }
 
@@ -171,16 +181,29 @@ export function TerminalTimestampGutter({
       const rows = Math.max(1, term.rows || 1);
       const cellHeight = screen.clientHeight / rows;
       if (!Number.isFinite(cellHeight) || cellHeight <= 0) {
-        clearElement(gutter);
+        clearGutter();
         return;
       }
 
       const screenRect = screen.getBoundingClientRect();
       const gutterRect = gutter.getBoundingClientRect();
       const screenTop = screenRect.top - gutterRect.top;
+      const visibleRows = getVisibleTerminalLineTimestampRows(term);
+      const signature = JSON.stringify({
+        screenTop,
+        cellHeight,
+        color,
+        fontFamily: typography.fontFamily,
+        fontSize: typography.fontSize,
+        fontWeight: typography.fontWeight,
+        rows: visibleRows,
+      });
+      if (signature === lastRenderSignature) return;
+      lastRenderSignature = signature;
+
       const fragment = document.createDocumentFragment();
 
-      for (const { row, label } of getVisibleTerminalLineTimestampRows(term)) {
+      for (const { row, label } of visibleRows) {
         const item = document.createElement("div");
         item.textContent = label;
         item.className = "absolute left-0 right-0 px-2 text-right tabular-nums whitespace-nowrap";
@@ -213,7 +236,7 @@ export function TerminalTimestampGutter({
       const term = termRef.current;
       const container = containerRef.current;
       if (!enabled || !term || !container) {
-        clearElement(gutter);
+        clearGutter();
         if (enabled) {
           retryTimer = setTimeout(attach, 50);
         }
@@ -256,6 +279,8 @@ export function TerminalTimestampGutter({
     color,
     containerRef,
     enabled,
+    bottom,
+    left,
     sessionId,
     termRef,
     top,
@@ -270,10 +295,14 @@ export function TerminalTimestampGutter({
     <div
       ref={gutterRef}
       aria-hidden="true"
-      className="pointer-events-none absolute bottom-0 left-0 z-[1] overflow-hidden select-none border-r border-white/5 bg-black/10 text-[color:var(--terminal-ui-fg)]"
+      className="pointer-events-none absolute z-[1] overflow-hidden select-none text-[color:var(--terminal-ui-fg)]"
       style={{
         top,
+        bottom,
+        left,
         width,
+        backgroundColor: "var(--terminal-ui-bg)",
+        boxShadow: "inset -0.5px 0 0 color-mix(in srgb, var(--terminal-ui-fg) 8%, transparent)",
       }}
       data-section="terminal-timestamp-gutter"
     />

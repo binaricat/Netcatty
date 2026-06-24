@@ -347,8 +347,9 @@ function SettingsTerminalTab(props: {
           />
         </SettingRow>
       </div>
-      {followAppTerminalTheme ? (
-        <div className="space-y-2">
+      <div className="space-y-2">
+        {followAppTerminalTheme && (
+          <>
           <div>
             <div className="text-xs text-muted-foreground mb-1.5 px-1">
               {t("settings.terminal.theme.darkTheme")}
@@ -373,14 +374,21 @@ function SettingsTerminalTab(props: {
                 : t("settings.terminal.theme.selectButton")}
             />
           </div>
-        </div>
-      ) : (
-        <ThemePreviewButton
-          theme={currentTheme}
-          onClick={() => setThemeModalOpen(true)}
-          buttonLabel={t("settings.terminal.theme.selectButton")}
-        />
-      )}
+          </>
+        )}
+        {!followAppTerminalTheme && (
+          <div>
+            <div className="text-xs text-muted-foreground mb-1.5 px-1">
+              {t("terminal.themeModal.globalTheme")}
+            </div>
+            <ThemePreviewButton
+              theme={currentTheme}
+              onClick={() => setThemeModalOpen(true)}
+              buttonLabel={t("settings.terminal.theme.selectButton")}
+            />
+          </div>
+        )}
+      </div>
 
       <ThemeSelectModal
         open={themeModalOpen}
@@ -551,6 +559,16 @@ function SettingsTerminalTab(props: {
             options={fontWeightOptions}
             onChange={(v) => updateTerminalSetting("fontWeightBold", parseInt(v))}
             className="w-40"
+          />
+        </SettingRow>
+
+        <SettingRow
+          label={t("settings.terminal.font.smoothing")}
+          description={t("settings.terminal.font.smoothing.desc")}
+        >
+          <Toggle
+            checked={terminalSettings.fontSmoothing}
+            onChange={(v) => updateTerminalSetting("fontSmoothing", v)}
           />
         </SettingRow>
 
@@ -961,6 +979,38 @@ function SettingsTerminalTab(props: {
             className="w-32"
           />
         </SettingRow>
+        <SettingRow
+          label={t("settings.terminal.rendering.hibernateHiddenTabs")}
+          description={t("settings.terminal.rendering.hibernateHiddenTabs.desc")}
+        >
+          <Toggle
+            checked={terminalSettings.hibernateHiddenTabs}
+            onChange={(v) => updateTerminalSetting("hibernateHiddenTabs", v)}
+          />
+        </SettingRow>
+        {terminalSettings.hibernateHiddenTabs && (
+          <SettingRow
+            label={t("settings.terminal.rendering.hibernateHiddenTabsDelay")}
+            description={t("settings.terminal.rendering.hibernateHiddenTabsDelay.desc")}
+          >
+            <div className="flex items-center gap-2">
+              <Input
+                type="number"
+                min={5}
+                max={600}
+                value={terminalSettings.hibernateHiddenTabsDelaySec}
+                onChange={(e) => {
+                  const val = parseInt(e.target.value, 10);
+                  if (!Number.isNaN(val) && val >= 5 && val <= 600) {
+                    updateTerminalSetting("hibernateHiddenTabsDelaySec", val);
+                  }
+                }}
+                className="w-20"
+              />
+              <span className="text-sm text-muted-foreground">{t("settings.terminal.serverStats.seconds")}</span>
+            </div>
+          </SettingRow>
+        )}
       </div>
       {/* Autocomplete */}
       <SectionHeader title={t("settings.terminal.section.workspaceFocus")} />

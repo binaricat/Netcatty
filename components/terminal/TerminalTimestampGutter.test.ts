@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import {
   TERMINAL_TIMESTAMP_GUTTER_HORIZONTAL_PADDING,
@@ -60,4 +61,13 @@ test("timestamp gutter typography follows terminal typography", () => {
       fontWeight: 500,
     },
   );
+});
+
+test("timestamp gutter uses the terminal background", () => {
+  const source = readFileSync(new URL("./TerminalTimestampGutter.tsx", import.meta.url), "utf8");
+
+  assert.match(source, /backgroundColor: "var\(--terminal-ui-bg\)"/);
+  assert.doesNotMatch(source, /bg-black\/10/);
+  assert.match(source, /boxShadow: "inset -0\.5px 0 0 color-mix\(in srgb, var\(--terminal-ui-fg\) 8%, transparent\)"/);
+  assert.doesNotMatch(source, /border-r/);
 });

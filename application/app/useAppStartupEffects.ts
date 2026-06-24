@@ -8,14 +8,35 @@ import { toast } from '../../components/ui/toast';
 
 type StartupEffectsContext = Record<string, any>;
 
+type KeyboardInteractiveScope = "terminal" | "external";
+type KeyboardInteractiveRequestLike = {
+  scope?: KeyboardInteractiveScope;
+  sessionId?: string;
+};
+type SessionIdLike = { id: string };
+
+export function shouldQueueKeyboardInteractiveRequest(
+  request: KeyboardInteractiveRequestLike,
+  sessions: SessionIdLike[],
+): boolean {
+  if (request.scope !== "terminal") return true;
+  if (!request.sessionId) return false;
+  return sessions.some((session) => session.id === request.sessionId);
+}
+
 export function useAppStartupEffects(ctx: StartupEffectsContext) {
-  const {dismissUpdate, groupConfigs, hosts, identities,
+  const {dismissUpdate, enabled = true, groupConfigs, hosts, identities,
     installUpdate, isVaultInitialized, keys, openSettingsWindow, portForwardingRules, proxyProfiles, sessions, setKeyboardInteractiveQueue,
     t, terminalSettings, updateState, workspaces,
   } = ctx;
+  const sessionsRef = useRef(sessions);
+  useEffect(() => {
+    sessionsRef.current = sessions;
+  }, [sessions]);
 
   // Show toast notification when update is available (only when auto-download is idle)
   useEffect(() => {
+    if (!enabled) return;
     // Skip "update available" toast if auto-download has already started or completed
     if (updateState.autoDownloadStatus !== 'idle') return;
     // Don't show automatic notification when auto-update is disabled
@@ -41,12 +62,13 @@ export function useAppStartupEffects(ctx: StartupEffectsContext) {
         }
       );
     }
-  }, [updateState.hasUpdate, updateState.latestRelease, updateState.autoDownloadStatus, t, openSettingsWindow, dismissUpdate]);
+  }, [enabled, updateState.hasUpdate, updateState.latestRelease, updateState.autoDownloadStatus, t, openSettingsWindow, dismissUpdate]);
 
   // Track previous autoDownloadStatus so toast effects fire only on actual transitions,
   // not when unrelated deps (installUpdate, openSettingsWindow) change their reference.
   const prevAutoDownloadStatusRef = useRef(updateState.autoDownloadStatus);
   useEffect(() => {
+    if (!enabled) return;
     const prev = prevAutoDownloadStatusRef.current;
     prevAutoDownloadStatusRef.current = updateState.autoDownloadStatus;
     if (prev === updateState.autoDownloadStatus) return;
@@ -72,10 +94,11 @@ export function useAppStartupEffects(ctx: StartupEffectsContext) {
         }
       );
     }
-  }, [updateState.autoDownloadStatus, updateState.latestRelease?.version, t, installUpdate, openSettingsWindow]);
+  }, [enabled, updateState.autoDownloadStatus, updateState.latestRelease?.version, t, installUpdate, openSettingsWindow]);
 
   // Auto-start port forwarding rules on app launch
   usePortForwardingAutoStart({
+    enabled,
     isVaultInitialized,
     hosts,
     keys,
@@ -87,6 +110,7 @@ export function useAppStartupEffects(ctx: StartupEffectsContext) {
 
   // Sync tray menu data + handle tray actions
   useEffect(() => {
+    if (!enabled) return;
     const bridge = netcattyBridge.get();
     if (!bridge?.updateTrayMenuData) return;
 
@@ -116,7 +140,7 @@ export function useAppStartupEffects(ctx: StartupEffectsContext) {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [sessions, portForwardingRules, workspaces]);
+  }, [enabled, sessions, portForwardingRules, workspaces]);
 
   // Quit guard: block app exit while any editor tab has unsaved changes.
   // Main process sends "app:query-dirty-editors"; we respond with the result.
@@ -146,7 +170,7 @@ export function useAppStartupEffects(ctx: StartupEffectsContext) {
       }
     });
     return unsub;
-  }, [t]);
+  }, [enabled, t]);
 
   // Keyboard-interactive authentication (2FA/MFA) event listener
   useEffect(() => {
@@ -154,6 +178,7 @@ export function useAppStartupEffects(ctx: StartupEffectsContext) {
     if (!bridge?.onKeyboardInteractive) return;
 
     const unsubscribe = bridge.onKeyboardInteractive((request) => {
+      if (!shouldQueueKeyboardInteractiveRequest(request, sessionsRef.current)) return;
       console.log('[App] Keyboard-interactive request received:', request);
       // Add to queue instead of replacing - supports multiple concurrent sessions
       setKeyboardInteractiveQueue(prev => [...prev, {
@@ -170,7 +195,7 @@ export function useAppStartupEffects(ctx: StartupEffectsContext) {
     return () => {
       unsubscribe?.();
     };
-  }, [setKeyboardInteractiveQueue]);
+  }, [enabled, setKeyboardInteractiveQueue]);
 
 
 }

@@ -103,6 +103,10 @@ Object.defineProperty(globalThis, "window", {
 
 const { getCompletions } = await import("./autocomplete/completionEngine.ts");
 const { clearHistory, recordCommand } = await import("./autocomplete/commandHistoryStore.ts");
+const {
+  normalizePathTokenForLookup,
+  shouldPreferRemoteShellCwd,
+} = await import("./autocomplete/remotePathCompleter.ts");
 
 test.beforeEach(() => {
   localStorage.clear();
@@ -162,6 +166,54 @@ test("getCompletions uses the remote shell cwd for relative path arguments inste
   assert.equal(completions[0]?.source, "path");
   assert.equal(completions[0]?.text, "cat worktree.txt");
   assert.equal(completions.some((entry) => entry.text.includes("~")), false);
+});
+
+test("getCompletions uses absolute prompt cwd for remote relative path arguments", async () => {
+  bridgeState.remoteEntriesByPath.set(".", [{ name: "old-user-file.txt", type: "file" }]);
+  bridgeState.remoteEntriesByPath.set("/etc", [{ name: "passwd", type: "file" }]);
+
+  const completions = await getCompletions("cat pa", {
+    hostId: "host-1",
+    os: "linux",
+    protocol: "ssh",
+    sessionId: "session-1",
+    cwd: "/etc",
+    cwdSource: "prompt",
+  });
+
+  assert.deepEqual(bridgeState.remoteCalls, ["/etc"]);
+  assert.equal(completions[0]?.source, "path");
+  assert.equal(completions[0]?.text, "cat passwd");
+  assert.equal(completions.some((entry) => entry.text === "cat old-user-file.txt"), false);
+});
+
+test("remote subdirectory lookups keep absolute prompt cwd", () => {
+  const preferRelativeCwd = shouldPreferRemoteShellCwd("ssh", "session-1", "linux", "/etc", "prompt");
+
+  assert.equal(preferRelativeCwd, false);
+  assert.equal(
+    normalizePathTokenForLookup("pam.d/", "/etc", { preferRelativeCwd }),
+    "/etc/pam.d/",
+  );
+});
+
+test("getCompletions keeps remote shell cwd when absolute cwd is only a fallback", async () => {
+  bridgeState.remoteEntriesByPath.set("/old", [{ name: "old-user-file.txt", type: "file" }]);
+  bridgeState.remoteEntriesByPath.set(".", [{ name: "worktree.txt", type: "file" }]);
+
+  const completions = await getCompletions("cat wo", {
+    hostId: "host-1",
+    os: "linux",
+    protocol: "ssh",
+    sessionId: "session-1",
+    cwd: "/old",
+    cwdSource: "fallback",
+  });
+
+  assert.deepEqual(bridgeState.remoteCalls, ["."]);
+  assert.equal(completions[0]?.source, "path");
+  assert.equal(completions[0]?.text, "cat worktree.txt");
+  assert.equal(completions.some((entry) => entry.text === "cat old-user-file.txt"), false);
 });
 
 test("getCompletions does not reuse cached remote relative listings after cwd changes", async () => {

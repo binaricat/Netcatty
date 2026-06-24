@@ -5,8 +5,11 @@ import { netcattyBridge } from "../../../infrastructure/services/netcattyBridge"
 import { logger } from "../../../lib/logger";
 import { pasteTextIntoTerminal } from "../runtime/terminalUserPaste";
 import { clearTerminalViewport } from "../clearTerminalViewport";
-import { extractRootPathsFromClipboardFiles } from "../terminalHelpers";
-import { handleRemoteClipboardImagePaste } from "../clipboardImagePaste";
+import {
+  handleRemoteClipboardImageUpload,
+  type RemoteClipboardImageUploadResult,
+} from "../clipboardImagePaste";
+import { handleTerminalClipboardPaste } from "../terminalClipboardPaste";
 
 type BroadcastPasteRefs = {
   sourceSessionId: string;
@@ -39,6 +42,7 @@ export const useTerminalContextActions = ({
   terminalBackend,
   getRemoteCwd,
   scrollToBottomAfterProgrammaticInput,
+  onClipboardImageUploadResult,
 }: {
   termRef: RefObject<XTerm | null>;
   sourceSessionId: string;
@@ -54,6 +58,7 @@ export const useTerminalContextActions = ({
   };
   getRemoteCwd?: () => Promise<string | null | undefined>;
   scrollToBottomAfterProgrammaticInput?: (data: string) => void;
+  onClipboardImageUploadResult?: (result: RemoteClipboardImageUploadResult) => void;
 }) => {
   const broadcastUserPasteData = useCallback((data: string) => {
     return broadcastTerminalPasteData(data, {
@@ -78,51 +83,54 @@ export const useTerminalContextActions = ({
     if (!term) return;
     try {
       const bridge = netcattyBridge.get();
-      if (supportsRemoteImagePaste && bridge?.readClipboardImage && getRemoteCwd) {
-        const handled = await handleRemoteClipboardImagePaste({
-          bridge,
-          getRemoteCwd,
-          sessionId: sessionRef.current,
-          terminalBackend,
-          term,
-          scrollToBottomAfterProgrammaticInput,
-        });
-        if (handled) return;
-      }
-
-      const readClipboardFiles = bridge?.readClipboardFiles;
-      if (readClipboardFiles) {
-        const files = await readClipboardFiles();
-        if (files.length > 0 && isLocalConnection && sessionRef.current) {
-          const paths = extractRootPathsFromClipboardFiles(files);
-          if (paths.length > 0) {
-            terminalBackend.writeToSession(sessionRef.current, paths.join(" "));
-            term.focus();
-            return;
-          }
-        }
-      }
-
-      const text = await navigator.clipboard.readText();
-      if (text && sessionRef.current) {
-        pasteTextIntoTerminal(term, text, {
-          scrollOnPaste: scrollOnPasteRef?.current ?? false,
-          onPasteData: broadcastUserPasteData,
-        });
-      }
+      await handleTerminalClipboardPaste({
+        bridge,
+        isLocalConnection,
+        readClipboardText: () => navigator.clipboard.readText(),
+        scrollOnPaste: scrollOnPasteRef?.current ?? false,
+        onPasteData: broadcastUserPasteData,
+        sessionId: sessionRef.current,
+        terminalBackend,
+        term,
+      });
     } catch (err) {
       logger.warn("Failed to paste from clipboard", err);
     }
   }, [
     broadcastUserPasteData,
     isLocalConnection,
-    supportsRemoteImagePaste,
     sessionRef,
     termRef,
     scrollOnPasteRef,
     terminalBackend,
+  ]);
+
+  const onUploadClipboardImage = useCallback(async () => {
+    const term = termRef.current;
+    if (!term) return;
+    try {
+      const bridge = netcattyBridge.get();
+      const result = await handleRemoteClipboardImageUpload({
+        bridge,
+        getRemoteCwd: getRemoteCwd ?? (async () => undefined),
+        sessionId: supportsRemoteImagePaste ? sessionRef.current : null,
+        terminalBackend,
+        term,
+        scrollToBottomAfterProgrammaticInput,
+      });
+      onClipboardImageUploadResult?.(result);
+    } catch (err) {
+      logger.warn("Failed to upload clipboard image", err);
+      onClipboardImageUploadResult?.({ ok: false, reason: "upload-failed" });
+    }
+  }, [
     getRemoteCwd,
+    onClipboardImageUploadResult,
     scrollToBottomAfterProgrammaticInput,
+    sessionRef,
+    supportsRemoteImagePaste,
+    termRef,
+    terminalBackend,
   ]);
 
   const onPasteSelection = useCallback(() => {
@@ -156,5 +164,13 @@ export const useTerminalContextActions = ({
     onHasSelectionChange?.(true);
   }, [onHasSelectionChange, termRef]);
 
-  return { onCopy, onPaste, onPasteSelection, onSelectAll, onClear, onSelectWord };
+  return {
+    onCopy,
+    onPaste,
+    onUploadClipboardImage: supportsRemoteImagePaste ? onUploadClipboardImage : undefined,
+    onPasteSelection,
+    onSelectAll,
+    onClear,
+    onSelectWord,
+  };
 };

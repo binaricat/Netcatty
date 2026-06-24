@@ -1,7 +1,7 @@
 /**
  * Port Forwarding utilities and constants
  */
-import { PortForwardingType } from '../../domain/models';
+import type { PortForwardingRule, PortForwardingType } from '../../domain/models';
 
 const TYPE_LABEL_KEYS: Record<PortForwardingType, string> = {
   local: 'pf.type.local',
@@ -40,6 +40,29 @@ export function getTypeDescription(
   type: PortForwardingType
 ): string {
   return t(TYPE_DESCRIPTION_KEYS[type]);
+}
+
+export function buildRuleSummary(
+  t: (key: string, vars?: Record<string, unknown>) => string,
+  rule: PortForwardingRule
+): string {
+  const vars = {
+    bindAddress: rule.bindAddress,
+    localPort: rule.localPort,
+    remoteHost: rule.remoteHost,
+    remotePort: rule.remotePort,
+  };
+
+  switch (rule.type) {
+    case 'local':
+      return t('pf.rule.summary.local', vars);
+    case 'remote':
+      return t('pf.rule.summary.remote', vars);
+    case 'dynamic':
+      return t('pf.rule.summary.dynamic', vars);
+    default:
+      return t('pf.rule.summary.local', vars);
+  }
 }
 
 /**

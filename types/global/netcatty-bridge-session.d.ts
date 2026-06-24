@@ -226,7 +226,15 @@ declare global {
       };
     }>;
     setSessionEncoding?(sessionId: string, encoding: string): Promise<{ ok: boolean; encoding: string }>;
-    writeToSession(sessionId: string, data: string, options?: { automated?: boolean }): void;
+    writeToSession(
+      sessionId: string,
+      data: string,
+      options?: {
+        automated?: boolean;
+        lineDelayMs?: number;
+        logRewrite?: { sentCommand: string; displayCommand: string };
+      },
+    ): void;
     resizeSession(sessionId: string, cols: number, rows: number): void;
     setSessionFlowPaused(sessionId: string, paused: boolean): void;
     closeSession(sessionId: string): void;
@@ -294,6 +302,7 @@ declare global {
         prompts: Array<{ prompt: string; echo: boolean }>;
         hostname: string;
         savedPassword?: string | null;
+        scope?: "terminal" | "external";
       }) => void
     ): () => void;
     respondKeyboardInteractive?(

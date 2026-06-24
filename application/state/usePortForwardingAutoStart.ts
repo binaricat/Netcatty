@@ -18,6 +18,7 @@ import {
 import { logger } from "../../lib/logger";
 
 export interface UsePortForwardingAutoStartOptions {
+  enabled?: boolean;
   isVaultInitialized: boolean;
   hosts: Host[];
   keys: SSHKey[];
@@ -98,6 +99,7 @@ export const getAutoStartRuleBlockReason = (
  * This hook should be called at the App level to run on app launch.
  */
 export const usePortForwardingAutoStart = ({
+  enabled = true,
   isVaultInitialized,
   hosts,
   keys,
@@ -202,6 +204,7 @@ export const usePortForwardingAutoStart = ({
 
   // Set up the reconnect callback
   useEffect(() => {
+    if (!enabled) return;
     const handleReconnect = async (
       ruleId: string,
       onStatusChange: (status: PortForwardingRule["status"], error?: string) => void,
@@ -249,10 +252,11 @@ export const usePortForwardingAutoStart = ({
     return () => {
       setReconnectCallback(null);
     };
-  }, [isHostAuthReady, resolveEffectiveHost, resolveEffectiveHosts]);
+  }, [enabled, isHostAuthReady, resolveEffectiveHost, resolveEffectiveHosts]);
 
   // Auto-start rules on app launch
   useEffect(() => {
+    if (!enabled) return;
     if (autoStartExecutedRef.current) return;
     if (!isVaultInitialized) return;
 
@@ -319,6 +323,7 @@ export const usePortForwardingAutoStart = ({
     void runAutoStart();
   }, [
     groupConfigs,
+    enabled,
     hosts,
     identities,
     isHostAuthReady,

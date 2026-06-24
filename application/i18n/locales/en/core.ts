@@ -144,6 +144,17 @@ export const enCoreMessages: Messages = {
   'settings.update.autoUpdateEnabled': 'Automatic Updates',
   'settings.update.autoUpdateEnabledDesc': 'Automatically check and download updates when available.',
 
+  // Settings > Session Restore
+  'settings.sessionRestore.title': 'Session Restore',
+  'settings.sessionRestore.restorePreviousSession': 'Restore previous tabs and workspaces',
+  'settings.sessionRestore.restorePreviousSessionDesc': 'Reopen terminal tabs and workspace layouts from the last app session.',
+  'settings.sessionRestore.restoreTerminalCwd': 'Restore terminal working directory',
+  'settings.sessionRestore.restoreTerminalCwdDesc': 'When reconnecting a restored terminal, try to return to its last known directory without blocking the connection.',
+  'terminal.restore.placeholder.title': 'Restored session',
+  'terminal.restore.placeholder.desc': 'This terminal is disconnected. Reconnect when you are ready to start a new shell for this tab.',
+  'terminal.restore.placeholder.reconnect': 'Reconnect',
+  'terminal.restore.cwdLog': 'Restoring working directory: {cwd}',
+
   // Settings > Session Logs
   'settings.sessionLogs.title': 'Session Logs',
   'settings.sessionLogs.description': 'Configure session log export and auto-save settings.',
@@ -323,6 +334,8 @@ export const enCoreMessages: Messages = {
   'settings.terminal.font.weight.black': 'Black',
   'settings.terminal.font.weightBold': 'Bold font weight',
   'settings.terminal.font.weightBold.desc': 'Weight for bold text (100-900)',
+  'settings.terminal.font.smoothing': 'Font smoothing',
+  'settings.terminal.font.smoothing.desc': 'Use native macOS font anti-aliasing',
   'settings.terminal.font.linePadding': 'Line padding',
   'settings.terminal.font.linePadding.desc': 'Additional space between lines (0-10)',
   'settings.terminal.font.emulationType': 'Terminal emulation type',
@@ -466,6 +479,10 @@ export const enCoreMessages: Messages = {
   'settings.terminal.rendering.renderer': 'Renderer',
   'settings.terminal.rendering.renderer.desc': 'Choose the terminal rendering technology. Auto will use DOM on low-memory devices. Changes take effect on new terminal sessions.',
   'settings.terminal.rendering.auto': 'Auto',
+  'settings.terminal.rendering.hibernateHiddenTabs': 'Hibernate hidden tabs',
+  'settings.terminal.rendering.hibernateHiddenTabs.desc': 'Dispose the terminal renderer for off-screen tabs to save memory while keeping the SSH session connected. Skipped during file transfers.',
+  'settings.terminal.rendering.hibernateHiddenTabsDelay': 'Hibernate delay',
+  'settings.terminal.rendering.hibernateHiddenTabsDelay.desc': 'How long a tab must stay off-screen before its renderer is released (5–600 seconds).',
 
   // Settings > Terminal > Workspace Focus Indicator
   'settings.terminal.section.workspaceFocus': 'Workspace Focus Indicator',
@@ -561,7 +578,7 @@ export const enCoreMessages: Messages = {
   'sync.autoSync.emptyVaultConflict.restoreDesc': 'Recommended — recover your hosts, keys, and snippets from the cloud backup',
   'sync.autoSync.emptyVaultConflict.keepEmpty': 'Keep Empty',
   'sync.autoSync.emptyVaultConflict.keepEmptyDesc': 'Start fresh with an empty vault',
-  'sync.autoSync.emptyVaultConflict.cloudSummary': '{hosts} hosts, {keys} keys, {snippets} snippets, {proxyProfiles} proxies',
+  'sync.autoSync.emptyVaultConflict.cloudSummary': '{hosts} hosts, {keys} keys, {snippets} snippets, {notes} notes, {proxyProfiles} proxies',
   'sync.autoSync.emptyVaultManual': 'Cannot sync: the local vault is empty. Restore from a local backup or enable Force Push in the sync panel first.',
 
   'sync.blocked.title': 'Sync paused',
@@ -598,6 +615,7 @@ export const enCoreMessages: Messages = {
   'vault.nav.proxies': 'Proxies',
   'vault.nav.portForwarding': 'Port Forwarding',
   'vault.nav.snippets': 'Snippets',
+  'vault.nav.notes': 'Notes',
   'vault.nav.knownHosts': 'Known Hosts',
   'vault.nav.logs': 'Logs',
 
@@ -698,5 +716,6 @@ export const enCoreMessages: Messages = {
   'vault.hosts.errors.nameRequired': 'Host name is required.',
   'vault.hosts.empty.title': 'Set up your hosts',
   'vault.hosts.empty.desc': 'Save hosts to quickly connect to your servers, VMs, and containers.',
+  'deepLink.ssh.invalid': 'Invalid ssh:// link',
 
 };

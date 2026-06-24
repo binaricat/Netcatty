@@ -105,6 +105,7 @@ function createZmodemSentry(opts) {
   let active = false;
   let currentZSession = null;
   let _needsDrain = false;
+  let _sawUploadBackpressure = false;
   const pendingEchoes = [];
   let pendingTerminalSuppression = null;
   let cancelInterruptTimer = null;
@@ -385,7 +386,10 @@ function createZmodemSentry(opts) {
       const ok = writeToRemote(Buffer.from(octets));
       // Track backpressure: if stream.write() returned false, the
       // kernel TCP buffer is full.  The upload loop should pause.
-      if (ok === false) _needsDrain = true;
+      if (ok === false) {
+        _needsDrain = true;
+        _sawUploadBackpressure = true;
+      }
     },
 
     on_detect(detection) {
@@ -425,6 +429,14 @@ function createZmodemSentry(opts) {
         getDragDropUpload: () => dragDropUpload,
         takeDragDropUpload,
         clearDragDropUpload,
+        hasUploadBackpressure: () => _sawUploadBackpressure,
+        resetUploadBackpressure: () => {
+          _sawUploadBackpressure = false;
+        },
+        onUploadTimeout: () => {
+          ignoreDetectionUntil = Date.now() + 1000;
+          cooldownUntil = Date.now() + COOLDOWN_MS;
+        },
         waitForDrain: () => {
           if (!_needsDrain) return Promise.resolve();
           _needsDrain = false;
@@ -629,20 +641,35 @@ function createZmodemSentry(opts) {
 // Shared helpers (module-level, usable from handleUpload / handleDownload)
 // ---------------------------------------------------------------------------
 
+const UPLOAD_FILE_END_TIMEOUT_MS = 45000;
+const UPLOAD_BACKPRESSURE_FILE_END_TIMEOUT_MS = 120000;
+const UPLOAD_SESSION_CLOSE_TIMEOUT_MS = 15000;
+
+function resolveTimeoutMs(value, fallback) {
+  return Number.isFinite(value) && value >= 0 ? value : fallback;
+}
+
 /**
  * Race a promise against a timeout.  If the promise doesn't settle within
- * `ms`, resolve with undefined instead of hanging forever.  This prevents
- * zmodem.js internal promises (xfer.end, zsession.close) from blocking
- * indefinitely after cancel/abort.
+ * `ms`, reject instead of hanging forever.  This prevents zmodem.js internal
+ * promises (xfer.end, zsession.close) from blocking indefinitely.
  */
-function withTimeout(promise, ms) {
+function withTimeout(promise, ms, message = "ZMODEM handshake timeout") {
   let timer;
   return Promise.race([
-    promise,
+    Promise.resolve(promise),
     new Promise((_, reject) => {
-      timer = setTimeout(() => reject(new Error("ZMODEM handshake timeout")), ms);
+      timer = setTimeout(() => {
+        const err = new Error(message);
+        err.code = "NETCATTY_ZMODEM_TIMEOUT";
+        reject(err);
+      }, ms);
     }),
   ]).finally(() => clearTimeout(timer));
+}
+
+function isZmodemTimeoutError(err) {
+  return err && err.code === "NETCATTY_ZMODEM_TIMEOUT";
 }
 
 /**
@@ -654,6 +681,33 @@ function abortRemoteProcess(writeToRemote) {
   setTimeout(() => {
     try { writeToRemote(Buffer.from("\x03")); } catch { /* ignore */ }
   }, 150);
+}
+
+function resolveUploadFileEndTimeoutMs(opts) {
+  const normalTimeout = resolveTimeoutMs(
+    opts.uploadFileEndTimeoutMs,
+    UPLOAD_FILE_END_TIMEOUT_MS,
+  );
+  const slowTimeout = resolveTimeoutMs(
+    opts.slowUploadFileEndTimeoutMs,
+    UPLOAD_BACKPRESSURE_FILE_END_TIMEOUT_MS,
+  );
+
+  return opts.hasUploadBackpressure?.()
+    ? Math.max(normalTimeout, slowTimeout)
+    : normalTimeout;
+}
+
+async function waitForUploadHandshake(promise, ms, message, opts) {
+  try {
+    return await withTimeout(promise, ms, message);
+  } catch (err) {
+    if (isZmodemTimeoutError(err)) {
+      try { opts.onUploadTimeout?.(); } catch { /* ignore */ }
+      abortRemoteProcess(opts.writeToRemote);
+    }
+    throw err;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -676,6 +730,10 @@ async function handleUpload(zsession, opts) {
   const contents = getWebContents();
   const { BrowserWindow, dialog } = getElectron();
   const yieldToIO = () => new Promise((resolve) => setImmediate(resolve));
+  const uploadSessionCloseTimeoutMs = resolveTimeoutMs(
+    opts.uploadSessionCloseTimeoutMs,
+    UPLOAD_SESSION_CLOSE_TIMEOUT_MS,
+  );
 
   const dragDrop = opts.takeDragDropUpload?.() ?? opts.getDragDropUpload?.();
   let filePaths;
@@ -745,6 +803,7 @@ async function handleUpload(zsession, opts) {
 
   for (let i = 0; i < offers.length; i++) {
     const { filePath, stat, name } = offers[i];
+    opts.resetUploadBackpressure?.();
 
     safeSend(contents, "netcatty:zmodem:progress", {
       sessionId,
@@ -818,13 +877,23 @@ async function handleUpload(zsession, opts) {
         transferType: "upload",
         finalizing: true,
       });
-      await withTimeout(xfer.end(), 120000);
+      await waitForUploadHandshake(
+        xfer.end(),
+        resolveUploadFileEndTimeoutMs(opts),
+        `Remote did not confirm receiving ${name}. The upload was stopped so the terminal can recover.`,
+        opts,
+      );
     } finally {
       fs.closeSync(fd);
     }
   }
 
-  await withTimeout(zsession.close(), 120000);
+  await waitForUploadHandshake(
+    zsession.close(),
+    uploadSessionCloseTimeoutMs,
+    "Remote did not finish the ZMODEM upload session in time. The upload was stopped so the terminal can recover.",
+    opts,
+  );
 
   // rz re-creates overwritten files with the remote umask, dropping their
   // original permission bits. Now that everything is on disk, restore them
@@ -1034,4 +1103,4 @@ function safeSend(contents, channel, data) {
   }
 }
 
-module.exports = { createZmodemSentry, buildUploadPlan, buildModeRestores };
+module.exports = { createZmodemSentry, buildUploadPlan, buildModeRestores, handleUpload };

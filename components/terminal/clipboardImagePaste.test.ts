@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 
 import {
   buildRemoteClipboardImagePath,
-  handleRemoteClipboardImagePaste,
+  getRemoteClipboardImageUploadErrorMessageKey,
+  handleRemoteClipboardImageUpload,
   quoteRemotePathForShell,
 } from "./clipboardImagePaste";
 
@@ -28,7 +29,7 @@ test("remote paths are quoted for shell-safe insertion", () => {
   );
 });
 
-test("remote clipboard image paste uploads and inserts the remote image path without broadcasting", async () => {
+test("remote clipboard image upload inserts the remote image path without broadcasting", async () => {
   const writes: Array<{ sessionId: string; data: string }> = [];
   const scrolled: string[] = [];
   let focused = false;
@@ -37,7 +38,7 @@ test("remote clipboard image paste uploads and inserts the remote image path wit
   const transferPayloads: unknown[] = [];
   const broadcastData: string[] = [];
 
-  const handled = await handleRemoteClipboardImagePaste({
+  const result = await handleRemoteClipboardImageUpload({
     bridge: {
       readClipboardImage: async () => ({
         path: "/tmp/netcatty/shot.png",
@@ -75,7 +76,11 @@ test("remote clipboard image paste uploads and inserts the remote image path wit
     scrollToBottomAfterProgrammaticInput: (data) => scrolled.push(data),
   });
 
-  assert.equal(handled, true);
+  assert.deepEqual(result, {
+    ok: true,
+    remotePath: "/home/alice/project/.netcatty-paste-images/shot_1.png",
+    pastedPath: "/home/alice/project/.netcatty-paste-images/shot_1.png",
+  });
   assert.deepEqual(transferPayloads, [
     {
       transferId: "transfer-1",
@@ -100,8 +105,8 @@ test("remote clipboard image paste uploads and inserts the remote image path wit
   assert.equal(deletedTempFile, "/tmp/netcatty/shot.png");
 });
 
-test("remote clipboard image paste reports unhandled when no image exists", async () => {
-  const handled = await handleRemoteClipboardImagePaste({
+test("remote clipboard image upload reports no image when no image exists", async () => {
+  const result = await handleRemoteClipboardImageUpload({
     bridge: {
       readClipboardImage: async () => null,
       openSftpForSession: async () => "sftp-1",
@@ -114,14 +119,33 @@ test("remote clipboard image paste reports unhandled when no image exists", asyn
     },
   });
 
-  assert.equal(handled, false);
+  assert.deepEqual(result, { ok: false, reason: "no-image" });
 });
 
-test("remote clipboard image paste skips upload without a reliable cwd", async () => {
+test("remote clipboard image upload reports no image without inserting a path", async () => {
+  const result = await handleRemoteClipboardImageUpload({
+    bridge: {
+      readClipboardImage: async () => null,
+      openSftpForSession: async () => {
+        assert.fail("should not open SFTP without an image");
+      },
+      startStreamTransfer: async (options) => ({ transferId: options.transferId }),
+    },
+    getRemoteCwd: async () => "/home/alice",
+    sessionId: "session-1",
+    terminalBackend: {
+      writeToSession: () => assert.fail("should not paste without an image"),
+    },
+  });
+
+  assert.deepEqual(result, { ok: false, reason: "no-image" });
+});
+
+test("remote clipboard image upload skips upload without a reliable cwd", async () => {
   const transferPayloads: unknown[] = [];
   let deletedTempFile: string | undefined;
 
-  const handled = await handleRemoteClipboardImagePaste({
+  const result = await handleRemoteClipboardImageUpload({
     bridge: {
       readClipboardImage: async () => ({
         path: "/tmp/netcatty/shot.png",
@@ -148,16 +172,16 @@ test("remote clipboard image paste skips upload without a reliable cwd", async (
     },
   });
 
-  assert.equal(handled, false);
+  assert.deepEqual(result, { ok: false, reason: "no-cwd" });
   assert.deepEqual(transferPayloads, []);
   assert.equal(deletedTempFile, "/tmp/netcatty/shot.png");
 });
 
-test("remote clipboard image paste does not insert a path when upload returns an error", async () => {
+test("remote clipboard image upload does not insert a path when upload returns an error", async () => {
   let closedSftpId: string | undefined;
   let deletedTempFile: string | undefined;
 
-  const handled = await handleRemoteClipboardImagePaste({
+  const result = await handleRemoteClipboardImageUpload({
     bridge: {
       readClipboardImage: async () => ({
         path: "/tmp/netcatty/shot.png",
@@ -182,7 +206,54 @@ test("remote clipboard image paste does not insert a path when upload returns an
     },
   });
 
-  assert.equal(handled, false);
+  assert.deepEqual(result, { ok: false, reason: "upload-failed" });
   assert.equal(closedSftpId, "sftp-1");
   assert.equal(deletedTempFile, "/tmp/netcatty/shot.png");
+});
+
+test("remote clipboard image upload reports transfer failures without inserting a path", async () => {
+  const result = await handleRemoteClipboardImageUpload({
+    bridge: {
+      readClipboardImage: async () => ({
+        path: "/tmp/netcatty/shot.png",
+        name: "shot.png",
+        mediaType: "image/png",
+        size: 12,
+      }),
+      openSftpForSession: async () => "sftp-1",
+      startStreamTransfer: async (options) => ({ transferId: options.transferId, error: "disk full" }),
+    },
+    getRemoteCwd: async () => "/home/alice",
+    sessionId: "session-1",
+    terminalBackend: {
+      writeToSession: () => assert.fail("should not paste failed upload path"),
+    },
+  });
+
+  assert.deepEqual(result, { ok: false, reason: "upload-failed" });
+});
+
+test("remote clipboard image upload result maps to user-facing message keys", () => {
+  assert.equal(
+    getRemoteClipboardImageUploadErrorMessageKey({
+      ok: false,
+      reason: "no-image",
+    }),
+    "terminal.clipboardImageUpload.noImage",
+  );
+  assert.equal(
+    getRemoteClipboardImageUploadErrorMessageKey({
+      ok: false,
+      reason: "upload-failed",
+    }),
+    "terminal.clipboardImageUpload.failed",
+  );
+  assert.equal(
+    getRemoteClipboardImageUploadErrorMessageKey({
+      ok: true,
+      remotePath: "/tmp/image.png",
+      pastedPath: "/tmp/image.png",
+    }),
+    null,
+  );
 });

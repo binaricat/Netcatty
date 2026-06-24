@@ -90,12 +90,6 @@ export function pruneInactiveScopedTransientState(
   };
 }
 
-function isRestorableTerminalSession(session: AISession): boolean {
-  return session.scope.type === "terminal"
-    && !!session.scope.hostIds?.length
-    && session.scope.hostIds.some((id) => !id.startsWith("local-") && !id.startsWith("serial-"));
-}
-
 export function pruneInactiveScopedSessions(
   sessions: AISession[],
   activeTargetIds: Set<string>,
@@ -123,23 +117,8 @@ export function pruneInactiveScopedSessions(
     };
   }
 
-  const orphanedSessionIdSet = new Set(orphanedSessionIds);
-  let sessionsChanged = false;
-
-  const nextSessions = sessions.flatMap((session) => {
-    if (!orphanedSessionIdSet.has(session.id)) {
-      return [session];
-    }
-
-    if (!isRestorableTerminalSession(session)) {
-      sessionsChanged = true;
-      return [];
-    }
-    return [session];
-  });
-
   return {
-    sessions: sessionsChanged ? nextSessions : sessions,
+    sessions,
     orphanedSessionIds,
   };
 }

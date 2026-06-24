@@ -36,6 +36,7 @@ interface SystemManagerSidePanelProps {
   isVisible: boolean;
   terminalSettings: TerminalSettings;
   snippets: Snippet[];
+  onRequestTerminalFocus?: () => void;
 }
 
 export const SystemManagerSidePanel = memo(function SystemManagerSidePanel({
@@ -45,6 +46,7 @@ export const SystemManagerSidePanel = memo(function SystemManagerSidePanel({
   isVisible,
   terminalSettings,
   snippets,
+  onRequestTerminalFocus,
 }: SystemManagerSidePanelProps) {
   const { t } = useI18n();
   const backend = useSystemManagerBackend();
@@ -219,6 +221,7 @@ export const SystemManagerSidePanel = memo(function SystemManagerSidePanel({
               backend={backend}
               refreshIntervalSec={terminalSettings.systemManagerTmuxRefreshInterval}
               snippets={snippets}
+              onRequestTerminalFocus={onRequestTerminalFocus}
             />
           </div>
         ) : null}

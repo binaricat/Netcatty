@@ -11,7 +11,7 @@ import { Button } from '../ui/button';
 import { ContextMenu,ContextMenuContent,ContextMenuItem,ContextMenuSeparator,ContextMenuTrigger } from '../ui/context-menu';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
 import { vaultEntityIconClass } from '../vault/VaultEntityIcon';
-import { getStatusColor,getTypeColor } from './utils';
+import { buildRuleSummary,getStatusColor,getTypeColor } from './utils';
 
 export type ViewMode = 'grid' | 'list';
 
@@ -101,10 +101,7 @@ export const RuleCard: React.FC<RuleCardProps> = ({
                                     <Tooltip>
                                         <TooltipTrigger asChild>
                                             <span className="truncate cursor-default">
-                                                {rule.type === 'dynamic'
-                                                    ? t('pf.rule.summary.dynamic', { bindAddress: rule.bindAddress, localPort: rule.localPort })
-                                                    : t('pf.rule.summary.default', { bindAddress: rule.bindAddress, localPort: rule.localPort, remoteHost: rule.remoteHost, remotePort: rule.remotePort })
-                                                }
+                                                {buildRuleSummary(t, rule)}
                                             </span>
                                         </TooltipTrigger>
                                         <TooltipContent side="bottom" align="start" className="max-w-xs">

@@ -14,15 +14,15 @@ export function getSessionScopeMatchRank(
   activeTerminalSessionIds?: Set<string>,
 ): number {
   if (session.scope.type !== scopeType) return 0;
-  if (session.scope.targetId === scopeTargetId) return 2;
+  if (session.scope.targetId === scopeTargetId) return 3;
 
-  if (scopeType !== "terminal" || !scopeHostIds?.length || !session.scope.hostIds?.length) {
+  if (scopeType === "terminal" && activeTerminalSessionIds?.has(session.id)) {
     return 0;
   }
 
-  if (activeTerminalSessionIds?.has(session.id)) {
-    return 0;
+  if (scopeType === "terminal" && scopeHostIds?.length && session.scope.hostIds?.length) {
+    return session.scope.hostIds.some((hostId) => scopeHostIds.includes(hostId)) ? 2 : 0;
   }
 
-  return session.scope.hostIds.some((hostId) => scopeHostIds.includes(hostId)) ? 1 : 0;
+  return 1;
 }

@@ -128,7 +128,7 @@ const TrayPanelContent: React.FC<TrayPanelContentProps> = ({ terminalSettings })
   } = useTrayPanelBackend();
 
   const { hosts, keys, identities, proxyProfiles, groupConfigs } = useVaultState();
-  useSessionState();
+  useSessionState({ persistSessionRestore: false });
   const { rules: portForwardingRules, startTunnel, stopTunnel } = usePortForwardingState();
   const activeTabId = useActiveTabId();
   const proxyProfileIdSet = useMemo(

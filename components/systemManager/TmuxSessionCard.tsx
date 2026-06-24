@@ -22,8 +22,10 @@ import {
   SystemPanelStatusBadge,
 } from './SystemPanelUi';
 import { SystemPanelPromptDialog } from './SystemPanelPromptDialog';
+import { SystemPanelConfirmDialog } from './SystemPanelConfirmDialog';
 import { openInteractiveTerminal } from './openInteractiveTerminal';
 import { showSystemManagerError } from './systemManagerToast';
+import { runTmuxSessionAction } from './tmuxActionFocus';
 
 type Backend = ReturnType<typeof useSystemManagerBackend>;
 const TMUX_POPUP_ICON = {
@@ -41,6 +43,24 @@ interface PendingTarget {
   windowIndex?: number;
 }
 
+interface ConfirmTmuxDetachOptions {
+  sessionName: string;
+  confirmMessage: string;
+  confirm: (message: string) => boolean;
+  runAction: (action: TmuxManageAction) => Promise<void>;
+}
+
+export async function runConfirmedTmuxDetachAction({
+  sessionName,
+  confirmMessage,
+  confirm,
+  runAction,
+}: ConfirmTmuxDetachOptions): Promise<boolean> {
+  if (!confirm(confirmMessage)) return false;
+  await runAction({ action: 'detachSession', sessionName });
+  return true;
+}
+
 interface TmuxSessionCardProps {
   session: TmuxSessionInfo;
   sessionId: string;
@@ -50,6 +70,7 @@ interface TmuxSessionCardProps {
   onLoadDetails: (session: TmuxSessionInfo, options?: { force?: boolean; urgent?: boolean }) => Promise<void>;
   onRefreshDetails: (session: TmuxSessionInfo) => Promise<void>;
   onSessionsChanged: () => Promise<void>;
+  onRequestTerminalFocus?: () => void;
 }
 
 export const TmuxSessionCard = memo(function TmuxSessionCard({
@@ -61,10 +82,12 @@ export const TmuxSessionCard = memo(function TmuxSessionCard({
   onLoadDetails,
   onRefreshDetails,
   onSessionsChanged,
+  onRequestTerminalFocus,
 }: TmuxSessionCardProps) {
   const { t } = useI18n();
   const [expanded, setExpanded] = useState(false);
   const [renamePrompt, setRenamePrompt] = useState<RenamePromptTarget | null>(null);
+  const [detachConfirmOpen, setDetachConfirmOpen] = useState(false);
   const [newWindowOpen, setNewWindowOpen] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -102,13 +125,16 @@ export const TmuxSessionCard = memo(function TmuxSessionCard({
     });
     setActionError(null);
     try {
-      const result = await backend.tmuxAction({ sessionId, ...action });
-      if (!result.success) throw new Error(result.error || t('systemManager.errors.actionFailed'));
       const cardWillRemount = action.action === 'killSession' || action.action === 'renameSession';
-      if (!cardWillRemount && expanded) {
-        await onRefreshDetails(session);
-      }
-      await onSessionsChanged();
+      const result = await runTmuxSessionAction({
+        sessionId,
+        action,
+        tmuxAction: backend.tmuxAction,
+        onRefreshDetails: !cardWillRemount && expanded ? () => onRefreshDetails(session) : undefined,
+        onSessionsChanged,
+        onRequestTerminalFocus,
+      });
+      if (!result.success) throw new Error(result.error || t('systemManager.errors.actionFailed'));
     } catch (err) {
       setActionError(err instanceof Error ? err.message : t('systemManager.errors.actionFailed'));
     } finally {
@@ -170,11 +196,7 @@ export const TmuxSessionCard = memo(function TmuxSessionCard({
                 title={t('systemManager.tmux.detach')}
                 disabled={busy}
                 loading={isPending('detachSession')}
-                onClick={() => {
-                  if (globalThis.confirm(t('systemManager.tmux.confirmDetachSession', { name: session.name }))) {
-                    void runAction({ action: 'detachSession', sessionName: session.name });
-                  }
-                }}
+                onClick={() => setDetachConfirmOpen(true)}
               >
                 <Unplug size={12} />
               </SystemPanelRoundButton>
@@ -285,6 +307,20 @@ export const TmuxSessionCard = memo(function TmuxSessionCard({
           </div>
         )}
       </SystemPanelCollapsible>
+
+      <SystemPanelConfirmDialog
+        open={detachConfirmOpen}
+        title={t('systemManager.tmux.detach')}
+        message={t('systemManager.tmux.confirmDetachSession', { name: session.name })}
+        confirmLabel={t('systemManager.tmux.detach')}
+        destructive
+        busy={busy}
+        onOpenChange={setDetachConfirmOpen}
+        onConfirm={() => {
+          setDetachConfirmOpen(false);
+          void runAction({ action: 'detachSession', sessionName: session.name });
+        }}
+      />
 
       <SystemPanelPromptDialog
         open={renamePrompt !== null}

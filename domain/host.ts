@@ -1,4 +1,5 @@
 import { Host, TerminalSettings } from './models';
+import { sanitizeHostIconFields } from './hostIcon';
 import { migrateDeprecatedFontOverride } from '../infrastructure/config/fonts';
 
 export type HostLabelRenameResult =
@@ -270,9 +271,20 @@ export const preserveConcurrentHostLineTimestampUpdate = ({
 }): Host => {
   if (!openedHost || !latestHost) return draft;
   if (draft.id !== openedHost.id || draft.id !== latestHost.id) return draft;
-  if (draft.showLineTimestamps !== openedHost.showLineTimestamps) return draft;
-  if (latestHost.showLineTimestamps === openedHost.showLineTimestamps) return draft;
-  return { ...draft, showLineTimestamps: latestHost.showLineTimestamps };
+  let next = draft;
+  if (
+    draft.showLineTimestamps === openedHost.showLineTimestamps &&
+    latestHost.showLineTimestamps !== openedHost.showLineTimestamps
+  ) {
+    next = { ...next, showLineTimestamps: latestHost.showLineTimestamps };
+  }
+  if (
+    draft.sftpFollowTerminalCwd === openedHost.sftpFollowTerminalCwd &&
+    latestHost.sftpFollowTerminalCwd !== openedHost.sftpFollowTerminalCwd
+  ) {
+    next = { ...next, sftpFollowTerminalCwd: latestHost.sftpFollowTerminalCwd };
+  }
+  return next;
 };
 
 export const upsertHostById = (hosts: Host[], host: Host): Host[] => {
@@ -326,6 +338,7 @@ export const sanitizeHost = (host: Host): Host => {
       : host.distroMode === 'auto'
         ? 'auto'
         : undefined;
+  const cleanHostIcon = sanitizeHostIconFields(host);
   const migrated = migrateDeprecatedFontOverride(host);
   const cleanNotes = host.notes?.trim() || undefined;
   return {
@@ -334,6 +347,12 @@ export const sanitizeHost = (host: Host): Host => {
     distro: cleanDistro,
     distroMode: cleanDistroMode,
     manualDistro: cleanManualDistro || undefined,
+    iconMode: undefined,
+    iconId: undefined,
+    iconColorMode: undefined,
+    iconColor: undefined,
+    iconColorCustom: undefined,
+    ...cleanHostIcon,
     notes: cleanNotes,
   };
 };

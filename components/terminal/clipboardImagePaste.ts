@@ -28,6 +28,19 @@ type HandleRemoteClipboardImagePasteOptions = {
   term?: TerminalLike | null;
 };
 
+export type RemoteClipboardImageUploadResult =
+  | { ok: true; remotePath: string; pastedPath: string }
+  | { ok: false; reason: "unsupported" | "no-session" | "no-image" | "no-cwd" | "upload-failed" };
+
+export function getRemoteClipboardImageUploadErrorMessageKey(
+  result: RemoteClipboardImageUploadResult,
+): "terminal.clipboardImageUpload.noImage" | "terminal.clipboardImageUpload.failed" | null {
+  if (result.ok === true) return null;
+  return result.reason === "no-image"
+    ? "terminal.clipboardImageUpload.noImage"
+    : "terminal.clipboardImageUpload.failed";
+}
+
 const shellSafePathPattern = /^[A-Za-z0-9_./~:@%+=,-]+$/;
 
 export function sanitizeRemoteClipboardImageName(name: string): string {
@@ -65,7 +78,7 @@ function defaultTransferId(): string {
   return uuid ? `clipboard-image-${uuid}` : `clipboard-image-${Date.now()}`;
 }
 
-export async function handleRemoteClipboardImagePaste({
+export async function handleRemoteClipboardImageUpload({
   bridge,
   createTransferId = defaultTransferId,
   getRemoteCwd,
@@ -73,20 +86,20 @@ export async function handleRemoteClipboardImagePaste({
   sessionId,
   terminalBackend,
   term,
-}: HandleRemoteClipboardImagePasteOptions): Promise<boolean> {
-  if (!sessionId) return false;
+}: HandleRemoteClipboardImagePasteOptions): Promise<RemoteClipboardImageUploadResult> {
+  if (!sessionId) return { ok: false, reason: "no-session" };
   if (!bridge?.readClipboardImage || !bridge.openSftpForSession || !bridge.startStreamTransfer) {
-    return false;
+    return { ok: false, reason: "unsupported" };
   }
 
   const image: ClipboardImageFile | null = await bridge.readClipboardImage();
-  if (!image?.path || !image.name) return false;
+  if (!image?.path || !image.name) return { ok: false, reason: "no-image" };
 
   let sftpId: string | undefined;
   try {
     const remoteCwd = await getRemoteCwd();
     const targetPath = buildRemoteClipboardImagePath(remoteCwd, image.name);
-    if (!targetPath) return false;
+    if (!targetPath) return { ok: false, reason: "no-cwd" };
     const transferId = createTransferId();
 
     sftpId = await bridge.openSftpForSession(sessionId);
@@ -99,13 +112,13 @@ export async function handleRemoteClipboardImagePaste({
       targetSftpId: sftpId,
       totalBytes: image.size,
     });
-    if (!transferResult || transferResult.error) return false;
+    if (!transferResult || transferResult.error) return { ok: false, reason: "upload-failed" };
 
     const pastedPath = quoteRemotePathForShell(targetPath);
     terminalBackend.writeToSession(sessionId, pastedPath);
     scrollToBottomAfterProgrammaticInput?.(pastedPath);
     term?.focus?.();
-    return true;
+    return { ok: true, remotePath: targetPath, pastedPath };
   } finally {
     if (sftpId && bridge.closeSftp) {
       await bridge.closeSftp(sftpId).catch(() => undefined);

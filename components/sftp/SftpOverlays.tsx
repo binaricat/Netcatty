@@ -1,20 +1,66 @@
-import React from "react";
+import React, { lazy, Suspense } from "react";
 import type { Host, SftpFileEntry } from "../../types";
 import type { FileOpenerType, SystemAppInfo } from "../../lib/sftpFileUtils";
 import type { useSftpState } from "../../application/state/useSftpState";
 import type { HotkeyScheme, KeyBinding } from "../../domain/models";
 import type { TransferTask } from "../../types";
 import FileOpenerDialog from "../FileOpenerDialog";
-import TextEditorModal from "../TextEditorModal";
 import type { TextEditorModalSnapshot } from "../TextEditorModal";
 import { TerminalHostKeyVerification } from "../terminal/TerminalHostKeyVerification";
 import { Dialog, DialogContent, DialogTitle } from "../ui/dialog";
+import { LazyLoadBoundary } from "../ui/lazy-load-boundary";
 import { SftpConflictDialog } from "./SftpConflictDialog";
 import { SftpHostPicker } from "./SftpHostPicker";
 import { SftpPermissionsDialog } from "./SftpPermissionsDialog";
 import { SftpTransferQueue } from "./SftpTransferQueue";
 
+const LazyTextEditorModal = lazy(() => import("../TextEditorModal"));
+
 type SftpState = ReturnType<typeof useSftpState>;
+
+const TextEditorModalLoading: React.FC<{
+  open: boolean;
+  fileName: string;
+  onClose: () => void;
+}> = ({ open, fileName, onClose }) => (
+  <Dialog open={open} onOpenChange={(isOpen) => !isOpen && onClose()}>
+    <DialogContent className="max-w-5xl h-[85vh] flex flex-col p-0 gap-0 overflow-hidden">
+      <DialogTitle className="sr-only">{fileName || "Text editor"}</DialogTitle>
+      <div className="netcatty-lazy-fade-in h-full min-h-0" aria-hidden="true" />
+    </DialogContent>
+  </Dialog>
+);
+
+const TextEditorModalUnavailable: React.FC<{
+  open: boolean;
+  fileName: string;
+  onClose: () => void;
+}> = ({ open, fileName, onClose }) => (
+  <Dialog open={open} onOpenChange={(isOpen) => !isOpen && onClose()}>
+    <DialogContent className="max-w-md">
+      <DialogTitle>Text editor could not load.</DialogTitle>
+      <div className="text-sm text-muted-foreground">
+        {fileName ? `${fileName} cannot be opened until the editor reloads.` : "The editor needs to reload before it can open this file."}
+      </div>
+      <div className="flex justify-end gap-2">
+        <button
+          type="button"
+          className="rounded-md border border-border px-3 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-muted"
+          onClick={onClose}
+        >
+          Close
+        </button>
+        <button
+          type="button"
+          className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+          onClick={() => window.location.reload()}
+        >
+          Reload
+        </button>
+      </div>
+    </DialogContent>
+  </Dialog>
+);
 
 interface SftpOverlaysProps {
   hosts: Host[];
@@ -99,6 +145,14 @@ export const SftpOverlays: React.FC<SftpOverlaysProps> = React.memo(({
   onPromoteToTab,
   onRequestTerminalFocus,
 }) => {
+  const textEditorFileName = textEditorTarget?.file.name || "";
+  const closeTextEditor = () => {
+    setShowTextEditor(false);
+    setTextEditorTarget(null);
+    setTextEditorContent("");
+    onRequestTerminalFocus?.();
+  };
+
   return (
     <>
       {/* Host pickers for adding new tabs */}
@@ -179,23 +233,42 @@ export const SftpOverlays: React.FC<SftpOverlaysProps> = React.memo(({
       />
 
       {/* Text Editor Modal */}
-      <TextEditorModal
-        open={showTextEditor}
-        onClose={() => {
-          setShowTextEditor(false);
-          setTextEditorTarget(null);
-          setTextEditorContent("");
-          onRequestTerminalFocus?.();
-        }}
-        fileName={textEditorTarget?.file.name || ""}
-        initialContent={textEditorContent}
-        onSave={handleSaveTextFile}
-        editorWordWrap={editorWordWrap}
-        onToggleWordWrap={() => setEditorWordWrap(!editorWordWrap)}
-        hotkeyScheme={hotkeyScheme}
-        keyBindings={keyBindings}
-        onPromoteToTab={onPromoteToTab}
-      />
+      {showTextEditor && (
+        <LazyLoadBoundary
+          name="Text editor"
+          resetKey={textEditorTarget?.fullPath || "text-editor"}
+          fallback={
+            <TextEditorModalUnavailable
+              open={showTextEditor}
+              fileName={textEditorFileName}
+              onClose={closeTextEditor}
+            />
+          }
+        >
+          <Suspense
+            fallback={
+              <TextEditorModalLoading
+                open={showTextEditor}
+                fileName={textEditorFileName}
+                onClose={closeTextEditor}
+              />
+            }
+          >
+            <LazyTextEditorModal
+              open={showTextEditor}
+              onClose={closeTextEditor}
+              fileName={textEditorFileName}
+              initialContent={textEditorContent}
+              onSave={handleSaveTextFile}
+              editorWordWrap={editorWordWrap}
+              onToggleWordWrap={() => setEditorWordWrap(!editorWordWrap)}
+              hotkeyScheme={hotkeyScheme}
+              keyBindings={keyBindings}
+              onPromoteToTab={onPromoteToTab}
+            />
+          </Suspense>
+        </LazyLoadBoundary>
+      )}
 
       {/* File Opener Dialog */}
       <FileOpenerDialog

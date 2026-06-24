@@ -18,6 +18,7 @@ export interface TerminalConnectionProgressProps {
     onCancelConnect: () => void;
     onCloseSession: () => void;
     onRetry: () => void;
+    reconnectLabel?: string;
 }
 
 export interface TerminalConnectionLogListProps {
@@ -59,6 +60,7 @@ export const TerminalConnectionProgress: React.FC<TerminalConnectionProgressProp
     onCancelConnect: _onCancelConnect,
     onCloseSession,
     onRetry,
+    reconnectLabel,
 }) => {
     const { t } = useI18n();
 
@@ -95,7 +97,7 @@ export const TerminalConnectionProgress: React.FC<TerminalConnectionProgressProp
                             {t('terminal.toolbar.closeSession')}
                         </Button>
                         <Button size="sm" className="h-7 px-3 text-[11px]" onClick={onRetry}>
-                            <Play className="h-3 w-3 mr-1.5" /> {t('terminal.progress.startOver')}
+                            <Play className="h-3 w-3 mr-1.5" /> {reconnectLabel ?? t('terminal.progress.startOver')}
                         </Button>
                     </>
                 )}

@@ -10,10 +10,13 @@ import {
   shouldMarkSessionActivity,
 } from '../application/state/sessionActivity';
 import { sessionActivityStore } from '../application/state/sessionActivityStore';
+import { matchCodingCliProviderFromCommand } from '../domain/codingCliProviderMatch';
+import { createCodingCliOutputScanner, type CodingCliOutputScanner } from '../domain/codingCliOutputDetect';
+import type { CodingCliProviderId } from '../domain/codingCliProviders';
+import { inferCodingCliProviderFromTitleSignals, shouldClearCodingCliProviderForTitle } from '../domain/codingCliTitleParse';
 import { sessionCapabilitiesStore } from '../application/state/sessionCapabilitiesStore';
 import { useTerminalBackend } from '../application/state/useTerminalBackend';
 import { collectSessionIds } from '../domain/workspace';
-
 
 import { cn, normalizeLineEndings } from '../lib/utils';
 import { detectLocalOs } from '../lib/localShell';
@@ -25,21 +28,30 @@ import {
 import { buildCacheKey } from '../application/state/sftp/sharedRemoteHostCache';
 import type { DropEntry } from '../lib/sftpFileUtils';
 import { Host, KnownHost, TerminalSession, Workspace } from '../types';
-import { resolveGroupDefaults, applyGroupDefaults } from '../domain/groupConfig';
 import { applySessionFontSizeToHost } from '../domain/terminalAppearance';
 import { resolveHostAutofillPassword } from '../domain/sshAuth';
-import { materializeHostProxyProfile } from '../domain/proxyProfiles';
+import {
+  resolveEffectiveTerminalHost,
+  resolveTerminalChainHosts,
+  resolveTerminalSessionHost,
+} from '../domain/terminalHostResolution';
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 import { useI18n } from '../application/i18n/I18nProvider';
 import { SftpSidePanel } from './SftpSidePanel';
 import { ScriptsSidePanel } from './ScriptsSidePanel';
 import { HistorySidePanel } from './HistorySidePanel';
+import { NotesManager } from './notes/NotesManager';
 import { useRemoteHistoryState } from '../application/state/useRemoteHistoryState';
 import { resolveSnippetCommand } from './SnippetExecutionProvider';
 import type { Snippet } from '../types';
 import { ThemeSidePanel } from './terminal/ThemeSidePanel';
 import { focusTerminalSessionInput } from './terminal/focusTerminalSession';
 import { TerminalComposeBar } from './terminal/TerminalComposeBar';
+import {
+  AUTO_RUN_SNIPPET_LINE_DELAY_MS,
+  shouldDelayAutoRunSnippetInput,
+  type TerminalBroadcastInputOptions,
+} from './terminal/terminalHelpers';
 import { Button } from './ui/button';
 import { setupMcpApprovalBridge } from '../infrastructure/ai/shared/approvalGate';
 import { resolveScriptsSidePanelShortcutIntent } from '../application/state/resolveSnippetsShortcutIntent';
@@ -47,8 +59,12 @@ import { resolveSidePanelToggleIntent } from '../application/state/resolveSidePa
 import { resolveAiSidePanelToggleIntent } from '../application/state/resolveAiSidePanelToggleIntent';
 import { terminalLayerAreEqual } from './terminalLayerMemo';
 import { TerminalLayerTabBridge } from './terminalLayer/TerminalLayerTabBridge';
+import {
+  canUseDirectSessionWriteFallback,
+} from './terminalLayer/terminalLayerSessionRouting';
 import { resolvePreferredTerminalCwd, scheduleBackendCwdProbeAfterCommand } from './terminal/sftpCwd';
 import { classifyDistroId, shouldProbeSessionCwd } from '../domain/host';
+import { resolveHostFollowTerminalCwd, resolveSftpFollowTerminalCwdTargetHost } from './sftp/sftpFollowTerminalCwd';
 
 import {
   AIChatPanelsHost,
@@ -56,6 +72,7 @@ import {
   AIStateMaintenanceHost,
   AIStateProvider,
   ChunkedEscapeFilter,
+  clearHostTreePreviewVars,
   TerminalPanesHost,
   clearTerminalPreviewVars,
   clearTopTabsPreviewVars,
@@ -87,11 +104,15 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   identities,
   snippets,
   snippetPackages,
+  notes,
+  noteGroups,
+  openNoteRequest,
   sessions,
   workspaces,
   knownHosts = [],
   draggingSessionId,
   terminalTheme,
+  terminalThemeId = terminalTheme.id,
   followAppTerminalTheme = false,
   accentMode = 'theme',
   customAccent = '',
@@ -100,13 +121,18 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   fontSize = 14,
   hotkeyScheme = 'disabled',
   disableTerminalFontZoom = false,
+  restoreTerminalCwd = false,
   keyBindings = [],
   onHotkeyAction,
   onUpdateTerminalThemeId,
+  onUpdateFollowAppTerminalThemeId,
   onUpdateTerminalFontFamilyId,
   onUpdateTerminalFontSize,
   onUpdateTerminalFontWeight,
   onUpdateSessionFontSize,
+  onUpdateSessionRestoreCwd,
+  onUpdateSessionDynamicTitle,
+  onUpdateSessionCodingCliProvider,
   onClearSessionFontSizeOverride,
   onCloseSession,
   onUpdateSessionStatus,
@@ -135,6 +161,8 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   updateHosts,
   updateSnippets,
   updateSnippetPackages,
+  updateNotes,
+  updateNoteGroups,
   sftpDefaultViewMode,
   sftpDoubleClickBehavior,
   sftpAutoSync,
@@ -167,6 +195,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   const focusedSessionIdRef = useRef<string | undefined>(undefined);
   const terminalCwdRevisionRef = useRef(0);
   const [terminalCwdRevision, setTerminalCwdRevision] = useState(0);
+  const terminalOsc7SignalBySessionRef = useRef<Map<string, number>>(new Map());
   const cwdProbeCancelersRef = useRef<Map<string, () => void>>(new Map());
   const cwdProbeGenerationRef = useRef<Map<string, number>>(new Map());
 
@@ -180,7 +209,20 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     return () => window.clearTimeout(timeoutId);
   }, []);
 
-  const handleTerminalCwdChange = useCallback((sessionId: string, cwd: string | null) => {
+  const handleTerminalCwdChange = useCallback((
+    sessionId: string,
+    cwd: string | null,
+    meta?: { source?: 'osc7' },
+  ) => {
+    if (meta?.source === 'osc7') {
+      // Bump on every OSC 7 report, even when the decoded path is unchanged.
+      // PROMPT_COMMAND/precmd emits OSC 7 after each command; skipping the
+      // backend pwd probe in that case prevents SFTP follow from toggling
+      // between OSC 7 cwd and login-shell fallback pwd (notably after sudo).
+      const nextSignal = (terminalOsc7SignalBySessionRef.current.get(sessionId) ?? 0) + 1;
+      terminalOsc7SignalBySessionRef.current.set(sessionId, nextSignal);
+    }
+
     const currentCwd = terminalRendererCwdBySessionRef.current.get(sessionId) ?? null;
     const nextCwd = cwd && cwd.trim().length > 0 ? cwd : null;
     if (currentCwd === nextCwd) return;
@@ -190,12 +232,124 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     } else {
       terminalRendererCwdBySessionRef.current.delete(sessionId);
     }
+    onUpdateSessionRestoreCwd?.(sessionId, nextCwd);
     terminalCwdRevisionRef.current += 1;
     setTerminalCwdRevision(terminalCwdRevisionRef.current);
+  }, [onUpdateSessionRestoreCwd]);
+
+  const codingCliOutputScannersRef = useRef<Map<string, CodingCliOutputScanner>>(new Map());
+  const codingCliOutputScanDisabledRef = useRef<Set<string>>(new Set());
+
+  const applySessionCodingCliProvider = useCallback((
+    sessionId: string,
+    providerId: CodingCliProviderId,
+  ) => {
+    const session = sessionsRef.current.find((candidate) => candidate.id === sessionId);
+    if (!session || session.codingCliProviderId === providerId) return;
+    onUpdateSessionCodingCliProvider?.(sessionId, providerId);
+  }, [onUpdateSessionCodingCliProvider]);
+
+  const applySessionCodingCliProviderFromCommand = useCallback((
+    sessionId: string,
+    commandLine: string,
+  ) => {
+    const provider = matchCodingCliProviderFromCommand(commandLine);
+    if (provider) {
+      codingCliOutputScannersRef.current.delete(sessionId);
+      codingCliOutputScanDisabledRef.current.delete(sessionId);
+      applySessionCodingCliProvider(sessionId, provider.id);
+    }
+  }, [applySessionCodingCliProvider]);
+
+  const handleTerminalTitleChange = useCallback((sessionId: string, title: string | null) => {
+    const session = sessionsRef.current.find((candidate) => candidate.id === sessionId);
+    if (!session) return;
+    const host = hostsRef.current.find((candidate) => candidate.id === session.hostId);
+    const isDynamicTitleDisabled = host?.disableDynamicTabTitle === true;
+    if (isDynamicTitleDisabled) {
+      onUpdateSessionDynamicTitle?.(sessionId, null);
+    } else {
+      onUpdateSessionDynamicTitle?.(sessionId, title);
+    }
+
+    const trimmedTitle = title?.trim();
+    if (!trimmedTitle) {
+      if (session.codingCliProviderId) {
+        codingCliOutputScannersRef.current.delete(sessionId);
+        codingCliOutputScanDisabledRef.current.delete(sessionId);
+        onUpdateSessionCodingCliProvider?.(sessionId, null);
+      }
+      return;
+    }
+
+    if (isDynamicTitleDisabled) {
+      if (
+        session.codingCliProviderId
+        && shouldClearCodingCliProviderForTitle(trimmedTitle, session.codingCliProviderId)
+      ) {
+        codingCliOutputScannersRef.current.delete(sessionId);
+        codingCliOutputScanDisabledRef.current.delete(sessionId);
+        onUpdateSessionCodingCliProvider?.(sessionId, null);
+      }
+      return;
+    }
+
+    const providerId = inferCodingCliProviderFromTitleSignals(trimmedTitle);
+    if (providerId) {
+      if (!session.codingCliProviderId || session.codingCliProviderId !== providerId) {
+        codingCliOutputScannersRef.current.delete(sessionId);
+        codingCliOutputScanDisabledRef.current.delete(sessionId);
+        applySessionCodingCliProvider(sessionId, providerId);
+      }
+      return;
+    }
+
+    if (
+      session.codingCliProviderId
+      && shouldClearCodingCliProviderForTitle(trimmedTitle, session.codingCliProviderId)
+    ) {
+      codingCliOutputScannersRef.current.delete(sessionId);
+      codingCliOutputScanDisabledRef.current.delete(sessionId);
+      onUpdateSessionCodingCliProvider?.(sessionId, null);
+    }
+  }, [applySessionCodingCliProvider, onUpdateSessionCodingCliProvider, onUpdateSessionDynamicTitle]);
+
+  const handleTerminalOutput = useCallback((sessionId: string, chunk: string) => {
+    if (!chunk || codingCliOutputScanDisabledRef.current.has(sessionId)) return;
+
+    const session = sessionsRef.current.find((candidate) => candidate.id === sessionId);
+    if (session?.codingCliProviderId) return;
+
+    let scanner = codingCliOutputScannersRef.current.get(sessionId);
+    if (!scanner) {
+      scanner = createCodingCliOutputScanner();
+      codingCliOutputScannersRef.current.set(sessionId, scanner);
+    }
+
+    const providerId = scanner.feed(chunk);
+    if (providerId) {
+      applySessionCodingCliProvider(sessionId, providerId);
+      return;
+    }
+
+    if (scanner.isExhausted()) {
+      codingCliOutputScannersRef.current.delete(sessionId);
+      codingCliOutputScanDisabledRef.current.delete(sessionId);
+      codingCliOutputScanDisabledRef.current.add(sessionId);
+    }
+  }, [applySessionCodingCliProvider]);
+
+  const handleTerminalBell = useCallback((sessionId: string) => {
+    const session = sessionsRef.current.find((candidate) => candidate.id === sessionId);
+    if (!session) return;
+    if (!shouldMarkSessionActivity(activeTabStore.getActiveTabId(), session)) return;
+    sessionActivityStore.setTabActive(sessionId, true);
   }, []);
 
   // Stable callback references for Terminal components
   const handleCloseSession = useCallback((sessionId: string) => {
+    codingCliOutputScannersRef.current.delete(sessionId);
+    codingCliOutputScanDisabledRef.current.delete(sessionId);
     sessionCapabilitiesStore.delete(sessionId);
     onCloseSession(sessionId);
   }, [onCloseSession]);
@@ -283,6 +437,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   // Terminal backend for broadcast writes
   const terminalBackend = useTerminalBackend();
   const snippetExecutorsRef = useRef<Map<string, SnippetExecutor>>(new Map());
+  const programmaticCommandLogRewriteHandlersRef = useRef<Map<string, (rewrite: ProgrammaticCommandLogRewrite) => void>>(new Map());
 
   const handleSnippetExecutorChange = useCallback((sessionId: string, executor: SnippetExecutor | null) => {
     if (executor) {
@@ -290,6 +445,17 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       return;
     }
     snippetExecutorsRef.current.delete(sessionId);
+  }, []);
+
+  const handleProgrammaticCommandLogRewriteChange = useCallback((
+    sessionId: string,
+    queueRewrite: ((rewrite: ProgrammaticCommandLogRewrite) => void) | null,
+  ) => {
+    if (queueRewrite) {
+      programmaticCommandLogRewriteHandlersRef.current.set(sessionId, queueRewrite);
+      return;
+    }
+    programmaticCommandLogRewriteHandlersRef.current.delete(sessionId);
   }, []);
 
   const onSessionData = terminalBackend.onSessionData;
@@ -310,19 +476,6 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   const onSetWorkspaceFocusedSessionRef = useRef(onSetWorkspaceFocusedSession);
   onSetWorkspaceFocusedSessionRef.current = onSetWorkspaceFocusedSession;
 
-  // Handle broadcast input - write to all other sessions in the source workspace.
-  const handleBroadcastInput = useCallback((data: string, sourceSessionId: string) => {
-    const sourceSession = sessionsRef.current.find((session) => session.id === sourceSessionId);
-    const workspaceId = sourceSession?.workspaceId;
-    if (!workspaceId) return;
-
-    for (const session of sessionsRef.current) {
-      if (session.workspaceId === workspaceId && session.id !== sourceSessionId) {
-        terminalBackend.writeToSession(session.id, data);
-      }
-    }
-  }, [terminalBackend]);
-
   // Side panel state - per-tab tracking of which sub-panel is active
   // Maps tab IDs to the active sub-panel type (sftp/scripts/theme), absent = closed
   const [sidePanelOpenTabs, setSidePanelOpenTabs] = useState<Map<string, SidePanelTab>>(new Map());
@@ -331,6 +484,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   const [scriptsMountedTabIds, setScriptsMountedTabIds] = useState<string[]>([]);
   const [systemMountedTabIds, setSystemMountedTabIds] = useState<string[]>([]);
   const [themeMountedTabIds, setThemeMountedTabIds] = useState<string[]>([]);
+  const [notesMountedTabIds, setNotesMountedTabIds] = useState<string[]>([]);
   const [sidePanelWidth, setSidePanelWidth, persistSidePanelWidth] = useStoredNumber(
     STORAGE_KEY_SIDE_PANEL_WIDTH, 420, { min: 280, max: 800 },
   );
@@ -345,6 +499,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   // Remember the last sub-panel shown per tab so the toggle shortcut can
   // restore it after a close. Overwritten on open, never cleared on close.
   const lastSidePanelTabRef = useRef<Map<string, SidePanelTab>>(new Map());
+  const notesReturnTabRef = useRef<Map<string, SidePanelTab>>(new Map());
 
   // The host to pass to the SFTP panel - stored when the user opens SFTP
   const [sftpHostForTab, setSftpHostForTab] = useState<Map<string, Host>>(new Map());
@@ -356,6 +511,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   >(new Map());
   const [pendingTerminalSelectionForAI, setPendingTerminalSelectionForAI] =
     useState<PendingTerminalSelectionForAI | null>(null);
+  const [notesOpenNoteByTab, setNotesOpenNoteByTab] = useState<Map<string, string>>(new Map());
   const sftpHostForTabRef = useRef(sftpHostForTab);
   sftpHostForTabRef.current = sftpHostForTab;
 
@@ -481,15 +637,12 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     [proxyProfiles],
   );
   const effectiveHosts = useMemo(
-    () => hosts.map((host) => {
-      const groupDefaults = host.group
-        ? resolveGroupDefaults(host.group, groupConfigs, { validProxyProfileIds: proxyProfileIdSet })
-        : {};
-      return materializeHostProxyProfile(
-        applyGroupDefaults(host, groupDefaults, { validProxyProfileIds: proxyProfileIdSet }),
-        proxyProfiles,
-      );
-    }),
+    () => hosts.map((host) => resolveEffectiveTerminalHost({
+      host,
+      groupConfigs,
+      proxyProfiles,
+      validProxyProfileIds: proxyProfileIdSet,
+    })),
     [groupConfigs, hosts, proxyProfileIdSet, proxyProfiles],
   );
 
@@ -497,116 +650,85 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   const sessionHostsMap = useMemo(() => {
     const map = new Map<string, Host>();
     for (const session of sessions) {
-      const rawHost = hostMap.get(session.hostId);
-      if (rawHost) {
-        // Apply group config defaults so Terminal sees the merged host
-        const groupDefaults = rawHost.group
-          ? resolveGroupDefaults(rawHost.group, groupConfigs, { validProxyProfileIds: proxyProfileIdSet })
-          : {};
-        const existingHost = materializeHostProxyProfile(
-          applyGroupDefaults(rawHost, groupDefaults, { validProxyProfileIds: proxyProfileIdSet }),
-          proxyProfiles,
-        );
-
-        const protocol = session.protocol ?? existingHost.protocol;
-        const port = session.port ?? existingHost.port;
-        const moshEnabled = session.moshEnabled ?? existingHost.moshEnabled;
-        const etEnabled = session.etEnabled ?? existingHost.etEnabled;
-
-        let hostForSession: Host;
-        if (
-          protocol === existingHost.protocol &&
-          port === existingHost.port &&
-          moshEnabled === existingHost.moshEnabled
-          && etEnabled === existingHost.etEnabled
-        ) {
-          hostForSession = existingHost;
-        } else {
-          hostForSession = {
-            ...existingHost,
-            protocol,
-            port,
-            moshEnabled,
-            etEnabled,
-          };
-        }
-        map.set(session.id, applySessionFontSizeToHost(hostForSession, session));
-      } else {
-        // Create stable fallback host object
-        const fallbackProtocol = session.protocol ?? 'local' as const;
-        const fallbackHost: Host = {
-          id: session.hostId,
-          label: session.hostLabel || 'Local Terminal',
-          hostname: session.hostname || 'localhost',
-          username: session.username || 'local',
-          port: session.port ?? 22,
-          // Only local terminals adopt the client OS — unsaved serial
-          // sessions and orphaned remote sessions (whose host was deleted
-          // while the session lives on) also hit this fallback, and the
-          // non-local autocomplete path in Terminal.tsx trusts host.os, so
-          // a Windows-client 'windows' tag here would mis-shape POSIX
-          // remote/serial autocomplete (#1112 review).
-          os: fallbackProtocol === 'local'
-            ? detectLocalOs(navigator.userAgent || navigator.platform)
-            : 'linux',
-          group: '',
-          tags: [],
-          protocol: fallbackProtocol,
-          moshEnabled: session.moshEnabled,
-          etEnabled: session.etEnabled,
-          charset: session.charset,
-          localShell: session.localShell,
-          localShellArgs: session.localShellArgs,
-          localShellName: session.localShellName,
-          localShellIcon: session.localShellIcon,
-        };
-        map.set(session.id, applySessionFontSizeToHost(fallbackHost, session));
-      }
+      const hostForSession = resolveTerminalSessionHost({
+        session,
+        hosts,
+        groupConfigs,
+        proxyProfiles,
+        localOs: detectLocalOs(navigator.userAgent || navigator.platform),
+      });
+      map.set(session.id, applySessionFontSizeToHost(hostForSession, session));
     }
     return map;
-  }, [sessions, hostMap, groupConfigs, proxyProfileIdSet, proxyProfiles]);
+  }, [sessions, hosts, groupConfigs, proxyProfiles]);
+  const resolvedSessionHostIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const session of sessions) {
+      if (hostMap.has(session.hostId) || session.protocol === 'local') ids.add(session.id);
+    }
+    return ids;
+  }, [hostMap, sessions]);
   const sessionChainHostsMap = useMemo(() => {
     const map = new Map<string, Host[]>();
     for (const session of sessions) {
       const host = sessionHostsMap.get(session.id);
-      if (!host?.hostChain?.hostIds?.length) continue;
-      map.set(
-        session.id,
-        host.hostChain.hostIds
-          .map((hostId) => {
-            const rawChainHost = hostMap.get(hostId);
-            if (!rawChainHost) return undefined;
-            const chainGroupDefaults = rawChainHost.group
-              ? resolveGroupDefaults(rawChainHost.group, groupConfigs, { validProxyProfileIds: proxyProfileIdSet })
-              : {};
-            return materializeHostProxyProfile(
-              applyGroupDefaults(rawChainHost, chainGroupDefaults, { validProxyProfileIds: proxyProfileIdSet }),
-              proxyProfiles,
-            );
-          })
-          .filter((value): value is Host => Boolean(value)),
-      );
+      const chainHosts = resolveTerminalChainHosts({
+        host,
+        hosts,
+        groupConfigs,
+        proxyProfiles,
+        validProxyProfileIds: proxyProfileIdSet,
+      });
+      if (chainHosts.length > 0) map.set(session.id, chainHosts);
     }
     return map;
-  }, [sessions, sessionHostsMap, hostMap, groupConfigs, proxyProfileIdSet, proxyProfiles]);
+  }, [sessions, sessionHostsMap, hosts, groupConfigs, proxyProfileIdSet, proxyProfiles]);
   const sessionHostsMapRef = useRef(sessionHostsMap);
   sessionHostsMapRef.current = sessionHostsMap;
 
-  const handleCommandSubmitted = useCallback((_command: string, _hostId: string, _hostLabel: string, sessionId: string) => {
+  // Handle broadcast input - write to all other sessions in the source workspace.
+  const handleBroadcastInput = useCallback((
+    data: string,
+    sourceSessionId: string,
+    options?: TerminalBroadcastInputOptions,
+  ) => {
+    const sourceSession = sessionsRef.current.find((session) => session.id === sourceSessionId);
+    const workspaceId = sourceSession?.workspaceId;
+    if (!workspaceId) return;
+
+    for (const session of sessionsRef.current) {
+      if (session.workspaceId !== workspaceId || session.id === sourceSessionId) continue;
+      if (!canUseDirectSessionWriteFallback(session)) continue;
+
+      const lineDelayMs = options?.lineDelayMs;
+      terminalBackend.writeToSession(session.id, data, {
+        automated: true,
+        ...(lineDelayMs ? { lineDelayMs } : {}),
+      });
+    }
+  }, [terminalBackend]);
+
+  const handleCommandSubmitted = useCallback((command: string, _hostId: string, _hostLabel: string, sessionId: string) => {
+    applySessionCodingCliProviderFromCommand(sessionId, command);
+
     const tabId = activeTabIdRef.current;
-    if (!sftpFollowTerminalCwdRef.current || !tabId || sidePanelOpenTabsRef.current.get(tabId) !== 'sftp') return;
+    if (!tabId || sidePanelOpenTabsRef.current.get(tabId) !== 'sftp') return;
 
     const session = sessionsRef.current.find((candidate) => candidate.id === sessionId);
     if (!session || !canReuseTerminalConnection(session)) return;
+    const sessionHost = sessionHostsMapRef.current.get(sessionId);
+    const visibleSftpHost = sftpHostForTabRef.current.get(tabId) ?? null;
+    const followHost = resolveSftpFollowTerminalCwdTargetHost(visibleSftpHost, sessionHost);
+    if (!resolveHostFollowTerminalCwd(followHost?.sftpFollowTerminalCwd, sftpFollowTerminalCwdRef.current)) return;
 
-    const revisionAtCommand = terminalCwdRevisionRef.current;
+    const osc7SignalAtCommand = terminalOsc7SignalBySessionRef.current.get(sessionId) ?? 0;
     const probeGeneration = (cwdProbeGenerationRef.current.get(sessionId) ?? 0) + 1;
     cwdProbeGenerationRef.current.set(sessionId, probeGeneration);
     cwdProbeCancelersRef.current.get(sessionId)?.();
     const cancelProbe = scheduleBackendCwdProbeAfterCommand({
       sessionId,
-      cwdRevisionAtCommand: revisionAtCommand,
-      getCwdRevision: () => terminalCwdRevisionRef.current,
+      osc7SignalAtCommand,
+      getOsc7Signal: () => terminalOsc7SignalBySessionRef.current.get(sessionId) ?? 0,
       getSessionPwd: (id, options) => terminalBackend.getSessionPwd(id, options),
       canProbe: async () => {
         if (cwdProbeGenerationRef.current.get(sessionId) !== probeGeneration) return false;
@@ -629,7 +751,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       },
     });
     cwdProbeCancelersRef.current.set(sessionId, cancelProbe);
-  }, [handleTerminalCwdChange, terminalBackend]);
+  }, [applySessionCodingCliProviderFromCommand, handleTerminalCwdChange, terminalBackend]);
 
   const handleCommandExecuted = useCallback((command: string, hostId: string, hostLabel: string, sessionId: string) => {
     onCommandExecuted?.(command, hostId, hostLabel, sessionId);
@@ -727,6 +849,10 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     }
     if (panel === 'system') {
       setSystemMountedTabIds((prev) => addMountedSidePanelTabId(prev, tabId));
+      return;
+    }
+    if (panel === 'notes') {
+      setNotesMountedTabIds((prev) => addMountedSidePanelTabId(prev, tabId));
     }
   }, []);
 
@@ -803,6 +929,13 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     setScriptsMountedTabIds((prev) => removeMountedSidePanelTabId(prev, activeTabId));
     setThemeMountedTabIds((prev) => removeMountedSidePanelTabId(prev, activeTabId));
     setSystemMountedTabIds((prev) => removeMountedSidePanelTabId(prev, activeTabId));
+    setNotesMountedTabIds((prev) => removeMountedSidePanelTabId(prev, activeTabId));
+    setNotesOpenNoteByTab((prev) => {
+      const next = new Map(prev);
+      next.delete(activeTabId);
+      return next;
+    });
+    notesReturnTabRef.current.delete(activeTabId);
     refocusTerminalSession(sessionIdToRefocus);
   }, [getActiveTerminalSessionId, refocusTerminalSession, syncWorkspaceFocusIfNeeded]);
 
@@ -930,6 +1063,73 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     handleSwitchSidePanelTab('system');
   }, [handleSwitchSidePanelTab]);
 
+  const handleOpenNotes = useCallback(() => {
+    const tabId = activeTabIdRef.current;
+    if (!tabId) return;
+    const currentPanel = sidePanelOpenTabsRef.current.get(tabId) ?? null;
+    if (currentPanel && currentPanel !== 'notes') {
+      notesReturnTabRef.current.set(tabId, currentPanel);
+    }
+    handleSwitchSidePanelTab('notes');
+  }, [handleSwitchSidePanelTab]);
+
+  const handleBackFromNotes = useCallback(() => {
+    const tabId = activeTabIdRef.current;
+    if (!tabId) return;
+    const fallback: SidePanelTab = resolveSftpHostForTab(tabId) ? 'sftp' : 'scripts';
+    const remembered = notesReturnTabRef.current.get(tabId) ?? fallback;
+    const target = remembered === 'notes'
+      ? fallback
+      : (remembered === 'sftp' && !resolveSftpHostForTab(tabId) ? 'scripts' : remembered);
+    handleSwitchSidePanelTab(target);
+  }, [handleSwitchSidePanelTab, resolveSftpHostForTab]);
+
+  const openNotesPanelForSourceNote = useCallback((tabId: string, noteId: string) => {
+    setNotesOpenNoteByTab((prev) => {
+      const next = new Map(prev);
+      next.set(tabId, noteId);
+      return next;
+    });
+    setNotesMountedTabIds((prev) => addMountedSidePanelTabId(prev, tabId));
+    setSidePanelOpenTabs((prev) => {
+      const next = new Map(prev);
+      next.set(tabId, 'notes');
+      return next;
+    });
+  }, []);
+
+  const handleOpenHostFromNotes = useCallback((host: Host, source?: { noteId?: string }) => {
+    const sourceNoteId = source?.noteId;
+    const previousTabId = activeTabStore.getActiveTabId();
+    const connectedTabId = onConnectToHost(host);
+    if (!sourceNoteId) return;
+
+    if (typeof connectedTabId === 'string' && connectedTabId) {
+      openNotesPanelForSourceNote(connectedTabId, sourceNoteId);
+      return;
+    }
+
+    const openWhenTabIsReady = (attempt = 0) => {
+      const tabId = activeTabStore.getActiveTabId();
+      if (tabId && tabId !== previousTabId) {
+        openNotesPanelForSourceNote(tabId, sourceNoteId);
+        return;
+      }
+      if (attempt >= 8) {
+        if (tabId) openNotesPanelForSourceNote(tabId, sourceNoteId);
+        return;
+      }
+      window.setTimeout(() => openWhenTabIsReady(attempt + 1), 16);
+    };
+
+    openWhenTabIsReady();
+  }, [onConnectToHost, openNotesPanelForSourceNote]);
+
+  useEffect(() => {
+    if (!openNoteRequest) return;
+    openNotesPanelForSourceNote(openNoteRequest.tabId, openNoteRequest.noteId);
+  }, [openNoteRequest, openNotesPanelForSourceNote]);
+
   const handleAddSelectionToAI = useCallback((sourceSessionId: string, selection: string) => {
     const text = selection.trim();
     if (!text) return;
@@ -977,7 +1177,10 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   }, [handleCloseSidePanel, handleSwitchSidePanelTab]);
 
   // Execute snippet on the focused terminal session
-  const handleSnippetClickForFocusedSession = useCallback((command: string, noAutoRun?: boolean) => {
+  const handleSnippetClickForFocusedSession = useCallback((
+    command: string,
+    noAutoRun?: boolean,
+  ) => {
     const sessionId = activeWorkspaceRef.current?.focusedSessionId ?? activeSessionRef.current?.id;
     if (!sessionId) return;
     const executor = snippetExecutorsRef.current.get(sessionId);
@@ -986,9 +1189,18 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       return;
     }
 
+    const session = sessionsRef.current.find((candidate) => candidate.id === sessionId);
+    if (!session || !canUseDirectSessionWriteFallback(session)) return;
+
     let data = normalizeLineEndings(command);
     if (!noAutoRun) data = `${data}\r`;
-    terminalBackend.writeToSession(sessionId, data);
+    const lineDelayMs = shouldDelayAutoRunSnippetInput(data, { noAutoRun })
+      ? AUTO_RUN_SNIPPET_LINE_DELAY_MS
+      : undefined;
+    terminalBackend.writeToSession(sessionId, data, {
+      automated: true,
+      ...(lineDelayMs ? { lineDelayMs } : {}),
+    });
     // Re-focus the terminal so the user can interact immediately
     const pane = document.querySelector(`[data-session-id="${sessionId}"]`);
     const textarea = pane?.querySelector('textarea.xterm-helper-textarea') as HTMLTextAreaElement | null;
@@ -1027,6 +1239,8 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
         if (executor) {
           executor(text, false, { broadcast: false });
         } else {
+          const session = sessionsRef.current.find((candidate) => candidate.id === sid);
+          if (!session || !canUseDirectSessionWriteFallback(session)) continue;
           terminalBackend.writeToSession(sid, payload);
         }
       }
@@ -1041,6 +1255,8 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
         if (executor) {
           executor(text, false);
         } else {
+          const session = sessionsRef.current.find((candidate) => candidate.id === targetId);
+          if (!session || !canUseDirectSessionWriteFallback(session)) return;
           terminalBackend.writeToSession(targetId, payload);
         }
       }
@@ -1065,12 +1281,14 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     Array,
     Button,
     ChunkedEscapeFilter,
+    clearHostTreePreviewVars,
     clearTerminalPreviewVars,
     clearTopTabsPreviewVars,
     FolderTree,
     History,
     HistorySidePanel,
     MessageSquare,
+    NotesManager,
     Palette,
     PanelLeft,
     PanelRight,
@@ -1102,6 +1320,9 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     handleOpenTheme,
     handleOpenAI,
     handleOpenSystem,
+    handleOpenNotes,
+    handleBackFromNotes,
+    handleOpenHostFromNotes,
     handleOsDetected,
     handlePendingTerminalSelectionConsumed,
     handlePendingUploadHandled,
@@ -1111,8 +1332,12 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     handleSnippetClickForFocusedSession,
     handleSnippetFromPanel,
     handleSnippetExecutorChange,
+    handleProgrammaticCommandLogRewriteChange,
     handleStatusChange,
     handleTerminalCwdChange,
+    handleTerminalTitleChange,
+    handleTerminalBell,
+    handleTerminalOutput,
     handleTerminalDataCapture,
     handleTerminalFontSizeChange,
     handleToggleAiFromTopBar,
@@ -1127,6 +1352,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     hostsRef,
     hotkeyScheme,
     disableTerminalFontZoom,
+    restoreTerminalCwd,
     identities,
     isBroadcastEnabled,
     isComposeBarOpen,
@@ -1136,6 +1362,8 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     lastSidePanelTabRef,
     mountedAiTabIds: aiMountedTabIds,
     mountedSftpTabIds,
+    notesMountedTabIds,
+    notesOpenNoteByTab,
     scriptsMountedTabIds,
     systemMountedTabIds,
     themeMountedTabIds,
@@ -1164,10 +1392,14 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     onToggleWorkspaceViewModeRef,
     onUpdateHost,
     onUpdateSplitSizes,
+    onUpdateFollowAppTerminalThemeId,
     onUpdateTerminalFontFamilyId,
     onUpdateTerminalFontSize,
     onUpdateTerminalFontWeight,
     onUpdateSessionFontSize,
+    onUpdateSessionRestoreCwd,
+    onUpdateSessionDynamicTitle,
+    onUpdateSessionCodingCliProvider,
     onClearSessionFontSizeOverride,
     onUpdateTerminalThemeId,
     pendingTerminalSelectionForAI,
@@ -1180,6 +1412,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     sessionActivityStore,
     sessionChainHostsMap,
     sessionHostsMap,
+    resolvedSessionHostIds,
     sessionLogConfig,
     sessionSudoAutofillPasswordsMap,
     sessions,
@@ -1188,6 +1421,8 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     setIsComposeBarOpen,
     setPendingTerminalSelectionForAI,
     setAiMountedTabIds,
+    setNotesMountedTabIds,
+    setNotesOpenNoteByTab,
     setScriptsMountedTabIds,
     setSystemMountedTabIds,
     setThemeMountedTabIds,
@@ -1214,8 +1449,11 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     sftpUseCompressedUpload,
     shouldMarkSessionActivity,
     snippetExecutorsRef,
+    programmaticCommandLogRewriteHandlersRef,
     snippetPackages,
     snippets,
+    noteGroups,
+    notes,
     splitHorizontalHandlersRef,
     splitVerticalHandlersRef,
     sshDebugLogsEnabled,
@@ -1227,6 +1465,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     terminalRendererCwdBySessionRef,
     terminalSettings,
     terminalTheme,
+    terminalThemeId,
     ThemeSidePanel,
     toggleScriptsSidePanelRef,
     toggleSidePanelRef,
@@ -1234,6 +1473,8 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     TooltipContent,
     TooltipTrigger,
     updateHosts,
+    updateNoteGroups,
+    updateNotes,
     updateSnippetPackages,
     updateSnippets,
     X,

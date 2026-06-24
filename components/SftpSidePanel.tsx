@@ -40,7 +40,11 @@ import { useSftpKeyboardShortcuts } from "./sftp/hooks/useSftpKeyboardShortcuts"
 import { sftpFocusStore } from "./sftp/hooks/useSftpFocusedPane";
 import { keepOnlyPaneSelections } from "./sftp/hooks/selectionScope";
 import { KeyBinding, HotkeyScheme } from "../domain/models";
-import { shouldFollowTerminalCwdNavigate } from "./sftp/sftpFollowTerminalCwd";
+import {
+  mergeLatestFollowTerminalCwdHostSetting,
+  resolveHostFollowTerminalCwd,
+  shouldFollowTerminalCwdNavigate,
+} from "./sftp/sftpFollowTerminalCwd";
 
 interface SftpSidePanelProps {
   hosts: Host[];
@@ -79,7 +83,7 @@ interface SftpSidePanelProps {
   onGetTerminalCwd?: (options?: { preferFreshBackend?: boolean }) => Promise<string | null>;
   activeTerminalCwd?: string | null;
   sftpFollowTerminalCwd?: boolean;
-  onSftpFollowTerminalCwdChange?: (enabled: boolean) => void;
+  onSftpFollowTerminalCwdChange?: (enabled: boolean, host?: Host | null) => void;
   onRequestTerminalFocus?: () => void;
   terminalSettings?: { keepaliveInterval: number; keepaliveCountMax: number };
 }
@@ -473,7 +477,7 @@ type SftpSidePanelInteractiveBodyProps = {
   onGetTerminalCwd?: (options?: { preferFreshBackend?: boolean }) => Promise<string | null>;
   activeTerminalCwd?: string | null;
   sftpFollowTerminalCwd: boolean;
-  onSftpFollowTerminalCwdChange?: (enabled: boolean) => void;
+  onSftpFollowTerminalCwdChange?: (enabled: boolean, host?: Host | null) => void;
   onRequestTerminalFocus?: () => void;
   isVisible: boolean;
   behaviorRef: MutableRefObject<"open" | "transfer">;
@@ -653,13 +657,39 @@ const SftpSidePanelInteractiveBody: React.FC<SftpSidePanelInteractiveBodyProps> 
     onInteractiveWorkChange(showTextEditor || !!permissionsState || showFileOpenerDialog);
   }, [onInteractiveWorkChange, permissionsState, showFileOpenerDialog, showTextEditor]);
 
+  // When a host switch is deferred or the picker connects a different host,
+  // actions should follow the visible SFTP connection, not the incoming default.
+  const displayHost = useMemo(() => {
+    const conn = sftp.leftPane.connection;
+    if (conn && !conn.isLocal) {
+      const latestHost = hosts.find((h) => h.id === conn.hostId) ?? null;
+      // Prefer the stored Host object from connect time — it preserves
+      // session-time overrides that the vault host may lack.
+      if (connectedHostObjRef.current && connectedHostObjRef.current.id === conn.hostId) {
+        return mergeLatestFollowTerminalCwdHostSetting(connectedHostObjRef.current, latestHost);
+      }
+      return latestHost ?? activeHost;
+    }
+    return activeHost;
+  }, [activeHost, connectedHostObjRef, hosts, sftp.leftPane.connection]);
+
+  const followTerminalCwdHost = useMemo(() => {
+    if (sftp.leftPane.connection?.isLocal) return null;
+    return displayHost;
+  }, [displayHost, sftp.leftPane.connection?.isLocal]);
+
+  const effectiveFollowTerminalCwd = resolveHostFollowTerminalCwd(
+    followTerminalCwdHost?.sftpFollowTerminalCwd,
+    sftpFollowTerminalCwd,
+  );
+
   const canFollowTerminalCwd = useMemo(() => {
-    if (!onGetTerminalCwd || !activeHost) return false;
-    const proto = activeHost.protocol;
+    if (!onGetTerminalCwd || !followTerminalCwdHost) return false;
+    const proto = followTerminalCwdHost.protocol;
     if (proto === "local" || proto === "serial") return false;
-    if (activeHost.id?.startsWith("local-") || activeHost.id?.startsWith("serial-")) return false;
+    if (followTerminalCwdHost.id?.startsWith("local-") || followTerminalCwdHost.id?.startsWith("serial-")) return false;
     return true;
-  }, [activeHost, onGetTerminalCwd]);
+  }, [followTerminalCwdHost, onGetTerminalCwd]);
 
   const hasActiveWork = showTextEditor || !!permissionsState || showFileOpenerDialog
     || (sftp.activeFileWatchCountRef?.current ?? 0) > 0;
@@ -673,7 +703,7 @@ const SftpSidePanelInteractiveBody: React.FC<SftpSidePanelInteractiveBodyProps> 
   }, [onGetTerminalCwd, sftpRef]);
 
   const syncFollowToTerminalCwd = useCallback(async () => {
-    if (!onGetTerminalCwd || !sftpFollowTerminalCwd || !canFollowTerminalCwd) {
+    if (!onGetTerminalCwd || !effectiveFollowTerminalCwd || !canFollowTerminalCwd) {
       return;
     }
 
@@ -685,7 +715,7 @@ const SftpSidePanelInteractiveBody: React.FC<SftpSidePanelInteractiveBodyProps> 
 
     const connection = sftpRef.current.leftPane.connection;
     if (!shouldFollowTerminalCwdNavigate({
-      followEnabled: sftpFollowTerminalCwd,
+      followEnabled: effectiveFollowTerminalCwd,
       isVisible,
       terminalCwd,
       currentPath: connection?.currentPath,
@@ -699,26 +729,26 @@ const SftpSidePanelInteractiveBody: React.FC<SftpSidePanelInteractiveBodyProps> 
   }, [
     activeTerminalCwd,
     canFollowTerminalCwd,
+    effectiveFollowTerminalCwd,
     hasActiveWork,
     isVisible,
     onGetTerminalCwd,
     sftpRef,
-    sftpFollowTerminalCwd,
   ]);
 
   const handleToggleFollowTerminalCwd = useCallback(() => {
-    onSftpFollowTerminalCwdChange?.(!sftpFollowTerminalCwd);
-  }, [onSftpFollowTerminalCwdChange, sftpFollowTerminalCwd]);
+    onSftpFollowTerminalCwdChange?.(!effectiveFollowTerminalCwd, followTerminalCwdHost);
+  }, [effectiveFollowTerminalCwd, followTerminalCwdHost, onSftpFollowTerminalCwdChange]);
 
   useEffect(() => {
-    if (!sftpFollowTerminalCwd || !canFollowTerminalCwd || !isVisible || hasActiveWork) return;
+    if (!effectiveFollowTerminalCwd || !canFollowTerminalCwd || !isVisible || hasActiveWork) return;
     void syncFollowToTerminalCwd();
   }, [
     activeTerminalCwd,
     canFollowTerminalCwd,
+    effectiveFollowTerminalCwd,
     hasActiveWork,
     isVisible,
-    sftpFollowTerminalCwd,
     sftp.leftPane.connection?.currentPath,
     sftp.leftPane.connection?.status,
     sftp.leftPane.connection?.isLocal,
@@ -810,23 +840,6 @@ const SftpSidePanelInteractiveBody: React.FC<SftpSidePanelInteractiveBodyProps> 
     [t],
   );
 
-  // When the auto-connect effect defers a switch (active transfers or open
-  // editor), the panel still operates on the current connection, not
-  // activeHost.  Use the connected host for the header so the label matches
-  // what browse/edit/delete actions actually target.
-  const displayHost = useMemo(() => {
-    const conn = sftp.leftPane.connection;
-    if (conn && !conn.isLocal) {
-      // Prefer the stored Host object from connect time — it preserves
-      // session-time overrides that the vault host may lack.
-      if (connectedHostObjRef.current && connectedHostObjRef.current.id === conn.hostId) {
-        return connectedHostObjRef.current;
-      }
-      return hosts.find((h) => h.id === conn.hostId) ?? activeHost;
-    }
-    return activeHost;
-  }, [activeHost, connectedHostObjRef, hosts, sftp.leftPane.connection]);
-
   // Determine the active pane to render (without using global activeTabStore)
   const activeLeftPaneId = sftp.leftTabs.activeTabId;
 
@@ -899,7 +912,7 @@ const SftpSidePanelInteractiveBody: React.FC<SftpSidePanelInteractiveBodyProps> 
                   forceActive
                   onToggleShowHiddenFiles={() => handleToggleHiddenFiles(pane.id)}
                   onGoToTerminalCwd={onGetTerminalCwd ? handleGoToTerminalCwd : undefined}
-                  followTerminalCwd={canFollowTerminalCwd ? sftpFollowTerminalCwd : undefined}
+                  followTerminalCwd={canFollowTerminalCwd ? effectiveFollowTerminalCwd : undefined}
                   onToggleFollowTerminalCwd={canFollowTerminalCwd ? handleToggleFollowTerminalCwd : undefined}
                 />
               </div>

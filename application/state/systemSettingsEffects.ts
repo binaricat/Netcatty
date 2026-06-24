@@ -10,6 +10,7 @@ import { localStorageAdapter } from '../../infrastructure/persistence/localStora
 import { netcattyBridge } from '../../infrastructure/services/netcattyBridge';
 
 interface UseSystemSettingsEffectsParams {
+  enabled?: boolean;
   toggleWindowHotkey: string;
   globalHotkeyEnabled: boolean;
   closeToTray: boolean;
@@ -22,6 +23,7 @@ interface UseSystemSettingsEffectsParams {
 }
 
 export function useSystemSettingsEffects({
+  enabled = true,
   toggleWindowHotkey,
   globalHotkeyEnabled,
   closeToTray,
@@ -34,6 +36,7 @@ export function useSystemSettingsEffects({
 }: UseSystemSettingsEffectsParams) {
   // Persist and sync toggle window hotkey setting
   useEffect(() => {
+    if (!enabled) return;
     // Register/unregister the global hotkey in main process (needed on mount)
     const bridge = netcattyBridge.get();
     if (bridge?.registerGlobalHotkey) {
@@ -64,6 +67,7 @@ export function useSystemSettingsEffects({
     notifySettingsChanged(STORAGE_KEY_TOGGLE_WINDOW_HOTKEY, toggleWindowHotkey);
   }, [
     toggleWindowHotkey,
+    enabled,
     globalHotkeyEnabled,
     notifySettingsChanged,
     persistMountedRef,
@@ -72,13 +76,15 @@ export function useSystemSettingsEffects({
 
   // Persist global hotkey enabled setting
   useEffect(() => {
+    if (!enabled) return;
     localStorageAdapter.writeString(STORAGE_KEY_GLOBAL_HOTKEY_ENABLED, globalHotkeyEnabled ? 'true' : 'false');
     if (!persistMountedRef.current) return;
     notifySettingsChanged(STORAGE_KEY_GLOBAL_HOTKEY_ENABLED, globalHotkeyEnabled);
-  }, [globalHotkeyEnabled, notifySettingsChanged, persistMountedRef]);
+  }, [enabled, globalHotkeyEnabled, notifySettingsChanged, persistMountedRef]);
 
   // Persist and sync close to tray setting
   useEffect(() => {
+    if (!enabled) return;
     // Update main process tray behavior (needed on mount)
     const bridge = netcattyBridge.get();
     if (bridge?.setCloseToTray) {
@@ -90,10 +96,11 @@ export function useSystemSettingsEffects({
     // Skip IPC on initial mount
     if (!persistMountedRef.current) return;
     notifySettingsChanged(STORAGE_KEY_CLOSE_TO_TRAY, closeToTray);
-  }, [closeToTray, notifySettingsChanged, persistMountedRef]);
+  }, [enabled, closeToTray, notifySettingsChanged, persistMountedRef]);
 
   // Persist and sync window opacity
   useEffect(() => {
+    if (!enabled) return;
     const bridge = netcattyBridge.get();
     bridge?.setWindowOpacity?.(windowOpacity).catch((err) => {
       console.warn('[WindowOpacity] Failed to apply window opacity:', err);
@@ -101,12 +108,13 @@ export function useSystemSettingsEffects({
     localStorageAdapter.writeString(STORAGE_KEY_WINDOW_OPACITY, String(windowOpacity));
     if (!persistMountedRef.current) return;
     notifySettingsChanged(STORAGE_KEY_WINDOW_OPACITY, windowOpacity);
-  }, [windowOpacity, notifySettingsChanged, persistMountedRef]);
+  }, [enabled, windowOpacity, notifySettingsChanged, persistMountedRef]);
 
   // Hydrate auto-update state from the main-process preference file on mount.
   // This reconciles localStorage (renderer) with auto-update-pref.json (main)
   // in case localStorage was cleared or is stale.
   useEffect(() => {
+    if (!enabled) return;
     const bridge = netcattyBridge.get();
     void bridge?.getAutoUpdate?.().then((result) => {
       if (result && typeof result.enabled === 'boolean') {
@@ -118,11 +126,12 @@ export function useSystemSettingsEffects({
         });
       }
     }).catch(() => { /* bridge unavailable */ });
-  }, [setAutoUpdateEnabled]);
+  }, [enabled, setAutoUpdateEnabled]);
 
   // Persist auto-update enabled setting.
   // Initial mount still writes localStorage, but skips cross-window/main-process IPC.
   useEffect(() => {
+    if (!enabled) return;
     localStorageAdapter.writeString(STORAGE_KEY_AUTO_UPDATE_ENABLED, autoUpdateEnabled ? 'true' : 'false');
     if (!persistMountedRef.current) return;
     notifySettingsChanged(STORAGE_KEY_AUTO_UPDATE_ENABLED, autoUpdateEnabled);
@@ -131,7 +140,7 @@ export function useSystemSettingsEffects({
     bridge?.setAutoUpdate?.(autoUpdateEnabled).catch((err: unknown) => {
       console.warn('[AutoUpdate] Failed to set auto-update:', err);
     });
-  }, [autoUpdateEnabled, notifySettingsChanged, persistMountedRef]);
+  }, [enabled, autoUpdateEnabled, notifySettingsChanged, persistMountedRef]);
 
 
 }

@@ -25,13 +25,24 @@ export function normalizeStartupCommandDelay(raw: number | undefined): number {
   return Math.max(0, Math.min(STARTUP_COMMAND_MAX_DELAY_MS, value));
 }
 
+export const resolveStartupCommand = (
+  ctx: TerminalSessionStartersContext,
+  options?: { consumeSuppressHostStartupCommand?: boolean },
+): string | undefined => {
+  const command = ctx.startupCommand || (ctx.suppressHostStartupCommandRef?.current ? undefined : ctx.host.startupCommand);
+  if (options?.consumeSuppressHostStartupCommand && ctx.suppressHostStartupCommandRef) {
+    ctx.suppressHostStartupCommandRef.current = false;
+  }
+  return command;
+};
+
 export const scheduleStartupCommand = (
   ctx: TerminalSessionStartersContext,
   term: XTerm,
   id: string,
   onSettled?: () => void,
 ): (() => void) | undefined => {
-  const commandToRun = ctx.startupCommand || ctx.host.startupCommand;
+  const commandToRun = resolveStartupCommand(ctx, { consumeSuppressHostStartupCommand: true });
   if (!commandToRun || ctx.hasRunStartupCommandRef.current) return undefined;
 
   ctx.hasRunStartupCommandRef.current = true;
@@ -96,4 +107,3 @@ export const scheduleStartupCommand = (
     if (timeoutId) clearTimeout(timeoutId);
   };
 };
-

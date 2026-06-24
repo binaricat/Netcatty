@@ -13,6 +13,24 @@ test("normalizeTerminalSettings defaults startupCommandDelayMs to 600", () => {
   assert.equal(normalizeTerminalSettings().startupCommandDelayMs, 600);
 });
 
+test("normalizeTerminalSettings enables font smoothing by default", () => {
+  assert.equal(normalizeTerminalSettings().fontSmoothing, true);
+});
+
+test("normalizeTerminalSettings enables hibernate for hidden tabs by default", () => {
+  assert.equal(normalizeTerminalSettings().hibernateHiddenTabs, true);
+  assert.equal(normalizeTerminalSettings().hibernateHiddenTabsDelaySec, 5);
+});
+
+test("normalizeTerminalSettings clamps hibernate delay seconds", () => {
+  assert.equal(normalizeTerminalSettings({ hibernateHiddenTabsDelaySec: 120 }).hibernateHiddenTabsDelaySec, 120);
+  assert.equal(normalizeTerminalSettings({ hibernateHiddenTabsDelaySec: 2 }).hibernateHiddenTabsDelaySec, 5);
+});
+
+test("normalizeTerminalSettings preserves disabled font smoothing", () => {
+  assert.equal(normalizeTerminalSettings({ fontSmoothing: false }).fontSmoothing, false);
+});
+
 test("normalizeTerminalSettings preserves a provided startupCommandDelayMs", () => {
   assert.equal(normalizeTerminalSettings({ startupCommandDelayMs: 0 }).startupCommandDelayMs, 0);
   assert.equal(normalizeTerminalSettings({ startupCommandDelayMs: 1500 }).startupCommandDelayMs, 1500);

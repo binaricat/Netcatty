@@ -218,6 +218,13 @@ export const tryAttachSessionToTerminal = (
   return true;
 };
 
+export const detachSessionDataListeners = (ctx: Pick<TerminalSessionStartersContext, "disposeDataRef" | "disposeExitRef">) => {
+  ctx.disposeDataRef.current?.();
+  ctx.disposeDataRef.current = null;
+  ctx.disposeExitRef.current?.();
+  ctx.disposeExitRef.current = null;
+};
+
 export const attachSessionToTerminal = (
   ctx: TerminalSessionStartersContext,
   term: XTerm,
@@ -260,6 +267,7 @@ export const attachSessionToTerminal = (
     }
     data = sudoAutofill?.handleOutput(data) ?? data;
     writeSessionData(ctx, term, data);
+    ctx.onTerminalOutput?.(data);
     if (!ctx.hasConnectedRef.current) {
       ctx.updateStatus("connected");
       opts?.onConnected?.();

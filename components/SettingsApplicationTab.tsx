@@ -261,6 +261,7 @@ export default function SettingsApplicationTab({ updateState, checkNow, openRele
           </div>
         </div>
       </div>
+
     </SettingsTabContent>
   );
 }

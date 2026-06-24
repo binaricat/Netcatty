@@ -6,6 +6,7 @@
 
 import type { CompletionContext } from "./completionEngine";
 import type { FigArg } from "./figSpecLoader";
+import type { AutocompleteCwdSource } from "./terminalAutocompleteLayout";
 
 /** Directory entry returned from IPC */
 export interface DirEntry {
@@ -201,12 +202,13 @@ export async function getPathSuggestions(
     protocol?: string;
     os?: "linux" | "windows" | "macos";
     cwd?: string;
+    cwdSource?: AutocompleteCwdSource;
     foldersOnly: boolean;
   },
 ): Promise<{ name: string; type: DirEntry["type"] }[]> {
-  const { sessionId, protocol, os, cwd, foldersOnly } = options;
+  const { sessionId, protocol, os, cwd, cwdSource, foldersOnly } = options;
   const { dirToList, filterPrefix } = resolvePathComponents(ctx.currentWord, cwd, {
-    preferRelativeCwd: shouldUseRemoteShellCwd(protocol, sessionId, os),
+    preferRelativeCwd: shouldPreferRemoteShellCwd(protocol, sessionId, os, cwd, cwdSource),
   });
 
   const entries = await listDirectoryEntries(dirToList, {
@@ -348,11 +350,14 @@ function resolveDirLookup(pathToken: string, cwd: string | undefined, preferRela
   return normalizePosixLikePath(pathToken);
 }
 
-function shouldUseRemoteShellCwd(
+export function shouldPreferRemoteShellCwd(
   protocol: string | undefined,
   sessionId: string | undefined,
   os?: "linux" | "windows" | "macos",
+  cwd?: string,
+  cwdSource?: AutocompleteCwdSource,
 ): boolean {
+  if (cwdSource === "prompt" && cwd?.startsWith("/")) return false;
   return Boolean(sessionId && protocol !== "local" && os === "linux");
 }
 
@@ -362,7 +367,7 @@ function shouldBypassCache(
   os: "linux" | "windows" | "macos" | undefined,
   dirPath: string,
 ): boolean {
-  if (!shouldUseRemoteShellCwd(protocol, sessionId, os)) return false;
+  if (!shouldPreferRemoteShellCwd(protocol, sessionId, os)) return false;
   return !dirPath.startsWith("/") && dirPath !== "~" && !dirPath.startsWith("~/");
 }
 

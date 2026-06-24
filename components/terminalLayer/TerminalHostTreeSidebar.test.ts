@@ -130,6 +130,30 @@ test('host tree sidebar clips the panel instead of fading it out while closing',
   }).opacity, 1);
 });
 
+test('host tree sidebar colors can be overridden by immediate preview styles', () => {
+  const theme = {
+    termBg: 'var(--terminal-host-tree-bg, #000000)',
+    termFg: 'var(--terminal-host-tree-fg, #ffffff)',
+    mutedFg: 'var(--terminal-host-tree-muted, #999999)',
+    separator: 'var(--terminal-host-tree-separator, #333333)',
+    rowHoverBg: 'var(--terminal-host-tree-hover-bg, #111111)',
+    rowActiveBg: 'var(--terminal-host-tree-active-bg, #222222)',
+    rowDropBg: 'var(--terminal-host-tree-drop-bg, #444444)',
+    folderFg: 'var(--terminal-host-tree-folder-fg, #cccccc)',
+  };
+
+  const style = getTerminalHostTreeSidebarPanelStyle({
+    isVisible: true,
+    displayWidth: 240,
+    panelTransition: 'border-color 220ms ease-out',
+    theme,
+  });
+
+  assert.equal(style.backgroundColor, theme.termBg);
+  assert.equal(style.color, theme.termFg);
+  assert.equal(style.borderRight, `1px solid ${theme.separator}`);
+});
+
 test('host tree host inline rename trims and updates the matching host label', () => {
   const result = applyTerminalHostTreeHostRename([host], 'host-1', '  web-01  ');
 
@@ -155,7 +179,7 @@ test('host tree hover card is hidden while the same host is inline editing', () 
 test('host tree hover card renders markdown notes and keeps host details out of the header subtitle', () => {
   const source = readFileSync(new URL('./TerminalHostTreeSidebar.tsx', import.meta.url), 'utf8');
 
-  assert.match(source, /<MessageResponse/);
+  assert.match(source, /<LazyMessageResponse/);
   assert.match(source, /size="sm"/);
   assert.match(source, /items-center gap-2/);
   assert.match(source, /className="rounded"/);

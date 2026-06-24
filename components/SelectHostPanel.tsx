@@ -79,6 +79,10 @@ const SelectHostPanel: React.FC<SelectHostPanelProps> = ({
     () => hosts.filter((host) => host.protocol !== "serial"),
     [hosts]
   );
+  const selectedHostIdSet = useMemo(
+    () => new Set(selectedHostIds),
+    [selectedHostIds],
+  );
 
   // Get all unique tags from hosts
   const allTags = useMemo(() => {
@@ -107,6 +111,19 @@ const SelectHostPanel: React.FC<SelectHostPanelProps> = ({
     return Array.from(pathSet).sort();
   }, [selectableHosts, customGroups]);
 
+  const groupHostCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    selectableHosts.forEach((host) => {
+      if (!host.group) return;
+      const parts = host.group.split("/");
+      for (let i = 1; i <= parts.length; i += 1) {
+        const path = parts.slice(0, i).join("/");
+        counts.set(path, (counts.get(path) ?? 0) + 1);
+      }
+    });
+    return counts;
+  }, [selectableHosts]);
+
   // Get groups at current level
   const groupsWithCounts = useMemo(() => {
     const prefix = currentPath ? `${currentPath}/` : "";
@@ -119,11 +136,7 @@ const SelectHostPanel: React.FC<SelectHostPanelProps> = ({
         const topLevel = path.split("/")[0];
         if (!seen.has(topLevel)) {
           seen.add(topLevel);
-          const count = selectableHosts.filter(
-            (h) =>
-              h.group &&
-              (h.group === topLevel || h.group.startsWith(`${topLevel}/`)),
-          ).length;
+          const count = groupHostCounts.get(topLevel) ?? 0;
           groups.push({ path: topLevel, name: topLevel, count });
         }
       } else if (path.startsWith(prefix) && path !== currentPath) {
@@ -133,18 +146,14 @@ const SelectHostPanel: React.FC<SelectHostPanelProps> = ({
         const fullPath = `${prefix}${nextLevel}`;
         if (!seen.has(fullPath)) {
           seen.add(fullPath);
-          const count = selectableHosts.filter(
-            (h) =>
-              h.group &&
-              (h.group === fullPath || h.group.startsWith(`${fullPath}/`)),
-          ).length;
+          const count = groupHostCounts.get(fullPath) ?? 0;
           groups.push({ path: fullPath, name: nextLevel, count });
         }
       }
     });
 
     return groups;
-  }, [allGroupPaths, currentPath, selectableHosts]);
+  }, [allGroupPaths, currentPath, groupHostCounts]);
 
   // Get hosts at current level with filtering and sorting
   const filteredHosts = useMemo(() => {
@@ -326,7 +335,7 @@ const SelectHostPanel: React.FC<SelectHostPanelProps> = ({
               <h4 className="text-xs font-semibold mb-2 text-muted-foreground">{t("vault.nav.hosts")}</h4>
               <div className="space-y-1">
                 {filteredHosts.map((host) => {
-                  const isSelected = selectedHostIds.includes(host.id);
+                  const isSelected = selectedHostIdSet.has(host.id);
                   const connectionStr = `${host.username}@${host.hostname}:${host.port || 22}`;
 
                   return (
@@ -395,7 +404,7 @@ const SelectHostPanel: React.FC<SelectHostPanelProps> = ({
             if (onContinue) {
               onContinue();
             } else {
-              const host = selectableHosts.find((h) => selectedHostIds.includes(h.id));
+              const host = selectableHosts.find((h) => selectedHostIdSet.has(h.id));
               if (host) {
                 onSelect(host);
               }

@@ -71,6 +71,7 @@ export const zhCNAiMessages: Messages = {
   'ai.codex.notFoundHint': '在 PATH 中未找到 codex。请安装或在下方指定可执行文件路径。',
   'ai.codex.customPathPlaceholder': '例如 /usr/local/bin/codex',
   'ai.codex.check': '检查',
+  'ai.codex.resetPath': '重置',
   'ai.codex.openLogin': '打开登录',
   'ai.codex.logout': '退出登录',
   'ai.codex.connectChatGPT': '连接 ChatGPT',
@@ -96,6 +97,7 @@ export const zhCNAiMessages: Messages = {
   'ai.claude.envVars.placeholder': 'ANTHROPIC_BASE_URL=https://...\nANTHROPIC_MODEL=...',
   'ai.claude.envVars.hint': '每行一个 KEY=VALUE，传给 Claude agent。明文存在本地——API key／凭据建议用上面的「配置目录」（claude 登录），不要放这里。',
   'ai.claude.check': '检查',
+  'ai.claude.resetPath': '重置',
 
   // Public MCP
   'ai.publicMcp.status.unavailable': '不可用',
@@ -148,6 +150,7 @@ export const zhCNAiMessages: Messages = {
   'ai.copilot.notFoundHint': '在 PATH 中未找到 copilot。请安装或在下方指定可执行文件路径。',
   'ai.copilot.customPathPlaceholder': '例如 /usr/local/bin/copilot',
   'ai.copilot.check': '检查',
+  'ai.copilot.resetPath': '重置',
 
   // AI Cursor SDK
   'ai.cursor.title': 'Cursor',
@@ -187,6 +190,7 @@ export const zhCNAiMessages: Messages = {
   'ai.codebuddy.notFoundHint': '在 PATH 中未找到 codebuddy。请安装或在下方指定可执行文件路径。',
   'ai.codebuddy.customPathPlaceholder': '例如 /usr/local/bin/codebuddy',
   'ai.codebuddy.check': '检查',
+  'ai.codebuddy.resetPath': '重置',
   'ai.codebuddy.configSection': '认证与配置（可选）',
   'ai.codebuddy.internetEnv': '网络环境',
   'ai.codebuddy.internetEnv.default': '默认（海外）',
@@ -196,6 +200,18 @@ export const zhCNAiMessages: Messages = {
   'ai.codebuddy.envVars': '环境变量',
   'ai.codebuddy.envVars.placeholder': 'CODEBUDDY_API_KEY=...\nCODEBUDDY_AUTH_TOKEN=...\nOTHER_VAR=...',
   'ai.codebuddy.envVars.hint': '每行一个 KEY=VALUE，传给 CodeBuddy agent。可在此设置 CODEBUDDY_API_KEY 或 CODEBUDDY_AUTH_TOKEN 完成认证。明文存在本地。',
+
+  // AI OpenCode
+  'ai.opencode.title': 'OpenCode',
+  'ai.opencode.description': '通过官方 SDK 接入 OpenCode。先在 OpenCode 里配置 provider 和密钥，检测到后即可作为外部编程 Agent 使用。',
+  'ai.opencode.detecting': '检测中...',
+  'ai.opencode.detected': '已检测到',
+  'ai.opencode.notFound': '未找到',
+  'ai.opencode.path': '路径：',
+  'ai.opencode.notFoundHint': '在 PATH 中未找到 opencode。请安装或在下方指定可执行文件路径。',
+  'ai.opencode.customPathPlaceholder': '例如 /usr/local/bin/opencode',
+  'ai.opencode.check': '检查',
+  'ai.opencode.resetPath': '重置',
 
   // AI Default Agent
   'ai.defaultAgent': '默认 Agent',
@@ -361,6 +377,7 @@ export const zhCNAiMessages: Messages = {
   'terminal.layer.scripts': '脚本',
   'terminal.layer.history': '命令历史',
   'terminal.layer.theme': '主题',
+  'terminal.layer.notes': '笔记',
   'terminal.layer.aiChat': 'AI 助手',
   'terminal.layer.movePanelLeft': '面板移至左侧',
   'terminal.layer.movePanelRight': '面板移至右侧',

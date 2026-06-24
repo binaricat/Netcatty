@@ -23,6 +23,7 @@ reproduced below and applies to:
 - `deepseek.svg`
 - `moonshot.svg`
 - `kimi.svg`
+- `codex.svg` (in `../agents/`, Codex CLI product mark)
 - `qwen.svg`
 - `zhipu.svg`
 - `doubao.svg`

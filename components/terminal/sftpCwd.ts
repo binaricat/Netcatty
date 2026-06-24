@@ -67,27 +67,27 @@ export const PROBE_SESSION_CWD_AFTER_COMMAND_MS = 150;
 
 export type ProbeBackendSessionCwdAfterCommandOptions = {
   sessionId: string;
-  cwdRevisionAtCommand: number;
-  getCwdRevision: () => number;
+  osc7SignalAtCommand: number;
+  getOsc7Signal: () => number;
   getSessionPwd: (sessionId: string, options?: SessionPwdOptions) => Promise<SessionPwdResult>;
   canProbe?: () => boolean | Promise<boolean>;
 };
 
-/** Probe backend pwd when OSC 7 did not update cwd after a command. */
+/** Probe backend pwd when OSC 7 did not report after a command. */
 export const probeBackendSessionCwdAfterCommand = async ({
   sessionId,
-  cwdRevisionAtCommand,
-  getCwdRevision,
+  osc7SignalAtCommand,
+  getOsc7Signal,
   getSessionPwd,
   canProbe = () => true,
 }: ProbeBackendSessionCwdAfterCommandOptions): Promise<string | null> => {
-  if (getCwdRevision() !== cwdRevisionAtCommand) return null;
+  if (getOsc7Signal() !== osc7SignalAtCommand) return null;
   const allowed = await canProbe();
-  if (!allowed || getCwdRevision() !== cwdRevisionAtCommand) return null;
+  if (!allowed || getOsc7Signal() !== osc7SignalAtCommand) return null;
 
   try {
     const result = await getSessionPwd(sessionId);
-    if (getCwdRevision() !== cwdRevisionAtCommand) return null;
+    if (getOsc7Signal() !== osc7SignalAtCommand) return null;
     return result.success ? normalizeCwd(result.cwd) : null;
   } catch {
     return null;

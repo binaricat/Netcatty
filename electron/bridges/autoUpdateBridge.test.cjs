@@ -164,7 +164,7 @@ function makeWindowManagerWithMainWindow() {
   };
 }
 
-function makeWindowManagerWithMainWindows(count) {
+function makeWindowManagerWithMainWindows(count, options = {}) {
   const windows = Array.from({ length: count }, (_unused, index) => {
     const sentChannels = [];
     const webContents = {
@@ -190,6 +190,7 @@ function makeWindowManagerWithMainWindows(count) {
   return {
     calls: [],
     windows,
+    appContentWindows: options.appContentWindows || windows,
     setQuittingForUpdate(value) {
       this.calls.push(value);
     },
@@ -201,6 +202,9 @@ function makeWindowManagerWithMainWindows(count) {
     },
     getMainWindows() {
       return windows;
+    },
+    getAppContentWindows() {
+      return this.appContentWindows;
     },
   };
 }
@@ -439,7 +443,7 @@ test("install handler aborts and notifies when the renderer reports dirty editor
   );
 });
 
-test("install handler checks every main window before installing", async () => {
+test("install handler checks every app content window before installing", async () => {
   const order = [];
   const autoUpdater = {
     autoDownload: true,
@@ -450,7 +454,27 @@ test("install handler checks every main window before installing", async () => {
       order.push("quitAndInstall");
     },
   };
-  const fakeWindowManager = makeWindowManagerWithMainWindows(2);
+  const fakeWindowManager = makeWindowManagerWithMainWindows(1);
+  const peerWebContents = {
+    id: 2,
+    sentChannels: [],
+    send(channel) {
+      this.sentChannels.push(channel);
+    },
+    isDestroyed() {
+      return false;
+    },
+    isCrashed() {
+      return false;
+    },
+  };
+  const peerWindow = {
+    webContents: peerWebContents,
+    isDestroyed() {
+      return false;
+    },
+  };
+  fakeWindowManager.appContentWindows = [fakeWindowManager.windows[0], peerWindow];
   const queriedWebContents = [];
   const fakeDirtyEditorGuard = {
     queryDirtyEditors(webContents) {
@@ -473,7 +497,7 @@ test("install handler checks every main window before installing", async () => {
       bridge.registerHandlers(ipcMain);
       await ipcMain.invoke("netcatty:update:install");
 
-      assert.deepEqual(queriedWebContents, fakeWindowManager.windows.map((window) => window.webContents));
+      assert.deepEqual(queriedWebContents, fakeWindowManager.appContentWindows.map((window) => window.webContents));
       assert.equal(order.includes("quitAndInstall"), false);
       assert.deepEqual(fakeWindowManager.calls, []);
       assert.equal(fakeGlobalShortcut.cleanupCount, 0);

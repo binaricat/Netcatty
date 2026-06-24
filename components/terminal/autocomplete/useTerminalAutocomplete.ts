@@ -20,7 +20,11 @@ import type { Snippet } from "../../../domain/models";
 import { recordCommand } from "./commandHistoryStore";
 import { shellEscape } from "./completionEngine";
 import { preloadCommonSpecs } from "./figSpecLoader";
-import { listDirectoryEntries, normalizePathTokenForLookup } from "./remotePathCompleter";
+import {
+  listDirectoryEntries,
+  normalizePathTokenForLookup,
+  shouldPreferRemoteShellCwd,
+} from "./remotePathCompleter";
 import { decideGhostSuggestion } from "./ghostSuggestionPolicy";
 import { computeLivePreviewWrite } from "./livePreviewSequence";
 import {
@@ -28,7 +32,7 @@ import {
   areSuggestionsEqual,
   resolveAutocompleteAnchorInViewport,
   resolveAutocompleteCursorColumn,
-  resolveAutocompleteCwd,
+  resolveAutocompleteCwdWithSource,
 } from "./terminalAutocompleteLayout";
 import { handleTerminalAutocompleteInput } from "./terminalAutocompleteInput";
 import { handleTerminalAutocompleteKeyEvent } from "./terminalAutocompleteKeyEvent";
@@ -345,15 +349,19 @@ export function useTerminalAutocomplete(
     const activeWord = activePrompt?.isAtPrompt
       ? parseCommandLine(activePrompt.userInput).currentWord
       : parseCommandLine(item.text).currentWord;
-    const cwd = resolveAutocompleteCwd(
+    const cwdResolution = resolveAutocompleteCwdWithSource(
       activePrompt?.promptText ?? "",
       activeWord,
       getCwdRef.current?.(),
       hostOsRef.current,
     );
-    const dirPath = normalizePathTokenForLookup(parseCommandLine(item.text).currentWord, cwd, {
-      preferRelativeCwd: Boolean(
-        sessionIdRef.current && protocolRef.current !== "local" && hostOsRef.current === "linux",
+    const dirPath = normalizePathTokenForLookup(parseCommandLine(item.text).currentWord, cwdResolution.cwd, {
+      preferRelativeCwd: shouldPreferRemoteShellCwd(
+        protocolRef.current,
+        sessionIdRef.current,
+        hostOsRef.current,
+        cwdResolution.cwd,
+        cwdResolution.source,
       ),
     });
     if (!dirPath) return;
@@ -625,7 +633,7 @@ export function useTerminalAutocomplete(
 
     const input = prompt.userInput;
     const parsedInput = parseCommandLine(input);
-    const cwd = resolveAutocompleteCwd(
+    const cwdResolution = resolveAutocompleteCwdWithSource(
       prompt.promptText,
       parsedInput.currentWord,
       getCwdRef.current?.(),
@@ -639,7 +647,8 @@ export function useTerminalAutocomplete(
       maxResults: settingsRef.current.maxSuggestions,
       sessionId: sessionIdRef.current,
       protocol: protocolRef.current,
-      cwd,
+      cwd: cwdResolution.cwd,
+      cwdSource: cwdResolution.source,
       snippets: snippetsRef.current,
     });
 

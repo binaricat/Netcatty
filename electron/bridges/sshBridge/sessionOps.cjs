@@ -1102,7 +1102,7 @@ function createSessionOpsApi(ctx) {
       if (!session || !session.stream) {
         return { ok: false, encoding: encoding || "utf-8" };
       }
-      const enc = String(encoding || "utf-8").toLowerCase();
+      const enc = normalizeTerminalEncoding(encoding);
       if (!iconv.encodingExists(enc)) {
         return { ok: false, encoding: enc };
       }

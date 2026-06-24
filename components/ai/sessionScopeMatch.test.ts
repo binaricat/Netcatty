@@ -46,7 +46,22 @@ test("host-matched terminal session remains resumable when no terminal is displa
       ["host-a"],
       new Set(["session-other"]),
     ),
-    1,
+    2,
+  );
+});
+
+test("host-mismatched terminal session is not resumable for the current terminal", () => {
+  const session = createSession("session-1", "terminal-closed", ["host-b"]);
+
+  assert.equal(
+    getSessionScopeMatchRank(
+      session,
+      "terminal",
+      "terminal-current",
+      ["host-a"],
+      new Set(),
+    ),
+    0,
   );
 });
 
@@ -71,7 +86,7 @@ test("ownership is tracked by session id, not scope.targetId", () => {
   );
 });
 
-test("session targeting the current scope is an exact match (rank 2)", () => {
+test("session targeting the current scope is an exact match (rank 3)", () => {
   const session = createSession("session-1", "terminal-current", ["host-a"]);
 
   assert.equal(
@@ -82,7 +97,7 @@ test("session targeting the current scope is an exact match (rank 2)", () => {
       ["host-a"],
       new Set(),
     ),
-    2,
+    3,
   );
 });
 

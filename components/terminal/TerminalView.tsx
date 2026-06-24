@@ -1,12 +1,21 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import React, { memo, useCallback, useEffect, useState } from 'react';
 
+import { OSC7_SETUP_TARGETS } from './osc7Setup';
 import { TerminalServerStats } from './TerminalServerStats';
 import {
   TerminalTimestampGutter,
   resolveTerminalTimestampGutterColor,
   resolveTerminalTimestampGutterWidth,
 } from './TerminalTimestampGutter';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '../ui/dialog';
 
 type TerminalViewContext = Record<string, any>;
 type HostLineTimestampToggle = {
@@ -88,14 +97,16 @@ function terminalViewCtxEqual(
 }
 
 function TerminalViewInner({ ctx }: { ctx: TerminalViewContext }) {
-  const { Activity, Button, Clock3, Copy, Maximize2, Radio, Sparkles, SquareArrowOutUpRight, TerminalAutocomplete, TerminalComposeBar, TerminalConnectionDialog, TerminalContextMenu, TerminalSearchBar, Tooltip, TooltipContent, TooltipTrigger, ZmodemOverwriteDialog, ZmodemProgressIndicator, auth, autocompleteAcceptTextRef, autocompleteCloseRef, autocompleteHostOs, autocompleteInputRef, autocompleteKeyEventRef, autocompleteRepositionRef, autocompleteSettings, chainProgress, cn, compactToolbar, lineTimestampsAvailable, containerRef, effectiveFontSize, effectiveFontWeight, effectiveTheme, error, executeSnippet, executeSnippetCommand, handleAddSelectionToAI, handleCancelConnect, handleCloseDisconnectedSession, handleCloseSearch, handleDismissDisconnectedDialog, handleDragEnter, handleDragLeave, handleDragOver, handleDrop, handleFindNext, handleFindPrevious, handleHostKeyAddAndContinue, handleHostKeyClose, handleHostKeyContinue, handleOsc52ReadResponse, handleReceiveYmodem, handleRetry, handleSearch, handleSendYmodem, handleTopOverlayMouseDownCapture, hasMouseTracking, hasSelection, host, hotkeyScheme, inWorkspace, isBroadcastEnabled, isCancelling, isComposeBarOpen, isDraggingOver, isFocusMode, isLocalConnection, remoteDragDropUsesZmodem, isSerialConnection, isSearchOpen, isSupportedOs, isSystemSidebarEligible, isVisible, keyBindings, keys, knownCwdRef, needsHostKeyVerification, onCloseSession, onDetach, onDetachPointerDown, onExpandToFocus, onOpenSystem, onRename, onSplitHorizontal, onSplitVertical, onToggleBroadcast, onUpdateHost, osc52ReadPromptVisible, pendingHostKeyInfo, progressLogs, progressValue, renderControls, resolvedFontFamily, searchMatchCount, selectionOverlayPosition, sessionDisplayName, sessionId, sessionRef, setIsComposeBarOpen, setShowLogs, shouldShowConnectionDialog, showLogs, showSelectionAIAction, snippets, status, statusDotTone, sudoHintRef, sudoHintText, t, termRef, terminalContextActions, terminalCwdTracker, terminalPreviewVars, terminalSettings, timeLeft, toast, zmodem } = ctx;
+  const { Activity, Button, Clock3, Copy, Maximize2, Radio, Sparkles, SquareArrowOutUpRight, TerminalAutocomplete, TerminalComposeBar, TerminalConnectionDialog, TerminalContextMenu, TerminalSearchBar, Tooltip, TooltipContent, TooltipTrigger, ZmodemOverwriteDialog, ZmodemProgressIndicator, auth, autocompleteAcceptTextRef, autocompleteCloseRef, autocompleteHostOs, autocompleteInputRef, autocompleteKeyEventRef, autocompleteRepositionRef, autocompleteSettings, chainProgress, cn, compactToolbar, lineTimestampsAvailable, containerRef, effectiveFontSize, effectiveFontWeight, effectiveTheme, error, executeSnippet, executeSnippetCommand, handleAddSelectionToAI, handleCancelConnect, handleCloseDisconnectedSession, handleCloseSearch, handleDismissDisconnectedDialog, handleDragEnter, handleDragLeave, handleDragOver, handleDrop, handleFindNext, handleFindPrevious, handleHostKeyAddAndContinue, handleHostKeyClose, handleHostKeyContinue, handleOsc52ReadResponse, handleOsc7SetupConfirm, handleOsc7SetupOpenChange, handleReceiveYmodem, handleRetry, handleSearch, handleSendYmodem, handleTopOverlayMouseDownCapture, hasMouseTracking, hasSelection, host, hotkeyScheme, inWorkspace, isBroadcastEnabled, isCancelling, isComposeBarOpen, isDraggingOver, isFocusMode, isLocalConnection, remoteDragDropUsesZmodem, isSerialConnection, isSearchOpen, isSupportedOs, isSystemSidebarEligible, isVisible, keyBindings, keys, knownCwdRef, needsHostKeyVerification, onCloseSession, onDetach, onDetachPointerDown, onExpandToFocus, onOpenSystem, onRename, onSplitHorizontal, onSplitVertical, onToggleBroadcast, onUpdateHost, osc52ReadPromptVisible, osc7SetupCommand, osc7SetupOpen, pendingHostKeyInfo, progressLogs, progressValue, renderControls, resolvedFontFamily, restoreState, searchMatchCount, selectionOverlayPosition, sessionDisplayName, sessionId, sessionRef, setIsComposeBarOpen, setShowLogs, shouldShowConnectionDialog, showLogs, showSelectionAIAction, snippets, status, statusDotTone, sudoHintRef, sudoHintText, t, termRef, terminalContextActions, terminalCwdTracker, terminalPreviewVars, terminalSettings, timeLeft, toast, zmodem } = ctx;
   const ymodemActionEnabled = shouldEnableYmodemAction({
     isSerialConnection,
     status,
     handleSendYmodem,
     handleReceiveYmodem,
   });
-  const terminalContentTop = isSearchOpen ? "64px" : "30px";
+  const terminalToolbarOffset = isSearchOpen ? 64 : 30;
+  const terminalBodyInset = 4;
+  const terminalContentTop = `${terminalToolbarOffset + terminalBodyInset}px`;
   const showLineTimestampGutter = lineTimestampsAvailable !== false && host.showLineTimestamps === true;
   const lineTimestampColor = resolveTerminalTimestampGutterColor(effectiveTheme.colors);
   const [lineTimestampGutterWidth, setLineTimestampGutterWidth] = useState(() => (
@@ -121,6 +132,7 @@ function TerminalViewInner({ ctx }: { ctx: TerminalViewContext }) {
       isAlternateScreen={hasMouseTracking}
       onCopy={terminalContextActions.onCopy}
       onPaste={terminalContextActions.onPaste}
+      onUploadClipboardImage={status === "connected" ? terminalContextActions.onUploadClipboardImage : undefined}
       onPasteSelection={terminalContextActions.onPasteSelection}
       onSelectAll={terminalContextActions.onSelectAll}
       onClear={terminalContextActions.onClear}
@@ -366,10 +378,13 @@ function TerminalViewInner({ ctx }: { ctx: TerminalViewContext }) {
         >
           <div
             ref={containerRef}
-            className="xterm-container absolute inset-x-0 bottom-0"
+            className="xterm-container absolute"
+            data-font-smoothing={terminalSettings?.fontSmoothing !== false ? "true" : "false"}
             style={{
               top: terminalContentTop,
-              left: activeLineTimestampGutterWidth,
+              left: activeLineTimestampGutterWidth + terminalBodyInset,
+              right: terminalBodyInset,
+              bottom: terminalBodyInset,
               paddingLeft: 6,
               backgroundColor: 'var(--terminal-ui-bg)',
             }}
@@ -379,6 +394,8 @@ function TerminalViewInner({ ctx }: { ctx: TerminalViewContext }) {
             containerRef={containerRef}
             enabled={showLineTimestampGutter}
             top={terminalContentTop}
+            left={terminalBodyInset}
+            bottom={terminalBodyInset}
             sessionId={sessionId}
             color={lineTimestampColor}
             fontFamily={resolvedFontFamily}
@@ -443,7 +460,7 @@ function TerminalViewInner({ ctx }: { ctx: TerminalViewContext }) {
             onAcceptSnippet={(snippet) => void executeSnippet(snippet)}
             themeColors={effectiveTheme.colors}
             containerRef={containerRef}
-            searchBarOffset={isSearchOpen ? 64 : 30}
+            searchBarOffset={terminalToolbarOffset + terminalBodyInset}
             keyEventRef={autocompleteKeyEventRef}
             inputRef={autocompleteInputRef}
             repositionRef={autocompleteRepositionRef}
@@ -475,11 +492,56 @@ function TerminalViewInner({ ctx }: { ctx: TerminalViewContext }) {
             </div>
           )}
 
+          <Dialog open={Boolean(osc7SetupOpen)} onOpenChange={handleOsc7SetupOpenChange}>
+            <DialogContent className="sm:max-w-[640px]">
+              <DialogHeader>
+                <DialogTitle>{t("terminal.osc7Setup.title")}</DialogTitle>
+                <DialogDescription>
+                  {t("terminal.osc7Setup.desc")}
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-3">
+                <div className="rounded-md border border-border/70 bg-muted/35 p-3">
+                  <p className="mb-2 text-xs font-medium text-muted-foreground">
+                    {t("terminal.osc7Setup.targets")}
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {OSC7_SETUP_TARGETS.map((target) => (
+                      <code
+                        key={target}
+                        className="rounded bg-background px-2 py-1 text-[11px] text-foreground"
+                      >
+                        {target}
+                      </code>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <p className="mb-2 text-xs font-medium text-muted-foreground">
+                    {t("terminal.osc7Setup.command")}
+                  </p>
+                  <pre className="max-h-56 overflow-auto rounded-md border border-border/70 bg-muted/35 p-3 text-[11px] leading-relaxed whitespace-pre-wrap">
+                    {osc7SetupCommand}
+                  </pre>
+                </div>
+              </div>
+              <DialogFooter>
+                <Button variant="secondary" onClick={() => handleOsc7SetupOpenChange(false)}>
+                  {t("common.cancel")}
+                </Button>
+                <Button onClick={handleOsc7SetupConfirm} disabled={status !== "connected"}>
+                  {t("terminal.osc7Setup.run")}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
           {/* Connection dialog: skip for local/serial during connecting phase, but show on error */}
           {shouldShowConnectionDialog && (
               <TerminalConnectionDialog
                 host={host}
                 status={status}
+                restoreState={restoreState}
                 error={error}
                 progressValue={progressValue}
                 chainProgress={chainProgress}

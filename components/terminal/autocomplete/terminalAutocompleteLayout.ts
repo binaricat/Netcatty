@@ -10,39 +10,50 @@ export function resolveAutocompleteCwd(
   fallbackCwd: string | undefined,
   os: "linux" | "windows" | "macos",
 ): string | undefined {
-  if (os === "windows") return fallbackCwd;
+  return resolveAutocompleteCwdWithSource(promptText, currentWord, fallbackCwd, os).cwd;
+}
+
+export type AutocompleteCwdSource = "prompt" | "fallback" | "none";
+
+export function resolveAutocompleteCwdWithSource(
+  promptText: string,
+  currentWord: string,
+  fallbackCwd: string | undefined,
+  os: "linux" | "windows" | "macos",
+): { cwd: string | undefined; source: AutocompleteCwdSource } {
+  if (os === "windows") return { cwd: fallbackCwd, source: fallbackCwd ? "fallback" : "none" };
 
   const normalizedWord = currentWord.trim().replace(/^['"]/, "");
 
   // Absolute or home-relative paths don't depend on cwd
   if (normalizedWord.startsWith("/") || normalizedWord.startsWith("~/")) {
-    return fallbackCwd;
+    return { cwd: fallbackCwd, source: fallbackCwd ? "fallback" : "none" };
   }
 
   // For empty word (e.g. "cd ") and relative paths, try prompt-based cwd
   // extraction which reflects the current visible prompt — more up-to-date
   // than fallbackCwd when OSC 7 is not supported.
   const promptCwd = extractPosixCwdFromPrompt(promptText);
-  return chooseAutocompleteCwd(promptCwd, fallbackCwd);
+  return chooseAutocompleteCwdWithSource(promptCwd, fallbackCwd);
 }
 
-function chooseAutocompleteCwd(
+function chooseAutocompleteCwdWithSource(
   promptCwd: string | undefined,
   fallbackCwd: string | undefined,
-): string | undefined {
-  if (!promptCwd) return fallbackCwd;
-  if (!fallbackCwd) return promptCwd;
+): { cwd: string | undefined; source: AutocompleteCwdSource } {
+  if (!promptCwd) return { cwd: fallbackCwd, source: fallbackCwd ? "fallback" : "none" };
+  if (!fallbackCwd) return { cwd: promptCwd, source: "prompt" };
 
   // Prompt cwd is extracted from the currently visible prompt, so it tracks
   // directory changes even when OSC 7 is not supported. Prefer it over
   // fallbackCwd (which may be stale from initial connection) whenever it
   // looks like a usable path.
   if (promptCwd.startsWith("/") || promptCwd === "~" || promptCwd.startsWith("~/")) {
-    return promptCwd;
+    return { cwd: promptCwd, source: "prompt" };
   }
 
   // Bare directory name (e.g. "xunlong") can't be used as a path — fallback
-  return fallbackCwd;
+  return { cwd: fallbackCwd, source: fallbackCwd ? "fallback" : "none" };
 }
 
 function extractPosixCwdFromPrompt(promptText: string): string | undefined {

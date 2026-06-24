@@ -38,6 +38,7 @@ interface TmuxManagerTabProps {
   backend: Backend;
   refreshIntervalSec: number;
   snippets: Snippet[];
+  onRequestTerminalFocus?: () => void;
 }
 
 export const TmuxManagerTab = memo(function TmuxManagerTab({
@@ -48,6 +49,7 @@ export const TmuxManagerTab = memo(function TmuxManagerTab({
   backend,
   refreshIntervalSec,
   snippets,
+  onRequestTerminalFocus,
 }: TmuxManagerTabProps) {
   const { t } = useI18n();
   const stableT = useStableTranslate();
@@ -235,6 +237,7 @@ export const TmuxManagerTab = memo(function TmuxManagerTab({
             onLoadDetails={loadTmuxDetails}
             onRefreshDetails={refreshTmuxDetails}
             onSessionsChanged={refresh}
+            onRequestTerminalFocus={onRequestTerminalFocus}
           />
         ))}
       </SystemPanelList>

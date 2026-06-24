@@ -71,6 +71,7 @@ export const enAiMessages: Messages = {
   'ai.codex.notFoundHint': 'Could not find codex in PATH. Install it or specify the executable path below.',
   'ai.codex.customPathPlaceholder': 'e.g. /usr/local/bin/codex',
   'ai.codex.check': 'Check',
+  'ai.codex.resetPath': 'Reset',
   'ai.codex.openLogin': 'Open Login',
   'ai.codex.logout': 'Logout',
   'ai.codex.connectChatGPT': 'Connect ChatGPT',
@@ -96,6 +97,7 @@ export const enAiMessages: Messages = {
   'ai.claude.envVars.placeholder': 'ANTHROPIC_BASE_URL=https://...\nANTHROPIC_MODEL=...',
   'ai.claude.envVars.hint': 'One KEY=VALUE per line, passed to the Claude agent. Stored locally in plaintext — for API keys / credentials, prefer the config directory above (a `claude` login).',
   'ai.claude.check': 'Check',
+  'ai.claude.resetPath': 'Reset',
 
   // Public MCP
   'ai.publicMcp.status.unavailable': 'Unavailable',
@@ -148,6 +150,7 @@ export const enAiMessages: Messages = {
   'ai.copilot.notFoundHint': 'Could not find copilot in PATH. Install it or specify the executable path below.',
   'ai.copilot.customPathPlaceholder': 'e.g. /usr/local/bin/copilot',
   'ai.copilot.check': 'Check',
+  'ai.copilot.resetPath': 'Reset',
 
   // AI Cursor SDK
   'ai.cursor.title': 'Cursor',
@@ -187,6 +190,7 @@ export const enAiMessages: Messages = {
   'ai.codebuddy.notFoundHint': 'Could not find codebuddy in PATH. Install it or specify the executable path below.',
   'ai.codebuddy.customPathPlaceholder': 'e.g. /usr/local/bin/codebuddy',
   'ai.codebuddy.check': 'Check',
+  'ai.codebuddy.resetPath': 'Reset',
   'ai.codebuddy.configSection': 'Authentication & config (optional)',
   'ai.codebuddy.internetEnv': 'Internet Environment',
   'ai.codebuddy.internetEnv.default': 'Default (overseas)',
@@ -196,6 +200,18 @@ export const enAiMessages: Messages = {
   'ai.codebuddy.envVars': 'Environment variables',
   'ai.codebuddy.envVars.placeholder': 'CODEBUDDY_API_KEY=...\nCODEBUDDY_AUTH_TOKEN=...\nOTHER_VAR=...',
   'ai.codebuddy.envVars.hint': 'One KEY=VALUE per line, passed to the CodeBuddy agent. Set CODEBUDDY_API_KEY or CODEBUDDY_AUTH_TOKEN here for authentication. Stored locally in plaintext.',
+
+  // AI OpenCode
+  'ai.opencode.title': 'OpenCode',
+  'ai.opencode.description': 'Uses OpenCode via the official SDK. Configure providers and keys in OpenCode, then select it as an external coding agent.',
+  'ai.opencode.detecting': 'Detecting...',
+  'ai.opencode.detected': 'Detected',
+  'ai.opencode.notFound': 'Not found',
+  'ai.opencode.path': 'Path:',
+  'ai.opencode.notFoundHint': 'Could not find opencode in PATH. Install it or specify the executable path below.',
+  'ai.opencode.customPathPlaceholder': 'e.g. /usr/local/bin/opencode',
+  'ai.opencode.check': 'Check',
+  'ai.opencode.resetPath': 'Reset',
 
   // AI Default Agent
   'ai.defaultAgent': 'Default Agent',
@@ -361,6 +377,7 @@ export const enAiMessages: Messages = {
   'terminal.layer.scripts': 'Scripts',
   'terminal.layer.history': 'History',
   'terminal.layer.theme': 'Theme',
+  'terminal.layer.notes': 'Notes',
   'terminal.layer.aiChat': 'AI Chat',
   'terminal.layer.movePanelLeft': 'Move panel to left',
   'terminal.layer.movePanelRight': 'Move panel to right',

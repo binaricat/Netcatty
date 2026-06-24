@@ -1,9 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import React from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 
+import { I18nProvider } from '../application/i18n/I18nProvider.tsx';
 import type { AIDraft, AISession } from '../infrastructure/ai/types';
+import { TooltipProvider } from './ui/tooltip.tsx';
 import {
   aiChatSidePanelPropsAreEqual,
+  AIChatSidePanel,
   hasAIChatSidePanelRetainedContent,
   shouldKeepAIChatSidePanelMounted,
 } from './AIChatSidePanel.tsx';
@@ -100,6 +105,32 @@ test('hidden AI side panel is retained when it has session messages', () => {
 
 test('visible AI side panel is always mounted even when empty', () => {
   assert.equal(shouldKeepAIChatSidePanelMounted(baseProps({ isVisible: true })), true);
+});
+
+test('visible empty draft renders the input immediately without preparing state', () => {
+  const markup = renderToStaticMarkup(
+    React.createElement(
+      I18nProvider,
+      { locale: 'en' },
+      React.createElement(
+        TooltipProvider,
+        null,
+        React.createElement(AIChatSidePanel, baseProps({
+          isVisible: true,
+          sessions: [session({ id: 'session-history' })],
+          draftsByScope: {
+            'terminal:terminal-1': draft(),
+          },
+          panelViewByScope: {
+            'terminal:terminal-1': { mode: 'draft' },
+          },
+        })),
+      ),
+    ),
+  );
+
+  assert.match(markup, /textarea/);
+  assert.doesNotMatch(markup, /data-section="ai-chat-panel-preparing"/);
 });
 
 test('AI side panel re-renders when retained content becomes visible again', () => {

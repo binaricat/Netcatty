@@ -163,7 +163,6 @@ const ChatInput: React.FC<ChatInputProps> = ({
   const modelBtnRef = useRef<HTMLButtonElement>(null);
   const permBtnRef = useRef<HTMLButtonElement>(null);
   const attachBtnRef = useRef<HTMLButtonElement>(null);
-  const quickMsgBtnRef = useRef<HTMLButtonElement>(null);
   const slashPickerListRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -257,28 +256,6 @@ const ChatInput: React.FC<ChatInputProps> = ({
     }
     setActiveMenu(menu);
   }, [findSlashTrigger, getInputPanelMenuPos, value]);
-
-  const openSlashCommandPicker = useCallback((anchor?: 'toolbar') => {
-    if (anchor === 'toolbar') {
-      const rect = quickMsgBtnRef.current?.getBoundingClientRect();
-      if (rect) {
-        setMenuPos({ left: rect.left, bottom: window.innerHeight - rect.top + 6 });
-      }
-      setInputPanelPos(null);
-      const caret = textareaRef.current?.selectionStart ?? value.length;
-      const trigger = findSlashTrigger(value, caret);
-      if (trigger) {
-        setSlashQuery(trigger.query);
-        setSlashRange({ start: trigger.start, end: trigger.end });
-      } else {
-        setSlashQuery('');
-        setSlashRange(null);
-      }
-      setActiveMenu('slashCommand');
-      return;
-    }
-    openInputPanelMenu('slashCommand');
-  }, [findSlashTrigger, openInputPanelMenu, value]);
 
   const userSkillOptions = useMemo<UserSkillSlashOption[]>(
     () => userSkills.map((skill) => ({
@@ -916,7 +893,9 @@ const ChatInput: React.FC<ChatInputProps> = ({
                         );
                       })}
                     </div>
-                  ) : modelPresets.map(preset => {
+                  ) : (
+                    <div className="min-w-[260px] max-h-[320px] overflow-y-auto">
+                      {modelPresets.map(preset => {
                     const isSelected = preset.id === selectedBaseModelId;
                     const hasThinking = preset.thinkingLevels && preset.thinkingLevels.length > 0;
                     return (
@@ -981,7 +960,9 @@ const ChatInput: React.FC<ChatInputProps> = ({
                         )}
                       </div>
                     );
-                  })}
+                      })}
+                    </div>
+                  )}
                 </div>
               </>,
               document.body,
@@ -1068,30 +1049,6 @@ const ChatInput: React.FC<ChatInputProps> = ({
           <div className="flex-1 min-w-0" />
 
           <div className="flex items-center gap-1">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  ref={quickMsgBtnRef}
-                  type="button"
-                  onClick={() => {
-                    if (!showSlashCommandPicker) {
-                      openSlashCommandPicker('toolbar');
-                    } else {
-                      closeAllMenus();
-                    }
-                  }}
-                  className={[
-                    iconButtonClassName,
-                    isSlashCatalogEmpty ? 'opacity-45 hover:opacity-80' : '',
-                  ].filter(Boolean).join(' ')}
-                  aria-label={t('ai.chat.slashCommands')}
-                  aria-expanded={showSlashCommandPicker}
-                >
-                  <MessageSquare size={13} />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent>{t('ai.chat.slashCommands')}</TooltipContent>
-            </Tooltip>
             <PromptInputSubmit
               status={status}
               onStop={onStop}

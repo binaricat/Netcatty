@@ -40,7 +40,7 @@ import { cn } from '../../lib/utils';
 import type { GroupConfig, GroupNode, Host, TerminalTheme } from '../../types';
 import { HostTreeGroupContextMenuContent, HostTreeHostContextMenuContent } from '../host/HostTreeContextMenus';
 import { HostTreeGroupInlineRenameInput } from '../host/HostTreeGroupInlineRenameInput';
-import { MessageResponse } from '../ai-elements/message';
+import { LazyMessageResponse } from '../ai-elements/LazyMessageResponse';
 import { DistroAvatar } from '../DistroAvatar';
 import { ContextMenu, ContextMenuTrigger } from '../ui/context-menu';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '../ui/hover-card';
@@ -291,9 +291,9 @@ const TerminalHostTreeHostHoverCard: React.FC<{ host: Host }> = ({ host }) => {
       {notes && (
         <div className="mt-3 border-t border-border/60 pt-3">
           <div className="mb-1 text-muted-foreground">{t('hostDetails.notes.label')}</div>
-          <MessageResponse className="host-tree-notes-scroll max-h-[min(44vh,420px)] overflow-y-auto pr-2 text-xs leading-relaxed text-popover-foreground/90 [&_h1]:text-sm [&_h1]:mt-2 [&_h1]:mb-1 [&_h2]:text-sm [&_h2]:mt-2 [&_h2]:mb-1 [&_h3]:text-xs [&_h3]:mt-1.5 [&_h3]:mb-1 [&_p]:my-1 [&_ul]:my-1 [&_ol]:my-1">
+          <LazyMessageResponse className="host-tree-notes-scroll max-h-[min(44vh,420px)] overflow-y-auto pr-2 text-xs leading-relaxed text-popover-foreground/90 [&_h1]:text-sm [&_h1]:mt-2 [&_h1]:mb-1 [&_h2]:text-sm [&_h2]:mt-2 [&_h2]:mb-1 [&_h3]:text-xs [&_h3]:mt-1.5 [&_h3]:mb-1 [&_p]:my-1 [&_ul]:my-1 [&_ol]:my-1">
             {notes}
-          </MessageResponse>
+          </LazyMessageResponse>
         </div>
       )}
     </HoverCardContent>
@@ -639,15 +639,21 @@ const TerminalHostTreeSidebarInner: React.FC<TerminalHostTreeSidebarProps> = ({
   const theme = useMemo<HostTreeTheme>(() => {
     const termBg = resolvedPreviewTheme.colors.background;
     const termFg = resolvedPreviewTheme.colors.foreground;
+    const mutedFg = `color-mix(in srgb, ${termFg} 55%, ${termBg} 45%)`;
+    const separator = `color-mix(in srgb, ${termFg} 10%, ${termBg} 90%)`;
+    const rowHoverBg = `color-mix(in srgb, ${termFg} 8%, transparent)`;
+    const rowActiveBg = `color-mix(in srgb, ${termFg} 14%, transparent)`;
+    const rowDropBg = `color-mix(in srgb, ${termFg} 20%, transparent)`;
+    const folderFg = `color-mix(in srgb, ${termFg} 75%, ${termBg} 25%)`;
     return {
-      termBg,
-      termFg,
-      mutedFg: `color-mix(in srgb, ${termFg} 55%, ${termBg} 45%)`,
-      separator: `color-mix(in srgb, ${termFg} 10%, ${termBg} 90%)`,
-      rowHoverBg: `color-mix(in srgb, ${termFg} 8%, transparent)`,
-      rowActiveBg: `color-mix(in srgb, ${termFg} 14%, transparent)`,
-      rowDropBg: `color-mix(in srgb, ${termFg} 20%, transparent)`,
-      folderFg: `color-mix(in srgb, ${termFg} 75%, ${termBg} 25%)`,
+      termBg: `var(--terminal-host-tree-bg, ${termBg})`,
+      termFg: `var(--terminal-host-tree-fg, ${termFg})`,
+      mutedFg: `var(--terminal-host-tree-muted, ${mutedFg})`,
+      separator: `var(--terminal-host-tree-separator, ${separator})`,
+      rowHoverBg: `var(--terminal-host-tree-hover-bg, ${rowHoverBg})`,
+      rowActiveBg: `var(--terminal-host-tree-active-bg, ${rowActiveBg})`,
+      rowDropBg: `var(--terminal-host-tree-drop-bg, ${rowDropBg})`,
+      folderFg: `var(--terminal-host-tree-folder-fg, ${folderFg})`,
     };
   }, [resolvedPreviewTheme]);
 

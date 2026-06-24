@@ -305,6 +305,7 @@ async function startPortForward(event, payload) {
     hostname,
     password,
     logPrefix: "[PortForward]",
+    scope: "external",
   }));
 
   return new Promise((resolve, reject) => {

@@ -53,7 +53,8 @@ export interface UseUpdateCheckResult {
  * - Respects dismissed version to avoid nagging
  * - Provides manual check capability
  */
-export function useUpdateCheck(options?: { autoUpdateEnabled?: boolean; onNeedsSave?: () => void }): UseUpdateCheckResult {
+export function useUpdateCheck(options?: { autoUpdateEnabled?: boolean; enabled?: boolean; onNeedsSave?: () => void }): UseUpdateCheckResult {
+  const enabled = options?.enabled !== false;
   // Accept auto-update toggle from the caller (e.g. useSettingsState) so it
   // reacts immediately in the same window. Falls back to reading localStorage
   // when no caller provides the value (e.g. in non-settings contexts).
@@ -115,6 +116,7 @@ export function useUpdateCheck(options?: { autoUpdateEnabled?: boolean; onNeedsS
 
   // Get current app version
   useEffect(() => {
+    if (!enabled) return;
     const loadVersion = async () => {
       try {
         const bridge = netcattyBridge.get();
@@ -127,12 +129,13 @@ export function useUpdateCheck(options?: { autoUpdateEnabled?: boolean; onNeedsS
       }
     };
     void loadVersion();
-  }, []);
+  }, [enabled]);
 
   // Hydrate auto-download status from the main process so windows opened
   // after the download started (e.g. Settings) immediately reflect the
   // current state instead of showing stale 'idle'.
   useEffect(() => {
+    if (!enabled) return;
     const bridge = netcattyBridge.get();
     void bridge?.getUpdateStatus?.().then((snapshot) => {
       if (!snapshot || snapshot.status === 'idle') return;
@@ -173,11 +176,12 @@ export function useUpdateCheck(options?: { autoUpdateEnabled?: boolean; onNeedsS
         };
       });
     });
-  }, []);
+  }, [enabled]);
 
   // Subscribe to electron-updater auto-download IPC events.
   // These fire automatically when autoDownload=true in the main process.
   useEffect(() => {
+    if (!enabled) return;
     const bridge = netcattyBridge.get();
 
     // When electron-updater confirms no update in its feed, don't write
@@ -276,7 +280,7 @@ export function useUpdateCheck(options?: { autoUpdateEnabled?: boolean; onNeedsS
       cleanupError?.();
       cleanupNeedsSave?.();
     };
-  }, []);
+  }, [enabled]);
 
   const performCheck = useCallback(async (currentVersion: string): Promise<UpdateCheckResult | null> => {
     debugLog('performCheck called', { currentVersion, IS_UPDATE_DEMO_MODE });
@@ -372,6 +376,8 @@ export function useUpdateCheck(options?: { autoUpdateEnabled?: boolean; onNeedsS
   }, []);
 
   const checkNow = useCallback(async (): Promise<UpdateCheckResult | null> => {
+    if (!enabled) return null;
+
     // Prevent concurrent checks (performCheck owns isCheckingRef)
     if (isCheckingRef.current) {
       debugLog('checkNow: already checking, skipping');
@@ -499,7 +505,7 @@ export function useUpdateCheck(options?: { autoUpdateEnabled?: boolean; onNeedsS
     }
 
     return result;
-  }, [performCheck]);
+  }, [enabled, performCheck]);
 
   const dismissUpdate = useCallback(() => {
     if (updateState.latestRelease?.version) {
@@ -529,10 +535,12 @@ export function useUpdateCheck(options?: { autoUpdateEnabled?: boolean; onNeedsS
   }, [updateState.latestRelease]);
 
   const installUpdate = useCallback(() => {
+    if (!enabled) return;
     netcattyBridge.get()?.installUpdate?.();
-  }, []);
+  }, [enabled]);
 
   const startDownload = useCallback(async () => {
+    if (!enabled) return;
     if (autoDownloadStatusRef.current === 'downloading' || autoDownloadStatusRef.current === 'ready') return;
     const bridge = netcattyBridge.get();
     try {
@@ -570,10 +578,11 @@ export function useUpdateCheck(options?: { autoUpdateEnabled?: boolean; onNeedsS
         downloadError: 'Download failed',
       }));
     });
-  }, [openReleasePage]);
+  }, [enabled, openReleasePage]);
 
   // Startup check with delay - runs once on mount
   useEffect(() => {
+    if (!enabled) return;
     debugLog('Startup check effect mounted, IS_UPDATE_DEMO_MODE:', IS_UPDATE_DEMO_MODE);
     
     // In demo mode, trigger check immediately after a short delay
@@ -594,10 +603,11 @@ export function useUpdateCheck(options?: { autoUpdateEnabled?: boolean; onNeedsS
     
     // Normal mode: wait for version to be loaded, then check
     // This is handled by the version-dependent effect below
-  }, [performCheck]);
+  }, [enabled, performCheck]);
 
   // Normal mode startup check - depends on currentVersion
   useEffect(() => {
+    if (!enabled) return;
     // Skip in demo mode (handled above)
     if (IS_UPDATE_DEMO_MODE) {
       return;
@@ -703,7 +713,7 @@ export function useUpdateCheck(options?: { autoUpdateEnabled?: boolean; onNeedsS
         clearTimeout(startupCheckTimeoutRef.current);
       }
     };
-  }, [updateState.currentVersion, autoUpdateEnabled, performCheck]);
+  }, [enabled, updateState.currentVersion, autoUpdateEnabled, performCheck]);
 
   return {
     updateState,

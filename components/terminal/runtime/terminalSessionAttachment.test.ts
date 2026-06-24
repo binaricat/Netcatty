@@ -73,7 +73,7 @@ test("writeSessionData records terminal output timestamps without changing outpu
   assert.deepEqual(markerLines, [0, 1]);
 });
 
-test("writeSessionData records timestamps independently of display settings", () => {
+test("writeSessionData keeps timestamp metadata when the host gutter is disabled", () => {
   const { term, writes, markerLines } = createFakeTerm();
   writeSessionData(createContext(true, { showLineTimestamps: false }) as never, term, "hello");
 
@@ -113,7 +113,7 @@ test("writeSessionData resumes timestamps after leaving alternate screen in the 
   assert.deepEqual(markerLines, [0]);
 });
 
-test("writeSessionData keeps recording while the latest host display setting changes", () => {
+test("writeSessionData preserves timestamps across host gutter visibility changes", () => {
   const { term, writes, markerLines, disposedMarkerLines } = createFakeTerm();
   const ctx = createContext(false, { showLineTimestamps: false });
 

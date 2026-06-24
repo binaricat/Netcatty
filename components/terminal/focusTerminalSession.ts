@@ -1,9 +1,21 @@
-type QueryTarget = {
+type QueryRoot = {
+  querySelector: (selector: string) => unknown | null;
+};
+
+type QueryTarget = QueryRoot & {
   querySelector: (selector: string) => QueryTarget | FocusableTarget | null;
 };
 
 type FocusableTarget = {
   focus?: () => void;
+};
+
+/** Skip terminal refocus while a Radix dialog is open so deferred tmux actions do not steal modal focus. */
+export const hasOpenAppDialog = (
+  doc: QueryRoot | null = typeof document !== "undefined" ? document : null,
+): boolean => {
+  if (!doc) return false;
+  return doc.querySelector('[role="dialog"][data-state="open"]') !== null;
 };
 
 interface FocusTerminalSessionInputOptions {
@@ -15,6 +27,20 @@ interface FocusTerminalSessionInputOptions {
 
 const escapeAttributeValue = (value: string): string =>
   value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+
+export const TERMINAL_SESSION_RESTORE_FOCUS_EVENT = "netcatty:terminal-session-restore-focus";
+
+export type TerminalSessionRestoreFocusDetail = {
+  sessionId: string;
+};
+
+const dispatchTerminalSessionRestoreFocus = (sessionId: string): void => {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent<TerminalSessionRestoreFocusDetail>(
+    TERMINAL_SESSION_RESTORE_FOCUS_EVENT,
+    { detail: { sessionId } },
+  ));
+};
 
 export const focusTerminalSessionInput = (
   sessionId: string | null | undefined,
@@ -43,9 +69,15 @@ export const focusTerminalSessionInput = (
   const paneSelector = `[data-session-id="${escapeAttributeValue(sessionId)}"]`;
 
   const focusTarget = () => {
+    if (hasOpenAppDialog(doc)) {
+      dispatchTerminalSessionRestoreFocus(sessionId);
+      return;
+    }
+
     const pane = doc.querySelector(paneSelector) as QueryTarget | null;
     const textarea = pane?.querySelector("textarea.xterm-helper-textarea") as FocusableTarget | null;
     textarea?.focus?.();
+    dispatchTerminalSessionRestoreFocus(sessionId);
   };
 
   raf(() => {

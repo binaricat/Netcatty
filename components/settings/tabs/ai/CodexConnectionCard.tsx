@@ -1,5 +1,5 @@
 import React from "react";
-import { ExternalLink, LogIn, LogOut, RefreshCw, X } from "lucide-react";
+import { ExternalLink, LogIn, LogOut, RefreshCw, RotateCcw, X } from "lucide-react";
 import { useI18n } from "../../../../application/i18n/I18nProvider";
 import { Button } from "../../../ui/button";
 import { cn } from "../../../../lib/utils";
@@ -11,9 +11,11 @@ export const CodexConnectionCard: React.FC<{
   customPath: string;
   onCustomPathChange: (path: string) => void;
   onRecheckPath: () => void;
+  onResetPath: () => void;
   integration: CodexIntegrationStatus | null;
   loginSession: CodexLoginSession | null;
   isLoading: boolean;
+  hasPendingCustomPath?: boolean;
   error: string | null;
   onRefresh: () => void;
   onConnect: () => void;
@@ -26,9 +28,11 @@ export const CodexConnectionCard: React.FC<{
   customPath,
   onCustomPathChange,
   onRecheckPath,
+  onResetPath,
   integration,
   loginSession,
   isLoading,
+  hasPendingCustomPath = false,
   error,
   onRefresh,
   onConnect,
@@ -96,8 +100,7 @@ export const CodexConnectionCard: React.FC<{
         </div>
       </div>
 
-      {/* Path detection info */}
-      {found ? (
+      {found && (
         <div className="flex items-center gap-2 text-xs">
           <span className="text-muted-foreground">{t('ai.codex.path')}</span>
           <span className="font-mono text-foreground truncate">{pathInfo.path}</span>
@@ -108,11 +111,15 @@ export const CodexConnectionCard: React.FC<{
             </>
           )}
         </div>
-      ) : !isResolvingPath ? (
+      )}
+
+      {!isResolvingPath && (
         <div className="space-y-2">
-          <p className="text-xs text-amber-500">
-            {t('ai.codex.notFoundHint')}
-          </p>
+          {!found && (
+            <p className="text-xs text-amber-500">
+              {t('ai.codex.notFoundHint')}
+            </p>
+          )}
           <div className="flex items-center gap-2">
             <input
               type="text"
@@ -125,9 +132,13 @@ export const CodexConnectionCard: React.FC<{
               <RefreshCw size={14} className="mr-1.5" />
               {t('ai.codex.check')}
             </Button>
+            <Button variant="ghost" size="sm" onClick={onResetPath} disabled={!customPath.trim()}>
+              <RotateCcw size={14} className="mr-1.5" />
+              {t('ai.codex.resetPath')}
+            </Button>
           </div>
         </div>
-      ) : null}
+      )}
 
       {/* Connection & login UI -- only when codex is detected */}
       {found && (
@@ -148,18 +159,18 @@ export const CodexConnectionCard: React.FC<{
               // Nothing to log out of; config.toml is user-owned state.
               null
             ) : integration?.isConnected ? (
-              <Button variant="outline" size="sm" onClick={onLogout}>
+              <Button variant="outline" size="sm" onClick={onLogout} disabled={hasPendingCustomPath}>
                 <LogOut size={14} className="mr-1.5" />
                 {t('ai.codex.logout')}
               </Button>
             ) : (
-              <Button variant="default" size="sm" onClick={onConnect}>
+              <Button variant="default" size="sm" onClick={onConnect} disabled={hasPendingCustomPath}>
                 <LogIn size={14} className="mr-1.5" />
                 {t('ai.codex.connectChatGPT')}
               </Button>
             )}
 
-            <Button variant="outline" size="sm" onClick={onRefresh} disabled={isLoading}>
+            <Button variant="outline" size="sm" onClick={onRefresh} disabled={isLoading || hasPendingCustomPath}>
               <RefreshCw size={14} className={cn("mr-1.5", isLoading && "animate-spin")} />
               {t('ai.codex.refreshStatus')}
             </Button>

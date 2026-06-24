@@ -71,7 +71,7 @@ export const ZmodemProgressIndicator: React.FC<ZmodemProgressIndicatorProps> = (
           />
         </div>
         <div className="text-[10px] opacity-50 mt-0.5">
-          {formatBytes(transferred)} / {formatBytes(total)}
+          {finalizing ? label : `${formatBytes(transferred)} / ${formatBytes(total)}`}
         </div>
       </div>
       <Tooltip>

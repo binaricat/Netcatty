@@ -200,6 +200,8 @@ export interface SyncPayload {
   snippets: import('./models').Snippet[];
   customGroups: string[];
   snippetPackages?: string[];
+  notes?: import('./models').VaultNote[];
+  noteGroups?: string[];
 
   // Group configs (connection defaults per host group)
   groupConfigs?: import('./models').GroupConfig[];
@@ -294,6 +296,8 @@ export const SYNC_PAYLOAD_ENTITY_KEYS = [
   'snippets',
   'customGroups',
   'snippetPackages',
+  'notes',
+  'noteGroups',
   'portForwardingRules',
   'knownHosts',
   'groupConfigs',
@@ -307,6 +311,8 @@ export const CLOUD_SYNC_PAYLOAD_ENTITY_KEYS = [
   'snippets',
   'customGroups',
   'snippetPackages',
+  'notes',
+  'noteGroups',
   'portForwardingRules',
   'groupConfigs',
 ] as const;

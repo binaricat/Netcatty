@@ -6,6 +6,7 @@ import {
   getMissingChainHostIds,
 } from "./createTerminalSessionStarters";
 import { createPromptLineBreakState } from "./promptLineBreak";
+import { resolveStartupCommand } from "./terminalStartupCommands";
 import { pasteTextIntoTerminal } from "./terminalUserPaste";
 
 const noop = () => undefined;
@@ -159,6 +160,83 @@ test("startSSH forwards custom ProxyCommand to the SSH bridge", async () => {
     username: undefined,
     password: undefined,
   });
+});
+
+test("startSSH sends key and password together in one connection for publickey+password MFA hosts", async () => {
+  let capturedOptions: Record<string, unknown> | null = null;
+  let startCalls = 0;
+  const terminalBackend = {
+    backendAvailable: () => true,
+    telnetAvailable: () => true,
+    moshAvailable: () => true,
+    localAvailable: () => true,
+    serialAvailable: () => true,
+    execAvailable: () => true,
+    startSSHSession: async (options: Record<string, unknown>) => {
+      startCalls += 1;
+      capturedOptions = options;
+      return "ssh-session";
+    },
+    startTelnetSession: async () => "telnet-session",
+    startMoshSession: async () => "mosh-session",
+    startLocalSession: async () => "local-session",
+    startSerialSession: async () => "serial-session",
+    execCommand: async () => ({}),
+    onSessionData: () => noop,
+    onSessionExit: () => noop,
+    onChainProgress: () => noop,
+    writeToSession: noop,
+    resizeSession: noop,
+  };
+  const ctx = {
+    host: {
+      id: "host-1",
+      label: "Target",
+      hostname: "target.example.test",
+      username: "alice",
+      port: 22,
+      authMethod: "key",
+      identityFilePaths: ["/Users/me/.ssh/key"],
+      password: "login-secret",
+      savePassword: true,
+    },
+    keys: [],
+    identities: [],
+    resolvedChainHosts: [],
+    sessionId: "session-1",
+    terminalSettings: {},
+    terminalBackend,
+    sessionRef: { current: null },
+    hasConnectedRef: { current: false },
+    hasRunStartupCommandRef: { current: false },
+    disposeDataRef: { current: null },
+    disposeExitRef: { current: null },
+    fitAddonRef: { current: null },
+    serializeAddonRef: { current: null },
+    pendingAuthRef: { current: null },
+    updateStatus: noop,
+    setStatus: noop,
+    setError: noop,
+    setNeedsAuth: noop,
+    setAuthRetryMessage: noop,
+    setAuthPassword: noop,
+    setProgressLogs: noop,
+    setProgressValue: noop,
+    setChainProgress: noop,
+  };
+  const term = {
+    cols: 120,
+    rows: 32,
+    write: (_data: string, callback?: () => void) => callback?.(),
+    writeln: noop,
+    scrollToBottom: noop,
+  };
+
+  await createTerminalSessionStarters(ctx as never).startSSH(term as never);
+
+  assert.equal(startCalls, 1, "credentials must go in a single connection, not separate per-factor attempts");
+  assert.equal(capturedOptions?.password, "login-secret");
+  assert.deepEqual(capturedOptions?.identityFilePaths, ["/Users/me/.ssh/key"]);
 });
 
 test("startSSH forwards the saved sudo autofill password to the SSH bridge", async () => {
@@ -651,6 +729,196 @@ test("local session runs startup command after attaching", async () => {
     data: "docker logs -f --tail 200 abc123\r",
     automated: true,
   }]);
+});
+
+test("startup command suppression is consumed only when scheduling", () => {
+  const suppressHostStartupCommandRef = { current: true };
+  const ctx = createStarterContext({
+    host: {
+      id: "host-1",
+      label: "Target",
+      hostname: "target.example.test",
+      username: "alice",
+      startupCommand: "echo host-startup",
+    },
+    startupCommand: undefined,
+    suppressHostStartupCommandRef,
+  });
+
+  assert.equal(resolveStartupCommand(ctx as never), undefined);
+  assert.equal(suppressHostStartupCommandRef.current, true);
+  assert.equal(
+    resolveStartupCommand(ctx as never, { consumeSuppressHostStartupCommand: true }),
+    undefined,
+  );
+  assert.equal(suppressHostStartupCommandRef.current, false);
+  assert.equal(resolveStartupCommand(ctx as never), "echo host-startup");
+});
+
+test("restored local reconnect does not fall back to host startup command", async () => {
+  const sessionWrites: Array<{ id: string; data: string; automated?: boolean }> = [];
+
+  const terminalBackend = {
+    backendAvailable: () => true,
+    telnetAvailable: () => true,
+    moshAvailable: () => true,
+    localAvailable: () => true,
+    serialAvailable: () => true,
+    execAvailable: () => true,
+    startSSHSession: async () => "ssh-session",
+    startTelnetSession: async () => "telnet-session",
+    startMoshSession: async () => "mosh-session",
+    startLocalSession: async () => "local-session",
+    startSerialSession: async () => "serial-session",
+    execCommand: async () => ({}),
+    onSessionData: () => noop,
+    onSessionExit: () => noop,
+    onChainProgress: () => noop,
+    writeToSession: (id: string, data: string, options?: { automated?: boolean }) => {
+      sessionWrites.push({ id, data, automated: options?.automated });
+    },
+    resizeSession: noop,
+  };
+
+  const ctx = createStarterContext({
+    host: {
+      id: "local-host",
+      label: "Local",
+      hostname: "local",
+      username: "",
+      protocol: "local",
+      startupCommand: "echo host-startup",
+    },
+    terminalSettings: { startupCommandDelayMs: 0 },
+    terminalBackend,
+    startupCommand: undefined,
+    suppressHostStartupCommandRef: { current: true },
+    promptLineBreakStateRef: undefined,
+  });
+
+  await createTerminalSessionStarters(ctx as never).startLocal(createTermStub() as never);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.deepEqual(sessionWrites, []);
+});
+
+test("local session restores cwd before startup command after attaching", async () => {
+  const sessionWrites: Array<{ id: string; data: string; automated?: boolean }> = [];
+  const executedCommands: string[] = [];
+  const progressLogs: string[] = [];
+
+  const terminalBackend = {
+    backendAvailable: () => true,
+    telnetAvailable: () => true,
+    moshAvailable: () => true,
+    localAvailable: () => true,
+    serialAvailable: () => true,
+    execAvailable: () => true,
+    startSSHSession: async () => "ssh-session",
+    startTelnetSession: async () => "telnet-session",
+    startMoshSession: async () => "mosh-session",
+    startLocalSession: async () => "local-session",
+    startSerialSession: async () => "serial-session",
+    execCommand: async () => ({}),
+    onSessionData: () => noop,
+    onSessionExit: () => noop,
+    onChainProgress: () => noop,
+    writeToSession: (id: string, data: string, options?: { automated?: boolean }) => {
+      sessionWrites.push({ id, data, automated: options?.automated });
+    },
+    resizeSession: noop,
+  };
+
+  const restoreCwdIntentRef = {
+    current: { cwd: "/srv/app dir", command: "cd -- '/srv/app dir'" },
+  };
+  const ctx = createStarterContext({
+    host: {
+      id: "local-host",
+      label: "Local",
+      hostname: "local",
+      username: "",
+      protocol: "local",
+    },
+    terminalSettings: { startupCommandDelayMs: 0 },
+    terminalBackend,
+    startupCommand: "pwd",
+    promptLineBreakStateRef: undefined,
+    restoreCwdIntentRef,
+    setProgressLogs: (updater: (prev: string[]) => string[]) => {
+      progressLogs.splice(0, progressLogs.length, ...updater(progressLogs));
+    },
+    onCommandExecuted: (command: string) => {
+      executedCommands.push(command);
+    },
+  });
+
+  await createTerminalSessionStarters(ctx as never).startLocal(createTermStub() as never);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(restoreCwdIntentRef.current, null);
+  assert.deepEqual(sessionWrites, [
+    { id: "local-session", data: "cd -- '/srv/app dir'\r", automated: true },
+    { id: "local-session", data: "pwd\r", automated: true },
+  ]);
+  assert.deepEqual(executedCommands, ["pwd"]);
+  assert.deepEqual(progressLogs, ["Restoring working directory: /srv/app dir"]);
+});
+
+test("ssh session restores cwd before startup command after attaching", async () => {
+  const sessionWrites: Array<{ id: string; data: string; automated?: boolean }> = [];
+  const executedCommands: string[] = [];
+  const progressLogs: string[] = [];
+
+  const terminalBackend = {
+    backendAvailable: () => true,
+    telnetAvailable: () => true,
+    moshAvailable: () => true,
+    localAvailable: () => true,
+    serialAvailable: () => true,
+    execAvailable: () => true,
+    startSSHSession: async () => "ssh-session",
+    startTelnetSession: async () => "telnet-session",
+    startMoshSession: async () => "mosh-session",
+    startLocalSession: async () => "local-session",
+    startSerialSession: async () => "serial-session",
+    execCommand: async () => ({}),
+    onSessionData: () => noop,
+    onSessionExit: () => noop,
+    onChainProgress: () => noop,
+    writeToSession: (id: string, data: string, options?: { automated?: boolean }) => {
+      sessionWrites.push({ id, data, automated: options?.automated });
+    },
+    resizeSession: noop,
+  };
+
+  const restoreCwdIntentRef = {
+    current: { cwd: "/srv/app dir", command: "cd -- '/srv/app dir'" },
+  };
+  const ctx = createStarterContext({
+    terminalSettings: { startupCommandDelayMs: 0 },
+    terminalBackend,
+    startupCommand: "pwd",
+    promptLineBreakStateRef: undefined,
+    restoreCwdIntentRef,
+    setProgressLogs: (updater: (prev: string[]) => string[]) => {
+      progressLogs.splice(0, progressLogs.length, ...updater(progressLogs));
+    },
+    onCommandExecuted: (command: string) => {
+      executedCommands.push(command);
+    },
+  });
+
+  await createTerminalSessionStarters(ctx as never).startSSH(createTermStub() as never);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(restoreCwdIntentRef.current, null);
+  assert.deepEqual(sessionWrites, [
+    { id: "ssh-session", data: "cd -- '/srv/app dir'\r", automated: true },
+    { id: "ssh-session", data: "pwd\r", automated: true },
+  ]);
+  assert.deepEqual(executedCommands, ["pwd"]);
+  assert.deepEqual(progressLogs, ["Restoring working directory: /srv/app dir"]);
 });
 
 test("local session resets terminal timestamp state when reusing a terminal", async () => {
@@ -1481,7 +1749,7 @@ test("startSSH omits jump host identity file paths when password auth is selecte
   assert.equal(jumpHosts[0]?.identityFilePaths, undefined);
 });
 
-test("startSSH tries local identity file paths before saved passwords for key auth", async () => {
+test("startSSH sends local identity file paths with saved passwords for key auth", async () => {
   let capturedOptions: Record<string, unknown> | null = null;
 
   const terminalBackend = {
@@ -1552,6 +1820,6 @@ test("startSSH tries local identity file paths before saved passwords for key au
   await createTerminalSessionStarters(ctx as never).startSSH(term as never);
 
   assert.ok(capturedOptions);
-  assert.equal(capturedOptions.password, undefined);
+  assert.equal(capturedOptions.password, "saved-password");
   assert.deepEqual(capturedOptions.identityFilePaths, ["/Users/alice/.ssh/id_ed25519"]);
 });
