@@ -11,9 +11,12 @@
  *   (bring-your-own-CLI), so we MUST point `connection` at the user's system
  *   `copilot` binary via RuntimeConnection.forStdio({ path }) — otherwise the SDK
  *   falls back to the (absent) bundled runtime in the shipped app.
- * - Side effects route through the injected netcatty MCP server (stdio). The
- *   SDK-level permission handler rejects local Copilot tools and allows only
- *   MCP requests; netcatty MCP then enforces approval/scope/blocklist.
+ * - MCP mode: side effects route through the injected netcatty MCP server
+ *   (stdio). The permission handler rejects local Copilot tools and allows
+ *   only MCP requests; netcatty MCP then enforces approval/scope/blocklist.
+ * - Skills mode: only builtin bash (+ skill) are exposed. Shell permission
+ *   requests are approved only for Netcatty CLI invocations; discovery env is
+ *   passed to the Copilot runtime so `netcatty-tool-cli` can reach the host.
  *
  * 🔬 SMOKE-CALIBRATE [copilot-stream]: sendAndWait returns only the final
  *   assistant text. A follow-up can subscribe via session.on(handler) to stream
@@ -48,7 +51,13 @@ function toCopilotMcpServers(injectedMcpServers) {
   return map;
 }
 
-function buildCopilotSessionOptions({ model, injectedMcpServers }) {
+const COPILOT_SKILLS_AVAILABLE_TOOLS = ["builtin:bash", "builtin:skill"];
+
+function copilotBuiltinTools(toolIntegrationMode) {
+  return toolIntegrationMode === "skills" ? [...COPILOT_SKILLS_AVAILABLE_TOOLS] : null;
+}
+
+function buildCopilotSessionOptions({ model, injectedMcpServers, toolIntegrationMode }) {
   // onPermissionRequest is wired in runCopilotTurn (it needs the SDK's approveAll).
   const options = {
     mcpServers: toCopilotMcpServers(injectedMcpServers),
@@ -58,8 +67,14 @@ function buildCopilotSessionOptions({ model, injectedMcpServers }) {
     // has live reasoning to render.
     streaming: true,
   };
+  const availableTools = copilotBuiltinTools(toolIntegrationMode);
+  if (availableTools) options.availableTools = availableTools;
   if (model) options.model = model;
   return options;
+}
+
+function isLikelyNetcattyCliShellCommand(fullCommandText) {
+  return /netcatty-tool-cli/i.test(String(fullCommandText || ""));
 }
 
 function approveNetcattyMcpOnly(request) {
@@ -70,6 +85,28 @@ function approveNetcattyMcpOnly(request) {
     kind: "reject",
     feedback: "Only Netcatty MCP tools are allowed from this integration.",
   };
+}
+
+function approveNetcattyCliShellOnly(request) {
+  if (request?.kind === "shell") {
+    const fullCommandText = request.fullCommandText || "";
+    if (isLikelyNetcattyCliShellCommand(fullCommandText)) {
+      return { kind: "approve-once" };
+    }
+    return {
+      kind: "reject",
+      feedback:
+        "Only Netcatty CLI shell commands are allowed. Invoke the netcatty-tool-cli launcher or script prefix provided in the host context, and include --chat-session on every call.",
+    };
+  }
+  return {
+    kind: "reject",
+    feedback: "Only Netcatty CLI shell commands are allowed from this integration.",
+  };
+}
+
+function buildCopilotPermissionHandler(toolIntegrationMode) {
+  return toolIntegrationMode === "skills" ? approveNetcattyCliShellOnly : approveNetcattyMcpOnly;
 }
 
 function extractCopilotContent(response) {
@@ -178,7 +215,18 @@ function translateCopilotEvent(event, emitter, state) {
  * @param {AbortSignal} [args.signal]
  * @param {object} [args.sdkModule] inject the @github/copilot-sdk module (for tests)
  */
-async function runCopilotTurn({ prompt, attachments, clientOptions, sessionOptions, resumeSessionId, emitter, signal, sdkModule }) {
+async function runCopilotTurn({
+  prompt,
+  attachments,
+  clientOptions,
+  sessionOptions,
+  resumeSessionId,
+  toolIntegrationMode,
+  runtimeEnv,
+  emitter,
+  signal,
+  sdkModule,
+}) {
   let resolvedModule = sdkModule;
   if (!resolvedModule) {
     try { resolvedModule = await import("@github/copilot-sdk"); } catch { emitter.emitError("GitHub Copilot SDK not installed. Run: npm install @github/copilot-sdk"); return { sessionId: null }; }
@@ -190,6 +238,9 @@ async function runCopilotTurn({ prompt, attachments, clientOptions, sessionOptio
   // (the bundled runtime is excluded from packaging) and authenticate as the
   // logged-in user (gh CLI / stored OAuth).
   const realClientOptions = { useLoggedInUser: true };
+  if (runtimeEnv && typeof runtimeEnv === "object") {
+    realClientOptions.env = runtimeEnv;
+  }
   if (clientOptions?.cliPath && RuntimeConnection?.forStdio) {
     realClientOptions.connection = RuntimeConnection.forStdio({ path: clientOptions.cliPath });
   }
@@ -202,8 +253,8 @@ async function runCopilotTurn({ prompt, attachments, clientOptions, sessionOptio
     const sessionConfig = {
       ...sessionOptions,
       streaming: true,
-      // Allow only MCP calls; netcatty MCP performs scope/approval/blocklist checks.
-      onPermissionRequest: approveNetcattyMcpOnly,
+      // MCP mode: only netcatty MCP. Skills mode: only Netcatty CLI shell commands.
+      onPermissionRequest: buildCopilotPermissionHandler(toolIntegrationMode),
     };
     // Resume the prior conversation so context carries ACROSS turns (incl. after
     // a Stop). Always (re)apply sessionConfig so the FRESH netcatty MCP server
@@ -335,7 +386,11 @@ module.exports = {
   buildCopilotClientOptions,
   buildCopilotSessionOptions,
   buildCopilotMessageOptions,
+  buildCopilotPermissionHandler,
   approveNetcattyMcpOnly,
+  approveNetcattyCliShellOnly,
+  isLikelyNetcattyCliShellCommand,
+  copilotBuiltinTools,
   toCopilotMcpServers,
   extractCopilotContent,
   extractCopilotResultText,

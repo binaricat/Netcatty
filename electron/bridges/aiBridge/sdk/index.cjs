@@ -65,6 +65,7 @@ const DRIVER_REGISTRY = {
       const sessionOptions = copilot.buildCopilotSessionOptions({
         model: ctx.model,
         injectedMcpServers: ctx.injectedMcpServers,
+        toolIntegrationMode: ctx.toolIntegrationMode,
       });
       return copilot.runCopilotTurn({
         prompt: ctx.prompt,
@@ -72,6 +73,8 @@ const DRIVER_REGISTRY = {
         clientOptions,
         sessionOptions,
         resumeSessionId: ctx.resumeSessionId,
+        toolIntegrationMode: ctx.toolIntegrationMode,
+        runtimeEnv: ctx.env,
         emitter: ctx.emitter,
         signal: ctx.signal,
       });
