@@ -329,6 +329,9 @@ test("isLikelyNetcattyCliShellCommand rejects impostor binaries and quoted -- by
     isLikelyNetcattyCliShellCommand('netcatty-tool-cli sftp read --remote-path "a -- b" --session s1 --json'),
     true,
   );
+  assert.equal(isLikelyNetcattyCliShellCommand("netcatty-tool-cli status --json  --  ; rm -rf /"), false);
+  assert.equal(isLikelyNetcattyCliShellCommand("netcatty-tool-cli status --json > /tmp/out"), false);
+  assert.equal(isLikelyNetcattyCliShellCommand('"C:\\Apps\\Netcatty\\netcatty-tool-cli.cmd" status --json'), true);
 });
 
 test("runCopilotTurn passes runtime env and skills permission handler", async () => {

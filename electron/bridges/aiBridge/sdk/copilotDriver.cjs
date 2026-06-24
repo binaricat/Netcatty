@@ -75,9 +75,11 @@ function buildCopilotSessionOptions({ model, injectedMcpServers, toolIntegration
   return options;
 }
 
-// Shell chaining/redirection in the local Netcatty CLI prefix (not after `--`).
-const LOCAL_SHELL_METACHAR_PATTERN = /(?:[;&|`]|&&|\|\||\$\(|\$\{|<<?|\r?\n)/;
+// Shell chaining/redirection in the local Netcatty CLI prefix (not after exec `--`).
+const LOCAL_SHELL_METACHAR_PATTERN = /(?:[;&|`]|&&|\|\||\$\(|\$\{|<<?|>{1,2}|\r?\n)/;
 const LOCAL_SHELL_WRAPPER_PATTERN = /^(?:\/[^\s]+\/)?(?:ba|z|fi)?sh(?:\.exe)?\s+-c\b/i;
+const NETCATTY_CLI_TOKEN = String.raw`netcatty-tool-cli(?:\.(?:cjs|cmd))?`;
+const NETCATTY_CLI_PATH_SUFFIX = String.raw`(?:[\\/]|^)${NETCATTY_CLI_TOKEN}`;
 
 /** Find the last exec/job-start payload separator outside shell quotes. */
 function findExecPayloadSeparatorIndex(command) {
@@ -155,15 +157,35 @@ function getLocalNetcattyCliPrefix(fullCommandText) {
 function isNetcattyCliInvocationPrefix(localPart) {
   const text = String(localPart || "").trim();
   if (!text) return false;
-  return /^(?:(?:[A-Za-z_][\w.-]*=[^\s]+\s+)*)?(?:"[^"]*\/netcatty-tool-cli(?:\.cjs)?"|'[^']*\/netcatty-tool-cli(?:\.cjs)?'|netcatty-tool-cli(?:\.cjs)?(?=\s|$)|\S*\/netcatty-tool-cli(?:\.cjs)?(?=\s|$)|node\s+(?:"[^"]*netcatty-tool-cli(?:\.cjs)?"|'[^']*netcatty-tool-cli(?:\.cjs)?'|\S*\/netcatty-tool-cli(?:\.cjs)?)(?=\s|$))/i.test(text);
+  const invocation = new RegExp(
+    String.raw`^(?:(?:[A-Za-z_][\w.-]*=[^\s]+\s+)*)?(?:"[^"]*${NETCATTY_CLI_PATH_SUFFIX}"|'[^']*${NETCATTY_CLI_PATH_SUFFIX}'|${NETCATTY_CLI_TOKEN}(?=\s|$)|\S*${NETCATTY_CLI_PATH_SUFFIX}(?=\s|$)|node\s+(?:"[^"]*${NETCATTY_CLI_PATH_SUFFIX}"|'[^']*${NETCATTY_CLI_PATH_SUFFIX}'|\S*${NETCATTY_CLI_PATH_SUFFIX})(?=\s|$))`,
+    "i",
+  );
+  return invocation.test(text);
+}
+
+function hasExecPayloadSubcommand(localPart) {
+  return /\b(?:exec|job-start)\b/i.test(String(localPart || ""));
 }
 
 function isLikelyNetcattyCliShellCommand(fullCommandText) {
-  const localPart = getLocalNetcattyCliPrefix(fullCommandText);
-  if (!localPart) return false;
-  if (LOCAL_SHELL_WRAPPER_PATTERN.test(localPart)) return false;
-  if (containsUnquotedShellMetachar(localPart)) return false;
-  return isNetcattyCliInvocationPrefix(localPart);
+  const command = String(fullCommandText || "").trim();
+  if (!command) return false;
+
+  const splitAt = findExecPayloadSeparatorIndex(command);
+  const localPart = splitAt >= 0 ? command.slice(0, splitAt).trim() : command;
+  const remotePayload = splitAt >= 0 ? command.slice(splitAt + 4).trim() : "";
+
+  if (!localPart || LOCAL_SHELL_WRAPPER_PATTERN.test(localPart)) return false;
+  if (!isNetcattyCliInvocationPrefix(localPart)) return false;
+
+  if (remotePayload) {
+    if (!hasExecPayloadSubcommand(localPart)) return false;
+    if (containsUnquotedShellMetachar(localPart)) return false;
+    return true;
+  }
+
+  return !containsUnquotedShellMetachar(command);
 }
 
 function approveNetcattyMcpOnly(request) {
@@ -481,7 +503,7 @@ module.exports = {
   isLikelyNetcattyCliShellCommand,
   getLocalNetcattyCliPrefix,
   findExecPayloadSeparatorIndex,
-  containsUnquotedShellMetachar,
+  hasExecPayloadSubcommand,
   copilotBuiltinTools,
   toCopilotMcpServers,
   extractCopilotContent,
