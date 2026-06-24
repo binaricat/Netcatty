@@ -512,6 +512,9 @@ const ChatInput: React.FC<ChatInputProps> = ({
     : (selectedPreset
         ? selectedPreset.name + (selectedThinking ? ` / ${formatThinkingLabel(selectedThinking)}` : '')
         : modelName || providerName || t('ai.chat.noModel'));
+  const modelChipMaxWidth = hasProviderSwitcher
+    ? 'max-w-[180px]'
+    : (selectedThinking ? 'max-w-[148px]' : 'max-w-[82px]');
   const hasModelPicker = hasProviderSwitcher || (modelPresets.length > 0 && !!onModelSelect);
   const popoverMaxWidth = hasProviderSwitcher ? PROVIDER_PICKER_MAX_WIDTH : MODEL_PICKER_MAX_WIDTH;
   const chipClassName =
@@ -819,6 +822,9 @@ const ChatInput: React.FC<ChatInputProps> = ({
                     const left = Math.max(8, Math.min(rect.left, window.innerWidth - popoverMaxWidth - 8));
                     setMenuPos({ left, bottom: window.innerHeight - rect.top + 6 });
                   }
+                  if (selectedPreset?.thinkingLevels?.length) {
+                    setHoveredModelId(selectedPreset.id);
+                  }
                   setActiveMenu('model');
                 } else {
                   closeAllMenus();
@@ -833,7 +839,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
               ) : (
                 <Cpu size={11} className="text-muted-foreground/64" />
               )}
-              <span className={`truncate min-w-0 ${hasProviderSwitcher ? 'max-w-[180px]' : 'max-w-[82px]'}`}>{modelLabel}</span>
+              <span className={`truncate min-w-0 ${modelChipMaxWidth}`}>{modelLabel}</span>
               {hasModelPicker && <ChevronDown size={9} className="text-muted-foreground/50" />}
             </button>
             {showModelPicker && hasModelPicker && menuPos && createPortal(
@@ -898,10 +904,10 @@ const ChatInput: React.FC<ChatInputProps> = ({
                       {modelPresets.map(preset => {
                     const isSelected = preset.id === selectedBaseModelId;
                     const hasThinking = preset.thinkingLevels && preset.thinkingLevels.length > 0;
+                    const showThinkingLevels = hasThinking && hoveredModelId === preset.id;
                     return (
                       <div
                         key={preset.id}
-                        className="relative"
                         onMouseEnter={() => setHoveredModelId(hasThinking ? preset.id : null)}
                         onFocus={() => { if (hasThinking) setHoveredModelId(preset.id); }}
                         onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setHoveredModelId(null); }}
@@ -910,21 +916,29 @@ const ChatInput: React.FC<ChatInputProps> = ({
                           type="button"
                           role="option"
                           aria-selected={isSelected}
+                          aria-expanded={hasThinking ? showThinkingLevels : undefined}
                           onClick={() => {
                             if (!hasThinking) {
                               onModelSelect?.(preset.id);
                               closeAllMenus();
+                              return;
                             }
+                            setHoveredModelId(showThinkingLevels ? null : preset.id);
                           }}
                           className="w-full min-w-0 flex items-center gap-1.5 px-3 py-1.5 text-left text-[12px] hover:bg-muted/30 transition-colors cursor-pointer"
                         >
                           {isSelected ? <Check size={11} className="text-primary shrink-0" /> : <span className="w-[11px] shrink-0" />}
                           <span className="flex-1 min-w-0 truncate text-foreground/85">{preset.name}</span>
-                          {hasThinking && <ChevronRight size={10} className="text-muted-foreground/50 shrink-0" />}
+                          {hasThinking && (
+                            <ChevronRight
+                              size={10}
+                              className={`text-muted-foreground/50 shrink-0 transition-transform ${showThinkingLevels ? 'rotate-90' : ''}`}
+                            />
+                          )}
                         </button>
-                        {/* Thinking level sub-menu */}
-                        {hasThinking && hoveredModelId === preset.id && (
-                          <div role="listbox" aria-label="Thinking level" className="absolute left-full top-0 ml-1 min-w-[120px] rounded-lg border border-border/50 bg-popover shadow-lg py-1 z-[1001]">
+                        {/* Inline thinking levels — flyout submenus get clipped by overflow-y-auto above. */}
+                        {showThinkingLevels && (
+                          <div role="listbox" aria-label="Thinking level" className="border-t border-border/30 bg-muted/10 py-0.5">
                             {preset.thinkingLevels!.map(level => {
                               const fullId = `${preset.id}/${level}`;
                               const isLevelSelected = selectedModelId === fullId;
@@ -949,7 +963,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
                                       closeAllMenus();
                                     }
                                   }}
-                                  className="w-full flex items-center gap-1.5 px-3 py-1.5 text-left text-[12px] hover:bg-muted/30 transition-colors cursor-pointer whitespace-nowrap"
+                                  className="w-full flex items-center gap-1.5 pl-7 pr-3 py-1.5 text-left text-[12px] hover:bg-muted/30 transition-colors cursor-pointer whitespace-nowrap"
                                 >
                                   {isLevelSelected ? <Check size={11} className="text-primary shrink-0" /> : <span className="w-[11px] shrink-0" />}
                                   <span className="text-foreground/85">{formatThinkingLabel(level)}</span>
