@@ -38,7 +38,17 @@ interface BufferSnapshot {
   baseY: number;
   viewportY: number;
   cursorAbsoluteY: number;
-  viewportProbe: readonly number[];
+  viewportProbe: readonly ViewportProbeSample[];
+}
+
+interface ViewportProbeSample {
+  lineY: number;
+  hash: number;
+}
+
+interface WrappedBlockContext {
+  logicalLineText: string;
+  segmentBounds: Map<number, { lineStart: number; lineEnd: number }>;
 }
 
 /** Shared empty array for non-matching lines to avoid per-call allocations. */
@@ -676,7 +686,7 @@ export class KeywordHighlighter implements IDisposable {
     };
   }
 
-  private buildViewportProbe(buffer: IBuffer, rows: number): readonly number[] {
+  private buildViewportProbe(buffer: IBuffer, rows: number): readonly ViewportProbeSample[] {
     if (rows <= 0) return [];
     const viewportStart = buffer.viewportY;
     const viewportEnd = viewportStart + rows - 1;
@@ -687,11 +697,12 @@ export class KeywordHighlighter implements IDisposable {
       lineSet.add(Math.max(viewportStart, Math.min(viewportEnd, targetLine)));
     }
 
-    const probe: number[] = [];
+    const probe: ViewportProbeSample[] = [];
     for (const lineY of lineSet) {
       const lineText = buffer.getLine(lineY)?.translateToString(true) ?? "";
-      probe.push(this.hashProbeText(lineText));
+      probe.push({ lineY, hash: this.hashProbeText(lineText) });
     }
+    probe.sort((left, right) => left.lineY - right.lineY);
     return probe;
   }
 
@@ -707,18 +718,18 @@ export class KeywordHighlighter implements IDisposable {
     return hash >>> 0;
   }
 
-  private countViewportProbeDiff(
-    currentProbe: readonly number[],
-    previousProbe: readonly number[],
-  ): number {
-    const maxLen = Math.max(currentProbe.length, previousProbe.length);
-    let diffCount = 0;
-    for (let index = 0; index < maxLen; index += 1) {
-      if (currentProbe[index] !== previousProbe[index]) {
-        diffCount += 1;
+  private collectViewportProbeDiffLines(
+    currentProbe: readonly ViewportProbeSample[],
+    previousProbe: readonly ViewportProbeSample[],
+  ): number[] {
+    const previousByLine = new Map(previousProbe.map((sample) => [sample.lineY, sample.hash]));
+    const changedLines: number[] = [];
+    for (const sample of currentProbe) {
+      if (previousByLine.get(sample.lineY) !== sample.hash) {
+        changedLines.push(sample.lineY);
       }
     }
-    return diffCount;
+    return changedLines;
   }
 
   private markVisibleRangeDirty() {
@@ -854,19 +865,28 @@ export class KeywordHighlighter implements IDisposable {
       snapshot.length === prev.length &&
       snapshot.baseY === prev.baseY &&
       snapshot.viewportY === prev.viewportY;
-    const probeDiffCount = this.countViewportProbeDiff(
+    const changedProbeLines = this.collectViewportProbeDiffLines(
       snapshot.viewportProbe,
       prev.viewportProbe,
     );
-    // Detect in-place ANSI redraw chunks (cursor returns near original line
-    // while multiple viewport regions are actually rewritten).
+    const probeDiffCount = changedProbeLines.length;
+    const cursorStart = Math.min(prev.cursorAbsoluteY, snapshot.cursorAbsoluteY) - padding;
+    const cursorEnd = Math.max(prev.cursorAbsoluteY, snapshot.cursorAbsoluteY) + padding;
+    // Detect in-place ANSI redraw chunks (cursor returns near original line while
+    // multiple viewport regions are actually rewritten).
     if (sameWindow && cursorSpan <= Math.max(1, padding * 2) && probeDiffCount >= 2) {
       this.markVisibleRangeDirty();
       return;
     }
+    // Single-line ANSI redraw via save/restore: also mark the rewritten probe
+    // line dirty when it is away from the cursor.
+    if (sameWindow && cursorSpan <= Math.max(1, padding * 2) && probeDiffCount === 1) {
+      const changedLine = changedProbeLines[0];
+      if (changedLine < cursorStart || changedLine > cursorEnd) {
+        this.addDirtyRange(changedLine - padding, changedLine + padding);
+      }
+    }
 
-    const cursorStart = Math.min(prev.cursorAbsoluteY, snapshot.cursorAbsoluteY) - padding;
-    const cursorEnd = Math.max(prev.cursorAbsoluteY, snapshot.cursorAbsoluteY) + padding;
     this.addDirtyRange(cursorStart, cursorEnd);
 
     if (snapshot.viewportY !== prev.viewportY) {
@@ -983,6 +1003,7 @@ export class KeywordHighlighter implements IDisposable {
   private processLineRange(start: number, end: number, cursorAbsoluteY: number) {
     if (end < start) return;
     const buffer = this.term.buffer.active;
+    const wrappedBlockCache = new Map<number, WrappedBlockContext>();
     for (let lineY = start; lineY <= end; lineY++) {
       const line = buffer.getLine(lineY);
       if (!line) {
@@ -998,7 +1019,7 @@ export class KeywordHighlighter implements IDisposable {
 
       const hasWrappedContext = this.hasWrappedNeighbor(buffer, lineY, line);
       const cachedRanges = hasWrappedContext
-        ? this.scanWrappedLine(buffer, lineY, line, lineText)
+        ? this.scanWrappedLine(buffer, lineY, line, lineText, wrappedBlockCache)
         : this.getCachedRanges(line, lineText);
       if (cachedRanges.length === 0) {
         this.disposeLineDecorations(lineY);
@@ -1061,31 +1082,28 @@ export class KeywordHighlighter implements IDisposable {
     return !!nextLine?.isWrapped;
   }
 
-  private buildWrappedContext(buffer: IBuffer, lineY: number): {
-    logicalLineText: string;
-    lineStart: number;
-    lineEnd: number;
-  } | null {
+  private findWrappedBlockStart(buffer: IBuffer, lineY: number): number {
     let startY = lineY;
     while (startY > 0) {
       const current = buffer.getLine(startY);
       if (!current?.isWrapped) break;
       startY -= 1;
     }
+    return startY;
+  }
 
+  private buildWrappedBlockContext(buffer: IBuffer, startY: number): WrappedBlockContext | null {
     let logicalLineText = "";
-    let lineStart = -1;
-    let lineEnd = -1;
+    const segmentBounds = new Map<number, { lineStart: number; lineEnd: number }>();
     let cursorY = startY;
 
     while (true) {
       const segment = buffer.getLine(cursorY);
       if (!segment) break;
       const segmentText = segment.translateToString(true);
-      if (cursorY === lineY) {
-        lineStart = logicalLineText.length;
-        lineEnd = lineStart + segmentText.length;
-      }
+      const lineStart = logicalLineText.length;
+      const lineEnd = lineStart + segmentText.length;
+      segmentBounds.set(cursorY, { lineStart, lineEnd });
       logicalLineText += segmentText;
 
       const nextLine = buffer.getLine(cursorY + 1);
@@ -1093,17 +1111,41 @@ export class KeywordHighlighter implements IDisposable {
       cursorY += 1;
     }
 
-    if (lineStart < 0 || lineEnd < 0) return null;
-    return { logicalLineText, lineStart, lineEnd };
+    if (segmentBounds.size === 0) return null;
+    return { logicalLineText, segmentBounds };
+  }
+
+  private getWrappedContext(
+    buffer: IBuffer,
+    lineY: number,
+    cache: Map<number, WrappedBlockContext>,
+  ): { logicalLineText: string; lineStart: number; lineEnd: number } | null {
+    const startY = this.findWrappedBlockStart(buffer, lineY);
+    let block = cache.get(startY);
+    if (!block) {
+      block = this.buildWrappedBlockContext(buffer, startY) ?? undefined;
+      if (block) {
+        cache.set(startY, block);
+      }
+    }
+    if (!block) return null;
+    const bounds = block.segmentBounds.get(lineY);
+    if (!bounds) return null;
+    return {
+      logicalLineText: block.logicalLineText,
+      lineStart: bounds.lineStart,
+      lineEnd: bounds.lineEnd,
+    };
   }
 
   private scanWrappedLine(
     buffer: IBuffer,
     lineY: number,
     line: IBufferLine,
-    lineText: string
+    lineText: string,
+    wrappedBlockCache: Map<number, WrappedBlockContext>,
   ): CachedDecorationRange[] {
-    const context = this.buildWrappedContext(buffer, lineY);
+    const context = this.getWrappedContext(buffer, lineY, wrappedBlockCache);
     if (!context || context.logicalLineText === lineText) {
       return this.scanLine(line, lineText);
     }
