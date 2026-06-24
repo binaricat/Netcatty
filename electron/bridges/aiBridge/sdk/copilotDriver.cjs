@@ -115,7 +115,7 @@ function findExecPayloadSeparatorIndex(command) {
   return lastIndex;
 }
 
-function containsUnquotedShellMetachar(text) {
+function containsUnsafeShellMetachar(text) {
   let inSingle = false;
   let inDouble = false;
   let escape = false;
@@ -138,7 +138,11 @@ function containsUnquotedShellMetachar(text) {
       inDouble = !inDouble;
       continue;
     }
-    if (inSingle || inDouble) continue;
+    if (inSingle) continue;
+    if (inDouble) {
+      if (text.startsWith("$(", i) || ch === "`") return true;
+      continue;
+    }
     if (LOCAL_SHELL_METACHAR_PATTERN.test(text.slice(i))) return true;
   }
   return false;
@@ -157,8 +161,16 @@ function getLocalNetcattyCliPrefix(fullCommandText) {
 function isNetcattyCliInvocationPrefix(localPart) {
   const text = String(localPart || "").trim();
   if (!text) return false;
+  const pathPrefix = String.raw`(?:\.\./|\./|/|[A-Za-z]:[\\/])[\w. \\-]*[\\/]`;
   const invocation = new RegExp(
-    String.raw`^(?:(?:[A-Za-z_][\w.-]*=[^\s]+\s+)*)?(?:"[^"]*${NETCATTY_CLI_PATH_SUFFIX}"|'[^']*${NETCATTY_CLI_PATH_SUFFIX}'|${NETCATTY_CLI_TOKEN}(?=\s|$)|\S*${NETCATTY_CLI_PATH_SUFFIX}(?=\s|$)|node\s+(?:"[^"]*${NETCATTY_CLI_PATH_SUFFIX}"|'[^']*${NETCATTY_CLI_PATH_SUFFIX}'|\S*${NETCATTY_CLI_PATH_SUFFIX})(?=\s|$))`,
+    String.raw`^(?:(?:[A-Za-z_][\w.-]*=[^\s]+\s+)*)?(?:` +
+    String.raw`"[^"]*${NETCATTY_CLI_PATH_SUFFIX}"|` +
+    String.raw `'[^']*${NETCATTY_CLI_PATH_SUFFIX}'|` +
+    String.raw `${NETCATTY_CLI_TOKEN}(?=\s|$)|` +
+    String.raw `${pathPrefix}${NETCATTY_CLI_TOKEN}(?=\s|$)|` +
+    String.raw `node\s+(?:${NETCATTY_CLI_TOKEN}(?=\s|$)|${pathPrefix}${NETCATTY_CLI_TOKEN}(?=\s|$)|` +
+    String.raw `(?:[\w.-]+(?:[\\/][\w.-]+)*[\\/])?${NETCATTY_CLI_TOKEN}(?=\s|$)|` +
+    String.raw `"[^"]*${NETCATTY_CLI_PATH_SUFFIX}"|'[^']*${NETCATTY_CLI_PATH_SUFFIX}'))`,
     "i",
   );
   return invocation.test(text);
@@ -181,11 +193,11 @@ function isLikelyNetcattyCliShellCommand(fullCommandText) {
 
   if (remotePayload) {
     if (!hasExecPayloadSubcommand(localPart)) return false;
-    if (containsUnquotedShellMetachar(localPart)) return false;
+    if (containsUnsafeShellMetachar(localPart)) return false;
     return true;
   }
 
-  return !containsUnquotedShellMetachar(command);
+  return !containsUnsafeShellMetachar(command);
 }
 
 function approveNetcattyMcpOnly(request) {
@@ -503,6 +515,7 @@ module.exports = {
   isLikelyNetcattyCliShellCommand,
   getLocalNetcattyCliPrefix,
   findExecPayloadSeparatorIndex,
+  containsUnsafeShellMetachar,
   hasExecPayloadSubcommand,
   copilotBuiltinTools,
   toCopilotMcpServers,

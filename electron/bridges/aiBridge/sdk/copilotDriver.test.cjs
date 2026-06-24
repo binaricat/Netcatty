@@ -332,6 +332,8 @@ test("isLikelyNetcattyCliShellCommand rejects impostor binaries and quoted -- by
   assert.equal(isLikelyNetcattyCliShellCommand("netcatty-tool-cli status --json  --  ; rm -rf /"), false);
   assert.equal(isLikelyNetcattyCliShellCommand("netcatty-tool-cli status --json > /tmp/out"), false);
   assert.equal(isLikelyNetcattyCliShellCommand('"C:\\Apps\\Netcatty\\netcatty-tool-cli.cmd" status --json'), true);
+  assert.equal(isLikelyNetcattyCliShellCommand("attacker/netcatty-tool-cli status --json"), false);
+  assert.equal(isLikelyNetcattyCliShellCommand('netcatty-tool-cli status "$(id)" --json'), false);
 });
 
 test("runCopilotTurn passes runtime env and skills permission handler", async () => {
