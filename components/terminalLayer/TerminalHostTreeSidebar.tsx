@@ -198,6 +198,30 @@ export function getTerminalHostTreeMeasuredLayoutWidth(
     : Math.max(0, fallbackWidth);
 }
 
+export function getTerminalHostTreeReservedLayoutWidth(
+  element: Pick<HTMLElement, 'getBoundingClientRect'> | null,
+  targetLayoutWidth: number,
+  isVisible: boolean,
+): number {
+  const measuredWidth = getTerminalHostTreeMeasuredLayoutWidth(element, targetLayoutWidth);
+  return isVisible
+    ? Math.max(measuredWidth, Math.max(0, targetLayoutWidth))
+    : measuredWidth;
+}
+
+export function shouldShowTerminalHostTreeExpandCollapseControls(
+  groupPathCount: number,
+  searchActive: boolean,
+  tagsActive: boolean,
+  compactToolbar: boolean,
+): boolean {
+  return groupPathCount > 0 && !searchActive && !tagsActive && !compactToolbar;
+}
+
+export function shouldCompactTerminalHostTreeToolbar(displayWidth: number): boolean {
+  return displayWidth > 0 && displayWidth <= TERMINAL_HOST_TREE_MIN_WIDTH + 24;
+}
+
 function hostMatchesSearch(host: Host, search: string): boolean {
   const s = search.toLowerCase();
   return (
@@ -745,8 +769,6 @@ const TerminalHostTreeSidebarInner: React.FC<TerminalHostTreeSidebarProps> = ({
     collapseAll();
   }, [collapseAll]);
 
-  const canExpandCollapse = allGroupPaths.length > 0 && !searchActive && !tagsActive;
-
   const handleCollapse = useCallback(() => {
     terminalHostTreeStore.setIsOpen(false);
   }, []);
@@ -961,6 +983,13 @@ const TerminalHostTreeSidebarInner: React.FC<TerminalHostTreeSidebarProps> = ({
   }, [isVisible, persistSidebarWidth, setSidebarWidth, sidebarWidth]);
 
   const displayWidth = resizePreviewWidth ?? sidebarWidth;
+  const compactToolbarActions = shouldCompactTerminalHostTreeToolbar(displayWidth);
+  const showExpandCollapseControls = shouldShowTerminalHostTreeExpandCollapseControls(
+    allGroupPaths.length,
+    searchActive,
+    tagsActive,
+    compactToolbarActions,
+  );
   const targetLayoutWidth = getTerminalHostTreeLayoutTargetWidth(isVisible, displayWidth);
   const hiddenSurfaceShellWidth = getTerminalHostTreeHiddenSurfaceShellWidth(isOpen, enabled, displayWidth);
   const [shellWidth, setShellWidth] = useState(getTerminalHostTreeInitialLayoutWidth);
@@ -969,9 +998,9 @@ const TerminalHostTreeSidebarInner: React.FC<TerminalHostTreeSidebarProps> = ({
 
   const syncLayoutWidthFromShell = useCallback((fallbackWidth = targetLayoutWidth) => {
     terminalHostTreeStore.setLayoutWidth(
-      getTerminalHostTreeMeasuredLayoutWidth(shellRef.current, fallbackWidth),
+      getTerminalHostTreeReservedLayoutWidth(shellRef.current, fallbackWidth, isVisible),
     );
-  }, [targetLayoutWidth]);
+  }, [isVisible, targetLayoutWidth]);
 
   useEffect(() => {
     const el = shellRef.current;
@@ -1097,9 +1126,10 @@ const TerminalHostTreeSidebarInner: React.FC<TerminalHostTreeSidebarProps> = ({
           canNewGroup={Boolean(menuActions)}
           onCreateLocalTerminal={handleCreateLocalTerminal}
           canCreateLocalTerminal={Boolean(onCreateLocalTerminal)}
+          compactActions={compactToolbarActions}
           onExpandAll={handleExpandAll}
           onCollapseAll={handleCollapseAll}
-          canExpandCollapse={canExpandCollapse}
+          showExpandCollapseControls={showExpandCollapseControls}
           onCollapse={handleCollapse}
         />
 

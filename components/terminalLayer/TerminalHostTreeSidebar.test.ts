@@ -20,9 +20,12 @@ const {
   getTerminalHostTreeInitialLayoutWidth,
   getTerminalHostTreeLayoutTargetWidth,
   getTerminalHostTreeMeasuredLayoutWidth,
+  getTerminalHostTreeReservedLayoutWidth,
   getTerminalHostTreeSidebarPanelStyle,
   getTerminalHostTreeSidebarShellStyle,
+  shouldCompactTerminalHostTreeToolbar,
   isTerminalHostTreeSidebarVisible,
+  shouldShowTerminalHostTreeExpandCollapseControls,
 } = await import('./TerminalHostTreeSidebar.tsx');
 const { TERMINAL_HOST_TREE_WIDTH_TRANSITION } = await import('../../application/state/terminalHostTreeAnimation.ts');
 
@@ -74,6 +77,34 @@ test('host tree layout sync can sample the current shell width before targeting'
     getBoundingClientRect: () => ({ width: -12 }),
   } as unknown as HTMLElement, 240), 0);
   assert.equal(getTerminalHostTreeMeasuredLayoutWidth(null, 240), 240);
+});
+
+test('host tree layout reserves target width while opening to keep content out of the sidebar', () => {
+  assert.equal(getTerminalHostTreeReservedLayoutWidth({
+    getBoundingClientRect: () => ({ width: 84 }),
+  } as unknown as HTMLElement, 240, true), 240);
+  assert.equal(getTerminalHostTreeReservedLayoutWidth({
+    getBoundingClientRect: () => ({ width: 260 }),
+  } as unknown as HTMLElement, 240, true), 260);
+  assert.equal(getTerminalHostTreeReservedLayoutWidth({
+    getBoundingClientRect: () => ({ width: 84 }),
+  } as unknown as HTMLElement, 0, false), 84);
+});
+
+test('host tree expand and collapse controls only render when they can act', () => {
+  assert.equal(shouldShowTerminalHostTreeExpandCollapseControls(1, false, false, false), true);
+  assert.equal(shouldShowTerminalHostTreeExpandCollapseControls(0, false, false, false), false);
+  assert.equal(shouldShowTerminalHostTreeExpandCollapseControls(1, true, false, false), false);
+  assert.equal(shouldShowTerminalHostTreeExpandCollapseControls(1, false, true, false), false);
+  assert.equal(shouldShowTerminalHostTreeExpandCollapseControls(1, false, false, true), false);
+});
+
+test('host tree toolbar compacts low-priority actions near the minimum width', () => {
+  assert.equal(shouldCompactTerminalHostTreeToolbar(132), true);
+  assert.equal(shouldCompactTerminalHostTreeToolbar(156), true);
+  assert.equal(shouldCompactTerminalHostTreeToolbar(184), false);
+  assert.equal(shouldCompactTerminalHostTreeToolbar(220), false);
+  assert.equal(shouldCompactTerminalHostTreeToolbar(0), false);
 });
 
 test('host tree layout width follows the animated shell via ResizeObserver', () => {

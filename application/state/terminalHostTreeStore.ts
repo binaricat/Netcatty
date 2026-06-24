@@ -5,7 +5,7 @@ import { localStorageAdapter } from '../../infrastructure/persistence/localStora
 
 type Listener = () => void;
 
-export const TERMINAL_HOST_TREE_MIN_WIDTH = 160;
+export const TERMINAL_HOST_TREE_MIN_WIDTH = 132;
 export const TERMINAL_HOST_TREE_DEFAULT_WIDTH = 220;
 export const TERMINAL_HOST_TREE_MAX_WIDTH = 360;
 

@@ -29,9 +29,10 @@ interface TerminalHostTreeToolbarProps {
   canNewGroup?: boolean;
   onCreateLocalTerminal: () => void;
   canCreateLocalTerminal?: boolean;
+  compactActions?: boolean;
   onExpandAll: () => void;
   onCollapseAll: () => void;
-  canExpandCollapse?: boolean;
+  showExpandCollapseControls?: boolean;
   onCollapse: () => void;
 }
 
@@ -50,9 +51,10 @@ export const TerminalHostTreeToolbar: React.FC<TerminalHostTreeToolbarProps> = (
   canNewGroup = true,
   onCreateLocalTerminal,
   canCreateLocalTerminal = true,
+  compactActions = false,
   onExpandAll,
   onCollapseAll,
-  canExpandCollapse = true,
+  showExpandCollapseControls = true,
   onCollapse,
 }) => {
   const { t } = useI18n();
@@ -117,69 +119,75 @@ export const TerminalHostTreeToolbar: React.FC<TerminalHostTreeToolbarProps> = (
           <TooltipContent side="bottom">{t('terminal.layer.hostTree.tagsButton')}</TooltipContent>
         </Tooltip>
 
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              className={iconButtonClass}
-              style={{ color: theme.mutedFg }}
-              disabled={!canNewGroup}
-              onClick={onNewRootGroup}
-            >
-              <FolderPlus size={14} />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">{t('terminal.layer.hostTree.newGroup')}</TooltipContent>
-        </Tooltip>
+        {!compactActions && (
+          <>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className={iconButtonClass}
+                  style={{ color: theme.mutedFg }}
+                  disabled={!canNewGroup}
+                  onClick={onNewRootGroup}
+                >
+                  <FolderPlus size={14} />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">{t('terminal.layer.hostTree.newGroup')}</TooltipContent>
+            </Tooltip>
 
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              className={iconButtonClass}
-              style={{ color: theme.mutedFg }}
-              disabled={!canCreateLocalTerminal}
-              onClick={onCreateLocalTerminal}
-            >
-              <TerminalSquare size={14} />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">{t('terminal.layer.hostTree.localShell')}</TooltipContent>
-        </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className={iconButtonClass}
+                  style={{ color: theme.mutedFg }}
+                  disabled={!canCreateLocalTerminal}
+                  onClick={onCreateLocalTerminal}
+                >
+                  <TerminalSquare size={14} />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">{t('terminal.layer.hostTree.localShell')}</TooltipContent>
+            </Tooltip>
+          </>
+        )}
 
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              className={iconButtonClass}
-              style={{ color: theme.mutedFg }}
-              disabled={!canExpandCollapse}
-              onClick={onExpandAll}
-            >
-              <Expand size={14} />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">{t('vault.tree.expandAll')}</TooltipContent>
-        </Tooltip>
+        {showExpandCollapseControls && (
+          <>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className={iconButtonClass}
+                  style={{ color: theme.mutedFg }}
+                  onClick={onExpandAll}
+                >
+                  <Expand size={14} />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">{t('vault.tree.expandAll')}</TooltipContent>
+            </Tooltip>
 
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              className={iconButtonClass}
-              style={{ color: theme.mutedFg }}
-              disabled={!canExpandCollapse}
-              onClick={onCollapseAll}
-            >
-              <Minimize2 size={14} />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">{t('vault.tree.collapseAll')}</TooltipContent>
-        </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className={iconButtonClass}
+                  style={{ color: theme.mutedFg }}
+                  onClick={onCollapseAll}
+                >
+                  <Minimize2 size={14} />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">{t('vault.tree.collapseAll')}</TooltipContent>
+            </Tooltip>
+          </>
+        )}
 
         <div className="flex-1 min-w-0" />
 
@@ -188,7 +196,7 @@ export const TerminalHostTreeToolbar: React.FC<TerminalHostTreeToolbarProps> = (
             <Button
               variant="ghost"
               size="icon"
-              className={iconButtonClass}
+              className={cn(iconButtonClass, 'mr-1')}
               style={{ color: theme.mutedFg }}
               onClick={onCollapse}
             >

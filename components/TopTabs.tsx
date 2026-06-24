@@ -9,6 +9,7 @@ import { resolveSessionTabTitle } from '../domain/sessionTabTitle';
 import { useSessionActivityMap } from '../application/state/sessionActivityStore';
 import { getTopTabInsertionTarget, getWorkspaceSessionDragId, hasWorkspaceSessionDrag } from '../application/state/terminalDragData';
 import {
+  TERMINAL_HOST_TREE_MIN_WIDTH,
   useTerminalHostTreeLayoutWidth,
   useTerminalHostTreeOpen,
   useToggleTerminalHostTree,
@@ -48,6 +49,15 @@ const emptyTabStyle: React.CSSProperties = {};
 
 export function computeHostTreeTabGutter(hostTreeLayoutWidth: number, toggleRight: number): number {
   return Math.max(0, hostTreeLayoutWidth - toggleRight);
+}
+
+export function shouldHideRootTabsForNarrowHostTree(
+  isHostTreeOpen: boolean,
+  hostTreeLayoutWidth: number,
+): boolean {
+  return isHostTreeOpen
+    && hostTreeLayoutWidth > 0
+    && hostTreeLayoutWidth <= TERMINAL_HOST_TREE_MIN_WIDTH + 24;
 }
 
 export function shouldShowHostTreeToggle({
@@ -191,6 +201,10 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
   const isHostTreeOpen = useTerminalHostTreeOpen();
   const hostTreeLayoutWidth = useTerminalHostTreeLayoutWidth();
   const toggleHostTree = useToggleTerminalHostTree();
+  const hideRootTabsForNarrowHostTree = shouldHideRootTabsForNarrowHostTree(
+    isHostTreeOpen,
+    hostTreeLayoutWidth,
+  );
   const activeTabId = useActiveTabId();
   const { getTabAnimationClass } = useTopTabLifecycleAnimations(orderedTabs);
   const fixedLeftTabsRef = useRef<HTMLDivElement>(null);
@@ -876,7 +890,13 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
         }}
       >
         {/* Fixed left tabs: Vaults and SFTP */}
-        <div ref={fixedLeftTabsRef} className="flex items-end gap-0 flex-shrink-0 app-drag">
+        <div
+          ref={fixedLeftTabsRef}
+          className={cn(
+            'flex items-end gap-0 flex-shrink-0 app-drag overflow-hidden transition-[width,opacity] duration-200 ease-out',
+            hideRootTabsForNarrowHostTree && 'w-0 opacity-0 pointer-events-none',
+          )}
+        >
           <RootTopTab
             tabId="vault"
             label="Vaults"

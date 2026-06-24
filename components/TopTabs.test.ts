@@ -19,6 +19,7 @@ Object.defineProperty(globalThis, "requestAnimationFrame", {
 const {
   computeHostTreeTabGutter,
   resolveWorkspaceSessionTabDropTarget,
+  shouldHideRootTabsForNarrowHostTree,
   shouldKeepHostTreeToggleSurface,
   shouldShowHostTreeToggle,
 } = await import("./TopTabs.tsx");
@@ -42,6 +43,14 @@ test("host tree tab gutter fills the remaining sidebar width", () => {
 
 test("host tree tab gutter never goes negative", () => {
   assert.equal(computeHostTreeTabGutter(120, 280), 0);
+});
+
+test("root tabs hide only when an open host tree is at the narrow edge", () => {
+  assert.equal(shouldHideRootTabsForNarrowHostTree(true, 132), true);
+  assert.equal(shouldHideRootTabsForNarrowHostTree(true, 156), true);
+  assert.equal(shouldHideRootTabsForNarrowHostTree(true, 184), false);
+  assert.equal(shouldHideRootTabsForNarrowHostTree(true, 220), false);
+  assert.equal(shouldHideRootTabsForNarrowHostTree(false, 132), false);
 });
 
 test("host tree tab surface stays mounted when root pages are active", () => {
