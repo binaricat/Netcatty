@@ -283,7 +283,10 @@ test("detectVendorFromSshVersion recognizes H3C and Comware banners", () => {
   assert.equal(detectVendorFromSshVersion("H3C-Comware-7.1.064"), "h3c");
   assert.equal(detectVendorFromSshVersion("SSH-2.0-Comware-7.1.064"), "h3c");
   assert.equal(detectVendorFromSshVersion("SSH-2.0-3Com OS"), "h3c");
-  assert.equal(detectVendorFromSshVersion("SSH-2.0-mpSSH_0.2.1"), "h3c");
+});
+
+test("detectVendorFromSshVersion maps mpSSH banners to HPE iLO", () => {
+  assert.equal(detectVendorFromSshVersion("SSH-2.0-mpSSH_0.2.1"), "hpe");
 });
 
 test("normalizeDistroId maps Alibaba Cloud Linux os-release ID to alinux", () => {

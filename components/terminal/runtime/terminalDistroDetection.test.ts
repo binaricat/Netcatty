@@ -15,7 +15,7 @@ test("runDistroDetection uses SSH banner but skips POSIX probes for manually mar
   await runDistroDetection({
     host: {
       id: "host-1",
-      label: "Ruijie AP",
+      label: "HPE iLO",
       hostname: "192.168.2.2",
       username: "root",
       deviceType: "network",
@@ -37,5 +37,5 @@ test("runDistroDetection uses SSH banner but skips POSIX probes for manually mar
 
   assert.equal(remoteInfoCalls, 1);
   assert.equal(distroProbeCalls, 0);
-  assert.deepEqual(detected, ["h3c"]);
+  assert.deepEqual(detected, ["hpe"]);
 });

@@ -147,7 +147,9 @@ export const detectVendorFromSshVersion = (softwareVersion?: string): '' | Netwo
   if (/^H3C[-_\s]/i.test(s)) return 'h3c';
   if (/^Comware-/i.test(s)) return 'h3c';
   if (/^3Com\s*OS/i.test(s)) return 'h3c';
-  if (/^mpSSH_/i.test(s)) return 'h3c';
+
+  // HPE iLO
+  if (/^mpSSH_/i.test(s)) return 'hpe';
 
   // MikroTik RouterOS
   if (/^ROSSSH\b/.test(s)) return 'mikrotik';
