@@ -656,7 +656,7 @@ function createStartSessionApi(ctx) {
           if (connectOpts.password) order.push("password");
           // Add default key fallback if available and no user key configured
           // Must also set connectOpts.privateKey for ssh2 to actually try publickey auth
-          if (defaultKeyInfo && !options.privateKey) {
+          if (defaultKeyInfo && !hasUserConfiguredKey(options)) {
             connectOpts.privateKey = defaultKeyInfo.privateKey;
             order.push("publickey");
           }
@@ -693,7 +693,7 @@ function createStartSessionApi(ctx) {
                 id: `publickey-default-${keyInfo.keyName}`
               });
             }
-          } else if (defaultKeyInfo && !options.privateKey && !usedDefaultKeyAsPrimary) {
+          } else if (defaultKeyInfo && !hasUserConfiguredKey(options) && !usedDefaultKeyAsPrimary) {
             // Single default key fallback (when user has configured other auth methods)
             authMethods.push({ type: "publickey", key: defaultKeyInfo.privateKey, isDefault: true, id: "publickey-default" });
           }
