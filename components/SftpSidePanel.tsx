@@ -44,6 +44,7 @@ import {
   mergeLatestFollowTerminalCwdHostSetting,
   resolveHostFollowTerminalCwd,
   shouldFollowTerminalCwdNavigate,
+  type SftpFollowTerminalCwdBlock,
 } from "./sftp/sftpFollowTerminalCwd";
 
 interface SftpSidePanelProps {
@@ -694,15 +695,19 @@ const SftpSidePanelInteractiveBody: React.FC<SftpSidePanelInteractiveBodyProps> 
   const hasActiveWork = showTextEditor || !!permissionsState || showFileOpenerDialog
     || (sftp.activeFileWatchCountRef?.current ?? 0) > 0;
 
-  const blockedFollowTerminalCwdRef = useRef<string | null>(null);
+  const blockedFollowRef = useRef<SftpFollowTerminalCwdBlock | null>(null);
 
   useEffect(() => {
-    blockedFollowTerminalCwdRef.current = null;
-  }, [activeTerminalCwd]);
+    blockedFollowRef.current = null;
+  }, [
+    activeTerminalCwd,
+    followTerminalCwdHost?.id,
+    sftp.leftPane.connection?.id,
+  ]);
 
   useEffect(() => {
     if (effectiveFollowTerminalCwd) return;
-    blockedFollowTerminalCwdRef.current = null;
+    blockedFollowRef.current = null;
   }, [effectiveFollowTerminalCwd]);
 
   const handleGoToTerminalCwd = useCallback(async () => {
@@ -730,27 +735,22 @@ const SftpSidePanelInteractiveBody: React.FC<SftpSidePanelInteractiveBodyProps> 
       isVisible,
       terminalCwd,
       currentPath: connection?.currentPath,
+      connectionId: connection?.id,
       hasActiveWork,
       isConnected: Boolean(connection && !connection.isLocal && connection.status === "connected"),
-      blockedTerminalCwd: blockedFollowTerminalCwdRef.current,
+      blockedFollow: blockedFollowRef.current,
     })) {
       return;
     }
 
-    await sftpRef.current.navigateTo("left", terminalCwd);
-
-    const updatedConnection = sftpRef.current.leftPane.connection;
-    if (updatedConnection?.currentPath === terminalCwd) {
-      blockedFollowTerminalCwdRef.current = null;
+    const navigated = await sftpRef.current.navigateTo("left", terminalCwd);
+    if (navigated) {
+      blockedFollowRef.current = null;
       return;
     }
 
-    if (
-      updatedConnection
-      && !updatedConnection.isLocal
-      && updatedConnection.status === "connected"
-    ) {
-      blockedFollowTerminalCwdRef.current = terminalCwd;
+    if (connection?.id) {
+      blockedFollowRef.current = { connectionId: connection.id, terminalCwd };
     }
   }, [
     activeTerminalCwd,
@@ -765,7 +765,7 @@ const SftpSidePanelInteractiveBody: React.FC<SftpSidePanelInteractiveBodyProps> 
   const handleToggleFollowTerminalCwd = useCallback(() => {
     const nextEnabled = !effectiveFollowTerminalCwd;
     if (!nextEnabled) {
-      blockedFollowTerminalCwdRef.current = null;
+      blockedFollowRef.current = null;
     }
     if (
       connectedHostObjRef.current

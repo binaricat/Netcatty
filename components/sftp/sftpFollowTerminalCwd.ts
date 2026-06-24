@@ -1,12 +1,18 @@
+export type SftpFollowTerminalCwdBlock = {
+  connectionId: string;
+  terminalCwd: string;
+};
+
 export type SftpFollowTerminalCwdContext = {
   followEnabled: boolean;
   isVisible: boolean;
   terminalCwd?: string | null;
   currentPath?: string | null;
+  connectionId?: string | null;
   hasActiveWork: boolean;
   isConnected: boolean;
   /** Skip auto-follow while this terminal cwd cannot be reached on SFTP. */
-  blockedTerminalCwd?: string | null;
+  blockedFollow?: SftpFollowTerminalCwdBlock | null;
 };
 
 export const resolveHostFollowTerminalCwd = (
@@ -44,14 +50,22 @@ export const shouldFollowTerminalCwdNavigate = ({
   isVisible,
   terminalCwd,
   currentPath,
+  connectionId,
   hasActiveWork,
   isConnected,
-  blockedTerminalCwd,
+  blockedFollow,
 }: SftpFollowTerminalCwdContext): boolean => {
   if (!followEnabled || !isVisible || !isConnected) return false;
   if (hasActiveWork) return false;
   if (!terminalCwd || terminalCwd.trim().length === 0) return false;
-  if (blockedTerminalCwd && blockedTerminalCwd === terminalCwd) return false;
+  if (
+    blockedFollow
+    && connectionId
+    && blockedFollow.connectionId === connectionId
+    && blockedFollow.terminalCwd === terminalCwd
+  ) {
+    return false;
+  }
   if (!currentPath || currentPath === terminalCwd) return false;
   return true;
 };

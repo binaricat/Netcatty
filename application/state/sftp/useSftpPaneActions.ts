@@ -44,7 +44,7 @@ interface UseSftpPaneActionsParams {
 }
 
 interface UseSftpPaneActionsResult {
-  navigateTo: (side: "left" | "right", path: string, options?: { force?: boolean; tabId?: string }) => Promise<void>;
+  navigateTo: (side: "left" | "right", path: string, options?: { force?: boolean; tabId?: string }) => Promise<boolean>;
   refresh: (side: "left" | "right", options?: { tabId?: string }) => Promise<void>;
   navigateUp: (side: "left" | "right") => Promise<void>;
   openEntry: (side: "left" | "right", entry: SftpFileEntry) => Promise<void>;
@@ -171,7 +171,7 @@ export const useSftpPaneActions = ({
         : getActivePane(side);
 
       if (!pane?.connection || !targetTabId) {
-        return;
+        return false;
       }
 
       const connectionId = pane.connection.id;
@@ -220,7 +220,7 @@ export const useSftpPaneActions = ({
             filenameEncoding: pane.filenameEncoding,
           });
         }
-        return;
+        return true;
       }
 
       // Re-seed confirmed state whenever the pane is settled (not loading), or
@@ -277,7 +277,7 @@ export const useSftpPaneActions = ({
             } else {
               handleSessionError(side, new Error("SFTP session lost"));
             }
-            return;
+            return false;
           }
 
           try {
@@ -295,7 +295,7 @@ export const useSftpPaneActions = ({
               } else {
                 handleSessionError(side, err as Error);
               }
-              return;
+              return false;
             }
             throw err as Error;
           }
@@ -306,7 +306,7 @@ export const useSftpPaneActions = ({
           // a connect/disconnect. Check if THIS tab's request is still current.
           if (tabNavSeqRef.current.get(targetTabId) !== requestId) {
             // This tab also has a newer navigation — drop completely.
-            return;
+            return true;
           }
           // Side was superseded by another tab, but this tab's request is
           // still current. The fetched files are valid — fall through to
@@ -344,10 +344,11 @@ export const useSftpPaneActions = ({
             filenameEncoding: pane.filenameEncoding,
           });
         }
+        return true;
       } catch (err) {
         if (navSeqRef.current[side] !== requestId) {
           if (tabNavSeqRef.current.get(targetTabId) !== requestId) {
-            return;
+            return true;
           }
           // Side superseded by another tab, but this tab's request is
           // current — fall through to show the error on this tab.
@@ -367,6 +368,7 @@ export const useSftpPaneActions = ({
             loading: false,
           };
         });
+        return false;
       }
     },
     [

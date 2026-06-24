@@ -12,6 +12,7 @@ const base = {
   isVisible: true,
   terminalCwd: "/home/user/project",
   currentPath: "/home/user",
+  connectionId: "conn-1",
   hasActiveWork: false,
   isConnected: true,
 };
@@ -43,9 +44,20 @@ test("shouldFollowTerminalCwdNavigate returns false when cwd is blocked after a 
   assert.equal(
     shouldFollowTerminalCwdNavigate({
       ...base,
-      blockedTerminalCwd: "/home/user/project",
+      blockedFollow: { connectionId: "conn-1", terminalCwd: "/home/user/project" },
     }),
     false,
+  );
+});
+
+test("shouldFollowTerminalCwdNavigate ignores blocked cwd for a different connection", () => {
+  assert.equal(
+    shouldFollowTerminalCwdNavigate({
+      ...base,
+      connectionId: "conn-2",
+      blockedFollow: { connectionId: "conn-1", terminalCwd: "/home/user/project" },
+    }),
+    true,
   );
 });
 
@@ -54,7 +66,7 @@ test("shouldFollowTerminalCwdNavigate ignores blocked cwd when terminal cwd chan
     shouldFollowTerminalCwdNavigate({
       ...base,
       terminalCwd: "/home/user/other",
-      blockedTerminalCwd: "/home/user/project",
+      blockedFollow: { connectionId: "conn-1", terminalCwd: "/home/user/project" },
     }),
     true,
   );
