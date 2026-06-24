@@ -780,19 +780,12 @@ async function handleMessage(socket, line) {
 
 // ── RPC Dispatch ──
 
-// Methods that modify remote state — blocked in observer mode
-const WRITE_METHODS = new Set([
-  "netcatty/exec",
-  "netcatty/sftp/write",
-  "netcatty/sftp/download",
-  "netcatty/sftp/upload",
-  "netcatty/sftp/mkdir",
-  "netcatty/sftp/delete",
-  "netcatty/sftp/rename",
-  "netcatty/sftp/chmod",
-  "netcatty/jobStart",
-  "netcatty/jobStop",
-]);
+const {
+  evaluateRpcPermission,
+  USER_DENIED_MESSAGE,
+} = require("../capabilities/policy.cjs");
+const { CAPABILITY_SURFACES } = require("../capabilities/constants.cjs");
+const { getCapabilityByRpcMethod } = require("../capabilities/registry.cjs");
 
 /**
  * Validate that a sessionId is allowed in the current scope.
@@ -822,29 +815,23 @@ function validateSessionScope(sessionId, chatSessionId, explicitScopedIds = null
 
 async function dispatch(method, params) {
   debugLog("dispatch", { method, params, permissionMode });
-  const sessionWriteLockId = (method === "netcatty/exec" || method === "netcatty/jobStart") ? params?.sessionId : null;
+  const capability = getCapabilityByRpcMethod(method, CAPABILITY_SURFACES.BUILTIN);
+  const sessionWriteLockId = (capability?.id === "terminal.execute" || capability?.id === "terminal.start")
+    ? params?.sessionId
+    : null;
   pruneCompletedBackgroundJobs();
 
-  // Observer mode: block all write operations *except* netcatty/jobStop,
-  // which must remain available so users can interrupt long-running jobs
-  // they started before switching to observer mode (otherwise the job
-  // would hold the per-session lock until it exits on its own).
-  if (permissionMode === "observer" && WRITE_METHODS.has(method) && method !== "netcatty/jobStop") {
-    return { ok: false, error: `Operation denied: permission mode is "observer" (read-only). Change to "confirm" or "autonomous" in Settings → AI → Safety to allow this action.` };
-  }
-
-  if (WRITE_METHODS.has(method) && !params?.chatSessionId) {
-    return {
-      ok: false,
-      error: "chatSessionId is required for write operations.",
-    };
-  }
-
-  // netcatty/jobStop must remain callable after SDK agent cancel so users can stop
-  // a long-running terminal_start job (which intentionally survives SDK Stop)
-  // even from a chat session whose write methods are otherwise blocked.
-  if (WRITE_METHODS.has(method) && method !== "netcatty/jobStop" && isChatSessionCancelled(params?.chatSessionId)) {
-    return { ok: false, error: "Operation cancelled: the SDK agent session was stopped." };
+  const permission = evaluateRpcPermission({
+    rpcMethod: method,
+    surface: CAPABILITY_SURFACES.BUILTIN,
+    permissionMode,
+    params,
+    context: {
+      chatSessionCancelled: isChatSessionCancelled(params?.chatSessionId),
+    },
+  });
+  if (!permission.allowed) {
+    return { ok: false, error: permission.error };
   }
 
   // Validate session scope *first* so out-of-scope callers cannot infer the
@@ -855,7 +842,7 @@ async function dispatch(method, params) {
     if (scopeErr) return { ok: false, error: scopeErr };
   }
 
-  if ((method === "netcatty/exec" || method === "netcatty/jobStart") && params?.sessionId) {
+  if ((capability?.id === "terminal.execute" || capability?.id === "terminal.start") && params?.sessionId) {
     const busy = getSessionBusyError(params.sessionId);
     if (busy) return busy;
   }
@@ -876,11 +863,11 @@ async function dispatch(method, params) {
     // netcatty/jobStop bypasses approval — it's a stop/cancel action that
     // must remain available even if the renderer is unavailable; otherwise
     // a runaway terminal_start job could not be interrupted at all.
-    if (permissionMode === "confirm" && WRITE_METHODS.has(method) && method !== "netcatty/jobStop") {
+    if (permission.requiresApproval) {
       const { chatSessionId, ...toolArgs } = params || {};
       const approved = await requestApprovalFromRenderer(method, toolArgs, chatSessionId);
       if (!approved) {
-        return { ok: false, error: "Operation denied by user." };
+        return { ok: false, error: USER_DENIED_MESSAGE };
       }
     }
     switch (method) {

@@ -4,6 +4,8 @@
 const path = require("node:path");
 
 const { connectClient, createError } = require("./netcattyRpcClient.cjs");
+const { listCliCapabilities } = require("../capabilities/adapters/cliAdapter.cjs");
+const { CAPABILITY_STATUS } = require("../capabilities/constants.cjs");
 
 function printHelp() {
   process.stdout.write(
@@ -29,6 +31,7 @@ function printHelp() {
     "  netcatty-tool-cli sftp home --session <id> --chat-session <id> [--json] [--scope-session <session-id> ...]\n" +
     "  netcatty-tool-cli cancel --chat-session <id> [--json]\n" +
     "  netcatty-tool-cli resume --chat-session <id> [--json]\n" +
+    "  netcatty-tool-cli capabilities [--json] [--status implemented|planned|all]\n" +
     "  netcatty-tool-cli help\n\n" +
     "Examples:\n" +
     "  netcatty-tool-cli status --json\n" +
@@ -347,6 +350,26 @@ async function run() {
 
   if (!command || command === "help" || command === "--help" || command === "-h") {
     printHelp();
+    process.exit(0);
+  }
+
+  if (command === "capabilities") {
+    const hasStatusFlag = process.argv.includes("--status");
+    const statusArg = hasStatusFlag
+      ? process.argv[process.argv.indexOf("--status") + 1]
+      : CAPABILITY_STATUS.IMPLEMENTED;
+    const status = statusArg === "all" ? null : statusArg;
+    const payload = {
+      ok: true,
+      capabilities: listCliCapabilities(
+        hasStatusFlag && statusArg === "all"
+          ? { status: null }
+          : { status },
+      ),
+    };
+    process.stdout.write(opts.json
+      ? `${JSON.stringify(payload, null, 2)}\n`
+      : `${payload.capabilities.map((entry) => entry.command.join(" ")).join("\n")}\n`);
     process.exit(0);
   }
 
