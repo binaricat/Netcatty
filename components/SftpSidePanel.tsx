@@ -694,6 +694,17 @@ const SftpSidePanelInteractiveBody: React.FC<SftpSidePanelInteractiveBodyProps> 
   const hasActiveWork = showTextEditor || !!permissionsState || showFileOpenerDialog
     || (sftp.activeFileWatchCountRef?.current ?? 0) > 0;
 
+  const blockedFollowTerminalCwdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    blockedFollowTerminalCwdRef.current = null;
+  }, [activeTerminalCwd]);
+
+  useEffect(() => {
+    if (effectiveFollowTerminalCwd) return;
+    blockedFollowTerminalCwdRef.current = null;
+  }, [effectiveFollowTerminalCwd]);
+
   const handleGoToTerminalCwd = useCallback(async () => {
     if (!onGetTerminalCwd) return;
     const cwd = await onGetTerminalCwd({ preferFreshBackend: true });
@@ -721,11 +732,26 @@ const SftpSidePanelInteractiveBody: React.FC<SftpSidePanelInteractiveBodyProps> 
       currentPath: connection?.currentPath,
       hasActiveWork,
       isConnected: Boolean(connection && !connection.isLocal && connection.status === "connected"),
+      blockedTerminalCwd: blockedFollowTerminalCwdRef.current,
     })) {
       return;
     }
 
     await sftpRef.current.navigateTo("left", terminalCwd);
+
+    const updatedConnection = sftpRef.current.leftPane.connection;
+    if (updatedConnection?.currentPath === terminalCwd) {
+      blockedFollowTerminalCwdRef.current = null;
+      return;
+    }
+
+    if (
+      updatedConnection
+      && !updatedConnection.isLocal
+      && updatedConnection.status === "connected"
+    ) {
+      blockedFollowTerminalCwdRef.current = terminalCwd;
+    }
   }, [
     activeTerminalCwd,
     canFollowTerminalCwd,
@@ -737,8 +763,21 @@ const SftpSidePanelInteractiveBody: React.FC<SftpSidePanelInteractiveBodyProps> 
   ]);
 
   const handleToggleFollowTerminalCwd = useCallback(() => {
-    onSftpFollowTerminalCwdChange?.(!effectiveFollowTerminalCwd, followTerminalCwdHost);
-  }, [effectiveFollowTerminalCwd, followTerminalCwdHost, onSftpFollowTerminalCwdChange]);
+    const nextEnabled = !effectiveFollowTerminalCwd;
+    if (!nextEnabled) {
+      blockedFollowTerminalCwdRef.current = null;
+    }
+    if (
+      connectedHostObjRef.current
+      && followTerminalCwdHost?.id === connectedHostObjRef.current.id
+    ) {
+      connectedHostObjRef.current = {
+        ...connectedHostObjRef.current,
+        sftpFollowTerminalCwd: nextEnabled,
+      };
+    }
+    onSftpFollowTerminalCwdChange?.(nextEnabled, followTerminalCwdHost);
+  }, [effectiveFollowTerminalCwd, followTerminalCwdHost, connectedHostObjRef, onSftpFollowTerminalCwdChange]);
 
   useEffect(() => {
     if (!effectiveFollowTerminalCwd || !canFollowTerminalCwd || !isVisible || hasActiveWork) return;

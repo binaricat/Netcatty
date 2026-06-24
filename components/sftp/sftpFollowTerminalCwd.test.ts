@@ -39,6 +39,27 @@ test("shouldFollowTerminalCwdNavigate returns false without a known terminal cwd
   assert.equal(shouldFollowTerminalCwdNavigate({ ...base, terminalCwd: null }), false);
 });
 
+test("shouldFollowTerminalCwdNavigate returns false when cwd is blocked after a failed follow", () => {
+  assert.equal(
+    shouldFollowTerminalCwdNavigate({
+      ...base,
+      blockedTerminalCwd: "/home/user/project",
+    }),
+    false,
+  );
+});
+
+test("shouldFollowTerminalCwdNavigate ignores blocked cwd when terminal cwd changed", () => {
+  assert.equal(
+    shouldFollowTerminalCwdNavigate({
+      ...base,
+      terminalCwd: "/home/user/other",
+      blockedTerminalCwd: "/home/user/project",
+    }),
+    true,
+  );
+});
+
 test("resolveHostFollowTerminalCwd inherits the global setting until the host overrides it", () => {
   assert.equal(resolveHostFollowTerminalCwd(undefined, true), true);
   assert.equal(resolveHostFollowTerminalCwd(undefined, false), false);
@@ -86,6 +107,27 @@ test("mergeLatestFollowTerminalCwdHostSetting refreshes the follow flag without 
       id: "host-1",
       hostname: "session.example.com",
       sftpFollowTerminalCwd: true,
+    },
+  );
+});
+
+test("mergeLatestFollowTerminalCwdHostSetting keeps optimistic session override until vault updates", () => {
+  const connectedHost = {
+    id: "host-1",
+    hostname: "session.example.com",
+    sftpFollowTerminalCwd: false,
+  };
+  const latestHost = {
+    id: "host-1",
+    hostname: "vault.example.com",
+  };
+
+  assert.deepEqual(
+    mergeLatestFollowTerminalCwdHostSetting(connectedHost, latestHost),
+    {
+      id: "host-1",
+      hostname: "session.example.com",
+      sftpFollowTerminalCwd: false,
     },
   );
 });

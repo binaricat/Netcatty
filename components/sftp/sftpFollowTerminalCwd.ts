@@ -5,6 +5,8 @@ export type SftpFollowTerminalCwdContext = {
   currentPath?: string | null;
   hasActiveWork: boolean;
   isConnected: boolean;
+  /** Skip auto-follow while this terminal cwd cannot be reached on SFTP. */
+  blockedTerminalCwd?: string | null;
 };
 
 export const resolveHostFollowTerminalCwd = (
@@ -29,7 +31,10 @@ export const mergeLatestFollowTerminalCwdHostSetting = <
   return {
     ...latestHost,
     ...displayHost,
-    sftpFollowTerminalCwd: latestHost.sftpFollowTerminalCwd,
+    sftpFollowTerminalCwd:
+      latestHost.sftpFollowTerminalCwd !== undefined
+        ? latestHost.sftpFollowTerminalCwd
+        : displayHost.sftpFollowTerminalCwd,
   };
 };
 
@@ -41,10 +46,12 @@ export const shouldFollowTerminalCwdNavigate = ({
   currentPath,
   hasActiveWork,
   isConnected,
+  blockedTerminalCwd,
 }: SftpFollowTerminalCwdContext): boolean => {
   if (!followEnabled || !isVisible || !isConnected) return false;
   if (hasActiveWork) return false;
   if (!terminalCwd || terminalCwd.trim().length === 0) return false;
+  if (blockedTerminalCwd && blockedTerminalCwd === terminalCwd) return false;
   if (!currentPath || currentPath === terminalCwd) return false;
   return true;
 };
