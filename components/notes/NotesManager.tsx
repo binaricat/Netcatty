@@ -949,9 +949,7 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
             editingInitialName={note.title}
             onRenameCommit={(name) => {
               setEditingNoteId(null);
-              const title = name.trim();
-              if (!title) return;
-              saveNote({ ...note, title, updatedAt: Date.now() });
+              saveNote({ ...note, title: name.trim(), updatedAt: Date.now() });
             }}
             onRenameCancel={() => setEditingNoteId(null)}
             icon={<FileText size={16} className="mr-2 shrink-0 text-muted-foreground" />}

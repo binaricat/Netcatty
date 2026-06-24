@@ -228,6 +228,20 @@ test("NotesManager exposes markdown import controls", () => {
   assert.match(source, /multiple/);
 });
 
+test("NotesManager shows placeholder label for notes without titles", () => {
+  const markup = renderNotes([note({ title: "" })]);
+
+  assert.match(markup, /Note title/);
+});
+
+test("NotesManager tree rename allows clearing note titles", () => {
+  const source = readFileSync(new URL("./NotesManager.tsx", import.meta.url), "utf8");
+  const renameBlock = source.match(/onRenameCommit=\{\(name\) => \{[\s\S]*?\}\}/)?.[0] ?? "";
+
+  assert.match(renameBlock, /saveNote\(\{ \.\.\.note, title: name\.trim\(\)/);
+  assert.doesNotMatch(renameBlock, /if \(!title\) return/);
+});
+
 test("NotesManager sidebar mode renders list without editor by default", () => {
   const markup = renderNotes([note()], "sidebar");
 
