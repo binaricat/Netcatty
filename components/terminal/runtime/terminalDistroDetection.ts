@@ -44,12 +44,9 @@ export const runDistroDetection = async (
   const isStillCurrent = () => isConnectionTokenCurrent(sessionId, connectionToken);
 
   if (!isStillCurrent()) return;
-  if (
+  const isKnownNetworkDevice =
     ctx.host.deviceType === "network" ||
-    classifyDistroId(ctx.host.distro) === "network-device"
-  ) {
-    return;
-  }
+    classifyDistroId(ctx.host.distro) === "network-device";
 
   // Step 1: try to classify from the SSH server identification string
   // captured at handshake time. This is free (no extra channel) and
@@ -73,6 +70,7 @@ export const runDistroDetection = async (
   }
 
   if (!isStillCurrent()) return;
+  if (isKnownNetworkDevice) return;
 
   // Step 2: unknown or generic OpenSSH/Dropbear — fall back to the
   // /etc/os-release probe to pick a distro-specific icon. We deliberately
