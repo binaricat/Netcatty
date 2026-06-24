@@ -31,6 +31,7 @@ export const DISTRO_LOGOS: Record<string, string> = {
   cisco: "/distro/cisco.svg",
   juniper: "/distro/juniper.svg",
   huawei: "/distro/huawei.svg",
+  h3c: "/distro/h3c.svg",
   hpe: "/distro/hpe.svg",
   mikrotik: "/distro/mikrotik.svg",
   fortinet: "/distro/fortinet.svg",
@@ -62,6 +63,7 @@ export const DISTRO_COLORS: Record<string, string> = {
   cisco: "bg-[#1BA0D7]",
   juniper: "bg-[#0A6EB4]",
   huawei: "bg-[#CF0A2C]",
+  h3c: "bg-white",
   hpe: "bg-[#01A982]",
   mikrotik: "bg-[#293239]",
   fortinet: "bg-[#EE3124]",
@@ -158,7 +160,7 @@ const DistroAvatarInner: React.FC<DistroAvatarProps> = ({
         <img
           src={logo}
           alt={distro || host.os}
-          className={cn("object-contain invert brightness-0", iconSize)}
+          className={distro === "h3c" ? "object-contain w-[80%]" : cn("object-contain invert brightness-0", iconSize)}
           onError={() => setErrored(true)}
         />
       </div>

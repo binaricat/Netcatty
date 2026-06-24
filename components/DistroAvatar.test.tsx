@@ -60,3 +60,16 @@ test("DistroAvatar keeps distro icon and applies custom palette color when icon 
   assert.match(markup, /src="\/distro\/ubuntu.svg"/);
   assert.doesNotMatch(markup, /bg-\[#E95420\]/);
 });
+
+test("DistroAvatar renders H3C logo without monochrome inversion", () => {
+  const markup = renderToStaticMarkup(
+    <DistroAvatar
+      host={{ ...baseHost, distro: "h3c" }}
+      fallback="H"
+    />,
+  );
+
+  assert.match(markup, /src="\/distro\/h3c.svg"/);
+  assert.match(markup, /bg-white/);
+  assert.doesNotMatch(markup, /invert brightness-0/);
+});

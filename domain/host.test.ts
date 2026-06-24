@@ -279,6 +279,12 @@ test("detectVendorFromSshVersion recognizes Ruijie RGOS banner", () => {
   assert.equal(detectVendorFromSshVersion("SSH-2.0-RGOS_SSH"), "ruijie");
 });
 
+test("detectVendorFromSshVersion recognizes H3C and Comware banners", () => {
+  assert.equal(detectVendorFromSshVersion("H3C-Comware-7.1.064"), "h3c");
+  assert.equal(detectVendorFromSshVersion("SSH-2.0-Comware-7.1.064"), "h3c");
+  assert.equal(detectVendorFromSshVersion("SSH-2.0-3Com OS"), "h3c");
+});
+
 test("normalizeDistroId maps Alibaba Cloud Linux os-release ID to alinux", () => {
   // /etc/os-release ID="alinux" — the canonical signal from Alibaba Cloud
   // Linux 3 (issue #1200). Regression guard: 'alinux'.includes('linux') is
