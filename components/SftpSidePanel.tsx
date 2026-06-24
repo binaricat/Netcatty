@@ -572,6 +572,10 @@ const SftpSidePanelInteractiveBody: React.FC<SftpSidePanelInteractiveBodyProps> 
   const panelRootRef = useRef<HTMLDivElement>(null);
   const dialogActionScopeIdRef = useRef(`sftp-side-panel:${crypto.randomUUID()}`);
   const [hasPaneFocus, setHasPaneFocus] = useState(false);
+  const [pendingFollowOverride, setPendingFollowOverride] = useState<{
+    hostId: string;
+    value: boolean;
+  } | null>(null);
 
   useSftpKeyboardShortcuts({
     keyBindings,
@@ -699,15 +703,34 @@ const SftpSidePanelInteractiveBody: React.FC<SftpSidePanelInteractiveBodyProps> 
     const conn = sftp.leftPane.connection;
     if (conn && !conn.isLocal) {
       const latestHost = hosts.find((h) => h.id === conn.hostId) ?? null;
+      const pendingFollowValue = pendingFollowOverride?.hostId === conn.hostId
+        ? pendingFollowOverride.value
+        : undefined;
       // Prefer the stored Host object from connect time — it preserves
       // session-time overrides that the vault host may lack.
       if (connectedHostObjRef.current && connectedHostObjRef.current.id === conn.hostId) {
-        return mergeLatestFollowTerminalCwdHostSetting(connectedHostObjRef.current, latestHost);
+        return mergeLatestFollowTerminalCwdHostSetting(
+          connectedHostObjRef.current,
+          latestHost,
+          pendingFollowValue,
+        );
       }
       return latestHost ?? activeHost;
     }
     return activeHost;
-  }, [activeHost, connectedHostObjRef, hosts, sftp.leftPane.connection]);
+  }, [activeHost, connectedHostObjRef, hosts, pendingFollowOverride, sftp.leftPane.connection]);
+
+  useEffect(() => {
+    if (!pendingFollowOverride) return;
+    const latestHost = hosts.find((host) => host.id === pendingFollowOverride.hostId);
+    if (latestHost?.sftpFollowTerminalCwd === pendingFollowOverride.value) {
+      setPendingFollowOverride(null);
+    }
+  }, [hosts, pendingFollowOverride]);
+
+  useEffect(() => {
+    setPendingFollowOverride(null);
+  }, [sftp.leftPane.connection?.id]);
 
   const followTerminalCwdHost = useMemo(() => {
     if (sftp.leftPane.connection?.isLocal) return null;
@@ -816,17 +839,11 @@ const SftpSidePanelInteractiveBody: React.FC<SftpSidePanelInteractiveBodyProps> 
     if (!nextEnabled) {
       blockedFollowRef.current = null;
     }
-    if (
-      connectedHostObjRef.current
-      && followTerminalCwdHost?.id === connectedHostObjRef.current.id
-    ) {
-      connectedHostObjRef.current = {
-        ...connectedHostObjRef.current,
-        sftpFollowTerminalCwd: nextEnabled,
-      };
+    if (followTerminalCwdHost?.id) {
+      setPendingFollowOverride({ hostId: followTerminalCwdHost.id, value: nextEnabled });
     }
     onSftpFollowTerminalCwdChange?.(nextEnabled, followTerminalCwdHost);
-  }, [effectiveFollowTerminalCwd, followTerminalCwdHost, connectedHostObjRef, onSftpFollowTerminalCwdChange]);
+  }, [effectiveFollowTerminalCwd, followTerminalCwdHost, onSftpFollowTerminalCwdChange]);
 
   useEffect(() => {
     if (!effectiveFollowTerminalCwd || !canFollowTerminalCwd || !isVisible || hasActiveWork) return;

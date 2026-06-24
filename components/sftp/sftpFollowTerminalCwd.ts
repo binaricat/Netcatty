@@ -30,6 +30,7 @@ export const mergeLatestFollowTerminalCwdHostSetting = <
 >(
   displayHost: T | null | undefined,
   latestHost: T | null | undefined,
+  pendingFollowOverride?: boolean,
 ): T | null => {
   if (!displayHost) return latestHost ?? null;
   if (!latestHost || latestHost.id !== displayHost.id) return displayHost;
@@ -40,7 +41,7 @@ export const mergeLatestFollowTerminalCwdHostSetting = <
     sftpFollowTerminalCwd:
       latestHost.sftpFollowTerminalCwd !== undefined
         ? latestHost.sftpFollowTerminalCwd
-        : displayHost.sftpFollowTerminalCwd,
+        : pendingFollowOverride,
   };
 };
 

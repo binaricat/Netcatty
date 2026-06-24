@@ -136,11 +136,32 @@ test("mergeLatestFollowTerminalCwdHostSetting keeps optimistic session override 
   };
 
   assert.deepEqual(
-    mergeLatestFollowTerminalCwdHostSetting(connectedHost, latestHost),
+    mergeLatestFollowTerminalCwdHostSetting(connectedHost, latestHost, false),
     {
       id: "host-1",
       hostname: "session.example.com",
       sftpFollowTerminalCwd: false,
+    },
+  );
+});
+
+test("mergeLatestFollowTerminalCwdHostSetting drops stale session override when vault clears the follow flag", () => {
+  const connectedHost = {
+    id: "host-1",
+    hostname: "session.example.com",
+    sftpFollowTerminalCwd: true,
+  };
+  const latestHost = {
+    id: "host-1",
+    hostname: "vault.example.com",
+  };
+
+  assert.deepEqual(
+    mergeLatestFollowTerminalCwdHostSetting(connectedHost, latestHost),
+    {
+      id: "host-1",
+      hostname: "session.example.com",
+      sftpFollowTerminalCwd: undefined,
     },
   );
 });
