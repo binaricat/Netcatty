@@ -43,8 +43,10 @@ interface UseSftpPaneActionsParams {
   dirCacheTtlMs: number;
 }
 
+export type SftpNavigateResult = "reached" | "failed" | "aborted";
+
 interface UseSftpPaneActionsResult {
-  navigateTo: (side: "left" | "right", path: string, options?: { force?: boolean; tabId?: string }) => Promise<void>;
+  navigateTo: (side: "left" | "right", path: string, options?: { force?: boolean; tabId?: string }) => Promise<SftpNavigateResult>;
   refresh: (side: "left" | "right", options?: { tabId?: string }) => Promise<void>;
   navigateUp: (side: "left" | "right") => Promise<void>;
   openEntry: (side: "left" | "right", entry: SftpFileEntry) => Promise<void>;
@@ -160,7 +162,7 @@ export const useSftpPaneActions = ({
       side: "left" | "right",
       path: string,
       options?: { force?: boolean; tabId?: string },
-    ) => {
+    ): Promise<SftpNavigateResult> => {
       const sideTabs = side === "left" ? leftTabsRef.current : rightTabsRef.current;
       // When tabId is specified, target that specific tab instead of the active one.
       // This allows refreshing a background tab (e.g. after a transfer completes
@@ -171,7 +173,7 @@ export const useSftpPaneActions = ({
         : getActivePane(side);
 
       if (!pane?.connection || !targetTabId) {
-        return;
+        return "aborted";
       }
 
       const connectionId = pane.connection.id;
@@ -220,7 +222,7 @@ export const useSftpPaneActions = ({
             filenameEncoding: pane.filenameEncoding,
           });
         }
-        return;
+        return "reached";
       }
 
       // Re-seed confirmed state whenever the pane is settled (not loading), or
@@ -277,7 +279,7 @@ export const useSftpPaneActions = ({
             } else {
               handleSessionError(side, new Error("SFTP session lost"));
             }
-            return;
+            return "aborted";
           }
 
           try {
@@ -295,7 +297,7 @@ export const useSftpPaneActions = ({
               } else {
                 handleSessionError(side, err as Error);
               }
-              return;
+              return "aborted";
             }
             throw err as Error;
           }
@@ -306,7 +308,7 @@ export const useSftpPaneActions = ({
           // a connect/disconnect. Check if THIS tab's request is still current.
           if (tabNavSeqRef.current.get(targetTabId) !== requestId) {
             // This tab also has a newer navigation — drop completely.
-            return;
+            return "aborted";
           }
           // Side was superseded by another tab, but this tab's request is
           // still current. The fetched files are valid — fall through to
@@ -344,18 +346,21 @@ export const useSftpPaneActions = ({
             filenameEncoding: pane.filenameEncoding,
           });
         }
+        return "reached";
       } catch (err) {
         if (navSeqRef.current[side] !== requestId) {
           if (tabNavSeqRef.current.get(targetTabId) !== requestId) {
-            return;
+            return "aborted";
           }
           // Side superseded by another tab, but this tab's request is
           // current — fall through to show the error on this tab.
         }
+        let navigationFailed = false;
         updateTab(side, targetTabId, (prev) => {
           if (prev.connection?.id !== connectionId) {
             return prev;
           }
+          navigationFailed = true;
           return {
             ...prev,
             connection: { ...prev.connection, currentPath: previousPath },
@@ -367,6 +372,7 @@ export const useSftpPaneActions = ({
             loading: false,
           };
         });
+        return navigationFailed ? "failed" : "aborted";
       }
     },
     [

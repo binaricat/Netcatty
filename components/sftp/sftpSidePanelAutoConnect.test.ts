@@ -83,3 +83,16 @@ test("shouldResetSftpSidePanelSourceSession detects terminal session changes", (
   assert.equal(shouldResetSftpSidePanelSourceSession(null, "sess-a"), false);
   assert.equal(shouldResetSftpSidePanelSourceSession("sess-a", null), false);
 });
+
+test("shouldSkipSftpSidePanelAutoConnect returns false after terminal session changes", () => {
+  const tab = remoteConnectedTab();
+  assert.equal(
+    shouldSkipSftpSidePanelAutoConnect("host-key", "host-key", tab, true),
+    true,
+  );
+  // Caller gates on sessionChanged before invoking skip — stale reuse must not win.
+  assert.equal(
+    shouldResetSftpSidePanelSourceSession("sess-a", "sess-b"),
+    true,
+  );
+});
