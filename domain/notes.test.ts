@@ -11,15 +11,23 @@ import {
   remapExpandedNoteGroupPaths,
   resolveMovedNoteGroupPath,
   resolveRenderedMarkdownLinkHref,
+  sanitizeNoteTitle,
   sanitizeVaultNote,
 } from "./notes";
 
 test("sanitizeVaultNote supplies safe defaults", () => {
   const note = sanitizeVaultNote({ title: "  ", content: 123 as never });
-  assert.equal(note.title, "Untitled note");
+  assert.equal(note.title, "");
   assert.equal(note.content, "");
   assert.equal(typeof note.id, "string");
   assert.equal(typeof note.createdAt, "number");
+});
+
+test("sanitizeNoteTitle preserves non-empty titles and allows empty titles", () => {
+  assert.equal(sanitizeNoteTitle("  My note  "), "My note");
+  assert.equal(sanitizeNoteTitle(""), "");
+  assert.equal(sanitizeNoteTitle("   "), "");
+  assert.equal(sanitizeNoteTitle(undefined), "");
 });
 
 test("normalizeVaultNotes trims group and de-duplicates tags", () => {

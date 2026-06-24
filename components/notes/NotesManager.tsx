@@ -181,7 +181,7 @@ const createNote = (group: string | null, order: number): VaultNote => {
   const now = Date.now();
   return {
     id: crypto.randomUUID(),
-    title: "Untitled note",
+    title: "",
     content: "",
     group: group || undefined,
     createdAt: now,
@@ -934,13 +934,15 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
     );
   };
 
+  const noteDisplayTitle = (title: string) => title || t("notes.title.placeholder");
+
   const renderNoteRow = (note: VaultNote, depth: number) => {
     if (!noteMatches(note)) return null;
     return (
       <ContextMenu key={note.id}>
         <ContextMenuTrigger asChild>
           <VaultTreeItemRow
-            label={note.title}
+            label={noteDisplayTitle(note.title)}
             depth={depth}
             selected={selectedNoteId === note.id}
             editing={editingNoteId === note.id}

@@ -14,10 +14,8 @@ const cleanStringArray = (values: unknown): string[] | undefined => {
   return cleaned.length ? cleaned : undefined;
 };
 
-export const sanitizeNoteTitle = (title: unknown): string => {
-  const value = typeof title === "string" ? title.trim() : "";
-  return value || "Untitled note";
-};
+export const sanitizeNoteTitle = (title: unknown): string =>
+  typeof title === "string" ? title.trim() : "";
 
 export const sanitizeVaultNote = (note: Partial<VaultNote>): VaultNote => {
   const now = Date.now();
