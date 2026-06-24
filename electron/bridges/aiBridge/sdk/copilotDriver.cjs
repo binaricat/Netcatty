@@ -79,12 +79,75 @@ function buildCopilotSessionOptions({ model, injectedMcpServers, toolIntegration
 const LOCAL_SHELL_METACHAR_PATTERN = /(?:[;&|`]|&&|\|\||\$\(|\$\{|<<?|\r?\n)/;
 const LOCAL_SHELL_WRAPPER_PATTERN = /^(?:\/[^\s]+\/)?(?:ba|z|fi)?sh(?:\.exe)?\s+-c\b/i;
 
-/** Split before exec/job-start remote payload (` -- cmd`), not before `--session` flags. */
+/** Find the last exec/job-start payload separator outside shell quotes. */
+function findExecPayloadSeparatorIndex(command) {
+  const text = String(command || "");
+  let inSingle = false;
+  let inDouble = false;
+  let escape = false;
+  let lastIndex = -1;
+
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    if (escape) {
+      escape = false;
+      continue;
+    }
+    if (ch === "\\" && (inSingle || inDouble)) {
+      escape = true;
+      continue;
+    }
+    if (!inDouble && ch === "'") {
+      inSingle = !inSingle;
+      continue;
+    }
+    if (!inSingle && ch === '"') {
+      inDouble = !inDouble;
+      continue;
+    }
+    if (!inSingle && !inDouble && text.startsWith(" -- ", i)) {
+      lastIndex = i;
+      i += 3;
+    }
+  }
+  return lastIndex;
+}
+
+function containsUnquotedShellMetachar(text) {
+  let inSingle = false;
+  let inDouble = false;
+  let escape = false;
+
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    if (escape) {
+      escape = false;
+      continue;
+    }
+    if (ch === "\\" && (inSingle || inDouble)) {
+      escape = true;
+      continue;
+    }
+    if (!inDouble && ch === "'") {
+      inSingle = !inSingle;
+      continue;
+    }
+    if (!inSingle && ch === '"') {
+      inDouble = !inDouble;
+      continue;
+    }
+    if (inSingle || inDouble) continue;
+    if (LOCAL_SHELL_METACHAR_PATTERN.test(text.slice(i))) return true;
+  }
+  return false;
+}
+
+/** Split before the final exec/job-start remote payload (` -- cmd`), not flag values. */
 function getLocalNetcattyCliPrefix(fullCommandText) {
   const command = String(fullCommandText || "").trim();
-  const match = command.match(/\s--\s/);
-  if (match && match.index != null) {
-    return command.slice(0, match.index).trim();
+  const splitAt = findExecPayloadSeparatorIndex(command);
+  if (splitAt >= 0) {
+    return command.slice(0, splitAt).trim();
   }
   return command;
 }
@@ -92,14 +155,14 @@ function getLocalNetcattyCliPrefix(fullCommandText) {
 function isNetcattyCliInvocationPrefix(localPart) {
   const text = String(localPart || "").trim();
   if (!text) return false;
-  return /^(?:(?:[A-Za-z_][\w.-]*=[^\s]+\s+)*)?(?:"[^"]*netcatty-tool-cli(?:\.cjs)?[^"]*"|'[^']*netcatty-tool-cli(?:\.cjs)?[^']*'|(?:\S*\/)?netcatty-tool-cli(?:\.cjs)?(?:\b|\s)|node\s+\S*netcatty-tool-cli(?:\.cjs)?\b)/i.test(text);
+  return /^(?:(?:[A-Za-z_][\w.-]*=[^\s]+\s+)*)?(?:"[^"]*\/netcatty-tool-cli(?:\.cjs)?"|'[^']*\/netcatty-tool-cli(?:\.cjs)?'|netcatty-tool-cli(?:\.cjs)?(?=\s|$)|\S*\/netcatty-tool-cli(?:\.cjs)?(?=\s|$)|node\s+(?:"[^"]*netcatty-tool-cli(?:\.cjs)?"|'[^']*netcatty-tool-cli(?:\.cjs)?'|\S*\/netcatty-tool-cli(?:\.cjs)?)(?=\s|$))/i.test(text);
 }
 
 function isLikelyNetcattyCliShellCommand(fullCommandText) {
   const localPart = getLocalNetcattyCliPrefix(fullCommandText);
   if (!localPart) return false;
   if (LOCAL_SHELL_WRAPPER_PATTERN.test(localPart)) return false;
-  if (LOCAL_SHELL_METACHAR_PATTERN.test(localPart)) return false;
+  if (containsUnquotedShellMetachar(localPart)) return false;
   return isNetcattyCliInvocationPrefix(localPart);
 }
 
@@ -417,6 +480,8 @@ module.exports = {
   approveNetcattyCliShellOnly,
   isLikelyNetcattyCliShellCommand,
   getLocalNetcattyCliPrefix,
+  findExecPayloadSeparatorIndex,
+  containsUnquotedShellMetachar,
   copilotBuiltinTools,
   toCopilotMcpServers,
   extractCopilotContent,

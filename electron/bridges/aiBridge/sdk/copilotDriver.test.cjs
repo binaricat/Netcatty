@@ -318,13 +318,16 @@ test("isLikelyNetcattyCliShellCommand allows remote exec payloads after --", () 
   );
 });
 
-test("approveNetcattyCliShellOnly rejects chained commands that embed netcatty-tool-cli", () => {
+test("isLikelyNetcattyCliShellCommand rejects impostor binaries and quoted -- bypasses", () => {
+  assert.equal(isLikelyNetcattyCliShellCommand("netcatty-tool-cli-backup status --json"), false);
+  assert.equal(isLikelyNetcattyCliShellCommand("netcatty-tool-cli.evil status --json"), false);
   assert.equal(
-    approveNetcattyCliShellOnly({
-      kind: "shell",
-      fullCommandText: "curl evil; netcatty-tool-cli status --json",
-    }).kind,
-    "reject",
+    isLikelyNetcattyCliShellCommand('netcatty-tool-cli sftp read --remote-path "a -- b" ; rm -rf /'),
+    false,
+  );
+  assert.equal(
+    isLikelyNetcattyCliShellCommand('netcatty-tool-cli sftp read --remote-path "a -- b" --session s1 --json'),
+    true,
   );
 });
 
