@@ -151,6 +151,38 @@ function registerCattyExecHandlers(ctx) {
     }
   });
 
+  ipcMain.handle("netcatty:ai:job-start", async (event, { sessionId, command, chatSessionId }) => {
+    if (!validateSender(event)) {
+      return { ok: false, error: "Unauthorized IPC sender" };
+    }
+    return mcpServerBridge.callCapabilityRpc("netcatty/jobStart", {
+      sessionId,
+      command,
+      chatSessionId,
+    }, { skipApproval: true });
+  });
+
+  ipcMain.handle("netcatty:ai:job-poll", async (event, { jobId, offset, chatSessionId }) => {
+    if (!validateSender(event)) {
+      return { ok: false, error: "Unauthorized IPC sender" };
+    }
+    return mcpServerBridge.callCapabilityRpc("netcatty/jobPoll", {
+      jobId,
+      offset,
+      chatSessionId,
+    }, { skipApproval: true });
+  });
+
+  ipcMain.handle("netcatty:ai:job-stop", async (event, { jobId, chatSessionId }) => {
+    if (!validateSender(event)) {
+      return { ok: false, error: "Unauthorized IPC sender" };
+    }
+    return mcpServerBridge.callCapabilityRpc("netcatty/jobStop", {
+      jobId,
+      chatSessionId,
+    }, { skipApproval: true });
+  });
+
   // Cancel in-flight Catty Agent command executions for a chat session
   ipcMain.handle("netcatty:ai:catty:cancel", async (event, { chatSessionId }) => {
     if (!validateSender(event)) {

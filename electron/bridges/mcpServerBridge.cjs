@@ -813,7 +813,7 @@ function validateSessionScope(sessionId, chatSessionId, explicitScopedIds = null
   return null;
 }
 
-async function dispatch(method, params) {
+async function dispatch(method, params, options = {}) {
   debugLog("dispatch", { method, params, permissionMode });
   const capability = getCapabilityByRpcMethod(method, CAPABILITY_SURFACES.BUILTIN);
   const sessionWriteLockId = (capability?.id === "terminal.execute" || capability?.id === "terminal.start")
@@ -863,7 +863,7 @@ async function dispatch(method, params) {
     // netcatty/jobStop bypasses approval — it's a stop/cancel action that
     // must remain available even if the renderer is unavailable; otherwise
     // a runaway terminal_start job could not be interrupted at all.
-    if (permission.requiresApproval) {
+    if (permission.requiresApproval && !options.skipApproval) {
       const { chatSessionId, ...toolArgs } = params || {};
       const approved = await requestApprovalFromRenderer(method, toolArgs, chatSessionId);
       if (!approved) {
@@ -919,6 +919,10 @@ async function dispatch(method, params) {
       pendingSessionWriteApprovals.delete(sessionWriteLockId);
     }
   }
+}
+
+function callCapabilityRpc(method, params, options = {}) {
+  return dispatch(method, params || {}, options);
 }
 
 // ── Handler: getContext ──
@@ -1120,4 +1124,5 @@ module.exports = {
   reserveSessionExecution,
   releaseSessionExecution,
   getSessionBusyError,
+  callCapabilityRpc,
 };

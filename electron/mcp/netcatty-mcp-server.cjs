@@ -11,6 +11,8 @@ const net = require("node:net");
 const { McpServer } = require("@modelcontextprotocol/sdk/server/mcp.js");
 const { StdioServerTransport } = require("@modelcontextprotocol/sdk/server/stdio.js");
 const { z } = require("zod");
+const { CAPABILITY_SURFACES } = require("../capabilities/constants.cjs");
+const { getMcpToolDefinition } = require("../capabilities/adapters/mcpAdapter.cjs");
 
 const DEBUG_MCP = process.env.NETCATTY_MCP_DEBUG === "1";
 
@@ -180,6 +182,17 @@ const server = new McpServer({
   version: "1.0.0",
 });
 
+function registerBuiltinTool(toolName, handler) {
+  const definition = getMcpToolDefinition(toolName, CAPABILITY_SURFACES.BUILTIN, z);
+  if (!definition) {
+    throw new Error(`Missing builtin MCP capability definition for ${toolName}`);
+  }
+  if (definition.implementationStatus === "not_implemented") {
+    throw new Error(`Builtin MCP capability ${definition.id} is marked not implemented`);
+  }
+  server.tool(definition.toolName, definition.description, definition.inputSchema, handler);
+}
+
 // Scope params shared by all tool calls.
 // When chatSessionId is present, let the main process resolve the current
 // workspace membership dynamically so mid-session workspace changes are visible
@@ -269,14 +282,8 @@ server.tool(
   },
 );
 
-// Tool: terminal_execute
-server.tool(
+registerBuiltinTool(
   "terminal_execute",
-  "Execute a short command on a Netcatty terminal session and wait for the full result. Use this only for commands expected to finish within about 60 seconds. For long-running commands such as builds, scans, log-following, or anything likely to exceed that budget, use terminal_start and then terminal_poll instead.",
-  {
-    sessionId: z.string().describe("The terminal session ID (from get_environment) to execute on."),
-    command: z.string().describe("The command to execute in the target session."),
-  },
   async ({ sessionId, command }) => {
     debugLog("terminal_execute called", { sessionId, command });
     // skipBlocklist: bridge layer does session-aware blocklist (serial sessions skip shell patterns)
@@ -308,13 +315,8 @@ server.tool(
   },
 );
 
-server.tool(
+registerBuiltinTool(
   "terminal_start",
-  "Start a long-running command on a Netcatty terminal session without waiting for final completion. The command still runs in the visible terminal/PTTY so the user can watch live output. Prefer this whenever the command may exceed about 2 minutes, or when it streams output for an extended period, such as builds, scans, watch commands, and log-follow commands. After starting, wait at least about 30 seconds before the first terminal_poll unless you have a strong reason to check sooner.",
-  {
-    sessionId: z.string().describe("The terminal session ID (from get_environment) to execute on."),
-    command: z.string().describe("The command to start in the target session."),
-  },
   async ({ sessionId, command }) => {
     const guardErr = guardWriteOperation(command, { skipBlocklist: true });
     if (guardErr) {
@@ -340,13 +342,8 @@ server.tool(
   },
 );
 
-server.tool(
+registerBuiltinTool(
   "terminal_poll",
-  "Poll a long-running Netcatty command that was started with terminal_start. Returns incremental output since the given offset and the current status. Use the returned nextOffset for the next poll. If outputTruncated is true, only the retained tail starting at outputBaseOffset is still available. Do not poll aggressively: wait at least about 30 seconds between polls unless the tool output explicitly justifies checking sooner. As soon as completed is true, stop polling and analyze the final result immediately.",
-  {
-    jobId: z.string().describe("The background job ID returned by terminal_start."),
-    offset: z.number().int().min(0).optional().describe("Character offset previously returned as nextOffset. Omit or use 0 on the first poll."),
-  },
   async ({ jobId, offset }) => {
     const result = await rpcCall("netcatty/jobPoll", { ...scopeParams, jobId, offset: offset || 0 });
     if (!result.ok) {
@@ -356,12 +353,8 @@ server.tool(
   },
 );
 
-server.tool(
+registerBuiltinTool(
   "terminal_stop",
-  "Stop a long-running Netcatty command that was started with terminal_start. This sends Ctrl+C to the running terminal job and returns its latest state.",
-  {
-    jobId: z.string().describe("The background job ID returned by terminal_start."),
-  },
   async ({ jobId }) => {
     const result = await rpcCall("netcatty/jobStop", { ...scopeParams, jobId });
     if (!result.ok) {

@@ -12,6 +12,14 @@
  * @property {string} [mcpTool]
  * @property {string[]} [command]
  * @property {boolean} [confirmInConfirmMode]
+ * @property {'implemented' | 'not_implemented'} [implementationStatus]
+ * @property {string} [notImplementedReason]
+ *
+ * @typedef {Object} CapabilityParameterDefinition
+ * @property {'string' | 'number' | 'integer' | 'boolean'} type
+ * @property {string} [description]
+ * @property {boolean} [optional]
+ * @property {number} [min]
  *
  * @typedef {Object} CapabilityPolicy
  * @property {boolean} write
@@ -27,6 +35,7 @@
  * @property {string} domain
  * @property {CapabilityStatus} status
  * @property {string} description
+ * @property {Record<string, CapabilityParameterDefinition>} [parameters]
  * @property {CapabilityPolicy} policy
  * @property {Partial<Record<CapabilitySurface, CapabilitySurfaceBinding>>} surfaces
  *

@@ -13,5 +13,7 @@ test("netcatty-tool-cli capabilities lists implemented commands without app conn
   assert.equal(result.status, 0, result.stderr);
   const payload = JSON.parse(result.stdout);
   assert.equal(payload.ok, true);
-  assert.ok(payload.capabilities.some((entry) => entry.id === "terminal.execute"));
+  const terminalExecute = payload.capabilities.find((entry) => entry.id === "terminal.execute");
+  assert.ok(terminalExecute);
+  assert.equal(terminalExecute.parameters.sessionId.type, "string");
 });

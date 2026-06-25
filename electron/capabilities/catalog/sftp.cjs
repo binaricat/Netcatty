@@ -2,6 +2,11 @@
 
 const { CAPABILITY_STATUS } = require("../constants.cjs");
 
+const PUBLIC_MCP_NOT_IMPLEMENTED = Object.freeze({
+  implementationStatus: "not_implemented",
+  notImplementedReason: "Cataloged for the future public MCP surface, but not registered by the current Netcatty MCP server.",
+});
+
 function sftpCapability(id, description, policyOverrides, surfaces) {
   return {
     id,
@@ -30,7 +35,7 @@ const SFTP_CAPABILITIES = [
     { sensitiveRead: true },
     {
       builtin: { rpcMethod: "netcatty/sftp/list" },
-      public: { rpcMethod: "public/sftp/list", mcpTool: "sftp_list", confirmInConfirmMode: true },
+      public: { rpcMethod: "public/sftp/list", mcpTool: "sftp_list", confirmInConfirmMode: true, ...PUBLIC_MCP_NOT_IMPLEMENTED },
       cli: { command: ["sftp", "list"] },
     },
   ),
@@ -40,7 +45,7 @@ const SFTP_CAPABILITIES = [
     { sensitiveRead: true },
     {
       builtin: { rpcMethod: "netcatty/sftp/read" },
-      public: { rpcMethod: "public/sftp/readFile", mcpTool: "sftp_read_file", confirmInConfirmMode: true },
+      public: { rpcMethod: "public/sftp/readFile", mcpTool: "sftp_read_file", confirmInConfirmMode: true, ...PUBLIC_MCP_NOT_IMPLEMENTED },
       cli: { command: ["sftp", "read"] },
     },
   ),
@@ -50,7 +55,7 @@ const SFTP_CAPABILITIES = [
     { write: true, bypassesApproval: false, bypassesChatCancel: false },
     {
       builtin: { rpcMethod: "netcatty/sftp/write" },
-      public: { rpcMethod: "public/sftp/writeFile", mcpTool: "sftp_write_file" },
+      public: { rpcMethod: "public/sftp/writeFile", mcpTool: "sftp_write_file", ...PUBLIC_MCP_NOT_IMPLEMENTED },
       cli: { command: ["sftp", "write"] },
     },
   ),
@@ -78,7 +83,7 @@ const SFTP_CAPABILITIES = [
     { sensitiveRead: true },
     {
       builtin: { rpcMethod: "netcatty/sftp/stat" },
-      public: { rpcMethod: "public/sftp/stat", mcpTool: "sftp_stat", confirmInConfirmMode: true },
+      public: { rpcMethod: "public/sftp/stat", mcpTool: "sftp_stat", confirmInConfirmMode: true, ...PUBLIC_MCP_NOT_IMPLEMENTED },
       cli: { command: ["sftp", "stat"] },
     },
   ),
@@ -88,7 +93,7 @@ const SFTP_CAPABILITIES = [
     { sensitiveRead: true },
     {
       builtin: { rpcMethod: "netcatty/sftp/home" },
-      public: { rpcMethod: "public/sftp/home", mcpTool: "sftp_home", confirmInConfirmMode: true },
+      public: { rpcMethod: "public/sftp/home", mcpTool: "sftp_home", confirmInConfirmMode: true, ...PUBLIC_MCP_NOT_IMPLEMENTED },
       cli: { command: ["sftp", "home"] },
     },
   ),
@@ -98,7 +103,7 @@ const SFTP_CAPABILITIES = [
     { write: true, bypassesApproval: false, bypassesChatCancel: false },
     {
       builtin: { rpcMethod: "netcatty/sftp/mkdir" },
-      public: { rpcMethod: "public/sftp/mkdir", mcpTool: "sftp_mkdir" },
+      public: { rpcMethod: "public/sftp/mkdir", mcpTool: "sftp_mkdir", ...PUBLIC_MCP_NOT_IMPLEMENTED },
       cli: { command: ["sftp", "mkdir"] },
     },
   ),
@@ -108,7 +113,7 @@ const SFTP_CAPABILITIES = [
     { write: true, bypassesApproval: false, bypassesChatCancel: false },
     {
       builtin: { rpcMethod: "netcatty/sftp/delete" },
-      public: { rpcMethod: "public/sftp/delete", mcpTool: "sftp_delete" },
+      public: { rpcMethod: "public/sftp/delete", mcpTool: "sftp_delete", ...PUBLIC_MCP_NOT_IMPLEMENTED },
       cli: { command: ["sftp", "delete"] },
     },
   ),
@@ -118,7 +123,7 @@ const SFTP_CAPABILITIES = [
     { write: true, bypassesApproval: false, bypassesChatCancel: false },
     {
       builtin: { rpcMethod: "netcatty/sftp/rename" },
-      public: { rpcMethod: "public/sftp/rename", mcpTool: "sftp_rename" },
+      public: { rpcMethod: "public/sftp/rename", mcpTool: "sftp_rename", ...PUBLIC_MCP_NOT_IMPLEMENTED },
       cli: { command: ["sftp", "rename"] },
     },
   ),
@@ -128,7 +133,7 @@ const SFTP_CAPABILITIES = [
     { write: true, bypassesApproval: false, bypassesChatCancel: false },
     {
       builtin: { rpcMethod: "netcatty/sftp/chmod" },
-      public: { rpcMethod: "public/sftp/chmod", mcpTool: "sftp_chmod" },
+      public: { rpcMethod: "public/sftp/chmod", mcpTool: "sftp_chmod", ...PUBLIC_MCP_NOT_IMPLEMENTED },
       cli: { command: ["sftp", "chmod"] },
     },
   ),

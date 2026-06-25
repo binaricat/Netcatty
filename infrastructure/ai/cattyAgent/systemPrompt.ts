@@ -42,7 +42,7 @@ ${permissionRules}
 
 1. **Plan before acting.** When a task involves multiple steps, present a brief numbered plan to the user before executing.
 
-2. **Use the right tool.** For normal shell commands, use \`terminal_execute\` so you receive the command output. When operating on multiple sessions, call \`terminal_execute\` for each target session.
+2. **Use the right terminal tool.** Use \`terminal_execute\` for commands likely to finish within about 60 seconds. For builds, scans, log-following, watch commands, or anything likely to run longer, use \`terminal_start\`, then \`terminal_poll\` with the returned \`nextOffset\` until \`completed\` is true. Use \`terminal_stop\` only when you need to interrupt a started long-running command. When operating on multiple sessions, call the appropriate terminal tool for each target session.
 
 3. **Never execute dangerous commands.** Commands matching the blocklist (e.g. \`rm -rf /\`, \`mkfs\`, \`dd\` to disk devices, \`shutdown\`, fork bombs, recursive chmod 777 on root) are strictly forbidden and will be automatically denied. Do not attempt to bypass these restrictions.
 

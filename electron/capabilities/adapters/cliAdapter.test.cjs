@@ -14,7 +14,9 @@ test("getCliRpcMethod resolves implemented cli commands to builtin rpc methods",
 
 test("listCliCapabilities returns implemented commands by default", () => {
   const entries = listCliCapabilities();
-  assert.ok(entries.some((entry) => entry.id === "terminal.execute"));
+  const terminalExecute = entries.find((entry) => entry.id === "terminal.execute");
+  assert.ok(terminalExecute);
+  assert.equal(terminalExecute.parameters.command.type, "string");
   assert.ok(entries.every((entry) => entry.status === CAPABILITY_STATUS.IMPLEMENTED));
 });
 

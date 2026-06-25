@@ -8,7 +8,17 @@ const TERMINAL_CAPABILITIES = [
     id: "terminal.execute",
     domain: "terminal",
     status: CAPABILITY_STATUS.IMPLEMENTED,
-    description: "Execute a short command in a terminal session and wait for completion.",
+    description: "Execute a short command on a Netcatty terminal session and wait for the full result. Use this only for commands expected to finish within about 60 seconds. For long-running commands such as builds, scans, log-following, or anything likely to exceed that budget, use terminal_start and then terminal_poll instead.",
+    parameters: {
+      sessionId: {
+        type: "string",
+        description: "The terminal session ID (from get_environment or workspace_get_info) to execute on.",
+      },
+      command: {
+        type: "string",
+        description: "The command to execute in the target session.",
+      },
+    },
     policy: {
       write: true,
       sensitiveRead: false,
@@ -28,7 +38,17 @@ const TERMINAL_CAPABILITIES = [
     id: "terminal.start",
     domain: "terminal",
     status: CAPABILITY_STATUS.IMPLEMENTED,
-    description: "Start a long-running command in a terminal session.",
+    description: "Start a long-running command on a Netcatty terminal session without waiting for final completion. The command still runs in the visible terminal/PTTY so the user can watch live output. Prefer this whenever the command may exceed about 2 minutes, or when it streams output for an extended period, such as builds, scans, watch commands, and log-follow commands. After starting, wait at least about 30 seconds before the first terminal_poll unless you have a strong reason to check sooner.",
+    parameters: {
+      sessionId: {
+        type: "string",
+        description: "The terminal session ID (from get_environment or workspace_get_info) to execute on.",
+      },
+      command: {
+        type: "string",
+        description: "The command to start in the target session.",
+      },
+    },
     policy: {
       write: true,
       sensitiveRead: false,
@@ -48,7 +68,19 @@ const TERMINAL_CAPABILITIES = [
     id: "terminal.poll",
     domain: "terminal",
     status: CAPABILITY_STATUS.IMPLEMENTED,
-    description: "Poll incremental output from a long-running terminal job.",
+    description: "Poll a long-running Netcatty command that was started with terminal_start. Returns incremental output since the given offset and the current status. Use the returned nextOffset for the next poll. If outputTruncated is true, only the retained tail starting at outputBaseOffset is still available. Do not poll aggressively: wait at least about 30 seconds between polls unless the tool output explicitly justifies checking sooner. As soon as completed is true, stop polling and analyze the final result immediately.",
+    parameters: {
+      jobId: {
+        type: "string",
+        description: "The background job ID returned by terminal_start.",
+      },
+      offset: {
+        type: "integer",
+        optional: true,
+        min: 0,
+        description: "Character offset previously returned as nextOffset. Omit or use 0 on the first poll.",
+      },
+    },
     policy: {
       write: false,
       sensitiveRead: false,
@@ -68,7 +100,13 @@ const TERMINAL_CAPABILITIES = [
     id: "terminal.stop",
     domain: "terminal",
     status: CAPABILITY_STATUS.IMPLEMENTED,
-    description: "Stop a long-running terminal job.",
+    description: "Stop a long-running Netcatty command that was started with terminal_start. This sends Ctrl+C to the running terminal job and returns its latest state.",
+    parameters: {
+      jobId: {
+        type: "string",
+        description: "The background job ID returned by terminal_start.",
+      },
+    },
     policy: {
       write: true,
       sensitiveRead: false,

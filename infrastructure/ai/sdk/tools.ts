@@ -6,6 +6,9 @@ import type { WebSearchConfig } from '../types';
 import { isWebSearchReady } from '../types';
 import {
   executeTerminalExecute,
+  executeTerminalPoll,
+  executeTerminalStart,
+  executeTerminalStop,
   executeWorkspaceGetInfo,
   executeWorkspaceGetSessionInfo,
   executeWebSearch,
@@ -16,6 +19,7 @@ import {
 import { requestApproval } from '../shared/approvalGate';
 import { reserveSessionSlot } from '../shared/sessionExecutionQueue';
 import { truncateTextWithHeadAndTail } from '../requestPayloadCompression';
+import { getSharedBuiltinMcpToolDefinition } from './capabilityToolDefinitions';
 
 const MAX_LIVE_TERMINAL_STDOUT_CHARS = 24_000;
 const MAX_LIVE_TERMINAL_STDERR_CHARS = 12_000;
@@ -55,16 +59,15 @@ export function createCattyTools(
   chatSessionId?: string,
 ) {
   const deps: ToolDeps = { bridge, context, commandBlocklist, permissionMode, webSearchConfig, chatSessionId };
+  const terminalExecuteDefinition = getSharedBuiltinMcpToolDefinition('terminal_execute', z);
+  const terminalStartDefinition = getSharedBuiltinMcpToolDefinition('terminal_start', z);
+  const terminalPollDefinition = getSharedBuiltinMcpToolDefinition('terminal_poll', z);
+  const terminalStopDefinition = getSharedBuiltinMcpToolDefinition('terminal_stop', z);
 
   return {
     terminal_execute: tool({
-      description:
-        'Execute a shell command on the specified terminal session. ' +
-        "The command runs in the session's shell and output is returned when complete.",
-      inputSchema: z.object({
-        sessionId: z.string().describe('The terminal session ID to execute the command on.'),
-        command: z.string().describe('The shell command to execute in the target session.'),
-      }),
+      description: terminalExecuteDefinition.description,
+      inputSchema: z.object(terminalExecuteDefinition.inputSchema),
       // No needsApproval — approval is handled inside execute via the approval gate.
       execute: async ({ sessionId, command }, { toolCallId, abortSignal }) => {
         // Snap our place in the per-session execution queue *first*,
@@ -129,6 +132,49 @@ export function createCattyTools(
         } finally {
           slot.release();
         }
+      },
+    }),
+
+    terminal_start: tool({
+      description: terminalStartDefinition.description,
+      inputSchema: z.object(terminalStartDefinition.inputSchema),
+      execute: async ({ sessionId, command }, { toolCallId, abortSignal }) => {
+        const queueKey = `${chatSessionId ?? 'global'}:${sessionId}`;
+        const slot = reserveSessionSlot(queueKey);
+        try {
+          if (permissionMode === 'confirm') {
+            const approved = await requestApproval(toolCallId, 'terminal_start', { sessionId, command }, chatSessionId);
+            if (!approved) {
+              return { error: 'User denied command execution.' };
+            }
+          }
+          if (abortSignal?.aborted) {
+            return { error: 'Command cancelled before it could start.' };
+          }
+          await slot.ready;
+          if (abortSignal?.aborted) {
+            return { error: 'Command cancelled before it could start.' };
+          }
+          return unwrap(await executeTerminalStart(deps, { sessionId, command }));
+        } finally {
+          slot.release();
+        }
+      },
+    }),
+
+    terminal_poll: tool({
+      description: terminalPollDefinition.description,
+      inputSchema: z.object(terminalPollDefinition.inputSchema),
+      execute: async ({ jobId, offset }) => {
+        return unwrap(await executeTerminalPoll(deps, { jobId, offset }));
+      },
+    }),
+
+    terminal_stop: tool({
+      description: terminalStopDefinition.description,
+      inputSchema: z.object(terminalStopDefinition.inputSchema),
+      execute: async ({ jobId }) => {
+        return unwrap(await executeTerminalStop(deps, { jobId }));
       },
     }),
 

@@ -1,6 +1,9 @@
 import type { ToolCall, ToolResult, AIPermissionMode, WebSearchConfig } from '../types';
 import {
   executeTerminalExecute,
+  executeTerminalPoll,
+  executeTerminalStart,
+  executeTerminalStop,
   executeWorkspaceGetInfo,
   executeWorkspaceGetSessionInfo,
   executeWebSearch,
@@ -25,6 +28,29 @@ export interface NetcattyBridge {
     exitCode?: number;
     error?: string;
   }>;
+  aiJobStart?(
+    sessionId: string,
+    command: string,
+    chatSessionId?: string,
+  ): Promise<{
+    ok: boolean;
+    jobId?: string;
+    sessionId?: string;
+    status?: string;
+    startedAt?: number;
+    outputMode?: string;
+    recommendedPollIntervalMs?: number;
+    error?: string;
+  }>;
+  aiJobPoll?(
+    jobId: string,
+    offset?: number,
+    chatSessionId?: string,
+  ): Promise<Record<string, unknown> & { ok: boolean; error?: string }>;
+  aiJobStop?(
+    jobId: string,
+    chatSessionId?: string,
+  ): Promise<Record<string, unknown> & { ok: boolean; error?: string }>;
   /**
    * Cancel any in-flight Catty Agent command execution scoped to the
    * given chat session. Idempotent — safe to call when nothing is
@@ -112,6 +138,29 @@ export function createToolExecutor(
           const r = await executeTerminalExecute(deps, {
             sessionId: String(args.sessionId || ''),
             command: String(args.command || ''),
+          });
+          return toToolResult(toolCall.id, r);
+        }
+
+        case 'terminal_start': {
+          const r = await executeTerminalStart(deps, {
+            sessionId: String(args.sessionId || ''),
+            command: String(args.command || ''),
+          });
+          return toToolResult(toolCall.id, r);
+        }
+
+        case 'terminal_poll': {
+          const r = await executeTerminalPoll(deps, {
+            jobId: String(args.jobId || ''),
+            offset: Number(args.offset) || 0,
+          });
+          return toToolResult(toolCall.id, r);
+        }
+
+        case 'terminal_stop': {
+          const r = await executeTerminalStop(deps, {
+            jobId: String(args.jobId || ''),
           });
           return toToolResult(toolCall.id, r);
         }

@@ -24,9 +24,12 @@ function listCliCapabilities(options = {}) {
       domain: capability.domain,
       status: capability.status,
       description: capability.description,
+      parameters: capability.parameters || {},
       command: capability.surfaces[surface].command,
       rpcMethod: capability.surfaces?.[CAPABILITY_SURFACES.BUILTIN]?.rpcMethod || null,
       policy: capability.policy,
+      implementationStatus: capability.surfaces?.[surface]?.implementationStatus || "implemented",
+      notImplementedReason: capability.surfaces?.[surface]?.notImplementedReason || null,
     }));
 }
 

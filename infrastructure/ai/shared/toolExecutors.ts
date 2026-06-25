@@ -115,6 +115,82 @@ export async function executeTerminalExecute(
   };
 }
 
+export async function executeTerminalStart(
+  deps: ToolDeps,
+  args: { sessionId: string; command: string },
+): Promise<ToolExecResult<{
+  jobId?: string;
+  sessionId?: string;
+  status?: string;
+  startedAt?: number;
+  outputMode?: string;
+  recommendedPollIntervalMs?: number;
+}>> {
+  const { bridge, context, permissionMode } = deps;
+  const { sessionId, command } = args;
+
+  if (!sessionId || !command) {
+    return { ok: false, error: 'Missing sessionId or command' };
+  }
+  const scopeErr = validateSessionScope(context, sessionId);
+  if (scopeErr) return { ok: false, error: scopeErr };
+  if (isObserver(permissionMode)) {
+    return { ok: false, error: 'Observer mode: command execution is disabled. Switch to Confirm or Auto mode to execute commands.' };
+  }
+  if (!bridge.aiJobStart) {
+    return { ok: false, error: 'terminal_start is not available on the Netcatty bridge' };
+  }
+
+  const result = await bridge.aiJobStart(sessionId, command, deps.chatSessionId);
+  if (!result.ok) {
+    return { ok: false, error: result.error || 'Failed to start long-running command' };
+  }
+  return { ok: true, data: result };
+}
+
+export async function executeTerminalPoll(
+  deps: ToolDeps,
+  args: { jobId: string; offset?: number },
+): Promise<ToolExecResult<Record<string, unknown>>> {
+  const { bridge } = deps;
+  const { jobId } = args;
+
+  if (!jobId) {
+    return { ok: false, error: 'Missing jobId' };
+  }
+  if (!bridge.aiJobPoll) {
+    return { ok: false, error: 'terminal_poll is not available on the Netcatty bridge' };
+  }
+
+  const offset = Number.isFinite(args.offset) && (args.offset ?? 0) >= 0 ? args.offset : 0;
+  const result = await bridge.aiJobPoll(jobId, offset, deps.chatSessionId);
+  if (!result.ok) {
+    return { ok: false, error: result.error || 'Failed to poll long-running command' };
+  }
+  return { ok: true, data: result };
+}
+
+export async function executeTerminalStop(
+  deps: ToolDeps,
+  args: { jobId: string },
+): Promise<ToolExecResult<Record<string, unknown>>> {
+  const { bridge } = deps;
+  const { jobId } = args;
+
+  if (!jobId) {
+    return { ok: false, error: 'Missing jobId' };
+  }
+  if (!bridge.aiJobStop) {
+    return { ok: false, error: 'terminal_stop is not available on the Netcatty bridge' };
+  }
+
+  const result = await bridge.aiJobStop(jobId, deps.chatSessionId);
+  if (!result.ok) {
+    return { ok: false, error: result.error || 'Failed to stop long-running command' };
+  }
+  return { ok: true, data: result };
+}
+
 export function executeWorkspaceGetInfo(
   deps: ToolDeps,
 ): ToolExecResult<{
