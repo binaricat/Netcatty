@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Host, VaultNote } from '../../domain/models';
-import { handleVaultAgentOp, type VaultAgentApiDeps } from './vaultAgentBridgeClient';
+import { handleVaultAgentOp, runSerializedVaultAgentRequest, type VaultAgentApiDeps } from './vaultAgentBridgeClient';
 
 type DepsSeed = {
   hosts?: Host[];
@@ -283,5 +283,28 @@ describe('handleVaultAgentOp vault hosts', () => {
     assert.equal(updatedHosts[0]?.length, 2);
     assert.ok(updatedGroups[0]?.includes('prod/web'));
     assert.equal((result as { addedCount?: number }).addedCount, 2);
+  });
+});
+
+describe('runSerializedVaultAgentRequest', () => {
+  it('runs concurrent tasks sequentially without losing updates', async () => {
+    let value = 0;
+    const results = await Promise.all([
+      runSerializedVaultAgentRequest(async () => {
+        const snapshot = value;
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        value = snapshot + 1;
+        return value;
+      }),
+      runSerializedVaultAgentRequest(async () => {
+        const snapshot = value;
+        await new Promise((resolve) => setTimeout(resolve, 1));
+        value = snapshot + 1;
+        return value;
+      }),
+    ]);
+
+    assert.deepEqual(results, [1, 2]);
+    assert.equal(value, 2);
   });
 });

@@ -522,6 +522,18 @@ export async function handleVaultAgentOp(
 export type VaultAgentHandler = (op: string, params: Record<string, unknown>) => Promise<Record<string, unknown>>;
 
 let activeHandler: VaultAgentHandler | null = null;
+let vaultAgentMutationChain: Promise<unknown> = Promise.resolve();
+
+/** Serialize vault agent IPC handlers so read-modify-write mutations cannot clobber each other. */
+export async function runSerializedVaultAgentRequest<T>(task: () => Promise<T>): Promise<T> {
+  const run = () => task();
+  const next = vaultAgentMutationChain.then(run, run);
+  vaultAgentMutationChain = next.then(
+    () => undefined,
+    () => undefined,
+  );
+  return next;
+}
 
 export function registerVaultAgentHandler(handler: VaultAgentHandler | null): void {
   activeHandler = handler;
@@ -535,17 +547,19 @@ export function setupVaultAgentBridge(): () => void {
 
   const unsubscribe = bridge.onVaultAgentRequest(async (payload) => {
     const { requestId, op, params } = payload;
-    try {
-      const result = activeHandler
-        ? await activeHandler(op, params || {})
-        : { ok: false, error: 'Vault agent bridge is not ready.' };
-      await bridge.respondVaultAgent?.(requestId, result);
-    } catch (err) {
-      await bridge.respondVaultAgent?.(requestId, {
-        ok: false,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
+    await runSerializedVaultAgentRequest(async () => {
+      try {
+        const result = activeHandler
+          ? await activeHandler(op, params || {})
+          : { ok: false, error: 'Vault agent bridge is not ready.' };
+        await bridge.respondVaultAgent?.(requestId, result);
+      } catch (err) {
+        await bridge.respondVaultAgent?.(requestId, {
+          ok: false,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    });
   });
 
   return unsubscribe;
