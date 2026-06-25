@@ -65,6 +65,41 @@ export const DEFAULT_FONT_SIZE = 14;
 export const MIN_FONT_SIZE = 10;
 export const MAX_FONT_SIZE = 32;
 
+export type FontPlatform = 'darwin' | 'win32' | 'linux' | (string & {});
+
+/**
+ * The default terminal font id for a given OS. Chosen so the primary
+ * Latin glyphs render with a font that ships with the OS — avoiding the
+ * cold-start cell-misalignment in #1647, where a bundled webfont
+ * (JetBrains Mono, font-display: swap) swapped in *after* xterm measured
+ * the cell grid and left ASCII garbled until a manual window resize.
+ *
+ *   - darwin: Menlo is a macOS system font (instant, no swap).
+ *   - win32:  Consolas ships with every Windows since Vista.
+ *   - linux:  DejaVu Sans Mono is the most widely pre-installed Linux
+ *             monospace; if a given distro lacks it, the runtime font-ready
+ *             remeasure (useTerminalEffects) still recovers any swap.
+ *
+ * Unknown platforms fall back to the macOS default.
+ */
+export function getDefaultTerminalFontIdForPlatform(platform: FontPlatform): string {
+  if (platform === 'win32') return 'consolas';
+  if (platform === 'linux') return 'dejavu-sans-mono';
+  return 'menlo';
+}
+
+/**
+ * Normalize a `navigator.platform` string to the coarse OS buckets used
+ * by getDefaultTerminalFontIdForPlatform. Mirrors the detection already
+ * used for the CJK fallback stack in Terminal.tsx (Mac/Win regex on
+ * navigator.platform); anything else — including Linux — is `linux`.
+ */
+export function detectFontPlatform(navigatorPlatform: string): FontPlatform {
+  if (/Win/i.test(navigatorPlatform)) return 'win32';
+  if (/Mac|iPhone|iPad|iPod/i.test(navigatorPlatform)) return 'darwin';
+  return 'linux';
+}
+
 // Font ids that earlier versions of netcatty exposed in the primary font
 // dropdown but that are proportional (non-monospace) and produce broken
 // cell-grid alignment when used as a terminal font. Reads should migrate

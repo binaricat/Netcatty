@@ -26,6 +26,33 @@ const KNOWN_BUNDLED_FAMILIES = new Set<string>([
   'Sarasa Mono SC',     // public/fonts/SarasaMonoSC-Regular.woff2 (OFL)
 ]);
 
+const KNOWN_BUNDLED_BY_LOWER = new Map<string, string>(
+  [...KNOWN_BUNDLED_FAMILIES].map((name) => [name.toLowerCase(), name]),
+);
+
+/**
+ * The bundled webfonts (shipped via @font-face / @fontsource) that appear
+ * in a composed font-family stack, in stack order and de-duplicated, with
+ * their canonical casing. Used to explicitly preload the fonts a terminal
+ * actually renders with so xterm can remeasure the cell grid once they
+ * load — these faces use `font-display: swap`, so without an explicit
+ * preload + remeasure their late swap garbles the grid until a manual
+ * resize (#1647). System fonts and the generic `monospace` keyword are
+ * skipped.
+ */
+export function bundledFamiliesInStack(fontFamilyCss: string): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const token of splitFontFamilyList(fontFamilyCss)) {
+    const bare = token.replace(/^["']|["']$/g, '').toLowerCase();
+    const canonical = KNOWN_BUNDLED_BY_LOWER.get(bare);
+    if (!canonical || seen.has(canonical)) continue;
+    seen.add(canonical);
+    result.push(canonical);
+  }
+  return result;
+}
+
 let systemFamilies: Set<string> | null = null;
 let availabilityVersion = 0;
 const listeners = new Set<() => void>();

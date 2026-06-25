@@ -1,6 +1,10 @@
 import type { HotkeyScheme, SessionLogFormat, TerminalSettings } from '../../domain/models';
 import { STORAGE_KEY_TERM_FONT_FAMILY } from '../../infrastructure/config/storageKeys';
-import { isDeprecatedPrimaryFontId } from '../../infrastructure/config/fonts';
+import {
+  isDeprecatedPrimaryFontId,
+  detectFontPlatform,
+  getDefaultTerminalFontIdForPlatform,
+} from '../../infrastructure/config/fonts';
 import { DARK_UI_THEMES, LIGHT_UI_THEMES, type UiThemeTokens } from '../../infrastructure/config/uiThemes';
 import { UI_FONTS } from '../../infrastructure/config/uiFonts';
 import { uiFontStore } from './uiFontStore';
@@ -33,6 +37,19 @@ export const DEFAULT_ACCENT_MODE: 'theme' | 'custom' = 'theme';
 export const DEFAULT_CUSTOM_ACCENT = '221.2 83.2% 53.3%';
 export const DEFAULT_TERMINAL_THEME = 'netcatty-dark';
 export const DEFAULT_FONT_FAMILY = 'menlo';
+
+/**
+ * The default terminal font id for the current OS. On Windows/Linux the
+ * macOS-oriented `menlo` default isn't installed, so the primary Latin
+ * glyphs fell through to a bundled webfont whose late swap garbled the
+ * cell grid on cold start (#1647). Resolving a locally-installed font per
+ * platform keeps the first paint correct. Falls back to DEFAULT_FONT_FAMILY
+ * outside a browser (e.g. tests) where `navigator` is absent.
+ */
+export function getDefaultTerminalFontFamily(): string {
+  if (typeof navigator === 'undefined') return DEFAULT_FONT_FAMILY;
+  return getDefaultTerminalFontIdForPlatform(detectFontPlatform(navigator.platform));
+}
 
 /**
  * Migrate any terminal font id arriving from storage / IPC / sync to a

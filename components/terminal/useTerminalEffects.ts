@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, react-hooks/exhaustive-deps */
 import { useRef } from 'react';
 import { resolveFontWeightBold } from '../../lib/fontWeightAvailability';
+import { bundledFamiliesInStack } from '../../lib/fontAvailability';
 import { resolveXTermScrollback } from '../../infrastructure/config/xtermPerformance';
 import { shouldInterceptMouseTrackingContextMenu } from './runtime/middleClickBehavior';
 import {
@@ -743,9 +744,90 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
 
   useEffect(() => {
     let cancelled = false;
+
+    // Re-derive cell metrics and repaint after a font finishes loading. xterm
+    // measures the cell grid once at open(); a webfont that swaps in later
+    // (font-display: swap on the bundled JetBrains Mono / Sarasa Mono SC, or
+    // any user-chosen webfont) leaves the grid sized to the fallback until a
+    // manual resize (#1647). This performs the same recovery a resize does.
+    const remeasureAfterFontLoad = () => {
+      const term = termRef.current as {
+        cols: number;
+        rows: number;
+        renderer?: { remeasureFont?: () => void };
+      } | null;
+      if (cancelled || !term) return;
+      const fitAddon = fitAddonRef.current;
+      try {
+        term.renderer?.remeasureFont?.();
+      } catch (err) {
+        logger.warn("Font remeasure failed", err);
+      }
+
+      // remeasureFont does not invalidate cells rasterized before fonts were ready.
+      xtermRuntimeRef.current?.clearTextureAtlas();
+      const visibleTerm = termRef.current;
+      if (visibleTerm) {
+        forceSyncRenderAfterResize(visibleTerm);
+      }
+
+      try {
+        fitAddon?.fit();
+      } catch (err) {
+        logger.warn("Fit after fonts ready failed", err);
+      }
+
+      if (terminalSettings && termRef.current) {
+        const resolvedBold = resolveFontWeightBold({
+          fontFamilyCss: termRef.current.options?.fontFamily || "",
+          normalWeight: effectiveFontWeight,
+          desiredBoldWeight: terminalSettings.fontWeightBold,
+          fontSize: effectiveFontSize,
+        });
+        termRef.current.options.fontWeightBold = resolvedBold as
+          | 100
+          | 200
+          | 300
+          | 400
+          | 500
+          | 600
+          | 700
+          | 800
+          | 900;
+      }
+
+      const id = sessionRef.current;
+      if (id) {
+        try {
+          resizeSession(id, term.cols, term.rows);
+        } catch (err) {
+          logger.warn("Resize session after fonts ready failed", err);
+        }
+      }
+    };
+
+    const fontFaceSet = document.fonts as FontFaceSet | undefined;
+
+    // Coalesce bursts of loadingdone events (a cold start loads several faces
+    // in quick succession) into a single remeasure.
+    let remeasureTimer: ReturnType<typeof setTimeout> | null = null;
+    const scheduleRemeasure = () => {
+      if (cancelled) return;
+      if (remeasureTimer) clearTimeout(remeasureTimer);
+      remeasureTimer = setTimeout(() => {
+        remeasureTimer = null;
+        remeasureAfterFontLoad();
+      }, 50);
+    };
+
+    // Any font finishing later than the initial measurement — including a
+    // user-chosen webfont primary — triggers a remeasure, so recovery no
+    // longer depends on the single document.fonts.ready resolution below.
+    const onLoadingDone = () => scheduleRemeasure();
+    fontFaceSet?.addEventListener?.("loadingdone", onLoadingDone);
+
     const waitForFonts = async () => {
       try {
-        const fontFaceSet = document.fonts as FontFaceSet | undefined;
         if (!fontFaceSet?.ready) return;
         await fontFaceSet.ready;
         if (cancelled) return;
@@ -758,60 +840,23 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
         } catch (err) {
           logger.warn("Nerd Font preload failed", err);
         }
-        if (cancelled) return;
 
-        const term = termRef.current as {
-          cols: number;
-          rows: number;
-          renderer?: { remeasureFont?: () => void };
-        } | null;
-        const fitAddon = fitAddonRef.current;
-        try {
-          term?.renderer?.remeasureFont?.();
-        } catch (err) {
-          logger.warn("Font remeasure failed", err);
-        }
-
-        // remeasureFont does not invalidate cells rasterized before fonts were ready.
-        xtermRuntimeRef.current?.clearTextureAtlas();
-        const visibleTerm = termRef.current;
-        if (visibleTerm) {
-          forceSyncRenderAfterResize(visibleTerm);
-        }
-
-        try {
-          fitAddon?.fit();
-        } catch (err) {
-          logger.warn("Fit after fonts ready failed", err);
-        }
-
-        if (terminalSettings && termRef.current) {
-          const resolvedBold = resolveFontWeightBold({
-            fontFamilyCss: termRef.current.options?.fontFamily || "",
-            normalWeight: effectiveFontWeight,
-            desiredBoldWeight: terminalSettings.fontWeightBold,
-            fontSize: effectiveFontSize,
-          });
-          termRef.current.options.fontWeightBold = resolvedBold as
-            | 100
-            | 200
-            | 300
-            | 400
-            | 500
-            | 600
-            | 700
-            | 800
-            | 900;
-        }
-
-        const id = sessionRef.current;
-        if (id && term) {
+        // Explicitly load the bundled webfonts the terminal actually renders
+        // with (the Latin JetBrains Mono fallback, the Sarasa Mono SC CJK
+        // fallback). document.fonts.ready can resolve before these are even
+        // requested, so without this the cold-start grid stays mis-sized (#1647).
+        const fontFamilyCss = (termRef.current as { options?: { fontFamily?: string } } | null)
+          ?.options?.fontFamily || "";
+        for (const family of bundledFamiliesInStack(fontFamilyCss)) {
           try {
-            resizeSession(id, term.cols, term.rows);
+            await fontFaceSet.load(`${effectiveFontSize}px "${family}"`);
           } catch (err) {
-            logger.warn("Resize session after fonts ready failed", err);
+            logger.warn(`Bundled font preload failed: ${family}`, err);
           }
         }
+        if (cancelled) return;
+
+        remeasureAfterFontLoad();
       } catch (err) {
         logger.warn("Waiting for fonts failed", err);
       }
@@ -820,6 +865,8 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
     waitForFonts();
     return () => {
       cancelled = true;
+      if (remeasureTimer) clearTimeout(remeasureTimer);
+      fontFaceSet?.removeEventListener?.("loadingdone", onLoadingDone);
     };
   }, [effectiveFontSize, effectiveFontWeight, resizeSession, terminalSettings]);
 

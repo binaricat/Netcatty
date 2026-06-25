@@ -1,6 +1,10 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { TERMINAL_FONTS } from './fonts';
+import {
+  TERMINAL_FONTS,
+  getDefaultTerminalFontIdForPlatform,
+  detectFontPlatform,
+} from './fonts';
 
 /**
  * Proportional (non-monospace) fonts must never appear in the terminal
@@ -65,5 +69,50 @@ describe('TERMINAL_FONTS dropdown contents', () => {
       assert.equal(seen.has(font.id), false, `duplicate id: ${font.id}`);
       seen.add(font.id);
     }
+  });
+});
+
+describe('getDefaultTerminalFontIdForPlatform', () => {
+  it('uses a locally-installed Windows font (no webfont swap on cold start)', () => {
+    assert.equal(getDefaultTerminalFontIdForPlatform('win32'), 'consolas');
+  });
+
+  it('uses the most widely pre-installed Linux monospace font', () => {
+    assert.equal(getDefaultTerminalFontIdForPlatform('linux'), 'dejavu-sans-mono');
+  });
+
+  it('keeps the macOS system font default', () => {
+    assert.equal(getDefaultTerminalFontIdForPlatform('darwin'), 'menlo');
+  });
+
+  it('falls back to the macOS default for unknown platforms', () => {
+    assert.equal(getDefaultTerminalFontIdForPlatform('freebsd'), 'menlo');
+  });
+
+  it('only ever returns ids that exist in TERMINAL_FONTS', () => {
+    const ids = new Set(TERMINAL_FONTS.map((f) => f.id));
+    for (const platform of ['darwin', 'win32', 'linux', 'unknown']) {
+      assert.ok(
+        ids.has(getDefaultTerminalFontIdForPlatform(platform)),
+        `default for ${platform} not in TERMINAL_FONTS`,
+      );
+    }
+  });
+});
+
+describe('detectFontPlatform', () => {
+  it('maps navigator.platform Windows values to win32', () => {
+    assert.equal(detectFontPlatform('Win32'), 'win32');
+    assert.equal(detectFontPlatform('Windows'), 'win32');
+  });
+
+  it('maps macOS and iOS values to darwin', () => {
+    assert.equal(detectFontPlatform('MacIntel'), 'darwin');
+    assert.equal(detectFontPlatform('iPhone'), 'darwin');
+  });
+
+  it('treats everything else (incl. Linux) as linux', () => {
+    assert.equal(detectFontPlatform('Linux x86_64'), 'linux');
+    assert.equal(detectFontPlatform(''), 'linux');
   });
 });

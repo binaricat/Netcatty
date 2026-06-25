@@ -76,7 +76,7 @@ import {
   DEFAULT_CUSTOM_ACCENT,
   DEFAULT_DARK_UI_THEME,
   DEFAULT_EDITOR_WORD_WRAP,
-  DEFAULT_FONT_FAMILY,
+  getDefaultTerminalFontFamily,
   DEFAULT_HOTKEY_SCHEME,
   DEFAULT_LIGHT_UI_THEME,
   DEFAULT_SESSION_LOGS_ENABLED,
@@ -178,7 +178,7 @@ export const useSettingsState = (options: { enableSettingsSync?: boolean; enable
   );
   const [terminalFontFamilyId, setTerminalFontFamilyId] = useState<string>(() => {
     const stored = localStorageAdapter.readString(STORAGE_KEY_TERM_FONT_FAMILY);
-    return migrateIncomingTerminalFontId(stored) ?? DEFAULT_FONT_FAMILY;
+    return migrateIncomingTerminalFontId(stored) ?? getDefaultTerminalFontFamily();
   });
   const [terminalFontSize, setTerminalFontSize] = useState<number>(() => localStorageAdapter.readNumber(STORAGE_KEY_TERM_FONT_SIZE) || DEFAULT_FONT_SIZE);
   const [uiLanguage, setUiLanguage] = useState<UILanguage>(() => {

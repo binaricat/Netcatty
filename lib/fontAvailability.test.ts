@@ -9,7 +9,28 @@ import {
   clearFontAvailabilityCache,
   subscribeFontAvailability,
   getFontAvailabilityVersion,
+  bundledFamiliesInStack,
 } from './fontAvailability';
+
+describe('bundledFamiliesInStack', () => {
+  it('returns bundled webfonts present in a composed stack, in order', () => {
+    const stack = 'Consolas, "JetBrains Mono", "Sarasa Mono SC", monospace';
+    assert.deepEqual(bundledFamiliesInStack(stack), ['JetBrains Mono', 'Sarasa Mono SC']);
+  });
+
+  it('returns nothing when only system fonts are referenced', () => {
+    assert.deepEqual(bundledFamiliesInStack('Menlo, monospace'), []);
+  });
+
+  it('ignores the generic monospace keyword and dedupes', () => {
+    const stack = '"JetBrains Mono", "JetBrains Mono", monospace';
+    assert.deepEqual(bundledFamiliesInStack(stack), ['JetBrains Mono']);
+  });
+
+  it('is case-insensitive on family names', () => {
+    assert.deepEqual(bundledFamiliesInStack('"jetbrains mono"'), ['JetBrains Mono']);
+  });
+});
 
 describe('extractPrimaryFamily', () => {
   it('strips quotes from a quoted name', () => {
