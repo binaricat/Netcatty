@@ -39,12 +39,28 @@ export function useVaultAgentBridge(input: UseVaultAgentBridgeInput): void {
     notes: input.notes,
     customGroups: input.customGroups,
   });
+  const lastSyncedVaultInputRef = useRef({
+    hosts: input.hosts,
+    notes: input.notes,
+    customGroups: input.customGroups,
+  });
 
-  useEffect(() => {
-    vaultSnapshotRef.current.hosts = input.hosts;
-    vaultSnapshotRef.current.notes = input.notes;
-    vaultSnapshotRef.current.customGroups = input.customGroups;
-  }, [input.customGroups, input.hosts, input.notes]);
+  if (
+    input.hosts !== lastSyncedVaultInputRef.current.hosts
+    || input.notes !== lastSyncedVaultInputRef.current.notes
+    || input.customGroups !== lastSyncedVaultInputRef.current.customGroups
+  ) {
+    vaultSnapshotRef.current = {
+      hosts: input.hosts,
+      notes: input.notes,
+      customGroups: input.customGroups,
+    };
+    lastSyncedVaultInputRef.current = {
+      hosts: input.hosts,
+      notes: input.notes,
+      customGroups: input.customGroups,
+    };
+  }
 
   useEffect(() => {
     registerVaultAgentHandler(async (op, params) => {

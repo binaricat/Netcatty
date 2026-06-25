@@ -1006,6 +1006,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
       bridge: getNetcattyBridge(),
       reason: 'user',
     });
+    await getAgentRuntime().waitForActiveTurn(sessionId);
     if (controller && abortControllersRef.current.get(sessionId) === controller) {
       abortControllersRef.current.delete(sessionId);
     }

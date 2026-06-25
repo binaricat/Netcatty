@@ -27,6 +27,7 @@ export class AgentRuntime {
   private readonly drivers = new Map<AgentBackend, TurnDriver>();
   private readonly listeners = new Set<AgentEventListener>();
   private readonly activeTurns = new Map<string, ActiveTurn>();
+  private readonly activeTurnPromises = new Map<string, Promise<TurnResult>>();
   private readonly toolOutputStores = new Map<string, ToolOutputStore>();
   private readonly traceStore: typeof globalTraceStore;
 
@@ -51,6 +52,10 @@ export class AgentRuntime {
     this.toolOutputStores.delete(chatSessionId);
   }
 
+  async waitForActiveTurn(chatSessionId: string): Promise<void> {
+    await this.activeTurnPromises.get(chatSessionId)?.catch(() => {});
+  }
+
   subscribe(listener: AgentEventListener): () => void {
     this.listeners.add(listener);
     return () => {
@@ -64,6 +69,24 @@ export class AgentRuntime {
       throw new Error(`No TurnDriver registered for backend "${input.backend}"`);
     }
 
+    const chatSessionId = input.chatSessionId;
+    const priorTurn = this.activeTurnPromises.get(chatSessionId);
+    if (priorTurn) {
+      await priorTurn.catch(() => {});
+    }
+
+    const turnPromise = this.runTurnInternal(input, driver);
+    this.activeTurnPromises.set(chatSessionId, turnPromise);
+    try {
+      return await turnPromise;
+    } finally {
+      if (this.activeTurnPromises.get(chatSessionId) === turnPromise) {
+        this.activeTurnPromises.delete(chatSessionId);
+      }
+    }
+  }
+
+  private async runTurnInternal(input: TurnInput, driver: TurnDriver): Promise<TurnResult> {
     const turnId = nextTurnId();
     const chatSessionId = input.chatSessionId;
     const toolOutputStore = this.getToolOutputStore(chatSessionId);
@@ -149,5 +172,6 @@ export class AgentRuntime {
       reason,
       backend: active?.backend ?? 'catty',
     });
+    await this.waitForActiveTurn(chatSessionId);
   }
 }
