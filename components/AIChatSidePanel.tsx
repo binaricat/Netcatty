@@ -48,7 +48,7 @@ import {
 import { getScopedHistorySessions } from './ai/scopedHistorySessions';
 import { buildExternalAgentHistoryMessagesForBridge } from './ai/externalAgentHistory';
 import { canSendWithAgent, findEnabledExternalAgent } from './ai/agentSendEligibility';
-import { setGrantPersister } from '../infrastructure/ai/shared/approvalGate';
+import { registerGrantPersister } from '../infrastructure/ai/shared/approvalGate';
 import { stopAgentTurn } from '../infrastructure/ai/harness/agentStop';
 import { useAIPermissionGrantsState } from '../application/state/useAIPermissionGrantsState';
 import { useConversationExport } from './ai/hooks/useConversationExport';
@@ -1011,8 +1011,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
   const { addGrant } = useAIPermissionGrantsState();
 
   useEffect(() => {
-    setGrantPersister((rule) => { addGrant(rule); });
-    return () => { setGrantPersister(null); };
+    return registerGrantPersister((rule) => { addGrant(rule); });
   }, [addGrant]);
 
   const handleStop = useCallback(() => {

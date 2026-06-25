@@ -46,6 +46,7 @@ export interface ResolveApprovalOptions {
 export type GrantPersister = (rule: PermissionGrantRule) => void;
 
 let grantPersister: GrantPersister | null = null;
+const grantPersisterStack: GrantPersister[] = [];
 let grantsHydrated = false;
 
 function ensureGrantsHydrated(): void {
@@ -57,7 +58,24 @@ function ensureGrantsHydrated(): void {
 }
 
 export function setGrantPersister(persister: GrantPersister | null): void {
+  grantPersisterStack.length = 0;
+  if (persister) {
+    grantPersisterStack.push(persister);
+  }
   grantPersister = persister;
+}
+
+/** Register a grant persister; supports multiple mounted AI panels via a stack. */
+export function registerGrantPersister(persister: GrantPersister): () => void {
+  grantPersisterStack.push(persister);
+  grantPersister = persister;
+  return () => {
+    const idx = grantPersisterStack.lastIndexOf(persister);
+    if (idx >= 0) {
+      grantPersisterStack.splice(idx, 1);
+    }
+    grantPersister = grantPersisterStack[grantPersisterStack.length - 1] ?? null;
+  };
 }
 
 // Pending approval entries keyed by toolCallId.

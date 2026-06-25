@@ -32,7 +32,9 @@ export function useVaultAgentBridge(input: UseVaultAgentBridgeInput): void {
     registerVaultAgentHandler(async (op, params) => {
       const current = inputRef.current;
       return handleVaultAgentOp(op, params, {
-        hosts: current.hosts,
+        getHosts: () => inputRef.current.hosts,
+        getNotes: () => inputRef.current.notes,
+        getCustomGroups: () => inputRef.current.customGroups,
         snippets: current.snippets,
         portForwardingRules: current.portForwardingRules,
         keys: current.keys,
@@ -40,14 +42,12 @@ export function useVaultAgentBridge(input: UseVaultAgentBridgeInput): void {
         terminalSettings: current.terminalSettings,
         resolveEffectiveHost: current.resolveEffectiveHost,
         updateHostNotes: (hostId, notes) => {
-          current.updateHosts(
-            current.hosts.map((host) => (host.id === hostId ? { ...host, notes } : host)),
+          inputRef.current.updateHosts(
+            inputRef.current.hosts.map((host) => (host.id === hostId ? { ...host, notes } : host)),
           );
         },
-        customGroups: current.customGroups,
         updateCustomGroups: current.updateCustomGroups,
         updateHosts: current.updateHosts,
-        notes: current.notes,
         updateNotes: current.updateNotes,
         startTunnel: current.startTunnel,
         stopTunnel: current.stopTunnel,

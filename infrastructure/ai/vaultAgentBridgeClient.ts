@@ -144,7 +144,9 @@ function parseOptionalStringArray(
 }
 
 export interface VaultAgentApiDeps {
-  hosts: Host[];
+  getHosts: () => Host[];
+  getNotes: () => VaultNote[];
+  getCustomGroups: () => string[];
   snippets: Snippet[];
   portForwardingRules: PortForwardingRule[];
   keys: SSHKey[];
@@ -152,10 +154,8 @@ export interface VaultAgentApiDeps {
   terminalSettings?: Pick<TerminalSettings, 'keepaliveInterval' | 'keepaliveCountMax'>;
   resolveEffectiveHost: (host: Host) => Host;
   updateHostNotes: (hostId: string, notes: string) => void;
-  customGroups: string[];
   updateCustomGroups: (groups: string[]) => void;
   updateHosts: (hosts: Host[]) => void;
-  notes: VaultNote[];
   updateNotes: (notes: VaultNote[]) => void;
   startTunnel: (
     rule: PortForwardingRule,
@@ -181,14 +181,14 @@ export async function handleVaultAgentOp(
   switch (op) {
     case 'host.get': {
       const hostId = String(params.hostId || '');
-      const host = deps.hosts.find((entry) => entry.id === hostId);
+      const host = deps.getHosts().find((entry) => entry.id === hostId);
       if (!host) return { ok: false, error: `Host "${hostId}" was not found.` };
       return { ok: true, host: sanitizeHostForAgent(deps.resolveEffectiveHost(host)) };
     }
     case 'host.list': {
       return {
         ok: true,
-        hosts: deps.hosts.map((host) => summarizeHostForList(deps.resolveEffectiveHost(host))),
+        hosts: deps.getHosts().map((host) => summarizeHostForList(deps.resolveEffectiveHost(host))),
       };
     }
     case 'hosts.create': {
@@ -221,8 +221,8 @@ export async function handleVaultAgentOp(
       }
 
       const merged = applyVaultHostCreates(
-        deps.hosts,
-        deps.customGroups,
+        deps.getHosts(),
+        deps.getCustomGroups(),
         builtHosts,
         { skipDuplicates },
       );
@@ -296,8 +296,8 @@ export async function handleVaultAgentOp(
       }
 
       const merged = applyVaultHostImport(
-        deps.hosts,
-        deps.customGroups,
+        deps.getHosts(),
+        deps.getCustomGroups(),
         importResult,
         { skipDuplicates },
       );
@@ -328,14 +328,14 @@ export async function handleVaultAgentOp(
     }
     case 'host.notes.get': {
       const hostId = String(params.hostId || '');
-      const host = deps.hosts.find((entry) => entry.id === hostId);
+      const host = deps.getHosts().find((entry) => entry.id === hostId);
       if (!host) return { ok: false, error: `Host "${hostId}" was not found.` };
       return { ok: true, hostId, notes: host.notes || '' };
     }
     case 'host.notes.set': {
       const hostId = String(params.hostId || '');
       const notes = typeof params.notes === 'string' ? params.notes : '';
-      const host = deps.hosts.find((entry) => entry.id === hostId);
+      const host = deps.getHosts().find((entry) => entry.id === hostId);
       if (!host) return { ok: false, error: `Host "${hostId}" was not found.` };
       deps.updateHostNotes(hostId, notes);
       return { ok: true, hostId };
@@ -343,12 +343,12 @@ export async function handleVaultAgentOp(
     case 'note.list': {
       return {
         ok: true,
-        notes: deps.notes.map(summarizeVaultNoteForList),
+        notes: deps.getNotes().map(summarizeVaultNoteForList),
       };
     }
     case 'note.get': {
       const noteId = String(params.noteId || '');
-      const note = deps.notes.find((entry) => entry.id === noteId);
+      const note = deps.getNotes().find((entry) => entry.id === noteId);
       if (!note) return { ok: false, error: `Vault note "${noteId}" was not found.` };
       return { ok: true, note: serializeVaultNoteForAgent(note) };
     }
@@ -366,15 +366,15 @@ export async function handleVaultAgentOp(
         group: typeof params.group === 'string' && params.group.trim() ? params.group.trim() : undefined,
         linkedHostIds,
         tags,
-        order: getNextVaultOrder(deps.notes),
+        order: getNextVaultOrder(deps.getNotes()),
       });
-      const nextNotes = normalizeVaultNotes([...deps.notes, note]);
+      const nextNotes = normalizeVaultNotes([...deps.getNotes(), note]);
       deps.updateNotes(nextNotes);
       return { ok: true, note: serializeVaultNoteForAgent(note) };
     }
     case 'note.update': {
       const noteId = String(params.noteId || '');
-      const existing = deps.notes.find((entry) => entry.id === noteId);
+      const existing = deps.getNotes().find((entry) => entry.id === noteId);
       if (!existing) return { ok: false, error: `Vault note "${noteId}" was not found.` };
       const linkedHostIds = parseOptionalStringArray(params.linkedHostIds, 'linkedHostIds');
       if (linkedHostIds && 'error' in linkedHostIds) return { ok: false, error: linkedHostIds.error };
@@ -393,7 +393,7 @@ export async function handleVaultAgentOp(
       });
       if (!note.title) return { ok: false, error: 'title cannot be empty.' };
       const nextNotes = normalizeVaultNotes(
-        deps.notes.map((entry) => (entry.id === noteId ? note : entry)),
+        deps.getNotes().map((entry) => (entry.id === noteId ? note : entry)),
       );
       deps.updateNotes(nextNotes);
       return { ok: true, note: serializeVaultNoteForAgent(note) };
@@ -482,7 +482,7 @@ export async function handleVaultAgentOp(
       const rule = deps.portForwardingRules.find((entry) => entry.id === ruleId);
       if (!rule) return { ok: false, error: `Port forwarding rule "${ruleId}" was not found.` };
       if (!rule.hostId) return { ok: false, error: 'Rule has no associated host.' };
-      const rawHost = deps.hosts.find((entry) => entry.id === rule.hostId);
+      const rawHost = deps.getHosts().find((entry) => entry.id === rule.hostId);
       if (!rawHost) return { ok: false, error: `Host "${rule.hostId}" was not found.` };
       const host = deps.resolveEffectiveHost(rawHost);
       try {
@@ -490,7 +490,7 @@ export async function handleVaultAgentOp(
       } catch (err) {
         return { ok: false, error: err instanceof Error ? err.message : String(err) };
       }
-      const effectiveHosts = deps.hosts.map((entry) => deps.resolveEffectiveHost(entry));
+      const effectiveHosts = deps.getHosts().map((entry) => deps.resolveEffectiveHost(entry));
       const result = await deps.startTunnel(
         rule,
         host,

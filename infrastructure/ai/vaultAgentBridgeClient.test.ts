@@ -3,23 +3,60 @@ import assert from 'node:assert/strict';
 import type { Host, VaultNote } from '../../domain/models';
 import { handleVaultAgentOp, type VaultAgentApiDeps } from './vaultAgentBridgeClient';
 
-function createDeps(overrides: Partial<VaultAgentApiDeps> = {}): VaultAgentApiDeps {
-  return {
-    hosts: [],
+type DepsSeed = {
+  hosts?: Host[];
+  notes?: VaultNote[];
+  customGroups?: string[];
+};
+
+function createDeps(
+  overrides: Partial<VaultAgentApiDeps> & DepsSeed = {},
+): VaultAgentApiDeps {
+  let hosts = overrides.hosts ?? [];
+  let notes = overrides.notes ?? [];
+  let customGroups = overrides.customGroups ?? [];
+
+  const base: VaultAgentApiDeps = {
+    getHosts: () => hosts,
+    getNotes: () => notes,
+    getCustomGroups: () => customGroups,
     snippets: [],
     portForwardingRules: [],
     keys: [],
     identities: [],
     resolveEffectiveHost: (host) => host,
     updateHostNotes: () => {},
-    customGroups: [],
-    updateCustomGroups: () => {},
-    updateHosts: () => {},
-    notes: [],
-    updateNotes: () => {},
+    updateCustomGroups: (groups) => {
+      customGroups = groups;
+    },
+    updateHosts: (nextHosts) => {
+      hosts = nextHosts;
+    },
+    updateNotes: (nextNotes) => {
+      notes = nextNotes;
+    },
     startTunnel: async () => ({ success: true }),
     stopTunnel: async () => ({ success: true }),
+  };
+
+  return {
+    ...base,
     ...overrides,
+    getHosts: overrides.getHosts ?? base.getHosts,
+    getNotes: overrides.getNotes ?? base.getNotes,
+    getCustomGroups: overrides.getCustomGroups ?? base.getCustomGroups,
+    updateHosts: (nextHosts) => {
+      base.updateHosts(nextHosts);
+      overrides.updateHosts?.(nextHosts);
+    },
+    updateNotes: (nextNotes) => {
+      base.updateNotes(nextNotes);
+      overrides.updateNotes?.(nextNotes);
+    },
+    updateCustomGroups: (groups) => {
+      base.updateCustomGroups(groups);
+      overrides.updateCustomGroups?.(groups);
+    },
   };
 }
 
@@ -28,8 +65,8 @@ describe('handleVaultAgentOp vault notes', () => {
     const updated: VaultNote[][] = [];
     const deps = createDeps({
       notes: [],
-      updateNotes: (notes) => {
-        updated.push(notes);
+      updateNotes: (nextNotes) => {
+        updated.push(nextNotes);
       },
     });
 
@@ -58,11 +95,11 @@ describe('handleVaultAgentOp vault notes', () => {
     const result = await handleVaultAgentOp('note.list', {}, createDeps({ notes: [note] }));
 
     assert.equal(result.ok, true);
-    const notes = (result as { notes?: Array<{ id: string; contentLength: number; title: string }> }).notes;
-    assert.equal(notes?.length, 1);
-    assert.equal(notes?.[0]?.title, 'Existing');
-    assert.equal(notes?.[0]?.contentLength, 'secret body'.length);
-    assert.equal('content' in (notes?.[0] ?? {}), false);
+    const listed = (result as { notes?: Array<{ id: string; contentLength: number; title: string }> }).notes;
+    assert.equal(listed?.length, 1);
+    assert.equal(listed?.[0]?.title, 'Existing');
+    assert.equal(listed?.[0]?.contentLength, 'secret body'.length);
+    assert.equal('content' in (listed?.[0] ?? {}), false);
   });
 
   it('note.update replaces content and bumps updatedAt', async () => {
@@ -76,8 +113,8 @@ describe('handleVaultAgentOp vault notes', () => {
     const updated: VaultNote[][] = [];
     const deps = createDeps({
       notes: [existing],
-      updateNotes: (notes) => {
-        updated.push(notes);
+      updateNotes: (nextNotes) => {
+        updated.push(nextNotes);
       },
     });
 
@@ -93,6 +130,26 @@ describe('handleVaultAgentOp vault notes', () => {
     assert.ok((updated[0]?.[0]?.updatedAt ?? 0) >= 100);
   });
 
+  it('sequential note.create calls accumulate instead of overwriting prior notes', async () => {
+    const deps = createDeps({ notes: [] });
+
+    const first = await handleVaultAgentOp(
+      'note.create',
+      { title: 'First', content: 'one' },
+      deps,
+    );
+    const second = await handleVaultAgentOp(
+      'note.create',
+      { title: 'Second', content: 'two' },
+      deps,
+    );
+
+    assert.equal(first.ok, true);
+    assert.equal(second.ok, true);
+    assert.equal(deps.getNotes().length, 2);
+    assert.deepEqual(deps.getNotes().map((note) => note.title), ['First', 'Second']);
+  });
+
   it('host.notes.set still updates host metadata separately from vault notes', async () => {
     const host: Host = {
       id: 'host-1',
@@ -104,7 +161,6 @@ describe('handleVaultAgentOp vault notes', () => {
     let hostNotes = '';
     const deps = createDeps({
       hosts: [host],
-      updateHosts: undefined as never,
       updateHostNotes: (hostId, notes) => {
         assert.equal(hostId, 'host-1');
         hostNotes = notes;
@@ -167,6 +223,26 @@ describe('handleVaultAgentOp vault hosts', () => {
     assert.equal(result.ok, true);
     assert.equal(updatedHosts[0]?.length, 2);
     assert.equal((result as { addedCount?: number }).addedCount, 2);
+  });
+
+  it('sequential hosts.create calls accumulate instead of dropping prior hosts', async () => {
+    const deps = createDeps({ hosts: [], customGroups: [] });
+
+    const first = await handleVaultAgentOp(
+      'hosts.create',
+      { hosts: JSON.stringify([{ hostname: '10.0.0.1', username: 'root', label: 'first' }]) },
+      deps,
+    );
+    const second = await handleVaultAgentOp(
+      'hosts.create',
+      { hosts: JSON.stringify([{ hostname: '10.0.0.2', username: 'root', label: 'second' }]) },
+      deps,
+    );
+
+    assert.equal(first.ok, true);
+    assert.equal(second.ok, true);
+    assert.equal(deps.getHosts().length, 2);
+    assert.deepEqual(deps.getHosts().map((host) => host.hostname), ['10.0.0.1', '10.0.0.2']);
   });
 
   it('host.import dryRun previews parsed hosts without writing', async () => {

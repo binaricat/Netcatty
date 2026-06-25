@@ -100,7 +100,7 @@ async function runCattyTurn(input: CattyTurnInput, ctx: TurnDriverContext): Prom
     activeModelId,
   );
 
-  ui.setStreamingForScope(sendScopeKey, true);
+  ui.setStreamingForScope(sessionId, true);
 
   try {
     const openAIChatAssistantFieldsByMessage = new Map<ModelMessage, OpenAIChatAssistantFields | undefined>();
@@ -307,7 +307,7 @@ async function runCattyTurn(input: CattyTurnInput, ctx: TurnDriverContext): Prom
     ui.reportStreamError(sessionId, signal, err);
   } finally {
     ui.updateLastMessage(sessionId, msg => msg.statusText ? { ...msg, statusText: '' } : msg);
-    ui.setStreamingForScope(sendScopeKey, false);
+    ui.setStreamingForScope(sessionId, false);
     context.autoTitleSession(sessionId, context.titleText ?? trimmed);
   }
 }
