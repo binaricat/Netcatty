@@ -233,6 +233,13 @@ function createPreloadApi(ctx) {
     telnetAutoLoginCancelledListeners.get(sessionId).add(cb);
     return () => telnetAutoLoginCancelledListeners.get(sessionId)?.delete(cb);
   },
+  onTelnetEchoMode: (sessionId, cb) => {
+    if (!telnetEchoModeListeners.has(sessionId)) {
+      telnetEchoModeListeners.set(sessionId, new Set());
+    }
+    telnetEchoModeListeners.get(sessionId).add(cb);
+    return () => telnetEchoModeListeners.get(sessionId)?.delete(cb);
+  },
   onAuthFailed: (sessionId, cb) => {
     if (!authFailedListeners.has(sessionId)) authFailedListeners.set(sessionId, new Set());
     authFailedListeners.get(sessionId).add(cb);

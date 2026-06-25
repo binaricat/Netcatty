@@ -44,6 +44,15 @@ function createTelnetSessionApi(ctx) {
         // do not corrupt their stream by misreading stray 0xFF bytes as IAC.
         let telnetProtocolActive = false;
         let telnetCleanData = Buffer.alloc(0);
+        const canAutoLocalEcho = !options.username && typeof options.password !== "string";
+        const sendEchoMode = (remoteEcho) => {
+          const contents = electronModule.webContents.fromId(event.sender.id);
+          contents?.send("netcatty:telnet:echo-mode", {
+            sessionId,
+            remoteEcho,
+            localEcho: !remoteEcho && canAutoLocalEcho,
+          });
+        };
     
         const writeRawTelnetCommand = (cmd, opt) => {
           if (socket.destroyed) return;
@@ -66,6 +75,7 @@ function createTelnetSessionApi(ctx) {
             const session = sessions.get(sessionId);
             return { cols: session?.cols ?? cols, rows: session?.rows ?? rows };
           },
+          onRemoteEchoChange: sendEchoMode,
         });
     
         const telnetParser = telnetProtocol.createTelnetParser({

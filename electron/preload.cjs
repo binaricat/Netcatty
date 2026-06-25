@@ -17,6 +17,7 @@ const sftpConnectionProgressListeners = new Set();
 const authFailedListeners = new Map();
 const telnetAutoLoginCompleteListeners = new Map();
 const telnetAutoLoginCancelledListeners = new Map();
+const telnetEchoModeListeners = new Map();
 const languageChangeListeners = new Set();
 const fullscreenChangeListeners = new Set();
 const keyboardInteractiveListeners = new Set();
@@ -318,6 +319,18 @@ ipcRenderer.on("netcatty:telnet:auto-login-cancelled", (_event, payload) => {
       cb(payload);
     } catch (err) {
       console.error("Telnet auto-login cancellation callback failed", err);
+    }
+  });
+});
+
+ipcRenderer.on("netcatty:telnet:echo-mode", (_event, payload) => {
+  const set = telnetEchoModeListeners.get(payload.sessionId);
+  if (!set) return;
+  set.forEach((cb) => {
+    try {
+      cb(payload);
+    } catch (err) {
+      console.error("Telnet echo mode callback failed", err);
     }
   });
 });
@@ -660,6 +673,7 @@ const api = createPreloadApi({
   authFailedListeners,
   telnetAutoLoginCompleteListeners,
   telnetAutoLoginCancelledListeners,
+  telnetEchoModeListeners,
   languageChangeListeners,
   fullscreenChangeListeners,
   keyboardInteractiveListeners,

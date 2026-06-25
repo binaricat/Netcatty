@@ -56,6 +56,7 @@ import {
   resolveMiddleClickBehavior,
 } from "./middleClickBehavior";
 import { handleSerialLineModeInput } from "./serialLineInput";
+import { formatTelnetLocalEcho } from "./telnetLocalEcho";
 import {
   isTerminalFontSizeAction,
   nextTerminalFontSizeForAction,
@@ -181,6 +182,7 @@ export type CreateXTermRuntimeContext = {
   serialLocalEcho?: boolean;
   serialLineMode?: boolean;
   serialLineBufferRef?: RefObject<string>;
+  telnetLocalEchoRef?: RefObject<boolean>;
   onTerminalLogData?: (data: string) => void;
 
   // Callback when shell reports CWD change via OSC 7
@@ -1037,6 +1039,10 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
           } else if (dataToWrite.charCodeAt(0) >= 32 || dataToWrite.length > 1) {
             writeLocalTerminalData(dataToWrite);
           }
+        }
+        if (ctx.host.protocol === "telnet" && ctx.telnetLocalEchoRef?.current) {
+          const localEcho = formatTelnetLocalEcho(dataToWrite);
+          if (localEcho) writeLocalTerminalData(localEcho);
         }
       }
 

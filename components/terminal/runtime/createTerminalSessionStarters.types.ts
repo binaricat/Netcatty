@@ -58,6 +58,10 @@ export type TerminalBackendApi = {
     sessionId: string,
     cb: (evt: { sessionId: string }) => void,
   ) => (() => void) | undefined;
+  onTelnetEchoMode?: (
+    sessionId: string,
+    cb: (evt: { sessionId: string; remoteEcho: boolean; localEcho: boolean }) => void,
+  ) => (() => void) | undefined;
   onChainProgress: (
     cb: (sessionId: string, hop: number, total: number, label: string, status: string, error?: string) => void,
   ) => (() => void) | undefined;
@@ -110,6 +114,7 @@ export type TerminalSessionStartersContext = {
   terminalSettingsRef?: RefObject<TerminalSettings | undefined>;
   terminalBackend: TerminalBackendApi;
   serialConfig?: SerialConfig;
+  telnetLocalEchoRef?: RefObject<boolean>;
   sessionLog?: SessionLogConfig;
   sshDebugLogEnabled?: boolean;
   sudoAutofillPassword?: string;

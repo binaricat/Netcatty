@@ -330,6 +330,18 @@ test("peer's WILL ECHO triggers DO ECHO, repeated WILL ECHO is swallowed as ack"
   ]);
 });
 
+test("peer's ECHO negotiation publishes remote echo state", () => {
+  const states = [];
+  const { negotiator } = recordNegotiator({
+    onRemoteEchoChange: (enabled) => states.push(enabled),
+  });
+
+  negotiator.handleCommand(WILL, OPT.ECHO);
+  negotiator.handleCommand(WONT, OPT.ECHO);
+
+  assert.deepEqual(states, [true, false]);
+});
+
 test("peer's WONT on our pending DO is swallowed", () => {
   const { negotiator, commands } = recordNegotiator();
   negotiator.start();

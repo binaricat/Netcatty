@@ -287,6 +287,10 @@ declare global {
       sessionId: string,
       cb: (evt: { sessionId: string }) => void
     ): () => void;
+    onTelnetEchoMode?(
+      sessionId: string,
+      cb: (evt: { sessionId: string; remoteEcho: boolean; localEcho: boolean }) => void
+    ): () => void;
     onAuthFailed?(
       sessionId: string,
       cb: (evt: { sessionId: string; error: string; hostname: string }) => void

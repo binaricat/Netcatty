@@ -567,6 +567,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
 
     let disposeAutoLoginComplete: (() => void) | undefined;
     let disposeAutoLoginCancelled: (() => void) | undefined;
+    let disposeTelnetEchoMode: (() => void) | undefined;
     let cancelPendingStartupCommand: (() => void) | undefined;
     const disposeAutoLoginListener = () => {
       disposeAutoLoginComplete?.();
@@ -579,6 +580,9 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
     const cleanupTelnetStartupWait = () => {
       disposeAutoLoginListener();
       disposeAutoLoginCancelListener();
+      disposeTelnetEchoMode?.();
+      disposeTelnetEchoMode = undefined;
+      if (ctx.telnetLocalEchoRef) ctx.telnetLocalEchoRef.current = false;
       cancelPendingStartupCommand?.();
       cancelPendingStartupCommand = undefined;
     };
@@ -621,6 +625,15 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         disposeAutoLoginCancelled = ctx.terminalBackend.onTelnetAutoLoginCancelled?.(
           ctx.sessionId,
           cleanupTelnetStartupWait,
+        );
+      }
+      if (ctx.telnetLocalEchoRef && ctx.terminalBackend.onTelnetEchoMode) {
+        ctx.telnetLocalEchoRef.current = false;
+        disposeTelnetEchoMode = ctx.terminalBackend.onTelnetEchoMode(
+          ctx.sessionId,
+          (evt) => {
+            ctx.telnetLocalEchoRef!.current = Boolean(evt.localEcho);
+          },
         );
       }
       const id = await ctx.terminalBackend.startTelnetSession({

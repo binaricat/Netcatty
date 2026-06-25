@@ -268,6 +268,7 @@ function createTelnetNegotiator({
   writeSubnegotiation,
   getWindowSize,
   termType = "XTERM-256COLOR",
+  onRemoteEchoChange,
 } = {}) {
   const pendingDoRequests = new Set();
   const pendingWillRequests = new Set();
@@ -278,6 +279,7 @@ function createTelnetNegotiator({
   const sizeFn = typeof getWindowSize === "function"
     ? getWindowSize
     : () => ({ cols: 80, rows: 24 });
+  const echoSink = typeof onRemoteEchoChange === "function" ? onRemoteEchoChange : () => {};
 
   const naws = () => {
     const { cols, rows } = sizeFn() || {};
@@ -326,6 +328,7 @@ function createTelnetNegotiator({
     }
 
     if (cmd === WILL) {
+      if (opt === OPT.ECHO) echoSink(true);
       if (!acknowledgesOurRequest) {
         if (opt === OPT.SUPPRESS_GO_AHEAD || opt === OPT.ECHO) {
           cmdSink(DO, opt);
@@ -356,6 +359,7 @@ function createTelnetNegotiator({
     }
 
     if (cmd === WONT) {
+      if (opt === OPT.ECHO) echoSink(false);
       if (!acknowledgesOurRequest) cmdSink(DONT, opt);
       return;
     }
