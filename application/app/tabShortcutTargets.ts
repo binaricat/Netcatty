@@ -12,3 +12,11 @@ export function buildNumberShortcutTabTargets(params: {
   const pinnedTabs = params.showSftpTab ? ['vault', 'sftp'] : ['vault'];
   return [...pinnedTabs, ...workTabs];
 }
+
+/** Tab ids targeted by next/previous tab shortcuts. */
+export function buildCycleTabTargets(params: {
+  orderedTabs: readonly string[];
+  editorTabIds: readonly string[];
+}): string[] {
+  return [...params.orderedTabs, ...params.editorTabIds];
+}
