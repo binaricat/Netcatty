@@ -64,7 +64,7 @@ export const SafetySettings: React.FC<{
   const permissionModeOptions = [
     { value: "observer", label: t('ai.safety.permissionMode.observer') },
     { value: "confirm", label: t('ai.safety.permissionMode.confirm') },
-    { value: "autonomous", label: t('ai.safety.permissionMode.autonomous') },
+    { value: "auto", label: t('ai.safety.permissionMode.auto') },
   ];
 
   return (

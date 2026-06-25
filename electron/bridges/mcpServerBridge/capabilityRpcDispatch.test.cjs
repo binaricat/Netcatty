@@ -175,10 +175,10 @@ test("dispatchCapabilityRpc reads permissionMode from deps on each call", async 
   });
 
   await liveDispatch("vault/host/get", { hostId: "host-1" });
-  mutableDeps.permissionMode = PERMISSION_MODES.AUTONOMOUS;
+  mutableDeps.permissionMode = PERMISSION_MODES.AUTO;
   await liveDispatch("vault/host/get", { hostId: "host-2" });
 
-  assert.deepEqual(seenModes, [PERMISSION_MODES.CONFIRM, PERMISSION_MODES.AUTONOMOUS]);
+  assert.deepEqual(seenModes, [PERMISSION_MODES.CONFIRM, PERMISSION_MODES.AUTO]);
 });
 
 test("implemented vault capabilities do not return CAPABILITY_NOT_IMPLEMENTED", async () => {

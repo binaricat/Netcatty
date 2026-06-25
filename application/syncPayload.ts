@@ -466,7 +466,7 @@ export function collectSyncableSettings(): SyncPayload['settings'] {
   const activeModelId = localStorageAdapter.readString(STORAGE_KEY_AI_ACTIVE_MODEL);
   if (activeModelId != null) ai.activeModelId = activeModelId;
   const permissionMode = localStorageAdapter.readString(STORAGE_KEY_AI_PERMISSION_MODE);
-  if (permissionMode === 'observer' || permissionMode === 'confirm' || permissionMode === 'autonomous') {
+  if (permissionMode === 'observer' || permissionMode === 'confirm' || permissionMode === 'auto') {
     ai.globalPermissionMode = permissionMode;
   }
   const toolIntegrationMode = localStorageAdapter.readString(STORAGE_KEY_AI_TOOL_INTEGRATION_MODE);

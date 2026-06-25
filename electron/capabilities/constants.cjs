@@ -2,7 +2,7 @@
 
 /** @typedef {'builtin' | 'public' | 'cli' | 'global' | 'catty' | 'globalAgent'} CapabilitySurface */
 /** @typedef {'implemented' | 'planned'} CapabilityStatus */
-/** @typedef {'observer' | 'confirm' | 'autonomous'} PermissionMode */
+/** @typedef {'observer' | 'confirm' | 'auto'} PermissionMode */
 /** @typedef {'sidebar' | 'global'} AgentKind */
 
 const CAPABILITY_SURFACES = Object.freeze({
@@ -32,7 +32,7 @@ const CAPABILITY_STATUS = Object.freeze({
 const PERMISSION_MODES = Object.freeze({
   OBSERVER: "observer",
   CONFIRM: "confirm",
-  AUTONOMOUS: "autonomous",
+  AUTO: "auto",
 });
 
 const RPC_TIMEOUT_DEFAULTS = Object.freeze({

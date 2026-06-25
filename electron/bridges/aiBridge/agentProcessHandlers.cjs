@@ -51,7 +51,7 @@ function registerAgentProcessHandlers(ctx) {
 
   ipcMain.handle("netcatty:ai:mcp:set-permission-mode", async (event, { mode }) => {
     if (!validateSenderOrSettings(event)) return { ok: false, error: "Unauthorized IPC sender" };
-    const validModes = ["observer", "confirm", "autonomous"];
+    const validModes = ["observer", "confirm", "auto"];
     if (!validModes.includes(mode)) {
       return { ok: false, error: `mode must be one of: ${validModes.join(", ")}` };
     }

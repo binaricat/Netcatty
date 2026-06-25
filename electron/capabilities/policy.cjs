@@ -3,7 +3,7 @@
 const { CAPABILITY_SURFACES, PERMISSION_MODES } = require("./constants.cjs");
 const { getCapabilityByRpcMethod } = require("./registry.cjs");
 
-const OBSERVER_DENY_MESSAGE = 'Operation denied: permission mode is "observer" (read-only). Change to "confirm" or "autonomous" in Settings → AI → Safety to allow this action.';
+const OBSERVER_DENY_MESSAGE = 'Operation denied: permission mode is "observer" (read-only). Change to "confirm" or "auto" in Settings → AI → Safety to allow this action.';
 const CHAT_SESSION_REQUIRED_MESSAGE = "chatSessionId is required for write operations.";
 const CHAT_SESSION_CANCELLED_MESSAGE = "Operation cancelled: the SDK agent session was stopped.";
 const USER_DENIED_MESSAGE = "Operation denied by user.";

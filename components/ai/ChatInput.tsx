@@ -472,7 +472,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
 
   const status: PromptInputStatus = isStreaming ? 'streaming' : 'idle';
 
-  // Permission mode chip removed — agents run in autonomous mode
+  // Permission mode chip removed — agents run in auto mode
 
   // selectedModelId may be "<modelId>/<thinkingLevel>" for codex ChatGPT models
   // (e.g. "gpt-5.4/high"). Note: custom config.toml / OpenRouter model ids
@@ -1009,11 +1009,11 @@ const ChatInput: React.FC<ChatInputProps> = ({
                     >
                       {permissionMode === 'observer' && <Eye size={11} className="text-blue-400/70" />}
                       {permissionMode === 'confirm' && <ShieldCheck size={11} className="text-yellow-400/70" />}
-                      {permissionMode === 'autonomous' && <Zap size={11} className="text-green-400/70" />}
+                      {permissionMode === 'auto' && <Zap size={11} className="text-green-400/70" />}
                       <span className="truncate max-w-[72px]">
                         {permissionMode === 'observer' && t('ai.chat.permObserver')}
                         {permissionMode === 'confirm' && t('ai.chat.permConfirm')}
-                        {permissionMode === 'autonomous' && t('ai.chat.permAuto')}
+                        {permissionMode === 'auto' && t('ai.chat.permAuto')}
                       </span>
                       <ChevronDown size={9} className="text-muted-foreground/50" />
                     </button>
@@ -1031,7 +1031,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
                       style={{ left: menuPos.left, bottom: menuPos.bottom }}
                     >
                       {([
-                        { mode: 'autonomous' as const, icon: Zap, color: 'text-green-400/70', label: t('ai.chat.permAuto'), desc: t('ai.chat.permAutoDesc') },
+                        { mode: 'auto' as const, icon: Zap, color: 'text-green-400/70', label: t('ai.chat.permAuto'), desc: t('ai.chat.permAutoDesc') },
                         { mode: 'confirm' as const, icon: ShieldCheck, color: 'text-yellow-400/70', label: t('ai.chat.permConfirm'), desc: t('ai.chat.permConfirmDesc') },
                         { mode: 'observer' as const, icon: Eye, color: 'text-blue-400/70', label: t('ai.chat.permObserver'), desc: t('ai.chat.permObserverDesc') },
                       ]).map(({ mode, icon: Icon, color, label, desc }) => (

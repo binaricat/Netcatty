@@ -315,7 +315,7 @@ export const enAiMessages: Messages = {
   'ai.safety.permissionMode.description': 'Controls how the AI interacts with your Netcatty terminal sessions. Observer mode blocks write operations that go through Netcatty. External agent CLIs may still have their own local tools and approval flow.',
   'ai.safety.permissionMode.observer': 'Observer - Read only, no actions',
   'ai.safety.permissionMode.confirm': 'Confirm - Ask before actions',
-  'ai.safety.permissionMode.autonomous': 'Autonomous - Execute freely',
+  'ai.safety.permissionMode.auto': 'Auto - Execute freely',
   'ai.safety.commandTimeout': 'Command Timeout',
   'ai.safety.commandTimeout.description': 'Maximum seconds a command can run before being terminated through Netcatty execution.',
   'ai.safety.commandTimeout.unit': 'sec',

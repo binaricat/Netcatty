@@ -87,7 +87,7 @@ test("public surface treats sensitive reads as confirm-gated", () => {
 test("write operations require chatSessionId on builtin surface", () => {
   const decision = evaluateRpcPermission({
     rpcMethod: "netcatty/exec",
-    permissionMode: PERMISSION_MODES.AUTONOMOUS,
+    permissionMode: PERMISSION_MODES.AUTO,
     params: {},
   });
   assert.equal(decision.allowed, false);
@@ -97,7 +97,7 @@ test("write operations require chatSessionId on builtin surface", () => {
 test("cancelled chat sessions block terminal writes", () => {
   const decision = evaluateRpcPermission({
     rpcMethod: "netcatty/exec",
-    permissionMode: PERMISSION_MODES.AUTONOMOUS,
+    permissionMode: PERMISSION_MODES.AUTO,
     params: { chatSessionId: "chat-1" },
     context: { chatSessionCancelled: true },
   });
@@ -108,7 +108,7 @@ test("cancelled chat sessions block terminal writes", () => {
 test("cancelled chat sessions block sftp writes", () => {
   const decision = evaluateRpcPermission({
     rpcMethod: "netcatty/sftp/write",
-    permissionMode: PERMISSION_MODES.AUTONOMOUS,
+    permissionMode: PERMISSION_MODES.AUTO,
     params: { chatSessionId: "chat-1" },
     context: { chatSessionCancelled: true },
   });
@@ -119,7 +119,7 @@ test("cancelled chat sessions block sftp writes", () => {
 test("cancelled chat sessions still allow sftp reads", () => {
   const decision = evaluateRpcPermission({
     rpcMethod: "netcatty/sftp/list",
-    permissionMode: PERMISSION_MODES.AUTONOMOUS,
+    permissionMode: PERMISSION_MODES.AUTO,
     params: { chatSessionId: "chat-1" },
     context: { chatSessionCancelled: true },
   });

@@ -264,7 +264,7 @@ export interface SyncPayload {
       providers?: Array<Record<string, unknown>>;
       activeProviderId?: string;
       activeModelId?: string;
-      globalPermissionMode?: 'observer' | 'confirm' | 'autonomous';
+      globalPermissionMode?: 'observer' | 'confirm' | 'auto';
       toolIntegrationMode?: 'mcp' | 'skills';
       hostPermissions?: Array<Record<string, unknown>>;
       // externalAgents intentionally omitted: command/args/env are device-local

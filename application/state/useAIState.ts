@@ -83,7 +83,7 @@ export function useAIState() {
   // ── Permission Model ──
   const [globalPermissionMode, setGlobalPermissionModeRaw] = useState<AIPermissionMode>(() => {
     const stored = localStorageAdapter.readString(STORAGE_KEY_AI_PERMISSION_MODE);
-    if (stored === 'observer' || stored === 'confirm' || stored === 'autonomous') return stored;
+    if (stored === 'observer' || stored === 'confirm' || stored === 'auto') return stored;
     return 'confirm';
   });
   const [toolIntegrationMode, setToolIntegrationModeRaw] = useState<AIToolIntegrationMode>(() => {
@@ -399,7 +399,7 @@ export function useAIState() {
             break;
           case STORAGE_KEY_AI_PERMISSION_MODE: {
             const mode = localStorageAdapter.readString(STORAGE_KEY_AI_PERMISSION_MODE);
-            if (mode === 'observer' || mode === 'confirm' || mode === 'autonomous') {
+            if (mode === 'observer' || mode === 'confirm' || mode === 'auto') {
               setGlobalPermissionModeRaw(mode);
               getAIBridge()?.aiMcpSetPermissionMode?.(mode);
             }
@@ -545,7 +545,7 @@ export function useAIState() {
     bridge?.aiMcpSetMaxIterations?.(initialMaxIter);
     const storedPermMode = localStorageAdapter.readString(STORAGE_KEY_AI_PERMISSION_MODE);
     const initialPermMode: AIPermissionMode =
-      storedPermMode === 'observer' || storedPermMode === 'confirm' || storedPermMode === 'autonomous'
+      storedPermMode === 'observer' || storedPermMode === 'confirm' || storedPermMode === 'auto'
         ? storedPermMode
         : 'confirm';
     bridge?.aiMcpSetPermissionMode?.(initialPermMode);

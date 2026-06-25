@@ -14,6 +14,42 @@ import {
 } from './AIChatSidePanel.tsx';
 import type { AIChatSidePanelProps } from './AIChatSidePanel.types.ts';
 
+type LocalStorageMock = {
+  clear(): void;
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+  removeItem(key: string): void;
+};
+
+function installLocalStorage(): LocalStorageMock {
+  const store = new Map<string, string>();
+  const localStorage: LocalStorageMock = {
+    clear() {
+      store.clear();
+    },
+    getItem(key: string) {
+      return store.has(key) ? store.get(key)! : null;
+    },
+    setItem(key: string, value: string) {
+      store.set(key, String(value));
+    },
+    removeItem(key: string) {
+      store.delete(key);
+    },
+  };
+  Object.defineProperty(globalThis, 'localStorage', {
+    value: localStorage,
+    configurable: true,
+  });
+  return localStorage;
+}
+
+const localStorage = installLocalStorage();
+
+test.beforeEach(() => {
+  localStorage.clear();
+});
+
 const draft = (overrides: Partial<AIDraft> = {}): AIDraft => ({
   text: '',
   agentId: 'catty',
@@ -64,7 +100,7 @@ const baseProps = (overrides: Partial<AIChatSidePanelProps> = {}): AIChatSidePan
   setAgentModel: () => undefined,
   agentProviderMap: {},
   setAgentProvider: () => undefined,
-  globalPermissionMode: 'autonomous',
+  globalPermissionMode: 'auto',
   scopeType: 'terminal',
   scopeTargetId: 'terminal-1',
   isVisible: false,

@@ -198,7 +198,7 @@ export interface AISessionScope {
 }
 
 // Permission model
-export type AIPermissionMode = 'observer' | 'confirm' | 'autonomous';
+export type AIPermissionMode = 'observer' | 'confirm' | 'auto';
 export type AIToolIntegrationMode = 'mcp' | 'skills';
 
 export interface HostAIPermission {

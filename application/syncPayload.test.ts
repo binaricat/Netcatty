@@ -143,7 +143,7 @@ test("buildSyncPayload includes AI configuration settings", () => {
   localStorage.setItem(storageKeys.STORAGE_KEY_AI_PROVIDERS, JSON.stringify(providers));
   localStorage.setItem(storageKeys.STORAGE_KEY_AI_ACTIVE_PROVIDER, "openai-main");
   localStorage.setItem(storageKeys.STORAGE_KEY_AI_ACTIVE_MODEL, "gpt-test");
-  localStorage.setItem(storageKeys.STORAGE_KEY_AI_PERMISSION_MODE, "autonomous");
+  localStorage.setItem(storageKeys.STORAGE_KEY_AI_PERMISSION_MODE, "auto");
   localStorage.setItem(storageKeys.STORAGE_KEY_AI_TOOL_INTEGRATION_MODE, "skills");
   localStorage.setItem(storageKeys.STORAGE_KEY_AI_DEFAULT_AGENT, "codex");
   localStorage.setItem(storageKeys.STORAGE_KEY_AI_COMMAND_BLOCKLIST, JSON.stringify(["rm -rf"]));
@@ -160,7 +160,7 @@ test("buildSyncPayload includes AI configuration settings", () => {
     providers,
     activeProviderId: "openai-main",
     activeModelId: "gpt-test",
-    globalPermissionMode: "autonomous",
+    globalPermissionMode: "auto",
     toolIntegrationMode: "skills",
     defaultAgentId: "codex",
     commandBlocklist: ["rm -rf"],

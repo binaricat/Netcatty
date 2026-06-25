@@ -21,7 +21,7 @@ export interface SystemPromptContext {
       status?: string;
     }>;
   }>;
-  permissionMode: 'observer' | 'confirm' | 'autonomous';
+  permissionMode: 'observer' | 'confirm' | 'auto';
   webSearchEnabled?: boolean;
   userSkillsContext?: string;
 }
@@ -151,7 +151,7 @@ function buildHostList(
 }
 
 function buildPermissionRules(
-  permissionMode: 'observer' | 'confirm' | 'autonomous',
+  permissionMode: 'observer' | 'confirm' | 'auto',
 ): string {
   switch (permissionMode) {
     case 'observer':
@@ -161,7 +161,7 @@ function buildPermissionRules(
         '- Fetching URLs (`url_fetch`)',
         '- Searching the web (`web_search`)',
         '',
-        'All write and execute operations are denied. If the user asks you to run a command or modify a file, explain that observer mode does not allow it and suggest switching to confirm or autonomous mode.',
+        'All write and execute operations are denied. If the user asks you to run a command or modify a file, explain that observer mode does not allow it and suggest switching to confirm or auto mode.',
       ].join('\n');
 
     case 'confirm':
@@ -172,11 +172,11 @@ function buildPermissionRules(
         'You do NOT need to ask the user for confirmation in your text responses. Just call the tool directly — the approval system handles it. Read-only operations are allowed without any approval.',
       ].join('\n');
 
-    case 'autonomous':
+    case 'auto':
       return [
-        'You are in **autonomous** mode. You may execute commands and write files without explicit per-action approval, as long as they are not on the blocklist.',
+        'You are in **auto** mode. You may execute commands and write files without explicit per-action approval, as long as they are not on the blocklist.',
         '',
-        'Even in autonomous mode:',
+        'Even in auto mode:',
         '- Always present a plan for multi-step tasks before starting.',
         '- Blocked commands are still denied regardless of mode.',
         '- Exercise caution with destructive or irreversible operations.',

@@ -303,7 +303,7 @@ export const ruAiMessages: Messages = {
   'ai.safety.permissionMode.description': 'Управляет тем, как AI взаимодействует с вашими терминалами. Режим наблюдателя блокирует все операции записи через Netcatty и применяется как к встроенным, так и к внешним агентам. Режим подтверждения носит рекомендательный характер для внешних агентов (они управляют собственным потоком одобрения инструментов).',
   'ai.safety.permissionMode.observer': 'Наблюдатель — только чтение, без действий',
   'ai.safety.permissionMode.confirm': 'Подтверждение — спрашивать перед действиями',
-  'ai.safety.permissionMode.autonomous': 'Автономный — выполнять свободно',
+  'ai.safety.permissionMode.auto': 'Авто — выполнять свободно',
   'ai.safety.commandTimeout': 'Тайм-аут команды',
   'ai.safety.commandTimeout.description': 'Максимальное число секунд, которое команда может выполняться до принудительного завершения. Применяется как к встроенным, так и к внешним агентам.',
   'ai.safety.commandTimeout.unit': 'с',
