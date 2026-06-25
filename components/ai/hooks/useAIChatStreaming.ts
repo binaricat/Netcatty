@@ -39,6 +39,8 @@ import {
 import {
   compressMessagesForRequestTooLargeRetry,
 } from '../../../infrastructure/ai/requestPayloadCompression';
+import type { AgentEvent, AgentEventContext } from '../../../infrastructure/ai/agentEvent';
+import { createAgentEvent, createAgentEventFromContext } from '../../../infrastructure/ai/agentEvent';
 import {
   createCattyRequestTooLargeRetryError,
   hadToolProgressBeforeRequestTooLarge,
@@ -50,6 +52,7 @@ import { getExternalAgentSdkBackend } from '../../../infrastructure/ai/managedAg
 import { runSdkAgentTurn } from '../../../infrastructure/ai/sdkAgentAdapter';
 import { classifyError, isRequestTooLargeError } from '../../../infrastructure/ai/errorClassifier';
 import { isSdkStreamStateError } from '../../../infrastructure/ai/shared/streamStateErrors';
+import { onApprovalTraceEvent } from '../../../infrastructure/ai/shared/approvalGate';
 import {
   buildPromptWithTerminalSelectionAttachments,
   isTerminalSelectionAttachment,
@@ -163,6 +166,7 @@ function collectOpenAIChatAssistantFieldsForMessages(
 export interface UseAIChatStreamingParams {
   maxIterations: number;
   addMessageToSession: (sessionId: string, message: ChatMessage) => void;
+  appendAgentEventToSession: (sessionId: string, event: AgentEvent) => void;
   updateLastMessage: (sessionId: string, updater: (msg: ChatMessage) => ChatMessage) => void;
   updateMessageById: (sessionId: string, messageId: string, updater: (msg: ChatMessage) => ChatMessage) => void;
 }
@@ -189,6 +193,7 @@ export interface UseAIChatStreamingReturn {
     currentAssistantMsgId: string,
     advancedParams?: ProviderAdvancedParams,
     continuationContext?: CattyProviderContinuationContext,
+    turnId?: string,
   ) => Promise<void>;
   /** Send a message to the Catty agent (built-in). */
   sendToCattyAgent: (
@@ -251,6 +256,7 @@ export interface SendToExternalContext {
 export function useAIChatStreaming({
   maxIterations,
   addMessageToSession,
+  appendAgentEventToSession,
   updateLastMessage,
   updateMessageById,
 }: UseAIChatStreamingParams): UseAIChatStreamingReturn {
@@ -258,6 +264,12 @@ export function useAIChatStreaming({
   const [streamingSessionIds, setStreamingSessions] = useState<Set<string>>(
     () => new Set(sharedStreamingSessionIds),
   );
+
+  const appendTraceEvent = useCallback((event: AgentEvent) => {
+    appendAgentEventToSession(event.sessionId, event);
+  }, [appendAgentEventToSession]);
+
+  useEffect(() => onApprovalTraceEvent(appendTraceEvent), [appendTraceEvent]);
   useEffect(() => {
     const syncFromStore = () => {
       setStreamingSessions(new Set(sharedStreamingSessionIds));
@@ -329,7 +341,15 @@ export function useAIChatStreaming({
     currentAssistantMsgId: string,
     advancedParams?: ProviderAdvancedParams,
     continuationContext?: CattyProviderContinuationContext,
+    turnId?: string,
   ): Promise<void> => {
+    const traceContext: AgentEventContext = {
+      sessionId: streamSessionId,
+      turnId,
+      source: 'catty',
+      model: continuationContext?.source.modelId,
+      providerId: continuationContext?.source.providerType,
+    };
     const result = streamText({
       model,
       messages: sdkMessages,
@@ -448,6 +468,11 @@ export function useAIChatStreaming({
             updateAssistantContinuation(messageId, { textProviderOptions: providerOptions });
           }
           if (text) {
+            appendTraceEvent(createAgentEventFromContext(traceContext, {
+              type: 'model_delta',
+              delta: text,
+              messageId: activeMsgId,
+            }));
             pendingText += text;
             if (rafId === null) {
               rafId = requestAnimationFrame(flushText);
@@ -473,6 +498,21 @@ export function useAIChatStreaming({
             : undefined;
           if (continuation || rText) {
             const messageId = ensureAssistantMessage();
+            if (rText) {
+              appendTraceEvent(createAgentEventFromContext(traceContext, {
+                type: 'reasoning_delta',
+                delta: rText,
+                phase: chunk.type === 'reasoning-start' ? 'start' : 'delta',
+                messageId,
+              }));
+            } else if (chunk.type === 'reasoning-start') {
+              appendTraceEvent(createAgentEventFromContext(traceContext, {
+                type: 'reasoning_delta',
+                delta: '',
+                phase: 'start',
+                messageId,
+              }));
+            }
             updateAssistantContinuation(messageId, continuation, rText);
           }
           break;
@@ -489,13 +529,38 @@ export function useAIChatStreaming({
           break;
         }
         case 'reasoning-end':
+          appendTraceEvent(createAgentEventFromContext(traceContext, {
+            type: 'reasoning_delta',
+            delta: '',
+            phase: 'end',
+            messageId: activeMsgId,
+          }));
+          break;
         case 'text-start':
         case 'text-end':
         case 'start':
-        case 'finish':
         case 'start-step':
         case 'finish-step':
           break;
+        case 'finish': {
+          const usage = (chunk as { usage?: {
+            inputTokens?: number;
+            outputTokens?: number;
+            totalTokens?: number;
+            promptTokens?: number;
+            completionTokens?: number;
+          } }).usage;
+          if (usage) {
+            appendTraceEvent(createAgentEventFromContext(traceContext, {
+              type: 'usage',
+              promptTokens: usage.promptTokens ?? usage.inputTokens,
+              completionTokens: usage.completionTokens ?? usage.outputTokens,
+              totalTokens: usage.totalTokens,
+              raw: usage,
+            }));
+          }
+          break;
+        }
         case 'tool-call': {
           cancelPendingFlush();
           flushText();
@@ -503,6 +568,13 @@ export function useAIChatStreaming({
           hadToolProgress = true;
           const messageId = ensureAssistantMessage();
           const providerOptions = normalizeProviderContinuationOptions(typedChunk.providerMetadata);
+          appendTraceEvent(createAgentEventFromContext(traceContext, {
+            type: 'tool_call',
+            toolCallId: typedChunk.toolCallId,
+            toolName: typedChunk.toolName,
+            args: (typedChunk.input ?? typedChunk.args) as Record<string, unknown>,
+            messageId,
+          }));
           updateMessageById(streamSessionId, messageId, msg => ({
             ...msg,
             toolCalls: [...(msg.toolCalls || []), {
@@ -534,6 +606,14 @@ export function useAIChatStreaming({
           );
           const toolOutput = typedChunk.output ?? typedChunk.result;
           const toolError = isToolResultError(toolOutput);
+          appendTraceEvent(createAgentEventFromContext(traceContext, {
+            type: 'tool_result',
+            toolCallId: typedChunk.toolCallId,
+            output: typeof toolOutput === 'string'
+              ? toolOutput
+              : JSON.stringify(toolOutput),
+            isError: toolError,
+          }));
           addMessageToSession(streamSessionId, {
             id: generateId(),
             role: 'tool',
@@ -583,6 +663,12 @@ export function useAIChatStreaming({
           }
           cancelPendingFlush();
           flushText();
+          appendTraceEvent(createAgentEventFromContext(traceContext, {
+            type: 'error',
+            error: classifyError(typedChunk.error).message,
+            retryable: classifyError(typedChunk.error).retryable,
+            errorKind: classifyError(typedChunk.error).type,
+          }));
           updateMessageById(streamSessionId, activeMsgId, msg => ({
             ...msg,
             statusText: '',
@@ -610,7 +696,7 @@ export function useAIChatStreaming({
       reader.releaseLock();
     }
     return;
-  }, [maxIterations, addMessageToSession, updateMessageById]);
+  }, [maxIterations, addMessageToSession, updateMessageById, appendTraceEvent]);
 
   // -------------------------------------------------------------------
   // sendToExternalAgent
@@ -632,6 +718,22 @@ export function useAIChatStreaming({
     );
 
     const sdkBackend = getExternalAgentSdkBackend(agentConfig);
+    const turnId = `turn-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const turnStartedAt = Date.now();
+    appendTraceEvent(createAgentEvent({
+      type: 'turn_start',
+      sessionId,
+      turnId,
+      source: 'external_sdk',
+      agentId: agentConfig.id,
+      backend: sdkBackend,
+      model: context.selectedAgentModel || agentConfig.name || 'external',
+      prompt: trimmed,
+      attachments: attachedImages.map(attachment => ({
+        filename: attachment.filename,
+        mediaType: attachment.mediaType,
+      })),
+    }));
     if (sdkBackend && bridge) {
       const requestId = `sdk_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
 
@@ -651,14 +753,38 @@ export function useAIChatStreaming({
           });
         }
       };
+      let sawErrorEvent = false;
+      let turnEnded = false;
+      const endTurn = (status: Extract<AgentEvent, { type: 'turn_end' }>['status']) => {
+        if (turnEnded) return;
+        turnEnded = true;
+        appendTraceEvent(createAgentEvent({
+          type: 'turn_end',
+          sessionId,
+          turnId,
+          source: 'external_sdk',
+          requestId,
+          backend: sdkBackend,
+          model: context.selectedAgentModel,
+          status,
+          durationMs: Date.now() - turnStartedAt,
+        }));
+      };
 
-      await runSdkAgentTurn(
-        bridge,
-        requestId,
-        sessionId,
-        agentConfig,
-        trimmed,
-        {
+      try {
+        await runSdkAgentTurn(
+          bridge,
+          requestId,
+          sessionId,
+          agentConfig,
+          trimmed,
+          {
+          onAgentEvent: (event) => {
+            if (event.type === 'error') {
+              sawErrorEvent = true;
+            }
+            appendTraceEvent(event);
+          },
           onTextDelta: (text: string) => {
             maybeCreateAssistantMsg();
             updateLastMessage(sessionId, msg => ({
@@ -715,35 +841,92 @@ export function useAIChatStreaming({
             context.updateExternalSessionId?.(sessionId, externalSessionId);
           },
           onError: (error: string) => {
+            if (!sawErrorEvent) {
+              appendTraceEvent(createAgentEvent({
+                type: 'error',
+                sessionId,
+                turnId,
+                source: 'external_sdk',
+                requestId,
+                backend: sdkBackend,
+                model: context.selectedAgentModel,
+                error,
+                errorKind: 'agent',
+              }));
+            }
+            endTurn('error');
             reportStreamError(sessionId, abortController.signal, error);
             setStreamingForScope(sessionId, false);
           },
-          onDone: () => {},
-        },
-        abortController.signal,
-        // Managed SDK agents (codex, claude) must resolve auth from their own
-        // CLI config/login state, so we deliberately pass no providerId here.
-        // See issue #705 for Codex; same reasoning for Claude.
-        undefined,
-        context.selectedAgentModel,
-        context.existingSessionId,
-        context.historyMessages,
-        attachedImages.length > 0 ? attachedImages : undefined,
-        context.toolIntegrationMode,
-        context.defaultTargetSession,
-        userSkillsContext,
-      );
+          onDone: () => {
+            endTurn(abortController.signal.aborted ? 'aborted' : 'completed');
+          },
+          },
+          abortController.signal,
+          // Managed SDK agents (codex, claude) must resolve auth from their own
+          // CLI config/login state, so we deliberately pass no providerId here.
+          // See issue #705 for Codex; same reasoning for Claude.
+          undefined,
+          context.selectedAgentModel,
+          context.existingSessionId,
+          context.historyMessages,
+          attachedImages.length > 0 ? attachedImages : undefined,
+          context.toolIntegrationMode,
+          context.defaultTargetSession,
+          userSkillsContext,
+          turnId,
+        );
+      } catch (err) {
+        const errorInfo = classifyError(err);
+        if (!sawErrorEvent) {
+          appendTraceEvent(createAgentEvent({
+            type: 'error',
+            sessionId,
+            turnId,
+            source: 'external_sdk',
+            requestId,
+            backend: sdkBackend,
+            model: context.selectedAgentModel,
+            error: errorInfo.message,
+            retryable: errorInfo.retryable,
+            errorKind: errorInfo.type,
+          }));
+        }
+        endTurn(abortController.signal.aborted ? 'aborted' : 'error');
+        throw err;
+      }
     } else {
+      const error = 'This agent has no SDK backend configured. Re-discover it in Settings -> AI.';
+      appendTraceEvent(createAgentEvent({
+        type: 'error',
+        sessionId,
+        turnId,
+        source: 'external_sdk',
+        backend: sdkBackend,
+        model: context.selectedAgentModel,
+        error,
+        errorKind: 'agent',
+      }));
+      appendTraceEvent(createAgentEvent({
+        type: 'turn_end',
+        sessionId,
+        turnId,
+        source: 'external_sdk',
+        backend: sdkBackend,
+        model: context.selectedAgentModel,
+        status: 'error',
+        durationMs: Date.now() - turnStartedAt,
+      }));
       // Managed agents always route through the SDK path above.
       reportStreamError(
         sessionId,
         abortController.signal,
-        'This agent has no SDK backend configured. Re-discover it in Settings -> AI.',
+        error,
       );
       setStreamingForScope(sessionId, false);
     }
   }, [
-    addMessageToSession, updateLastMessage, setStreamingForScope, reportStreamError,
+    addMessageToSession, updateLastMessage, setStreamingForScope, reportStreamError, appendTraceEvent,
   ]);
 
   // -------------------------------------------------------------------
@@ -803,6 +986,30 @@ export function useAIChatStreaming({
     }
 
     const activeModelId = context.activeModelId || context.activeProvider.defaultModel || '';
+    const turnId = `turn-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const turnStartedAt = Date.now();
+    let turnStatus: Extract<AgentEvent, { type: 'turn_end' }>['status'] = 'completed';
+    appendTraceEvent(createAgentEvent({
+      type: 'turn_start',
+      sessionId,
+      turnId,
+      source: 'catty',
+      agentId: 'catty',
+      model: activeModelId,
+      providerId: context.activeProvider.providerId,
+      prompt: trimmed,
+      attachments: attachments?.map(attachment => ({
+        filename: attachment.filename,
+        mediaType: attachment.mediaType,
+        terminalSelection: attachment.terminalSelection,
+        lineCount: attachment.lineCount,
+      })),
+      scope: {
+        type: context.scopeType,
+        targetId: context.scopeTargetId,
+        label: context.scopeLabel,
+      },
+    }));
     const continuationContext: CattyProviderContinuationContext = {
       source: {
         providerConfigId: context.activeProvider.id,
@@ -1075,7 +1282,20 @@ export function useAIChatStreaming({
           if (statusText) {
             updateLastMessage(sessionId, msg => ({ ...msg, statusText }));
           }
+          const compactionReason: Extract<AgentEvent, { type: 'compaction' }>['reason'] =
+            force || compressForRequestTooLargeRetry ? 'request_too_large' : 'threshold';
           const inputMessages = compressRetryMessages(messages, compressionLog);
+          appendTraceEvent(createAgentEvent({
+            type: 'compaction',
+            sessionId,
+            turnId,
+            source: 'catty',
+            model: activeModelId,
+            providerId: context.activeProvider?.providerId,
+            phase: 'start',
+            reason: compactionReason,
+            messagesBefore: inputMessages.length,
+          }));
           const compacted = await prepareContextCompaction({
             messages: inputMessages,
             contextWindow,
@@ -1087,10 +1307,35 @@ export function useAIChatStreaming({
           let nextMessages = force && !compacted.didCompact
             ? keepRecentContextMessages(inputMessages, DEFAULT_PROTECT_RECENT_MESSAGES)
             : compacted.messages;
+          appendTraceEvent(createAgentEvent({
+            type: 'compaction',
+            sessionId,
+            turnId,
+            source: 'catty',
+            model: activeModelId,
+            providerId: context.activeProvider?.providerId,
+            phase: 'end',
+            reason: compactionReason,
+            messagesBefore: inputMessages.length,
+            messagesAfter: nextMessages.length,
+            didCompact: compacted.didCompact || (force && !compacted.didCompact),
+          }));
           return compressRetryMessages(nextMessages);
         } catch (err) {
           if (abortController.signal.aborted) throw err;
           console.warn(fallbackLog, err);
+          appendTraceEvent(createAgentEvent({
+            type: 'compaction',
+            sessionId,
+            turnId,
+            source: 'catty',
+            model: activeModelId,
+            providerId: context.activeProvider?.providerId,
+            phase: 'error',
+            reason: force || compressForRequestTooLargeRetry ? 'request_too_large' : 'threshold',
+            messagesBefore: messages.length,
+            error: err instanceof Error ? err.message : String(err),
+          }));
           const fallbackMessages = keepRecentContextMessages(messages, DEFAULT_PROTECT_RECENT_MESSAGES);
           if (!compressForRequestTooLargeRetry) {
             return fallbackMessages;
@@ -1120,6 +1365,7 @@ export function useAIChatStreaming({
           assistantMsgId,
           context.activeProvider?.advancedParams,
           continuationContext,
+          turnId,
         );
       } catch (streamErr) {
         if (abortController.signal.aborted || !isRequestTooLargeError(streamErr)) {
@@ -1183,12 +1429,39 @@ export function useAIChatStreaming({
           retryAssistantMsgId,
           context.activeProvider?.advancedParams,
           continuationContext,
+          turnId,
         );
       }
     } catch (err) {
       console.error('[Catty] streamText error:', err);
+      turnStatus = abortController.signal.aborted ? 'aborted' : 'error';
+      const errorInfo = classifyError(err);
+      appendTraceEvent(createAgentEvent({
+        type: 'error',
+        sessionId,
+        turnId,
+        source: 'catty',
+        model: activeModelId,
+        providerId: context.activeProvider?.providerId,
+        error: errorInfo.message,
+        retryable: errorInfo.retryable,
+        errorKind: errorInfo.type,
+      }));
       reportStreamError(sessionId, abortController.signal, err);
     } finally {
+      if (abortController.signal.aborted) {
+        turnStatus = 'aborted';
+      }
+      appendTraceEvent(createAgentEvent({
+        type: 'turn_end',
+        sessionId,
+        turnId,
+        source: 'catty',
+        model: activeModelId,
+        providerId: context.activeProvider?.providerId,
+        status: turnStatus,
+        durationMs: Date.now() - turnStartedAt,
+      }));
       // Clear any lingering statusText when the stream finishes
       updateLastMessage(sessionId, msg => msg.statusText ? { ...msg, statusText: '' } : msg);
       setStreamingForScope(sessionId, false);
@@ -1198,6 +1471,7 @@ export function useAIChatStreaming({
   }, [
     processCattyStream, reportStreamError, setStreamingForScope,
     addMessageToSession, updateLastMessage, updateMessageById,
+    appendTraceEvent,
   ]);
 
   return {

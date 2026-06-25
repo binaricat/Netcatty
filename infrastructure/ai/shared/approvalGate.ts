@@ -14,6 +14,8 @@
  * Approvals are scoped by optional chatSessionId to prevent cross-session
  * interference when stopping or cancelling sessions.
  */
+import type { AgentEvent } from '../agentEvent';
+import { createAgentEvent } from '../agentEvent';
 
 /** Default timeout for unanswered approval prompts (5 minutes). */
 const APPROVAL_TIMEOUT_MS = 5 * 60 * 1000;
@@ -41,6 +43,50 @@ const listeners = new Set<ApprovalRequestListener>();
 // Subscribers for approval cleared/removed events (UI listens to clean up cards)
 type ApprovalClearedListener = (toolCallIds: string[]) => void;
 const clearedListeners = new Set<ApprovalClearedListener>();
+
+type ApprovalTraceListener = (event: AgentEvent) => void;
+const traceListeners = new Set<ApprovalTraceListener>();
+
+function approvalSource(toolCallId: string): AgentEvent['source'] {
+  return toolCallId.startsWith('mcp_approval_') ? 'mcp' : 'catty';
+}
+
+function emitApprovalTraceEvent(event: AgentEvent): void {
+  for (const listener of traceListeners) {
+    try { listener(event); } catch { /* ignore listener errors */ }
+  }
+}
+
+function emitApprovalRequested(request: ApprovalRequest, timeoutMs?: number): void {
+  if (!request.chatSessionId) return;
+  emitApprovalTraceEvent(createAgentEvent({
+    type: 'approval_requested',
+    sessionId: request.chatSessionId,
+    source: approvalSource(request.toolCallId),
+    approvalId: request.toolCallId,
+    toolCallId: request.toolCallId,
+    toolName: request.toolName,
+    args: request.args,
+    timeoutMs,
+  }));
+}
+
+function emitApprovalResolved(
+  request: ApprovalRequest,
+  approved: boolean,
+  resolution: Extract<AgentEvent, { type: 'approval_resolved' }>['resolution'],
+): void {
+  if (!request.chatSessionId) return;
+  emitApprovalTraceEvent(createAgentEvent({
+    type: 'approval_resolved',
+    sessionId: request.chatSessionId,
+    source: approvalSource(request.toolCallId),
+    approvalId: request.toolCallId,
+    toolCallId: request.toolCallId,
+    approved,
+    resolution,
+  }));
+}
 
 /**
  * Called from a tool's `execute` function when it needs user approval.
@@ -74,6 +120,7 @@ export function requestApproval(
       if (pendingApprovals.has(toolCallId)) {
         pendingApprovals.delete(toolCallId);
         wrappedResolve(false);
+        emitApprovalResolved(request, false, 'timeout');
         // Notify UI to remove the stale card
         for (const cl of clearedListeners) {
           try { cl([toolCallId]); } catch { /* ignore */ }
@@ -82,6 +129,7 @@ export function requestApproval(
     }, timeoutMs);
 
     // Notify all UI listeners
+    emitApprovalRequested(request, timeoutMs);
     for (const listener of listeners) {
       try { listener(request); } catch { /* ignore listener errors */ }
     }
@@ -98,6 +146,7 @@ export function resolveApproval(toolCallId: string, approved: boolean): void {
     pendingApprovals.delete(toolCallId);
     // SDK tool calls have a real resolve; MCP tool calls have a no-op resolve
     entry.resolve(approved);
+    emitApprovalResolved(entry.request, approved, approved ? 'approved' : 'denied');
   }
 
   // MCP tool call: also forward response to main process via IPC
@@ -123,6 +172,11 @@ export function onApprovalRequest(listener: ApprovalRequestListener): () => void
 export function onApprovalCleared(listener: ApprovalClearedListener): () => void {
   clearedListeners.add(listener);
   return () => { clearedListeners.delete(listener); };
+}
+
+export function onApprovalTraceEvent(listener: ApprovalTraceListener): () => void {
+  traceListeners.add(listener);
+  return () => { traceListeners.delete(listener); };
 }
 
 /**
@@ -162,6 +216,7 @@ export function clearAllPendingApprovals(chatSessionId?: string): void {
     // Clear everything (legacy / global stop)
     for (const [id, entry] of pendingApprovals) {
       entry.resolve(false);
+      emitApprovalResolved(entry.request, false, 'cleared');
       clearedIds.push(id);
     }
     pendingApprovals.clear();
@@ -171,6 +226,7 @@ export function clearAllPendingApprovals(chatSessionId?: string): void {
       if (entry.request.chatSessionId === chatSessionId) {
         pendingApprovals.delete(id);
         entry.resolve(false);
+        emitApprovalResolved(entry.request, false, 'cleared');
         clearedIds.push(id);
       }
     }
@@ -231,6 +287,7 @@ export function setupMcpApprovalBridge(): () => void {
     }
 
     // Notify all UI listeners
+    emitApprovalRequested(request);
     for (const listener of listeners) {
       try { listener(request); } catch { /* ignore listener errors */ }
     }
@@ -242,7 +299,11 @@ export function setupMcpApprovalBridge(): () => void {
     const clearedIds: string[] = [];
     for (const id of payload.approvalIds) {
       if (pendingApprovals.has(id)) {
+        const entry = pendingApprovals.get(id);
         pendingApprovals.delete(id);
+        if (entry) {
+          emitApprovalResolved(entry.request, false, 'cleared');
+        }
         clearedIds.push(id);
       }
     }

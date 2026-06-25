@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import { formatSdkAgentErrorForDisplay, runSdkAgentTurn } from './sdkAgentAdapter';
 import type { SdkAgentCallbacks } from './sdkAgentAdapter';
+import type { AgentEvent } from './agentEvent';
 import type { ExternalAgentConfig } from './types';
 
 function createCallbacks(errors: string[]): SdkAgentCallbacks {
@@ -238,6 +239,73 @@ test('runSdkAgentTurn stores SDK session ids with backend and path metadata', as
     backend: 'codex',
     binPath: '/opt/homebrew/bin/codex',
   });
+});
+
+test('runSdkAgentTurn normalizes SDK stream events to AgentEvent callbacks', async () => {
+  const agentEvents: AgentEvent[] = [];
+  let onEvent: ((event: unknown) => void) | null = null;
+  let done: (() => void) | null = null;
+  const bridge: Record<string, (...args: unknown[]) => unknown> = {
+    aiSdkAgentStream: async () => {
+      queueMicrotask(() => {
+        onEvent?.({
+          type: 'tool-call',
+          toolName: 'terminal_execute',
+          args: { command: 'pwd' },
+          toolCallId: 'tc-1',
+        });
+        onEvent?.({
+          type: 'tool-result',
+          toolCallId: 'tc-1',
+          output: '/workspace',
+          toolName: 'terminal_execute',
+        });
+        done?.();
+      });
+      return { ok: true };
+    },
+    aiSdkAgentCancel: async () => ({ ok: true }),
+    onAiSdkAgentEvent: (_requestId: unknown, cb: unknown) => {
+      onEvent = cb as (event: unknown) => void;
+      return () => {};
+    },
+    onAiSdkAgentDone: (_requestId: unknown, cb: unknown) => {
+      done = cb as () => void;
+      return () => {};
+    },
+    onAiSdkAgentError: () => () => {},
+  };
+
+  await runSdkAgentTurn(
+    bridge,
+    'request-trace',
+    'chat-trace',
+    sdkConfig,
+    'hello',
+    {
+      ...createCallbacks([]),
+      onAgentEvent: (event) => agentEvents.push(event),
+    },
+    undefined,
+    undefined,
+    'gpt-5.5',
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    'turn-1',
+  );
+
+  assert.deepEqual(agentEvents.map(event => event.type), ['tool_call', 'tool_result']);
+  assert.equal(agentEvents[0].sessionId, 'chat-trace');
+  assert.equal(agentEvents[0].turnId, 'turn-1');
+  assert.equal(agentEvents[0].source, 'external_sdk');
+  assert.equal(agentEvents[0].backend, 'codex');
+  assert.equal(agentEvents[0].model, 'gpt-5.5');
+  assert.deepEqual((agentEvents[0] as Extract<AgentEvent, { type: 'tool_call' }>).args, { command: 'pwd' });
+  assert.equal((agentEvents[1] as Extract<AgentEvent, { type: 'tool_result' }>).output, '/workspace');
 });
 
 test('runSdkAgentTurn forwards Cursor API key as agent environment', async () => {

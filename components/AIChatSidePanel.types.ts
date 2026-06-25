@@ -11,6 +11,7 @@ import type {
   WebSearchConfig,
 } from '../infrastructure/ai/types';
 import type { AIQuickMessage } from '../infrastructure/ai/quickMessages';
+import type { AgentEvent } from '../infrastructure/ai/agentEvent';
 import type { ExecutorContext } from '../infrastructure/ai/cattyAgent/executor';
 
 // -------------------------------------------------------------------
@@ -40,6 +41,7 @@ export interface AIChatSidePanelProps {
   updateSessionTitle: (sessionId: string, title: string) => void;
   updateSessionExternalSessionId: (sessionId: string, externalSessionId: string | undefined) => void;
   addMessageToSession: (sessionId: string, message: ChatMessage) => void;
+  appendAgentEventToSession: (sessionId: string, event: AgentEvent) => void;
   updateLastMessage: (
     sessionId: string,
     updater: (msg: ChatMessage) => ChatMessage,

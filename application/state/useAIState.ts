@@ -21,6 +21,11 @@ import {
 } from '../../infrastructure/config/storageKeys';
 import type { AIQuickMessage } from '../../infrastructure/ai/quickMessages';
 import { sanitizeQuickMessages } from '../../infrastructure/ai/quickMessages';
+import type { AgentEvent } from '../../infrastructure/ai/agentEvent';
+import {
+  appendAgentEvent,
+  DEFAULT_MAX_AGENT_TRACE_EVENTS,
+} from '../../infrastructure/ai/traceStore';
 import type {
   AIDraft,
   AISession,
@@ -724,6 +729,22 @@ export function useAIState() {
     });
   }, [debouncedPersistSessions]);
 
+  const appendAgentEventToSession = useCallback((sessionId: string, event: AgentEvent) => {
+    setSessionsRaw(prev => {
+      const next = prev.map(s => {
+        if (s.id !== sessionId) return s;
+        return {
+          ...s,
+          trace: appendAgentEvent(s.trace, event, DEFAULT_MAX_AGENT_TRACE_EVENTS),
+          updatedAt: Date.now(),
+        };
+      });
+      setLatestAISessionsSnapshot(next);
+      debouncedPersistSessions();
+      return next;
+    });
+  }, [debouncedPersistSessions]);
+
   const updateLastMessage = useCallback((sessionId: string, updater: (msg: ChatMessage) => ChatMessage) => {
     setSessionsRaw(prev => {
       const next = prev.map(s => {
@@ -760,7 +781,7 @@ export function useAIState() {
       persistTimerRef.current = null;
     }
     setSessionsRaw(prev => {
-      const next = prev.map(s => s.id === sessionId ? { ...s, messages: [], updatedAt: Date.now() } : s);
+      const next = prev.map(s => s.id === sessionId ? { ...s, messages: [], trace: [], updatedAt: Date.now() } : s);
       setLatestAISessionsSnapshot(next);
       persistSessions(next);
       return next;
@@ -1046,6 +1067,7 @@ export function useAIState() {
     updateSessionTitle,
     updateSessionExternalSessionId,
     addMessageToSession,
+    appendAgentEventToSession,
     updateLastMessage,
     updateMessageById,
     clearSessionMessages,
@@ -1103,6 +1125,7 @@ export function useAIState() {
     updateSessionTitle,
     updateSessionExternalSessionId,
     addMessageToSession,
+    appendAgentEventToSession,
     updateLastMessage,
     updateMessageById,
     clearSessionMessages,

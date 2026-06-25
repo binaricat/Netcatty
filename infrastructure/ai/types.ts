@@ -1,5 +1,6 @@
 // AI Provider types
 import defaultCommandBlocklist from '../../lib/commandBlocklist.json';
+import type { AgentEvent } from './agentEvent';
 import type { ProviderContinuation } from './providerContinuation';
 
 export type AIProviderId =
@@ -186,6 +187,8 @@ export interface AISession {
   agentId: string;
   scope: AISessionScope;
   messages: ChatMessage[];
+  /** Append-only runtime trace. `messages` remains the UI projection/cache. */
+  trace?: AgentEvent[];
   externalSessionId?: string;
   createdAt: number;
   updatedAt: number;

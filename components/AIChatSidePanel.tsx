@@ -239,6 +239,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
   updateSessionTitle,
   updateSessionExternalSessionId,
   addMessageToSession,
+  appendAgentEventToSession,
   updateLastMessage,
   updateMessageById,
   providers,
@@ -289,6 +290,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
   } = useAIChatStreaming({
     maxIterations,
     addMessageToSession,
+    appendAgentEventToSession,
     updateLastMessage,
     updateMessageById,
   });
@@ -1149,6 +1151,7 @@ const AI_CHAT_SIDE_PANEL_AI_STATE_KEYS = [
   'updateSessionTitle',
   'updateSessionExternalSessionId',
   'addMessageToSession',
+  'appendAgentEventToSession',
   'updateLastMessage',
   'updateMessageById',
   'providers',

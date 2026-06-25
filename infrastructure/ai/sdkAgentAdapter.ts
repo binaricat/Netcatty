@@ -6,6 +6,8 @@
  */
 
 import type { AIToolIntegrationMode, ExternalAgentConfig } from './types';
+import type { AgentEvent, AgentEventContext } from './agentEvent';
+import { normalizeSdkStreamEventToAgentEvents } from './agentEvent';
 import { getExternalAgentSdkBackend } from './managedAgents';
 import { decryptField } from '../persistence/secureFieldAdapter';
 
@@ -23,6 +25,7 @@ export interface DefaultTargetSessionHint {
 }
 
 export interface SdkAgentCallbacks {
+  onAgentEvent?: (event: AgentEvent) => void;
   onSessionId?: (sessionId: string) => void;
   onTextDelta: (text: string) => void;
   onThinkingDelta: (text: string) => void;
@@ -182,6 +185,7 @@ export async function runSdkAgentTurn(
   toolIntegrationMode?: AIToolIntegrationMode,
   defaultTargetSession?: DefaultTargetSessionHint,
   userSkillsContext?: string,
+  turnId?: string,
 ): Promise<void> {
   const sdkBridge = bridge as unknown as SdkAgentBridge;
   const sdkBackend = getExternalAgentSdkBackend(config);
@@ -210,7 +214,15 @@ export async function runSdkAgentTurn(
 
   // Set up event listeners before starting stream
   const unsubEvent = sdkBridge.onAiSdkAgentEvent(requestId, (event: StreamEvent) => {
-    const streamFailed = handleStreamEvent(event, callbacks);
+    const streamFailed = handleStreamEvent(event, callbacks, {
+      sessionId: chatSessionId,
+      source: 'external_sdk',
+      requestId,
+      turnId,
+      backend: sdkBackend,
+      model,
+      providerId,
+    });
     if (streamFailed) {
       settle();
     }
@@ -299,7 +311,15 @@ function cleanup(fns: (() => void)[]) {
  * Handle a single stream event from the AI SDK fullStream.
  * Events come from `streamText().fullStream` in the main process.
  */
-function handleStreamEvent(event: StreamEvent, callbacks: SdkAgentCallbacks): boolean {
+function handleStreamEvent(
+  event: StreamEvent,
+  callbacks: SdkAgentCallbacks,
+  context: AgentEventContext,
+): boolean {
+  for (const agentEvent of normalizeSdkStreamEventToAgentEvents(event, context)) {
+    callbacks.onAgentEvent?.(agentEvent);
+  }
+
   switch (event.type) {
     case 'text-delta': {
       const text = (event.textDelta as string) || (event.delta as string) || '';

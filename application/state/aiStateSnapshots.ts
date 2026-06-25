@@ -3,6 +3,10 @@ import {
   STORAGE_KEY_AI_ACTIVE_SESSION_MAP,
   STORAGE_KEY_AI_SESSIONS,
 } from '../../infrastructure/config/storageKeys';
+import {
+  DEFAULT_MAX_AGENT_TRACE_EVENTS,
+  trimAgentTrace,
+} from '../../infrastructure/ai/traceStore';
 import type {
   AIDraft,
   AIPanelView,
@@ -160,6 +164,8 @@ export function cleanupOrphanedAISessions(activeTargetIds: Set<string>) {
 const MAX_STORED_SESSIONS = 50;
 /** Maximum number of messages per session when persisting to localStorage. */
 const MAX_SESSION_MESSAGES = 200;
+/** Maximum number of trace events per session when persisting to localStorage. */
+const MAX_SESSION_TRACE_EVENTS = DEFAULT_MAX_AGENT_TRACE_EVENTS;
 
 /**
  * Prune sessions before writing to localStorage to prevent hitting the
@@ -174,10 +180,15 @@ export function pruneSessionsForStorage(sessions: AISession[]): AISession[] {
   const sorted = [...sessions].sort((a, b) => b.updatedAt - a.updatedAt);
   const limited = sorted.slice(0, MAX_STORED_SESSIONS);
   return limited.map(s => {
-    if (s.messages.length > MAX_SESSION_MESSAGES) {
-      return { ...s, messages: s.messages.slice(-MAX_SESSION_MESSAGES) };
-    }
-    return s;
+    const messages = s.messages.length > MAX_SESSION_MESSAGES
+      ? s.messages.slice(-MAX_SESSION_MESSAGES)
+      : s.messages;
+    const trace = s.trace?.length
+      ? trimAgentTrace(s.trace, MAX_SESSION_TRACE_EVENTS)
+      : s.trace;
+    return messages !== s.messages || trace !== s.trace
+      ? { ...s, messages, trace }
+      : s;
   });
 }
 
