@@ -1,5 +1,6 @@
 // AI Provider types
 import defaultCommandBlocklist from '../../lib/commandBlocklist.json';
+import type { ContextCompactionTrace } from './contextCompaction';
 import type { ProviderContinuation } from './providerContinuation';
 
 export type AIProviderId =
@@ -141,6 +142,9 @@ export interface ChatMessage {
     toolName: string;
     toolArgs: Record<string, unknown>;
     status: 'pending' | 'approved' | 'denied';
+  };
+  diagnostics?: {
+    contextCompaction?: ContextCompactionTrace[];
   };
 }
 

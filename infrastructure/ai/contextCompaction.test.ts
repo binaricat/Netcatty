@@ -3,7 +3,9 @@ import assert from "node:assert/strict";
 import type { ModelMessage } from "ai";
 
 import {
+  buildContextCompactionTrace,
   buildCompactedMessages,
+  estimateModelMessagesChars,
   estimateModelMessagesTokens,
   estimateUnknownTokens,
   findSafeCompactionSplitIndex,
@@ -105,6 +107,15 @@ test("prepareContextCompaction summarizes old messages and returns compacted con
   assert.equal(result.didCompact, true);
   assert.equal(result.summary, "Summary of old messages.");
   assert.deepEqual(result.messages.slice(-2), messages.slice(-2));
+  assert.equal(result.trace.mode, "llm-summary");
+  assert.equal(result.trace.triggerReason, "context-window-threshold");
+  assert.equal(result.trace.compactedMessageCount, 2);
+  assert.equal(result.trace.retainedTailMessageCount, 2);
+  assert.deepEqual(result.trace.ranges.summarizedMessages, { start: 0, endExclusive: 2 });
+  assert.deepEqual(result.trace.ranges.retainedTail, { start: 2, endExclusive: 4 });
+  assert.equal(result.trace.before.messageCount, 4);
+  assert.equal(result.trace.after.messageCount, 4);
+  assert.ok(result.trace.after.estimatedTokens < result.trace.before.estimatedTokens);
 });
 
 test("prepareContextCompaction includes reserved request tokens in the compaction check", async () => {
@@ -127,6 +138,76 @@ test("prepareContextCompaction includes reserved request tokens in the compactio
 
   assert.equal(result.didCompact, true);
   assert.equal(result.summary, "System prompt forced compaction.");
+  assert.ok(result.trace.reservedTokens > 0);
+  assert.ok(result.trace.before.estimatedPromptTokens > result.trace.before.estimatedTokens);
+});
+
+test("prepareContextCompaction returns a skipped trace below the threshold", async () => {
+  const messages: ModelMessage[] = [
+    { role: "user", content: "short prompt" },
+    { role: "assistant", content: "short answer" },
+  ];
+
+  const result = await prepareContextCompaction({
+    messages,
+    contextWindow: 10_000,
+    summarize: async () => {
+      throw new Error("summarizer should not run");
+    },
+    trace: {
+      now: () => 123,
+    },
+  });
+
+  assert.equal(result.didCompact, false);
+  assert.equal(result.trace.createdAt, 123);
+  assert.equal(result.trace.mode, "skipped");
+  assert.equal(result.trace.skippedReason, "below-threshold");
+  assert.equal(result.trace.before.estimatedChars, estimateModelMessagesChars(messages));
+  assert.equal(result.trace.after.estimatedChars, result.trace.before.estimatedChars);
+});
+
+test("buildContextCompactionTrace records request-too-large retry metadata", () => {
+  const messagesBefore: ModelMessage[] = [
+    { role: "user", content: "old ".repeat(100) },
+    { role: "assistant", content: "recent answer" },
+  ];
+  const messagesAfter: ModelMessage[] = [
+    { role: "user", content: "recent answer" },
+  ];
+
+  const trace = buildContextCompactionTrace({
+    messagesBefore,
+    messagesAfter,
+    contextWindow: 100,
+    reservedTokens: 11.2,
+    thresholdRatio: 0,
+    protectRecentMessages: 1,
+    splitAt: 1,
+    mode: "recent-tail-fallback",
+    skippedReason: "summarizer-error",
+    triggerReason: "http-413-retry",
+    requestTooLargeRetry: {
+      attempt: 1,
+      hadToolProgress: true,
+      payloadCompressionAppliedBeforeCompaction: true,
+      payloadCompressionAppliedAfterCompaction: false,
+    },
+    now: () => 456,
+  });
+
+  assert.equal(trace.createdAt, 456);
+  assert.equal(trace.didCompact, true);
+  assert.equal(trace.mode, "recent-tail-fallback");
+  assert.equal(trace.skippedReason, "summarizer-error");
+  assert.equal(trace.reservedTokens, 12);
+  assert.equal(trace.requestTooLargeRetry?.attempt, 1);
+  assert.equal(trace.requestTooLargeRetry?.hadToolProgress, true);
+  assert.equal(trace.requestTooLargeRetry?.payloadCompressionAppliedBeforeCompaction, true);
+  assert.equal(trace.before.messageCount, 2);
+  assert.equal(trace.after.messageCount, 1);
+  assert.equal(trace.compactedMessageCount, 1);
+  assert.equal(trace.retainedTailMessageCount, 1);
 });
 
 test("prepareContextCompaction summarizes older tool results instead of dropping them first", async () => {
@@ -173,6 +254,52 @@ test("prepareContextCompaction summarizes older tool results instead of dropping
 
   assert.equal(result.didCompact, true);
   assert.match(result.messages[0]?.content as string, /81% full/);
+});
+
+test("prepareContextCompaction keeps tool call and result together when the split overlaps their boundary", async () => {
+  const messages: ModelMessage[] = [
+    { role: "user", content: "old setup ".repeat(80) },
+    {
+      role: "assistant",
+      content: [
+        {
+          type: "tool-call",
+          toolCallId: "call-1",
+          toolName: "terminal_execute",
+          input: { command: "npm test" },
+        },
+      ],
+    },
+    {
+      role: "tool",
+      content: [
+        {
+          type: "tool-result",
+          toolCallId: "call-1",
+          toolName: "terminal_execute",
+          output: { type: "text", value: "AssertionError: failed" },
+        },
+      ],
+    },
+    { role: "user", content: "recent follow-up" },
+    { role: "assistant", content: "recent answer" },
+  ];
+
+  const result = await prepareContextCompaction({
+    messages,
+    contextWindow: 90,
+    protectRecentMessages: 3,
+    summarize: async (messagesToSummarize) => {
+      assert.deepEqual(messagesToSummarize, messages.slice(0, 1));
+      return "Old setup happened.";
+    },
+  });
+
+  assert.equal(result.didCompact, true);
+  assert.equal(result.trace.splitIndex, 1);
+  assert.equal(result.trace.compactedMessageCount, 1);
+  assert.equal(result.trace.retainedTailMessageCount, 4);
+  assert.deepEqual(result.messages.slice(-4), messages.slice(1));
 });
 
 test("formatMessagesForCompaction redacts image and file payloads", () => {

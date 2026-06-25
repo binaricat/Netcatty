@@ -27,6 +27,7 @@ import type {
 import { isWebSearchReady } from '../../../infrastructure/ai/types';
 import { buildSystemPrompt } from '../../../infrastructure/ai/cattyAgent/systemPrompt';
 import {
+  buildContextCompactionTrace,
   CONTEXT_COMPACTION_SYSTEM_PROMPT,
   DEFAULT_CONTEXT_WINDOW_TOKENS,
   DEFAULT_PROTECT_RECENT_MESSAGES,
@@ -35,6 +36,8 @@ import {
   keepRecentContextMessages,
   prepareContextCompaction,
   resolveContextWindow,
+  type ContextCompactionRequestTooLargeRetryInfo,
+  type ContextCompactionTrace,
 } from '../../../infrastructure/ai/contextCompaction';
 import {
   compressMessagesForRequestTooLargeRetry,
@@ -1046,6 +1049,23 @@ export function useAIChatStreaming({
         );
         return pruned;
       };
+      const recordContextCompactionTrace = (
+        messageId: string,
+        trace: ContextCompactionTrace,
+      ) => {
+        if (!trace.didCompact && !trace.requestTooLargeRetry) return;
+        console.info('[Catty] Context compaction trace:', trace);
+        updateMessageById(sessionId, messageId, msg => ({
+          ...msg,
+          diagnostics: {
+            ...msg.diagnostics,
+            contextCompaction: [
+              ...(msg.diagnostics?.contextCompaction ?? []),
+              trace,
+            ],
+          },
+        }));
+      };
       const compactMessages = async (
         messages: ModelMessage[],
         {
@@ -1054,28 +1074,46 @@ export function useAIChatStreaming({
           fallbackLog,
           compressForRequestTooLargeRetry = false,
           compressionLog,
+          traceTargetMessageId = assistantMsgId,
+          triggerReason = force ? 'http-413-retry' : 'context-window-threshold',
+          requestTooLargeRetry,
         }: {
           force?: boolean;
           statusText?: string;
           fallbackLog: string;
           compressForRequestTooLargeRetry?: boolean;
           compressionLog?: string;
+          traceTargetMessageId?: string;
+          triggerReason?: string;
+          requestTooLargeRetry?: ContextCompactionRequestTooLargeRetryInfo;
         },
       ): Promise<ModelMessage[]> => {
-        const compressRetryMessages = (candidateMessages: ModelMessage[], log?: string): ModelMessage[] => {
-          if (!compressForRequestTooLargeRetry) return candidateMessages;
+        const compressRetryMessages = (candidateMessages: ModelMessage[], log?: string): {
+          messages: ModelMessage[];
+          didAdjust: boolean;
+        } => {
+          if (!compressForRequestTooLargeRetry) {
+            return { messages: candidateMessages, didAdjust: false };
+          }
           const compressed = compressMessagesForRequestTooLargeRetry(candidateMessages);
           if (compressed.didAdjust && log) {
             console.warn(log);
           }
-          return compressed.messages;
+          return compressed;
         };
 
         try {
           if (statusText) {
             updateLastMessage(sessionId, msg => ({ ...msg, statusText }));
           }
-          const inputMessages = compressRetryMessages(messages, compressionLog);
+          const inputCompression = compressRetryMessages(messages, compressionLog);
+          const inputMessages = inputCompression.messages;
+          const retryTrace: ContextCompactionRequestTooLargeRetryInfo | undefined = requestTooLargeRetry
+            ? {
+                ...requestTooLargeRetry,
+                payloadCompressionAppliedBeforeCompaction: inputCompression.didAdjust,
+              }
+            : undefined;
           const compacted = await prepareContextCompaction({
             messages: inputMessages,
             contextWindow,
@@ -1083,22 +1121,76 @@ export function useAIChatStreaming({
             thresholdRatio: force ? 0 : undefined,
             protectRecentMessages: DEFAULT_PROTECT_RECENT_MESSAGES,
             summarize: summarizeForCompaction,
+            trace: {
+              triggerReason,
+              requestTooLargeRetry: retryTrace,
+            },
           });
           let nextMessages = force && !compacted.didCompact
             ? keepRecentContextMessages(inputMessages, DEFAULT_PROTECT_RECENT_MESSAGES)
             : compacted.messages;
-          return compressRetryMessages(nextMessages);
+          const outputCompression = compressRetryMessages(nextMessages);
+          nextMessages = outputCompression.messages;
+          const finalTrace: ContextCompactionTrace = outputCompression.didAdjust && compacted.trace.requestTooLargeRetry
+            ? {
+                ...compacted.trace,
+                requestTooLargeRetry: {
+                  ...compacted.trace.requestTooLargeRetry,
+                  payloadCompressionAppliedAfterCompaction: true,
+                },
+              }
+            : compacted.trace;
+          recordContextCompactionTrace(traceTargetMessageId, finalTrace);
+          return nextMessages;
         } catch (err) {
           if (abortController.signal.aborted) throw err;
           console.warn(fallbackLog, err);
           const fallbackMessages = keepRecentContextMessages(messages, DEFAULT_PROTECT_RECENT_MESSAGES);
+          const fallbackSplitAt = messages.length - fallbackMessages.length;
+          const fallbackRetryTrace = requestTooLargeRetry
+            ? {
+                ...requestTooLargeRetry,
+                payloadCompressionAppliedBeforeCompaction: false,
+              }
+            : undefined;
           if (!compressForRequestTooLargeRetry) {
+            recordContextCompactionTrace(traceTargetMessageId, buildContextCompactionTrace({
+              messagesBefore: messages,
+              messagesAfter: fallbackMessages,
+              contextWindow,
+              reservedTokens: getRequestReserveTokens(),
+              thresholdRatio: force ? 0 : undefined,
+              protectRecentMessages: DEFAULT_PROTECT_RECENT_MESSAGES,
+              splitAt: fallbackSplitAt,
+              mode: 'recent-tail-fallback',
+              skippedReason: 'summarizer-error',
+              triggerReason,
+              requestTooLargeRetry: fallbackRetryTrace,
+            }));
             return fallbackMessages;
           }
           const compressed = compressMessagesForRequestTooLargeRetry(fallbackMessages);
           if (compressed.didAdjust) {
             console.warn('[Catty] Request content compressed after compaction fallback.');
           }
+          recordContextCompactionTrace(traceTargetMessageId, buildContextCompactionTrace({
+            messagesBefore: messages,
+            messagesAfter: compressed.messages,
+            contextWindow,
+            reservedTokens: getRequestReserveTokens(),
+            thresholdRatio: force ? 0 : undefined,
+            protectRecentMessages: DEFAULT_PROTECT_RECENT_MESSAGES,
+            splitAt: fallbackSplitAt,
+            mode: 'recent-tail-fallback',
+            skippedReason: 'summarizer-error',
+            triggerReason,
+            requestTooLargeRetry: fallbackRetryTrace
+              ? {
+                  ...fallbackRetryTrace,
+                  payloadCompressionAppliedAfterCompaction: compressed.didAdjust,
+                }
+              : undefined,
+          }));
           return compressed.messages;
         }
       };
@@ -1171,6 +1263,12 @@ export function useAIChatStreaming({
           fallbackLog: '[Catty] Forced context compaction after 413 failed; falling back to recent messages only:',
           compressForRequestTooLargeRetry: true,
           compressionLog: '[Catty] Request content compressed after forced context compaction.',
+          traceTargetMessageId: retryAssistantMsgId,
+          triggerReason: 'http-413-retry',
+          requestTooLargeRetry: {
+            attempt: 1,
+            hadToolProgress,
+          },
         }));
 
         await processCattyStream(

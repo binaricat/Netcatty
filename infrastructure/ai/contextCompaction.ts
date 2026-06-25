@@ -32,12 +32,72 @@ export interface PrepareContextCompactionInput {
   thresholdRatio?: number;
   protectRecentMessages?: number;
   summarize: (messagesToSummarize: ModelMessage[]) => Promise<string>;
+  trace?: ContextCompactionTraceOptions;
 }
 
 export interface PrepareContextCompactionResult {
   messages: ModelMessage[];
   summary?: string;
   didCompact: boolean;
+  trace: ContextCompactionTrace;
+}
+
+export interface ContextCompactionTraceOptions {
+  triggerReason?: string;
+  requestTooLargeRetry?: ContextCompactionRequestTooLargeRetryInfo;
+  now?: () => number;
+}
+
+export interface ContextCompactionRequestTooLargeRetryInfo {
+  attempt: number;
+  hadToolProgress: boolean;
+  payloadCompressionAppliedBeforeCompaction?: boolean;
+  payloadCompressionAppliedAfterCompaction?: boolean;
+}
+
+export type ContextCompactionTraceMode = "llm-summary" | "recent-tail-fallback" | "skipped";
+
+export type ContextCompactionSkippedReason =
+  | "below-threshold"
+  | "no-old-messages"
+  | "empty-summary"
+  | "summarizer-error";
+
+export interface ContextCompactionTraceSnapshot {
+  messageCount: number;
+  estimatedChars: number;
+  estimatedTokens: number;
+  estimatedPromptTokens: number;
+}
+
+export interface ContextCompactionTraceRange {
+  start: number;
+  endExclusive: number;
+}
+
+export interface ContextCompactionTrace {
+  type: "context_compaction";
+  createdAt: number;
+  triggerReason: string;
+  mode: ContextCompactionTraceMode;
+  didCompact: boolean;
+  skippedReason?: ContextCompactionSkippedReason;
+  contextWindow: number;
+  thresholdRatio: number;
+  reservedTokens: number;
+  protectRecentMessages: number;
+  splitIndex: number;
+  compactedMessageCount: number;
+  retainedTailMessageCount: number;
+  retainedTailTokenEstimate: number;
+  ranges: {
+    summarizedMessages: ContextCompactionTraceRange;
+    retainedTail: ContextCompactionTraceRange;
+  };
+  before: ContextCompactionTraceSnapshot;
+  after: ContextCompactionTraceSnapshot;
+  summary?: string;
+  requestTooLargeRetry?: ContextCompactionRequestTooLargeRetryInfo;
 }
 
 export interface ResolveContextWindowInput {
@@ -76,10 +136,14 @@ export function sanitizeContextWindow(value: unknown): number | undefined {
 }
 
 export function estimateModelMessagesTokens(messages: ModelMessage[]): number {
-  const chars = messages.reduce((total, message) => {
+  const chars = estimateModelMessagesChars(messages);
+  return Math.ceil(chars / TOKEN_CHARS);
+}
+
+export function estimateModelMessagesChars(messages: ModelMessage[]): number {
+  return messages.reduce((total, message) => {
     return total + estimateUnknownChars(message.role) + estimateUnknownChars(message.content);
   }, 0);
-  return Math.ceil(chars / TOKEN_CHARS);
 }
 
 export function estimateUnknownTokens(value: unknown): number {
@@ -123,6 +187,73 @@ export function buildCompactedMessages({
   ];
 }
 
+export function buildContextCompactionTrace({
+  messagesBefore,
+  messagesAfter,
+  contextWindow = DEFAULT_CONTEXT_WINDOW_TOKENS,
+  reservedTokens = 0,
+  thresholdRatio = DEFAULT_COMPACTION_RATIO,
+  protectRecentMessages = DEFAULT_PROTECT_RECENT_MESSAGES,
+  splitAt = messagesBefore.length,
+  mode,
+  skippedReason,
+  summary,
+  triggerReason = "context-window-threshold",
+  requestTooLargeRetry,
+  now = Date.now,
+}: {
+  messagesBefore: ModelMessage[];
+  messagesAfter: ModelMessage[];
+  contextWindow?: number;
+  reservedTokens?: number;
+  thresholdRatio?: number;
+  protectRecentMessages?: number;
+  splitAt?: number;
+  mode: ContextCompactionTraceMode;
+  skippedReason?: ContextCompactionSkippedReason;
+  summary?: string;
+  triggerReason?: string;
+  requestTooLargeRetry?: ContextCompactionRequestTooLargeRetryInfo;
+  now?: () => number;
+}): ContextCompactionTrace {
+  const safeReservedTokens = Math.max(0, Math.ceil(reservedTokens));
+  const safeSplitAt = Math.max(0, Math.min(messagesBefore.length, splitAt));
+  const retainedTail = messagesBefore.slice(safeSplitAt);
+  const before = buildTraceSnapshot(messagesBefore, safeReservedTokens);
+  const after = buildTraceSnapshot(messagesAfter, safeReservedTokens);
+
+  return {
+    type: "context_compaction",
+    createdAt: now(),
+    triggerReason,
+    mode,
+    didCompact: mode !== "skipped",
+    ...(skippedReason ? { skippedReason } : {}),
+    contextWindow,
+    thresholdRatio,
+    reservedTokens: safeReservedTokens,
+    protectRecentMessages,
+    splitIndex: safeSplitAt,
+    compactedMessageCount: safeSplitAt,
+    retainedTailMessageCount: retainedTail.length,
+    retainedTailTokenEstimate: estimateModelMessagesTokens(retainedTail),
+    ranges: {
+      summarizedMessages: {
+        start: 0,
+        endExclusive: safeSplitAt,
+      },
+      retainedTail: {
+        start: safeSplitAt,
+        endExclusive: messagesBefore.length,
+      },
+    },
+    before,
+    after,
+    ...(summary ? { summary } : {}),
+    ...(requestTooLargeRetry ? { requestTooLargeRetry } : {}),
+  };
+}
+
 export async function prepareContextCompaction({
   messages,
   contextWindow = DEFAULT_CONTEXT_WINDOW_TOKENS,
@@ -130,28 +261,96 @@ export async function prepareContextCompaction({
   thresholdRatio,
   protectRecentMessages = DEFAULT_PROTECT_RECENT_MESSAGES,
   summarize,
+  trace: traceOptions,
 }: PrepareContextCompactionInput): Promise<PrepareContextCompactionResult> {
-  const promptTokens = estimateModelMessagesTokens(messages) + Math.max(0, Math.ceil(reservedTokens));
-  if (!shouldCompactContext({ promptTokens, contextWindow, thresholdRatio })) {
-    return { messages, didCompact: false };
+  const effectiveThresholdRatio = thresholdRatio ?? DEFAULT_COMPACTION_RATIO;
+  const safeReservedTokens = Math.max(0, Math.ceil(reservedTokens));
+  const promptTokens = estimateModelMessagesTokens(messages) + safeReservedTokens;
+  if (!shouldCompactContext({ promptTokens, contextWindow, thresholdRatio: effectiveThresholdRatio })) {
+    return {
+      messages,
+      didCompact: false,
+      trace: buildContextCompactionTrace({
+        messagesBefore: messages,
+        messagesAfter: messages,
+        contextWindow,
+        reservedTokens: safeReservedTokens,
+        thresholdRatio: effectiveThresholdRatio,
+        protectRecentMessages,
+        mode: "skipped",
+        skippedReason: "below-threshold",
+        triggerReason: traceOptions?.triggerReason,
+        requestTooLargeRetry: traceOptions?.requestTooLargeRetry,
+        now: traceOptions?.now,
+      }),
+    };
   }
 
   const splitAt = findSafeCompactionSplitIndex(messages, protectRecentMessages);
   const oldMessages = messages.slice(0, splitAt);
   const recentMessages = messages.slice(splitAt);
   if (oldMessages.length === 0) {
-    return { messages, didCompact: false };
+    return {
+      messages,
+      didCompact: false,
+      trace: buildContextCompactionTrace({
+        messagesBefore: messages,
+        messagesAfter: messages,
+        contextWindow,
+        reservedTokens: safeReservedTokens,
+        thresholdRatio: effectiveThresholdRatio,
+        protectRecentMessages,
+        splitAt,
+        mode: "skipped",
+        skippedReason: "no-old-messages",
+        triggerReason: traceOptions?.triggerReason,
+        requestTooLargeRetry: traceOptions?.requestTooLargeRetry,
+        now: traceOptions?.now,
+      }),
+    };
   }
 
   const summary = (await summarize(oldMessages)).trim();
   if (!summary) {
-    return { messages, didCompact: false };
+    return {
+      messages,
+      didCompact: false,
+      trace: buildContextCompactionTrace({
+        messagesBefore: messages,
+        messagesAfter: messages,
+        contextWindow,
+        reservedTokens: safeReservedTokens,
+        thresholdRatio: effectiveThresholdRatio,
+        protectRecentMessages,
+        splitAt,
+        mode: "skipped",
+        skippedReason: "empty-summary",
+        triggerReason: traceOptions?.triggerReason,
+        requestTooLargeRetry: traceOptions?.requestTooLargeRetry,
+        now: traceOptions?.now,
+      }),
+    };
   }
+  const compactedMessages = buildCompactedMessages({ summary, recentMessages });
 
   return {
-    messages: buildCompactedMessages({ summary, recentMessages }),
+    messages: compactedMessages,
     summary,
     didCompact: true,
+    trace: buildContextCompactionTrace({
+      messagesBefore: messages,
+      messagesAfter: compactedMessages,
+      contextWindow,
+      reservedTokens: safeReservedTokens,
+      thresholdRatio: effectiveThresholdRatio,
+      protectRecentMessages,
+      splitAt,
+      mode: "llm-summary",
+      summary,
+      triggerReason: traceOptions?.triggerReason,
+      requestTooLargeRetry: traceOptions?.requestTooLargeRetry,
+      now: traceOptions?.now,
+    }),
   };
 }
 
@@ -169,6 +368,20 @@ export function keepRecentContextMessages(
 ): ModelMessage[] {
   const splitAt = findSafeCompactionSplitIndex(messages, protectRecentMessages);
   return messages.slice(splitAt);
+}
+
+function buildTraceSnapshot(
+  messages: ModelMessage[],
+  reservedTokens: number,
+): ContextCompactionTraceSnapshot {
+  const estimatedChars = estimateModelMessagesChars(messages);
+  const estimatedTokens = Math.ceil(estimatedChars / TOKEN_CHARS);
+  return {
+    messageCount: messages.length,
+    estimatedChars,
+    estimatedTokens,
+    estimatedPromptTokens: estimatedTokens + reservedTokens,
+  };
 }
 
 function estimateUnknownChars(value: unknown): number {
