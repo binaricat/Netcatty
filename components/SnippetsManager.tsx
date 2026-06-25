@@ -1,4 +1,4 @@
-import { CheckSquare, ChevronDown, Clock, Copy, Download, Edit2, FileCode, FolderPlus, LayoutGrid, List as ListIcon, Package, Play, Plus, Search, Square, Trash2, Upload, X } from 'lucide-react';
+import { CheckSquare, ChevronDown, Clock, Copy, Download, Edit2, FileCode, FolderPlus, LayoutGrid, List as ListIcon, Package, Play, Plus, Search, Square, Trash2, Upload, X, Zap } from 'lucide-react';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useI18n } from '../application/i18n/I18nProvider';
 import { useStoredViewMode } from '../application/state/useStoredViewMode';
@@ -690,6 +690,7 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
         targets: targetSelection,
         shortkey: editingSnippet.shortkey,
         noAutoRun: editingSnippet.noAutoRun,
+        runOnConnect: editingSnippet.runOnConnect,
         order: editingSnippet.order,
       });
       setRightPanelMode('none');
@@ -1791,6 +1792,17 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
                             <div className="shrink-0 px-2 py-1 text-[10px] font-mono rounded border border-border bg-muted/50 text-muted-foreground">
                               {snippet.shortkey}
                             </div>
+                          )}
+                          {snippet.runOnConnect && (
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <div className="shrink-0 px-2 py-1 text-[10px] rounded border border-primary/30 bg-primary/10 text-primary flex items-center gap-1">
+                                  <Zap size={11} />
+                                  {t('snippets.automation.badge')}
+                                </div>
+                              </TooltipTrigger>
+                              <TooltipContent>{t('snippets.automation.badgeTooltip')}</TooltipContent>
+                            </Tooltip>
                           )}
                           {viewMode === 'list' && !isMultiSelectMode && (
                             <Button

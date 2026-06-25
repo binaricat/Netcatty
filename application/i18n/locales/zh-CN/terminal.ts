@@ -668,6 +668,11 @@ export const zhCNTerminalMessages: Messages = {
   'snippets.packageDialog.root': '根目录',
   'snippets.packageDialog.placeholder': '例如：ops/maintenance',
   'snippets.packageDialog.hint': '使用 "/" 创建嵌套代码包。',
+  'snippets.automation.runOnConnect': '连接时自动运行',
+  'snippets.automation.runOnConnectHelp': '打开已选择的目标主机时，此脚本会追加到主机启动命令之后，并在终端连接成功后执行。',
+  'snippets.automation.targetRequired': '请至少添加一个目标主机以启用此自动化。',
+  'snippets.automation.badge': '自动',
+  'snippets.automation.badgeTooltip': '目标主机连接时会自动运行',
 
   // Snippets Rename Dialog
   'snippets.renameDialog.title': '重命名代码包',

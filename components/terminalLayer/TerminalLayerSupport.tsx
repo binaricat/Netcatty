@@ -1,4 +1,4 @@
-import React, { createContext, lazy, memo, Suspense, useCallback, useContext, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import React, { createContext, lazy, memo, Suspense, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 
 import { activeTabStore } from '../../application/state/activeTabStore';
 import { useTerminalLayoutSuppressActive } from '../../application/state/terminalLayoutSuppressStore';
@@ -10,6 +10,11 @@ import { useStoredBoolean } from '../../application/state/useStoredBoolean';
 import { collectSessionIds, SplitDirection } from '../../domain/workspace';
 import { resolveSessionTabTitle } from '../../domain/sessionTabTitle';
 import { KeyBinding, TerminalSettings } from '../../domain/models';
+import {
+  buildStartupCommandWithSnippetAutomation,
+  getHostConnectSnippetCommands,
+} from '../../domain/snippetAutomation';
+import { readSnippetVariableValuesForSnippet } from '../../application/state/snippetVariableValues';
 import { STORAGE_KEY_AI_SHOW_TERMINAL_SELECTION_ACTION } from '../../infrastructure/config/storageKeys';
 import { cn } from '../../lib/utils';
 import { LazyLoadBoundary } from '../ui/lazy-load-boundary';
@@ -904,6 +909,19 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
   const inActiveWorkspace = !!activeWorkspaceId;
   const isFocusMode = paneState.mode === 'focus';
   const isSplitViewVisible = paneState.mode === 'split';
+  const startupCommand = useMemo(() => {
+    if (session.startupCommand || session.restoreState) return session.startupCommand;
+    const snippetCommands = getHostConnectSnippetCommands(
+      host,
+      snippets,
+      (snippet) => readSnippetVariableValuesForSnippet(snippet.id),
+    );
+    if (snippetCommands.length === 0) return undefined;
+    return buildStartupCommandWithSnippetAutomation({
+      hostStartupCommand: host.startupCommand,
+      snippetCommands,
+    });
+  }, [host, session.restoreState, session.startupCommand, snippets]);
   const rect = activeWorkspaceId && isSplitViewVisible
     ? workspaceRectsById.get(activeWorkspaceId)?.[session.id] ?? null
     : null;
@@ -1215,7 +1233,7 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
         shellType={session.shellType}
         lastCwd={session.lastCwd}
         restoreTerminalCwd={restoreTerminalCwd && sessionHostResolved}
-        startupCommand={session.startupCommand}
+        startupCommand={startupCommand}
         noAutoRun={session.noAutoRun}
         reuseConnectionFromSessionId={session.reuseConnectionFromSessionId}
         serialConfig={session.serialConfig}

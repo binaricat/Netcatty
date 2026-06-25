@@ -13,6 +13,7 @@ export type SnippetExportItem = {
   package?: string;
   shortkey?: string;
   noAutoRun?: boolean;
+  runOnConnect?: boolean;
 };
 
 export type SnippetExportPayload = {
@@ -96,6 +97,7 @@ const toExportItem = (snippet: Snippet): SnippetExportItem => ({
   package: snippet.package || "",
   shortkey: snippet.shortkey,
   noAutoRun: snippet.noAutoRun,
+  runOnConnect: snippet.runOnConnect,
 });
 
 export const buildSnippetExportPayload = ({
@@ -139,6 +141,7 @@ const sanitizeImportItem = (value: unknown): SnippetExportItem | null => {
       ? value.shortkey.trim()
       : undefined,
     noAutoRun: value.noAutoRun === true ? true : undefined,
+    runOnConnect: value.runOnConnect === true ? true : undefined,
   };
 };
 
@@ -216,6 +219,7 @@ const toImportedSnippet = (item: SnippetExportItem, id: string, order?: number):
   targets: [],
   shortkey: item.shortkey,
   noAutoRun: item.noAutoRun,
+  runOnConnect: item.runOnConnect,
   order,
 });
 

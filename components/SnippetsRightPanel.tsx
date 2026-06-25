@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { parseSnippetVariables } from '../domain/snippetVariables';
-import { Check, Clock, Keyboard, Loader2, Package, RotateCcw, Trash2 } from 'lucide-react';
+import { Check, Clock, Keyboard, Loader2, Package, RotateCcw, Trash2, Zap } from 'lucide-react';
 import { cn } from '../lib/utils';
 import SelectHostPanel from './SelectHostPanel';
 import { AsidePanel, AsidePanelContent, AsidePanelFooter } from './ui/aside-panel';
@@ -206,6 +206,32 @@ export const SnippetsRightPanel: React.FC<SnippetsRightPanelProps> = ({
               />
               <span className="text-xs text-muted-foreground">{t('snippets.field.noAutoRun')}</span>
             </label>
+
+            {/* Automation */}
+            <Card className="p-3 space-y-2 bg-card border-border/80">
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={editingSnippet.runOnConnect ?? false}
+                  onChange={(e) => setEditingSnippet({ ...editingSnippet, runOnConnect: e.target.checked || undefined })}
+                  className="mt-0.5 rounded border-input"
+                />
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
+                    <Zap size={13} className="text-primary" />
+                    {t('snippets.automation.runOnConnect')}
+                  </span>
+                  <span className="block mt-1 text-[11px] leading-relaxed text-muted-foreground">
+                    {t('snippets.automation.runOnConnectHelp')}
+                  </span>
+                  {targetHosts.length === 0 && (
+                    <span className="block mt-1 text-[11px] leading-relaxed text-amber-500">
+                      {t('snippets.automation.targetRequired')}
+                    </span>
+                  )}
+                </span>
+              </label>
+            </Card>
 
             {/* Shortkey */}
             <Card className="p-3 space-y-2 bg-card border-border/80">

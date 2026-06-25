@@ -40,6 +40,7 @@ test("buildSnippetExportPayload removes host target bindings", () => {
       tags: [],
       package: "ops/web",
       noAutoRun: undefined,
+      runOnConnect: undefined,
       shortkey: undefined,
     },
   ]);
@@ -142,6 +143,7 @@ test("mergeSnippetImportPayload overwrites duplicate commands while preserving l
         tags: ["linux"],
         shortkey: "F8",
         noAutoRun: true,
+        runOnConnect: true,
       },
     ],
   }));
@@ -170,6 +172,7 @@ test("mergeSnippetImportPayload overwrites duplicate commands while preserving l
       targets: [],
       shortkey: "F8",
       noAutoRun: true,
+      runOnConnect: true,
       order: 1000,
     },
   ]);

@@ -648,6 +648,11 @@ export const enTerminalMessages: Messages = {
   'snippets.packageDialog.root': 'Root',
   'snippets.packageDialog.placeholder': 'e.g. ops/maintenance',
   'snippets.packageDialog.hint': 'Use "/" to create nested packages.',
+  'snippets.automation.runOnConnect': 'Run automatically on connect',
+  'snippets.automation.runOnConnectHelp': 'When a selected target opens, this script is appended to the host startup command and executed after the terminal connects.',
+  'snippets.automation.targetRequired': 'Add at least one target host to enable this automation.',
+  'snippets.automation.badge': 'Auto',
+  'snippets.automation.badgeTooltip': 'Runs automatically when a target host connects',
 
   // Snippets Rename Dialog
   'snippets.renameDialog.title': 'Rename Package',

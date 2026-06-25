@@ -674,6 +674,11 @@ export const ruTerminalMessages: Messages = {
   'snippets.packageDialog.root': 'Корень',
   'snippets.packageDialog.placeholder': 'например, ops/maintenance',
   'snippets.packageDialog.hint': 'Используйте "/" для создания вложенных пакетов.',
+  'snippets.automation.runOnConnect': 'Запускать автоматически при подключении',
+  'snippets.automation.runOnConnectHelp': 'Когда выбранный целевой хост открывается, этот скрипт добавляется к стартовой команде хоста и выполняется после подключения терминала.',
+  'snippets.automation.targetRequired': 'Добавьте хотя бы один целевой хост, чтобы включить эту автоматизацию.',
+  'snippets.automation.badge': 'Авто',
+  'snippets.automation.badgeTooltip': 'Автоматически запускается при подключении целевого хоста',
 
   // Snippets Rename Dialog
   'snippets.renameDialog.title': 'Переименовать пакет',
