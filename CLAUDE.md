@@ -41,15 +41,18 @@ Netcatty is an Electron + React desktop app (SSH manager, terminal, SFTP browser
 - **`main.cjs`** — entry point; wires crash logging, process error guards, and delegates to `main/registerBridges.cjs`
 - **`bridges/`** — one `.cjs` file per capability domain (sshBridge, sftpBridge, terminalBridge, portForwardingBridge, aiBridge, etc.). Each bridge exposes IPC handlers via `ipcMain`. Tests live alongside the bridge file (`*.test.cjs`).
 - **`preload.cjs`** — exposes a typed `window.electron` API to the renderer via `contextBridge`. Uses `preload/api.cjs` for the generated API surface.
-- **`cli/`** — `netcatty-tool-cli.cjs` is a separate internal binary for tool/MCP integration; treat as internal surface only.
+- **`cli/`** — `netcatty-tool-cli.cjs` is a separate internal binary for tool/MCP/Skills integration; treat as internal surface only.
 
 ### Renderer Process (React + Vite)
 Three-layer architecture (see `AGENTS.md` for full detail):
 
 - **`domain/`** — pure TypeScript logic, no side effects. Models (`models.ts`), host helpers, workspace tree operations.
 - **`application/state/`** — React hooks that own state and persistence boundaries. Key hooks: `useVaultState` (hosts/keys/snippets), `useSessionState` (terminal sessions/workspace), `useSettingsState` (theme/config).
-- **`infrastructure/`** — external edges: `persistence/localStorageAdapter.ts` for storage, `services/` for network calls (Gemini AI, GitHub Gist sync), `config/` for defaults, storage keys, and terminal themes.
+- **`infrastructure/`** — external edges: `persistence/localStorageAdapter.ts` for storage, `ai/` and `services/` for AI providers, managed agents, web services, and GitHub Gist sync, `config/` for defaults, storage keys, and terminal themes.
 - **`components/`** — presentation only. `App.tsx` wires hooks to components; no business logic in components.
+
+### AI Harness
+See `docs/ai-harness.md` for the current Catty/Vercel AI SDK path, managed external SDK agents, MCP/Skills integration, permission boundaries, context compaction, known gaps, and public positioning.
 
 ### IPC Pattern
 UI calls `window.electron.*` (preload API) → IPC → bridge handler in main process. Never call `ipcRenderer` directly from components.

@@ -57,6 +57,20 @@
 - 🔥 **Intelligent context awareness** — understands your server environment and provides tailored responses
 - 🚀 **One-click complex operations** — set up clusters, deploy services, and more with simple instructions
 
+### AI architecture note
+
+Catty is Netcatty's built-in agent path. It uses Vercel AI SDK for provider streaming
+and tool-loop execution, while managed external agents such as Claude, Codex,
+Copilot, Cursor, CodeBuddy, and OpenCode run through Electron SDK drivers and
+receive Netcatty capabilities through MCP or Skills + CLI.
+
+Vercel AI SDK is part of the harness, not the complete product runtime. Netcatty
+also owns session scope, permission modes, approval UX, terminal execution,
+context compaction, and integration surfaces. Command blocklists are treated as
+defense-in-depth, not as the full security boundary. See
+[`docs/ai-harness.md`](docs/ai-harness.md) for the current architecture,
+boundaries, known gaps, and public positioning.
+
 ### 🎬 AI in Action
 
 #### 🔥 Single Host — Intelligent Server Diagnostics

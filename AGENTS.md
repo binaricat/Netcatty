@@ -14,13 +14,14 @@ This project is wired around three layers: domain (pure logic), application stat
 - **Infrastructure** (`infrastructure/`): External edges and configuration.
   - `config/` holds defaults, storage keys, terminal themes.
   - `persistence/localStorageAdapter.ts` abstracts localStorage read/write.
-  - `services/` contains networked services (Gemini AI, GitHub Gist sync).
+  - `services/` and `ai/` contain networked integrations (AI providers, managed agents, web services, GitHub Gist sync).
 - **UI** (`components/`, `App.tsx`): Presentation; depends on hooks and domain helpers only.
 
 ## How Things Talk
 - UI calls application hooks -> hooks call domain helpers -> persistence/config via infrastructure adapters.
 - `App.tsx` wires hooks to components; no business logic should live in components beyond view glue.
 - Local storage keys are centralized in `infrastructure/config/storageKeys.ts`; avoid ad-hoc `localStorage` calls elsewhere.
+- AI harness architecture, boundaries, and public positioning are documented in `docs/ai-harness.md`.
 
 ## Extending the System
 1) **New domain logic**: Add pure functions/types under `domain/`; avoid side effects.  
