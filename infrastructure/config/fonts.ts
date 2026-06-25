@@ -122,6 +122,25 @@ export function resolveTerminalFontFamilyId(
   return getDefaultTerminalFontIdForPlatform(detectFontPlatform(navigatorPlatform));
 }
 
+/**
+ * Whether two terminal font ids resolve to the same concrete font on this
+ * platform. Font pickers display the resolved concrete font for an `auto`
+ * value, so a click on the shown default arrives as that concrete id while
+ * the stored value is still `auto`; comparing raw would treat it as a
+ * change and pin a per-OS font (which then syncs across devices). Comparing
+ * resolved ids makes that click a correct no-op.
+ */
+export function isSameResolvedTerminalFont(
+  a: string | null | undefined,
+  b: string | null | undefined,
+  navigatorPlatform: string,
+): boolean {
+  return (
+    resolveTerminalFontFamilyId(a, navigatorPlatform) ===
+    resolveTerminalFontFamilyId(b, navigatorPlatform)
+  );
+}
+
 // Font ids that earlier versions of netcatty exposed in the primary font
 // dropdown but that are proportional (non-monospace) and produce broken
 // cell-grid alignment when used as a terminal font. Reads should migrate

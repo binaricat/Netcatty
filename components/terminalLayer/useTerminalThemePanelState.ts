@@ -16,6 +16,7 @@ import {
   resolveHostTerminalThemeId,
 } from '../../domain/terminalAppearance';
 import { TERMINAL_THEMES } from '../../infrastructure/config/terminalThemes';
+import { isSameResolvedTerminalFont } from '../../infrastructure/config/fonts';
 import type { Host, TerminalSession, TerminalTheme, Workspace } from '../../types';
 import { useCustomThemes } from '../../application/state/customThemeStore';
 import { applyTopTabsChromeThemeVars } from '../../application/app/topTabsChromeTheme';
@@ -28,6 +29,8 @@ import {
   setStylePropertyIfChanged,
   type SidePanelTab,
 } from './TerminalLayerSupport';
+
+const navigatorPlatform = typeof navigator !== 'undefined' ? navigator.platform : '';
 
 interface UseTerminalThemePanelStateOptions {
   accentMode: 'theme' | 'custom';
@@ -270,7 +273,10 @@ export function useTerminalThemePanelState({
     }, [focusedHost, isFocusedHostEphemeral, onUpdateHost, previewTargetSessionId, rawFocusedHost]);
   
   const handleFontFamilyChangeForFocusedSession = useCallback((fontFamilyId: string) => {
-      if (!focusedHost || fontFamilyId === focusedFontFamilyId) return;
+      // The panel shows the resolved concrete font for an `auto` default, so
+      // compare resolved ids — otherwise clicking the already-displayed default
+      // pins a per-OS font (and syncs it across devices). #1647 follow-up.
+      if (!focusedHost || isSameResolvedTerminalFont(fontFamilyId, focusedFontFamilyId, navigatorPlatform)) return;
       startTransition(() => {
         if (isFocusedHostEphemeral) {
           onUpdateTerminalFontFamilyId?.(fontFamilyId);

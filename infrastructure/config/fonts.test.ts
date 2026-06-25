@@ -5,6 +5,7 @@ import {
   getDefaultTerminalFontIdForPlatform,
   detectFontPlatform,
   resolveTerminalFontFamilyId,
+  isSameResolvedTerminalFont,
   TERMINAL_FONT_AUTO,
 } from './fonts';
 
@@ -118,6 +119,25 @@ describe('resolveTerminalFontFamilyId', () => {
   it('keeps an explicit font id regardless of platform', () => {
     assert.equal(resolveTerminalFontFamilyId('jetbrains-mono', 'Win32'), 'jetbrains-mono');
     assert.equal(resolveTerminalFontFamilyId('menlo', 'Win32'), 'menlo');
+  });
+});
+
+describe('isSameResolvedTerminalFont', () => {
+  it('treats clicking the displayed default while stored=auto as a no-op', () => {
+    // Prevents the side panel from pinning a concrete per-OS font (which would
+    // then sync across devices) on a no-op-looking click of the shown default.
+    assert.equal(isSameResolvedTerminalFont('consolas', TERMINAL_FONT_AUTO, 'Win32'), true);
+    assert.equal(isSameResolvedTerminalFont('menlo', TERMINAL_FONT_AUTO, 'MacIntel'), true);
+    assert.equal(isSameResolvedTerminalFont('dejavu-sans-mono', TERMINAL_FONT_AUTO, 'Linux'), true);
+  });
+
+  it('reports a real change when a different font is selected', () => {
+    assert.equal(isSameResolvedTerminalFont('jetbrains-mono', TERMINAL_FONT_AUTO, 'Win32'), false);
+  });
+
+  it('compares concrete ids directly', () => {
+    assert.equal(isSameResolvedTerminalFont('fira-code', 'fira-code', 'Win32'), true);
+    assert.equal(isSameResolvedTerminalFont('fira-code', 'menlo', 'Win32'), false);
   });
 });
 
