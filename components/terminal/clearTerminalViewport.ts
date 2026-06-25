@@ -14,6 +14,11 @@ type ClearTerminalViewportOptions = {
   wipeScrollback?: boolean;
 };
 
+type AppendEraseScrollbackOptions = {
+  wipeScrollback: boolean;
+  normalScreen: boolean;
+};
+
 const getVisibleContentRowCount = (term: XTerm): number => {
   const buffer = term.buffer.active;
   if (buffer.type !== "normal") {
@@ -120,4 +125,72 @@ export const shouldWipeScrollbackAfterFullErase = (
     return false;
   }
   return term.buffer.active.type === "normal";
+};
+
+export const appendEraseScrollbackAfterFullErases = (
+  data: string,
+  { wipeScrollback, normalScreen }: AppendEraseScrollbackOptions,
+): string => {
+  if (!wipeScrollback || !normalScreen || data.length === 0) {
+    return data;
+  }
+
+  let result = "";
+  let index = 0;
+  let inDec2026SyncBlock = false;
+  let inAlternateScreen = false;
+
+  while (index < data.length) {
+    if (data.startsWith("\x1b[?2026h", index)) {
+      inDec2026SyncBlock = true;
+      result += "\x1b[?2026h";
+      index += "\x1b[?2026h".length;
+      continue;
+    }
+
+    if (data.startsWith("\x1b[?2026l", index)) {
+      inDec2026SyncBlock = false;
+      result += "\x1b[?2026l";
+      index += "\x1b[?2026l".length;
+      continue;
+    }
+
+    const altEnter = ["\x1b[?47h", "\x1b[?1047h", "\x1b[?1049h"].find((sequence) =>
+      data.startsWith(sequence, index)
+    );
+    if (altEnter) {
+      inAlternateScreen = true;
+      result += altEnter;
+      index += altEnter.length;
+      continue;
+    }
+
+    const altLeave = ["\x1b[?47l", "\x1b[?1047l", "\x1b[?1049l"].find((sequence) =>
+      data.startsWith(sequence, index)
+    );
+    if (altLeave) {
+      inAlternateScreen = false;
+      result += altLeave;
+      index += altLeave.length;
+      continue;
+    }
+
+    if (data.startsWith("\x1b[2J", index)) {
+      result += "\x1b[2J";
+      index += "\x1b[2J".length;
+      if (
+        !inDec2026SyncBlock
+        && !inAlternateScreen
+        && !data.startsWith("\x1b[3J", index)
+      ) {
+        result += "\x1b[3J";
+      }
+      continue;
+    }
+
+    result += data[index];
+    index += 1;
+  }
+
+  return result;
 };

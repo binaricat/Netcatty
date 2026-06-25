@@ -40,7 +40,6 @@ import {
   isEraseViewportSequence,
   preserveTerminalViewportInScrollback,
   shouldPreserveViewportBeforeFullErase,
-  shouldWipeScrollbackAfterFullErase,
 } from "../clearTerminalViewport";
 import {
   createKittyKeyboardModeState,
@@ -1118,9 +1117,6 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     if (isEraseViewportSequence(params)) {
       if (shouldPreserveViewportBeforeFullErase(term, inDec2026SyncBlock, wipeAllowed)) {
         preserveTerminalViewportInScrollback(term);
-      }
-      if (shouldWipeScrollbackAfterFullErase(term, inDec2026SyncBlock, wipeAllowed)) {
-        queueMicrotask(() => term.write("\x1b[3J"));
       }
       return false;
     }

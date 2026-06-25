@@ -22,6 +22,7 @@ import {
   filterTerminalSessionData,
   resetTerminalSyncBlockFilter,
 } from "./terminalSyncBlockFilter";
+import { appendEraseScrollbackAfterFullErases } from "../clearTerminalViewport";
 import {
   enqueueCoalescedTerminalWrite,
   flushTerminalWriteCoalescer,
@@ -163,8 +164,12 @@ const writeSessionDataImmediate = (
   const flow = getFlowController(ctx, term);
   flow.received(data.length);
   enqueueTerminalWrite(term, (done) => {
-    const displayData = filterTerminalSessionData(term, data);
     const settings = ctx.terminalSettingsRef?.current ?? ctx.terminalSettings;
+    const filteredData = filterTerminalSessionData(term, data);
+    const displayData = appendEraseScrollbackAfterFullErases(filteredData, {
+      wipeScrollback: settings?.clearWipesScrollback ?? true,
+      normalScreen: term.buffer?.active?.type !== "alternate",
+    });
     const forcePromptNewLine = settings?.forcePromptNewLine ?? false;
     if (!forcePromptNewLine && ctx.promptLineBreakStateRef?.current) {
       ctx.promptLineBreakStateRef.current.pendingCommand = false;
@@ -197,7 +202,7 @@ const writeSessionDataImmediate = (
       }
       done();
       // Acknowledge the chunk so back-pressure can ease once xterm catches up.
-      flow.written(displayData.length);
+      flow.written(filteredData.length);
     };
 
     writeTerminalDataWithLineTimestamps(term, preparedDisplayData, afterWrite);

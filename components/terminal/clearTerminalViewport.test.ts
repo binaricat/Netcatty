@@ -72,3 +72,34 @@ test("local clear writes erase-scrollback when requested", () => {
   assert.equal(writes.length, 1);
   assert.equal(writes[0].includes("\x1b[3J"), true);
 });
+
+test("local clear preserves scrollback when erase-scrollback is not requested", () => {
+  const writes: string[] = [];
+  const term = {
+    rows: 5,
+    buffer: {
+      active: {
+        type: "normal",
+        baseY: 0,
+        cursorY: 2,
+        cursorX: 4,
+      },
+    },
+    _core: {
+      scroll: () => {},
+      _inputHandler: {
+        _eraseAttrData: () => ({}),
+      },
+    },
+    write: (payload: string, callback?: () => void) => {
+      writes.push(payload);
+      callback?.();
+    },
+    scrollToBottom: () => {},
+  };
+
+  clearTerminalViewport(term as never, { wipeScrollback: false });
+
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].includes("\x1b[3J"), false);
+});
