@@ -45,6 +45,12 @@ import {
 } from '../../../infrastructure/ai/cattyRequestTooLargeRetry';
 import { createModelFromConfig } from '../../../infrastructure/ai/sdk/providers';
 import { createCattyTools } from '../../../infrastructure/ai/sdk/tools';
+import {
+  AgentBudgetTracker,
+  createBudgetStopCondition,
+  normalizeAgentBudgetLimits,
+} from '../../../infrastructure/ai/shared/agentBudget';
+import { createDoomLoopState } from '../../../infrastructure/ai/shared/doomLoopDetector';
 import type { ExecutorContext } from '../../../infrastructure/ai/cattyAgent/executor';
 import { getExternalAgentSdkBackend } from '../../../infrastructure/ai/managedAgents';
 import { runSdkAgentTurn } from '../../../infrastructure/ai/sdkAgentAdapter';
@@ -162,6 +168,10 @@ function collectOpenAIChatAssistantFieldsForMessages(
 
 export interface UseAIChatStreamingParams {
   maxIterations: number;
+  maxToolCalls: number;
+  maxTokens: number;
+  maxCostUsd: number;
+  costPerMillionTokensUsd: number;
   addMessageToSession: (sessionId: string, message: ChatMessage) => void;
   updateLastMessage: (sessionId: string, updater: (msg: ChatMessage) => ChatMessage) => void;
   updateMessageById: (sessionId: string, messageId: string, updater: (msg: ChatMessage) => ChatMessage) => void;
@@ -189,6 +199,7 @@ export interface UseAIChatStreamingReturn {
     currentAssistantMsgId: string,
     advancedParams?: ProviderAdvancedParams,
     continuationContext?: CattyProviderContinuationContext,
+    budgetTracker?: AgentBudgetTracker,
   ) => Promise<void>;
   /** Send a message to the Catty agent (built-in). */
   sendToCattyAgent: (
@@ -250,6 +261,10 @@ export interface SendToExternalContext {
 
 export function useAIChatStreaming({
   maxIterations,
+  maxToolCalls,
+  maxTokens,
+  maxCostUsd,
+  costPerMillionTokensUsd,
   addMessageToSession,
   updateLastMessage,
   updateMessageById,
@@ -329,13 +344,24 @@ export function useAIChatStreaming({
     currentAssistantMsgId: string,
     advancedParams?: ProviderAdvancedParams,
     continuationContext?: CattyProviderContinuationContext,
+    budgetTracker = new AgentBudgetTracker(normalizeAgentBudgetLimits({
+      maxSteps: maxIterations,
+      maxToolCalls,
+      maxTokens,
+      maxCostUsd,
+      costPerMillionTokensUsd,
+    })),
   ): Promise<void> => {
+    const budgetStopWhen = createBudgetStopCondition(budgetTracker);
     const result = streamText({
       model,
       messages: sdkMessages,
       system: systemPrompt,
       tools,
-      stopWhen: stepCountIs(maxIterations),
+      stopWhen: [
+        stepCountIs(maxIterations),
+        budgetStopWhen,
+      ] as unknown as Parameters<typeof streamText>[0]['stopWhen'],
       abortSignal: signal,
       includeRawChunks: true,
       ...(advancedParams?.maxTokens != null && { maxOutputTokens: advancedParams.maxTokens }),
@@ -609,8 +635,30 @@ export function useAIChatStreaming({
       flushText();
       reader.releaseLock();
     }
+    const stopReason = budgetTracker.getStopReason();
+    if (stopReason && !signal.aborted) {
+      addMessageToSession(streamSessionId, {
+        id: generateId(),
+        role: 'assistant',
+        content: stopReason.message,
+        errorInfo: {
+          type: 'agent',
+          message: stopReason.message,
+          retryable: false,
+        },
+        timestamp: Date.now(),
+      });
+    }
     return;
-  }, [maxIterations, addMessageToSession, updateMessageById]);
+  }, [
+    maxIterations,
+    maxToolCalls,
+    maxTokens,
+    maxCostUsd,
+    costPerMillionTokensUsd,
+    addMessageToSession,
+    updateMessageById,
+  ]);
 
   // -------------------------------------------------------------------
   // sendToExternalAgent
@@ -771,6 +819,17 @@ export function useAIChatStreaming({
       workspaceId: context.scopeType === 'workspace' ? context.scopeTargetId : undefined,
       workspaceName: context.scopeType === 'workspace' ? context.scopeLabel : undefined,
     }));
+    const budgetTracker = new AgentBudgetTracker(normalizeAgentBudgetLimits({
+      maxSteps: maxIterations,
+      maxToolCalls,
+      maxTokens,
+      maxCostUsd,
+      costPerMillionTokensUsd,
+    }));
+    const toolSafety = {
+      budgetTracker,
+      doomLoopState: createDoomLoopState(),
+    };
     const tools = createCattyTools(
       bridge,
       getExecutorContext,
@@ -778,6 +837,7 @@ export function useAIChatStreaming({
       context.globalPermissionMode,
       context.webSearchConfig ?? undefined,
       sessionId,
+      toolSafety,
     );
 
     const systemPrompt = buildSystemPrompt({
@@ -1120,6 +1180,7 @@ export function useAIChatStreaming({
           assistantMsgId,
           context.activeProvider?.advancedParams,
           continuationContext,
+          budgetTracker,
         );
       } catch (streamErr) {
         if (abortController.signal.aborted || !isRequestTooLargeError(streamErr)) {
@@ -1183,6 +1244,7 @@ export function useAIChatStreaming({
           retryAssistantMsgId,
           context.activeProvider?.advancedParams,
           continuationContext,
+          budgetTracker,
         );
       }
     } catch (err) {
@@ -1198,6 +1260,7 @@ export function useAIChatStreaming({
   }, [
     processCattyStream, reportStreamError, setStreamingForScope,
     addMessageToSession, updateLastMessage, updateMessageById,
+    maxIterations, maxToolCalls, maxTokens, maxCostUsd, costPerMillionTokensUsd,
   ]);
 
   return {

@@ -189,6 +189,14 @@ const SettingsAITabContainer: React.FC = () => {
                 setCommandTimeout={aiState.setCommandTimeout}
                 maxIterations={aiState.maxIterations}
                 setMaxIterations={aiState.setMaxIterations}
+                maxToolCalls={aiState.maxToolCalls}
+                setMaxToolCalls={aiState.setMaxToolCalls}
+                maxTokens={aiState.maxTokens}
+                setMaxTokens={aiState.setMaxTokens}
+                maxCostUsd={aiState.maxCostUsd}
+                setMaxCostUsd={aiState.setMaxCostUsd}
+                costPerMillionTokensUsd={aiState.costPerMillionTokensUsd}
+                setCostPerMillionTokensUsd={aiState.setCostPerMillionTokensUsd}
                 webSearchConfig={aiState.webSearchConfig}
                 setWebSearchConfig={aiState.setWebSearchConfig}
                 quickMessages={aiState.quickMessages}

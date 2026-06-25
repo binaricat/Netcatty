@@ -49,6 +49,15 @@ function registerAgentProcessHandlers(ctx) {
     return { ok: true };
   });
 
+  ipcMain.handle("netcatty:ai:mcp:set-budget-limits", async (event, { limits }) => {
+    if (!validateSenderOrSettings(event)) return { ok: false, error: "Unauthorized IPC sender" };
+    if (!limits || typeof limits !== "object") {
+      return { ok: false, error: "limits must be an object" };
+    }
+    mcpServerBridge.setBudgetLimits(limits);
+    return { ok: true };
+  });
+
   ipcMain.handle("netcatty:ai:mcp:set-permission-mode", async (event, { mode }) => {
     if (!validateSenderOrSettings(event)) return { ok: false, error: "Unauthorized IPC sender" };
     const validModes = ["observer", "confirm", "autonomous"];

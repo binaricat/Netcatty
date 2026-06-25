@@ -81,6 +81,10 @@ import {
   STORAGE_KEY_AI_COMMAND_BLOCKLIST,
   STORAGE_KEY_AI_COMMAND_TIMEOUT,
   STORAGE_KEY_AI_MAX_ITERATIONS,
+  STORAGE_KEY_AI_MAX_TOOL_CALLS,
+  STORAGE_KEY_AI_MAX_TOKENS,
+  STORAGE_KEY_AI_MAX_COST_USD,
+  STORAGE_KEY_AI_COST_PER_MILLION_TOKENS_USD,
   STORAGE_KEY_AI_AGENT_MODEL_MAP,
   STORAGE_KEY_AI_AGENT_PROVIDER_MAP,
   STORAGE_KEY_AI_WEB_SEARCH,
@@ -253,6 +257,10 @@ export const SYNCABLE_SETTING_STORAGE_KEYS = [
   STORAGE_KEY_AI_COMMAND_BLOCKLIST,
   STORAGE_KEY_AI_COMMAND_TIMEOUT,
   STORAGE_KEY_AI_MAX_ITERATIONS,
+  STORAGE_KEY_AI_MAX_TOOL_CALLS,
+  STORAGE_KEY_AI_MAX_TOKENS,
+  STORAGE_KEY_AI_MAX_COST_USD,
+  STORAGE_KEY_AI_COST_PER_MILLION_TOKENS_USD,
   STORAGE_KEY_AI_AGENT_MODEL_MAP,
   STORAGE_KEY_AI_AGENT_PROVIDER_MAP,
   STORAGE_KEY_AI_WEB_SEARCH,
@@ -484,6 +492,16 @@ export function collectSyncableSettings(): SyncPayload['settings'] {
   if (commandTimeout != null && Number.isFinite(commandTimeout)) ai.commandTimeout = commandTimeout;
   const maxIterations = localStorageAdapter.readNumber(STORAGE_KEY_AI_MAX_ITERATIONS);
   if (maxIterations != null && Number.isFinite(maxIterations)) ai.maxIterations = maxIterations;
+  const maxToolCalls = localStorageAdapter.readNumber(STORAGE_KEY_AI_MAX_TOOL_CALLS);
+  if (maxToolCalls != null && Number.isFinite(maxToolCalls)) ai.maxToolCalls = maxToolCalls;
+  const maxTokens = localStorageAdapter.readNumber(STORAGE_KEY_AI_MAX_TOKENS);
+  if (maxTokens != null && Number.isFinite(maxTokens)) ai.maxTokens = maxTokens;
+  const maxCostUsd = localStorageAdapter.readNumber(STORAGE_KEY_AI_MAX_COST_USD);
+  if (maxCostUsd != null && Number.isFinite(maxCostUsd)) ai.maxCostUsd = maxCostUsd;
+  const costPerMillionTokensUsd = localStorageAdapter.readNumber(STORAGE_KEY_AI_COST_PER_MILLION_TOKENS_USD);
+  if (costPerMillionTokensUsd != null && Number.isFinite(costPerMillionTokensUsd)) {
+    ai.costPerMillionTokensUsd = costPerMillionTokensUsd;
+  }
   const agentModelMap = readRecordSetting<Record<string, string>>(STORAGE_KEY_AI_AGENT_MODEL_MAP);
   if (agentModelMap) ai.agentModelMap = agentModelMap;
   const agentProviderMap = readRecordSetting<Record<string, string>>(STORAGE_KEY_AI_AGENT_PROVIDER_MAP);
@@ -684,6 +702,12 @@ async function applySyncableSettings(settings: NonNullable<SyncPayload['settings
     if (ai.commandBlocklist != null) localStorageAdapter.write(STORAGE_KEY_AI_COMMAND_BLOCKLIST, ai.commandBlocklist);
     if (ai.commandTimeout != null) localStorageAdapter.writeNumber(STORAGE_KEY_AI_COMMAND_TIMEOUT, ai.commandTimeout);
     if (ai.maxIterations != null) localStorageAdapter.writeNumber(STORAGE_KEY_AI_MAX_ITERATIONS, ai.maxIterations);
+    if (ai.maxToolCalls != null) localStorageAdapter.writeNumber(STORAGE_KEY_AI_MAX_TOOL_CALLS, ai.maxToolCalls);
+    if (ai.maxTokens != null) localStorageAdapter.writeNumber(STORAGE_KEY_AI_MAX_TOKENS, ai.maxTokens);
+    if (ai.maxCostUsd != null) localStorageAdapter.writeNumber(STORAGE_KEY_AI_MAX_COST_USD, ai.maxCostUsd);
+    if (ai.costPerMillionTokensUsd != null) {
+      localStorageAdapter.writeNumber(STORAGE_KEY_AI_COST_PER_MILLION_TOKENS_USD, ai.costPerMillionTokensUsd);
+    }
     if (ai.agentModelMap != null) localStorageAdapter.write(STORAGE_KEY_AI_AGENT_MODEL_MAP, ai.agentModelMap);
     if (ai.agentProviderMap != null) localStorageAdapter.write(STORAGE_KEY_AI_AGENT_PROVIDER_MAP, ai.agentProviderMap);
     if (ai.webSearchConfig !== undefined) {
@@ -736,6 +760,10 @@ function notifyAIStateAfterSync(ai: NonNullable<SyncPayload['settings']>['ai']):
   if (ai.commandBlocklist != null) touched.push(STORAGE_KEY_AI_COMMAND_BLOCKLIST);
   if (ai.commandTimeout != null) touched.push(STORAGE_KEY_AI_COMMAND_TIMEOUT);
   if (ai.maxIterations != null) touched.push(STORAGE_KEY_AI_MAX_ITERATIONS);
+  if (ai.maxToolCalls != null) touched.push(STORAGE_KEY_AI_MAX_TOOL_CALLS);
+  if (ai.maxTokens != null) touched.push(STORAGE_KEY_AI_MAX_TOKENS);
+  if (ai.maxCostUsd != null) touched.push(STORAGE_KEY_AI_MAX_COST_USD);
+  if (ai.costPerMillionTokensUsd != null) touched.push(STORAGE_KEY_AI_COST_PER_MILLION_TOKENS_USD);
   if (ai.agentModelMap != null) touched.push(STORAGE_KEY_AI_AGENT_MODEL_MAP);
   // agentProviderMap is *always* potentially mutated because the reconcile
   // step may have pruned it even if the payload didn't ship one.

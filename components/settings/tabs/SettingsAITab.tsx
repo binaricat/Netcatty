@@ -145,6 +145,14 @@ interface SettingsAITabProps {
   setCommandTimeout: (value: number) => void;
   maxIterations: number;
   setMaxIterations: (value: number) => void;
+  maxToolCalls: number;
+  setMaxToolCalls: (value: number) => void;
+  maxTokens: number;
+  setMaxTokens: (value: number) => void;
+  maxCostUsd: number;
+  setMaxCostUsd: (value: number) => void;
+  costPerMillionTokensUsd: number;
+  setCostPerMillionTokensUsd: (value: number) => void;
   webSearchConfig: WebSearchConfig | null;
   setWebSearchConfig: (config: WebSearchConfig | null) => void;
   quickMessages: AIQuickMessage[];
@@ -180,6 +188,14 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
   setCommandTimeout,
   maxIterations,
   setMaxIterations,
+  maxToolCalls,
+  setMaxToolCalls,
+  maxTokens,
+  setMaxTokens,
+  maxCostUsd,
+  setMaxCostUsd,
+  costPerMillionTokensUsd,
+  setCostPerMillionTokensUsd,
   webSearchConfig,
   setWebSearchConfig,
   quickMessages,
@@ -1153,6 +1169,14 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
             setCommandTimeout={setCommandTimeout}
             maxIterations={maxIterations}
             setMaxIterations={setMaxIterations}
+            maxToolCalls={maxToolCalls}
+            setMaxToolCalls={setMaxToolCalls}
+            maxTokens={maxTokens}
+            setMaxTokens={setMaxTokens}
+            maxCostUsd={maxCostUsd}
+            setMaxCostUsd={setMaxCostUsd}
+            costPerMillionTokensUsd={costPerMillionTokensUsd}
+            setCostPerMillionTokensUsd={setCostPerMillionTokensUsd}
           />
         </TabsContent>
       </Tabs>

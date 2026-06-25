@@ -273,6 +273,10 @@ export interface SyncPayload {
       commandBlocklist?: string[];
       commandTimeout?: number;
       maxIterations?: number;
+      maxToolCalls?: number;
+      maxTokens?: number;
+      maxCostUsd?: number;
+      costPerMillionTokensUsd?: number;
       agentModelMap?: Record<string, string>;
       agentProviderMap?: Record<string, string>;
       webSearchConfig?: Record<string, unknown> | null;

@@ -51,6 +51,19 @@ let commandTimeoutMs = 60000;
 
 // Max iterations for AI agent loops (default 20, synced from user settings)
 let maxIterations = 20;
+let budgetLimits = {
+  maxToolCalls: 60,
+  maxTokens: 0,
+  maxCostUsd: 0,
+  costPerMillionTokensUsd: 0,
+};
+const agentBudgetStates = new Map(); // chatSessionId -> { toolCalls, paused, doomLoop }
+const DOOM_LOOP_THRESHOLD = 3;
+const BUDGET_EXEMPT_METHODS = new Set([
+  "netcatty/getContext",
+  "netcatty/getStatus",
+  "netcatty/setCancelled",
+]);
 
 // Permission mode: 'observer' | 'confirm' | 'autonomous' (synced from user settings)
 let permissionMode = "confirm";
@@ -342,6 +355,157 @@ function getMaxIterations() {
   return maxIterations;
 }
 
+function sanitizeBudgetNumber(value, fallback, min, max) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return fallback;
+  return Math.max(min, Math.min(max, numeric));
+}
+
+function setBudgetLimits(limits) {
+  budgetLimits = {
+    maxToolCalls: sanitizeBudgetNumber(limits?.maxToolCalls, budgetLimits.maxToolCalls, 1, 500),
+    maxTokens: sanitizeBudgetNumber(limits?.maxTokens, budgetLimits.maxTokens, 0, 10_000_000),
+    maxCostUsd: sanitizeBudgetNumber(limits?.maxCostUsd, budgetLimits.maxCostUsd, 0, 10_000),
+    costPerMillionTokensUsd: sanitizeBudgetNumber(
+      limits?.costPerMillionTokensUsd,
+      budgetLimits.costPerMillionTokensUsd,
+      0,
+      10_000,
+    ),
+  };
+}
+
+function getBudgetLimits() {
+  return { ...budgetLimits };
+}
+
+function getBudgetState(chatSessionId) {
+  const key = chatSessionId || "__global__";
+  let state = agentBudgetStates.get(key);
+  if (!state) {
+    state = {
+      toolCalls: 0,
+      paused: false,
+      doomLoop: { last: null, repeatCount: 0 },
+    };
+    agentBudgetStates.set(key, state);
+  }
+  return state;
+}
+
+function resetBudgetState(chatSessionId) {
+  if (!chatSessionId) return;
+  agentBudgetStates.set(chatSessionId, {
+    toolCalls: 0,
+    paused: false,
+    doomLoop: { last: null, repeatCount: 0 },
+  });
+}
+
+function isBudgetedMethod(method) {
+  return !BUDGET_EXEMPT_METHODS.has(method);
+}
+
+function consumeToolBudget(method, params) {
+  if (!isBudgetedMethod(method)) return null;
+  const state = getBudgetState(params?.chatSessionId);
+  if (state.paused) {
+    return {
+      ok: false,
+      error: "Doom loop pause is active. Confirm or cancel the agent before running more Netcatty tools.",
+    };
+  }
+  if (state.toolCalls >= budgetLimits.maxToolCalls) {
+    return {
+      ok: false,
+      error: `Agent budget exceeded: tool calls limit ${budgetLimits.maxToolCalls} reached.`,
+    };
+  }
+  state.toolCalls += 1;
+  return null;
+}
+
+function stableStringify(value) {
+  if (value == null) return String(value);
+  if (typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
+  return `{${Object.entries(value)
+    .filter(([, entryValue]) => typeof entryValue !== "undefined")
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([key, entryValue]) => `${JSON.stringify(key)}:${stableStringify(entryValue)}`)
+    .join(",")}}`;
+}
+
+function fingerprintParams(params) {
+  const clone = { ...(params || {}) };
+  delete clone.chatSessionId;
+  delete clone.scopedSessionIds;
+  return stableStringify(clone);
+}
+
+function isFailureResult(result) {
+  return Boolean(result && typeof result === "object" && (result.ok === false || result.isError === true || typeof result.error === "string"));
+}
+
+function failureSignature(result) {
+  const raw = typeof result?.error === "string"
+    ? result.error
+    : typeof result?.message === "string"
+      ? result.message
+      : stableStringify(result);
+  return String(raw)
+    .replace(/\b[0-9a-f]{8,}\b/gi, "<hex>")
+    .replace(/\b\d{4,}\b/g, "<num>")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 500);
+}
+
+function resetDoomLoopState(state) {
+  state.paused = false;
+  state.doomLoop = { last: null, repeatCount: 0 };
+}
+
+async function applyDoomLoopDetection(method, params, result) {
+  if (!isBudgetedMethod(method) || !isFailureResult(result)) {
+    if (isBudgetedMethod(method)) resetDoomLoopState(getBudgetState(params?.chatSessionId));
+    return result;
+  }
+
+  const state = getBudgetState(params?.chatSessionId);
+  const record = {
+    method,
+    paramsFingerprint: fingerprintParams(params),
+    failureSignature: failureSignature(result),
+  };
+  const previous = state.doomLoop.last;
+  const isRepeat = previous?.method === record.method
+    && previous.paramsFingerprint === record.paramsFingerprint
+    && previous.failureSignature === record.failureSignature;
+  state.doomLoop = {
+    last: record,
+    repeatCount: isRepeat ? state.doomLoop.repeatCount + 1 : 1,
+  };
+
+  if (state.doomLoop.repeatCount < DOOM_LOOP_THRESHOLD) return result;
+
+  const approved = await requestApprovalFromRenderer("doom_loop_pause", {
+    method,
+    params: params ? { ...params, chatSessionId: undefined, scopedSessionIds: undefined } : {},
+    repeatCount: state.doomLoop.repeatCount,
+    lastError: record.failureSignature,
+  }, params?.chatSessionId);
+  if (approved) {
+    resetDoomLoopState(state);
+    return result;
+  }
+  state.paused = true;
+  return {
+    ok: false,
+    error: "Doom loop detected: repeated identical failing tool calls were paused by the user.",
+  };
+}
+
 function setPermissionMode(mode) {
   if (mode === "observer" || mode === "confirm" || mode === "autonomous") {
     permissionMode = mode;
@@ -430,6 +594,7 @@ function updateSessionMetadata(sessionList, chatSessionId) {
   // Store per-scope metadata when chatSessionId is provided
   if (chatSessionId) {
     scopedMetadata.set(chatSessionId, { sessionIds: ids, metadata: metaMap });
+    resetBudgetState(chatSessionId);
   }
 }
 
@@ -847,6 +1012,9 @@ async function dispatch(method, params) {
     if (busy) return busy;
   }
 
+  const budgetError = consumeToolBudget(method, params);
+  if (budgetError) return budgetError;
+
   if (sessionWriteLockId) {
     const pendingMethod = pendingSessionWriteApprovals.get(sessionWriteLockId);
     if (pendingMethod) {
@@ -870,50 +1038,73 @@ async function dispatch(method, params) {
         return { ok: false, error: USER_DENIED_MESSAGE };
       }
     }
+    let result;
     switch (method) {
       case "netcatty/getContext":
-        return handleGetContext(params);
+        result = handleGetContext(params);
+        break;
       case "netcatty/getStatus":
-        return handleGetStatus();
+        result = handleGetStatus(params);
+        break;
       case "netcatty/listAttachments":
-        return handleListAttachments(params);
+        result = handleListAttachments(params);
+        break;
       case "netcatty/readAttachment":
-        return handleReadAttachment(params);
+        result = handleReadAttachment(params);
+        break;
       case "netcatty/exec":
-        return handleExec(params);
+        result = handleExec(params);
+        break;
       case "netcatty/sftp/list":
-        return handleSftpList(params);
+        result = handleSftpList(params);
+        break;
       case "netcatty/sftp/read":
-        return handleSftpRead(params);
+        result = handleSftpRead(params);
+        break;
       case "netcatty/sftp/write":
-        return handleSftpWrite(params);
+        result = handleSftpWrite(params);
+        break;
       case "netcatty/sftp/download":
-        return handleSftpDownload(params);
+        result = handleSftpDownload(params);
+        break;
       case "netcatty/sftp/upload":
-        return handleSftpUpload(params);
+        result = handleSftpUpload(params);
+        break;
       case "netcatty/sftp/mkdir":
-        return handleSftpMkdir(params);
+        result = handleSftpMkdir(params);
+        break;
       case "netcatty/sftp/delete":
-        return handleSftpDelete(params);
+        result = handleSftpDelete(params);
+        break;
       case "netcatty/sftp/rename":
-        return handleSftpRename(params);
+        result = handleSftpRename(params);
+        break;
       case "netcatty/sftp/stat":
-        return handleSftpStat(params);
+        result = handleSftpStat(params);
+        break;
       case "netcatty/sftp/chmod":
-        return handleSftpChmod(params);
+        result = handleSftpChmod(params);
+        break;
       case "netcatty/sftp/home":
-        return handleSftpHome(params);
+        result = handleSftpHome(params);
+        break;
       case "netcatty/setCancelled":
-        return handleSetCancelled(params);
+        result = handleSetCancelled(params);
+        break;
       case "netcatty/jobStart":
-        return handleJobStart(params);
+        result = handleJobStart(params);
+        break;
       case "netcatty/jobPoll":
-        return handleJobPoll(params);
+        result = handleJobPoll(params);
+        break;
       case "netcatty/jobStop":
-        return handleJobStop(params);
+        result = handleJobStop(params);
+        break;
       default:
         throw new Error(`Unknown method: ${method}`);
     }
+    result = await result;
+    return applyDoomLoopDetection(method, params, result);
   } finally {
     if (sessionWriteLockId) {
       pendingSessionWriteApprovals.delete(sessionWriteLockId);
@@ -987,7 +1178,8 @@ function handleGetContext(params) {
   };
 }
 
-function handleGetStatus() {
+function handleGetStatus(params) {
+  const budgetState = getBudgetState(params?.chatSessionId);
   return {
     ok: true,
     environment: "netcatty-terminal",
@@ -995,6 +1187,12 @@ function handleGetStatus() {
     approvalTimeoutMs: APPROVAL_TIMEOUT_MS,
     commandTimeoutMs,
     maxIterations,
+    budgetLimits: getBudgetLimits(),
+    budgetUsage: {
+      toolCalls: budgetState.toolCalls,
+      paused: budgetState.paused,
+      doomLoopRepeatCount: budgetState.doomLoop.repeatCount,
+    },
     tcpPort,
     sessionCount: sessions?.size || 0,
     scopedContextCount: scopedMetadata.size,
@@ -1094,6 +1292,8 @@ module.exports = {
   getCommandTimeoutMs,
   setMaxIterations,
   getMaxIterations,
+  setBudgetLimits,
+  getBudgetLimits,
   setPermissionMode,
   getPermissionMode,
   setChatSessionCancelled,

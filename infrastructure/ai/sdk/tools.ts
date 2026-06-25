@@ -16,14 +16,77 @@ import {
 import { requestApproval } from '../shared/approvalGate';
 import { reserveSessionSlot } from '../shared/sessionExecutionQueue';
 import { truncateTextWithHeadAndTail } from '../requestPayloadCompression';
+import type { AgentBudgetTracker } from '../shared/agentBudget';
+import {
+  createDoomLoopState,
+  isToolResultFailure,
+  recordDoomLoopResult,
+  resetDoomLoopState,
+  type DoomLoopState,
+} from '../shared/doomLoopDetector';
 
 const MAX_LIVE_TERMINAL_STDOUT_CHARS = 24_000;
 const MAX_LIVE_TERMINAL_STDERR_CHARS = 12_000;
+const DOOM_LOOP_TOOL_NAME = 'doom_loop_pause';
 
 /** Unwrap a shared ToolExecResult into the shape expected by Vercel AI SDK tool results. */
 function unwrap<T>(r: ToolExecResult<T>): T | { error: string } {
   if (r.ok === false) return { error: r.error };
   return r.data;
+}
+
+export interface CattyToolSafety {
+  budgetTracker?: AgentBudgetTracker;
+  doomLoopState?: DoomLoopState;
+}
+
+function getDoomLoopState(safety?: CattyToolSafety): DoomLoopState | undefined {
+  return safety?.doomLoopState;
+}
+
+function recordToolCallBudget(safety?: CattyToolSafety): { error: string } | null {
+  const reason = safety?.budgetTracker?.recordToolCall();
+  return reason ? { error: reason.message } : null;
+}
+
+async function maybePauseForDoomLoop<T>(
+  safety: CattyToolSafety | undefined,
+  toolCallId: string,
+  toolName: string,
+  args: Record<string, unknown>,
+  result: T,
+  chatSessionId?: string,
+): Promise<T | { error: string }> {
+  const state = getDoomLoopState(safety);
+  if (!state) return result;
+  if (state.paused) {
+    return { error: 'Doom loop pause is active. The user must approve before this repeated tool call can continue.' };
+  }
+  if (!isToolResultFailure(result)) {
+    resetDoomLoopState(state);
+    return result;
+  }
+
+  const detection = recordDoomLoopResult(state, toolName, args, result);
+  if (!detection.triggered) return result;
+
+  const approved = await requestApproval(
+    `doom_${toolCallId}`,
+    DOOM_LOOP_TOOL_NAME,
+    {
+      toolName,
+      args,
+      repeatCount: detection.repeatCount,
+      lastError: detection.record.failureSignature,
+    },
+    chatSessionId,
+  );
+  if (approved) {
+    resetDoomLoopState(state);
+    return result;
+  }
+  state.paused = true;
+  return { error: 'Doom loop detected: repeated identical failing tool calls were paused by the user.' };
 }
 
 export function fitTerminalExecuteResultForModel(result: {
@@ -53,6 +116,7 @@ export function createCattyTools(
   permissionMode: AIPermissionMode = 'confirm',
   webSearchConfig?: WebSearchConfig,
   chatSessionId?: string,
+  safety: CattyToolSafety = { doomLoopState: createDoomLoopState() },
 ) {
   const deps: ToolDeps = { bridge, context, commandBlocklist, permissionMode, webSearchConfig, chatSessionId };
 
@@ -67,6 +131,8 @@ export function createCattyTools(
       }),
       // No needsApproval — approval is handled inside execute via the approval gate.
       execute: async ({ sessionId, command }, { toolCallId, abortSignal }) => {
+        const budgetError = recordToolCallBudget(safety);
+        if (budgetError) return budgetError;
         // Snap our place in the per-session execution queue *first*,
         // synchronously, so the eventual command-run order matches the
         // LLM's tool_use emission order regardless of how long each
@@ -121,8 +187,17 @@ export function createCattyTools(
           abortSignal?.addEventListener('abort', cancelOnAbort, { once: true });
           try {
             const result = await executeTerminalExecute(deps, { sessionId, command });
-            if (result.ok === false) return unwrap(result);
-            return fitTerminalExecuteResultForModel(result.data);
+            const output = result.ok === false
+              ? unwrap(result)
+              : fitTerminalExecuteResultForModel(result.data);
+            return maybePauseForDoomLoop(
+              safety,
+              toolCallId,
+              'terminal_execute',
+              { sessionId, command },
+              output,
+              chatSessionId,
+            );
           } finally {
             abortSignal?.removeEventListener('abort', cancelOnAbort);
           }
@@ -138,7 +213,10 @@ export function createCattyTools(
         'and their connection status. No parameters required.',
       inputSchema: z.object({}),
       execute: async () => {
-        return unwrap(executeWorkspaceGetInfo(deps));
+        const budgetError = recordToolCallBudget(safety);
+        if (budgetError) return budgetError;
+        const output = unwrap(executeWorkspaceGetInfo(deps));
+        return maybePauseForDoomLoop(safety, 'workspace_get_info', 'workspace_get_info', {}, output, chatSessionId);
       },
     }),
 
@@ -150,7 +228,17 @@ export function createCattyTools(
         sessionId: z.string().describe('The session ID to get information about.'),
       }),
       execute: async ({ sessionId }) => {
-        return unwrap(executeWorkspaceGetSessionInfo(deps, { sessionId }));
+        const budgetError = recordToolCallBudget(safety);
+        if (budgetError) return budgetError;
+        const output = unwrap(executeWorkspaceGetSessionInfo(deps, { sessionId }));
+        return maybePauseForDoomLoop(
+          safety,
+          `workspace_get_session_info_${sessionId}`,
+          'workspace_get_session_info',
+          { sessionId },
+          output,
+          chatSessionId,
+        );
       },
     }),
 
@@ -168,7 +256,17 @@ export function createCattyTools(
             .describe('Maximum number of search results to return. If omitted, uses the configured default.'),
         }),
         execute: async ({ query, maxResults }) => {
-          return unwrap(await executeWebSearch(deps, { query, maxResults }));
+          const budgetError = recordToolCallBudget(safety);
+          if (budgetError) return budgetError;
+          const output = unwrap(await executeWebSearch(deps, { query, maxResults }));
+          return maybePauseForDoomLoop(
+            safety,
+            `web_search_${Date.now()}`,
+            'web_search',
+            { query, maxResults },
+            output,
+            chatSessionId,
+          );
         },
       }),
     } : {}),
@@ -187,7 +285,17 @@ export function createCattyTools(
           .describe('Maximum number of characters to return. Defaults to 50000.'),
       }),
       execute: async ({ url, maxLength }) => {
-        return unwrap(await executeUrlFetch(deps, { url, maxLength }));
+        const budgetError = recordToolCallBudget(safety);
+        if (budgetError) return budgetError;
+        const output = unwrap(await executeUrlFetch(deps, { url, maxLength }));
+        return maybePauseForDoomLoop(
+          safety,
+          `url_fetch_${Date.now()}`,
+          'url_fetch',
+          { url, maxLength },
+          output,
+          chatSessionId,
+        );
       },
     }),
   };

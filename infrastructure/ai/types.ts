@@ -1,6 +1,12 @@
 // AI Provider types
 import defaultCommandBlocklist from '../../lib/commandBlocklist.json';
 import type { ProviderContinuation } from './providerContinuation';
+import {
+  DEFAULT_COST_PER_MILLION_TOKENS_USD,
+  DEFAULT_MAX_COST_USD,
+  DEFAULT_MAX_TOKENS,
+  DEFAULT_MAX_TOOL_CALLS,
+} from './shared/agentBudget';
 
 export type AIProviderId =
   | 'openai'
@@ -310,7 +316,11 @@ export interface AISettings {
   defaultAgentId: string;
   commandBlocklist: string[];    // global command blocklist patterns
   commandTimeout: number;        // seconds, default 60
-  maxIterations: number;         // doom loop prevention, default 20
+  maxIterations: number;         // step-loop prevention, default 20
+  maxToolCalls: number;          // per-turn Netcatty tool-call budget
+  maxTokens: number;             // per-turn model token budget; 0 disables
+  maxCostUsd: number;            // per-turn estimated cost budget; 0 disables
+  costPerMillionTokensUsd: number; // fallback cost estimator when provider omits cost
   webSearchConfig?: WebSearchConfig;
 }
 
@@ -329,6 +339,10 @@ export const DEFAULT_AI_SETTINGS: AISettings = {
   commandBlocklist: [...DEFAULT_COMMAND_BLOCKLIST],
   commandTimeout: 60,
   maxIterations: 20,
+  maxToolCalls: DEFAULT_MAX_TOOL_CALLS,
+  maxTokens: DEFAULT_MAX_TOKENS,
+  maxCostUsd: DEFAULT_MAX_COST_USD,
+  costPerMillionTokensUsd: DEFAULT_COST_PER_MILLION_TOKENS_USD,
 };
 
 export interface ProviderPreset {

@@ -104,6 +104,12 @@ declare global {
       connected: boolean;
     }>, chatSessionId?: string): Promise<{ ok: boolean }>;
     aiMcpSetToolIntegrationMode?(mode: 'mcp' | 'skills'): Promise<{ ok: boolean; error?: string }>;
+    aiMcpSetBudgetLimits?(limits: {
+      maxToolCalls: number;
+      maxTokens: number;
+      maxCostUsd: number;
+      costPerMillionTokensUsd: number;
+    }): Promise<{ ok: boolean; error?: string }>;
     aiUserSkillsGetStatus?(): Promise<{
       ok: boolean;
       directoryPath?: string;

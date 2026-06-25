@@ -12,6 +12,10 @@ import {
   STORAGE_KEY_AI_COMMAND_BLOCKLIST,
   STORAGE_KEY_AI_COMMAND_TIMEOUT,
   STORAGE_KEY_AI_MAX_ITERATIONS,
+  STORAGE_KEY_AI_MAX_TOOL_CALLS,
+  STORAGE_KEY_AI_MAX_TOKENS,
+  STORAGE_KEY_AI_MAX_COST_USD,
+  STORAGE_KEY_AI_COST_PER_MILLION_TOKENS_USD,
   STORAGE_KEY_AI_SESSIONS,
   STORAGE_KEY_AI_ACTIVE_SESSION_MAP,
   STORAGE_KEY_AI_AGENT_MODEL_MAP,
@@ -34,6 +38,12 @@ import type {
   WebSearchConfig,
 } from '../../infrastructure/ai/types';
 import { DEFAULT_COMMAND_BLOCKLIST } from '../../infrastructure/ai/types';
+import {
+  DEFAULT_COST_PER_MILLION_TOKENS_USD,
+  DEFAULT_MAX_COST_USD,
+  DEFAULT_MAX_TOKENS,
+  DEFAULT_MAX_TOOL_CALLS,
+} from '../../infrastructure/ai/shared/agentBudget';
 import {
   activateDraftView,
   clearScopeDraftState,
@@ -111,6 +121,19 @@ export function useAIState() {
   );
   const [maxIterations, setMaxIterationsRaw] = useState<number>(() =>
     localStorageAdapter.readNumber(STORAGE_KEY_AI_MAX_ITERATIONS) ?? 20
+  );
+  const [maxToolCalls, setMaxToolCallsRaw] = useState<number>(() =>
+    localStorageAdapter.readNumber(STORAGE_KEY_AI_MAX_TOOL_CALLS) ?? DEFAULT_MAX_TOOL_CALLS
+  );
+  const [maxTokens, setMaxTokensRaw] = useState<number>(() =>
+    localStorageAdapter.readNumber(STORAGE_KEY_AI_MAX_TOKENS) ?? DEFAULT_MAX_TOKENS
+  );
+  const [maxCostUsd, setMaxCostUsdRaw] = useState<number>(() =>
+    localStorageAdapter.readNumber(STORAGE_KEY_AI_MAX_COST_USD) ?? DEFAULT_MAX_COST_USD
+  );
+  const [costPerMillionTokensUsd, setCostPerMillionTokensUsdRaw] = useState<number>(() =>
+    localStorageAdapter.readNumber(STORAGE_KEY_AI_COST_PER_MILLION_TOKENS_USD)
+      ?? DEFAULT_COST_PER_MILLION_TOKENS_USD
   );
 
   // ── Sessions ──
@@ -376,6 +399,44 @@ export function useAIState() {
     bridge?.aiMcpSetMaxIterations?.(value);
   }, []);
 
+  const syncBudgetLimitsToBridge = useCallback((next: {
+    maxToolCalls?: number;
+    maxTokens?: number;
+    maxCostUsd?: number;
+    costPerMillionTokensUsd?: number;
+  } = {}) => {
+    getAIBridge()?.aiMcpSetBudgetLimits?.({
+      maxToolCalls: next.maxToolCalls ?? maxToolCalls,
+      maxTokens: next.maxTokens ?? maxTokens,
+      maxCostUsd: next.maxCostUsd ?? maxCostUsd,
+      costPerMillionTokensUsd: next.costPerMillionTokensUsd ?? costPerMillionTokensUsd,
+    });
+  }, [costPerMillionTokensUsd, maxCostUsd, maxTokens, maxToolCalls]);
+
+  const setMaxToolCalls = useCallback((value: number) => {
+    setMaxToolCallsRaw(value);
+    localStorageAdapter.writeNumber(STORAGE_KEY_AI_MAX_TOOL_CALLS, value);
+    syncBudgetLimitsToBridge({ maxToolCalls: value });
+  }, [syncBudgetLimitsToBridge]);
+
+  const setMaxTokens = useCallback((value: number) => {
+    setMaxTokensRaw(value);
+    localStorageAdapter.writeNumber(STORAGE_KEY_AI_MAX_TOKENS, value);
+    syncBudgetLimitsToBridge({ maxTokens: value });
+  }, [syncBudgetLimitsToBridge]);
+
+  const setMaxCostUsd = useCallback((value: number) => {
+    setMaxCostUsdRaw(value);
+    localStorageAdapter.writeNumber(STORAGE_KEY_AI_MAX_COST_USD, value);
+    syncBudgetLimitsToBridge({ maxCostUsd: value });
+  }, [syncBudgetLimitsToBridge]);
+
+  const setCostPerMillionTokensUsd = useCallback((value: number) => {
+    setCostPerMillionTokensUsdRaw(value);
+    localStorageAdapter.writeNumber(STORAGE_KEY_AI_COST_PER_MILLION_TOKENS_USD, value);
+    syncBudgetLimitsToBridge({ costPerMillionTokensUsd: value });
+  }, [syncBudgetLimitsToBridge]);
+
   // ── Cross-window sync via storage events ──
   // When the settings window updates localStorage, the main window picks up changes.
   useEffect(() => {
@@ -455,6 +516,28 @@ export function useAIState() {
             }
             setMaxIterationsRaw(iters);
             getAIBridge()?.aiMcpSetMaxIterations?.(iters);
+            break;
+          }
+          case STORAGE_KEY_AI_MAX_TOOL_CALLS:
+          case STORAGE_KEY_AI_MAX_TOKENS:
+          case STORAGE_KEY_AI_MAX_COST_USD:
+          case STORAGE_KEY_AI_COST_PER_MILLION_TOKENS_USD: {
+            const nextMaxToolCalls = localStorageAdapter.readNumber(STORAGE_KEY_AI_MAX_TOOL_CALLS) ?? DEFAULT_MAX_TOOL_CALLS;
+            const nextMaxTokens = localStorageAdapter.readNumber(STORAGE_KEY_AI_MAX_TOKENS) ?? DEFAULT_MAX_TOKENS;
+            const nextMaxCostUsd = localStorageAdapter.readNumber(STORAGE_KEY_AI_MAX_COST_USD) ?? DEFAULT_MAX_COST_USD;
+            const nextCostPerMillionTokensUsd =
+              localStorageAdapter.readNumber(STORAGE_KEY_AI_COST_PER_MILLION_TOKENS_USD)
+                ?? DEFAULT_COST_PER_MILLION_TOKENS_USD;
+            setMaxToolCallsRaw(nextMaxToolCalls);
+            setMaxTokensRaw(nextMaxTokens);
+            setMaxCostUsdRaw(nextMaxCostUsd);
+            setCostPerMillionTokensUsdRaw(nextCostPerMillionTokensUsd);
+            getAIBridge()?.aiMcpSetBudgetLimits?.({
+              maxToolCalls: nextMaxToolCalls,
+              maxTokens: nextMaxTokens,
+              maxCostUsd: nextMaxCostUsd,
+              costPerMillionTokensUsd: nextCostPerMillionTokensUsd,
+            });
             break;
           }
           case STORAGE_KEY_AI_HOST_PERMISSIONS: {
@@ -543,6 +626,14 @@ export function useAIState() {
     bridge?.aiMcpSetCommandTimeout?.(initialTimeout);
     const initialMaxIter = localStorageAdapter.readNumber(STORAGE_KEY_AI_MAX_ITERATIONS) ?? 20;
     bridge?.aiMcpSetMaxIterations?.(initialMaxIter);
+    bridge?.aiMcpSetBudgetLimits?.({
+      maxToolCalls: localStorageAdapter.readNumber(STORAGE_KEY_AI_MAX_TOOL_CALLS) ?? DEFAULT_MAX_TOOL_CALLS,
+      maxTokens: localStorageAdapter.readNumber(STORAGE_KEY_AI_MAX_TOKENS) ?? DEFAULT_MAX_TOKENS,
+      maxCostUsd: localStorageAdapter.readNumber(STORAGE_KEY_AI_MAX_COST_USD) ?? DEFAULT_MAX_COST_USD,
+      costPerMillionTokensUsd:
+        localStorageAdapter.readNumber(STORAGE_KEY_AI_COST_PER_MILLION_TOKENS_USD)
+          ?? DEFAULT_COST_PER_MILLION_TOKENS_USD,
+    });
     const storedPermMode = localStorageAdapter.readString(STORAGE_KEY_AI_PERMISSION_MODE);
     const initialPermMode: AIPermissionMode =
       storedPermMode === 'observer' || storedPermMode === 'confirm' || storedPermMode === 'autonomous'
@@ -1020,6 +1111,14 @@ export function useAIState() {
     setCommandTimeout,
     maxIterations,
     setMaxIterations,
+    maxToolCalls,
+    setMaxToolCalls,
+    maxTokens,
+    setMaxTokens,
+    maxCostUsd,
+    setMaxCostUsd,
+    costPerMillionTokensUsd,
+    setCostPerMillionTokensUsd,
     agentModelMap,
     setAgentModel,
     agentProviderMap,
@@ -1077,6 +1176,14 @@ export function useAIState() {
     setCommandTimeout,
     maxIterations,
     setMaxIterations,
+    maxToolCalls,
+    setMaxToolCalls,
+    maxTokens,
+    setMaxTokens,
+    maxCostUsd,
+    setMaxCostUsd,
+    costPerMillionTokensUsd,
+    setCostPerMillionTokensUsd,
     agentModelMap,
     setAgentModel,
     agentProviderMap,

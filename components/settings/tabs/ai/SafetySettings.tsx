@@ -15,6 +15,14 @@ export const SafetySettings: React.FC<{
   setCommandTimeout: (value: number) => void;
   maxIterations: number;
   setMaxIterations: (value: number) => void;
+  maxToolCalls: number;
+  setMaxToolCalls: (value: number) => void;
+  maxTokens: number;
+  setMaxTokens: (value: number) => void;
+  maxCostUsd: number;
+  setMaxCostUsd: (value: number) => void;
+  costPerMillionTokensUsd: number;
+  setCostPerMillionTokensUsd: (value: number) => void;
 }> = ({
   globalPermissionMode,
   setGlobalPermissionMode,
@@ -24,6 +32,14 @@ export const SafetySettings: React.FC<{
   setCommandTimeout,
   maxIterations,
   setMaxIterations,
+  maxToolCalls,
+  setMaxToolCalls,
+  maxTokens,
+  setMaxTokens,
+  maxCostUsd,
+  setMaxCostUsd,
+  costPerMillionTokensUsd,
+  setCostPerMillionTokensUsd,
 }) => {
   const { t } = useI18n();
   const [regexErrors, setRegexErrors] = useState<Record<number, string>>({});
@@ -117,6 +133,76 @@ export const SafetySettings: React.FC<{
             min={1}
             max={100}
             className="w-20 h-9 rounded-md border border-input bg-background px-3 text-sm text-right focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          />
+        </SettingRow>
+
+        <SettingRow
+          label={t('ai.safety.maxToolCalls')}
+          description={t('ai.safety.maxToolCalls.description')}
+        >
+          <input
+            type="number"
+            value={maxToolCalls}
+            onChange={(e) => {
+              const val = parseInt(e.target.value, 10);
+              if (!isNaN(val) && val > 0) setMaxToolCalls(val);
+            }}
+            min={1}
+            max={500}
+            className="w-20 h-9 rounded-md border border-input bg-background px-3 text-sm text-right focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          />
+        </SettingRow>
+
+        <SettingRow
+          label={t('ai.safety.maxTokens')}
+          description={t('ai.safety.maxTokens.description')}
+        >
+          <input
+            type="number"
+            value={maxTokens}
+            onChange={(e) => {
+              const val = parseInt(e.target.value, 10);
+              if (!isNaN(val) && val >= 0) setMaxTokens(val);
+            }}
+            min={0}
+            max={10000000}
+            className="w-28 h-9 rounded-md border border-input bg-background px-3 text-sm text-right focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          />
+        </SettingRow>
+
+        <SettingRow
+          label={t('ai.safety.maxCostUsd')}
+          description={t('ai.safety.maxCostUsd.description')}
+        >
+          <input
+            type="number"
+            value={maxCostUsd}
+            onChange={(e) => {
+              const val = parseFloat(e.target.value);
+              if (!isNaN(val) && val >= 0) setMaxCostUsd(val);
+            }}
+            min={0}
+            max={10000}
+            step={0.01}
+            className="w-24 h-9 rounded-md border border-input bg-background px-3 text-sm text-right focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          />
+        </SettingRow>
+
+        <SettingRow
+          label={t('ai.safety.costPerMillionTokensUsd')}
+          description={t('ai.safety.costPerMillionTokensUsd.description')}
+        >
+          <input
+            type="number"
+            value={costPerMillionTokensUsd}
+            onChange={(e) => {
+              const val = parseFloat(e.target.value);
+              if (!isNaN(val) && val >= 0) setCostPerMillionTokensUsd(val);
+            }}
+            min={0}
+            max={10000}
+            step={0.01}
+            className="w-24 h-9 rounded-md border border-input bg-background px-3 text-sm text-right focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
           />
         </SettingRow>
         </SettingCard>

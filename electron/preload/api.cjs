@@ -963,6 +963,9 @@ function createPreloadApi(ctx) {
   aiMcpSetMaxIterations: async (maxIterations) => {
     return ipcRenderer.invoke("netcatty:ai:mcp:set-max-iterations", { maxIterations });
   },
+  aiMcpSetBudgetLimits: async (limits) => {
+    return ipcRenderer.invoke("netcatty:ai:mcp:set-budget-limits", { limits });
+  },
   aiMcpSetPermissionMode: async (mode) => {
     return ipcRenderer.invoke("netcatty:ai:mcp:set-permission-mode", { mode });
   },

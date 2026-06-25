@@ -11,6 +11,10 @@ import {
   STORAGE_KEY_AI_COMMAND_BLOCKLIST,
   STORAGE_KEY_AI_COMMAND_TIMEOUT,
   STORAGE_KEY_AI_MAX_ITERATIONS,
+  STORAGE_KEY_AI_MAX_TOOL_CALLS,
+  STORAGE_KEY_AI_MAX_TOKENS,
+  STORAGE_KEY_AI_MAX_COST_USD,
+  STORAGE_KEY_AI_COST_PER_MILLION_TOKENS_USD,
   STORAGE_KEY_AI_AGENT_MODEL_MAP,
   STORAGE_KEY_AI_AGENT_PROVIDER_MAP,
   STORAGE_KEY_AI_WEB_SEARCH,
@@ -27,6 +31,12 @@ import type {
   WebSearchConfig,
 } from '../../infrastructure/ai/types';
 import { DEFAULT_COMMAND_BLOCKLIST } from '../../infrastructure/ai/types';
+import {
+  DEFAULT_COST_PER_MILLION_TOKENS_USD,
+  DEFAULT_MAX_COST_USD,
+  DEFAULT_MAX_TOKENS,
+  DEFAULT_MAX_TOOL_CALLS,
+} from '../../infrastructure/ai/shared/agentBudget';
 import { removeProviderReferences } from './aiProviderCleanup';
 import { AI_STATE_CHANGED_EVENT, emitAIStateChanged } from './aiStateEvents';
 import { getAIBridge } from './aiStateSnapshots';
@@ -70,6 +80,19 @@ export function useAISettingsState() {
   );
   const [maxIterations, setMaxIterationsRaw] = useState<number>(() =>
     localStorageAdapter.readNumber(STORAGE_KEY_AI_MAX_ITERATIONS) ?? 20
+  );
+  const [maxToolCalls, setMaxToolCallsRaw] = useState<number>(() =>
+    localStorageAdapter.readNumber(STORAGE_KEY_AI_MAX_TOOL_CALLS) ?? DEFAULT_MAX_TOOL_CALLS
+  );
+  const [maxTokens, setMaxTokensRaw] = useState<number>(() =>
+    localStorageAdapter.readNumber(STORAGE_KEY_AI_MAX_TOKENS) ?? DEFAULT_MAX_TOKENS
+  );
+  const [maxCostUsd, setMaxCostUsdRaw] = useState<number>(() =>
+    localStorageAdapter.readNumber(STORAGE_KEY_AI_MAX_COST_USD) ?? DEFAULT_MAX_COST_USD
+  );
+  const [costPerMillionTokensUsd, setCostPerMillionTokensUsdRaw] = useState<number>(() =>
+    localStorageAdapter.readNumber(STORAGE_KEY_AI_COST_PER_MILLION_TOKENS_USD)
+      ?? DEFAULT_COST_PER_MILLION_TOKENS_USD
   );
   const [webSearchConfig, setWebSearchConfigRaw] = useState<WebSearchConfig | null>(() =>
     localStorageAdapter.read<WebSearchConfig>(STORAGE_KEY_AI_WEB_SEARCH) ?? null
@@ -174,6 +197,44 @@ export function useAISettingsState() {
     getAIBridge()?.aiMcpSetMaxIterations?.(value);
   }, []);
 
+  const syncBudgetLimitsToBridge = useCallback((next: {
+    maxToolCalls?: number;
+    maxTokens?: number;
+    maxCostUsd?: number;
+    costPerMillionTokensUsd?: number;
+  } = {}) => {
+    getAIBridge()?.aiMcpSetBudgetLimits?.({
+      maxToolCalls: next.maxToolCalls ?? maxToolCalls,
+      maxTokens: next.maxTokens ?? maxTokens,
+      maxCostUsd: next.maxCostUsd ?? maxCostUsd,
+      costPerMillionTokensUsd: next.costPerMillionTokensUsd ?? costPerMillionTokensUsd,
+    });
+  }, [costPerMillionTokensUsd, maxCostUsd, maxTokens, maxToolCalls]);
+
+  const setMaxToolCalls = useCallback((value: number) => {
+    setMaxToolCallsRaw(value);
+    localStorageAdapter.writeNumber(STORAGE_KEY_AI_MAX_TOOL_CALLS, value);
+    syncBudgetLimitsToBridge({ maxToolCalls: value });
+  }, [syncBudgetLimitsToBridge]);
+
+  const setMaxTokens = useCallback((value: number) => {
+    setMaxTokensRaw(value);
+    localStorageAdapter.writeNumber(STORAGE_KEY_AI_MAX_TOKENS, value);
+    syncBudgetLimitsToBridge({ maxTokens: value });
+  }, [syncBudgetLimitsToBridge]);
+
+  const setMaxCostUsd = useCallback((value: number) => {
+    setMaxCostUsdRaw(value);
+    localStorageAdapter.writeNumber(STORAGE_KEY_AI_MAX_COST_USD, value);
+    syncBudgetLimitsToBridge({ maxCostUsd: value });
+  }, [syncBudgetLimitsToBridge]);
+
+  const setCostPerMillionTokensUsd = useCallback((value: number) => {
+    setCostPerMillionTokensUsdRaw(value);
+    localStorageAdapter.writeNumber(STORAGE_KEY_AI_COST_PER_MILLION_TOKENS_USD, value);
+    syncBudgetLimitsToBridge({ costPerMillionTokensUsd: value });
+  }, [syncBudgetLimitsToBridge]);
+
   const setWebSearchConfig = useCallback((config: WebSearchConfig | null) => {
     setWebSearchConfigRaw(config);
     if (config) {
@@ -248,6 +309,28 @@ export function useAISettingsState() {
             getAIBridge()?.aiMcpSetMaxIterations?.(iters);
             break;
           }
+          case STORAGE_KEY_AI_MAX_TOOL_CALLS:
+          case STORAGE_KEY_AI_MAX_TOKENS:
+          case STORAGE_KEY_AI_MAX_COST_USD:
+          case STORAGE_KEY_AI_COST_PER_MILLION_TOKENS_USD: {
+            const nextMaxToolCalls = localStorageAdapter.readNumber(STORAGE_KEY_AI_MAX_TOOL_CALLS) ?? DEFAULT_MAX_TOOL_CALLS;
+            const nextMaxTokens = localStorageAdapter.readNumber(STORAGE_KEY_AI_MAX_TOKENS) ?? DEFAULT_MAX_TOKENS;
+            const nextMaxCostUsd = localStorageAdapter.readNumber(STORAGE_KEY_AI_MAX_COST_USD) ?? DEFAULT_MAX_COST_USD;
+            const nextCostPerMillionTokensUsd =
+              localStorageAdapter.readNumber(STORAGE_KEY_AI_COST_PER_MILLION_TOKENS_USD)
+                ?? DEFAULT_COST_PER_MILLION_TOKENS_USD;
+            setMaxToolCallsRaw(nextMaxToolCalls);
+            setMaxTokensRaw(nextMaxTokens);
+            setMaxCostUsdRaw(nextMaxCostUsd);
+            setCostPerMillionTokensUsdRaw(nextCostPerMillionTokensUsd);
+            getAIBridge()?.aiMcpSetBudgetLimits?.({
+              maxToolCalls: nextMaxToolCalls,
+              maxTokens: nextMaxTokens,
+              maxCostUsd: nextMaxCostUsd,
+              costPerMillionTokensUsd: nextCostPerMillionTokensUsd,
+            });
+            break;
+          }
           case STORAGE_KEY_AI_WEB_SEARCH:
             setWebSearchConfigRaw(localStorageAdapter.read<WebSearchConfig>(STORAGE_KEY_AI_WEB_SEARCH) ?? null);
             break;
@@ -278,9 +361,25 @@ export function useAISettingsState() {
     bridge?.aiMcpSetCommandBlocklist?.(commandBlocklist);
     bridge?.aiMcpSetCommandTimeout?.(commandTimeout);
     bridge?.aiMcpSetMaxIterations?.(maxIterations);
+    bridge?.aiMcpSetBudgetLimits?.({
+      maxToolCalls,
+      maxTokens,
+      maxCostUsd,
+      costPerMillionTokensUsd,
+    });
     bridge?.aiMcpSetPermissionMode?.(globalPermissionMode);
     bridge?.aiMcpSetToolIntegrationMode?.(toolIntegrationMode);
-  }, [commandBlocklist, commandTimeout, globalPermissionMode, maxIterations, toolIntegrationMode]);
+  }, [
+    commandBlocklist,
+    commandTimeout,
+    costPerMillionTokensUsd,
+    globalPermissionMode,
+    maxCostUsd,
+    maxIterations,
+    maxTokens,
+    maxToolCalls,
+    toolIntegrationMode,
+  ]);
 
   const activeProvider = providers.find((provider) => provider.id === activeProviderId) ?? null;
 
@@ -309,6 +408,14 @@ export function useAISettingsState() {
     setCommandTimeout,
     maxIterations,
     setMaxIterations,
+    maxToolCalls,
+    setMaxToolCalls,
+    maxTokens,
+    setMaxTokens,
+    maxCostUsd,
+    setMaxCostUsd,
+    costPerMillionTokensUsd,
+    setCostPerMillionTokensUsd,
     webSearchConfig,
     setWebSearchConfig,
     quickMessages,
@@ -340,6 +447,14 @@ export function useAISettingsState() {
     setCommandTimeout,
     maxIterations,
     setMaxIterations,
+    maxToolCalls,
+    setMaxToolCalls,
+    maxTokens,
+    setMaxTokens,
+    maxCostUsd,
+    setMaxCostUsd,
+    costPerMillionTokensUsd,
+    setCostPerMillionTokensUsd,
     webSearchConfig,
     setWebSearchConfig,
     quickMessages,
