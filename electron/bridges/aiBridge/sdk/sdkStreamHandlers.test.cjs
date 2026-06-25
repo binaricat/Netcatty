@@ -17,6 +17,7 @@ test("resolveBackendKey maps backend command/value to registry key", () => {
   assert.equal(resolveBackendKey("copilot"), "copilot");
   assert.equal(resolveBackendKey("codebuddy"), "codebuddy");
   assert.equal(resolveBackendKey("opencode"), "opencode");
+  assert.equal(resolveBackendKey("pi"), "pi");
 });
 
 test("resolveBackendKey returns null for unknown", () => {
@@ -297,6 +298,18 @@ test("resolveSdkBackendBinPath realpaths CodeBuddy PATH discovery fallback", () 
     realpath: () => "/opt/codebuddy/bin/codebuddy",
   });
   assert.equal(out, "/opt/codebuddy/bin/codebuddy");
+});
+
+test("resolveSdkBackendBinPath prefers configured Pi path", () => {
+  const out = resolveSdkBackendBinPath({
+    backendKey: "pi",
+    shellEnv: { PATH: "/usr/bin" },
+    env: { PI_BIN: "/shim/bin/pi" },
+    resolveCliFromPath: () => "/usr/bin/pi",
+    normalizeCliPathForPlatform: (value) => value,
+    realpath: () => "/opt/pi/bin/pi",
+  });
+  assert.equal(out, "/opt/pi/bin/pi");
 });
 
 test("resolveSdkBackendBinPath resolves Windows CodeBuddy shim to the package JS entry", () => {

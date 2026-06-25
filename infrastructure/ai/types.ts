@@ -233,7 +233,7 @@ export interface ExternalAgentConfig {
   icon?: string;
   enabled: boolean;
   available?: boolean;
-  /** SDK backend key for managed agents (claude|codex|copilot|cursor|codebuddy|opencode). */
+  /** SDK backend key for managed agents (claude|codex|copilot|cursor|codebuddy|opencode|pi). */
   sdkBackend?: string;
   /** Internal: whether the managed command was set manually or auto-detected. */
   commandSource?: "manual" | "auto";
@@ -258,8 +258,8 @@ export interface DiscoveredAgent {
   /** @deprecated Legacy discovery field from the pre-SDK migration. */
   acpCommand?: string;
   acpArgs?: string[];
-  /** SDK backend key (claude|codex|copilot|cursor|codebuddy|opencode) — the routing value. */
-  sdkBackend?: 'claude' | 'codex' | 'copilot' | 'cursor' | 'codebuddy' | 'opencode';
+  /** SDK backend key (claude|codex|copilot|cursor|codebuddy|opencode|pi) — the routing value. */
+  sdkBackend?: 'claude' | 'codex' | 'copilot' | 'cursor' | 'codebuddy' | 'opencode' | 'pi';
   /** Absolute resolved CLI path (preferred over `path`). */
   binPath?: string;
   installed?: boolean;
@@ -485,6 +485,15 @@ export const OPENCODE_MODEL_PRESETS: AgentModelPreset[] = [
   { id: 'ollama/llama3.3', name: 'Ollama Llama 3.3' },
 ];
 
+// Pi uses provider/model ids from @earendil-works/pi-coding-agent's ModelRegistry.
+export const PI_MODEL_PRESETS: AgentModelPreset[] = [
+  { id: 'anthropic/claude-sonnet-4-5', name: 'Claude Sonnet 4.5', description: 'Pi default', thinkingLevels: ['minimal', 'low', 'medium', 'high'] },
+  { id: 'anthropic/claude-opus-4-5', name: 'Claude Opus 4.5', thinkingLevels: ['minimal', 'low', 'medium', 'high'] },
+  { id: 'openai/gpt-5.1', name: 'OpenAI GPT-5.1', thinkingLevels: ['minimal', 'low', 'medium', 'high'] },
+  { id: 'openai-codex/gpt-5.1-codex', name: 'Codex GPT-5.1', thinkingLevels: ['minimal', 'low', 'medium', 'high'] },
+  { id: 'google/gemini-3-pro', name: 'Gemini 3 Pro', thinkingLevels: ['minimal', 'low', 'medium', 'high'] },
+];
+
 export function getAgentModelPresets(agentCommand?: string): AgentModelPreset[] {
   if (!agentCommand) return [];
   // Split on both POSIX (/) and Windows (\) separators so command paths like
@@ -497,6 +506,7 @@ export function getAgentModelPresets(agentCommand?: string): AgentModelPreset[] 
   if (basename.startsWith('cursor')) return CURSOR_MODEL_PRESETS;
   if (basename.startsWith('codebuddy')) return CODEBUDDY_MODEL_PRESETS;
   if (basename.startsWith('opencode')) return OPENCODE_MODEL_PRESETS;
+  if (basename === 'pi' || basename.startsWith('pi.')) return PI_MODEL_PRESETS;
   return [];
 }
 

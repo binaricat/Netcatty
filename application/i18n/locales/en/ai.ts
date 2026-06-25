@@ -172,6 +172,18 @@ export const enAiMessages: Messages = {
   'ai.opencode.check': 'Check',
   'ai.opencode.resetPath': 'Reset',
 
+  // AI Pi POC Agent
+  'ai.pi.title': 'Pi POC Agent',
+  'ai.pi.description': 'Uses Pi via the official SDK (`@earendil-works/pi-coding-agent`). Netcatty exposes scoped capability tools and disables Pi local write/bash tools for this POC.',
+  'ai.pi.detecting': 'Detecting...',
+  'ai.pi.detected': 'Detected',
+  'ai.pi.notFound': 'Not found',
+  'ai.pi.path': 'Path:',
+  'ai.pi.notFoundHint': 'Could not find pi in PATH. Install @earendil-works/pi-coding-agent or specify the executable path below.',
+  'ai.pi.customPathPlaceholder': 'e.g. /usr/local/bin/pi',
+  'ai.pi.check': 'Check',
+  'ai.pi.resetPath': 'Reset',
+
   // AI Default Agent
   'ai.defaultAgent': 'Default Agent',
   'ai.defaultAgent.description': 'Agent to use when starting a new AI session',

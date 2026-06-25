@@ -172,6 +172,18 @@ export const zhCNAiMessages: Messages = {
   'ai.opencode.check': '检查',
   'ai.opencode.resetPath': '重置',
 
+  // AI Pi POC Agent
+  'ai.pi.title': 'Pi POC Agent',
+  'ai.pi.description': '通过官方 SDK（`@earendil-works/pi-coding-agent`）接入 Pi。本 POC 只暴露 Netcatty 作用域能力工具，并禁用 Pi 本地 write/bash 工具。',
+  'ai.pi.detecting': '检测中...',
+  'ai.pi.detected': '已检测到',
+  'ai.pi.notFound': '未找到',
+  'ai.pi.path': '路径：',
+  'ai.pi.notFoundHint': '在 PATH 中未找到 pi。请安装 @earendil-works/pi-coding-agent，或在下方指定可执行文件路径。',
+  'ai.pi.customPathPlaceholder': '例如 /usr/local/bin/pi',
+  'ai.pi.check': '检查',
+  'ai.pi.resetPath': '重置',
+
   // AI Default Agent
   'ai.defaultAgent': '默认 Agent',
   'ai.defaultAgent.description': '创建新 AI 会话时使用的 Agent',

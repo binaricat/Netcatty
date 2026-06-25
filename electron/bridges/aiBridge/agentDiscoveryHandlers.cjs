@@ -52,6 +52,8 @@ function registerAgentDiscoveryHandlers(ctx) {
         description: "Tencent's coding agent CLI (Agent SDK)", sdkBackend: "codebuddy", args: [] },
       { command: "opencode", name: "OpenCode", icon: "opencode",
         description: "Open source coding agent via the official OpenCode SDK", sdkBackend: "opencode", args: [] },
+      { command: "pi", name: "Pi POC Agent", icon: "pi",
+        description: "Pi coding agent via @earendil-works/pi-coding-agent", sdkBackend: "pi", args: [] },
     ];
 
     const shellEnv = await getShellEnv();
@@ -97,6 +99,8 @@ function registerAgentDiscoveryHandlers(ctx) {
           auth = probeCodebuddyAuth({ env: shellEnv });
         } else if (agent.command === "opencode") {
           auth = { authenticated: true, authSource: "opencode-config" };
+        } else if (agent.command === "pi") {
+          auth = { authenticated: true, authSource: "pi-config" };
         }
       } catch { /* auth probe is best-effort */ }
 

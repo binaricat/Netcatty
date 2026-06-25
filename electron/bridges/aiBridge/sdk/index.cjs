@@ -15,6 +15,7 @@ const copilot = require("./copilotDriver.cjs");
 const cursor = require("./cursorDriver.cjs");
 const codebuddy = require("./codebuddyDriver.cjs");
 const opencode = require("./opencodeDriver.cjs");
+const pi = require("./piDriver.cjs");
 
 const DRIVER_REGISTRY = {
   claude: {
@@ -149,6 +150,23 @@ const DRIVER_REGISTRY = {
     },
     async listModels(ctx) {
       return opencode.listOpenCodeModels({ env: ctx.env, binPath: ctx.binPath });
+    },
+  },
+  pi: {
+    async runTurn(ctx) {
+      return pi.runPiTurn({
+        prompt: ctx.prompt,
+        attachments: ctx.attachments,
+        cwd: ctx.cwd,
+        model: ctx.model,
+        env: ctx.env,
+        injectedMcpServers: ctx.injectedMcpServers,
+        emitter: ctx.emitter,
+        abortController: ctx.abortController,
+      });
+    },
+    async listModels(ctx) {
+      return pi.listPiModels({ env: ctx.env });
     },
   },
 };

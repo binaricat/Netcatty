@@ -1,6 +1,6 @@
 import type { DiscoveredAgent, ExternalAgentConfig } from './types';
 
-export type ManagedAgentKey = 'codex' | 'claude' | 'copilot' | 'cursor' | 'codebuddy' | 'opencode';
+export type ManagedAgentKey = 'codex' | 'claude' | 'copilot' | 'cursor' | 'codebuddy' | 'opencode' | 'pi';
 
 const MANAGED_AGENT_META: Record<ManagedAgentKey, { commandNames: string[]; sdkBackend: string }> = {
   codex: { commandNames: ['codex'], sdkBackend: 'codex' },
@@ -9,6 +9,7 @@ const MANAGED_AGENT_META: Record<ManagedAgentKey, { commandNames: string[]; sdkB
   cursor: { commandNames: ['cursor'], sdkBackend: 'cursor' },
   codebuddy: { commandNames: ['codebuddy'], sdkBackend: 'codebuddy' },
   opencode: { commandNames: ['opencode'], sdkBackend: 'opencode' },
+  pi: { commandNames: ['pi'], sdkBackend: 'pi' },
 };
 
 function getCommandBasename(command: string | undefined): string {
@@ -36,7 +37,8 @@ export function isSettingsManagedDiscoveredAgent(
     || agent.command === 'copilot'
     || agent.command === 'cursor'
     || agent.command === 'codebuddy'
-    || agent.command === 'opencode';
+    || agent.command === 'opencode'
+    || agent.command === 'pi';
 }
 
 export function matchesManagedAgentConfig(

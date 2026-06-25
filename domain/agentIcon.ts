@@ -19,6 +19,7 @@ export type AgentIconKey =
   | 'atom'
   | 'droid'
   | 'opencode'
+  | 'pi'
   | 'kimi'
   | 'codebuddy'
   | 'terminal'
@@ -104,6 +105,11 @@ export const AGENT_ICON_VISUALS: Record<AgentIconKey, AgentIconVisual> = {
   opencode: {
     src: '/ai/agents/opencode.svg',
     badgeClassName: 'border-slate-500/22 bg-slate-500/12',
+    imageClassName: 'object-contain dark:brightness-0 dark:invert opacity-90',
+  },
+  pi: {
+    src: '/ai/agents/pi.svg',
+    badgeClassName: 'border-fuchsia-500/22 bg-fuchsia-500/12',
     imageClassName: 'object-contain dark:brightness-0 dark:invert opacity-90',
   },
   kimi: {

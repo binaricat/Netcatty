@@ -9,7 +9,8 @@ export type CodingCliProviderId =
   | 'droid'
   | 'copilot'
   | 'cursor'
-  | 'codebuddy';
+  | 'codebuddy'
+  | 'pi';
 
 export type CodingCliProvider = {
   id: CodingCliProviderId;
@@ -92,6 +93,13 @@ export const CODING_CLI_PROVIDERS: readonly CodingCliProvider[] = [
     command: 'codebuddy',
     titleHints: ['codebuddy'],
     iconKey: 'codebuddy',
+  },
+  {
+    id: 'pi',
+    label: 'Pi',
+    command: 'pi',
+    titleHints: ['pi'],
+    iconKey: 'pi',
   },
 ] as const;
 

@@ -212,6 +212,23 @@ test('buildManagedAgentState stores OPENCODE_BIN for opencode', () => {
   });
 });
 
+test('buildManagedAgentState stores PI_BIN for pi', () => {
+  const state = buildManagedAgentState(
+    [],
+    'catty',
+    'pi',
+    { path: '/opt/homebrew/bin/pi', version: '0.80.2', available: true },
+  );
+
+  assert.equal(state.agents.length, 1);
+  assert.equal(state.agents[0].id, 'discovered_pi');
+  assert.equal(state.agents[0].command, '/opt/homebrew/bin/pi');
+  assert.equal(state.agents[0].sdkBackend, 'pi');
+  assert.deepEqual(state.agents[0].env, {
+    PI_BIN: '/opt/homebrew/bin/pi',
+  });
+});
+
 test('updateCodebuddyManagedEnv creates a disabled managed entry before CLI detection', () => {
   const state = updateCodebuddyManagedEnv([], 'internal', 'CODEBUDDY_API_KEY=secret');
 

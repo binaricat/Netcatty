@@ -12,7 +12,7 @@ export const CopilotCliCard: React.FC<{
   onCustomPathChange: (path: string) => void;
   onRecheckPath: () => void;
   onResetPath?: () => void;
-  i18nPrefix?: "ai.copilot" | "ai.cursor" | "ai.opencode";
+  i18nPrefix?: "ai.copilot" | "ai.cursor" | "ai.opencode" | "ai.pi";
   allowEmptyCheck?: boolean;
   showCustomPathInput?: boolean;
 }> = ({

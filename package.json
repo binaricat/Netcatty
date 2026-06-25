@@ -112,6 +112,7 @@
   "optionalDependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.161",
     "@cursor/sdk": "^1.0.18",
+    "@earendil-works/pi-coding-agent": "^0.80.2",
     "@github/copilot-sdk": "1.0.0",
     "@opencode-ai/sdk": "^1.17.9",
     "@tencent-ai/agent-sdk": "^0.3.173",
