@@ -1006,7 +1006,9 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
       bridge: getNetcattyBridge(),
       reason: 'user',
     });
-    abortControllersRef.current.delete(sessionId);
+    if (controller && abortControllersRef.current.get(sessionId) === controller) {
+      abortControllersRef.current.delete(sessionId);
+    }
   }, [setStreamingForScope, updateLastMessage, abortControllersRef]);
 
   const { addGrant } = useAIPermissionGrantsState();
