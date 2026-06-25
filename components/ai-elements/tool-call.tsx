@@ -6,6 +6,7 @@ import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 import { useI18n } from '../../application/i18n/I18nProvider';
+import { APPROVAL_DENIAL_REASONS, APPROVAL_TIMEOUT_MS, type ApprovalDenialReason } from '../../infrastructure/ai/shared/approvalPolicy';
 
 /**
  * Pull the user-meaningful shell command out of the tool-call args.
@@ -112,6 +113,9 @@ function formatToolResult(result: unknown): string {
 
   if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
     const obj = parsed as Record<string, unknown>;
+    if (typeof obj.error === 'string' && typeof obj.denialReason === 'string') {
+      return `Error (${obj.denialReason}): ${obj.error}`;
+    }
     if (typeof obj.stdout === 'string' || typeof obj.stderr === 'string') {
       const parts: string[] = [];
       if (typeof obj.stdout === 'string' && obj.stdout) parts.push(obj.stdout);
@@ -137,6 +141,8 @@ export interface ToolCallProps extends HTMLAttributes<HTMLDivElement> {
   isInterrupted?: boolean;
   /** Approval state for this tool call (from the approval gate). */
   approvalStatus?: 'pending' | 'approved' | 'denied';
+  /** Reason for a denied approval/tool call when available. */
+  approvalDenialReason?: ApprovalDenialReason;
   /** Called when user approves this tool call. */
   onApprove?: () => void;
   /** Called when user rejects this tool call. */
@@ -145,7 +151,7 @@ export interface ToolCallProps extends HTMLAttributes<HTMLDivElement> {
 
 export const ToolCall = ({
   name, args, result, isError, isLoading, isInterrupted,
-  approvalStatus, onApprove, onReject,
+  approvalStatus, approvalDenialReason, onApprove, onReject,
   className, ...props
 }: ToolCallProps) => {
   const { t } = useI18n();
@@ -155,6 +161,7 @@ export const ToolCall = ({
   const [responded, setResponded] = useState(false);
 
   const isPendingApproval = approvalStatus === 'pending' && !responded;
+  const approvalTimeoutSeconds = Math.round(APPROVAL_TIMEOUT_MS / 1000);
 
   const handleApprove = useCallback(() => {
     if (!isPendingApproval) return;
@@ -212,6 +219,14 @@ export const ToolCall = ({
     <CheckCircle2 size={12} className={cn('text-green-400/70', statusIconClass)} />
   ) : null;
 
+  const denialLabel = approvalDenialReason === APPROVAL_DENIAL_REASONS.TIMEOUT_AUTO_DENIED
+    ? t('ai.chat.toolTimedOut')
+    : approvalDenialReason === APPROVAL_DENIAL_REASONS.POLICY_DENIED
+      ? t('ai.chat.toolPolicyDenied')
+      : approvalDenialReason === APPROVAL_DENIAL_REASONS.OBSERVER_DENIED
+        ? t('ai.chat.toolObserverDenied')
+        : t('ai.chat.toolDenied');
+
   return (
     <div
       ref={cardRef}
@@ -254,7 +269,7 @@ export const ToolCall = ({
         )}
         {approvalStatus === 'denied' && (
           <Badge className="text-[10px] px-1.5 py-0 bg-red-600/20 text-red-400 border-red-600/30">
-            {t('ai.chat.toolDenied')}
+            {denialLabel}
           </Badge>
         )}
         {statusIcon}
@@ -276,7 +291,7 @@ export const ToolCall = ({
             <div className="px-3 py-2 border-t border-border/20">
               <div className="flex items-center justify-between">
                 <span className="text-[10px] text-muted-foreground/30">
-                  {t('ai.chat.toolApprovalHint')}
+                  {t('ai.chat.toolApprovalHint').replace('{seconds}', String(approvalTimeoutSeconds))}
                 </span>
                 <div className="flex items-center gap-1.5">
                   <Button

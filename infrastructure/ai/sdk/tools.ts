@@ -14,6 +14,7 @@ import {
   type ToolExecResult,
 } from '../shared/toolExecutors';
 import { requestApproval } from '../shared/approvalGate';
+import { createDeniedToolResult } from '../shared/approvalPolicy';
 import { reserveSessionSlot } from '../shared/sessionExecutionQueue';
 import { truncateTextWithHeadAndTail } from '../requestPayloadCompression';
 
@@ -21,8 +22,13 @@ const MAX_LIVE_TERMINAL_STDOUT_CHARS = 24_000;
 const MAX_LIVE_TERMINAL_STDERR_CHARS = 12_000;
 
 /** Unwrap a shared ToolExecResult into the shape expected by Vercel AI SDK tool results. */
-function unwrap<T>(r: ToolExecResult<T>): T | { error: string } {
-  if (r.ok === false) return { error: r.error };
+function unwrap<T>(r: ToolExecResult<T>): T | { error: string; denialReason?: string } {
+  if (r.ok === false) {
+    return {
+      error: r.error,
+      ...(r.denialReason ? { denialReason: r.denialReason } : {}),
+    };
+  }
   return r.data;
 }
 
@@ -90,9 +96,9 @@ export function createCattyTools(
           // card immediately and the user can approve/deny in any
           // order — the queue still drains in reservation order.
           if (permissionMode === 'confirm') {
-            const approved = await requestApproval(toolCallId, 'terminal_execute', { sessionId, command }, chatSessionId);
-            if (!approved) {
-              return { error: 'User denied command execution.' };
+            const approval = await requestApproval(toolCallId, 'terminal_execute', { sessionId, command }, chatSessionId);
+            if (!approval.approved) {
+              return createDeniedToolResult(approval.reason, approval.message);
             }
           }
           if (abortSignal?.aborted) {

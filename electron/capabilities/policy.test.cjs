@@ -4,6 +4,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 
 const {
+  APPROVAL_DENIAL_REASONS,
   BUILTIN_WRITE_RPC_METHODS,
   BUILTIN_APPROVAL_RPC_METHODS,
   PUBLIC_CONFIRM_RPC_METHODS,
@@ -43,6 +44,7 @@ test("observer mode blocks writes but allows terminal poll", () => {
   });
   assert.equal(denied.allowed, false);
   assert.match(denied.error, /observer/i);
+  assert.equal(denied.denialReason, APPROVAL_DENIAL_REASONS.OBSERVER_DENIED);
 
   const allowed = evaluateRpcPermission({
     rpcMethod: "netcatty/jobPoll",
@@ -91,6 +93,7 @@ test("write operations require chatSessionId on builtin surface", () => {
   });
   assert.equal(decision.allowed, false);
   assert.match(decision.error, /chatSessionId/i);
+  assert.equal(decision.denialReason, APPROVAL_DENIAL_REASONS.POLICY_DENIED);
 });
 
 test("cancelled chat sessions block terminal writes", () => {
@@ -102,6 +105,7 @@ test("cancelled chat sessions block terminal writes", () => {
   });
   assert.equal(decision.allowed, false);
   assert.match(decision.error, /cancelled/i);
+  assert.equal(decision.denialReason, APPROVAL_DENIAL_REASONS.POLICY_DENIED);
 });
 
 test("cancelled chat sessions block sftp writes", () => {

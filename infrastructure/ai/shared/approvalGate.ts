@@ -3,7 +3,7 @@
  *
  * Tools call `requestApproval()` inside their `execute` function. This returns
  * a Promise that resolves when the user approves/rejects from the UI, or after
- * a timeout (default 5 minutes) to prevent indefinite hangs.
+ * a timeout to prevent indefinite hangs.
  *
  * Also supports MCP/SDK-agent tool calls from the Electron main process:
  * the main process sends an IPC approval request, and we route it
@@ -15,8 +15,14 @@
  * interference when stopping or cancelling sessions.
  */
 
-/** Default timeout for unanswered approval prompts (5 minutes). */
-const APPROVAL_TIMEOUT_MS = 5 * 60 * 1000;
+import {
+  APPROVAL_DENIAL_REASONS,
+  APPROVAL_TIMEOUT_MS,
+  approvalAccepted,
+  approvalDenied,
+  type ApprovalDenialReason,
+  type ApprovalResult,
+} from './approvalPolicy';
 
 export interface ApprovalRequest {
   toolCallId: string;
@@ -30,7 +36,7 @@ export interface ApprovalRequest {
 // SDK approvals have a real `resolve` callback; MCP approvals use a no-op
 // (the real resolution goes via IPC in resolveApproval).
 const pendingApprovals = new Map<string, {
-  resolve: (approved: boolean) => void;
+  resolve: (result: ApprovalResult) => void;
   request: ApprovalRequest;
 }>();
 
@@ -39,15 +45,27 @@ type ApprovalRequestListener = (request: ApprovalRequest) => void;
 const listeners = new Set<ApprovalRequestListener>();
 
 // Subscribers for approval cleared/removed events (UI listens to clean up cards)
-type ApprovalClearedListener = (toolCallIds: string[]) => void;
+export interface ApprovalClearedEvent {
+  toolCallId: string;
+  reason: ApprovalDenialReason;
+}
+type ApprovalClearedListener = (events: ApprovalClearedEvent[]) => void;
 const clearedListeners = new Set<ApprovalClearedListener>();
+
+function notifyApprovalCleared(events: ApprovalClearedEvent[]): void {
+  if (events.length === 0) return;
+  for (const cl of clearedListeners) {
+    try { cl(events); } catch { /* ignore */ }
+  }
+}
 
 /**
  * Called from a tool's `execute` function when it needs user approval.
- * Returns a Promise<boolean> that resolves to `true` (approved) or `false` (denied).
+ * Returns a decision that records whether denial came from the user, timeout,
+ * or safety policy.
  * The UI is notified via the listener system to render approval buttons.
  *
- * If the user does not respond within `timeoutMs` (default 5 minutes), the
+ * If the user does not respond within `timeoutMs`, the
  * approval is auto-denied to prevent the session from hanging indefinitely.
  */
 export function requestApproval(
@@ -56,15 +74,15 @@ export function requestApproval(
   args: Record<string, unknown>,
   chatSessionId?: string,
   timeoutMs: number = APPROVAL_TIMEOUT_MS,
-): Promise<boolean> {
+): Promise<ApprovalResult> {
   const request: ApprovalRequest = { toolCallId, toolName, args, chatSessionId };
 
-  return new Promise<boolean>((resolve) => {
+  return new Promise<ApprovalResult>((resolve) => {
     let timerId: ReturnType<typeof setTimeout> | null = null;
 
-    const wrappedResolve = (approved: boolean) => {
+    const wrappedResolve = (result: ApprovalResult) => {
       if (timerId) { clearTimeout(timerId); timerId = null; }
-      resolve(approved);
+      resolve(result);
     };
 
     pendingApprovals.set(toolCallId, { resolve: wrappedResolve, request });
@@ -73,11 +91,11 @@ export function requestApproval(
     timerId = setTimeout(() => {
       if (pendingApprovals.has(toolCallId)) {
         pendingApprovals.delete(toolCallId);
-        wrappedResolve(false);
-        // Notify UI to remove the stale card
-        for (const cl of clearedListeners) {
-          try { cl([toolCallId]); } catch { /* ignore */ }
-        }
+        wrappedResolve(approvalDenied(APPROVAL_DENIAL_REASONS.TIMEOUT_AUTO_DENIED));
+        notifyApprovalCleared([{
+          toolCallId,
+          reason: APPROVAL_DENIAL_REASONS.TIMEOUT_AUTO_DENIED,
+        }]);
       }
     }, timeoutMs);
 
@@ -97,7 +115,9 @@ export function resolveApproval(toolCallId: string, approved: boolean): void {
   if (entry) {
     pendingApprovals.delete(toolCallId);
     // SDK tool calls have a real resolve; MCP tool calls have a no-op resolve
-    entry.resolve(approved);
+    entry.resolve(approved
+      ? approvalAccepted()
+      : approvalDenied(APPROVAL_DENIAL_REASONS.USER_DENIED));
   }
 
   // MCP tool call: also forward response to main process via IPC
@@ -148,7 +168,7 @@ export function hasPendingApproval(toolCallId: string): boolean {
 
 /**
  * Clear pending approvals, optionally scoped to a specific chatSessionId.
- * Resolves matching entries with `false` (denied) so execute functions don't hang.
+ * Resolves matching entries with policy_denied so execute functions don't hang.
  * Also notifies cleared-listeners so the UI can remove stale approval cards.
  *
  * When chatSessionId is provided, only approvals belonging to that session
@@ -156,13 +176,13 @@ export function hasPendingApproval(toolCallId: string): boolean {
  * When omitted, all pending approvals are cleared (backward-compatible).
  */
 export function clearAllPendingApprovals(chatSessionId?: string): void {
-  const clearedIds: string[] = [];
+  const clearedEvents: ApprovalClearedEvent[] = [];
 
   if (!chatSessionId) {
     // Clear everything (legacy / global stop)
     for (const [id, entry] of pendingApprovals) {
-      entry.resolve(false);
-      clearedIds.push(id);
+      entry.resolve(approvalDenied(APPROVAL_DENIAL_REASONS.POLICY_DENIED));
+      clearedEvents.push({ toolCallId: id, reason: APPROVAL_DENIAL_REASONS.POLICY_DENIED });
     }
     pendingApprovals.clear();
   } else {
@@ -170,18 +190,14 @@ export function clearAllPendingApprovals(chatSessionId?: string): void {
     for (const [id, entry] of pendingApprovals) {
       if (entry.request.chatSessionId === chatSessionId) {
         pendingApprovals.delete(id);
-        entry.resolve(false);
-        clearedIds.push(id);
+        entry.resolve(approvalDenied(APPROVAL_DENIAL_REASONS.POLICY_DENIED));
+        clearedEvents.push({ toolCallId: id, reason: APPROVAL_DENIAL_REASONS.POLICY_DENIED });
       }
     }
   }
 
   // Notify UI listeners to remove the cards
-  if (clearedIds.length > 0) {
-    for (const cl of clearedListeners) {
-      try { cl(clearedIds); } catch { /* ignore */ }
-    }
-  }
+  notifyApprovalCleared(clearedEvents);
 }
 
 /**
@@ -207,6 +223,8 @@ export function setupMcpApprovalBridge(): () => void {
       }) => void) => () => void;
       onMcpApprovalCleared?: (cb: (payload: {
         approvalIds: string[];
+        approvals?: Array<{ approvalId: string; reason?: ApprovalDenialReason }>;
+        reason?: ApprovalDenialReason;
       }) => void) => () => void;
     };
   }).netcatty;
@@ -239,18 +257,21 @@ export function setupMcpApprovalBridge(): () => void {
   // Subscribe to main-process approval cleared events (timeout, cancel)
   // so stale approval cards are removed from the renderer UI.
   const unsubCleared = bridge.onMcpApprovalCleared?.((payload) => {
-    const clearedIds: string[] = [];
-    for (const id of payload.approvalIds) {
+    const approvals = payload.approvals?.length
+      ? payload.approvals
+      : payload.approvalIds.map((approvalId) => ({ approvalId, reason: payload.reason }));
+    const clearedEvents: ApprovalClearedEvent[] = [];
+    for (const { approvalId, reason } of approvals) {
+      const id = approvalId;
       if (pendingApprovals.has(id)) {
         pendingApprovals.delete(id);
-        clearedIds.push(id);
+        clearedEvents.push({
+          toolCallId: id,
+          reason: reason ?? APPROVAL_DENIAL_REASONS.POLICY_DENIED,
+        });
       }
     }
-    if (clearedIds.length > 0) {
-      for (const cl of clearedListeners) {
-        try { cl(clearedIds); } catch { /* ignore */ }
-      }
-    }
+    notifyApprovalCleared(clearedEvents);
   });
 
   return () => {

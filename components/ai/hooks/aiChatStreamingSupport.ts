@@ -1,4 +1,5 @@
 import type { NetcattyBridge } from '../../../infrastructure/ai/cattyAgent/executor';
+import { isApprovalDenialReason, type ApprovalDenialReason } from '../../../infrastructure/ai/shared/approvalPolicy';
 import type {
   OpenAIChatAssistantFields,
   ProviderContinuationOptions,
@@ -66,10 +67,38 @@ export function isToolResultError(output: unknown): boolean {
         if ('error' in parsedObj && typeof parsedObj.error === 'string') return true;
         if ('ok' in parsedObj && parsedObj.ok === false) return true;
       }
-    } catch { /* not JSON, not an error */ }
+    } catch {
+      if (/^Error \((user_denied|timeout_auto_denied|policy_denied|observer_denied)\):/.test(output)) {
+        return true;
+      }
+    }
   }
   
   return false;
+}
+
+export function extractToolResultDenialReason(output: unknown): ApprovalDenialReason | undefined {
+  if (output == null) return undefined;
+
+  if (typeof output === 'object') {
+    const obj = output as Record<string, unknown>;
+    return isApprovalDenialReason(obj.denialReason) ? obj.denialReason : undefined;
+  }
+
+  if (typeof output === 'string') {
+    try {
+      const parsed = JSON.parse(output);
+      if (parsed && typeof parsed === 'object') {
+        const parsedObj = parsed as Record<string, unknown>;
+        return isApprovalDenialReason(parsedObj.denialReason) ? parsedObj.denialReason : undefined;
+      }
+    } catch {
+      const match = output.match(/Error \(([^)]+)\):/);
+      if (match && isApprovalDenialReason(match[1])) return match[1];
+    }
+  }
+
+  return undefined;
 }
 
 /** Shape of an error chunk from the Vercel AI SDK fullStream. */

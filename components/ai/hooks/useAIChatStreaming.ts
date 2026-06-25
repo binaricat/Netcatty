@@ -74,6 +74,7 @@ import {
 import {
   getNetcattyBridge,
   generateId,
+  extractToolResultDenialReason,
   isToolResultError,
   resolveUserSkillsContext,
   toAssistantModelContent,
@@ -534,6 +535,7 @@ export function useAIChatStreaming({
           );
           const toolOutput = typedChunk.output ?? typedChunk.result;
           const toolError = isToolResultError(toolOutput);
+          const denialReason = extractToolResultDenialReason(toolOutput);
           addMessageToSession(streamSessionId, {
             id: generateId(),
             role: 'tool',
@@ -544,6 +546,7 @@ export function useAIChatStreaming({
                 ? toolOutput
                 : JSON.stringify(toolOutput),
               isError: toolError,
+              ...(denialReason ? { denialReason } : {}),
             }],
             timestamp: Date.now(),
             executionStatus: 'completed',
@@ -700,9 +703,10 @@ export function useAIChatStreaming({
               return { ...msg, toolCalls: updatedToolCalls, executionStatus: 'completed', statusText: undefined };
             });
             const toolError = isToolResultError(result);
+            const denialReason = extractToolResultDenialReason(result);
             addMessageToSession(sessionId, {
               id: generateId(), role: 'tool', content: '',
-              toolResults: [{ toolCallId, content: result, isError: toolError }],
+              toolResults: [{ toolCallId, content: result, isError: toolError, ...(denialReason ? { denialReason } : {}) }],
               timestamp: Date.now(), executionStatus: 'completed',
             });
             needsNewAssistantMsg = true;

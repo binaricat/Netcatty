@@ -5,6 +5,7 @@ const assert = require("node:assert/strict");
 
 const { resolveRpcTimeoutMs, isLongRunningRpcMethod, isApprovalWaitRpcMethod } = require("./rpcTimeouts.cjs");
 const { CAPABILITY_SURFACES, PERMISSION_MODES, RPC_TIMEOUT_DEFAULTS } = require("./constants.cjs");
+const approvalPolicy = require("../../lib/aiApprovalPolicy.json");
 
 test("long-running rpc methods include exec and sftp home", () => {
   assert.equal(isLongRunningRpcMethod("netcatty/exec"), true);
@@ -37,15 +38,19 @@ test("resolveRpcTimeoutMs combines operation and approval budgets", () => {
     surface: CAPABILITY_SURFACES.BUILTIN,
     bridgeCommandTimeoutMs: 60_000,
     bridgePermissionMode: PERMISSION_MODES.CONFIRM,
-    bridgeApprovalTimeoutMs: 110_000,
+    bridgeApprovalTimeoutMs: approvalPolicy.approvalTimeoutMs,
   });
   assert.equal(
     timeoutMs,
     Math.max(
       RPC_TIMEOUT_DEFAULTS.DEFAULT_RPC_TIMEOUT_MS,
-      110_000 + 60_000 + RPC_TIMEOUT_DEFAULTS.RPC_TIMEOUT_BUFFER_MS,
+      approvalPolicy.approvalTimeoutMs + 60_000 + RPC_TIMEOUT_DEFAULTS.RPC_TIMEOUT_BUFFER_MS,
     ),
   );
+});
+
+test("default approval timeout comes from the shared approval policy", () => {
+  assert.equal(RPC_TIMEOUT_DEFAULTS.DEFAULT_APPROVAL_TIMEOUT_MS, approvalPolicy.approvalTimeoutMs);
 });
 
 test("resolveRpcTimeoutMs falls back to default for lightweight rpc", () => {

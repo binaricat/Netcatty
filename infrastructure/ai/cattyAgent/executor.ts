@@ -1,4 +1,5 @@
 import type { ToolCall, ToolResult, AIPermissionMode, WebSearchConfig } from '../types';
+import type { ApprovalDenialReason } from '../shared/approvalPolicy';
 import {
   executeTerminalExecute,
   executeWorkspaceGetInfo,
@@ -24,6 +25,7 @@ export interface NetcattyBridge {
     stderr?: string;
     exitCode?: number;
     error?: string;
+    denialReason?: ApprovalDenialReason;
   }>;
   /**
    * Cancel any in-flight Catty Agent command execution scoped to the
@@ -58,7 +60,12 @@ export interface ExecutorContext {
 /** Convert a shared ToolExecResult into the executor's ToolResult format. */
 function toToolResult(toolCallId: string, r: ToolExecResult): ToolResult {
   if (r.ok === false) {
-    return { toolCallId, content: r.error, isError: true };
+    return {
+      toolCallId,
+      content: r.error,
+      isError: true,
+      ...(r.denialReason ? { denialReason: r.denialReason } : {}),
+    };
   }
   // For terminal_execute, format as the legacy STDOUT/STDERR/exitCode text block
   if (

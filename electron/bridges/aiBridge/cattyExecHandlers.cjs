@@ -1,4 +1,6 @@
 /* eslint-disable no-undef */
+const { APPROVAL_DENIAL_REASONS, APPROVAL_DENIAL_MESSAGES } = require("../../capabilities/constants.cjs");
+
 function registerCattyExecHandlers(ctx) {
   with (ctx) {
   ipcMain.handle("netcatty:ai:exec", async (event, { sessionId, command, chatSessionId }) => {
@@ -8,7 +10,11 @@ function registerCattyExecHandlers(ctx) {
     }
     // Block execution in observer mode (Issue #11)
     if (mcpServerBridge.getPermissionMode() === "observer") {
-      return { ok: false, error: "Execution blocked: permission mode is 'observer'" };
+      return {
+        ok: false,
+        error: APPROVAL_DENIAL_MESSAGES.OBSERVER_DENIED,
+        denialReason: APPROVAL_DENIAL_REASONS.OBSERVER_DENIED,
+      };
     }
     const session = sessions?.get(sessionId);
     if (!session) {
@@ -43,7 +49,11 @@ function registerCattyExecHandlers(ctx) {
       const safety = mcpServerBridge.checkCommandSafety(command);
       if (safety.blocked) {
         releaseLock();
-        return { ok: false, error: `Command blocked by safety policy. Pattern: ${safety.matchedPattern}` };
+        return {
+          ok: false,
+          error: `Command blocked by safety policy. Pattern: ${safety.matchedPattern}`,
+          denialReason: APPROVAL_DENIAL_REASONS.POLICY_DENIED,
+        };
       }
     }
 

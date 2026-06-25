@@ -11,6 +11,11 @@ import type { NetcattyBridge, ExecutorContext } from '../cattyAgent/executor';
 import type { AIPermissionMode, WebSearchConfig } from '../types';
 import { checkCommandSafety } from '../cattyAgent/safety';
 import { executeWebSearchProvider } from './webSearchProviders';
+import {
+  APPROVAL_DENIAL_REASONS,
+  createDeniedToolResult,
+  type ApprovalDenialReason,
+} from './approvalPolicy';
 
 // ---------------------------------------------------------------------------
 // Shared result types
@@ -19,7 +24,7 @@ import { executeWebSearchProvider } from './webSearchProviders';
 /** Discriminated union returned by every shared executor. */
 export type ToolExecResult<T = unknown> =
   | { ok: true; data: T }
-  | { ok: false; error: string };
+  | { ok: false; error: string; denialReason?: ApprovalDenialReason };
 
 // ---------------------------------------------------------------------------
 // Dependencies bundle
@@ -74,9 +79,11 @@ export async function executeTerminalExecute(
     return { ok: false, error: 'Missing sessionId or command' };
   }
   const scopeErr = validateSessionScope(context, sessionId);
-  if (scopeErr) return { ok: false, error: scopeErr };
+  if (scopeErr) {
+    return { ok: false, ...createDeniedToolResult(APPROVAL_DENIAL_REASONS.POLICY_DENIED, scopeErr) };
+  }
   if (isObserver(permissionMode)) {
-    return { ok: false, error: 'Observer mode: command execution is disabled. Switch to Confirm or Auto mode to execute commands.' };
+    return { ok: false, ...createDeniedToolResult(APPROVAL_DENIAL_REASONS.OBSERVER_DENIED) };
   }
   // Shell blocklist is meaningless on network device CLIs (e.g. "shutdown"
   // disables an interface on Cisco). Skip for serial and network device sessions.
@@ -89,7 +96,13 @@ export async function executeTerminalExecute(
   if (!isNetworkDevice) {
     const safety = checkCommandSafety(command, commandBlocklist);
     if (safety.blocked) {
-      return { ok: false, error: `Command blocked by safety policy. Matched pattern: ${safety.matchedPattern}` };
+      return {
+        ok: false,
+        ...createDeniedToolResult(
+          APPROVAL_DENIAL_REASONS.POLICY_DENIED,
+          `Command blocked by safety policy. Matched pattern: ${safety.matchedPattern}`,
+        ),
+      };
     }
   }
 
@@ -99,7 +112,12 @@ export async function executeTerminalExecute(
     const parts = [result.error];
     if (result.stdout) parts.push(`Partial output:\n${result.stdout}`);
     if (result.stderr) parts.push(`Stderr:\n${result.stderr}`);
-    return { ok: false, error: parts.join('\n\n') };
+    const denialReason = (result as { denialReason?: ApprovalDenialReason }).denialReason;
+    return {
+      ok: false,
+      error: parts.join('\n\n'),
+      ...(denialReason ? { denialReason } : {}),
+    };
   }
   // Command ran (even if exit code is non-zero) — always return stdout+exitCode for LLM to judge.
   // Network device / serial sessions return exitCode: null because vendor CLIs don't expose

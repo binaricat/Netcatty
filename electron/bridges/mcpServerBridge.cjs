@@ -81,15 +81,32 @@ function setMainWindowGetter(fn) {
 
 /**
  * Request approval from the renderer process.
- * Sends an IPC event and returns a Promise<boolean> that resolves
- * when the user approves/rejects in the UI, or auto-denies after timeout.
+ * Sends an IPC event and returns a decision with explicit denial reason.
  */
+const {
+  APPROVAL_DENIAL_MESSAGES,
+  APPROVAL_DENIAL_REASONS,
+  CAPABILITY_SURFACES,
+  RPC_TIMEOUT_DEFAULTS,
+} = require("../capabilities/constants.cjs");
+
 // External SDK agents (for example Codex) may give up on MCP tool calls after
-// about 120 seconds; see openai/codex#6127 ("timed out awaiting tools/call
-// after 120s"). Keep the Netcatty-side approval window below that with a small
-// buffer so a stale approval cannot still be accepted after the agent has
+// about 120 seconds. Keep the shared Netcatty approval window below that with a
+// small buffer so a stale approval cannot still be accepted after the agent has
 // already timed out and abandoned the call.
-const APPROVAL_TIMEOUT_MS = 110 * 1000; // 110 seconds
+const APPROVAL_TIMEOUT_MS = RPC_TIMEOUT_DEFAULTS.DEFAULT_APPROVAL_TIMEOUT_MS;
+
+function approvalAccepted() {
+  return { approved: true };
+}
+
+function approvalDenied(reason, message = APPROVAL_DENIAL_MESSAGES.POLICY_DENIED) {
+  return { approved: false, reason, message };
+}
+
+function formatClearedApprovals(approvalIds, reason) {
+  return approvalIds.map((approvalId) => ({ approvalId, reason }));
+}
 
 function requestApprovalFromRenderer(toolName, args, chatSessionId) {
   return new Promise((resolve) => {
@@ -97,7 +114,10 @@ function requestApprovalFromRenderer(toolName, args, chatSessionId) {
     const mainWin = typeof getMainWindowFn === 'function' ? getMainWindowFn() : null;
     if (!mainWin || mainWin.isDestroyed()) {
       // No renderer available — deny to preserve confirm mode safety guarantee
-      resolve(false);
+      resolve(approvalDenied(
+        APPROVAL_DENIAL_REASONS.POLICY_DENIED,
+        "Operation denied: no renderer is available to collect approval.",
+      ));
       return;
     }
     const approvalId = `mcp_approval_${++approvalIdCounter}_${Date.now()}`;
@@ -106,12 +126,19 @@ function requestApprovalFromRenderer(toolName, args, chatSessionId) {
     const timerId = setTimeout(() => {
       if (pendingApprovals.has(approvalId)) {
         pendingApprovals.delete(approvalId);
-        resolve(false);
+        resolve(approvalDenied(
+          APPROVAL_DENIAL_REASONS.TIMEOUT_AUTO_DENIED,
+          APPROVAL_DENIAL_MESSAGES.TIMEOUT_AUTO_DENIED,
+        ));
         // Notify renderer to remove the stale approval card
         try {
           const win = typeof getMainWindowFn === 'function' ? getMainWindowFn() : null;
           if (win && !win.isDestroyed()) {
-            win.webContents.send('netcatty:ai:mcp:approval-cleared', { approvalIds: [approvalId] });
+            win.webContents.send('netcatty:ai:mcp:approval-cleared', {
+              approvalIds: [approvalId],
+              reason: APPROVAL_DENIAL_REASONS.TIMEOUT_AUTO_DENIED,
+              approvals: formatClearedApprovals([approvalId], APPROVAL_DENIAL_REASONS.TIMEOUT_AUTO_DENIED),
+            });
           }
         } catch { /* ignore */ }
       }
@@ -120,7 +147,9 @@ function requestApprovalFromRenderer(toolName, args, chatSessionId) {
     pendingApprovals.set(approvalId, {
       resolve: (approved) => {
         clearTimeout(timerId);
-        resolve(approved);
+        resolve(approved
+          ? approvalAccepted()
+          : approvalDenied(APPROVAL_DENIAL_REASONS.USER_DENIED, APPROVAL_DENIAL_MESSAGES.USER_DENIED));
       },
       chatSessionId: chatSessionId || null,
     });
@@ -142,12 +171,16 @@ function resolveApprovalFromRenderer(approvalId, approved) {
   }
 }
 
-function notifyRendererApprovalCleared(approvalIds) {
+function notifyRendererApprovalCleared(approvalIds, reason = APPROVAL_DENIAL_REASONS.POLICY_DENIED) {
   if (!Array.isArray(approvalIds) || approvalIds.length === 0) return;
   try {
     const win = typeof getMainWindowFn === "function" ? getMainWindowFn() : null;
     if (win && !win.isDestroyed()) {
-      win.webContents.send("netcatty:ai:mcp:approval-cleared", { approvalIds });
+      win.webContents.send("netcatty:ai:mcp:approval-cleared", {
+        approvalIds,
+        reason,
+        approvals: formatClearedApprovals(approvalIds, reason),
+      });
     }
   } catch {
     // Ignore renderer notification failures during approval cleanup.
@@ -156,27 +189,27 @@ function notifyRendererApprovalCleared(approvalIds) {
 
 /**
  * Clear pending MCP approvals, optionally scoped to a specific chatSessionId.
- * Resolves matched entries with false (denied) to unblock hanging promises.
+ * Resolves matched entries with policy_denied to unblock hanging promises.
  */
 function clearPendingApprovals(chatSessionId) {
   const clearedIds = [];
   if (!chatSessionId) {
     for (const [id, entry] of pendingApprovals) {
-      entry.resolve(false);
+      entry.resolve(approvalDenied(APPROVAL_DENIAL_REASONS.POLICY_DENIED));
       clearedIds.push(id);
     }
     pendingApprovals.clear();
-    notifyRendererApprovalCleared(clearedIds);
+    notifyRendererApprovalCleared(clearedIds, APPROVAL_DENIAL_REASONS.POLICY_DENIED);
     return;
   }
   for (const [id, entry] of pendingApprovals) {
     if (entry.chatSessionId === chatSessionId) {
       pendingApprovals.delete(id);
-      entry.resolve(false);
+      entry.resolve(approvalDenied(APPROVAL_DENIAL_REASONS.POLICY_DENIED));
       clearedIds.push(id);
     }
   }
-  notifyRendererApprovalCleared(clearedIds);
+  notifyRendererApprovalCleared(clearedIds, APPROVAL_DENIAL_REASONS.POLICY_DENIED);
 }
 
 function cancelAllPtyExecs() {
@@ -782,9 +815,7 @@ async function handleMessage(socket, line) {
 
 const {
   evaluateRpcPermission,
-  USER_DENIED_MESSAGE,
 } = require("../capabilities/policy.cjs");
-const { CAPABILITY_SURFACES } = require("../capabilities/constants.cjs");
 const { getCapabilityByRpcMethod } = require("../capabilities/registry.cjs");
 
 /**
@@ -831,7 +862,11 @@ async function dispatch(method, params) {
     },
   });
   if (!permission.allowed) {
-    return { ok: false, error: permission.error };
+    return {
+      ok: false,
+      error: permission.error,
+      denialReason: permission.denialReason || APPROVAL_DENIAL_REASONS.POLICY_DENIED,
+    };
   }
 
   // Validate session scope *first* so out-of-scope callers cannot infer the
@@ -839,7 +874,13 @@ async function dispatch(method, params) {
   // messages, and so requests fail fast without blocking the write lock.
   if (method !== "netcatty/getContext" && params?.sessionId) {
     const scopeErr = validateSessionScope(params.sessionId, params?.chatSessionId, params?.scopedSessionIds);
-    if (scopeErr) return { ok: false, error: scopeErr };
+    if (scopeErr) {
+      return {
+        ok: false,
+        error: scopeErr,
+        denialReason: APPROVAL_DENIAL_REASONS.POLICY_DENIED,
+      };
+    }
   }
 
   if ((capability?.id === "terminal.execute" || capability?.id === "terminal.start") && params?.sessionId) {
@@ -865,9 +906,13 @@ async function dispatch(method, params) {
     // a runaway terminal_start job could not be interrupted at all.
     if (permission.requiresApproval) {
       const { chatSessionId, ...toolArgs } = params || {};
-      const approved = await requestApprovalFromRenderer(method, toolArgs, chatSessionId);
-      if (!approved) {
-        return { ok: false, error: USER_DENIED_MESSAGE };
+      const approval = await requestApprovalFromRenderer(method, toolArgs, chatSessionId);
+      if (!approval.approved) {
+        return {
+          ok: false,
+          error: approval.message,
+          denialReason: approval.reason,
+        };
       }
     }
     switch (method) {

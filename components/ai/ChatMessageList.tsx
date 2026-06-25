@@ -27,6 +27,7 @@ import {
   resolveApproval,
   type ApprovalRequest,
 } from '../../infrastructure/ai/shared/approvalGate';
+import { APPROVAL_DENIAL_REASONS, type ApprovalDenialReason } from '../../infrastructure/ai/shared/approvalPolicy';
 import {
   getAIPanelDiagnosticHiddenParts,
   getAIPanelProfilerProps,
@@ -46,7 +47,7 @@ const MESSAGE_RENDER_STEP = 50;
 const ChatMessageList: React.FC<ChatMessageListProps> = ({ messages, isStreaming, activeSessionId }) => {
   // Track pending approvals from the approval gate
   const [pendingApprovals, setPendingApprovals] = useState<Map<string, ApprovalRequest>>(new Map());
-  const [resolvedApprovals, setResolvedApprovals] = useState<Map<string, boolean>>(new Map());
+  const [resolvedApprovals, setResolvedApprovals] = useState<Map<string, true | ApprovalDenialReason>>(new Map());
 
   // Subscribe to approval gate events (SDK + MCP tool calls)
   useEffect(() => {
@@ -61,10 +62,17 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({ messages, isStreaming
 
   // Subscribe to approval cleared/removed events (fired on session stop or timeout)
   useEffect(() => {
-    return onApprovalCleared((clearedIds) => {
+    return onApprovalCleared((clearedEvents) => {
       setPendingApprovals(prev => {
         const m = new Map(prev);
-        for (const id of clearedIds) m.delete(id);
+        for (const event of clearedEvents) m.delete(event.toolCallId);
+        return m;
+      });
+      setResolvedApprovals(prev => {
+        const m = new Map(prev);
+        for (const event of clearedEvents) {
+          m.set(event.toolCallId, event.reason);
+        }
         return m;
       });
     });
@@ -79,7 +87,7 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({ messages, isStreaming
   const handleReject = useCallback((toolCallId: string) => {
     resolveApproval(toolCallId, false);
     setPendingApprovals(prev => { const m = new Map(prev); m.delete(toolCallId); return m; });
-    setResolvedApprovals(prev => new Map(prev).set(toolCallId, false));
+    setResolvedApprovals(prev => new Map(prev).set(toolCallId, APPROVAL_DENIAL_REASONS.USER_DENIED));
   }, []);
   const [preview, setPreview] = useState<{ src: string; name: string } | null>(null);
   const [zoom, setZoom] = useState(100);
@@ -196,6 +204,17 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({ messages, isStreaming
 
   const lastAssistantMessage = displayedMessages.findLast(m => m.role === 'assistant');
 
+  const getApprovalStatus = (toolCallId: string): {
+    approvalStatus?: 'pending' | 'approved' | 'denied';
+    denialReason?: ApprovalDenialReason;
+  } => {
+    if (pendingApprovals.has(toolCallId)) return { approvalStatus: 'pending' };
+    const resolved = resolvedApprovals.get(toolCallId);
+    if (resolved === true) return { approvalStatus: 'approved' };
+    if (resolved) return { approvalStatus: 'denied', denialReason: resolved };
+    return {};
+  };
+
   return (
     <>
     <Conversation className="flex-1">
@@ -243,6 +262,8 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({ messages, isStreaming
                         args={toolCallArgs.get(tr.toolCallId)}
                         result={tr.content}
                         isError={tr.isError}
+                        approvalStatus={tr.denialReason ? 'denied' : undefined}
+                        approvalDenialReason={tr.denialReason}
                       />
                     </div>
                     </React.Profiler>
@@ -328,14 +349,7 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({ messages, isStreaming
                     <ToolCallGroup count={unresolvedTcs.length} defaultExpanded={false}>
                       {unresolvedTcs.map((tc) => {
                         const isPending = pendingApprovals.has(tc.id);
-                        const resolved = resolvedApprovals.get(tc.id);
-                        const approvalStatus = isPending
-                          ? "pending" as const
-                          : resolved === true
-                            ? "approved" as const
-                            : resolved === false
-                              ? "denied" as const
-                              : undefined;
+                        const { approvalStatus, denialReason } = getApprovalStatus(tc.id);
                         return (
                           <div key={tc.id} className="px-2 py-1.5">
                             <ToolCall
@@ -343,6 +357,7 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({ messages, isStreaming
                               args={tc.arguments}
                               isInterrupted={!isPending}
                               approvalStatus={approvalStatus}
+                              approvalDenialReason={denialReason}
                               onApprove={() => handleApprove(tc.id)}
                               onReject={() => handleReject(tc.id)}
                             />
@@ -393,14 +408,7 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({ messages, isStreaming
             <ToolCallGroup count={pendingTcs.length} defaultExpanded={isActive}>
               {pendingTcs.map((tc) => {
                 const isPending = pendingApprovals.has(tc.id);
-                const resolved = resolvedApprovals.get(tc.id);
-                const approvalStatus = isPending
-                  ? "pending" as const
-                  : resolved === true
-                    ? "approved" as const
-                    : resolved === false
-                      ? "denied" as const
-                      : undefined;
+                const { approvalStatus, denialReason } = getApprovalStatus(tc.id);
                 return (
                   <div key={tc.id} className="px-2 py-1.5">
                     <ToolCall
@@ -408,6 +416,7 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({ messages, isStreaming
                       args={tc.arguments}
                       isLoading={isToolRunning && !isPending}
                       approvalStatus={approvalStatus}
+                      approvalDenialReason={denialReason}
                       onApprove={() => handleApprove(tc.id)}
                       onReject={() => handleReject(tc.id)}
                     />

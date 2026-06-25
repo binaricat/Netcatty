@@ -1,12 +1,27 @@
 "use strict";
 
-const { CAPABILITY_SURFACES, PERMISSION_MODES } = require("./constants.cjs");
+const {
+  APPROVAL_DENIAL_MESSAGES,
+  APPROVAL_DENIAL_REASONS,
+  CAPABILITY_SURFACES,
+  PERMISSION_MODES,
+} = require("./constants.cjs");
 const { getCapabilityByRpcMethod } = require("./registry.cjs");
 
-const OBSERVER_DENY_MESSAGE = 'Operation denied: permission mode is "observer" (read-only). Change to "confirm" or "autonomous" in Settings → AI → Safety to allow this action.';
+const OBSERVER_DENY_MESSAGE = APPROVAL_DENIAL_MESSAGES.OBSERVER_DENIED;
 const CHAT_SESSION_REQUIRED_MESSAGE = "chatSessionId is required for write operations.";
 const CHAT_SESSION_CANCELLED_MESSAGE = "Operation cancelled: the SDK agent session was stopped.";
-const USER_DENIED_MESSAGE = "Operation denied by user.";
+const USER_DENIED_MESSAGE = APPROVAL_DENIAL_MESSAGES.USER_DENIED;
+
+function denied(reason, error, capability) {
+  return {
+    allowed: false,
+    requiresApproval: false,
+    error,
+    denialReason: reason,
+    capability,
+  };
+}
 
 function requiresApprovalInConfirmMode(capability, surface) {
   if (!capability) return false;
@@ -43,12 +58,7 @@ function evaluateRpcPermission({
   }
 
   if (capability?.policy.write && !params?.chatSessionId && surface === CAPABILITY_SURFACES.BUILTIN) {
-    return {
-      allowed: false,
-      requiresApproval: false,
-      error: CHAT_SESSION_REQUIRED_MESSAGE,
-      capability,
-    };
+    return denied(APPROVAL_DENIAL_REASONS.POLICY_DENIED, CHAT_SESSION_REQUIRED_MESSAGE, capability);
   }
 
   if (
@@ -57,21 +67,11 @@ function evaluateRpcPermission({
     && context.chatSessionCancelled
     && surface === CAPABILITY_SURFACES.BUILTIN
   ) {
-    return {
-      allowed: false,
-      requiresApproval: false,
-      error: CHAT_SESSION_CANCELLED_MESSAGE,
-      capability,
-    };
+    return denied(APPROVAL_DENIAL_REASONS.POLICY_DENIED, CHAT_SESSION_CANCELLED_MESSAGE, capability);
   }
 
   if (permissionMode === PERMISSION_MODES.OBSERVER && isBlockedInObserverMode(capability)) {
-    return {
-      allowed: false,
-      requiresApproval: false,
-      error: OBSERVER_DENY_MESSAGE,
-      capability,
-    };
+    return denied(APPROVAL_DENIAL_REASONS.OBSERVER_DENIED, OBSERVER_DENY_MESSAGE, capability);
   }
 
   const requiresApproval = permissionMode === PERMISSION_MODES.CONFIRM
@@ -129,6 +129,7 @@ module.exports = {
   CHAT_SESSION_REQUIRED_MESSAGE,
   CHAT_SESSION_CANCELLED_MESSAGE,
   USER_DENIED_MESSAGE,
+  APPROVAL_DENIAL_REASONS,
   requiresApprovalInConfirmMode,
   isBlockedInObserverMode,
   evaluateRpcPermission,

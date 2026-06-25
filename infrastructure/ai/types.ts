@@ -154,6 +154,7 @@ export interface ToolResult {
   toolCallId: string;
   content: string;
   isError?: boolean;
+  denialReason?: 'user_denied' | 'timeout_auto_denied' | 'policy_denied' | 'observer_denied';
 }
 
 export interface ChatParams {

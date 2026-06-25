@@ -11,6 +11,7 @@ const net = require("node:net");
 const { McpServer } = require("@modelcontextprotocol/sdk/server/mcp.js");
 const { StdioServerTransport } = require("@modelcontextprotocol/sdk/server/stdio.js");
 const { z } = require("zod");
+const { APPROVAL_DENIAL_REASONS, APPROVAL_DENIAL_MESSAGES } = require("../capabilities/constants.cjs");
 
 const DEBUG_MCP = process.env.NETCATTY_MCP_DEBUG === "1";
 
@@ -79,17 +80,29 @@ function checkCommandSafety(command) {
 /** Guard for write tools: blocks in observer mode, optionally checks command safety. */
 function guardWriteOperation(command, { skipBlocklist = false } = {}) {
   if (PERMISSION_MODE === "observer") {
-    return 'Operation denied: permission mode is "observer" (read-only). Change to "confirm" or "autonomous" in Settings → AI → Safety to allow this action.';
+    return {
+      message: APPROVAL_DENIAL_MESSAGES.OBSERVER_DENIED,
+      denialReason: APPROVAL_DENIAL_REASONS.OBSERVER_DENIED,
+    };
   }
   // When skipBlocklist is true, the caller relies on the TCP bridge layer for
   // session-aware blocklist checks (e.g. serial and network device sessions skip shell patterns).
   if (!skipBlocklist && command) {
     const safety = checkCommandSafety(command);
     if (safety.blocked) {
-      return `Command blocked by safety policy. Pattern: ${safety.matchedPattern}`;
+      return {
+        message: `Command blocked by safety policy. Pattern: ${safety.matchedPattern}`,
+        denialReason: APPROVAL_DENIAL_REASONS.POLICY_DENIED,
+      };
     }
   }
   return null;
+}
+
+function formatMcpError(result, fallback) {
+  const message = result?.error || fallback;
+  const reason = result?.denialReason;
+  return reason ? `Error (${reason}): ${message}` : `Error: ${message}`;
 }
 
 let tcpSocket = null;
@@ -283,7 +296,7 @@ server.tool(
     const guardErr = guardWriteOperation(command, { skipBlocklist: true });
     if (guardErr) {
       debugLog("terminal_execute blocked locally", { sessionId, guardErr });
-      return { content: [{ type: "text", text: `Error: ${guardErr}` }], isError: true };
+      return { content: [{ type: "text", text: formatMcpError({ error: guardErr.message, denialReason: guardErr.denialReason }, "Command blocked") }], isError: true };
     }
     const result = await rpcCall("netcatty/exec", { ...scopeParams, sessionId, command });
     debugLog("terminal_execute result", {
@@ -295,7 +308,7 @@ server.tool(
       stderrLength: result?.stderr?.length || 0,
     });
     if (!result.ok) {
-      return { content: [{ type: "text", text: `Error: ${result.error || "Command failed"}` }], isError: true };
+      return { content: [{ type: "text", text: formatMcpError(result, "Command failed") }], isError: true };
     }
     const parts = [];
     if (result.stdout) parts.push(result.stdout);
@@ -318,11 +331,11 @@ server.tool(
   async ({ sessionId, command }) => {
     const guardErr = guardWriteOperation(command, { skipBlocklist: true });
     if (guardErr) {
-      return { content: [{ type: "text", text: `Error: ${guardErr}` }], isError: true };
+      return { content: [{ type: "text", text: formatMcpError({ error: guardErr.message, denialReason: guardErr.denialReason }, "Command blocked") }], isError: true };
     }
     const result = await rpcCall("netcatty/jobStart", { ...scopeParams, sessionId, command });
     if (!result.ok) {
-      return { content: [{ type: "text", text: `Error: ${result.error || "Failed to start background command"}` }], isError: true };
+      return { content: [{ type: "text", text: formatMcpError(result, "Failed to start background command") }], isError: true };
     }
     return {
       content: [{
@@ -350,7 +363,7 @@ server.tool(
   async ({ jobId, offset }) => {
     const result = await rpcCall("netcatty/jobPoll", { ...scopeParams, jobId, offset: offset || 0 });
     if (!result.ok) {
-      return { content: [{ type: "text", text: `Error: ${result.error || "Failed to poll background command"}` }], isError: true };
+      return { content: [{ type: "text", text: formatMcpError(result, "Failed to poll background command") }], isError: true };
     }
     return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
   },
@@ -365,7 +378,7 @@ server.tool(
   async ({ jobId }) => {
     const result = await rpcCall("netcatty/jobStop", { ...scopeParams, jobId });
     if (!result.ok) {
-      return { content: [{ type: "text", text: `Error: ${result.error || "Failed to stop background command"}` }], isError: true };
+      return { content: [{ type: "text", text: formatMcpError(result, "Failed to stop background command") }], isError: true };
     }
     return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
   },

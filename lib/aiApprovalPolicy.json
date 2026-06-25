@@ -1,0 +1,15 @@
+{
+  "approvalTimeoutMs": 110000,
+  "denialReasons": {
+    "userDenied": "user_denied",
+    "timeoutAutoDenied": "timeout_auto_denied",
+    "policyDenied": "policy_denied",
+    "observerDenied": "observer_denied"
+  },
+  "messages": {
+    "user_denied": "Operation denied by user.",
+    "timeout_auto_denied": "Operation automatically denied because approval timed out.",
+    "policy_denied": "Operation denied by Netcatty safety policy.",
+    "observer_denied": "Operation denied: permission mode is \"observer\" (read-only). Change to \"confirm\" or \"autonomous\" in Settings \u2192 AI \u2192 Safety to allow this action."
+  }
+}
