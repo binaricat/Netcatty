@@ -164,7 +164,18 @@ function createOpenAIChatToolCallNormalizer(requestId: string): (data: string) =
           : toolCallRecord;
 
         if (existingId) {
-          normalizedToolCalls.push(toolCall);
+          const normalizedToolCall = normalizeOpenAIChatToolCall(toolCallRecord, existingId);
+          if (
+            normalizedToolCall.id === toolCallRecord.id &&
+            normalizedToolCall.type === toolCallRecord.type &&
+            normalizedToolCall.function === toolCallRecord.function
+          ) {
+            normalizedToolCalls.push(toolCall);
+          } else {
+            changed = true;
+            deltaChanged = true;
+            normalizedToolCalls.push(normalizedToolCall);
+          }
           continue;
         }
 
@@ -180,15 +191,20 @@ function createOpenAIChatToolCallNormalizer(requestId: string): (data: string) =
           : `call_netcatty_${requestIdToken}_${choiceIndex}_${toolCallIndex}`;
         toolCallIdsByChoiceAndIndex.set(key, toolCallId);
         pendingToolCallsByChoiceAndIndex.delete(key);
+        const normalizedToolCall = normalizeOpenAIChatToolCall(candidateToolCall, toolCallId);
 
-        if (candidateToolCall === toolCallRecord && toolCallId === toolCallRecord.id) {
+        if (
+          candidateToolCall === toolCallRecord &&
+          toolCallId === toolCallRecord.id &&
+          normalizedToolCall.type === toolCallRecord.type
+        ) {
           normalizedToolCalls.push(toolCall);
           continue;
         }
 
         changed = true;
         deltaChanged = true;
-        normalizedToolCalls.push({ ...candidateToolCall, id: toolCallId });
+        normalizedToolCalls.push(normalizedToolCall);
       }
 
       if (!deltaChanged) return choice;
@@ -221,10 +237,17 @@ function mergeOpenAIChatToolCallDeltas(
   const incomingFunction = incomingFn && typeof incomingFn === 'object'
     ? incomingFn as Record<string, unknown>
     : undefined;
-  const mergedFunction = {
+  const mergedFunction: Record<string, unknown> = {
     ...(currentFunction ?? {}),
     ...(incomingFunction ?? {}),
   };
+  if (
+    typeof currentFunction?.name === 'string' &&
+    currentFunction.name &&
+    incomingFunction?.name === ''
+  ) {
+    mergedFunction.name = currentFunction.name;
+  }
   const currentArgs = currentFunction?.arguments;
   const incomingArgs = incomingFunction?.arguments;
   if (typeof currentArgs === 'string' && typeof incomingArgs === 'string') {
@@ -236,6 +259,23 @@ function mergeOpenAIChatToolCallDeltas(
     ...incoming,
     function: mergedFunction,
   };
+}
+
+function normalizeOpenAIChatToolCall(
+  toolCall: Record<string, unknown>,
+  toolCallId: string,
+): Record<string, unknown> {
+  const normalized = { ...toolCall, id: toolCallId };
+  if (normalized.type === '') {
+    normalized.type = 'function';
+  }
+  const fn = normalized.function;
+  if (fn && typeof fn === 'object' && (fn as Record<string, unknown>).name === '') {
+    const normalizedFunction = { ...(fn as Record<string, unknown>) };
+    delete normalizedFunction.name;
+    normalized.function = normalizedFunction;
+  }
+  return normalized;
 }
 
 function hasFunctionName(toolCall: Record<string, unknown>): boolean {
