@@ -8,6 +8,10 @@ import {
   buildHistoricalUserReplayContent,
 } from "./cattyHistoryReplay.ts";
 import type { ChatMessage } from "../../infrastructure/ai/types.ts";
+import {
+  buildTerminalExecuteResultForModel,
+  resetToolResultHandlesForTests,
+} from "../../infrastructure/ai/toolResultHandles.ts";
 
 test("buildHistoricalUserReplayContent replaces historical image data with a placeholder", () => {
   const attachment: ChatMessageAttachment = {
@@ -106,6 +110,39 @@ test("buildHistoricalToolResultReplayText can preserve terminal output for 413 r
     buildHistoricalToolResultReplayText(result, toolCall, { preserveTerminalOutput: true }),
     "real terminal output",
   );
+});
+
+test("buildHistoricalToolResultReplayText preserves compressed terminal handle metadata", () => {
+  resetToolResultHandlesForTests();
+  const toolCall: ToolCall = {
+    id: "call-1",
+    name: "terminal_execute",
+    arguments: { command: "npm run build" },
+  };
+  const compressed = buildTerminalExecuteResultForModel({
+    stdout: "BUILD\n".repeat(20_000),
+    stderr: "",
+    exitCode: 0,
+  }, {
+    chatSessionId: "chat-1",
+    toolCallId: "call-1",
+    sessionId: "session-1",
+    command: "npm run build",
+  });
+
+  assert.ok("outputCompression" in compressed);
+  const content = JSON.stringify(compressed);
+  const result: ToolResult = {
+    toolCallId: "call-1",
+    content,
+  };
+
+  const replay = buildHistoricalToolResultReplayText(result, toolCall);
+
+  assert.equal(replay, content);
+  assert.match(replay, /tool_result_read/);
+  assert.match(replay, /outputCompression/);
+  assert.doesNotMatch(replay, /Historical terminal output omitted/);
 });
 
 test("buildHistoricalToolReplayMaps pairs reused tool ids with the nearest preceding call", () => {

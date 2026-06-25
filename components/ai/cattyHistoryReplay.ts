@@ -1,5 +1,6 @@
 import type { ChatMessage, ChatMessageAttachment, ToolCall, ToolResult } from "../../infrastructure/ai/types";
 import { isTerminalSelectionAttachment } from "../../application/state/terminalSelectionAttachment";
+import { isCompressedTerminalToolResultContent } from "../../infrastructure/ai/toolResultHandles";
 
 const MAX_ATTACHMENT_PLACEHOLDER_DETAIL_CHARS = 120;
 const MAX_TOOL_COMMAND_CHARS = 220;
@@ -120,6 +121,9 @@ export function buildHistoricalToolResultReplayText(
 ): string {
   const toolName = toolCall?.name ?? "unknown";
   if (!isTerminalToolName(toolName) || preserveTerminalOutput) {
+    return result.content;
+  }
+  if (isCompressedTerminalToolResultContent(result.content)) {
     return result.content;
   }
 

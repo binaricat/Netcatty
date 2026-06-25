@@ -16,6 +16,10 @@ import {
 import { requestApproval } from '../shared/approvalGate';
 import { reserveSessionSlot } from '../shared/sessionExecutionQueue';
 import { truncateTextWithHeadAndTail } from '../requestPayloadCompression';
+import {
+  buildTerminalExecuteResultForModel,
+  readToolResultHandle,
+} from '../toolResultHandles';
 
 const MAX_LIVE_TERMINAL_STDOUT_CHARS = 24_000;
 const MAX_LIVE_TERMINAL_STDERR_CHARS = 12_000;
@@ -122,13 +126,43 @@ export function createCattyTools(
           try {
             const result = await executeTerminalExecute(deps, { sessionId, command });
             if (result.ok === false) return unwrap(result);
-            return fitTerminalExecuteResultForModel(result.data);
+            return buildTerminalExecuteResultForModel(result.data, {
+              chatSessionId,
+              toolCallId,
+              sessionId,
+              command,
+            });
           } finally {
             abortSignal?.removeEventListener('abort', cancelOnAbort);
           }
         } finally {
           slot.release();
         }
+      },
+    }),
+
+    tool_result_read: tool({
+      description:
+        'Read an exact slice from a large tool result that was compressed into a handle. ' +
+        'Use this when terminal_execute returns outputCompression.handle and you need more exact stdout/stderr. ' +
+        'Repeated identical reads return a concise notice; change offset, length, or channel to inspect a different slice.',
+      inputSchema: z.object({
+        handle: z.string().describe('The outputCompression.handle returned by a compressed tool result.'),
+        channel: z.enum(['all', 'stdout', 'stderr']).optional().default('all')
+          .describe('Which part of the stored result to read. Defaults to all.'),
+        offset: z.number().int().min(0).optional().default(0)
+          .describe('Character offset to start reading from. Defaults to 0.'),
+        length: z.number().int().min(1).max(20000).optional().default(4000)
+          .describe('Maximum characters to return. Defaults to 4000, max 20000.'),
+      }),
+      execute: async ({ handle, channel, offset, length }) => {
+        return readToolResultHandle({
+          handle,
+          channel,
+          offset,
+          length,
+          chatSessionId,
+        });
       },
     }),
 
