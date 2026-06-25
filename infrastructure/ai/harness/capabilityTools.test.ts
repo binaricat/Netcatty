@@ -65,4 +65,30 @@ describe('capabilityTools result fitting', () => {
     assert.ok(handleId);
     assert.equal(store.read({ handleId, mode: 'full', maxChars: body.length + 100 }, 'chat-1'), body);
   });
+
+  it('does not refit explicit tool output read-back content', async () => {
+    const store = new ToolOutputStore();
+    const body = `${'full note line\n'.repeat(1000)}important ending`;
+    const handle = store.store({
+      chatSessionId: 'chat-1',
+      capabilityId: 'vault.notes.get',
+      content: body,
+    });
+    const tools = createCattyToolsFromCatalog(
+      {},
+      { sessions: [] },
+      [],
+      'auto',
+      undefined,
+      'chat-1',
+      store,
+    );
+
+    const result = await tools.tool_output_read.execute(
+      { handleId: handle.id, mode: 'full', maxChars: body.length + 100 },
+      { toolCallId: 'call-1', messages: [] },
+    ) as { content: string };
+
+    assert.equal(result.content, body);
+  });
 });

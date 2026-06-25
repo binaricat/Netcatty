@@ -119,6 +119,10 @@ function fitCapabilityResultForModel(
   chatSessionId?: string,
   toolOutputStore?: ToolOutputStore,
 ): unknown {
+  if (spec.capabilityId === 'harness.tool_output.read') {
+    return result;
+  }
+
   return fitLargeToolResultForModel({
     result,
     capabilityId: spec.capabilityId,
