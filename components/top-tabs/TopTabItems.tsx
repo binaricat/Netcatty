@@ -10,6 +10,7 @@ import { resolveHostIconAppearance, resolveHostIconColorAppearance } from '../..
 import { resolveSessionCodingCliProvider } from '../../domain/codingCliProviderMatch';
 import { resolveCodingCliActivityPhase } from '../../domain/codingCliTitleParse';
 import { resolveSessionTabTitle } from '../../domain/sessionTabTitle';
+import type { DynamicTabTitleMode } from '../../domain/models';
 import { CodingCliProviderIcon } from '../icons/CodingCliProviderIcon';
 import { cn } from '../../lib/utils';
 import { Host, TerminalSession, Workspace } from '../../types';
@@ -503,6 +504,7 @@ interface SessionTopTabProps {
   onCopySession: (sessionId: string) => void;
   onCopySessionToNewWindow: (sessionId: string) => void;
   renderBulkCloseItems: RenderBulkCloseItems;
+  dynamicTabTitleMode?: DynamicTabTitleMode;
   t: TranslateFn;
   tabAnimationClass?: string;
 }
@@ -526,6 +528,7 @@ export const SessionTopTab: React.FC<SessionTopTabProps> = memo(({
   onCopySession,
   onCopySessionToNewWindow,
   renderBulkCloseItems,
+  dynamicTabTitleMode,
   t,
   tabAnimationClass,
 }) => {
@@ -592,7 +595,7 @@ export const SessionTopTab: React.FC<SessionTopTabProps> = memo(({
           )}
           <div className="flex items-center gap-2 min-w-0 flex-1">
             <SessionTabIcon host={host} session={session} isActive={isActive} protocol={session.protocol} shellIcon={session.localShellIcon} />
-            <span className="truncate">{resolveSessionTabTitle(session, host)}</span>
+            <span className="truncate">{resolveSessionTabTitle(session, dynamicTabTitleMode)}</span>
             <div className="flex-shrink-0">{sessionStatusDot(session.status, hasActivity)}</div>
           </div>
           <button

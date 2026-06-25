@@ -380,6 +380,12 @@ export const enCoreMessages: Messages = {
   'settings.terminal.behavior.forcePromptNewLine': 'Prompt on a new line',
   'settings.terminal.behavior.forcePromptNewLine.desc':
     'When the final line of command output is not terminated by a newline, move the recognized shell prompt to the next visual line.',
+  'settings.terminal.behavior.dynamicTabTitle': 'Dynamic tab title',
+  'settings.terminal.behavior.dynamicTabTitle.desc':
+    'Choose when session tabs should follow shell-reported window titles.',
+  'settings.terminal.behavior.dynamicTabTitle.off': 'Disabled',
+  'settings.terminal.behavior.dynamicTabTitle.agent': 'Agents only',
+  'settings.terminal.behavior.dynamicTabTitle.all': 'All sessions',
   'settings.terminal.behavior.osc52Clipboard': 'OSC-52 clipboard',
   'settings.terminal.behavior.osc52Clipboard.desc':
     'Allow remote programs (tmux, vim, etc.) to access the local clipboard via OSC-52 escape sequences.',

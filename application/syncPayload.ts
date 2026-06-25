@@ -202,7 +202,7 @@ const SYNCABLE_TERMINAL_KEYS = [
   'rightClickBehavior', 'middleClickBehavior', 'copyOnSelect', 'middleClickPaste', 'wordSeparators',
   'linkModifier', 'keywordHighlightEnabled', 'keywordHighlightRules',
   'keepaliveInterval', 'keepaliveCountMax', 'disableBracketedPaste', 'clearWipesScrollback',
-  'preserveSelectionOnInput', 'forcePromptNewLine', 'osc52Clipboard', 'showServerStats',
+  'preserveSelectionOnInput', 'forcePromptNewLine', 'osc52Clipboard', 'dynamicTabTitleMode', 'showServerStats',
   'serverStatsRefreshInterval',
   'systemManagerProcessRefreshInterval', 'systemManagerTmuxRefreshInterval',
   'systemManagerDockerListRefreshInterval', 'systemManagerDockerStatsRefreshInterval',

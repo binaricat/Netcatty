@@ -354,6 +354,7 @@ export function terminalLayerFocusSidebarPropsEqual(prev: Ctx, next: Ctx): boole
     && eq(prev, next, 'resolvedPreviewTheme')
     && eq(prev, next, 'sessionHostsMap')
     && eq(prev, next, 'sessions')
+    && prev.terminalSettings?.dynamicTabTitleMode === next.terminalSettings?.dynamicTabTitleMode
     && eq(prev, next, 't')
     && eq(prev, next, 'onReorderWorkspaceSessions')
     && eq(prev, next, 'onRequestAddToWorkspace')

@@ -369,6 +369,12 @@ export const ruCoreMessages: Messages = {
   'settings.terminal.behavior.forcePromptNewLine': 'Переносить приглашение на новую строку',
   'settings.terminal.behavior.forcePromptNewLine.desc':
     'Если последняя строка вывода команды не завершена переводом строки, переносить распознанное приглашение оболочки на следующую визуальную строку.',
+  'settings.terminal.behavior.dynamicTabTitle': 'Динамический заголовок вкладки',
+  'settings.terminal.behavior.dynamicTabTitle.desc':
+    'Выберите, когда вкладки сеансов должны следовать заголовкам окна, сообщаемым оболочкой.',
+  'settings.terminal.behavior.dynamicTabTitle.off': 'Отключено',
+  'settings.terminal.behavior.dynamicTabTitle.agent': 'Только агенты',
+  'settings.terminal.behavior.dynamicTabTitle.all': 'Все сеансы',
   'settings.terminal.behavior.osc52Clipboard': 'Буфер обмена OSC-52',
   'settings.terminal.behavior.osc52Clipboard.desc':
     'Разрешить удалённым программам (tmux, vim и т. д.) доступ к локальному буферу обмена через escape-последовательности OSC-52.',

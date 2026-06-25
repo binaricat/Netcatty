@@ -9,10 +9,24 @@ const middleClickBehaviorOptions = (
   }
 ).MIDDLE_CLICK_BEHAVIOR_OPTIONS;
 
+const dynamicTabTitleModeOptions = (
+  terminalBehaviorSettings as {
+    DYNAMIC_TAB_TITLE_MODE_OPTIONS?: Array<{ value: string; labelKey: string }>;
+  }
+).DYNAMIC_TAB_TITLE_MODE_OPTIONS;
+
 test("middle-click settings expose only supported behaviors", () => {
   assert.ok(Array.isArray(middleClickBehaviorOptions));
   assert.deepEqual(
     middleClickBehaviorOptions.map((option) => option.value),
     ["context-menu", "paste", "disabled"],
+  );
+});
+
+test("dynamic tab title settings expose off, agent-only, and all modes", () => {
+  assert.ok(Array.isArray(dynamicTabTitleModeOptions));
+  assert.deepEqual(
+    dynamicTabTitleModeOptions.map((option) => option.value),
+    ["off", "agent", "all"],
   );
 });

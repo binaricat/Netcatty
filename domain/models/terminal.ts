@@ -13,6 +13,7 @@ export type RightClickBehavior = TerminalMouseClickBehavior;
 export type MiddleClickBehavior = 'context-menu' | 'paste' | 'disabled';
 export type LinkModifier = 'none' | 'ctrl' | 'alt' | 'meta';
 export type TerminalEmulationType = 'xterm-256color' | 'xterm-16color' | 'xterm';
+export type DynamicTabTitleMode = 'off' | 'agent' | 'all';
 
 // Keyword highlighting configuration
 export interface KeywordHighlightRule {
@@ -119,6 +120,9 @@ export interface TerminalSettings {
 
   // Clipboard
   osc52Clipboard: 'off' | 'write-only' | 'read-write' | 'prompt'; // OSC-52 clipboard access: off, write-only (default), read-write, or prompt on read
+
+  // Tab titles
+  dynamicTabTitleMode: DynamicTabTitleMode; // off, agent-only, or all shell-reported titles
 
   // Rendering
   rendererType: 'auto' | 'webgl' | 'dom'; // Terminal renderer: auto (detect based on hardware), webgl, or dom
@@ -259,6 +263,12 @@ const resolveMiddleClickBehavior = (
   return DEFAULT_TERMINAL_SETTINGS.middleClickBehavior;
 };
 
+const isDynamicTabTitleMode = (value: unknown): value is DynamicTabTitleMode => (
+  value === 'off' ||
+  value === 'agent' ||
+  value === 'all'
+);
+
 export const normalizeTerminalSettings = (
   settings?: Partial<TerminalSettings> | null,
 ): TerminalSettings => {
@@ -268,6 +278,9 @@ export const normalizeTerminalSettings = (
     ...(settings ?? {}),
     middleClickBehavior,
     middleClickPaste: middleClickBehavior === 'paste',
+    dynamicTabTitleMode: isDynamicTabTitleMode(settings?.dynamicTabTitleMode)
+      ? settings.dynamicTabTitleMode
+      : DEFAULT_TERMINAL_SETTINGS.dynamicTabTitleMode,
   };
 
   // Migrate legacy 'canvas' renderer to 'dom' (canvas removed in xterm.js 6.0)
@@ -348,6 +361,7 @@ const DEFAULT_TERMINAL_SETTINGS: TerminalSettings = {
   preserveSelectionOnInput: false, // Opt-in: keep selection alive when typing
   forcePromptNewLine: false, // Opt-in: keep the next shell prompt visually separated from unterminated final output lines
   osc52Clipboard: 'write-only', // OSC-52: allow remote programs to write clipboard by default
+  dynamicTabTitleMode: 'agent',
   rendererType: 'auto', // Auto-detect best renderer based on hardware
   hibernateHiddenTabs: false,
   hibernateHiddenTabsDelaySec: 5,

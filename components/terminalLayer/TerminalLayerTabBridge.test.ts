@@ -20,3 +20,8 @@ test('terminal panes can gate cwd restore per session host resolution', () => {
   assert.match(supportSource, /restoreTerminalCwd=\{restoreTerminalCwd && sessionHostResolved\}/);
   assert.match(layerSource, /session\.protocol === 'local'/);
 });
+
+test('terminal layer bridge refreshes when terminal settings change', () => {
+  assert.match(source, /terminalSettings: s\.terminalSettings/);
+  assert.match(source, /\[\s*[\s\S]*s\.terminalSettings[\s\S]*\]\);/);
+});

@@ -256,6 +256,12 @@ export const zhCNTerminalMessages: Messages = {
   'settings.terminal.behavior.forcePromptNewLine': '提示符另起一行',
   'settings.terminal.behavior.forcePromptNewLine.desc':
     '当命令输出的最后一行未以换行符结束时，将识别到的 shell 提示符移动到下一行显示。',
+  'settings.terminal.behavior.dynamicTabTitle': '动态标签页标题',
+  'settings.terminal.behavior.dynamicTabTitle.desc':
+    '选择标签页什么时候跟随 Shell 报告的窗口标题。',
+  'settings.terminal.behavior.dynamicTabTitle.off': '关闭',
+  'settings.terminal.behavior.dynamicTabTitle.agent': '仅 Agent',
+  'settings.terminal.behavior.dynamicTabTitle.all': '全部会话',
   'settings.terminal.behavior.osc52Clipboard': 'OSC-52 剪贴板',
   'settings.terminal.behavior.osc52Clipboard.desc':
     '允许远程程序（tmux、vim 等）通过 OSC-52 转义序列访问本地剪贴板。',

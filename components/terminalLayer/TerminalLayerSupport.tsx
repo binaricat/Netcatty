@@ -1010,7 +1010,7 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
     e.stopPropagation();
 
     const startPoint = { clientX: e.clientX, clientY: e.clientY };
-    const dragLabel = resolveSessionTabTitle(session, host);
+    const dragLabel = resolveSessionTabTitle(session, terminalSettings?.dynamicTabTitleMode);
     let dragStarted = false;
     let ghostEl: HTMLDivElement | null = null;
     let insertEl: HTMLDivElement | null = null;
@@ -1162,13 +1162,13 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
     document.addEventListener('pointerup', handlePointerUp, true);
     document.addEventListener('pointercancel', handlePointerCancel, true);
   }, [
-    host,
     inActiveWorkspace,
     onEndSessionDrag,
     onRemoveSessionFromWorkspace,
     onReorderTabs,
     onStartSessionDrag,
     session,
+    terminalSettings?.dynamicTabTitleMode,
     workspaceById,
   ]);
   const handleTerminalFontSizeChange = useCallback((nextFontSize: number) => {
@@ -1255,7 +1255,7 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
         sessionLog={sessionLog}
         sshDebugLogEnabled={sshDebugLogEnabled}
         sudoAutofillPassword={sudoAutofillPassword}
-        sessionDisplayName={resolveSessionTabTitle(session, host)}
+        sessionDisplayName={resolveSessionTabTitle(session, terminalSettings?.dynamicTabTitleMode)}
         showSelectionAIAction={showSelectionAIAction}
         onAddSelectionToAI={onAddSelectionToAI}
         onRename={handleRename}
