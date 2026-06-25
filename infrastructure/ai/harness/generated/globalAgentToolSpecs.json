@@ -1,0 +1,985 @@
+[
+  {
+    "capabilityId": "session.environment",
+    "toolName": "get_environment",
+    "rpcMethod": "netcatty/getContext",
+    "localExecution": false,
+    "description": "List scoped terminal sessions available to the agent.",
+    "inputShape": {},
+    "policy": {
+      "write": false,
+      "sensitiveRead": false,
+      "longRunning": false,
+      "requiresChatSession": true,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": true,
+      "bypassesChatCancel": true
+    },
+    "agentKind": "global"
+  },
+  {
+    "capabilityId": "attachment.list",
+    "toolName": "list_attachments",
+    "rpcMethod": "netcatty/listAttachments",
+    "localExecution": false,
+    "description": "List user-attached files in the current AI chat scope.",
+    "inputShape": {},
+    "policy": {
+      "write": false,
+      "sensitiveRead": false,
+      "longRunning": false,
+      "requiresChatSession": true,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": true,
+      "bypassesChatCancel": true
+    },
+    "agentKind": "global"
+  },
+  {
+    "capabilityId": "attachment.read",
+    "toolName": "read_attachment",
+    "rpcMethod": "netcatty/readAttachment",
+    "localExecution": false,
+    "description": "Read a user-attached file from the current AI chat scope.",
+    "inputShape": {
+      "filePath": {
+        "type": "string",
+        "optional": true,
+        "description": "Exact local attachment path."
+      },
+      "filename": {
+        "type": "string",
+        "optional": true,
+        "description": "Attachment filename from list_attachments."
+      }
+    },
+    "policy": {
+      "write": false,
+      "sensitiveRead": true,
+      "longRunning": false,
+      "requiresChatSession": true,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": true,
+      "bypassesChatCancel": true
+    },
+    "agentKind": "global"
+  },
+  {
+    "capabilityId": "terminal.execute",
+    "toolName": "terminal_execute",
+    "rpcMethod": "netcatty/exec",
+    "localExecution": false,
+    "description": "Execute a short command in a terminal session and wait for completion. Use only for commands expected to finish within about 60 seconds. For long-running commands use terminal_start and terminal_poll.",
+    "inputShape": {
+      "sessionId": {
+        "type": "string",
+        "optional": false,
+        "description": "The terminal session ID to execute on."
+      },
+      "command": {
+        "type": "string",
+        "optional": false,
+        "description": "The shell command to execute in the target session."
+      }
+    },
+    "policy": {
+      "write": true,
+      "sensitiveRead": false,
+      "longRunning": true,
+      "requiresChatSession": true,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": false,
+      "bypassesChatCancel": false
+    },
+    "agentKind": "global"
+  },
+  {
+    "capabilityId": "terminal.start",
+    "toolName": "terminal_start",
+    "rpcMethod": "netcatty/jobStart",
+    "localExecution": false,
+    "description": "Start a long-running command in a terminal session. Prefer for builds, scans, log-following, or anything likely to exceed about 2 minutes.",
+    "inputShape": {
+      "sessionId": {
+        "type": "string",
+        "optional": false,
+        "description": "The terminal session ID to start a long-running command on."
+      },
+      "command": {
+        "type": "string",
+        "optional": false,
+        "description": "The command to start in the target session."
+      }
+    },
+    "policy": {
+      "write": true,
+      "sensitiveRead": false,
+      "longRunning": true,
+      "requiresChatSession": true,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": false,
+      "bypassesChatCancel": false
+    },
+    "agentKind": "global"
+  },
+  {
+    "capabilityId": "terminal.poll",
+    "toolName": "terminal_poll",
+    "rpcMethod": "netcatty/jobPoll",
+    "localExecution": false,
+    "description": "Poll incremental output from a long-running terminal job. Wait at least about 30 seconds between polls unless output justifies checking sooner.",
+    "inputShape": {
+      "jobId": {
+        "type": "string",
+        "optional": false,
+        "description": "The background job ID returned by terminal_start."
+      },
+      "offset": {
+        "type": "number",
+        "optional": true,
+        "description": "Character offset from a previous poll (default 0)."
+      }
+    },
+    "policy": {
+      "write": false,
+      "sensitiveRead": false,
+      "longRunning": false,
+      "requiresChatSession": true,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": true,
+      "bypassesChatCancel": true
+    },
+    "agentKind": "global"
+  },
+  {
+    "capabilityId": "terminal.stop",
+    "toolName": "terminal_stop",
+    "rpcMethod": "netcatty/jobStop",
+    "localExecution": false,
+    "description": "Stop a long-running terminal job.",
+    "inputShape": {
+      "jobId": {
+        "type": "string",
+        "optional": false,
+        "description": "The background job ID returned by terminal_start."
+      }
+    },
+    "policy": {
+      "write": true,
+      "sensitiveRead": false,
+      "longRunning": false,
+      "requiresChatSession": true,
+      "bypassesObserverBlock": true,
+      "bypassesApproval": true,
+      "bypassesChatCancel": true
+    },
+    "agentKind": "global"
+  },
+  {
+    "capabilityId": "sftp.list",
+    "toolName": "sftp_list",
+    "rpcMethod": "netcatty/sftp/list",
+    "localExecution": false,
+    "description": "List a remote directory over SFTP.",
+    "inputShape": {
+      "sessionId": {
+        "type": "string",
+        "optional": false,
+        "description": "SFTP session ID."
+      },
+      "path": {
+        "type": "string",
+        "optional": false,
+        "description": "Remote directory path."
+      }
+    },
+    "policy": {
+      "write": false,
+      "sensitiveRead": true,
+      "longRunning": true,
+      "requiresChatSession": true,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": true,
+      "bypassesChatCancel": true
+    },
+    "agentKind": "global"
+  },
+  {
+    "capabilityId": "sftp.read",
+    "toolName": "sftp_read_file",
+    "rpcMethod": "netcatty/sftp/read",
+    "localExecution": false,
+    "description": "Read a remote file over SFTP.",
+    "inputShape": {
+      "sessionId": {
+        "type": "string",
+        "optional": false,
+        "description": "SFTP session ID."
+      },
+      "path": {
+        "type": "string",
+        "optional": false,
+        "description": "Remote file path to read."
+      }
+    },
+    "policy": {
+      "write": false,
+      "sensitiveRead": true,
+      "longRunning": true,
+      "requiresChatSession": true,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": true,
+      "bypassesChatCancel": true
+    },
+    "agentKind": "global"
+  },
+  {
+    "capabilityId": "sftp.write",
+    "toolName": "sftp_write_file",
+    "rpcMethod": "netcatty/sftp/write",
+    "localExecution": false,
+    "description": "Write a remote file over SFTP.",
+    "inputShape": {
+      "sessionId": {
+        "type": "string",
+        "optional": false,
+        "description": "SFTP session ID."
+      },
+      "path": {
+        "type": "string",
+        "optional": false,
+        "description": "Remote file path to write."
+      },
+      "content": {
+        "type": "string",
+        "optional": false,
+        "description": "File content to write."
+      }
+    },
+    "policy": {
+      "write": true,
+      "sensitiveRead": false,
+      "longRunning": true,
+      "requiresChatSession": true,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": false,
+      "bypassesChatCancel": false
+    },
+    "agentKind": "global"
+  },
+  {
+    "capabilityId": "sftp.download",
+    "toolName": "sftp_download",
+    "rpcMethod": "netcatty/sftp/download",
+    "localExecution": false,
+    "description": "Download a remote file to a local path.",
+    "inputShape": {
+      "sessionId": {
+        "type": "string",
+        "optional": false,
+        "description": "SFTP session ID."
+      },
+      "remotePath": {
+        "type": "string",
+        "optional": false,
+        "description": "Remote file path to download."
+      },
+      "localPath": {
+        "type": "string",
+        "optional": false,
+        "description": "Local destination path."
+      }
+    },
+    "policy": {
+      "write": true,
+      "sensitiveRead": false,
+      "longRunning": true,
+      "requiresChatSession": true,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": false,
+      "bypassesChatCancel": false
+    },
+    "agentKind": "global"
+  },
+  {
+    "capabilityId": "sftp.upload",
+    "toolName": "sftp_upload",
+    "rpcMethod": "netcatty/sftp/upload",
+    "localExecution": false,
+    "description": "Upload a local file to a remote path.",
+    "inputShape": {
+      "sessionId": {
+        "type": "string",
+        "optional": false,
+        "description": "SFTP session ID."
+      },
+      "localPath": {
+        "type": "string",
+        "optional": false,
+        "description": "Local file path to upload."
+      },
+      "remotePath": {
+        "type": "string",
+        "optional": false,
+        "description": "Remote destination path."
+      }
+    },
+    "policy": {
+      "write": true,
+      "sensitiveRead": false,
+      "longRunning": true,
+      "requiresChatSession": true,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": false,
+      "bypassesChatCancel": false
+    },
+    "agentKind": "global"
+  },
+  {
+    "capabilityId": "sftp.stat",
+    "toolName": "sftp_stat",
+    "rpcMethod": "netcatty/sftp/stat",
+    "localExecution": false,
+    "description": "Get remote file metadata over SFTP.",
+    "inputShape": {
+      "sessionId": {
+        "type": "string",
+        "optional": false,
+        "description": "SFTP session ID."
+      },
+      "path": {
+        "type": "string",
+        "optional": false,
+        "description": "Remote path to stat."
+      }
+    },
+    "policy": {
+      "write": false,
+      "sensitiveRead": true,
+      "longRunning": true,
+      "requiresChatSession": true,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": true,
+      "bypassesChatCancel": true
+    },
+    "agentKind": "global"
+  },
+  {
+    "capabilityId": "sftp.home",
+    "toolName": "sftp_home",
+    "rpcMethod": "netcatty/sftp/home",
+    "localExecution": false,
+    "description": "Get the remote home directory for a session.",
+    "inputShape": {
+      "sessionId": {
+        "type": "string",
+        "optional": false,
+        "description": "SFTP session ID."
+      }
+    },
+    "policy": {
+      "write": false,
+      "sensitiveRead": true,
+      "longRunning": true,
+      "requiresChatSession": true,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": true,
+      "bypassesChatCancel": true
+    },
+    "agentKind": "global"
+  },
+  {
+    "capabilityId": "sftp.mkdir",
+    "toolName": "sftp_mkdir",
+    "rpcMethod": "netcatty/sftp/mkdir",
+    "localExecution": false,
+    "description": "Create a remote directory over SFTP.",
+    "inputShape": {
+      "sessionId": {
+        "type": "string",
+        "optional": false,
+        "description": "SFTP session ID."
+      },
+      "path": {
+        "type": "string",
+        "optional": false,
+        "description": "Remote directory path to create."
+      }
+    },
+    "policy": {
+      "write": true,
+      "sensitiveRead": false,
+      "longRunning": true,
+      "requiresChatSession": true,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": false,
+      "bypassesChatCancel": false
+    },
+    "agentKind": "global"
+  },
+  {
+    "capabilityId": "sftp.delete",
+    "toolName": "sftp_delete",
+    "rpcMethod": "netcatty/sftp/delete",
+    "localExecution": false,
+    "description": "Delete a remote file or directory over SFTP.",
+    "inputShape": {
+      "sessionId": {
+        "type": "string",
+        "optional": false,
+        "description": "SFTP session ID."
+      },
+      "path": {
+        "type": "string",
+        "optional": false,
+        "description": "Remote file or directory path to delete."
+      }
+    },
+    "policy": {
+      "write": true,
+      "sensitiveRead": false,
+      "longRunning": true,
+      "requiresChatSession": true,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": false,
+      "bypassesChatCancel": false
+    },
+    "agentKind": "global"
+  },
+  {
+    "capabilityId": "sftp.rename",
+    "toolName": "sftp_rename",
+    "rpcMethod": "netcatty/sftp/rename",
+    "localExecution": false,
+    "description": "Rename a remote file or directory over SFTP.",
+    "inputShape": {
+      "sessionId": {
+        "type": "string",
+        "optional": false,
+        "description": "SFTP session ID."
+      },
+      "oldPath": {
+        "type": "string",
+        "optional": false,
+        "description": "Current remote path."
+      },
+      "newPath": {
+        "type": "string",
+        "optional": false,
+        "description": "New remote path."
+      }
+    },
+    "policy": {
+      "write": true,
+      "sensitiveRead": false,
+      "longRunning": true,
+      "requiresChatSession": true,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": false,
+      "bypassesChatCancel": false
+    },
+    "agentKind": "global"
+  },
+  {
+    "capabilityId": "sftp.chmod",
+    "toolName": "sftp_chmod",
+    "rpcMethod": "netcatty/sftp/chmod",
+    "localExecution": false,
+    "description": "Change remote file permissions over SFTP.",
+    "inputShape": {
+      "sessionId": {
+        "type": "string",
+        "optional": false,
+        "description": "SFTP session ID."
+      },
+      "path": {
+        "type": "string",
+        "optional": false,
+        "description": "Remote file path."
+      },
+      "mode": {
+        "type": "string",
+        "optional": false,
+        "description": "Octal permission mode (e.g. 755)."
+      }
+    },
+    "policy": {
+      "write": true,
+      "sensitiveRead": false,
+      "longRunning": true,
+      "requiresChatSession": true,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": false,
+      "bypassesChatCancel": false
+    },
+    "agentKind": "global"
+  },
+  {
+    "capabilityId": "vault.host.get",
+    "toolName": "host_get",
+    "rpcMethod": "vault/host/get",
+    "localExecution": false,
+    "description": "Get host metadata from the vault.",
+    "inputShape": {
+      "hostId": {
+        "type": "string",
+        "optional": false,
+        "description": "Vault host ID."
+      }
+    },
+    "policy": {
+      "write": false,
+      "sensitiveRead": true,
+      "longRunning": false,
+      "requiresChatSession": false,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": true,
+      "bypassesChatCancel": true
+    },
+    "agentKind": "global"
+  },
+  {
+    "capabilityId": "vault.host.list",
+    "toolName": "vault_hosts_list",
+    "rpcMethod": "vault/hosts/list",
+    "localExecution": false,
+    "description": "List saved hosts in the vault (metadata only — no passwords or keys).",
+    "inputShape": {},
+    "policy": {
+      "write": false,
+      "sensitiveRead": true,
+      "longRunning": false,
+      "requiresChatSession": false,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": true,
+      "bypassesChatCancel": true
+    },
+    "agentKind": "global"
+  },
+  {
+    "capabilityId": "vault.hosts.create",
+    "toolName": "vault_hosts_create",
+    "rpcMethod": "vault/hosts/create",
+    "localExecution": false,
+    "description": "Create vault hosts from structured host objects. Use when the user wants to add/create a host (Vault → Hosts). NOT for Vault → Notes sidebar documentation. Use when the user wants to add/create a host in Vault → Hosts (创建主机、SSH 连接凭据). NOT for Vault → Notes sidebar docs. Put SSH password in password field; long remarks/admin tables in host notes field. Never fall back to vault_notes_create if this fails.",
+    "inputShape": {
+      "hosts": {
+        "type": "string",
+        "optional": false,
+        "description": "JSON array of host objects you extracted from the user's text. Each object: hostname (required), label, port, username, password, group, tags (array or comma-separated string), notes (Host Details remarks — NOT Vault sidebar Notes), protocol (ssh|telnet|local)."
+      },
+      "dryRun": {
+        "type": "string",
+        "optional": true,
+        "description": "Set to true to validate and preview without writing to the vault."
+      },
+      "skipDuplicates": {
+        "type": "string",
+        "optional": true,
+        "description": "Set to false to create even when a matching host already exists (default true)."
+      }
+    },
+    "policy": {
+      "write": true,
+      "sensitiveRead": false,
+      "longRunning": false,
+      "requiresChatSession": false,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": false,
+      "bypassesChatCancel": false
+    },
+    "agentKind": "global"
+  },
+  {
+    "capabilityId": "vault.host.import",
+    "toolName": "vault_hosts_import",
+    "rpcMethod": "vault/hosts/import",
+    "localExecution": false,
+    "description": "Parse known host export file formats (PuTTY, MobaXterm, CSV, SecureCRT, ssh_config) into vault hosts. For arbitrary unstructured text, map to host objects and use vault_hosts_create instead. Only for text in known export formats (PuTTY reg, MobaXterm ini, CSV template, SecureCRT, ssh_config). For arbitrary unstructured host lists from the user, extract fields yourself and call vault_hosts_create.",
+    "inputShape": {
+      "format": {
+        "type": "string",
+        "optional": false,
+        "description": "Import format: csv, putty, mobaxterm, securecrt, ssh_config, or auto to detect from text."
+      },
+      "text": {
+        "type": "string",
+        "optional": false,
+        "description": "Exported host data text to import."
+      },
+      "dryRun": {
+        "type": "string",
+        "optional": true,
+        "description": "Set to true to parse and preview without writing to the vault."
+      },
+      "skipDuplicates": {
+        "type": "string",
+        "optional": true,
+        "description": "Set to false to import even when a matching host already exists (default true)."
+      },
+      "fileName": {
+        "type": "string",
+        "optional": true,
+        "description": "Optional source file name (helps SecureCRT .ini parsing)."
+      }
+    },
+    "policy": {
+      "write": true,
+      "sensitiveRead": false,
+      "longRunning": false,
+      "requiresChatSession": false,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": false,
+      "bypassesChatCancel": false
+    },
+    "agentKind": "global"
+  },
+  {
+    "capabilityId": "vault.host.notes.get",
+    "toolName": "host_notes_get",
+    "rpcMethod": "vault/host/notes/get",
+    "localExecution": false,
+    "description": "Read host metadata notes attached to a saved host (Host Details panel — not Vault sidebar Notes). Host metadata notes on a saved host — not Vault → Notes sidebar entries.",
+    "inputShape": {
+      "hostId": {
+        "type": "string",
+        "optional": false,
+        "description": "Vault host ID."
+      }
+    },
+    "policy": {
+      "write": false,
+      "sensitiveRead": true,
+      "longRunning": false,
+      "requiresChatSession": false,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": true,
+      "bypassesChatCancel": true
+    },
+    "agentKind": "global"
+  },
+  {
+    "capabilityId": "vault.host.notes.set",
+    "toolName": "host_notes_set",
+    "rpcMethod": "vault/host/notes/set",
+    "localExecution": false,
+    "description": "Update host metadata notes on a saved host (Host Details panel — not Vault sidebar Notes). Host metadata notes on a saved host — not Vault → Notes sidebar entries. Prefer vault_notes_create/update when the user wants vault notes they can open in the Notes sidebar.",
+    "inputShape": {
+      "hostId": {
+        "type": "string",
+        "optional": false,
+        "description": "Vault host ID."
+      },
+      "notes": {
+        "type": "string",
+        "optional": false,
+        "description": "Host metadata notes (Host Details — not Vault sidebar Notes)."
+      }
+    },
+    "policy": {
+      "write": true,
+      "sensitiveRead": false,
+      "longRunning": false,
+      "requiresChatSession": false,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": false,
+      "bypassesChatCancel": false
+    },
+    "agentKind": "global"
+  },
+  {
+    "capabilityId": "vault.note.list",
+    "toolName": "vault_notes_list",
+    "rpcMethod": "vault/notes/list",
+    "localExecution": false,
+    "description": "List notes in Vault → Notes (markdown notes visible in the vault sidebar).",
+    "inputShape": {},
+    "policy": {
+      "write": false,
+      "sensitiveRead": false,
+      "longRunning": false,
+      "requiresChatSession": false,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": true,
+      "bypassesChatCancel": true
+    },
+    "agentKind": "global"
+  },
+  {
+    "capabilityId": "vault.note.get",
+    "toolName": "vault_notes_get",
+    "rpcMethod": "vault/notes/get",
+    "localExecution": false,
+    "description": "Get a Vault → Notes entry by id (full markdown content).",
+    "inputShape": {
+      "noteId": {
+        "type": "string",
+        "optional": false,
+        "description": "Vault note ID from vault_notes_list."
+      }
+    },
+    "policy": {
+      "write": false,
+      "sensitiveRead": false,
+      "longRunning": false,
+      "requiresChatSession": false,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": true,
+      "bypassesChatCancel": true
+    },
+    "agentKind": "global"
+  },
+  {
+    "capabilityId": "vault.note.create",
+    "toolName": "vault_notes_create",
+    "rpcMethod": "vault/notes/create",
+    "localExecution": false,
+    "description": "Create a note in Vault → Notes sidebar (markdown documentation). NOT for adding SSH hosts — use vault_hosts_create for that. Use ONLY when the user wants markdown documentation in Vault → Notes sidebar (保险箱笔记). Do NOT use when the user asked to create/add a host — use vault_hosts_create instead.",
+    "inputShape": {
+      "title": {
+        "type": "string",
+        "optional": false,
+        "description": "Note title shown in Vault → Notes."
+      },
+      "content": {
+        "type": "string",
+        "optional": false,
+        "description": "Markdown note body."
+      },
+      "group": {
+        "type": "string",
+        "optional": true,
+        "description": "Optional folder path (e.g. infra/prod)."
+      },
+      "linkedHostIds": {
+        "type": "string",
+        "optional": true,
+        "description": "Optional JSON array of vault host IDs to link."
+      },
+      "tags": {
+        "type": "string",
+        "optional": true,
+        "description": "Optional JSON array of tag strings."
+      }
+    },
+    "policy": {
+      "write": true,
+      "sensitiveRead": false,
+      "longRunning": false,
+      "requiresChatSession": false,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": false,
+      "bypassesChatCancel": false
+    },
+    "agentKind": "global"
+  },
+  {
+    "capabilityId": "vault.note.update",
+    "toolName": "vault_notes_update",
+    "rpcMethod": "vault/notes/update",
+    "localExecution": false,
+    "description": "Update an existing Vault → Notes entry by id. Update an existing Vault → Notes entry (visible in the vault notes sidebar).",
+    "inputShape": {
+      "noteId": {
+        "type": "string",
+        "optional": false,
+        "description": "Vault note ID to update."
+      },
+      "title": {
+        "type": "string",
+        "optional": true,
+        "description": "New title."
+      },
+      "content": {
+        "type": "string",
+        "optional": true,
+        "description": "New markdown body."
+      },
+      "group": {
+        "type": "string",
+        "optional": true,
+        "description": "New folder path."
+      },
+      "linkedHostIds": {
+        "type": "string",
+        "optional": true,
+        "description": "Optional JSON array of vault host IDs to link."
+      },
+      "tags": {
+        "type": "string",
+        "optional": true,
+        "description": "Optional JSON array of tag strings."
+      }
+    },
+    "policy": {
+      "write": true,
+      "sensitiveRead": false,
+      "longRunning": false,
+      "requiresChatSession": false,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": false,
+      "bypassesChatCancel": false
+    },
+    "agentKind": "global"
+  },
+  {
+    "capabilityId": "vault.snippets.list",
+    "toolName": "snippets_list",
+    "rpcMethod": "vault/snippets/list",
+    "localExecution": false,
+    "description": "List code snippets stored in the vault.",
+    "inputShape": {},
+    "policy": {
+      "write": false,
+      "sensitiveRead": false,
+      "longRunning": false,
+      "requiresChatSession": false,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": true,
+      "bypassesChatCancel": true
+    },
+    "agentKind": "global"
+  },
+  {
+    "capabilityId": "vault.snippets.get",
+    "toolName": "snippets_get",
+    "rpcMethod": "vault/snippets/get",
+    "localExecution": false,
+    "description": "Get a single code snippet from the vault.",
+    "inputShape": {
+      "snippetId": {
+        "type": "string",
+        "optional": false,
+        "description": "Snippet ID."
+      }
+    },
+    "policy": {
+      "write": false,
+      "sensitiveRead": false,
+      "longRunning": false,
+      "requiresChatSession": false,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": true,
+      "bypassesChatCancel": true
+    },
+    "agentKind": "global"
+  },
+  {
+    "capabilityId": "vault.snippets.run",
+    "toolName": "snippets_run",
+    "rpcMethod": "vault/snippets/run",
+    "localExecution": false,
+    "description": "Resolve snippet variables and execute a snippet in a terminal session.",
+    "inputShape": {
+      "snippetId": {
+        "type": "string",
+        "optional": false,
+        "description": "Snippet ID to run."
+      },
+      "sessionId": {
+        "type": "string",
+        "optional": false,
+        "description": "Terminal session ID to execute on."
+      },
+      "variables": {
+        "type": "string",
+        "optional": true,
+        "description": "JSON object of snippet variable values."
+      }
+    },
+    "policy": {
+      "write": true,
+      "sensitiveRead": false,
+      "longRunning": true,
+      "requiresChatSession": true,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": false,
+      "bypassesChatCancel": false
+    },
+    "agentKind": "global"
+  },
+  {
+    "capabilityId": "portforward.rules.list",
+    "toolName": "portforward_rules_list",
+    "rpcMethod": "portforward/rules/list",
+    "localExecution": false,
+    "description": "List persisted port forwarding rules.",
+    "inputShape": {},
+    "policy": {
+      "write": false,
+      "sensitiveRead": false,
+      "longRunning": false,
+      "requiresChatSession": false,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": true,
+      "bypassesChatCancel": true
+    },
+    "agentKind": "global"
+  },
+  {
+    "capabilityId": "portforward.tunnels.list",
+    "toolName": "portforward_tunnels_list",
+    "rpcMethod": "portforward/tunnels/list",
+    "localExecution": false,
+    "description": "List active port forwarding tunnels.",
+    "inputShape": {},
+    "policy": {
+      "write": false,
+      "sensitiveRead": false,
+      "longRunning": false,
+      "requiresChatSession": false,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": true,
+      "bypassesChatCancel": true
+    },
+    "agentKind": "global"
+  },
+  {
+    "capabilityId": "portforward.start",
+    "toolName": "portforward_start",
+    "rpcMethod": "portforward/start",
+    "localExecution": false,
+    "description": "Start a port forwarding tunnel for a rule.",
+    "inputShape": {
+      "ruleId": {
+        "type": "string",
+        "optional": false,
+        "description": "Port forwarding rule ID."
+      }
+    },
+    "policy": {
+      "write": true,
+      "sensitiveRead": false,
+      "longRunning": true,
+      "requiresChatSession": false,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": false,
+      "bypassesChatCancel": false
+    },
+    "agentKind": "global"
+  },
+  {
+    "capabilityId": "portforward.stop",
+    "toolName": "portforward_stop",
+    "rpcMethod": "portforward/stop",
+    "localExecution": false,
+    "description": "Stop an active port forwarding tunnel.",
+    "inputShape": {
+      "ruleId": {
+        "type": "string",
+        "optional": false,
+        "description": "Port forwarding rule ID."
+      }
+    },
+    "policy": {
+      "write": true,
+      "sensitiveRead": false,
+      "longRunning": false,
+      "requiresChatSession": false,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": false,
+      "bypassesChatCancel": false
+    },
+    "agentKind": "global"
+  }
+]

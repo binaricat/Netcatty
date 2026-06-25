@@ -76,6 +76,27 @@ async function invokeCapabilityRpc(
   return result;
 }
 
+async function tryFetchHostEnvironment(
+  bridge: NetcattyBridge,
+  chatSessionId?: string,
+): Promise<Record<string, unknown> | null> {
+  if (!bridge.aiCapability || !chatSessionId) return null;
+  try {
+    const environment = await invokeCapabilityRpc(
+      bridge,
+      'netcatty/getContext',
+      {},
+      chatSessionId,
+    );
+    if (environment && typeof environment === 'object' && !('error' in environment)) {
+      return environment as Record<string, unknown>;
+    }
+  } catch {
+    // IPC failures must not block read-only harness tools.
+  }
+  return null;
+}
+
 function applyToolDedup(
   toolName: string,
   fingerprint: string,
@@ -131,27 +152,20 @@ async function executeLocalCattyCapability(ctx: LocalExecutionContext): Promise<
         return unwrap(local);
       }
       let merged: unknown = local.data;
-      if (deps.bridge.aiCapability && chatSessionId) {
-        const environment = await invokeCapabilityRpc(
-          deps.bridge,
-          'netcatty/getContext',
-          {},
-          chatSessionId,
-        );
-        if (environment && typeof environment === 'object' && !('error' in environment)) {
-          const hosts = Array.isArray((environment as { hosts?: unknown[] }).hosts)
-            ? (environment as { hosts: Array<Record<string, unknown>> }).hosts
-            : [];
-          const hostBySessionId = new Map(hosts.map((host) => [String(host.sessionId), host]));
-          merged = {
-            ...local.data,
-            sessions: local.data.sessions.map((session) => ({
-              ...session,
-              ...(hostBySessionId.get(session.sessionId) ?? {}),
-            })),
-            activePortForwardTunnels: (environment as { activePortForwardTunnels?: unknown }).activePortForwardTunnels,
-          };
-        }
+      const environment = await tryFetchHostEnvironment(deps.bridge, chatSessionId);
+      if (environment) {
+        const hosts = Array.isArray(environment.hosts)
+          ? (environment.hosts as Array<Record<string, unknown>>)
+          : [];
+        const hostBySessionId = new Map(hosts.map((host) => [String(host.sessionId), host]));
+        merged = {
+          ...local.data,
+          sessions: local.data.sessions.map((session) => ({
+            ...session,
+            ...(hostBySessionId.get(session.sessionId) ?? {}),
+          })),
+          activePortForwardTunnels: environment.activePortForwardTunnels,
+        };
       }
       if (fingerprint) {
         return applyToolDedup(spec.toolName, fingerprint, merged, toolResultDedup);
@@ -164,21 +178,14 @@ async function executeLocalCattyCapability(ctx: LocalExecutionContext): Promise<
       if (local.ok === false) {
         return unwrap(local);
       }
-      if (deps.bridge.aiCapability && chatSessionId) {
-        const environment = await invokeCapabilityRpc(
-          deps.bridge,
-          'netcatty/getContext',
-          {},
-          chatSessionId,
-        );
-        if (environment && typeof environment === 'object' && !('error' in environment)) {
-          const hosts = Array.isArray((environment as { hosts?: unknown[] }).hosts)
-            ? (environment as { hosts: Array<Record<string, unknown>> }).hosts
-            : [];
-          const match = hosts.find((host) => String(host.sessionId) === sessionId);
-          if (match) {
-            return { ...local.data, ...match };
-          }
+      const environment = await tryFetchHostEnvironment(deps.bridge, chatSessionId);
+      if (environment) {
+        const hosts = Array.isArray(environment.hosts)
+          ? (environment.hosts as Array<Record<string, unknown>>)
+          : [];
+        const match = hosts.find((host) => String(host.sessionId) === sessionId);
+        if (match) {
+          return { ...local.data, ...match };
         }
       }
       return local.data;
@@ -201,6 +208,32 @@ async function executeLocalCattyCapability(ctx: LocalExecutionContext): Promise<
   }
 }
 
+function resolveSessionQueueKey(
+  spec: CattyToolSpec,
+  args: Record<string, unknown>,
+  chatSessionId?: string,
+): string | null {
+  // Read-only harness tools only inspect renderer context (plus optional host
+  // metadata). They must not queue behind terminal.execute on the same sessionId.
+  if (spec.capabilityId.startsWith('harness.') && !spec.policy.write) {
+    return null;
+  }
+
+  const sessionId = typeof args.sessionId === 'string' ? args.sessionId : undefined;
+  if (sessionId) {
+    return `${chatSessionId ?? 'global'}:${sessionId}`;
+  }
+  return `${chatSessionId ?? 'global'}:${spec.toolName}`;
+}
+
+export function resolveSessionQueueKeyForTests(
+  spec: Pick<CattyToolSpec, 'capabilityId' | 'toolName' | 'policy'>,
+  args: Record<string, unknown>,
+  chatSessionId?: string,
+): string | null {
+  return resolveSessionQueueKey(spec as CattyToolSpec, args, chatSessionId);
+}
+
 function createCatalogTool(
   spec: CattyToolSpec,
   deps: ToolDeps,
@@ -214,13 +247,12 @@ function createCatalogTool(
     description: spec.description,
     inputSchema,
     execute: async (args, { toolCallId, abortSignal }) => {
-      const sessionId = typeof (args as { sessionId?: string }).sessionId === 'string'
-        ? (args as { sessionId: string }).sessionId
-        : undefined;
-      const queueKey = sessionId
-        ? `${deps.chatSessionId ?? 'global'}:${sessionId}`
-        : `${deps.chatSessionId ?? 'global'}:${spec.toolName}`;
-      const slot = reserveSessionSlot(queueKey);
+      const queueKey = resolveSessionQueueKey(
+        spec,
+        args as Record<string, unknown>,
+        deps.chatSessionId,
+      );
+      const slot = queueKey ? reserveSessionSlot(queueKey) : null;
 
       try {
         if (
@@ -245,7 +277,7 @@ function createCatalogTool(
           return { error: 'Tool call cancelled before it could start.' };
         }
 
-        await slot.ready;
+        await slot?.ready;
 
         if (spec.capabilityId === 'terminal.execute') {
           const { sessionId: sid, command } = args as { sessionId: string; command: string };
@@ -344,7 +376,7 @@ function createCatalogTool(
 
         return raw;
       } finally {
-        slot.release();
+        slot?.release();
       }
     },
   });

@@ -14,7 +14,7 @@ import type {
 } from '../infrastructure/ai/types';
 import type { ExecutorContext } from '../infrastructure/ai/cattyAgent/executor';
 import { getAgentModelPresets } from '../infrastructure/ai/types';
-import { getExternalAgentSdkBackend, matchesManagedAgentConfig } from '../infrastructure/ai/managedAgents';
+import { getExternalAgentSdkBackend, getManualAgentCommand, matchesManagedAgentConfig } from '../infrastructure/ai/managedAgents';
 import { useAgentDiscovery } from '../application/state/useAgentDiscovery';
 import {
   getReadyUserSkillOptions,
@@ -97,7 +97,7 @@ if (typeof window !== 'undefined') {
   subscribeUserSkillsStatusChanged(invalidateUserSkillsStatusCache);
 }
 
-import { getManualAgentCommand } from '../../../infrastructure/ai/managedAgents';
+function loadUserSkillsStatus(
   bridge: ReturnType<typeof getNetcattyBridge>,
 ): Promise<UserSkillsStatusLoadResult> {
   const requestVersion = userSkillsStatusCacheVersion;
@@ -262,6 +262,11 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
   terminalSessions = [],
   resolveExecutorContext,
   isVisible = true,
+  notes = [],
+  hosts = [],
+  onOpenVaultNote,
+  onOpenVaultHost,
+  onOpenVaultSection,
 }) => {
   const { t } = useI18n();
   const scopeKey = `${scopeType}:${scopeTargetId ?? ''}`;
@@ -1130,6 +1135,11 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
         removeSelectedUserSkill={removeSelectedUserSkill}
         globalPermissionMode={globalPermissionMode}
         setGlobalPermissionMode={setGlobalPermissionMode}
+        notes={notes}
+        hosts={hosts}
+        onOpenVaultNote={onOpenVaultNote}
+        onOpenVaultHost={onOpenVaultHost}
+        onOpenVaultSection={onOpenVaultSection}
       />
     </React.Profiler>
   );
@@ -1195,6 +1205,11 @@ export function aiChatSidePanelPropsAreEqual(
   if (prev.scopeHostIds !== next.scopeHostIds) return false;
   if (prev.terminalSessions !== next.terminalSessions) return false;
   if (prev.resolveExecutorContext !== next.resolveExecutorContext) return false;
+  if (prev.notes !== next.notes) return false;
+  if (prev.hosts !== next.hosts) return false;
+  if (prev.onOpenVaultNote !== next.onOpenVaultNote) return false;
+  if (prev.onOpenVaultHost !== next.onOpenVaultHost) return false;
+  if (prev.onOpenVaultSection !== next.onOpenVaultSection) return false;
 
   for (const key of AI_CHAT_SIDE_PANEL_AI_STATE_KEYS) {
     if (prev[key] !== next[key]) return false;

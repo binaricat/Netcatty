@@ -4,10 +4,6 @@
  * Permission grant pattern matching — shared between main (MCP) and renderer.
  */
 
-function escapeRegex(value) {
-  return value.replace(/[.+?^${}()|[\]\\]/g, "\\$&");
-}
-
 function patternMatches(pattern, value) {
   if (typeof pattern !== "string" || pattern.length === 0) return false;
   if (pattern === "*") return true;
@@ -33,13 +29,20 @@ function globOrRegexMatch(pattern, value) {
     }
   }
 
-  if (!pattern.includes("*")) {
+  if (!pattern.includes("*") && !pattern.includes("?")) {
     return value === pattern;
   }
 
-  const parts = pattern.split("*").map(escapeRegex);
-  const regex = new RegExp(`^${parts.join(".*")}$`);
-  return regex.test(value);
+  // OpenCode Wildcard.match semantics (trailing " *" allows optional args).
+  let escaped = pattern
+    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+    .replace(/\*/g, ".*")
+    .replace(/\?/g, ".");
+  if (escaped.endsWith(" .*")) {
+    escaped = `${escaped.slice(0, -3)}( .*)?`;
+  }
+
+  return new RegExp(`^${escaped}$`, "s").test(value);
 }
 
 function argsPatternMatches(argsPattern, args) {
@@ -54,45 +57,15 @@ function argsPatternMatches(argsPattern, args) {
   return true;
 }
 
-function resolveSessionTarget(args, chatSessionId, sessionId) {
-  if (args && typeof args.sessionId === "string" && args.sessionId.length > 0) {
-    return args.sessionId;
-  }
-  if (typeof sessionId === "string" && sessionId.length > 0) {
-    return sessionId;
-  }
-  return typeof chatSessionId === "string" ? chatSessionId : "";
-}
-
-function resolveHostname(args, hostname) {
-  if (typeof hostname === "string" && hostname.length > 0) return hostname;
-  if (args && typeof args.hostname === "string") return args.hostname;
-  return "";
-}
-
-/**
- * @param {Array<{ capabilityId: string; sessionPattern: string; commandPattern?: string; argsPattern?: Record<string, string> }>} rules
- */
 function matchPermissionGrant(rules, ctx) {
   if (!Array.isArray(rules) || rules.length === 0) return null;
 
   const args = ctx?.args && typeof ctx.args === "object" ? ctx.args : {};
-  const sessionTarget = resolveSessionTarget(args, ctx?.chatSessionId, ctx?.sessionId);
-  const hostname = resolveHostname(args, ctx?.hostname);
 
   for (const rule of rules) {
     if (!rule || typeof rule.capabilityId !== "string") continue;
 
     if (rule.capabilityId !== ctx?.capabilityId) continue;
-
-    const sessionPattern = typeof rule.sessionPattern === "string" ? rule.sessionPattern : "*";
-    let sessionMatched = false;
-    if (sessionPattern.startsWith("host:")) {
-      sessionMatched = patternMatches(sessionPattern, hostname);
-    } else {
-      sessionMatched = patternMatches(sessionPattern, sessionTarget);
-    }
-    if (!sessionMatched) continue;
 
     if (rule.commandPattern) {
       const command = typeof args.command === "string" ? args.command : "";
@@ -114,15 +87,16 @@ function sanitizePermissionGrants(raw) {
   for (const entry of raw) {
     if (!entry || typeof entry !== "object") continue;
     const capabilityId = typeof entry.capabilityId === "string" ? entry.capabilityId.trim() : "";
-    const sessionPattern = typeof entry.sessionPattern === "string" ? entry.sessionPattern.trim() : "";
-    if (!capabilityId || !sessionPattern) continue;
+    if (!capabilityId) continue;
 
     const rule = {
       id: typeof entry.id === "string" && entry.id.trim()
         ? entry.id.trim().slice(0, 64)
         : `grant_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
       capabilityId,
-      sessionPattern,
+      sessionPattern: typeof entry.sessionPattern === "string" && entry.sessionPattern.trim()
+        ? entry.sessionPattern.trim()
+        : "*",
       createdAt: typeof entry.createdAt === "number" && Number.isFinite(entry.createdAt)
         ? entry.createdAt
         : Date.now(),

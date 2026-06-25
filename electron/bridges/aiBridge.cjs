@@ -13,6 +13,7 @@ const { randomUUID } = require("node:crypto");
 const { spawn, execFileSync } = require("node:child_process");
 const fs = require("node:fs");
 const { existsSync } = fs;
+const { appendVaultAgentGuidance } = require("../shared/vaultAgentGuidance.cjs");
 
 const mcpServerBridge = require("./mcpServerBridge.cjs");
 const { getCliLauncherPath, TOOL_CLI_DISCOVERY_ENV_VAR } = require("../cli/discoveryPath.cjs");
@@ -188,7 +189,7 @@ function buildExternalAgentSystemContext({ mode, chatSessionId, defaultTargetSes
     );
   }
 
-  return (
+  return appendVaultAgentGuidance(
     `${userSkillsPreamble}` +
     `[Context: You are inside Netcatty, a multi-session terminal manager. ` +
     `Use the "netcatty-remote-hosts" MCP tools to operate only on the terminal sessions exposed by Netcatty. ` +
@@ -198,7 +199,7 @@ function buildExternalAgentSystemContext({ mode, chatSessionId, defaultTargetSes
     `Use terminal_execute only for commands likely to finish within about 60 seconds. ` +
     `For long-running commands such as builds, scans, follow/log streaming, watch commands, or anything likely to exceed 60 seconds on PTY-backed shell sessions, use terminal_start, then terminal_poll until completed is true. Reuse the returned nextOffset for the next poll. If terminal_poll reports outputTruncated=true, only the retained tail starting at outputBaseOffset is still available. Do not poll aggressively: wait at least about 30 seconds between polls, and increase the interval further when there is no new output, to avoid wasting tokens. As soon as completed is true, stop polling and analyze the result immediately. ` +
     `Use terminal_stop if you need to interrupt a started long-running command. Note: terminal_start requires a PTY-backed session; for sessions that only support exec-channel execution (no writable PTY), use terminal_execute instead. ` +
-    `For serial/raw sessions and network device sessions (deviceType: network), commands are sent as-is without shell wrapping and exit codes are unavailable. Use vendor CLI commands directly.]`
+    `For serial/raw sessions and network device sessions (deviceType: network), commands are sent as-is without shell wrapping and exit codes are unavailable. Use vendor CLI commands directly.]`,
   );
 }
 
@@ -793,4 +794,10 @@ function cleanup() {
   mcpServerBridge.cleanup();
 }
 
-module.exports = { init, registerHandlers, cleanup };
+module.exports = {
+  init,
+  registerHandlers,
+  cleanup,
+  buildExternalAgentSystemContext,
+  buildExternalAgentContextualPrompt,
+};

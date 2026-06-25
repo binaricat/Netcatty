@@ -284,36 +284,37 @@ export const ToolCall = ({
           {/* Inline approval buttons */}
           {isPendingApproval && (
             <div className="px-3 py-2 border-t border-border/20">
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] text-muted-foreground/30">
+              <div className="flex items-center justify-between gap-3">
+                <span className="shrink-0 text-[10px] text-muted-foreground/30">
                   {t('ai.chat.toolApprovalHint')}
                 </span>
-                <div className="flex items-center gap-1.5">
+                <div className="flex shrink-0 items-center gap-1.5">
                   <Button
                     variant="outline"
                     size="sm"
-                    className="h-6 px-2 text-[11px] border-red-500/20 text-red-400/80 hover:bg-red-500/10 hover:text-red-400"
+                    className="h-7 gap-1 px-2.5 text-[11px] font-normal border-red-500/25 text-red-400/90 hover:bg-red-500/10 hover:text-red-400 hover:border-red-500/40"
                     onClick={handleReject}
                   >
-                    <X size={11} className="mr-0.5" />
+                    <X size={12} className="shrink-0" />
                     {t('ai.chat.reject')}
                   </Button>
                   <Button
                     ref={approveBtnRef}
                     variant="outline"
                     size="sm"
-                    className="h-6 px-2 text-[11px] border-green-500/20 text-green-400/80 hover:bg-green-500/10 hover:text-green-400"
+                    className="h-7 gap-1 px-2.5 text-[11px] font-normal border-green-500/25 text-green-400/90 hover:bg-green-500/10 hover:text-green-400 hover:border-green-500/40"
                     onClick={handleApproveOnce}
                   >
-                    <Check size={11} className="mr-0.5" />
+                    <Check size={12} className="shrink-0" />
                     {t('ai.chat.approveOnce')}
                   </Button>
                   <Button
+                    variant="outline"
                     size="sm"
-                    className="h-6 px-2.5 text-[11px] bg-green-600/80 hover:bg-green-600 text-white"
+                    className="h-7 gap-1 px-2.5 text-[11px] font-normal border-green-500/35 text-green-300/95 hover:bg-green-500/10 hover:text-green-300 hover:border-green-500/50"
                     onClick={handleAlwaysAllow}
                   >
-                    <Check size={11} className="mr-0.5" />
+                    <Check size={12} className="shrink-0" />
                     {t('ai.chat.alwaysAllow')}
                   </Button>
                 </div>

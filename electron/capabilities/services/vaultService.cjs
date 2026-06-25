@@ -20,6 +20,21 @@ function createVaultService(ctx = {}) {
       if (bridgeErr) return bridgeErr;
       return invokeVaultAgent("host.get", { hostId: params.hostId });
     },
+    listHosts: async () => {
+      const bridgeErr = requireBridge();
+      if (bridgeErr) return bridgeErr;
+      return invokeVaultAgent("host.list", {});
+    },
+    createHosts: async (params = {}) => {
+      const bridgeErr = requireBridge();
+      if (bridgeErr) return bridgeErr;
+      return invokeVaultAgent("hosts.create", params);
+    },
+    importHosts: async (params = {}) => {
+      const bridgeErr = requireBridge();
+      if (bridgeErr) return bridgeErr;
+      return invokeVaultAgent("host.import", params);
+    },
     getHostNotes: async (params = {}) => {
       const bridgeErr = requireBridge();
       if (bridgeErr) return bridgeErr;
@@ -32,6 +47,26 @@ function createVaultService(ctx = {}) {
         hostId: params.hostId,
         notes: params.notes,
       });
+    },
+    listNotes: async () => {
+      const bridgeErr = requireBridge();
+      if (bridgeErr) return bridgeErr;
+      return invokeVaultAgent("note.list", {});
+    },
+    getNote: async (params = {}) => {
+      const bridgeErr = requireBridge();
+      if (bridgeErr) return bridgeErr;
+      return invokeVaultAgent("note.get", { noteId: params.noteId });
+    },
+    createNote: async (params = {}) => {
+      const bridgeErr = requireBridge();
+      if (bridgeErr) return bridgeErr;
+      return invokeVaultAgent("note.create", params);
+    },
+    updateNote: async (params = {}) => {
+      const bridgeErr = requireBridge();
+      if (bridgeErr) return bridgeErr;
+      return invokeVaultAgent("note.update", params);
     },
     listSnippets: async () => {
       const bridgeErr = requireBridge();

@@ -40,6 +40,7 @@ export interface ApprovalRequest {
 export interface ResolveApprovalOptions {
   approved: boolean;
   persistGrant?: PermissionGrantRule;
+  persistGrants?: PermissionGrantRule[];
 }
 
 export type GrantPersister = (rule: PermissionGrantRule) => void;
@@ -198,6 +199,9 @@ export function resolveApproval(
 ): void {
   const approved = typeof decision === 'boolean' ? decision : decision.approved;
   const persistGrant = typeof decision === 'boolean' ? undefined : decision.persistGrant;
+  const persistGrants = typeof decision === 'boolean'
+    ? undefined
+    : (decision.persistGrants ?? (persistGrant ? [persistGrant] : undefined));
 
   const entry = pendingApprovals.get(toolCallId);
   const request = entry?.request;
@@ -209,9 +213,11 @@ export function resolveApproval(
 
   if (request) {
     let persistedGrantId: string | undefined;
-    if (approved && persistGrant) {
-      grantPersister?.(persistGrant);
-      persistedGrantId = persistGrant.id;
+    if (approved && persistGrants?.length) {
+      for (const grant of persistGrants) {
+        grantPersister?.(grant);
+        persistedGrantId = grant.id;
+      }
     }
     emitApprovalEvent('approval_resolved', request, {
       outcome: approved ? 'approved' : 'denied',

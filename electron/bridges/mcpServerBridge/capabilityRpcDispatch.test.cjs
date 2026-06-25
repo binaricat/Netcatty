@@ -103,6 +103,41 @@ test("dispatchCapabilityRpc denies public vault host notes set when approval rej
   assert.match(result.error, /denied/i);
 });
 
+test("dispatchCapabilityRpc routes vault hosts create to vault service", async () => {
+  let invokedOp = null;
+  const dispatch = createTestDispatcher({
+    invokeVaultAgent: async (op, params) => {
+      invokedOp = op;
+      return { ok: true, addedCount: 1, previewHosts: [] , params };
+    },
+  });
+
+  const result = await dispatch("vault/hosts/create", {
+    hosts: JSON.stringify([{ hostname: "10.2.0.209", username: "root" }]),
+    dryRun: "true",
+  });
+  assert.equal(invokedOp, "hosts.create");
+  assert.equal(result.ok, true);
+});
+
+test("dispatchCapabilityRpc routes vault hosts import to vault service", async () => {
+  let invokedOp = null;
+  const dispatch = createTestDispatcher({
+    invokeVaultAgent: async (op) => {
+      invokedOp = op;
+      return { ok: true, addedCount: 0 };
+    },
+  });
+
+  const result = await dispatch("vault/hosts/import", {
+    format: "csv",
+    text: "hostname,username\n10.0.0.1,root\n",
+    dryRun: "true",
+  });
+  assert.equal(invokedOp, "host.import");
+  assert.equal(result.ok, true);
+});
+
 test("dispatchCapabilityRpc routes portforward start to portforward service", async () => {
   let invokedOp = null;
   const dispatch = createTestDispatcher({

@@ -1,4 +1,5 @@
 import cattyToolSpecs from './generated/cattyToolSpecs.json';
+import { buildAlwaysAllowCommandPatterns } from '../shared/shellCommandGrant';
 
 export interface PermissionGrantRule {
   id: string;
@@ -22,6 +23,10 @@ type CattyToolSpecRef = {
   capabilityId: string;
   toolName: string;
   rpcMethod: string | null;
+  policy?: {
+    write?: boolean;
+    bypassesApproval?: boolean;
+  };
 };
 
 const TOOL_NAME_TO_CAPABILITY = new Map<string, string>();
@@ -38,10 +43,6 @@ export function resolveCapabilityId(toolOrRpcName: string): string {
   return TOOL_NAME_TO_CAPABILITY.get(toolOrRpcName)
     ?? RPC_METHOD_TO_CAPABILITY.get(toolOrRpcName)
     ?? toolOrRpcName;
-}
-
-function escapeRegex(value: string): string {
-  return value.replace(/[.+?^${}()|[\]\\]/g, '\\$&');
 }
 
 export function patternMatches(pattern: string, value: string): boolean {
@@ -67,13 +68,20 @@ function globOrRegexMatch(pattern: string, value: string): boolean {
     }
   }
 
-  if (!pattern.includes('*')) {
+  if (!pattern.includes('*') && !pattern.includes('?')) {
     return value === pattern;
   }
 
-  const parts = pattern.split('*').map(escapeRegex);
-  const regex = new RegExp(`^${parts.join('.*')}$`);
-  return regex.test(value);
+  // OpenCode Wildcard.match semantics (trailing " *" allows optional args).
+  let escaped = pattern
+    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+    .replace(/\*/g, '.*')
+    .replace(/\?/g, '.');
+  if (escaped.endsWith(' .*')) {
+    escaped = `${escaped.slice(0, -3)}( .*)?`;
+  }
+
+  return new RegExp(`^${escaped}$`, 's').test(value);
 }
 
 function argsPatternMatches(
@@ -91,29 +99,6 @@ function argsPatternMatches(
   return true;
 }
 
-function resolveSessionTarget(
-  args: Record<string, unknown> | undefined,
-  chatSessionId?: string,
-  sessionId?: string,
-): string {
-  if (typeof args?.sessionId === 'string' && args.sessionId.length > 0) {
-    return args.sessionId;
-  }
-  if (typeof sessionId === 'string' && sessionId.length > 0) {
-    return sessionId;
-  }
-  return chatSessionId ?? '';
-}
-
-function resolveHostname(
-  args: Record<string, unknown> | undefined,
-  hostname?: string,
-): string {
-  if (hostname) return hostname;
-  if (typeof args?.hostname === 'string') return args.hostname;
-  return '';
-}
-
 export function matchPermissionGrant(
   rules: readonly PermissionGrantRule[],
   ctx: PermissionGrantMatchContext,
@@ -121,17 +106,9 @@ export function matchPermissionGrant(
   if (rules.length === 0) return null;
 
   const args = ctx.args ?? {};
-  const sessionTarget = resolveSessionTarget(args, ctx.chatSessionId, ctx.sessionId);
-  const hostname = resolveHostname(args, ctx.hostname);
 
   for (const rule of rules) {
     if (rule.capabilityId !== ctx.capabilityId) continue;
-
-    const sessionPattern = rule.sessionPattern || '*';
-    const sessionMatched = sessionPattern.startsWith('host:')
-      ? patternMatches(sessionPattern, hostname)
-      : patternMatches(sessionPattern, sessionTarget);
-    if (!sessionMatched) continue;
 
     if (rule.commandPattern) {
       const command = typeof args.command === 'string' ? args.command : '';
@@ -154,15 +131,16 @@ export function sanitizePermissionGrants(raw: unknown): PermissionGrantRule[] {
     if (!entry || typeof entry !== 'object') continue;
     const record = entry as Record<string, unknown>;
     const capabilityId = typeof record.capabilityId === 'string' ? record.capabilityId.trim() : '';
-    const sessionPattern = typeof record.sessionPattern === 'string' ? record.sessionPattern.trim() : '';
-    if (!capabilityId || !sessionPattern) continue;
+    if (!capabilityId) continue;
 
     const rule: PermissionGrantRule = {
       id: typeof record.id === 'string' && record.id.trim()
         ? record.id.trim().slice(0, 64)
         : createPermissionGrantId(),
       capabilityId,
-      sessionPattern,
+      sessionPattern: typeof record.sessionPattern === 'string' && record.sessionPattern.trim()
+        ? record.sessionPattern.trim()
+        : '*',
       createdAt: typeof record.createdAt === 'number' && Number.isFinite(record.createdAt)
         ? record.createdAt
         : Date.now(),
@@ -196,25 +174,71 @@ export function createPermissionGrantId(): string {
   return `grant_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
+const COMMAND_GRANT_CAPABILITIES = new Set([
+  'terminal.execute',
+  'terminal.start',
+]);
+
+const GRANTABLE_CAPABILITY_IDS: readonly string[] = Object.freeze(
+  [...new Set(
+    (cattyToolSpecs as CattyToolSpecRef[])
+      .filter((spec) => spec.policy?.write && !spec.policy?.bypassesApproval)
+      .map((spec) => spec.capabilityId),
+  )].sort(),
+);
+
+export function listGrantableCapabilityIds(): readonly string[] {
+  return GRANTABLE_CAPABILITY_IDS;
+}
+
+export function capabilitySupportsCommandPatternGrant(capabilityId: string): boolean {
+  return COMMAND_GRANT_CAPABILITIES.has(capabilityId);
+}
+
+function resolveCommandGrantPatterns(
+  capabilityId: string,
+  args: Record<string, unknown>,
+): string[] | undefined {
+  if (!COMMAND_GRANT_CAPABILITIES.has(capabilityId)) return undefined;
+  const command = typeof args.command === 'string' ? args.command.trim() : '';
+  if (!command) return undefined;
+  return buildAlwaysAllowCommandPatterns(command);
+}
+
+export function buildGrantsFromApproval(
+  capabilityId: string,
+  args: Record<string, unknown>,
+  _chatSessionId?: string,
+): PermissionGrantRule[] {
+  // OpenCode-style always-allow: global scope (not bound to a terminal session UUID).
+  const sessionPattern = '*';
+  const commandPatterns = resolveCommandGrantPatterns(capabilityId, args);
+  const createdAt = Date.now();
+
+  if (!commandPatterns || commandPatterns.length === 0) {
+    return [{
+      id: createPermissionGrantId(),
+      capabilityId,
+      sessionPattern,
+      createdAt,
+    }];
+  }
+
+  return commandPatterns.map((commandPattern) => ({
+    id: createPermissionGrantId(),
+    capabilityId,
+    sessionPattern,
+    commandPattern,
+    createdAt,
+  }));
+}
+
 export function buildGrantFromApproval(
   capabilityId: string,
   args: Record<string, unknown>,
   chatSessionId?: string,
 ): PermissionGrantRule {
-  const sessionPattern = typeof args.sessionId === 'string' && args.sessionId
-    ? args.sessionId
-    : (chatSessionId ?? '*');
-  const commandPattern = typeof args.command === 'string' && args.command.trim()
-    ? args.command.trim()
-    : undefined;
-
-  return {
-    id: createPermissionGrantId(),
-    capabilityId,
-    sessionPattern,
-    commandPattern,
-    createdAt: Date.now(),
-  };
+  return buildGrantsFromApproval(capabilityId, args, chatSessionId)[0];
 }
 
 let activeRules: PermissionGrantRule[] = [];

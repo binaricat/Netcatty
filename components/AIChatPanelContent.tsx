@@ -1,6 +1,7 @@
 import React, { type Dispatch, type SetStateAction } from 'react';
 import { History, Plus } from 'lucide-react';
 import type { AIPermissionMode, AISession, ChatMessage, DiscoveredAgent, ExternalAgentConfig, AgentModelPreset, ProviderConfig, UploadedFile } from '../infrastructure/ai/types';
+import type { Host, VaultNote } from '../types';
 import type { UserSkillOption } from './ai/userSkillsState';
 import type { AIQuickMessage } from '../infrastructure/ai/quickMessages';
 import { Button } from './ui/button';
@@ -71,6 +72,11 @@ interface AIChatPanelContentProps {
   removeSelectedUserSkill: (slug: string) => void;
   globalPermissionMode: AIPermissionMode;
   setGlobalPermissionMode?: (mode: AIPermissionMode) => void;
+  notes?: VaultNote[];
+  hosts?: Host[];
+  onOpenVaultNote?: (noteId: string) => void;
+  onOpenVaultHost?: (hostId: string) => void;
+  onOpenVaultSection?: (section: 'notes' | 'hosts') => void;
 }
 
 export const AIChatPanelContent: React.FC<AIChatPanelContentProps> = ({
@@ -118,7 +124,12 @@ export const AIChatPanelContent: React.FC<AIChatPanelContentProps> = ({
   addSelectedUserSkill,
   removeSelectedUserSkill,
   globalPermissionMode,
-  setGlobalPermissionMode
+  setGlobalPermissionMode,
+  notes = [],
+  hosts = [],
+  onOpenVaultNote,
+  onOpenVaultHost,
+  onOpenVaultSection,
 }) => {
   const hiddenParts = getAIPanelDiagnosticHiddenParts();
   const hideHeader = isAIPanelDiagnosticPartHidden('header', hiddenParts);
@@ -199,6 +210,11 @@ export const AIChatPanelContent: React.FC<AIChatPanelContentProps> = ({
                 messages={messages}
                 isStreaming={isStreaming}
                 activeSessionId={activeSessionId}
+                notes={notes}
+                hosts={hosts}
+                onOpenVaultNote={onOpenVaultNote}
+                onOpenVaultHost={onOpenVaultHost}
+                onOpenVaultSection={onOpenVaultSection}
               />
             </React.Profiler>
           )}

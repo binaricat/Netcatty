@@ -197,7 +197,7 @@ export function TerminalLayerTabBridge({ stableRef }: { stableRef: StableRef }) 
   });
 
   const { aiContextsByTabId, resolveAIExecutorContext } = useTerminalAiContexts({
-    hosts,
+    hosts: s.hosts,
     hostsRef: s.hostsRef,
     portForwardingRules: s.portForwardingRules,
     portForwardingRulesRef: s.portForwardingRulesRef,

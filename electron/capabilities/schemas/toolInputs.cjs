@@ -77,12 +77,71 @@ const TOOL_INPUT_FIELDS = Object.freeze({
   "vault.host.get": {
     hostId: { type: "string", description: "Vault host ID." },
   },
+  "vault.host.list": {},
+  "vault.hosts.create": {
+    hosts: {
+      type: "string",
+      description:
+        "JSON array of host objects you extracted from the user's text. Each object: hostname (required), label, port, username, password, group, tags (array or comma-separated string), notes (Host Details remarks — NOT Vault sidebar Notes), protocol (ssh|telnet|local).",
+    },
+    dryRun: {
+      type: "string",
+      optional: true,
+      description: "Set to true to validate and preview without writing to the vault.",
+    },
+    skipDuplicates: {
+      type: "string",
+      optional: true,
+      description: "Set to false to create even when a matching host already exists (default true).",
+    },
+  },
+  "vault.host.import": {
+    format: {
+      type: "string",
+      description: "Import format: csv, putty, mobaxterm, securecrt, ssh_config, or auto to detect from text.",
+    },
+    text: { type: "string", description: "Exported host data text to import." },
+    dryRun: {
+      type: "string",
+      optional: true,
+      description: "Set to true to parse and preview without writing to the vault.",
+    },
+    skipDuplicates: {
+      type: "string",
+      optional: true,
+      description: "Set to false to import even when a matching host already exists (default true).",
+    },
+    fileName: {
+      type: "string",
+      optional: true,
+      description: "Optional source file name (helps SecureCRT .ini parsing).",
+    },
+  },
   "vault.host.notes.get": {
     hostId: { type: "string", description: "Vault host ID." },
   },
   "vault.host.notes.set": {
     hostId: { type: "string", description: "Vault host ID." },
-    notes: { type: "string", description: "Host notes text." },
+    notes: { type: "string", description: "Host metadata notes (Host Details — not Vault sidebar Notes)." },
+  },
+  "vault.note.list": {},
+  "vault.note.get": {
+    noteId: { type: "string", description: "Vault note ID from vault_notes_list." },
+  },
+  "vault.note.create": {
+    title: { type: "string", description: "Note title shown in Vault → Notes." },
+    content: { type: "string", description: "Markdown note body." },
+    group: { type: "string", optional: true, description: "Optional folder path (e.g. infra/prod)." },
+    linkedHostIds: { type: "string", optional: true, description: "Optional JSON array of vault host IDs to link." },
+    tags: { type: "string", optional: true, description: "Optional JSON array of tag strings." },
+  },
+  "vault.note.update": {
+    noteId: { type: "string", description: "Vault note ID to update." },
+    title: { type: "string", optional: true, description: "New title." },
+    content: { type: "string", optional: true, description: "New markdown body." },
+    group: { type: "string", optional: true, description: "New folder path." },
+    linkedHostIds: { type: "string", optional: true, description: "Optional JSON array of vault host IDs to link." },
+    tags: { type: "string", optional: true, description: "Optional JSON array of tag strings." },
   },
   "vault.snippets.list": {},
   "vault.snippets.get": {
@@ -128,6 +187,18 @@ const MODEL_DESCRIPTION_HINTS = Object.freeze({
     "Prefer for builds, scans, log-following, or anything likely to exceed about 2 minutes.",
   "terminal.poll":
     "Wait at least about 30 seconds between polls unless output justifies checking sooner.",
+  "vault.host.notes.get":
+    "Host metadata notes on a saved host — not Vault → Notes sidebar entries.",
+  "vault.host.notes.set":
+    "Host metadata notes on a saved host — not Vault → Notes sidebar entries. Prefer vault_notes_create/update when the user wants vault notes they can open in the Notes sidebar.",
+  "vault.host.import":
+    "Only for text in known export formats (PuTTY reg, MobaXterm ini, CSV template, SecureCRT, ssh_config). For arbitrary unstructured host lists from the user, extract fields yourself and call vault_hosts_create.",
+  "vault.hosts.create":
+    "Use when the user wants to add/create a host in Vault → Hosts (创建主机、SSH 连接凭据). NOT for Vault → Notes sidebar docs. Put SSH password in password field; long remarks/admin tables in host notes field. Never fall back to vault_notes_create if this fails.",
+  "vault.note.create":
+    "Use ONLY when the user wants markdown documentation in Vault → Notes sidebar (保险箱笔记). Do NOT use when the user asked to create/add a host — use vault_hosts_create instead.",
+  "vault.note.update":
+    "Update an existing Vault → Notes entry (visible in the vault notes sidebar).",
 });
 
 module.exports = {

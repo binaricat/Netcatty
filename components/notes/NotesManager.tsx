@@ -330,7 +330,7 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
   const { t } = useI18n();
   const { openExternal } = useApplicationBackend();
   const isSidebarMode = displayMode === "sidebar";
-  const initialOpenNoteId = isSidebarMode && openNoteId && notes.some((note) => note.id === openNoteId)
+  const initialOpenNoteId = openNoteId && notes.some((note) => note.id === openNoteId)
     ? openNoteId
     : null;
   const [query, setQuery] = useState("");
@@ -413,10 +413,10 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
   }, [selectedNote?.group]);
 
   useEffect(() => {
-    if (!isSidebarMode || !openNoteId) return;
+    if (!openNoteId) return;
     const note = sortedNotes.find((item) => item.id === openNoteId);
     if (!note) return;
-    const nextSelection = getNoteSelectionState(note, true);
+    const nextSelection = getNoteSelectionState(note, isSidebarMode);
     setSelectedNoteId(nextSelection.selectedNoteId);
     setSelectedGroup(nextSelection.selectedGroup);
     setOverlayNoteId(nextSelection.overlayNoteId);

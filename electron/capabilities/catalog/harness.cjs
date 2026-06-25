@@ -2,7 +2,7 @@
 
 const { CAPABILITY_STATUS } = require("../constants.cjs");
 
-/** Catty-only harness tools (renderer-local execution; not exposed to MCP/CLI). */
+/** Catty-only harness tools (sidebar agent; renderer-local; not MCP/CLI). */
 /** @type {import("../types.cjs").CapabilityDefinition[]} */
 const HARNESS_CAPABILITIES = [
   {

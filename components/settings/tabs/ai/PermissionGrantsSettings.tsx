@@ -1,10 +1,63 @@
-import React, { useCallback, useRef, useState } from 'react';
-import { Download, Plus, Upload, X } from 'lucide-react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
+import { Download, Plus, Trash2, Upload } from 'lucide-react';
 import { useI18n } from '../../../../application/i18n/I18nProvider';
 import { Button } from '../../../ui/button';
 import { SettingCard, SettingsSection } from '../../settings-ui';
+import { Tooltip, TooltipContent, TooltipTrigger } from '../../../ui/tooltip';
 import type { PermissionGrantRule } from '../../../../infrastructure/ai/harness/permissionGrants';
-import { createPermissionGrantId } from '../../../../infrastructure/ai/harness/permissionGrants';
+import {
+  capabilitySupportsCommandPatternGrant,
+  createPermissionGrantId,
+  listGrantableCapabilityIds,
+} from '../../../../infrastructure/ai/harness/permissionGrants';
+
+const cellInputClass =
+  'w-full min-w-0 max-w-full h-7 rounded border border-input bg-background px-2 text-xs font-mono focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring overflow-x-auto whitespace-nowrap scrollbar-thin';
+
+const cellSelectClass =
+  `${cellInputClass} font-sans truncate pr-6`;
+
+const GrantCellInput: React.FC<{
+  value: string;
+  placeholder?: string;
+  mono?: boolean;
+  onChange: (value: string) => void;
+}> = ({ value, placeholder, mono = true, onChange }) => (
+  <input
+    type="text"
+    value={value}
+    placeholder={placeholder}
+    onChange={(e) => onChange(e.target.value)}
+    className={mono ? cellInputClass : `${cellInputClass} font-sans whitespace-normal`}
+    title={value}
+  />
+);
+
+const GrantCapabilitySelect: React.FC<{
+  value: string;
+  options: readonly string[];
+  onChange: (value: string) => void;
+}> = ({ value, options, onChange }) => {
+  const selectOptions = useMemo(() => {
+    if (options.includes(value)) return options;
+    return [value, ...options];
+  }, [options, value]);
+
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      className={cellSelectClass}
+      title={value}
+    >
+      {selectOptions.map((capabilityId) => (
+        <option key={capabilityId} value={capabilityId}>
+          {capabilityId}
+        </option>
+      ))}
+    </select>
+  );
+};
 
 export const PermissionGrantsSettings: React.FC<{
   grants: PermissionGrantRule[];
@@ -24,15 +77,16 @@ export const PermissionGrantsSettings: React.FC<{
   const { t } = useI18n();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [importError, setImportError] = useState<string | null>(null);
+  const grantableCapabilityIds = useMemo(() => listGrantableCapabilityIds(), []);
 
   const handleAdd = useCallback(() => {
     addGrant({
       id: createPermissionGrantId(),
-      capabilityId: 'terminal.execute',
+      capabilityId: grantableCapabilityIds[0] ?? 'terminal.execute',
       sessionPattern: '*',
       createdAt: Date.now(),
     });
-  }, [addGrant]);
+  }, [addGrant, grantableCapabilityIds]);
 
   const handleExport = useCallback(() => {
     const payload = exportGrants();
@@ -58,21 +112,25 @@ export const PermissionGrantsSettings: React.FC<{
 
   return (
     <SettingsSection title={t('ai.safety.grants.title')}>
-      <SettingCard padded className="space-y-3">
-        <div className="flex items-start justify-between gap-3">
-          <div>
+      <SettingCard padded className="space-y-3 min-w-0 max-w-full overflow-hidden">
+        <div className="space-y-3">
+          <div className="min-w-0">
             <p className="text-sm font-medium">{t('ai.safety.grants.heading')}</p>
-            <p className="text-xs text-muted-foreground">{t('ai.safety.grants.description')}</p>
+            <p className="text-xs text-muted-foreground mt-1">{t('ai.safety.grants.description')}</p>
           </div>
-          <div className="flex items-center gap-1.5 shrink-0">
-            <Button variant="outline" size="sm" className="text-xs" onClick={handleExport}>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <Button variant="outline" size="sm" className="h-7 text-xs" onClick={handleAdd}>
+              <Plus size={14} className="mr-1" />
+              {t('ai.safety.grants.add')}
+            </Button>
+            <Button variant="outline" size="sm" className="h-7 text-xs" onClick={handleExport}>
               <Download size={14} className="mr-1" />
               {t('ai.safety.grants.export')}
             </Button>
             <Button
               variant="outline"
               size="sm"
-              className="text-xs"
+              className="h-7 text-xs"
               onClick={() => fileInputRef.current?.click()}
             >
               <Upload size={14} className="mr-1" />
@@ -96,80 +154,101 @@ export const PermissionGrantsSettings: React.FC<{
           <p className="text-[11px] text-destructive">{importError}</p>
         )}
 
-        <div className="space-y-2">
-          {grants.length === 0 && (
-            <p className="text-xs text-muted-foreground">{t('ai.safety.grants.empty')}</p>
-          )}
-          {grants.map((grant) => (
-            <div key={grant.id} className="rounded-md border border-border/40 p-3 space-y-2">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                <label className="space-y-1">
-                  <span className="text-[10px] uppercase tracking-wide text-muted-foreground/60">
+        {grants.length === 0 ? (
+          <p className="text-xs text-muted-foreground py-6 text-center border border-dashed border-border/50 rounded-lg">
+            {t('ai.safety.grants.empty')}
+          </p>
+        ) : (
+          <div className="w-full max-w-full min-w-0 overflow-x-auto overscroll-x-contain rounded-lg border border-border/40 bg-card">
+            <table className="w-full max-w-full table-fixed text-sm border-collapse">
+              <colgroup>
+                <col className="w-[28%]" />
+                <col className="w-[42%]" />
+                <col className="w-[24%]" />
+                <col className="w-[6%]" />
+              </colgroup>
+              <thead>
+                <tr className="bg-muted/50 border-b border-border">
+                  <th className="text-left px-2 py-2 text-xs font-medium text-muted-foreground truncate">
                     {t('ai.safety.grants.capability')}
-                  </span>
-                  <input
-                    type="text"
-                    value={grant.capabilityId}
-                    onChange={(e) => updateGrant(grant.id, { capabilityId: e.target.value })}
-                    className="w-full h-8 rounded-md border border-input bg-background px-2 text-xs font-mono"
-                  />
-                </label>
-                <label className="space-y-1">
-                  <span className="text-[10px] uppercase tracking-wide text-muted-foreground/60">
-                    {t('ai.safety.grants.sessionPattern')}
-                  </span>
-                  <input
-                    type="text"
-                    value={grant.sessionPattern}
-                    onChange={(e) => updateGrant(grant.id, { sessionPattern: e.target.value })}
-                    className="w-full h-8 rounded-md border border-input bg-background px-2 text-xs font-mono"
-                    placeholder="*"
-                  />
-                </label>
-                <label className="space-y-1 md:col-span-2">
-                  <span className="text-[10px] uppercase tracking-wide text-muted-foreground/60">
+                  </th>
+                  <th className="text-left px-2 py-2 text-xs font-medium text-muted-foreground truncate">
                     {t('ai.safety.grants.commandPattern')}
-                  </span>
-                  <input
-                    type="text"
-                    value={grant.commandPattern ?? ''}
-                    onChange={(e) => updateGrant(grant.id, {
-                      commandPattern: e.target.value.trim() || undefined,
-                    })}
-                    className="w-full h-8 rounded-md border border-input bg-background px-2 text-xs font-mono"
-                    placeholder="ls *"
-                  />
-                </label>
-                <label className="space-y-1 md:col-span-2">
-                  <span className="text-[10px] uppercase tracking-wide text-muted-foreground/60">
+                  </th>
+                  <th className="text-left px-2 py-2 text-xs font-medium text-muted-foreground truncate">
                     {t('ai.safety.grants.note')}
-                  </span>
-                  <input
-                    type="text"
-                    value={grant.note ?? ''}
-                    onChange={(e) => updateGrant(grant.id, { note: e.target.value.trim() || undefined })}
-                    className="w-full h-8 rounded-md border border-input bg-background px-2 text-xs"
-                  />
-                </label>
-              </div>
-              <div className="flex justify-end">
-                <button
-                  type="button"
-                  onClick={() => removeGrant(grant.id)}
-                  className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-destructive transition-colors"
-                >
-                  <X size={12} />
-                  {t('ai.safety.grants.remove')}
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
+                  </th>
+                  <th className="px-1 py-2" aria-hidden />
+                </tr>
+              </thead>
+              <tbody>
+                {grants.map((grant) => {
+                  const supportsCommandPattern = capabilitySupportsCommandPatternGrant(grant.capabilityId);
 
-        <Button variant="outline" size="sm" className="text-xs" onClick={handleAdd}>
-          <Plus size={14} className="mr-1" />
-          {t('ai.safety.grants.add')}
-        </Button>
+                  return (
+                    <tr
+                      key={grant.id}
+                      className="border-b border-border/60 last:border-b-0 hover:bg-muted/20"
+                    >
+                      <td className="px-2 py-2 align-middle max-w-0">
+                        <GrantCapabilitySelect
+                          value={grant.capabilityId}
+                          options={grantableCapabilityIds}
+                          onChange={(capabilityId) => {
+                            const updates: Partial<Omit<PermissionGrantRule, 'id' | 'createdAt'>> = {
+                              capabilityId,
+                            };
+                            if (!capabilitySupportsCommandPatternGrant(capabilityId)) {
+                              updates.commandPattern = undefined;
+                            }
+                            updateGrant(grant.id, updates);
+                          }}
+                        />
+                      </td>
+                      <td className="px-2 py-2 align-middle max-w-0">
+                        {supportsCommandPattern ? (
+                          <GrantCellInput
+                            value={grant.commandPattern ?? ''}
+                            placeholder="lscpu *"
+                            onChange={(commandPattern) => updateGrant(grant.id, {
+                              commandPattern: commandPattern.trim() || undefined,
+                            })}
+                          />
+                        ) : (
+                          <span className="text-xs text-muted-foreground px-1">—</span>
+                        )}
+                      </td>
+                      <td className="px-2 py-2 align-middle max-w-0">
+                        <GrantCellInput
+                          value={grant.note ?? ''}
+                          mono={false}
+                          onChange={(note) => updateGrant(grant.id, {
+                            note: note.trim() || undefined,
+                          })}
+                        />
+                      </td>
+                      <td className="px-1 py-2 align-middle text-center">
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                              onClick={() => removeGrant(grant.id)}
+                            >
+                              <Trash2 size={14} />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>{t('ai.safety.grants.remove')}</TooltipContent>
+                        </Tooltip>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </SettingCard>
     </SettingsSection>
   );

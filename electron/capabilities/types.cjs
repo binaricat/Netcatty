@@ -6,6 +6,7 @@
  * @typedef {import('./constants.cjs').CapabilitySurface} CapabilitySurface
  * @typedef {import('./constants.cjs').CapabilityStatus} CapabilityStatus
  * @typedef {import('./constants.cjs').PermissionMode} PermissionMode
+ * @typedef {import('./constants.cjs').AgentKind} AgentKind
  *
  * @typedef {Object} CapabilitySurfaceBinding
  * @property {string} [rpcMethod]
@@ -30,6 +31,7 @@
  * @property {string} description
  * @property {CapabilityPolicy} policy
  * @property {Partial<Record<CapabilitySurface, CapabilitySurfaceBinding>>} surfaces
+ * @property {AgentKind[]} [agentKinds] Explicit agent placement; inferred when omitted (see resolveAgentKinds).
  *
  * @typedef {Object} RpcPermissionContext
  * @property {boolean} [chatSessionCancelled]

@@ -13,6 +13,7 @@ const path = require("node:path");
 const { existsSync } = require("node:fs");
 
 const { toUnpackedAsarPath, getFreshIdlePrompt } = require("./ai/shellUtils.cjs");
+const { appendVaultAgentGuidance } = require("../shared/vaultAgentGuidance.cjs");
 const { execViaPty, startPtyJob, execViaChannel, execViaRawPty } = require("./ai/ptyExec.cjs");
 const { safeSend } = require("./ipcUtils.cjs");
 const { getCliDiscoveryFilePath } = require("../cli/discoveryPath.cjs");
@@ -961,7 +962,7 @@ async function dispatch(method, params) {
 
 // ── Handler: getContext ──
 
-function handleGetContext(params) {
+async function handleGetContext(params) {
   debugLog("handleGetContext:start", { params, sessionCount: sessions?.size || 0 });
   if (!sessions) return { hosts: [], instructions: "No sessions available." };
 
@@ -1017,20 +1018,22 @@ function handleGetContext(params) {
 
   let activePortForwardTunnels = [];
   try {
-    activePortForwardTunnels = portForwardingBridge.listPortForwards() || [];
+    activePortForwardTunnels = await portForwardingBridge.listPortForwards() || [];
   } catch {
     activePortForwardTunnels = [];
   }
 
   return {
     environment: "netcatty-terminal",
-    description: "You are operating inside Netcatty, a multi-session terminal manager. " +
+    description: appendVaultAgentGuidance(
+      "You are operating inside Netcatty, a multi-session terminal manager. " +
       "The available sessions may be remote hosts, local terminals, Mosh-backed shells, or serial port connections (network devices, embedded systems). " +
       "Use the provided tools to execute commands through the sessions exposed by Netcatty. " +
       "Serial sessions (protocol: serial, shellType: raw) do not run a standard shell — commands are sent as-is. " +
       "Network device sessions (deviceType: network) use vendor CLIs (Huawei VRP, Cisco IOS, etc.) — commands are sent as-is without shell wrapping, and exit codes are unavailable. " +
       "Vault snippets, port forwarding rules/tunnels, and SFTP read/write tools are available when exposed in the tool list. " +
       "Always prefer these tools over suggesting the user to do things manually.",
+    ),
     hosts,
     hostCount: hosts.length,
     activePortForwardTunnels,

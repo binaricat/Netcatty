@@ -143,6 +143,9 @@ function TerminalLayerSidePanelTabBody({ ctx }: { ctx: SidePanelContext }) {
     NotesManager,
     noteGroups,
     notes,
+    onOpenVaultHostFromChat,
+    onOpenVaultNoteFromChat,
+    onOpenVaultSectionFromChat,
     scriptsMountedTabIds,
     systemMountedTabIds,
     themeMountedTabIds,
@@ -676,6 +679,11 @@ function TerminalLayerSidePanelTabBody({ ctx }: { ctx: SidePanelContext }) {
                   resolveExecutorContext={resolveAIExecutorContext}
                   pendingTerminalSelection={pendingTerminalSelectionForAI}
                   onPendingTerminalSelectionConsumed={handlePendingTerminalSelectionConsumed}
+                  notes={notes}
+                  hosts={hosts}
+                  onOpenVaultNoteFromChat={onOpenVaultNoteFromChat}
+                  onOpenVaultHostFromChat={onOpenVaultHostFromChat}
+                  onOpenVaultSectionFromChat={onOpenVaultSectionFromChat}
                 />
               </AISidePanelStateRoot>
             )}

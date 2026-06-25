@@ -1,5 +1,22 @@
-import type { Host, Identity, PortForwardingRule, Snippet, SSHKey, TerminalSettings } from '../../domain/models';
-import { applySnippetVariables, parseSnippetVariables } from '../../domain/snippetVariables';
+import type { Host, Identity, PortForwardingRule, Snippet, SSHKey, TerminalSettings, VaultNote } from '../../domain/models';
+import {
+  normalizeVaultNotes,
+  sanitizeNoteTitle,
+  sanitizeVaultNote,
+} from '../../domain/notes';
+import { getNextVaultOrder } from '../../domain/vaultOrder';
+import {
+  applyVaultHostCreates,
+  buildVaultHostsFromDrafts,
+  parseVaultHostDraftsInput,
+} from '../../domain/vaultHostCreate';
+import {
+  applyVaultHostImport,
+  detectVaultImportFormat,
+  importVaultHostsFromText,
+  VAULT_IMPORT_FORMATS,
+  type VaultImportFormat,
+} from '../../domain/vaultImport';
 import { resolveHostAuth } from '../../domain/sshAuth';
 import { netcattyBridge } from '../services/netcattyBridge';
 
@@ -17,6 +34,43 @@ export function sanitizeHostForAgent(host: Host): Record<string, unknown> {
     sanitized[key] = value;
   }
   return sanitized;
+}
+
+function summarizeHostForList(host: Host) {
+  return {
+    id: host.id,
+    label: host.label,
+    hostname: host.hostname,
+    port: host.port,
+    username: host.username,
+    protocol: host.protocol,
+    group: host.group,
+    tags: host.tags,
+    os: host.os,
+    createdAt: host.createdAt,
+  };
+}
+
+function parseOptionalBoolean(value: unknown): boolean | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value === 'boolean') return value;
+  if (typeof value !== 'string') return undefined;
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'true' || normalized === '1' || normalized === 'yes') return true;
+  if (normalized === 'false' || normalized === '0' || normalized === 'no') return false;
+  return undefined;
+}
+
+function resolveVaultImportFormat(raw: unknown): VaultImportFormat | 'auto' | { error: string } {
+  const format = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
+  if (!format) return { error: 'format is required.' };
+  if (format === 'auto') return 'auto';
+  if ((VAULT_IMPORT_FORMATS as readonly string[]).includes(format)) {
+    return format as VaultImportFormat;
+  }
+  return {
+    error: `Unsupported format "${format}". Use csv, putty, mobaxterm, securecrt, ssh_config, or auto.`,
+  };
 }
 
 export function sanitizePortForwardRuleForAgent(rule: PortForwardingRule): Record<string, unknown> {
@@ -37,6 +91,58 @@ export function sanitizePortForwardRuleForAgent(rule: PortForwardingRule): Recor
   };
 }
 
+function summarizeVaultNoteForList(note: VaultNote) {
+  return {
+    id: note.id,
+    title: note.title,
+    group: note.group,
+    tags: note.tags,
+    linkedHostIds: note.linkedHostIds,
+    updatedAt: note.updatedAt,
+    contentLength: note.content.length,
+  };
+}
+
+function serializeVaultNoteForAgent(note: VaultNote) {
+  return {
+    id: note.id,
+    title: note.title,
+    content: note.content,
+    group: note.group,
+    tags: note.tags,
+    linkedHostIds: note.linkedHostIds,
+    createdAt: note.createdAt,
+    updatedAt: note.updatedAt,
+  };
+}
+
+function parseOptionalStringArray(
+  value: unknown,
+  fieldName: string,
+): string[] | undefined | { error: string } {
+  if (value === undefined || value === null) return undefined;
+  if (Array.isArray(value)) {
+    return value.map((entry) => String(entry).trim()).filter(Boolean);
+  }
+  if (typeof value !== 'string') {
+    return { error: `${fieldName} must be a string or array.` };
+  }
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  if (trimmed.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(trimmed) as unknown;
+      if (!Array.isArray(parsed)) {
+        return { error: `${fieldName} must be a JSON array.` };
+      }
+      return parsed.map((entry) => String(entry).trim()).filter(Boolean);
+    } catch {
+      return { error: `${fieldName} must be valid JSON array.` };
+    }
+  }
+  return trimmed.split(',').map((entry) => entry.trim()).filter(Boolean);
+}
+
 export interface VaultAgentApiDeps {
   hosts: Host[];
   snippets: Snippet[];
@@ -46,6 +152,11 @@ export interface VaultAgentApiDeps {
   terminalSettings?: Pick<TerminalSettings, 'keepaliveInterval' | 'keepaliveCountMax'>;
   resolveEffectiveHost: (host: Host) => Host;
   updateHostNotes: (hostId: string, notes: string) => void;
+  customGroups: string[];
+  updateCustomGroups: (groups: string[]) => void;
+  updateHosts: (hosts: Host[]) => void;
+  notes: VaultNote[];
+  updateNotes: (notes: VaultNote[]) => void;
   startTunnel: (
     rule: PortForwardingRule,
     host: Host,
@@ -74,6 +185,147 @@ export async function handleVaultAgentOp(
       if (!host) return { ok: false, error: `Host "${hostId}" was not found.` };
       return { ok: true, host: sanitizeHostForAgent(deps.resolveEffectiveHost(host)) };
     }
+    case 'host.list': {
+      return {
+        ok: true,
+        hosts: deps.hosts.map((host) => summarizeHostForList(deps.resolveEffectiveHost(host))),
+      };
+    }
+    case 'hosts.create': {
+      const parsedDrafts = parseVaultHostDraftsInput(params.hosts);
+      if (!parsedDrafts.ok) return { ok: false, error: parsedDrafts.error };
+
+      const dryRun = parseOptionalBoolean(params.dryRun) ?? false;
+      const skipDuplicates = parseOptionalBoolean(params.skipDuplicates) ?? true;
+      const { hosts: builtHosts, issues: buildIssues } = buildVaultHostsFromDrafts(parsedDrafts.drafts);
+
+      if (builtHosts.length === 0) {
+        return {
+          ok: false,
+          error: buildIssues[0]?.error || 'No valid hosts to create.',
+          issues: buildIssues,
+        };
+      }
+
+      const previewHosts = builtHosts.map((host) => sanitizeHostForAgent(host));
+
+      if (dryRun) {
+        return {
+          ok: true,
+          dryRun: true,
+          parsedCount: parsedDrafts.drafts.length,
+          validCount: builtHosts.length,
+          issues: buildIssues,
+          previewHosts,
+        };
+      }
+
+      const merged = applyVaultHostCreates(
+        deps.hosts,
+        deps.customGroups,
+        builtHosts,
+        { skipDuplicates },
+      );
+
+      if (merged.addedCount === 0) {
+        return {
+          ok: false,
+          error: 'No new hosts were added (all duplicates or invalid).',
+          issues: buildIssues,
+          skippedExistingCount: merged.skippedExistingCount,
+          previewHosts,
+        };
+      }
+
+      deps.updateHosts(merged.hosts);
+      deps.updateCustomGroups(merged.customGroups);
+
+      return {
+        ok: true,
+        dryRun: false,
+        parsedCount: parsedDrafts.drafts.length,
+        validCount: builtHosts.length,
+        addedCount: merged.addedCount,
+        skippedExistingCount: merged.skippedExistingCount,
+        issues: buildIssues,
+        previewHosts: merged.addedHosts.map((host) => sanitizeHostForAgent(host)),
+      };
+    }
+    case 'host.import': {
+      const text = typeof params.text === 'string' ? params.text : '';
+      if (!text.trim()) return { ok: false, error: 'text is required.' };
+
+      const formatParam = resolveVaultImportFormat(params.format);
+      if (typeof formatParam === 'object' && 'error' in formatParam) {
+        return { ok: false, error: formatParam.error };
+      }
+
+      let resolvedFormat: VaultImportFormat;
+      if (formatParam === 'auto') {
+        const detected = detectVaultImportFormat(text);
+        if (!detected) {
+          return {
+            ok: false,
+            error: 'Could not detect import format. Specify csv, putty, mobaxterm, securecrt, or ssh_config.',
+          };
+        }
+        resolvedFormat = detected;
+      } else {
+        resolvedFormat = formatParam;
+      }
+
+      const dryRun = parseOptionalBoolean(params.dryRun) ?? false;
+      const skipDuplicates = parseOptionalBoolean(params.skipDuplicates) ?? true;
+      const fileName = typeof params.fileName === 'string' && params.fileName.trim()
+        ? params.fileName.trim()
+        : undefined;
+
+      const importResult = importVaultHostsFromText(resolvedFormat, text, { fileName });
+      const previewHosts = importResult.hosts.map((host) => sanitizeHostForAgent(host));
+
+      if (dryRun) {
+        return {
+          ok: true,
+          dryRun: true,
+          format: resolvedFormat,
+          stats: importResult.stats,
+          issues: importResult.issues,
+          groups: importResult.groups,
+          previewHosts,
+        };
+      }
+
+      const merged = applyVaultHostImport(
+        deps.hosts,
+        deps.customGroups,
+        importResult,
+        { skipDuplicates },
+      );
+
+      if (merged.addedCount === 0 && importResult.stats.parsed === 0) {
+        return {
+          ok: false,
+          error: importResult.issues[0]?.message || 'No hosts were imported.',
+          format: resolvedFormat,
+          stats: importResult.stats,
+          issues: importResult.issues,
+        };
+      }
+
+      deps.updateHosts(merged.hosts);
+      deps.updateCustomGroups(merged.customGroups);
+
+      return {
+        ok: true,
+        dryRun: false,
+        format: resolvedFormat,
+        stats: importResult.stats,
+        issues: importResult.issues,
+        addedCount: merged.addedCount,
+        skippedExistingCount: merged.skippedExistingCount,
+        previewHosts: previewHosts.slice(0, 20),
+      };
+    }
     case 'host.notes.get': {
       const hostId = String(params.hostId || '');
       const host = deps.hosts.find((entry) => entry.id === hostId);
@@ -87,6 +339,64 @@ export async function handleVaultAgentOp(
       if (!host) return { ok: false, error: `Host "${hostId}" was not found.` };
       deps.updateHostNotes(hostId, notes);
       return { ok: true, hostId };
+    }
+    case 'note.list': {
+      return {
+        ok: true,
+        notes: deps.notes.map(summarizeVaultNoteForList),
+      };
+    }
+    case 'note.get': {
+      const noteId = String(params.noteId || '');
+      const note = deps.notes.find((entry) => entry.id === noteId);
+      if (!note) return { ok: false, error: `Vault note "${noteId}" was not found.` };
+      return { ok: true, note: serializeVaultNoteForAgent(note) };
+    }
+    case 'note.create': {
+      const title = sanitizeNoteTitle(params.title);
+      if (!title) return { ok: false, error: 'title is required.' };
+      const content = typeof params.content === 'string' ? params.content : '';
+      const linkedHostIds = parseOptionalStringArray(params.linkedHostIds, 'linkedHostIds');
+      if (linkedHostIds && 'error' in linkedHostIds) return { ok: false, error: linkedHostIds.error };
+      const tags = parseOptionalStringArray(params.tags, 'tags');
+      if (tags && 'error' in tags) return { ok: false, error: tags.error };
+      const note = sanitizeVaultNote({
+        title,
+        content,
+        group: typeof params.group === 'string' && params.group.trim() ? params.group.trim() : undefined,
+        linkedHostIds,
+        tags,
+        order: getNextVaultOrder(deps.notes),
+      });
+      const nextNotes = normalizeVaultNotes([...deps.notes, note]);
+      deps.updateNotes(nextNotes);
+      return { ok: true, note: serializeVaultNoteForAgent(note) };
+    }
+    case 'note.update': {
+      const noteId = String(params.noteId || '');
+      const existing = deps.notes.find((entry) => entry.id === noteId);
+      if (!existing) return { ok: false, error: `Vault note "${noteId}" was not found.` };
+      const linkedHostIds = parseOptionalStringArray(params.linkedHostIds, 'linkedHostIds');
+      if (linkedHostIds && 'error' in linkedHostIds) return { ok: false, error: linkedHostIds.error };
+      const tags = parseOptionalStringArray(params.tags, 'tags');
+      if (tags && 'error' in tags) return { ok: false, error: tags.error };
+      const note = sanitizeVaultNote({
+        ...existing,
+        title: params.title !== undefined ? sanitizeNoteTitle(params.title) : existing.title,
+        content: typeof params.content === 'string' ? params.content : existing.content,
+        group: params.group !== undefined
+          ? (typeof params.group === 'string' && params.group.trim() ? params.group.trim() : undefined)
+          : existing.group,
+        linkedHostIds: linkedHostIds ?? existing.linkedHostIds,
+        tags: tags ?? existing.tags,
+        updatedAt: Date.now(),
+      });
+      if (!note.title) return { ok: false, error: 'title cannot be empty.' };
+      const nextNotes = normalizeVaultNotes(
+        deps.notes.map((entry) => (entry.id === noteId ? note : entry)),
+      );
+      deps.updateNotes(nextNotes);
+      return { ok: true, note: serializeVaultNoteForAgent(note) };
     }
     case 'snippets.list': {
       return {

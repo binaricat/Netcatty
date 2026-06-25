@@ -12,6 +12,7 @@ import type {
 } from '../infrastructure/ai/types';
 import type { AIQuickMessage } from '../infrastructure/ai/quickMessages';
 import type { ExecutorContext } from '../infrastructure/ai/cattyAgent/executor';
+import type { Host, VaultNote } from '../types';
 
 // -------------------------------------------------------------------
 // Props
@@ -103,6 +104,13 @@ export interface AIChatSidePanelProps {
 
   // Visibility
   isVisible?: boolean;
+
+  // Vault artifact navigation (from AI chat tool results)
+  notes?: VaultNote[];
+  hosts?: Host[];
+  onOpenVaultNote?: (noteId: string) => void;
+  onOpenVaultHost?: (hostId: string) => void;
+  onOpenVaultSection?: (section: 'notes' | 'hosts') => void;
 }
 
 // -------------------------------------------------------------------

@@ -40,10 +40,25 @@ Turn orchestration is centralized in **AgentRuntime**; the React hook `useAIChat
 
 Single source of truth: `electron/capabilities/catalog/` + `electron/capabilities/codegen/toolSurfaces.cjs`.
 
+**Agent kinds** (where an in-app agent runs — orthogonal to MCP/CLI/RPC surfaces):
+
+| Kind | UI | Tool list | Notes |
+|------|-----|-----------|--------|
+| `sidebar` | Chat side panel (Catty) | `listAgentToolSpecs('sidebar')` → `cattyToolSpecs.json` | Includes `harness.*` renderer-local tools (`surfaces.catty`) |
+| `global` | Future app-wide agent | `listAgentToolSpecs('global')` → `globalAgentToolSpecs.json` | Shared RPC tools (terminal, SFTP, vault, …); **no** sidebar-only harness tools unless opted in |
+
+Placement rules (`resolveAgentKinds` in `toolSurfaces.cjs`):
+
+- Explicit `agentKinds` on a catalog entry overrides inference.
+- `surfaces.globalAgent` only → global agent (future global-only local tools).
+- `surfaces.catty` only (harness) → sidebar only.
+- RPC/MCP-backed tools → both agents unless restricted via `agentKinds`.
+
 | Surface | Codegen / consumer | Notes |
 |---------|-------------------|--------|
-| Catty tools | `npm run generate:capability-tools` → `infrastructure/ai/harness/generated/cattyToolSpecs.json` | **33** tools: **28** RPC/catalog capabilities (minus denylist) + **5** `harness.*` catty-only tools with renderer-local execution. CI verifies JSON drift. |
-| MCP stdio | `electron/capabilities/codegen/mcpToolRegistry.cjs` → `electron/mcp/netcatty-mcp-server.cjs` | Registry-driven; **28** tools incl. SFTP (11), attachments, vault (6), portforward (4). Harness tools are **not** on MCP. |
+| Catty (sidebar) tools | `npm run generate:capability-tools` → `infrastructure/ai/harness/generated/cattyToolSpecs.json` | Sidebar agent tool set. CI verifies JSON drift. |
+| Global agent tools | same script → `globalAgentToolSpecs.json` | Prepared for future global agent runtime; shared RPC tools only today. |
+| MCP stdio | `electron/capabilities/codegen/mcpToolRegistry.cjs` → `electron/mcp/netcatty-mcp-server.cjs` | Registry-driven; external agents. Harness tools are **not** on MCP. |
 | CLI | `electron/cli/netcatty-tool-cli.cjs` + `electron/capabilities/adapters/cliAdapter.cjs` | **30** catalog commands; exec/sftp/session remain special-case; vault/portforward/snippets use catalog fallback dispatch |
 | RPC dispatch | `electron/bridges/mcpServerBridge.cjs` + `capabilityRpcDispatch.cjs` | `netcatty/*` builtin handlers via `buildBuiltinRpcHandlerRegistry` (catalog-aligned); `public/*`, `vault/*`, `portforward/*` → services |
 | Vault bridge | `electron/bridges/aiBridge/vaultAgentBridge.cjs` + `infrastructure/ai/vaultAgentBridgeClient.ts` | Renderer vault state; **never** returns password/privateKey |

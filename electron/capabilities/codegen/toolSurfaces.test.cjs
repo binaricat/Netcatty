@@ -38,14 +38,49 @@ test("listCattyToolSpecs includes SFTP write tools and attachments", () => {
 test("listCattyToolSpecs includes vault host tools and SFTP transfer", () => {
   const capabilityIds = listCattyToolSpecs().map((spec) => spec.capabilityId);
   assert.ok(capabilityIds.includes("vault.host.get"));
-  assert.ok(capabilityIds.includes("vault.host.notes.set"));
+  assert.ok(capabilityIds.includes("vault.host.list"));
+  assert.ok(capabilityIds.includes("vault.hosts.create"));
+  assert.ok(capabilityIds.includes("vault.host.import"));
+  assert.ok(capabilityIds.includes("vault.note.create"));
+  assert.ok(capabilityIds.includes("vault.note.list"));
   assert.ok(capabilityIds.includes("sftp.download"));
   assert.ok(capabilityIds.includes("sftp.upload"));
 });
 
+test("listCattyToolSpecs binds vault note tools to global RPC methods", () => {
+  const specs = listCattyToolSpecs();
+  const noteCreate = specs.find((spec) => spec.capabilityId === "vault.note.create");
+  assert.equal(noteCreate?.rpcMethod, "vault/notes/create");
+  const noteList = specs.find((spec) => spec.capabilityId === "vault.note.list");
+  assert.equal(noteList?.rpcMethod, "vault/notes/list");
+});
+
+test("listCattyToolSpecs binds vault and portforward tools to global RPC methods", () => {
+  const specs = listCattyToolSpecs();
+  const hostNotesSet = specs.find((spec) => spec.capabilityId === "vault.host.notes.set");
+  assert.equal(hostNotesSet?.rpcMethod, "vault/host/notes/set");
+  const portforwardStart = specs.find((spec) => spec.capabilityId === "portforward.start");
+  assert.equal(portforwardStart?.rpcMethod, "portforward/start");
+});
+
+test("listAgentToolSpecs splits sidebar harness tools from shared RPC tools", () => {
+  const { AGENT_KINDS, listAgentToolSpecs } = require("./toolSurfaces.cjs");
+  const sidebarIds = listAgentToolSpecs(AGENT_KINDS.SIDEBAR).map((spec) => spec.capabilityId);
+  const globalIds = listAgentToolSpecs(AGENT_KINDS.GLOBAL).map((spec) => spec.capabilityId);
+
+  assert.ok(sidebarIds.includes("harness.workspace.get_info"));
+  assert.ok(!globalIds.includes("harness.workspace.get_info"));
+
+  assert.ok(sidebarIds.includes("terminal.execute"));
+  assert.ok(globalIds.includes("terminal.execute"));
+  assert.ok(globalIds.includes("vault.note.create"));
+
+  assert.ok(globalIds.every((id) => sidebarIds.includes(id) || id.startsWith("harness.") === false));
+});
+
 test("listCattyToolSpecs includes harness catty-only tools with local execution", () => {
   const specs = listCattyToolSpecs();
-  assert.ok(specs.length >= 33);
+  assert.ok(specs.length >= 40);
   const harness = specs.filter((spec) => spec.capabilityId.startsWith("harness."));
   assert.equal(harness.length, 5);
   for (const spec of harness) {
@@ -62,12 +97,12 @@ test("harness capabilities are not exposed on MCP", () => {
   for (const capabilityId of mcpCapabilityIds) {
     assert.ok(!capabilityId.startsWith("harness."));
   }
-  assert.equal(listMcpTools().length, 28);
+  assert.equal(listMcpTools().length, 35);
 });
 
 test("listMcpTools descriptions stay aligned with catalog capability ids", () => {
   const mcpTools = listMcpTools();
-  assert.ok(mcpTools.length >= 28);
+  assert.ok(mcpTools.length >= 35);
   for (const tool of mcpTools) {
     assert.ok(tool.capabilityId);
     assert.ok(tool.mcpTool);

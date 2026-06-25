@@ -2,6 +2,8 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildGrantFromApproval,
+  buildGrantsFromApproval,
+  listGrantableCapabilityIds,
   matchPermissionGrant,
   patternMatches,
   type PermissionGrantRule,
@@ -26,12 +28,12 @@ describe('permissionGrants', () => {
     assert.ok(matched);
   });
 
-  it('matches host: prefixed session patterns against hostname', () => {
-    const rules = [baseRule({ sessionPattern: 'host:prod-*' })];
+  it('ignores sessionPattern and matches globally by capability and command', () => {
+    const rules = [baseRule({ sessionPattern: 'old-session-uuid', commandPattern: 'ls *' })];
     const matched = matchPermissionGrant(rules, {
       capabilityId: 'terminal.execute',
-      hostname: 'prod-web-01',
-      args: { command: 'uptime' },
+      sessionId: 'different-session',
+      args: { command: 'ls -la /tmp' },
     });
     assert.ok(matched);
   });
@@ -46,13 +48,36 @@ describe('permissionGrants', () => {
     assert.equal(matched, null);
   });
 
-  it('buildGrantFromApproval defaults session pattern from args.sessionId', () => {
+  it('buildGrantFromApproval uses global scope and OpenCode-style command prefix patterns', () => {
     const grant = buildGrantFromApproval('terminal.execute', {
       sessionId: 'ssh-1',
       command: 'systemctl status nginx',
     }, 'chat-1');
-    assert.equal(grant.sessionPattern, 'ssh-1');
-    assert.equal(grant.commandPattern, 'systemctl status nginx');
+    assert.equal(grant.sessionPattern, '*');
+    assert.equal(grant.commandPattern, 'systemctl status *');
+  });
+
+  it('buildGrantsFromApproval emits one rule per chained command segment', () => {
+    const grants = buildGrantsFromApproval('terminal.execute', {
+      sessionId: 'ssh-1',
+      command: 'cd /tmp && lscpu',
+    }, 'chat-1');
+    assert.equal(grants.length, 1);
+    assert.equal(grants[0]?.commandPattern, 'lscpu *');
+  });
+
+  it('OpenCode wildcard allows optional args after prefix', () => {
+    assert.equal(patternMatches('lscpu *', 'lscpu'), true);
+    assert.equal(patternMatches('lscpu *', 'lscpu -e'), true);
+    assert.equal(patternMatches('git checkout *', 'git checkout main'), true);
+    assert.equal(patternMatches('git checkout *', 'git commit'), false);
+  });
+
+  it('lists grantable capability ids from catalog policy', () => {
+    const ids = listGrantableCapabilityIds();
+    assert.ok(ids.includes('terminal.execute'));
+    assert.ok(ids.includes('sftp.write'));
+    assert.ok(!ids.includes('terminal.poll'));
   });
 
   it('patternMatches supports regex literals', () => {
