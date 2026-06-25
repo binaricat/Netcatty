@@ -13,9 +13,14 @@ function readPermissionGrants(): PermissionGrantRule[] {
   return sanitizePermissionGrants(localStorageAdapter.read<unknown>(STORAGE_KEY_AI_PERMISSION_GRANTS));
 }
 
+function syncPermissionGrantsToMainProcess(rules: PermissionGrantRule[]): void {
+  void getAIBridge()?.aiMcpSyncPermissionGrants?.(rules)?.catch(() => {});
+}
+
 function writePermissionGrants(rules: PermissionGrantRule[]): void {
   localStorageAdapter.write(STORAGE_KEY_AI_PERMISSION_GRANTS, rules);
   setActivePermissionGrants(rules);
+  syncPermissionGrantsToMainProcess(rules);
   emitAIStateChanged(STORAGE_KEY_AI_PERMISSION_GRANTS);
 }
 
@@ -65,6 +70,7 @@ export function useAIPermissionGrantsState() {
       if (key !== STORAGE_KEY_AI_PERMISSION_GRANTS) return;
       const next = readPermissionGrants();
       setActivePermissionGrants(next);
+      syncPermissionGrantsToMainProcess(next);
       setRulesRaw(next);
     };
 
