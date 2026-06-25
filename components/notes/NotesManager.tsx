@@ -115,6 +115,8 @@ export interface NotesManagerProps {
   onOpenHost?: (host: Host, source?: { noteId: string }) => void;
   displayMode?: "full" | "sidebar";
   openNoteId?: string | null;
+  /** Called after a one-shot openNoteId focus request has been applied. */
+  onOpenNoteIdHandled?: () => void;
 }
 
 type HoverActionMenuProps = {
@@ -326,6 +328,7 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
   onOpenHost,
   displayMode = "full",
   openNoteId = null,
+  onOpenNoteIdHandled,
 }) => {
   const { t } = useI18n();
   const { openExternal } = useApplicationBackend();
@@ -423,7 +426,8 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
     if (note.group) {
       setExpandedGroups((current) => new Set([...current, ...ancestorNoteGroupPaths(note.group || "")]));
     }
-  }, [isSidebarMode, openNoteId, sortedNotes]);
+    onOpenNoteIdHandled?.();
+  }, [isSidebarMode, onOpenNoteIdHandled, openNoteId, sortedNotes]);
 
   useEffect(() => {
     if (expandedPanel !== "search") return;
