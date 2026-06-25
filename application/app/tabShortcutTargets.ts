@@ -1,4 +1,4 @@
-/** Tab ids targeted by Cmd/Ctrl+[1...9] number shortcuts. */
+/** Tab ids targeted by keyboard tab navigation shortcuts. */
 export function buildNumberShortcutTabTargets(params: {
   showSftpTab: boolean;
   shellOnlyTabNumberShortcuts: boolean;

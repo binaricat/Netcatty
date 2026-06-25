@@ -251,7 +251,7 @@ export interface SyncPayload {
     showOnlyUngroupedHostsInRoot?: boolean;
     // Top tabs: show standalone SFTP view tab
     showSftpTab?: boolean;
-    // Shortcuts: Cmd/Ctrl+[1...9] skip pinned Vault/SFTP tabs
+    // Shortcuts: Cmd/Ctrl+[1...9] and Ctrl+Tab skip pinned Vault/SFTP tabs
     shellOnlyTabNumberShortcuts?: boolean;
     // Shortcuts: disable terminal font zoom shortcuts
     disableTerminalFontZoom?: boolean;

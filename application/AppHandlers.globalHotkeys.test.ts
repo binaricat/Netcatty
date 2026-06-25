@@ -170,6 +170,104 @@ test('quick switch hotkey toggles the quick switcher open state', () => {
   assert.equal(isQuickSwitcherOpen, false);
 });
 
+test('next tab includes pinned tabs when shell-only shortcut mode is disabled', () => {
+  let activeTabId = '';
+  const noop = () => {};
+
+  executeHotkeyActionImpl(
+    () => ({
+      IS_DEV: false,
+      MOVE_FOCUS_DEBOUNCE_MS: 0,
+      activeTabStore: { getActiveTabId: () => 'vault' },
+      addConnectionLogRef: { current: noop },
+      closeSession: noop,
+      closeTabInFlightRef: { current: false },
+      closeWorkspace: noop,
+      collectSessionIds: () => [],
+      confirmIfBusyLocalTerminal: async () => true,
+      createLocalTerminalWithCurrentShell: noop,
+      editorTabs: [{ id: 'editor-1' }],
+      fromEditorTabId: () => null,
+      handleOpenSettingsRef: { current: noop },
+      handleRequestCloseEditorTabRef: { current: noop },
+      isEditorTabId: () => false,
+      isQuickSwitcherOpen: false,
+      lastMoveFocusTimeRef: { current: 0 },
+      moveFocusInWorkspace: noop,
+      orderedTabs: ['session-1'],
+      resolveCloseIntent: () => ({ kind: 'noop' }),
+      resolveSnippetsShortcutIntent: () => ({ kind: 'noop' }),
+      sessions: [],
+      setActiveTabId: (id: string) => { activeTabId = id; },
+      setAddToWorkspaceDialog: noop,
+      setIsQuickSwitcherOpen: noop,
+      setNavigateToSection: noop,
+      settings: { showSftpTab: true, shellOnlyTabNumberShortcuts: false },
+      splitSessionWithCurrentShell: noop,
+      systemInfoRef: { current: { username: 'user', hostname: 'host' } },
+      toEditorTabId: (id: string) => `editor:${id}`,
+      toggleBroadcast: noop,
+      toggleScriptsSidePanelRef: { current: noop },
+      toggleSidePanelRef: { current: noop },
+      toggleWorkspaceViewMode: noop,
+      workspaces: [],
+    }),
+    'nextTab',
+    { key: 'Tab', ctrlKey: true } as KeyboardEvent,
+  );
+
+  assert.equal(activeTabId, 'sftp');
+});
+
+test('next tab skips pinned tabs when shell-only shortcut mode is enabled', () => {
+  let activeTabId = '';
+  const noop = () => {};
+
+  executeHotkeyActionImpl(
+    () => ({
+      IS_DEV: false,
+      MOVE_FOCUS_DEBOUNCE_MS: 0,
+      activeTabStore: { getActiveTabId: () => 'vault' },
+      addConnectionLogRef: { current: noop },
+      closeSession: noop,
+      closeTabInFlightRef: { current: false },
+      closeWorkspace: noop,
+      collectSessionIds: () => [],
+      confirmIfBusyLocalTerminal: async () => true,
+      createLocalTerminalWithCurrentShell: noop,
+      editorTabs: [{ id: 'editor-1' }],
+      fromEditorTabId: () => null,
+      handleOpenSettingsRef: { current: noop },
+      handleRequestCloseEditorTabRef: { current: noop },
+      isEditorTabId: () => false,
+      isQuickSwitcherOpen: false,
+      lastMoveFocusTimeRef: { current: 0 },
+      moveFocusInWorkspace: noop,
+      orderedTabs: ['session-1'],
+      resolveCloseIntent: () => ({ kind: 'noop' }),
+      resolveSnippetsShortcutIntent: () => ({ kind: 'noop' }),
+      sessions: [],
+      setActiveTabId: (id: string) => { activeTabId = id; },
+      setAddToWorkspaceDialog: noop,
+      setIsQuickSwitcherOpen: noop,
+      setNavigateToSection: noop,
+      settings: { showSftpTab: true, shellOnlyTabNumberShortcuts: true },
+      splitSessionWithCurrentShell: noop,
+      systemInfoRef: { current: { username: 'user', hostname: 'host' } },
+      toEditorTabId: (id: string) => `editor:${id}`,
+      toggleBroadcast: noop,
+      toggleScriptsSidePanelRef: { current: noop },
+      toggleSidePanelRef: { current: noop },
+      toggleWorkspaceViewMode: noop,
+      workspaces: [],
+    }),
+    'nextTab',
+    { key: 'Tab', ctrlKey: true } as KeyboardEvent,
+  );
+
+  assert.equal(activeTabId, 'session-1');
+});
+
 test('connection log host snapshot includes custom host icon fields', () => {
   assert.deepEqual(
     getLogHostVisualSnapshot({

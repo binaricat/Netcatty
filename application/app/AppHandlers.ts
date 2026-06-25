@@ -452,14 +452,7 @@ export async function closeTabsBatchImpl(getCtx: AppContextGetter, targetIds: st
 export function executeHotkeyActionImpl(getCtx: AppContextGetter, action: string, e: KeyboardEvent) {
   const { IS_DEV, MOVE_FOCUS_DEBOUNCE_MS, activeTabStore, addConnectionLogRef, closeSession, closeTabInFlightRef, closeWorkspace, collectSessionIds, confirmIfBusyLocalTerminal, createLocalTerminalWithCurrentShell, editorTabs, fromEditorTabId, handleOpenSettingsRef, handleRequestCloseEditorTabRef, isEditorTabId, isQuickSwitcherOpen, lastMoveFocusTimeRef, moveFocusInWorkspace, orderedTabs, resolveCloseIntent, resolveSnippetsShortcutIntent, sessions, setActiveTabId, setAddToWorkspaceDialog, setIsQuickSwitcherOpen, setNavigateToSection, settings, splitSessionWithCurrentShell, systemInfoRef, toEditorTabId, toggleBroadcast, toggleScriptsSidePanelRef, toggleSidePanelRef, toggleWorkspaceViewMode, workspaces } = getCtx();
 {
-    // Build complete tab list: vault + (sftp when visible) + sessions/workspaces + editor tabs.
-    // Hiding the SFTP tab must also remove it from keyboard cycling so nextTab
-    // doesn't land on a hidden tab (which would get redirected back) and so
-    // number shortcuts don't shift.
-    const allTabs = settings.showSftpTab
-      ? ['vault', 'sftp', ...orderedTabs, ...editorTabs.map((t) => toEditorTabId(t.id))]
-      : ['vault', ...orderedTabs, ...editorTabs.map((t) => toEditorTabId(t.id))];
-    const numberShortcutTabs = buildNumberShortcutTabTargets({
+    const shortcutTabs = buildNumberShortcutTabTargets({
       showSftpTab: settings.showSftpTab ?? true,
       shellOnlyTabNumberShortcuts: settings.shellOnlyTabNumberShortcuts ?? false,
       orderedTabs,
@@ -470,31 +463,31 @@ export function executeHotkeyActionImpl(getCtx: AppContextGetter, action: string
         // Get the number key pressed (1-9)
         const num = parseInt(e.key, 10);
         if (num >= 1 && num <= 9) {
-          if (num <= numberShortcutTabs.length) {
-            setActiveTabId(numberShortcutTabs[num - 1]);
+          if (num <= shortcutTabs.length) {
+            setActiveTabId(shortcutTabs[num - 1]);
           }
         }
         break;
       }
       case 'nextTab': {
         const currentId = activeTabStore.getActiveTabId();
-        const currentIdx = allTabs.indexOf(currentId);
-        if (currentIdx !== -1 && allTabs.length > 0) {
-          const nextIdx = (currentIdx + 1) % allTabs.length;
-          setActiveTabId(allTabs[nextIdx]);
-        } else if (allTabs.length > 0) {
-          setActiveTabId(allTabs[0]);
+        const currentIdx = shortcutTabs.indexOf(currentId);
+        if (currentIdx !== -1 && shortcutTabs.length > 0) {
+          const nextIdx = (currentIdx + 1) % shortcutTabs.length;
+          setActiveTabId(shortcutTabs[nextIdx]);
+        } else if (shortcutTabs.length > 0) {
+          setActiveTabId(shortcutTabs[0]);
         }
         break;
       }
       case 'prevTab': {
         const currentId = activeTabStore.getActiveTabId();
-        const currentIdx = allTabs.indexOf(currentId);
-        if (currentIdx !== -1 && allTabs.length > 0) {
-          const prevIdx = (currentIdx - 1 + allTabs.length) % allTabs.length;
-          setActiveTabId(allTabs[prevIdx]);
-        } else if (allTabs.length > 0) {
-          setActiveTabId(allTabs[allTabs.length - 1]);
+        const currentIdx = shortcutTabs.indexOf(currentId);
+        if (currentIdx !== -1 && shortcutTabs.length > 0) {
+          const prevIdx = (currentIdx - 1 + shortcutTabs.length) % shortcutTabs.length;
+          setActiveTabId(shortcutTabs[prevIdx]);
+        } else if (shortcutTabs.length > 0) {
+          setActiveTabId(shortcutTabs[shortcutTabs.length - 1]);
         }
         break;
       }
