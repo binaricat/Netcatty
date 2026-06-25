@@ -40,6 +40,7 @@ import {
   isEraseViewportSequence,
   preserveTerminalViewportInScrollback,
   shouldPreserveViewportBeforeFullErase,
+  shouldWipeScrollbackAfterFullErase,
 } from "../clearTerminalViewport";
 import {
   createKittyKeyboardModeState,
@@ -873,7 +874,9 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
               break;
             }
             case "clearBuffer": {
-              clearTerminalViewport(term);
+              clearTerminalViewport(term, {
+                wipeScrollback: ctx.terminalSettingsRef.current?.clearWipesScrollback ?? true,
+              });
               break;
             }
             case "searchTerminal": {
@@ -1111,9 +1114,13 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
   );
 
   const eraseScrollbackDisposable = term.parser.registerCsiHandler({ final: "J" }, (params) => {
+    const wipeAllowed = ctx.terminalSettingsRef.current?.clearWipesScrollback ?? true;
     if (isEraseViewportSequence(params)) {
-      if (shouldPreserveViewportBeforeFullErase(term, inDec2026SyncBlock)) {
+      if (shouldPreserveViewportBeforeFullErase(term, inDec2026SyncBlock, wipeAllowed)) {
         preserveTerminalViewportInScrollback(term);
+      }
+      if (shouldWipeScrollbackAfterFullErase(term, inDec2026SyncBlock, wipeAllowed)) {
+        queueMicrotask(() => term.write("\x1b[3J"));
       }
       return false;
     }
@@ -1122,7 +1129,6 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     }
     // CSI 3 J — POSIX/ncurses default `clear` emits this to wipe scrollback.
     // Honor it unless the user opts into the legacy "preserve history" behavior.
-    const wipeAllowed = ctx.terminalSettingsRef.current?.clearWipesScrollback ?? true;
     return !wipeAllowed;
   });
 

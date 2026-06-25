@@ -1190,6 +1190,8 @@ const TerminalComponent: React.FC<TerminalProps> = ({
 
   const scrollOnPasteRef = useRef(terminalSettings?.scrollOnPaste ?? true);
   scrollOnPasteRef.current = terminalSettings?.scrollOnPaste ?? true;
+  const clearWipesScrollbackRef = useRef(terminalSettings?.clearWipesScrollback ?? true);
+  clearWipesScrollbackRef.current = terminalSettings?.clearWipesScrollback ?? true;
 
   const scrollToBottomAfterProgrammaticInput = useCallback((data: string) => {
     if (termRef.current && shouldScrollOnTerminalInput(terminalSettingsRef.current, data)) {
@@ -1270,6 +1272,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     sessionRef,
     onHasSelectionChange: setHasSelection,
     scrollOnPasteRef,
+    clearWipesScrollbackRef,
     isBroadcastEnabledRef,
     onBroadcastInputRef,
     isLocalConnection,

@@ -10,6 +10,10 @@ type InternalTerminal = XTerm & {
   };
 };
 
+type ClearTerminalViewportOptions = {
+  wipeScrollback?: boolean;
+};
+
 const getVisibleContentRowCount = (term: XTerm): number => {
   const buffer = term.buffer.active;
   if (buffer.type !== "normal") {
@@ -49,7 +53,10 @@ export const preserveTerminalViewportInScrollback = (term: XTerm): void => {
   }
 };
 
-export const clearTerminalViewport = (term: XTerm): void => {
+export const clearTerminalViewport = (
+  term: XTerm,
+  options: ClearTerminalViewportOptions = {},
+): void => {
   const buffer = term.buffer.active;
   if (buffer.type !== "normal") return;
 
@@ -73,7 +80,8 @@ export const clearTerminalViewport = (term: XTerm): void => {
   // Clear everything below the prompt and reposition the cursor on it.
   // CSI coordinates are 1-indexed.
   const col = cursorX + 1;
-  term.write(`\x1b[2;1H\x1b[J\x1b[1;${col}H`, () => {
+  const eraseScrollback = options.wipeScrollback ? "\x1b[3J" : "";
+  term.write(`\x1b[2;1H\x1b[J${eraseScrollback}\x1b[1;${col}H`, () => {
     term.scrollToBottom();
   });
 };
@@ -92,8 +100,23 @@ export const isEraseViewportSequence = (params: CsiParam[]): boolean =>
 export const shouldPreserveViewportBeforeFullErase = (
   term: XTerm,
   inDec2026SyncBlock: boolean,
+  clearWipesScrollback = false,
 ): boolean => {
   if (inDec2026SyncBlock) {
+    return false;
+  }
+  if (clearWipesScrollback) {
+    return false;
+  }
+  return term.buffer.active.type === "normal";
+};
+
+export const shouldWipeScrollbackAfterFullErase = (
+  term: XTerm,
+  inDec2026SyncBlock: boolean,
+  clearWipesScrollback: boolean,
+): boolean => {
+  if (!clearWipesScrollback || inDec2026SyncBlock) {
     return false;
   }
   return term.buffer.active.type === "normal";
