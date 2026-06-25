@@ -3,6 +3,7 @@ export interface SystemPromptContext {
   scopeLabel?: string;
   hosts: Array<{
     sessionId: string;
+    hostId?: string;
     hostname: string;
     label: string;
     os?: string;
@@ -11,6 +12,14 @@ export interface SystemPromptContext {
     shellType?: string;
     deviceType?: string;
     connected: boolean;
+    hostChain?: Array<{ hostId: string; label?: string; hostname?: string }>;
+    activePortForwards?: Array<{
+      ruleId: string;
+      label?: string;
+      type?: string;
+      localPort?: number;
+      status?: string;
+    }>;
   }>;
   permissionMode: 'observer' | 'confirm' | 'autonomous';
   webSearchEnabled?: boolean;
@@ -42,7 +51,7 @@ ${permissionRules}
 
 1. **Plan before acting.** When a task involves multiple steps, present a brief numbered plan to the user before executing.
 
-2. **Use the right tool.** For normal shell commands, use \`terminal_execute\` so you receive the command output. When operating on multiple sessions, call \`terminal_execute\` for each target session.
+2. **Use the right tool.** For normal shell commands, use \`terminal_execute\`. SFTP read/write, vault snippets, and port forwarding tools are available when listed in your tool set — prefer them over manual shell workarounds. When operating on multiple sessions, call \`terminal_execute\` for each target session.
 
 3. **Never execute dangerous commands.** Commands matching the blocklist (e.g. \`rm -rf /\`, \`mkfs\`, \`dd\` to disk devices, \`shutdown\`, fork bombs, recursive chmod 777 on root) are strictly forbidden and will be automatically denied. Do not attempt to bypass these restrictions.
 
@@ -78,6 +87,29 @@ function buildScopeDescription(
   }
 }
 
+function formatHostChain(
+  hostChain: SystemPromptContext['hosts'][number]['hostChain'],
+): string | null {
+  if (!hostChain?.length) return null;
+  return hostChain
+    .map((hop) => hop.label || hop.hostname || hop.hostId)
+    .join(' → ');
+}
+
+function formatActivePortForwards(
+  activePortForwards: SystemPromptContext['hosts'][number]['activePortForwards'],
+): string | null {
+  if (!activePortForwards?.length) return null;
+  return activePortForwards
+    .map((rule) => {
+      const label = rule.label || rule.ruleId;
+      const port = rule.localPort != null ? `:${rule.localPort}` : '';
+      const status = rule.status ? ` (${rule.status})` : '';
+      return `${label}${port}${status}`;
+    })
+    .join(', ');
+}
+
 function buildHostList(
   hosts: SystemPromptContext['hosts'],
 ): string {
@@ -87,6 +119,8 @@ function buildHostList(
 
   const lines = hosts.map(host => {
     const status = host.connected ? 'connected' : 'disconnected';
+    const hostChain = formatHostChain(host.hostChain);
+    const portForwards = formatActivePortForwards(host.activePortForwards);
     const details = [
       `hostname: ${host.hostname}`,
       `label: ${host.label}`,
@@ -95,6 +129,8 @@ function buildHostList(
       host.username ? `user: ${host.username}` : null,
       host.shellType ? `shell: ${host.shellType}` : null,
       host.deviceType ? `deviceType: ${host.deviceType}` : null,
+      hostChain ? `hostChain: ${hostChain}` : null,
+      portForwards ? `portForwards: ${portForwards}` : null,
       `status: ${status}`,
     ]
       .filter(Boolean)

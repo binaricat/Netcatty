@@ -10,6 +10,7 @@
  * @typedef {Object} CapabilitySurfaceBinding
  * @property {string} [rpcMethod]
  * @property {string} [mcpTool]
+ * @property {string} [toolName]
  * @property {string[]} [command]
  * @property {boolean} [confirmInConfirmMode]
  *

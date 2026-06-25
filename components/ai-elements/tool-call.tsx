@@ -141,11 +141,15 @@ export interface ToolCallProps extends HTMLAttributes<HTMLDivElement> {
   onApprove?: () => void;
   /** Called when user rejects this tool call. */
   onReject?: () => void;
+  /** Called when user approves once without persisting a grant rule. */
+  onApproveOnce?: () => void;
+  /** Called when user approves and persists an always-allow grant rule. */
+  onAlwaysAllow?: () => void;
 }
 
 export const ToolCall = ({
   name, args, result, isError, isLoading, isInterrupted,
-  approvalStatus, onApprove, onReject,
+  approvalStatus, onApprove, onReject, onApproveOnce, onAlwaysAllow,
   className, ...props
 }: ToolCallProps) => {
   const { t } = useI18n();
@@ -156,11 +160,17 @@ export const ToolCall = ({
 
   const isPendingApproval = approvalStatus === 'pending' && !responded;
 
-  const handleApprove = useCallback(() => {
+  const handleApproveOnce = useCallback(() => {
     if (!isPendingApproval) return;
     setResponded(true);
-    onApprove?.();
-  }, [isPendingApproval, onApprove]);
+    (onApproveOnce ?? onApprove)?.();
+  }, [isPendingApproval, onApproveOnce, onApprove]);
+
+  const handleAlwaysAllow = useCallback(() => {
+    if (!isPendingApproval) return;
+    setResponded(true);
+    (onAlwaysAllow ?? onApprove)?.();
+  }, [isPendingApproval, onAlwaysAllow, onApprove]);
 
   const handleReject = useCallback(() => {
     if (!isPendingApproval) return;
@@ -171,9 +181,9 @@ export const ToolCall = ({
   // Keyboard: Enter = approve, Escape = reject (when pending)
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (!isPendingApproval) return;
-    if (e.key === 'Enter') { e.preventDefault(); handleApprove(); }
+    if (e.key === 'Enter') { e.preventDefault(); handleApproveOnce(); }
     else if (e.key === 'Escape') { e.preventDefault(); handleReject(); }
-  }, [isPendingApproval, handleApprove, handleReject]);
+  }, [isPendingApproval, handleApproveOnce, handleReject]);
 
   // Auto-focus and auto-scroll when approval is pending
   useEffect(() => {
@@ -290,12 +300,21 @@ export const ToolCall = ({
                   </Button>
                   <Button
                     ref={approveBtnRef}
+                    variant="outline"
                     size="sm"
-                    className="h-6 px-2.5 text-[11px] bg-green-600/80 hover:bg-green-600 text-white"
-                    onClick={handleApprove}
+                    className="h-6 px-2 text-[11px] border-green-500/20 text-green-400/80 hover:bg-green-500/10 hover:text-green-400"
+                    onClick={handleApproveOnce}
                   >
                     <Check size={11} className="mr-0.5" />
-                    {t('ai.chat.approve')}
+                    {t('ai.chat.approveOnce')}
+                  </Button>
+                  <Button
+                    size="sm"
+                    className="h-6 px-2.5 text-[11px] bg-green-600/80 hover:bg-green-600 text-white"
+                    onClick={handleAlwaysAllow}
+                  >
+                    <Check size={11} className="mr-0.5" />
+                    {t('ai.chat.alwaysAllow')}
                   </Button>
                 </div>
               </div>

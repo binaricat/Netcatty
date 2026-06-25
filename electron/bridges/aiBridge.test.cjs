@@ -21,6 +21,7 @@ function loadBridgeWithMocks(options = {}) {
     "./mcpServerBridge.cjs": {
       init() {},
       setMainWindowGetter() {},
+      setVaultAgentInvoker() {},
       getOrCreateHost: async () => 4010,
       getScopedSessionIds: () => [],
       buildMcpServerConfig: () => ({ name: "netcatty-remote-hosts", type: "http", url: "http://127.0.0.1:4010" }),

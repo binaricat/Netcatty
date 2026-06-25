@@ -60,6 +60,7 @@ const SFTP_CAPABILITIES = [
     { write: true, bypassesApproval: false, bypassesChatCancel: false },
     {
       builtin: { rpcMethod: "netcatty/sftp/download" },
+      public: { rpcMethod: "public/sftp/download", mcpTool: "sftp_download" },
       cli: { command: ["sftp", "download"] },
     },
   ),
@@ -69,6 +70,7 @@ const SFTP_CAPABILITIES = [
     { write: true, bypassesApproval: false, bypassesChatCancel: false },
     {
       builtin: { rpcMethod: "netcatty/sftp/upload" },
+      public: { rpcMethod: "public/sftp/upload", mcpTool: "sftp_upload" },
       cli: { command: ["sftp", "upload"] },
     },
   ),

@@ -156,6 +156,8 @@ export const STORAGE_KEY_AI_AGENT_MODEL_MAP = 'netcatty_ai_agent_model_map_v1';
 export const STORAGE_KEY_AI_AGENT_PROVIDER_MAP = 'netcatty_ai_agent_provider_map_v1';
 export const STORAGE_KEY_AI_WEB_SEARCH = 'netcatty_ai_web_search_v1';
 export const STORAGE_KEY_AI_QUICK_MESSAGES = 'netcatty_ai_quick_messages_v1';
+/** Confirm-mode permission grant memory (capability + session/command patterns). */
+export const STORAGE_KEY_AI_PERMISSION_GRANTS = 'netcatty_ai_permission_grants_v1';
 export const STORAGE_KEY_AI_SHOW_TERMINAL_SELECTION_ACTION = 'netcatty_ai_show_terminal_selection_action_v1';
 
 // SFTP Transfer Concurrency

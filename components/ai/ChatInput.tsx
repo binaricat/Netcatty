@@ -7,7 +7,7 @@
  */
 
 import { AtSign, Check, ChevronDown, ChevronRight, Cpu, Expand, Eye, FileText, ImageIcon, MessageSquare, Package, Plus, ShieldCheck, SquareTerminal, X, Zap } from 'lucide-react';
-import { filterQuickMessages, buildSlashCommandItems, filterUserSkillsForSlash, getSlashCommandItemKey, type AIQuickMessage, type SlashCommandItem, type UserSkillSlashOption } from '../../infrastructure/ai/quickMessages';
+import { filterQuickMessages, buildSlashCommandItems, filterUserSkillsForSlash, getSlashCommandItemKey, isSystemStopSlashCommand, type AIQuickMessage, type SlashCommandItem, type UserSkillSlashOption } from '../../infrastructure/ai/quickMessages';
 import { SlashCommandPicker } from './SlashCommandPicker';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useI18n } from '../../application/i18n/I18nProvider';
@@ -460,9 +460,14 @@ const ChatInput: React.FC<ChatInputProps> = ({
 
   const handleSubmit = useCallback(
     (_text: string, _event: FormEvent<HTMLFormElement>) => {
+      if (isSystemStopSlashCommand(value)) {
+        onStop?.();
+        onChange('');
+        return;
+      }
       onSend();
     },
-    [onSend],
+    [onSend, onStop, onChange, value],
   );
 
   const status: PromptInputStatus = isStreaming ? 'streaming' : 'idle';

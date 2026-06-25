@@ -17,7 +17,18 @@ const VALID_BACKENDS = new Set(listBackends());
 const MODEL_CACHE_TTL_MS = 5 * 60 * 1000;
 const MODEL_LIST_TIMEOUT_MS = 10000;
 const sdkModelCache = new Map();
-const SDK_SESSION_ID_PREFIX = "netcatty-sdk-session:";
+const { parseSdkSessionIdentity: parseSdkSessionIdentityPayload, SDK_SESSION_ID_PREFIX } = require("../../../shared/sdkSessionIdentity.cjs");
+const { isPathLikeCommand } = require("../../../shared/pathLikeCommand.cjs");
+
+function parseSdkSessionIdentity(value) {
+  const parsed = parseSdkSessionIdentityPayload(value);
+  if (!parsed) return null;
+  return {
+    sessionId: parsed.id,
+    backendKey: parsed.backend,
+    binPath: parsed.binPath || "",
+  };
+}
 
 function buildSdkSessionKey(chatSessionId, backendKey, binPath) {
   return [
@@ -40,29 +51,6 @@ function normalizeSdkListModelsResult(raw) {
   const currentModelId = Array.isArray(raw) ? null : raw?.currentModelId || null;
   const models = Array.isArray(rawModels) ? rawModels.filter((m) => m && m.id) : [];
   return { currentModelId, models };
-}
-
-function isPathLikeCommand(command) {
-  const raw = String(command || "").trim();
-  return Boolean(raw && (raw.includes("/") || raw.includes("\\") || /^[a-z]:/i.test(raw)));
-}
-
-function parseSdkSessionIdentity(value) {
-  const raw = String(value || "");
-  if (!raw.startsWith(SDK_SESSION_ID_PREFIX)) return null;
-  try {
-    const parsed = JSON.parse(decodeURIComponent(raw.slice(SDK_SESSION_ID_PREFIX.length)));
-    const sessionId = String(parsed?.id || "").trim();
-    const backendKey = String(parsed?.backend || "").trim();
-    if (!sessionId || !backendKey) return null;
-    return {
-      sessionId,
-      backendKey,
-      binPath: String(parsed?.binPath || ""),
-    };
-  } catch {
-    return null;
-  }
 }
 
 function deleteSdkSessionKeysForChat(sdkSessionIds, chatSessionId) {

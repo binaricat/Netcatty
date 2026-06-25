@@ -1,0 +1,855 @@
+[
+  {
+    "capabilityId": "session.environment",
+    "toolName": "get_environment",
+    "rpcMethod": "netcatty/getContext",
+    "localExecution": false,
+    "description": "List scoped terminal sessions available to the agent.",
+    "inputShape": {},
+    "policy": {
+      "write": false,
+      "sensitiveRead": false,
+      "longRunning": false,
+      "requiresChatSession": true,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": true,
+      "bypassesChatCancel": true
+    }
+  },
+  {
+    "capabilityId": "attachment.list",
+    "toolName": "list_attachments",
+    "rpcMethod": "netcatty/listAttachments",
+    "localExecution": false,
+    "description": "List user-attached files in the current AI chat scope.",
+    "inputShape": {},
+    "policy": {
+      "write": false,
+      "sensitiveRead": false,
+      "longRunning": false,
+      "requiresChatSession": true,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": true,
+      "bypassesChatCancel": true
+    }
+  },
+  {
+    "capabilityId": "attachment.read",
+    "toolName": "read_attachment",
+    "rpcMethod": "netcatty/readAttachment",
+    "localExecution": false,
+    "description": "Read a user-attached file from the current AI chat scope.",
+    "inputShape": {
+      "filePath": {
+        "type": "string",
+        "optional": true,
+        "description": "Exact local attachment path."
+      },
+      "filename": {
+        "type": "string",
+        "optional": true,
+        "description": "Attachment filename from list_attachments."
+      }
+    },
+    "policy": {
+      "write": false,
+      "sensitiveRead": true,
+      "longRunning": false,
+      "requiresChatSession": true,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": true,
+      "bypassesChatCancel": true
+    }
+  },
+  {
+    "capabilityId": "terminal.execute",
+    "toolName": "terminal_execute",
+    "rpcMethod": "netcatty/exec",
+    "localExecution": false,
+    "description": "Execute a short command in a terminal session and wait for completion. Use only for commands expected to finish within about 60 seconds. For long-running commands use terminal_start and terminal_poll.",
+    "inputShape": {
+      "sessionId": {
+        "type": "string",
+        "optional": false,
+        "description": "The terminal session ID to execute on."
+      },
+      "command": {
+        "type": "string",
+        "optional": false,
+        "description": "The shell command to execute in the target session."
+      }
+    },
+    "policy": {
+      "write": true,
+      "sensitiveRead": false,
+      "longRunning": true,
+      "requiresChatSession": true,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": false,
+      "bypassesChatCancel": false
+    }
+  },
+  {
+    "capabilityId": "terminal.start",
+    "toolName": "terminal_start",
+    "rpcMethod": "netcatty/jobStart",
+    "localExecution": false,
+    "description": "Start a long-running command in a terminal session. Prefer for builds, scans, log-following, or anything likely to exceed about 2 minutes.",
+    "inputShape": {
+      "sessionId": {
+        "type": "string",
+        "optional": false,
+        "description": "The terminal session ID to start a long-running command on."
+      },
+      "command": {
+        "type": "string",
+        "optional": false,
+        "description": "The command to start in the target session."
+      }
+    },
+    "policy": {
+      "write": true,
+      "sensitiveRead": false,
+      "longRunning": true,
+      "requiresChatSession": true,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": false,
+      "bypassesChatCancel": false
+    }
+  },
+  {
+    "capabilityId": "terminal.poll",
+    "toolName": "terminal_poll",
+    "rpcMethod": "netcatty/jobPoll",
+    "localExecution": false,
+    "description": "Poll incremental output from a long-running terminal job. Wait at least about 30 seconds between polls unless output justifies checking sooner.",
+    "inputShape": {
+      "jobId": {
+        "type": "string",
+        "optional": false,
+        "description": "The background job ID returned by terminal_start."
+      },
+      "offset": {
+        "type": "number",
+        "optional": true,
+        "description": "Character offset from a previous poll (default 0)."
+      }
+    },
+    "policy": {
+      "write": false,
+      "sensitiveRead": false,
+      "longRunning": false,
+      "requiresChatSession": true,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": true,
+      "bypassesChatCancel": true
+    }
+  },
+  {
+    "capabilityId": "terminal.stop",
+    "toolName": "terminal_stop",
+    "rpcMethod": "netcatty/jobStop",
+    "localExecution": false,
+    "description": "Stop a long-running terminal job.",
+    "inputShape": {
+      "jobId": {
+        "type": "string",
+        "optional": false,
+        "description": "The background job ID returned by terminal_start."
+      }
+    },
+    "policy": {
+      "write": true,
+      "sensitiveRead": false,
+      "longRunning": false,
+      "requiresChatSession": true,
+      "bypassesObserverBlock": true,
+      "bypassesApproval": true,
+      "bypassesChatCancel": true
+    }
+  },
+  {
+    "capabilityId": "sftp.list",
+    "toolName": "sftp_list",
+    "rpcMethod": "netcatty/sftp/list",
+    "localExecution": false,
+    "description": "List a remote directory over SFTP.",
+    "inputShape": {
+      "sessionId": {
+        "type": "string",
+        "optional": false,
+        "description": "SFTP session ID."
+      },
+      "path": {
+        "type": "string",
+        "optional": false,
+        "description": "Remote directory path."
+      }
+    },
+    "policy": {
+      "write": false,
+      "sensitiveRead": true,
+      "longRunning": true,
+      "requiresChatSession": true,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": true,
+      "bypassesChatCancel": true
+    }
+  },
+  {
+    "capabilityId": "sftp.read",
+    "toolName": "sftp_read_file",
+    "rpcMethod": "netcatty/sftp/read",
+    "localExecution": false,
+    "description": "Read a remote file over SFTP.",
+    "inputShape": {
+      "sessionId": {
+        "type": "string",
+        "optional": false,
+        "description": "SFTP session ID."
+      },
+      "path": {
+        "type": "string",
+        "optional": false,
+        "description": "Remote file path to read."
+      }
+    },
+    "policy": {
+      "write": false,
+      "sensitiveRead": true,
+      "longRunning": true,
+      "requiresChatSession": true,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": true,
+      "bypassesChatCancel": true
+    }
+  },
+  {
+    "capabilityId": "sftp.write",
+    "toolName": "sftp_write_file",
+    "rpcMethod": "netcatty/sftp/write",
+    "localExecution": false,
+    "description": "Write a remote file over SFTP.",
+    "inputShape": {
+      "sessionId": {
+        "type": "string",
+        "optional": false,
+        "description": "SFTP session ID."
+      },
+      "path": {
+        "type": "string",
+        "optional": false,
+        "description": "Remote file path to write."
+      },
+      "content": {
+        "type": "string",
+        "optional": false,
+        "description": "File content to write."
+      }
+    },
+    "policy": {
+      "write": true,
+      "sensitiveRead": false,
+      "longRunning": true,
+      "requiresChatSession": true,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": false,
+      "bypassesChatCancel": false
+    }
+  },
+  {
+    "capabilityId": "sftp.download",
+    "toolName": "sftp_download",
+    "rpcMethod": "netcatty/sftp/download",
+    "localExecution": false,
+    "description": "Download a remote file to a local path.",
+    "inputShape": {
+      "sessionId": {
+        "type": "string",
+        "optional": false,
+        "description": "SFTP session ID."
+      },
+      "remotePath": {
+        "type": "string",
+        "optional": false,
+        "description": "Remote file path to download."
+      },
+      "localPath": {
+        "type": "string",
+        "optional": false,
+        "description": "Local destination path."
+      }
+    },
+    "policy": {
+      "write": true,
+      "sensitiveRead": false,
+      "longRunning": true,
+      "requiresChatSession": true,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": false,
+      "bypassesChatCancel": false
+    }
+  },
+  {
+    "capabilityId": "sftp.upload",
+    "toolName": "sftp_upload",
+    "rpcMethod": "netcatty/sftp/upload",
+    "localExecution": false,
+    "description": "Upload a local file to a remote path.",
+    "inputShape": {
+      "sessionId": {
+        "type": "string",
+        "optional": false,
+        "description": "SFTP session ID."
+      },
+      "localPath": {
+        "type": "string",
+        "optional": false,
+        "description": "Local file path to upload."
+      },
+      "remotePath": {
+        "type": "string",
+        "optional": false,
+        "description": "Remote destination path."
+      }
+    },
+    "policy": {
+      "write": true,
+      "sensitiveRead": false,
+      "longRunning": true,
+      "requiresChatSession": true,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": false,
+      "bypassesChatCancel": false
+    }
+  },
+  {
+    "capabilityId": "sftp.stat",
+    "toolName": "sftp_stat",
+    "rpcMethod": "netcatty/sftp/stat",
+    "localExecution": false,
+    "description": "Get remote file metadata over SFTP.",
+    "inputShape": {
+      "sessionId": {
+        "type": "string",
+        "optional": false,
+        "description": "SFTP session ID."
+      },
+      "path": {
+        "type": "string",
+        "optional": false,
+        "description": "Remote path to stat."
+      }
+    },
+    "policy": {
+      "write": false,
+      "sensitiveRead": true,
+      "longRunning": true,
+      "requiresChatSession": true,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": true,
+      "bypassesChatCancel": true
+    }
+  },
+  {
+    "capabilityId": "sftp.home",
+    "toolName": "sftp_home",
+    "rpcMethod": "netcatty/sftp/home",
+    "localExecution": false,
+    "description": "Get the remote home directory for a session.",
+    "inputShape": {
+      "sessionId": {
+        "type": "string",
+        "optional": false,
+        "description": "SFTP session ID."
+      }
+    },
+    "policy": {
+      "write": false,
+      "sensitiveRead": true,
+      "longRunning": true,
+      "requiresChatSession": true,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": true,
+      "bypassesChatCancel": true
+    }
+  },
+  {
+    "capabilityId": "sftp.mkdir",
+    "toolName": "sftp_mkdir",
+    "rpcMethod": "netcatty/sftp/mkdir",
+    "localExecution": false,
+    "description": "Create a remote directory over SFTP.",
+    "inputShape": {
+      "sessionId": {
+        "type": "string",
+        "optional": false,
+        "description": "SFTP session ID."
+      },
+      "path": {
+        "type": "string",
+        "optional": false,
+        "description": "Remote directory path to create."
+      }
+    },
+    "policy": {
+      "write": true,
+      "sensitiveRead": false,
+      "longRunning": true,
+      "requiresChatSession": true,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": false,
+      "bypassesChatCancel": false
+    }
+  },
+  {
+    "capabilityId": "sftp.delete",
+    "toolName": "sftp_delete",
+    "rpcMethod": "netcatty/sftp/delete",
+    "localExecution": false,
+    "description": "Delete a remote file or directory over SFTP.",
+    "inputShape": {
+      "sessionId": {
+        "type": "string",
+        "optional": false,
+        "description": "SFTP session ID."
+      },
+      "path": {
+        "type": "string",
+        "optional": false,
+        "description": "Remote file or directory path to delete."
+      }
+    },
+    "policy": {
+      "write": true,
+      "sensitiveRead": false,
+      "longRunning": true,
+      "requiresChatSession": true,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": false,
+      "bypassesChatCancel": false
+    }
+  },
+  {
+    "capabilityId": "sftp.rename",
+    "toolName": "sftp_rename",
+    "rpcMethod": "netcatty/sftp/rename",
+    "localExecution": false,
+    "description": "Rename a remote file or directory over SFTP.",
+    "inputShape": {
+      "sessionId": {
+        "type": "string",
+        "optional": false,
+        "description": "SFTP session ID."
+      },
+      "oldPath": {
+        "type": "string",
+        "optional": false,
+        "description": "Current remote path."
+      },
+      "newPath": {
+        "type": "string",
+        "optional": false,
+        "description": "New remote path."
+      }
+    },
+    "policy": {
+      "write": true,
+      "sensitiveRead": false,
+      "longRunning": true,
+      "requiresChatSession": true,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": false,
+      "bypassesChatCancel": false
+    }
+  },
+  {
+    "capabilityId": "sftp.chmod",
+    "toolName": "sftp_chmod",
+    "rpcMethod": "netcatty/sftp/chmod",
+    "localExecution": false,
+    "description": "Change remote file permissions over SFTP.",
+    "inputShape": {
+      "sessionId": {
+        "type": "string",
+        "optional": false,
+        "description": "SFTP session ID."
+      },
+      "path": {
+        "type": "string",
+        "optional": false,
+        "description": "Remote file path."
+      },
+      "mode": {
+        "type": "string",
+        "optional": false,
+        "description": "Octal permission mode (e.g. 755)."
+      }
+    },
+    "policy": {
+      "write": true,
+      "sensitiveRead": false,
+      "longRunning": true,
+      "requiresChatSession": true,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": false,
+      "bypassesChatCancel": false
+    }
+  },
+  {
+    "capabilityId": "vault.host.get",
+    "toolName": "host_get",
+    "rpcMethod": null,
+    "localExecution": false,
+    "description": "Get host metadata from the vault.",
+    "inputShape": {
+      "hostId": {
+        "type": "string",
+        "optional": false,
+        "description": "Vault host ID."
+      }
+    },
+    "policy": {
+      "write": false,
+      "sensitiveRead": true,
+      "longRunning": false,
+      "requiresChatSession": false,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": true,
+      "bypassesChatCancel": true
+    }
+  },
+  {
+    "capabilityId": "vault.host.notes.get",
+    "toolName": "host_notes_get",
+    "rpcMethod": null,
+    "localExecution": false,
+    "description": "Read host notes from the vault.",
+    "inputShape": {
+      "hostId": {
+        "type": "string",
+        "optional": false,
+        "description": "Vault host ID."
+      }
+    },
+    "policy": {
+      "write": false,
+      "sensitiveRead": true,
+      "longRunning": false,
+      "requiresChatSession": false,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": true,
+      "bypassesChatCancel": true
+    }
+  },
+  {
+    "capabilityId": "vault.host.notes.set",
+    "toolName": "host_notes_set",
+    "rpcMethod": null,
+    "localExecution": false,
+    "description": "Update host notes in the vault.",
+    "inputShape": {
+      "hostId": {
+        "type": "string",
+        "optional": false,
+        "description": "Vault host ID."
+      },
+      "notes": {
+        "type": "string",
+        "optional": false,
+        "description": "Host notes text."
+      }
+    },
+    "policy": {
+      "write": true,
+      "sensitiveRead": false,
+      "longRunning": false,
+      "requiresChatSession": false,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": false,
+      "bypassesChatCancel": false
+    }
+  },
+  {
+    "capabilityId": "vault.snippets.list",
+    "toolName": "snippets_list",
+    "rpcMethod": null,
+    "localExecution": false,
+    "description": "List code snippets stored in the vault.",
+    "inputShape": {},
+    "policy": {
+      "write": false,
+      "sensitiveRead": false,
+      "longRunning": false,
+      "requiresChatSession": false,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": true,
+      "bypassesChatCancel": true
+    }
+  },
+  {
+    "capabilityId": "vault.snippets.get",
+    "toolName": "snippets_get",
+    "rpcMethod": null,
+    "localExecution": false,
+    "description": "Get a single code snippet from the vault.",
+    "inputShape": {
+      "snippetId": {
+        "type": "string",
+        "optional": false,
+        "description": "Snippet ID."
+      }
+    },
+    "policy": {
+      "write": false,
+      "sensitiveRead": false,
+      "longRunning": false,
+      "requiresChatSession": false,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": true,
+      "bypassesChatCancel": true
+    }
+  },
+  {
+    "capabilityId": "vault.snippets.run",
+    "toolName": "snippets_run",
+    "rpcMethod": null,
+    "localExecution": false,
+    "description": "Resolve snippet variables and execute a snippet in a terminal session.",
+    "inputShape": {
+      "snippetId": {
+        "type": "string",
+        "optional": false,
+        "description": "Snippet ID to run."
+      },
+      "sessionId": {
+        "type": "string",
+        "optional": false,
+        "description": "Terminal session ID to execute on."
+      },
+      "variables": {
+        "type": "string",
+        "optional": true,
+        "description": "JSON object of snippet variable values."
+      }
+    },
+    "policy": {
+      "write": true,
+      "sensitiveRead": false,
+      "longRunning": true,
+      "requiresChatSession": true,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": false,
+      "bypassesChatCancel": false
+    }
+  },
+  {
+    "capabilityId": "portforward.rules.list",
+    "toolName": "portforward_rules_list",
+    "rpcMethod": null,
+    "localExecution": false,
+    "description": "List persisted port forwarding rules.",
+    "inputShape": {},
+    "policy": {
+      "write": false,
+      "sensitiveRead": false,
+      "longRunning": false,
+      "requiresChatSession": false,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": true,
+      "bypassesChatCancel": true
+    }
+  },
+  {
+    "capabilityId": "portforward.tunnels.list",
+    "toolName": "portforward_tunnels_list",
+    "rpcMethod": null,
+    "localExecution": false,
+    "description": "List active port forwarding tunnels.",
+    "inputShape": {},
+    "policy": {
+      "write": false,
+      "sensitiveRead": false,
+      "longRunning": false,
+      "requiresChatSession": false,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": true,
+      "bypassesChatCancel": true
+    }
+  },
+  {
+    "capabilityId": "portforward.start",
+    "toolName": "portforward_start",
+    "rpcMethod": null,
+    "localExecution": false,
+    "description": "Start a port forwarding tunnel for a rule.",
+    "inputShape": {
+      "ruleId": {
+        "type": "string",
+        "optional": false,
+        "description": "Port forwarding rule ID."
+      }
+    },
+    "policy": {
+      "write": true,
+      "sensitiveRead": false,
+      "longRunning": true,
+      "requiresChatSession": false,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": false,
+      "bypassesChatCancel": false
+    }
+  },
+  {
+    "capabilityId": "portforward.stop",
+    "toolName": "portforward_stop",
+    "rpcMethod": null,
+    "localExecution": false,
+    "description": "Stop an active port forwarding tunnel.",
+    "inputShape": {
+      "ruleId": {
+        "type": "string",
+        "optional": false,
+        "description": "Port forwarding rule ID."
+      }
+    },
+    "policy": {
+      "write": true,
+      "sensitiveRead": false,
+      "longRunning": false,
+      "requiresChatSession": false,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": false,
+      "bypassesChatCancel": false
+    }
+  },
+  {
+    "capabilityId": "harness.tool_output.read",
+    "toolName": "tool_output_read",
+    "rpcMethod": null,
+    "localExecution": true,
+    "description": "Read stored tool output by handle id when a prior tool result was truncated.",
+    "inputShape": {
+      "handleId": {
+        "type": "string",
+        "optional": false,
+        "description": "Tool output handle id from a prior truncated result."
+      },
+      "mode": {
+        "type": "string",
+        "optional": true,
+        "description": "Which portion to read: head, tail, or full."
+      },
+      "maxChars": {
+        "type": "number",
+        "optional": true,
+        "description": "Maximum characters to return."
+      }
+    },
+    "policy": {
+      "write": false,
+      "sensitiveRead": false,
+      "longRunning": false,
+      "requiresChatSession": true,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": true,
+      "bypassesChatCancel": true
+    }
+  },
+  {
+    "capabilityId": "harness.workspace.get_info",
+    "toolName": "workspace_get_info",
+    "rpcMethod": null,
+    "localExecution": true,
+    "description": "Get information about the current workspace, including all terminal sessions and their connection status.",
+    "inputShape": {},
+    "policy": {
+      "write": false,
+      "sensitiveRead": false,
+      "longRunning": false,
+      "requiresChatSession": true,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": true,
+      "bypassesChatCancel": true
+    }
+  },
+  {
+    "capabilityId": "harness.workspace.get_session_info",
+    "toolName": "workspace_get_session_info",
+    "rpcMethod": null,
+    "localExecution": true,
+    "description": "Get detailed information about a specific terminal or SFTP session.",
+    "inputShape": {
+      "sessionId": {
+        "type": "string",
+        "optional": false,
+        "description": "The session ID to get information about."
+      }
+    },
+    "policy": {
+      "write": false,
+      "sensitiveRead": false,
+      "longRunning": false,
+      "requiresChatSession": true,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": true,
+      "bypassesChatCancel": true
+    }
+  },
+  {
+    "capabilityId": "harness.web.search",
+    "toolName": "web_search",
+    "rpcMethod": null,
+    "localExecution": true,
+    "description": "Search the web for current information when configured in AI settings.",
+    "inputShape": {
+      "query": {
+        "type": "string",
+        "optional": false,
+        "description": "The search query to look up on the web."
+      },
+      "maxResults": {
+        "type": "number",
+        "optional": true,
+        "description": "Maximum number of search results to return."
+      }
+    },
+    "policy": {
+      "write": false,
+      "sensitiveRead": false,
+      "longRunning": false,
+      "requiresChatSession": true,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": true,
+      "bypassesChatCancel": true
+    }
+  },
+  {
+    "capabilityId": "harness.url.fetch",
+    "toolName": "url_fetch",
+    "rpcMethod": null,
+    "localExecution": true,
+    "description": "Fetch and read the content of an HTTPS URL.",
+    "inputShape": {
+      "url": {
+        "type": "string",
+        "optional": false,
+        "description": "The HTTPS URL to fetch."
+      },
+      "maxLength": {
+        "type": "number",
+        "optional": true,
+        "description": "Maximum characters to return (default 50000)."
+      }
+    },
+    "policy": {
+      "write": false,
+      "sensitiveRead": false,
+      "longRunning": false,
+      "requiresChatSession": true,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": true,
+      "bypassesChatCancel": true
+    }
+  }
+]

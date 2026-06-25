@@ -1,0 +1,315 @@
+import type { ModelMessage } from 'ai';
+import type { OpenAIChatAssistantFields } from '../../providerContinuation';
+import {
+  DEFAULT_CONTEXT_WINDOW_TOKENS,
+  estimateUnknownTokens,
+  resolveContextWindow,
+} from '../../contextCompaction';
+import { buildSystemPrompt } from '../../cattyAgent/systemPrompt';
+import { isWebSearchReady } from '../../types';
+import { createModelFromConfig } from '../../sdk/providers';
+import { createCattyToolsFromCatalog } from '../capabilityTools';
+import {
+  compactCattyMessages,
+  prepareCattyMessagesForStream,
+} from '../cattyRuntime';
+import { clearChatSessionCancelled } from '../agentStop';
+import { prepareStepContext } from '../contextManager';
+import { isRequestTooLargeError } from '../../errorClassifier';
+import { getNetcattyBridge, generateId, resolveUserSkillsContext } from '../../../../components/ai/hooks/aiChatStreamingSupport';
+import {
+  buildCattySdkMessages,
+  collectOpenAIChatAssistantFieldsForMessages,
+  collectToolResultsAfterMessage,
+  createContinuationContext,
+} from './cattyMessageBuilder';
+import { hadToolProgressBeforeRequestTooLarge, processCattyStream } from './cattyStreamProcessor';
+import type { CattyTurnInput, TurnDriver, TurnDriverContext } from './types';
+
+export class CattyTurnDriver implements TurnDriver {
+  readonly backend = 'catty' as const;
+
+  async run(input: import('./types').TurnInput, ctx: TurnDriverContext): Promise<void> {
+    if (input.backend !== 'catty') {
+      throw new Error('CattyTurnDriver received non-catty input');
+    }
+    await runCattyTurn(input, ctx);
+  }
+
+  abort(): void {
+    // Abort is handled via AbortSignal on the turn input.
+  }
+}
+
+async function runCattyTurn(input: CattyTurnInput, ctx: TurnDriverContext): Promise<void> {
+  const {
+    chatSessionId: sessionId,
+    sendScopeKey,
+    userText: trimmed,
+    signal,
+    currentSession,
+    assistantMsgId,
+    context,
+    attachments,
+    maxIterations,
+    bridge,
+    ui,
+  } = input;
+
+  const netcattyBridge = bridge ?? getNetcattyBridge();
+  await clearChatSessionCancelled(sessionId, netcattyBridge);
+  const userSkillsContext = await resolveUserSkillsContext(
+    netcattyBridge,
+    trimmed,
+    context.selectedUserSkillSlugs,
+  );
+  const getExecutorContext = context.getExecutorContext ?? (() => ({
+    sessions: context.terminalSessions,
+    workspaceId: context.scopeType === 'workspace' ? context.scopeTargetId : undefined,
+    workspaceName: context.scopeType === 'workspace' ? context.scopeLabel : undefined,
+  }));
+  const tools = createCattyToolsFromCatalog(
+    netcattyBridge,
+    getExecutorContext,
+    context.commandBlocklist,
+    context.globalPermissionMode,
+    context.webSearchConfig ?? undefined,
+    sessionId,
+    ctx.toolOutputStore,
+    ctx.toolResultDedup,
+  );
+
+  const systemPrompt = buildSystemPrompt({
+    scopeType: context.scopeType,
+    scopeLabel: context.scopeLabel,
+    hosts: context.terminalSessions,
+    permissionMode: context.globalPermissionMode,
+    webSearchEnabled: isWebSearchReady(context.webSearchConfig),
+    userSkillsContext,
+  });
+
+  if (!context.activeProvider) {
+    ui.reportStreamError(sessionId, signal, 'No AI provider configured. Please configure a provider in Settings → AI.');
+    return;
+  }
+
+  const activeModelId = context.activeModelId || context.activeProvider.defaultModel || '';
+  const continuationContext = createContinuationContext(
+    context.activeProvider.id,
+    context.activeProvider.providerId,
+    activeModelId,
+  );
+
+  ui.setStreamingForScope(sendScopeKey, true);
+
+  try {
+    const openAIChatAssistantFieldsByMessage = new Map<ModelMessage, OpenAIChatAssistantFields | undefined>();
+
+    const buildSdkMessages = (
+      allMessages: import('../../types').ChatMessage[],
+      includeCurrentUserMessage: boolean,
+      options: { preserveTerminalToolResults?: ReadonlySet<import('../../types').ToolResult> } = {},
+    ) => buildCattySdkMessages({
+      allMessages,
+      includeCurrentUserMessage,
+      trimmed,
+      attachments: includeCurrentUserMessage ? attachments : undefined,
+      continuationContext,
+      preserveTerminalToolResults: options.preserveTerminalToolResults,
+      fieldsByMessage: openAIChatAssistantFieldsByMessage,
+    });
+
+    let model;
+    try {
+      model = createModelFromConfig(
+        {
+          ...context.activeProvider,
+          defaultModel: activeModelId,
+        },
+        {
+          getOpenAIChatAssistantFields: () => continuationContext.openAIChatAssistantFields,
+        },
+      );
+    } catch (e) {
+      console.error('[Catty] Model creation failed:', e);
+      ui.reportStreamError(sessionId, signal, `Model creation failed: ${e instanceof Error ? e.message : String(e)}`);
+      return;
+    }
+
+    const contextWindow = resolveContextWindow({
+      provider: context.activeProvider,
+      modelId: activeModelId,
+      defaultContextWindow: DEFAULT_CONTEXT_WINDOW_TOKENS,
+    });
+    const outputReserveTokens = Math.min(4096, Math.ceil(contextWindow * 0.05));
+    const getRequestReserveTokens = () => outputReserveTokens + estimateUnknownTokens({
+      systemPrompt,
+      toolNames: Object.keys(tools),
+      openAIChatAssistantFields: Array.from(openAIChatAssistantFieldsByMessage.values()),
+    });
+
+    const prepareMessagesForStream = (messages: ModelMessage[]): ModelMessage[] => {
+      const pruned = prepareCattyMessagesForStream(messages);
+      continuationContext.openAIChatAssistantFields = collectOpenAIChatAssistantFieldsForMessages(
+        pruned,
+        openAIChatAssistantFieldsByMessage,
+      );
+      return pruned;
+    };
+
+    const compactMessages = async (
+      messages: ModelMessage[],
+      options: {
+        force?: boolean;
+        statusText?: string;
+        compressForRequestTooLargeRetry?: boolean;
+      },
+    ): Promise<ModelMessage[]> => {
+      const pendingHandles = ctx.toolOutputStore.listPendingHandles(sessionId);
+      const result = await compactCattyMessages({
+        messages,
+        sessionId,
+        chatSessionId: sessionId,
+        provider: context.activeProvider,
+        modelId: activeModelId || context.activeProvider?.defaultModel,
+        reservedTokens: getRequestReserveTokens,
+        model,
+        abortSignal: signal,
+        trigger: options.force ? 'force' : options.compressForRequestTooLargeRetry ? '413-retry' : 'pre-turn',
+        force: options.force,
+        compressForRequestTooLargeRetry: options.compressForRequestTooLargeRetry,
+        onStatusText: (text) => {
+          ui.updateLastMessage(sessionId, msg => ({ ...msg, statusText: options.statusText || text }));
+        },
+        onCompaction: (trace) => {
+          ctx.emit({
+            id: `compaction-${Date.now()}`,
+            type: 'compaction',
+            trace,
+          } as import('../types').AgentEvent);
+          if (options.compressForRequestTooLargeRetry && trace.did413Fallback) {
+            console.warn('[Catty] Request content compressed after forced context compaction.');
+          }
+        },
+        reinjection: {
+          permissionMode: context.permissionMode ?? context.globalPermissionMode,
+          sessionScopeSummary: pendingHandles.length
+            ? `Pending tool output handles: ${pendingHandles.map(h => h.id).join(', ')}`
+            : undefined,
+        },
+      });
+      return result.messages;
+    };
+
+    let messagesForStream = buildSdkMessages(currentSession?.messages ?? [], true);
+    messagesForStream = await compactMessages(messagesForStream, {});
+    messagesForStream = prepareMessagesForStream(messagesForStream);
+
+    const runStream = async (streamMessages: ModelMessage[], streamAssistantMsgId: string) => {
+      const { usage } = await processCattyStream({
+        streamSessionId: sessionId,
+        model,
+        systemPrompt,
+        tools,
+        sdkMessages: streamMessages,
+        signal,
+        currentAssistantMsgId: streamAssistantMsgId,
+        maxIterations,
+        advancedParams: context.activeProvider?.advancedParams,
+        continuationContext,
+        turnId: ctx.turnId,
+        onAgentEvent: (event) => ctx.emit(event),
+        prepareStep: async ({ stepNumber, messages }) => {
+          const prepared = await prepareStepContext({
+            messages,
+            stepNumber,
+            sessionId,
+            chatSessionId: sessionId,
+            providerId: context.activeProvider?.providerId,
+            modelId: activeModelId,
+            toolOutputStore: ctx.toolOutputStore,
+          });
+          return { messages: prepared.messages };
+        },
+        ui: {
+          addMessageToSession: ui.addMessageToSession,
+          updateMessageById: ui.updateMessageById,
+        },
+      });
+
+      if (usage?.totalTokens) {
+        ctx.emit({
+          id: `usage-${ctx.turnId}`,
+          type: 'usage',
+          promptTokens: usage.promptTokens ?? 0,
+          completionTokens: usage.completionTokens ?? 0,
+          totalTokens: usage.totalTokens,
+          estimated: false,
+        } as import('../types').AgentEvent);
+      }
+    };
+
+    try {
+      await runStream(messagesForStream, assistantMsgId);
+    } catch (streamErr) {
+      if (signal.aborted || !isRequestTooLargeError(streamErr)) {
+        throw streamErr;
+      }
+
+      console.warn('[Catty] Request hit HTTP 413; forcing context compaction and retrying once.', streamErr);
+      const statusText = 'Request was too large. Compacting context and retrying...';
+      const hadToolProgress = hadToolProgressBeforeRequestTooLarge(streamErr);
+      let retryBaseMessages = messagesForStream;
+      let retryAssistantMsgId = assistantMsgId;
+      if (hadToolProgress) {
+        const latestSession = ui.getLatestSession?.(sessionId);
+        if (latestSession) {
+          retryBaseMessages = buildSdkMessages(latestSession.messages, false, {
+            preserveTerminalToolResults: collectToolResultsAfterMessage(
+              latestSession.messages,
+              assistantMsgId,
+            ),
+          });
+        }
+        retryAssistantMsgId = generateId();
+        ui.addMessageToSession(sessionId, {
+          id: retryAssistantMsgId,
+          role: 'assistant',
+          content: '',
+          timestamp: Date.now(),
+          model: activeModelId || context.activeProvider?.defaultModel || '',
+          providerId: context.activeProvider?.providerId,
+          statusText,
+        });
+      } else {
+        ui.updateMessageById(sessionId, assistantMsgId, msg => ({
+          ...msg,
+          content: '',
+          thinking: undefined,
+          thinkingDurationMs: undefined,
+          providerContinuation: undefined,
+          toolCalls: undefined,
+          errorInfo: undefined,
+          executionStatus: undefined,
+          pendingApproval: undefined,
+          statusText,
+        }));
+      }
+      const retryMessages = prepareMessagesForStream(await compactMessages(retryBaseMessages, {
+        force: true,
+        statusText,
+        compressForRequestTooLargeRetry: true,
+      }));
+      await runStream(retryMessages, retryAssistantMsgId);
+    }
+  } catch (err) {
+    console.error('[Catty] streamText error:', err);
+    ui.reportStreamError(sessionId, signal, err);
+  } finally {
+    ui.updateLastMessage(sessionId, msg => msg.statusText ? { ...msg, statusText: '' } : msg);
+    ui.setStreamingForScope(sendScopeKey, false);
+    context.autoTitleSession(sessionId, context.titleText ?? trimmed);
+  }
+}
+
+export const cattyTurnDriver = new CattyTurnDriver();

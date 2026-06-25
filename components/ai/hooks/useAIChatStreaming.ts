@@ -1,17 +1,11 @@
 /**
- * useAIChatStreaming — Encapsulates all streaming logic for the AI chat panel.
+ * useAIChatStreaming — React UI layer for AI chat streaming.
  *
- * Handles:
- * - Catty agent streaming via Vercel AI SDK `streamText`
- * - External agent streaming through official SDK backends
- * - Text-delta batching via requestAnimationFrame
- * - Abort controller management
- * - Stream state tracking (per-session)
- * - Error reporting
+ * Turn orchestration lives in AgentRuntime + TurnDrivers; this hook only
+ * manages streaming state, abort controllers, and UI callbacks.
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { generateText, pruneMessages, streamText, stepCountIs, type ModelMessage } from 'ai';
 import type {
   AIPermissionMode,
   AIToolIntegrationMode,
@@ -19,75 +13,18 @@ import type {
   ChatMessage,
   ChatMessageAttachment,
   ExternalAgentConfig,
-  ProviderAdvancedParams,
   ProviderConfig,
-  ToolResult,
   WebSearchConfig,
 } from '../../../infrastructure/ai/types';
-import { isWebSearchReady } from '../../../infrastructure/ai/types';
-import { buildSystemPrompt } from '../../../infrastructure/ai/cattyAgent/systemPrompt';
-import {
-  CONTEXT_COMPACTION_SYSTEM_PROMPT,
-  DEFAULT_CONTEXT_WINDOW_TOKENS,
-  DEFAULT_PROTECT_RECENT_MESSAGES,
-  formatMessagesForCompaction,
-  estimateUnknownTokens,
-  keepRecentContextMessages,
-  prepareContextCompaction,
-  resolveContextWindow,
-} from '../../../infrastructure/ai/contextCompaction';
-import {
-  compressMessagesForRequestTooLargeRetry,
-} from '../../../infrastructure/ai/requestPayloadCompression';
-import {
-  createCattyRequestTooLargeRetryError,
-  hadToolProgressBeforeRequestTooLarge,
-} from '../../../infrastructure/ai/cattyRequestTooLargeRetry';
-import { createModelFromConfig } from '../../../infrastructure/ai/sdk/providers';
-import { createCattyTools } from '../../../infrastructure/ai/sdk/tools';
 import type { ExecutorContext } from '../../../infrastructure/ai/cattyAgent/executor';
-import { getExternalAgentSdkBackend } from '../../../infrastructure/ai/managedAgents';
-import { runSdkAgentTurn } from '../../../infrastructure/ai/sdkAgentAdapter';
-import { classifyError, isRequestTooLargeError } from '../../../infrastructure/ai/errorClassifier';
-import { isSdkStreamStateError } from '../../../infrastructure/ai/shared/streamStateErrors';
-import {
-  buildPromptWithTerminalSelectionAttachments,
-  isTerminalSelectionAttachment,
-} from '../../../application/state/terminalSelectionAttachment';
+import { getAgentRuntime } from '../../../infrastructure/ai/harness/globalAgentRuntime';
+import { classifyError } from '../../../infrastructure/ai/errorClassifier';
 import { latestAISessionsSnapshot } from '../../../application/state/aiStateSnapshots';
 import {
-  buildHistoricalToolReplayMaps,
-  buildHistoricalToolResultReplayText,
-  buildHistoricalUserReplayContent,
-} from '../cattyHistoryReplay';
-import {
-  extractProviderContinuationFromRawChunk,
-  getOpenAIChatAssistantFieldsForHistoryMessage,
-  isProviderContinuationForSource,
-  mergeProviderContinuation,
-  normalizeProviderContinuationOptions,
-  withProviderContinuationSource,
-  type OpenAIChatAssistantFields,
-  type ProviderContinuation,
-} from '../../../infrastructure/ai/providerContinuation';
-
-import {
-  getNetcattyBridge,
   generateId,
-  isToolResultError,
-  resolveUserSkillsContext,
-  toAssistantModelContent,
-  type AssistantContentPart,
-  type CattyProviderContinuationContext,
+  getNetcattyBridge,
   type DefaultTargetSessionHint,
-  type ErrorChunk,
-  type RawChunk,
-  type ReasoningChunk,
-  type StreamChunk,
   type TerminalSessionInfo,
-  type TextDeltaChunk,
-  type ToolCallChunk,
-  type ToolResultChunk,
 } from './aiChatStreamingSupport';
 
 export { getNetcattyBridge } from './aiChatStreamingSupport';
@@ -101,11 +38,6 @@ const streamingSubscribers = new Set<() => void>();
 export function isAIChatSessionStreaming(sessionId: string | null | undefined): boolean {
   return !!sessionId && sharedStreamingSessionIds.has(sessionId);
 }
-const OPENAI_CHAT_ASSISTANT_FIELDS = Symbol('netcatty.openAIChatAssistantFields');
-
-type ModelMessageWithOpenAIChatFields = ModelMessage & {
-  [OPENAI_CHAT_ASSISTANT_FIELDS]?: OpenAIChatAssistantFields;
-};
 
 function emitStreamingStoreChange(): void {
   streamingSubscribers.forEach(listener => {
@@ -117,49 +49,6 @@ function emitStreamingStoreChange(): void {
   });
 }
 
-function rememberOpenAIChatAssistantFields(
-  message: ModelMessage,
-  fields: OpenAIChatAssistantFields | undefined,
-  fieldsByMessage: Map<ModelMessage, OpenAIChatAssistantFields | undefined>,
-): void {
-  fieldsByMessage.set(message, fields);
-  (message as ModelMessageWithOpenAIChatFields)[OPENAI_CHAT_ASSISTANT_FIELDS] = fields;
-}
-
-function getRememberedOpenAIChatAssistantFields(
-  message: ModelMessage,
-  fieldsByMessage: Map<ModelMessage, OpenAIChatAssistantFields | undefined>,
-): OpenAIChatAssistantFields | undefined {
-  if (fieldsByMessage.has(message)) return fieldsByMessage.get(message);
-  return (message as ModelMessageWithOpenAIChatFields)[OPENAI_CHAT_ASSISTANT_FIELDS];
-}
-
-function modelMessageHasToolCall(message: ModelMessage): boolean {
-  if (message.role !== 'assistant' || !Array.isArray(message.content)) return false;
-  return message.content.some((part) => part && typeof part === 'object' && (part as { type?: string }).type === 'tool-call');
-}
-
-function collectOpenAIChatAssistantFieldsForMessages(
-  messages: ModelMessage[],
-  fieldsByMessage: Map<ModelMessage, OpenAIChatAssistantFields | undefined>,
-): Array<OpenAIChatAssistantFields | undefined> {
-  const fields: Array<OpenAIChatAssistantFields | undefined> = [];
-  let previousMessageWasTool = false;
-  for (const message of messages) {
-    const needsContinuationFields = message.role === 'assistant'
-      && (modelMessageHasToolCall(message) || previousMessageWasTool);
-    if (needsContinuationFields) {
-      fields.push(getRememberedOpenAIChatAssistantFields(message, fieldsByMessage));
-    }
-    previousMessageWasTool = message.role === 'tool';
-  }
-  return fields;
-}
-
-// -------------------------------------------------------------------
-// Hook parameters
-// -------------------------------------------------------------------
-
 export interface UseAIChatStreamingParams {
   maxIterations: number;
   addMessageToSession: (sessionId: string, message: ChatMessage) => void;
@@ -167,30 +56,10 @@ export interface UseAIChatStreamingParams {
   updateMessageById: (sessionId: string, messageId: string, updater: (msg: ChatMessage) => ChatMessage) => void;
 }
 
-// -------------------------------------------------------------------
-// Hook return type
-// -------------------------------------------------------------------
-
 export interface UseAIChatStreamingReturn {
-  /** Set of session IDs currently streaming. */
   streamingSessionIds: Set<string>;
-  /** Set or unset streaming state for a session. */
   setStreamingForScope: (key: string, val: boolean) => void;
-  /** Ref to per-session abort controllers. */
   abortControllersRef: React.MutableRefObject<Map<string, AbortController>>;
-  /** Process a Catty agent stream. */
-  processCattyStream: (
-    streamSessionId: string,
-    model: ReturnType<typeof createModelFromConfig>,
-    systemPrompt: string,
-    tools: ReturnType<typeof createCattyTools>,
-    sdkMessages: Array<ModelMessage>,
-    signal: AbortSignal,
-    currentAssistantMsgId: string,
-    advancedParams?: ProviderAdvancedParams,
-    continuationContext?: CattyProviderContinuationContext,
-  ) => Promise<void>;
-  /** Send a message to the Catty agent (built-in). */
   sendToCattyAgent: (
     sessionId: string,
     sendScopeKey: string,
@@ -201,7 +70,6 @@ export interface UseAIChatStreamingReturn {
     context: SendToCattyContext,
     attachments?: ChatMessageAttachment[],
   ) => Promise<void>;
-  /** Send a message to an external SDK agent. */
   sendToExternalAgent: (
     sessionId: string,
     trimmed: string,
@@ -210,11 +78,9 @@ export interface UseAIChatStreamingReturn {
     attachedImages: Array<{ base64Data: string; mediaType: string; filename?: string; filePath?: string }>,
     context: SendToExternalContext,
   ) => Promise<void>;
-  /** Report a streaming error to the chat. */
   reportStreamError: (sessionId: string, abortSignal: AbortSignal, err: unknown) => void;
 }
 
-/** Context values needed by sendToCattyAgent that change frequently (avoids stale closures). */
 export interface SendToCattyContext {
   activeProvider: ProviderConfig | undefined;
   activeModelId: string;
@@ -229,9 +95,9 @@ export interface SendToCattyContext {
   autoTitleSession: (sessionId: string, text: string) => void;
   titleText?: string;
   selectedUserSkillSlugs?: string[];
+  permissionMode?: AIPermissionMode;
 }
 
-/** Context values needed by sendToExternalAgent that change frequently. */
 export interface SendToExternalContext {
   existingSessionId?: string;
   updateExternalSessionId?: (sessionId: string, externalSessionId: string | undefined) => void;
@@ -244,20 +110,16 @@ export interface SendToExternalContext {
   selectedUserSkillSlugs?: string[];
 }
 
-// -------------------------------------------------------------------
-// Hook implementation
-// -------------------------------------------------------------------
-
 export function useAIChatStreaming({
   maxIterations,
   addMessageToSession,
   updateLastMessage,
   updateMessageById,
 }: UseAIChatStreamingParams): UseAIChatStreamingReturn {
-  // Per-session streaming state (keyed by sessionId)
   const [streamingSessionIds, setStreamingSessions] = useState<Set<string>>(
     () => new Set(sharedStreamingSessionIds),
   );
+
   useEffect(() => {
     const syncFromStore = () => {
       setStreamingSessions(new Set(sharedStreamingSessionIds));
@@ -281,12 +143,7 @@ export function useAIChatStreaming({
     }
   }, []);
 
-  // Per-scope abort controllers
   const abortControllersRef = useRef<Map<string, AbortController>>(sharedAbortControllers);
-
-  // -------------------------------------------------------------------
-  // reportStreamError
-  // -------------------------------------------------------------------
 
   const reportStreamError = useCallback((
     sessionId: string,
@@ -294,12 +151,7 @@ export function useAIChatStreaming({
     err: unknown,
   ) => {
     if (abortSignal.aborted) return;
-    // Log the full unsanitized error for debugging
     console.error('[AIChatSidePanel] Stream error (full):', err);
-    // Pass the raw error to classifyError so it can inspect structured
-    // fields (statusCode, responseBody) from APICallError and friends;
-    // string-coercing here would strip the metadata we need to detect
-    // 413 / HTML-error-page / parse-failure scenarios.
     const errorInfo = classifyError(err);
     updateLastMessage(sessionId, msg => ({
       ...msg,
@@ -315,306 +167,14 @@ export function useAIChatStreaming({
     });
   }, [updateLastMessage, addMessageToSession]);
 
-  // -------------------------------------------------------------------
-  // processCattyStream
-  // -------------------------------------------------------------------
-
-  const processCattyStream = useCallback(async (
-    streamSessionId: string,
-    model: ReturnType<typeof createModelFromConfig>,
-    systemPrompt: string,
-    tools: ReturnType<typeof createCattyTools>,
-    sdkMessages: Array<ModelMessage>,
-    signal: AbortSignal,
-    currentAssistantMsgId: string,
-    advancedParams?: ProviderAdvancedParams,
-    continuationContext?: CattyProviderContinuationContext,
-  ): Promise<void> => {
-    const result = streamText({
-      model,
-      messages: sdkMessages,
-      system: systemPrompt,
-      tools,
-      stopWhen: stepCountIs(maxIterations),
-      abortSignal: signal,
-      includeRawChunks: true,
-      ...(advancedParams?.maxTokens != null && { maxOutputTokens: advancedParams.maxTokens }),
-      ...(advancedParams?.temperature != null && { temperature: advancedParams.temperature }),
-      ...(advancedParams?.topP != null && { topP: advancedParams.topP }),
-      ...(advancedParams?.frequencyPenalty != null && { frequencyPenalty: advancedParams.frequencyPenalty }),
-      ...(advancedParams?.presencePenalty != null && { presencePenalty: advancedParams.presencePenalty }),
-    });
-
-    // Track the current assistant message ID so updates target the correct message
-    let activeMsgId = currentAssistantMsgId;
-    let lastAddedRole: 'assistant' | 'tool' = 'assistant';
-    let hadToolProgress = false;
-    const reader = result.fullStream.getReader();
-
-    // -- Text-delta batching: accumulate deltas and flush periodically --
-    let pendingText = '';
-    let rafId: number | null = null;
-    const ensureAssistantMessage = (): string => {
-      if (lastAddedRole !== 'tool') return activeMsgId;
-
-      const newId = generateId();
-      addMessageToSession(streamSessionId, {
-        id: newId,
-        role: 'assistant',
-        content: '',
-        timestamp: Date.now(),
-      });
-      activeMsgId = newId;
-      lastAddedRole = 'assistant';
-      return activeMsgId;
-    };
-
-    const updateAssistantContinuation = (
-      messageId: string,
-      continuation: ProviderContinuation | undefined,
-      thinkingText = '',
-    ) => {
-      if (!continuation && !thinkingText) return;
-      const sourcedContinuation = withProviderContinuationSource(continuation, continuationContext?.source);
-      updateMessageById(streamSessionId, messageId, msg => {
-        const providerContinuation = mergeProviderContinuation(msg.providerContinuation, sourcedContinuation);
-        return {
-          ...msg,
-          ...(providerContinuation ? { providerContinuation } : {}),
-          ...(thinkingText ? { thinking: (msg.thinking || '') + thinkingText } : {}),
-        };
-      });
-    };
-
-    const getOpenAIReasoningText = (continuation: ProviderContinuation | undefined): string => {
-      const reasoningContent = continuation?.openAIChatAssistantFields?.reasoning_content;
-      return typeof reasoningContent === 'string' ? reasoningContent : '';
-    };
-
-    const flushText = () => {
-      if (pendingText) {
-        const text = pendingText;
-        pendingText = '';
-        if (lastAddedRole === 'tool') {
-          const newId = generateId();
-          addMessageToSession(streamSessionId, {
-            id: newId,
-            role: 'assistant',
-            content: text,
-            timestamp: Date.now(),
-          });
-          activeMsgId = newId;
-          lastAddedRole = 'assistant';
-        } else {
-          updateMessageById(streamSessionId, activeMsgId, msg => ({
-            ...msg,
-            content: msg.content + text,
-          }));
-        }
-      }
-      rafId = null;
-    };
-
-    const cancelPendingFlush = () => {
-      if (rafId !== null) {
-        cancelAnimationFrame(rafId);
-        rafId = null;
-      }
-    };
-
-    try {
-    while (true) {
-      let readResult: ReadableStreamReadResult<unknown>;
-      try {
-        readResult = await reader.read();
-      } catch (readErr) {
-        if (isRequestTooLargeError(readErr)) {
-          throw createCattyRequestTooLargeRetryError(readErr, hadToolProgress);
-        }
-        throw readErr;
-      }
-      const { done, value } = readResult;
-      if (done) break;
-      // Use the StreamChunk union for type narrowing instead of unsafe casts
-      const chunk = value as StreamChunk;
-      switch (chunk.type) {
-        case 'text':
-        case 'text-delta': {
-          const typedChunk = chunk as TextDeltaChunk;
-          const text = typedChunk.text ?? typedChunk.textDelta;
-          const providerOptions = normalizeProviderContinuationOptions(typedChunk.providerMetadata);
-          if (providerOptions) {
-            const messageId = ensureAssistantMessage();
-            updateAssistantContinuation(messageId, { textProviderOptions: providerOptions });
-          }
-          if (text) {
-            pendingText += text;
-            if (rafId === null) {
-              rafId = requestAnimationFrame(flushText);
-            }
-          }
-          break;
-        }
-        case 'reasoning':
-        case 'reasoning-start':
-        case 'reasoning-delta': {
-          cancelPendingFlush();
-          flushText();
-          const typedChunk = chunk as ReasoningChunk;
-          const rText = typedChunk.text ?? typedChunk.textDelta ?? typedChunk.delta ?? '';
-          const providerOptions = normalizeProviderContinuationOptions(typedChunk.providerMetadata);
-          const continuation = rText || providerOptions
-            ? {
-                reasoningParts: [{
-                  text: rText,
-                  ...(providerOptions ? { providerOptions } : {}),
-                }],
-              } satisfies ProviderContinuation
-            : undefined;
-          if (continuation || rText) {
-            const messageId = ensureAssistantMessage();
-            updateAssistantContinuation(messageId, continuation, rText);
-          }
-          break;
-        }
-        case 'raw': {
-          const typedChunk = chunk as RawChunk;
-          const continuation = extractProviderContinuationFromRawChunk(typedChunk.rawValue);
-          if (continuation) {
-            cancelPendingFlush();
-            flushText();
-            const messageId = ensureAssistantMessage();
-            updateAssistantContinuation(messageId, continuation, getOpenAIReasoningText(continuation));
-          }
-          break;
-        }
-        case 'reasoning-end':
-        case 'text-start':
-        case 'text-end':
-        case 'start':
-        case 'finish':
-        case 'start-step':
-        case 'finish-step':
-          break;
-        case 'tool-call': {
-          cancelPendingFlush();
-          flushText();
-          const typedChunk = chunk as ToolCallChunk;
-          hadToolProgress = true;
-          const messageId = ensureAssistantMessage();
-          const providerOptions = normalizeProviderContinuationOptions(typedChunk.providerMetadata);
-          updateMessageById(streamSessionId, messageId, msg => ({
-            ...msg,
-            toolCalls: [...(msg.toolCalls || []), {
-              id: typedChunk.toolCallId,
-              name: typedChunk.toolName,
-              arguments: (typedChunk.input ?? typedChunk.args) as Record<string, unknown>,
-            }],
-            executionStatus: 'running',
-            statusText: undefined,
-          }));
-          if (providerOptions) {
-            updateAssistantContinuation(messageId, {
-              toolCallProviderOptionsById: {
-                [typedChunk.toolCallId]: providerOptions,
-              },
-            });
-          }
-          break;
-        }
-        case 'tool-result': {
-          cancelPendingFlush();
-          flushText();
-          const typedChunk = chunk as ToolResultChunk;
-          hadToolProgress = true;
-          // Mark the assistant message's tool execution as completed
-          updateMessageById(streamSessionId, activeMsgId, msg =>
-            msg.role === 'assistant' && msg.executionStatus === 'running'
-              ? { ...msg, executionStatus: 'completed', statusText: undefined } : msg,
-          );
-          const toolOutput = typedChunk.output ?? typedChunk.result;
-          const toolError = isToolResultError(toolOutput);
-          addMessageToSession(streamSessionId, {
-            id: generateId(),
-            role: 'tool',
-            content: '',
-            toolResults: [{
-              toolCallId: typedChunk.toolCallId,
-              content: typeof toolOutput === 'string'
-                ? toolOutput
-                : JSON.stringify(toolOutput),
-              isError: toolError,
-            }],
-            timestamp: Date.now(),
-            executionStatus: 'completed',
-          });
-          lastAddedRole = 'tool';
-          break;
-        }
-        // tool-approval-request is no longer handled here — approval is now
-        // inside the tool's execute function via the approvalGate module.
-        // The SDK may still emit this chunk type but we simply ignore it.
-        case 'error': {
-          const typedChunk = chunk as ErrorChunk;
-          // Internal SDK reasoning/text state-machine errors (e.g. a
-          // third-party Anthropic-compat backend like DeepSeek's
-          // `-v4-flash` streaming thinking deltas without first emitting
-          // the `reasoning-start` content-block signal) leak through
-          // fullStream once per orphan delta. They're not user-facing
-          // errors — and worse, surfacing one assistant message per
-          // event breaks tool_use/tool_result contiguity on the next
-          // turn, which the Anthropic backend then rejects as
-          // `messages.N: tool_use ids were found without tool_result
-          // blocks immediately after`. Filter them out at the chunk
-          // boundary: drop the placeholder assistant message and keep
-          // accepting subsequent chunks, so the rest of the stream
-          // (real text, tool calls, the genuine `finish`) lands intact.
-          if (isSdkStreamStateError(typedChunk.error)) {
-            console.warn('[Catty] suppressed SDK stream state error:', typedChunk.error);
-            break;
-          }
-          if (isRequestTooLargeError(typedChunk.error)) {
-            cancelPendingFlush();
-            flushText();
-            throw createCattyRequestTooLargeRetryError(
-              typedChunk.error,
-              hadToolProgress,
-            );
-          }
-          cancelPendingFlush();
-          flushText();
-          updateMessageById(streamSessionId, activeMsgId, msg => ({
-            ...msg,
-            statusText: '',
-            executionStatus: msg.executionStatus === 'running' ? 'failed' : msg.executionStatus,
-          }));
-          addMessageToSession(streamSessionId, {
-            id: generateId(),
-            role: 'assistant',
-            content: '',
-            // Pass the raw error so classifyError can detect 413 / HTML /
-            // schema-parse scenarios via structured fields (statusCode,
-            // responseBody) instead of lossy string conversion.
-            errorInfo: classifyError(typedChunk.error),
-            timestamp: Date.now(),
-          });
-          break;
-        }
-        default:
-          break;
-      }
-    }
-    } finally {
-      cancelPendingFlush();
-      flushText();
-      reader.releaseLock();
-    }
-    return;
-  }, [maxIterations, addMessageToSession, updateMessageById]);
-
-  // -------------------------------------------------------------------
-  // sendToExternalAgent
-  // -------------------------------------------------------------------
+  const uiCallbacks = useCallback(() => ({
+    addMessageToSession,
+    updateLastMessage,
+    updateMessageById,
+    reportStreamError,
+    setStreamingForScope,
+    getLatestSession: (sessionId: string) => latestAISessionsSnapshot?.find(s => s.id === sessionId),
+  }), [addMessageToSession, updateLastMessage, updateMessageById, reportStreamError, setStreamingForScope]);
 
   const sendToExternalAgent = useCallback(async (
     sessionId: string,
@@ -625,130 +185,18 @@ export function useAIChatStreaming({
     context: SendToExternalContext,
   ) => {
     const bridge = getNetcattyBridge();
-    const userSkillsContext = await resolveUserSkillsContext(
+    await getAgentRuntime().runTurn({
+      backend: 'external-sdk',
+      chatSessionId: sessionId,
+      userText: trimmed,
+      signal: abortController.signal,
+      agentConfig,
+      attachedImages,
+      context,
       bridge,
-      trimmed,
-      context.selectedUserSkillSlugs,
-    );
-
-    const sdkBackend = getExternalAgentSdkBackend(agentConfig);
-    if (sdkBackend && bridge) {
-      const requestId = `sdk_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-
-      // Push terminal session metadata to MCP bridge
-      if (bridge?.aiMcpUpdateSessions) {
-        await bridge.aiMcpUpdateSessions(context.terminalSessions, sessionId);
-      }
-
-      // Mutable flag: set after tool-result, cleared when new assistant msg is created
-      let needsNewAssistantMsg = false;
-      const maybeCreateAssistantMsg = () => {
-        if (needsNewAssistantMsg) {
-          needsNewAssistantMsg = false;
-          addMessageToSession(sessionId, {
-            id: generateId(), role: 'assistant', content: '', timestamp: Date.now(),
-            model: agentConfig.name || 'external',
-          });
-        }
-      };
-
-      await runSdkAgentTurn(
-        bridge,
-        requestId,
-        sessionId,
-        agentConfig,
-        trimmed,
-        {
-          onTextDelta: (text: string) => {
-            maybeCreateAssistantMsg();
-            updateLastMessage(sessionId, msg => ({
-              ...msg,
-              content: msg.content + text,
-              statusText: undefined,
-              thinkingDurationMs: msg.thinking && !msg.thinkingDurationMs
-                ? Date.now() - msg.timestamp : msg.thinkingDurationMs,
-            }));
-          },
-          onThinkingDelta: (text: string) => {
-            maybeCreateAssistantMsg();
-            updateLastMessage(sessionId, msg => ({
-              ...msg, thinking: (msg.thinking || '') + text,
-            }));
-          },
-          onThinkingDone: () => {
-            updateLastMessage(sessionId, msg => ({
-              ...msg, thinkingDurationMs: msg.thinkingDurationMs || (Date.now() - msg.timestamp),
-            }));
-          },
-          onToolCall: (toolName: string, args: Record<string, unknown>, toolCallId?: string) => {
-            maybeCreateAssistantMsg();
-            updateLastMessage(sessionId, msg => ({
-              ...msg,
-              toolCalls: [...(msg.toolCalls || []), { id: toolCallId || `tc_${Date.now()}`, name: toolName, arguments: args }],
-              executionStatus: 'running',
-              statusText: undefined,
-            }));
-          },
-          onToolResult: (toolCallId: string, result: string, toolName?: string) => {
-            updateLastMessage(sessionId, msg => {
-              if (msg.role !== 'assistant' || msg.executionStatus !== 'running') return msg;
-              // Only patch tool call name if the existing name is missing/generic
-              // (don't overwrite a good name from onToolCall with a wrapper name from tool-result)
-              const updatedToolCalls = toolName && !toolName.includes('sdk_agent_dynamic_tool') && msg.toolCalls
-                ? msg.toolCalls.map(tc => tc.id === toolCallId && !tc.name ? { ...tc, name: toolName } : tc)
-                : msg.toolCalls;
-              return { ...msg, toolCalls: updatedToolCalls, executionStatus: 'completed', statusText: undefined };
-            });
-            const toolError = isToolResultError(result);
-            addMessageToSession(sessionId, {
-              id: generateId(), role: 'tool', content: '',
-              toolResults: [{ toolCallId, content: result, isError: toolError }],
-              timestamp: Date.now(), executionStatus: 'completed',
-            });
-            needsNewAssistantMsg = true;
-          },
-          onStatus: (message: string) => {
-            maybeCreateAssistantMsg();
-            updateLastMessage(sessionId, msg => ({ ...msg, statusText: message }));
-          },
-          onSessionId: (externalSessionId: string) => {
-            context.updateExternalSessionId?.(sessionId, externalSessionId);
-          },
-          onError: (error: string) => {
-            reportStreamError(sessionId, abortController.signal, error);
-            setStreamingForScope(sessionId, false);
-          },
-          onDone: () => {},
-        },
-        abortController.signal,
-        // Managed SDK agents (codex, claude) must resolve auth from their own
-        // CLI config/login state, so we deliberately pass no providerId here.
-        // See issue #705 for Codex; same reasoning for Claude.
-        undefined,
-        context.selectedAgentModel,
-        context.existingSessionId,
-        context.historyMessages,
-        attachedImages.length > 0 ? attachedImages : undefined,
-        context.toolIntegrationMode,
-        context.defaultTargetSession,
-        userSkillsContext,
-      );
-    } else {
-      // Managed agents always route through the SDK path above.
-      reportStreamError(
-        sessionId,
-        abortController.signal,
-        'This agent has no SDK backend configured. Re-discover it in Settings -> AI.',
-      );
-      setStreamingForScope(sessionId, false);
-    }
-  }, [
-    addMessageToSession, updateLastMessage, setStreamingForScope, reportStreamError,
-  ]);
-
-  // -------------------------------------------------------------------
-  // sendToCattyAgent
-  // -------------------------------------------------------------------
+      ui: uiCallbacks(),
+    });
+  }, [uiCallbacks]);
 
   const sendToCattyAgent = useCallback(async (
     sessionId: string,
@@ -761,450 +209,30 @@ export function useAIChatStreaming({
     attachments?: ChatMessageAttachment[],
   ) => {
     const bridge = getNetcattyBridge();
-    const userSkillsContext = await resolveUserSkillsContext(
-      bridge,
-      trimmed,
-      context.selectedUserSkillSlugs,
-    );
-    const getExecutorContext = context.getExecutorContext ?? (() => ({
-      sessions: context.terminalSessions,
-      workspaceId: context.scopeType === 'workspace' ? context.scopeTargetId : undefined,
-      workspaceName: context.scopeType === 'workspace' ? context.scopeLabel : undefined,
-    }));
-    const tools = createCattyTools(
-      bridge,
-      getExecutorContext,
-      context.commandBlocklist,
-      context.globalPermissionMode,
-      context.webSearchConfig ?? undefined,
-      sessionId,
-    );
-
-    const systemPrompt = buildSystemPrompt({
-      scopeType: context.scopeType, scopeLabel: context.scopeLabel,
-      hosts: context.terminalSessions.map(s => ({
-        sessionId: s.sessionId, hostname: s.hostname, label: s.label,
-        os: s.os,
-        username: s.username,
-        protocol: s.protocol,
-        shellType: s.shellType,
-        deviceType: s.deviceType,
-        connected: s.connected,
-      })),
-      permissionMode: context.globalPermissionMode,
-      webSearchEnabled: isWebSearchReady(context.webSearchConfig),
-      userSkillsContext,
-    });
-
-    // Guard: activeProvider must exist for Catty agent path
-    if (!context.activeProvider) {
-      reportStreamError(sessionId, abortController.signal, 'No AI provider configured. Please configure a provider in Settings → AI.');
-      return;
-    }
-
-    const activeModelId = context.activeModelId || context.activeProvider.defaultModel || '';
-    const continuationContext: CattyProviderContinuationContext = {
-      source: {
-        providerConfigId: context.activeProvider.id,
-        providerType: context.activeProvider.providerId,
-        modelId: activeModelId,
-      },
-      openAIChatAssistantFields: [],
-    };
-
     try {
-      let openAIChatAssistantFieldsByMessage = new Map<ModelMessage, OpenAIChatAssistantFields | undefined>();
-      const buildSdkMessages = (
-        allMessages: ChatMessage[],
-        includeCurrentUserMessage: boolean,
-        {
-          preserveTerminalToolResults = new Set<ToolResult>(),
-        }: {
-          preserveTerminalToolResults?: ReadonlySet<ToolResult>;
-        } = {},
-      ): Array<ModelMessage> => {
-        const { resolvedToolCallsByAssistant, toolCallByToolResult } = buildHistoricalToolReplayMaps(allMessages);
-        const nextFieldsByMessage = new Map<ModelMessage, OpenAIChatAssistantFields | undefined>();
-        const sdkMessages: Array<ModelMessage> = [];
-        let previousHistoryMessageWasToolResult = false;
-
-        for (const m of allMessages) {
-          const currentMessageFollowsToolResult = previousHistoryMessageWasToolResult;
-          if (m.role === 'user') {
-            // Historical attachments are replayed as placeholders so screenshots,
-            // files, and terminal selections do not balloon every follow-up request.
-            const messageAttachments = m.attachments ?? m.images;
-            sdkMessages.push({
-              role: 'user',
-              content: buildHistoricalUserReplayContent(m.content, messageAttachments ?? []),
-            });
-          } else if (m.role === 'assistant') {
-            const activeContinuation = isProviderContinuationForSource(
-              m.providerContinuation,
-              continuationContext.source,
-            )
-              ? m.providerContinuation
-              : undefined;
-            const openAIChatAssistantFields = getOpenAIChatAssistantFieldsForHistoryMessage(
-              m,
-              continuationContext.source,
-            );
-            if (m.toolCalls?.length) {
-              // Only include tool calls that have matching results
-              const resolvedToolCalls = resolvedToolCallsByAssistant.get(m);
-              const resolvedCalls = resolvedToolCalls
-                ? m.toolCalls.filter(tc => resolvedToolCalls.has(tc))
-                : [];
-              const contentParts: AssistantContentPart[] = [];
-              if (resolvedCalls.length > 0) {
-                for (const part of activeContinuation?.reasoningParts ?? []) {
-                  if (!part.text && !part.providerOptions) continue;
-                  contentParts.push({
-                    type: 'reasoning' as const,
-                    text: part.text,
-                    ...(part.providerOptions ? { providerOptions: part.providerOptions } : {}),
-                  });
-                }
-              }
-              if (m.content) {
-                contentParts.push({
-                  type: 'text' as const,
-                  text: m.content,
-                  ...(activeContinuation?.textProviderOptions ? { providerOptions: activeContinuation.textProviderOptions } : {}),
-                });
-              }
-              for (const tc of resolvedCalls) {
-                const providerOptions = activeContinuation?.toolCallProviderOptionsById?.[tc.id];
-                contentParts.push({
-                  type: 'tool-call' as const,
-                  toolCallId: tc.id,
-                  toolName: tc.name,
-                  input: tc.arguments ?? {},
-                  ...(providerOptions ? { providerOptions } : {}),
-                });
-              }
-              // If all tool calls were orphaned, just include the text content
-              if (contentParts.length > 0) {
-                const message: ModelMessage = { role: 'assistant', content: toAssistantModelContent(contentParts) };
-                sdkMessages.push(message);
-                if (resolvedCalls.length > 0) {
-                  rememberOpenAIChatAssistantFields(message, openAIChatAssistantFields, nextFieldsByMessage);
-                }
-              }
-            } else if (m.content) {
-              const contentParts: AssistantContentPart[] = [];
-              for (const part of activeContinuation?.reasoningParts ?? []) {
-                if (!part.text && !part.providerOptions) continue;
-                contentParts.push({
-                  type: 'reasoning' as const,
-                  text: part.text,
-                  ...(part.providerOptions ? { providerOptions: part.providerOptions } : {}),
-                });
-              }
-              contentParts.push({
-                type: 'text' as const,
-                text: m.content,
-                ...(activeContinuation?.textProviderOptions ? { providerOptions: activeContinuation.textProviderOptions } : {}),
-              });
-              const message: ModelMessage = {
-                role: 'assistant',
-                content: toAssistantModelContent(contentParts),
-              };
-              sdkMessages.push(message);
-              if (currentMessageFollowsToolResult) {
-                rememberOpenAIChatAssistantFields(message, openAIChatAssistantFields, nextFieldsByMessage);
-              }
-            }
-          } else if (m.role === 'tool' && m.toolResults?.length) {
-            sdkMessages.push({
-              role: 'tool',
-              content: m.toolResults.map(tr => {
-                const toolCall = toolCallByToolResult.get(tr);
-                return {
-                  type: 'tool-result' as const,
-                  toolCallId: tr.toolCallId,
-                  toolName: toolCall?.name ?? 'unknown',
-                  output: {
-                    type: 'text' as const,
-                    value: buildHistoricalToolResultReplayText(tr, toolCall, {
-                      preserveTerminalOutput: preserveTerminalToolResults.has(tr),
-                    }),
-                  },
-                };
-              }),
-            });
-          }
-          previousHistoryMessageWasToolResult = m.role === 'tool' && !!m.toolResults?.length;
-        }
-
-        if (includeCurrentUserMessage) {
-          // Build the current user message — include attachments as multimodal content
-          if (attachments?.length) {
-            const modelText = buildPromptWithTerminalSelectionAttachments(trimmed, attachments);
-            const modelAttachments = attachments.filter(
-              (attachment) => !isTerminalSelectionAttachment(attachment),
-            );
-            if (!modelAttachments.length) {
-              sdkMessages.push({ role: 'user', content: modelText });
-            } else {
-              const parts: Array<{ type: 'text'; text: string } | { type: 'image'; image: string; mediaType?: string } | { type: 'file'; data: string; mediaType: string; filename?: string }> = [];
-              parts.push({ type: 'text', text: modelText });
-              for (const att of modelAttachments) {
-                if (att.mediaType.startsWith('image/')) {
-                  parts.push({ type: 'image', image: att.base64Data, mediaType: att.mediaType });
-                } else {
-                  parts.push({ type: 'file', data: att.base64Data, mediaType: att.mediaType, filename: att.filename });
-                }
-              }
-              sdkMessages.push({ role: 'user', content: parts });
-            }
-          } else {
-            sdkMessages.push({ role: 'user', content: trimmed });
-          }
-        }
-
-        openAIChatAssistantFieldsByMessage = nextFieldsByMessage;
-        return sdkMessages;
-      };
-
-      const sdkMessages = buildSdkMessages(currentSession?.messages ?? [], true);
-      const collectToolResultsAfterMessage = (
-        messages: ChatMessage[],
-        messageId: string,
-      ): Set<ToolResult> => {
-        const results = new Set<ToolResult>();
-        let afterMessage = false;
-        for (const message of messages) {
-          if (message.id === messageId) {
-            afterMessage = true;
-            continue;
-          }
-          if (!afterMessage || message.role !== 'tool' || !message.toolResults?.length) continue;
-          for (const result of message.toolResults) {
-            results.add(result);
-          }
-        }
-        return results;
-      };
-
-      // Create model with placeholder API key — the main process injects the real
-      // decrypted key when the HTTP request is proxied through IPC, so plaintext
-      // keys never transit the renderer ↔ main IPC boundary.
-      let model;
-      try {
-        model = createModelFromConfig(
-          {
-            ...context.activeProvider,
-            defaultModel: activeModelId,
-          },
-          {
-            getOpenAIChatAssistantFields: () => continuationContext.openAIChatAssistantFields,
-          },
-        );
-      } catch (e) {
-        console.error('[Catty] Model creation failed:', e);
-        reportStreamError(sessionId, abortController.signal, `Model creation failed: ${e instanceof Error ? e.message : String(e)}`);
-        return;
-      }
-
-      const contextWindow = resolveContextWindow({
-        provider: context.activeProvider,
-        modelId: activeModelId,
-        defaultContextWindow: DEFAULT_CONTEXT_WINDOW_TOKENS,
+      await getAgentRuntime().runTurn({
+        backend: 'catty',
+        chatSessionId: sessionId,
+        sendScopeKey,
+        userText: trimmed,
+        signal: abortController.signal,
+        currentSession,
+        assistantMsgId,
+        context,
+        attachments,
+        maxIterations,
+        bridge,
+        ui: uiCallbacks(),
       });
-      const outputReserveTokens = Math.min(4096, Math.ceil(contextWindow * 0.05));
-      const getRequestReserveTokens = () => outputReserveTokens + estimateUnknownTokens({
-        systemPrompt,
-        toolNames: Object.keys(tools),
-        openAIChatAssistantFields: Array.from(openAIChatAssistantFieldsByMessage.values()),
-      });
-
-      const summarizeForCompaction = async (messagesToSummarize: ModelMessage[]) => {
-        updateLastMessage(sessionId, msg => ({ ...msg, statusText: 'Compacting earlier context...' }));
-        const result = await generateText({
-          model,
-          system: CONTEXT_COMPACTION_SYSTEM_PROMPT,
-          messages: [{
-            role: 'user',
-            content: `Summarize this earlier conversation context for the next model turn:\n\n${formatMessagesForCompaction(messagesToSummarize)}`,
-          }],
-          abortSignal: abortController.signal,
-          maxOutputTokens: 1600,
-          temperature: 0,
-        });
-        return result.text;
-      };
-      const prepareMessagesForStream = (messages: ModelMessage[]): ModelMessage[] => {
-        const pruned = pruneMessages({
-          messages,
-          reasoning: 'all',
-          emptyMessages: 'remove',
-        });
-        continuationContext.openAIChatAssistantFields = collectOpenAIChatAssistantFieldsForMessages(
-          pruned,
-          openAIChatAssistantFieldsByMessage,
-        );
-        return pruned;
-      };
-      const compactMessages = async (
-        messages: ModelMessage[],
-        {
-          force = false,
-          statusText,
-          fallbackLog,
-          compressForRequestTooLargeRetry = false,
-          compressionLog,
-        }: {
-          force?: boolean;
-          statusText?: string;
-          fallbackLog: string;
-          compressForRequestTooLargeRetry?: boolean;
-          compressionLog?: string;
-        },
-      ): Promise<ModelMessage[]> => {
-        const compressRetryMessages = (candidateMessages: ModelMessage[], log?: string): ModelMessage[] => {
-          if (!compressForRequestTooLargeRetry) return candidateMessages;
-          const compressed = compressMessagesForRequestTooLargeRetry(candidateMessages);
-          if (compressed.didAdjust && log) {
-            console.warn(log);
-          }
-          return compressed.messages;
-        };
-
-        try {
-          if (statusText) {
-            updateLastMessage(sessionId, msg => ({ ...msg, statusText }));
-          }
-          const inputMessages = compressRetryMessages(messages, compressionLog);
-          const compacted = await prepareContextCompaction({
-            messages: inputMessages,
-            contextWindow,
-            reservedTokens: getRequestReserveTokens(),
-            thresholdRatio: force ? 0 : undefined,
-            protectRecentMessages: DEFAULT_PROTECT_RECENT_MESSAGES,
-            summarize: summarizeForCompaction,
-          });
-          let nextMessages = force && !compacted.didCompact
-            ? keepRecentContextMessages(inputMessages, DEFAULT_PROTECT_RECENT_MESSAGES)
-            : compacted.messages;
-          return compressRetryMessages(nextMessages);
-        } catch (err) {
-          if (abortController.signal.aborted) throw err;
-          console.warn(fallbackLog, err);
-          const fallbackMessages = keepRecentContextMessages(messages, DEFAULT_PROTECT_RECENT_MESSAGES);
-          if (!compressForRequestTooLargeRetry) {
-            return fallbackMessages;
-          }
-          const compressed = compressMessagesForRequestTooLargeRetry(fallbackMessages);
-          if (compressed.didAdjust) {
-            console.warn('[Catty] Request content compressed after compaction fallback.');
-          }
-          return compressed.messages;
-        }
-      };
-      let messagesForStream = sdkMessages;
-      messagesForStream = await compactMessages(messagesForStream, {
-        fallbackLog: '[Catty] Context compaction failed; falling back to recent messages only:',
-      });
-
-      messagesForStream = prepareMessagesForStream(messagesForStream);
-
-      try {
-        await processCattyStream(
-          sessionId,
-          model,
-          systemPrompt,
-          tools,
-          messagesForStream,
-          abortController.signal,
-          assistantMsgId,
-          context.activeProvider?.advancedParams,
-          continuationContext,
-        );
-      } catch (streamErr) {
-        if (abortController.signal.aborted || !isRequestTooLargeError(streamErr)) {
-          throw streamErr;
-        }
-
-        console.warn('[Catty] Request hit HTTP 413; forcing context compaction and retrying once.', streamErr);
-        const statusText = 'Request was too large. Compacting context and retrying...';
-        const hadToolProgress = hadToolProgressBeforeRequestTooLarge(streamErr);
-        let retryBaseMessages = messagesForStream;
-        let retryAssistantMsgId = assistantMsgId;
-        if (hadToolProgress) {
-          const latestSession = latestAISessionsSnapshot?.find(session => session.id === sessionId);
-          if (latestSession) {
-            retryBaseMessages = buildSdkMessages(latestSession.messages, false, {
-              preserveTerminalToolResults: collectToolResultsAfterMessage(
-                latestSession.messages,
-                assistantMsgId,
-              ),
-            });
-          }
-          retryAssistantMsgId = generateId();
-          addMessageToSession(sessionId, {
-            id: retryAssistantMsgId,
-            role: 'assistant',
-            content: '',
-            timestamp: Date.now(),
-            model: activeModelId || context.activeProvider?.defaultModel || '',
-            providerId: context.activeProvider?.providerId,
-            statusText,
-          });
-        } else {
-          updateMessageById(sessionId, assistantMsgId, msg => ({
-            ...msg,
-            content: '',
-            thinking: undefined,
-            thinkingDurationMs: undefined,
-            providerContinuation: undefined,
-            toolCalls: undefined,
-            errorInfo: undefined,
-            executionStatus: undefined,
-            pendingApproval: undefined,
-            statusText,
-          }));
-        }
-        const retryMessages = prepareMessagesForStream(await compactMessages(retryBaseMessages, {
-          force: true,
-          statusText,
-          fallbackLog: '[Catty] Forced context compaction after 413 failed; falling back to recent messages only:',
-          compressForRequestTooLargeRetry: true,
-          compressionLog: '[Catty] Request content compressed after forced context compaction.',
-        }));
-
-        await processCattyStream(
-          sessionId,
-          model,
-          systemPrompt,
-          tools,
-          retryMessages,
-          abortController.signal,
-          retryAssistantMsgId,
-          context.activeProvider?.advancedParams,
-          continuationContext,
-        );
-      }
-    } catch (err) {
-      console.error('[Catty] streamText error:', err);
-      reportStreamError(sessionId, abortController.signal, err);
     } finally {
-      // Clear any lingering statusText when the stream finishes
-      updateLastMessage(sessionId, msg => msg.statusText ? { ...msg, statusText: '' } : msg);
-      setStreamingForScope(sessionId, false);
       abortControllersRef.current.delete(sessionId);
-      context.autoTitleSession(sessionId, context.titleText ?? trimmed);
     }
-  }, [
-    processCattyStream, reportStreamError, setStreamingForScope,
-    addMessageToSession, updateLastMessage, updateMessageById,
-  ]);
+  }, [maxIterations, uiCallbacks]);
 
   return {
     streamingSessionIds,
     setStreamingForScope,
     abortControllersRef,
-    processCattyStream,
     sendToCattyAgent,
     sendToExternalAgent,
     reportStreamError,

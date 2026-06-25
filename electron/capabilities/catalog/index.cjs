@@ -5,6 +5,7 @@ const { TERMINAL_CAPABILITIES } = require("./terminal.cjs");
 const { SFTP_CAPABILITIES } = require("./sftp.cjs");
 const { VAULT_CAPABILITIES } = require("./vault.cjs");
 const { PORT_FORWARD_CAPABILITIES } = require("./portforward.cjs");
+const { HARNESS_CAPABILITIES } = require("./harness.cjs");
 
 const ALL_CAPABILITIES = Object.freeze([
   ...META_CAPABILITIES,
@@ -12,6 +13,7 @@ const ALL_CAPABILITIES = Object.freeze([
   ...SFTP_CAPABILITIES,
   ...VAULT_CAPABILITIES,
   ...PORT_FORWARD_CAPABILITIES,
+  ...HARNESS_CAPABILITIES,
 ]);
 
 module.exports = {
@@ -20,5 +22,6 @@ module.exports = {
   SFTP_CAPABILITIES,
   VAULT_CAPABILITIES,
   PORT_FORWARD_CAPABILITIES,
+  HARNESS_CAPABILITIES,
   ALL_CAPABILITIES,
 };

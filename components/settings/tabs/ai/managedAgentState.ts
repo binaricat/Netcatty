@@ -1,15 +1,12 @@
 import type { ExternalAgentConfig } from "../../../../infrastructure/ai/types";
 import {
   type ManagedAgentKey,
+  getExternalAgentSdkBackend,
+  isPathLikeCommand,
 } from "../../../../infrastructure/ai/managedAgents";
 import type { AgentPathInfo } from "./types";
 import { AGENT_DEFAULTS } from "./types";
 import { buildCodebuddyEnv } from "./codebuddyConfigEnv";
-
-function isPathLikeCommand(command: string | undefined): boolean {
-  const normalized = String(command || "").trim();
-  return normalized.includes("/") || normalized.includes("\\");
-}
 
 function getAutoManagedAgentStoredPath(
   agents: ExternalAgentConfig[],

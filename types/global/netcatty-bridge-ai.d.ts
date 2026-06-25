@@ -94,6 +94,7 @@ declare global {
     }>;
     aiMcpUpdateSessions?(sessions: Array<{
       sessionId: string;
+      hostId?: string;
       hostname: string;
       label: string;
       os?: string;
@@ -102,7 +103,11 @@ declare global {
       shellType?: string;
       deviceType?: string;
       connected: boolean;
+      hostChain?: Array<{ hostId: string; label?: string; hostname?: string }>;
+      activePortForwards?: Array<{ ruleId: string; label?: string; type?: string; localPort?: number; status?: string }>;
     }>, chatSessionId?: string): Promise<{ ok: boolean }>;
+    onVaultAgentRequest?(cb: (payload: { requestId: string; op: string; params: Record<string, unknown> }) => void): () => void;
+    respondVaultAgent?(requestId: string, result: Record<string, unknown>): Promise<{ ok: boolean; error?: string }>;
     aiMcpSetToolIntegrationMode?(mode: 'mcp' | 'skills'): Promise<{ ok: boolean; error?: string }>;
     aiUserSkillsGetStatus?(): Promise<{
       ok: boolean;
@@ -149,6 +154,9 @@ declare global {
     }>;
     aiSdkAgentStream?(requestId: string, chatSessionId: string, sdkBackend: string, prompt: string, cwd?: string, providerId?: string, model?: string, existingSessionId?: string, historyMessages?: Array<{ role: 'user' | 'assistant'; content: string }>, images?: Array<{ base64Data: string; mediaType: string; filename?: string; filePath?: string }>, toolIntegrationMode?: 'mcp' | 'skills', defaultTargetSession?: { sessionId: string; hostname: string; label: string; os?: string; username?: string; protocol?: string; shellType?: string; deviceType?: string; connected: boolean; source: 'scope-target' | 'only-connected-in-scope' }, userSkillsContext?: string, agentEnv?: Record<string, string>, agentCommand?: string): Promise<{ ok: boolean; error?: string }>;
     aiSdkAgentListModels?(sdkBackend: string, cwd?: string, providerId?: string, chatSessionId?: string, agentEnv?: Record<string, string>, agentCommand?: string): Promise<{ ok: boolean; models?: Array<{ id: string; name: string; description?: string; thinkingLevels?: string[] }>; currentModelId?: string | null; error?: string }>;
+    aiCattyCancelExec?(chatSessionId: string): Promise<unknown>;
+    aiSetChatSessionCancelled?(chatSessionId: string, cancelled?: boolean): Promise<{ ok: boolean; error?: string }>;
+    aiMcpSyncPermissionGrants?(grants: Array<Record<string, unknown>>): Promise<{ ok: boolean; count?: number; error?: string }>;
     aiSdkAgentCancel?(requestId: string, chatSessionId?: string): Promise<{ ok: boolean; error?: string }>;
     aiSdkAgentCleanup?(chatSessionId: string): Promise<{ ok: boolean }>;
     onAiSdkAgentEvent?(requestId: string, cb: (event: Record<string, unknown>) => void): () => void;

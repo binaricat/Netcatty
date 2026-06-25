@@ -84,6 +84,32 @@ function evaluateRpcPermission({
   };
 }
 
+function evaluatePermissionWithGrants(ctx, grants = []) {
+  const base = evaluateRpcPermission(ctx);
+  if (!base.allowed || !base.requiresApproval || !base.capability) {
+    return base;
+  }
+
+  const { matchPermissionGrant } = require("../shared/permissionGrants.cjs");
+  const params = ctx?.params && typeof ctx.params === "object" ? ctx.params : {};
+  const matched = matchPermissionGrant(grants, {
+    capabilityId: base.capability.id,
+    chatSessionId: params.chatSessionId,
+    sessionId: params.sessionId,
+    args: params,
+  });
+
+  if (matched) {
+    return {
+      ...base,
+      requiresApproval: false,
+      matchedGrantId: matched.id,
+    };
+  }
+
+  return base;
+}
+
 function buildRpcMethodSet(surface, predicate) {
   const { getRpcMethodsForSurface } = require("./registry.cjs");
   const methods = new Set();
@@ -132,6 +158,7 @@ module.exports = {
   requiresApprovalInConfirmMode,
   isBlockedInObserverMode,
   evaluateRpcPermission,
+  evaluatePermissionWithGrants,
   BUILTIN_WRITE_RPC_METHODS,
   BUILTIN_APPROVAL_RPC_METHODS,
   PUBLIC_WRITE_RPC_METHODS,

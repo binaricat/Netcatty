@@ -28,6 +28,10 @@ import {
   type ApprovalRequest,
 } from '../../infrastructure/ai/shared/approvalGate';
 import {
+  buildGrantFromApproval,
+  resolveCapabilityId,
+} from '../../infrastructure/ai/harness/permissionGrants';
+import {
   getAIPanelDiagnosticHiddenParts,
   getAIPanelProfilerProps,
   isAIPanelDiagnosticPartHidden,
@@ -70,8 +74,16 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({ messages, isStreaming
     });
   }, []);
 
-  const handleApprove = useCallback((toolCallId: string) => {
+  const handleApproveOnce = useCallback((toolCallId: string) => {
     resolveApproval(toolCallId, true);
+    setPendingApprovals(prev => { const m = new Map(prev); m.delete(toolCallId); return m; });
+    setResolvedApprovals(prev => new Map(prev).set(toolCallId, true));
+  }, []);
+
+  const handleAlwaysAllow = useCallback((toolCallId: string, request: ApprovalRequest) => {
+    const capabilityId = request.capabilityId ?? resolveCapabilityId(request.toolName);
+    const persistGrant = buildGrantFromApproval(capabilityId, request.args, request.chatSessionId);
+    resolveApproval(toolCallId, { approved: true, persistGrant });
     setPendingApprovals(prev => { const m = new Map(prev); m.delete(toolCallId); return m; });
     setResolvedApprovals(prev => new Map(prev).set(toolCallId, true));
   }, []);
@@ -343,7 +355,13 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({ messages, isStreaming
                               args={tc.arguments}
                               isInterrupted={!isPending}
                               approvalStatus={approvalStatus}
-                              onApprove={() => handleApprove(tc.id)}
+                              onApproveOnce={() => handleApproveOnce(tc.id)}
+                              onAlwaysAllow={() => handleAlwaysAllow(tc.id, pendingApprovals.get(tc.id) ?? {
+                                toolCallId: tc.id,
+                                toolName: tc.name,
+                                args: tc.arguments ?? {},
+                                chatSessionId: activeSessionId ?? undefined,
+                              })}
                               onReject={() => handleReject(tc.id)}
                             />
                           </div>
@@ -408,7 +426,13 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({ messages, isStreaming
                       args={tc.arguments}
                       isLoading={isToolRunning && !isPending}
                       approvalStatus={approvalStatus}
-                      onApprove={() => handleApprove(tc.id)}
+                      onApproveOnce={() => handleApproveOnce(tc.id)}
+                      onAlwaysAllow={() => handleAlwaysAllow(tc.id, pendingApprovals.get(tc.id) ?? {
+                        toolCallId: tc.id,
+                        toolName: tc.name,
+                        args: tc.arguments ?? {},
+                        chatSessionId: activeSessionId ?? undefined,
+                      })}
                       onReject={() => handleReject(tc.id)}
                     />
                   </div>
@@ -431,7 +455,8 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({ messages, isStreaming
                     isLoading={false}
                     isInterrupted={false}
                     approvalStatus={'pending'}
-                    onApprove={() => handleApprove(id)}
+                    onApproveOnce={() => handleApproveOnce(id)}
+                    onAlwaysAllow={() => handleAlwaysAllow(id, req)}
                     onReject={() => handleReject(id)}
                   />
                 </div>

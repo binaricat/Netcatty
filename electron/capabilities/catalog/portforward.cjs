@@ -7,7 +7,7 @@ const PORT_FORWARD_CAPABILITIES = [
   {
     id: "portforward.rules.list",
     domain: "portforward",
-    status: CAPABILITY_STATUS.PLANNED,
+    status: CAPABILITY_STATUS.IMPLEMENTED,
     description: "List persisted port forwarding rules.",
     policy: {
       write: false,
@@ -27,7 +27,7 @@ const PORT_FORWARD_CAPABILITIES = [
   {
     id: "portforward.tunnels.list",
     domain: "portforward",
-    status: CAPABILITY_STATUS.PLANNED,
+    status: CAPABILITY_STATUS.IMPLEMENTED,
     description: "List active port forwarding tunnels.",
     policy: {
       write: false,
@@ -47,7 +47,7 @@ const PORT_FORWARD_CAPABILITIES = [
   {
     id: "portforward.start",
     domain: "portforward",
-    status: CAPABILITY_STATUS.PLANNED,
+    status: CAPABILITY_STATUS.IMPLEMENTED,
     description: "Start a port forwarding tunnel for a rule.",
     policy: {
       write: true,
@@ -67,7 +67,7 @@ const PORT_FORWARD_CAPABILITIES = [
   {
     id: "portforward.stop",
     domain: "portforward",
-    status: CAPABILITY_STATUS.PLANNED,
+    status: CAPABILITY_STATUS.IMPLEMENTED,
     description: "Stop an active port forwarding tunnel.",
     policy: {
       write: true,

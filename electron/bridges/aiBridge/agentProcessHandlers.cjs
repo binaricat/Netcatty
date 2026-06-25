@@ -69,6 +69,12 @@ function registerAgentProcessHandlers(ctx) {
     return { ok: true };
   });
 
+  ipcMain.handle("netcatty:ai:mcp:sync-permission-grants", async (event, { grants }) => {
+    if (!validateSenderOrSettings(event)) return { ok: false, error: "Unauthorized IPC sender" };
+    mcpServerBridge.setPermissionGrants(grants);
+    return { ok: true, count: mcpServerBridge.getPermissionGrants().length };
+  });
+
   // ── MCP Approval response (renderer → main) ──
   ipcMain.handle("netcatty:ai:mcp:approval-response", async (event, { approvalId, approved }) => {
     if (!validateSender(event)) return { ok: false, error: "Unauthorized IPC sender" };

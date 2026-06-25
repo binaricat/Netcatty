@@ -48,7 +48,9 @@ import {
 import { getScopedHistorySessions } from './ai/scopedHistorySessions';
 import { buildExternalAgentHistoryMessagesForBridge } from './ai/externalAgentHistory';
 import { canSendWithAgent, findEnabledExternalAgent } from './ai/agentSendEligibility';
-import { clearAllPendingApprovals } from '../infrastructure/ai/shared/approvalGate';
+import { setGrantPersister } from '../infrastructure/ai/shared/approvalGate';
+import { stopAgentTurn } from '../infrastructure/ai/harness/agentStop';
+import { useAIPermissionGrantsState } from '../application/state/useAIPermissionGrantsState';
 import { useConversationExport } from './ai/hooks/useConversationExport';
 import type { AIChatSidePanelProps } from './AIChatSidePanel.types';
 import {
@@ -95,12 +97,7 @@ if (typeof window !== 'undefined') {
   subscribeUserSkillsStatusChanged(invalidateUserSkillsStatusCache);
 }
 
-function getManualAgentCommand(config: ExternalAgentConfig | null | undefined): string | undefined {
-  const command = String(config?.command || '').trim();
-  return config?.commandSource === 'manual' && command ? command : undefined;
-}
-
-function loadUserSkillsStatus(
+import { getManualAgentCommand } from '../../../infrastructure/ai/managedAgents';
   bridge: ReturnType<typeof getNetcattyBridge>,
 ): Promise<UserSkillsStatusLoadResult> {
   const requestVersion = userSkillsStatusCacheVersion;
@@ -989,21 +986,29 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     clearScopeDraft, showScopeSessionView, setActiveSessionId,
   ]);
 
-  const stopStreamingForSession = useCallback((sessionId: string) => {
+  const stopStreamingForSession = useCallback(async (sessionId: string) => {
     const controller = abortControllersRef.current.get(sessionId);
-    controller?.abort();
-    abortControllersRef.current.delete(sessionId);
     setStreamingForScope(sessionId, false);
     updateLastMessage(sessionId, (msg) => ({
       ...msg,
       statusText: '',
       executionStatus: msg.executionStatus === 'running' ? 'cancelled' : msg.executionStatus,
     }));
-    clearAllPendingApprovals(sessionId);
-    const bridge = getNetcattyBridge();
-    bridge?.aiCattyCancelExec?.(sessionId);
-    bridge?.aiSdkAgentCancel?.('', sessionId);
+    await stopAgentTurn({
+      chatSessionId: sessionId,
+      abortController: controller,
+      bridge: getNetcattyBridge(),
+      reason: 'user',
+    });
+    abortControllersRef.current.delete(sessionId);
   }, [setStreamingForScope, updateLastMessage, abortControllersRef]);
+
+  const { addGrant } = useAIPermissionGrantsState();
+
+  useEffect(() => {
+    setGrantPersister((rule) => { addGrant(rule); });
+    return () => { setGrantPersister(null); };
+  }, [addGrant]);
 
   const handleStop = useCallback(() => {
     if (!activeSessionId) return;

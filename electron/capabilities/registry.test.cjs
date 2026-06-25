@@ -13,12 +13,10 @@ const {
 } = require("./registry.cjs");
 const { CAPABILITY_STATUS, CAPABILITY_SURFACES } = require("./constants.cjs");
 
-test("registry contains implemented and planned capabilities", () => {
+test("registry contains implemented capabilities", () => {
   assert.ok(ALL_CAPABILITIES.length >= 20);
   const implemented = listCapabilities({ status: CAPABILITY_STATUS.IMPLEMENTED });
-  const planned = listCapabilities({ status: CAPABILITY_STATUS.PLANNED });
-  assert.ok(implemented.length > 0);
-  assert.ok(planned.length > 0);
+  assert.ok(implemented.length >= 20);
 });
 
 test("registry resolves builtin rpc methods and mcp tools", () => {
@@ -41,7 +39,7 @@ test("registry resolves cli commands", () => {
   assert.equal(sftpList?.id, "sftp.list");
 });
 
-test("planned vault and portforward capabilities are registered", () => {
-  assert.equal(getCapabilityById("vault.host.notes.get")?.status, CAPABILITY_STATUS.PLANNED);
-  assert.equal(getCapabilityById("portforward.start")?.status, CAPABILITY_STATUS.PLANNED);
+test("vault and portforward capabilities are implemented", () => {
+  assert.equal(getCapabilityById("vault.host.notes.get")?.status, CAPABILITY_STATUS.IMPLEMENTED);
+  assert.equal(getCapabilityById("portforward.start")?.status, CAPABILITY_STATUS.IMPLEMENTED);
 });

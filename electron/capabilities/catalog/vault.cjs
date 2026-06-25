@@ -7,7 +7,7 @@ const VAULT_CAPABILITIES = [
   {
     id: "vault.host.get",
     domain: "vault",
-    status: CAPABILITY_STATUS.PLANNED,
+    status: CAPABILITY_STATUS.IMPLEMENTED,
     description: "Get host metadata from the vault.",
     policy: {
       write: false,
@@ -21,12 +21,13 @@ const VAULT_CAPABILITIES = [
     surfaces: {
       cli: { command: ["vault", "host", "get"] },
       global: { rpcMethod: "vault/host/get" },
+      public: { rpcMethod: "public/vault/host/get", mcpTool: "host_get" },
     },
   },
   {
     id: "vault.host.notes.get",
     domain: "vault",
-    status: CAPABILITY_STATUS.PLANNED,
+    status: CAPABILITY_STATUS.IMPLEMENTED,
     description: "Read host notes from the vault.",
     policy: {
       write: false,
@@ -46,7 +47,7 @@ const VAULT_CAPABILITIES = [
   {
     id: "vault.host.notes.set",
     domain: "vault",
-    status: CAPABILITY_STATUS.PLANNED,
+    status: CAPABILITY_STATUS.IMPLEMENTED,
     description: "Update host notes in the vault.",
     policy: {
       write: true,
@@ -60,12 +61,13 @@ const VAULT_CAPABILITIES = [
     surfaces: {
       cli: { command: ["vault", "host-notes", "set"] },
       global: { rpcMethod: "vault/host/notes/set" },
+      public: { rpcMethod: "public/vault/hostNotes/set", mcpTool: "host_notes_set" },
     },
   },
   {
     id: "vault.snippets.list",
     domain: "vault",
-    status: CAPABILITY_STATUS.PLANNED,
+    status: CAPABILITY_STATUS.IMPLEMENTED,
     description: "List code snippets stored in the vault.",
     policy: {
       write: false,
@@ -85,7 +87,7 @@ const VAULT_CAPABILITIES = [
   {
     id: "vault.snippets.get",
     domain: "vault",
-    status: CAPABILITY_STATUS.PLANNED,
+    status: CAPABILITY_STATUS.IMPLEMENTED,
     description: "Get a single code snippet from the vault.",
     policy: {
       write: false,
@@ -105,7 +107,7 @@ const VAULT_CAPABILITIES = [
   {
     id: "vault.snippets.run",
     domain: "vault",
-    status: CAPABILITY_STATUS.PLANNED,
+    status: CAPABILITY_STATUS.IMPLEMENTED,
     description: "Resolve snippet variables and execute a snippet in a terminal session.",
     policy: {
       write: true,

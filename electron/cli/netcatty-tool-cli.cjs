@@ -4,44 +4,29 @@
 const path = require("node:path");
 
 const { connectClient, createError } = require("./netcattyRpcClient.cjs");
-const { listCliCapabilities } = require("../capabilities/adapters/cliAdapter.cjs");
+const {
+  buildCatalogCliParams,
+  formatCliHelpLines,
+  getCliRpcMethod,
+  listCliCapabilities,
+} = require("../capabilities/adapters/cliAdapter.cjs");
+const { getCapabilityByCliCommand } = require("../capabilities/registry.cjs");
 const { CAPABILITY_STATUS } = require("../capabilities/constants.cjs");
 
 function printHelp() {
+  const catalogLines = formatCliHelpLines().join("\n");
   process.stdout.write(
     "Netcatty Tool CLI\n\n" +
     "Usage:\n" +
-    "  netcatty-tool-cli status [--json]\n" +
-    "  netcatty-tool-cli env --chat-session <id> [--json] [--scope-session <session-id> ...]\n" +
-    "  netcatty-tool-cli session --session <id> --chat-session <id> [--json] [--scope-session <session-id> ...]\n" +
-    "  netcatty-tool-cli exec --session <id> --chat-session <id> [--json] [--] <shell-ready-command>\n" +
-    "  netcatty-tool-cli job-start --session <id> --chat-session <id> [--json] [--] <shell-ready-command>\n" +
-    "  netcatty-tool-cli job-poll --job <id> --chat-session <id> [--offset <n>] [--json]\n" +
-    "  netcatty-tool-cli job-stop --job <id> --chat-session <id> [--json]\n" +
-    "  netcatty-tool-cli sftp list --session <id> --remote-path <remote-path> --chat-session <id> [--encoding <enc>] [--json] [--scope-session <session-id> ...]\n" +
-    "  netcatty-tool-cli sftp read --session <id> --remote-path <remote-path> --chat-session <id> [--encoding <enc>] [--json] [--scope-session <session-id> ...]\n" +
-    "  netcatty-tool-cli sftp write --session <id> --remote-path <remote-path> --content <text> --chat-session <id> [--encoding <enc>] [--json] [--scope-session <session-id> ...]\n" +
-    "  netcatty-tool-cli sftp download --session <id> --remote-path <remote-path> --local-path <local-path> --chat-session <id> [--encoding <enc>] [--json] [--scope-session <session-id> ...]\n" +
-    "  netcatty-tool-cli sftp upload --session <id> --local-path <local-path> --remote-path <remote-path> --chat-session <id> [--encoding <enc>] [--json] [--scope-session <session-id> ...]\n" +
-    "  netcatty-tool-cli sftp mkdir --session <id> --remote-path <remote-path> --chat-session <id> [--encoding <enc>] [--json] [--scope-session <session-id> ...]\n" +
-    "  netcatty-tool-cli sftp delete --session <id> --remote-path <remote-path> --chat-session <id> [--encoding <enc>] [--json] [--scope-session <session-id> ...]\n" +
-    "  netcatty-tool-cli sftp rename --session <id> --old-remote-path <remote-path> --new-remote-path <remote-path> --chat-session <id> [--encoding <enc>] [--json] [--scope-session <session-id> ...]\n" +
-    "  netcatty-tool-cli sftp stat --session <id> --remote-path <remote-path> --chat-session <id> [--encoding <enc>] [--json] [--scope-session <session-id> ...]\n" +
-    "  netcatty-tool-cli sftp chmod --session <id> --remote-path <remote-path> --mode <octal> --chat-session <id> [--encoding <enc>] [--json] [--scope-session <session-id> ...]\n" +
-    "  netcatty-tool-cli sftp home --session <id> --chat-session <id> [--json] [--scope-session <session-id> ...]\n" +
-    "  netcatty-tool-cli cancel --chat-session <id> [--json]\n" +
-    "  netcatty-tool-cli resume --chat-session <id> [--json]\n" +
-    "  netcatty-tool-cli capabilities [--json] [--status implemented|planned|all]\n" +
-    "  netcatty-tool-cli help\n\n" +
+    catalogLines + "\n\n" +
     "Examples:\n" +
     "  netcatty-tool-cli status --json\n" +
     "  netcatty-tool-cli env --chat-session ai_123 --json\n" +
     "  netcatty-tool-cli session --session sess_123 --json --chat-session ai_123\n" +
     "  netcatty-tool-cli exec --session sess_123 --chat-session ai_123 --json -- \"pwd\"\n" +
-    "  netcatty-tool-cli job-start --session sess_123 --chat-session ai_123 --json -- \"npm run dev\"\n" +
-    "  netcatty-tool-cli job-poll --job job_123 --chat-session ai_123 --offset 0 --json\n" +
-    "  netcatty-tool-cli sftp list --session sess_123 --remote-path /etc --chat-session ai_123 --json\n" +
-    "  netcatty-tool-cli sftp download --session sess_123 --remote-path /etc/hosts --local-path ./hosts.txt --chat-session ai_123 --json\n\n" +
+    "  netcatty-tool-cli vault host get --host-id host_123 --json\n" +
+    "  netcatty-tool-cli snippets run --snippet-id snip_1 --session sess_123 --chat-session ai_123 --json\n" +
+    "  netcatty-tool-cli portforward rules list --json\n\n" +
     "Notes:\n" +
     "  - Start the Netcatty desktop app before using this CLI.\n" +
     "  - This CLI is intended as an internal Skills + CLI transport, not a general customer-facing shell tool.\n" +
@@ -50,6 +35,7 @@ function printHelp() {
     "  - `job-start` always requires both --session <id> and --chat-session <id>.\n" +
     "  - `job-poll` and `job-stop` always require both --job <id> and --chat-session <id>.\n" +
     "  - Every `sftp <op>` always requires both --session <id> and --chat-session <id>, and only works on connected SSH-backed sessions.\n" +
+    "  - Vault/portforward/snippet commands use catalog-driven dispatch; see `capabilities --json` for the full list.\n" +
     "  - After `--`, pass exactly one shell-ready command string. Preserve quoting inside that one argument.\n" +
     "  - `cancel` stops in-flight execs, session-backed SFTP transfers, and running jobs for that chat session, then blocks further execs until `resume`.\n",
   );
@@ -85,6 +71,11 @@ function parseArgs(argv) {
     content: null,
     mode: null,
     encoding: null,
+    hostId: null,
+    snippetId: null,
+    ruleId: null,
+    notes: null,
+    variables: null,
     command: [],
   };
 
@@ -158,6 +149,31 @@ function parseArgs(argv) {
     }
     if (arg === "--encoding") {
       opts.encoding = readFlagValue(args, i + 1);
+      i += 1;
+      continue;
+    }
+    if (arg === "--host-id") {
+      opts.hostId = readFlagValue(args, i + 1);
+      i += 1;
+      continue;
+    }
+    if (arg === "--snippet-id") {
+      opts.snippetId = readFlagValue(args, i + 1);
+      i += 1;
+      continue;
+    }
+    if (arg === "--rule-id") {
+      opts.ruleId = readFlagValue(args, i + 1);
+      i += 1;
+      continue;
+    }
+    if (arg === "--notes") {
+      opts.notes = readFlagValue(args, i + 1);
+      i += 1;
+      continue;
+    }
+    if (arg === "--variables") {
+      opts.variables = readFlagValue(args, i + 1);
       i += 1;
       continue;
     }
@@ -691,6 +707,31 @@ async function run() {
       process.stdout.write(opts.json
         ? `${JSON.stringify(payload, null, 2)}\n`
         : `Chat session ${opts.chatSessionId} ${cancelled ? "cancelled" : "resumed"}.\n`);
+      return;
+    }
+
+    const catalogCapability = getCapabilityByCliCommand(positionals);
+    if (catalogCapability) {
+      const rpcMethod = getCliRpcMethod(positionals);
+      if (!rpcMethod) {
+        throw createError("INVALID_ARGUMENT", `No RPC mapping for command: ${positionals.join(" ")}`);
+      }
+      if (catalogCapability.policy?.requiresChatSession && !opts.chatSessionId) {
+        throw createError(
+          "INVALID_ARGUMENT",
+          `Missing required --chat-session <id> for ${positionals.join(" ")}.`,
+        );
+      }
+      const params = buildCatalogCliParams(catalogCapability.id, opts, createError);
+      const result = ensureBridgeCallOk(
+        await client.call(rpcMethod, { ...params, ...buildScopeParams(opts) }),
+        "CAPABILITY_RPC_FAILED",
+        `Failed to execute ${catalogCapability.id}`,
+      );
+      const payload = { ok: true, ...result };
+      process.stdout.write(opts.json
+        ? `${JSON.stringify(payload, null, 2)}\n`
+        : `${JSON.stringify(result, null, 2)}\n`);
       return;
     }
 

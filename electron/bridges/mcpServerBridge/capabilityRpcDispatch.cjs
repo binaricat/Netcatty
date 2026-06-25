@@ -1,0 +1,123 @@
+"use strict";
+
+const { CAPABILITY_STATUS, CAPABILITY_SURFACES } = require("../../capabilities/constants.cjs");
+const { getCapabilityByRpcMethod } = require("../../capabilities/registry.cjs");
+const { getMcpToolNameForRpcMethod } = require("../../capabilities/adapters/mcpAdapter.cjs");
+const { createVaultService } = require("../../capabilities/services/vaultService.cjs");
+const { createPortForwardService } = require("../../capabilities/services/portforwardService.cjs");
+
+const UNROUTED = Symbol("capability-rpc-unrouted");
+
+const SERVICE_BINDINGS = Object.freeze({
+  "vault.host.get": { domain: "vault", method: "getHost" },
+  "vault.host.notes.get": { domain: "vault", method: "getHostNotes" },
+  "vault.host.notes.set": { domain: "vault", method: "setHostNotes" },
+  "vault.snippets.list": { domain: "vault", method: "listSnippets" },
+  "vault.snippets.get": { domain: "vault", method: "getSnippet" },
+  "vault.snippets.run": { domain: "vault", method: "runSnippet" },
+  "portforward.rules.list": { domain: "portforward", method: "listRules" },
+  "portforward.tunnels.list": { domain: "portforward", method: "listTunnels" },
+  "portforward.start": { domain: "portforward", method: "start" },
+  "portforward.stop": { domain: "portforward", method: "stop" },
+});
+
+function resolveCapabilitySurface(rpcMethod) {
+  for (const surface of [
+    CAPABILITY_SURFACES.PUBLIC,
+    CAPABILITY_SURFACES.GLOBAL,
+    CAPABILITY_SURFACES.BUILTIN,
+  ]) {
+    if (rpcMethod.startsWith("netcatty/") && surface !== CAPABILITY_SURFACES.BUILTIN) {
+      continue;
+    }
+    const capability = getCapabilityByRpcMethod(rpcMethod, surface);
+    if (capability) {
+      return { capability, surface };
+    }
+  }
+  return null;
+}
+
+function createCapabilityRpcDispatcher(deps) {
+  const {
+    invokeVaultAgent,
+    evaluatePermissionWithGrants,
+    permissionMode,
+    permissionGrantsSnapshot,
+    isChatSessionCancelled,
+    requestApprovalFromRenderer,
+    USER_DENIED_MESSAGE,
+  } = deps;
+
+  const vaultService = createVaultService({ invokeVaultAgent });
+  const portforwardService = createPortForwardService({ invokeVaultAgent });
+  const services = {
+    vault: vaultService,
+    portforward: portforwardService,
+  };
+
+  return async function dispatchCapabilityRpc(rpcMethod, params = {}) {
+    if (typeof rpcMethod !== "string" || rpcMethod.startsWith("netcatty/")) {
+      return UNROUTED;
+    }
+
+    const resolved = resolveCapabilitySurface(rpcMethod);
+    if (!resolved) {
+      return UNROUTED;
+    }
+
+    const { capability, surface } = resolved;
+    if (capability.status !== CAPABILITY_STATUS.IMPLEMENTED) {
+      return {
+        ok: false,
+        code: "CAPABILITY_NOT_IMPLEMENTED",
+        error: `Capability "${capability.id}" is not implemented yet.`,
+      };
+    }
+
+    const binding = SERVICE_BINDINGS[capability.id];
+    if (!binding) {
+      return UNROUTED;
+    }
+
+    const permission = evaluatePermissionWithGrants({
+      rpcMethod,
+      surface,
+      permissionMode,
+      params,
+      context: {
+        chatSessionCancelled: isChatSessionCancelled(params?.chatSessionId),
+      },
+    }, permissionGrantsSnapshot);
+
+    if (!permission.allowed) {
+      return { ok: false, error: permission.error };
+    }
+
+    if (permission.requiresApproval) {
+      const { chatSessionId, ...toolArgs } = params || {};
+      const toolName = getMcpToolNameForRpcMethod(rpcMethod, surface) || capability.id;
+      const approved = await requestApprovalFromRenderer(toolName, toolArgs, chatSessionId);
+      if (!approved) {
+        return { ok: false, error: USER_DENIED_MESSAGE };
+      }
+    }
+
+    const service = services[binding.domain];
+    const handler = service?.[binding.method];
+    if (typeof handler !== "function") {
+      return {
+        ok: false,
+        error: `Capability handler "${capability.id}" is unavailable.`,
+      };
+    }
+
+    return handler(params);
+  };
+}
+
+module.exports = {
+  UNROUTED,
+  createCapabilityRpcDispatcher,
+  SERVICE_BINDINGS,
+};

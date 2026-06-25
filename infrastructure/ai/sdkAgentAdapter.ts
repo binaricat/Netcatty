@@ -6,7 +6,9 @@
  */
 
 import type { AIToolIntegrationMode, ExternalAgentConfig } from './types';
-import { getExternalAgentSdkBackend } from './managedAgents';
+import { getExternalAgentSdkBackend, getManualAgentCommand } from './managedAgents';
+import { encodeSdkSessionIdentity } from './harness/sdkSessionIdentity';
+import { globalTraceStore, mapSdkStreamEventToAgentEvents } from './harness';
 import { decryptField } from '../persistence/secureFieldAdapter';
 
 export interface DefaultTargetSessionHint {
@@ -63,32 +65,6 @@ interface StreamEvent {
   [key: string]: unknown;
 }
 
-const SDK_SESSION_ID_PREFIX = 'netcatty-sdk-session:';
-
-function getManualAgentCommand(config: ExternalAgentConfig): string | undefined {
-  const command = String(config.command || '').trim();
-  return config.commandSource === 'manual' && command ? command : undefined;
-}
-
-function encodeSdkSessionIdentity(
-  sessionId: string,
-  sdkBackend?: string,
-  binPath?: string,
-): string {
-  if (!sessionId || !sdkBackend) return sessionId;
-  return `${SDK_SESSION_ID_PREFIX}${encodeURIComponent(JSON.stringify({
-    v: 1,
-    id: sessionId,
-    backend: sdkBackend,
-    binPath: binPath || '',
-  }))}`;
-}
-
-/**
- * Run one managed SDK agent turn.
- * Sends the prompt to the main process and listens for streamed events.
- * Stream events are forwarded back via IPC.
- */
 export interface FileAttachment {
   base64Data: string;
   mediaType: string;
@@ -182,6 +158,10 @@ export async function runSdkAgentTurn(
   toolIntegrationMode?: AIToolIntegrationMode,
   defaultTargetSession?: DefaultTargetSessionHint,
   userSkillsContext?: string,
+  harnessOptions?: {
+    traceSink?: (event: import('./harness/types').AgentEvent) => void;
+    skipHarnessTrace?: boolean;
+  },
 ): Promise<void> {
   const sdkBridge = bridge as unknown as SdkAgentBridge;
   const sdkBackend = getExternalAgentSdkBackend(config);
@@ -209,7 +189,36 @@ export async function runSdkAgentTurn(
   const agentCommand = getManualAgentCommand(config);
 
   // Set up event listeners before starting stream
+  if (!harnessOptions?.skipHarnessTrace) {
+    globalTraceStore.append({
+      id: `turn-start-${requestId}`,
+      type: 'turn_start',
+      sessionId: chatSessionId,
+      chatSessionId,
+      backend: 'external-sdk',
+      timestamp: Date.now(),
+      backendLabel: sdkBackend,
+    });
+  }
+
+  const appendHarnessEvent = (event: import('./harness/types').AgentEvent) => {
+    if (harnessOptions?.traceSink) {
+      harnessOptions.traceSink(event);
+      return;
+    }
+    if (!harnessOptions?.skipHarnessTrace) {
+      globalTraceStore.append(event);
+    }
+  };
+
   const unsubEvent = sdkBridge.onAiSdkAgentEvent(requestId, (event: StreamEvent) => {
+    for (const agentEvent of mapSdkStreamEventToAgentEvents(event, {
+      sessionId: chatSessionId,
+      chatSessionId,
+      turnId: requestId,
+    })) {
+      appendHarnessEvent(agentEvent);
+    }
     const streamFailed = handleStreamEvent(event, callbacks);
     if (streamFailed) {
       settle();

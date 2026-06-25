@@ -52,6 +52,8 @@ export type TerminalLayerStableSnapshot = {
   sessionsRef: React.MutableRefObject<TerminalSession[]>;
   workspacesRef: React.MutableRefObject<Workspace[]>;
   hostsRef: React.MutableRefObject<Host[]>;
+  portForwardingRules: import('../../domain/models').PortForwardingRule[];
+  portForwardingRulesRef: React.MutableRefObject<import('../../domain/models').PortForwardingRule[]>;
   onSetWorkspaceFocusedSessionRef: React.MutableRefObject<TerminalLayerProps['onSetWorkspaceFocusedSession']>;
   sidePanelOpenTabs: Map<string, SidePanelTab>;
   setSidePanelOpenTabs: React.Dispatch<React.SetStateAction<Map<string, SidePanelTab>>>;

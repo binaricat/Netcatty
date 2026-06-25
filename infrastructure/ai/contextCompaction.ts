@@ -1,5 +1,6 @@
 import type { ModelMessage } from "ai";
 import type { ProviderConfig } from "./types";
+import { estimateModelMessagesTokensWithKind } from "./harness/tokenEstimator";
 
 const DEFAULT_COMPACTION_RATIO = 0.85;
 const TOKEN_CHARS = 4;
@@ -76,10 +77,7 @@ export function sanitizeContextWindow(value: unknown): number | undefined {
 }
 
 export function estimateModelMessagesTokens(messages: ModelMessage[]): number {
-  const chars = messages.reduce((total, message) => {
-    return total + estimateUnknownChars(message.role) + estimateUnknownChars(message.content);
-  }, 0);
-  return Math.ceil(chars / TOKEN_CHARS);
+  return estimateModelMessagesTokensWithKind({ messages }).tokens;
 }
 
 export function estimateUnknownTokens(value: unknown): number {

@@ -14,4 +14,6 @@ test("netcatty-tool-cli capabilities lists implemented commands without app conn
   const payload = JSON.parse(result.stdout);
   assert.equal(payload.ok, true);
   assert.ok(payload.capabilities.some((entry) => entry.id === "terminal.execute"));
+  assert.ok(payload.capabilities.some((entry) => entry.id === "vault.host.get"));
+  assert.ok(payload.capabilities.some((entry) => entry.id === "portforward.rules.list"));
 });

@@ -5,11 +5,39 @@ const {
   getCapabilityByCliCommand,
   listCapabilities,
 } = require("../registry.cjs");
+const { TOOL_INPUT_FIELDS } = require("../schemas/toolInputs.cjs");
+
+/** Maps TOOL_INPUT_FIELDS keys to CLI flag names and opts property names. */
+const CLI_FIELD_BINDINGS = Object.freeze({
+  hostId: { flag: "--host-id", optKey: "hostId" },
+  snippetId: { flag: "--snippet-id", optKey: "snippetId" },
+  ruleId: { flag: "--rule-id", optKey: "ruleId" },
+  notes: { flag: "--notes", optKey: "notes" },
+  sessionId: { flag: "--session", optKey: "sessionId" },
+  variables: { flag: "--variables", optKey: "variables" },
+  path: { flag: "--remote-path", optKey: "remotePath" },
+  remotePath: { flag: "--remote-path", optKey: "remotePath" },
+  localPath: { flag: "--local-path", optKey: "localPath" },
+  oldPath: { flag: "--old-remote-path", optKey: "oldRemotePath" },
+  newPath: { flag: "--new-remote-path", optKey: "newRemotePath" },
+  content: { flag: "--content", optKey: "content" },
+  mode: { flag: "--mode", optKey: "mode" },
+  command: { flag: "--", optKey: "command" },
+  jobId: { flag: "--job", optKey: "jobId" },
+  offset: { flag: "--offset", optKey: "offset" },
+});
+
+function resolveCliRpcMethod(capability) {
+  if (!capability) return null;
+  return capability.surfaces?.[CAPABILITY_SURFACES.BUILTIN]?.rpcMethod
+    || capability.surfaces?.[CAPABILITY_SURFACES.GLOBAL]?.rpcMethod
+    || capability.surfaces?.[CAPABILITY_SURFACES.PUBLIC]?.rpcMethod
+    || null;
+}
 
 function getCliRpcMethod(commandParts) {
   const capability = getCapabilityByCliCommand(commandParts);
-  if (!capability) return null;
-  return capability.surfaces?.[CAPABILITY_SURFACES.BUILTIN]?.rpcMethod || null;
+  return resolveCliRpcMethod(capability);
 }
 
 function listCliCapabilities(options = {}) {
@@ -25,7 +53,7 @@ function listCliCapabilities(options = {}) {
       status: capability.status,
       description: capability.description,
       command: capability.surfaces[surface].command,
-      rpcMethod: capability.surfaces?.[CAPABILITY_SURFACES.BUILTIN]?.rpcMethod || null,
+      rpcMethod: resolveCliRpcMethod(capability),
       policy: capability.policy,
     }));
 }
@@ -37,8 +65,53 @@ function formatCliHelpLines(options = {}) {
   });
 }
 
+function buildCatalogCliParams(capabilityId, opts, createError) {
+  const fields = TOOL_INPUT_FIELDS[capabilityId];
+  if (!fields) {
+    return {};
+  }
+
+  const params = {};
+  for (const [fieldName, fieldDef] of Object.entries(fields)) {
+    const binding = CLI_FIELD_BINDINGS[fieldName];
+    if (!binding) continue;
+
+    let value = opts[binding.optKey];
+    if (fieldName === "command" && Array.isArray(value)) {
+      value = value.length === 1 ? value[0] : null;
+    }
+    if (fieldName === "variables" && typeof value === "string" && value.trim()) {
+      try {
+        value = JSON.parse(value);
+      } catch {
+        throw createError("INVALID_ARGUMENT", `--variables must be valid JSON for ${capabilityId}.`);
+      }
+    }
+    if (fieldName === "offset" && value != null) {
+      value = Number(value);
+    }
+
+    if (value == null || value === "") {
+      if (!fieldDef.optional) {
+        throw createError(
+          "INVALID_ARGUMENT",
+          `Missing required ${binding.flag} for ${capabilityId}.`,
+        );
+      }
+      continue;
+    }
+
+    params[fieldName] = value;
+  }
+
+  return params;
+}
+
 module.exports = {
+  CLI_FIELD_BINDINGS,
+  buildCatalogCliParams,
   getCliRpcMethod,
   listCliCapabilities,
   formatCliHelpLines,
+  resolveCliRpcMethod,
 };

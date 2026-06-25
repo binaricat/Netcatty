@@ -17,6 +17,7 @@ const { execViaPty, startPtyJob, execViaChannel, execViaRawPty } = require("./ai
 const { safeSend } = require("./ipcUtils.cjs");
 const { getCliDiscoveryFilePath } = require("../cli/discoveryPath.cjs");
 const sftpBridge = require("./sftpBridge.cjs");
+const portForwardingBridge = require("./portForwardingBridge.cjs");
 
 const DEBUG_MCP = process.env.NETCATTY_MCP_DEBUG === "1";
 
@@ -55,6 +56,9 @@ let maxIterations = 20;
 // Permission mode: 'observer' | 'confirm' | 'autonomous' (synced from user settings)
 let permissionMode = "confirm";
 
+// Cached permission grants synced from renderer (confirm-mode memory table)
+let permissionGrantsSnapshot = [];
+
 // Track active PTY executions for cancellation
 const activePtyExecs = new Map(); // marker → { ptyStream, cleanup }
 const cancelledChatSessions = new Set();
@@ -89,7 +93,8 @@ function setMainWindowGetter(fn) {
 // after 120s"). Keep the Netcatty-side approval window below that with a small
 // buffer so a stale approval cannot still be accepted after the agent has
 // already timed out and abandoned the call.
-const APPROVAL_TIMEOUT_MS = 110 * 1000; // 110 seconds
+const { MCP_APPROVAL_TIMEOUT_MS } = require("../shared/approvalConstants.cjs");
+const APPROVAL_TIMEOUT_MS = MCP_APPROVAL_TIMEOUT_MS;
 
 function requestApprovalFromRenderer(toolName, args, chatSessionId) {
   return new Promise((resolve) => {
@@ -424,6 +429,9 @@ function updateSessionMetadata(sessionList, chatSessionId) {
       shellType: s.shellType || "",
       deviceType: s.deviceType || "",
       connected: s.connected !== false,
+      hostId: s.hostId || "",
+      hostChain: Array.isArray(s.hostChain) ? s.hostChain : [],
+      activePortForwards: Array.isArray(s.activePortForwards) ? s.activePortForwards : [],
     });
   }
 
@@ -782,10 +790,41 @@ async function handleMessage(socket, line) {
 
 const {
   evaluateRpcPermission,
+  evaluatePermissionWithGrants,
   USER_DENIED_MESSAGE,
 } = require("../capabilities/policy.cjs");
 const { CAPABILITY_SURFACES } = require("../capabilities/constants.cjs");
 const { getCapabilityByRpcMethod } = require("../capabilities/registry.cjs");
+const {
+  createCapabilityRpcDispatcher,
+  UNROUTED,
+} = require("./mcpServerBridge/capabilityRpcDispatch.cjs");
+const { buildBuiltinRpcHandlerRegistry } = require("./mcpServerBridge/builtinRpcHandlers.cjs");
+
+let invokeVaultAgentFn = null;
+
+function setVaultAgentInvoker(fn) {
+  invokeVaultAgentFn = typeof fn === "function" ? fn : null;
+}
+
+const dispatchCapabilityRpc = createCapabilityRpcDispatcher({
+  invokeVaultAgent: (...args) => {
+    if (typeof invokeVaultAgentFn !== "function") {
+      return Promise.resolve({ ok: false, error: "Vault agent bridge is unavailable." });
+    }
+    return invokeVaultAgentFn(...args);
+  },
+  evaluatePermissionWithGrants,
+  get permissionMode() {
+    return permissionMode;
+  },
+  get permissionGrantsSnapshot() {
+    return permissionGrantsSnapshot;
+  },
+  isChatSessionCancelled,
+  requestApprovalFromRenderer,
+  USER_DENIED_MESSAGE,
+});
 
 /**
  * Validate that a sessionId is allowed in the current scope.
@@ -813,15 +852,53 @@ function validateSessionScope(sessionId, chatSessionId, explicitScopedIds = null
   return null;
 }
 
+let builtinRpcHandlerRegistry = null;
+
+function getBuiltinRpcHandlerRegistry() {
+  if (!builtinRpcHandlerRegistry) {
+    builtinRpcHandlerRegistry = buildBuiltinRpcHandlerRegistry({
+      "session.environment": handleGetContext,
+      "meta.status": handleGetStatus,
+      "attachment.list": handleListAttachments,
+      "attachment.read": handleReadAttachment,
+      "terminal.execute": handleExec,
+      "sftp.list": handleSftpList,
+      "sftp.read": handleSftpRead,
+      "sftp.write": handleSftpWrite,
+      "sftp.download": handleSftpDownload,
+      "sftp.upload": handleSftpUpload,
+      "sftp.mkdir": handleSftpMkdir,
+      "sftp.delete": handleSftpDelete,
+      "sftp.rename": handleSftpRename,
+      "sftp.stat": handleSftpStat,
+      "sftp.chmod": handleSftpChmod,
+      "sftp.home": handleSftpHome,
+      "session.cancel": handleSetCancelled,
+      "terminal.start": handleJobStart,
+      "terminal.poll": handleJobPoll,
+      "terminal.stop": handleJobStop,
+    });
+  }
+  return builtinRpcHandlerRegistry;
+}
+
 async function dispatch(method, params) {
   debugLog("dispatch", { method, params, permissionMode });
+
+  if (!method.startsWith("netcatty/")) {
+    const capabilityResult = await dispatchCapabilityRpc(method, params || {});
+    if (capabilityResult !== UNROUTED) {
+      return capabilityResult;
+    }
+  }
+
   const capability = getCapabilityByRpcMethod(method, CAPABILITY_SURFACES.BUILTIN);
   const sessionWriteLockId = (capability?.id === "terminal.execute" || capability?.id === "terminal.start")
     ? params?.sessionId
     : null;
   pruneCompletedBackgroundJobs();
 
-  const permission = evaluateRpcPermission({
+  const permission = evaluatePermissionWithGrants({
     rpcMethod: method,
     surface: CAPABILITY_SURFACES.BUILTIN,
     permissionMode,
@@ -829,7 +906,7 @@ async function dispatch(method, params) {
     context: {
       chatSessionCancelled: isChatSessionCancelled(params?.chatSessionId),
     },
-  });
+  }, permissionGrantsSnapshot);
   if (!permission.allowed) {
     return { ok: false, error: permission.error };
   }
@@ -870,50 +947,11 @@ async function dispatch(method, params) {
         return { ok: false, error: USER_DENIED_MESSAGE };
       }
     }
-    switch (method) {
-      case "netcatty/getContext":
-        return handleGetContext(params);
-      case "netcatty/getStatus":
-        return handleGetStatus();
-      case "netcatty/listAttachments":
-        return handleListAttachments(params);
-      case "netcatty/readAttachment":
-        return handleReadAttachment(params);
-      case "netcatty/exec":
-        return handleExec(params);
-      case "netcatty/sftp/list":
-        return handleSftpList(params);
-      case "netcatty/sftp/read":
-        return handleSftpRead(params);
-      case "netcatty/sftp/write":
-        return handleSftpWrite(params);
-      case "netcatty/sftp/download":
-        return handleSftpDownload(params);
-      case "netcatty/sftp/upload":
-        return handleSftpUpload(params);
-      case "netcatty/sftp/mkdir":
-        return handleSftpMkdir(params);
-      case "netcatty/sftp/delete":
-        return handleSftpDelete(params);
-      case "netcatty/sftp/rename":
-        return handleSftpRename(params);
-      case "netcatty/sftp/stat":
-        return handleSftpStat(params);
-      case "netcatty/sftp/chmod":
-        return handleSftpChmod(params);
-      case "netcatty/sftp/home":
-        return handleSftpHome(params);
-      case "netcatty/setCancelled":
-        return handleSetCancelled(params);
-      case "netcatty/jobStart":
-        return handleJobStart(params);
-      case "netcatty/jobPoll":
-        return handleJobPoll(params);
-      case "netcatty/jobStop":
-        return handleJobStop(params);
-      default:
-        throw new Error(`Unknown method: ${method}`);
+    const handler = getBuiltinRpcHandlerRegistry().get(method);
+    if (!handler) {
+      throw new Error(`Unknown method: ${method}`);
     }
+    return handler(params);
   } finally {
     if (sessionWriteLockId) {
       pendingSessionWriteApprovals.delete(sessionWriteLockId);
@@ -971,7 +1009,17 @@ function handleGetContext(params) {
       shellType: meta.shellType || session.shellKind || "",
       deviceType: meta.deviceType || "",
       connected: meta.connected !== undefined ? meta.connected : !!(session.sshClient || session.conn || ptyStream || session.serialPort),
+      hostId: meta.hostId || "",
+      hostChain: meta.hostChain || [],
+      activePortForwards: meta.activePortForwards || [],
     });
+  }
+
+  let activePortForwardTunnels = [];
+  try {
+    activePortForwardTunnels = portForwardingBridge.listPortForwards() || [];
+  } catch {
+    activePortForwardTunnels = [];
   }
 
   return {
@@ -981,9 +1029,11 @@ function handleGetContext(params) {
       "Use the provided tools to execute commands through the sessions exposed by Netcatty. " +
       "Serial sessions (protocol: serial, shellType: raw) do not run a standard shell — commands are sent as-is. " +
       "Network device sessions (deviceType: network) use vendor CLIs (Huawei VRP, Cisco IOS, etc.) — commands are sent as-is without shell wrapping, and exit codes are unavailable. " +
+      "Vault snippets, port forwarding rules/tunnels, and SFTP read/write tools are available when exposed in the tool list. " +
       "Always prefer these tools over suggesting the user to do things manually.",
     hosts,
     hostCount: hosts.length,
+    activePortForwardTunnels,
   };
 }
 
@@ -1007,13 +1057,19 @@ function handleGetStatus() {
   };
 }
 
-async function handleSetCancelled(params) {
-  const chatSessionId = params?.chatSessionId;
-  const cancelled = params?.cancelled !== false;
+function setPermissionGrants(grants) {
+  const { sanitizePermissionGrants } = require("../shared/permissionGrants.cjs");
+  permissionGrantsSnapshot = sanitizePermissionGrants(grants);
+}
+
+function getPermissionGrants() {
+  return permissionGrantsSnapshot;
+}
+
+function applyChatSessionCancelled(chatSessionId, cancelled) {
   if (!chatSessionId || typeof chatSessionId !== "string") {
     throw new Error("chatSessionId is required");
   }
-
   if (cancelled) {
     setChatSessionCancelled(chatSessionId, true);
     cancelPtyExecsForSession(chatSessionId);
@@ -1023,12 +1079,17 @@ async function handleSetCancelled(params) {
   } else {
     setChatSessionCancelled(chatSessionId, false);
   }
-
   return {
     ok: true,
     chatSessionId,
-    cancelled,
+    cancelled: !!cancelled,
   };
+}
+
+async function handleSetCancelled(params) {
+  const chatSessionId = params?.chatSessionId;
+  const cancelled = params?.cancelled !== false;
+  return applyChatSessionCancelled(chatSessionId, cancelled);
 }
 
 const { createSftpHandlerApi } = require("./mcpServerBridge/sftpHandlers.cjs");
@@ -1096,7 +1157,10 @@ module.exports = {
   getMaxIterations,
   setPermissionMode,
   getPermissionMode,
+  setPermissionGrants,
+  getPermissionGrants,
   setChatSessionCancelled,
+  applyChatSessionCancelled,
   checkCommandSafety,
   updateSessionMetadata,
   updateAttachmentMetadata,
@@ -1115,9 +1179,11 @@ module.exports = {
   cleanup,
   shutdownHost,
   setMainWindowGetter,
+  setVaultAgentInvoker,
   resolveApprovalFromRenderer,
   clearPendingApprovals,
   reserveSessionExecution,
   releaseSessionExecution,
   getSessionBusyError,
+  dispatchBuiltinRpc: dispatch,
 };

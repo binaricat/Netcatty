@@ -33,6 +33,12 @@ export interface NetcattyBridge {
    * `aiExec` but before the main process has registered it.
    */
   aiCattyCancelExec?(chatSessionId: string): Promise<unknown>;
+  aiSetChatSessionCancelled?(chatSessionId: string, cancelled?: boolean): Promise<{ ok: boolean; error?: string }>;
+  aiCapability?(
+    rpcMethod: string,
+    params: Record<string, unknown>,
+    chatSessionId?: string,
+  ): Promise<unknown>;
 }
 
 // Workspace context provided to the executor

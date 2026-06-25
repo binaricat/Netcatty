@@ -1,19 +1,58 @@
 "use strict";
 
-const { createNotImplementedHandler } = require("./notImplemented.cjs");
-
 /**
- * Vault domain service skeleton. Handlers will be wired to a VaultFacade bridge
- * in a follow-up PR; registry entries already describe the public contract.
+ * Vault domain service. Read-only metadata and notes/snippets are served from
+ * renderer vault state via VaultAgentBridge; credentials never cross the bridge.
  */
-function createVaultService(_ctx = {}) {
+function createVaultService(ctx = {}) {
+  const { invokeVaultAgent } = ctx;
+
+  function requireBridge() {
+    if (typeof invokeVaultAgent !== "function") {
+      return { ok: false, error: "Vault agent bridge is unavailable." };
+    }
+    return null;
+  }
+
   return {
-    getHost: createNotImplementedHandler("vault.host.get"),
-    getHostNotes: createNotImplementedHandler("vault.host.notes.get"),
-    setHostNotes: createNotImplementedHandler("vault.host.notes.set"),
-    listSnippets: createNotImplementedHandler("vault.snippets.list"),
-    getSnippet: createNotImplementedHandler("vault.snippets.get"),
-    runSnippet: createNotImplementedHandler("vault.snippets.run"),
+    getHost: async (params = {}) => {
+      const bridgeErr = requireBridge();
+      if (bridgeErr) return bridgeErr;
+      return invokeVaultAgent("host.get", { hostId: params.hostId });
+    },
+    getHostNotes: async (params = {}) => {
+      const bridgeErr = requireBridge();
+      if (bridgeErr) return bridgeErr;
+      return invokeVaultAgent("host.notes.get", { hostId: params.hostId });
+    },
+    setHostNotes: async (params = {}) => {
+      const bridgeErr = requireBridge();
+      if (bridgeErr) return bridgeErr;
+      return invokeVaultAgent("host.notes.set", {
+        hostId: params.hostId,
+        notes: params.notes,
+      });
+    },
+    listSnippets: async () => {
+      const bridgeErr = requireBridge();
+      if (bridgeErr) return bridgeErr;
+      return invokeVaultAgent("snippets.list", {});
+    },
+    getSnippet: async (params = {}) => {
+      const bridgeErr = requireBridge();
+      if (bridgeErr) return bridgeErr;
+      return invokeVaultAgent("snippets.get", { snippetId: params.snippetId });
+    },
+    runSnippet: async (params = {}) => {
+      const bridgeErr = requireBridge();
+      if (bridgeErr) return bridgeErr;
+      return invokeVaultAgent("snippets.run", {
+        snippetId: params.snippetId,
+        sessionId: params.sessionId,
+        variables: params.variables,
+        chatSessionId: params.chatSessionId,
+      });
+    },
   };
 }
 

@@ -10,7 +10,12 @@
 const net = require("node:net");
 const { McpServer } = require("@modelcontextprotocol/sdk/server/mcp.js");
 const { StdioServerTransport } = require("@modelcontextprotocol/sdk/server/stdio.js");
-const { z } = require("zod");
+const { getCatalogToolDescription } = require("./catalogToolMetadata.cjs");
+const { registerMcpTools } = require("../capabilities/codegen/mcpToolRegistry.cjs");
+
+function catalogDescription(toolName, fallback) {
+  return getCatalogToolDescription(toolName) || fallback;
+}
 
 const DEBUG_MCP = process.env.NETCATTY_MCP_DEBUG === "1";
 
@@ -205,171 +210,13 @@ server.resource(
   },
 );
 
-// Tool: get_environment
-server.tool(
-  "get_environment",
-  "Get information about the current Netcatty scope: all terminal sessions exposed by Netcatty, their session IDs, OS, shell hints, and connection status. Sessions may be remote hosts, a local terminal, Mosh-backed shells, or serial port connections (network devices, embedded systems). Serial sessions have protocol 'serial' and shellType 'raw'. SSH sessions with deviceType 'network' are network equipment (Huawei VRP, Cisco IOS, etc.) using vendor CLIs instead of a standard shell. Call this first before executing commands.",
-  {},
-  async () => {
-    process.stderr.write(`[netcatty-mcp] get_environment called, SCOPED_SESSION_IDS: ${JSON.stringify(SCOPED_SESSION_IDS)}, CHAT_SESSION_ID: ${CHAT_SESSION_ID}\n`);
-    const ctx = await rpcCall("netcatty/getContext", scopeParams);
-    process.stderr.write(`[netcatty-mcp] get_environment result: hostCount=${ctx.hostCount}, hosts=${JSON.stringify(ctx.hosts?.map(h => h.sessionId))}\n`);
-    debugLog("get_environment payload", {
-      hostCount: ctx?.hostCount,
-      hosts: Array.isArray(ctx?.hosts) ? ctx.hosts.map(h => ({
-        sessionId: h.sessionId,
-        hostname: h.hostname,
-        connected: h.connected,
-        protocol: h.protocol,
-        deviceType: h.deviceType,
-      })) : [],
-    });
-    return {
-      content: [{
-        type: "text",
-        text: JSON.stringify(ctx, null, 2),
-      }],
-    };
-  },
-);
-
-server.tool(
-  "list_attachments",
-  "List local files explicitly attached by the user in this Netcatty AI chat. Use this before read_attachment when the user asks about a pasted, dropped, or uploaded local file.",
-  {},
-  async () => {
-    const result = await rpcCall("netcatty/listAttachments", scopeParams);
-    if (!result.ok) {
-      return { content: [{ type: "text", text: `Error: ${result.error || "Failed to list attachments"}` }], isError: true };
-    }
-    return { content: [{ type: "text", text: JSON.stringify(result.attachments || [], null, 2) }] };
-  },
-);
-
-server.tool(
-  "read_attachment",
-  "Read a local file explicitly attached by the user in this Netcatty AI chat. This tool only accepts file paths or filenames that were registered from user attachments; it cannot read arbitrary local files.",
-  {
-    filePath: z.string().optional().describe("Exact local attachment path shown in the prompt or returned by list_attachments."),
-    filename: z.string().optional().describe("Attachment filename returned by list_attachments. Use filePath when available."),
-  },
-  async ({ filePath, filename }) => {
-    const result = await rpcCall("netcatty/readAttachment", { ...scopeParams, filePath, filename });
-    if (!result.ok) {
-      return { content: [{ type: "text", text: `Error: ${result.error || "Failed to read attachment"}` }], isError: true };
-    }
-    const payload = {
-      filename: result.filename,
-      mediaType: result.mediaType,
-      filePath: result.filePath,
-      sizeBytes: result.sizeBytes,
-      ...(result.text != null ? { text: result.text } : { base64Data: result.base64Data }),
-    };
-    return { content: [{ type: "text", text: JSON.stringify(payload, null, 2) }] };
-  },
-);
-
-// Tool: terminal_execute
-server.tool(
-  "terminal_execute",
-  "Execute a short command on a Netcatty terminal session and wait for the full result. Use this only for commands expected to finish within about 60 seconds. For long-running commands such as builds, scans, log-following, or anything likely to exceed that budget, use terminal_start and then terminal_poll instead.",
-  {
-    sessionId: z.string().describe("The terminal session ID (from get_environment) to execute on."),
-    command: z.string().describe("The command to execute in the target session."),
-  },
-  async ({ sessionId, command }) => {
-    debugLog("terminal_execute called", { sessionId, command });
-    // skipBlocklist: bridge layer does session-aware blocklist (serial sessions skip shell patterns)
-    const guardErr = guardWriteOperation(command, { skipBlocklist: true });
-    if (guardErr) {
-      debugLog("terminal_execute blocked locally", { sessionId, guardErr });
-      return { content: [{ type: "text", text: `Error: ${guardErr}` }], isError: true };
-    }
-    const result = await rpcCall("netcatty/exec", { ...scopeParams, sessionId, command });
-    debugLog("terminal_execute result", {
-      sessionId,
-      ok: result?.ok,
-      error: result?.error,
-      exitCode: result?.exitCode,
-      stdoutLength: result?.stdout?.length || 0,
-      stderrLength: result?.stderr?.length || 0,
-    });
-    if (!result.ok) {
-      return { content: [{ type: "text", text: `Error: ${result.error || "Command failed"}` }], isError: true };
-    }
-    const parts = [];
-    if (result.stdout) parts.push(result.stdout);
-    if (result.stderr) parts.push(`[stderr] ${result.stderr}`);
-    // Serial/raw and network device sessions return null exitCode (vendor CLIs have no exit codes)
-    if (result.exitCode != null) {
-      parts.push(`[exit code: ${result.exitCode}]`);
-    }
-    return { content: [{ type: "text", text: parts.join("\n") }] };
-  },
-);
-
-server.tool(
-  "terminal_start",
-  "Start a long-running command on a Netcatty terminal session without waiting for final completion. The command still runs in the visible terminal/PTTY so the user can watch live output. Prefer this whenever the command may exceed about 2 minutes, or when it streams output for an extended period, such as builds, scans, watch commands, and log-follow commands. After starting, wait at least about 30 seconds before the first terminal_poll unless you have a strong reason to check sooner.",
-  {
-    sessionId: z.string().describe("The terminal session ID (from get_environment) to execute on."),
-    command: z.string().describe("The command to start in the target session."),
-  },
-  async ({ sessionId, command }) => {
-    const guardErr = guardWriteOperation(command, { skipBlocklist: true });
-    if (guardErr) {
-      return { content: [{ type: "text", text: `Error: ${guardErr}` }], isError: true };
-    }
-    const result = await rpcCall("netcatty/jobStart", { ...scopeParams, sessionId, command });
-    if (!result.ok) {
-      return { content: [{ type: "text", text: `Error: ${result.error || "Failed to start background command"}` }], isError: true };
-    }
-    return {
-      content: [{
-        type: "text",
-        text: JSON.stringify({
-          jobId: result.jobId,
-          sessionId: result.sessionId,
-          status: result.status,
-          startedAt: result.startedAt,
-          outputMode: result.outputMode,
-          recommendedPollIntervalMs: result.recommendedPollIntervalMs,
-        }, null, 2),
-      }],
-    };
-  },
-);
-
-server.tool(
-  "terminal_poll",
-  "Poll a long-running Netcatty command that was started with terminal_start. Returns incremental output since the given offset and the current status. Use the returned nextOffset for the next poll. If outputTruncated is true, only the retained tail starting at outputBaseOffset is still available. Do not poll aggressively: wait at least about 30 seconds between polls unless the tool output explicitly justifies checking sooner. As soon as completed is true, stop polling and analyze the final result immediately.",
-  {
-    jobId: z.string().describe("The background job ID returned by terminal_start."),
-    offset: z.number().int().min(0).optional().describe("Character offset previously returned as nextOffset. Omit or use 0 on the first poll."),
-  },
-  async ({ jobId, offset }) => {
-    const result = await rpcCall("netcatty/jobPoll", { ...scopeParams, jobId, offset: offset || 0 });
-    if (!result.ok) {
-      return { content: [{ type: "text", text: `Error: ${result.error || "Failed to poll background command"}` }], isError: true };
-    }
-    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
-  },
-);
-
-server.tool(
-  "terminal_stop",
-  "Stop a long-running Netcatty command that was started with terminal_start. This sends Ctrl+C to the running terminal job and returns its latest state.",
-  {
-    jobId: z.string().describe("The background job ID returned by terminal_start."),
-  },
-  async ({ jobId }) => {
-    const result = await rpcCall("netcatty/jobStop", { ...scopeParams, jobId });
-    if (!result.ok) {
-      return { content: [{ type: "text", text: `Error: ${result.error || "Failed to stop background command"}` }], isError: true };
-    }
-    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
-  },
-);
+// Register catalog-driven MCP tools (terminal, SFTP, attachments, vault, portforward).
+registerMcpTools(server, {
+  rpcCall,
+  scopeParams,
+  guardWriteOperation,
+  catalogDescription,
+});
 
 // ── Start ──
 

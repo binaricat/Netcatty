@@ -22,7 +22,7 @@ test("createRegistryDispatcher routes implemented capabilities to handlers", asy
   assert.equal(calls.length, 0);
 });
 
-test("createRegistryDispatcher returns not-implemented for planned capabilities", async () => {
+test("createRegistryDispatcher falls back for implemented capabilities without handlers", async () => {
   const dispatch = createRegistryDispatcher({
     surface: CAPABILITY_SURFACES.GLOBAL,
     handlers: {},
@@ -31,7 +31,7 @@ test("createRegistryDispatcher returns not-implemented for planned capabilities"
 
   const result = await dispatch("vault/host/notes/get", { hostId: "host-1" });
   assert.equal(result.ok, false);
-  assert.equal(result.code, "CAPABILITY_NOT_IMPLEMENTED");
+  assert.equal(result.error, "unknown:vault/host/notes/get");
 });
 
 test("createRegistryDispatcher falls back for unknown rpc methods", async () => {

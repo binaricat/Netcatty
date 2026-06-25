@@ -8,6 +8,7 @@ const {
   BUILTIN_APPROVAL_RPC_METHODS,
   PUBLIC_CONFIRM_RPC_METHODS,
   evaluateRpcPermission,
+  evaluatePermissionWithGrants,
   OBSERVER_DENY_MESSAGE,
 } = require("./policy.cjs");
 const { CAPABILITY_SURFACES, PERMISSION_MODES } = require("./constants.cjs");
@@ -145,4 +146,52 @@ test("unknown rpc methods pass through policy checks", () => {
   assert.equal(decision.allowed, true);
   assert.equal(decision.requiresApproval, false);
   assert.equal(decision.capability, null);
+});
+
+test("confirm mode requires approval for portforward start and host notes set", () => {
+  const portforwardDecision = evaluateRpcPermission({
+    rpcMethod: "public/portforward/start",
+    surface: CAPABILITY_SURFACES.PUBLIC,
+    permissionMode: PERMISSION_MODES.CONFIRM,
+    params: { chatSessionId: "chat-1", ruleId: "rule-1" },
+  });
+  assert.equal(portforwardDecision.requiresApproval, true);
+
+  const notesDecision = evaluateRpcPermission({
+    rpcMethod: "vault/host/notes/set",
+    surface: CAPABILITY_SURFACES.GLOBAL,
+    permissionMode: PERMISSION_MODES.CONFIRM,
+    params: { chatSessionId: "chat-1", hostId: "host-1" },
+  });
+  assert.equal(notesDecision.requiresApproval, true);
+
+  const publicNotesDecision = evaluateRpcPermission({
+    rpcMethod: "public/vault/hostNotes/set",
+    surface: CAPABILITY_SURFACES.PUBLIC,
+    permissionMode: PERMISSION_MODES.CONFIRM,
+    params: { chatSessionId: "chat-1", hostId: "host-1" },
+  });
+  assert.equal(publicNotesDecision.requiresApproval, true);
+});
+
+test("evaluatePermissionWithGrants skips approval when a grant matches", () => {
+  const decision = evaluatePermissionWithGrants({
+    rpcMethod: "netcatty/exec",
+    permissionMode: PERMISSION_MODES.CONFIRM,
+    params: {
+      chatSessionId: "chat-1",
+      sessionId: "session-a",
+      command: "ls -la",
+    },
+    context: { chatSessionCancelled: false },
+  }, [{
+    id: "grant-1",
+    capabilityId: "terminal.execute",
+    sessionPattern: "session-a",
+    commandPattern: "ls *",
+    createdAt: Date.now(),
+  }]);
+
+  assert.equal(decision.allowed, true);
+  assert.equal(decision.requiresApproval, false);
 });

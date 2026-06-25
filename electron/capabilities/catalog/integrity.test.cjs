@@ -28,9 +28,19 @@ const IMPLEMENTED_CLI_COMMANDS = [
   ["sftp", "home"],
   ["cancel"],
   ["resume"],
+  ["vault", "host", "get"],
+  ["vault", "host-notes", "get"],
+  ["vault", "host-notes", "set"],
+  ["snippets", "list"],
+  ["snippets", "get"],
+  ["snippets", "run"],
+  ["portforward", "rules", "list"],
+  ["portforward", "tunnels", "list"],
+  ["portforward", "start"],
+  ["portforward", "stop"],
 ];
 
-test("every implemented cli command maps to a builtin rpc method", () => {
+test("every implemented cli command maps to an rpc method", () => {
   for (const command of IMPLEMENTED_CLI_COMMANDS) {
     const rpcMethod = getCliRpcMethod(command);
     assert.ok(rpcMethod, `missing rpc mapping for ${command.join(" ")}`);

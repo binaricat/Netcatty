@@ -1,6 +1,6 @@
 "use strict";
 
-/** @typedef {'builtin' | 'public' | 'cli' | 'global'} CapabilitySurface */
+/** @typedef {'builtin' | 'public' | 'cli' | 'global' | 'catty'} CapabilitySurface */
 /** @typedef {'implemented' | 'planned'} CapabilityStatus */
 /** @typedef {'observer' | 'confirm' | 'autonomous'} PermissionMode */
 
@@ -9,6 +9,8 @@ const CAPABILITY_SURFACES = Object.freeze({
   PUBLIC: "public",
   CLI: "cli",
   GLOBAL: "global",
+  /** Renderer-local Catty harness tools (no MCP/CLI exposure). */
+  CATTY: "catty",
 });
 
 const CAPABILITY_STATUS = Object.freeze({

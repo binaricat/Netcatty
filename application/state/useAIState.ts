@@ -67,6 +67,7 @@ import {
   type DraftsByScope,
   type PanelViewByScope,
 } from './aiStateSnapshots';
+import { getAgentRuntime } from '../../infrastructure/ai/harness/globalAgentRuntime';
 import { AI_STATE_CHANGED_EVENT, emitAIStateChanged } from './aiStateEvents';
 export function useAIState() {
   // ── Provider Config ──
@@ -611,6 +612,7 @@ export function useAIState() {
 
   const deleteSession = useCallback((sessionId: string, scopeKey?: string) => {
     cleanupSdkAgentSessions([sessionId]);
+    getAgentRuntime().clearChatSession(sessionId);
     if (persistTimerRef.current) {
       clearTimeout(persistTimerRef.current);
       persistTimerRef.current = null;

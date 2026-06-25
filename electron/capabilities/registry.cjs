@@ -9,6 +9,7 @@ function buildRegistryIndex(capabilities) {
   const byMcpTool = new Map();
   const byCliCommand = new Map();
   const byDomain = new Map();
+  const byCattyTool = new Map();
 
   for (const capability of capabilities) {
     byId.set(capability.id, capability);
@@ -27,6 +28,9 @@ function buildRegistryIndex(capabilities) {
       if (Array.isArray(binding?.command) && binding.command.length > 0) {
         byCliCommand.set(binding.command.join(" "), capability);
       }
+      if (binding?.toolName) {
+        byCattyTool.set(binding.toolName, capability);
+      }
     }
   }
 
@@ -36,6 +40,7 @@ function buildRegistryIndex(capabilities) {
     byRpcMethod,
     byMcpTool,
     byCliCommand,
+    byCattyTool,
     byDomain,
   };
 }
@@ -69,6 +74,10 @@ function getCapabilityByCliCommand(commandParts) {
   return registryIndex.byCliCommand.get(key) || null;
 }
 
+function getCapabilityByCattyToolName(toolName) {
+  return registryIndex.byCattyTool.get(toolName) || null;
+}
+
 function getRpcMethodsForSurface(surface, filter = {}) {
   const methods = new Set();
   for (const capability of registryIndex.capabilities) {
@@ -95,6 +104,7 @@ module.exports = {
   getCapabilityByRpcMethod,
   getCapabilityByMcpTool,
   getCapabilityByCliCommand,
+  getCapabilityByCattyToolName,
   getRpcMethodsForSurface,
   getImplementedRpcMethodsForSurface,
   buildRegistryIndex,

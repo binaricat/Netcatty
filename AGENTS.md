@@ -22,6 +22,39 @@ This project is wired around three layers: domain (pure logic), application stat
 - `App.tsx` wires hooks to components; no business logic should live in components beyond view glue.
 - Local storage keys are centralized in `infrastructure/config/storageKeys.ts`; avoid ad-hoc `localStorage` calls elsewhere.
 
+## AI Agent Harness (`infrastructure/ai/harness/`)
+
+Turn orchestration is centralized in **AgentRuntime**; the React hook `useAIChatStreaming` only manages UI state and delegates `runTurn` / `stopTurn`.
+
+| Layer | Module | Role |
+|-------|--------|------|
+| Runtime | `agentRuntime.ts`, `globalAgentRuntime.ts` | Turn lifecycle, trace fan-out, per-turn ToolOutputStore / ToolResultDedup |
+| Drivers | `turnDrivers/cattyTurnDriver.ts`, `turnDrivers/externalSdkTurnDriver.ts` | Catty `streamText` + External SDK IPC; emit unified `AgentEvent`s |
+| Context | `contextManager.ts`, `tokenEstimator.ts`, `cattyRuntime.ts` | Pre-turn / 413 compaction, `prepareStepContext`, provider-aware token estimates |
+| Tools | `capabilityTools.ts`, `toolOutputStore.ts`, `toolResultDedup.ts` | Catalog tools, truncated output handles (`tool_output_read`), duplicate-read notices |
+| Trace | `traceStore.ts`, `agentEventAdapter.ts` | Session event log incl. `usage` and `CompactionTrace` |
+
+**Stop** always goes through `stopAgentTurn()` (UI, `/stop`, MCP). Do not add parallel abort paths in hooks.
+
+### Capability exposure (Round 2 + gap fill)
+
+Single source of truth: `electron/capabilities/catalog/` + `electron/capabilities/codegen/toolSurfaces.cjs`.
+
+| Surface | Codegen / consumer | Notes |
+|---------|-------------------|--------|
+| Catty tools | `npm run generate:capability-tools` → `infrastructure/ai/harness/generated/cattyToolSpecs.json` | **33** tools: **28** RPC/catalog capabilities (minus denylist) + **5** `harness.*` catty-only tools with renderer-local execution. CI verifies JSON drift. |
+| MCP stdio | `electron/capabilities/codegen/mcpToolRegistry.cjs` → `electron/mcp/netcatty-mcp-server.cjs` | Registry-driven; **28** tools incl. SFTP (11), attachments, vault (6), portforward (4). Harness tools are **not** on MCP. |
+| CLI | `electron/cli/netcatty-tool-cli.cjs` + `electron/capabilities/adapters/cliAdapter.cjs` | **30** catalog commands; exec/sftp/session remain special-case; vault/portforward/snippets use catalog fallback dispatch |
+| RPC dispatch | `electron/bridges/mcpServerBridge.cjs` + `capabilityRpcDispatch.cjs` | `netcatty/*` builtin handlers via `buildBuiltinRpcHandlerRegistry` (catalog-aligned); `public/*`, `vault/*`, `portforward/*` → services |
+| Vault bridge | `electron/bridges/aiBridge/vaultAgentBridge.cjs` + `infrastructure/ai/vaultAgentBridgeClient.ts` | Renderer vault state; **never** returns password/privateKey |
+| AI context | `buildAITerminalSessionInfo` + `useTerminalAiContexts` | Per-session `hostChain` + `activePortForwards`; mirrored in `getContext` and Catty system prompt |
+
+**Policy:** SFTP writes/transfers, `portforward_start`, and `host_notes_set` require confirm-mode approval. Observer mode blocks writes.
+
+**Handles:** `ToolOutputStore` persists across turns per chat session; cleared on chat session delete. Large `sftp.read` results spill to `tool_output_read`.
+
+**Harness domain (`catalog/harness.cjs`):** Catty-only surface (`surfaces.catty.toolName`). Registered in the capability catalog but executed locally in `capabilityTools.executeLocalCattyCapability` (not MCP/CLI). `harness.web.search` is omitted when web search is not configured.
+
 ## Extending the System
 1) **New domain logic**: Add pure functions/types under `domain/`; avoid side effects.  
 2) **New stateful behavior**: Wrap it in a hook under `application/state/`; keep external I/O behind adapters.  

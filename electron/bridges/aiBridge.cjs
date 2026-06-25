@@ -22,6 +22,7 @@ const {
   toPublicUserSkillsStatus,
 } = require("./ai/userSkills.cjs");
 const { registerProviderHandlers } = require("./aiBridge/providerHandlers.cjs"), { registerCattyExecHandlers } = require("./aiBridge/cattyExecHandlers.cjs"), { createAgentCliHelpers } = require("./aiBridge/agentCliHelpers.cjs");
+const { createVaultAgentBridge } = require("./aiBridge/vaultAgentBridge.cjs");
 const { registerAgentDiscoveryHandlers } = require("./aiBridge/agentDiscoveryHandlers.cjs"), { registerAgentProcessHandlers } = require("./aiBridge/agentProcessHandlers.cjs"), { registerSdkStreamHandlers } = require("./aiBridge/sdk/sdkStreamHandlers.cjs");
 const { probeClaudeAuth, probeCopilotAuth, probeCodexAuth, probeCodebuddyAuth } = require("./aiBridge/agentAuthProbes.cjs");
 
@@ -219,6 +220,7 @@ let electronModule = null;
 let mainWebContentsId = null;
 let cliDiscoveryFilePath = null;
 let registeredContext = null;
+let registeredVaultAgentBridge = null;
 
 // Active streaming requests (for cancellation)
 const activeStreams = new Map();
@@ -739,6 +741,23 @@ function registerHandlers(ipcMain) {
   const context = createHandlerContext(ipcMain);
   Object.assign(context, createAgentCliHelpers(context));
   registeredContext = context;
+
+  if (!registeredVaultAgentBridge) {
+    registeredVaultAgentBridge = createVaultAgentBridge({
+      getMainWindowFn: () => {
+        try {
+          const windowManager = require("./windowManager.cjs");
+          const mainWin = windowManager.getMainWindow?.();
+          return (mainWin && !mainWin.isDestroyed()) ? mainWin : null;
+        } catch {
+          return null;
+        }
+      },
+      validateSender,
+    });
+    mcpServerBridge.setVaultAgentInvoker(registeredVaultAgentBridge.invokeVaultAgent);
+  }
+  registeredVaultAgentBridge.registerHandlers(ipcMain);
 
   registerProviderHandlers(context);
   registerCattyExecHandlers(context);

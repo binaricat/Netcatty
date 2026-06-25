@@ -268,7 +268,30 @@ export type AITerminalSessionInfo = {
   shellType?: string;
   deviceType?: string;
   connected: boolean;
+  hostChain?: Array<{ hostId: string; label?: string; hostname?: string }>;
+  activePortForwards?: Array<{
+    ruleId: string;
+    label?: string;
+    type?: string;
+    localPort?: number;
+    status?: string;
+  }>;
 };
+
+function summarizeHostChain(
+  host: Host | undefined,
+  allHosts: Host[],
+): AITerminalSessionInfo['hostChain'] | undefined {
+  if (!host?.hostChain?.hostIds?.length) return undefined;
+  return host.hostChain.hostIds.map((hostId) => {
+    const jumpHost = allHosts.find((entry) => entry.id === hostId);
+    return {
+      hostId,
+      label: jumpHost?.label,
+      hostname: jumpHost?.hostname,
+    };
+  });
+}
 
 export type AIPanelContext = {
   scopeType: 'terminal' | 'workspace';
@@ -286,9 +309,26 @@ export const buildAITerminalSessionInfo = (
   session: TerminalSession | undefined,
   host: Host | undefined,
   localOs: 'linux' | 'macos' | 'windows',
+  options?: {
+    allHosts?: Host[];
+    portForwardingRules?: import('../../domain/models').PortForwardingRule[];
+  },
 ): AITerminalSessionInfo => {
   const protocol = session?.protocol || host?.protocol;
   const isLocalSession = protocol === 'local' || session?.hostId?.startsWith('local-');
+  const allHosts = options?.allHosts ?? (host ? [host] : []);
+  const hostChain = summarizeHostChain(host, allHosts);
+  const activePortForwards = host?.id && options?.portForwardingRules
+    ? options.portForwardingRules
+      .filter((rule) => rule.hostId === host.id && (rule.status === 'active' || rule.status === 'connecting'))
+      .map((rule) => ({
+        ruleId: rule.id,
+        label: rule.label,
+        type: rule.type,
+        localPort: rule.localPort,
+        status: rule.status,
+      }))
+    : undefined;
   return {
     sessionId: session?.id || '',
     hostId: session?.hostId || '',
@@ -302,6 +342,8 @@ export const buildAITerminalSessionInfo = (
     // PTY and cannot connect to vendor CLIs, so network device mode doesn't apply.
     deviceType: (session?.moshEnabled || host?.moshEnabled || session?.etEnabled || host?.etEnabled) ? undefined : host?.deviceType,
     connected: session?.status === 'connected',
+    ...(hostChain?.length ? { hostChain } : {}),
+    ...(activePortForwards?.length ? { activePortForwards } : {}),
   };
 };
 
@@ -526,6 +568,7 @@ AIChatPanelsHost.displayName = 'AIChatPanelsHost';
 
 export interface TerminalLayerProps {
   hosts: Host[];
+  portForwardingRules?: import('../../domain/models').PortForwardingRule[];
   customGroups: string[];
   groupConfigs: GroupConfig[];
   proxyProfiles: ProxyProfile[];

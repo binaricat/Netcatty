@@ -920,6 +920,12 @@ function createPreloadApi(ctx) {
   aiCattyCancelExec: async (chatSessionId) => {
     return ipcRenderer.invoke("netcatty:ai:catty:cancel", { chatSessionId });
   },
+  aiSetChatSessionCancelled: async (chatSessionId, cancelled = true) => {
+    return ipcRenderer.invoke("netcatty:ai:chat-session:set-cancelled", { chatSessionId, cancelled });
+  },
+  aiCapability: async (rpcMethod, params, chatSessionId) => {
+    return ipcRenderer.invoke("netcatty:ai:capability", { rpcMethod, params, chatSessionId });
+  },
   aiDiscoverAgents: async (options) => {
     return ipcRenderer.invoke("netcatty:ai:agents:discover", options);
   },
@@ -963,6 +969,9 @@ function createPreloadApi(ctx) {
   aiMcpSetToolIntegrationMode: async (mode) => {
     return ipcRenderer.invoke("netcatty:ai:mcp:set-tool-integration-mode", { mode });
   },
+  aiMcpSyncPermissionGrants: async (grants) => {
+    return ipcRenderer.invoke("netcatty:ai:mcp:sync-permission-grants", { grants });
+  },
   aiUserSkillsGetStatus: async () => {
     return ipcRenderer.invoke("netcatty:ai:user-skills:status");
   },
@@ -986,6 +995,14 @@ function createPreloadApi(ctx) {
     const handler = (_event, payload) => cb(payload);
     ipcRenderer.on("netcatty:ai:mcp:approval-cleared", handler);
     return () => ipcRenderer.removeListener("netcatty:ai:mcp:approval-cleared", handler);
+  },
+  onVaultAgentRequest: (cb) => {
+    const handler = (_event, payload) => cb(payload);
+    ipcRenderer.on("netcatty:ai:vault-agent:request", handler);
+    return () => ipcRenderer.removeListener("netcatty:ai:vault-agent:request", handler);
+  },
+  respondVaultAgent: async (requestId, result) => {
+    return ipcRenderer.invoke("netcatty:ai:vault-agent:response", { requestId, result });
   },
   // SDK external agent streaming
   aiSdkAgentStream: async (requestId, chatSessionId, sdkBackend, prompt, cwd, providerId, model, existingSessionId, historyMessages, images, toolIntegrationMode, defaultTargetSession, userSkillsContext, agentEnv, agentCommand) => {

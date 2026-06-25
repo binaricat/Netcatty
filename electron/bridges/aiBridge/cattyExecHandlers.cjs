@@ -160,6 +160,33 @@ function registerCattyExecHandlers(ctx) {
     void mcpServerBridge.cancelSftpOpsForSession?.(chatSessionId);
     return { ok: true };
   });
+
+  ipcMain.handle("netcatty:ai:chat-session:set-cancelled", async (event, { chatSessionId, cancelled }) => {
+    if (!validateSender(event)) {
+      return { ok: false, error: "Unauthorized IPC sender" };
+    }
+    if (!chatSessionId || typeof chatSessionId !== "string") {
+      return { ok: false, error: "chatSessionId is required" };
+    }
+    try {
+      return await mcpServerBridge.applyChatSessionCancelled(chatSessionId, cancelled !== false);
+    } catch (err) {
+      return { ok: false, error: err?.message || String(err) };
+    }
+  });
+
+  ipcMain.handle("netcatty:ai:capability", async (event, { rpcMethod, params, chatSessionId }) => {
+    if (!validateSender(event)) {
+      return { ok: false, error: "Unauthorized IPC sender" };
+    }
+    if (!rpcMethod || typeof rpcMethod !== "string") {
+      return { ok: false, error: "rpcMethod is required" };
+    }
+    return mcpServerBridge.dispatchBuiltinRpc(rpcMethod, {
+      ...(params || {}),
+      chatSessionId,
+    });
+  });
   }
 }
 
