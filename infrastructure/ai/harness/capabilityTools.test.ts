@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveSessionQueueKeyForTests } from './capabilityTools';
+import { createCattyToolsFromCatalog, resolveSessionQueueKeyForTests } from './capabilityTools';
+import { ToolOutputStore } from './toolOutputStore';
 
 describe('capabilityTools session queue keys', () => {
   it('does not queue read-only harness tools behind terminal session writes', () => {
@@ -27,5 +28,41 @@ describe('capabilityTools session queue keys', () => {
       'chat-1',
     );
     assert.equal(key, 'chat-1:session-a');
+  });
+});
+
+describe('capabilityTools result fitting', () => {
+  it('truncates large vault note content and stores the full note body behind a handle', async () => {
+    const store = new ToolOutputStore();
+    const body = `${'note line\n'.repeat(1000)}important ending`;
+    const tools = createCattyToolsFromCatalog(
+      {
+        aiCapability: async () => ({
+          ok: true,
+          note: {
+            id: 'note-1',
+            title: 'Long note',
+            content: body,
+          },
+        }),
+      },
+      { sessions: [] },
+      [],
+      'auto',
+      undefined,
+      'chat-1',
+      store,
+    );
+
+    const result = await tools.vault_notes_get.execute(
+      { noteId: 'note-1' },
+      { toolCallId: 'call-1', messages: [] },
+    ) as { note: { content: string } };
+
+    assert.notEqual(result.note.content, body);
+    assert.match(result.note.content, /tool output handle/);
+    const handleId = result.note.content.match(/handleId=(tool-output-[^\]\s]+)/)?.[1];
+    assert.ok(handleId);
+    assert.equal(store.read({ handleId, mode: 'full', maxChars: body.length + 100 }, 'chat-1'), body);
   });
 });

@@ -16,6 +16,7 @@ import {
 import { requestApproval } from '../shared/approvalGate';
 import { reserveSessionSlot } from '../shared/sessionExecutionQueue';
 import { fitTerminalExecuteResultForModel } from './terminalCompression';
+import { fitLargeToolResultForModel } from './toolResultFitting';
 import type { ToolOutputStore } from './toolOutputStore';
 import {
   hashScopeKey,
@@ -110,6 +111,20 @@ function applyToolDedup(
   }
   dedup.remember(toolName, fingerprint, previewToolResult(result));
   return result;
+}
+
+function fitCapabilityResultForModel(
+  result: unknown,
+  spec: CattyToolSpec,
+  chatSessionId?: string,
+  toolOutputStore?: ToolOutputStore,
+): unknown {
+  return fitLargeToolResultForModel({
+    result,
+    capabilityId: spec.capabilityId,
+    chatSessionId,
+    toolOutputStore,
+  });
 }
 
 interface LocalExecutionContext {
@@ -304,7 +319,7 @@ function createCatalogTool(
         }
 
         if (spec.localExecution || spec.capabilityId.startsWith('harness.')) {
-          return executeLocalCattyCapability({
+          const result = await executeLocalCattyCapability({
             deps,
             spec,
             args: args as Record<string, unknown>,
@@ -312,6 +327,7 @@ function createCatalogTool(
             toolResultDedup,
             chatSessionId: deps.chatSessionId,
           });
+          return fitCapabilityResultForModel(result, spec, deps.chatSessionId, toolOutputStore);
         }
 
         if (!spec.rpcMethod) {
@@ -332,7 +348,12 @@ function createCatalogTool(
             hashScopeKey([deps.chatSessionId, ctx.workspaceId, String(ctx.sessions?.length ?? 0)]),
           );
           if (fingerprint) {
-            return applyToolDedup(spec.toolName, fingerprint, raw, toolResultDedup);
+            return fitCapabilityResultForModel(
+              applyToolDedup(spec.toolName, fingerprint, raw, toolResultDedup),
+              spec,
+              deps.chatSessionId,
+              toolOutputStore,
+            );
           }
         }
 
@@ -343,7 +364,12 @@ function createCatalogTool(
             hashScopeKey([sid, path]),
           );
           if (fingerprint) {
-            return applyToolDedup(spec.toolName, fingerprint, raw, toolResultDedup);
+            return fitCapabilityResultForModel(
+              applyToolDedup(spec.toolName, fingerprint, raw, toolResultDedup),
+              spec,
+              deps.chatSessionId,
+              toolOutputStore,
+            );
           }
 
           if (
@@ -374,7 +400,7 @@ function createCatalogTool(
           }
         }
 
-        return raw;
+        return fitCapabilityResultForModel(raw, spec, deps.chatSessionId, toolOutputStore);
       } finally {
         slot?.release();
       }
