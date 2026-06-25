@@ -218,6 +218,7 @@ ipcRenderer.on("netcatty:exit", (_event, payload) => {
   exitListeners.delete(payload.sessionId);
   telnetAutoLoginCompleteListeners.delete(payload.sessionId);
   telnetAutoLoginCancelledListeners.delete(payload.sessionId);
+  telnetEchoModeListeners.delete(payload.sessionId);
   zmodemListeners.delete(payload.sessionId);
   zmodemOverwriteListeners.delete(payload.sessionId);
   const pendingTimer = _mcpFlushTimers.get(payload.sessionId);

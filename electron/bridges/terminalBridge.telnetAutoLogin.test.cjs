@@ -1,6 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const net = require("node:net");
+const iconv = require("iconv-lite");
 
 const terminalBridge = require("./terminalBridge.cjs");
 
@@ -99,6 +100,62 @@ test("startTelnetSession answers login prompts with saved credentials", async ()
       evt.payload?.sessionId === "telnet-auto-login-test",
     ));
     assert.deepEqual(serverErrors, []);
+  } finally {
+    terminalBridge.cleanupAllSessions();
+    for (const socket of sockets) socket.destroy();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("startTelnetSession encodes saved Telnet credentials with the session charset", async () => {
+  const chunks = [];
+  const sockets = new Set();
+  const server = net.createServer((socket) => {
+    sockets.add(socket);
+    socket.on("error", () => {});
+    socket.on("close", () => {
+      sockets.delete(socket);
+    });
+    socket.write("Username: ");
+    socket.on("data", (chunk) => {
+      chunks.push(chunk);
+      if (Buffer.concat(chunks).includes(iconv.encode("管理员\r\n", "gb18030"))) {
+        socket.write("\r\nPassword: ");
+      }
+    });
+  });
+
+  const port = await listen(server);
+  const sessions = new Map();
+  terminalBridge.init({
+    sessions,
+    electronModule: {
+      webContents: {
+        fromId: () => ({
+          send() {},
+        }),
+      },
+    },
+  });
+
+  try {
+    await terminalBridge.startTelnetSession(
+      { sender: { id: 1 } },
+      {
+        sessionId: "telnet-auto-login-gb18030",
+        hostname: "127.0.0.1",
+        port,
+        username: "管理员",
+        password: "秘密",
+        charset: "GB18030",
+      },
+    );
+
+    await waitFor(() => Buffer.concat(chunks).length >= iconv.encode("管理员\r\n秘密\r\n", "gb18030").length);
+    assert.deepEqual(
+      [...Buffer.concat(chunks)],
+      [...iconv.encode("管理员\r\n秘密\r\n", "gb18030")],
+    );
   } finally {
     terminalBridge.cleanupAllSessions();
     for (const socket of sockets) socket.destroy();

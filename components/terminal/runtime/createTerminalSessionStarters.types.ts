@@ -130,6 +130,7 @@ export type TerminalSessionStartersContext = {
   hasRunStartupCommandRef: RefObject<boolean>;
   disposeDataRef: RefObject<(() => void) | null>;
   disposeExitRef: RefObject<(() => void) | null>;
+  disposeTelnetEchoModeRef?: RefObject<(() => void) | null>;
   fitAddonRef: RefObject<FitAddon | null>;
   serializeAddonRef: RefObject<SerializeAddon | null>;
   pendingAuthRef: RefObject<PendingAuth>;

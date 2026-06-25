@@ -176,6 +176,7 @@ function createPreloadApi(ctx) {
     ipcRenderer.send("netcatty:flow", { sessionId, paused: Boolean(paused) });
   },
   closeSession: (sessionId) => {
+    telnetEchoModeListeners.delete(sessionId);
     ipcRenderer.send("netcatty:close", { sessionId });
   },
   setSessionEncoding: async (sessionId, encoding) => {

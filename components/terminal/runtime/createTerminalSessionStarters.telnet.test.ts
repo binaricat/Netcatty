@@ -502,6 +502,172 @@ test("startTelnet waits for auto-login before running the startup command", asyn
   assert.equal(disposedAutoLoginCancelListener, true);
 });
 
+test("startTelnet keeps Telnet echo subscription after auto-login is cancelled", async () => {
+  let autoLoginCancelled: ((evt: { sessionId: string }) => void) | null = null;
+  let echoCallback: ((evt: { sessionId: string; remoteEcho: boolean; localEcho: boolean }) => void) | null = null;
+  let echoDisposals = 0;
+
+  const terminalBackend = {
+    backendAvailable: () => true,
+    telnetAvailable: () => true,
+    moshAvailable: () => true,
+    localAvailable: () => true,
+    serialAvailable: () => true,
+    execAvailable: () => true,
+    startSSHSession: async () => "ssh-session",
+    startTelnetSession: async () => "session-1",
+    startMoshSession: async () => "mosh-session",
+    startLocalSession: async () => "local-session",
+    startSerialSession: async () => "serial-session",
+    execCommand: async () => ({}),
+    onSessionData: () => noop,
+    onSessionExit: () => noop,
+    onTelnetAutoLoginComplete: () => noop,
+    onTelnetAutoLoginCancelled: (_sessionId: string, cb: (evt: { sessionId: string }) => void) => {
+      autoLoginCancelled = cb;
+      return noop;
+    },
+    onTelnetEchoMode: (_sessionId: string, cb: (evt: { sessionId: string; remoteEcho: boolean; localEcho: boolean }) => void) => {
+      echoCallback = cb;
+      return () => {
+        echoDisposals += 1;
+      };
+    },
+    onChainProgress: () => noop,
+    writeToSession: noop,
+    resizeSession: noop,
+  };
+
+  const telnetLocalEchoRef = { current: false };
+  const disposeTelnetEchoModeRef = { current: null as (() => void) | null };
+  const ctx = {
+    host: {
+      id: "host-1",
+      protocol: "telnet",
+      label: "Example",
+      hostname: "example.test",
+      telnetUsername: "admin",
+      startupCommand: "show version",
+    },
+    keys: [],
+    resolvedChainHosts: [],
+    sessionId: "session-1",
+    terminalSettings: {},
+    terminalBackend,
+    telnetLocalEchoRef,
+    disposeTelnetEchoModeRef,
+    sessionRef: { current: null },
+    hasConnectedRef: { current: false },
+    hasRunStartupCommandRef: { current: false },
+    disposeDataRef: { current: null },
+    disposeExitRef: { current: null },
+    fitAddonRef: { current: null },
+    serializeAddonRef: { current: null },
+    pendingAuthRef: { current: null },
+    updateStatus: noop,
+    setStatus: noop,
+    setError: noop,
+    setNeedsAuth: noop,
+    setAuthRetryMessage: noop,
+    setAuthPassword: noop,
+    setProgressLogs: noop,
+    setProgressValue: noop,
+    setChainProgress: noop,
+  };
+
+  const term = {
+    cols: 120,
+    rows: 32,
+    write: noop,
+    writeln: noop,
+    scrollToBottom: noop,
+  };
+
+  await createTerminalSessionStarters(ctx as never).startTelnet(term as never);
+
+  assert.ok(autoLoginCancelled);
+  assert.equal(typeof disposeTelnetEchoModeRef.current, "function");
+  autoLoginCancelled({ sessionId: "session-1" });
+  assert.equal(echoDisposals, 0);
+
+  echoCallback?.({ sessionId: "session-1", remoteEcho: false, localEcho: true });
+  assert.equal(telnetLocalEchoRef.current, true);
+});
+
+test("startTelnet ignores stale replacement failures", async () => {
+  let error: string | null = null;
+  const statuses: string[] = [];
+
+  const terminalBackend = {
+    backendAvailable: () => true,
+    telnetAvailable: () => true,
+    moshAvailable: () => true,
+    localAvailable: () => true,
+    serialAvailable: () => true,
+    execAvailable: () => true,
+    startSSHSession: async () => "ssh-session",
+    startTelnetSession: async () => {
+      throw new Error("Error invoking remote method 'netcatty:telnet:start': Error: Telnet session start was replaced");
+    },
+    startMoshSession: async () => "mosh-session",
+    startLocalSession: async () => "local-session",
+    startSerialSession: async () => "serial-session",
+    execCommand: async () => ({}),
+    onSessionData: () => noop,
+    onSessionExit: () => noop,
+    onTelnetEchoMode: () => noop,
+    onChainProgress: () => noop,
+    writeToSession: noop,
+    resizeSession: noop,
+  };
+
+  const ctx = {
+    host: {
+      id: "host-1",
+      protocol: "telnet",
+      label: "Example",
+      hostname: "example.test",
+    },
+    keys: [],
+    resolvedChainHosts: [],
+    sessionId: "session-1",
+    terminalSettings: {},
+    terminalBackend,
+    telnetLocalEchoRef: { current: false },
+    disposeTelnetEchoModeRef: { current: null },
+    sessionRef: { current: null },
+    hasConnectedRef: { current: false },
+    hasRunStartupCommandRef: { current: false },
+    disposeDataRef: { current: null },
+    disposeExitRef: { current: null },
+    fitAddonRef: { current: null },
+    serializeAddonRef: { current: null },
+    pendingAuthRef: { current: null },
+    updateStatus: (next: string) => { statuses.push(next); },
+    setStatus: noop,
+    setError: (message: string | null) => { error = message; },
+    setNeedsAuth: noop,
+    setAuthRetryMessage: noop,
+    setAuthPassword: noop,
+    setProgressLogs: noop,
+    setProgressValue: noop,
+    setChainProgress: noop,
+  };
+
+  const term = {
+    cols: 120,
+    rows: 32,
+    write: noop,
+    writeln: noop,
+    scrollToBottom: noop,
+  };
+
+  await createTerminalSessionStarters(ctx as never).startTelnet(term as never);
+
+  assert.equal(error, null);
+  assert.deepEqual(statuses, []);
+});
+
 test("startTelnet runs a multi-line startup command in sequence", async () => {
   const writtenCommands: string[] = [];
   const executedCommands: string[] = [];
@@ -703,6 +869,7 @@ test("startTelnet does not run startup command if auto-login never completes", a
   const executedCommands: string[] = [];
   let capturedOptions: Record<string, unknown> | null = null;
   let autoLoginComplete: ((evt: { sessionId: string }) => void) | null = null;
+  let sessionExit: ((evt: { reason?: "closed" }) => void) | null = null;
   let disposedAutoLoginListener = false;
 
   const terminalBackend = {
@@ -722,7 +889,10 @@ test("startTelnet does not run startup command if auto-login never completes", a
     startSerialSession: async () => "serial-session",
     execCommand: async () => ({}),
     onSessionData: () => noop,
-    onSessionExit: () => noop,
+    onSessionExit: (_sessionId: string, cb: (evt: { reason?: "closed" }) => void) => {
+      sessionExit = cb;
+      return noop;
+    },
     onTelnetAutoLoginComplete: (_sessionId: string, cb: (evt: { sessionId: string }) => void) => {
       autoLoginComplete = cb;
       return () => {
@@ -791,7 +961,8 @@ test("startTelnet does not run startup command if auto-login never completes", a
   assert.deepEqual(writtenCommands, []);
   assert.deepEqual(executedCommands, []);
 
-  ctx.disposeExitRef.current?.();
+  assert.ok(sessionExit);
+  sessionExit({ reason: "closed" });
   assert.equal(disposedAutoLoginListener, true);
 });
 
@@ -949,6 +1120,85 @@ test("startTelnet rejects configured proxies instead of connecting directly", as
 
   assert.equal(started, false);
   assert.match(error, /Telnet does not support proxy/);
+});
+
+test("reattachSession refreshes Telnet echo-mode subscription", () => {
+  let echoCallback: ((evt: { sessionId: string; remoteEcho: boolean; localEcho: boolean }) => void) | null = null;
+  let echoDisposals = 0;
+  const echoSessionIds: string[] = [];
+
+  const terminalBackend = {
+    onSessionData: () => noop,
+    onSessionExit: () => noop,
+    onTelnetEchoMode: (sessionId: string, cb: (evt: { sessionId: string; remoteEcho: boolean; localEcho: boolean }) => void) => {
+      echoSessionIds.push(sessionId);
+      echoCallback = cb;
+      return () => {
+        echoDisposals += 1;
+      };
+    },
+    writeToSession: noop,
+    resizeSession: noop,
+  };
+
+  const telnetLocalEchoRef = { current: false };
+  const disposeTelnetEchoModeRef = { current: null as (() => void) | null };
+  const ctx = {
+    host: {
+      id: "host-1",
+      protocol: "telnet",
+      label: "Example",
+      hostname: "example.test",
+    },
+    keys: [],
+    resolvedChainHosts: [],
+    sessionId: "session-1",
+    terminalSettings: {},
+    terminalBackend,
+    telnetLocalEchoRef,
+    disposeTelnetEchoModeRef,
+    sessionRef: { current: "telnet-session" },
+    hasConnectedRef: { current: false },
+    hasRunStartupCommandRef: { current: false },
+    disposeDataRef: { current: null },
+    disposeExitRef: { current: null },
+    fitAddonRef: { current: null },
+    serializeAddonRef: { current: null },
+    pendingAuthRef: { current: null },
+    updateStatus: noop,
+    setStatus: noop,
+    setError: noop,
+    setNeedsAuth: noop,
+    setAuthRetryMessage: noop,
+    setAuthPassword: noop,
+    setProgressLogs: noop,
+    setProgressValue: noop,
+    setChainProgress: noop,
+  };
+
+  const term = {
+    cols: 120,
+    rows: 32,
+    write: noop,
+    writeln: noop,
+    scrollToBottom: noop,
+  };
+
+  const starters = createTerminalSessionStarters(ctx as never);
+  assert.equal(starters.reattachSession(term as never), true);
+  assert.deepEqual(echoSessionIds, ["telnet-session"]);
+  assert.equal(typeof disposeTelnetEchoModeRef.current, "function");
+
+  echoCallback?.({ sessionId: "telnet-session", remoteEcho: false, localEcho: true });
+  assert.equal(telnetLocalEchoRef.current, true);
+
+  assert.equal(starters.reattachSession(term as never), true);
+  assert.deepEqual(echoSessionIds, ["telnet-session", "telnet-session"]);
+  assert.equal(echoDisposals, 1);
+  assert.equal(telnetLocalEchoRef.current, true);
+
+  echoCallback?.({ sessionId: "telnet-session", remoteEcho: true, localEcho: false });
+  assert.equal(telnetLocalEchoRef.current, false);
 });
 
 test("splitStartupCommandLines drops blank lines but keeps content verbatim", () => {

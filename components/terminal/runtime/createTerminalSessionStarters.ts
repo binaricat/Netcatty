@@ -33,6 +33,8 @@ import {
 } from "../../../domain/host";
 import { hasUsableProxyConfig } from "../../../domain/proxyProfiles";
 
+const TELNET_SESSION_REPLACED_ERROR = "Telnet session start was replaced";
+
 export const getMissingChainHostIds = (
   host: Host,
   resolvedChainHosts: Host[],
@@ -44,6 +46,8 @@ export const getMissingChainHostIds = (
 };
 
 export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContext) => {
+  let fallbackDisposeTelnetEchoMode: (() => void) | null = null;
+
   const tr = (key: string, fallback: string): string => {
     const translated = ctx.t?.(key);
     if (!translated || translated === key) return fallback;
@@ -75,6 +79,35 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
       return sanitizeCredentialValue(ctx.sudoAutofillPasswordRef.current);
     }
     return sanitizeCredentialValue(ctx.sudoAutofillPassword);
+  };
+
+  const clearTelnetEchoMode = ({ resetLocalEcho = true }: { resetLocalEcho?: boolean } = {}) => {
+    ctx.disposeTelnetEchoModeRef?.current?.();
+    if (ctx.disposeTelnetEchoModeRef) ctx.disposeTelnetEchoModeRef.current = null;
+    fallbackDisposeTelnetEchoMode?.();
+    fallbackDisposeTelnetEchoMode = null;
+    if (resetLocalEcho && ctx.telnetLocalEchoRef) ctx.telnetLocalEchoRef.current = false;
+  };
+
+  const attachTelnetEchoMode = (
+    backendSessionId: string,
+    { resetLocalEcho = true }: { resetLocalEcho?: boolean } = {},
+  ) => {
+    if (ctx.host.protocol !== "telnet") return;
+    if (!ctx.telnetLocalEchoRef || !ctx.terminalBackend.onTelnetEchoMode) return;
+    clearTelnetEchoMode({ resetLocalEcho });
+    if (resetLocalEcho) ctx.telnetLocalEchoRef.current = false;
+    const dispose = ctx.terminalBackend.onTelnetEchoMode(
+      backendSessionId,
+      (evt) => {
+        ctx.telnetLocalEchoRef!.current = Boolean(evt.localEcho);
+      },
+    ) ?? null;
+    if (ctx.disposeTelnetEchoModeRef) {
+      ctx.disposeTelnetEchoModeRef.current = dispose;
+    } else {
+      fallbackDisposeTelnetEchoMode = dispose;
+    }
   };
 
   const startSSH = async (term: XTerm) => {
@@ -567,7 +600,6 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
 
     let disposeAutoLoginComplete: (() => void) | undefined;
     let disposeAutoLoginCancelled: (() => void) | undefined;
-    let disposeTelnetEchoMode: (() => void) | undefined;
     let cancelPendingStartupCommand: (() => void) | undefined;
     const disposeAutoLoginListener = () => {
       disposeAutoLoginComplete?.();
@@ -580,11 +612,12 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
     const cleanupTelnetStartupWait = () => {
       disposeAutoLoginListener();
       disposeAutoLoginCancelListener();
-      disposeTelnetEchoMode?.();
-      disposeTelnetEchoMode = undefined;
-      if (ctx.telnetLocalEchoRef) ctx.telnetLocalEchoRef.current = false;
       cancelPendingStartupCommand?.();
       cancelPendingStartupCommand = undefined;
+    };
+    const cleanupTelnetSession = () => {
+      cleanupTelnetStartupWait();
+      clearTelnetEchoMode();
     };
     try {
       const telnetEnv = buildTermEnv(ctx.host, ctx.terminalSettings);
@@ -627,15 +660,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
           cleanupTelnetStartupWait,
         );
       }
-      if (ctx.telnetLocalEchoRef && ctx.terminalBackend.onTelnetEchoMode) {
-        ctx.telnetLocalEchoRef.current = false;
-        disposeTelnetEchoMode = ctx.terminalBackend.onTelnetEchoMode(
-          ctx.sessionId,
-          (evt) => {
-            ctx.telnetLocalEchoRef!.current = Boolean(evt.localEcho);
-          },
-        );
-      }
+      attachTelnetEchoMode(ctx.sessionId);
       const id = await ctx.terminalBackend.startTelnetSession({
         sessionId: ctx.sessionId,
         hostname: ctx.host.hostname,
@@ -649,21 +674,19 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         sessionLog: ctx.sessionLog?.enabled ? ctx.sessionLog : undefined,
       });
       telnetSessionId = id;
+      if (id !== ctx.sessionId) {
+        attachTelnetEchoMode(id);
+      }
 
       if (!tryAttachSessionToTerminal(ctx, term, id, {
         onExitMessage: (evt) =>
           `\r\n[Telnet session closed${evt?.exitCode !== undefined ? ` (code ${evt.exitCode})` : ""}]`,
-        onExit: cleanupTelnetStartupWait,
+        onExit: cleanupTelnetSession,
       })) {
-        cleanupTelnetStartupWait();
+        cleanupTelnetSession();
         abortSessionStartAfterUnmount();
         return;
       }
-      const disposeTelnetExit = ctx.disposeExitRef.current;
-      ctx.disposeExitRef.current = () => {
-        cleanupTelnetStartupWait();
-        disposeTelnetExit?.();
-      };
 
       // Many telnet endpoints (especially no-auth devices) stay silent until
       // the client sends data. Mark connected once the socket session is
@@ -676,8 +699,12 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         return;
       }
     } catch (err) {
-      cleanupTelnetStartupWait();
       const message = err instanceof Error ? err.message : String(err);
+      if (message.includes(TELNET_SESSION_REPLACED_ERROR)) {
+        cleanupTelnetStartupWait();
+        return;
+      }
+      cleanupTelnetSession();
       ctx.setError(message);
       writeTerminalLine(ctx, term, `\r\n[Failed to start Telnet: ${message}]`);
       ctx.updateStatus("disconnected");
@@ -1240,6 +1267,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
       convertLfToCrlf: isSerial,
       sudoAutofillPassword: ctx.sudoAutofillPassword,
     });
+    attachTelnetEchoMode(id, { resetLocalEcho: false });
     ctx.hasConnectedRef.current = true;
     return true;
   };

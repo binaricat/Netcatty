@@ -235,6 +235,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   const knownCwdRef = useRef<string | undefined>(undefined);
   const disposeDataRef = useRef<(() => void) | null>(null);
   const disposeExitRef = useRef<(() => void) | null>(null);
+  const disposeTelnetEchoModeRef = useRef<(() => void) | null>(null);
   const hibernatedRef = useRef(false);
   const softHiddenRef = useRef(false);
   const hasRuntimeRef = useRef(false);
@@ -796,6 +797,9 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     disposeDataRef.current = null;
     disposeExitRef.current?.();
     disposeExitRef.current = null;
+    disposeTelnetEchoModeRef.current?.();
+    disposeTelnetEchoModeRef.current = null;
+    telnetLocalEchoRef.current = false;
 
     if (sessionRef.current) {
       try {
@@ -828,6 +832,9 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     disposeDataRef.current = null;
     disposeExitRef.current?.();
     disposeExitRef.current = null;
+    disposeTelnetEchoModeRef.current?.();
+    disposeTelnetEchoModeRef.current = null;
+    telnetLocalEchoRef.current = false;
     if (sessionRef.current) {
       try {
         terminalBackend.closeSession(sessionRef.current);
@@ -858,6 +865,9 @@ const TerminalComponent: React.FC<TerminalProps> = ({
 
     disposeExitRef.current?.();
     disposeExitRef.current = terminalBackend.onSessionExit(backendId, (evt) => {
+      disposeTelnetEchoModeRef.current?.();
+      disposeTelnetEchoModeRef.current = null;
+      telnetLocalEchoRef.current = false;
       updateStatusRef.current("disconnected");
       if (evt.error) {
         setError(evt.error);
@@ -1004,6 +1014,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     restoreCwdIntentRef,
     disposeDataRef,
     disposeExitRef,
+    disposeTelnetEchoModeRef,
     fitAddonRef,
     serializeAddonRef,
     pendingAuthRef,
