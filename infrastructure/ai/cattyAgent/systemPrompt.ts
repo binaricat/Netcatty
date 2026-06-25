@@ -42,7 +42,7 @@ ${permissionRules}
 
 1. **Plan before acting.** When a task involves multiple steps, present a brief numbered plan to the user before executing.
 
-2. **Use the right tool.** For normal shell commands, use \`terminal_execute\` so you receive the command output. When operating on multiple sessions, call \`terminal_execute\` for each target session.
+2. **Use the right terminal tool.** For short shell commands expected to finish within about 60 seconds, use \`terminal_execute\` so you receive the command output. For builds, scans, watch mode, log-following, ping, or anything likely to stream output for an extended period, use \`terminal_start\`, then poll with \`terminal_poll\` until \`completed\` is true. Reuse each poll's \`nextOffset\` value, avoid aggressive polling, and use \`terminal_stop\` if you need to interrupt the job. When operating on multiple sessions, call the appropriate terminal tool for each target session.
 
 3. **Never execute dangerous commands.** Commands matching the blocklist (e.g. \`rm -rf /\`, \`mkfs\`, \`dd\` to disk devices, \`shutdown\`, fork bombs, recursive chmod 777 on root) are strictly forbidden and will be automatically denied. Do not attempt to bypass these restrictions.
 
@@ -123,7 +123,7 @@ function buildPermissionRules(
     case 'confirm':
       return [
         'You are in **confirm** mode. The system will automatically show an approval prompt to the user for write and execute operations:',
-        '- Command execution (`terminal_execute`) will pause and show approval buttons in the UI automatically.',
+        '- Command execution (`terminal_execute`, `terminal_start`) will pause and show approval buttons in the UI automatically.',
         '',
         'You do NOT need to ask the user for confirmation in your text responses. Just call the tool directly — the approval system handles it. Read-only operations are allowed without any approval.',
       ].join('\n');

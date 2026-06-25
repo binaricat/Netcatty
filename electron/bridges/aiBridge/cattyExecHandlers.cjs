@@ -102,10 +102,9 @@ function registerCattyExecHandlers(ctx) {
               syntheticEcho: true,
             });
           },
-          // Catty Agent has no terminal_start fallback for long-running
-          // commands, so do NOT enforce a hard wall-clock timeout here.
-          // The inactivity timeout still applies, so genuinely hung
-          // processes are still terminated.
+          // Catty Agent now has terminal_start/terminal_poll for long-running
+          // commands, so keep terminal_execute on the short-command budget.
+          enforceWallTimeout: true,
         }));
       }
 
@@ -149,6 +148,50 @@ function registerCattyExecHandlers(ctx) {
       releaseLock();
       return { ok: false, error: err?.message || String(err) };
     }
+  });
+
+  ipcMain.handle("netcatty:ai:job-start", async (event, { sessionId, command, chatSessionId, scopedSessionIds }) => {
+    if (!validateSender(event)) {
+      return { ok: false, error: "Unauthorized IPC sender" };
+    }
+    if (!mcpServerBridge.dispatchFromRendererTool) {
+      return { ok: false, error: "Background job dispatch is not available" };
+    }
+    return mcpServerBridge.dispatchFromRendererTool("netcatty/jobStart", {
+      sessionId,
+      command,
+      chatSessionId,
+      scopedSessionIds,
+    });
+  });
+
+  ipcMain.handle("netcatty:ai:job-poll", async (event, { jobId, offset, chatSessionId, scopedSessionIds }) => {
+    if (!validateSender(event)) {
+      return { ok: false, error: "Unauthorized IPC sender" };
+    }
+    if (!mcpServerBridge.dispatchFromRendererTool) {
+      return { ok: false, error: "Background job dispatch is not available" };
+    }
+    return mcpServerBridge.dispatchFromRendererTool("netcatty/jobPoll", {
+      jobId,
+      offset,
+      chatSessionId,
+      scopedSessionIds,
+    });
+  });
+
+  ipcMain.handle("netcatty:ai:job-stop", async (event, { jobId, chatSessionId, scopedSessionIds }) => {
+    if (!validateSender(event)) {
+      return { ok: false, error: "Unauthorized IPC sender" };
+    }
+    if (!mcpServerBridge.dispatchFromRendererTool) {
+      return { ok: false, error: "Background job dispatch is not available" };
+    }
+    return mcpServerBridge.dispatchFromRendererTool("netcatty/jobStop", {
+      jobId,
+      chatSessionId,
+      scopedSessionIds,
+    });
   });
 
   // Cancel in-flight Catty Agent command executions for a chat session

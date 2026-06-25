@@ -8,6 +8,9 @@ declare global {
     aiFetch?(url: string, method?: string, headers?: Record<string, string>, body?: string, providerId?: string, skipHostCheck?: boolean, followRedirects?: boolean, skipTLSVerify?: boolean): Promise<{ ok: boolean; status?: number; data: string; error?: string }>;
     aiAllowlistAddHost?(baseURL: string): Promise<{ ok: boolean; error?: string }>;
     aiExec?(sessionId: string, command: string, chatSessionId?: string): Promise<{ ok: boolean; stdout?: string; stderr?: string; exitCode?: number | null; error?: string }>;
+    aiJobStart?(sessionId: string, command: string, chatSessionId?: string, scopedSessionIds?: string[]): Promise<{ ok: boolean; jobId?: string; sessionId?: string; command?: string; status?: string; startedAt?: number; outputMode?: string; recommendedPollIntervalMs?: number; error?: string }>;
+    aiJobPoll?(jobId: string, offset?: number, chatSessionId?: string, scopedSessionIds?: string[]): Promise<{ ok: boolean; jobId?: string; sessionId?: string; command?: string; status?: string; completed?: boolean; exitCode?: number | null; error?: string | null; startedAt?: number; updatedAt?: number; output?: string; nextOffset?: number; totalOutputChars?: number; outputBaseOffset?: number; outputTruncated?: boolean; recommendedPollIntervalMs?: number }>;
+    aiJobStop?(jobId: string, chatSessionId?: string, scopedSessionIds?: string[]): Promise<{ ok: boolean; jobId?: string; sessionId?: string; command?: string; status?: string; completed?: boolean; exitCode?: number | null; error?: string | null; startedAt?: number; updatedAt?: number; output?: string; nextOffset?: number; totalOutputChars?: number; outputBaseOffset?: number; outputTruncated?: boolean; recommendedPollIntervalMs?: number }>;
     aiCattyCancelExec?(chatSessionId: string): Promise<{ ok: boolean; error?: string }>;
     aiDiscoverAgents?(options?: { refreshShellEnv?: boolean; apiKeyPresent?: boolean }): Promise<Array<{
       command: string;

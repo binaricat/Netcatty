@@ -6,6 +6,9 @@ import type { WebSearchConfig } from '../types';
 import { isWebSearchReady } from '../types';
 import {
   executeTerminalExecute,
+  executeTerminalPoll,
+  executeTerminalStart,
+  executeTerminalStop,
   executeWorkspaceGetInfo,
   executeWorkspaceGetSessionInfo,
   executeWebSearch,
@@ -19,6 +22,7 @@ import { truncateTextWithHeadAndTail } from '../requestPayloadCompression';
 
 const MAX_LIVE_TERMINAL_STDOUT_CHARS = 24_000;
 const MAX_LIVE_TERMINAL_STDERR_CHARS = 12_000;
+const MAX_LIVE_TERMINAL_JOB_OUTPUT_CHARS = 24_000;
 
 /** Unwrap a shared ToolExecResult into the shape expected by Vercel AI SDK tool results. */
 function unwrap<T>(r: ToolExecResult<T>): T | { error: string } {
@@ -35,6 +39,13 @@ export function fitTerminalExecuteResultForModel(result: {
     ...result,
     stdout: truncateTextWithHeadAndTail(result.stdout, MAX_LIVE_TERMINAL_STDOUT_CHARS),
     stderr: truncateTextWithHeadAndTail(result.stderr, MAX_LIVE_TERMINAL_STDERR_CHARS),
+  };
+}
+
+export function fitTerminalJobResultForModel<T extends { output: string }>(result: T): T {
+  return {
+    ...result,
+    output: truncateTextWithHeadAndTail(result.output, MAX_LIVE_TERMINAL_JOB_OUTPUT_CHARS),
   };
 }
 
@@ -59,8 +70,8 @@ export function createCattyTools(
   return {
     terminal_execute: tool({
       description:
-        'Execute a shell command on the specified terminal session. ' +
-        "The command runs in the session's shell and output is returned when complete.",
+        'Execute a short shell command on the specified terminal session and wait for completion. ' +
+        "Use terminal_start for builds, watch commands, log-following, or commands likely to run longer than about 60 seconds.",
       inputSchema: z.object({
         sessionId: z.string().describe('The terminal session ID to execute the command on.'),
         command: z.string().describe('The shell command to execute in the target session.'),
@@ -129,6 +140,73 @@ export function createCattyTools(
         } finally {
           slot.release();
         }
+      },
+    }),
+
+    terminal_start: tool({
+      description:
+        'Start a long-running command on the specified terminal session without waiting for completion. ' +
+        'Use this for builds, scans, watch commands, log-following, or anything likely to stream output for an extended period. ' +
+        'After starting, use terminal_poll with the returned jobId and nextOffset values, and use terminal_stop to interrupt it.',
+      inputSchema: z.object({
+        sessionId: z.string().describe('The terminal session ID to execute the long-running command on.'),
+        command: z.string().describe('The shell command to start in the target session.'),
+      }),
+      execute: async ({ sessionId, command }, { toolCallId, abortSignal }) => {
+        const queueKey = `${chatSessionId ?? 'global'}:${sessionId}`;
+        const slot = reserveSessionSlot(queueKey);
+        try {
+          if (permissionMode === 'confirm') {
+            const approved = await requestApproval(toolCallId, 'terminal_start', { sessionId, command }, chatSessionId);
+            if (!approved) {
+              return { error: 'User denied command execution.' };
+            }
+          }
+          if (abortSignal?.aborted) {
+            return { error: 'Command cancelled before it could start.' };
+          }
+          await slot.ready;
+          if (abortSignal?.aborted) {
+            return { error: 'Command cancelled before it could start.' };
+          }
+          return unwrap(await executeTerminalStart(deps, { sessionId, command }));
+        } finally {
+          slot.release();
+        }
+      },
+    }),
+
+    terminal_poll: tool({
+      description:
+        'Poll a long-running terminal job that was started with terminal_start. ' +
+        'Returns incremental output since the provided offset plus status, completion, nextOffset, and truncation metadata. ' +
+        'Do not poll aggressively; normally wait roughly 30 seconds between polls unless the output justifies checking sooner.',
+      inputSchema: z.object({
+        jobId: z.string().describe('The background job ID returned by terminal_start.'),
+        offset: z
+          .number()
+          .optional()
+          .default(0)
+          .describe('The output offset to resume from. Use the previous terminal_poll nextOffset value.'),
+      }),
+      execute: async ({ jobId, offset }) => {
+        const result = await executeTerminalPoll(deps, { jobId, offset });
+        if (result.ok === false) return unwrap(result);
+        return fitTerminalJobResultForModel(result.data);
+      },
+    }),
+
+    terminal_stop: tool({
+      description:
+        'Stop a long-running terminal job that was started with terminal_start. ' +
+        'This sends an interrupt to the visible terminal job and returns the latest job state and output.',
+      inputSchema: z.object({
+        jobId: z.string().describe('The background job ID returned by terminal_start.'),
+      }),
+      execute: async ({ jobId }) => {
+        const result = await executeTerminalStop(deps, { jobId });
+        if (result.ok === false) return unwrap(result);
+        return fitTerminalJobResultForModel(result.data);
       },
     }),
 

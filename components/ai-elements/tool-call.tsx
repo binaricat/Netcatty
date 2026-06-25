@@ -94,6 +94,20 @@ export function extractDisplayCommand(args: Record<string, unknown> | undefined)
   return cmdString;
 }
 
+export function formatToolCallName(name: string, args: Record<string, unknown> | undefined): string {
+  const jobId = typeof args?.jobId === 'string' ? args.jobId : '';
+  switch (name) {
+    case 'terminal_start':
+      return 'netcatty: start terminal job';
+    case 'terminal_poll':
+      return jobId ? `netcatty: poll job ${jobId}` : 'netcatty: poll job';
+    case 'terminal_stop':
+      return jobId ? `netcatty: stop job ${jobId}` : 'netcatty: stop job';
+    default:
+      return name;
+  }
+}
+
 /**
  * Format tool result for display. Extracts stdout/stderr from structured
  * command results for terminal-like output.
@@ -112,6 +126,19 @@ function formatToolResult(result: unknown): string {
 
   if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
     const obj = parsed as Record<string, unknown>;
+    if (
+      typeof obj.output === 'string' ||
+      typeof obj.status === 'string' ||
+      typeof obj.jobId === 'string'
+    ) {
+      const parts: string[] = [];
+      if (typeof obj.status === 'string') parts.push(`status: ${obj.status}`);
+      if (typeof obj.jobId === 'string') parts.push(`job: ${obj.jobId}`);
+      if (typeof obj.output === 'string' && obj.output) parts.push(obj.output);
+      if (typeof obj.exitCode === 'number') parts.push(`exit code: ${obj.exitCode}`);
+      if (typeof obj.error === 'string' && obj.error) parts.push(`error: ${obj.error}`);
+      if (parts.length > 0) return parts.join('\n');
+    }
     if (typeof obj.stdout === 'string' || typeof obj.stderr === 'string') {
       const parts: string[] = [];
       if (typeof obj.stdout === 'string' && obj.stdout) parts.push(obj.stdout);
@@ -243,7 +270,7 @@ export const ToolCall = ({
               </Tooltip>
             );
           }
-          return <span className="font-mono text-muted-foreground/70 truncate">{name}</span>;
+          return <span className="font-mono text-muted-foreground/70 truncate">{formatToolCallName(name, args)}</span>;
         })()}
         <span className="flex-1" />
         {/* Approval badge for resolved approvals */}

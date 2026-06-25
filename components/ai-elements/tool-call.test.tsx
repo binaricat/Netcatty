@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { extractDisplayCommand } from './tool-call';
+import { extractDisplayCommand, formatToolCallName } from './tool-call';
 
 // Codex (SDK) emits command_execution.command as a STRING that wraps the real
 // command in `<shell> -lc '<full>'`. Under Skills + CLI the real command is a
@@ -58,4 +58,10 @@ test('plain command passes through unchanged', () => {
 test('empty / missing args -> null', () => {
   assert.equal(extractDisplayCommand(undefined), null);
   assert.equal(extractDisplayCommand({ command: '' }), null);
+});
+
+test('formats Catty long-running terminal tool names', () => {
+  assert.equal(formatToolCallName('terminal_start', { command: 'npm run build' }), 'netcatty: start terminal job');
+  assert.equal(formatToolCallName('terminal_poll', { jobId: 'job_123' }), 'netcatty: poll job job_123');
+  assert.equal(formatToolCallName('terminal_stop', { jobId: 'job_123' }), 'netcatty: stop job job_123');
 });

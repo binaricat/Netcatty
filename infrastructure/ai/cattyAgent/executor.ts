@@ -1,6 +1,9 @@
 import type { ToolCall, ToolResult, AIPermissionMode, WebSearchConfig } from '../types';
 import {
   executeTerminalExecute,
+  executeTerminalPoll,
+  executeTerminalStart,
+  executeTerminalStop,
   executeWorkspaceGetInfo,
   executeWorkspaceGetSessionInfo,
   executeWebSearch,
@@ -24,6 +27,67 @@ export interface NetcattyBridge {
     stderr?: string;
     exitCode?: number;
     error?: string;
+  }>;
+  aiJobStart?(
+    sessionId: string,
+    command: string,
+    chatSessionId?: string,
+    scopedSessionIds?: string[],
+  ): Promise<{
+    ok: boolean;
+    jobId?: string;
+    sessionId?: string;
+    command?: string;
+    status?: string;
+    startedAt?: number;
+    outputMode?: string;
+    recommendedPollIntervalMs?: number;
+    error?: string;
+  }>;
+  aiJobPoll?(
+    jobId: string,
+    offset?: number,
+    chatSessionId?: string,
+    scopedSessionIds?: string[],
+  ): Promise<{
+    ok: boolean;
+    jobId?: string;
+    sessionId?: string;
+    command?: string;
+    status?: string;
+    completed?: boolean;
+    exitCode?: number | null;
+    error?: string | null;
+    startedAt?: number;
+    updatedAt?: number;
+    output?: string;
+    nextOffset?: number;
+    totalOutputChars?: number;
+    outputBaseOffset?: number;
+    outputTruncated?: boolean;
+    recommendedPollIntervalMs?: number;
+  }>;
+  aiJobStop?(
+    jobId: string,
+    chatSessionId?: string,
+    scopedSessionIds?: string[],
+  ): Promise<{
+    ok: boolean;
+    jobId?: string;
+    sessionId?: string;
+    command?: string;
+    status?: string;
+    completed?: boolean;
+    exitCode?: number | null;
+    error?: string | null;
+    startedAt?: number;
+    updatedAt?: number;
+    output?: string;
+    nextOffset?: number;
+    totalOutputChars?: number;
+    outputBaseOffset?: number;
+    outputTruncated?: boolean;
+    recommendedPollIntervalMs?: number;
   }>;
   /**
    * Cancel any in-flight Catty Agent command execution scoped to the
@@ -112,6 +176,29 @@ export function createToolExecutor(
           const r = await executeTerminalExecute(deps, {
             sessionId: String(args.sessionId || ''),
             command: String(args.command || ''),
+          });
+          return toToolResult(toolCall.id, r);
+        }
+
+        case 'terminal_start': {
+          const r = await executeTerminalStart(deps, {
+            sessionId: String(args.sessionId || ''),
+            command: String(args.command || ''),
+          });
+          return toToolResult(toolCall.id, r);
+        }
+
+        case 'terminal_poll': {
+          const r = await executeTerminalPoll(deps, {
+            jobId: String(args.jobId || ''),
+            offset: Number(args.offset) || 0,
+          });
+          return toToolResult(toolCall.id, r);
+        }
+
+        case 'terminal_stop': {
+          const r = await executeTerminalStop(deps, {
+            jobId: String(args.jobId || ''),
           });
           return toToolResult(toolCall.id, r);
         }

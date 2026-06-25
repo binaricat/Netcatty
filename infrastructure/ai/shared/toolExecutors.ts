@@ -21,6 +21,34 @@ export type ToolExecResult<T = unknown> =
   | { ok: true; data: T }
   | { ok: false; error: string };
 
+export interface TerminalJobStartData {
+  jobId: string;
+  sessionId: string;
+  command: string;
+  status: string;
+  startedAt: number;
+  outputMode?: string;
+  recommendedPollIntervalMs?: number;
+}
+
+export interface TerminalJobSnapshotData {
+  jobId: string;
+  sessionId: string;
+  command: string;
+  status: string;
+  completed: boolean;
+  exitCode: number | null;
+  error: string | null;
+  startedAt: number;
+  updatedAt: number;
+  output: string;
+  nextOffset: number;
+  totalOutputChars: number;
+  outputBaseOffset: number;
+  outputTruncated: boolean;
+  recommendedPollIntervalMs?: number;
+}
+
 // ---------------------------------------------------------------------------
 // Dependencies bundle
 // ---------------------------------------------------------------------------
@@ -47,6 +75,10 @@ function validSessionIds(ctx: ToolDeps['context']): Set<string> {
   return new Set(resolved.sessions.map(s => s.sessionId));
 }
 
+function scopedSessionIds(ctx: ToolDeps['context']): string[] {
+  return [...validSessionIds(ctx)];
+}
+
 function validateSessionScope(ctx: ToolDeps['context'], sessionId: string): string | null {
   const ids = validSessionIds(ctx);
   if (!ids.has(sessionId)) {
@@ -59,15 +91,23 @@ function isObserver(mode: AIPermissionMode): boolean {
   return mode === 'observer';
 }
 
-// ---------------------------------------------------------------------------
-// Tool executors
-// ---------------------------------------------------------------------------
+function getSessionExecutionContext(ctx: ToolDeps['context'], sessionId: string): {
+  isNetworkDevice: boolean;
+} {
+  const resolved = resolveContext(ctx);
+  const targetSession = resolved.sessions.find(s => s.sessionId === sessionId);
+  const proto = targetSession?.protocol || '';
+  const isSshOrSerial = proto === 'ssh' || proto === 'serial';
+  return {
+    isNetworkDevice: proto === 'serial' || (targetSession?.deviceType === 'network' && isSshOrSerial),
+  };
+}
 
-export async function executeTerminalExecute(
+function validateTerminalCommand(
   deps: ToolDeps,
   args: { sessionId: string; command: string },
-): Promise<ToolExecResult<{ stdout: string; stderr: string; exitCode: number | null }>> {
-  const { bridge, context, commandBlocklist, permissionMode } = deps;
+): ToolExecResult<{ isNetworkDevice: boolean }> {
+  const { context, commandBlocklist, permissionMode } = deps;
   const { sessionId, command } = args;
 
   if (!sessionId || !command) {
@@ -78,20 +118,30 @@ export async function executeTerminalExecute(
   if (isObserver(permissionMode)) {
     return { ok: false, error: 'Observer mode: command execution is disabled. Switch to Confirm or Auto mode to execute commands.' };
   }
-  // Shell blocklist is meaningless on network device CLIs (e.g. "shutdown"
-  // disables an interface on Cisco). Skip for serial and network device sessions.
-  // The bridge layer (handleExec / netcatty:ai:exec) also has its own session-aware check.
-  const resolved = resolveContext(context);
-  const targetSession = resolved.sessions.find(s => s.sessionId === sessionId);
-  const proto = targetSession?.protocol || '';
-  const isSshOrSerial = proto === 'ssh' || proto === 'serial';
-  const isNetworkDevice = proto === 'serial' || (targetSession?.deviceType === 'network' && isSshOrSerial);
-  if (!isNetworkDevice) {
+
+  const executionContext = getSessionExecutionContext(context, sessionId);
+  if (!executionContext.isNetworkDevice) {
     const safety = checkCommandSafety(command, commandBlocklist);
     if (safety.blocked) {
       return { ok: false, error: `Command blocked by safety policy. Matched pattern: ${safety.matchedPattern}` };
     }
   }
+  return { ok: true, data: executionContext };
+}
+
+// ---------------------------------------------------------------------------
+// Tool executors
+// ---------------------------------------------------------------------------
+
+export async function executeTerminalExecute(
+  deps: ToolDeps,
+  args: { sessionId: string; command: string },
+): Promise<ToolExecResult<{ stdout: string; stderr: string; exitCode: number | null }>> {
+  const { bridge } = deps;
+  const { sessionId, command } = args;
+  const validated = validateTerminalCommand(deps, args);
+  if (validated.ok === false) return validated;
+  const { isNetworkDevice } = validated.data;
 
   const result = await bridge.aiExec(sessionId, command, deps.chatSessionId);
   // Real execution failures (timeout, disconnect, no stream) have an `error` field
@@ -113,6 +163,128 @@ export async function executeTerminalExecute(
       exitCode: isNetworkDevice ? (result.exitCode ?? null) : (result.exitCode ?? -1),
     },
   };
+}
+
+export async function executeTerminalStart(
+  deps: ToolDeps,
+  args: { sessionId: string; command: string },
+): Promise<ToolExecResult<TerminalJobStartData>> {
+  const { bridge } = deps;
+  const { sessionId, command } = args;
+  const validated = validateTerminalCommand(deps, args);
+  if (validated.ok === false) return validated;
+
+  if (!bridge.aiJobStart) {
+    return { ok: false, error: 'terminal_start is not available on the Netcatty bridge' };
+  }
+
+  const result = await bridge.aiJobStart(
+    sessionId,
+    command,
+    deps.chatSessionId,
+    scopedSessionIds(deps.context),
+  );
+  if (!result.ok) {
+    return { ok: false, error: result.error || 'Failed to start background terminal job' };
+  }
+  if (!result.jobId || !result.sessionId || !result.command || !result.status || !result.startedAt) {
+    return { ok: false, error: 'Background terminal job start returned an incomplete response' };
+  }
+  return {
+    ok: true,
+    data: {
+      jobId: result.jobId,
+      sessionId: result.sessionId,
+      command: result.command,
+      status: result.status,
+      startedAt: result.startedAt,
+      outputMode: result.outputMode,
+      recommendedPollIntervalMs: result.recommendedPollIntervalMs,
+    },
+  };
+}
+
+function normalizeTerminalJobSnapshot(result: {
+  ok: boolean;
+  jobId?: string;
+  sessionId?: string;
+  command?: string;
+  status?: string;
+  completed?: boolean;
+  exitCode?: number | null;
+  error?: string | null;
+  startedAt?: number;
+  updatedAt?: number;
+  output?: string;
+  nextOffset?: number;
+  totalOutputChars?: number;
+  outputBaseOffset?: number;
+  outputTruncated?: boolean;
+  recommendedPollIntervalMs?: number;
+}): ToolExecResult<TerminalJobSnapshotData> {
+  if (!result.ok) {
+    return { ok: false, error: result.error || 'Background terminal job request failed' };
+  }
+  if (!result.jobId || !result.sessionId || !result.command || !result.status) {
+    return { ok: false, error: 'Background terminal job returned an incomplete response' };
+  }
+  return {
+    ok: true,
+    data: {
+      jobId: result.jobId,
+      sessionId: result.sessionId,
+      command: result.command,
+      status: result.status,
+      completed: Boolean(result.completed),
+      exitCode: result.exitCode ?? null,
+      error: result.error ?? null,
+      startedAt: Number(result.startedAt) || 0,
+      updatedAt: Number(result.updatedAt) || 0,
+      output: result.output || '',
+      nextOffset: Number(result.nextOffset) || 0,
+      totalOutputChars: Number(result.totalOutputChars) || 0,
+      outputBaseOffset: Number(result.outputBaseOffset) || 0,
+      outputTruncated: Boolean(result.outputTruncated),
+      recommendedPollIntervalMs: result.recommendedPollIntervalMs,
+    },
+  };
+}
+
+export async function executeTerminalPoll(
+  deps: ToolDeps,
+  args: { jobId: string; offset?: number },
+): Promise<ToolExecResult<TerminalJobSnapshotData>> {
+  if (!args.jobId) {
+    return { ok: false, error: 'Missing jobId' };
+  }
+  if (!deps.bridge.aiJobPoll) {
+    return { ok: false, error: 'terminal_poll is not available on the Netcatty bridge' };
+  }
+  const result = await deps.bridge.aiJobPoll(
+    args.jobId,
+    args.offset ?? 0,
+    deps.chatSessionId,
+    scopedSessionIds(deps.context),
+  );
+  return normalizeTerminalJobSnapshot(result);
+}
+
+export async function executeTerminalStop(
+  deps: ToolDeps,
+  args: { jobId: string },
+): Promise<ToolExecResult<TerminalJobSnapshotData>> {
+  if (!args.jobId) {
+    return { ok: false, error: 'Missing jobId' };
+  }
+  if (!deps.bridge.aiJobStop) {
+    return { ok: false, error: 'terminal_stop is not available on the Netcatty bridge' };
+  }
+  const result = await deps.bridge.aiJobStop(
+    args.jobId,
+    deps.chatSessionId,
+    scopedSessionIds(deps.context),
+  );
+  return normalizeTerminalJobSnapshot(result);
 }
 
 export function executeWorkspaceGetInfo(
