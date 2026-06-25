@@ -230,6 +230,7 @@ const WorkspaceFocusSessionRow = memo<WorkspaceFocusSessionRowProps>(({
   && prev.onDragOver === next.onDragOver
   && prev.onDrop === next.onDrop
   && prev.onDragEnd === next.onDragEnd
+  && prev.dynamicTabTitleMode === next.dynamicTabTitleMode
   && prev.t === next.t
 ));
 WorkspaceFocusSessionRow.displayName = 'WorkspaceFocusSessionRow';
