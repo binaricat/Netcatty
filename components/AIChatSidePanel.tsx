@@ -50,6 +50,7 @@ import { buildExternalAgentHistoryMessagesForBridge } from './ai/externalAgentHi
 import { canSendWithAgent, findEnabledExternalAgent } from './ai/agentSendEligibility';
 import { registerGrantPersister } from '../infrastructure/ai/shared/approvalGate';
 import { stopAgentTurn } from '../infrastructure/ai/harness/agentStop';
+import { getAgentRuntime } from '../infrastructure/ai/harness/globalAgentRuntime';
 import { useAIPermissionGrantsState } from '../application/state/useAIPermissionGrantsState';
 import { useConversationExport } from './ai/hooks/useConversationExport';
 import type { AIChatSidePanelProps } from './AIChatSidePanel.types';
@@ -1031,7 +1032,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
   );
 
   const handleDeleteSession = useCallback(
-    (e: React.MouseEvent, sessionId: string) => {
+    async (e: React.MouseEvent, sessionId: string) => {
       e.stopPropagation();
       const deletingActiveSession =
         activeSessionId === sessionId
@@ -1047,10 +1048,11 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
         ?? currentAgentId;
 
       if (abortControllersRef.current.has(sessionId) || streamingSessionIds.has(sessionId)) {
-        stopStreamingForSession(sessionId);
+        await stopStreamingForSession(sessionId);
       }
 
       deleteSession(sessionId, scopeKey);
+      getAgentRuntime().clearChatSession(sessionId);
 
       if (deletingActiveSession || deletingLastScopedSession) {
         setShowHistory(false);

@@ -58,6 +58,9 @@ async function runCattyTurn(input: CattyTurnInput, ctx: TurnDriverContext): Prom
 
   const netcattyBridge = bridge ?? getNetcattyBridge();
   await clearChatSessionCancelled(sessionId, netcattyBridge);
+  if (netcattyBridge.aiMcpUpdateSessions) {
+    await netcattyBridge.aiMcpUpdateSessions(context.terminalSessions, sessionId);
+  }
   const userSkillsContext = await resolveUserSkillsContext(
     netcattyBridge,
     trimmed,
