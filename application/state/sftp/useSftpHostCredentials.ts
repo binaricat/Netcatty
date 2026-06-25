@@ -8,14 +8,18 @@ import { hasUsableProxyConfig } from "../../../domain/proxyProfiles";
 // Fallback used when no global TerminalSettings are wired through (older
 // call sites or tests). Matches DEFAULT_TERMINAL_SETTINGS so behavior is
 // identical whether or not the caller passes settings.
-const FALLBACK_KEEPALIVE = { keepaliveInterval: 30, keepaliveCountMax: 10 };
+const FALLBACK_TERMINAL_SETTINGS = {
+  verifyHostKeys: true,
+  keepaliveInterval: 30,
+  keepaliveCountMax: 10,
+};
 
 interface UseSftpHostCredentialsParams {
   hosts: Host[];
   keys: SSHKey[];
   identities: Identity[];
   knownHosts?: KnownHost[];
-  terminalSettings?: Pick<TerminalSettings, 'keepaliveInterval' | 'keepaliveCountMax'>;
+  terminalSettings?: Pick<TerminalSettings, 'verifyHostKeys' | 'keepaliveInterval' | 'keepaliveCountMax'>;
 }
 
 export const buildSftpHostCredentials = ({
@@ -26,7 +30,7 @@ export const buildSftpHostCredentials = ({
   knownHosts,
   terminalSettings,
 }: UseSftpHostCredentialsParams & { host: Host }): NetcattySSHOptions => {
-  const globalKeepalive = terminalSettings ?? FALLBACK_KEEPALIVE;
+  const globalTerminalSettings = { ...FALLBACK_TERMINAL_SETTINGS, ...(terminalSettings ?? {}) };
   if (host.proxyProfileId && !host.proxyConfig) {
     throw new Error(`Saved proxy for host "${host.label || host.hostname}" is missing. Open host settings and select a valid proxy.`);
   }
@@ -92,7 +96,7 @@ export const buildSftpHostCredentials = ({
       ) {
         throw new Error(`Saved credentials for jump host "${jumpHost.label || jumpHost.hostname}" cannot be decrypted on this device. Open host settings and re-enter them.`);
       }
-      const hopKeepalive = resolveHostKeepalive(jumpHost, globalKeepalive);
+      const hopKeepalive = resolveHostKeepalive(jumpHost, globalTerminalSettings);
       return {
         hostname: jumpHost.hostname,
         port: jumpHost.port || 22,
@@ -118,6 +122,7 @@ export const buildSftpHostCredentials = ({
         identityFilePaths: jumpKeyAuth.identityFilePaths,
         keepaliveInterval: hopKeepalive.interval,
         keepaliveCountMax: hopKeepalive.countMax,
+        verifyHostKeys: globalTerminalSettings.verifyHostKeys,
         legacyAlgorithms: jumpHost.legacyAlgorithms,
         skipEcdsaHostKey: jumpHost.skipEcdsaHostKey,
         algorithmOverrides: jumpHost.algorithms,
@@ -149,7 +154,7 @@ export const buildSftpHostCredentials = ({
     throw new Error("Saved credentials cannot be decrypted on this device. Open host settings and re-enter them.");
   }
 
-  const targetKeepalive = resolveHostKeepalive(host, globalKeepalive);
+  const targetKeepalive = resolveHostKeepalive(host, globalTerminalSettings);
   return {
     hostname: host.hostname,
     username: resolved.username,
@@ -168,6 +173,7 @@ export const buildSftpHostCredentials = ({
     keepaliveInterval: targetKeepalive.interval,
     keepaliveCountMax: targetKeepalive.countMax,
     knownHosts,
+    verifyHostKeys: globalTerminalSettings.verifyHostKeys,
     // Algorithm settings — must reach the SFTP bridge or hosts that need
     // legacy mode / the ECDSA skip / advanced overrides would still hit
     // the original negotiation failure when opening their SFTP pane,

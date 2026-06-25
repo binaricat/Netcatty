@@ -122,6 +122,11 @@ export const useTerminalBackend = () => {
     return bridge?.onTelnetAutoLoginCancelled?.(sessionId, cb);
   }, []);
 
+  const onTelnetEchoMode = useCallback((sessionId: string, cb: (evt: { sessionId: string; remoteEcho: boolean; localEcho: boolean }) => void) => {
+    const bridge = netcattyBridge.get();
+    return bridge?.onTelnetEchoMode?.(sessionId, cb);
+  }, []);
+
   const onChainProgress = useCallback((cb: (sessionId: string, hop: number, total: number, label: string, status: string, error?: string) => void) => {
     const bridge = netcattyBridge.get();
     return bridge?.onChainProgress?.(cb);
@@ -332,6 +337,7 @@ export const useTerminalBackend = () => {
       onSessionExit,
       onTelnetAutoLoginComplete,
       onTelnetAutoLoginCancelled,
+      onTelnetEchoMode,
       onChainProgress,
       onConnectionReuseFallback,
       onWindowFullScreenChanged,
@@ -380,6 +386,7 @@ export const useTerminalBackend = () => {
       onSessionExit,
       onTelnetAutoLoginComplete,
       onTelnetAutoLoginCancelled,
+      onTelnetEchoMode,
       onChainProgress,
       onConnectionReuseFallback,
       onWindowFullScreenChanged,

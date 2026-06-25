@@ -32,6 +32,8 @@ export const enTerminalMessages: Messages = {
   'terminal.toolbar.terminalSettings': 'Terminal settings',
   'terminal.toolbar.searchTerminal': 'Search terminal',
   'terminal.toolbar.search': 'Search',
+  'terminal.toolbar.startSessionLog': 'Start session log',
+  'terminal.toolbar.stopSessionLog': 'Stop session log',
   'terminal.toolbar.timestampsEnable': 'Show timestamps',
   'terminal.toolbar.timestampsDisable': 'Hide timestamps',
   'terminal.toolbar.broadcast': 'Broadcast',

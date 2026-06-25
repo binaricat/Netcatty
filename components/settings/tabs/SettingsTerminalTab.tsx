@@ -792,6 +792,15 @@ function SettingsTerminalTab(props: {
       <SectionHeader title={t("settings.terminal.section.connection")} />
       <div className="space-y-0 divide-y divide-border rounded-lg border bg-card px-4">
         <SettingRow
+          label={t("settings.terminal.connection.verifyHostKeys")}
+          description={t("settings.terminal.connection.verifyHostKeys.desc")}
+        >
+          <Toggle
+            checked={terminalSettings.verifyHostKeys}
+            onChange={(v) => updateTerminalSetting("verifyHostKeys", v)}
+          />
+        </SettingRow>
+        <SettingRow
           label={t("settings.terminal.connection.keepaliveInterval")}
           description={t("settings.terminal.connection.keepaliveInterval.desc")}
         >

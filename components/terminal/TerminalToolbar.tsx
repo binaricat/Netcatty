@@ -2,7 +2,7 @@
  * Terminal Toolbar
  * Displays high-frequency terminal actions and close button in the terminal status bar.
  */
-import { Check, ChevronRight, Download, FolderInput, FolderSync, History, Languages, MoreVertical, X, Zap, Palette, Search, TextCursorInput, Upload } from 'lucide-react';
+import { Check, ChevronRight, Download, FileText, FolderInput, FolderSync, History, Languages, MoreVertical, X, Zap, Palette, Search, TextCursorInput, Upload } from 'lucide-react';
 import React, { useState } from 'react';
 import { useI18n } from '../../application/i18n/I18nProvider';
 import { Host, Snippet } from '../../types';
@@ -34,6 +34,11 @@ export interface TerminalToolbarProps {
     // Search functionality
     isSearchOpen?: boolean;
     onToggleSearch?: () => void;
+    // Manual session log
+    showLogButton?: boolean;
+    onToggleSessionLog?: () => void;
+    isSessionLogging?: boolean;
+    isSessionLogDisabled?: boolean;
     // Compose bar
     isComposeBarOpen?: boolean;
     onToggleComposeBar?: () => void;
@@ -61,6 +66,10 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
     onClose,
     isSearchOpen,
     onToggleSearch,
+    showLogButton = false,
+    onToggleSessionLog,
+    isSessionLogging = false,
+    isSessionLogDisabled = false,
     isComposeBarOpen,
     onToggleComposeBar,
     terminalEncoding,
@@ -274,6 +283,29 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
                 </TooltipTrigger>
                 <TooltipContent>{t("terminal.toolbar.searchTerminal")}</TooltipContent>
             </Tooltip>
+
+            {showLogButton && (
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <Button
+                            type="button"
+                            variant="secondary"
+                            size="icon"
+                            className={cn(buttonBase, isSessionLogDisabled && "opacity-50")}
+                            aria-label={isSessionLogging ? t("terminal.toolbar.stopSessionLog") : t("terminal.toolbar.startSessionLog")}
+                            aria-pressed={isSessionLogging}
+                            onClick={onToggleSessionLog}
+                            disabled={isSessionLogDisabled || !onToggleSessionLog}
+                            style={isSessionLogging ? activeButtonStyle : undefined}
+                        >
+                            <FileText size={12} />
+                        </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                        {isSessionLogging ? t("terminal.toolbar.stopSessionLog") : t("terminal.toolbar.startSessionLog")}
+                    </TooltipContent>
+                </Tooltip>
+            )}
 
             <Tooltip>
                 <TooltipTrigger asChild>

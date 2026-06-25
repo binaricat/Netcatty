@@ -106,3 +106,48 @@ test("auto-save host directory falls back when the sanitized host label is empty
     fs.rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test("manual session logs survive tokenless stale stops and stop through the bridge", async () => {
+  const directory = path.join(TEMP_ROOT, `manual-token-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+  const filePath = path.join(directory, "manual.log");
+  const sessionId = `session-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const dialogMock = {
+    showSaveDialog: async () => ({ canceled: false, filePath }),
+  };
+  const {
+    startManualSessionLog,
+    stopManualSessionLog,
+  } = loadBridgeWithDialog(dialogMock);
+  const sessionLogStreamManager = require("./sessionLogStreamManager.cjs");
+
+  try {
+    const startResult = await startManualSessionLog(null, {
+      sessionId,
+      sessionName: "H3C switch",
+      preferredDirectory: directory,
+      initialLine: "started\n",
+    });
+    assert.equal(startResult.success, true);
+    assert.equal(startResult.started, true);
+
+    sessionLogStreamManager.appendData(sessionId, "before-stale\n");
+    const staleResult = await sessionLogStreamManager.stopStream(sessionId);
+    assert.equal(staleResult, null);
+    assert.equal(sessionLogStreamManager.hasStream(sessionId), true);
+
+    sessionLogStreamManager.appendData(sessionId, "after-stale\n");
+    const stopResult = await stopManualSessionLog(null, { sessionId });
+    assert.equal(stopResult.success, true);
+    assert.equal(stopResult.stopped, true);
+    assert.equal(stopResult.filePath, filePath);
+    assert.equal(sessionLogStreamManager.hasStream(sessionId), false);
+
+    const content = fs.readFileSync(filePath, "utf8");
+    assert.match(content, /started/);
+    assert.match(content, /before-stale/);
+    assert.match(content, /after-stale/);
+  } finally {
+    await sessionLogStreamManager.cleanupAll();
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});

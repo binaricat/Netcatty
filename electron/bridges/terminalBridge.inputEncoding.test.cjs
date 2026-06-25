@@ -84,9 +84,9 @@ test("Telnet input is encoded with the session's GB18030 charset", async () => {
       { sessionId: "telnet-gb18030-input", data: "你好\r" },
     );
 
-    await waitFor(() => Buffer.concat(chunks).length >= 5);
+    await waitFor(() => Buffer.concat(chunks).length >= 6);
     const received = Buffer.concat(chunks);
-    assert.deepEqual([...received], [...iconv.encode("你好\r", "gb18030")]);
+    assert.deepEqual([...received], [...iconv.encode("你好\r\n", "gb18030")]);
     // It must NOT be the UTF-8 serialization that the old code always sent.
     assert.notDeepEqual([...received], [...Buffer.from("你好\r", "utf8")]);
   } finally {
@@ -128,9 +128,93 @@ test("Telnet input stays UTF-8 when no charset is configured", async () => {
       { sessionId: "telnet-utf8-input", data: "你好\r" },
     );
 
-    await waitFor(() => Buffer.concat(chunks).length >= 7);
+    await waitFor(() => Buffer.concat(chunks).length >= 8);
     const received = Buffer.concat(chunks);
-    assert.deepEqual([...received], [...Buffer.from("你好\r", "utf8")]);
+    assert.deepEqual([...received], [...Buffer.from("你好\r\n", "utf8")]);
+  } finally {
+    terminalBridge.cleanupAllSessions();
+    for (const socket of sockets) socket.destroy();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("Telnet Enter is sent as CRLF so RT-Thread shells submit the command", async () => {
+  const chunks = [];
+  const sockets = new Set();
+  let serverSocket = null;
+  const server = net.createServer((socket) => {
+    serverSocket = socket;
+    sockets.add(socket);
+    socket.on("error", () => {});
+    socket.on("close", () => sockets.delete(socket));
+    socket.on("data", (buf) => chunks.push(buf));
+  });
+
+  const port = await listen(server);
+  const sessions = new Map();
+  initBridge(sessions);
+
+  try {
+    await terminalBridge.startTelnetSession(
+      { sender: { id: 1 } },
+      {
+        sessionId: "telnet-rtthread-enter",
+        hostname: "127.0.0.1",
+        port,
+      },
+    );
+    await waitFor(() => serverSocket);
+
+    terminalBridge.writeToSession(
+      {},
+      { sessionId: "telnet-rtthread-enter", data: "ps\r" },
+    );
+
+    await waitFor(() => Buffer.concat(chunks).length >= 3);
+    const received = Buffer.concat(chunks);
+    assert.deepEqual([...received], [...Buffer.from("ps\r\n", "utf8")]);
+  } finally {
+    terminalBridge.cleanupAllSessions();
+    for (const socket of sockets) socket.destroy();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("Telnet input preserves existing CRLF and CR NUL while normalizing bare LF", async () => {
+  const chunks = [];
+  const sockets = new Set();
+  let serverSocket = null;
+  const server = net.createServer((socket) => {
+    serverSocket = socket;
+    sockets.add(socket);
+    socket.on("error", () => {});
+    socket.on("close", () => sockets.delete(socket));
+    socket.on("data", (buf) => chunks.push(buf));
+  });
+
+  const port = await listen(server);
+  const sessions = new Map();
+  initBridge(sessions);
+
+  try {
+    await terminalBridge.startTelnetSession(
+      { sender: { id: 1 } },
+      {
+        sessionId: "telnet-rfc-newlines",
+        hostname: "127.0.0.1",
+        port,
+      },
+    );
+    await waitFor(() => serverSocket);
+
+    terminalBridge.writeToSession(
+      {},
+      { sessionId: "telnet-rfc-newlines", data: "one\r\ntwo\nthree\r\0" },
+    );
+
+    await waitFor(() => Buffer.concat(chunks).length >= 17);
+    const received = Buffer.concat(chunks);
+    assert.deepEqual([...received], [...Buffer.from("one\r\ntwo\r\nthree\r\0", "utf8")]);
   } finally {
     terminalBridge.cleanupAllSessions();
     for (const socket of sockets) socket.destroy();
@@ -179,9 +263,9 @@ test("setSessionEncoding switches the Telnet input charset at runtime", async ()
       { sessionId: "telnet-switch-input", data: "测试\r" },
     );
 
-    await waitFor(() => Buffer.concat(chunks).length >= 5);
+    await waitFor(() => Buffer.concat(chunks).length >= 6);
     const received = Buffer.concat(chunks);
-    assert.deepEqual([...received], [...iconv.encode("测试\r", "gb18030")]);
+    assert.deepEqual([...received], [...iconv.encode("测试\r\n", "gb18030")]);
   } finally {
     terminalBridge.cleanupAllSessions();
     for (const socket of sockets) socket.destroy();

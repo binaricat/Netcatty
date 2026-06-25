@@ -25,6 +25,7 @@ function TerminalLayerFocusSidebarSectionInner({ ctx }: { ctx: FocusSidebarConte
       resolvedPreviewTheme={ctx.resolvedPreviewTheme}
       sessionHostsMap={ctx.sessionHostsMap}
       sessions={ctx.sessions}
+      dynamicTabTitleMode={ctx.terminalSettings?.dynamicTabTitleMode}
       t={ctx.t}
     />
   );

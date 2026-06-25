@@ -41,13 +41,12 @@ test('matchCodingCliProviderFromTitle detects Claude Code and Codex titles', () 
   );
 });
 
-test('resolveSessionCodingCliProvider honors disabled dynamic titles', () => {
+test('resolveSessionCodingCliProvider detects providers from dynamic titles', () => {
   assert.equal(
     resolveSessionCodingCliProvider(
       { dynamicTitle: 'Claude Code' },
-      { disableDynamicTabTitle: true },
-    ),
-    undefined,
+    )?.id,
+    'claude',
   );
 });
 

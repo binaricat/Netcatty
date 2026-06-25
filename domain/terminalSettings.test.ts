@@ -13,6 +13,23 @@ test("normalizeTerminalSettings defaults startupCommandDelayMs to 600", () => {
   assert.equal(normalizeTerminalSettings().startupCommandDelayMs, 600);
 });
 
+test("normalizeTerminalSettings defaults dynamic tab titles to agent mode", () => {
+  assert.equal(normalizeTerminalSettings().dynamicTabTitleMode, "agent");
+});
+
+test("normalizeTerminalSettings preserves supported dynamic tab title modes", () => {
+  assert.equal(normalizeTerminalSettings({ dynamicTabTitleMode: "off" }).dynamicTabTitleMode, "off");
+  assert.equal(normalizeTerminalSettings({ dynamicTabTitleMode: "agent" }).dynamicTabTitleMode, "agent");
+  assert.equal(normalizeTerminalSettings({ dynamicTabTitleMode: "all" }).dynamicTabTitleMode, "all");
+});
+
+test("normalizeTerminalSettings falls back for unsupported dynamic tab title modes", () => {
+  assert.equal(
+    normalizeTerminalSettings({ dynamicTabTitleMode: "legacy" as never }).dynamicTabTitleMode,
+    "agent",
+  );
+});
+
 test("normalizeTerminalSettings enables font smoothing by default", () => {
   assert.equal(normalizeTerminalSettings().fontSmoothing, true);
 });

@@ -547,7 +547,9 @@ test("startSerial captures direct connected banner in terminal log data", async 
     keys: [],
     resolvedChainHosts: [],
     sessionId: "session-1",
-    terminalSettings: {},
+    terminalSettings: {
+      verifyHostKeys: false,
+    },
     terminalBackend,
     serialConfig: {
       path: "COM3",
@@ -1632,7 +1634,9 @@ test("startSSH passes known host records to the SSH bridge", async () => {
     knownHosts,
     resolvedChainHosts: [],
     sessionId: "session-1",
-    terminalSettings: {},
+    terminalSettings: {
+      verifyHostKeys: false,
+    },
     terminalBackend,
     sessionRef: { current: null },
     hasConnectedRef: { current: false },
@@ -1665,6 +1669,7 @@ test("startSSH passes known host records to the SSH bridge", async () => {
 
   assert.ok(capturedOptions);
   assert.equal(capturedOptions.knownHosts, knownHosts);
+  assert.equal(capturedOptions.verifyHostKeys, false);
 });
 
 test("startSSH omits jump host identity file paths when password auth is selected", async () => {

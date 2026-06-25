@@ -49,8 +49,6 @@ function createCapabilityRpcDispatcher(deps) {
   const {
     invokeVaultAgent,
     evaluatePermissionWithGrants,
-    permissionMode,
-    permissionGrantsSnapshot,
     isChatSessionCancelled,
     requestApprovalFromRenderer,
     USER_DENIED_MESSAGE,
@@ -90,12 +88,12 @@ function createCapabilityRpcDispatcher(deps) {
     const permission = evaluatePermissionWithGrants({
       rpcMethod,
       surface,
-      permissionMode,
+      permissionMode: deps.permissionMode,
       params,
       context: {
         chatSessionCancelled: isChatSessionCancelled(params?.chatSessionId),
       },
-    }, permissionGrantsSnapshot);
+    }, deps.permissionGrantsSnapshot);
 
     if (!permission.allowed) {
       return { ok: false, error: permission.error };

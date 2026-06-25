@@ -108,6 +108,18 @@ test("HostDetailsPanel keeps explicitly cleared telnet credentials empty", () =>
   assert.doesNotMatch(markup, /placeholder="Telnet Password"[^>]*value="ssh-password"/);
 });
 
+test("HostDetailsPanel disables save when hostname is whitespace only", () => {
+  const markup = renderHostDetails({
+    ...hostWithMissingProxyProfile,
+    hostname: "   ",
+    proxyProfileId: undefined,
+  });
+
+  assert.match(markup, /<button[^>]*disabled=""[^>]*aria-label="Save"/);
+  assert.match(markup, />Save<\/button>/);
+  assert.match(markup, /<button[^>]*disabled=""[^>]*>Save<\/button>/);
+});
+
 test("HostDetailsPanel gives the telnet port field the same roomy layout as SSH", () => {
   const markup = renderHostDetails({
     ...hostWithMissingProxyProfile,

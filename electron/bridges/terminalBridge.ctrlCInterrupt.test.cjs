@@ -162,9 +162,9 @@ test("automated multi-line input is written one line at a time", async () => {
     },
   );
 
-  assert.deepEqual(calls, ["tthdf 0 2323\r"]);
+  assert.deepEqual(calls, ["tthdf 0 2323\r\n"]);
   await delay(30);
-  assert.deepEqual(calls, ["tthdf 0 2323\r", "admin\r", "test123\r", "\r"]);
+  assert.deepEqual(calls, ["tthdf 0 2323\r\n", "admin\r\n", "test123\r\n", "\r\n"]);
 });
 
 test("manual input cancels pending automated lines", async () => {
@@ -192,5 +192,5 @@ test("manual input cancels pending automated lines", async () => {
   terminalBridge.writeToSession({ sender: {} }, { sessionId: "telnet-1", data: "\x03" });
 
   await delay(60);
-  assert.deepEqual(calls, ["first\r", "\x03"]);
+  assert.deepEqual(calls, ["first\r\n", "\x03"]);
 });

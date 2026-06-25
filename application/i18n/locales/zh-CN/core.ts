@@ -67,6 +67,8 @@ export const zhCNCoreMessages: Messages = {
   'settings.tab.shortcuts': '快捷键',
   'settings.tab.syncCloud': '同步与云',
   'settings.tab.system': '系统',
+  'settings.terminal.connection.verifyHostKeys': '校验 SSH 主机密钥',
+  'settings.terminal.connection.verifyHostKeys.desc': '连接到新的或已变化的 SSH 主机密钥前先询问。只建议在可信内网中关闭。',
 
   // Settings > System
   'settings.system.title': '系统',

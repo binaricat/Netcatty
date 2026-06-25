@@ -380,6 +380,12 @@ export const enCoreMessages: Messages = {
   'settings.terminal.behavior.forcePromptNewLine': 'Prompt on a new line',
   'settings.terminal.behavior.forcePromptNewLine.desc':
     'When the final line of command output is not terminated by a newline, move the recognized shell prompt to the next visual line.',
+  'settings.terminal.behavior.dynamicTabTitle': 'Dynamic tab title',
+  'settings.terminal.behavior.dynamicTabTitle.desc':
+    'Choose when session tabs should follow shell-reported window titles.',
+  'settings.terminal.behavior.dynamicTabTitle.off': 'Disabled',
+  'settings.terminal.behavior.dynamicTabTitle.agent': 'Agents only',
+  'settings.terminal.behavior.dynamicTabTitle.all': 'All sessions',
   'settings.terminal.behavior.osc52Clipboard': 'OSC-52 clipboard',
   'settings.terminal.behavior.osc52Clipboard.desc':
     'Allow remote programs (tmux, vim, etc.) to access the local clipboard via OSC-52 escape sequences.',
@@ -451,6 +457,8 @@ export const enCoreMessages: Messages = {
   'settings.terminal.localShell.startDir.notFound': 'Directory not found',
   'settings.terminal.localShell.startDir.isFile': 'Path is a file, not a directory',
   'settings.terminal.section.connection': 'Connection',
+  'settings.terminal.connection.verifyHostKeys': 'Verify SSH host keys',
+  'settings.terminal.connection.verifyHostKeys.desc': 'Ask before connecting to a new or changed SSH host key. Turn this off only for trusted private networks.',
   'settings.terminal.connection.keepaliveInterval': 'Keepalive Interval',
   'settings.terminal.connection.keepaliveInterval.desc': 'How often (in seconds) to send SSH-level keepalive packets. Set to 0 to disable globally — note that individual hosts can override this in their own settings.',
   'settings.terminal.connection.keepaliveCountMax': 'Max unanswered keepalives',

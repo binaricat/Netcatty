@@ -10,6 +10,15 @@ type InternalTerminal = XTerm & {
   };
 };
 
+type ClearTerminalViewportOptions = {
+  wipeScrollback?: boolean;
+};
+
+type AppendEraseScrollbackOptions = {
+  wipeScrollback: boolean;
+  normalScreen: boolean;
+};
+
 const getVisibleContentRowCount = (term: XTerm): number => {
   const buffer = term.buffer.active;
   if (buffer.type !== "normal") {
@@ -49,7 +58,10 @@ export const preserveTerminalViewportInScrollback = (term: XTerm): void => {
   }
 };
 
-export const clearTerminalViewport = (term: XTerm): void => {
+export const clearTerminalViewport = (
+  term: XTerm,
+  options: ClearTerminalViewportOptions = {},
+): void => {
   const buffer = term.buffer.active;
   if (buffer.type !== "normal") return;
 
@@ -73,7 +85,8 @@ export const clearTerminalViewport = (term: XTerm): void => {
   // Clear everything below the prompt and reposition the cursor on it.
   // CSI coordinates are 1-indexed.
   const col = cursorX + 1;
-  term.write(`\x1b[2;1H\x1b[J\x1b[1;${col}H`, () => {
+  const eraseScrollback = options.wipeScrollback ? "\x1b[3J" : "";
+  term.write(`\x1b[2;1H\x1b[J${eraseScrollback}\x1b[1;${col}H`, () => {
     term.scrollToBottom();
   });
 };
@@ -92,9 +105,92 @@ export const isEraseViewportSequence = (params: CsiParam[]): boolean =>
 export const shouldPreserveViewportBeforeFullErase = (
   term: XTerm,
   inDec2026SyncBlock: boolean,
+  clearWipesScrollback = false,
 ): boolean => {
   if (inDec2026SyncBlock) {
     return false;
   }
+  if (clearWipesScrollback) {
+    return false;
+  }
   return term.buffer.active.type === "normal";
+};
+
+export const shouldWipeScrollbackAfterFullErase = (
+  term: XTerm,
+  inDec2026SyncBlock: boolean,
+  clearWipesScrollback: boolean,
+): boolean => {
+  if (!clearWipesScrollback || inDec2026SyncBlock) {
+    return false;
+  }
+  return term.buffer.active.type === "normal";
+};
+
+export const appendEraseScrollbackAfterFullErases = (
+  data: string,
+  { wipeScrollback, normalScreen }: AppendEraseScrollbackOptions,
+): string => {
+  if (!wipeScrollback || !normalScreen || data.length === 0) {
+    return data;
+  }
+
+  let result = "";
+  let index = 0;
+  let inDec2026SyncBlock = false;
+  let inAlternateScreen = false;
+
+  while (index < data.length) {
+    if (data.startsWith("\x1b[?2026h", index)) {
+      inDec2026SyncBlock = true;
+      result += "\x1b[?2026h";
+      index += "\x1b[?2026h".length;
+      continue;
+    }
+
+    if (data.startsWith("\x1b[?2026l", index)) {
+      inDec2026SyncBlock = false;
+      result += "\x1b[?2026l";
+      index += "\x1b[?2026l".length;
+      continue;
+    }
+
+    const altEnter = ["\x1b[?47h", "\x1b[?1047h", "\x1b[?1049h"].find((sequence) =>
+      data.startsWith(sequence, index)
+    );
+    if (altEnter) {
+      inAlternateScreen = true;
+      result += altEnter;
+      index += altEnter.length;
+      continue;
+    }
+
+    const altLeave = ["\x1b[?47l", "\x1b[?1047l", "\x1b[?1049l"].find((sequence) =>
+      data.startsWith(sequence, index)
+    );
+    if (altLeave) {
+      inAlternateScreen = false;
+      result += altLeave;
+      index += altLeave.length;
+      continue;
+    }
+
+    if (data.startsWith("\x1b[2J", index)) {
+      result += "\x1b[2J";
+      index += "\x1b[2J".length;
+      if (
+        !inDec2026SyncBlock
+        && !inAlternateScreen
+        && !data.startsWith("\x1b[3J", index)
+      ) {
+        result += "\x1b[3J";
+      }
+      continue;
+    }
+
+    result += data[index];
+    index += 1;
+  }
+
+  return result;
 };

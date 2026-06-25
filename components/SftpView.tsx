@@ -68,7 +68,7 @@ interface SftpViewProps {
   keyBindings: KeyBinding[];
   editorWordWrap: boolean;
   setEditorWordWrap: (enabled: boolean) => void;
-  terminalSettings?: { keepaliveInterval: number; keepaliveCountMax: number };
+  terminalSettings?: { verifyHostKeys: boolean; keepaliveInterval: number; keepaliveCountMax: number };
 }
 
 const SftpViewInner: React.FC<SftpViewProps> = ({
@@ -614,7 +614,7 @@ const SftpViewInner: React.FC<SftpViewProps> = ({
   );
 };
 
-const sftpViewAreEqual = (prev: SftpViewProps, next: SftpViewProps): boolean =>
+export const sftpViewAreEqual = (prev: SftpViewProps, next: SftpViewProps): boolean =>
   prev.hosts === next.hosts &&
   prev.keys === next.keys &&
   prev.identities === next.identities &&
@@ -631,9 +631,10 @@ const sftpViewAreEqual = (prev: SftpViewProps, next: SftpViewProps): boolean =>
   prev.keyBindings === next.keyBindings &&
   prev.editorWordWrap === next.editorWordWrap &&
   prev.setEditorWordWrap === next.setEditorWordWrap &&
-  // Only the keepalive fields of terminalSettings affect SFTP connection
+  // Only these terminal connection settings affect SFTP connection
   // resolution today; compare them directly rather than the whole object
   // so unrelated terminal-setting changes don't tear the panel down.
+  prev.terminalSettings?.verifyHostKeys === next.terminalSettings?.verifyHostKeys &&
   prev.terminalSettings?.keepaliveInterval === next.terminalSettings?.keepaliveInterval &&
   prev.terminalSettings?.keepaliveCountMax === next.terminalSettings?.keepaliveCountMax;
 

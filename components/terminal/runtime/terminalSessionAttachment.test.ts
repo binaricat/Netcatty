@@ -113,6 +113,38 @@ test("writeSessionData resumes timestamps after leaving alternate screen in the 
   assert.deepEqual(markerLines, [0]);
 });
 
+test("writeSessionData inserts erase-scrollback immediately after normal full clear", () => {
+  const { term, writes } = createFakeTerm();
+  writeSessionData(createContext(false) as never, term, "\x1b[H\x1b[2Jfresh output");
+
+  assert.equal(writes.join(""), "\x1b[H\x1b[2J\x1b[3Jfresh output");
+});
+
+test("writeSessionData preserves scrollback after normal full clear when disabled", () => {
+  const { term, writes } = createFakeTerm();
+  const ctx = createContext(false);
+  ctx.terminalSettingsRef.current.clearWipesScrollback = false;
+  ctx.terminalSettings.clearWipesScrollback = false;
+
+  writeSessionData(ctx as never, term, "\x1b[H\x1b[2Jfresh output");
+
+  assert.equal(writes.join(""), "\x1b[H\x1b[2Jfresh output");
+});
+
+test("writeSessionData does not duplicate existing erase-scrollback after full clear", () => {
+  const { term, writes } = createFakeTerm();
+  writeSessionData(createContext(false) as never, term, "\x1b[H\x1b[2J\x1b[3Jfresh output");
+
+  assert.equal(writes.join(""), "\x1b[H\x1b[2J\x1b[3Jfresh output");
+});
+
+test("writeSessionData does not add erase-scrollback inside synchronized output", () => {
+  const { term, writes } = createFakeTerm();
+  writeSessionData(createContext(false) as never, term, "\x1b[?2026h\x1b[H\x1b[2Jframe\x1b[?2026l");
+
+  assert.equal(writes.join(""), "\x1b[?2026h\x1b[H\x1b[2Jframe\x1b[?2026l");
+});
+
 test("writeSessionData preserves timestamps across host gutter visibility changes", () => {
   const { term, writes, markerLines, disposedMarkerLines } = createFakeTerm();
   const ctx = createContext(false, { showLineTimestamps: false });

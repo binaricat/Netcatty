@@ -529,6 +529,7 @@ export function TerminalLayerTabBridge({ stableRef }: { stableRef: StableRef }) 
     sessionHostsMap,
     s.resolvedSessionHostIds,
     sessions,
+    s.terminalSettings,
     showHostTreeSidebar,
     sftpActiveHost,
     s.sftpFollowTerminalCwd,

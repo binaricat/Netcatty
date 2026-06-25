@@ -124,6 +124,22 @@ test("buildSftpHostCredentials forwards known hosts for SFTP host-key checks", (
   assert.equal(credentials.knownHosts, knownHosts);
 });
 
+test("buildSftpHostCredentials forwards the host-key verification setting", () => {
+  const credentials = buildSftpHostCredentials({
+    host: host(),
+    hosts: [],
+    keys: [],
+    identities: [],
+    terminalSettings: {
+      verifyHostKeys: false,
+      keepaliveInterval: 30,
+      keepaliveCountMax: 10,
+    },
+  });
+
+  assert.equal(credentials.verifyHostKeys, false);
+});
+
 test("buildSftpHostCredentials passes jump host reference keys as identity file paths", () => {
   const key: SSHKey = {
     id: "jump-key",

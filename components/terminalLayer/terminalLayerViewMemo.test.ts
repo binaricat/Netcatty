@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import type { Workspace } from "../../types";
 import {
+  terminalLayerFocusSidebarPropsEqual,
   terminalLayerSidePanelCtxEqual,
   terminalLayerViewCtxEqual,
   terminalLayerWorkspaceCtxEqual,
@@ -138,6 +139,33 @@ test("terminal layer side panel re-renders when follow terminal cwd setting chan
     terminalLayerViewCtxEqual(
       baseCtx,
       { ...baseCtx, sftpFollowTerminalCwd: true },
+    ),
+    false,
+  );
+});
+
+test("terminal layer focus sidebar re-renders when dynamic tab title mode changes", () => {
+  const baseCtx = {
+    isFocusMode: true,
+    activeWorkspace: workspace(),
+    focusedSessionId: "session-1",
+    resolvedPreviewTheme: {},
+    sessionHostsMap: new Map(),
+    sessions: [],
+    terminalSettings: { dynamicTabTitleMode: "agent" },
+  };
+
+  assert.equal(
+    terminalLayerFocusSidebarPropsEqual(
+      baseCtx,
+      { ...baseCtx, terminalSettings: { dynamicTabTitleMode: "off" } },
+    ),
+    false,
+  );
+  assert.equal(
+    terminalLayerViewCtxEqual(
+      baseCtx,
+      { ...baseCtx, terminalSettings: { dynamicTabTitleMode: "off" } },
     ),
     false,
   );

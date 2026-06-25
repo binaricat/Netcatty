@@ -359,9 +359,11 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
       return { ...prev, environmentVariables: filtered.length > 0 ? filtered : undefined };
     });
   };
+  const hasHostname = form.hostname.trim().length > 0;
 
   const handleSubmit = () => {
-    if (!form.hostname) return;
+    const hostname = form.hostname.trim();
+    if (!hostname) return;
     const normalizedProxyConfig = normalizeManualProxyConfig(form.proxyConfig);
     if (normalizedProxyConfig && !isCompleteProxyConfig(normalizedProxyConfig)) {
       toast.error(
@@ -375,7 +377,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
       setActiveSubPanel("proxy");
       return;
     }
-    let finalLabel = form.label?.trim() || form.hostname;
+    let finalLabel = form.label?.trim() || hostname;
     const finalGroup = groupInputValue.trim() || form.group || "";
 
     const targetManagedSource = managedSources
@@ -407,6 +409,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
     let cleaned: Host = {
       ...formWithoutProxyDraft,
       ...(normalizedProxyConfig && { proxyConfig: normalizedProxyConfig }),
+      hostname,
       label: finalLabel,
       group: finalGroup,
       tags: form.tags || [],
@@ -711,7 +714,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
           size="icon"
           className="h-8 w-8"
           onClick={handleSubmit}
-          disabled={!form.hostname}
+          disabled={!hasHostname}
           aria-label={t("hostDetails.saveAria")}
         >
           <Check size={16} />
@@ -985,7 +988,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
         <Button
           className="w-full h-10"
           onClick={handleSubmit}
-          disabled={!form.hostname}
+          disabled={!hasHostname}
         >
           {t("common.save")}
         </Button>

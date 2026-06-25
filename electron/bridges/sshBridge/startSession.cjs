@@ -504,6 +504,7 @@ function createStartSessionApi(ctx) {
           hostname: options.hostname,
           port: options.port || 22,
           knownHosts: options.knownHosts,
+          verifyHostKeys: options.verifyHostKeys,
         });
 
         // Authentication for final target

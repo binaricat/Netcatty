@@ -14,6 +14,7 @@ const {
   SUBOPTION_IS,
   SUBOPTION_SEND,
   escapeIacForWire,
+  normalizeNvtNewlines,
   createTelnetParser,
   createTelnetNegotiator,
 } = require("./telnetProtocol.cjs");
@@ -52,6 +53,13 @@ test("escapeIacForWire — doubles each 0xFF", () => {
     [...got],
     [0xff, 0xff, 0x61, 0xff, 0xff, 0xff, 0xff, 0x62],
   );
+});
+
+test("normalizeNvtNewlines converts local newlines to Telnet NVT form", () => {
+  assert.equal(normalizeNvtNewlines("ps\r"), "ps\r\n");
+  assert.equal(normalizeNvtNewlines("ps\n"), "ps\r\n");
+  assert.equal(normalizeNvtNewlines("ps\r\n"), "ps\r\n");
+  assert.equal(normalizeNvtNewlines("red\r\0raw"), "red\r\0raw");
 });
 
 test("parser emits clean data when no IAC bytes are present", () => {
@@ -307,19 +315,72 @@ test("peer's independent DO NAWS (no WILL pending) replies WILL + size subneg", 
   assert.equal(subnegs[0].opt, OPT.NAWS);
 });
 
-test("peer's WILL ECHO triggers DO ECHO, repeated WILL ECHO is swallowed as ack", () => {
-  const { negotiator, commands } = recordNegotiator();
-  // First WILL ECHO: fresh request → we reply DO ECHO. That DO is sent via
-  // the raw writer (not requestOption), so it is NOT in pendingDoRequests.
-  // The peer's subsequent WILL ECHO is a re-announce and we should reply
-  // with another DO. The negotiator does not currently de-duplicate, so
-  // this test pins down the actual behaviour: reply each time.
-  negotiator.handleCommand(WILL, OPT.ECHO);
-  negotiator.handleCommand(WILL, OPT.ECHO);
+test("peer's repeated DO for enabled local options is ignored", () => {
+  const { negotiator, commands, subnegs } = recordNegotiator();
+  negotiator.handleCommand(DO, OPT.NAWS);
+  negotiator.handleCommand(DO, OPT.NAWS);
+  negotiator.handleCommand(DO, OPT.SUPPRESS_GO_AHEAD);
+  negotiator.handleCommand(DO, OPT.SUPPRESS_GO_AHEAD);
+
   assert.deepEqual(commands, [
-    { cmd: DO, opt: OPT.ECHO },
+    { cmd: WILL, opt: OPT.NAWS },
+    { cmd: WILL, opt: OPT.SUPPRESS_GO_AHEAD },
+  ]);
+  assert.equal(subnegs.length, 1);
+});
+
+test("peer's DO/DONT ECHO controls client local echo", () => {
+  const states = [];
+  const { negotiator, commands } = recordNegotiator({
+    onLocalEchoChange: (enabled) => states.push(enabled),
+  });
+
+  negotiator.handleCommand(DO, OPT.ECHO);
+  negotiator.handleCommand(DO, OPT.ECHO);
+  negotiator.handleCommand(DONT, OPT.ECHO);
+  negotiator.handleCommand(DONT, OPT.ECHO);
+
+  assert.deepEqual(states, [true, false]);
+  assert.deepEqual(commands, [
+    { cmd: WILL, opt: OPT.ECHO },
+    { cmd: WONT, opt: OPT.ECHO },
+  ]);
+});
+
+test("peer's WILL ECHO triggers DO ECHO, repeated WILL ECHO is ignored", () => {
+  const { negotiator, commands } = recordNegotiator();
+  negotiator.handleCommand(WILL, OPT.ECHO);
+  negotiator.handleCommand(WILL, OPT.ECHO);
+  assert.deepEqual(commands, [{ cmd: DO, opt: OPT.ECHO }]);
+});
+
+test("peer's WILL ECHO disables client local echo", () => {
+  const states = [];
+  const { negotiator, commands } = recordNegotiator({
+    onLocalEchoChange: (enabled) => states.push(enabled),
+  });
+
+  negotiator.handleCommand(DO, OPT.ECHO);
+  commands.length = 0;
+  negotiator.handleCommand(WILL, OPT.ECHO);
+
+  assert.deepEqual(states, [true, false]);
+  assert.deepEqual(commands, [
+    { cmd: WONT, opt: OPT.ECHO },
     { cmd: DO, opt: OPT.ECHO },
   ]);
+});
+
+test("peer's ECHO negotiation publishes remote echo state", () => {
+  const states = [];
+  const { negotiator } = recordNegotiator({
+    onRemoteEchoChange: (enabled) => states.push(enabled),
+  });
+
+  negotiator.handleCommand(WILL, OPT.ECHO);
+  negotiator.handleCommand(WONT, OPT.ECHO);
+
+  assert.deepEqual(states, [true, false]);
 });
 
 test("peer's WONT on our pending DO is swallowed", () => {
@@ -331,6 +392,17 @@ test("peer's WONT on our pending DO is swallowed", () => {
   assert.equal(negotiator.pendingDoCount, 0);
 });
 
+test("peer's repeated WONT ECHO is not acknowledged in a loop", () => {
+  const { negotiator, commands } = recordNegotiator();
+  negotiator.handleCommand(WILL, OPT.ECHO);
+  commands.length = 0;
+
+  negotiator.handleCommand(WONT, OPT.ECHO);
+  negotiator.handleCommand(WONT, OPT.ECHO);
+
+  assert.deepEqual(commands, [{ cmd: DONT, opt: OPT.ECHO }]);
+});
+
 test("peer's DONT on our pending WILL is swallowed", () => {
   const { negotiator, commands } = recordNegotiator();
   negotiator.start();
@@ -339,6 +411,17 @@ test("peer's DONT on our pending WILL is swallowed", () => {
   assert.deepEqual(commands, []);
   // NAWS still outstanding.
   assert.equal(negotiator.pendingWillCount, 1);
+});
+
+test("peer's repeated DONT for enabled local options is not acknowledged in a loop", () => {
+  const { negotiator, commands } = recordNegotiator();
+  negotiator.handleCommand(DO, OPT.SUPPRESS_GO_AHEAD);
+  commands.length = 0;
+
+  negotiator.handleCommand(DONT, OPT.SUPPRESS_GO_AHEAD);
+  negotiator.handleCommand(DONT, OPT.SUPPRESS_GO_AHEAD);
+
+  assert.deepEqual(commands, [{ cmd: WONT, opt: OPT.SUPPRESS_GO_AHEAD }]);
 });
 
 test("peer's DO on an option we don't support replies WONT", () => {

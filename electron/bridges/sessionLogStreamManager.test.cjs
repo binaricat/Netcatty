@@ -8,6 +8,7 @@ const {
   registerProgrammaticCommandLogRewrite,
   registerSudoAutofillInput,
   startStream,
+  startStreamToFile,
   stopStream,
 } = require("./sessionLogStreamManager.cjs");
 
@@ -137,6 +138,98 @@ test("stopStream without a token still tears down the current stream (back-compa
     assert.equal(fs.readFileSync(finalPath, "utf8"), "data\n");
     assert.equal(hasStream(sessionId), false);
   } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("token-required explicit file streams ignore tokenless stale stops", async () => {
+  const directory = path.join(TEMP_ROOT, `manual-token-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+  const filePath = path.join(directory, "manual.log");
+  const sessionId = `session-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  let token;
+
+  try {
+    const result = startStreamToFile(sessionId, {
+      filePath,
+      format: "raw",
+      hostLabel: "manual",
+      startTime: Date.UTC(2026, 0, 2, 3, 4, 5),
+      stopRequiresToken: true,
+    });
+    assert.equal(result.ok, true);
+    token = result.token;
+
+    appendData(sessionId, "before-stale\n");
+    const staleResult = await stopStream(sessionId);
+    assert.equal(staleResult, null);
+    assert.equal(hasStream(sessionId), true);
+
+    appendData(sessionId, "after-stale\n");
+    const finalPath = await stopStream(sessionId, token);
+
+    assert.equal(finalPath, filePath);
+    assert.equal(fs.readFileSync(filePath, "utf8"), "before-stale\nafter-stale\n");
+  } finally {
+    if (hasStream(sessionId)) {
+      await stopStream(sessionId, token);
+    }
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("startStreamToFile writes to an explicit raw log file path", async () => {
+  const directory = path.join(TEMP_ROOT, `manual-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+  const filePath = path.join(directory, "manual.log");
+  const sessionId = `session-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+  try {
+    const result = startStreamToFile(sessionId, {
+      filePath,
+      format: "raw",
+      hostLabel: "manual",
+      startTime: Date.UTC(2026, 0, 2, 3, 4, 5),
+      initialLine: "header\n",
+    });
+
+    assert.equal(result.ok, true);
+    appendData(sessionId, "body\n");
+    const finalPath = await stopStream(sessionId);
+
+    assert.equal(finalPath, filePath);
+    assert.equal(fs.readFileSync(filePath, "utf8"), "header\nbody\n");
+  } finally {
+    await stopStream(sessionId);
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("startStreamToFile can write human-readable text logs from ANSI terminal output", async () => {
+  const directory = path.join(TEMP_ROOT, `manual-txt-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+  const filePath = path.join(directory, "manual.log");
+  const sessionId = `session-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+  try {
+    const result = startStreamToFile(sessionId, {
+      filePath,
+      format: "txt",
+      hostLabel: "manual",
+      startTime: Date.UTC(2026, 0, 2, 3, 4, 5),
+    });
+
+    assert.equal(result.ok, true);
+    appendData(
+      sessionId,
+      "\x1b[01;32mroot@MyNAS\x1b[00m:\x1b[01;34m~\x1b[00m# ip a\r\n1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536\r\n\x1b[01;32mroot@MyNAS\x1b[00m:\x1b[01;34m~\x1b[00m# ",
+    );
+    const finalPath = await stopStream(sessionId);
+
+    assert.equal(finalPath, filePath);
+    assert.equal(
+      fs.readFileSync(filePath, "utf8"),
+      "root@MyNAS:~# ip a\n1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536\nroot@MyNAS:~#",
+    );
+  } finally {
+    await stopStream(sessionId);
     fs.rmSync(directory, { recursive: true, force: true });
   }
 });

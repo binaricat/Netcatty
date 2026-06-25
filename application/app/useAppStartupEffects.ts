@@ -26,7 +26,7 @@ export function shouldQueueKeyboardInteractiveRequest(
 
 export function useAppStartupEffects(ctx: StartupEffectsContext) {
   const {dismissUpdate, enabled = true, groupConfigs, hosts, identities,
-    installUpdate, isVaultInitialized, keys, openSettingsWindow, portForwardingRules, proxyProfiles, sessions, setKeyboardInteractiveQueue,
+    installUpdate, isVaultInitialized, keys, knownHosts, openSettingsWindow, portForwardingRules, proxyProfiles, sessions, setKeyboardInteractiveQueue,
     t, terminalSettings, updateState, workspaces,
   } = ctx;
   const sessionsRef = useRef(sessions);
@@ -103,6 +103,7 @@ export function useAppStartupEffects(ctx: StartupEffectsContext) {
     hosts,
     keys,
     identities,
+    knownHosts,
     proxyProfiles,
     groupConfigs,
     terminalSettings,

@@ -333,7 +333,7 @@ export const resolveHostKeepalive = (
 };
 
 export const sanitizeHost = (host: Host): Host => {
-  const cleanHostname = (host.hostname || '').split(/\s+/)[0];
+  const cleanHostname = (host.hostname || '').trim().split(/\s+/)[0];
   const cleanDistro = normalizeDistroId(host.distro);
   const cleanManualDistro = normalizeDistroId(host.manualDistro);
   const cleanDistroMode =

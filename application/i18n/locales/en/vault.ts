@@ -628,8 +628,6 @@ export const enVaultMessages: Messages = {
   'hostDetails.section.terminalBehavior': 'Terminal Behavior',
   'hostDetails.lineTimestamps': 'Show output timestamps',
   'hostDetails.lineTimestamps.desc': 'Show local time beside visible output lines for this host without changing terminal text.',
-  'hostDetails.disableDynamicTabTitle': 'Disable dynamic tab title',
-  'hostDetails.disableDynamicTabTitle.desc': 'Keep the connection name on session tabs instead of following the shell-reported window title.',
   'hostDetails.legacyAlgorithms': 'Allow Legacy Algorithms',
   'hostDetails.legacyAlgorithms.desc': 'Enable deprecated SSH algorithms (diffie-hellman-group1, ssh-dss, 3des-cbc, etc.) for connecting to older network equipment.',
   'hostDetails.legacyAlgorithms.warning': 'These algorithms have known security weaknesses. Only enable for legacy devices that do not support modern cryptography.',

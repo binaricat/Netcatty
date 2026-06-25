@@ -82,6 +82,18 @@ declare global {
       directory: string;
     }): Promise<{ success: boolean; error?: string; filePath?: string }>;
     openSessionLogsDir?(directory: string): Promise<{ success: boolean; error?: string }>;
+    startManualSessionLog?(payload: {
+      sessionId: string;
+      sessionName?: string;
+      preferredDirectory?: string;
+      initialLine?: string;
+    }): Promise<{ success: boolean; started: boolean; canceled?: boolean; error?: string; filePath?: string }>;
+    stopManualSessionLog?(payload: {
+      sessionId: string;
+    }): Promise<{ success: boolean; stopped: boolean; error?: string; filePath?: string }>;
+    getManualSessionLogStatus?(payload: {
+      sessionId: string;
+    }): Promise<{ success: boolean; isLogging: boolean; error?: string }>;
 
     // Get file path from File object (for drag-and-drop, uses Electron's webUtils)
     getPathForFile?(file: File): string | undefined;

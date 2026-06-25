@@ -39,6 +39,7 @@ declare global {
       // Known hosts, used to verify the host key before the stats companion
       // connection (issue #1198) sends a saved password.
       knownHosts?: import("../../domain/models").KnownHost[];
+      verifyHostKeys?: boolean;
       cols?: number;
       rows?: number;
       charset?: string;
@@ -62,6 +63,7 @@ declare global {
       skipEcdsaHostKey?: boolean;
       algorithmOverrides?: import("../../domain/models").HostAlgorithmOverrides;
       knownHosts?: import("../../domain/models").KnownHost[];
+      verifyHostKeys?: boolean;
       jumpHosts?: NetcattyJumpHost[];
       agentForwarding?: boolean;
       sudoAutofillPassword?: string;
@@ -286,6 +288,10 @@ declare global {
     onTelnetAutoLoginCancelled?(
       sessionId: string,
       cb: (evt: { sessionId: string }) => void
+    ): () => void;
+    onTelnetEchoMode?(
+      sessionId: string,
+      cb: (evt: { sessionId: string; remoteEcho: boolean; localEcho: boolean }) => void
     ): () => void;
     onAuthFailed?(
       sessionId: string,

@@ -156,6 +156,31 @@ test("dispatchCapabilityRpc routes portforward start to portforward service", as
   assert.equal(result.ruleId, "rule-1");
 });
 
+test("dispatchCapabilityRpc reads permissionMode from deps on each call", async () => {
+  const seenModes = [];
+  const mutableDeps = { permissionMode: PERMISSION_MODES.CONFIRM };
+  const liveDispatch = createCapabilityRpcDispatcher({
+    invokeVaultAgent: async () => ({ ok: true }),
+    evaluatePermissionWithGrants: (input) => {
+      seenModes.push(input.permissionMode);
+      return { allowed: true, requiresApproval: false };
+    },
+    get permissionMode() {
+      return mutableDeps.permissionMode;
+    },
+    permissionGrantsSnapshot: [],
+    isChatSessionCancelled: () => false,
+    requestApprovalFromRenderer: async () => true,
+    USER_DENIED_MESSAGE: "User denied the operation.",
+  });
+
+  await liveDispatch("vault/host/get", { hostId: "host-1" });
+  mutableDeps.permissionMode = PERMISSION_MODES.AUTONOMOUS;
+  await liveDispatch("vault/host/get", { hostId: "host-2" });
+
+  assert.deepEqual(seenModes, [PERMISSION_MODES.CONFIRM, PERMISSION_MODES.AUTONOMOUS]);
+});
+
 test("implemented vault capabilities do not return CAPABILITY_NOT_IMPLEMENTED", async () => {
   const dispatch = createTestDispatcher();
   const result = await dispatch("vault/host/get", { hostId: "host-1" });

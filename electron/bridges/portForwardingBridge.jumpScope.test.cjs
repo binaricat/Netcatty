@@ -84,6 +84,13 @@ test("port forwarding routes jump-host keyboard-interactive prompts through the 
   const event = { sender: createSender() };
 
   try {
+    const knownHosts = [{
+      id: "kh-jump",
+      hostname: "jump.internal",
+      port: 22,
+      keyType: "ssh-ed25519",
+      fingerprint: "trusted-jump-fingerprint",
+    }];
     const result = await bridge.startPortForward(event, {
       tunnelId: "pf-jump-scope",
       type: "local",
@@ -95,6 +102,7 @@ test("port forwarding routes jump-host keyboard-interactive prompts through the 
       port: 22,
       username: "dbuser",
       password: "target-password",
+      knownHosts,
       jumpHosts: [{
         hostname: "jump.internal",
         port: 22,
@@ -105,6 +113,7 @@ test("port forwarding routes jump-host keyboard-interactive prompts through the 
 
     assert.equal(result.success, true);
     assert.equal(getCapturedChainOptions()?._keyboardInteractiveScope, "external");
+    assert.equal(getCapturedChainOptions()?.knownHosts, knownHosts);
   } finally {
     await bridge.stopPortForward(event, { tunnelId: "pf-jump-scope" });
   }

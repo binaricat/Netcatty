@@ -793,6 +793,7 @@ main();
             skipEcdsaHostKey: options.skipEcdsaHostKey,
             algorithmOverrides: options.algorithmOverrides,
             knownHosts: options.knownHosts,
+            verifyHostKeys: options.verifyHostKeys,
             hasJumpHost: Array.isArray(options.jumpHosts) && options.jumpHosts.length > 0,
           },
           systemManagerSudoPassword: typeof options.sudoAutofillPassword === "string" && options.sudoAutofillPassword.length > 0

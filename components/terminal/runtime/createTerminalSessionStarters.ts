@@ -33,6 +33,8 @@ import {
 } from "../../../domain/host";
 import { hasUsableProxyConfig } from "../../../domain/proxyProfiles";
 
+const TELNET_SESSION_REPLACED_ERROR = "Telnet session start was replaced";
+
 export const getMissingChainHostIds = (
   host: Host,
   resolvedChainHosts: Host[],
@@ -44,6 +46,14 @@ export const getMissingChainHostIds = (
 };
 
 export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContext) => {
+  const globalTerminalSettings = {
+    verifyHostKeys: true,
+    keepaliveInterval: 30,
+    keepaliveCountMax: 10,
+    ...(ctx.terminalSettings ?? {}),
+  };
+  let fallbackDisposeTelnetEchoMode: (() => void) | null = null;
+
   const tr = (key: string, fallback: string): string => {
     const translated = ctx.t?.(key);
     if (!translated || translated === key) return fallback;
@@ -75,6 +85,35 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
       return sanitizeCredentialValue(ctx.sudoAutofillPasswordRef.current);
     }
     return sanitizeCredentialValue(ctx.sudoAutofillPassword);
+  };
+
+  const clearTelnetEchoMode = ({ resetLocalEcho = true }: { resetLocalEcho?: boolean } = {}) => {
+    ctx.disposeTelnetEchoModeRef?.current?.();
+    if (ctx.disposeTelnetEchoModeRef) ctx.disposeTelnetEchoModeRef.current = null;
+    fallbackDisposeTelnetEchoMode?.();
+    fallbackDisposeTelnetEchoMode = null;
+    if (resetLocalEcho && ctx.telnetLocalEchoRef) ctx.telnetLocalEchoRef.current = false;
+  };
+
+  const attachTelnetEchoMode = (
+    backendSessionId: string,
+    { resetLocalEcho = true }: { resetLocalEcho?: boolean } = {},
+  ) => {
+    if (ctx.host.protocol !== "telnet") return;
+    if (!ctx.telnetLocalEchoRef || !ctx.terminalBackend.onTelnetEchoMode) return;
+    clearTelnetEchoMode({ resetLocalEcho });
+    if (resetLocalEcho) ctx.telnetLocalEchoRef.current = false;
+    const dispose = ctx.terminalBackend.onTelnetEchoMode(
+      backendSessionId,
+      (evt) => {
+        ctx.telnetLocalEchoRef!.current = Boolean(evt.localEcho);
+      },
+    ) ?? null;
+    if (ctx.disposeTelnetEchoModeRef) {
+      ctx.disposeTelnetEchoModeRef.current = dispose;
+    } else {
+      fallbackDisposeTelnetEchoMode = dispose;
+    }
   };
 
   const startSSH = async (term: XTerm) => {
@@ -170,7 +209,6 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
       ctx.updateStatus("disconnected");
       return;
     }
-    const globalKeepalive = ctx.terminalSettings ?? { keepaliveInterval: 30, keepaliveCountMax: 10 };
     const jumpHosts = ctx.resolvedChainHosts.map<NetcattyJumpHost>((jumpHost, index) => {
       const jumpAuth = resolveHostAuth({
         host: jumpHost,
@@ -216,7 +254,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
       // Resolve keepalive for THIS hop. Each jump host carries its own
       // override toggle, so a bastion that is a router (interval=0) can
       // coexist with a cloud target host (interval=30) in the same chain.
-      const hopKeepalive = resolveHostKeepalive(jumpHost, globalKeepalive);
+      const hopKeepalive = resolveHostKeepalive(jumpHost, globalTerminalSettings);
 
       return {
         hostname: jumpHost.hostname,
@@ -243,6 +281,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         identityFilePaths: jumpIdentityFilePaths,
         keepaliveInterval: hopKeepalive.interval,
         keepaliveCountMax: hopKeepalive.countMax,
+        verifyHostKeys: globalTerminalSettings.verifyHostKeys,
         legacyAlgorithms: jumpHost.legacyAlgorithms,
         skipEcdsaHostKey: jumpHost.skipEcdsaHostKey,
         algorithmOverrides: jumpHost.algorithms,
@@ -381,7 +420,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         // inherits the cloud-friendly global setting.
         const keepalive = resolveHostKeepalive(
           ctx.host,
-          ctx.terminalSettings ?? { keepaliveInterval: 30, keepaliveCountMax: 10 },
+          globalTerminalSettings,
         );
         return ctx.terminalBackend.startSSHSession({
           sessionId: ctx.sessionId,
@@ -412,6 +451,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
           jumpHosts: jumpHosts.length > 0 ? jumpHosts : undefined,
           keepaliveInterval: keepalive.interval,
           keepaliveCountMax: keepalive.countMax,
+          verifyHostKeys: globalTerminalSettings.verifyHostKeys,
           sessionLog: ctx.sessionLog?.enabled ? ctx.sessionLog : undefined,
           sshDebugLogEnabled: ctx.sshDebugLogEnabled,
           identityFilePaths: attempt.useIdentityFiles ? targetIdentityFilePaths : undefined,
@@ -582,6 +622,10 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
       cancelPendingStartupCommand?.();
       cancelPendingStartupCommand = undefined;
     };
+    const cleanupTelnetSession = () => {
+      cleanupTelnetStartupWait();
+      clearTelnetEchoMode();
+    };
     try {
       const telnetEnv = buildTermEnv(ctx.host, ctx.terminalSettings);
       const telnetUsername = resolveTelnetUsername(ctx.host);
@@ -623,6 +667,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
           cleanupTelnetStartupWait,
         );
       }
+      attachTelnetEchoMode(ctx.sessionId);
       const id = await ctx.terminalBackend.startTelnetSession({
         sessionId: ctx.sessionId,
         hostname: ctx.host.hostname,
@@ -636,21 +681,19 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         sessionLog: ctx.sessionLog?.enabled ? ctx.sessionLog : undefined,
       });
       telnetSessionId = id;
+      if (id !== ctx.sessionId) {
+        attachTelnetEchoMode(id);
+      }
 
       if (!tryAttachSessionToTerminal(ctx, term, id, {
         onExitMessage: (evt) =>
           `\r\n[Telnet session closed${evt?.exitCode !== undefined ? ` (code ${evt.exitCode})` : ""}]`,
-        onExit: cleanupTelnetStartupWait,
+        onExit: cleanupTelnetSession,
       })) {
-        cleanupTelnetStartupWait();
+        cleanupTelnetSession();
         abortSessionStartAfterUnmount();
         return;
       }
-      const disposeTelnetExit = ctx.disposeExitRef.current;
-      ctx.disposeExitRef.current = () => {
-        cleanupTelnetStartupWait();
-        disposeTelnetExit?.();
-      };
 
       // Many telnet endpoints (especially no-auth devices) stay silent until
       // the client sends data. Mark connected once the socket session is
@@ -663,8 +706,12 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         return;
       }
     } catch (err) {
-      cleanupTelnetStartupWait();
       const message = err instanceof Error ? err.message : String(err);
+      if (message.includes(TELNET_SESSION_REPLACED_ERROR)) {
+        cleanupTelnetStartupWait();
+        return;
+      }
+      cleanupTelnetSession();
       ctx.setError(message);
       writeTerminalLine(ctx, term, `\r\n[Failed to start Telnet: ${message}]`);
       ctx.updateStatus("disconnected");
@@ -789,6 +836,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         // Lets the stats companion verify the host key before sending a saved
         // password (#1198), so it never discloses it to an unvetted host.
         knownHosts: ctx.knownHosts,
+        verifyHostKeys: globalTerminalSettings.verifyHostKeys,
         sudoAutofillPassword: resolveSavedSudoAutofillPassword(),
         cols: term.cols,
         rows: term.rows,
@@ -1026,6 +1074,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         skipEcdsaHostKey: ctx.host.skipEcdsaHostKey,
         algorithmOverrides: ctx.host.algorithms,
         knownHosts: ctx.knownHosts,
+        verifyHostKeys: globalTerminalSettings.verifyHostKeys,
         jumpHosts: jumpHosts.length > 0 ? jumpHosts : undefined,
         agentForwarding: ctx.host.agentForwarding,
         sudoAutofillPassword: resolveSavedSudoAutofillPassword(),
@@ -1227,6 +1276,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
       convertLfToCrlf: isSerial,
       sudoAutofillPassword: ctx.sudoAutofillPassword,
     });
+    attachTelnetEchoMode(id, { resetLocalEcho: false });
     ctx.hasConnectedRef.current = true;
     return true;
   };

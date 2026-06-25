@@ -173,6 +173,14 @@ test("sanitizeHost removes invalid custom host icon fields", () => {
   assert.equal(sanitized.iconColor, undefined);
 });
 
+test("sanitizeHost trims leading whitespace before extracting the hostname", () => {
+  const sanitized = sanitizeHost(makeHost({
+    hostname: " 127.0.0.1",
+  }));
+
+  assert.equal(sanitized.hostname, "127.0.0.1");
+});
+
 test("preserves a concurrent terminal timestamp toggle when host details did not edit it", () => {
   const openedHost = makeHost({ showLineTimestamps: false });
   const latestHost = makeHost({ showLineTimestamps: true });

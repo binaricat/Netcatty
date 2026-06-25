@@ -471,9 +471,9 @@ const telnetSessionApi = createTelnetSessionApi({
   get sessions() { return sessions; },
   get electronModule() { return electronModule; },
   net, randomUUID, StringDecoder, iconv, Buffer, console, setTimeout, clearTimeout,
-  normalizeTerminalEncoding, createTelnetAutoLogin, telnetProtocol,
+  normalizeTerminalEncoding, encodeTerminalInput, createTelnetAutoLogin, telnetProtocol,
   createPtyOutputBuffer, sessionLogStreamManager, createZmodemSentry, ptyProcessTree,
-  enableTcpNoDelay, trackSessionIdlePrompt, stripAnsi,
+  enableTcpNoDelay, trackSessionIdlePrompt, stripAnsi, clearPendingAutomatedWrites,
 });
 const { startTelnetSession } = telnetSessionApi;
 
@@ -772,7 +772,10 @@ function writeToSessionNow(payload, data, logRewrite = payload.logRewrite) {
     // the transport's native string serialization keeps handling that case.
     sessionLogStreamManager.registerSudoAutofillInput(payload.sessionId, data);
     sessionLogStreamManager.registerProgrammaticCommandLogRewrite(payload.sessionId, logRewrite);
-    const outgoing = encodeTerminalInput(data, session.encoding);
+    const inputData = session.type === 'telnet-native'
+      ? telnetProtocol.normalizeNvtNewlines(data)
+      : data;
+    const outgoing = encodeTerminalInput(inputData, session.encoding);
 
     if (session.stream) {
       signalSshInterruptIfNeeded(session, data);
@@ -995,6 +998,7 @@ function closeSession(event, payload) {
     session.zmodemSentry?.cancel();
     session.flushPendingData?.();
     cleanupSessionExternalAuthArtifacts(session);
+    session.releaseTelnetGeneration?.();
     if (session.stream) {
       // Snapshot multiplexing state *before* closing the channel: closing the
       // stream can synchronously fire its "close" handler, which nulls
@@ -1198,6 +1202,7 @@ function cleanupAllSessions() {
       cancelActiveYmodemSession(session);
       clearPendingAutomatedWrites(session);
       cleanupSessionExternalAuthArtifacts(session);
+      session.releaseTelnetGeneration?.();
       if (session.stream) {
         session.stream.close();
         session.conn?.end();

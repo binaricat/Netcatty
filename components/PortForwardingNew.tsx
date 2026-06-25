@@ -15,6 +15,7 @@ import { usePortForwardingState } from "../application/state/usePortForwardingSt
 import {
   GroupConfig,
   Host,
+  KnownHost,
   ManagedSource,
   PortForwardingRule,
   PortForwardingType,
@@ -75,6 +76,7 @@ interface PortForwardingProps {
   keys: SSHKey[];
   identities?: import('../domain/models').Identity[];
   customGroups: string[];
+  knownHosts?: KnownHost[];
   managedSources?: ManagedSource[];
   groupConfigs?: GroupConfig[];
   proxyProfiles?: ProxyProfile[];
@@ -89,6 +91,7 @@ const PortForwarding: React.FC<PortForwardingProps> = ({
   keys,
   identities = [],
   customGroups: _customGroups,
+  knownHosts = [],
   managedSources = [],
   groupConfigs = [],
   proxyProfiles = [],
@@ -193,6 +196,7 @@ const PortForwarding: React.FC<PortForwardingProps> = ({
           },
           rule.autoStart, // Enable reconnect for auto-start rules
           terminalSettings,
+          knownHosts,
         );
         // Show error from result only if not already shown
         if (!result.success && result.error && !errorShown) {
@@ -210,7 +214,7 @@ const PortForwarding: React.FC<PortForwardingProps> = ({
         });
       }
     },
-    [hostById, hosts, identities, keys, resolveEffectiveHost, setRuleStatus, startTunnel, t, terminalSettings],
+    [hostById, hosts, identities, keys, knownHosts, resolveEffectiveHost, setRuleStatus, startTunnel, t, terminalSettings],
   );
 
   // Stop a port forwarding tunnel

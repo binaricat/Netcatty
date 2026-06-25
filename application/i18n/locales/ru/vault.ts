@@ -660,8 +660,6 @@ export const ruVaultMessages: Messages = {
   'hostDetails.section.terminalBehavior': 'Поведение терминала',
   'hostDetails.lineTimestamps': 'Показывать время вывода',
   'hostDetails.lineTimestamps.desc': 'Показывать локальное время рядом с видимыми строками вывода для этого хоста, не изменяя текст терминала.',
-  'hostDetails.disableDynamicTabTitle': 'Отключить динамический заголовок вкладки',
-  'hostDetails.disableDynamicTabTitle.desc': 'Показывать имя подключения на вкладках сессии вместо заголовка окна от shell.',
   'hostDetails.legacyAlgorithms': 'Разрешить устаревшие алгоритмы',
   'hostDetails.legacyAlgorithms.desc': 'Включить устаревшие SSH-алгоритмы (diffie-hellman-group1, ssh-dss, 3des-cbc и т. д.) для подключения к старому сетевому оборудованию.',
   'hostDetails.legacyAlgorithms.warning': 'У этих алгоритмов есть известные слабые места безопасности. Включайте только для устаревших устройств, которые не поддерживают современную криптографию.',

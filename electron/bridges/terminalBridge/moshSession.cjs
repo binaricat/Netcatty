@@ -576,6 +576,7 @@ function createMoshSessionApi(ctx) {
         // password (see moshStatsConnection.cjs). Public-key / agent auth
         // does not depend on this.
         knownHosts: options.knownHosts,
+        verifyHostKeys: options.verifyHostKeys,
       };
       session.systemManagerSudoPassword = typeof options.sudoAutofillPassword === "string" && options.sudoAutofillPassword.length > 0
         ? options.sudoAutofillPassword

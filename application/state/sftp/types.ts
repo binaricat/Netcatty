@@ -85,7 +85,7 @@ export interface SftpStateOptions {
    * keepalive resolution so a host that has opted into its own override
    * is honored for SFTP browsing too (not just the terminal session).
    */
-  terminalSettings?: { keepaliveInterval: number; keepaliveCountMax: number };
+  terminalSettings?: { verifyHostKeys: boolean; keepaliveInterval: number; keepaliveCountMax: number };
   knownHosts?: KnownHost[];
   onAddKnownHost?: (knownHost: KnownHost) => void;
 }

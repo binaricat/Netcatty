@@ -170,6 +170,7 @@ export function AppView({ ctx }: { ctx: AppViewContext }) {
         onRemoveSessionFromWorkspace={removeSessionFromWorkspace}
         showSftpTab={settings.showSftpTab}
         showHostTreeSidebar={settings.showHostTreeSidebar}
+        dynamicTabTitleMode={settings.terminalSettings.dynamicTabTitleMode}
         editorTabs={editorTabs}
         onRequestCloseEditorTab={handleRequestCloseEditorTab}
         hostById={hostById}

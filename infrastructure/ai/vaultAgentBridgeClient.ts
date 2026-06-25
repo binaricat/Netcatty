@@ -116,6 +116,29 @@ function serializeVaultNoteForAgent(note: VaultNote) {
   };
 }
 
+function parseSnippetVariableValues(
+  raw: unknown,
+): Record<string, string> | { error: string } {
+  if (raw === undefined || raw === null) return {};
+  if (typeof raw === 'object' && !Array.isArray(raw)) {
+    return Object.fromEntries(
+      Object.entries(raw as Record<string, unknown>).map(([key, value]) => [key, String(value ?? '')]),
+    );
+  }
+  if (typeof raw !== 'string' || !raw.trim()) return {};
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return Object.fromEntries(
+        Object.entries(parsed as Record<string, unknown>).map(([key, value]) => [key, String(value ?? '')]),
+      );
+    }
+    return { error: 'variables must be a JSON object string.' };
+  } catch {
+    return { error: 'variables must be a JSON object string.' };
+  }
+}
+
 function parseOptionalStringArray(
   value: unknown,
   fieldName: string,
@@ -434,18 +457,11 @@ export async function handleVaultAgentOp(
       if (!sessionId) return { ok: false, error: 'sessionId is required.' };
 
       let variableValues: Record<string, string> = {};
-      if (typeof params.variables === 'string' && params.variables.trim()) {
-        try {
-          const parsed = JSON.parse(params.variables) as unknown;
-          if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-            variableValues = Object.fromEntries(
-              Object.entries(parsed as Record<string, unknown>).map(([key, value]) => [key, String(value ?? '')]),
-            );
-          }
-        } catch {
-          return { ok: false, error: 'variables must be a JSON object string.' };
-        }
+      const parsedVariables = parseSnippetVariableValues(params.variables);
+      if ('error' in parsedVariables) {
+        return { ok: false, error: parsedVariables.error };
       }
+      variableValues = parsedVariables;
 
       const defs = parseSnippetVariables(snippet.command);
       for (const def of defs) {

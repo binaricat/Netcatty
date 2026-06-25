@@ -57,6 +57,7 @@ import {
   resolveMiddleClickBehavior,
 } from "./middleClickBehavior";
 import { handleSerialLineModeInput } from "./serialLineInput";
+import { formatTelnetLocalEcho } from "./telnetLocalEcho";
 import {
   isTerminalFontSizeAction,
   nextTerminalFontSizeForAction,
@@ -182,6 +183,7 @@ export type CreateXTermRuntimeContext = {
   serialLocalEcho?: boolean;
   serialLineMode?: boolean;
   serialLineBufferRef?: RefObject<string>;
+  telnetLocalEchoRef?: RefObject<boolean>;
   onTerminalLogData?: (data: string) => void;
 
   // Callback when shell reports CWD change via OSC 7
@@ -871,7 +873,9 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
               break;
             }
             case "clearBuffer": {
-              clearTerminalViewport(term);
+              clearTerminalViewport(term, {
+                wipeScrollback: ctx.terminalSettingsRef.current?.clearWipesScrollback ?? true,
+              });
               break;
             }
             case "searchTerminal": {
@@ -1042,6 +1046,10 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
             writeLocalTerminalData(dataToWrite);
           }
         }
+        if (ctx.host.protocol === "telnet" && ctx.telnetLocalEchoRef?.current) {
+          const localEcho = formatTelnetLocalEcho(dataToWrite);
+          if (localEcho) writeLocalTerminalData(localEcho);
+        }
       }
 
       // Use remapped data so broadcast peers also receive the correct byte
@@ -1105,8 +1113,9 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
   );
 
   const eraseScrollbackDisposable = term.parser.registerCsiHandler({ final: "J" }, (params) => {
+    const wipeAllowed = ctx.terminalSettingsRef.current?.clearWipesScrollback ?? true;
     if (isEraseViewportSequence(params)) {
-      if (shouldPreserveViewportBeforeFullErase(term, inDec2026SyncBlock)) {
+      if (shouldPreserveViewportBeforeFullErase(term, inDec2026SyncBlock, wipeAllowed)) {
         preserveTerminalViewportInScrollback(term);
       }
       return false;
@@ -1116,7 +1125,6 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     }
     // CSI 3 J — POSIX/ncurses default `clear` emits this to wipe scrollback.
     // Honor it unless the user opts into the legacy "preserve history" behavior.
-    const wipeAllowed = ctx.terminalSettingsRef.current?.clearWipesScrollback ?? true;
     return !wipeAllowed;
   });
 

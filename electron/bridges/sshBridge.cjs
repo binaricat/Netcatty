@@ -556,6 +556,7 @@ async function connectThroughChain(event, options, jumpHosts, targetHost, target
         hostname: jump.hostname,
         port: jump.port || 22,
         knownHosts: options.knownHosts,
+        verifyHostKeys: jump.verifyHostKeys ?? options.verifyHostKeys,
       });
       attachSshDebugLogger(connOpts, sshDiagnosticLogger);
       logSshAlgorithms("Jump host", connOpts.algorithms, {
