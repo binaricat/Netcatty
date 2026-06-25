@@ -772,7 +772,10 @@ function writeToSessionNow(payload, data, logRewrite = payload.logRewrite) {
     // the transport's native string serialization keeps handling that case.
     sessionLogStreamManager.registerSudoAutofillInput(payload.sessionId, data);
     sessionLogStreamManager.registerProgrammaticCommandLogRewrite(payload.sessionId, logRewrite);
-    const outgoing = encodeTerminalInput(data, session.encoding);
+    const inputData = session.type === 'telnet-native'
+      ? telnetProtocol.normalizeNvtNewlines(data)
+      : data;
+    const outgoing = encodeTerminalInput(inputData, session.encoding);
 
     if (session.stream) {
       signalSshInterruptIfNeeded(session, data);

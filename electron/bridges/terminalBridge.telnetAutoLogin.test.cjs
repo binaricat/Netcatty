@@ -54,10 +54,10 @@ test("startTelnetSession answers login prompts with saved credentials", async ()
         promptedForUsername = true;
         socket.write("Username: ");
       }
-      if (joined.includes("admin\r") && !joined.includes("secret\r")) {
+      if (joined.includes("admin\r\n") && !joined.includes("secret\r\n")) {
         socket.write("\r\nPassword: ");
       }
-      if (joined.includes("secret\r")) {
+      if (joined.includes("secret\r\n")) {
         socket.end("\r\nWelcome\r\nrouter# ");
       }
     });
@@ -92,8 +92,8 @@ test("startTelnetSession answers login prompts with saved credentials", async ()
     );
 
     assert.equal(result.sessionId, "telnet-auto-login-test");
-    await waitFor(() => received.join("").includes("\radmin\rsecret\r"));
-    assert.equal(received.join(""), "\radmin\rsecret\r");
+    await waitFor(() => received.join("").includes("\r\nadmin\r\nsecret\r\n"));
+    assert.equal(received.join(""), "\r\nadmin\r\nsecret\r\n");
     assert.ok(sentEvents.some((evt) =>
       evt.channel === "netcatty:telnet:auto-login-complete" &&
       evt.payload?.sessionId === "telnet-auto-login-test",
@@ -121,10 +121,10 @@ test("automated Telnet writes do not cancel auto-login", async () => {
     socket.on("data", (chunk) => {
       received.push(chunk);
       const joined = received.join("");
-      if (joined.includes("admin\r") && !joined.includes("secret\r")) {
+      if (joined.includes("admin\r\n") && !joined.includes("secret\r\n")) {
         socket.write("\r\nPassword: ");
       }
-      if (joined.includes("secret\r")) {
+      if (joined.includes("secret\r\n")) {
         socket.end("\r\nWelcome\r\n");
       }
     });
@@ -167,8 +167,8 @@ test("automated Telnet writes do not cancel auto-login", async () => {
 
     clientSocket.write("Username: ");
 
-    await waitFor(() => received.join("").includes("admin\rsecret\r"));
-    assert.equal(received.join(""), "show version\radmin\rsecret\r");
+    await waitFor(() => received.join("").includes("admin\r\nsecret\r\n"));
+    assert.equal(received.join(""), "show version\r\nadmin\r\nsecret\r\n");
   } finally {
     terminalBridge.cleanupAllSessions();
     for (const socket of sockets) socket.destroy();

@@ -85,6 +85,18 @@ function escapeIacForWire(buf) {
 }
 
 /**
+ * Normalize text input to Telnet NVT newline rules (RFC 854): newline is CR LF,
+ * while a literal carriage return is CR NUL. Existing CR LF / CR NUL sequences
+ * are already valid and must not be expanded again.
+ */
+function normalizeNvtNewlines(data) {
+  if (typeof data !== "string" || data.length === 0) return data;
+  return data
+    .replace(/\r(?![\n\0])/g, "\r\n")
+    .replace(/(?<!\r)\n/g, "\r\n");
+}
+
+/**
  * Build a stateful Telnet parser.
  *
  * The parser preserves any partial command (IAC alone, IAC + verb without
@@ -397,6 +409,7 @@ module.exports = {
   // Helpers
   commandName,
   escapeIacForWire,
+  normalizeNvtNewlines,
   createTelnetParser,
   createTelnetNegotiator,
 };

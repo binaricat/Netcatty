@@ -26,7 +26,7 @@ function createTelnetSessionApi(ctx) {
           username: options.username,
           password: options.password,
           write(data) {
-            if (!socket.destroyed) socket.write(data);
+            if (!socket.destroyed) socket.write(telnetProtocol.normalizeNvtNewlines(data));
           },
           onComplete() {
             const contents = electronModule.webContents.fromId(event.sender.id);

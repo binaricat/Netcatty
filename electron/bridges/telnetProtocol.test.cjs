@@ -14,6 +14,7 @@ const {
   SUBOPTION_IS,
   SUBOPTION_SEND,
   escapeIacForWire,
+  normalizeNvtNewlines,
   createTelnetParser,
   createTelnetNegotiator,
 } = require("./telnetProtocol.cjs");
@@ -52,6 +53,13 @@ test("escapeIacForWire — doubles each 0xFF", () => {
     [...got],
     [0xff, 0xff, 0x61, 0xff, 0xff, 0xff, 0xff, 0x62],
   );
+});
+
+test("normalizeNvtNewlines converts local newlines to Telnet NVT form", () => {
+  assert.equal(normalizeNvtNewlines("ps\r"), "ps\r\n");
+  assert.equal(normalizeNvtNewlines("ps\n"), "ps\r\n");
+  assert.equal(normalizeNvtNewlines("ps\r\n"), "ps\r\n");
+  assert.equal(normalizeNvtNewlines("red\r\0raw"), "red\r\0raw");
 });
 
 test("parser emits clean data when no IAC bytes are present", () => {
