@@ -30,6 +30,7 @@ import {
   resolveHostTerminalFontWeight,
 } from "../../../domain/terminalAppearance";
 import { resolveFontWeightBold } from "../../../lib/fontWeightAvailability";
+import { resolveTerminalFontFamilyId } from "../../../infrastructure/config/fonts";
 import { logger } from "../../../lib/logger";
 import { isMacPlatform } from "../../../lib/utils";
 import { netcattyBridge } from "../../../infrastructure/services/netcattyBridge";
@@ -281,7 +282,10 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     rendererType,
   });
 
-  const hostFontId = resolveHostTerminalFontFamilyId(ctx.host, ctx.fontFamilyId) || "menlo";
+  const hostFontId = resolveTerminalFontFamilyId(
+    resolveHostTerminalFontFamilyId(ctx.host, ctx.fontFamilyId),
+    typeof navigator !== "undefined" ? navigator.platform : "",
+  );
   // Use fontStore for font lookup - guarantees non-empty result
   const fontObj = fontStore.getFontById(hostFontId);
   const fontFamily = ctx.resolvedFontFamily || fontObj.family;

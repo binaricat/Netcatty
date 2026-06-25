@@ -6,7 +6,7 @@ import type {
   TerminalSettings,
 } from "../../../domain/models";
 import { useI18n } from "../../../application/i18n/I18nProvider";
-import { MAX_FONT_SIZE, MIN_FONT_SIZE, type TerminalFont } from "../../../infrastructure/config/fonts";
+import { MAX_FONT_SIZE, MIN_FONT_SIZE, resolveTerminalFontFamilyId, type TerminalFont } from "../../../infrastructure/config/fonts";
 import { TERMINAL_THEMES } from "../../../infrastructure/config/terminalThemes";
 import { customThemeStore, useCustomThemes } from "../../../application/state/customThemeStore";
 import { parseItermcolors } from "../../../infrastructure/parsers/itermcolorsParser";
@@ -495,7 +495,10 @@ function SettingsTerminalTab(props: {
           description={t("settings.terminal.font.family.desc")}
         >
           <TerminalFontSelect
-            value={terminalFontFamilyId}
+            value={resolveTerminalFontFamilyId(
+              terminalFontFamilyId,
+              typeof navigator !== "undefined" ? navigator.platform : "",
+            )}
             fonts={availableFonts}
             onChange={(id) => setTerminalFontFamilyId(id)}
             className="w-48"

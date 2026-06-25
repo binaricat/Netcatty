@@ -37,6 +37,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 import { toast } from "./ui/toast";
 import { useAvailableFonts } from "../application/state/fontStore";
 import { composeFontFamilyStack, type SupportedPlatform } from "../infrastructure/config/cjkFonts";
+import { resolveTerminalFontFamilyId } from "../infrastructure/config/fonts";
 import { TERMINAL_THEMES } from "../infrastructure/config/terminalThemes";
 import { useCustomThemes } from "../application/state/customThemeStore";
 
@@ -702,7 +703,10 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     const hostFontId = hasFontFamilyOverride && host.fontFamily
       ? host.fontFamily
       : fontFamilyId;
-    const resolvedFontId = hostFontId || "menlo";
+    const resolvedFontId = resolveTerminalFontFamilyId(
+      hostFontId,
+      typeof navigator !== "undefined" ? navigator.platform : "",
+    );
     const selectedFont = availableFonts.find((f) => f.id === resolvedFontId) || availableFonts[0];
     const platform: SupportedPlatform =
       typeof navigator !== "undefined" && /Mac/i.test(navigator.platform)

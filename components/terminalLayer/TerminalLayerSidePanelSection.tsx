@@ -17,10 +17,12 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 import type { SidePanelTab } from './TerminalLayerSupport';
 import { terminalLayerSidePanelCtxEqual } from './terminalLayerViewMemo';
 import { resolveSftpFollowTerminalCwdTargetHost } from '../sftp/sftpFollowTerminalCwd';
+import { resolveTerminalFontFamilyId } from '../../infrastructure/config/fonts';
 import type { Host } from '../../types';
 
 type SidePanelContext = Record<string, any>;
 const SIDE_PANEL_TAB_DRAG_MIME = 'application/x-netcatty-sidepanel-tab';
+const navigatorPlatform = typeof navigator !== 'undefined' ? navigator.platform : '';
 
 export function getTerminalSidePanelShellWidth({
   activeSidePanelTab,
@@ -619,8 +621,8 @@ function TerminalLayerSidePanelTabBody({ ctx }: { ctx: SidePanelContext }) {
                     followAppTerminalTheme={followAppTerminalTheme}
                     currentThemeId={previewedOrVisibleThemeId}
                     globalThemeId={terminalThemeId ?? terminalTheme.id}
-                    currentFontFamilyId={focusedFontFamilyId}
-                    globalFontFamilyId={terminalFontFamilyId}
+                    currentFontFamilyId={resolveTerminalFontFamilyId(focusedFontFamilyId, navigatorPlatform)}
+                    globalFontFamilyId={resolveTerminalFontFamilyId(terminalFontFamilyId, navigatorPlatform)}
                     currentFontSize={focusedFontSize}
                     currentFontWeight={focusedFontWeight}
                     canResetTheme={followAppTerminalTheme ? false : focusedThemeOverridden}

@@ -4,6 +4,8 @@ import {
   TERMINAL_FONTS,
   getDefaultTerminalFontIdForPlatform,
   detectFontPlatform,
+  resolveTerminalFontFamilyId,
+  TERMINAL_FONT_AUTO,
 } from './fonts';
 
 /**
@@ -97,6 +99,25 @@ describe('getDefaultTerminalFontIdForPlatform', () => {
         `default for ${platform} not in TERMINAL_FONTS`,
       );
     }
+  });
+});
+
+describe('resolveTerminalFontFamilyId', () => {
+  it('resolves the auto sentinel to the per-platform default', () => {
+    assert.equal(resolveTerminalFontFamilyId(TERMINAL_FONT_AUTO, 'Win32'), 'consolas');
+    assert.equal(resolveTerminalFontFamilyId(TERMINAL_FONT_AUTO, 'MacIntel'), 'menlo');
+    assert.equal(resolveTerminalFontFamilyId(TERMINAL_FONT_AUTO, 'Linux x86_64'), 'dejavu-sans-mono');
+  });
+
+  it('treats empty/nullish ids as auto (resolves per platform)', () => {
+    assert.equal(resolveTerminalFontFamilyId('', 'Win32'), 'consolas');
+    assert.equal(resolveTerminalFontFamilyId(null, 'MacIntel'), 'menlo');
+    assert.equal(resolveTerminalFontFamilyId(undefined, 'Linux'), 'dejavu-sans-mono');
+  });
+
+  it('keeps an explicit font id regardless of platform', () => {
+    assert.equal(resolveTerminalFontFamilyId('jetbrains-mono', 'Win32'), 'jetbrains-mono');
+    assert.equal(resolveTerminalFontFamilyId('menlo', 'Win32'), 'menlo');
   });
 });
 

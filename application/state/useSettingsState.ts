@@ -64,7 +64,7 @@ import {
 } from '../../domain/customKeyBindings';
 import { TERMINAL_THEME_AUTO } from '../../domain/terminalAppearance';
 import { customThemeStore, useCustomThemes } from '../state/customThemeStore';
-import { DEFAULT_FONT_SIZE } from '../../infrastructure/config/fonts';
+import { DEFAULT_FONT_SIZE, TERMINAL_FONT_AUTO } from '../../infrastructure/config/fonts';
 import { getUiThemeById } from '../../infrastructure/config/uiThemes';
 import { DEFAULT_UI_FONT_ID, withWindowsEmojiFallback } from '../../infrastructure/config/uiFonts';
 import { uiFontStore, useUIFontsLoaded } from './uiFontStore';
@@ -76,7 +76,6 @@ import {
   DEFAULT_CUSTOM_ACCENT,
   DEFAULT_DARK_UI_THEME,
   DEFAULT_EDITOR_WORD_WRAP,
-  getDefaultTerminalFontFamily,
   DEFAULT_HOTKEY_SCHEME,
   DEFAULT_LIGHT_UI_THEME,
   DEFAULT_SESSION_LOGS_ENABLED,
@@ -178,7 +177,7 @@ export const useSettingsState = (options: { enableSettingsSync?: boolean; enable
   );
   const [terminalFontFamilyId, setTerminalFontFamilyId] = useState<string>(() => {
     const stored = localStorageAdapter.readString(STORAGE_KEY_TERM_FONT_FAMILY);
-    return migrateIncomingTerminalFontId(stored) ?? getDefaultTerminalFontFamily();
+    return migrateIncomingTerminalFontId(stored) ?? TERMINAL_FONT_AUTO;
   });
   const [terminalFontSize, setTerminalFontSize] = useState<number>(() => localStorageAdapter.readNumber(STORAGE_KEY_TERM_FONT_SIZE) || DEFAULT_FONT_SIZE);
   const [uiLanguage, setUiLanguage] = useState<UILanguage>(() => {

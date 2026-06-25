@@ -100,6 +100,28 @@ export function detectFontPlatform(navigatorPlatform: string): FontPlatform {
   return 'linux';
 }
 
+/**
+ * The stored sentinel meaning "follow the OS default font". It is
+ * persisted and cloud-synced as-is (platform-neutral), so each device
+ * resolves it to its own locally-installed default at render time —
+ * unlike a concrete platform id, which would leak one OS's font to
+ * another via sync and reintroduce #1647 on the receiving machine.
+ */
+export const TERMINAL_FONT_AUTO = 'auto';
+
+/**
+ * Resolve a stored terminal font id to a concrete font id. The `auto`
+ * sentinel (and any empty/nullish value) resolves to the per-platform
+ * default; an explicit user choice is returned unchanged.
+ */
+export function resolveTerminalFontFamilyId(
+  id: string | null | undefined,
+  navigatorPlatform: string,
+): string {
+  if (id && id !== TERMINAL_FONT_AUTO) return id;
+  return getDefaultTerminalFontIdForPlatform(detectFontPlatform(navigatorPlatform));
+}
+
 // Font ids that earlier versions of netcatty exposed in the primary font
 // dropdown but that are proportional (non-monospace) and produce broken
 // cell-grid alignment when used as a terminal font. Reads should migrate
