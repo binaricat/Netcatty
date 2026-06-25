@@ -24,17 +24,35 @@ export interface UseVaultAgentBridgeInput {
   stopTunnel: VaultAgentApiDeps['stopTunnel'];
 }
 
+type VaultAgentSnapshot = {
+  hosts: Host[];
+  notes: VaultNote[];
+  customGroups: string[];
+};
+
 export function useVaultAgentBridge(input: UseVaultAgentBridgeInput): void {
   const inputRef = useRef(input);
   inputRef.current = input;
+
+  const vaultSnapshotRef = useRef<VaultAgentSnapshot>({
+    hosts: input.hosts,
+    notes: input.notes,
+    customGroups: input.customGroups,
+  });
+
+  useEffect(() => {
+    vaultSnapshotRef.current.hosts = input.hosts;
+    vaultSnapshotRef.current.notes = input.notes;
+    vaultSnapshotRef.current.customGroups = input.customGroups;
+  }, [input.customGroups, input.hosts, input.notes]);
 
   useEffect(() => {
     registerVaultAgentHandler(async (op, params) => {
       const current = inputRef.current;
       return handleVaultAgentOp(op, params, {
-        getHosts: () => inputRef.current.hosts,
-        getNotes: () => inputRef.current.notes,
-        getCustomGroups: () => inputRef.current.customGroups,
+        getHosts: () => vaultSnapshotRef.current.hosts,
+        getNotes: () => vaultSnapshotRef.current.notes,
+        getCustomGroups: () => vaultSnapshotRef.current.customGroups,
         snippets: current.snippets,
         portForwardingRules: current.portForwardingRules,
         keys: current.keys,
@@ -42,13 +60,24 @@ export function useVaultAgentBridge(input: UseVaultAgentBridgeInput): void {
         terminalSettings: current.terminalSettings,
         resolveEffectiveHost: current.resolveEffectiveHost,
         updateHostNotes: (hostId, notes) => {
-          inputRef.current.updateHosts(
-            inputRef.current.hosts.map((host) => (host.id === hostId ? { ...host, notes } : host)),
-          );
+          const nextHosts = vaultSnapshotRef.current.hosts.map((host) => (
+            host.id === hostId ? { ...host, notes } : host
+          ));
+          vaultSnapshotRef.current.hosts = nextHosts;
+          current.updateHosts(nextHosts);
         },
-        updateCustomGroups: current.updateCustomGroups,
-        updateHosts: current.updateHosts,
-        updateNotes: current.updateNotes,
+        updateCustomGroups: (groups) => {
+          vaultSnapshotRef.current.customGroups = groups;
+          current.updateCustomGroups(groups);
+        },
+        updateHosts: (hosts) => {
+          vaultSnapshotRef.current.hosts = hosts;
+          current.updateHosts(hosts);
+        },
+        updateNotes: (notes) => {
+          vaultSnapshotRef.current.notes = notes;
+          current.updateNotes(notes);
+        },
         startTunnel: current.startTunnel,
         stopTunnel: current.stopTunnel,
       });
