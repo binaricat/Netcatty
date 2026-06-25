@@ -5,7 +5,7 @@ import type { PassphraseRequest } from '../../components/PassphraseModal';
 import { getEffectiveHostDistro } from '../../domain/host';
 import { sanitizeHostIconFields } from '../../domain/hostIcon';
 import { getTerminalPassthroughActions } from '../state/useGlobalHotkeys';
-import { buildCycleTabTargets, buildNumberShortcutTabTargets } from './tabShortcutTargets';
+import { buildNumberShortcutTabTargets } from './tabShortcutTargets';
 
 type AppContextGetter = () => Record<string, any>;
 const TERMINAL_PASSTHROUGH_ACTIONS = getTerminalPassthroughActions();
@@ -465,10 +465,6 @@ export function executeHotkeyActionImpl(getCtx: AppContextGetter, action: string
       orderedTabs,
       editorTabIds: editorTabs.map((t) => toEditorTabId(t.id)),
     });
-    const cycleTabs = buildCycleTabTargets({
-      orderedTabs,
-      editorTabIds: editorTabs.map((t) => toEditorTabId(t.id)),
-    });
     switch (action) {
       case 'switchToTab': {
         // Get the number key pressed (1-9)
@@ -482,23 +478,23 @@ export function executeHotkeyActionImpl(getCtx: AppContextGetter, action: string
       }
       case 'nextTab': {
         const currentId = activeTabStore.getActiveTabId();
-        const currentIdx = cycleTabs.indexOf(currentId);
-        if (currentIdx !== -1 && cycleTabs.length > 0) {
-          const nextIdx = (currentIdx + 1) % cycleTabs.length;
-          setActiveTabId(cycleTabs[nextIdx]);
-        } else if (cycleTabs.length > 0) {
-          setActiveTabId(cycleTabs[0]);
+        const currentIdx = allTabs.indexOf(currentId);
+        if (currentIdx !== -1 && allTabs.length > 0) {
+          const nextIdx = (currentIdx + 1) % allTabs.length;
+          setActiveTabId(allTabs[nextIdx]);
+        } else if (allTabs.length > 0) {
+          setActiveTabId(allTabs[0]);
         }
         break;
       }
       case 'prevTab': {
         const currentId = activeTabStore.getActiveTabId();
-        const currentIdx = cycleTabs.indexOf(currentId);
-        if (currentIdx !== -1 && cycleTabs.length > 0) {
-          const prevIdx = (currentIdx - 1 + cycleTabs.length) % cycleTabs.length;
-          setActiveTabId(cycleTabs[prevIdx]);
-        } else if (cycleTabs.length > 0) {
-          setActiveTabId(cycleTabs[cycleTabs.length - 1]);
+        const currentIdx = allTabs.indexOf(currentId);
+        if (currentIdx !== -1 && allTabs.length > 0) {
+          const prevIdx = (currentIdx - 1 + allTabs.length) % allTabs.length;
+          setActiveTabId(allTabs[prevIdx]);
+        } else if (allTabs.length > 0) {
+          setActiveTabId(allTabs[allTabs.length - 1]);
         }
         break;
       }
