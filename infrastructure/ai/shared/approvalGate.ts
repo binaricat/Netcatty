@@ -49,12 +49,17 @@ let grantPersister: GrantPersister | null = null;
 const grantPersisterStack: GrantPersister[] = [];
 let grantsHydrated = false;
 
-function ensureGrantsHydrated(): void {
-  if (grantsHydrated || typeof window === 'undefined') return;
-  grantsHydrated = true;
+function refreshPermissionGrantsFromStorage(): void {
+  if (typeof window === 'undefined') return;
   setActivePermissionGrants(
     sanitizePermissionGrants(localStorageAdapter.read<unknown>(STORAGE_KEY_AI_PERMISSION_GRANTS)),
   );
+  grantsHydrated = true;
+}
+
+function ensureGrantsHydrated(): void {
+  if (grantsHydrated) return;
+  refreshPermissionGrantsFromStorage();
 }
 
 export function setGrantPersister(persister: GrantPersister | null): void {
@@ -137,7 +142,7 @@ function emitApprovalEvent(
 }
 
 function isGrantedByRules(request: ApprovalRequest): boolean {
-  ensureGrantsHydrated();
+  refreshPermissionGrantsFromStorage();
   const capabilityId = request.capabilityId ?? resolveCapabilityId(request.toolName);
   return matchPermissionGrant(getActivePermissionGrants(), {
     capabilityId,
