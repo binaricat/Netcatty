@@ -6,6 +6,8 @@
 const path = require("node:path");
 const fs = require("node:fs");
 
+const { safeSend } = require("./ipcUtils.cjs");
+
 const V8_CACHE_OPTIONS = "bypassHeatCheck";
 
 function getGlobalShortcutBridge() {
@@ -1242,6 +1244,15 @@ function showAndFocusMainWindow(win) {
   return restoreWindowInputFocus(win, { show: true });
 }
 
+/**
+ * Tell the renderer to dismiss transient overlays before the native hide (#1722).
+ * Must run before BrowserWindow.hide(), not from Electron's post-hide event.
+ */
+function notifyWindowWillHide(win) {
+  if (!win || win.isDestroyed?.()) return;
+  safeSend(win.webContents, "netcatty:window:will-hide");
+}
+
 module.exports = {
   createWindow,
   openSettingsWindow,
@@ -1264,6 +1275,7 @@ module.exports = {
   registerWindowHandlers,
   restoreWindowInputFocus,
   showAndFocusMainWindow,
+  notifyWindowWillHide,
   requestWindowCommandClose,
   shouldCloseWindowFromInput,
   WINDOW_COMMAND_CLOSE_CHANNEL,

@@ -87,6 +87,8 @@ function performPendingFullscreenHide(win) {
   clearPendingFullscreenHide(win);
 
   try {
+    const windowManager = require("./windowManager.cjs");
+    windowManager.notifyWindowWillHide?.(win);
     win.hide();
     return "hidden";
   } catch (err) {
@@ -406,6 +408,8 @@ function hideWindowRespectingMacFullscreen(win) {
   }
 
   try {
+    const windowManager = require("./windowManager.cjs");
+    windowManager.notifyWindowWillHide?.(win);
     win.hide();
     return true;
   } catch (err) {

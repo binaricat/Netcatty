@@ -342,10 +342,6 @@ function createMainWindowApi(ctx) {
       win.on("show", () => {
         safeSend("netcatty:window:shown");
       });
-
-      win.on("hide", () => {
-        safeSend("netcatty:window:will-hide");
-      });
     
       // Ensure native background matches frontend background, even before first paint.
       try {
