@@ -109,13 +109,22 @@ function compressMessageToolResults(
   return changed ? { ...message, content: nextContent as ModelMessage['content'] } : message;
 }
 
-export function pruneStaleToolContext(messages: ModelMessage[]): {
+export interface PruneStaleToolContextOptions {
+  /** Omit older terminal_execute output only when context is under budget pressure. */
+  pruneTerminalOutput?: boolean;
+}
+
+export function pruneStaleToolContext(
+  messages: ModelMessage[],
+  options: PruneStaleToolContextOptions = {},
+): {
   messages: ModelMessage[];
   didAdjust: boolean;
 } {
   const toolCallMap = getToolCallMap(messages);
   const latestReadByKey = new Map<string, number>();
   const terminalExecutionsBySession = new Map<string, Array<{ index: number; command?: string }>>();
+  const pruneTerminalOutput = options.pruneTerminalOutput === true;
 
   messages.forEach((message, index) => {
     for (const part of getToolResultParts(message)) {
@@ -126,7 +135,7 @@ export function pruneStaleToolContext(messages: ModelMessage[]): {
       const readKey = readFingerprint(toolName, args);
       if (readKey) latestReadByKey.set(readKey, index);
       const termKey = terminalFingerprint(toolName, args);
-      if (termKey) {
+      if (pruneTerminalOutput && termKey) {
         const callArgs = isRecord(args) ? args : {};
         const entries = terminalExecutionsBySession.get(termKey) ?? [];
         entries.push({
@@ -139,19 +148,23 @@ export function pruneStaleToolContext(messages: ModelMessage[]): {
   });
 
   const keepTerminalIndices = new Set<number>();
-  for (const entries of terminalExecutionsBySession.values()) {
-    for (const entry of entries.slice(-2)) {
-      keepTerminalIndices.add(entry.index);
+  if (pruneTerminalOutput) {
+    for (const entries of terminalExecutionsBySession.values()) {
+      for (const entry of entries.slice(-2)) {
+        keepTerminalIndices.add(entry.index);
+      }
     }
   }
   const terminalOmitByIndex = new Map<number, string>();
-  for (const entries of terminalExecutionsBySession.values()) {
-    for (const entry of entries) {
-      if (keepTerminalIndices.has(entry.index)) continue;
-      terminalOmitByIndex.set(
-        entry.index,
-        `${EARLIER_TERMINAL_PREFIX} command=${entry.command ?? 'unknown'}]`,
-      );
+  if (pruneTerminalOutput) {
+    for (const entries of terminalExecutionsBySession.values()) {
+      for (const entry of entries) {
+        if (keepTerminalIndices.has(entry.index)) continue;
+        terminalOmitByIndex.set(
+          entry.index,
+          `${EARLIER_TERMINAL_PREFIX} command=${entry.command ?? 'unknown'}]`,
+        );
+      }
     }
   }
 
@@ -167,7 +180,7 @@ export function pruneStaleToolContext(messages: ModelMessage[]): {
         }
       }
       const termKey = terminalFingerprint(toolName, args);
-      if (termKey && terminalOmitByIndex.has(index)) {
+      if (pruneTerminalOutput && termKey && terminalOmitByIndex.has(index)) {
         return terminalOmitByIndex.get(index)!;
       }
       return null;

@@ -210,8 +210,17 @@ export async function processCattyStream(input: ProcessCattyStreamInput): Promis
   let pendingText = '';
   let rafId: number | null = null;
 
+  const clearCompactionStatusFromAssistant = (messageId: string) => {
+    ui.updateMessageById(streamSessionId, messageId, msg =>
+      msg.role === 'assistant' && msg.statusText
+        ? { ...msg, statusText: undefined }
+        : msg,
+    );
+  };
+
   const ensureAssistantMessage = (): string => {
     if (lastAddedRole !== 'tool') return activeMsgId;
+    clearCompactionStatusFromAssistant(activeMsgId);
     const newId = generateId();
     ui.addMessageToSession(streamSessionId, {
       id: newId,
@@ -251,6 +260,7 @@ export async function processCattyStream(input: ProcessCattyStreamInput): Promis
       const text = pendingText;
       pendingText = '';
       if (lastAddedRole === 'tool') {
+        clearCompactionStatusFromAssistant(activeMsgId);
         const newId = generateId();
         ui.addMessageToSession(streamSessionId, {
           id: newId,

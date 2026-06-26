@@ -43,7 +43,7 @@ test('pruneStaleToolContext supersedes older sftp reads for same path', () => {
     },
   ];
 
-  const result = pruneStaleToolContext(messages);
+  const result = pruneStaleToolContext(messages, { pruneTerminalOutput: true });
   assert.equal(result.didAdjust, true);
   const serialized = JSON.stringify(result.messages);
   assert.match(serialized, /superseded read/);
@@ -90,7 +90,7 @@ test('pruneStaleToolContext supersedes older sftp_read_file reads for same path'
     },
   ];
 
-  const result = pruneStaleToolContext(messages);
+  const result = pruneStaleToolContext(messages, { pruneTerminalOutput: true });
   assert.equal(result.didAdjust, true);
   const serialized = JSON.stringify(result.messages);
   assert.match(serialized, /superseded read/);
@@ -137,7 +137,7 @@ test('pruneStaleToolContext keeps sftp reads for same path on different sessions
     },
   ];
 
-  const result = pruneStaleToolContext(messages);
+  const result = pruneStaleToolContext(messages, { pruneTerminalOutput: true });
   assert.equal(result.didAdjust, false);
   const serialized = JSON.stringify(result.messages);
   assert.match(serialized, /host-a config/);
@@ -180,7 +180,7 @@ test('pruneStaleToolContext keeps last two terminal outputs per session', () => 
     ...terminalExecutePair('t3', 'sess-1', 'free -m', 'free-3'),
   ];
 
-  const result = pruneStaleToolContext(messages);
+  const result = pruneStaleToolContext(messages, { pruneTerminalOutput: true });
   assert.equal(result.didAdjust, true);
   const serialized = JSON.stringify(result.messages);
   assert.match(serialized, /df-2/);
@@ -196,11 +196,26 @@ test('pruneStaleToolContext omits terminal outputs per session independently', (
     ...terminalExecutePair('b1', 'sess-b', 'uptime', 'b-uptime'),
   ];
 
-  const result = pruneStaleToolContext(messages);
+  const result = pruneStaleToolContext(messages, { pruneTerminalOutput: true });
   assert.equal(result.didAdjust, true);
   const serialized = JSON.stringify(result.messages);
   assert.match(serialized, /a-df/);
   assert.match(serialized, /a-free/);
   assert.match(serialized, /b-uptime/);
   assert.doesNotMatch(serialized, /a-uptime/);
+});
+
+test('pruneStaleToolContext preserves terminal output without budget pressure flag', () => {
+  const messages: ModelMessage[] = [
+    ...terminalExecutePair('t1', 'sess-1', 'uptime', 'uptime-1'),
+    ...terminalExecutePair('t2', 'sess-1', 'df -h', 'df-2'),
+    ...terminalExecutePair('t3', 'sess-1', 'free -m', 'free-3'),
+  ];
+
+  const result = pruneStaleToolContext(messages);
+  assert.equal(result.didAdjust, false);
+  const serialized = JSON.stringify(result.messages);
+  assert.match(serialized, /uptime-1/);
+  assert.match(serialized, /df-2/);
+  assert.match(serialized, /free-3/);
 });

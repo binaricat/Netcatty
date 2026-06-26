@@ -13,6 +13,7 @@ import {
   computeCompactionThreshold,
   computeTotalInputTokens,
   DEFAULT_MAX_OUTPUT_TOKENS,
+  shouldCompactByBudget,
 } from './contextBudget';
 import { estimateModelMessagesTokensWithKind } from './tokenEstimator';
 import { pruneStaleToolContext } from './staleContextPruner';
@@ -136,6 +137,27 @@ function buildCompactionTrace(input: {
   };
 }
 
+function isContextUnderBudgetPressure(input: {
+  messages: ModelMessage[];
+  contextWindow: number;
+  maxOutputTokens: number;
+  providerId?: string | null;
+  reservedTokens?: number;
+  force?: boolean;
+  trigger?: ContextPrepareTrigger;
+}): boolean {
+  if (input.force || input.trigger === '413-retry' || input.trigger === 'force') {
+    return true;
+  }
+  return shouldCompactByBudget({
+    messages: input.messages,
+    contextWindow: input.contextWindow,
+    maxOutputTokens: input.maxOutputTokens,
+    providerId: input.providerId,
+    reservedTokens: input.reservedTokens,
+  });
+}
+
 export async function prepareTurnContext(
   input: PrepareTurnContextInput,
 ): Promise<ContextPrepareResult> {
@@ -144,7 +166,18 @@ export async function prepareTurnContext(
   const maxOutputTokens = input.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS;
   const messagesBeforeCount = input.messages.length;
 
-  const stale = pruneStaleToolContext(input.messages);
+  const underBudgetPressure = isContextUnderBudgetPressure({
+    messages: input.messages,
+    contextWindow,
+    maxOutputTokens,
+    providerId: input.providerId,
+    reservedTokens: input.reservedTokens,
+    force: input.force,
+    trigger: input.trigger,
+  });
+  const stale = pruneStaleToolContext(input.messages, {
+    pruneTerminalOutput: underBudgetPressure,
+  });
   let working = stale.messages;
   let didAdjust = stale.didAdjust;
 
@@ -313,7 +346,16 @@ export async function prepareStepContext(
   const protectRecent = input.protectRecentMessages ?? DEFAULT_PROTECT_RECENT_MESSAGES;
   const messagesBeforeCount = input.messages.length;
 
-  const stale = pruneStaleToolContext(input.messages);
+  const underBudgetPressure = isContextUnderBudgetPressure({
+    messages: input.messages,
+    contextWindow,
+    maxOutputTokens,
+    providerId: input.providerId,
+    reservedTokens: input.reservedTokens,
+  });
+  const stale = pruneStaleToolContext(input.messages, {
+    pruneTerminalOutput: underBudgetPressure,
+  });
   let working = stale.messages;
 
   const typed = compressMessagesForRequestTooLargeRetry(working);
