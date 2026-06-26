@@ -10,6 +10,7 @@ import type {
   AgentModelPreset,
   AISessionScope,
   DiscoveredAgent,
+  ExternalAgentConfig,
 } from '../infrastructure/ai/types';
 import type { ExecutorContext } from '../infrastructure/ai/cattyAgent/executor';
 import { getAgentModelPresets } from '../infrastructure/ai/types';
@@ -54,11 +55,14 @@ import { useAIPermissionGrantsState } from '../application/state/useAIPermission
 import { useConversationExport } from './ai/hooks/useConversationExport';
 import type { AIChatSidePanelProps } from './AIChatSidePanel.types';
 import {
+  buildSdkRuntimeModelCacheKey,
+  sdkRuntimeModelCache,
   generateId,
   normalizeSdkRuntimeModelPresets,
   shouldAdoptSdkCurrentModel,
   shouldLoadSdkRuntimeModels,
   shouldUseStoredAgentModel,
+  type SdkRuntimeModelCatalog,
 } from './AIChatSidePanelHelpers';
 import { AIChatPanelContent } from './AIChatPanelContent';
 import {
@@ -74,6 +78,13 @@ type UserSkillsStatusResult = { ok: boolean; skills?: Array<{
   status: 'ready' | 'warning';
 }> } | null;
 type UserSkillsStatusLoadResult = UserSkillsStatusResult | undefined;
+type SdkRuntimeModelTarget = {
+  agentId: string;
+  cacheKey: string;
+  sdkBackend: string;
+  agentEnv?: Record<string, string>;
+  agentCommand?: string;
+};
 
 const USER_SKILLS_STATUS_CACHE_TTL_MS = 60_000;
 let userSkillsStatusCache: {
@@ -654,55 +665,178 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
   const agentModelMapRef = useRef(agentModelMap);
   agentModelMapRef.current = agentModelMap;
 
-  useEffect(() => {
-    if (!isVisible) return;
-    const sdkBackend = getExternalAgentSdkBackend(currentAgentConfig);
-    if (!sdkBackend) return;
-    if (!shouldLoadSdkRuntimeModels(currentAgentConfig) && !isCodexManagedAgent) return;
-
-    const bridge = getNetcattyBridge();
-    if (!bridge?.aiSdkAgentListModels) return;
-
-    let cancelled = false;
-    void bridge.aiSdkAgentListModels(
+  const buildExternalAgentRuntimeModelTarget = useCallback((agent: ExternalAgentConfig | undefined): SdkRuntimeModelTarget | null => {
+    if (!agent) return null;
+    const sdkBackend = getExternalAgentSdkBackend(agent);
+    if (!sdkBackend) return null;
+    return {
+      agentId: agent.id,
+      cacheKey: buildSdkRuntimeModelCacheKey(agent),
       sdkBackend,
-      undefined,
-      undefined,
-      `models_${currentAgentId}`,
-      currentAgentConfig.env,
-      getManualAgentCommand(currentAgentConfig),
-    ).then((result) => {
-      if (cancelled || !result?.ok || !Array.isArray(result.models)) return;
-      const runtimePresets = normalizeSdkRuntimeModelPresets(result.models, result.currentModelId);
-      const storedModelId = agentModelMapRef.current[currentAgentId];
-      if (runtimePresets.length === 0) {
-        setRuntimeAgentModelPresets((prev) => {
-          if (!(currentAgentId in prev)) return prev;
-          const { [currentAgentId]: _removed, ...rest } = prev;
-          return rest;
-        });
-        if (shouldAdoptSdkCurrentModel(result.currentModelId, storedModelId, runtimePresets)) {
-          setAgentModel(currentAgentId, result.currentModelId!);
-        }
-        return;
-      }
+      agentEnv: agent.env,
+      agentCommand: getManualAgentCommand(agent),
+    };
+  }, []);
+
+  const buildDiscoveredAgentRuntimeModelTarget = useCallback((agent: DiscoveredAgent): SdkRuntimeModelTarget | null => {
+    const sdkBackend = agent.sdkBackend ?? agent.command;
+    if (sdkBackend !== 'opencode') return null;
+    const command = agent.binPath || agent.path || agent.command;
+    const agentId = `discovered_${agent.command}`;
+    return {
+      agentId,
+      cacheKey: buildSdkRuntimeModelCacheKey({
+        id: agentId,
+        command,
+        sdkBackend,
+        env: command ? { OPENCODE_BIN: command } : undefined,
+      }),
+      sdkBackend,
+      agentCommand: command,
+    };
+  }, []);
+
+  const applySdkRuntimeModelCatalog = useCallback((
+    agentId: string,
+    catalog: SdkRuntimeModelCatalog,
+    options: { adoptCurrentModel?: boolean } = {},
+  ) => {
+    const runtimePresets = normalizeSdkRuntimeModelPresets(catalog.models, catalog.currentModelId);
+    const storedModelId = agentModelMapRef.current[agentId];
+    if (runtimePresets.length === 0) {
+      setRuntimeAgentModelPresets((prev) => {
+        if (!(agentId in prev)) return prev;
+        const { [agentId]: _removed, ...rest } = prev;
+        return rest;
+      });
+    } else {
       setRuntimeAgentModelPresets((prev) => ({
         ...prev,
-        [currentAgentId]: runtimePresets,
+        [agentId]: runtimePresets,
       }));
-      if (shouldAdoptSdkCurrentModel(result.currentModelId, storedModelId, runtimePresets)) {
-        setAgentModel(currentAgentId, result.currentModelId);
-      }
-    }).catch((err) => {
-      if (!cancelled) {
+    }
+
+    if (
+      options.adoptCurrentModel
+      && catalog.currentModelId
+      && shouldAdoptSdkCurrentModel(catalog.currentModelId, storedModelId, runtimePresets)
+    ) {
+      setAgentModel(agentId, catalog.currentModelId);
+    }
+  }, [setAgentModel]);
+
+  const loadSdkRuntimeModelCatalog = useCallback((
+    target: SdkRuntimeModelTarget,
+    options: { force?: boolean; logErrors?: boolean } = {},
+  ): Promise<SdkRuntimeModelCatalog | null> => {
+    const bridge = getNetcattyBridge();
+    if (!bridge?.aiSdkAgentListModels) return Promise.resolve(null);
+
+    return sdkRuntimeModelCache.refresh(
+      target.cacheKey,
+      async () => {
+        const result = await bridge.aiSdkAgentListModels!(
+          target.sdkBackend,
+          undefined,
+          undefined,
+          `models_${target.agentId}`,
+          target.agentEnv,
+          target.agentCommand,
+        );
+        if (!result?.ok || !Array.isArray(result.models)) {
+          throw new Error(result?.error || 'Failed to load SDK agent models');
+        }
+        return {
+          currentModelId: result.currentModelId ?? null,
+          models: result.models,
+        };
+      },
+      { force: options.force },
+    ).catch((err) => {
+      if (options.logErrors !== false) {
         console.warn('[AIChatSidePanel] Failed to load SDK agent models:', err);
       }
+      return null;
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!isVisible) return;
+    if (!currentAgentConfig) return;
+    if (!shouldLoadSdkRuntimeModels(currentAgentConfig) && !isCodexManagedAgent) return;
+
+    const target = buildExternalAgentRuntimeModelTarget(currentAgentConfig);
+    if (!target) return;
+
+    const cached = sdkRuntimeModelCache.read(target.cacheKey);
+    if (cached) {
+      applySdkRuntimeModelCatalog(target.agentId, cached);
+    }
+
+    let cancelled = false;
+    void loadSdkRuntimeModelCatalog(target, {
+      force: target.sdkBackend === 'opencode',
+    }).then((catalog) => {
+      if (cancelled || !catalog) return;
+      applySdkRuntimeModelCatalog(target.agentId, catalog, { adoptCurrentModel: true });
     });
 
     return () => {
       cancelled = true;
     };
-  }, [isVisible, currentAgentConfig, currentAgentId, isCodexManagedAgent, setAgentModel]);
+  }, [
+    isVisible,
+    currentAgentConfig,
+    isCodexManagedAgent,
+    buildExternalAgentRuntimeModelTarget,
+    loadSdkRuntimeModelCatalog,
+    applySdkRuntimeModelCatalog,
+  ]);
+
+  useEffect(() => {
+    if (!isVisible) return;
+    const targets = new Map<string, SdkRuntimeModelTarget>();
+    const configuredTargetCacheKeys = new Set<string>();
+
+    for (const agent of externalAgents) {
+      if (!agent.enabled || getExternalAgentSdkBackend(agent) !== 'opencode') continue;
+      const target = buildExternalAgentRuntimeModelTarget(agent);
+      if (target) {
+        targets.set(target.cacheKey, target);
+        configuredTargetCacheKeys.add(target.cacheKey);
+      }
+    }
+
+    for (const agent of discoveredAgents) {
+      const target = buildDiscoveredAgentRuntimeModelTarget(agent);
+      if (target) targets.set(target.cacheKey, target);
+    }
+
+    if (targets.size === 0) return;
+
+    let cancelled = false;
+    for (const target of targets.values()) {
+      void loadSdkRuntimeModelCatalog(target, { logErrors: false })
+        .then((catalog) => {
+          if (cancelled || !catalog) return;
+          if (configuredTargetCacheKeys.has(target.cacheKey)) {
+            applySdkRuntimeModelCatalog(target.agentId, catalog);
+          }
+        });
+    }
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    isVisible,
+    externalAgents,
+    discoveredAgents,
+    buildExternalAgentRuntimeModelTarget,
+    buildDiscoveredAgentRuntimeModelTarget,
+    loadSdkRuntimeModelCatalog,
+    applySdkRuntimeModelCatalog,
+  ]);
 
   const hasCodexCustomConfig = codexCustomConfigResolved && isCodexManagedAgent;
 

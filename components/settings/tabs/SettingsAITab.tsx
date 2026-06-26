@@ -308,7 +308,6 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
   const mountedRef = useRef(true);
   const agentPathRequestIdRef = useRef<Partial<Record<ManagedAgentKey, number>>>({});
   const codexRequestIdRef = useRef(0);
-
   useEffect(() => () => {
     mountedRef.current = false;
     codexRequestIdRef.current += 1;
