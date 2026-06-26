@@ -399,6 +399,7 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
         ...(form.identityId !== undefined && { identityId: form.identityId }),
         ...(form.identityFileId !== undefined && { identityFileId: form.identityFileId }),
         ...(form.identityFilePaths !== undefined && { identityFilePaths: form.identityFilePaths }),
+        ...(form.deviceType !== undefined && { deviceType: form.deviceType }),
         ...(form.agentForwarding !== undefined && { agentForwarding: form.agentForwarding }),
         ...(form.startupCommand !== undefined && { startupCommand: form.startupCommand }),
         ...(form.legacyAlgorithms !== undefined && { legacyAlgorithms: form.legacyAlgorithms }),
