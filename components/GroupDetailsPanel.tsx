@@ -176,6 +176,7 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
       delete next.identityId;
       delete next.identityFileId;
       delete next.identityFilePaths;
+      delete next.deviceType;
       delete next.agentForwarding;
       delete next.startupCommand;
       delete next.legacyAlgorithms;
@@ -354,6 +355,11 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
     if (!parentGroup || groupConfigs.length === 0) return false;
     return !!resolveGroupDefaults(parentGroup, groupConfigs).skipEcdsaHostKey;
   }, [groupConfigs, parentGroup]);
+  const inheritedDeviceType = useMemo(() => {
+    if (!parentGroup || groupConfigs.length === 0) return undefined;
+    return resolveGroupDefaults(parentGroup, groupConfigs).deviceType;
+  }, [groupConfigs, parentGroup]);
+  const effectiveDeviceType = form.deviceType ?? inheritedDeviceType;
   const effectiveThemeId = form.themeOverride === false
     ? inheritedThemeId
     : (form.theme || inheritedThemeId);
@@ -599,6 +605,7 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
           setNewKeyFilePath={setNewKeyFilePath}
           inheritedLegacyAlgorithms={inheritedLegacyAlgorithms}
           inheritedSkipEcdsaHostKey={inheritedSkipEcdsaHostKey}
+          inheritedDeviceType={inheritedDeviceType}
           showAlgorithmOverrides={showAlgorithmOverrides}
           setShowAlgorithmOverrides={setShowAlgorithmOverrides}
           inheritedAlgorithmOverrides={inheritedAlgorithmOverrides}
@@ -607,7 +614,7 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
           chainedHosts={chainedHosts}
         />
 
-        {(!form.protocol || form.protocol === "ssh") && !form.moshEnabled && !form.etEnabled && (
+        {sshEnabled && (!form.protocol || form.protocol === "ssh") && !form.moshEnabled && !form.etEnabled && (
           <HostDetailsSection
             icon={<Router size={14} className="text-muted-foreground" />}
             title={t("hostDetails.section.deviceType")}
@@ -615,10 +622,10 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
             <ToggleRow
               label={t("hostDetails.deviceType")}
               hint={t("hostDetails.deviceType.desc")}
-              enabled={form.deviceType === "network"}
-              onToggle={() => update("deviceType", form.deviceType === "network" ? undefined : "network")}
+              enabled={effectiveDeviceType === "network"}
+              onToggle={() => update("deviceType", effectiveDeviceType === "network" ? "general" : "network")}
             />
-            {form.deviceType === "network" && (
+            {effectiveDeviceType === "network" && (
               <div className="flex items-start gap-2 p-2 rounded-md bg-yellow-500/10 border border-yellow-500/20">
                 <AlertTriangle size={14} className="text-yellow-500 mt-0.5 flex-shrink-0" />
                 <p className="text-xs text-yellow-600 dark:text-yellow-400 break-words">

@@ -43,6 +43,7 @@ export const GroupSshSettingsSection: React.FC<GroupSshSettingsSectionProps> = (
   setNewKeyFilePath,
   inheritedLegacyAlgorithms,
   inheritedSkipEcdsaHostKey,
+  inheritedDeviceType,
   showAlgorithmOverrides,
   setShowAlgorithmOverrides,
   inheritedAlgorithmOverrides,
@@ -515,7 +516,7 @@ export const GroupSshSettingsSection: React.FC<GroupSshSettingsSectionProps> = (
               onToggle={() => {
                 const enabling = !form.moshEnabled;
                 update("moshEnabled", enabling);
-                if (enabling) update("deviceType", undefined);
+                if (enabling) update("deviceType", inheritedDeviceType === "network" ? "general" : undefined);
               }}
             />
             {form.moshEnabled && (
@@ -534,7 +535,7 @@ export const GroupSshSettingsSection: React.FC<GroupSshSettingsSectionProps> = (
               onToggle={() => {
                 const enabling = !form.etEnabled;
                 update("etEnabled", enabling);
-                if (enabling) update("deviceType", undefined);
+                if (enabling) update("deviceType", inheritedDeviceType === "network" ? "general" : undefined);
               }}
             />
             {form.etEnabled && (

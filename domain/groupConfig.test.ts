@@ -49,6 +49,21 @@ test("applyGroupDefaults lets host device type override group device type", () =
   assert.equal(result.deviceType, "general");
 });
 
+test("resolveGroupDefaults lets child group device type override parent device type", () => {
+  const resolved = resolveGroupDefaults("prod/access", [
+    {
+      path: "prod",
+      deviceType: "network",
+    },
+    {
+      path: "prod/access",
+      deviceType: "general",
+    },
+  ]);
+
+  assert.equal(resolved.deviceType, "general");
+});
+
 test("resolveGroupDefaults treats saved and custom proxies as one inherited setting", () => {
   const resolved = resolveGroupDefaults("prod/api", [
     {
