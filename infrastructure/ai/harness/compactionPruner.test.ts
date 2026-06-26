@@ -46,3 +46,24 @@ test('pruneUntilFitsCompaction shrinks history to fit budget', () => {
   });
   assert.ok(pruned.length < messages.length);
 });
+
+test('pruneUntilFitsCompaction drops oldest messages first', () => {
+  const messages: ModelMessage[] = [
+    { role: 'user', content: `oldest ${'x'.repeat(5_000)}` },
+    ...Array.from({ length: 16 }, (_, index) => ({
+      role: index % 2 === 0 ? 'assistant' : 'user',
+      content: 'middle context',
+    })) as ModelMessage[],
+    { role: 'user', content: 'newest goal for current task' },
+    { role: 'assistant', content: 'latest reply before tail split' },
+  ];
+
+  const pruned = pruneUntilFitsCompaction({
+    messages,
+    availableForInput: 800,
+    providerId: 'openai',
+  });
+  const serialized = JSON.stringify(pruned);
+  assert.match(serialized, /newest goal for current task/);
+  assert.doesNotMatch(serialized, /oldest/);
+});

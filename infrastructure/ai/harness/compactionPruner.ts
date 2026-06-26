@@ -38,6 +38,30 @@ export function pruneLastModelMessage(messages: ModelMessage[]): ModelMessage[] 
   return messages.slice(0, -1);
 }
 
+/** Prune from the head while preserving valid tool-call/tool-result pairing. */
+export function pruneFirstModelMessage(messages: ModelMessage[]): ModelMessage[] {
+  if (messages.length === 0) return messages;
+  if (messages.length === 1) return [];
+
+  const first = messages[0];
+  const second = messages[1];
+
+  if (first.role === 'assistant' && endsWithToolCall(first) && second?.role === 'tool') {
+    return messages.slice(2);
+  }
+  if (first.role === 'user' && second?.role === 'assistant' && endsWithToolCall(second) && messages[2]?.role === 'tool') {
+    return messages.slice(3);
+  }
+  if (first.role === 'user' && second?.role === 'assistant') {
+    return messages.slice(2);
+  }
+  if (startsWithToolResult(first)) {
+    return messages.slice(1);
+  }
+
+  return messages.slice(1);
+}
+
 export function countMessagesTokens(messages: ModelMessage[], providerId?: string | null): number {
   return estimateModelMessagesTokensWithKind({ messages, providerId }).tokens;
 }
@@ -58,7 +82,7 @@ export function pruneUntilFitsCompaction(input: PruneUntilFitsCompactionInput): 
     if (tokens <= input.availableForInput) {
       return working;
     }
-    const pruned = pruneLastModelMessage(working);
+    const pruned = pruneFirstModelMessage(working);
     if (pruned.length === working.length) break;
     working = pruned;
   }
