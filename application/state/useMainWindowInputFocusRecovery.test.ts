@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 
-const root = new URL("../..", import.meta.url);
+const root = fileURLToPath(new URL("../..", import.meta.url));
 
 function readProjectFile(path: string): string {
-  return readFileSync(join(root.pathname, path), "utf8");
+  return readFileSync(join(root, path), "utf8");
 }
 
 test("useMainWindowInputFocusRecovery listens for visibility and window focus", () => {
