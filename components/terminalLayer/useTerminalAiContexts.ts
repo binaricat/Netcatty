@@ -111,7 +111,7 @@ export function useTerminalAiContexts({
     return {
       sessions: sessionIds.map((sid) => {
         const session = latestSessions.find((s) => s.id === sid);
-        const host = session?.hostId ? latestHosts.find((h) => h.id === session.hostId) : undefined;
+        const host = session ? sessionHostsMap.get(session.id) : undefined;
         return buildAITerminalSessionInfo(session, host, localOs, {
           allHosts: latestHosts,
           portForwardingRules: portForwardingRulesRef.current,
@@ -130,7 +130,7 @@ export function useTerminalAiContexts({
         return reader(request);
       },
     };
-  }, [hostsRef, portForwardingRulesRef, sessionsRef, terminalContextReadersRef, workspacesRef]);
+  }, [hostsRef, portForwardingRulesRef, sessionHostsMap, sessionsRef, terminalContextReadersRef, workspacesRef]);
 
   return {
     aiContextsByTabId,
