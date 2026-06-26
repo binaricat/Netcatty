@@ -37,6 +37,18 @@ test("applyGroupDefaults lets a host custom proxy override a group proxy profile
   assert.deepEqual(result.proxyConfig, customProxy);
 });
 
+test("applyGroupDefaults inherits group device type when host does not set one", () => {
+  const result = applyGroupDefaults(host(), { deviceType: "network" });
+
+  assert.equal(result.deviceType, "network");
+});
+
+test("applyGroupDefaults lets host device type override group device type", () => {
+  const result = applyGroupDefaults(host({ deviceType: "general" }), { deviceType: "network" });
+
+  assert.equal(result.deviceType, "general");
+});
+
 test("resolveGroupDefaults treats saved and custom proxies as one inherited setting", () => {
   const resolved = resolveGroupDefaults("prod/api", [
     {

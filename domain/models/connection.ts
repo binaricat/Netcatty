@@ -325,6 +325,7 @@ export interface GroupConfig {
   identityFilePaths?: string[];
   port?: number;
   protocol?: 'ssh' | 'telnet';
+  deviceType?: 'general' | 'network';
   agentForwarding?: boolean;
   proxyProfileId?: string;
   proxyConfig?: ProxyConfig;

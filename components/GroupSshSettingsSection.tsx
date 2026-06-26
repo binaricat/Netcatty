@@ -512,7 +512,11 @@ export const GroupSshSettingsSection: React.FC<GroupSshSettingsSectionProps> = (
             <ToggleRow
               label="Mosh"
               enabled={!!form.moshEnabled}
-              onToggle={() => update("moshEnabled", !form.moshEnabled)}
+              onToggle={() => {
+                const enabling = !form.moshEnabled;
+                update("moshEnabled", enabling);
+                if (enabling) update("deviceType", undefined);
+              }}
             />
             {form.moshEnabled && (
               <Input
@@ -527,7 +531,11 @@ export const GroupSshSettingsSection: React.FC<GroupSshSettingsSectionProps> = (
             <ToggleRow
               label="EternalTerminal"
               enabled={!!form.etEnabled}
-              onToggle={() => update("etEnabled", !form.etEnabled)}
+              onToggle={() => {
+                const enabling = !form.etEnabled;
+                update("etEnabled", enabling);
+                if (enabling) update("deviceType", undefined);
+              }}
             />
             {form.etEnabled && (
               <Input
