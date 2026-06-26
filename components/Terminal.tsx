@@ -530,9 +530,10 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     return cwd ?? undefined;
   }, [terminalBackend, terminalCwdTracker]);
 
-  const clearTerminalCwd = useCallback(() => {
+  const clearTerminalCwd = useCallback((options?: { persistRestoreMetadata?: boolean }) => {
     terminalCwdTracker.clearRendererCwd();
     knownCwdRef.current = undefined;
+    if (options?.persistRestoreMetadata === false) return;
     onTerminalCwdChange?.(sessionId, null);
   }, [onTerminalCwdChange, sessionId, terminalCwdTracker]);
 
@@ -932,7 +933,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     setChainProgress,
     t,
     onSessionAttached: (id: string) => {
-      clearTerminalCwd();
+      clearTerminalCwd({ persistRestoreMetadata: false });
       // SSH: always sync. Its backend starts in utf-8 regardless of
       // host.charset, so the push is what keeps the UI state aligned
       // across reconnects — including localhost SSH targets, hence
@@ -956,6 +957,9 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       if ((isTelnet || isSerial) && userPickedEncodingRef.current) {
         setSessionEncoding(id, terminalEncodingRef.current);
       }
+    },
+    onRestoreCwdIntentConsumed: (cwd: string) => {
+      knownCwdRef.current = cwd;
     },
     onSessionExit: (closedSessionId, evt) => {
       clearTerminalCwd();

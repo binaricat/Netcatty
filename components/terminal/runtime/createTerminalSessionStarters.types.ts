@@ -144,6 +144,7 @@ export type TerminalSessionStartersContext = {
   t?: (key: string) => string;
 
   onSessionAttached?: (sessionId: string) => void;
+  onRestoreCwdIntentConsumed?: (cwd: string) => void;
   onSessionExit?: (sessionId: string, evt: { exitCode?: number; signal?: number; error?: string; reason?: "exited" | "error" | "timeout" | "closed" }) => void;
   onTerminalDataCapture?: (sessionId: string, data: string) => void;
   onTerminalLogData?: (data: string) => void;

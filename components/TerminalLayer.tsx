@@ -62,9 +62,9 @@ import { TerminalLayerTabBridge } from './terminalLayer/TerminalLayerTabBridge';
 import {
   canUseDirectSessionWriteFallback,
 } from './terminalLayer/terminalLayerSessionRouting';
+import { shouldProbeCommandCwd } from './terminalLayer/commandCwdProbe';
 import { resolvePreferredTerminalCwd, scheduleBackendCwdProbeAfterCommand } from './terminal/sftpCwd';
 import { classifyDistroId, shouldProbeSessionCwd } from '../domain/host';
-import { resolveHostFollowTerminalCwd, resolveSftpFollowTerminalCwdTargetHost } from './sftp/sftpFollowTerminalCwd';
 
 import {
   AIChatPanelsHost,
@@ -698,14 +698,18 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     applySessionCodingCliProviderFromCommand(sessionId, command);
 
     const tabId = activeTabIdRef.current;
-    if (!tabId || sidePanelOpenTabsRef.current.get(tabId) !== 'sftp') return;
-
     const session = sessionsRef.current.find((candidate) => candidate.id === sessionId);
     if (!session || !canReuseTerminalConnection(session)) return;
     const sessionHost = sessionHostsMapRef.current.get(sessionId);
-    const visibleSftpHost = sftpHostForTabRef.current.get(tabId) ?? null;
-    const followHost = resolveSftpFollowTerminalCwdTargetHost(visibleSftpHost, sessionHost);
-    if (!resolveHostFollowTerminalCwd(followHost?.sftpFollowTerminalCwd, sftpFollowTerminalCwdRef.current)) return;
+    const visibleSftpHost = tabId && sidePanelOpenTabsRef.current.get(tabId) === 'sftp'
+      ? sftpHostForTabRef.current.get(tabId) ?? null
+      : null;
+    if (!shouldProbeCommandCwd({
+      restoreTerminalCwd,
+      visibleSftpHost,
+      sessionHost,
+      globalSftpFollowTerminalCwd: sftpFollowTerminalCwdRef.current,
+    })) return;
 
     const revisionAtCommand = terminalCwdRevisionRef.current;
     const probeGeneration = (cwdProbeGenerationRef.current.get(sessionId) ?? 0) + 1;
@@ -737,7 +741,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       },
     });
     cwdProbeCancelersRef.current.set(sessionId, cancelProbe);
-  }, [applySessionCodingCliProviderFromCommand, handleTerminalCwdChange, terminalBackend]);
+  }, [applySessionCodingCliProviderFromCommand, handleTerminalCwdChange, restoreTerminalCwd, terminalBackend]);
 
   const handleCommandExecuted = useCallback((command: string, hostId: string, hostLabel: string, sessionId: string) => {
     onCommandExecuted?.(command, hostId, hostLabel, sessionId);
