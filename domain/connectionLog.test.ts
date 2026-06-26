@@ -7,6 +7,7 @@ import {
   MAX_PERSISTED_UNSAVED_TERMINAL_DATA_ENTRIES,
   mergeConnectionLogsFromStorage,
   mergeTerminalDataIntoLogs,
+  mergeTerminalDataMapsForStorage,
   pruneTerminalDataMapForStorage,
 } from "./connectionLogTerminalData.ts";
 
@@ -146,4 +147,20 @@ test("pruneTerminalDataMapForStorage caps unsaved replay buffers", () => {
   assert.equal(Object.keys(pruned).length, MAX_PERSISTED_UNSAVED_TERMINAL_DATA_ENTRIES);
   assert.equal(pruned["log-59"], "data-log-59");
   assert.equal(pruned["log-0"], undefined);
+});
+
+test("mergeTerminalDataMapsForStorage keeps replay data from other windows", () => {
+  const logs: ConnectionLog[] = [
+    { ...baseLog, id: "local", startTime: 2000 },
+    { ...baseLog, id: "remote", startTime: 1000 },
+  ];
+
+  const merged = mergeTerminalDataMapsForStorage(
+    logs,
+    { remote: "remote-window output" },
+    { local: "local-window output" },
+  );
+
+  assert.equal(merged.remote, "remote-window output");
+  assert.equal(merged.local, "local-window output");
 });

@@ -88,11 +88,16 @@ export const pruneTerminalDataMapForStorage = (
   return next;
 };
 
-export const upsertTerminalDataInMap = (
-  map: ConnectionLogTerminalDataMap,
-  logId: string,
-  terminalData: string,
-): ConnectionLogTerminalDataMap => ({
-  ...map,
-  [logId]: terminalData,
-});
+/** Fold side-store maps together, then cap to the allowed unsaved/saved set. */
+export const mergeTerminalDataMapsForStorage = (
+  logs: ConnectionLog[],
+  ...maps: ConnectionLogTerminalDataMap[]
+): ConnectionLogTerminalDataMap => {
+  const combined: ConnectionLogTerminalDataMap = {};
+  for (const map of maps) {
+    for (const [id, data] of Object.entries(map)) {
+      if (data) combined[id] = data;
+    }
+  }
+  return pruneTerminalDataMapForStorage(logs, combined);
+};

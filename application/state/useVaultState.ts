@@ -46,6 +46,7 @@ import {
   buildTerminalDataMapFromLogs,
   mergeConnectionLogsFromStorage,
   mergeTerminalDataIntoLogs,
+  mergeTerminalDataMapsForStorage,
   pruneTerminalDataMapForStorage,
   type ConnectionLogTerminalDataMap,
 } from "../../domain/connectionLogTerminalData";
@@ -162,11 +163,15 @@ const readConnectionLogTerminalDataMap = (): ConnectionLogTerminalDataMap =>
 const writeConnectionLogTerminalDataMap = (
   logs: ConnectionLog[],
   map: ConnectionLogTerminalDataMap,
-): void => {
-  const pruned = pruneTerminalDataMapForStorage(logs, map);
+): boolean => {
+  const pruned = mergeTerminalDataMapsForStorage(
+    logs,
+    readConnectionLogTerminalDataMap(),
+    map,
+  );
   const existing = readConnectionLogTerminalDataMap();
-  if (JSON.stringify(existing) === JSON.stringify(pruned)) return;
-  localStorageAdapter.write(STORAGE_KEY_CONNECTION_LOG_TERMINAL_DATA, pruned);
+  if (JSON.stringify(existing) === JSON.stringify(pruned)) return true;
+  return localStorageAdapter.write(STORAGE_KEY_CONNECTION_LOG_TERMINAL_DATA, pruned);
 };
 
 export const useVaultState = () => {
@@ -207,24 +212,35 @@ export const useVaultState = () => {
   const connectionLogTerminalDataRef = useRef<ConnectionLogTerminalDataMap>({});
 
   const syncConnectionLogTerminalDataMap = useCallback((logs: ConnectionLog[]) => {
-    const merged = pruneTerminalDataMapForStorage(
+    const merged = mergeTerminalDataMapsForStorage(
       logs,
-      {
+      readConnectionLogTerminalDataMap(),
+      connectionLogTerminalDataRef.current,
+      buildTerminalDataMapFromLogs(logs),
+    );
+    const persisted = writeConnectionLogTerminalDataMap(logs, merged);
+    if (persisted) {
+      connectionLogTerminalDataRef.current = merged;
+    } else {
+      connectionLogTerminalDataRef.current = {
         ...connectionLogTerminalDataRef.current,
         ...buildTerminalDataMapFromLogs(logs),
-      },
-    );
-    connectionLogTerminalDataRef.current = merged;
-    writeConnectionLogTerminalDataMap(logs, merged);
-    return merged;
+      };
+    }
+    return { map: connectionLogTerminalDataRef.current, persisted };
   }, []);
 
   const persistConnectionLogState = useCallback((
     logs: ConnectionLog[],
     options?: { pruneMainBlob?: boolean },
   ) => {
-    syncConnectionLogTerminalDataMap(logs);
-    if (options?.pruneMainBlob) {
+    const { persisted } = syncConnectionLogTerminalDataMap(logs);
+    const unsavedTerminalDataPending = logs.some(
+      (log) => !log.saved && log.terminalData !== undefined,
+    );
+    const shouldPruneMainBlob = options?.pruneMainBlob
+      && (persisted || !unsavedTerminalDataPending);
+    if (shouldPruneMainBlob) {
       localStorageAdapter.write(STORAGE_KEY_CONNECTION_LOGS, pruneConnectionLogsForStorage(logs));
     } else {
       localStorageAdapter.write(STORAGE_KEY_CONNECTION_LOGS, logs);
