@@ -39,6 +39,34 @@ function getToolResultText(part: Record<string, unknown>): string {
   return '';
 }
 
+function isToolResultError(part: Record<string, unknown>, text: string): boolean {
+  if (part.isError === true) return true;
+  if (text.toLowerCase().includes('error')) return true;
+  return isToolResultErrorOutput(part.output);
+}
+
+function isToolResultErrorOutput(output: unknown): boolean {
+  if (output == null) return false;
+  if (typeof output === 'object') {
+    const obj = output as Record<string, unknown>;
+    if ('error' in obj && typeof obj.error === 'string') return true;
+    if ('ok' in obj && obj.ok === false) return true;
+    if (obj.type === 'json' || obj.type === 'object') {
+      return isToolResultErrorOutput(obj.value);
+    }
+  }
+  if (typeof output === 'string') {
+    try {
+      const parsed = JSON.parse(output) as Record<string, unknown>;
+      if ('error' in parsed && typeof parsed.error === 'string') return true;
+      if ('ok' in parsed && parsed.ok === false) return true;
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
+
 function isCachedOrSuperseded(text: string): boolean {
   return text.includes('[cached]')
     || text.startsWith(SUPERSEDED_READ_PREFIX)
@@ -98,7 +126,7 @@ function compressMessageToolResults(
     const toolName = meta?.toolName ?? (typeof part.toolName === 'string' ? part.toolName : '');
     const args = meta?.input;
     const text = getToolResultText(part);
-    const isError = text.toLowerCase().includes('error') || Boolean(part.isError);
+    const isError = isToolResultError(part, text);
     if (isCachedOrSuperseded(text)) return part;
     const replacement = updater(toolName, args, text, isError);
     if (replacement == null || replacement === text) return part;
@@ -135,7 +163,7 @@ export function pruneStaleToolContext(
       const readKey = readFingerprint(toolName, args);
       if (readKey) {
         const text = getToolResultText(part);
-        const isError = text.toLowerCase().includes('error') || Boolean(part.isError);
+        const isError = isToolResultError(part, text);
         if (!isError) {
           latestReadByKey.set(readKey, index);
         }
