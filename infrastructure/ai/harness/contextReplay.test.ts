@@ -26,6 +26,7 @@ test('context replay compaction retains user goal and recent tail', async () => 
     reinjection: {
       userGoal: goal,
       permissionMode: 'confirm',
+      sessionStateText: 'User goal: Deploy nginx\nActive hosts: sess-1 (last: systemctl status nginx)',
     },
   });
 

@@ -23,7 +23,7 @@ export type AgentBackend = 'catty' | 'external-sdk';
 
 export type ApprovalOutcome = 'approved' | 'denied' | 'timeout';
 
-export type ContextPrepareTrigger = 'pre-turn' | '413-retry' | 'force';
+export type ContextPrepareTrigger = 'pre-turn' | '413-retry' | 'force' | 'step';
 
 export interface AgentEventBase {
   id: string;

@@ -13,6 +13,7 @@ import type { ExecutorContext } from '../../cattyAgent/executor';
 import type { AgentBackend, AgentEvent, AgentEventListener } from '../types';
 import type { ToolOutputStore } from '../toolOutputStore';
 import type { ToolResultDedup } from '../toolResultDedup';
+import type { SessionStateStore } from '../sessionState';
 import type { DefaultTargetSessionHint } from '../../sdkAgentAdapter';
 import type { AgentStopBridge } from '../agentStop';
 
@@ -118,6 +119,7 @@ export interface TurnDriverContext {
   emit: (event: Omit<AgentEvent, 'turnId' | 'sessionId' | 'chatSessionId' | 'backend' | 'timestamp'> & Partial<Pick<AgentEvent, 'turnId' | 'sessionId' | 'chatSessionId' | 'backend' | 'timestamp'>>) => void;
   toolOutputStore: ToolOutputStore;
   toolResultDedup: ToolResultDedup;
+  sessionStateStore: SessionStateStore;
   onEvent?: AgentEventListener;
 }
 
@@ -134,6 +136,12 @@ export interface PrepareStepContextInput {
   chatSessionId?: string;
   providerId?: string | null;
   modelId?: string | null;
+  contextWindow?: number;
+  reservedTokens?: number;
+  maxOutputTokens?: number;
+  protectRecentMessages?: number;
   toolOutputStore?: ToolOutputStore;
   runtimeContext: import('../cattyRuntimeContext').CattyRuntimeContext;
+  onEvent?: AgentEventListener;
+  onStatusText?: () => void;
 }

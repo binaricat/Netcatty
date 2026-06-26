@@ -25,6 +25,14 @@ function createTurnContext(): TurnDriverContext {
       buildCachedNotice: () => ({}),
       clearTurn: () => {},
     },
+    sessionStateStore: {
+      mergeFromUserGoal: () => {},
+      toReinjectionText: () => undefined,
+      get: () => ({ decisions: [], activeHosts: {}, blockers: [], updatedAt: Date.now() }),
+      clear: () => {},
+      updateFromToolResult: () => {},
+      mergeFromAssistantContent: () => {},
+    },
   } as TurnDriverContext;
 }
 

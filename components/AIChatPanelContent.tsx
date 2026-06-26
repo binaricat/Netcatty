@@ -47,6 +47,7 @@ interface AIChatPanelContentProps {
   handleDeleteSession: (event: React.MouseEvent, sessionId: string) => void;
   messages: ChatMessage[];
   isStreaming: boolean;
+  compactionHint?: import('../infrastructure/ai/harness/types').CompactionTrace | null;
   inputValue: string;
   setInputValue: (value: string) => void;
   handleSend: () => void;
@@ -100,6 +101,7 @@ export const AIChatPanelContent: React.FC<AIChatPanelContentProps> = ({
   handleDeleteSession,
   messages,
   isStreaming,
+  compactionHint = null,
   inputValue,
   setInputValue,
   handleSend,
@@ -210,6 +212,7 @@ export const AIChatPanelContent: React.FC<AIChatPanelContentProps> = ({
                 messages={messages}
                 isStreaming={isStreaming}
                 activeSessionId={activeSessionId}
+                compactionHint={compactionHint}
                 notes={notes}
                 hosts={hosts}
                 onOpenVaultNote={onOpenVaultNote}

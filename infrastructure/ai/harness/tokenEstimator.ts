@@ -19,7 +19,7 @@ function estimateChars(value: unknown): number {
   return String(value).length;
 }
 
-function resolveEstimatorKind(providerId?: string | null): TokenEstimatorKind {
+export function resolveEstimatorKind(providerId?: string | null): TokenEstimatorKind {
   const id = (providerId ?? '').toLowerCase();
   if (id.includes('openai') || id.includes('gpt')) return 'openai-heuristic';
   if (id.includes('anthropic') || id.includes('claude')) return 'anthropic-heuristic';
@@ -38,6 +38,16 @@ function applyHeuristicMultiplier(chars: number, kind: TokenEstimatorKind): numb
     default:
       return Math.ceil(chars / CHARS_PER_TOKEN_FALLBACK);
   }
+}
+
+export function estimateTextTokens(text: string, providerId?: string | null): number {
+  const kind = resolveEstimatorKind(providerId);
+  return applyHeuristicMultiplier(text.length, kind);
+}
+
+export function estimateUnknownTokens(value: unknown, providerId?: string | null): number {
+  const kind = resolveEstimatorKind(providerId);
+  return applyHeuristicMultiplier(estimateChars(value), kind);
 }
 
 export interface EstimateModelMessagesTokensInput {

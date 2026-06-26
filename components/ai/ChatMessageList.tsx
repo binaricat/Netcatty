@@ -44,6 +44,10 @@ import {
   resolveCapabilityId,
 } from '../../infrastructure/ai/harness/permissionGrants';
 import {
+  formatCompactionBanner,
+  resolveCompactionStatusText,
+} from './hooks/useAgentCompactionUi';
+import {
   getAIPanelDiagnosticHiddenParts,
   getAIPanelProfilerProps,
   isAIPanelDiagnosticPartHidden,
@@ -54,6 +58,7 @@ interface ChatMessageListProps {
   isStreaming?: boolean;
   /** Active chat session ID — used to filter standalone MCP approval blocks */
   activeSessionId?: string | null;
+  compactionHint?: import('../../infrastructure/ai/harness/types').CompactionTrace | null;
   notes?: VaultNote[];
   hosts?: Host[];
   onOpenVaultNote?: (noteId: string) => void;
@@ -82,6 +87,7 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({
   messages,
   isStreaming,
   activeSessionId,
+  compactionHint = null,
   notes = [],
   hosts = [],
   onOpenVaultNote,
@@ -247,11 +253,19 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({
   }
 
   const lastAssistantMessage = displayedMessages.findLast(m => m.role === 'assistant');
+  const compactionBanner = compactionHint
+    ? formatCompactionBanner(compactionHint, t)
+    : null;
 
   const conversation = (
     <>
     <Conversation className="flex-1">
       <ConversationContent className="gap-1.5 px-4 py-2">
+        {compactionBanner && (
+          <div className="mb-2 rounded-md border border-border/50 bg-muted/30 px-3 py-2 text-[11px] text-muted-foreground">
+            {compactionBanner}
+          </div>
+        )}
         {hiddenMessageCount > 0 && (
           <button
             type="button"
@@ -468,7 +482,9 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({
                 {/* Status text with shimmer */}
                 {message.statusText && (
                   <div className="py-1">
-                    <span className="thinking-shimmer text-xs">{message.statusText}</span>
+                    <span className="thinking-shimmer text-xs">
+                      {resolveCompactionStatusText(message.statusText, t)}
+                    </span>
                   </div>
                 )}
 

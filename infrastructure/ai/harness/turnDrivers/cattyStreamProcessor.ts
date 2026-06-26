@@ -264,6 +264,7 @@ export async function processCattyStream(input: ProcessCattyStreamInput): Promis
         ui.updateMessageById(streamSessionId, activeMsgId, msg => ({
           ...msg,
           content: msg.content + text,
+          ...(msg.statusText ? { statusText: undefined } : {}),
         }));
       }
     }

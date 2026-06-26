@@ -4,6 +4,10 @@ export const zhCNAiMessages: Messages = {
   // AI Settings
   'ai.agentSettings': 'Agent 设置',
   'ai.chat.preparing': '准备中…',
+  'ai.chat.compactingContext': '正在压缩较早的上下文…',
+  'ai.chat.compactingStep': '正在为下一步整理上下文…',
+  'ai.chat.compactionRetry': '请求过大，正在压缩上下文并重试…',
+  'ai.chat.compactionBanner': '上下文已压缩：{before}K → {after}K tokens',
   'ai.title': 'AI',
   'ai.description': '配置 AI 提供商、Agent 和安全设置',
   'ai.providers': '提供商',

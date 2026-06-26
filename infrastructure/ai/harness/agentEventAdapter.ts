@@ -158,6 +158,7 @@ export function mapCattyStreamChunkToAgentEvents(
       id: nextEventId('tool-result'),
       type: 'tool_result',
       toolCallId: chunk.toolCallId,
+      toolName: typeof chunk.toolName === 'string' ? chunk.toolName : undefined,
       result: resultText,
       isError: isToolResultError(output),
     }];
@@ -174,6 +175,7 @@ export function mapCattyStreamChunkToAgentEvents(
       id: nextEventId('tool-result'),
       type: 'tool_result',
       toolCallId: chunk.toolCallId,
+      toolName: typeof chunk.toolName === 'string' ? chunk.toolName : undefined,
       result: resultText,
       isError: true,
     }];

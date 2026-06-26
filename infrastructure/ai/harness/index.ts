@@ -28,6 +28,8 @@ export { globalAgentRuntime, getAgentRuntime } from './globalAgentRuntime';
 export {
   estimateModelMessagesTokens,
   estimateModelMessagesTokensWithKind,
+  estimateTextTokens,
+  estimateUnknownTokens,
 } from './tokenEstimator';
 export type { EstimateModelMessagesTokensInput, EstimateModelMessagesTokensResult } from './tokenEstimator';
 
@@ -56,6 +58,21 @@ export {
   extractLatestUserGoal,
 } from './contextManager';
 export type { PrepareTurnContextInput, PostCompactReinjection } from './contextManager';
+
+export {
+  computeCompactionThreshold,
+  computeTotalInputTokens,
+  shouldCompactByBudget,
+  DEFAULT_MAX_OUTPUT_TOKENS,
+} from './contextBudget';
+
+export { SessionStateStore, globalSessionStateStore } from './sessionState';
+export type { CattySessionState } from './sessionState';
+
+export { pruneStaleToolContext } from './staleContextPruner';
+export { pruneUntilFitsCompaction } from './compactionPruner';
+
+export { CATTY_COMPACTION_STATUS_KEYS } from './compactionStatusKeys';
 
 export { buildExternalBridgeContextMessages } from './externalBridgeContext';
 

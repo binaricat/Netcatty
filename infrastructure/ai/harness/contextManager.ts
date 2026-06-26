@@ -4,11 +4,18 @@ import { isStepHandleNoticeMessage } from './agentEventAdapter';
 import {
   DEFAULT_CONTEXT_WINDOW_TOKENS,
   DEFAULT_PROTECT_RECENT_MESSAGES,
+  findSafeCompactionSplitIndex,
   keepRecentContextMessages,
   prepareContextCompaction,
 } from '../contextCompaction';
 import { compressMessagesForRequestTooLargeRetry } from '../requestPayloadCompression';
+import {
+  computeCompactionThreshold,
+  computeTotalInputTokens,
+  DEFAULT_MAX_OUTPUT_TOKENS,
+} from './contextBudget';
 import { estimateModelMessagesTokensWithKind } from './tokenEstimator';
+import { pruneStaleToolContext } from './staleContextPruner';
 import type { PrepareStepContextInput } from './turnDrivers/types';
 import type {
   AgentEventListener,
@@ -24,6 +31,7 @@ export interface PrepareTurnContextInput {
   backend: 'catty' | 'external-bridge';
   contextWindow?: number;
   reservedTokens?: number;
+  maxOutputTokens?: number;
   trigger: ContextPrepareTrigger;
   protectRecentMessages?: number;
   force?: boolean;
@@ -39,13 +47,18 @@ export interface PrepareTurnContextInput {
 export interface PostCompactReinjection {
   permissionMode?: AIPermissionMode;
   sessionScopeSummary?: string;
+  sessionStateText?: string;
   userGoal?: string;
   pendingToolHandleIds?: string[];
 }
 
 function emitCompactionEvent(
   onEvent: AgentEventListener | undefined,
-  input: PrepareTurnContextInput,
+  input: {
+    sessionId?: string;
+    chatSessionId?: string;
+    backend: PrepareTurnContextInput['backend'];
+  },
   trace: CompactionTrace,
 ): void {
   if (!onEvent || !input.sessionId) return;
@@ -74,6 +87,9 @@ function buildReinjectionMessages(reinjection?: PostCompactReinjection): ModelMe
   if (reinjection.permissionMode) {
     lines.push(`Permission mode: ${reinjection.permissionMode}`);
   }
+  if (reinjection.sessionStateText) {
+    lines.push(reinjection.sessionStateText);
+  }
   if (reinjection.sessionScopeSummary) {
     lines.push(reinjection.sessionScopeSummary);
   }
@@ -90,20 +106,55 @@ function buildReinjectionMessages(reinjection?: PostCompactReinjection): ModelMe
   }];
 }
 
+function buildCompactionTrace(input: {
+  trigger: ContextPrepareTrigger;
+  tokensBefore: number;
+  tokensAfter: number;
+  messagesBefore: number;
+  messagesAfter: number;
+  compressedMessageCount: number;
+  retainedTailCount: number;
+  summaryLength?: number;
+  didTypedCompression: boolean;
+  didLlmSummarize: boolean;
+  did413Fallback: boolean;
+  estimatorKind?: CompactionTrace['estimatorKind'];
+}): CompactionTrace {
+  return {
+    trigger: input.trigger,
+    estimatedTokensBefore: input.tokensBefore,
+    estimatedTokensAfter: input.tokensAfter,
+    messagesBefore: input.messagesBefore,
+    messagesAfter: input.messagesAfter,
+    compressedMessageCount: input.compressedMessageCount,
+    retainedTailCount: input.retainedTailCount,
+    summaryLength: input.summaryLength,
+    didTypedCompression: input.didTypedCompression,
+    didLlmSummarize: input.didLlmSummarize,
+    did413Fallback: input.did413Fallback,
+    estimatorKind: input.estimatorKind,
+  };
+}
+
 export async function prepareTurnContext(
   input: PrepareTurnContextInput,
 ): Promise<ContextPrepareResult> {
   const contextWindow = input.contextWindow ?? DEFAULT_CONTEXT_WINDOW_TOKENS;
   const protectRecent = input.protectRecentMessages ?? DEFAULT_PROTECT_RECENT_MESSAGES;
+  const maxOutputTokens = input.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS;
+  const messagesBeforeCount = input.messages.length;
+
+  const stale = pruneStaleToolContext(input.messages);
+  let working = stale.messages;
+  let didAdjust = stale.didAdjust;
+
   const tokensBeforeResult = estimateModelMessagesTokensWithKind({
-    messages: input.messages,
+    messages: working,
     providerId: input.providerId,
   });
   const tokensBefore = tokensBeforeResult.tokens;
   const estimatorKind = tokensBeforeResult.estimatorKind;
 
-  let working = input.messages;
-  let didAdjust = false;
   let didTypedCompression = false;
   let didLlmSummarize = false;
   let did413Fallback = false;
@@ -132,6 +183,8 @@ export async function prepareTurnContext(
       contextWindow,
       reservedTokens: input.reservedTokens ?? 0,
       thresholdRatio: input.force || input.trigger === 'force' ? 0 : undefined,
+      maxOutputTokens,
+      providerId: input.providerId,
       protectRecentMessages: protectRecent,
       summarize: input.summarize,
     });
@@ -141,7 +194,7 @@ export async function prepareTurnContext(
       didLlmSummarize = true;
       didAdjust = true;
       summaryLength = compacted.summary?.length;
-      compressedMessageCount = Math.max(0, input.messages.length - protectRecent);
+      compressedMessageCount = Math.max(0, messagesBeforeCount - protectRecent);
       retainedTailCount = protectRecent;
     } else if (input.force || input.trigger === '413-retry' || input.trigger === 'force') {
       working = keepRecentContextMessages(working, protectRecent);
@@ -166,11 +219,11 @@ export async function prepareTurnContext(
   }).tokens;
 
   if (didAdjust) {
-    const trace: CompactionTrace = {
+    const trace = buildCompactionTrace({
       trigger: input.trigger,
-      estimatedTokensBefore: tokensBefore,
-      estimatedTokensAfter: tokensAfter,
-      messagesBefore: input.messages.length,
+      tokensBefore,
+      tokensAfter,
+      messagesBefore: messagesBeforeCount,
       messagesAfter: working.length,
       compressedMessageCount,
       retainedTailCount,
@@ -179,7 +232,7 @@ export async function prepareTurnContext(
       didLlmSummarize,
       did413Fallback,
       estimatorKind,
-    };
+    });
     emitCompactionEvent(input.onEvent, input, trace);
     return { messages: working, didAdjust: true, trace };
   }
@@ -200,22 +253,76 @@ export function extractLatestUserGoal(messages: ModelMessage[] | ChatMessage[]):
     const content = typeof message.content === 'string'
       ? message.content.trim()
       : '';
-    if (content) return content.slice(0, 500);
+    if (content && !content.startsWith('[Netcatty session context')) return content.slice(0, 500);
   }
   return undefined;
+}
+
+function applyStepBudgetGuard(
+  messages: ModelMessage[],
+  input: {
+    contextWindow: number;
+    reservedTokens: number;
+    maxOutputTokens: number;
+    providerId?: string | null;
+    protectRecentMessages: number;
+  },
+): { messages: ModelMessage[]; didAdjust: boolean; didTypedCompression: boolean } {
+  const threshold = computeCompactionThreshold({
+    contextWindow: input.contextWindow,
+    maxOutputTokens: input.maxOutputTokens,
+  });
+  const total = computeTotalInputTokens({
+    messages,
+    providerId: input.providerId,
+    reservedTokens: input.reservedTokens,
+  });
+  if (total < threshold) {
+    return { messages, didAdjust: false, didTypedCompression: false };
+  }
+
+  const splitAt = findSafeCompactionSplitIndex(messages, input.protectRecentMessages);
+  const head = messages.slice(0, splitAt);
+  const tail = messages.slice(splitAt);
+  const compressedHead = applyTypedMessageCompression(head);
+  let next = [...compressedHead.messages, ...tail];
+  let didAdjust = compressedHead.didAdjust;
+
+  let afterTotal = computeTotalInputTokens({
+    messages: next,
+    providerId: input.providerId,
+    reservedTokens: input.reservedTokens,
+  });
+  if (afterTotal >= threshold && splitAt > 0) {
+    next = keepRecentContextMessages(next, input.protectRecentMessages);
+    didAdjust = true;
+  }
+
+  return {
+    messages: next,
+    didAdjust: didAdjust || next.length !== messages.length,
+    didTypedCompression: compressedHead.didAdjust,
+  };
 }
 
 /** Step-level typed pruning — no LLM summarize (reserved for pre-turn / 413). */
 export async function prepareStepContext(
   input: PrepareStepContextInput,
 ): Promise<ContextPrepareResult & { runtimeContext?: import('./cattyRuntimeContext').CattyRuntimeContext }> {
-  const typed = compressMessagesForRequestTooLargeRetry(input.messages);
-  let working = typed.messages;
-  let didAdjust = typed.didAdjust;
+  const contextWindow = input.contextWindow ?? DEFAULT_CONTEXT_WINDOW_TOKENS;
+  const maxOutputTokens = input.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS;
+  const protectRecent = input.protectRecentMessages ?? DEFAULT_PROTECT_RECENT_MESSAGES;
+  const messagesBeforeCount = input.messages.length;
+
+  const stale = pruneStaleToolContext(input.messages);
+  let working = stale.messages;
+
+  const typed = compressMessagesForRequestTooLargeRetry(working);
+  working = typed.messages;
 
   const pendingHandles = input.toolOutputStore?.listPendingHandles(input.chatSessionId ?? input.sessionId) ?? [];
+  let didHandleNotice = false;
   if (pendingHandles.length > 0 && input.stepNumber > 0) {
-    // v7: prepareStep message overrides carry forward — strip prior step notices first.
     working = working.filter((message) => {
       if (message.role !== 'user') return true;
       const content = typeof message.content === 'string' ? message.content : '';
@@ -226,8 +333,30 @@ export async function prepareStepContext(
       content: `[step ${input.stepNumber}] Tool output handles available: ${pendingHandles.map(h => h.id).join(', ')}`,
     };
     working = [notice, ...working];
-    didAdjust = true;
+    didHandleNotice = true;
   }
+
+  const budgetGuard = applyStepBudgetGuard(working, {
+    contextWindow,
+    reservedTokens: input.reservedTokens ?? 0,
+    maxOutputTokens,
+    providerId: input.providerId,
+    protectRecentMessages: protectRecent,
+  });
+  working = budgetGuard.messages;
+  if (didHandleNotice && pendingHandles.length > 0) {
+    const hasHandleNotice = working.some(
+      (message) => message.role === 'user' && isStepHandleNoticeMessage(message.content),
+    );
+    if (!hasHandleNotice) {
+      working = [{
+        role: 'user',
+        content: `[step ${input.stepNumber}] Tool output handles available: ${pendingHandles.map(h => h.id).join(', ')}`,
+      }, ...working];
+    }
+  }
+  const didBudgetAdjust = stale.didAdjust || typed.didAdjust || budgetGuard.didAdjust;
+  const didAdjust = didBudgetAdjust || didHandleNotice;
 
   const before = estimateModelMessagesTokensWithKind({
     messages: input.messages,
@@ -238,23 +367,32 @@ export async function prepareStepContext(
     providerId: input.providerId,
   });
 
-  const trace = didAdjust ? {
-    trigger: 'pre-turn' as const,
-    estimatedTokensBefore: before.tokens,
-    estimatedTokensAfter: after.tokens,
-    messagesBefore: input.messages.length,
+  const trace = didBudgetAdjust ? buildCompactionTrace({
+    trigger: 'step',
+    tokensBefore: before.tokens,
+    tokensAfter: after.tokens,
+    messagesBefore: messagesBeforeCount,
     messagesAfter: working.length,
-    compressedMessageCount: 0,
+    compressedMessageCount: Math.max(0, messagesBeforeCount - working.length),
     retainedTailCount: working.length,
-    didTypedCompression: typed.didAdjust,
+    didTypedCompression: typed.didAdjust || budgetGuard.didTypedCompression,
     didLlmSummarize: false,
     did413Fallback: false,
     estimatorKind: before.estimatorKind,
-  } : undefined;
+  }) : undefined;
+
+  if (trace && didBudgetAdjust && input.onEvent && input.sessionId) {
+    emitCompactionEvent(input.onEvent, {
+      sessionId: input.sessionId,
+      chatSessionId: input.chatSessionId,
+      backend: 'catty',
+    }, trace);
+    input.onStatusText?.();
+  }
 
   const runtimeContext = {
     ...input.runtimeContext,
-    ...(trace ? { lastCompaction: trace, lastStepAdjusted: didAdjust } : {}),
+    ...(trace ? { lastCompaction: trace, lastStepAdjusted: didBudgetAdjust } : {}),
     ...(didAdjust ? { lastStepAdjusted: true } : {}),
   };
 

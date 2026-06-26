@@ -3,6 +3,7 @@ import { stopAgentTurn } from './agentStop';
 import type { AgentBackend, AgentEvent, AgentEventListener } from './types';
 import { ToolOutputStore } from './toolOutputStore';
 import { ToolResultDedup } from './toolResultDedup';
+import { SessionStateStore } from './sessionState';
 import type { TurnDriver, TurnInput, TurnResult } from './turnDrivers/types';
 
 let turnCounter = 0;
@@ -21,6 +22,7 @@ interface ActiveTurn {
 export interface AgentRuntimeOptions {
   drivers: TurnDriver[];
   traceStore?: typeof globalTraceStore;
+  sessionStateStore?: SessionStateStore;
 }
 
 export class AgentRuntime {
@@ -29,6 +31,7 @@ export class AgentRuntime {
   private readonly activeTurns = new Map<string, ActiveTurn>();
   private readonly activeTurnPromises = new Map<string, Promise<TurnResult>>();
   private readonly toolOutputStores = new Map<string, ToolOutputStore>();
+  private readonly sessionStateStore: SessionStateStore;
   private readonly traceStore: typeof globalTraceStore;
 
   constructor(options: AgentRuntimeOptions) {
@@ -36,6 +39,7 @@ export class AgentRuntime {
       this.drivers.set(driver.backend, driver);
     }
     this.traceStore = options.traceStore ?? globalTraceStore;
+    this.sessionStateStore = options.sessionStateStore ?? new SessionStateStore();
   }
 
   getToolOutputStore(chatSessionId: string): ToolOutputStore {
@@ -47,9 +51,14 @@ export class AgentRuntime {
     return store;
   }
 
+  getSessionStateStore(): SessionStateStore {
+    return this.sessionStateStore;
+  }
+
   clearChatSession(chatSessionId: string): void {
     this.toolOutputStores.get(chatSessionId)?.prune(chatSessionId);
     this.toolOutputStores.delete(chatSessionId);
+    this.sessionStateStore.clear(chatSessionId);
   }
 
   async waitForActiveTurn(chatSessionId: string): Promise<void> {
@@ -92,12 +101,19 @@ export class AgentRuntime {
     const toolOutputStore = this.getToolOutputStore(chatSessionId);
     const toolResultDedup = new ToolResultDedup();
     toolResultDedup.beginTurn();
+    const sessionStateStore = this.sessionStateStore;
+
+    if (input.backend === 'catty') {
+      sessionStateStore.mergeFromUserGoal(chatSessionId, input.userText);
+    }
 
     this.activeTurns.set(chatSessionId, {
       turnId,
       backend: input.backend,
       driver,
     });
+
+    const toolCallMeta = new Map<string, { toolName: string; args: Record<string, unknown> }>();
 
     const emit = (
       partial: Omit<AgentEvent, 'turnId' | 'sessionId' | 'chatSessionId' | 'backend' | 'timestamp'>
@@ -113,6 +129,30 @@ export class AgentRuntime {
         turnId: partial.turnId ?? turnId,
         ...partial,
       } as AgentEvent;
+
+      if (event.type === 'tool_call') {
+        toolCallMeta.set(event.toolCallId, {
+          toolName: event.toolName,
+          args: event.args,
+        });
+      }
+      if (event.type === 'tool_result') {
+        const meta = toolCallMeta.get(event.toolCallId);
+        const toolName = event.toolName ?? meta?.toolName;
+        if (toolName) {
+          sessionStateStore.updateFromToolResult(
+            chatSessionId,
+            toolName,
+            meta?.args,
+            event.result,
+            event.isError,
+          );
+        }
+      }
+      if (event.type === 'model_delta' && event.text) {
+        sessionStateStore.mergeFromAssistantContent(chatSessionId, event.text);
+      }
+
       this.traceStore.append(event);
       for (const listener of this.listeners) {
         listener(event);
@@ -139,6 +179,7 @@ export class AgentRuntime {
         emit,
         toolOutputStore,
         toolResultDedup,
+        sessionStateStore,
       });
       if (input.signal.aborted) {
         reason = 'aborted';

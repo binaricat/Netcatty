@@ -30,7 +30,7 @@ Turn orchestration is centralized in **AgentRuntime**; the React hook `useAIChat
 |-------|--------|------|
 | Runtime | `agentRuntime.ts`, `globalAgentRuntime.ts` | Turn lifecycle, trace fan-out, per-turn ToolOutputStore / ToolResultDedup |
 | Drivers | `turnDrivers/cattyTurnDriver.ts`, `turnDrivers/externalSdkTurnDriver.ts` | Catty `streamText` + External SDK IPC; emit unified `AgentEvent`s |
-| Context | `contextManager.ts`, `tokenEstimator.ts`, `cattyRuntime.ts` | Pre-turn / 413 compaction, `prepareStepContext`, provider-aware token estimates |
+| Context | `contextManager.ts`, `contextBudget.ts`, `tokenEstimator.ts`, `sessionState.ts`, `staleContextPruner.ts`, `compactionPruner.ts`, `cattyRuntime.ts` | Pre-turn / step / 413 compaction, dynamic thresholds, SessionState reinjection, stale tool pruning |
 | Tools | `capabilityTools.ts`, `toolOutputStore.ts`, `toolResultDedup.ts` | Catalog tools, truncated output handles (`tool_output_read`), duplicate-read notices |
 | Trace | `traceStore.ts`, `agentEventAdapter.ts` | Session event log incl. `usage`, `performance`, and `CompactionTrace` |
 

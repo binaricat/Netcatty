@@ -1,9 +1,14 @@
 import type { ModelMessage } from "ai";
 import type { ProviderConfig } from "./types";
-import { estimateModelMessagesTokensWithKind } from "./harness/tokenEstimator";
+import {
+  computeCompactionThreshold,
+  DEFAULT_MAX_OUTPUT_TOKENS,
+} from "./harness/contextBudget";
+import {
+  estimateModelMessagesTokensWithKind,
+  estimateUnknownTokens,
+} from "./harness/tokenEstimator";
 
-const DEFAULT_COMPACTION_RATIO = 0.85;
-const TOKEN_CHARS = 4;
 const REDACTED_PAYLOAD_PREVIEW_CHARS = 80;
 
 export const DEFAULT_CONTEXT_WINDOW_TOKENS = 128_000;
@@ -24,6 +29,7 @@ export interface ShouldCompactContextInput {
   promptTokens: number;
   contextWindow: number;
   thresholdRatio?: number;
+  maxOutputTokens?: number;
 }
 
 export interface PrepareContextCompactionInput {
@@ -31,6 +37,8 @@ export interface PrepareContextCompactionInput {
   contextWindow?: number;
   reservedTokens?: number;
   thresholdRatio?: number;
+  maxOutputTokens?: number;
+  providerId?: string | null;
   protectRecentMessages?: number;
   summarize: (messagesToSummarize: ModelMessage[]) => Promise<string>;
 }
@@ -50,10 +58,14 @@ export interface ResolveContextWindowInput {
 export function shouldCompactContext({
   promptTokens,
   contextWindow,
-  thresholdRatio = DEFAULT_COMPACTION_RATIO,
+  thresholdRatio,
+  maxOutputTokens = DEFAULT_MAX_OUTPUT_TOKENS,
 }: ShouldCompactContextInput): boolean {
   if (contextWindow <= 0) return false;
-  return promptTokens >= contextWindow * thresholdRatio;
+  const threshold = thresholdRatio != null
+    ? contextWindow * thresholdRatio
+    : computeCompactionThreshold({ contextWindow, maxOutputTokens });
+  return promptTokens >= threshold;
 }
 
 export function resolveContextWindow({
@@ -76,13 +88,14 @@ export function sanitizeContextWindow(value: unknown): number | undefined {
   return Math.max(1, Math.round(num));
 }
 
-export function estimateModelMessagesTokens(messages: ModelMessage[]): number {
-  return estimateModelMessagesTokensWithKind({ messages }).tokens;
+export function estimateModelMessagesTokens(
+  messages: ModelMessage[],
+  providerId?: string | null,
+): number {
+  return estimateModelMessagesTokensWithKind({ messages, providerId }).tokens;
 }
 
-export function estimateUnknownTokens(value: unknown): number {
-  return Math.ceil(estimateUnknownChars(value) / TOKEN_CHARS);
-}
+export { estimateUnknownTokens };
 
 export function findSafeCompactionSplitIndex(
   messages: ModelMessage[],
@@ -126,11 +139,19 @@ export async function prepareContextCompaction({
   contextWindow = DEFAULT_CONTEXT_WINDOW_TOKENS,
   reservedTokens = 0,
   thresholdRatio,
+  maxOutputTokens = DEFAULT_MAX_OUTPUT_TOKENS,
+  providerId,
   protectRecentMessages = DEFAULT_PROTECT_RECENT_MESSAGES,
   summarize,
 }: PrepareContextCompactionInput): Promise<PrepareContextCompactionResult> {
-  const promptTokens = estimateModelMessagesTokens(messages) + Math.max(0, Math.ceil(reservedTokens));
-  if (!shouldCompactContext({ promptTokens, contextWindow, thresholdRatio })) {
+  const promptTokens = estimateModelMessagesTokens(messages, providerId)
+    + Math.max(0, Math.ceil(reservedTokens));
+  if (!shouldCompactContext({
+    promptTokens,
+    contextWindow,
+    thresholdRatio,
+    maxOutputTokens,
+  })) {
     return { messages, didCompact: false };
   }
 
@@ -167,22 +188,6 @@ export function keepRecentContextMessages(
 ): ModelMessage[] {
   const splitAt = findSafeCompactionSplitIndex(messages, protectRecentMessages);
   return messages.slice(splitAt);
-}
-
-function estimateUnknownChars(value: unknown): number {
-  if (value == null) return 0;
-  if (typeof value === "string") return value.length;
-  if (typeof value === "number" || typeof value === "boolean") return String(value).length;
-  if (Array.isArray(value)) return value.reduce((total, part) => total + estimateUnknownChars(part), 0);
-  if (typeof value === "object") {
-    const record = value as Record<string, unknown>;
-    let total = 0;
-    for (const [key, entry] of Object.entries(record)) {
-      total += key.length + estimateUnknownChars(entry);
-    }
-    return total;
-  }
-  return String(value).length;
 }
 
 function startsWithToolResult(message: ModelMessage | undefined): boolean {
