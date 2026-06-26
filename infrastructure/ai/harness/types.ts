@@ -13,6 +13,9 @@ export type AgentEventType =
   | 'approval_resolved'
   | 'compaction'
   | 'usage'
+  | 'performance'
+  | 'model_call_start'
+  | 'step_end'
   | 'error'
   | 'turn_end';
 
@@ -113,6 +116,31 @@ export interface UsageEvent extends AgentEventBase {
   estimated?: boolean;
 }
 
+export interface PerformanceEvent extends AgentEventBase {
+  type: 'performance';
+  responseTimeMs?: number;
+  timeToFirstOutputMs?: number;
+  outputTokensPerSecond?: number;
+}
+
+export interface ModelCallStartEvent extends AgentEventBase {
+  type: 'model_call_start';
+  callId: string;
+  modelId: string;
+  providerId?: string;
+}
+
+export interface StepEndEvent extends AgentEventBase {
+  type: 'step_end';
+  callId: string;
+  stepNumber: number;
+  modelId?: string;
+  finishReason?: string;
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+}
+
 export interface TurnEndEvent extends AgentEventBase {
   type: 'turn_end';
   reason?: 'completed' | 'aborted' | 'error';
@@ -128,6 +156,9 @@ export type AgentEvent =
   | ApprovalResolvedEvent
   | CompactionEvent
   | UsageEvent
+  | PerformanceEvent
+  | ModelCallStartEvent
+  | StepEndEvent
   | ErrorEvent
   | TurnEndEvent;
 

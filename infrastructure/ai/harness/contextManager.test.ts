@@ -1,8 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { ModelMessage } from 'ai';
-import { prepareTurnContext } from './contextManager.ts';
+import { prepareTurnContext, prepareStepContext } from './contextManager.ts';
 import { TraceStore } from './traceStore.ts';
+import { ToolOutputStore } from './toolOutputStore.ts';
+import { createInitialCattyRuntimeContext } from './cattyRuntimeContext.ts';
 
 test('prepareTurnContext applies typed compression before LLM summarize threshold', async () => {
   const longOutput = 'line\n'.repeat(20_000);
@@ -99,4 +101,40 @@ test('TraceStore records compaction events for export', async () => {
   const exported = store.exportTrace('chat-3');
   assert.ok(exported.compactions.length >= 1);
   assert.equal(exported.compactions[0]?.trigger, 'force');
+});
+
+test('prepareStepContext replaces prior step handle notices under v7 carry-forward semantics', async () => {
+  const store = new ToolOutputStore();
+  store.store({
+    chatSessionId: 'chat-4',
+    capabilityId: 'sftp.read',
+    content: 'large payload',
+  });
+  const runtimeContext = createInitialCattyRuntimeContext({
+    chatSessionId: 'chat-4',
+    turnId: 'turn-1',
+    permissionMode: 'confirm',
+    scopeType: 'terminal',
+  });
+  const priorNotice: ModelMessage = {
+    role: 'user',
+    content: '[step 1] Tool output handles available: tool-output-old',
+  };
+  const prepared = await prepareStepContext({
+    messages: [priorNotice, { role: 'user', content: 'continue' }],
+    stepNumber: 2,
+    sessionId: 'chat-4',
+    chatSessionId: 'chat-4',
+    toolOutputStore: store,
+    runtimeContext,
+  });
+
+  const notices = prepared.messages.filter(
+    (message) => message.role === 'user'
+      && typeof message.content === 'string'
+      && message.content.includes('Tool output handles available'),
+  );
+  assert.equal(notices.length, 1);
+  assert.match(String(notices[0]?.content), /\[step 2\]/);
+  assert.doesNotMatch(String(notices[0]?.content), /tool-output-old/);
 });

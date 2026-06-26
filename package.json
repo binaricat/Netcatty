@@ -7,6 +7,9 @@
   "type": "module",
   "author": "binaricat <support@netcatty.com>",
   "license": "GPL-3.0-or-later",
+  "engines": {
+    "node": ">=22"
+  },
   "main": "electron/main.cjs",
   "bin": {
     "netcatty-tool-cli": "./electron/cli/netcatty-tool-cli.cjs"
@@ -39,9 +42,9 @@
     "test": "node --test --import tsx electron/*.test.cjs electron/capabilities/*.test.cjs electron/capabilities/*/*.test.cjs electron/capabilities/*/*/*.test.cjs electron/cli/*.test.cjs electron/bridges/*.test.cjs electron/bridges/*/*.test.cjs electron/bridges/aiBridge/sdk/*.test.cjs scripts/*.test.cjs application/*.test.ts application/app/*.test.ts application/i18n/locales/*.test.ts application/state/*.test.ts application/state/*/*.test.ts components/*.test.ts components/*.test.tsx components/editor/*.test.ts components/editor/*.test.tsx components/notes/*.test.tsx components/port-forwarding/*.test.ts components/systemManager/*.test.ts components/terminalLayer/*.test.ts components/settings/*.test.tsx components/settings/tabs/*.test.ts components/settings/tabs/ai/*.test.ts components/settings/tabs/ai/*.test.tsx components/ai/*.test.ts components/ai/*.test.tsx components/ai/toolArtifacts/*.test.ts components/ai/toolArtifacts/*.test.tsx components/ai-elements/*.test.tsx components/sftp/*.test.ts components/terminal/*.test.ts components/terminal/*.test.tsx components/terminal/runtime/*.test.ts components/vault/*.test.ts components/vault/*.test.tsx domain/*.test.ts domain/*/*.test.ts infrastructure/ai/*.test.ts infrastructure/ai/*/*.test.ts infrastructure/ai/sdk/*.test.ts infrastructure/config/*.test.ts infrastructure/persistence/*.test.ts infrastructure/services/*/*.test.ts lib/*.test.ts"
   },
   "dependencies": {
-    "@ai-sdk/anthropic": "^3.0.58",
-    "@ai-sdk/google": "^3.0.43",
-    "@ai-sdk/openai": "^3.0.41",
+    "@ai-sdk/anthropic": "^4.0.0",
+    "@ai-sdk/google": "^4.0.0",
+    "@ai-sdk/openai": "^4.0.0",
     "@aws-sdk/client-s3": "^3.956.0",
     "@fontsource/jetbrains-mono": "^5.2.8",
     "@fontsource/space-grotesk": "^5.2.10",
@@ -68,7 +71,7 @@
     "@xterm/addon-web-links": "0.13.0-beta.220",
     "@xterm/addon-webgl": "0.20.0-beta.219",
     "@xterm/xterm": "6.1.0-beta.220",
-    "ai": "^6.0.116",
+    "ai": "^7.0.2",
     "clsx": "2.1.1",
     "electron-updater": "^6.8.3",
     "iconv-lite": "^0.6.3",

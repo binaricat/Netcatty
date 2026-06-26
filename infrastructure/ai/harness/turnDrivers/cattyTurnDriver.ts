@@ -9,12 +9,13 @@ import { buildSystemPrompt } from '../../cattyAgent/systemPrompt';
 import { isWebSearchReady } from '../../types';
 import { createModelFromConfig } from '../../sdk/providers';
 import { createCattyToolsFromCatalog } from '../capabilityTools';
+import { createInitialCattyRuntimeContext } from '../cattyRuntimeContext';
+import { prepareStepContext, extractLatestUserGoal } from '../contextManager';
 import {
   compactCattyMessages,
   prepareCattyMessagesForStream,
 } from '../cattyRuntime';
 import { clearChatSessionCancelled } from '../agentStop';
-import { prepareStepContext } from '../contextManager';
 import { isRequestTooLargeError } from '../../errorClassifier';
 import { getNetcattyBridge, generateId, resolveUserSkillsContext } from '../../../../components/ai/hooks/aiChatStreamingSupport';
 import {
@@ -73,7 +74,7 @@ async function runCattyTurn(input: CattyTurnInput, ctx: TurnDriverContext): Prom
     workspaceId: context.scopeType === 'workspace' ? context.scopeTargetId : undefined,
     workspaceName: context.scopeType === 'workspace' ? context.scopeLabel : undefined,
   }));
-  const tools = createCattyToolsFromCatalog(
+  const toolsBundle = createCattyToolsFromCatalog(
     netcattyBridge,
     getExecutorContext,
     context.commandBlocklist,
@@ -83,6 +84,7 @@ async function runCattyTurn(input: CattyTurnInput, ctx: TurnDriverContext): Prom
     ctx.toolOutputStore,
     ctx.toolResultDedup,
   );
+  const { tools } = toolsBundle;
 
   const systemPrompt = buildSystemPrompt({
     scopeType: context.scopeType,
@@ -210,12 +212,23 @@ async function runCattyTurn(input: CattyTurnInput, ctx: TurnDriverContext): Prom
     messagesForStream = await compactMessages(messagesForStream, {});
     messagesForStream = prepareMessagesForStream(messagesForStream);
 
+    const runtimeContext = createInitialCattyRuntimeContext({
+      chatSessionId: sessionId,
+      turnId: ctx.turnId,
+      providerId: context.activeProvider?.providerId,
+      modelId: activeModelId,
+      permissionMode: context.permissionMode ?? context.globalPermissionMode,
+      scopeType: context.scopeType,
+      scopeLabel: context.scopeLabel,
+      userGoal: extractLatestUserGoal(messagesForStream),
+    });
+
     const runStream = async (streamMessages: ModelMessage[], streamAssistantMsgId: string) => {
-      const { usage } = await processCattyStream({
+      await processCattyStream({
         streamSessionId: sessionId,
         model,
         systemPrompt,
-        tools,
+        toolsBundle,
         sdkMessages: streamMessages,
         signal,
         currentAssistantMsgId: streamAssistantMsgId,
@@ -223,8 +236,9 @@ async function runCattyTurn(input: CattyTurnInput, ctx: TurnDriverContext): Prom
         advancedParams: context.activeProvider?.advancedParams,
         continuationContext,
         turnId: ctx.turnId,
+        runtimeContext,
         onAgentEvent: (event) => ctx.emit(event),
-        prepareStep: async ({ stepNumber, messages }) => {
+        prepareStep: async ({ stepNumber, messages, runtimeContext: stepRuntimeContext }) => {
           const prepared = await prepareStepContext({
             messages,
             stepNumber,
@@ -233,25 +247,18 @@ async function runCattyTurn(input: CattyTurnInput, ctx: TurnDriverContext): Prom
             providerId: context.activeProvider?.providerId,
             modelId: activeModelId,
             toolOutputStore: ctx.toolOutputStore,
+            runtimeContext: stepRuntimeContext,
           });
-          return { messages: prepared.messages };
+          return {
+            messages: prepared.messages,
+            runtimeContext: prepared.runtimeContext,
+          };
         },
         ui: {
           addMessageToSession: ui.addMessageToSession,
           updateMessageById: ui.updateMessageById,
         },
       });
-
-      if (usage?.totalTokens) {
-        ctx.emit({
-          id: `usage-${ctx.turnId}`,
-          type: 'usage',
-          promptTokens: usage.promptTokens ?? 0,
-          completionTokens: usage.completionTokens ?? 0,
-          totalTokens: usage.totalTokens,
-          estimated: false,
-        } as import('../types').AgentEvent);
-      }
     };
 
     try {

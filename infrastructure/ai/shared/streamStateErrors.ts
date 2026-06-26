@@ -8,7 +8,7 @@
  * deltas without first emitting a `reasoning-start` content-block
  * signal, the Vercel AI SDK's reasoning state machine has nothing
  * registered for the incoming `part.id` and enqueues an
- * `error` chunk on `fullStream` with the text
+ * `error` chunk on `stream` with the text
  * `reasoning part <id> not found` — once per orphan delta. The
  * analogous error exists for text parts.
  *

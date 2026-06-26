@@ -1,7 +1,9 @@
 /**
  * approvalGate — Promise-based approval system for tool execution.
  *
- * Tools call `requestApproval()` inside their `execute` function. This returns
+ * Catty write tools are gated by `streamText({ toolApproval })` (see cattyToolApproval.ts).
+ * MCP/external agents use main-process approval via `setupMcpApprovalBridge()`.
+ * `requestApproval()` is the shared renderer Promise used by both paths.
  * a Promise that resolves when the user approves/rejects from the UI, or after
  * a timeout (default 5 minutes) to prevent indefinite hangs.
  *

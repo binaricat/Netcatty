@@ -135,4 +135,5 @@ export interface PrepareStepContextInput {
   providerId?: string | null;
   modelId?: string | null;
   toolOutputStore?: ToolOutputStore;
+  runtimeContext: import('../cattyRuntimeContext').CattyRuntimeContext;
 }

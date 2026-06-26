@@ -1,6 +1,6 @@
 import { createOpenAI } from '@ai-sdk/openai';
 import { createAnthropic } from '@ai-sdk/anthropic';
-import { createGoogleGenerativeAI } from '@ai-sdk/google';
+import { createGoogle } from '@ai-sdk/google';
 import type { ProviderConfig, ProviderStyle } from '../types';
 import { resolveProviderStyle } from '../types';
 import {
@@ -554,7 +554,7 @@ export function createModelFromConfig(
       })(modelId);
 
     case 'google':
-      return createGoogleGenerativeAI({
+      return createGoogle({
         apiKey,
         baseURL,
         fetch: customFetch,

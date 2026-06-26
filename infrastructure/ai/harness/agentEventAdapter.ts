@@ -1,4 +1,5 @@
 import type { AgentEvent, AgentEventListener } from './types';
+import { resolveStreamChunkToolCallId } from '../../../components/ai/hooks/aiChatStreamingSupport';
 
 let eventCounter = 0;
 
@@ -25,6 +26,14 @@ export interface CattyStreamChunk {
   output?: unknown;
   result?: unknown;
   error?: unknown;
+  approved?: boolean;
+  stepNumber?: number;
+}
+
+const STEP_HANDLE_NOTICE_RE = /^\[step \d+\] Tool output handles available:/;
+
+function isStepHandleNoticeMessage(content: unknown): boolean {
+  return typeof content === 'string' && STEP_HANDLE_NOTICE_RE.test(content);
 }
 
 function isToolResultError(output: unknown): boolean {
@@ -154,6 +163,22 @@ export function mapCattyStreamChunkToAgentEvents(
     }];
   }
 
+  if (chunk.type === 'tool-error' && chunk.toolCallId) {
+    const resultText = chunk.error instanceof Error
+      ? JSON.stringify({ error: chunk.error.message })
+      : typeof chunk.error === 'string'
+        ? JSON.stringify({ error: chunk.error })
+        : JSON.stringify({ error: String(chunk.error ?? 'Tool execution failed.') });
+    return [{
+      ...base,
+      id: nextEventId('tool-result'),
+      type: 'tool_result',
+      toolCallId: chunk.toolCallId,
+      result: resultText,
+      isError: true,
+    }];
+  }
+
   if (chunk.type === 'error') {
     const message = chunk.error instanceof Error
       ? chunk.error.message
@@ -161,8 +186,70 @@ export function mapCattyStreamChunkToAgentEvents(
     return [{ ...base, id: nextEventId('error'), type: 'error', message }];
   }
 
+  if (chunk.type === 'tool-approval-request') {
+    const toolCallId = resolveStreamChunkToolCallId(chunk);
+    const toolName = chunk.toolName ?? chunk.toolCall?.toolName;
+    if (!toolCallId || !toolName) return [];
+    return [{
+      ...base,
+      id: nextEventId('approval-requested'),
+      type: 'approval_requested',
+      toolCallId,
+      toolName,
+      args: (chunk.input ?? chunk.args ?? chunk.toolCall?.input ?? {}) as Record<string, unknown>,
+    }];
+  }
+
+  if (chunk.type === 'tool-approval-response') {
+    const toolCallId = resolveStreamChunkToolCallId(chunk);
+    if (!toolCallId) return [];
+    const approved = chunk.approved === true;
+    const events: AgentEvent[] = [{
+      ...base,
+      id: nextEventId('approval-resolved'),
+      type: 'approval_resolved',
+      toolCallId,
+      toolName: String(chunk.toolName ?? chunk.toolCall?.toolName ?? 'unknown'),
+      outcome: approved ? 'approved' : 'denied',
+    }];
+    if (!approved) {
+      events.push({
+        ...base,
+        id: nextEventId('tool-result'),
+        type: 'tool_result',
+        toolCallId,
+        result: JSON.stringify({ error: chunk.reason ?? 'Tool execution denied.' }),
+        isError: true,
+      });
+    }
+    return events;
+  }
+
+  if (chunk.type === 'tool-output-denied' && chunk.toolCallId) {
+    return [
+      {
+        ...base,
+        id: nextEventId('approval-resolved'),
+        type: 'approval_resolved',
+        toolCallId: chunk.toolCallId,
+        toolName: String(chunk.toolName ?? 'unknown'),
+        outcome: 'denied',
+      },
+      {
+        ...base,
+        id: nextEventId('tool-result'),
+        type: 'tool_result',
+        toolCallId: chunk.toolCallId,
+        result: JSON.stringify({ error: 'Tool execution denied.' }),
+        isError: true,
+      },
+    ];
+  }
+
   return [];
 }
+
+export { isStepHandleNoticeMessage };
 
 export function createHarnessEventSink(
   listener: AgentEventListener,

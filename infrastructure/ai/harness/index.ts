@@ -11,6 +11,9 @@ export type {
   ExternalBridgeHistoryMessage,
   TokenEstimatorKind,
   UsageEvent,
+  PerformanceEvent,
+  ModelCallStartEvent,
+  StepEndEvent,
 } from './types';
 
 export { TraceStore, globalTraceStore } from './traceStore';
@@ -84,6 +87,17 @@ export {
 export type { CompactCattyMessagesInput, CompactCattyMessagesResult } from './cattyRuntime';
 
 export { createCattyToolsFromCatalog } from './capabilityTools';
+export type { CattyToolsBundle } from './capabilityTools';
+
+export {
+  createInitialCattyRuntimeContext,
+  cattyRuntimeContextSchema,
+  cattyToolContextSchema,
+} from './cattyRuntimeContext';
+export type { CattyRuntimeContext, CattyToolContext } from './cattyRuntimeContext';
+
+export { buildCattyStreamTimeouts, buildCattyCompactionTimeout } from './streamTimeouts';
+export { buildCattyToolApproval } from './cattyToolApproval';
 
 export {
   PermissionGrantStore,

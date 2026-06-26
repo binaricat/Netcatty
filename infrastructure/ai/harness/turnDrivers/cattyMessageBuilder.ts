@@ -206,11 +206,11 @@ export function buildCattySdkMessages(input: BuildCattySdkMessagesInput): ModelM
       if (!modelAttachments.length) {
         sdkMessages.push({ role: 'user', content: modelText });
       } else {
-        const parts: Array<{ type: 'text'; text: string } | { type: 'image'; image: string; mediaType?: string } | { type: 'file'; data: string; mediaType: string; filename?: string }> = [];
+        const parts: Array<{ type: 'text'; text: string } | { type: 'file'; data: string; mediaType: string; filename?: string }> = [];
         parts.push({ type: 'text', text: modelText });
         for (const att of modelAttachments) {
           if (att.mediaType.startsWith('image/')) {
-            parts.push({ type: 'image', image: att.base64Data, mediaType: att.mediaType });
+            parts.push({ type: 'file', data: att.base64Data, mediaType: att.mediaType });
           } else {
             parts.push({ type: 'file', data: att.base64Data, mediaType: att.mediaType, filename: att.filename });
           }

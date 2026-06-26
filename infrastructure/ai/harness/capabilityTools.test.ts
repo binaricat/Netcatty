@@ -1,6 +1,10 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { createCattyToolsFromCatalog, resolveSessionQueueKeyForTests } from './capabilityTools';
+import {
+  createCattyToolsFromCatalog,
+  resolveSessionQueueKeyForTests,
+  withCattyToolContext,
+} from './capabilityTools';
 import { ToolOutputStore } from './toolOutputStore';
 
 describe('capabilityTools session queue keys', () => {
@@ -35,7 +39,7 @@ describe('capabilityTools result fitting', () => {
   it('truncates large vault note content and stores the full note body behind a handle', async () => {
     const store = new ToolOutputStore();
     const body = `${'note line\n'.repeat(1000)}important ending`;
-    const tools = createCattyToolsFromCatalog(
+    const { tools, toolsContext } = createCattyToolsFromCatalog(
       {
         aiCapability: async () => ({
           ok: true,
@@ -54,9 +58,12 @@ describe('capabilityTools result fitting', () => {
       store,
     );
 
-    const result = await tools.vault_notes_get.execute(
+    const result = await withCattyToolContext(
+      tools.vault_notes_get,
+      toolsContext.vault_notes_get,
+      'call-1',
+    ).execute(
       { noteId: 'note-1' },
-      { toolCallId: 'call-1', messages: [] },
     ) as { note: { content: string } };
 
     assert.notEqual(result.note.content, body);
@@ -74,7 +81,7 @@ describe('capabilityTools result fitting', () => {
       capabilityId: 'vault.notes.get',
       content: body,
     });
-    const tools = createCattyToolsFromCatalog(
+    const { tools, toolsContext } = createCattyToolsFromCatalog(
       {},
       { sessions: [] },
       [],
@@ -84,9 +91,12 @@ describe('capabilityTools result fitting', () => {
       store,
     );
 
-    const result = await tools.tool_output_read.execute(
+    const result = await withCattyToolContext(
+      tools.tool_output_read,
+      toolsContext.tool_output_read,
+      'call-1',
+    ).execute(
       { handleId: handle.id, mode: 'full', maxChars: body.length + 100 },
-      { toolCallId: 'call-1', messages: [] },
     ) as { content: string };
 
     assert.equal(result.content, body);
@@ -95,7 +105,7 @@ describe('capabilityTools result fitting', () => {
 
 describe('capabilityTools terminal context reader', () => {
   it('reads terminal context from the only scoped terminal when sessionId is omitted', async () => {
-    const tools = createCattyToolsFromCatalog(
+    const { tools, toolsContext } = createCattyToolsFromCatalog(
       {},
       {
         sessions: [{
@@ -126,9 +136,12 @@ describe('capabilityTools terminal context reader', () => {
       'chat-1',
     );
 
-    const result = await tools.terminal_read_context.execute(
+    const result = await withCattyToolContext(
+      tools.terminal_read_context,
+      toolsContext.terminal_read_context,
+      'call-1',
+    ).execute(
       { range: 'tail', maxLines: 20 },
-      { toolCallId: 'call-1', messages: [] },
     ) as { sessionId: string; content: string; range: string };
 
     assert.equal(result.sessionId, 'session-1');
@@ -139,7 +152,7 @@ describe('capabilityTools terminal context reader', () => {
   it('fits large terminal context reads through the shared tool output store', async () => {
     const store = new ToolOutputStore();
     const body = `${'terminal line output '.repeat(900)}important ending`;
-    const tools = createCattyToolsFromCatalog(
+    const { tools, toolsContext } = createCattyToolsFromCatalog(
       {},
       {
         sessions: [{
@@ -171,9 +184,12 @@ describe('capabilityTools terminal context reader', () => {
       store,
     );
 
-    const result = await tools.terminal_read_context.execute(
+    const result = await withCattyToolContext(
+      tools.terminal_read_context,
+      toolsContext.terminal_read_context,
+      'call-1',
+    ).execute(
       { range: 'viewport' },
-      { toolCallId: 'call-1', messages: [] },
     ) as { content: string };
 
     assert.notEqual(result.content, body);
@@ -184,7 +200,7 @@ describe('capabilityTools terminal context reader', () => {
   });
 
   it('asks for sessionId when multiple scoped terminals are available', async () => {
-    const tools = createCattyToolsFromCatalog(
+    const { tools, toolsContext } = createCattyToolsFromCatalog(
       {},
       {
         sessions: [
@@ -198,9 +214,12 @@ describe('capabilityTools terminal context reader', () => {
       'chat-1',
     );
 
-    const result = await tools.terminal_read_context.execute(
+    const result = await withCattyToolContext(
+      tools.terminal_read_context,
+      toolsContext.terminal_read_context,
+      'call-1',
+    ).execute(
       { range: 'viewport' },
-      { toolCallId: 'call-1', messages: [] },
     ) as { error?: string };
 
     assert.match(result.error ?? '', /sessionId/);

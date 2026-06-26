@@ -305,8 +305,8 @@ function cleanup(fns: (() => void)[]) {
 }
 
 /**
- * Handle a single stream event from the AI SDK fullStream.
- * Events come from `streamText().fullStream` in the main process.
+ * Handle a single stream event from the AI SDK stream.
+ * Events come from `streamText().stream` in the main process.
  */
 function handleStreamEvent(event: StreamEvent, callbacks: SdkAgentCallbacks): boolean {
   switch (event.type) {

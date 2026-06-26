@@ -1,4 +1,4 @@
-import { streamText, stepCountIs, type ModelMessage } from 'ai';
+import { streamText, isStepCount, type ModelMessage } from 'ai';
 import { classifyError } from '../../errorClassifier';
 import { isRequestTooLargeError } from '../../errorClassifier';
 import { isSdkStreamStateError } from '../../shared/streamStateErrors';
@@ -10,7 +10,10 @@ import { mapCattyStreamChunkToAgentEvents } from '../agentEventAdapter';
 import type { AgentEvent } from '../types';
 import type { ProviderAdvancedParams } from '../../types';
 import { createModelFromConfig } from '../../sdk/providers';
-import { createCattyToolsFromCatalog } from '../capabilityTools';
+import type { CattyToolsBundle } from '../capabilityTools';
+import { buildCattyToolApproval } from '../cattyToolApproval';
+import type { CattyRuntimeContext } from '../cattyRuntimeContext';
+import { buildCattyStreamTimeouts } from '../streamTimeouts';
 import {
   extractProviderContinuationFromRawChunk,
   mergeProviderContinuation,
@@ -19,21 +22,25 @@ import {
   type ProviderContinuation,
 } from '../../providerContinuation';
 import {
+  formatToolErrorContent,
   generateId,
   isToolResultError,
+  resolveStreamChunkToolCallId,
   type CattyProviderContinuationContext,
   type ErrorChunk,
   type RawChunk,
   type ReasoningChunk,
   type StreamChunk,
   type TextDeltaChunk,
+  type ToolApprovalResponseChunk,
   type ToolCallChunk,
+  type ToolErrorChunk,
+  type ToolOutputDeniedChunk,
   type ToolResultChunk,
 } from '../../../../components/ai/hooks/aiChatStreamingSupport';
 import type { ChatMessage } from '../../types';
 
 export type CattyModel = ReturnType<typeof createModelFromConfig>;
-export type CattyTools = ReturnType<typeof createCattyToolsFromCatalog>;
 
 export interface CattyStreamUiSink {
   addMessageToSession: (sessionId: string, message: ChatMessage) => void;
@@ -44,7 +51,7 @@ export interface ProcessCattyStreamInput {
   streamSessionId: string;
   model: CattyModel;
   systemPrompt: string;
-  tools: CattyTools;
+  toolsBundle: CattyToolsBundle;
   sdkMessages: ModelMessage[];
   signal: AbortSignal;
   currentAssistantMsgId: string;
@@ -52,17 +59,41 @@ export interface ProcessCattyStreamInput {
   advancedParams?: ProviderAdvancedParams;
   continuationContext?: CattyProviderContinuationContext;
   turnId?: string;
+  runtimeContext: CattyRuntimeContext;
   onAgentEvent?: (event: AgentEvent) => void;
-  prepareStep?: (args: { stepNumber: number; messages: ModelMessage[] }) => Promise<{ messages: ModelMessage[] } | undefined>;
+  prepareStep?: (args: {
+    stepNumber: number;
+    messages: ModelMessage[];
+    runtimeContext: CattyRuntimeContext;
+  }) => Promise<{ messages: ModelMessage[]; runtimeContext?: CattyRuntimeContext } | undefined>;
   ui: CattyStreamUiSink;
 }
 
-export async function processCattyStream(input: ProcessCattyStreamInput): Promise<{ usage?: { promptTokens?: number; completionTokens?: number; totalTokens?: number } }> {
+export interface ProcessCattyStreamResult {
+  usage?: {
+    promptTokens?: number;
+    completionTokens?: number;
+    totalTokens?: number;
+  };
+  performance?: {
+    responseTimeMs?: number;
+    timeToFirstOutputMs?: number;
+    outputTokensPerSecond?: number;
+  };
+}
+
+/** Skip trace emission for SDK-internal stream bookkeeping errors we suppress in UI. */
+export function shouldEmitAgentEventsForStreamChunk(chunk: StreamChunk): boolean {
+  if (chunk.type !== 'error') return true;
+  return !isSdkStreamStateError((chunk as ErrorChunk).error);
+}
+
+export async function processCattyStream(input: ProcessCattyStreamInput): Promise<ProcessCattyStreamResult> {
   const {
     streamSessionId,
     model,
     systemPrompt,
-    tools,
+    toolsBundle,
     sdkMessages,
     signal,
     currentAssistantMsgId,
@@ -70,22 +101,97 @@ export async function processCattyStream(input: ProcessCattyStreamInput): Promis
     advancedParams,
     continuationContext,
     turnId,
+    runtimeContext: initialRuntimeContext,
     onAgentEvent,
     prepareStep,
     ui,
   } = input;
 
+  let runtimeContext = initialRuntimeContext;
+  const { tools, toolsContext } = toolsBundle;
+
   const result = streamText({
     model,
     messages: sdkMessages,
-    system: systemPrompt,
+    instructions: systemPrompt,
     tools,
-    stopWhen: stepCountIs(maxIterations),
+    toolsContext,
+    runtimeContext,
+    toolApproval: buildCattyToolApproval({
+      permissionMode: runtimeContext.permissionMode,
+      chatSessionId: runtimeContext.chatSessionId,
+    }),
+    stopWhen: isStepCount(maxIterations),
     abortSignal: signal,
-    includeRawChunks: true,
+    include: { rawChunks: true },
+    timeout: buildCattyStreamTimeouts({ permissionMode: runtimeContext.permissionMode }),
+    telemetry: {
+      functionId: `catty-${runtimeContext.agentKind}`,
+      metadata: {
+        chatSessionId: runtimeContext.chatSessionId,
+        turnId: runtimeContext.turnId,
+      },
+    },
+    onStart: ({ callId, modelId, runtimeContext: startContext }) => {
+      onAgentEvent?.({
+        id: `model-call-start-${callId}`,
+        type: 'model_call_start',
+        sessionId: streamSessionId,
+        chatSessionId: startContext.chatSessionId,
+        backend: 'catty',
+        timestamp: Date.now(),
+        turnId,
+        callId,
+        modelId,
+        providerId: startContext.providerId,
+      } as AgentEvent);
+    },
+    onStepEnd: (step) => {
+      const usage = step.usage;
+      onAgentEvent?.({
+        id: `step-end-${step.callId}-${step.stepNumber}`,
+        type: 'step_end',
+        sessionId: streamSessionId,
+        chatSessionId: step.runtimeContext.chatSessionId,
+        backend: 'catty',
+        timestamp: Date.now(),
+        turnId,
+        callId: step.callId,
+        stepNumber: step.stepNumber,
+        modelId: step.model.modelId,
+        finishReason: step.finishReason,
+        promptTokens: usage.inputTokens ?? 0,
+        completionTokens: usage.outputTokens ?? 0,
+        totalTokens: (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0),
+      } as AgentEvent);
+    },
+    onEnd: ({ callId, usage, runtimeContext: endContext }) => {
+      if (usage) {
+        onAgentEvent?.({
+          id: `usage-${callId}`,
+          type: 'usage',
+          sessionId: streamSessionId,
+          chatSessionId: endContext.chatSessionId,
+          backend: 'catty',
+          timestamp: Date.now(),
+          turnId,
+          promptTokens: usage.inputTokens ?? 0,
+          completionTokens: usage.outputTokens ?? 0,
+          totalTokens: (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0),
+          estimated: false,
+        } as AgentEvent);
+      }
+    },
     ...(prepareStep ? {
-      prepareStep: async ({ stepNumber, messages }) => {
-        const prepared = await prepareStep({ stepNumber, messages });
+      prepareStep: async ({ stepNumber, messages, runtimeContext: stepRuntimeContext }) => {
+        const prepared = await prepareStep({
+          stepNumber,
+          messages,
+          runtimeContext: stepRuntimeContext as CattyRuntimeContext,
+        });
+        if (prepared?.runtimeContext) {
+          runtimeContext = prepared.runtimeContext;
+        }
         return prepared ?? { messages };
       },
     } : {}),
@@ -99,7 +205,7 @@ export async function processCattyStream(input: ProcessCattyStreamInput): Promis
   let activeMsgId = currentAssistantMsgId;
   let lastAddedRole: 'assistant' | 'tool' = 'assistant';
   let hadToolProgress = false;
-  const reader = result.fullStream.getReader();
+  const reader = result.stream.getReader();
 
   let pendingText = '';
   let rafId: number | null = null;
@@ -171,6 +277,40 @@ export async function processCattyStream(input: ProcessCattyStreamInput): Promis
     }
   };
 
+  const appendToolResultToUi = (toolCallId: string, content: string, isError: boolean) => {
+    cancelPendingFlush();
+    flushText();
+    hadToolProgress = true;
+    ui.updateMessageById(streamSessionId, activeMsgId, msg =>
+      msg.role === 'assistant' && msg.executionStatus === 'running'
+        ? { ...msg, executionStatus: 'completed', statusText: undefined } : msg,
+    );
+    ui.addMessageToSession(streamSessionId, {
+      id: generateId(),
+      role: 'tool',
+      content: '',
+      toolResults: [{
+        toolCallId,
+        content,
+        isError,
+      }],
+      timestamp: Date.now(),
+      executionStatus: 'completed',
+    });
+    lastAddedRole = 'tool';
+  };
+
+  const deniedToolResultIds = new Set<string>();
+  const appendDeniedToolResultToUi = (toolCallId: string, reason?: unknown) => {
+    if (deniedToolResultIds.has(toolCallId)) return;
+    deniedToolResultIds.add(toolCallId);
+    appendToolResultToUi(
+      toolCallId,
+      formatToolErrorContent(reason, 'Tool execution denied.'),
+      true,
+    );
+  };
+
   try {
     while (true) {
       let readResult: ReadableStreamReadResult<unknown>;
@@ -185,12 +325,14 @@ export async function processCattyStream(input: ProcessCattyStreamInput): Promis
       const { done, value } = readResult;
       if (done) break;
       const chunk = value as StreamChunk;
-      for (const agentEvent of mapCattyStreamChunkToAgentEvents(chunk, {
-        sessionId: streamSessionId,
-        chatSessionId: streamSessionId,
-        turnId,
-      })) {
-        onAgentEvent?.(agentEvent);
+      if (shouldEmitAgentEventsForStreamChunk(chunk)) {
+        for (const agentEvent of mapCattyStreamChunkToAgentEvents(chunk, {
+          sessionId: streamSessionId,
+          chatSessionId: streamSessionId,
+          turnId,
+        })) {
+          onAgentEvent?.(agentEvent);
+        }
       }
       switch (chunk.type) {
         case 'text':
@@ -250,7 +392,18 @@ export async function processCattyStream(input: ProcessCattyStreamInput): Promis
         case 'finish':
         case 'start-step':
         case 'finish-step':
+        case 'tool-approval-request':
           break;
+        case 'tool-approval-response': {
+          const typedChunk = chunk as ToolApprovalResponseChunk;
+          if (typedChunk.approved === false) {
+            const toolCallId = resolveStreamChunkToolCallId(typedChunk);
+            if (toolCallId) {
+              appendDeniedToolResultToUi(toolCallId, typedChunk.reason);
+            }
+          }
+          break;
+        }
         case 'tool-call': {
           cancelPendingFlush();
           flushText();
@@ -278,31 +431,27 @@ export async function processCattyStream(input: ProcessCattyStreamInput): Promis
           break;
         }
         case 'tool-result': {
-          cancelPendingFlush();
-          flushText();
           const typedChunk = chunk as ToolResultChunk;
-          hadToolProgress = true;
-          ui.updateMessageById(streamSessionId, activeMsgId, msg =>
-            msg.role === 'assistant' && msg.executionStatus === 'running'
-              ? { ...msg, executionStatus: 'completed', statusText: undefined } : msg,
-          );
           const toolOutput = typedChunk.output ?? typedChunk.result;
-          const toolError = isToolResultError(toolOutput);
-          ui.addMessageToSession(streamSessionId, {
-            id: generateId(),
-            role: 'tool',
-            content: '',
-            toolResults: [{
-              toolCallId: typedChunk.toolCallId,
-              content: typeof toolOutput === 'string'
-                ? toolOutput
-                : JSON.stringify(toolOutput),
-              isError: toolError,
-            }],
-            timestamp: Date.now(),
-            executionStatus: 'completed',
-          });
-          lastAddedRole = 'tool';
+          appendToolResultToUi(
+            typedChunk.toolCallId,
+            typeof toolOutput === 'string' ? toolOutput : JSON.stringify(toolOutput),
+            isToolResultError(toolOutput),
+          );
+          break;
+        }
+        case 'tool-error': {
+          const typedChunk = chunk as ToolErrorChunk;
+          appendToolResultToUi(
+            typedChunk.toolCallId,
+            formatToolErrorContent(typedChunk.error),
+            true,
+          );
+          break;
+        }
+        case 'tool-output-denied': {
+          const typedChunk = chunk as ToolOutputDeniedChunk;
+          appendDeniedToolResultToUi(typedChunk.toolCallId);
           break;
         }
         case 'error': {
@@ -346,11 +495,34 @@ export async function processCattyStream(input: ProcessCattyStreamInput): Promis
   }
 
   const usage = await result.usage;
+  const finalStep = await result.finalStep;
+  const performance = finalStep?.performance;
+
+  if (performance) {
+    onAgentEvent?.({
+      id: `performance-${turnId ?? Date.now()}`,
+      type: 'performance',
+      sessionId: streamSessionId,
+      chatSessionId: runtimeContext.chatSessionId,
+      backend: 'catty',
+      timestamp: Date.now(),
+      turnId,
+      responseTimeMs: performance.responseTimeMs,
+      timeToFirstOutputMs: performance.timeToFirstOutputMs,
+      outputTokensPerSecond: performance.outputTokensPerSecond,
+    } as AgentEvent);
+  }
+
   return {
     usage: usage ? {
       promptTokens: usage.inputTokens,
       completionTokens: usage.outputTokens,
       totalTokens: (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0),
+    } : undefined,
+    performance: performance ? {
+      responseTimeMs: performance.responseTimeMs,
+      timeToFirstOutputMs: performance.timeToFirstOutputMs,
+      outputTokensPerSecond: performance.outputTokensPerSecond,
     } : undefined,
   };
 }

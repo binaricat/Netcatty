@@ -14,7 +14,6 @@ import {
   type ToolDeps,
   type ToolExecResult,
 } from '../shared/toolExecutors';
-import { requestApproval } from '../shared/approvalGate';
 import { reserveSessionSlot } from '../shared/sessionExecutionQueue';
 import { fitTerminalExecuteResultForModel } from './terminalCompression';
 import { fitLargeToolResultForModel } from './toolResultFitting';
@@ -25,6 +24,11 @@ import {
   type ToolResultDedup,
 } from './toolResultDedup';
 import cattyToolSpecs from './generated/cattyToolSpecs.json';
+import {
+  cattyToolContextSchema,
+  toolDepsFromContext,
+  type CattyToolContext,
+} from './cattyRuntimeContext';
 
 type FieldShape = {
   type: string;
@@ -43,6 +47,11 @@ type CattyToolSpec = {
     write: boolean;
     bypassesApproval: boolean;
   };
+};
+
+export type CattyToolsBundle = {
+  tools: Record<string, ReturnType<typeof tool>>;
+  toolsContext: Record<string, CattyToolContext>;
 };
 
 function buildZodObject(shape: Record<string, FieldShape>): z.ZodObject<Record<string, z.ZodTypeAny>> {
@@ -271,8 +280,6 @@ function resolveSessionQueueKey(
   args: Record<string, unknown>,
   chatSessionId?: string,
 ): string | null {
-  // Read-only harness tools only inspect renderer context (plus optional host
-  // metadata). They must not queue behind terminal.execute on the same sessionId.
   if (spec.capabilityId.startsWith('harness.') && !spec.policy.write) {
     return null;
   }
@@ -292,19 +299,18 @@ export function resolveSessionQueueKeyForTests(
   return resolveSessionQueueKey(spec as CattyToolSpec, args, chatSessionId);
 }
 
-function createCatalogTool(
-  spec: CattyToolSpec,
-  deps: ToolDeps,
-  permissionMode: AIPermissionMode,
-  toolOutputStore?: ToolOutputStore,
-  toolResultDedup?: ToolResultDedup,
-) {
+function createCatalogTool(spec: CattyToolSpec) {
   const inputSchema = buildZodObject(spec.inputShape);
 
   return tool({
     description: spec.description,
     inputSchema,
-    execute: async (args, { toolCallId, abortSignal }) => {
+    contextSchema: cattyToolContextSchema,
+    execute: async (args, { toolCallId: _toolCallId, abortSignal, context }) => {
+      const toolContext = context as CattyToolContext;
+      const deps = toolDepsFromContext(toolContext);
+      const { toolOutputStore, toolResultDedup } = toolContext;
+
       const queueKey = resolveSessionQueueKey(
         spec,
         args as Record<string, unknown>,
@@ -313,24 +319,6 @@ function createCatalogTool(
       const slot = queueKey ? reserveSessionSlot(queueKey) : null;
 
       try {
-        if (
-          permissionMode === 'confirm'
-          && spec.policy.write
-          && !spec.policy.bypassesApproval
-        ) {
-          const approved = await requestApproval(
-            toolCallId,
-            spec.toolName,
-            args as Record<string, unknown>,
-            deps.chatSessionId,
-            undefined,
-            spec.capabilityId,
-          );
-          if (!approved) {
-            return { error: 'User denied tool execution.' };
-          }
-        }
-
         if (abortSignal?.aborted) {
           return { error: 'Tool call cancelled before it could start.' };
         }
@@ -451,6 +439,30 @@ function createCatalogTool(
   });
 }
 
+export function buildCattyToolContext(input: {
+  bridge: NetcattyBridge;
+  context: ToolDeps['context'];
+  commandBlocklist?: string[];
+  permissionMode: AIPermissionMode;
+  webSearchConfig?: WebSearchConfig;
+  chatSessionId?: string;
+  toolOutputStore?: ToolOutputStore;
+  toolResultDedup?: ToolResultDedup;
+}): CattyToolContext {
+  return {
+    bridge: input.bridge,
+    chatSessionId: input.chatSessionId,
+    permissionMode: input.permissionMode,
+    commandBlocklist: input.commandBlocklist,
+    webSearchConfig: input.webSearchConfig,
+    getExecutorContext: typeof input.context === 'function'
+      ? input.context
+      : () => input.context,
+    toolOutputStore: input.toolOutputStore,
+    toolResultDedup: input.toolResultDedup,
+  };
+}
+
 export function createCattyToolsFromCatalog(
   bridge: NetcattyBridge,
   context: ToolDeps['context'],
@@ -460,29 +472,49 @@ export function createCattyToolsFromCatalog(
   chatSessionId?: string,
   toolOutputStore?: ToolOutputStore,
   toolResultDedup?: ToolResultDedup,
-) {
-  const deps: ToolDeps = {
+): CattyToolsBundle {
+  const sharedContext = buildCattyToolContext({
     bridge,
     context,
     commandBlocklist,
     permissionMode,
     webSearchConfig,
     chatSessionId,
-  };
+    toolOutputStore,
+    toolResultDedup,
+  });
 
   const catalogTools: Record<string, ReturnType<typeof tool>> = {};
+  const toolsContext: Record<string, CattyToolContext> = {};
+
   for (const rawSpec of cattyToolSpecs as CattyToolSpec[]) {
     if (rawSpec.capabilityId === 'harness.web.search' && !isWebSearchReady(webSearchConfig)) {
       continue;
     }
-    catalogTools[rawSpec.toolName] = createCatalogTool(
-      rawSpec,
-      deps,
-      permissionMode,
-      toolOutputStore,
-      toolResultDedup,
-    );
+    catalogTools[rawSpec.toolName] = createCatalogTool(rawSpec);
+    toolsContext[rawSpec.toolName] = sharedContext;
   }
 
-  return catalogTools;
+  return { tools: catalogTools, toolsContext };
 }
+
+/** Test helper: attach shared context when calling tool.execute directly. */
+export function withCattyToolContext<T extends { execute: (...args: never[]) => unknown }>(
+  toolInstance: T,
+  context: CattyToolContext,
+  toolCallId = 'test-call',
+): T {
+  const original = toolInstance.execute.bind(toolInstance);
+  return {
+    ...toolInstance,
+    execute: (input: Parameters<T['execute']>[0], options?: Partial<Parameters<T['execute']>[1]>) =>
+      original(input, {
+        toolCallId,
+        messages: [],
+        ...options,
+        context,
+      } as Parameters<T['execute']>[1]),
+  } as T;
+}
+
+export { tryFetchHostEnvironment };

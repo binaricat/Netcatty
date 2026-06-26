@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { stepCountIs, streamText, tool } from 'ai';
+import { isStepCount, streamText, tool } from 'ai';
 import { z } from 'zod';
 import { createBridgeFetchForSDK, createModelFromConfig } from './sdk/providers';
 import type { OpenAIChatAssistantFields } from './providerContinuation';
@@ -373,11 +373,11 @@ test('replays reasoning_content through the SDK tool loop', async (t) => {
         execute: async () => ({ ok: true }),
       }),
     },
-    stopWhen: stepCountIs(2),
-    includeRawChunks: true,
+    stopWhen: isStepCount(2),
+    include: { rawChunks: true },
   });
 
-  for await (const _chunk of result.fullStream) {
+  for await (const _chunk of result.stream) {
     // Drain the stream so the SDK completes the tool loop.
   }
 
@@ -474,11 +474,11 @@ test('continues OpenAI-compatible tool streams when the introductory tool chunk 
         execute: async () => ({ ok: true }),
       }),
     },
-    stopWhen: stepCountIs(2),
+    stopWhen: isStepCount(2),
   });
 
   let text = '';
-  for await (const chunk of result.fullStream) {
+  for await (const chunk of result.stream) {
     if (chunk.type === 'text-delta') {
       text += chunk.text;
     }
@@ -579,11 +579,11 @@ test('continues OpenAI-compatible streams when provider chunks omit the top-leve
         execute: async () => ({ ok: true }),
       }),
     },
-    stopWhen: stepCountIs(2),
+    stopWhen: isStepCount(2),
   });
 
   let text = '';
-  for await (const chunk of result.fullStream) {
+  for await (const chunk of result.stream) {
     if (chunk.type === 'text-delta') {
       text += chunk.text;
     }
@@ -690,11 +690,11 @@ test('continues DeepSeek-compatible tool streams when empty id, type, and name p
         },
       }),
     },
-    stopWhen: stepCountIs(2),
+    stopWhen: isStepCount(2),
   });
 
   let text = '';
-  for await (const chunk of result.fullStream) {
+  for await (const chunk of result.stream) {
     if (chunk.type === 'text-delta') {
       text += chunk.text;
     }
@@ -808,11 +808,11 @@ test('continues DeepSeek-compatible tool streams when later argument chunks keep
         },
       }),
     },
-    stopWhen: stepCountIs(2),
+    stopWhen: isStepCount(2),
   });
 
   let text = '';
-  for await (const chunk of result.fullStream) {
+  for await (const chunk of result.stream) {
     if (chunk.type === 'text-delta') {
       text += chunk.text;
     }
@@ -915,11 +915,11 @@ test('continues OpenAI-compatible tool streams when arguments arrive before the 
         },
       }),
     },
-    stopWhen: stepCountIs(2),
+    stopWhen: isStepCount(2),
   });
 
   let text = '';
-  for await (const chunk of result.fullStream) {
+  for await (const chunk of result.stream) {
     if (chunk.type === 'text-delta') {
       text += chunk.text;
     }

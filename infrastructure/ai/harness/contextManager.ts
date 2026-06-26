@@ -1,5 +1,6 @@
 import type { ModelMessage } from 'ai';
 import type { ChatMessage, AIPermissionMode } from '../types';
+import { isStepHandleNoticeMessage } from './agentEventAdapter';
 import {
   DEFAULT_CONTEXT_WINDOW_TOKENS,
   DEFAULT_PROTECT_RECENT_MESSAGES,
@@ -207,13 +208,19 @@ export function extractLatestUserGoal(messages: ModelMessage[] | ChatMessage[]):
 /** Step-level typed pruning — no LLM summarize (reserved for pre-turn / 413). */
 export async function prepareStepContext(
   input: PrepareStepContextInput,
-): Promise<ContextPrepareResult> {
+): Promise<ContextPrepareResult & { runtimeContext?: import('./cattyRuntimeContext').CattyRuntimeContext }> {
   const typed = compressMessagesForRequestTooLargeRetry(input.messages);
   let working = typed.messages;
   let didAdjust = typed.didAdjust;
 
   const pendingHandles = input.toolOutputStore?.listPendingHandles(input.chatSessionId ?? input.sessionId) ?? [];
   if (pendingHandles.length > 0 && input.stepNumber > 0) {
+    // v7: prepareStep message overrides carry forward — strip prior step notices first.
+    working = working.filter((message) => {
+      if (message.role !== 'user') return true;
+      const content = typeof message.content === 'string' ? message.content : '';
+      return !isStepHandleNoticeMessage(content);
+    });
     const notice: ModelMessage = {
       role: 'user',
       content: `[step ${input.stepNumber}] Tool output handles available: ${pendingHandles.map(h => h.id).join(', ')}`,
@@ -231,21 +238,30 @@ export async function prepareStepContext(
     providerId: input.providerId,
   });
 
+  const trace = didAdjust ? {
+    trigger: 'pre-turn' as const,
+    estimatedTokensBefore: before.tokens,
+    estimatedTokensAfter: after.tokens,
+    messagesBefore: input.messages.length,
+    messagesAfter: working.length,
+    compressedMessageCount: 0,
+    retainedTailCount: working.length,
+    didTypedCompression: typed.didAdjust,
+    didLlmSummarize: false,
+    did413Fallback: false,
+    estimatorKind: before.estimatorKind,
+  } : undefined;
+
+  const runtimeContext = {
+    ...input.runtimeContext,
+    ...(trace ? { lastCompaction: trace, lastStepAdjusted: didAdjust } : {}),
+    ...(didAdjust ? { lastStepAdjusted: true } : {}),
+  };
+
   return {
     messages: working,
     didAdjust,
-    trace: didAdjust ? {
-      trigger: 'pre-turn',
-      estimatedTokensBefore: before.tokens,
-      estimatedTokensAfter: after.tokens,
-      messagesBefore: input.messages.length,
-      messagesAfter: working.length,
-      compressedMessageCount: 0,
-      retainedTailCount: working.length,
-      didTypedCompression: typed.didAdjust,
-      didLlmSummarize: false,
-      did413Fallback: false,
-      estimatorKind: before.estimatorKind,
-    } : undefined,
+    trace,
+    runtimeContext,
   };
 }

@@ -12,6 +12,7 @@ import {
   prepareTurnContext,
 } from './contextManager';
 import type { AgentEventListener, CompactionTrace } from './types';
+import { buildCattyCompactionTimeout } from './streamTimeouts';
 
 export interface CompactCattyMessagesInput {
   messages: ModelMessage[];
@@ -61,7 +62,7 @@ export async function compactCattyMessages(
     input.onStatusText?.('Compacting earlier context...');
     const result = await generateText({
       model: input.model,
-      system: CONTEXT_COMPACTION_SYSTEM_PROMPT,
+      instructions: CONTEXT_COMPACTION_SYSTEM_PROMPT,
       messages: [{
         role: 'user',
         content: `Summarize this earlier conversation context for the next model turn:\n\n${formatMessagesForCompaction(messagesToSummarize)}`,
@@ -69,6 +70,7 @@ export async function compactCattyMessages(
       abortSignal: input.abortSignal,
       maxOutputTokens: 1600,
       temperature: 0,
+      timeout: buildCattyCompactionTimeout(),
     });
     return result.text;
   };

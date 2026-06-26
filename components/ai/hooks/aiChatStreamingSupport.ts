@@ -5,7 +5,7 @@ import type {
   ProviderContinuationSource,
 } from '../../../infrastructure/ai/providerContinuation';
 
-/** Shape of a text/text-delta chunk from the Vercel AI SDK fullStream. */
+/** Shape of a text/text-delta chunk from the Vercel AI SDK stream. */
 export interface TextDeltaChunk {
   type: 'text' | 'text-delta';
   text?: string;
@@ -13,7 +13,7 @@ export interface TextDeltaChunk {
   providerMetadata?: unknown;
 }
 
-/** Shape of a reasoning chunk from the Vercel AI SDK fullStream. */
+/** Shape of a reasoning chunk from the Vercel AI SDK stream. */
 export interface ReasoningChunk {
   type: 'reasoning' | 'reasoning-start' | 'reasoning-delta';
   text?: string;
@@ -22,13 +22,13 @@ export interface ReasoningChunk {
   providerMetadata?: unknown;
 }
 
-/** Shape of a raw provider chunk from the Vercel AI SDK fullStream. */
+/** Shape of a raw provider chunk from the Vercel AI SDK stream. */
 export interface RawChunk {
   type: 'raw';
   rawValue: unknown;
 }
 
-/** Shape of a tool-call chunk from the Vercel AI SDK fullStream. */
+/** Shape of a tool-call chunk from the Vercel AI SDK stream. */
 export interface ToolCallChunk {
   type: 'tool-call';
   toolCallId: string;
@@ -38,12 +38,64 @@ export interface ToolCallChunk {
   providerMetadata?: unknown;
 }
 
-/** Shape of a tool-result chunk from the Vercel AI SDK fullStream. */
+/** Shape of a tool-result chunk from the Vercel AI SDK stream. */
 export interface ToolResultChunk {
   type: 'tool-result';
   toolCallId: string;
   output?: unknown;
   result?: unknown;
+}
+
+/** Shape of a tool-error chunk from the Vercel AI SDK stream. */
+export interface ToolErrorChunk {
+  type: 'tool-error';
+  toolCallId: string;
+  toolName?: string;
+  error?: unknown;
+}
+
+/** Shape of a tool-output-denied chunk from the Vercel AI SDK stream. */
+export interface ToolOutputDeniedChunk {
+  type: 'tool-output-denied';
+  toolCallId: string;
+  toolName?: string;
+}
+
+/** Nested tool call reference on approval stream chunks. */
+export interface StreamChunkToolCallRef {
+  toolCallId: string;
+  toolName: string;
+  input?: unknown;
+  args?: unknown;
+}
+
+/** Shape of a tool-approval-response chunk from the Vercel AI SDK stream. */
+export interface ToolApprovalResponseChunk {
+  type: 'tool-approval-response';
+  approvalId?: string;
+  approved?: boolean;
+  reason?: string;
+  toolCallId?: string;
+  toolName?: string;
+  toolCall?: StreamChunkToolCallRef;
+}
+
+/** Resolve toolCallId from flat or nested approval/tool chunks. */
+export function resolveStreamChunkToolCallId(chunk: {
+  toolCallId?: string;
+  toolCall?: { toolCallId?: string };
+}): string | undefined {
+  return chunk.toolCallId ?? chunk.toolCall?.toolCallId;
+}
+
+/** Format tool execution failures for model/UI consumption. */
+export function formatToolErrorContent(error: unknown, fallback = 'Tool execution failed.'): string {
+  if (error instanceof Error) return JSON.stringify({ error: error.message });
+  if (typeof error === 'string') return JSON.stringify({ error });
+  if (error != null && typeof error === 'object' && 'error' in error) {
+    return JSON.stringify(error);
+  }
+  return JSON.stringify({ error: fallback });
 }
 
 /** Detect tool results that represent errors/denials (e.g. `{ error: "..." }` or `{ ok: false }`) */
@@ -72,7 +124,7 @@ export function isToolResultError(output: unknown): boolean {
   return false;
 }
 
-/** Shape of an error chunk from the Vercel AI SDK fullStream. */
+/** Shape of an error chunk from the Vercel AI SDK stream. */
 export interface ErrorChunk {
   type: 'error';
   error: unknown;
@@ -84,9 +136,12 @@ export type StreamChunk =
   | ReasoningChunk
   | ToolCallChunk
   | ToolResultChunk
+  | ToolErrorChunk
+  | ToolOutputDeniedChunk
+  | ToolApprovalResponseChunk
   | ErrorChunk
   | RawChunk
-  | { type: 'reasoning-end' | 'text-start' | 'text-end' | 'start' | 'finish' | 'start-step' | 'finish-step' | 'tool-approval-request' };
+  | { type: 'reasoning-end' | 'text-start' | 'text-end' | 'start' | 'finish' | 'start-step' | 'finish-step' | 'tool-approval-request'; approvalId?: string; toolCallId?: string; toolName?: string; approved?: boolean; toolCall?: StreamChunkToolCallRef; input?: unknown; args?: unknown };
 
 /** Shape of the netcatty bridge exposed on `window` (panel-specific subset). */
 export interface PanelBridge extends NetcattyBridge {

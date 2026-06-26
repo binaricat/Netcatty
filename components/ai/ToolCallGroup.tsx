@@ -36,7 +36,7 @@ const ToolCallGroup: React.FC<ToolCallGroupProps> = ({
   }, [defaultExpanded]);
 
   return (
-    <div className="rounded-md border border-border/20 bg-muted/5 overflow-hidden">
+    <div className="min-w-0 rounded-md border border-border/20 bg-muted/5 overflow-hidden">
       <button
         type="button"
         onClick={() => setExpanded((e) => !e)}

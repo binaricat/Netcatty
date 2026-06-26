@@ -32,9 +32,23 @@ Turn orchestration is centralized in **AgentRuntime**; the React hook `useAIChat
 | Drivers | `turnDrivers/cattyTurnDriver.ts`, `turnDrivers/externalSdkTurnDriver.ts` | Catty `streamText` + External SDK IPC; emit unified `AgentEvent`s |
 | Context | `contextManager.ts`, `tokenEstimator.ts`, `cattyRuntime.ts` | Pre-turn / 413 compaction, `prepareStepContext`, provider-aware token estimates |
 | Tools | `capabilityTools.ts`, `toolOutputStore.ts`, `toolResultDedup.ts` | Catalog tools, truncated output handles (`tool_output_read`), duplicate-read notices |
-| Trace | `traceStore.ts`, `agentEventAdapter.ts` | Session event log incl. `usage` and `CompactionTrace` |
+| Trace | `traceStore.ts`, `agentEventAdapter.ts` | Session event log incl. `usage`, `performance`, and `CompactionTrace` |
 
 **Stop** always goes through `stopAgentTurn()` (UI, `/stop`, MCP). Do not add parallel abort paths in hooks.
+
+### AI SDK v7 (Catty path)
+
+Catty sidebar turns use **Vercel AI SDK 7** via `streamText` in `turnDrivers/cattyStreamProcessor.ts`. Key conventions:
+
+| Concern | Module | Notes |
+|---------|--------|-------|
+| `runtimeContext` | `cattyRuntimeContext.ts` | Per-turn orchestration state (`chatSessionId`, `turnId`, `agentKind`, `permissionMode`, scope, `lastCompaction`). Passed to `prepareStep` and lifecycle callbacks. **Does not replace** pre-turn compaction or 413 handling. |
+| `toolsContext` | `capabilityTools.ts` | Per-tool keyed context (`bridge`, `getExecutorContext`, `toolOutputStore`, …). Tools read deps from `{ context }` in `execute`, not closure capture. |
+| `toolApproval` | `cattyToolApproval.ts` | Write-tool gating for Catty `streamText` only. Calls `requestApproval()` in confirm mode; observer auto-denies writes. **External MCP agents** still approve via main-process `mcpServerBridge` → `setupMcpApprovalBridge()` — unchanged. |
+| `timeout` | `streamTimeouts.ts` | `totalMs` / `stepMs` / `chunkMs` / `toolMs` on `streamText`; compaction `generateText` uses a shorter 90s timeout. |
+| Lifecycle | `cattyStreamProcessor.ts` | `onStart` → `model_call_start`; `onStepEnd` → per-step `step_end` usage; `onEnd` → turn-total `usage`; `finalStep.performance` → `performance` event. Distinct from `AgentRuntime` turn_start/turn_end. |
+
+Compaction remains **`prepareTurnContext` / `compactCattyMessages`** (pre-turn + 413-retry). Step-level pruning is **`prepareStepContext`** only (typed compression + handle notices, no LLM summarize).
 
 ### Capability exposure (Round 2 + gap fill)
 
