@@ -23,6 +23,7 @@ import {
 } from "../../infrastructure/config/defaultData";
 import {
   STORAGE_KEY_CONNECTION_LOGS,
+  STORAGE_KEY_CONNECTION_LOG_TERMINAL_DATA,
   STORAGE_KEY_GROUP_CONFIGS,
   STORAGE_KEY_GROUPS,
   STORAGE_KEY_HOSTS,
@@ -39,8 +40,15 @@ import {
   STORAGE_KEY_SNIPPETS,
   STORAGE_KEY_TERM_SETTINGS,
 } from "../../infrastructure/config/storageKeys";
-import { localStorageAdapter } from "../../infrastructure/persistence/localStorageAdapter";
+import { localStorageAdapter, LOCAL_STORAGE_ADAPTER_CHANGED_EVENT } from "../../infrastructure/persistence/localStorageAdapter";
 import { mergeGlobalHistoryOnAppend, sanitizeGlobalHistoryEntries } from "../../domain/globalHistory";
+import {
+  buildTerminalDataMapFromLogs,
+  mergeConnectionLogsFromStorage,
+  mergeTerminalDataIntoLogs,
+  pruneTerminalDataMapForStorage,
+  type ConnectionLogTerminalDataMap,
+} from "../../domain/connectionLogTerminalData";
 import { getNextVaultOrder, normalizeVaultOrder } from "../../domain/vaultOrder";
 import { loadSanitizedShellHistory } from "./shellHistoryPersistence";
 import {
@@ -148,6 +156,19 @@ const readLegacyLineTimestampsEnabled = (): boolean => {
   return stored?.showLineTimestamps === true;
 };
 
+const readConnectionLogTerminalDataMap = (): ConnectionLogTerminalDataMap =>
+  localStorageAdapter.read<ConnectionLogTerminalDataMap>(STORAGE_KEY_CONNECTION_LOG_TERMINAL_DATA) ?? {};
+
+const writeConnectionLogTerminalDataMap = (
+  logs: ConnectionLog[],
+  map: ConnectionLogTerminalDataMap,
+): void => {
+  const pruned = pruneTerminalDataMapForStorage(logs, map);
+  const existing = readConnectionLogTerminalDataMap();
+  if (JSON.stringify(existing) === JSON.stringify(pruned)) return;
+  localStorageAdapter.write(STORAGE_KEY_CONNECTION_LOG_TERMINAL_DATA, pruned);
+};
+
 export const useVaultState = () => {
   const [isInitialized, setIsInitialized] = useState(false);
   const [hosts, setHosts] = useState<Host[]>([]);
@@ -183,6 +204,41 @@ export const useVaultState = () => {
   const identitiesReadSeq = useRef(0);
   const proxyProfilesReadSeq = useRef(0);
   const groupConfigsReadSeq = useRef(0);
+  const connectionLogTerminalDataRef = useRef<ConnectionLogTerminalDataMap>({});
+
+  const syncConnectionLogTerminalDataMap = useCallback((logs: ConnectionLog[]) => {
+    const merged = pruneTerminalDataMapForStorage(
+      logs,
+      {
+        ...connectionLogTerminalDataRef.current,
+        ...buildTerminalDataMapFromLogs(logs),
+      },
+    );
+    connectionLogTerminalDataRef.current = merged;
+    writeConnectionLogTerminalDataMap(logs, merged);
+    return merged;
+  }, []);
+
+  const persistConnectionLogState = useCallback((
+    logs: ConnectionLog[],
+    options?: { pruneMainBlob?: boolean },
+  ) => {
+    syncConnectionLogTerminalDataMap(logs);
+    if (options?.pruneMainBlob) {
+      localStorageAdapter.write(STORAGE_KEY_CONNECTION_LOGS, pruneConnectionLogsForStorage(logs));
+    } else {
+      localStorageAdapter.write(STORAGE_KEY_CONNECTION_LOGS, logs);
+    }
+  }, [syncConnectionLogTerminalDataMap]);
+
+  const applyConnectionLogsFromStorage = useCallback((
+    prev: ConnectionLog[],
+    storedLogs: ConnectionLog[],
+    terminalDataMap: ConnectionLogTerminalDataMap,
+  ) => {
+    connectionLogTerminalDataRef.current = terminalDataMap;
+    return mergeConnectionLogsFromStorage(prev, storedLogs, terminalDataMap);
+  }, []);
 
   const updateHosts = useCallback((data: Host[]) => {
     const cleaned = normalizeVaultOrder(data.map(sanitizeHost));
@@ -403,12 +459,12 @@ export const useVaultState = () => {
         const final = [...updated, ...savedLogs].sort(
           (a, b) => b.startTime - a.startTime
         );
-        localStorageAdapter.write(STORAGE_KEY_CONNECTION_LOGS, pruneConnectionLogsForStorage(final));
+        persistConnectionLogState(final, { pruneMainBlob: true });
         return final;
       });
       return newLog.id;
     },
-    []
+    [persistConnectionLogState],
   );
 
   const updateConnectionLog = useCallback(
@@ -417,11 +473,11 @@ export const useVaultState = () => {
         const updated = prev.map((log) =>
           log.id === id ? { ...log, ...updates } : log
         );
-        localStorageAdapter.write(STORAGE_KEY_CONNECTION_LOGS, pruneConnectionLogsForStorage(updated));
+        persistConnectionLogState(updated, { pruneMainBlob: true });
         return updated;
       });
     },
-    []
+    [persistConnectionLogState],
   );
 
   const toggleConnectionLogSaved = useCallback((id: string) => {
@@ -429,26 +485,29 @@ export const useVaultState = () => {
       const updated = prev.map((log) =>
         log.id === id ? { ...log, saved: !log.saved } : log
       );
-      localStorageAdapter.write(STORAGE_KEY_CONNECTION_LOGS, updated);
+      persistConnectionLogState(updated, { pruneMainBlob: false });
       return updated;
     });
-  }, []);
+  }, [persistConnectionLogState]);
 
   const deleteConnectionLog = useCallback((id: string) => {
     setConnectionLogs((prev) => {
       const updated = prev.filter((log) => log.id !== id);
-      localStorageAdapter.write(STORAGE_KEY_CONNECTION_LOGS, updated);
+      const map = { ...connectionLogTerminalDataRef.current };
+      delete map[id];
+      connectionLogTerminalDataRef.current = map;
+      persistConnectionLogState(updated, { pruneMainBlob: true });
       return updated;
     });
-  }, []);
+  }, [persistConnectionLogState]);
 
   const clearUnsavedConnectionLogs = useCallback(() => {
     setConnectionLogs((prev) => {
       const saved = prev.filter((log) => log.saved);
-      localStorageAdapter.write(STORAGE_KEY_CONNECTION_LOGS, pruneConnectionLogsForStorage(saved));
+      persistConnectionLogState(saved, { pruneMainBlob: true });
       return saved;
     });
-  }, []);
+  }, [persistConnectionLogState]);
 
   // Convert a known host to a managed host
   const convertKnownHostToHost = useCallback((knownHost: KnownHost): Host => {
@@ -644,7 +703,11 @@ export const useVaultState = () => {
         const savedConnectionLogs = localStorageAdapter.read<ConnectionLog[]>(
           STORAGE_KEY_CONNECTION_LOGS,
         );
-        if (savedConnectionLogs) setConnectionLogs(savedConnectionLogs);
+        const terminalDataMap = readConnectionLogTerminalDataMap();
+        connectionLogTerminalDataRef.current = terminalDataMap;
+        if (savedConnectionLogs) {
+          setConnectionLogs(mergeTerminalDataIntoLogs(savedConnectionLogs, terminalDataMap));
+        }
 
         // Load managed sources
         const savedManagedSources = localStorageAdapter.read<ManagedSource[]>(
@@ -787,7 +850,16 @@ export const useVaultState = () => {
 
       if (key === STORAGE_KEY_CONNECTION_LOGS) {
         const next = safeParse<ConnectionLog[]>(event.newValue) ?? [];
-        setConnectionLogs(next);
+        setConnectionLogs((prev) =>
+          applyConnectionLogsFromStorage(prev, next, connectionLogTerminalDataRef.current),
+        );
+        return;
+      }
+
+      if (key === STORAGE_KEY_CONNECTION_LOG_TERMINAL_DATA) {
+        const next = safeParse<ConnectionLogTerminalDataMap>(event.newValue) ?? {};
+        connectionLogTerminalDataRef.current = next;
+        setConnectionLogs((prev) => mergeConnectionLogsFromStorage(prev, prev, next));
         return;
       }
 
@@ -810,9 +882,29 @@ export const useVaultState = () => {
       }
     };
 
+    const handleLocalStorageAdapterChanged = (event: Event) => {
+      const key = (event as CustomEvent<{ key?: string }>).detail?.key;
+      if (key === STORAGE_KEY_CONNECTION_LOGS) {
+        const next = localStorageAdapter.read<ConnectionLog[]>(STORAGE_KEY_CONNECTION_LOGS) ?? [];
+        setConnectionLogs((prev) =>
+          applyConnectionLogsFromStorage(prev, next, connectionLogTerminalDataRef.current),
+        );
+        return;
+      }
+      if (key === STORAGE_KEY_CONNECTION_LOG_TERMINAL_DATA) {
+        const next = readConnectionLogTerminalDataMap();
+        connectionLogTerminalDataRef.current = next;
+        setConnectionLogs((prev) => mergeConnectionLogsFromStorage(prev, prev, next));
+      }
+    };
+
     window.addEventListener("storage", handleStorage);
-    return () => window.removeEventListener("storage", handleStorage);
-  }, []);
+    window.addEventListener(LOCAL_STORAGE_ADAPTER_CHANGED_EVENT, handleLocalStorageAdapterChanged);
+    return () => {
+      window.removeEventListener("storage", handleStorage);
+      window.removeEventListener(LOCAL_STORAGE_ADAPTER_CHANGED_EVENT, handleLocalStorageAdapterChanged);
+    };
+  }, [applyConnectionLogsFromStorage]);
 
   const updateHostLastConnected = useCallback((hostId: string) => {
     setHosts((prev) => {

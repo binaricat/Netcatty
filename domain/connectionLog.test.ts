@@ -3,6 +3,12 @@ import assert from "node:assert/strict";
 
 import type { ConnectionLog } from "./models.ts";
 import { selectConnectionLogForTerminalDataCapture } from "./connectionLog.ts";
+import {
+  MAX_PERSISTED_UNSAVED_TERMINAL_DATA_ENTRIES,
+  mergeConnectionLogsFromStorage,
+  mergeTerminalDataIntoLogs,
+  pruneTerminalDataMapForStorage,
+} from "./connectionLogTerminalData.ts";
 
 const baseLog: ConnectionLog = {
   id: "log-base",
@@ -65,4 +71,79 @@ test("selectConnectionLogForTerminalDataCapture reuses the latest log for repeat
     )?.id,
     "first-capture",
   );
+});
+
+test("selectConnectionLogForTerminalDataCapture does not cross-match localhost logs without sessionId", () => {
+  const openLocalWithoutSession = {
+    ...baseLog,
+    id: "open-local",
+    sessionId: undefined,
+    hostname: "localhost",
+    protocol: "local",
+    startTime: 3000,
+  };
+  const targetLocal = {
+    ...baseLog,
+    id: "target-local",
+    sessionId: "session-local-a",
+    hostname: "localhost",
+    protocol: "local",
+    startTime: 2000,
+  };
+
+  assert.equal(
+    selectConnectionLogForTerminalDataCapture(
+      [openLocalWithoutSession, targetLocal],
+      { sessionId: "session-local-b", hostname: "localhost" },
+    ),
+    undefined,
+  );
+});
+
+test("mergeConnectionLogsFromStorage keeps in-memory terminal replay data", () => {
+  const memoryLog = {
+    ...baseLog,
+    id: "memory",
+    terminalData: "captured output",
+  };
+  const storedLog = {
+    ...baseLog,
+    id: "memory",
+    endTime: 2000,
+  };
+
+  const merged = mergeConnectionLogsFromStorage(
+    [memoryLog],
+    [storedLog],
+    {},
+  );
+
+  assert.equal(merged[0]?.terminalData, "captured output");
+});
+
+test("mergeTerminalDataIntoLogs hydrates unsaved logs from side storage", () => {
+  const storedLog = { ...baseLog, id: "hydrate" };
+  const hydrated = mergeTerminalDataIntoLogs([storedLog], {
+    hydrate: "side-store output",
+  });
+
+  assert.equal(hydrated[0]?.terminalData, "side-store output");
+});
+
+test("pruneTerminalDataMapForStorage caps unsaved replay buffers", () => {
+  const logs: ConnectionLog[] = Array.from({ length: 60 }, (_, index) => ({
+    ...baseLog,
+    id: `log-${index}`,
+    startTime: index,
+    saved: false,
+  }));
+
+  const map = Object.fromEntries(
+    logs.map((log) => [log.id, `data-${log.id}`]),
+  );
+
+  const pruned = pruneTerminalDataMapForStorage(logs, map);
+  assert.equal(Object.keys(pruned).length, MAX_PERSISTED_UNSAVED_TERMINAL_DATA_ENTRIES);
+  assert.equal(pruned["log-59"], "data-log-59");
+  assert.equal(pruned["log-0"], undefined);
 });

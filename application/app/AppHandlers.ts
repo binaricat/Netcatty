@@ -577,9 +577,10 @@ export function executeHotkeyActionImpl(getCtx: AppContextGetter, action: string
         break;
       }
       case 'newTab':
-      case 'openLocal':
-        // Add connection log for local terminal
+      case 'openLocal': {
+        const sessionId = createLocalTerminalWithCurrentShell();
         addConnectionLogRef.current({
+          sessionId,
           hostId: '',
           hostLabel: 'Local Terminal',
           hostname: 'localhost',
@@ -590,8 +591,8 @@ export function executeHotkeyActionImpl(getCtx: AppContextGetter, action: string
           localHostname: systemInfoRef.current.hostname,
           saved: false,
         });
-        createLocalTerminalWithCurrentShell();
         break;
+      }
       case 'openHosts':
         setActiveTabId('vault');
         break;

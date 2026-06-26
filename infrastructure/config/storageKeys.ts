@@ -33,6 +33,8 @@ export const STORAGE_KEY_PF_VIEW_MODE = 'netcatty_pf_view_mode_v1';
 export const STORAGE_KEY_KNOWN_HOSTS = 'netcatty_known_hosts_v1';
 export const STORAGE_KEY_SHELL_HISTORY = 'netcatty_shell_history_v1';
 export const STORAGE_KEY_CONNECTION_LOGS = 'netcatty_connection_logs_v1';
+/** Side store for unsaved connection-log terminal replay buffers (main blob omits them for perf). */
+export const STORAGE_KEY_CONNECTION_LOG_TERMINAL_DATA = 'netcatty_connection_log_terminal_data_v1';
 export const STORAGE_KEY_SESSION_RESTORE = 'netcatty_session_restore_v1';
 export const STORAGE_KEY_RESTORE_PREVIOUS_SESSION = 'netcatty_restore_previous_session_v1';
 export const STORAGE_KEY_RESTORE_TERMINAL_CWD = 'netcatty_restore_terminal_cwd_v1';
