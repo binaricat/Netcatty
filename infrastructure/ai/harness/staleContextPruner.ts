@@ -55,7 +55,10 @@ function readFingerprint(toolName: string, args: unknown): string | null {
   if (!isRecord(args)) return null;
   if (isSftpReadTool(toolName)) {
     const path = args.path ?? args.remotePath;
-    return typeof path === 'string' ? `read:${path}` : null;
+    if (typeof path !== 'string') return null;
+    const sessionId = args.sessionId;
+    const sessionPart = typeof sessionId === 'string' ? sessionId : '';
+    return `read:${sessionPart}:${path}`;
   }
   if (toolName === 'read_attachment' || toolName === 'harness.read_attachment') {
     const id = args.attachmentId ?? args.id ?? args.filename ?? args.name;
@@ -112,7 +115,7 @@ export function pruneStaleToolContext(messages: ModelMessage[]): {
 } {
   const toolCallMap = getToolCallMap(messages);
   const latestReadByKey = new Map<string, number>();
-  const terminalExecutions: Array<{ index: number; command?: string }> = [];
+  const terminalExecutionsBySession = new Map<string, Array<{ index: number; command?: string }>>();
 
   messages.forEach((message, index) => {
     for (const part of getToolResultParts(message)) {
@@ -125,24 +128,31 @@ export function pruneStaleToolContext(messages: ModelMessage[]): {
       const termKey = terminalFingerprint(toolName, args);
       if (termKey) {
         const callArgs = isRecord(args) ? args : {};
-        terminalExecutions.push({
+        const entries = terminalExecutionsBySession.get(termKey) ?? [];
+        entries.push({
           index,
           command: typeof callArgs.command === 'string' ? callArgs.command : undefined,
         });
+        terminalExecutionsBySession.set(termKey, entries);
       }
     }
   });
 
-  const keepTerminalIndices = new Set(
-    terminalExecutions.slice(-2).map((entry) => entry.index),
-  );
+  const keepTerminalIndices = new Set<number>();
+  for (const entries of terminalExecutionsBySession.values()) {
+    for (const entry of entries.slice(-2)) {
+      keepTerminalIndices.add(entry.index);
+    }
+  }
   const terminalOmitByIndex = new Map<number, string>();
-  for (const entry of terminalExecutions) {
-    if (keepTerminalIndices.has(entry.index)) continue;
-    terminalOmitByIndex.set(
-      entry.index,
-      `${EARLIER_TERMINAL_PREFIX} command=${entry.command ?? 'unknown'}]`,
-    );
+  for (const entries of terminalExecutionsBySession.values()) {
+    for (const entry of entries) {
+      if (keepTerminalIndices.has(entry.index)) continue;
+      terminalOmitByIndex.set(
+        entry.index,
+        `${EARLIER_TERMINAL_PREFIX} command=${entry.command ?? 'unknown'}]`,
+      );
+    }
   }
 
   let didAdjust = false;
