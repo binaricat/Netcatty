@@ -6,19 +6,32 @@ import {
   MAX_PENDING_WRITE_COALESCE_BYTES,
 } from "./writeCoalescer.ts";
 
-type FrameCallback = (time: number) => void;
+type ScheduledCallback = () => void;
 
-let frameCallbacks: Map<number, FrameCallback>;
-let nextFrameId: number;
+let frameCallbacks: Map<number, ScheduledCallback>;
+let timerCallbacks: Map<number, ScheduledCallback>;
+let nextId: number;
 
-const createTestCoalescer = (write: (data: string) => void) =>
+const createTestCoalescer = (
+  write: (data: string) => void,
+  options: { maxFlushBytes?: number } = {},
+) =>
   createWriteCoalescer(write, {
+    maxFlushBytes: options.maxFlushBytes,
     scheduleFrame(callback) {
-      const id = nextFrameId;
-      nextFrameId += 1;
+      const id = nextId;
+      nextId += 1;
       frameCallbacks.set(id, callback);
       return () => {
         frameCallbacks.delete(id);
+      };
+    },
+    scheduleTimer(callback) {
+      const id = nextId;
+      nextId += 1;
+      timerCallbacks.set(id, callback);
+      return () => {
+        timerCallbacks.delete(id);
       };
     },
   });
@@ -27,13 +40,22 @@ const fireFrame = (): void => {
   const callbacks = [...frameCallbacks.values()];
   frameCallbacks.clear();
   for (const callback of callbacks) {
-    callback(performance.now());
+    callback();
+  }
+};
+
+const fireTimer = (): void => {
+  const callbacks = [...timerCallbacks.values()];
+  timerCallbacks.clear();
+  for (const callback of callbacks) {
+    callback();
   }
 };
 
 beforeEach(() => {
   frameCallbacks = new Map();
-  nextFrameId = 1;
+  timerCallbacks = new Map();
+  nextId = 1;
 });
 
 test("coalesces chunks in the same frame into one write", () => {
@@ -70,6 +92,7 @@ test("flushSync writes pending bytes immediately and cancels the scheduled frame
   assert.deepEqual(writes, ["pending"]);
 
   fireFrame();
+  fireTimer();
   assert.deepEqual(writes, ["pending"]);
 });
 
@@ -80,8 +103,12 @@ test("flushes synchronously when pending bytes exceed the cap", () => {
 
   coalescer.push(chunk);
   coalescer.push("y");
-  assert.equal(writes.length, 1);
-  assert.equal(writes[0]?.length, MAX_PENDING_WRITE_COALESCE_BYTES + 1);
+  // Over the hard ceiling it flushes synchronously (no frame needed) and, since
+  // the backlog far exceeds the per-write slice, drains the oversized chunk and
+  // the tail as separate writes rather than one giant batch.
+  assert.equal(writes.length, 2);
+  assert.equal(writes[0]?.length, MAX_PENDING_WRITE_COALESCE_BYTES);
+  assert.equal(writes[1], "y");
 });
 
 test("dispose flushes remaining bytes and stops accepting new chunks", () => {
@@ -95,4 +122,60 @@ test("dispose flushes remaining bytes and stops accepting new chunks", () => {
   coalescer.push("ignored");
   fireFrame();
   assert.deepEqual(writes, ["tail"]);
+});
+
+test("drains a backlog in bounded slices, never splitting a chunk", () => {
+  const writes: string[] = [];
+  const coalescer = createTestCoalescer((data) => writes.push(data), {
+    maxFlushBytes: 10,
+  });
+
+  coalescer.push("aaaa");
+  coalescer.push("bbbb");
+  coalescer.push("cccc");
+  coalescer.push("dddd");
+  fireFrame();
+
+  // Batched on chunk boundaries without exceeding the 10-byte slice cap.
+  assert.deepEqual(writes, ["aaaabbbb", "ccccdddd"]);
+  assert.equal(writes.join(""), "aaaabbbbccccdddd");
+});
+
+test("emits an oversized single chunk whole rather than splitting it", () => {
+  const writes: string[] = [];
+  const coalescer = createTestCoalescer((data) => writes.push(data), {
+    maxFlushBytes: 10,
+  });
+
+  const big = "x".repeat(25);
+  coalescer.push(big);
+  coalescer.push("y");
+  fireFrame();
+
+  assert.deepEqual(writes, [big, "y"]);
+});
+
+test("timer flushes the backlog when the frame never fires (hidden window)", () => {
+  const writes: string[] = [];
+  const coalescer = createTestCoalescer((data) => writes.push(data));
+
+  coalescer.push("background");
+  // rAF stays throttled (no fireFrame) — the timer fallback must still drain.
+  fireTimer();
+  assert.deepEqual(writes, ["background"]);
+
+  // The frame that lost the race was cancelled, so it cannot double-write.
+  fireFrame();
+  assert.deepEqual(writes, ["background"]);
+});
+
+test("a winning frame cancels the pending fallback timer", () => {
+  const writes: string[] = [];
+  const coalescer = createTestCoalescer((data) => writes.push(data));
+
+  coalescer.push("once");
+  fireFrame();
+  fireTimer();
+
+  assert.deepEqual(writes, ["once"]);
 });

@@ -1184,14 +1184,29 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
       !inWorkspace || isFocusMode || isFocused
     );
 
+    // A whole-window return from the background does not change pane `isVisible`,
+    // so the pane-visibility WebGL recovery effect above never runs for this
+    // case. But Chromium can evict the GPU/WebGL context while the window is
+    // backgrounded (App Nap / occlusion), and xterm's onContextLoss then
+    // disposes the WebGL addon and silently falls back to the far slower DOM
+    // renderer — which janks on heavy / long-context output and can leave the
+    // terminal degraded until the next tab switch. Recreate the renderer on
+    // resume; ensureWebglRenderer is idempotent (a no-op unless a context loss
+    // disposed it, or WebGL is disabled for this device).
+    const recoverWebglRendererOnAppResume = () => {
+      xtermRuntimeRef.current?.ensureWebglRenderer();
+    };
+
     const handleVisibilityChange = () => {
       if (document.visibilityState !== 'visible') return;
       if (!shouldRecoverOnAppResume()) return;
+      recoverWebglRendererOnAppResume();
       scheduleLayoutRecoveryRefit();
     };
 
     const handleWindowFocus = () => {
       if (!shouldRecoverOnAppResume()) return;
+      recoverWebglRendererOnAppResume();
       scheduleLayoutRecoveryRefit();
     };
 
