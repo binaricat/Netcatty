@@ -4,6 +4,7 @@ import {
   computeCompactionBuffer,
   computeCompactionThreshold,
   computeTotalInputTokens,
+  DEFAULT_MAX_OUTPUT_TOKENS,
   shouldCompactByBudget,
 } from './contextBudget.ts';
 import type { ModelMessage } from 'ai';
@@ -38,4 +39,20 @@ test('computeTotalInputTokens includes system and tool names', () => {
   });
   const base = computeTotalInputTokens({ messages, providerId: 'anthropic' });
   assert.ok(withExtras > base);
+});
+
+test('computeCompactionThreshold keeps a reasonable threshold for small context windows', () => {
+  const threshold8k = computeCompactionThreshold({
+    contextWindow: 8_192,
+    maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS,
+  });
+  assert.ok(threshold8k > 1_000);
+  assert.ok(threshold8k < 8_192 * 0.85);
+
+  const threshold4k = computeCompactionThreshold({
+    contextWindow: 4_096,
+    maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS,
+  });
+  assert.ok(threshold4k > 500);
+  assert.ok(threshold4k < 4_096 * 0.85);
 });

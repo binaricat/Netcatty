@@ -9,6 +9,20 @@ export const COMPACTION_PROMPT_RESERVE = 150;
 export const AUTO_COMPACT_BUFFER_CAP = 15_000;
 export const AUTO_COMPACT_BUFFER_RATIO = 0.8;
 export const DEFAULT_MAX_OUTPUT_TOKENS = 4096;
+const MIN_OUTPUT_RESERVE = 256;
+const MAX_OUTPUT_SHARE_OF_WINDOW = 0.25;
+
+export function resolveEffectiveMaxOutputTokens(
+  contextWindow: number,
+  maxOutputTokens: number = DEFAULT_MAX_OUTPUT_TOKENS,
+): number {
+  if (contextWindow <= 0) return maxOutputTokens;
+  const cappedByWindow = Math.max(
+    MIN_OUTPUT_RESERVE,
+    Math.floor(contextWindow * MAX_OUTPUT_SHARE_OF_WINDOW),
+  );
+  return Math.min(maxOutputTokens, cappedByWindow);
+}
 
 export interface ComputeCompactionThresholdInput {
   contextWindow: number;
@@ -25,7 +39,10 @@ export function computeCompactionBuffer(contextWindow: number, maxOutputTokens: 
 
 /** Continue-style threshold: compact before the next turn would exceed the window. */
 export function computeCompactionThreshold(input: ComputeCompactionThresholdInput): number {
-  const maxOutputTokens = input.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS;
+  const maxOutputTokens = resolveEffectiveMaxOutputTokens(
+    input.contextWindow,
+    input.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
+  );
   const compactionPromptTokens = input.compactionPromptTokens ?? COMPACTION_PROMPT_RESERVE;
   const buffer = computeCompactionBuffer(input.contextWindow, maxOutputTokens);
   const threshold = input.contextWindow - maxOutputTokens - buffer - compactionPromptTokens;
