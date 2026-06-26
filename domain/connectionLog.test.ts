@@ -167,6 +167,19 @@ test("mergeTerminalDataMapsForStorage keeps replay data from other windows", () 
   assert.equal(merged.other, "other-window only");
 });
 
+test("mergeTerminalDataMapsForStorage prefers fresher local replay data for orphans", () => {
+  const logs: ConnectionLog[] = [{ ...baseLog, id: "local", startTime: 2000 }];
+
+  const merged = mergeTerminalDataMapsForStorage(
+    logs,
+    { other: "stale snapshot" },
+    [{ other: "fresh local" }],
+    new Set(["local", "other"]),
+  );
+
+  assert.equal(merged.other, "fresh local");
+});
+
 test("mergeTerminalDataMapsForStorage drops deleted log replay buffers", () => {
   const logs: ConnectionLog[] = [{ ...baseLog, id: "local", startTime: 2000 }];
 

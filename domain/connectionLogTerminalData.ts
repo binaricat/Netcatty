@@ -105,9 +105,9 @@ export const mergeTerminalDataMapsForStorage = (
 
   // Retain replay buffers only for log ids still present in the persisted
   // connection-log blob but not yet loaded into this window's React state.
-  for (const [id, data] of Object.entries(persistedSnapshot)) {
-    if (data && !logs.some((log) => log.id === id) && persistedLogIds.has(id)) {
-      pruned[id] = data;
+  for (const id of persistedLogIds) {
+    if (!logs.some((log) => log.id === id) && combined[id]) {
+      pruned[id] = combined[id];
     }
   }
 
