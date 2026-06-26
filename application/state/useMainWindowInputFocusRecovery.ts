@@ -1,7 +1,10 @@
 import { useEffect } from "react";
 
 import { netcattyBridge } from "../../infrastructure/services/netcattyBridge";
-import { scheduleWindowInputFocus } from "./windowInputFocus";
+import {
+  scheduleWindowInputFocus,
+  type ScheduledWindowInputFocus,
+} from "./windowInputFocus";
 
 export type MainWindowInputFocusRecoveryOptions = {
   /** Close transient overlays before the window hides (#1722). */
@@ -18,12 +21,21 @@ export function useMainWindowInputFocusRecovery(
   const { onPageHidden } = options;
 
   useEffect(() => {
+    let pendingFocusRecovery: ScheduledWindowInputFocus | null = null;
+
+    const cancelPendingFocusRecovery = () => {
+      pendingFocusRecovery?.cancel();
+      pendingFocusRecovery = null;
+    };
+
     const recoverFocus = () => {
       if (document.visibilityState !== "visible") return;
-      scheduleWindowInputFocus();
+      cancelPendingFocusRecovery();
+      pendingFocusRecovery = scheduleWindowInputFocus();
     };
 
     const dismissTransientUi = () => {
+      cancelPendingFocusRecovery();
       onPageHidden?.();
     };
 
@@ -47,6 +59,7 @@ export function useMainWindowInputFocusRecovery(
     });
 
     return () => {
+      cancelPendingFocusRecovery();
       document.removeEventListener("visibilitychange", onVisibilityChange);
       window.removeEventListener("focus", recoverFocus);
       unsubscribeShown?.();

@@ -25,6 +25,15 @@ test("useMainWindowInputFocusRecovery dismisses transient UI when the page hides
   assert.match(source, /onPageHidden\?\.\(\)/);
   assert.match(source, /onWindowShown/);
   assert.match(source, /onWindowWillHide/);
+  assert.match(source, /cancelPendingFocusRecovery/);
+});
+
+test("scheduleWindowInputFocus skips deferred focus when the page is hidden", () => {
+  const source = readProjectFile("application/state/windowInputFocus.ts");
+
+  assert.match(source, /document\.visibilityState !== "visible"/);
+  assert.match(source, /cancelAnimationFrame/);
+  assert.match(source, /clearTimeout/);
 });
 
 test("AppView mounts main-window input focus recovery with overlay dismiss", () => {
