@@ -43,7 +43,7 @@ test('pruneStaleToolContext supersedes older sftp reads for same path', () => {
     },
   ];
 
-  const result = pruneStaleToolContext(messages, { pruneTerminalOutput: true });
+  const result = pruneStaleToolContext(messages, { underBudgetPressure: true });
   assert.equal(result.didAdjust, true);
   const serialized = JSON.stringify(result.messages);
   assert.match(serialized, /superseded read/);
@@ -90,7 +90,7 @@ test('pruneStaleToolContext supersedes older sftp_read_file reads for same path'
     },
   ];
 
-  const result = pruneStaleToolContext(messages, { pruneTerminalOutput: true });
+  const result = pruneStaleToolContext(messages, { underBudgetPressure: true });
   assert.equal(result.didAdjust, true);
   const serialized = JSON.stringify(result.messages);
   assert.match(serialized, /superseded read/);
@@ -137,7 +137,7 @@ test('pruneStaleToolContext keeps sftp reads for same path on different sessions
     },
   ];
 
-  const result = pruneStaleToolContext(messages, { pruneTerminalOutput: true });
+  const result = pruneStaleToolContext(messages, { underBudgetPressure: true });
   assert.equal(result.didAdjust, false);
   const serialized = JSON.stringify(result.messages);
   assert.match(serialized, /host-a config/);
@@ -180,7 +180,7 @@ test('pruneStaleToolContext keeps last two terminal outputs per session', () => 
     ...terminalExecutePair('t3', 'sess-1', 'free -m', 'free-3'),
   ];
 
-  const result = pruneStaleToolContext(messages, { pruneTerminalOutput: true });
+  const result = pruneStaleToolContext(messages, { underBudgetPressure: true });
   assert.equal(result.didAdjust, true);
   const serialized = JSON.stringify(result.messages);
   assert.match(serialized, /df-2/);
@@ -196,13 +196,61 @@ test('pruneStaleToolContext omits terminal outputs per session independently', (
     ...terminalExecutePair('b1', 'sess-b', 'uptime', 'b-uptime'),
   ];
 
-  const result = pruneStaleToolContext(messages, { pruneTerminalOutput: true });
+  const result = pruneStaleToolContext(messages, { underBudgetPressure: true });
   assert.equal(result.didAdjust, true);
   const serialized = JSON.stringify(result.messages);
   assert.match(serialized, /a-df/);
   assert.match(serialized, /a-free/);
   assert.match(serialized, /b-uptime/);
   assert.doesNotMatch(serialized, /a-uptime/);
+});
+
+test('pruneStaleToolContext preserves repeated sftp reads without budget pressure', () => {
+  const messages: ModelMessage[] = [
+    {
+      role: 'assistant',
+      content: [{
+        type: 'tool-call',
+        toolCallId: 'c1',
+        toolName: 'sftp_read_file',
+        input: { sessionId: 'host-a', path: '/etc/nginx/nginx.conf' },
+      }],
+    },
+    {
+      role: 'tool',
+      content: [{
+        type: 'tool-result',
+        toolCallId: 'c1',
+        toolName: 'sftp_read_file',
+        output: { type: 'text', value: 'before edit' },
+      }],
+    },
+    {
+      role: 'assistant',
+      content: [{
+        type: 'tool-call',
+        toolCallId: 'c2',
+        toolName: 'sftp_read_file',
+        input: { sessionId: 'host-a', path: '/etc/nginx/nginx.conf' },
+      }],
+    },
+    {
+      role: 'tool',
+      content: [{
+        type: 'tool-result',
+        toolCallId: 'c2',
+        toolName: 'sftp_read_file',
+        output: { type: 'text', value: 'after edit' },
+      }],
+    },
+  ];
+
+  const result = pruneStaleToolContext(messages);
+  assert.equal(result.didAdjust, false);
+  const serialized = JSON.stringify(result.messages);
+  assert.match(serialized, /before edit/);
+  assert.match(serialized, /after edit/);
+  assert.doesNotMatch(serialized, /superseded read/);
 });
 
 test('pruneStaleToolContext preserves terminal output without budget pressure flag', () => {

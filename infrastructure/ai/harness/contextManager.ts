@@ -176,7 +176,7 @@ export async function prepareTurnContext(
     trigger: input.trigger,
   });
   const stale = pruneStaleToolContext(input.messages, {
-    pruneTerminalOutput: underBudgetPressure,
+    underBudgetPressure,
   });
   let working = stale.messages;
   let didAdjust = stale.didAdjust;
@@ -354,7 +354,7 @@ export async function prepareStepContext(
     reservedTokens: input.reservedTokens,
   });
   const stale = pruneStaleToolContext(input.messages, {
-    pruneTerminalOutput: underBudgetPressure,
+    underBudgetPressure,
   });
   let working = stale.messages;
 

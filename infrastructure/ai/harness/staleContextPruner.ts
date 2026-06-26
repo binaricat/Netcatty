@@ -110,8 +110,8 @@ function compressMessageToolResults(
 }
 
 export interface PruneStaleToolContextOptions {
-  /** Omit older terminal_execute output only when context is under budget pressure. */
-  pruneTerminalOutput?: boolean;
+  /** Supersede stale reads and omit older terminal output only under context budget pressure. */
+  underBudgetPressure?: boolean;
 }
 
 export function pruneStaleToolContext(
@@ -124,7 +124,7 @@ export function pruneStaleToolContext(
   const toolCallMap = getToolCallMap(messages);
   const latestReadByKey = new Map<string, number>();
   const terminalExecutionsBySession = new Map<string, Array<{ index: number; command?: string }>>();
-  const pruneTerminalOutput = options.pruneTerminalOutput === true;
+  const underBudgetPressure = options.underBudgetPressure === true;
 
   messages.forEach((message, index) => {
     for (const part of getToolResultParts(message)) {
@@ -135,7 +135,7 @@ export function pruneStaleToolContext(
       const readKey = readFingerprint(toolName, args);
       if (readKey) latestReadByKey.set(readKey, index);
       const termKey = terminalFingerprint(toolName, args);
-      if (pruneTerminalOutput && termKey) {
+      if (underBudgetPressure && termKey) {
         const callArgs = isRecord(args) ? args : {};
         const entries = terminalExecutionsBySession.get(termKey) ?? [];
         entries.push({
@@ -148,7 +148,7 @@ export function pruneStaleToolContext(
   });
 
   const keepTerminalIndices = new Set<number>();
-  if (pruneTerminalOutput) {
+  if (underBudgetPressure) {
     for (const entries of terminalExecutionsBySession.values()) {
       for (const entry of entries.slice(-2)) {
         keepTerminalIndices.add(entry.index);
@@ -156,7 +156,7 @@ export function pruneStaleToolContext(
     }
   }
   const terminalOmitByIndex = new Map<number, string>();
-  if (pruneTerminalOutput) {
+  if (underBudgetPressure) {
     for (const entries of terminalExecutionsBySession.values()) {
       for (const entry of entries) {
         if (keepTerminalIndices.has(entry.index)) continue;
@@ -173,14 +173,14 @@ export function pruneStaleToolContext(
     const updated = compressMessageToolResults(message, (toolName, args, text, isError) => {
       if (isError) return null;
       const readKey = readFingerprint(toolName, args);
-      if (readKey) {
+      if (underBudgetPressure && readKey) {
         const latestIndex = latestReadByKey.get(readKey);
         if (latestIndex != null && latestIndex !== index) {
           return `${SUPERSEDED_READ_PREFIX} ${readKey}]`;
         }
       }
       const termKey = terminalFingerprint(toolName, args);
-      if (pruneTerminalOutput && termKey && terminalOmitByIndex.has(index)) {
+      if (underBudgetPressure && termKey && terminalOmitByIndex.has(index)) {
         return terminalOmitByIndex.get(index)!;
       }
       return null;
