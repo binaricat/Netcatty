@@ -91,21 +91,22 @@ export const pruneTerminalDataMapForStorage = (
 /** Fold side-store maps together, then cap to the allowed unsaved/saved set. */
 export const mergeTerminalDataMapsForStorage = (
   logs: ConnectionLog[],
-  ...maps: ConnectionLogTerminalDataMap[]
+  persistedSnapshot: ConnectionLogTerminalDataMap,
+  localMaps: ConnectionLogTerminalDataMap[],
+  persistedLogIds: ReadonlySet<string>,
 ): ConnectionLogTerminalDataMap => {
-  const combined: ConnectionLogTerminalDataMap = {};
-  for (const map of maps) {
+  const combined: ConnectionLogTerminalDataMap = { ...persistedSnapshot };
+  for (const map of localMaps) {
     for (const [id, data] of Object.entries(map)) {
       if (data) combined[id] = data;
     }
   }
   const pruned = pruneTerminalDataMapForStorage(logs, combined);
 
-  // Retain replay buffers for log ids this window has not loaded yet (another
-  // window may have created the log before our connectionLogs state catches up).
-  const persistedSnapshot = maps[0] ?? {};
+  // Retain replay buffers only for log ids still present in the persisted
+  // connection-log blob but not yet loaded into this window's React state.
   for (const [id, data] of Object.entries(persistedSnapshot)) {
-    if (data && !logs.some((log) => log.id === id)) {
+    if (data && !logs.some((log) => log.id === id) && persistedLogIds.has(id)) {
       pruned[id] = data;
     }
   }

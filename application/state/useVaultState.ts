@@ -159,16 +159,22 @@ const readLegacyLineTimestampsEnabled = (): boolean => {
 const readConnectionLogTerminalDataMap = (): ConnectionLogTerminalDataMap =>
   localStorageAdapter.read<ConnectionLogTerminalDataMap>(STORAGE_KEY_CONNECTION_LOG_TERMINAL_DATA) ?? {};
 
+const readPersistedConnectionLogIds = (): Set<string> => {
+  const stored = localStorageAdapter.read<ConnectionLog[]>(STORAGE_KEY_CONNECTION_LOGS) ?? [];
+  return new Set(stored.map((log) => log.id));
+};
+
 const writeConnectionLogTerminalDataMap = (
   logs: ConnectionLog[],
-  map: ConnectionLogTerminalDataMap,
+  localMaps: ConnectionLogTerminalDataMap[],
 ): boolean => {
+  const existing = readConnectionLogTerminalDataMap();
   const pruned = mergeTerminalDataMapsForStorage(
     logs,
-    readConnectionLogTerminalDataMap(),
-    map,
+    existing,
+    localMaps,
+    readPersistedConnectionLogIds(),
   );
-  const existing = readConnectionLogTerminalDataMap();
   if (JSON.stringify(existing) === JSON.stringify(pruned)) return true;
   return localStorageAdapter.write(STORAGE_KEY_CONNECTION_LOG_TERMINAL_DATA, pruned);
 };
@@ -211,13 +217,18 @@ export const useVaultState = () => {
   const connectionLogTerminalDataRef = useRef<ConnectionLogTerminalDataMap>({});
 
   const syncConnectionLogTerminalDataMap = useCallback((logs: ConnectionLog[]) => {
-    const merged = mergeTerminalDataMapsForStorage(
-      logs,
-      readConnectionLogTerminalDataMap(),
+    const localMaps = [
       connectionLogTerminalDataRef.current,
       buildTerminalDataMapFromLogs(logs),
+    ];
+    const existing = readConnectionLogTerminalDataMap();
+    const merged = mergeTerminalDataMapsForStorage(
+      logs,
+      existing,
+      localMaps,
+      readPersistedConnectionLogIds(),
     );
-    const persisted = writeConnectionLogTerminalDataMap(logs, merged);
+    const persisted = writeConnectionLogTerminalDataMap(logs, localMaps);
     if (persisted) {
       connectionLogTerminalDataRef.current = merged;
     } else {
@@ -233,19 +244,32 @@ export const useVaultState = () => {
     logs: ConnectionLog[],
     options?: { pruneMainBlob?: boolean },
   ) => {
-    const { persisted } = syncConnectionLogTerminalDataMap(logs);
     const unsavedTerminalDataPending = logs.some(
       (log) => !log.saved && log.terminalData !== undefined,
     );
-    const shouldPruneMainBlob = options?.pruneMainBlob
-      && (persisted || !unsavedTerminalDataPending);
-    const mainPayload = shouldPruneMainBlob
-      ? pruneConnectionLogsForStorage(logs)
-      : logs;
-    const mainPersisted = localStorageAdapter.write(STORAGE_KEY_CONNECTION_LOGS, mainPayload);
+
+    let mainPersisted = true;
+    if (options?.pruneMainBlob) {
+      const prunedMain = pruneConnectionLogsForStorage(logs);
+      mainPersisted = localStorageAdapter.write(STORAGE_KEY_CONNECTION_LOGS, prunedMain);
+      if (!mainPersisted && unsavedTerminalDataPending) {
+        mainPersisted = localStorageAdapter.write(STORAGE_KEY_CONNECTION_LOGS, logs);
+      }
+    }
+
+    const { persisted: sidePersisted } = syncConnectionLogTerminalDataMap(logs);
+
+    if (!options?.pruneMainBlob) {
+      mainPersisted = localStorageAdapter.write(STORAGE_KEY_CONNECTION_LOGS, logs);
+    }
+
     if (!mainPersisted && unsavedTerminalDataPending) {
       console.warn(
         "[useVaultState] Failed to persist connection log terminal replay data to localStorage.",
+      );
+    } else if (!sidePersisted && unsavedTerminalDataPending && options?.pruneMainBlob && mainPersisted) {
+      console.warn(
+        "[useVaultState] Failed to persist connection log terminal replay data side store.",
       );
     }
   }, [syncConnectionLogTerminalDataMap]);

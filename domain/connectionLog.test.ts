@@ -158,10 +158,25 @@ test("mergeTerminalDataMapsForStorage keeps replay data from other windows", () 
   const merged = mergeTerminalDataMapsForStorage(
     logs,
     { remote: "remote-window output", other: "other-window only" },
-    { local: "local-window output" },
+    [{ local: "local-window output" }],
+    new Set(["local", "remote", "other"]),
   );
 
   assert.equal(merged.remote, "remote-window output");
   assert.equal(merged.local, "local-window output");
   assert.equal(merged.other, "other-window only");
+});
+
+test("mergeTerminalDataMapsForStorage drops deleted log replay buffers", () => {
+  const logs: ConnectionLog[] = [{ ...baseLog, id: "local", startTime: 2000 }];
+
+  const merged = mergeTerminalDataMapsForStorage(
+    logs,
+    { local: "keep", deleted: "drop me" },
+    [],
+    new Set(["local"]),
+  );
+
+  assert.equal(merged.local, "keep");
+  assert.equal(merged.deleted, undefined);
 });
