@@ -12,6 +12,7 @@ export type AgentEventType =
   | 'approval_requested'
   | 'approval_resolved'
   | 'compaction'
+  | 'compaction_start'
   | 'usage'
   | 'performance'
   | 'model_call_start'
@@ -101,6 +102,11 @@ export interface CompactionEvent extends AgentEventBase {
   trace: CompactionTrace;
 }
 
+export interface CompactionStartEvent extends AgentEventBase {
+  type: 'compaction_start';
+  trigger: ContextPrepareTrigger;
+}
+
 export interface ErrorEvent extends AgentEventBase {
   type: 'error';
   message: string;
@@ -155,6 +161,7 @@ export type AgentEvent =
   | ApprovalRequestedEvent
   | ApprovalResolvedEvent
   | CompactionEvent
+  | CompactionStartEvent
   | UsageEvent
   | PerformanceEvent
   | ModelCallStartEvent

@@ -143,5 +143,4 @@ export interface PrepareStepContextInput {
   toolOutputStore?: ToolOutputStore;
   runtimeContext: import('../cattyRuntimeContext').CattyRuntimeContext;
   onEvent?: AgentEventListener;
-  onStatusText?: () => void;
 }

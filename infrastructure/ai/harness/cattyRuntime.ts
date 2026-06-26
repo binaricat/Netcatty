@@ -20,7 +20,6 @@ import {
   resolveEffectiveMaxOutputTokens,
 } from './contextBudget';
 import { pruneUntilFitsCompaction } from './compactionPruner';
-import { CATTY_COMPACTION_STATUS_KEYS } from './compactionStatusKeys';
 
 export interface CompactCattyMessagesInput {
   messages: ModelMessage[];
@@ -35,7 +34,7 @@ export interface CompactCattyMessagesInput {
   force?: boolean;
   compressForRequestTooLargeRetry?: boolean;
   maxOutputTokens?: number;
-  onStatusText?: (key: typeof CATTY_COMPACTION_STATUS_KEYS.preTurn | typeof CATTY_COMPACTION_STATUS_KEYS.retry) => void;
+  onCompactionStart?: (trigger: 'pre-turn' | '413-retry' | 'force') => void;
   onCompaction?: (trace: CompactionTrace) => void;
   reinjection?: {
     permissionMode?: import('../types').AIPermissionMode;
@@ -73,11 +72,12 @@ export async function compactCattyMessages(
   const providerId = input.provider?.providerId;
 
   const summarize = async (messagesToSummarize: ModelMessage[]) => {
-    input.onStatusText?.(
-      input.trigger === '413-retry' || input.compressForRequestTooLargeRetry
-        ? CATTY_COMPACTION_STATUS_KEYS.retry
-        : CATTY_COMPACTION_STATUS_KEYS.preTurn,
-    );
+    const summarizeTrigger = input.trigger === '413-retry' || input.compressForRequestTooLargeRetry
+      ? '413-retry'
+      : input.trigger === 'force' || input.force
+        ? 'force'
+        : 'pre-turn';
+    input.onCompactionStart?.(summarizeTrigger);
     const reserved = input.reservedTokens?.() ?? 0;
     const compactionOutputTokens = resolveEffectiveMaxOutputTokens(
       contextWindow,

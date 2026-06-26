@@ -6,7 +6,6 @@
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { useI18n } from '../../../application/i18n/I18nProvider';
 import type {
   AIPermissionMode,
   AIToolIntegrationMode,
@@ -30,7 +29,7 @@ import {
 import { useAgentCompactionUi } from './useAgentCompactionUi';
 
 export { getNetcattyBridge } from './aiChatStreamingSupport';
-export type { CompactionUiHint } from './useAgentCompactionUi';
+export type { ActiveCompactionUi } from './useAgentCompactionUi';
 export type { DefaultTargetSessionHint } from './aiChatStreamingSupport';
 
 const sharedStreamingSessionIds = new Set<string>();
@@ -82,7 +81,7 @@ export interface UseAIChatStreamingReturn {
     context: SendToExternalContext,
   ) => Promise<void>;
   reportStreamError: (sessionId: string, abortSignal: AbortSignal, err: unknown) => void;
-  compactionHint: import('./useAgentCompactionUi').CompactionUiHint | null;
+  activeCompaction: import('./useAgentCompactionUi').ActiveCompactionUi | null;
 }
 
 export interface SendToCattyContext {
@@ -120,7 +119,6 @@ export function useAIChatStreaming({
   updateLastMessage,
   updateMessageById,
 }: UseAIChatStreamingParams): UseAIChatStreamingReturn {
-  const { t } = useI18n();
   const [streamingSessionIds, setStreamingSessions] = useState<Set<string>>(
     () => new Set(sharedStreamingSessionIds),
   );
@@ -150,7 +148,7 @@ export function useAIChatStreaming({
 
   const abortControllersRef = useRef<Map<string, AbortController>>(sharedAbortControllers);
 
-  const compactionHint = useAgentCompactionUi(updateLastMessage, updateMessageById, t);
+  const activeCompaction = useAgentCompactionUi();
 
   const reportStreamError = useCallback((
     sessionId: string,
@@ -243,6 +241,6 @@ export function useAIChatStreaming({
     sendToCattyAgent,
     sendToExternalAgent,
     reportStreamError,
-    compactionHint,
+    activeCompaction,
   };
 }

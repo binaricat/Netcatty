@@ -74,6 +74,27 @@ function emitCompactionEvent(
   });
 }
 
+function emitCompactionStart(
+  onEvent: AgentEventListener | undefined,
+  input: {
+    sessionId?: string;
+    chatSessionId?: string;
+    backend: PrepareTurnContextInput['backend'];
+  },
+  trigger: ContextPrepareTrigger,
+): void {
+  if (!onEvent || !input.sessionId) return;
+  onEvent({
+    id: `compaction-start-${Date.now()}`,
+    type: 'compaction_start',
+    sessionId: input.sessionId,
+    chatSessionId: input.chatSessionId,
+    backend: input.backend === 'catty' ? 'catty' : 'external-sdk',
+    timestamp: Date.now(),
+    trigger,
+  });
+}
+
 function applyTypedMessageCompression(messages: ModelMessage[]): {
   messages: ModelMessage[];
   didAdjust: boolean;
@@ -423,12 +444,16 @@ export async function prepareStepContext(
   }) : undefined;
 
   if (trace && didBudgetAdjust && input.onEvent && input.sessionId) {
+    emitCompactionStart(input.onEvent, {
+      sessionId: input.sessionId,
+      chatSessionId: input.chatSessionId,
+      backend: 'catty',
+    }, 'step');
     emitCompactionEvent(input.onEvent, {
       sessionId: input.sessionId,
       chatSessionId: input.chatSessionId,
       backend: 'catty',
     }, trace);
-    input.onStatusText?.();
   }
 
   const runtimeContext = {

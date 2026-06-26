@@ -16,7 +16,6 @@ import {
   prepareCattyMessagesForStream,
 } from '../cattyRuntime';
 import { DEFAULT_MAX_OUTPUT_TOKENS } from '../contextBudget';
-import { CATTY_COMPACTION_STATUS_KEYS } from '../compactionStatusKeys';
 import { clearChatSessionCancelled } from '../agentStop';
 import { isRequestTooLargeError } from '../../errorClassifier';
 import { getNetcattyBridge, generateId, resolveUserSkillsContext } from '../../../../components/ai/hooks/aiChatStreamingSupport';
@@ -172,7 +171,6 @@ async function runCattyTurn(input: CattyTurnInput, ctx: TurnDriverContext): Prom
       messages: ModelMessage[],
       options: {
         force?: boolean;
-        statusTextKey?: string;
         compressForRequestTooLargeRetry?: boolean;
       },
     ): Promise<ModelMessage[]> => {
@@ -191,20 +189,16 @@ async function runCattyTurn(input: CattyTurnInput, ctx: TurnDriverContext): Prom
         trigger: options.force ? 'force' : options.compressForRequestTooLargeRetry ? '413-retry' : 'pre-turn',
         force: options.force,
         compressForRequestTooLargeRetry: options.compressForRequestTooLargeRetry,
-        onStatusText: (key) => {
-          const session = ui.getLatestSession?.(sessionId);
-          const lastAssistant = session?.messages.findLast(message => message.role === 'assistant');
-          if (lastAssistant) {
-            ui.updateMessageById(sessionId, lastAssistant.id, msg => ({
-              ...msg,
-              statusText: options.statusTextKey ?? key,
-            }));
-          } else {
-            ui.updateLastMessage(sessionId, msg => ({
-              ...msg,
-              statusText: options.statusTextKey ?? key,
-            }));
-          }
+        onCompactionStart: (trigger) => {
+          ctx.emit({
+            id: `compaction-start-${Date.now()}`,
+            type: 'compaction_start',
+            sessionId,
+            chatSessionId: sessionId,
+            backend: 'catty',
+            timestamp: Date.now(),
+            trigger,
+          } as import('../types').AgentEvent);
         },
         onCompaction: (trace) => {
           ctx.emit({
@@ -271,16 +265,6 @@ async function runCattyTurn(input: CattyTurnInput, ctx: TurnDriverContext): Prom
             toolOutputStore: ctx.toolOutputStore,
             runtimeContext: stepRuntimeContext,
             onEvent: (event) => ctx.emit(event),
-            onStatusText: () => {
-              const session = ui.getLatestSession?.(sessionId);
-              const lastAssistant = session?.messages.findLast(message => message.role === 'assistant');
-              const statusText = CATTY_COMPACTION_STATUS_KEYS.step;
-              if (lastAssistant) {
-                ui.updateMessageById(sessionId, lastAssistant.id, msg => ({ ...msg, statusText }));
-              } else {
-                ui.updateLastMessage(sessionId, msg => ({ ...msg, statusText }));
-              }
-            },
           });
           return {
             messages: prepared.messages,
@@ -302,7 +286,6 @@ async function runCattyTurn(input: CattyTurnInput, ctx: TurnDriverContext): Prom
       }
 
       console.warn('[Catty] Request hit HTTP 413; forcing context compaction and retrying once.', streamErr);
-      const statusTextKey = CATTY_COMPACTION_STATUS_KEYS.retry;
       const hadToolProgress = hadToolProgressBeforeRequestTooLarge(streamErr);
       let retryBaseMessages = messagesForStream;
       let retryAssistantMsgId = assistantMsgId;
@@ -324,7 +307,6 @@ async function runCattyTurn(input: CattyTurnInput, ctx: TurnDriverContext): Prom
           timestamp: Date.now(),
           model: activeModelId || context.activeProvider?.defaultModel || '',
           providerId: context.activeProvider?.providerId,
-          statusText: statusTextKey,
         });
       } else {
         ui.updateMessageById(sessionId, assistantMsgId, msg => ({
@@ -337,12 +319,10 @@ async function runCattyTurn(input: CattyTurnInput, ctx: TurnDriverContext): Prom
           errorInfo: undefined,
           executionStatus: undefined,
           pendingApproval: undefined,
-          statusText: statusTextKey,
         }));
       }
       const retryMessages = prepareMessagesForStream(await compactMessages(retryBaseMessages, {
         force: true,
-        statusTextKey,
         compressForRequestTooLargeRetry: true,
       }));
       await runStream(retryMessages, retryAssistantMsgId);

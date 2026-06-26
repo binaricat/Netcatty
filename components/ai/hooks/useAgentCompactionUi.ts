@@ -1,16 +1,14 @@
-import { useCallback, useEffect, useState } from 'react';
-import type { CompactionTrace } from '../../../infrastructure/ai/harness/types';
+import { useEffect, useState } from 'react';
+import type { ContextPrepareTrigger } from '../../../infrastructure/ai/harness/types';
 import { getAgentRuntime } from '../../../infrastructure/ai/harness/globalAgentRuntime';
 import { CATTY_COMPACTION_STATUS_KEYS } from '../../../infrastructure/ai/harness/compactionStatusKeys';
-import type { ChatMessage } from '../../../infrastructure/ai/types';
-import { latestAISessionsSnapshot } from '../../../application/state/aiStateSnapshots';
 
-export interface CompactionUiHint {
-  trace: CompactionTrace;
+export interface ActiveCompactionUi {
   sessionId: string;
+  trigger: ContextPrepareTrigger;
 }
 
-function statusKeyForTrigger(trigger: CompactionTrace['trigger']): string {
+function statusKeyForTrigger(trigger: ContextPrepareTrigger): string {
   switch (trigger) {
     case 'step':
       return CATTY_COMPACTION_STATUS_KEYS.step;
@@ -21,48 +19,31 @@ function statusKeyForTrigger(trigger: CompactionTrace['trigger']): string {
   }
 }
 
-export function useAgentCompactionUi(
-  updateLastMessage: (sessionId: string, updater: (msg: ChatMessage) => ChatMessage) => void,
-  updateMessageById: (sessionId: string, messageId: string, updater: (msg: ChatMessage) => ChatMessage) => void,
-  translate: (key: string, params?: Record<string, string | number>) => string,
-): CompactionUiHint | null {
-  const [hint, setHint] = useState<CompactionUiHint | null>(null);
-
-  const applyStatusText = useCallback((sessionId: string, statusText: string) => {
-    const session = latestAISessionsSnapshot?.find(entry => entry.id === sessionId);
-    if (session) {
-      for (let i = session.messages.length - 1; i >= 0; i -= 1) {
-        const message = session.messages[i];
-        if (message?.role === 'assistant') {
-          updateMessageById(sessionId, message.id, msg => ({ ...msg, statusText }));
-          return;
-        }
-      }
-    }
-    updateLastMessage(sessionId, msg => ({ ...msg, statusText }));
-  }, [updateLastMessage, updateMessageById]);
+export function useAgentCompactionUi(): ActiveCompactionUi | null {
+  const [active, setActive] = useState<ActiveCompactionUi | null>(null);
 
   useEffect(() => {
     const unsubscribe = getAgentRuntime().subscribe((event) => {
-      if (event.type !== 'compaction') return;
       const sessionId = event.chatSessionId ?? event.sessionId;
-      setHint({ trace: event.trace, sessionId });
-      const statusKey = statusKeyForTrigger(event.trace.trigger);
-      applyStatusText(sessionId, translate(statusKey));
+      if (event.type === 'compaction_start') {
+        setActive({ sessionId, trigger: event.trigger });
+        return;
+      }
+      if (event.type === 'compaction' || event.type === 'turn_end') {
+        setActive((prev) => (prev?.sessionId === sessionId ? null : prev));
+      }
     });
     return unsubscribe;
-  }, [applyStatusText, translate]);
+  }, []);
 
-  return hint;
+  return active;
 }
 
-export function formatCompactionBanner(
-  trace: CompactionTrace,
+export function compactionStatusText(
+  trigger: ContextPrepareTrigger,
   translate: (key: string, params?: Record<string, string | number>) => string,
 ): string {
-  const beforeK = Math.round(trace.estimatedTokensBefore / 1000);
-  const afterK = Math.round(trace.estimatedTokensAfter / 1000);
-  return translate('ai.chat.compactionBanner', { before: beforeK, after: afterK });
+  return translate(statusKeyForTrigger(trigger));
 }
 
 export function resolveCompactionStatusText(
