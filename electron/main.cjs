@@ -354,15 +354,7 @@ function focusMainWindow() {
       getGlobalShortcutBridge().clearPendingFullscreenHide?.(win);
     } catch {}
 
-    try {
-      if (win.isMinimized && win.isMinimized()) win.restore();
-    } catch {}
-    try {
-      win.show();
-    } catch {}
-    try {
-      win.focus();
-    } catch {}
+    getWindowManager().showAndFocusMainWindow?.(win);
     try {
       app.focus({ steal: true });
     } catch {}
@@ -827,9 +819,7 @@ if (!gotLock) {
           try {
             getGlobalShortcutBridge().clearPendingFullscreenHide?.(mainWin);
           } catch {}
-          if (mainWin.isMinimized?.()) mainWin.restore();
-          mainWin.show?.();
-          mainWin.focus?.();
+          getWindowManager().showAndFocusMainWindow?.(mainWin);
           try {
             app.focus({ steal: true });
           } catch {}

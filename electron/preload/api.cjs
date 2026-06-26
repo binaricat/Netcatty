@@ -508,6 +508,14 @@ function createPreloadApi(ctx) {
     fullscreenChangeListeners.add(cb);
     return () => fullscreenChangeListeners.delete(cb);
   },
+  onWindowShown: (cb) => {
+    windowShownListeners.add(cb);
+    return () => windowShownListeners.delete(cb);
+  },
+  onWindowWillHide: (cb) => {
+    windowWillHideListeners.add(cb);
+    return () => windowWillHideListeners.delete(cb);
+  },
   
   // Settings window
   openSettingsWindow: () => ipcRenderer.invoke("netcatty:settings:open"),

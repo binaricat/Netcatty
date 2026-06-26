@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import React, { Suspense, lazy, useMemo } from 'react';
+import React, { Suspense, lazy, useCallback, useMemo } from 'react';
 import { AlertTriangle, Download, Trash2 } from 'lucide-react';
 import { activeTabStore, toEditorTabId, useIsEditorTabActive } from '../state/activeTabStore';
 import { editorTabStore } from '../state/editorTabStore';
@@ -22,6 +22,7 @@ import { toast } from '../../components/ui/toast';
 import { AppHostTreeLayer } from './AppHostTreeLayer';
 import { getUiThemeById } from '../../infrastructure/config/uiThemes';
 import { buildAppThemeCssVars } from '../state/settingsStateDefaults';
+import { useMainWindowInputFocusRecovery } from '../state/useMainWindowInputFocusRecovery';
 
 const LazyProtocolSelectDialog = lazy(() => import('../../components/ProtocolSelectDialog'));
 const LazyQuickSwitcher = lazy(() =>
@@ -54,6 +55,36 @@ type AppViewContext = Record<string, any>;
 
 export function AppView({ ctx }: { ctx: AppViewContext }) {
   const {
+    resetSessionRename,
+    resetWorkspaceRename,
+    setAddToWorkspaceDialog,
+    setIsCreateWorkspaceOpen,
+    setIsQuickSwitcherOpen,
+    setProtocolSelectHost,
+    setQuickSearch,
+  } = ctx;
+
+  const dismissTransientOverlays = useCallback(() => {
+    setIsQuickSwitcherOpen(false);
+    setQuickSearch('');
+    setIsCreateWorkspaceOpen(false);
+    setProtocolSelectHost(null);
+    setAddToWorkspaceDialog(null);
+    resetSessionRename();
+    resetWorkspaceRename();
+  }, [
+    resetSessionRename,
+    resetWorkspaceRename,
+    setAddToWorkspaceDialog,
+    setIsCreateWorkspaceOpen,
+    setIsQuickSwitcherOpen,
+    setProtocolSelectHost,
+    setQuickSearch,
+  ]);
+
+  useMainWindowInputFocusRecovery({ onPageHidden: dismissTransientOverlays });
+
+  const {
     accentMode, addShellHistoryEntry, addSessionToWorkspace, addToWorkspaceDialog, appendHostToWorkspace, appendLocalTerminalToWorkspace,
     clearAndRemoveSource, clearAndRemoveSources, clearUnsavedConnectionLogs, closeLogView, closeSession, closeTabsBatch, closeWorkspace, copySessionToNewWindowWithCurrentShell, copySessionWithCurrentShell,
     connectionLogs, convertKnownHostToHost, createWorkspaceFromSessions, createWorkspaceFromTargets, createWorkspaceWithHosts, customAccent,
@@ -64,10 +95,10 @@ export function AppView({ ctx }: { ctx: AppViewContext }) {
     handleRequestCloseEditorTabRef, handleSessionStatusChange, handleSyncNowManual, handleTerminalDataCapture, handleToggleTheme, handleUpdateHostFromTerminal,
     hostById, hosts, hotkeyScheme, identities, importOrReuseKey, isBroadcastEnabled, isCreateWorkspaceOpen, isMacClient, isQuickSwitcherOpen,
     keyBindings, keyboardInteractiveQueue, keys, logViews, managedSources, navigateToSection, noteGroups, notes, openLogView, openNoteRequest, orderedTabsWithEditors, orphanSessions,
-    passphraseQueue, protocolSelectHost, proxyProfiles, portForwardingRules, quickResults, quickSearch, removeSessionFromWorkspace, reorderWorkTabs, reorderWorkspaceSessions, resetSessionRename,
-    resetWorkspaceRename, resolveEmptyVaultConflict, resolvedTheme, runSnippet, sessionLogsDir, sessionLogsEnabled, sessionLogsFormat, sessionLogsTimestampsEnabled, sessionRenameTarget, sshDebugLogsEnabled,
-    sessionRenameValue, sessions, setActiveTabId, setAddToWorkspaceDialog, setDeepLinkHostDraft, setDraggingSessionId, setEditorWordWrap, setIsCreateWorkspaceOpen, setIsQuickSwitcherOpen,
-    setNavigateToSection, setProtocolSelectHost, setQuickSearch, setSessionRenameValue, setTerminalFontFamilyId, setTerminalFontSize, setTerminalThemeId, setVaultFocusRequest, updateSessionFontSize, updateSessionRestoreCwd, updateSessionDynamicTitle, updateSessionCodingCliProvider, clearSessionFontSizeOverride,
+    passphraseQueue, protocolSelectHost, proxyProfiles, portForwardingRules, quickResults, quickSearch, removeSessionFromWorkspace, reorderWorkTabs, reorderWorkspaceSessions,
+    resolveEmptyVaultConflict, resolvedTheme, runSnippet, sessionLogsDir, sessionLogsEnabled, sessionLogsFormat, sessionLogsTimestampsEnabled, sessionRenameTarget, sshDebugLogsEnabled,
+    sessionRenameValue, sessions, setActiveTabId, setDeepLinkHostDraft, setDraggingSessionId, setEditorWordWrap,
+    setNavigateToSection, setSessionRenameValue, setTerminalFontFamilyId, setTerminalFontSize, setTerminalThemeId, setVaultFocusRequest, updateSessionFontSize, updateSessionRestoreCwd, updateSessionDynamicTitle, updateSessionCodingCliProvider, clearSessionFontSizeOverride,
     setWorkspaceFocusedSession, setWorkspaceRenameValue, settings, sftpAutoOpenSidebar, sftpFollowTerminalCwd, setSftpFollowTerminalCwd, sftpAutoSync, sftpDefaultViewMode, sftpDoubleClickBehavior,
     sftpShowHiddenFiles, sftpUseCompressedUpload, shellHistory, snippetPackages, snippets, splitSessionWithCurrentShell, startSessionRename,
     startWorkspaceRename, submitSessionRename, submitWorkspaceRename, t, terminalFontFamilyId, terminalFontSize, terminalSettings, terminalThemeId, themeById,

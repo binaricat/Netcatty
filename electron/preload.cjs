@@ -27,6 +27,8 @@ const telnetAutoLoginCancelledListeners = new Map();
 const telnetEchoModeListeners = new Map();
 const languageChangeListeners = new Set();
 const fullscreenChangeListeners = new Set();
+const windowShownListeners = new Set();
+const windowWillHideListeners = new Set();
 const keyboardInteractiveListeners = new Set();
 const hostKeyVerificationListeners = new Set();
 const passphraseListeners = new Set();
@@ -281,6 +283,26 @@ ipcRenderer.on("netcatty:window:fullscreen-changed", (_event, isFullscreen) => {
       cb(isFullscreen);
     } catch (err) {
       console.error("Fullscreen changed callback failed", err);
+    }
+  });
+});
+
+ipcRenderer.on("netcatty:window:shown", () => {
+  windowShownListeners.forEach((cb) => {
+    try {
+      cb();
+    } catch (err) {
+      console.error("Window shown callback failed", err);
+    }
+  });
+});
+
+ipcRenderer.on("netcatty:window:will-hide", () => {
+  windowWillHideListeners.forEach((cb) => {
+    try {
+      cb();
+    } catch (err) {
+      console.error("Window will-hide callback failed", err);
     }
   });
 });
@@ -680,6 +702,8 @@ const api = createPreloadApi({
   terminalDataBacklog,
   languageChangeListeners,
   fullscreenChangeListeners,
+  windowShownListeners,
+  windowWillHideListeners,
   keyboardInteractiveListeners,
   hostKeyVerificationListeners,
   passphraseListeners,

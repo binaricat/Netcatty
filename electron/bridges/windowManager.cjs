@@ -1225,6 +1225,23 @@ function getSettingsWindow() {
   return settingsWindow;
 }
 
+/**
+ * Show the main window and restore reliable keyboard/caret routing (#760, #1722).
+ * Global hotkeys and tray entry points invoke this from non-foreground contexts
+ * where bare BrowserWindow.focus() is silently rejected on Windows.
+ */
+function showAndFocusMainWindow(win) {
+  if (!win || win.isDestroyed?.()) return false;
+  if (win.isMinimized?.()) {
+    try {
+      win.restore();
+    } catch {
+      // ignore
+    }
+  }
+  return restoreWindowInputFocus(win, { show: true });
+}
+
 module.exports = {
   createWindow,
   openSettingsWindow,
@@ -1246,6 +1263,7 @@ module.exports = {
   isWindowUsable,
   registerWindowHandlers,
   restoreWindowInputFocus,
+  showAndFocusMainWindow,
   requestWindowCommandClose,
   shouldCloseWindowFromInput,
   WINDOW_COMMAND_CLOSE_CHANNEL,

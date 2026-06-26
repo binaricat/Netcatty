@@ -10,6 +10,7 @@ const {
   registerWindowHandlers,
   resolveSettingsWindowBounds,
   restoreWindowInputFocus,
+  showAndFocusMainWindow,
   requestWindowCommandClose,
   sendWhenRendererReady,
   shouldCloseWindowFromInput,
@@ -214,6 +215,40 @@ test("restoreWindowInputFocus can show the window when requested", () => {
 
   assert.equal(restored, true);
   assert.deepEqual(calls, ["show", "focus", "webContents.focus"]);
+});
+
+test("showAndFocusMainWindow restores minimized windows before focusing", () => {
+  const calls = [];
+  const win = {
+    isDestroyed() {
+      return false;
+    },
+    isMinimized() {
+      return true;
+    },
+    restore() {
+      calls.push("restore");
+    },
+    show() {
+      calls.push("show");
+    },
+    focus() {
+      calls.push("focus");
+    },
+    webContents: {
+      isDestroyed() {
+        return false;
+      },
+      focus() {
+        calls.push("webContents.focus");
+      },
+    },
+  };
+
+  const restored = showAndFocusMainWindow(win);
+
+  assert.equal(restored, true);
+  assert.deepEqual(calls, ["restore", "show", "focus", "webContents.focus"]);
 });
 
 test("buildAppMenu closes a non-app window directly when Cmd+W is invoked", () => {
