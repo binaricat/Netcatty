@@ -164,16 +164,30 @@ const readPersistedConnectionLogIds = (): Set<string> => {
   return new Set(stored.map((log) => log.id));
 };
 
+const buildPersistedLogIds = (
+  logs: ConnectionLog[],
+  usePersistedLogIdsFromDisk: boolean,
+): Set<string> => {
+  const ids = new Set(logs.map((log) => log.id));
+  if (usePersistedLogIdsFromDisk) {
+    for (const id of readPersistedConnectionLogIds()) {
+      ids.add(id);
+    }
+  }
+  return ids;
+};
+
 const writeConnectionLogTerminalDataMap = (
   logs: ConnectionLog[],
   localMaps: ConnectionLogTerminalDataMap[],
+  usePersistedLogIdsFromDisk: boolean,
 ): boolean => {
   const existing = readConnectionLogTerminalDataMap();
   const pruned = mergeTerminalDataMapsForStorage(
     logs,
     existing,
     localMaps,
-    readPersistedConnectionLogIds(),
+    buildPersistedLogIds(logs, usePersistedLogIdsFromDisk),
   );
   if (JSON.stringify(existing) === JSON.stringify(pruned)) return true;
   return localStorageAdapter.write(STORAGE_KEY_CONNECTION_LOG_TERMINAL_DATA, pruned);
@@ -216,7 +230,11 @@ export const useVaultState = () => {
   const groupConfigsReadSeq = useRef(0);
   const connectionLogTerminalDataRef = useRef<ConnectionLogTerminalDataMap>({});
 
-  const syncConnectionLogTerminalDataMap = useCallback((logs: ConnectionLog[]) => {
+  const syncConnectionLogTerminalDataMap = useCallback((
+    logs: ConnectionLog[],
+    options?: { usePersistedLogIdsFromDisk?: boolean },
+  ) => {
+    const usePersistedLogIdsFromDisk = options?.usePersistedLogIdsFromDisk ?? false;
     const localMaps = [
       connectionLogTerminalDataRef.current,
       buildTerminalDataMapFromLogs(logs),
@@ -226,9 +244,13 @@ export const useVaultState = () => {
       logs,
       existing,
       localMaps,
-      readPersistedConnectionLogIds(),
+      buildPersistedLogIds(logs, usePersistedLogIdsFromDisk),
     );
-    const persisted = writeConnectionLogTerminalDataMap(logs, localMaps);
+    const persisted = writeConnectionLogTerminalDataMap(
+      logs,
+      localMaps,
+      usePersistedLogIdsFromDisk,
+    );
     if (persisted) {
       connectionLogTerminalDataRef.current = merged;
     } else {
@@ -257,7 +279,12 @@ export const useVaultState = () => {
       }
     }
 
-    const { persisted: sidePersisted } = syncConnectionLogTerminalDataMap(logs);
+    let sidePersisted = true;
+    if (mainPersisted || !options?.pruneMainBlob) {
+      ({ persisted: sidePersisted } = syncConnectionLogTerminalDataMap(logs, {
+        usePersistedLogIdsFromDisk: Boolean(options?.pruneMainBlob && mainPersisted),
+      }));
+    }
 
     if (!options?.pruneMainBlob) {
       mainPersisted = localStorageAdapter.write(STORAGE_KEY_CONNECTION_LOGS, logs);
