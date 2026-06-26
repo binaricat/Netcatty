@@ -157,10 +157,11 @@ test("mergeTerminalDataMapsForStorage keeps replay data from other windows", () 
 
   const merged = mergeTerminalDataMapsForStorage(
     logs,
-    { remote: "remote-window output" },
+    { remote: "remote-window output", other: "other-window only" },
     { local: "local-window output" },
   );
 
   assert.equal(merged.remote, "remote-window output");
   assert.equal(merged.local, "local-window output");
+  assert.equal(merged.other, "other-window only");
 });

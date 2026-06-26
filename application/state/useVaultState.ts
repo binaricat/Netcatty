@@ -47,7 +47,6 @@ import {
   mergeConnectionLogsFromStorage,
   mergeTerminalDataIntoLogs,
   mergeTerminalDataMapsForStorage,
-  pruneTerminalDataMapForStorage,
   type ConnectionLogTerminalDataMap,
 } from "../../domain/connectionLogTerminalData";
 import { getNextVaultOrder, normalizeVaultOrder } from "../../domain/vaultOrder";
@@ -240,10 +239,14 @@ export const useVaultState = () => {
     );
     const shouldPruneMainBlob = options?.pruneMainBlob
       && (persisted || !unsavedTerminalDataPending);
-    if (shouldPruneMainBlob) {
-      localStorageAdapter.write(STORAGE_KEY_CONNECTION_LOGS, pruneConnectionLogsForStorage(logs));
-    } else {
-      localStorageAdapter.write(STORAGE_KEY_CONNECTION_LOGS, logs);
+    const mainPayload = shouldPruneMainBlob
+      ? pruneConnectionLogsForStorage(logs)
+      : logs;
+    const mainPersisted = localStorageAdapter.write(STORAGE_KEY_CONNECTION_LOGS, mainPayload);
+    if (!mainPersisted && unsavedTerminalDataPending) {
+      console.warn(
+        "[useVaultState] Failed to persist connection log terminal replay data to localStorage.",
+      );
     }
   }, [syncConnectionLogTerminalDataMap]);
 

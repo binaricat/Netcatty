@@ -99,5 +99,16 @@ export const mergeTerminalDataMapsForStorage = (
       if (data) combined[id] = data;
     }
   }
-  return pruneTerminalDataMapForStorage(logs, combined);
+  const pruned = pruneTerminalDataMapForStorage(logs, combined);
+
+  // Retain replay buffers for log ids this window has not loaded yet (another
+  // window may have created the log before our connectionLogs state catches up).
+  const persistedSnapshot = maps[0] ?? {};
+  for (const [id, data] of Object.entries(persistedSnapshot)) {
+    if (data && !logs.some((log) => log.id === id)) {
+      pruned[id] = data;
+    }
+  }
+
+  return pruned;
 };
