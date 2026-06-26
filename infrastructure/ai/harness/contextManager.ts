@@ -208,9 +208,8 @@ export async function prepareTurnContext(
   }
 
   const reinjection = buildReinjectionMessages(input.reinjection);
-  if (reinjection.length > 0) {
+  if (reinjection.length > 0 && didAdjust) {
     working = [...reinjection, ...working];
-    didAdjust = true;
   }
 
   const tokensAfter = estimateModelMessagesTokensWithKind({

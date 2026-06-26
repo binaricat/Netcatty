@@ -45,9 +45,15 @@ function isCachedOrSuperseded(text: string): boolean {
     || text.startsWith(EARLIER_TERMINAL_PREFIX);
 }
 
+function isSftpReadTool(toolName: string): boolean {
+  return toolName === 'sftp_read'
+    || toolName === 'sftp.read'
+    || toolName === 'sftp_read_file';
+}
+
 function readFingerprint(toolName: string, args: unknown): string | null {
   if (!isRecord(args)) return null;
-  if (toolName === 'sftp_read' || toolName === 'sftp.read') {
+  if (isSftpReadTool(toolName)) {
     const path = args.path ?? args.remotePath;
     return typeof path === 'string' ? `read:${path}` : null;
   }

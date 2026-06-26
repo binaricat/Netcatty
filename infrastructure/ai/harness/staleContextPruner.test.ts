@@ -49,3 +49,50 @@ test('pruneStaleToolContext supersedes older sftp reads for same path', () => {
   assert.match(serialized, /superseded read/);
   assert.match(serialized, /new config body/);
 });
+
+test('pruneStaleToolContext supersedes older sftp_read_file reads for same path', () => {
+  const messages: ModelMessage[] = [
+    {
+      role: 'assistant',
+      content: [{
+        type: 'tool-call',
+        toolCallId: 'c1',
+        toolName: 'sftp_read_file',
+        input: { path: '/etc/nginx/nginx.conf' },
+      }],
+    },
+    {
+      role: 'tool',
+      content: [{
+        type: 'tool-result',
+        toolCallId: 'c1',
+        toolName: 'sftp_read_file',
+        output: { type: 'text', value: 'old config body' },
+      }],
+    },
+    {
+      role: 'assistant',
+      content: [{
+        type: 'tool-call',
+        toolCallId: 'c2',
+        toolName: 'sftp_read_file',
+        input: { path: '/etc/nginx/nginx.conf' },
+      }],
+    },
+    {
+      role: 'tool',
+      content: [{
+        type: 'tool-result',
+        toolCallId: 'c2',
+        toolName: 'sftp_read_file',
+        output: { type: 'text', value: 'new config body' },
+      }],
+    },
+  ];
+
+  const result = pruneStaleToolContext(messages);
+  assert.equal(result.didAdjust, true);
+  const serialized = JSON.stringify(result.messages);
+  assert.match(serialized, /superseded read/);
+  assert.match(serialized, /new config body/);
+});

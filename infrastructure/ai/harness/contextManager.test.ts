@@ -64,6 +64,35 @@ test('prepareTurnContext applies typed compression before LLM summarize threshol
   assert.ok(serialized.length < JSON.stringify(messages).length);
 });
 
+test('prepareTurnContext skips reinjection when no compaction occurred', async () => {
+  const messages: ModelMessage[] = [
+    { role: 'user', content: 'List running containers on prod-web-01.' },
+    { role: 'assistant', content: 'I will check docker ps.' },
+  ];
+
+  const events: string[] = [];
+  const prepared = await prepareTurnContext({
+    messages,
+    backend: 'catty',
+    contextWindow: 128_000,
+    trigger: 'pre-turn',
+    sessionId: 'chat-no-compact',
+    onEvent: (event) => {
+      if (event.type === 'compaction') events.push(event.trace.trigger);
+    },
+    reinjection: {
+      permissionMode: 'confirm',
+      userGoal: 'List running containers on prod-web-01.',
+    },
+  });
+
+  assert.equal(prepared.didAdjust, false);
+  assert.equal(events.length, 0);
+  const serialized = JSON.stringify(prepared.messages);
+  assert.doesNotMatch(serialized, /Netcatty session context/);
+  assert.doesNotMatch(serialized, /Permission mode: confirm/);
+});
+
 test('prepareTurnContext force trigger retains recent user goal in replay', async () => {
   const messages: ModelMessage[] = Array.from({ length: 40 }, (_, index) => ({
     role: index % 2 === 0 ? 'user' : 'assistant',
