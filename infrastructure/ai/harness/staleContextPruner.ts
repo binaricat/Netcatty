@@ -133,7 +133,13 @@ export function pruneStaleToolContext(
       const toolName = meta?.toolName ?? (typeof part.toolName === 'string' ? part.toolName : '');
       const args = meta?.input;
       const readKey = readFingerprint(toolName, args);
-      if (readKey) latestReadByKey.set(readKey, index);
+      if (readKey) {
+        const text = getToolResultText(part);
+        const isError = text.toLowerCase().includes('error') || Boolean(part.isError);
+        if (!isError) {
+          latestReadByKey.set(readKey, index);
+        }
+      }
       const termKey = terminalFingerprint(toolName, args);
       if (underBudgetPressure && termKey) {
         const callArgs = isRecord(args) ? args : {};

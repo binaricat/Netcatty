@@ -253,6 +253,54 @@ test('pruneStaleToolContext preserves repeated sftp reads without budget pressur
   assert.doesNotMatch(serialized, /superseded read/);
 });
 
+test('pruneStaleToolContext keeps last successful read when a later read fails', () => {
+  const messages: ModelMessage[] = [
+    {
+      role: 'assistant',
+      content: [{
+        type: 'tool-call',
+        toolCallId: 'c1',
+        toolName: 'sftp_read_file',
+        input: { sessionId: 'host-a', path: '/etc/nginx/nginx.conf' },
+      }],
+    },
+    {
+      role: 'tool',
+      content: [{
+        type: 'tool-result',
+        toolCallId: 'c1',
+        toolName: 'sftp_read_file',
+        output: { type: 'text', value: 'valid config body' },
+      }],
+    },
+    {
+      role: 'assistant',
+      content: [{
+        type: 'tool-call',
+        toolCallId: 'c2',
+        toolName: 'sftp_read_file',
+        input: { sessionId: 'host-a', path: '/etc/nginx/nginx.conf' },
+      }],
+    },
+    {
+      role: 'tool',
+      content: [{
+        type: 'tool-result',
+        toolCallId: 'c2',
+        toolName: 'sftp_read_file',
+        output: { type: 'text', value: 'Permission denied error' },
+        isError: true,
+      }],
+    },
+  ];
+
+  const result = pruneStaleToolContext(messages, { underBudgetPressure: true });
+  assert.equal(result.didAdjust, false);
+  const serialized = JSON.stringify(result.messages);
+  assert.match(serialized, /valid config body/);
+  assert.doesNotMatch(serialized, /superseded read/);
+});
+
 test('pruneStaleToolContext preserves terminal output without budget pressure flag', () => {
   const messages: ModelMessage[] = [
     ...terminalExecutePair('t1', 'sess-1', 'uptime', 'uptime-1'),

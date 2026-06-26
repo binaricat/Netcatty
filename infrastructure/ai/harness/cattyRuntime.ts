@@ -15,7 +15,9 @@ import type { AgentEventListener, CompactionTrace } from './types';
 import { buildCattyCompactionTimeout } from './streamTimeouts';
 import {
   COMPACTION_PROMPT_RESERVE,
+  COMPACTION_SUMMARY_MAX_OUTPUT_TOKENS,
   DEFAULT_MAX_OUTPUT_TOKENS,
+  resolveEffectiveMaxOutputTokens,
 } from './contextBudget';
 import { pruneUntilFitsCompaction } from './compactionPruner';
 import { CATTY_COMPACTION_STATUS_KEYS } from './compactionStatusKeys';
@@ -77,9 +79,13 @@ export async function compactCattyMessages(
         : CATTY_COMPACTION_STATUS_KEYS.preTurn,
     );
     const reserved = input.reservedTokens?.() ?? 0;
+    const compactionOutputTokens = resolveEffectiveMaxOutputTokens(
+      contextWindow,
+      COMPACTION_SUMMARY_MAX_OUTPUT_TOKENS,
+    );
     const availableForInput = Math.max(
       1,
-      contextWindow - maxOutputTokens - COMPACTION_PROMPT_RESERVE - reserved,
+      contextWindow - compactionOutputTokens - COMPACTION_PROMPT_RESERVE - reserved,
     );
     const pruned = pruneUntilFitsCompaction({
       messages: messagesToSummarize,
@@ -94,7 +100,7 @@ export async function compactCattyMessages(
         content: `Summarize this earlier conversation context for the next model turn:\n\n${formatMessagesForCompaction(pruned)}`,
       }],
       abortSignal: input.abortSignal,
-      maxOutputTokens: 1600,
+      maxOutputTokens: COMPACTION_SUMMARY_MAX_OUTPUT_TOKENS,
       temperature: 0,
       timeout: buildCattyCompactionTimeout(),
     });
