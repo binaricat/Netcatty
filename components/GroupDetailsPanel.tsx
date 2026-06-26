@@ -605,7 +605,6 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
           setNewKeyFilePath={setNewKeyFilePath}
           inheritedLegacyAlgorithms={inheritedLegacyAlgorithms}
           inheritedSkipEcdsaHostKey={inheritedSkipEcdsaHostKey}
-          inheritedDeviceType={inheritedDeviceType}
           showAlgorithmOverrides={showAlgorithmOverrides}
           setShowAlgorithmOverrides={setShowAlgorithmOverrides}
           inheritedAlgorithmOverrides={inheritedAlgorithmOverrides}

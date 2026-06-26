@@ -46,7 +46,11 @@ export const HostDetailsAdvancedSections: React.FC<HostDetailsAdvancedSectionsPr
   proxySummaryTooltip,
   clearProxyConfig,
   groupDefaults,
-}) => (
+}) => {
+  const inheritedDeviceType = effectiveGroupDefaults?.deviceType;
+  const effectiveDeviceType = form.deviceType ?? inheritedDeviceType;
+
+  return (
   <>
         <HostDetailsSection
           icon={<Palette size={14} className="text-muted-foreground" />}
@@ -176,7 +180,6 @@ export const HostDetailsAdvancedSections: React.FC<HostDetailsAdvancedSectionsPr
                   ...prev,
                   moshEnabled: true,
                   etEnabled: false,
-                  deviceType: prev.deviceType === 'network' ? undefined : prev.deviceType,
                   x11Forwarding: undefined,
                 }));
               } else {
@@ -200,7 +203,6 @@ export const HostDetailsAdvancedSections: React.FC<HostDetailsAdvancedSectionsPr
                   ...prev,
                   etEnabled: true,
                   moshEnabled: false,
-                  deviceType: prev.deviceType === 'network' ? undefined : prev.deviceType,
                   x11Forwarding: undefined,
                 }));
               } else {
@@ -276,10 +278,10 @@ export const HostDetailsAdvancedSections: React.FC<HostDetailsAdvancedSectionsPr
           <ToggleRow
             label={t("hostDetails.deviceType")}
             hint={t("hostDetails.deviceType.desc")}
-            enabled={form.deviceType === 'network'}
-            onToggle={() => update("deviceType", form.deviceType === 'network' ? undefined : 'network')}
+            enabled={effectiveDeviceType === 'network'}
+            onToggle={() => update("deviceType", effectiveDeviceType === 'network' ? 'general' : 'network')}
           />
-          {form.deviceType === 'network' && (
+          {effectiveDeviceType === 'network' && (
             <div className="flex items-start gap-2 p-2 rounded-md bg-yellow-500/10 border border-yellow-500/20">
               <AlertTriangle size={14} className="text-yellow-500 mt-0.5 flex-shrink-0" />
               <p className="text-xs text-yellow-600 dark:text-yellow-400 break-words">
@@ -627,4 +629,5 @@ export const HostDetailsAdvancedSections: React.FC<HostDetailsAdvancedSectionsPr
           />
         </HostDetailsSection>
   </>
-);
+  );
+};
