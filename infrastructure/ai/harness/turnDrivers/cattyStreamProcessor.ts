@@ -126,7 +126,11 @@ export async function processCattyStream(input: ProcessCattyStreamInput): Promis
     stopWhen: isStepCount(maxIterations),
     abortSignal: signal,
     include: { rawChunks: true },
-    timeout: buildCattyStreamTimeouts({ permissionMode: runtimeContext.permissionMode, commandTimeoutMs }),
+    timeout: buildCattyStreamTimeouts({
+      permissionMode: runtimeContext.permissionMode,
+      commandTimeoutMs,
+      maxIterations,
+    }),
     telemetry: {
       functionId: `catty-${runtimeContext.agentKind}`,
       metadata: {
