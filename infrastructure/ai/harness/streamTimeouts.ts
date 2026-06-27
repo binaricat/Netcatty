@@ -9,17 +9,23 @@ const COMPACTION_TIMEOUT_MS = 90 * 1000;
 
 export interface BuildCattyStreamTimeoutsInput {
   permissionMode?: AIPermissionMode;
+  commandTimeoutMs?: number;
 }
 
 /** v7 streamText timeout profile for Catty multi-step agent turns. */
 export function buildCattyStreamTimeouts(
-  _input: BuildCattyStreamTimeoutsInput = {},
+  input: BuildCattyStreamTimeoutsInput = {},
 ) {
+  const approvalBudgetMs = input.permissionMode === 'confirm' ? CATTY_APPROVAL_TIMEOUT_MS : 0;
+  const commandTimeoutBudgetMs =
+    Number.isFinite(input.commandTimeoutMs) && input.commandTimeoutMs > 0
+      ? input.commandTimeoutMs + approvalBudgetMs + NINETY_SECONDS_MS
+      : 0;
   return {
-    totalMs: THIRTY_MINUTES_MS,
-    stepMs: TEN_MINUTES_MS,
-    chunkMs: TWO_MINUTES_MS,
-    toolMs: CATTY_APPROVAL_TIMEOUT_MS + NINETY_SECONDS_MS,
+    totalMs: Math.max(THIRTY_MINUTES_MS, commandTimeoutBudgetMs),
+    stepMs: Math.max(TEN_MINUTES_MS, commandTimeoutBudgetMs),
+    chunkMs: Math.max(TWO_MINUTES_MS, commandTimeoutBudgetMs),
+    toolMs: Math.max(CATTY_APPROVAL_TIMEOUT_MS + NINETY_SECONDS_MS, commandTimeoutBudgetMs),
   };
 }
 

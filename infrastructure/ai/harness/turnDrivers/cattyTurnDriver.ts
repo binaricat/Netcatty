@@ -6,7 +6,7 @@ import {
   resolveContextWindow,
 } from '../../contextCompaction';
 import { buildSystemPrompt } from '../../cattyAgent/systemPrompt';
-import { isWebSearchReady } from '../../types';
+import { isWebSearchReady, normalizeCommandTimeoutSeconds } from '../../types';
 import { createModelFromConfig } from '../../sdk/providers';
 import { createCattyToolsFromCatalog } from '../capabilityTools';
 import { createInitialCattyRuntimeContext } from '../cattyRuntimeContext';
@@ -235,6 +235,14 @@ async function runCattyTurn(input: CattyTurnInput, ctx: TurnDriverContext): Prom
       scopeLabel: context.scopeLabel,
       userGoal: extractLatestUserGoal(messagesForStream),
     });
+    const commandTimeoutSeconds =
+      Number.isFinite(context.commandTimeout) && context.commandTimeout > 0
+        ? normalizeCommandTimeoutSeconds(context.commandTimeout)
+        : undefined;
+    const commandTimeoutMs =
+      commandTimeoutSeconds != null
+        ? commandTimeoutSeconds * 1000
+        : undefined;
 
     const runStream = async (streamMessages: ModelMessage[], streamAssistantMsgId: string) => {
       await processCattyStream({
@@ -249,6 +257,7 @@ async function runCattyTurn(input: CattyTurnInput, ctx: TurnDriverContext): Prom
         advancedParams: context.activeProvider?.advancedParams,
         continuationContext,
         turnId: ctx.turnId,
+        commandTimeoutMs,
         runtimeContext,
         onAgentEvent: (event) => ctx.emit(event),
         prepareStep: async ({ stepNumber, messages, runtimeContext: stepRuntimeContext }) => {

@@ -30,6 +30,9 @@ function loadBridgeWithMocks(options = {}) {
           ? options.getPermissionMode()
           : "default",
       getMaxIterations: () => 20,
+      setCommandTimeout: (...args) => {
+        if (typeof options.setCommandTimeout === "function") options.setCommandTimeout(...args);
+      },
       updateAttachmentMetadata: (...args) => {
         if (typeof options.updateAttachmentMetadata === "function") options.updateAttachmentMetadata(...args);
       },
@@ -209,6 +212,33 @@ test("mcp attachment update handler forwards current chat attachments", async ()
 
     assert.deepEqual(result, { ok: true });
     assert.deepEqual(calls, [{ attachments, chatSessionId: "chat-1" }]);
+  } finally {
+    restore();
+  }
+});
+
+test("command timeout handler accepts one-day timeout values", async () => {
+  const calls = [];
+  const { bridge, restore } = loadBridgeWithMocks({
+    setCommandTimeout: (value) => calls.push(value),
+  });
+  const ipcMain = createIpcMainStub();
+
+  bridge.init({
+    sessions: new Map(),
+    sftpClients: new Map(),
+    electronModule: { app: { getPath: () => process.cwd() } },
+  });
+  bridge.registerHandlers(ipcMain);
+
+  try {
+    const setCommandTimeout = ipcMain.handlers.get("netcatty:ai:mcp:set-command-timeout");
+    assert.equal(typeof setCommandTimeout, "function");
+
+    const result = await setCommandTimeout({ sender: { id: 1 } }, { timeout: 86_400 });
+
+    assert.deepEqual(result, { ok: true });
+    assert.deepEqual(calls, [86_400]);
   } finally {
     restore();
   }

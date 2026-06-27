@@ -59,6 +59,7 @@ export interface ProcessCattyStreamInput {
   advancedParams?: ProviderAdvancedParams;
   continuationContext?: CattyProviderContinuationContext;
   turnId?: string;
+  commandTimeoutMs?: number;
   runtimeContext: CattyRuntimeContext;
   onAgentEvent?: (event: AgentEvent) => void;
   prepareStep?: (args: {
@@ -101,6 +102,7 @@ export async function processCattyStream(input: ProcessCattyStreamInput): Promis
     advancedParams,
     continuationContext,
     turnId,
+    commandTimeoutMs,
     runtimeContext: initialRuntimeContext,
     onAgentEvent,
     prepareStep,
@@ -124,7 +126,7 @@ export async function processCattyStream(input: ProcessCattyStreamInput): Promis
     stopWhen: isStepCount(maxIterations),
     abortSignal: signal,
     include: { rawChunks: true },
-    timeout: buildCattyStreamTimeouts({ permissionMode: runtimeContext.permissionMode }),
+    timeout: buildCattyStreamTimeouts({ permissionMode: runtimeContext.permissionMode, commandTimeoutMs }),
     telemetry: {
       functionId: `catty-${runtimeContext.agentKind}`,
       metadata: {

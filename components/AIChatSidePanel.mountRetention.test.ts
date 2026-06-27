@@ -182,3 +182,15 @@ test('AI side panel re-renders when retained content becomes visible again', () 
     { ...hiddenProps, isVisible: true },
   ), false);
 });
+
+test('AI side panel re-renders when command timeout changes', () => {
+  const props = baseProps({
+    isVisible: true,
+    commandTimeout: 60,
+  });
+
+  assert.equal(aiChatSidePanelPropsAreEqual(
+    props,
+    { ...props, commandTimeout: 86_400 },
+  ), false);
+});

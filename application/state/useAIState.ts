@@ -33,7 +33,11 @@ import type {
   AISessionScope,
   WebSearchConfig,
 } from '../../infrastructure/ai/types';
-import { DEFAULT_COMMAND_BLOCKLIST } from '../../infrastructure/ai/types';
+import {
+  DEFAULT_COMMAND_BLOCKLIST,
+  DEFAULT_COMMAND_TIMEOUT_SECONDS,
+  normalizeCommandTimeoutSeconds,
+} from '../../infrastructure/ai/types';
 import {
   activateDraftView,
   clearScopeDraftState,
@@ -107,7 +111,9 @@ export function useAIState() {
     localStorageAdapter.read<string[]>(STORAGE_KEY_AI_COMMAND_BLOCKLIST) ?? [...DEFAULT_COMMAND_BLOCKLIST]
   );
   const [commandTimeout, setCommandTimeoutRaw] = useState<number>(() =>
-    localStorageAdapter.readNumber(STORAGE_KEY_AI_COMMAND_TIMEOUT) ?? 60
+    normalizeCommandTimeoutSeconds(
+      localStorageAdapter.readNumber(STORAGE_KEY_AI_COMMAND_TIMEOUT) ?? DEFAULT_COMMAND_TIMEOUT_SECONDS,
+    )
   );
   const [maxIterations, setMaxIterationsRaw] = useState<number>(() =>
     localStorageAdapter.readNumber(STORAGE_KEY_AI_MAX_ITERATIONS) ?? 20
@@ -361,11 +367,12 @@ export function useAIState() {
   }, []);
 
   const setCommandTimeout = useCallback((value: number) => {
-    setCommandTimeoutRaw(value);
-    localStorageAdapter.writeNumber(STORAGE_KEY_AI_COMMAND_TIMEOUT, value);
+    const normalizedValue = normalizeCommandTimeoutSeconds(value);
+    setCommandTimeoutRaw(normalizedValue);
+    localStorageAdapter.writeNumber(STORAGE_KEY_AI_COMMAND_TIMEOUT, normalizedValue);
     // Sync to MCP Server bridge
     const bridge = getAIBridge();
-    bridge?.aiMcpSetCommandTimeout?.(value);
+    bridge?.aiMcpSetCommandTimeout?.(normalizedValue);
   }, []);
 
   const setMaxIterations = useCallback((value: number) => {
@@ -438,13 +445,14 @@ export function useAIState() {
             break;
           }
           case STORAGE_KEY_AI_COMMAND_TIMEOUT: {
-            const timeout = localStorageAdapter.readNumber(STORAGE_KEY_AI_COMMAND_TIMEOUT) ?? 60;
+            const timeout = localStorageAdapter.readNumber(STORAGE_KEY_AI_COMMAND_TIMEOUT) ?? DEFAULT_COMMAND_TIMEOUT_SECONDS;
             if (!Number.isFinite(timeout)) {
               console.warn('[useAIState] Cross-window sync: AI_COMMAND_TIMEOUT is not a finite number, skipping');
               break;
             }
-            setCommandTimeoutRaw(timeout);
-            getAIBridge()?.aiMcpSetCommandTimeout?.(timeout);
+            const normalizedTimeout = normalizeCommandTimeoutSeconds(timeout);
+            setCommandTimeoutRaw(normalizedTimeout);
+            getAIBridge()?.aiMcpSetCommandTimeout?.(normalizedTimeout);
             break;
           }
           case STORAGE_KEY_AI_MAX_ITERATIONS: {
@@ -539,7 +547,9 @@ export function useAIState() {
     const bridge = getAIBridge();
     const initialBlocklist = localStorageAdapter.read<string[]>(STORAGE_KEY_AI_COMMAND_BLOCKLIST) ?? [...DEFAULT_COMMAND_BLOCKLIST];
     bridge?.aiMcpSetCommandBlocklist?.(initialBlocklist);
-    const initialTimeout = localStorageAdapter.readNumber(STORAGE_KEY_AI_COMMAND_TIMEOUT) ?? 60;
+    const initialTimeout = normalizeCommandTimeoutSeconds(
+      localStorageAdapter.readNumber(STORAGE_KEY_AI_COMMAND_TIMEOUT) ?? DEFAULT_COMMAND_TIMEOUT_SECONDS,
+    );
     bridge?.aiMcpSetCommandTimeout?.(initialTimeout);
     const initialMaxIter = localStorageAdapter.readNumber(STORAGE_KEY_AI_MAX_ITERATIONS) ?? 20;
     bridge?.aiMcpSetMaxIterations?.(initialMaxIter);

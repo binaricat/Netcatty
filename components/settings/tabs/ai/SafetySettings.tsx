@@ -1,7 +1,7 @@
 import React, { useCallback, useState } from "react";
 import { Plus, X } from "lucide-react";
 import type { AIPermissionMode } from "../../../../infrastructure/ai/types";
-import { DEFAULT_COMMAND_BLOCKLIST } from "../../../../infrastructure/ai/types";
+import { DEFAULT_COMMAND_BLOCKLIST, MAX_COMMAND_TIMEOUT_SECONDS } from "../../../../infrastructure/ai/types";
 import { useI18n } from "../../../../application/i18n/I18nProvider";
 import { Button } from "../../../ui/button";
 import { Select, SettingCard, SettingRow, SettingsSection } from "../../settings-ui";
@@ -93,10 +93,10 @@ export const SafetySettings: React.FC<{
               value={commandTimeout}
               onChange={(e) => {
                 const val = parseInt(e.target.value, 10);
-                if (!isNaN(val) && val > 0) setCommandTimeout(val);
+                if (!isNaN(val)) setCommandTimeout(val);
               }}
               min={1}
-              max={3600}
+              max={MAX_COMMAND_TIMEOUT_SECONDS}
               className="w-20 h-9 rounded-md border border-input bg-background px-3 text-sm text-right focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
             />
             <span className="text-xs text-muted-foreground">{t('ai.safety.commandTimeout.unit')}</span>

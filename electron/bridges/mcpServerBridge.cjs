@@ -49,6 +49,7 @@ let commandBlocklist = [];
 let compiledBlocklist = [];
 
 // Command timeout in milliseconds (default 60s, synced from user settings)
+const MAX_COMMAND_TIMEOUT_SECONDS = 24 * 60 * 60;
 let commandTimeoutMs = 60000;
 
 // Max iterations for AI agent loops (default 20, synced from user settings)
@@ -333,7 +334,7 @@ function setCommandBlocklist(list) {
 }
 
 function setCommandTimeout(seconds) {
-  commandTimeoutMs = Math.max(1, Math.min(3600, seconds || 60)) * 1000;
+  commandTimeoutMs = Math.max(1, Math.min(MAX_COMMAND_TIMEOUT_SECONDS, seconds || 60)) * 1000;
 }
 
 function getCommandTimeoutMs() {

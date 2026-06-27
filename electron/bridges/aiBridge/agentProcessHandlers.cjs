@@ -1,6 +1,7 @@
 /* eslint-disable no-undef */
 function registerAgentProcessHandlers(ctx) {
   with (ctx) {
+  const maxCommandTimeoutSeconds = 24 * 60 * 60;
   // ── MCP Server session metadata ──
 
   ipcMain.handle("netcatty:ai:mcp:update-sessions", async (event, { sessions: sessionList, chatSessionId }) => {
@@ -38,8 +39,8 @@ function registerAgentProcessHandlers(ctx) {
   ipcMain.handle("netcatty:ai:mcp:set-command-timeout", async (event, { timeout }) => {
     if (!validateSenderOrSettings(event)) return { ok: false, error: "Unauthorized IPC sender" };
     const value = Number(timeout);
-    if (!Number.isFinite(value) || value < 1 || value > 3600) {
-      return { ok: false, error: "timeout must be a number between 1 and 3600" };
+    if (!Number.isFinite(value) || value < 1 || value > maxCommandTimeoutSeconds) {
+      return { ok: false, error: `timeout must be a number between 1 and ${maxCommandTimeoutSeconds}` };
     }
     mcpServerBridge.setCommandTimeout(value);
     return { ok: true };

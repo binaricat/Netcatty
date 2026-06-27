@@ -69,6 +69,7 @@ export interface AIChatSidePanelProps {
   globalPermissionMode: AIPermissionMode;
   setGlobalPermissionMode?: (mode: AIPermissionMode) => void;
   commandBlocklist?: string[];
+  commandTimeout?: number;
   maxIterations?: number;
 
   // Web search

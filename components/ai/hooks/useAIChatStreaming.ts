@@ -92,6 +92,7 @@ export interface SendToCattyContext {
   scopeLabel?: string;
   globalPermissionMode: AIPermissionMode;
   commandBlocklist?: string[];
+  commandTimeout?: number;
   terminalSessions: TerminalSessionInfo[];
   webSearchConfig?: WebSearchConfig | null;
   getExecutorContext?: () => ExecutorContext;

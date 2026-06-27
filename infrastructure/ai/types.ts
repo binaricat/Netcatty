@@ -320,6 +320,14 @@ export const DEFAULT_COMMAND_BLOCKLIST = [
   ...defaultCommandBlocklist,
 ];
 
+export const DEFAULT_COMMAND_TIMEOUT_SECONDS = 60;
+export const MAX_COMMAND_TIMEOUT_SECONDS = 24 * 60 * 60;
+
+export function normalizeCommandTimeoutSeconds(value: number): number {
+  if (!Number.isFinite(value)) return DEFAULT_COMMAND_TIMEOUT_SECONDS;
+  return Math.min(MAX_COMMAND_TIMEOUT_SECONDS, Math.max(1, value));
+}
+
 export const DEFAULT_AI_SETTINGS: AISettings = {
   providers: [],
   activeProviderId: '',
@@ -329,7 +337,7 @@ export const DEFAULT_AI_SETTINGS: AISettings = {
   externalAgents: [],
   defaultAgentId: 'catty',
   commandBlocklist: [...DEFAULT_COMMAND_BLOCKLIST],
-  commandTimeout: 60,
+  commandTimeout: DEFAULT_COMMAND_TIMEOUT_SECONDS,
   maxIterations: 20,
 };
 

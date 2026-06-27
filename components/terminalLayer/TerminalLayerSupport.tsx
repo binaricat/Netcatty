@@ -559,6 +559,7 @@ const AIChatPanelsHostInner: React.FC<AIChatPanelsHostProps> = ({
                     globalPermissionMode={aiState.globalPermissionMode}
                     setGlobalPermissionMode={aiState.setGlobalPermissionMode}
                     commandBlocklist={aiState.commandBlocklist}
+                    commandTimeout={aiState.commandTimeout}
                     maxIterations={aiState.maxIterations}
                     webSearchConfig={aiState.webSearchConfig}
                     quickMessages={aiState.quickMessages}
