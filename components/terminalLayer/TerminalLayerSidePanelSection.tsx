@@ -122,6 +122,7 @@ function TerminalLayerSidePanelTabBody({ ctx }: { ctx: SidePanelContext }) {
     activeTerminalSessionForSystem,
     activeSystemSessionHost,
     handlePendingTerminalSelectionConsumed,
+    handleSftpCurrentPathChange,
     handleSftpInitialLocationApplied,
     handleSnippetFromPanel,
     handleThemeChangeForFocusedSession,
@@ -534,6 +535,7 @@ function TerminalLayerSidePanelTabBody({ ctx }: { ctx: SidePanelContext }) {
                       : null
                   }
                   onInitialLocationApplied={(location) => handleSftpInitialLocationApplied(tabId, location)}
+                  onCurrentPathChange={(location) => handleSftpCurrentPathChange(tabId, location)}
                   showWorkspaceHostHeader={isVisibleSftpPanel && !!activeWorkspace}
                   isVisible={isVisibleSftpPanel}
                   renderOverlays={isVisibleSftpPanel}

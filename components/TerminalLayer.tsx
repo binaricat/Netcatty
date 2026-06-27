@@ -28,6 +28,7 @@ import {
   STORAGE_KEY_TERMINAL_COMPOSE_BAR_OPEN,
 } from '../infrastructure/config/storageKeys';
 import { buildCacheKey } from '../application/state/sftp/sharedRemoteHostCache';
+import { resolveSftpOpenLocation, type SftpRememberedLocation } from '../application/state/sftp/sftpReopenLocation';
 import type { DropEntry } from '../lib/sftpFileUtils';
 import { Host, KnownHost, TerminalSession, Workspace } from '../types';
 import { applySessionFontSizeToHost } from '../domain/terminalAppearance';
@@ -531,6 +532,9 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   const notesOpenRequestIdRef = useRef(0);
   const sftpHostForTabRef = useRef(sftpHostForTab);
   sftpHostForTabRef.current = sftpHostForTab;
+  // Last directory browsed in each terminal tab's SFTP panel, kept across the
+  // panel being closed/unmounted so re-opening the same terminal restores it.
+  const sftpLastPathForTabRef = useRef<Map<string, SftpRememberedLocation>>(new Map());
 
   const handleToggleWorkspaceComposeBar = useCallback(() => {
     setIsComposeBarOpen(prev => !prev);
@@ -589,10 +593,20 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       return next;
     });
 
+    // First open of a terminal lands on the terminal CWD; re-opening restores
+    // the last directory browsed in this terminal's SFTP panel. Drag-and-drop
+    // uploads keep their explicit target path.
+    const effectiveInitialPath = pendingUploadEntries?.length
+      ? initialPath
+      : resolveSftpOpenLocation({
+          hostId: host.id,
+          terminalCwd: initialPath,
+          remembered: sftpLastPathForTabRef.current.get(tabId),
+        });
     setSftpInitialLocationForTab(prev => {
       const next = new Map(prev);
-      if (initialPath) {
-        next.set(tabId, { hostId: host.id, path: initialPath });
+      if (effectiveInitialPath) {
+        next.set(tabId, { hostId: host.id, path: effectiveInitialPath });
       } else {
         next.delete(tabId);
       }
@@ -639,6 +653,11 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       next.delete(tabId);
       return next;
     });
+  }, []);
+
+  const handleSftpCurrentPathChange = useCallback((tabId: string, location: SftpRememberedLocation) => {
+    if (!location.path) return;
+    sftpLastPathForTabRef.current.set(tabId, location);
   }, []);
 
   // Pre-compute host lookup map for O(1) access
@@ -1377,6 +1396,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     handlePendingTerminalSelectionConsumed,
     handlePendingUploadHandled,
     handleSessionExit,
+    handleSftpCurrentPathChange,
     handleSftpInitialLocationApplied,
     persistSidePanelWidth,
     handleSnippetClickForFocusedSession,

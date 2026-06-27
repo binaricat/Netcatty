@@ -68,6 +68,7 @@ interface SftpSidePanelProps {
   activeSessionId?: string | null;
   initialLocation?: { hostId: string; path: string } | null;
   onInitialLocationApplied?: (location: { hostId: string; path: string }) => void;
+  onCurrentPathChange?: (location: { hostId: string; path: string }) => void;
   showWorkspaceHostHeader?: boolean;
   isVisible?: boolean;
   renderOverlays?: boolean;
@@ -108,6 +109,7 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
   activeSessionId,
   initialLocation,
   onInitialLocationApplied,
+  onCurrentPathChange,
   showWorkspaceHostHeader = false,
   isVisible = true,
   renderOverlays = true,
@@ -386,6 +388,21 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
     onInitialLocationApplied,
     sftp.leftPane,
   ]);
+
+  // Report the directory currently browsed so the terminal layer can restore it
+  // when this terminal's SFTP panel is closed and re-opened.
+  const onCurrentPathChangeRef = useRef(onCurrentPathChange);
+  onCurrentPathChangeRef.current = onCurrentPathChange;
+  useEffect(() => {
+    const connection = sftp.leftPane.connection;
+    if (!connection || connection.isLocal) return;
+    if (connection.status !== "connected") return;
+    if (!connection.currentPath) return;
+    onCurrentPathChangeRef.current?.({
+      hostId: connection.hostId,
+      path: connection.currentPath,
+    });
+  }, [sftp.leftPane.connection]);
 
   useEffect(() => {
     if (!pendingUpload || !activeHost) return;
