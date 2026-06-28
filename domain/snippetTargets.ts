@@ -26,6 +26,23 @@ export function snippetAppliesToHost(snippet: Snippet, hostId?: string): boolean
   return snippet.targets.includes(hostId);
 }
 
+/**
+ * onOutput triggers listen on the active terminal session. When no explicit targets
+ * are configured, they apply to whichever host the session is connected to.
+ */
+export function snippetAppliesToOutputTrigger(
+  snippet: Pick<Snippet, 'trigger' | 'targets' | 'targetsAllHosts'>,
+  hostId?: string,
+): boolean {
+  if (snippet.trigger !== 'onOutput') return false;
+  if (hostId === undefined) return false;
+  if (snippet.targetsAllHosts) return true;
+  if (snippet.targets && snippet.targets.length > 0) {
+    return snippet.targets.includes(hostId);
+  }
+  return true;
+}
+
 /** Scripts explicitly linked to a host via targets (excludes all-hosts scripts). */
 export function getScriptsLinkedToHost(snippets: Snippet[], hostId: string): Snippet[] {
   return snippets.filter(

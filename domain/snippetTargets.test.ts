@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   getRunnableHostsForSnippet,
   snippetAppliesToHost,
+  snippetAppliesToOutputTrigger,
   snippetHasRunTargets,
 } from './snippetTargets.ts';
 import type { Host, Snippet } from './models';
@@ -56,6 +57,25 @@ test('snippetHasRunTargets requires explicit scope', () => {
   assert.equal(snippetHasRunTargets(baseSnippet), false);
   assert.equal(snippetHasRunTargets({ ...baseSnippet, targets: ['host-a'] }), true);
   assert.equal(snippetHasRunTargets({ ...baseSnippet, targetsAllHosts: true }), true);
+});
+
+test('snippetAppliesToOutputTrigger applies to current session when targets are unset', () => {
+  const snippet = { ...baseSnippet, trigger: 'onConnect' as const };
+  assert.equal(snippetAppliesToOutputTrigger(snippet, 'host-a'), false);
+
+  const output = { ...baseSnippet, trigger: 'onOutput' as const };
+  assert.equal(snippetAppliesToOutputTrigger(output, 'host-a'), true);
+  assert.equal(snippetAppliesToOutputTrigger(output, undefined), false);
+});
+
+test('snippetAppliesToOutputTrigger respects explicit host targets', () => {
+  const output = {
+    ...baseSnippet,
+    trigger: 'onOutput' as const,
+    targets: ['host-a'],
+  };
+  assert.equal(snippetAppliesToOutputTrigger(output, 'host-a'), true);
+  assert.equal(snippetAppliesToOutputTrigger(output, 'host-b'), false);
 });
 
 test('getRunnableHostsForSnippet excludes serial hosts and respects scope', () => {

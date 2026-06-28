@@ -197,6 +197,7 @@ export type CreateXTermRuntimeContext = {
     recordEnter: (options?: { sensitive?: boolean }) => Promise<void>;
   } | undefined>;
   passwordPromptActiveRef?: RefObject<boolean>;
+  onOutputTriggerUserInputRef?: RefObject<((data: string) => void) | undefined>;
   sudoAutofillRef?: RefObject<SudoPasswordAutofill | null>;
   setIsSearchOpen: Dispatch<SetStateAction<boolean>>;
 
@@ -1102,7 +1103,10 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
         handleSerialLineModeInput(dataToWrite, {
           bufferRef: ctx.serialLineBufferRef,
           localEcho: ctx.serialLocalEcho,
-          writeToSession: (nextData) => ctx.terminalBackend.writeToSession(id, nextData),
+          writeToSession: (nextData) => {
+            ctx.onOutputTriggerUserInputRef?.current?.(nextData);
+            ctx.terminalBackend.writeToSession(id, nextData);
+          },
           writeToTerminal: writeLocalTerminalData,
         });
       } else {
@@ -1112,6 +1116,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
         if (dataToWrite === "\x7f" && ctx.host.backspaceBehavior === "ctrl-h") {
           outData = "\x08";
         }
+        ctx.onOutputTriggerUserInputRef?.current?.(outData);
         ctx.terminalBackend.writeToSession(id, outData);
 
         // Local echo for serial connections only when explicitly enabled
