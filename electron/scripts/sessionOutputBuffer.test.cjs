@@ -49,6 +49,33 @@ test("SessionOutputBuffer waitForAny matches shell prompt patterns", async () =>
   assert.equal(await pending, 0);
 });
 
+test("SessionOutputBuffer waitFor ignores stale prompt before cursor", async () => {
+  const buffer = new SessionOutputBuffer("s1");
+  buffer.append("user@host:~$ ");
+  const first = buffer.waitFor("$ ", 1000);
+  assert.equal(await first, "$ ");
+
+  const second = buffer.waitFor("$ ", 1000);
+  let resolvedEarly = false;
+  void second.then(() => {
+    resolvedEarly = true;
+  });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(resolvedEarly, false);
+
+  buffer.append("ls output\nuser@host:~$ ");
+  assert.equal(await second, "$ ");
+});
+
+test("stepsToJavaScript sends sensitive prompt result", () => {
+  const code = stepsToJavaScript([
+    { type: "send", value: "secret", sensitive: true },
+    { type: "waitForPrompt", timeoutMs: 30000 },
+  ], "2026-06-27");
+  assert.match(code, /const sensitiveValue0 = await nct\.dialog\.prompt\("Enter sensitive value", ""\);/);
+  assert.match(code, /await nct\.screen\.sendLine\(sensitiveValue0\);/);
+});
+
 test("stepsToJavaScript generates sendLine and waitForPrompt steps", () => {
   const code = stepsToJavaScript([
     { type: "waitForPrompt", timeoutMs: 30000 },

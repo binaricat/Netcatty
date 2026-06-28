@@ -31,12 +31,23 @@ function tryMatch(text, pattern) {
   return match[0];
 }
 
+function tryMatchWithEnd(text, pattern) {
+  const regex = compilePattern(pattern);
+  const match = regex.exec(text);
+  if (!match || match.index === undefined) return null;
+  return {
+    value: match[0],
+    endOffset: match.index + match[0].length,
+  };
+}
+
 class SessionOutputBuffer {
   constructor(sessionId, maxSize = DEFAULT_BUFFER_SIZE) {
     this.sessionId = sessionId;
     this.maxSize = maxSize;
     this.chunks = [];
     this.totalLength = 0;
+    this.scanOffset = 0;
     this.waiters = [];
   }
 
@@ -46,7 +57,9 @@ class SessionOutputBuffer {
     this.totalLength += this.chunks[this.chunks.length - 1].length;
     while (this.totalLength > this.maxSize && this.chunks.length > 1) {
       const removed = this.chunks.shift();
-      this.totalLength -= removed.length;
+      const removedLength = removed.length;
+      this.totalLength -= removedLength;
+      this.scanOffset = Math.max(0, this.scanOffset - removedLength);
     }
     this.flushWaiters();
   }
@@ -55,20 +68,41 @@ class SessionOutputBuffer {
     return this.chunks.join("");
   }
 
+  getPendingText() {
+    return this.getText().slice(this.scanOffset);
+  }
+
+  tryMatchPending(pattern) {
+    return tryMatchWithEnd(this.getPendingText(), pattern);
+  }
+
+  advanceScanOffset(endOffset) {
+    const absoluteEnd = this.scanOffset + endOffset;
+    this.scanOffset = Math.min(absoluteEnd, this.getText().length);
+  }
+
   clear() {
     this.chunks = [];
     this.totalLength = 0;
+    this.scanOffset = 0;
   }
 
   flushWaiters() {
     if (this.waiters.length === 0) return;
-    const text = this.getText();
     const remaining = [];
     for (const waiter of this.waiters) {
-      const matched = tryMatch(text, waiter.pattern);
+      if (waiter.custom) {
+        if (!waiter.custom.check()) {
+          remaining.push(waiter);
+        }
+        continue;
+      }
+      const matched = this.tryMatchPending(waiter.pattern);
       if (matched !== null) {
+        this.advanceScanOffset(matched.endOffset);
         clearTimeout(waiter.timer);
-        waiter.resolve(matched);
+        if (waiter.abortInterval) clearInterval(waiter.abortInterval);
+        waiter.resolve(matched.value);
       } else {
         remaining.push(waiter);
       }
@@ -77,10 +111,10 @@ class SessionOutputBuffer {
   }
 
   waitFor(pattern, timeoutMs = 30000, shouldAbort) {
-    const existing = this.getText();
-    const immediate = tryMatch(existing, pattern);
+    const immediate = this.tryMatchPending(pattern);
     if (immediate !== null) {
-      return Promise.resolve(immediate);
+      this.advanceScanOffset(immediate.endOffset);
+      return Promise.resolve(immediate.value);
     }
 
     return new Promise((resolve, reject) => {
@@ -121,9 +155,10 @@ class SessionOutputBuffer {
     if (!Array.isArray(patterns) || patterns.length === 0) {
       throw new TypeError("waitForAny requires a non-empty patterns array");
     }
-    const existing = this.getText();
     for (let index = 0; index < patterns.length; index += 1) {
-      if (tryMatch(existing, patterns[index]) !== null) {
+      const matched = this.tryMatchPending(patterns[index]);
+      if (matched !== null) {
+        this.advanceScanOffset(matched.endOffset);
         return index;
       }
     }
@@ -137,9 +172,10 @@ class SessionOutputBuffer {
         timer: null,
         interval: null,
         check: () => {
-          const text = this.getText();
           for (let index = 0; index < patterns.length; index += 1) {
-            if (tryMatch(text, patterns[index]) !== null) {
+            const matched = this.tryMatchPending(patterns[index]);
+            if (matched !== null) {
+              this.advanceScanOffset(matched.endOffset);
               clearTimeout(waiter.timer);
               if (waiter.interval) clearInterval(waiter.interval);
               if (waiter.abortInterval) clearInterval(waiter.abortInterval);
@@ -188,6 +224,7 @@ class SessionOutputBuffer {
     this.waiters = [];
     this.chunks = [];
     this.totalLength = 0;
+    this.scanOffset = 0;
   }
 }
 

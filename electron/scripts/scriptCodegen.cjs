@@ -14,10 +14,12 @@ function stepsToJavaScript(steps, recordedAt) {
     "async function main() {",
   ].filter(Boolean);
 
-  for (const step of steps) {
+  for (let index = 0; index < steps.length; index += 1) {
+    const step = steps[index];
     if (step.type === "send") {
       if (step.sensitive) {
-        lines.push(`  await nct.dialog.prompt("Enter sensitive value", "");`);
+        lines.push(`  const sensitiveValue${index} = await nct.dialog.prompt("Enter sensitive value", "");`);
+        lines.push(`  await nct.screen.sendLine(sensitiveValue${index});`);
         continue;
       }
       lines.push(`  await nct.screen.sendLine(${escapeJsString(step.value)});`);
