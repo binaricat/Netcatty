@@ -16,6 +16,21 @@ function isSessionScriptRunActive(sessionId: string): boolean {
   return Boolean(getActiveScriptRunForSession(sessionId));
 }
 
+function waitForSessionScriptRunActive(sessionId: string, timeoutMs = 1000): Promise<void> {
+  if (isSessionScriptRunActive(sessionId)) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    const startedAt = Date.now();
+    const unsubscribe = subscribeScriptRuns(() => {
+      if (isSessionScriptRunActive(sessionId) || Date.now() - startedAt >= timeoutMs) {
+        unsubscribe();
+        resolve();
+      }
+    });
+  });
+}
+
 export function useOutputTriggers({
   sessionId,
   hostId,
@@ -49,6 +64,7 @@ export function useOutputTriggers({
         }
         launchingRef.current = true;
         void Promise.resolve(onRunScript(snippet, sessionId))
+          .then(() => waitForSessionScriptRunActive(sessionId))
           .catch(() => {
             // Failed starts can retry on the next matching output chunk.
           })

@@ -55,6 +55,7 @@ import {
   resumeScriptRun,
   runAutomationScript,
   stopScriptRun,
+  waitForScriptRun,
 } from '../application/state/scriptAutomationCoordinator';
 import { ThemeSidePanel } from './terminal/ThemeSidePanel';
 import { focusTerminalSessionInput } from './terminal/focusTerminalSession';
@@ -1378,7 +1379,11 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       });
       if (mode === 'sequential') {
         for (const sid of sessionIds) {
-          await runOnSession(sid);
+          const { runId } = await runOnSession(sid);
+          const run = await waitForScriptRun(runId);
+          if (run.status === 'paused') {
+            break;
+          }
         }
       } else {
         await Promise.all(sessionIds.map((sid) => runOnSession(sid)));
