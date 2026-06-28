@@ -61,7 +61,9 @@ const SelectHostPanel: React.FC<SelectHostPanelProps> = ({
       onContinue();
       return;
     }
-    const host = hosts.find((entry) => selectedHostIds.includes(entry.id));
+    const host = hosts
+      .filter((entry) => entry.protocol !== "serial")
+      .find((entry) => selectedHostIds.includes(entry.id));
     if (host) onSelect(host);
   };
 
