@@ -28,10 +28,11 @@ export function useOutputTriggers({
 }: OutputTriggerContext) {
   const bufferRef = useRef('');
   const lastFiredBufferLengthRef = useRef(new Map<string, number>());
+  const launchingRef = useRef(false);
   const hadActiveScriptRef = useRef(false);
 
   const scanBuffer = useCallback(() => {
-    if (isSessionScriptRunActive(sessionId)) {
+    if (isSessionScriptRunActive(sessionId) || launchingRef.current) {
       return;
     }
 
@@ -39,7 +40,7 @@ export function useOutputTriggers({
     const bufferLength = bufferRef.current.length;
 
     for (const snippet of snippets) {
-      if (isSessionScriptRunActive(sessionId)) {
+      if (isSessionScriptRunActive(sessionId) || launchingRef.current) {
         return;
       }
       if (!isScriptSnippet(snippet) || snippet.trigger !== 'onOutput' || !snippet.triggerPattern || !snippet.id) {
@@ -53,12 +54,16 @@ export function useOutputTriggers({
       try {
         const regex = new RegExp(snippet.triggerPattern);
         if (regex.test(text)) {
+          launchingRef.current = true;
           void Promise.resolve(onRunScript(snippet, sessionId))
             .then(() => {
               lastFiredBufferLengthRef.current.set(key, bufferLength);
             })
             .catch(() => {
               // Keep the trigger armed so a failed start can retry on the same output.
+            })
+            .finally(() => {
+              launchingRef.current = false;
             });
           return;
         }
@@ -76,6 +81,7 @@ export function useOutputTriggers({
   useEffect(() => {
     lastFiredBufferLengthRef.current = new Map();
     bufferRef.current = '';
+    launchingRef.current = false;
     hadActiveScriptRef.current = isSessionScriptRunActive(sessionId);
   }, [sessionId, hostId]);
 

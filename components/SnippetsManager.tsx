@@ -1908,9 +1908,11 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
                           const runTargets = getRunnableHostsForSnippet(snippet, hosts);
                           if (runTargets.length > 0) {
                             onRunSnippet?.(snippet, runTargets);
+                            return;
                           }
+                          toast.error(t('scripts.actions.noRunnableHosts'));
                         }}
-                        disabled={!snippetHasRunTargets(snippet)}
+                        disabled={getRunnableHostsForSnippet(snippet, hosts).length === 0}
                       >
                         <Play className="mr-2 h-4 w-4" /> {t('action.run')}
                       </ContextMenuItem>

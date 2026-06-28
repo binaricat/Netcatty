@@ -70,13 +70,20 @@ const TERMINAL_SCRIPT_STATUSES = new Set<ScriptRun['status']>(['completed', 'fai
 
 export function waitForScriptRun(
   runId: string,
-  options: { signal?: AbortSignal } = {},
+  options: { signal?: AbortSignal; timeoutMs?: number } = {},
 ): Promise<ScriptRun> {
+  const timeoutMs = options.timeoutMs ?? 3_600_000;
+
   return new Promise((resolve, reject) => {
     let settled = false;
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
     const finish = (handler: () => void) => {
       if (settled) return;
       settled = true;
+      if (timeoutId !== undefined) {
+        clearTimeout(timeoutId);
+      }
       unsubscribe();
       options.signal?.removeEventListener('abort', onAbort);
       handler();
@@ -86,15 +93,22 @@ export function waitForScriptRun(
       finish(() => reject(new Error('Aborted')));
     };
 
-    const unsubscribe = subscribeScriptRuns((currentRuns) => {
-      const run = currentRuns.find((entry) => entry.runId === runId);
+    const settleRun = (run: ScriptRun | undefined) => {
       if (!run || !TERMINAL_SCRIPT_STATUSES.has(run.status)) return;
       if (run.status === 'completed' || run.status === 'paused') {
         finish(() => resolve(run));
         return;
       }
       finish(() => reject(new Error(run.error || 'Script failed')));
+    };
+
+    const unsubscribe = subscribeScriptRuns((currentRuns) => {
+      settleRun(currentRuns.find((entry) => entry.runId === runId));
     });
+
+    timeoutId = setTimeout(() => {
+      finish(() => reject(new Error('Script run timed out')));
+    }, timeoutMs);
 
     options.signal?.addEventListener('abort', onAbort, { once: true });
   });
