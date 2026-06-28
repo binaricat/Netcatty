@@ -75,7 +75,9 @@ export function useOutputTriggers({
     }
 
     const text = bufferRef.current;
-    const newPortion = text.slice(-Math.max(recentChunk.length + 128, 256));
+    const overlap = 64;
+    const chunkWithOverlap = text.slice(Math.max(0, text.length - recentChunk.length - overlap));
+    const chunkStartInSlice = Math.max(0, chunkWithOverlap.length - recentChunk.length);
 
     for (const snippet of snippets) {
       if (isSessionScriptRunActive(sessionId) || launchingRef.current) {
@@ -87,7 +89,12 @@ export function useOutputTriggers({
       if (!snippetAppliesToHost(snippet, hostId)) continue;
       try {
         const regex = new RegExp(snippet.triggerPattern);
-        if (!regex.test(newPortion)) {
+        const match = chunkWithOverlap.match(regex);
+        if (!match || match.index === undefined) {
+          continue;
+        }
+        const matchEnd = match.index + match[0].length;
+        if (matchEnd <= chunkStartInSlice) {
           continue;
         }
         launchingRef.current = true;
