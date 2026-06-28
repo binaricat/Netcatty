@@ -83,7 +83,7 @@ test('syncHostsForSnippetTargetChange appends and removes queue entries', () => 
     ['host-a'],
     snippets,
   );
-  assert.equal(removed[0].connectScriptIds, undefined);
+  assert.deepEqual(removed[0].connectScriptIds, []);
 });
 
 test('getGlobalConnectScripts sorts by order', () => {
@@ -114,5 +114,5 @@ test('removeHostConnectScript clears empty queue', () => {
     'only',
     snippets,
   );
-  assert.equal(updated.connectScriptIds, undefined);
+  assert.deepEqual(updated.connectScriptIds, []);
 });

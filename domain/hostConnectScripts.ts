@@ -71,8 +71,10 @@ export function migrateHostConnectScriptIds(host: Host, snippets: Snippet[]): st
 
 /** Effective ordered script IDs for a host (lazy migrate + prune). */
 export function getHostConnectScriptIds(host: Host, snippets: Snippet[]): string[] {
-  const source = host.connectScriptIds ?? migrateHostConnectScriptIds(host, snippets);
-  return pruneConnectScriptIds(source, snippets);
+  if (host.connectScriptIds !== undefined) {
+    return pruneConnectScriptIds(host.connectScriptIds, snippets);
+  }
+  return migrateHostConnectScriptIds(host, snippets);
 }
 
 export function ensureHostConnectScriptIds(host: Host, snippets: Snippet[]): Host {
@@ -82,7 +84,7 @@ export function ensureHostConnectScriptIds(host: Host, snippets: Snippet[]): Hos
       && pruned.every((id, index) => id === host.connectScriptIds![index])) {
       return host;
     }
-    return { ...host, connectScriptIds: pruned.length > 0 ? pruned : undefined };
+    return { ...host, connectScriptIds: pruned };
   }
   const migrated = migrateHostConnectScriptIds(host, snippets);
   return migrated.length > 0 ? { ...host, connectScriptIds: migrated } : host;
@@ -129,7 +131,7 @@ export function appendHostConnectScript(host: Host, scriptId: string, snippets: 
 export function removeHostConnectScript(host: Host, scriptId: string, snippets: Snippet[]): Host {
   const current = getHostConnectScriptIds(host, snippets);
   const next = current.filter((id) => id !== scriptId);
-  return { ...host, connectScriptIds: next.length > 0 ? next : undefined };
+  return { ...host, connectScriptIds: next };
 }
 
 export function moveHostConnectScript(

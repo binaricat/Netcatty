@@ -70,12 +70,12 @@ export function useOutputTriggers({
   const launchingRef = useRef(false);
 
   const scanBuffer = useCallback((recentChunk: string) => {
-    if (isSessionScriptRunActive(sessionId) || launchingRef.current) {
+    if (!recentChunk || isSessionScriptRunActive(sessionId) || launchingRef.current) {
       return;
     }
 
     const text = bufferRef.current;
-    const tailWindow = text.slice(-Math.max(recentChunk.length + 256, 512));
+    const newPortion = text.slice(-Math.max(recentChunk.length + 128, 256));
 
     for (const snippet of snippets) {
       if (isSessionScriptRunActive(sessionId) || launchingRef.current) {
@@ -87,7 +87,7 @@ export function useOutputTriggers({
       if (!snippetAppliesToHost(snippet, hostId)) continue;
       try {
         const regex = new RegExp(snippet.triggerPattern);
-        if (!regex.test(tailWindow)) {
+        if (!regex.test(newPortion)) {
           continue;
         }
         launchingRef.current = true;
