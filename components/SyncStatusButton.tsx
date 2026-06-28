@@ -2,7 +2,7 @@
  * SyncStatusButton - Cloud Sync Status Indicator for Top Bar
  *
  * Shows current sync state with cloud icon and colored indicators:
- * - Green dot: All synced
+ * - Green dot: Local changes pending upload
  * - Blue dot + spin: Syncing in progress
  * - Red dot: Error
  * - Gray dot: No providers connected
@@ -25,7 +25,7 @@ import {
     Server,
 } from 'lucide-react';
 import { useCloudSync } from '../application/state/useCloudSync';
-import { isProviderReadyForSync, type CloudProvider } from '../domain/sync';
+import { isProviderReadyForSync, type CloudProvider, formatSyncDateTime } from '../domain/sync';
 import { useI18n } from '../application/i18n/I18nProvider';
 import { cn } from '../lib/utils';
 import { Button } from './ui/button';
@@ -136,6 +136,11 @@ export const SyncStatusButton: React.FC<SyncStatusButtonProps> = ({
     const connectedProvider = getConnectedProvider();
     const providerConnection = connectedProvider ? sync.providers[connectedProvider] : null;
 
+    const hasVersionMismatch = sync.hasAnyConnectedProvider
+        && sync.localVersion !== sync.remoteVersion;
+
+    const hasPendingSync = sync.pendingLocalSync || hasVersionMismatch;
+
     // Determine overall status for the button indicator
     const getOverallStatus = (): StatusIndicatorProps['status'] => {
         if (sync.overallSyncStatus === 'syncing') return 'syncing';
@@ -146,7 +151,7 @@ export const SyncStatusButton: React.FC<SyncStatusButtonProps> = ({
         ) {
             return 'error';
         }
-        if (sync.overallSyncStatus === 'synced') return 'synced';
+        if (hasPendingSync) return 'synced';
         return 'none';
     };
 
@@ -164,7 +169,7 @@ export const SyncStatusButton: React.FC<SyncStatusButtonProps> = ({
         const diff = Date.now() - timestamp;
         if (diff < 60000) return t('time.justNow');
         if (diff < 3600000) return t('time.minutesAgo', { minutes: Math.floor(diff / 60000) });
-        return new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        return formatSyncDateTime(timestamp);
     };
 
     // Create a unique key based on sync state to force re-render
@@ -186,12 +191,13 @@ export const SyncStatusButton: React.FC<SyncStatusButtonProps> = ({
                         >
                             {getButtonIcon()}
 
-                            {/* Status indicator dot */}
-                            <StatusIndicator
-                                status={overallStatus}
-                                size="sm"
-                                className="absolute top-0.5 right-0.5 ring-2 ring-background"
-                            />
+                            {overallStatus !== 'none' && (
+                                <StatusIndicator
+                                    status={overallStatus}
+                                    size="sm"
+                                    className="absolute top-0.5 right-0.5 ring-2 ring-background"
+                                />
+                            )}
                         </Button>
                     </PopoverTrigger>
                 </TooltipTrigger>
@@ -208,7 +214,7 @@ export const SyncStatusButton: React.FC<SyncStatusButtonProps> = ({
                 <div className="px-3 py-2.5 border-b border-border/60">
                     <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
-                            {overallStatus === 'synced' && (
+                            {overallStatus === 'synced' && hasPendingSync && (
                                 <Cloud size={16} className="text-green-500" />
                             )}
                             {overallStatus === 'syncing' && (
@@ -217,15 +223,19 @@ export const SyncStatusButton: React.FC<SyncStatusButtonProps> = ({
                             {overallStatus === 'error' && (
                                 <Cloud size={16} className="text-red-500" />
                             )}
-                            {overallStatus === 'none' && (
+                            {overallStatus === 'none' && sync.hasAnyConnectedProvider && (
+                                <Cloud size={16} className="text-muted-foreground" />
+                            )}
+                            {overallStatus === 'none' && !sync.hasAnyConnectedProvider && (
                                 <CloudOff size={16} className="text-muted-foreground" />
                             )}
 
                             <span className="text-sm font-medium">
-                                {overallStatus === 'synced' && t('sync.active')}
+                                {overallStatus === 'synced' && hasPendingSync && t('sync.pending')}
                                 {overallStatus === 'syncing' && t('sync.syncing')}
                                 {overallStatus === 'error' && t('sync.error')}
-                                {overallStatus === 'none' && t('sync.notConfigured')}
+                                {overallStatus === 'none' && sync.hasAnyConnectedProvider && t('sync.active')}
+                                {overallStatus === 'none' && !sync.hasAnyConnectedProvider && t('sync.notConfigured')}
                             </span>
                         </div>
 

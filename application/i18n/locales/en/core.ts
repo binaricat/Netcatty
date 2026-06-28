@@ -575,6 +575,7 @@ export const enCoreMessages: Messages = {
   'sync.cloudSync': 'Cloud Sync',
   'sync.settings': 'Sync Settings',
   'sync.active': 'Cloud Sync Active',
+  'sync.pending': 'Changes pending sync',
   'sync.syncing': 'Syncing...',
   'sync.error': 'Sync Error',
   'sync.notConfigured': 'Not Configured',

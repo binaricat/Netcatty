@@ -58,6 +58,7 @@ export interface CloudSyncHook {
   remoteVersion: number;
   remoteUpdatedAt: number;
   syncHistory: SyncHistoryEntry[];
+  pendingLocalSync: boolean;
   pendingBrowserAuthProvider: 'google' | 'onedrive' | null;
   
   // Computed
@@ -731,6 +732,7 @@ export const useCloudSync = (): CloudSyncHook => {
     remoteVersion: state.remoteVersion,
     remoteUpdatedAt: state.remoteUpdatedAt,
     syncHistory: state.syncHistory,
+    pendingLocalSync: state.pendingLocalSync,
     pendingBrowserAuthProvider: pendingBrowserAuth?.provider ?? null,
     
     // Computed

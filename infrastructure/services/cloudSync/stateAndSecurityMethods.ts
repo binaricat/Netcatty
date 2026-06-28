@@ -89,6 +89,7 @@ export function loadInitialStateImpl(this: any): SyncManagerState {
       autoSyncInterval: syncConfig?.interval || SYNC_CONSTANTS.DEFAULT_AUTO_SYNC_INTERVAL,
       syncStrategy: normalizeCloudSyncStrategy(syncConfig?.syncStrategy ?? DEFAULT_CLOUD_SYNC_STRATEGY),
       syncHistory,
+      pendingLocalSync: false,
     };
   }
 

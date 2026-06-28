@@ -634,23 +634,31 @@ export const getDefaultDeviceName = (): string => {
 };
 
 /**
+ * Format a sync timestamp as `yyyymmdd hhmm` (e.g. `20250628 1430`).
+ */
+export const formatSyncDateTime = (timestamp: number): string => {
+  const date = new Date(timestamp);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  const hours = String(date.getHours()).padStart(2, '0');
+  const minutes = String(date.getMinutes()).padStart(2, '0');
+  return `${year}${month}${day} ${hours}${minutes}`;
+};
+
+/**
  * Format last sync time for display
  */
 export const formatLastSync = (timestamp?: number): string => {
   if (!timestamp) return 'Never synced';
-  
+
   const now = Date.now();
   const diff = now - timestamp;
-  
+
   if (diff < 60000) return 'Just now';
   if (diff < 3600000) return `${Math.floor(diff / 60000)} min ago`;
-  if (diff < 86400000) {
-    const date = new Date(timestamp);
-    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  }
-  
-  const date = new Date(timestamp);
-  return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+
+  return formatSyncDateTime(timestamp);
 };
 
 /**

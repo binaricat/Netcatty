@@ -304,6 +304,7 @@ export const zhCNCoreMessages: Messages = {
   'sync.cloudSync': '云同步',
   'sync.settings': '同步设置',
   'sync.active': '云同步已启用',
+  'sync.pending': '有待同步的更改',
   'sync.syncing': '正在同步…',
   'sync.error': '同步错误',
   'sync.notConfigured': '未配置',

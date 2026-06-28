@@ -592,6 +592,7 @@ export const ruCoreMessages: Messages = {
   'sync.cloudSync': 'Облачная синхронизация',
   'sync.settings': 'Настройки синхронизации',
   'sync.active': 'Облачная синхронизация активна',
+  'sync.pending': 'Есть несинхронизированные изменения',
   'sync.syncing': 'Синхронизация...',
   'sync.error': 'Ошибка синхронизации',
   'sync.notConfigured': 'Не настроено',

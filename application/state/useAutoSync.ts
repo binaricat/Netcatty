@@ -385,6 +385,7 @@ export const useAutoSync = (config: AutoSyncConfig) => {
       }
 
       lastSyncedDataRef.current = dataHash;
+      manager.setPendingLocalSync(false);
 
       // Successful sync implies a successful per-provider
       // `checkProviderConflict` (which inspects remote) — equivalent
@@ -458,6 +459,28 @@ export const useAutoSync = (config: AutoSyncConfig) => {
   useEffect(() => {
     getDataHashRef.current = getDataHash;
   }, [getDataHash]);
+
+  const refreshPendingLocalSync = useCallback(async () => {
+    if (!enabled || !sync.hasAnyConnectedProvider || !sync.isUnlocked) {
+      manager.setPendingLocalSync(false);
+      return;
+    }
+    if (!remoteCheckDoneRef.current) {
+      return;
+    }
+    const currentHash = await getDataHashRef.current();
+    const hashDecision = resolveAutoSyncHashDecision({
+      currentHash,
+      lastSyncedHash: lastSyncedDataRef.current,
+      appliedSkipHash: skipNextSyncHashRef.current,
+    });
+    manager.setPendingLocalSync(hashDecision === 'sync');
+  }, [enabled, sync.hasAnyConnectedProvider, sync.isUnlocked]);
+
+  const refreshPendingLocalSyncRef = useRef(refreshPendingLocalSync);
+  useEffect(() => {
+    refreshPendingLocalSyncRef.current = refreshPendingLocalSync;
+  }, [refreshPendingLocalSync]);
 
   // Serialize `checkRemoteVersion` invocations. Overlapping runs would
   // race on `commitRemoteInspection` + `onApplyPayload`: two merges
@@ -713,6 +736,7 @@ export const useAutoSync = (config: AutoSyncConfig) => {
         // unlock/startupReady transition, and a manual sync from
         // Settings remains available as an escape hatch.
         remoteCheckDoneRef.current = true;
+        await refreshPendingLocalSyncRef.current();
       }
       checkRemoteInFlightRef.current = false;
     }
@@ -838,6 +862,21 @@ export const useAutoSync = (config: AutoSyncConfig) => {
     sync.isSyncing,
     getDataHash,
     syncNow,
+    config.settingsVersion,
+    enabled,
+    bookmarksVersion,
+    syncableSettingsStorageVersion,
+  ]);
+
+  // Reflect unsynced local edits in the top-bar cloud indicator.
+  useEffect(() => {
+    void refreshPendingLocalSync();
+  }, [
+    refreshPendingLocalSync,
+    getDataHash,
+    sync.hasAnyConnectedProvider,
+    sync.isUnlocked,
+    sync.isSyncing,
     config.settingsVersion,
     enabled,
     bookmarksVersion,
