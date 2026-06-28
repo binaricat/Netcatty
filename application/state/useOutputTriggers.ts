@@ -16,10 +16,6 @@ function isSessionScriptRunActive(sessionId: string): boolean {
   return Boolean(getActiveScriptRunForSession(sessionId));
 }
 
-function outputTriggerKey(sessionId: string, snippetId: string): string {
-  return `snippet:${sessionId}:${snippetId}`;
-}
-
 export function useOutputTriggers({
   sessionId,
   hostId,
@@ -27,17 +23,16 @@ export function useOutputTriggers({
   onRunScript,
 }: OutputTriggerContext) {
   const bufferRef = useRef('');
-  const lastFiredBufferLengthRef = useRef(new Map<string, number>());
   const launchingRef = useRef(false);
   const hadActiveScriptRef = useRef(false);
 
-  const scanBuffer = useCallback(() => {
+  const scanBuffer = useCallback((recentChunk: string) => {
     if (isSessionScriptRunActive(sessionId) || launchingRef.current) {
       return;
     }
 
     const text = bufferRef.current;
-    const bufferLength = bufferRef.current.length;
+    const tailWindow = text.slice(-Math.max(recentChunk.length + 256, 512));
 
     for (const snippet of snippets) {
       if (isSessionScriptRunActive(sessionId) || launchingRef.current) {
@@ -47,26 +42,20 @@ export function useOutputTriggers({
         continue;
       }
       if (!snippetAppliesToHost(snippet, hostId)) continue;
-      const key = outputTriggerKey(sessionId, snippet.id);
-      if (lastFiredBufferLengthRef.current.get(key) === bufferLength) {
-        continue;
-      }
       try {
         const regex = new RegExp(snippet.triggerPattern);
-        if (regex.test(text)) {
-          launchingRef.current = true;
-          void Promise.resolve(onRunScript(snippet, sessionId))
-            .then(() => {
-              lastFiredBufferLengthRef.current.set(key, bufferLength);
-            })
-            .catch(() => {
-              // Keep the trigger armed so a failed start can retry on the same output.
-            })
-            .finally(() => {
-              launchingRef.current = false;
-            });
-          return;
+        if (!regex.test(tailWindow)) {
+          continue;
         }
+        launchingRef.current = true;
+        void Promise.resolve(onRunScript(snippet, sessionId))
+          .catch(() => {
+            // Failed starts can retry on the next matching output chunk.
+          })
+          .finally(() => {
+            launchingRef.current = false;
+          });
+        return;
       } catch {
         // ignore invalid regex
       }
@@ -75,11 +64,10 @@ export function useOutputTriggers({
 
   const appendOutput = useCallback((chunk: string) => {
     bufferRef.current = (bufferRef.current + chunk).slice(-8192);
-    scanBuffer();
+    scanBuffer(chunk);
   }, [scanBuffer]);
 
   useEffect(() => {
-    lastFiredBufferLengthRef.current = new Map();
     bufferRef.current = '';
     launchingRef.current = false;
     hadActiveScriptRef.current = isSessionScriptRunActive(sessionId);
@@ -91,7 +79,7 @@ export function useOutputTriggers({
         run.sessionId === sessionId && (run.status === 'running' || run.status === 'paused'),
       );
       if (hadActiveScriptRef.current && !active) {
-        scanBuffer();
+        scanBuffer('');
       }
       hadActiveScriptRef.current = active;
     });

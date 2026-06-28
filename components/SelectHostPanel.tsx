@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import { cn } from "../lib/utils";
 import { useI18n } from "../application/i18n/I18nProvider";
 import { Host, ProxyProfile, SSHKey } from "../types";
@@ -54,6 +54,7 @@ const SelectHostPanel: React.FC<SelectHostPanelProps> = ({
   resizeAriaLabel,
 }) => {
   const { t } = useI18n();
+  const [newHostPanelOpen, setNewHostPanelOpen] = useState(false);
   const panelTitle = title ?? t("selectHost.title");
 
   const handleConfirm = () => {
@@ -75,7 +76,7 @@ const SelectHostPanel: React.FC<SelectHostPanelProps> = ({
       subtitle={subtitle}
       showBackButton={true}
       onBack={onBack}
-      className={cn(layout === "overlay" && "z-40", className)}
+      className={cn(layout === "overlay" && "z-40", newHostPanelOpen && "overflow-visible", className)}
       layout={layout}
       resizable={resizable}
       persistWidthStorageKey={persistWidthStorageKey}
@@ -95,6 +96,7 @@ const SelectHostPanel: React.FC<SelectHostPanelProps> = ({
         managedSources={managedSources}
         onSaveHost={onSaveHost}
         onCreateGroup={onCreateGroup}
+        onNewHostPanelOpenChange={setNewHostPanelOpen}
         className="flex-1 min-h-0"
       />
     </AsidePanel>

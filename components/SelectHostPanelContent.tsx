@@ -5,7 +5,7 @@ import {
   Plus,
   Search,
 } from 'lucide-react';
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { cn } from '../lib/utils';
 import { matchesHostSearchQuery, matchesSearchQuery } from '../lib/searchMatcher';
 import { useI18n } from '../application/i18n/I18nProvider';
@@ -39,6 +39,7 @@ export interface SelectHostPanelContentProps {
   managedSources?: ManagedSource[];
   onSaveHost?: (host: Host) => void;
   onCreateGroup?: (groupPath: string) => void;
+  onNewHostPanelOpenChange?: (open: boolean) => void;
   className?: string;
 }
 
@@ -57,6 +58,7 @@ export const SelectHostPanelContent: React.FC<SelectHostPanelContentProps> = ({
   managedSources = [],
   onSaveHost,
   onCreateGroup,
+  onNewHostPanelOpenChange,
   className,
 }) => {
   const { t } = useI18n();
@@ -65,6 +67,10 @@ export const SelectHostPanelContent: React.FC<SelectHostPanelContentProps> = ({
   const [sortMode, setSortMode] = useState<SortMode>('az');
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [showNewHostPanel, setShowNewHostPanel] = useState(false);
+
+  useEffect(() => {
+    onNewHostPanelOpenChange?.(showNewHostPanel);
+  }, [onNewHostPanelOpenChange, showNewHostPanel]);
 
   const selectableHosts = useMemo(
     () => hosts.filter((host) => host.protocol !== 'serial'),
