@@ -4,7 +4,7 @@ import { SerializeAddon } from "@xterm/addon-serialize";
 import { SearchAddon } from "@xterm/addon-search";
 import "@xterm/xterm/css/xterm.css";
 import { Activity, Cpu, Clock3, Copy, HardDrive, Maximize2, MemoryStick, Radio, ArrowDownToLine, ArrowUpFromLine, Sparkles, SquareArrowOutUpRight } from "lucide-react";
-import React, { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import React, { memo, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import { useI18n } from "../application/i18n/I18nProvider";
 import { detectLocalOs } from "../lib/localShell";
 import { logger } from "../lib/logger";
@@ -268,7 +268,9 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   const CONNECTION_TIMEOUT = 120000;
   const { t } = useI18n();
   const connectScriptsConsumedRef = useRef(false);
+  const connectScriptsCompletedIdsRef = useRef(new Set<string>());
   const pendingScriptRunIdRef = useRef<string | null>(null);
+  const [, bumpConnectScriptRetry] = useReducer((value: number) => value + 1, 0);
   const [saveRecordingOpen, setSaveRecordingOpen] = useState(false);
   const [recordedCode, setRecordedCode] = useState('');
   const recorder = useScriptRecorder(sessionId);
@@ -1357,6 +1359,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   useEffect(() => {
     if (status === 'disconnected') {
       connectScriptsConsumedRef.current = false;
+      connectScriptsCompletedIdsRef.current = new Set();
       pendingScriptRunIdRef.current = null;
     }
   }, [status]);
@@ -1392,7 +1395,9 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       const runPending = Boolean(pendingOne && pendingScriptRunIdRef.current !== pendingOne.id);
       const connectQueueNow = connectScriptsConsumedRef.current
         ? []
-        : resolveConnectScriptsForHost(host, snippets);
+        : resolveConnectScriptsForHost(host, snippets).filter(
+          (item) => item.id && !connectScriptsCompletedIdsRef.current.has(item.id),
+        );
 
       const scriptsToRun: Snippet[] = [];
       if (runPending && pendingOne) {
@@ -1404,21 +1409,28 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         }
       }
 
-      if (!connectScriptsConsumedRef.current) {
-        if (connectQueueNow.length > 0) {
-          connectScriptsConsumedRef.current = true;
-        } else if (
-          isVaultInitialized()
+      const resolvedConnectScripts = resolveConnectScriptsForHost(host, snippets);
+      const allConnectScriptsDone = resolvedConnectScripts.length === 0
+        || resolvedConnectScripts.every(
+          (item) => item.id && connectScriptsCompletedIdsRef.current.has(item.id),
+        );
+
+      if (scriptsToRun.length === 0) {
+        if (
+          !connectScriptsConsumedRef.current
+          && allConnectScriptsDone
+          && isVaultInitialized()
           && !hasUnresolvedConnectScriptBindings(host, snippets)
         ) {
           connectScriptsConsumedRef.current = true;
         }
-      }
-      if (runPending && pendingOne?.id) {
-        pendingScriptRunIdRef.current = pendingOne.id;
+        return;
       }
 
-      if (scriptsToRun.length === 0) return;
+      const pendingScriptIdToMark = runPending ? pendingOne?.id : undefined;
+      const connectIdsInBatch = new Set(
+        connectQueueNow.map((item) => item.id).filter((id): id is string => Boolean(id)),
+      );
 
       void runConnectScriptsSequential({
         scripts: scriptsToRun,
@@ -1428,14 +1440,34 @@ const TerminalComponent: React.FC<TerminalProps> = ({
           hostname: host.hostname,
           username: host.username,
         },
-      }).catch((err) => {
-        const message = err instanceof Error ? err.message : String(err);
-        toast.error(message.includes('Observer mode') ? t('scripts.observer.blocked') : message);
-      });
+        onScriptComplete: (snippet) => {
+          if (snippet.id && connectIdsInBatch.has(snippet.id)) {
+            connectScriptsCompletedIdsRef.current.add(snippet.id);
+          }
+          if (snippet.id && snippet.id === pendingScriptIdToMark) {
+            pendingScriptRunIdRef.current = snippet.id;
+          }
+        },
+      })
+        .then(() => {
+          const resolvedAfterRun = resolveConnectScriptsForHost(host, snippets);
+          const doneAfterRun = resolvedAfterRun.length === 0
+            || resolvedAfterRun.every(
+              (item) => item.id && connectScriptsCompletedIdsRef.current.has(item.id),
+            );
+          if (doneAfterRun) {
+            connectScriptsConsumedRef.current = true;
+          }
+        })
+        .catch((err) => {
+          const message = err instanceof Error ? err.message : String(err);
+          toast.error(message.includes('Observer mode') ? t('scripts.observer.blocked') : message);
+          bumpConnectScriptRetry();
+        });
     }, 400);
 
     return () => window.clearTimeout(timer);
-  }, [host, pendingScript, pendingScriptId, sessionId, snippets, status, t]);
+  }, [host, pendingScript, pendingScriptId, sessionId, snippets, status, t, bumpConnectScriptRetry]);
 
   useEffect(() => {
     return registerScreenSnapshotProvider(sessionId, () => {

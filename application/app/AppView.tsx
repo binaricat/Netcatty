@@ -477,6 +477,7 @@ export function AppView({ ctx }: { ctx: AppViewContext }) {
           updateSnippetPackages(Array.from(new Set([...snippetPackages, pkg])))
         }
         onUpdateHosts={updateHosts}
+        onRunSnippet={runSnippet}
       />
 
       {/* Root-mounted AddToWorkspaceDialog — triggered by the focus-mode

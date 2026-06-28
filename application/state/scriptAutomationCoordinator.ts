@@ -105,6 +105,7 @@ export async function runConnectScriptsSequential(params: {
   sessionId: string;
   signal?: AbortSignal;
   onScriptStart?: (snippet: Snippet) => void;
+  onScriptComplete?: (snippet: Snippet) => void;
   sessionMeta?: {
     connected?: boolean;
     hostname?: string;
@@ -122,6 +123,7 @@ export async function runConnectScriptsSequential(params: {
       sessionMeta: params.sessionMeta,
     });
     await waitForScriptRun(runId, { signal: params.signal });
+    params.onScriptComplete?.(snippet);
   }
 }
 

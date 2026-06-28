@@ -25,6 +25,7 @@ export interface QuickScriptEditorDialogProps {
   onUpdateSnippet: (snippet: Snippet) => void;
   onCreatePackage?: (packagePath: string) => void;
   onUpdateHosts?: (hosts: Host[]) => void;
+  onRunSnippet?: (snippet: Snippet, targetHosts: Host[]) => void;
 }
 
 function createBlankScript(): Partial<Snippet> {
@@ -48,6 +49,7 @@ export const QuickScriptEditorDialog: React.FC<QuickScriptEditorDialogProps> = (
   onUpdateSnippet,
   onCreatePackage,
   onUpdateHosts,
+  onRunSnippet,
 }) => {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
@@ -205,11 +207,15 @@ export const QuickScriptEditorDialog: React.FC<QuickScriptEditorDialogProps> = (
     if (!savedSnippet) return;
     const runTargets = getRunnableHostsForSnippet(savedSnippet, hosts);
     if (runTargets.length === 0) return;
-    window.dispatchEvent(new CustomEvent('netcatty:scripts:run-now', {
-      detail: { snippet: savedSnippet },
-    }));
+    if (onRunSnippet) {
+      onRunSnippet(savedSnippet, runTargets);
+    } else {
+      window.dispatchEvent(new CustomEvent('netcatty:scripts:run-now', {
+        detail: { snippet: savedSnippet },
+      }));
+    }
     setOpen(false);
-  }, [hosts, persistSnippet]);
+  }, [hosts, onRunSnippet, persistSnippet]);
 
   const handleSelectHost = useCallback((host: Host) => {
     setTargetSelection((prev) => (
