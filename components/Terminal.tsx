@@ -313,12 +313,11 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     sessionId,
     hostId: host.id,
     snippets,
-    onRunScript: (snippet, sid) => {
-      void runAutomationScript({ snippet, sessionId: sid }).catch((err) => {
-        const message = err instanceof Error ? err.message : String(err);
-        toast.error(message.includes('Observer mode') ? t('scripts.observer.blocked') : message);
-      });
-    },
+    onRunScript: (snippet, sid) => runAutomationScript({ snippet, sessionId: sid }).catch((err) => {
+      const message = err instanceof Error ? err.message : String(err);
+      toast.error(message.includes('Observer mode') ? t('scripts.observer.blocked') : message);
+      throw err;
+    }),
   });
   const availableFonts = useAvailableFonts();
   const containerRef = useRef<HTMLDivElement>(null);

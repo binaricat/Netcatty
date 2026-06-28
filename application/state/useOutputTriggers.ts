@@ -103,18 +103,19 @@ export function useOutputTriggers({
         if (matchEnd <= lastMatchEnd) {
           continue;
         }
-        lastTriggerMatchEndRef.current.set(snippet.id, matchEnd);
+        const matchedSnippetId = snippet.id;
         launchingRef.current = true;
         void Promise.resolve(onRunScript(snippet, sessionId))
           .then(async () => {
             const started = await waitForSessionScriptRunActive(sessionId);
-            if (started) {
-              await waitForSessionScriptRunInactive(sessionId);
+            if (!started) {
+              return;
             }
+            lastTriggerMatchEndRef.current.set(matchedSnippetId, matchEnd);
+            await waitForSessionScriptRunInactive(sessionId);
           })
           .catch(() => {
             // Failed starts can retry on the next matching output chunk.
-            lastTriggerMatchEndRef.current.delete(snippet.id);
           })
           .finally(() => {
             launchingRef.current = false;
