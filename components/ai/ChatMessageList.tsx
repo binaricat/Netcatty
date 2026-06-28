@@ -22,6 +22,7 @@ import ThinkingBlock from './ThinkingBlock';
 import ToolCallGroup from './ToolCallGroup';
 import {
   VaultArtifactNavigationProvider,
+  type VaultArtifactNavSection,
 } from './toolArtifacts/VaultArtifactNavigationContext';
 import { parseTerminalToolArtifact } from './toolArtifacts/terminalToolArtifact';
 import { TerminalArtifactToolResult } from './toolArtifacts/TerminalArtifactToolResult';
@@ -31,7 +32,7 @@ import {
 } from './toolArtifacts/toolArtifactNames';
 import { parseVaultToolArtifact } from './toolArtifacts/vaultToolArtifact';
 import { VaultArtifactToolResult } from './toolArtifacts/VaultArtifactToolResult';
-import type { Host, VaultNote } from '../../types';
+import type { Host, Snippet, VaultNote } from '../../types';
 import {
   onApprovalRequest,
   onApprovalCleared,
@@ -62,23 +63,27 @@ interface ChatMessageListProps {
   activeCompaction?: ActiveCompactionUi | null;
   notes?: VaultNote[];
   hosts?: Host[];
+  snippets?: Snippet[];
   onOpenVaultNote?: (noteId: string) => void;
   onOpenVaultHost?: (hostId: string) => void;
-  onOpenVaultSection?: (section: 'notes' | 'hosts') => void;
+  onOpenVaultSnippet?: (snippetId: string) => void;
+  onOpenVaultSection?: (section: VaultArtifactNavSection) => void;
 }
 
 interface VaultArtifactNavigationCallbackOptions {
   onOpenVaultNote?: (noteId: string) => void;
   onOpenVaultHost?: (hostId: string) => void;
-  onOpenVaultSection?: (section: 'notes' | 'hosts') => void;
+  onOpenVaultSnippet?: (snippetId: string) => void;
+  onOpenVaultSection?: (section: VaultArtifactNavSection) => void;
 }
 
 export function shouldProvideVaultArtifactNavigation({
   onOpenVaultNote,
   onOpenVaultHost,
+  onOpenVaultSnippet,
   onOpenVaultSection,
 }: VaultArtifactNavigationCallbackOptions): boolean {
-  return Boolean(onOpenVaultNote || onOpenVaultHost || onOpenVaultSection);
+  return Boolean(onOpenVaultNote || onOpenVaultHost || onOpenVaultSnippet || onOpenVaultSection);
 }
 
 const MESSAGE_RENDER_BATCH = 50;
@@ -91,8 +96,10 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({
   activeCompaction = null,
   notes = [],
   hosts = [],
+  snippets = [],
   onOpenVaultNote,
   onOpenVaultHost,
+  onOpenVaultSnippet,
   onOpenVaultSection,
 }) => {
   // Track pending approvals from the approval gate
@@ -670,13 +677,20 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({
     </>
   );
 
-  if (shouldProvideVaultArtifactNavigation({ onOpenVaultNote, onOpenVaultHost, onOpenVaultSection })) {
+  if (shouldProvideVaultArtifactNavigation({
+    onOpenVaultNote,
+    onOpenVaultHost,
+    onOpenVaultSnippet,
+    onOpenVaultSection,
+  })) {
     return (
       <VaultArtifactNavigationProvider
         notes={notes}
         hosts={hosts}
+        snippets={snippets}
         onOpenVaultNote={onOpenVaultNote}
         onOpenVaultHost={onOpenVaultHost}
+        onOpenVaultSnippet={onOpenVaultSnippet}
         onOpenVaultSection={onOpenVaultSection}
       >
         {conversation}
@@ -692,8 +706,10 @@ function areMessagesEqual(prev: ChatMessageListProps, next: ChatMessageListProps
   if (prev.activeSessionId !== next.activeSessionId) return false;
   if (prev.notes !== next.notes) return false;
   if (prev.hosts !== next.hosts) return false;
+  if (prev.snippets !== next.snippets) return false;
   if (prev.onOpenVaultNote !== next.onOpenVaultNote) return false;
   if (prev.onOpenVaultHost !== next.onOpenVaultHost) return false;
+  if (prev.onOpenVaultSnippet !== next.onOpenVaultSnippet) return false;
   if (prev.onOpenVaultSection !== next.onOpenVaultSection) return false;
   if (prev.messages.length !== next.messages.length) return false;
   if (prev.messages === next.messages) return true;

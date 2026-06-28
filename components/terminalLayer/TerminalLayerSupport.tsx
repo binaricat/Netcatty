@@ -376,9 +376,11 @@ interface AIChatPanelsHostProps {
   onPendingTerminalSelectionConsumed?: (requestId: string) => void;
   notes: VaultNote[];
   hosts: Host[];
+  snippets: Snippet[];
   onOpenVaultNoteFromChat?: (noteId: string) => void;
   onOpenVaultHostFromChat?: (hostId: string) => void;
-  onOpenVaultSectionFromChat?: (section: 'notes' | 'hosts') => void;
+  onOpenVaultSectionFromChat?: (section: 'notes' | 'hosts' | 'snippets') => void;
+  onOpenVaultSnippetFromChat?: (snippetId: string) => void;
 }
 
 interface AIStateMaintenanceHostProps {
@@ -448,9 +450,11 @@ function aiChatPanelsHostAreEqual(
   if (prev.resolveExecutorContext !== next.resolveExecutorContext) return false;
   if (prev.notes !== next.notes) return false;
   if (prev.hosts !== next.hosts) return false;
+  if (prev.snippets !== next.snippets) return false;
   if (prev.onOpenVaultNoteFromChat !== next.onOpenVaultNoteFromChat) return false;
   if (prev.onOpenVaultHostFromChat !== next.onOpenVaultHostFromChat) return false;
   if (prev.onOpenVaultSectionFromChat !== next.onOpenVaultSectionFromChat) return false;
+  if (prev.onOpenVaultSnippetFromChat !== next.onOpenVaultSnippetFromChat) return false;
   if (prev.activeTabId === next.activeTabId) return true;
 
   for (let i = 0; i < prev.mountedTabIds.length; i += 1) {
@@ -472,9 +476,11 @@ const AIChatPanelsHostInner: React.FC<AIChatPanelsHostProps> = ({
   onPendingTerminalSelectionConsumed,
   notes,
   hosts,
+  snippets,
   onOpenVaultNoteFromChat,
   onOpenVaultHostFromChat,
   onOpenVaultSectionFromChat,
+  onOpenVaultSnippetFromChat,
 }) => {
   const aiState = useContext(AIStateContext);
 
@@ -586,9 +592,11 @@ const AIChatPanelsHostInner: React.FC<AIChatPanelsHostProps> = ({
                     isVisible={isVisible}
                     notes={notes}
                     hosts={hosts}
+                    snippets={snippets}
                     onOpenVaultNote={onOpenVaultNoteFromChat}
                     onOpenVaultHost={onOpenVaultHostFromChat}
                     onOpenVaultSection={onOpenVaultSectionFromChat}
+                    onOpenVaultSnippet={onOpenVaultSnippetFromChat}
                   />
               </Suspense>
             </LazyLoadBoundary>
@@ -617,7 +625,8 @@ export interface TerminalLayerProps {
   openNoteRequest?: { tabId: string; noteId: string; requestId: number } | null;
   onOpenVaultNoteFromChat?: (noteId: string) => void;
   onOpenVaultHostFromChat?: (hostId: string) => void;
-  onOpenVaultSectionFromChat?: (section: 'notes' | 'hosts') => void;
+  onOpenVaultSectionFromChat?: (section: 'notes' | 'hosts' | 'snippets') => void;
+  onOpenVaultSnippetFromChat?: (snippetId: string) => void;
   sessions: TerminalSession[];
   workspaces: Workspace[];
   knownHosts?: KnownHost[];

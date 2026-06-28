@@ -1,5 +1,21 @@
 "use strict";
 
+/** Matches waitForScriptRun default (1h) plus bridge overhead. */
+const VAULT_AGENT_SCRIPT_WAIT_TIMEOUT_MS = 3_605_000;
+
+function parseVaultAgentWaitFlag(raw) {
+  if (raw === undefined || raw === null || raw === "") return false;
+  if (typeof raw === "boolean") return raw;
+  const normalized = String(raw).trim().toLowerCase();
+  return normalized === "true" || normalized === "1" || normalized === "yes";
+}
+
+function vaultAgentInvokeOptions(op, params = {}) {
+  if (op !== "snippets.run" && op !== "scripts.run") return undefined;
+  if (!parseVaultAgentWaitFlag(params.wait)) return undefined;
+  return { timeoutMs: VAULT_AGENT_SCRIPT_WAIT_TIMEOUT_MS };
+}
+
 /**
  * Vault domain service. Read-only metadata and notes/snippets are served from
  * renderer vault state via VaultAgentBridge; credentials never cross the bridge.
@@ -86,7 +102,93 @@ function createVaultService(ctx = {}) {
         sessionId: params.sessionId,
         variables: params.variables,
         chatSessionId: params.chatSessionId,
-      });
+        wait: params.wait,
+      }, vaultAgentInvokeOptions("snippets.run", params));
+    },
+    createSnippet: async (params = {}) => {
+      const bridgeErr = requireBridge();
+      if (bridgeErr) return bridgeErr;
+      return invokeVaultAgent("snippets.create", params);
+    },
+    updateSnippet: async (params = {}) => {
+      const bridgeErr = requireBridge();
+      if (bridgeErr) return bridgeErr;
+      return invokeVaultAgent("snippets.update", params);
+    },
+    deleteSnippet: async (params = {}) => {
+      const bridgeErr = requireBridge();
+      if (bridgeErr) return bridgeErr;
+      return invokeVaultAgent("snippets.delete", params);
+    },
+    listScripts: async () => {
+      const bridgeErr = requireBridge();
+      if (bridgeErr) return bridgeErr;
+      return invokeVaultAgent("scripts.list", {});
+    },
+    getScript: async (params = {}) => {
+      const bridgeErr = requireBridge();
+      if (bridgeErr) return bridgeErr;
+      return invokeVaultAgent("scripts.get", { scriptId: params.scriptId, snippetId: params.scriptId });
+    },
+    createScript: async (params = {}) => {
+      const bridgeErr = requireBridge();
+      if (bridgeErr) return bridgeErr;
+      return invokeVaultAgent("scripts.create", params);
+    },
+    updateScript: async (params = {}) => {
+      const bridgeErr = requireBridge();
+      if (bridgeErr) return bridgeErr;
+      return invokeVaultAgent("scripts.update", params);
+    },
+    deleteScript: async (params = {}) => {
+      const bridgeErr = requireBridge();
+      if (bridgeErr) return bridgeErr;
+      return invokeVaultAgent("scripts.delete", params);
+    },
+    runScript: async (params = {}) => {
+      const bridgeErr = requireBridge();
+      if (bridgeErr) return bridgeErr;
+      return invokeVaultAgent("scripts.run", params, vaultAgentInvokeOptions("scripts.run", params));
+    },
+    getScriptReference: async () => {
+      const bridgeErr = requireBridge();
+      if (bridgeErr) return bridgeErr;
+      return invokeVaultAgent("scripts.reference", {});
+    },
+    listScriptRuns: async (params = {}) => {
+      const bridgeErr = requireBridge();
+      if (bridgeErr) return bridgeErr;
+      return invokeVaultAgent("scripts.runs.list", params);
+    },
+    stopScriptRun: async (params = {}) => {
+      const bridgeErr = requireBridge();
+      if (bridgeErr) return bridgeErr;
+      return invokeVaultAgent("scripts.run.stop", params);
+    },
+    pauseScriptRun: async (params = {}) => {
+      const bridgeErr = requireBridge();
+      if (bridgeErr) return bridgeErr;
+      return invokeVaultAgent("scripts.run.pause", params);
+    },
+    resumeScriptRun: async (params = {}) => {
+      const bridgeErr = requireBridge();
+      if (bridgeErr) return bridgeErr;
+      return invokeVaultAgent("scripts.run.resume", params);
+    },
+    setScriptTargets: async (params = {}) => {
+      const bridgeErr = requireBridge();
+      if (bridgeErr) return bridgeErr;
+      return invokeVaultAgent("scripts.targets.set", params);
+    },
+    listHostConnectScripts: async (params = {}) => {
+      const bridgeErr = requireBridge();
+      if (bridgeErr) return bridgeErr;
+      return invokeVaultAgent("host.connectScripts.list", params);
+    },
+    setHostConnectScripts: async (params = {}) => {
+      const bridgeErr = requireBridge();
+      if (bridgeErr) return bridgeErr;
+      return invokeVaultAgent("host.connectScripts.set", params);
     },
   };
 }

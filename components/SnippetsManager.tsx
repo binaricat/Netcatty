@@ -70,6 +70,9 @@ interface SnippetsManagerProps {
   onSaveHost?: (host: Host) => void;
   onUpdateHosts?: (hosts: Host[]) => void;
   onCreateGroup?: (groupPath: string) => void;
+  openSnippetId?: string | null;
+  openSnippetRequestId?: number | null;
+  onOpenSnippetIdHandled?: () => void;
 }
 
 type RightPanelMode = 'none' | 'edit-snippet' | 'history' | 'select-targets';
@@ -455,6 +458,9 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
   onSaveHost,
   onUpdateHosts,
   onCreateGroup,
+  openSnippetId = null,
+  openSnippetRequestId = null,
+  onOpenSnippetIdHandled,
 }) => {
   const { t } = useI18n();
   const [rightPanelMode, setRightPanelMode] = useState<RightPanelMode>('none');
@@ -692,6 +698,14 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
     }
     setRightPanelMode('edit-snippet');
   }, [selectedPackage]);
+
+  useEffect(() => {
+    if (!openSnippetId) return;
+    const snippet = snippets.find((item) => item.id === openSnippetId);
+    if (!snippet) return;
+    handleEdit(snippet);
+    onOpenSnippetIdHandled?.();
+  }, [handleEdit, onOpenSnippetIdHandled, openSnippetId, openSnippetRequestId, snippets]);
 
 
   const buildSavedSnippet = useCallback((): Snippet | null => {

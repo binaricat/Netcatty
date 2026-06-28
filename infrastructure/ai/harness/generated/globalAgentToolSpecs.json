@@ -869,7 +869,7 @@
     "toolName": "snippets_run",
     "rpcMethod": "vault/snippets/run",
     "localExecution": false,
-    "description": "Resolve snippet variables and execute a snippet in a terminal session.",
+    "description": "Run a vault snippet or automation script in a terminal session. Text snippets paste shell commands; scripts (kind=script) run via the nct JavaScript runtime. Text snippets (kind=snippet) paste shell commands with optional {{variables}}. Scripts (kind=script) run via nct JavaScript runtime — use scripts_run for script-only workflows.",
     "inputShape": {
       "snippetId": {
         "type": "string",
@@ -885,6 +885,11 @@
         "type": "string",
         "optional": true,
         "description": "JSON object of snippet variable values."
+      },
+      "wait": {
+        "type": "string",
+        "optional": true,
+        "description": "Set to true to wait for script completion when kind=script."
       }
     },
     "policy": {
@@ -892,6 +897,637 @@
       "sensitiveRead": false,
       "longRunning": true,
       "requiresChatSession": true,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": false,
+      "bypassesChatCancel": false
+    },
+    "agentKind": "global"
+  },
+  {
+    "capabilityId": "vault.snippets.create",
+    "toolName": "snippets_create",
+    "rpcMethod": "vault/snippets/create",
+    "localExecution": false,
+    "description": "Create a vault snippet or automation script (set kind=script for nct automation). Create vault snippets (shell text) or scripts (kind=script, nct JavaScript). For multi-step terminal automation use kind=script and call scripts_reference.",
+    "inputShape": {
+      "label": {
+        "type": "string",
+        "optional": false,
+        "description": "Snippet or script label."
+      },
+      "content": {
+        "type": "string",
+        "optional": false,
+        "description": "Snippet command text or script JavaScript source."
+      },
+      "kind": {
+        "type": "string",
+        "optional": true,
+        "description": "snippet (default) or script for nct automation."
+      },
+      "tags": {
+        "type": "string",
+        "optional": true,
+        "description": "Optional JSON array of tag strings."
+      },
+      "targets": {
+        "type": "string",
+        "optional": true,
+        "description": "Optional JSON array of vault host IDs."
+      },
+      "targetsAllHosts": {
+        "type": "string",
+        "optional": true,
+        "description": "Set true to target all connectable hosts."
+      },
+      "package": {
+        "type": "string",
+        "optional": true,
+        "description": "Optional vault package path."
+      },
+      "shortkey": {
+        "type": "string",
+        "optional": true,
+        "description": "Optional keyboard shortcut."
+      },
+      "noAutoRun": {
+        "type": "string",
+        "optional": true,
+        "description": "For text snippets: paste without pressing Enter."
+      },
+      "language": {
+        "type": "string",
+        "optional": true,
+        "description": "javascript or python (UI label only; runtime is JS)."
+      },
+      "description": {
+        "type": "string",
+        "optional": true,
+        "description": "Optional script description."
+      },
+      "trigger": {
+        "type": "string",
+        "optional": true,
+        "description": "manual, onConnect, or onOutput (scripts)."
+      },
+      "triggerPattern": {
+        "type": "string",
+        "optional": true,
+        "description": "Regex when trigger=onOutput."
+      }
+    },
+    "policy": {
+      "write": true,
+      "sensitiveRead": false,
+      "longRunning": false,
+      "requiresChatSession": false,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": false,
+      "bypassesChatCancel": false
+    },
+    "agentKind": "global"
+  },
+  {
+    "capabilityId": "vault.snippets.update",
+    "toolName": "snippets_update",
+    "rpcMethod": "vault/snippets/update",
+    "localExecution": false,
+    "description": "Update an existing vault snippet or automation script by id.",
+    "inputShape": {
+      "snippetId": {
+        "type": "string",
+        "optional": false,
+        "description": "Snippet ID to update."
+      },
+      "label": {
+        "type": "string",
+        "optional": true,
+        "description": "New label."
+      },
+      "content": {
+        "type": "string",
+        "optional": true,
+        "description": "New command or script source."
+      },
+      "kind": {
+        "type": "string",
+        "optional": true,
+        "description": "snippet or script."
+      },
+      "tags": {
+        "type": "string",
+        "optional": true,
+        "description": "Optional JSON array of tag strings."
+      },
+      "targets": {
+        "type": "string",
+        "optional": true,
+        "description": "Optional JSON array of vault host IDs."
+      },
+      "targetsAllHosts": {
+        "type": "string",
+        "optional": true,
+        "description": "Set true to target all connectable hosts."
+      },
+      "package": {
+        "type": "string",
+        "optional": true,
+        "description": "Optional vault package path."
+      },
+      "shortkey": {
+        "type": "string",
+        "optional": true,
+        "description": "Optional keyboard shortcut."
+      },
+      "noAutoRun": {
+        "type": "string",
+        "optional": true,
+        "description": "For text snippets: paste without pressing Enter."
+      },
+      "language": {
+        "type": "string",
+        "optional": true,
+        "description": "javascript or python."
+      },
+      "description": {
+        "type": "string",
+        "optional": true,
+        "description": "Optional script description."
+      },
+      "trigger": {
+        "type": "string",
+        "optional": true,
+        "description": "manual, onConnect, or onOutput."
+      },
+      "triggerPattern": {
+        "type": "string",
+        "optional": true,
+        "description": "Regex when trigger=onOutput."
+      }
+    },
+    "policy": {
+      "write": true,
+      "sensitiveRead": false,
+      "longRunning": false,
+      "requiresChatSession": false,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": false,
+      "bypassesChatCancel": false
+    },
+    "agentKind": "global"
+  },
+  {
+    "capabilityId": "vault.snippets.delete",
+    "toolName": "snippets_delete",
+    "rpcMethod": "vault/snippets/delete",
+    "localExecution": false,
+    "description": "Delete a vault snippet or automation script by id.",
+    "inputShape": {
+      "snippetId": {
+        "type": "string",
+        "optional": false,
+        "description": "Snippet ID to delete."
+      }
+    },
+    "policy": {
+      "write": true,
+      "sensitiveRead": false,
+      "longRunning": false,
+      "requiresChatSession": false,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": false,
+      "bypassesChatCancel": false
+    },
+    "agentKind": "global"
+  },
+  {
+    "capabilityId": "vault.scripts.list",
+    "toolName": "scripts_list",
+    "rpcMethod": "vault/scripts/list",
+    "localExecution": false,
+    "description": "List automation scripts (kind=script) in the vault.",
+    "inputShape": {},
+    "policy": {
+      "write": false,
+      "sensitiveRead": false,
+      "longRunning": false,
+      "requiresChatSession": false,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": true,
+      "bypassesChatCancel": true
+    },
+    "agentKind": "global"
+  },
+  {
+    "capabilityId": "vault.scripts.get",
+    "toolName": "scripts_get",
+    "rpcMethod": "vault/scripts/get",
+    "localExecution": false,
+    "description": "Get a single automation script including JavaScript source.",
+    "inputShape": {
+      "scriptId": {
+        "type": "string",
+        "optional": false,
+        "description": "Automation script ID."
+      }
+    },
+    "policy": {
+      "write": false,
+      "sensitiveRead": false,
+      "longRunning": false,
+      "requiresChatSession": false,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": true,
+      "bypassesChatCancel": true
+    },
+    "agentKind": "global"
+  },
+  {
+    "capabilityId": "vault.scripts.create",
+    "toolName": "scripts_create",
+    "rpcMethod": "vault/scripts/create",
+    "localExecution": false,
+    "description": "Create an automation script using the nct JavaScript API. Call scripts_reference first when authoring nct automation. Create nct automation scripts. Call scripts_reference first to learn the nct API, triggers, and source wrapping rules.",
+    "inputShape": {
+      "label": {
+        "type": "string",
+        "optional": false,
+        "description": "Script label."
+      },
+      "content": {
+        "type": "string",
+        "optional": false,
+        "description": "JavaScript automation source using nct.* API."
+      },
+      "tags": {
+        "type": "string",
+        "optional": true,
+        "description": "Optional JSON array of tag strings."
+      },
+      "targets": {
+        "type": "string",
+        "optional": true,
+        "description": "Optional JSON array of vault host IDs."
+      },
+      "targetsAllHosts": {
+        "type": "string",
+        "optional": true,
+        "description": "Set true to target all connectable hosts."
+      },
+      "package": {
+        "type": "string",
+        "optional": true,
+        "description": "Optional vault package path."
+      },
+      "description": {
+        "type": "string",
+        "optional": true,
+        "description": "Optional script description."
+      },
+      "trigger": {
+        "type": "string",
+        "optional": true,
+        "description": "manual (default), onConnect, or onOutput."
+      },
+      "triggerPattern": {
+        "type": "string",
+        "optional": true,
+        "description": "Regex when trigger=onOutput."
+      }
+    },
+    "policy": {
+      "write": true,
+      "sensitiveRead": false,
+      "longRunning": false,
+      "requiresChatSession": false,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": false,
+      "bypassesChatCancel": false
+    },
+    "agentKind": "global"
+  },
+  {
+    "capabilityId": "vault.scripts.update",
+    "toolName": "scripts_update",
+    "rpcMethod": "vault/scripts/update",
+    "localExecution": false,
+    "description": "Update an automation script by id (partial fields).",
+    "inputShape": {
+      "scriptId": {
+        "type": "string",
+        "optional": false,
+        "description": "Script ID to update."
+      },
+      "label": {
+        "type": "string",
+        "optional": true,
+        "description": "New label."
+      },
+      "content": {
+        "type": "string",
+        "optional": true,
+        "description": "New JavaScript source."
+      },
+      "tags": {
+        "type": "string",
+        "optional": true,
+        "description": "Optional JSON array of tag strings."
+      },
+      "targets": {
+        "type": "string",
+        "optional": true,
+        "description": "Optional JSON array of vault host IDs."
+      },
+      "targetsAllHosts": {
+        "type": "string",
+        "optional": true,
+        "description": "Set true to target all connectable hosts."
+      },
+      "package": {
+        "type": "string",
+        "optional": true,
+        "description": "Optional vault package path."
+      },
+      "description": {
+        "type": "string",
+        "optional": true,
+        "description": "Optional script description."
+      },
+      "trigger": {
+        "type": "string",
+        "optional": true,
+        "description": "manual, onConnect, or onOutput."
+      },
+      "triggerPattern": {
+        "type": "string",
+        "optional": true,
+        "description": "Regex when trigger=onOutput."
+      }
+    },
+    "policy": {
+      "write": true,
+      "sensitiveRead": false,
+      "longRunning": false,
+      "requiresChatSession": false,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": false,
+      "bypassesChatCancel": false
+    },
+    "agentKind": "global"
+  },
+  {
+    "capabilityId": "vault.scripts.delete",
+    "toolName": "scripts_delete",
+    "rpcMethod": "vault/scripts/delete",
+    "localExecution": false,
+    "description": "Delete an automation script and remove host connect bindings.",
+    "inputShape": {
+      "scriptId": {
+        "type": "string",
+        "optional": false,
+        "description": "Script ID to delete."
+      }
+    },
+    "policy": {
+      "write": true,
+      "sensitiveRead": false,
+      "longRunning": false,
+      "requiresChatSession": false,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": false,
+      "bypassesChatCancel": false
+    },
+    "agentKind": "global"
+  },
+  {
+    "capabilityId": "vault.scripts.run",
+    "toolName": "scripts_run",
+    "rpcMethod": "vault/scripts/run",
+    "localExecution": false,
+    "description": "Run an automation script in a terminal session via the nct runtime. Set wait=true to block until completion. Runs automation scripts in the nct JavaScript sandbox. Use wait=true to block until completion. Prefer over terminal_execute for await nct.screen.* workflows.",
+    "inputShape": {
+      "scriptId": {
+        "type": "string",
+        "optional": false,
+        "description": "Script ID to run."
+      },
+      "sessionId": {
+        "type": "string",
+        "optional": false,
+        "description": "Terminal session ID."
+      },
+      "wait": {
+        "type": "string",
+        "optional": true,
+        "description": "Set to true to block until the script completes."
+      }
+    },
+    "policy": {
+      "write": true,
+      "sensitiveRead": false,
+      "longRunning": true,
+      "requiresChatSession": true,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": false,
+      "bypassesChatCancel": false
+    },
+    "agentKind": "global"
+  },
+  {
+    "capabilityId": "vault.scripts.reference",
+    "toolName": "scripts_reference",
+    "rpcMethod": "vault/scripts/reference",
+    "localExecution": false,
+    "description": "Return Netcatty automation script syntax: nct API, triggers, host targeting, and source wrapping rules. Returns full Netcatty automation script syntax reference (nct API, triggers, host targeting). Read before authoring scripts.",
+    "inputShape": {},
+    "policy": {
+      "write": false,
+      "sensitiveRead": false,
+      "longRunning": false,
+      "requiresChatSession": false,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": true,
+      "bypassesChatCancel": true
+    },
+    "agentKind": "global"
+  },
+  {
+    "capabilityId": "vault.scripts.runs.list",
+    "toolName": "scripts_runs_list",
+    "rpcMethod": "vault/scripts/runs/list",
+    "localExecution": false,
+    "description": "List automation script runs (optionally filter by sessionId).",
+    "inputShape": {
+      "sessionId": {
+        "type": "string",
+        "optional": true,
+        "description": "Optional terminal session ID filter."
+      }
+    },
+    "policy": {
+      "write": false,
+      "sensitiveRead": false,
+      "longRunning": false,
+      "requiresChatSession": false,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": true,
+      "bypassesChatCancel": true
+    },
+    "agentKind": "global"
+  },
+  {
+    "capabilityId": "vault.scripts.run.stop",
+    "toolName": "scripts_run_stop",
+    "rpcMethod": "vault/scripts/run/stop",
+    "localExecution": false,
+    "description": "Stop a running automation script by runId.",
+    "inputShape": {
+      "runId": {
+        "type": "string",
+        "optional": false,
+        "description": "Script run ID from scripts_run or scripts_runs_list."
+      }
+    },
+    "policy": {
+      "write": true,
+      "sensitiveRead": false,
+      "longRunning": false,
+      "requiresChatSession": true,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": false,
+      "bypassesChatCancel": false
+    },
+    "agentKind": "global"
+  },
+  {
+    "capabilityId": "vault.scripts.run.pause",
+    "toolName": "scripts_run_pause",
+    "rpcMethod": "vault/scripts/run/pause",
+    "localExecution": false,
+    "description": "Pause a running automation script by runId.",
+    "inputShape": {
+      "runId": {
+        "type": "string",
+        "optional": false,
+        "description": "Script run ID to pause."
+      }
+    },
+    "policy": {
+      "write": true,
+      "sensitiveRead": false,
+      "longRunning": false,
+      "requiresChatSession": true,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": false,
+      "bypassesChatCancel": false
+    },
+    "agentKind": "global"
+  },
+  {
+    "capabilityId": "vault.scripts.run.resume",
+    "toolName": "scripts_run_resume",
+    "rpcMethod": "vault/scripts/run/resume",
+    "localExecution": false,
+    "description": "Resume a paused automation script by runId.",
+    "inputShape": {
+      "runId": {
+        "type": "string",
+        "optional": false,
+        "description": "Script run ID to resume."
+      }
+    },
+    "policy": {
+      "write": true,
+      "sensitiveRead": false,
+      "longRunning": false,
+      "requiresChatSession": true,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": false,
+      "bypassesChatCancel": false
+    },
+    "agentKind": "global"
+  },
+  {
+    "capabilityId": "vault.scripts.targets.set",
+    "toolName": "scripts_targets_set",
+    "rpcMethod": "vault/scripts/targets/set",
+    "localExecution": false,
+    "description": "Set host targets or targetsAllHosts for an automation script. onConnect scripts sync host connect queues.",
+    "inputShape": {
+      "scriptId": {
+        "type": "string",
+        "optional": false,
+        "description": "Script ID."
+      },
+      "targets": {
+        "type": "string",
+        "optional": true,
+        "description": "JSON array of vault host IDs (omit when targetsAllHosts=true)."
+      },
+      "targetsAllHosts": {
+        "type": "string",
+        "optional": true,
+        "description": "Set true to target all connectable hosts."
+      }
+    },
+    "policy": {
+      "write": true,
+      "sensitiveRead": false,
+      "longRunning": false,
+      "requiresChatSession": false,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": false,
+      "bypassesChatCancel": false
+    },
+    "agentKind": "global"
+  },
+  {
+    "capabilityId": "vault.host.connectScripts.list",
+    "toolName": "host_connect_scripts_list",
+    "rpcMethod": "vault/host/connectScripts/list",
+    "localExecution": false,
+    "description": "List resolved onConnect automation scripts for a host (global scripts first, then host queue).",
+    "inputShape": {
+      "hostId": {
+        "type": "string",
+        "optional": false,
+        "description": "Vault host ID."
+      }
+    },
+    "policy": {
+      "write": false,
+      "sensitiveRead": false,
+      "longRunning": false,
+      "requiresChatSession": false,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": true,
+      "bypassesChatCancel": true
+    },
+    "agentKind": "global"
+  },
+  {
+    "capabilityId": "vault.host.connectScripts.set",
+    "toolName": "host_connect_scripts_set",
+    "rpcMethod": "vault/host/connectScripts/set",
+    "localExecution": false,
+    "description": "Set ordered onConnect script IDs for a host (host-specific queue; globals run separately). Sets per-host onConnect script queue order. Global targetsAllHosts scripts run first automatically.",
+    "inputShape": {
+      "hostId": {
+        "type": "string",
+        "optional": false,
+        "description": "Vault host ID."
+      },
+      "scriptIds": {
+        "type": "string",
+        "optional": false,
+        "description": "JSON array of onConnect script IDs in run order."
+      }
+    },
+    "policy": {
+      "write": true,
+      "sensitiveRead": false,
+      "longRunning": false,
+      "requiresChatSession": false,
       "bypassesObserverBlock": false,
       "bypassesApproval": false,
       "bypassesChatCancel": false

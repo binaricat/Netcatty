@@ -273,6 +273,47 @@ test("ChatMessageList renders Copilot MCP-prefixed wrapped vault results as arti
   assert.doesNotMatch(markup, /copilot-call-1/);
 });
 
+test('ChatMessageList renders script create tool results as artifact cards', () => {
+  const messages: ChatMessage[] = [
+    {
+      id: 'tool-script-1',
+      role: 'tool',
+      content: '',
+      timestamp: 1,
+      toolResults: [
+        {
+          toolCallId: 'call-script-1',
+          toolName: 'scripts_create',
+          content: {
+            ok: true,
+            script: {
+              id: 'script-1',
+              label: 'Disk cleanup',
+              language: 'javascript',
+            },
+          },
+        },
+      ],
+    },
+  ];
+
+  const markup = renderToStaticMarkup(
+    React.createElement(
+      I18nProvider,
+      { locale: 'en' },
+      React.createElement(
+        TooltipProvider,
+        null,
+        React.createElement(ChatMessageList, { messages }),
+      ),
+    ),
+  );
+
+  assert.match(markup, /Disk cleanup/);
+  assert.match(markup, /javascript script/);
+  assert.doesNotMatch(markup, /call-script-1/);
+});
+
 test("ChatMessageList wires vault artifact navigation when only note open is available", () => {
   assert.equal(shouldProvideVaultArtifactNavigation({
     onOpenVaultNote: () => {},

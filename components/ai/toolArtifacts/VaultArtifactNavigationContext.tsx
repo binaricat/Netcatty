@@ -1,31 +1,38 @@
 import React, { createContext, useCallback, useContext, useMemo } from 'react';
-import type { Host, VaultNote } from '../../../types';
+import type { Host, Snippet, VaultNote } from '../../../types';
 import { useI18n } from '../../../application/i18n/I18nProvider';
 import { toast } from '../../ui/toast';
-import type { VaultToolArtifact } from './vaultToolArtifact';
+import type { VaultSummarySection, VaultToolArtifact } from './vaultToolArtifact';
+
+export type VaultArtifactNavSection = Extract<VaultSummarySection, 'notes' | 'hosts' | 'snippets'>;
 
 export interface VaultArtifactNavigationActions {
   openVaultNote?: (noteId: string) => void;
   openVaultHost?: (hostId: string) => void;
-  openVaultSection?: (section: 'notes' | 'hosts') => void;
+  openVaultSnippet?: (snippetId: string) => void;
+  openVaultSection?: (section: VaultArtifactNavSection) => void;
 }
 
 interface CreateVaultArtifactNavigationActionsOptions {
   notes: VaultNote[];
   hosts: Host[];
+  snippets: Snippet[];
   t: (key: string) => string;
   onOpenVaultNote?: (noteId: string) => void;
   onOpenVaultHost?: (hostId: string) => void;
-  onOpenVaultSection?: (section: 'notes' | 'hosts') => void;
+  onOpenVaultSnippet?: (snippetId: string) => void;
+  onOpenVaultSection?: (section: VaultArtifactNavSection) => void;
   onUnavailable: (message: string, title: string) => void;
 }
 
 interface VaultArtifactNavigationProviderProps {
   notes: VaultNote[];
   hosts: Host[];
+  snippets?: Snippet[];
   onOpenVaultNote?: (noteId: string) => void;
   onOpenVaultHost?: (hostId: string) => void;
-  onOpenVaultSection?: (section: 'notes' | 'hosts') => void;
+  onOpenVaultSnippet?: (snippetId: string) => void;
+  onOpenVaultSection?: (section: VaultArtifactNavSection) => void;
   children: React.ReactNode;
 }
 
@@ -34,9 +41,11 @@ const VaultArtifactNavigationContext = createContext<VaultArtifactNavigationActi
 export function createVaultArtifactNavigationActions({
   notes,
   hosts,
+  snippets,
   t,
   onOpenVaultNote,
   onOpenVaultHost,
+  onOpenVaultSnippet,
   onOpenVaultSection,
   onUnavailable,
 }: CreateVaultArtifactNavigationActionsOptions): VaultArtifactNavigationActions {
@@ -64,6 +73,17 @@ export function createVaultArtifactNavigationActions({
     };
   }
 
+  if (onOpenVaultSnippet) {
+    actions.openVaultSnippet = (snippetId: string) => {
+      const exists = snippets.some((snippet) => snippet.id === snippetId);
+      if (!exists) {
+        onUnavailable(t('ai.chat.artifact.snippetMissing'), t('ai.chat.artifact.unavailableTitle'));
+        return;
+      }
+      onOpenVaultSnippet(snippetId);
+    };
+  }
+
   if (onOpenVaultSection) {
     actions.openVaultSection = onOpenVaultSection;
   }
@@ -74,8 +94,10 @@ export function createVaultArtifactNavigationActions({
 export function VaultArtifactNavigationProvider({
   notes,
   hosts,
+  snippets = [],
   onOpenVaultNote,
   onOpenVaultHost,
+  onOpenVaultSnippet,
   onOpenVaultSection,
   children,
 }: VaultArtifactNavigationProviderProps) {
@@ -88,12 +110,24 @@ export function VaultArtifactNavigationProvider({
   const value = useMemo<VaultArtifactNavigationActions>(() => createVaultArtifactNavigationActions({
     notes,
     hosts,
+    snippets,
     t,
     onOpenVaultNote,
     onOpenVaultHost,
+    onOpenVaultSnippet,
     onOpenVaultSection,
     onUnavailable,
-  }), [hosts, notes, onOpenVaultHost, onOpenVaultNote, onOpenVaultSection, onUnavailable, t]);
+  }), [
+    hosts,
+    notes,
+    onOpenVaultHost,
+    onOpenVaultNote,
+    onOpenVaultSection,
+    onOpenVaultSnippet,
+    onUnavailable,
+    snippets,
+    t,
+  ]);
 
   return (
     <VaultArtifactNavigationContext.Provider value={value}>
@@ -121,7 +155,25 @@ export function navigateVaultArtifact(
       navigation.openVaultSection?.('hosts');
       break;
     case 'vault.summary':
-      navigation.openVaultSection?.(artifact.section);
+      if (artifact.section === 'scripts') {
+        navigation.openVaultSection?.('snippets');
+      } else {
+        navigation.openVaultSection?.(artifact.section);
+      }
+      break;
+    case 'vault.snippet':
+    case 'vault.script':
+      navigation.openVaultSnippet?.(artifact.kind === 'vault.snippet' ? artifact.snippetId : artifact.scriptId);
+      break;
+    case 'vault.snippet.run':
+      navigation.openVaultSnippet?.(artifact.snippetId);
+      break;
+    case 'vault.script.run':
+      navigation.openVaultSnippet?.(artifact.scriptId);
+      break;
+    case 'vault.script.reference':
+    case 'vault.script.runs':
+      navigation.openVaultSection?.('snippets');
       break;
     default:
       break;
@@ -140,7 +192,14 @@ export function canNavigateVaultArtifact(
       return Boolean(navigation.openVaultHost);
     case 'vault.hosts.batch':
     case 'vault.summary':
+    case 'vault.script.reference':
+    case 'vault.script.runs':
       return Boolean(navigation.openVaultSection);
+    case 'vault.snippet':
+    case 'vault.script':
+    case 'vault.snippet.run':
+    case 'vault.script.run':
+      return Boolean(navigation.openVaultSnippet);
     default:
       return false;
   }

@@ -276,8 +276,10 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
   isVisible = true,
   notes = [],
   hosts = [],
+  snippets = [],
   onOpenVaultNote,
   onOpenVaultHost,
+  onOpenVaultSnippet,
   onOpenVaultSection,
 }) => {
   const { t } = useI18n();
@@ -1280,8 +1282,10 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
         setGlobalPermissionMode={setGlobalPermissionMode}
         notes={notes}
         hosts={hosts}
+        snippets={snippets}
         onOpenVaultNote={onOpenVaultNote}
         onOpenVaultHost={onOpenVaultHost}
+        onOpenVaultSnippet={onOpenVaultSnippet}
         onOpenVaultSection={onOpenVaultSection}
       />
     </React.Profiler>
@@ -1351,8 +1355,10 @@ export function aiChatSidePanelPropsAreEqual(
   if (prev.resolveExecutorContext !== next.resolveExecutorContext) return false;
   if (prev.notes !== next.notes) return false;
   if (prev.hosts !== next.hosts) return false;
+  if (prev.snippets !== next.snippets) return false;
   if (prev.onOpenVaultNote !== next.onOpenVaultNote) return false;
   if (prev.onOpenVaultHost !== next.onOpenVaultHost) return false;
+  if (prev.onOpenVaultSnippet !== next.onOpenVaultSnippet) return false;
   if (prev.onOpenVaultSection !== next.onOpenVaultSection) return false;
 
   for (const key of AI_CHAT_SIDE_PANEL_AI_STATE_KEYS) {

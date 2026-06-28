@@ -1,6 +1,8 @@
 import { normalizeArtifactToolName } from './toolArtifactNames';
 import { parseResultPayload } from './toolArtifactResultPayload';
 
+export type VaultSummarySection = 'notes' | 'hosts' | 'snippets' | 'scripts';
+
 export type VaultToolArtifact =
   | {
       kind: 'vault.note';
@@ -25,8 +27,52 @@ export type VaultToolArtifact =
     }
   | {
       kind: 'vault.summary';
-      section: 'notes' | 'hosts';
+      section: VaultSummarySection;
       count: number;
+    }
+  | {
+      kind: 'vault.snippet';
+      snippetId: string;
+      label: string;
+      package?: string;
+    }
+  | {
+      kind: 'vault.script';
+      scriptId: string;
+      label: string;
+      package?: string;
+      language?: string;
+    }
+  | {
+      kind: 'vault.snippet.deleted';
+      snippetId: string;
+    }
+  | {
+      kind: 'vault.script.deleted';
+      scriptId: string;
+    }
+  | {
+      kind: 'vault.snippet.run';
+      snippetId: string;
+      command?: string;
+    }
+  | {
+      kind: 'vault.script.run';
+      scriptId: string;
+      runId: string;
+      status?: string;
+    }
+  | {
+      kind: 'vault.script.runs';
+      count: number;
+    }
+  | {
+      kind: 'vault.script.action';
+      action: 'stop' | 'pause' | 'resume';
+      runId: string;
+    }
+  | {
+      kind: 'vault.script.reference';
     }
   | {
       kind: 'error';
@@ -42,6 +88,24 @@ const VAULT_ARTIFACT_TOOL_NAMES = new Set([
   'vault_hosts_import',
   'vault_hosts_list',
   'host_get',
+  'snippets_list',
+  'snippets_get',
+  'snippets_create',
+  'snippets_update',
+  'snippets_delete',
+  'snippets_run',
+  'scripts_list',
+  'scripts_get',
+  'scripts_create',
+  'scripts_update',
+  'scripts_delete',
+  'scripts_run',
+  'scripts_reference',
+  'scripts_runs_list',
+  'scripts_run_stop',
+  'scripts_run_pause',
+  'scripts_run_resume',
+  'scripts_targets_set',
 ]);
 
 function readString(value: unknown): string | undefined {
@@ -79,6 +143,35 @@ function parseHostArtifact(host: unknown): VaultToolArtifact | null {
     hostname,
     port: readNumber(record.port),
     group: readString(record.group),
+  };
+}
+
+function parseSnippetArtifact(snippet: unknown): VaultToolArtifact | null {
+  if (!snippet || typeof snippet !== 'object') return null;
+  const record = snippet as Record<string, unknown>;
+  const snippetId = readString(record.id);
+  const label = readString(record.label);
+  if (!snippetId || !label) return null;
+  return {
+    kind: 'vault.snippet',
+    snippetId,
+    label,
+    package: readString(record.package),
+  };
+}
+
+function parseScriptArtifact(script: unknown): VaultToolArtifact | null {
+  if (!script || typeof script !== 'object') return null;
+  const record = script as Record<string, unknown>;
+  const scriptId = readString(record.id);
+  const label = readString(record.label);
+  if (!scriptId || !label) return null;
+  return {
+    kind: 'vault.script',
+    scriptId,
+    label,
+    package: readString(record.package),
+    language: readString(record.language),
   };
 }
 
@@ -163,7 +256,75 @@ export function parseVaultToolArtifact(
     }
     case 'host_get':
       return parseHostArtifact(payload.host);
+    case 'snippets_list': {
+      const snippets = Array.isArray(payload.snippets) ? payload.snippets : [];
+      return { kind: 'vault.summary', section: 'snippets', count: snippets.length };
+    }
+    case 'snippets_get':
+    case 'snippets_create':
+    case 'snippets_update':
+      return parseSnippetArtifact(payload.snippet);
+    case 'snippets_delete': {
+      const snippetId = readString(payload.snippetId);
+      if (!snippetId) return null;
+      return { kind: 'vault.snippet.deleted', snippetId };
+    }
+    case 'snippets_run': {
+      const snippetId = readString(payload.snippetId);
+      if (!snippetId) return null;
+      return {
+        kind: 'vault.snippet.run',
+        snippetId,
+        command: readString(payload.command),
+      };
+    }
+    case 'scripts_list': {
+      const scripts = Array.isArray(payload.scripts) ? payload.scripts : [];
+      return { kind: 'vault.summary', section: 'scripts', count: scripts.length };
+    }
+    case 'scripts_get':
+    case 'scripts_create':
+    case 'scripts_update':
+    case 'scripts_targets_set':
+      return parseScriptArtifact(payload.script);
+    case 'scripts_delete': {
+      const scriptId = readString(payload.scriptId);
+      if (!scriptId) return null;
+      return { kind: 'vault.script.deleted', scriptId };
+    }
+    case 'scripts_run': {
+      const scriptId = readString(payload.snippetId) ?? readString(payload.scriptId);
+      const runId = readString(payload.runId);
+      if (!scriptId || !runId) return null;
+      return {
+        kind: 'vault.script.run',
+        scriptId,
+        runId,
+        status: readString(payload.status),
+      };
+    }
+    case 'scripts_reference':
+      return { kind: 'vault.script.reference' };
+    case 'scripts_runs_list': {
+      const runs = Array.isArray(payload.runs) ? payload.runs : [];
+      return { kind: 'vault.script.runs', count: runs.length };
+    }
+    case 'scripts_run_stop':
+      return parseScriptRunAction(payload, 'stop');
+    case 'scripts_run_pause':
+      return parseScriptRunAction(payload, 'pause');
+    case 'scripts_run_resume':
+      return parseScriptRunAction(payload, 'resume');
     default:
       return null;
   }
+}
+
+function parseScriptRunAction(
+  payload: Record<string, unknown>,
+  action: 'stop' | 'pause' | 'resume',
+): VaultToolArtifact | null {
+  const runId = readString(payload.runId);
+  if (!runId) return null;
+  return { kind: 'vault.script.action', action, runId };
 }

@@ -59,6 +59,10 @@ ${permissionRules}
 
    **Vault → Notes (sidebar markdown docs):** When the user explicitly wants documentation saved to **Vault → Notes** (the notes sidebar / 保险箱笔记), use \`vault_notes_create\` or \`vault_notes_update\` — **not** \`host_notes_set\` (Host Details only) and **not** as a substitute for creating a host.
 
+   **Snippets vs automation scripts:** Use \`snippets_*\` for shell command text (paste/execute with optional \`{{variables}}\`). Use \`scripts_*\` for multi-step terminal automation written in JavaScript with the \`nct.*\` API (\`await nct.screen.sendLine\`, \`waitFor\`, dialogs, progress). Call \`scripts_reference\` before authoring or editing scripts. Run scripts with \`scripts_run\` (set \`wait: true\` to block until done); use \`scripts_runs_list\`, \`scripts_run_stop\`, \`scripts_run_pause\`, and \`scripts_run_resume\` for lifecycle control. Create/update/delete vault entries with \`snippets_create/update/delete\` (any kind) or \`scripts_create/update/delete\` (scripts only).
+
+   **Script triggers and hosts:** \`trigger: manual\` runs on demand; \`onConnect\` runs after SSH connect (global \`targetsAllHosts\` scripts first, then per-host \`connectScriptIds\` queue); \`onOutput\` runs when terminal output matches \`triggerPattern\` (regex). Link scripts to hosts with \`scripts_targets_set\` or manage per-host connect order with \`host_connect_scripts_list\` / \`host_connect_scripts_set\`.
+
    **Never fallback:** If \`vault_hosts_create\` or \`vault_hosts_import\` fails, report the error to the user. Do **not** silently create a Vault note instead of the requested host.
 
    When the user pastes unstructured text with host/server info, **you** extract fields and call \`vault_hosts_create\`. When operating on multiple sessions, call \`terminal_execute\` for each target session.

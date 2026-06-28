@@ -4,7 +4,32 @@ import {
   sanitizeNoteTitle,
   sanitizeVaultNote,
 } from '../../domain/notes';
+import { getScriptApiReference } from '../../domain/scriptApiReference.ts';
+import {
+  applyScriptTargetsPatch,
+  applySnippetCreateToVault,
+  applySnippetUpdateToVault,
+  buildSnippetFromAgentDraft,
+  applySnippetAgentPatch,
+  deleteSnippetFromVault,
+  filterScriptSnippets,
+  serializeScriptForAgentGet,
+  serializeScriptForAgentList,
+  serializeSnippetForAgentGet,
+  serializeSnippetForAgentList,
+  setHostConnectScriptIds,
+  summarizeConnectScriptsForHost,
+} from '../../domain/snippetAgentOps.ts';
+import { isScriptSnippet } from '../../domain/snippetScript.ts';
+import { applySnippetVariables, parseSnippetVariables } from '../../domain/snippetVariables';
 import { getNextVaultOrder } from '../../domain/vaultOrder';
+import {
+  runAutomationScript,
+  stopScriptRun,
+  pauseScriptRun,
+  resumeScriptRun,
+  waitForScriptRun,
+} from '../../application/state/scriptAutomationCoordinator.ts';
 import {
   applyVaultHostCreates,
   buildVaultHostsFromDrafts,
@@ -48,6 +73,8 @@ function summarizeHostForList(host: Host) {
     tags: host.tags,
     os: host.os,
     createdAt: host.createdAt,
+    connectScriptIds: host.connectScriptIds,
+    loginScriptId: host.loginScriptId,
   };
 }
 
@@ -166,6 +193,87 @@ function parseOptionalStringArray(
   return trimmed.split(',').map((entry) => entry.trim()).filter(Boolean);
 }
 
+function snippetDraftFromParams(params: Record<string, unknown>) {
+  const command = params.command ?? params.content;
+  return {
+    label: params.label,
+    command,
+    kind: params.kind,
+    tags: params.tags,
+    targets: params.targets,
+    targetsAllHosts: params.targetsAllHosts,
+    package: params.package,
+    shortkey: params.shortkey,
+    noAutoRun: params.noAutoRun,
+    language: params.language,
+    description: params.description,
+    trigger: params.trigger,
+    triggerPattern: params.triggerPattern,
+  };
+}
+
+async function executeSnippetOrScriptRun(
+  snippet: Snippet,
+  sessionId: string,
+  params: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  if (isScriptSnippet(snippet)) {
+    const wait = parseOptionalBoolean(params.wait) ?? false;
+    try {
+      const { runId } = await runAutomationScript({
+        snippet,
+        sessionId,
+      });
+      if (!wait) {
+        return { ok: true, sessionId, snippetId: snippet.id, runId, kind: 'script' };
+      }
+      const run = await waitForScriptRun(runId);
+      return {
+        ok: true,
+        sessionId,
+        snippetId: snippet.id,
+        runId,
+        kind: 'script',
+        status: run.status,
+        error: run.error,
+      };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  let variableValues: Record<string, string> = {};
+  const parsedVariables = parseSnippetVariableValues(params.variables);
+  if ('error' in parsedVariables) {
+    return { ok: false, error: parsedVariables.error };
+  }
+  variableValues = parsedVariables;
+
+  const defs = parseSnippetVariables(snippet.command);
+  for (const def of defs) {
+    if (variableValues[def.name] === undefined && def.defaultValue !== undefined) {
+      variableValues[def.name] = def.defaultValue;
+    }
+  }
+  for (const def of defs) {
+    if ((variableValues[def.name] ?? '').trim() === '' && def.defaultValue === undefined) {
+      return { ok: false, error: `Missing snippet variable "${def.name}".` };
+    }
+  }
+
+  const command = applySnippetVariables(snippet.command, variableValues);
+  const bridge = netcattyBridge.get();
+  if (!bridge?.aiExec) {
+    return { ok: false, error: 'Terminal execution bridge is unavailable.' };
+  }
+  const chatSessionId = typeof params.chatSessionId === 'string' ? params.chatSessionId : undefined;
+  const result = await bridge.aiExec(sessionId, command, chatSessionId);
+  if (result && typeof result === 'object' && 'ok' in result && result.ok === false) {
+    return { ok: false, error: (result as { error?: string }).error || 'Snippet execution failed.' };
+  }
+  return { ok: true, sessionId, snippetId: snippet.id, command, kind: 'snippet', result };
+}
+
 export interface VaultAgentApiDeps {
   getHosts: () => Host[];
   getNotes: () => VaultNote[];
@@ -180,6 +288,7 @@ export interface VaultAgentApiDeps {
   updateCustomGroups: (groups: string[]) => void;
   updateHosts: (hosts: Host[]) => void;
   updateNotes: (notes: VaultNote[]) => void;
+  updateSnippets: (snippets: Snippet[]) => void;
   startTunnel: (
     rule: PortForwardingRule,
     host: Host,
@@ -424,30 +533,47 @@ export async function handleVaultAgentOp(
     case 'snippets.list': {
       return {
         ok: true,
-        snippets: deps.snippets.map((snippet) => ({
-          id: snippet.id,
-          label: snippet.label,
-          tags: snippet.tags || [],
-          targets: snippet.targets || [],
-          package: snippet.package,
-        })),
+        snippets: deps.snippets.map(serializeSnippetForAgentList),
       };
     }
     case 'snippets.get': {
       const snippetId = String(params.snippetId || '');
       const snippet = deps.snippets.find((entry) => entry.id === snippetId);
       if (!snippet) return { ok: false, error: `Snippet "${snippetId}" was not found.` };
-      return {
-        ok: true,
-        snippet: {
-          id: snippet.id,
-          label: snippet.label,
-          command: snippet.command,
-          tags: snippet.tags || [],
-          targets: snippet.targets || [],
-          noAutoRun: snippet.noAutoRun,
-        },
-      };
+      return { ok: true, snippet: serializeSnippetForAgentGet(snippet) };
+    }
+    case 'snippets.create': {
+      const built = buildSnippetFromAgentDraft(snippetDraftFromParams(params), deps.snippets);
+      if (!built.ok) return { ok: false, error: built.error };
+      const merged = applySnippetCreateToVault(deps.snippets, deps.getHosts(), built.snippet);
+      deps.updateSnippets(merged.snippets);
+      deps.updateHosts(merged.hosts);
+      return { ok: true, snippet: serializeSnippetForAgentGet(built.snippet) };
+    }
+    case 'snippets.update': {
+      const snippetId = String(params.snippetId || '');
+      const existing = deps.snippets.find((entry) => entry.id === snippetId);
+      if (!existing) return { ok: false, error: `Snippet "${snippetId}" was not found.` };
+      const patched = applySnippetAgentPatch(existing, snippetDraftFromParams(params));
+      if (!patched.ok) return { ok: false, error: patched.error };
+      const merged = applySnippetUpdateToVault(
+        deps.snippets,
+        deps.getHosts(),
+        patched.snippet,
+        existing,
+        patched.prevTargetIds,
+      );
+      deps.updateSnippets(merged.snippets);
+      deps.updateHosts(merged.hosts);
+      return { ok: true, snippet: serializeSnippetForAgentGet(patched.snippet) };
+    }
+    case 'snippets.delete': {
+      const snippetId = String(params.snippetId || '');
+      const removed = deleteSnippetFromVault(deps.snippets, deps.getHosts(), snippetId);
+      if ('error' in removed) return { ok: false, error: removed.error };
+      deps.updateSnippets(removed.snippets);
+      deps.updateHosts(removed.hosts);
+      return { ok: true, snippetId };
     }
     case 'snippets.run': {
       const snippetId = String(params.snippetId || '');
@@ -455,37 +581,153 @@ export async function handleVaultAgentOp(
       const snippet = deps.snippets.find((entry) => entry.id === snippetId);
       if (!snippet) return { ok: false, error: `Snippet "${snippetId}" was not found.` };
       if (!sessionId) return { ok: false, error: 'sessionId is required.' };
-
-      let variableValues: Record<string, string> = {};
-      const parsedVariables = parseSnippetVariableValues(params.variables);
-      if ('error' in parsedVariables) {
-        return { ok: false, error: parsedVariables.error };
+      return executeSnippetOrScriptRun(snippet, sessionId, params);
+    }
+    case 'scripts.list': {
+      return {
+        ok: true,
+        scripts: filterScriptSnippets(deps.snippets).map(serializeScriptForAgentList),
+      };
+    }
+    case 'scripts.get': {
+      const scriptId = String(params.scriptId || params.snippetId || '');
+      const script = deps.snippets.find((entry) => entry.id === scriptId && isScriptSnippet(entry));
+      if (!script) return { ok: false, error: `Script "${scriptId}" was not found.` };
+      return { ok: true, script: serializeScriptForAgentGet(script) };
+    }
+    case 'scripts.create': {
+      const built = buildSnippetFromAgentDraft(
+        snippetDraftFromParams(params),
+        deps.snippets,
+        { forceKind: 'script' },
+      );
+      if (!built.ok) return { ok: false, error: built.error };
+      const merged = applySnippetCreateToVault(deps.snippets, deps.getHosts(), built.snippet);
+      deps.updateSnippets(merged.snippets);
+      deps.updateHosts(merged.hosts);
+      return { ok: true, script: serializeScriptForAgentGet(built.snippet) };
+    }
+    case 'scripts.update': {
+      const scriptId = String(params.scriptId || params.snippetId || '');
+      const existing = deps.snippets.find((entry) => entry.id === scriptId);
+      if (!existing || !isScriptSnippet(existing)) {
+        return { ok: false, error: `Script "${scriptId}" was not found.` };
       }
-      variableValues = parsedVariables;
-
-      const defs = parseSnippetVariables(snippet.command);
-      for (const def of defs) {
-        if (variableValues[def.name] === undefined && def.defaultValue !== undefined) {
-          variableValues[def.name] = def.defaultValue;
-        }
+      const patched = applySnippetAgentPatch(existing, snippetDraftFromParams(params), { forceKind: 'script' });
+      if (!patched.ok) return { ok: false, error: patched.error };
+      const merged = applySnippetUpdateToVault(
+        deps.snippets,
+        deps.getHosts(),
+        patched.snippet,
+        existing,
+        patched.prevTargetIds,
+      );
+      deps.updateSnippets(merged.snippets);
+      deps.updateHosts(merged.hosts);
+      return { ok: true, script: serializeScriptForAgentGet(patched.snippet) };
+    }
+    case 'scripts.delete': {
+      const scriptId = String(params.scriptId || params.snippetId || '');
+      const existing = deps.snippets.find((entry) => entry.id === scriptId);
+      if (!existing || !isScriptSnippet(existing)) {
+        return { ok: false, error: `Script "${scriptId}" was not found.` };
       }
-      for (const def of defs) {
-        if ((variableValues[def.name] ?? '').trim() === '' && def.defaultValue === undefined) {
-          return { ok: false, error: `Missing snippet variable "${def.name}".` };
-        }
-      }
-
-      const command = applySnippetVariables(snippet.command, variableValues);
+      const removed = deleteSnippetFromVault(deps.snippets, deps.getHosts(), scriptId);
+      if ('error' in removed) return { ok: false, error: removed.error };
+      deps.updateSnippets(removed.snippets);
+      deps.updateHosts(removed.hosts);
+      return { ok: true, scriptId };
+    }
+    case 'scripts.run': {
+      const scriptId = String(params.scriptId || params.snippetId || '');
+      const sessionId = String(params.sessionId || '');
+      const script = deps.snippets.find((entry) => entry.id === scriptId && isScriptSnippet(entry));
+      if (!script) return { ok: false, error: `Script "${scriptId}" was not found.` };
+      if (!sessionId) return { ok: false, error: 'sessionId is required.' };
+      return executeSnippetOrScriptRun(script, sessionId, params);
+    }
+    case 'scripts.reference': {
+      return { ok: true, reference: getScriptApiReference() };
+    }
+    case 'scripts.runs.list': {
       const bridge = netcattyBridge.get();
-      if (!bridge?.aiExec) {
-        return { ok: false, error: 'Terminal execution bridge is unavailable.' };
+      if (!bridge?.scriptGetRuns) {
+        return { ok: false, error: 'Script runs bridge is unavailable.' };
       }
-      const chatSessionId = typeof params.chatSessionId === 'string' ? params.chatSessionId : undefined;
-      const result = await bridge.aiExec(sessionId, command, chatSessionId);
-      if (result && typeof result === 'object' && 'ok' in result && result.ok === false) {
-        return { ok: false, error: (result as { error?: string }).error || 'Snippet execution failed.' };
-      }
-      return { ok: true, sessionId, snippetId, command, result };
+      const sessionId = typeof params.sessionId === 'string' && params.sessionId.trim()
+        ? params.sessionId.trim()
+        : undefined;
+      const runs = await bridge.scriptGetRuns(sessionId);
+      return { ok: true, runs };
+    }
+    case 'scripts.run.stop': {
+      const runId = String(params.runId || '');
+      if (!runId) return { ok: false, error: 'runId is required.' };
+      const result = await stopScriptRun(runId);
+      if (!result.ok) return { ok: false, error: `Script run "${runId}" was not found or could not be stopped.` };
+      return { ok: true, runId };
+    }
+    case 'scripts.run.pause': {
+      const runId = String(params.runId || '');
+      if (!runId) return { ok: false, error: 'runId is required.' };
+      const result = await pauseScriptRun(runId);
+      if (!result.ok) return { ok: false, error: `Script run "${runId}" was not found or could not be paused.` };
+      return { ok: true, runId };
+    }
+    case 'scripts.run.resume': {
+      const runId = String(params.runId || '');
+      if (!runId) return { ok: false, error: 'runId is required.' };
+      const result = await resumeScriptRun(runId);
+      if (!result.ok) return { ok: false, error: `Script run "${runId}" was not found or could not be resumed.` };
+      return { ok: true, runId };
+    }
+    case 'scripts.targets.set': {
+      const scriptId = String(params.scriptId || params.snippetId || '');
+      const existing = deps.snippets.find((entry) => entry.id === scriptId && isScriptSnippet(entry));
+      if (!existing) return { ok: false, error: `Script "${scriptId}" was not found.` };
+      const patched = applyScriptTargetsPatch(existing, {
+        targets: params.targets,
+        targetsAllHosts: params.targetsAllHosts,
+      });
+      if (!patched.ok) return { ok: false, error: patched.error };
+      const merged = applySnippetUpdateToVault(
+        deps.snippets,
+        deps.getHosts(),
+        patched.snippet,
+        existing,
+        patched.prevTargetIds,
+      );
+      deps.updateSnippets(merged.snippets);
+      deps.updateHosts(merged.hosts);
+      return { ok: true, script: serializeScriptForAgentGet(patched.snippet) };
+    }
+    case 'host.connectScripts.list': {
+      const hostId = String(params.hostId || '');
+      const host = deps.getHosts().find((entry) => entry.id === hostId);
+      if (!host) return { ok: false, error: `Host "${hostId}" was not found.` };
+      return {
+        ok: true,
+        ...summarizeConnectScriptsForHost(host, deps.snippets),
+      };
+    }
+    case 'host.connectScripts.set': {
+      const hostId = String(params.hostId || '');
+      const host = deps.getHosts().find((entry) => entry.id === hostId);
+      if (!host) return { ok: false, error: `Host "${hostId}" was not found.` };
+      const scriptIds = parseOptionalStringArray(params.scriptIds, 'scriptIds');
+      if (scriptIds && 'error' in scriptIds) return { ok: false, error: scriptIds.error };
+      if (!scriptIds) return { ok: false, error: 'scriptIds is required.' };
+      const nextHost = setHostConnectScriptIds(host, scriptIds, deps.snippets);
+      if (!nextHost.ok) return { ok: false, error: nextHost.error };
+      const nextHosts = deps.getHosts().map((entry) => (
+        entry.id === hostId ? nextHost.host : entry
+      ));
+      deps.updateHosts(nextHosts);
+      return {
+        ok: true,
+        hostId,
+        connectScriptIds: nextHost.host.connectScriptIds ?? [],
+      };
     }
     case 'portforward.rules.list': {
       return {
@@ -535,6 +777,14 @@ export async function handleVaultAgentOp(
   }
 }
 
+export function shouldBypassVaultAgentSerialization(
+  op: string,
+  params: Record<string, unknown>,
+): boolean {
+  if (op !== 'scripts.run' && op !== 'snippets.run') return false;
+  return parseOptionalBoolean(params.wait) ?? false;
+}
+
 export type VaultAgentHandler = (op: string, params: Record<string, unknown>) => Promise<Record<string, unknown>>;
 
 let activeHandler: VaultAgentHandler | null = null;
@@ -563,10 +813,11 @@ export function setupVaultAgentBridge(): () => void {
 
   const unsubscribe = bridge.onVaultAgentRequest(async (payload) => {
     const { requestId, op, params } = payload;
-    await runSerializedVaultAgentRequest(async () => {
+    const safeParams = params || {};
+    const runHandler = async () => {
       try {
         const result = activeHandler
-          ? await activeHandler(op, params || {})
+          ? await activeHandler(op, safeParams)
           : { ok: false, error: 'Vault agent bridge is not ready.' };
         await bridge.respondVaultAgent?.(requestId, result);
       } catch (err) {
@@ -575,7 +826,14 @@ export function setupVaultAgentBridge(): () => void {
           error: err instanceof Error ? err.message : String(err),
         });
       }
-    });
+    };
+
+    if (shouldBypassVaultAgentSerialization(op, safeParams)) {
+      await runHandler();
+      return;
+    }
+
+    await runSerializedVaultAgentRequest(runHandler);
   });
 
   return unsubscribe;

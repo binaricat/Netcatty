@@ -157,14 +157,17 @@ export async function runSnippetOrScript(params: {
   params.runSnippetText(params.command, params.snippet.noAutoRun);
 }
 
-export async function stopScriptRun(runId: string) {
-  await netcattyBridge.get()?.scriptStop?.(runId);
+export async function stopScriptRun(runId: string): Promise<{ ok: boolean }> {
+  const result = await netcattyBridge.get()?.scriptStop?.(runId);
+  return { ok: result?.ok !== false };
 }
 
-export async function pauseScriptRun(runId: string) {
-  await netcattyBridge.get()?.scriptPause?.(runId);
+export async function pauseScriptRun(runId: string): Promise<{ ok: boolean }> {
+  const result = await netcattyBridge.get()?.scriptPause?.(runId);
+  return { ok: result?.ok !== false };
 }
 
-export async function resumeScriptRun(runId: string) {
-  await netcattyBridge.get()?.scriptResume?.(runId);
+export async function resumeScriptRun(runId: string): Promise<{ ok: boolean }> {
+  const result = await netcattyBridge.get()?.scriptResume?.(runId);
+  return { ok: result?.ok !== false };
 }

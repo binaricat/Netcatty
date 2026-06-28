@@ -73,6 +73,52 @@ test('parseVaultToolArtifact maps errors', () => {
   });
 });
 
+test('parseVaultToolArtifact maps script create results', () => {
+  const artifact = parseVaultToolArtifact('scripts_create', {
+    ok: true,
+    script: {
+      id: 'script-1',
+      label: 'Disk cleanup',
+      language: 'javascript',
+      package: 'maintenance',
+    },
+  });
+  assert.deepEqual(artifact, {
+    kind: 'vault.script',
+    scriptId: 'script-1',
+    label: 'Disk cleanup',
+    package: 'maintenance',
+    language: 'javascript',
+  });
+});
+
+test('parseVaultToolArtifact maps snippet list results', () => {
+  const artifact = parseVaultToolArtifact('snippets_list', {
+    ok: true,
+    snippets: [{ id: 's1', label: 'Restart nginx' }],
+  });
+  assert.deepEqual(artifact, {
+    kind: 'vault.summary',
+    section: 'snippets',
+    count: 1,
+  });
+});
+
+test('parseVaultToolArtifact maps script run results', () => {
+  const artifact = parseVaultToolArtifact('scripts_run', {
+    ok: true,
+    snippetId: 'script-1',
+    runId: 'run-9',
+    kind: 'script',
+  });
+  assert.deepEqual(artifact, {
+    kind: 'vault.script.run',
+    scriptId: 'script-1',
+    runId: 'run-9',
+    status: undefined,
+  });
+});
+
 test('parseVaultToolArtifact unwraps Claude MCP text result envelopes', () => {
   const artifact = parseVaultToolArtifact('mcp__netcatty-remote-hosts__vault_notes_list', JSON.stringify([
     {

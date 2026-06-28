@@ -16,6 +16,7 @@ export interface UseVaultAgentBridgeInput {
   terminalSettings?: Pick<TerminalSettings, 'keepaliveInterval' | 'keepaliveCountMax'>;
   resolveEffectiveHost: (host: Host) => Host;
   updateHosts: (hosts: Host[]) => void;
+  updateSnippets: (snippets: Snippet[]) => void;
   customGroups: string[];
   updateCustomGroups: (groups: string[]) => void;
   notes: VaultNote[];
@@ -27,6 +28,7 @@ export interface UseVaultAgentBridgeInput {
 type VaultAgentSnapshot = {
   hosts: Host[];
   notes: VaultNote[];
+  snippets: Snippet[];
   customGroups: string[];
 };
 
@@ -37,27 +39,32 @@ export function useVaultAgentBridge(input: UseVaultAgentBridgeInput): void {
   const vaultSnapshotRef = useRef<VaultAgentSnapshot>({
     hosts: input.hosts,
     notes: input.notes,
+    snippets: input.snippets,
     customGroups: input.customGroups,
   });
   const lastSyncedVaultInputRef = useRef({
     hosts: input.hosts,
     notes: input.notes,
+    snippets: input.snippets,
     customGroups: input.customGroups,
   });
 
   if (
     input.hosts !== lastSyncedVaultInputRef.current.hosts
     || input.notes !== lastSyncedVaultInputRef.current.notes
+    || input.snippets !== lastSyncedVaultInputRef.current.snippets
     || input.customGroups !== lastSyncedVaultInputRef.current.customGroups
   ) {
     vaultSnapshotRef.current = {
       hosts: input.hosts,
       notes: input.notes,
+      snippets: input.snippets,
       customGroups: input.customGroups,
     };
     lastSyncedVaultInputRef.current = {
       hosts: input.hosts,
       notes: input.notes,
+      snippets: input.snippets,
       customGroups: input.customGroups,
     };
   }
@@ -69,7 +76,7 @@ export function useVaultAgentBridge(input: UseVaultAgentBridgeInput): void {
         getHosts: () => vaultSnapshotRef.current.hosts,
         getNotes: () => vaultSnapshotRef.current.notes,
         getCustomGroups: () => vaultSnapshotRef.current.customGroups,
-        snippets: current.snippets,
+        snippets: vaultSnapshotRef.current.snippets,
         portForwardingRules: current.portForwardingRules,
         keys: current.keys,
         identities: current.identities,
@@ -93,6 +100,10 @@ export function useVaultAgentBridge(input: UseVaultAgentBridgeInput): void {
         updateNotes: (notes) => {
           vaultSnapshotRef.current.notes = notes;
           current.updateNotes(notes);
+        },
+        updateSnippets: (nextSnippets) => {
+          vaultSnapshotRef.current.snippets = nextSnippets;
+          current.updateSnippets(nextSnippets);
         },
         startTunnel: current.startTunnel,
         stopTunnel: current.stopTunnel,

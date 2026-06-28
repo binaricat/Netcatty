@@ -417,9 +417,11 @@ function SidePanelAiSlotInner({ ctx }: { ctx: SidePanelStableContext }) {
     handlePendingTerminalSelectionConsumed,
     notes,
     hosts,
+    snippets,
     onOpenVaultNoteFromChat,
     onOpenVaultHostFromChat,
     onOpenVaultSectionFromChat,
+    onOpenVaultSnippetFromChat,
     validAIScopeTargetIds,
   } = ctx;
 
@@ -438,9 +440,11 @@ function SidePanelAiSlotInner({ ctx }: { ctx: SidePanelStableContext }) {
         onPendingTerminalSelectionConsumed={handlePendingTerminalSelectionConsumed}
         notes={notes}
         hosts={hosts}
+        snippets={snippets}
         onOpenVaultNoteFromChat={onOpenVaultNoteFromChat}
         onOpenVaultHostFromChat={onOpenVaultHostFromChat}
         onOpenVaultSectionFromChat={onOpenVaultSectionFromChat}
+        onOpenVaultSnippetFromChat={onOpenVaultSnippetFromChat}
       />
     </AISidePanelStateRoot>
   );

@@ -1,11 +1,12 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import type { Host, VaultNote } from '../../domain/models';
+import type { Host, Snippet, VaultNote } from '../../domain/models';
 import { handleVaultAgentOp, runSerializedVaultAgentRequest, type VaultAgentApiDeps } from './vaultAgentBridgeClient';
 
 type DepsSeed = {
   hosts?: Host[];
   notes?: VaultNote[];
+  snippets?: Snippet[];
   customGroups?: string[];
 };
 
@@ -14,13 +15,14 @@ function createDeps(
 ): VaultAgentApiDeps {
   let hosts = overrides.hosts ?? [];
   let notes = overrides.notes ?? [];
+  let snippets = overrides.snippets ?? [];
   let customGroups = overrides.customGroups ?? [];
 
   const base: VaultAgentApiDeps = {
     getHosts: () => hosts,
     getNotes: () => notes,
     getCustomGroups: () => customGroups,
-    snippets: [],
+    snippets,
     portForwardingRules: [],
     keys: [],
     identities: [],
@@ -35,6 +37,9 @@ function createDeps(
     updateNotes: (nextNotes) => {
       notes = nextNotes;
     },
+    updateSnippets: (nextSnippets) => {
+      snippets = nextSnippets;
+    },
     startTunnel: async () => ({ success: true }),
     stopTunnel: async () => ({ success: true }),
   };
@@ -42,6 +47,9 @@ function createDeps(
   return {
     ...base,
     ...overrides,
+    get snippets() {
+      return snippets;
+    },
     getHosts: overrides.getHosts ?? base.getHosts,
     getNotes: overrides.getNotes ?? base.getNotes,
     getCustomGroups: overrides.getCustomGroups ?? base.getCustomGroups,
@@ -52,6 +60,10 @@ function createDeps(
     updateNotes: (nextNotes) => {
       base.updateNotes(nextNotes);
       overrides.updateNotes?.(nextNotes);
+    },
+    updateSnippets: (nextSnippets) => {
+      base.updateSnippets(nextSnippets);
+      overrides.updateSnippets?.(nextSnippets);
     },
     updateCustomGroups: (groups) => {
       base.updateCustomGroups(groups);
@@ -283,6 +295,119 @@ describe('handleVaultAgentOp vault hosts', () => {
     assert.equal(updatedHosts[0]?.length, 2);
     assert.ok(updatedGroups[0]?.includes('prod/web'));
     assert.equal((result as { addedCount?: number }).addedCount, 2);
+  });
+});
+
+describe('handleVaultAgentOp snippets and scripts', () => {
+  it('snippets.create persists script metadata via updateSnippets', async () => {
+    const updated: Snippet[][] = [];
+    const deps = createDeps({
+      snippets: [],
+      updateSnippets: (nextSnippets) => {
+        updated.push(nextSnippets);
+      },
+    });
+
+    const result = await handleVaultAgentOp(
+      'snippets.create',
+      {
+        label: 'Deploy',
+        content: 'await nct.screen.sendLine("echo ok");',
+        kind: 'script',
+        trigger: 'manual',
+      },
+      deps,
+    );
+
+    assert.equal(result.ok, true);
+    assert.equal(updated.length, 1);
+    assert.equal(updated[0]?.[0]?.kind, 'script');
+    assert.equal(updated[0]?.[0]?.label, 'Deploy');
+  });
+
+  it('snippets.list returns kind and trigger fields', async () => {
+    const deps = createDeps({
+      snippets: [{
+        id: 's1',
+        label: 'Auto',
+        command: 'nct.log(1)',
+        kind: 'script',
+        trigger: 'onConnect',
+        targetsAllHosts: true,
+      }],
+    });
+
+    const result = await handleVaultAgentOp('snippets.list', {}, deps);
+    assert.equal(result.ok, true);
+    const listed = (result as { snippets?: Array<{ kind?: string; trigger?: string; targetsAllHosts?: boolean }> }).snippets;
+    assert.equal(listed?.[0]?.kind, 'script');
+    assert.equal(listed?.[0]?.trigger, 'onConnect');
+    assert.equal(listed?.[0]?.targetsAllHosts, true);
+  });
+
+  it('scripts.reference returns nct syntax reference', async () => {
+    const result = await handleVaultAgentOp('scripts.reference', {}, createDeps());
+    assert.equal(result.ok, true);
+    const reference = (result as { reference?: string }).reference ?? '';
+    assert.match(reference, /nct\.screen\.waitForPrompt/);
+  });
+
+  it('host.connectScripts.set updates host queue', async () => {
+    const host: Host = {
+      id: 'host-a',
+      label: 'A',
+      hostname: 'a.example',
+      username: 'root',
+      os: 'linux',
+      protocol: 'ssh',
+      tags: [],
+    };
+    const snippets: Snippet[] = [{
+      id: 'run',
+      label: 'Run',
+      command: 'nct.log(1)',
+      kind: 'script',
+      trigger: 'onConnect',
+      targets: ['host-a'],
+    }];
+    const deps = createDeps({ hosts: [host], snippets });
+
+    const result = await handleVaultAgentOp(
+      'host.connectScripts.set',
+      { hostId: 'host-a', scriptIds: JSON.stringify(['run']) },
+      deps,
+    );
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(deps.getHosts()[0]?.connectScriptIds, ['run']);
+  });
+
+  it('scripts.delete removes script from vault', async () => {
+    const snippets: Snippet[] = [{
+      id: 'run',
+      label: 'Run',
+      command: 'nct.log(1)',
+      kind: 'script',
+    }];
+    const updated: Snippet[][] = [];
+    const deps = createDeps({
+      snippets,
+      updateSnippets: (next) => {
+        updated.push(next);
+      },
+    });
+
+    const result = await handleVaultAgentOp('scripts.delete', { scriptId: 'run' }, deps);
+    assert.equal(result.ok, true);
+    assert.equal(updated[0]?.length, 0);
+  });
+
+  it('scripts.delete rejects text snippets', async () => {
+    const deps = createDeps({
+      snippets: [{ id: 'cmd', label: 'Cmd', command: 'ls', kind: 'snippet' }],
+    });
+    const result = await handleVaultAgentOp('scripts.delete', { scriptId: 'cmd' }, deps);
+    assert.equal(result.ok, false);
   });
 });
 

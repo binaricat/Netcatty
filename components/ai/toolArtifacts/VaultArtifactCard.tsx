@@ -57,10 +57,78 @@ function getArtifactPresentation(
       return {
         title: artifact.section === 'notes'
           ? t('ai.chat.artifact.notesSummary', { count: artifact.count })
-          : t('ai.chat.artifact.hostsSummary', { count: artifact.count }),
+          : artifact.section === 'hosts'
+            ? t('ai.chat.artifact.hostsSummary', { count: artifact.count })
+            : artifact.section === 'snippets'
+              ? t('ai.chat.artifact.snippetsSummary', { count: artifact.count })
+              : t('ai.chat.artifact.scriptsSummary', { count: artifact.count }),
         subtitle: artifact.section === 'notes'
           ? t('ai.chat.artifact.openNotes')
-          : t('ai.chat.artifact.openHosts'),
+          : artifact.section === 'hosts'
+            ? t('ai.chat.artifact.openHosts')
+            : t('ai.chat.artifact.openSnippets'),
+        clickable: true,
+      };
+    case 'vault.snippet':
+      return {
+        title: artifact.label,
+        subtitle: artifact.package || t('ai.chat.artifact.snippetFallback'),
+        clickable: true,
+      };
+    case 'vault.script':
+      return {
+        title: artifact.label,
+        subtitle: artifact.language
+          ? t('ai.chat.artifact.scriptLanguage', { language: artifact.language })
+          : artifact.package || t('ai.chat.artifact.scriptFallback'),
+        clickable: true,
+      };
+    case 'vault.snippet.deleted':
+      return {
+        title: t('ai.chat.artifact.snippetDeleted'),
+        subtitle: artifact.snippetId,
+        clickable: false,
+      };
+    case 'vault.script.deleted':
+      return {
+        title: t('ai.chat.artifact.scriptDeleted'),
+        subtitle: artifact.scriptId,
+        clickable: false,
+      };
+    case 'vault.snippet.run':
+      return {
+        title: t('ai.chat.artifact.snippetRan'),
+        subtitle: artifact.command || artifact.snippetId,
+        clickable: true,
+      };
+    case 'vault.script.run':
+      return {
+        title: artifact.status
+          ? t('ai.chat.artifact.scriptRunStatus', { status: artifact.status })
+          : t('ai.chat.artifact.scriptStarted'),
+        subtitle: artifact.runId,
+        clickable: true,
+      };
+    case 'vault.script.runs':
+      return {
+        title: t('ai.chat.artifact.scriptRunsSummary', { count: artifact.count }),
+        subtitle: t('ai.chat.artifact.openSnippets'),
+        clickable: true,
+      };
+    case 'vault.script.action':
+      return {
+        title: artifact.action === 'stop'
+          ? t('ai.chat.artifact.scriptRunStopped')
+          : artifact.action === 'pause'
+            ? t('ai.chat.artifact.scriptRunPaused')
+            : t('ai.chat.artifact.scriptRunResumed'),
+        subtitle: artifact.runId,
+        clickable: false,
+      };
+    case 'vault.script.reference':
+      return {
+        title: t('ai.chat.artifact.scriptReference'),
+        subtitle: t('ai.chat.artifact.openSnippets'),
         clickable: true,
       };
     case 'error':

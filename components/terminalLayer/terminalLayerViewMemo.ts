@@ -274,6 +274,7 @@ const SIDE_PANEL_STABLE_CTX_KEYS = [
   'onOpenVaultNoteFromChat',
   'onOpenVaultHostFromChat',
   'onOpenVaultSectionFromChat',
+  'onOpenVaultSnippetFromChat',
   't',
 ] as const;
 

@@ -15,6 +15,7 @@ export const terminalLayerAreEqual = (
   prev.onOpenVaultNoteFromChat === next.onOpenVaultNoteFromChat &&
   prev.onOpenVaultHostFromChat === next.onOpenVaultHostFromChat &&
   prev.onOpenVaultSectionFromChat === next.onOpenVaultSectionFromChat &&
+  prev.onOpenVaultSnippetFromChat === next.onOpenVaultSnippetFromChat &&
   prev.sessions === next.sessions &&
   prev.workspaces === next.workspaces &&
   prev.knownHosts === next.knownHosts &&
