@@ -265,8 +265,11 @@ const TerminalComponent: React.FC<TerminalProps> = ({
 
   // Timeout for connection - increased to 120s to allow time for keyboard-interactive (2FA) authentication
   const CONNECTION_TIMEOUT = 120000;
+  /** Allow connect-script queue to populate after connect (e.g. snippets still loading). */
+  const CONNECT_SCRIPT_GRACE_MS = 5000;
   const { t } = useI18n();
   const connectScriptsConsumedRef = useRef(false);
+  const connectEstablishedAtRef = useRef<number | null>(null);
   const pendingScriptRunIdRef = useRef<string | null>(null);
   const [saveRecordingOpen, setSaveRecordingOpen] = useState(false);
   const [recordedCode, setRecordedCode] = useState('');
@@ -1354,8 +1357,15 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   sessionStartersRef.current = sessionStarters;
 
   useEffect(() => {
+    if (status === 'connected') {
+      if (connectEstablishedAtRef.current === null) {
+        connectEstablishedAtRef.current = Date.now();
+      }
+      return;
+    }
     if (status === 'disconnected') {
       connectScriptsConsumedRef.current = false;
+      connectEstablishedAtRef.current = null;
     }
   }, [status]);
 
@@ -1386,12 +1396,12 @@ const TerminalComponent: React.FC<TerminalProps> = ({
 
     // Defer until xterm has rendered login output and the main-process output tap
     // has populated SessionOutputBuffer (avoids waitForPrompt racing an empty buffer).
-    const timer = window.setTimeout(() => {
+    const timers: number[] = [];
+    timers.push(window.setTimeout(() => {
       const runPending = Boolean(pendingOne && pendingScriptRunIdRef.current !== pendingOne.id);
       const connectQueueNow = connectScriptsConsumedRef.current
         ? []
         : resolveConnectScriptsForHost(host, snippets);
-      const shouldConsumeConnect = !connectScriptsConsumedRef.current;
 
       const scriptsToRun: Snippet[] = [];
       if (runPending && pendingOne) {
@@ -1403,8 +1413,15 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         }
       }
 
-      if (shouldConsumeConnect) {
-        connectScriptsConsumedRef.current = true;
+      if (!connectScriptsConsumedRef.current) {
+        if (connectQueueNow.length > 0) {
+          connectScriptsConsumedRef.current = true;
+        } else {
+          const establishedAt = connectEstablishedAtRef.current ?? Date.now();
+          if (Date.now() - establishedAt >= CONNECT_SCRIPT_GRACE_MS) {
+            connectScriptsConsumedRef.current = true;
+          }
+        }
       }
       if (runPending && pendingOne?.id) {
         pendingScriptRunIdRef.current = pendingOne.id;
@@ -1424,9 +1441,25 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         const message = err instanceof Error ? err.message : String(err);
         toast.error(message.includes('Observer mode') ? t('scripts.observer.blocked') : message);
       });
-    }, 400);
+    }, 400));
 
-    return () => window.clearTimeout(timer);
+    if (shouldEvaluateConnect) {
+      const establishedAt = connectEstablishedAtRef.current ?? Date.now();
+      const remainingGraceMs = CONNECT_SCRIPT_GRACE_MS - (Date.now() - establishedAt);
+      if (remainingGraceMs > 0) {
+        timers.push(window.setTimeout(() => {
+          if (!connectScriptsConsumedRef.current) {
+            connectScriptsConsumedRef.current = true;
+          }
+        }, remainingGraceMs));
+      }
+    }
+
+    return () => {
+      for (const timer of timers) {
+        window.clearTimeout(timer);
+      }
+    };
   }, [host, pendingScript, pendingScriptId, sessionId, snippets, status, t]);
 
   useEffect(() => {
