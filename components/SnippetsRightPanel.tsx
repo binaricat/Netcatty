@@ -16,7 +16,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 import { Combobox } from './ui/combobox';
 import { HistoryItem } from './SnippetsHistoryItem';
 import type { Snippet } from '@/domain/models';
-import { getRunnableHostsForSnippet, snippetHasRunTargets } from '@/domain/snippetTargets.ts';
+import { getRunnableHostsForSnippet } from '@/domain/snippetTargets.ts';
 import { STORAGE_KEY_SNIPPETS_PANEL_WIDTH } from '@/infrastructure/config/storageKeys.ts';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -82,14 +82,17 @@ export const SnippetsRightPanel: React.FC<SnippetsRightPanelProps> = ({
     targetsAllHosts: editingSnippet.targetsAllHosts || undefined,
   }), [editingSnippet, targetSelection]);
 
+  const runTargets = useMemo(
+    () => getRunnableHostsForSnippet(runnableEditingSnippet, hosts),
+    [hosts, runnableEditingSnippet],
+  );
+
   const runEditingScript = () => {
-    const runTargets = getRunnableHostsForSnippet(runnableEditingSnippet, hosts);
     if (runTargets.length === 0) return;
     onRunSnippet?.(runnableEditingSnippet, runTargets);
   };
 
-  const canRunEditingScript = Boolean(editingSnippet.command?.trim())
-    && snippetHasRunTargets(runnableEditingSnippet);
+  const canRunEditingScript = Boolean(editingSnippet.command?.trim()) && runTargets.length > 0;
 
   const handleTargetsAllHostsChange = (checked: boolean) => {
     if (checked) {
@@ -338,10 +341,10 @@ export const SnippetsRightPanel: React.FC<SnippetsRightPanelProps> = ({
           <AsidePanelFooter>
             <Button
               className="w-full"
-              onClick={snippetHasRunTargets(runnableEditingSnippet) ? handleSaveAndRun : handleSave}
+              onClick={canRunEditingScript ? handleSaveAndRun : handleSave}
               disabled={!editingSnippet.label || !editingSnippet.command}
             >
-              {snippetHasRunTargets(runnableEditingSnippet) ? t('action.run') : t('common.save')}
+              {canRunEditingScript ? t('action.run') : t('common.save')}
             </Button>
           </AsidePanelFooter>
           {isEditingScript ? (

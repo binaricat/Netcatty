@@ -5,12 +5,10 @@ import {
   appendHostConnectScript,
   getGlobalConnectScripts,
   getHostConnectScriptIds,
-  prepareSnippetForHostConnectQueue,
   removeHostConnectScript,
   reorderHostConnectScript,
 } from '@/domain/hostConnectScripts.ts';
 import { isScriptSnippet } from '@/domain/snippetScript.ts';
-import { unlinkHostFromScripts } from '@/domain/snippetTargets.ts';
 import { cn } from '@/lib/utils';
 import { getVaultDropPosition } from '@/components/vault/vaultReorderDrag';
 import {
@@ -28,7 +26,6 @@ export interface HostDetailsScriptsSectionProps {
   host: Host;
   onHostChange: (host: Host) => void;
   snippets: Snippet[];
-  onSnippetsChange: (snippets: Snippet[]) => void;
   t: (key: string, params?: Record<string, unknown>) => string;
 }
 
@@ -49,7 +46,6 @@ export const HostDetailsScriptsSection: React.FC<HostDetailsScriptsSectionProps>
   host,
   onHostChange,
   snippets,
-  onSnippetsChange,
   t,
 }) => {
   const [draggingScriptId, setDraggingScriptId] = useState<string | null>(null);
@@ -100,15 +96,11 @@ export const HostDetailsScriptsSection: React.FC<HostDetailsScriptsSectionProps>
     if (!scriptId) return;
     const snippet = scriptById(snippets, scriptId);
     if (!snippet) return;
-    onSnippetsChange(snippets.map((item) => (
-      item.id === scriptId ? prepareSnippetForHostConnectQueue(item, host.id) : item
-    )));
     onHostChange(appendHostConnectScript(host, scriptId, snippets));
   };
 
   const handleRemoveFromQueue = (scriptId: string) => {
     onHostChange(removeHostConnectScript(host, scriptId, snippets));
-    onSnippetsChange(unlinkHostFromScripts(snippets, host.id, scriptId));
   };
 
   const handleDragStart = (event: DragEvent<HTMLDivElement>, scriptId: string) => {

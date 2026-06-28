@@ -269,6 +269,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   const { t } = useI18n();
   const connectScriptsConsumedRef = useRef(false);
   const connectScriptsCompletedIdsRef = useRef(new Set<string>());
+  const connectScriptsInFlightRef = useRef(false);
   const pendingScriptRunIdRef = useRef<string | null>(null);
   const [, bumpConnectScriptRetry] = useReducer((value: number) => value + 1, 0);
   const [saveRecordingOpen, setSaveRecordingOpen] = useState(false);
@@ -1387,6 +1388,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       pendingOne && pendingScriptRunIdRef.current !== pendingOne.id,
     );
     if (!shouldEvaluateConnect && !hasPendingWork) return;
+    if (connectScriptsInFlightRef.current) return;
 
     // Defer until xterm has rendered login output and the main-process output tap
     // has populated SessionOutputBuffer (avoids waitForPrompt racing an empty buffer).
@@ -1429,6 +1431,8 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         connectQueueNow.map((item) => item.id).filter((id): id is string => Boolean(id)),
       );
 
+      connectScriptsInFlightRef.current = true;
+
       void runConnectScriptsSequential({
         scripts: scriptsToRun,
         sessionId,
@@ -1460,6 +1464,9 @@ const TerminalComponent: React.FC<TerminalProps> = ({
           const message = err instanceof Error ? err.message : String(err);
           toast.error(message.includes('Observer mode') ? t('scripts.observer.blocked') : message);
           bumpConnectScriptRetry();
+        })
+        .finally(() => {
+          connectScriptsInFlightRef.current = false;
         });
     }, 400);
 

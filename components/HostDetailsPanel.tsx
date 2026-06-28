@@ -66,7 +66,9 @@ import {
 } from "./host-details";
 import { HostNotesEditor } from "./host/HostNotesEditor";
 import { HostDetailsScriptsSection } from "./host/HostDetailsScriptsSection";
-import { ensureHostConnectScriptIds } from "@/domain/hostConnectScripts.ts";
+import { ensureHostConnectScriptIds, getHostConnectScriptIds, prepareSnippetForHostConnectQueue } from "@/domain/hostConnectScripts.ts";
+import { isScriptSnippet } from "@/domain/snippetScript.ts";
+import { unlinkHostFromScripts } from "@/domain/snippetTargets.ts";
 
 type CredentialType = "sshid" | "key" | "certificate" | "localKeyFile" | null;
 type SubPanel =
@@ -493,6 +495,38 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
     if ((cleaned.protocol && cleaned.protocol !== "ssh") || cleaned.moshEnabled || cleaned.etEnabled) {
       delete cleaned.x11Forwarding;
     }
+    if (onSnippetsChange && initialData) {
+      const hostId = cleaned.id;
+      const savedQueueIds = getHostConnectScriptIds(initialData, snippets);
+      const finalQueueIds = getHostConnectScriptIds(cleaned, snippets);
+      const savedSet = new Set(savedQueueIds);
+      const finalSet = new Set(finalQueueIds);
+      let nextSnippets = snippets;
+      let changed = false;
+
+      for (const scriptId of finalQueueIds) {
+        if (!savedSet.has(scriptId)) {
+          nextSnippets = nextSnippets.map((item) => (
+            item.id === scriptId && isScriptSnippet(item)
+              ? prepareSnippetForHostConnectQueue(item, hostId)
+              : item
+          ));
+          changed = true;
+        }
+      }
+      for (const scriptId of savedQueueIds) {
+        if (!finalSet.has(scriptId)) {
+          const unlinked = unlinkHostFromScripts(nextSnippets, hostId, scriptId);
+          if (unlinked !== nextSnippets) {
+            nextSnippets = unlinked;
+            changed = true;
+          }
+        }
+      }
+      if (changed) {
+        onSnippetsChange(nextSnippets);
+      }
+    }
     onSave(cleaned);
   };
 
@@ -862,7 +896,6 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
             host={form}
             onHostChange={setForm}
             snippets={snippets}
-            onSnippetsChange={onSnippetsChange}
             t={t}
           />
         ) : null}
