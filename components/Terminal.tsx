@@ -271,6 +271,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   const connectScriptsCompletedIdsRef = useRef(new Set<string>());
   const connectScriptsInFlightRef = useRef(false);
   const pendingScriptRunIdRef = useRef<string | null>(null);
+  const pendingScriptHandledRef = useRef<Snippet | null>(null);
   const [connectScriptRetryTick, setConnectScriptRetryTick] = useState(0);
   const [saveRecordingOpen, setSaveRecordingOpen] = useState(false);
   const [recordedCode, setRecordedCode] = useState('');
@@ -1369,34 +1370,40 @@ const TerminalComponent: React.FC<TerminalProps> = ({
 
   useEffect(() => {
     pendingScriptRunIdRef.current = null;
+    pendingScriptHandledRef.current = null;
   }, [pendingScript?.id, pendingScriptId]);
+
+  const isPendingScriptAlreadyHandled = useCallback((snippet: Snippet) => {
+    if (snippet.id) {
+      return pendingScriptRunIdRef.current === snippet.id;
+    }
+    return pendingScriptHandledRef.current === snippet;
+  }, []);
 
   useEffect(() => {
     if (status !== 'connected') return;
 
     let pendingOne: Snippet | undefined;
     if (pendingScript && isScriptSnippet(pendingScript)) {
-      if (pendingScriptRunIdRef.current !== pendingScript.id) {
+      if (!isPendingScriptAlreadyHandled(pendingScript)) {
         pendingOne = pendingScript;
       }
     } else if (pendingScriptId) {
       const script = snippets.find((item) => item.id === pendingScriptId && isScriptSnippet(item));
-      if (script && pendingScriptRunIdRef.current !== script.id) {
+      if (script && !isPendingScriptAlreadyHandled(script)) {
         pendingOne = script;
       }
     }
 
     const shouldEvaluateConnect = !connectScriptsConsumedRef.current;
-    const hasPendingWork = Boolean(
-      pendingOne && pendingScriptRunIdRef.current !== pendingOne.id,
-    );
+    const hasPendingWork = Boolean(pendingOne);
     if (!shouldEvaluateConnect && !hasPendingWork) return;
     if (connectScriptsInFlightRef.current) return;
 
     // Defer until xterm has rendered login output and the main-process output tap
     // has populated SessionOutputBuffer (avoids waitForPrompt racing an empty buffer).
     const timer = window.setTimeout(() => {
-      const runPending = Boolean(pendingOne && pendingScriptRunIdRef.current !== pendingOne.id);
+      const runPending = Boolean(pendingOne);
       const connectQueueNow = connectScriptsConsumedRef.current
         ? []
         : resolveConnectScriptsForHost(host, snippets).filter(
@@ -1429,7 +1436,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         return;
       }
 
-      const pendingScriptIdToMark = runPending ? pendingOne?.id : undefined;
+      const pendingScriptToMark = runPending ? pendingOne : undefined;
       const connectIdsInBatch = new Set(
         connectQueueNow.map((item) => item.id).filter((id): id is string => Boolean(id)),
       );
@@ -1448,8 +1455,12 @@ const TerminalComponent: React.FC<TerminalProps> = ({
           if (snippet.id && connectIdsInBatch.has(snippet.id)) {
             connectScriptsCompletedIdsRef.current.add(snippet.id);
           }
-          if (snippet.id && snippet.id === pendingScriptIdToMark) {
-            pendingScriptRunIdRef.current = snippet.id;
+          if (pendingScriptToMark && snippet === pendingScriptToMark) {
+            if (snippet.id) {
+              pendingScriptRunIdRef.current = snippet.id;
+            } else {
+              pendingScriptHandledRef.current = snippet;
+            }
           }
         },
       })
@@ -1474,7 +1485,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     }, 400);
 
     return () => window.clearTimeout(timer);
-  }, [host, pendingScript, pendingScriptId, sessionId, snippets, status, t, connectScriptRetryTick]);
+  }, [host, isPendingScriptAlreadyHandled, pendingScript, pendingScriptId, sessionId, snippets, status, t, connectScriptRetryTick]);
 
   useEffect(() => {
     return registerScreenSnapshotProvider(sessionId, () => {

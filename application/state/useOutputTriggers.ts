@@ -16,6 +16,10 @@ function isSessionScriptRunActive(sessionId: string): boolean {
   return Boolean(getActiveScriptRunForSession(sessionId));
 }
 
+function outputTriggerKey(sessionId: string, snippetId: string): string {
+  return `snippet:${sessionId}:${snippetId}`;
+}
+
 export function useOutputTriggers({
   sessionId,
   hostId,
@@ -23,7 +27,7 @@ export function useOutputTriggers({
   onRunScript,
 }: OutputTriggerContext) {
   const bufferRef = useRef('');
-  const firedRef = useRef(new Set<string>());
+  const lastFiredBufferLengthRef = useRef(new Map<string, number>());
   const hadActiveScriptRef = useRef(false);
 
   const scanBuffer = useCallback(() => {
@@ -32,18 +36,21 @@ export function useOutputTriggers({
     }
 
     const text = bufferRef.current;
+    const bufferLength = bufferRef.current.length;
 
     for (const snippet of snippets) {
       if (!isScriptSnippet(snippet) || snippet.trigger !== 'onOutput' || !snippet.triggerPattern || !snippet.id) {
         continue;
       }
       if (!snippetAppliesToHost(snippet, hostId)) continue;
-      const key = `snippet:${sessionId}:${snippet.id}`;
-      if (firedRef.current.has(key)) continue;
+      const key = outputTriggerKey(sessionId, snippet.id);
+      if (lastFiredBufferLengthRef.current.get(key) === bufferLength) {
+        continue;
+      }
       try {
         const regex = new RegExp(snippet.triggerPattern);
         if (regex.test(text)) {
-          firedRef.current.add(key);
+          lastFiredBufferLengthRef.current.set(key, bufferLength);
           onRunScript(snippet, sessionId);
         }
       } catch {
@@ -58,7 +65,7 @@ export function useOutputTriggers({
   }, [scanBuffer]);
 
   useEffect(() => {
-    firedRef.current.clear();
+    lastFiredBufferLengthRef.current = new Map();
     bufferRef.current = '';
     hadActiveScriptRef.current = isSessionScriptRunActive(sessionId);
   }, [sessionId, hostId]);
