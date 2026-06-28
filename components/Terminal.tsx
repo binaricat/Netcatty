@@ -267,6 +267,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   const CONNECTION_TIMEOUT = 120000;
   const { t } = useI18n();
   const scriptRanRef = useRef(false);
+  const pendingScriptRunIdRef = useRef<string | null>(null);
   const [saveRecordingOpen, setSaveRecordingOpen] = useState(false);
   const [recordedCode, setRecordedCode] = useState('');
   const recorder = useScriptRecorder(sessionId);
@@ -1359,25 +1360,48 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   }, [status]);
 
   useEffect(() => {
-    if (status !== 'connected' || scriptRanRef.current) return;
+    pendingScriptRunIdRef.current = null;
+  }, [pendingScript?.id, pendingScriptId]);
 
-    const queue = resolveConnectScriptsForHost(host, snippets);
-    let scripts = queue;
+  useEffect(() => {
+    if (status !== 'connected') return;
+
+    let pendingOne: Snippet | undefined;
     if (pendingScript && isScriptSnippet(pendingScript)) {
-      scripts = [pendingScript, ...queue.filter((item) => item.id !== pendingScript.id)];
+      if (pendingScriptRunIdRef.current !== pendingScript.id) {
+        pendingOne = pendingScript;
+      }
     } else if (pendingScriptId) {
       const script = snippets.find((item) => item.id === pendingScriptId && isScriptSnippet(item));
-      if (script) {
-        scripts = [script, ...queue.filter((item) => item.id !== script.id)];
+      if (script && pendingScriptRunIdRef.current !== script.id) {
+        pendingOne = script;
       }
     }
+
+    const connectQueue = scriptRanRef.current
+      ? []
+      : resolveConnectScriptsForHost(host, snippets);
+
+    const scripts = pendingOne
+      ? [pendingOne, ...connectQueue.filter((item) => item.id !== pendingOne!.id)]
+      : connectQueue;
+
     if (scripts.length === 0) return;
 
     // Defer until xterm has rendered login output and the main-process output tap
     // has populated SessionOutputBuffer (avoids waitForPrompt racing an empty buffer).
     const timer = window.setTimeout(() => {
-      if (scriptRanRef.current) return;
-      scriptRanRef.current = true;
+      const runConnect = connectQueue.length > 0 && !scriptRanRef.current;
+      const runPending = Boolean(pendingOne && pendingScriptRunIdRef.current !== pendingOne.id);
+      if (!runConnect && !runPending) return;
+
+      if (runConnect) {
+        scriptRanRef.current = true;
+      }
+      if (runPending && pendingOne?.id) {
+        pendingScriptRunIdRef.current = pendingOne.id;
+      }
+
       void runConnectScriptsSequential({
         scripts,
         sessionId,

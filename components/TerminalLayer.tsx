@@ -1313,13 +1313,33 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     mode: 'sequential' | 'parallel' = 'parallel',
   ) => {
     const workspace = activeWorkspaceRef.current;
-    if (!workspace) return;
+    if (!workspace) {
+      const sessionId = getActiveTerminalSessionId();
+      if (!sessionId) {
+        toast.error(t('scripts.recording.noSession'));
+        return;
+      }
+      try {
+        await runAutomationScript({ snippet, sessionId });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        toast.error(message.includes('Observer mode') ? t('scripts.observer.blocked') : message);
+      }
+      return;
+    }
     const workspaceSessions = sessionsRef.current.filter((session) => session.workspaceId === workspace.id);
     const sessionIds = workspaceSessions
       .filter((session) => session.status === 'connected')
       .map((session) => session.id);
     const skippedConnecting = workspaceSessions.filter((session) => session.status === 'connecting').length;
-    if (sessionIds.length === 0) return;
+    if (sessionIds.length === 0) {
+      if (skippedConnecting > 0) {
+        toast.info(t('scripts.actions.skippedConnectingSessions', { count: skippedConnecting }));
+      } else {
+        toast.error(t('scripts.recording.noSession'));
+      }
+      return;
+    }
     if (skippedConnecting > 0) {
       toast.info(t('scripts.actions.skippedConnectingSessions', { count: skippedConnecting }));
     }
@@ -1334,7 +1354,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       const message = err instanceof Error ? err.message : String(err);
       toast.error(message.includes('Observer mode') ? t('scripts.observer.blocked') : message);
     }
-  }, [t]);
+  }, [getActiveTerminalSessionId, t]);
 
   useEffect(() => {
     const handler = (event: Event) => {
