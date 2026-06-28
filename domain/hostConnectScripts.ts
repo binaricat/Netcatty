@@ -186,7 +186,7 @@ export function syncHostsForSnippetTargetChange(
     return hosts;
   }
   if (snippet.targetsAllHosts) {
-    return hosts;
+    return hosts.map((host) => removeHostConnectScript(host, snippet.id!, snippets));
   }
 
   const prev = new Set(prevTargetIds ?? []);

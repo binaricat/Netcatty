@@ -1360,7 +1360,6 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     if (status === 'disconnected') {
       connectScriptsConsumedRef.current = false;
       connectScriptsCompletedIdsRef.current = new Set();
-      pendingScriptRunIdRef.current = null;
     }
   }, [status]);
 
@@ -1400,13 +1399,11 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         );
 
       const scriptsToRun: Snippet[] = [];
-      if (runPending && pendingOne) {
-        scriptsToRun.push(pendingOne);
-      }
       for (const item of connectQueueNow) {
-        if (!scriptsToRun.some((entry) => entry.id === item.id)) {
-          scriptsToRun.push(item);
-        }
+        scriptsToRun.push(item);
+      }
+      if (runPending && pendingOne && !scriptsToRun.some((entry) => entry.id === pendingOne.id)) {
+        scriptsToRun.push(pendingOne);
       }
 
       const resolvedConnectScripts = resolveConnectScriptsForHost(host, snippets);
