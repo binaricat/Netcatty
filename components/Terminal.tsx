@@ -1429,6 +1429,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
           !connectScriptsConsumedRef.current
           && allConnectScriptsDone
           && isVaultInitialized()
+          && snippets.length > 0
           && !hasUnresolvedConnectScriptBindings(host, snippets)
         ) {
           connectScriptsConsumedRef.current = true;

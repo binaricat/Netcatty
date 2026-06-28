@@ -39,6 +39,9 @@ export function useOutputTriggers({
     const bufferLength = bufferRef.current.length;
 
     for (const snippet of snippets) {
+      if (isSessionScriptRunActive(sessionId)) {
+        return;
+      }
       if (!isScriptSnippet(snippet) || snippet.trigger !== 'onOutput' || !snippet.triggerPattern || !snippet.id) {
         continue;
       }
@@ -57,6 +60,7 @@ export function useOutputTriggers({
             .catch(() => {
               // Keep the trigger armed so a failed start can retry on the same output.
             });
+          return;
         }
       } catch {
         // ignore invalid regex
