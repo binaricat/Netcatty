@@ -4,7 +4,7 @@ import { SerializeAddon } from "@xterm/addon-serialize";
 import { SearchAddon } from "@xterm/addon-search";
 import "@xterm/xterm/css/xterm.css";
 import { Activity, Cpu, Clock3, Copy, HardDrive, Maximize2, MemoryStick, Radio, ArrowDownToLine, ArrowUpFromLine, Sparkles, SquareArrowOutUpRight } from "lucide-react";
-import React, { memo, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
+import React, { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useI18n } from "../application/i18n/I18nProvider";
 import { detectLocalOs } from "../lib/localShell";
 import { logger } from "../lib/logger";
@@ -271,7 +271,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   const connectScriptsCompletedIdsRef = useRef(new Set<string>());
   const connectScriptsInFlightRef = useRef(false);
   const pendingScriptRunIdRef = useRef<string | null>(null);
-  const [, bumpConnectScriptRetry] = useReducer((value: number) => value + 1, 0);
+  const [connectScriptRetryTick, setConnectScriptRetryTick] = useState(0);
   const [saveRecordingOpen, setSaveRecordingOpen] = useState(false);
   const [recordedCode, setRecordedCode] = useState('');
   const recorder = useScriptRecorder(sessionId);
@@ -313,7 +313,10 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     hostId: host.id,
     snippets,
     onRunScript: (snippet, sid) => {
-      void runAutomationScript({ snippet, sessionId: sid });
+      void runAutomationScript({ snippet, sessionId: sid }).catch((err) => {
+        const message = err instanceof Error ? err.message : String(err);
+        toast.error(message.includes('Observer mode') ? t('scripts.observer.blocked') : message);
+      });
     },
   });
   const availableFonts = useAvailableFonts();
@@ -1463,7 +1466,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         .catch((err) => {
           const message = err instanceof Error ? err.message : String(err);
           toast.error(message.includes('Observer mode') ? t('scripts.observer.blocked') : message);
-          bumpConnectScriptRetry();
+          setConnectScriptRetryTick((tick) => tick + 1);
         })
         .finally(() => {
           connectScriptsInFlightRef.current = false;
@@ -1471,7 +1474,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     }, 400);
 
     return () => window.clearTimeout(timer);
-  }, [host, pendingScript, pendingScriptId, sessionId, snippets, status, t, bumpConnectScriptRetry]);
+  }, [host, pendingScript, pendingScriptId, sessionId, snippets, status, t, connectScriptRetryTick]);
 
   useEffect(() => {
     return registerScreenSnapshotProvider(sessionId, () => {

@@ -6,7 +6,6 @@ import {
 } from '@/domain/snippetScript.ts';
 import {
   getRunnableHostsForSnippet,
-  snippetHasRunTargets,
 } from '@/domain/snippetTargets.ts';
 import {
   removeHostConnectScript,
@@ -136,8 +135,12 @@ export const QuickScriptEditorDialog: React.FC<QuickScriptEditorDialogProps> = (
     targetsAllHosts: editingSnippet.targetsAllHosts || undefined,
   }), [editingSnippet, targetSelection]);
 
-  const canRun = Boolean(editingSnippet.command?.trim())
-    && snippetHasRunTargets(runnableSnippet);
+  const runTargets = useMemo(
+    () => getRunnableHostsForSnippet(runnableSnippet, hosts),
+    [hosts, runnableSnippet],
+  );
+
+  const canRun = Boolean(editingSnippet.command?.trim()) && runTargets.length > 0;
 
   const syncHostsAfterSave = useCallback((savedSnippet: Snippet, nextSnippets: Snippet[]) => {
     if (!onUpdateHosts || !savedSnippet.id) return;
@@ -205,17 +208,20 @@ export const QuickScriptEditorDialog: React.FC<QuickScriptEditorDialogProps> = (
   const handleRun = useCallback(() => {
     const savedSnippet = persistSnippet();
     if (!savedSnippet) return;
-    const runTargets = getRunnableHostsForSnippet(savedSnippet, hosts);
-    if (runTargets.length === 0) return;
+    const targets = getRunnableHostsForSnippet(savedSnippet, hosts);
+    if (targets.length === 0) {
+      toast.error(t('scripts.actions.noSession'));
+      return;
+    }
     if (onRunSnippet) {
-      onRunSnippet(savedSnippet, runTargets);
+      onRunSnippet(savedSnippet, targets);
     } else {
       window.dispatchEvent(new CustomEvent('netcatty:scripts:run-now', {
         detail: { snippet: savedSnippet },
       }));
     }
     setOpen(false);
-  }, [hosts, onRunSnippet, persistSnippet]);
+  }, [hosts, onRunSnippet, persistSnippet, t]);
 
   const handleSelectHost = useCallback((host: Host) => {
     setTargetSelection((prev) => (
