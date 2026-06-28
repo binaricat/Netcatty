@@ -5,10 +5,11 @@
  * Colors are derived from the active terminal theme for visual consistency.
  */
 
-import React, { useEffect, useRef, useState, memo } from "react";
+import React, { useEffect, useLayoutEffect, useRef, useState, memo } from "react";
 import { Folder, File, Link } from "lucide-react";
 import type { CompletionSuggestion, SuggestionSource } from "./completionEngine";
 import {
+  clampAutocompletePopupGeometry,
   computeAutocompletePopupPlacement,
   resolveAutocompleteClampViewport,
 } from "./terminalAutocompleteLayout";
@@ -139,6 +140,7 @@ const AutocompletePopup: React.FC<AutocompletePopupProps> = ({
   const listRef = useRef<HTMLDivElement>(null);
   const selectedRef = useRef<HTMLDivElement>(null);
   const [hoveredIndex, setHoveredIndex] = useState(-1);
+  const [measuredSize, setMeasuredSize] = useState<{ width: number; height: number } | null>(null);
 
   useEffect(() => {
     if (selectedRef.current && listRef.current) {
@@ -177,6 +179,56 @@ const AutocompletePopup: React.FC<AutocompletePopupProps> = ({
       window.removeEventListener("resize", requestReposition);
     };
   }, [containerRef, onRequestReposition, visible]);
+
+  useEffect(() => {
+    if (!visible || !onRequestReposition || suggestions.length === 0) return;
+
+    let firstFrame = 0;
+    let secondFrame = 0;
+    firstFrame = requestAnimationFrame(() => {
+      onRequestReposition();
+      secondFrame = requestAnimationFrame(onRequestReposition);
+    });
+
+    return () => {
+      if (firstFrame) cancelAnimationFrame(firstFrame);
+      if (secondFrame) cancelAnimationFrame(secondFrame);
+    };
+  }, [onRequestReposition, subDirPanels.length, suggestions, visible]);
+
+  useLayoutEffect(() => {
+    if (!visible || suggestions.length === 0) {
+      setMeasuredSize((current) => (current === null ? current : null));
+      return;
+    }
+
+    let frameId = 0;
+    const measure = () => {
+      const rect = wrapperRef.current?.getBoundingClientRect();
+      if (!rect || rect.width <= 0 || rect.height <= 0) return;
+      setMeasuredSize((current) => {
+        if (
+          current &&
+          Math.abs(current.width - rect.width) < 0.5 &&
+          Math.abs(current.height - rect.height) < 0.5
+        ) {
+          return current;
+        }
+        return { width: rect.width, height: rect.height };
+      });
+    };
+
+    measure();
+    const wrapper = wrapperRef.current;
+    const observer = wrapper ? new ResizeObserver(measure) : null;
+    observer?.observe(wrapper);
+    frameId = requestAnimationFrame(measure);
+
+    return () => {
+      if (frameId) cancelAnimationFrame(frameId);
+      observer?.disconnect();
+    };
+  }, [hoveredIndex, selectedIndex, subDirPanels, suggestions, visible]);
 
   // Dismiss popup when clicking outside
   useEffect(() => {
@@ -270,6 +322,16 @@ const AutocompletePopup: React.FC<AutocompletePopupProps> = ({
   const effectiveMaxHeight = placement.maxHeight;
   const anchoredTop = placement.top;
   const clampedLeft = placement.left;
+  const finalGeometry = measuredSize
+    ? clampAutocompletePopupGeometry({
+        left: clampedLeft,
+        top: anchoredTop,
+        width: measuredSize.width,
+        height: measuredSize.height,
+        clampViewport,
+        viewportPadding,
+      })
+    : { left: clampedLeft, top: anchoredTop };
 
   const sharedBoxStyle = {
     // border-box so each panel's maxWidth is its true outer width (padding +
@@ -292,8 +354,8 @@ const AutocompletePopup: React.FC<AutocompletePopupProps> = ({
       ref={wrapperRef}
       style={{
         position: "fixed",
-        left: `${clampedLeft}px`,
-        top: `${anchoredTop}px`,
+        left: `${finalGeometry.left}px`,
+        top: `${finalGeometry.top}px`,
         zIndex: 10000,
         display: "flex",
         alignItems: renderUpward ? "flex-end" : "flex-start",

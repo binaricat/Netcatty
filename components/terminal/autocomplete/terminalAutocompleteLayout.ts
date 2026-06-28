@@ -187,6 +187,48 @@ export interface PopupPlacement {
   maxHeight: number;
 }
 
+export interface PopupGeometryClampInput {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+  clampViewport: PopupClampViewport;
+  viewportPadding: number;
+}
+
+export interface PopupGeometry {
+  top: number;
+  left: number;
+}
+
+function clampCoordinate(value: number, min: number, max: number): number {
+  if (max <= min) return min;
+  return Math.max(min, Math.min(value, max));
+}
+
+/**
+ * Final guardrail using the rendered popup's actual DOM size. The placement
+ * pass uses estimated list/detail/panel sizes so it can decide before render;
+ * this pass prevents any estimate mismatch or delayed xterm cursor refresh
+ * from letting the fixed-position portal escape the terminal/app bounds.
+ */
+export function clampAutocompletePopupGeometry(
+  input: PopupGeometryClampInput,
+): PopupGeometry {
+  const { left, top, width, height, clampViewport, viewportPadding } = input;
+  const safeWidth = Number.isFinite(width) ? Math.max(0, width) : 0;
+  const safeHeight = Number.isFinite(height) ? Math.max(0, height) : 0;
+  const minLeft = clampViewport.left + viewportPadding;
+  const minTop = clampViewport.top + viewportPadding;
+  const maxLeft = clampViewport.left + clampViewport.width - viewportPadding - safeWidth;
+  const maxTop = clampViewport.top + clampViewport.height - viewportPadding - safeHeight;
+
+  return {
+    left: clampCoordinate(left, minLeft, Math.max(minLeft, maxLeft)),
+    top: clampCoordinate(top, minTop, Math.max(minTop, maxTop)),
+  };
+}
+
 /**
  * Decide where to place the autocomplete popup so it never spills past the
  * viewport edges. Pure and deterministic so the boundary math is unit-tested

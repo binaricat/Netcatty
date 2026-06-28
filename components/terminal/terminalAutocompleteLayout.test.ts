@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  clampAutocompletePopupGeometry,
   computeAutocompletePopupPlacement,
   resolveAutocompleteAnchorInViewport,
   resolveAutocompleteClampViewport,
@@ -164,6 +165,38 @@ test("clamps within a split terminal pane instead of the full window", () => {
   });
   assert.ok(p.left >= pane.left + baseInput.viewportPadding);
   assert.ok(p.left + 400 <= pane.left + pane.width - baseInput.viewportPadding + 0.001);
+});
+
+test("final popup geometry clamps the actual rendered width", () => {
+  const pane = { left: 700, top: 80, width: 680, height: 520 };
+  const geometry = clampAutocompletePopupGeometry({
+    left: 970,
+    top: 180,
+    width: 520,
+    height: 220,
+    clampViewport: pane,
+    viewportPadding: 8,
+  });
+
+  assert.equal(geometry.left, 852);
+  assert.ok(geometry.left >= pane.left + 8);
+  assert.ok(geometry.left + 520 <= pane.left + pane.width - 8);
+});
+
+test("final popup geometry clamps the actual rendered height", () => {
+  const pane = { left: 700, top: 80, width: 680, height: 520 };
+  const geometry = clampAutocompletePopupGeometry({
+    left: 760,
+    top: 470,
+    width: 360,
+    height: 180,
+    clampViewport: pane,
+    viewportPadding: 8,
+  });
+
+  assert.equal(geometry.top, 412);
+  assert.ok(geometry.top >= pane.top + 8);
+  assert.ok(geometry.top + 180 <= pane.top + pane.height - 8);
 });
 
 test("resolveAutocompleteAnchorInViewport uses the xterm screen rect in split panes", () => {
