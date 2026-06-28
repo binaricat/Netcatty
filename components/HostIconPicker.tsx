@@ -10,8 +10,10 @@ import {
   isHostIconId,
   resolveHostIconDefaultColorHex,
 } from "../domain/hostIcon";
+import type { Host } from "../domain/models";
 import type { HostIconColorId, HostIconColorMode, HostIconId, HostIconMode } from "../domain/models";
 import { cn } from "../lib/utils";
+import { DistroAvatar } from "./DistroAvatar";
 import { renderHostIconGlyph } from "./hostIconRenderer";
 import { Input } from "./ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
@@ -24,6 +26,7 @@ type DistroOption = {
 };
 
 type HostIconPickerProps = {
+  previewHost?: Host;
   distroMode?: "auto" | "manual";
   manualDistro?: string;
   effectiveDistro?: string;
@@ -94,6 +97,7 @@ const colorHexForId = (colorId?: HostIconColorId) =>
   HOST_ICON_COLORS.find((color) => color.id === colorId)?.hex || HOST_ICON_COLORS[0].hex;
 
 export const HostIconPicker: React.FC<HostIconPickerProps> = ({
+  previewHost,
   distroMode,
   manualDistro,
   effectiveDistro,
@@ -205,6 +209,23 @@ export const HostIconPicker: React.FC<HostIconPickerProps> = ({
 
   return (
     <div className="space-y-4">
+      {previewHost ? (
+        <div
+          className="flex items-center justify-center rounded-xl border border-border/60 bg-secondary/20 py-5"
+          aria-label={t("hostDetails.icon.preview")}
+        >
+          <DistroAvatar
+            host={previewHost}
+            fallback={
+              previewHost.label?.slice(0, 2).toUpperCase()
+              || previewHost.hostname?.slice(0, 2).toUpperCase()
+              || "H"
+            }
+            size="lg"
+          />
+        </div>
+      ) : null}
+
       <div className="grid gap-2 md:grid-cols-2">
         <div className="space-y-1">
           <span className="text-xs text-muted-foreground">{t("hostDetails.icon.source")}</span>

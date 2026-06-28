@@ -166,6 +166,11 @@ test("runtime routes terminal data over output messages", async () => {
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.deepEqual(parentPort.messages[0], {
+    kind: "output-tap",
+    sessionId: "s1",
+    data: "hello",
+  });
+  assert.deepEqual(parentPort.messages[1], {
     kind: "output",
     sessionId: "s1",
     data: "hello",
@@ -209,6 +214,11 @@ test("runtime routes terminal data over a transferred output port", async () => 
     { sessionId: "s1", data: "hello" },
   ]);
   assert.equal(parentPort.messages[0].kind, "output-port-ready");
+  assert.deepEqual(parentPort.messages[1], {
+    kind: "output-tap",
+    sessionId: "s1",
+    data: "hello",
+  });
   assert.equal(parentPort.messages.some((message) => message.kind === "output"), false);
 });
 
@@ -228,6 +238,11 @@ test("runtime.createSender uses the transferred output port", () => {
   runtime.createSender(7).send("netcatty:data", { sessionId: "s1", data: "hello" });
 
   assert.deepEqual(outputPort.messages, [{ sessionId: "s1", data: "hello" }]);
+  assert.deepEqual(parentPort.messages.at(-1), {
+    kind: "output-tap",
+    sessionId: "s1",
+    data: "hello",
+  });
 });
 
 test("runtime forwards non-output renderer events to the parent", async () => {

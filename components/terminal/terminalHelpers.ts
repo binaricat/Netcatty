@@ -137,6 +137,8 @@ export interface TerminalProps {
   restoreTerminalCwd?: boolean;
   startupCommand?: string;
   noAutoRun?: boolean;
+  pendingScriptId?: string;
+  pendingScript?: Snippet;
   // When this tab was created from a connected SSH session, the id of the
   // source session whose authenticated connection should be reused for a new
   // shell channel — skipping a second MFA prompt (issue #1204).

@@ -41,6 +41,8 @@ export const terminalPropsAreEqual = (
   && prev.sessionDisplayName === next.sessionDisplayName
   && prev.startupCommand === next.startupCommand
   && prev.noAutoRun === next.noAutoRun
+  && prev.pendingScriptId === next.pendingScriptId
+  && prev.pendingScript === next.pendingScript
   && prev.reuseConnectionFromSessionId === next.reuseConnectionFromSessionId
   && prev.serialConfig === next.serialConfig
   && prev.hotkeyScheme === next.hotkeyScheme

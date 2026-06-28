@@ -1,4 +1,4 @@
-import { CheckSquare, ChevronDown, Clock, Copy, Download, Edit2, FileCode, FolderPlus, LayoutGrid, List as ListIcon, Package, Play, Plus, Search, Square, Trash2, Upload, X } from 'lucide-react';
+import { CheckSquare, ChevronDown, Clock, Copy, Download, Edit2, FileCode, FolderPlus, LayoutGrid, List as ListIcon, Package, Play, Plus, Search, Square, Trash2, Upload, X, Zap } from 'lucide-react';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useI18n } from '../application/i18n/I18nProvider';
 import { useStoredViewMode } from '../application/state/useStoredViewMode';
@@ -14,6 +14,9 @@ import {
   type SnippetExportPayload,
   type SnippetImportConflictAction,
 } from '../domain/snippetTransfer';
+import { getRunnableHostsForSnippet, snippetHasRunTargets } from '../domain/snippetTargets.ts';
+import { removeHostConnectScript, syncHostsForSnippetTargetChange } from '../domain/hostConnectScripts.ts';
+import { DEFAULT_SCRIPT_TEMPLATE, isScriptSnippet } from '../domain/snippetScript.ts';
 import { reorderVaultItems, reorderVaultStrings, sortByVaultOrder } from '../domain/vaultOrder';
 import { Button } from './ui/button';
 import { ComboboxOption } from './ui/combobox';
@@ -34,6 +37,7 @@ import {
 } from './vault/VaultPageHeader';
 import {
   VaultEntityIcon,
+  vaultAutomationScriptIconClass,
   vaultPrimaryIconClass,
   vaultSnippetIconClass,
 } from './vault/VaultEntityIcon';
@@ -64,6 +68,7 @@ interface SnippetsManagerProps {
   proxyProfiles?: ProxyProfile[];
   managedSources?: ManagedSource[];
   onSaveHost?: (host: Host) => void;
+  onUpdateHosts?: (hosts: Host[]) => void;
   onCreateGroup?: (groupPath: string) => void;
 }
 
@@ -448,6 +453,7 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
   proxyProfiles = [],
   managedSources = [],
   onSaveHost,
+  onUpdateHosts,
   onCreateGroup,
 }) => {
   const { t } = useI18n();
@@ -663,38 +669,110 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
     };
   }, [isRecordingShortkey, isMac, validateShortkey]);
 
-  const handleEdit = (snippet?: Snippet) => {
+  const handleEdit = useCallback((snippet?: Snippet, asScript = false) => {
     if (snippet) {
       setEditingSnippet(snippet);
-      setTargetSelection(snippet.targets || []);
+      setTargetSelection(snippet.targetsAllHosts ? [] : (snippet.targets || []));
     } else {
-      setEditingSnippet({
+      setEditingSnippet(asScript ? {
+        label: '',
+        command: DEFAULT_SCRIPT_TEMPLATE,
+        package: selectedPackage || '',
+        targets: [],
+        kind: 'script',
+        language: 'javascript',
+        trigger: 'manual',
+      } : {
         label: '',
         command: '',
         package: selectedPackage || '',
-        targets: []
+        targets: [],
       });
       setTargetSelection([]);
     }
     setRightPanelMode('edit-snippet');
-  };
+  }, [selectedPackage]);
 
-  const handleSubmit = () => {
-    if (editingSnippet.label && editingSnippet.command) {
-      onSave({
-        id: editingSnippet.id || crypto.randomUUID(),
-        label: editingSnippet.label,
-        command: editingSnippet.command,
-        tags: editingSnippet.tags || [],
-        package: editingSnippet.package || '',
-        targets: targetSelection,
-        shortkey: editingSnippet.shortkey,
-        noAutoRun: editingSnippet.noAutoRun,
-        order: editingSnippet.order,
-      });
-      setRightPanelMode('none');
+
+  const buildSavedSnippet = useCallback((): Snippet | null => {
+    if (!editingSnippet.label || !editingSnippet.command) return null;
+    return {
+      id: editingSnippet.id || crypto.randomUUID(),
+      label: editingSnippet.label,
+      command: editingSnippet.command,
+      tags: editingSnippet.tags || [],
+      package: editingSnippet.package || '',
+      targets: editingSnippet.targetsAllHosts ? [] : targetSelection,
+      targetsAllHosts: editingSnippet.targetsAllHosts || undefined,
+      shortkey: editingSnippet.shortkey,
+      noAutoRun: editingSnippet.noAutoRun,
+      order: editingSnippet.order,
+      kind: editingSnippet.kind,
+      language: editingSnippet.language,
+      description: editingSnippet.description,
+      trigger: editingSnippet.trigger,
+      triggerPattern: editingSnippet.triggerPattern,
+    };
+  }, [editingSnippet, targetSelection]);
+
+  const syncHostsAfterSnippetSave = useCallback((
+    savedSnippet: Snippet,
+    nextSnippets: Snippet[],
+  ) => {
+    if (!onUpdateHosts || !savedSnippet.id) return;
+    const original = snippets.find((item) => item.id === savedSnippet.id);
+    const prevTargetIds = original?.targetsAllHosts ? [] : (original?.targets ?? []);
+    let nextHosts = hosts;
+
+    if (isScriptSnippet(savedSnippet) && savedSnippet.trigger === 'onConnect') {
+      nextHosts = syncHostsForSnippetTargetChange(hosts, savedSnippet, prevTargetIds, nextSnippets);
+    } else if (original && isScriptSnippet(original) && original.trigger === 'onConnect') {
+      nextHosts = hosts.map((item) => removeHostConnectScript(item, savedSnippet.id!, nextSnippets));
     }
-  };
+
+    const changed = nextHosts.length !== hosts.length
+      || nextHosts.some((host, index) => host !== hosts[index]);
+    if (changed) {
+      onUpdateHosts(nextHosts);
+    }
+  }, [hosts, onUpdateHosts, snippets]);
+
+  const handleSave = useCallback(() => {
+    const savedSnippet = buildSavedSnippet();
+    if (!savedSnippet) return;
+    const nextSnippets = snippets.find((ex) => ex.id === savedSnippet.id)
+      ? snippets.map((ex) => (ex.id === savedSnippet.id ? savedSnippet : ex))
+      : [...snippets, savedSnippet];
+    onSave(savedSnippet);
+    syncHostsAfterSnippetSave(savedSnippet, nextSnippets);
+    setRightPanelMode('none');
+  }, [buildSavedSnippet, onSave, snippets, syncHostsAfterSnippetSave]);
+
+  const handleSaveAndRun = useCallback(() => {
+    const savedSnippet = buildSavedSnippet();
+    if (!savedSnippet) return;
+    const nextSnippets = snippets.find((ex) => ex.id === savedSnippet.id)
+      ? snippets.map((ex) => (ex.id === savedSnippet.id ? savedSnippet : ex))
+      : [...snippets, savedSnippet];
+    onSave(savedSnippet);
+    syncHostsAfterSnippetSave(savedSnippet, nextSnippets);
+    const runTargets = getRunnableHostsForSnippet(savedSnippet, hosts);
+    if (snippetHasRunTargets(savedSnippet) && runTargets.length > 0) {
+      onRunSnippet?.(savedSnippet, runTargets);
+    }
+    setRightPanelMode('none');
+  }, [buildSavedSnippet, hosts, onRunSnippet, onSave, snippets, syncHostsAfterSnippetSave]);
+
+  useEffect(() => {
+    const handler = (event: KeyboardEvent) => {
+      if (rightPanelMode !== 'edit-snippet') return;
+      if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 's') return;
+      event.preventDefault();
+      handleSave();
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [handleSave, rightPanelMode]);
 
   const handleCopy = (id: string, text: string) => {
     navigator.clipboard.writeText(text);
@@ -723,9 +801,18 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
   };
 
   const handleTargetSelect = (host: Host) => {
-    setTargetSelection((prev) =>
-      prev.includes(host.id) ? prev.filter((id) => id !== host.id) : [...prev, host.id]
-    );
+    if (editingSnippet.targetsAllHosts) {
+      setEditingSnippet((prev) => ({ ...prev, targetsAllHosts: undefined }));
+    }
+    setTargetSelection((prev) => {
+      const next = prev.includes(host.id) ? prev.filter((id) => id !== host.id) : [...prev, host.id];
+      setEditingSnippet((snippet) => ({
+        ...snippet,
+        targetsAllHosts: undefined,
+        targets: next,
+      }));
+      return next;
+    });
   };
 
   const handleTargetPickerBack = () => {
@@ -1430,6 +1517,7 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
       hosts={hosts}
       customGroups={customGroups}
       targetSelection={targetSelection}
+      setTargetSelection={setTargetSelection}
       handleTargetSelect={handleTargetSelect}
       handleTargetPickerBack={handleTargetPickerBack}
       availableKeys={availableKeys}
@@ -1441,7 +1529,8 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
       handleClosePanel={handleClosePanel}
       editingSnippet={editingSnippet}
       onDelete={onDelete}
-      handleSubmit={handleSubmit}
+      handleSave={handleSave}
+      handleSaveAndRun={handleSaveAndRun}
       setEditingSnippet={setEditingSnippet}
       packageOptions={packageOptions}
       selectedPackage={selectedPackage}
@@ -1463,6 +1552,7 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
       hasMoreHistory={hasMoreHistory}
       isLoadingMore={isLoadingMore}
       loadMoreHistory={loadMoreHistory}
+      onRunSnippet={onRunSnippet}
     />
   );
 
@@ -1479,6 +1569,9 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
             />
             <Button onClick={() => handleEdit()} size="sm" className="h-10 px-3">
               <Plus size={14} className="mr-2" /> {t('snippets.action.newSnippet')}
+            </Button>
+            <Button onClick={() => handleEdit(undefined, true)} size="sm" variant="secondary" className={vaultHeaderSecondaryButtonClass}>
+              <Play size={14} className="mr-2" /> {t('snippets.action.newScript')}
             </Button>
             <Button
               onClick={() => {
@@ -1771,8 +1864,12 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
                             </div>
                           )}
                           <VaultEntityIcon
-                            className={vaultSnippetIconClass}
-                            icon={<FileCode size={18} />}
+                            className={isScriptSnippet(snippet) ? vaultAutomationScriptIconClass : vaultSnippetIconClass}
+                            icon={isScriptSnippet(snippet) ? (
+                              <Play size={18} />
+                            ) : (
+                              <Zap size={18} />
+                            )}
                           />
                           <div className="w-0 flex-1">
                             <div className="text-sm font-semibold truncate">{snippet.label}</div>
@@ -1808,14 +1905,12 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
                     <ContextMenuContent>
                       <ContextMenuItem
                         onClick={() => {
-                          const targetHostsList = (snippet.targets || [])
-                            .map(id => hostById.get(id))
-                            .filter((h): h is Host => Boolean(h));
-                          if (targetHostsList.length > 0) {
-                            onRunSnippet?.(snippet, targetHostsList);
+                          const runTargets = getRunnableHostsForSnippet(snippet, hosts);
+                          if (runTargets.length > 0) {
+                            onRunSnippet?.(snippet, runTargets);
                           }
                         }}
-                        disabled={!snippet.targets?.length}
+                        disabled={!snippetHasRunTargets(snippet)}
                       >
                         <Play className="mr-2 h-4 w-4" /> {t('action.run')}
                       </ContextMenuItem>

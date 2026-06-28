@@ -85,11 +85,11 @@ test('side panel tab order can move the dragged tab after the target tab', () =>
 
 test('notes side panel forwards repeated open-note requests', () => {
   const layerSource = readFileSync(new URL('../TerminalLayer.tsx', import.meta.url), 'utf8');
-  const sectionSource = readFileSync(new URL('./TerminalLayerSidePanelSection.tsx', import.meta.url), 'utf8');
+  const slotsSource = readFileSync(new URL('./terminalLayerSidePanelSlots.tsx', import.meta.url), 'utf8');
 
   assert.match(layerSource, /notesOpenRequestIdRef\.current \+= 1/);
   assert.match(layerSource, /next\.set\(tabId, \{ noteId, requestId \}\)/);
-  assert.match(sectionSource, /openNoteRequestId=\{openNoteRequest\?\.requestId \?\? null\}/);
+  assert.match(slotsSource, /openNoteRequestId=\{openNoteRequest\?\.requestId \?\? null\}/);
 });
 
 test('side panel tab bar and borders use inline resolved terminal theme colors', () => {

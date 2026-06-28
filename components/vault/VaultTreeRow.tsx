@@ -220,7 +220,7 @@ export const VaultTreeItemRow: React.FC<VaultTreeItemRowProps> = ({
     {...props}
   >
     {leading ?? <div className="mr-1 h-5 w-4 flex-shrink-0" />}
-    {icon ?? <FileText size={14} className="mr-2 shrink-0 text-muted-foreground" />}
+    {icon ? <div className="mr-2 flex shrink-0 items-center self-center">{icon}</div> : <FileText size={14} className="mr-2 shrink-0 text-muted-foreground" />}
     {content ?? (
       <div className="min-w-0 flex-1">
         {editing && onRenameCommit && onRenameCancel ? (
@@ -230,7 +230,7 @@ export const VaultTreeItemRow: React.FC<VaultTreeItemRowProps> = ({
             onCancel={onRenameCancel}
           />
         ) : (
-          <div className="flex h-5 min-w-0 translate-y-px items-center truncate leading-none">{label}</div>
+          <div className="flex min-w-0 items-center truncate leading-none">{label}</div>
         )}
         {detail && <div className="truncate text-xs text-muted-foreground">{detail}</div>}
       </div>

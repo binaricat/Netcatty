@@ -647,7 +647,7 @@ export const enCoreMessages: Messages = {
   'vault.nav.keychain': 'Keychain',
   'vault.nav.proxies': 'Proxies',
   'vault.nav.portForwarding': 'Port Forwarding',
-  'vault.nav.snippets': 'Snippets',
+  'vault.nav.snippets': 'Scripts',
   'vault.nav.notes': 'Notes',
   'vault.nav.knownHosts': 'Known Hosts',
   'vault.nav.logs': 'Logs',

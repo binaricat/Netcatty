@@ -36,6 +36,7 @@ function createTerminalWorkerManager(options = {}) {
   const outputPortReady = new Set();
   const sessionWebContentsIds = new Map();
   const urgentInputWebContentsIds = new Set();
+  const outputTaps = new Set();
   const maxPendingOutputChunks = Number.isFinite(options.maxPendingOutputChunks)
     ? Math.max(0, Math.trunc(options.maxPendingOutputChunks))
     : 512;
@@ -95,6 +96,17 @@ function createTerminalWorkerManager(options = {}) {
   function deliverOutputToRenderer(sessionId, data) {
     if (terminalOutputChannel?.send?.(sessionId, data)) return true;
     return sendOutputOverLegacyIpc(sessionId, data);
+  }
+
+  function notifyOutputTaps(sessionId, data) {
+    if (!sessionId || !data || outputTaps.size === 0) return;
+    for (const tap of outputTaps) {
+      try {
+        tap(sessionId, data);
+      } catch (err) {
+        console.warn("[terminalWorkerManager] output tap failed", err);
+      }
+    }
   }
 
   function openOutputSession(sessionId, webContentsId) {
@@ -192,6 +204,7 @@ function createTerminalWorkerManager(options = {}) {
     }
     if (message.kind === "output") {
       if (closedSessions.has(message.sessionId)) return;
+      notifyOutputTaps(message.sessionId, message.data);
       if (outputPortPending.has(message.sessionId)) {
         bufferOutput(message.sessionId, message.data);
         return;
@@ -202,6 +215,12 @@ function createTerminalWorkerManager(options = {}) {
       }
       if (!deliverOutputToRenderer(message.sessionId, message.data)) {
         bufferOutput(message.sessionId, message.data);
+      }
+      return;
+    }
+    if (message.kind === "output-tap") {
+      if (!closedSessions.has(message.sessionId)) {
+        notifyOutputTaps(message.sessionId, message.data);
       }
       return;
     }
@@ -325,6 +344,18 @@ function createTerminalWorkerManager(options = {}) {
     ensureStarted,
     request,
     send,
+    hasOpenSession(sessionId) {
+      return Boolean(
+        sessionId
+        && sessionWebContentsIds.has(sessionId)
+        && !closedSessions.has(sessionId),
+      );
+    },
+    addOutputTap(listener) {
+      if (typeof listener !== "function") return () => {};
+      outputTaps.add(listener);
+      return () => outputTaps.delete(listener);
+    },
     stop,
   };
 }

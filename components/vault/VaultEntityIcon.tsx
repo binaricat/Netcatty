@@ -10,8 +10,12 @@ type VaultEntityIconProps = {
 export const vaultEntityIconClass =
   "h-11 w-11 rounded-xl flex items-center justify-center shrink-0";
 
+export const vaultEntityIconSmClass =
+  "h-8 w-8 rounded-xl flex items-center justify-center shrink-0";
+
 export const vaultPrimaryIconClass = "bg-primary text-primary-foreground";
-export const vaultSnippetIconClass = "bg-amber-600 text-white dark:bg-amber-400 dark:text-slate-950";
+export const vaultSnippetIconClass = "bg-sky-700 text-white dark:bg-sky-400 dark:text-slate-950";
+export const vaultAutomationScriptIconClass = "bg-violet-700 text-white dark:bg-violet-400 dark:text-slate-950";
 export const vaultKeyIconClass = "bg-cyan-600 text-white dark:bg-cyan-400 dark:text-slate-950";
 export const vaultCertificateIconClass = "bg-teal-600 text-white dark:bg-teal-400 dark:text-slate-950";
 export const vaultIdentityIconClass = "bg-emerald-600 text-white dark:bg-emerald-400 dark:text-slate-950";

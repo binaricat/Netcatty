@@ -428,6 +428,68 @@ test("worker output is routed through the dedicated terminal output channel", ()
   assert.deepEqual(routed, [{ sessionId: "session-1", data: "hello" }]);
 });
 
+test("worker output notifies output taps before renderer routing", () => {
+  const child = new FakeChild();
+  const routed = [];
+  const tapped = [];
+  const manager = createTerminalWorkerManager({
+    utilityProcess: {
+      fork() {
+        return child;
+      },
+    },
+    terminalOutputChannel: {
+      send(sessionId, data) {
+        routed.push({ sessionId, data });
+        return true;
+      },
+    },
+    workerScriptPath: "/worker.cjs",
+  });
+
+  manager.addOutputTap((sessionId, data) => tapped.push({ sessionId, data }));
+  manager.ensureStarted();
+  child.emit("message", {
+    kind: "output",
+    sessionId: "session-1",
+    data: "hello",
+  });
+
+  assert.deepEqual(tapped, [{ sessionId: "session-1", data: "hello" }]);
+  assert.deepEqual(routed, [{ sessionId: "session-1", data: "hello" }]);
+});
+
+test("worker output-tap messages notify taps without duplicate renderer routing", () => {
+  const child = new FakeChild();
+  const routed = [];
+  const tapped = [];
+  const manager = createTerminalWorkerManager({
+    utilityProcess: {
+      fork() {
+        return child;
+      },
+    },
+    terminalOutputChannel: {
+      send(sessionId, data) {
+        routed.push({ sessionId, data });
+        return true;
+      },
+    },
+    workerScriptPath: "/worker.cjs",
+  });
+
+  manager.addOutputTap((sessionId, data) => tapped.push({ sessionId, data }));
+  manager.ensureStarted();
+  child.emit("message", {
+    kind: "output-tap",
+    sessionId: "session-1",
+    data: "direct-port-output",
+  });
+
+  assert.deepEqual(tapped, [{ sessionId: "session-1", data: "direct-port-output" }]);
+  assert.deepEqual(routed, []);
+});
+
 test("worker buffers early output until the output port is opened", async () => {
   const child = new FakeChild();
   const routed = [];

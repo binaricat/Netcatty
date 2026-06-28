@@ -55,6 +55,24 @@ import { TerminalConnectionDialog } from "./terminal/TerminalConnectionDialog";
 import { HostKeyInfo } from "./terminal/TerminalHostKeyVerification";
 import { createKnownHostFromHostKeyInfo, toHostKeyInfo } from "./terminal/hostKeyVerification";
 import { TerminalToolbar } from "./terminal/TerminalToolbar";
+import { ScriptRecordingIndicator } from "./terminal/ScriptRecordingIndicator";
+import { ScriptSaveRecordingDialog } from "./scripts/ScriptSaveRecordingDialog";
+import { registerScreenSnapshotProvider } from "@/infrastructure/scripts/screenSnapshotRegistry.ts";
+import { useScriptRecorder } from "@/application/state/useScriptRecorder.ts";
+import { getScriptRecordingSnapshot, setScriptRecordingState } from "@/application/state/scriptRecordingStore.ts";
+import {
+  runAutomationScript,
+  runConnectScriptsSequential,
+  subscribeScriptRuns,
+  pauseScriptRun,
+  resumeScriptRun,
+  stopScriptRun,
+} from "@/application/state/scriptAutomationCoordinator.ts";
+import { resolveConnectScriptsForHost } from "@/domain/hostConnectScripts.ts";
+import { netcattyBridge } from "@/infrastructure/services/netcattyBridge.ts";
+import { ScriptExecutionOverlay } from "./terminal/ScriptExecutionOverlay";
+import { isScriptSnippet } from "@/domain/snippetScript.ts";
+import { useOutputTriggers } from "@/application/state/useOutputTriggers.ts";
 import { TerminalComposeBar } from "./terminal/TerminalComposeBar";
 import { TerminalContextMenu } from "./terminal/TerminalContextMenu";
 import { TerminalSearchBar } from "./terminal/TerminalSearchBar";
@@ -187,6 +205,8 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   restoreTerminalCwd = false,
   startupCommand,
   noAutoRun,
+  pendingScriptId,
+  pendingScript,
   reuseConnectionFromSessionId,
   serialConfig,
   hotkeyScheme = "disabled",
@@ -246,6 +266,51 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   // Timeout for connection - increased to 120s to allow time for keyboard-interactive (2FA) authentication
   const CONNECTION_TIMEOUT = 120000;
   const { t } = useI18n();
+  const scriptRanRef = useRef(false);
+  const [saveRecordingOpen, setSaveRecordingOpen] = useState(false);
+  const [recordedCode, setRecordedCode] = useState('');
+  const recorder = useScriptRecorder(sessionId);
+  const recorderRef = useRef(recorder);
+  recorderRef.current = recorder;
+  const passwordPromptActiveRef = useRef(false);
+  const [activeScriptRun, setActiveScriptRun] = useState<import('@/types/global/netcatty-bridge-script.d.ts').ScriptRun | undefined>(undefined);
+  const dismissedScriptRunIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    return subscribeScriptRuns((runs) => {
+      const sessionRuns = runs.filter((run) => run.sessionId === sessionId);
+      const liveRun = sessionRuns.find((run) => run.status === 'running' || run.status === 'paused');
+      if (liveRun) {
+        dismissedScriptRunIdRef.current = null;
+        setActiveScriptRun(liveRun);
+        return;
+      }
+
+      const finishedRun = sessionRuns
+        .filter((run) =>
+          (run.status === 'completed' || run.status === 'failed')
+          && run.runId !== dismissedScriptRunIdRef.current,
+        )
+        .sort((a, b) => (b.endedAt ?? 0) - (a.endedAt ?? 0))[0];
+
+      setActiveScriptRun(finishedRun);
+    });
+  }, [sessionId]);
+
+  const dismissScriptOverlay = useCallback(() => {
+    if (activeScriptRun) {
+      dismissedScriptRunIdRef.current = activeScriptRun.runId;
+    }
+    setActiveScriptRun(undefined);
+  }, [activeScriptRun]);
+  const outputTriggers = useOutputTriggers({
+    sessionId,
+    hostId: host.id,
+    snippets,
+    onRunScript: (snippet, sid) => {
+      void runAutomationScript({ snippet, sessionId: sid });
+    },
+  });
   const availableFonts = useAvailableFonts();
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<XTerm | null>(null);
@@ -618,6 +683,12 @@ const TerminalComponent: React.FC<TerminalProps> = ({
           break;
         } else if (ch === "\r" || ch === "\n") {
           const rawCommand = commandBufferRef.current;
+          if (recorderRef.current.isRecording) {
+            void recorderRef.current.recordEnter({
+              sensitive: passwordPromptActiveRef.current,
+            });
+            passwordPromptActiveRef.current = false;
+          }
           recordTerminalCommandExecution(rawCommand, {
             host,
             sessionId,
@@ -629,11 +700,14 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         } else if (ch === "\x15") {
           // Ctrl+U: clear line — reset command buffer (fuzzy match sends this)
           commandBufferRef.current = "";
+          recorderRef.current.recordClearLine();
         } else if (ch === "\b" || ch === "\x7f") {
           // Backspace: remove last character (Windows fuzzy replacement uses \b)
           commandBufferRef.current = commandBufferRef.current.slice(0, -1);
+          recorderRef.current.recordBackspace();
         } else if (ch.charCodeAt(0) >= 32) {
           commandBufferRef.current += ch;
+          recorderRef.current.recordInput(ch);
         }
       }
     }
@@ -1253,8 +1327,19 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     },
     onTerminalDataCapture: handleTerminalDataCaptureOnce,
     onTerminalOutput: onTerminalOutput
-      ? (chunk: string) => onTerminalOutput(sessionId, chunk)
-      : undefined,
+      ? (chunk: string) => {
+          if (/password|passphrase|口令/i.test(chunk)) {
+            passwordPromptActiveRef.current = true;
+          }
+          outputTriggers.appendOutput(chunk);
+          onTerminalOutput(sessionId, chunk);
+        }
+      : (chunk: string) => {
+          if (/password|passphrase|口令/i.test(chunk)) {
+            passwordPromptActiveRef.current = true;
+          }
+          outputTriggers.appendOutput(chunk);
+        },
     onTerminalLogData: captureTerminalLogData,
     onProgrammaticCommandLogRewrite: queueProgrammaticCommandLogRewrite,
     onOsDetected,
@@ -1266,6 +1351,100 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     sudoAutofillPasswordRef,
   });
   sessionStartersRef.current = sessionStarters;
+
+  useEffect(() => {
+    if (status !== 'connected' || scriptRanRef.current) return;
+
+    const queue = resolveConnectScriptsForHost(host, snippets);
+    let scripts = queue;
+    if (pendingScript && isScriptSnippet(pendingScript)) {
+      scripts = [pendingScript, ...queue.filter((item) => item.id !== pendingScript.id)];
+    } else if (pendingScriptId) {
+      const script = snippets.find((item) => item.id === pendingScriptId && isScriptSnippet(item));
+      if (script) {
+        scripts = [script, ...queue.filter((item) => item.id !== script.id)];
+      }
+    }
+    if (scripts.length === 0) return;
+
+    // Defer until xterm has rendered login output and the main-process output tap
+    // has populated SessionOutputBuffer (avoids waitForPrompt racing an empty buffer).
+    const timer = window.setTimeout(() => {
+      if (scriptRanRef.current) return;
+      scriptRanRef.current = true;
+      void runConnectScriptsSequential({
+        scripts,
+        sessionId,
+        sessionMeta: {
+          connected: true,
+          hostname: host.hostname,
+          username: host.username,
+        },
+      }).catch((err) => {
+        const message = err instanceof Error ? err.message : String(err);
+        toast.error(message.includes('Observer mode') ? t('scripts.observer.blocked') : message);
+      });
+    }, 400);
+
+    return () => window.clearTimeout(timer);
+  }, [host, pendingScript, pendingScriptId, sessionId, snippets, status, t]);
+
+  useEffect(() => {
+    return registerScreenSnapshotProvider(sessionId, () => {
+      const term = termRef.current;
+      if (!term?.buffer?.active) {
+        return { rows: 24, cols: 80, currentRow: 0, lines: [] };
+      }
+      const buffer = term.buffer.active;
+      const lines: string[] = [];
+      for (let row = 0; row < term.rows; row += 1) {
+        lines.push(buffer.getLine(buffer.viewportY + row)?.translateToString(true) ?? '');
+      }
+      return {
+        rows: term.rows,
+        cols: term.cols,
+        currentRow: buffer.baseY + buffer.cursorY,
+        lines,
+      };
+    });
+  }, [sessionId]);
+
+  useEffect(() => {
+    const startHandler = (event: Event) => {
+      const detail = (event as CustomEvent<{ sessionId?: string }>).detail;
+      if (detail?.sessionId !== sessionId) return;
+      void recorderRef.current.startRecording();
+    };
+    const stopHandler = (event: Event) => {
+      const detail = (event as CustomEvent<{ sessionId?: string }>).detail;
+      if (detail?.sessionId !== sessionId) return;
+      if (!recorderRef.current.isRecording) return;
+      void recorderRef.current.stopRecording().then(({ code }) => {
+        setRecordedCode(code);
+        setSaveRecordingOpen(true);
+      });
+    };
+    window.addEventListener('netcatty:script:recording:start', startHandler);
+    window.addEventListener('netcatty:script:recording:stop', stopHandler);
+    return () => {
+      window.removeEventListener('netcatty:script:recording:start', startHandler);
+      window.removeEventListener('netcatty:script:recording:stop', stopHandler);
+    };
+  }, [sessionId]);
+
+  useEffect(() => {
+    if (recorder.isRecording) {
+      setScriptRecordingState(sessionId, recorder.isPaused);
+    } else if (getScriptRecordingSnapshot().sessionId === sessionId) {
+      setScriptRecordingState(null);
+    }
+  }, [recorder.isRecording, recorder.isPaused, sessionId]);
+
+  useEffect(() => () => {
+    if (getScriptRecordingSnapshot().sessionId === sessionId) {
+      setScriptRecordingState(null);
+    }
+  }, [sessionId]);
 
   useEffect(() => {
     setConnectionReuseFellBack(false);
@@ -1381,6 +1560,20 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     }
   }, []);
 
+  useEffect(() => {
+    const bridge = netcattyBridge.get();
+    const dispose = bridge?.onScriptSessionInput?.(({ sessionId: sid, data }) => {
+      if (sid !== sessionId) return;
+      scrollToBottomAfterProgrammaticInput(data);
+    });
+    return dispose;
+  }, [scrollToBottomAfterProgrammaticInput, sessionId]);
+
+  useEffect(() => {
+    if (!activeScriptRun) return;
+    termRef.current?.scrollToBottom();
+  }, [activeScriptRun]);
+
   const broadcastUserPasteData = useCallback((data: string) => {
     if (sessionRef.current && isBroadcastEnabledRef.current && onBroadcastInputRef.current) {
       onBroadcastInputRef.current(data, sessionId);
@@ -1435,10 +1628,19 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   }, [prepareProgrammaticSudoInput, scrollToBottomAfterProgrammaticInput, terminalBackend, sessionId]);
 
   const executeSnippet = useCallback(async (snippet: Snippet) => {
+    if (isScriptSnippet(snippet)) {
+      try {
+        await runAutomationScript({ snippet, sessionId });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        toast.error(message.includes('Observer mode') ? t('scripts.observer.blocked') : message);
+      }
+      return;
+    }
     const command = await resolveSnippetCommand(snippet);
     if (command === null) return;
     executeSnippetCommand(command, snippet.noAutoRun);
-  }, [executeSnippetCommand]);
+  }, [executeSnippetCommand, sessionId, t]);
 
   const onSnippetShortkeyRef = useRef(executeSnippet);
   onSnippetShortkeyRef.current = executeSnippet;
@@ -1853,6 +2055,21 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       onToggleComposeBar={inWorkspace ? onToggleComposeBar : () => setIsComposeBarOpen(prev => !prev)}
       terminalEncoding={terminalEncoding}
       onSetTerminalEncoding={handleSetTerminalEncoding}
+      recordingIndicator={recorder.isRecording ? (
+        <ScriptRecordingIndicator
+          elapsedMs={recorder.elapsedMs}
+          isPaused={recorder.isPaused}
+          onPause={recorder.pauseRecording}
+          onResume={recorder.resumeRecording}
+          onStop={() => {
+            void recorder.stopRecording().then(({ code }) => {
+              setRecordedCode(code);
+              setSaveRecordingOpen(true);
+            });
+          }}
+        />
+      ) : undefined}
+      onStartRecording={status === 'connected' ? () => { void recorder.startRecording(); } : undefined}
     />
   ), [
     compactToolbar,
@@ -1884,6 +2101,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     snippets,
     status,
     terminalEncoding,
+    recorder,
   ]);
 
   const statusDotTone =
@@ -1929,6 +2147,8 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     onCommandExecuted,
     onCommandSubmitted,
     commandBufferRef,
+    scriptRecorderRef: recorderRef,
+    passwordPromptActiveRef,
     promptLineBreakStateRef,
     sudoAutofillRef,
     setIsSearchOpen,
@@ -2076,9 +2296,34 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     onWake: wakeFromHibernateRuntime,
   });
 
-  useTerminalEffects({ CONNECTION_TIMEOUT, Error, XTERM_PERFORMANCE_CONFIG, applyUserCursorPreference, auth, autocompleteCloseRef, autocompleteInputRef, autocompleteKeyEventRef, captureTerminalLogData, clearTerminalCwd, commandBufferRef, connectionLogBufferRef, containerRef, createPromptLineBreakState, createReplaySafeTerminalLogSanitizer, createXTermRuntime, deferTerminalResizeRef, disableTerminalFontZoomRef, effectiveFontSize, effectiveFontWeight, effectiveTheme, error, executeSnippetCommand, finalizeTerminalLogData, fitAddonRef, fontFamilyId, fontSize, fontWeightFixupDoneRef, forceCloseHibernatedSession, forceSyncRenderAfterResize, handleOsc52ReadRequest, handleTerminalDataCaptureOnce, hasConnectedRef, hasRuntimeRef, host, hotkeySchemeRef, hibernatedRef, identities, inWorkspace, isBootActiveRef, isBroadcastEnabledRef, isComposeBarOpen: effectiveComposeBarOpen, isFocusMode, isFocused, isLocalConnection, isNetworkDevice, isResizing: deferTerminalResize, isRestoringSelectionRef, isSearchOpen, isSerialConnection, isVisible, isVisibleRef, keyBindingsRef, keys, knownCwdRef, lastFittedSizeRef, lastToastedErrorRef, logger, mouseTrackingRef, onBroadcastInputRef, onBroadcastInterruptPriorityChange, onCommandExecuted, onCommandSubmitted, onHotkeyActionRef, onSnippetShortkeyRef, onSnippetExecutorChange, onTerminalCwdChange, onTerminalTitleChange, onTerminalBell, onTerminalFontSizeChange, paneLayoutKey, pendingAuthRef, pendingOutputScrollRef, prepareRestoredReconnect, prevIsResizingRef, promptLineBreakStateRef, resizeSession, resolveHostAuth, resolvedFontFamily, safeFit, searchAddonRef, serialConfig, serialLineBufferRef, serializeAddonRef, sessionId, sessionRef, sessionStarters, setError, setHasMouseTracking, setHasSelection, setIsCancelling, setIsDisconnectedDialogDismissed, setIsSearchOpen, setNeedsHostKeyVerification, setPendingHostKeyInfo, setPendingHostKeyRequestId, setProgressLogs, setProgressValue, setSelectionOverlayPosition, setShowLogs, setStatus, setTimeLeft, shouldEnableNativeUserInputAutoScroll, shouldProbeSessionCwd, shouldStartTerminalBackend, snippetsRef, status, statusRef, sudoAutofillRef, t, teardown, telnetLocalEchoRef, termRef, terminalAltKeyOptions, terminalBackend, terminalContextActionsRef, terminalCwdTracker, terminalDataCapturedRef, terminalLogSanitizerRef, terminalSettings, terminalSettingsRef, toHostKeyInfo, toast, updateStatus, useEffect, useLayoutEffect, xtermRuntimeRef, zmodem, zmodemToastedRef, restoreState });
+  useTerminalEffects({ CONNECTION_TIMEOUT, Error, XTERM_PERFORMANCE_CONFIG, applyUserCursorPreference, auth, autocompleteCloseRef, autocompleteInputRef, autocompleteKeyEventRef, captureTerminalLogData, clearTerminalCwd, commandBufferRef, connectionLogBufferRef, containerRef, createPromptLineBreakState, createReplaySafeTerminalLogSanitizer, createXTermRuntime, deferTerminalResizeRef, disableTerminalFontZoomRef, effectiveFontSize, effectiveFontWeight, effectiveTheme, error, executeSnippetCommand, finalizeTerminalLogData, fitAddonRef, fontFamilyId, fontSize, fontWeightFixupDoneRef, forceCloseHibernatedSession, forceSyncRenderAfterResize, handleOsc52ReadRequest, handleTerminalDataCaptureOnce, hasConnectedRef, hasRuntimeRef, host, hotkeySchemeRef, hibernatedRef, identities, inWorkspace, isBootActiveRef, isBroadcastEnabledRef, isComposeBarOpen: effectiveComposeBarOpen, isFocusMode, isFocused, isLocalConnection, isNetworkDevice, isResizing: deferTerminalResize, isRestoringSelectionRef, isSearchOpen, isSerialConnection, isVisible, isVisibleRef, keyBindingsRef, keys, knownCwdRef, lastFittedSizeRef, lastToastedErrorRef, logger, mouseTrackingRef, onBroadcastInputRef, onBroadcastInterruptPriorityChange, onCommandExecuted, onCommandSubmitted, onHotkeyActionRef, onSnippetShortkeyRef, onSnippetExecutorChange, onTerminalCwdChange, onTerminalTitleChange, onTerminalBell, onTerminalFontSizeChange, paneLayoutKey, passwordPromptActiveRef, pendingAuthRef, pendingOutputScrollRef, prepareRestoredReconnect, prevIsResizingRef, promptLineBreakStateRef, resizeSession, resolveHostAuth, resolvedFontFamily, safeFit, scriptRecorderRef: recorderRef, searchAddonRef, serialConfig, serialLineBufferRef, serializeAddonRef, sessionId, sessionRef, sessionStarters, setError, setHasMouseTracking, setHasSelection, setIsCancelling, setIsDisconnectedDialogDismissed, setIsSearchOpen, setNeedsHostKeyVerification, setPendingHostKeyInfo, setPendingHostKeyRequestId, setProgressLogs, setProgressValue, setSelectionOverlayPosition, setShowLogs, setStatus, setTimeLeft, shouldEnableNativeUserInputAutoScroll, shouldProbeSessionCwd, shouldStartTerminalBackend, snippetsRef, status, statusRef, sudoAutofillRef, t, teardown, telnetLocalEchoRef, termRef, terminalAltKeyOptions, terminalBackend, terminalContextActionsRef, terminalCwdTracker, terminalDataCapturedRef, terminalLogSanitizerRef, terminalSettings, terminalSettingsRef, toHostKeyInfo, toast, updateStatus, useEffect, useLayoutEffect, xtermRuntimeRef, zmodem, zmodemToastedRef, restoreState });
 
-  return <TerminalView ctx={{ Activity, ArrowDownToLine, ArrowUpFromLine, Button, Clock3, Copy, Cpu, HardDrive, HoverCard, HoverCardContent, HoverCardTrigger, Maximize2, MemoryStick, Radio, Sparkles, SquareArrowOutUpRight, TerminalAutocomplete, TerminalComposeBar, TerminalConnectionDialog, TerminalContextMenu, TerminalSearchBar, Tooltip, TooltipContent, TooltipTrigger, ZmodemOverwriteDialog, ZmodemProgressIndicator, auth, autocompleteAcceptTextRef, autocompleteCloseRef, autocompleteHostOs, autocompleteInputRef, autocompleteKeyEventRef, autocompleteRepositionRef, autocompleteSettings, chainProgress, cn, compactToolbar, lineTimestampsAvailable, containerRef, effectiveFontSize, effectiveFontWeight, effectiveTheme, error, executeSnippet, executeSnippetCommand, handleAddSelectionToAI, handleCancelConnect, handleCloseDisconnectedSession, handleCloseSearch, handleDismissDisconnectedDialog, handleDragEnter, handleDragLeave, handleDragOver, handleDrop, handleFindNext, handleFindPrevious, handleHostKeyAddAndContinue, handleHostKeyClose, handleHostKeyContinue, handleOsc52ReadResponse, handleOsc7SetupConfirm, handleOsc7SetupOpenChange, handleReceiveYmodem, handleRetry, handleSearch, handleSendYmodem, handleTopOverlayMouseDownCapture, hasMouseTracking, hasSelection, host, hotkeyScheme, inWorkspace, isBroadcastEnabled, isCancelling, isComposeBarOpen, isDraggingOver, isFocusMode, isLocalConnection, remoteDragDropUsesZmodem, isSerialConnection, isSearchOpen, isSupportedOs, isSystemSidebarEligible, isVisible, keyBindings, keys, knownCwdRef, needsHostKeyVerification, onAddSelectionToAI, onBroadcastInput, onCloseSession, onDetach, onDetachDragEnd, onDetachDragStart, onDetachPointerDown, onEndSessionDrag, onExpandToFocus, onOpenSystem, onRename, onSplitHorizontal, onSplitVertical, onStartSessionDrag, onToggleBroadcast, onUpdateHost: handleUpdateHostFromTerminal, osc52ReadPromptVisible, osc7SetupOpen, osc7SetupRunning, pendingHostKeyInfo, progressLogs, progressValue, renderControls, resolvedFontFamily, restoreState, scrollToBottomAfterProgrammaticInput, searchMatchCount, selectionOverlayPosition, sessionDisplayName, sessionId, sessionRef, setIsComposeBarOpen, setShowLogs, shouldShowConnectionDialog, showLogs, showSelectionAIAction, snippets, status, statusDotTone, sudoHintRef, sudoHintText: t("terminal.sudoHint.pressEnter"), t, termRef, terminalBackend, terminalContextActions, terminalCwdTracker, terminalPreviewVars, terminalSettings, timeLeft, toast, zmodem }} />;
+  return (
+    <>
+      <TerminalView ctx={{ Activity, ArrowDownToLine, ArrowUpFromLine, Button, Clock3, Copy, Cpu, HardDrive, HoverCard, HoverCardContent, HoverCardTrigger, Maximize2, MemoryStick, Radio, Sparkles, SquareArrowOutUpRight, TerminalAutocomplete, TerminalComposeBar, TerminalConnectionDialog, TerminalContextMenu, TerminalSearchBar, Tooltip, TooltipContent, TooltipTrigger, ZmodemOverwriteDialog, ZmodemProgressIndicator, auth, autocompleteAcceptTextRef, autocompleteCloseRef, autocompleteHostOs, autocompleteInputRef, autocompleteKeyEventRef, autocompleteRepositionRef, autocompleteSettings, chainProgress, cn, compactToolbar, lineTimestampsAvailable, containerRef, effectiveFontSize, effectiveFontWeight, effectiveTheme, error, executeSnippet, executeSnippetCommand, handleAddSelectionToAI, handleCancelConnect, handleCloseDisconnectedSession, handleCloseSearch, handleDismissDisconnectedDialog, handleDragEnter, handleDragLeave, handleDragOver, handleDrop, handleFindNext, handleFindPrevious, handleHostKeyAddAndContinue, handleHostKeyClose, handleHostKeyContinue, handleOsc52ReadResponse, handleOsc7SetupConfirm, handleOsc7SetupOpenChange, handleReceiveYmodem, handleRetry, handleSearch, handleSendYmodem, handleTopOverlayMouseDownCapture, hasMouseTracking, hasSelection, host, hotkeyScheme, inWorkspace, isBroadcastEnabled, isCancelling, isComposeBarOpen, isDraggingOver, isFocusMode, isLocalConnection, remoteDragDropUsesZmodem, isSerialConnection, isSearchOpen, isSupportedOs, isSystemSidebarEligible, isVisible, keyBindings, keys, knownCwdRef, needsHostKeyVerification, onAddSelectionToAI, onBroadcastInput, onCloseSession, onDetach, onDetachDragEnd, onDetachDragStart, onDetachPointerDown, onEndSessionDrag, onExpandToFocus, onOpenSystem, onRename, onSplitHorizontal, onSplitVertical, onStartSessionDrag, onToggleBroadcast, onUpdateHost: handleUpdateHostFromTerminal, osc52ReadPromptVisible, osc7SetupOpen, osc7SetupRunning, pendingHostKeyInfo, progressLogs, progressValue, renderControls, resolvedFontFamily, restoreState, scrollToBottomAfterProgrammaticInput, searchMatchCount, scriptExecutionOverlay: activeScriptRun ? (
+        <ScriptExecutionOverlay
+          run={activeScriptRun}
+          onPause={() => { void pauseScriptRun(activeScriptRun.runId); }}
+          onResume={() => { void resumeScriptRun(activeScriptRun.runId); }}
+          onStop={() => { void stopScriptRun(activeScriptRun.runId); }}
+          onDismiss={dismissScriptOverlay}
+        />
+      ) : null, selectionOverlayPosition, sessionDisplayName, sessionId, sessionRef, setIsComposeBarOpen, setShowLogs, shouldShowConnectionDialog, showLogs, showSelectionAIAction, snippets, status, statusDotTone, sudoHintRef, sudoHintText: t("terminal.sudoHint.pressEnter"), t, termRef, terminalBackend, terminalContextActions, terminalCwdTracker, terminalPreviewVars, terminalSettings, timeLeft, toast, zmodem }} />
+      <ScriptSaveRecordingDialog
+        open={saveRecordingOpen}
+        code={recordedCode}
+        packages={snippetPackages}
+        defaultName={`recorded-${new Date().toISOString().slice(0, 10)}`}
+        onClose={() => setSaveRecordingOpen(false)}
+        onSave={({ name, packagePath, code, editAfterSave }) => {
+          window.dispatchEvent(new CustomEvent('netcatty:scripts:save-recorded', {
+            detail: { name, packagePath, code, editAfterSave },
+          }));
+          setSaveRecordingOpen(false);
+        }}
+      />
+    </>
+  );
 };
 
 const Terminal = memo(TerminalComponent, terminalPropsAreEqual);

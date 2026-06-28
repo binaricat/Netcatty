@@ -207,10 +207,10 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
                   }}
                 >
                   <FileCode size={16} className="flex-shrink-0" />
-                  {!sidebarCollapsed && t("vault.nav.snippets")}
+                  {!sidebarCollapsed && t("vault.nav.scripts")}
                 </RippleButton>
               </TooltipTrigger>
-              {sidebarCollapsed && <TooltipContent side="right">{t("vault.nav.snippets")}</TooltipContent>}
+              {sidebarCollapsed && <TooltipContent side="right">{t("vault.nav.scripts")}</TooltipContent>}
             </Tooltip>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -604,6 +604,7 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
                 proxyProfiles={proxyProfiles}
                 managedSources={managedSources}
                 onSaveHost={(host) => onUpdateHosts([...hosts, host])}
+                onUpdateHosts={onUpdateHosts}
                 onCreateGroup={(groupPath) =>
                   onUpdateCustomGroups(
                     Array.from(new Set([...customGroups, groupPath])),
@@ -785,6 +786,8 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
           terminalFontSize={terminalFontSize}
           groupDefaults={editingHostGroupDefaults}
           groupConfigs={groupConfigs}
+          snippets={snippets}
+          onSnippetsChange={onUpdateSnippets}
           onImportKey={onImportOrReuseKey}
           onSave={(host) => {
             const latestHost = hosts.find((entry: { id: string }) => entry.id === host.id);

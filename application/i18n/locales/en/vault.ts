@@ -522,6 +522,7 @@ export const enVaultMessages: Messages = {
   'hostDetails.icon.colorManual': 'Manual',
   'hostDetails.icon.colorChoice': 'Color',
   'hostDetails.icon.autoColorLabel': 'Current color',
+  'hostDetails.icon.preview': 'Icon preview',
   'hostDetails.icon.showLibrary': 'Show icon library',
   'hostDetails.icon.hideLibrary': 'Hide icon library',
   'hostDetails.icon.autoUsesDistro': 'Use Linux Distribution icon and selected color for this host.',

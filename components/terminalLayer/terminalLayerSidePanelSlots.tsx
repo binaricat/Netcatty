@@ -209,6 +209,7 @@ function SidePanelScriptsSlotInner({
   const sidePanelOpenTabs = ctx.sidePanelOpenTabs as Map<string, SidePanelTab>;
   const sidePanelTab = useSidePanelTabType(tabId, sidePanelOpenTabs);
   const isVisible = isTabActive && sidePanelTab === 'scripts';
+  const live = useSidePanelLiveSnapshotForTab(tabId, isVisible);
 
   const {
     ScriptsSidePanel,
@@ -217,6 +218,13 @@ function SidePanelScriptsSlotInner({
     updateSnippets,
     updateSnippetPackages,
     handleSnippetFromPanel,
+    handleRunScriptFromPanel,
+    handleRunScriptOnWorkspace,
+    handleStartRecordingFromPanel,
+    scriptRuns,
+    handleStopScriptRun,
+    handlePauseScriptRun,
+    handleResumeScriptRun,
   } = ctx;
 
   return (
@@ -227,6 +235,14 @@ function SidePanelScriptsSlotInner({
         onSnippetsChange={updateSnippets}
         onPackagesChange={updateSnippetPackages}
         onSnippetClick={handleSnippetFromPanel}
+        onRunScript={handleRunScriptFromPanel}
+        onRunScriptOnWorkspace={handleRunScriptOnWorkspace}
+        onStartRecording={handleStartRecordingFromPanel}
+        runs={scriptRuns}
+        onStopRun={handleStopScriptRun}
+        onPauseRun={handlePauseScriptRun}
+        onResumeRun={handleResumeScriptRun}
+        focusedSessionId={live.focusedSessionId ?? undefined}
         isVisible={isVisible}
       />
     </div>

@@ -39,8 +39,6 @@ test("buildSnippetExportPayload removes host target bindings", () => {
       command: "sudo systemctl restart nginx",
       tags: [],
       package: "ops/web",
-      noAutoRun: undefined,
-      shortkey: undefined,
     },
   ]);
 });

@@ -272,7 +272,6 @@ const TerminalHostTreeHostHoverCard: React.FC<{ host: Host }> = ({ host }) => {
           host={host}
           size="sm"
           fallback={host.label.slice(0, 1).toUpperCase()}
-          className="rounded"
         />
         <div className="flex h-5 min-w-0 items-center">
           <div className="translate-y-px truncate text-[15px] font-semibold leading-none">{host.label}</div>
@@ -407,7 +406,7 @@ const HostTreeFlatRowItem = memo<HostTreeFlatRowProps>(({
         }}
       >
         <span className="flex h-5 w-4 shrink-0 items-center" />
-        <span className="flex h-5 shrink-0 items-center">
+        <span className="flex h-5 shrink-0 items-center justify-center">
           <DistroAvatar host={row.host} size="xs" fallback={row.host.label.slice(0, 1).toUpperCase()} />
         </span>
         {isInlineEditing && menuActions && inlineEditInitialName ? (
@@ -420,14 +419,14 @@ const HostTreeFlatRowItem = memo<HostTreeFlatRowProps>(({
           />
         ) : (
           <span
-            className="flex h-5 min-w-0 flex-1 translate-y-px items-center truncate leading-none"
+            className="flex min-w-0 flex-1 items-center truncate leading-none"
             style={{ color: theme.termFg }}
           >
             {row.host.label}
           </span>
         )}
         {row.host.protocol && row.host.protocol !== 'ssh' && (
-          <span className="flex h-5 shrink-0 translate-y-px items-center text-[10px] leading-none uppercase opacity-70" style={{ color: theme.mutedFg }}>
+          <span className="flex shrink-0 items-center text-[10px] leading-none uppercase opacity-70" style={{ color: theme.mutedFg }}>
             {row.host.protocol}
           </span>
         )}
@@ -555,7 +554,7 @@ const HostTreeFlatRowItem = memo<HostTreeFlatRowProps>(({
           style={{ color: theme.termFg }}
         />
       ) : (
-        <span className="flex h-5 min-w-0 flex-1 translate-y-px items-center truncate leading-none">{node.name}</span>
+        <span className="flex min-w-0 flex-1 items-center truncate leading-none">{node.name}</span>
       )}
     </div>
   );

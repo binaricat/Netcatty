@@ -600,6 +600,7 @@ export const ruTerminalMessages: Messages = {
   'snippets.action.selectSnippets': 'Выбрать сниппеты',
   'snippets.panel.newTitle': 'Новый сниппет',
   'snippets.panel.editTitle': 'Редактировать сниппет',
+  'snippets.panel.resizeWidth': 'Изменить ширину панели',
   'snippets.field.description': 'Описание действия',
   'snippets.field.descriptionPlaceholder': 'Например: проверить сетевую нагрузку',
   'snippets.field.package': 'Добавить пакет',

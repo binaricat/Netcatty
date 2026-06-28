@@ -30,7 +30,7 @@ import {
   resolveHostTerminalFontSize,
   resolveHostTerminalThemeId,
 } from "../domain/terminalAppearance";
-import { EnvVar, GroupConfig, Host, Identity, ManagedSource, ProxyConfig, ProxyProfile, SSHKey } from "../types";
+import { EnvVar, GroupConfig, Host, Identity, ManagedSource, ProxyConfig, ProxyProfile, Snippet, SSHKey } from "../types";
 import { DISTRO_COLORS, DISTRO_LOGOS } from "./DistroAvatar";
 import ThemeSelectPanel from "./ThemeSelectPanel";
 import {
@@ -65,6 +65,8 @@ import {
   ProxyPanel,
 } from "./host-details";
 import { HostNotesEditor } from "./host/HostNotesEditor";
+import { HostDetailsScriptsSection } from "./host/HostDetailsScriptsSection";
+import { ensureHostConnectScriptIds } from "@/domain/hostConnectScripts.ts";
 
 type CredentialType = "sshid" | "key" | "certificate" | "localKeyFile" | null;
 type SubPanel =
@@ -96,6 +98,8 @@ interface HostDetailsPanelProps {
   groupConfigs?: GroupConfig[];
   layout?: AsidePanelLayout;
   onImportKey?: (draft: Partial<SSHKey>) => SSHKey;
+  snippets?: Snippet[];
+  onSnippetsChange?: (snippets: Snippet[]) => void;
 }
 
 const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
@@ -118,6 +122,8 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
   groupConfigs = [],
   layout = "overlay",
   onImportKey,
+  snippets = [],
+  onSnippetsChange,
 }) => {
   const { t } = useI18n();
   const { checkSshAgent } = useApplicationBackend();
@@ -177,13 +183,18 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
 
   useEffect(() => {
     if (initialData) {
-      setForm(normalizePrimaryTelnetState(initialData));
+      const normalized = normalizePrimaryTelnetState(initialData);
+      setForm(
+        snippets.length > 0
+          ? ensureHostConnectScriptIds(normalized, snippets)
+          : normalized,
+      );
       setGroupInputValue(initialData.group || "");
       setPendingReferenceKeyPath(null);
       setShowPassword(false);
       setShowTelnetPassword(false);
     }
-  }, [initialData]);
+  }, [initialData, snippets]);
 
   const update = <K extends keyof Host>(key: K, value: Host[K]) => {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -827,6 +838,16 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
           effectiveFormDistro={effectiveFormDistro}
           getDistroOptionLabel={getDistroOptionLabel}
         />
+
+        {onSnippetsChange ? (
+          <HostDetailsScriptsSection
+            host={form}
+            onHostChange={setForm}
+            snippets={snippets}
+            onSnippetsChange={onSnippetsChange}
+            t={t}
+          />
+        ) : null}
 
         <HostDetailsAdvancedSections
           t={t}

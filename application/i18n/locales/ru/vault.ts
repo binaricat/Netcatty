@@ -557,6 +557,7 @@ export const ruVaultMessages: Messages = {
   'hostDetails.icon.colorManual': 'Вручную',
   'hostDetails.icon.colorChoice': 'Цвет',
   'hostDetails.icon.autoColorLabel': 'Текущий цвет',
+  'hostDetails.icon.preview': 'Предпросмотр значка',
   'hostDetails.icon.showLibrary': 'Показать библиотеку значков',
   'hostDetails.icon.hideLibrary': 'Скрыть библиотеку значков',
   'hostDetails.icon.autoUsesDistro': 'Использует значок дистрибутива Linux и выбранный цвет для этого хоста.',

@@ -12,6 +12,7 @@ import { Package } from 'lucide-react';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useI18n } from '../application/i18n/I18nProvider';
 import type { Snippet } from '../domain/models';
+import { isScriptSnippet } from '../domain/snippetScript.ts';
 import { Button } from './ui/button';
 import { Combobox } from './ui/combobox';
 import {
@@ -77,7 +78,7 @@ export const QuickAddSnippetDialog: React.FC<QuickAddSnippetDialogProps> = ({
     const handler = (e: Event) => {
       const detail = (e as CustomEvent<{ snippet?: Snippet }>).detail;
       const snippet = detail?.snippet;
-      if (!snippet) return;
+      if (!snippet || isScriptSnippet(snippet)) return;
       setEditing(snippet);
       setLabel(snippet.label ?? '');
       setCommand(snippet.command ?? '');

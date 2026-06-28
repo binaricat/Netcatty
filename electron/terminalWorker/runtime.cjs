@@ -149,6 +149,11 @@ function createSender(parentPort, webContentsId, outputPorts) {
     },
     send(channel, payload) {
       if (channel === "netcatty:data") {
+        parentPort.postMessage({
+          kind: "output-tap",
+          sessionId: payload?.sessionId,
+          data: payload?.data,
+        });
         if (outputPorts?.post?.(payload?.sessionId, payload?.data)) {
           return;
         }

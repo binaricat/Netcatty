@@ -7,14 +7,10 @@
  */
 import type { Snippet } from "../../../domain/models";
 import type { CompletionSuggestion } from "./completionEngine";
+import { snippetAppliesToHost } from "../../../domain/snippetTargets";
 
 const SNIPPET_BASE_SCORE = 2000; // Above history (1000+freq) per "snippet > history".
 const SNIPPET_PREFIX_BONUS = 100;
-
-function appliesToHost(snippet: Snippet, hostId?: string): boolean {
-  if (!snippet.targets || snippet.targets.length === 0) return true;
-  return hostId !== undefined && snippet.targets.includes(hostId);
-}
 
 export function getSnippetSuggestions(
   input: string,
@@ -26,7 +22,7 @@ export function getSnippetSuggestions(
 
   const out: CompletionSuggestion[] = [];
   for (const snippet of snippets) {
-    if (!appliesToHost(snippet, options.hostId)) continue;
+    if (!snippetAppliesToHost(snippet, options.hostId)) continue;
     const label = (snippet.label || "").toLowerCase();
     const firstLine = (snippet.command || "").split("\n")[0].trim().toLowerCase();
 

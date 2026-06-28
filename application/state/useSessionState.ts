@@ -2,6 +2,7 @@ import { MouseEvent,useCallback,useEffect,useMemo,useRef,useState } from 'react'
 import { ConnectionLog,Host,SerialConfig,Snippet,TerminalSession,Workspace,WorkspaceViewMode } from '../../domain/models';
 import { addLogView, getLogViewTabId, removeLogView, type LogView } from './logViewState';
 import { createHostTerminalSession, createLocalTerminalSession, createSerialTerminalSession, type LocalTerminalOptions } from './sessionFactories';
+import { isScriptSnippet } from '../../domain/snippetScript.ts';
 import {
 appendPaneToWorkspaceRoot,
 collectSessionIds,
@@ -967,9 +968,12 @@ export const useSessionState = ({
     const sessionsWithWorkspace = newSessions.map(s => ({
       ...s,
       workspaceId: workspace.id,
-      // Store the command to run after connection
-      startupCommand: resolvedCommand,
-      noAutoRun: snippet.noAutoRun,
+      ...(isScriptSnippet(snippet)
+        ? { pendingScriptId: snippet.id, pendingScript: snippet }
+        : {
+          startupCommand: resolvedCommand,
+          noAutoRun: snippet.noAutoRun,
+        }),
     }));
 
 	    setSessions(prev => [...prev, ...sessionsWithWorkspace]);

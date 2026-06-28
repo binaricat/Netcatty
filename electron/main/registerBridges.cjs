@@ -189,6 +189,16 @@ function createBridgeRegistrar(context) {
     portForwardingBridge.registerHandlers(ipcMain);
     terminalBridge.registerHandlers(ipcMain, { terminalWorkerManager });
 
+    const scriptBridge = require("../bridges/scriptBridge.cjs");
+    scriptBridge.init({
+      sessions,
+      electronModule,
+      terminalBridge,
+      terminalWorkerManager,
+      getMainWindow: () => win,
+    });
+    scriptBridge.registerHandlers(ipcMain);
+
     const { createSystemManagerBridge } = require("../bridges/systemManagerBridge.cjs");
     const systemManagerBridge = createSystemManagerBridge({
       getSessions: () => sessions,

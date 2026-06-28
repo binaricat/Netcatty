@@ -2,7 +2,7 @@
  * Terminal Toolbar
  * Displays high-frequency terminal actions and close button in the terminal status bar.
  */
-import { Check, ChevronRight, Download, FileText, FolderInput, FolderSync, History, Languages, MoreVertical, X, Zap, Palette, Search, TextCursorInput, Upload } from 'lucide-react';
+import { Check, ChevronRight, Download, FileText, FolderInput, FolderSync, History, Languages, MoreVertical, X, Zap, Palette, Search, TextCursorInput, Upload, Circle } from 'lucide-react';
 import React, { useState } from 'react';
 import { useI18n } from '../../application/i18n/I18nProvider';
 import { Host, Snippet } from '../../types';
@@ -45,6 +45,8 @@ export interface TerminalToolbarProps {
     // Terminal encoding
     terminalEncoding?: 'utf-8' | 'gb18030';
     onSetTerminalEncoding?: (encoding: 'utf-8' | 'gb18030') => void;
+    recordingIndicator?: React.ReactNode;
+    onStartRecording?: () => void;
 }
 
 export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
@@ -74,6 +76,8 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
     onToggleComposeBar,
     terminalEncoding,
     onSetTerminalEncoding,
+    recordingIndicator,
+    onStartRecording,
 }) => {
     const { t } = useI18n();
     const [highlightPopoverOpen, setHighlightPopoverOpen] = useState(false);
@@ -399,6 +403,14 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
                             <span className="flex-1 text-left truncate">{t("terminal.toolbar.terminalSettings")}</span>
                         </button>
                     </PopoverClose>
+                    {onStartRecording && status === 'connected' && !recordingIndicator ? (
+                        <PopoverClose asChild>
+                            <button type="button" className={menuItemClass} onClick={onStartRecording}>
+                                <Circle size={12} className="shrink-0 text-red-500" />
+                                <span className="flex-1 text-left truncate">{t('scripts.recording.start')}</span>
+                            </button>
+                        </PopoverClose>
+                    ) : null}
                     {encodingSwitchSupported && onSetTerminalEncoding && (
                         <Popover open={encodingSubmenuOpen} onOpenChange={setEncodingSubmenuOpen}>
                             <PopoverTrigger asChild>
@@ -452,6 +464,8 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
                     )}
                 </PopoverContent>
             </Popover>
+
+            {recordingIndicator}
 
             {showClose && onClose && (
                 <Tooltip>

@@ -96,6 +96,7 @@ export const zhCNVaultMessages: Messages = {
   'hostDetails.icon.colorManual': '手动',
   'hostDetails.icon.colorChoice': '颜色',
   'hostDetails.icon.autoColorLabel': '当前颜色',
+  'hostDetails.icon.preview': '图标预览',
   'hostDetails.icon.showLibrary': '展开图标库',
   'hostDetails.icon.hideLibrary': '收起图标库',
   'hostDetails.icon.autoUsesDistro': '使用 Linux 发行版图标和所选颜色显示此主机。',

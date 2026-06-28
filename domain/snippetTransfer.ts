@@ -2,7 +2,8 @@ import type { Snippet } from "./models";
 import { normalizeVaultOrder } from "./vaultOrder";
 
 export const SNIPPET_EXPORT_KIND = "netcatty.snippets" as const;
-export const SNIPPET_EXPORT_VERSION = 1 as const;
+export const SNIPPET_EXPORT_VERSION = 2 as const;
+export const SNIPPET_EXPORT_VERSION_LEGACY = 1 as const;
 
 export type SnippetImportConflictAction = "skip" | "overwrite";
 
@@ -13,11 +14,16 @@ export type SnippetExportItem = {
   package?: string;
   shortkey?: string;
   noAutoRun?: boolean;
+  kind?: "snippet" | "script";
+  language?: "javascript" | "python";
+  description?: string;
+  trigger?: "manual" | "onConnect" | "onOutput";
+  triggerPattern?: string;
 };
 
 export type SnippetExportPayload = {
   kind: typeof SNIPPET_EXPORT_KIND;
-  version: typeof SNIPPET_EXPORT_VERSION;
+  version: typeof SNIPPET_EXPORT_VERSION | typeof SNIPPET_EXPORT_VERSION_LEGACY;
   exportedAt: string;
   snippetPackages: string[];
   snippets: SnippetExportItem[];
@@ -94,8 +100,13 @@ const toExportItem = (snippet: Snippet): SnippetExportItem => ({
   command: snippet.command,
   tags: Array.isArray(snippet.tags) ? [...snippet.tags] : [],
   package: snippet.package || "",
-  shortkey: snippet.shortkey,
-  noAutoRun: snippet.noAutoRun,
+  ...(snippet.shortkey ? { shortkey: snippet.shortkey } : {}),
+  ...(snippet.noAutoRun ? { noAutoRun: snippet.noAutoRun } : {}),
+  ...(snippet.kind ? { kind: snippet.kind } : {}),
+  ...(snippet.language ? { language: snippet.language } : {}),
+  ...(snippet.description ? { description: snippet.description } : {}),
+  ...(snippet.trigger ? { trigger: snippet.trigger } : {}),
+  ...(snippet.triggerPattern ? { triggerPattern: snippet.triggerPattern } : {}),
 });
 
 export const buildSnippetExportPayload = ({
@@ -139,11 +150,28 @@ const sanitizeImportItem = (value: unknown): SnippetExportItem | null => {
       ? value.shortkey.trim()
       : undefined,
     noAutoRun: value.noAutoRun === true ? true : undefined,
+    kind: value.kind === "script" ? "script" : undefined,
+    language: value.language === "javascript" || value.language === "python"
+      ? value.language
+      : undefined,
+    description: typeof value.description === "string" && value.description.trim()
+      ? value.description.trim()
+      : undefined,
+    trigger: value.trigger === "onConnect" || value.trigger === "onOutput"
+      ? value.trigger
+      : undefined,
+    triggerPattern: typeof value.triggerPattern === "string" && value.triggerPattern.trim()
+      ? value.triggerPattern.trim()
+      : undefined,
   };
 };
 
 const parseSnippetImportObject = (parsed: Record<string, unknown>): SnippetExportPayload => {
-  if (parsed.kind !== SNIPPET_EXPORT_KIND || parsed.version !== SNIPPET_EXPORT_VERSION) {
+  const version = parsed.version;
+  if (parsed.kind !== SNIPPET_EXPORT_KIND) {
+    throw new Error("Unsupported snippet import file.");
+  }
+  if (version !== SNIPPET_EXPORT_VERSION && version !== SNIPPET_EXPORT_VERSION_LEGACY) {
     throw new Error("Unsupported snippet import file.");
   }
   if (!Array.isArray(parsed.snippets)) {
@@ -156,7 +184,7 @@ const parseSnippetImportObject = (parsed: Record<string, unknown>): SnippetExpor
 
   return {
     kind: SNIPPET_EXPORT_KIND,
-    version: SNIPPET_EXPORT_VERSION,
+    version: version === SNIPPET_EXPORT_VERSION ? SNIPPET_EXPORT_VERSION : SNIPPET_EXPORT_VERSION_LEGACY,
     exportedAt: typeof parsed.exportedAt === "string" ? parsed.exportedAt : "",
     snippetPackages: collectSnippetPackagePaths(
       snippets,
@@ -214,8 +242,13 @@ const toImportedSnippet = (item: SnippetExportItem, id: string, order?: number):
   tags: item.tags || [],
   package: item.package || "",
   targets: [],
-  shortkey: item.shortkey,
-  noAutoRun: item.noAutoRun,
+  ...(item.shortkey ? { shortkey: item.shortkey } : {}),
+  ...(item.noAutoRun ? { noAutoRun: item.noAutoRun } : {}),
+  ...(item.kind ? { kind: item.kind } : {}),
+  ...(item.language ? { language: item.language } : {}),
+  ...(item.description ? { description: item.description } : {}),
+  ...(item.trigger ? { trigger: item.trigger } : {}),
+  ...(item.triggerPattern ? { triggerPattern: item.triggerPattern } : {}),
   order,
 });
 

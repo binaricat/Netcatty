@@ -376,7 +376,7 @@ export const zhCNCoreMessages: Messages = {
   'vault.nav.keychain': '钥匙串',
   'vault.nav.proxies': '代理',
   'vault.nav.portForwarding': '端口转发',
-  'vault.nav.snippets': '代码片段',
+  'vault.nav.snippets': '脚本',
   'vault.nav.notes': '笔记',
   'vault.nav.knownHosts': '已知主机',
   'vault.nav.logs': '日志',

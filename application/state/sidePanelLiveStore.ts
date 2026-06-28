@@ -8,6 +8,7 @@ export type SidePanelLiveSnapshot = {
   activeTerminalSessionForSystem: TerminalSession | null;
   activeSystemSessionHost: Host | null;
   focusedHost: Host | null;
+  focusedSessionId: string | null;
   historySessionId: string | null;
   resolvedPreviewTheme: TerminalTheme | null;
   previewedOrVisibleThemeId: string | undefined;
@@ -28,6 +29,7 @@ const EMPTY_SNAPSHOT: SidePanelLiveSnapshot = {
   activeTerminalSessionForSystem: null,
   activeSystemSessionHost: null,
   focusedHost: null,
+  focusedSessionId: null,
   historySessionId: null,
   resolvedPreviewTheme: null,
   previewedOrVisibleThemeId: undefined,
@@ -52,6 +54,7 @@ function liveSnapshotEqual(a: SidePanelLiveSnapshot, b: SidePanelLiveSnapshot): 
     && a.activeTerminalSessionForSystem === b.activeTerminalSessionForSystem
     && a.activeSystemSessionHost === b.activeSystemSessionHost
     && a.focusedHost === b.focusedHost
+    && a.focusedSessionId === b.focusedSessionId
     && a.historySessionId === b.historySessionId
     && a.resolvedPreviewTheme === b.resolvedPreviewTheme
     && a.previewedOrVisibleThemeId === b.previewedOrVisibleThemeId

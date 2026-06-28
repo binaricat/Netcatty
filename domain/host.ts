@@ -1,5 +1,6 @@
-import { Host, TerminalSettings } from './models';
+import { Host, Snippet, TerminalSettings } from './models';
 import { sanitizeHostIconFields } from './hostIcon';
+import { migrateHostConnectScriptIds } from './hostConnectScripts.ts';
 import { migrateDeprecatedFontOverride } from '../infrastructure/config/fonts';
 
 export type HostLabelRenameResult =
@@ -348,7 +349,7 @@ export const resolveHostKeepalive = (
   };
 };
 
-export const sanitizeHost = (host: Host): Host => {
+export const sanitizeHost = (host: Host, snippets: Snippet[] = []): Host => {
   const cleanHostname = (host.hostname || '').trim().split(/\s+/)[0];
   const cleanDistro = normalizeDistroId(host.distro);
   const cleanManualDistro = normalizeDistroId(host.manualDistro);
@@ -361,6 +362,13 @@ export const sanitizeHost = (host: Host): Host => {
   const cleanHostIcon = sanitizeHostIconFields(host);
   const migrated = migrateDeprecatedFontOverride(host);
   const cleanNotes = host.notes?.trim() || undefined;
+  const connectScriptIds = host.connectScriptIds ?? (
+    snippets.length > 0
+      ? migrateHostConnectScriptIds(host, snippets)
+      : host.loginScriptId
+        ? [host.loginScriptId]
+        : undefined
+  );
   return {
     ...migrated,
     hostname: cleanHostname,
@@ -374,5 +382,6 @@ export const sanitizeHost = (host: Host): Host => {
     iconColorCustom: undefined,
     ...cleanHostIcon,
     notes: cleanNotes,
+    connectScriptIds: connectScriptIds && connectScriptIds.length > 0 ? connectScriptIds : undefined,
   };
 };

@@ -1203,6 +1203,39 @@ function createPreloadApi(ctx) {
     ipcRenderer.on("netcatty:ai:agent:exit", handler);
     return () => ipcRenderer.removeListener("netcatty:ai:agent:exit", handler);
   },
+  scriptRun: async (params) => ipcRenderer.invoke("netcatty:script:run", params),
+  scriptStop: async (runId) => ipcRenderer.invoke("netcatty:script:stop", { runId }),
+  scriptPause: async (runId) => ipcRenderer.invoke("netcatty:script:pause", { runId }),
+  scriptResume: async (runId) => ipcRenderer.invoke("netcatty:script:resume", { runId }),
+  scriptGetRuns: async (sessionId) => ipcRenderer.invoke("netcatty:script:get-runs", sessionId ? { sessionId } : {}),
+  scriptDialogResponse: async (requestId, value, cancelled) =>
+    ipcRenderer.invoke("netcatty:script:dialog-response", { requestId, value, cancelled }),
+  scriptScreenSnapshotResponse: async (requestId, snapshot) =>
+    ipcRenderer.invoke("netcatty:script:screen-snapshot-response", { requestId, snapshot }),
+  scriptRecordingStart: async (sessionId) => ipcRenderer.invoke("netcatty:script:recording:start", { sessionId }),
+  scriptRecordingStop: async (sessionId) => ipcRenderer.invoke("netcatty:script:recording:stop", { sessionId }),
+  scriptRecordingAppendStep: async (sessionId, step) =>
+    ipcRenderer.invoke("netcatty:script:recording:append-step", { sessionId, step }),
+  onScriptRunsUpdated: (cb) => {
+    const handler = (_event, payload) => cb(payload);
+    ipcRenderer.on("netcatty:script:runs-updated", handler);
+    return () => ipcRenderer.removeListener("netcatty:script:runs-updated", handler);
+  },
+  onScriptDialogRequest: (cb) => {
+    const handler = (_event, payload) => cb(payload);
+    ipcRenderer.on("netcatty:script:dialog-request", handler);
+    return () => ipcRenderer.removeListener("netcatty:script:dialog-request", handler);
+  },
+  onScriptScreenSnapshotRequest: (cb) => {
+    const handler = (_event, payload) => cb(payload);
+    ipcRenderer.on("netcatty:script:screen-snapshot-request", handler);
+    return () => ipcRenderer.removeListener("netcatty:script:screen-snapshot-request", handler);
+  },
+  onScriptSessionInput: (cb) => {
+    const handler = (_event, payload) => cb(payload);
+    ipcRenderer.on("netcatty:script:session-input", handler);
+    return () => ipcRenderer.removeListener("netcatty:script:session-input", handler);
+  },
     };
   }
 }

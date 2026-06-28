@@ -93,14 +93,24 @@ const DistroAvatarInner: React.FC<DistroAvatarProps> = ({
   const [errored, setErrored] = React.useState(false);
   const bg = DISTRO_COLORS[distro] || DISTRO_COLORS.default;
 
-  // Size variants — rounded rects (same corner style as SessionTabIcon in TopTabItems)
+  // Corner radii ~27% of edge (matches lg rounded-xl on 44px) — avoids circles on small sizes
+  const radiusClasses = {
+    xs: "rounded-[4px]",
+    sm: "rounded-[5px]",
+    md: "rounded-lg",
+    tree: "rounded-[6px]",
+    log: "rounded-[10px]",
+    lg: "rounded-xl",
+  } as const;
+
+  // Size variants — rounded rects aligned with vault host list (lg = rounded-xl)
   const sizeClasses = {
-    xs: "h-4 w-4 rounded",
-    sm: "h-5 w-5 rounded",
-    md: "h-8 w-8 rounded",
-    tree: "h-6 w-6 rounded",
-    log: "h-9 w-9 rounded-xl",
-    lg: "h-11 w-11 rounded-xl",
+    xs: "h-4 w-4",
+    sm: "h-5 w-5",
+    md: "h-8 w-8",
+    tree: "h-6 w-6",
+    log: "h-9 w-9",
+    lg: "h-11 w-11",
   };
   const iconSizes = {
     xs: "h-2.5 w-2.5",
@@ -111,7 +121,7 @@ const DistroAvatarInner: React.FC<DistroAvatarProps> = ({
     lg: "h-5 w-5",
   };
 
-  const containerClass = sizeClasses[size];
+  const containerClass = cn(sizeClasses[size], radiusClasses[size]);
   const iconSize = iconSizes[size];
 
   // Show USB icon for serial hosts
@@ -119,7 +129,7 @@ const DistroAvatarInner: React.FC<DistroAvatarProps> = ({
     return (
       <div
         className={cn(
-          "shrink-0 rounded flex items-center justify-center bg-amber-600 text-white dark:bg-amber-400 dark:text-slate-950",
+          "shrink-0 flex items-center justify-center bg-amber-600 text-white dark:bg-amber-400 dark:text-slate-950",
           containerClass,
           className,
         )}
@@ -135,7 +145,7 @@ const DistroAvatarInner: React.FC<DistroAvatarProps> = ({
     return (
       <div
         className={cn(
-          "shrink-0 rounded flex items-center justify-center text-white",
+          "shrink-0 flex items-center justify-center text-white",
           containerClass,
           className,
         )}
@@ -150,7 +160,7 @@ const DistroAvatarInner: React.FC<DistroAvatarProps> = ({
     return (
       <div
         className={cn(
-          "shrink-0 rounded flex items-center justify-center overflow-hidden",
+          "shrink-0 flex items-center justify-center overflow-hidden",
           containerClass,
           !customColor && bg,
           className,
@@ -170,7 +180,7 @@ const DistroAvatarInner: React.FC<DistroAvatarProps> = ({
   return (
     <div
       className={cn(
-        "shrink-0 rounded flex items-center justify-center bg-primary text-primary-foreground",
+        "shrink-0 flex items-center justify-center bg-primary text-primary-foreground",
         containerClass,
         className,
       )}

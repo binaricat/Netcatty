@@ -52,8 +52,12 @@ export const STORAGE_KEY_VAULT_NOTES_VIEW_MODE = 'netcatty_vault_notes_view_mode
 export const STORAGE_KEY_VAULT_NOTES_EDITOR_MODE = 'netcatty_vault_notes_editor_mode_v1';
 export const STORAGE_KEY_VAULT_NOTES_SELECTED_GROUP = 'netcatty_vault_notes_selected_group_v1';
 export const STORAGE_KEY_VAULT_NOTES_TREE_WIDTH = 'netcatty_vault_notes_tree_width_v1';
+/** Inline snippet/script edit panel width (px). */
+export const STORAGE_KEY_SNIPPETS_PANEL_WIDTH = 'netcatty_snippets_panel_width_v1';
 /** Inline snippet script editor height (px) in vault edit panel. */
 export const STORAGE_KEY_SNIPPET_SCRIPT_EDITOR_HEIGHT = 'netcatty_snippet_script_editor_height_v1';
+/** Automation script Monaco editor height (px) in vault sidebar. */
+export const STORAGE_KEY_SCRIPT_EDITOR_HEIGHT = 'netcatty_script_editor_height_v1';
 /** Terminal compose bar total height (px). */
 export const STORAGE_KEY_COMPOSE_BAR_HEIGHT = 'netcatty_compose_bar_height_v1';
 /** Snippet IDs pinned to the terminal compose bar quick strip. */

@@ -66,8 +66,10 @@ import { getHostSearchMatch } from './lib/searchMatcher';
 import { useDiscoveredShells, resolveShellSetting } from './lib/useDiscoveredShells';
 import { Host, HostProtocol, KnownHost, SerialConfig, Snippet, SSHKey, TerminalSession } from './types';
 import { resolveSnippetCommand } from './components/SnippetExecutionProvider';
-import { AppView } from './application/app/AppView';
+import { isScriptSnippet } from './domain/snippetScript.ts';
+import { ScriptAutomationRoot } from './components/scripts/ScriptAutomationRoot';
 import { AppActiveTabChrome } from './application/app/AppActiveTabChrome';
+import { AppView } from './application/app/AppView';
 import { useAppStartupEffects } from './application/app/useAppStartupEffects';
 import { LogViewWrapper, SftpViewMount, TerminalLayerMount, VaultViewContainer } from './application/app/AppMounts';
 import { handleTrayJumpToSessionImpl, handleTrayTogglePortForwardImpl, handleTrayPanelConnectImpl, handleGlobalHotkeyKeyDownImpl, handleEscapeKeyDownImpl, handleKeyboardInteractiveSubmitImpl, handleKeyboardInteractiveCancelImpl, handlePassphraseSubmitImpl, handlePassphraseCancelImpl, handlePassphraseSkipImpl, createLocalTerminalWithCurrentShellImpl, splitSessionWithCurrentShellImpl, copySessionWithCurrentShellImpl, copySessionToNewWindowWithCurrentShellImpl, confirmIfBusyLocalTerminalImpl, closeTabsBatchImpl, executeHotkeyActionImpl, handleCreateLocalTerminalImpl, handleConnectToHostImpl, handleTerminalDataCaptureImpl, hasMultipleProtocolsImpl, handleHostConnectWithProtocolCheckImpl, handleProtocolSelectImpl, handleToggleThemeImpl, handleRootContextMenuImpl } from './application/app/AppHandlers';
@@ -284,6 +286,11 @@ function App({ settings }: { settings: SettingsState }) {
 
   const handleRunSnippet = useCallback(
     async (snippet: Snippet, targetHosts: Host[]) => {
+      if (targetHosts.length === 0) return;
+      if (isScriptSnippet(snippet)) {
+        runSnippet(snippet, targetHosts);
+        return;
+      }
       const command = await resolveSnippetCommand(snippet);
       if (command === null) return;
       runSnippet(snippet, targetHosts, command);
@@ -1204,6 +1211,7 @@ function AppWithProviders() {
     <I18nProvider locale={settings.uiLanguage}>
       <ToastProvider>
         <TooltipProvider delayDuration={300}>
+          <ScriptAutomationRoot />
           <App settings={settings} />
         </TooltipProvider>
       </ToastProvider>

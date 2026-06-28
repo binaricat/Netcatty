@@ -46,6 +46,13 @@ export function TerminalLayerTabBridge({ stableRef }: { stableRef: StableRef }) 
   );
   const isFocusMode = activeWorkspace?.viewMode === 'focus';
   const focusedSessionId = activeWorkspace?.focusedSessionId;
+  const effectiveFocusedSessionId = useMemo((): string | null => {
+    if (activeWorkspace) {
+      if (focusedSessionId) return focusedSessionId;
+      return sessions.find((session) => session.workspaceId === activeWorkspace.id)?.id ?? null;
+    }
+    return activeSession?.id ?? null;
+  }, [activeSession?.id, activeWorkspace, focusedSessionId, sessions]);
 
   s.activeWorkspaceRef.current = activeWorkspace;
   s.activeSessionRef.current = activeSession;
@@ -137,7 +144,7 @@ export function TerminalLayerTabBridge({ stableRef }: { stableRef: StableRef }) 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [linkedTerminalSessionIdForSftp, s.terminalCwdRevision]);
 
-  const historySessionId = (activeWorkspace ? focusedSessionId : activeSession?.id) ?? null;
+  const historySessionId = effectiveFocusedSessionId;
   const activeTerminalSessionForSystem = useMemo(
     () => resolveSystemSidebarSession(sessions, activeWorkspace, focusedSessionId, activeSession),
     [activeSession, activeWorkspace, focusedSessionId, sessions],
@@ -216,6 +223,7 @@ export function TerminalLayerTabBridge({ stableRef }: { stableRef: StableRef }) 
     activeTerminalSessionForSystem: activeTerminalSessionForSystem ?? null,
     activeSystemSessionHost,
     focusedHost,
+    focusedSessionId: effectiveFocusedSessionId,
     historySessionId,
     resolvedPreviewTheme: themeState.resolvedPreviewTheme,
     previewedOrVisibleThemeId: themeState.previewedOrVisibleThemeId,
@@ -400,6 +408,13 @@ export function TerminalLayerTabBridge({ stableRef }: { stableRef: StableRef }) 
     setSidePanelWidth: s.setSidePanelWidth,
     handleSnippetClickForFocusedSession: s.handleSnippetClickForFocusedSession,
     handleSnippetFromPanel: s.handleSnippetFromPanel,
+    handleRunScriptFromPanel: s.handleRunScriptFromPanel,
+    handleRunScriptOnWorkspace: s.handleRunScriptOnWorkspace,
+    handleStartRecordingFromPanel: s.handleStartRecordingFromPanel,
+    scriptRuns: s.scriptRuns,
+    handleStopScriptRun: s.handleStopScriptRun,
+    handlePauseScriptRun: s.handlePauseScriptRun,
+    handleResumeScriptRun: s.handleResumeScriptRun,
     handleSnippetExecutorChange: s.handleSnippetExecutorChange,
     handleBroadcastInterruptPriorityChange: s.handleBroadcastInterruptPriorityChange,
     handleProgrammaticCommandLogRewriteChange: s.handleProgrammaticCommandLogRewriteChange,

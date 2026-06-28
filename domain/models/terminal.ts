@@ -1,4 +1,4 @@
-import type { SerialConfig } from './connection';
+import type { SerialConfig, Snippet } from './connection';
 import type { CodingCliProviderId } from '../codingCliProviders';
 import {
   normalizeHibernateHiddenTabsDelaySec,
@@ -417,6 +417,10 @@ export interface TerminalSession {
   hostname: string;
   status: 'connecting' | 'connected' | 'disconnected';
   workspaceId?: string;
+  /** Script to auto-run after connect (multi-host script runner). */
+  pendingScriptId?: string;
+  /** Snapshot used by "Run now" so unsaved editor changes run exactly as shown. */
+  pendingScript?: Snippet;
   startupCommand?: string; // Command to run after connection (for snippet runner)
   noAutoRun?: boolean;     // If true, paste command without auto-executing
   // Connection-time protocol overrides (used instead of looking up from hosts)
