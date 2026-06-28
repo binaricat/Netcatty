@@ -210,7 +210,7 @@ export const QuickScriptEditorDialog: React.FC<QuickScriptEditorDialogProps> = (
     if (!savedSnippet) return;
     const targets = getRunnableHostsForSnippet(savedSnippet, hosts);
     if (targets.length === 0) {
-      toast.error(t('scripts.actions.noSession'));
+      toast.error(t('scripts.actions.noRunnableHosts'));
       return;
     }
     if (onRunSnippet) {

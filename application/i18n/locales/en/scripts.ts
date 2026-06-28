@@ -24,6 +24,7 @@ export const enScriptsMessages = {
   'scripts.actions.runParallel': 'Run on all tabs (parallel)',
   'scripts.actions.runSequential': 'Run on all tabs (sequential)',
   'scripts.actions.skippedConnectingSessions': '{count} tab(s) still connecting and were skipped',
+  'scripts.actions.noRunnableHosts': 'No connectable hosts match this script\'s targets',
   'scripts.sidePanel.library': 'Library',
   'scripts.sidePanel.running': 'Running',
   'scripts.sidePanel.newScript': 'New script',

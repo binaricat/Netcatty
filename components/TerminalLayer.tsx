@@ -108,6 +108,21 @@ const removeMountedSidePanelTabId = (
   tabId: string,
 ): string[] => tabIds.filter((id) => id !== tabId);
 
+function buildScriptSessionMeta(
+  sessionId: string,
+  sessions: TerminalSession[],
+  hosts: Host[],
+) {
+  const session = sessions.find((entry) => entry.id === sessionId);
+  if (!session) return undefined;
+  const host = hosts.find((entry) => entry.id === session.hostId);
+  return {
+    connected: session.status === 'connected',
+    hostname: host?.hostname ?? session.hostname,
+    username: host?.username ?? session.username,
+  };
+}
+
 const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   hosts,
   portForwardingRules = [],
@@ -1285,7 +1300,11 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     if (!sessionId) return;
     if (isScriptSnippet(snippet)) {
       try {
-        await runAutomationScript({ snippet, sessionId });
+        await runAutomationScript({
+          snippet,
+          sessionId,
+          sessionMeta: buildScriptSessionMeta(sessionId, sessionsRef.current, hosts),
+        });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         toast.error(message.includes('Observer mode') ? t('scripts.observer.blocked') : message);
@@ -1295,18 +1314,22 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     const command = await resolveSnippetCommand(snippet);
     if (command === null) return;
     handleSnippetClickForFocusedSession(command, snippet.noAutoRun);
-  }, [getActiveTerminalSessionId, handleSnippetClickForFocusedSession, t]);
+  }, [getActiveTerminalSessionId, handleSnippetClickForFocusedSession, hosts, t]);
 
   const handleRunScriptFromPanel = useCallback(async (snippet: Snippet) => {
     const sessionId = getActiveTerminalSessionId();
     if (!sessionId) return;
     try {
-      await runAutomationScript({ snippet, sessionId });
+      await runAutomationScript({
+        snippet,
+        sessionId,
+        sessionMeta: buildScriptSessionMeta(sessionId, sessionsRef.current, hosts),
+      });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       toast.error(message.includes('Observer mode') ? t('scripts.observer.blocked') : message);
     }
-  }, [getActiveTerminalSessionId, t]);
+  }, [getActiveTerminalSessionId, hosts, t]);
 
   const handleRunScriptOnWorkspace = useCallback(async (
     snippet: Snippet,
@@ -1320,7 +1343,11 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
         return;
       }
       try {
-        await runAutomationScript({ snippet, sessionId });
+        await runAutomationScript({
+          snippet,
+          sessionId,
+          sessionMeta: buildScriptSessionMeta(sessionId, sessionsRef.current, hosts),
+        });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         toast.error(message.includes('Observer mode') ? t('scripts.observer.blocked') : message);
@@ -1344,17 +1371,23 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       toast.info(t('scripts.actions.skippedConnectingSessions', { count: skippedConnecting }));
     }
     try {
-      await runAutomationScript({
+      const runOnSession = (sid: string) => runAutomationScript({
         snippet,
-        sessionId: sessionIds[0],
-        sessionIds,
-        mode,
+        sessionId: sid,
+        sessionMeta: buildScriptSessionMeta(sid, sessionsRef.current, hosts),
       });
+      if (mode === 'sequential') {
+        for (const sid of sessionIds) {
+          await runOnSession(sid);
+        }
+      } else {
+        await Promise.all(sessionIds.map((sid) => runOnSession(sid)));
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       toast.error(message.includes('Observer mode') ? t('scripts.observer.blocked') : message);
     }
-  }, [getActiveTerminalSessionId, t]);
+  }, [getActiveTerminalSessionId, hosts, t]);
 
   useEffect(() => {
     const handler = (event: Event) => {

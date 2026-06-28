@@ -9,7 +9,7 @@ type OutputTriggerContext = {
   sessionId: string;
   hostId?: string;
   snippets: Snippet[];
-  onRunScript: (snippet: Snippet, sessionId: string) => void;
+  onRunScript: (snippet: Snippet, sessionId: string) => void | Promise<void>;
 };
 
 function isSessionScriptRunActive(sessionId: string): boolean {
@@ -50,8 +50,13 @@ export function useOutputTriggers({
       try {
         const regex = new RegExp(snippet.triggerPattern);
         if (regex.test(text)) {
-          lastFiredBufferLengthRef.current.set(key, bufferLength);
-          onRunScript(snippet, sessionId);
+          void Promise.resolve(onRunScript(snippet, sessionId))
+            .then(() => {
+              lastFiredBufferLengthRef.current.set(key, bufferLength);
+            })
+            .catch(() => {
+              // Keep the trigger armed so a failed start can retry on the same output.
+            });
         }
       } catch {
         // ignore invalid regex

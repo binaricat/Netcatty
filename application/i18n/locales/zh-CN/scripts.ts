@@ -24,6 +24,7 @@ export const zhCNScriptsMessages = {
   'scripts.actions.runParallel': '在所有标签页并行运行',
   'scripts.actions.runSequential': '在所有标签页顺序运行',
   'scripts.actions.skippedConnectingSessions': '有 {count} 个标签仍在连接中，已跳过',
+  'scripts.actions.noRunnableHosts': '没有与脚本目标匹配的可连接主机',
   'scripts.sidePanel.library': '脚本库',
   'scripts.sidePanel.running': '运行中',
   'scripts.sidePanel.newScript': '新建脚本',
