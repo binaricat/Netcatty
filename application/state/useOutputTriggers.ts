@@ -21,30 +21,40 @@ function waitForSessionScriptRunActive(sessionId: string, timeoutMs = 5000): Pro
     return Promise.resolve(true);
   }
   return new Promise((resolve) => {
-    const startedAt = Date.now();
+    let settled = false;
+    const finish = (value: boolean) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutId);
+      unsubscribe();
+      resolve(value);
+    };
+    const timeoutId = setTimeout(() => finish(false), timeoutMs);
     const unsubscribe = subscribeScriptRuns(() => {
       if (isSessionScriptRunActive(sessionId)) {
-        unsubscribe();
-        resolve(true);
-        return;
-      }
-      if (Date.now() - startedAt >= timeoutMs) {
-        unsubscribe();
-        resolve(false);
+        finish(true);
       }
     });
   });
 }
 
-function waitForSessionScriptRunInactive(sessionId: string): Promise<void> {
+function waitForSessionScriptRunInactive(sessionId: string, timeoutMs = 3_600_000): Promise<void> {
   if (!isSessionScriptRunActive(sessionId)) {
     return Promise.resolve();
   }
   return new Promise((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutId);
+      unsubscribe();
+      resolve();
+    };
+    const timeoutId = setTimeout(finish, timeoutMs);
     const unsubscribe = subscribeScriptRuns(() => {
       if (!isSessionScriptRunActive(sessionId)) {
-        unsubscribe();
-        resolve();
+        finish();
       }
     });
   });
@@ -58,7 +68,6 @@ export function useOutputTriggers({
 }: OutputTriggerContext) {
   const bufferRef = useRef('');
   const launchingRef = useRef(false);
-  const hadActiveScriptRef = useRef(false);
 
   const scanBuffer = useCallback((recentChunk: string) => {
     if (isSessionScriptRunActive(sessionId) || launchingRef.current) {
@@ -110,20 +119,7 @@ export function useOutputTriggers({
   useEffect(() => {
     bufferRef.current = '';
     launchingRef.current = false;
-    hadActiveScriptRef.current = isSessionScriptRunActive(sessionId);
   }, [sessionId, hostId]);
-
-  useEffect(() => {
-    return subscribeScriptRuns((runs) => {
-      const active = runs.some((run) =>
-        run.sessionId === sessionId && (run.status === 'running' || run.status === 'paused'),
-      );
-      if (hadActiveScriptRef.current && !active) {
-        scanBuffer('');
-      }
-      hadActiveScriptRef.current = active;
-    });
-  }, [scanBuffer, sessionId]);
 
   return { appendOutput };
 }
