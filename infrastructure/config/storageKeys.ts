@@ -208,5 +208,3 @@ export const STORAGE_KEY_DEFAULT_KEY_PASSPHRASES = 'netcatty_default_key_passphr
 // Debug Flags (no _v1 suffix — developer-only, not persisted data)
 export const STORAGE_KEY_DEBUG_HOTKEYS = 'debug.hotkeys';
 export const STORAGE_KEY_DEBUG_UPDATE_DEMO = 'debug.updateDemo';
-/** Set to "1" in localStorage to log onOutput trigger pipeline in production builds. */
-export const STORAGE_KEY_OUTPUT_TRIGGER_DEBUG = 'netcatty.outputTriggerDebug';

@@ -1,16 +1,10 @@
 import { useCallback, useEffect, useRef } from 'react';
 import type { Snippet } from '@/domain/models';
+import { snippetAppliesToOutputTrigger } from '@/domain/snippetTargets.ts';
 import { isScriptSnippet } from '@/domain/snippetScript.ts';
 import { createTerminalOutputTriggerFilter } from '@/domain/terminalOutputTriggerFilter.ts';
 import { netcattyBridge } from '@/infrastructure/services/netcattyBridge.ts';
 import { getActiveScriptRunForSession } from '@/application/state/scriptAutomationCoordinator.ts';
-import {
-  getOutputTriggerSkipReason,
-  previewTerminalBytes,
-  summarizeOnOutputSnippets,
-  traceOutputTrigger,
-} from '@/application/state/outputTriggerDiagnostics.ts';
-import { logger } from '@/lib/logger.ts';
 
 type OutputTriggerContext = {
   sessionId: string;
@@ -49,39 +43,8 @@ export function useOutputTriggers({
   const lastTriggerMatchEndRef = useRef(new Map<string, number>());
   const serverOutputFilterRef = useRef(createTerminalOutputTriggerFilter());
 
-  useEffect(() => {
-    const candidates = summarizeOnOutputSnippets(snippets, hostId);
-    const eligible = candidates.filter((item) => item.skipReason === 'eligible');
-    traceOutputTrigger('session.init', {
-      sessionId,
-      hostId,
-      snippetCount: snippets.length,
-      onOutputCandidates: candidates.length,
-      eligibleCount: eligible.length,
-      eligible: eligible.map((item) => ({
-        id: item.id,
-        label: item.label,
-        pattern: item.triggerPattern,
-      })),
-      skipped: candidates.filter((item) => item.skipReason !== 'eligible'),
-    });
-  }, [hostId, sessionId, snippets]);
-
   const scanBuffer = useCallback((recentChunk: string) => {
-    if (!recentChunk) {
-      traceOutputTrigger('scan.skip', { sessionId, reason: 'empty-chunk' });
-      return;
-    }
-    if (isSessionScriptRunActive(sessionId)) {
-      traceOutputTrigger('scan.skip', {
-        sessionId,
-        reason: 'script-run-active',
-        activeRun: getActiveScriptRunForSession(sessionId)?.runId,
-      });
-      return;
-    }
-    if (launchingRef.current) {
-      traceOutputTrigger('scan.skip', { sessionId, reason: 'launching' });
+    if (!recentChunk || isSessionScriptRunActive(sessionId) || launchingRef.current) {
       return;
     }
 
@@ -91,153 +54,62 @@ export function useOutputTriggers({
     const chunkStartInSlice = Math.max(0, chunkWithOverlap.length - recentChunk.length);
     const chunkBaseOffset = text.length - chunkWithOverlap.length;
 
-    traceOutputTrigger('scan.start', {
-      sessionId,
-      recentPreview: previewTerminalBytes(recentChunk),
-      bufferLen: text.length,
-      overlapPreview: previewTerminalBytes(chunkWithOverlap, 240),
-      chunkStartInSlice,
-    });
-
     for (const snippet of snippets) {
       if (isSessionScriptRunActive(sessionId) || launchingRef.current) {
-        traceOutputTrigger('scan.abort', { sessionId, snippetId: snippet.id, reason: 'script-run-or-launching' });
         return;
       }
-
-      const skipReason = getOutputTriggerSkipReason(snippet, hostId);
-      if (skipReason !== 'eligible') {
-        if (snippet.trigger === 'onOutput' || isScriptSnippet(snippet)) {
-          traceOutputTrigger('scan.candidate.skip', {
-            sessionId,
-            snippetId: snippet.id,
-            label: snippet.label,
-            reason: skipReason,
-            kind: snippet.kind ?? 'snippet',
-            trigger: snippet.trigger ?? 'manual',
-            triggerPattern: snippet.triggerPattern,
-            targetsAllHosts: snippet.targetsAllHosts ?? false,
-            targetCount: snippet.targets?.length ?? 0,
-            hostId,
-          });
-        }
+      if (!isScriptSnippet(snippet) || snippet.trigger !== 'onOutput' || !snippet.triggerPattern || !snippet.id) {
         continue;
       }
-
+      if (!snippetAppliesToOutputTrigger(snippet, hostId)) continue;
       try {
-        const matched = findMatchEndingAfter(chunkWithOverlap, snippet.triggerPattern!, chunkStartInSlice);
+        const matched = findMatchEndingAfter(chunkWithOverlap, snippet.triggerPattern, chunkStartInSlice);
         if (!matched) {
-          traceOutputTrigger('scan.candidate.no-match', {
-            sessionId,
-            snippetId: snippet.id,
-            label: snippet.label,
-            pattern: snippet.triggerPattern,
-            chunkStartInSlice,
-          });
           continue;
         }
         const matchEnd = chunkBaseOffset + matched.endOffset;
-        const lastMatchEnd = lastTriggerMatchEndRef.current.get(snippet.id!) ?? -1;
+        const lastMatchEnd = lastTriggerMatchEndRef.current.get(snippet.id) ?? -1;
         if (matchEnd <= lastMatchEnd) {
-          traceOutputTrigger('scan.candidate.dedup', {
-            sessionId,
-            snippetId: snippet.id,
-            label: snippet.label,
-            match: matched.value,
-            matchEnd,
-            lastMatchEnd,
-          });
           continue;
         }
-        const matchedSnippetId = snippet.id!;
+        const matchedSnippetId = snippet.id;
         launchingRef.current = true;
         lastTriggerMatchEndRef.current.set(matchedSnippetId, matchEnd);
-        traceOutputTrigger('scan.launch', {
-          sessionId,
-          snippetId: matchedSnippetId,
-          label: snippet.label,
-          pattern: snippet.triggerPattern,
-          match: matched.value,
-          matchEnd,
-        });
         void Promise.resolve(onRunScript(snippet, sessionId))
-          .then(() => {
-            traceOutputTrigger('scan.launch.ok', { sessionId, snippetId: matchedSnippetId });
-          })
-          .catch((err) => {
-            const message = err instanceof Error ? err.message : String(err);
-            traceOutputTrigger('scan.launch.error', { sessionId, snippetId: matchedSnippetId, message });
-            logger.warn('[output-trigger] script launch failed', { sessionId, snippetId: matchedSnippetId, message });
+          .catch(() => {
+            // Failed starts can retry on the next matching output chunk.
           })
           .finally(() => {
             launchingRef.current = false;
           });
         return;
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        traceOutputTrigger('scan.candidate.invalid-regex', {
-          sessionId,
-          snippetId: snippet.id,
-          label: snippet.label,
-          pattern: snippet.triggerPattern,
-          message,
-        });
+      } catch {
+        // ignore invalid regex
       }
     }
-
-    traceOutputTrigger('scan.done-no-match', { sessionId });
   }, [hostId, onRunScript, sessionId, snippets]);
 
   const appendOutput = useCallback((chunk: string) => {
-    if (!chunk) {
-      traceOutputTrigger('output.skip', { sessionId, reason: 'empty-chunk' });
-      return;
-    }
-    traceOutputTrigger('output.raw', {
-      sessionId,
-      rawLen: chunk.length,
-      preview: previewTerminalBytes(chunk),
-    });
-    const { scannableText, alternateScreenActive, meta } = serverOutputFilterRef.current.processServerChunk(chunk);
-    traceOutputTrigger('output.filtered', {
-      sessionId,
-      alternateScreenActive,
-      meta,
-      scannablePreview: previewTerminalBytes(scannableText),
-    });
-    if (!scannableText) {
-      traceOutputTrigger('output.skip', {
-        sessionId,
-        reason: meta.dropReason ?? 'empty-scannable',
-        alternateScreenActive,
-      });
-      return;
-    }
-    if (alternateScreenActive) {
-      traceOutputTrigger('output.skip', { sessionId, reason: 'alternate-screen-active' });
+    if (!chunk) return;
+    const { scannableText, alternateScreenActive } = serverOutputFilterRef.current.processServerChunk(chunk);
+    if (!scannableText || alternateScreenActive) {
       return;
     }
     bufferRef.current = (bufferRef.current + scannableText).slice(-8192);
     scanBuffer(scannableText);
-  }, [scanBuffer, sessionId]);
+  }, [scanBuffer]);
 
   const noteUserInput = useCallback((data: string) => {
     if (!data) return;
     serverOutputFilterRef.current.noteUserInput(data);
-    traceOutputTrigger('input.note', {
-      sessionId,
-      bytes: data.length,
-      preview: previewTerminalBytes(data),
-    });
-  }, [sessionId]);
+  }, []);
 
   useEffect(() => {
     bufferRef.current = '';
     launchingRef.current = false;
     lastTriggerMatchEndRef.current = new Map();
     serverOutputFilterRef.current.reset();
-    traceOutputTrigger('session.reset', { sessionId, hostId });
-  }, [hostId, sessionId]);
+  }, [sessionId, hostId]);
 
   return { appendOutput, noteUserInput };
 }
