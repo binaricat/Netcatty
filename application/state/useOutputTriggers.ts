@@ -16,14 +16,33 @@ function isSessionScriptRunActive(sessionId: string): boolean {
   return Boolean(getActiveScriptRunForSession(sessionId));
 }
 
-function waitForSessionScriptRunActive(sessionId: string, timeoutMs = 1000): Promise<void> {
+function waitForSessionScriptRunActive(sessionId: string, timeoutMs = 5000): Promise<boolean> {
   if (isSessionScriptRunActive(sessionId)) {
-    return Promise.resolve();
+    return Promise.resolve(true);
   }
   return new Promise((resolve) => {
     const startedAt = Date.now();
     const unsubscribe = subscribeScriptRuns(() => {
-      if (isSessionScriptRunActive(sessionId) || Date.now() - startedAt >= timeoutMs) {
+      if (isSessionScriptRunActive(sessionId)) {
+        unsubscribe();
+        resolve(true);
+        return;
+      }
+      if (Date.now() - startedAt >= timeoutMs) {
+        unsubscribe();
+        resolve(false);
+      }
+    });
+  });
+}
+
+function waitForSessionScriptRunInactive(sessionId: string): Promise<void> {
+  if (!isSessionScriptRunActive(sessionId)) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    const unsubscribe = subscribeScriptRuns(() => {
+      if (!isSessionScriptRunActive(sessionId)) {
         unsubscribe();
         resolve();
       }
@@ -64,7 +83,12 @@ export function useOutputTriggers({
         }
         launchingRef.current = true;
         void Promise.resolve(onRunScript(snippet, sessionId))
-          .then(() => waitForSessionScriptRunActive(sessionId))
+          .then(async () => {
+            const started = await waitForSessionScriptRunActive(sessionId);
+            if (started) {
+              await waitForSessionScriptRunInactive(sessionId);
+            }
+          })
           .catch(() => {
             // Failed starts can retry on the next matching output chunk.
           })

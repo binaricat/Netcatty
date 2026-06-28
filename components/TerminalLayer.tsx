@@ -1380,10 +1380,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       if (mode === 'sequential') {
         for (const sid of sessionIds) {
           const { runId } = await runOnSession(sid);
-          const run = await waitForScriptRun(runId);
-          if (run.status === 'paused') {
-            break;
-          }
+          await waitForScriptRun(runId);
         }
       } else {
         await Promise.all(sessionIds.map((sid) => runOnSession(sid)));

@@ -66,7 +66,7 @@ export async function runAutomationScript(params: {
   });
 }
 
-const TERMINAL_SCRIPT_STATUSES = new Set<ScriptRun['status']>(['completed', 'failed', 'paused']);
+const TERMINAL_SCRIPT_STATUSES = new Set<ScriptRun['status']>(['completed', 'failed']);
 
 export function waitForScriptRun(
   runId: string,
@@ -95,7 +95,7 @@ export function waitForScriptRun(
 
     const settleRun = (run: ScriptRun | undefined) => {
       if (!run || !TERMINAL_SCRIPT_STATUSES.has(run.status)) return;
-      if (run.status === 'completed' || run.status === 'paused') {
+      if (run.status === 'completed') {
         finish(() => resolve(run));
         return;
       }
@@ -136,10 +136,7 @@ export async function runConnectScriptsSequential(params: {
       sessionId: params.sessionId,
       sessionMeta: params.sessionMeta,
     });
-    const run = await waitForScriptRun(runId, { signal: params.signal });
-    if (run.status === 'paused') {
-      break;
-    }
+    await waitForScriptRun(runId, { signal: params.signal });
     params.onScriptComplete?.(snippet);
   }
 }
