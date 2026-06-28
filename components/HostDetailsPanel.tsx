@@ -181,19 +181,37 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
 
   const [groupInputValue, setGroupInputValue] = useState(form.group || "");
 
+  const initialHostId = initialData?.id;
+
   useEffect(() => {
-    if (initialData) {
-      const normalized = normalizePrimaryTelnetState(initialData);
-      setForm(
-        snippets.length > 0
-          ? ensureHostConnectScriptIds(normalized, snippets)
-          : normalized,
-      );
-      setGroupInputValue(initialData.group || "");
-      setPendingReferenceKeyPath(null);
-      setShowPassword(false);
-      setShowTelnetPassword(false);
-    }
+    if (!initialData) return;
+    const normalized = normalizePrimaryTelnetState(initialData);
+    setForm(
+      snippets.length > 0
+        ? ensureHostConnectScriptIds(normalized, snippets)
+        : normalized,
+    );
+    setGroupInputValue(initialData.group || "");
+    setPendingReferenceKeyPath(null);
+    setShowPassword(false);
+    setShowTelnetPassword(false);
+    // Reset only when opening a different host — not when snippets list updates.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialHostId]);
+
+  useEffect(() => {
+    if (!initialData || snippets.length === 0) return;
+    setForm((prev) => {
+      if (prev.id !== initialData.id) return prev;
+      const synced = ensureHostConnectScriptIds(prev, snippets);
+      if (
+        synced.connectScriptIds === prev.connectScriptIds
+        && synced.loginScriptId === prev.loginScriptId
+      ) {
+        return prev;
+      }
+      return synced;
+    });
   }, [initialData, snippets]);
 
   const update = <K extends keyof Host>(key: K, value: Host[K]) => {

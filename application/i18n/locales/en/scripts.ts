@@ -23,6 +23,7 @@ export const enScriptsMessages = {
   'scripts.actions.runNowHint': 'Run on selected targets, or on all connectable hosts when that option is enabled.',
   'scripts.actions.runParallel': 'Run on all tabs (parallel)',
   'scripts.actions.runSequential': 'Run on all tabs (sequential)',
+  'scripts.actions.skippedConnectingSessions': '{count} tab(s) still connecting and were skipped',
   'scripts.sidePanel.library': 'Library',
   'scripts.sidePanel.running': 'Running',
   'scripts.sidePanel.newScript': 'New script',

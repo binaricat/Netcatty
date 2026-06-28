@@ -1281,7 +1281,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   );
 
   const handleSnippetFromPanel = useCallback(async (snippet: Snippet) => {
-    const sessionId = activeWorkspaceRef.current?.focusedSessionId ?? activeSessionRef.current?.id;
+    const sessionId = getActiveTerminalSessionId();
     if (!sessionId) return;
     if (isScriptSnippet(snippet)) {
       try {
@@ -1295,10 +1295,10 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     const command = await resolveSnippetCommand(snippet);
     if (command === null) return;
     handleSnippetClickForFocusedSession(command, snippet.noAutoRun);
-  }, [handleSnippetClickForFocusedSession, t]);
+  }, [getActiveTerminalSessionId, handleSnippetClickForFocusedSession, t]);
 
   const handleRunScriptFromPanel = useCallback(async (snippet: Snippet) => {
-    const sessionId = activeWorkspaceRef.current?.focusedSessionId ?? activeSessionRef.current?.id;
+    const sessionId = getActiveTerminalSessionId();
     if (!sessionId) return;
     try {
       await runAutomationScript({ snippet, sessionId });
@@ -1306,7 +1306,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       const message = err instanceof Error ? err.message : String(err);
       toast.error(message.includes('Observer mode') ? t('scripts.observer.blocked') : message);
     }
-  }, [t]);
+  }, [getActiveTerminalSessionId, t]);
 
   const handleRunScriptOnWorkspace = useCallback(async (
     snippet: Snippet,
@@ -1314,10 +1314,15 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   ) => {
     const workspace = activeWorkspaceRef.current;
     if (!workspace) return;
-    const sessionIds = sessionsRef.current
-      .filter((session) => session.workspaceId === workspace.id && session.status === 'connected')
+    const workspaceSessions = sessionsRef.current.filter((session) => session.workspaceId === workspace.id);
+    const sessionIds = workspaceSessions
+      .filter((session) => session.status === 'connected')
       .map((session) => session.id);
+    const skippedConnecting = workspaceSessions.filter((session) => session.status === 'connecting').length;
     if (sessionIds.length === 0) return;
+    if (skippedConnecting > 0) {
+      toast.info(t('scripts.actions.skippedConnectingSessions', { count: skippedConnecting }));
+    }
     try {
       await runAutomationScript({
         snippet,

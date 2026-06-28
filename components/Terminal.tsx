@@ -1353,6 +1353,12 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   sessionStartersRef.current = sessionStarters;
 
   useEffect(() => {
+    if (status === 'disconnected') {
+      scriptRanRef.current = false;
+    }
+  }, [status]);
+
+  useEffect(() => {
     if (status !== 'connected' || scriptRanRef.current) return;
 
     const queue = resolveConnectScriptsForHost(host, snippets);
@@ -2022,6 +2028,19 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     };
   }, [getManualSessionLogStatus, sessionId, status]);
 
+  const handleToolbarRecordingToggle = useCallback(() => {
+    const recording = getScriptRecordingSnapshot();
+    if (recording.sessionId && recording.sessionId !== sessionId) {
+      toast.error(t('scripts.recording.alreadyActive'));
+      return;
+    }
+    if (recording.sessionId === sessionId) {
+      window.dispatchEvent(new CustomEvent('netcatty:script:recording:stop', { detail: { sessionId } }));
+      return;
+    }
+    window.dispatchEvent(new CustomEvent('netcatty:script:recording:start', { detail: { sessionId } }));
+  }, [sessionId, t]);
+
   const renderControls = useCallback((opts?: { showClose?: boolean }) => (
     <TerminalToolbar
       status={status}
@@ -2069,7 +2088,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
           }}
         />
       ) : undefined}
-      onStartRecording={status === 'connected' ? () => { void recorder.startRecording(); } : undefined}
+      onStartRecording={status === 'connected' ? handleToolbarRecordingToggle : undefined}
     />
   ), [
     compactToolbar,
@@ -2080,6 +2099,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     handleSetTerminalEncoding,
     handleToggleSessionLog,
     handleToggleSearch,
+    handleToolbarRecordingToggle,
     host,
     inWorkspace,
     isLocalConnection,

@@ -23,6 +23,7 @@ export const zhCNScriptsMessages = {
   'scripts.actions.runNowHint': '在所选目标主机上运行；勾选「对所有主机生效」时在所有可连接主机上运行。',
   'scripts.actions.runParallel': '在所有标签页并行运行',
   'scripts.actions.runSequential': '在所有标签页顺序运行',
+  'scripts.actions.skippedConnectingSessions': '有 {count} 个标签仍在连接中，已跳过',
   'scripts.sidePanel.library': '脚本库',
   'scripts.sidePanel.running': '运行中',
   'scripts.sidePanel.newScript': '新建脚本',

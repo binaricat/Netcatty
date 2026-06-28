@@ -595,6 +595,7 @@ export function TerminalLayerTabBridge({ stableRef }: { stableRef: StableRef }) 
     s.terminalTheme,
     s.resolveSessionAppearance,
     s.hostMap,
+    s.scriptRuns,
   ]);
 
   return <TerminalLayerView ctx={ctx} />;
