@@ -497,8 +497,8 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
     }
     if (onSnippetsChange && initialData) {
       const hostId = cleaned.id;
-      const savedQueueIds = getHostConnectScriptIds(initialData, snippets);
-      const finalQueueIds = getHostConnectScriptIds(cleaned, snippets);
+      const savedQueueIds = initialData.connectScriptIds ?? getHostConnectScriptIds(initialData, snippets);
+      const finalQueueIds = cleaned.connectScriptIds ?? getHostConnectScriptIds(cleaned, snippets);
       const savedSet = new Set(savedQueueIds);
       const finalSet = new Set(finalQueueIds);
       let nextSnippets = snippets;
