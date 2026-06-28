@@ -16,7 +16,7 @@ function isSessionScriptRunActive(sessionId: string): boolean {
   return Boolean(getActiveScriptRunForSession(sessionId));
 }
 
-function waitForSessionScriptRunActive(sessionId: string, timeoutMs = 5000): Promise<boolean> {
+function waitForSessionScriptRunActive(sessionId: string, timeoutMs = 30_000): Promise<boolean> {
   if (isSessionScriptRunActive(sessionId)) {
     return Promise.resolve(true);
   }
@@ -68,6 +68,7 @@ export function useOutputTriggers({
 }: OutputTriggerContext) {
   const bufferRef = useRef('');
   const launchingRef = useRef(false);
+  const lastTriggerMatchEndRef = useRef(new Map<string, number>());
 
   const scanBuffer = useCallback((recentChunk: string) => {
     if (!recentChunk || isSessionScriptRunActive(sessionId) || launchingRef.current) {
@@ -78,6 +79,7 @@ export function useOutputTriggers({
     const overlap = 64;
     const chunkWithOverlap = text.slice(Math.max(0, text.length - recentChunk.length - overlap));
     const chunkStartInSlice = Math.max(0, chunkWithOverlap.length - recentChunk.length);
+    const chunkBaseOffset = text.length - chunkWithOverlap.length;
 
     for (const snippet of snippets) {
       if (isSessionScriptRunActive(sessionId) || launchingRef.current) {
@@ -93,10 +95,15 @@ export function useOutputTriggers({
         if (!match || match.index === undefined) {
           continue;
         }
-        const matchEnd = match.index + match[0].length;
-        if (matchEnd <= chunkStartInSlice) {
+        const matchEnd = chunkBaseOffset + match.index + match[0].length;
+        if (matchEnd <= chunkStartInSlice + chunkBaseOffset) {
           continue;
         }
+        const lastMatchEnd = lastTriggerMatchEndRef.current.get(snippet.id) ?? -1;
+        if (matchEnd <= lastMatchEnd) {
+          continue;
+        }
+        lastTriggerMatchEndRef.current.set(snippet.id, matchEnd);
         launchingRef.current = true;
         void Promise.resolve(onRunScript(snippet, sessionId))
           .then(async () => {
@@ -107,6 +114,7 @@ export function useOutputTriggers({
           })
           .catch(() => {
             // Failed starts can retry on the next matching output chunk.
+            lastTriggerMatchEndRef.current.delete(snippet.id);
           })
           .finally(() => {
             launchingRef.current = false;
@@ -126,6 +134,7 @@ export function useOutputTriggers({
   useEffect(() => {
     bufferRef.current = '';
     launchingRef.current = false;
+    lastTriggerMatchEndRef.current = new Map();
   }, [sessionId, hostId]);
 
   return { appendOutput };
