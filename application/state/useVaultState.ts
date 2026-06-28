@@ -51,6 +51,7 @@ import {
 } from "../../domain/connectionLogTerminalData";
 import { getNextVaultOrder, normalizeVaultOrder } from "../../domain/vaultOrder";
 import { loadSanitizedShellHistory } from "./shellHistoryPersistence";
+import { setVaultInitialized } from "./vaultInitStore";
 import {
   decryptGroupConfigs,
   decryptHosts,
@@ -801,6 +802,7 @@ export const useVaultState = () => {
         }
       } finally {
         setIsInitialized(true);
+        setVaultInitialized(true);
       }
     };
 

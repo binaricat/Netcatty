@@ -88,6 +88,21 @@ export function ensureHostConnectScriptIds(host: Host, snippets: Snippet[]): Hos
   return migrated.length > 0 ? { ...host, connectScriptIds: migrated } : host;
 }
 
+/** True when host references connect scripts that are not present in snippets yet. */
+export function hasUnresolvedConnectScriptBindings(host: Host, snippets: Snippet[]): boolean {
+  const candidateIds = new Set<string>();
+  if (host.loginScriptId) candidateIds.add(host.loginScriptId);
+  for (const id of host.connectScriptIds ?? []) {
+    if (id) candidateIds.add(id);
+  }
+  for (const id of candidateIds) {
+    if (!snippets.some((snippet) => snippet.id === id)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /** Resolve full onConnect run list: global scripts first, then host queue; dedupe favors host queue. */
 export function resolveConnectScriptsForHost(host: Host, snippets: Snippet[]): Snippet[] {
   const hostIds = getHostConnectScriptIds(host, snippets);
