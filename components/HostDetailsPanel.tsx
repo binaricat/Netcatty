@@ -171,6 +171,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
   const [showPassword, setShowPassword] = useState(false);
   const [showTelnetPassword, setShowTelnetPassword] = useState(false);
   const [showAlgorithmOverrides, setShowAlgorithmOverrides] = useState(false);
+  const [showNotesEditor, setShowNotesEditor] = useState(() => Boolean(initialData?.notes?.trim()));
 
   const [newKeyFilePath, setNewKeyFilePath] = useState("");
   const [pendingReferenceKeyPath, setPendingReferenceKeyPath] = useState<string | null>(null);
@@ -208,6 +209,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
     setPendingReferenceKeyPath(null);
     setShowPassword(false);
     setShowTelnetPassword(false);
+    setShowNotesEditor(Boolean(normalized.notes?.trim()));
     // Reset only when opening a different host — not when snippets list updates.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialHostId]);
@@ -865,19 +867,6 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
           </div>
         </HostDetailsSection>
 
-        <HostDetailsSection
-          icon={<FileText size={14} className="text-muted-foreground shrink-0" />}
-          title={t("hostDetails.notes.label")}
-          hint={t("hostDetails.notes.help")}
-        >
-          <HostNotesEditor
-            panelKey={form.id}
-            value={form.notes ?? ""}
-            onChange={(notes) => update("notes", notes)}
-            showHeader={false}
-          />
-        </HostDetailsSection>
-
         <HostDetailsConnectionSections
           t={t}
           form={form}
@@ -917,6 +906,33 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
             t={t}
           />
         ) : null}
+
+        <HostDetailsSection
+          icon={<FileText size={14} className="text-muted-foreground shrink-0" />}
+          title={t("hostDetails.notes.label")}
+          hint={t("hostDetails.notes.help")}
+          action={
+            <Switch
+              checked={showNotesEditor}
+              onCheckedChange={setShowNotesEditor}
+              aria-label={
+                showNotesEditor
+                  ? t("hostDetails.notes.toggle.hide")
+                  : t("hostDetails.notes.toggle.show")
+              }
+            />
+          }
+        >
+          {showNotesEditor ? (
+            <HostNotesEditor
+              panelKey={form.id}
+              value={form.notes ?? ""}
+              onChange={(notes) => update("notes", notes)}
+              showHeader={false}
+              defaultTab="edit"
+            />
+          ) : null}
+        </HostDetailsSection>
 
         <HostDetailsAdvancedSections
           t={t}

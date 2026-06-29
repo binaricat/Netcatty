@@ -10,7 +10,8 @@ import { cn } from "../../lib/utils";
 const PREVIEW_PROSE_CLASS =
   "text-sm text-foreground/90 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0";
 
-function defaultNotesTab(notes: string): "edit" | "preview" {
+function defaultNotesTab(notes: string, preferredTab?: "edit" | "preview"): "edit" | "preview" {
+  if (preferredTab) return preferredTab;
   return notes.trim() ? "preview" : "edit";
 }
 
@@ -21,6 +22,7 @@ export interface HostNotesEditorProps {
   panelKey?: string;
   className?: string;
   showHeader?: boolean;
+  defaultTab?: "edit" | "preview";
 }
 
 export const HostNotesEditor: React.FC<HostNotesEditorProps> = ({
@@ -29,16 +31,17 @@ export const HostNotesEditor: React.FC<HostNotesEditorProps> = ({
   panelKey,
   className,
   showHeader = true,
+  defaultTab,
 }) => {
   const { t } = useI18n();
-  const [tab, setTab] = useState<"edit" | "preview">(() => defaultNotesTab(value));
+  const [tab, setTab] = useState<"edit" | "preview">(() => defaultNotesTab(value, defaultTab));
 
   useEffect(() => {
     if (panelKey === undefined) return;
-    setTab(defaultNotesTab(value));
+    setTab(defaultNotesTab(value, defaultTab));
     // Only reset tab when opening another host, not while editing notes.
     // eslint-disable-next-line react-hooks/exhaustive-deps -- value read on panelKey change
-  }, [panelKey]);
+  }, [panelKey, defaultTab]);
 
   const trimmed = value.trim();
 

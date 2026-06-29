@@ -74,6 +74,8 @@ export const zhTWVaultMessages: Messages = {
   'hostDetails.notes.tab.edit': '編輯',
   'hostDetails.notes.tab.preview': '預覽',
   'hostDetails.notes.preview.empty': '暫無內容可預覽。',
+  'hostDetails.notes.toggle.show': '顯示備註編輯框',
+  'hostDetails.notes.toggle.hide': '隱藏備註編輯框',
   'hostDetails.group.placeholder': '父級 Group',
   'hostDetails.section.credentials': '憑證',
   'hostDetails.section.portCredentials': '埠與憑證',

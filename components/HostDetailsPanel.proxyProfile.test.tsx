@@ -326,3 +326,34 @@ test("HostDetailsPanel shows color and icon controls in the connection settings"
   assert.match(markup, /Blue/);
   assert.match(markup, /IP or Hostname/);
 });
+
+test("HostDetailsPanel keeps empty notes collapsed below connection settings", () => {
+  const markup = renderHostDetails({
+    ...hostWithMissingProxyProfile,
+    proxyProfileId: undefined,
+    notes: "",
+  });
+
+  assert.match(markup, /aria-label="Show notes editor"/);
+  assert.doesNotMatch(markup, /placeholder="Hardware, project, customer, region, role\.\.\."/);
+  assert.ok(
+    markup.indexOf("IP or Hostname") < markup.indexOf("Notes"),
+    "expected notes to render after connection settings",
+  );
+});
+
+test("HostDetailsPanel expands notes when the host already has notes", () => {
+  const markup = renderHostDetails({
+    ...hostWithMissingProxyProfile,
+    proxyProfileId: undefined,
+    notes: "Runs nightly backups",
+  });
+
+  assert.match(markup, /aria-label="Hide notes editor"/);
+  assert.match(markup, /Runs nightly backups/);
+  assert.match(markup, /placeholder="Hardware, project, customer, region, role\.\.\."/);
+  assert.ok(
+    markup.indexOf("IP or Hostname") < markup.indexOf("Notes"),
+    "expected notes to render after connection settings",
+  );
+});

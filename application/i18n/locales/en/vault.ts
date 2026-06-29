@@ -501,6 +501,8 @@ export const enVaultMessages: Messages = {
   'hostDetails.notes.tab.edit': 'Edit',
   'hostDetails.notes.tab.preview': 'Preview',
   'hostDetails.notes.preview.empty': 'Nothing to preview yet.',
+  'hostDetails.notes.toggle.show': 'Show notes editor',
+  'hostDetails.notes.toggle.hide': 'Hide notes editor',
   'hostDetails.group.placeholder': 'Parent Group',
   'hostDetails.section.credentials': 'Credentials',
   'hostDetails.section.portCredentials': 'Port & Credentials',

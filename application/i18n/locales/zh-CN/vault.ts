@@ -75,6 +75,8 @@ export const zhCNVaultMessages: Messages = {
   'hostDetails.notes.tab.edit': '编辑',
   'hostDetails.notes.tab.preview': '预览',
   'hostDetails.notes.preview.empty': '暂无内容可预览。',
+  'hostDetails.notes.toggle.show': '显示备注编辑框',
+  'hostDetails.notes.toggle.hide': '隐藏备注编辑框',
   'hostDetails.group.placeholder': '父级 Group',
   'hostDetails.section.credentials': '凭据',
   'hostDetails.section.portCredentials': '端口与凭据',

@@ -536,6 +536,8 @@ export const ruVaultMessages: Messages = {
   'hostDetails.notes.tab.edit': 'Редактировать',
   'hostDetails.notes.tab.preview': 'Просмотр',
   'hostDetails.notes.preview.empty': 'Пока нечего просматривать.',
+  'hostDetails.notes.toggle.show': 'Показать редактор заметок',
+  'hostDetails.notes.toggle.hide': 'Скрыть редактор заметок',
   'hostDetails.group.placeholder': 'Родительская группа',
   'hostDetails.section.credentials': 'Учётные данные',
   'hostDetails.section.portCredentials': 'Порт и учётные данные',
