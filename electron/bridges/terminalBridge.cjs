@@ -1015,6 +1015,7 @@ function drainPendingOutputForInterrupt(sessionId, session, trace) {
     cols: session.cols,
     rows: session.rows,
   });
+  sessionLogStreamManager.appendData(sessionId, output.data);
 }
 
 function interruptSession(event, payload) {
