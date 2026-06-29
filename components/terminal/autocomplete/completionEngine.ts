@@ -29,6 +29,7 @@ import {
   shouldDoPathCompletion,
   getPathSuggestions,
   resolvePathComponents,
+  hasRemotePathLookupToken,
 } from "./remotePathCompleter";
 import { getSnippetSuggestions } from "./snippetCompleter";
 import type { Snippet } from "../../../domain/models";
@@ -240,7 +241,8 @@ export async function getCompletions(
     }
   }
 
-  const canQueryPaths = options.protocol === "local" || options.sessionId !== undefined;
+  const canQueryPaths = options.protocol === "local" ||
+    (options.sessionId !== undefined && hasRemotePathLookupToken(ctx.currentWord));
 
   const pathEntries = canQueryPaths && pathCheck.shouldComplete
     ? await getPathSuggestions(ctx, {

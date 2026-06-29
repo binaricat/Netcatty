@@ -129,6 +129,10 @@ export function shouldDoPathCompletion(
   return { shouldComplete: false, foldersOnly: false };
 }
 
+export function hasRemotePathLookupToken(currentWord: string): boolean {
+  return stripWrappingQuotes(currentWord).length > 0;
+}
+
 /**
  * Parse the current word into directory-to-list and filter prefix.
  */

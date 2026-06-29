@@ -216,6 +216,20 @@ test("getCompletions keeps remote shell cwd when absolute cwd is only a fallback
   assert.equal(completions.some((entry) => entry.text === "cat old-user-file.txt"), false);
 });
 
+test("getCompletions does not query remote directories after a blank path command argument", async () => {
+  bridgeState.remoteEntriesByPath.set(".", [{ name: "worktree.txt", type: "file" }]);
+
+  const completions = await getCompletions("cat ", {
+    hostId: "host-1",
+    os: "linux",
+    protocol: "ssh",
+    sessionId: "session-1",
+  });
+
+  assert.deepEqual(bridgeState.remoteCalls, []);
+  assert.equal(completions.some((entry) => entry.source === "path"), false);
+});
+
 test("getCompletions does not reuse cached remote relative listings after cwd changes", async () => {
   bridgeState.remoteEntriesByPath.set(".", [{ name: "home-only.txt", type: "file" }]);
 
@@ -235,6 +249,6 @@ test("getCompletions does not reuse cached remote relative listings after cwd ch
     sessionId: "session-1",
   });
 
-  assert.equal(bridgeState.remoteCalls.length, 2);
+  assert.equal(bridgeState.remoteCalls.length, 1);
   assert.equal(completions[0]?.text, "cat worktree.txt");
 });
