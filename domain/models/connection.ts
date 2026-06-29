@@ -13,6 +13,7 @@ export interface ProxyConfig {
   command?: string;
   username?: string;
   password?: string;
+  identityId?: string;
 }
 
 export interface ProxyProfile {

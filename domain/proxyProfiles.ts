@@ -1,4 +1,4 @@
-import type { GroupConfig, Host, ProxyConfig, ProxyProfile } from "./models";
+import type { GroupConfig, Host, Identity, ProxyConfig, ProxyProfile } from "./models";
 
 const cloneProxyConfig = (config: ProxyConfig): ProxyConfig => ({
   ...config,
@@ -42,6 +42,34 @@ export const normalizeManualProxyConfig = (
     username: config.username?.trim() || undefined,
     password: config.password || undefined,
   };
+};
+
+export const resolveProxyConfigAuth = (
+  config: ProxyConfig | undefined,
+  identities: Identity[] = [],
+): ProxyConfig | undefined => {
+  if (!config) return undefined;
+  if (!config.identityId) return cloneProxyConfig(config);
+  const identity = identities.find((candidate) => candidate.id === config.identityId);
+  if (!identity) return cloneProxyConfig(config);
+  return {
+    ...config,
+    username: identity.username?.trim() || undefined,
+    password: identity.password,
+  };
+};
+
+export type ProxyConfigIdentityIssue = "missing-identity" | "missing-password";
+
+export const getProxyConfigIdentityIssue = (
+  config: ProxyConfig | undefined,
+  identities: Identity[] = [],
+): ProxyConfigIdentityIssue | undefined => {
+  if (!config?.identityId || isProxyCommandConfig(config)) return undefined;
+  const identity = identities.find((candidate) => candidate.id === config.identityId);
+  if (!identity) return "missing-identity";
+  if (identity.password === undefined) return "missing-password";
+  return undefined;
 };
 
 export const hasUsableProxyConfig = (config: ProxyConfig | undefined): boolean => {

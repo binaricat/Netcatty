@@ -702,6 +702,7 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
                 proxyProfiles={proxyProfiles}
                 hosts={hosts}
                 groupConfigs={groupConfigs}
+                identities={identities}
                 onUpdateProxyProfiles={onUpdateProxyProfiles}
                 onUpdateHosts={onUpdateHosts}
                 onUpdateGroupConfigs={onUpdateGroupConfigs}

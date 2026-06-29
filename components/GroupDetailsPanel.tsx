@@ -18,6 +18,7 @@ import { resolveGroupDefaults, resolveGroupTerminalThemeId } from "../domain/gro
 import {
   formatProxyConfigEndpoint,
   formatProxyConfigType,
+  getProxyConfigIdentityIssue,
   isCompleteProxyConfig,
   normalizeManualProxyConfig,
 } from "../domain/proxyProfiles";
@@ -223,18 +224,30 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelPropsWithResize> = ({
 
   // Proxy helpers
   const updateProxyConfig = useCallback(
-    (field: keyof ProxyConfig, value: string | number) => {
+    (field: keyof ProxyConfig, value: string | number | undefined) => {
       setForm((prev) => {
         const { proxyProfileId: _proxyProfileId, ...rest } = prev;
+        const nextProxyConfig: ProxyConfig = {
+          type: prev.proxyConfig?.type || "http",
+          host: prev.proxyConfig?.host || "",
+          port: prev.proxyConfig?.port || 8080,
+          ...prev.proxyConfig,
+        };
+        if (value === undefined) {
+          delete nextProxyConfig[field];
+        } else {
+          nextProxyConfig[field] = value as never;
+        }
+        if (field === "username" || field === "password") {
+          delete nextProxyConfig.identityId;
+        }
+        if (field === "identityId" && value) {
+          delete nextProxyConfig.username;
+          delete nextProxyConfig.password;
+        }
         return {
           ...rest,
-          proxyConfig: {
-            type: prev.proxyConfig?.type || "http",
-            host: prev.proxyConfig?.host || "",
-            port: prev.proxyConfig?.port || 8080,
-            ...prev.proxyConfig,
-            [field]: value,
-          },
+          proxyConfig: nextProxyConfig,
         };
       });
     },
@@ -393,8 +406,18 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelPropsWithResize> = ({
       setActiveSubPanel("proxy");
       return;
     }
+    if (getProxyConfigIdentityIssue(normalizedProxyConfig, identities)) {
+      toast.error(t("hostDetails.proxyPanel.identityUnavailable"));
+      setActiveSubPanel("proxy");
+      return;
+    }
     if (sshEnabled && hasMissingProxyProfile) {
       toast.error(t("hostDetails.proxyPanel.missingSaved"));
+      setActiveSubPanel("proxy");
+      return;
+    }
+    if (sshEnabled && getProxyConfigIdentityIssue(selectedProxyProfile?.config, identities)) {
+      toast.error(t("hostDetails.proxyPanel.identityUnavailable"));
       setActiveSubPanel("proxy");
       return;
     }
@@ -468,6 +491,7 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelPropsWithResize> = ({
       <ProxyPanel
         proxyConfig={form.proxyConfig}
         proxyProfiles={proxyProfiles}
+        identities={identities}
         selectedProxyProfileId={form.proxyProfileId}
         onUpdateProxy={updateProxyConfig}
         onSelectProxyProfile={selectProxyProfile}

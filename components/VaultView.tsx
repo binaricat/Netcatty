@@ -43,9 +43,8 @@ import { sanitizeCredentialValue } from "../domain/credentials";
 import { resolveGroupDefaults, applyGroupDefaults } from "../domain/groupConfig";
 import {
   getEffectiveHostDistro,
-  resolveTelnetPassword,
+  resolveTelnetCredentials,
   resolveTelnetPort,
-  resolveTelnetUsername,
   sanitizeHost,
   upsertHostById,
 } from "../domain/host";
@@ -120,6 +119,28 @@ import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "./ui/t
 import { Badge } from "./ui/badge";
 import { HotkeyScheme, KeyBinding } from "../domain/models";
 import { VaultViewLayout } from "./vault/VaultViewLayout";
+
+export const resolveHostCopyCredentialValues = (
+  host: Host,
+  identities: Identity[],
+): { username: string | undefined; rawPassword: string | undefined } => {
+  if (host.protocol === "telnet") {
+    const credentials = resolveTelnetCredentials(host, identities);
+    return {
+      username: credentials.username,
+      rawPassword: credentials.rawPassword,
+    };
+  }
+
+  const identity = host.identityId
+    ? identities.find((item) => item.id === host.identityId)
+    : undefined;
+
+  return {
+    username: identity?.username?.trim() || host.username?.trim(),
+    rawPassword: identity?.password || host.password,
+  };
+};
 import { useVaultHostCollections } from "./vault/useVaultHostCollections";
 import { useVaultImportHandlers } from "./vault/useVaultImportHandlers";
 import { useVaultGroupDragHandlers } from "./vault/useVaultGroupDragHandlers";
@@ -624,19 +645,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
       address = effective.hostname;
     }
 
-    // Resolve credentials from identity if configured, otherwise use host credentials
-    // For telnet hosts, use telnet-specific credentials
-    const identity = effective.identityId
-      ? identities.find((i) => i.id === effective.identityId)
-      : undefined;
-
-    const username = isTelnet
-      ? resolveTelnetUsername(effective)
-      : (identity?.username?.trim() || effective.username?.trim());
-
-    const rawPassword = isTelnet
-      ? resolveTelnetPassword(effective)
-      : (identity?.password || effective.password);
+    const { username, rawPassword } = resolveHostCopyCredentialValues(effective, identities);
     const password = sanitizeCredentialValue(rawPassword);
 
     if (!password) {

@@ -12,12 +12,14 @@ import {
   Settings2,
   SquareTerminal,
   Trash2,
+  User,
 } from "lucide-react";
 import React, { useMemo, useRef, useState } from "react";
 import { useI18n } from "../application/i18n/I18nProvider";
 import { useStoredViewMode } from "../application/state/useStoredViewMode";
 import {
   formatProxyConfigEndpoint,
+  getProxyConfigIdentityIssue,
   isProxyCommandConfig,
   isValidProxyPort,
   removeProxyProfileReferences,
@@ -27,7 +29,7 @@ import {
   STORAGE_KEY_VAULT_PROXY_PROFILES_VIEW_MODE,
 } from "../infrastructure/config/storageKeys";
 import { cn } from "../lib/utils";
-import type { GroupConfig, Host, ProxyConfig, ProxyProfile } from "../types";
+import type { GroupConfig, Host, Identity, ProxyConfig, ProxyProfile } from "../types";
 import {
   AsidePanel,
   AsidePanelContent,
@@ -74,6 +76,7 @@ interface ProxyProfilesManagerProps {
   proxyProfiles: ProxyProfile[];
   hosts: Host[];
   groupConfigs: GroupConfig[];
+  identities?: Identity[];
   onUpdateProxyProfiles: (profiles: ProxyProfile[]) => void;
   onUpdateHosts: (hosts: Host[]) => void;
   onUpdateGroupConfigs: (configs: GroupConfig[]) => void;
@@ -101,6 +104,40 @@ const getProfileUsageCount = (
 ): number =>
   hosts.filter((host) => host.proxyProfileId === profileId).length +
   groupConfigs.filter((config) => config.proxyProfileId === profileId).length;
+
+export const getProxyProfileCredentialIdentities = (
+  identities: Identity[],
+): Identity[] => identities.filter((identity) => identity.password !== undefined);
+
+export const updateProxyProfileDraftConfig = (
+  current: ProxyConfig,
+  field: keyof ProxyConfig,
+  value: string | number | undefined,
+): ProxyConfig => {
+  const config = { ...current };
+  if (value === undefined) {
+    delete config[field];
+  } else {
+    config[field] = value as never;
+  }
+  if (field === "username" || field === "password") {
+    delete config.identityId;
+  }
+  if (field === "identityId" && value) {
+    delete config.username;
+    delete config.password;
+  }
+  return config;
+};
+
+export const hasUnavailableProxyProfileDraftIdentity = (
+  draft: ProxyProfile | null,
+  identities: Identity[],
+): boolean => Boolean(
+  draft?.config.identityId &&
+  !isProxyCommandConfig(draft.config) &&
+  getProxyConfigIdentityIssue(draft.config, identities),
+);
 
 type ProxyProfilesViewMode = "grid" | "list";
 
@@ -217,6 +254,7 @@ export const ProxyProfilesManager: React.FC<ProxyProfilesManagerProps> = ({
   proxyProfiles,
   hosts,
   groupConfigs,
+  identities = [],
   onUpdateProxyProfiles,
   onUpdateHosts,
   onUpdateGroupConfigs,
@@ -232,6 +270,17 @@ export const ProxyProfilesManager: React.FC<ProxyProfilesManagerProps> = ({
   const [draft, setDraft] = useState<ProxyProfile | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ProxyProfile | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
+  const proxyCredentialIdentities = useMemo(
+    () => getProxyProfileCredentialIdentities(identities),
+    [identities],
+  );
+  const selectedDraftIdentity = useMemo(
+    () => draft?.config.identityId
+      ? proxyCredentialIdentities.find((identity) => identity.id === draft.config.identityId)
+      : undefined,
+    [draft?.config.identityId, proxyCredentialIdentities],
+  );
+  const hasUnavailableDraftIdentity = hasUnavailableProxyProfileDraftIdentity(draft, identities);
 
   const usageByProfileId = useMemo(() => {
     const map = new Map<string, number>();
@@ -263,15 +312,12 @@ export const ProxyProfilesManager: React.FC<ProxyProfilesManagerProps> = ({
     },
   });
 
-  const updateDraftConfig = (field: keyof ProxyConfig, value: string | number) => {
+  const updateDraftConfig = (field: keyof ProxyConfig, value: string | number | undefined) => {
     setDraft((prev) => {
       if (!prev) return prev;
       return {
         ...prev,
-        config: {
-          ...prev.config,
-          [field]: value,
-        },
+        config: updateProxyProfileDraftConfig(prev.config, field, value),
       };
     });
   };
@@ -314,6 +360,10 @@ export const ProxyProfilesManager: React.FC<ProxyProfilesManagerProps> = ({
     }
     if (!isCommand && !isValidProxyPort(draft.config.port)) {
       toast.error(t("proxyProfiles.error.port"));
+      return;
+    }
+    if (getProxyConfigIdentityIssue(draft.config, identities)) {
+      toast.error(t("hostDetails.proxyPanel.identityUnavailable"));
       return;
     }
 
@@ -565,25 +615,71 @@ export const ProxyProfilesManager: React.FC<ProxyProfilesManagerProps> = ({
                 </div>
                 <Badge variant="secondary" className="text-xs">{t("common.optional")}</Badge>
               </div>
-              <Input
-                aria-label={t("hostDetails.proxyPanel.usernamePlaceholder")}
-                value={draft.config.username || ""}
-                onChange={(event) => updateDraftConfig("username", event.target.value)}
-                placeholder={t("hostDetails.proxyPanel.usernamePlaceholder")}
-                className="h-10"
-              />
-              <Input
-                aria-label={t("hostDetails.proxyPanel.passwordPlaceholder")}
-                type="password"
-                value={draft.config.password || ""}
-                onChange={(event) => updateDraftConfig("password", event.target.value)}
-                placeholder={t("hostDetails.proxyPanel.passwordPlaceholder")}
-                className="h-10"
-              />
+              {(proxyCredentialIdentities.length > 0 || hasUnavailableDraftIdentity) && (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <User size={14} className="text-muted-foreground" />
+                    <p className="text-xs font-semibold">{t("hostDetails.proxyPanel.identities")}</p>
+                  </div>
+                  <Select
+                    value={draft.config.identityId || "__custom_credentials__"}
+                    onValueChange={(value) =>
+                      updateDraftConfig("identityId", value === "__custom_credentials__" ? undefined : value)
+                    }
+                  >
+                    <SelectTrigger
+                      aria-label={t("hostDetails.proxyPanel.identities")}
+                      className="h-10"
+                    >
+                      <SelectValue placeholder={t("hostDetails.proxyPanel.identities")} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__custom_credentials__">
+                        {t("hostDetails.proxyPanel.customCredentials")}
+                      </SelectItem>
+                      {proxyCredentialIdentities.map((identity) => (
+                        <SelectItem key={identity.id} value={identity.id}>
+                          {identity.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {selectedDraftIdentity && (
+                    <div className="min-w-0 rounded-md bg-secondary/50 p-2 text-sm">
+                      <div className="font-medium truncate">{selectedDraftIdentity.label}</div>
+                      <div className="text-xs text-muted-foreground truncate">{selectedDraftIdentity.username}</div>
+                    </div>
+                  )}
+                  {hasUnavailableDraftIdentity && (
+                    <div className="min-w-0 rounded-md border border-destructive/30 bg-destructive/10 p-2 text-sm text-destructive">
+                      {t("hostDetails.proxyPanel.identityUnavailable")}
+                    </div>
+                  )}
+                </div>
+              )}
+              {!draft.config.identityId && (
+                <>
+                  <Input
+                    aria-label={t("hostDetails.proxyPanel.usernamePlaceholder")}
+                    value={draft.config.username || ""}
+                    onChange={(event) => updateDraftConfig("username", event.target.value)}
+                    placeholder={t("hostDetails.proxyPanel.usernamePlaceholder")}
+                    className="h-10"
+                  />
+                  <Input
+                    aria-label={t("hostDetails.proxyPanel.passwordPlaceholder")}
+                    type="password"
+                    value={draft.config.password || ""}
+                    onChange={(event) => updateDraftConfig("password", event.target.value)}
+                    placeholder={t("hostDetails.proxyPanel.passwordPlaceholder")}
+                    className="h-10"
+                  />
+                </>
+              )}
             </Card>}
           </AsidePanelContent>
           <AsidePanelFooter>
-            <Button className="w-full" onClick={saveDraft}>
+            <Button className="w-full" onClick={saveDraft} disabled={hasUnavailableDraftIdentity}>
               {t("common.save")}
             </Button>
           </AsidePanelFooter>

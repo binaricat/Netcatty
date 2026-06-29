@@ -8,7 +8,11 @@ import { Host, Identity, KnownHost, PortForwardingRule, SSHKey, TerminalSettings
 import { isEncryptedCredentialPlaceholder, sanitizeCredentialValue } from '../../domain/credentials';
 import { resolveBridgeKeyAuth, resolveHostAuth } from '../../domain/sshAuth';
 import { resolveHostKeepalive } from '../../domain/host';
-import { hasUsableProxyConfig } from '../../domain/proxyProfiles';
+import {
+  getProxyConfigIdentityIssue,
+  hasUsableProxyConfig,
+  resolveProxyConfigAuth,
+} from '../../domain/proxyProfiles';
 
 // Fallback matching DEFAULT_TERMINAL_SETTINGS so older call sites that don't
 // thread terminalSettings still get the cloud-friendly defaults.
@@ -16,6 +20,19 @@ const FALLBACK_TERMINAL_SETTINGS = {
   verifyHostKeys: true,
   keepaliveInterval: 30,
   keepaliveCountMax: 10,
+};
+
+const getProxyIdentityIssueMessage = (
+  configHost: Host,
+  identities: Identity[],
+  labelPrefix: 'host' | 'jump host',
+): string | undefined => {
+  const issue = getProxyConfigIdentityIssue(configHost.proxyConfig, identities);
+  if (!issue) return undefined;
+  const label = configHost.label || configHost.hostname;
+  return issue === 'missing-password'
+    ? `Proxy identity for ${labelPrefix} "${label}" has no saved password. Open host settings and select a password identity or enter proxy credentials.`
+    : `Proxy identity for ${labelPrefix} "${label}" is missing. Open host settings and select a password identity or enter proxy credentials.`;
 };
 import { logger } from '../../lib/logger';
 import { localStorageAdapter } from '../persistence/localStorageAdapter';
@@ -394,17 +411,22 @@ export const startPortForward = async (
     if (host.proxyProfileId && !host.proxyConfig) {
       throw new Error(`Saved proxy for host "${host.label || host.hostname}" is missing. Open host settings and select a valid proxy.`);
     }
+    const hostProxyIdentityIssue = getProxyIdentityIssueMessage(host, identities, 'host');
+    if (hostProxyIdentityIssue) {
+      throw new Error(hostProxyIdentityIssue);
+    }
 
     const resolved = resolveHostAuth({ host, keys, identities });
     const key = resolved.key;
-    const proxy = host.proxyConfig
+    const resolvedHostProxyConfig = resolveProxyConfigAuth(host.proxyConfig, identities);
+    const proxy = resolvedHostProxyConfig
       ? {
-        type: host.proxyConfig.type,
-        host: host.proxyConfig.host,
-        port: host.proxyConfig.port,
-        command: host.proxyConfig.command,
-        username: host.proxyConfig.username,
-        password: sanitizeCredentialValue(host.proxyConfig.password),
+        type: resolvedHostProxyConfig.type,
+        host: resolvedHostProxyConfig.host,
+        port: resolvedHostProxyConfig.port,
+        command: resolvedHostProxyConfig.command,
+        username: resolvedHostProxyConfig.username,
+        password: sanitizeCredentialValue(resolvedHostProxyConfig.password),
       }
       : undefined;
     let jumpHosts: NetcattyJumpHost[] | undefined;
@@ -422,14 +444,19 @@ export const startPortForward = async (
           if (jumpHost.proxyProfileId && !jumpHost.proxyConfig) {
             throw new Error(`Saved proxy for jump host "${jumpHost.label || jumpHost.hostname}" is missing. Open host settings and select a valid proxy.`);
           }
+          const jumpProxyIdentityIssue = getProxyIdentityIssueMessage(jumpHost, identities, 'jump host');
+          if (jumpProxyIdentityIssue) {
+            throw new Error(jumpProxyIdentityIssue);
+          }
+          const resolvedJumpProxyConfig = resolveProxyConfigAuth(jumpHost.proxyConfig, identities);
           const hasConfiguredJumpProxyEndpoint =
             index === 0 &&
-            hasUsableProxyConfig(jumpHost.proxyConfig);
+            hasUsableProxyConfig(resolvedJumpProxyConfig);
           if (
             hasConfiguredJumpProxyEndpoint &&
-            jumpHost.proxyConfig?.username &&
-            isEncryptedCredentialPlaceholder(jumpHost.proxyConfig.password) &&
-            !sanitizeCredentialValue(jumpHost.proxyConfig.password)
+            resolvedJumpProxyConfig?.username &&
+            isEncryptedCredentialPlaceholder(resolvedJumpProxyConfig.password) &&
+            !sanitizeCredentialValue(resolvedJumpProxyConfig.password)
           ) {
             throw new Error(`Proxy credentials for jump host "${jumpHost.label || jumpHost.hostname}" cannot be decrypted on this device. Open host settings and re-enter the proxy password.`);
           }
@@ -467,14 +494,14 @@ export const startPortForward = async (
             keyId: jumpResolved.keyId,
             keySource: jumpKey?.source,
             label: jumpHost.label,
-            proxy: hasUsableProxyConfig(jumpHost.proxyConfig)
+            proxy: hasUsableProxyConfig(resolvedJumpProxyConfig)
               ? {
-                type: jumpHost.proxyConfig.type,
-                host: jumpHost.proxyConfig.host,
-                port: jumpHost.proxyConfig.port,
-                command: jumpHost.proxyConfig.command,
-                username: jumpHost.proxyConfig.username,
-                password: sanitizeCredentialValue(jumpHost.proxyConfig.password),
+                type: resolvedJumpProxyConfig!.type,
+                host: resolvedJumpProxyConfig!.host,
+                port: resolvedJumpProxyConfig!.port,
+                command: resolvedJumpProxyConfig!.command,
+                username: resolvedJumpProxyConfig!.username,
+                password: sanitizeCredentialValue(resolvedJumpProxyConfig!.password),
               }
               : undefined,
             identityFilePaths: jumpKeyAuth.identityFilePaths,
@@ -488,7 +515,12 @@ export const startPortForward = async (
         });
     }
     const usesTargetProxyForFirstHop = !!proxy && !jumpHosts?.[0]?.proxy;
-    if (usesTargetProxyForFirstHop && host.proxyConfig?.username && isEncryptedCredentialPlaceholder(host.proxyConfig.password) && !proxy?.password) {
+    if (
+      usesTargetProxyForFirstHop &&
+      resolvedHostProxyConfig?.username &&
+      isEncryptedCredentialPlaceholder(resolvedHostProxyConfig.password) &&
+      !proxy?.password
+    ) {
       throw new Error('Proxy credentials cannot be decrypted on this device. Open host settings and re-enter the proxy password.');
     }
     

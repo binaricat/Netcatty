@@ -678,6 +678,8 @@ export const enVaultMessages: Messages = {
   'hostDetails.proxyPanel.usernamePlaceholder': 'Username',
   'hostDetails.proxyPanel.passwordPlaceholder': 'Password',
   'hostDetails.proxyPanel.identities': 'Identities',
+  'hostDetails.proxyPanel.customCredentials': 'Custom credentials',
+  'hostDetails.proxyPanel.identityUnavailable': 'Selected proxy identity is missing or has no saved password.',
   'hostDetails.proxyPanel.remove': 'Remove Proxy',
   'hostDetails.proxyPanel.savedProxy': 'Saved proxy',
   'hostDetails.proxyPanel.selectSaved': 'Select saved proxy',

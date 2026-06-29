@@ -2,11 +2,11 @@
  * Proxy Configuration Sub-Panel
  * Panel for configuring HTTP/SOCKS5/ProxyCommand proxy settings
  */
-import { Globe, KeyRound, SquareTerminal, Trash2 } from 'lucide-react';
+import { Globe, KeyRound, SquareTerminal, Trash2, User } from 'lucide-react';
 import React, { useCallback, useMemo } from 'react';
 import { useI18n } from '../../application/i18n/I18nProvider';
-import { formatProxyConfigEndpoint, formatProxyConfigType, isProxyCommandConfig, isValidProxyPort } from '../../domain/proxyProfiles';
-import { ProxyConfig, ProxyProfile } from '../../types';
+import { formatProxyConfigEndpoint, formatProxyConfigType, getProxyConfigIdentityIssue, isProxyCommandConfig, isValidProxyPort } from '../../domain/proxyProfiles';
+import { Identity, ProxyConfig, ProxyProfile } from '../../types';
 import { AsidePanel, AsidePanelContent, type AsidePanelLayout, type AsidePanelResizeProps } from '../ui/aside-panel';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
@@ -17,8 +17,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 export interface ProxyPanelProps {
     proxyConfig?: ProxyConfig;
     proxyProfiles?: ProxyProfile[];
+    identities?: Identity[];
     selectedProxyProfileId?: string;
-    onUpdateProxy: (field: keyof ProxyConfig, value: string | number) => void;
+    onUpdateProxy: (field: keyof ProxyConfig, value: string | number | undefined) => void;
     onSelectProxyProfile?: (profileId: string | undefined) => void;
     onClearProxy: () => void;
     onBack: () => void;
@@ -31,6 +32,7 @@ export type ProxyPanelPropsWithResize = ProxyPanelProps & AsidePanelResizeProps;
 export const ProxyPanel: React.FC<ProxyPanelPropsWithResize> = ({
     proxyConfig,
     proxyProfiles = [],
+    identities = [],
     selectedProxyProfileId,
     onUpdateProxy,
     onSelectProxyProfile,
@@ -44,19 +46,32 @@ export const ProxyPanel: React.FC<ProxyPanelPropsWithResize> = ({
 }) => {
     const { t } = useI18n();
     const customValue = '__custom__';
+    const customCredentialsValue = '__custom_credentials__';
     const selectedProfile = useMemo(
         () => proxyProfiles.find((profile) => profile.id === selectedProxyProfileId),
         [proxyProfiles, selectedProxyProfileId],
     );
     const hasMissingProfile = Boolean(selectedProxyProfileId && !selectedProfile);
+    const selectedProfileIdentityIssue = getProxyConfigIdentityIssue(selectedProfile?.config, identities);
     const selectedValue = selectedProfile ? selectedProfile.id : customValue;
     const isUsingProfile = Boolean(selectedProfile);
     const isCommandProxy = isProxyCommandConfig(proxyConfig);
+    const proxyCredentialIdentities = useMemo(
+        () => identities.filter((identity) => identity.password !== undefined),
+        [identities],
+    );
+    const selectedIdentity = useMemo(
+        () => proxyConfig?.identityId
+            ? proxyCredentialIdentities.find((identity) => identity.id === proxyConfig.identityId)
+            : undefined,
+        [proxyCredentialIdentities, proxyConfig?.identityId],
+    );
+    const hasMissingIdentity = Boolean(proxyConfig?.identityId && !selectedIdentity);
     const hasManualProxyHost = Boolean(proxyConfig?.host?.trim());
     const hasManualProxyCommand = Boolean(proxyConfig?.command?.trim());
     const hasManualProxyValue = isCommandProxy ? hasManualProxyCommand : hasManualProxyHost;
     const hasInvalidManualProxyPort = !isCommandProxy && hasManualProxyHost && !isValidProxyPort(proxyConfig?.port);
-    const canSave = isUsingProfile || (hasManualProxyValue && !hasInvalidManualProxyPort);
+    const canSave = (isUsingProfile && !selectedProfileIdentityIssue) || (hasManualProxyValue && !hasInvalidManualProxyPort && !hasMissingIdentity);
     const handleBack = useCallback(() => {
         if (hasInvalidManualProxyPort) return;
         onBack();
@@ -120,6 +135,11 @@ export const ProxyPanel: React.FC<ProxyPanelPropsWithResize> = ({
                                         {formatProxyConfigEndpoint(selectedProfile.config)}
                                     </span>
                                 </div>
+                            </div>
+                        )}
+                        {selectedProfileIdentityIssue && (
+                            <div className="min-w-0 rounded-md border border-destructive/30 bg-destructive/10 p-2 text-sm text-destructive">
+                                {t('hostDetails.proxyPanel.identityUnavailable')}
                             </div>
                         )}
                     </Card>
@@ -202,21 +222,67 @@ export const ProxyPanel: React.FC<ProxyPanelPropsWithResize> = ({
                                 </div>
                                 <Badge variant="secondary" className="text-xs">{t('common.optional')}</Badge>
                             </div>
-                            <Input
-                                aria-label={t('hostDetails.proxyPanel.usernamePlaceholder')}
-                                placeholder={t('hostDetails.proxyPanel.usernamePlaceholder')}
-                                value={proxyConfig?.username || ""}
-                                onChange={(e) => onUpdateProxy('username', e.target.value)}
-                                className="h-10"
-                            />
-                            <Input
-                                aria-label={t('hostDetails.proxyPanel.passwordPlaceholder')}
-                                placeholder={t('hostDetails.proxyPanel.passwordPlaceholder')}
-                                type="password"
-                                value={proxyConfig?.password || ""}
-                                onChange={(e) => onUpdateProxy('password', e.target.value)}
-                                className="h-10"
-                            />
+                            {(proxyCredentialIdentities.length > 0 || hasMissingIdentity) && (
+                                <div className="space-y-2">
+                                    <div className="flex items-center gap-2">
+                                        <User size={14} className="text-muted-foreground" />
+                                        <p className="text-xs font-semibold">{t('hostDetails.proxyPanel.identities')}</p>
+                                    </div>
+                                    <Select
+                                        value={proxyConfig?.identityId || customCredentialsValue}
+                                        onValueChange={(value) =>
+                                            onUpdateProxy('identityId', value === customCredentialsValue ? undefined : value)
+                                        }
+                                    >
+                                        <SelectTrigger
+                                            aria-label={t('hostDetails.proxyPanel.identities')}
+                                            className="h-10"
+                                        >
+                                            <SelectValue placeholder={t('hostDetails.proxyPanel.identities')} />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value={customCredentialsValue}>
+                                                {t('hostDetails.proxyPanel.customCredentials')}
+                                            </SelectItem>
+                                            {proxyCredentialIdentities.map((identity) => (
+                                                <SelectItem key={identity.id} value={identity.id}>
+                                                    {identity.label}
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                    {selectedIdentity && (
+                                        <div className="min-w-0 rounded-md bg-secondary/50 p-2 text-sm">
+                                            <div className="font-medium truncate">{selectedIdentity.label}</div>
+                                            <div className="text-xs text-muted-foreground truncate">{selectedIdentity.username}</div>
+                                        </div>
+                                    )}
+                                    {hasMissingIdentity && (
+                                        <div className="min-w-0 rounded-md border border-destructive/30 bg-destructive/10 p-2 text-sm text-destructive">
+                                            {t('hostDetails.proxyPanel.identityUnavailable')}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                            {!proxyConfig?.identityId && (
+                                <>
+                                    <Input
+                                        aria-label={t('hostDetails.proxyPanel.usernamePlaceholder')}
+                                        placeholder={t('hostDetails.proxyPanel.usernamePlaceholder')}
+                                        value={proxyConfig?.username || ""}
+                                        onChange={(e) => onUpdateProxy('username', e.target.value)}
+                                        className="h-10"
+                                    />
+                                    <Input
+                                        aria-label={t('hostDetails.proxyPanel.passwordPlaceholder')}
+                                        placeholder={t('hostDetails.proxyPanel.passwordPlaceholder')}
+                                        type="password"
+                                        value={proxyConfig?.password || ""}
+                                        onChange={(e) => onUpdateProxy('password', e.target.value)}
+                                        className="h-10"
+                                    />
+                                </>
+                            )}
                         </Card>}
                     </>
                 )}

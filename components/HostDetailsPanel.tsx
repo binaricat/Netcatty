@@ -20,6 +20,7 @@ import {
 import {
   formatProxyConfigEndpoint,
   formatProxyConfigType,
+  getProxyConfigIdentityIssue,
   isCompleteProxyConfig,
   normalizeManualProxyConfig,
 } from "../domain/proxyProfiles";
@@ -327,18 +328,30 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
   }, []);
 
   const updateProxyConfig = useCallback(
-    (field: keyof ProxyConfig, value: string | number) => {
+    (field: keyof ProxyConfig, value: string | number | undefined) => {
       setForm((prev) => {
         const { proxyProfileId: _proxyProfileId, ...rest } = prev;
+        const nextProxyConfig: ProxyConfig = {
+          type: prev.proxyConfig?.type || "http",
+          host: prev.proxyConfig?.host || "",
+          port: prev.proxyConfig?.port || 8080,
+          ...prev.proxyConfig,
+        };
+        if (value === undefined) {
+          delete nextProxyConfig[field];
+        } else {
+          nextProxyConfig[field] = value as never;
+        }
+        if (field === "username" || field === "password") {
+          delete nextProxyConfig.identityId;
+        }
+        if (field === "identityId" && value) {
+          delete nextProxyConfig.username;
+          delete nextProxyConfig.password;
+        }
         return {
           ...rest,
-          proxyConfig: {
-            type: prev.proxyConfig?.type || "http",
-            host: prev.proxyConfig?.host || "",
-            port: prev.proxyConfig?.port || 8080,
-            ...prev.proxyConfig,
-            [field]: value,
-          },
+          proxyConfig: nextProxyConfig,
         } as Host;
       });
     },
@@ -416,8 +429,18 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
       setActiveSubPanel("proxy");
       return;
     }
+    if (getProxyConfigIdentityIssue(normalizedProxyConfig, identities)) {
+      toast.error(t("hostDetails.proxyPanel.identityUnavailable"));
+      setActiveSubPanel("proxy");
+      return;
+    }
     if (hasMissingProxyProfile) {
       toast.error(t("hostDetails.proxyPanel.missingSaved"));
+      setActiveSubPanel("proxy");
+      return;
+    }
+    if (getProxyConfigIdentityIssue(selectedProxyProfile?.config, identities)) {
+      toast.error(t("hostDetails.proxyPanel.identityUnavailable"));
       setActiveSubPanel("proxy");
       return;
     }
@@ -661,6 +684,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
       <ProxyPanel
         proxyConfig={form.proxyConfig}
         proxyProfiles={proxyProfiles}
+        identities={identities}
         selectedProxyProfileId={form.proxyProfileId}
         onUpdateProxy={updateProxyConfig}
         onSelectProxyProfile={selectProxyProfile}

@@ -162,6 +162,118 @@ test("startSSH forwards custom ProxyCommand to the SSH bridge", async () => {
   });
 });
 
+test("startSSH resolves proxy credentials from a referenced keychain identity", async () => {
+  let capturedOptions: { proxy?: Record<string, unknown> } | null = null;
+  const terminalBackend = {
+    backendAvailable: () => true,
+    telnetAvailable: () => true,
+    moshAvailable: () => true,
+    localAvailable: () => true,
+    serialAvailable: () => true,
+    execAvailable: () => true,
+    startSSHSession: async (options: { proxy?: Record<string, unknown> }) => {
+      capturedOptions = options;
+      return "ssh-session";
+    },
+    startTelnetSession: async () => "telnet-session",
+    startMoshSession: async () => "mosh-session",
+    startLocalSession: async () => "local-session",
+    startSerialSession: async () => "serial-session",
+    execCommand: async () => ({}),
+    onSessionData: () => noop,
+    onSessionExit: () => noop,
+    onChainProgress: () => noop,
+    writeToSession: noop,
+    resizeSession: noop,
+  };
+  const ctx = createStarterContext({
+    host: {
+      id: "host-1",
+      label: "Target",
+      hostname: "target.example.test",
+      username: "alice",
+      port: 2200,
+      proxyConfig: {
+        type: "http",
+        host: "proxy.example.com",
+        port: 3128,
+        identityId: "identity-1",
+      },
+    },
+    identities: [{
+      id: "identity-1",
+      label: "Proxy Login",
+      username: "proxy-user",
+      authMethod: "password",
+      password: "proxy-secret",
+      created: 1,
+    }],
+    terminalBackend,
+  });
+
+  await createTerminalSessionStarters(ctx as never).startSSH(createTermStub() as never);
+
+  assert.equal(capturedOptions?.proxy?.username, "proxy-user");
+  assert.equal(capturedOptions?.proxy?.password, "proxy-secret");
+});
+
+test("startSSH rejects proxy identities without a saved password", async () => {
+  let capturedError = "";
+  let startCalled = false;
+  const terminalBackend = {
+    backendAvailable: () => true,
+    telnetAvailable: () => true,
+    moshAvailable: () => true,
+    localAvailable: () => true,
+    serialAvailable: () => true,
+    execAvailable: () => true,
+    startSSHSession: async () => {
+      startCalled = true;
+      return "ssh-session";
+    },
+    startTelnetSession: async () => "telnet-session",
+    startMoshSession: async () => "mosh-session",
+    startLocalSession: async () => "local-session",
+    startSerialSession: async () => "serial-session",
+    execCommand: async () => ({}),
+    onSessionData: () => noop,
+    onSessionExit: () => noop,
+    onChainProgress: () => noop,
+    writeToSession: noop,
+    resizeSession: noop,
+  };
+  const ctx = createStarterContext({
+    host: {
+      id: "host-1",
+      label: "Target",
+      hostname: "target.example.test",
+      username: "alice",
+      proxyConfig: {
+        type: "http",
+        host: "proxy.example.com",
+        port: 3128,
+        identityId: "identity-1",
+      },
+    },
+    identities: [{
+      id: "identity-1",
+      label: "Key Only",
+      username: "proxy-user",
+      authMethod: "key",
+      created: 1,
+    }],
+    terminalBackend,
+    setError: (message: string) => {
+      capturedError = message;
+    },
+  });
+
+  await createTerminalSessionStarters(ctx as never).startSSH(createTermStub() as never);
+
+  assert.equal(startCalled, false);
+  assert.match(capturedError, /has no saved password/);
+});
+
 test("startSSH sends key and password together in one connection for publickey+password MFA hosts", async () => {
   let capturedOptions: Record<string, unknown> | null = null;
   let startCalls = 0;

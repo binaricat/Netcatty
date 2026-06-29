@@ -1,4 +1,4 @@
-import { Host, Snippet, TerminalSettings } from './models';
+import { Host, Identity, Snippet, TerminalSettings } from './models';
 import { sanitizeHostIconFields } from './hostIcon';
 import { migrateHostConnectScriptIds } from './hostConnectScripts.ts';
 import { migrateDeprecatedFontOverride } from '../infrastructure/config/fonts';
@@ -251,6 +251,26 @@ export const resolveTelnetPassword = (
   host.telnetPassword !== undefined
     ? host.telnetPassword
     : host.password;
+
+export const resolveTelnetCredentials = (
+  host: Pick<Host, 'identityId' | 'telnetUsername' | 'telnetPassword' | 'username' | 'password'>,
+  identities: Identity[] = [],
+): { username?: string; password?: string; rawPassword?: string } => {
+  const identity = host.identityId
+    ? identities.find((candidate) => candidate.id === host.identityId)
+    : undefined;
+  const username = host.telnetUsername !== undefined
+    ? host.telnetUsername.trim()
+    : identity?.username?.trim() || host.username?.trim();
+  const rawPassword = host.telnetPassword !== undefined
+    ? host.telnetPassword
+    : identity?.password ?? host.password;
+  return {
+    username,
+    password: rawPassword,
+    rawPassword,
+  };
+};
 
 export const resolveTelnetPort = (
   host: Pick<Host, 'protocol' | 'telnetPort' | 'port'>,

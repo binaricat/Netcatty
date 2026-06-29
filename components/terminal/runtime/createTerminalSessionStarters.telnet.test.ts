@@ -161,6 +161,91 @@ test("startTelnet passes saved telnet credentials without falling back after exp
   assert.equal(capturedOptions.port, 2323);
 });
 
+test("startTelnet uses a referenced keychain identity when telnet credentials are unset", async () => {
+  let capturedOptions: Record<string, unknown> | null = null;
+
+  const terminalBackend = {
+    backendAvailable: () => true,
+    telnetAvailable: () => true,
+    moshAvailable: () => true,
+    localAvailable: () => true,
+    serialAvailable: () => true,
+    execAvailable: () => true,
+    startSSHSession: async () => "ssh-session",
+    startTelnetSession: async (options: Record<string, unknown>) => {
+      capturedOptions = options;
+      return "telnet-session";
+    },
+    startMoshSession: async () => "mosh-session",
+    startLocalSession: async () => "local-session",
+    startSerialSession: async () => "serial-session",
+    execCommand: async () => ({}),
+    onSessionData: () => noop,
+    onSessionExit: () => noop,
+    onChainProgress: () => noop,
+    writeToSession: noop,
+    resizeSession: noop,
+  };
+
+  const ctx = {
+    host: {
+      id: "host-1",
+      label: "Example",
+      hostname: "example.test",
+      username: "ssh-user",
+      password: "ssh-password",
+      identityId: "identity-1",
+      telnetUsername: undefined,
+      telnetPassword: undefined,
+      telnetPort: 2323,
+    },
+    keys: [],
+    identities: [{
+      id: "identity-1",
+      label: "Shared Login",
+      username: "identity-user",
+      authMethod: "password",
+      password: "identity-password",
+      created: 1,
+    }],
+    resolvedChainHosts: [],
+    sessionId: "session-1",
+    terminalSettings: {},
+    terminalBackend,
+    sessionRef: { current: null },
+    hasConnectedRef: { current: false },
+    hasRunStartupCommandRef: { current: false },
+    disposeDataRef: { current: null },
+    disposeExitRef: { current: null },
+    fitAddonRef: { current: null },
+    serializeAddonRef: { current: null },
+    pendingAuthRef: { current: null },
+    updateStatus: noop,
+    setStatus: noop,
+    setError: noop,
+    setNeedsAuth: noop,
+    setAuthRetryMessage: noop,
+    setAuthPassword: noop,
+    setProgressLogs: noop,
+    setProgressValue: noop,
+    setChainProgress: noop,
+  };
+
+  const term = {
+    cols: 120,
+    rows: 32,
+    write: noop,
+    writeln: noop,
+    scrollToBottom: noop,
+  };
+
+  await createTerminalSessionStarters(ctx as never).startTelnet(term as never);
+
+  assert.ok(capturedOptions);
+  assert.equal(capturedOptions.username, "identity-user");
+  assert.equal(capturedOptions.password, "identity-password");
+});
+
 test("startTelnet preserves an explicitly cleared telnet password", async () => {
   let capturedOptions: Record<string, unknown> | null = null;
 

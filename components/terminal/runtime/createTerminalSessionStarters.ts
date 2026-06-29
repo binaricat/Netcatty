@@ -28,11 +28,14 @@ import {
 import { resolveHostAuth } from "../../../domain/sshAuth";
 import {
   resolveHostKeepalive,
-  resolveTelnetPassword,
+  resolveTelnetCredentials,
   resolveTelnetPort,
-  resolveTelnetUsername,
 } from "../../../domain/host";
-import { hasUsableProxyConfig } from "../../../domain/proxyProfiles";
+import {
+  getProxyConfigIdentityIssue,
+  hasUsableProxyConfig,
+  resolveProxyConfigAuth,
+} from "../../../domain/proxyProfiles";
 import { hasConnectionPassedTcpDial } from "../connectionTimeouts";
 
 const TELNET_SESSION_REPLACED_ERROR = "Telnet session start was replaced";
@@ -60,6 +63,23 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
     const translated = ctx.t?.(key);
     if (!translated || translated === key) return fallback;
     return translated;
+  };
+
+  const getProxyIdentityIssueMessage = (label: string): string | undefined => {
+    const issue = getProxyConfigIdentityIssue(ctx.host.proxyConfig, ctx.identities);
+    if (!issue) return undefined;
+    return issue === "missing-password"
+      ? `Proxy identity for host "${label}" has no saved password. Open host settings and select a password identity or enter proxy credentials.`
+      : `Proxy identity for host "${label}" is missing. Open host settings and select a password identity or enter proxy credentials.`;
+  };
+
+  const getJumpProxyIdentityIssueMessage = (jumpHost: Host): string | undefined => {
+    const issue = getProxyConfigIdentityIssue(jumpHost.proxyConfig, ctx.identities);
+    if (!issue) return undefined;
+    const label = jumpHost.label || jumpHost.hostname;
+    return issue === "missing-password"
+      ? `Proxy identity for jump host "${label}" has no saved password. Open host settings and select a password identity or enter proxy credentials.`
+      : `Proxy identity for jump host "${label}" is missing. Open host settings and select a password identity or enter proxy credentials.`;
   };
 
   const abortSessionStartAfterUnmount = () => {
@@ -184,7 +204,8 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
       );
     };
 
-    const rawProxyPassword = ctx.host.proxyConfig?.password;
+    const resolvedHostProxyConfig = resolveProxyConfigAuth(ctx.host.proxyConfig, ctx.identities);
+    const rawProxyPassword = resolvedHostProxyConfig?.password;
     if (ctx.host.proxyProfileId && !ctx.host.proxyConfig) {
       const message = `Saved proxy for host "${ctx.host.label || ctx.host.hostname}" is missing. Open host settings and select a valid proxy.`;
       ctx.setError(message);
@@ -192,14 +213,21 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
       ctx.updateStatus("disconnected");
       return;
     }
+    const proxyIdentityIssueMessage = getProxyIdentityIssueMessage(ctx.host.label || ctx.host.hostname);
+    if (proxyIdentityIssueMessage) {
+      ctx.setError(proxyIdentityIssueMessage);
+      writeTerminalLine(ctx, term, `\r\n[${proxyIdentityIssueMessage}]`);
+      ctx.updateStatus("disconnected");
+      return;
+    }
     const hasEncryptedProxyPassword = isEncryptedCredentialPlaceholder(rawProxyPassword);
-    const proxyConfig = ctx.host.proxyConfig
+    const proxyConfig = resolvedHostProxyConfig
       ? {
-        type: ctx.host.proxyConfig.type,
-        host: ctx.host.proxyConfig.host,
-        port: ctx.host.proxyConfig.port,
-        command: ctx.host.proxyConfig.command,
-        username: ctx.host.proxyConfig.username,
+        type: resolvedHostProxyConfig.type,
+        host: resolvedHostProxyConfig.host,
+        port: resolvedHostProxyConfig.port,
+        command: resolvedHostProxyConfig.command,
+        username: resolvedHostProxyConfig.username,
         password: sanitizeCredentialValue(rawProxyPassword),
       }
       : undefined;
@@ -208,6 +236,16 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
     const unresolvedJumpProxyHost = ctx.resolvedChainHosts.find((jumpHost) => jumpHost.proxyProfileId && !jumpHost.proxyConfig);
     if (unresolvedJumpProxyHost) {
       const message = `Saved proxy for jump host "${unresolvedJumpProxyHost.label || unresolvedJumpProxyHost.hostname}" is missing. Open host settings and select a valid proxy.`;
+      ctx.setError(message);
+      writeTerminalLine(ctx, term, `\r\n[${message}]`);
+      ctx.updateStatus("disconnected");
+      return;
+    }
+    const jumpProxyIdentityIssueHost = ctx.resolvedChainHosts.find((jumpHost) =>
+      Boolean(getProxyConfigIdentityIssue(jumpHost.proxyConfig, ctx.identities)),
+    );
+    if (jumpProxyIdentityIssueHost) {
+      const message = getJumpProxyIdentityIssueMessage(jumpProxyIdentityIssueHost)!;
       ctx.setError(message);
       writeTerminalLine(ctx, term, `\r\n[${message}]`);
       ctx.updateStatus("disconnected");
@@ -238,13 +276,14 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
             ? jumpHost.identityFilePaths
             : undefined;
       const hasJumpKeyMaterial = Boolean(jumpPrivateKey || jumpIdentityFilePaths?.length);
+      const resolvedJumpProxyConfig = resolveProxyConfigAuth(jumpHost.proxyConfig, ctx.identities);
       const hasConfiguredJumpProxyEndpoint =
         index === 0 &&
-        hasUsableProxyConfig(jumpHost.proxyConfig);
+        hasUsableProxyConfig(resolvedJumpProxyConfig);
       const hasEncryptedJumpProxyCredential =
         hasConfiguredJumpProxyEndpoint &&
-        Boolean(jumpHost.proxyConfig?.username) &&
-        isEncryptedCredentialPlaceholder(jumpHost.proxyConfig?.password);
+        Boolean(resolvedJumpProxyConfig?.username) &&
+        isEncryptedCredentialPlaceholder(resolvedJumpProxyConfig?.password);
 
       const hasEncryptedJumpCredential =
         isEncryptedCredentialPlaceholder(rawJumpPassword) ||
@@ -272,14 +311,14 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         keyId: jumpAuth.keyId,
         keySource: jumpKey?.source,
         label: jumpHost.label,
-        proxy: hasUsableProxyConfig(jumpHost.proxyConfig)
+        proxy: hasUsableProxyConfig(resolvedJumpProxyConfig)
           ? {
-            type: jumpHost.proxyConfig.type,
-            host: jumpHost.proxyConfig.host,
-            port: jumpHost.proxyConfig.port,
-            command: jumpHost.proxyConfig.command,
-            username: jumpHost.proxyConfig.username,
-            password: sanitizeCredentialValue(jumpHost.proxyConfig.password),
+            type: resolvedJumpProxyConfig!.type,
+            host: resolvedJumpProxyConfig!.host,
+            port: resolvedJumpProxyConfig!.port,
+            command: resolvedJumpProxyConfig!.command,
+            username: resolvedJumpProxyConfig!.username,
+            password: sanitizeCredentialValue(resolvedJumpProxyConfig!.password),
           }
           : undefined,
         identityFilePaths: jumpIdentityFilePaths,
@@ -655,8 +694,9 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
     };
     try {
       const telnetEnv = buildTermEnv(ctx.host, ctx.terminalSettings);
-      const telnetUsername = resolveTelnetUsername(ctx.host);
-      const rawTelnetPassword = resolveTelnetPassword(ctx.host);
+      const telnetCredentials = resolveTelnetCredentials(ctx.host, ctx.identities);
+      const telnetUsername = telnetCredentials.username;
+      const rawTelnetPassword = telnetCredentials.rawPassword;
       const telnetPassword = sanitizeCredentialValue(rawTelnetPassword);
       const hasTelnetPasswordForAutoLogin = rawTelnetPassword !== undefined;
       if (isEncryptedCredentialPlaceholder(rawTelnetPassword)) {

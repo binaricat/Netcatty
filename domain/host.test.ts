@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import type { Host } from "./models.ts";
+import type { Host, Identity } from "./models.ts";
 import {
   classifyDistroId,
   detectVendorFromSshVersion,
@@ -10,6 +10,7 @@ import {
   normalizePrimaryTelnetState,
   preserveConcurrentHostLineTimestampUpdate,
   resolveHostKeepalive,
+  resolveTelnetCredentials,
   resolveTelnetPort,
   resolveTelnetPassword,
   resolveTelnetUsername,
@@ -88,6 +89,52 @@ test("telnet credential helpers fall back only when telnet fields are unset", ()
 
   assert.equal(resolveTelnetUsername(host), "ssh-user");
   assert.equal(resolveTelnetPassword(host), "ssh-password");
+});
+
+test("resolveTelnetCredentials uses a referenced keychain identity when telnet fields are unset", () => {
+  const identity: Identity = {
+    id: "identity-1",
+    label: "Shared Login",
+    username: "identity-user",
+    authMethod: "password",
+    password: "identity-password",
+    created: 1,
+  };
+  const host = makeHost({
+    username: "ssh-user",
+    password: "ssh-password",
+    identityId: identity.id,
+    telnetUsername: undefined,
+    telnetPassword: undefined,
+  });
+
+  assert.deepEqual(resolveTelnetCredentials(host, [identity]), {
+    username: "identity-user",
+    password: "identity-password",
+    rawPassword: "identity-password",
+  });
+});
+
+test("resolveTelnetCredentials preserves explicitly cleared telnet fields ahead of identity fallback", () => {
+  const identity: Identity = {
+    id: "identity-1",
+    label: "Shared Login",
+    username: "identity-user",
+    authMethod: "password",
+    password: "identity-password",
+    created: 1,
+  };
+  const host = makeHost({
+    identityId: identity.id,
+    telnetUsername: "",
+    telnetPassword: "",
+  });
+
+  assert.deepEqual(resolveTelnetCredentials(host, [identity]), {
+    username: "",
+    password: "",
+    rawPassword: "",
+  });
 });
 
 test("normalizePrimaryTelnetState enables primary telnet without materializing a port", () => {

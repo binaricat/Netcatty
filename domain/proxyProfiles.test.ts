@@ -1,14 +1,16 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import type { Host, ProxyProfile } from "./models.ts";
+import type { Host, Identity, ProxyProfile } from "./models.ts";
 import {
   formatProxyConfigEndpoint,
   formatProxyConfigType,
   isCompleteProxyConfig,
   normalizeManualProxyConfig,
+  getProxyConfigIdentityIssue,
   materializeHostProxyProfile,
   removeProxyProfileReferences,
+  resolveProxyConfigAuth,
 } from "./proxyProfiles.ts";
 
 const profile = (overrides: Partial<ProxyProfile> = {}): ProxyProfile => ({
@@ -59,6 +61,69 @@ test("materializeHostProxyProfile keeps explicit custom proxy ahead of profile r
   );
 
   assert.deepEqual(resolved.proxyConfig, customProxy);
+});
+
+test("resolveProxyConfigAuth resolves proxy credentials from a referenced keychain identity", () => {
+  const identity: Identity = {
+    id: "identity-1",
+    label: "Proxy Login",
+    username: "proxy-user",
+    authMethod: "password",
+    password: "proxy-secret",
+    created: 1,
+  };
+
+  assert.deepEqual(
+    resolveProxyConfigAuth(
+      {
+        type: "socks5",
+        host: "proxy.example.com",
+        port: 1080,
+        identityId: identity.id,
+      },
+      [identity],
+    ),
+    {
+      type: "socks5",
+      host: "proxy.example.com",
+      port: 1080,
+      identityId: identity.id,
+      username: "proxy-user",
+      password: "proxy-secret",
+    },
+  );
+});
+
+test("getProxyConfigIdentityIssue flags missing proxy identities", () => {
+  assert.equal(
+    getProxyConfigIdentityIssue({
+      type: "http",
+      host: "proxy.example.com",
+      port: 3128,
+      identityId: "missing-identity",
+    }),
+    "missing-identity",
+  );
+});
+
+test("getProxyConfigIdentityIssue flags proxy identities without saved passwords", () => {
+  const identity: Identity = {
+    id: "identity-1",
+    label: "Key only",
+    username: "proxy-user",
+    authMethod: "key",
+    created: 1,
+  };
+
+  assert.equal(
+    getProxyConfigIdentityIssue({
+      type: "http",
+      host: "proxy.example.com",
+      port: 3128,
+      identityId: identity.id,
+    }, [identity]),
+    "missing-password",
+  );
 });
 
 test("removeProxyProfileReferences clears hosts and group configs that use a deleted profile", () => {
