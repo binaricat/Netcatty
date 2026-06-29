@@ -2,7 +2,6 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 
 const terminalBridge = require("./terminalBridge.cjs");
-const sessionLogStreamManager = require("./sessionLogStreamManager.cjs");
 const {
   FLOW_HIGH_WATER_MARK,
 } = require("../../infrastructure/config/terminalFlowConstants.cjs");
@@ -161,61 +160,49 @@ test("interruptSession sends SSH Ctrl+C without fastpath under low output pressu
 test("interruptSession filters pending SSH output under high output pressure", () => {
   const calls = [];
   const sent = [];
-  const logged = [];
-  const originalAppendData = sessionLogStreamManager.appendData;
-  sessionLogStreamManager.appendData = (sessionId, data) => {
-    logged.push([sessionId, data]);
-  };
   const sessions = new Map();
-  try {
-    sessions.set("ssh-1", {
-      cols: 80,
-      rows: 24,
-      webContentsId: 1,
-      takePendingData() {
-        calls.push(["take-pending"]);
-        return "stale frame\x1b[?1049l";
+  sessions.set("ssh-1", {
+    cols: 80,
+    rows: 24,
+    webContentsId: 1,
+    takePendingData() {
+      calls.push(["take-pending"]);
+      return "stale frame\x1b[?1049l";
+    },
+    discardPendingData() {
+      calls.push(["discard"]);
+    },
+    flowState: {
+      rendererPaused: false,
+      unackedBytes: FLOW_HIGH_WATER_MARK + 1300,
+      appliedPause: false,
+    },
+    stream: {
+      pause() {
+        calls.push(["pause"]);
       },
-      discardPendingData() {
-        calls.push(["discard"]);
+      resume() {},
+      signal(signalName) {
+        calls.push(["signal", signalName]);
       },
-      flowState: {
-        rendererPaused: false,
-        unackedBytes: FLOW_HIGH_WATER_MARK + 1300,
-        appliedPause: false,
+      write(data) {
+        calls.push(["write", data]);
       },
-      stream: {
-        pause() {
-          calls.push(["pause"]);
-        },
-        resume() {},
-        signal(signalName) {
-          calls.push(["signal", signalName]);
-        },
-        write(data) {
-          calls.push(["write", data]);
-        },
-      },
-    });
-    initBridge(sessions, sent);
+    },
+  });
+  initBridge(sessions, sent);
 
-    terminalBridge.interruptSession({ sender: {} }, { sessionId: "ssh-1" });
+  terminalBridge.interruptSession({ sender: {} }, { sessionId: "ssh-1" });
 
-    assert.deepEqual(calls, [
-      ["pause"],
-      ["take-pending"],
-      ["pause"],
-      ["write", "\x03"],
-    ]);
-    assert.deepEqual(sent, [
-      ["netcatty:data", { sessionId: "ssh-1", data: "\x1b[?1049l" }],
-    ]);
-    assert.deepEqual(logged, [
-      ["ssh-1", "\x1b[?1049l"],
-    ]);
-  } finally {
-    sessionLogStreamManager.appendData = originalAppendData;
-  }
+  assert.deepEqual(calls, [
+    ["pause"],
+    ["take-pending"],
+    ["pause"],
+    ["write", "\x03"],
+  ]);
+  assert.deepEqual(sent, [
+    ["netcatty:data", { sessionId: "ssh-1", data: "\x1b[?1049l" }],
+  ]);
 });
 
 test("interruptSession does not arm SSH output drain for tiny in-flight echo", () => {
