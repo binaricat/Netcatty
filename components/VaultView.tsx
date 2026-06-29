@@ -631,11 +631,11 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
       : undefined;
 
     const username = isTelnet
-      ? resolveTelnetUsername(effective)
+      ? resolveTelnetUsername(effective, identity)
       : (identity?.username?.trim() || effective.username?.trim());
 
     const rawPassword = isTelnet
-      ? resolveTelnetPassword(effective)
+      ? resolveTelnetPassword(effective, identity)
       : (identity?.password || effective.password);
     const password = sanitizeCredentialValue(rawPassword);
 

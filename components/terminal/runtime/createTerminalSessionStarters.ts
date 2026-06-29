@@ -654,9 +654,12 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
       clearTelnetEchoMode();
     };
     try {
+      const resolvedTelnetIdentity = ctx.host.identityId
+        ? resolveHostAuth({ host: ctx.host, keys: ctx.keys, identities: ctx.identities }).identity
+        : undefined;
       const telnetEnv = buildTermEnv(ctx.host, ctx.terminalSettings);
-      const telnetUsername = resolveTelnetUsername(ctx.host);
-      const rawTelnetPassword = resolveTelnetPassword(ctx.host);
+      const telnetUsername = resolveTelnetUsername(ctx.host, resolvedTelnetIdentity);
+      const rawTelnetPassword = resolveTelnetPassword(ctx.host, resolvedTelnetIdentity);
       const telnetPassword = sanitizeCredentialValue(rawTelnetPassword);
       const hasTelnetPasswordForAutoLogin = rawTelnetPassword !== undefined;
       if (isEncryptedCredentialPlaceholder(rawTelnetPassword)) {

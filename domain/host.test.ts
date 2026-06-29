@@ -78,7 +78,7 @@ test("telnet credential helpers preserve explicitly cleared values", () => {
   assert.equal(resolveTelnetPassword(host), "");
 });
 
-test("telnet credential helpers fall back only when telnet fields are unset", () => {
+test("telnet credential helpers do not fall back to SSH credentials when telnet fields are unset", () => {
   const host = makeHost({
     username: " ssh-user ",
     password: "ssh-password",
@@ -86,8 +86,24 @@ test("telnet credential helpers fall back only when telnet fields are unset", ()
     telnetPassword: undefined,
   });
 
-  assert.equal(resolveTelnetUsername(host), "ssh-user");
-  assert.equal(resolveTelnetPassword(host), "ssh-password");
+  assert.equal(resolveTelnetUsername(host), undefined);
+  assert.equal(resolveTelnetPassword(host), undefined);
+});
+
+test("telnet credential helpers can resolve a referenced identity", () => {
+  const host = makeHost({
+    username: " ssh-user ",
+    password: "ssh-password",
+    telnetUsername: undefined,
+    telnetPassword: undefined,
+  });
+  const identity = {
+    username: " telnet-identity ",
+    password: "identity-password",
+  };
+
+  assert.equal(resolveTelnetUsername(host, identity), "telnet-identity");
+  assert.equal(resolveTelnetPassword(host, identity), "identity-password");
 });
 
 test("normalizePrimaryTelnetState enables primary telnet without materializing a port", () => {
