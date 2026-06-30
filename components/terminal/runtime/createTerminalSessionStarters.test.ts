@@ -6,7 +6,7 @@ import {
   getMissingChainHostIds,
 } from "./createTerminalSessionStarters";
 import { createPromptLineBreakState } from "./promptLineBreak";
-import { resolveStartupCommand } from "./terminalStartupCommands";
+import { resolveStartupCommand, scheduleStartupCommand } from "./terminalStartupCommands";
 import { pasteTextIntoTerminal } from "./terminalUserPaste";
 
 const noop = () => undefined;
@@ -2588,4 +2588,78 @@ test("startSSH sends local identity file paths with saved passwords for key auth
   assert.ok(capturedOptions);
   assert.equal(capturedOptions.password, "saved-password");
   assert.deepEqual(capturedOptions.identityFilePaths, ["/Users/alice/.ssh/id_ed25519"]);
+});
+
+test("scheduleStartupCommand sends shell multi-line snippets in one write", async () => {
+  const sessionWrites: Array<{ id: string; data: string; automated?: boolean }> = [];
+  const executedCommands: string[] = [];
+  const terminalBackend = {
+    writeToSession: (id: string, data: string, options?: { automated?: boolean }) => {
+      sessionWrites.push({ id, data, automated: options?.automated });
+    },
+  };
+  const ctx = createStarterContext({
+    host: {
+      id: "host-1",
+      label: "Target",
+      hostname: "target.example.test",
+      username: "alice",
+      protocol: "ssh",
+    },
+    terminalSettings: { startupCommandDelayMs: 0 },
+    terminalBackend,
+    startupCommand: 'sudo apt install gconf2-common -y\necho "123456"',
+    sessionRef: { current: "ssh-session" },
+    promptLineBreakStateRef: undefined,
+    onCommandExecuted: (command: string) => {
+      executedCommands.push(command);
+    },
+  });
+
+  const cancel = scheduleStartupCommand(ctx as never, createTermStub() as never, "ssh-session");
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(typeof cancel, "function");
+  assert.deepEqual(sessionWrites, [{
+    id: "ssh-session",
+    data: 'sudo apt install gconf2-common -y\necho "123456"\r',
+    automated: true,
+  }]);
+  assert.deepEqual(executedCommands, [
+    "sudo apt install gconf2-common -y",
+    'echo "123456"',
+  ]);
+});
+
+test("scheduleStartupCommand still sequences telnet multi-line startup commands", async () => {
+  const sessionWrites: Array<{ id: string; data: string; automated?: boolean }> = [];
+  const terminalBackend = {
+    writeToSession: (id: string, data: string, options?: { automated?: boolean }) => {
+      sessionWrites.push({ id, data, automated: options?.automated });
+    },
+  };
+  const ctx = createStarterContext({
+    host: {
+      id: "host-1",
+      label: "Target",
+      hostname: "target.example.test",
+      username: "alice",
+      protocol: "telnet",
+    },
+    terminalSettings: { startupCommandDelayMs: 0 },
+    terminalBackend,
+    startupCommand: "first cmd\nsecond cmd",
+    sessionRef: { current: "telnet-session" },
+    promptLineBreakStateRef: undefined,
+  });
+
+  scheduleStartupCommand(ctx as never, createTermStub() as never, "telnet-session");
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(sessionWrites, [{ id: "telnet-session", data: "first cmd\r", automated: true }]);
+
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(sessionWrites, [
+    { id: "telnet-session", data: "first cmd\r", automated: true },
+    { id: "telnet-session", data: "second cmd\r", automated: true },
+  ]);
 });

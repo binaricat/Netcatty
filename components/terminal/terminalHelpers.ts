@@ -262,9 +262,13 @@ export function shouldShowTerminalConnectionDialog({
 
 export function shouldDelayAutoRunSnippetInput(
   data: string,
-  opts: { noAutoRun?: boolean },
+  opts: { noAutoRun?: boolean; protocol?: Host["protocol"] },
 ): boolean {
   if (opts.noAutoRun) return false;
+  // Telnet login sequences need a pause between lines so prompts can respond.
+  // Shell sessions should paste all lines at once so bash can queue commands
+  // (e.g. a long-running apt install followed by echo).
+  if (opts.protocol !== "telnet") return false;
   const normalized = normalizeLineEndings(String(data ?? "")).replace(/\r/g, "\n");
   const withoutSubmitEnter = normalized.endsWith("\n") ? normalized.slice(0, -1) : normalized;
   return withoutSubmitEnter.includes("\n");

@@ -1353,10 +1353,14 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
 
     const session = sessionsRef.current.find((candidate) => candidate.id === sessionId);
     if (!session || !canUseDirectSessionWriteFallback(session)) return;
+    const sessionHost = sessionHostsMapRef.current.get(sessionId);
 
     let data = normalizeLineEndings(command);
     if (!noAutoRun) data = `${data}\r`;
-    const lineDelayMs = shouldDelayAutoRunSnippetInput(data, { noAutoRun })
+    const lineDelayMs = shouldDelayAutoRunSnippetInput(data, {
+      noAutoRun,
+      protocol: sessionHost?.protocol ?? session.protocol,
+    })
       ? AUTO_RUN_SNIPPET_LINE_DELAY_MS
       : undefined;
     terminalBackend.writeToSession(sessionId, data, {

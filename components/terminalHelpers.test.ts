@@ -129,10 +129,20 @@ test("connection reuse hides connecting dialog only while reuse is still possibl
   );
 });
 
-test("auto-run snippets delay multi-line input but paste-only snippets do not", () => {
+test("auto-run snippets delay multi-line telnet input but paste-only snippets do not", () => {
   assert.equal(AUTO_RUN_SNIPPET_LINE_DELAY_MS > 0, true);
-  assert.equal(shouldDelayAutoRunSnippetInput("tthdf 0 2323\nadmin\ntest123", { noAutoRun: false }), true);
-  assert.equal(shouldDelayAutoRunSnippetInput("tthdf 0 2323\nadmin\ntest123", { noAutoRun: true }), false);
-  assert.equal(shouldDelayAutoRunSnippetInput("show version", { noAutoRun: false }), false);
-  assert.equal(shouldDelayAutoRunSnippetInput("show version\r", { noAutoRun: false }), false);
+  assert.equal(
+    shouldDelayAutoRunSnippetInput("tthdf 0 2323\nadmin\ntest123", { noAutoRun: false, protocol: "telnet" }),
+    true,
+  );
+  assert.equal(
+    shouldDelayAutoRunSnippetInput("sudo apt install -y\necho done", { noAutoRun: false, protocol: "ssh" }),
+    false,
+  );
+  assert.equal(
+    shouldDelayAutoRunSnippetInput("tthdf 0 2323\nadmin\ntest123", { noAutoRun: true, protocol: "telnet" }),
+    false,
+  );
+  assert.equal(shouldDelayAutoRunSnippetInput("show version", { noAutoRun: false, protocol: "telnet" }), false);
+  assert.equal(shouldDelayAutoRunSnippetInput("show version\r", { noAutoRun: false, protocol: "telnet" }), false);
 });

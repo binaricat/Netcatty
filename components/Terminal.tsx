@@ -1752,7 +1752,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     if (!term || !id) return;
 
     let data = normalizeLineEndings(command);
-    const lineDelayMs = shouldDelayAutoRunSnippetInput(data, { noAutoRun })
+    const lineDelayMs = shouldDelayAutoRunSnippetInput(data, { noAutoRun, protocol: host.protocol })
       ? AUTO_RUN_SNIPPET_LINE_DELAY_MS
       : undefined;
     const isMultiLine = data.includes('\n');

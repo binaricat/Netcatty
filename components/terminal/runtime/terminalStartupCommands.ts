@@ -1,4 +1,5 @@
 import type { Terminal as XTerm } from "@xterm/xterm";
+import { normalizeLineEndings } from "../../../lib/utils";
 import { markPromptLineBreakCommandPending } from "./promptLineBreak";
 import type { TerminalSessionStartersContext } from "./createTerminalSessionStarters.types";
 
@@ -73,15 +74,39 @@ export const scheduleStartupCommand = (
     };
   }
 
-  // Auto-run: send each non-empty line in sequence, waiting delayMs before the
-  // first and between each, so a line runs inside any sub-shell opened by a
-  // previous line (e.g. `sudo -i` then `alias ...`).
   const lines = splitStartupCommandLines(commandToRun);
   if (lines.length === 0) {
     onSettled?.();
     return undefined;
   }
 
+  const isTelnetStartup = ctx.host.protocol === "telnet";
+
+  // Shell sessions: send all lines in one write so the shell can queue commands
+  // while a long-running foreground job is active (issue #1836).
+  if (!isTelnetStartup) {
+    timeoutId = setTimeout(() => {
+      if (cancelled) return;
+      if (!sessionIsCurrent()) {
+        onSettled?.();
+        return;
+      }
+      const data = `${normalizeLineEndings(commandToRun)}\r`;
+      ctx.terminalBackend.writeToSession(ctx.sessionRef.current, data, { automated: true });
+      for (const line of lines) {
+        markPromptLineBreakCommandPending(ctx.promptLineBreakStateRef, term, line);
+        ctx.onCommandExecuted?.(line, ctx.host.id, ctx.host.label, ctx.sessionId);
+      }
+      onSettled?.();
+    }, delayMs);
+    return () => {
+      cancelled = true;
+      if (timeoutId) clearTimeout(timeoutId);
+    };
+  }
+
+  // Telnet: send each non-empty line in sequence, waiting delayMs before the
+  // first and between each, so prompts can respond between steps.
   let index = 0;
   const runNext = () => {
     if (cancelled) return;
