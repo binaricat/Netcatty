@@ -1153,6 +1153,14 @@ function createPreloadApi(ctx) {
   respondVaultAgent: async (requestId, result) => {
     return ipcRenderer.invoke("netcatty:ai:vault-agent:response", { requestId, result });
   },
+  onAssetActionRequest: (cb) => {
+    const handler = (_event, payload) => cb(payload);
+    ipcRenderer.on("netcatty:ai:asset-action:request", handler);
+    return () => ipcRenderer.removeListener("netcatty:ai:asset-action:request", handler);
+  },
+  respondAssetAction: async (requestId, result) => {
+    return ipcRenderer.invoke("netcatty:ai:asset-action:response", { requestId, result });
+  },
   // SDK external agent streaming
   aiSdkAgentStream: async (requestId, chatSessionId, sdkBackend, prompt, cwd, providerId, model, existingSessionId, historyMessages, images, toolIntegrationMode, defaultTargetSession, userSkillsContext, agentEnv, agentCommand) => {
     return ipcRenderer.invoke("netcatty:ai:sdk-agent:stream", { requestId, chatSessionId, sdkBackend, prompt, cwd, providerId, model, existingSessionId, historyMessages, images, toolIntegrationMode, defaultTargetSession, userSkillsContext, agentEnv, agentCommand });

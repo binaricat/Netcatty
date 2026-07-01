@@ -157,6 +157,8 @@ declare global {
     }>, chatSessionId?: string): Promise<{ ok: boolean }>;
     onVaultAgentRequest?(cb: (payload: { requestId: string; op: string; params: Record<string, unknown> }) => void): () => void;
     respondVaultAgent?(requestId: string, result: Record<string, unknown>): Promise<{ ok: boolean; error?: string }>;
+    onAssetActionRequest?(cb: (payload: { requestId: string; op: string; params: Record<string, unknown> }) => void): () => void;
+    respondAssetAction?(requestId: string, result: Record<string, unknown>): Promise<{ ok: boolean; error?: string }>;
     aiMcpSetToolIntegrationMode?(mode: 'mcp' | 'skills'): Promise<{ ok: boolean; error?: string }>;
     publicMcpGetStatus?(): Promise<PublicMcpStatus>;
     publicMcpSetEnabled?(enabled: boolean): Promise<PublicMcpStatus>;

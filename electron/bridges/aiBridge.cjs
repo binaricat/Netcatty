@@ -24,6 +24,7 @@ const {
 } = require("./ai/userSkills.cjs");
 const { registerProviderHandlers } = require("./aiBridge/providerHandlers.cjs"), { registerCattyExecHandlers } = require("./aiBridge/cattyExecHandlers.cjs"), { createAgentCliHelpers } = require("./aiBridge/agentCliHelpers.cjs");
 const { createVaultAgentBridge } = require("./aiBridge/vaultAgentBridge.cjs");
+const { createAssetActionBridge } = require("./aiBridge/assetActionBridge.cjs");
 const { registerAgentDiscoveryHandlers } = require("./aiBridge/agentDiscoveryHandlers.cjs"), { registerAgentProcessHandlers } = require("./aiBridge/agentProcessHandlers.cjs"), { registerSdkStreamHandlers } = require("./aiBridge/sdk/sdkStreamHandlers.cjs");
 const { probeClaudeAuth, probeCopilotAuth, probeCodexAuth, probeCodebuddyAuth } = require("./aiBridge/agentAuthProbes.cjs");
 
@@ -224,6 +225,7 @@ let mainWebContentsId = null;
 let cliDiscoveryFilePath = null;
 let registeredContext = null;
 let registeredVaultAgentBridge = null;
+let registeredAssetActionBridge = null;
 
 // Active streaming requests (for cancellation)
 const activeStreams = new Map();
@@ -741,6 +743,12 @@ function createHandlerContext(ipcMain) {
     normalizeAgentEnv,
     safeReadJson,
     streamRequest,
+    invokeAssetAction: (...args) => {
+      if (!registeredAssetActionBridge) {
+        return Promise.resolve({ ok: false, error: "Asset action bridge is not ready." });
+      }
+      return registeredAssetActionBridge.invokeAssetAction(...args);
+    },
   };
 }
 
@@ -765,6 +773,22 @@ function registerHandlers(ipcMain) {
     mcpServerBridge.setVaultAgentInvoker(registeredVaultAgentBridge.invokeVaultAgent);
   }
   registeredVaultAgentBridge.registerHandlers(ipcMain);
+
+  if (!registeredAssetActionBridge) {
+    registeredAssetActionBridge = createAssetActionBridge({
+      getMainWindowFn: () => {
+        try {
+          const windowManager = require("./windowManager.cjs");
+          const mainWin = windowManager.getMainWindow?.();
+          return (mainWin && !mainWin.isDestroyed()) ? mainWin : null;
+        } catch {
+          return null;
+        }
+      },
+      validateSender,
+    });
+  }
+  registeredAssetActionBridge.registerHandlers(ipcMain);
 
   registerProviderHandlers(context);
   registerCattyExecHandlers(context);

@@ -8,6 +8,7 @@ import { useSettingsState } from './application/state/useSettingsState';
 import { useUpdateCheck } from './application/state/useUpdateCheck';
 import { useVaultState } from './application/state/useVaultState';
 import { useVaultAgentBridge } from './application/state/useVaultAgentBridge';
+import { useAssetActionBridge } from './application/state/useAssetActionBridge';
 import { useWindowControls } from './application/state/useWindowControls';
 import { useEditorTabs } from './application/state/editorTabStore';
 import { syncPublicMcpStartupState } from './application/state/usePublicMcpToggleState';
@@ -972,6 +973,33 @@ function App({ settings }: { settings: SettingsState }) {
 
   // Wrapper to connect to host with logging
   const handleConnectToHost = useCallback((host: Host) => { return handleConnectToHostImpl(() => ({ addConnectionLog, connectToHost, host, identities, keys, resolveEffectiveHost, resolveHostAuth, systemInfoRef }), host); }, [addConnectionLog, connectToHost, resolveEffectiveHost, identities, keys]);
+
+  useAssetActionBridge({
+    hosts,
+    sessions,
+    resolveEffectiveHost,
+    openHost: (hostId) => {
+      const host = hosts.find((entry) => entry.id === hostId);
+      if (!host) return;
+      setDeepLinkHostDraft(host);
+      setNavigateToSection('hosts');
+      setActiveTabId('vault');
+    },
+    connectHost: handleConnectToHost,
+    closeSession: (sessionId) => {
+      closeSession(sessionId);
+      return true;
+    },
+    focusSession: (sessionId) => {
+      const session = sessions.find((entry) => entry.id === sessionId);
+      if (session?.workspaceId) {
+        setActiveTabId(session.workspaceId);
+        setWorkspaceFocusedSession(session.workspaceId, sessionId);
+        return;
+      }
+      setActiveTabId(sessionId);
+    },
+  });
 
   const _handleSshDeepLink = useEffectEvent((payload: { url?: string }) => {
     const rawUrl = payload?.url || '';
