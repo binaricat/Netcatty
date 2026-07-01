@@ -141,7 +141,7 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
           }}
         >
                 {viewMode !== "tree" && (
-                  <section className="space-y-2">
+                  <section className="space-y-2 pt-2">
                     <div className="flex items-center gap-2 text-sm font-semibold">
                       <button
                         className={cn(
