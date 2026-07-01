@@ -5,6 +5,7 @@ const { getCapabilityByRpcMethod } = require("../../capabilities/registry.cjs");
 const { getMcpToolNameForRpcMethod } = require("../../capabilities/adapters/mcpAdapter.cjs");
 const { createVaultService } = require("../../capabilities/services/vaultService.cjs");
 const { createPortForwardService } = require("../../capabilities/services/portforwardService.cjs");
+const { createAssetSessionService } = require("../../capabilities/services/assetSessionService.cjs");
 
 const UNROUTED = Symbol("capability-rpc-unrouted");
 
@@ -39,6 +40,15 @@ const SERVICE_BINDINGS = Object.freeze({
   "vault.scripts.targets.set": { domain: "vault", method: "setScriptTargets" },
   "vault.host.connectScripts.list": { domain: "vault", method: "listHostConnectScripts" },
   "vault.host.connectScripts.set": { domain: "vault", method: "setHostConnectScripts" },
+  "asset.list": { domain: "vault", method: "listAssets" },
+  "asset.get": { domain: "vault", method: "getAsset" },
+  "asset.add": { domain: "vault", method: "addAsset" },
+  "asset.edit": { domain: "vault", method: "editAsset" },
+  "asset.remove": { domain: "vault", method: "removeAsset" },
+  "asset.open": { domain: "assetSession", method: "open" },
+  "asset.connect": { domain: "assetSession", method: "connect" },
+  "asset.disconnect": { domain: "assetSession", method: "disconnect" },
+  "asset.reconnect": { domain: "assetSession", method: "reconnect" },
   "portforward.rules.list": { domain: "portforward", method: "listRules" },
   "portforward.tunnels.list": { domain: "portforward", method: "listTunnels" },
   "portforward.start": { domain: "portforward", method: "start" },
@@ -65,6 +75,7 @@ function resolveCapabilitySurface(rpcMethod) {
 function createCapabilityRpcDispatcher(deps) {
   const {
     invokeVaultAgent,
+    invokeAssetAction,
     evaluatePermissionWithGrants,
     isChatSessionCancelled,
     requestApprovalFromRenderer,
@@ -73,9 +84,11 @@ function createCapabilityRpcDispatcher(deps) {
 
   const vaultService = createVaultService({ invokeVaultAgent });
   const portforwardService = createPortForwardService({ invokeVaultAgent });
+  const assetSessionService = createAssetSessionService({ invokeAssetAction });
   const services = {
     vault: vaultService,
     portforward: portforwardService,
+    assetSession: assetSessionService,
   };
 
   return async function dispatchCapabilityRpc(rpcMethod, params = {}) {

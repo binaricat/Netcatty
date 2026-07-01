@@ -1627,5 +1627,235 @@
       "bypassesChatCancel": false
     },
     "agentKind": "global"
+  },
+  {
+    "capabilityId": "asset.list",
+    "toolName": "asset_list",
+    "rpcMethod": "asset/list",
+    "localExecution": false,
+    "description": "List saved server assets from Vault Hosts (metadata only; no passwords or keys).",
+    "inputShape": {},
+    "policy": {
+      "write": false,
+      "sensitiveRead": true,
+      "longRunning": false,
+      "requiresChatSession": false,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": true,
+      "bypassesChatCancel": true
+    },
+    "agentKind": "global"
+  },
+  {
+    "capabilityId": "asset.get",
+    "toolName": "asset_get",
+    "rpcMethod": "asset/get",
+    "localExecution": false,
+    "description": "Get a saved server asset by host ID (metadata only; no passwords or keys).",
+    "inputShape": {
+      "hostId": {
+        "type": "string",
+        "optional": false,
+        "description": "Saved server asset host ID."
+      }
+    },
+    "policy": {
+      "write": false,
+      "sensitiveRead": true,
+      "longRunning": false,
+      "requiresChatSession": false,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": true,
+      "bypassesChatCancel": true
+    },
+    "agentKind": "global"
+  },
+  {
+    "capabilityId": "asset.add",
+    "toolName": "asset_add",
+    "rpcMethod": "asset/add",
+    "localExecution": false,
+    "description": "Add one or more saved server assets to Vault Hosts.",
+    "inputShape": {
+      "hosts": {
+        "type": "string",
+        "optional": false,
+        "description": "JSON array of server asset host objects. Each object: hostname (required), label, port, username, password, group, tags, notes, protocol (ssh|telnet|local). Raw credential fields are accepted only when Netcatty can mask approval, history, and export displays; otherwise use identityId or identityFileId."
+      },
+      "dryRun": {
+        "type": "string",
+        "optional": true,
+        "description": "Set to true to validate and preview without writing to the vault."
+      },
+      "skipDuplicates": {
+        "type": "string",
+        "optional": true,
+        "description": "Set to false to create even when a matching asset already exists (default true)."
+      }
+    },
+    "policy": {
+      "write": true,
+      "sensitiveRead": false,
+      "longRunning": false,
+      "requiresChatSession": false,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": false,
+      "bypassesChatCancel": false
+    },
+    "agentKind": "global"
+  },
+  {
+    "capabilityId": "asset.edit",
+    "toolName": "asset_edit",
+    "rpcMethod": "asset/edit",
+    "localExecution": false,
+    "description": "Edit fields on a saved server asset.",
+    "inputShape": {
+      "hostId": {
+        "type": "string",
+        "optional": false,
+        "description": "Saved server asset host ID."
+      },
+      "patch": {
+        "type": "string",
+        "optional": false,
+        "description": "JSON object of fields to patch on the asset. Raw credential fields are accepted only when Netcatty can mask approval, history, and export displays; otherwise use identityId or identityFileId."
+      }
+    },
+    "policy": {
+      "write": true,
+      "sensitiveRead": false,
+      "longRunning": false,
+      "requiresChatSession": false,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": false,
+      "bypassesChatCancel": false
+    },
+    "agentKind": "global"
+  },
+  {
+    "capabilityId": "asset.remove",
+    "toolName": "asset_remove",
+    "rpcMethod": "asset/remove",
+    "localExecution": false,
+    "description": "Remove a saved server asset from Vault Hosts.",
+    "inputShape": {
+      "hostId": {
+        "type": "string",
+        "optional": false,
+        "description": "Saved server asset host ID."
+      }
+    },
+    "policy": {
+      "write": true,
+      "sensitiveRead": false,
+      "longRunning": false,
+      "requiresChatSession": false,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": false,
+      "bypassesChatCancel": false
+    },
+    "agentKind": "global"
+  },
+  {
+    "capabilityId": "asset.open",
+    "toolName": "asset_open",
+    "rpcMethod": "asset/open",
+    "localExecution": false,
+    "description": "Open a saved server asset in the Vault Hosts UI.",
+    "inputShape": {
+      "hostId": {
+        "type": "string",
+        "optional": false,
+        "description": "Saved server asset host ID to open in Vault Hosts."
+      }
+    },
+    "policy": {
+      "write": true,
+      "sensitiveRead": false,
+      "longRunning": false,
+      "requiresChatSession": false,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": false,
+      "bypassesChatCancel": false
+    },
+    "agentKind": "global"
+  },
+  {
+    "capabilityId": "asset.connect",
+    "toolName": "asset_connect",
+    "rpcMethod": "asset/connect",
+    "localExecution": false,
+    "description": "Open a new SSH terminal session for a saved server asset.",
+    "inputShape": {
+      "hostId": {
+        "type": "string",
+        "optional": false,
+        "description": "Saved SSH server asset host ID to connect."
+      }
+    },
+    "policy": {
+      "write": true,
+      "sensitiveRead": false,
+      "longRunning": false,
+      "requiresChatSession": false,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": false,
+      "bypassesChatCancel": false
+    },
+    "agentKind": "global"
+  },
+  {
+    "capabilityId": "asset.disconnect",
+    "toolName": "asset_disconnect",
+    "rpcMethod": "asset/disconnect",
+    "localExecution": false,
+    "description": "Close an existing terminal session for a saved server asset.",
+    "inputShape": {
+      "sessionId": {
+        "type": "string",
+        "optional": true,
+        "description": "Terminal session ID to close."
+      },
+      "hostId": {
+        "type": "string",
+        "optional": true,
+        "description": "Saved server asset host ID. Required when sessionId is omitted; rejected if multiple sessions match."
+      }
+    },
+    "policy": {
+      "write": true,
+      "sensitiveRead": false,
+      "longRunning": false,
+      "requiresChatSession": false,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": false,
+      "bypassesChatCancel": false
+    },
+    "agentKind": "global"
+  },
+  {
+    "capabilityId": "asset.reconnect",
+    "toolName": "asset_reconnect",
+    "rpcMethod": "asset/reconnect",
+    "localExecution": false,
+    "description": "Close and reopen an existing SSH terminal session for a saved server asset.",
+    "inputShape": {
+      "sessionId": {
+        "type": "string",
+        "optional": false,
+        "description": "Terminal session ID to close and reopen."
+      }
+    },
+    "policy": {
+      "write": true,
+      "sensitiveRead": false,
+      "longRunning": false,
+      "requiresChatSession": false,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": false,
+      "bypassesChatCancel": false
+    },
+    "agentKind": "global"
   }
 ]

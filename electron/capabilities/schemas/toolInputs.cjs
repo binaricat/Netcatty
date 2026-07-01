@@ -117,6 +117,55 @@ const TOOL_INPUT_FIELDS = Object.freeze({
       description: "Optional source file name (helps SecureCRT .ini parsing).",
     },
   },
+  "asset.list": {},
+  "asset.get": {
+    hostId: { type: "string", description: "Saved server asset host ID." },
+  },
+  "asset.add": {
+    hosts: {
+      type: "string",
+      description:
+        "JSON array of server asset host objects. Each object: hostname (required), label, port, username, password, group, tags, notes, protocol (ssh|telnet|local). Raw credential fields are accepted only when Netcatty can mask approval, history, and export displays; otherwise use identityId or identityFileId.",
+    },
+    dryRun: {
+      type: "string",
+      optional: true,
+      description: "Set to true to validate and preview without writing to the vault.",
+    },
+    skipDuplicates: {
+      type: "string",
+      optional: true,
+      description: "Set to false to create even when a matching asset already exists (default true).",
+    },
+  },
+  "asset.edit": {
+    hostId: { type: "string", description: "Saved server asset host ID." },
+    patch: {
+      type: "string",
+      description:
+        "JSON object of fields to patch on the asset. Raw credential fields are accepted only when Netcatty can mask approval, history, and export displays; otherwise use identityId or identityFileId.",
+    },
+  },
+  "asset.remove": {
+    hostId: { type: "string", description: "Saved server asset host ID." },
+  },
+  "asset.open": {
+    hostId: { type: "string", description: "Saved server asset host ID to open in Vault Hosts." },
+  },
+  "asset.connect": {
+    hostId: { type: "string", description: "Saved SSH server asset host ID to connect." },
+  },
+  "asset.disconnect": {
+    sessionId: { type: "string", optional: true, description: "Terminal session ID to close." },
+    hostId: {
+      type: "string",
+      optional: true,
+      description: "Saved server asset host ID. Required when sessionId is omitted; rejected if multiple sessions match.",
+    },
+  },
+  "asset.reconnect": {
+    sessionId: { type: "string", description: "Terminal session ID to close and reopen." },
+  },
   "vault.host.notes.get": {
     hostId: { type: "string", description: "Vault host ID." },
   },

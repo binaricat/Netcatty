@@ -787,6 +787,7 @@ function registerHandlers(ipcMain) {
       },
       validateSender,
     });
+    mcpServerBridge.setAssetActionInvoker(registeredAssetActionBridge.invokeAssetAction);
   }
   registeredAssetActionBridge.registerHandlers(ipcMain);
 

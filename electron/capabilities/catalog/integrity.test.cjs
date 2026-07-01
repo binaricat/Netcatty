@@ -6,6 +6,7 @@ const assert = require("node:assert/strict");
 const { ALL_CAPABILITIES } = require("../index.cjs");
 const { CAPABILITY_STATUS, CAPABILITY_SURFACES } = require("../constants.cjs");
 const { getCliRpcMethod } = require("../adapters/cliAdapter.cjs");
+const { getCapabilityById } = require("../registry.cjs");
 
 const IMPLEMENTED_CLI_COMMANDS = [
   ["status"],
@@ -82,4 +83,9 @@ test("implemented capabilities expose at least one surface binding", () => {
 test("capability ids are unique", () => {
   const ids = ALL_CAPABILITIES.map((capability) => capability.id);
   assert.equal(new Set(ids).size, ids.length);
+});
+
+test("asset capabilities are exposed on global and public surfaces", () => {
+  assert.equal(getCapabilityById("asset.list").surfaces.global.rpcMethod, "asset/list");
+  assert.equal(getCapabilityById("asset.connect").surfaces.public.mcpTool, "asset_connect");
 });

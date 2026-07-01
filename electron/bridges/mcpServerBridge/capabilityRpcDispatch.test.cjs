@@ -120,6 +120,38 @@ test("dispatchCapabilityRpc routes vault hosts create to vault service", async (
   assert.equal(result.ok, true);
 });
 
+test("dispatchCapabilityRpc routes asset add to vault service", async () => {
+  let invokedOp = null;
+  const dispatch = createTestDispatcher({
+    invokeVaultAgent: async (op) => {
+      invokedOp = op;
+      return { ok: true };
+    },
+    invokeAssetAction: async () => ({ ok: true }),
+  });
+
+  const result = await dispatch("asset/add", { hosts: "[]" });
+
+  assert.equal(invokedOp, "asset.add");
+  assert.equal(result.ok, true);
+});
+
+test("dispatchCapabilityRpc routes asset connect to asset action service", async () => {
+  let invokedOp = null;
+  const dispatch = createTestDispatcher({
+    invokeAssetAction: async (op, params) => {
+      invokedOp = op;
+      return { ok: true, hostId: params.hostId };
+    },
+  });
+
+  const result = await dispatch("asset/connect", { hostId: "host-1" });
+
+  assert.equal(invokedOp, "asset.connect");
+  assert.equal(result.ok, true);
+  assert.equal(result.hostId, "host-1");
+});
+
 test("dispatchCapabilityRpc routes vault hosts import to vault service", async () => {
   let invokedOp = null;
   const dispatch = createTestDispatcher({

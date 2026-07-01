@@ -818,9 +818,14 @@ const {
 const { buildBuiltinRpcHandlerRegistry } = require("./mcpServerBridge/builtinRpcHandlers.cjs");
 
 let invokeVaultAgentFn = null;
+let invokeAssetActionFn = null;
 
 function setVaultAgentInvoker(fn) {
   invokeVaultAgentFn = typeof fn === "function" ? fn : null;
+}
+
+function setAssetActionInvoker(fn) {
+  invokeAssetActionFn = typeof fn === "function" ? fn : null;
 }
 
 const dispatchCapabilityRpc = createCapabilityRpcDispatcher({
@@ -829,6 +834,12 @@ const dispatchCapabilityRpc = createCapabilityRpcDispatcher({
       return Promise.resolve({ ok: false, error: "Vault agent bridge is unavailable." });
     }
     return invokeVaultAgentFn(...args);
+  },
+  invokeAssetAction: (...args) => {
+    if (typeof invokeAssetActionFn !== "function") {
+      return Promise.resolve({ ok: false, error: "Asset action bridge is unavailable." });
+    }
+    return invokeAssetActionFn(...args);
   },
   evaluatePermissionWithGrants,
   get permissionMode() {
@@ -1400,6 +1411,7 @@ module.exports = {
   setMainWindowGetter,
   requestApproval: requestApprovalFromRenderer,
   setVaultAgentInvoker,
+  setAssetActionInvoker,
   resolveApprovalFromRenderer,
   clearPendingApprovals,
   reserveSessionExecution,
