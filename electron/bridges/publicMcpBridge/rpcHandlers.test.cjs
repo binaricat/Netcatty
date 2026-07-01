@@ -302,6 +302,30 @@ test("rpc handlers do not request approval for public write methods in autonomou
   assert.deepEqual(terminalCalls.map((entry) => entry.method), ["execute"]);
 });
 
+test("rpc handlers dispatch public asset methods through capability dispatcher", async () => {
+  const capabilityCalls = [];
+  const { ctx } = makeContext({
+    async dispatchCapabilityRpc(method, params) {
+      capabilityCalls.push({ method, params });
+      return { ok: true, method, hostId: params.hostId };
+    },
+  });
+  const handlers = createPublicRpcHandlers(ctx);
+
+  const result = await handlers.dispatch("public/asset/connect", {
+    hostId: "host-1",
+  });
+
+  assert.deepEqual(result, {
+    ok: true,
+    method: "public/asset/connect",
+    hostId: "host-1",
+  });
+  assert.deepEqual(capabilityCalls, [
+    { method: "public/asset/connect", params: { hostId: "host-1" } },
+  ]);
+});
+
 test("rpc handlers reject unknown methods", async () => {
   const { ctx } = makeContext();
   const handlers = createPublicRpcHandlers(ctx);

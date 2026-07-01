@@ -241,6 +241,12 @@ function createPublicMcpBridge(overrides = {}) {
       getPermissionMode,
       getApprovalTimeoutMs,
       requestApproval,
+      dispatchCapabilityRpc: async (...args) => {
+        if (typeof mcpServerBridge?.dispatchCapabilityRpc !== "function") {
+          return { ok: false, error: "Public MCP asset capabilities are unavailable." };
+        }
+        return await mcpServerBridge.dispatchCapabilityRpc(...args);
+      },
       getEnabled: () => enabled,
     });
     if (!codexSetup) {

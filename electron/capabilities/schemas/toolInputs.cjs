@@ -165,6 +165,11 @@ const TOOL_INPUT_FIELDS = Object.freeze({
   },
   "asset.reconnect": {
     sessionId: { type: "string", description: "Terminal session ID to close and reopen." },
+    hostId: {
+      type: "string",
+      optional: true,
+      description: "Optional saved server asset host ID to validate before reconnecting.",
+    },
   },
   "vault.host.notes.get": {
     hostId: { type: "string", description: "Vault host ID." },

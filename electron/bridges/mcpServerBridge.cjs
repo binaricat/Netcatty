@@ -1417,5 +1417,6 @@ module.exports = {
   reserveSessionExecution,
   releaseSessionExecution,
   getSessionBusyError,
+  dispatchCapabilityRpc,
   dispatchBuiltinRpc: dispatch,
 };

@@ -67,6 +67,25 @@ describe('handleAssetActionOp', () => {
     assert.doesNotMatch(JSON.stringify(result), /secret/);
   });
 
+  it('rejects disconnect when sessionId does not belong to the requested host', async () => {
+    const closed: string[] = [];
+    const result = await handleAssetActionOp('asset.disconnect', {
+      sessionId: 's1',
+      hostId: 'other-host',
+    }, createDeps({
+      getSessions: () => [{ id: 's1', hostId: 'host-1', status: 'connected' }],
+      closeSession: (sessionId) => {
+        closed.push(sessionId);
+        return true;
+      },
+    }));
+
+    assert.equal(result.ok, false);
+    assert.match(String(result.error), /does not belong/i);
+    assert.deepEqual(closed, []);
+    assert.doesNotMatch(JSON.stringify(result), /secret/);
+  });
+
   it('reconnects an existing session by closing it and opening a replacement', async () => {
     const closed: string[] = [];
     const connected: string[] = [];
@@ -86,6 +105,31 @@ describe('handleAssetActionOp', () => {
     assert.equal(result.sessionId, 'session-2');
     assert.deepEqual(closed, ['s1']);
     assert.deepEqual(connected, ['host-1']);
+    assert.doesNotMatch(JSON.stringify(result), /secret/);
+  });
+
+  it('rejects reconnect when sessionId does not belong to the requested host', async () => {
+    const closed: string[] = [];
+    const connected: string[] = [];
+    const result = await handleAssetActionOp('asset.reconnect', {
+      sessionId: 's1',
+      hostId: 'other-host',
+    }, createDeps({
+      getSessions: () => [{ id: 's1', hostId: 'host-1', status: 'connected' }],
+      closeSession: (sessionId) => {
+        closed.push(sessionId);
+        return true;
+      },
+      connectHost: (entry) => {
+        connected.push(entry.id);
+        return 'session-2';
+      },
+    }));
+
+    assert.equal(result.ok, false);
+    assert.match(String(result.error), /does not belong/i);
+    assert.deepEqual(closed, []);
+    assert.deepEqual(connected, []);
     assert.doesNotMatch(JSON.stringify(result), /secret/);
   });
 });

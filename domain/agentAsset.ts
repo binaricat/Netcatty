@@ -27,6 +27,7 @@ const HOST_SECRET_FIELD_NAMES = new Set([
   'telnetPassword',
   'privateKey',
   'passphrase',
+  'notes',
 ]);
 
 const SECRET_ARG_TOOL_NAMES = new Set([
@@ -130,6 +131,9 @@ export function maskSecretToolArgs(
   const masked = maskUnknown(args) as Record<string, unknown>;
   if (typeof args.hosts === 'string') {
     masked.hosts = maskJsonString(args.hosts);
+  }
+  if (typeof args.patch === 'string') {
+    masked.patch = maskJsonString(args.patch);
   }
   if (shouldMaskImportText(normalizedToolName) && typeof args.text === 'string') {
     masked.text = '[REDACTED_IMPORT_TEXT]';

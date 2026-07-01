@@ -1845,6 +1845,11 @@
         "type": "string",
         "optional": false,
         "description": "Terminal session ID to close and reopen."
+      },
+      "hostId": {
+        "type": "string",
+        "optional": true,
+        "description": "Optional saved server asset host ID to validate before reconnecting."
       }
     },
     "policy": {

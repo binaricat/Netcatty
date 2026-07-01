@@ -21,6 +21,7 @@ import { CATTY_APPROVAL_TIMEOUT_MS } from './approvalConstants';
 import { localStorageAdapter } from '../../persistence/localStorageAdapter';
 import { STORAGE_KEY_AI_PERMISSION_GRANTS } from '../../config/storageKeys';
 import { globalTraceStore } from '../harness/traceStore';
+import { maskSecretToolArgs } from '../../../domain/agentAsset';
 import {
   getActivePermissionGrants,
   matchPermissionGrant,
@@ -121,7 +122,7 @@ function emitApprovalEvent(
       ...base,
       id: nextApprovalEventId('approval-requested'),
       type: 'approval_requested',
-      args: request.args,
+      args: maskSecretToolArgs(request.toolName, request.args),
     });
     return;
   }

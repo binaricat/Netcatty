@@ -47,10 +47,17 @@ function findMatchingSessions(
   },
 ): AgentSession[] {
   return deps.getSessions().filter((entry) => {
-    if (sessionId) return entry.id === sessionId;
+    if (sessionId) return entry.id === sessionId && (!hostId || entry.hostId === hostId);
     if (hostId) return entry.hostId === hostId;
     return false;
   });
+}
+
+function sessionHostMismatchError(sessionId: string, hostId: string) {
+  return {
+    ok: false,
+    error: `Session "${sessionId}" does not belong to host "${hostId}".`,
+  };
 }
 
 export async function handleAssetActionOp(
@@ -93,6 +100,12 @@ export async function handleAssetActionOp(
     }
 
     case 'asset.disconnect': {
+      if (sessionId && hostId) {
+        const session = deps.getSessions().find((entry) => entry.id === sessionId);
+        if (session && session.hostId !== hostId) {
+          return sessionHostMismatchError(sessionId, hostId);
+        }
+      }
       const sessions = findMatchingSessions(deps, { hostId, sessionId });
       if (sessions.length === 0) {
         return { ok: false, error: 'Session not found or already closed.' };
@@ -113,6 +126,9 @@ export async function handleAssetActionOp(
       if (!sessionId) return { ok: false, error: 'sessionId is required.' };
       const session = deps.getSessions().find((entry) => entry.id === sessionId);
       if (!session) return { ok: false, error: 'Session not found or already closed.' };
+      if (hostId && session.hostId !== hostId) {
+        return sessionHostMismatchError(sessionId, hostId);
+      }
       const host = session.hostId ? findHost(deps, session.hostId) : undefined;
       if (!host) return { ok: false, error: 'Host not found.' };
       const effectiveHost = deps.resolveEffectiveHost(host);

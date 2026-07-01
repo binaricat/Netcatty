@@ -96,4 +96,49 @@ describe('maskSecretToolArgs', () => {
     assert.doesNotMatch(JSON.stringify(masked), /prefixed-import-secret/);
     assert.equal(masked.text, '[REDACTED_IMPORT_TEXT]');
   });
+
+  it('masks asset add notes and credentials in JSON host input', () => {
+    const masked = maskSecretToolArgs('asset_add', {
+      hosts: JSON.stringify([
+        {
+          hostname: 'asset.example.com',
+          notes: 'note-secret',
+          password: 'pw-secret',
+        },
+      ]),
+    });
+
+    const serialized = JSON.stringify(masked);
+    assert.doesNotMatch(serialized, /note-secret|pw-secret/);
+    assert.match(serialized, /\[REDACTED\]/);
+  });
+
+  it('masks asset edit patch notes and credentials in JSON patch input', () => {
+    const masked = maskSecretToolArgs('asset_edit', {
+      hostId: 'host-1',
+      patch: JSON.stringify({
+        notes: 'note-secret',
+        password: 'pw-secret',
+        telnetPassword: 'tn-secret',
+      }),
+    });
+
+    const serialized = JSON.stringify(masked);
+    assert.doesNotMatch(serialized, /note-secret|pw-secret|tn-secret/);
+    assert.match(serialized, /\[REDACTED\]/);
+  });
+
+  it('masks asset edit patch notes and credentials in object patch input', () => {
+    const masked = maskSecretToolArgs('asset_edit', {
+      hostId: 'host-1',
+      patch: {
+        notes: 'note-secret',
+        password: 'pw-secret',
+      },
+    });
+
+    const serialized = JSON.stringify(masked);
+    assert.doesNotMatch(serialized, /note-secret|pw-secret/);
+    assert.match(serialized, /\[REDACTED\]/);
+  });
 });

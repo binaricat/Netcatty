@@ -64,6 +64,10 @@ function createPublicRpcHandlers(ctx) {
     const permission = await enforcePermissionMode(method, params);
     if (!permission.ok) return permission;
 
+    if (method.startsWith("public/asset/") && typeof ctx.dispatchCapabilityRpc === "function") {
+      return await ctx.dispatchCapabilityRpc(method, params);
+    }
+
     switch (method) {
       case "public/getEnvironment":
         return createEnvironmentPayload(ctx.registry);

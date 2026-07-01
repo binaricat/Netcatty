@@ -30,6 +30,13 @@ const APPROVAL_WAIT_METHODS = new Set([
   "public/sftp/delete",
   "public/sftp/rename",
   "public/sftp/chmod",
+  "public/asset/add",
+  "public/asset/edit",
+  "public/asset/remove",
+  "public/asset/open",
+  "public/asset/connect",
+  "public/asset/disconnect",
+  "public/asset/reconnect",
 ]);
 
 function getMcpSdk() {
@@ -471,6 +478,105 @@ const PUBLIC_TOOL_DEFINITIONS = {
     },
     rpcMethod: "public/sftp/chmod",
     buildParams: ({ sessionId, path, mode, encoding }) => ({ sessionId, path, mode, encoding }),
+  },
+  asset_list: {
+    description: "List saved server assets from Netcatty Vault Hosts (metadata only; no passwords or keys).",
+    schemaBuilder: () => ({}),
+    rpcMethod: "public/asset/list",
+    buildParams: () => ({}),
+  },
+  asset_get: {
+    description: "Get a saved server asset by host ID (metadata only; no passwords or keys).",
+    schemaBuilder: () => {
+      const z = getZod();
+      return {
+        hostId: z.string().describe("Saved server asset host ID."),
+      };
+    },
+    rpcMethod: "public/asset/get",
+    buildParams: ({ hostId }) => ({ hostId }),
+  },
+  asset_add: {
+    description: "Add one or more saved server assets to Netcatty Vault Hosts.",
+    schemaBuilder: () => {
+      const z = getZod();
+      return {
+        hosts: z.string().describe("JSON array of server asset host objects."),
+        dryRun: z.string().optional().describe("Set to true to validate and preview without writing."),
+        skipDuplicates: z.string().optional().describe("Set to false to create even when a matching asset exists."),
+      };
+    },
+    rpcMethod: "public/asset/add",
+    buildParams: ({ hosts, dryRun, skipDuplicates }) => ({ hosts, dryRun, skipDuplicates }),
+  },
+  asset_edit: {
+    description: "Edit fields on a saved server asset.",
+    schemaBuilder: () => {
+      const z = getZod();
+      return {
+        hostId: z.string().describe("Saved server asset host ID."),
+        patch: z.string().describe("JSON object of fields to patch on the asset."),
+      };
+    },
+    rpcMethod: "public/asset/edit",
+    buildParams: ({ hostId, patch }) => ({ hostId, patch }),
+  },
+  asset_remove: {
+    description: "Remove a saved server asset from Netcatty Vault Hosts.",
+    schemaBuilder: () => {
+      const z = getZod();
+      return {
+        hostId: z.string().describe("Saved server asset host ID."),
+      };
+    },
+    rpcMethod: "public/asset/remove",
+    buildParams: ({ hostId }) => ({ hostId }),
+  },
+  asset_open: {
+    description: "Open a saved server asset in the Netcatty Vault Hosts UI.",
+    schemaBuilder: () => {
+      const z = getZod();
+      return {
+        hostId: z.string().describe("Saved server asset host ID to open."),
+      };
+    },
+    rpcMethod: "public/asset/open",
+    buildParams: ({ hostId }) => ({ hostId }),
+  },
+  asset_connect: {
+    description: "Open a new SSH terminal session for a saved server asset.",
+    schemaBuilder: () => {
+      const z = getZod();
+      return {
+        hostId: z.string().describe("Saved SSH server asset host ID to connect."),
+      };
+    },
+    rpcMethod: "public/asset/connect",
+    buildParams: ({ hostId }) => ({ hostId }),
+  },
+  asset_disconnect: {
+    description: "Close an existing terminal session for a saved server asset.",
+    schemaBuilder: () => {
+      const z = getZod();
+      return {
+        sessionId: z.string().optional().describe("Terminal session ID to close."),
+        hostId: z.string().optional().describe("Saved server asset host ID. Required when sessionId is omitted."),
+      };
+    },
+    rpcMethod: "public/asset/disconnect",
+    buildParams: ({ sessionId, hostId }) => ({ sessionId, hostId }),
+  },
+  asset_reconnect: {
+    description: "Close and reopen an existing SSH terminal session for a saved server asset.",
+    schemaBuilder: () => {
+      const z = getZod();
+      return {
+        sessionId: z.string().describe("Terminal session ID to close and reopen."),
+        hostId: z.string().optional().describe("Optional saved server asset host ID to validate before reconnecting."),
+      };
+    },
+    rpcMethod: "public/asset/reconnect",
+    buildParams: ({ sessionId, hostId }) => ({ sessionId, hostId }),
   },
 };
 

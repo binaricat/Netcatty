@@ -124,6 +124,15 @@ test("public tool definitions map to expected RPC methods and params", () => {
       sftp_delete: "public/sftp/delete",
       sftp_rename: "public/sftp/rename",
       sftp_chmod: "public/sftp/chmod",
+      asset_list: "public/asset/list",
+      asset_get: "public/asset/get",
+      asset_add: "public/asset/add",
+      asset_edit: "public/asset/edit",
+      asset_remove: "public/asset/remove",
+      asset_open: "public/asset/open",
+      asset_connect: "public/asset/connect",
+      asset_disconnect: "public/asset/disconnect",
+      asset_reconnect: "public/asset/reconnect",
     },
   );
 
@@ -148,6 +157,20 @@ test("public tool definitions map to expected RPC methods and params", () => {
       encoding: "utf8",
     }),
     { sessionId: "ssh-1", oldPath: "/tmp/a", newPath: "/tmp/b", encoding: "utf8" },
+  );
+  assert.deepEqual(
+    PUBLIC_TOOL_DEFINITIONS.asset_edit.buildParams({
+      hostId: "host-1",
+      patch: "{\"label\":\"prod\"}",
+    }),
+    { hostId: "host-1", patch: "{\"label\":\"prod\"}" },
+  );
+  assert.deepEqual(
+    PUBLIC_TOOL_DEFINITIONS.asset_reconnect.buildParams({
+      sessionId: "session-1",
+      hostId: "host-1",
+    }),
+    { sessionId: "session-1", hostId: "host-1" },
   );
 });
 
