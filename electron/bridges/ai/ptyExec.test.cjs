@@ -1,5 +1,9 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const { spawnSync } = require("node:child_process");
+const { mkdtempSync, rmSync } = require("node:fs");
+const { tmpdir } = require("node:os");
+const { join } = require("node:path");
 
 const {
   resolveEffectiveShellKind,
@@ -116,6 +120,97 @@ test("cmd wrapper uses interactive cmd variable expansion", () => {
   const wrapped = buildWrappedCommand("ipconfig /all", "cmd", "__NCMCP_TEST__");
   assert.match(wrapped, /"%__NCMCP_TEST___CMD%"/);
   assert.doesNotMatch(wrapped, /"%%__NCMCP_TEST___CMD%%"/);
+});
+
+test("posix wrapper isolates set -e failures from the parent login shell", () => {
+  const marker = "__NCMCP_TEST__";
+  const wrapped = buildWrappedCommand("  set -e\nfalse\necho SHOULD_NOT_PRINT", "posix", marker);
+  const result = spawnSync("sh", ["-c", `${wrapped}printf 'PARENT_STILL_ALIVE\\n'`], {
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      SHELL: "/bin/sh",
+    },
+  });
+
+  assert.equal(result.error, undefined);
+  assert.match(result.stdout, new RegExp(`${marker}_S`));
+  assert.match(result.stdout, new RegExp(`${marker}_E:1`));
+  assert.match(result.stdout, /PARENT_STILL_ALIVE/);
+  assert.doesNotMatch(result.stdout, /SHOULD_NOT_PRINT/);
+});
+
+test("posix wrapper keeps non-exiting state changes in the parent shell", () => {
+  const marker = "__NCMCP_TEST__";
+  const cwd = mkdtempSync(join(tmpdir(), "netcatty-pty-cd-"));
+  try {
+    const wrapped = buildWrappedCommand(`cd '${cwd.replace(/'/g, "'\\''")}'`, "posix", marker);
+    const result = spawnSync("sh", ["-c", `${wrapped}pwd`], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        SHELL: "/bin/false",
+      },
+    });
+
+    assert.equal(result.error, undefined);
+    assert.match(result.stdout, new RegExp(`${marker}_E:0`));
+    assert.match(result.stdout, new RegExp(`${cwd.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("posix wrapper survives a failing command when parent errexit is already active", () => {
+  const marker = "__NCMCP_TEST__";
+  const wrapped = buildWrappedCommand("false", "posix", marker);
+  const result = spawnSync("sh", ["-c", `set -e; ${wrapped}printf 'PARENT_STILL_ALIVE\\n'`], {
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      SHELL: "/bin/sh",
+    },
+  });
+
+  assert.equal(result.error, undefined);
+  assert.equal(result.status, 0);
+  assert.match(result.stdout, new RegExp(`${marker}_S`));
+  assert.match(result.stdout, new RegExp(`${marker}_E:1`));
+  assert.match(result.stdout, /PARENT_STILL_ALIVE/);
+});
+
+test("posix wrapper isolates inside the current shell instead of SHELL env", { skip: process.platform === "win32" }, () => {
+  const marker = "__NCMCP_TEST__";
+  const wrapped = buildWrappedCommand("set -e\n[[ 1 == 1 ]] && echo BASH_OK", "posix", marker);
+  const result = spawnSync("bash", ["-c", `${wrapped}printf 'PARENT_STILL_ALIVE\\n'`], {
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      SHELL: "/bin/false",
+    },
+  });
+
+  assert.equal(result.error, undefined);
+  assert.equal(result.status, 0);
+  assert.match(result.stdout, /BASH_OK/);
+  assert.match(result.stdout, new RegExp(`${marker}_E:0`));
+  assert.match(result.stdout, /PARENT_STILL_ALIVE/);
+});
+
+test("posix wrapper emits the end marker on a fresh line after exec without trailing newline", () => {
+  const marker = "__NCMCP_TEST__";
+  const wrapped = buildWrappedCommand("exec printf OK", "posix", marker);
+  const result = spawnSync("sh", ["-c", `${wrapped}printf 'PARENT_STILL_ALIVE\\n'`], {
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      SHELL: "/bin/sh",
+    },
+  });
+
+  assert.equal(result.error, undefined);
+  assert.match(result.stdout, new RegExp(`OK\\n${marker}_E:0`));
+  assert.match(result.stdout, /PARENT_STILL_ALIVE/);
 });
 
 test("execViaChannel registers a pending-cancel marker before the SSH channel opens", () => {

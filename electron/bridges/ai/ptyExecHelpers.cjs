@@ -76,6 +76,11 @@ function escapeCmdForNestedShell(text) {
   return String(text || "").replace(/"/g, '""').replace(/%/g, "%%");
 }
 
+function shouldIsolatePosixCommand(command) {
+  const text = String(command || "");
+  return /(^|[\n\r;|&({])\s*(?:set\s+(?:-[^\n\r;|&)]*e[^\n\r;|&)]*|-o\s+errexit)\b|exit\b|logout\b|exec\b|kill\s+(?:-[A-Za-z0-9]+\s+)?(?:\$\$|0)\b)/.test(text);
+}
+
 // Matches PowerShell's default prompt only (e.g. `PS C:\Users\alice>`,
 // `PS>`). Custom prompt functions (oh-my-posh, starship, PSReadLine themes
 // that emit `❯`/`λ`/etc.) intentionally fall through — we'd rather miss
@@ -158,7 +163,7 @@ function buildWrappedCommand(command, shellKind, marker) {
     default: {
       // Single-line compound command with early marker.
       //
-      // Layout: __NCMCP_xxx=0; { ... MARKER_S; eval command; MARKER_E; }
+      // Layout: __NCMCP_xxx=0; { ... MARKER_S; command; MARKER_E; }
       //
       // Key design decisions:
       //
@@ -169,9 +174,10 @@ function buildWrappedCommand(command, shellKind, marker) {
       //    long echo line might not contain the marker and would leak
       //    through to the terminal as garbage.
       //
-      // 2) The user command is executed via eval on a quoted string. This
-      //    keeps shell syntax errors inside the eval call so the wrapper
-      //    can still emit the end marker and return a non-zero exit code.
+      // 2) Normal commands still run in the active shell so state changes like
+      //    `cd` and `export` keep affecting the visible terminal. Commands
+      //    that can exit the shell (`set -e`, `exit`, `exec`, ...) run in a
+      //    subshell of the current shell so the wrapper can emit the end marker.
       //
       // 3) Single-line { ... } is parsed fully before execution, so SIGINT
       //    cannot cause bash to flush the end marker from the input buffer.
@@ -179,6 +185,7 @@ function buildWrappedCommand(command, shellKind, marker) {
       //    preventing the shell from aborting the compound command.
       const noPager = "PAGER=cat SYSTEMD_PAGER= GIT_PAGER=cat LESS= ";
       const escaped = escapePosixSingleQuoted(command);
+      const isolate = shouldIsolatePosixCommand(command) ? "1" : "0";
       // Leading single space: lets bash/zsh skip recording this command
       // in history when the user already has HISTCONTROL=ignorespace
       // (bash) or HIST_IGNORE_SPACE (zsh) configured — Debian/Ubuntu and
@@ -187,7 +194,7 @@ function buildWrappedCommand(command, shellKind, marker) {
       // Without that config the prefix is harmless; it just doesn't
       // suppress history recording.
       return (
-        ` ${marker}=0; ${marker}_cmd='${escaped}'; { printf '%s\\n' '${marker}_S'; trap ':' INT; ${noPager}eval "$${marker}_cmd"; __NCMCP_rc=$?; trap - INT; printf '%s\\n' '${marker}_E:'\"$__NCMCP_rc\"; (exit $__NCMCP_rc); }\n`
+        ` ${marker}=0; ${marker}_cmd='${escaped}'; ${marker}_isolate=${isolate}; ${marker}_flags=$-; { printf '%s\\n' '${marker}_S'; trap ':' INT; case "$${marker}_flags" in *e*) set +e; ${marker}_isolate=1 ;; esac; if [ "$${marker}_isolate" = 1 ]; then ( ${noPager}eval "$${marker}_cmd" ); else ${noPager}eval "$${marker}_cmd"; fi; __NCMCP_rc=$?; printf '\\n%s\\n' '${marker}_E:'\"$__NCMCP_rc\"; trap - INT; case "$${marker}_flags" in *e*) set -e; true ;; *) (exit $__NCMCP_rc) ;; esac; }\n`
       );
     }
   }
