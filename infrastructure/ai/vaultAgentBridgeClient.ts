@@ -1,4 +1,5 @@
 import type { Host, Identity, PortForwardingRule, Snippet, SSHKey, TerminalSettings, VaultNote } from '../../domain/models';
+import { redactHostForAgent } from '../../domain/agentAsset';
 import {
   normalizeVaultNotes,
   sanitizeNoteTitle,
@@ -44,39 +45,6 @@ import {
 } from '../../domain/vaultImport';
 import { resolveHostAuth } from '../../domain/sshAuth';
 import { netcattyBridge } from '../services/netcattyBridge';
-
-const SENSITIVE_HOST_KEYS = new Set([
-  'password',
-  'telnetPassword',
-  'privateKey',
-  'passphrase',
-]);
-
-export function sanitizeHostForAgent(host: Host): Record<string, unknown> {
-  const sanitized: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(host)) {
-    if (SENSITIVE_HOST_KEYS.has(key)) continue;
-    sanitized[key] = value;
-  }
-  return sanitized;
-}
-
-function summarizeHostForList(host: Host) {
-  return {
-    id: host.id,
-    label: host.label,
-    hostname: host.hostname,
-    port: host.port,
-    username: host.username,
-    protocol: host.protocol,
-    group: host.group,
-    tags: host.tags,
-    os: host.os,
-    createdAt: host.createdAt,
-    connectScriptIds: host.connectScriptIds,
-    loginScriptId: host.loginScriptId,
-  };
-}
 
 function parseOptionalBoolean(value: unknown): boolean | undefined {
   if (value === undefined || value === null) return undefined;
@@ -316,12 +284,12 @@ export async function handleVaultAgentOp(
       const hostId = String(params.hostId || '');
       const host = deps.getHosts().find((entry) => entry.id === hostId);
       if (!host) return { ok: false, error: `Host "${hostId}" was not found.` };
-      return { ok: true, host: sanitizeHostForAgent(deps.resolveEffectiveHost(host)) };
+      return { ok: true, host: redactHostForAgent(deps.resolveEffectiveHost(host)) };
     }
     case 'host.list': {
       return {
         ok: true,
-        hosts: deps.getHosts().map((host) => summarizeHostForList(deps.resolveEffectiveHost(host))),
+        hosts: deps.getHosts().map((host) => redactHostForAgent(deps.resolveEffectiveHost(host))),
       };
     }
     case 'hosts.create': {
@@ -340,7 +308,7 @@ export async function handleVaultAgentOp(
         };
       }
 
-      const previewHosts = builtHosts.map((host) => sanitizeHostForAgent(host));
+      const previewHosts = builtHosts.map((host) => redactHostForAgent(host));
 
       if (dryRun) {
         return {
@@ -381,7 +349,7 @@ export async function handleVaultAgentOp(
         addedCount: merged.addedCount,
         skippedExistingCount: merged.skippedExistingCount,
         issues: buildIssues,
-        previewHosts: merged.addedHosts.map((host) => sanitizeHostForAgent(host)),
+        previewHosts: merged.addedHosts.map((host) => redactHostForAgent(host)),
       };
     }
     case 'host.import': {
@@ -414,7 +382,7 @@ export async function handleVaultAgentOp(
         : undefined;
 
       const importResult = importVaultHostsFromText(resolvedFormat, text, { fileName });
-      const previewHosts = importResult.hosts.map((host) => sanitizeHostForAgent(host));
+      const previewHosts = importResult.hosts.map((host) => redactHostForAgent(host));
 
       if (dryRun) {
         return {

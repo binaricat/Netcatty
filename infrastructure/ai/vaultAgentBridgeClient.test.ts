@@ -204,14 +204,22 @@ describe('handleVaultAgentOp vault hosts', () => {
       hostname: '10.0.0.1',
       username: 'root',
       password: 'secret',
+      telnetPassword: 'telnet-secret',
       port: 22,
+      notes: 'note-secret',
+      identityFilePaths: ['/tmp/private-key'],
     };
     const result = await handleVaultAgentOp('host.list', {}, createDeps({ hosts: [host] }));
     assert.equal(result.ok, true);
     const hosts = (result as { hosts?: Array<Record<string, unknown>> }).hosts;
     assert.equal(hosts?.length, 1);
     assert.equal(hosts?.[0]?.hostname, '10.0.0.1');
+    assert.equal(hosts?.[0]?.hasPassword, true);
+    assert.equal(hosts?.[0]?.hasNotes, true);
     assert.equal('password' in (hosts?.[0] ?? {}), false);
+    assert.equal('telnetPassword' in (hosts?.[0] ?? {}), false);
+    assert.equal('notes' in (hosts?.[0] ?? {}), false);
+    assert.doesNotMatch(JSON.stringify(result), /secret|note-secret|private-key/);
   });
 
   it('hosts.create maps structured JSON from arbitrary text into vault hosts', async () => {
