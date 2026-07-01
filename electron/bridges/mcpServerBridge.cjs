@@ -22,10 +22,47 @@ const portForwardingBridge = require("./portForwardingBridge.cjs");
 const DEFAULT_COMMAND_BLOCKLIST = require("../../lib/commandBlocklist.cjs");
 
 const DEBUG_MCP = process.env.NETCATTY_MCP_DEBUG === "1";
+const DEBUG_SECRET_FIELD_NAMES = new Set([
+  "password",
+  "telnetpassword",
+  "privatekey",
+  "passphrase",
+  "notes",
+  "hosts",
+  "patch",
+  "text",
+  "token",
+]);
 
 function debugLog(...args) {
   if (!DEBUG_MCP) return;
   console.error("[MCP Bridge:debug]", ...args);
+}
+
+function sanitizeDebugValue(value) {
+  if (Array.isArray(value)) return value.map(sanitizeDebugValue);
+  if (!value || typeof value !== "object") return value;
+
+  const sanitized = {};
+  for (const [key, entry] of Object.entries(value)) {
+    sanitized[key] = DEBUG_SECRET_FIELD_NAMES.has(key.toLowerCase())
+      ? "[REDACTED]"
+      : sanitizeDebugValue(entry);
+  }
+  return sanitized;
+}
+
+function summarizeDebugRpcLine(line) {
+  try {
+    const message = JSON.parse(line);
+    return {
+      id: message?.id,
+      method: message?.method,
+      hasParams: Boolean(message?.params && typeof message.params === "object"),
+    };
+  } catch {
+    return { parseable: false };
+  }
 }
 
 let sessions = null;   // Map<sessionId, { sshClient, stream, pty, proc, conn, ... }>
@@ -109,7 +146,7 @@ const APPROVAL_TIMEOUT_MS = MCP_APPROVAL_TIMEOUT_MS;
 
 function requestApprovalFromRenderer(toolName, args, chatSessionId) {
   return new Promise((resolve) => {
-    debugLog("requestApprovalFromRenderer", { toolName, args, chatSessionId });
+    debugLog("requestApprovalFromRenderer", { toolName, args: sanitizeDebugValue(args), chatSessionId });
     const mainWin = typeof getMainWindowFn === 'function' ? getMainWindowFn() : null;
     if (!mainWin || mainWin.isDestroyed()) {
       // No renderer available — deny to preserve confirm mode safety guarantee
@@ -741,7 +778,7 @@ function handleConnection(socket) {
       const line = buffer.slice(0, newlineIdx);
       buffer = buffer.slice(newlineIdx + 1);
       if (!line.trim()) continue;
-      debugLog("Incoming line", line);
+      debugLog("Incoming line", summarizeDebugRpcLine(line));
       handleMessage(socket, line);
     }
   });
@@ -760,7 +797,7 @@ async function handleMessage(socket, line) {
   }
 
   const { id, method, params } = msg;
-  debugLog("handleMessage", { id, method, params });
+  debugLog("handleMessage", { id, method, params: sanitizeDebugValue(params) });
   if (id == null || !method) return;
 
   // ── Authentication gate ──
@@ -1081,7 +1118,7 @@ function getBuiltinRpcHandlerRegistry() {
 }
 
 async function dispatch(method, params) {
-  debugLog("dispatch", { method, params, permissionMode });
+  debugLog("dispatch", { method, params: sanitizeDebugValue(params), permissionMode });
 
   if (!method.startsWith("netcatty/")) {
     const capabilityResult = await dispatchCapabilityRpc(method, params || {});
@@ -1172,7 +1209,7 @@ async function dispatch(method, params) {
 // ── Handler: getContext ──
 
 async function handleGetContext(params) {
-  debugLog("handleGetContext:start", { params, sessionCount: sessions?.size || 0 });
+  debugLog("handleGetContext:start", { params: sanitizeDebugValue(params), sessionCount: sessions?.size || 0 });
   if (!sessions) return { hosts: [], instructions: "No sessions available." };
 
   // chatSessionId may be passed via env for per-scope metadata lookup
