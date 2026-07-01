@@ -1,5 +1,6 @@
 import type { ChatMessage, ChatMessageAttachment, ToolCall, ToolResult } from "../../infrastructure/ai/types";
 import { isTerminalSelectionAttachment } from "../../application/state/terminalSelectionAttachment";
+import { maskSecretToolArgs } from "../../domain/agentAsset";
 
 const MAX_ATTACHMENT_PLACEHOLDER_DETAIL_CHARS = 120;
 const MAX_TOOL_COMMAND_CHARS = 220;
@@ -59,7 +60,7 @@ export function buildHistoricalUserReplayContent(
 }
 
 function getToolCommand(toolCall?: ToolCall): string | undefined {
-  const args = toolCall?.arguments ?? {};
+  const args = maskSecretToolArgs(toolCall?.name ?? "unknown", toolCall?.arguments ?? {});
   if (typeof args.command === "string") return args.command;
   const serialized = JSON.stringify(args);
   return serialized && serialized !== "{}" ? serialized : undefined;

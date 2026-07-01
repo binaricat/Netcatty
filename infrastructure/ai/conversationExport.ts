@@ -1,22 +1,40 @@
 import type { AISession } from './types';
+import { maskSecretToolArgs } from '../../domain/agentAsset';
+
+function sanitizeSessionForExport(session: AISession): AISession {
+  return {
+    ...session,
+    messages: session.messages.map((message) => {
+      if (message.role !== 'assistant' || !message.toolCalls?.length) return message;
+      return {
+        ...message,
+        toolCalls: message.toolCalls.map((toolCall) => ({
+          ...toolCall,
+          arguments: maskSecretToolArgs(toolCall.name, toolCall.arguments ?? {}),
+        })),
+      };
+    }),
+  };
+}
 
 /**
  * Export a session as Markdown
  */
 export function exportAsMarkdown(session: AISession): string {
+  const exportSession = sanitizeSessionForExport(session);
   const lines: string[] = [];
 
-  lines.push(`# ${session.title || 'Untitled Chat'}`);
+  lines.push(`# ${exportSession.title || 'Untitled Chat'}`);
   lines.push('');
-  lines.push(`- **Agent:** ${session.agentId}`);
-  lines.push(`- **Scope:** ${session.scope.type}${session.scope.targetId ? ` (${session.scope.targetId})` : ''}`);
-  lines.push(`- **Created:** ${new Date(session.createdAt).toLocaleString()}`);
-  lines.push(`- **Updated:** ${new Date(session.updatedAt).toLocaleString()}`);
+  lines.push(`- **Agent:** ${exportSession.agentId}`);
+  lines.push(`- **Scope:** ${exportSession.scope.type}${exportSession.scope.targetId ? ` (${exportSession.scope.targetId})` : ''}`);
+  lines.push(`- **Created:** ${new Date(exportSession.createdAt).toLocaleString()}`);
+  lines.push(`- **Updated:** ${new Date(exportSession.updatedAt).toLocaleString()}`);
   lines.push('');
   lines.push('---');
   lines.push('');
 
-  for (const msg of session.messages) {
+  for (const msg of exportSession.messages) {
     if (msg.role === 'system') continue;
 
     const time = new Date(msg.timestamp).toLocaleTimeString();
@@ -64,21 +82,22 @@ export function exportAsMarkdown(session: AISession): string {
  * Export a session as JSON
  */
 export function exportAsJSON(session: AISession): string {
-  return JSON.stringify(session, null, 2);
+  return JSON.stringify(sanitizeSessionForExport(session), null, 2);
 }
 
 /**
  * Export a session as plain text
  */
 export function exportAsPlainText(session: AISession): string {
+  const exportSession = sanitizeSessionForExport(session);
   const lines: string[] = [];
 
-  lines.push(`Chat: ${session.title || 'Untitled'}`);
-  lines.push(`Date: ${new Date(session.createdAt).toLocaleString()}`);
+  lines.push(`Chat: ${exportSession.title || 'Untitled'}`);
+  lines.push(`Date: ${new Date(exportSession.createdAt).toLocaleString()}`);
   lines.push('='.repeat(60));
   lines.push('');
 
-  for (const msg of session.messages) {
+  for (const msg of exportSession.messages) {
     if (msg.role === 'system') continue;
 
     const time = new Date(msg.timestamp).toLocaleTimeString();

@@ -91,6 +91,25 @@ test("buildHistoricalToolResultReplayText keeps non-terminal tool results intact
   assert.equal(buildHistoricalToolResultReplayText(result, toolCall), "search result summary");
 });
 
+test("buildHistoricalToolResultReplayText masks secret host tool arguments in replay placeholders", () => {
+  const toolCall: ToolCall = {
+    id: "call-1",
+    name: "terminal_execute",
+    arguments: {
+      hosts: JSON.stringify([{ hostname: "secret.example.com", password: "pw-secret" }]),
+    },
+  };
+  const result: ToolResult = {
+    toolCallId: "call-1",
+    content: "SECRET OUTPUT ".repeat(1000),
+  };
+
+  const replay = buildHistoricalToolResultReplayText(result, toolCall);
+
+  assert.doesNotMatch(replay, /pw-secret/);
+  assert.match(replay, /REDACTED/);
+});
+
 test("buildHistoricalToolResultReplayText can preserve terminal output for 413 retries", () => {
   const toolCall: ToolCall = {
     id: "call-1",

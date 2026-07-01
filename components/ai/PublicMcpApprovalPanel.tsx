@@ -12,6 +12,7 @@ import {
   resolveApproval,
   type ApprovalRequest,
 } from "../../infrastructure/ai/shared/approvalGate";
+import { maskSecretToolArgs } from "../../domain/agentAsset";
 import { shouldShowPublicMcpApproval } from "./approvalVisibility";
 
 export interface PublicMcpApprovalPanelViewProps {
@@ -54,7 +55,8 @@ export function PublicMcpApprovalPanelView({
     >
       <div className="flex flex-col gap-2">
         {approvals.map((approval) => {
-          const summary = summarizeArgs(approval.args);
+          const maskedArgs = maskSecretToolArgs(approval.toolName, approval.args);
+          const summary = summarizeArgs(maskedArgs);
           return (
             <section
               key={approval.toolCallId}
@@ -92,7 +94,7 @@ export function PublicMcpApprovalPanelView({
                         {t("ai.publicMcp.approval.arguments")}
                       </summary>
                       <pre className="max-h-48 overflow-auto px-2.5 pb-2 text-[11px] font-mono text-muted-foreground/60 whitespace-pre [overflow-wrap:normal]">
-                        {JSON.stringify(approval.args, null, 2)}
+                        {JSON.stringify(maskedArgs, null, 2)}
                       </pre>
                     </details>
                   </div>
@@ -167,4 +169,3 @@ export function PublicMcpApprovalPanel() {
     />
   );
 }
-

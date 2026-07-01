@@ -1,3 +1,5 @@
+import { maskSecretToolArgs } from "../../../domain/agentAsset";
+
 function stringifyToolPayload(value: unknown): string {
   if (value == null) return '';
   if (typeof value === 'string') {
@@ -26,7 +28,7 @@ export function formatVaultToolTooltip(
   const lines: string[] = [toolName];
 
   if (args && Object.keys(args).length > 0) {
-    lines.push('', 'Arguments:', stringifyToolPayload(args));
+    lines.push('', 'Arguments:', stringifyToolPayload(maskSecretToolArgs(toolName, args)));
   }
 
   if (result !== undefined) {

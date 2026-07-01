@@ -36,6 +36,12 @@ const SECRET_ARG_TOOL_NAMES = new Set([
   'vault_hosts_import',
 ]);
 
+function normalizeToolName(toolName: string): string {
+  return toolName
+    .replace(/^public[/:]/, '')
+    .replace(/[/:.]/g, '_');
+}
+
 function hasString(value: unknown): boolean {
   return typeof value === 'string' && value.length > 0;
 }
@@ -94,17 +100,38 @@ export function containsRawHostSecretInput(args: Record<string, unknown> = {}): 
   return hasString(args.hosts) || hasString(args.text);
 }
 
+function containsHostPayload(args: Record<string, unknown>): boolean {
+  return ['password', 'telnetPassword', 'privateKey', 'passphrase'].some((key) => hasString(args[key]))
+    || typeof args.hosts === 'string'
+    || (Array.isArray(args.hosts) && args.hosts.length > 0);
+}
+
+function shouldMaskImportText(toolName: string): boolean {
+  return normalizeToolName(toolName).endsWith('vault_hosts_import');
+}
+
+function isSecretArgToolName(toolName: string): boolean {
+  const normalizedToolName = normalizeToolName(toolName);
+  return Array.from(SECRET_ARG_TOOL_NAMES).some((secretToolName) => (
+    normalizedToolName === secretToolName || normalizedToolName.endsWith(`_${secretToolName}`)
+  ));
+}
+
 export function maskSecretToolArgs(
   toolName: string,
   args: Record<string, unknown> = {},
 ): Record<string, unknown> {
-  if (!SECRET_ARG_TOOL_NAMES.has(toolName)) return args;
+  const normalizedToolName = normalizeToolName(toolName);
+  const shouldMaskArgs = isSecretArgToolName(normalizedToolName) || containsHostPayload(args);
+  if (!shouldMaskArgs && !(shouldMaskImportText(normalizedToolName) && typeof args.text === 'string')) {
+    return args;
+  }
 
   const masked = maskUnknown(args) as Record<string, unknown>;
   if (typeof args.hosts === 'string') {
     masked.hosts = maskJsonString(args.hosts);
   }
-  if (typeof args.text === 'string') {
+  if (shouldMaskImportText(normalizedToolName) && typeof args.text === 'string') {
     masked.text = '[REDACTED_IMPORT_TEXT]';
   }
   return masked;

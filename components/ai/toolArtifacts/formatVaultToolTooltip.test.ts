@@ -16,3 +16,22 @@ test('formatVaultToolTooltip joins tool name, args, and result with line breaks'
   assert.match(text, /Result:/);
   assert.match(text, /"ok": true/);
 });
+
+test('formatVaultToolTooltip masks secret host arguments', () => {
+  const text = formatVaultToolTooltip(
+    'vault_hosts_create',
+    {
+      hosts: JSON.stringify([
+        {
+          hostname: 'secret.example.com',
+          password: 'pw-secret',
+          telnetPassword: 'tn-secret',
+        },
+      ]),
+    },
+    { ok: true },
+  );
+
+  assert.doesNotMatch(text, /pw-secret|tn-secret/);
+  assert.match(text, /REDACTED/);
+});

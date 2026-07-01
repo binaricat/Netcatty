@@ -43,3 +43,25 @@ test("PublicMcpApprovalPanelView renders nothing when there are no approvals", (
   assert.equal(renderPanel({ approvals: [] }), "");
 });
 
+test("PublicMcpApprovalPanelView masks secret host arguments", () => {
+  const markup = renderPanel({
+    approvals: [
+      {
+        toolCallId: "mcp_approval_secret",
+        toolName: "vault_hosts_create",
+        args: {
+          hosts: JSON.stringify([
+            {
+              hostname: "secret.example.com",
+              password: "pw-secret",
+              telnetPassword: "tn-secret",
+            },
+          ]),
+        },
+      },
+    ],
+  });
+
+  assert.doesNotMatch(markup, /pw-secret|tn-secret/);
+  assert.match(markup, /REDACTED/);
+});

@@ -55,6 +55,7 @@ import {
   getAIPanelProfilerProps,
   isAIPanelDiagnosticPartHidden,
 } from './aiPanelDiagnostics';
+import { maskSecretToolArgs } from '../../domain/agentAsset';
 
 interface ChatMessageListProps {
   messages: ChatMessage[];
@@ -249,7 +250,7 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({
     if (m.role === 'assistant' && m.toolCalls) {
       for (const tc of m.toolCalls) {
         toolCallNames.set(tc.id, tc.name);
-        if (tc.arguments) toolCallArgs.set(tc.id, tc.arguments);
+        if (tc.arguments) toolCallArgs.set(tc.id, maskSecretToolArgs(tc.name, tc.arguments));
       }
     }
   }
@@ -469,7 +470,7 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({
                           <div key={tc.id} className="px-2 py-1.5">
                             <ToolCall
                               name={tc.name}
-                              args={tc.arguments}
+                              args={maskSecretToolArgs(tc.name, tc.arguments ?? {})}
                               isInterrupted={!isPending}
                               approvalStatus={approvalStatus}
                               onApproveOnce={() => handleApproveOnce(tc.id)}
@@ -542,7 +543,7 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({
                   <div key={tc.id} className="px-2 py-1.5">
                     <ToolCall
                       name={tc.name}
-                      args={tc.arguments}
+                      args={maskSecretToolArgs(tc.name, tc.arguments ?? {})}
                       isLoading={isToolRunning && !isPending}
                       approvalStatus={approvalStatus}
                       onApproveOnce={() => handleApproveOnce(tc.id)}
@@ -568,7 +569,7 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({
                 <div>
                   <ToolCall
                     name={req.toolName}
-                    args={req.args}
+                    args={maskSecretToolArgs(req.toolName, req.args)}
                     isLoading={false}
                     isInterrupted={false}
                     approvalStatus={'pending'}

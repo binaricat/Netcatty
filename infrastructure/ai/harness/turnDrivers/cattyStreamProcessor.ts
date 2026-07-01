@@ -39,6 +39,7 @@ import {
   type ToolResultChunk,
 } from '../../../../components/ai/hooks/aiChatStreamingSupport';
 import type { ChatMessage } from '../../types';
+import { maskSecretToolArgs } from '../../../../domain/agentAsset';
 
 export type CattyModel = ReturnType<typeof createModelFromConfig>;
 
@@ -433,7 +434,10 @@ export async function processCattyStream(input: ProcessCattyStreamInput): Promis
             toolCalls: [...(msg.toolCalls || []), {
               id: typedChunk.toolCallId,
               name: typedChunk.toolName,
-              arguments: (typedChunk.input ?? typedChunk.args) as Record<string, unknown>,
+              arguments: maskSecretToolArgs(
+                typedChunk.toolName,
+                (typedChunk.input ?? typedChunk.args) as Record<string, unknown>,
+              ),
             }],
             executionStatus: 'running',
             statusText: undefined,

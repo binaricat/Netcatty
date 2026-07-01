@@ -1,5 +1,6 @@
 import type { AgentEvent, AgentEventListener } from './types';
 import { resolveStreamChunkToolCallId } from '../../../components/ai/hooks/aiChatStreamingSupport';
+import { maskSecretToolArgs } from '../../../domain/agentAsset';
 
 let eventCounter = 0;
 
@@ -27,7 +28,14 @@ export interface CattyStreamChunk {
   result?: unknown;
   error?: unknown;
   approved?: boolean;
+  approvalId?: string;
+  reason?: unknown;
   stepNumber?: number;
+  toolCall?: {
+    toolCallId?: string;
+    toolName?: string;
+    input?: unknown;
+  };
 }
 
 const STEP_HANDLE_NOTICE_RE = /^\[step \d+\] Tool output handles available:/;
@@ -83,15 +91,17 @@ export function mapSdkStreamEventToAgentEvents(
         type: 'reasoning_delta',
         text: String(event.text ?? event.textDelta ?? event.delta ?? ''),
       }];
-    case 'tool-call':
+    case 'tool-call': {
+      const sdkToolName = String(event.toolName ?? event.name ?? 'unknown');
       return [{
         ...base,
         id: nextEventId('tool-call'),
         type: 'tool_call',
         toolCallId: String(event.toolCallId ?? event.id ?? ''),
-        toolName: String(event.toolName ?? event.name ?? 'unknown'),
-        args: (event.args ?? event.input ?? {}) as Record<string, unknown>,
+        toolName: sdkToolName,
+        args: maskSecretToolArgs(sdkToolName, (event.args ?? event.input ?? {}) as Record<string, unknown>),
       }];
+    }
     case 'tool-result':
       return [{
         ...base,
@@ -146,7 +156,7 @@ export function mapCattyStreamChunkToAgentEvents(
       type: 'tool_call',
       toolCallId: chunk.toolCallId,
       toolName: chunk.toolName,
-      args: (chunk.input ?? chunk.args ?? {}) as Record<string, unknown>,
+      args: maskSecretToolArgs(chunk.toolName, (chunk.input ?? chunk.args ?? {}) as Record<string, unknown>),
     }];
   }
 
@@ -198,7 +208,7 @@ export function mapCattyStreamChunkToAgentEvents(
       type: 'approval_requested',
       toolCallId,
       toolName,
-      args: (chunk.input ?? chunk.args ?? chunk.toolCall?.input ?? {}) as Record<string, unknown>,
+      args: maskSecretToolArgs(toolName, (chunk.input ?? chunk.args ?? chunk.toolCall?.input ?? {}) as Record<string, unknown>),
     }];
   }
 

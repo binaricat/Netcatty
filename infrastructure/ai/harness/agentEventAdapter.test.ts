@@ -35,6 +35,32 @@ describe('agentEventAdapter', () => {
     assert.match(String((events[0] as { result?: string }).result), /timeout/);
   });
 
+  it('masks secret host tool-call args in trace events', () => {
+    const events = mapCattyStreamChunkToAgentEvents(
+      {
+        type: 'tool-call',
+        toolCallId: 'call-secret',
+        toolName: 'vault_hosts_create',
+        input: {
+          hosts: JSON.stringify([
+            {
+              hostname: 'secret.example.com',
+              password: 'pw-secret',
+              telnetPassword: 'tn-secret',
+            },
+          ]),
+        },
+      },
+      { sessionId: 'chat-1', turnId: 'turn-1' },
+    );
+
+    assert.equal(events.length, 1);
+    assert.equal(events[0]?.type, 'tool_call');
+    const serialized = JSON.stringify((events[0] as { args?: unknown }).args);
+    assert.doesNotMatch(serialized, /pw-secret|tn-secret/);
+    assert.match(serialized, /REDACTED/);
+  });
+
   it('maps denied tool-approval-response with nested toolCall to tool_result', () => {
     const events = mapCattyStreamChunkToAgentEvents(
       {

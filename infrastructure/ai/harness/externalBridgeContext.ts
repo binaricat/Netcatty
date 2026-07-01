@@ -1,6 +1,7 @@
 import type { ChatMessage } from '../types';
 import type { ExternalBridgeHistoryMessage } from './types';
 import { buildHistoricalToolResultReplayText, buildHistoricalUserReplayContent } from '../../../components/ai/cattyHistoryReplay';
+import { maskSecretToolArgs } from '../../../domain/agentAsset';
 
 type ExternalAgentHistoryMessage = ExternalBridgeHistoryMessage;
 type RawHistoryMessage = ExternalAgentHistoryMessage & { sourceId: string };
@@ -55,6 +56,15 @@ function normalizeWhitespace(value: string): string {
 
 function isImportantText(value: string): boolean {
   return IMPORTANT_PATTERNS.some((pattern) => pattern.test(value));
+}
+
+function stringifyToolArgsForHistory(toolName: string, args: unknown): string {
+  return JSON.stringify(maskSecretToolArgs(
+    toolName,
+    args && typeof args === "object" && !Array.isArray(args)
+      ? args as Record<string, unknown>
+      : {},
+  ));
 }
 
 function isDurableConstraintText(value: string): boolean {
@@ -137,7 +147,7 @@ function summarizeToolMessage(
     // the same way toRawHistoryMessage does.
     const callInfo = lookupToolCallInfo(toolCallIndex, message.id, result.toolCallId);
     const callLabel = callInfo
-      ? ` [from ${callInfo.name}(${truncateText(JSON.stringify(callInfo.arguments ?? {}), MAX_TOOL_CALL_LABEL_CHARS)})]`
+      ? ` [from ${callInfo.name}(${truncateText(stringifyToolArgsForHistory(callInfo.name, callInfo.arguments), MAX_TOOL_CALL_LABEL_CHARS)})]`
       : "";
     const replayContent = buildHistoricalToolResultReplayText(result, callInfo
       ? { id: result.toolCallId, name: callInfo.name, arguments: callInfo.arguments as Record<string, unknown> }
@@ -162,7 +172,7 @@ function summarizeMessage(
 
   if (message.role === "assistant" && message.toolCalls?.length) {
     for (const toolCall of message.toolCalls) {
-      const args = JSON.stringify(toolCall.arguments ?? {});
+      const args = stringifyToolArgsForHistory(toolCall.name, toolCall.arguments);
       const summary = `Tool call: ${toolCall.name}(${truncateText(args, 220)})`;
       if (isImportantText(summary)) lines.push(summary);
     }
@@ -242,7 +252,7 @@ function toRawHistoryMessage(
     const parts: string[] = [];
     if (message.content) parts.push(message.content);
     if (message.toolCalls?.length) {
-      parts.push(...message.toolCalls.map((tc) => `Tool call: ${tc.name}(${JSON.stringify(tc.arguments ?? {})})`));
+      parts.push(...message.toolCalls.map((tc) => `Tool call: ${tc.name}(${stringifyToolArgsForHistory(tc.name, tc.arguments)})`));
     }
     return parts.length
       ? [{ sourceId: message.id, role: "assistant", content: truncateText(parts.join("\n\n"), MAX_RAW_MESSAGE_CHARS) }]
@@ -265,7 +275,7 @@ function toRawHistoryMessage(
       const prefix = result.isError ? "Tool error" : "Tool result";
       const callInfo = lookupToolCallInfo(toolCallIndex, message.id, result.toolCallId);
       const callLabel = callInfo
-        ? ` [from ${callInfo.name}(${truncateText(JSON.stringify(callInfo.arguments ?? {}), MAX_TOOL_CALL_LABEL_CHARS)})]`
+        ? ` [from ${callInfo.name}(${truncateText(stringifyToolArgsForHistory(callInfo.name, callInfo.arguments), MAX_TOOL_CALL_LABEL_CHARS)})]`
         : "";
       const replayContent = buildHistoricalToolResultReplayText(result, callInfo
         ? { id: result.toolCallId, name: callInfo.name, arguments: callInfo.arguments as Record<string, unknown> }

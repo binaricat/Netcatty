@@ -2,6 +2,7 @@ import { getExternalAgentSdkBackend } from '../../managedAgents';
 import { runSdkAgentTurn, type SdkAgentCallbacks } from '../../sdkAgentAdapter';
 import { getNetcattyBridge, generateId, resolveUserSkillsContext, isToolResultError } from '../../../../components/ai/hooks/aiChatStreamingSupport';
 import type { ExternalTurnInput, TurnDriver, TurnDriverContext } from './types';
+import { maskSecretToolArgs } from '../../../../domain/agentAsset';
 
 export class ExternalSdkTurnDriver implements TurnDriver {
   readonly backend = 'external-sdk' as const;
@@ -101,7 +102,11 @@ async function runExternalTurn(input: ExternalTurnInput, ctx: TurnDriverContext)
       toolNamesByCallId.set(id, toolName);
       ui.updateLastMessage(sessionId, msg => ({
         ...msg,
-        toolCalls: [...(msg.toolCalls || []), { id, name: toolName, arguments: args }],
+        toolCalls: [...(msg.toolCalls || []), {
+          id,
+          name: toolName,
+          arguments: maskSecretToolArgs(toolName, args),
+        }],
         executionStatus: 'running',
         statusText: undefined,
       }));

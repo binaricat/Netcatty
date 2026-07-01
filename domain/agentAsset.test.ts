@@ -31,7 +31,7 @@ const secretHost = {
     password: 'proxy-secret',
   },
   notes: 'note contains pasted-secret',
-} as Host & Record<string, unknown>;
+} as unknown as Host & Record<string, unknown>;
 
 describe('redactHostForAgent', () => {
   it('returns an allowlisted host shape without secrets or freeform notes', () => {
@@ -84,6 +84,16 @@ describe('maskSecretToolArgs', () => {
       text: 'Hostname,Password\n10.0.0.1,import-secret',
     });
     assert.doesNotMatch(JSON.stringify(masked), /import-secret/);
+    assert.equal(masked.text, '[REDACTED_IMPORT_TEXT]');
+  });
+
+  it('masks import text for MCP-prefixed host import tool names', () => {
+    const masked = maskSecretToolArgs('mcp__netcatty__vault_hosts_import', {
+      format: 'csv',
+      text: 'Hostname,Password\n10.0.0.1,prefixed-import-secret',
+    });
+
+    assert.doesNotMatch(JSON.stringify(masked), /prefixed-import-secret/);
     assert.equal(masked.text, '[REDACTED_IMPORT_TEXT]');
   });
 });

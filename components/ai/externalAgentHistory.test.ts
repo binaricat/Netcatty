@@ -75,6 +75,33 @@ test("buildExternalAgentHistoryMessagesForBridge keeps fallback history availabl
   );
 });
 
+test("buildExternalAgentHistoryMessages masks secret host tool arguments", () => {
+  const messages: ChatMessage[] = [
+    message("assistant-secret", "assistant", "", {
+      toolCalls: [
+        {
+          id: "secret-call-1",
+          name: "vault_hosts_create",
+          arguments: {
+            hosts: JSON.stringify([
+              {
+                hostname: "secret.example.com",
+                password: "pw-secret",
+                telnetPassword: "tn-secret",
+              },
+            ]),
+          },
+        },
+      ],
+    }),
+  ];
+
+  const result = buildExternalAgentHistoryMessages(messages);
+  const serialized = JSON.stringify(result);
+  assert.doesNotMatch(serialized, /pw-secret|tn-secret/);
+  assert.match(serialized, /REDACTED/);
+});
+
 test("buildExternalAgentHistoryMessages replaces historical terminal selection attachments with placeholders", () => {
   const terminalSelection = createTerminalSelectionAttachment("docker ps -a\npermission denied");
   assert.ok(terminalSelection);

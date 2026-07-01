@@ -73,6 +73,48 @@ test("ChatMessageList renders external MCP vault tool results as artifact cards"
   assert.doesNotMatch(markup, /external-call-1/);
 });
 
+test("ChatMessageList masks secret host tool arguments", () => {
+  const messages: ChatMessage[] = [
+    {
+      id: "assistant-secret",
+      role: "assistant",
+      content: "",
+      timestamp: 1,
+      toolCalls: [
+        {
+          id: "secret-call-1",
+          name: "vault_hosts_create",
+          arguments: {
+            hosts: JSON.stringify([
+              {
+                hostname: "secret.example.com",
+                password: "pw-secret",
+                telnetPassword: "tn-secret",
+              },
+            ]),
+          },
+        },
+      ],
+      executionStatus: "cancelled",
+    },
+  ];
+
+  const markup = renderToStaticMarkup(
+    React.createElement(
+      I18nProvider,
+      { locale: "en" },
+      React.createElement(
+        TooltipProvider,
+        null,
+        React.createElement(ChatMessageList, { messages }),
+      ),
+    ),
+  );
+
+  assert.doesNotMatch(markup, /pw-secret|tn-secret/);
+  assert.match(markup, /REDACTED/);
+});
+
 test("ChatMessageList renders Netcatty CLI vault results as artifact cards", () => {
   const messages: ChatMessage[] = [
     {
