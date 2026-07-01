@@ -539,10 +539,25 @@ async function checkCompressedUploadSupport(event, payload) {
   }
 }
 
+function registerWorkerHandle(ipcMain, terminalWorkerManager, channel) {
+  ipcMain.handle(channel, (event, payload) => terminalWorkerManager.request(channel, payload, {
+    webContentsId: event?.sender?.id,
+  }));
+}
+
 /**
  * Register IPC handlers
  */
-function registerHandlers(ipcMain) {
+function registerHandlers(ipcMain, options = {}) {
+  const terminalWorkerManager = options.terminalWorkerManager || null;
+  if (terminalWorkerManager) {
+    [
+      "netcatty:compress:start",
+      "netcatty:compress:cancel",
+      "netcatty:compress:checkSupport",
+    ].forEach((channel) => registerWorkerHandle(ipcMain, terminalWorkerManager, channel));
+    return;
+  }
   ipcMain.handle("netcatty:compress:start", startCompressedUpload);
   ipcMain.handle("netcatty:compress:cancel", cancelCompression);
   ipcMain.handle("netcatty:compress:checkSupport", checkCompressedUploadSupport);

@@ -46,6 +46,8 @@ import { CopilotCliCard } from "./ai/CopilotCliCard";
 import { PublicMcpCard } from "./ai/PublicMcpCard";
 import { CodebuddyCard } from "./ai/CodebuddyCard";
 import { SafetySettings } from "./ai/SafetySettings";
+import { PermissionGrantsSettings } from "./ai/PermissionGrantsSettings";
+import { useAIPermissionGrantsState } from "../../../application/state/useAIPermissionGrantsState";
 import { WebSearchSettings } from "./ai/WebSearchSettings";
 import { QuickMessagesSettings } from "./ai/QuickMessagesSettings";
 import type { AIQuickMessage } from "../../../infrastructure/ai/quickMessages";
@@ -201,6 +203,14 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
   showTerminalSelectionAIAction,
   setShowTerminalSelectionAIAction,
 }) => {
+  const {
+    permissionGrants,
+    addGrant,
+    updateGrant,
+    removeGrant,
+    importGrants,
+    exportGrants,
+  } = useAIPermissionGrantsState();
   const { t } = useI18n();
   const [editingProviderId, setEditingProviderId] = useState<string | null>(null);
   const [codexIntegration, setCodexIntegration] = useState<CodexIntegrationStatus | null>(null);
@@ -312,7 +322,6 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
   const mountedRef = useRef(true);
   const agentPathRequestIdRef = useRef<Partial<Record<ManagedAgentKey, number>>>({});
   const codexRequestIdRef = useRef(0);
-
   useEffect(() => () => {
     mountedRef.current = false;
     codexRequestIdRef.current += 1;
@@ -1178,6 +1187,14 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
             setCommandTimeout={setCommandTimeout}
             maxIterations={maxIterations}
             setMaxIterations={setMaxIterations}
+          />
+          <PermissionGrantsSettings
+            grants={permissionGrants}
+            addGrant={addGrant}
+            updateGrant={updateGrant}
+            removeGrant={removeGrant}
+            importGrants={importGrants}
+            exportGrants={exportGrants}
           />
         </TabsContent>
       </Tabs>

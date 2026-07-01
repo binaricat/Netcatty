@@ -39,8 +39,6 @@ test("buildSnippetExportPayload removes host target bindings", () => {
       command: "sudo systemctl restart nginx",
       tags: [],
       package: "ops/web",
-      noAutoRun: undefined,
-      shortkey: undefined,
     },
   ]);
 });
@@ -142,6 +140,7 @@ test("mergeSnippetImportPayload overwrites duplicate commands while preserving l
         tags: ["linux"],
         shortkey: "F8",
         noAutoRun: true,
+        multiLineRunMode: "lineDelay",
       },
     ],
   }));
@@ -170,9 +169,27 @@ test("mergeSnippetImportPayload overwrites duplicate commands while preserving l
       targets: [],
       shortkey: "F8",
       noAutoRun: true,
+      multiLineRunMode: "lineDelay",
       order: 1000,
     },
   ]);
+});
+
+test("buildSnippetExportPayload preserves multi-line run mode", () => {
+  const payload = buildSnippetExportPayload({
+    snippets: [
+      snippet({
+        id: "snippet-1",
+        label: "Prompt login",
+        command: "user\npass",
+        multiLineRunMode: "lineDelay",
+      }),
+    ],
+    snippetPackages: [],
+    exportedAt: "2026-06-23T00:00:00.000Z",
+  });
+
+  assert.equal(payload.snippets[0].multiLineRunMode, "lineDelay");
 });
 
 test("mergeSnippetImportPayload keeps existing empty snippet packages", () => {

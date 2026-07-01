@@ -328,7 +328,7 @@ test("selectReleaseAsset stays on the primary when SHA256SUMS is empty (unverifi
   assert.equal(selectReleaseAsset(target, new Map()).file, "mosh-client-linux-x64.tar.gz");
 });
 
-test("selectReleaseAsset prefers the pinned Windows standalone client by default", () => {
+test("selectReleaseAsset prefers the released Windows bundle by default", () => {
   const target = {
     platform: "win32", arch: "x64",
     file: "mosh-client-win32-x64.tar.gz", localDir: "win32-x64", extract: "tar.gz",
@@ -339,15 +339,14 @@ test("selectReleaseAsset prefers the pinned Windows standalone client by default
       url: "https://example.test/mosh-client.exe",
       sha256: "abc",
     },
-    preferLegacy: true,
   };
   const sums = new Map([["mosh-client-win32-x64.tar.gz", "def"]]);
 
-  assert.equal(selectReleaseAsset(target, sums).file, "mosh-client-win32-x64.exe");
+  assert.equal(selectReleaseAsset(target, sums).file, "mosh-client-win32-x64.tar.gz");
   assert.equal(selectReleaseAsset(target, sums, { forceWindowsCygwin: true }).file, "mosh-client-win32-x64.tar.gz");
 });
 
-test("selectReleaseAsset uses the released Windows standalone asset when published", () => {
+test("selectReleaseAsset falls back to the Windows standalone asset when the bundle is absent", () => {
   const target = {
     platform: "win32", arch: "x64",
     file: "mosh-client-win32-x64.tar.gz", localDir: "win32-x64", extract: "tar.gz",
@@ -358,7 +357,6 @@ test("selectReleaseAsset uses the released Windows standalone asset when publish
       url: "https://example.test/mosh-client.exe",
       sha256: "abc",
     },
-    preferLegacy: true,
   };
   const asset = selectReleaseAsset(target, new Map([["mosh-client-win32-x64.exe", "abc"]]));
 
@@ -379,7 +377,6 @@ test("selectReleaseAsset ignores a released Windows asset when its checksum is n
       url: "https://example.test/mosh-client.exe",
       sha256: "abc",
     },
-    preferLegacy: true,
   };
   const asset = selectReleaseAsset(target, new Map([["mosh-client-win32-x64.exe", "def"]]));
 
@@ -389,18 +386,18 @@ test("selectReleaseAsset ignores a released Windows asset when its checksum is n
   assert.equal(asset.sha256, "abc");
 });
 
-test("fetch-mosh-binaries downloads the pinned Windows standalone client", async (t) => {
+test("fetch-mosh-binaries downloads the released Windows bundle by default", async (t) => {
   const resDir = path.join(makeTmp(t), "resources", "mosh");
-  const flat = Buffer.from("working-windows-standalone");
-  fs.mkdirSync(path.join(resDir, "win32-x64", "mosh-client-win32-x64-dlls"), { recursive: true });
-  fs.mkdirSync(path.join(resDir, "win32-x64", "terminfo", "78"), { recursive: true });
-  fs.writeFileSync(path.join(resDir, "win32-x64", "mosh-client-win32-x64-dlls", "cygwin1.dll"), "stale");
-  fs.writeFileSync(path.join(resDir, "win32-x64", "terminfo", "78", "xterm-256color"), "stale");
-  const baseUrl = await serveAssets(t, {
-    SHA256SUMS: "",
+  const tar = makeTarGz(t, {
+    "mosh-client.exe": "exe",
+    "mosh-client-win32-x64-dlls/cygwin1.dll": "dll",
+    "terminfo/x/xterm-256color": "terminfo",
   });
-  const legacyBaseUrl = await serveAssets(t, {
-    "mosh-client-win32-x64.exe": flat,
+  fs.mkdirSync(path.join(resDir, "win32-x64", "mosh-client-win32-x64-dlls"), { recursive: true });
+  fs.writeFileSync(path.join(resDir, "win32-x64", "mosh-client-win32-x64-dlls", "cygwin1.dll"), "stale");
+  const baseUrl = await serveAssets(t, {
+    "mosh-client-win32-x64.tar.gz": tar,
+    SHA256SUMS: `${sha256(tar)}  mosh-client-win32-x64.tar.gz\n`,
   });
 
   await execFileAsync(process.execPath, [script, "--platform=win32", "--arch=x64"], {
@@ -409,18 +406,14 @@ test("fetch-mosh-binaries downloads the pinned Windows standalone client", async
       MOSH_BIN_RELEASE: "test",
       MOSH_BIN_BASE_URL: baseUrl,
       MOSH_BIN_RES_DIR: resDir,
-      MOSH_BIN_WINDOWS_LEGACY_URL: `${legacyBaseUrl}/mosh-client-win32-x64.exe`,
-      MOSH_BIN_WINDOWS_LEGACY_SHA256: sha256(flat),
       CI: "true",
     },
     stdio: "pipe",
   });
 
-  const dest = path.join(resDir, "win32-x64", "mosh-client.exe");
-  assert.equal(fs.existsSync(dest), true);
-  assert.equal(fs.readFileSync(dest, "utf8"), "working-windows-standalone");
-  assert.equal(fs.existsSync(path.join(resDir, "win32-x64", "mosh-client-win32-x64-dlls")), false);
-  assert.equal(fs.existsSync(path.join(resDir, "win32-x64", "terminfo")), false);
+  assert.equal(fs.readFileSync(path.join(resDir, "win32-x64", "mosh-client.exe"), "utf8"), "exe");
+  assert.equal(fs.readFileSync(path.join(resDir, "win32-x64", "mosh-client-win32-x64-dlls", "cygwin1.dll"), "utf8"), "dll");
+  assert.equal(fs.readFileSync(path.join(resDir, "win32-x64", "terminfo", "x", "xterm-256color"), "utf8"), "terminfo");
 });
 
 test("fetch-mosh-binaries falls back to the legacy flat asset for older releases", async (t) => {

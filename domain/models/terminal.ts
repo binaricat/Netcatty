@@ -1,6 +1,10 @@
-import type { SerialConfig } from './connection';
+import type { SerialConfig, Snippet } from './connection';
 import type { CodingCliProviderId } from '../codingCliProviders';
-import { normalizeHibernateHiddenTabsDelaySec } from '../terminalHibernate';
+import {
+  normalizeHibernateHiddenTabsDelaySec,
+  normalizeHibernateKeepRendererCount,
+  normalizeHibernateReplayChunkBytes,
+} from '../terminalHibernate';
 
 // Terminal appearance settings
 export type CursorShape = 'block' | 'bar' | 'underline';
@@ -9,6 +13,7 @@ export type RightClickBehavior = TerminalMouseClickBehavior;
 export type MiddleClickBehavior = 'context-menu' | 'paste' | 'disabled';
 export type LinkModifier = 'none' | 'ctrl' | 'alt' | 'meta';
 export type TerminalEmulationType = 'xterm-256color' | 'xterm-16color' | 'xterm';
+export type DynamicTabTitleMode = 'off' | 'agent' | 'all';
 
 // Keyword highlighting configuration
 export interface KeywordHighlightRule {
@@ -74,6 +79,7 @@ export interface TerminalSettings {
   localStartDir: string; // Starting directory for local terminal (empty = home directory)
 
   // SSH Connection
+  verifyHostKeys: boolean; // Verify SSH host keys before authenticating
   keepaliveInterval: number; // Seconds between SSH-level keepalive packets (0 = disabled)
   keepaliveCountMax: number; // Unanswered keepalives before declaring the connection dead
   x11Display: string; // Optional local X11 DISPLAY override (empty = use system DISPLAY/default)
@@ -116,12 +122,23 @@ export interface TerminalSettings {
   // Clipboard
   osc52Clipboard: 'off' | 'write-only' | 'read-write' | 'prompt'; // OSC-52 clipboard access: off, write-only (default), read-write, or prompt on read
 
+  // Tab titles
+  dynamicTabTitleMode: DynamicTabTitleMode; // off, agent-only, or all shell-reported titles
+
   // Rendering
   rendererType: 'auto' | 'webgl' | 'dom'; // Terminal renderer: auto (detect based on hardware), webgl, or dom
   /** Dispose xterm for hidden tabs after a delay to save renderer memory; SSH stays connected. */
   hibernateHiddenTabs: boolean;
   /** Seconds after a tab leaves view before hibernating (see hibernateHiddenTabs). */
   hibernateHiddenTabsDelaySec: number;
+  /** Skip full hibernate while a full-screen TUI owns the alternate screen buffer. */
+  hibernateSkipAltScreen: boolean;
+  /** Hidden tabs whose renderer is kept alive (WebGL suspended) before full hibernate. */
+  hibernateKeepRendererCount: number;
+  /** Bytes per animation frame when replaying hibernate snapshots in the renderer. */
+  hibernateReplayChunkBytes: number;
+  /** Prefer WASM terminal serialize when available (falls back to JS). */
+  hibernatePreferWasmSerialize: boolean;
   showLineTimestamps: boolean; // Show output timestamps in a side gutter
 
   // Autocomplete
@@ -247,6 +264,12 @@ const resolveMiddleClickBehavior = (
   return DEFAULT_TERMINAL_SETTINGS.middleClickBehavior;
 };
 
+const isDynamicTabTitleMode = (value: unknown): value is DynamicTabTitleMode => (
+  value === 'off' ||
+  value === 'agent' ||
+  value === 'all'
+);
+
 export const normalizeTerminalSettings = (
   settings?: Partial<TerminalSettings> | null,
 ): TerminalSettings => {
@@ -256,6 +279,9 @@ export const normalizeTerminalSettings = (
     ...(settings ?? {}),
     middleClickBehavior,
     middleClickPaste: middleClickBehavior === 'paste',
+    dynamicTabTitleMode: isDynamicTabTitleMode(settings?.dynamicTabTitleMode)
+      ? settings.dynamicTabTitleMode
+      : DEFAULT_TERMINAL_SETTINGS.dynamicTabTitleMode,
   };
 
   // Migrate legacy 'canvas' renderer to 'dom' (canvas removed in xterm.js 6.0)
@@ -268,6 +294,12 @@ export const normalizeTerminalSettings = (
     rendererType,
     hibernateHiddenTabsDelaySec: normalizeHibernateHiddenTabsDelaySec(
       mergedSettings.hibernateHiddenTabsDelaySec,
+    ),
+    hibernateKeepRendererCount: normalizeHibernateKeepRendererCount(
+      mergedSettings.hibernateKeepRendererCount,
+    ),
+    hibernateReplayChunkBytes: normalizeHibernateReplayChunkBytes(
+      mergedSettings.hibernateReplayChunkBytes,
     ),
     autocompleteGhostText: mergedSettings.autocompletePopupMenu
       ? false
@@ -315,6 +347,7 @@ const DEFAULT_TERMINAL_SETTINGS: TerminalSettings = {
   // before declaring the session dead (~5 min). Hosts whose SSH stack doesn't
   // reply to keepalive@openssh.com (older routers/switches) should set their
   // own per-host keepaliveOverride and dial these values down.
+  verifyHostKeys: true,
   keepaliveInterval: 30,
   keepaliveCountMax: 10,
   x11Display: '', // Empty = use DISPLAY/default local X server
@@ -330,9 +363,14 @@ const DEFAULT_TERMINAL_SETTINGS: TerminalSettings = {
   preserveSelectionOnInput: false, // Opt-in: keep selection alive when typing
   forcePromptNewLine: false, // Opt-in: keep the next shell prompt visually separated from unterminated final output lines
   osc52Clipboard: 'write-only', // OSC-52: allow remote programs to write clipboard by default
+  dynamicTabTitleMode: 'agent',
   rendererType: 'auto', // Auto-detect best renderer based on hardware
-  hibernateHiddenTabs: true,
+  hibernateHiddenTabs: false,
   hibernateHiddenTabsDelaySec: 5,
+  hibernateSkipAltScreen: true,
+  hibernateKeepRendererCount: 2,
+  hibernateReplayChunkBytes: 16 * 1024,
+  hibernatePreferWasmSerialize: false,
   showLineTimestamps: false, // Opt-in: shows output timestamps beside terminal lines
   autocompleteEnabled: true, // Autocomplete enabled by default
   autocompleteGhostText: false, // Mutually exclusive with popup menu
@@ -379,8 +417,13 @@ export interface TerminalSession {
   hostname: string;
   status: 'connecting' | 'connected' | 'disconnected';
   workspaceId?: string;
+  /** Script to auto-run after connect (multi-host script runner). */
+  pendingScriptId?: string;
+  /** Snapshot used by "Run now" so unsaved editor changes run exactly as shown. */
+  pendingScript?: Snippet;
   startupCommand?: string; // Command to run after connection (for snippet runner)
   noAutoRun?: boolean;     // If true, paste command without auto-executing
+  multiLineRunMode?: Snippet['multiLineRunMode'];
   // Connection-time protocol overrides (used instead of looking up from hosts)
   protocol?: 'ssh' | 'telnet' | 'local' | 'serial';
   port?: number;

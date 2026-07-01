@@ -4,9 +4,19 @@ type Listener = () => void;
 
 let suppressDepth = 0;
 const listeners = new Set<Listener>();
+let notifyRafId: number | null = null;
 
-function emit() {
-  listeners.forEach((listener) => listener());
+const scheduleFrame =
+  typeof requestAnimationFrame === 'function'
+    ? requestAnimationFrame
+    : (cb: () => void) => setTimeout(cb, 0) as unknown as number;
+
+function scheduleEmit() {
+  if (notifyRafId !== null) return;
+  notifyRafId = scheduleFrame(() => {
+    notifyRafId = null;
+    listeners.forEach((listener) => listener());
+  });
 }
 
 export const terminalLayoutSuppressStore = {
@@ -19,14 +29,14 @@ export const terminalLayoutSuppressStore = {
 
   begin: () => {
     suppressDepth += 1;
-    emit();
+    scheduleEmit();
   },
 
   end: () => {
     const wasActive = suppressDepth > 0;
     suppressDepth = Math.max(0, suppressDepth - 1);
     if (wasActive) {
-      emit();
+      scheduleEmit();
     }
   },
 };

@@ -158,7 +158,11 @@ function createSettingsWindowApi(ctx) {
       // Open external links in system browser by default, and allow only known OAuth hosts in-app.
       try {
         win.webContents?.setWindowOpenHandler?.(
-          createAppWindowOpenHandler(shell, { backgroundColor, appIcon })
+          createAppWindowOpenHandler(shell, {
+            backgroundColor,
+            appIcon,
+            getAppIcon: () => resolveLiveAppIcon(appIcon),
+          })
         );
       } catch {
         // ignore

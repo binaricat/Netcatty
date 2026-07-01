@@ -85,6 +85,18 @@ function escapeIacForWire(buf) {
 }
 
 /**
+ * Normalize text input to Telnet NVT newline rules (RFC 854): newline is CR LF,
+ * while a literal carriage return is CR NUL. Existing CR LF / CR NUL sequences
+ * are already valid and must not be expanded again.
+ */
+function normalizeNvtNewlines(data) {
+  if (typeof data !== "string" || data.length === 0) return data;
+  return data
+    .replace(/\r(?![\n\0])/g, "\r\n")
+    .replace(/(?<!\r)\n/g, "\r\n");
+}
+
+/**
  * Build a stateful Telnet parser.
  *
  * The parser preserves any partial command (IAC alone, IAC + verb without
@@ -256,9 +268,13 @@ function createTelnetNegotiator({
   writeSubnegotiation,
   getWindowSize,
   termType = "XTERM-256COLOR",
+  onRemoteEchoChange,
+  onLocalEchoChange,
 } = {}) {
   const pendingDoRequests = new Set();
   const pendingWillRequests = new Set();
+  const enabledRemoteOptions = new Set();
+  const enabledLocalOptions = new Set();
 
   const noopWrite = () => {};
   const cmdSink = typeof writeCommand === "function" ? writeCommand : noopWrite;
@@ -266,6 +282,8 @@ function createTelnetNegotiator({
   const sizeFn = typeof getWindowSize === "function"
     ? getWindowSize
     : () => ({ cols: 80, rows: 24 });
+  const echoSink = typeof onRemoteEchoChange === "function" ? onRemoteEchoChange : () => {};
+  const localEchoSink = typeof onLocalEchoChange === "function" ? onLocalEchoChange : () => {};
 
   const naws = () => {
     const { cols, rows } = sizeFn() || {};
@@ -314,10 +332,20 @@ function createTelnetNegotiator({
     }
 
     if (cmd === WILL) {
+      const supported = opt === OPT.SUPPRESS_GO_AHEAD || opt === OPT.ECHO;
+      const wasEnabled = enabledRemoteOptions.has(opt);
+      if (supported) enabledRemoteOptions.add(opt);
+      if (opt === OPT.ECHO) {
+        echoSink(true);
+        if (enabledLocalOptions.delete(opt)) {
+          localEchoSink(false);
+          cmdSink(WONT, opt);
+        }
+      }
       if (!acknowledgesOurRequest) {
-        if (opt === OPT.SUPPRESS_GO_AHEAD || opt === OPT.ECHO) {
+        if (supported && !wasEnabled) {
           cmdSink(DO, opt);
-        } else {
+        } else if (!supported) {
           cmdSink(DONT, opt);
         }
       }
@@ -325,13 +353,20 @@ function createTelnetNegotiator({
     }
 
     if (cmd === DO) {
+      const wasEnabled = enabledLocalOptions.has(opt);
       if (opt === OPT.NAWS) {
-        if (!acknowledgesOurRequest) cmdSink(WILL, opt);
-        // Always follow through with the actual size, whether this DO is the
-        // peer's reply to our WILL or an independent fresh request.
-        naws();
+        enabledLocalOptions.add(opt);
+        if (!acknowledgesOurRequest && !wasEnabled) cmdSink(WILL, opt);
+        // Follow through with the actual size when NAWS first becomes active,
+        // whether this DO acknowledges our WILL or starts from the peer.
+        if (!wasEnabled) naws();
+      } else if (opt === OPT.ECHO) {
+        enabledLocalOptions.add(opt);
+        if (!acknowledgesOurRequest && !wasEnabled) cmdSink(WILL, opt);
+        if (!wasEnabled) localEchoSink(true);
       } else if (opt === OPT.TERMINAL_TYPE || opt === OPT.SUPPRESS_GO_AHEAD) {
-        if (!acknowledgesOurRequest) cmdSink(WILL, opt);
+        enabledLocalOptions.add(opt);
+        if (!acknowledgesOurRequest && !wasEnabled) cmdSink(WILL, opt);
       } else {
         if (!acknowledgesOurRequest) cmdSink(WONT, opt);
       }
@@ -339,12 +374,18 @@ function createTelnetNegotiator({
     }
 
     if (cmd === DONT) {
-      if (!acknowledgesOurRequest) cmdSink(WONT, opt);
+      const wasEnabled = enabledLocalOptions.delete(opt);
+      if (opt === OPT.ECHO && wasEnabled) localEchoSink(false);
+      if (!acknowledgesOurRequest && (wasEnabled || pendingWillRequests.has(opt))) {
+        cmdSink(WONT, opt);
+      }
       return;
     }
 
     if (cmd === WONT) {
-      if (!acknowledgesOurRequest) cmdSink(DONT, opt);
+      const wasEnabled = enabledRemoteOptions.delete(opt);
+      if (opt === OPT.ECHO) echoSink(false);
+      if (!acknowledgesOurRequest && wasEnabled) cmdSink(DONT, opt);
       return;
     }
   };
@@ -397,6 +438,7 @@ module.exports = {
   // Helpers
   commandName,
   escapeIacForWire,
+  normalizeNvtNewlines,
   createTelnetParser,
   createTelnetNegotiator,
 };

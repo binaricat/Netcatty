@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
+const { StringDecoder } = require("node:string_decoder");
 
 const {
   addBundledMoshDllPath,
@@ -10,6 +11,7 @@ const {
   addBundledMoshTerminfoEnv,
   resolveBareMoshClient,
 } = require("./terminalBridge.cjs");
+const { createMoshSessionApi } = require("./terminalBridge/moshSession.cjs");
 
 function makeTmp() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-mosh-resolve-"));
@@ -219,6 +221,26 @@ test("Windows mosh runtime env includes DLL path and terminfo", () => {
   assert.equal(env.Path.split(";")[0], dllDir);
   assert.equal(env.TERMINFO, terminfo);
   assert.equal(env.TERMINFO_DIRS, terminfo);
+});
+
+test("mosh UTF-8 decoder preserves fragmented Chinese output", () => {
+  const { createMoshUtf8Decoder } = createMoshSessionApi({
+    StringDecoder,
+    Buffer,
+  });
+  const decode = createMoshUtf8Decoder();
+  const fixture = Buffer.from("mosh: 连接恢复，终端输出正常\n", "utf8");
+  const chunks = [
+    fixture.subarray(0, 9),
+    fixture.subarray(9, 11),
+    fixture.subarray(11, 17),
+    fixture.subarray(17),
+  ];
+
+  const decoded = chunks.map((chunk) => decode(chunk)).join("");
+
+  assert.equal(decoded, "mosh: 连接恢复，终端输出正常\n");
+  assert.equal(decoded.includes("\uFFFD"), false);
 });
 
 test("removed Mosh client detection APIs are not exposed to the renderer", () => {

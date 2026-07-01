@@ -36,7 +36,10 @@ import {
   STORAGE_KEY_TERMINAL_HOST_TREE_WIDTH,
   STORAGE_KEY_VAULT_HOSTS_TREE_EXPANDED,
 } from '../../infrastructure/config/storageKeys';
+import { themeFingerprint } from '../../application/state/useActiveChromeTheme';
+import { buildHostTreeThemeFromTerminalTheme } from '../../infrastructure/theme/terminalAppearanceTokens';
 import { cn } from '../../lib/utils';
+import { matchesHostSearchQuery, matchesSearchQuery } from '../../lib/searchMatcher';
 import type { GroupConfig, GroupNode, Host, TerminalTheme } from '../../types';
 import { HostTreeGroupContextMenuContent, HostTreeHostContextMenuContent } from '../host/HostTreeContextMenus';
 import { HostTreeGroupInlineRenameInput } from '../host/HostTreeGroupInlineRenameInput';
@@ -199,13 +202,8 @@ export function getTerminalHostTreeMeasuredLayoutWidth(
 }
 
 function hostMatchesSearch(host: Host, search: string): boolean {
-  const s = search.toLowerCase();
-  return (
-    host.label.toLowerCase().includes(s)
-    || host.hostname.toLowerCase().includes(s)
-    || host.tags.some((tag) => tag.toLowerCase().includes(s))
-    || (host.notes?.toLowerCase().includes(s) ?? false)
-  );
+  return matchesHostSearchQuery(search, host)
+    || matchesSearchQuery(search, host.username, host.notes);
 }
 
 function filterGroupNode(
@@ -274,10 +272,9 @@ const TerminalHostTreeHostHoverCard: React.FC<{ host: Host }> = ({ host }) => {
           host={host}
           size="sm"
           fallback={host.label.slice(0, 1).toUpperCase()}
-          className="rounded"
         />
-        <div className="flex h-5 min-w-0 items-center">
-          <div className="translate-y-px truncate text-[15px] font-semibold leading-none">{host.label}</div>
+        <div className="flex min-h-6 min-w-0 items-center">
+          <div className="truncate text-[15px] font-semibold leading-5">{host.label}</div>
         </div>
       </div>
       <div className="mt-3 space-y-1.5">
@@ -409,7 +406,7 @@ const HostTreeFlatRowItem = memo<HostTreeFlatRowProps>(({
         }}
       >
         <span className="flex h-5 w-4 shrink-0 items-center" />
-        <span className="flex h-5 shrink-0 items-center">
+        <span className="flex h-5 shrink-0 items-center justify-center">
           <DistroAvatar host={row.host} size="xs" fallback={row.host.label.slice(0, 1).toUpperCase()} />
         </span>
         {isInlineEditing && menuActions && inlineEditInitialName ? (
@@ -421,10 +418,15 @@ const HostTreeFlatRowItem = memo<HostTreeFlatRowProps>(({
             style={{ color: theme.termFg }}
           />
         ) : (
-          <span className="flex h-5 min-w-0 flex-1 translate-y-px items-center truncate leading-none">{row.host.label}</span>
+          <span
+            className="flex min-w-0 flex-1 items-center truncate leading-5"
+            style={{ color: theme.termFg }}
+          >
+            {row.host.label}
+          </span>
         )}
         {row.host.protocol && row.host.protocol !== 'ssh' && (
-          <span className="flex h-5 shrink-0 translate-y-px items-center text-[10px] leading-none uppercase opacity-70" style={{ color: theme.mutedFg }}>
+          <span className="flex shrink-0 items-center text-[10px] leading-4 uppercase opacity-70" style={{ color: theme.mutedFg }}>
             {row.host.protocol}
           </span>
         )}
@@ -552,7 +554,7 @@ const HostTreeFlatRowItem = memo<HostTreeFlatRowProps>(({
           style={{ color: theme.termFg }}
         />
       ) : (
-        <span className="flex h-5 min-w-0 flex-1 translate-y-px items-center truncate leading-none">{node.name}</span>
+        <span className="flex min-w-0 flex-1 items-center truncate leading-5">{node.name}</span>
       )}
     </div>
   );
@@ -636,26 +638,10 @@ const TerminalHostTreeSidebarInner: React.FC<TerminalHostTreeSidebarProps> = ({
   const inlineHostEdit = useHostTreeInlineHostEdit();
   const listRef = useRef<FixedSizeVirtualListHandle>(null);
 
-  const theme = useMemo<HostTreeTheme>(() => {
-    const termBg = resolvedPreviewTheme.colors.background;
-    const termFg = resolvedPreviewTheme.colors.foreground;
-    const mutedFg = `color-mix(in srgb, ${termFg} 55%, ${termBg} 45%)`;
-    const separator = `color-mix(in srgb, ${termFg} 10%, ${termBg} 90%)`;
-    const rowHoverBg = `color-mix(in srgb, ${termFg} 8%, transparent)`;
-    const rowActiveBg = `color-mix(in srgb, ${termFg} 14%, transparent)`;
-    const rowDropBg = `color-mix(in srgb, ${termFg} 20%, transparent)`;
-    const folderFg = `color-mix(in srgb, ${termFg} 75%, ${termBg} 25%)`;
-    return {
-      termBg: `var(--terminal-host-tree-bg, ${termBg})`,
-      termFg: `var(--terminal-host-tree-fg, ${termFg})`,
-      mutedFg: `var(--terminal-host-tree-muted, ${mutedFg})`,
-      separator: `var(--terminal-host-tree-separator, ${separator})`,
-      rowHoverBg: `var(--terminal-host-tree-hover-bg, ${rowHoverBg})`,
-      rowActiveBg: `var(--terminal-host-tree-active-bg, ${rowActiveBg})`,
-      rowDropBg: `var(--terminal-host-tree-drop-bg, ${rowDropBg})`,
-      folderFg: `var(--terminal-host-tree-folder-fg, ${folderFg})`,
-    };
-  }, [resolvedPreviewTheme]);
+  const theme = useMemo(
+    () => buildHostTreeThemeFromTerminalTheme(resolvedPreviewTheme),
+    [resolvedPreviewTheme],
+  );
 
   const allTags = useMemo(() => {
     const tags = new Set<string>();
@@ -744,8 +730,6 @@ const TerminalHostTreeSidebarInner: React.FC<TerminalHostTreeSidebarProps> = ({
   const handleCollapseAll = useCallback(() => {
     collapseAll();
   }, [collapseAll]);
-
-  const canExpandCollapse = allGroupPaths.length > 0 && !searchActive && !tagsActive;
 
   const handleCollapse = useCallback(() => {
     terminalHostTreeStore.setIsOpen(false);
@@ -961,6 +945,7 @@ const TerminalHostTreeSidebarInner: React.FC<TerminalHostTreeSidebarProps> = ({
   }, [isVisible, persistSidebarWidth, setSidebarWidth, sidebarWidth]);
 
   const displayWidth = resizePreviewWidth ?? sidebarWidth;
+  const canExpandCollapse = allGroupPaths.length > 0 && !searchActive && !tagsActive;
   const targetLayoutWidth = getTerminalHostTreeLayoutTargetWidth(isVisible, displayWidth);
   const hiddenSurfaceShellWidth = getTerminalHostTreeHiddenSurfaceShellWidth(isOpen, enabled, displayWidth);
   const [shellWidth, setShellWidth] = useState(getTerminalHostTreeInitialLayoutWidth);
@@ -1141,8 +1126,8 @@ export const TerminalHostTreeSidebar = memo(
     && prev.enabled === next.enabled
     && prev.surfaceVisible === next.surfaceVisible
     && prev.customGroups === next.customGroups
-    && prev.resolvedPreviewTheme === next.resolvedPreviewTheme
     && prev.activeHostId === next.activeHostId
+    && themeFingerprint(prev.resolvedPreviewTheme) === themeFingerprint(next.resolvedPreviewTheme)
     && prev.onConnect === next.onConnect
     && prev.onCreateLocalTerminal === next.onCreateLocalTerminal
   ),

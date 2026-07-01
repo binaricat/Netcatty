@@ -886,10 +886,25 @@ async function sameHostCopyDirectory(event, payload) {
   }
 }
 
+function registerWorkerHandle(ipcMain, terminalWorkerManager, channel) {
+  ipcMain.handle(channel, (event, payload) => terminalWorkerManager.request(channel, payload, {
+    webContentsId: event?.sender?.id,
+  }));
+}
+
 /**
  * Register IPC handlers for transfer operations
  */
-function registerHandlers(ipcMain) {
+function registerHandlers(ipcMain, options = {}) {
+  const terminalWorkerManager = options.terminalWorkerManager || null;
+  if (terminalWorkerManager) {
+    [
+      "netcatty:transfer:start",
+      "netcatty:transfer:cancel",
+      "netcatty:transfer:same-host-copy-dir",
+    ].forEach((channel) => registerWorkerHandle(ipcMain, terminalWorkerManager, channel));
+    return;
+  }
   ipcMain.handle("netcatty:transfer:start", startTransfer);
   ipcMain.handle("netcatty:transfer:cancel", cancelTransfer);
   ipcMain.handle("netcatty:transfer:same-host-copy-dir", sameHostCopyDirectory);

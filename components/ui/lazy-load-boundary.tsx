@@ -4,7 +4,7 @@ import { cn } from "../../lib/utils";
 type LazyLoadBoundaryProps = {
   children: React.ReactNode;
   className?: string;
-  fallback?: React.ReactNode;
+  fallback?: React.ReactNode | ((error: Error) => React.ReactNode);
   name?: string;
   resetKey?: React.Key | null;
 };
@@ -37,9 +37,15 @@ export class LazyLoadBoundary extends Component<LazyLoadBoundaryProps, LazyLoadB
     this.setState(({ retryKey }) => ({ error: null, retryKey: retryKey + 1 }));
   };
 
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    console.error(`[LazyLoadBoundary] ${this.props.name || "content"} failed:`, error, errorInfo.componentStack);
+  }
+
   render() {
     if (this.state.error) {
-      if (this.props.fallback) return this.props.fallback;
+      const { fallback } = this.props;
+      if (typeof fallback === "function") return fallback(this.state.error);
+      if (fallback) return fallback;
       const label = this.props.name || "This area";
       return (
         <div

@@ -3,7 +3,9 @@ import assert from "node:assert/strict";
 
 import type { Workspace } from "../../types";
 import {
+  terminalLayerFocusSidebarPropsEqual,
   terminalLayerSidePanelCtxEqual,
+  terminalLayerSidePanelStableCtxEqual,
   terminalLayerViewCtxEqual,
   terminalLayerWorkspaceCtxEqual,
 } from "./terminalLayerViewMemo.ts";
@@ -97,6 +99,30 @@ test("terminal layer memo re-renders when active workspace root changes", () => 
   );
 });
 
+test("terminal layer side panel stable ctx ignores linked terminal cwd changes", () => {
+  const baseCtx = {
+    mountedSftpTabIds: ["workspace-1"],
+    sidePanelOpenTabs: new Map([["workspace-1", "sftp"]]),
+    activeTerminalCwd: "/home/user",
+    sftpFollowTerminalCwd: true,
+  };
+
+  assert.equal(
+    terminalLayerSidePanelStableCtxEqual(
+      baseCtx,
+      { ...baseCtx, activeTerminalCwd: "/home/user/project" },
+    ),
+    true,
+  );
+  assert.equal(
+    terminalLayerSidePanelCtxEqual(
+      baseCtx,
+      { ...baseCtx, activeTerminalCwd: "/home/user/project" },
+    ),
+    false,
+  );
+});
+
 test("terminal layer side panel re-renders when linked terminal cwd changes", () => {
   const baseCtx = {
     mountedSftpTabIds: ["workspace-1"],
@@ -138,6 +164,48 @@ test("terminal layer side panel re-renders when follow terminal cwd setting chan
     terminalLayerViewCtxEqual(
       baseCtx,
       { ...baseCtx, sftpFollowTerminalCwd: true },
+    ),
+    false,
+  );
+});
+
+test("terminal layer side panel re-renders when vault note open callback changes", () => {
+  const baseCtx = {
+    mountedAiTabIds: ["workspace-1"],
+    onOpenVaultNoteFromChat: () => {},
+  };
+
+  assert.equal(
+    terminalLayerSidePanelCtxEqual(
+      baseCtx,
+      { ...baseCtx, onOpenVaultNoteFromChat: () => {} },
+    ),
+    false,
+  );
+});
+
+test("terminal layer focus sidebar re-renders when dynamic tab title mode changes", () => {
+  const baseCtx = {
+    isFocusMode: true,
+    activeWorkspace: workspace(),
+    focusedSessionId: "session-1",
+    resolvedPreviewTheme: {},
+    sessionHostsMap: new Map(),
+    sessions: [],
+    terminalSettings: { dynamicTabTitleMode: "agent" },
+  };
+
+  assert.equal(
+    terminalLayerFocusSidebarPropsEqual(
+      baseCtx,
+      { ...baseCtx, terminalSettings: { dynamicTabTitleMode: "off" } },
+    ),
+    false,
+  );
+  assert.equal(
+    terminalLayerViewCtxEqual(
+      baseCtx,
+      { ...baseCtx, terminalSettings: { dynamicTabTitleMode: "off" } },
     ),
     false,
   );

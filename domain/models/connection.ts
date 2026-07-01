@@ -11,6 +11,7 @@ export interface ProxyConfig {
   host: string;
   port: number;
   command?: string;
+  identityId?: string;
   username?: string;
   password?: string;
 }
@@ -28,6 +29,8 @@ export interface ProxyProfile {
 export interface HostChainConfig {
   hostIds: string[]; // Array of host IDs in order (first = closest to client)
 }
+
+export type MultiLineRunMode = 'lineDelay' | 'paste';
 
 // Per-host SSH algorithm override lists (advanced). Each property, when
 // present and non-empty, fully replaces the offered list for that category.
@@ -148,6 +151,13 @@ export interface Host {
   x11Forwarding?: boolean;
   createdAt?: number; // Timestamp when host was created
   startupCommand?: string;
+  startupCommandRunMode?: MultiLineRunMode;
+  /** Script id (kind=script) to run automatically after connect. */
+  loginScriptId?: string;
+  /** Ordered onConnect script IDs for this host (canonical run order). */
+  connectScriptIds?: string[];
+  /** Output regex triggers that launch scripts on terminal output. */
+  outputTriggers?: HostOutputTrigger[];
   hostChaining?: string; // Deprecated: use hostChain instead
   proxy?: string; // Deprecated: use proxyConfig instead
   proxyProfileId?: string; // Reference to reusable proxy profile
@@ -180,6 +190,7 @@ export interface Host {
   protocols?: ProtocolConfig[]; // Multiple protocol configurations
   telnetPort?: number; // Telnet-specific port (for quick access)
   telnetEnabled?: boolean; // Is Telnet enabled for this host
+  telnetIdentityId?: string; // Reference to a Telnet-specific reusable identity
   telnetUsername?: string; // Telnet-specific username
   telnetPassword?: string; // Telnet-specific password
   // Serial-specific configuration (for protocol='serial' hosts)
@@ -274,16 +285,37 @@ export interface Identity {
   order?: number;
 }
 
+export type SnippetKind = 'snippet' | 'script';
+export type SnippetMultiLineRunMode = MultiLineRunMode;
+export type ScriptLanguage = 'javascript' | 'python';
+export type ScriptTrigger = 'manual' | 'onConnect' | 'onOutput';
+
 export interface Snippet {
   id: string;
   label: string;
-  command: string; // Multi-line script
+  command: string; // Multi-line script or automation script source
   tags?: string[];
   package?: string; // package path
   targets?: string[]; // host ids
+  /** When true, script/snippet applies to every connectable host (no per-host picker). */
+  targetsAllHosts?: boolean;
   shortkey?: string; // Keyboard shortcut to send this snippet in terminal (e.g., "F1", "Ctrl + F1")
   noAutoRun?: boolean; // If true, paste command without executing (no trailing Enter)
+  multiLineRunMode?: SnippetMultiLineRunMode; // Multi-line auto-run behavior; default is paste.
   order?: number;
+  /** Default 'snippet' — static text paste. 'script' runs via nct automation engine. */
+  kind?: SnippetKind;
+  language?: ScriptLanguage;
+  description?: string;
+  trigger?: ScriptTrigger;
+  /** Regex pattern when trigger is 'onOutput'. */
+  triggerPattern?: string;
+}
+
+export interface HostOutputTrigger {
+  id: string;
+  pattern: string;
+  scriptId: string;
 }
 
 export interface VaultNote {
@@ -325,11 +357,14 @@ export interface GroupConfig {
   identityFilePaths?: string[];
   port?: number;
   protocol?: 'ssh' | 'telnet';
+  deviceType?: 'general' | 'network';
   agentForwarding?: boolean;
   proxyProfileId?: string;
   proxyConfig?: ProxyConfig;
   hostChain?: HostChainConfig;
   startupCommand?: string;
+  startupCommandRunMode?: MultiLineRunMode;
+  loginScriptId?: string;
   legacyAlgorithms?: boolean;
   skipEcdsaHostKey?: boolean;
   algorithms?: HostAlgorithmOverrides;

@@ -231,6 +231,8 @@ export interface SyncPayload {
     terminalFontFamily?: string;
     terminalFontSize?: number;
     terminalSettings?: Record<string, unknown>;
+    terminalSidePanelAutoOpen?: boolean;
+    terminalSidePanelAutoOpenTab?: import('./terminalSidePanelAutoOpen').TerminalSidePanelAutoOpenTab;
     customTerminalThemes?: Array<{ id: string; name: string; colors: Record<string, string> }>;
     // Keyboard
     customKeyBindings?: Record<string, { mac?: string; pc?: string }>;
@@ -251,7 +253,7 @@ export interface SyncPayload {
     showOnlyUngroupedHostsInRoot?: boolean;
     // Top tabs: show standalone SFTP view tab
     showSftpTab?: boolean;
-    // Shortcuts: Cmd/Ctrl+[1...9] skip pinned Vault/SFTP tabs
+    // Shortcuts: Cmd/Ctrl+[1...9] and Ctrl+Tab skip pinned Vault/SFTP tabs
     shellOnlyTabNumberShortcuts?: boolean;
     // Shortcuts: disable terminal font zoom shortcuts
     disableTerminalFontZoom?: boolean;
@@ -264,7 +266,7 @@ export interface SyncPayload {
       providers?: Array<Record<string, unknown>>;
       activeProviderId?: string;
       activeModelId?: string;
-      globalPermissionMode?: 'observer' | 'confirm' | 'autonomous';
+      globalPermissionMode?: 'observer' | 'confirm' | 'auto';
       toolIntegrationMode?: 'mcp' | 'skills';
       hostPermissions?: Array<Record<string, unknown>>;
       // externalAgents intentionally omitted: command/args/env are device-local
@@ -634,23 +636,31 @@ export const getDefaultDeviceName = (): string => {
 };
 
 /**
+ * Format a sync timestamp as `yyyymmdd hhmm` (e.g. `20250628 1430`).
+ */
+export const formatSyncDateTime = (timestamp: number): string => {
+  const date = new Date(timestamp);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  const hours = String(date.getHours()).padStart(2, '0');
+  const minutes = String(date.getMinutes()).padStart(2, '0');
+  return `${year}${month}${day} ${hours}${minutes}`;
+};
+
+/**
  * Format last sync time for display
  */
 export const formatLastSync = (timestamp?: number): string => {
   if (!timestamp) return 'Never synced';
-  
+
   const now = Date.now();
   const diff = now - timestamp;
-  
+
   if (diff < 60000) return 'Just now';
   if (diff < 3600000) return `${Math.floor(diff / 60000)} min ago`;
-  if (diff < 86400000) {
-    const date = new Date(timestamp);
-    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  }
-  
-  const date = new Date(timestamp);
-  return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+
+  return formatSyncDateTime(timestamp);
 };
 
 /**

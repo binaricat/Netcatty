@@ -3,12 +3,17 @@ import React, { useMemo } from 'react';
 import { useActiveTabId } from '../state/activeTabStore';
 import type { EditorTab } from '../state/editorTabStore';
 import type { LogView } from '../state/logViewState';
+import { useManualTerminalChromeSurfaceInjection } from '../state/useManualTerminalChromeSurfaceInjection';
 import { TerminalHostTreeSidebar } from '../../components/terminalLayer/TerminalHostTreeSidebar';
+import type {
+  ResolvedAppearance,
+  TerminalAppearanceHostScope,
+} from '../../domain/terminalAppearanceRuntime';
 import type { GroupConfig, Host, TerminalSession, TerminalTheme, Workspace } from '../../types';
+import { resolveActiveChromeTheme } from './activeChromeTheme';
 import {
   isHostTreeWorkTabSurface,
   resolveWorkTabActiveHostId,
-  resolveWorkTabHostTreeTheme,
 } from './workTabSurface';
 
 interface AppHostTreeLayerProps {
@@ -27,6 +32,7 @@ interface AppHostTreeLayerProps {
   followAppTerminalTheme: boolean;
   hostById: ReadonlyMap<string, Host>;
   themeById: ReadonlyMap<string, TerminalTheme>;
+  resolveSessionAppearance?: (hostScope: TerminalAppearanceHostScope) => ResolvedAppearance;
   onConnect: (host: Host) => void;
   onCreateLocalTerminal?: () => void;
 }
@@ -55,6 +61,7 @@ export const AppHostTreeLayer: React.FC<AppHostTreeLayerProps> = ({
   followAppTerminalTheme,
   hostById,
   themeById,
+  resolveSessionAppearance,
   onConnect,
   onCreateLocalTerminal,
 }) => {
@@ -62,6 +69,14 @@ export const AppHostTreeLayer: React.FC<AppHostTreeLayerProps> = ({
   const sessionIds = useMemo(() => new Set(sessions.map((session) => session.id)), [sessions]);
   const workspaceIds = useMemo(() => new Set(workspaces.map((workspace) => workspace.id)), [workspaces]);
   const logViewIds = useMemo(() => new Set(logViews.map((logView) => logView.id)), [logViews]);
+  const sessionById = useMemo(
+    () => new Map(sessions.map((session) => [session.id, session])),
+    [sessions],
+  );
+  const workspaceById = useMemo(
+    () => new Map(workspaces.map((workspace) => [workspace.id, workspace])),
+    [workspaces],
+  );
   const surfaceVisible = isHostTreeWorkTabSurface({
     enabled,
     activeTabId,
@@ -78,23 +93,40 @@ export const AppHostTreeLayer: React.FC<AppHostTreeLayerProps> = ({
     workspaces,
   }), [activeTabId, editorTabs, sessions, workspaces]);
 
-  const hostTreeTheme = useMemo(() => resolveWorkTabHostTreeTheme({
-    activeHostId,
+  const hostTreeTheme = useMemo(() => (
+    resolveActiveChromeTheme({
+      accentMode,
+      activeTabId,
+      currentTerminalTheme,
+      customAccent,
+      editorTabs,
+      followAppTerminalTheme,
+      hostById,
+      logViews,
+      resolveSessionAppearance,
+      sessionById,
+      themeById,
+      workspaceById,
+    }) ?? currentTerminalTheme
+  ), [
     accentMode,
+    activeTabId,
     currentTerminalTheme,
     customAccent,
+    editorTabs,
     followAppTerminalTheme,
     hostById,
+    logViews,
+    resolveSessionAppearance,
+    sessionById,
     themeById,
-  }), [
-    activeHostId,
-    accentMode,
-    currentTerminalTheme,
-    customAccent,
-    followAppTerminalTheme,
-    hostById,
-    themeById,
+    workspaceById,
   ]);
+
+  useManualTerminalChromeSurfaceInjection(
+    hostTreeTheme,
+    !followAppTerminalTheme && surfaceVisible,
+  );
 
   return (
     <div

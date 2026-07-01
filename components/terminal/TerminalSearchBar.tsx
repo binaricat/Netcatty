@@ -10,6 +10,12 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 
 export interface TerminalSearchBarProps {
     isOpen: boolean;
+    /**
+     * Incremented each time the search hotkey fires while the bar is already
+     * open. Watched by the focus effect so Cmd/Ctrl+F re-grabs focus when it
+     * has moved elsewhere (issue #1789). Ignored while `isOpen` is false.
+     */
+    focusToken?: number;
     onClose: () => void;
     onSearch: (term: string) => boolean;
     onFindNext: () => boolean;
@@ -19,6 +25,7 @@ export interface TerminalSearchBarProps {
 
 export const TerminalSearchBar: React.FC<TerminalSearchBarProps> = ({
     isOpen,
+    focusToken,
     onClose,
     onSearch,
     onFindNext,
@@ -30,13 +37,14 @@ export const TerminalSearchBar: React.FC<TerminalSearchBarProps> = ({
     const inputRef = useRef<HTMLInputElement>(null);
     const prevSearchTermRef = useRef('');
 
-    // Focus input when opened
+    // Focus input when opened, or when the search hotkey re-fires while open
+    // (focusToken bumps) so focus returns to the input after it moved elsewhere.
     useEffect(() => {
         if (isOpen && inputRef.current) {
             inputRef.current.focus();
             inputRef.current.select();
         }
-    }, [isOpen]);
+    }, [isOpen, focusToken]);
 
     // Trigger search when term changes
     useEffect(() => {

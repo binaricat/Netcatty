@@ -4,7 +4,6 @@ import {
   titleIncludesPhrase,
 } from './codingCliTitleParse';
 import type { Host, TerminalSession } from '../types';
-import { isDynamicTabTitleDisabled } from './sessionTabTitle';
 
 export type SessionCodingCliSource = Pick<
   TerminalSession,
@@ -104,7 +103,7 @@ export function resolveCodingCliProviderFromCommandCandidates(
 
 export function resolveSessionCodingCliProvider(
   source: SessionCodingCliSource,
-  host?: Pick<Host, 'disableDynamicTabTitle' | 'startupCommand'>,
+  host?: Pick<Host, 'startupCommand'>,
 ): CodingCliProvider | undefined {
   if (source.codingCliProviderId) {
     const sticky = getCodingCliProvider(source.codingCliProviderId);
@@ -114,7 +113,7 @@ export function resolveSessionCodingCliProvider(
   const commandProvider = resolveCodingCliProviderFromCommandCandidates(source, host);
   if (commandProvider) return commandProvider;
 
-  if (!isDynamicTabTitleDisabled(host) && !source.customName) {
+  if (!source.customName) {
     const dynamicTitle = source.dynamicTitle?.trim();
     if (dynamicTitle) {
       const provider = matchCodingCliProviderFromTitle(dynamicTitle);
@@ -131,7 +130,7 @@ export function resolveSessionCodingCliProvider(
 
 export function resolveSessionCodingCliProviderId(
   source: SessionCodingCliSource,
-  host?: Pick<Host, 'disableDynamicTabTitle' | 'startupCommand'>,
+  host?: Pick<Host, 'startupCommand'>,
 ): CodingCliProviderId | undefined {
   return resolveSessionCodingCliProvider(source, host)?.id;
 }

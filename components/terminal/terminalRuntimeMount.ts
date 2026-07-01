@@ -60,7 +60,7 @@ export function applyTerminalKeywordHighlightRules(
 
 export type WakeTerminalFromHibernateOptions = {
   refs: TerminalRuntimeRefs;
-  runtimeContext: Omit<CreateXTermRuntimeContext, "container" | "initiallyVisible">;
+  runtimeContext: Omit<CreateXTermRuntimeContext, "container" | "initiallyVisible" | "deferWebglUntilReplayComplete">;
   container: HTMLDivElement;
   getPayload: () => TerminalHibernateWakePayload;
   /** Stop hibernate IPC listeners before reading the final replay payload. */
@@ -76,6 +76,7 @@ export type WakeTerminalFromHibernateOptions = {
   /** When false, recreate xterm and replay output without reattaching or forcing connected status. */
   sessionConnected?: boolean;
   getSessionConnected?: () => boolean;
+  replayChunkBytes?: number;
 };
 
 export async function wakeTerminalFromHibernate(
@@ -97,6 +98,7 @@ export async function wakeTerminalFromHibernate(
     updateStatus,
     sessionConnected = true,
     getSessionConnected,
+    replayChunkBytes = 16 * 1024,
   } = options;
 
   if (refs.hasRuntimeRef.current) {
@@ -118,6 +120,7 @@ export async function wakeTerminalFromHibernate(
     ...runtimeContext,
     container,
     initiallyVisible: true,
+    deferWebglUntilReplayComplete: true,
   });
 
   assignTerminalRuntimeRefs(refs, runtime);
@@ -126,25 +129,43 @@ export async function wakeTerminalFromHibernate(
   const term = runtime.term;
   const initialPayload = getPayload();
   const pendingAtApplyStart = initialPayload.pendingBuffer;
-  await applyHibernateWakeToTerminal(term, runtime, initialPayload);
+  const replayOptions = { chunkBytes: replayChunkBytes };
+
+  await applyHibernateWakeToTerminal(term, runtime, initialPayload, {
+    replayOptions,
+    deferWebgl: true,
+  });
+
   let replayedPendingLength = pendingAtApplyStart.length;
   for (let drainPass = 0; drainPass < 16; drainPass += 1) {
     const pending = getPayload().pendingBuffer;
     if (pending.length <= replayedPendingLength) break;
-    await appendTerminalReplayData(term, pending.slice(replayedPendingLength));
+    await appendTerminalReplayData(
+      term,
+      pending.slice(replayedPendingLength),
+      replayOptions,
+    );
     replayedPendingLength = pending.length;
   }
   const finalPending = getPayload().pendingBuffer;
   if (finalPending.length > replayedPendingLength) {
-    await appendTerminalReplayData(term, finalPending.slice(replayedPendingLength));
+    await appendTerminalReplayData(
+      term,
+      finalPending.slice(replayedPendingLength),
+      replayOptions,
+    );
     replayedPendingLength = finalPending.length;
   }
+
   stopHibernateListeners();
   const shouldReattach = sessionConnected && (getSessionConnected?.() ?? true);
   if (shouldReattach) {
     reattachSession(term);
     updateStatus("connected");
   }
+
+  runtime.ensureWebglRenderer();
+  runtime.clearTextureAtlas();
 
   safeFit({ force: true });
   resizeSession();
@@ -174,6 +195,8 @@ export async function wakeTerminalFromHibernate(
   logger.info("[Terminal] Resumed from hibernate", {
     sessionId,
     snapshotChars: initialPayload.snapshot.length,
+    viewportChars: initialPayload.viewportSnapshot?.length ?? initialPayload.snapshot.length,
+    scrollbackChars: initialPayload.scrollbackSnapshot?.length ?? 0,
     pendingChars: replayedPendingLength,
     alternateScreen: initialPayload.alternateScreen,
   });

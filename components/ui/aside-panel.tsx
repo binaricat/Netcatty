@@ -1,8 +1,47 @@
 import { ArrowLeft, MoreVertical, X } from 'lucide-react';
 import React, { createContext, ReactNode, useCallback, useContext, useMemo, useState } from 'react';
 import { cn } from '../../lib/utils';
+import { localStorageAdapter } from '@/infrastructure/persistence/localStorageAdapter';
 import { Popover, PopoverContent, PopoverTrigger } from './popover';
 import { ScrollArea } from './scroll-area';
+
+export const DEFAULT_ASIDE_INLINE_WIDTH_PX = 380;
+const MIN_ASIDE_INLINE_WIDTH_PX = 320;
+const MAX_ASIDE_INLINE_WIDTH_PX = 720;
+
+export function clampAsideInlineWidth(width: number): number {
+    return Math.max(MIN_ASIDE_INLINE_WIDTH_PX, Math.min(MAX_ASIDE_INLINE_WIDTH_PX, width));
+}
+
+export interface AsidePanelResizeProps {
+    resizable?: boolean;
+    persistWidthStorageKey?: string;
+    resizeAriaLabel?: string;
+}
+
+function parseInlineWidthPx(width: string): number {
+    const arbitraryWidthMatch = width.match(/w-\[(.+)\]/);
+    if (arbitraryWidthMatch) {
+        const raw = arbitraryWidthMatch[1].trim();
+        const parsed = parseInt(raw, 10);
+        if (!Number.isNaN(parsed)) return clampAsideInlineWidth(parsed);
+    }
+
+    switch (width) {
+        case 'w-full':
+        case 'w-screen':
+            return DEFAULT_ASIDE_INLINE_WIDTH_PX;
+        default:
+            return DEFAULT_ASIDE_INLINE_WIDTH_PX;
+    }
+}
+
+function readPersistedAsideWidth(storageKey: string | undefined, fallback: number): number {
+    if (!storageKey) return fallback;
+    const stored = localStorageAdapter.readNumber(storageKey);
+    if (stored === null) return fallback;
+    return clampAsideInlineWidth(stored);
+}
 
 // Types
 interface AsideContentItem {
@@ -33,7 +72,7 @@ export const useAsidePanel = () => {
 };
 
 // Props
-interface AsidePanelProps {
+interface AsidePanelProps extends AsidePanelResizeProps {
     open: boolean;
     onClose: () => void;
     title?: string;
@@ -258,7 +297,7 @@ export const AsidePanelStack: React.FC<AsidePanelStackProps> = ({
         <AsidePanelContext.Provider value={{ push, pop, replace, clear, canGoBack, currentItem }}>
             <div className={cn(
                 layout === 'inline'
-                    ? "relative split-panel-enter shrink-0 h-full min-h-0 max-w-full border-l border-border/60 bg-background z-30 flex flex-col app-no-drag overflow-hidden shadow-[-16px_0_32px_hsl(var(--foreground)/0.08)]"
+                    ? "relative split-panel-enter shrink-0 h-full min-h-0 max-w-full border-l border-border/60 bg-background flex flex-col app-no-drag overflow-hidden shadow-[-16px_0_32px_hsl(var(--foreground)/0.08)]"
                     : "absolute right-0 top-0 bottom-0 max-w-full border-l border-border/60 bg-background z-30 flex flex-col app-no-drag overflow-hidden",
                 layout === 'overlay' && width,
                 className
@@ -292,28 +331,89 @@ export const AsidePanel: React.FC<AsidePanelProps> = ({
     className,
     width = 'w-[380px]',
     layout = 'overlay',
+    resizable = false,
+    persistWidthStorageKey,
+    resizeAriaLabel,
     dataSection,
 }) => {
-    if (!open) return null;
+    const fallbackWidthPx = parseInlineWidthPx(width);
+    const [inlineWidthPx, setInlineWidthPx] = useState(() =>
+        resizable ? readPersistedAsideWidth(persistWidthStorageKey, fallbackWidthPx) : fallbackWidthPx,
+    );
+    const [isResizing, setIsResizing] = useState(false);
+    const effectiveInlineWidthPx = resizable ? inlineWidthPx : fallbackWidthPx;
 
-    const inlineWidth = resolveInlineWidth(width);
     const inlineStyle = layout === 'inline'
         ? ({
-            width: inlineWidth,
-            ['--aside-inline-width' as string]: inlineWidth,
+            width: `${effectiveInlineWidthPx}px`,
+            ['--aside-inline-width' as string]: `${effectiveInlineWidthPx}px`,
         } as React.CSSProperties)
         : undefined;
+
+    const handleResizeStart = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+        if (!resizable || layout !== 'inline') return;
+
+        event.preventDefault();
+        event.stopPropagation();
+
+        const startX = event.clientX;
+        const startWidth = inlineWidthPx;
+        const previousCursor = document.body.style.cursor;
+        const previousUserSelect = document.body.style.userSelect;
+
+        setIsResizing(true);
+        document.body.style.cursor = 'col-resize';
+        document.body.style.userSelect = 'none';
+
+        const handlePointerMove = (moveEvent: PointerEvent) => {
+            setInlineWidthPx(clampAsideInlineWidth(startWidth + startX - moveEvent.clientX));
+        };
+        const handlePointerUp = (upEvent: PointerEvent) => {
+            const nextWidth = clampAsideInlineWidth(startWidth + startX - upEvent.clientX);
+            setInlineWidthPx(nextWidth);
+            if (persistWidthStorageKey) {
+                localStorageAdapter.writeNumber(persistWidthStorageKey, nextWidth);
+            }
+            setIsResizing(false);
+            document.body.style.cursor = previousCursor;
+            document.body.style.userSelect = previousUserSelect;
+            window.removeEventListener('pointermove', handlePointerMove);
+            window.removeEventListener('pointerup', handlePointerUp);
+            window.removeEventListener('pointercancel', handlePointerUp);
+        };
+
+        window.addEventListener('pointermove', handlePointerMove);
+        window.addEventListener('pointerup', handlePointerUp);
+        window.addEventListener('pointercancel', handlePointerUp);
+    }, [inlineWidthPx, layout, persistWidthStorageKey, resizable]);
+
+    if (!open) return null;
 
     return (
         <div className={cn(
             layout === 'inline'
-                ? "relative split-panel-enter shrink-0 h-full min-h-0 max-w-full border-l border-border/60 bg-background z-30 flex flex-col app-no-drag overflow-hidden shadow-[-16px_0_32px_hsl(var(--foreground)/0.08)]"
+                ? "relative split-panel-enter shrink-0 h-full min-h-0 max-w-full border-l border-border/60 bg-background flex flex-col app-no-drag overflow-hidden shadow-[-16px_0_32px_hsl(var(--foreground)/0.08)]"
                 : "absolute right-0 top-0 bottom-0 max-w-full border-l border-border/60 bg-background z-30 flex flex-col app-no-drag overflow-hidden",
             layout === 'overlay' && width,
+            isResizing && layout === 'inline' && 'transition-none',
             className
         )}
         style={inlineStyle}
         data-section={dataSection}>
+            {resizable && layout === 'inline' ? (
+                <div
+                    role="separator"
+                    aria-orientation="vertical"
+                    aria-label={resizeAriaLabel}
+                    className={cn(
+                        'absolute left-0 top-0 z-40 h-full w-2 -translate-x-1/2 cursor-col-resize',
+                        'after:absolute after:left-1/2 after:top-2 after:h-[calc(100%-16px)] after:w-px after:-translate-x-1/2 after:bg-border/0 after:transition-colors',
+                        'hover:after:bg-border/70',
+                        isResizing && 'after:bg-primary/70',
+                    )}
+                    onPointerDown={handleResizeStart}
+                />
+            ) : null}
             {title && (
                 <AsidePanelHeader
                     title={title}

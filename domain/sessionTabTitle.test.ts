@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   getSessionConnectionLabel,
-  isDynamicTabTitleDisabled,
   resolveSessionTabTitle,
 } from './sessionTabTitle';
 
@@ -17,19 +16,47 @@ test('getSessionConnectionLabel prefers customName over hostLabel', () => {
   );
 });
 
-test('resolveSessionTabTitle uses dynamic title by default', () => {
+test('resolveSessionTabTitle ignores dynamic title for non-agent sessions', () => {
   assert.equal(
     resolveSessionTabTitle(
-      { hostLabel: 'web-01', dynamicTitle: 'claude: refactor auth' },
-      undefined,
+      { hostLabel: 'web-01', dynamicTitle: 'root@v2022:/var/log' },
+    ),
+    'web-01',
+  );
+});
+
+test('resolveSessionTabTitle uses dynamic title for agent sessions', () => {
+  assert.equal(
+    resolveSessionTabTitle(
+      { hostLabel: 'web-01', dynamicTitle: 'claude: refactor auth', codingCliProviderId: 'claude' },
     ),
     'claude: refactor auth',
   );
 });
 
+test('resolveSessionTabTitle uses dynamic title for all sessions in all mode', () => {
+  assert.equal(
+    resolveSessionTabTitle(
+      { hostLabel: 'web-01', dynamicTitle: 'root@v2022:/var/log' },
+      'all',
+    ),
+    'root@v2022:/var/log',
+  );
+});
+
+test('resolveSessionTabTitle disables dynamic titles in off mode', () => {
+  assert.equal(
+    resolveSessionTabTitle(
+      { hostLabel: 'web-01', dynamicTitle: 'claude: refactor auth', codingCliProviderId: 'claude' },
+      'off',
+    ),
+    'web-01',
+  );
+});
+
 test('resolveSessionTabTitle falls back to connection label when dynamic title is empty', () => {
   assert.equal(
-    resolveSessionTabTitle({ hostLabel: 'web-01', dynamicTitle: '   ' }, undefined),
+    resolveSessionTabTitle({ hostLabel: 'web-01', dynamicTitle: '   ' }),
     'web-01',
   );
 });
@@ -38,34 +65,16 @@ test('resolveSessionTabTitle prefers user customName over dynamic title', () => 
   assert.equal(
     resolveSessionTabTitle(
       { customName: 'Prod deploy', hostLabel: 'web-01', dynamicTitle: 'claude: refactor auth' },
-      undefined,
     ),
     'Prod deploy',
-  );
-});
-
-test('resolveSessionTabTitle honors disableDynamicTabTitle host setting', () => {
-  assert.equal(
-    resolveSessionTabTitle(
-      { hostLabel: 'web-01', dynamicTitle: 'user@host:/var/log' },
-      { disableDynamicTabTitle: true },
-    ),
-    'web-01',
   );
 });
 
 test('resolveSessionTabTitle strips agent spinner prefixes from dynamic titles', () => {
   assert.equal(
     resolveSessionTabTitle(
-      { hostLabel: 'web-01', dynamicTitle: '⠋ Droid' },
-      undefined,
+      { hostLabel: 'web-01', dynamicTitle: '⠋ Droid', codingCliProviderId: 'droid' },
     ),
     'Droid',
   );
-});
-
-test('isDynamicTabTitleDisabled is false unless explicitly enabled', () => {
-  assert.equal(isDynamicTabTitleDisabled(undefined), false);
-  assert.equal(isDynamicTabTitleDisabled({}), false);
-  assert.equal(isDynamicTabTitleDisabled({ disableDynamicTabTitle: true }), true);
 });

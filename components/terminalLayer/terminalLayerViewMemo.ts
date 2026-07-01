@@ -94,6 +94,18 @@ function activeWorkspaceEqual(a: any, b: any): boolean {
     && workspaceNodeEqual(a.root, b.root);
 }
 
+function terminalThemeEqual(prev: Ctx, next: Ctx, key: string): boolean {
+  if (key !== 'terminalTheme') return prev[key] === next[key];
+  const a = prev.terminalTheme;
+  const b = next.terminalTheme;
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return a.id === b.id
+    && a.colors.background === b.colors.background
+    && a.colors.foreground === b.colors.foreground
+    && a.colors.cursor === b.colors.cursor;
+}
+
 function workspaceCtxKeyEqual(prev: Ctx, next: Ctx, key: string): boolean {
   if (key === 'computeSplitHint' || key === 'handleWorkspaceDrop') {
     if (!prev.draggingSessionId && !next.draggingSessionId) return true;
@@ -107,17 +119,71 @@ function workspaceCtxKeyEqual(prev: Ctx, next: Ctx, key: string): boolean {
   if (key === 'activeResizers') {
     return resizerHandlesEqual(prev.activeResizers, next.activeResizers);
   }
-  return prev[key] === next[key];
-}
-
-function sidePanelCtxKeyEqual(prev: Ctx, next: Ctx, key: string): boolean {
-  if (key === 'activeWorkspace') {
-    return activeWorkspaceEqual(prev.activeWorkspace, next.activeWorkspace);
+  if (key === 'terminalTheme') {
+    return terminalThemeEqual(prev, next, key);
   }
   return prev[key] === next[key];
 }
 
-const SIDE_PANEL_CTX_KEYS = [
+function scriptRunsEqual(a: any, b: any): boolean {
+  if (a === b) return true;
+  if (!Array.isArray(a) || !Array.isArray(b)) return false;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    const prevRun = a[i];
+    const nextRun = b[i];
+    if (prevRun === nextRun) continue;
+    if (!prevRun || !nextRun) return false;
+    if (
+      prevRun.runId !== nextRun.runId
+      || prevRun.status !== nextRun.status
+      || prevRun.stepIndex !== nextRun.stepIndex
+      || prevRun.waitingFor !== nextRun.waitingFor
+      || prevRun.error !== nextRun.error
+      || prevRun.logs?.length !== nextRun.logs?.length
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function sidePanelCtxKeyEqual(prev: Ctx, next: Ctx, key: string): boolean {
+  if (key === 'scriptRuns') {
+    return scriptRunsEqual(prev.scriptRuns, next.scriptRuns);
+  }
+  if (key === 'activeWorkspace') {
+    return activeWorkspaceEqual(prev.activeWorkspace, next.activeWorkspace);
+  }
+  if (key === 'terminalTheme') {
+    return terminalThemeEqual(prev, next, key);
+  }
+  return prev[key] === next[key];
+}
+
+const SIDE_PANEL_LIVE_CTX_KEYS = [
+  'activeTerminalSessionForSystem',
+  'activeSystemSessionHost',
+  'focusedHost',
+  'focusedSessionId',
+  'historySessionId',
+  'scriptRuns',
+  'resolvedPreviewTheme',
+  'previewedOrVisibleThemeId',
+  'sftpActiveHost',
+  'activeTerminalSessionIdForSftp',
+  'activeTerminalCwd',
+  'activeWorkspace',
+  'focusedFontFamilyId',
+  'focusedFontFamilyOverridden',
+  'focusedFontSize',
+  'focusedFontSizeOverridden',
+  'focusedFontWeight',
+  'focusedFontWeightOverridden',
+  'focusedThemeOverridden',
+] as const;
+
+const SIDE_PANEL_STABLE_CTX_KEYS = [
   'mountedSftpTabIds',
   'mountedAiTabIds',
   'notesMountedTabIds',
@@ -125,10 +191,6 @@ const SIDE_PANEL_CTX_KEYS = [
   'scriptsMountedTabIds',
   'systemMountedTabIds',
   'themeMountedTabIds',
-  'activeTerminalSessionForSystem',
-  'activeSystemSessionHost',
-  'focusedHost',
-  'historySessionId',
   'remoteHistory',
   'shellHistory',
   'handleHistoryPaste',
@@ -139,12 +201,7 @@ const SIDE_PANEL_CTX_KEYS = [
   'sidePanelWidth',
   'sidePanelPosition',
   'sidePanelOpenTabs',
-  'resolvedPreviewTheme',
-  'sftpActiveHost',
   'sftpHostForTab',
-  'activeTerminalSessionIdForSftp',
-  'activeTerminalCwd',
-  'activeWorkspace',
   'effectiveHosts',
   'hosts',
   'keys',
@@ -155,6 +212,7 @@ const SIDE_PANEL_CTX_KEYS = [
   'sftpDefaultViewMode',
   'sftpInitialLocationForTab',
   'sftpPendingUploadsForTab',
+  'handleSftpCurrentPathChange',
   'sftpDoubleClickBehavior',
   'sftpAutoSync',
   'sftpShowHiddenFiles',
@@ -171,17 +229,16 @@ const SIDE_PANEL_CTX_KEYS = [
   'snippets',
   'snippetPackages',
   'handleSnippetFromPanel',
+  'handleRunScriptFromPanel',
+  'handleRunScriptOnWorkspace',
+  'handleStartRecordingFromPanel',
+  'handleStopScriptRun',
+  'handlePauseScriptRun',
+  'handleResumeScriptRun',
   'followAppTerminalTheme',
-  'previewedOrVisibleThemeId',
   'terminalTheme',
+  'terminalThemeId',
   'terminalFontFamilyId',
-  'focusedFontFamilyId',
-  'focusedFontFamilyOverridden',
-  'focusedFontSize',
-  'focusedFontSizeOverridden',
-  'focusedFontWeight',
-  'focusedFontWeightOverridden',
-  'focusedThemeOverridden',
   'handleThemeChangeForFocusedSession',
   'handleThemeResetForFocusedSession',
   'handleFontFamilyChangeForFocusedSession',
@@ -215,6 +272,10 @@ const SIDE_PANEL_CTX_KEYS = [
   'noteGroups',
   'updateNotes',
   'updateNoteGroups',
+  'onOpenVaultNoteFromChat',
+  'onOpenVaultHostFromChat',
+  'onOpenVaultSectionFromChat',
+  'onOpenVaultSnippetFromChat',
   't',
 ] as const;
 
@@ -238,7 +299,8 @@ const WORKSPACE_CTX_KEYS = [
   'workspaceBroadcastHandlersRef',
   'splitHorizontalHandlersRef',
   'splitVerticalHandlersRef',
-  'themePreview',
+  'resolveSessionAppearance',
+  'hostMap',
   'keys',
   'identities',
   'snippets',
@@ -265,6 +327,7 @@ const WORKSPACE_CTX_KEYS = [
   'handleTerminalTitleChange',
   'handleTerminalBell',
   'handleTerminalOutput',
+  'handleTerminalContextReaderChange',
   'handleOpenScripts',
   'handleOpenHistory',
   'handleOpenSystem',
@@ -282,6 +345,7 @@ const WORKSPACE_CTX_KEYS = [
   'onSplitSession',
   'isBroadcastEnabled',
   'handleBroadcastInput',
+  'handleBroadcastInterruptPriorityChange',
   'handleToggleWorkspaceComposeBar',
   'handleSnippetExecutorChange',
   'handleProgrammaticCommandLogRewriteChange',
@@ -306,8 +370,16 @@ const WORKSPACE_CTX_KEYS = [
   'onEndSessionDrag',
 ] as const;
 
+export function terminalLayerSidePanelStableCtxEqual(prev: Ctx, next: Ctx): boolean {
+  for (const key of SIDE_PANEL_STABLE_CTX_KEYS as unknown as string[]) {
+    if (!sidePanelCtxKeyEqual(prev, next, key)) return false;
+  }
+  return true;
+}
+
 export function terminalLayerSidePanelCtxEqual(prev: Ctx, next: Ctx): boolean {
-  for (const key of SIDE_PANEL_CTX_KEYS as unknown as string[]) {
+  if (!terminalLayerSidePanelStableCtxEqual(prev, next)) return false;
+  for (const key of SIDE_PANEL_LIVE_CTX_KEYS as unknown as string[]) {
     if (!sidePanelCtxKeyEqual(prev, next, key)) return false;
   }
   return true;
@@ -354,6 +426,7 @@ export function terminalLayerFocusSidebarPropsEqual(prev: Ctx, next: Ctx): boole
     && eq(prev, next, 'resolvedPreviewTheme')
     && eq(prev, next, 'sessionHostsMap')
     && eq(prev, next, 'sessions')
+    && prev.terminalSettings?.dynamicTabTitleMode === next.terminalSettings?.dynamicTabTitleMode
     && eq(prev, next, 't')
     && eq(prev, next, 'onReorderWorkspaceSessions')
     && eq(prev, next, 'onRequestAddToWorkspace')

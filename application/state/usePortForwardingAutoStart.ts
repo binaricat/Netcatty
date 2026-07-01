@@ -4,7 +4,7 @@
  * when the application starts, not when the user navigates to the port forwarding page.
  */
 import { useCallback, useEffect, useRef } from "react";
-import { GroupConfig, Host, Identity, PortForwardingRule, ProxyProfile, SSHKey } from "../../domain/models";
+import { GroupConfig, Host, Identity, KnownHost, PortForwardingRule, ProxyProfile, SSHKey } from "../../domain/models";
 import { resolveGroupDefaults, applyGroupDefaults } from "../../domain/groupConfig";
 import { materializeHostProxyProfile } from "../../domain/proxyProfiles";
 import { STORAGE_KEY_PORT_FORWARDING } from "../../infrastructure/config/storageKeys";
@@ -25,6 +25,7 @@ export interface UsePortForwardingAutoStartOptions {
   identities: Identity[];
   proxyProfiles: ProxyProfile[];
   groupConfigs: GroupConfig[];
+  knownHosts?: KnownHost[];
   terminalSettings?: { keepaliveInterval: number; keepaliveCountMax: number };
 }
 
@@ -106,6 +107,7 @@ export const usePortForwardingAutoStart = ({
   identities,
   proxyProfiles,
   groupConfigs,
+  knownHosts = [],
   terminalSettings,
 }: UsePortForwardingAutoStartOptions): void => {
   const autoStartExecutedRef = useRef(false);
@@ -114,6 +116,7 @@ export const usePortForwardingAutoStart = ({
   const identitiesRef = useRef<Identity[]>(identities);
   const proxyProfilesRef = useRef<ProxyProfile[]>(proxyProfiles);
   const groupConfigsRef = useRef<GroupConfig[]>(groupConfigs);
+  const knownHostsRef = useRef<KnownHost[]>(knownHosts);
   const terminalSettingsRef = useRef(terminalSettings);
   terminalSettingsRef.current = terminalSettings;
 
@@ -162,6 +165,10 @@ export const usePortForwardingAutoStart = ({
   useEffect(() => {
     groupConfigsRef.current = groupConfigs;
   }, [groupConfigs]);
+
+  useEffect(() => {
+    knownHostsRef.current = knownHosts;
+  }, [knownHosts]);
 
   const resolveEffectiveHost = useCallback((host: Host): Host => {
     const validProxyProfileIds: ReadonlySet<string> = new Set(proxyProfilesRef.current.map((profile) => profile.id));
@@ -245,7 +252,7 @@ export const usePortForwardingAutoStart = ({
       }
 
       const host = resolveEffectiveHost(rawHost);
-      return startPortForward(rule, host, resolveEffectiveHosts(hostsRef.current), keysRef.current, identitiesRef.current, onStatusChange, true, terminalSettingsRef.current);
+      return startPortForward(rule, host, resolveEffectiveHosts(hostsRef.current), keysRef.current, identitiesRef.current, onStatusChange, true, terminalSettingsRef.current, knownHostsRef.current);
     };
 
     setReconnectCallback(handleReconnect);
@@ -316,6 +323,7 @@ export const usePortForwardingAutoStart = ({
           // re-trigger the auto-start effect (its dep array is intentionally
           // stable to fire once on vault init).
           terminalSettingsRef.current,
+          knownHostsRef.current,
         );
       }
     };
@@ -329,6 +337,7 @@ export const usePortForwardingAutoStart = ({
     isHostAuthReady,
     isVaultInitialized,
     keys,
+    knownHosts,
     proxyProfiles,
     resolveEffectiveHost,
     resolveEffectiveHosts,

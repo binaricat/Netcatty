@@ -2,7 +2,7 @@
  * Terminal Toolbar
  * Displays high-frequency terminal actions and close button in the terminal status bar.
  */
-import { Check, ChevronRight, Download, FolderInput, FolderSync, History, Languages, MoreVertical, X, Zap, Palette, Search, TextCursorInput, Upload } from 'lucide-react';
+import { Check, ChevronRight, Download, FileText, FolderInput, FolderSync, History, Languages, MoreVertical, X, Zap, Palette, Search, TextCursorInput, Upload, Circle } from 'lucide-react';
 import React, { useState } from 'react';
 import { useI18n } from '../../application/i18n/I18nProvider';
 import { Host, Snippet } from '../../types';
@@ -34,12 +34,19 @@ export interface TerminalToolbarProps {
     // Search functionality
     isSearchOpen?: boolean;
     onToggleSearch?: () => void;
+    // Manual session log
+    showLogButton?: boolean;
+    onToggleSessionLog?: () => void;
+    isSessionLogging?: boolean;
+    isSessionLogDisabled?: boolean;
     // Compose bar
     isComposeBarOpen?: boolean;
     onToggleComposeBar?: () => void;
     // Terminal encoding
     terminalEncoding?: 'utf-8' | 'gb18030';
     onSetTerminalEncoding?: (encoding: 'utf-8' | 'gb18030') => void;
+    recordingIndicator?: React.ReactNode;
+    onStartRecording?: () => void;
 }
 
 export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
@@ -61,10 +68,16 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
     onClose,
     isSearchOpen,
     onToggleSearch,
+    showLogButton = false,
+    onToggleSessionLog,
+    isSessionLogging = false,
+    isSessionLogDisabled = false,
     isComposeBarOpen,
     onToggleComposeBar,
     terminalEncoding,
     onSetTerminalEncoding,
+    recordingIndicator,
+    onStartRecording,
 }) => {
     const { t } = useI18n();
     const [highlightPopoverOpen, setHighlightPopoverOpen] = useState(false);
@@ -275,6 +288,29 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
                 <TooltipContent>{t("terminal.toolbar.searchTerminal")}</TooltipContent>
             </Tooltip>
 
+            {showLogButton && (
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <Button
+                            type="button"
+                            variant="secondary"
+                            size="icon"
+                            className={cn(buttonBase, isSessionLogDisabled && "opacity-50")}
+                            aria-label={isSessionLogging ? t("terminal.toolbar.stopSessionLog") : t("terminal.toolbar.startSessionLog")}
+                            aria-pressed={isSessionLogging}
+                            onClick={onToggleSessionLog}
+                            disabled={isSessionLogDisabled || !onToggleSessionLog}
+                            style={isSessionLogging ? activeButtonStyle : undefined}
+                        >
+                            <FileText size={12} />
+                        </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                        {isSessionLogging ? t("terminal.toolbar.stopSessionLog") : t("terminal.toolbar.startSessionLog")}
+                    </TooltipContent>
+                </Tooltip>
+            )}
+
             <Tooltip>
                 <TooltipTrigger asChild>
                     <Button
@@ -367,6 +403,14 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
                             <span className="flex-1 text-left truncate">{t("terminal.toolbar.terminalSettings")}</span>
                         </button>
                     </PopoverClose>
+                    {onStartRecording && status === 'connected' && !recordingIndicator ? (
+                        <PopoverClose asChild>
+                            <button type="button" className={menuItemClass} onClick={onStartRecording}>
+                                <Circle size={12} className="shrink-0 text-red-500" />
+                                <span className="flex-1 text-left truncate">{t('scripts.recording.start')}</span>
+                            </button>
+                        </PopoverClose>
+                    ) : null}
                     {encodingSwitchSupported && onSetTerminalEncoding && (
                         <Popover open={encodingSubmenuOpen} onOpenChange={setEncodingSubmenuOpen}>
                             <PopoverTrigger asChild>
@@ -420,6 +464,8 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
                     )}
                 </PopoverContent>
             </Popover>
+
+            {recordingIndicator}
 
             {showClose && onClose && (
                 <Tooltip>

@@ -31,6 +31,8 @@ const baseProps = {
   sftpShowHiddenFiles: false,
   sftpUseCompressedUpload: false,
   sftpAutoOpenSidebar: false,
+  terminalSidePanelAutoOpen: false,
+  terminalSidePanelAutoOpenTab: "scripts",
   sftpFollowTerminalCwd: false,
   setSftpFollowTerminalCwd: () => {},
   editorWordWrap: false,
@@ -114,6 +116,24 @@ test("TerminalLayer re-renders when broadcast state changes", () => {
     terminalLayerAreEqual(
       baseProps as never,
       { ...baseProps, isBroadcastEnabled: () => true } as never,
+    ),
+    false,
+  );
+});
+
+test("TerminalLayer re-renders when terminal side panel auto-open settings change", () => {
+  assert.equal(
+    terminalLayerAreEqual(
+      baseProps as never,
+      { ...baseProps, terminalSidePanelAutoOpen: true } as never,
+    ),
+    false,
+  );
+
+  assert.equal(
+    terminalLayerAreEqual(
+      baseProps as never,
+      { ...baseProps, terminalSidePanelAutoOpenTab: "history" } as never,
     ),
     false,
   );

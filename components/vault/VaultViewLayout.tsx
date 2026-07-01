@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import React from "react";
 import { preserveConcurrentHostLineTimestampUpdate } from "../../domain/host";
+import { STORAGE_KEY_VAULT_HOST_PANEL_WIDTH } from "@/infrastructure/config/storageKeys.ts";
 import { VaultHostListSection } from "./VaultHostListSection";
 import {
   VaultHeaderSearch,
@@ -18,8 +19,15 @@ const VaultSectionLoading = () => (
 
 export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
   const { Activity, allGroupPaths, allTags, AppLogo, Array, Badge, BookMarked, Boolean, Button, cancelInlineGroupEdit, CheckSquare, ChevronDown, clearHostSelection, ClipboardCopy, Clock, cn, commitInlineGroupRename, connectionLogs, connectSelectedHosts, ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger, Copy, currentSection, customGroups, deleteGroupPath, deleteGroupWithHosts, deleteSelectedHosts, deleteTargetPath, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, displayedGroups, displayedHosts, DistroAvatar, Download, Dropdown, DropdownContent, DropdownTrigger, Edit2, editingGroupPath, editingHost, editingHostGroupDefaults, FileCode, FileSymlink, FolderPlus, FolderTree, getDropTargetClasses, getEffectiveHostDistro, Globe, groupConfigs, GroupDetailsPanel, groupedDisplayHosts, handleConnectClick, handleCopyCredentials, handleDeleteTag, handleDuplicateHost, handleEditGroupConfig, handleEditHost, handleEditTag, handleExportHosts, handleHostConnect, handleImportFileSelected, handleNewHost, handleProtocolSelect, handleQuickConnect, handleQuickConnectSaveHost, handleSaveGroupConfig, handleSearchKeyDown, handleUnmanageGroup, handleSidebarWidthCommit, hasHostsSidePanel, HostDetailsPanel, hostListScrollRef, hosts, HostTreeView, hotkeyScheme, identities, ImportVaultDialog, Input, isDeleteGroupOpen, isGroupPanelOpen, isHostPanelOpen, isHostsSectionActive, isImportOpen, isMultiSelectMode, isNewFolderOpen, isQuickConnectOpen, isRenameGroupOpen, isSearchQuickConnect, isSerialModalOpen, Key, keyBindings, KeychainManager, keys, knownHostsManagerElement, Label, lastPinnedId, LayoutGrid, LazyConnectionLogsManager, LazyProtocolSelectDialog, List, managedGroupPaths, managedSources, moveGroup, moveHostToGroup, Network, newFolderName, newHostGroupPath, onClearUnsavedConnectionLogs, onConnectSerial, onCreateLocalTerminal, onDeleteConnectionLog, onDeleteHost, onImportOrReuseKey, onOpenLogView, onOpenSettings, onRunSnippet, onToggleConnectionLogSaved, onUpdateCustomGroups, onUpdateGroupConfigs, onUpdateHosts, onUpdateIdentities, onUpdateKeys, onUpdateProxyProfiles, onUpdateSnippetPackages, onUpdateSnippets, Pin, pinnedHosts, pinnedRecentIds, Plug, Plus, PortForwarding, protocolSelectHost, proxyProfiles, ProxyProfilesManager, quickConnectTarget, quickConnectWarnings, QuickConnectWizard, recentHosts, renameGroupError, renameGroupName, renameTargetPath, reorderGroup, reorderHost, RippleButton, rootRef, sanitizeHost, search, selectedGroupPath, selectedHostIds, selectedTags, SerialConnectModal, SerialHostDetailsPanel, sessionCount, Set, setCurrentSection, setDeleteGroupWithHosts, setDeleteTargetPath, setDragOverDropTarget, setEditingGroupPath, setEditingHost, setGroupDragOverDropTarget, setIsDeleteGroupOpen, setIsGroupPanelOpen, setIsHostPanelOpen, setIsImportOpen, setIsMultiSelectMode, setIsNewFolderOpen, setIsQuickConnectOpen, setIsRenameGroupOpen, setIsSerialModalOpen, setLastPinnedId, setNewFolderName, setNewHostGroupPath, setProtocolSelectHost, setQuickConnectTarget, setQuickConnectWarnings, setRenameGroupError, setRenameGroupName, setRenameTargetPath, setSearch, setSelectedGroupPath, setSelectedHostIds, setSelectedTags, setSidebarCollapsed, setSidebarWidth, setSortMode, setTargetParentPath, Settings, setViewMode, shellHistory, shouldHideEmptyRootHostsSection, showRecentHosts, sidebarCollapsed, sidebarWidth, snippetPackages, snippets, SnippetsManager, SortDropdown, sortMode, splitViewGridStyle, Square, Star, startInlineDeleteGroup, startInlineNewGroup, startInlineRenameGroup, submitNewFolder, submitRenameGroup, Suspense, t, TagFilterDropdown, targetParentPath, terminalFontSize, terminalSettings, TerminalSquare, terminalThemeId, toggleHostPinned, toggleHostSelection, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger, Trash2, treeExpandedState, treeViewGroupTree, treeViewHosts, Upload, upsertHostById, Usb, viewMode, visibleDisplayedHosts, X, Zap } = ctx;
-  const { noteGroups, NotebookText, notes, NotesManager, onOpenHostFromNote, onUpdateNoteGroups, onUpdateNotes } = ctx;
+  const { knownHosts, noteGroups, NotebookText, notes, NotesManager, onOpenHostFromNote, onOpenNoteIdHandled, onOpenSnippetIdHandled, onUpdateNoteGroups, onUpdateNotes, openNoteId, openSnippetId } = ctx;
+  const vaultHostPanelResizeProps = {
+    resizable: true as const,
+    persistWidthStorageKey: STORAGE_KEY_VAULT_HOST_PANEL_WIDTH,
+    resizeAriaLabel: t("vault.panel.resizeWidth"),
+  };
   const [isSidebarResizing, setIsSidebarResizing] = React.useState(false);
+  const newHostActionsRef = React.useRef<HTMLDivElement>(null);
+  const sessionActionsRef = React.useRef<HTMLDivElement>(null);
   const sidebarMinWidth = 56;
   const sidebarMaxWidth = 320;
   const effectiveSidebarWidth = Math.max(
@@ -61,6 +69,19 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
     window.addEventListener("pointerup", handlePointerUp);
     window.addEventListener("pointercancel", handlePointerUp);
   }, [effectiveSidebarWidth, handleSidebarWidthCommit, setSidebarWidth]);
+
+  React.useEffect(() => {
+    if (!isHostPanelOpen) return;
+    const activeElement = document.activeElement;
+    if (!(activeElement instanceof HTMLElement)) return;
+    if (
+      newHostActionsRef.current?.contains(activeElement)
+      || sessionActionsRef.current?.contains(activeElement)
+    ) {
+      activeElement.blur();
+    }
+  }, [isHostPanelOpen]);
+
   return (
     <div ref={rootRef} className="absolute inset-0 min-h-0 flex bg-secondary" data-section="vault-view">
       {/* Sidebar */}
@@ -192,10 +213,10 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
                   }}
                 >
                   <FileCode size={16} className="flex-shrink-0" />
-                  {!sidebarCollapsed && t("vault.nav.snippets")}
+                  {!sidebarCollapsed && t("vault.nav.scripts")}
                 </RippleButton>
               </TooltipTrigger>
-              {sidebarCollapsed && <TooltipContent side="right">{t("vault.nav.snippets")}</TooltipContent>}
+              {sidebarCollapsed && <TooltipContent side="right">{t("vault.nav.scripts")}</TooltipContent>}
             </Tooltip>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -405,13 +426,15 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
                 host details / new-host aside panel is open, since the button
                 would be a no-op in that state. */}
             <div
+              ref={newHostActionsRef}
               className={cn(
                 "flex items-center app-no-drag overflow-hidden transition-[max-width,opacity,margin] duration-200 ease-in-out",
                 isHostPanelOpen
                   ? "max-w-0 opacity-0 -ml-2 pointer-events-none"
                   : "max-w-[260px] opacity-100",
               )}
-              aria-hidden={isHostPanelOpen}
+              aria-hidden={isHostPanelOpen ? true : undefined}
+              inert={isHostPanelOpen ? true : undefined}
             >
               <Dropdown>
                 <div className="flex items-center rounded-md bg-primary text-primary-foreground">
@@ -468,13 +491,15 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
                 the host details / new-host aside panel is open, freeing
                 horizontal space for the panel. */}
             <div
+              ref={sessionActionsRef}
               className={cn(
                 "flex items-center gap-3 overflow-hidden transition-[max-width,opacity,margin] duration-200 ease-in-out",
                 isHostPanelOpen
                   ? "max-w-0 opacity-0 -ml-3 pointer-events-none"
                   : "max-w-[320px] opacity-100",
               )}
-              aria-hidden={isHostPanelOpen}
+              aria-hidden={isHostPanelOpen ? true : undefined}
+              inert={isHostPanelOpen ? true : undefined}
             >
               <Button
                 size="sm"
@@ -560,6 +585,7 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
         {currentSection === "snippets" && (
           <LazyLoadBoundary name="Snippets" resetKey="snippets">
             <Suspense fallback={<VaultSectionLoading />}>
+              <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
               <SnippetsManager
                 snippets={snippets}
                 packages={snippetPackages}
@@ -585,12 +611,16 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
                 proxyProfiles={proxyProfiles}
                 managedSources={managedSources}
                 onSaveHost={(host) => onUpdateHosts([...hosts, host])}
+                onUpdateHosts={onUpdateHosts}
                 onCreateGroup={(groupPath) =>
                   onUpdateCustomGroups(
                     Array.from(new Set([...customGroups, groupPath])),
                   )
                 }
+                openSnippetId={openSnippetId ?? null}
+                onOpenSnippetIdHandled={onOpenSnippetIdHandled}
               />
+              </div>
             </Suspense>
           </LazyLoadBoundary>
         )}
@@ -604,6 +634,8 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
             hosts={hosts}
             onUpdateNotes={onUpdateNotes}
             onUpdateNoteGroups={onUpdateNoteGroups}
+            openNoteId={openNoteId ?? null}
+            onOpenNoteIdHandled={onOpenNoteIdHandled}
             onOpenHost={(host: any, source: any) => {
               if (source?.noteId && onOpenHostFromNote) {
                 onOpenHostFromNote(host, source);
@@ -670,6 +702,7 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
                 proxyProfiles={proxyProfiles}
                 hosts={hosts}
                 groupConfigs={groupConfigs}
+                identities={identities}
                 onUpdateProxyProfiles={onUpdateProxyProfiles}
                 onUpdateHosts={onUpdateHosts}
                 onUpdateGroupConfigs={onUpdateGroupConfigs}
@@ -684,6 +717,7 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
               hosts={hosts}
               keys={keys}
               identities={identities}
+              knownHosts={knownHosts}
               proxyProfiles={proxyProfiles}
               customGroups={customGroups}
               managedSources={managedSources}
@@ -744,6 +778,7 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
             setEditingGroupPath(null);
           }}
           layout="inline"
+          {...vaultHostPanelResizeProps}
         />
       )}
 
@@ -763,6 +798,8 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
           terminalFontSize={terminalFontSize}
           groupDefaults={editingHostGroupDefaults}
           groupConfigs={groupConfigs}
+          snippets={snippets}
+          onSnippetsChange={onUpdateSnippets}
           onImportKey={onImportOrReuseKey}
           onSave={(host) => {
             const latestHost = hosts.find((entry: { id: string }) => entry.id === host.id);
@@ -787,6 +824,7 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
             );
           }}
           layout="inline"
+          {...vaultHostPanelResizeProps}
         />
       )}
 
@@ -808,6 +846,7 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
             setNewHostGroupPath(null);
           }}
           layout="inline"
+          {...vaultHostPanelResizeProps}
         />
       )}
         </div>

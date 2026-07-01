@@ -6,7 +6,7 @@ import { Plus,X } from 'lucide-react';
 import React from 'react';
 import { useI18n } from '../../application/i18n/I18nProvider';
 import { EnvVar } from '../../types';
-import { AsidePanel,AsidePanelContent,type AsidePanelLayout } from '../ui/aside-panel';
+import { AsidePanel,AsidePanelContent,type AsidePanelLayout,type AsidePanelResizeProps } from '../ui/aside-panel';
 import { Button } from '../ui/button';
 import { Card } from '../ui/card';
 import { Input } from '../ui/input';
@@ -28,7 +28,9 @@ export interface EnvVarsPanelProps {
     layout?: AsidePanelLayout;
 }
 
-export const EnvVarsPanel: React.FC<EnvVarsPanelProps> = ({
+export type EnvVarsPanelPropsWithResize = EnvVarsPanelProps & AsidePanelResizeProps;
+
+export const EnvVarsPanel: React.FC<EnvVarsPanelPropsWithResize> = ({
     hostLabel,
     hostHostname,
     environmentVariables,
@@ -43,6 +45,9 @@ export const EnvVarsPanel: React.FC<EnvVarsPanelProps> = ({
     onBack,
     onCancel,
     layout = 'overlay',
+    resizable,
+    persistWidthStorageKey,
+    resizeAriaLabel,
 }) => {
     const { t } = useI18n();
     return (
@@ -53,6 +58,9 @@ export const EnvVarsPanel: React.FC<EnvVarsPanelProps> = ({
             showBackButton={true}
             onBack={onBack}
             layout={layout}
+            resizable={resizable}
+            persistWidthStorageKey={persistWidthStorageKey}
+            resizeAriaLabel={resizeAriaLabel}
             actions={
                 <Button size="sm" onClick={onSave}>
                     {t('common.save')}

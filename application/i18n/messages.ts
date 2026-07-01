@@ -1,5 +1,6 @@
 import en, { type Messages } from './locales/en';
 import zhCN from './locales/zh-CN';
+import zhTW from './locales/zh-TW';
 import ru from './locales/ru';
 
 // Keep keys stable; add new locales by adding another import and map entry.
@@ -9,5 +10,6 @@ export const MESSAGES_BY_LOCALE: Record<string, Messages> = {
   en,
   ru,
   'zh-CN': zhCN,
+  'zh-TW': zhTW,
 };
 

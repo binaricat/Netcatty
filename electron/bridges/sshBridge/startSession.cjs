@@ -1,4 +1,22 @@
 /* eslint-disable no-undef */
+const { emitTerminalSessionData } = require("../emitTerminalSessionData.cjs");
+const {
+  setBufferedOutputBytes,
+  shouldAcceptSessionOutput,
+  shouldProcessSessionOutput,
+} = require("../terminalFlowAck.cjs");
+const {
+  filterTerminalInterruptOutput,
+  takePendingInterruptOutputMeta,
+} = require("../terminalInterruptOutputGate.cjs");
+const {
+  logTerminalInterruptDrainDropSample,
+  logTerminalOutputDropSample,
+} = require("../terminalInterruptDiagnostics.cjs");
+
+const SSH_TCP_CONNECT_TIMEOUT_MS = 20000;
+const SSH_AUTH_READY_TIMEOUT_MS = 120000;
+
 function createStartSessionApi(ctx) {
   with (ctx) {
     /**
@@ -61,8 +79,11 @@ function createStartSessionApi(ctx) {
           port: options.port || 22,
           username: options.username || 'root',
         },
+        cols: options.cols || 80,
+        rows: options.rows || 24,
       };
       sessions.set(sessionId, session);
+      openTerminalOutputSession?.(sessionId, event.sender);
 
       // Attach the shared connection descriptor to this session. The caller owns
       // the reference *count*: the fresh-connection path calls createConnectionRef
@@ -93,19 +114,59 @@ function createStartSessionApi(ctx) {
       // event-loop turn (see ptyOutputBuffer) rather than on a fixed timer,
       // so interactive echo isn't held back by the batch interval. A size
       // cap still forces an immediate flush for bursts of output.
-      const { bufferData, flush: flushBuffer } = createPtyOutputBuffer((data) => {
+      const {
+        bufferData,
+        flushPaced: flushBufferPaced,
+        takePendingEntry: takePendingBuffer,
+        discard: discardBuffer,
+      } = createPtyOutputBuffer((data, meta) => {
         const contents = event.sender;
-        safeSend(contents, "netcatty:data", { sessionId, data });
+        const current = sessions.get(sessionId);
+        emitTerminalSessionData(contents, sessionId, data, {
+          cols: current?.cols,
+          rows: current?.rows,
+          meta,
+        });
+      }, {
+        onPendingBytesChange: (bytes) => {
+          if (sessions.get(sessionId) === session) setBufferedOutputBytes(session, bytes);
+        },
+        shouldAcceptOutput: () => shouldAcceptSessionOutput(sessions.get(sessionId)),
       });
+      session.flushPendingData = flushBufferPaced;
+      session.takePendingData = takePendingBuffer;
+      session.discardPendingData = discardBuffer;
 
       const sshZmodemSentry = createZmodemSentry({
         sessionId,
         onData(buf) {
           const decoder = getSessionDecoder(sessionId, "stdout");
           const decoded = decoder.write(buf);
-          trackSessionIdlePrompt(session, decoded);
-          bufferData(decoded);
-          sessionLogStreamManager.appendData(sessionId, decoded);
+          const output = filterTerminalInterruptOutput(session, decoded);
+          if (!output.accepted) {
+            logTerminalInterruptDrainDropSample(session, {
+              sessionId,
+              stream: "stdout",
+              droppedBytes: output.droppedBytes,
+              reason: output.reason,
+              accepted: false,
+            });
+            return;
+          }
+          if (output.droppedBytes > 0) {
+            logTerminalInterruptDrainDropSample(session, {
+              sessionId,
+              stream: "stdout",
+              droppedBytes: output.droppedBytes,
+              reason: output.reason,
+              accepted: true,
+            });
+          }
+          if (!output.data) return;
+          const outputMeta = takePendingInterruptOutputMeta(session);
+          trackSessionIdlePrompt(session, output.data);
+          bufferData(output.data, outputMeta);
+          sessionLogStreamManager.appendData(sessionId, output.data);
         },
         writeToRemote(buf) {
           try { return stream.write(buf); } catch { return true; /* ignore */ }
@@ -141,22 +202,68 @@ function createStartSessionApi(ctx) {
         getWebContents() {
           return event.sender;
         },
+        selectUploadFiles: selectZmodemUploadFiles
+          ? () => selectZmodemUploadFiles(event.sender.id)
+          : undefined,
+        selectDownloadDirectory: selectZmodemDownloadDirectory
+          ? () => selectZmodemDownloadDirectory(event.sender.id)
+          : undefined,
         label: "SSH",
       });
       session.zmodemSentry = sshZmodemSentry;
 
       stream.on("data", (data) => {
+        const currentSession = sessions.get(sessionId);
+        if (!shouldProcessSessionOutput(currentSession, sshZmodemSentry)) {
+          logTerminalOutputDropSample(currentSession, {
+            sessionId,
+            stream: "stdout",
+            bytes: Buffer.isBuffer(data) ? data.length : Buffer.byteLength(String(data)),
+          });
+          return;
+        }
         // data is Buffer from ssh2 — feed raw bytes to ZMODEM sentry.
         // In normal mode, sentry's onData callback handles decoding and buffering.
         sshZmodemSentry.consume(data);
       });
 
       stream.stderr?.on("data", (data) => {
+        const currentSession = sessions.get(sessionId);
+        if (!shouldProcessSessionOutput(currentSession)) {
+          logTerminalOutputDropSample(currentSession, {
+            sessionId,
+            stream: "stderr",
+            bytes: Buffer.isBuffer(data) ? data.length : Buffer.byteLength(String(data)),
+          });
+          return;
+        }
         // stderr is not used for ZMODEM — decode normally
         const decoder = getSessionDecoder(sessionId, "stderr");
         const decoded = decoder.write(data);
-        bufferData(decoded);
-        sessionLogStreamManager.appendData(sessionId, decoded);
+        const output = filterTerminalInterruptOutput(currentSession, decoded);
+        if (!output.accepted) {
+          logTerminalInterruptDrainDropSample(currentSession, {
+            sessionId,
+            stream: "stderr",
+            droppedBytes: output.droppedBytes,
+            reason: output.reason,
+            accepted: false,
+          });
+          return;
+        }
+        if (output.droppedBytes > 0) {
+          logTerminalInterruptDrainDropSample(currentSession, {
+            sessionId,
+            stream: "stderr",
+            droppedBytes: output.droppedBytes,
+            reason: output.reason,
+            accepted: true,
+          });
+        }
+        if (!output.data) return;
+        const outputMeta = takePendingInterruptOutputMeta(currentSession);
+        bufferData(output.data, outputMeta);
+        sessionLogStreamManager.appendData(sessionId, output.data);
       });
 
       // Capture the real exit code from the remote process.
@@ -173,6 +280,7 @@ function createStartSessionApi(ctx) {
         streamExited = typeof code === "number" && !signal;
       });
 
+      let closeFinalized = false;
       stream.on("close", () => {
         log("shell stream closed", {
           sessionId,
@@ -182,44 +290,47 @@ function createStartSessionApi(ctx) {
           reused: !!isReused,
           transportError: sessions.get(sessionId)?._transportError,
         });
-        // Always flush buffered data regardless of session state.
-        // flushBuffer() cancels any pending scheduled flush internally.
-        flushBuffer();
-        sessionLogStreamManager.stopStream(sessionId, logStreamToken);
-        if (detachX11Forwarding) {
-          detachX11Forwarding();
-          detachX11Forwarding = null;
-        }
-
-        // Only send exit if session hasn't already been cleaned up by
-        // conn.once("close") — which fires before stream.on("close")
-        // in ssh2 when the transport drops.
-        if (sessions.has(sessionId)) {
-          const contents = event.sender;
-          const liveSession = sessions.get(sessionId);
-          const transportError = liveSession?._transportError;
-          if (transportError) {
-            safeSend(contents, "netcatty:exit", { sessionId, exitCode: 1, error: transportError, reason: "error" });
-          } else {
-            // A shell TMOUT auto-logout is a clean exit (numeric code, no
-            // signal) — identical to a user-typed `exit` by code/signal —
-            // so detect it via the banner the shell prints just before
-            // exiting and report it as a timeout. That keeps the tab open
-            // for reconnect instead of auto-closing it (#1062 / #977).
-            const idleTimedOut = streamExited && looksLikeIdleAutoLogout(liveSession?._promptTrackTail);
-            const reason = idleTimedOut ? "timeout" : (streamExited ? "exited" : "closed");
-            safeSend(contents, "netcatty:exit", { sessionId, exitCode: streamExitCode, reason });
+        const finalizeClose = () => {
+          if (closeFinalized) return;
+          closeFinalized = true;
+          sessionLogStreamManager.stopStream(sessionId, logStreamToken);
+          if (detachX11Forwarding) {
+            detachX11Forwarding();
+            detachX11Forwarding = null;
           }
-          liveSession?.zmodemSentry?.cancel();
-          // Release this channel's hold on the shared connection. The transport
-          // (and any jump-host chain) is only ended once the last channel is
-          // gone, so closing a reused tab — or the original tab while a copy is
-          // still open — leaves the siblings connected.
-          releaseConnectionRef(liveSession);
-          sessions.delete(sessionId);
-          sessionEncodings.delete(sessionId);
-          sessionDecoders.delete(sessionId);
-        }
+
+          // Only send exit if session hasn't already been cleaned up by
+          // conn.once("close") — which fires before stream.on("close")
+          // in ssh2 when the transport drops.
+          if (sessions.has(sessionId)) {
+            const contents = event.sender;
+            const liveSession = sessions.get(sessionId);
+            const transportError = liveSession?._transportError;
+            if (transportError) {
+              safeSend(contents, "netcatty:exit", { sessionId, exitCode: 1, error: transportError, reason: "error" });
+            } else {
+              // A shell TMOUT auto-logout is a clean exit (numeric code, no
+              // signal) — identical to a user-typed `exit` by code/signal —
+              // so detect it via the banner the shell prints just before
+              // exiting and report it as a timeout. That keeps the tab open
+              // for reconnect instead of auto-closing it (#1062 / #977).
+              const idleTimedOut = streamExited && looksLikeIdleAutoLogout(liveSession?._promptTrackTail);
+              const reason = idleTimedOut ? "timeout" : (streamExited ? "exited" : "closed");
+              safeSend(contents, "netcatty:exit", { sessionId, exitCode: streamExitCode, reason });
+            }
+            liveSession?.zmodemSentry?.cancel();
+            // Release this channel's hold on the shared connection. The transport
+            // (and any jump-host chain) is only ended once the last channel is
+            // gone, so closing a reused tab — or the original tab while a copy is
+            // still open — leaves the siblings connected.
+            releaseConnectionRef(liveSession);
+            closeTerminalOutputSession?.(sessionId);
+            sessions.delete(sessionId);
+            sessionEncodings.delete(sessionId);
+            sessionDecoders.delete(sessionId);
+          }
+        };
+        flushBufferPaced(finalizeClose);
       });
 
       // Pre-seed encoding from host charset if it's a GB variant. Seed BOTH the
@@ -467,8 +578,10 @@ function createStartSessionApi(ctx) {
           host: options.hostname,
           port: options.port || 22,
           username: options.username || "root",
-          // `readyTimeout` covers the entire connection + authentication flow in ssh2.
-          readyTimeout: 20000, // Fast failure for non-interactive auth
+          // `timeout` covers TCP dial silence; `readyTimeout` covers the full
+          // SSH handshake/auth flow so MFA still has enough time.
+          timeout: SSH_TCP_CONNECT_TIMEOUT_MS,
+          readyTimeout: SSH_AUTH_READY_TIMEOUT_MS,
           // Resolved keepalive (caller decides whether host override or global
           // applies). interval is in seconds; 0 means truly disabled, so
           // countMax also goes to 0 to skip ssh2's dead-connection check.
@@ -496,6 +609,7 @@ function createStartSessionApi(ctx) {
           hostname: options.hostname,
           port: options.port || 22,
           knownHosts: options.knownHosts,
+          verifyHostKeys: options.verifyHostKeys,
         });
 
         // Authentication for final target
@@ -532,6 +646,12 @@ function createStartSessionApi(ctx) {
             hostname: options.hostname,
             initialPassphrase: options.passphrase,
             logPrefix: "[SSH]",
+            onPassphrasePromptShown: () => sendProgress(
+              totalHops, totalHops, options.hostname, "auth-attempt", "waiting for user input...",
+            ),
+            onPassphrasePromptResolved: () => sendProgress(
+              totalHops, totalHops, options.hostname, "auth-attempt", "user responded",
+            ),
             onLoaded: (loaded) => {
               log("Loaded identity file", { keyPath: loaded.keyPath, encrypted: !!loaded.passphrase });
             },
@@ -549,6 +669,12 @@ function createStartSessionApi(ctx) {
             hostname: options.hostname,
             initialPassphrase: effectivePassphrase,
             logPrefix: "[SSH]",
+            onPassphrasePromptShown: () => sendProgress(
+              totalHops, totalHops, options.hostname, "auth-attempt", "waiting for user input...",
+            ),
+            onPassphrasePromptResolved: () => sendProgress(
+              totalHops, totalHops, options.hostname, "auth-attempt", "user responded",
+            ),
           })
           : null;
         const effectivePrivateKey = inlineKey?.privateKey || identityFile?.privateKey;
@@ -601,7 +727,9 @@ function createStartSessionApi(ctx) {
           });
         }
 
-        // If no primary auth method configured, try ssh-agent first, then ALL default keys
+        // If no primary auth method configured, try ssh-agent first, then ALL default keys.
+        // Skip default-key primaries when the user explicitly chose a key (inline or
+        // identityFilePaths) even if loading that key failed (issue #1614).
         if (!connectOpts.privateKey && !connectOpts.password && !connectOpts.agent) {
           // First, try to use ssh-agent if available (this is what regular SSH does)
           const sshAgentSocket = await getAvailableAgentSocket();
@@ -612,12 +740,12 @@ function createStartSessionApi(ctx) {
           }
 
           // Mark that we need to try all default keys (handled in authMethods below)
-          if (allDefaultKeys.length > 0) {
+          if (!hasUserConfiguredKey(options) && allDefaultKeys.length > 0) {
             log("Will try all default SSH keys as fallback", { count: allDefaultKeys.length, keyNames: allDefaultKeys.map(k => k.keyName) });
             // Set first key for connectOpts.privateKey (required for ssh2 to allow publickey auth)
             connectOpts.privateKey = allDefaultKeys[0].privateKey;
             usedDefaultKeyAsPrimary = true;
-          } else {
+          } else if (allDefaultKeys.length === 0) {
             log("No default SSH key found in ~/.ssh directory");
           }
         }
@@ -656,7 +784,7 @@ function createStartSessionApi(ctx) {
           if (connectOpts.password) order.push("password");
           // Add default key fallback if available and no user key configured
           // Must also set connectOpts.privateKey for ssh2 to actually try publickey auth
-          if (defaultKeyInfo && !options.privateKey) {
+          if (defaultKeyInfo && !hasUserConfiguredKey(options)) {
             connectOpts.privateKey = defaultKeyInfo.privateKey;
             order.push("publickey");
           }
@@ -693,7 +821,7 @@ function createStartSessionApi(ctx) {
                 id: `publickey-default-${keyInfo.keyName}`
               });
             }
-          } else if (defaultKeyInfo && !options.privateKey && !usedDefaultKeyAsPrimary) {
+          } else if (defaultKeyInfo && !hasUserConfiguredKey(options) && !usedDefaultKeyAsPrimary) {
             // Single default key fallback (when user has configured other auth methods)
             authMethods.push({ type: "publickey", key: defaultKeyInfo.privateKey, isDefault: true, id: "publickey-default" });
           }
@@ -947,7 +1075,8 @@ function createStartSessionApi(ctx) {
           connectionSocket = await createProxySocket(
             options.proxy,
             options.hostname,
-            options.port || 22
+            options.port || 22,
+            { timeoutMs: SSH_TCP_CONNECT_TIMEOUT_MS }
           );
           connectOpts.sock = connectionSocket;
           delete connectOpts.host;
@@ -986,7 +1115,11 @@ function createStartSessionApi(ctx) {
             }
           };
 
-          conn.once("connect", () => enableSshNoDelay(conn));
+          conn.once("connect", () => {
+            try { conn._sock?.setTimeout?.(0); } catch { }
+            sendProgress(totalHops, totalHops, options.hostname, 'tcp-connected');
+            enableSshNoDelay(conn);
+          });
           if (connectOpts.sock) enableTcpNoDelay(connectOpts.sock);
 
           conn.once("handshake", () => {
@@ -1015,7 +1148,11 @@ function createStartSessionApi(ctx) {
             sendProgress(totalHops, totalHops, options.hostname, 'shell');
 
             const sendTerminalMessage = (data) => {
-              safeSend(event.sender, "netcatty:data", { sessionId, data });
+              const current = sessions.get(sessionId);
+              emitTerminalSessionData(event.sender, sessionId, data, {
+                cols: current?.cols,
+                rows: current?.rows,
+              });
             };
 
             const x11FakeCookie = options.x11Forwarding
@@ -1175,6 +1312,7 @@ function createStartSessionApi(ctx) {
               detachX11Forwarding = null;
             }
             sessions.get(sessionId)?.zmodemSentry?.cancel();
+            closeTerminalOutputSession?.(sessionId);
             sessions.delete(sessionId);
             sessionEncodings.delete(sessionId);
             sessionDecoders.delete(sessionId);
@@ -1195,6 +1333,7 @@ function createStartSessionApi(ctx) {
             safeSend(contents, "netcatty:exit", { sessionId, exitCode: 1, error: err.message, reason: "timeout" });
             sessionLogStreamManager.stopStream(sessionId, ownerLogStreamToken);
             sessions.get(sessionId)?.zmodemSentry?.cancel();
+            closeTerminalOutputSession?.(sessionId);
             sessions.delete(sessionId);
             sessionEncodings.delete(sessionId);
             sessionDecoders.delete(sessionId);
@@ -1240,6 +1379,7 @@ function createStartSessionApi(ctx) {
               // siblings (if any) keep the count above zero until their own
               // stream close handlers run.
               releaseConnectionRef(session);
+              closeTerminalOutputSession?.(sessionId);
               sessions.delete(sessionId);
               sessionEncodings.delete(sessionId);
               sessionDecoders.delete(sessionId);
@@ -1301,9 +1441,6 @@ function createStartSessionApi(ctx) {
           }
           // If authHandler is a function, it already handles keyboard-interactive
 
-          // Increase timeout to allow for keyboard-interactive auth
-          connectOpts.readyTimeout = 120000; // 2 minutes for 2FA input
-
           console.log(`${logPrefix} Connecting to ${options.hostname}...`);
           conn.connect(connectOpts);
         });
@@ -1318,4 +1455,8 @@ function createStartSessionApi(ctx) {
   }
 }
 
-module.exports = { createStartSessionApi };
+module.exports = {
+  SSH_AUTH_READY_TIMEOUT_MS,
+  SSH_TCP_CONNECT_TIMEOUT_MS,
+  createStartSessionApi,
+};

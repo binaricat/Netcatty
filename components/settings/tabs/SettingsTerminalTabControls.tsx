@@ -249,15 +249,18 @@ export const KeywordHighlightRulesEditor: React.FC<{
 // Theme preview button component
 export const ThemePreviewButton: React.FC<{
   theme: (typeof TERMINAL_THEMES)[0];
-  onClick: () => void;
+  onClick?: () => void;
   buttonLabel: string;
-}> = ({ theme, onClick, buttonLabel }) => {
+  disabled?: boolean;
+}> = ({ theme, onClick, buttonLabel, disabled = false }) => {
   const c = theme.colors;
   return (
     <button
       onClick={onClick}
+      disabled={disabled}
       className={cn(
-        "w-full flex items-center gap-4 p-3 rounded-lg border bg-card hover:bg-accent/50 transition-all text-left",
+        "w-full flex items-center gap-4 p-3 rounded-lg border bg-card transition-all text-left",
+        disabled ? "cursor-default" : "hover:bg-accent/50",
       )}
     >
       {/* Theme preview swatch */}
@@ -288,7 +291,7 @@ export const ThemePreviewButton: React.FC<{
       {/* Action button area */}
       <div className="flex items-center gap-2 text-muted-foreground">
         <span className="text-xs">{buttonLabel}</span>
-        <ChevronRight size={16} />
+        {!disabled && <ChevronRight size={16} />}
       </div>
     </button>
   );

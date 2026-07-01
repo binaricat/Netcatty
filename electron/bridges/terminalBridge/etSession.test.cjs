@@ -44,7 +44,7 @@ function makeApi(t, overrides = {}) {
     tempDirBridge,
     createZmodemSentry: () => ({}),
     trackSessionIdlePrompt: () => {},
-    createPtyOutputBuffer: () => ({ bufferData() {}, flush() {} }),
+    createPtyOutputBuffer: () => ({ bufferData() {}, flush() {}, flushPaced() {} }),
     findExecutable: () => "ssh",
     bundledEtClient: () => null,
   });

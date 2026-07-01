@@ -13,10 +13,12 @@ const path = require("node:path");
 const { existsSync } = require("node:fs");
 
 const { toUnpackedAsarPath, getFreshIdlePrompt } = require("./ai/shellUtils.cjs");
+const { appendVaultAgentGuidance } = require("../shared/vaultAgentGuidance.cjs");
 const { execViaPty, startPtyJob, execViaChannel, execViaRawPty } = require("./ai/ptyExec.cjs");
 const { safeSend } = require("./ipcUtils.cjs");
 const { getCliDiscoveryFilePath } = require("../cli/discoveryPath.cjs");
 const sftpBridge = require("./sftpBridge.cjs");
+const portForwardingBridge = require("./portForwardingBridge.cjs");
 const DEFAULT_COMMAND_BLOCKLIST = require("../../lib/commandBlocklist.cjs");
 
 const DEBUG_MCP = process.env.NETCATTY_MCP_DEBUG === "1";
@@ -27,6 +29,7 @@ function debugLog(...args) {
 }
 
 let sessions = null;   // Map<sessionId, { sshClient, stream, pty, proc, conn, ... }>
+let terminalWorkerManager = null;
 let tcpServer = null;
 let tcpPort = null;
 let authToken = null;  // Random token generated when TCP server starts
@@ -54,19 +57,24 @@ let compiledBlocklist = commandBlocklist.map((pattern) => {
 });
 
 // Command timeout in milliseconds (default 60s, synced from user settings)
+const MAX_COMMAND_TIMEOUT_SECONDS = 24 * 60 * 60;
 let commandTimeoutMs = 60000;
 
 // Max iterations for AI agent loops (default 20, synced from user settings)
 let maxIterations = 20;
 
-// Permission mode: 'observer' | 'confirm' | 'autonomous' (synced from user settings)
+// Permission mode: 'observer' | 'confirm' | 'auto' (synced from user settings)
 let permissionMode = "confirm";
+
+// Cached permission grants synced from renderer (confirm-mode memory table)
+let permissionGrantsSnapshot = [];
 
 // Track active PTY executions for cancellation
 const activePtyExecs = new Map(); // marker → { ptyStream, cleanup }
 const cancelledChatSessions = new Set();
 const activeExecChatSessions = new Map(); // chatSessionId -> { sessionId, command, startedAt }
 const backgroundJobs = new Map(); // jobId -> job metadata
+const workerBackgroundJobs = new Map(); // jobId -> { chatSessionId, sessionId }
 const activeSessionExecutions = new Map(); // sessionId -> { kind, startedAt, token }
 const activeSessionSftpOps = new Map(); // opId -> { chatSessionId, cancel }
 const pendingSessionWriteApprovals = new Map(); // sessionId -> method
@@ -96,7 +104,8 @@ function setMainWindowGetter(fn) {
 // after 120s"). Keep the Netcatty-side approval window below that with a small
 // buffer so a stale approval cannot still be accepted after the agent has
 // already timed out and abandoned the call.
-const APPROVAL_TIMEOUT_MS = 110 * 1000; // 110 seconds
+const { MCP_APPROVAL_TIMEOUT_MS } = require("../shared/approvalConstants.cjs");
+const APPROVAL_TIMEOUT_MS = MCP_APPROVAL_TIMEOUT_MS;
 
 function requestApprovalFromRenderer(toolName, args, chatSessionId) {
   return new Promise((resolve) => {
@@ -242,6 +251,7 @@ const {
 
 function init(deps) {
   sessions = deps.sessions;
+  terminalWorkerManager = deps.terminalWorkerManager || null;
   electronModule = deps.electronModule || null;
   cliDiscoveryFilePath = deps.cliDiscoveryFilePath || getCliDiscoveryFilePath();
   debugLog("init", { hasSessions: Boolean(sessions), hasElectron: Boolean(electronModule) });
@@ -334,7 +344,7 @@ function setCommandBlocklist(list) {
 }
 
 function setCommandTimeout(seconds) {
-  commandTimeoutMs = Math.max(1, Math.min(3600, seconds || 60)) * 1000;
+  commandTimeoutMs = Math.max(1, Math.min(MAX_COMMAND_TIMEOUT_SECONDS, seconds || 60)) * 1000;
 }
 
 function getCommandTimeoutMs() {
@@ -350,7 +360,7 @@ function getMaxIterations() {
 }
 
 function setPermissionMode(mode) {
-  if (mode === "observer" || mode === "confirm" || mode === "autonomous") {
+  if (mode === "observer" || mode === "confirm" || mode === "auto") {
     permissionMode = mode;
     writeCliDiscoveryFile();
   }
@@ -435,6 +445,9 @@ function updateSessionMetadata(sessionList, chatSessionId) {
       shellType: s.shellType || "",
       deviceType: s.deviceType || "",
       connected: s.connected !== false,
+      hostId: s.hostId || "",
+      hostChain: Array.isArray(s.hostChain) ? s.hostChain : [],
+      activePortForwards: Array.isArray(s.activePortForwards) ? s.activePortForwards : [],
     });
   }
 
@@ -791,19 +804,43 @@ async function handleMessage(socket, line) {
 
 // ── RPC Dispatch ──
 
-// Methods that modify remote state — blocked in observer mode
-const WRITE_METHODS = new Set([
-  "netcatty/exec",
-  "netcatty/sftp/write",
-  "netcatty/sftp/download",
-  "netcatty/sftp/upload",
-  "netcatty/sftp/mkdir",
-  "netcatty/sftp/delete",
-  "netcatty/sftp/rename",
-  "netcatty/sftp/chmod",
-  "netcatty/jobStart",
-  "netcatty/jobStop",
-]);
+const {
+  evaluateRpcPermission,
+  evaluatePermissionWithGrants,
+  USER_DENIED_MESSAGE,
+} = require("../capabilities/policy.cjs");
+const { CAPABILITY_SURFACES } = require("../capabilities/constants.cjs");
+const { getCapabilityByRpcMethod } = require("../capabilities/registry.cjs");
+const {
+  createCapabilityRpcDispatcher,
+  UNROUTED,
+} = require("./mcpServerBridge/capabilityRpcDispatch.cjs");
+const { buildBuiltinRpcHandlerRegistry } = require("./mcpServerBridge/builtinRpcHandlers.cjs");
+
+let invokeVaultAgentFn = null;
+
+function setVaultAgentInvoker(fn) {
+  invokeVaultAgentFn = typeof fn === "function" ? fn : null;
+}
+
+const dispatchCapabilityRpc = createCapabilityRpcDispatcher({
+  invokeVaultAgent: (...args) => {
+    if (typeof invokeVaultAgentFn !== "function") {
+      return Promise.resolve({ ok: false, error: "Vault agent bridge is unavailable." });
+    }
+    return invokeVaultAgentFn(...args);
+  },
+  evaluatePermissionWithGrants,
+  get permissionMode() {
+    return permissionMode;
+  },
+  get permissionGrantsSnapshot() {
+    return permissionGrantsSnapshot;
+  },
+  isChatSessionCancelled,
+  requestApprovalFromRenderer,
+  USER_DENIED_MESSAGE,
+});
 
 /**
  * Validate that a sessionId is allowed in the current scope.
@@ -831,31 +868,234 @@ function validateSessionScope(sessionId, chatSessionId, explicitScopedIds = null
   return null;
 }
 
-async function dispatch(method, params) {
-  debugLog("dispatch", { method, params, permissionMode });
-  const sessionWriteLockId = (method === "netcatty/exec" || method === "netcatty/jobStart") ? params?.sessionId : null;
-  pruneCompletedBackgroundJobs();
+function isNetworkDeviceLikeMeta(meta) {
+  const protocol = meta?.protocol || "";
+  const isSshOrSerial = protocol === "ssh" || protocol === "serial";
+  return (meta?.deviceType === "network" && isSshOrSerial) || protocol === "serial";
+}
 
-  // Observer mode: block all write operations *except* netcatty/jobStop,
-  // which must remain available so users can interrupt long-running jobs
-  // they started before switching to observer mode (otherwise the job
-  // would hold the per-session lock until it exits on its own).
-  if (permissionMode === "observer" && WRITE_METHODS.has(method) && method !== "netcatty/jobStop") {
-    return { ok: false, error: `Operation denied: permission mode is "observer" (read-only). Change to "confirm" or "autonomous" in Settings → AI → Safety to allow this action.` };
+function buildHostFromMetadata(sessionId, meta) {
+  return {
+    sessionId,
+    hostname: meta.hostname || "",
+    label: meta.label || "",
+    os: meta.os || "",
+    username: meta.username || "",
+    protocol: meta.protocol || "",
+    shellType: meta.shellType || "",
+    deviceType: meta.deviceType || "",
+    connected: meta.connected !== false,
+    hostId: meta.hostId || "",
+    hostChain: Array.isArray(meta.hostChain) ? meta.hostChain : [],
+    activePortForwards: Array.isArray(meta.activePortForwards) ? meta.activePortForwards : [],
+  };
+}
+
+async function handleWorkerTerminalExec(params = {}) {
+  const { sessionId, command } = params;
+  if (!sessionId || !command) throw new Error("sessionId and command are required");
+  if (typeof command !== "string" || !command.trim()) {
+    return { ok: false, error: "Invalid command", exitCode: 1 };
+  }
+  if (!terminalWorkerManager?.request) {
+    return { ok: false, error: "Session not found" };
   }
 
-  if (WRITE_METHODS.has(method) && !params?.chatSessionId) {
+  const chatSessionId = params?.chatSessionId || null;
+  const meta = getSessionMeta(sessionId, chatSessionId) || {};
+  if (!isNetworkDeviceLikeMeta(meta)) {
+    const safety = checkCommandSafety(command);
+    if (safety.blocked) {
+      return { ok: false, error: `Command blocked by safety policy. Pattern: ${safety.matchedPattern}` };
+    }
+  }
+
+  const reservation = reserveSessionExecution(sessionId, "exec");
+  if (!reservation.ok) return reservation;
+  const sessionToken = reservation.token;
+  const executionLock = beginChatExecution(chatSessionId, sessionId, command);
+  if (!executionLock.ok) {
+    releaseSessionExecution(sessionId, sessionToken);
     return {
       ok: false,
-      error: "chatSessionId is required for write operations.",
+      code: "COMMAND_ALREADY_RUNNING",
+      error: `Another Netcatty command is already running for chat session "${chatSessionId}". Wait for it to finish before starting a new exec.`,
+      activeCommand: executionLock.active.command,
+      activeSessionId: executionLock.active.sessionId,
     };
   }
 
-  // netcatty/jobStop must remain callable after SDK agent cancel so users can stop
-  // a long-running terminal_start job (which intentionally survives SDK Stop)
-  // even from a chat session whose write methods are otherwise blocked.
-  if (WRITE_METHODS.has(method) && method !== "netcatty/jobStop" && isChatSessionCancelled(params?.chatSessionId)) {
-    return { ok: false, error: "Operation cancelled: the SDK agent session was stopped." };
+  try {
+    return await terminalWorkerManager.request("netcatty:ai:exec", {
+      sessionId,
+      command,
+      chatSessionId,
+      commandTimeoutMs,
+      sessionMeta: meta,
+      enforceWallTimeout: true,
+    }, {});
+  } catch (err) {
+    return { ok: false, error: err?.message || String(err) };
+  } finally {
+    releaseSessionExecution(sessionId, sessionToken);
+    executionLock.release();
+  }
+}
+
+async function handleWorkerJobStart(params = {}) {
+  const { sessionId, command } = params;
+  if (!sessionId || !command) throw new Error("sessionId and command are required");
+  if (typeof command !== "string" || !command.trim()) {
+    return { ok: false, error: "Invalid command", exitCode: 1 };
+  }
+  if (!terminalWorkerManager?.request) {
+    return { ok: false, error: "Session not found" };
+  }
+
+  const chatSessionId = params?.chatSessionId || null;
+  const meta = getSessionMeta(sessionId, chatSessionId) || {};
+  if (!isNetworkDeviceLikeMeta(meta)) {
+    const safety = checkCommandSafety(command);
+    if (safety.blocked) {
+      return { ok: false, error: `Command blocked by safety policy. Pattern: ${safety.matchedPattern}` };
+    }
+  }
+
+  try {
+    const result = await terminalWorkerManager.request("netcatty:ai:jobStart", {
+      sessionId,
+      command,
+      chatSessionId,
+      commandTimeoutMs,
+      sessionMeta: meta,
+    }, {});
+    if (result?.ok && result.jobId) {
+      workerBackgroundJobs.set(result.jobId, {
+        chatSessionId: chatSessionId || null,
+        sessionId,
+      });
+    }
+    return result;
+  } catch (err) {
+    return { ok: false, error: err?.message || String(err) };
+  }
+}
+
+function getWorkerJob(jobId, chatSessionId) {
+  const job = workerBackgroundJobs.get(jobId);
+  if (!job) return null;
+  if (job.chatSessionId && (!chatSessionId || chatSessionId !== job.chatSessionId)) {
+    return null;
+  }
+  return job;
+}
+
+async function handleWorkerJobPoll(params = {}) {
+  const { jobId, chatSessionId, scopedSessionIds } = params || {};
+  if (!jobId) throw new Error("jobId is required");
+  const job = getWorkerJob(jobId, chatSessionId || null);
+  if (!job || !terminalWorkerManager?.request) {
+    return { ok: false, error: "Background job not found" };
+  }
+  if (job.sessionId) {
+    const scopeErr = validateSessionScope(job.sessionId, chatSessionId || null, scopedSessionIds);
+    if (scopeErr) return { ok: false, error: scopeErr };
+  }
+  const result = await terminalWorkerManager.request("netcatty:ai:jobPoll", params, {});
+  if (result?.completed) {
+    workerBackgroundJobs.delete(jobId);
+  }
+  return result;
+}
+
+async function handleWorkerJobStop(params = {}) {
+  const { jobId, chatSessionId, scopedSessionIds } = params || {};
+  if (!jobId) throw new Error("jobId is required");
+  const job = getWorkerJob(jobId, chatSessionId || null);
+  if (!job || !terminalWorkerManager?.request) {
+    return { ok: false, error: "Background job not found" };
+  }
+  if (Array.isArray(scopedSessionIds) && job.sessionId && !scopedSessionIds.includes(job.sessionId)) {
+    return { ok: false, error: `Session "${job.sessionId}" is not in the current scope.` };
+  }
+  const result = await terminalWorkerManager.request("netcatty:ai:jobStop", params, {});
+  if (result?.completed) {
+    workerBackgroundJobs.delete(jobId);
+  }
+  return result;
+}
+
+function cancelWorkerBackgroundJobsForSession(chatSessionId) {
+  if (!chatSessionId) return;
+  for (const [jobId, job] of workerBackgroundJobs) {
+    if (job.chatSessionId === chatSessionId) {
+      workerBackgroundJobs.delete(jobId);
+    }
+  }
+  try {
+    terminalWorkerManager?.send?.("netcatty:ai:catty:cancel", { chatSessionId }, {});
+  } catch {
+    // Worker may already be gone while cancelling a torn-down chat/session.
+  }
+}
+
+let builtinRpcHandlerRegistry = null;
+
+function getBuiltinRpcHandlerRegistry() {
+  if (!builtinRpcHandlerRegistry) {
+    builtinRpcHandlerRegistry = buildBuiltinRpcHandlerRegistry({
+      "session.environment": handleGetContext,
+      "meta.status": handleGetStatus,
+      "attachment.list": handleListAttachments,
+      "attachment.read": handleReadAttachment,
+      "terminal.execute": handleExec,
+      "sftp.list": handleSftpList,
+      "sftp.read": handleSftpRead,
+      "sftp.write": handleSftpWrite,
+      "sftp.download": handleSftpDownload,
+      "sftp.upload": handleSftpUpload,
+      "sftp.mkdir": handleSftpMkdir,
+      "sftp.delete": handleSftpDelete,
+      "sftp.rename": handleSftpRename,
+      "sftp.stat": handleSftpStat,
+      "sftp.chmod": handleSftpChmod,
+      "sftp.home": handleSftpHome,
+      "session.cancel": handleSetCancelled,
+      "terminal.start": handleJobStart,
+      "terminal.poll": handleJobPoll,
+      "terminal.stop": handleJobStop,
+    });
+  }
+  return builtinRpcHandlerRegistry;
+}
+
+async function dispatch(method, params) {
+  debugLog("dispatch", { method, params, permissionMode });
+
+  if (!method.startsWith("netcatty/")) {
+    const capabilityResult = await dispatchCapabilityRpc(method, params || {});
+    if (capabilityResult !== UNROUTED) {
+      return capabilityResult;
+    }
+  }
+
+  const capability = getCapabilityByRpcMethod(method, CAPABILITY_SURFACES.BUILTIN);
+  const sessionWriteLockId = (capability?.id === "terminal.execute" || capability?.id === "terminal.start")
+    ? params?.sessionId
+    : null;
+  pruneCompletedBackgroundJobs();
+
+  const permission = evaluatePermissionWithGrants({
+    rpcMethod: method,
+    surface: CAPABILITY_SURFACES.BUILTIN,
+    permissionMode,
+    params,
+    context: {
+      chatSessionCancelled: isChatSessionCancelled(params?.chatSessionId),
+    },
+  }, permissionGrantsSnapshot);
+  if (!permission.allowed) {
+    return { ok: false, error: permission.error };
   }
 
   // Validate session scope *first* so out-of-scope callers cannot infer the
@@ -866,7 +1106,7 @@ async function dispatch(method, params) {
     if (scopeErr) return { ok: false, error: scopeErr };
   }
 
-  if ((method === "netcatty/exec" || method === "netcatty/jobStart") && params?.sessionId) {
+  if ((capability?.id === "terminal.execute" || capability?.id === "terminal.start") && params?.sessionId) {
     const busy = getSessionBusyError(params.sessionId);
     if (busy) return busy;
   }
@@ -887,57 +1127,30 @@ async function dispatch(method, params) {
     // netcatty/jobStop bypasses approval — it's a stop/cancel action that
     // must remain available even if the renderer is unavailable; otherwise
     // a runaway terminal_start job could not be interrupted at all.
-    if (permissionMode === "confirm" && WRITE_METHODS.has(method) && method !== "netcatty/jobStop") {
+    if (permission.requiresApproval) {
       const { chatSessionId, ...toolArgs } = params || {};
       const approved = await requestApprovalFromRenderer(method, toolArgs, chatSessionId);
       if (!approved) {
-        return { ok: false, error: "Operation denied by user." };
+        return { ok: false, error: USER_DENIED_MESSAGE };
       }
     }
-    switch (method) {
-      case "netcatty/getContext":
-        return handleGetContext(params);
-      case "netcatty/getStatus":
-        return handleGetStatus();
-      case "netcatty/listAttachments":
-        return handleListAttachments(params);
-      case "netcatty/readAttachment":
-        return handleReadAttachment(params);
-      case "netcatty/exec":
-        return handleExec(params);
-      case "netcatty/sftp/list":
-        return handleSftpList(params);
-      case "netcatty/sftp/read":
-        return handleSftpRead(params);
-      case "netcatty/sftp/write":
-        return handleSftpWrite(params);
-      case "netcatty/sftp/download":
-        return handleSftpDownload(params);
-      case "netcatty/sftp/upload":
-        return handleSftpUpload(params);
-      case "netcatty/sftp/mkdir":
-        return handleSftpMkdir(params);
-      case "netcatty/sftp/delete":
-        return handleSftpDelete(params);
-      case "netcatty/sftp/rename":
-        return handleSftpRename(params);
-      case "netcatty/sftp/stat":
-        return handleSftpStat(params);
-      case "netcatty/sftp/chmod":
-        return handleSftpChmod(params);
-      case "netcatty/sftp/home":
-        return handleSftpHome(params);
-      case "netcatty/setCancelled":
-        return handleSetCancelled(params);
-      case "netcatty/jobStart":
-        return handleJobStart(params);
-      case "netcatty/jobPoll":
-        return handleJobPoll(params);
-      case "netcatty/jobStop":
-        return handleJobStop(params);
-      default:
-        throw new Error(`Unknown method: ${method}`);
+    const handler = getBuiltinRpcHandlerRegistry().get(method);
+    if (!handler) {
+      throw new Error(`Unknown method: ${method}`);
     }
+    if (capability?.id === "terminal.execute" && params?.sessionId && !sessions?.get?.(params.sessionId)) {
+      return handleWorkerTerminalExec(params);
+    }
+    if (capability?.id === "terminal.start" && params?.sessionId && !sessions?.get?.(params.sessionId)) {
+      return handleWorkerJobStart(params);
+    }
+    if (capability?.id === "terminal.poll" && workerBackgroundJobs.has(params?.jobId)) {
+      return handleWorkerJobPoll(params);
+    }
+    if (capability?.id === "terminal.stop" && workerBackgroundJobs.has(params?.jobId)) {
+      return handleWorkerJobStop(params);
+    }
+    return handler(params);
   } finally {
     if (sessionWriteLockId) {
       pendingSessionWriteApprovals.delete(sessionWriteLockId);
@@ -947,7 +1160,7 @@ async function dispatch(method, params) {
 
 // ── Handler: getContext ──
 
-function handleGetContext(params) {
+async function handleGetContext(params) {
   debugLog("handleGetContext:start", { params, sessionCount: sessions?.size || 0 });
   if (!sessions) return { hosts: [], instructions: "No sessions available." };
 
@@ -964,6 +1177,7 @@ function handleGetContext(params) {
   const scopedIds = resolvedScopedIds ? new Set(resolvedScopedIds) : null;
 
   const hosts = [];
+  const addedHostIds = new Set();
   // When a scoped context exists but currently resolves to zero sessions, treat
   // it as "no access" rather than falling back to all sessions.
   if (hasScopedContext && (!resolvedScopedIds || resolvedScopedIds.length === 0)) {
@@ -995,19 +1209,44 @@ function handleGetContext(params) {
       shellType: meta.shellType || session.shellKind || "",
       deviceType: meta.deviceType || "",
       connected: meta.connected !== undefined ? meta.connected : !!(session.sshClient || session.conn || ptyStream || session.serialPort),
+      hostId: meta.hostId || "",
+      hostChain: meta.hostChain || [],
+      activePortForwards: meta.activePortForwards || [],
     });
+    addedHostIds.add(sessionId);
+  }
+
+  if (resolvedScopedIds?.length) {
+    for (const sessionId of resolvedScopedIds) {
+      if (addedHostIds.has(sessionId)) continue;
+      const meta = getSessionMeta(sessionId, chatSessionId);
+      if (!meta || meta.connected === false) continue;
+      hosts.push(buildHostFromMetadata(sessionId, meta));
+      addedHostIds.add(sessionId);
+    }
+  }
+
+  let activePortForwardTunnels = [];
+  try {
+    activePortForwardTunnels = await portForwardingBridge.listPortForwards() || [];
+  } catch {
+    activePortForwardTunnels = [];
   }
 
   return {
     environment: "netcatty-terminal",
-    description: "You are operating inside Netcatty, a multi-session terminal manager. " +
+    description: appendVaultAgentGuidance(
+      "You are operating inside Netcatty, a multi-session terminal manager. " +
       "The available sessions may be remote hosts, local terminals, Mosh-backed shells, or serial port connections (network devices, embedded systems). " +
       "Use the provided tools to execute commands through the sessions exposed by Netcatty. " +
       "Serial sessions (protocol: serial, shellType: raw) do not run a standard shell — commands are sent as-is. " +
       "Network device sessions (deviceType: network) use vendor CLIs (Huawei VRP, Cisco IOS, etc.) — commands are sent as-is without shell wrapping, and exit codes are unavailable. " +
+      "Vault snippets, port forwarding rules/tunnels, and SFTP read/write tools are available when exposed in the tool list. " +
       "Always prefer these tools over suggesting the user to do things manually.",
+    ),
     hosts,
     hostCount: hosts.length,
+    activePortForwardTunnels,
   };
 }
 
@@ -1031,33 +1270,47 @@ function handleGetStatus() {
   };
 }
 
-async function handleSetCancelled(params) {
-  const chatSessionId = params?.chatSessionId;
-  const cancelled = params?.cancelled !== false;
+function setPermissionGrants(grants) {
+  const { sanitizePermissionGrants } = require("../shared/permissionGrants.cjs");
+  permissionGrantsSnapshot = sanitizePermissionGrants(grants);
+}
+
+function getPermissionGrants() {
+  return permissionGrantsSnapshot;
+}
+
+function applyChatSessionCancelled(chatSessionId, cancelled) {
   if (!chatSessionId || typeof chatSessionId !== "string") {
     throw new Error("chatSessionId is required");
   }
-
   if (cancelled) {
     setChatSessionCancelled(chatSessionId, true);
     cancelPtyExecsForSession(chatSessionId);
     cancelBackgroundJobsForSession(chatSessionId);
+    cancelWorkerBackgroundJobsForSession(chatSessionId);
     clearPendingApprovals(chatSessionId);
     void cancelSftpOpsForSession(chatSessionId);
   } else {
     setChatSessionCancelled(chatSessionId, false);
   }
-
   return {
     ok: true,
     chatSessionId,
-    cancelled,
+    cancelled: !!cancelled,
   };
+}
+
+async function handleSetCancelled(params) {
+  const chatSessionId = params?.chatSessionId;
+  const cancelled = params?.cancelled !== false;
+  return applyChatSessionCancelled(chatSessionId, cancelled);
 }
 
 const { createSftpHandlerApi } = require("./mcpServerBridge/sftpHandlers.cjs");
 const sftpHandlerApi = createSftpHandlerApi({
   get commandTimeoutMs() { return commandTimeoutMs; },
+  get sessions() { return sessions; },
+  get terminalWorkerManager() { return terminalWorkerManager; },
   sftpBridge, registerSftpOp, setTimeout, clearTimeout, AbortController, Promise, Error,
 });
 const {
@@ -1103,6 +1356,7 @@ const configAndCleanupApi = createConfigAndCleanupApi({
   get permissionMode() { return permissionMode; },
   process, existsSync, path, __dirname, toUnpackedAsarPath, DEBUG_MCP,
   getScopedSessionIds, scopedMetadata, scopedAttachments, cancelledChatSessions, cancelBackgroundJobsForSession,
+  cancelWorkerBackgroundJobsForSession,
   clearPendingApprovals, cancelSftpOpsForSession, sftpBridge,
 });
 const { resolveMcpServerRuntimeCommand, buildMcpServerConfig, cleanupScopedMetadata } = configAndCleanupApi;
@@ -1121,7 +1375,10 @@ module.exports = {
   setPermissionMode,
   getPermissionMode,
   getApprovalTimeoutMs,
+  setPermissionGrants,
+  getPermissionGrants,
   setChatSessionCancelled,
+  applyChatSessionCancelled,
   checkCommandSafety,
   updateSessionMetadata,
   updateAttachmentMetadata,
@@ -1134,6 +1391,7 @@ module.exports = {
   cancelBackgroundJobsForSession,
   cancelAllPtyExecs,
   cancelPtyExecsForSession,
+  cancelWorkerBackgroundJobsForSession,
   cancelSftpOpsForSession,
   getSessionMeta,
   cleanupScopedMetadata,
@@ -1141,9 +1399,11 @@ module.exports = {
   shutdownHost,
   setMainWindowGetter,
   requestApproval: requestApprovalFromRenderer,
+  setVaultAgentInvoker,
   resolveApprovalFromRenderer,
   clearPendingApprovals,
   reserveSessionExecution,
   releaseSessionExecution,
   getSessionBusyError,
+  dispatchBuiltinRpc: dispatch,
 };

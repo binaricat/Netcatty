@@ -1,5 +1,6 @@
 import {
   ArrowLeft,
+  Download,
   Edit2,
   Expand,
   FileText,
@@ -21,6 +22,7 @@ import { useStoredNumber } from "../../application/state/useStoredNumber";
 import { useStoredString } from "../../application/state/useStoredString";
 import {
   ancestorNoteGroupPaths,
+  buildVaultNoteMarkdownExportFiles,
   cleanNoteGroupPath,
   getNoteGroupParentPath,
   isNoteGroupInside,
@@ -32,6 +34,8 @@ import {
   remapExpandedNoteGroupPaths,
   replaceNoteGroupPrefix,
   resolveMovedNoteGroupPath,
+  sanitizeNoteExportFileNamePart,
+  type VaultNotesExportScope,
 } from "../../domain/notes";
 import { getNextVaultOrder, reorderVaultItems, reorderVaultStrings, sortByVaultOrder } from "../../domain/vaultOrder";
 import {
@@ -41,6 +45,7 @@ import {
 import { logger } from "../../lib/logger";
 import { cn } from "../../lib/utils";
 import { readTextFile } from "../../lib/readTextFile";
+import { buildTextFilesZipBlob } from "../../lib/textZip";
 import type { Host, VaultNote } from "../../types";
 import { Button } from "../ui/button";
 import { LazyLoadBoundary } from "../ui/lazy-load-boundary";
@@ -115,6 +120,9 @@ export interface NotesManagerProps {
   onOpenHost?: (host: Host, source?: { noteId: string }) => void;
   displayMode?: "full" | "sidebar";
   openNoteId?: string | null;
+  openNoteRequestId?: number | null;
+  /** Called after a one-shot openNoteId focus request has been applied. */
+  onOpenNoteIdHandled?: () => void;
 }
 
 type HoverActionMenuProps = {
@@ -181,7 +189,7 @@ const createNote = (group: string | null, order: number): VaultNote => {
   const now = Date.now();
   return {
     id: crypto.randomUUID(),
-    title: "Untitled note",
+    title: "",
     content: "",
     group: group || undefined,
     createdAt: now,
@@ -326,11 +334,13 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
   onOpenHost,
   displayMode = "full",
   openNoteId = null,
+  openNoteRequestId = null,
+  onOpenNoteIdHandled,
 }) => {
   const { t } = useI18n();
   const { openExternal } = useApplicationBackend();
   const isSidebarMode = displayMode === "sidebar";
-  const initialOpenNoteId = isSidebarMode && openNoteId && notes.some((note) => note.id === openNoteId)
+  const initialOpenNoteId = openNoteId && notes.some((note) => note.id === openNoteId)
     ? openNoteId
     : null;
   const [query, setQuery] = useState("");
@@ -362,6 +372,7 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
   const isImportingMarkdownRef = useRef(false);
   const importTargetGroupRef = useRef<string | null | undefined>(undefined);
   const sortedNotesRef = useRef<VaultNote[]>([]);
+  const activeDownloadUrlsRef = useRef<Set<string>>(new Set());
 
   const groups = useMemo(() => normalizeNoteGroups(noteGroups), [noteGroups]);
   const groupOrderByPath = useMemo(
@@ -388,6 +399,14 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
   const selectedNote = getSelectedVaultNote(sortedNotes, selectedNoteId);
   const overlayNote = sortedNotes.find((note) => note.id === overlayNoteId) ?? null;
 
+  useEffect(() => {
+    const urls = activeDownloadUrlsRef.current;
+    return () => {
+      urls.forEach((url) => URL.revokeObjectURL(url));
+      urls.clear();
+    };
+  }, []);
+
   const queryText = query.trim();
   const queryLower = queryText.toLowerCase();
   const noteMatches = (note: VaultNote) => matchesVaultNoteSearch(note, queryText, hosts);
@@ -413,17 +432,18 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
   }, [selectedNote?.group]);
 
   useEffect(() => {
-    if (!isSidebarMode || !openNoteId) return;
+    if (!openNoteId) return;
     const note = sortedNotes.find((item) => item.id === openNoteId);
     if (!note) return;
-    const nextSelection = getNoteSelectionState(note, true);
+    const nextSelection = getNoteSelectionState(note, isSidebarMode);
     setSelectedNoteId(nextSelection.selectedNoteId);
     setSelectedGroup(nextSelection.selectedGroup);
     setOverlayNoteId(nextSelection.overlayNoteId);
     if (note.group) {
       setExpandedGroups((current) => new Set([...current, ...ancestorNoteGroupPaths(note.group || "")]));
     }
-  }, [isSidebarMode, openNoteId, sortedNotes]);
+    onOpenNoteIdHandled?.();
+  }, [isSidebarMode, onOpenNoteIdHandled, openNoteId, openNoteRequestId, sortedNotes]);
 
   useEffect(() => {
     if (expandedPanel !== "search") return;
@@ -595,6 +615,80 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
     selectedNote,
     t,
   ]);
+
+  const downloadNotesBlob = useCallback((blob: Blob, fileName: string) => {
+    const url = URL.createObjectURL(blob);
+    activeDownloadUrlsRef.current.add(url);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = fileName;
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+
+    window.setTimeout(() => {
+      URL.revokeObjectURL(url);
+      activeDownloadUrlsRef.current.delete(url);
+    }, 60_000);
+  }, []);
+
+  const exportNoteToMarkdown = useCallback((note: VaultNote) => {
+    try {
+      const fileName = `${sanitizeNoteExportFileNamePart(note.title, "note")}.md`;
+      downloadNotesBlob(
+        new Blob([note.content], { type: "text/markdown;charset=utf-8" }),
+        fileName,
+      );
+      toast.success(t("notes.export.toast.success", { count: 1 }));
+    } catch (err) {
+      logger.error("Failed to export note:", err);
+      toast.error(t("notes.export.toast.failed"));
+    }
+  }, [downloadNotesBlob, t]);
+
+  const exportNotesToZip = useCallback((scope: VaultNotesExportScope, fileNamePart: string) => {
+    try {
+      const files = buildVaultNoteMarkdownExportFiles(sortedNotesRef.current, scope);
+      if (files.length === 0) {
+        toast.warning(t("notes.export.toast.empty"));
+        return;
+      }
+
+      const blob = buildTextFilesZipBlob(files);
+      const safeName = sanitizeNoteExportFileNamePart(fileNamePart, "notes");
+      downloadNotesBlob(blob, `netcatty-notes-${safeName}.zip`);
+      toast.success(t("notes.export.toast.success", { count: files.length }));
+    } catch (err) {
+      logger.error("Failed to export notes:", err);
+      toast.error(t("notes.export.toast.failed"));
+    }
+  }, [downloadNotesBlob, t]);
+
+  const exportAllNotes = useCallback(() => {
+    exportNotesToZip({ type: "all" }, "all");
+  }, [exportNotesToZip]);
+
+  const exportGroupNotes = useCallback((groupPath: string) => {
+    exportNotesToZip({ type: "group", group: groupPath }, groupPath);
+  }, [exportNotesToZip]);
+
+  const renderNoteExportButton = (note: VaultNote) => (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          aria-label={t("notes.action.exportNote")}
+          className="app-no-drag h-8 w-8 shrink-0 rounded-md p-0 text-muted-foreground transition-colors hover:bg-secondary/70 hover:text-foreground"
+          onClick={() => exportNoteToMarkdown(note)}
+        >
+          <Download size={16} />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent side="bottom">{t("notes.action.exportNote")}</TooltipContent>
+    </Tooltip>
+  );
 
   const duplicateNoteById = (noteId: string) => {
     const source = sortedNotes.find((note) => note.id === noteId);
@@ -821,6 +915,10 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
         action: () => duplicateNoteById(note.id),
       },
       {
+        label: t("notes.action.exportNote"),
+        action: () => exportNoteToMarkdown(note),
+      },
+      {
         label: t("action.delete"),
         action: () => deleteNoteById(note.id),
         destructive: true,
@@ -872,6 +970,10 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
       {
         label: t("notes.action.importMarkdown"),
         action: () => openImportMarkdownPicker(groupPath),
+      },
+      {
+        label: t("notes.action.exportGroup"),
+        action: () => exportGroupNotes(groupPath),
       },
       {
         label: t("common.rename"),
@@ -934,22 +1036,22 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
     );
   };
 
+  const noteDisplayTitle = (title: string) => title || t("notes.title.placeholder");
+
   const renderNoteRow = (note: VaultNote, depth: number) => {
     if (!noteMatches(note)) return null;
     return (
       <ContextMenu key={note.id}>
         <ContextMenuTrigger asChild>
           <VaultTreeItemRow
-            label={note.title}
+            label={noteDisplayTitle(note.title)}
             depth={depth}
             selected={selectedNoteId === note.id}
             editing={editingNoteId === note.id}
             editingInitialName={note.title}
             onRenameCommit={(name) => {
               setEditingNoteId(null);
-              const title = name.trim();
-              if (!title) return;
-              saveNote({ ...note, title, updatedAt: Date.now() });
+              saveNote({ ...note, title: name.trim(), updatedAt: Date.now() });
             }}
             onRenameCancel={() => setEditingNoteId(null)}
             icon={<FileText size={16} className="mr-2 shrink-0 text-muted-foreground" />}
@@ -1247,6 +1349,21 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
                     variant="ghost"
                     size="icon"
                     className={toolbarIconButtonClass}
+                    disabled={sortedNotes.length === 0}
+                    onClick={exportAllNotes}
+                  >
+                    <Download size={14} className="text-muted-foreground" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">{t("notes.action.exportAll")}</TooltipContent>
+              </Tooltip>
+
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className={toolbarIconButtonClass}
                     disabled={!canExpandCollapse}
                     onClick={expandAllGroups}
                   >
@@ -1369,6 +1486,7 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
                     })}
                   />
                 </div>
+                {renderNoteExportButton(selectedNote)}
                 {renderNoteModeToggle()}
               </div>
               <ScrollArea className="min-h-0 flex-1">
@@ -1454,6 +1572,7 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
                   })}
                 />
               </div>
+              {renderNoteExportButton(overlayNote)}
               {renderNoteModeToggle()}
             </div>
             <ScrollArea className="min-h-0 flex-1">

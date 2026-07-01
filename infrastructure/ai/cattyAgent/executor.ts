@@ -1,4 +1,7 @@
 import type { ToolCall, ToolResult, AIPermissionMode, WebSearchConfig } from '../types';
+import type {
+  TerminalContextReader,
+} from '../../../domain/terminalContextRead';
 import {
   executeTerminalExecute,
   executeWorkspaceGetInfo,
@@ -33,6 +36,12 @@ export interface NetcattyBridge {
    * `aiExec` but before the main process has registered it.
    */
   aiCattyCancelExec?(chatSessionId: string): Promise<unknown>;
+  aiSetChatSessionCancelled?(chatSessionId: string, cancelled?: boolean): Promise<{ ok: boolean; error?: string }>;
+  aiCapability?(
+    rpcMethod: string,
+    params: Record<string, unknown>,
+    chatSessionId?: string,
+  ): Promise<unknown>;
 }
 
 // Workspace context provided to the executor
@@ -53,6 +62,7 @@ export interface ExecutorContext {
   // Workspace info
   workspaceId?: string;
   workspaceName?: string;
+  readTerminalContext?: TerminalContextReader;
 }
 
 /** Convert a shared ToolExecResult into the executor's ToolResult format. */

@@ -74,3 +74,45 @@ test("VaultView re-renders when proxy profiles change", () => {
     false,
   );
 });
+
+test("VaultView re-renders when host-key verification setting changes", () => {
+  const baseProps = {
+    hosts: [],
+    keys: [],
+    identities: [],
+    proxyProfiles: [],
+    snippets: [],
+    snippetPackages: [],
+    notes: [],
+    noteGroups: [],
+    customGroups: [],
+    knownHosts: [],
+    shellHistory: [],
+    connectionLogs: [],
+    sessions: [],
+    managedSources: [],
+    groupConfigs: {},
+    terminalThemeId: "default",
+    terminalFontSize: 14,
+    navigateToSection: null,
+    terminalSettings: {
+      verifyHostKeys: true,
+      keepaliveInterval: 30,
+      keepaliveCountMax: 10,
+    },
+  };
+
+  assert.equal(
+    vaultViewAreEqual(
+      baseProps as never,
+      {
+        ...baseProps,
+        terminalSettings: {
+          ...baseProps.terminalSettings,
+          verifyHostKeys: false,
+        },
+      } as never,
+    ),
+    false,
+  );
+});

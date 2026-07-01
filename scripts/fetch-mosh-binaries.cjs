@@ -23,11 +23,9 @@
 //   MOSH_BIN_RES_DIR  — override output dir for tests.
 //   MOSH_BIN_ALLOW_UNVERIFIED=true — explicit local escape hatch for mirrors
 //                       without SHA256SUMS. Never use for release builds.
-//   MOSH_BIN_FORCE_WINDOWS_CYGWIN=true — debug escape hatch for the upstream
-//                       Cygwin Windows bundle. The default Windows x64 asset
-//                       is the FluentTerminal-pinned standalone client because
-//                       the current Cygwin build clears the terminal and never
-//                       renders remote output on Windows.
+//   MOSH_BIN_FORCE_WINDOWS_CYGWIN=true — legacy debug knob kept for older
+//                       automation. Windows now prefers the released bundle
+//                       with its runtime helpers when SHA256SUMS lists it.
 //   MOSH_BIN_WINDOWS_LEGACY_URL / MOSH_BIN_WINDOWS_LEGACY_SHA256 — test/mirror
 //                       overrides for that pinned Windows fallback.
 
@@ -54,10 +52,8 @@ const WINDOWS_LEGACY_FLUENT_MOSH_CLIENT = {
 // Using flat names in the release for SHA256SUMS readability, then
 // fanning out into platform-arch subdirs locally.
 //
-// Linux/macOS targets are tar.gz bundles containing the binary plus the
-// runtime helpers each platform needs. Windows x64 defaults to the
-// SHA256-pinned FluentTerminal standalone exe because the tested Cygwin
-// bundle clears the terminal and never renders remote output on Windows.
+// Linux/macOS/Windows bundle targets are tar.gz archives containing the
+// binary plus the runtime helpers each platform needs.
 // Bundling terminfo lets bundled Posix mosh-client builds work on
 // minimal hosts that don't have a
 // system ncurses-base — see issue #890.
@@ -87,7 +83,6 @@ const TARGETS = [
     platform: "win32", arch: "x64",
     file: "mosh-client-win32-x64.tar.gz", localDir: "win32-x64", extract: "tar.gz",
     legacy: WINDOWS_LEGACY_FLUENT_MOSH_CLIENT,
-    preferLegacy: true,
   },
 ];
 
@@ -115,7 +110,12 @@ function selectReleaseAsset(target, sums, opts = {}) {
   if (sums.size === 0) return primary;
   if (sums.has(target.file)) return primary;
   if (sums.has(target.legacy.file)) {
-    return applyReleaseAssetOverrides({ file: target.legacy.file, local: target.legacy.local }, opts);
+    const expected = sums.get(target.legacy.file);
+    const fallback = applyReleaseAssetOverrides(target.legacy, opts);
+    if (fallback.id && fallback.sha256 && expected !== fallback.sha256) {
+      return fallback;
+    }
+    return { file: target.legacy.file, local: target.legacy.local, sha256: expected };
   }
   return primary;
 }

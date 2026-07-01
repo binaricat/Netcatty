@@ -1,5 +1,5 @@
 import React from 'react';
-import { ArrowDownToLine, ArrowUpFromLine, Cpu, HardDrive, MemoryStick } from 'lucide-react';
+import { Activity, ArrowDownToLine, ArrowUpFromLine, Cpu, HardDrive, MemoryStick } from 'lucide-react';
 
 import { useI18n } from '../../application/i18n/I18nProvider';
 import { cn } from '../../lib/utils';
@@ -16,6 +16,10 @@ interface TerminalServerStatsProps {
   isSupportedOs: boolean;
   isConnected: boolean;
 }
+
+const formatLatency = (latencyMs: number | null): string => (
+  typeof latencyMs === 'number' && Number.isFinite(latencyMs) ? `${latencyMs}ms` : '--ms'
+);
 
 /**
  * Self-contained server-stats (CPU / Memory / Disk / Network) indicator.
@@ -43,6 +47,8 @@ export const TerminalServerStats: React.FC<TerminalServerStatsProps> = ({
     isConnected,
     isVisible,
   });
+  const hasNetworkDetails = serverStats.netInterfaces.length > 0;
+  const hasLatency = serverStats.latencyMs !== null;
 
   if (!enabled || !isConnected || !serverStats.lastUpdated) return null;
 
@@ -312,7 +318,7 @@ export const TerminalServerStats: React.FC<TerminalServerStatsProps> = ({
                   </HoverCardContent>
                 </HoverCard>
                 {/* Network - with HoverCard for per-interface details */}
-                {serverStats.netInterfaces.length > 0 && (
+                {(hasNetworkDetails || hasLatency) && (
                   <HoverCard openDelay={200} closeDelay={100}>
                     <HoverCardTrigger asChild>
                       <button
@@ -323,6 +329,8 @@ export const TerminalServerStats: React.FC<TerminalServerStatsProps> = ({
                         <span className="truncate">{formatNetSpeed(serverStats.netRxSpeed)}</span>
                         <ArrowUpFromLine size={9} className="flex-shrink-0 text-sky-400" />
                         <span className="truncate">{formatNetSpeed(serverStats.netTxSpeed)}</span>
+                        <Activity size={9} className="flex-shrink-0 text-violet-400" />
+                        <span className="truncate">{formatLatency(serverStats.latencyMs)}</span>
                       </button>
                     </HoverCardTrigger>
                     <HoverCardContent
@@ -333,25 +341,38 @@ export const TerminalServerStats: React.FC<TerminalServerStatsProps> = ({
                     >
                       <div className="text-xs space-y-2">
                         <div className="font-medium text-sm mb-2">{t("terminal.serverStats.networkDetails")}</div>
-                        <div className="space-y-2 max-h-[200px] overflow-y-auto">
-                          {serverStats.netInterfaces.map((iface, index) => (
-                            <div key={index} className="flex items-center justify-between gap-4 min-w-[200px]">
-                              <span className="text-[10px] text-muted-foreground font-mono">
-                                {iface.name}
-                              </span>
-                              <div className="flex items-center gap-2">
-                                <span className="flex items-center gap-0.5 text-emerald-400">
-                                  <ArrowDownToLine size={9} />
-                                  {formatNetSpeed(iface.rxSpeed)}
-                                </span>
-                                <span className="flex items-center gap-0.5 text-sky-400">
-                                  <ArrowUpFromLine size={9} />
-                                  {formatNetSpeed(iface.txSpeed)}
-                                </span>
-                              </div>
-                            </div>
-                          ))}
+                        <div className="flex items-center justify-between gap-4 min-w-[200px]">
+                          <span className="text-[10px] text-muted-foreground">
+                            {t("terminal.serverStats.latency")}
+                          </span>
+                          <span className="flex items-center gap-0.5 text-violet-400">
+                            <Activity size={9} />
+                            {formatLatency(serverStats.latencyMs)}
+                          </span>
                         </div>
+                        {hasNetworkDetails ? (
+                          <div className="space-y-2 max-h-[200px] overflow-y-auto">
+                            {serverStats.netInterfaces.map((iface, index) => (
+                              <div key={index} className="flex items-center justify-between gap-4 min-w-[200px]">
+                                <span className="text-[10px] text-muted-foreground font-mono">
+                                  {iface.name}
+                                </span>
+                                <div className="flex items-center gap-2">
+                                  <span className="flex items-center gap-0.5 text-emerald-400">
+                                    <ArrowDownToLine size={9} />
+                                    {formatNetSpeed(iface.rxSpeed)}
+                                  </span>
+                                  <span className="flex items-center gap-0.5 text-sky-400">
+                                    <ArrowUpFromLine size={9} />
+                                    {formatNetSpeed(iface.txSpeed)}
+                                  </span>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="text-muted-foreground">{t("terminal.serverStats.noData")}</div>
+                        )}
                       </div>
                     </HoverCardContent>
                   </HoverCard>

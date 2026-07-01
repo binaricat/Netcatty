@@ -210,6 +210,34 @@ function createSystemManagerBridge(deps) {
     return { success: true, code: result.code };
   }
 
+  async function setupOsc7Tracking(event, payload) {
+    const sessionId = payload?.sessionId;
+    const command = payload?.command;
+    if (!sessionId || typeof command !== "string" || !command.trim()) {
+      return { success: false, error: "Missing sessionId or command" };
+    }
+
+    const result = await execOnSession(event, sessionId, command, 10000);
+    if (result.pending) return { success: false, pending: true, error: result.error };
+    if (!result.success) return { success: false, error: result.error || "Directory tracking setup failed" };
+    if (typeof result.code === "number" && result.code !== 0) {
+      const error = String(result.stderr || result.error || `Directory tracking setup failed with exit code ${result.code}`).trim();
+      return {
+        success: false,
+        stdout: result.stdout || "",
+        stderr: result.stderr || "",
+        code: result.code,
+        error,
+      };
+    }
+    return {
+      success: true,
+      stdout: result.stdout || "",
+      stderr: result.stderr || "",
+      code: result.code ?? 0,
+    };
+  }
+
   async function listTmuxSessions(event, payload) {
     const sessionId = typeof payload === "string" ? payload : payload?.sessionId;
     if (!sessionId) return { success: false, error: "Missing sessionId" };
@@ -283,10 +311,40 @@ function createSystemManagerBridge(deps) {
     return { success: true, output: result.stdout };
   }
 
-  function registerHandlers(ipcMain) {
+  function registerWorkerHandle(ipcMain, terminalWorkerManager, channel) {
+    ipcMain.handle(channel, (event, payload) => terminalWorkerManager.request(channel, payload, {
+      webContentsId: event?.sender?.id,
+    }));
+  }
+
+  function registerHandlers(ipcMain, options = {}) {
+    const terminalWorkerManager = options.terminalWorkerManager || null;
+    if (terminalWorkerManager) {
+      [
+        "netcatty:system:probeCapabilities",
+        "netcatty:system:listProcesses",
+        "netcatty:system:signalProcess",
+        "netcatty:system:setupOsc7Tracking",
+        "netcatty:system:listTmuxSessions",
+        "netcatty:system:createTmuxSession",
+        "netcatty:system:listTmuxWindows",
+        "netcatty:system:listTmuxPanes",
+        "netcatty:system:listTmuxClients",
+        "netcatty:system:tmuxAction",
+        "netcatty:system:listDockerContainers",
+        "netcatty:system:listDockerImages",
+        "netcatty:system:dockerStats",
+        "netcatty:system:dockerInspect",
+        "netcatty:system:dockerImageInspect",
+        "netcatty:system:dockerAction",
+        "netcatty:system:dockerImageAction",
+      ].forEach((channel) => registerWorkerHandle(ipcMain, terminalWorkerManager, channel));
+      return;
+    }
     ipcMain.handle("netcatty:system:probeCapabilities", probeCapabilities);
     ipcMain.handle("netcatty:system:listProcesses", listProcesses);
     ipcMain.handle("netcatty:system:signalProcess", signalProcess);
+    ipcMain.handle("netcatty:system:setupOsc7Tracking", setupOsc7Tracking);
     ipcMain.handle("netcatty:system:listTmuxSessions", listTmuxSessions);
     ipcMain.handle("netcatty:system:createTmuxSession", createTmuxSession);
     ipcMain.handle("netcatty:system:listTmuxWindows", listTmuxWindows);
@@ -302,7 +360,7 @@ function createSystemManagerBridge(deps) {
     ipcMain.handle("netcatty:system:dockerImageAction", dockerImageAction);
   }
 
-  return { registerHandlers, probeCapabilities, listProcesses };
+  return { registerHandlers, probeCapabilities, listProcesses, setupOsc7Tracking };
 }
 
 module.exports = { createSystemManagerBridge };

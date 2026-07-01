@@ -12,6 +12,7 @@ import { Package } from 'lucide-react';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useI18n } from '../application/i18n/I18nProvider';
 import type { Snippet } from '../domain/models';
+import { isScriptSnippet } from '../domain/snippetScript.ts';
 import { Button } from './ui/button';
 import { Combobox } from './ui/combobox';
 import {
@@ -24,6 +25,7 @@ import {
 } from './ui/dialog';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { SnippetScriptEditor } from './snippets/SnippetScriptEditor';
 
 export interface QuickAddSnippetDialogProps {
@@ -52,6 +54,7 @@ export const QuickAddSnippetDialog: React.FC<QuickAddSnippetDialogProps> = ({
   const [command, setCommand] = useState('');
   const [packagePath, setPackagePath] = useState('');
   const [noAutoRun, setNoAutoRun] = useState(false);
+  const [multiLineRunMode, setMultiLineRunMode] = useState<Snippet["multiLineRunMode"]>(undefined);
   const [editing, setEditing] = useState<Snippet | null>(null);
   const labelInputRef = useRef<HTMLInputElement>(null);
 
@@ -65,6 +68,7 @@ export const QuickAddSnippetDialog: React.FC<QuickAddSnippetDialogProps> = ({
       setCommand(getQuickAddSnippetInitialCommand(event));
       setPackagePath('');
       setNoAutoRun(false);
+      setMultiLineRunMode(undefined);
       setOpen(true);
     };
     window.addEventListener('netcatty:snippets:add', handler);
@@ -77,12 +81,13 @@ export const QuickAddSnippetDialog: React.FC<QuickAddSnippetDialogProps> = ({
     const handler = (e: Event) => {
       const detail = (e as CustomEvent<{ snippet?: Snippet }>).detail;
       const snippet = detail?.snippet;
-      if (!snippet) return;
+      if (!snippet || isScriptSnippet(snippet)) return;
       setEditing(snippet);
       setLabel(snippet.label ?? '');
       setCommand(snippet.command ?? '');
       setPackagePath(snippet.package ?? '');
       setNoAutoRun(snippet.noAutoRun ?? false);
+      setMultiLineRunMode(snippet.multiLineRunMode);
       setOpen(true);
     };
     window.addEventListener('netcatty:snippets:edit', handler);
@@ -130,6 +135,7 @@ export const QuickAddSnippetDialog: React.FC<QuickAddSnippetDialogProps> = ({
         command,
         package: trimmedPackage || '',
         noAutoRun: noAutoRun || undefined,
+        multiLineRunMode,
       });
     } else {
       onCreateSnippet({
@@ -140,10 +146,11 @@ export const QuickAddSnippetDialog: React.FC<QuickAddSnippetDialogProps> = ({
         package: trimmedPackage || '',
         targets: [],
         noAutoRun: noAutoRun || undefined,
+        multiLineRunMode,
       });
     }
     setOpen(false);
-  }, [canSave, packagePath, packages, onCreatePackage, onCreateSnippet, onUpdateSnippet, editing, label, command, noAutoRun]);
+  }, [canSave, packagePath, packages, onCreatePackage, onCreateSnippet, onUpdateSnippet, editing, label, command, noAutoRun, multiLineRunMode]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -219,6 +226,22 @@ export const QuickAddSnippetDialog: React.FC<QuickAddSnippetDialogProps> = ({
             />
             <span className="text-xs text-muted-foreground">{t('snippets.field.noAutoRun')}</span>
           </label>
+
+          <div className="space-y-2">
+            <Label className="text-xs">{t('snippets.field.multiLineRunMode')}</Label>
+            <Select
+              value={multiLineRunMode ?? 'paste'}
+              onValueChange={(value) => setMultiLineRunMode(value === 'lineDelay' ? 'lineDelay' : undefined)}
+            >
+              <SelectTrigger className="h-10">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="paste">{t('snippets.field.multiLineRunMode.paste')}</SelectItem>
+                <SelectItem value="lineDelay">{t('snippets.field.multiLineRunMode.lineDelay')}</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
         </div>
 
         <DialogFooter className="shrink-0">

@@ -10,6 +10,7 @@ export const SUPPORTED_UI_LOCALES: LocaleOption[] = [
   { id: 'en', label: 'English' },
   { id: 'ru', label: 'Русский' },
   { id: 'zh-CN', label: '简体中文' },
+  { id: 'zh-TW', label: '繁體中文' },
 ];
 
 const isSupportedLocale = (locale: string): boolean => {

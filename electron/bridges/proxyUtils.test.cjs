@@ -1,6 +1,8 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const { EventEmitter } = require("node:events");
 const { once } = require("node:events");
+const net = require("node:net");
 
 const {
   createProxySocket,
@@ -64,4 +66,36 @@ test("createProxySocket exposes ProxyCommand stdout as socket data", async () =>
   } finally {
     socket.destroy();
   }
+});
+
+test("createProxySocket times out stalled HTTP proxy handshakes", async (t) => {
+  const originalConnect = net.connect;
+  let socketDestroyed = false;
+  const keepAlive = setTimeout(() => {}, 100);
+  t.after(() => {
+    clearTimeout(keepAlive);
+    net.connect = originalConnect;
+  });
+  net.connect = () => {
+    const socket = new EventEmitter();
+    socket.setNoDelay = () => socket;
+    socket.destroy = () => {
+      socketDestroyed = true;
+      socket.emit("close");
+      return socket;
+    };
+    socket.write = () => true;
+    return socket;
+  };
+
+  await assert.rejects(
+    () => createProxySocket(
+      { type: "http", host: "127.0.0.1", port: 8080 },
+      "server.example.com",
+      22,
+      { timeoutMs: 20 },
+    ),
+    /Proxy connection timeout to server\.example\.com:22/,
+  );
+  assert.equal(socketDestroyed, true);
 });

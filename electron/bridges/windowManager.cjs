@@ -6,6 +6,8 @@
 const path = require("node:path");
 const fs = require("node:fs");
 
+const { safeSend } = require("./ipcUtils.cjs");
+
 const V8_CACHE_OPTIONS = "bypassHeatCheck";
 
 function getGlobalShortcutBridge() {
@@ -248,6 +250,7 @@ function getWindowBoundsState(win, overrideBounds) {
 const MENU_LABELS = {
   en: { edit: "Edit", view: "View", window: "Window", reload: "Reload", closeWindow: "Close Window" },
   "zh-CN": { edit: "编辑", view: "视图", window: "窗口", reload: "重新加载", closeWindow: "关闭窗口" },
+  "zh-TW": { edit: "編輯", view: "檢視", window: "視窗", reload: "重新載入", closeWindow: "關閉視窗" },
 };
 
 function tMenu(language, key) {
@@ -824,6 +827,20 @@ async function sendWhenRendererReady(win, channel, payload, options = {}) {
   return { success: true };
 }
 
+function resolveLiveAppIcon(fallback = null) {
+  try {
+    const appIconManager = require("./appIconManager.cjs");
+    const appPath = electronApp?.getAppPath?.();
+    if (appPath) {
+      const iconPath = appIconManager.getAppIconPath(appPath);
+      if (iconPath) return iconPath;
+    }
+  } catch {
+    // ignore
+  }
+  return fallback;
+}
+
 /**
  * Create the main application window
  */
@@ -877,6 +894,7 @@ const mainWindowApi = createMainWindowApi({
   unregisterAppContentWindow,
   getMainWindowCount,
   applyWindowOpacityToWindow,
+  resolveLiveAppIcon,
   closeSettingsWindow: (...args) => closeSettingsWindow(...args),
   hideSettingsWindow: (...args) => hideSettingsWindow(...args),
 });
@@ -919,6 +937,7 @@ const settingsWindowApi = createSettingsWindowApi({
   resolveFrontendBackgroundColor,
   createAppWindowOpenHandler,
   createExternalOnlyWindowOpenHandler,
+  resolveLiveAppIcon,
   getDevRendererBaseUrl,
   applyWindowOpacityToWindow,
 });
@@ -1057,6 +1076,18 @@ function registerWindowHandlers(ipcMain, nativeTheme) {
   ipcMain.handle("netcatty:setWindowOpacity", (_event, opacity) => {
     applyWindowOpacity(opacity);
     return true;
+  });
+
+  ipcMain.handle("netcatty:setAppIconVariant", (_event, variant) => {
+    const { app, BrowserWindow, nativeImage } = require("electron");
+    const appIconManager = require("./appIconManager.cjs");
+    return appIconManager.applyAppIconVariant(variant, {
+      app,
+      BrowserWindow,
+      nativeImage,
+      appPath: app.getAppPath(),
+      isMac: process.platform === "darwin",
+    });
   });
 
   ipcMain.handle("netcatty:setLanguage", (_event, language) => {
@@ -1225,6 +1256,32 @@ function getSettingsWindow() {
   return settingsWindow;
 }
 
+/**
+ * Show the main window and restore reliable keyboard/caret routing (#760, #1722).
+ * Global hotkeys and tray entry points invoke this from non-foreground contexts
+ * where bare BrowserWindow.focus() is silently rejected on Windows.
+ */
+function showAndFocusMainWindow(win) {
+  if (!win || win.isDestroyed?.()) return false;
+  if (win.isMinimized?.()) {
+    try {
+      win.restore();
+    } catch {
+      // ignore
+    }
+  }
+  return restoreWindowInputFocus(win, { show: true });
+}
+
+/**
+ * Tell the renderer to dismiss transient overlays before the native hide (#1722).
+ * Must run before BrowserWindow.hide(), not from Electron's post-hide event.
+ */
+function notifyWindowWillHide(win) {
+  if (!win || win.isDestroyed?.()) return;
+  safeSend(win.webContents, "netcatty:window:will-hide");
+}
+
 module.exports = {
   createWindow,
   openSettingsWindow,
@@ -1246,6 +1303,8 @@ module.exports = {
   isWindowUsable,
   registerWindowHandlers,
   restoreWindowInputFocus,
+  showAndFocusMainWindow,
+  notifyWindowWillHide,
   requestWindowCommandClose,
   shouldCloseWindowFromInput,
   WINDOW_COMMAND_CLOSE_CHANNEL,

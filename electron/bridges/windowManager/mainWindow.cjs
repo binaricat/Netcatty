@@ -338,6 +338,10 @@ function createMainWindowApi(ctx) {
         updateNormalBounds();
         scheduleSaveState();
       });
+
+      win.on("show", () => {
+        safeSend("netcatty:window:shown");
+      });
     
       // Ensure native background matches frontend background, even before first paint.
       try {
@@ -361,7 +365,8 @@ function createMainWindowApi(ctx) {
           // ignore
         }
         try {
-          if (appIcon && childWindow.setIcon) childWindow.setIcon(appIcon);
+          const iconPath = resolveLiveAppIcon(appIcon);
+          if (iconPath && childWindow.setIcon) childWindow.setIcon(iconPath);
         } catch {
           // ignore
         }
@@ -375,7 +380,11 @@ function createMainWindowApi(ctx) {
       });
     
       win.webContents.setWindowOpenHandler(
-        createAppWindowOpenHandler(shell, { backgroundColor, appIcon })
+        createAppWindowOpenHandler(shell, {
+          backgroundColor,
+          appIcon,
+          getAppIcon: () => resolveLiveAppIcon(appIcon),
+        })
       );
     
       // Register window control handlers

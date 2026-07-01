@@ -42,6 +42,12 @@ export function resolveEffectiveTerminalHost({
   );
 }
 
+const suppressDeviceTypeForShellTransport = (host: Host): Host => {
+  if (!host.moshEnabled && !host.etEnabled) return host;
+  if (host.deviceType === undefined) return host;
+  return { ...host, deviceType: undefined };
+};
+
 function buildFallbackHostFromSession(
   session: TerminalSession,
   localOs: LocalOs,
@@ -95,16 +101,16 @@ export function resolveTerminalSessionHost({
     moshEnabled === existingHost.moshEnabled &&
     etEnabled === existingHost.etEnabled
   ) {
-    return existingHost;
+    return suppressDeviceTypeForShellTransport(existingHost);
   }
 
-  return {
+  return suppressDeviceTypeForShellTransport({
     ...existingHost,
     protocol,
     port,
     moshEnabled,
     etEnabled,
-  };
+  });
 }
 
 export function resolveTerminalChainHosts({

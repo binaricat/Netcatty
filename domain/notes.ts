@@ -14,10 +14,8 @@ const cleanStringArray = (values: unknown): string[] | undefined => {
   return cleaned.length ? cleaned : undefined;
 };
 
-export const sanitizeNoteTitle = (title: unknown): string => {
-  const value = typeof title === "string" ? title.trim() : "";
-  return value || "Untitled note";
-};
+export const sanitizeNoteTitle = (title: unknown): string =>
+  typeof title === "string" ? title.trim() : "";
 
 export const sanitizeVaultNote = (note: Partial<VaultNote>): VaultNote => {
   const now = Date.now();
@@ -146,6 +144,80 @@ export const remapExpandedNoteGroupPaths = (
 };
 
 export const sortVaultNotes = (notes: VaultNote[]): VaultNote[] => sortByVaultOrder(notes);
+
+export type VaultNotesExportScope =
+  | { type: "all" }
+  | { type: "group"; group: string };
+
+export interface VaultNoteMarkdownExportFile {
+  name: string;
+  content: string;
+}
+
+const NOTE_EXPORT_UNSAFE_FILENAME_CHARS = /[<>:"/\\|?*]/g;
+const NOTE_EXPORT_RESERVED_WINDOWS_NAMES = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
+
+const replaceControlFilenameChars = (value: string): string => {
+  let output = "";
+  for (const char of value) {
+    output += char.charCodeAt(0) < 32 ? "-" : char;
+  }
+  return output;
+};
+
+export const sanitizeNoteExportFileNamePart = (value: string | undefined, fallback: string): string => {
+  const cleaned = replaceControlFilenameChars((value ?? "").trim())
+    .replace(NOTE_EXPORT_UNSAFE_FILENAME_CHARS, "-")
+    .replace(/\s+/g, " ")
+    .replace(/\.+$/g, "")
+    .trim();
+  const safe = cleaned && cleaned !== "." && cleaned !== ".." ? cleaned : fallback;
+  const withoutReservedName = NOTE_EXPORT_RESERVED_WINDOWS_NAMES.test(safe) ? `${safe}_` : safe;
+  return withoutReservedName.slice(0, 120) || fallback;
+};
+
+export const getVaultNotesForExportScope = (
+  notes: VaultNote[],
+  scope: VaultNotesExportScope = { type: "all" },
+): VaultNote[] => {
+  const normalized = sortVaultNotes(normalizeVaultNotes(notes));
+  if (scope.type === "all") return normalized;
+
+  const group = cleanNoteGroupPath(scope.group);
+  if (!group) return [];
+  return normalized.filter((note) => isNoteGroupInside(note.group, group));
+};
+
+export const buildVaultNoteMarkdownExportFiles = (
+  notes: VaultNote[],
+  scope: VaultNotesExportScope = { type: "all" },
+): VaultNoteMarkdownExportFile[] => {
+  const usedNames = new Set<string>();
+
+  return getVaultNotesForExportScope(notes, scope).map((note, index) => {
+    const groupSegments = note.group
+      ? cleanNoteGroupPath(note.group)
+        .split("/")
+        .filter(Boolean)
+        .map((part) => sanitizeNoteExportFileNamePart(part, "folder"))
+      : [];
+    const baseName = sanitizeNoteExportFileNamePart(note.title, `note-${index + 1}`);
+    const basePath = [...groupSegments, baseName].join("/");
+    let candidate = `${basePath}.md`;
+    let suffix = 2;
+
+    while (usedNames.has(candidate.toLowerCase())) {
+      candidate = `${basePath}-${suffix}.md`;
+      suffix += 1;
+    }
+    usedNames.add(candidate.toLowerCase());
+
+    return {
+      name: candidate,
+      content: note.content,
+    };
+  });
+};
 
 export const matchesVaultNoteSearch = (
   note: VaultNote,

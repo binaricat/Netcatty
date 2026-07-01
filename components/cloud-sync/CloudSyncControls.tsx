@@ -32,7 +32,7 @@ import { useI18n } from '../../application/i18n/I18nProvider';
 import { useCloudSync } from '../../application/state/useCloudSync';
 
 
-import { type CloudProvider, type ConflictInfo, type SyncChangeEntityKey, type SyncEntityChangeCounts } from '../../domain/sync';
+import { type CloudProvider, type ConflictInfo, type SyncChangeEntityKey, type SyncEntityChangeCounts, formatLastSync } from '../../domain/sync';
 import { cn } from '../../lib/utils';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
@@ -302,16 +302,15 @@ export const ProviderCard: React.FC<ProviderCardProps> = ({
     extraActions,
 }) => {
     const { t } = useI18n();
-    const formatLastSync = (timestamp?: number): string => {
+    const formatLastSyncLabel = (timestamp?: number): string => {
         if (!timestamp) return t('cloudSync.lastSync.never');
-        const date = new Date(timestamp);
-        const now = new Date();
-        const diff = now.getTime() - date.getTime();
+        const now = Date.now();
+        const diff = now - timestamp;
 
         if (diff < 60000) return t('cloudSync.lastSync.justNow');
         if (diff < 3600000) return t('cloudSync.lastSync.minutesAgo', { minutes: Math.floor(diff / 60000) });
 
-        return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        return formatLastSync(timestamp);
     };
 
     const status = error
@@ -358,7 +357,7 @@ export const ProviderCard: React.FC<ProviderCardProps> = ({
                             {account.name || account.email}
                         </span>
                         <span className="text-xs text-muted-foreground">
-                            · {formatLastSync(lastSync)}
+                            · {formatLastSyncLabel(lastSync)}
                         </span>
                     </div>
                 ) : error ? (

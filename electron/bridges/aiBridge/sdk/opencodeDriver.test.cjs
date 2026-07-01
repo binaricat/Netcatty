@@ -64,6 +64,25 @@ test("buildOpenCodeConfig isolates local tools and injects Netcatty MCP", () => 
   });
 });
 
+test("buildOpenCodeConfig allowlists Netcatty CLI paths in skills mode", () => {
+  const cfg = buildOpenCodeConfig({
+    toolIntegrationMode: "skills",
+    skillsPathAllowlist: [
+      "/Applications/Netcatty.app/Contents/MacOS/**",
+      "/Users/me/Library/Application Support/netcatty/netcatty-tool-cli/**",
+    ],
+  });
+
+  assert.equal(cfg.permission.bash, "allow");
+  assert.equal(cfg.permission.skill, "allow");
+  assert.equal(cfg.permission.list, "deny");
+  assert.deepEqual(cfg.permission.external_directory, {
+    "/Applications/Netcatty.app/Contents/MacOS/**": "allow",
+    "/Users/me/Library/Application Support/netcatty/netcatty-tool-cli/**": "allow",
+    "*": "deny",
+  });
+});
+
 test("buildOpenCodePromptParts includes supported images as file parts", () => {
   assert.deepEqual(buildOpenCodePromptParts("describe", [
     { filename: "shot.png", mediaType: "image/png", filePath: "/tmp/shot.png", base64Data: "abc" },

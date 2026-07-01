@@ -18,6 +18,15 @@ export const readStoredStringValue = <T extends string>(
   return isAllowedValue(stored) ? stored : fallback;
 };
 
+export const readOptionalStoredStringValue = <T extends string>(
+  storageKey: string,
+  isAllowedValue: (value: string | null) => value is T,
+): T | null => {
+  if (!canUseLocalStorage()) return null;
+  const stored = localStorageAdapter.readString(storageKey);
+  return isAllowedValue(stored) ? stored : null;
+};
+
 export const resolveStoredStringUpdate = <T extends string>(
   currentValue: T,
   nextValue: T | ((currentValue: T) => T),

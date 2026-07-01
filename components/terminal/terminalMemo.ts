@@ -1,6 +1,8 @@
 import type { TerminalProps } from './terminalHelpers';
 
-const getThemePreviewId = (props: TerminalProps): string | null => props.themePreviewId ?? null;
+const themeFingerprint = (theme: TerminalProps['terminalTheme'] | undefined): string => (
+  theme?.colors ? `${theme.id}:${theme.colors.background}:${theme.colors.foreground}:${theme.colors.cursor}` : ''
+);
 
 export const terminalPropsAreEqual = (
   prev: TerminalProps,
@@ -14,7 +16,7 @@ export const terminalPropsAreEqual = (
   && prev.compactToolbar === next.compactToolbar
   && prev.lineTimestampsAvailable === next.lineTimestampsAvailable
   && prev.chainHosts === next.chainHosts
-  && getThemePreviewId(prev) === getThemePreviewId(next)
+  && themeFingerprint(prev.appearanceTheme ?? prev.terminalTheme) === themeFingerprint(next.appearanceTheme ?? next.terminalTheme)
   && prev.knownHosts === next.knownHosts
   // TerminalPane owns the actual visibility style and publishes per-session
   // visibility to paneVisibilityStore. Let Terminal skip visibility-only tab
@@ -27,7 +29,6 @@ export const terminalPropsAreEqual = (
   && prev.isFocused === next.isFocused
   && prev.fontFamilyId === next.fontFamilyId
   && prev.fontSize === next.fontSize
-  && prev.terminalTheme === next.terminalTheme
   && prev.followAppTerminalTheme === next.followAppTerminalTheme
   && prev.accentMode === next.accentMode
   && prev.customAccent === next.customAccent
@@ -40,6 +41,8 @@ export const terminalPropsAreEqual = (
   && prev.sessionDisplayName === next.sessionDisplayName
   && prev.startupCommand === next.startupCommand
   && prev.noAutoRun === next.noAutoRun
+  && prev.pendingScriptId === next.pendingScriptId
+  && prev.pendingScript === next.pendingScript
   && prev.reuseConnectionFromSessionId === next.reuseConnectionFromSessionId
   && prev.serialConfig === next.serialConfig
   && prev.hotkeyScheme === next.hotkeyScheme
@@ -70,6 +73,7 @@ export const terminalPropsAreEqual = (
   && prev.onTerminalTitleChange === next.onTerminalTitleChange
   && prev.onTerminalBell === next.onTerminalBell
   && prev.onTerminalOutput === next.onTerminalOutput
+  && prev.onTerminalContextReaderChange === next.onTerminalContextReaderChange
   && prev.onOpenScripts === next.onOpenScripts
   && prev.onOpenHistory === next.onOpenHistory
   && prev.onOpenTheme === next.onOpenTheme
@@ -77,6 +81,7 @@ export const terminalPropsAreEqual = (
   && prev.onToggleBroadcast === next.onToggleBroadcast
   && prev.onToggleComposeBar === next.onToggleComposeBar
   && prev.onBroadcastInput === next.onBroadcastInput
+  && prev.onBroadcastInterruptPriorityChange === next.onBroadcastInterruptPriorityChange
   && prev.onSnippetExecutorChange === next.onSnippetExecutorChange
   && prev.onProgrammaticCommandLogRewriteChange === next.onProgrammaticCommandLogRewriteChange
   && prev.onAddSelectionToAI === next.onAddSelectionToAI

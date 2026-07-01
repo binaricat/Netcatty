@@ -12,6 +12,7 @@ export interface TerminalConnectionProgressProps {
     status: 'connecting' | 'connected' | 'disconnected';
     error: string | null;
     timeLeft: number;
+    isAwaitingUserInput?: boolean;
     isCancelling: boolean;
     showLogs: boolean;
     progressLogs: string[];
@@ -54,6 +55,7 @@ export const TerminalConnectionProgress: React.FC<TerminalConnectionProgressProp
     status,
     error,
     timeLeft,
+    isAwaitingUserInput = false,
     isCancelling: _isCancelling,
     showLogs,
     progressLogs,
@@ -72,7 +74,9 @@ export const TerminalConnectionProgress: React.FC<TerminalConnectionProgressProp
                         <>
                             <Loader2 className="h-3 w-3 mt-0.5 flex-shrink-0 animate-spin" />
                             <span className="min-w-0 whitespace-pre-wrap break-words leading-5">
-                                {t('terminal.progress.timeoutIn', { seconds: timeLeft })}
+                                {isAwaitingUserInput
+                                    ? t('terminal.progress.waitingForUserInput')
+                                    : t('terminal.progress.timeoutIn', { seconds: timeLeft })}
                             </span>
                         </>
                     ) : (

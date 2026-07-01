@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { buildSftpHostCredentials } from "./useSftpHostCredentials.ts";
-import type { Host, KnownHost, SSHKey } from "../../../domain/models.ts";
+import type { Host, Identity, KnownHost, SSHKey } from "../../../domain/models.ts";
 
 const host = (overrides: Partial<Host> = {}): Host => ({
   id: "host-1",
@@ -52,6 +52,129 @@ test("buildSftpHostCredentials rejects missing saved proxy profiles on jump host
   );
 });
 
+test("buildSftpHostCredentials rejects missing proxy identities", () => {
+  assert.throws(
+    () => buildSftpHostCredentials({
+      host: host({
+        proxyConfig: {
+          type: "http",
+          host: "proxy.example.com",
+          port: 3128,
+          identityId: "missing-identity",
+        },
+      }),
+      hosts: [],
+      keys: [],
+      identities: [],
+    }),
+    /Proxy identity for "Host" is missing/,
+  );
+});
+
+test("buildSftpHostCredentials rejects incomplete proxy identities", () => {
+  assert.throws(
+    () => buildSftpHostCredentials({
+      host: host({
+        proxyConfig: {
+          type: "http",
+          host: "proxy.example.com",
+          port: 3128,
+          identityId: "identity-1",
+        },
+      }),
+      hosts: [],
+      keys: [],
+      identities: [{
+        id: "identity-1",
+        label: "Proxy login",
+        username: "proxy-user",
+        authMethod: "password",
+        created: 1,
+      }],
+    }),
+    /Proxy identity for "Host" is incomplete/,
+  );
+});
+
+test("buildSftpHostCredentials rejects proxy identities with blank usernames even when passwords are encrypted", () => {
+  assert.throws(
+    () => buildSftpHostCredentials({
+      host: host({
+        proxyConfig: {
+          type: "http",
+          host: "proxy.example.com",
+          port: 3128,
+          identityId: "identity-1",
+        },
+      }),
+      hosts: [],
+      keys: [],
+      identities: [{
+        id: "identity-1",
+        label: "Proxy login",
+        username: " ",
+        authMethod: "password",
+        password: "enc:v1:djEwAAAA",
+        created: 1,
+      }],
+    }),
+    /Proxy identity for "Host" is incomplete/,
+  );
+});
+
+test("buildSftpHostCredentials rejects missing proxy identities on jump hosts", () => {
+  const jumpHost = host({
+    id: "jump-1",
+    label: "Jump",
+    proxyConfig: {
+      type: "http",
+      host: "proxy.example.com",
+      port: 3128,
+      identityId: "missing-identity",
+    },
+  });
+
+  assert.throws(
+    () => buildSftpHostCredentials({
+      host: host({ hostChain: { hostIds: ["jump-1"] } }),
+      hosts: [jumpHost],
+      keys: [],
+      identities: [],
+    }),
+    /Proxy identity for "Jump" is missing/,
+  );
+});
+
+test("buildSftpHostCredentials rejects incomplete proxy identities on jump hosts", () => {
+  const jumpHost = host({
+    id: "jump-1",
+    label: "Jump",
+    proxyConfig: {
+      type: "http",
+      host: "proxy.example.com",
+      port: 3128,
+      identityId: "identity-1",
+    },
+  });
+
+  assert.throws(
+    () => buildSftpHostCredentials({
+      host: host({ hostChain: { hostIds: ["jump-1"] } }),
+      hosts: [jumpHost],
+      keys: [],
+      identities: [{
+        id: "identity-1",
+        label: "Proxy login",
+        username: "",
+        authMethod: "password",
+        password: "enc:v1:djEwAAAA",
+        created: 1,
+      }],
+    }),
+    /Proxy identity for "Jump" is incomplete/,
+  );
+});
+
 test("buildSftpHostCredentials forwards custom ProxyCommand settings", () => {
   const credentials = buildSftpHostCredentials({
     host: host({
@@ -75,6 +198,130 @@ test("buildSftpHostCredentials forwards custom ProxyCommand settings", () => {
     username: undefined,
     password: undefined,
   });
+});
+
+test("buildSftpHostCredentials resolves proxy credentials from a selected identity", () => {
+  const identity: Identity = {
+    id: "identity-1",
+    label: "Proxy login",
+    username: "proxy-user",
+    authMethod: "password",
+    password: "proxy-secret",
+    created: 1,
+  };
+  const credentials = buildSftpHostCredentials({
+    host: host({
+      proxyConfig: {
+        type: "socks5",
+        host: "proxy.example.com",
+        port: 1080,
+        identityId: identity.id,
+      },
+    }),
+    hosts: [],
+    keys: [],
+    identities: [identity],
+  });
+
+  assert.deepEqual(credentials.proxy, {
+    type: "socks5",
+    host: "proxy.example.com",
+    port: 1080,
+    username: "proxy-user",
+    password: "proxy-secret",
+  });
+});
+
+test("buildSftpHostCredentials rejects undecryptable proxy identity passwords", () => {
+  assert.throws(
+    () => buildSftpHostCredentials({
+      host: host({
+        proxyConfig: {
+          type: "http",
+          host: "proxy.example.com",
+          port: 3128,
+          identityId: "identity-1",
+        },
+      }),
+      hosts: [],
+      keys: [],
+      identities: [{
+        id: "identity-1",
+        label: "Proxy login",
+        username: "proxy-user",
+        authMethod: "password",
+        password: "enc:v1:djEwAAAA",
+        created: 1,
+      }],
+    }),
+    /Proxy credentials cannot be decrypted/,
+  );
+});
+
+test("buildSftpHostCredentials resolves jump host proxy credentials from a selected identity", () => {
+  const identity: Identity = {
+    id: "identity-1",
+    label: "Proxy login",
+    username: "proxy-user",
+    authMethod: "password",
+    password: "proxy-secret",
+    created: 1,
+  };
+  const jumpHost = host({
+    id: "jump-1",
+    label: "Jump",
+    proxyConfig: {
+      type: "socks5",
+      host: "jump-proxy.example.com",
+      port: 1080,
+      identityId: identity.id,
+    },
+  });
+
+  const credentials = buildSftpHostCredentials({
+    host: host({ hostChain: { hostIds: ["jump-1"] } }),
+    hosts: [jumpHost],
+    keys: [],
+    identities: [identity],
+  });
+
+  assert.deepEqual(credentials.jumpHosts?.[0]?.proxy, {
+    type: "socks5",
+    host: "jump-proxy.example.com",
+    port: 1080,
+    username: "proxy-user",
+    password: "proxy-secret",
+  });
+});
+
+test("buildSftpHostCredentials rejects undecryptable jump host proxy identity passwords", () => {
+  const jumpHost = host({
+    id: "jump-1",
+    label: "Jump",
+    proxyConfig: {
+      type: "http",
+      host: "proxy.example.com",
+      port: 3128,
+      identityId: "identity-1",
+    },
+  });
+
+  assert.throws(
+    () => buildSftpHostCredentials({
+      host: host({ hostChain: { hostIds: ["jump-1"] } }),
+      hosts: [jumpHost],
+      keys: [],
+      identities: [{
+        id: "identity-1",
+        label: "Proxy login",
+        username: "proxy-user",
+        authMethod: "password",
+        password: "enc:v1:djEwAAAA",
+        created: 1,
+      }],
+    }),
+    /Proxy credentials for jump host "Jump" cannot be decrypted/,
+  );
 });
 
 test("buildSftpHostCredentials passes reference keys as identity file paths", () => {
@@ -122,6 +369,22 @@ test("buildSftpHostCredentials forwards known hosts for SFTP host-key checks", (
   });
 
   assert.equal(credentials.knownHosts, knownHosts);
+});
+
+test("buildSftpHostCredentials forwards the host-key verification setting", () => {
+  const credentials = buildSftpHostCredentials({
+    host: host(),
+    hosts: [],
+    keys: [],
+    identities: [],
+    terminalSettings: {
+      verifyHostKeys: false,
+      keepaliveInterval: 30,
+      keepaliveCountMax: 10,
+    },
+  });
+
+  assert.equal(credentials.verifyHostKeys, false);
 });
 
 test("buildSftpHostCredentials passes jump host reference keys as identity file paths", () => {

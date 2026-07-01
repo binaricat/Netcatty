@@ -129,17 +129,18 @@ jobs:
           path: out/
 
   # ------------------------------------------------------------------
-  # Windows x64 pinned standalone client.
-  # Do not compile this in CI: the upstream Cygwin build can clear the
-  # terminal and never render output on Windows. Ship the SHA256-pinned
-  # FluentTerminal standalone binary verified by fetch-windows.sh.
+  # Windows x64 pinned runtime bundle.
+  # Do not compile this in CI: rebuilding the upstream Cygwin client here
+  # previously regressed Windows startup. Ship the SHA256-pinned Netcatty
+  # bundle with DLLs + terminfo, plus the FluentTerminal standalone fallback,
+  # verified by fetch-windows.sh.
   # ------------------------------------------------------------------
   fetch-windows-x64:
     name: fetch-windows-x64
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Fetch pinned mosh-client.exe (win32-x64)
+      - name: Fetch pinned mosh-client bundle (win32-x64)
         run: |
           set -euo pipefail
           export OUT_DIR="${GITHUB_WORKSPACE}/out"
@@ -212,7 +213,7 @@ jobs:
           {
             printf '%s\n' 'Pre-built `mosh-client` binaries consumed by `scripts/fetch-mosh-binaries.cjs` during `npm run pack`.'
             printf 'Linux/macOS artifacts are built from `mobile-shell/mosh` upstream ref `%s`.\n' "${MOSH_REF}"
-            printf '%s\n\n' 'Windows x64 is the SHA256-pinned FluentTerminal standalone `mosh-client.exe` fallback.'
+            printf '%s\n\n' 'Windows x64 is the SHA256-pinned Netcatty runtime bundle, with the FluentTerminal standalone `mosh-client.exe` kept as a fallback asset.'
             printf 'Source workflow: %s/%s/actions/runs/%s\n' "${GITHUB_SERVER_URL}" "${GITHUB_REPOSITORY}" "${GITHUB_RUN_ID}"
             printf 'Source commit: `%s`\n\n' "${GITHUB_SHA}"
             printf '%s\n' 'All artifacts are GPL-3.0; see `resources/mosh/README.md` for source provenance.'

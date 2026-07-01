@@ -1,5 +1,5 @@
 import React from "react";
-import type { LinkModifier, MiddleClickBehavior, RightClickBehavior, TerminalSettings } from "../../../domain/models";
+import type { DynamicTabTitleMode, LinkModifier, MiddleClickBehavior, RightClickBehavior, TerminalSettings } from "../../../domain/models";
 import { Input } from "../../ui/input";
 import { Label } from "../../ui/label";
 import { SectionHeader, Select, SettingRow, Toggle } from "../settings-ui";
@@ -19,6 +19,15 @@ export const MIDDLE_CLICK_BEHAVIOR_OPTIONS: Array<{
   { value: "context-menu", labelKey: "settings.terminal.behavior.middleClick.menu" },
   { value: "paste", labelKey: "settings.terminal.behavior.middleClick.paste" },
   { value: "disabled", labelKey: "settings.terminal.behavior.middleClick.disabled" },
+];
+
+export const DYNAMIC_TAB_TITLE_MODE_OPTIONS: Array<{
+  value: DynamicTabTitleMode;
+  labelKey: string;
+}> = [
+  { value: "off", labelKey: "settings.terminal.behavior.dynamicTabTitle.off" },
+  { value: "agent", labelKey: "settings.terminal.behavior.dynamicTabTitle.agent" },
+  { value: "all", labelKey: "settings.terminal.behavior.dynamicTabTitle.all" },
 ];
 
 export const TerminalBehaviorSettings: React.FC<TerminalBehaviorSettingsProps> = ({
@@ -93,6 +102,21 @@ export const TerminalBehaviorSettings: React.FC<TerminalBehaviorSettingsProps> =
           description={t("settings.terminal.behavior.forcePromptNewLine.desc")}
         >
           <Toggle checked={terminalSettings.forcePromptNewLine ?? false} onChange={(v) => updateTerminalSetting("forcePromptNewLine", v)} />
+        </SettingRow>
+
+        <SettingRow
+          label={t("settings.terminal.behavior.dynamicTabTitle")}
+          description={t("settings.terminal.behavior.dynamicTabTitle.desc")}
+        >
+          <Select
+            value={terminalSettings.dynamicTabTitleMode ?? "agent"}
+            options={DYNAMIC_TAB_TITLE_MODE_OPTIONS.map((option) => ({
+              value: option.value,
+              label: t(option.labelKey),
+            }))}
+            onChange={(v) => updateTerminalSetting("dynamicTabTitleMode", v as DynamicTabTitleMode)}
+            className="w-44"
+          />
         </SettingRow>
 
         <SettingRow

@@ -1,5 +1,6 @@
 import type { TerminalTheme } from '../../domain/models';
 import { classicTerminalThemes } from './terminalThemes/classic';
+import { systemPresetTerminalThemes } from './terminalThemes/systemPresets';
 import { coreTerminalThemes } from './terminalThemes/core';
 import { extraTerminalThemes } from './terminalThemes/extra';
 import { modernTerminalThemes } from './terminalThemes/modern';
@@ -30,9 +31,14 @@ export const TERMINAL_THEMES: TerminalTheme[] = [
   ...uiMatchTerminalThemes,
   ...modernTerminalThemes,
   ...classicTerminalThemes,
+  ...systemPresetTerminalThemes,
   ...extraTerminalThemes,
 ];
 
+const TERMINAL_THEME_BY_ID = new Map(TERMINAL_THEMES.map((theme) => [theme.id, theme]));
+
+export const getBuiltinTerminalThemeById = (themeId: string): TerminalTheme | undefined =>
+  TERMINAL_THEME_BY_ID.get(themeId);
 
 export const isUiMatchTerminalThemeId = (themeId: string): boolean =>
   UI_MATCH_TERMINAL_THEME_IDS.has(themeId);

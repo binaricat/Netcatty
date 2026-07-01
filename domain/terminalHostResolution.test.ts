@@ -120,6 +120,64 @@ test("resolveTerminalSessionHost keeps explicit missing local sessions local", (
   assert.equal(resolved.os, "macos");
 });
 
+test("resolveTerminalSessionHost suppresses inherited network device mode for Mosh sessions", () => {
+  const host: Host = {
+    id: "target",
+    label: "Target",
+    hostname: "target.example.test",
+    username: "alice",
+    port: 22,
+    protocol: "ssh",
+    tags: [],
+    os: "linux",
+    group: "prod/web",
+  };
+  const groupConfigs: GroupConfig[] = [
+    { path: "prod", deviceType: "network" },
+    { path: "prod/web", moshEnabled: true },
+  ];
+
+  const resolved = resolveTerminalSessionHost({
+    session: baseSession,
+    hosts: [host],
+    groupConfigs,
+    proxyProfiles,
+    localOs: "linux",
+  });
+
+  assert.equal(resolved.moshEnabled, true);
+  assert.equal(resolved.deviceType, undefined);
+});
+
+test("resolveTerminalSessionHost suppresses explicit network device mode for ET session overrides", () => {
+  const host: Host = {
+    id: "target",
+    label: "Target",
+    hostname: "target.example.test",
+    username: "alice",
+    port: 22,
+    protocol: "ssh",
+    tags: [],
+    os: "linux",
+    deviceType: "network",
+  };
+
+  const resolved = resolveTerminalSessionHost({
+    session: {
+      ...baseSession,
+      etEnabled: true,
+    },
+    hosts: [host],
+    groupConfigs: [],
+    proxyProfiles,
+    localOs: "linux",
+  });
+
+  assert.equal(resolved.etEnabled, true);
+  assert.equal(resolved.deviceType, undefined);
+  assert.equal(host.deviceType, "network");
+});
+
 test("resolveTerminalChainHosts materializes proxy profiles on jump hosts", () => {
   const target: Host = {
     id: "target",

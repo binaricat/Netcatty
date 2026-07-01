@@ -18,16 +18,21 @@ import { useI18n } from "../application/i18n/I18nProvider";
 import { useStoredViewMode } from "../application/state/useStoredViewMode";
 import {
   formatProxyConfigEndpoint,
+  hasIncompleteProxyIdentity,
+  hasMissingProxyIdentity,
+  hasUnreadableProxyCredential,
   isProxyCommandConfig,
   isValidProxyPort,
+  normalizeManualProxyConfig,
   removeProxyProfileReferences,
+  updateProxyConfigField,
 } from "../domain/proxyProfiles";
 import { reorderVaultItems, sortByVaultOrder } from "../domain/vaultOrder";
 import {
   STORAGE_KEY_VAULT_PROXY_PROFILES_VIEW_MODE,
 } from "../infrastructure/config/storageKeys";
 import { cn } from "../lib/utils";
-import type { GroupConfig, Host, ProxyConfig, ProxyProfile } from "../types";
+import type { GroupConfig, Host, Identity, ProxyConfig, ProxyProfile } from "../types";
 import {
   AsidePanel,
   AsidePanelContent,
@@ -74,10 +79,56 @@ interface ProxyProfilesManagerProps {
   proxyProfiles: ProxyProfile[];
   hosts: Host[];
   groupConfigs: GroupConfig[];
+  identities: Identity[];
   onUpdateProxyProfiles: (profiles: ProxyProfile[]) => void;
   onUpdateHosts: (hosts: Host[]) => void;
   onUpdateGroupConfigs: (configs: GroupConfig[]) => void;
 }
+
+export type ProxyProfileSaveError =
+  | "required"
+  | "port"
+  | "missingIdentity"
+  | "incompleteIdentity"
+  | "unreadableIdentity";
+
+export const prepareProxyProfileForSave = (
+  draft: ProxyProfile,
+  identities: Identity[],
+  updatedAt = Date.now(),
+): { saved?: ProxyProfile; error?: ProxyProfileSaveError } => {
+  const label = draft.label.trim();
+  const host = draft.config.host.trim();
+  const command = draft.config.command?.trim() || "";
+  const isCommand = isProxyCommandConfig(draft.config);
+  if (!label || (isCommand ? !command : (!host || !draft.config.port))) {
+    return { error: "required" };
+  }
+  if (!isCommand && !isValidProxyPort(draft.config.port)) {
+    return { error: "port" };
+  }
+  if (!isCommand && hasMissingProxyIdentity(draft.config, identities)) {
+    return { error: "missingIdentity" };
+  }
+  if (!isCommand && hasIncompleteProxyIdentity(draft.config, identities)) {
+    return { error: "incompleteIdentity" };
+  }
+  if (!isCommand && hasUnreadableProxyCredential(draft.config, identities)) {
+    return { error: "unreadableIdentity" };
+  }
+
+  const normalizedConfig = normalizeManualProxyConfig(draft.config);
+  if (!normalizedConfig) return { error: "required" };
+
+  return {
+    saved: {
+      ...draft,
+      label,
+      config: normalizedConfig,
+      updatedAt,
+    },
+  };
+};
 
 const createDraftProfile = (): ProxyProfile => {
   const now = Date.now();
@@ -217,6 +268,7 @@ export const ProxyProfilesManager: React.FC<ProxyProfilesManagerProps> = ({
   proxyProfiles,
   hosts,
   groupConfigs,
+  identities,
   onUpdateProxyProfiles,
   onUpdateHosts,
   onUpdateGroupConfigs,
@@ -232,6 +284,18 @@ export const ProxyProfilesManager: React.FC<ProxyProfilesManagerProps> = ({
   const [draft, setDraft] = useState<ProxyProfile | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ProxyProfile | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
+  const manualCredentialsValue = "__manual_credentials__";
+  const missingIdentityValue = "__missing_identity__";
+  const selectedDraftIdentity = useMemo(
+    () => identities.find((identity) => identity.id === draft?.config.identityId),
+    [draft?.config.identityId, identities],
+  );
+  const hasMissingDraftIdentity = hasMissingProxyIdentity(draft?.config, identities);
+  const hasIncompleteDraftIdentity = hasIncompleteProxyIdentity(draft?.config, identities);
+  const hasUnreadableDraftIdentity = hasUnreadableProxyCredential(draft?.config, identities);
+  const selectedDraftIdentityValue =
+    selectedDraftIdentity?.id ||
+    (hasMissingDraftIdentity ? missingIdentityValue : manualCredentialsValue);
 
   const usageByProfileId = useMemo(() => {
     const map = new Map<string, number>();
@@ -263,15 +327,12 @@ export const ProxyProfilesManager: React.FC<ProxyProfilesManagerProps> = ({
     },
   });
 
-  const updateDraftConfig = (field: keyof ProxyConfig, value: string | number) => {
+  const updateDraftConfig = (field: keyof ProxyConfig, value: ProxyConfig[keyof ProxyConfig]) => {
     setDraft((prev) => {
       if (!prev) return prev;
       return {
         ...prev,
-        config: {
-          ...prev.config,
-          [field]: value,
-        },
+        config: updateProxyConfigField(prev.config, field, value),
       };
     });
   };
@@ -304,38 +365,21 @@ export const ProxyProfilesManager: React.FC<ProxyProfilesManagerProps> = ({
 
   const saveDraft = () => {
     if (!draft) return;
-    const label = draft.label.trim();
-    const host = draft.config.host.trim();
-    const command = draft.config.command?.trim() || "";
-    const isCommand = isProxyCommandConfig(draft.config);
-    if (!label || (isCommand ? !command : (!host || !draft.config.port))) {
-      toast.error(t("proxyProfiles.error.required"));
+    const result = prepareProxyProfileForSave(draft, identities);
+    if (!result.saved) {
+      const messageKey = result.error === "port"
+        ? "proxyProfiles.error.port"
+        : result.error === "missingIdentity"
+          ? "hostDetails.proxyPanel.missingIdentity"
+          : result.error === "incompleteIdentity"
+            ? "hostDetails.proxyPanel.incompleteIdentity"
+            : result.error === "unreadableIdentity"
+              ? "hostDetails.proxyPanel.unreadableIdentity"
+              : "proxyProfiles.error.required";
+      toast.error(t(messageKey));
       return;
     }
-    if (!isCommand && !isValidProxyPort(draft.config.port)) {
-      toast.error(t("proxyProfiles.error.port"));
-      return;
-    }
-
-    const saved: ProxyProfile = {
-      ...draft,
-      label,
-      config: isCommand
-        ? {
-          type: "command",
-          host: "",
-          port: 0,
-          command,
-        }
-        : {
-          ...draft.config,
-          host,
-          port: Number(draft.config.port),
-          username: draft.config.username?.trim() || undefined,
-          password: draft.config.password || undefined,
-        },
-      updatedAt: Date.now(),
-    };
+    const saved = result.saved;
 
     onUpdateProxyProfiles(
       proxyProfiles.some((profile) => profile.id === saved.id)
@@ -565,21 +609,90 @@ export const ProxyProfilesManager: React.FC<ProxyProfilesManagerProps> = ({
                 </div>
                 <Badge variant="secondary" className="text-xs">{t("common.optional")}</Badge>
               </div>
-              <Input
-                aria-label={t("hostDetails.proxyPanel.usernamePlaceholder")}
-                value={draft.config.username || ""}
-                onChange={(event) => updateDraftConfig("username", event.target.value)}
-                placeholder={t("hostDetails.proxyPanel.usernamePlaceholder")}
-                className="h-10"
-              />
-              <Input
-                aria-label={t("hostDetails.proxyPanel.passwordPlaceholder")}
-                type="password"
-                value={draft.config.password || ""}
-                onChange={(event) => updateDraftConfig("password", event.target.value)}
-                placeholder={t("hostDetails.proxyPanel.passwordPlaceholder")}
-                className="h-10"
-              />
+              {identities.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-xs text-muted-foreground">
+                    {t("hostDetails.proxyPanel.keychainIdentity")}
+                  </p>
+                  <Select
+                    value={selectedDraftIdentityValue}
+                    onValueChange={(value) => {
+                      if (value === missingIdentityValue) return;
+                      updateDraftConfig(
+                        "identityId",
+                        value === manualCredentialsValue ? undefined : value,
+                      );
+                    }}
+                  >
+                    <SelectTrigger
+                      aria-label={t("hostDetails.proxyPanel.keychainIdentity")}
+                      className="h-10"
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={manualCredentialsValue}>
+                        {t("hostDetails.proxyPanel.manualCredentials")}
+                      </SelectItem>
+                      {hasMissingDraftIdentity && (
+                        <SelectItem value={missingIdentityValue}>
+                          {t("hostDetails.proxyPanel.missingIdentity")}
+                        </SelectItem>
+                      )}
+                      {identities.map((identity) => (
+                        <SelectItem key={identity.id} value={identity.id}>
+                          {identity.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+              {hasMissingDraftIdentity && (
+                <div className="min-w-0 rounded-md border border-destructive/30 bg-destructive/10 p-2 text-sm text-destructive">
+                  {t("hostDetails.proxyPanel.missingIdentity")}
+                </div>
+              )}
+              {hasIncompleteDraftIdentity && (
+                <div className="min-w-0 rounded-md border border-destructive/30 bg-destructive/10 p-2 text-sm text-destructive">
+                  {t("hostDetails.proxyPanel.incompleteIdentity")}
+                </div>
+              )}
+              {hasUnreadableDraftIdentity && (
+                <div className="min-w-0 rounded-md border border-destructive/30 bg-destructive/10 p-2 text-sm text-destructive">
+                  {t("hostDetails.proxyPanel.unreadableIdentity")}
+                </div>
+              )}
+              {selectedDraftIdentity ? (
+                <div className="min-w-0 rounded-md bg-secondary/50 p-2 text-sm">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <Badge variant="secondary" className="text-xs shrink-0">
+                      {t("hostDetails.proxyPanel.keychainIdentity")}
+                    </Badge>
+                    <span className="truncate">
+                      {selectedDraftIdentity.label} - {selectedDraftIdentity.username}
+                    </span>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <Input
+                    aria-label={t("hostDetails.proxyPanel.usernamePlaceholder")}
+                    value={draft.config.username || ""}
+                    onChange={(event) => updateDraftConfig("username", event.target.value)}
+                    placeholder={t("hostDetails.proxyPanel.usernamePlaceholder")}
+                    className="h-10"
+                  />
+                  <Input
+                    aria-label={t("hostDetails.proxyPanel.passwordPlaceholder")}
+                    type="password"
+                    value={draft.config.password || ""}
+                    onChange={(event) => updateDraftConfig("password", event.target.value)}
+                    placeholder={t("hostDetails.proxyPanel.passwordPlaceholder")}
+                    className="h-10"
+                  />
+                </>
+              )}
             </Card>}
           </AsidePanelContent>
           <AsidePanelFooter>

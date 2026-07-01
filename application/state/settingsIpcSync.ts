@@ -39,14 +39,19 @@ import {
   STORAGE_KEY_UI_THEME_LIGHT,
   STORAGE_KEY_WORKSPACE_FOCUS_STYLE,
   STORAGE_KEY_SHOW_HOST_TREE_SIDEBAR,
+  STORAGE_KEY_TERMINAL_SIDE_PANEL_AUTO_OPEN,
+  STORAGE_KEY_TERMINAL_SIDE_PANEL_AUTO_OPEN_TAB,
   STORAGE_KEY_WINDOW_OPACITY,
+  STORAGE_KEY_APP_ICON_VARIANT,
 } from '../../infrastructure/config/storageKeys';
+import { resolveAppIconVariant, type AppIconVariant } from '../../domain/appIconVariant';
 import { netcattyBridge } from '../../infrastructure/services/netcattyBridge';
 import {
   clampWindowOpacity,
   isValidUiFontId,
   migrateIncomingTerminalFontId,
 } from './settingsStateDefaults';
+import { isTerminalSidePanelAutoOpenTab, type TerminalSidePanelAutoOpenTab } from '../../domain/terminalSidePanelAutoOpen';
 
 interface UseSettingsIpcSyncParams {
   enabled?: boolean;
@@ -73,12 +78,15 @@ interface UseSettingsIpcSyncParams {
   setIsHotkeyRecordingState: Dispatch<SetStateAction<boolean>>;
   setGlobalHotkeyEnabled: Dispatch<SetStateAction<boolean>>;
   setWindowOpacity: Dispatch<SetStateAction<number>>;
+  setAppIconVariant: Dispatch<SetStateAction<AppIconVariant>>;
   setAutoUpdateEnabled: Dispatch<SetStateAction<boolean>>;
   setSftpAutoOpenSidebar: Dispatch<SetStateAction<boolean>>;
   setSftpFollowTerminalCwd: Dispatch<SetStateAction<boolean>>;
   setSftpDefaultViewMode: Dispatch<SetStateAction<'list' | 'tree'>>;
   setWorkspaceFocusStyleState: Dispatch<SetStateAction<'dim' | 'border'>>;
   setShowHostTreeSidebarState: Dispatch<SetStateAction<boolean>>;
+  setTerminalSidePanelAutoOpenState: Dispatch<SetStateAction<boolean>>;
+  setTerminalSidePanelAutoOpenTabState: Dispatch<SetStateAction<TerminalSidePanelAutoOpenTab>>;
   setDisableTerminalFontZoomState: Dispatch<SetStateAction<boolean>>;
   setRestorePreviousSessionState: Dispatch<SetStateAction<boolean>>;
   setRestoreTerminalCwdState: Dispatch<SetStateAction<boolean>>;
@@ -110,12 +118,15 @@ export function useSettingsIpcSync({
   setIsHotkeyRecordingState,
   setGlobalHotkeyEnabled,
   setWindowOpacity,
+  setAppIconVariant,
   setAutoUpdateEnabled,
   setSftpAutoOpenSidebar,
   setSftpFollowTerminalCwd,
   setSftpDefaultViewMode,
   setWorkspaceFocusStyleState,
   setShowHostTreeSidebarState,
+  setTerminalSidePanelAutoOpenState,
+  setTerminalSidePanelAutoOpenTabState,
   setDisableTerminalFontZoomState,
   setRestorePreviousSessionState,
   setRestoreTerminalCwdState,
@@ -226,6 +237,10 @@ export function useSettingsIpcSync({
         const nextOpacity = clampWindowOpacity(value);
         setWindowOpacity((prev) => (prev === nextOpacity ? prev : nextOpacity));
       }
+      if (key === STORAGE_KEY_APP_ICON_VARIANT) {
+        const nextVariant = resolveAppIconVariant(value);
+        setAppIconVariant((prev) => (prev === nextVariant ? prev : nextVariant));
+      }
       if (key === STORAGE_KEY_AUTO_UPDATE_ENABLED && typeof value === 'boolean') {
         setAutoUpdateEnabled((prev) => (prev === value ? prev : value));
       }
@@ -245,6 +260,12 @@ export function useSettingsIpcSync({
       }
       if (key === STORAGE_KEY_SHOW_HOST_TREE_SIDEBAR && typeof value === 'boolean') {
         setShowHostTreeSidebarState((prev) => (prev === value ? prev : value));
+      }
+      if (key === STORAGE_KEY_TERMINAL_SIDE_PANEL_AUTO_OPEN && typeof value === 'boolean') {
+        setTerminalSidePanelAutoOpenState((prev) => (prev === value ? prev : value));
+      }
+      if (key === STORAGE_KEY_TERMINAL_SIDE_PANEL_AUTO_OPEN_TAB && isTerminalSidePanelAutoOpenTab(value)) {
+        setTerminalSidePanelAutoOpenTabState((prev) => (prev === value ? prev : value));
       }
       if (key === STORAGE_KEY_DISABLE_TERMINAL_FONT_ZOOM && typeof value === 'boolean') {
         setDisableTerminalFontZoomState((prev) => (prev === value ? prev : value));
@@ -275,6 +296,7 @@ export function useSettingsIpcSync({
     setFollowAppTerminalThemeState,
     setGlobalHotkeyEnabled,
     setWindowOpacity,
+    setAppIconVariant,
     setHotkeyScheme,
     setIsHotkeyRecordingState,
     setSessionLogsDir,
@@ -287,6 +309,8 @@ export function useSettingsIpcSync({
     setSftpFollowTerminalCwd,
     setSftpDefaultViewMode,
     setShowHostTreeSidebarState,
+    setTerminalSidePanelAutoOpenState,
+    setTerminalSidePanelAutoOpenTabState,
     setDisableTerminalFontZoomState,
     setRestorePreviousSessionState,
     setRestoreTerminalCwdState,

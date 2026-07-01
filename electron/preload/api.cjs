@@ -1,5 +1,51 @@
- 
+const { clearTerminalDataSession } = require("./terminalDataBacklog.cjs");
+
 function createPreloadApi(ctx) {
+  const terminalDataBacklog = ctx.terminalDataBacklog || null;
+  const displayDataListeners = ctx.displayDataListeners || new Map();
+  const closedTerminalDataSessions = ctx.closedTerminalDataSessions || null;
+  const markTerminalDataSessionOpen = (sessionId) => {
+    if (!sessionId) return;
+    closedTerminalDataSessions?.delete?.(sessionId);
+  };
+  const markRequestedTerminalDataSessionOpen = (options) => {
+    markTerminalDataSessionOpen(options?.sessionId);
+  };
+  const markTerminalDataSessionClosed = (sessionId) => {
+    if (!sessionId) return;
+    closedTerminalDataSessions?.add?.(sessionId);
+    clearTerminalDataSession({
+      dataListeners: ctx.dataListeners,
+      displayDataListeners,
+      terminalDataBacklog,
+    }, sessionId);
+    ctx.terminalOutputPorts?.closeSession?.(sessionId);
+  };
+  const sanitizeInterruptTrace = (trace) => {
+    if (!trace || typeof trace !== "object") return undefined;
+    const priority = trace.rendererPriority && typeof trace.rendererPriority === "object"
+      ? {
+          sessionId: typeof trace.rendererPriority.sessionId === "string" ? trace.rendererPriority.sessionId : null,
+          backlogBytes: Number(trace.rendererPriority.backlogBytes) || 0,
+          writeQueueDepth: Number(trace.rendererPriority.writeQueueDepth) || 0,
+          deferredAckBytes: Number(trace.rendererPriority.deferredAckBytes) || 0,
+          ackAfterInputBytes: Number(trace.rendererPriority.ackAfterInputBytes) || 0,
+          scheduledBackendResume: Boolean(trace.rendererPriority.scheduledBackendResume),
+          skippedReason: typeof trace.rendererPriority.skippedReason === "string" ? trace.rendererPriority.skippedReason : undefined,
+        }
+      : undefined;
+    return {
+      debug: trace.debug === true,
+      traceId: typeof trace.traceId === "string" ? trace.traceId.slice(0, 128) : undefined,
+      source: typeof trace.source === "string" ? trace.source.slice(0, 80) : undefined,
+      sessionId: typeof trace.sessionId === "string" ? trace.sessionId : undefined,
+      rendererKeyAt: Number.isFinite(trace.rendererKeyAt) ? trace.rendererKeyAt : undefined,
+      rendererSendAt: Number.isFinite(trace.rendererSendAt) ? trace.rendererSendAt : undefined,
+      rendererStatus: typeof trace.rendererStatus === "string" ? trace.rendererStatus.slice(0, 40) : undefined,
+      rendererHasSelection: trace.rendererHasSelection === true,
+      rendererPriority: priority,
+    };
+  };
   with (ctx) {
     return {
   getWindowsPtyInfo: () => {
@@ -16,27 +62,39 @@ function createPreloadApi(ctx) {
     return hasBuildNumber ? { backend, buildNumber } : { backend };
   },
   startSSHSession: async (options) => {
+    markRequestedTerminalDataSessionOpen(options);
     const result = await ipcRenderer.invoke("netcatty:start", options);
+    markTerminalDataSessionOpen(result?.sessionId);
     return result.sessionId;
   },
   startTelnetSession: async (options) => {
+    markRequestedTerminalDataSessionOpen(options);
     const result = await ipcRenderer.invoke("netcatty:telnet:start", options);
+    markTerminalDataSessionOpen(result?.sessionId);
     return result.sessionId;
   },
   startMoshSession: async (options) => {
+    markRequestedTerminalDataSessionOpen(options);
     const result = await ipcRenderer.invoke("netcatty:mosh:start", options);
+    markTerminalDataSessionOpen(result?.sessionId);
     return result.sessionId;
   },
   startEtSession: async (options) => {
+    markRequestedTerminalDataSessionOpen(options);
     const result = await ipcRenderer.invoke("netcatty:et:start", options);
+    markTerminalDataSessionOpen(result?.sessionId);
     return result.sessionId;
   },
   startLocalSession: async (options) => {
+    markRequestedTerminalDataSessionOpen(options);
     const result = await ipcRenderer.invoke("netcatty:local:start", options || {});
+    markTerminalDataSessionOpen(result?.sessionId);
     return result.sessionId;
   },
   startSerialSession: async (options) => {
+    markRequestedTerminalDataSessionOpen(options);
     const result = await ipcRenderer.invoke("netcatty:serial:start", options);
+    markTerminalDataSessionOpen(result?.sessionId);
     return result.sessionId;
   },
   listSerialPorts: async () => {
@@ -70,6 +128,13 @@ function createPreloadApi(ctx) {
         : undefined,
     });
   },
+  interruptSession: (sessionId, trace) => {
+    const sanitizedTrace = sanitizeInterruptTrace(trace);
+    if (ctx.terminalUrgentInputPorts?.postInterrupt?.(sessionId, sanitizedTrace)) {
+      return;
+    }
+    ipcRenderer.send("netcatty:interrupt", { sessionId, trace: sanitizedTrace });
+  },
   execCommand: async (options) => {
     return ipcRenderer.invoke("netcatty:ssh:exec", options);
   },
@@ -96,6 +161,9 @@ function createPreloadApi(ctx) {
   },
   signalSystemProcess: async (options) => {
     return ipcRenderer.invoke("netcatty:system:signalProcess", options);
+  },
+  setupOsc7Tracking: async (sessionId, command) => {
+    return ipcRenderer.invoke("netcatty:system:setupOsc7Tracking", { sessionId, command });
   },
   listTmuxSessions: async (sessionId) => {
     return ipcRenderer.invoke("netcatty:system:listTmuxSessions", { sessionId });
@@ -175,7 +243,13 @@ function createPreloadApi(ctx) {
   setSessionFlowPaused: (sessionId, paused) => {
     ipcRenderer.send("netcatty:flow", { sessionId, paused: Boolean(paused) });
   },
+  ackSessionFlow: (sessionId, bytes) => {
+    if (!sessionId || !Number.isFinite(bytes) || bytes <= 0) return;
+    ipcRenderer.send("netcatty:flow:ack", { sessionId, bytes });
+  },
   closeSession: (sessionId) => {
+    markTerminalDataSessionClosed(sessionId);
+    telnetEchoModeListeners.delete(sessionId);
     ipcRenderer.send("netcatty:close", { sessionId });
   },
   setSessionEncoding: async (sessionId, encoding) => {
@@ -209,15 +283,42 @@ function createPreloadApi(ctx) {
   respondZmodemOverwrite: (payload) => {
     ipcRenderer.send("netcatty:zmodem:overwrite-response", payload);
   },
-  onSessionData: (sessionId, cb) => {
+  onSessionData: (sessionId, cb, options) => {
+    const replayBacklog = options?.replayBacklog === true;
     if (!dataListeners.has(sessionId)) dataListeners.set(sessionId, new Set());
     dataListeners.get(sessionId).add(cb);
-    return () => dataListeners.get(sessionId)?.delete(cb);
+    if (replayBacklog) {
+      if (!displayDataListeners.has(sessionId)) displayDataListeners.set(sessionId, new Set());
+      displayDataListeners.get(sessionId).add(cb);
+      const pendingEntry = terminalDataBacklog?.takeEntry?.(sessionId)
+        ?? { data: terminalDataBacklog?.take?.(sessionId) || "", meta: undefined };
+      if (pendingEntry.data) {
+        try {
+          cb(pendingEntry.data, pendingEntry.meta);
+        } catch (err) {
+          console.error("Data callback failed", err);
+        }
+      }
+    }
+    return () => {
+      const dataSet = dataListeners.get(sessionId);
+      dataSet?.delete(cb);
+      if (dataSet?.size === 0) dataListeners.delete(sessionId);
+
+      if (!replayBacklog) return;
+      const displaySet = displayDataListeners.get(sessionId);
+      displaySet?.delete(cb);
+      if (displaySet?.size === 0) displayDataListeners.delete(sessionId);
+    };
   },
   onSessionExit: (sessionId, cb) => {
     if (!exitListeners.has(sessionId)) exitListeners.set(sessionId, new Set());
     exitListeners.get(sessionId).add(cb);
-    return () => exitListeners.get(sessionId)?.delete(cb);
+    return () => {
+      const set = exitListeners.get(sessionId);
+      set?.delete(cb);
+      if (set?.size === 0) exitListeners.delete(sessionId);
+    };
   },
   onTelnetAutoLoginComplete: (sessionId, cb) => {
     if (!telnetAutoLoginCompleteListeners.has(sessionId)) {
@@ -232,6 +333,13 @@ function createPreloadApi(ctx) {
     }
     telnetAutoLoginCancelledListeners.get(sessionId).add(cb);
     return () => telnetAutoLoginCancelledListeners.get(sessionId)?.delete(cb);
+  },
+  onTelnetEchoMode: (sessionId, cb) => {
+    if (!telnetEchoModeListeners.has(sessionId)) {
+      telnetEchoModeListeners.set(sessionId, new Set());
+    }
+    telnetEchoModeListeners.get(sessionId).add(cb);
+    return () => telnetEchoModeListeners.get(sessionId)?.delete(cb);
   },
   onAuthFailed: (sessionId, cb) => {
     if (!authFailedListeners.has(sessionId)) authFailedListeners.set(sessionId, new Set());
@@ -406,6 +514,9 @@ function createPreloadApi(ctx) {
   setWindowOpacity: async (opacity) => {
     return ipcRenderer.invoke("netcatty:setWindowOpacity", opacity);
   },
+  setAppIconVariant: async (variant) => {
+    return ipcRenderer.invoke("netcatty:setAppIconVariant", variant);
+  },
   setLanguage: async (language) => {
     return ipcRenderer.invoke("netcatty:setLanguage", language);
   },
@@ -472,6 +583,14 @@ function createPreloadApi(ctx) {
   onWindowFullScreenChanged: (cb) => {
     fullscreenChangeListeners.add(cb);
     return () => fullscreenChangeListeners.delete(cb);
+  },
+  onWindowShown: (cb) => {
+    windowShownListeners.add(cb);
+    return () => windowShownListeners.delete(cb);
+  },
+  onWindowWillHide: (cb) => {
+    windowWillHideListeners.add(cb);
+    return () => windowWillHideListeners.delete(cb);
   },
   
   // Settings window
@@ -751,6 +870,12 @@ function createPreloadApi(ctx) {
     ipcRenderer.invoke("netcatty:sessionLogs:autoSave", payload),
   openSessionLogsDir: (directory) =>
     ipcRenderer.invoke("netcatty:sessionLogs:openDir", { directory }),
+  startManualSessionLog: (payload) =>
+    ipcRenderer.invoke("netcatty:sessionLog:manualStart", payload),
+  stopManualSessionLog: (payload) =>
+    ipcRenderer.invoke("netcatty:sessionLog:manualStop", payload),
+  getManualSessionLogStatus: (payload) =>
+    ipcRenderer.invoke("netcatty:sessionLog:manualStatus", payload),
 
   // Crash Logs
   getCrashLogs: () =>
@@ -920,6 +1045,12 @@ function createPreloadApi(ctx) {
   aiCattyCancelExec: async (chatSessionId) => {
     return ipcRenderer.invoke("netcatty:ai:catty:cancel", { chatSessionId });
   },
+  aiSetChatSessionCancelled: async (chatSessionId, cancelled = true) => {
+    return ipcRenderer.invoke("netcatty:ai:chat-session:set-cancelled", { chatSessionId, cancelled });
+  },
+  aiCapability: async (rpcMethod, params, chatSessionId) => {
+    return ipcRenderer.invoke("netcatty:ai:capability", { rpcMethod, params, chatSessionId });
+  },
   aiDiscoverAgents: async (options) => {
     return ipcRenderer.invoke("netcatty:ai:agents:discover", options);
   },
@@ -947,6 +1078,9 @@ function createPreloadApi(ctx) {
   // MCP Server session metadata
   aiMcpUpdateSessions: async (sessions, chatSessionId) => {
     return ipcRenderer.invoke("netcatty:ai:mcp:update-sessions", { sessions, chatSessionId });
+  },
+  aiMcpUpdateAttachments: async (attachments, chatSessionId) => {
+    return ipcRenderer.invoke("netcatty:ai:mcp:update-attachments", { attachments, chatSessionId });
   },
   aiMcpSetCommandBlocklist: async (blocklist) => {
     return ipcRenderer.invoke("netcatty:ai:mcp:set-command-blocklist", { blocklist });
@@ -984,6 +1118,9 @@ function createPreloadApi(ctx) {
   publicMcpClaudeAdd: async () => {
     return ipcRenderer.invoke("netcatty:public-mcp:claude:add");
   },
+  aiMcpSyncPermissionGrants: async (grants) => {
+    return ipcRenderer.invoke("netcatty:ai:mcp:sync-permission-grants", { grants });
+  },
   aiUserSkillsGetStatus: async () => {
     return ipcRenderer.invoke("netcatty:ai:user-skills:status");
   },
@@ -1007,6 +1144,14 @@ function createPreloadApi(ctx) {
     const handler = (_event, payload) => cb(payload);
     ipcRenderer.on("netcatty:ai:mcp:approval-cleared", handler);
     return () => ipcRenderer.removeListener("netcatty:ai:mcp:approval-cleared", handler);
+  },
+  onVaultAgentRequest: (cb) => {
+    const handler = (_event, payload) => cb(payload);
+    ipcRenderer.on("netcatty:ai:vault-agent:request", handler);
+    return () => ipcRenderer.removeListener("netcatty:ai:vault-agent:request", handler);
+  },
+  respondVaultAgent: async (requestId, result) => {
+    return ipcRenderer.invoke("netcatty:ai:vault-agent:response", { requestId, result });
   },
   // SDK external agent streaming
   aiSdkAgentStream: async (requestId, chatSessionId, sdkBackend, prompt, cwd, providerId, model, existingSessionId, historyMessages, images, toolIntegrationMode, defaultTargetSession, userSkillsContext, agentEnv, agentCommand) => {
@@ -1083,6 +1228,39 @@ function createPreloadApi(ctx) {
     };
     ipcRenderer.on("netcatty:ai:agent:exit", handler);
     return () => ipcRenderer.removeListener("netcatty:ai:agent:exit", handler);
+  },
+  scriptRun: async (params) => ipcRenderer.invoke("netcatty:script:run", params),
+  scriptStop: async (runId) => ipcRenderer.invoke("netcatty:script:stop", { runId }),
+  scriptPause: async (runId) => ipcRenderer.invoke("netcatty:script:pause", { runId }),
+  scriptResume: async (runId) => ipcRenderer.invoke("netcatty:script:resume", { runId }),
+  scriptGetRuns: async (sessionId) => ipcRenderer.invoke("netcatty:script:get-runs", sessionId ? { sessionId } : {}),
+  scriptDialogResponse: async (requestId, value, cancelled) =>
+    ipcRenderer.invoke("netcatty:script:dialog-response", { requestId, value, cancelled }),
+  scriptScreenSnapshotResponse: async (requestId, snapshot) =>
+    ipcRenderer.invoke("netcatty:script:screen-snapshot-response", { requestId, snapshot }),
+  scriptRecordingStart: async (sessionId) => ipcRenderer.invoke("netcatty:script:recording:start", { sessionId }),
+  scriptRecordingStop: async (sessionId) => ipcRenderer.invoke("netcatty:script:recording:stop", { sessionId }),
+  scriptRecordingAppendStep: async (sessionId, step) =>
+    ipcRenderer.invoke("netcatty:script:recording:append-step", { sessionId, step }),
+  onScriptRunsUpdated: (cb) => {
+    const handler = (_event, payload) => cb(payload);
+    ipcRenderer.on("netcatty:script:runs-updated", handler);
+    return () => ipcRenderer.removeListener("netcatty:script:runs-updated", handler);
+  },
+  onScriptDialogRequest: (cb) => {
+    const handler = (_event, payload) => cb(payload);
+    ipcRenderer.on("netcatty:script:dialog-request", handler);
+    return () => ipcRenderer.removeListener("netcatty:script:dialog-request", handler);
+  },
+  onScriptScreenSnapshotRequest: (cb) => {
+    const handler = (_event, payload) => cb(payload);
+    ipcRenderer.on("netcatty:script:screen-snapshot-request", handler);
+    return () => ipcRenderer.removeListener("netcatty:script:screen-snapshot-request", handler);
+  },
+  onScriptSessionInput: (cb) => {
+    const handler = (_event, payload) => cb(payload);
+    ipcRenderer.on("netcatty:script:session-input", handler);
+    return () => ipcRenderer.removeListener("netcatty:script:session-input", handler);
   },
     };
   }

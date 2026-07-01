@@ -5,6 +5,9 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 const { mcpEnvPairsToObject } = require("./injectMcp.cjs");
+const {
+  buildOpenCodeSkillsPermissionRules,
+} = require("./netcattySkillsOpenCodePermissions.cjs");
 
 const OPENCODE_IMAGE_MEDIA_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
 const DEFAULT_OPENCODE_PORT = 4096;
@@ -55,17 +58,21 @@ function toOpenCodeMcpConfig(injectedMcpServers) {
   return mcp;
 }
 
-function buildOpenCodeConfig({ model, injectedMcpServers, toolIntegrationMode } = {}) {
+function buildOpenCodeConfig({ model, injectedMcpServers, toolIntegrationMode, skillsPathAllowlist } = {}) {
   const allowBash = toolIntegrationMode === "skills";
+  const permission = {
+    edit: "deny",
+    bash: allowBash ? "allow" : "deny",
+    webfetch: "deny",
+    external_directory: "deny",
+  };
+  if (allowBash && Array.isArray(skillsPathAllowlist) && skillsPathAllowlist.length > 0) {
+    Object.assign(permission, buildOpenCodeSkillsPermissionRules(skillsPathAllowlist));
+  }
   const config = {
     share: "disabled",
     autoupdate: false,
-    permission: {
-      edit: "deny",
-      bash: allowBash ? "allow" : "deny",
-      webfetch: "deny",
-      external_directory: "deny",
-    },
+    permission,
     mcp: toOpenCodeMcpConfig(injectedMcpServers),
   };
   if (model) config.model = model;
@@ -505,9 +512,9 @@ function createStopWait() {
 
 async function runOpenCodeTurn({
   prompt, systemPrompt, attachments, cwd, model, injectedMcpServers, toolIntegrationMode,
-  resumeSessionId, env, binPath, emitter, abortController, openCodeFactory,
+  skillsPathAllowlist, resumeSessionId, env, binPath, emitter, abortController, openCodeFactory,
 }) {
-  const config = buildOpenCodeConfig({ model, injectedMcpServers, toolIntegrationMode });
+  const config = buildOpenCodeConfig({ model, injectedMcpServers, toolIntegrationMode, skillsPathAllowlist });
   let opencode = null;
   let sessionId = resumeSessionId || null;
   let hasContent = false;

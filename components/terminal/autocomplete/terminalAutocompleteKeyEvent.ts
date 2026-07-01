@@ -19,7 +19,8 @@ interface TerminalAutocompleteKeyEventContext {
   handleSubDirSelect: (level: number, entry: SubDirEntry) => void;
   fetchSubDirForIndex: (index: number) => void;
   renderPreviewSelection: (index: number) => void;
-  acceptSnippet: (snippet: Snippet) => void;
+  acceptPreviewlessSelection: (index: number) => boolean;
+  acceptSnippet: (snippet: Snippet) => boolean;
 }
 
 export function handleTerminalAutocompleteKeyEvent(
@@ -42,6 +43,7 @@ export function handleTerminalAutocompleteKeyEvent(
     handleSubDirSelect,
     fetchSubDirForIndex,
     renderPreviewSelection,
+    acceptPreviewlessSelection,
     acceptSnippet,
   } = context;
   if (!settingsRef.current.enabled || e.type !== "keydown") return true;
@@ -203,7 +205,7 @@ export function handleTerminalAutocompleteKeyEvent(
         });
         // Live-render the highlighted entry's full path into the line (#1005).
         const newEntry = focusedPanel.entries[newIdx];
-        if (newEntry) renderSubDirPath(focusLevel, newEntry);
+        if (newEntry && settingsRef.current.livePreview) renderSubDirPath(focusLevel, newEntry);
         // Auto-expand next level if the newly selected item is a directory
         if (newEntry?.type === "directory") {
           expandSubDir(focusLevel, newEntry);
@@ -276,7 +278,7 @@ export function handleTerminalAutocompleteKeyEvent(
         selectedIndex: next,
         subDirPanels: [], subDirFocusLevel: -1,
       }));
-      renderPreviewSelection(next);
+      if (settingsRef.current.livePreview) renderPreviewSelection(next);
       if (next >= 0) fetchSubDirForIndex(next);
       return false;
     }
@@ -290,10 +292,24 @@ export function handleTerminalAutocompleteKeyEvent(
     if (e.key === "Enter") {
       const selected = s.selectedIndex >= 0 ? s.suggestions[s.selectedIndex] : null;
       if (selected?.source === "snippet" && selected.snippet) {
+        if (!acceptSnippet(selected.snippet)) {
+          clearState();
+          previewActiveRef.current = false;
+          return true;
+        }
         e.preventDefault();
         previewActiveRef.current = false;
-        acceptSnippet(selected.snippet);
         return false; // consume — run the snippet, not the typed text
+      }
+      if (!settingsRef.current.livePreview && selected) {
+        if (acceptPreviewlessSelection(s.selectedIndex)) {
+          e.preventDefault();
+          previewActiveRef.current = false;
+          return false;
+        }
+        clearState();
+        previewActiveRef.current = false;
+        return true;
       }
       clearState();
       previewActiveRef.current = false;

@@ -6,6 +6,7 @@ import type { EditorTab } from '../application/state/editorTabStore';
 import { buildWorkspaceActivityMap } from '../application/state/sessionActivity';
 import { collectSessionIds } from '../domain/workspace';
 import { resolveSessionTabTitle } from '../domain/sessionTabTitle';
+import type { DynamicTabTitleMode } from '../domain/models';
 import { useSessionActivityMap } from '../application/state/sessionActivityStore';
 import { getTopTabInsertionTarget, getWorkspaceSessionDragId, hasWorkspaceSessionDrag } from '../application/state/terminalDragData';
 import {
@@ -148,6 +149,7 @@ interface TopTabsProps {
   ) => void;
   showSftpTab: boolean;
   showHostTreeSidebar: boolean;
+  dynamicTabTitleMode?: DynamicTabTitleMode;
   editorTabs: readonly EditorTab[];
   onRequestCloseEditorTab: (editorTabId: string) => void;
   hostById: Map<string, Host>;
@@ -185,6 +187,7 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
   onRemoveSessionFromWorkspace,
   showSftpTab,
   showHostTreeSidebar,
+  dynamicTabTitleMode,
   editorTabs,
   onRequestCloseEditorTab,
   hostById,
@@ -759,6 +762,7 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
             onCopySession={onCopySession}
             onCopySessionToNewWindow={onCopySessionToNewWindow}
             renderBulkCloseItems={renderBulkCloseItems}
+            dynamicTabTitleMode={dynamicTabTitleMode}
             t={t}
             tabAnimationClass={getTabAnimationClass(session.id)}
           />
@@ -780,7 +784,7 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
           if (wsSession) {
             workspaceSessionLabels[sessionId] = resolveSessionTabTitle(
               wsSession,
-              hostMap.get(wsSession.hostId),
+              dynamicTabTitleMode,
             );
           }
         }
@@ -1152,7 +1156,8 @@ const topTabsAreEqual = (prev: TopTabsProps, next: TopTabsProps): boolean => {
     prev.onSyncNow === next.onSyncNow &&
     prev.onToggleTheme === next.onToggleTheme &&
     prev.showSftpTab === next.showSftpTab &&
-    prev.showHostTreeSidebar === next.showHostTreeSidebar
+    prev.showHostTreeSidebar === next.showHostTreeSidebar &&
+    prev.dynamicTabTitleMode === next.dynamicTabTitleMode
   );
 };
 

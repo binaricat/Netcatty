@@ -1,4 +1,8 @@
-import { classifyDistroId, detectVendorFromSshVersion } from "../../../domain/host";
+import {
+  classifyDistroId,
+  detectVendorFromSshVersion,
+  normalizeDistroId,
+} from "../../../domain/host";
 import { logger } from "../../../lib/logger";
 import type { TerminalSessionStartersContext } from "./createTerminalSessionStarters.types";
 
@@ -44,12 +48,9 @@ export const runDistroDetection = async (
   const isStillCurrent = () => isConnectionTokenCurrent(sessionId, connectionToken);
 
   if (!isStillCurrent()) return;
-  if (
+  const isKnownNetworkDevice =
     ctx.host.deviceType === "network" ||
-    classifyDistroId(ctx.host.distro) === "network-device"
-  ) {
-    return;
-  }
+    classifyDistroId(ctx.host.distro) === "network-device";
 
   // Step 1: try to classify from the SSH server identification string
   // captured at handshake time. This is free (no extra channel) and
@@ -73,6 +74,7 @@ export const runDistroDetection = async (
   }
 
   if (!isStillCurrent()) return;
+  if (isKnownNetworkDevice) return;
 
   // Step 2: unknown or generic OpenSSH/Dropbear — fall back to the
   // /etc/os-release probe to pick a distro-specific icon. We deliberately
@@ -89,9 +91,10 @@ export const runDistroDetection = async (
       if (!res?.success) return;
       const data = `${res.stdout || ""}\n${res.stderr || ""}`;
       const idMatch = data.match(/^ID="?([\w-]+)"?$/im);
-      const distro = idMatch
+      const rawDistro = idMatch
         ? idMatch[1]
         : (data.split(/\s+/)[0] || "").toLowerCase();
+      const distro = normalizeDistroId(rawDistro) || rawDistro;
       if (distro) ctx.onOsDetected?.(ctx.host.id, distro);
     }
   } catch (err) {

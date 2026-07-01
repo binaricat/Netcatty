@@ -5,12 +5,13 @@ const assert = require("node:assert/strict");
 const { EventEmitter } = require("node:events");
 const { createSystemManagerBridge } = require("./systemManagerBridge.cjs");
 
-function createFakeExecStream(stdout) {
+function createFakeExecStream(stdout, options = {}) {
   const stream = new EventEmitter();
   stream.stderr = new EventEmitter();
   process.nextTick(() => {
-    stream.emit("data", stdout);
-    stream.emit("close", 0);
+    if (stdout) stream.emit("data", stdout);
+    if (options.stderr) stream.stderr.emit("data", options.stderr);
+    stream.emit("close", options.code ?? 0);
   });
   return stream;
 }
@@ -66,4 +67,50 @@ test("probeCapabilities reports Docker when docker is installed even if plain do
 
   assert.equal(result.success, true);
   assert.equal(result.capabilities.hasDocker, true);
+});
+
+test("setupOsc7Tracking runs the setup command through the active session executor", async () => {
+  let seenCommand = "";
+  const conn = {
+    exec(command, callback) {
+      seenCommand = command;
+      callback(null, createFakeExecStream("__NETCATTY_OSC7_SETUP_SHELL__=bash\n"));
+    },
+  };
+  const sessions = new Map([["s1", { conn, type: "ssh" }]]);
+  const bridge = createSystemManagerBridge({
+    getSessions: () => sessions,
+    process,
+  });
+
+  const result = await bridge.setupOsc7Tracking(null, {
+    sessionId: "s1",
+    command: "printf setup-script",
+  });
+
+  assert.equal(result.success, true);
+  assert.equal(result.stdout, "__NETCATTY_OSC7_SETUP_SHELL__=bash\n");
+  assert.equal(seenCommand, "printf setup-script");
+});
+
+test("setupOsc7Tracking reports non-zero setup exits as failures", async () => {
+  const conn = {
+    exec(_command, callback) {
+      callback(null, createFakeExecStream("", { code: 2, stderr: "unsupported shell\n" }));
+    },
+  };
+  const sessions = new Map([["s1", { conn, type: "ssh" }]]);
+  const bridge = createSystemManagerBridge({
+    getSessions: () => sessions,
+    process,
+  });
+
+  const result = await bridge.setupOsc7Tracking(null, {
+    sessionId: "s1",
+    command: "printf setup-script",
+  });
+
+  assert.equal(result.success, false);
+  assert.equal(result.code, 2);
+  assert.match(result.error, /unsupported shell/);
 });

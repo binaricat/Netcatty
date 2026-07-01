@@ -350,11 +350,27 @@ function listWatchers() {
   return watchers;
 }
 
+function registerWorkerHandle(ipcMain, terminalWorkerManager, channel) {
+  ipcMain.handle(channel, (event, payload) => terminalWorkerManager.request(channel, payload, {
+    webContentsId: event?.sender?.id,
+  }));
+}
+
 /**
  * Register IPC handlers for file watching operations
  */
-function registerHandlers(ipcMain) {
+function registerHandlers(ipcMain, options = {}) {
   console.log("[FileWatcher] Registering IPC handlers");
+  const terminalWorkerManager = options.terminalWorkerManager || null;
+  if (terminalWorkerManager) {
+    [
+      "netcatty:filewatch:start",
+      "netcatty:filewatch:stop",
+      "netcatty:filewatch:list",
+      "netcatty:filewatch:registerTempFile",
+    ].forEach((channel) => registerWorkerHandle(ipcMain, terminalWorkerManager, channel));
+    return;
+  }
   ipcMain.handle("netcatty:filewatch:start", (event, args) => {
     console.log("[FileWatcher] IPC netcatty:filewatch:start received", args);
     return startWatching(event, args);

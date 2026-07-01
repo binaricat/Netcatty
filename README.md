@@ -294,6 +294,16 @@ Or browse all releases at [GitHub Releases](https://github.com/binaricat/Netcatt
 
 > **macOS Users:** Current releases are expected to be code-signed and notarized. If Gatekeeper still warns, make sure you downloaded the latest official build from GitHub Releases.
 
+### Nix / NixOS
+
+Netcatty provides a flake that wraps the official Linux AppImage release for Nix and NixOS users:
+
+```bash
+nix run github:binaricat/Netcatty
+```
+
+For declarative installs, add the Netcatty flake as an input and use `inputs.netcatty.packages.${pkgs.system}.default` in your NixOS or Home Manager package list.
+
 ### Prerequisites
 - Node.js 18+ and npm
 - macOS, Windows 10+, or Linux

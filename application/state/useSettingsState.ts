@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type SetStateAction } from 'react';
 
-import { runThemeTransition } from './themeTransition';
+import { runThemeTransition, type ThemeTransitionMode } from './themeTransition';
 import { SyncConfig, TerminalSettings, HotkeyScheme, CustomKeyBindings, DEFAULT_KEY_BINDINGS, KeyBinding, UILanguage, SessionLogFormat, normalizeTerminalSettings } from '../../domain/models';
 import {
   STORAGE_KEY_COLOR,
@@ -43,12 +43,15 @@ import {
   STORAGE_KEY_CLOSE_TO_TRAY,
   STORAGE_KEY_GLOBAL_HOTKEY_ENABLED,
   STORAGE_KEY_WINDOW_OPACITY,
+  STORAGE_KEY_APP_ICON_VARIANT,
   STORAGE_KEY_AUTO_UPDATE_ENABLED,
   STORAGE_KEY_WORKSPACE_FOCUS_STYLE,
   STORAGE_KEY_SHOW_RECENT_HOSTS,
   STORAGE_KEY_SHOW_ONLY_UNGROUPED_HOSTS_IN_ROOT,
   STORAGE_KEY_SHOW_SFTP_TAB,
   STORAGE_KEY_SHOW_HOST_TREE_SIDEBAR,
+  STORAGE_KEY_TERMINAL_SIDE_PANEL_AUTO_OPEN,
+  STORAGE_KEY_TERMINAL_SIDE_PANEL_AUTO_OPEN_TAB,
   STORAGE_KEY_SHELL_ONLY_TAB_NUMBER_SHORTCUTS,
   STORAGE_KEY_DISABLE_TERMINAL_FONT_ZOOM,
 } from '../../infrastructure/config/storageKeys';
@@ -62,9 +65,8 @@ import {
   shouldApplyIncomingCustomKeyBindingsRecord,
   updateCustomKeyBinding as updateCustomKeyBindingRecord,
 } from '../../domain/customKeyBindings';
-import { TERMINAL_THEME_AUTO } from '../../domain/terminalAppearance';
-import { customThemeStore, useCustomThemes } from '../state/customThemeStore';
-import { DEFAULT_FONT_SIZE } from '../../infrastructure/config/fonts';
+import { resolveGlobalTerminalAppearance, idleThemeUserIntent } from '../../domain/terminalAppearanceRuntime';
+import { DEFAULT_FONT_SIZE, TERMINAL_FONT_AUTO } from '../../infrastructure/config/fonts';
 import { getUiThemeById } from '../../infrastructure/config/uiThemes';
 import { DEFAULT_UI_FONT_ID, withWindowsEmojiFallback } from '../../infrastructure/config/uiFonts';
 import { uiFontStore, useUIFontsLoaded } from './uiFontStore';
@@ -76,7 +78,6 @@ import {
   DEFAULT_CUSTOM_ACCENT,
   DEFAULT_DARK_UI_THEME,
   DEFAULT_EDITOR_WORD_WRAP,
-  DEFAULT_FONT_FAMILY,
   DEFAULT_HOTKEY_SCHEME,
   DEFAULT_LIGHT_UI_THEME,
   DEFAULT_SESSION_LOGS_ENABLED,
@@ -117,9 +118,18 @@ import { resolveRestorePreviousSessionSetting, resolveRestoreTerminalCwdSetting 
 import { sessionRestoreStorage } from './sessionRestoreStorage';
 import { useSettingsStorageSync } from './settingsStorageSync';
 import { useSettingsIpcSync } from './settingsIpcSync';
-import { resolveCurrentTerminalTheme } from './settingsTerminalTheme';
+import { TERMINAL_THEME_AUTO } from '../../domain/terminalAppearance';
+import { customThemeStore, useCustomThemes } from '../state/customThemeStore';
 import { useSystemSettingsEffects } from './systemSettingsEffects';
+import { resolveAppIconVariant, type AppIconVariant } from '../../domain/appIconVariant';
+import { DEFAULT_APP_ICON_VARIANT } from '../../infrastructure/config/appIconVariants';
 import { applyCustomCssToDocument } from '../../lib/customCss';
+import {
+  DEFAULT_TERMINAL_SIDE_PANEL_AUTO_OPEN_ENABLED,
+  DEFAULT_TERMINAL_SIDE_PANEL_AUTO_OPEN_TAB,
+  isTerminalSidePanelAutoOpenTab,
+  type TerminalSidePanelAutoOpenTab,
+} from '../../domain/terminalSidePanelAutoOpen';
 
 export const useSettingsState = (options: { enableSettingsSync?: boolean; enableSystemEffects?: boolean } = {}) => {
   const enableSettingsSync = options.enableSettingsSync !== false;
@@ -178,7 +188,7 @@ export const useSettingsState = (options: { enableSettingsSync?: boolean; enable
   );
   const [terminalFontFamilyId, setTerminalFontFamilyId] = useState<string>(() => {
     const stored = localStorageAdapter.readString(STORAGE_KEY_TERM_FONT_FAMILY);
-    return migrateIncomingTerminalFontId(stored) ?? DEFAULT_FONT_FAMILY;
+    return migrateIncomingTerminalFontId(stored) ?? TERMINAL_FONT_AUTO;
   });
   const [terminalFontSize, setTerminalFontSize] = useState<number>(() => localStorageAdapter.readNumber(STORAGE_KEY_TERM_FONT_SIZE) || DEFAULT_FONT_SIZE);
   const [uiLanguage, setUiLanguage] = useState<UILanguage>(() => {
@@ -250,6 +260,14 @@ export const useSettingsState = (options: { enableSettingsSync?: boolean; enable
   const [showHostTreeSidebar, setShowHostTreeSidebarState] = useState<boolean>(() => {
     const stored = localStorageAdapter.readBoolean(STORAGE_KEY_SHOW_HOST_TREE_SIDEBAR);
     return stored ?? DEFAULT_SHOW_HOST_TREE_SIDEBAR;
+  });
+  const [terminalSidePanelAutoOpen, setTerminalSidePanelAutoOpenState] = useState<boolean>(() => {
+    const stored = localStorageAdapter.readBoolean(STORAGE_KEY_TERMINAL_SIDE_PANEL_AUTO_OPEN);
+    return stored ?? DEFAULT_TERMINAL_SIDE_PANEL_AUTO_OPEN_ENABLED;
+  });
+  const [terminalSidePanelAutoOpenTab, setTerminalSidePanelAutoOpenTabState] = useState<TerminalSidePanelAutoOpenTab>(() => {
+    const stored = readStoredString(STORAGE_KEY_TERMINAL_SIDE_PANEL_AUTO_OPEN_TAB);
+    return isTerminalSidePanelAutoOpenTab(stored) ? stored : DEFAULT_TERMINAL_SIDE_PANEL_AUTO_OPEN_TAB;
   });
   const [shellOnlyTabNumberShortcuts, setShellOnlyTabNumberShortcutsState] = useState<boolean>(() => {
     const stored = localStorageAdapter.readBoolean(STORAGE_KEY_SHELL_ONLY_TAB_NUMBER_SHORTCUTS);
@@ -343,6 +361,18 @@ export const useSettingsState = (options: { enableSettingsSync?: boolean; enable
       return clampWindowOpacity(candidate);
     });
   }, []);
+  const [appIconVariant, setAppIconVariantState] = useState<AppIconVariant>(() => {
+    const stored = readStoredString(STORAGE_KEY_APP_ICON_VARIANT);
+    return resolveAppIconVariant(stored ?? DEFAULT_APP_ICON_VARIANT);
+  });
+  const setAppIconVariant = useCallback((nextValue: SetStateAction<AppIconVariant>) => {
+    setAppIconVariantState((prev) => {
+      const candidate = typeof nextValue === 'function'
+        ? (nextValue as (prevState: AppIconVariant) => AppIconVariant)(prev)
+        : nextValue;
+      return resolveAppIconVariant(candidate);
+    });
+  }, []);
   const incomingTerminalSettingsSignatureRef = useRef<string | null>(null);
   const localTerminalSettingsVersionRef = useRef(0);
   const broadcastedLocalTerminalSettingsVersionRef = useRef(0);
@@ -357,6 +387,7 @@ export const useSettingsState = (options: { enableSettingsSync?: boolean; enable
   // Fix 1: Mount guard — skip redundant IPC broadcasts & localStorage writes on initial mount.
   // Set to true by the LAST useEffect declaration; all persist effects see false on first render.
   const persistMountedRef = useRef(false);
+  const appearanceTransitionModeRef = useRef<ThemeTransitionMode>('view');
 
   const setTerminalSettings = useCallback((nextValue: SetStateAction<TerminalSettings>) => {
     setTerminalSettingsState((prev) => {
@@ -512,6 +543,7 @@ export const useSettingsState = (options: { enableSettingsSync?: boolean; enable
   const syncCustomCssFromStorage = useCallback(() => {
     const storedCss = localStorageAdapter.readString(STORAGE_KEY_CUSTOM_CSS) || '';
     setCustomCSS((prev) => (prev === storedCss ? prev : storedCss));
+    applyCustomCssToDocument(storedCss);
   }, []);
 
   const rehydrateAllFromStorage = useCallback(() => {
@@ -592,6 +624,14 @@ export const useSettingsState = (options: { enableSettingsSync?: boolean; enable
     setShowSftpTabState(storedShowSftpTab ?? DEFAULT_SHOW_SFTP_TAB);
     const storedShowHostTreeSidebar = localStorageAdapter.readBoolean(STORAGE_KEY_SHOW_HOST_TREE_SIDEBAR);
     setShowHostTreeSidebarState(storedShowHostTreeSidebar ?? DEFAULT_SHOW_HOST_TREE_SIDEBAR);
+    const storedTerminalSidePanelAutoOpen = localStorageAdapter.readBoolean(STORAGE_KEY_TERMINAL_SIDE_PANEL_AUTO_OPEN);
+    setTerminalSidePanelAutoOpenState(storedTerminalSidePanelAutoOpen ?? DEFAULT_TERMINAL_SIDE_PANEL_AUTO_OPEN_ENABLED);
+    const storedTerminalSidePanelAutoOpenTab = readStoredString(STORAGE_KEY_TERMINAL_SIDE_PANEL_AUTO_OPEN_TAB);
+    setTerminalSidePanelAutoOpenTabState(
+      isTerminalSidePanelAutoOpenTab(storedTerminalSidePanelAutoOpenTab)
+        ? storedTerminalSidePanelAutoOpenTab
+        : DEFAULT_TERMINAL_SIDE_PANEL_AUTO_OPEN_TAB,
+    );
     const storedShellOnlyTabNumberShortcuts = localStorageAdapter.readBoolean(STORAGE_KEY_SHELL_ONLY_TAB_NUMBER_SHORTCUTS);
     setShellOnlyTabNumberShortcutsState(storedShellOnlyTabNumberShortcuts ?? DEFAULT_SHELL_ONLY_TAB_NUMBER_SHORTCUTS);
     const storedDisableTerminalFontZoom = localStorageAdapter.readBoolean(STORAGE_KEY_DISABLE_TERMINAL_FONT_ZOOM);
@@ -612,8 +652,10 @@ export const useSettingsState = (options: { enableSettingsSync?: boolean; enable
   useLayoutEffect(() => {
     const tokens = getUiThemeById(resolvedTheme, resolvedTheme === 'dark' ? darkUiThemeId : lightUiThemeId).tokens;
     const apply = () => applyThemeTokens(theme, resolvedTheme, tokens, accentMode, customAccent);
+    const transitionMode = appearanceTransitionModeRef.current;
+    appearanceTransitionModeRef.current = 'instant';
     if (persistMountedRef.current) {
-      runThemeTransition(apply);
+      runThemeTransition(apply, { mode: transitionMode });
     } else {
       apply();
     }
@@ -687,12 +729,15 @@ export const useSettingsState = (options: { enableSettingsSync?: boolean; enable
     setIsHotkeyRecordingState,
     setGlobalHotkeyEnabled,
     setWindowOpacity,
+    setAppIconVariant,
     setAutoUpdateEnabled,
     setSftpAutoOpenSidebar,
     setSftpFollowTerminalCwd,
     setSftpDefaultViewMode,
     setWorkspaceFocusStyleState,
     setShowHostTreeSidebarState,
+    setTerminalSidePanelAutoOpenState,
+    setTerminalSidePanelAutoOpenTabState,
     setDisableTerminalFontZoomState,
     setRestorePreviousSessionState,
     setRestoreTerminalCwdState,
@@ -724,18 +769,18 @@ export const useSettingsState = (options: { enableSettingsSync?: boolean; enable
     terminalThemeId, followAppTerminalTheme, terminalFontFamilyId, terminalFontSize,
     sftpDoubleClickBehavior, sftpAutoSync, sftpShowHiddenFiles,
     sftpUseCompressedUpload, sftpAutoOpenSidebar, sftpFollowTerminalCwd, sftpDefaultViewMode,
-    showRecentHosts, showOnlyUngroupedHostsInRoot, showSftpTab, showHostTreeSidebar, shellOnlyTabNumberShortcuts, disableTerminalFontZoom, restorePreviousSession, restoreTerminalCwd,
+    showRecentHosts, showOnlyUngroupedHostsInRoot, showSftpTab, showHostTreeSidebar, terminalSidePanelAutoOpen, terminalSidePanelAutoOpenTab, shellOnlyTabNumberShortcuts, disableTerminalFontZoom, restorePreviousSession, restoreTerminalCwd,
     editorWordWrap, sessionLogsEnabled, sessionLogsDir, sessionLogsFormat, sessionLogsTimestampsEnabled, sshDebugLogsEnabled, sshDeepLinkEnabled,
-    globalHotkeyEnabled, autoUpdateEnabled, windowOpacity,
+    globalHotkeyEnabled, autoUpdateEnabled, windowOpacity, appIconVariant,
     setTheme, setLightUiThemeId, setDarkUiThemeId, setAccentMode, setCustomAccent,
     setCustomCSS, setUiFontFamilyId, setHotkeyScheme, setUiLanguage,
     setTerminalThemeId, setTerminalThemeDarkId, setTerminalThemeLightId,
     setFollowAppTerminalThemeState, setTerminalFontFamilyId, setTerminalFontSize,
     setSftpDoubleClickBehavior, setSftpAutoSync, setSftpShowHiddenFiles,
     setSftpUseCompressedUpload, setSftpAutoOpenSidebar, setSftpFollowTerminalCwd, setSftpDefaultViewMode,
-    setShowRecentHostsState, setShowOnlyUngroupedHostsInRootState, setShowSftpTabState, setShowHostTreeSidebarState, setShellOnlyTabNumberShortcutsState, setDisableTerminalFontZoomState, setRestorePreviousSessionState, setRestoreTerminalCwdState,
+    setShowRecentHostsState, setShowOnlyUngroupedHostsInRootState, setShowSftpTabState, setShowHostTreeSidebarState, setTerminalSidePanelAutoOpenState, setTerminalSidePanelAutoOpenTabState, setShellOnlyTabNumberShortcutsState, setDisableTerminalFontZoomState, setRestorePreviousSessionState, setRestoreTerminalCwdState,
     setEditorWordWrapState, setSessionLogsEnabled, setSessionLogsDir, setSessionLogsFormat, setSessionLogsTimestampsEnabled, setSshDebugLogsEnabled, setSshDeepLinkEnabledState: applyIncomingSshDeepLinkEnabled,
-    setGlobalHotkeyEnabled, setWindowOpacity, setAutoUpdateEnabled, setWorkspaceFocusStyleState,
+    setGlobalHotkeyEnabled, setWindowOpacity, setAppIconVariant, setAutoUpdateEnabled, setWorkspaceFocusStyleState,
     setSftpTransferConcurrencyState, applyIncomingCustomKeyBindings, mergeIncomingTerminalSettings,
   });
 
@@ -845,6 +890,21 @@ export const useSettingsState = (options: { enableSettingsSync?: boolean; enable
     localStorageAdapter.writeBoolean(STORAGE_KEY_SHOW_HOST_TREE_SIDEBAR, enabled);
     if (!persistMountedRef.current) return;
     notifySettingsChanged(STORAGE_KEY_SHOW_HOST_TREE_SIDEBAR, enabled);
+  }, [notifySettingsChanged]);
+
+  const setTerminalSidePanelAutoOpen = useCallback((enabled: boolean) => {
+    setTerminalSidePanelAutoOpenState(enabled);
+    localStorageAdapter.writeBoolean(STORAGE_KEY_TERMINAL_SIDE_PANEL_AUTO_OPEN, enabled);
+    if (!persistMountedRef.current) return;
+    notifySettingsChanged(STORAGE_KEY_TERMINAL_SIDE_PANEL_AUTO_OPEN, enabled);
+  }, [notifySettingsChanged]);
+
+  const setTerminalSidePanelAutoOpenTab = useCallback((tab: TerminalSidePanelAutoOpenTab) => {
+    const next = isTerminalSidePanelAutoOpenTab(tab) ? tab : DEFAULT_TERMINAL_SIDE_PANEL_AUTO_OPEN_TAB;
+    setTerminalSidePanelAutoOpenTabState(next);
+    localStorageAdapter.writeString(STORAGE_KEY_TERMINAL_SIDE_PANEL_AUTO_OPEN_TAB, next);
+    if (!persistMountedRef.current) return;
+    notifySettingsChanged(STORAGE_KEY_TERMINAL_SIDE_PANEL_AUTO_OPEN_TAB, next);
   }, [notifySettingsChanged]);
 
   const setShellOnlyTabNumberShortcuts = useCallback((enabled: boolean) => {
@@ -1033,10 +1093,12 @@ export const useSettingsState = (options: { enableSettingsSync?: boolean; enable
     globalHotkeyEnabled,
     closeToTray,
     windowOpacity,
+    appIconVariant,
     autoUpdateEnabled,
     persistMountedRef,
     setHotkeyRegistrationError,
     setAutoUpdateEnabled,
+    setAppIconVariant,
     notifySettingsChanged,
   });
 
@@ -1083,20 +1145,25 @@ export const useSettingsState = (options: { enableSettingsSync?: boolean; enable
   // Subscribe to custom theme changes so editing in-place triggers re-render
   const customThemes = useCustomThemes();
 
-  const currentTerminalTheme = useMemo(() => resolveCurrentTerminalTheme({
-    terminalThemeId,
-    terminalThemeDarkId,
-    terminalThemeLightId,
+  const settledTerminalTheme = useMemo(() => resolveGlobalTerminalAppearance({
+    userIntent: idleThemeUserIntent(),
+    settings: {
+      terminalThemeId,
+      terminalThemeDarkId,
+      terminalThemeLightId,
+      followAppTerminalTheme,
+      resolvedTheme,
+      lightUiThemeId,
+      darkUiThemeId,
+      accentMode,
+      customAccent,
+    },
     customThemes,
-    followAppTerminalTheme,
-    resolvedTheme,
-    lightUiThemeId,
-    darkUiThemeId,
-    accentMode,
-    customAccent,
-  }), [terminalThemeId, terminalThemeDarkId, terminalThemeLightId, customThemes,
+  }).theme, [terminalThemeId, terminalThemeDarkId, terminalThemeLightId, customThemes,
       followAppTerminalTheme, resolvedTheme, lightUiThemeId, darkUiThemeId,
       accentMode, customAccent]);
+
+  const currentTerminalTheme = settledTerminalTheme;
 
   const updateTerminalSetting = useCallback(<K extends keyof TerminalSettings>(
     key: K,
@@ -1177,6 +1244,10 @@ export const useSettingsState = (options: { enableSettingsSync?: boolean; enable
     setShowSftpTab,
     showHostTreeSidebar,
     setShowHostTreeSidebar,
+    terminalSidePanelAutoOpen,
+    setTerminalSidePanelAutoOpen,
+    terminalSidePanelAutoOpenTab,
+    setTerminalSidePanelAutoOpenTab,
     shellOnlyTabNumberShortcuts,
     setShellOnlyTabNumberShortcuts,
     disableTerminalFontZoom,
@@ -1219,6 +1290,8 @@ export const useSettingsState = (options: { enableSettingsSync?: boolean; enable
     setGlobalHotkeyEnabled,
     windowOpacity,
     setWindowOpacity,
+    appIconVariant,
+    setAppIconVariant,
     rehydrateAllFromStorage,
     applyAppTheme,
     workspaceFocusStyle,
@@ -1231,7 +1304,7 @@ export const useSettingsState = (options: { enableSettingsSync?: boolean; enable
       terminalThemeId, terminalFontFamilyId, terminalFontSize, terminalSettings,
       customKeyBindings, editorWordWrap,
       sftpDoubleClickBehavior, sftpAutoSync, sftpShowHiddenFiles, sftpUseCompressedUpload, sftpAutoOpenSidebar, sftpFollowTerminalCwd, sftpDefaultViewMode,
-      showRecentHosts, showOnlyUngroupedHostsInRoot, showSftpTab, showHostTreeSidebar, shellOnlyTabNumberShortcuts, disableTerminalFontZoom,
+      showRecentHosts, showOnlyUngroupedHostsInRoot, showSftpTab, showHostTreeSidebar, terminalSidePanelAutoOpen, terminalSidePanelAutoOpenTab, shellOnlyTabNumberShortcuts, disableTerminalFontZoom,
       customThemes, workspaceFocusStyle, sessionLogsTimestampsEnabled, sshDebugLogsEnabled, sshDeepLinkEnabled,
     ]),
   };

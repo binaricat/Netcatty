@@ -144,10 +144,14 @@ export const TerminalConnectionDialog: React.FC<TerminalConnectionDialogProps> =
     const secondSegmentWidth = shouldCompleteProgress || secondSegmentUnlocked ? targetSecondSegmentWidth : 0;
 
     return (
-        <div className={cn(
-            "absolute inset-0 z-20 flex items-center justify-center",
-            needsAuth ? "bg-black" : "bg-black/30"
-        )}>
+        <div
+            className="absolute inset-0 z-20 flex items-center justify-center"
+            style={{
+                backgroundColor: needsAuth
+                    ? 'var(--terminal-ui-bg, var(--background))'
+                    : 'color-mix(in srgb, var(--terminal-ui-bg, var(--background)) 35%, transparent)',
+            }}
+        >
             <div
                 className="w-[540px] max-w-[88vw] rounded-xl shadow-xl p-4 space-y-3 transition-all duration-200"
                 style={{

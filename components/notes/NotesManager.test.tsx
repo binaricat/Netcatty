@@ -228,6 +228,32 @@ test("NotesManager exposes markdown import controls", () => {
   assert.match(source, /multiple/);
 });
 
+test("NotesManager exposes markdown export controls", () => {
+  const source = readFileSync(new URL("./NotesManager.tsx", import.meta.url), "utf8");
+
+  assert.match(source, /notes\.action\.exportNote/);
+  assert.match(source, /notes\.action\.exportGroup/);
+  assert.match(source, /notes\.action\.exportAll/);
+  assert.match(source, /buildVaultNoteMarkdownExportFiles/);
+  assert.match(source, /buildTextFilesZipBlob/);
+  assert.match(source, /downloadNotesBlob/);
+  assert.match(source, /text\/markdown;charset=utf-8/);
+});
+
+test("NotesManager shows placeholder label for notes without titles", () => {
+  const markup = renderNotes([note({ title: "" })]);
+
+  assert.match(markup, /Note title/);
+});
+
+test("NotesManager tree rename allows clearing note titles", () => {
+  const source = readFileSync(new URL("./NotesManager.tsx", import.meta.url), "utf8");
+  const renameBlock = source.match(/onRenameCommit=\{\(name\) => \{[\s\S]*?\}\}/)?.[0] ?? "";
+
+  assert.match(renameBlock, /saveNote\(\{ \.\.\.note, title: name\.trim\(\)/);
+  assert.doesNotMatch(renameBlock, /if \(!title\) return/);
+});
+
 test("NotesManager sidebar mode renders list without editor by default", () => {
   const markup = renderNotes([note()], "sidebar");
 
@@ -259,4 +285,11 @@ test("NotesManager sidebar mode opens the requested note without selecting its f
   assert.equal(markup.match(/data-selected="true"/g)?.length, 1);
   assert.match(markup, /data-vault-tree-row="group"[^>]*data-selected="false"/);
   assert.match(markup, /data-vault-tree-row="item"[^>]*data-selected="true"[^>]*data-note-id="note-2"/);
+});
+
+test("NotesManager can re-open the same sidebar note when the request id changes", () => {
+  const source = readFileSync(new URL("./NotesManager.tsx", import.meta.url), "utf8");
+
+  assert.match(source, /openNoteRequestId\?: number \| null/);
+  assert.match(source, /\[isSidebarMode, onOpenNoteIdHandled, openNoteId, openNoteRequestId, sortedNotes\]/);
 });

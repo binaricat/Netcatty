@@ -3,7 +3,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
-const { createZmodemSentry, buildUploadPlan, buildModeRestores, handleUpload } = require("./zmodemHelper.cjs");
+const { createZmodemSentry, buildUploadPlan, buildModeRestores, handleUpload, handleDownload } = require("./zmodemHelper.cjs");
 
 const never = () => { throw new Error("resolver should not be called"); };
 
@@ -266,6 +266,75 @@ test("handleUpload completes when the remote confirms after progress reaches 100
     events.some((event) => event.channel === "netcatty:zmodem:progress" && event.data.finalizing === true),
     true,
   );
+  fs.rmSync(tempDir, { recursive: true, force: true });
+});
+
+test("handleUpload uses injected file picker when no drag-drop upload is queued", async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-zmodem-"));
+  const filePath = path.join(tempDir, "picker-upload.txt");
+  fs.writeFileSync(filePath, "payload");
+  let pickerCalled = false;
+  let endCalled = false;
+
+  const zsession = {
+    async send_offer() {
+      return {
+        send() {},
+        async end() {
+          endCalled = true;
+        },
+      };
+    },
+    async close() {},
+  };
+
+  await handleUpload(zsession, {
+    sessionId: "session-1",
+    getWebContents: () => ({
+      isDestroyed: () => false,
+      send() {},
+    }),
+    selectUploadFiles: async () => {
+      pickerCalled = true;
+      return { canceled: false, filePaths: [filePath] };
+    },
+  });
+
+  assert.equal(pickerCalled, true);
+  assert.equal(endCalled, true);
+  fs.rmSync(tempDir, { recursive: true, force: true });
+});
+
+test("handleDownload uses injected directory picker before accepting remote files", async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-zmodem-download-"));
+  let pickerCalled = false;
+  const handlers = new Map();
+  let startCalled = false;
+
+  const zsession = {
+    on(event, handler) {
+      handlers.set(event, handler);
+    },
+    start() {
+      startCalled = true;
+      setImmediate(() => handlers.get("session_end")?.());
+    },
+  };
+
+  await handleDownload(zsession, {
+    sessionId: "session-1",
+    getWebContents: () => ({
+      isDestroyed: () => false,
+      send() {},
+    }),
+    selectDownloadDirectory: async () => {
+      pickerCalled = true;
+      return { canceled: false, filePaths: [tempDir] };
+    },
+  });
+
+  assert.equal(startCalled, true);
+  assert.equal(pickerCalled, true);
   fs.rmSync(tempDir, { recursive: true, force: true });
 });
 

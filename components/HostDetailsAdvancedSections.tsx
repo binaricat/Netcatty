@@ -6,7 +6,7 @@ import { MAX_FONT_SIZE, MIN_FONT_SIZE } from "../infrastructure/config/fonts";
 import { AlgorithmOverridesPanel } from "./host-details/AlgorithmOverridesPanel";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
-import { HostDetailsSection, HostDetailsSettingRow } from "./host-details";
+import { HostDetailsSection, HostDetailsSettingRow, HostDetailsOverrideReset } from "./host-details";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "./ui/collapsible";
 import { Input } from "./ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
@@ -45,8 +45,13 @@ export const HostDetailsAdvancedSections: React.FC<HostDetailsAdvancedSectionsPr
   proxySummaryLabel,
   proxySummaryTooltip,
   clearProxyConfig,
-  groupDefaults,
-}) => (
+}) => {
+  const inheritedDeviceType = effectiveGroupDefaults?.deviceType;
+  const effectiveDeviceType = form.deviceType ?? inheritedDeviceType;
+  const inheritedStartupCommandRunMode = effectiveGroupDefaults?.startupCommandRunMode ?? "paste";
+  const effectiveStartupCommandRunMode = form.startupCommandRunMode ?? inheritedStartupCommandRunMode;
+
+  return (
   <>
         <HostDetailsSection
           icon={<Palette size={14} className="text-muted-foreground" />}
@@ -54,110 +59,110 @@ export const HostDetailsAdvancedSections: React.FC<HostDetailsAdvancedSectionsPr
         >
 
           {/* SSH Theme Selection */}
-          <button
-            type="button"
-            className="w-full flex items-center gap-3 p-2 rounded-lg bg-secondary/50 hover:bg-secondary transition-colors text-left"
-            onClick={() => setActiveSubPanel("theme-select")}
-          >
-            <div
-              className="w-12 h-8 rounded-md border border-border/60 flex items-center justify-center text-[6px] font-mono overflow-hidden"
-              style={{
-                backgroundColor:
-                  customThemeStore.getThemeById(effectiveThemeId)?.colors.background || "#100F0F",
-                color:
-                  customThemeStore.getThemeById(effectiveThemeId)?.colors.foreground || "#CECDC3",
-              }}
+          <div className="flex w-full items-center gap-1 rounded-lg bg-secondary/50 p-2 transition-colors hover:bg-secondary">
+            <button
+              type="button"
+              className="flex min-w-0 flex-1 items-center gap-3 text-left"
+              onClick={() => setActiveSubPanel("theme-select")}
             >
-              <div className="p-0.5">
-                <div
-                  style={{
-                    color: customThemeStore.getThemeById(effectiveThemeId)?.colors.green,
-                  }}
-                >
-                  $
+              <div
+                className="w-12 h-8 rounded-md border border-border/60 flex items-center justify-center text-[6px] font-mono overflow-hidden shrink-0"
+                style={{
+                  backgroundColor:
+                    customThemeStore.getThemeById(effectiveThemeId)?.colors.background || "#100F0F",
+                  color:
+                    customThemeStore.getThemeById(effectiveThemeId)?.colors.foreground || "#CECDC3",
+                }}
+              >
+                <div className="p-0.5">
+                  <div
+                    style={{
+                      color: customThemeStore.getThemeById(effectiveThemeId)?.colors.green,
+                    }}
+                  >
+                    $
+                  </div>
                 </div>
               </div>
-            </div>
-            <span className="text-sm flex-1">
-              {customThemeStore.getThemeById(effectiveThemeId)?.name || "Flexoki Dark"}
-            </span>
-          </button>
-          {hasEffectiveThemeOverride && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="w-full justify-start text-primary"
-              onClick={() => setForm((prev) => clearHostThemeOverride(prev))}
-            >
-              {t("common.useGlobal")}
-            </Button>
-          )}
+              <span className="text-sm flex-1 truncate">
+                {customThemeStore.getThemeById(effectiveThemeId)?.name || "Flexoki Dark"}
+              </span>
+            </button>
+            {hasEffectiveThemeOverride && (
+              <HostDetailsOverrideReset
+                label={t("common.useGlobal")}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setForm((prev) => clearHostThemeOverride(prev));
+                }}
+              />
+            )}
+          </div>
 
           {/* Font Size */}
           <HostDetailsSettingRow label="Font Size">
             <div className="flex items-center gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  if (effectiveFontSize > MIN_FONT_SIZE) {
-                    setForm((prev) => ({
-                      ...prev,
-                      fontSize: effectiveFontSize - 1,
-                      fontSizeOverride: true,
-                    }));
-                  }
-                }}
-                disabled={effectiveFontSize <= MIN_FONT_SIZE}
-                className="h-8 w-8 px-0"
-              >
-                -
-              </Button>
-              <Input
-                type="number"
-                min={MIN_FONT_SIZE}
-                max={MAX_FONT_SIZE}
-                value={effectiveFontSize}
-                onChange={(e) => {
-                  const val = parseInt(e.target.value);
-                  if (val >= MIN_FONT_SIZE && val <= MAX_FONT_SIZE) {
-                    setForm((prev) => ({
-                      ...prev,
-                      fontSize: val,
-                      fontSizeOverride: true,
-                    }));
-                  }
-                }}
-                className="h-8 w-16 text-center"
-              />
-              <span className="text-sm text-muted-foreground">pt</span>
-              {hasEffectiveFontSizeOverride && (
+              <div className="flex items-center gap-1.5">
                 <Button
-                  variant="ghost"
+                  variant="outline"
                   size="sm"
-                  className="h-8 text-primary"
-                  onClick={() => setForm((prev) => clearHostFontSizeOverride(prev))}
+                  onClick={() => {
+                    if (effectiveFontSize > MIN_FONT_SIZE) {
+                      setForm((prev) => ({
+                        ...prev,
+                        fontSize: effectiveFontSize - 1,
+                        fontSizeOverride: true,
+                      }));
+                    }
+                  }}
+                  disabled={effectiveFontSize <= MIN_FONT_SIZE}
+                  className="h-8 w-8 px-0"
                 >
-                  {t("common.useGlobal")}
+                  -
                 </Button>
+                <Input
+                  type="number"
+                  min={MIN_FONT_SIZE}
+                  max={MAX_FONT_SIZE}
+                  value={effectiveFontSize}
+                  onChange={(e) => {
+                    const val = parseInt(e.target.value);
+                    if (val >= MIN_FONT_SIZE && val <= MAX_FONT_SIZE) {
+                      setForm((prev) => ({
+                        ...prev,
+                        fontSize: val,
+                        fontSizeOverride: true,
+                      }));
+                    }
+                  }}
+                  className="h-8 w-16 text-center"
+                />
+                <span className="text-sm text-muted-foreground">pt</span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    if (effectiveFontSize < MAX_FONT_SIZE) {
+                      setForm((prev) => ({
+                        ...prev,
+                        fontSize: effectiveFontSize + 1,
+                        fontSizeOverride: true,
+                      }));
+                    }
+                  }}
+                  disabled={effectiveFontSize >= MAX_FONT_SIZE}
+                  className="h-8 w-8 px-0"
+                >
+                  +
+                </Button>
+              </div>
+              {hasEffectiveFontSizeOverride && (
+                <HostDetailsOverrideReset
+                  size="sm"
+                  label={t("common.useGlobal")}
+                  onClick={() => setForm((prev) => clearHostFontSizeOverride(prev))}
+                />
               )}
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  if (effectiveFontSize < MAX_FONT_SIZE) {
-                    setForm((prev) => ({
-                      ...prev,
-                      fontSize: effectiveFontSize + 1,
-                      fontSizeOverride: true,
-                    }));
-                  }
-                }}
-                disabled={effectiveFontSize >= MAX_FONT_SIZE}
-                className="h-8 w-8 px-0"
-              >
-                +
-              </Button>
             </div>
           </HostDetailsSettingRow>
         </HostDetailsSection>
@@ -176,7 +181,6 @@ export const HostDetailsAdvancedSections: React.FC<HostDetailsAdvancedSectionsPr
                   ...prev,
                   moshEnabled: true,
                   etEnabled: false,
-                  deviceType: prev.deviceType === 'network' ? undefined : prev.deviceType,
                   x11Forwarding: undefined,
                 }));
               } else {
@@ -200,7 +204,6 @@ export const HostDetailsAdvancedSections: React.FC<HostDetailsAdvancedSectionsPr
                   ...prev,
                   etEnabled: true,
                   moshEnabled: false,
-                  deviceType: prev.deviceType === 'network' ? undefined : prev.deviceType,
                   x11Forwarding: undefined,
                 }));
               } else {
@@ -276,10 +279,10 @@ export const HostDetailsAdvancedSections: React.FC<HostDetailsAdvancedSectionsPr
           <ToggleRow
             label={t("hostDetails.deviceType")}
             hint={t("hostDetails.deviceType.desc")}
-            enabled={form.deviceType === 'network'}
-            onToggle={() => update("deviceType", form.deviceType === 'network' ? undefined : 'network')}
+            enabled={effectiveDeviceType === 'network'}
+            onToggle={() => update("deviceType", effectiveDeviceType === 'network' ? 'general' : 'network')}
           />
-          {form.deviceType === 'network' && (
+          {effectiveDeviceType === 'network' && (
             <div className="flex items-start gap-2 p-2 rounded-md bg-yellow-500/10 border border-yellow-500/20">
               <AlertTriangle size={14} className="text-yellow-500 mt-0.5 flex-shrink-0" />
               <p className="text-xs text-yellow-600 dark:text-yellow-400 break-words">
@@ -375,12 +378,6 @@ export const HostDetailsAdvancedSections: React.FC<HostDetailsAdvancedSectionsPr
             hint={t("hostDetails.lineTimestamps.desc")}
             enabled={!!form.showLineTimestamps}
             onToggle={() => update("showLineTimestamps", !form.showLineTimestamps)}
-          />
-          <ToggleRow
-            label={t("hostDetails.disableDynamicTabTitle")}
-            hint={t("hostDetails.disableDynamicTabTitle.desc")}
-            enabled={!!form.disableDynamicTabTitle}
-            onToggle={() => update("disableDynamicTabTitle", !form.disableDynamicTabTitle)}
           />
           <HostDetailsSettingRow label={t("hostDetails.backspaceBehavior")}>
             <Select
@@ -625,12 +622,33 @@ export const HostDetailsAdvancedSections: React.FC<HostDetailsAdvancedSectionsPr
           hint={t("hostDetails.startupCommand.help")}
         >
           <Textarea
-            placeholder={groupDefaults?.startupCommand || t("hostDetails.startupCommand.placeholder")}
+            placeholder={effectiveGroupDefaults?.startupCommand || t("hostDetails.startupCommand.placeholder")}
             value={form.startupCommand || ""}
             onChange={(e) => update("startupCommand", e.target.value)}
             className="min-h-[80px] font-mono text-sm"
             rows={3}
           />
+          <HostDetailsSettingRow
+            label={t("hostDetails.startupCommand.runMode")}
+            hint={t("hostDetails.startupCommand.runMode.help")}
+          >
+            <Select
+              value={effectiveStartupCommandRunMode}
+              onValueChange={(value) => update(
+                "startupCommandRunMode",
+                value === inheritedStartupCommandRunMode ? undefined : value,
+              )}
+            >
+              <SelectTrigger className="h-9 w-[180px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="lineDelay">{t("hostDetails.startupCommand.runMode.lineDelay")}</SelectItem>
+                <SelectItem value="paste">{t("hostDetails.startupCommand.runMode.paste")}</SelectItem>
+              </SelectContent>
+            </Select>
+          </HostDetailsSettingRow>
         </HostDetailsSection>
   </>
-);
+  );
+};

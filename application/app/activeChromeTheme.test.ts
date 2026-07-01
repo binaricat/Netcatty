@@ -101,6 +101,146 @@ test("root pages use the normal application theme", () => {
   assert.equal(resolved, null);
 });
 
+test("follow-app workspace split view always uses the global terminal theme", () => {
+  const workspace: Workspace = {
+    id: "ws-1",
+    name: "Workspace",
+    viewMode: "split",
+    focusedSessionId: "session-1",
+    root: {
+      type: "split",
+      direction: "horizontal",
+      sizes: [50, 50],
+      children: [
+        { type: "session", sessionId: "session-1" },
+        { type: "session", sessionId: "session-2" },
+      ],
+    },
+  } as unknown as Workspace;
+
+  const hostA = { id: "host-a", theme: hostTheme.id, themeOverride: true } as unknown as Host;
+  const hostB = { id: "host-b", theme: logTheme.id, themeOverride: true } as unknown as Host;
+
+  const resolved = resolveActiveChromeTheme({
+    ...baseInput,
+    activeTabId: "ws-1",
+    followAppTerminalTheme: true,
+    hostById: new Map([
+      ["host-a", hostA],
+      ["host-b", hostB],
+    ]),
+    sessionById: new Map([
+      ["session-1", { id: "session-1", hostId: "host-a" } as TerminalSession],
+      ["session-2", { id: "session-2", hostId: "host-b" } as TerminalSession],
+    ]),
+    workspaceById: new Map([["ws-1", workspace]]),
+  });
+
+  assert.equal(resolved?.id, currentTheme.id);
+});
+
+test("manual workspace split view uses the focused session theme when panes differ", () => {
+  const workspace: Workspace = {
+    id: "ws-1",
+    name: "Workspace",
+    viewMode: "split",
+    focusedSessionId: "session-2",
+    root: {
+      type: "split",
+      direction: "horizontal",
+      sizes: [50, 50],
+      children: [
+        { type: "pane", sessionId: "session-1" },
+        { type: "pane", sessionId: "session-2" },
+      ],
+    },
+  } as unknown as Workspace;
+
+  const hostA = { id: "host-a", theme: hostTheme.id, themeOverride: true } as unknown as Host;
+  const hostB = { id: "host-b", theme: logTheme.id, themeOverride: true } as unknown as Host;
+  const focusedTheme = theme("focused-intent");
+
+  const resolved = resolveActiveChromeTheme({
+    ...baseInput,
+    activeTabId: "ws-1",
+    hostById: new Map([
+      ["host-a", hostA],
+      ["host-b", hostB],
+    ]),
+    sessionById: new Map([
+      ["session-1", { id: "session-1", hostId: "host-a" } as TerminalSession],
+      ["session-2", { id: "session-2", hostId: "host-b" } as TerminalSession],
+    ]),
+    workspaceById: new Map([["ws-1", workspace]]),
+    resolveSessionAppearance: ({ host }) => (
+      host?.id === "host-b"
+        ? { themeId: focusedTheme.id, theme: focusedTheme, source: "intent", appThemeUpdate: null }
+        : { themeId: hostTheme.id, theme: hostTheme, source: "host-override", appThemeUpdate: null }
+    ),
+  });
+
+  assert.equal(resolved?.id, focusedTheme.id);
+});
+
+test("manual split workspace falls back to the first tree session theme when focus is stale", () => {
+  const workspace: Workspace = {
+    id: "ws-1",
+    name: "Workspace",
+    viewMode: "split",
+    focusedSessionId: "missing-session",
+    root: {
+      type: "split",
+      direction: "horizontal",
+      sizes: [50, 50],
+      children: [
+        { type: "pane", sessionId: "session-1" },
+        { type: "pane", sessionId: "session-2" },
+      ],
+    },
+  } as unknown as Workspace;
+
+  const hostA = { id: "host-a", theme: hostTheme.id, themeOverride: true } as unknown as Host;
+  const hostB = { id: "host-b", theme: logTheme.id, themeOverride: true } as unknown as Host;
+
+  const resolved = resolveActiveChromeTheme({
+    ...baseInput,
+    activeTabId: "ws-1",
+    hostById: new Map([
+      ["host-a", hostA],
+      ["host-b", hostB],
+    ]),
+    sessionById: new Map([
+      ["session-1", { id: "session-1", hostId: "host-a" } as TerminalSession],
+      ["session-2", { id: "session-2", hostId: "host-b" } as TerminalSession],
+    ]),
+    workspaceById: new Map([["ws-1", workspace]]),
+  });
+
+  assert.equal(resolved?.id, hostTheme.id);
+});
+
+test("manual mode prefers runtime session appearance over stale host theme ids", () => {
+  const intentTheme = theme("intent-theme");
+  const resolved = resolveActiveChromeTheme({
+    ...baseInput,
+    activeTabId: "session-1",
+    hostById: new Map([
+      ["host-1", { id: "host-1", theme: hostTheme.id, themeOverride: true } as unknown as Host],
+    ]),
+    sessionById: new Map([
+      ["session-1", { id: "session-1", hostId: "host-1" } as TerminalSession],
+    ]),
+    resolveSessionAppearance: () => ({
+      themeId: intentTheme.id,
+      theme: intentTheme,
+      source: "intent",
+      appThemeUpdate: null,
+    }),
+  });
+
+  assert.equal(resolved?.id, intentTheme.id);
+});
+
 test("chrome theme sync waits until a newly opened session is present in deps", () => {
   assert.equal(
     isActiveChromeThemeResolvable({

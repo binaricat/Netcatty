@@ -14,8 +14,12 @@ import {
 } from "./contextCompaction.ts";
 
 test("shouldCompactContext waits until the prompt approaches the context window", () => {
-  assert.equal(shouldCompactContext({ promptTokens: 70, contextWindow: 100 }), false);
-  assert.equal(shouldCompactContext({ promptTokens: 85, contextWindow: 100 }), true);
+  assert.equal(shouldCompactContext({ promptTokens: 70, contextWindow: 100, thresholdRatio: 0.85 }), false);
+  assert.equal(shouldCompactContext({ promptTokens: 85, contextWindow: 100, thresholdRatio: 0.85 }), true);
+});
+
+test("shouldCompactContext uses dynamic threshold when ratio omitted", () => {
+  assert.equal(shouldCompactContext({ promptTokens: 70, contextWindow: 100 }), true);
 });
 
 test("findSafeCompactionSplitIndex keeps recent messages intact", () => {

@@ -888,6 +888,261 @@ test("startMosh rejects missing saved proxy profiles", async () => {
   assert.match(error, /Saved proxy/);
 });
 
+test("startMosh rejects missing proxy identities before the unsupported proxy guard", async () => {
+  let started = false;
+  let error = "";
+
+  const terminalBackend = {
+    backendAvailable: () => true,
+    telnetAvailable: () => true,
+    moshAvailable: () => true,
+    localAvailable: () => true,
+    serialAvailable: () => true,
+    execAvailable: () => true,
+    startSSHSession: async () => "ssh-session",
+    startTelnetSession: async () => "telnet-session",
+    startMoshSession: async () => {
+      started = true;
+      return "mosh-session";
+    },
+    startLocalSession: async () => "local-session",
+    startSerialSession: async () => "serial-session",
+    execCommand: async () => ({}),
+    onSessionData: () => noop,
+    onSessionExit: () => noop,
+    onChainProgress: () => noop,
+    writeToSession: noop,
+    resizeSession: noop,
+  };
+
+  const ctx = {
+    host: {
+      id: "host-1",
+      label: "Example",
+      hostname: "example.test",
+      username: "alice",
+      port: 2200,
+      proxyConfig: {
+        type: "http",
+        host: "proxy.example.com",
+        port: 3128,
+        identityId: "missing-identity",
+      },
+    },
+    keys: [],
+    identities: [],
+    resolvedChainHosts: [],
+    sessionId: "session-1",
+    terminalSettings: {},
+    terminalBackend,
+    sessionRef: { current: null },
+    hasConnectedRef: { current: false },
+    hasRunStartupCommandRef: { current: false },
+    disposeDataRef: { current: null },
+    disposeExitRef: { current: null },
+    fitAddonRef: { current: null },
+    serializeAddonRef: { current: null },
+    pendingAuthRef: { current: null },
+    updateStatus: noop,
+    setStatus: noop,
+    setError: (message: string) => { error = message; },
+    setNeedsAuth: noop,
+    setAuthRetryMessage: noop,
+    setAuthPassword: noop,
+    setProgressLogs: noop,
+    setProgressValue: noop,
+    setChainProgress: noop,
+  };
+
+  const term = {
+    cols: 120,
+    rows: 32,
+    write: noop,
+    writeln: noop,
+    scrollToBottom: noop,
+  };
+
+  await createTerminalSessionStarters(ctx as never).startMosh(term as never);
+
+  assert.equal(started, false);
+  assert.match(error, /Proxy identity/);
+  assert.match(error, /missing/);
+});
+
+test("startMosh rejects incomplete proxy identities before the unsupported proxy guard", async () => {
+  let started = false;
+  let error = "";
+
+  const terminalBackend = {
+    backendAvailable: () => true,
+    telnetAvailable: () => true,
+    moshAvailable: () => true,
+    localAvailable: () => true,
+    serialAvailable: () => true,
+    execAvailable: () => true,
+    startSSHSession: async () => "ssh-session",
+    startTelnetSession: async () => "telnet-session",
+    startMoshSession: async () => {
+      started = true;
+      return "mosh-session";
+    },
+    startLocalSession: async () => "local-session",
+    startSerialSession: async () => "serial-session",
+    execCommand: async () => ({}),
+    onSessionData: () => noop,
+    onSessionExit: () => noop,
+    onChainProgress: () => noop,
+    writeToSession: noop,
+    resizeSession: noop,
+  };
+
+  const ctx = {
+    host: {
+      id: "host-1",
+      label: "Example",
+      hostname: "example.test",
+      username: "alice",
+      port: 2200,
+      proxyConfig: {
+        type: "http",
+        host: "proxy.example.com",
+        port: 3128,
+        identityId: "identity-1",
+      },
+    },
+    keys: [],
+    identities: [{
+      id: "identity-1",
+      label: "Proxy login",
+      username: "proxy-user",
+      authMethod: "password",
+      created: 1,
+    }],
+    resolvedChainHosts: [],
+    sessionId: "session-1",
+    terminalSettings: {},
+    terminalBackend,
+    sessionRef: { current: null },
+    hasConnectedRef: { current: false },
+    hasRunStartupCommandRef: { current: false },
+    disposeDataRef: { current: null },
+    disposeExitRef: { current: null },
+    fitAddonRef: { current: null },
+    serializeAddonRef: { current: null },
+    pendingAuthRef: { current: null },
+    updateStatus: noop,
+    setStatus: noop,
+    setError: (message: string) => { error = message; },
+    setNeedsAuth: noop,
+    setAuthRetryMessage: noop,
+    setAuthPassword: noop,
+    setProgressLogs: noop,
+    setProgressValue: noop,
+    setChainProgress: noop,
+  };
+
+  const term = {
+    cols: 120,
+    rows: 32,
+    write: noop,
+    writeln: noop,
+    scrollToBottom: noop,
+  };
+
+  await createTerminalSessionStarters(ctx as never).startMosh(term as never);
+
+  assert.equal(started, false);
+  assert.match(error, /Proxy identity/);
+  assert.match(error, /incomplete/);
+});
+
+test("startMosh does not connect when a proxy identity password is encrypted", async () => {
+  let started = false;
+  let error = "";
+
+  const terminalBackend = {
+    backendAvailable: () => true,
+    telnetAvailable: () => true,
+    moshAvailable: () => true,
+    localAvailable: () => true,
+    serialAvailable: () => true,
+    execAvailable: () => true,
+    startSSHSession: async () => "ssh-session",
+    startTelnetSession: async () => "telnet-session",
+    startMoshSession: async () => {
+      started = true;
+      return "mosh-session";
+    },
+    startLocalSession: async () => "local-session",
+    startSerialSession: async () => "serial-session",
+    execCommand: async () => ({}),
+    onSessionData: () => noop,
+    onSessionExit: () => noop,
+    onChainProgress: () => noop,
+    writeToSession: noop,
+    resizeSession: noop,
+  };
+
+  const ctx = {
+    host: {
+      id: "host-1",
+      label: "Example",
+      hostname: "example.test",
+      username: "alice",
+      port: 2200,
+      proxyConfig: {
+        type: "http",
+        host: "proxy.example.com",
+        port: 3128,
+        identityId: "identity-1",
+      },
+    },
+    keys: [],
+    identities: [{
+      id: "identity-1",
+      label: "Proxy login",
+      username: "proxy-user",
+      authMethod: "password",
+      password: ENCRYPTED_CREDENTIAL_PLACEHOLDER,
+      created: 1,
+    }],
+    resolvedChainHosts: [],
+    sessionId: "session-1",
+    terminalSettings: {},
+    terminalBackend,
+    sessionRef: { current: null },
+    hasConnectedRef: { current: false },
+    hasRunStartupCommandRef: { current: false },
+    disposeDataRef: { current: null },
+    disposeExitRef: { current: null },
+    fitAddonRef: { current: null },
+    serializeAddonRef: { current: null },
+    pendingAuthRef: { current: null },
+    updateStatus: noop,
+    setStatus: noop,
+    setError: (message: string) => { error = message; },
+    setNeedsAuth: noop,
+    setAuthRetryMessage: noop,
+    setAuthPassword: noop,
+    setProgressLogs: noop,
+    setProgressValue: noop,
+    setChainProgress: noop,
+  };
+
+  const term = {
+    cols: 120,
+    rows: 32,
+    write: noop,
+    writeln: noop,
+    scrollToBottom: noop,
+  };
+
+  await createTerminalSessionStarters(ctx as never).startMosh(term as never);
+
+  assert.equal(started, false);
+  assert.match(error, /Mosh does not support proxy/);
+});
+
 test("startMosh rejects configured proxies instead of connecting directly", async () => {
   let started = false;
   let error = "";

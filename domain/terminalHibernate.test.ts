@@ -26,8 +26,8 @@ test("capHibernateBufferByLines keeps the most recent lines", () => {
   assert.equal(capHibernateBufferByLines(input, 2), "line-3\nline-4");
 });
 
-test("resolveTerminalHibernateEnabled defaults to enabled", () => {
-  assert.equal(resolveTerminalHibernateEnabled(), true);
+test("resolveTerminalHibernateEnabled defaults to disabled", () => {
+  assert.equal(resolveTerminalHibernateEnabled(), false);
   assert.equal(resolveTerminalHibernateEnabled({ hibernateHiddenTabs: true }), true);
   assert.equal(resolveTerminalHibernateEnabled({ hibernateHiddenTabs: false }), false);
 });

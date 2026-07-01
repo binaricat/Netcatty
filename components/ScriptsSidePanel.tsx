@@ -7,12 +7,17 @@
  * list of matching snippets regardless of package nesting.
  */
 
-import { ChevronRight, Edit2, FileCode, Package, Plus, Search, Trash2, Zap } from 'lucide-react';
-import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ChevronRight, Edit2, Layers, Package, Play, Plus, Search, Trash2, Zap } from 'lucide-react';
+import React, { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useI18n } from '../application/i18n/I18nProvider';
+import { getScriptRecordingSnapshot, subscribeScriptRecording } from '../application/state/scriptRecordingStore.ts';
 import { reorderVaultItems, reorderVaultStrings, sortByVaultOrder } from '../domain/vaultOrder';
+import { isScriptSnippet } from '../domain/snippetScript.ts';
 import { cn } from '../lib/utils';
 import { Snippet } from '../types';
+import type { ScriptRun } from '../types/global/netcatty-bridge-script.d.ts';
+import { ScriptRunList } from './scripts/ScriptRunList';
+import { ScriptRecordingHelpDialog } from './scripts/ScriptRecordingHelpDialog';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -21,6 +26,7 @@ import {
 } from './ui/context-menu';
 import { FixedSizeVirtualList } from './ui/FixedSizeVirtualList';
 import { Input } from './ui/input';
+import { SnippetCommandTooltipContent } from './snippets/SnippetCommandTooltipContent';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/tooltip';
 
 const SCRIPT_ROW_HEIGHT = 34;
@@ -34,9 +40,17 @@ interface ScriptsSidePanelProps {
   snippets: Snippet[];
   packages: string[];
   onSnippetClick: (snippet: Snippet) => void;
+  onRunScript?: (snippet: Snippet) => void;
+  onRunScriptOnWorkspace?: (snippet: Snippet, mode: 'sequential' | 'parallel') => void;
   onSnippetsChange?: (snippets: Snippet[]) => void;
   onPackagesChange?: (packages: string[]) => void;
   isVisible?: boolean;
+  runs?: ScriptRun[];
+  onStopRun?: (runId: string) => void;
+  onPauseRun?: (runId: string) => void;
+  onResumeRun?: (runId: string) => void;
+  onStartRecording?: () => void;
+  focusedSessionId?: string;
 }
 
 type TreeRow =
@@ -221,13 +235,46 @@ const ScriptsSidePanelInner: React.FC<ScriptsSidePanelProps> = ({
   snippets,
   packages,
   onSnippetClick,
+  onRunScript,
+  onRunScriptOnWorkspace,
   onSnippetsChange,
   onPackagesChange,
   isVisible = true,
+  runs = [],
+  onStopRun,
+  onPauseRun,
+  onResumeRun,
+  onStartRecording,
+  focusedSessionId,
 }) => {
   const { t } = useI18n();
   const [search, setSearch] = useState('');
+  const [subView, setSubView] = useState<'library' | 'running'>('library');
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<{ packagePath?: string }>).detail;
+      setSubView('library');
+      setSearch('');
+      if (detail?.packagePath) {
+        setExpandedPaths((prev) => {
+          const next = new Set(prev);
+          let path = detail.packagePath || '';
+          while (path) {
+            next.add(path);
+            const slash = path.lastIndexOf('/');
+            if (slash < 0) break;
+            path = path.slice(0, slash);
+          }
+          next.add('');
+          return next;
+        });
+      }
+    };
+    window.addEventListener('netcatty:scripts:saved', handler);
+    return () => window.removeEventListener('netcatty:scripts:saved', handler);
+  }, []);
 
   // Normalize the package list + derive ancestor packages implied by each path
   // (e.g. package "a/b/c" implies roots "a" and "a/b" even when not listed).
@@ -343,10 +390,38 @@ const ScriptsSidePanelInner: React.FC<ScriptsSidePanelProps> = ({
 
   const handleSnippetClick = useCallback(
     (snippet: Snippet) => {
+      if (isScriptSnippet(snippet)) {
+        onRunScript?.(snippet);
+        setSubView('running');
+        return;
+      }
       onSnippetClick(snippet);
     },
-    [onSnippetClick],
+    [onRunScript, onSnippetClick],
   );
+
+  const sessionRuns = useMemo(() => {
+    if (!focusedSessionId) return runs;
+    return runs.filter((run) => run.sessionId === focusedSessionId);
+  }, [focusedSessionId, runs]);
+
+  const recordingState = useSyncExternalStore(
+    subscribeScriptRecording,
+    getScriptRecordingSnapshot,
+    getScriptRecordingSnapshot,
+  );
+  const isRecordingFocusedSession = Boolean(
+    focusedSessionId && recordingState.sessionId === focusedSessionId,
+  );
+  const canStartRecording = Boolean(onStartRecording && focusedSessionId);
+  const recordingDisabledReason = !onStartRecording
+    ? 'unavailable'
+    : !focusedSessionId
+      ? 'noSession'
+      : null;
+  const recordingButtonLabel = isRecordingFocusedSession
+    ? t('scripts.recording.active')
+    : t('scripts.recording.start');
 
   const moveSnippetToPackage = useCallback((snippetId: string, packagePath: string | null) => {
     if (!onSnippetsChange) return;
@@ -506,10 +581,11 @@ const ScriptsSidePanelInner: React.FC<ScriptsSidePanelProps> = ({
   ]);
 
   const handleAddSnippet = useCallback(() => {
-    // Let the App shell listen and navigate to the Snippets section with
-    // the "add" panel pre-opened, so the user does not have to leave the
-    // terminal to jump back and click "New Snippet".
     window.dispatchEvent(new CustomEvent('netcatty:snippets:add'));
+  }, []);
+
+  const handleAddScript = useCallback(() => {
+    window.dispatchEvent(new CustomEvent('netcatty:scripts:add'));
   }, []);
 
   const handleEditSnippet = useCallback((snippet: Snippet) => {
@@ -534,6 +610,41 @@ const ScriptsSidePanelInner: React.FC<ScriptsSidePanelProps> = ({
       className="h-full flex flex-col bg-background overflow-hidden"
       data-section="snippets-panel"
     >
+      {/* Sub view tabs */}
+      <div className="shrink-0 px-2 py-1 border-b border-border/50 flex items-center gap-1">
+        <button
+          type="button"
+          className={cn(
+            'flex-1 h-7 rounded-md text-xs',
+            subView === 'library' ? 'bg-accent text-foreground' : 'text-muted-foreground hover:bg-muted/50',
+          )}
+          onClick={() => setSubView('library')}
+        >
+          {t('scripts.sidePanel.library')}
+        </button>
+        <button
+          type="button"
+          className={cn(
+            'flex-1 h-7 rounded-md text-xs',
+            subView === 'running' ? 'bg-accent text-foreground' : 'text-muted-foreground hover:bg-muted/50',
+          )}
+          onClick={() => setSubView('running')}
+        >
+          {t('scripts.sidePanel.running')}
+        </button>
+      </div>
+
+      {subView === 'running' ? (
+        <div className="flex-1 min-h-0 overflow-auto">
+          <ScriptRunList
+            runs={sessionRuns}
+            onStop={onStopRun ?? (() => {})}
+            onPause={onPauseRun ?? (() => {})}
+            onResume={onResumeRun ?? (() => {})}
+          />
+        </div>
+      ) : (
+      <>
       {/* Search + Add */}
       <div className="shrink-0 px-2 py-1.5 border-b border-border/50 flex items-center gap-1.5">
         <div className="relative flex-1 min-w-0">
@@ -623,6 +734,14 @@ const ScriptsSidePanelInner: React.FC<ScriptsSidePanelProps> = ({
                   onClick={() => handleSnippetClick(item.row.snippet)}
                   onEdit={() => handleEditSnippet(item.row.snippet)}
                   onDelete={() => handleDeleteSnippet(item.row.snippet.id)}
+                  onRunParallel={isScriptSnippet(item.row.snippet) && onRunScriptOnWorkspace
+                    ? () => onRunScriptOnWorkspace(item.row.snippet, 'parallel')
+                    : undefined}
+                  onRunSequential={isScriptSnippet(item.row.snippet) && onRunScriptOnWorkspace
+                    ? () => onRunScriptOnWorkspace(item.row.snippet, 'sequential')
+                    : undefined}
+                  runParallelLabel={t('scripts.actions.runParallel')}
+                  runSequentialLabel={t('scripts.actions.runSequential')}
                   editLabel={t('action.edit')}
                   deleteLabel={t('action.delete')}
                 />
@@ -631,6 +750,49 @@ const ScriptsSidePanelInner: React.FC<ScriptsSidePanelProps> = ({
           />
         )}
       </div>
+      <div className="shrink-0 px-2 py-2 border-t border-border/50 flex items-center gap-2">
+        <button
+          type="button"
+          onClick={handleAddScript}
+          className="flex-1 h-8 rounded-md text-xs bg-secondary/60 hover:bg-secondary"
+        >
+          {t('scripts.sidePanel.newScript')}
+        </button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onClick={onStartRecording}
+              disabled={!canStartRecording}
+              className={cn(
+                'flex-1 h-8 rounded-md text-xs disabled:opacity-50',
+                isRecordingFocusedSession
+                  ? 'bg-red-500/15 text-red-500 hover:bg-red-500/25'
+                  : 'bg-secondary/60 hover:bg-secondary',
+              )}
+            >
+              {recordingButtonLabel}
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="top" className="max-w-[240px]">
+            {recordingDisabledReason === 'unavailable'
+              ? t('scripts.recording.unavailableHint')
+              : recordingDisabledReason === 'noSession'
+                ? t('scripts.recording.noSession')
+                : isRecordingFocusedSession
+                  ? t('scripts.recording.activeHint')
+                  : t('scripts.recording.startHint')}
+          </TooltipContent>
+        </Tooltip>
+        <ScriptRecordingHelpDialog />
+      </div>
+      {isRecordingFocusedSession ? (
+        <p className="shrink-0 px-2 pb-2 text-[10px] text-muted-foreground leading-relaxed">
+          {t('scripts.recording.activeHint')}
+        </p>
+      ) : null}
+      </>
+      )}
     </div>
     </TooltipProvider>
   );
@@ -690,6 +852,10 @@ interface SnippetRowProps {
   onClick: () => void;
   onEdit: () => void;
   onDelete: () => void;
+  onRunParallel?: () => void;
+  onRunSequential?: () => void;
+  runParallelLabel?: string;
+  runSequentialLabel?: string;
   editLabel: string;
   deleteLabel: string;
 }
@@ -706,6 +872,10 @@ const SnippetRow = memo<SnippetRowProps>(({
   onClick,
   onEdit,
   onDelete,
+  onRunParallel,
+  onRunSequential,
+  runParallelLabel,
+  runSequentialLabel,
   editLabel,
   deleteLabel,
 }) => (
@@ -735,7 +905,11 @@ const SnippetRow = memo<SnippetRowProps>(({
               {/* Hidden chevron column mirrors PackageRow's layout so the
                   snippet icon lines up exactly with the package icon above. */}
               <ChevronRight size={12} className="shrink-0 opacity-0" aria-hidden />
-              <FileCode size={12} className="shrink-0 text-muted-foreground" />
+              {isScriptSnippet(snippet) ? (
+                <Play size={12} className="shrink-0 text-primary" />
+              ) : (
+                <Zap size={12} className="shrink-0 text-muted-foreground" />
+              )}
               <span className="flex-1 min-w-0 truncate text-xs font-medium">{snippet.label}</span>
               {subtitle && (
                 <span className="shrink-0 max-w-[40%] truncate text-[10px] text-muted-foreground">
@@ -744,16 +918,23 @@ const SnippetRow = memo<SnippetRowProps>(({
               )}
             </button>
           </TooltipTrigger>
-          <TooltipContent side="right" align="start" className="max-w-[480px]">
-            <div className="font-medium text-xs mb-1 break-all">{snippet.label}</div>
-            <pre className="font-mono text-[11px] whitespace-pre-wrap break-all leading-snug opacity-90">
-              {snippet.command}
-            </pre>
+          <TooltipContent side="right" align="start">
+            <SnippetCommandTooltipContent label={snippet.label} command={snippet.command} />
           </TooltipContent>
         </Tooltip>
       </div>
     </ContextMenuTrigger>
     <ContextMenuContent>
+      {onRunParallel ? (
+        <ContextMenuItem onClick={onRunParallel}>
+          <Layers className="mr-2 h-4 w-4" /> {runParallelLabel}
+        </ContextMenuItem>
+      ) : null}
+      {onRunSequential ? (
+        <ContextMenuItem onClick={onRunSequential}>
+          <Layers className="mr-2 h-4 w-4" /> {runSequentialLabel}
+        </ContextMenuItem>
+      ) : null}
       <ContextMenuItem onClick={onEdit}>
         <Edit2 className="mr-2 h-4 w-4" /> {editLabel}
       </ContextMenuItem>

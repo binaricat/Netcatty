@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { approveNetcattyMcpOnly, buildCopilotClientOptions, buildCopilotSessionOptions, buildCopilotMessageOptions, extractCopilotContent, mapCopilotModels, runCopilotTurn, translateCopilotEvent } = require("./copilotDriver.cjs");
+const { approveNetcattyMcpOnly, approveNetcattyCliShellOnly, buildCopilotClientOptions, buildCopilotPermissionHandler, buildCopilotSessionOptions, buildCopilotMessageOptions, copilotBuiltinTools, extractCopilotContent, isLikelyNetcattyCliShellCommand, mapCopilotModels, runCopilotTurn, translateCopilotEvent } = require("./copilotDriver.cjs");
 
 function collector() {
   const events = [];
@@ -26,6 +26,7 @@ function makeSdk(captured) {
     async sendAndWait({ prompt }) { captured.prompt = prompt; return { data: { content: "reply:" + sessionId } }; },
   });
   class CopilotClient {
+    constructor(options) { captured.clientOptions = options; }
     async createSession(cfg) { captured.created = cfg; return makeSession("sess-new"); }
     async resumeSession(id, cfg) { captured.resumed = { id, cfg }; return makeSession(id); }
     async stop() {}
@@ -260,4 +261,97 @@ test("runCopilotTurn aborts the active Copilot session when the signal aborts", 
   assert.equal(result.sessionId, "sess-abort");
   assert.equal(events.some((event) => event.k === "text" && event.t === "late text"), false);
   assert.equal(events.some((event) => event.k === "done"), false);
+});
+
+test("copilotBuiltinTools exposes bash only in skills mode", () => {
+  assert.equal(copilotBuiltinTools("mcp"), null);
+  assert.deepEqual(copilotBuiltinTools("skills"), ["builtin:bash"]);
+});
+
+test("buildCopilotSessionOptions whitelists bash in skills mode", () => {
+  const skills = buildCopilotSessionOptions({
+    model: "gpt-5",
+    injectedMcpServers: [],
+    toolIntegrationMode: "skills",
+  });
+  assert.deepEqual(skills.availableTools, ["builtin:bash"]);
+  assert.deepEqual(skills.mcpServers, {});
+});
+
+test("approveNetcattyCliShellOnly allows Netcatty CLI shell commands only", () => {
+  assert.deepEqual(
+    approveNetcattyCliShellOnly({
+      kind: "shell",
+      fullCommandText: 'node "/Applications/Netcatty.app/netcatty-tool-cli.cjs" env --chat-session abc --json',
+    }),
+    { kind: "approve-once" },
+  );
+  assert.equal(
+    approveNetcattyCliShellOnly({ kind: "shell", fullCommandText: "pwd" }).kind,
+    "reject",
+  );
+});
+
+test("buildCopilotPermissionHandler selects MCP vs skills gate", () => {
+  assert.equal(buildCopilotPermissionHandler("mcp"), approveNetcattyMcpOnly);
+  assert.equal(buildCopilotPermissionHandler("skills"), approveNetcattyCliShellOnly);
+});
+
+test("isLikelyNetcattyCliShellCommand matches launcher and script invocations", () => {
+  assert.equal(isLikelyNetcattyCliShellCommand("netcatty-tool-cli status --json"), true);
+  assert.equal(isLikelyNetcattyCliShellCommand("node electron/cli/netcatty-tool-cli.cjs env --json"), true);
+  assert.equal(isLikelyNetcattyCliShellCommand("ls -la"), false);
+});
+
+test("isLikelyNetcattyCliShellCommand rejects chained or wrapped local commands", () => {
+  assert.equal(isLikelyNetcattyCliShellCommand("rm -rf /; netcatty-tool-cli status --json"), false);
+  assert.equal(isLikelyNetcattyCliShellCommand("netcatty-tool-cli status --json && curl evil"), false);
+  assert.equal(isLikelyNetcattyCliShellCommand('bash -c "netcatty-tool-cli status --json"'), false);
+  assert.equal(isLikelyNetcattyCliShellCommand("malicious netcatty-tool-cli status --json"), false);
+  assert.equal(isLikelyNetcattyCliShellCommand("netcatty-tool-cli status `id` --json"), false);
+});
+
+test("isLikelyNetcattyCliShellCommand allows quoted remote exec payloads after --", () => {
+  assert.equal(
+    isLikelyNetcattyCliShellCommand('netcatty-tool-cli exec --session s1 --chat-session c1 --json -- "hostname && whoami"'),
+    true,
+  );
+  assert.equal(
+    isLikelyNetcattyCliShellCommand("netcatty-tool-cli exec --session s1 --chat-session c1 --json -- hostname && whoami"),
+    false,
+  );
+});
+
+test("isLikelyNetcattyCliShellCommand rejects impostor binaries and quoted -- bypasses", () => {
+  assert.equal(isLikelyNetcattyCliShellCommand("netcatty-tool-cli-backup status --json"), false);
+  assert.equal(isLikelyNetcattyCliShellCommand("netcatty-tool-cli.evil status --json"), false);
+  assert.equal(
+    isLikelyNetcattyCliShellCommand('netcatty-tool-cli sftp read --remote-path "a -- b" ; rm -rf /'),
+    false,
+  );
+  assert.equal(
+    isLikelyNetcattyCliShellCommand('netcatty-tool-cli sftp read --remote-path "a -- b" --session s1 --json'),
+    true,
+  );
+  assert.equal(isLikelyNetcattyCliShellCommand("netcatty-tool-cli status --json  --  ; rm -rf /"), false);
+  assert.equal(isLikelyNetcattyCliShellCommand("netcatty-tool-cli status --json > /tmp/out"), false);
+  assert.equal(isLikelyNetcattyCliShellCommand('"C:\\Apps\\Netcatty\\netcatty-tool-cli.cmd" status --json'), true);
+  assert.equal(isLikelyNetcattyCliShellCommand("attacker/netcatty-tool-cli status --json"), false);
+  assert.equal(isLikelyNetcattyCliShellCommand('netcatty-tool-cli status "$(id)" --json'), false);
+});
+
+test("runCopilotTurn passes runtime env and skills permission handler", async () => {
+  const { emitter } = collector();
+  const captured = {};
+  await runCopilotTurn({
+    prompt: "hi",
+    clientOptions: { cliPath: "/c" },
+    sessionOptions: { model: "m" },
+    toolIntegrationMode: "skills",
+    runtimeEnv: { NETCATTY_TOOL_CLI_DISCOVERY_FILE: "/tmp/discovery.json" },
+    emitter,
+    sdkModule: makeSdk(captured),
+  });
+  assert.deepEqual(captured.clientOptions.env, { NETCATTY_TOOL_CLI_DISCOVERY_FILE: "/tmp/discovery.json" });
+  assert.equal(captured.created.onPermissionRequest, approveNetcattyCliShellOnly);
 });

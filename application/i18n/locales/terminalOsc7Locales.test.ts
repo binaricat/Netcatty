@@ -12,6 +12,9 @@ const osc7Keys = [
   "terminal.osc7Setup.targets",
   "terminal.osc7Setup.command",
   "terminal.osc7Setup.run",
+  "terminal.osc7Setup.running",
+  "terminal.osc7Setup.configured",
+  "terminal.osc7Setup.failed",
   "terminal.osc7Setup.sent",
 ] as const;
 

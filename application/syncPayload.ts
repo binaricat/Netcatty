@@ -53,6 +53,8 @@ import {
   STORAGE_KEY_TERM_FONT_FAMILY,
   STORAGE_KEY_TERM_FONT_SIZE,
   STORAGE_KEY_TERM_SETTINGS,
+  STORAGE_KEY_TERMINAL_SIDE_PANEL_AUTO_OPEN,
+  STORAGE_KEY_TERMINAL_SIDE_PANEL_AUTO_OPEN_TAB,
   STORAGE_KEY_CUSTOM_KEY_BINDINGS,
   STORAGE_KEY_EDITOR_WORD_WRAP,
   STORAGE_KEY_SFTP_DOUBLE_CLICK_BEHAVIOR,
@@ -88,6 +90,7 @@ import {
   STORAGE_KEY_AI_SHOW_TERMINAL_SELECTION_ACTION,
   STORAGE_KEY_PORT_FORWARDING,
 } from '../infrastructure/config/storageKeys';
+import { isTerminalSidePanelAutoOpenTab } from '../domain/terminalSidePanelAutoOpen';
 
 // ---------------------------------------------------------------------------
 // Input types
@@ -202,7 +205,7 @@ const SYNCABLE_TERMINAL_KEYS = [
   'rightClickBehavior', 'middleClickBehavior', 'copyOnSelect', 'middleClickPaste', 'wordSeparators',
   'linkModifier', 'keywordHighlightEnabled', 'keywordHighlightRules',
   'keepaliveInterval', 'keepaliveCountMax', 'disableBracketedPaste', 'clearWipesScrollback',
-  'preserveSelectionOnInput', 'forcePromptNewLine', 'osc52Clipboard', 'showServerStats',
+  'preserveSelectionOnInput', 'forcePromptNewLine', 'osc52Clipboard', 'dynamicTabTitleMode', 'showServerStats',
   'serverStatsRefreshInterval',
   'systemManagerProcessRefreshInterval', 'systemManagerTmuxRefreshInterval',
   'systemManagerDockerListRefreshInterval', 'systemManagerDockerStatsRefreshInterval',
@@ -227,6 +230,8 @@ export const SYNCABLE_SETTING_STORAGE_KEYS = [
   STORAGE_KEY_TERM_FONT_FAMILY,
   STORAGE_KEY_TERM_FONT_SIZE,
   STORAGE_KEY_TERM_SETTINGS,
+  STORAGE_KEY_TERMINAL_SIDE_PANEL_AUTO_OPEN,
+  STORAGE_KEY_TERMINAL_SIDE_PANEL_AUTO_OPEN_TAB,
   STORAGE_KEY_CUSTOM_THEMES,
   STORAGE_KEY_CUSTOM_KEY_BINDINGS,
   STORAGE_KEY_EDITOR_WORD_WRAP,
@@ -386,6 +391,12 @@ export function collectSyncableSettings(): SyncPayload['settings'] {
   if (termFont) settings.terminalFontFamily = termFont;
   const termSize = localStorageAdapter.readNumber(STORAGE_KEY_TERM_FONT_SIZE);
   if (termSize != null) settings.terminalFontSize = termSize;
+  const terminalSidePanelAutoOpen = localStorageAdapter.readBoolean(STORAGE_KEY_TERMINAL_SIDE_PANEL_AUTO_OPEN);
+  if (terminalSidePanelAutoOpen != null) settings.terminalSidePanelAutoOpen = terminalSidePanelAutoOpen;
+  const terminalSidePanelAutoOpenTab = localStorageAdapter.readString(STORAGE_KEY_TERMINAL_SIDE_PANEL_AUTO_OPEN_TAB);
+  if (isTerminalSidePanelAutoOpenTab(terminalSidePanelAutoOpenTab)) {
+    settings.terminalSidePanelAutoOpenTab = terminalSidePanelAutoOpenTab;
+  }
 
   // Terminal settings (syncable subset only)
   const termSettingsRaw = localStorageAdapter.readString(STORAGE_KEY_TERM_SETTINGS);
@@ -466,7 +477,7 @@ export function collectSyncableSettings(): SyncPayload['settings'] {
   const activeModelId = localStorageAdapter.readString(STORAGE_KEY_AI_ACTIVE_MODEL);
   if (activeModelId != null) ai.activeModelId = activeModelId;
   const permissionMode = localStorageAdapter.readString(STORAGE_KEY_AI_PERMISSION_MODE);
-  if (permissionMode === 'observer' || permissionMode === 'confirm' || permissionMode === 'autonomous') {
+  if (permissionMode === 'observer' || permissionMode === 'confirm' || permissionMode === 'auto') {
     ai.globalPermissionMode = permissionMode;
   }
   const toolIntegrationMode = localStorageAdapter.readString(STORAGE_KEY_AI_TOOL_INTEGRATION_MODE);
@@ -571,6 +582,12 @@ async function applySyncableSettings(settings: NonNullable<SyncPayload['settings
   if (settings.terminalThemeLight != null) localStorageAdapter.writeString(STORAGE_KEY_TERM_THEME_LIGHT, settings.terminalThemeLight);
   if (settings.terminalFontFamily != null) localStorageAdapter.writeString(STORAGE_KEY_TERM_FONT_FAMILY, settings.terminalFontFamily);
   if (settings.terminalFontSize != null) localStorageAdapter.writeString(STORAGE_KEY_TERM_FONT_SIZE, String(settings.terminalFontSize));
+  if (settings.terminalSidePanelAutoOpen != null) {
+    localStorageAdapter.writeBoolean(STORAGE_KEY_TERMINAL_SIDE_PANEL_AUTO_OPEN, settings.terminalSidePanelAutoOpen);
+  }
+  if (isTerminalSidePanelAutoOpenTab(settings.terminalSidePanelAutoOpenTab)) {
+    localStorageAdapter.writeString(STORAGE_KEY_TERMINAL_SIDE_PANEL_AUTO_OPEN_TAB, settings.terminalSidePanelAutoOpenTab);
+  }
 
   // Terminal settings — merge with existing to preserve platform-specific keys
   if (settings.terminalSettings) {

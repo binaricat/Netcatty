@@ -2,7 +2,7 @@ import { useCallback } from "react";
 
 import { sanitizeHost } from "../../domain/host";
 import { readTextFile } from "../../lib/readTextFile";
-import { importVaultHostsFromText, type VaultImportFormat } from "../../domain/vaultImport";
+import { applyVaultHostImport, importVaultHostsFromText, type VaultImportFormat } from "../../domain/vaultImport";
 import type { Host, ManagedSource } from "../../types";
 import type { ImportOptions } from "./ImportVaultDialog";
 import { toast } from "../ui/toast";
@@ -153,16 +153,9 @@ export function useVaultImportHandlers({
             ) as string[];
             onUpdateCustomGroups(nextGroups);
           } else if (newHosts.length > 0) {
-            onUpdateHosts([...hosts, ...newHosts].map(sanitizeHost));
-  
-            const nextGroups = Array.from(
-              new Set([
-                ...customGroups,
-                ...result.groups,
-                ...newHosts.map((h) => h.group).filter(Boolean),
-              ]),
-            ) as string[];
-            onUpdateCustomGroups(nextGroups);
+            const merged = applyVaultHostImport(hosts, customGroups, result, { skipDuplicates: true });
+            onUpdateHosts(merged.hosts);
+            onUpdateCustomGroups(merged.customGroups);
           }
   
           // Count total hosts affected (new + converted to managed)

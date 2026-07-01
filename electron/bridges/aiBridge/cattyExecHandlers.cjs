@@ -1,4 +1,63 @@
 /* eslint-disable no-undef */
+function getWorkerExecutionMeta(mcpServerBridge, sessionId, chatSessionId) {
+  return mcpServerBridge.getSessionMeta?.(sessionId, chatSessionId) || {};
+}
+
+function isNetworkDeviceLike(meta) {
+  const protocol = meta?.protocol || "";
+  const isSshOrSerial = protocol === "ssh" || protocol === "serial";
+  return (meta?.deviceType === "network" && isSshOrSerial) || protocol === "serial";
+}
+
+async function proxyCattyExecToWorker({
+  event,
+  terminalWorkerManager,
+  mcpServerBridge,
+  sessionId,
+  command,
+  chatSessionId,
+}) {
+  if (!terminalWorkerManager?.request) {
+    return { ok: false, error: "Session not found" };
+  }
+
+  const busyErr = mcpServerBridge.getSessionBusyError?.(sessionId);
+  if (busyErr) return busyErr;
+
+  const meta = getWorkerExecutionMeta(mcpServerBridge, sessionId, chatSessionId);
+  if (!isNetworkDeviceLike(meta)) {
+    const safety = mcpServerBridge.checkCommandSafety(command);
+    if (safety.blocked) {
+      return { ok: false, error: `Command blocked by safety policy. Pattern: ${safety.matchedPattern}` };
+    }
+  }
+
+  const reservation = mcpServerBridge.reserveSessionExecution?.(sessionId, "exec");
+  if (reservation && !reservation.ok) return reservation;
+  const sessionToken = reservation?.token;
+  const releaseLock = () => {
+    if (sessionToken) {
+      try { mcpServerBridge.releaseSessionExecution?.(sessionId, sessionToken); } catch {}
+    }
+  };
+
+  try {
+    return await terminalWorkerManager.request("netcatty:ai:exec", {
+      sessionId,
+      command,
+      chatSessionId,
+      commandTimeoutMs: mcpServerBridge.getCommandTimeoutMs ? mcpServerBridge.getCommandTimeoutMs() : 60000,
+      sessionMeta: meta,
+    }, {
+      webContentsId: event?.sender?.id,
+    });
+  } catch (err) {
+    return { ok: false, error: err?.message || String(err) };
+  } finally {
+    releaseLock();
+  }
+}
+
 function registerCattyExecHandlers(ctx) {
   with (ctx) {
   ipcMain.handle("netcatty:ai:exec", async (event, { sessionId, command, chatSessionId }) => {
@@ -12,7 +71,14 @@ function registerCattyExecHandlers(ctx) {
     }
     const session = sessions?.get(sessionId);
     if (!session) {
-      return { ok: false, error: "Session not found" };
+      return proxyCattyExecToWorker({
+        event,
+        terminalWorkerManager,
+        mcpServerBridge,
+        sessionId,
+        command,
+        chatSessionId,
+      });
     }
 
     // Honor the per-session execution lock so this IPC path does not race with
@@ -158,7 +224,45 @@ function registerCattyExecHandlers(ctx) {
     }
     mcpServerBridge.cancelPtyExecsForSession(chatSessionId);
     void mcpServerBridge.cancelSftpOpsForSession?.(chatSessionId);
+    if (typeof mcpServerBridge.cancelWorkerBackgroundJobsForSession === "function") {
+      mcpServerBridge.cancelWorkerBackgroundJobsForSession(chatSessionId);
+    } else {
+      try {
+        terminalWorkerManager?.send?.("netcatty:ai:catty:cancel", { chatSessionId }, {
+          webContentsId: event?.sender?.id,
+        });
+      } catch {
+        // Worker may already be gone while cancelling a torn-down terminal.
+      }
+    }
     return { ok: true };
+  });
+
+  ipcMain.handle("netcatty:ai:chat-session:set-cancelled", async (event, { chatSessionId, cancelled }) => {
+    if (!validateSender(event)) {
+      return { ok: false, error: "Unauthorized IPC sender" };
+    }
+    if (!chatSessionId || typeof chatSessionId !== "string") {
+      return { ok: false, error: "chatSessionId is required" };
+    }
+    try {
+      return await mcpServerBridge.applyChatSessionCancelled(chatSessionId, cancelled !== false);
+    } catch (err) {
+      return { ok: false, error: err?.message || String(err) };
+    }
+  });
+
+  ipcMain.handle("netcatty:ai:capability", async (event, { rpcMethod, params, chatSessionId }) => {
+    if (!validateSender(event)) {
+      return { ok: false, error: "Unauthorized IPC sender" };
+    }
+    if (!rpcMethod || typeof rpcMethod !== "string") {
+      return { ok: false, error: "rpcMethod is required" };
+    }
+    return mcpServerBridge.dispatchBuiltinRpc(rpcMethod, {
+      ...(params || {}),
+      chatSessionId,
+    });
   });
   }
 }

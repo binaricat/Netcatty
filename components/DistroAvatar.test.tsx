@@ -35,6 +35,19 @@ test("DistroAvatar keeps serial hosts on the USB icon", () => {
   assert.doesNotMatch(markup, /background-color:#2563EB/i);
 });
 
+test("DistroAvatar xs size uses compact corners without appearing circular", () => {
+  const markup = renderToStaticMarkup(
+    <DistroAvatar
+      host={{ ...baseHost, distro: "ubuntu" }}
+      fallback="U"
+      size="xs"
+    />,
+  );
+
+  assert.match(markup, /h-4 w-4 rounded-\[4px\]/);
+  assert.doesNotMatch(markup, /rounded-full/);
+});
+
 test("DistroAvatar tree size uses compact host icon corners", () => {
   const markup = renderToStaticMarkup(
     <DistroAvatar
@@ -44,8 +57,7 @@ test("DistroAvatar tree size uses compact host icon corners", () => {
     />,
   );
 
-  assert.match(markup, /h-6 w-6 rounded/);
-  assert.doesNotMatch(markup, /rounded-md/);
+  assert.match(markup, /h-6 w-6 rounded-\[6px\]/);
 });
 
 test("DistroAvatar keeps distro icon and applies custom palette color when icon mode is automatic", () => {
@@ -59,4 +71,17 @@ test("DistroAvatar keeps distro icon and applies custom palette color when icon 
   assert.match(markup, /background-color:#2563EB/i);
   assert.match(markup, /src="\/distro\/ubuntu.svg"/);
   assert.doesNotMatch(markup, /bg-\[#E95420\]/);
+});
+
+test("DistroAvatar renders H3C logo without monochrome inversion", () => {
+  const markup = renderToStaticMarkup(
+    <DistroAvatar
+      host={{ ...baseHost, distro: "h3c" }}
+      fallback="H"
+    />,
+  );
+
+  assert.match(markup, /src="\/distro\/h3c.svg"/);
+  assert.match(markup, /bg-white/);
+  assert.doesNotMatch(markup, /invert brightness-0/);
 });

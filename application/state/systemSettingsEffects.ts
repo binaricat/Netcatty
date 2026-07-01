@@ -1,11 +1,13 @@
-import { useEffect, type MutableRefObject } from 'react';
+import { useEffect, useRef, type MutableRefObject } from 'react';
 import {
   STORAGE_KEY_AUTO_UPDATE_ENABLED,
   STORAGE_KEY_CLOSE_TO_TRAY,
   STORAGE_KEY_GLOBAL_HOTKEY_ENABLED,
   STORAGE_KEY_TOGGLE_WINDOW_HOTKEY,
   STORAGE_KEY_WINDOW_OPACITY,
+  STORAGE_KEY_APP_ICON_VARIANT,
 } from '../../infrastructure/config/storageKeys';
+import { resolveAppIconVariant, type AppIconVariant } from '../../domain/appIconVariant';
 import { localStorageAdapter } from '../../infrastructure/persistence/localStorageAdapter';
 import { netcattyBridge } from '../../infrastructure/services/netcattyBridge';
 
@@ -15,10 +17,12 @@ interface UseSystemSettingsEffectsParams {
   globalHotkeyEnabled: boolean;
   closeToTray: boolean;
   windowOpacity: number;
+  appIconVariant: AppIconVariant;
   autoUpdateEnabled: boolean;
   persistMountedRef: MutableRefObject<boolean>;
   setHotkeyRegistrationError: (error: string | null) => void;
   setAutoUpdateEnabled: (enabled: boolean | ((prev: boolean) => boolean)) => void;
+  setAppIconVariant: (variant: AppIconVariant | ((prev: AppIconVariant) => AppIconVariant)) => void;
   notifySettingsChanged: (key: string, value: unknown) => void;
 }
 
@@ -28,12 +32,16 @@ export function useSystemSettingsEffects({
   globalHotkeyEnabled,
   closeToTray,
   windowOpacity,
+  appIconVariant,
   autoUpdateEnabled,
   persistMountedRef,
   setHotkeyRegistrationError,
   setAutoUpdateEnabled,
+  setAppIconVariant,
   notifySettingsChanged,
 }: UseSystemSettingsEffectsParams) {
+  const appIconApplyRequestIdRef = useRef(0);
+
   // Persist and sync toggle window hotkey setting
   useEffect(() => {
     if (!enabled) return;
@@ -109,6 +117,57 @@ export function useSystemSettingsEffects({
     if (!persistMountedRef.current) return;
     notifySettingsChanged(STORAGE_KEY_WINDOW_OPACITY, windowOpacity);
   }, [enabled, windowOpacity, notifySettingsChanged, persistMountedRef]);
+
+  // Persist and sync app icon variant
+  useEffect(() => {
+    if (!enabled) return;
+    const storedBefore = resolveAppIconVariant(
+      localStorageAdapter.readString(STORAGE_KEY_APP_ICON_VARIANT) ?? '',
+    );
+
+    localStorageAdapter.writeString(STORAGE_KEY_APP_ICON_VARIANT, appIconVariant);
+    if (!persistMountedRef.current) {
+      // Still apply on initial mount before cross-window notify is enabled.
+    } else {
+      notifySettingsChanged(STORAGE_KEY_APP_ICON_VARIANT, appIconVariant);
+    }
+
+    const bridge = netcattyBridge.get();
+    if (!bridge?.setAppIconVariant) return;
+
+    const requestId = ++appIconApplyRequestIdRef.current;
+    let cancelled = false;
+
+    const revertVariant = () => {
+      localStorageAdapter.writeString(STORAGE_KEY_APP_ICON_VARIANT, storedBefore);
+      if (appIconVariant !== storedBefore) {
+        setAppIconVariant(storedBefore);
+      }
+      if (persistMountedRef.current) {
+        notifySettingsChanged(STORAGE_KEY_APP_ICON_VARIANT, storedBefore);
+      }
+    };
+
+    void bridge.setAppIconVariant(appIconVariant)
+      .then((applied) => {
+        if (cancelled || requestId !== appIconApplyRequestIdRef.current) return;
+        if (applied === false && storedBefore !== appIconVariant) {
+          console.warn('[AppIcon] Failed to apply app icon variant:', appIconVariant);
+          revertVariant();
+        }
+      })
+      .catch((err) => {
+        if (cancelled || requestId !== appIconApplyRequestIdRef.current) return;
+        if (storedBefore !== appIconVariant) {
+          console.warn('[AppIcon] Failed to apply app icon variant:', err);
+          revertVariant();
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [enabled, appIconVariant, notifySettingsChanged, persistMountedRef, setAppIconVariant]);
 
   // Hydrate auto-update state from the main-process preference file on mount.
   // This reconciles localStorage (renderer) with auto-update-pref.json (main)

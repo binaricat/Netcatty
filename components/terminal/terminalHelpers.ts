@@ -1,10 +1,12 @@
 import type { DragEvent, PointerEvent } from "react";
 import { Terminal as XTerm } from "@xterm/xterm";
 
+import type { TerminalContextReader } from "../../domain/terminalContextRead";
 import { getSessionConnectionLabel, resolveSessionTabTitle } from "../../domain/sessionTabTitle";
 import { logger } from "../../lib/logger";
 import { getPathForFile, type DropEntry } from "../../lib/sftpFileUtils";
 import { normalizeLineEndings } from "../../lib/utils";
+import { resolveSnippetMultiLineRunMode } from "../../domain/snippetRunMode";
 import type {
   Host,
   Identity,
@@ -113,7 +115,7 @@ export interface TerminalProps {
   /** Line timestamps are unavailable in popup terminals that stream shell output without timestamp metadata. */
   lineTimestampsAvailable?: boolean;
   chainHosts?: Host[];
-  themePreviewId?: string;
+  appearanceTheme?: TerminalTheme;
   knownHosts?: KnownHost[];
   isVisible: boolean;
   /** Changes when split-pane bounds update; triggers xterm refit after tab switches. */
@@ -136,6 +138,9 @@ export interface TerminalProps {
   restoreTerminalCwd?: boolean;
   startupCommand?: string;
   noAutoRun?: boolean;
+  multiLineRunMode?: Snippet["multiLineRunMode"];
+  pendingScriptId?: string;
+  pendingScript?: Snippet;
   // When this tab was created from a connected SSH session, the id of the
   // source session whose authenticated connection should be reused for a new
   // shell channel — skipping a second MFA prompt (issue #1204).
@@ -178,6 +183,7 @@ export interface TerminalProps {
   onTerminalTitleChange?: (sessionId: string, title: string | null) => void;
   onTerminalBell?: (sessionId: string) => void;
   onTerminalOutput?: (sessionId: string, chunk: string) => void;
+  onTerminalContextReaderChange?: (sessionId: string, reader: TerminalContextReader | null) => void;
   onOpenScripts?: () => void;
   onOpenHistory?: () => void;
   onOpenTheme?: () => void;
@@ -196,8 +202,12 @@ export interface TerminalProps {
     executor: ((
       command: string,
       noAutoRun?: boolean,
-      options?: { broadcast?: boolean },
+      options?: { broadcast?: boolean; multiLineRunMode?: Snippet["multiLineRunMode"] },
     ) => void) | null,
+  ) => void;
+  onBroadcastInterruptPriorityChange?: (
+    sessionId: string,
+    prioritize: (() => void) | null,
   ) => void;
   onProgrammaticCommandLogRewriteChange?: (
     sessionId: string,
@@ -254,9 +264,10 @@ export function shouldShowTerminalConnectionDialog({
 
 export function shouldDelayAutoRunSnippetInput(
   data: string,
-  opts: { noAutoRun?: boolean },
+  opts: { noAutoRun?: boolean; multiLineRunMode?: Snippet["multiLineRunMode"] },
 ): boolean {
   if (opts.noAutoRun) return false;
+  if (resolveSnippetMultiLineRunMode(opts.multiLineRunMode) === "paste") return false;
   const normalized = normalizeLineEndings(String(data ?? "")).replace(/\r/g, "\n");
   const withoutSubmitEnter = normalized.endsWith("\n") ? normalized.slice(0, -1) : normalized;
   return withoutSubmitEnter.includes("\n");

@@ -2,8 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  clampAutocompletePopupGeometry,
   computeAutocompletePopupPlacement,
   resolveAutocompleteAnchorInViewport,
+  resolveAutocompleteClampViewport,
   resolveAutocompleteCursorColumn,
   type PopupPlacementInput,
 } from "./autocomplete/terminalAutocompleteLayout.ts";
@@ -165,6 +167,38 @@ test("clamps within a split terminal pane instead of the full window", () => {
   assert.ok(p.left + 400 <= pane.left + pane.width - baseInput.viewportPadding + 0.001);
 });
 
+test("final popup geometry clamps the actual rendered width", () => {
+  const pane = { left: 700, top: 80, width: 680, height: 520 };
+  const geometry = clampAutocompletePopupGeometry({
+    left: 970,
+    top: 180,
+    width: 520,
+    height: 220,
+    clampViewport: pane,
+    viewportPadding: 8,
+  });
+
+  assert.equal(geometry.left, 852);
+  assert.ok(geometry.left >= pane.left + 8);
+  assert.ok(geometry.left + 520 <= pane.left + pane.width - 8);
+});
+
+test("final popup geometry clamps the actual rendered height", () => {
+  const pane = { left: 700, top: 80, width: 680, height: 520 };
+  const geometry = clampAutocompletePopupGeometry({
+    left: 760,
+    top: 470,
+    width: 360,
+    height: 180,
+    clampViewport: pane,
+    viewportPadding: 8,
+  });
+
+  assert.equal(geometry.top, 412);
+  assert.ok(geometry.top >= pane.top + 8);
+  assert.ok(geometry.top + 180 <= pane.top + pane.height - 8);
+});
+
 test("resolveAutocompleteAnchorInViewport uses the xterm screen rect in split panes", () => {
   const cellWidth = 5;
   const cellHeight = 200 / 24;
@@ -238,6 +272,159 @@ test("resolveAutocompleteCursorColumn prefers prompt-aligned column when xterm l
     userInput: "d",
   });
   assert.equal(column, "root@host:~# ".length + 1);
+});
+
+test("short popup flips upward when the cursor is at the bottom of the screen", () => {
+  // Regression for issue #1710: a *short* suggestion list must flip up when
+  // the anchor line is the last visible row, even if there is a tiny positive
+  // "phantom" space below the screen rect.
+  const p = computeAutocompletePopupPlacement({
+    ...baseInput,
+    anchorTop: 772,
+    anchorBottom: 792,
+    desiredHeight: 64, // 2 short items
+    maxHeight: 240,
+  });
+  assert.equal(p.renderUpward, true, "short popup should flip upward at bottom row");
+  assert.ok(p.top + Math.min(p.maxHeight, 64) <= 772 - baseInput.anchorGap + 0.001,
+    "rendered popup should stay above the anchor line");
+  assert.ok(p.top >= baseInput.viewportPadding,
+    "popup should not be clipped above the viewport");
+});
+
+test("clamps a downward popup back inside the terminal when the anchor is above the viewport", () => {
+  const p = computeAutocompletePopupPlacement({
+    ...baseInput,
+    anchorTop: -60,
+    anchorBottom: -40,
+    desiredHeight: 96,
+    maxHeight: 240,
+    expandUpwardHint: false,
+  });
+  const contentHeight = Math.min(p.maxHeight, 96);
+
+  assert.equal(p.renderUpward, false);
+  assert.ok(
+    p.top >= baseInput.viewportPadding,
+    `popup top ${p.top} should stay inside the terminal viewport`,
+  );
+  assert.ok(
+    p.top + contentHeight <= baseInput.viewportHeight - baseInput.viewportPadding + 0.001,
+    `popup bottom ${p.top + contentHeight} should stay inside the terminal viewport`,
+  );
+});
+
+test("clamps an upward popup back inside the terminal when the anchor is below the viewport", () => {
+  const p = computeAutocompletePopupPlacement({
+    ...baseInput,
+    anchorTop: 860,
+    anchorBottom: 880,
+    desiredHeight: 96,
+    maxHeight: 240,
+    expandUpwardHint: true,
+  });
+  const contentHeight = Math.min(p.maxHeight, 96);
+
+  assert.equal(p.renderUpward, true);
+  assert.ok(
+    p.top >= baseInput.viewportPadding,
+    `popup top ${p.top} should stay inside the terminal viewport`,
+  );
+  assert.ok(
+    p.top + contentHeight <= baseInput.viewportHeight - baseInput.viewportPadding + 0.001,
+    `popup bottom ${p.top + contentHeight} should stay inside the terminal viewport`,
+  );
+});
+
+test("resolveAutocompleteClampViewport clamps to the xterm screen rect", () => {
+  const container = {
+    closest: () => null,
+    querySelector: (selector: string) =>
+      selector === ".xterm-screen"
+        ? {
+            getBoundingClientRect: () => ({
+              left: 100,
+              top: 50,
+              width: 600,
+              height: 400,
+              right: 700,
+              bottom: 450,
+              x: 100,
+              y: 50,
+              toJSON: () => ({}),
+            }),
+          }
+        : null,
+    getBoundingClientRect: () => ({
+      left: 100,
+      top: 50,
+      width: 600,
+      height: 410, // 10px taller than the screen
+      right: 700,
+      bottom: 460,
+      x: 100,
+      y: 50,
+      toJSON: () => ({}),
+    }),
+  } as unknown as HTMLElement;
+
+  const clamp = resolveAutocompleteClampViewport(container);
+  assert.equal(clamp.top, 50);
+  assert.equal(clamp.height, 400, "clamp height should match the screen, not the taller container");
+  assert.equal(clamp.width, 600);
+});
+
+test("resolveAutocompleteClampViewport prefers the visible terminal screen over the split pane", () => {
+  const pane = {
+    getAttribute: (name: string) => (name === "data-section" ? "terminal-split-pane" : null),
+    getBoundingClientRect: () => ({
+      left: 20,
+      top: 30,
+      width: 500,
+      height: 300,
+      right: 520,
+      bottom: 330,
+      x: 20,
+      y: 30,
+      toJSON: () => ({}),
+    }),
+  };
+  const screen = {
+    getBoundingClientRect: () => ({
+      left: 25,
+      top: 35,
+      width: 490,
+      height: 280,
+      right: 515,
+      bottom: 315,
+      x: 25,
+      y: 35,
+      toJSON: () => ({}),
+    }),
+  };
+  const container = {
+    closest: (selector: string) =>
+      selector === '[data-section="terminal-split-pane"]' ? (pane as never) : null,
+    querySelector: (selector: string) =>
+      selector === ".xterm-screen" ? (screen as never) : null,
+    getBoundingClientRect: () => ({
+      left: 20,
+      top: 30,
+      width: 500,
+      height: 310,
+      right: 520,
+      bottom: 340,
+      x: 20,
+      y: 30,
+      toJSON: () => ({}),
+    }),
+  } as unknown as HTMLElement;
+
+  const clamp = resolveAutocompleteClampViewport(container);
+  assert.equal(clamp.left, 25, "screen left should win");
+  assert.equal(clamp.top, 35, "screen top should win");
+  assert.equal(clamp.width, 490, "screen width should win");
+  assert.equal(clamp.height, 280, "screen height should win");
 });
 
 test("resolveAutocompleteAnchorInViewport ignores the helper textarea horizontal position", () => {

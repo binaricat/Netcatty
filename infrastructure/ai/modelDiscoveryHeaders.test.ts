@@ -18,7 +18,7 @@ test("buildModelDiscoveryHeaders uses Bearer auth for the openai-compatible fami
 
 test("buildModelDiscoveryHeaders uses x-goog-api-key for the google family", () => {
   // Google Generative AI rejects Bearer auth — discovery has to match
-  // the createGoogleGenerativeAI runtime client, which uses x-goog-api-key.
+  // the createGoogle runtime client, which uses x-goog-api-key.
   assert.deepEqual(buildModelDiscoveryHeaders("google", "AIza-test"), {
     "x-goog-api-key": "AIza-test",
   });

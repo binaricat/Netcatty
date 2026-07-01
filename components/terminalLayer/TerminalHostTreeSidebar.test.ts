@@ -93,10 +93,11 @@ test('host tree keeps shell width while hidden behind root pages', () => {
   assert.doesNotMatch(source, /if \(!surfaceVisible\) \{\s*setShellWidth\(0\);/);
 });
 
-test('host tree sidebar memo tracks surface visibility changes', () => {
+test('host tree sidebar memo tracks surface visibility and theme changes', () => {
   const source = readFileSync(new URL('./TerminalHostTreeSidebar.tsx', import.meta.url), 'utf8');
 
   assert.match(source, /prev\.surfaceVisible === next\.surfaceVisible/);
+  assert.match(source, /themeFingerprint\(prev\.resolvedPreviewTheme\) === themeFingerprint\(next\.resolvedPreviewTheme\)/);
 });
 
 test('host tree sidebar clips the panel instead of fading it out while closing', () => {
@@ -182,9 +183,8 @@ test('host tree hover card renders markdown notes and keeps host details out of 
   assert.match(source, /<LazyMessageResponse/);
   assert.match(source, /size="sm"/);
   assert.match(source, /items-center gap-2/);
-  assert.match(source, /className="rounded"/);
-  assert.match(source, /flex h-5 min-w-0 items-center/);
-  assert.match(source, /translate-y-px truncate text-\[15px\] font-semibold leading-none/);
+  assert.match(source, /flex min-h-6 min-w-0 items-center/);
+  assert.match(source, /truncate text-\[15px\] font-semibold leading-5/);
   assert.match(source, /details\.host/);
   assert.doesNotMatch(source, /text-muted-foreground">\{host\.hostname\}/);
   assert.match(source, /host-tree-notes-scroll/);
@@ -195,10 +195,10 @@ test('host tree hover card renders markdown notes and keeps host details out of 
 test('host tree row icons, labels, and protocol badges share centered line boxes', () => {
   const source = readFileSync(new URL('./TerminalHostTreeSidebar.tsx', import.meta.url), 'utf8');
 
-  assert.match(source, /flex h-5 shrink-0 items-center">\s*<DistroAvatar/);
-  assert.match(source, /flex h-5 min-w-0 flex-1 translate-y-px items-center truncate leading-none">\{row\.host\.label\}/);
-  assert.match(source, /flex h-5 shrink-0 translate-y-px items-center text-\[10px\] leading-none uppercase/);
-  assert.match(source, /flex h-5 w-4 shrink-0 items-center justify-center/);
+  assert.match(source, /flex h-5 shrink-0 items-center justify-center">\s*<DistroAvatar/);
+  assert.match(source, /flex min-w-0 flex-1 items-center truncate leading-5/);
+  assert.match(source, /flex shrink-0 items-center text-\[10px\] leading-4 uppercase/);
+  assert.match(source, /flex h-5 w-4 shrink-0 items-center/);
   assert.match(source, /flex h-5 shrink-0 items-center">\s*\{isExpanded/);
-  assert.match(source, /flex h-5 min-w-0 flex-1 translate-y-px items-center truncate leading-none">\{node\.name\}/);
+  assert.match(source, /flex min-w-0 flex-1 items-center truncate leading-5">\{node\.name\}/);
 });

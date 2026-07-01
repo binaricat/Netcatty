@@ -1,11 +1,18 @@
 /* eslint-disable no-undef */
 function registerAgentProcessHandlers(ctx) {
   with (ctx) {
+  const maxCommandTimeoutSeconds = 24 * 60 * 60;
   // ── MCP Server session metadata ──
 
   ipcMain.handle("netcatty:ai:mcp:update-sessions", async (event, { sessions: sessionList, chatSessionId }) => {
     if (!validateSenderOrSettings(event)) return { ok: false, error: "Unauthorized IPC sender" };
     mcpServerBridge.updateSessionMetadata(sessionList || [], chatSessionId);
+    return { ok: true };
+  });
+
+  ipcMain.handle("netcatty:ai:mcp:update-attachments", async (event, { attachments, chatSessionId }) => {
+    if (!validateSenderOrSettings(event)) return { ok: false, error: "Unauthorized IPC sender" };
+    mcpServerBridge.updateAttachmentMetadata(attachments || [], chatSessionId);
     return { ok: true };
   });
 
@@ -32,8 +39,8 @@ function registerAgentProcessHandlers(ctx) {
   ipcMain.handle("netcatty:ai:mcp:set-command-timeout", async (event, { timeout }) => {
     if (!validateSenderOrSettings(event)) return { ok: false, error: "Unauthorized IPC sender" };
     const value = Number(timeout);
-    if (!Number.isFinite(value) || value < 1 || value > 3600) {
-      return { ok: false, error: "timeout must be a number between 1 and 3600" };
+    if (!Number.isFinite(value) || value < 1 || value > maxCommandTimeoutSeconds) {
+      return { ok: false, error: `timeout must be a number between 1 and ${maxCommandTimeoutSeconds}` };
     }
     mcpServerBridge.setCommandTimeout(value);
     return { ok: true };
@@ -51,7 +58,7 @@ function registerAgentProcessHandlers(ctx) {
 
   ipcMain.handle("netcatty:ai:mcp:set-permission-mode", async (event, { mode }) => {
     if (!validateSenderOrSettings(event)) return { ok: false, error: "Unauthorized IPC sender" };
-    const validModes = ["observer", "confirm", "autonomous"];
+    const validModes = ["observer", "confirm", "auto"];
     if (!validModes.includes(mode)) {
       return { ok: false, error: `mode must be one of: ${validModes.join(", ")}` };
     }
@@ -67,6 +74,12 @@ function registerAgentProcessHandlers(ctx) {
     }
     setToolIntegrationMode(mode);
     return { ok: true };
+  });
+
+  ipcMain.handle("netcatty:ai:mcp:sync-permission-grants", async (event, { grants }) => {
+    if (!validateSenderOrSettings(event)) return { ok: false, error: "Unauthorized IPC sender" };
+    mcpServerBridge.setPermissionGrants(grants);
+    return { ok: true, count: mcpServerBridge.getPermissionGrants().length };
   });
 
   // ── MCP Approval response (renderer → main) ──

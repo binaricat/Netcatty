@@ -69,6 +69,33 @@ test("keeps Scripts visible before the terminal overflow menu", () => {
   assert.match(markup, /type="button"[^>]*aria-label="Scripts"/);
 });
 
+test("shows manual session log button when requested", () => {
+  const markup = renderToolbar(sshHost, "connected", {
+    showLogButton: true,
+    onToggleSessionLog: () => {},
+  });
+
+  const logIndex = markup.indexOf('aria-label="Start session log"');
+  const scriptsIndex = markup.indexOf('aria-label="Scripts"');
+
+  assert.notEqual(logIndex, -1);
+  assert.notEqual(scriptsIndex, -1);
+  assert.ok(logIndex < scriptsIndex);
+});
+
+test("marks manual session log button active while logging", () => {
+  const markup = renderToolbar(sshHost, "connected", {
+    showLogButton: true,
+    onToggleSessionLog: () => {},
+    isSessionLogging: true,
+  });
+
+  assert.match(
+    markup,
+    /aria-label="Stop session log"[^>]*aria-pressed="true"[^>]*style="background-color:var\(--terminal-toolbar-btn-active\)"/,
+  );
+});
+
 test("hides SFTP for local terminal sessions", () => {
   const markup = renderToolbar({
     ...sshHost,

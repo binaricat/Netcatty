@@ -3,6 +3,7 @@ import {
     AsidePanel,
     AsidePanelContent,
     type AsidePanelLayout,
+    type AsidePanelResizeProps,
 } from './ui/aside-panel';
 import { ScrollArea } from './ui/scroll-area';
 import { ThemeList } from './ThemeList';
@@ -17,7 +18,9 @@ interface ThemeSelectPanelProps {
     layout?: AsidePanelLayout;
 }
 
-const ThemeSelectPanel: React.FC<ThemeSelectPanelProps> = ({
+type ThemeSelectPanelPropsWithResize = ThemeSelectPanelProps & AsidePanelResizeProps;
+
+const ThemeSelectPanel: React.FC<ThemeSelectPanelPropsWithResize> = ({
     open,
     selectedThemeId,
     onSelect,
@@ -25,6 +28,9 @@ const ThemeSelectPanel: React.FC<ThemeSelectPanelProps> = ({
     onBack,
     showBackButton = true,
     layout = 'overlay',
+    resizable,
+    persistWidthStorageKey,
+    resizeAriaLabel,
 }) => {
     return (
         <AsidePanel
@@ -34,6 +40,9 @@ const ThemeSelectPanel: React.FC<ThemeSelectPanelProps> = ({
             showBackButton={showBackButton}
             onBack={onBack}
             layout={layout}
+            resizable={resizable}
+            persistWidthStorageKey={persistWidthStorageKey}
+            resizeAriaLabel={resizeAriaLabel}
         >
             <AsidePanelContent className="p-0">
                 <ScrollArea className="h-full">

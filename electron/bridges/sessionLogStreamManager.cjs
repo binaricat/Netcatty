@@ -148,7 +148,7 @@ function sanitizeSudoAutofillLogData(entry, dataChunk, { final = false } = {}) {
 function startStream(sessionId, opts) {
   if (activeStreams.has(sessionId)) {
     console.warn(`[SessionLogStream] Stream already active for ${sessionId}, stopping old one`);
-    stopStream(sessionId);
+    stopStream(sessionId, activeStreams.get(sessionId)?.startToken);
   }
 
   const { hostLabel, hostname, directory, format, startTime } = opts;
@@ -173,59 +173,104 @@ function startStream(sessionId, opts) {
     const fileName = `${dateStr}.${ext}`;
     const filePath = path.join(hostDir, fileName);
 
-    const writeStream = isRaw
-      ? fs.createWriteStream(filePath, { flags: "w", encoding: "utf8" })
-      : null;
-
-    if (writeStream) {
-      writeStream.on("error", (err) => {
-        console.error(`[SessionLogStream] Write error for ${sessionId}:`, err.message);
-        // Disable this stream on error to avoid cascading failures
-        const entry = activeStreams.get(sessionId);
-        if (entry) {
-          entry.disabled = true;
-        }
-      });
-    }
-
-    const startToken = Symbol("session-log-stream");
-    const entry = {
-      writeStream,
+    return createStreamEntry(sessionId, {
       filePath,
       hostDir,
       format,
-      isRaw,
-      isHtml,
-      renderer: isRaw ? null : createTerminalTextRenderer(),
-      renderedTimestampPrefixer: !isRaw && opts.timestampsEnabled
-        ? createRenderedLineTimestampPrefixer({ timestampProvider: opts.timestampProvider })
-        : null,
       hostLabel: hostLabel || hostname || "unknown",
       startTime: startTime || Date.now(),
-      buffer: "",
-      programmaticCommandLogRewriter: createProgrammaticCommandLogRewriter(),
-      sudoAutofillRewrites: [],
-      sudoAutofillPending: "",
-      flushTimer: null,
-      snapshotPromise: null,
-      snapshotRequested: false,
-      snapshotDirty: false,
-      closing: false,
-      disabled: false,
-      startToken,
-    };
-
-    // Start periodic flush
-    entry.flushTimer = setInterval(() => {
-      flushBuffer(entry);
-    }, FLUSH_INTERVAL);
-
-    activeStreams.set(sessionId, entry);
-    console.log(`[SessionLogStream] Started stream for ${sessionId} -> ${filePath}`);
-    return startToken;
+      timestampsEnabled: opts.timestampsEnabled,
+      timestampProvider: opts.timestampProvider,
+    });
   } catch (err) {
     console.error(`[SessionLogStream] Failed to start stream for ${sessionId}:`, err.message);
     return null;
+  }
+}
+
+function createStreamEntry(sessionId, opts) {
+  const { filePath, hostDir, format, hostLabel, startTime } = opts;
+  const isRaw = format === "raw";
+  const isHtml = format === "html";
+  const writeStream = isRaw
+    ? fs.createWriteStream(filePath, { flags: "w", encoding: "utf8" })
+    : null;
+
+  if (writeStream) {
+    writeStream.on("error", (err) => {
+      console.error(`[SessionLogStream] Write error for ${sessionId}:`, err.message);
+      const entry = activeStreams.get(sessionId);
+      if (entry) {
+        entry.disabled = true;
+      }
+    });
+  }
+
+  const startToken = Symbol("session-log-stream");
+  const entry = {
+    writeStream,
+    filePath,
+    hostDir,
+    format,
+    isRaw,
+    isHtml,
+    renderer: isRaw ? null : createTerminalTextRenderer(),
+    renderedTimestampPrefixer: !isRaw && opts.timestampsEnabled
+      ? createRenderedLineTimestampPrefixer({ timestampProvider: opts.timestampProvider })
+      : null,
+    hostLabel,
+    startTime,
+    buffer: "",
+    programmaticCommandLogRewriter: createProgrammaticCommandLogRewriter(),
+    sudoAutofillRewrites: [],
+    sudoAutofillPending: "",
+    flushTimer: null,
+    snapshotPromise: null,
+    snapshotRequested: false,
+    snapshotDirty: false,
+    closing: false,
+    disabled: false,
+    startToken,
+    stopRequiresToken: Boolean(opts.stopRequiresToken),
+  };
+
+  entry.flushTimer = setInterval(() => {
+    flushBuffer(entry);
+  }, FLUSH_INTERVAL);
+
+  activeStreams.set(sessionId, entry);
+  console.log(`[SessionLogStream] Started stream for ${sessionId} -> ${filePath}`);
+  return startToken;
+}
+
+function startStreamToFile(sessionId, opts = {}) {
+  if (activeStreams.has(sessionId)) {
+    return { ok: false, error: "Stream already active for this session" };
+  }
+
+  const { filePath, hostLabel, startTime, initialLine } = opts;
+  if (!filePath) {
+    return { ok: false, error: "Missing filePath" };
+  }
+
+  try {
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    const token = createStreamEntry(sessionId, {
+      filePath,
+      hostDir: path.dirname(filePath),
+      format: opts.format || "raw",
+      hostLabel: hostLabel || "session",
+      startTime: startTime || Date.now(),
+      timestampsEnabled: opts.timestampsEnabled,
+      timestampProvider: opts.timestampProvider,
+      stopRequiresToken: opts.stopRequiresToken,
+    });
+    if (typeof initialLine === "string" && initialLine.length > 0) {
+      appendData(sessionId, initialLine);
+    }
+    return { ok: true, token };
+  } catch (err) {
+    return { ok: false, error: err?.message || String(err) };
   }
 }
 
@@ -359,6 +404,9 @@ async function stopStream(sessionId, expectedToken) {
     // The current stream belongs to a fresh incarnation; leave it alone.
     return null;
   }
+  if (entry.stopRequiresToken && !expectedToken) {
+    return null;
+  }
   activeStreams.delete(sessionId);
   entry.closing = true;
 
@@ -412,12 +460,13 @@ function hasStream(sessionId) {
  */
 async function cleanupAll() {
   console.log(`[SessionLogStream] Cleaning up ${activeStreams.size} active streams`);
-  const ids = [...activeStreams.keys()];
-  await Promise.allSettled(ids.map(id => stopStream(id)));
+  const entries = [...activeStreams.entries()];
+  await Promise.allSettled(entries.map(([id, entry]) => stopStream(id, entry.startToken)));
 }
 
 module.exports = {
   startStream,
+  startStreamToFile,
   appendData,
   registerSudoAutofillInput,
   registerProgrammaticCommandLogRewrite,

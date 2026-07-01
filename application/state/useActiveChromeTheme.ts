@@ -228,11 +228,6 @@ export function syncActiveChromeTheme(
   const nextFingerprint = activeTheme ? themeFingerprint(activeTheme) : null;
   const appliedFingerprint = getAppliedChromeFingerprint();
   if (nextFingerprint === appliedFingerprint) {
-    if (activeTheme) {
-      refreshActiveChromeThemeSurfaces(activeTheme);
-    } else {
-      clearTopTabsChromeThemeVars();
-    }
     return;
   }
 

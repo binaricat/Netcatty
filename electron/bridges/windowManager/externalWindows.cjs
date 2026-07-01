@@ -2,6 +2,19 @@
 function createExternalWindowApi(ctx) {
   with (ctx) {
     const fallbackBrowserWindows = new Set();
+
+    function resolveAppIconFromOptions(options = {}) {
+      const { appIcon, getAppIcon } = options;
+      if (typeof getAppIcon === "function") {
+        try {
+          const resolved = getAppIcon();
+          if (resolved) return resolved;
+        } catch {
+          // ignore
+        }
+      }
+      return appIcon;
+    }
     
     /**
      * Open a URL in a minimal in-app BrowserWindow. Used as a fallback when the
@@ -14,7 +27,8 @@ function createExternalWindowApi(ctx) {
      *     leak into the main app session
      */
     function openFallbackBrowser(url, options = {}) {
-      const { backgroundColor, appIcon } = options;
+      const { backgroundColor, appIcon, getAppIcon } = options;
+      const icon = resolveAppIconFromOptions(options);
       const electron = require("electron");
       const { BrowserWindow, screen } = electron;
     
@@ -42,7 +56,7 @@ function createExternalWindowApi(ctx) {
         ...bounds,
         title: url,
         backgroundColor: backgroundColor || THEME_COLORS[currentTheme]?.background,
-        icon: appIcon,
+        icon,
         show: false,
         autoHideMenuBar: true,
         webPreferences: {
@@ -82,7 +96,7 @@ function createExternalWindowApi(ctx) {
           const targetUrl = details?.url;
           if (targetUrl && typeof targetUrl === "string" && /^https?:/i.test(targetUrl)) {
             try {
-              const popup = openFallbackBrowser(targetUrl, { backgroundColor, appIcon });
+              const popup = openFallbackBrowser(targetUrl, { backgroundColor, appIcon, getAppIcon });
               popup.loaded.catch((err) => {
                 console.warn("[windowManager] fallback popup loadURL failed:", err?.message || err);
               });
@@ -196,7 +210,7 @@ function createExternalWindowApi(ctx) {
       };
     }
     
-    function createAppWindowOpenHandler(shell, { backgroundColor, appIcon }) {
+    function createAppWindowOpenHandler(shell, { backgroundColor, appIcon, getAppIcon }) {
       const allowedPopupHosts = new Set([
         // OAuth (PKCE loopback)
         "accounts.google.com",
@@ -228,6 +242,7 @@ function createExternalWindowApi(ctx) {
     
       return (details) => {
         const targetUrl = details?.url;
+        const currentIcon = resolveAppIconFromOptions({ appIcon, getAppIcon });
         if (!targetUrl || typeof targetUrl !== "string" || !/^https?:/i.test(targetUrl)) {
           return { action: "deny" };
         }
@@ -236,7 +251,11 @@ function createExternalWindowApi(ctx) {
         if (!isAllowedInAppPopupUrl(targetUrl)) {
           // Try system browser first, fall back to an in-app BrowserWindow when
           // the OS has no handler for the URL (see tryOpenExternalWithFallback).
-          tryOpenExternalWithFallback(shell, targetUrl, { backgroundColor, appIcon }).catch((err) => {
+          tryOpenExternalWithFallback(shell, targetUrl, {
+            backgroundColor,
+            appIcon: currentIcon,
+            getAppIcon,
+          }).catch((err) => {
             console.warn("[windowManager] tryOpenExternalWithFallback threw:", err?.message || err);
           });
           return { action: "deny" };
@@ -251,7 +270,7 @@ function createExternalWindowApi(ctx) {
             minWidth: 420,
             minHeight: 560,
             backgroundColor,
-            icon: appIcon,
+            icon: currentIcon,
             autoHideMenuBar: true,
             menuBarVisible: false,
             title: "Netcatty Authorization",

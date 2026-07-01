@@ -1,49 +1,49 @@
 import type { TerminalTheme } from '../../../domain/models';
 
 export const modernTerminalThemes: TerminalTheme[] = [
-  { id: 'ui-pure-black', name: 'Pure Black (UI Match)', type: 'dark', colors: {
+  { id: 'ui-pure-black', name: 'Pure Black', type: 'dark', colors: {
     background: '#000000', foreground: '#c9d1d9', cursor: '#58a6ff', selection: '#264f78',
     black: '#000000', red: '#ff7b72', green: '#3fb950', yellow: '#d29922',
     blue: '#58a6ff', magenta: '#bc8cff', cyan: '#39c5cf', white: '#b1bac4',
     brightBlack: '#6e7681', brightRed: '#ffa198', brightGreen: '#56d364', brightYellow: '#e3b341',
     brightBlue: '#79c0ff', brightMagenta: '#d2a8ff', brightCyan: '#56d4dd', brightWhite: '#f0f6fc',
   }},
-  { id: 'ui-midnight', name: 'Midnight (UI Match)', type: 'dark', colors: {
+  { id: 'ui-midnight', name: 'Midnight', type: 'dark', colors: {
     background: '#141822', foreground: '#c9d1d9', cursor: '#58a6ff', selection: '#264f78',
     black: '#141822', red: '#ff7b72', green: '#3fb950', yellow: '#d29922',
     blue: '#58a6ff', magenta: '#bc8cff', cyan: '#39c5cf', white: '#b1bac4',
     brightBlack: '#6e7681', brightRed: '#ffa198', brightGreen: '#56d364', brightYellow: '#e3b341',
     brightBlue: '#79c0ff', brightMagenta: '#d2a8ff', brightCyan: '#56d4dd', brightWhite: '#f0f6fc',
   }},
-  { id: 'ui-deep-blue', name: 'Deep Blue (UI Match)', type: 'dark', colors: {
+  { id: 'ui-deep-blue', name: 'Deep Blue', type: 'dark', colors: {
     background: '#111722', foreground: '#c9d1d9', cursor: '#58a6ff', selection: '#264f78',
     black: '#111722', red: '#ff7b72', green: '#3fb950', yellow: '#d29922',
     blue: '#58a6ff', magenta: '#bc8cff', cyan: '#39c5cf', white: '#b1bac4',
     brightBlack: '#6e7681', brightRed: '#ffa198', brightGreen: '#56d364', brightYellow: '#e3b341',
     brightBlue: '#79c0ff', brightMagenta: '#d2a8ff', brightCyan: '#56d4dd', brightWhite: '#f0f6fc',
   }},
-  { id: 'ui-vscode', name: 'VS Code (UI Match)', type: 'dark', colors: {
+  { id: 'ui-vscode', name: 'VS Code', type: 'dark', colors: {
     background: '#1f1f1f', foreground: '#cccccc', cursor: '#aeafad', selection: '#264f78',
     black: '#1f1f1f', red: '#f44747', green: '#6a9955', yellow: '#dcdcaa',
     blue: '#569cd6', magenta: '#c586c0', cyan: '#4ec9b0', white: '#d4d4d4',
     brightBlack: '#808080', brightRed: '#f44747', brightGreen: '#6a9955', brightYellow: '#dcdcaa',
     brightBlue: '#569cd6', brightMagenta: '#c586c0', brightCyan: '#4ec9b0', brightWhite: '#e5e5e5',
   }},
-  { id: 'ui-graphite', name: 'Graphite (UI Match)', type: 'dark', colors: {
+  { id: 'ui-graphite', name: 'Graphite', type: 'dark', colors: {
     background: '#1c1e21', foreground: '#c9d1d9', cursor: '#58a6ff', selection: '#264f78',
     black: '#1c1e21', red: '#ff7b72', green: '#3fb950', yellow: '#d29922',
     blue: '#58a6ff', magenta: '#bc8cff', cyan: '#39c5cf', white: '#b1bac4',
     brightBlack: '#6e7681', brightRed: '#ffa198', brightGreen: '#56d364', brightYellow: '#e3b341',
     brightBlue: '#79c0ff', brightMagenta: '#d2a8ff', brightCyan: '#56d4dd', brightWhite: '#f0f6fc',
   }},
-  { id: 'ui-obsidian', name: 'Obsidian (UI Match)', type: 'dark', colors: {
+  { id: 'ui-obsidian', name: 'Obsidian', type: 'dark', colors: {
     background: '#131316', foreground: '#c9d1d9', cursor: '#a78bfa', selection: '#3b3175',
     black: '#131316', red: '#ff7b72', green: '#3fb950', yellow: '#d29922',
     blue: '#58a6ff', magenta: '#bc8cff', cyan: '#39c5cf', white: '#b1bac4',
     brightBlack: '#6e7681', brightRed: '#ffa198', brightGreen: '#56d364', brightYellow: '#e3b341',
     brightBlue: '#79c0ff', brightMagenta: '#d2a8ff', brightCyan: '#56d4dd', brightWhite: '#f0f6fc',
   }},
-  { id: 'ui-forest', name: 'Forest (UI Match)', type: 'dark', colors: {
+  { id: 'ui-forest', name: 'Forest', type: 'dark', colors: {
     background: '#161d1a', foreground: '#c9d1d9', cursor: '#34d399', selection: '#1a4a3a',
     black: '#161d1a', red: '#ff7b72', green: '#3fb950', yellow: '#d29922',
     blue: '#58a6ff', magenta: '#bc8cff', cyan: '#39c5cf', white: '#b1bac4',

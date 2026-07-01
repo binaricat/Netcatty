@@ -123,6 +123,57 @@ interface HostItemProps {
   onConvertToHost: (knownHost: KnownHost) => void;
 }
 
+const knownHostActionButtonClass =
+  "h-8 w-8 shrink-0 opacity-0 transition-opacity group-hover:opacity-100";
+
+const KnownHostItemActions: React.FC<{
+  knownHost: KnownHost;
+  converted: boolean;
+  onDelete: (id: string) => void;
+  onConvertToHost: (knownHost: KnownHost) => void;
+}> = ({ knownHost, converted, onDelete, onConvertToHost }) => {
+  const { t } = useI18n();
+
+  return (
+    <div className="flex shrink-0 items-center gap-1">
+      {!converted && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className={knownHostActionButtonClass}
+              onClick={(e) => {
+                e.stopPropagation();
+                onConvertToHost(knownHost);
+              }}
+            >
+              <ArrowRight size={14} />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{t("action.convertToHost")}</TooltipContent>
+        </Tooltip>
+      )}
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon"
+            className={cn(knownHostActionButtonClass, "text-destructive hover:text-destructive hover:bg-destructive/10")}
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete(knownHost.id);
+            }}
+          >
+            <Trash2 size={14} />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>{t("action.remove")}</TooltipContent>
+      </Tooltip>
+    </div>
+  );
+};
+
 const HostItem = React.memo<HostItemProps>(
   ({ knownHost, converted, viewMode, reorderProps, onDelete, onConvertToHost }) => {
     const { t } = useI18n();
@@ -141,39 +192,6 @@ const HostItem = React.memo<HostItemProps>(
                 reorderProps?.className,
               )}
             >
-              {/* Quick action buttons on hover */}
-              <div className="absolute top-1 right-1 flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                {!converted && (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        className="p-1 rounded hover:bg-primary/20 text-primary"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onConvertToHost(knownHost);
-                        }}
-                      >
-                        <ArrowRight size={12} />
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent>{t("action.convertToHost")}</TooltipContent>
-                  </Tooltip>
-                )}
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button
-                      className="p-1 rounded hover:bg-destructive/20 text-destructive"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onDelete(knownHost.id);
-                      }}
-                    >
-                      <Trash2 size={12} />
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent>{t("action.remove")}</TooltipContent>
-                </Tooltip>
-              </div>
               <div className="flex items-center gap-3 h-full">
                 <VaultEntityIcon
                   className={vaultPrimaryIconClass}
@@ -184,6 +202,12 @@ const HostItem = React.memo<HostItemProps>(
                     {knownHost.hostname}
                   </span>
                 </div>
+                <KnownHostItemActions
+                  knownHost={knownHost}
+                  converted={converted}
+                  onDelete={onDelete}
+                  onConvertToHost={onConvertToHost}
+                />
               </div>
             </div>
           </ContextMenuTrigger>
@@ -226,26 +250,12 @@ const HostItem = React.memo<HostItemProps>(
                 {knownHost.hostname}
               </span>
             </div>
-            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-              {!converted && (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onConvertToHost(knownHost);
-                      }}
-                    >
-                      <ArrowRight size={14} />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>{t("action.convertToHost")}</TooltipContent>
-                </Tooltip>
-              )}
-            </div>
+            <KnownHostItemActions
+              knownHost={knownHost}
+              converted={converted}
+              onDelete={onDelete}
+              onConvertToHost={onConvertToHost}
+            />
           </div>
         </ContextMenuTrigger>
         <ContextMenuContent>

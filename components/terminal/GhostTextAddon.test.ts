@@ -479,3 +479,217 @@ test("hides the ghost on render when the device echoed untracked input (#1013)",
     restoreDocument();
   }
 });
+
+test("hides the ghost when TopsecOS-style backspace leaves stale text after the cursor (#1060)", () => {
+  const restoreDocument = installFakeDocument();
+  const { term, ghostElement, fireRender } = createFakeTerm();
+  const addon = new GhostTextAddon();
+
+  try {
+    addon.activate(term as never);
+    // The user deleted back from "system..." to "syst", so the tracked
+    // input is shorter and the ghost regrows to "em license show".
+    addon.show("system license show", "syst");
+    assert.equal(addon.isActive(), true);
+
+    // TopsecOS devices shown in #1060 leave the old suffix visible after
+    // the cursor while processing Backspace, so the real buffer looks like:
+    // TopsecOS# syst|em license show
+    const beforeCursor = "TopsecOS# syst";
+    const line = `${beforeCursor}em license show`;
+    const active = term.buffer.active as Record<string, unknown>;
+    active.baseY = 0;
+    active.cursorX = beforeCursor.length;
+    active.getLine = () => ({ translateToString: () => line });
+
+    fireRender();
+
+    assert.equal(addon.isActive(), false);
+    assert.equal(ghostElement()?.style.display, "none");
+  } finally {
+    addon.dispose();
+    restoreDocument();
+  }
+});
+
+test("hides the ghost when only the deleted prefix remains after the cursor (#1060)", () => {
+  const restoreDocument = installFakeDocument();
+  const { term, ghostElement, fireRender } = createFakeTerm();
+  const addon = new GhostTextAddon();
+
+  try {
+    addon.activate(term as never);
+    addon.show("system license show", "syst");
+    assert.equal(addon.isActive(), true);
+
+    const beforeCursor = "TopsecOS# syst";
+    const active = term.buffer.active as Record<string, unknown>;
+    active.baseY = 0;
+    active.cursorX = beforeCursor.length;
+    active.getLine = () => ({ translateToString: () => `${beforeCursor}em` });
+
+    fireRender();
+
+    assert.equal(addon.isActive(), false);
+    assert.equal(ghostElement()?.style.display, "none");
+  } finally {
+    addon.dispose();
+    restoreDocument();
+  }
+});
+
+test("hides the ghost when TopsecOS-style backspace leaves stale text after empty input (#1060)", () => {
+  const restoreDocument = installFakeDocument();
+  const { term, ghostElement, fireRender } = createFakeTerm();
+  const addon = new GhostTextAddon();
+
+  try {
+    addon.activate(term as never);
+    addon.show("system license show", "");
+    assert.equal(addon.isActive(), true);
+
+    const beforeCursor = "TopsecOS# ";
+    const active = term.buffer.active as Record<string, unknown>;
+    active.baseY = 0;
+    active.cursorX = beforeCursor.length;
+    active.getLine = () => ({ translateToString: () => `${beforeCursor}system license show` });
+
+    fireRender();
+
+    assert.equal(addon.isActive(), false);
+    assert.equal(ghostElement()?.style.display, "none");
+  } finally {
+    addon.dispose();
+    restoreDocument();
+  }
+});
+
+test("hides the ghost when stale text is followed by right-side status text (#1060)", () => {
+  const restoreDocument = installFakeDocument();
+  const { term, ghostElement, fireRender } = createFakeTerm();
+  const addon = new GhostTextAddon();
+
+  try {
+    addon.activate(term as never);
+    addon.show("system license show", "syst");
+    assert.equal(addon.isActive(), true);
+
+    const beforeCursor = "TopsecOS# syst";
+    const active = term.buffer.active as Record<string, unknown>;
+    active.baseY = 0;
+    active.cursorX = beforeCursor.length;
+    active.getLine = () => ({ translateToString: () => `${beforeCursor}em     12:34 ok` });
+
+    fireRender();
+
+    assert.equal(addon.isActive(), false);
+    assert.equal(ghostElement()?.style.display, "none");
+  } finally {
+    addon.dispose();
+    restoreDocument();
+  }
+});
+
+test("hides the ghost when a stale argument suffix starts with a space (#1060)", () => {
+  const restoreDocument = installFakeDocument();
+  const { term, ghostElement, fireRender } = createFakeTerm();
+  const addon = new GhostTextAddon();
+
+  try {
+    addon.activate(term as never);
+    addon.show("system license show", "system");
+    assert.equal(addon.isActive(), true);
+
+    const beforeCursor = "TopsecOS# system";
+    const active = term.buffer.active as Record<string, unknown>;
+    active.baseY = 0;
+    active.cursorX = beforeCursor.length;
+    active.getLine = () => ({ translateToString: () => `${beforeCursor} license show` });
+
+    fireRender();
+
+    assert.equal(addon.isActive(), false);
+    assert.equal(ghostElement()?.style.display, "none");
+  } finally {
+    addon.dispose();
+    restoreDocument();
+  }
+});
+
+test("keeps the ghost when unrelated right-side prompt text is visible", () => {
+  const restoreDocument = installFakeDocument();
+  const { term, ghostElement, fireRender } = createFakeTerm();
+  const addon = new GhostTextAddon();
+
+  try {
+    addon.activate(term as never);
+    addon.show("system license show", "syst");
+    assert.equal(addon.isActive(), true);
+
+    const beforeCursor = "host# syst";
+    const active = term.buffer.active as Record<string, unknown>;
+    active.baseY = 0;
+    active.cursorX = beforeCursor.length;
+    active.getLine = () => ({ translateToString: () => `${beforeCursor}     12:34 ok` });
+
+    fireRender();
+
+    assert.equal(addon.isActive(), true);
+    assert.notEqual(ghostElement()?.style.display, "none");
+  } finally {
+    addon.dispose();
+    restoreDocument();
+  }
+});
+
+test("keeps the ghost when only right-side spacing overlaps a space-prefixed suffix", () => {
+  const restoreDocument = installFakeDocument();
+  const { term, ghostElement, fireRender } = createFakeTerm();
+  const addon = new GhostTextAddon();
+
+  try {
+    addon.activate(term as never);
+    addon.show("system license show", "system");
+    assert.equal(addon.isActive(), true);
+
+    const beforeCursor = "host# system";
+    const active = term.buffer.active as Record<string, unknown>;
+    active.baseY = 0;
+    active.cursorX = beforeCursor.length;
+    active.getLine = () => ({ translateToString: () => `${beforeCursor}     12:34 ok` });
+
+    fireRender();
+
+    assert.equal(addon.isActive(), true);
+    assert.notEqual(ghostElement()?.style.display, "none");
+  } finally {
+    addon.dispose();
+    restoreDocument();
+  }
+});
+
+test("keeps the ghost when adjacent right-side text only shares the first character", () => {
+  const restoreDocument = installFakeDocument();
+  const { term, ghostElement, fireRender } = createFakeTerm();
+  const addon = new GhostTextAddon();
+
+  try {
+    addon.activate(term as never);
+    addon.show("system license show", "syst");
+    assert.equal(addon.isActive(), true);
+
+    const beforeCursor = "host# syst";
+    const active = term.buffer.active as Record<string, unknown>;
+    active.baseY = 0;
+    active.cursorX = beforeCursor.length;
+    active.getLine = () => ({ translateToString: () => `${beforeCursor}error` });
+
+    fireRender();
+
+    assert.equal(addon.isActive(), true);
+    assert.notEqual(ghostElement()?.style.display, "none");
+  } finally {
+    addon.dispose();
+    restoreDocument();
+  }
+});

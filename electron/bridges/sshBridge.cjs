@@ -10,6 +10,7 @@ const { randomUUID } = require("node:crypto");
 const os = require("node:os");
 const crypto = require("node:crypto");
 const { exec } = require("node:child_process");
+require("./boringSslDhCompat.cjs").installBoringSslDhCompat();
 const { Client: SSHClient, utils: sshUtils } = require("ssh2");
 const { NetcattyAgent } = require("./netcattyAgent.cjs");
 const keyboardInteractiveHandler = require("./keyboardInteractiveHandler.cjs");
@@ -32,6 +33,7 @@ const {
   preparePrivateKeyForAuth,
   loadIdentityFileForAuth,
   loadFirstIdentityFileForAuth,
+  hasUserConfiguredKey,
   PassphraseCancelledError,
   isPassphraseCancelledError,
 } = require("./sshAuthHelper.cjs");
@@ -44,11 +46,16 @@ const {
   _resetAlgorithmSupportCacheForTests,
 } = require("./sshAlgorithms.cjs");
 const { enableSshNoDelay, enableTcpNoDelay } = require("./tcpNoDelay.cjs");
+const {
+  configureTerminalSessionDataEmitter,
+} = require("./emitTerminalSessionData.cjs");
 
 // Default SSH key names in priority order (preferred keys tried first)
 const PREFERRED_KEY_NAMES = ["id_ed25519", "id_ecdsa", "id_rsa"];
 // Match any private key file: id_* but not *.pub
 const SSH_KEY_PATTERN = /^id_[\w-]+$/;
+const SSH_TCP_CONNECT_TIMEOUT_MS = 20000;
+const SSH_AUTH_READY_TIMEOUT_MS = 120000;
 
 function quoteShellArg(value) {
   return "'" + String(value).replace(/'/g, "'\\''") + "'";
@@ -380,6 +387,9 @@ async function openSshDebugLogDir() {
 // Session storage - shared reference passed from main
 let sessions = null;
 let electronModule = null;
+let terminalOutputChannel = null;
+let selectZmodemUploadFiles = null;
+let selectZmodemDownloadDirectory = null;
 
 // Authentication method cache - remembers successful auth methods per host
 // Key format: "username@hostname:port"
@@ -469,6 +479,21 @@ const zmodemOverwritePending = new Map(); // requestId -> (decision) => void
 function init(deps) {
   sessions = deps.sessions;
   electronModule = deps.electronModule;
+  terminalOutputChannel = deps.terminalOutputChannel || null;
+  selectZmodemUploadFiles = deps.selectZmodemUploadFiles || null;
+  selectZmodemDownloadDirectory = deps.selectZmodemDownloadDirectory || null;
+  configureTerminalSessionDataEmitter({
+    getSession: (sessionId) => sessions?.get(sessionId),
+    outputChannel: terminalOutputChannel,
+  });
+}
+
+function openTerminalOutputSession(sessionId, webContents) {
+  terminalOutputChannel?.openSession?.(sessionId, webContents);
+}
+
+function closeTerminalOutputSession(sessionId) {
+  terminalOutputChannel?.closeSession?.(sessionId);
 }
 
 /**
@@ -478,6 +503,7 @@ async function connectThroughChain(event, options, jumpHosts, targetHost, target
   const sender = event.sender;
   const connections = options?._connectionsRef || [];
   const sshDiagnosticLogger = options?._sshDiagnosticLogger || log;
+  const keyboardInteractiveScope = options?._keyboardInteractiveScope || "terminal";
   let currentSocket = null;
 
   const sendProgress = (hop, total, label, status, error) => {
@@ -518,7 +544,8 @@ async function connectThroughChain(event, options, jumpHosts, targetHost, target
         host: jump.hostname,
         port: jump.port || 22,
         username: jump.username || 'root',
-        readyTimeout: 120000, // 2 minutes to allow for keyboard-interactive (2FA/MFA)
+        timeout: SSH_TCP_CONNECT_TIMEOUT_MS,
+        readyTimeout: SSH_AUTH_READY_TIMEOUT_MS, // 2 minutes to allow for keyboard-interactive (2FA/MFA)
         keepaliveInterval: hopInterval > 0 ? hopInterval * 1000 : 0,
         keepaliveCountMax: hopInterval > 0 ? hopCountMax : 0,
         // Enable keyboard-interactive authentication (required for 2FA/MFA)
@@ -554,6 +581,7 @@ async function connectThroughChain(event, options, jumpHosts, targetHost, target
         hostname: jump.hostname,
         port: jump.port || 22,
         knownHosts: options.knownHosts,
+        verifyHostKeys: jump.verifyHostKeys ?? options.verifyHostKeys,
       });
       attachSshDebugLogger(connOpts, sshDiagnosticLogger);
       logSshAlgorithms("Jump host", connOpts.algorithms, {
@@ -576,6 +604,12 @@ async function connectThroughChain(event, options, jumpHosts, targetHost, target
           initialPassphrase: jump.passphrase,
           passphraseSignal: options._passphraseSignal,
           logPrefix: `[Chain] Hop ${i + 1}:`,
+          onPassphrasePromptShown: () => sendProgress(
+            i + 1, totalHops + 1, hopLabel, "auth-attempt", "waiting for user input...",
+          ),
+          onPassphrasePromptResolved: () => sendProgress(
+            i + 1, totalHops + 1, hopLabel, "auth-attempt", "user responded",
+          ),
           onLoaded: (loaded) => {
             if (loaded.passphrase) {
               sendProgress(i + 1, totalHops + 1, hopLabel, 'auth-attempt', 'passphrase required');
@@ -597,6 +631,12 @@ async function connectThroughChain(event, options, jumpHosts, targetHost, target
           initialPassphrase: jump.passphrase,
           passphraseSignal: options._passphraseSignal,
           logPrefix: `[Chain] Hop ${i + 1}:`,
+          onPassphrasePromptShown: () => sendProgress(
+            i + 1, totalHops + 1, hopLabel, "auth-attempt", "waiting for user input...",
+          ),
+          onPassphrasePromptResolved: () => sendProgress(
+            i + 1, totalHops + 1, hopLabel, "auth-attempt", "user responded",
+          ),
         })
         : null;
       const effectivePrivateKey = inlineKey?.privateKey || identityFile?.privateKey;
@@ -622,7 +662,7 @@ async function connectThroughChain(event, options, jumpHosts, targetHost, target
         } else if (jump.privateKey && isKeyEncrypted(jump.privateKey)) {
           // Key is encrypted but no passphrase provided — prompt the user
           console.log(`[Chain] Hop ${i + 1}: key is encrypted, requesting passphrase`);
-          sendProgress(i + 1, totalHops + 1, hopLabel, 'auth-attempt', 'passphrase required');
+          sendProgress(i + 1, totalHops + 1, hopLabel, 'auth-attempt', 'waiting for user input...');
           const keyLabel = jump.label || hopLabel;
           const result = await passphraseHandler.requestPassphrase(
             sender,
@@ -632,6 +672,7 @@ async function connectThroughChain(event, options, jumpHosts, targetHost, target
             false,
             { signal: options._passphraseSignal }
           );
+          sendProgress(i + 1, totalHops + 1, hopLabel, 'auth-attempt', 'user responded');
           if (result?.passphrase) {
             connOpts.passphrase = result.passphrase;
           } else {
@@ -672,6 +713,7 @@ async function connectThroughChain(event, options, jumpHosts, targetHost, target
       const effectiveHopProxy = isFirst ? ((hasUsableJumpProxy ? jump.proxy : null) || options.proxy) : null;
       if (effectiveHopProxy) {
         currentSocket = await createProxySocket(effectiveHopProxy, jump.hostname, jump.port || 22, {
+          timeoutMs: SSH_TCP_CONNECT_TIMEOUT_MS,
           onSocket: (socket) => {
             if (options?._tunnelRef) {
               options._tunnelRef.pendingConn = socket;
@@ -717,6 +759,7 @@ async function connectThroughChain(event, options, jumpHosts, targetHost, target
           console.error(`[Chain] Hop ${i + 1}/${totalHops}: ${hopLabel} timeout`);
           const errMsg = `Connection timeout to ${hopLabel}`;
           sendProgress(i + 1, totalHops + 1, hopLabel, 'error', errMsg);
+          try { conn.destroy(); } catch { }
           reject(new Error(errMsg));
         });
         // Handle keyboard-interactive authentication for jump hosts (2FA/MFA)
@@ -726,7 +769,7 @@ async function connectThroughChain(event, options, jumpHosts, targetHost, target
           hostname: hopLabel,
           password: jump.password,
           logPrefix: `[Chain] Hop ${i + 1}/${totalHops}`,
-          scope: "terminal",
+          scope: keyboardInteractiveScope,
           onAutoFill: () => sendProgress(
             i + 1, totalHops + 1, hopLabel, 'auth-attempt', 'using saved password',
           ),
@@ -738,7 +781,11 @@ async function connectThroughChain(event, options, jumpHosts, targetHost, target
           ),
         }));
         console.log(`[Chain] Hop ${i + 1}/${totalHops}: Connecting to ${hopLabel}...`);
-        conn.once('connect', () => enableSshNoDelay(conn));
+        conn.once('connect', () => {
+          try { conn._sock?.setTimeout?.(0); } catch { }
+          sendProgress(i + 1, totalHops + 1, hopLabel, 'tcp-connected');
+          enableSshNoDelay(conn);
+        });
         if (connOpts.sock) enableTcpNoDelay(connOpts.sock);
         conn.connect(connOpts);
       });
@@ -762,7 +809,25 @@ async function connectThroughChain(event, options, jumpHosts, targetHost, target
       console.log(`[Chain] Hop ${i + 1}/${totalHops}: Forwarding from ${hopLabel} to ${nextHost}:${nextPort}...`);
       sendProgress(i + 1, totalHops + 1, hopLabel, 'forwarding');
       currentSocket = await new Promise((resolve, reject) => {
+        const forwardTimeoutMs = options?._forwardTimeoutMs || SSH_TCP_CONNECT_TIMEOUT_MS;
+        let settled = false;
+        const timeout = setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          const errMsg = `Connection timeout from ${hopLabel} to ${nextHost}:${nextPort}`;
+          console.error(`[Chain] Hop ${i + 1}/${totalHops}: forwardOut from ${hopLabel} to ${nextHost}:${nextPort} TIMEOUT`);
+          sendProgress(i + 1, totalHops + 1, hopLabel, 'error', errMsg);
+          try { conn.destroy(); } catch { }
+          reject(new Error(errMsg));
+        }, forwardTimeoutMs);
+        if (!options?._forwardTimeoutMs) timeout.unref?.();
         conn.forwardOut('127.0.0.1', 0, nextHost, nextPort, (err, stream) => {
+          if (settled) {
+            try { stream?.destroy?.(); } catch { }
+            return;
+          }
+          settled = true;
+          clearTimeout(timeout);
           if (err) {
             console.error(`[Chain] Hop ${i + 1}/${totalHops}: forwardOut from ${hopLabel} to ${nextHost}:${nextPort} FAILED:`, err.message);
             reject(err);
@@ -810,7 +875,10 @@ const startSessionApi = createStartSessionApi({
   attachSshDebugLogger, logSshAlgorithms, resolveLangFromCharset, safeSend, zmodemOverwritePending,
   shouldLogSshDebugMessage, log, createSshDiagnosticLogger,
   buildAlgorithms, randomUUID, findDefaultPrivateKey, findAllDefaultPrivateKeys,
-  preparePrivateKeyForAuth, loadFirstIdentityFileForAuth, createKeyboardInteractiveHandler,
+  openTerminalOutputSession, closeTerminalOutputSession,
+  get selectZmodemUploadFiles() { return selectZmodemUploadFiles; },
+  get selectZmodemDownloadDirectory() { return selectZmodemDownloadDirectory; },
+  preparePrivateKeyForAuth, loadFirstIdentityFileForAuth, hasUserConfiguredKey, createKeyboardInteractiveHandler,
   createConnectionRef, acquireConnectionRef, releaseConnectionRef, findReusableSession,
   get probeReceiveConflicts() { return probeReceiveConflicts; },
   get removeRemoteFiles() { return removeRemoteFiles; },
@@ -1036,17 +1104,58 @@ const {
 /**
  * Register IPC handlers for SSH operations
  */
-function registerHandlers(ipcMain) {
-  ipcMain.handle("netcatty:start", startSSHSessionWrapper);
-  ipcMain.handle("netcatty:ssh:exec", execCommand);
-  ipcMain.handle("netcatty:ssh:pwd", getSessionPwd);
-  ipcMain.handle("netcatty:ssh:remoteInfo", getSessionRemoteInfo);
-  ipcMain.handle("netcatty:ssh:distroInfo", getSessionDistroInfo);
-  ipcMain.handle("netcatty:ssh:readRemoteHistory", readRemoteHistory);
-  ipcMain.handle("netcatty:ssh:listdir", listSessionDir);
-  ipcMain.handle("netcatty:ssh:stats", getServerStats);
+function registerWorkerHandle(ipcMain, terminalWorkerManager, channel) {
+  ipcMain.handle(channel, (event, payload) => {
+    return terminalWorkerManager.request(channel, payload, {
+      webContentsId: event?.sender?.id,
+    });
+  });
+}
+
+function registerHandlers(ipcMain, options = {}) {
+  const terminalWorkerManager = options.terminalWorkerManager || null;
+  if (terminalWorkerManager) {
+    [
+      "netcatty:start",
+      "netcatty:ssh:exec",
+      "netcatty:ssh:pwd",
+      "netcatty:ssh:remoteInfo",
+      "netcatty:ssh:distroInfo",
+      "netcatty:ssh:readRemoteHistory",
+      "netcatty:ssh:listdir",
+      "netcatty:ssh:stats",
+      "netcatty:ssh:setEncoding",
+      "netcatty:keyboard-interactive:respond",
+      "netcatty:passphrase:respond",
+      "netcatty:host-key:respond",
+    ].forEach((channel) => registerWorkerHandle(ipcMain, terminalWorkerManager, channel));
+    ipcMain.on("netcatty:zmodem:overwrite-response", (event, payload) => {
+      terminalWorkerManager.send("netcatty:zmodem:overwrite-response", payload, {
+        webContentsId: event?.sender?.id,
+      });
+    });
+  } else {
+    ipcMain.handle("netcatty:start", startSSHSessionWrapper);
+    ipcMain.handle("netcatty:ssh:exec", execCommand);
+    ipcMain.handle("netcatty:ssh:pwd", getSessionPwd);
+    ipcMain.handle("netcatty:ssh:remoteInfo", getSessionRemoteInfo);
+    ipcMain.handle("netcatty:ssh:distroInfo", getSessionDistroInfo);
+    ipcMain.handle("netcatty:ssh:readRemoteHistory", readRemoteHistory);
+    ipcMain.handle("netcatty:ssh:listdir", listSessionDir);
+    ipcMain.handle("netcatty:ssh:stats", getServerStats);
+    ipcMain.handle("netcatty:ssh:setEncoding", setSessionEncoding);
+    ipcMain.on("netcatty:zmodem:overwrite-response", (_event, payload) => {
+      const resolve = zmodemOverwritePending.get(payload?.requestId);
+      if (resolve) { zmodemOverwritePending.delete(payload.requestId); resolve(payload); }
+    });
+    // Register the shared keyboard-interactive response handler
+    keyboardInteractiveHandler.registerHandler(ipcMain);
+    // Register the passphrase response handler
+    passphraseHandler.registerHandler(ipcMain);
+    // Register the SSH host key verification response handler
+    hostKeyVerifier.registerHandler(ipcMain);
+  }
   ipcMain.handle("netcatty:key:generate", generateKeyPair);
-  ipcMain.handle("netcatty:ssh:setEncoding", setSessionEncoding);
   ipcMain.handle("netcatty:sshDebugLog:info", getSshDebugLogInfo);
   ipcMain.handle("netcatty:sshDebugLog:openDir", openSshDebugLogDir);
   ipcMain.handle("netcatty:ssh:check-agent", async () => {
@@ -1069,16 +1178,6 @@ function registerHandlers(ipcMain) {
     }
     return keys;
   });
-  ipcMain.on("netcatty:zmodem:overwrite-response", (_event, payload) => {
-    const resolve = zmodemOverwritePending.get(payload?.requestId);
-    if (resolve) { zmodemOverwritePending.delete(payload.requestId); resolve(payload); }
-  });
-  // Register the shared keyboard-interactive response handler
-  keyboardInteractiveHandler.registerHandler(ipcMain);
-  // Register the passphrase response handler
-  passphraseHandler.registerHandler(ipcMain);
-  // Register the SSH host key verification response handler
-  hostKeyVerifier.registerHandler(ipcMain);
 }
 
 module.exports = {

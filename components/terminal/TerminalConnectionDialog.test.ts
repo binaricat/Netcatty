@@ -91,6 +91,23 @@ test("renders host key confirmation inside the connection dialog", () => {
   assert.equal(markup.includes("Timeout in"), false);
 });
 
+test("does not show a countdown while waiting for user input", () => {
+  const markup = renderDialog({
+    progressProps: {
+      timeLeft: 20,
+      isAwaitingUserInput: true,
+      isCancelling: false,
+      progressLogs: ["Waiting for passphrase."],
+      onCancelConnect: () => {},
+      onCloseSession: () => {},
+      onRetry: () => {},
+    },
+  });
+
+  assert.match(markup, /Waiting for user input/);
+  assert.equal(markup.includes("Timeout in"), false);
+});
+
 test("renders changed host key warning in the same connection dialog", () => {
   const markup = renderDialog({
     hostKeyVerification: {

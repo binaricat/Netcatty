@@ -747,11 +747,15 @@ async function handleUpload(zsession, opts) {
       : filePaths.map((fp) => path.basename(fp));
     dragDropTempPaths = dragDrop.tempPaths || [];
   } else {
-    const win = contents ? BrowserWindow.fromWebContents(contents) : null;
-    const result = await dialog.showOpenDialog(win || undefined, {
-      properties: ["openFile", "multiSelections"],
-      title: "Select files to upload (ZMODEM)",
-    });
+    const result = opts.selectUploadFiles
+      ? await opts.selectUploadFiles({ sessionId, contents })
+      : await (async () => {
+        const win = contents ? BrowserWindow.fromWebContents(contents) : null;
+        return dialog.showOpenDialog(win || undefined, {
+          properties: ["openFile", "multiSelections"],
+          title: "Select files to upload (ZMODEM)",
+        });
+      })();
 
     if (result.canceled || !result.filePaths.length) {
       try { zsession.abort(); } catch { /* ignore */ }
@@ -930,7 +934,6 @@ async function handleDownload(zsession, opts) {
   const contents = getWebContents();
   const { BrowserWindow, dialog } = getElectron();
 
-  const win = contents ? BrowserWindow.fromWebContents(contents) : null;
   let fileIndex = 0;
   const pendingStreams = [];
   const pendingOffers = [];
@@ -1069,10 +1072,15 @@ async function handleDownload(zsession, opts) {
   // time out waiting for ZRINIT while the user browses for a folder.
   zsession.start();
 
-  const result = await dialog.showOpenDialog(win || undefined, {
-    properties: ["openDirectory", "createDirectory"],
-    title: "Select download directory (ZMODEM)",
-  });
+  const result = opts.selectDownloadDirectory
+    ? await opts.selectDownloadDirectory({ sessionId, contents })
+    : await (async () => {
+      const win = contents ? BrowserWindow.fromWebContents(contents) : null;
+      return dialog.showOpenDialog(win || undefined, {
+        properties: ["openDirectory", "createDirectory"],
+        title: "Select download directory (ZMODEM)",
+      });
+    })();
 
   if (result.canceled || !result.filePaths.length) {
     try { zsession.abort(); } catch { /* ignore */ }
@@ -1103,4 +1111,4 @@ function safeSend(contents, channel, data) {
   }
 }
 
-module.exports = { createZmodemSentry, buildUploadPlan, buildModeRestores, handleUpload };
+module.exports = { createZmodemSentry, buildUploadPlan, buildModeRestores, handleUpload, handleDownload };

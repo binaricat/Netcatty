@@ -11,9 +11,14 @@
  *   (bring-your-own-CLI), so we MUST point `connection` at the user's system
  *   `copilot` binary via RuntimeConnection.forStdio({ path }) — otherwise the SDK
  *   falls back to the (absent) bundled runtime in the shipped app.
- * - Side effects route through the injected netcatty MCP server (stdio). The
- *   SDK-level permission handler rejects local Copilot tools and allows only
- *   MCP requests; netcatty MCP then enforces approval/scope/blocklist.
+ * - MCP mode: side effects route through the injected netcatty MCP server
+ *   (stdio). The permission handler rejects local Copilot tools and allows
+ *   only MCP requests; netcatty MCP then enforces approval/scope/blocklist.
+ * - Skills mode: only builtin bash is exposed (CLI instructions are injected via
+ *   the host prompt; the skill builtin is omitted because its read/custom-tool
+ *   permission kinds are not shell-safe to auto-approve). Shell permission
+ *   requests are approved only for Netcatty CLI invocations; discovery env is
+ *   passed to the Copilot runtime so `netcatty-tool-cli` can reach the host.
  *
  * 🔬 SMOKE-CALIBRATE [copilot-stream]: sendAndWait returns only the final
  *   assistant text. A follow-up can subscribe via session.on(handler) to stream
@@ -48,7 +53,13 @@ function toCopilotMcpServers(injectedMcpServers) {
   return map;
 }
 
-function buildCopilotSessionOptions({ model, injectedMcpServers }) {
+const COPILOT_SKILLS_AVAILABLE_TOOLS = ["builtin:bash"];
+
+function copilotBuiltinTools(toolIntegrationMode) {
+  return toolIntegrationMode === "skills" ? [...COPILOT_SKILLS_AVAILABLE_TOOLS] : null;
+}
+
+function buildCopilotSessionOptions({ model, injectedMcpServers, toolIntegrationMode }) {
   // onPermissionRequest is wired in runCopilotTurn (it needs the SDK's approveAll).
   const options = {
     mcpServers: toCopilotMcpServers(injectedMcpServers),
@@ -58,8 +69,143 @@ function buildCopilotSessionOptions({ model, injectedMcpServers }) {
     // has live reasoning to render.
     streaming: true,
   };
+  const availableTools = copilotBuiltinTools(toolIntegrationMode);
+  if (availableTools) options.availableTools = availableTools;
   if (model) options.model = model;
   return options;
+}
+
+// Shell chaining/redirection in the local Netcatty CLI prefix (not after exec `--`).
+const LOCAL_SHELL_METACHAR_PATTERN = /(?:[;&|`]|&&|\|\||\$\(|\$\{|<<?|>{1,2}|\r?\n)/;
+const LOCAL_SHELL_WRAPPER_PATTERN = /^(?:\/[^\s]+\/)?(?:ba|z|fi)?sh(?:\.exe)?\s+-c\b/i;
+const NETCATTY_CLI_TOKEN = String.raw`netcatty-tool-cli(?:\.(?:cjs|cmd))?`;
+const NETCATTY_CLI_PATH_SUFFIX = String.raw`(?:[\\/]|^)${NETCATTY_CLI_TOKEN}`;
+
+/** Find the last exec/job-start payload separator outside shell quotes. */
+function findExecPayloadSeparatorIndex(command) {
+  const text = String(command || "");
+  let inSingle = false;
+  let inDouble = false;
+  let escape = false;
+  let lastIndex = -1;
+
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    if (escape) {
+      escape = false;
+      continue;
+    }
+    if (ch === "\\" && (inSingle || inDouble)) {
+      escape = true;
+      continue;
+    }
+    if (!inDouble && ch === "'") {
+      inSingle = !inSingle;
+      continue;
+    }
+    if (!inSingle && ch === '"') {
+      inDouble = !inDouble;
+      continue;
+    }
+    if (!inSingle && !inDouble && text.startsWith(" -- ", i)) {
+      lastIndex = i;
+      i += 3;
+    }
+  }
+  return lastIndex;
+}
+
+function matchesShellMetacharAt(text, index) {
+  const match = LOCAL_SHELL_METACHAR_PATTERN.exec(String(text || "").slice(index));
+  return Boolean(match && match.index === 0);
+}
+
+function containsUnsafeShellMetachar(text) {
+  let inSingle = false;
+  let inDouble = false;
+  let escape = false;
+
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    if (escape) {
+      escape = false;
+      continue;
+    }
+    if (ch === "\\" && (inSingle || inDouble)) {
+      escape = true;
+      continue;
+    }
+    if (!inDouble && ch === "'") {
+      inSingle = !inSingle;
+      continue;
+    }
+    if (!inSingle && ch === '"') {
+      inDouble = !inDouble;
+      continue;
+    }
+    if (inSingle) continue;
+    if (inDouble) {
+      if (text.startsWith("$(", i) || ch === "`") return true;
+      continue;
+    }
+    if (matchesShellMetacharAt(text, i)) return true;
+  }
+  return false;
+}
+
+/** Split before the final exec/job-start remote payload (` -- cmd`), not flag values. */
+function getLocalNetcattyCliPrefix(fullCommandText) {
+  const command = String(fullCommandText || "").trim();
+  const splitAt = findExecPayloadSeparatorIndex(command);
+  if (splitAt >= 0) {
+    return command.slice(0, splitAt).trim();
+  }
+  return command;
+}
+
+function isNetcattyCliInvocationPrefix(localPart) {
+  const text = String(localPart || "").trim();
+  if (!text) return false;
+  const pathPrefix = String.raw`(?:\.\./|\./|/|[A-Za-z]:[\\/])[\w. \\-]*[\\/]`;
+  const invocation = new RegExp(
+    String.raw`^(?:(?:[A-Za-z_][\w.-]*=[^\s]+\s+)*)?(?:` +
+    String.raw`"[^"]*${NETCATTY_CLI_PATH_SUFFIX}"|` +
+    String.raw `'[^']*${NETCATTY_CLI_PATH_SUFFIX}'|` +
+    String.raw `${NETCATTY_CLI_TOKEN}(?=\s|$)|` +
+    String.raw `${pathPrefix}${NETCATTY_CLI_TOKEN}(?=\s|$)|` +
+    String.raw `node\s+(?:${NETCATTY_CLI_TOKEN}(?=\s|$)|${pathPrefix}${NETCATTY_CLI_TOKEN}(?=\s|$)|` +
+    String.raw `(?:[\w.-]+(?:[\\/][\w.-]+)*[\\/])?${NETCATTY_CLI_TOKEN}(?=\s|$)|` +
+    String.raw `"[^"]*${NETCATTY_CLI_PATH_SUFFIX}"|'[^']*${NETCATTY_CLI_PATH_SUFFIX}'))`,
+    "i",
+  );
+  return invocation.test(text);
+}
+
+function hasExecPayloadSubcommand(localPart) {
+  return /\b(?:exec|job-start)\b/i.test(String(localPart || ""));
+}
+
+function isLikelyNetcattyCliShellCommand(fullCommandText) {
+  const command = String(fullCommandText || "").trim();
+  if (!command) return false;
+
+  const splitAt = findExecPayloadSeparatorIndex(command);
+  const localPart = splitAt >= 0 ? command.slice(0, splitAt).trim() : command;
+  const remotePayload = splitAt >= 0 ? command.slice(splitAt + 4).trim() : "";
+
+  if (!localPart || LOCAL_SHELL_WRAPPER_PATTERN.test(localPart)) return false;
+  if (!isNetcattyCliInvocationPrefix(localPart)) return false;
+
+  if (remotePayload) {
+    if (!hasExecPayloadSubcommand(localPart)) return false;
+    if (containsUnsafeShellMetachar(localPart)) return false;
+    // The runtime executes fullCommandText in a local shell; scan all of it so
+    // tokens after `--` cannot chain additional local commands unless quoted.
+    if (containsUnsafeShellMetachar(command)) return false;
+    return true;
+  }
+
+  return !containsUnsafeShellMetachar(command);
 }
 
 function approveNetcattyMcpOnly(request) {
@@ -70,6 +216,28 @@ function approveNetcattyMcpOnly(request) {
     kind: "reject",
     feedback: "Only Netcatty MCP tools are allowed from this integration.",
   };
+}
+
+function approveNetcattyCliShellOnly(request) {
+  if (request?.kind === "shell") {
+    const fullCommandText = request.fullCommandText || "";
+    if (isLikelyNetcattyCliShellCommand(fullCommandText)) {
+      return { kind: "approve-once" };
+    }
+    return {
+      kind: "reject",
+      feedback:
+        "Only Netcatty CLI shell commands are allowed. Invoke the netcatty-tool-cli launcher or script prefix provided in the host context, and include --chat-session on every call.",
+    };
+  }
+  return {
+    kind: "reject",
+    feedback: "Only Netcatty CLI shell commands are allowed from this integration.",
+  };
+}
+
+function buildCopilotPermissionHandler(toolIntegrationMode) {
+  return toolIntegrationMode === "skills" ? approveNetcattyCliShellOnly : approveNetcattyMcpOnly;
 }
 
 function extractCopilotContent(response) {
@@ -178,7 +346,18 @@ function translateCopilotEvent(event, emitter, state) {
  * @param {AbortSignal} [args.signal]
  * @param {object} [args.sdkModule] inject the @github/copilot-sdk module (for tests)
  */
-async function runCopilotTurn({ prompt, attachments, clientOptions, sessionOptions, resumeSessionId, emitter, signal, sdkModule }) {
+async function runCopilotTurn({
+  prompt,
+  attachments,
+  clientOptions,
+  sessionOptions,
+  resumeSessionId,
+  toolIntegrationMode,
+  runtimeEnv,
+  emitter,
+  signal,
+  sdkModule,
+}) {
   let resolvedModule = sdkModule;
   if (!resolvedModule) {
     try { resolvedModule = await import("@github/copilot-sdk"); } catch { emitter.emitError("GitHub Copilot SDK not installed. Run: npm install @github/copilot-sdk"); return { sessionId: null }; }
@@ -190,6 +369,9 @@ async function runCopilotTurn({ prompt, attachments, clientOptions, sessionOptio
   // (the bundled runtime is excluded from packaging) and authenticate as the
   // logged-in user (gh CLI / stored OAuth).
   const realClientOptions = { useLoggedInUser: true };
+  if (runtimeEnv && typeof runtimeEnv === "object") {
+    realClientOptions.env = runtimeEnv;
+  }
   if (clientOptions?.cliPath && RuntimeConnection?.forStdio) {
     realClientOptions.connection = RuntimeConnection.forStdio({ path: clientOptions.cliPath });
   }
@@ -202,8 +384,8 @@ async function runCopilotTurn({ prompt, attachments, clientOptions, sessionOptio
     const sessionConfig = {
       ...sessionOptions,
       streaming: true,
-      // Allow only MCP calls; netcatty MCP performs scope/approval/blocklist checks.
-      onPermissionRequest: approveNetcattyMcpOnly,
+      // MCP mode: only netcatty MCP. Skills mode: only Netcatty CLI shell commands.
+      onPermissionRequest: buildCopilotPermissionHandler(toolIntegrationMode),
     };
     // Resume the prior conversation so context carries ACROSS turns (incl. after
     // a Stop). Always (re)apply sessionConfig so the FRESH netcatty MCP server
@@ -335,7 +517,16 @@ module.exports = {
   buildCopilotClientOptions,
   buildCopilotSessionOptions,
   buildCopilotMessageOptions,
+  buildCopilotPermissionHandler,
   approveNetcattyMcpOnly,
+  approveNetcattyCliShellOnly,
+  isLikelyNetcattyCliShellCommand,
+  getLocalNetcattyCliPrefix,
+  findExecPayloadSeparatorIndex,
+  containsUnsafeShellMetachar,
+  matchesShellMetacharAt,
+  hasExecPayloadSubcommand,
+  copilotBuiltinTools,
   toCopilotMcpServers,
   extractCopilotContent,
   extractCopilotResultText,

@@ -687,6 +687,46 @@ jobs:
           fail_on_unmatched_files: false
           token: ${{ secrets.RELEASE_TOKEN }}
 
+  update-nix-release:
+    name: update Nix release metadata
+    runs-on: ubuntu-latest
+    needs: release
+    if: |
+      startsWith(github.ref, 'refs/tags/v')
+      && !contains(github.ref_name, '-')
+      && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish_release))
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - name: Checkout default branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          token: ${{ secrets.RELEASE_TOKEN }}
+
+      - name: Download Linux artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Update Nix release metadata
+        run: node .github/scripts/update-nix-release.js --artifacts artifacts --version "${GITHUB_REF_NAME#v}"
+
+      - name: Commit Nix release metadata
+        shell: bash
+        run: |
+          if git diff --quiet -- nix/release.nix; then
+            echo "Nix release metadata is already current."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add nix/release.nix
+          git commit -m "Update Nix release metadata for ${GITHUB_REF_NAME}"
+          git push origin HEAD:${{ github.event.repository.default_branch }}
+
   homebrew-tap:
     name: bump homebrew tap
     runs-on: ubuntu-latest

@@ -28,7 +28,8 @@ function TerminalLayerWorkspaceSectionInner({ ctx }: { ctx: WorkspaceContext }) 
     workspaceBroadcastHandlersRef,
     splitHorizontalHandlersRef,
     splitVerticalHandlersRef,
-    themePreview,
+    resolveSessionAppearance,
+    hostMap,
     keys,
     identities,
     snippets,
@@ -55,6 +56,7 @@ function TerminalLayerWorkspaceSectionInner({ ctx }: { ctx: WorkspaceContext }) 
     handleTerminalTitleChange,
     handleTerminalBell,
     handleTerminalOutput,
+    handleTerminalContextReaderChange,
     handleOpenScripts,
     handleOpenHistory,
     handleOpenSystem,
@@ -72,6 +74,7 @@ function TerminalLayerWorkspaceSectionInner({ ctx }: { ctx: WorkspaceContext }) 
     onSplitSession,
     isBroadcastEnabled,
     handleBroadcastInput,
+    handleBroadcastInterruptPriorityChange,
     handleToggleWorkspaceComposeBar,
     handleSnippetExecutorChange,
     handleProgrammaticCommandLogRewriteChange,
@@ -149,7 +152,8 @@ function TerminalLayerWorkspaceSectionInner({ ctx }: { ctx: WorkspaceContext }) 
           workspaceBroadcastHandlersRef={workspaceBroadcastHandlersRef}
           splitHorizontalHandlersRef={splitHorizontalHandlersRef}
           splitVerticalHandlersRef={splitVerticalHandlersRef}
-          themePreview={themePreview}
+          resolveSessionAppearance={resolveSessionAppearance}
+          hostMap={hostMap}
           keys={keys}
           identities={identities}
           snippets={snippets}
@@ -176,6 +180,7 @@ function TerminalLayerWorkspaceSectionInner({ ctx }: { ctx: WorkspaceContext }) 
           onTerminalTitleChange={handleTerminalTitleChange}
           onTerminalBell={handleTerminalBell}
           onTerminalOutput={handleTerminalOutput}
+          onTerminalContextReaderChange={handleTerminalContextReaderChange}
           onOpenScripts={handleOpenScripts}
           onOpenHistory={handleOpenHistory}
           onOpenSystem={handleOpenSystem}
@@ -193,6 +198,7 @@ function TerminalLayerWorkspaceSectionInner({ ctx }: { ctx: WorkspaceContext }) 
           onSplitSession={onSplitSession}
           isBroadcastEnabled={isBroadcastEnabled}
           onBroadcastInput={handleBroadcastInput}
+          onBroadcastInterruptPriorityChange={handleBroadcastInterruptPriorityChange}
           onToggleWorkspaceComposeBar={handleToggleWorkspaceComposeBar}
           onSnippetExecutorChange={handleSnippetExecutorChange}
           onProgrammaticCommandLogRewriteChange={handleProgrammaticCommandLogRewriteChange}

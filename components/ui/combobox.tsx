@@ -2,7 +2,6 @@ import { Check, ChevronDown, Plus, X } from "lucide-react"
 import * as React from "react"
 import { cn } from "../../lib/utils"
 import { Popover, PopoverContent, PopoverTrigger } from "./popover"
-import { ScrollArea } from "./scroll-area"
 
 export interface ComboboxOption {
     value: string;
@@ -24,6 +23,49 @@ interface ComboboxProps {
     className?: string;
     triggerClassName?: string;
     disabled?: boolean;
+}
+
+export const comboboxWheelDeltaToPixels = (deltaY: number, deltaMode: number): number => {
+    if (deltaMode === 1) return deltaY * 16
+    if (deltaMode === 2) return deltaY * 280
+    return deltaY
+}
+
+export type ComboboxScrollableTarget = {
+    clientHeight: number;
+    scrollHeight: number;
+    scrollTop: number;
+}
+
+export const applyComboboxWheelScroll = (
+    target: ComboboxScrollableTarget,
+    deltaY: number,
+    deltaMode: number,
+): boolean => {
+    if (target.scrollHeight <= target.clientHeight) return false
+
+    target.scrollTop += comboboxWheelDeltaToPixels(deltaY, deltaMode)
+    return true
+}
+
+function ComboboxOptionsList({ children }: { children: React.ReactNode }) {
+    const handleWheelCapture = (event: React.WheelEvent<HTMLDivElement>) => {
+        const handled = applyComboboxWheelScroll(event.currentTarget, event.deltaY, event.deltaMode)
+        if (!handled) return
+
+        event.preventDefault()
+        event.stopPropagation()
+        event.nativeEvent.stopImmediatePropagation()
+    }
+
+    return (
+        <div
+            className="max-h-[280px] overflow-y-auto overscroll-contain p-1"
+            onWheelCapture={handleWheelCapture}
+        >
+            {children}
+        </div>
+    )
 }
 
 export function Combobox({
@@ -150,72 +192,70 @@ export function Combobox({
                 </div>
             </PopoverTrigger>
             <PopoverContent
-                className={cn("p-0 border-border/60", className)}
+                className={cn("app-no-drag p-0 border-border/60", className)}
                 align="start"
                 sideOffset={4}
                 onOpenAutoFocus={(e) => e.preventDefault()}
                 style={{ width: 'var(--radix-popover-trigger-width)' }}
             >
                 {/* Options List */}
-                <ScrollArea className="max-h-[280px]">
-                    <div className="p-1">
-                        {filteredOptions.length === 0 && !showCreateOption ? (
-                            <div className="py-4 text-center text-sm text-muted-foreground">
-                                {emptyText}
-                            </div>
-                        ) : (
-                            <>
-                                {/* Create new option */}
-                                {showCreateOption && (
-                                    <button
-                                        type="button"
-                                        className="flex w-full items-center gap-3 px-3 py-2.5 rounded-md text-sm hover:bg-secondary/80 transition-colors text-left"
-                                        onClick={handleCreate}
-                                    >
-                                        <Plus size={16} className="text-primary shrink-0" />
-                                        <span className="text-muted-foreground">{createText}</span>
-                                        <span className="font-medium text-foreground">{inputValue}</span>
-                                    </button>
-                                )}
+                <ComboboxOptionsList>
+                    {filteredOptions.length === 0 && !showCreateOption ? (
+                        <div className="py-4 text-center text-sm text-muted-foreground">
+                            {emptyText}
+                        </div>
+                    ) : (
+                        <>
+                            {/* Create new option */}
+                            {showCreateOption && (
+                                <button
+                                    type="button"
+                                    className="flex w-full items-center gap-3 px-3 py-2.5 rounded-md text-sm hover:bg-secondary/80 transition-colors text-left"
+                                    onClick={handleCreate}
+                                >
+                                    <Plus size={16} className="text-primary shrink-0" />
+                                    <span className="text-muted-foreground">{createText}</span>
+                                    <span className="font-medium text-foreground">{inputValue}</span>
+                                </button>
+                            )}
 
-                                {/* Separator if both create and options exist */}
-                                {showCreateOption && filteredOptions.length > 0 && (
-                                    <div className="h-px bg-border/60 my-1" />
-                                )}
+                            {/* Separator if both create and options exist */}
+                            {showCreateOption && filteredOptions.length > 0 && (
+                                <div className="h-px bg-border/60 my-1" />
+                            )}
 
-                                {/* Existing options */}
-                                {filteredOptions.map((option) => (
-                                    <button
-                                        key={option.value}
-                                        type="button"
-                                        className={cn(
-                                            "flex w-full items-center gap-3 px-3 py-2.5 rounded-md text-sm transition-colors text-left",
-                                            value === option.value
-                                                ? "bg-primary/10 text-foreground"
-                                                : "hover:bg-secondary/80"
+                            {/* Existing options */}
+                            {filteredOptions.map((option) => (
+                                <button
+                                    key={option.value}
+                                    type="button"
+                                    className={cn(
+                                        "flex w-full items-center gap-3 px-3 py-2.5 rounded-md text-sm transition-colors text-left",
+                                        value === option.value
+                                            ? "bg-primary/10 text-foreground"
+                                            : "hover:bg-secondary/80"
+                                    )}
+                                    onClick={() => handleSelect(option.value)}
+                                >
+                                    {option.icon && (
+                                        <span className="shrink-0 text-muted-foreground">{option.icon}</span>
+                                    )}
+                                    <div className="flex-1 min-w-0">
+                                        <div className="truncate font-medium">{option.label}</div>
+                                        {option.sublabel && (
+                                            <div className="text-xs text-muted-foreground truncate">
+                                                {option.sublabel}
+                                            </div>
                                         )}
-                                        onClick={() => handleSelect(option.value)}
-                                    >
-                                        {option.icon && (
-                                            <span className="shrink-0 text-muted-foreground">{option.icon}</span>
-                                        )}
-                                        <div className="flex-1 min-w-0">
-                                            <div className="truncate font-medium">{option.label}</div>
-                                            {option.sublabel && (
-                                                <div className="text-xs text-muted-foreground truncate">
-                                                    {option.sublabel}
-                                                </div>
-                                            )}
-                                        </div>
-                                        {value === option.value && (
-                                            <Check size={16} className="shrink-0 text-primary" />
-                                        )}
-                                    </button>
-                                ))}
-                            </>
-                        )}
-                    </div>
-                </ScrollArea>
+                                    </div>
+                                    {value === option.value && (
+                                        <Check size={16} className="shrink-0 text-primary" />
+                                    )}
+                                </button>
+                            ))}
+                        </>
+                    )}
+                </ComboboxOptionsList>
             </PopoverContent>
         </Popover>
     )
@@ -355,71 +395,69 @@ export function MultiCombobox({
                 </div>
             </PopoverTrigger>
             <PopoverContent
-                className={cn("p-0 border-border/60", className)}
+                className={cn("app-no-drag p-0 border-border/60", className)}
                 align="start"
                 sideOffset={4}
                 onOpenAutoFocus={(e) => e.preventDefault()}
                 style={{ width: 'var(--radix-popover-trigger-width)' }}
             >
                 {/* Options List */}
-                <ScrollArea className="max-h-[280px]">
-                    <div className="p-1">
-                        {filteredOptions.length === 0 && !showCreateOption ? (
-                            <div className="py-4 text-center text-sm text-muted-foreground">
-                                {emptyText}
-                            </div>
-                        ) : (
-                            <>
-                                {/* Create new option */}
-                                {showCreateOption && (
+                <ComboboxOptionsList>
+                    {filteredOptions.length === 0 && !showCreateOption ? (
+                        <div className="py-4 text-center text-sm text-muted-foreground">
+                            {emptyText}
+                        </div>
+                    ) : (
+                        <>
+                            {/* Create new option */}
+                            {showCreateOption && (
+                                <button
+                                    type="button"
+                                    className="flex w-full items-center gap-3 px-3 py-2.5 rounded-md text-sm hover:bg-secondary/80 transition-colors text-left"
+                                    onClick={handleCreate}
+                                >
+                                    <Plus size={16} className="text-primary shrink-0" />
+                                    <span className="text-muted-foreground">{createText}</span>
+                                    <span className="font-medium text-foreground">{inputValue}</span>
+                                </button>
+                            )}
+
+                            {/* Separator if both create and options exist */}
+                            {showCreateOption && filteredOptions.length > 0 && (
+                                <div className="h-px bg-border/60 my-1" />
+                            )}
+
+                            {/* Existing options */}
+                            {filteredOptions.map((option) => {
+                                const isSelected = values.includes(option.value)
+                                return (
                                     <button
+                                        key={option.value}
                                         type="button"
-                                        className="flex w-full items-center gap-3 px-3 py-2.5 rounded-md text-sm hover:bg-secondary/80 transition-colors text-left"
-                                        onClick={handleCreate}
+                                        className={cn(
+                                            "flex w-full items-center gap-3 px-3 py-2.5 rounded-md text-sm transition-colors text-left",
+                                            isSelected
+                                                ? "bg-primary/10 text-foreground"
+                                                : "hover:bg-secondary/80"
+                                        )}
+                                        onClick={() => {
+                                            handleToggle(option.value)
+                                            setInputValue("")
+                                        }}
                                     >
-                                        <Plus size={16} className="text-primary shrink-0" />
-                                        <span className="text-muted-foreground">{createText}</span>
-                                        <span className="font-medium text-foreground">{inputValue}</span>
+                                        <div className={cn(
+                                            "w-4 h-4 rounded border flex items-center justify-center shrink-0",
+                                            isSelected ? "bg-primary border-primary" : "border-muted-foreground/40"
+                                        )}>
+                                            {isSelected && <Check size={12} className="text-primary-foreground" />}
+                                        </div>
+                                        <span className="truncate flex-1">{option.label}</span>
                                     </button>
-                                )}
-
-                                {/* Separator if both create and options exist */}
-                                {showCreateOption && filteredOptions.length > 0 && (
-                                    <div className="h-px bg-border/60 my-1" />
-                                )}
-
-                                {/* Existing options */}
-                                {filteredOptions.map((option) => {
-                                    const isSelected = values.includes(option.value)
-                                    return (
-                                        <button
-                                            key={option.value}
-                                            type="button"
-                                            className={cn(
-                                                "flex w-full items-center gap-3 px-3 py-2.5 rounded-md text-sm transition-colors text-left",
-                                                isSelected
-                                                    ? "bg-primary/10 text-foreground"
-                                                    : "hover:bg-secondary/80"
-                                            )}
-                                            onClick={() => {
-                                                handleToggle(option.value)
-                                                setInputValue("")
-                                            }}
-                                        >
-                                            <div className={cn(
-                                                "w-4 h-4 rounded border flex items-center justify-center shrink-0",
-                                                isSelected ? "bg-primary border-primary" : "border-muted-foreground/40"
-                                            )}>
-                                                {isSelected && <Check size={12} className="text-primary-foreground" />}
-                                            </div>
-                                            <span className="truncate flex-1">{option.label}</span>
-                                        </button>
-                                    )
-                                })}
-                            </>
-                        )}
-                    </div>
-                </ScrollArea>
+                                )
+                            })}
+                        </>
+                    )}
+                </ComboboxOptionsList>
             </PopoverContent>
         </Popover>
     )

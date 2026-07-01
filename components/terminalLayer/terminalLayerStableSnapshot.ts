@@ -52,6 +52,8 @@ export type TerminalLayerStableSnapshot = {
   sessionsRef: React.MutableRefObject<TerminalSession[]>;
   workspacesRef: React.MutableRefObject<Workspace[]>;
   hostsRef: React.MutableRefObject<Host[]>;
+  portForwardingRules: import('../../domain/models').PortForwardingRule[];
+  portForwardingRulesRef: React.MutableRefObject<import('../../domain/models').PortForwardingRule[]>;
   onSetWorkspaceFocusedSessionRef: React.MutableRefObject<TerminalLayerProps['onSetWorkspaceFocusedSession']>;
   sidePanelOpenTabs: Map<string, SidePanelTab>;
   setSidePanelOpenTabs: React.Dispatch<React.SetStateAction<Map<string, SidePanelTab>>>;
@@ -72,8 +74,8 @@ export type TerminalLayerStableSnapshot = {
   lastSidePanelTabRef: React.MutableRefObject<Map<string, SidePanelTab>>;
   notesMountedTabIds: string[];
   setNotesMountedTabIds: React.Dispatch<React.SetStateAction<string[]>>;
-  notesOpenNoteByTab: Map<string, string>;
-  setNotesOpenNoteByTab: React.Dispatch<React.SetStateAction<Map<string, string>>>;
+  notesOpenNoteByTab: Map<string, { noteId: string; requestId: number }>;
+  setNotesOpenNoteByTab: React.Dispatch<React.SetStateAction<Map<string, { noteId: string; requestId: number }>>>;
   isComposeBarOpen: boolean;
   setIsComposeBarOpen: React.Dispatch<React.SetStateAction<boolean>>;
   splitHorizontalHandlersRef: React.MutableRefObject<Map<string, () => void>>;
@@ -95,6 +97,7 @@ export type TerminalLayerStableSnapshot = {
   handleCommandExecuted: (command: string, hostId: string, hostLabel: string, sessionId: string) => void;
   handleTerminalDataCapture: (sessionId: string, data: string) => void;
   handleBroadcastInput: (data: string, sourceSessionId: string) => void;
+  handleBroadcastInterruptPriorityChange: (sessionId: string, prioritize: (() => void) | null) => void;
   handleSnippetExecutorChange: (sessionId: string, executor: SnippetExecutor | null) => void;
   handleProgrammaticCommandLogRewriteChange: (
     sessionId: string,
@@ -104,6 +107,7 @@ export type TerminalLayerStableSnapshot = {
   handleOpenSftp: (host: Host, initialPath?: string, pendingUploadEntries?: DropEntry[], sourceSessionId?: string) => void;
   handlePendingUploadHandled: (tabId: string, requestId: string) => void;
   handleSftpInitialLocationApplied: (tabId: string, location: { hostId: string; path: string }) => void;
+  handleSftpCurrentPathChange: (memoryKey: string, location: { hostId: string; path: string }) => void;
   handleSidePanelResizeStart: (e: React.MouseEvent) => void;
   handleToggleWorkspaceComposeBar: () => void;
   handleSwitchSidePanelTab: (tab: SidePanelTab) => void;

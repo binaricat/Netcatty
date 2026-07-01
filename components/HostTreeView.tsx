@@ -457,9 +457,7 @@ const HostTreeItem: React.FC<HostTreeItemProps> = ({
             <div className="mr-2 h-4 w-4 flex-shrink-0" />
           )}
           icon={(
-            <div className="mr-2 flex-shrink-0">
-              <DistroAvatar host={host} fallback={(host.os || "L")[0].toUpperCase()} size="tree" />
-            </div>
+            <DistroAvatar host={host} fallback={(host.os || "L")[0].toUpperCase()} size="tree" />
           )}
           content={(
             <div className="min-w-0 flex-1 leading-tight">

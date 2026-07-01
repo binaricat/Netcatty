@@ -1,4 +1,11 @@
 /* eslint-disable no-undef */
+const { emitTerminalSessionData } = require("../emitTerminalSessionData.cjs");
+const {
+  setBufferedOutputBytes,
+  shouldAcceptSessionOutput,
+  shouldProcessSessionOutput,
+} = require("../terminalFlowAck.cjs");
+
 function createMoshSessionApi(ctx) {
   with (ctx) {
     function resolveBareMoshClient(_options, opts = {}) {
@@ -135,6 +142,15 @@ function createMoshSessionApi(ctx) {
       addBundledMoshDllPath(env, bareClient, opts);
       addBundledMoshTerminfoEnv(env, bareClient, opts);
       return env;
+    }
+
+    function createMoshUtf8Decoder() {
+      const decoder = new StringDecoder("utf8");
+      return (chunk) => {
+        if (Buffer.isBuffer(chunk)) return decoder.write(chunk);
+        if (chunk instanceof Uint8Array) return decoder.write(Buffer.from(chunk));
+        return chunk == null ? "" : String(chunk);
+      };
     }
     
     function stripMoshPromptControls(text) {
@@ -406,6 +422,7 @@ function createMoshSessionApi(ctx) {
         moshAuthTempFiles: moshAuth.tempFiles,
       };
       sessions.set(sessionId, session);
+      openTerminalOutputSession?.(sessionId, event.sender);
     
       let logStreamToken = null;
       if (options.sessionLog?.enabled && options.sessionLog?.directory) {
@@ -423,11 +440,24 @@ function createMoshSessionApi(ctx) {
       // it to scope its stopStream call.
       session.logStreamToken = logStreamToken;
     
-      const { bufferData, flush } = createPtyOutputBuffer((data) => {
+      const {
+        bufferData,
+        flush,
+        flushPaced,
+        discard,
+      } = createPtyOutputBuffer((data, meta) => {
         const contents = electronModule.webContents.fromId(session.webContentsId);
-        contents?.send("netcatty:data", { sessionId, data });
+        emitTerminalSessionData(contents, sessionId, data, {
+          cols: session.cols,
+          rows: session.rows,
+          meta,
+        });
+      }, {
+        onPendingBytesChange: (bytes) => setBufferedOutputBytes(session, bytes),
+        shouldAcceptOutput: () => shouldAcceptSessionOutput(session),
       });
-      session.flushPendingData = flush;
+      session.flushPendingData = flushPaced;
+      session.discardPendingData = discard;
     
       const sniffer = moshHandshake.createMoshConnectSniffer();
       const respondToPasswordPrompt = createMoshSshPasswordResponder(sshPty, options.password, options.passphrase);
@@ -468,18 +498,21 @@ function createMoshSessionApi(ctx) {
               parsed: session.moshHandshakeResult,
               bufferData,
               flush,
+              flushPaced,
               sessionId,
             });
           } catch (err) {
-            flush();
-            sessionLogStreamManager.stopStream(sessionId, logStreamToken);
-            const contents = electronModule.webContents.fromId(session.webContentsId);
-            contents?.send("netcatty:exit", {
-              sessionId,
-              reason: "error",
-              error: `Failed to spawn mosh-client: ${err.message}`,
+            flushPaced(() => {
+              sessionLogStreamManager.stopStream(sessionId, logStreamToken);
+              const contents = electronModule.webContents.fromId(session.webContentsId);
+              contents?.send("netcatty:exit", {
+                sessionId,
+                reason: "error",
+                error: `Failed to spawn mosh-client: ${err.message}`,
+              });
+              closeTerminalOutputSession?.(sessionId);
+              sessions.delete(sessionId);
             });
-            sessions.delete(sessionId);
           }
           return;
         }
@@ -488,16 +521,18 @@ function createMoshSessionApi(ctx) {
         // The user has already seen the failure output (auth error, host
         // key warning, etc). Just surface a session-exit with the code so
         // the renderer can label the session "disconnected".
-        flush();
-        sessionLogStreamManager.stopStream(sessionId, logStreamToken);
-        const contents = electronModule.webContents.fromId(session.webContentsId);
-        contents?.send("netcatty:exit", {
-          sessionId,
-          exitCode,
-          signal,
-          reason: "error",
+        flushPaced(() => {
+          sessionLogStreamManager.stopStream(sessionId, logStreamToken);
+          const contents = electronModule.webContents.fromId(session.webContentsId);
+          contents?.send("netcatty:exit", {
+            sessionId,
+            exitCode,
+            signal,
+            reason: "error",
+          });
+          closeTerminalOutputSession?.(sessionId);
+          sessions.delete(sessionId);
         });
-        sessions.delete(sessionId);
       });
     
       return { sessionId };
@@ -510,7 +545,7 @@ function createMoshSessionApi(ctx) {
      * sentry whose writeToRemote closure captured the previous handle.
      */
     function swapToMoshClient(session, options, ctx) {
-      const { bareClient, optionsEnv, lang, parsed, bufferData, flush, sessionId } = ctx;
+      const { bareClient, optionsEnv, lang, parsed, bufferData, flush, flushPaced, sessionId } = ctx;
     
       const env = moshHandshake.buildMoshClientEnv({
         baseEnv: { ...process.env, ...optionsEnv, TERM: "xterm-256color" },
@@ -571,6 +606,7 @@ function createMoshSessionApi(ctx) {
         // password (see moshStatsConnection.cjs). Public-key / agent auth
         // does not depend on this.
         knownHosts: options.knownHosts,
+        verifyHostKeys: options.verifyHostKeys,
       };
       session.systemManagerSudoPassword = typeof options.sudoAutofillPassword === "string" && options.sudoAutofillPassword.length > 0
         ? options.sudoAutofillPassword
@@ -591,13 +627,25 @@ function createMoshSessionApi(ctx) {
             try { return mcPty.write(buf); } catch { return true; }
           },
           getWebContents() { return electronModule.webContents.fromId(session.webContentsId); },
+          selectUploadFiles: selectZmodemUploadFiles
+            ? () => selectZmodemUploadFiles(session.webContentsId)
+            : undefined,
+          selectDownloadDirectory: selectZmodemDownloadDirectory
+            ? () => selectZmodemDownloadDirectory(session.webContentsId)
+            : undefined,
           protocolLabel: "Mosh",
         });
         session.zmodemSentry = sentry;
-        mcPty.onData((data) => sentry.consume(data));
-      } else {
         mcPty.onData((data) => {
-          const str = data.toString("utf8");
+          if (!shouldProcessSessionOutput(session, sentry)) return;
+          sentry.consume(data);
+        });
+      } else {
+        const decodeMoshOutput = createMoshUtf8Decoder();
+        mcPty.onData((data) => {
+          if (!shouldProcessSessionOutput(session)) return;
+          const str = decodeMoshOutput(data);
+          if (!str) return;
           trackSessionIdlePrompt(session, str);
           bufferData(str);
           sessionLogStreamManager.appendData(sessionId, str);
@@ -612,16 +660,18 @@ function createMoshSessionApi(ctx) {
         // #1198) if one was opened — it lives on moshStatsConn and outlives
         // the mosh-client PTY otherwise.
         try { session.moshStatsConn?.end(); } catch { /* ignore */ }
-        flush();
-        sessionLogStreamManager.stopStream(sessionId, session.logStreamToken);
-        const contents = electronModule.webContents.fromId(session.webContentsId);
-        contents?.send("netcatty:exit", {
-          sessionId,
-          exitCode,
-          signal,
-          reason: exitCode !== 0 ? "error" : "exited",
+        flushPaced(() => {
+          sessionLogStreamManager.stopStream(sessionId, session.logStreamToken);
+          const contents = electronModule.webContents.fromId(session.webContentsId);
+          contents?.send("netcatty:exit", {
+            sessionId,
+            exitCode,
+            signal,
+            reason: exitCode !== 0 ? "error" : "exited",
+          });
+          closeTerminalOutputSession?.(sessionId);
+          sessions.delete(sessionId);
         });
-        sessions.delete(sessionId);
       });
     }
     
@@ -675,6 +725,7 @@ function createMoshSessionApi(ctx) {
       addBundledMoshDllPath,
       addBundledMoshTerminfoEnv,
       addBundledMoshRuntimeEnv,
+      createMoshUtf8Decoder,
       buildMoshSshAuthArgs,
       cleanupMoshAuthTempFiles,
       startMoshSessionViaHandshake,

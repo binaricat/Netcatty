@@ -19,6 +19,7 @@ import {
   AsidePanelContent,
   AsidePanelFooter,
   type AsidePanelLayout,
+  type AsidePanelResizeProps,
 } from './ui/aside-panel';
 import { HostNotesEditor } from './host/HostNotesEditor';
 
@@ -41,19 +42,24 @@ interface SerialHostDetailsPanelProps {
   layout?: AsidePanelLayout;
 }
 
+type SerialHostDetailsPanelPropsWithResize = SerialHostDetailsPanelProps & AsidePanelResizeProps;
+
 const BAUD_RATES = [300, 1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600];
 const DATA_BITS: Array<5 | 6 | 7 | 8> = [5, 6, 7, 8];
 const STOP_BITS: Array<1 | 1.5 | 2> = [1, 1.5, 2];
 const PARITY_OPTIONS: SerialParity[] = ['none', 'even', 'odd', 'mark', 'space'];
 const FLOW_CONTROL_OPTIONS: SerialFlowControl[] = ['none', 'xon/xoff', 'rts/cts'];
 
-export const SerialHostDetailsPanel: React.FC<SerialHostDetailsPanelProps> = ({
+export const SerialHostDetailsPanel: React.FC<SerialHostDetailsPanelPropsWithResize> = ({
   initialData,
   allTags = [],
   groups = [],
   onSave,
   onCancel,
   layout = 'overlay',
+  resizable,
+  persistWidthStorageKey,
+  resizeAriaLabel,
 }) => {
   const { t } = useI18n();
   const terminalBackend = useTerminalBackend();
@@ -173,6 +179,9 @@ export const SerialHostDetailsPanel: React.FC<SerialHostDetailsPanelProps> = ({
       className="z-40"
       layout={layout}
       dataSection="serial-host-details-panel"
+      resizable={resizable}
+      persistWidthStorageKey={persistWidthStorageKey}
+      resizeAriaLabel={resizeAriaLabel}
     >
       <AsidePanelContent>
         {/* Label */}

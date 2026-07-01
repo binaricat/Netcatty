@@ -4,6 +4,9 @@ const { getDriver, listBackends } = require("./index.cjs");
 const { buildSdkAgentEnv } = require("./env.cjs");
 const { buildInjectedMcpServers } = require("./injectMcp.cjs");
 const { createStreamEmitter } = require("./emit.cjs");
+const { buildNetcattySkillsOpenCodePathAllowlist } = require("./netcattySkillsOpenCodePermissions.cjs");
+const { getToolCliStateDir } = require("../../../cli/discoveryPath.cjs");
+const tempDirBridge = require("../../tempDirBridge.cjs");
 const { realpathSync } = require("node:fs");
 
 const VALID_BACKENDS = new Set(listBackends());
@@ -14,7 +17,18 @@ const VALID_BACKENDS = new Set(listBackends());
 const MODEL_CACHE_TTL_MS = 5 * 60 * 1000;
 const MODEL_LIST_TIMEOUT_MS = 10000;
 const sdkModelCache = new Map();
-const SDK_SESSION_ID_PREFIX = "netcatty-sdk-session:";
+const { parseSdkSessionIdentity: parseSdkSessionIdentityPayload, SDK_SESSION_ID_PREFIX } = require("../../../shared/sdkSessionIdentity.cjs");
+const { isPathLikeCommand } = require("../../../shared/pathLikeCommand.cjs");
+
+function parseSdkSessionIdentity(value) {
+  const parsed = parseSdkSessionIdentityPayload(value);
+  if (!parsed) return null;
+  return {
+    sessionId: parsed.id,
+    backendKey: parsed.backend,
+    binPath: parsed.binPath || "",
+  };
+}
 
 function buildSdkSessionKey(chatSessionId, backendKey, binPath) {
   return [
@@ -37,29 +51,6 @@ function normalizeSdkListModelsResult(raw) {
   const currentModelId = Array.isArray(raw) ? null : raw?.currentModelId || null;
   const models = Array.isArray(rawModels) ? rawModels.filter((m) => m && m.id) : [];
   return { currentModelId, models };
-}
-
-function isPathLikeCommand(command) {
-  const raw = String(command || "").trim();
-  return Boolean(raw && (raw.includes("/") || raw.includes("\\") || /^[a-z]:/i.test(raw)));
-}
-
-function parseSdkSessionIdentity(value) {
-  const raw = String(value || "");
-  if (!raw.startsWith(SDK_SESSION_ID_PREFIX)) return null;
-  try {
-    const parsed = JSON.parse(decodeURIComponent(raw.slice(SDK_SESSION_ID_PREFIX.length)));
-    const sessionId = String(parsed?.id || "").trim();
-    const backendKey = String(parsed?.backend || "").trim();
-    if (!sessionId || !backendKey) return null;
-    return {
-      sessionId,
-      backendKey,
-      binPath: String(parsed?.binPath || ""),
-    };
-  } catch {
-    return null;
-  }
 }
 
 function deleteSdkSessionKeysForChat(sdkSessionIds, chatSessionId) {
@@ -404,6 +395,22 @@ function registerSdkStreamHandlers(ctx) {
               }
             },
           };
+          const skillsPathAllowlist = effectiveMode === "skills" && backendKey === "opencode"
+            ? buildNetcattySkillsOpenCodePathAllowlist({
+              launcherPath: NETCATTY_TOOL_LAUNCHER_PATH,
+              cliScriptPath: NETCATTY_TOOL_CLI_PATH,
+              skillPath: NETCATTY_TOOL_SKILL_PATH,
+              discoveryFilePath: cliDiscoveryFilePath || undefined,
+              cliStateDir: cliDiscoveryFilePath
+                ? undefined
+                : getToolCliStateDir({ userDataDir: electronModule?.getPath?.("userData") }),
+              runtimeBinaryPath: process.execPath,
+              tempDir: tempDirBridge.getTempDir(),
+              extraFilePaths: stagedAttachments
+                .map((attachment) => attachment?.filePath)
+                .filter(Boolean),
+            })
+            : undefined;
           const result = await driver.runTurn({
             prompt: backendKey === "opencode" ? turnPrompt : contextualPrompt,
             systemPrompt: backendKey === "opencode" ? systemContext : undefined,
@@ -414,6 +421,7 @@ function registerSdkStreamHandlers(ctx) {
             injectedMcpServers,
             claudeSettings,
             toolIntegrationMode: effectiveMode,
+            skillsPathAllowlist,
             emitter: driverEmitter,
             signal: abortController.signal,
             abortController,
@@ -492,6 +500,7 @@ function registerSdkStreamHandlers(ctx) {
       const effectiveChatSessionId = chatSessionId || sdkRequestSessions.get(requestId);
       mcpServerBridge.setChatSessionCancelled?.(effectiveChatSessionId, true);
       mcpServerBridge.cancelPtyExecsForSession(effectiveChatSessionId);
+      mcpServerBridge.cancelWorkerBackgroundJobsForSession?.(effectiveChatSessionId);
       mcpServerBridge.clearPendingApprovals(effectiveChatSessionId);
       void mcpServerBridge.cancelSftpOpsForSession?.(effectiveChatSessionId);
       const controller = sdkActiveStreams.get(requestId);
@@ -506,6 +515,7 @@ function registerSdkStreamHandlers(ctx) {
       if (!validateSender(event)) return { ok: false, error: "Unauthorized IPC sender" };
       mcpServerBridge.setChatSessionCancelled?.(chatSessionId, true);
       mcpServerBridge.cancelPtyExecsForSession(chatSessionId);
+      mcpServerBridge.cancelWorkerBackgroundJobsForSession?.(chatSessionId);
       deleteSdkSessionKeysForChat(sdkSessionIds, chatSessionId);
       await mcpServerBridge.cleanupScopedMetadata(chatSessionId);
       return { ok: true };

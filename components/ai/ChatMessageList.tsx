@@ -21,6 +21,19 @@ import { ToolCall } from '../ai-elements/tool-call';
 import ThinkingBlock from './ThinkingBlock';
 import ToolCallGroup from './ToolCallGroup';
 import {
+  VaultArtifactNavigationProvider,
+  type VaultArtifactNavSection,
+} from './toolArtifacts/VaultArtifactNavigationContext';
+import { parseTerminalToolArtifact } from './toolArtifacts/terminalToolArtifact';
+import { TerminalArtifactToolResult } from './toolArtifacts/TerminalArtifactToolResult';
+import {
+  inferArtifactToolNameFromCliArgs,
+  normalizeArtifactToolName,
+} from './toolArtifacts/toolArtifactNames';
+import { parseVaultToolArtifact } from './toolArtifacts/vaultToolArtifact';
+import { VaultArtifactToolResult } from './toolArtifacts/VaultArtifactToolResult';
+import type { Host, Snippet, VaultNote } from '../../types';
+import {
   onApprovalRequest,
   onApprovalCleared,
   replayPendingApprovals,
@@ -28,6 +41,15 @@ import {
   type ApprovalRequest,
 } from '../../infrastructure/ai/shared/approvalGate';
 import { shouldShowStandaloneApproval } from './approvalVisibility';
+import {
+  buildGrantsFromApproval,
+  resolveCapabilityId,
+} from '../../infrastructure/ai/harness/permissionGrants';
+import {
+  compactionStatusText,
+  resolveCompactionStatusText,
+  type ActiveCompactionUi,
+} from './hooks/useAgentCompactionUi';
 import {
   getAIPanelDiagnosticHiddenParts,
   getAIPanelProfilerProps,
@@ -39,12 +61,48 @@ interface ChatMessageListProps {
   isStreaming?: boolean;
   /** Active chat session ID — used to filter standalone MCP approval blocks */
   activeSessionId?: string | null;
+  activeCompaction?: ActiveCompactionUi | null;
+  notes?: VaultNote[];
+  hosts?: Host[];
+  snippets?: Snippet[];
+  onOpenVaultNote?: (noteId: string) => void;
+  onOpenVaultHost?: (hostId: string) => void;
+  onOpenVaultSnippet?: (snippetId: string) => void;
+  onOpenVaultSection?: (section: VaultArtifactNavSection) => void;
+}
+
+interface VaultArtifactNavigationCallbackOptions {
+  onOpenVaultNote?: (noteId: string) => void;
+  onOpenVaultHost?: (hostId: string) => void;
+  onOpenVaultSnippet?: (snippetId: string) => void;
+  onOpenVaultSection?: (section: VaultArtifactNavSection) => void;
+}
+
+export function shouldProvideVaultArtifactNavigation({
+  onOpenVaultNote,
+  onOpenVaultHost,
+  onOpenVaultSnippet,
+  onOpenVaultSection,
+}: VaultArtifactNavigationCallbackOptions): boolean {
+  return Boolean(onOpenVaultNote || onOpenVaultHost || onOpenVaultSnippet || onOpenVaultSection);
 }
 
 const MESSAGE_RENDER_BATCH = 50;
 const MESSAGE_RENDER_STEP = 50;
 
-const ChatMessageList: React.FC<ChatMessageListProps> = ({ messages, isStreaming, activeSessionId }) => {
+const ChatMessageList: React.FC<ChatMessageListProps> = ({
+  messages,
+  isStreaming,
+  activeSessionId,
+  activeCompaction = null,
+  notes = [],
+  hosts = [],
+  snippets = [],
+  onOpenVaultNote,
+  onOpenVaultHost,
+  onOpenVaultSnippet,
+  onOpenVaultSection,
+}) => {
   // Track pending approvals from the approval gate
   const [pendingApprovals, setPendingApprovals] = useState<Map<string, ApprovalRequest>>(new Map());
   const [resolvedApprovals, setResolvedApprovals] = useState<Map<string, boolean>>(new Map());
@@ -72,8 +130,16 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({ messages, isStreaming
     });
   }, []);
 
-  const handleApprove = useCallback((toolCallId: string) => {
+  const handleApproveOnce = useCallback((toolCallId: string) => {
     resolveApproval(toolCallId, true);
+    setPendingApprovals(prev => { const m = new Map(prev); m.delete(toolCallId); return m; });
+    setResolvedApprovals(prev => new Map(prev).set(toolCallId, true));
+  }, []);
+
+  const handleAlwaysAllow = useCallback((toolCallId: string, request: ApprovalRequest) => {
+    const capabilityId = request.capabilityId ?? resolveCapabilityId(request.toolName);
+    const persistGrants = buildGrantsFromApproval(capabilityId, request.args, request.chatSessionId);
+    resolveApproval(toolCallId, { approved: true, persistGrants });
     setPendingApprovals(prev => { const m = new Map(prev); m.delete(toolCallId); return m; });
     setResolvedApprovals(prev => new Map(prev).set(toolCallId, true));
   }, []);
@@ -199,8 +265,13 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({ messages, isStreaming
   }
 
   const lastAssistantMessage = displayedMessages.findLast(m => m.role === 'assistant');
+  const showCompactionStatus = Boolean(
+    activeCompaction
+    && activeSessionId
+    && activeCompaction.sessionId === activeSessionId,
+  );
 
-  return (
+  const conversation = (
     <>
     <Conversation className="flex-1">
       <ConversationContent className="gap-1.5 px-4 py-2">
@@ -224,13 +295,80 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({ messages, isStreaming
             let end = idx + 1;
             while (end < displayedMessages.length && displayedMessages[end].role === "tool") end++;
             const group = displayedMessages.slice(idx, end);
-            const groupTotal = group.reduce(
-              (sum, m) => sum + (m.toolResults?.length ?? 0), 0,
+            const toolResults = group.flatMap((toolMsg) =>
+              (toolMsg.toolResults ?? []).map((tr) => {
+                const args = toolCallArgs.get(tr.toolCallId);
+                const resultToolName = typeof tr.toolName === 'string' ? tr.toolName : undefined;
+                const pairedToolName = toolCallNames.get(tr.toolCallId);
+                const artifactToolName =
+                  inferArtifactToolNameFromCliArgs(args)
+                  ?? normalizeArtifactToolName(resultToolName)
+                  ?? normalizeArtifactToolName(pairedToolName);
+                return {
+                  toolCallId: tr.toolCallId,
+                  name: pairedToolName || resultToolName || tr.toolCallId,
+                  artifactToolName,
+                  args,
+                  content: tr.content,
+                  isError: tr.isError,
+                };
+              }),
             );
+            const groupTotal = toolResults.length;
 
             // Expanded while the agent is still working (no assistant response follows)
             const hasAssistantAfter = end < displayedMessages.length
               && displayedMessages[end].role === "assistant";
+
+            const renderToolResultItem = (item: typeof toolResults[number]) => {
+              const artifactToolName = item.artifactToolName ?? item.name;
+              const terminalArtifact = parseTerminalToolArtifact(artifactToolName, item.content);
+              if (terminalArtifact) {
+                return (
+                  <TerminalArtifactToolResult
+                    key={item.toolCallId}
+                    artifact={terminalArtifact}
+                    toolName={artifactToolName}
+                    args={item.args}
+                    result={item.content}
+                    isError={item.isError}
+                  />
+                );
+              }
+              const artifact = parseVaultToolArtifact(artifactToolName, item.content);
+              if (artifact) {
+                return (
+                  <VaultArtifactToolResult
+                    key={item.toolCallId}
+                    artifact={artifact}
+                    toolName={artifactToolName}
+                    args={item.args}
+                    result={item.content}
+                    isError={item.isError}
+                  />
+                );
+              }
+              return (
+                <React.Profiler key={item.toolCallId} {...getAIPanelProfilerProps("AIChatPanel.ToolCall.Result")}>
+                  <div>
+                    <ToolCall
+                      name={item.name}
+                      args={item.args}
+                      result={item.content}
+                      isError={item.isError}
+                    />
+                  </div>
+                </React.Profiler>
+              );
+            };
+
+            if (groupTotal === 1) {
+              return (
+                <div key={`tool-group-${message.id}`} className="py-0.5">
+                  {renderToolResultItem(toolResults[0])}
+                </div>
+              );
+            }
 
             return (
               <ToolCallGroup
@@ -238,20 +376,7 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({ messages, isStreaming
                 count={groupTotal}
                 defaultExpanded={!hasAssistantAfter}
               >
-                {group.map((toolMsg) =>
-                  toolMsg.toolResults?.map((tr) => (
-                    <React.Profiler key={tr.toolCallId} {...getAIPanelProfilerProps("AIChatPanel.ToolCall.Result")}>
-                    <div>
-                      <ToolCall
-                        name={toolCallNames.get(tr.toolCallId) || tr.toolCallId}
-                        args={toolCallArgs.get(tr.toolCallId)}
-                        result={tr.content}
-                        isError={tr.isError}
-                      />
-                    </div>
-                    </React.Profiler>
-                  )),
-                )}
+                {toolResults.map(renderToolResultItem)}
               </ToolCallGroup>
             );
           }
@@ -347,7 +472,13 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({ messages, isStreaming
                               args={tc.arguments}
                               isInterrupted={!isPending}
                               approvalStatus={approvalStatus}
-                              onApprove={() => handleApprove(tc.id)}
+                              onApproveOnce={() => handleApproveOnce(tc.id)}
+                              onAlwaysAllow={() => handleAlwaysAllow(tc.id, pendingApprovals.get(tc.id) ?? {
+                                toolCallId: tc.id,
+                                toolName: tc.name,
+                                args: tc.arguments ?? {},
+                                chatSessionId: activeSessionId ?? undefined,
+                              })}
                               onReject={() => handleReject(tc.id)}
                             />
                           </div>
@@ -360,7 +491,9 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({ messages, isStreaming
                 {/* Status text with shimmer */}
                 {message.statusText && (
                   <div className="py-1">
-                    <span className="thinking-shimmer text-xs">{message.statusText}</span>
+                    <span className="thinking-shimmer text-xs">
+                      {resolveCompactionStatusText(message.statusText, t)}
+                    </span>
                   </div>
                 )}
 
@@ -412,7 +545,13 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({ messages, isStreaming
                       args={tc.arguments}
                       isLoading={isToolRunning && !isPending}
                       approvalStatus={approvalStatus}
-                      onApprove={() => handleApprove(tc.id)}
+                      onApproveOnce={() => handleApproveOnce(tc.id)}
+                      onAlwaysAllow={() => handleAlwaysAllow(tc.id, pendingApprovals.get(tc.id) ?? {
+                        toolCallId: tc.id,
+                        toolName: tc.name,
+                        args: tc.arguments ?? {},
+                        chatSessionId: activeSessionId ?? undefined,
+                      })}
                       onReject={() => handleReject(tc.id)}
                     />
                   </div>
@@ -433,13 +572,23 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({ messages, isStreaming
                     isLoading={false}
                     isInterrupted={false}
                     approvalStatus={'pending'}
-                    onApprove={() => handleApprove(id)}
+                    onApproveOnce={() => handleApproveOnce(id)}
+                    onAlwaysAllow={() => handleAlwaysAllow(id, req)}
                     onReject={() => handleReject(id)}
                   />
                 </div>
               </React.Profiler>
             );
           })}
+        {/* Transient compaction status — inline, no banner */}
+        {showCompactionStatus && activeCompaction && (
+          <div className="py-1">
+            <span className="thinking-shimmer text-xs text-muted-foreground">
+              {compactionStatusText(activeCompaction.trigger, t)}
+            </span>
+          </div>
+        )}
+
         {/* Streaming indicator — only when no content and no thinking yet */}
         {isStreaming && !lastAssistantMessage?.content && !lastAssistantMessage?.thinking && (
           <div className="flex items-center gap-1 py-2">
@@ -529,11 +678,41 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({ messages, isStreaming
     </Dialog>
     </>
   );
+
+  if (shouldProvideVaultArtifactNavigation({
+    onOpenVaultNote,
+    onOpenVaultHost,
+    onOpenVaultSnippet,
+    onOpenVaultSection,
+  })) {
+    return (
+      <VaultArtifactNavigationProvider
+        notes={notes}
+        hosts={hosts}
+        snippets={snippets}
+        onOpenVaultNote={onOpenVaultNote}
+        onOpenVaultHost={onOpenVaultHost}
+        onOpenVaultSnippet={onOpenVaultSnippet}
+        onOpenVaultSection={onOpenVaultSection}
+      >
+        {conversation}
+      </VaultArtifactNavigationProvider>
+    );
+  }
+
+  return conversation;
 };
 
 function areMessagesEqual(prev: ChatMessageListProps, next: ChatMessageListProps): boolean {
   if (prev.isStreaming !== next.isStreaming) return false;
   if (prev.activeSessionId !== next.activeSessionId) return false;
+  if (prev.notes !== next.notes) return false;
+  if (prev.hosts !== next.hosts) return false;
+  if (prev.snippets !== next.snippets) return false;
+  if (prev.onOpenVaultNote !== next.onOpenVaultNote) return false;
+  if (prev.onOpenVaultHost !== next.onOpenVaultHost) return false;
+  if (prev.onOpenVaultSnippet !== next.onOpenVaultSnippet) return false;
+  if (prev.onOpenVaultSection !== next.onOpenVaultSection) return false;
   if (prev.messages.length !== next.messages.length) return false;
   if (prev.messages === next.messages) return true;
 

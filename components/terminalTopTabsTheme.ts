@@ -1,7 +1,7 @@
 import { collectSessionIds } from "../domain/workspace";
 import type { Workspace } from "../types";
 
-export type TopTabsSidePanelTab = "sftp" | "scripts" | "history" | "theme" | "ai" | null;
+export type TopTabsSidePanelTab = "sftp" | "scripts" | "history" | "theme" | "ai" | "system" | "notes" | null;
 
 type ScopedTopTabsThemeInput = {
   activeSidePanelTab: TopTabsSidePanelTab;

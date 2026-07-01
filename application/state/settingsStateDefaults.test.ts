@@ -7,8 +7,43 @@ import {
   getHslTokenRelativeLuminance,
   resolveReadableForegroundForHsl,
   resolveThemeAccentForeground,
+  migrateIncomingTerminalFontId,
 } from "./settingsStateDefaults.ts";
+import { TERMINAL_FONT_AUTO } from "../../infrastructure/config/fonts.ts";
+import { STORAGE_KEY_TERM_FONT_FAMILY } from "../../infrastructure/config/storageKeys.ts";
 import type { UiThemeTokens } from "../../infrastructure/config/uiThemes.ts";
+
+function installMemoryLocalStorage(): Map<string, string> {
+  const store = new Map<string, string>();
+  (globalThis as { localStorage?: unknown }).localStorage = {
+    getItem: (k: string) => (store.has(k) ? store.get(k)! : null),
+    setItem: (k: string, v: string) => void store.set(k, v),
+    removeItem: (k: string) => void store.delete(k),
+    clear: () => store.clear(),
+  };
+  return store;
+}
+
+test("migrateIncomingTerminalFontId rewrites deprecated ids to the auto sentinel, not menlo", () => {
+  // menlo would put Windows/Linux upgrade users back into the #1647 path,
+  // and a concrete id would leak across OSes via sync; auto resolves per device.
+  const store = installMemoryLocalStorage();
+  try {
+    assert.equal(migrateIncomingTerminalFontId("pingfang-sc"), TERMINAL_FONT_AUTO);
+    // The rewrite is persisted as the platform-neutral sentinel, never a concrete id.
+    assert.equal(store.get(STORAGE_KEY_TERM_FONT_FAMILY), TERMINAL_FONT_AUTO);
+    assert.equal(migrateIncomingTerminalFontId("microsoft-yahei"), TERMINAL_FONT_AUTO);
+  } finally {
+    delete (globalThis as { localStorage?: unknown }).localStorage;
+  }
+});
+
+test("migrateIncomingTerminalFontId leaves valid ids and empty values untouched", () => {
+  assert.equal(migrateIncomingTerminalFontId("jetbrains-mono"), "jetbrains-mono");
+  assert.equal(migrateIncomingTerminalFontId(TERMINAL_FONT_AUTO), TERMINAL_FONT_AUTO);
+  assert.equal(migrateIncomingTerminalFontId(""), null);
+  assert.equal(migrateIncomingTerminalFontId(null), null);
+});
 
 test("readable foreground picks white text for dark accent colors", () => {
   assert.equal(resolveReadableForegroundForHsl("270 70% 45%"), "0 0% 100%");

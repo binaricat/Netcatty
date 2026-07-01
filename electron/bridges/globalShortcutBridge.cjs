@@ -87,6 +87,8 @@ function performPendingFullscreenHide(win) {
   clearPendingFullscreenHide(win);
 
   try {
+    const windowManager = require("./windowManager.cjs");
+    windowManager.notifyWindowWillHide?.(win);
     win.hide();
     return "hidden";
   } catch (err) {
@@ -161,19 +163,21 @@ function startPendingFullscreenHideWatchdog(win) {
   }, FULLSCREEN_LEAVE_WATCHDOG_MS);
 }
 
-function openMainWindow() {
-  const { app } = electronModule;
-  const win = getMainWindow();
-  if (!win) return;
+function bringMainWindowToForeground(win) {
+  if (!win || win.isDestroyed?.()) return false;
   clearPendingFullscreenHide(win);
-  if (win.isMinimized()) win.restore();
-  win.show();
-  win.focus();
+  const windowManager = require("./windowManager.cjs");
+  const focused = windowManager.showAndFocusMainWindow?.(win) ?? false;
   try {
-    app.focus({ steal: true });
+    electronModule?.app?.focus?.({ steal: true });
   } catch {
     // ignore
   }
+  return focused;
+}
+
+function openMainWindow() {
+  bringMainWindowToForeground(getMainWindow());
 }
 
 function getTrayPanelUrl() {
@@ -404,6 +408,8 @@ function hideWindowRespectingMacFullscreen(win) {
   }
 
   try {
+    const windowManager = require("./windowManager.cjs");
+    windowManager.notifyWindowWillHide?.(win);
     win.hide();
     return true;
   } catch (err) {
@@ -477,42 +483,18 @@ function toggleWindowVisibility() {
   try {
     // Check if window is minimized first - minimized windows may still report isVisible() = true
     if (win.isMinimized()) {
-      clearPendingFullscreenHide(win);
-      win.restore();
-      win.show();
-      win.focus();
-      const { app } = electronModule;
-      try {
-        app.focus({ steal: true });
-      } catch {
-        // ignore
-      }
+      bringMainWindowToForeground(win);
     } else if (win.isVisible()) {
       if (win.isFocused()) {
         // Window is visible and focused - hide it
         hideWindowRespectingMacFullscreen(win);
       } else {
         // Window is visible but not focused - focus it
-        clearPendingFullscreenHide(win);
-        win.focus();
-        const { app } = electronModule;
-        try {
-          app.focus({ steal: true });
-        } catch {
-          // ignore
-        }
+        bringMainWindowToForeground(win);
       }
     } else {
       // Window is hidden - show and focus it
-      clearPendingFullscreenHide(win);
-      win.show();
-      win.focus();
-      const { app } = electronModule;
-      try {
-        app.focus({ steal: true });
-      } catch {
-        // ignore
-      }
+      bringMainWindowToForeground(win);
     }
   } catch (err) {
     console.warn("[GlobalShortcut] Error toggling window visibility:", err);
@@ -687,10 +669,7 @@ function buildTrayMenuTemplate() {
         click: () => {
           // Focus window and switch to this session
           const win = getMainWindow();
-          if (win) {
-            if (win.isMinimized()) win.restore();
-            win.show();
-            win.focus();
+          if (win && bringMainWindowToForeground(win)) {
             // Notify renderer to focus this session
             win.webContents?.send("netcatty:tray:focusSession", session.id);
           }

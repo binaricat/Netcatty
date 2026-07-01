@@ -5,6 +5,7 @@ import { cn } from '../../lib/utils';
 import type { Snippet } from '../../types';
 import { FixedSizeVirtualList } from '../ui/FixedSizeVirtualList';
 import { Input } from '../ui/input';
+import { SnippetCommandTooltipContent } from './SnippetCommandTooltipContent';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
 
 const ROW_HEIGHT = 34;
@@ -112,11 +113,8 @@ export const SnippetCommandPicker = memo(function SnippetCommandPicker({
                         ) : null}
                       </button>
                     </TooltipTrigger>
-                    <TooltipContent side="right" align="start" className="max-w-[480px]">
-                      <div className="mb-1 break-all text-xs font-medium">{snippet.label}</div>
-                      <pre className="whitespace-pre-wrap break-all font-mono text-[11px] leading-snug opacity-90">
-                        {snippet.command}
-                      </pre>
+                    <TooltipContent side="right" align="start">
+                      <SnippetCommandTooltipContent label={snippet.label} command={snippet.command} />
                     </TooltipContent>
                   </Tooltip>
                 );

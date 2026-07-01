@@ -4,28 +4,39 @@ import test from "node:test";
 
 const source = readFileSync(new URL("./useTerminalThemePanelState.ts", import.meta.url), "utf8");
 
-test("follow-app side panel theme changes update the global terminal theme", () => {
-  assert.match(source, /onUpdateFollowAppTerminalThemeId\?\.\(themeId\)/);
+test("follow-app side panel theme changes delegate to ThemeRuntime pickTheme", () => {
+  assert.match(source, /pickTheme\(themeId\)/);
   assert.match(source, /if \(followAppTerminalTheme\) \{/);
+  assert.doesNotMatch(source, /onUpdateFollowAppTerminalThemeId/);
+  assert.doesNotMatch(source, /setThemePreview/);
+  assert.doesNotMatch(source, /applyTerminalPreviewVars/);
 });
 
-test("follow-app side panel theme changes skip focused-only terminal preview", () => {
-  const followAppBranch = source.match(/if \(followAppTerminalTheme\) \{[\s\S]*?return;[\s\S]*?\n\s+\}/)?.[0] ?? "";
-
-  assert.notEqual(followAppBranch, "", "follow-app theme changes should have an immediate branch");
-  assert.doesNotMatch(followAppBranch, /applyTerminalPreviewVars/);
-  assert.doesNotMatch(followAppBranch, /applyTopTabsPreviewVars/);
-  assert.doesNotMatch(followAppBranch, /applyHostTreePreviewVars/);
-  assert.match(followAppBranch, /clearTerminalPreviewVars\(previewTargetSessionId\)/);
-  assert.match(followAppBranch, /clearHostTreePreviewVars\(\)/);
-  assert.match(followAppBranch, /clearTopTabsPreviewVars\(\)/);
-  assert.match(
-    source,
-    /if \(followAppTerminalTheme\) \{[\s\S]*setThemePreview\(\{ targetSessionId: null, themeId: null \}\);[\s\S]*onUpdateFollowAppTerminalThemeId\?\.\(themeId\);[\s\S]*return;[\s\S]*\}\s+applyTopTabsPreviewVars\(themeId\);[\s\S]*applyHostTreePreviewVars\(themeId\);[\s\S]*applyTerminalPreviewVars\(previewTargetSessionId, themeId\);/,
-  );
+test("manual side panel theme changes persist host overrides and use runtime pick intent", () => {
+  assert.match(source, /pickTheme\(themeId, \{/);
+  assert.match(source, /scopeHostId:/);
+  assert.match(source, /onUpdateHost\(\{ \.\.\.rawFocusedHost, theme: themeId, themeOverride: true \}\)/);
+  assert.doesNotMatch(source, /startTransition\(\(\) => \{[\s\S]*onUpdateHost\(\{ \.\.\.rawFocusedHost, theme: themeId/);
 });
 
-test("theme previews update the host tree sidebar in the same pass", () => {
-  assert.match(source, /applyHostTreePreviewVars\(themeId\)/);
-  assert.match(source, /clearHostTreePreviewVars\(\)/);
+test("follow-app keeps runtime intent until the side panel closes", () => {
+  assert.match(source, /isSidePanelOpenForCurrentTab/);
+  assert.match(source, /if \(!followAppTerminalTheme && activeSidePanelTab !== 'theme'\)/);
+  assert.match(source, /clearIntent\(\)/);
+});
+
+test("follow-app theme list selection tracks global runtime theme id", () => {
+  assert.match(source, /listSelectedThemeId = followAppTerminalTheme/);
+  assert.match(source, /terminalTheme\.id/);
+});
+
+test("manual theme list selection reads focused appearance from runtime", () => {
+  assert.match(source, /resolveFocusedAppearance\(focusedHostScope\)/);
+  assert.match(source, /focusedAppearance\.themeId/);
+  assert.match(source, /resolvedPreviewTheme = focusedAppearance\.theme/);
+});
+
+test("closing the theme tab clears runtime user intent", () => {
+  assert.match(source, /if \(isSidePanelOpenForCurrentTab\)/);
+  assert.match(source, /clearIntent\(\)/);
 });

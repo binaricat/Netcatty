@@ -54,6 +54,7 @@ const makeCtx = (
     ...host,
   },
   keys: [],
+  identities: [],
   resolvedChainHosts,
   sessionId: "session-1",
   terminalSettings: {},
@@ -155,6 +156,151 @@ test("startEt rejects a configured chain with more than one jump host even if un
 
   assert.equal(started, false);
   assert.match(error, /at most one jump host/i);
+});
+
+test("startEt rejects missing proxy identities on the target host before unsupported proxy", async () => {
+  let started = false;
+  let error = "";
+  const backend = makeBackend(() => { started = true; });
+  const ctx = makeCtx(
+    {
+      proxyConfig: {
+        type: "http",
+        host: "proxy.example.test",
+        port: 3128,
+        identityId: "missing-identity",
+      },
+    },
+    [],
+    backend,
+    { setError: (m) => { error = m; } },
+  );
+
+  await createTerminalSessionStarters(ctx as never).startEt(term as never);
+
+  assert.equal(started, false);
+  assert.match(error, /Proxy identity for "Target" is missing/);
+});
+
+test("startEt rejects incomplete proxy identities on the target host before unsupported proxy", async () => {
+  let started = false;
+  let error = "";
+  const backend = makeBackend(() => { started = true; });
+  const ctx = {
+    ...makeCtx(
+      {
+        proxyConfig: {
+          type: "http",
+          host: "proxy.example.test",
+          port: 3128,
+          identityId: "identity-1",
+        },
+      },
+      [],
+      backend,
+      { setError: (m) => { error = m; } },
+    ),
+    identities: [{
+      id: "identity-1",
+      label: "Proxy login",
+      username: "proxy-user",
+      authMethod: "password",
+      created: 1,
+    }],
+  };
+
+  await createTerminalSessionStarters(ctx as never).startEt(term as never);
+
+  assert.equal(started, false);
+  assert.match(error, /Proxy identity for "Target" is incomplete/);
+});
+
+test("startEt rejects missing saved proxy profiles on jump hosts", async () => {
+  let started = false;
+  let error = "";
+  const backend = makeBackend(() => { started = true; });
+  const ctx = makeCtx(
+    { hostChain: { hostIds: ["jump-1"] } },
+    [{
+      id: "jump-1",
+      label: "Jump",
+      hostname: "jump.example.test",
+      username: "jumper",
+      proxyProfileId: "missing-proxy",
+    }],
+    backend,
+    { setError: (m) => { error = m; } },
+  );
+
+  await createTerminalSessionStarters(ctx as never).startEt(term as never);
+
+  assert.equal(started, false);
+  assert.match(error, /Saved proxy for jump host "Jump" is missing/);
+});
+
+test("startEt rejects missing proxy identities on jump hosts", async () => {
+  let started = false;
+  let error = "";
+  const backend = makeBackend(() => { started = true; });
+  const ctx = makeCtx(
+    { hostChain: { hostIds: ["jump-1"] } },
+    [{
+      id: "jump-1",
+      label: "Jump",
+      hostname: "jump.example.test",
+      username: "jumper",
+      proxyConfig: {
+        type: "http",
+        host: "proxy.example.test",
+        port: 3128,
+        identityId: "missing-identity",
+      },
+    }],
+    backend,
+    { setError: (m) => { error = m; } },
+  );
+
+  await createTerminalSessionStarters(ctx as never).startEt(term as never);
+
+  assert.equal(started, false);
+  assert.match(error, /Proxy identity for "Jump" is missing/);
+});
+
+test("startEt rejects incomplete proxy identities on jump hosts", async () => {
+  let started = false;
+  let error = "";
+  const backend = makeBackend(() => { started = true; });
+  const ctx = {
+    ...makeCtx(
+      { hostChain: { hostIds: ["jump-1"] } },
+      [{
+        id: "jump-1",
+        label: "Jump",
+        hostname: "jump.example.test",
+        username: "jumper",
+        proxyConfig: {
+          type: "http",
+          host: "proxy.example.test",
+          port: 3128,
+          identityId: "identity-1",
+        },
+      }],
+      backend,
+      { setError: (m) => { error = m; } },
+    ),
+    identities: [{
+      id: "identity-1",
+      label: "Proxy login",
+      username: "proxy-user",
+      authMethod: "password",
+      created: 1,
+    }],
+  };
+
+  await createTerminalSessionStarters(ctx as never).startEt(term as never);
+
+  assert.equal(started, false);
+  assert.match(error, /Proxy identity for "Jump" is incomplete/);
 });
 
 test("startEt connects with a single resolved jump host", async () => {

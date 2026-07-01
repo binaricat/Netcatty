@@ -147,6 +147,16 @@ const isC1SingleCharCursorControl = (ch: string): boolean =>
 const isEscSingleCharCursorControl = (ch: string): boolean =>
   ch === "D" || ch === "E" || ch === "M";
 
+const hasReplayControlCandidate = (input: string): boolean => {
+  for (let i = 0; i < input.length; i += 1) {
+    const code = input.charCodeAt(i);
+    if (input[i] === ESC || (code >= 0x80 && code <= 0x9f)) {
+      return true;
+    }
+  }
+  return false;
+};
+
 class ReplaySafeTerminalLogSanitizerImpl implements ReplaySafeTerminalLogSanitizer {
   private pendingInput = "";
   private pendingCursorHome = "";
@@ -172,6 +182,19 @@ class ReplaySafeTerminalLogSanitizerImpl implements ReplaySafeTerminalLogSanitiz
       this.hasOutput = true;
       this.lastOutputChar = next[next.length - 1];
     };
+
+    if (
+      !this.pendingCursorHome
+      && !this.discardingCsi
+      && !this.controlStringMode
+      && !hasReplayControlCandidate(data)
+    ) {
+      appendOutput(data);
+      if (data) {
+        this.inClearCluster = false;
+      }
+      return output;
+    }
 
     const flushPendingCursorHome = () => {
       if (!this.pendingCursorHome) return;

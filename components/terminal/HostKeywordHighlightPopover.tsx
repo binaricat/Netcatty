@@ -23,6 +23,14 @@ export interface HostKeywordHighlightPopoverProps {
 
 const DEFAULT_NEW_RULE_COLOR = '#F87171';
 
+export function addHostKeywordHighlightRule(host: Host, rule: KeywordHighlightRule): Host {
+  return {
+    ...host,
+    keywordHighlightRules: [...(host.keywordHighlightRules ?? []), rule],
+    keywordHighlightEnabled: true,
+  };
+}
+
 export const HostKeywordHighlightPopover: React.FC<HostKeywordHighlightPopoverProps> = ({
   host,
   onUpdateHost,
@@ -76,19 +84,16 @@ export const HostKeywordHighlightPopover: React.FC<HostKeywordHighlightPopoverPr
       enabled: true,
     };
 
-    updateRules([...rules, newRule]);
+    if (host && onUpdateHost) {
+      onUpdateHost(addHostKeywordHighlightRule(host, newRule));
+    }
 
     // Reset form
     setNewRuleLabel('');
     setNewRulePattern('');
     setNewRuleColor(DEFAULT_NEW_RULE_COLOR);
     setPatternError(null);
-
-    // Auto-enable if adding the first rule and not enabled
-    if (rules.length === 0 && !enabled && host && onUpdateHost) {
-      onUpdateHost({ ...host, keywordHighlightRules: [newRule], keywordHighlightEnabled: true });
-    }
-  }, [newRuleLabel, newRulePattern, newRuleColor, rules, updateRules, enabled, host, onUpdateHost, t]);
+  }, [newRuleLabel, newRulePattern, newRuleColor, host, onUpdateHost, t]);
 
   const handleDeleteRule = useCallback((ruleId: string) => {
     updateRules(rules.filter((r) => r.id !== ruleId));

@@ -1,7 +1,7 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
-import { defineConfig } from 'vite';
+import { defineConfig, type Plugin } from 'vite';
 
 // Custom plugin to suppress monaco-editor source map warnings
 const suppressMonacoSourcemapWarning = () => ({
@@ -15,6 +15,25 @@ const suppressMonacoSourcemapWarning = () => ({
       if (msg.includes('loader.js.map')) return;
       originalWarn(msg, options);
     };
+  },
+});
+
+/** After git pull / npm install, stale pre-bundles return 504; force a full reload. */
+const reloadOnOutdatedOptimizeDep = (): Plugin => ({
+  name: 'reload-on-outdated-optimize-dep',
+  apply: 'serve',
+  configureServer(server) {
+    server.middlewares.use((req, res, next) => {
+      res.on('finish', () => {
+        if (
+          res.statusCode === 504
+          && req.url?.includes('/node_modules/.vite/deps/')
+        ) {
+          server.ws.send({ type: 'full-reload', path: '*' });
+        }
+      });
+      next();
+    });
   },
 });
 
@@ -72,7 +91,7 @@ export default defineConfig(() => {
           },
         },
       },
-      plugins: [suppressMonacoSourcemapWarning(), tailwindcss(), react()],
+      plugins: [suppressMonacoSourcemapWarning(), reloadOnOutdatedOptimizeDep(), tailwindcss(), react()],
       resolve: {
         alias: {
           '@': path.resolve(__dirname, '.'),

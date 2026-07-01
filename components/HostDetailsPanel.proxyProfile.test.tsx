@@ -4,11 +4,14 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { I18nProvider } from "../application/i18n/I18nProvider.tsx";
-import type { Host } from "../types.ts";
+import type { Host, Identity } from "../types.ts";
 import HostDetailsPanel, { parseOptionalPortInput } from "./HostDetailsPanel.tsx";
 import {
+  prepareProxyConfigForSave,
+  prepareTelnetCredentialsForSave,
   resolvePrimaryProtocolSavePort,
   resolvePrimaryProtocolSwitchPort,
+  validateProxyConfigForSave,
 } from "./HostDetailsPanel.helpers.ts";
 import { TooltipProvider } from "./ui/tooltip.tsx";
 
@@ -26,7 +29,10 @@ const hostWithMissingProxyProfile: Host = {
   createdAt: 1,
 };
 
-const renderHostDetails = (initialData: Host = hostWithMissingProxyProfile) =>
+const renderHostDetails = (
+  initialData: Host = hostWithMissingProxyProfile,
+  options: { identities?: Identity[] } = {},
+) =>
   renderToStaticMarkup(
     React.createElement(
       I18nProvider,
@@ -37,7 +43,7 @@ const renderHostDetails = (initialData: Host = hostWithMissingProxyProfile) =>
         React.createElement(HostDetailsPanel, {
           initialData,
           availableKeys: [],
-          identities: [],
+          identities: options.identities ?? [],
           proxyProfiles: [],
           groups: [],
           managedSources: [],
@@ -106,6 +112,72 @@ test("HostDetailsPanel keeps explicitly cleared telnet credentials empty", () =>
   assert.match(markup, /placeholder="Telnet Password"[^>]*value=""/);
   assert.doesNotMatch(markup, /placeholder="Telnet Username"[^>]*value="root"/);
   assert.doesNotMatch(markup, /placeholder="Telnet Password"[^>]*value="ssh-password"/);
+});
+
+test("HostDetailsPanel shows a selected telnet identity instead of manual telnet fields", () => {
+  const markup = renderHostDetails(
+    {
+      ...hostWithMissingProxyProfile,
+      protocol: "telnet",
+      telnetEnabled: true,
+      identityId: "ssh-identity",
+      telnetIdentityId: "telnet-identity",
+      telnetUsername: undefined,
+      telnetPassword: undefined,
+      proxyProfileId: undefined,
+    },
+    {
+      identities: [{
+        id: "ssh-identity",
+        label: "SSH login",
+        username: "ssh-user",
+        authMethod: "password",
+        password: "ssh-password",
+        created: 1,
+      }, {
+        id: "telnet-identity",
+        label: "Telnet login",
+        username: "telnet-user",
+        authMethod: "password",
+        password: "telnet-password",
+        created: 2,
+      }],
+    },
+  );
+
+  assert.match(markup, /telnet-user - Telnet login/);
+  assert.doesNotMatch(markup, /placeholder="Telnet Username"/);
+  assert.doesNotMatch(markup, /placeholder="Telnet Password"/);
+});
+
+test("prepareTelnetCredentialsForSave preserves selected telnet identity and clears manual telnet fields", () => {
+  const saved = prepareTelnetCredentialsForSave({
+    ...hostWithMissingProxyProfile,
+    protocol: "telnet",
+    telnetEnabled: true,
+    identityId: "ssh-identity",
+    telnetIdentityId: "telnet-identity",
+    telnetUsername: "stale-telnet-user",
+    telnetPassword: "stale-telnet-password",
+    proxyProfileId: undefined,
+  });
+
+  assert.equal(saved.identityId, "ssh-identity");
+  assert.equal(saved.telnetIdentityId, "telnet-identity");
+  assert.equal(saved.telnetUsername, undefined);
+  assert.equal(saved.telnetPassword, undefined);
+});
+
+test("HostDetailsPanel disables save when hostname is whitespace only", () => {
+  const markup = renderHostDetails({
+    ...hostWithMissingProxyProfile,
+    hostname: "   ",
+    proxyProfileId: undefined,
+  });
+
+  assert.match(markup, /<button[^>]*disabled=""[^>]*aria-label="Save"/);
+  assert.match(markup, />Save<\/button>/);
+  assert.match(markup, /<button[^>]*disabled=""[^>]*>Save<\/button>/);
 });
 
 test("HostDetailsPanel gives the telnet port field the same roomy layout as SSH", () => {
@@ -263,6 +335,138 @@ test("parseOptionalPortInput clears empty port values", () => {
   assert.equal(parseOptionalPortInput("2325"), 2325);
 });
 
+test("validateProxyConfigForSave rejects missing proxy identities", () => {
+  assert.equal(
+    validateProxyConfigForSave({
+      proxyConfig: {
+        type: "http",
+        host: "proxy.example.com",
+        port: 3128,
+        identityId: "missing-identity",
+      },
+      identities: [],
+    }),
+    "missingIdentity",
+  );
+});
+
+test("validateProxyConfigForSave rejects missing identities inside saved proxy profiles", () => {
+  assert.equal(
+    validateProxyConfigForSave({
+      proxyProfileId: "profile-1",
+      proxyProfiles: [{
+        id: "profile-1",
+        label: "Office Proxy",
+        config: {
+          type: "http",
+          host: "proxy.example.com",
+          port: 3128,
+          identityId: "missing-identity",
+        },
+        createdAt: 1,
+      }],
+      identities: [],
+    }),
+    "missingIdentity",
+  );
+});
+
+test("validateProxyConfigForSave rejects incomplete proxy identities", () => {
+  assert.equal(
+    validateProxyConfigForSave({
+      proxyConfig: {
+        type: "http",
+        host: "proxy.example.com",
+        port: 3128,
+        identityId: "identity-1",
+      },
+      identities: [{
+        id: "identity-1",
+        label: "Proxy login",
+        username: "proxy-user",
+        authMethod: "password",
+        created: 1,
+      }],
+    }),
+    "incompleteIdentity",
+  );
+});
+
+test("validateProxyConfigForSave rejects unreadable proxy identity passwords", () => {
+  assert.equal(
+    validateProxyConfigForSave({
+      proxyConfig: {
+        type: "http",
+        host: "proxy.example.com",
+        port: 3128,
+        identityId: "identity-1",
+      },
+      identities: [{
+        id: "identity-1",
+        label: "Proxy login",
+        username: "proxy-user",
+        authMethod: "password",
+        password: "enc:v1:djEwAAAA",
+        created: 1,
+      }],
+    }),
+    "unreadableIdentity",
+  );
+});
+
+test("prepareProxyConfigForSave returns a normalized proxy config for save handlers", () => {
+  assert.deepEqual(
+    prepareProxyConfigForSave({
+      proxyConfig: {
+        type: "http",
+        host: " proxy.example.com ",
+        port: "3128" as never,
+        command: "cloudflared access ssh --hostname %h --token secret",
+        username: " proxy-user ",
+        password: "proxy-secret",
+      },
+      identities: [],
+    }),
+    {
+      normalizedProxyConfig: {
+        type: "http",
+        host: "proxy.example.com",
+        port: 3128,
+        username: "proxy-user",
+        password: "proxy-secret",
+      },
+    },
+  );
+});
+
+test("prepareProxyConfigForSave returns identity errors before save handlers build output", () => {
+  assert.deepEqual(
+    prepareProxyConfigForSave({
+      proxyProfileId: "profile-1",
+      proxyProfiles: [{
+        id: "profile-1",
+        label: "Office Proxy",
+        config: {
+          type: "http",
+          host: "proxy.example.com",
+          port: 3128,
+          identityId: "identity-1",
+        },
+        createdAt: 1,
+      }],
+      identities: [{
+        id: "identity-1",
+        label: "Proxy login",
+        username: "",
+        authMethod: "password",
+        password: "enc:v1:djEwAAAA",
+        created: 1,
+      }],
+    }),
+    { error: "incompleteIdentity" },
+  );
+});
+
 test("resolvePrimaryProtocolSwitchPort only migrates opposite protocol defaults", () => {
   assert.equal(resolvePrimaryProtocolSwitchPort(22, "telnet", false, false), 23);
   assert.equal(resolvePrimaryProtocolSwitchPort(23, "ssh", false, false), 22);
@@ -313,4 +517,35 @@ test("HostDetailsPanel shows color and icon controls in the connection settings"
   assert.match(markup, /Icon color/);
   assert.match(markup, /Blue/);
   assert.match(markup, /IP or Hostname/);
+});
+
+test("HostDetailsPanel keeps empty notes collapsed below connection settings", () => {
+  const markup = renderHostDetails({
+    ...hostWithMissingProxyProfile,
+    proxyProfileId: undefined,
+    notes: "",
+  });
+
+  assert.match(markup, /aria-label="Show notes editor"/);
+  assert.doesNotMatch(markup, /placeholder="Hardware, project, customer, region, role\.\.\."/);
+  assert.ok(
+    markup.indexOf("IP or Hostname") < markup.indexOf("Notes"),
+    "expected notes to render after connection settings",
+  );
+});
+
+test("HostDetailsPanel expands notes when the host already has notes", () => {
+  const markup = renderHostDetails({
+    ...hostWithMissingProxyProfile,
+    proxyProfileId: undefined,
+    notes: "Runs nightly backups",
+  });
+
+  assert.match(markup, /aria-label="Hide notes editor"/);
+  assert.match(markup, /Runs nightly backups/);
+  assert.match(markup, /placeholder="Hardware, project, customer, region, role\.\.\."/);
+  assert.ok(
+    markup.indexOf("IP or Hostname") < markup.indexOf("Notes"),
+    "expected notes to render after connection settings",
+  );
 });

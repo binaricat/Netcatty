@@ -187,6 +187,48 @@ export interface PopupPlacement {
   maxHeight: number;
 }
 
+export interface PopupGeometryClampInput {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+  clampViewport: PopupClampViewport;
+  viewportPadding: number;
+}
+
+export interface PopupGeometry {
+  top: number;
+  left: number;
+}
+
+function clampCoordinate(value: number, min: number, max: number): number {
+  if (max <= min) return min;
+  return Math.max(min, Math.min(value, max));
+}
+
+/**
+ * Final guardrail using the rendered popup's actual DOM size. The placement
+ * pass uses estimated list/detail/panel sizes so it can decide before render;
+ * this pass prevents any estimate mismatch or delayed xterm cursor refresh
+ * from letting the fixed-position portal escape the terminal/app bounds.
+ */
+export function clampAutocompletePopupGeometry(
+  input: PopupGeometryClampInput,
+): PopupGeometry {
+  const { left, top, width, height, clampViewport, viewportPadding } = input;
+  const safeWidth = Number.isFinite(width) ? Math.max(0, width) : 0;
+  const safeHeight = Number.isFinite(height) ? Math.max(0, height) : 0;
+  const minLeft = clampViewport.left + viewportPadding;
+  const minTop = clampViewport.top + viewportPadding;
+  const maxLeft = clampViewport.left + clampViewport.width - viewportPadding - safeWidth;
+  const maxTop = clampViewport.top + clampViewport.height - viewportPadding - safeHeight;
+
+  return {
+    left: clampCoordinate(left, minLeft, Math.max(minLeft, maxLeft)),
+    top: clampCoordinate(top, minTop, Math.max(minTop, maxTop)),
+  };
+}
+
 /**
  * Decide where to place the autocomplete popup so it never spills past the
  * viewport edges. Pure and deterministic so the boundary math is unit-tested
@@ -246,14 +288,21 @@ export function computeAutocompletePopupPlacement(
         : spaceAbove > spaceBelow;
 
   const availableVerticalSpace = renderUpward ? spaceAbove : spaceBelow;
-  const effectiveMaxHeight = Math.max(0, Math.min(maxHeight, availableVerticalSpace));
+  const availableViewportHeight = Math.max(0, bounds.height - viewportPadding * 2);
+  const effectiveMaxHeight = Math.max(
+    0,
+    Math.min(maxHeight, availableVerticalSpace, availableViewportHeight),
+  );
   const contentHeightForPlacement = Math.min(effectiveMaxHeight, cappedDesiredHeight);
-  const top = renderUpward
+  const unclampedTop = renderUpward
     ? Math.max(bounds.top + viewportPadding, anchorTop - anchorGap - contentHeightForPlacement)
     : Math.min(
         anchorBottom + anchorGap,
         boundsBottom - viewportPadding - contentHeightForPlacement,
       );
+  const minTop = bounds.top + viewportPadding;
+  const maxTop = Math.max(minTop, boundsBottom - viewportPadding - contentHeightForPlacement);
+  const top = Math.max(minTop, Math.min(unclampedTop, maxTop));
 
   // Right edge that keeps the clamped assembly inside the bounds. When the
   // assembly is wider than the available room this goes below the left padding,
@@ -319,10 +368,25 @@ export function resolveAutocompleteCursorColumn(
   return Math.max(fromLine, fromPrompt);
 }
 
-/** Clamp autocomplete popups to the active terminal pane in split workspaces. */
+/** Clamp autocomplete popups to the active terminal screen in split workspaces.
+ *
+ * Uses the visible `.xterm-screen` rect as the clamp boundary so the popup
+ * never overflows the *actual* rendered terminal grid. The `.xterm-container`
+ * can be a few pixels taller than the screen (rounding/padding), so falling
+ * back to its rect produced a false positive `spaceBelow` at the bottom row
+ * and caused short suggestion lists to flip downward below the visible area
+ * (see issue #1710).
+ */
 export function resolveAutocompleteClampViewport(container: HTMLElement | null): PopupClampViewport {
   const pane = container?.closest<HTMLElement>('[data-section="terminal-split-pane"]');
-  const rect = pane?.getBoundingClientRect() ?? container?.getBoundingClientRect();
+  const screen = container?.querySelector<HTMLElement>(".xterm-screen")
+    ?? null;
+  // Clamp to the rendered screen so the popup cannot spill past the visible
+  // terminal rows. If the screen is not mounted yet, fall back to the split
+  // pane/container rect or the full viewport.
+  const rect = screen?.getBoundingClientRect()
+    ?? pane?.getBoundingClientRect()
+    ?? container?.getBoundingClientRect();
   if (rect && rect.width > 0 && rect.height > 0) {
     return {
       left: rect.left,

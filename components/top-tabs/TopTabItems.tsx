@@ -10,6 +10,7 @@ import { resolveHostIconAppearance, resolveHostIconColorAppearance } from '../..
 import { resolveSessionCodingCliProvider } from '../../domain/codingCliProviderMatch';
 import { resolveCodingCliActivityPhase } from '../../domain/codingCliTitleParse';
 import { resolveSessionTabTitle } from '../../domain/sessionTabTitle';
+import type { DynamicTabTitleMode } from '../../domain/models';
 import { CodingCliProviderIcon } from '../icons/CodingCliProviderIcon';
 import { cn } from '../../lib/utils';
 import { Host, TerminalSession, Workspace } from '../../types';
@@ -125,7 +126,7 @@ const SessionTabIcon: React.FC<{
           <img
             src={logo}
             alt={distro || host.os}
-            className={cn(iconSize, "object-contain invert brightness-0")}
+            className={distro === "h3c" ? "object-contain w-[80%]" : cn(iconSize, "object-contain invert brightness-0")}
           />
         </div>
       );
@@ -162,6 +163,44 @@ export const sessionStatusDot = (status: TerminalSession['status'], hasActivity:
       />
     </span>
   );
+};
+
+const getSessionTopTabAddress = (
+  session: Pick<TerminalSession, 'protocol' | 'hostname' | 'moshEnabled' | 'etEnabled'>,
+): string | null => {
+  const protocol = session.protocol ?? 'ssh';
+  if (
+    session.moshEnabled
+    || session.etEnabled
+    || (protocol !== 'ssh' && protocol !== 'telnet')
+    || !session.hostname
+  ) {
+    return null;
+  }
+  return session.hostname;
+};
+
+export const formatSessionTopTabTooltip = (
+  session: Pick<TerminalSession, 'protocol' | 'hostname' | 'moshEnabled' | 'etEnabled' | 'username' | 'port'>,
+): string | null => {
+  const address = getSessionTopTabAddress(session);
+  if (!address) return null;
+  return `${session.username ? `${session.username}@` : ''}${address}${session.port ? `:${session.port}` : ''}`;
+};
+
+export const formatSessionTopTabLabel = (
+  session: Pick<
+    TerminalSession,
+    'customName' | 'hostLabel' | 'dynamicTitle' | 'codingCliProviderId' | 'protocol' | 'hostname' | 'moshEnabled' | 'etEnabled'
+  >,
+  dynamicTabTitleMode?: DynamicTabTitleMode,
+): string => {
+  const baseTitle = resolveSessionTabTitle(session, dynamicTabTitleMode);
+  const address = getSessionTopTabAddress(session);
+  if (!address) return baseTitle;
+  if (!baseTitle) return address;
+  if (baseTitle.trim() === address) return baseTitle;
+  return `${baseTitle} · ${address}`;
 };
 
 // Custom window controls for Windows/Linux (frameless window)
@@ -503,6 +542,7 @@ interface SessionTopTabProps {
   onCopySession: (sessionId: string) => void;
   onCopySessionToNewWindow: (sessionId: string) => void;
   renderBulkCloseItems: RenderBulkCloseItems;
+  dynamicTabTitleMode?: DynamicTabTitleMode;
   t: TranslateFn;
   tabAnimationClass?: string;
 }
@@ -526,6 +566,7 @@ export const SessionTopTab: React.FC<SessionTopTabProps> = memo(({
   onCopySession,
   onCopySessionToNewWindow,
   renderBulkCloseItems,
+  dynamicTabTitleMode,
   t,
   tabAnimationClass,
 }) => {
@@ -533,77 +574,99 @@ export const SessionTopTab: React.FC<SessionTopTabProps> = memo(({
   const handleClick = useCallback(() => {
     activeTabStore.setActiveTabId(session.id);
   }, [session.id]);
+  const addressTooltip = formatSessionTopTabTooltip(session);
+  const tabTitle = formatSessionTopTabLabel(session, dynamicTabTitleMode);
+
+  const tabBody = (
+    <div
+      data-tab-id={session.id}
+      data-tab-type="session"
+      data-state={isActive ? 'active' : 'inactive'}
+      onClick={handleClick}
+      onMouseDown={handleTabMiddleMouseDown}
+      onAuxClick={(e) => handleTabMiddleClickClose(e, () => onCloseSession(session.id))}
+      draggable
+      onDragStart={(e) => onTabDragStart(e, session.id)}
+      onDragEnd={onTabDragEnd}
+      onDragOver={(e) => onTabDragOver(e, session.id)}
+      onDragLeave={onTabDragLeave}
+      onDrop={(e) => onTabDrop(e, session.id)}
+      className={cn(
+        "netcatty-tab relative h-7 pl-3 pr-2 min-w-[140px] max-w-[240px] rounded-t-md overflow-hidden text-xs font-semibold cursor-pointer flex items-center justify-between gap-2 app-no-drag flex-shrink-0",
+        "transition-transform duration-150",
+        isBeingDragged && isDraggingForReorder ? "opacity-40 scale-95" : "",
+        tabAnimationClass,
+      )}
+      style={{
+        ...shiftStyle,
+        backgroundColor: isActive
+          ? 'var(--top-tabs-active-bg, hsl(var(--background)))'
+          : 'transparent',
+        color: isActive
+          ? 'var(--top-tabs-fg, hsl(var(--foreground)))'
+          : 'var(--top-tabs-muted, hsl(var(--muted-foreground)))',
+      }}
+      onMouseEnter={(e) => {
+        if (!isActive) {
+          e.currentTarget.style.backgroundColor = 'color-mix(in srgb, var(--top-tabs-active-bg, hsl(var(--background))) 40%, transparent)';
+          e.currentTarget.style.color = 'var(--top-tabs-fg, hsl(var(--foreground)))';
+        }
+      }}
+      onMouseLeave={(e) => {
+        if (!isActive) {
+          e.currentTarget.style.backgroundColor = 'transparent';
+          e.currentTarget.style.color = 'var(--top-tabs-muted, hsl(var(--muted-foreground)))';
+        }
+      }}
+    >
+      {showDropIndicatorBefore && isDraggingForReorder && (
+        <div
+          className="absolute -left-0.5 top-1 bottom-1 w-0.5 rounded-full animate-pulse"
+          style={{ backgroundColor: 'var(--top-tabs-accent, hsl(var(--accent)))', boxShadow: '0 0 8px 2px color-mix(in srgb, var(--top-tabs-accent, hsl(var(--accent))) 50%, transparent)' }}
+        />
+      )}
+      {showDropIndicatorAfter && isDraggingForReorder && (
+        <div
+          className="absolute -right-0.5 top-1 bottom-1 w-0.5 rounded-full animate-pulse"
+          style={{ backgroundColor: 'var(--top-tabs-accent, hsl(var(--accent)))', boxShadow: '0 0 8px 2px color-mix(in srgb, var(--top-tabs-accent, hsl(var(--accent))) 50%, transparent)' }}
+        />
+      )}
+      <div className="flex items-center gap-2 min-w-0 flex-1">
+        <SessionTabIcon host={host} session={session} isActive={isActive} protocol={session.protocol} shellIcon={session.localShellIcon} />
+        <span className="truncate">{tabTitle}</span>
+        <div className="flex-shrink-0">{sessionStatusDot(session.status, hasActivity)}</div>
+      </div>
+      <button
+        onClick={(e) => onCloseSession(session.id, e)}
+        className="p-1 rounded-full hover:bg-destructive/10 hover:text-destructive transition-colors"
+        aria-label={t('tabs.closeSessionAria')}
+      >
+        <X size={12} />
+      </button>
+    </div>
+  );
+
+  const tabTrigger = (
+    addressTooltip ? (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <ContextMenuTrigger asChild>{tabBody}</ContextMenuTrigger>
+        </TooltipTrigger>
+        <TooltipContent
+          sideOffset={6}
+          className="rounded-md border border-border/60 bg-popover/95 px-2.5 py-1.5 font-mono text-[11px] font-medium leading-none text-foreground shadow-lg supports-[backdrop-filter]:backdrop-blur-sm"
+        >
+          {addressTooltip}
+        </TooltipContent>
+      </Tooltip>
+    ) : (
+      <ContextMenuTrigger asChild>{tabBody}</ContextMenuTrigger>
+    )
+  );
 
   return (
     <ContextMenu>
-      <ContextMenuTrigger asChild>
-        <div
-          data-tab-id={session.id}
-          data-tab-type="session"
-          data-state={isActive ? 'active' : 'inactive'}
-          onClick={handleClick}
-          onMouseDown={handleTabMiddleMouseDown}
-          onAuxClick={(e) => handleTabMiddleClickClose(e, () => onCloseSession(session.id))}
-          draggable
-          onDragStart={(e) => onTabDragStart(e, session.id)}
-          onDragEnd={onTabDragEnd}
-          onDragOver={(e) => onTabDragOver(e, session.id)}
-          onDragLeave={onTabDragLeave}
-          onDrop={(e) => onTabDrop(e, session.id)}
-          className={cn(
-            "netcatty-tab relative h-7 pl-3 pr-2 min-w-[140px] max-w-[240px] rounded-t-md overflow-hidden text-xs font-semibold cursor-pointer flex items-center justify-between gap-2 app-no-drag flex-shrink-0",
-            "transition-transform duration-150",
-            isBeingDragged && isDraggingForReorder ? "opacity-40 scale-95" : "",
-            tabAnimationClass,
-          )}
-          style={{
-            ...shiftStyle,
-            backgroundColor: isActive
-              ? 'var(--top-tabs-active-bg, hsl(var(--background)))'
-              : 'transparent',
-            color: isActive
-              ? 'var(--top-tabs-fg, hsl(var(--foreground)))'
-              : 'var(--top-tabs-muted, hsl(var(--muted-foreground)))',
-          }}
-          onMouseEnter={(e) => {
-            if (!isActive) {
-              e.currentTarget.style.backgroundColor = 'color-mix(in srgb, var(--top-tabs-active-bg, hsl(var(--background))) 40%, transparent)';
-              e.currentTarget.style.color = 'var(--top-tabs-fg, hsl(var(--foreground)))';
-            }
-          }}
-          onMouseLeave={(e) => {
-            if (!isActive) {
-              e.currentTarget.style.backgroundColor = 'transparent';
-              e.currentTarget.style.color = 'var(--top-tabs-muted, hsl(var(--muted-foreground)))';
-            }
-          }}
-        >
-          {showDropIndicatorBefore && isDraggingForReorder && (
-            <div
-              className="absolute -left-0.5 top-1 bottom-1 w-0.5 rounded-full animate-pulse"
-              style={{ backgroundColor: 'var(--top-tabs-accent, hsl(var(--accent)))', boxShadow: '0 0 8px 2px color-mix(in srgb, var(--top-tabs-accent, hsl(var(--accent))) 50%, transparent)' }}
-            />
-          )}
-          {showDropIndicatorAfter && isDraggingForReorder && (
-            <div
-              className="absolute -right-0.5 top-1 bottom-1 w-0.5 rounded-full animate-pulse"
-              style={{ backgroundColor: 'var(--top-tabs-accent, hsl(var(--accent)))', boxShadow: '0 0 8px 2px color-mix(in srgb, var(--top-tabs-accent, hsl(var(--accent))) 50%, transparent)' }}
-            />
-          )}
-          <div className="flex items-center gap-2 min-w-0 flex-1">
-            <SessionTabIcon host={host} session={session} isActive={isActive} protocol={session.protocol} shellIcon={session.localShellIcon} />
-            <span className="truncate">{resolveSessionTabTitle(session, host)}</span>
-            <div className="flex-shrink-0">{sessionStatusDot(session.status, hasActivity)}</div>
-          </div>
-          <button
-            onClick={(e) => onCloseSession(session.id, e)}
-            className="p-1 rounded-full hover:bg-destructive/10 hover:text-destructive transition-colors"
-            aria-label={t('tabs.closeSessionAria')}
-          >
-            <X size={12} />
-          </button>
-        </div>
-      </ContextMenuTrigger>
+      {tabTrigger}
       <SessionTabContextMenuContent
         sessionId={session.id}
         onCloseSession={onCloseSession}

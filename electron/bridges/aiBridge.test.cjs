@@ -5,6 +5,10 @@ const Module = require("node:module");
 const os = require("node:os");
 const path = require("node:path");
 const { prepareCommandForSpawn } = require("./ai/shellUtils.cjs");
+const {
+  isCodexAuthError: realIsCodexAuthError,
+  normalizeCodexIntegrationState: realNormalizeCodexIntegrationState,
+} = require("./ai/codexHelpers.cjs");
 
 function createIpcMainStub() {
   const handlers = new Map();
@@ -21,6 +25,7 @@ function loadBridgeWithMocks(options = {}) {
     "./mcpServerBridge.cjs": {
       init() {},
       setMainWindowGetter() {},
+      setVaultAgentInvoker() {},
       getOrCreateHost: async () => 4010,
       getScopedSessionIds: () => [],
       buildMcpServerConfig: () => ({ name: "netcatty-remote-hosts", type: "http", url: "http://127.0.0.1:4010" }),
@@ -29,6 +34,12 @@ function loadBridgeWithMocks(options = {}) {
           ? options.getPermissionMode()
           : "default",
       getMaxIterations: () => 20,
+      setCommandTimeout: (...args) => {
+        if (typeof options.setCommandTimeout === "function") options.setCommandTimeout(...args);
+      },
+      updateAttachmentMetadata: (...args) => {
+        if (typeof options.updateAttachmentMetadata === "function") options.updateAttachmentMetadata(...args);
+      },
       setChatSessionCancelled() {},
       cancelPtyExecsForSession() {},
       clearPendingApprovals() {},
@@ -101,11 +112,19 @@ function loadBridgeWithMocks(options = {}) {
         typeof options.getActiveCodexLoginSession === "function"
           ? options.getActiveCodexLoginSession()
           : null,
-      normalizeCodexIntegrationState: () => ({}),
+      normalizeCodexIntegrationState: (...args) =>
+        typeof options.normalizeCodexIntegrationState === "function"
+          ? options.normalizeCodexIntegrationState(...args)
+          : realNormalizeCodexIntegrationState(...args),
+      appendCodexChatGptValidationFailure: (rawOutput, validationError) =>
+        `${rawOutput}\n\nChatGPT auth validation failed:\n${validationError}`.trim(),
       readCodexCustomProviderConfig: () => null,
       getCodexCustomConfigPreflightError: () => null,
       extractCodexError: (err) => ({ message: err?.message || String(err) }),
-      isCodexAuthError: () => false,
+      isCodexAuthError: (...args) =>
+        typeof options.isCodexAuthError === "function"
+          ? options.isCodexAuthError(...args)
+          : realIsCodexAuthError(...args),
       getCodexAuthFingerprint: (...args) =>
         typeof options.getCodexAuthFingerprint === "function"
           ? options.getCodexAuthFingerprint(...args)
@@ -173,6 +192,69 @@ function loadBridgeWithMocks(options = {}) {
     throw error;
   }
 }
+
+test("mcp attachment update handler forwards current chat attachments", async () => {
+  const calls = [];
+  const { bridge, restore } = loadBridgeWithMocks({
+    updateAttachmentMetadata: (attachments, chatSessionId) => calls.push({ attachments, chatSessionId }),
+  });
+  const ipcMain = createIpcMainStub();
+
+  bridge.init({
+    sessions: new Map(),
+    sftpClients: new Map(),
+    electronModule: { app: { getPath: () => process.cwd() } },
+  });
+  bridge.registerHandlers(ipcMain);
+
+  try {
+    const updateAttachments = ipcMain.handlers.get("netcatty:ai:mcp:update-attachments");
+    assert.equal(typeof updateAttachments, "function");
+    const attachments = [{
+      filename: "hosts_export_2026-06-25.csv",
+      mediaType: "text/csv",
+      base64Data: Buffer.from("label,hostname\nprod,prod.example.com\n").toString("base64"),
+      filePath: "/tmp/hosts_export_2026-06-25.csv",
+    }];
+
+    const result = await updateAttachments({ sender: { id: 1 } }, {
+      attachments,
+      chatSessionId: "chat-1",
+    });
+
+    assert.deepEqual(result, { ok: true });
+    assert.deepEqual(calls, [{ attachments, chatSessionId: "chat-1" }]);
+  } finally {
+    restore();
+  }
+});
+
+test("command timeout handler accepts one-day timeout values", async () => {
+  const calls = [];
+  const { bridge, restore } = loadBridgeWithMocks({
+    setCommandTimeout: (value) => calls.push(value),
+  });
+  const ipcMain = createIpcMainStub();
+
+  bridge.init({
+    sessions: new Map(),
+    sftpClients: new Map(),
+    electronModule: { app: { getPath: () => process.cwd() } },
+  });
+  bridge.registerHandlers(ipcMain);
+
+  try {
+    const setCommandTimeout = ipcMain.handlers.get("netcatty:ai:mcp:set-command-timeout");
+    assert.equal(typeof setCommandTimeout, "function");
+
+    const result = await setCommandTimeout({ sender: { id: 1 } }, { timeout: 86_400 });
+
+    assert.deepEqual(result, { ok: true });
+    assert.deepEqual(calls, [86_400]);
+  } finally {
+    restore();
+  }
+});
 
 test("discover returns the 3-layer contract for an installed, authenticated agent", async (t) => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-discover-contract-"));
@@ -266,6 +348,49 @@ test("codex login does not reuse an active session from a different resolved pat
 
     assert.equal(result.ok, false);
     assert.match(result.error, /different CLI path/);
+  } finally {
+    restore();
+  }
+});
+
+test("codex integration keeps ChatGPT connected when the SDK validation probe fails", async (t) => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-codex-integration-"));
+  t.after(() => {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  const codexPath = path.join(tempDir, "codex");
+  fs.writeFileSync(
+    codexPath,
+    `#!${process.execPath}\nconsole.log('Logged in using ChatGPT');\n`,
+    { mode: 0o755 },
+  );
+
+  const { bridge, restore } = loadBridgeWithMocks({
+    normalizeCliPathForPlatform: (value) => value,
+  });
+  const ipcMain = createIpcMainStub();
+
+  bridge.init({
+    sessions: new Map(),
+    sftpClients: new Map(),
+    electronModule: { app: { getPath: () => process.cwd() } },
+  });
+  bridge.registerHandlers(ipcMain);
+
+  try {
+    const handler = ipcMain.handlers.get("netcatty:ai:codex:get-integration");
+    assert.equal(typeof handler, "function");
+
+    const result = await handler({ sender: { id: 1 } }, {
+      codexPath,
+      validateChatGptAuth: true,
+    });
+
+    assert.equal(result.state, "connected_chatgpt", JSON.stringify(result));
+    assert.equal(result.isConnected, true);
+    assert.match(result.rawOutput, /Logged in using ChatGPT/);
+    assert.match(result.rawOutput, /ChatGPT auth validation failed:/);
   } finally {
     restore();
   }

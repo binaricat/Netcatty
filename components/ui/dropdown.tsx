@@ -50,6 +50,16 @@ const Dropdown: React.FC<DropdownProps> = ({
     [controlledOpen, onOpenChange],
   );
 
+  useEffect(() => {
+    const closeOnPageHidden = () => {
+      if (document.visibilityState === "hidden") {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("visibilitychange", closeOnPageHidden);
+    return () => document.removeEventListener("visibilitychange", closeOnPageHidden);
+  }, [setOpen]);
+
   return (
     <DropdownContext.Provider value={{ open, setOpen, triggerRef }}>
       {children}

@@ -4,15 +4,27 @@
  * for establishing and managing SSH port forwarding tunnels.
  */
 
-import { Host, Identity, PortForwardingRule, SSHKey, TerminalSettings } from '../../domain/models';
+import { Host, Identity, KnownHost, PortForwardingRule, SSHKey, TerminalSettings } from '../../domain/models';
 import { isEncryptedCredentialPlaceholder, sanitizeCredentialValue } from '../../domain/credentials';
 import { resolveBridgeKeyAuth, resolveHostAuth } from '../../domain/sshAuth';
 import { resolveHostKeepalive } from '../../domain/host';
-import { hasUsableProxyConfig } from '../../domain/proxyProfiles';
+import {
+  findIncompleteProxyIdentityId,
+  findMissingProxyIdentityId,
+  formatIncompleteProxyIdentityMessage,
+  formatMissingProxyIdentityMessage,
+  hasUnreadableProxyCredential,
+  hasUsableProxyConfig,
+  resolveProxyConfigAuth,
+} from '../../domain/proxyProfiles';
 
 // Fallback matching DEFAULT_TERMINAL_SETTINGS so older call sites that don't
 // thread terminalSettings still get the cloud-friendly defaults.
-const FALLBACK_KEEPALIVE = { keepaliveInterval: 30, keepaliveCountMax: 10 };
+const FALLBACK_TERMINAL_SETTINGS = {
+  verifyHostKeys: true,
+  keepaliveInterval: 30,
+  keepaliveCountMax: 10,
+};
 import { logger } from '../../lib/logger';
 import { localStorageAdapter } from '../persistence/localStorageAdapter';
 import { STORAGE_KEY_PF_RECONNECT_CANCEL } from '../config/storageKeys';
@@ -368,9 +380,10 @@ export const startPortForward = async (
   identities: Identity[],
   onStatusChange: (status: PortForwardingRule['status'], error?: string) => void,
   enableReconnect = false,
-  terminalSettings?: Pick<TerminalSettings, 'keepaliveInterval' | 'keepaliveCountMax'>,
+  terminalSettings?: Pick<TerminalSettings, 'verifyHostKeys' | 'keepaliveInterval' | 'keepaliveCountMax'>,
+  knownHosts?: KnownHost[],
 ): Promise<{ success: boolean; error?: string }> => {
-  const globalKeepalive = terminalSettings ?? FALLBACK_KEEPALIVE;
+  const globalTerminalSettings = { ...FALLBACK_TERMINAL_SETTINGS, ...(terminalSettings ?? {}) };
   const bridge = netcattyBridge.get();
   
   // Clear any existing reconnect timer
@@ -389,18 +402,17 @@ export const startPortForward = async (
     if (host.proxyProfileId && !host.proxyConfig) {
       throw new Error(`Saved proxy for host "${host.label || host.hostname}" is missing. Open host settings and select a valid proxy.`);
     }
+    if (findMissingProxyIdentityId(host.proxyConfig, identities)) {
+      throw new Error(formatMissingProxyIdentityMessage(host.label || host.hostname));
+    }
+    if (findIncompleteProxyIdentityId(host.proxyConfig, identities)) {
+      throw new Error(formatIncompleteProxyIdentityMessage(host.label || host.hostname));
+    }
 
     const resolved = resolveHostAuth({ host, keys, identities });
     const key = resolved.key;
     const proxy = host.proxyConfig
-      ? {
-        type: host.proxyConfig.type,
-        host: host.proxyConfig.host,
-        port: host.proxyConfig.port,
-        command: host.proxyConfig.command,
-        username: host.proxyConfig.username,
-        password: sanitizeCredentialValue(host.proxyConfig.password),
-      }
+      ? resolveProxyConfigAuth(host.proxyConfig, identities)
       : undefined;
     let jumpHosts: NetcattyJumpHost[] | undefined;
     if (host.hostChain?.hostIds?.length) {
@@ -417,14 +429,18 @@ export const startPortForward = async (
           if (jumpHost.proxyProfileId && !jumpHost.proxyConfig) {
             throw new Error(`Saved proxy for jump host "${jumpHost.label || jumpHost.hostname}" is missing. Open host settings and select a valid proxy.`);
           }
+          if (findMissingProxyIdentityId(jumpHost.proxyConfig, identities)) {
+            throw new Error(formatMissingProxyIdentityMessage(jumpHost.label || jumpHost.hostname));
+          }
+          if (findIncompleteProxyIdentityId(jumpHost.proxyConfig, identities)) {
+            throw new Error(formatIncompleteProxyIdentityMessage(jumpHost.label || jumpHost.hostname));
+          }
           const hasConfiguredJumpProxyEndpoint =
             index === 0 &&
             hasUsableProxyConfig(jumpHost.proxyConfig);
           if (
             hasConfiguredJumpProxyEndpoint &&
-            jumpHost.proxyConfig?.username &&
-            isEncryptedCredentialPlaceholder(jumpHost.proxyConfig.password) &&
-            !sanitizeCredentialValue(jumpHost.proxyConfig.password)
+            hasUnreadableProxyCredential(jumpHost.proxyConfig, identities)
           ) {
             throw new Error(`Proxy credentials for jump host "${jumpHost.label || jumpHost.hostname}" cannot be decrypted on this device. Open host settings and re-enter the proxy password.`);
           }
@@ -449,7 +465,7 @@ export const startPortForward = async (
           ) {
             throw new Error(`Saved credentials for jump host "${jumpHost.label || jumpHost.hostname}" cannot be decrypted on this device. Open host settings and re-enter them.`);
           }
-          const hopKeepalive = resolveHostKeepalive(jumpHost, globalKeepalive);
+          const hopKeepalive = resolveHostKeepalive(jumpHost, globalTerminalSettings);
           return {
             hostname: jumpHost.hostname,
             port: jumpHost.port || 22,
@@ -463,18 +479,12 @@ export const startPortForward = async (
             keySource: jumpKey?.source,
             label: jumpHost.label,
             proxy: hasUsableProxyConfig(jumpHost.proxyConfig)
-              ? {
-                type: jumpHost.proxyConfig.type,
-                host: jumpHost.proxyConfig.host,
-                port: jumpHost.proxyConfig.port,
-                command: jumpHost.proxyConfig.command,
-                username: jumpHost.proxyConfig.username,
-                password: sanitizeCredentialValue(jumpHost.proxyConfig.password),
-              }
+              ? resolveProxyConfigAuth(jumpHost.proxyConfig, identities)
               : undefined,
             identityFilePaths: jumpKeyAuth.identityFilePaths,
             keepaliveInterval: hopKeepalive.interval,
             keepaliveCountMax: hopKeepalive.countMax,
+            verifyHostKeys: globalTerminalSettings.verifyHostKeys,
             legacyAlgorithms: jumpHost.legacyAlgorithms,
             skipEcdsaHostKey: jumpHost.skipEcdsaHostKey,
             algorithmOverrides: jumpHost.algorithms,
@@ -482,7 +492,7 @@ export const startPortForward = async (
         });
     }
     const usesTargetProxyForFirstHop = !!proxy && !jumpHosts?.[0]?.proxy;
-    if (usesTargetProxyForFirstHop && host.proxyConfig?.username && isEncryptedCredentialPlaceholder(host.proxyConfig.password) && !proxy?.password) {
+    if (usesTargetProxyForFirstHop && hasUnreadableProxyCredential(host.proxyConfig, identities)) {
       throw new Error('Proxy credentials cannot be decrypted on this device. Open host settings and re-enter the proxy password.');
     }
     
@@ -554,14 +564,16 @@ export const startPortForward = async (
       certificate: key?.certificate,
       keyId: resolved.keyId,
       passphrase: keyAuth.passphrase,
+      knownHosts,
+      verifyHostKeys: globalTerminalSettings.verifyHostKeys,
       proxy,
       jumpHosts: jumpHosts && jumpHosts.length > 0 ? jumpHosts : undefined,
       identityFilePaths: keyAuth.identityFilePaths,
       legacyAlgorithms: host.legacyAlgorithms,
       skipEcdsaHostKey: host.skipEcdsaHostKey,
       algorithmOverrides: host.algorithms,
-      keepaliveInterval: resolveHostKeepalive(host, globalKeepalive).interval,
-      keepaliveCountMax: resolveHostKeepalive(host, globalKeepalive).countMax,
+      keepaliveInterval: resolveHostKeepalive(host, globalTerminalSettings).interval,
+      keepaliveCountMax: resolveHostKeepalive(host, globalTerminalSettings).countMax,
     });
     
     if (!result.success) {

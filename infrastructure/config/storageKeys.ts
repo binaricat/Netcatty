@@ -33,6 +33,8 @@ export const STORAGE_KEY_PF_VIEW_MODE = 'netcatty_pf_view_mode_v1';
 export const STORAGE_KEY_KNOWN_HOSTS = 'netcatty_known_hosts_v1';
 export const STORAGE_KEY_SHELL_HISTORY = 'netcatty_shell_history_v1';
 export const STORAGE_KEY_CONNECTION_LOGS = 'netcatty_connection_logs_v1';
+/** Side store for unsaved connection-log terminal replay buffers (main blob omits them for perf). */
+export const STORAGE_KEY_CONNECTION_LOG_TERMINAL_DATA = 'netcatty_connection_log_terminal_data_v1';
 export const STORAGE_KEY_SESSION_RESTORE = 'netcatty_session_restore_v1';
 export const STORAGE_KEY_RESTORE_PREVIOUS_SESSION = 'netcatty_restore_previous_session_v1';
 export const STORAGE_KEY_RESTORE_TERMINAL_CWD = 'netcatty_restore_terminal_cwd_v1';
@@ -50,8 +52,14 @@ export const STORAGE_KEY_VAULT_NOTES_VIEW_MODE = 'netcatty_vault_notes_view_mode
 export const STORAGE_KEY_VAULT_NOTES_EDITOR_MODE = 'netcatty_vault_notes_editor_mode_v1';
 export const STORAGE_KEY_VAULT_NOTES_SELECTED_GROUP = 'netcatty_vault_notes_selected_group_v1';
 export const STORAGE_KEY_VAULT_NOTES_TREE_WIDTH = 'netcatty_vault_notes_tree_width_v1';
+/** Inline snippet/script edit panel width (px). */
+export const STORAGE_KEY_SNIPPETS_PANEL_WIDTH = 'netcatty_snippets_panel_width_v1';
+/** Inline vault host/group details panel width (px). */
+export const STORAGE_KEY_VAULT_HOST_PANEL_WIDTH = 'netcatty_vault_host_panel_width_v1';
 /** Inline snippet script editor height (px) in vault edit panel. */
 export const STORAGE_KEY_SNIPPET_SCRIPT_EDITOR_HEIGHT = 'netcatty_snippet_script_editor_height_v1';
+/** Automation script Monaco editor height (px) in vault sidebar. */
+export const STORAGE_KEY_SCRIPT_EDITOR_HEIGHT = 'netcatty_script_editor_height_v1';
 /** Terminal compose bar total height (px). */
 export const STORAGE_KEY_COMPOSE_BAR_HEIGHT = 'netcatty_compose_bar_height_v1';
 /** Snippet IDs pinned to the terminal compose bar quick strip. */
@@ -135,6 +143,7 @@ export const STORAGE_KEY_TOGGLE_WINDOW_HOTKEY = 'netcatty_toggle_window_hotkey_v
 export const STORAGE_KEY_CLOSE_TO_TRAY = 'netcatty_close_to_tray_v1';
 export const STORAGE_KEY_GLOBAL_HOTKEY_ENABLED = 'netcatty_global_hotkey_enabled_v1';
 export const STORAGE_KEY_WINDOW_OPACITY = 'netcatty_window_opacity_v1';
+export const STORAGE_KEY_APP_ICON_VARIANT = 'netcatty_app_icon_variant_v1';
 // Custom Terminal Themes
 export const STORAGE_KEY_CUSTOM_THEMES = 'netcatty_custom_themes_v1';
 
@@ -159,6 +168,8 @@ export const STORAGE_KEY_AI_PUBLIC_MCP_ENABLED = 'netcatty_ai_public_mcp_enabled
 export const STORAGE_KEY_AI_PUBLIC_MCP_MODE = 'netcatty_ai_public_mcp_mode_v1';
 export const STORAGE_KEY_AI_PUBLIC_MCP_IDLE_TIMEOUT_MINUTES = 'netcatty_ai_public_mcp_idle_timeout_minutes_v1';
 export const STORAGE_KEY_AI_QUICK_MESSAGES = 'netcatty_ai_quick_messages_v1';
+/** Confirm-mode permission grant memory (capability + session/command patterns). */
+export const STORAGE_KEY_AI_PERMISSION_GRANTS = 'netcatty_ai_permission_grants_v1';
 export const STORAGE_KEY_AI_SHOW_TERMINAL_SELECTION_ACTION = 'netcatty_ai_show_terminal_selection_action_v1';
 
 // SFTP Transfer Concurrency
@@ -175,7 +186,7 @@ export const STORAGE_KEY_SHOW_ONLY_UNGROUPED_HOSTS_IN_ROOT = 'netcatty_show_only
 export const STORAGE_KEY_SHOW_SFTP_TAB = 'netcatty_show_sftp_tab_v1';
 export const STORAGE_KEY_SHOW_HOST_TREE_SIDEBAR = 'netcatty_show_host_tree_sidebar_v1';
 
-// Shortcuts: Cmd/Ctrl+[1...9] skip pinned Vault/SFTP tabs
+// Shortcuts: Cmd/Ctrl+[1...9] and Ctrl+Tab skip pinned Vault/SFTP tabs
 export const STORAGE_KEY_SHELL_ONLY_TAB_NUMBER_SHORTCUTS = 'netcatty_shell_only_tab_number_shortcuts_v1';
 
 // Shortcuts: disable terminal font zoom shortcuts
@@ -187,9 +198,14 @@ export const STORAGE_KEY_GROUP_CONFIGS = 'netcatty_group_configs_v1';
 // Side Panel
 export const STORAGE_KEY_SIDE_PANEL_WIDTH = 'netcatty_side_panel_width';
 export const STORAGE_KEY_TERMINAL_SIDE_PANEL_TAB_ORDER = 'netcatty_terminal_side_panel_tab_order_v1';
+export const STORAGE_KEY_TERMINAL_SIDE_PANEL_AUTO_OPEN = 'netcatty_terminal_side_panel_auto_open_v1';
+export const STORAGE_KEY_TERMINAL_SIDE_PANEL_AUTO_OPEN_TAB = 'netcatty_terminal_side_panel_auto_open_tab_v1';
 export const STORAGE_KEY_WORKSPACE_FOCUS_SIDEBAR_WIDTH = 'netcatty_workspace_focus_sidebar_width';
 export const STORAGE_KEY_TERMINAL_HOST_TREE_WIDTH = 'netcatty_terminal_host_tree_width_v1';
 export const STORAGE_KEY_TERMINAL_HOST_TREE_COLLAPSED = 'netcatty_terminal_host_tree_collapsed_v1';
+export const STORAGE_KEY_TERMINAL_COMPOSE_BAR_OPEN = 'netcatty_terminal_compose_bar_open_v1';
+export const STORAGE_KEY_TERMINAL_SEARCH_OPEN = 'netcatty_terminal_search_open_v1';
+export const STORAGE_KEY_TERMINAL_ENCODING_BY_HOST_PREFIX = 'netcatty_terminal_encoding_by_host_v1:';
 
 // Port Forwarding (transient cross-window broadcast key)
 export const STORAGE_KEY_PF_RECONNECT_CANCEL = '__netcatty_pf_cancel_reconnect';

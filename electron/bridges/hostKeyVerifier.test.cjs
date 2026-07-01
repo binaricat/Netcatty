@@ -272,6 +272,29 @@ test("createHostVerifier accepts trusted host keys without prompting", async () 
   assert.deepEqual(sent, []);
 });
 
+test("createHostVerifier skips prompts when host key verification is disabled", async () => {
+  const rawKey = Buffer.from("untrusted server key");
+  const sent = [];
+  const sender = {
+    id: 1,
+    isDestroyed: () => false,
+    send: (channel, payload) => sent.push({ channel, payload }),
+  };
+  const verifier = createHostVerifier({
+    sender,
+    sessionId: "session-1",
+    hostname: "switch.local",
+    port: 22,
+    knownHosts: [],
+    verifyHostKeys: false,
+  });
+
+  const accepted = await new Promise((resolve) => verifier(rawKey, resolve));
+
+  assert.equal(accepted, true);
+  assert.deepEqual(sent, []);
+});
+
 test("createHostVerifier accepts imported full known_hosts public keys without prompting", async () => {
   const rawKey = makeRawPublicKey("ssh-ed25519");
   const sent = [];

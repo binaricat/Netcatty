@@ -13,6 +13,7 @@ const {
 
 const FILE_NAME_UNSAFE_CHARS = new Set(["<", ">", ":", "\"", "/", "\\", "|", "?", "*"]);
 const WINDOWS_RESERVED_DEVICE_NAME = /^(con|prn|aux|nul|com[1-9¹²³]|lpt[1-9¹²³])(?:\..*)?$/i;
+const manualSessionLogTokens = new Map();
 
 function isControlCharacter(char) {
   const code = char.codePointAt(0);
@@ -251,6 +252,96 @@ async function openSessionLogsDir(event, payload) {
   }
 }
 
+async function startManualSessionLog(event, payload = {}) {
+  const sessionLogStreamManager = require("./sessionLogStreamManager.cjs");
+  const { sessionId, sessionName, preferredDirectory, initialLine } = payload;
+  if (!sessionId) {
+    return { success: false, started: false, error: "Missing sessionId" };
+  }
+
+  if (sessionLogStreamManager.hasStream(sessionId)) {
+    return { success: false, started: false, error: "Session log is already active" };
+  }
+
+  const targetDirectory = typeof preferredDirectory === "string" && preferredDirectory.trim()
+    ? preferredDirectory.trim()
+    : require("node:os").homedir();
+  const safeSessionName = safePathSegment(sessionName || sessionId, "session");
+  const defaultPath = path.join(targetDirectory, `${safeSessionName}_${toLocalISOString(new Date())}.log`);
+
+  try {
+    const result = await dialog.showSaveDialog({
+      defaultPath,
+      filters: [
+        { name: "Log Files", extensions: ["log"] },
+        { name: "Text Files", extensions: ["txt"] },
+        { name: "All Files", extensions: ["*"] },
+      ],
+    });
+
+    if (result.canceled || !result.filePath) {
+      return { success: true, started: false, canceled: true };
+    }
+
+    const filePath = path.extname(result.filePath)
+      ? result.filePath
+      : `${result.filePath}.log`;
+    const startResult = sessionLogStreamManager.startStreamToFile(sessionId, {
+      filePath,
+      format: "txt",
+      hostLabel: safeSessionName,
+      startTime: Date.now(),
+      initialLine: typeof initialLine === "string" ? initialLine : "",
+      stopRequiresToken: true,
+    });
+
+    if (!startResult.ok) {
+      return { success: false, started: false, error: startResult.error || "Failed to start session log" };
+    }
+
+    manualSessionLogTokens.set(sessionId, startResult.token);
+    return { success: true, started: true, filePath };
+  } catch (err) {
+    return { success: false, started: false, error: err?.message || String(err) };
+  }
+}
+
+async function stopManualSessionLog(event, payload = {}) {
+  const sessionLogStreamManager = require("./sessionLogStreamManager.cjs");
+  const { sessionId } = payload;
+  if (!sessionId) {
+    return { success: false, stopped: false, error: "Missing sessionId" };
+  }
+
+  try {
+    const token = manualSessionLogTokens.get(sessionId);
+    if (!token) {
+      return { success: true, stopped: false };
+    }
+
+    const filePath = await sessionLogStreamManager.stopStream(sessionId, token);
+    if (!filePath) {
+      if (!sessionLogStreamManager.hasStream(sessionId)) {
+        manualSessionLogTokens.delete(sessionId);
+      }
+      return { success: true, stopped: false };
+    }
+    manualSessionLogTokens.delete(sessionId);
+    return { success: true, stopped: true, filePath };
+  } catch (err) {
+    return { success: false, stopped: false, error: err?.message || String(err) };
+  }
+}
+
+async function getManualSessionLogStatus(event, payload = {}) {
+  const sessionLogStreamManager = require("./sessionLogStreamManager.cjs");
+  const { sessionId } = payload;
+  if (!sessionId) {
+    return { success: false, isLogging: false, error: "Missing sessionId" };
+  }
+  return { success: true, isLogging: sessionLogStreamManager.hasStream(sessionId) };
+}
+
 /**
  * Register IPC handlers for session logs operations
  */
@@ -259,6 +350,9 @@ function registerHandlers(ipcMain) {
   ipcMain.handle("netcatty:sessionLogs:selectDir", selectSessionLogsDir);
   ipcMain.handle("netcatty:sessionLogs:autoSave", autoSaveSessionLog);
   ipcMain.handle("netcatty:sessionLogs:openDir", openSessionLogsDir);
+  ipcMain.handle("netcatty:sessionLog:manualStart", startManualSessionLog);
+  ipcMain.handle("netcatty:sessionLog:manualStop", stopManualSessionLog);
+  ipcMain.handle("netcatty:sessionLog:manualStatus", getManualSessionLogStatus);
 }
 
 module.exports = {
@@ -267,6 +361,9 @@ module.exports = {
   selectSessionLogsDir,
   autoSaveSessionLog,
   openSessionLogsDir,
+  startManualSessionLog,
+  stopManualSessionLog,
+  getManualSessionLogStatus,
   toLocalISOString,
   terminalDataToHtml,
   terminalPlainTextToHtml,

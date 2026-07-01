@@ -5,9 +5,17 @@
 import { Globe, KeyRound, SquareTerminal, Trash2 } from 'lucide-react';
 import React, { useCallback, useMemo } from 'react';
 import { useI18n } from '../../application/i18n/I18nProvider';
-import { formatProxyConfigEndpoint, formatProxyConfigType, isProxyCommandConfig, isValidProxyPort } from '../../domain/proxyProfiles';
-import { ProxyConfig, ProxyProfile } from '../../types';
-import { AsidePanel, AsidePanelContent, type AsidePanelLayout } from '../ui/aside-panel';
+import {
+    formatProxyConfigEndpoint,
+    formatProxyConfigType,
+    hasIncompleteProxyIdentity,
+    hasMissingProxyIdentity,
+    hasUnreadableProxyCredential,
+    isProxyCommandConfig,
+    isValidProxyPort,
+} from '../../domain/proxyProfiles';
+import { Identity, ProxyConfig, ProxyProfile } from '../../types';
+import { AsidePanel, AsidePanelContent, type AsidePanelLayout, type AsidePanelResizeProps } from '../ui/aside-panel';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { Card } from '../ui/card';
@@ -17,8 +25,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 export interface ProxyPanelProps {
     proxyConfig?: ProxyConfig;
     proxyProfiles?: ProxyProfile[];
+    identities?: Identity[];
     selectedProxyProfileId?: string;
-    onUpdateProxy: (field: keyof ProxyConfig, value: string | number) => void;
+    onUpdateProxy: (field: keyof ProxyConfig, value: ProxyConfig[keyof ProxyConfig]) => void;
     onSelectProxyProfile?: (profileId: string | undefined) => void;
     onClearProxy: () => void;
     onBack: () => void;
@@ -26,9 +35,12 @@ export interface ProxyPanelProps {
     layout?: AsidePanelLayout;
 }
 
-export const ProxyPanel: React.FC<ProxyPanelProps> = ({
+export type ProxyPanelPropsWithResize = ProxyPanelProps & AsidePanelResizeProps;
+
+export const ProxyPanel: React.FC<ProxyPanelPropsWithResize> = ({
     proxyConfig,
     proxyProfiles = [],
+    identities = [],
     selectedProxyProfileId,
     onUpdateProxy,
     onSelectProxyProfile,
@@ -36,6 +48,9 @@ export const ProxyPanel: React.FC<ProxyPanelProps> = ({
     onBack,
     onCancel,
     layout = 'overlay',
+    resizable,
+    persistWidthStorageKey,
+    resizeAriaLabel,
 }) => {
     const { t } = useI18n();
     const customValue = '__custom__';
@@ -51,11 +66,24 @@ export const ProxyPanel: React.FC<ProxyPanelProps> = ({
     const hasManualProxyCommand = Boolean(proxyConfig?.command?.trim());
     const hasManualProxyValue = isCommandProxy ? hasManualProxyCommand : hasManualProxyHost;
     const hasInvalidManualProxyPort = !isCommandProxy && hasManualProxyHost && !isValidProxyPort(proxyConfig?.port);
-    const canSave = isUsingProfile || (hasManualProxyValue && !hasInvalidManualProxyPort);
+    const effectiveProxyConfig = selectedProfile?.config ?? proxyConfig;
+    const hasMissingIdentity = hasMissingProxyIdentity(effectiveProxyConfig, identities);
+    const hasIncompleteIdentity = hasIncompleteProxyIdentity(effectiveProxyConfig, identities);
+    const hasUnreadableIdentity = hasUnreadableProxyCredential(effectiveProxyConfig, identities);
+    const hasInvalidIdentity = hasMissingIdentity || hasIncompleteIdentity || hasUnreadableIdentity;
+    const canSave = (isUsingProfile && !hasInvalidIdentity) ||
+        (!isUsingProfile && hasManualProxyValue && !hasInvalidManualProxyPort && !hasInvalidIdentity);
+    const manualCredentialsValue = '__manual_credentials__';
+    const missingIdentityValue = '__missing_identity__';
+    const selectedIdentity = useMemo(
+        () => identities.find((identity) => identity.id === proxyConfig?.identityId),
+        [identities, proxyConfig?.identityId],
+    );
+    const selectedIdentityValue = selectedIdentity?.id || (hasMissingIdentity ? missingIdentityValue : manualCredentialsValue);
     const handleBack = useCallback(() => {
-        if (hasInvalidManualProxyPort) return;
+        if (hasInvalidManualProxyPort || hasInvalidIdentity) return;
         onBack();
-    }, [hasInvalidManualProxyPort, onBack]);
+    }, [hasInvalidManualProxyPort, hasInvalidIdentity, onBack]);
 
     return (
         <AsidePanel
@@ -65,6 +93,9 @@ export const ProxyPanel: React.FC<ProxyPanelProps> = ({
             showBackButton={true}
             onBack={handleBack}
             layout={layout}
+            resizable={resizable}
+            persistWidthStorageKey={persistWidthStorageKey}
+            resizeAriaLabel={resizeAriaLabel}
             actions={
                 <Button size="sm" onClick={handleBack} disabled={!canSave}>
                     {t('common.save')}
@@ -112,6 +143,21 @@ export const ProxyPanel: React.FC<ProxyPanelProps> = ({
                                         {formatProxyConfigEndpoint(selectedProfile.config)}
                                     </span>
                                 </div>
+                            </div>
+                        )}
+                        {selectedProfile && hasMissingIdentity && (
+                            <div className="min-w-0 rounded-md border border-destructive/30 bg-destructive/10 p-2 text-sm text-destructive">
+                                {t('hostDetails.proxyPanel.missingIdentity')}
+                            </div>
+                        )}
+                        {selectedProfile && hasIncompleteIdentity && (
+                            <div className="min-w-0 rounded-md border border-destructive/30 bg-destructive/10 p-2 text-sm text-destructive">
+                                {t('hostDetails.proxyPanel.incompleteIdentity')}
+                            </div>
+                        )}
+                        {selectedProfile && hasUnreadableIdentity && (
+                            <div className="min-w-0 rounded-md border border-destructive/30 bg-destructive/10 p-2 text-sm text-destructive">
+                                {t('hostDetails.proxyPanel.unreadableIdentity')}
                             </div>
                         )}
                     </Card>
@@ -194,21 +240,90 @@ export const ProxyPanel: React.FC<ProxyPanelProps> = ({
                                 </div>
                                 <Badge variant="secondary" className="text-xs">{t('common.optional')}</Badge>
                             </div>
-                            <Input
-                                aria-label={t('hostDetails.proxyPanel.usernamePlaceholder')}
-                                placeholder={t('hostDetails.proxyPanel.usernamePlaceholder')}
-                                value={proxyConfig?.username || ""}
-                                onChange={(e) => onUpdateProxy('username', e.target.value)}
-                                className="h-10"
-                            />
-                            <Input
-                                aria-label={t('hostDetails.proxyPanel.passwordPlaceholder')}
-                                placeholder={t('hostDetails.proxyPanel.passwordPlaceholder')}
-                                type="password"
-                                value={proxyConfig?.password || ""}
-                                onChange={(e) => onUpdateProxy('password', e.target.value)}
-                                className="h-10"
-                            />
+                            {identities.length > 0 && (
+                                <div className="space-y-2">
+                                    <p className="text-xs text-muted-foreground">
+                                        {t('hostDetails.proxyPanel.keychainIdentity')}
+                                    </p>
+                                    <Select
+                                        value={selectedIdentityValue}
+                                        onValueChange={(value) => {
+                                            if (value === missingIdentityValue) return;
+                                            onUpdateProxy(
+                                                'identityId',
+                                                value === manualCredentialsValue ? undefined : value,
+                                            );
+                                        }}
+                                    >
+                                        <SelectTrigger
+                                            aria-label={t('hostDetails.proxyPanel.keychainIdentity')}
+                                            className="h-10"
+                                        >
+                                            <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value={manualCredentialsValue}>
+                                                {t('hostDetails.proxyPanel.manualCredentials')}
+                                            </SelectItem>
+                                            {hasMissingIdentity && (
+                                                <SelectItem value={missingIdentityValue}>
+                                                    {t('hostDetails.proxyPanel.missingIdentity')}
+                                                </SelectItem>
+                                            )}
+                                            {identities.map((identity) => (
+                                                <SelectItem key={identity.id} value={identity.id}>
+                                                    {identity.label}
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                            )}
+                            {hasMissingIdentity && (
+                                <div className="min-w-0 rounded-md border border-destructive/30 bg-destructive/10 p-2 text-sm text-destructive">
+                                    {t('hostDetails.proxyPanel.missingIdentity')}
+                                </div>
+                            )}
+                            {hasIncompleteIdentity && (
+                                <div className="min-w-0 rounded-md border border-destructive/30 bg-destructive/10 p-2 text-sm text-destructive">
+                                    {t('hostDetails.proxyPanel.incompleteIdentity')}
+                                </div>
+                            )}
+                            {hasUnreadableIdentity && (
+                                <div className="min-w-0 rounded-md border border-destructive/30 bg-destructive/10 p-2 text-sm text-destructive">
+                                    {t('hostDetails.proxyPanel.unreadableIdentity')}
+                                </div>
+                            )}
+                            {selectedIdentity ? (
+                                <div className="min-w-0 rounded-md bg-secondary/50 p-2 text-sm">
+                                    <div className="flex min-w-0 items-center gap-2">
+                                        <Badge variant="secondary" className="text-xs shrink-0">
+                                            {t('hostDetails.proxyPanel.keychainIdentity')}
+                                        </Badge>
+                                        <span className="truncate">
+                                            {selectedIdentity.label} - {selectedIdentity.username}
+                                        </span>
+                                    </div>
+                                </div>
+                            ) : (
+                                <>
+                                    <Input
+                                        aria-label={t('hostDetails.proxyPanel.usernamePlaceholder')}
+                                        placeholder={t('hostDetails.proxyPanel.usernamePlaceholder')}
+                                        value={proxyConfig?.username || ""}
+                                        onChange={(e) => onUpdateProxy('username', e.target.value)}
+                                        className="h-10"
+                                    />
+                                    <Input
+                                        aria-label={t('hostDetails.proxyPanel.passwordPlaceholder')}
+                                        placeholder={t('hostDetails.proxyPanel.passwordPlaceholder')}
+                                        type="password"
+                                        value={proxyConfig?.password || ""}
+                                        onChange={(e) => onUpdateProxy('password', e.target.value)}
+                                        className="h-10"
+                                    />
+                                </>
+                            )}
                         </Card>}
                     </>
                 )}

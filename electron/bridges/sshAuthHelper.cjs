@@ -175,6 +175,8 @@ async function preparePrivateKeyForAuth({
   initialPassphrase,
   passphraseSignal,
   logPrefix = "[SSHAuth]",
+  onPassphrasePromptShown,
+  onPassphrasePromptResolved,
 }) {
   if (!privateKey) return null;
 
@@ -202,6 +204,7 @@ async function preparePrivateKeyForAuth({
       keyPath: promptKeyPath,
       passphraseInvalid,
     });
+    onPassphrasePromptShown?.();
     const result = await passphraseHandler.requestPassphrase(
       sender,
       promptKeyPath,
@@ -210,6 +213,7 @@ async function preparePrivateKeyForAuth({
       passphraseInvalid,
       { signal: passphraseSignal }
     );
+    onPassphrasePromptResolved?.();
     if (result?.cancelled) {
       throw new PassphraseCancelledError(promptKeyPath);
     }
@@ -235,6 +239,8 @@ async function loadIdentityFileForAuth({
   initialPassphrase,
   passphraseSignal,
   logPrefix = "[SSHAuth]",
+  onPassphrasePromptShown,
+  onPassphrasePromptResolved,
 }) {
   const resolvedPath = expandIdentityFilePath(keyPath);
   const privateKey = await fs.promises.readFile(resolvedPath, "utf8");
@@ -261,6 +267,7 @@ async function loadIdentityFileForAuth({
       keyPath: resolvedPath,
       passphraseInvalid,
     });
+    onPassphrasePromptShown?.();
     const result = await passphraseHandler.requestPassphrase(
       sender,
       resolvedPath,
@@ -269,6 +276,7 @@ async function loadIdentityFileForAuth({
       passphraseInvalid,
       { signal: passphraseSignal }
     );
+    onPassphrasePromptResolved?.();
     if (result?.cancelled) {
       throw new PassphraseCancelledError(resolvedPath);
     }
@@ -296,6 +304,8 @@ async function loadFirstIdentityFileForAuth({
   logPrefix = "[SSHAuth]",
   onLoaded,
   onError,
+  onPassphrasePromptShown,
+  onPassphrasePromptResolved,
 }) {
   if (!Array.isArray(identityFilePaths) || identityFilePaths.length === 0) {
     return null;
@@ -310,6 +320,8 @@ async function loadFirstIdentityFileForAuth({
         initialPassphrase,
         passphraseSignal,
         logPrefix,
+        onPassphrasePromptShown,
+        onPassphrasePromptResolved,
       });
       if (!identityFile) {
         continue;
@@ -481,6 +493,22 @@ async function getAvailableAgentSocket() {
     return running ? "\\\\.\\pipe\\openssh-ssh-agent" : null;
   }
   return getSshAgentSocket();
+}
+
+/**
+ * True when the session options carry an explicit user key choice — either
+ * inline private key material or identity file paths from a Keychain reference
+ * key (issue #1614).
+ * @param {Object} options
+ * @param {string} [options.privateKey]
+ * @param {string[]} [options.identityFilePaths]
+ * @returns {boolean}
+ */
+function hasUserConfiguredKey(options) {
+  if (typeof options?.privateKey === "string" && options.privateKey.trim().length > 0) {
+    return true;
+  }
+  return Array.isArray(options?.identityFilePaths) && options.identityFilePaths.length > 0;
 }
 
 /**
@@ -1012,6 +1040,7 @@ module.exports = {
   preparePrivateKeyForAuth,
   loadIdentityFileForAuth,
   loadFirstIdentityFileForAuth,
+  hasUserConfiguredKey,
   PassphraseCancelledError,
   isPassphraseCancelledError,
 };

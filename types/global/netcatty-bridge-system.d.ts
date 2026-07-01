@@ -19,6 +19,14 @@ declare global {
       signal?: string;
       nice?: number;
     }): Promise<{ success: boolean; error?: string; code?: number }>;
+    setupOsc7Tracking?(sessionId: string, command: string): Promise<{
+      success: boolean;
+      pending?: boolean;
+      stdout?: string;
+      stderr?: string;
+      code?: number | null;
+      error?: string;
+    }>;
     listTmuxSessions?(sessionId: string): Promise<{
       success: boolean;
       error?: string;

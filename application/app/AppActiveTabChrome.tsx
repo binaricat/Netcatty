@@ -9,6 +9,7 @@ import { updateActiveChromeThemeDeps } from '../state/activeChromeThemeSync';
 import { useActiveChromeTheme } from '../state/useActiveChromeTheme';
 import { netcattyBridge } from '../../infrastructure/services/netcattyBridge';
 import { resolveActiveChromeTheme } from './activeChromeTheme';
+import type { TerminalAppearanceHostScope, ResolvedAppearance } from '../../domain/terminalAppearanceRuntime';
 import type {
   Host,
   TerminalSession,
@@ -32,6 +33,7 @@ interface AppActiveTabChromeProps {
   customAccent: string;
   editorTabs: readonly EditorTab[];
   logViews: readonly LogView[];
+  resolveSessionAppearance?: (hostScope: TerminalAppearanceHostScope) => ResolvedAppearance;
   t: (key: string) => string;
 }
 
@@ -57,6 +59,7 @@ export function AppActiveTabChrome({
   customAccent,
   editorTabs,
   logViews,
+  resolveSessionAppearance,
   t,
 }: AppActiveTabChromeProps) {
   const activeTabId = useActiveTabId();
@@ -76,6 +79,7 @@ export function AppActiveTabChrome({
     followAppTerminalTheme,
     hostById,
     logViews,
+    resolveSessionAppearance,
     sessionById,
     themeById,
     workspaceById,
@@ -88,6 +92,7 @@ export function AppActiveTabChrome({
     followAppTerminalTheme,
     hostById,
     logViews,
+    resolveSessionAppearance,
     sessionById,
     themeById,
     workspaceById,

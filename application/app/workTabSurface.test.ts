@@ -119,11 +119,13 @@ test('terminal content surface is limited to sessions and workspaces', () => {
 test('shared host tree resolves active host ids across work tab types', () => {
   const sessions = [
     { id: 'session-1', hostId: 'host-1' },
-    { id: 'session-2', hostId: 'host-2' },
+    { id: 'session-2', hostId: 'host-2', workspaceId: 'workspace-1' },
   ] as TerminalSession[];
-  const workspaces = [
-    { id: 'workspace-1', focusedSessionId: 'session-2' },
-  ] as Workspace[];
+  const workspaces = [{
+    id: 'workspace-1',
+    focusedSessionId: 'session-2',
+    root: { id: 'pane-2', type: 'pane', sessionId: 'session-2' },
+  }] as Workspace[];
   const editorTabs = [
     { id: 'file-1', hostId: 'host-3' },
   ] as EditorTab[];
@@ -132,6 +134,62 @@ test('shared host tree resolves active host ids across work tab types', () => {
   assert.equal(resolveWorkTabActiveHostId({ activeTabId: 'workspace-1', sessions, workspaces, editorTabs }), 'host-2');
   assert.equal(resolveWorkTabActiveHostId({ activeTabId: 'editor:file-1', sessions, workspaces, editorTabs }), 'host-3');
   assert.equal(resolveWorkTabActiveHostId({ activeTabId: 'log-1', sessions, workspaces, editorTabs }), null);
+});
+
+test('shared host tree falls back to the first workspace session when focused session is missing', () => {
+  const sessions = [
+    { id: 'session-1', hostId: 'host-1', workspaceId: 'workspace-1' },
+    { id: 'session-2', hostId: 'host-2', workspaceId: 'workspace-1' },
+  ] as TerminalSession[];
+  const workspaces = [{
+    id: 'workspace-1',
+    focusedSessionId: 'missing-session',
+    root: {
+      id: 'split-1',
+      type: 'split',
+      direction: 'horizontal',
+      children: [
+        { id: 'pane-1', type: 'pane', sessionId: 'session-1' },
+        { id: 'pane-2', type: 'pane', sessionId: 'session-2' },
+      ],
+      sizes: [0.5, 0.5],
+    },
+  }] as Workspace[];
+
+  assert.equal(resolveWorkTabActiveHostId({
+    activeTabId: 'workspace-1',
+    sessions,
+    workspaces,
+    editorTabs: [],
+  }), 'host-1');
+});
+
+test('shared host tree fallback prefers workspace tree order over sessions array order', () => {
+  const sessions = [
+    { id: 'session-2', hostId: 'host-2', workspaceId: 'workspace-1' },
+    { id: 'session-1', hostId: 'host-1', workspaceId: 'workspace-1' },
+  ] as TerminalSession[];
+  const workspaces = [{
+    id: 'workspace-1',
+    focusedSessionId: 'missing-session',
+    root: {
+      id: 'split-1',
+      type: 'split',
+      direction: 'horizontal',
+      children: [
+        { id: 'pane-1', type: 'pane', sessionId: 'session-1' },
+        { id: 'pane-2', type: 'pane', sessionId: 'session-2' },
+      ],
+      sizes: [0.5, 0.5],
+    },
+  }] as Workspace[];
+
+  assert.equal(resolveWorkTabActiveHostId({
+    activeTabId: 'workspace-1',
+    sessions,
+    workspaces,
+    editorTabs: [],
+  }), 'host-1');
 });
 
 test('shared host tree uses the active host theme when follow-app terminal theme is off', () => {

@@ -100,7 +100,7 @@
   --radius-sm: calc(var(--radius) - 4px);
 
   /* Fonts */
-  --font-sans: "Space Grotesk", system-ui, sans-serif;
+  --font-sans: "Mona Sans", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", monospace;
 
   /* Animations */
@@ -140,10 +140,10 @@
 
 }
 
-/* Windows: bundled flag font + Segoe UI Emoji ahead of Space Grotesk so host
+/* Windows: bundled flag font ahead of Mona Sans so host
    labels render flag icons instead of ISO country codes (#1589, #1604). */
 html.platform-win32 {
-  --font-sans: "Noto Color Emoji Flags", "Segoe UI Emoji", "Segoe UI Symbol", "Space Grotesk", system-ui, sans-serif;
+  --font-sans: "Noto Color Emoji Flags", "Mona Sans", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif, "Segoe UI Emoji", "Segoe UI Symbol";
 }
 
 @keyframes top-tab-enter {
@@ -1543,4 +1543,27 @@ html[data-theme-transition] *::after {
 .dark .netcatty-mdx-editor [class*="_tableEditor_"] > tbody > tr > td:not([class*="_toolCell_"]),
 .dark .netcatty-mdx-editor [class*="_tableEditor_"] > tbody > tr > th:not([class*="_toolCell_"]):not([data-tool-cell="true"]) {
   border-color: hsl(var(--foreground) / 0.3) !important;
+}
+
+/* Terminal appearance runtime (--nc-term-* injected by useThemeRuntime) */
+[data-terminal-appearance-root] {
+  --terminal-sidepanel-bg: var(--nc-term-panel-bg, var(--background));
+  --terminal-sidepanel-fg: var(--nc-term-panel-fg, var(--foreground));
+  --terminal-sidepanel-accent: var(--nc-term-cursor, var(--accent));
+  --terminal-sidepanel-muted: var(--nc-term-panel-muted, var(--muted-foreground));
+  --terminal-sidepanel-border: var(--nc-term-panel-border, var(--border));
+  --terminal-panel-bg: var(--nc-term-panel-bg, var(--background));
+  --terminal-panel-fg: var(--nc-term-panel-fg, var(--foreground));
+  --terminal-panel-muted: var(--nc-term-panel-muted, var(--muted-foreground));
+  --terminal-panel-border: var(--nc-term-panel-border, var(--border));
+  --terminal-panel-hover: var(--nc-term-panel-hover, var(--accent));
+  --terminal-panel-active: var(--nc-term-panel-active, var(--accent));
+  --terminal-host-tree-bg: var(--nc-term-host-tree-bg, var(--background));
+  --terminal-host-tree-fg: var(--nc-term-host-tree-fg, var(--foreground));
+  --terminal-host-tree-muted: var(--nc-term-host-tree-muted, var(--muted-foreground));
+  --terminal-host-tree-separator: var(--nc-term-host-tree-separator, var(--border));
+  --terminal-host-tree-hover-bg: var(--nc-term-host-tree-hover-bg, transparent);
+  --terminal-host-tree-active-bg: var(--nc-term-host-tree-active-bg, transparent);
+  --terminal-host-tree-drop-bg: var(--nc-term-host-tree-drop-bg, transparent);
+  --terminal-host-tree-folder-fg: var(--nc-term-host-tree-folder-fg, var(--foreground));
 }

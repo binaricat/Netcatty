@@ -5,6 +5,7 @@
 /// <reference path="./types/global/netcatty-bridge-ai.d.ts" />
 /// <reference path="./types/global/netcatty-bridge-app.d.ts" />
 /// <reference path="./types/global/netcatty-bridge-system.d.ts" />
+/// <reference path="./types/global/netcatty-bridge-script.d.ts" />
 declare module "*.cjs" {
   const value: Record<string, unknown>;
   export = value;
@@ -59,6 +60,7 @@ declare global {
     // override / global fallback). interval in seconds, 0 = disabled.
     keepaliveInterval?: number;
     keepaliveCountMax?: number;
+    verifyHostKeys?: boolean;
     // Per-hop algorithm settings, mirroring the target-host fields. When
     // omitted the bridge falls back to the target host's settings so a
     // single setting on the leaf still covers the chain (matches the
@@ -101,6 +103,7 @@ declare global {
     startupCommand?: string;
     passphrase?: string;
     knownHosts?: import("./domain/models").KnownHost[];
+    verifyHostKeys?: boolean;
     // Environment variables to set in the remote shell
     env?: Record<string, string>;
     // Proxy configuration
@@ -169,6 +172,8 @@ declare global {
     certificate?: string;
     keyId?: string;
     passphrase?: string;
+    knownHosts?: import("./domain/models").KnownHost[];
+    verifyHostKeys?: boolean;
     proxy?: NetcattyProxyConfig;
     jumpHosts?: NetcattyJumpHost[];
     identityFilePaths?: string[];

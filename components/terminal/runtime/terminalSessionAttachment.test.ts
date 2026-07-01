@@ -3,10 +3,27 @@ import assert from "node:assert/strict";
 import type { Terminal as XTerm } from "@xterm/xterm";
 
 import {
+  FLOW_HIGH_WATER_MARK,
+  FLOW_CHAR_COUNT_ACK_SIZE,
+  FLOW_LOW_WATER_MARK,
+  XTERM_WRITE_CALLBACK_BATCH_BYTES,
+} from "./terminalFlowConstants.ts";
+import {
   attachSessionToTerminal,
+  getFlowController,
   tryAttachSessionToTerminal,
   writeSessionData,
 } from "./terminalSessionAttachment.ts";
+import {
+  clearTerminalSessionFlowAck,
+  flushTerminalSessionFlowAck,
+} from "./terminalFlowAckBuffer.ts";
+import { flushTerminalWriteCoalescer } from "./terminalWriteCoalescer.ts";
+import {
+  clearDeferredTerminalWriteAck,
+  getDeferredTerminalWriteAckBytes,
+} from "./terminalWriteAckDeferral.ts";
+import { prioritizeTerminalInput } from "./terminalOutputPipeline";
 
 const createFakeTerm = (activeType = "normal") => {
   const writes: string[] = [];
@@ -64,6 +81,167 @@ const createContext = (showLineTimestamps: boolean, host: Record<string, unknown
   promptLineBreakStateRef: { current: undefined },
 });
 
+test("writeSessionData clears renderer backlog while deferring IPC ack", () => {
+  const term = {
+    buffer: { active: { type: "normal" } },
+    write(_data: string, callback?: () => void) {
+      callback?.();
+    },
+    scrollToBottom() {},
+  } as unknown as XTerm;
+  const ctx = createContext(false);
+  const ingressPerWrite = 100;
+  const writeCount = Math.floor((XTERM_WRITE_CALLBACK_BATCH_BYTES - 1) / ingressPerWrite);
+
+  for (let index = 0; index < writeCount; index += 1) {
+    writeSessionData(ctx as never, term, "x".repeat(ingressPerWrite));
+  }
+  flushTerminalWriteCoalescer(term);
+
+  const flow = getFlowController(ctx as never, term);
+  assert.equal(flow.pendingBytes(), 0);
+  assert.ok(getDeferredTerminalWriteAckBytes(term) > 0);
+  clearDeferredTerminalWriteAck(term);
+});
+
+test("writeSessionData flushes deferred IPC acks before small output can leave the source paused", async () => {
+  clearTerminalSessionFlowAck("session-1");
+  const term = {
+    buffer: { active: { type: "normal" } },
+    write(_data: string, callback?: () => void) {
+      callback?.();
+    },
+    scrollToBottom() {},
+  } as unknown as XTerm;
+  let mainUnackedBytes = 0;
+  let mainPaused = false;
+  const ctx = {
+    ...createContext(false),
+    sessionRef: { current: "session-1" },
+    terminalBackend: {
+      ackSessionFlow: (_sessionId: string, bytes: number) => {
+        mainUnackedBytes = Math.max(0, mainUnackedBytes - bytes);
+        if (mainPaused && mainUnackedBytes <= FLOW_LOW_WATER_MARK) {
+          mainPaused = false;
+        }
+      },
+    },
+  };
+  const chunk = "x".repeat(512);
+  const firstThresholdFlushBytes = Math.ceil(XTERM_WRITE_CALLBACK_BATCH_BYTES / chunk.length) * chunk.length;
+  const expectedDeferredBytes = Math.floor((FLOW_HIGH_WATER_MARK - FLOW_LOW_WATER_MARK) / chunk.length) * chunk.length;
+  const writeCount = (firstThresholdFlushBytes + expectedDeferredBytes) / chunk.length;
+  assert.ok(expectedDeferredBytes > 0);
+  assert.ok(expectedDeferredBytes < FLOW_HIGH_WATER_MARK);
+  assert.equal(Number.isInteger(writeCount), true);
+
+  for (let index = 0; index < writeCount; index += 1) {
+    mainUnackedBytes += chunk.length;
+    if (mainUnackedBytes >= FLOW_HIGH_WATER_MARK) {
+      mainPaused = true;
+    }
+    writeSessionData(ctx as never, term, chunk);
+  }
+  flushTerminalWriteCoalescer(term);
+
+  assert.equal(mainPaused, false);
+  assert.equal(mainUnackedBytes, expectedDeferredBytes);
+  assert.equal(getDeferredTerminalWriteAckBytes(term), expectedDeferredBytes);
+
+  await new Promise((resolve) => { setTimeout(resolve, 25); });
+
+  assert.equal(mainPaused, false);
+  assert.equal(mainUnackedBytes, 0);
+  assert.equal(getDeferredTerminalWriteAckBytes(term), 0);
+  clearTerminalSessionFlowAck("session-1");
+});
+
+test("writeSessionData acks ingress bytes to match main-process trackEmitted", () => {
+  clearTerminalSessionFlowAck("session-1");
+  const { term } = createFakeTerm();
+  const acked: number[] = [];
+  const ctx = {
+    ...createContext(false),
+    sessionRef: { current: "session-1" },
+    terminalBackend: {
+      ackSessionFlow: (_sessionId: string, bytes: number) => {
+        acked.push(bytes);
+      },
+    },
+  };
+
+  writeSessionData(ctx as never, term, "hello");
+  flushTerminalWriteCoalescer(term);
+  const deferred = clearDeferredTerminalWriteAck(term);
+  if (deferred > 0) {
+    ctx.terminalBackend.ackSessionFlow!("session-1", deferred);
+  }
+  flushTerminalSessionFlowAck("session-1");
+
+  assert.deepEqual(acked, [5]);
+  clearTerminalSessionFlowAck("session-1");
+});
+
+test("writeSessionData acks original ingress bytes when display data is expanded", () => {
+  clearTerminalSessionFlowAck("session-1");
+  const term = {
+    buffer: { active: { type: "normal" } },
+    write(_data: string, callback?: () => void) {
+      callback?.();
+    },
+    scrollToBottom() {},
+  } as unknown as XTerm;
+  const acked: number[] = [];
+  const ctx = {
+    ...createContext(false),
+    sessionRef: { current: "session-1" },
+    terminalBackend: {
+      ackSessionFlow: (_sessionId: string, bytes: number) => {
+        acked.push(bytes);
+      },
+    },
+  };
+
+  writeSessionData(ctx as never, term, "a\nb", 2);
+  flushTerminalWriteCoalescer(term);
+  const deferred = clearDeferredTerminalWriteAck(term);
+  if (deferred > 0) {
+    ctx.terminalBackend.ackSessionFlow!("session-1", deferred);
+  }
+  flushTerminalSessionFlowAck("session-1");
+
+  assert.deepEqual(acked, [2]);
+  clearTerminalSessionFlowAck("session-1");
+});
+
+test("writeSessionData batches IPC acks using the VS Code ack size", () => {
+  clearTerminalSessionFlowAck("session-1");
+  const term = {
+    buffer: { active: { type: "normal" } },
+    write(_data: string, callback?: () => void) {
+      callback?.();
+    },
+    scrollToBottom() {},
+  } as unknown as XTerm;
+  const acked: number[] = [];
+  const ctx = {
+    ...createContext(false),
+    sessionRef: { current: "session-1" },
+    terminalBackend: {
+      ackSessionFlow: (_sessionId: string, bytes: number) => {
+        acked.push(bytes);
+      },
+    },
+  };
+
+  writeSessionData(ctx as never, term, `${"x".repeat(FLOW_CHAR_COUNT_ACK_SIZE)}\n`);
+  flushTerminalWriteCoalescer(term);
+  flushTerminalSessionFlowAck("session-1");
+
+  assert.deepEqual(acked, [FLOW_CHAR_COUNT_ACK_SIZE, 1]);
+  clearTerminalSessionFlowAck("session-1");
+});
+
 test("writeSessionData records terminal output timestamps without changing output bytes", () => {
   const { term, writes, markerLines } = createFakeTerm();
   writeSessionData(createContext(false, { showLineTimestamps: true }) as never, term, "hello\r\nnext");
@@ -113,6 +291,38 @@ test("writeSessionData resumes timestamps after leaving alternate screen in the 
   assert.deepEqual(markerLines, [0]);
 });
 
+test("writeSessionData inserts erase-scrollback immediately after normal full clear", () => {
+  const { term, writes } = createFakeTerm();
+  writeSessionData(createContext(false) as never, term, "\x1b[H\x1b[2Jfresh output");
+
+  assert.equal(writes.join(""), "\x1b[H\x1b[2J\x1b[3Jfresh output");
+});
+
+test("writeSessionData preserves scrollback after normal full clear when disabled", () => {
+  const { term, writes } = createFakeTerm();
+  const ctx = createContext(false);
+  ctx.terminalSettingsRef.current.clearWipesScrollback = false;
+  ctx.terminalSettings.clearWipesScrollback = false;
+
+  writeSessionData(ctx as never, term, "\x1b[H\x1b[2Jfresh output");
+
+  assert.equal(writes.join(""), "\x1b[H\x1b[2Jfresh output");
+});
+
+test("writeSessionData does not duplicate existing erase-scrollback after full clear", () => {
+  const { term, writes } = createFakeTerm();
+  writeSessionData(createContext(false) as never, term, "\x1b[H\x1b[2J\x1b[3Jfresh output");
+
+  assert.equal(writes.join(""), "\x1b[H\x1b[2J\x1b[3Jfresh output");
+});
+
+test("writeSessionData does not add erase-scrollback inside synchronized output", () => {
+  const { term, writes } = createFakeTerm();
+  writeSessionData(createContext(false) as never, term, "\x1b[?2026h\x1b[H\x1b[2Jframe\x1b[?2026l");
+
+  assert.equal(writes.join(""), "\x1b[?2026h\x1b[H\x1b[2Jframe\x1b[?2026l");
+});
+
 test("writeSessionData preserves timestamps across host gutter visibility changes", () => {
   const { term, writes, markerLines, disposedMarkerLines } = createFakeTerm();
   const ctx = createContext(false, { showLineTimestamps: false });
@@ -156,6 +366,89 @@ test("attachSessionToTerminal resets timestamp state for a reused terminal", () 
 
   assert.equal(writes.length, 2);
   assert.equal(writes[1], "fresh");
+});
+
+test("attachSessionToTerminal keeps interrupt-time output visible", () => {
+  clearTerminalSessionFlowAck("session-1");
+  const { term, writes } = createFakeTerm();
+  const acked: number[] = [];
+  const output: string[] = [];
+  const logs: string[] = [];
+  let onData: ((data: string) => void) | null = null;
+  const ctx = {
+    ...createContext(false),
+    sessionId: "session-1",
+    sessionRef: { current: null },
+    hasConnectedRef: { current: true },
+    hasRunStartupCommandRef: { current: false },
+    disposeDataRef: { current: null },
+    disposeExitRef: { current: null },
+    fitAddonRef: { current: null },
+    serializeAddonRef: { current: null },
+    pendingAuthRef: { current: null },
+    onTerminalOutput: (chunk: string) => output.push(chunk),
+    onTerminalLogData: (chunk: string) => logs.push(chunk),
+    terminalBackend: {
+      onSessionData: (_id: string, cb: (data: string) => void) => {
+        onData = cb;
+        return () => {};
+      },
+      onSessionExit: () => () => {},
+      ackSessionFlow: (_sessionId: string, bytes: number) => {
+        acked.push(bytes);
+      },
+      setSessionFlowPaused: () => {},
+    },
+    updateStatus: () => {},
+    setError: () => {},
+    onSessionExit: () => {},
+  };
+
+  attachSessionToTerminal(ctx as never, term, "session-1");
+  const flow = getFlowController(ctx as never, term);
+  flow.received(FLOW_LOW_WATER_MARK);
+  prioritizeTerminalInput(
+    term,
+    "session-1",
+    flow,
+    ctx.terminalBackend,
+    (callback: () => void) => callback(),
+    {
+      reason: "interrupt",
+      drainStaleOutput: false,
+      quietMs: 500,
+      promptQuietMs: 80,
+      maxDrainMs: 1000,
+    },
+  );
+
+  onData?.("old output");
+  flushTerminalWriteCoalescer(term);
+
+  assert.equal(writes.join(""), "old output");
+  assert.equal(output.join(""), "old output");
+  assert.equal(logs.join(""), "old output");
+  assert.deepEqual(acked, []);
+
+  onData?.("^");
+  flushTerminalWriteCoalescer(term);
+
+  assert.equal(writes.join(""), "old output^");
+  assert.equal(output.join(""), "old output^");
+  assert.equal(logs.join(""), "old output^");
+  assert.deepEqual(acked, []);
+
+  onData?.("C\r\n$ ");
+  flushTerminalWriteCoalescer(term);
+  flushTerminalSessionFlowAck("session-1");
+
+  assert.equal(writes.join(""), "old output^C\r\n$ ");
+  assert.equal(output.join(""), "old output^C\r\n$ ");
+  assert.equal(logs.join(""), "old output^C\r\n$ ");
+  assert.deepEqual(acked, []);
+  assert.equal(getDeferredTerminalWriteAckBytes(term), 16);
+  clearDeferredTerminalWriteAck(term);
+  clearTerminalSessionFlowAck("session-1");
 });
 
 test("attachSessionToTerminal hints for sudo password prompts and fills on confirm", () => {

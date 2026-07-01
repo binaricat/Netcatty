@@ -6,6 +6,15 @@ import {
   createReplaySafeTerminalLogSanitizer,
 } from "./replaySafeTerminalLog";
 
+test("plain text output is preserved in large chunks", () => {
+  const chunk = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ\r\n".repeat(16 * 1024);
+  const sanitizer = createReplaySafeTerminalLogSanitizer();
+
+  assert.equal(sanitizer.append(chunk), chunk);
+  assert.equal(sanitizer.append("tail\n"), "tail\n");
+  assert.equal(sanitizer.finish(), "");
+});
+
 test("common shell clear sequence is safe to replay", () => {
   const log = createReplaySafeTerminalLog("login banner\n$ clear\n\x1b[H\x1b[2J\x1b[3Jafter clear\n");
 

@@ -279,6 +279,15 @@ function normalizeCodexIntegrationState(rawOutput) {
   return "unknown";
 }
 
+function appendCodexChatGptValidationFailure(rawOutput, validationError) {
+  return [
+    String(rawOutput || "").trim(),
+    "",
+    "ChatGPT auth validation failed:",
+    validationError || "Unknown validation error",
+  ].join("\n").trim();
+}
+
 // ── Error helpers ──
 
 function safeJsonStringify(value) {
@@ -337,7 +346,7 @@ function extractCodexError(error) {
 }
 
 function isCodexAuthError(params) {
-  const searchableText = `${params?.code || ""} ${params?.message || ""}`.toLowerCase();
+  const searchableText = `${params?.code || ""} ${params?.message || ""} ${params?.error || ""}`.toLowerCase();
   return CODEX_AUTH_HINTS.some((hint) => searchableText.includes(hint));
 }
 
@@ -373,6 +382,7 @@ module.exports = {
   toCodexLoginSessionResponse,
   getActiveCodexLoginSession,
   normalizeCodexIntegrationState,
+  appendCodexChatGptValidationFailure,
   readCodexCustomProviderConfig,
   getCodexCustomConfigPreflightError,
   extractCodexError,

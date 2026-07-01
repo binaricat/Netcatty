@@ -42,3 +42,9 @@ test('host tree layer hides immediately when leaving work tab surfaces', () => {
   assert.match(hostTreeLayerSource, /getAppHostTreeLayerStyle\(surfaceVisible\)/);
   assert.doesNotMatch(hostTreeLayerSource, /layerVisible/);
 });
+
+test('shared host tree theme follows active chrome resolution and manual chrome injection', () => {
+  assert.match(hostTreeLayerSource, /resolveActiveChromeTheme/);
+  assert.match(hostTreeLayerSource, /useManualTerminalChromeSurfaceInjection/);
+  assert.match(hostTreeLayerSource, /resolveSessionAppearance/);
+});

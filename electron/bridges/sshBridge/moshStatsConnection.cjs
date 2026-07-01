@@ -116,8 +116,14 @@ function createMoshStatsConnectionApi(ctx) {
     // keys. `trust.trusted` additionally gates the password method in the
     // authHandler (defense in depth); `trust.rejected` lets the caller treat an
     // untrusted host as a permanent failure so it stops reconnecting every poll.
-    function createTrustEnforcingHostVerifier({ hostname, port, knownHosts, trust, label }) {
+    function createTrustEnforcingHostVerifier({ hostname, port, knownHosts, verifyHostKeys = true, trust, label }) {
       return (rawKey, callback) => {
+        if (verifyHostKeys === false) {
+          trust.trusted = true;
+          callback(true);
+          return;
+        }
+
         try {
           const keyInfo = hostKeyVerifier.describeHostKey(rawKey);
           const decision = hostKeyVerifier.classifyHostKey({
@@ -267,6 +273,7 @@ function createMoshStatsConnectionApi(ctx) {
         hostname: connectOpts.host,
         port: connectOpts.port,
         knownHosts: auth.knownHosts,
+        verifyHostKeys: auth.verifyHostKeys,
         trust,
         label,
       });

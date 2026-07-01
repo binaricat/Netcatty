@@ -11,8 +11,42 @@ const { execFile, execFileSync } = require("node:child_process");
 const path = require("node:path");
 const { promisify } = require("node:util");
 const { StringDecoder } = require("node:string_decoder");
+const { ensureNodePtySpawnHelperExecutable } = require("./nodePtySpawnHelperPermissions.cjs");
+
+ensureNodePtySpawnHelperExecutable();
+
 const pty = require("node-pty");
 const { SerialPort } = require("serialport");
+const {
+  configureTerminalSessionDataEmitter,
+  emitTerminalSessionData,
+} = require("./emitTerminalSessionData.cjs");
+const {
+  getRecentInterruptTrace,
+  getSessionSnapshot,
+  logTerminalFlowAckSample,
+  logTerminalFlowPauseSample,
+  logTerminalInterruptDebug,
+  normalizeTrace,
+  rememberInterruptTrace,
+  resetTerminalFlowAckSample,
+} = require("./terminalInterruptDiagnostics.cjs");
+const {
+  clearSessionFlowState,
+  setBufferedOutputBytes,
+  setRendererFlowPaused,
+  shouldAcceptSessionOutput,
+  shouldProcessSessionOutput,
+  trackAck,
+} = require("./terminalFlowAck.cjs");
+const {
+  armTerminalInterruptOutputGate,
+  disarmTerminalInterruptOutputGate,
+  filterTerminalInterruptOutput,
+  shouldArmTerminalInterruptOutputGate,
+  stashPendingInterruptOutputMeta,
+  takePendingInterruptOutputMeta,
+} = require("./terminalInterruptOutputGate.cjs");
 const iconv = require("iconv-lite");
 const ptyProcessTree = require("./ptyProcessTree.cjs");
 
@@ -36,6 +70,9 @@ const execFileAsync = promisify(execFile);
 // Shared references
 let sessions = null;
 let electronModule = null;
+let terminalOutputChannel = null;
+let selectZmodemUploadFiles = null;
+let selectZmodemDownloadDirectory = null;
 
 const DEFAULT_UTF8_LOCALE = "en_US.UTF-8";
 const LOGIN_SHELLS = new Set(["bash", "zsh", "fish", "ksh"]);
@@ -69,7 +106,22 @@ const getLoginShellArgs = (shellPath) => {
 function init(deps) {
   sessions = deps.sessions;
   electronModule = deps.electronModule;
+  terminalOutputChannel = deps.terminalOutputChannel || null;
+  selectZmodemUploadFiles = deps.selectZmodemUploadFiles || null;
+  selectZmodemDownloadDirectory = deps.selectZmodemDownloadDirectory || null;
+  configureTerminalSessionDataEmitter({
+    getSession: (sessionId) => sessions?.get(sessionId),
+    outputChannel: terminalOutputChannel,
+  });
   cleanupStaleEtTempDirs();
+}
+
+function openTerminalOutputSession(sessionId, webContents) {
+  terminalOutputChannel?.openSession?.(sessionId, webContents);
+}
+
+function closeTerminalOutputSession(sessionId) {
+  terminalOutputChannel?.closeSession?.(sessionId);
 }
 
 /**
@@ -383,6 +435,7 @@ function startLocalSession(event, payload) {
     _promptTrackTail: "",
   };
   sessions.set(sessionId, session);
+  openTerminalOutputSession(sessionId, event.sender);
   ptyProcessTree.registerPid(sessionId, proc.pid);
 
   // Start real-time session log stream if configured. The token returned
@@ -402,11 +455,25 @@ function startLocalSession(event, payload) {
     });
   }
 
-  const { bufferData: bufferLocalData, flush: flushLocal } = createPtyOutputBuffer((data) => {
+  const {
+    bufferData: bufferLocalData,
+    flushPaced: flushLocalPaced,
+    takePendingEntry: takePendingLocal,
+    discard: discardLocal,
+  } = createPtyOutputBuffer((data, meta) => {
     const contents = electronModule.webContents.fromId(session.webContentsId);
-    contents?.send("netcatty:data", { sessionId, data });
+    emitTerminalSessionData(contents, sessionId, data, {
+      cols: session.cols,
+      rows: session.rows,
+      meta,
+    });
+  }, {
+    onPendingBytesChange: (bytes) => setBufferedOutputBytes(session, bytes),
+    shouldAcceptOutput: () => shouldAcceptSessionOutput(session),
   });
-  session.flushPendingData = flushLocal;
+  session.flushPendingData = flushLocalPaced;
+  session.takePendingData = takePendingLocal;
+  session.discardPendingData = discardLocal;
 
   // On Windows, node-pty ignores encoding: null and still emits UTF-8
   // strings, making raw-byte ZMODEM impossible for local PTY sessions.
@@ -428,32 +495,45 @@ function startLocalSession(event, payload) {
       getWebContents() {
         return electronModule.webContents.fromId(session.webContentsId);
       },
+      selectUploadFiles: selectZmodemUploadFiles
+        ? () => selectZmodemUploadFiles(session.webContentsId)
+        : undefined,
+      selectDownloadDirectory: selectZmodemDownloadDirectory
+        ? () => selectZmodemDownloadDirectory(session.webContentsId)
+        : undefined,
       label: "Local",
     });
     session.zmodemSentry = zmodemSentry;
 
     proc.onData((data) => {
+      if (!shouldProcessSessionOutput(session, zmodemSentry)) return;
       zmodemSentry.consume(data);
     });
   } else {
     proc.onData((data) => {
+      if (!shouldProcessSessionOutput(session)) return;
       trackSessionIdlePrompt(session, data);
       bufferLocalData(data);
       sessionLogStreamManager.appendData(sessionId, data);
     });
   }
 
+  let localExitFinalized = false;
   proc.onExit((evt) => {
-    flushLocal();
-    sessionLogStreamManager.stopStream(sessionId, logStreamToken);
-    ptyProcessTree.unregisterPid(sessionId);
-    sessions.delete(sessionId);
-    const contents = electronModule.webContents.fromId(session.webContentsId);
-    // Signal present = killed externally (show disconnected UI).
-    // No signal = process exited normally, even with non-zero code
-    // (e.g. user typed `exit` after a failed command), so auto-close.
-    const reason = evt.signal ? "error" : "exited";
-    contents?.send("netcatty:exit", { sessionId, ...evt, reason });
+    const finalizeExit = () => {
+      if (localExitFinalized) return;
+      localExitFinalized = true;
+      sessionLogStreamManager.stopStream(sessionId, logStreamToken);
+      ptyProcessTree.unregisterPid(sessionId);
+      sessions.delete(sessionId);
+      const contents = electronModule.webContents.fromId(session.webContentsId);
+      // Signal present = killed externally (show disconnected UI).
+      // No signal = process exited normally, even with non-zero code
+      // (e.g. user typed `exit` after a failed command), so auto-close.
+      const reason = evt.signal ? "error" : "exited";
+      contents?.send("netcatty:exit", { sessionId, ...evt, reason });
+    };
+    flushLocalPaced(finalizeExit);
   });
 
   return { sessionId };
@@ -467,9 +547,12 @@ const telnetSessionApi = createTelnetSessionApi({
   get sessions() { return sessions; },
   get electronModule() { return electronModule; },
   net, randomUUID, StringDecoder, iconv, Buffer, console, setTimeout, clearTimeout,
-  normalizeTerminalEncoding, createTelnetAutoLogin, telnetProtocol,
+  normalizeTerminalEncoding, encodeTerminalInput, createTelnetAutoLogin, telnetProtocol,
   createPtyOutputBuffer, sessionLogStreamManager, createZmodemSentry, ptyProcessTree,
-  enableTcpNoDelay, trackSessionIdlePrompt, stripAnsi,
+  enableTcpNoDelay, trackSessionIdlePrompt, stripAnsi, clearPendingAutomatedWrites,
+  openTerminalOutputSession, closeTerminalOutputSession,
+  get selectZmodemUploadFiles() { return selectZmodemUploadFiles; },
+  get selectZmodemDownloadDirectory() { return selectZmodemDownloadDirectory; },
 });
 const { startTelnetSession } = telnetSessionApi;
 
@@ -488,6 +571,9 @@ const moshSessionApi = createMoshSessionApi({
   stripAnsi, trackSessionIdlePrompt, createZmodemSentry, moshHandshake, tempDirBridge,
   createPtyOutputBuffer, enableTcpNoDelay, normalizeTerminalEncoding,
   resolvePosixExecutable, findExecutable, isExecutableFile,
+  openTerminalOutputSession, closeTerminalOutputSession,
+  get selectZmodemUploadFiles() { return selectZmodemUploadFiles; },
+  get selectZmodemDownloadDirectory() { return selectZmodemDownloadDirectory; },
   bundledMoshClient: (...args) => bundledMoshClient(...args),
 });
 const {
@@ -495,6 +581,7 @@ const {
   addBundledMoshDllPath,
   addBundledMoshTerminfoEnv,
   addBundledMoshRuntimeEnv,
+  createMoshUtf8Decoder,
   buildMoshSshAuthArgs,
   cleanupMoshAuthTempFiles,
   startMoshSessionViaHandshake,
@@ -517,6 +604,9 @@ const etSessionApi = createEtSessionApi({
   sessionLogStreamManager, tempDirBridge,
   createZmodemSentry, trackSessionIdlePrompt, createPtyOutputBuffer,
   findExecutable,
+  openTerminalOutputSession, closeTerminalOutputSession,
+  get selectZmodemUploadFiles() { return selectZmodemUploadFiles; },
+  get selectZmodemDownloadDirectory() { return selectZmodemDownloadDirectory; },
   bundledEtClient: (...args) => bundledEtClient(...args),
 });
 const {
@@ -607,6 +697,7 @@ async function startSerialSession(event, options) {
           webContentsId: event.sender.id,
         };
         sessions.set(sessionId, session);
+        openTerminalOutputSession(sessionId, event.sender);
 
         // Start real-time session log stream if configured
         if (options.sessionLog?.enabled && options.sessionLog?.directory) {
@@ -626,7 +717,10 @@ async function startSerialSession(event, options) {
             const decoded = serialDecoderRef.current.write(buf);
             if (!decoded) return;
             const contents = electronModule.webContents.fromId(session.webContentsId);
-            contents?.send("netcatty:data", { sessionId, data: decoded });
+            emitTerminalSessionData(contents, sessionId, decoded, {
+              cols: session.cols,
+              rows: session.rows,
+            });
             sessionLogStreamManager.appendData(sessionId, decoded);
           },
           writeToRemote(buf) {
@@ -635,12 +729,19 @@ async function startSerialSession(event, options) {
           getWebContents() {
             return electronModule.webContents.fromId(session.webContentsId);
           },
+          selectUploadFiles: selectZmodemUploadFiles
+            ? () => selectZmodemUploadFiles(session.webContentsId)
+            : undefined,
+          selectDownloadDirectory: selectZmodemDownloadDirectory
+            ? () => selectZmodemDownloadDirectory(session.webContentsId)
+            : undefined,
           label: "Serial",
         });
         session.zmodemSentry = serialZmodemSentry;
 
         serialPort.on('data', (data) => {
           if (session.ymodemActive) return;
+          if (!shouldProcessSessionOutput(session, serialZmodemSentry)) return;
           // data is already Buffer from serialport — feed to sentry
           serialZmodemSentry.consume(data);
         });
@@ -685,12 +786,35 @@ function cancelActiveYmodemSession(session) {
   session.ymodemAbortController?.abort();
 }
 
-function signalSshInterruptIfNeeded(session, data) {
-  if (data !== '\x03' || !session?.stream || typeof session.stream.signal !== "function") return;
+function pauseSshOutputForInterrupt(session, trace) {
+  const stream = session?.stream;
+  if (!stream || typeof stream.pause !== "function") return false;
+  const flowState = session.flowState;
+  let alreadyPaused = Boolean(flowState?.appliedPause || flowState?.rendererPaused);
   try {
-    session.stream.signal("INT");
+    if (typeof stream.isPaused === "function") {
+      alreadyPaused = alreadyPaused || stream.isPaused();
+    }
   } catch {
-    // Keep the legacy Ctrl+C byte write as the compatibility fallback.
+    // Treat unreadable pause state as not paused; a best-effort pause is fine.
+  }
+  if (alreadyPaused) return false;
+  logTerminalInterruptDebug("interrupt-output-pause-before-write-start", {
+    session: getSessionSnapshot(session),
+  }, trace);
+  try {
+    stream.pause();
+    logTerminalInterruptDebug("interrupt-output-pause-before-write-done", {
+      session: getSessionSnapshot(session),
+    }, trace);
+    return true;
+  } catch (err) {
+    logTerminalInterruptDebug("interrupt-output-pause-before-write-failed", {
+      error: err?.message || String(err),
+      code: err?.code,
+      session: getSessionSnapshot(session),
+    }, trace);
+    return false;
   }
 }
 
@@ -699,6 +823,25 @@ function clearPendingAutomatedWrites(session) {
   if (!Array.isArray(timers) || timers.length === 0) return;
   for (const timer of timers) clearTimeout(timer);
   session.pendingAutomatedWriteTimers = [];
+}
+
+// Terminal-originated automatic replies (cursor position reports, device
+// attributes, focus in/out, etc.) travel through the same write path as user
+// keystrokes but must NOT be treated as "the user started typing". A terminal
+// routinely emits such a reply right after the first line runs; counting it as
+// manual input would clear the pending automated line-by-line writes and only
+// the first line would ever be sent (multi-line compose-bar input bug).
+function isTerminalReportSequence(data) {
+  if (typeof data !== "string" || data.length === 0) return false;
+  // Focus in/out reports: ESC [ I  /  ESC [ O
+  if (data === "\x1b[I" || data === "\x1b[O") return true;
+  // CPR / DECXCPR / DA1 / DA2 / DSR: ESC [ (?|>)? digits/semicolons (R|c|n)
+  if (/^\x1b\[[?>]?[0-9;]*[Rcn]$/.test(data)) return true;
+  // Kitty keyboard mode query reply: ESC [ ? digits u
+  if (/^\x1b\[\?[0-9]+u$/.test(data)) return true;
+  // DCS replies (XTGETTCAP / DECRQSS, etc.): ESC P ... ESC \
+  if (/^\x1bP[\s\S]*\x1b\\$/.test(data)) return true;
+  return false;
 }
 
 function splitTerminalInputIntoLineWrites(data) {
@@ -748,8 +891,25 @@ function shouldBlockSessionInput(session, data) {
 
 function writeToSessionNow(payload, data, logRewrite = payload.logRewrite) {
   const session = sessions.get(payload.sessionId);
-  if (!session) return;
-  if (shouldBlockSessionInput(session, data)) return;
+  const trace = payload.interruptTrace || null;
+  if (!session) {
+    logTerminalInterruptDebug("write-session-missing", {
+      sessionId: payload.sessionId,
+      dataCode: data === "\x03" ? "ETX" : undefined,
+    }, trace);
+    return;
+  }
+  if (shouldBlockSessionInput(session, data)) {
+    logTerminalInterruptDebug("write-session-blocked-by-transfer", {
+      sessionId: payload.sessionId,
+      dataCode: data === "\x03" ? "ETX" : undefined,
+      session: getSessionSnapshot(session),
+    }, trace);
+    return;
+  }
+  if (data !== "\x03" && !payload.automated && !isTerminalReportSequence(data)) {
+    disarmTerminalInterruptOutputGate(session);
+  }
 
   try {
     if (session.type === 'telnet-native' && !payload.automated) {
@@ -765,11 +925,27 @@ function writeToSessionNow(payload, data, logRewrite = payload.logRewrite) {
     // the transport's native string serialization keeps handling that case.
     sessionLogStreamManager.registerSudoAutofillInput(payload.sessionId, data);
     sessionLogStreamManager.registerProgrammaticCommandLogRewrite(payload.sessionId, logRewrite);
-    const outgoing = encodeTerminalInput(data, session.encoding);
+    const inputData = session.type === 'telnet-native'
+      ? telnetProtocol.normalizeNvtNewlines(data)
+      : data;
+    const outgoing = encodeTerminalInput(inputData, session.encoding);
 
     if (session.stream) {
-      signalSshInterruptIfNeeded(session, data);
-      session.stream.write(outgoing);
+      const shouldLogInterruptWrite = data === "\x03" || trace;
+      if (shouldLogInterruptWrite) {
+        logTerminalInterruptDebug("ssh-stream-write-start", {
+          outgoingBytes: Buffer.isBuffer(outgoing) ? outgoing.length : Buffer.byteLength(String(outgoing)),
+          dataCode: data === "\x03" ? "ETX" : undefined,
+          session: getSessionSnapshot(session),
+        }, trace);
+      }
+      const writeResult = session.stream.write(outgoing);
+      if (shouldLogInterruptWrite) {
+        logTerminalInterruptDebug("ssh-stream-write-done", {
+          writeResult,
+          session: getSessionSnapshot(session),
+        }, trace);
+      }
     } else if (session.proc) {
       session.proc.write(outgoing);
     } else if (session.socket) {
@@ -790,6 +966,12 @@ function writeToSessionNow(payload, data, logRewrite = payload.logRewrite) {
       session.serialPort.write(outgoing);
     }
   } catch (err) {
+    logTerminalInterruptDebug("write-session-error", {
+      sessionId: payload.sessionId,
+      error: err?.message || String(err),
+      code: err?.code,
+      session: getSessionSnapshot(session),
+    }, trace);
     if (err.code !== 'EPIPE' && err.code !== 'ERR_STREAM_DESTROYED') {
       console.warn("Write failed", err);
     }
@@ -800,7 +982,9 @@ function writeToSession(event, payload) {
   const session = sessions.get(payload.sessionId);
   if (!session) return;
 
-  if (!payload.automated) clearPendingAutomatedWrites(session);
+  if (!payload.automated && !isTerminalReportSequence(payload.data)) {
+    clearPendingAutomatedWrites(session);
+  }
   if (shouldBlockSessionInput(session, payload.data)) {
     return;
   }
@@ -831,6 +1015,92 @@ function writeToSession(event, payload) {
   }
 
   writeToSessionNow(payload, payload.data);
+}
+
+function drainPendingOutputForInterrupt(sessionId, session, trace) {
+  if (typeof session?.takePendingData !== "function") return;
+  const pendingEntry = session.takePendingData();
+  const pending = typeof pendingEntry === "string" ? pendingEntry : pendingEntry?.data;
+  const pendingMeta = typeof pendingEntry === "string" ? undefined : pendingEntry?.meta;
+  if (!pending) return;
+  const output = filterTerminalInterruptOutput(session, pending);
+  if (!output.accepted || output.droppedBytes > 0) {
+    logTerminalInterruptDebug("interrupt-pending-output-filtered", {
+      session: getSessionSnapshot(session),
+      droppedBytes: output.droppedBytes,
+      reason: output.reason,
+      accepted: output.accepted,
+    }, trace);
+  }
+  if (!output.accepted || !output.data) {
+    stashPendingInterruptOutputMeta(session, pendingMeta);
+    return;
+  }
+  const outputMeta = takePendingInterruptOutputMeta(session, pendingMeta);
+  const contents = electronModule.webContents.fromId(session.webContentsId);
+  emitTerminalSessionData(contents, sessionId, output.data, {
+    cols: session.cols,
+    rows: session.rows,
+    meta: outputMeta,
+  });
+}
+
+function interruptSession(event, payload) {
+  const session = sessions.get(payload.sessionId);
+  const trace = normalizeTrace(payload);
+  if (!session) {
+    logTerminalInterruptDebug("interrupt-session-missing", {
+      sessionId: payload.sessionId,
+      senderId: event?.sender?.id,
+    }, trace);
+    return;
+  }
+  rememberInterruptTrace(session, trace);
+  resetTerminalFlowAckSample(session);
+  logTerminalInterruptDebug("interrupt-session-received", {
+    sessionId: payload.sessionId,
+    senderId: event?.sender?.id,
+    rendererPriority: trace?.rendererPriority,
+    session: getSessionSnapshot(session),
+  }, trace);
+
+  clearPendingAutomatedWrites(session);
+  const shouldDrainOldOutput = shouldArmTerminalInterruptOutputGate(session);
+  const pausedForInterrupt = shouldDrainOldOutput
+    ? pauseSshOutputForInterrupt(session, trace)
+    : false;
+  if (shouldDrainOldOutput) {
+    armTerminalInterruptOutputGate(session);
+    logTerminalInterruptDebug("interrupt-output-drain-armed", {
+      session: getSessionSnapshot(session),
+    }, trace);
+    drainPendingOutputForInterrupt(payload.sessionId, session, trace);
+  }
+  logTerminalInterruptDebug("interrupt-clear-flow-start", {
+    session: getSessionSnapshot(session),
+  }, trace);
+  clearSessionFlowState(session, { resume: !shouldDrainOldOutput });
+  logTerminalInterruptDebug("interrupt-clear-flow-done", {
+    session: getSessionSnapshot(session),
+  }, trace);
+  writeToSessionNow({ sessionId: payload.sessionId, interruptTrace: trace }, "\x03");
+  if (shouldDrainOldOutput || pausedForInterrupt) {
+    queueMicrotask(() => {
+      if (sessions.get(payload.sessionId) !== session) return;
+      try {
+        session.stream?.resume?.();
+        logTerminalInterruptDebug("interrupt-output-resumed-after-write", {
+          session: getSessionSnapshot(session),
+        }, trace);
+      } catch (err) {
+        logTerminalInterruptDebug("interrupt-output-resume-after-write-failed", {
+          error: err?.message || String(err),
+          code: err?.code,
+          session: getSessionSnapshot(session),
+        }, trace);
+      }
+    });
+  }
 }
 
 async function sendSerialYmodem(_event, payload) {
@@ -920,20 +1190,38 @@ async function receiveSerialYmodem(_event, payload) {
  */
 function setSessionFlowPaused(event, payload) {
   const session = sessions.get(payload.sessionId);
-  if (!session) return;
-  const target = session.stream || session.proc || session.socket || session.serialPort;
-  if (!target) return;
-  try {
-    if (payload.paused) {
-      target.pause?.();
-    } else {
-      target.resume?.();
-    }
-  } catch (err) {
-    if (err?.code !== 'EPIPE' && err?.code !== 'ERR_STREAM_DESTROYED') {
-      console.warn("Flow control toggle failed", err);
-    }
+  if (!session) {
+    logTerminalInterruptDebug("flow-paused-session-missing", {
+      sessionId: payload.sessionId,
+      paused: Boolean(payload.paused),
+      senderId: event?.sender?.id,
+    }, normalizeTrace(payload));
+    return;
   }
+  const trace = getRecentInterruptTrace(session);
+  setRendererFlowPaused(session, payload.paused);
+  if (!payload.paused) {
+    session.flushPendingData?.();
+  }
+  if (trace) {
+    logTerminalFlowPauseSample(session, {
+      sessionId: payload.sessionId,
+      paused: Boolean(payload.paused),
+      senderId: event?.sender?.id,
+    });
+  }
+}
+
+function ackSessionFlow(event, payload) {
+  const session = sessions.get(payload.sessionId);
+  if (!session) return;
+  logTerminalFlowAckSample(session, {
+    sessionId: payload.sessionId,
+    bytes: Number(payload.bytes),
+    senderId: event?.sender?.id,
+  });
+  trackAck(session, Number(payload.bytes));
+  session.flushPendingData?.();
 }
 
 /**
@@ -981,13 +1269,16 @@ function closeSession(event, payload) {
   const session = sessions.get(payload.sessionId);
   if (!session) return;
   session.closed = true;
-  
+  closeTerminalOutputSession(payload.sessionId);
+
   try {
+    clearSessionFlowState(session, { resume: false });
     cancelActiveYmodemSession(session);
     clearPendingAutomatedWrites(session);
     session.zmodemSentry?.cancel();
-    session.flushPendingData?.();
+    session.discardPendingData?.();
     cleanupSessionExternalAuthArtifacts(session);
+    session.releaseTelnetGeneration?.();
     if (session.stream) {
       // Snapshot multiplexing state *before* closing the channel: closing the
       // stream can synchronously fire its "close" handler, which nulls
@@ -1070,7 +1361,49 @@ function setSessionEncoding(_event, { sessionId, encoding }) {
 /**
  * Register IPC handlers for terminal operations
  */
-function registerHandlers(ipcMain) {
+function registerWorkerHandle(ipcMain, terminalWorkerManager, channel) {
+  ipcMain.handle(channel, (event, payload) => {
+    return terminalWorkerManager.request(channel, payload, {
+      webContentsId: event?.sender?.id,
+    });
+  });
+}
+
+function registerWorkerSend(ipcMain, terminalWorkerManager, channel) {
+  ipcMain.on(channel, (event, payload) => {
+    terminalWorkerManager.send(channel, payload, {
+      webContentsId: event?.sender?.id,
+    });
+  });
+}
+
+function registerHandlers(ipcMain, options = {}) {
+  const terminalWorkerManager = options.terminalWorkerManager || null;
+  if (terminalWorkerManager) {
+    [
+      "netcatty:local:start",
+      "netcatty:telnet:start",
+      "netcatty:mosh:start",
+      "netcatty:et:start",
+      "netcatty:serial:start",
+      "netcatty:serial:list",
+      "netcatty:serial:ymodem-send",
+      "netcatty:serial:ymodem-receive",
+      "netcatty:local:defaultShell",
+      "netcatty:local:validatePath",
+      "netcatty:shells:discover",
+      "netcatty:terminal:setEncoding",
+    ].forEach((channel) => registerWorkerHandle(ipcMain, terminalWorkerManager, channel));
+    [
+      "netcatty:write",
+      "netcatty:interrupt",
+      "netcatty:resize",
+      "netcatty:flow",
+      "netcatty:flow:ack",
+      "netcatty:close",
+    ].forEach((channel) => registerWorkerSend(ipcMain, terminalWorkerManager, channel));
+    return;
+  }
   ipcMain.handle("netcatty:local:start", startLocalSession);
   ipcMain.handle("netcatty:telnet:start", startTelnetSession);
   ipcMain.handle("netcatty:mosh:start", startMoshSession);
@@ -1084,8 +1417,10 @@ function registerHandlers(ipcMain) {
   ipcMain.handle("netcatty:shells:discover", () => discoverShells());
   ipcMain.handle("netcatty:terminal:setEncoding", setSessionEncoding);
   ipcMain.on("netcatty:write", writeToSession);
+  ipcMain.on("netcatty:interrupt", interruptSession);
   ipcMain.on("netcatty:resize", resizeSession);
   ipcMain.on("netcatty:flow", setSessionFlowPaused);
+  ipcMain.on("netcatty:flow:ack", ackSessionFlow);
   ipcMain.on("netcatty:close", closeSession);
 }
 
@@ -1190,7 +1525,11 @@ function cleanupAllSessions() {
       session.zmodemSentry?.cancel();
       cancelActiveYmodemSession(session);
       clearPendingAutomatedWrites(session);
+      clearSessionFlowState(session, { resume: false });
+      session.discardPendingData?.();
+      closeTerminalOutputSession(sessionId);
       cleanupSessionExternalAuthArtifacts(session);
+      session.releaseTelnetGeneration?.();
       if (session.stream) {
         session.stream.close();
         session.conn?.end();
@@ -1227,6 +1566,7 @@ function cleanupAllSessions() {
     ptyProcessTree.unregisterPid(sessionId);
   }
   sessions.clear();
+  terminalOutputChannel?.closeAll?.();
 }
 
 module.exports = {
@@ -1241,6 +1581,7 @@ module.exports = {
   addBundledMoshDllPath,
   addBundledMoshTerminfoEnv,
   addBundledMoshRuntimeEnv,
+  createMoshUtf8Decoder,
   startEtSession,
   execOnEtSession,
   bundledEtClient,
@@ -1252,7 +1593,9 @@ module.exports = {
   setSessionEncoding,
   resizeSession,
   setSessionFlowPaused,
+  ackSessionFlow,
   closeSession,
+  interruptSession,
   cleanupAllSessions,
   getDefaultShell,
   validatePath,

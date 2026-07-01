@@ -1,5 +1,16 @@
 import { fromEditorTabId, isEditorTabId } from "../state/activeTabStore";
 
+import { applyCustomAccentToTerminalTheme, resolveHostTerminalThemeId } from "../../domain/terminalAppearance";
+import type {
+  ResolvedAppearance,
+  TerminalAppearanceHostScope,
+} from "../../domain/terminalAppearanceRuntime";
+import { collectSessionIds } from "../../domain/workspace";
+import type { EditorTab } from "../state/editorTabStore";
+import type { LogView } from "../state/logViewState";
+import type { Host, TerminalSession, TerminalTheme, Workspace } from "../../types";
+import { resolveWorkspaceTargetSessionFromMap } from "./workTabSurface";
+
 export type ResolveActiveChromeThemeInput = {
   accentMode: "theme" | "custom";
   activeTabId: string;
@@ -9,6 +20,7 @@ export type ResolveActiveChromeThemeInput = {
   followAppTerminalTheme: boolean;
   hostById: Map<string, Host>;
   logViews: readonly LogView[];
+  resolveSessionAppearance?: (hostScope: TerminalAppearanceHostScope) => ResolvedAppearance;
   sessionById: Map<string, TerminalSession>;
   themeById: Map<string, TerminalTheme>;
   workspaceById: Map<string, Workspace>;
@@ -33,11 +45,6 @@ export function isActiveChromeThemeResolvable({
   if (sessionById.has(activeTabId)) return true;
   return false;
 }
-import { applyCustomAccentToTerminalTheme, resolveHostTerminalThemeId } from "../../domain/terminalAppearance";
-import { collectSessionIds } from "../../domain/workspace";
-import type { EditorTab } from "../state/editorTabStore";
-import type { LogView } from "../state/logViewState";
-import type { Host, TerminalSession, TerminalTheme, Workspace } from "../../types";
 
 export function resolveActiveChromeTheme({
   accentMode,
@@ -48,14 +55,23 @@ export function resolveActiveChromeTheme({
   followAppTerminalTheme,
   hostById,
   logViews,
+  resolveSessionAppearance,
   sessionById,
   themeById,
   workspaceById,
 }: ResolveActiveChromeThemeInput): TerminalTheme | null {
   if (activeTabId === "vault" || activeTabId === "sftp") return null;
 
+  const resolveHostScope = (hostId: string): TerminalAppearanceHostScope => {
+    const host = hostById.get(hostId) ?? null;
+    return { host, isEphemeral: !host || !hostById.has(host.id) };
+  };
+
   const resolveHostTheme = (hostId: string): TerminalTheme => {
     if (followAppTerminalTheme) return currentTerminalTheme;
+    if (resolveSessionAppearance) {
+      return resolveSessionAppearance(resolveHostScope(hostId)).theme;
+    }
     const host = hostById.get(hostId) ?? null;
     const themeId = resolveHostTerminalThemeId(host, currentTerminalTheme.id);
     const baseTheme = themeById.get(themeId) ?? currentTerminalTheme;
@@ -79,12 +95,10 @@ export function resolveActiveChromeTheme({
 
   const workspace = workspaceById.get(activeTabId);
   if (workspace) {
+    if (followAppTerminalTheme) return currentTerminalTheme;
+
     if (workspace.viewMode === "focus") {
-      const workspaceSessionIds = collectSessionIds(workspace.root);
-      const focusedSession = (workspace.focusedSessionId
-        ? sessionById.get(workspace.focusedSessionId)
-        : null)
-        ?? workspaceSessionIds.map((id) => sessionById.get(id)).find(Boolean);
+      const focusedSession = resolveWorkspaceTargetSessionFromMap(workspace, sessionById);
       return focusedSession ? resolveSessionTheme(focusedSession) : null;
     }
 
@@ -95,7 +109,10 @@ export function resolveActiveChromeTheme({
 
     const firstTheme = resolveSessionTheme(workspaceSessions[0]);
     const allSame = workspaceSessions.every((session) => resolveSessionTheme(session).id === firstTheme.id);
-    return allSame ? firstTheme : null;
+    if (allSame) return firstTheme;
+
+    const focusedSession = resolveWorkspaceTargetSessionFromMap(workspace, sessionById);
+    return focusedSession ? resolveSessionTheme(focusedSession) : null;
   }
 
   const session = sessionById.get(activeTabId);

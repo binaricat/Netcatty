@@ -71,6 +71,7 @@ function createConfigAndCleanupApi(ctx) {
         scopedAttachments.delete(chatSessionId);
         cancelledChatSessions.delete(chatSessionId);
         cancelBackgroundJobsForSession(chatSessionId);
+        cancelWorkerBackgroundJobsForSession(chatSessionId);
         // Resolve any in-flight approval requests so dispatch()'s finally block
         // releases its pendingSessionWriteApprovals entry. Without this, a chat
         // deleted while an approval was pending would leave the per-session

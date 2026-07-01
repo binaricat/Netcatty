@@ -47,6 +47,26 @@ function stringCellWidth(s: string): number {
   return w;
 }
 
+function commonPrefixLength(a: string, b: string): number {
+  const max = Math.min(a.length, b.length);
+  let i = 0;
+  while (i < max && a[i] === b[i]) i += 1;
+  return i;
+}
+
+function hasVisibleGhostPrefix(ghostText: string, afterCursor: string): boolean {
+  if (!ghostText || !afterCursor) return false;
+  const visibleAfterCursor = afterCursor.trimEnd();
+  const overlap = commonPrefixLength(ghostText, visibleAfterCursor);
+  if (overlap <= 0) return false;
+  if (ghostText.slice(0, overlap).trim().length === 0) return false;
+  return (
+    overlap === ghostText.length ||
+    overlap === visibleAfterCursor.length ||
+    afterCursor[overlap] === " "
+  );
+}
+
 export class GhostTextAddon implements IDisposable {
   private term: XTerm | null = null;
   private ghostElement: HTMLSpanElement | null = null;
@@ -135,9 +155,9 @@ export class GhostTextAddon implements IDisposable {
         if (this.hintActive) this.updateHintPosition();
         if (!this.isVisible()) return;
         // Fail-safe: if the device echoed input we didn't track (some bastion
-        // hosts / network OS, #1013), hide rather than draw the ghost over
-        // already-typed text. Done here (post-echo render) rather than in
-        // show()/adjustToInput so it never fights the keystroke-time path.
+        // hosts / network OS, #1013/#1060), hide rather than draw the ghost
+        // over already-visible text. Done here (post-echo render) rather than
+        // in show()/adjustToInput so it never fights the keystroke-time path.
         if (this.realLineHasUntrackedInput()) {
           this.hide();
           return;
@@ -331,7 +351,7 @@ export class GhostTextAddon implements IDisposable {
   }
 
   getGhostText(): string {
-    if (!this.currentSuggestion || !this.currentInput) return "";
+    if (!this.currentSuggestion) return "";
     return this.currentSuggestion.startsWith(this.currentInput)
       ? this.currentSuggestion.substring(this.currentInput.length)
       : "";
@@ -355,19 +375,24 @@ export class GhostTextAddon implements IDisposable {
   }
 
   /**
-   * True when the real terminal line has more input than we tracked, so
-   * rendering the ghost would paint over already-typed characters. See
-   * ./ghostTextConsistency and issue #1013. Returns false on hosts/inputs
-   * we can't judge (non-ASCII, echo still catching up), so the ghost only
-   * gets suppressed when corruption is actually imminent.
+   * True when the real terminal line has input we did not track, or already
+   * visible text exactly matches the ghost we are about to paint. See
+   * ./ghostTextConsistency and issues #1013 and #1060. Returns false on
+   * hosts/inputs we can't judge (non-ASCII, echo still catching up), so the
+   * ghost only gets suppressed when corruption is actually imminent.
    */
   private realLineHasUntrackedInput(): boolean {
-    if (!this.term || !this.currentInput) return false;
+    if (!this.term) return false;
     const buf = this.term.buffer.active;
     if (typeof buf?.getLine !== "function") return false;
     const line = buf.getLine(buf.baseY + buf.cursorY);
     if (!line || typeof line.translateToString !== "function") return false;
-    const beforeCursor = line.translateToString(false).slice(0, buf.cursorX);
+    const lineText = line.translateToString(false);
+    const beforeCursor = lineText.slice(0, buf.cursorX);
+    const afterCursor = lineText.slice(buf.cursorX);
+    const ghostText = this.getGhostText();
+    if (hasVisibleGhostPrefix(ghostText, afterCursor)) return true;
+    if (!this.currentInput) return false;
     return lineHasUntrackedTrailingInput(this.currentInput, beforeCursor);
   }
 

@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  buildVaultNoteMarkdownExportFiles,
   buildVaultNoteFromMarkdownImport,
   deriveNoteImportTitle,
+  getVaultNotesForExportScope,
   importMarkdownFilesToVaultNotes,
   importMarkdownPayloadsToVaultNotes,
   matchesVaultNoteSearch,
@@ -11,15 +13,24 @@ import {
   remapExpandedNoteGroupPaths,
   resolveMovedNoteGroupPath,
   resolveRenderedMarkdownLinkHref,
+  sanitizeNoteExportFileNamePart,
+  sanitizeNoteTitle,
   sanitizeVaultNote,
 } from "./notes";
 
 test("sanitizeVaultNote supplies safe defaults", () => {
   const note = sanitizeVaultNote({ title: "  ", content: 123 as never });
-  assert.equal(note.title, "Untitled note");
+  assert.equal(note.title, "");
   assert.equal(note.content, "");
   assert.equal(typeof note.id, "string");
   assert.equal(typeof note.createdAt, "number");
+});
+
+test("sanitizeNoteTitle preserves non-empty titles and allows empty titles", () => {
+  assert.equal(sanitizeNoteTitle("  My note  "), "My note");
+  assert.equal(sanitizeNoteTitle(""), "");
+  assert.equal(sanitizeNoteTitle("   "), "");
+  assert.equal(sanitizeNoteTitle(undefined), "");
 });
 
 test("normalizeVaultNotes trims group and de-duplicates tags", () => {
@@ -101,6 +112,44 @@ test("matchesVaultNoteSearch checks title, body, tags, group, and linked hosts",
   assert.equal(matchesVaultNoteSearch(note, "postgres", hosts), true);
   assert.equal(matchesVaultNoteSearch(note, "db-prod", hosts), true);
   assert.equal(matchesVaultNoteSearch(note, "missing", hosts), false);
+});
+
+test("sanitizeNoteExportFileNamePart removes unsafe path characters", () => {
+  assert.equal(sanitizeNoteExportFileNamePart("  a/b:c*  ", "note"), "a-b-c-");
+  assert.equal(sanitizeNoteExportFileNamePart("a\u0001b", "note"), "a-b");
+  assert.equal(sanitizeNoteExportFileNamePart("..", "note"), "note");
+  assert.equal(sanitizeNoteExportFileNamePart("CON", "note"), "CON_");
+});
+
+test("getVaultNotesForExportScope includes only selected folder descendants", () => {
+  const notes = [
+    sanitizeVaultNote({ id: "n1", title: "Root", content: "root", createdAt: 1, updatedAt: 1, order: 1000 }),
+    sanitizeVaultNote({ id: "n2", title: "Ops", content: "ops", group: "Ops", createdAt: 1, updatedAt: 1, order: 2000 }),
+    sanitizeVaultNote({ id: "n3", title: "DB", content: "db", group: "Ops/DB", createdAt: 1, updatedAt: 1, order: 3000 }),
+    sanitizeVaultNote({ id: "n4", title: "Other", content: "other", group: "Other", createdAt: 1, updatedAt: 1, order: 4000 }),
+  ];
+
+  assert.deepEqual(
+    getVaultNotesForExportScope(notes, { type: "group", group: "Ops" }).map((item) => item.id),
+    ["n2", "n3"],
+  );
+});
+
+test("buildVaultNoteMarkdownExportFiles preserves groups and de-duplicates file names", () => {
+  const notes = [
+    sanitizeVaultNote({ id: "n1", title: "Runbook", content: "# One", group: "Ops/DB", createdAt: 1, updatedAt: 1, order: 1000 }),
+    sanitizeVaultNote({ id: "n2", title: "Runbook", content: "# Two", group: "Ops/DB", createdAt: 1, updatedAt: 1, order: 2000 }),
+    sanitizeVaultNote({ id: "n3", title: "", content: "Untitled", createdAt: 1, updatedAt: 1, order: 3000 }),
+    sanitizeVaultNote({ id: "n4", title: "Outside", content: "Nope", group: "Other", createdAt: 1, updatedAt: 1, order: 4000 }),
+  ];
+
+  const files = buildVaultNoteMarkdownExportFiles(notes, { type: "group", group: "Ops" });
+  assert.deepEqual(files, [
+    { name: "Ops/DB/Runbook.md", content: "# One" },
+    { name: "Ops/DB/Runbook-2.md", content: "# Two" },
+  ]);
+
+  assert.equal(buildVaultNoteMarkdownExportFiles(notes)[2].name, "note-3.md");
 });
 
 test("resolveRenderedMarkdownLinkHref recovers ssh links sanitized by the editor DOM", () => {

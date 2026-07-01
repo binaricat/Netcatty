@@ -30,7 +30,11 @@ const {
   hasWorkspaceSessionDrag,
   isPointInsideRect,
 } = await import("../application/state/terminalDragData.ts");
-const { activateLogViewTab } = await import("./top-tabs/TopTabItems.tsx");
+const {
+  activateLogViewTab,
+  formatSessionTopTabLabel,
+  formatSessionTopTabTooltip,
+} = await import("./top-tabs/TopTabItems.tsx");
 const { activeTabStore } = await import("../application/state/activeTabStore.ts");
 const indexCss = readFileSync(new URL("../index.css", import.meta.url), "utf8");
 const topTabsSource = readFileSync(new URL("./TopTabs.tsx", import.meta.url), "utf8");
@@ -109,6 +113,79 @@ test("SessionTabIcon checks custom host icon appearance before distro logos", ()
   assert.ok(
     source.indexOf("resolveHostIconAppearance(host)") < source.indexOf("getEffectiveHostDistro(host)"),
     "custom host icon should be checked before distro fallback",
+  );
+});
+
+test("session top tab label appends the target address for ssh sessions", () => {
+  assert.equal(
+    formatSessionTopTabLabel({
+      hostLabel: "prod-web",
+      hostname: "10.1.2.34",
+      protocol: "ssh",
+    }),
+    "prod-web · 10.1.2.34",
+  );
+});
+
+test("session top tab label treats missing protocol as ssh", () => {
+  assert.equal(
+    formatSessionTopTabLabel({
+      hostLabel: "prod-web",
+      hostname: "10.1.2.34",
+    }),
+    "prod-web · 10.1.2.34",
+  );
+  assert.equal(
+    formatSessionTopTabTooltip({
+      username: "root",
+      hostname: "10.1.2.34",
+      port: 22,
+    }),
+    "root@10.1.2.34:22",
+  );
+});
+
+test("session top tab label avoids duplicating the target address", () => {
+  assert.equal(
+    formatSessionTopTabLabel({
+      hostLabel: "10.1.2.34",
+      hostname: "10.1.2.34",
+      protocol: "ssh",
+    }),
+    "10.1.2.34",
+  );
+});
+
+test("session top tab tooltip includes username and port when present", () => {
+  assert.equal(
+    formatSessionTopTabTooltip({
+      username: "root",
+      hostname: "db.internal",
+      port: 2222,
+      protocol: "ssh",
+    }),
+    "root@db.internal:2222",
+  );
+});
+
+test("session top tab helpers ignore local and mosh sessions", () => {
+  assert.equal(
+    formatSessionTopTabLabel({
+      hostLabel: "Local shell",
+      hostname: "127.0.0.1",
+      protocol: "local",
+    }),
+    "Local shell",
+  );
+  assert.equal(
+    formatSessionTopTabTooltip({
+      username: "root",
+      hostname: "10.1.2.34",
+      port: 22,
+      protocol: "ssh",
+      moshEnabled: true,
+    }),
+    null,
   );
 });
 

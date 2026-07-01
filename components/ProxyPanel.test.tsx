@@ -4,7 +4,7 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { I18nProvider } from "../application/i18n/I18nProvider.tsx";
-import type { ProxyProfile } from "../types.ts";
+import type { Identity, ProxyProfile } from "../types.ts";
 import { ProxyPanel } from "./host-details/ProxyPanel.tsx";
 
 const proxyProfile: ProxyProfile = {
@@ -18,6 +18,15 @@ const proxyProfile: ProxyProfile = {
   createdAt: 1,
 };
 
+const proxyIdentity: Identity = {
+  id: "identity-1",
+  label: "Proxy login",
+  username: "proxy-user",
+  authMethod: "password",
+  password: "proxy-secret",
+  created: 1,
+};
+
 const renderPanel = (props: Partial<React.ComponentProps<typeof ProxyPanel>> = {}) =>
   renderToStaticMarkup(
     React.createElement(
@@ -26,6 +35,7 @@ const renderPanel = (props: Partial<React.ComponentProps<typeof ProxyPanel>> = {
       React.createElement(ProxyPanel, {
         proxyConfig: undefined,
         proxyProfiles: [],
+        identities: [],
         selectedProxyProfileId: undefined,
         onUpdateProxy: () => {},
         onSelectProxyProfile: () => {},
@@ -102,6 +112,79 @@ test("ProxyPanel disables saving invalid manual proxy ports", () => {
   assert.match(markup, /disabled=""/);
 });
 
+test("ProxyPanel shows a clear missing state for stale proxy identities", () => {
+  const markup = renderPanel({
+    proxyConfig: {
+      type: "http",
+      host: "manual-proxy.example.com",
+      port: 3128,
+      identityId: "missing-identity",
+    },
+    identities: [proxyIdentity],
+  });
+
+  assert.match(markup, /Missing keychain identity/);
+  assert.match(markup, /Username/);
+  assert.match(markup, /disabled=""/);
+});
+
+test("ProxyPanel warns when a saved proxy profile has a stale identity", () => {
+  const markup = renderPanel({
+    proxyProfiles: [{
+      ...proxyProfile,
+      config: {
+        type: "http",
+        host: "office-proxy.example.com",
+        port: 8080,
+        identityId: "missing-identity",
+      },
+    }],
+    selectedProxyProfileId: proxyProfile.id,
+    identities: [proxyIdentity],
+  });
+
+  assert.match(markup, /Missing keychain identity/);
+  assert.match(markup, /disabled=""/);
+});
+
+test("ProxyPanel warns when a saved proxy profile has an incomplete identity", () => {
+  const markup = renderPanel({
+    proxyProfiles: [{
+      ...proxyProfile,
+      config: {
+        type: "http",
+        host: "office-proxy.example.com",
+        port: 8080,
+        identityId: proxyIdentity.id,
+      },
+    }],
+    selectedProxyProfileId: proxyProfile.id,
+    identities: [{ ...proxyIdentity, password: undefined }],
+  });
+
+  assert.match(markup, /Proxy identity needs a username and password/);
+  assert.match(markup, /disabled=""/);
+});
+
+test("ProxyPanel warns when a saved proxy profile has an unreadable identity password", () => {
+  const markup = renderPanel({
+    proxyProfiles: [{
+      ...proxyProfile,
+      config: {
+        type: "http",
+        host: "office-proxy.example.com",
+        port: 8080,
+        identityId: proxyIdentity.id,
+      },
+    }],
+    selectedProxyProfileId: proxyProfile.id,
+    identities: [{ ...proxyIdentity, password: "enc:v1:djEwAAAA" }],
+  });
+
+  assert.match(markup, /Proxy identity password cannot be read/);
+  assert.match(markup, /disabled=""/);
+});
+
 test("ProxyPanel supports custom ProxyCommand settings", () => {
   const markup = renderPanel({
     proxyConfig: {
@@ -126,4 +209,20 @@ test("ProxyPanel uses a dropdown for proxy type selection", () => {
 
   assert.match(markup, /role="combobox"/);
   assert.match(markup, /aria-label="Type"/);
+});
+
+test("ProxyPanel offers keychain identities for HTTP and SOCKS5 proxy credentials", () => {
+  const markup = renderPanel({
+    proxyConfig: {
+      type: "socks5",
+      host: "manual-proxy.example.com",
+      port: 1080,
+      identityId: proxyIdentity.id,
+    },
+    identities: [proxyIdentity],
+  });
+
+  assert.match(markup, /Keychain identity/);
+  assert.match(markup, /Proxy login/);
+  assert.match(markup, /proxy-user/);
 });

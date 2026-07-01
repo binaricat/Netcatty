@@ -1,7 +1,6 @@
 import React from "react";
-import { ChevronDown, Eye, EyeOff, FileKey, FolderLock, FolderOpen, Key, KeyRound, MapPin, Plus, Shield, Trash2, User, X } from "lucide-react";
+import { ChevronDown, Eye, EyeOff, FileKey, FolderLock, FolderOpen, Key, KeyRound, MapPin, Plus, Shapes, Shield, Trash2, User, X } from "lucide-react";
 import type { Host } from "../types";
-import { DistroAvatar } from "./DistroAvatar";
 import { HostIconPicker } from "./HostIconPicker";
 import { Button } from "./ui/button";
 import { Combobox } from "./ui/combobox";
@@ -51,23 +50,12 @@ export const HostDetailsConnectionSections: React.FC<HostDetailsConnectionSectio
           icon={<MapPin size={14} className="text-muted-foreground" />}
           title={t("hostDetails.section.address")}
         >
-          <div className="flex items-center gap-2">
-            <DistroAvatar
-              host={form as Host}
-              fallback={
-                form.label?.slice(0, 2).toUpperCase() ||
-                form.hostname?.slice(0, 2).toUpperCase() ||
-                "H"
-              }
-              className="h-10 w-10"
-            />
-            <Input
-              placeholder={t("hostDetails.hostname.placeholder")}
-              value={form.hostname}
-              onChange={(e) => update("hostname", e.target.value)}
-              className="h-10 flex-1"
-            />
-          </div>
+          <Input
+            placeholder={t("hostDetails.hostname.placeholder")}
+            value={form.hostname}
+            onChange={(e) => update("hostname", e.target.value)}
+            className="h-10 w-full"
+          />
         </HostDetailsSection>
 
         <HostDetailsSection
@@ -630,11 +618,12 @@ export const HostDetailsConnectionSections: React.FC<HostDetailsConnectionSectio
         </HostDetailsSection>
 
         <HostDetailsSection
-          icon={<DistroAvatar host={form as Host} fallback="H" size="sm" />}
+          icon={<Shapes size={14} className="text-muted-foreground" />}
           title={t("hostDetails.icon.sectionTitle")}
           hint={t("hostDetails.icon.desc")}
         >
           <HostIconPicker
+            previewHost={form as Host}
             distroMode={form.distroMode}
             manualDistro={form.manualDistro}
             effectiveDistro={effectiveFormDistro}

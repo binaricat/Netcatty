@@ -43,6 +43,7 @@ export const GroupSshSettingsSection: React.FC<GroupSshSettingsSectionProps> = (
   setNewKeyFilePath,
   inheritedLegacyAlgorithms,
   inheritedSkipEcdsaHostKey,
+  inheritedStartupCommandRunMode,
   showAlgorithmOverrides,
   setShowAlgorithmOverrides,
   inheritedAlgorithmOverrides,
@@ -51,6 +52,8 @@ export const GroupSshSettingsSection: React.FC<GroupSshSettingsSectionProps> = (
   chainedHosts,
 }) => {
   if (!sshEnabled) return null;
+  const startupCommandRunModeFallback = inheritedStartupCommandRunMode ?? "paste";
+  const effectiveStartupCommandRunMode = form.startupCommandRunMode ?? startupCommandRunModeFallback;
 
   return (
           <HostDetailsSection
@@ -384,6 +387,26 @@ export const GroupSshSettingsSection: React.FC<GroupSshSettingsSectionProps> = (
               className="min-h-[80px] font-mono text-sm"
               rows={3}
             />
+            <HostDetailsSettingRow
+              label={t("hostDetails.startupCommand.runMode")}
+              hint={t("hostDetails.startupCommand.runMode.help")}
+            >
+              <Select
+                value={effectiveStartupCommandRunMode}
+                onValueChange={(value) => update(
+                  "startupCommandRunMode",
+                  value === startupCommandRunModeFallback ? undefined : value,
+                )}
+              >
+                <SelectTrigger className="h-9 w-[180px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="lineDelay">{t("hostDetails.startupCommand.runMode.lineDelay")}</SelectItem>
+                  <SelectItem value="paste">{t("hostDetails.startupCommand.runMode.paste")}</SelectItem>
+                </SelectContent>
+              </Select>
+            </HostDetailsSettingRow>
 
             {/* Display the *effective* value (this group's field falling
                 back to the resolved parent default). Same rationale as

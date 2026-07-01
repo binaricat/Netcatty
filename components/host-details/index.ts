@@ -20,3 +20,5 @@ export {
   HostDetailsSection,
   HostDetailsSettingRow,
 } from './HostDetailsSection';
+
+export { HostDetailsOverrideReset } from './HostDetailsOverrideReset';

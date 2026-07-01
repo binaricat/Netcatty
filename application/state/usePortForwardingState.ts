@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Host, Identity, PortForwardingRule, SSHKey } from "../../domain/models";
+import { Host, Identity, KnownHost, PortForwardingRule, SSHKey } from "../../domain/models";
 import { getNextVaultOrder, normalizeVaultOrder, reorderVaultItems, sortByVaultOrder, type VaultOrderPosition } from "../../domain/vaultOrder";
 import {
   STORAGE_KEY_PF_PREFER_FORM_MODE,
@@ -71,6 +71,7 @@ export interface UsePortForwardingStateResult {
     onStatusChange?: (status: PortForwardingRule["status"], error?: string) => void,
     enableReconnect?: boolean,
     terminalSettings?: { keepaliveInterval: number; keepaliveCountMax: number },
+    knownHosts?: KnownHost[],
   ) => Promise<{ success: boolean; error?: string }>;
   stopTunnel: (
     ruleId: string,
@@ -401,11 +402,12 @@ export const usePortForwardingState = (): UsePortForwardingStateResult => {
       ) => void,
       enableReconnect = false,
       terminalSettings?: { keepaliveInterval: number; keepaliveCountMax: number },
+      knownHosts?: KnownHost[],
     ) => {
       return startPortForward(rule, host, hosts, keys, identities, (status, error) => {
         setRuleStatus(rule.id, status, error);
         onStatusChange?.(status, error ?? undefined);
-      }, enableReconnect, terminalSettings);
+      }, enableReconnect, terminalSettings, knownHosts);
     },
     [setRuleStatus],
   );

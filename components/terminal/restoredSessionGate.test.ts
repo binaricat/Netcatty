@@ -82,3 +82,49 @@ test("manual reconnect captures restore cwd intent before clearing restored stat
     "manual retry must reactivate the boot guard before opening a backend session",
   );
 });
+
+test("startup and attach cwd cache clears preserve restore cwd metadata", () => {
+  const terminalSource = readFileSync(new URL("../Terminal.tsx", import.meta.url), "utf8");
+  const effectsSource = readFileSync(new URL("./useTerminalEffects.ts", import.meta.url), "utf8");
+
+  const clearDefinitionIndex = terminalSource.indexOf("const clearTerminalCwd = useCallback");
+  const clearNotifyIndex = terminalSource.indexOf("onTerminalCwdChange?.(sessionId, null)", clearDefinitionIndex);
+  const persistGuardIndex = terminalSource.indexOf("persistRestoreMetadata", clearDefinitionIndex);
+  const attachIndex = terminalSource.indexOf("onSessionAttached: (id: string) =>");
+  const attachClearIndex = terminalSource.indexOf("clearTerminalCwd({ persistRestoreMetadata: false })", attachIndex);
+  const startupClearIndex = effectsSource.indexOf("clearTerminalCwd({ persistRestoreMetadata: false })");
+
+  assert.notEqual(clearDefinitionIndex, -1);
+  assert.notEqual(clearNotifyIndex, -1);
+  assert.notEqual(persistGuardIndex, -1);
+  assert.notEqual(attachIndex, -1);
+  assert.notEqual(attachClearIndex, -1);
+  assert.notEqual(startupClearIndex, -1);
+  assert.ok(
+    persistGuardIndex < clearNotifyIndex,
+    "clearTerminalCwd must gate persisted restore metadata updates",
+  );
+});
+
+test("restored cwd intent marks known cwd before initial backend pwd probe can persist home", () => {
+  const terminalSource = readFileSync(new URL("../Terminal.tsx", import.meta.url), "utf8");
+  const effectsSource = readFileSync(new URL("./useTerminalEffects.ts", import.meta.url), "utf8");
+
+  const callbackIndex = terminalSource.indexOf("onRestoreCwdIntentConsumed:");
+  const knownAssignIndex = terminalSource.indexOf("knownCwdRef.current = cwd", callbackIndex);
+  const backendProbeGuardIndex = effectsSource.indexOf("knownCwdRef.current");
+  const backendPwdWriteIndex = effectsSource.indexOf("onTerminalCwdChange?.(sessionId, cwd ?? null)", backendProbeGuardIndex);
+
+  assert.notEqual(callbackIndex, -1);
+  assert.notEqual(knownAssignIndex, -1);
+  assert.notEqual(backendProbeGuardIndex, -1);
+  assert.notEqual(backendPwdWriteIndex, -1);
+  assert.ok(
+    knownAssignIndex > callbackIndex,
+    "Terminal must preserve the restore target as a known cwd when the restore command is sent",
+  );
+  assert.ok(
+    backendProbeGuardIndex < backendPwdWriteIndex,
+    "initial backend pwd probe must remain guarded by knownCwdRef before it writes restore metadata",
+  );
+});

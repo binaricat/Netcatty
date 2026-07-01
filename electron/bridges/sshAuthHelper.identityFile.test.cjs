@@ -127,8 +127,10 @@ test("preparePrivateKeyForAuth prompts for encrypted inline private keys", async
   });
 
   let promptCount = 0;
+  const promptEvents = [];
   passphraseHandler.requestPassphrase = async (_sender, promptedPath, keyName, hostname, passphraseInvalid) => {
     promptCount += 1;
+    promptEvents.push("request");
     assert.equal(promptedPath, "SSH key for export-key");
     assert.equal(keyName, "export-key");
     assert.equal(hostname, "example.test");
@@ -144,9 +146,12 @@ test("preparePrivateKeyForAuth prompts for encrypted inline private keys", async
     keyName: "export-key",
     hostname: "example.test",
     logPrefix: "[Test]",
+    onPassphrasePromptShown: () => promptEvents.push("shown"),
+    onPassphrasePromptResolved: () => promptEvents.push("resolved"),
   });
 
   assert.equal(promptCount, 1);
+  assert.deepEqual(promptEvents, ["shown", "request", "resolved"]);
   assert.equal(prepared.passphrase, "secret");
   assert.equal(prepared.privateKey, privateKey);
   assert.deepEqual(events, []);

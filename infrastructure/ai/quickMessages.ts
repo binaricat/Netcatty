@@ -150,3 +150,16 @@ export function getSlashCommandItemId(item: SlashCommandItem): string {
 export function createQuickMessageId(): string {
   return `qm_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
+
+/** Built-in slash commands — not stored in user quick messages. */
+export const SYSTEM_BUILTIN_SLASH_COMMANDS = {
+  stop: {
+    slug: 'stop',
+    descriptionKey: 'ai.chat.slashStopDesc',
+  },
+} as const;
+
+export function isSystemStopSlashCommand(input: string): boolean {
+  const trimmed = input.trim();
+  return /^\/stop(?:\s|$)/i.test(trimmed) || trimmed.toLowerCase() === '/stop';
+}

@@ -5,6 +5,7 @@ declare global {
     setTheme?(theme: 'light' | 'dark' | 'system'): Promise<boolean>;
     setBackgroundColor?(color: string): Promise<boolean>;
     setWindowOpacity?(opacity: number): Promise<boolean>;
+    setAppIconVariant?(variant: import('../../domain/appIconVariant').AppIconVariant): Promise<boolean>;
     setLanguage?(language: string): Promise<boolean>;
     // Window controls for custom title bar (Windows/Linux)
     windowMinimize?(): Promise<void>;
@@ -26,6 +27,8 @@ declare global {
     }) => void): () => void;
     onWindowCommandCloseRequested?(cb: () => void): () => void;
     onWindowFullScreenChanged?(cb: (isFullscreen: boolean) => void): () => void;
+    onWindowShown?(cb: () => void): () => void;
+    onWindowWillHide?(cb: () => void): () => void;
 
     // Settings window
     openSettingsWindow?(): Promise<boolean>;

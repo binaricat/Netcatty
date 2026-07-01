@@ -30,6 +30,8 @@ function fakeConn(stdout) {
 // success gate only requires cpu OR memTotal OR cpuCores to be non-null.
 const LINUX_STATS =
   "CPURAW:1000 900|CORES:4|PERCORERAW:|MEMINFO:8000 4000 100 900 0 0|PROCS:|DISKS:|NET:";
+const MACOS_STATS =
+  "NC_LATENCY_MARK|CPU:27|CORES:10|MEMINFO:32768 4096 0 8192 2048 1536|PROCS:123;1.2;Finder|DISKS:/:120:460:26|NET:en0:1000:3000";
 
 function makeSessionOps(sessions) {
   return createSessionOpsApi({
@@ -75,6 +77,7 @@ test("getServerStats opens a Mosh stats companion connection when session.conn i
   assert.equal(result.success, true);
   assert.equal(result.stats.memTotal, 8000);
   assert.equal(result.stats.cpuCores, 4);
+  assert.equal(typeof result.stats.latencyMs, "number");
 });
 
 test("getServerStats fails gracefully when the companion connection cannot be established", async () => {
@@ -121,6 +124,41 @@ test("getServerStats does not touch the companion path for a normal SSH session"
 
   assert.equal(ensureCalls, 0);
   assert.equal(result.success, true);
+});
+
+test("getServerStats parses macOS stats and avoids blocking top command", async () => {
+  const sessions = new Map();
+  let command = "";
+  const session = {
+    type: "ssh",
+    conn: {
+      exec(cmd, cb) {
+        command = cmd;
+        cb(null, fakeStream(MACOS_STATS));
+      },
+    },
+  };
+  sessions.set("sid", session);
+
+  const api = makeSessionOps(sessions);
+  const result = await api.getServerStats({ sender: {} }, { sessionId: "sid" });
+
+  assert.equal(result.success, true);
+  assert.match(command, /Darwin/);
+  assert.match(command, /ps -A -o %cpu=/);
+  assert.match(command, /awk -v c="\$cores"/);
+  assert.match(command, /s=s\/c/);
+  assert.doesNotMatch(command, /top -l/);
+  assert.equal(result.stats.cpu, 27);
+  assert.equal(result.stats.cpuCores, 10);
+  assert.equal(result.stats.memTotal, 32768);
+  assert.equal(result.stats.memUsed, 20480);
+  assert.equal(result.stats.diskPercent, 26);
+  assert.equal(result.stats.netInterfaces.length, 1);
+  assert.equal(result.stats.netInterfaces[0].name, "en0");
+  assert.equal(result.stats.netInterfaces[0].rxBytes, 1000);
+  assert.equal(result.stats.netInterfaces[0].txBytes, 3000);
+  assert.equal(typeof result.stats.latencyMs, "number");
 });
 
 test("getServerStats reports pending (not a hard failure) for a Mosh session before the handshake swap", async () => {

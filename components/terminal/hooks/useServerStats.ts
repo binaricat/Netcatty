@@ -40,6 +40,7 @@ export interface ServerStats {
   disks: DiskInfo[];            // All mounted disks
   netRxSpeed: number;           // Total network receive speed (bytes/sec)
   netTxSpeed: number;           // Total network transmit speed (bytes/sec)
+  latencyMs: number | null;     // Approximate SSH stats round-trip latency
   netInterfaces: NetInterfaceInfo[];  // Per-interface network stats
   lastUpdated: number | null;   // Timestamp of last successful update
 }
@@ -79,6 +80,7 @@ export function useServerStats({
     disks: [],
     netRxSpeed: 0,
     netTxSpeed: 0,
+    latencyMs: null,
     netInterfaces: [],
     lastUpdated: null,
   });
@@ -167,6 +169,7 @@ export function useServerStats({
           disks: result.stats.disks || [],
           netRxSpeed: result.stats.netRxSpeed || 0,
           netTxSpeed: result.stats.netTxSpeed || 0,
+          latencyMs: Number.isFinite(result.stats.latencyMs) ? result.stats.latencyMs : null,
           netInterfaces: result.stats.netInterfaces || [],
           lastUpdated: Date.now(),
         });
@@ -236,6 +239,7 @@ export function useServerStats({
         disks: [],
         netRxSpeed: 0,
         netTxSpeed: 0,
+        latencyMs: null,
         netInterfaces: [],
         lastUpdated: null,
       });

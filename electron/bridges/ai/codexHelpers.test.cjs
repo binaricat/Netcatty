@@ -1,7 +1,38 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
-const { extractCodexError } = require("./codexHelpers.cjs");
+const {
+  appendCodexChatGptValidationFailure,
+  extractCodexError,
+  isCodexAuthError,
+  normalizeCodexIntegrationState,
+} = require("./codexHelpers.cjs");
+
+test("normalizeCodexIntegrationState recognizes ChatGPT login status", () => {
+  assert.equal(
+    normalizeCodexIntegrationState("Logged in using ChatGPT"),
+    "connected_chatgpt",
+  );
+});
+
+test("appendCodexChatGptValidationFailure preserves the login status output", () => {
+  const output = appendCodexChatGptValidationFailure(
+    "Logged in using ChatGPT",
+    "SDK probe failed",
+  );
+
+  assert.match(output, /Logged in using ChatGPT/);
+  assert.match(output, /ChatGPT auth validation failed:/);
+  assert.match(output, /SDK probe failed/);
+  assert.equal(normalizeCodexIntegrationState(output), "connected_chatgpt");
+});
+
+test("isCodexAuthError recognizes auth failures stored in error text", () => {
+  assert.equal(
+    isCodexAuthError({ ok: false, error: "401 Unauthorized: authentication required" }),
+    true,
+  );
+});
 
 test("extractCodexError preserves nested error object messages", () => {
   const normalized = extractCodexError({

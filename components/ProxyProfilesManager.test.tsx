@@ -6,8 +6,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { I18nProvider } from "../application/i18n/I18nProvider.tsx";
 import { isValidProxyPort } from "../domain/proxyProfiles.ts";
 import { STORAGE_KEY_VAULT_PROXY_PROFILES_VIEW_MODE } from "../infrastructure/config/storageKeys.ts";
-import type { ProxyProfile } from "../types.ts";
-import { ProxyProfilesManager } from "./ProxyProfilesManager.tsx";
+import type { Identity, ProxyProfile } from "../types.ts";
+import { prepareProxyProfileForSave, ProxyProfilesManager } from "./ProxyProfilesManager.tsx";
 
 const proxyProfile: ProxyProfile = {
   id: "proxy-1",
@@ -18,6 +18,15 @@ const proxyProfile: ProxyProfile = {
     port: 8080,
   },
   createdAt: 1,
+};
+
+const proxyIdentity: Identity = {
+  id: "identity-1",
+  label: "Proxy login",
+  username: "proxy-user",
+  authMethod: "password",
+  password: "proxy-secret",
+  created: 1,
 };
 
 const installStorageStub = (viewMode: string | null = null) => {
@@ -53,6 +62,7 @@ const renderManager = (
         proxyProfiles: profiles,
         hosts: [],
         groupConfigs: [],
+        identities: [proxyIdentity],
         onUpdateProxyProfiles: () => {},
         onUpdateHosts: () => {},
         onUpdateGroupConfigs: () => {},
@@ -107,4 +117,109 @@ test("ProxyProfilesManager hides ProxyCommand contents in profile summaries", ()
   assert.match(markup, /ProxyCommand/);
   assert.doesNotMatch(markup, /cloudflared access ssh/);
   assert.doesNotMatch(markup, /secret/);
+});
+
+test("prepareProxyProfileForSave saves identity auth without stale manual credentials", () => {
+  const result = prepareProxyProfileForSave(
+    {
+      ...proxyProfile,
+      label: " Office Proxy ",
+      config: {
+        type: "http",
+        host: " proxy.example.com ",
+        port: 3128,
+        identityId: proxyIdentity.id,
+        username: "stale-user",
+        password: "stale-secret",
+      },
+    },
+    [proxyIdentity],
+    2,
+  );
+
+  assert.deepEqual(result.saved?.config, {
+    type: "http",
+    host: "proxy.example.com",
+    port: 3128,
+    identityId: proxyIdentity.id,
+  });
+  assert.equal(result.saved?.label, "Office Proxy");
+  assert.equal(result.saved?.updatedAt, 2);
+});
+
+test("prepareProxyProfileForSave rejects missing and incomplete proxy identities", () => {
+  assert.equal(
+    prepareProxyProfileForSave(
+      {
+        ...proxyProfile,
+        config: {
+          type: "http",
+          host: "proxy.example.com",
+          port: 3128,
+          identityId: "missing-identity",
+        },
+      },
+      [proxyIdentity],
+    ).error,
+    "missingIdentity",
+  );
+
+  assert.equal(
+    prepareProxyProfileForSave(
+      {
+        ...proxyProfile,
+        config: {
+          type: "http",
+          host: "proxy.example.com",
+          port: 3128,
+          identityId: proxyIdentity.id,
+        },
+      },
+      [{ ...proxyIdentity, password: undefined }],
+    ).error,
+    "incompleteIdentity",
+  );
+});
+
+test("prepareProxyProfileForSave rejects unreadable proxy identity passwords", () => {
+  assert.equal(
+    prepareProxyProfileForSave(
+      {
+        ...proxyProfile,
+        config: {
+          type: "http",
+          host: "proxy.example.com",
+          port: 3128,
+          identityId: proxyIdentity.id,
+        },
+      },
+      [{ ...proxyIdentity, password: "enc:v1:djEwAAAA" }],
+    ).error,
+    "unreadableIdentity",
+  );
+});
+
+test("prepareProxyProfileForSave strips stale ProxyCommand data from HTTP/SOCKS profiles", () => {
+  const result = prepareProxyProfileForSave(
+    {
+      ...proxyProfile,
+      config: {
+        type: "socks5",
+        host: "proxy.example.com",
+        port: 1080,
+        command: "cloudflared access ssh --hostname %h --token secret",
+        username: "proxy-user",
+        password: "proxy-secret",
+      },
+    },
+    [],
+  );
+
+  assert.deepEqual(result.saved?.config, {
+    type: "socks5",
+    host: "proxy.example.com",
+    port: 1080,
+    username: "proxy-user",
+    password: "proxy-secret",
+  });
 });

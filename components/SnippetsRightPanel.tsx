@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { parseSnippetVariables } from '../domain/snippetVariables';
 import { Check, Clock, Keyboard, Loader2, Package, RotateCcw, Trash2 } from 'lucide-react';
 import { cn } from '../lib/utils';
@@ -8,10 +8,17 @@ import { Button } from './ui/button';
 import { Card } from './ui/card';
 import { Input } from './ui/input';
 import { SnippetScriptEditor } from './snippets/SnippetScriptEditor';
+import { SnippetTargetsSection } from './snippets/SnippetTargetsSection';
+import { ScriptEditorPanel } from './scripts/ScriptEditorPanel';
+import { ScriptEditorModal } from './scripts/ScriptEditorModal';
+import { isScriptSnippet } from '../domain/snippetScript.ts';
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 import { Combobox } from './ui/combobox';
-import { DistroAvatar } from './DistroAvatar';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { HistoryItem } from './SnippetsHistoryItem';
+import type { Snippet } from '@/domain/models';
+import { getRunnableHostsForSnippet } from '@/domain/snippetTargets.ts';
+import { STORAGE_KEY_SNIPPETS_PANEL_WIDTH } from '@/infrastructure/config/storageKeys.ts';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type SnippetsRightPanelProps = Record<string, any>;
@@ -21,6 +28,7 @@ export const SnippetsRightPanel: React.FC<SnippetsRightPanelProps> = ({
   hosts,
   customGroups,
   targetSelection,
+  setTargetSelection,
   handleTargetSelect,
   handleTargetPickerBack,
   availableKeys,
@@ -32,7 +40,8 @@ export const SnippetsRightPanel: React.FC<SnippetsRightPanelProps> = ({
   handleClosePanel,
   editingSnippet,
   onDelete,
-  handleSubmit,
+  handleSave,
+  handleSaveAndRun,
   setEditingSnippet,
   packageOptions,
   selectedPackage,
@@ -54,11 +63,53 @@ export const SnippetsRightPanel: React.FC<SnippetsRightPanelProps> = ({
   hasMoreHistory,
   isLoadingMore,
   loadMoreHistory,
+  onRunSnippet,
 }) => {
   const detectedVariables = useMemo(
     () => parseSnippetVariables(editingSnippet?.command || ''),
     [editingSnippet?.command],
   );
+  const [scriptEditorModalOpen, setScriptEditorModalOpen] = useState(false);
+  const isEditingScript = isScriptSnippet(editingSnippet as import('../types').Snippet);
+  const snippetsPanelResizeProps = {
+    resizable: true as const,
+    persistWidthStorageKey: STORAGE_KEY_SNIPPETS_PANEL_WIDTH,
+    resizeAriaLabel: t('snippets.panel.resizeWidth'),
+  };
+
+  const runnableEditingSnippet = useMemo(() => ({
+    ...(editingSnippet as Snippet),
+    targets: editingSnippet.targetsAllHosts ? [] : targetSelection,
+    targetsAllHosts: editingSnippet.targetsAllHosts || undefined,
+  }), [editingSnippet, targetSelection]);
+
+  const runTargets = useMemo(
+    () => getRunnableHostsForSnippet(runnableEditingSnippet, hosts),
+    [hosts, runnableEditingSnippet],
+  );
+
+  const runEditingScript = () => {
+    if (runTargets.length === 0) return;
+    onRunSnippet?.(runnableEditingSnippet, runTargets);
+  };
+
+  const canRunEditingScript = Boolean(editingSnippet.command?.trim()) && runTargets.length > 0;
+
+  const handleTargetsAllHostsChange = (checked: boolean) => {
+    if (checked) {
+      setTargetSelection([]);
+      setEditingSnippet({
+        ...editingSnippet,
+        targetsAllHosts: true,
+        targets: [],
+      });
+      return;
+    }
+    setEditingSnippet({
+      ...editingSnippet,
+      targetsAllHosts: undefined,
+    });
+  };
 
     if (rightPanelMode === 'select-targets') {
       return (
@@ -77,6 +128,7 @@ export const SnippetsRightPanel: React.FC<SnippetsRightPanelProps> = ({
           onCreateGroup={onCreateGroup}
           title={t('snippets.targets.add')}
           layout="inline"
+          {...snippetsPanelResizeProps}
         />
       );
     }
@@ -86,8 +138,11 @@ export const SnippetsRightPanel: React.FC<SnippetsRightPanelProps> = ({
         <AsidePanel
           open={true}
           onClose={handleClosePanel}
-          title={editingSnippet.id ? t('snippets.panel.editTitle') : t('snippets.panel.newTitle')}
+          title={isEditingScript
+            ? t(editingSnippet.id ? 'snippets.panel.editAutomationTitle' : 'snippets.panel.newAutomationTitle')
+            : t(editingSnippet.id ? 'snippets.panel.editTitle' : 'snippets.panel.newTitle')}
           layout="inline"
+          {...snippetsPanelResizeProps}
           actions={
             <>
               {editingSnippet.id && (
@@ -115,7 +170,7 @@ export const SnippetsRightPanel: React.FC<SnippetsRightPanelProps> = ({
                 variant="ghost"
                 size="icon"
                 className="h-8 w-8"
-                onClick={handleSubmit}
+                onClick={handleSave}
                 disabled={!editingSnippet.label || !editingSnippet.command}
                 aria-label={t('common.save')}
               >
@@ -125,7 +180,7 @@ export const SnippetsRightPanel: React.FC<SnippetsRightPanelProps> = ({
           }
         >
           <AsidePanelContent>
-            {/* Action Description */}
+            {!isEditingScript ? (
             <Card className="p-3 space-y-2 bg-card border-border/80">
               <p className="text-xs font-semibold text-muted-foreground">{t('snippets.field.description')}</p>
               <Input
@@ -136,6 +191,7 @@ export const SnippetsRightPanel: React.FC<SnippetsRightPanelProps> = ({
                 spellCheck={false}
               />
             </Card>
+            ) : null}
 
             {/* Package */}
             <Card className="p-3 space-y-2 bg-card border-border/80">
@@ -163,40 +219,64 @@ export const SnippetsRightPanel: React.FC<SnippetsRightPanelProps> = ({
               />
             </Card>
 
-            {/* Script */}
-            <Card className="p-3 space-y-2 bg-card border-border/80">
-              <SnippetScriptEditor
-                label={t('snippets.field.scriptRequired')}
-                placeholder="ls -l"
-                value={editingSnippet.command || ''}
-                onChange={(command) => setEditingSnippet({ ...editingSnippet, command })}
+            {/* Script / Snippet body */}
+            {isEditingScript ? (
+              <ScriptEditorPanel
+                snippet={editingSnippet as import('../types').Snippet}
+                onChange={setEditingSnippet}
+                canRun={canRunEditingScript}
+                onExpand={() => setScriptEditorModalOpen(true)}
+                onRun={canRunEditingScript ? runEditingScript : undefined}
               />
-              <p className="text-[11px] text-muted-foreground leading-relaxed">
-                {t('snippets.field.variablesHelp')}
-              </p>
-              {detectedVariables.length > 0 && (
-                <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
-                  <span className="text-[10px] font-semibold text-muted-foreground shrink-0">
-                    {t('snippets.field.variablesDetected')}:
-                  </span>
-                  {detectedVariables.map((variable) => (
-                    <span
-                      key={variable.name}
-                      className="text-[10px] px-2 py-0.5 rounded-full bg-primary/10 text-primary font-mono"
-                    >
-                      {variable.name}
-                      {variable.defaultValue !== undefined && (
-                        <span className="text-muted-foreground font-sans ml-1">
-                          ({t('snippets.field.variableDefault', { value: variable.defaultValue })})
+            ) : (
+            <Card className="p-3 space-y-2 bg-card border-border/80">
+                  <SnippetScriptEditor
+                    label={t('snippets.field.scriptRequired')}
+                    placeholder="ls -l"
+                    value={editingSnippet.command || ''}
+                    onChange={(command) => setEditingSnippet({ ...editingSnippet, command })}
+                  />
+                  <p className="text-[11px] text-muted-foreground leading-relaxed">
+                    {t('snippets.field.variablesHelp')}
+                  </p>
+                  {detectedVariables.length > 0 && (
+                    <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                      <span className="text-[10px] font-semibold text-muted-foreground shrink-0">
+                        {t('snippets.field.variablesDetected')}:
+                      </span>
+                      {detectedVariables.map((variable) => (
+                        <span
+                          key={variable.name}
+                          className="text-[10px] px-2 py-0.5 rounded-full bg-primary/10 text-primary font-mono"
+                        >
+                          {variable.name}
+                          {variable.defaultValue !== undefined && (
+                            <span className="text-muted-foreground font-sans ml-1">
+                              ({t('snippets.field.variableDefault', { value: variable.defaultValue })})
+                            </span>
+                          )}
                         </span>
-                      )}
-                    </span>
-                  ))}
-                </div>
-              )}
+                      ))}
+                    </div>
+                  )}
             </Card>
+            )}
 
-            {/* No Auto Run */}
+            <SnippetTargetsSection
+              t={t}
+              targetHosts={targetHosts}
+              onEditTargets={openTargetPicker}
+              hint={isEditingScript
+                ? (editingSnippet.trigger === 'onConnect'
+                  ? t('scripts.targets.connectOrderHint')
+                  : t('scripts.targets.hint'))
+                : undefined}
+              targetsAllHosts={Boolean(editingSnippet.targetsAllHosts)}
+              onTargetsAllHostsChange={handleTargetsAllHostsChange}
+            />
+
+            {!isEditingScript ? (
+            <>
             <label className="flex items-center gap-2 cursor-pointer px-1">
               <input
                 type="checkbox"
@@ -206,6 +286,28 @@ export const SnippetsRightPanel: React.FC<SnippetsRightPanelProps> = ({
               />
               <span className="text-xs text-muted-foreground">{t('snippets.field.noAutoRun')}</span>
             </label>
+
+            <Card className="p-3 space-y-2 bg-card border-border/80">
+              <p className="text-xs font-semibold text-muted-foreground">{t('snippets.field.multiLineRunMode')}</p>
+              <Select
+                value={editingSnippet.multiLineRunMode ?? 'paste'}
+                onValueChange={(value) => setEditingSnippet({
+                  ...editingSnippet,
+                  multiLineRunMode: value === 'lineDelay' ? 'lineDelay' : undefined,
+                })}
+              >
+                <SelectTrigger className="h-10">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="paste">{t('snippets.field.multiLineRunMode.paste')}</SelectItem>
+                  <SelectItem value="lineDelay">{t('snippets.field.multiLineRunMode.lineDelay')}</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-[11px] text-muted-foreground leading-relaxed">
+                {t('snippets.field.multiLineRunModeHint')}
+              </p>
+            </Card>
 
             {/* Shortkey */}
             <Card className="p-3 space-y-2 bg-card border-border/80">
@@ -254,52 +356,38 @@ export const SnippetsRightPanel: React.FC<SnippetsRightPanelProps> = ({
               )}
               <p className="text-[11px] text-muted-foreground">{t('snippets.shortkey.hint')}</p>
             </Card>
-
-            {/* Targets */}
-            <Card className="p-3 space-y-3 bg-card border-border/80">
-              <div className="flex items-center justify-between">
-                <p className="text-xs font-semibold text-muted-foreground">{t('snippets.targets.title')}</p>
-                <Button variant="ghost" size="sm" className="h-6 px-2 text-xs text-primary" onClick={openTargetPicker}>
-                  {t('action.edit')}
-                </Button>
-              </div>
-
-              {targetHosts.length === 0 ? (
-                <Button
-                  variant="secondary"
-                  className="w-full h-10"
-                  onClick={openTargetPicker}
-                >
-                  {t('snippets.targets.add')}
-                </Button>
-              ) : (
-                <div className="space-y-2">
-                  {targetHosts.map((h) => (
-                    <div key={h.id} className="flex items-center gap-3 px-3 py-2 bg-background/60 border border-border/70 rounded-lg">
-                      <DistroAvatar host={h} fallback={h.os[0].toUpperCase()} className="h-10 w-10" />
-                      <div className="min-w-0 flex-1">
-                        <div className="text-sm font-semibold truncate">{h.hostname}</div>
-                        <div className="text-[11px] text-muted-foreground truncate">
-                          {h.protocol || 'ssh'}, {h.username}
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </Card>
+            </>
+            ) : null}
           </AsidePanelContent>
 
           {/* Footer */}
           <AsidePanelFooter>
             <Button
               className="w-full"
-              onClick={handleSubmit}
+              onClick={canRunEditingScript ? handleSaveAndRun : handleSave}
               disabled={!editingSnippet.label || !editingSnippet.command}
             >
-              {editingSnippet.targets?.length ? t('action.run') : t('common.save')}
+              {canRunEditingScript ? t('action.run') : t('common.save')}
             </Button>
           </AsidePanelFooter>
+          {isEditingScript ? (
+            <ScriptEditorModal
+              open={scriptEditorModalOpen}
+              onClose={() => setScriptEditorModalOpen(false)}
+              snippet={editingSnippet as import('../types').Snippet}
+              onChange={setEditingSnippet}
+              onSave={handleSave}
+              canRun={canRunEditingScript}
+              onRun={canRunEditingScript ? runEditingScript : undefined}
+              targetHosts={targetHosts}
+              hosts={hosts}
+              customGroups={customGroups}
+              selectedHostIds={targetSelection}
+              onSelectHost={handleTargetSelect}
+              targetsAllHosts={Boolean(editingSnippet.targetsAllHosts)}
+              onTargetsAllHostsChange={handleTargetsAllHostsChange}
+            />
+          ) : null}
         </AsidePanel>
       );
     }
@@ -314,6 +402,7 @@ export const SnippetsRightPanel: React.FC<SnippetsRightPanelProps> = ({
           showBackButton={true}
           onBack={handleClosePanel}
           layout="inline"
+          {...snippetsPanelResizeProps}
         >
           {/* History List */}
           <div

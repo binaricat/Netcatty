@@ -1,6 +1,9 @@
 import type { HotkeyScheme, SessionLogFormat, TerminalSettings } from '../../domain/models';
 import { STORAGE_KEY_TERM_FONT_FAMILY } from '../../infrastructure/config/storageKeys';
-import { isDeprecatedPrimaryFontId } from '../../infrastructure/config/fonts';
+import {
+  isDeprecatedPrimaryFontId,
+  TERMINAL_FONT_AUTO,
+} from '../../infrastructure/config/fonts';
 import { DARK_UI_THEMES, LIGHT_UI_THEMES, type UiThemeTokens } from '../../infrastructure/config/uiThemes';
 import { UI_FONTS } from '../../infrastructure/config/uiFonts';
 import { uiFontStore } from './uiFontStore';
@@ -45,13 +48,18 @@ export const DEFAULT_FONT_FAMILY = 'menlo';
  * single point of truth keeps deprecated ids from re-entering state.
  *
  * Returns null when there's nothing to apply (raw is empty); callers
- * fall back to DEFAULT_FONT_FAMILY in that case.
+ * fall back to the TERMINAL_FONT_AUTO sentinel in that case.
  */
 export function migrateIncomingTerminalFontId(raw: string | null | undefined): string | null {
   if (!raw) return null;
   if (isDeprecatedPrimaryFontId(raw)) {
-    localStorageAdapter.writeString(STORAGE_KEY_TERM_FONT_FAMILY, DEFAULT_FONT_FAMILY);
-    return DEFAULT_FONT_FAMILY;
+    // Rewrite to the platform-neutral auto sentinel rather than a concrete
+    // id: on Windows/Linux a hard-coded `menlo` would land these upgrade
+    // users right back in the missing-font / cold-start path (#1647), and
+    // syncing a concrete id would leak it across OSes. `auto` resolves to
+    // each device's local default at render time.
+    localStorageAdapter.writeString(STORAGE_KEY_TERM_FONT_FAMILY, TERMINAL_FONT_AUTO);
+    return TERMINAL_FONT_AUTO;
   }
   return raw;
 }

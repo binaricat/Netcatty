@@ -1,7 +1,9 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  DEFAULT_UI_FONT_ID,
   detectUiPlatform,
+  UI_FONTS,
   withWindowsEmojiFallback,
   WINDOWS_FLAG_EMOJI_FONT,
   WINDOWS_UI_EMOJI_FONTS,
@@ -66,5 +68,15 @@ describe('withUiCjkFallback', () => {
     const stack = withUiCjkFallback('"Space Grotesk", system-ui');
     assert.match(stack, /PingFang SC/);
     assert.match(stack, /Space Grotesk/);
+  });
+});
+
+describe('default UI font', () => {
+  it('uses Mona Sans while keeping Chinese fallbacks in the stack', () => {
+    const defaultFont = UI_FONTS.find((font) => font.id === DEFAULT_UI_FONT_ID);
+    assert.equal(DEFAULT_UI_FONT_ID, 'mona-sans');
+    assert.equal(defaultFont?.name, 'Mona Sans');
+    assert.match(defaultFont?.family ?? '', /Mona Sans/);
+    assert.match(defaultFont?.family ?? '', /PingFang SC/);
   });
 });

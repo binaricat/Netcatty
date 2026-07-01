@@ -29,7 +29,11 @@ import type {
   ProviderConfig,
   WebSearchConfig,
 } from '../../infrastructure/ai/types';
-import { DEFAULT_COMMAND_BLOCKLIST } from '../../infrastructure/ai/types';
+import {
+  DEFAULT_COMMAND_BLOCKLIST,
+  DEFAULT_COMMAND_TIMEOUT_SECONDS,
+  normalizeCommandTimeoutSeconds,
+} from '../../infrastructure/ai/types';
 import { removeProviderReferences } from './aiProviderCleanup';
 import { AI_STATE_CHANGED_EVENT, emitAIStateChanged } from './aiStateEvents';
 import { getAIBridge } from './aiStateSnapshots';
@@ -44,7 +48,7 @@ import { useStoredBoolean } from './useStoredBoolean';
 
 function readPermissionMode(): AIPermissionMode {
   const stored = localStorageAdapter.readString(STORAGE_KEY_AI_PERMISSION_MODE);
-  if (stored === 'observer' || stored === 'confirm' || stored === 'autonomous') return stored;
+  if (stored === 'observer' || stored === 'confirm' || stored === 'auto') return stored;
   return 'confirm';
 }
 
@@ -76,7 +80,9 @@ export function useAISettingsState() {
     localStorageAdapter.read<string[]>(STORAGE_KEY_AI_COMMAND_BLOCKLIST) ?? [...DEFAULT_COMMAND_BLOCKLIST]
   );
   const [commandTimeout, setCommandTimeoutRaw] = useState<number>(() =>
-    localStorageAdapter.readNumber(STORAGE_KEY_AI_COMMAND_TIMEOUT) ?? 60
+    normalizeCommandTimeoutSeconds(
+      localStorageAdapter.readNumber(STORAGE_KEY_AI_COMMAND_TIMEOUT) ?? DEFAULT_COMMAND_TIMEOUT_SECONDS,
+    )
   );
   const [maxIterations, setMaxIterationsRaw] = useState<number>(() =>
     localStorageAdapter.readNumber(STORAGE_KEY_AI_MAX_ITERATIONS) ?? 20
@@ -182,9 +188,10 @@ export function useAISettingsState() {
   }, []);
 
   const setCommandTimeout = useCallback((value: number) => {
-    setCommandTimeoutRaw(value);
-    localStorageAdapter.writeNumber(STORAGE_KEY_AI_COMMAND_TIMEOUT, value);
-    getAIBridge()?.aiMcpSetCommandTimeout?.(value);
+    const normalizedValue = normalizeCommandTimeoutSeconds(value);
+    setCommandTimeoutRaw(normalizedValue);
+    localStorageAdapter.writeNumber(STORAGE_KEY_AI_COMMAND_TIMEOUT, normalizedValue);
+    getAIBridge()?.aiMcpSetCommandTimeout?.(normalizedValue);
   }, []);
 
   const setMaxIterations = useCallback((value: number) => {
@@ -277,10 +284,11 @@ export function useAISettingsState() {
             break;
           }
           case STORAGE_KEY_AI_COMMAND_TIMEOUT: {
-            const timeout = localStorageAdapter.readNumber(STORAGE_KEY_AI_COMMAND_TIMEOUT) ?? 60;
+            const timeout = localStorageAdapter.readNumber(STORAGE_KEY_AI_COMMAND_TIMEOUT) ?? DEFAULT_COMMAND_TIMEOUT_SECONDS;
             if (!Number.isFinite(timeout)) break;
-            setCommandTimeoutRaw(timeout);
-            getAIBridge()?.aiMcpSetCommandTimeout?.(timeout);
+            const normalizedTimeout = normalizeCommandTimeoutSeconds(timeout);
+            setCommandTimeoutRaw(normalizedTimeout);
+            getAIBridge()?.aiMcpSetCommandTimeout?.(normalizedTimeout);
             break;
           }
           case STORAGE_KEY_AI_MAX_ITERATIONS: {

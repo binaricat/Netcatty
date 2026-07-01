@@ -1,7 +1,9 @@
 /**
  * approvalGate — Promise-based approval system for tool execution.
  *
- * Tools call `requestApproval()` inside their `execute` function. This returns
+ * Catty write tools are gated by `streamText({ toolApproval })` (see cattyToolApproval.ts).
+ * MCP/external agents use main-process approval via `setupMcpApprovalBridge()`.
+ * `requestApproval()` is the shared renderer Promise used by both paths.
  * a Promise that resolves when the user approves/rejects from the UI, or after
  * a timeout (default 5 minutes) to prevent indefinite hangs.
  *
@@ -15,8 +17,18 @@
  * interference when stopping or cancelling sessions.
  */
 
-/** Default timeout for unanswered approval prompts (5 minutes). */
-const APPROVAL_TIMEOUT_MS = 5 * 60 * 1000;
+import { CATTY_APPROVAL_TIMEOUT_MS } from './approvalConstants';
+import { localStorageAdapter } from '../../persistence/localStorageAdapter';
+import { STORAGE_KEY_AI_PERMISSION_GRANTS } from '../../config/storageKeys';
+import { globalTraceStore } from '../harness/traceStore';
+import {
+  getActivePermissionGrants,
+  matchPermissionGrant,
+  resolveCapabilityId,
+  sanitizePermissionGrants,
+  setActivePermissionGrants,
+  type PermissionGrantRule,
+} from '../harness/permissionGrants';
 
 export interface ApprovalRequest {
   toolCallId: string;
@@ -24,6 +36,46 @@ export interface ApprovalRequest {
   args: Record<string, unknown>;
   /** Optional chat session scope — used to clear only relevant approvals on stop */
   chatSessionId?: string;
+  capabilityId?: string;
+}
+
+export interface ResolveApprovalOptions {
+  approved: boolean;
+  persistGrant?: PermissionGrantRule;
+  persistGrants?: PermissionGrantRule[];
+}
+
+export type GrantPersister = (rule: PermissionGrantRule) => void;
+
+let grantPersister: GrantPersister | null = null;
+const grantPersisterStack: GrantPersister[] = [];
+
+function refreshPermissionGrantsFromStorage(): void {
+  if (typeof window === 'undefined') return;
+  setActivePermissionGrants(
+    sanitizePermissionGrants(localStorageAdapter.read<unknown>(STORAGE_KEY_AI_PERMISSION_GRANTS)),
+  );
+}
+
+export function setGrantPersister(persister: GrantPersister | null): void {
+  grantPersisterStack.length = 0;
+  if (persister) {
+    grantPersisterStack.push(persister);
+  }
+  grantPersister = persister;
+}
+
+/** Register a grant persister; supports multiple mounted AI panels via a stack. */
+export function registerGrantPersister(persister: GrantPersister): () => void {
+  grantPersisterStack.push(persister);
+  grantPersister = persister;
+  return () => {
+    const idx = grantPersisterStack.lastIndexOf(persister);
+    if (idx >= 0) {
+      grantPersisterStack.splice(idx, 1);
+    }
+    grantPersister = grantPersisterStack[grantPersisterStack.length - 1] ?? null;
+  };
 }
 
 // Pending approval entries keyed by toolCallId.
@@ -42,6 +94,58 @@ const listeners = new Set<ApprovalRequestListener>();
 type ApprovalClearedListener = (toolCallIds: string[]) => void;
 const clearedListeners = new Set<ApprovalClearedListener>();
 
+let approvalEventCounter = 0;
+
+function nextApprovalEventId(prefix: string): string {
+  approvalEventCounter += 1;
+  return `${prefix}-${Date.now()}-${approvalEventCounter}`;
+}
+
+function emitApprovalEvent(
+  type: 'approval_requested' | 'approval_resolved',
+  request: ApprovalRequest,
+  extra?: { outcome?: 'approved' | 'denied' | 'timeout'; persistedGrantId?: string },
+): void {
+  const sessionId = request.chatSessionId ?? 'global';
+  const base = {
+    sessionId,
+    chatSessionId: request.chatSessionId,
+    backend: 'catty' as const,
+    timestamp: Date.now(),
+    toolCallId: request.toolCallId,
+    toolName: request.toolName,
+  };
+
+  if (type === 'approval_requested') {
+    globalTraceStore.append({
+      ...base,
+      id: nextApprovalEventId('approval-requested'),
+      type: 'approval_requested',
+      args: request.args,
+    });
+    return;
+  }
+
+  globalTraceStore.append({
+    ...base,
+    id: nextApprovalEventId('approval-resolved'),
+    type: 'approval_resolved',
+    outcome: extra?.outcome ?? 'denied',
+    persistedGrantId: extra?.persistedGrantId,
+  });
+}
+
+function isGrantedByRules(request: ApprovalRequest): boolean {
+  refreshPermissionGrantsFromStorage();
+  const capabilityId = request.capabilityId ?? resolveCapabilityId(request.toolName);
+  return matchPermissionGrant(getActivePermissionGrants(), {
+    capabilityId,
+    chatSessionId: request.chatSessionId,
+    sessionId: typeof request.args.sessionId === 'string' ? request.args.sessionId : undefined,
+    args: request.args,
+  }) !== null;
+}
+
 /**
  * Called from a tool's `execute` function when it needs user approval.
  * Returns a Promise<boolean> that resolves to `true` (approved) or `false` (denied).
@@ -55,9 +159,22 @@ export function requestApproval(
   toolName: string,
   args: Record<string, unknown>,
   chatSessionId?: string,
-  timeoutMs: number = APPROVAL_TIMEOUT_MS,
+  timeoutMs: number = CATTY_APPROVAL_TIMEOUT_MS,
+  capabilityId?: string,
 ): Promise<boolean> {
-  const request: ApprovalRequest = { toolCallId, toolName, args, chatSessionId };
+  const request: ApprovalRequest = {
+    toolCallId,
+    toolName,
+    args,
+    chatSessionId,
+    capabilityId: capabilityId ?? resolveCapabilityId(toolName),
+  };
+
+  if (isGrantedByRules(request)) {
+    return Promise.resolve(true);
+  }
+
+  emitApprovalEvent('approval_requested', request);
 
   return new Promise<boolean>((resolve) => {
     let timerId: ReturnType<typeof setTimeout> | null = null;
@@ -74,6 +191,7 @@ export function requestApproval(
       if (pendingApprovals.has(toolCallId)) {
         pendingApprovals.delete(toolCallId);
         wrappedResolve(false);
+        emitApprovalEvent('approval_resolved', request, { outcome: 'timeout' });
         // Notify UI to remove the stale card
         for (const cl of clearedListeners) {
           try { cl([toolCallId]); } catch { /* ignore */ }
@@ -92,12 +210,36 @@ export function requestApproval(
  * Called from the UI when the user approves or rejects a tool execution.
  * Handles both SDK tool calls (local Promise) and MCP tool calls (IPC to main process).
  */
-export function resolveApproval(toolCallId: string, approved: boolean): void {
+export function resolveApproval(
+  toolCallId: string,
+  decision: boolean | ResolveApprovalOptions,
+): void {
+  const approved = typeof decision === 'boolean' ? decision : decision.approved;
+  const persistGrant = typeof decision === 'boolean' ? undefined : decision.persistGrant;
+  const persistGrants = typeof decision === 'boolean'
+    ? undefined
+    : (decision.persistGrants ?? (persistGrant ? [persistGrant] : undefined));
+
   const entry = pendingApprovals.get(toolCallId);
+  const request = entry?.request;
+
   if (entry) {
     pendingApprovals.delete(toolCallId);
-    // SDK tool calls have a real resolve; MCP tool calls have a no-op resolve
     entry.resolve(approved);
+  }
+
+  if (request) {
+    let persistedGrantId: string | undefined;
+    if (approved && persistGrants?.length) {
+      for (const grant of persistGrants) {
+        grantPersister?.(grant);
+        persistedGrantId = grant.id;
+      }
+    }
+    emitApprovalEvent('approval_resolved', request, {
+      outcome: approved ? 'approved' : 'denied',
+      persistedGrantId,
+    });
   }
 
   // MCP tool call: also forward response to main process via IPC
@@ -218,6 +360,7 @@ export function setupMcpApprovalBridge(): () => void {
       toolName: payload.toolName,
       args: payload.args,
       chatSessionId: payload.chatSessionId,
+      capabilityId: resolveCapabilityId(payload.toolName),
     };
 
     // Store in pendingApprovals so it survives unmount/remount

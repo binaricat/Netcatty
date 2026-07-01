@@ -4,10 +4,12 @@
  */
 
 const net = require("node:net");
+require("./boringSslDhCompat.cjs").installBoringSslDhCompat();
 const { Client: SSHClient } = require("ssh2");
 const { NetcattyAgent } = require("./netcattyAgent.cjs");
 const keyboardInteractiveHandler = require("./keyboardInteractiveHandler.cjs");
 const { connectThroughChain, buildAlgorithms } = require("./sshBridge.cjs");
+const hostKeyVerifier = require("./hostKeyVerifier.cjs");
 const { createProxySocket } = require("./proxyUtils.cjs");
 const { 
   buildAuthHandler, 
@@ -78,6 +80,8 @@ async function startPortForward(event, payload) {
     certificate,
     keyId,
     passphrase,
+    knownHosts,
+    verifyHostKeys,
     proxy,
     jumpHosts = [],
     identityFilePaths,
@@ -138,6 +142,14 @@ async function startPortForward(event, payload) {
     tryKeyboard: true,
     algorithms: buildAlgorithms(legacyAlgorithms, { skipEcdsaHostKey, algorithmOverrides }),
   };
+  connectOpts.hostVerifier = hostKeyVerifier.createHostVerifier({
+    sender,
+    sessionId: tunnelId,
+    hostname,
+    port,
+    knownHosts,
+    verifyHostKeys,
+  });
 
   const hasCertificate = typeof certificate === "string" && certificate.trim().length > 0;
   sendStatus('connecting');
@@ -233,6 +245,8 @@ async function startPortForward(event, payload) {
           privateKey,
           passphrase,
           proxy,
+          knownHosts,
+          verifyHostKeys,
           jumpHosts,
           legacyAlgorithms,
           skipEcdsaHostKey,
@@ -241,6 +255,7 @@ async function startPortForward(event, payload) {
           _connectionsRef: chainConnections,
           _tunnelRef: tunnelState,
           _passphraseSignal: passphraseAbortController.signal,
+          _keyboardInteractiveScope: "external",
         },
         jumpHosts,
         hostname,

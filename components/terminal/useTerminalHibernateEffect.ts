@@ -21,11 +21,18 @@ type UseTerminalHibernateEffectOptions = {
   hibernateDelayMs: number;
   fileTransferActive: boolean;
   hibernatedRef: React.MutableRefObject<boolean>;
+  softHiddenRef: React.MutableRefObject<boolean>;
   hibernatePendingBufferRef: React.MutableRefObject<string>;
   hibernateSnapshotRef: React.MutableRefObject<string>;
+  hibernateViewportSnapshotRef: React.MutableRefObject<string>;
+  hibernateScrollbackSnapshotRef: React.MutableRefObject<string>;
+  hibernateContextSnapshotRef: React.MutableRefObject<string>;
+  hibernateContextViewportSnapshotRef: React.MutableRefObject<string>;
+  hibernateContextScrollbackSnapshotRef: React.MutableRefObject<string>;
   hibernateAlternateScreenRef: React.MutableRefObject<boolean>;
   hasRuntimeRef: React.MutableRefObject<boolean>;
   onHibernate: () => void;
+  onSoftHideWake: () => void;
   onWake: (
     getPayload: () => TerminalHibernateWakePayload,
     options: { sessionConnected: boolean },
@@ -43,19 +50,28 @@ export function useTerminalHibernateEffect({
   hibernateDelayMs,
   fileTransferActive,
   hibernatedRef,
+  softHiddenRef,
   hibernatePendingBufferRef,
   hibernateSnapshotRef,
+  hibernateViewportSnapshotRef,
+  hibernateScrollbackSnapshotRef,
+  hibernateContextSnapshotRef,
+  hibernateContextViewportSnapshotRef,
+  hibernateContextScrollbackSnapshotRef,
   hibernateAlternateScreenRef,
   hasRuntimeRef,
   onHibernate,
+  onSoftHideWake,
   onWake,
 }: UseTerminalHibernateEffectOptions): void {
   const hiddenSinceRef = useRef<number | null>(null);
   const hibernateTimerRef = useRef<number | null>(null);
   const paneVisibleRef = useRef(resolvePaneVisible(sessionId, isVisible));
   const onHibernateRef = useRef(onHibernate);
+  const onSoftHideWakeRef = useRef(onSoftHideWake);
   const onWakeRef = useRef(onWake);
   onHibernateRef.current = onHibernate;
+  onSoftHideWakeRef.current = onSoftHideWake;
   onWakeRef.current = onWake;
 
   useEffect(() => {
@@ -70,6 +86,11 @@ export function useTerminalHibernateEffect({
 
     const clearHibernateState = () => {
       hibernateSnapshotRef.current = "";
+      hibernateViewportSnapshotRef.current = "";
+      hibernateScrollbackSnapshotRef.current = "";
+      hibernateContextSnapshotRef.current = "";
+      hibernateContextViewportSnapshotRef.current = "";
+      hibernateContextScrollbackSnapshotRef.current = "";
       hibernatePendingBufferRef.current = "";
       hibernateAlternateScreenRef.current = false;
       hibernatedRef.current = false;
@@ -94,17 +115,26 @@ export function useTerminalHibernateEffect({
     };
 
     const tryWake = () => {
+      if (softHiddenRef.current) {
+        softHiddenRef.current = false;
+        onSoftHideWakeRef.current();
+        return;
+      }
       if (!hibernatedRef.current) return;
 
       const sessionConnected = getSessionConnectedRef.current();
       const getPayload = (): TerminalHibernateWakePayload => ({
         snapshot: hibernateSnapshotRef.current,
+        viewportSnapshot: hibernateViewportSnapshotRef.current || hibernateSnapshotRef.current,
+        scrollbackSnapshot: hibernateScrollbackSnapshotRef.current,
         pendingBuffer: hibernatePendingBufferRef.current,
         alternateScreen: hibernateAlternateScreenRef.current,
       });
       logger.info("[Terminal] Waking from hibernate", {
         sessionId,
         snapshotChars: hibernateSnapshotRef.current.length,
+        viewportChars: hibernateViewportSnapshotRef.current.length,
+        scrollbackChars: hibernateScrollbackSnapshotRef.current.length,
         pendingChars: hibernatePendingBufferRef.current.length,
         sessionConnected,
       });
@@ -120,11 +150,11 @@ export function useTerminalHibernateEffect({
 
     if (!hibernateEnabled) {
       clearHibernateTimer();
-      if (hibernatedRef.current) {
+      if (hibernatedRef.current || softHiddenRef.current) {
         tryWake();
       }
       const unsubscribeDisabled = subscribePaneVisible(sessionId, () => {
-        if (hibernatedRef.current && resolveVisible()) {
+        if ((hibernatedRef.current || softHiddenRef.current) && resolveVisible()) {
           tryWake();
         }
       });
@@ -163,16 +193,22 @@ export function useTerminalHibernateEffect({
     fileTransferActive,
     getSessionConnectedRef,
     hasRuntimeRef,
+    hibernateAlternateScreenRef,
     hibernateDelayMs,
     hibernateEnabled,
+    hibernateContextScrollbackSnapshotRef,
+    hibernateContextSnapshotRef,
+    hibernateContextViewportSnapshotRef,
     hibernatePendingBufferRef,
+    hibernateScrollbackSnapshotRef,
     hibernateSnapshotRef,
-    hibernateAlternateScreenRef,
+    hibernateViewportSnapshotRef,
     hibernatedRef,
     isSearchOpen,
     isVisible,
     isVisibleRef,
     sessionId,
+    softHiddenRef,
     status,
   ]);
 }

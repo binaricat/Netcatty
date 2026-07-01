@@ -207,7 +207,13 @@ const createHostVerifier = ({
   hostname,
   port = 22,
   knownHosts = [],
+  verifyHostKeys = true,
 }) => (rawKey, callback) => {
+  if (verifyHostKeys === false) {
+    callback(true);
+    return;
+  }
+
   const keyInfo = describeHostKey(rawKey);
   const decision = classifyHostKey({
     knownHosts,

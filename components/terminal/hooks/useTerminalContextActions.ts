@@ -39,6 +39,7 @@ export const useTerminalContextActions = ({
   onBroadcastInputRef,
   isLocalConnection,
   supportsRemoteImagePaste,
+  clearWipesScrollbackRef,
   terminalBackend,
   getRemoteCwd,
   scrollToBottomAfterProgrammaticInput,
@@ -53,6 +54,7 @@ export const useTerminalContextActions = ({
   onBroadcastInputRef?: RefObject<((data: string, sourceSessionId: string) => void) | undefined>;
   isLocalConnection: boolean;
   supportsRemoteImagePaste: boolean;
+  clearWipesScrollbackRef?: RefObject<boolean | undefined>;
   terminalBackend: {
     writeToSession: (sessionId: string, data: string, options?: { automated?: boolean }) => void;
   };
@@ -154,8 +156,8 @@ export const useTerminalContextActions = ({
   const onClear = useCallback(() => {
     const term = termRef.current;
     if (!term) return;
-    clearTerminalViewport(term);
-  }, [termRef]);
+    clearTerminalViewport(term, { wipeScrollback: clearWipesScrollbackRef?.current ?? true });
+  }, [clearWipesScrollbackRef, termRef]);
 
   const onSelectWord = useCallback(() => {
     const term = termRef.current;

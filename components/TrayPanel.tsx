@@ -13,7 +13,10 @@ import { useTrayPanelBackend } from "../application/state/useTrayPanelBackend";
 import { useActiveTabId } from "../application/state/activeTabStore";
 import { resolveGroupDefaults, applyGroupDefaults } from "../domain/groupConfig";
 import { materializeHostProxyProfile } from "../domain/proxyProfiles";
-import type { Host } from "../domain/models";
+import { upsertKnownHost } from "../domain/knownHosts";
+import type { Host, KnownHost } from "../domain/models";
+import { getEffectiveKnownHosts } from "../infrastructure/syncHelpers";
+import { PortForwardHostKeyTrayPrompt } from "./port-forwarding";
 import { X, Maximize2, ChevronRight, ChevronDown, Power } from "lucide-react";
 import { AppLogo } from "./AppLogo";
 
@@ -112,7 +115,7 @@ const WorkspaceGroup: React.FC<{
 };
 
 interface TrayPanelContentProps {
-  terminalSettings?: { keepaliveInterval: number; keepaliveCountMax: number };
+  terminalSettings?: { verifyHostKeys: boolean; keepaliveInterval: number; keepaliveCountMax: number };
 }
 
 const TrayPanelContent: React.FC<TrayPanelContentProps> = ({ terminalSettings }) => {
@@ -127,7 +130,7 @@ const TrayPanelContent: React.FC<TrayPanelContentProps> = ({ terminalSettings })
     onTrayPanelMenuData,
   } = useTrayPanelBackend();
 
-  const { hosts, keys, identities, proxyProfiles, groupConfigs } = useVaultState();
+  const { hosts, keys, identities, proxyProfiles, groupConfigs, knownHosts, updateKnownHosts } = useVaultState();
   useSessionState({ persistSessionRestore: false });
   const { rules: portForwardingRules, startTunnel, stopTunnel } = usePortForwardingState();
   const activeTabId = useActiveTabId();
@@ -135,6 +138,13 @@ const TrayPanelContent: React.FC<TrayPanelContentProps> = ({ terminalSettings })
     () => new Set(proxyProfiles.map((profile) => profile.id)),
     [proxyProfiles],
   );
+  const effectiveKnownHosts = useMemo(
+    () => getEffectiveKnownHosts(knownHosts) ?? [],
+    [knownHosts],
+  );
+  const handleAddKnownHost = useCallback((knownHost: KnownHost) => {
+    updateKnownHosts(upsertKnownHost(effectiveKnownHosts, knownHost));
+  }, [effectiveKnownHosts, updateKnownHosts]);
 
   const [traySessions, setTraySessions] = useState<TraySession[]>([]);
 
@@ -190,6 +200,12 @@ const TrayPanelContent: React.FC<TrayPanelContentProps> = ({ terminalSettings })
       if (target instanceof HTMLElement && target.closest("button,a,input,select,textarea,[role='button']")) {
         return;
       }
+      if (
+        target instanceof HTMLElement &&
+        target.closest("[data-port-forward-host-key-dialog='true'],[data-port-forward-host-key-tray-prompt='true'],.port-forward-host-key-dialog-layer")
+      ) {
+        return;
+      }
       // Clicking on background should close panel
       const root = document.getElementById("tray-panel-root");
       if (root && !root.contains(target)) {
@@ -216,7 +232,8 @@ const TrayPanelContent: React.FC<TrayPanelContentProps> = ({ terminalSettings })
   }, [quitApp]);
 
   return (
-    <div id="tray-panel-root" className="w-full h-full bg-background/95 supports-[backdrop-filter]:backdrop-blur-sm border border-border/60 rounded-lg shadow-lg overflow-hidden flex flex-col">
+    <>
+      <div id="tray-panel-root" className="w-full h-full bg-background/95 supports-[backdrop-filter]:backdrop-blur-sm border border-border/60 rounded-lg shadow-lg overflow-hidden flex flex-col">
       <div className="px-3 py-2 border-b border-border/60 flex items-center justify-between app-no-drag">
         <div className="flex items-center gap-2">
           <AppLogo className="w-5 h-5" />
@@ -243,8 +260,9 @@ const TrayPanelContent: React.FC<TrayPanelContentProps> = ({ terminalSettings })
         </div>
       </div>
 
-      <div className="p-2 space-y-3 text-sm flex-1 overflow-y-auto min-h-0">
+      <PortForwardHostKeyTrayPrompt onAddKnownHost={handleAddKnownHost} />
 
+      <div className="p-2 space-y-3 text-sm flex-1 overflow-y-auto min-h-0">
         {jumpableSessions.length > 0 && (() => {
           // Group sessions by workspace
           const workspaceGroups = new Map<string, { title: string; sessions: typeof jumpableSessions }>();
@@ -368,7 +386,7 @@ const TrayPanelContent: React.FC<TrayPanelContentProps> = ({ terminalSettings })
                             const host = resolveEffectiveHost(rawHost);
                             void startTunnel(rule, host, hosts.map(resolveEffectiveHost), keys, identities, (status, error) => {
                               if (status === "error" && error) toast.error(error);
-                            }, rule.autoStart, terminalSettings);
+                            }, rule.autoStart, terminalSettings, effectiveKnownHosts);
                           }
                         }}
                         className={cn(
@@ -424,7 +442,8 @@ const TrayPanelContent: React.FC<TrayPanelContentProps> = ({ terminalSettings })
           <span>{t("tray.quit")}</span>
         </button>
       </div>
-    </div>
+      </div>
+    </>
   );
 };
 

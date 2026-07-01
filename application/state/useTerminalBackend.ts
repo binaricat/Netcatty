@@ -74,9 +74,26 @@ export const useTerminalBackend = () => {
     return bridge.execCommand(options);
   }, []);
 
+  const setupOsc7Tracking = useCallback(async (sessionId: string, command: string) => {
+    const bridge = netcattyBridge.get();
+    if (!bridge?.setupOsc7Tracking) {
+      return { success: false, error: "setupOsc7Tracking unavailable" };
+    }
+    return bridge.setupOsc7Tracking(sessionId, command);
+  }, []);
+
   const writeToSession = useCallback((sessionId: string, data: string, options?: Parameters<NonNullable<NetcattyBridge["writeToSession"]>>[2]) => {
     const bridge = netcattyBridge.get();
     bridge?.writeToSession?.(sessionId, data, options);
+  }, []);
+
+  const interruptSession = useCallback((sessionId: string, trace?: NetcattyTerminalInterruptTrace) => {
+    const bridge = netcattyBridge.get();
+    if (bridge?.interruptSession) {
+      bridge.interruptSession(sessionId, trace);
+      return;
+    }
+    bridge?.writeToSession?.(sessionId, "\x03");
   }, []);
 
   const resizeSession = useCallback((sessionId: string, cols: number, rows: number) => {
@@ -87,6 +104,11 @@ export const useTerminalBackend = () => {
   const setSessionFlowPaused = useCallback((sessionId: string, paused: boolean) => {
     const bridge = netcattyBridge.get();
     bridge?.setSessionFlowPaused?.(sessionId, paused);
+  }, []);
+
+  const ackSessionFlow = useCallback((sessionId: string, bytes: number) => {
+    const bridge = netcattyBridge.get();
+    bridge?.ackSessionFlow?.(sessionId, bytes);
   }, []);
 
   const closeSession = useCallback((sessionId: string) => {
@@ -100,10 +122,14 @@ export const useTerminalBackend = () => {
     return bridge.setSessionEncoding(sessionId, encoding);
   }, []);
 
-  const onSessionData = useCallback((sessionId: string, cb: (data: string) => void) => {
+  const onSessionData = useCallback((
+    sessionId: string,
+    cb: Parameters<NetcattyBridge["onSessionData"]>[1],
+    options?: Parameters<NetcattyBridge["onSessionData"]>[2],
+  ) => {
     const bridge = netcattyBridge.get();
     if (!bridge?.onSessionData) throw new Error("onSessionData unavailable");
-    return bridge.onSessionData(sessionId, cb);
+    return bridge.onSessionData(sessionId, cb, options);
   }, []);
 
   const onSessionExit = useCallback((sessionId: string, cb: (evt: { exitCode?: number; signal?: number; error?: string; reason?: "exited" | "error" | "timeout" | "closed" }) => void) => {
@@ -120,6 +146,11 @@ export const useTerminalBackend = () => {
   const onTelnetAutoLoginCancelled = useCallback((sessionId: string, cb: (evt: { sessionId: string }) => void) => {
     const bridge = netcattyBridge.get();
     return bridge?.onTelnetAutoLoginCancelled?.(sessionId, cb);
+  }, []);
+
+  const onTelnetEchoMode = useCallback((sessionId: string, cb: (evt: { sessionId: string; remoteEcho: boolean; localEcho: boolean }) => void) => {
+    const bridge = netcattyBridge.get();
+    return bridge?.onTelnetEchoMode?.(sessionId, cb);
   }, []);
 
   const onChainProgress = useCallback((cb: (sessionId: string, hop: number, total: number, label: string, status: string, error?: string) => void) => {
@@ -319,19 +350,23 @@ export const useTerminalBackend = () => {
       cancelZmodem,
       onZmodemEvent,
       execCommand,
+      setupOsc7Tracking,
       getSessionPwd,
       getSessionRemoteInfo,
       getSessionDistroInfo,
       getServerStats,
       writeToSession,
+      interruptSession,
       resizeSession,
       setSessionFlowPaused,
+      ackSessionFlow,
       closeSession,
       setSessionEncoding,
       onSessionData,
       onSessionExit,
       onTelnetAutoLoginComplete,
       onTelnetAutoLoginCancelled,
+      onTelnetEchoMode,
       onChainProgress,
       onConnectionReuseFallback,
       onWindowFullScreenChanged,
@@ -367,19 +402,23 @@ export const useTerminalBackend = () => {
       cancelZmodem,
       onZmodemEvent,
       execCommand,
+      setupOsc7Tracking,
       getSessionPwd,
       getSessionRemoteInfo,
       getSessionDistroInfo,
       getServerStats,
       writeToSession,
+      interruptSession,
       resizeSession,
       setSessionFlowPaused,
+      ackSessionFlow,
       closeSession,
       setSessionEncoding,
       onSessionData,
       onSessionExit,
       onTelnetAutoLoginComplete,
       onTelnetAutoLoginCancelled,
+      onTelnetEchoMode,
       onChainProgress,
       onConnectionReuseFallback,
       onWindowFullScreenChanged,

@@ -26,7 +26,7 @@ test("settings lazy-load errors stay inside the active settings tab", () => {
   const source = readFileSync(new URL("./SettingsPage.tsx", import.meta.url), "utf8");
   const errorFallbackIndex = source.indexOf("const SettingsTabLoadError");
   const tabContentIndex = source.indexOf("<SettingsTabContent value={value}>", errorFallbackIndex);
-  const boundaryFallbackIndex = source.indexOf("fallback={<SettingsTabLoadError value={value} />}");
+  const boundaryFallbackIndex = source.indexOf("fallback={(error) => <SettingsTabLoadError value={value} error={error} />}");
 
   assert.notEqual(errorFallbackIndex, -1);
   assert.notEqual(tabContentIndex, -1);

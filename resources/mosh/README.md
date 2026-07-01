@@ -12,19 +12,19 @@ directly (see `electron/bridges/moshHandshake.cjs` and
    `mosh-client` on relevant pushes/PRs, or on a manual
    `workflow_dispatch`. It uses `scripts/build-mosh/build-linux.sh` and
    `scripts/build-mosh/build-macos.sh` for Linux/macOS, and
-   `scripts/build-mosh/fetch-windows.sh` for the pinned Windows binary:
+   `scripts/build-mosh/fetch-windows.sh` for the pinned Windows bundle:
 
    | target            | provenance                                                      |
    |-------------------|-----------------------------------------------------------------|
    | `linux-x64`       | upstream source, manylinux2014, static third-party deps + glibc |
    | `linux-arm64`     | upstream source, manylinux2014, static third-party deps + glibc |
    | `darwin-universal`| upstream source, lipo arm64 + x86_64, macOS system dylibs only  |
-   | `win32-x64`       | FluentTerminal-pinned standalone fallback, SHA256 pinned        |
+   | `win32-x64`       | Netcatty-pinned runtime bundle + FluentTerminal fallback        |
    | `win32-arm64`     | (not built — Cygwin arm64 port not yet stable)                  |
 
-   The upstream Cygwin Windows build path was removed from the default
-   workflow because the tested build clears the terminal but never
-   renders remote output on Windows.
+   The upstream Cygwin Windows build is not rebuilt in this workflow by
+   default. Windows releases use a SHA256-pinned bundle that was built
+   by Netcatty and verified for packaging.
 
 2. When manually dispatched with `release_tag`, that workflow publishes
    the binaries to the dedicated `binaricat/Netcatty-mosh-bin`
@@ -51,7 +51,7 @@ directly (see `electron/bridges/moshHandshake.cjs` and
 
    Official Windows package builds currently ship x64 only for bundled
    Mosh coverage. Windows arm64 packaging should be added only after we
-   have a tested standalone arm64 client.
+   have a tested arm64 client bundle.
 
 The directory is otherwise empty (binaries are gitignored).
 
@@ -61,12 +61,13 @@ The directory is otherwise empty (binaries are gitignored).
   (https://github.com/mobile-shell/mosh).
 - Netcatty is **GPL-3.0**, so redistribution as part of the installer
   is permitted.
-- The default Windows x64 binary is the FluentTerminal-pinned
-  standalone `mosh-client.exe` from
-  https://github.com/felixse/FluentTerminal @ commit `bad0f85`, pinned
-  by SHA256 in `scripts/fetch-mosh-binaries.cjs`. The old Cygwin build
-  path is intentionally not used for Windows releases while it
-  reproduces the blank-screen runtime issue.
+- The default Windows x64 artifact is a SHA256-pinned Netcatty
+  `mosh-client-win32-x64.tar.gz` bundle from
+  `binaricat/Netcatty-mosh-bin` release `mosh-bin-1.4.0-2`. It includes
+  `mosh-client.exe`, required Cygwin runtime DLLs, and the bundled
+  `xterm-256color` terminfo entry. The FluentTerminal standalone
+  `mosh-client.exe` from https://github.com/felixse/FluentTerminal @
+  commit `bad0f85` remains published as a pinned fallback.
 - Bundled/static deps (OpenSSL Apache-2.0, protobuf BSD-3-Clause,
   ncurses MIT) are compatible with GPL-3.0.
 
@@ -98,12 +99,11 @@ For macOS the build needs an Xcode toolchain; see
 - Mosh startup requires Netcatty's bundled `mosh-client` and a usable
   `ssh` client for the remote bootstrap. System-installed `mosh` /
   `mosh-client` binaries are intentionally ignored.
-- Windows x64 currently ships the FluentTerminal-pinned standalone
-  client because the upstream Cygwin bundle can blank after terminal
-  initialization on Windows.
+- Windows x64 currently ships the pinned Netcatty runtime bundle. The
+  old standalone client remains only as a release fallback.
 
 ## Roadmap
 
-- Add Windows arm64 only after a tested standalone arm64 client is
+- Add Windows arm64 only after a tested arm64 client bundle is
   available.
 - Make `MOSH_REF` track upstream release tags automatically.

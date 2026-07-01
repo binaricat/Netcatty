@@ -87,6 +87,7 @@ function createOpenConnectionApi(ctx) {
             hostname: jump.hostname,
             port: jump.port || 22,
             knownHosts: options.knownHosts,
+            verifyHostKeys: jump.verifyHostKeys ?? options.verifyHostKeys,
           });
     
           // Auth - support agent (certificate), key, and password fallback
@@ -654,6 +655,7 @@ function createOpenConnectionApi(ctx) {
         hostname: options.hostname,
         port: options.port || 22,
         knownHosts: options.knownHosts,
+        verifyHostKeys: options.verifyHostKeys,
       });
     
       // Use the tunneled socket if we have one

@@ -210,16 +210,12 @@ function registerAgentDiscoveryHandlers(ctx) {
             }
             invalidateCodexValidationCache();
             state = "not_logged_in";
-          } else {
-            state = "unknown";
           }
 
-          effectiveRawOutput = [
+          effectiveRawOutput = appendCodexChatGptValidationFailure(
             rawOutput,
-            "",
-            "ChatGPT auth validation failed:",
             validation.error || "Unknown validation error",
-          ].join("\n").trim();
+          );
         }
       }
 

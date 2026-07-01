@@ -61,7 +61,7 @@ test("chrome layout animations wait until theme settle frames complete", () => {
   cancel();
 });
 
-test("syncActiveChromeTheme refreshes top tabs when the active theme fingerprint is unchanged", () => {
+test("syncActiveChromeTheme skips surface refresh when the active theme fingerprint is unchanged", () => {
   const globalWithDocument = globalThis as typeof globalThis & { document?: Document };
   const originalDocument = globalWithDocument.document;
   const theme = TERMINAL_THEMES[0];
@@ -83,9 +83,9 @@ test("syncActiveChromeTheme refreshes top tabs when the active theme fingerprint
       throw new Error("app theme should not be restored for an unchanged active chrome theme");
     });
 
-    assert.notEqual(topTabsRoot.style.getPropertyValue("--top-tabs-bg"), "");
-    assert.notEqual(topTabsRoot.style.getPropertyValue("--top-tabs-active-bg"), "");
-    assert.notEqual(topTabsRoot.style.getPropertyValue("--top-tabs-accent"), "");
+    assert.equal(topTabsRoot.style.getPropertyValue("--top-tabs-bg"), "");
+    assert.equal(topTabsRoot.style.getPropertyValue("--top-tabs-active-bg"), "");
+    assert.equal(topTabsRoot.style.getPropertyValue("--top-tabs-accent"), "");
   } finally {
     if (originalDocument) {
       globalWithDocument.document = originalDocument;

@@ -9,21 +9,80 @@ import {
   writeTerminalDataWithLineTimestamps,
 } from "./terminalLineTimestamps.ts";
 
-const createFakeTerm = () => {
+const createFakeTerm = (options: { cols?: number; wraparoundMode?: boolean } = {}) => {
   const writes: string[] = [];
   const markerLines: number[] = [];
   const disposedMarkerLines: number[] = [];
   let cursorLine = 0;
+  let cursorColumn = 0;
+  const cols = options.cols ?? Number.POSITIVE_INFINITY;
+  let wraparoundMode = options.wraparoundMode ?? true;
+  const isCombiningMark = (char: string): boolean => {
+    const code = char.codePointAt(0);
+    return code !== undefined && code >= 0x300 && code <= 0x36f;
+  };
+  const readCsiSequence = (data: string, startIndex: number): { sequence: string; endIndex: number } | null => {
+    if (data[startIndex] !== "\x1b" || data[startIndex + 1] !== "[") return null;
+    for (let index = startIndex + 2; index < data.length; index += 1) {
+      const char = data[index];
+      if (char >= "@" && char <= "~") {
+        return { sequence: data.slice(startIndex, index + 1), endIndex: index };
+      }
+    }
+    return null;
+  };
+  const applyCsiSequence = (sequence: string): void => {
+    if (sequence === "\x1b[?7h") {
+      wraparoundMode = true;
+    } else if (sequence === "\x1b[?7l") {
+      wraparoundMode = false;
+    }
+  };
   const term = {
     buffer: {
       active: { type: "normal", viewportY: 0 },
     },
+    cols,
+    get modes() {
+      return { wraparoundMode };
+    },
     rows: 24,
     write(data: string, callback?: () => void) {
       writes.push(data);
-      for (const char of data) {
+      for (let index = 0; index < data.length; index += 1) {
+        const sequence = readCsiSequence(data, index);
+        if (sequence) {
+          applyCsiSequence(sequence.sequence);
+          index = sequence.endIndex;
+          continue;
+        }
+        const char = data[index];
         if (char === "\n") {
           cursorLine += 1;
+          if (Number.isFinite(cols) && cursorColumn >= cols) {
+            cursorColumn = cols - 1;
+          }
+        } else if (char === "\r") {
+          cursorColumn = 0;
+        } else if (char === "\b") {
+          cursorColumn = Math.max(0, cursorColumn - 1);
+        } else if (char === "\t") {
+          if (cursorColumn < cols) {
+            const nextTabStop = cursorColumn + (8 - (cursorColumn % 8));
+            cursorColumn = Math.min(nextTabStop, cols - 1);
+          }
+        } else if (isCombiningMark(char)) {
+          continue;
+        } else if (char < " " || char === "\u007f") {
+          continue;
+        } else {
+          if (wraparoundMode && cursorColumn + 1 > cols) {
+            cursorLine += 1;
+            cursorColumn = 0;
+          }
+          cursorColumn = Number.isFinite(cols)
+            ? Math.min(cols, cursorColumn + 1)
+            : cursorColumn + 1;
         }
       }
       callback?.();
@@ -162,6 +221,89 @@ test("coalesces timestamp change notifications per write", () => {
 
   assert.deepEqual(markerLines, [0, 1, 2]);
   assert.equal(notifications, 1);
+});
+
+test("writes large timestamped output in one batch while preserving marker lines", () => {
+  const { term, writes, markerLines } = createFakeTerm();
+  const lines = Array.from({ length: 80 }, (_, index) => `line-${index}`).join("\r\n");
+
+  writeTerminalDataWithLineTimestamps(term as never, lines, () => {});
+
+  assert.deepEqual(writes, [lines]);
+  assert.deepEqual(markerLines, Array.from({ length: 80 }, (_, index) => index));
+});
+
+test("accounts for soft-wrapped rows when batching timestamp markers", () => {
+  const { term, writes, markerLines } = createFakeTerm({ cols: 5 });
+  const lines = Array.from({ length: 80 }, (_, index) => `line-${index}`).join("\r\n");
+
+  writeTerminalDataWithLineTimestamps(term as never, lines, () => {});
+
+  assert.deepEqual(writes, [lines]);
+  assert.deepEqual(markerLines, Array.from({ length: 80 }, (_, index) => index * 2));
+});
+
+test("does not soft-wrap exact-width rows when batching timestamp markers", () => {
+  const { term, writes, markerLines } = createFakeTerm({ cols: 5 });
+  const lines = Array.from({ length: 80 }, () => "abcde").join("\r\n");
+
+  writeTerminalDataWithLineTimestamps(term as never, lines, () => {});
+
+  assert.deepEqual(writes, [lines]);
+  assert.deepEqual(markerLines, Array.from({ length: 80 }, (_, index) => index));
+});
+
+test("preserves bare line feed cursor columns when batching timestamp markers", () => {
+  const { term, writes, markerLines } = createFakeTerm({ cols: 5 });
+  const lines = Array.from({ length: 80 }, () => "abcde").join("\n");
+
+  writeTerminalDataWithLineTimestamps(term as never, lines, () => {});
+
+  assert.deepEqual(writes, [lines]);
+  assert.deepEqual(markerLines, [
+    0,
+    ...Array.from({ length: 79 }, (_, index) => (index * 2) + 1),
+  ]);
+});
+
+test("respects disabled autowrap when batching timestamp markers", () => {
+  const { term, writes, markerLines } = createFakeTerm({ cols: 5 });
+  const lines = `\x1b[?7l${Array.from({ length: 80 }, () => "abcdef").join("\r\n")}`;
+
+  writeTerminalDataWithLineTimestamps(term as never, lines, () => {});
+
+  assert.deepEqual(writes, [lines]);
+  assert.deepEqual(markerLines, Array.from({ length: 80 }, (_, index) => index));
+});
+
+test("accounts for backspace cursor movement when batching timestamp markers", () => {
+  const { term, writes, markerLines } = createFakeTerm({ cols: 5 });
+  const lines = Array.from({ length: 80 }, () => "abc\b\b\bdef").join("\r\n");
+
+  writeTerminalDataWithLineTimestamps(term as never, lines, () => {});
+
+  assert.deepEqual(writes, [lines]);
+  assert.deepEqual(markerLines, Array.from({ length: 80 }, (_, index) => index));
+});
+
+test("accounts for tab stops without soft wrapping timestamp markers", () => {
+  const { term, writes, markerLines } = createFakeTerm({ cols: 5 });
+  const lines = Array.from({ length: 80 }, () => "\t").join("\r\n");
+
+  writeTerminalDataWithLineTimestamps(term as never, lines, () => {});
+
+  assert.deepEqual(writes, [lines]);
+  assert.deepEqual(markerLines, Array.from({ length: 80 }, (_, index) => index));
+});
+
+test("keeps batched timestamp markers aligned for combining characters", () => {
+  const { term, writes, markerLines } = createFakeTerm({ cols: 5 });
+  const lines = Array.from({ length: 80 }, () => "e\u0301e\u0301e\u0301").join("\r\n");
+
+  writeTerminalDataWithLineTimestamps(term as never, lines, () => {});
+
+  assert.deepEqual(writes, [lines]);
+  assert.deepEqual(markerLines, Array.from({ length: 80 }, (_, index) => index));
 });
 
 test("keeps recording and preserves existing timestamps when the gutter is hidden", () => {

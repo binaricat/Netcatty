@@ -1,5 +1,6 @@
 import { isActiveChromeThemeResolvable, resolveActiveChromeTheme } from '../app/activeChromeTheme';
 import { clearTopTabsChromeThemeVars } from '../app/topTabsChromeTheme';
+import type { TerminalAppearanceHostScope, ResolvedAppearance } from '../../domain/terminalAppearanceRuntime';
 import type { Host, TerminalSession, TerminalTheme, Workspace } from '../../types';
 import { activeTabStore } from './activeTabStore';
 import type { EditorTab } from './editorTabStore';
@@ -15,6 +16,7 @@ export type ActiveChromeThemeDeps = {
   followAppTerminalTheme: boolean;
   hostById: Map<string, Host>;
   logViews: readonly LogView[];
+  resolveSessionAppearance?: (hostScope: TerminalAppearanceHostScope) => ResolvedAppearance;
   sessionById: Map<string, TerminalSession>;
   themeById: Map<string, TerminalTheme>;
   workspaceById: Map<string, Workspace>;

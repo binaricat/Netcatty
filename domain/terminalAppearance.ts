@@ -69,8 +69,7 @@ export const resolveHostTerminalThemeId = (host: Host | null | undefined, defaul
  * terminal blends seamlessly with the app chrome. Returns undefined if no
  * match exists (caller should fall back to the global terminal theme).
  */
-const UI_TO_TERMINAL_THEME: Record<string, string> = {
-  // Light
+const CORE_LIGHT_UI_TO_TERMINAL_THEME: Record<string, string> = {
   'snow': 'ui-snow',
   'pure-white': 'ui-pure-white',
   'ivory': 'ui-ivory',
@@ -78,7 +77,9 @@ const UI_TO_TERMINAL_THEME: Record<string, string> = {
   'mint': 'ui-mint',
   'sand': 'ui-sand',
   'lavender': 'ui-lavender',
-  // Dark
+};
+
+const CORE_DARK_UI_TO_TERMINAL_THEME: Record<string, string> = {
   'pure-black': 'ui-pure-black',
   'midnight': 'ui-midnight',
   'deep-blue': 'ui-deep-blue',
@@ -88,25 +89,238 @@ const UI_TO_TERMINAL_THEME: Record<string, string> = {
   'forest': 'ui-forest',
 };
 
-export const getTerminalThemeForUiTheme = (uiThemeId: string): string | undefined =>
-  UI_TO_TERMINAL_THEME[uiThemeId];
+const UI_TO_TERMINAL_THEME: Record<string, string> = {
+  ...CORE_LIGHT_UI_TO_TERMINAL_THEME,
+  ...CORE_DARK_UI_TO_TERMINAL_THEME,
+};
+
+const SYSTEM_LIGHT_UI_TO_TERMINAL_THEME: Record<string, string> = {
+  "a-cup-of-coffee": "system-a-cup-of-coffee-light",
+  "abolkog": "system-abolkog-light",
+  "aurora": "system-aurora-light",
+  "ayu": "system-ayu-light",
+  "base16-flat": "system-base16-flat-light",
+  "base16-mocha": "system-base16-mocha-light",
+  "blue-dolphin": "system-blue-dolphin-light",
+  "calm-days-sober-nights-sky": "system-calm-days-sober-nights-sky-light",
+  "catppuccin": "system-catppuccin-light",
+  "chai": "system-chai-light",
+  "chinolor": "system-chinolor-light",
+  "cyberdyne": "system-cyberdyne-light",
+  "desert": "system-desert-light",
+  "django-reborn-again": "system-django-reborn-again-light",
+  "espresso": "system-espresso-light",
+  "eyehealth": "system-eyehealth-light",
+  "flexoki": "system-flexoki-light",
+  "fox": "system-fox-light",
+  "garbage-oracle": "system-garbage-oracle-light",
+  "github": "system-github-light",
+  "gruvbox-material": "system-gruvbox-material-light",
+  "homebrew": "system-homebrew-light",
+  "ic-orange-ppl": "system-ic-orange-ppl-light",
+  "ikki": "system-ikki-light",
+  "kanso-ink": "system-kanso-ink-light",
+  "kary-pro-colors": "system-kary-pro-colors-light",
+  "light-purple": "system-light-purple-light",
+  "mondrian": "system-mondrian-light",
+  "monochrome": "system-monochrome-light",
+  "monochrome-stone": "system-monochrome-stone-light",
+  "monokai-pro-spectrum": "system-monokai-pro-spectrum-light",
+  "monospace": "system-monospace-light",
+  "noctis-azureus": "system-noctis-azureus-light",
+  "noctis-hibernus": "system-noctis-hibernus-light",
+  "noir-essence": "system-noir-essence-light",
+  "nord-midnight": "system-nord-midnight-light",
+  "notionish": "system-notionish-light",
+  "phonebook": "system-phonebook-light",
+  "polychrome": "system-polychrome-light",
+  "purplepeter": "system-purplepeter-light",
+  "rainglow-codecourse": "system-rainglow-codecourse-light",
+  "rainglow-crisp": "system-rainglow-crisp-light",
+  "rainglow-lavender": "system-rainglow-lavender-light",
+  "remedy-tilted": "system-remedy-tilted-light",
+  "rose-pine": "system-rose-pine-light",
+  "selene-selenized": "system-selene-selenized-light",
+  "soft-color": "system-soft-color-light",
+  "tearout": "system-tearout-light",
+  "tokyo-night": "system-tokyo-night-light",
+  "tomorrow-night-eighties": "system-tomorrow-night-eighties-light",
+  "vaporizer-turquoise": "system-vaporizer-turquoise-light",
+  "xotopio": "system-xotopio-light",
+  "yuttari": "system-yuttari-light",
+  "zenbones-rosebones": "system-zenbones-rosebones-light",
+  "zhxo-red": "system-zhxo-red-light",
+};
+
+const SYSTEM_DARK_UI_TO_TERMINAL_THEME: Record<string, string> = {
+  "a-cup-of-coffee": "system-a-cup-of-coffee-dark",
+  "abolkog": "system-abolkog-dark",
+  "aurora": "system-aurora-dark",
+  "ayu": "system-ayu-dark",
+  "base16-flat": "system-base16-flat-dark",
+  "base16-mocha": "system-base16-mocha-dark",
+  "blue-dolphin": "system-blue-dolphin-dark",
+  "calm-days-sober-nights-sky": "system-calm-days-sober-nights-sky-dark",
+  "catppuccin": "system-catppuccin-dark",
+  "chai": "system-chai-dark",
+  "chinolor": "system-chinolor-dark",
+  "cyberdyne": "system-cyberdyne-dark",
+  "desert": "system-desert-dark",
+  "django-reborn-again": "system-django-reborn-again-dark",
+  "espresso": "system-espresso-dark",
+  "eyehealth": "system-eyehealth-dark",
+  "flexoki": "system-flexoki-dark",
+  "fox": "system-fox-dark",
+  "garbage-oracle": "system-garbage-oracle-dark",
+  "github": "system-github-dark",
+  "gruvbox-material": "system-gruvbox-material-dark",
+  "homebrew": "system-homebrew-dark",
+  "ic-orange-ppl": "system-ic-orange-ppl-dark",
+  "ikki": "system-ikki-dark",
+  "kanso-ink": "system-kanso-ink-dark",
+  "kary-pro-colors": "system-kary-pro-colors-dark",
+  "light-purple": "system-light-purple-dark",
+  "mondrian": "system-mondrian-dark",
+  "monochrome": "system-monochrome-dark",
+  "monochrome-stone": "system-monochrome-stone-dark",
+  "monokai-pro-spectrum": "system-monokai-pro-spectrum-dark",
+  "monospace": "system-monospace-dark",
+  "noctis-azureus": "system-noctis-azureus-dark",
+  "noctis-hibernus": "system-noctis-hibernus-dark",
+  "noir-essence": "system-noir-essence-dark",
+  "nord-midnight": "system-nord-midnight-dark",
+  "notionish": "system-notionish-dark",
+  "phonebook": "system-phonebook-dark",
+  "polychrome": "system-polychrome-dark",
+  "purplepeter": "system-purplepeter-dark",
+  "rainglow-codecourse": "system-rainglow-codecourse-dark",
+  "rainglow-crisp": "system-rainglow-crisp-dark",
+  "rainglow-lavender": "system-rainglow-lavender-dark",
+  "remedy-tilted": "system-remedy-tilted-dark",
+  "rose-pine": "system-rose-pine-dark",
+  "selene-selenized": "system-selene-selenized-dark",
+  "soft-color": "system-soft-color-dark",
+  "tearout": "system-tearout-dark",
+  "tokyo-night": "system-tokyo-night-dark",
+  "tomorrow-night-eighties": "system-tomorrow-night-eighties-dark",
+  "vaporizer-turquoise": "system-vaporizer-turquoise-dark",
+  "xotopio": "system-xotopio-dark",
+  "yuttari": "system-yuttari-dark",
+  "zenbones-rosebones": "system-zenbones-rosebones-dark",
+  "zhxo-red": "system-zhxo-red-dark",
+};
+
+export const getTerminalThemeForUiTheme = (uiThemeId: string, resolvedTheme?: 'light' | 'dark'): string | undefined => {
+  if (resolvedTheme === 'light') return SYSTEM_LIGHT_UI_TO_TERMINAL_THEME[uiThemeId] ?? UI_TO_TERMINAL_THEME[uiThemeId];
+  if (resolvedTheme === 'dark') return SYSTEM_DARK_UI_TO_TERMINAL_THEME[uiThemeId] ?? UI_TO_TERMINAL_THEME[uiThemeId];
+  return UI_TO_TERMINAL_THEME[uiThemeId];
+};
+
+export type FollowAppTerminalThemeSelection = {
+  appTheme: TerminalTheme['type'];
+  uiThemeId: string;
+};
+
+const createTerminalThemeToUiThemeMap = (): Record<string, FollowAppTerminalThemeSelection> => {
+  const entries: Array<[string, FollowAppTerminalThemeSelection]> = [];
+  for (const [uiThemeId, terminalThemeId] of Object.entries(CORE_LIGHT_UI_TO_TERMINAL_THEME)) {
+    entries.push([terminalThemeId, { appTheme: 'light', uiThemeId }]);
+  }
+  for (const [uiThemeId, terminalThemeId] of Object.entries(CORE_DARK_UI_TO_TERMINAL_THEME)) {
+    entries.push([terminalThemeId, { appTheme: 'dark', uiThemeId }]);
+  }
+  for (const [uiThemeId, terminalThemeId] of Object.entries(SYSTEM_LIGHT_UI_TO_TERMINAL_THEME)) {
+    entries.push([terminalThemeId, { appTheme: 'light', uiThemeId }]);
+  }
+  for (const [uiThemeId, terminalThemeId] of Object.entries(SYSTEM_DARK_UI_TO_TERMINAL_THEME)) {
+    entries.push([terminalThemeId, { appTheme: 'dark', uiThemeId }]);
+  }
+  return Object.fromEntries(entries);
+};
+
+const TERMINAL_THEME_TO_UI_THEME = createTerminalThemeToUiThemeMap();
+
+export const getFollowAppTerminalThemeIds = (type?: TerminalTheme['type']): string[] =>
+  Object.entries(TERMINAL_THEME_TO_UI_THEME)
+    .filter(([, selection]) => !type || selection.appTheme === type)
+    .map(([terminalThemeId]) => terminalThemeId);
+
+export const isFollowAppTerminalThemeId = (themeId: string): boolean =>
+  Object.prototype.hasOwnProperty.call(TERMINAL_THEME_TO_UI_THEME, themeId);
+
+export const getFollowAppTerminalThemeSelectionUpdate = (
+  themeId: string,
+): FollowAppTerminalThemeSelection | null =>
+  TERMINAL_THEME_TO_UI_THEME[themeId] ?? null;
 
 /**
- * Sentinel stored in the per-mode follow-theme settings meaning "let the
- * terminal theme follow the active UI theme preset" (the legacy
- * auto-matching behavior), as opposed to a concrete terminal theme id.
+ * Sentinel stored in the per-mode manual terminal theme settings. It means
+ * the user has not chosen a concrete terminal theme for that mode yet, so the
+ * app can use the UI-matched default.
  */
 export const TERMINAL_THEME_AUTO = 'auto';
 
 /**
  * Resolve which terminal theme id to use while "Follow Application Theme" is
- * enabled, honoring the user's per-mode override.
- *
- * - A concrete theme id in the active mode's setting is used as-is.
- * - `TERMINAL_THEME_AUTO` (the default) keeps the legacy behavior: match the
- *   active UI theme preset, then `fallbackThemeId` when no UI match exists.
+ * enabled. This is intentionally not overrideable: the terminal follows the
+ * active UI theme preset, then `fallbackThemeId` when no UI match exists.
  */
 export const resolveFollowedTerminalThemeId = (args: {
+  resolvedTheme: 'light' | 'dark';
+  lightUiThemeId: string;
+  darkUiThemeId: string;
+  fallbackThemeId: string;
+}): string => {
+  const activeUiThemeId = args.resolvedTheme === 'dark'
+    ? args.darkUiThemeId
+    : args.lightUiThemeId;
+  return getTerminalThemeForUiTheme(activeUiThemeId, args.resolvedTheme) ?? args.fallbackThemeId;
+};
+
+/** Resolve a follow-app sidebar pick using the target mode, not the current resolvedTheme. */
+export const resolveFollowAppTerminalThemeId = (
+  pendingTerminalThemeId: string | null | undefined,
+  args: {
+    resolvedTheme: 'light' | 'dark';
+    lightUiThemeId: string;
+    darkUiThemeId: string;
+    fallbackThemeId: string;
+  },
+): string => {
+  if (pendingTerminalThemeId && isFollowAppTerminalThemeId(pendingTerminalThemeId)) {
+    return pendingTerminalThemeId;
+  }
+  return resolveFollowedTerminalThemeId(args);
+};
+
+export const getFollowAppThemePickExpectedSettledId = (
+  pendingTerminalThemeId: string,
+): string | null => {
+  const selection = getFollowAppTerminalThemeSelectionUpdate(pendingTerminalThemeId);
+  if (!selection) return null;
+  return getTerminalThemeForUiTheme(selection.uiThemeId, selection.appTheme) ?? pendingTerminalThemeId;
+};
+
+export const isFollowAppThemePickSettled = (
+  pendingTerminalThemeId: string,
+  args: {
+    resolvedTheme: 'light' | 'dark';
+    lightUiThemeId: string;
+    darkUiThemeId: string;
+    fallbackThemeId: string;
+  },
+): boolean => {
+  const selection = getFollowAppTerminalThemeSelectionUpdate(pendingTerminalThemeId);
+  if (!selection) return true;
+  if (args.resolvedTheme !== selection.appTheme) return false;
+  const activeUiThemeId = selection.appTheme === 'dark'
+    ? args.darkUiThemeId
+    : args.lightUiThemeId;
+  if (activeUiThemeId !== selection.uiThemeId) return false;
+  return resolveFollowedTerminalThemeId(args) === pendingTerminalThemeId;
+};
+
+export const resolveManualTerminalThemeId = (args: {
   resolvedTheme: 'light' | 'dark';
   terminalThemeDarkId: string;
   terminalThemeLightId: string;
@@ -118,21 +332,8 @@ export const resolveFollowedTerminalThemeId = (args: {
     ? args.terminalThemeDarkId
     : args.terminalThemeLightId;
   if (selected && selected !== TERMINAL_THEME_AUTO) return selected;
-  const activeUiThemeId = args.resolvedTheme === 'dark'
-    ? args.darkUiThemeId
-    : args.lightUiThemeId;
-  return getTerminalThemeForUiTheme(activeUiThemeId) ?? args.fallbackThemeId;
+  return args.fallbackThemeId;
 };
-
-export const getFollowAppTerminalThemeSelectionUpdate = (
-  theme: Pick<TerminalTheme, 'id' | 'type'>,
-): {
-  appTheme: TerminalTheme['type'];
-  terminalThemeDarkId?: string;
-  terminalThemeLightId?: string;
-} => theme.type === 'dark'
-  ? { appTheme: 'dark', terminalThemeDarkId: theme.id }
-  : { appTheme: 'light', terminalThemeLightId: theme.id };
 
 type ParsedHslToken = {
   hue: number;

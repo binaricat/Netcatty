@@ -1,4 +1,12 @@
 import { Host, HostChainConfig, HostProtocol } from "./models";
+import { sanitizeHost } from "./host";
+import {
+  buildVaultHostFromDraft,
+  buildVaultHostMergeKey,
+  type VaultHostDraftProtocol,
+} from "./vaultHostCreate";
+
+export { buildVaultHostMergeKey } from "./vaultHostCreate";
 import { parseQuickConnectInput } from "./quickConnect";
 import { findHeaderIndex, parseCsv } from "./vaultImport/csvUtils";
 export { exportHostsToCsvWithStats, getVaultCsvTemplate } from "./vaultImport/csvExport";
@@ -85,21 +93,29 @@ export type VaultImportFormat =
   | "securecrt"
   | "ssh_config";
 
+export const VAULT_IMPORT_FORMATS: VaultImportFormat[] = [
+  "csv",
+  "putty",
+  "mobaxterm",
+  "securecrt",
+  "ssh_config",
+];
+
 type VaultImportIssueLevel = "warning" | "error";
 
-interface VaultImportIssue {
+export interface VaultImportIssue {
   level: VaultImportIssueLevel;
   message: string;
 }
 
-interface VaultImportStats {
+export interface VaultImportStats {
   parsed: number;
   imported: number;
   skipped: number;
   duplicates: number;
 }
 
-interface VaultImportResult {
+export interface VaultImportResult {
   hosts: Host[];
   groups: string[];
   issues: VaultImportIssue[];
@@ -145,8 +161,7 @@ const splitTags = (raw: string | undefined): string[] => {
     .filter(Boolean);
 };
 
-const hostKey = (h: Pick<Host, "hostname" | "port" | "username" | "protocol">) =>
-  `${(h.protocol ?? "ssh").toLowerCase()}|${h.hostname.toLowerCase()}|${h.port}|${(h.username ?? "").toLowerCase()}`;
+const hostKey = buildVaultHostMergeKey;
 
 const createHost = (input: {
   label?: string;
@@ -154,27 +169,16 @@ const createHost = (input: {
   username?: string;
   password?: string;
   port?: number;
-  protocol?: Exclude<HostProtocol, "mosh" | "et">;
+  protocol?: VaultHostDraftProtocol;
   group?: string;
   tags?: string[];
   notes?: string;
 }): Host => {
-  const now = Date.now();
-  const notes = input.notes?.trim() || undefined;
-  return {
-    id: crypto.randomUUID(),
-    label: input.label?.trim() || input.hostname,
-    hostname: input.hostname.trim(),
-    port: input.port ?? DEFAULT_SSH_PORT,
-    username: input.username?.trim() ?? "",
-    password: input.password || undefined,
-    group: normalizeGroupPath(input.group),
-    tags: (input.tags ?? []).filter(Boolean),
-    os: "linux",
-    protocol: input.protocol ?? "ssh",
-    createdAt: now,
-    ...(notes ? { notes } : {}),
-  };
+  const built = buildVaultHostFromDraft(input);
+  if (!built.ok) {
+    throw new Error(built.error);
+  }
+  return built.host;
 };
 
 const dedupeHosts = (hosts: Host[]): { hosts: Host[]; duplicates: number } => {
@@ -933,3 +937,77 @@ export const importVaultHostsFromText = (
     }
   }
 };
+
+export function detectVaultImportFormat(text: string): VaultImportFormat | null {
+  const input = (text ?? "").trim();
+  if (!input) return null;
+
+  if (
+    /Windows Registry Editor Version/i.test(input)
+    || /\\Software\\SimonTatham\\PuTTY\\Sessions/i.test(input)
+  ) {
+    return "putty";
+  }
+
+  if (/\[Bookmarks_\]/m.test(input) || /\[MobaXterm\]/i.test(input)) {
+    return "mobaxterm";
+  }
+
+  if (/^Host\s+/m.test(input) && (/^\s+HostName\s+/m.test(input) || /^\s+User\s+/m.test(input))) {
+    return "ssh_config";
+  }
+
+  if (/S:"Hostname"/m.test(input) && (/S:"Username"/m.test(input) || /D:"\[Sessions\]/i.test(input))) {
+    return "securecrt";
+  }
+
+  const firstLine = input.split(/\r?\n/, 1)[0] ?? "";
+  if (
+    /hostname|host(name)?|server/i.test(firstLine)
+    && (firstLine.includes(",") || firstLine.includes("\t"))
+  ) {
+    return "csv";
+  }
+
+  return null;
+}
+
+export function applyVaultHostImport(
+  existingHosts: Host[],
+  existingGroups: string[],
+  importResult: VaultImportResult,
+  options?: { skipDuplicates?: boolean },
+): {
+  hosts: Host[];
+  customGroups: string[];
+  addedCount: number;
+  skippedExistingCount: number;
+} {
+  const skipDuplicates = options?.skipDuplicates !== false;
+  const existingKeys = new Set(existingHosts.map(buildVaultHostMergeKey));
+  let newHosts = importResult.hosts;
+  let skippedExistingCount = 0;
+
+  if (skipDuplicates) {
+    newHosts = importResult.hosts.filter((host) => {
+      const duplicate = existingKeys.has(buildVaultHostMergeKey(host));
+      if (duplicate) skippedExistingCount++;
+      return !duplicate;
+    });
+  }
+
+  const customGroups = Array.from(
+    new Set([
+      ...existingGroups,
+      ...importResult.groups,
+      ...newHosts.map((host) => host.group).filter(Boolean),
+    ]),
+  ) as string[];
+
+  return {
+    hosts: [...existingHosts, ...newHosts].map(sanitizeHost),
+    customGroups,
+    addedCount: newHosts.length,
+    skippedExistingCount,
+  };
+}

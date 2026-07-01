@@ -67,16 +67,15 @@ test("supports repeated pause/resume cycles", () => {
   assert.deepEqual(events, ["pause", "resume", "pause", "resume"]);
 });
 
-test("reset clears state without firing callbacks", () => {
+test("reset clears state and resumes when paused", () => {
   const { controller, events } = make(100, 30);
   controller.received(120); // pause
   controller.reset();
   assert.equal(controller.isPaused(), false);
   assert.equal(controller.pendingBytes(), 0);
-  assert.deepEqual(events, ["pause"]); // reset itself is silent
-  // A fresh cycle works after reset.
+  assert.deepEqual(events, ["pause", "resume"]);
   controller.received(120);
-  assert.deepEqual(events, ["pause", "pause"]);
+  assert.deepEqual(events, ["pause", "resume", "pause"]);
 });
 
 test("ignores non-positive amounts", () => {

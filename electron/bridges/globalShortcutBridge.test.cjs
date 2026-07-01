@@ -554,3 +554,125 @@ test("tray icon event registration is platform-dependent", async () => {
     bridge.cleanup();
   });
 });
+
+test("toggleWindowVisibility show path delegates to showAndFocusMainWindow on win32", async () => {
+  await withPlatform("win32", async () => {
+    const windowManagerPath = require.resolve("./windowManager.cjs");
+    const actualWindowManager = require(windowManagerPath);
+    const showCalls = [];
+    let appFocusCalls = 0;
+
+    require.cache[windowManagerPath].exports = {
+      ...actualWindowManager,
+      showAndFocusMainWindow(win) {
+        showCalls.push(win);
+        return true;
+      },
+    };
+
+    try {
+      const bridge = loadBridge();
+      const electronModule = createElectronStub();
+      electronModule.app.focus = () => {
+        appFocusCalls += 1;
+      };
+      const win = new FakeWindow();
+      win.visible = false;
+      win.focused = false;
+      electronModule.BrowserWindow.getAllWindows = () => [win];
+      let toggleWindow = null;
+      electronModule.globalShortcut.register = (_accelerator, handler) => {
+        toggleWindow = handler;
+        return true;
+      };
+      const { ipcMain } = await enableCloseToTray(bridge, electronModule);
+      await ipcMain.handlers.get("netcatty:globalHotkey:register")(null, { hotkey: "Ctrl + `" });
+
+      assert.ok(toggleWindow, "expected global hotkey handler to register");
+      toggleWindow();
+
+      assert.equal(showCalls.length, 1);
+      assert.equal(showCalls[0], win);
+      assert.equal(appFocusCalls, 1);
+      assert.equal(win.showCalls, 0, "should not call bare win.show()");
+      assert.equal(win.focusCalls, 0, "should not call bare win.focus()");
+    } finally {
+      require.cache[windowManagerPath].exports = actualWindowManager;
+    }
+  });
+});
+
+test("openMainWindow delegates to showAndFocusMainWindow on win32", async () => {
+  await withPlatform("win32", async () => {
+    const windowManagerPath = require.resolve("./windowManager.cjs");
+    const actualWindowManager = require(windowManagerPath);
+    const showCalls = [];
+
+    require.cache[windowManagerPath].exports = {
+      ...actualWindowManager,
+      showAndFocusMainWindow(win) {
+        showCalls.push(win);
+        return true;
+      },
+    };
+
+    try {
+      const bridge = loadBridge();
+      const electronModule = createElectronStub();
+      electronModule.app.focus = () => {};
+      const win = new FakeWindow();
+      win.visible = false;
+      electronModule.BrowserWindow.getAllWindows = () => [win];
+      const { ipcMain } = await enableCloseToTray(bridge, electronModule);
+
+      await ipcMain.handlers.get("netcatty:trayPanel:openMainWindow")();
+
+      assert.equal(showCalls.length, 1);
+      assert.equal(showCalls[0], win);
+      assert.equal(win.showCalls, 0);
+      assert.equal(win.focusCalls, 0);
+    } finally {
+      require.cache[windowManagerPath].exports = actualWindowManager;
+    }
+  });
+});
+
+test("toggleWindowVisibility focuses visible-but-unfocused windows via showAndFocusMainWindow", async () => {
+  await withPlatform("win32", async () => {
+    const windowManagerPath = require.resolve("./windowManager.cjs");
+    const actualWindowManager = require(windowManagerPath);
+    const showCalls = [];
+
+    require.cache[windowManagerPath].exports = {
+      ...actualWindowManager,
+      showAndFocusMainWindow(win) {
+        showCalls.push(win);
+        return true;
+      },
+    };
+
+    try {
+      const bridge = loadBridge();
+      const electronModule = createElectronStub();
+      electronModule.app.focus = () => {};
+      const win = new FakeWindow();
+      win.visible = true;
+      win.focused = false;
+      electronModule.BrowserWindow.getAllWindows = () => [win];
+      let toggleWindow = null;
+      electronModule.globalShortcut.register = (_accelerator, handler) => {
+        toggleWindow = handler;
+        return true;
+      };
+      const { ipcMain } = await enableCloseToTray(bridge, electronModule);
+      await ipcMain.handlers.get("netcatty:globalHotkey:register")(null, { hotkey: "Ctrl + `" });
+
+      toggleWindow();
+
+      assert.equal(showCalls.length, 1);
+      assert.equal(win.hideCalls, 0);
+    } finally {
+      require.cache[windowManagerPath].exports = actualWindowManager;
+    }
+  });
+});

@@ -1,4 +1,7 @@
 import type { DiscoveredAgent, ExternalAgentConfig } from './types';
+import { getCommandBasename, isPathLikeCommand } from './shared/pathLikeCommand';
+
+export { isPathLikeCommand, getCommandBasename };
 
 export type ManagedAgentKey = 'codex' | 'claude' | 'copilot' | 'cursor' | 'codebuddy' | 'opencode';
 
@@ -10,18 +13,6 @@ const MANAGED_AGENT_META: Record<ManagedAgentKey, { commandNames: string[]; sdkB
   codebuddy: { commandNames: ['codebuddy'], sdkBackend: 'codebuddy' },
   opencode: { commandNames: ['opencode'], sdkBackend: 'opencode' },
 };
-
-function getCommandBasename(command: string | undefined): string {
-  const normalized = String(command || '').trim();
-  if (!normalized) return '';
-  const parts = normalized.split(/[\\/]/);
-  return (parts.pop() || '').toLowerCase();
-}
-
-function isPathLikeCommand(command: string | undefined): boolean {
-  const normalized = String(command || '').trim();
-  return normalized.includes('/') || normalized.includes('\\');
-}
 
 function matchesPrimaryCliBasename(command: string | undefined, agentKey: ManagedAgentKey): boolean {
   const basename = getCommandBasename(command);
@@ -87,4 +78,11 @@ export function getManagedAgentStoredPath(
       matchesPrimaryCliBasename(agent.command, agentKey),
   );
   return fallbackAgent?.command ?? null;
+}
+
+export function getManualAgentCommand(
+  config: Pick<ExternalAgentConfig, 'command' | 'commandSource'> | null | undefined,
+): string | undefined {
+  const command = String(config?.command || '').trim();
+  return config?.commandSource === 'manual' && command ? command : undefined;
 }

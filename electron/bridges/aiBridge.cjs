@@ -13,6 +13,7 @@ const { randomUUID } = require("node:crypto");
 const { spawn, execFileSync } = require("node:child_process");
 const fs = require("node:fs");
 const { existsSync } = fs;
+const { appendVaultAgentGuidance } = require("../shared/vaultAgentGuidance.cjs");
 
 const mcpServerBridge = require("./mcpServerBridge.cjs");
 const { getCliLauncherPath, TOOL_CLI_DISCOVERY_ENV_VAR } = require("../cli/discoveryPath.cjs");
@@ -22,6 +23,7 @@ const {
   toPublicUserSkillsStatus,
 } = require("./ai/userSkills.cjs");
 const { registerProviderHandlers } = require("./aiBridge/providerHandlers.cjs"), { registerCattyExecHandlers } = require("./aiBridge/cattyExecHandlers.cjs"), { createAgentCliHelpers } = require("./aiBridge/agentCliHelpers.cjs");
+const { createVaultAgentBridge } = require("./aiBridge/vaultAgentBridge.cjs");
 const { registerAgentDiscoveryHandlers } = require("./aiBridge/agentDiscoveryHandlers.cjs"), { registerAgentProcessHandlers } = require("./aiBridge/agentProcessHandlers.cjs"), { registerSdkStreamHandlers } = require("./aiBridge/sdk/sdkStreamHandlers.cjs");
 const { probeClaudeAuth, probeCopilotAuth, probeCodexAuth, probeCodebuddyAuth } = require("./aiBridge/agentAuthProbes.cjs");
 
@@ -57,6 +59,7 @@ const {
   toCodexLoginSessionResponse,
   getActiveCodexLoginSession,
   normalizeCodexIntegrationState,
+  appendCodexChatGptValidationFailure,
   readCodexCustomProviderConfig,
   getCodexCustomConfigPreflightError,
   extractCodexError,
@@ -187,7 +190,7 @@ function buildExternalAgentSystemContext({ mode, chatSessionId, defaultTargetSes
     );
   }
 
-  return (
+  return appendVaultAgentGuidance(
     `${userSkillsPreamble}` +
     `[Context: You are inside Netcatty, a multi-session terminal manager. ` +
     `Use the "netcatty-remote-hosts" MCP tools to operate only on the terminal sessions exposed by Netcatty. ` +
@@ -197,7 +200,7 @@ function buildExternalAgentSystemContext({ mode, chatSessionId, defaultTargetSes
     `Use terminal_execute only for commands likely to finish within about 60 seconds. ` +
     `For long-running commands such as builds, scans, follow/log streaming, watch commands, or anything likely to exceed 60 seconds on PTY-backed shell sessions, use terminal_start, then terminal_poll until completed is true. Reuse the returned nextOffset for the next poll. If terminal_poll reports outputTruncated=true, only the retained tail starting at outputBaseOffset is still available. Do not poll aggressively: wait at least about 30 seconds between polls, and increase the interval further when there is no new output, to avoid wasting tokens. As soon as completed is true, stop polling and analyze the result immediately. ` +
     `Use terminal_stop if you need to interrupt a started long-running command. Note: terminal_start requires a PTY-backed session; for sessions that only support exec-channel execution (no writable PTY), use terminal_execute instead. ` +
-    `For serial/raw sessions and network device sessions (deviceType: network), commands are sent as-is without shell wrapping and exit codes are unavailable. Use vendor CLI commands directly.]`
+    `For serial/raw sessions and network device sessions (deviceType: network), commands are sent as-is without shell wrapping and exit codes are unavailable. Use vendor CLI commands directly.]`,
   );
 }
 
@@ -216,9 +219,11 @@ const { execViaPty } = require("./ai/ptyExec.cjs");
 let sessions = null;
 let sftpClients = null;
 let electronModule = null;
+let terminalWorkerManager = null;
 let mainWebContentsId = null;
 let cliDiscoveryFilePath = null;
 let registeredContext = null;
+let registeredVaultAgentBridge = null;
 
 // Active streaming requests (for cancellation)
 const activeStreams = new Map();
@@ -361,8 +366,9 @@ function init(deps) {
   sessions = deps.sessions;
   sftpClients = deps.sftpClients;
   electronModule = deps.electronModule;
+  terminalWorkerManager = deps.terminalWorkerManager || null;
   cliDiscoveryFilePath = deps.cliDiscoveryFilePath || null;
-  mcpServerBridge.init({ sessions, sftpClients, electronModule, cliDiscoveryFilePath });
+  mcpServerBridge.init({ sessions, sftpClients, electronModule, cliDiscoveryFilePath, terminalWorkerManager });
 
   // Wire up main window getter for MCP approval IPC
   mcpServerBridge.setMainWindowGetter(() => {
@@ -678,6 +684,7 @@ function createHandlerContext(ipcMain) {
     toCodexLoginSessionResponse,
     getActiveCodexLoginSession,
     normalizeCodexIntegrationState,
+    appendCodexChatGptValidationFailure,
     readCodexCustomProviderConfig,
     getCodexCustomConfigPreflightError,
     extractCodexError,
@@ -705,6 +712,8 @@ function createHandlerContext(ipcMain) {
     set sftpClients(value) { sftpClients = value; },
     get electronModule() { return electronModule; },
     set electronModule(value) { electronModule = value; },
+    get terminalWorkerManager() { return terminalWorkerManager; },
+    set terminalWorkerManager(value) { terminalWorkerManager = value; },
     get mainWebContentsId() { return mainWebContentsId; },
     set mainWebContentsId(value) { mainWebContentsId = value; },
     get cliDiscoveryFilePath() { return cliDiscoveryFilePath; },
@@ -740,6 +749,23 @@ function registerHandlers(ipcMain) {
   Object.assign(context, createAgentCliHelpers(context));
   registeredContext = context;
 
+  if (!registeredVaultAgentBridge) {
+    registeredVaultAgentBridge = createVaultAgentBridge({
+      getMainWindowFn: () => {
+        try {
+          const windowManager = require("./windowManager.cjs");
+          const mainWin = windowManager.getMainWindow?.();
+          return (mainWin && !mainWin.isDestroyed()) ? mainWin : null;
+        } catch {
+          return null;
+        }
+      },
+      validateSender,
+    });
+    mcpServerBridge.setVaultAgentInvoker(registeredVaultAgentBridge.invokeVaultAgent);
+  }
+  registeredVaultAgentBridge.registerHandlers(ipcMain);
+
   registerProviderHandlers(context);
   registerCattyExecHandlers(context);
   registerAgentDiscoveryHandlers(context);
@@ -774,4 +800,10 @@ function cleanup() {
   mcpServerBridge.cleanup();
 }
 
-module.exports = { init, registerHandlers, cleanup };
+module.exports = {
+  init,
+  registerHandlers,
+  cleanup,
+  buildExternalAgentSystemContext,
+  buildExternalAgentContextualPrompt,
+};

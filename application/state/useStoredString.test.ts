@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   createStoredStringSyncHandlers,
+  readOptionalStoredStringValue,
   readStoredStringValue,
   resolveStoredStringUpdate,
 } from "./useStoredString.ts";
@@ -85,12 +86,15 @@ test("stored string helpers read fallback and resolve updater-style toggles", (t
 
   const storageKey = "netcatty:test-mode";
   assert.equal(readStoredStringValue(storageKey, "edit", isTestMode), "edit");
+  assert.equal(readOptionalStoredStringValue(storageKey, isTestMode), null);
 
   env.storage.setItem(storageKey, "preview");
   assert.equal(readStoredStringValue(storageKey, "edit", isTestMode), "preview");
+  assert.equal(readOptionalStoredStringValue(storageKey, isTestMode), "preview");
 
   env.storage.setItem(storageKey, "invalid");
   assert.equal(readStoredStringValue(storageKey, "edit", isTestMode), "edit");
+  assert.equal(readOptionalStoredStringValue(storageKey, isTestMode), null);
 
   assert.equal(resolveStoredStringUpdate<TestMode>("edit", "preview"), "preview");
   assert.equal(

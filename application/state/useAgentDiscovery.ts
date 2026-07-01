@@ -148,7 +148,7 @@ export function useAgentDiscovery(
         );
         if (!match) return ea;
 
-        // Check if args, SDK backend, or Claude's resolved system path differ
+        // Check if args, SDK backend, or managed SDK path env differ.
         const currentArgs = JSON.stringify(ea.args || []);
         const newArgs = JSON.stringify(match.args);
         const backend = match.sdkBackend ?? match.command;
@@ -158,9 +158,12 @@ export function useAgentDiscovery(
         const matchPath = match.binPath || match.path;
         const env = match.command === 'claude'
           ? { ...(ea.env ?? {}), CLAUDE_CODE_EXECUTABLE: matchPath }
-          : ea.env;
-        const envChanged = match.command === 'claude'
-          && ea.env?.CLAUDE_CODE_EXECUTABLE !== matchPath;
+          : match.command === 'opencode'
+            ? { ...(ea.env ?? {}), OPENCODE_BIN: matchPath }
+            : ea.env;
+        const envChanged =
+          (match.command === 'claude' && ea.env?.CLAUDE_CODE_EXECUTABLE !== matchPath)
+          || (match.command === 'opencode' && ea.env?.OPENCODE_BIN !== matchPath);
         if (currentArgs !== newArgs || backendChanged || envChanged) {
           changed = true;
           const { acpCommand: _legacyCommand, acpArgs: _legacyArgs, ...rest } = ea;
@@ -193,6 +196,8 @@ export function useAgentDiscovery(
         sdkBackend: backend,
         ...(agent.command === 'claude'
           ? { env: { CLAUDE_CODE_EXECUTABLE: agent.binPath || agent.path || '' } }
+          : agent.command === 'opencode'
+            ? { env: { OPENCODE_BIN: agent.binPath || agent.path || '' } }
           : {}),
       };
     },

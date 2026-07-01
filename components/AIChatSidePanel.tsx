@@ -14,7 +14,7 @@ import type {
 } from '../infrastructure/ai/types';
 import type { ExecutorContext } from '../infrastructure/ai/cattyAgent/executor';
 import { getAgentModelPresets } from '../infrastructure/ai/types';
-import { getExternalAgentSdkBackend, matchesManagedAgentConfig } from '../infrastructure/ai/managedAgents';
+import { getExternalAgentSdkBackend, getManualAgentCommand, matchesManagedAgentConfig } from '../infrastructure/ai/managedAgents';
 import { useAgentDiscovery } from '../application/state/useAgentDiscovery';
 import {
   getReadyUserSkillOptions,
@@ -48,15 +48,21 @@ import {
 import { getScopedHistorySessions } from './ai/scopedHistorySessions';
 import { buildExternalAgentHistoryMessagesForBridge } from './ai/externalAgentHistory';
 import { canSendWithAgent, findEnabledExternalAgent } from './ai/agentSendEligibility';
-import { clearAllPendingApprovals } from '../infrastructure/ai/shared/approvalGate';
+import { registerGrantPersister } from '../infrastructure/ai/shared/approvalGate';
+import { stopAgentTurn } from '../infrastructure/ai/harness/agentStop';
+import { getAgentRuntime } from '../infrastructure/ai/harness/globalAgentRuntime';
+import { useAIPermissionGrantsState } from '../application/state/useAIPermissionGrantsState';
 import { useConversationExport } from './ai/hooks/useConversationExport';
 import type { AIChatSidePanelProps } from './AIChatSidePanel.types';
 import {
+  buildSdkRuntimeModelCacheKey,
+  sdkRuntimeModelCache,
   generateId,
   normalizeSdkRuntimeModelPresets,
   shouldAdoptSdkCurrentModel,
   shouldLoadSdkRuntimeModels,
   shouldUseStoredAgentModel,
+  type SdkRuntimeModelCatalog,
 } from './AIChatSidePanelHelpers';
 import { AIChatPanelContent } from './AIChatPanelContent';
 import {
@@ -72,6 +78,13 @@ type UserSkillsStatusResult = { ok: boolean; skills?: Array<{
   status: 'ready' | 'warning';
 }> } | null;
 type UserSkillsStatusLoadResult = UserSkillsStatusResult | undefined;
+type SdkRuntimeModelTarget = {
+  agentId: string;
+  cacheKey: string;
+  sdkBackend: string;
+  agentEnv?: Record<string, string>;
+  agentCommand?: string;
+};
 
 const USER_SKILLS_STATUS_CACHE_TTL_MS = 60_000;
 let userSkillsStatusCache: {
@@ -93,11 +106,6 @@ function invalidateUserSkillsStatusCache() {
 
 if (typeof window !== 'undefined') {
   subscribeUserSkillsStatusChanged(invalidateUserSkillsStatusCache);
-}
-
-function getManualAgentCommand(config: ExternalAgentConfig | null | undefined): string | undefined {
-  const command = String(config?.command || '').trim();
-  return config?.commandSource === 'manual' && command ? command : undefined;
 }
 
 function loadUserSkillsStatus(
@@ -255,6 +263,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
   globalPermissionMode,
   setGlobalPermissionMode,
   commandBlocklist,
+  commandTimeout,
   maxIterations = 20,
   webSearchConfig,
   quickMessages = [],
@@ -265,6 +274,13 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
   terminalSessions = [],
   resolveExecutorContext,
   isVisible = true,
+  notes = [],
+  hosts = [],
+  snippets = [],
+  onOpenVaultNote,
+  onOpenVaultHost,
+  onOpenVaultSnippet,
+  onOpenVaultSection,
 }) => {
   const { t } = useI18n();
   const scopeKey = `${scopeType}:${scopeTargetId ?? ''}`;
@@ -286,6 +302,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     sendToCattyAgent,
     sendToExternalAgent,
     reportStreamError,
+    activeCompaction,
   } = useAIChatStreaming({
     maxIterations,
     addMessageToSession,
@@ -651,55 +668,178 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
   const agentModelMapRef = useRef(agentModelMap);
   agentModelMapRef.current = agentModelMap;
 
-  useEffect(() => {
-    if (!isVisible) return;
-    const sdkBackend = getExternalAgentSdkBackend(currentAgentConfig);
-    if (!sdkBackend) return;
-    if (!shouldLoadSdkRuntimeModels(currentAgentConfig) && !isCodexManagedAgent) return;
-
-    const bridge = getNetcattyBridge();
-    if (!bridge?.aiSdkAgentListModels) return;
-
-    let cancelled = false;
-    void bridge.aiSdkAgentListModels(
+  const buildExternalAgentRuntimeModelTarget = useCallback((agent: ExternalAgentConfig | undefined): SdkRuntimeModelTarget | null => {
+    if (!agent) return null;
+    const sdkBackend = getExternalAgentSdkBackend(agent);
+    if (!sdkBackend) return null;
+    return {
+      agentId: agent.id,
+      cacheKey: buildSdkRuntimeModelCacheKey(agent),
       sdkBackend,
-      undefined,
-      undefined,
-      `models_${currentAgentId}`,
-      currentAgentConfig.env,
-      getManualAgentCommand(currentAgentConfig),
-    ).then((result) => {
-      if (cancelled || !result?.ok || !Array.isArray(result.models)) return;
-      const runtimePresets = normalizeSdkRuntimeModelPresets(result.models, result.currentModelId);
-      const storedModelId = agentModelMapRef.current[currentAgentId];
-      if (runtimePresets.length === 0) {
-        setRuntimeAgentModelPresets((prev) => {
-          if (!(currentAgentId in prev)) return prev;
-          const { [currentAgentId]: _removed, ...rest } = prev;
-          return rest;
-        });
-        if (shouldAdoptSdkCurrentModel(result.currentModelId, storedModelId, runtimePresets)) {
-          setAgentModel(currentAgentId, result.currentModelId!);
-        }
-        return;
-      }
+      agentEnv: agent.env,
+      agentCommand: getManualAgentCommand(agent),
+    };
+  }, []);
+
+  const buildDiscoveredAgentRuntimeModelTarget = useCallback((agent: DiscoveredAgent): SdkRuntimeModelTarget | null => {
+    const sdkBackend = agent.sdkBackend ?? agent.command;
+    if (sdkBackend !== 'opencode') return null;
+    const command = agent.binPath || agent.path || agent.command;
+    const agentId = `discovered_${agent.command}`;
+    return {
+      agentId,
+      cacheKey: buildSdkRuntimeModelCacheKey({
+        id: agentId,
+        command,
+        sdkBackend,
+        env: command ? { OPENCODE_BIN: command } : undefined,
+      }),
+      sdkBackend,
+      agentCommand: command,
+    };
+  }, []);
+
+  const applySdkRuntimeModelCatalog = useCallback((
+    agentId: string,
+    catalog: SdkRuntimeModelCatalog,
+    options: { adoptCurrentModel?: boolean } = {},
+  ) => {
+    const runtimePresets = normalizeSdkRuntimeModelPresets(catalog.models, catalog.currentModelId);
+    const storedModelId = agentModelMapRef.current[agentId];
+    if (runtimePresets.length === 0) {
+      setRuntimeAgentModelPresets((prev) => {
+        if (!(agentId in prev)) return prev;
+        const { [agentId]: _removed, ...rest } = prev;
+        return rest;
+      });
+    } else {
       setRuntimeAgentModelPresets((prev) => ({
         ...prev,
-        [currentAgentId]: runtimePresets,
+        [agentId]: runtimePresets,
       }));
-      if (shouldAdoptSdkCurrentModel(result.currentModelId, storedModelId, runtimePresets)) {
-        setAgentModel(currentAgentId, result.currentModelId);
-      }
-    }).catch((err) => {
-      if (!cancelled) {
+    }
+
+    if (
+      options.adoptCurrentModel
+      && catalog.currentModelId
+      && shouldAdoptSdkCurrentModel(catalog.currentModelId, storedModelId, runtimePresets)
+    ) {
+      setAgentModel(agentId, catalog.currentModelId);
+    }
+  }, [setAgentModel]);
+
+  const loadSdkRuntimeModelCatalog = useCallback((
+    target: SdkRuntimeModelTarget,
+    options: { force?: boolean; logErrors?: boolean } = {},
+  ): Promise<SdkRuntimeModelCatalog | null> => {
+    const bridge = getNetcattyBridge();
+    if (!bridge?.aiSdkAgentListModels) return Promise.resolve(null);
+
+    return sdkRuntimeModelCache.refresh(
+      target.cacheKey,
+      async () => {
+        const result = await bridge.aiSdkAgentListModels!(
+          target.sdkBackend,
+          undefined,
+          undefined,
+          `models_${target.agentId}`,
+          target.agentEnv,
+          target.agentCommand,
+        );
+        if (!result?.ok || !Array.isArray(result.models)) {
+          throw new Error(result?.error || 'Failed to load SDK agent models');
+        }
+        return {
+          currentModelId: result.currentModelId ?? null,
+          models: result.models,
+        };
+      },
+      { force: options.force },
+    ).catch((err) => {
+      if (options.logErrors !== false) {
         console.warn('[AIChatSidePanel] Failed to load SDK agent models:', err);
       }
+      return null;
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!isVisible) return;
+    if (!currentAgentConfig) return;
+    if (!shouldLoadSdkRuntimeModels(currentAgentConfig) && !isCodexManagedAgent) return;
+
+    const target = buildExternalAgentRuntimeModelTarget(currentAgentConfig);
+    if (!target) return;
+
+    const cached = sdkRuntimeModelCache.read(target.cacheKey);
+    if (cached) {
+      applySdkRuntimeModelCatalog(target.agentId, cached);
+    }
+
+    let cancelled = false;
+    void loadSdkRuntimeModelCatalog(target, {
+      force: target.sdkBackend === 'opencode',
+    }).then((catalog) => {
+      if (cancelled || !catalog) return;
+      applySdkRuntimeModelCatalog(target.agentId, catalog, { adoptCurrentModel: true });
     });
 
     return () => {
       cancelled = true;
     };
-  }, [isVisible, currentAgentConfig, currentAgentId, isCodexManagedAgent, setAgentModel]);
+  }, [
+    isVisible,
+    currentAgentConfig,
+    isCodexManagedAgent,
+    buildExternalAgentRuntimeModelTarget,
+    loadSdkRuntimeModelCatalog,
+    applySdkRuntimeModelCatalog,
+  ]);
+
+  useEffect(() => {
+    if (!isVisible) return;
+    const targets = new Map<string, SdkRuntimeModelTarget>();
+    const configuredTargetCacheKeys = new Set<string>();
+
+    for (const agent of externalAgents) {
+      if (!agent.enabled || getExternalAgentSdkBackend(agent) !== 'opencode') continue;
+      const target = buildExternalAgentRuntimeModelTarget(agent);
+      if (target) {
+        targets.set(target.cacheKey, target);
+        configuredTargetCacheKeys.add(target.cacheKey);
+      }
+    }
+
+    for (const agent of discoveredAgents) {
+      const target = buildDiscoveredAgentRuntimeModelTarget(agent);
+      if (target) targets.set(target.cacheKey, target);
+    }
+
+    if (targets.size === 0) return;
+
+    let cancelled = false;
+    for (const target of targets.values()) {
+      void loadSdkRuntimeModelCatalog(target, { logErrors: false })
+        .then((catalog) => {
+          if (cancelled || !catalog) return;
+          if (configuredTargetCacheKeys.has(target.cacheKey)) {
+            applySdkRuntimeModelCatalog(target.agentId, catalog);
+          }
+        });
+    }
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    isVisible,
+    externalAgents,
+    discoveredAgents,
+    buildExternalAgentRuntimeModelTarget,
+    buildDiscoveredAgentRuntimeModelTarget,
+    loadSdkRuntimeModelCatalog,
+    applySdkRuntimeModelCatalog,
+  ]);
 
   const hasCodexCustomConfig = codexCustomConfigResolved && isCodexManagedAgent;
 
@@ -964,6 +1104,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
           scopeLabel,
           globalPermissionMode,
           commandBlocklist,
+          commandTimeout,
           terminalSessions,
           webSearchConfig,
           getExecutorContext: () => buildExecutorContextForScope(toolScope),
@@ -984,26 +1125,36 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     setStreamingForScope,
     sendToExternalAgent, sendToCattyAgent, reportStreamError, autoTitleSession, t,
     abortControllersRef, terminalSessions, defaultTargetSession, providers, selectedAgentModel, updateSessionExternalSessionId,
-    scopeType, scopeTargetId, scopeHostIds, scopeLabel, globalPermissionMode, commandBlocklist, webSearchConfig, buildExecutorContextForScope,
+    scopeType, scopeTargetId, scopeHostIds, scopeLabel, globalPermissionMode, commandBlocklist, commandTimeout, webSearchConfig, buildExecutorContextForScope,
     toolIntegrationMode,
     clearScopeDraft, showScopeSessionView, setActiveSessionId,
   ]);
 
-  const stopStreamingForSession = useCallback((sessionId: string) => {
+  const stopStreamingForSession = useCallback(async (sessionId: string) => {
     const controller = abortControllersRef.current.get(sessionId);
-    controller?.abort();
-    abortControllersRef.current.delete(sessionId);
     setStreamingForScope(sessionId, false);
     updateLastMessage(sessionId, (msg) => ({
       ...msg,
       statusText: '',
       executionStatus: msg.executionStatus === 'running' ? 'cancelled' : msg.executionStatus,
     }));
-    clearAllPendingApprovals(sessionId);
-    const bridge = getNetcattyBridge();
-    bridge?.aiCattyCancelExec?.(sessionId);
-    bridge?.aiSdkAgentCancel?.('', sessionId);
+    await stopAgentTurn({
+      chatSessionId: sessionId,
+      abortController: controller,
+      bridge: getNetcattyBridge(),
+      reason: 'user',
+    });
+    await getAgentRuntime().waitForActiveTurn(sessionId);
+    if (controller && abortControllersRef.current.get(sessionId) === controller) {
+      abortControllersRef.current.delete(sessionId);
+    }
   }, [setStreamingForScope, updateLastMessage, abortControllersRef]);
+
+  const { addGrant } = useAIPermissionGrantsState();
+
+  useEffect(() => {
+    return registerGrantPersister((rule) => { addGrant(rule); });
+  }, [addGrant]);
 
   const handleStop = useCallback(() => {
     if (!activeSessionId) return;
@@ -1022,7 +1173,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
   );
 
   const handleDeleteSession = useCallback(
-    (e: React.MouseEvent, sessionId: string) => {
+    async (e: React.MouseEvent, sessionId: string) => {
       e.stopPropagation();
       const deletingActiveSession =
         activeSessionId === sessionId
@@ -1038,10 +1189,11 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
         ?? currentAgentId;
 
       if (abortControllersRef.current.has(sessionId) || streamingSessionIds.has(sessionId)) {
-        stopStreamingForSession(sessionId);
+        await stopStreamingForSession(sessionId);
       }
 
       deleteSession(sessionId, scopeKey);
+      getAgentRuntime().clearChatSession(sessionId);
 
       if (deletingActiveSession || deletingLastScopedSession) {
         setShowHistory(false);
@@ -1100,6 +1252,9 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
         handleDeleteSession={handleDeleteSession}
         messages={messages}
         isStreaming={isStreaming}
+        activeCompaction={
+          activeCompaction?.sessionId === activeSessionId ? activeCompaction : null
+        }
         inputValue={inputValue}
         setInputValue={setInputValue}
         handleSend={handleSend}
@@ -1125,6 +1280,13 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
         removeSelectedUserSkill={removeSelectedUserSkill}
         globalPermissionMode={globalPermissionMode}
         setGlobalPermissionMode={setGlobalPermissionMode}
+        notes={notes}
+        hosts={hosts}
+        snippets={snippets}
+        onOpenVaultNote={onOpenVaultNote}
+        onOpenVaultHost={onOpenVaultHost}
+        onOpenVaultSnippet={onOpenVaultSnippet}
+        onOpenVaultSection={onOpenVaultSection}
       />
     </React.Profiler>
   );
@@ -1165,6 +1327,7 @@ const AI_CHAT_SIDE_PANEL_AI_STATE_KEYS = [
   'globalPermissionMode',
   'setGlobalPermissionMode',
   'commandBlocklist',
+  'commandTimeout',
   'maxIterations',
   'webSearchConfig',
   'quickMessages',
@@ -1190,6 +1353,13 @@ export function aiChatSidePanelPropsAreEqual(
   if (prev.scopeHostIds !== next.scopeHostIds) return false;
   if (prev.terminalSessions !== next.terminalSessions) return false;
   if (prev.resolveExecutorContext !== next.resolveExecutorContext) return false;
+  if (prev.notes !== next.notes) return false;
+  if (prev.hosts !== next.hosts) return false;
+  if (prev.snippets !== next.snippets) return false;
+  if (prev.onOpenVaultNote !== next.onOpenVaultNote) return false;
+  if (prev.onOpenVaultHost !== next.onOpenVaultHost) return false;
+  if (prev.onOpenVaultSnippet !== next.onOpenVaultSnippet) return false;
+  if (prev.onOpenVaultSection !== next.onOpenVaultSection) return false;
 
   for (const key of AI_CHAT_SIDE_PANEL_AI_STATE_KEYS) {
     if (prev[key] !== next[key]) return false;

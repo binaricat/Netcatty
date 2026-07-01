@@ -5,9 +5,104 @@ function createSftpHandlerApi(ctx) {
       if (!chatSessionId || !sessionId) return null;
       return `chat:${chatSessionId}:session:${sessionId}`;
     }
+
+    function getWorkerManager() {
+      return typeof terminalWorkerManager !== "undefined" ? terminalWorkerManager : null;
+    }
+
+    function getMainSessions() {
+      return typeof sessions !== "undefined" ? sessions : null;
+    }
+
+    function shouldProxySessionBackedSftpToWorker(params) {
+      if (!params?.sessionId) return false;
+      const manager = getWorkerManager();
+      if (!manager?.request) return false;
+      const mainSessions = getMainSessions();
+      return !mainSessions?.get?.(params.sessionId);
+    }
+
+    function requestWorkerSftp(channel, payload, options = {}) {
+      const manager = getWorkerManager();
+      if (!manager?.request) {
+        return Promise.reject(new Error("Terminal worker is unavailable"));
+      }
+      const timeoutMs = Number.isFinite(options.timeoutMs) && options.timeoutMs > 0
+        ? options.timeoutMs
+        : 0;
+      const requestPromise = manager.request(channel, payload, {});
+      if (!timeoutMs) return requestPromise;
+
+      let timer = null;
+      const timeoutPromise = new Promise((_, reject) => {
+        timer = setTimeout(() => {
+          reject(new Error(`${options.operationName || "SFTP operation"} timed out after ${timeoutMs}ms`));
+        }, timeoutMs);
+      });
+      return Promise.race([requestPromise, timeoutPromise]).finally(() => {
+        if (timer) clearTimeout(timer);
+      });
+    }
+
+    async function withWorkerSessionBackedSftp(params, workerChannel, options = {}) {
+      if (!workerChannel) throw new Error("Worker SFTP channel is required");
+      const chatSessionId = typeof params?.chatSessionId === "string" && params.chatSessionId ? params.chatSessionId : null;
+      const encodingStateKey = getSessionSftpEncodingStateKey(chatSessionId, params.sessionId);
+      const timeoutMs = Number.isFinite(options.timeoutMs) && options.timeoutMs > 0 ? options.timeoutMs : 0;
+      const operationName = options.operationName || "SFTP operation";
+      let sftpId = null;
+      let closePromise = null;
+      let cancellationError = null;
+
+      const closeSftpHandle = () => {
+        if (!sftpId) return Promise.resolve();
+        if (!closePromise) {
+          closePromise = requestWorkerSftp("netcatty:sftp:close", { sftpId, encodingStateKey });
+        }
+        return closePromise;
+      };
+      const unregisterSftpOp = registerSftpOp(chatSessionId, () => {
+        if (!cancellationError) {
+          cancellationError = new Error("Cancelled");
+        }
+        void closeSftpHandle().catch(() => {
+          // Ignore close failures while cancelling a worker-backed SFTP handle.
+        });
+      });
+
+      try {
+        const opened = await requestWorkerSftp("netcatty:sftp:openForSession", {
+          sessionId: params.sessionId,
+          encodingStateKey,
+          timeoutMs,
+        }, { timeoutMs, operationName });
+        sftpId = opened?.sftpId;
+        if (!sftpId) throw new Error("Failed to open session-backed SFTP handle");
+        if (cancellationError) throw cancellationError;
+
+        const { abortSignal: _abortSignal, ...workerParams } = params || {};
+        const value = await requestWorkerSftp(workerChannel, {
+          ...workerParams,
+          sftpId,
+          timeoutMs,
+        }, { timeoutMs, operationName });
+        if (cancellationError) throw cancellationError;
+        return value;
+      } finally {
+        unregisterSftpOp();
+        try {
+          await closeSftpHandle();
+        } catch {
+          // Ignore close failures for one-off worker-backed SFTP handles.
+        }
+      }
+    }
     
     async function withSessionBackedSftp(params, action, options = {}) {
       if (!params?.sessionId) throw new Error("sessionId is required");
+      if (shouldProxySessionBackedSftpToWorker(params) && options.workerChannel) {
+        return withWorkerSessionBackedSftp(params, options.workerChannel, options);
+      }
       const chatSessionId = typeof params?.chatSessionId === "string" && params.chatSessionId ? params.chatSessionId : null;
       const encodingStateKey = getSessionSftpEncodingStateKey(chatSessionId, params.sessionId);
       const timeoutMs = Number.isFinite(options.timeoutMs) && options.timeoutMs > 0 ? options.timeoutMs : 0;
@@ -122,7 +217,7 @@ function createSftpHandlerApi(ctx) {
       const entries = await withSessionBackedSftp(
         params,
         (payload) => sftpBridge.listSftp(null, payload),
-        { timeoutMs: commandTimeoutMs, operationName: "SFTP list" },
+        { timeoutMs: commandTimeoutMs, operationName: "SFTP list", workerChannel: "netcatty:sftp:list" },
       );
       return { ok: true, entries };
     }
@@ -132,7 +227,7 @@ function createSftpHandlerApi(ctx) {
       const content = await withSessionBackedSftp(
         params,
         (payload) => sftpBridge.readSftp(null, payload),
-        { timeoutMs: commandTimeoutMs, operationName: "SFTP read" },
+        { timeoutMs: commandTimeoutMs, operationName: "SFTP read", workerChannel: "netcatty:sftp:read" },
       );
       return { ok: true, path: params.path, content };
     }
@@ -143,7 +238,7 @@ function createSftpHandlerApi(ctx) {
       await withSessionBackedSftp(
         params,
         (payload) => sftpBridge.writeSftp(null, payload),
-        { timeoutMs: commandTimeoutMs, operationName: "SFTP write" },
+        { timeoutMs: commandTimeoutMs, operationName: "SFTP write", workerChannel: "netcatty:sftp:write" },
       );
       return { ok: true, path: params.path };
     }
@@ -155,7 +250,7 @@ function createSftpHandlerApi(ctx) {
       const result = await withSessionBackedSftp(
         params,
         (payload) => sftpBridge.downloadSftpToLocal(null, payload),
-        { timeoutMs: commandTimeoutMs, operationName: "SFTP download" },
+        { timeoutMs: commandTimeoutMs, operationName: "SFTP download", workerChannel: "netcatty:sftp:downloadToLocal" },
       );
       return { ok: true, ...result };
     }
@@ -167,7 +262,7 @@ function createSftpHandlerApi(ctx) {
       const result = await withSessionBackedSftp(
         params,
         (payload) => sftpBridge.uploadLocalToSftp(null, payload),
-        { timeoutMs: commandTimeoutMs, operationName: "SFTP upload" },
+        { timeoutMs: commandTimeoutMs, operationName: "SFTP upload", workerChannel: "netcatty:sftp:uploadLocal" },
       );
       return { ok: true, ...result };
     }
@@ -177,7 +272,7 @@ function createSftpHandlerApi(ctx) {
       await withSessionBackedSftp(
         params,
         (payload) => sftpBridge.mkdirSftp(null, payload),
-        { timeoutMs: commandTimeoutMs, operationName: "SFTP mkdir" },
+        { timeoutMs: commandTimeoutMs, operationName: "SFTP mkdir", workerChannel: "netcatty:sftp:mkdir" },
       );
       return { ok: true, path: params.path };
     }
@@ -187,7 +282,7 @@ function createSftpHandlerApi(ctx) {
       await withSessionBackedSftp(
         params,
         (payload) => sftpBridge.deleteSftp(null, payload),
-        { timeoutMs: commandTimeoutMs, operationName: "SFTP delete" },
+        { timeoutMs: commandTimeoutMs, operationName: "SFTP delete", workerChannel: "netcatty:sftp:delete" },
       );
       return { ok: true, path: params.path };
     }
@@ -199,7 +294,7 @@ function createSftpHandlerApi(ctx) {
       await withSessionBackedSftp(
         params,
         (payload) => sftpBridge.renameSftp(null, payload),
-        { timeoutMs: commandTimeoutMs, operationName: "SFTP rename" },
+        { timeoutMs: commandTimeoutMs, operationName: "SFTP rename", workerChannel: "netcatty:sftp:rename" },
       );
       return { ok: true, oldPath: params.oldPath, newPath: params.newPath };
     }
@@ -209,7 +304,7 @@ function createSftpHandlerApi(ctx) {
       const stat = await withSessionBackedSftp(
         params,
         (payload) => sftpBridge.statSftp(null, payload),
-        { timeoutMs: commandTimeoutMs, operationName: "SFTP stat" },
+        { timeoutMs: commandTimeoutMs, operationName: "SFTP stat", workerChannel: "netcatty:sftp:stat" },
       );
       return { ok: true, stat };
     }
@@ -219,7 +314,7 @@ function createSftpHandlerApi(ctx) {
       await withSessionBackedSftp(
         params,
         (payload) => sftpBridge.chmodSftp(null, payload),
-        { timeoutMs: commandTimeoutMs, operationName: "SFTP chmod" },
+        { timeoutMs: commandTimeoutMs, operationName: "SFTP chmod", workerChannel: "netcatty:sftp:chmod" },
       );
       return { ok: true, path: params.path, mode: params.mode };
     }
@@ -228,7 +323,7 @@ function createSftpHandlerApi(ctx) {
       const result = await withSessionBackedSftp(
         params,
         (payload) => sftpBridge.getSftpHomeDir(null, payload),
-        { timeoutMs: commandTimeoutMs, operationName: "SFTP home" },
+        { timeoutMs: commandTimeoutMs, operationName: "SFTP home", workerChannel: "netcatty:sftp:homeDir" },
       );
       if (!result?.success) {
         throw new Error(result?.error || "Could not determine home directory");

@@ -9,6 +9,7 @@ const net = require("node:net");
 const { randomUUID } = require("node:crypto");
 const { pipeline } = require("node:stream/promises");
 const { TextDecoder } = require("node:util");
+require("./boringSslDhCompat.cjs").installBoringSslDhCompat();
 const SftpClient = require("ssh2-sftp-client");
 const { Client: SSHClient } = require("ssh2");
 const iconv = require("iconv-lite");
@@ -932,10 +933,40 @@ const {
   getSftpHomeDir,
 } = fileOpsApi;
 
+function registerWorkerHandle(ipcMain, terminalWorkerManager, channel) {
+  ipcMain.handle(channel, (event, payload) => terminalWorkerManager.request(channel, payload, {
+    webContentsId: event?.sender?.id,
+  }));
+}
+
 /**
  * Register IPC handlers for SFTP operations
  */
-function registerHandlers(ipcMain) {
+function registerHandlers(ipcMain, options = {}) {
+  const terminalWorkerManager = options.terminalWorkerManager || null;
+  if (terminalWorkerManager) {
+    [
+      "netcatty:sftp:open",
+      "netcatty:sftp:openForSession",
+      "netcatty:sftp:list",
+      "netcatty:sftp:read",
+      "netcatty:sftp:readBinary",
+      "netcatty:sftp:write",
+      "netcatty:sftp:writeBinary",
+      "netcatty:sftp:writeBinaryWithProgress",
+      "netcatty:sftp:downloadToLocal",
+      "netcatty:sftp:uploadLocal",
+      "netcatty:sftp:cancelUpload",
+      "netcatty:sftp:close",
+      "netcatty:sftp:mkdir",
+      "netcatty:sftp:delete",
+      "netcatty:sftp:rename",
+      "netcatty:sftp:stat",
+      "netcatty:sftp:chmod",
+      "netcatty:sftp:homeDir",
+    ].forEach((channel) => registerWorkerHandle(ipcMain, terminalWorkerManager, channel));
+    return;
+  }
   ipcMain.handle("netcatty:sftp:open", openSftp);
   ipcMain.handle("netcatty:sftp:openForSession", openSftpForSession);
   ipcMain.handle("netcatty:sftp:list", listSftp);
@@ -944,6 +975,8 @@ function registerHandlers(ipcMain) {
   ipcMain.handle("netcatty:sftp:write", writeSftp);
   ipcMain.handle("netcatty:sftp:writeBinary", writeSftpBinary);
   ipcMain.handle("netcatty:sftp:writeBinaryWithProgress", writeSftpBinaryWithProgress);
+  ipcMain.handle("netcatty:sftp:downloadToLocal", downloadSftpToLocal);
+  ipcMain.handle("netcatty:sftp:uploadLocal", uploadLocalToSftp);
   ipcMain.handle("netcatty:sftp:cancelUpload", cancelSftpUpload);
   ipcMain.handle("netcatty:sftp:close", closeSftp);
   ipcMain.handle("netcatty:sftp:mkdir", mkdirSftp);

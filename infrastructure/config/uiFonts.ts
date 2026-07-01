@@ -23,7 +23,7 @@ export const WINDOWS_FLAG_EMOJI_FONT = '"Noto Color Emoji Flags"';
  * render as separate letters instead of composed flag emoji unless a color
  * emoji font is consulted first — see #1589.
  */
-export const WINDOWS_UI_EMOJI_FONTS = `${WINDOWS_FLAG_EMOJI_FONT}, "Segoe UI Emoji", "Segoe UI Symbol"`;
+export const WINDOWS_UI_EMOJI_FONTS = WINDOWS_FLAG_EMOJI_FONT;
 
 /**
  * Fallback fonts for CJK (Chinese, Japanese, Korean) support
@@ -66,10 +66,15 @@ export function withWindowsEmojiFallback(
   if (trimmed.includes('Noto Color Emoji Flags') || trimmed.includes('Segoe UI Emoji')) {
     return trimmed;
   }
-  return `${WINDOWS_UI_EMOJI_FONTS}, ${trimmed}`;
+  return `${WINDOWS_UI_EMOJI_FONTS}, ${trimmed}, "Segoe UI Emoji", "Segoe UI Symbol"`;
 }
 
 const BASE_UI_FONTS: UIFont[] = [
+  {
+    id: 'mona-sans',
+    name: 'Mona Sans',
+    family: '"Mona Sans", system-ui',
+  },
   {
     id: 'space-grotesk',
     name: 'Space Grotesk',
@@ -182,4 +187,4 @@ export const UI_FONTS: UIFont[] = BASE_UI_FONTS.map((font) => ({
   family: withUiCjkFallback(font.family),
 }));
 
-export const DEFAULT_UI_FONT_ID = 'space-grotesk';
+export const DEFAULT_UI_FONT_ID = 'mona-sans';

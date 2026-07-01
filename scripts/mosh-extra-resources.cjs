@@ -57,8 +57,8 @@ function moshExtraResources(platform) {
   }
 
   if (platform === "win32") {
-    // Windows normally ships the pinned standalone mosh-client.exe. Keep
-    // optional DLL/terminfo packaging so older Cygwin bundles remain usable.
+    // Windows normally ships the pinned runtime bundle. Keep DLL/terminfo
+    // packaging optional so the standalone fallback remains packageable.
     const arch = requestedArch();
     const exe = path.join(moshRoot, `win32-${arch}`, "mosh-client.exe");
     const dllDir = path.join(moshRoot, `win32-${arch}`, `mosh-client-win32-${arch}-dlls`);

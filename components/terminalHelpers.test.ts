@@ -129,9 +129,22 @@ test("connection reuse hides connecting dialog only while reuse is still possibl
   );
 });
 
-test("auto-run snippets delay multi-line input but paste-only snippets do not", () => {
+test("auto-run snippets only delay multi-line input in line-by-line mode", () => {
   assert.equal(AUTO_RUN_SNIPPET_LINE_DELAY_MS > 0, true);
-  assert.equal(shouldDelayAutoRunSnippetInput("tthdf 0 2323\nadmin\ntest123", { noAutoRun: false }), true);
+  assert.equal(shouldDelayAutoRunSnippetInput("tthdf 0 2323\nadmin\ntest123", { noAutoRun: false }), false);
+  assert.equal(
+    shouldDelayAutoRunSnippetInput("sudo apt install gconf2-common -y\necho \"123456\"", {
+      noAutoRun: false,
+    }),
+    false,
+  );
+  assert.equal(
+    shouldDelayAutoRunSnippetInput("tthdf 0 2323\nadmin\ntest123", {
+      noAutoRun: false,
+      multiLineRunMode: "lineDelay",
+    }),
+    true,
+  );
   assert.equal(shouldDelayAutoRunSnippetInput("tthdf 0 2323\nadmin\ntest123", { noAutoRun: true }), false);
   assert.equal(shouldDelayAutoRunSnippetInput("show version", { noAutoRun: false }), false);
   assert.equal(shouldDelayAutoRunSnippetInput("show version\r", { noAutoRun: false }), false);

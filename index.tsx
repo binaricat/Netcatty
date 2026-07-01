@@ -1,5 +1,9 @@
 import { Suspense, lazy } from 'react';
 import ReactDOM from 'react-dom/client';
+import '@fontsource/mona-sans/400.css';
+import '@fontsource/mona-sans/500.css';
+import '@fontsource/mona-sans/600.css';
+import '@fontsource/mona-sans/700.css';
 import '@fontsource/space-grotesk/400.css';
 import '@fontsource/space-grotesk/500.css';
 import '@fontsource/space-grotesk/600.css';
@@ -24,7 +28,7 @@ function SettingsWindowFallback() {
         flexDirection: 'column',
         background: 'hsl(var(--background))',
         color: 'hsl(var(--foreground))',
-        fontFamily: 'Space Grotesk, system-ui, sans-serif',
+        fontFamily: 'Mona Sans, PingFang SC, system-ui, sans-serif',
       }}
     >
       <div

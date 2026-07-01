@@ -11,6 +11,7 @@ interface ZmodemProgressIndicatorProps {
   fileIndex: number;
   fileCount: number;
   finalizing: boolean;
+  bytesPerSecond: number | null;
   onCancel: () => void;
 }
 
@@ -22,6 +23,11 @@ function formatBytes(bytes: number): string {
   return `${(bytes / Math.pow(k, i)).toFixed(1)} ${sizes[i]}`;
 }
 
+function formatSpeed(bytesPerSecond: number | null): string | null {
+  if (!bytesPerSecond || bytesPerSecond <= 0) return null;
+  return `${formatBytes(bytesPerSecond)}/s`;
+}
+
 export const ZmodemProgressIndicator: React.FC<ZmodemProgressIndicatorProps> = ({
   transferType,
   filename,
@@ -30,6 +36,7 @@ export const ZmodemProgressIndicator: React.FC<ZmodemProgressIndicatorProps> = (
   fileIndex,
   fileCount,
   finalizing,
+  bytesPerSecond,
   onCancel,
 }) => {
   const { t } = useI18n();
@@ -41,6 +48,7 @@ export const ZmodemProgressIndicator: React.FC<ZmodemProgressIndicatorProps> = (
       ? t('zmodem.uploading')
       : t('zmodem.downloading');
   const fileInfo = fileCount > 0 ? ` (${fileIndex + 1}/${fileCount})` : '';
+  const speed = formatSpeed(bytesPerSecond);
 
   return (
     <div
@@ -71,7 +79,9 @@ export const ZmodemProgressIndicator: React.FC<ZmodemProgressIndicatorProps> = (
           />
         </div>
         <div className="text-[10px] opacity-50 mt-0.5">
-          {finalizing ? label : `${formatBytes(transferred)} / ${formatBytes(total)}`}
+          {finalizing
+            ? label
+            : `${formatBytes(transferred)} / ${formatBytes(total)}${speed ? ` · ${speed}` : ''}`}
         </div>
       </div>
       <Tooltip>

@@ -1,4 +1,5 @@
 import type { Terminal as XTerm } from "@xterm/xterm";
+import { normalizeLineEndings, wrapBracketedPaste } from "../../../lib/utils";
 import { markPromptLineBreakCommandPending } from "./promptLineBreak";
 import type { TerminalSessionStartersContext } from "./createTerminalSessionStarters.types";
 
@@ -24,6 +25,14 @@ export function normalizeStartupCommandDelay(raw: number | undefined): number {
   const value = typeof raw === "number" && Number.isFinite(raw) ? raw : STARTUP_COMMAND_DEFAULT_DELAY_MS;
   return Math.max(0, Math.min(STARTUP_COMMAND_MAX_DELAY_MS, value));
 }
+
+const buildStartupPasteInput = (term: XTerm, commandText: string): string => {
+  let data = normalizeLineEndings(commandText);
+  if (data.includes("\n") && term.modes?.bracketedPasteMode && !term.options?.ignoreBracketedPasteMode) {
+    data = wrapBracketedPaste(data);
+  }
+  return `${data}\r`;
+};
 
 export const resolveStartupCommand = (
   ctx: TerminalSessionStartersContext,
@@ -73,15 +82,41 @@ export const scheduleStartupCommand = (
     };
   }
 
-  // Auto-run: send each non-empty line in sequence, waiting delayMs before the
-  // first and between each, so a line runs inside any sub-shell opened by a
-  // previous line (e.g. `sudo -i` then `alias ...`).
   const lines = splitStartupCommandLines(commandToRun);
   if (lines.length === 0) {
     onSettled?.();
     return undefined;
   }
 
+  const runMode = ctx.startupCommand
+    ? (ctx.multiLineRunMode ?? "paste")
+    : (ctx.host.startupCommandRunMode ?? "paste");
+  if (runMode === "paste") {
+    timeoutId = setTimeout(() => {
+      if (cancelled) return;
+      if (!sessionIsCurrent()) {
+        onSettled?.();
+        return;
+      }
+      ctx.terminalBackend.writeToSession(
+        ctx.sessionRef.current,
+        buildStartupPasteInput(term, commandToRun),
+        { automated: true },
+      );
+      for (const line of lines) {
+        markPromptLineBreakCommandPending(ctx.promptLineBreakStateRef, term, line);
+        ctx.onCommandExecuted?.(line, ctx.host.id, ctx.host.label, ctx.sessionId);
+      }
+      onSettled?.();
+    }, delayMs);
+    return () => {
+      cancelled = true;
+      if (timeoutId) clearTimeout(timeoutId);
+    };
+  }
+
+  // Line-by-line mode: wait before each line so prompt-driven sessions can
+  // react between steps.
   let index = 0;
   const runNext = () => {
     if (cancelled) return;
