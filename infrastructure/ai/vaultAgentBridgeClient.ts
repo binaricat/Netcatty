@@ -161,6 +161,72 @@ function parseOptionalStringArray(
   return trimmed.split(',').map((entry) => entry.trim()).filter(Boolean);
 }
 
+function parseAssetPatch(value: unknown): Record<string, unknown> | { error: string } {
+  if (!value || typeof value !== 'object') {
+    if (typeof value !== 'string') return { error: 'patch is required.' };
+    try {
+      const parsed = JSON.parse(value) as unknown;
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed as Record<string, unknown>;
+      }
+      return { error: 'patch must be a JSON object.' };
+    } catch {
+      return { error: 'patch must be a valid JSON object.' };
+    }
+  }
+  if (Array.isArray(value)) return { error: 'patch must be an object.' };
+  return value as Record<string, unknown>;
+}
+
+function buildHostAssetPatch(
+  existing: Host,
+  patch: Record<string, unknown>,
+): Host | { error: string } {
+  const next: Host = { ...existing };
+
+  if (typeof patch.label === 'string') next.label = patch.label.trim();
+  if (typeof patch.hostname === 'string') next.hostname = patch.hostname.trim();
+  if (typeof patch.username === 'string') next.username = patch.username.trim();
+  if (typeof patch.group === 'string') next.group = patch.group.trim() || undefined;
+  if (typeof patch.protocol === 'string') next.protocol = patch.protocol as Host['protocol'];
+  if (typeof patch.os === 'string') next.os = patch.os as Host['os'];
+  if (typeof patch.authMethod === 'string') next.authMethod = patch.authMethod as Host['authMethod'];
+  if (typeof patch.identityId === 'string') next.identityId = patch.identityId.trim() || undefined;
+  if (typeof patch.identityFileId === 'string') next.identityFileId = patch.identityFileId.trim() || undefined;
+  if (typeof patch.notes === 'string') next.notes = patch.notes;
+  if (typeof patch.loginScriptId === 'string') next.loginScriptId = patch.loginScriptId.trim() || undefined;
+
+  if (patch.port !== undefined) {
+    const port = typeof patch.port === 'number' ? patch.port : Number(String(patch.port).trim());
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+      return { error: 'port must be an integer between 1 and 65535.' };
+    }
+    next.port = port;
+  }
+
+  const tags = parseOptionalStringArray(patch.tags, 'tags');
+  if (tags && 'error' in tags) return tags;
+  if (tags) next.tags = tags;
+
+  const connectScriptIds = parseOptionalStringArray(patch.connectScriptIds, 'connectScriptIds');
+  if (connectScriptIds && 'error' in connectScriptIds) return connectScriptIds;
+  if (connectScriptIds) next.connectScriptIds = connectScriptIds;
+
+  if (patch.clearPassword === true) {
+    next.password = undefined;
+  } else if (typeof patch.password === 'string') {
+    next.password = patch.password;
+  }
+
+  if (patch.clearTelnetPassword === true) {
+    next.telnetPassword = undefined;
+  } else if (typeof patch.telnetPassword === 'string') {
+    next.telnetPassword = patch.telnetPassword;
+  }
+
+  return next;
+}
+
 function snippetDraftFromParams(params: Record<string, unknown>) {
   const command = params.command ?? params.content;
   return {
@@ -280,18 +346,23 @@ export async function handleVaultAgentOp(
   deps: VaultAgentApiDeps,
 ): Promise<Record<string, unknown>> {
   switch (op) {
+    case 'asset.get':
     case 'host.get': {
       const hostId = String(params.hostId || '');
       const host = deps.getHosts().find((entry) => entry.id === hostId);
       if (!host) return { ok: false, error: `Host "${hostId}" was not found.` };
-      return { ok: true, host: redactHostForAgent(deps.resolveEffectiveHost(host)) };
+      const redacted = redactHostForAgent(deps.resolveEffectiveHost(host));
+      return op === 'asset.get' ? { ok: true, asset: redacted } : { ok: true, host: redacted };
     }
+    case 'asset.list':
     case 'host.list': {
+      const hosts = deps.getHosts().map((host) => redactHostForAgent(deps.resolveEffectiveHost(host)));
       return {
         ok: true,
-        hosts: deps.getHosts().map((host) => redactHostForAgent(deps.resolveEffectiveHost(host))),
+        ...(op === 'asset.list' ? { assets: hosts } : { hosts }),
       };
     }
+    case 'asset.add':
     case 'hosts.create': {
       const parsedDrafts = parseVaultHostDraftsInput(params.hosts);
       if (!parsedDrafts.ok) return { ok: false, error: parsedDrafts.error };
@@ -318,6 +389,7 @@ export async function handleVaultAgentOp(
           validCount: builtHosts.length,
           issues: buildIssues,
           previewHosts,
+          ...(op === 'asset.add' ? { previewAssets: previewHosts } : {}),
         };
       }
 
@@ -341,6 +413,8 @@ export async function handleVaultAgentOp(
       deps.updateHosts(merged.hosts);
       deps.updateCustomGroups(merged.customGroups);
 
+      const addedHosts = merged.addedHosts.map((host) => redactHostForAgent(host));
+
       return {
         ok: true,
         dryRun: false,
@@ -349,8 +423,29 @@ export async function handleVaultAgentOp(
         addedCount: merged.addedCount,
         skippedExistingCount: merged.skippedExistingCount,
         issues: buildIssues,
-        previewHosts: merged.addedHosts.map((host) => redactHostForAgent(host)),
+        previewHosts: addedHosts,
+        ...(op === 'asset.add' ? { assets: addedHosts } : {}),
       };
+    }
+    case 'asset.edit': {
+      const hostId = String(params.hostId || '');
+      if (!hostId) return { ok: false, error: 'hostId is required.' };
+      const patch = parseAssetPatch(params.patch);
+      if ('error' in patch) return { ok: false, error: patch.error };
+      const existing = deps.getHosts().find((entry) => entry.id === hostId);
+      if (!existing) return { ok: false, error: 'Host not found.' };
+      const nextHost = buildHostAssetPatch(existing, patch);
+      if ('error' in nextHost) return { ok: false, error: nextHost.error };
+      deps.updateHosts(deps.getHosts().map((entry) => (entry.id === hostId ? nextHost : entry)));
+      return { ok: true, asset: redactHostForAgent(deps.resolveEffectiveHost(nextHost)) };
+    }
+    case 'asset.remove': {
+      const hostId = String(params.hostId || '');
+      if (!hostId) return { ok: false, error: 'hostId is required.' };
+      const existing = deps.getHosts().find((entry) => entry.id === hostId);
+      if (!existing) return { ok: false, error: 'Host not found.' };
+      deps.updateHosts(deps.getHosts().filter((entry) => entry.id !== hostId));
+      return { ok: true, hostId, asset: redactHostForAgent(deps.resolveEffectiveHost(existing)) };
     }
     case 'host.import': {
       const text = typeof params.text === 'string' ? params.text : '';

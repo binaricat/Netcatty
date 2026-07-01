@@ -304,6 +304,132 @@ describe('handleVaultAgentOp vault hosts', () => {
     assert.ok(updatedGroups[0]?.includes('prod/web'));
     assert.equal((result as { addedCount?: number }).addedCount, 2);
   });
+
+  it('asset.list and asset.get return redacted asset fields', async () => {
+    const deps = createDeps({
+      hosts: [{
+        id: 'host-1',
+        label: 'asset',
+        hostname: 'asset.example.com',
+        username: 'root',
+        password: 'asset-secret',
+        notes: 'note-secret',
+        tags: [],
+        os: 'linux',
+      }],
+    });
+
+    const listResult = await handleVaultAgentOp('asset.list', {}, deps);
+    const getResult = await handleVaultAgentOp('asset.get', { hostId: 'host-1' }, deps);
+
+    assert.equal(listResult.ok, true);
+    assert.equal((listResult as { assets?: unknown[] }).assets?.length, 1);
+    assert.equal(getResult.ok, true);
+    assert.equal((getResult as { asset?: Record<string, unknown> }).asset?.hostname, 'asset.example.com');
+    assert.doesNotMatch(JSON.stringify({ listResult, getResult }), /asset-secret|note-secret/);
+  });
+
+  it('asset.add creates hosts and returns redacted assets', async () => {
+    const deps = createDeps({ hosts: [], customGroups: [] });
+    const result = await handleVaultAgentOp('asset.add', {
+      hosts: JSON.stringify([
+        {
+          label: 'Asset API',
+          hostname: 'asset.example.com',
+          username: 'deploy',
+          password: 'asset-secret',
+          notes: 'note-secret',
+        },
+      ]),
+    }, deps);
+
+    assert.equal(result.ok, true);
+    assert.equal((result as { addedCount?: number }).addedCount, 1);
+    assert.equal((result as { assets?: unknown[] }).assets?.length, 1);
+    assert.equal(deps.getHosts().length, 1);
+    assert.doesNotMatch(JSON.stringify(result), /asset-secret|note-secret/);
+  });
+
+  it('asset.edit patches only provided fields and keeps secret clearing explicit', async () => {
+    const deps = createDeps({
+      hosts: [{
+        id: 'host-1',
+        label: 'old',
+        hostname: 'old.example.com',
+        username: 'root',
+        password: 'existing-secret',
+        tags: [],
+        os: 'linux',
+      }],
+    });
+
+    const result = await handleVaultAgentOp('asset.edit', {
+      hostId: 'host-1',
+      patch: { label: 'new', hostname: 'new.example.com' },
+    }, deps);
+
+    assert.equal(result.ok, true);
+    assert.equal(deps.getHosts()[0].label, 'new');
+    assert.equal(deps.getHosts()[0].hostname, 'new.example.com');
+    assert.equal(deps.getHosts()[0].password, 'existing-secret');
+    assert.doesNotMatch(JSON.stringify(result), /existing-secret/);
+  });
+
+  it('asset.edit clears credentials only with explicit clear flags', async () => {
+    const deps = createDeps({
+      hosts: [{
+        id: 'host-1',
+        label: 'host',
+        hostname: 'host.example.com',
+        username: 'root',
+        password: 'existing-secret',
+        telnetPassword: 'telnet-secret',
+        tags: [],
+        os: 'linux',
+      }],
+    });
+
+    const result = await handleVaultAgentOp('asset.edit', {
+      hostId: 'host-1',
+      patch: { clearPassword: true, clearTelnetPassword: true },
+    }, deps);
+
+    assert.equal(result.ok, true);
+    assert.equal(deps.getHosts()[0].password, undefined);
+    assert.equal(deps.getHosts()[0].telnetPassword, undefined);
+    assert.doesNotMatch(JSON.stringify(result), /existing-secret|telnet-secret/);
+  });
+
+  it('asset.remove deletes only the host and returns a redacted summary', async () => {
+    const deps = createDeps({
+      hosts: [
+        {
+          id: 'host-1',
+          label: 'a',
+          hostname: 'a.example.com',
+          username: 'root',
+          tags: [],
+          os: 'linux',
+          notes: 'note-secret',
+        },
+        {
+          id: 'host-2',
+          label: 'b',
+          hostname: 'b.example.com',
+          username: 'root',
+          tags: [],
+          os: 'linux',
+        },
+      ],
+    });
+
+    const result = await handleVaultAgentOp('asset.remove', { hostId: 'host-1' }, deps);
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(deps.getHosts().map((host) => host.id), ['host-2']);
+    assert.equal((result as { hostId?: string }).hostId, 'host-1');
+    assert.doesNotMatch(JSON.stringify(result), /note-secret/);
+  });
 });
 
 describe('handleVaultAgentOp snippets and scripts', () => {
