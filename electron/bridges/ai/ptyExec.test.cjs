@@ -1,5 +1,9 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const { spawnSync } = require("node:child_process");
+const { mkdtempSync, rmSync } = require("node:fs");
+const { tmpdir } = require("node:os");
+const { join } = require("node:path");
 
 const {
   resolveEffectiveShellKind,
@@ -116,6 +120,53 @@ test("cmd wrapper uses interactive cmd variable expansion", () => {
   const wrapped = buildWrappedCommand("ipconfig /all", "cmd", "__NCMCP_TEST__");
   assert.match(wrapped, /"%__NCMCP_TEST___CMD%"/);
   assert.doesNotMatch(wrapped, /"%%__NCMCP_TEST___CMD%%"/);
+});
+
+test("posix wrapper isolates set -e failures from the active shell", () => {
+  const marker = "__NCMCP_TEST__";
+  const wrapped = buildWrappedCommand("set -e\nfalse\necho SHOULD_NOT_PRINT", "posix", marker);
+  const result = spawnSync("sh", ["-c", `${wrapped}printf 'PARENT_STILL_ALIVE\\n'`], {
+    encoding: "utf8",
+  });
+
+  assert.equal(result.error, undefined);
+  assert.equal(result.status, 0);
+  assert.match(result.stdout, new RegExp(`${marker}_S`));
+  assert.match(result.stdout, new RegExp(`${marker}_E:1`));
+  assert.match(result.stdout, /PARENT_STILL_ALIVE/);
+  assert.doesNotMatch(result.stdout, /SHOULD_NOT_PRINT/);
+});
+
+test("posix wrapper survives failures when the active shell already has errexit", () => {
+  const marker = "__NCMCP_TEST__";
+  const wrapped = buildWrappedCommand("false", "posix", marker);
+  const result = spawnSync("sh", ["-c", `set -e; ${wrapped}printf 'PARENT_STILL_ALIVE\\n'`], {
+    encoding: "utf8",
+  });
+
+  assert.equal(result.error, undefined);
+  assert.equal(result.status, 0);
+  assert.match(result.stdout, new RegExp(`${marker}_S`));
+  assert.match(result.stdout, new RegExp(`${marker}_E:1`));
+  assert.match(result.stdout, /PARENT_STILL_ALIVE/);
+});
+
+test("posix wrapper still keeps safe state changes in the active shell", () => {
+  const marker = "__NCMCP_TEST__";
+  const cwd = mkdtempSync(join(tmpdir(), "netcatty-pty-cd-"));
+  try {
+    const wrapped = buildWrappedCommand(`cd '${cwd.replace(/'/g, "'\\''")}'`, "posix", marker);
+    const result = spawnSync("sh", ["-c", `${wrapped}pwd`], {
+      encoding: "utf8",
+    });
+
+    assert.equal(result.error, undefined);
+    assert.equal(result.status, 0);
+    assert.match(result.stdout, new RegExp(`${marker}_E:0`));
+    assert.match(result.stdout, new RegExp(`${cwd.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
 });
 
 test("execViaChannel registers a pending-cancel marker before the SSH channel opens", () => {
