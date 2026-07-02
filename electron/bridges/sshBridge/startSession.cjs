@@ -1398,7 +1398,9 @@ function createStartSessionApi(ctx) {
               // Owner already cleaned up (e.g. its stream closed first). Ensure
               // this connection's log stream is stopped defensively, scoped by
               // the captured token so a reconnect's fresh stream is left alone.
-              sessionLogStreamManager.stopStream(sessionId, ownerLogStreamToken);
+              if (ownerLogStreamToken) {
+                sessionLogStreamManager.stopStream(sessionId, ownerLogStreamToken);
+              }
             }
             if (!settled) {
               settled = true;
@@ -1457,8 +1459,15 @@ function createStartSessionApi(ctx) {
         });
       } catch (err) {
         console.error("[Chain] SSH chain connection error:", err.message);
-        const contents = event.sender;
-        safeSend(contents, "netcatty:exit", { sessionId, exitCode: 1, error: err.message });
+        const isAuthError = err.message?.toLowerCase().includes('authentication') ||
+          err.message?.toLowerCase().includes('auth') ||
+          err.message?.toLowerCase().includes('password') ||
+          err.level === 'client-authentication';
+        const suppressPreShellAuthExit = Boolean(options._suppressPreShellAuthExit && isAuthError);
+        if (!suppressPreShellAuthExit) {
+          const contents = event.sender;
+          safeSend(contents, "netcatty:exit", { sessionId, exitCode: 1, error: err.message });
+        }
         throw err;
       }
     }

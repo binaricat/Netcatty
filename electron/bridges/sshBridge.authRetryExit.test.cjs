@@ -1,7 +1,11 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { EventEmitter } = require("node:events");
+const fs = require("node:fs");
 const Module = require("node:module");
+const os = require("node:os");
+const path = require("node:path");
+const sessionLogStreamManager = require("./sessionLogStreamManager.cjs");
 
 function makeSender(events = null) {
   return {
@@ -60,7 +64,7 @@ function loadBridgeWithAuthRetryMocks(t, options = {}) {
 
     connect(opts) {
       this.connectOpts = opts;
-      const eventName = connectEvents[MockSSHClient.instances.length - 1] || "auth-error";
+      const eventName = connectEvents[MockSSHClient.connectCount++] || "auth-error";
       setImmediate(() => {
         if (eventName === "auth-error") {
           const err = new Error("All configured authentication methods failed");
@@ -76,6 +80,10 @@ function loadBridgeWithAuthRetryMocks(t, options = {}) {
       });
     }
 
+    forwardOut(_srcHost, _srcPort, _dstHost, _dstPort, cb) {
+      setImmediate(() => cb(null, new EventEmitter()));
+    }
+
     shell(_pty, _opts, cb) {
       setImmediate(() => cb(null, createShellStream()));
     }
@@ -89,6 +97,7 @@ function loadBridgeWithAuthRetryMocks(t, options = {}) {
     }
   }
   MockSSHClient.instances = [];
+  MockSSHClient.connectCount = 0;
 
   Module._load = function patchedLoad(request, parent, isMain) {
     if (request === "ssh2") {
@@ -239,6 +248,117 @@ test("stale close from failed first attempt does not close successful retry sess
     )),
     false,
   );
+});
+
+test("jump-host auth failure does not emit exit before encrypted-key retry success", async (t) => {
+  const { bridge, MockSSHClient } = loadBridgeWithAuthRetryMocks(t, {
+    connectEvents: ["auth-error", "ready", "ready"],
+    encryptedKeys: [
+      {
+        keyPath: "/Users/test/.ssh/id_ed25519",
+        keyName: "id_ed25519",
+        isEncrypted: true,
+      },
+    ],
+    passphraseResult: {
+      cancelled: false,
+      keys: [
+        {
+          keyPath: "/Users/test/.ssh/id_ed25519",
+          keyName: "id_ed25519",
+          privateKey: "UNLOCKED_PRIVATE_KEY",
+          passphrase: "secret",
+        },
+      ],
+    },
+  });
+  const ipcMain = makeIpcMain();
+  bridge.init({ sessions: new Map(), electronModule: {} });
+  bridge.registerHandlers(ipcMain);
+  const start = ipcMain.handlers.get("netcatty:start");
+  const sender = makeSender();
+
+  const result = await start(
+    { sender },
+    {
+      sessionId: "jump-retry-session",
+      hostname: "target.example",
+      username: "alice",
+      port: 22,
+      knownHosts: [],
+      jumpHosts: [{ hostname: "jump.example", username: "alice", port: 22 }],
+    },
+  );
+
+  assert.deepEqual(result, { sessionId: "jump-retry-session" });
+  assert.equal(MockSSHClient.connectCount, 3);
+  assert.equal(
+    sender.sent.some((message) => (
+      message.channel === "netcatty:exit"
+      && message.payload.sessionId === "jump-retry-session"
+    )),
+    false,
+  );
+});
+
+test("stale close from failed encrypted-key retry does not stop successful retry log stream", async (t) => {
+  const sessionId = "retry-session-log";
+  const logDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-auth-retry-log-"));
+  t.after(async () => {
+    await sessionLogStreamManager.stopStream(sessionId);
+    fs.rmSync(logDirectory, { recursive: true, force: true });
+  });
+
+  const sessions = new Map();
+  const { bridge, MockSSHClient } = loadBridgeWithAuthRetryMocks(t, {
+    connectEvents: ["auth-error", "ready"],
+    encryptedKeys: [
+      {
+        keyPath: "/Users/test/.ssh/id_ed25519",
+        keyName: "id_ed25519",
+        isEncrypted: true,
+      },
+    ],
+    passphraseResult: {
+      cancelled: false,
+      keys: [
+        {
+          keyPath: "/Users/test/.ssh/id_ed25519",
+          keyName: "id_ed25519",
+          privateKey: "UNLOCKED_PRIVATE_KEY",
+          passphrase: "secret",
+        },
+      ],
+    },
+  });
+  const ipcMain = makeIpcMain();
+  bridge.init({ sessions, electronModule: {} });
+  bridge.registerHandlers(ipcMain);
+  const start = ipcMain.handlers.get("netcatty:start");
+  const sender = makeSender();
+
+  await start(
+    { sender },
+    {
+      sessionId,
+      hostname: "example.test",
+      username: "alice",
+      port: 22,
+      knownHosts: [],
+      sessionLog: {
+        enabled: true,
+        directory: logDirectory,
+        format: "raw",
+      },
+    },
+  );
+
+  assert.equal(sessionLogStreamManager.hasStream(sessionId), true);
+
+  MockSSHClient.instances[0].emit("close");
+  await nextTick();
+
+  assert.equal(sessionLogStreamManager.hasStream(sessionId), true);
 });
 
 test("non-retryable auth failure still emits one exit", async (t) => {
