@@ -55,6 +55,7 @@ import {
 } from "./terminalFlowAckBuffer";
 import {
   enqueueTerminalWrite,
+  flushTerminalWriteQueueBypassingTimers,
   isTerminalWriteQueueInFloodMode,
   setTerminalWriteQueueDropHandler,
 } from "./terminalWriteQueue";
@@ -117,6 +118,18 @@ const terminalFlowControllers = new WeakMap<XTerm, OutputFlowController>();
 
 type TerminalSessionWriteOptions = CoalescedTerminalWriteOptions & {
   flushXtermWriteBuffer?: boolean;
+};
+
+const HIDDEN_PAGE_FLUSH_MAX_PASSES = 64;
+
+const flushTerminalWritesForHiddenPage = (term: XTerm): void => {
+  flushTerminalWriteBufferBypassingTimers(term);
+  for (let pass = 0; pass < HIDDEN_PAGE_FLUSH_MAX_PASSES; pass += 1) {
+    if (!flushTerminalWriteQueueBypassingTimers(term)) {
+      return;
+    }
+    flushTerminalWriteBufferBypassingTimers(term);
+  }
 };
 
 export const getFlowControllerForTerm = (term: XTerm): OutputFlowController | undefined =>
@@ -199,11 +212,20 @@ export const writeSessionData = (
   setTerminalOutputPressureVisibility(term, isPaneVisible);
   noteTerminalOutputPressureData(term, data);
   if (shouldFlushTerminalWritesForHiddenPage(isPaneVisible)) {
-    flushTerminalWriteCoalescer(term);
-    flushTerminalWriteBufferBypassingTimers(term);
-    writeSessionDataImmediate(ctx, term, data, ingressBytes, {
-      flushXtermWriteBuffer: true,
-    });
+    const writeHiddenPageData = (
+      batch: string,
+      batchIngress: number,
+    ): void => {
+      writeSessionDataImmediate(ctx, term, batch, batchIngress, {
+        flushXtermWriteBuffer: true,
+      });
+      flushTerminalWritesForHiddenPage(term);
+    };
+    flushTerminalWriteCoalescer(term, writeHiddenPageData);
+    flushTerminalWritesForHiddenPage(term);
+    enqueueCoalescedTerminalWrite(term, data, writeHiddenPageData, ingressBytes);
+    flushTerminalWriteCoalescer(term, writeHiddenPageData);
+    flushTerminalWritesForHiddenPage(term);
     return;
   }
   enqueueCoalescedTerminalWrite(term, data, (batch, batchIngress, writeOptions) => {

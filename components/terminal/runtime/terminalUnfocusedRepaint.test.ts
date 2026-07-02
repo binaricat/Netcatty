@@ -88,6 +88,41 @@ test("flushTerminalWriteBufferBypassingTimers drains xterm's internal write buff
   assert.equal(flushed, true);
 });
 
+test("flushTerminalWriteBufferBypassingTimers skips already parsed xterm chunks", () => {
+  const processed: string[] = [];
+  let oldCallbackCalled = false;
+  let pendingCallbackCalled = false;
+  const writeBuffer = {
+    _bufferOffset: 1,
+    _callbacks: [
+      () => { oldCallbackCalled = true; },
+      () => { pendingCallbackCalled = true; },
+    ] as Array<() => void>,
+    _pendingData: "pending".length,
+    _writeBuffer: ["already-parsed", "pending"],
+    flushSync() {
+      while (this._writeBuffer.length > 0) {
+        processed.push(this._writeBuffer.shift()!);
+        this._callbacks.shift()?.();
+      }
+      this._pendingData = 0;
+      this._bufferOffset = 0;
+    },
+  };
+  const term = {
+    _core: {
+      _writeBuffer: writeBuffer,
+    },
+  };
+
+  flushTerminalWriteBufferBypassingTimers(term as never);
+
+  assert.deepEqual(processed, ["pending"]);
+  assert.equal(oldCallbackCalled, false);
+  assert.equal(pendingCallbackCalled, true);
+  assert.equal(writeBuffer._pendingData, 0);
+});
+
 test("maybeFlushTerminalWriteCoalescerWhenUnfocused throttles coalescer flushes", () => {
   const source = readFileSync(
     new URL("./terminalUnfocusedRepaint.ts", import.meta.url),
@@ -123,7 +158,9 @@ test("writeSessionData bypasses animation-frame coalescing on hidden pages", () 
     "utf8",
   );
   assert.match(source, /shouldFlushTerminalWritesForHiddenPage\(isPaneVisible\)/);
-  assert.match(source, /flushTerminalWriteCoalescer\(term\);[\s\S]*flushTerminalWriteBufferBypassingTimers\(term\);[\s\S]*writeSessionDataImmediate\(ctx, term, data, ingressBytes, \{\s*flushXtermWriteBuffer: true,/);
+  assert.match(source, /flushTerminalWriteCoalescer\(term, writeHiddenPageData\)/);
+  assert.match(source, /enqueueCoalescedTerminalWrite\(term, data, writeHiddenPageData, ingressBytes\)/);
+  assert.match(source, /flushTerminalWriteQueueBypassingTimers\(term\)/);
   assert.match(source, /const deferFlowAck = !writeOptions\.flushXtermWriteBuffer/);
 });
 

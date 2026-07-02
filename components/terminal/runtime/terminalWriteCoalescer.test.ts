@@ -16,6 +16,32 @@ import {
 } from "./terminalFlowConstants.ts";
 
 const createFakeTerm = () => ({}) as XTerm;
+const withAnimationFrameQueue = (run: () => void) => {
+  const originalRequest = Object.getOwnPropertyDescriptor(globalThis, "requestAnimationFrame");
+  const originalCancel = Object.getOwnPropertyDescriptor(globalThis, "cancelAnimationFrame");
+  Object.defineProperty(globalThis, "requestAnimationFrame", {
+    configurable: true,
+    value: () => 1,
+  });
+  Object.defineProperty(globalThis, "cancelAnimationFrame", {
+    configurable: true,
+    value: () => {},
+  });
+  try {
+    run();
+  } finally {
+    if (originalRequest) {
+      Object.defineProperty(globalThis, "requestAnimationFrame", originalRequest);
+    } else {
+      Reflect.deleteProperty(globalThis, "requestAnimationFrame");
+    }
+    if (originalCancel) {
+      Object.defineProperty(globalThis, "cancelAnimationFrame", originalCancel);
+    } else {
+      Reflect.deleteProperty(globalThis, "cancelAnimationFrame");
+    }
+  }
+};
 
 test("splits a single flood-sized terminal batch before it reaches xterm", () => {
   const term = createFakeTerm();
@@ -171,6 +197,38 @@ test("keeps control-sequence terminal batches intact up to the coalescing cap", 
 
   assert.deepEqual(writes.map((write) => write.data.length), [payload.length]);
   assert.deepEqual(writes.map((write) => write.options), [undefined]);
+
+  resetTerminalWriteCoalescer(term);
+});
+
+test("uses the latest coalesced writer when pending output is flushed", () => {
+  const term = createFakeTerm();
+  const firstWriter: string[] = [];
+  const secondWriter: string[] = [];
+
+  setTerminalWriteCoalescerByteCapResolver(term, () => 100);
+  withAnimationFrameQueue(() => {
+    enqueueCoalescedTerminalWrite(
+      term,
+      "pending",
+      (data) => {
+        firstWriter.push(data);
+      },
+      "pending".length,
+    );
+    enqueueCoalescedTerminalWrite(
+      term,
+      " output",
+      (data) => {
+        secondWriter.push(data);
+      },
+      " output".length,
+    );
+    flushTerminalWriteCoalescer(term);
+  });
+
+  assert.deepEqual(firstWriter, []);
+  assert.deepEqual(secondWriter, ["pending output"]);
 
   resetTerminalWriteCoalescer(term);
 });

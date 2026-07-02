@@ -7,6 +7,7 @@ import {
   MAX_WRITE_QUEUE_ITEMS,
   abortTerminalWriteQueue,
   enqueueTerminalWrite,
+  flushTerminalWriteQueueBypassingTimers,
   getTerminalWriteQueueDepth,
   isTerminalWriteQueueInFloodMode,
   setTerminalWriteQueueDropHandler,
@@ -69,6 +70,25 @@ test("yieldAfter lets the event loop run between queued write chunks", async () 
   assert.deepEqual(order, [1]);
   await waitForQueuedWriteYield();
   assert.deepEqual(order, [1, 2]);
+});
+
+test("flushTerminalWriteQueueBypassingTimers drains deferred queue steps immediately", () => {
+  const term = createFakeTerm();
+  const order: number[] = [];
+
+  enqueueTerminalWrite(term, 1, (done) => {
+    order.push(1);
+    done();
+  }, { deferStart: true, yieldAfter: true });
+  enqueueTerminalWrite(term, 1, (done) => {
+    order.push(2);
+    done();
+  });
+
+  assert.deepEqual(order, []);
+  assert.equal(flushTerminalWriteQueueBypassingTimers(term), true);
+  assert.deepEqual(order, [1, 2]);
+  assert.equal(flushTerminalWriteQueueBypassingTimers(term), false);
 });
 
 test("marks flood mode and coalesces queued writes when item cap is exceeded", async () => {
@@ -243,6 +263,27 @@ test("merged flood backlog still yields between synchronous write steps", async 
   assert.deepEqual(order, [0]);
   await waitForQueuedWriteYield();
   assert.deepEqual(order, [0, 1]);
+});
+
+test("flushTerminalWriteQueueBypassingTimers drains merged flood backlog without timer yields", () => {
+  const term = createFakeTerm();
+  const order: number[] = [];
+
+  for (let index = 0; index < MAX_WRITE_QUEUE_ITEMS + 1; index += 1) {
+    enqueueTerminalWrite(
+      term,
+      10,
+      (done) => {
+        order.push(index);
+        done();
+      },
+      { deferStart: true, yieldAfter: true },
+    );
+  }
+
+  assert.equal(getTerminalWriteQueueDepth(term), 1);
+  assert.equal(flushTerminalWriteQueueBypassingTimers(term), true);
+  assert.deepEqual(order, Array.from({ length: MAX_WRITE_QUEUE_ITEMS + 1 }, (_, index) => index));
 });
 
 test("write queue yields when a drain reaches its byte budget", async () => {

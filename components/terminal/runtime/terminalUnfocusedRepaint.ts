@@ -16,9 +16,17 @@ type XTermWithPrivateWriteBuffer = XTerm & {
   _core?: {
     _writeBuffer?: {
       flushSync?: () => void;
+      _bufferOffset?: number;
+      _callbacks?: Array<(() => void) | undefined>;
+      _pendingData?: number;
+      _writeBuffer?: Array<string | Uint8Array>;
     };
   };
 };
+
+type XTermPrivateWriteBuffer = NonNullable<
+  NonNullable<XTermWithPrivateWriteBuffer["_core"]>["_writeBuffer"]
+>;
 
 export function isTerminalWindowUnfocusedButVisible(): boolean {
   if (typeof document === "undefined") return false;
@@ -34,10 +42,31 @@ export function shouldFlushTerminalWritesForHiddenPage(isPaneVisible: boolean): 
   return isPaneVisible && isTerminalPageHidden();
 }
 
+function normalizeXtermWriteBufferOffset(writeBuffer: XTermPrivateWriteBuffer): void {
+  const buffer = writeBuffer._writeBuffer;
+  const callbacks = writeBuffer._callbacks;
+  const offset = writeBuffer._bufferOffset;
+  if (!Array.isArray(buffer) || !Array.isArray(callbacks) || typeof offset !== "number") {
+    return;
+  }
+  if (offset <= 0) return;
+  if (offset >= buffer.length) {
+    buffer.length = 0;
+    callbacks.length = 0;
+    writeBuffer._pendingData = 0;
+    writeBuffer._bufferOffset = 0;
+    return;
+  }
+  writeBuffer._writeBuffer = buffer.slice(offset);
+  writeBuffer._callbacks = callbacks.slice(offset);
+  writeBuffer._bufferOffset = 0;
+}
+
 export function flushTerminalWriteBufferBypassingTimers(term: XTerm): void {
   const writeBuffer = (term as XTermWithPrivateWriteBuffer)._core?._writeBuffer;
   if (typeof writeBuffer?.flushSync !== "function") return;
   try {
+    normalizeXtermWriteBufferOffset(writeBuffer);
     writeBuffer.flushSync();
   } catch {
     // Best-effort private xterm recovery; normal async writes will continue.

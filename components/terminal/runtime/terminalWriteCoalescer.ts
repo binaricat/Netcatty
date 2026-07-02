@@ -13,10 +13,16 @@ export type CoalescedTerminalWriteOptions = {
   deferStart?: boolean;
   yieldAfter?: boolean;
 };
+type CoalescedTerminalWriteNow = (
+  data: string,
+  ingressBytes: number,
+  options?: CoalescedTerminalWriteOptions,
+) => void;
 
 const terminalWriteCoalescers = new WeakMap<XTerm, WriteCoalescer>();
 const terminalWriteCoalescerIngress = new WeakMap<XTerm, number>();
 const terminalWriteCoalescerByteCapResolvers = new WeakMap<XTerm, CoalescerByteCapResolver>();
+const terminalWriteCoalescerWriters = new WeakMap<XTerm, CoalescedTerminalWriteNow>();
 
 const defaultCoalescerByteCap = (): number => MAX_PENDING_WRITE_COALESCE_BYTES;
 
@@ -129,13 +135,10 @@ const writeLargeTerminalBatch = (
 export const enqueueCoalescedTerminalWrite = (
   term: XTerm,
   data: string,
-  writeNow: (
-    data: string,
-    ingressBytes: number,
-    options?: CoalescedTerminalWriteOptions,
-  ) => void,
+  writeNow: CoalescedTerminalWriteNow,
   ingressBytes: number = data.length,
 ): void => {
+  terminalWriteCoalescerWriters.set(term, writeNow);
   const maxPendingBytes = resolveCoalescerByteCap(term);
   if (getPendingCoalescedBytes(term) + data.length > maxPendingBytes) {
     flushTerminalWriteCoalescer(term);
@@ -159,11 +162,12 @@ export const enqueueCoalescedTerminalWrite = (
   if (!coalescer) {
     coalescer = createWriteCoalescer((batch) => {
       const batchIngress = takePendingIngressBytes(term, batch.length);
+      const activeWriteNow = terminalWriteCoalescerWriters.get(term) ?? writeNow;
       writeLargeTerminalBatch(
         batch,
         batchIngress,
         resolveTerminalWriteBatchBytes(batch, resolveCoalescerByteCap(term)),
-        writeNow,
+        activeWriteNow,
       );
     }, {
       getMaxPendingBytes: () => resolveCoalescerByteCap(term),
@@ -173,8 +177,25 @@ export const enqueueCoalescedTerminalWrite = (
   coalescer.push(data);
 };
 
-export const flushTerminalWriteCoalescer = (term: XTerm): void => {
-  terminalWriteCoalescers.get(term)?.flushSync();
+export const flushTerminalWriteCoalescer = (
+  term: XTerm,
+  writeNow?: CoalescedTerminalWriteNow,
+): void => {
+  const coalescer = terminalWriteCoalescers.get(term);
+  if (!coalescer) return;
+  if (!writeNow) {
+    coalescer.flushSync();
+    return;
+  }
+  coalescer.flushSync((batch) => {
+    const batchIngress = takePendingIngressBytes(term, batch.length);
+    writeLargeTerminalBatch(
+      batch,
+      batchIngress,
+      resolveTerminalWriteBatchBytes(batch, resolveCoalescerByteCap(term)),
+      writeNow,
+    );
+  });
 };
 
 export const resetTerminalWriteCoalescer = (term: XTerm): void => {
@@ -182,6 +203,7 @@ export const resetTerminalWriteCoalescer = (term: XTerm): void => {
   terminalWriteCoalescers.delete(term);
   terminalWriteCoalescerIngress.delete(term);
   terminalWriteCoalescerByteCapResolvers.delete(term);
+  terminalWriteCoalescerWriters.delete(term);
 };
 
 export const getTerminalWriteCoalescerPendingBytes = (term: XTerm): number =>

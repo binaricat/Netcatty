@@ -6,6 +6,7 @@ import {
   FLOW_HIGH_WATER_MARK,
   FLOW_CHAR_COUNT_ACK_SIZE,
   FLOW_LOW_WATER_MARK,
+  MAX_TERMINAL_PLAIN_WRITE_CHUNK_BYTES,
   XTERM_WRITE_CALLBACK_BATCH_BYTES,
 } from "./terminalFlowConstants.ts";
 import {
@@ -102,6 +103,37 @@ const withDocumentVisibility = (visibilityState: "visible" | "hidden", run: () =
   }
 };
 
+const withAnimationFrameQueue = (run: (frames: Array<FrameRequestCallback>) => void) => {
+  const originalRequest = Object.getOwnPropertyDescriptor(globalThis, "requestAnimationFrame");
+  const originalCancel = Object.getOwnPropertyDescriptor(globalThis, "cancelAnimationFrame");
+  const frames: Array<FrameRequestCallback> = [];
+  Object.defineProperty(globalThis, "requestAnimationFrame", {
+    configurable: true,
+    value: (callback: FrameRequestCallback) => {
+      frames.push(callback);
+      return frames.length;
+    },
+  });
+  Object.defineProperty(globalThis, "cancelAnimationFrame", {
+    configurable: true,
+    value: () => {},
+  });
+  try {
+    run(frames);
+  } finally {
+    if (originalRequest) {
+      Object.defineProperty(globalThis, "requestAnimationFrame", originalRequest);
+    } else {
+      Reflect.deleteProperty(globalThis, "requestAnimationFrame");
+    }
+    if (originalCancel) {
+      Object.defineProperty(globalThis, "cancelAnimationFrame", originalCancel);
+    } else {
+      Reflect.deleteProperty(globalThis, "cancelAnimationFrame");
+    }
+  }
+};
+
 test("notePendingOutputScrollIfEnabled leaves hidden output unmarked when scroll-on-output is disabled", () => {
   const pendingOutputScrollRef = { current: false };
 
@@ -185,11 +217,79 @@ test("writeSessionData flushes xterm writes while the page is hidden", () => {
   });
   flushTerminalSessionFlowAck("session-1");
 
-  assert.deepEqual(writes, [payload]);
+  assert.equal(writes.join(""), payload);
+  assert.deepEqual(writes.map((write) => write.length), [FLOW_CHAR_COUNT_ACK_SIZE, 1]);
   assert.equal(pendingCallbacks.length, 0);
   assert.equal(getFlowController(ctx as never, term).pendingBytes(), 0);
   assert.equal(getDeferredTerminalWriteAckBytes(term), 0);
   assert.equal(acked.reduce((total, bytes) => total + bytes, 0), payload.length);
+  clearTerminalSessionFlowAck("session-1");
+});
+
+test("writeSessionData flushes pending coalesced output with the hidden-page fast path", () => {
+  clearTerminalSessionFlowAck("session-1");
+  const pendingPayload = `${Array.from({ length: 20 }, () => "x".repeat(1000)).join("\n")}\n`;
+  assert.ok(pendingPayload.length > MAX_TERMINAL_PLAIN_WRITE_CHUNK_BYTES);
+  const currentPayload = "current\n";
+  const writes: string[] = [];
+  const pendingCallbacks: Array<() => void> = [];
+  const writeBuffer = {
+    flushSync() {
+      while (pendingCallbacks.length > 0) {
+        pendingCallbacks.shift()?.();
+      }
+    },
+  };
+  const term = {
+    buffer: { active: { type: "normal" } },
+    _core: { _writeBuffer: writeBuffer },
+    write(data: string, callback?: () => void) {
+      writes.push(data);
+      if (callback) pendingCallbacks.push(callback);
+    },
+    scrollToBottom() {},
+  } as unknown as XTerm;
+  const acked: number[] = [];
+  const ctx = {
+    ...createContext(false),
+    isVisibleRef: { current: true },
+    sessionRef: { current: "session-1" },
+    terminalBackend: {
+      ackSessionFlow: (_sessionId: string, bytes: number) => {
+        acked.push(bytes);
+      },
+    },
+  };
+
+  withAnimationFrameQueue((frames) => {
+    withDocumentVisibility("visible", () => {
+      writeSessionData(ctx as never, term, pendingPayload);
+    });
+    assert.equal(frames.length, 1);
+    assert.deepEqual(writes, []);
+
+    withDocumentVisibility("hidden", () => {
+      writeSessionData(ctx as never, term, currentPayload);
+    });
+  });
+  flushTerminalSessionFlowAck("session-1");
+
+  assert.equal(writes.join(""), `${pendingPayload}${currentPayload}`);
+  assert.deepEqual(
+    writes.map((write) => write.length),
+    [
+      MAX_TERMINAL_PLAIN_WRITE_CHUNK_BYTES,
+      pendingPayload.length - MAX_TERMINAL_PLAIN_WRITE_CHUNK_BYTES,
+      currentPayload.length,
+    ],
+  );
+  assert.equal(pendingCallbacks.length, 0);
+  assert.equal(getFlowController(ctx as never, term).pendingBytes(), 0);
+  assert.equal(getDeferredTerminalWriteAckBytes(term), 0);
+  assert.equal(
+    acked.reduce((total, bytes) => total + bytes, 0),
+    pendingPayload.length + currentPayload.length,
+  );
   clearTerminalSessionFlowAck("session-1");
 });
 
