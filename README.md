@@ -40,8 +40,7 @@
 
 ---
 
-<img width="2868" height="1784" alt="netcatty SSH (Window) 2026-04-23 11:19 PM" src="https://github.com/user-attachments/assets/d6df734f-9ebc-452a-8b7d-e8a0fdc9463a" />
-
+<img width="3142" height="1764" alt="Screenshot 2026-07-02 at 22 51 24" src="https://github.com/user-attachments/assets/3116165d-623a-4d3a-a28a-914befb9b72d" />
 
 ---
 
