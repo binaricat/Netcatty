@@ -964,6 +964,15 @@ function canRetryWithEncryptedDefaultKeys(options) {
     (!options._unlockedEncryptedKeys || options._unlockedEncryptedKeys.length === 0);
 }
 
+function canReuseExistingSession(options) {
+  if (!options.sourceSessionId || options.x11Forwarding) return false;
+  return Boolean(findReusableSession(sessions, options.sourceSessionId, {
+    hostname: options.hostname,
+    port: options.port || 22,
+    username: options.username || "root",
+  }));
+}
+
 function sendFinalStartFailureExit(event, options, err) {
   const sessionId = options.sessionId;
   if (!sessionId || event.sender?.isDestroyed?.()) return;
@@ -977,11 +986,25 @@ function sendFinalStartFailureExit(event, options, err) {
 
 async function startSSHSessionWrapper(event, options) {
   let retryableEncryptedKeys = [];
+  let loadedRetryableEncryptedKeys = false;
   let shouldSuppressInitialAuthExit = false;
-  if (canRetryWithEncryptedDefaultKeys(options)) {
+  const canRetryEncryptedDefaults = canRetryWithEncryptedDefaultKeys(options);
+  const mayReuseExistingSession = canRetryEncryptedDefaults && canReuseExistingSession(options);
+  const loadRetryableEncryptedKeys = async () => {
     const allKeysWithEncrypted = await findAllDefaultPrivateKeysFromHelper({ includeEncrypted: true });
     retryableEncryptedKeys = allKeysWithEncrypted.filter(k => k.isEncrypted);
+    loadedRetryableEncryptedKeys = true;
+    return retryableEncryptedKeys;
+  };
+
+  if (canRetryEncryptedDefaults && !mayReuseExistingSession) {
+    await loadRetryableEncryptedKeys();
     shouldSuppressInitialAuthExit = retryableEncryptedKeys.length > 0;
+  } else if (mayReuseExistingSession) {
+    // Let Copy Tab reuse an authenticated transport without waiting on key
+    // discovery. If reuse falls back to a fresh connection and auth fails, the
+    // catch path below lazily loads encrypted keys before deciding final failure.
+    shouldSuppressInitialAuthExit = true;
   }
 
   try {
@@ -995,8 +1018,10 @@ async function startSSHSessionWrapper(event, options) {
     if (isAuthError) {
       // Check if there are encrypted default keys we haven't tried yet
       // Only offer retry if no unlocked keys were provided in this attempt
-      if (canRetryWithEncryptedDefaultKeys(options)) {
-        const encryptedKeys = retryableEncryptedKeys;
+      if (canRetryEncryptedDefaults) {
+        const encryptedKeys = loadedRetryableEncryptedKeys
+          ? retryableEncryptedKeys
+          : await loadRetryableEncryptedKeys();
 
         if (encryptedKeys.length > 0) {
           console.log('[SSH] Auth failed, found encrypted default keys. Requesting passphrases for retry...');

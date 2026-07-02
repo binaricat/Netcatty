@@ -43,6 +43,31 @@ function nextTick() {
   return new Promise((resolve) => setImmediate(resolve));
 }
 
+function makeReusableSourceSession(endpoint) {
+  const conn = new EventEmitter();
+  conn._sock = { destroyed: false };
+  conn._remoteVer = "OpenSSH_test";
+  conn.shell = () => { throw new Error("Not connected"); };
+  conn.end = () => {};
+  conn.destroy = () => {};
+  const stream = createShellStream();
+  return {
+    conn,
+    stream,
+    chainConnections: [],
+    connRef: { count: 1, conn, chainConnections: [] },
+    webContentsId: 1,
+    zmodemSentry: { cancel() {} },
+    hostname: endpoint.hostname,
+    username: endpoint.username,
+    _reuseEndpoint: {
+      hostname: endpoint.hostname,
+      port: endpoint.port || 22,
+      username: endpoint.username,
+    },
+  };
+}
+
 function loadBridgeWithAuthRetryMocks(t, options = {}) {
   const bridgePath = require.resolve("./sshBridge.cjs");
   const startSessionPath = require.resolve("./sshBridge/startSession.cjs");
@@ -250,6 +275,57 @@ test("stale close from failed first attempt does not close successful retry sess
   );
 });
 
+test("stale error from failed first attempt does not mark successful retry session failed", async (t) => {
+  const sessions = new Map();
+  const { bridge, MockSSHClient } = loadBridgeWithAuthRetryMocks(t, {
+    connectEvents: ["auth-error", "ready"],
+    encryptedKeys: [
+      {
+        keyPath: "/Users/test/.ssh/id_ed25519",
+        keyName: "id_ed25519",
+        isEncrypted: true,
+      },
+    ],
+    passphraseResult: {
+      cancelled: false,
+      keys: [
+        {
+          keyPath: "/Users/test/.ssh/id_ed25519",
+          keyName: "id_ed25519",
+          privateKey: "UNLOCKED_PRIVATE_KEY",
+          passphrase: "secret",
+        },
+      ],
+    },
+  });
+  const ipcMain = makeIpcMain();
+  bridge.init({ sessions, electronModule: {} });
+  bridge.registerHandlers(ipcMain);
+  const start = ipcMain.handlers.get("netcatty:start");
+  const sender = makeSender();
+
+  await start(
+    { sender },
+    {
+      sessionId: "stale-error-session",
+      hostname: "example.test",
+      username: "alice",
+      port: 22,
+      knownHosts: [],
+    },
+  );
+
+  assert.equal(MockSSHClient.instances.length, 2);
+  assert.equal(sessions.has("stale-error-session"), true);
+
+  const err = new Error("late error from failed first attempt");
+  err.level = "client-socket";
+  MockSSHClient.instances[0].emit("error", err);
+  await nextTick();
+
+  assert.equal(sessions.get("stale-error-session")._transportError, undefined);
+});
+
 test("jump-host auth failure does not emit exit before encrypted-key retry success", async (t) => {
   const { bridge, MockSSHClient } = loadBridgeWithAuthRetryMocks(t, {
     connectEvents: ["auth-error", "ready", "ready"],
@@ -299,6 +375,128 @@ test("jump-host auth failure does not emit exit before encrypted-key retry succe
     )),
     false,
   );
+});
+
+test("fresh fallback after reuse failure still retries encrypted default key", async (t) => {
+  const events = [];
+  const sessions = new Map([
+    [
+      "source",
+      makeReusableSourceSession({
+        hostname: "example.test",
+        username: "alice",
+        port: 22,
+      }),
+    ],
+  ]);
+  const { bridge, MockSSHClient } = loadBridgeWithAuthRetryMocks(t, {
+    connectEvents: ["auth-error", "ready"],
+    encryptedKeys: [
+      {
+        keyPath: "/Users/test/.ssh/id_ed25519",
+        keyName: "id_ed25519",
+        isEncrypted: true,
+      },
+    ],
+    passphraseResult: {
+      cancelled: false,
+      keys: [
+        {
+          keyPath: "/Users/test/.ssh/id_ed25519",
+          keyName: "id_ed25519",
+          privateKey: "UNLOCKED_PRIVATE_KEY",
+          passphrase: "secret",
+        },
+      ],
+    },
+    onPassphraseRequest: () => events.push("passphrase-request"),
+  });
+  const ipcMain = makeIpcMain();
+  bridge.init({ sessions, electronModule: {} });
+  bridge.registerHandlers(ipcMain);
+  const start = ipcMain.handlers.get("netcatty:start");
+  const sender = makeSender(events);
+
+  const result = await start(
+    { sender },
+    {
+      sessionId: "reuse-fallback-retry-session",
+      sourceSessionId: "source",
+      hostname: "example.test",
+      username: "alice",
+      port: 22,
+      knownHosts: [],
+    },
+  );
+
+  assert.deepEqual(result, { sessionId: "reuse-fallback-retry-session" });
+  assert.equal(MockSSHClient.instances.length, 2);
+  assert.equal(events.includes("passphrase-request"), true);
+  assert.equal(
+    sender.sent.some((message) => (
+      message.channel === "netcatty:connection-reuse:fallback"
+      && message.payload.sessionId === "reuse-fallback-retry-session"
+    )),
+    true,
+  );
+  assert.equal(
+    sender.sent.some((message) => (
+      message.channel === "netcatty:exit"
+      && message.payload.sessionId === "reuse-fallback-retry-session"
+    )),
+    false,
+  );
+});
+
+test("fresh fallback after reuse failure without encrypted keys emits one final exit", async (t) => {
+  const sessions = new Map([
+    [
+      "source",
+      makeReusableSourceSession({
+        hostname: "example.test",
+        username: "alice",
+        port: 22,
+      }),
+    ],
+  ]);
+  const { bridge } = loadBridgeWithAuthRetryMocks(t, {
+    connectEvents: ["auth-error"],
+    encryptedKeys: [],
+  });
+  const ipcMain = makeIpcMain();
+  bridge.init({ sessions, electronModule: {} });
+  bridge.registerHandlers(ipcMain);
+  const start = ipcMain.handlers.get("netcatty:start");
+  const sender = makeSender();
+
+  await assert.rejects(
+    () => start(
+      { sender },
+      {
+        sessionId: "reuse-fallback-failed-session",
+        sourceSessionId: "source",
+        hostname: "example.test",
+        username: "alice",
+        port: 22,
+        knownHosts: [],
+      },
+    ),
+    /All configured authentication methods failed/,
+  );
+
+  assert.equal(
+    sender.sent.some((message) => (
+      message.channel === "netcatty:connection-reuse:fallback"
+      && message.payload.sessionId === "reuse-fallback-failed-session"
+    )),
+    true,
+  );
+  const exits = sender.sent.filter((message) => (
+    message.channel === "netcatty:exit"
+    && message.payload.sessionId === "reuse-fallback-failed-session"
+  ));
+  assert.equal(exits.length, 1);
+  assert.equal(exits[0].payload.reason, "error");
 });
 
 test("stale close from failed encrypted-key retry does not stop successful retry log stream", async (t) => {

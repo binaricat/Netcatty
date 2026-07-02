@@ -1256,13 +1256,14 @@ function createStartSessionApi(ctx) {
               // ssh2 closes every channel when the transport errors, so each
               // affected session (the owner and any reused siblings) gets the
               // flag and reports the error via its own stream close handler.
-              if (sessions.has(sessionId)) {
-                const session = sessions.get(sessionId);
-                if (session) session._transportError = err.message;
+              const currentSession = sessions.get(sessionId);
+              const ownsCurrentSession = Boolean(connRef && currentSession?.connRef === connRef);
+              if (ownsCurrentSession) {
+                currentSession._transportError = err.message;
               }
               if (connRef) {
                 for (const sibling of sessions.values()) {
-                  if (sibling !== sessions.get(sessionId) && sibling.connRef === connRef) {
+                  if (sibling !== currentSession && sibling.connRef === connRef) {
                     sibling._transportError = err.message;
                   }
                 }
