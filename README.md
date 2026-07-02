@@ -78,7 +78,6 @@ Watch Catty Agent orchestrate a Docker Swarm cluster across two servers in one c
 - [What is Netcatty](#what-is-netcatty)
 - [Why Netcatty](#why-netcatty)
 - [Features](#features)
-- [Demos](#demos)
 - [Screenshots](#screenshots)
   - [Main Window](#main-window)
   - [Vault Views](#vault-views)
