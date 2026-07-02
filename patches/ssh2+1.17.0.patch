@@ -1,3 +1,32 @@
+diff --git a/node_modules/ssh2/lib/agent.js b/node_modules/ssh2/lib/agent.js
+index bb495d1..c0d5def 100644
+--- a/node_modules/ssh2/lib/agent.js
++++ b/node_modules/ssh2/lib/agent.js
+@@ -711,7 +711,10 @@ const AgentProtocol = (() => {
+                 hash: undefined,
+               };
+               let ctx;
+-              if (pubKey.type === 'ssh-rsa') {
++              if (pubKey.type === 'ssh-rsa'
++                  || pubKey.type === 'ssh-rsa-cert-v01@openssh.com'
++                  || pubKey.type === 'rsa-sha2-256-cert-v01@openssh.com'
++                  || pubKey.type === 'rsa-sha2-512-cert-v01@openssh.com') {
+                 if (flagsVal & SSH_AGENT_RSA_SHA2_256) {
+                   ctx = 'rsa-sha2-256';
+                   flags.hash = 'sha256';
+@@ -781,7 +784,11 @@ const AgentProtocol = (() => {
+       if (pubKey instanceof Error)
+         throw new Error('Invalid public key argument');
+ 
+-      if (pubKey.type === 'ssh-rsa' && options) {
++      if ((pubKey.type === 'ssh-rsa'
++           || pubKey.type === 'ssh-rsa-cert-v01@openssh.com'
++           || pubKey.type === 'rsa-sha2-256-cert-v01@openssh.com'
++           || pubKey.type === 'rsa-sha2-512-cert-v01@openssh.com')
++          && options) {
+         switch (options.hash) {
+           case 'sha256':
+             flags = SSH_AGENT_RSA_SHA2_256;
 diff --git a/node_modules/ssh2/lib/client.js b/node_modules/ssh2/lib/client.js
 index 7291c2c..8943c9a 100644
 --- a/node_modules/ssh2/lib/client.js
@@ -742,12 +771,14 @@ diff --git a/node_modules/ssh2/lib/protocol/constants.js b/node_modules/ssh2/lib
 index ad77592..4b3f71a 100644
 --- a/node_modules/ssh2/lib/protocol/constants.js
 +++ b/node_modules/ssh2/lib/protocol/constants.js
-@@ -160,4 +160,5 @@ const COMPAT = {
+@@ -160,6 +160,7 @@ const COMPAT = {
    DYN_RPORT_BUG: 1 << 2,
    BUG_DHGEX_LARGE: 1 << 3,
    IMPLY_RSA_SHA2_SIGALGS: 1 << 4,
 +  COMWARE_DHGEX_1024: 1 << 5,
  };
+ 
+ module.exports = {
 @@ -330,6 +331,7 @@ module.exports = {
    COMPAT_CHECKS: [
      [ 'Cisco-1.25', COMPAT.BAD_DHGEX ],
@@ -775,3 +806,99 @@ index 811e631..4b5f792 100644
        this._maxBits = GEX_MAX_BITS;
      }
      start() {
+diff --git a/node_modules/ssh2/lib/protocol/keyParser.js b/node_modules/ssh2/lib/protocol/keyParser.js
+index a276c1a..df123fd 100644
+--- a/node_modules/ssh2/lib/protocol/keyParser.js
++++ b/node_modules/ssh2/lib/protocol/keyParser.js
+@@ -1186,6 +1186,26 @@ function OpenSSH_Public(type, comment, pubPEM, pubSSH, algo) {
+   this[SYM_DECRYPTED] = false;
+ }
+ OpenSSH_Public.prototype = BaseKey;
++
++function isOpenSSHCertType(type) {
++  return (typeof type === 'string'
++          && /-cert-v0[01]@openssh\.com$/.test(type));
++}
++
++function getOpenSSHCertBaseType(type) {
++  if (!isOpenSSHCertType(type))
++    return type;
++
++  const baseType = type.replace(/-cert-v0[01]@openssh\.com$/, '');
++  switch (baseType) {
++    case 'rsa-sha2-256':
++    case 'rsa-sha2-512':
++      return 'ssh-rsa';
++    default:
++      return baseType;
++  }
++}
++
+ {
+   let regexp;
+   if (eddsaSupported)
+@@ -1210,7 +1230,13 @@ OpenSSH_Public.prototype = BaseKey;
+     if (type === undefined || type.indexOf(baseType) !== 0)
+       return new Error('Malformed OpenSSH public key');
+ 
+-    return parseDER(data, baseType, comment, fullType);
++    return parseDER(
++      data,
++      baseType,
++      comment,
++      fullType,
++      isOpenSSHCertType(fullType) ? data : undefined
++    );
+   };
+ }
+ 
+@@ -1309,7 +1335,7 @@ RFC4716_Public.prototype = BaseKey;
+ }
+ 
+ 
+-function parseDER(data, baseType, comment, fullType) {
++function parseDER(data, baseType, comment, fullType, originalPubSSH) {
+   if (!isSupportedKeyType(baseType))
+     return new Error(`Unsupported OpenSSH public key type: ${baseType}`);
+ 
+@@ -1317,6 +1343,10 @@ function parseDER(data, baseType, comment, fullType) {
+   let oid;
+   let pubPEM = null;
+   let pubSSH = null;
++  const isCertificate = isOpenSSHCertType(fullType);
++
++  if (isCertificate && !skipFields(data, 1))
++    return new Error('Malformed OpenSSH public key');
+ 
+   switch (baseType) {
+     case 'ssh-rsa': {
+@@ -1387,7 +1417,13 @@ function parseDER(data, baseType, comment, fullType) {
+       return new Error(`Unsupported OpenSSH public key type: ${baseType}`);
+   }
+ 
+-  return new OpenSSH_Public(fullType, comment, pubPEM, pubSSH, algo);
++  return new OpenSSH_Public(
++    fullType,
++    comment,
++    pubPEM,
++    isCertificate ? Buffer.from(originalPubSSH || data) : pubSSH,
++    algo
++  );
+ }
+ 
+ function isSupportedKeyType(type) {
+@@ -1460,7 +1496,13 @@ function parseKey(data, passphrase) {
+     if (type !== undefined) {
+       data = binaryKeyParser.readRaw();
+       if (data !== undefined) {
+-        ret = parseDER(data, type, '', type);
++        ret = parseDER(
++          data,
++          getOpenSSHCertBaseType(type),
++          '',
++          type,
++          isOpenSSHCertType(type) ? origBuffer : undefined
++        );
+         // Ignore potentially useless errors in case the data was not actually
+         // in the binary format
+         if (ret instanceof Error)
