@@ -1305,7 +1305,15 @@ function createStartSessionApi(ctx) {
             }
 
             sendProgress(totalHops, totalHops, options.hostname, 'error', err.message);
-            safeSend(contents, "netcatty:exit", { sessionId, exitCode: 1, error: err.message, reason: "error" });
+            const suppressPreShellAuthExit = Boolean(options._suppressPreShellAuthExit && isAuthError);
+            if (suppressPreShellAuthExit) {
+              log("suppressing pre-shell auth exit for wrapper-managed retry", {
+                sessionId,
+                hostname: options.hostname,
+              });
+            } else {
+              safeSend(contents, "netcatty:exit", { sessionId, exitCode: 1, error: err.message, reason: "error" });
+            }
             sessionLogStreamManager.stopStream(sessionId, ownerLogStreamToken);
             if (detachX11Forwarding) {
               detachX11Forwarding();
@@ -1345,11 +1353,14 @@ function createStartSessionApi(ctx) {
 
           conn.once("close", () => {
             const contents = event.sender;
+            const currentSession = sessions.get(sessionId);
+            const ownsCurrentSession = Boolean(connRef && currentSession?.connRef === connRef);
             log("connection closed", {
               sessionId,
               hostname: options.hostname,
               settled,
-              transportError: sessions.get(sessionId)?._transportError,
+              staleForCurrentSession: Boolean(currentSession && !ownsCurrentSession),
+              transportError: ownsCurrentSession ? currentSession?._transportError : undefined,
             });
             if (!settled) {
               sendProgress(totalHops, totalHops, options.hostname, 'error', `Connection to ${options.hostname} closed unexpectedly`);
@@ -1360,8 +1371,8 @@ function createStartSessionApi(ctx) {
             // close then no-ops because the session is already gone. Reused
             // sibling channels each clean themselves up via their own stream
             // "close" (ssh2 closes every channel when the transport drops).
-            if (sessions.has(sessionId)) {
-              const session = sessions.get(sessionId);
+            if (ownsCurrentSession) {
+              const session = currentSession;
               const transportError = session?._transportError;
               if (transportError) {
                 // A transport error was recorded — report it as an error exit
