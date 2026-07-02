@@ -3,8 +3,30 @@ import test from "node:test";
 import { readFileSync } from "node:fs";
 
 import {
+  flushTerminalWriteBufferBypassingTimers,
   forceTerminalRepaintBypassingAnimationFrame,
+  shouldFlushTerminalWritesForHiddenPage,
 } from "./terminalUnfocusedRepaint.ts";
+
+const withDocumentVisibility = (visibilityState: "visible" | "hidden", run: () => void) => {
+  const original = Object.getOwnPropertyDescriptor(globalThis, "document");
+  Object.defineProperty(globalThis, "document", {
+    configurable: true,
+    value: {
+      visibilityState,
+      hasFocus: () => visibilityState === "visible",
+    },
+  });
+  try {
+    run();
+  } finally {
+    if (original) {
+      Object.defineProperty(globalThis, "document", original);
+    } else {
+      Reflect.deleteProperty(globalThis, "document");
+    }
+  }
+};
 
 test("isTerminalWindowUnfocusedButVisible checks visible page without focus", () => {
   const source = readFileSync(
@@ -38,6 +60,34 @@ test("forceTerminalRepaintBypassingAnimationFrame refreshes alternate-screen vie
   assert.equal(renderRowsCalled, true);
 });
 
+test("shouldFlushTerminalWritesForHiddenPage only flushes visible panes on hidden pages", () => {
+  withDocumentVisibility("hidden", () => {
+    assert.equal(shouldFlushTerminalWritesForHiddenPage(true), true);
+    assert.equal(shouldFlushTerminalWritesForHiddenPage(false), false);
+  });
+  withDocumentVisibility("visible", () => {
+    assert.equal(shouldFlushTerminalWritesForHiddenPage(true), false);
+  });
+});
+
+test("flushTerminalWriteBufferBypassingTimers drains xterm's internal write buffer", () => {
+  let flushed = false;
+  const writeBuffer = {
+    flushSync() {
+      flushed = this === writeBuffer;
+    },
+  };
+  const term = {
+    _core: {
+      _writeBuffer: writeBuffer,
+    },
+  };
+
+  flushTerminalWriteBufferBypassingTimers(term as never);
+
+  assert.equal(flushed, true);
+});
+
 test("maybeFlushTerminalWriteCoalescerWhenUnfocused throttles coalescer flushes", () => {
   const source = readFileSync(
     new URL("./terminalUnfocusedRepaint.ts", import.meta.url),
@@ -63,8 +113,18 @@ test("writeSessionData schedules a throttled coalescer flush when unfocused", ()
   );
   assert.match(
     source,
-    /maybeFlushTerminalWriteCoalescerWhenUnfocused\(\s*term,\s*ctx\.isVisibleRef\?\.current !== false,\s*\)/,
+    /maybeFlushTerminalWriteCoalescerWhenUnfocused\(\s*term,\s*isPaneVisible,\s*\)/,
   );
+});
+
+test("writeSessionData bypasses animation-frame coalescing on hidden pages", () => {
+  const source = readFileSync(
+    new URL("./terminalSessionAttachment.ts", import.meta.url),
+    "utf8",
+  );
+  assert.match(source, /shouldFlushTerminalWritesForHiddenPage\(isPaneVisible\)/);
+  assert.match(source, /flushTerminalWriteCoalescer\(term\);[\s\S]*flushTerminalWriteBufferBypassingTimers\(term\);[\s\S]*writeSessionDataImmediate\(ctx, term, data, ingressBytes, \{\s*flushXtermWriteBuffer: true,/);
+  assert.match(source, /const deferFlowAck = !writeOptions\.flushXtermWriteBuffer/);
 });
 
 test("writeSessionDataImmediate schedules unfocused repaint only for visible panes", () => {

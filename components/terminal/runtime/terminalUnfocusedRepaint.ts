@@ -12,9 +12,36 @@ const UNFOCUSED_FLUSH_DEBOUNCE_MS = 67;
 const unfocusedRepaintTimers = new WeakMap<XTerm, ReturnType<typeof setTimeout>>();
 const unfocusedFlushTimers = new WeakMap<XTerm, ReturnType<typeof setTimeout>>();
 
+type XTermWithPrivateWriteBuffer = XTerm & {
+  _core?: {
+    _writeBuffer?: {
+      flushSync?: () => void;
+    };
+  };
+};
+
 export function isTerminalWindowUnfocusedButVisible(): boolean {
   if (typeof document === "undefined") return false;
   return document.visibilityState === "visible" && !document.hasFocus();
+}
+
+export function isTerminalPageHidden(): boolean {
+  if (typeof document === "undefined") return false;
+  return document.visibilityState !== "visible";
+}
+
+export function shouldFlushTerminalWritesForHiddenPage(isPaneVisible: boolean): boolean {
+  return isPaneVisible && isTerminalPageHidden();
+}
+
+export function flushTerminalWriteBufferBypassingTimers(term: XTerm): void {
+  const writeBuffer = (term as XTermWithPrivateWriteBuffer)._core?._writeBuffer;
+  if (typeof writeBuffer?.flushSync !== "function") return;
+  try {
+    writeBuffer.flushSync();
+  } catch {
+    // Best-effort private xterm recovery; normal async writes will continue.
+  }
 }
 
 export function forceTerminalRepaintBypassingAnimationFrame(term: XTerm): void {

@@ -82,6 +82,26 @@ const createContext = (showLineTimestamps: boolean, host: Record<string, unknown
   promptLineBreakStateRef: { current: undefined },
 });
 
+const withDocumentVisibility = (visibilityState: "visible" | "hidden", run: () => void) => {
+  const original = Object.getOwnPropertyDescriptor(globalThis, "document");
+  Object.defineProperty(globalThis, "document", {
+    configurable: true,
+    value: {
+      visibilityState,
+      hasFocus: () => visibilityState === "visible",
+    },
+  });
+  try {
+    run();
+  } finally {
+    if (original) {
+      Object.defineProperty(globalThis, "document", original);
+    } else {
+      Reflect.deleteProperty(globalThis, "document");
+    }
+  }
+};
+
 test("notePendingOutputScrollIfEnabled leaves hidden output unmarked when scroll-on-output is disabled", () => {
   const pendingOutputScrollRef = { current: false };
 
@@ -125,6 +145,52 @@ test("writeSessionData clears renderer backlog while deferring IPC ack", () => {
   assert.equal(flow.pendingBytes(), 0);
   assert.ok(getDeferredTerminalWriteAckBytes(term) > 0);
   clearDeferredTerminalWriteAck(term);
+});
+
+test("writeSessionData flushes xterm writes while the page is hidden", () => {
+  clearTerminalSessionFlowAck("session-1");
+  const payload = "x".repeat(FLOW_CHAR_COUNT_ACK_SIZE + 1);
+  const writes: string[] = [];
+  const pendingCallbacks: Array<() => void> = [];
+  const writeBuffer = {
+    flushSync() {
+      while (pendingCallbacks.length > 0) {
+        pendingCallbacks.shift()?.();
+      }
+    },
+  };
+  const term = {
+    buffer: { active: { type: "normal" } },
+    _core: { _writeBuffer: writeBuffer },
+    write(data: string, callback?: () => void) {
+      writes.push(data);
+      if (callback) pendingCallbacks.push(callback);
+    },
+    scrollToBottom() {},
+  } as unknown as XTerm;
+  const acked: number[] = [];
+  const ctx = {
+    ...createContext(false),
+    isVisibleRef: { current: true },
+    sessionRef: { current: "session-1" },
+    terminalBackend: {
+      ackSessionFlow: (_sessionId: string, bytes: number) => {
+        acked.push(bytes);
+      },
+    },
+  };
+
+  withDocumentVisibility("hidden", () => {
+    writeSessionData(ctx as never, term, payload);
+  });
+  flushTerminalSessionFlowAck("session-1");
+
+  assert.deepEqual(writes, [payload]);
+  assert.equal(pendingCallbacks.length, 0);
+  assert.equal(getFlowController(ctx as never, term).pendingBytes(), 0);
+  assert.equal(getDeferredTerminalWriteAckBytes(term), 0);
+  assert.equal(acked.reduce((total, bytes) => total + bytes, 0), payload.length);
+  clearTerminalSessionFlowAck("session-1");
 });
 
 test("writeSessionData flushes deferred IPC acks before small output can leave the source paused", async () => {
