@@ -62,25 +62,13 @@
 
 Ask Catty Agent to check a server's health, and it runs the right commands, analyzes the output, and gives you a clear summary — all in seconds.
 
-
-
-https://github.com/user-attachments/assets/f819a1b6-8cba-4910-8017-97dfc080b477
-
-
-
-
-
+<img width="1510" height="870" alt="ai-single" src="https://github.com/user-attachments/assets/d3f34e53-8476-4fab-8634-394b931d1ff1" />
 
 #### 🚀 Multi-Host — Docker Swarm Cluster Setup
 
 Watch Catty Agent orchestrate a Docker Swarm cluster across two servers in one conversation. It handles the init, token exchange, and node joining — you just tell it what you want.
 
-
-https://github.com/user-attachments/assets/52fd30b8-9f02-43d4-a3b2-142691e8e3ec
-
-
-
-
+<img width="1515" height="870" alt="ai-muti" src="https://github.com/user-attachments/assets/ca166fc5-65d9-4d7b-951a-962c2ef230d8" />
 
 ---
 
