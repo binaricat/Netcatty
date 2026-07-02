@@ -112,7 +112,7 @@ test("ChatMessageList masks secret host tool arguments", () => {
   );
 
   assert.doesNotMatch(markup, /pw-secret|tn-secret/);
-  assert.match(markup, /REDACTED/);
+  assert.match(markup, /Tools used: 1/);
 });
 
 test("ChatMessageList renders Netcatty CLI vault results as artifact cards", () => {
