@@ -151,76 +151,6 @@ If you regularly work with a fleet of servers, Netcatty is built for speed and f
 
 ---
 
-<a name="demos"></a>
-# Demos
-
-Video previews (stored in `screenshots/gifs/`), rendered inline on GitHub:
-
-### Vault views: grid / list / tree
-Switch between different Vault views to match your workflow: overview in grid, dense scanning in list, and hierarchical navigation in tree.
-
-
-https://github.com/user-attachments/assets/1ff1f3f1-e5ae-40ea-b35a-0e5148c3afeb
-
-
-
-### Split terminals + session management
-Work in multiple sessions at once with split panes. Keep related tasks side-by-side and reduce context switching.
-
-
-
-https://github.com/user-attachments/assets/9c24b519-4b4b-4910-a22a-590d04c9af31
-
-
-
-
-
-### SFTP: drag & drop + built-in editor
-Move files with drag & drop, then edit quickly using the built-in editor without leaving the app.
-
-
-https://github.com/user-attachments/assets/f3afdb36-399d-4330-b9f3-4678f178f6db
-
-
-
-
-### Drag file upload
-Drop files into the app to kick off uploads without hunting through dialogs.
-
-
-
-https://github.com/user-attachments/assets/e1e26f7a-3489-41cc-975e-8dccba56ea85
-
-
-
-
-
-
-### Custom themes
-Make Netcatty yours: customize themes and UI appearance.
-
-
-
-https://github.com/user-attachments/assets/1a6049aa-9a4c-4d52-a13d-0b007a791b00
-
-
-
-
-
-### Keyword highlighting
-Highlight important terminal output so errors, warnings, and key events stand out at a glance.
-
-
-
-https://github.com/user-attachments/assets/1a1db7bd-948b-4f3c-97cd-8fd0cbe7cce7
-
-
-
-
-
-
----
-
 <a name="screenshots"></a>
 # Screenshots
 
@@ -229,29 +159,27 @@ https://github.com/user-attachments/assets/1a1db7bd-948b-4f3c-97cd-8fd0cbe7cce7
 
 The main window is designed for long-running SSH workflows: quick access to sessions, navigation, and core tools in one place.
 
-![Main Window (Dark)](screenshots/main-window-dark.png)
+<img width="1531" height="875" alt="black-grid" src="https://github.com/user-attachments/assets/004b80f6-5bbb-4f14-b8cd-33a0a5913b8c" />
 
-![Main Window (Light)](screenshots/main-window-light.png)
+<img width="1550" height="876" alt="light" src="https://github.com/user-attachments/assets/2b59a999-a25e-4217-944c-9aef0a09f272" />
+
 
 <a name="vault-views"></a>
 ## Vault Views
 
 Organize and navigate your hosts using the view that best fits the moment: grid for overview, list for scanning, tree for structure.
 
-![Vault Grid View](screenshots/vault_grid_view.png)
+<img width="1554" height="882" alt="list" src="https://github.com/user-attachments/assets/03249f15-b5f8-4770-a3c3-d5001636ea00" />
 
-![Vault List View](screenshots/vault_list_view.png)
+<img width="1561" height="878" alt="tree" src="https://github.com/user-attachments/assets/739f7b66-3898-43d0-8dd3-b9b97fd8e8de" />
 
-![Vault Tree View (Dark)](screenshots/treeview-dark.png)
-
-![Vault Tree View (Light)](screenshots/treeview-light.png)
 
 <a name="split-terminals"></a>
 ## Split Terminals
 
 Split panes help you monitor multiple servers/services at the same time (deploy + logs + metrics) without juggling windows.
 
-![Split Windows](screenshots/split-window.png)
+<img width="1560" height="871" alt="split" src="https://github.com/user-attachments/assets/c93a8523-6256-4bb3-8b6e-d599831f2f9f" />
 
 ---
 
@@ -319,25 +247,6 @@ npm install
 
 # Start development mode (Vite + Electron)
 npm run dev
-```
-
-### Project Structure
-
-```
-├── App.tsx                 # Main React application
-├── components/             # React components
-│   ├── Terminal.tsx        # Terminal component
-│   ├── SftpView.tsx        # SFTP browser
-│   ├── VaultView.tsx       # Host management
-│   ├── KeyManager.tsx      # SSH key management
-│   └── ...
-├── application/            # State management & i18n
-├── domain/                 # Domain models & logic
-├── infrastructure/         # Services & adapters
-├── electron/               # Electron main process
-│   ├── main.cjs            # Main entry
-│   └── bridges/            # IPC bridges
-└── public/                 # Static assets & icons
 ```
 
 ---
