@@ -5,13 +5,13 @@
 <h1 align="center">Netcatty</h1>
 
 <p align="center">
-  <strong>现代化 SSH 客户端、SFTP 浏览器 & 终端管理器</strong><br/>
+  <strong>🔥 AI 驱动的 SSH 客户端、SFTP 浏览器 & 终端管理器 🚀</strong><br/>
   <a href="https://netcatty.app"><strong>netcatty.app</strong></a>
 </p>
 
 <p align="center">
   一个基于 Electron、React 和 xterm.js 构建的功能丰富的 SSH 工作空间。<br/>
-  分屏终端、Vault 多视图、SFTP 工作流、自定义主题、关键词高亮 —— 一应俱全。
+  🔥 内置 AI Agent · 分屏终端 · Vault 多视图 · SFTP 工作流 · 自定义主题 —— 一应俱全。
 </p>
 
 <p align="center">
@@ -40,12 +40,42 @@
 
 ---
 
-[![Netcatty 主界面](screenshots/main-window-dark.png)](screenshots/main-window-dark.png)
+<img width="3142" height="1764" alt="Screenshot 2026-07-02 at 22 51 24" src="https://github.com/user-attachments/assets/3116165d-623a-4d3a-a28a-914befb9b72d" />
+
+---
+
+<a name="catty-agent"></a>
+# 🔥 Catty Agent — 你的 IT 运维 AI 搭档
+
+> 🚀 **用 AI 赋能你的日常 IT 运维工作。** Catty Agent 是内置的 AI 助手，能理解你的服务器环境、执行命令，并通过自然对话完成复杂的多主机操作。
+
+### 🔥 Catty Agent 能做什么？
+
+- 🚀 **自然语言管理服务器** —— 直接说出需求，不再需要记忆命令
+- 🔥 **实时服务器诊断** —— 通过对话检查状态、查看日志、监控资源
+- 🚀 **多主机协同** —— 跨多台服务器同时协调任务
+- 🔥 **智能上下文感知** —— 理解你的服务器环境，给出有针对性的回应
+- 🚀 **一键完成复杂操作** —— 搭集群、部署服务，一句话搞定
+
+### 🎬 AI 实战演示
+
+#### 🔥 单主机 —— 智能服务器诊断
+
+让 Catty Agent 检查服务器健康状态，它会自动运行合适的命令、分析输出并给出清晰总结 —— 几秒内完成。
+
+<img width="1510" height="870" alt="ai-single" src="https://github.com/user-attachments/assets/d3f34e53-8476-4fab-8634-394b931d1ff1" />
+
+#### 🚀 多主机 —— Docker Swarm 集群搭建
+
+看 Catty Agent 在一次对话中跨两台服务器编排 Docker Swarm 集群。它负责初始化、令牌交换和节点加入 —— 你只需说出想要的结果。
+
+<img width="1515" height="870" alt="ai-muti" src="https://github.com/user-attachments/assets/ca166fc5-65d9-4d7b-951a-962c2ef230d8" />
 
 ---
 
 # 目录 <!-- omit in toc -->
 
+- [🔥 Catty Agent — AI 搭档](#catty-agent)
 - [Netcatty 是什么](#netcatty-是什么)
 - [为什么是 Netcatty](#为什么是-netcatty)
 - [功能特性](#功能特性)
@@ -155,29 +185,25 @@ https://github.com/user-attachments/assets/e6516993-ad66-4594-8c28-57426082339b
 
 主界面围绕长期 SSH 工作流设计：把会话、导航和常用工具集中到同一处，减少切换成本。
 
-![主界面（深色）](screenshots/main-window-dark.png)
+<img width="1531" height="875" alt="black-grid" src="https://github.com/user-attachments/assets/004b80f6-5bbb-4f14-b8cd-33a0a5913b8c" />
 
-![主界面（浅色）](screenshots/main-window-light.png)
+<img width="1550" height="876" alt="light" src="https://github.com/user-attachments/assets/2b59a999-a25e-4217-944c-9aef0a09f272" />
 
 <a name="vault-视图"></a>
 ## Vault 视图
 
 用更适合当前任务的方式管理与浏览主机：网格看全局，列表做筛选，树形做整理与层级导航。
 
-![Vault 网格视图](screenshots/vault_grid_view.png)
+<img width="1554" height="882" alt="list" src="https://github.com/user-attachments/assets/03249f15-b5f8-4770-a3c3-d5001636ea00" />
 
-![Vault 列表视图](screenshots/vault_list_view.png)
-
-![Vault 树形视图（深色）](screenshots/treeview-dark.png)
-
-![Vault 树形视图（浅色）](screenshots/treeview-light.png)
+<img width="1561" height="878" alt="tree" src="https://github.com/user-attachments/assets/739f7b66-3898-43d0-8dd3-b9b97fd8e8de" />
 
 <a name="分屏终端"></a>
-## 分屏终端
+## 分割终端
 
 分屏适合同时处理多个任务（例如部署 + 日志 + 排障），不用频繁切换窗口。
 
-![分屏窗口](screenshots/split-window.png)
+<img width="1560" height="871" alt="split" src="https://github.com/user-attachments/assets/c93a8523-6256-4bb3-8b6e-d599831f2f9f" />
 
 ---
 
@@ -219,6 +245,16 @@ Netcatty 会自动识别并在主机列表中展示对应的系统图标：
 
 > **macOS 用户注意：** 当前发布版本应已完成代码签名和公证。如果 Gatekeeper 仍然提示风险，请确认您下载的是 GitHub Releases 中的最新官方构建。
 
+### Nix / NixOS
+
+Netcatty 提供了一个 flake，为 Nix 和 NixOS 用户封装了官方 Linux AppImage 发行版：
+
+```bash
+nix run github:binaricat/Netcatty
+```
+
+声明式安装时，将 Netcatty flake 添加为输入，并在 NixOS 或 Home Manager 的软件包列表中使用 `inputs.netcatty.packages.${pkgs.system}.default`。
+
 ### 前置条件
 - Node.js 18+ 和 npm
 - macOS、Windows 10+ 或 Linux
@@ -235,25 +271,6 @@ npm install
 
 # 启动开发模式（Vite + Electron）
 npm run dev
-```
-
-### 项目结构
-
-```
-├── App.tsx                 # 主 React 应用
-├── components/             # React 组件
-│   ├── Terminal.tsx        # 终端组件
-│   ├── SftpView.tsx        # SFTP 浏览器
-│   ├── VaultView.tsx       # 主机管理
-│   ├── KeyManager.tsx      # SSH 密钥管理
-│   └── ...
-├── application/            # 状态管理 & 国际化
-├── domain/                 # 领域模型 & 逻辑
-├── infrastructure/         # 服务 & 适配器
-├── electron/               # Electron 主进程
-│   ├── main.cjs            # 主入口
-│   └── bridges/            # IPC 桥接
-└── public/                 # 静态资源 & 图标
 ```
 
 ---
