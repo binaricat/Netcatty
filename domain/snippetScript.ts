@@ -55,9 +55,9 @@ async function main() {
   nct.log('[1/12] waitForPrompt');
   await nct.screen.waitForPrompt(CONFIG.PROMPT_TIMEOUT_MS);
 
-  nct.log('[2/12] sendLine + waitFor literal');
+  nct.log('[2/12] sendLine + waitForText');
   await nct.screen.sendLine(\`echo "\${tag}_BOOTSTRAP_OK"\`);
-  await nct.screen.waitFor(\`\${tag}_BOOTSTRAP_OK\`, CONFIG.STEP_TIMEOUT_MS);
+  await nct.screen.waitForText(\`\${tag}_BOOTSTRAP_OK\`, CONFIG.STEP_TIMEOUT_MS);
 
   nct.log('[3/12] waitForAny');
   await nct.screen.sendLine('echo ANY_CHECK && uname -s');
@@ -71,11 +71,11 @@ async function main() {
   nct.log('[5/12] send raw + Enter');
   await nct.screen.send(\`echo -n "\${tag}_RAW"\`);
   await nct.screen.sendLine('');
-  await nct.screen.waitFor(\`\${tag}_RAW\`, CONFIG.STEP_TIMEOUT_MS);
+  await nct.screen.waitForText(\`\${tag}_RAW\`, CONFIG.STEP_TIMEOUT_MS);
 
-  nct.log('[6/12] waitFor regex');
+  nct.log('[6/12] waitForRegex');
   await nct.screen.sendLine(\`echo BUILD_ID=\${tag}\`);
-  await nct.screen.waitFor(new RegExp(\`BUILD_ID=\${tag}\`), CONFIG.STEP_TIMEOUT_MS);
+  await nct.screen.waitForRegex(new RegExp(\`BUILD_ID=\${tag}\`), CONFIG.STEP_TIMEOUT_MS);
 
   nct.log('[7/12] session.sleep / nct.sleep');
   await nct.session.sleep(800);
@@ -93,7 +93,7 @@ async function main() {
       \`echo "\${tag}_SAMPLE_\${i}_DONE"\`,
     ].join(' && ');
     await nct.screen.sendLine(cmd);
-    await nct.screen.waitFor(new RegExp(\`\${tag}_SAMPLE_\${i}_DONE\`), CONFIG.STEP_TIMEOUT_MS);
+    await nct.screen.waitForRegex(new RegExp(\`\${tag}_SAMPLE_\${i}_DONE\`), CONFIG.STEP_TIMEOUT_MS);
     await nct.screen.waitForPrompt(CONFIG.PROMPT_TIMEOUT_MS);
     nct.progress.step(\`sample \${i}/\${CONFIG.SAMPLE_COUNT}\`);
     nct.log(\`sample \${i}/\${CONFIG.SAMPLE_COUNT} ok\`);
@@ -114,7 +114,7 @@ async function main() {
     nct.log('[10/12] startLog / stopLog');
     await nct.session.startLog(\`./netcatty-it-\${tag}.log\`);
     await nct.screen.sendLine(\`echo "\${tag}_LOGGED"\`);
-    await nct.screen.waitFor(\`\${tag}_LOGGED\`, CONFIG.STEP_TIMEOUT_MS);
+    await nct.screen.waitForText(\`\${tag}_LOGGED\`, CONFIG.STEP_TIMEOUT_MS);
     await nct.session.stopLog();
   } else {
     nct.log('[10/12] startLog/stopLog skipped');
@@ -145,7 +145,7 @@ async function main() {
   }
 
   await nct.screen.sendLine(\`echo "=== \${tag} ALL_PASSED ==="\`);
-  await nct.screen.waitFor(\`\${tag} ALL_PASSED\`, CONFIG.STEP_TIMEOUT_MS);
+  await nct.screen.waitForText(\`\${tag} ALL_PASSED\`, CONFIG.STEP_TIMEOUT_MS);
   nct.log('=== Netcatty Integration Test PASSED ===');
 }
 
@@ -155,7 +155,8 @@ await main();
 export const DEFAULT_SCRIPT_TEMPLATE = `// Netcatty automation script - async JS in the active terminal session
 //
 // nct.screen.waitForPrompt(ms?)          wait for shell prompt (# root / $ user)
-// nct.screen.waitFor(pattern, ms?)         wait for output (string or /regex/, default 30s)
+// nct.screen.waitForText(text, ms?)       wait for exact output text
+// nct.screen.waitForRegex(pattern, ms?)   wait for regex output, including multiline
 // nct.screen.waitForAny([patterns], ms?) wait until any pattern matches
 // nct.screen.sendLine(cmd)                type command + Enter; send(text) raw keys only
 // nct.screen.getText(start?, end?) | clear()

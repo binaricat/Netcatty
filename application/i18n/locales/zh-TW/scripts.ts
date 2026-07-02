@@ -9,7 +9,7 @@ export const zhTWScriptsMessages = {
   'scripts.trigger.manual': '手動執行',
   'scripts.trigger.onConnect': '連線時執行',
   'scripts.trigger.onOutput': '輸出比對時執行',
-  'scripts.trigger.onOutputHint': '僅在伺服器端輸出比對到正規表示式時觸發（會忽略本機按鍵回顯）。未設定目標主機時，對目前已連線的工作階段生效；設定目標後僅監聽對應主機。進入備用畫面的應用程式（如 vim、htop）期間不會觸發。本 session 有其他指令碼執行期間會抑制；指令碼結束後再檢查 buffer。流程內等待請用 nct.screen.waitFor。',
+  'scripts.trigger.onOutputHint': '僅在伺服器端輸出比對到正規表示式時觸發（會忽略本機按鍵回顯）。未設定目標主機時，對目前已連線的工作階段生效；設定目標後僅監聽對應主機。進入備用畫面的應用程式（如 vim、htop）期間不會觸發。本 session 有其他指令碼執行期間會抑制；指令碼結束後再檢查 buffer。流程內等待一般文字用 nct.screen.waitForText，正規表示式用 nct.screen.waitForRegex。',
   'scripts.actions.save': '儲存',
   'scripts.actions.runNow': '立即執行',
   'scripts.actions.openEditor': '彈出視窗編輯',

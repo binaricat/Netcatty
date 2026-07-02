@@ -5,15 +5,31 @@ type CompletionDisposable = { dispose: () => void };
 const NCT_API_COMPLETIONS = [
   {
     label: 'nct.screen.waitForPrompt',
+    sortText: 'nct.screen.waitFor.00.prompt',
     insertText: 'await nct.screen.waitForPrompt(${1:30000});',
     detail: 'Wait for shell prompt',
     documentation: 'Wait until an interactive shell prompt appears (# for root, $ for regular user).',
   },
   {
+    label: 'nct.screen.waitForText',
+    sortText: 'nct.screen.waitFor.01.text',
+    insertText: "await nct.screen.waitForText('${1:text}', ${2:30000});",
+    detail: 'Wait for literal text',
+    documentation: 'Wait until the exact text appears in session output. Regex characters are treated as normal text.',
+  },
+  {
+    label: 'nct.screen.waitForRegex',
+    sortText: 'nct.screen.waitFor.02.regex',
+    insertText: "await nct.screen.waitForRegex('${1:pattern}', ${2:30000});",
+    detail: 'Wait for regex match',
+    documentation: 'Wait until session output matches a regular expression. String patterns use dotAll matching for multiline output.',
+  },
+  {
     label: 'nct.screen.waitFor',
-    insertText: "await nct.screen.waitFor('${1:pattern}', ${2:30000});",
-    detail: 'Wait for terminal output',
-    documentation: 'Wait until the session output matches a literal string or /regex/flags pattern.',
+    sortText: 'nct.screen.waitFor.03.legacy',
+    insertText: "await nct.screen.waitFor('${1:text}', ${2:30000});",
+    detail: 'Wait for terminal output (legacy)',
+    documentation: 'Compatibility helper. Plain string patterns are literal; legacy /regex/flags strings still work, but prefer waitForText for text or waitForRegex for regular expressions.',
   },
   {
     label: 'nct.screen.waitForAny',
@@ -162,6 +178,7 @@ export function registerNctMonacoCompletionProvider(monaco: Monaco): CompletionD
           insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
           detail: item.detail,
           documentation: item.documentation,
+          sortText: item.sortText ?? item.label,
           range,
         }));
 

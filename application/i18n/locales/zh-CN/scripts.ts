@@ -9,7 +9,7 @@ export const zhCNScriptsMessages = {
   'scripts.trigger.manual': '手动运行',
   'scripts.trigger.onConnect': '连接时运行',
   'scripts.trigger.onOutput': '输出匹配时运行',
-  'scripts.trigger.onOutputHint': '仅在服务端输出匹配正则时触发（会忽略本地按键回显）。未配置目标主机时，对当前已连接会话生效；配置目标后仅监听对应主机。进入备用屏幕的应用（如 vim、htop）期间不会触发。本 session 有其他脚本运行期间会抑制；脚本结束后再检查 buffer。流程内等待请用 nct.screen.waitFor。',
+  'scripts.trigger.onOutputHint': '仅在服务端输出匹配正则时触发（会忽略本地按键回显）。未配置目标主机时，对当前已连接会话生效；配置目标后仅监听对应主机。进入备用屏幕的应用（如 vim、htop）期间不会触发。本 session 有其他脚本运行期间会抑制；脚本结束后再检查 buffer。流程内等待普通文本用 nct.screen.waitForText，正则用 nct.screen.waitForRegex。',
   'scripts.actions.save': '保存',
   'scripts.actions.runNow': '立即运行',
   'scripts.actions.openEditor': '弹窗编辑',

@@ -5,6 +5,7 @@ const assert = require("node:assert/strict");
 
 const {
   VAULT_HOSTS_VS_NOTES_GUIDANCE,
+  VAULT_SCRIPTS_GUIDANCE,
   appendVaultAgentGuidance,
 } = require("./vaultAgentGuidance.cjs");
 
@@ -28,4 +29,9 @@ test("appendVaultAgentGuidance appends guidance once", () => {
 
   const twice = appendVaultAgentGuidance(once);
   assert.equal(twice, once);
+});
+
+test("VAULT_SCRIPTS_GUIDANCE prefers explicit wait APIs", () => {
+  assert.match(VAULT_SCRIPTS_GUIDANCE, /waitForText\/waitForRegex/);
+  assert.doesNotMatch(VAULT_SCRIPTS_GUIDANCE, /sendLine,\s*waitFor,\s*dialogs/);
 });

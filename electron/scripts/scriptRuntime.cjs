@@ -179,7 +179,9 @@ function createScriptRuntime(deps) {
     }
   }
 
-  async function waitForWithRecovery(pattern, timeoutMs = 30000) {
+  async function waitForWithRecovery(pattern, timeoutMs = 30000, options = {}) {
+    const waitMethod = options.waitMethod || "waitFor";
+    const operationLabel = options.operationLabel || waitMethod;
     const patternLabel = pattern instanceof RegExp ? pattern.source : String(pattern);
     let stepTracked = false;
     while (true) {
@@ -187,12 +189,12 @@ function createScriptRuntime(deps) {
         throw new Error("Script stopped");
       }
       if (!stepTracked) {
-        await trackStep(`waitFor ${truncateActivityLabel(patternLabel, 60)}`);
+        await trackStep(`${operationLabel} ${truncateActivityLabel(patternLabel, 60)}`);
         stepTracked = true;
       }
       onStatusChange?.(runId, { waitingFor: patternLabel, status: "running", elapsedMs: Math.max(0, Date.now() - startedAt) });
       try {
-        return await getOutputBuffer(sessionId).waitFor(
+        return await getOutputBuffer(sessionId)[waitMethod](
           pattern,
           timeoutMs,
           () => Boolean(deps.isAborted?.()),
@@ -328,6 +330,18 @@ function createScriptRuntime(deps) {
     },
     waitFor(pattern, timeoutMs = 30000) {
       return waitForWithRecovery(pattern, timeoutMs);
+    },
+    waitForText(text, timeoutMs = 30000) {
+      return waitForWithRecovery(text, timeoutMs, {
+        waitMethod: "waitForText",
+        operationLabel: "waitForText",
+      });
+    },
+    waitForRegex(pattern, timeoutMs = 30000) {
+      return waitForWithRecovery(pattern, timeoutMs, {
+        waitMethod: "waitForRegex",
+        operationLabel: "waitForRegex",
+      });
     },
     waitForPrompt(timeoutMs = 60000) {
       return waitForPromptWithRecovery(timeoutMs);

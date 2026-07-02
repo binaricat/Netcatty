@@ -17,6 +17,71 @@ function isRegExpLike(pattern) {
   );
 }
 
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function hasUnescapedCharAt(source, index, char) {
+  if (source[index] !== char) return false;
+  let backslashCount = 0;
+  for (let cursor = index - 1; cursor >= 0 && source[cursor] === "\\"; cursor -= 1) {
+    backslashCount += 1;
+  }
+  return backslashCount % 2 === 0;
+}
+
+function isRegexCompatibleWaitPattern(pattern) {
+  return pattern instanceof RegExp || isRegExpLike(pattern);
+}
+
+function edgeDotRepeatTokenLengthAt(source, index) {
+  if (source[index] !== ".") return 0;
+  const quantifier = source[index + 1];
+  if (quantifier !== "*" && quantifier !== "+") return 0;
+  if (!hasUnescapedCharAt(source, index, ".")) return 0;
+  return source[index + 2] === "?" ? 3 : 2;
+}
+
+function stripEdgeDotRepeats(source) {
+  let start = 0;
+  let end = source.length;
+  if (hasUnescapedCharAt(source, start, "^")) {
+    start += 1;
+  }
+  if (end > start && hasUnescapedCharAt(source, end - 1, "$")) {
+    end -= 1;
+  }
+
+  while (start < end) {
+    const tokenLength = edgeDotRepeatTokenLengthAt(source, start);
+    if (tokenLength === 0) break;
+    start += tokenLength;
+  }
+  while (end - start >= 2) {
+    const lazyTokenLength = edgeDotRepeatTokenLengthAt(source, end - 3);
+    if (lazyTokenLength === 3) {
+      end -= 3;
+      continue;
+    }
+    const greedyTokenLength = edgeDotRepeatTokenLengthAt(source, end - 2);
+    if (greedyTokenLength !== 2) break;
+    end -= 2;
+  }
+  return source.slice(start, end);
+}
+
+function getRegExpFlags(regex, fallbackFlags = "") {
+  if (typeof regex.flags === "string") return regex.flags;
+  let flags = fallbackFlags;
+  if (regex.global && !flags.includes("g")) flags += "g";
+  if (regex.ignoreCase && !flags.includes("i")) flags += "i";
+  if (regex.multiline && !flags.includes("m")) flags += "m";
+  if (regex.dotAll && !flags.includes("s")) flags += "s";
+  if (regex.unicode && !flags.includes("u")) flags += "u";
+  if (regex.sticky && !flags.includes("y")) flags += "y";
+  return flags;
+}
+
 function compilePattern(pattern) {
   if (pattern instanceof RegExp || isRegExpLike(pattern)) return pattern;
   if (typeof pattern !== "string") {
@@ -26,8 +91,41 @@ function compilePattern(pattern) {
   if (slashMatch) {
     return new RegExp(slashMatch[1], slashMatch[2]);
   }
-  const escaped = pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return new RegExp(escaped);
+  return new RegExp(escapeRegExp(pattern));
+}
+
+function compileTextPattern(text) {
+  if (typeof text !== "string") {
+    throw new TypeError("waitForText pattern must be a string");
+  }
+  return new RegExp(escapeRegExp(text));
+}
+
+function compileRegexPattern(pattern) {
+  if (pattern instanceof RegExp || isRegExpLike(pattern)) return pattern;
+  if (typeof pattern !== "string") {
+    throw new TypeError("waitForRegex pattern must be a string or RegExp");
+  }
+  const slashMatch = pattern.match(/^\/(.+)\/([gimsuy]*)$/);
+  if (slashMatch) {
+    const flags = slashMatch[2].includes("s") ? slashMatch[2] : `${slashMatch[2]}s`;
+    return new RegExp(slashMatch[1], flags);
+  }
+  return new RegExp(pattern, "s");
+}
+
+function compileRegexFreshnessPattern(pattern) {
+  const regex = compileRegexPattern(pattern);
+  const source = typeof regex.source === "string" ? regex.source : String(pattern);
+  const strippedSource = stripEdgeDotRepeats(source);
+  if (!strippedSource || strippedSource === source) return null;
+  const flags = getRegExpFlags(regex).replace(/y/g, "");
+  const globalFlags = flags.includes("g") ? flags : `${flags}g`;
+  try {
+    return new RegExp(strippedSource, globalFlags);
+  } catch {
+    return null;
+  }
 }
 
 function tryMatch(text, pattern) {
@@ -37,8 +135,8 @@ function tryMatch(text, pattern) {
   return match[0];
 }
 
-function tryMatchWithEnd(text, pattern) {
-  const regex = compilePattern(pattern);
+function tryMatchWithEnd(text, pattern, compiler = compilePattern) {
+  const regex = compiler(pattern);
   if (typeof regex.lastIndex === "number") regex.lastIndex = 0;
   const match = regex.exec(text);
   if (!match || match.index === undefined) return null;
@@ -46,6 +144,56 @@ function tryMatchWithEnd(text, pattern) {
     value: match[0],
     endOffset: match.index + match[0].length,
   };
+}
+
+function tryRegexMatchWithEnd(text, pattern) {
+  const regex = compileRegexPattern(pattern);
+  if (typeof regex.lastIndex === "number") regex.lastIndex = 0;
+  const match = regex.exec(text);
+  if (!match || match.index === undefined) return null;
+
+  const value = match[0];
+  let freshStartOffset = match.index;
+  let freshEndOffset = match.index + value.length;
+  const freshnessRegex = compileRegexFreshnessPattern(pattern);
+  if (freshnessRegex) {
+    if (typeof freshnessRegex.lastIndex === "number") freshnessRegex.lastIndex = 0;
+    let freshMatch = freshnessRegex.exec(value);
+    let latestFreshStartOffset = null;
+    let latestFreshEndOffset = null;
+    while (freshMatch && freshMatch.index !== undefined) {
+      const startOffset = freshMatch.index;
+      const endOffset = freshMatch.index + freshMatch[0].length;
+      if (latestFreshEndOffset === null || endOffset >= latestFreshEndOffset) {
+        latestFreshStartOffset = startOffset;
+      }
+      latestFreshEndOffset = Math.max(latestFreshEndOffset ?? 0, endOffset);
+      if (freshMatch[0].length === 0) {
+        freshnessRegex.lastIndex += 1;
+      }
+      freshMatch = freshnessRegex.exec(value);
+    }
+    if (latestFreshEndOffset !== null) {
+      freshStartOffset = match.index + latestFreshStartOffset;
+      freshEndOffset = match.index + latestFreshEndOffset;
+    }
+  }
+
+  return {
+    value,
+    startOffset: match.index,
+    endOffset: match.index + value.length,
+    freshStartOffset,
+    freshEndOffset,
+  };
+}
+
+function staleAdvanceEndOffset(matched) {
+  return Math.max(Number(matched?.endOffset) || 0, 1);
+}
+
+function staleRegexAdvanceEndOffset(matched) {
+  return Math.max((Number(matched?.startOffset) || 0) + 1, 1);
 }
 
 function findFreshTailMatchAny(text, patterns) {
@@ -131,6 +279,14 @@ class SessionOutputBuffer {
     return tryMatchWithEnd(this.getPendingText(), pattern);
   }
 
+  tryMatchPendingText(text) {
+    return tryMatchWithEnd(this.getPendingText(), text, compileTextPattern);
+  }
+
+  tryMatchPendingRegex(pattern) {
+    return tryRegexMatchWithEnd(this.getPendingText(), pattern);
+  }
+
   consumeFreshPendingMatch(pattern) {
     while (true) {
       const matched = this.tryMatchPending(pattern);
@@ -139,8 +295,62 @@ class SessionOutputBuffer {
       if (isFreshTailMatch(this.getText().length, absoluteEnd)) {
         return matched;
       }
-      this.advanceScanOffset(matched.endOffset);
+      this.advanceScanOffset(staleAdvanceEndOffset(matched));
     }
+  }
+
+  consumeFreshPendingText(text) {
+    while (true) {
+      const matched = this.tryMatchPendingText(text);
+      if (matched === null) return null;
+      const absoluteEnd = this.scanOffset + matched.endOffset;
+      if (isFreshTailMatch(this.getText().length, absoluteEnd)) {
+        return matched;
+      }
+      this.advanceScanOffset(staleAdvanceEndOffset(matched));
+    }
+  }
+
+  consumeFreshPendingRegex(pattern, options = {}) {
+    const text = this.getText();
+    const baseOffset = this.scanOffset;
+    const pendingText = text.slice(baseOffset);
+    let relativeOffset = 0;
+    while (relativeOffset <= pendingText.length) {
+      const matched = tryRegexMatchWithEnd(pendingText.slice(relativeOffset), pattern);
+      if (matched === null) {
+        if (relativeOffset > 0) {
+          this.scanOffset = Math.min(baseOffset + relativeOffset, text.length);
+        }
+        return null;
+      }
+      const minFreshStartAbsolute = Number.isFinite(options.minFreshStartAbsolute)
+        ? options.minFreshStartAbsolute
+        : null;
+      const absoluteStart = baseOffset + relativeOffset + matched.freshStartOffset;
+      const absoluteEnd = baseOffset + relativeOffset + matched.freshEndOffset;
+      const matchStartAbsolute = baseOffset + relativeOffset + matched.startOffset;
+      if (
+        isFreshTailMatch(text.length, absoluteEnd)
+        && (minFreshStartAbsolute === null || absoluteStart >= minFreshStartAbsolute)
+      ) {
+        let value = matched.value;
+        if (minFreshStartAbsolute !== null && matchStartAbsolute < minFreshStartAbsolute) {
+          const valueFreshStart = matched.freshStartOffset - matched.startOffset;
+          const lineStart = matched.value.lastIndexOf("\n", Math.max(0, valueFreshStart - 1));
+          const valueStart = lineStart >= 0 ? lineStart : Math.max(0, valueFreshStart);
+          value = matched.value.slice(valueStart);
+        }
+        return {
+          ...matched,
+          value,
+          endOffset: relativeOffset + matched.endOffset,
+        };
+      }
+      relativeOffset += staleRegexAdvanceEndOffset(matched);
+    }
+    this.scanOffset = Math.min(baseOffset + relativeOffset, text.length);
+    return null;
   }
 
   consumeFreshPendingMatchAny(patterns) {
@@ -153,7 +363,7 @@ class SessionOutputBuffer {
         if (isFreshTailMatch(this.getText().length, absoluteEnd)) {
           return { index, matched };
         }
-        this.advanceScanOffset(matched.endOffset);
+        this.advanceScanOffset(staleAdvanceEndOffset(matched));
       }
     }
     return null;
@@ -235,7 +445,70 @@ class SessionOutputBuffer {
     this.waiters = remaining;
   }
 
+  waitForWithMatcher({ pattern, timeoutMs, shouldAbort, consumeFreshMatch, timeoutLabel }) {
+    return new Promise((resolve, reject) => {
+      const waiter = {
+        pattern,
+        resolve,
+        reject,
+        shouldAbort,
+        timer: null,
+        check: () => {
+          const matched = consumeFreshMatch();
+          if (matched === null) return false;
+          this.advanceScanOffset(matched.endOffset);
+          clearTimeout(waiter.timer);
+          if (waiter.abortInterval) clearInterval(waiter.abortInterval);
+          this.waiters = this.waiters.filter((entry) => entry.custom !== waiter);
+          resolve(matched.value);
+          return true;
+        },
+      };
+      waiter.timer = setTimeout(() => {
+        this.waiters = this.waiters.filter((entry) => entry.custom !== waiter);
+        if (waiter.abortInterval) clearInterval(waiter.abortInterval);
+        reject(new Error(`${timeoutLabel} timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
+      if (typeof shouldAbort === "function") {
+        waiter.abortInterval = setInterval(() => {
+          if (!shouldAbort()) return;
+          clearTimeout(waiter.timer);
+          clearInterval(waiter.abortInterval);
+          this.waiters = this.waiters.filter((entry) => entry.custom !== waiter);
+          reject(new Error("Script stopped"));
+        }, 100);
+      }
+      this.waiters.push({
+        pattern,
+        resolve: () => {},
+        reject,
+        timer: waiter.timer,
+        custom: waiter,
+      });
+    });
+  }
+
   waitFor(pattern, timeoutMs = 30000, shouldAbort) {
+    if (isRegexCompatibleWaitPattern(pattern)) {
+      const minFreshStartAbsolute = Math.max(
+        this.scanOffset,
+        this.getText().length - FRESH_MATCH_TAIL_SLACK,
+      );
+      const immediate = this.consumeFreshPendingRegex(pattern, { minFreshStartAbsolute });
+      if (immediate !== null) {
+        this.advanceScanOffset(immediate.endOffset);
+        return Promise.resolve(immediate.value);
+      }
+
+      return this.waitForWithMatcher({
+        pattern,
+        timeoutMs,
+        shouldAbort,
+        consumeFreshMatch: () => this.consumeFreshPendingRegex(pattern, { minFreshStartAbsolute }),
+        timeoutLabel: "waitFor",
+      });
+    }
+
     const immediate = this.consumeFreshPendingMatch(pattern);
     if (immediate !== null) {
       this.advanceScanOffset(immediate.endOffset);
@@ -267,10 +540,48 @@ class SessionOutputBuffer {
     });
   }
 
+  waitForText(text, timeoutMs = 30000, shouldAbort) {
+    const immediate = this.consumeFreshPendingText(text);
+    if (immediate !== null) {
+      this.advanceScanOffset(immediate.endOffset);
+      return Promise.resolve(immediate.value);
+    }
+
+    return this.waitForWithMatcher({
+      pattern: text,
+      timeoutMs,
+      shouldAbort,
+      consumeFreshMatch: () => this.consumeFreshPendingText(text),
+      timeoutLabel: "waitForText",
+    });
+  }
+
+  waitForRegex(pattern, timeoutMs = 30000, shouldAbort) {
+    const minFreshStartAbsolute = Math.max(
+      this.scanOffset,
+      this.getText().length - FRESH_MATCH_TAIL_SLACK,
+    );
+    const immediate = this.consumeFreshPendingRegex(pattern, { minFreshStartAbsolute });
+    if (immediate !== null) {
+      this.advanceScanOffset(immediate.endOffset);
+      return Promise.resolve(immediate.value);
+    }
+
+    return this.waitForWithMatcher({
+      pattern,
+      timeoutMs,
+      shouldAbort,
+      consumeFreshMatch: () => this.consumeFreshPendingRegex(pattern, { minFreshStartAbsolute }),
+      timeoutLabel: "waitForRegex",
+    });
+  }
+
   abortWaiters(reason = "Script stopped") {
     for (const waiter of this.waiters) {
       clearTimeout(waiter.timer);
       if (waiter.abortInterval) clearInterval(waiter.abortInterval);
+      if (waiter.custom?.abortInterval) clearInterval(waiter.custom.abortInterval);
+      if (waiter.custom?.interval) clearInterval(waiter.custom.interval);
       waiter.reject?.(new Error(reason));
     }
     this.waiters = [];
@@ -357,6 +668,9 @@ class SessionOutputBuffer {
   dispose() {
     for (const waiter of this.waiters) {
       clearTimeout(waiter.timer);
+      if (waiter.abortInterval) clearInterval(waiter.abortInterval);
+      if (waiter.custom?.abortInterval) clearInterval(waiter.custom.abortInterval);
+      if (waiter.custom?.interval) clearInterval(waiter.custom.interval);
       waiter.reject?.(new Error("Session output buffer disposed"));
     }
     this.waiters = [];

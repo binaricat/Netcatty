@@ -27,13 +27,18 @@ Global \`nct.version\` exposes the runtime version.
 
 ### nct.screen
 - \`await nct.screen.waitForPrompt(ms?)\` — wait for shell prompt (# root / $ user)
-- \`await nct.screen.waitFor(pattern, ms?)\` — wait for output (string or RegExp, default 30s)
+- \`await nct.screen.waitForText(text, ms?)\` — wait for exact text; regex characters are treated literally
+- \`await nct.screen.waitForRegex(pattern, ms?)\` — wait for regex output; string patterns match multiline output
+- \`await nct.screen.waitFor(pattern, ms?)\` — compatibility helper; plain strings are literal, and legacy \`/regex/flags\` strings still work
 - \`await nct.screen.waitForAny(patterns, ms?)\` — wait until any pattern matches
 - \`await nct.screen.sendLine(cmd)\` — type command + Enter
 - \`await nct.screen.send(text)\` — raw keys without Enter
 - \`await nct.screen.getText(start?, end?)\` — read terminal buffer
 - \`await nct.screen.clear()\` — clear screen
 - Properties: \`rows\`, \`cols\`, \`currentRow\`
+
+Use \`waitForText("请选择SSH资源")\` for literal prompts.
+Use \`waitForRegex(".*请选择SSH资源.*登录方式.*")\` for regex or output split across terminal lines.
 
 ### nct.session
 - \`nct.session.connected\`, \`hostname\`, \`username\`

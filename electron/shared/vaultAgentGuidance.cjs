@@ -18,7 +18,7 @@ const VAULT_HOSTS_VS_NOTES_GUIDANCE =
 
 const VAULT_SCRIPTS_GUIDANCE =
   "Snippets vs automation scripts: snippets_* for shell command text (optional {{variables}}). "
-  + "scripts_* for nct JavaScript automation (await nct.screen.sendLine, waitFor, dialogs). "
+  + "scripts_* for nct JavaScript automation (await nct.screen.sendLine, waitForText/waitForRegex, dialogs). "
   + "Call scripts_reference before authoring scripts. scripts_run with wait=true blocks until completion; "
   + "use scripts_runs_list / scripts_run_stop / scripts_run_pause / scripts_run_resume for lifecycle. "
   + "Triggers: manual, onConnect (runs after connect), onOutput (regex triggerPattern). "

@@ -3,6 +3,8 @@
 const STEP_MATCHERS = [
   { regex: /await\s+nct\.screen\.waitForPrompt\s*\(/g, label: "waitForPrompt" },
   { regex: /await\s+nct\.screen\.waitForAny\s*\(/g, label: "waitForAny" },
+  { regex: /await\s+nct\.screen\.waitForText\s*\(/g, label: "waitForText" },
+  { regex: /await\s+nct\.screen\.waitForRegex\s*\(/g, label: "waitForRegex" },
   { regex: /await\s+nct\.screen\.waitFor\s*\(/g, label: "waitFor" },
   { regex: /await\s+nct\.screen\.sendLine\s*\(/g, label: "sendLine" },
   { regex: /await\s+nct\.screen\.send\s*\(/g, label: "send" },

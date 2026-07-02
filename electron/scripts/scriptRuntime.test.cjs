@@ -3,6 +3,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { createScriptRuntime, wrapScriptSource, interruptibleSleep } = require("./scriptRuntime.cjs");
+const { SessionOutputBuffer } = require("./sessionOutputBuffer.cjs");
 
 test("wrapScriptSource wraps async main scripts in async IIFE", () => {
   const wrapped = wrapScriptSource(`
@@ -81,6 +82,32 @@ test("createScriptRuntime executes simple log script", async () => {
 
   await runtime.execute("nct.log('hello');");
   assert.deepEqual(logs, ["hello"]);
+});
+
+test("createScriptRuntime supports regex waits over multiline output", async () => {
+  const logs = [];
+  const buffer = new SessionOutputBuffer("s1");
+  const runtime = createScriptRuntime({
+    sessionId: "s1",
+    runId: "r1",
+    appendLog: (_id, message) => logs.push(message),
+    writeToSession: () => {},
+    getOutputBuffer: () => buffer,
+    getSessionMeta: () => ({ connected: true, hostname: "host", username: "user" }),
+    showDialog: async () => true,
+    isPaused: () => false,
+    isAborted: () => false,
+    onStatusChange: () => {},
+  });
+
+  const run = runtime.execute(`
+    await nct.screen.waitForRegex(".*SSH资源.*登录方式.*", 1000);
+    nct.log("matched");
+  `);
+  buffer.append("1. SSH资源\n请选择SSH资源\n'zxadmin'登录方式:");
+
+  await run;
+  assert.deepEqual(logs, ["matched"]);
 });
 
 test("createScriptRuntime reports activity labels for loops without X/Y totals", async () => {

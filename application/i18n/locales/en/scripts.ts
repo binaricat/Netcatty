@@ -9,7 +9,7 @@ export const enScriptsMessages = {
   'scripts.trigger.manual': 'Manual run',
   'scripts.trigger.onConnect': 'Run on connect',
   'scripts.trigger.onOutput': 'Run on output match',
-  'scripts.trigger.onOutputHint': 'Fires when server output matches the pattern (user keystroke echo is ignored). With no target hosts configured, listens on the current connected session; with targets, only those hosts. Disabled in alternate-screen apps such as vim or htop. Suppressed while another script is running on this session; rechecked after it finishes. For in-flow waits, use nct.screen.waitFor in script code.',
+  'scripts.trigger.onOutputHint': 'Fires when server output matches the pattern (user keystroke echo is ignored). With no target hosts configured, listens on the current connected session; with targets, only those hosts. Disabled in alternate-screen apps such as vim or htop. Suppressed while another script is running on this session; rechecked after it finishes. For in-flow waits, use nct.screen.waitForText or nct.screen.waitForRegex in script code.',
   'scripts.actions.save': 'Save',
   'scripts.actions.runNow': 'Run now',
   'scripts.actions.openEditor': 'Open editor',

@@ -24,7 +24,7 @@ function stepsToJavaScript(steps, recordedAt) {
       }
       lines.push(`  await nct.screen.sendLine(${escapeJsString(step.value)});`);
     } else if (step.type === "waitFor") {
-      lines.push(`  await nct.screen.waitFor(${escapeJsString(step.value)}, ${step.timeoutMs || 5000});`);
+      lines.push(`  await nct.screen.waitForText(${escapeJsString(step.value)}, ${step.timeoutMs || 5000});`);
     } else if (step.type === "waitForPrompt") {
       lines.push(`  await nct.screen.waitForPrompt(${step.timeoutMs || 30000});`);
     } else if (step.type === "sleep") {
