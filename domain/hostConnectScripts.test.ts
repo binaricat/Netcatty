@@ -6,7 +6,6 @@ import {
   getGlobalConnectScripts,
   getHostConnectScriptIds,
   migrateHostConnectScriptIds,
-  moveHostConnectScript,
   reorderHostConnectScript,
   removeHostConnectScript,
   resolveConnectScriptsForHost,
@@ -55,7 +54,7 @@ test('resolveConnectScriptsForHost runs globals before host queue and dedupes', 
   assert.deepEqual(resolved.map((item) => item.id), ['global', 'both', 'host-only']);
 });
 
-test('append and move update host connectScriptIds order', () => {
+test('append updates host connectScriptIds order', () => {
   const snippets = [
     script({ id: 'a', targets: ['host-a'] }),
     script({ id: 'b', targets: ['host-a'] }),
@@ -63,8 +62,6 @@ test('append and move update host connectScriptIds order', () => {
   let next = appendHostConnectScript(host, 'a', snippets);
   next = appendHostConnectScript(next, 'b', snippets);
   assert.deepEqual(getHostConnectScriptIds(next, snippets), ['a', 'b']);
-  next = moveHostConnectScript(next, 'b', 'up', snippets);
-  assert.deepEqual(getHostConnectScriptIds(next, snippets), ['b', 'a']);
 });
 
 test('syncHostsForSnippetTargetChange appends and removes queue entries', () => {

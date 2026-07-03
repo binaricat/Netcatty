@@ -52,14 +52,6 @@ export function getScriptsLinkedToHost(snippets: Snippet[], hostId: string): Sni
   );
 }
 
-export function getLoginScriptForHost(snippets: Snippet[], hostId: string): Snippet | undefined {
-  return snippets.find(
-    (snippet) => isScriptSnippet(snippet)
-      && snippet.trigger === 'onConnect'
-      && snippetAppliesToHost(snippet, hostId),
-  );
-}
-
 export function linkHostToScript(snippet: Snippet, hostId: string): Snippet {
   const targets = snippet.targets ?? [];
   if (targets.includes(hostId)) {
@@ -79,37 +71,8 @@ export function unlinkHostFromScript(snippet: Snippet, hostId: string): Snippet 
   return { ...snippet, targets: nextTargets.length > 0 ? nextTargets : undefined };
 }
 
-export function linkHostToScripts(snippets: Snippet[], hostId: string, scriptId: string): Snippet[] {
-  return snippets.map((snippet) => (
-    snippet.id === scriptId ? linkHostToScript(snippet, hostId) : snippet
-  ));
-}
-
 export function unlinkHostFromScripts(snippets: Snippet[], hostId: string, scriptId: string): Snippet[] {
   return snippets.map((snippet) => (
     snippet.id === scriptId ? unlinkHostFromScript(snippet, hostId) : snippet
   ));
-}
-
-/** @deprecated Prefer host.connectScriptIds queue via HostDetails automation panel. */
-export function setLoginScriptForHost(
-  snippets: Snippet[],
-  hostId: string,
-  scriptId?: string,
-): Snippet[] {
-  const cleared = snippets.map((snippet) => {
-    if (!isScriptSnippet(snippet) || snippet.trigger !== 'onConnect') return snippet;
-    if (!snippet.targets?.includes(hostId)) return snippet;
-    return unlinkHostFromScript(snippet, hostId);
-  });
-
-  if (!scriptId) return cleared;
-
-  return cleared.map((snippet) => {
-    if (!isScriptSnippet(snippet) || snippet.id !== scriptId) return snippet;
-    return {
-      ...linkHostToScript(snippet, hostId),
-      trigger: 'onConnect' as const,
-    };
-  });
 }

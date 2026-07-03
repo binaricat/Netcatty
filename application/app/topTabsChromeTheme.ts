@@ -113,8 +113,3 @@ export function applyTopTabsChromeThemeVars(theme: TerminalTheme): void {
   setStylePropertyIfChanged(tabsRoot, '--top-tabs-accent', 'hsl(var(--accent))');
   topTabsChromeThemeVarsApplied = true;
 }
-
-export function hasActiveChromeThemeDataset(): boolean {
-  if (typeof document === 'undefined') return false;
-  return Boolean(document.documentElement.dataset.activeChromeTheme);
-}

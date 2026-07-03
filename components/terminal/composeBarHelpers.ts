@@ -1,6 +1,5 @@
 import type { Snippet } from '../../types';
 
-export const COMPOSE_BAR_DEFAULT_HEIGHT = 120;
 export const COMPOSE_BAR_MIN_HEIGHT = 72;
 export const COMPOSE_BAR_MAX_HEIGHT = 360;
 

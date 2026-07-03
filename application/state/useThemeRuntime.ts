@@ -1,6 +1,6 @@
 import { useCallback, useLayoutEffect, useMemo, useState } from 'react';
 
-import type { Host, TerminalTheme } from '../../domain/models';
+import type { TerminalTheme } from '../../domain/models';
 import {
   idleThemeUserIntent,
   pickingThemeUserIntent,
@@ -112,8 +112,4 @@ export function useTerminalAppearanceInjection(
   useLayoutEffect(() => {
     injectTerminalAppearanceVars(appearance.theme, { includeChromeSurfaces });
   }, [appearance.theme.id, appearance.theme, includeChromeSurfaces]);
-}
-
-export function buildHostScope(host: Host | null, isEphemeral: boolean): TerminalAppearanceHostScope {
-  return { host, isEphemeral };
 }

@@ -2,7 +2,7 @@ import type { DragEvent, PointerEvent } from "react";
 import { Terminal as XTerm } from "@xterm/xterm";
 
 import type { TerminalContextReader } from "../../domain/terminalContextRead";
-import { getSessionConnectionLabel, resolveSessionTabTitle } from "../../domain/sessionTabTitle";
+import { resolveSessionTabTitle } from "../../domain/sessionTabTitle";
 import { logger } from "../../lib/logger";
 import { getPathForFile, type DropEntry } from "../../lib/sftpFileUtils";
 import { normalizeLineEndings } from "../../lib/utils";
@@ -26,14 +26,6 @@ export const AUTO_RUN_SNIPPET_LINE_DELAY_MS = 250;
 export interface TerminalBroadcastInputOptions {
   noAutoRun?: boolean;
   lineDelayMs?: number;
-}
-
-/**
- * Get the static connection label for a terminal session.
- * Uses customName if set, otherwise falls back to hostLabel.
- */
-export function getSessionDisplayName(session: TerminalSession): string {
-  return getSessionConnectionLabel(session);
 }
 
 export { resolveSessionTabTitle };

@@ -142,26 +142,12 @@ export const customThemeStore = new CustomThemeStore();
 
 // ============== Hooks ==============
 
-/** Get all themes (built-in + custom) */
-export const useAllThemes = (): TerminalTheme[] => {
-    return useSyncExternalStore(
-        customThemeStore.subscribe,
-        customThemeStore.getAllThemes
-    );
-};
-
 /** Get custom themes only */
 export const useCustomThemes = (): TerminalTheme[] => {
     return useSyncExternalStore(
         customThemeStore.subscribe,
         customThemeStore.getCustomThemes
     );
-};
-
-/** Get theme by ID (built-in or custom) with fallback */
-export const useThemeById = (id: string): TerminalTheme => {
-    const allThemes = useAllThemes();
-    return allThemes.find(t => t.id === id) || TERMINAL_THEMES[0];
 };
 
 /** Theme mutation actions */

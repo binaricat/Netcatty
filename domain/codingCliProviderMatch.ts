@@ -1,4 +1,4 @@
-import { CODING_CLI_PROVIDERS, getCodingCliProvider, type CodingCliProvider, type CodingCliProviderId } from './codingCliProviders';
+import { CODING_CLI_PROVIDERS, getCodingCliProvider, type CodingCliProvider } from './codingCliProviders';
 import {
   inferCodingCliProviderFromTitleSignals,
   titleIncludesPhrase,
@@ -126,11 +126,4 @@ export function resolveSessionCodingCliProvider(
   }
 
   return undefined;
-}
-
-export function resolveSessionCodingCliProviderId(
-  source: SessionCodingCliSource,
-  host?: Pick<Host, 'startupCommand'>,
-): CodingCliProviderId | undefined {
-  return resolveSessionCodingCliProvider(source, host)?.id;
 }

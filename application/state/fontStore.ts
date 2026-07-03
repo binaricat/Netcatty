@@ -135,24 +135,6 @@ export const useAvailableFonts = (): TerminalFont[] => {
 };
 
 /**
- * Get font loading state
- */
-export const useFontsLoading = (): boolean => {
-  return useSyncExternalStore(
-    fontStore.subscribe,
-    fontStore.getIsLoading
-  );
-};
-
-/**
- * Get font by ID with fallback - useful for components that need a specific font
- */
-export const useFontById = (fontId: string): TerminalFont => {
-  const fonts = useAvailableFonts();
-  return fonts.find(f => f.id === fontId) || fonts[0] || TERMINAL_FONTS[0];
-};
-
-/**
  * Initialize fonts eagerly (call at app startup)
  */
 export const initializeFonts = (): void => {

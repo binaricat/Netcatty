@@ -136,8 +136,6 @@ export type AgentIconSource = {
   type?: 'builtin' | 'external';
 };
 
-const GENERIC_AGENT_ICON_KEYS = new Set<AgentIconKey>(['terminal', 'plus', 'catty']);
-
 export function normalizeAgentToken(value?: string): string {
   return (value ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '');
 }
@@ -209,10 +207,6 @@ export function resolveAgentIconKey(source: AgentIconSource | 'add-more'): Agent
   }
 
   return 'terminal';
-}
-
-export function isRecognizedAgentIconKey(key: AgentIconKey): boolean {
-  return !GENERIC_AGENT_ICON_KEYS.has(key);
 }
 
 export function getAgentIconVisual(key: AgentIconKey): AgentIconVisual {

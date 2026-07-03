@@ -134,21 +134,6 @@ export function removeHostConnectScript(host: Host, scriptId: string, snippets: 
   return { ...host, connectScriptIds: next };
 }
 
-export function moveHostConnectScript(
-  host: Host,
-  scriptId: string,
-  direction: 'up' | 'down',
-  snippets: Snippet[],
-): Host {
-  const current = [...getHostConnectScriptIds(host, snippets)];
-  const index = current.indexOf(scriptId);
-  if (index === -1) return host;
-  const targetIndex = direction === 'up' ? index - 1 : index + 1;
-  if (targetIndex < 0 || targetIndex >= current.length) return host;
-  [current[index], current[targetIndex]] = [current[targetIndex], current[index]];
-  return { ...host, connectScriptIds: current };
-}
-
 export function reorderHostConnectScript(
   host: Host,
   draggedScriptId: string,
@@ -207,12 +192,4 @@ export function syncHostsForSnippetTargetChange(
     }
     return updated;
   });
-}
-
-export function connectScriptsForHostFromSnippets(
-  hostId: string,
-  snippets: Snippet[],
-): Snippet[] {
-  const host = { id: hostId } as Host;
-  return resolveConnectScriptsForHost(host, snippets);
 }

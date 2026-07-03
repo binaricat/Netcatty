@@ -67,11 +67,6 @@ export const useActiveTabId = () => {
   );
 };
 
-// Hook to get setter - never causes re-render
-export const useSetActiveTabId = () => {
-  return activeTabStore.setActiveTabId;
-};
-
 // Check if a specific tab is active - only re-renders when this specific tab's active state changes
 export const useIsTabActive = (tabId: string) => {
   const getSnapshot = useCallback(() => activeTabStore.getActiveTabId() === tabId, [tabId]);

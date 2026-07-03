@@ -348,10 +348,3 @@ export function getHostSearchMatch(
   const networkResult = evaluateHostFieldGroup(querySegments, networkSources);
   return selectBetterHostMatch(humanResult, networkResult);
 }
-
-export function getHostSearchReason(match: HostSearchMatchResult): string {
-  if (!match.matched || match.details.length === 0) return "";
-  const uniqueFields = Array.from(new Set(match.details.map((detail) => detail.field)));
-  const phaseLabel = match.phase === "strict" ? "strict" : "loose";
-  return `${phaseLabel}:${uniqueFields.join("/")}`;
-}

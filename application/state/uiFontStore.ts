@@ -163,16 +163,6 @@ export const useAvailableUIFonts = (): UIFont[] => {
 };
 
 /**
- * Get UI font loading state
- */
-export const useUIFontsLoading = (): boolean => {
-  return useSyncExternalStore(
-    uiFontStore.subscribe,
-    uiFontStore.getIsLoading
-  );
-};
-
-/**
  * Get UI font loaded state
  */
 export const useUIFontsLoaded = (): boolean => {
@@ -180,14 +170,6 @@ export const useUIFontsLoaded = (): boolean => {
     uiFontStore.subscribe,
     uiFontStore.getIsLoaded
   );
-};
-
-/**
- * Get UI font by ID with fallback
- */
-export const useUIFontById = (fontId: string): UIFont => {
-  const fonts = useAvailableUIFonts();
-  return fonts.find(f => f.id === fontId) || fonts[0] || UI_FONTS[0];
 };
 
 /**

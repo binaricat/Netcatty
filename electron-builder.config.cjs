@@ -52,7 +52,6 @@ module.exports = {
         'infrastructure/config/terminalFlowConstants.json',
         'lib/**/*.cjs',
         'lib/**/*.json',
-        '!electron/.dev-config.json',
         'skills/**/*',
         '!public/**/*',
         '!**/*.map',

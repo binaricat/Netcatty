@@ -78,18 +78,3 @@ function summarizeValue(value: unknown): string {
   }
   return String(value);
 }
-
-/**
- * 简单的渲染计数器，只记录渲染次数不做详细分析
- */
-export function useRenderCount(componentName: string): number {
-  const renderCountRef = useRef(0);
-  renderCountRef.current += 1;
-
-  // 只在调试模式下打印
-  if (DEBUG_RENDER_TRACKING) {
-    logger.info(`[Render] ${componentName} - 第${renderCountRef.current}次渲染`);
-  }
-
-  return renderCountRef.current;
-}

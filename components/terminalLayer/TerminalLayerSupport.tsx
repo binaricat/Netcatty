@@ -14,7 +14,7 @@ import { STORAGE_KEY_AI_SHOW_TERMINAL_SELECTION_ACTION } from '../../infrastruct
 import { cn } from '../../lib/utils';
 import { LazyLoadBoundary } from '../ui/lazy-load-boundary';
 import type { DropEntry } from '../../lib/sftpFileUtils';
-import type { GroupConfig, Host, Identity, KnownHost, ProxyProfile, SSHKey, Snippet, TerminalSession, TerminalTheme, VaultNote, Workspace } from '../../types';
+import type { GroupConfig, Host, Identity, KnownHost, ProxyProfile, SSHKey, Snippet, TerminalSession, VaultNote, Workspace } from '../../types';
 import type { ExecutorContext } from '../../infrastructure/ai/cattyAgent/executor';
 import Terminal from '../Terminal';
 import { removePaneVisible, setPaneVisible } from '../terminal/paneVisibilityStore';
@@ -141,12 +141,6 @@ export const clearTerminalPreviewVars = (sessionId: string | null) => {
   pane.style.removeProperty('--terminal-preview-toolbar-btn-active');
 };
 
-export const clearTerminalPreviewVarsForSessions = (sessionIds: Iterable<string>) => {
-  for (const sessionId of sessionIds) {
-    clearTerminalPreviewVars(sessionId);
-  }
-};
-
 export const setStylePropertyIfChanged = (element: HTMLElement, property: string, value: string) => {
   if (element.style.getPropertyValue(property) === value) return;
   element.style.setProperty(property, value);
@@ -173,29 +167,6 @@ const getHostTreePreviewRoots = (): HTMLElement[] => {
   return Array.from(document.querySelectorAll<HTMLElement>(
     '[data-section="app-host-tree-layer"], [data-section="terminal-host-tree-sidebar"]',
   ));
-};
-
-export const applyHostTreePreviewThemeVars = (theme: TerminalTheme) => {
-  const roots = getHostTreePreviewRoots();
-  if (roots.length === 0) return;
-  const bg = theme.colors.background;
-  const fg = theme.colors.foreground;
-  const values = {
-    '--terminal-host-tree-bg': bg,
-    '--terminal-host-tree-fg': fg,
-    '--terminal-host-tree-muted': `color-mix(in srgb, ${fg} 55%, ${bg} 45%)`,
-    '--terminal-host-tree-separator': `color-mix(in srgb, ${fg} 10%, ${bg} 90%)`,
-    '--terminal-host-tree-hover-bg': `color-mix(in srgb, ${fg} 8%, transparent)`,
-    '--terminal-host-tree-active-bg': `color-mix(in srgb, ${fg} 14%, transparent)`,
-    '--terminal-host-tree-drop-bg': `color-mix(in srgb, ${fg} 20%, transparent)`,
-    '--terminal-host-tree-folder-fg': `color-mix(in srgb, ${fg} 75%, ${bg} 25%)`,
-  } satisfies Record<(typeof HOST_TREE_PREVIEW_PROPERTIES)[number], string>;
-
-  for (const root of roots) {
-    for (const property of HOST_TREE_PREVIEW_PROPERTIES) {
-      setStylePropertyIfChanged(root, property, values[property]);
-    }
-  }
 };
 
 export const clearHostTreePreviewVars = () => {
