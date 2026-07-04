@@ -27,6 +27,10 @@ import {
   forceTerminalRepaintBypassingAnimationFrame,
 } from './runtime/terminalUnfocusedRepaint';
 import {
+  forceXTermFontRemeasure,
+  type XTermFontRemeasureTarget,
+} from './runtime/terminalFontRemeasure';
+import {
   isTerminalCloseGenerationCurrent,
   resolveConnectionLogCapturePayload,
   scheduleTerminalCloseTeardown,
@@ -1000,8 +1004,7 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
       const term = termRef.current as {
         cols: number;
         rows: number;
-        renderer?: { remeasureFont?: () => void };
-      } | null;
+      } & XTermFontRemeasureTarget | null;
       if (cancelled || !term) return;
       if (!isVisibleRef.current) {
         lastFittedSizeRef.current = null;
@@ -1009,12 +1012,14 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
       }
       const fitAddon = fitAddonRef.current;
       try {
-        term.renderer?.remeasureFont?.();
+        if (!forceXTermFontRemeasure(term)) {
+          logger.warn("Font remeasure skipped: xterm measurement hook unavailable");
+        }
       } catch (err) {
         logger.warn("Font remeasure failed", err);
       }
 
-      // remeasureFont does not invalidate cells rasterized before fonts were ready.
+      // Font remeasurement does not invalidate cells rasterized before fonts were ready.
       xtermRuntimeRef.current?.clearTextureAtlas();
       const visibleTerm = termRef.current;
       if (visibleTerm) {
@@ -1118,7 +1123,7 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
       if (remeasureTimer) clearTimeout(remeasureTimer);
       fontFaceSet?.removeEventListener?.("loadingdone", onLoadingDone);
     };
-  }, [effectiveFontSize, effectiveFontWeight, resizeSession, terminalSettings]);
+  }, [effectiveFontSize, effectiveFontWeight, resizeSession, resolvedFontFamily, terminalSettings]);
 
 
   useEffect(() => {
