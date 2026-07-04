@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   TERMINAL_AUTO_RECONNECT_DELAY_MS,
+  canAttemptTerminalAutoReconnect,
   isTerminalAutoReconnectEnabled,
   shouldAutoReconnectAfterExit,
   shouldContinueAutoReconnectAfterFailure,
@@ -94,6 +95,32 @@ test("an active auto reconnect loop continues after failed retry attempts", () =
       host: sshHost,
       terminalSettings: { sshAutoReconnectEnabled: false },
       loopActive: true,
+    }),
+    false,
+  );
+});
+
+test("terminal auto reconnect can start from live or fully hibernated runtimes", () => {
+  assert.equal(
+    canAttemptTerminalAutoReconnect({
+      hasTerminalRuntime: true,
+      isHibernated: false,
+    }),
+    true,
+  );
+
+  assert.equal(
+    canAttemptTerminalAutoReconnect({
+      hasTerminalRuntime: false,
+      isHibernated: true,
+    }),
+    true,
+  );
+
+  assert.equal(
+    canAttemptTerminalAutoReconnect({
+      hasTerminalRuntime: false,
+      isHibernated: false,
     }),
     false,
   );

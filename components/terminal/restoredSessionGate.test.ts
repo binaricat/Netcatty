@@ -98,6 +98,23 @@ test("auto reconnect connected history ref is initialized after status state exi
   );
 });
 
+test("auto reconnect wakes a hibernated terminal before requiring a terminal instance", () => {
+  const source = readFileSync(new URL("../Terminal.tsx", import.meta.url), "utf8");
+  const reconnectIndex = source.indexOf("const startReconnect = ");
+  const hibernatedAutoBranchIndex = source.indexOf('mode === "auto" && hibernatedRef.current', reconnectIndex);
+  const wakeCallIndex = source.indexOf("wakeHibernatedRuntimeForReconnectRef.current", hibernatedAutoBranchIndex);
+  const missingTermReturnIndex = source.indexOf("if (!termRef.current) return;", reconnectIndex);
+
+  assert.notEqual(reconnectIndex, -1);
+  assert.notEqual(hibernatedAutoBranchIndex, -1);
+  assert.notEqual(wakeCallIndex, -1);
+  assert.notEqual(missingTermReturnIndex, -1);
+  assert.ok(
+    hibernatedAutoBranchIndex < missingTermReturnIndex && wakeCallIndex < missingTermReturnIndex,
+    "auto reconnect must wake fully hibernated SSH sessions before the terminal guard can stop the retry",
+  );
+});
+
 test("dismissing the disconnected dialog returns focus to the terminal for enter reconnect", () => {
   const source = readFileSync(new URL("../Terminal.tsx", import.meta.url), "utf8");
   const dismissIndex = source.indexOf("const handleDismissDisconnectedDialog = () =>");

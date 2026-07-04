@@ -47,6 +47,7 @@ import { resolveHostAuth } from "../domain/sshAuth";
 import { useTerminalBackend } from "../application/state/useTerminalBackend";
 import {
   TERMINAL_AUTO_RECONNECT_DELAY_MS,
+  canAttemptTerminalAutoReconnect,
   shouldAutoReconnectAfterExit,
   shouldContinueAutoReconnectAfterFailure,
 } from "../application/state/terminalAutoReconnect";
@@ -372,6 +373,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   const autoReconnectLoopActiveRef = useRef(false);
   const autoReconnectAttemptRef = useRef(0);
   const startReconnectRef = useRef<((mode: "manual" | "auto") => void) | null>(null);
+  const wakeHibernatedRuntimeForReconnectRef = useRef<(() => Promise<boolean>) | null>(null);
   const terminalDataCapturedRef = useRef(false);
   const connectionLogBufferRef = useRef(createConnectionLogBuffer(MAX_CONNECTION_LOG_DATA_CHARS));
   const terminalLogSanitizerRef = useRef(createReplaySafeTerminalLogSanitizer());
@@ -1046,7 +1048,10 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         loopActive: autoReconnectLoopActiveRef.current,
       });
 
-    if (!shouldSchedule || !termRef.current) {
+    if (!shouldSchedule || !canAttemptTerminalAutoReconnect({
+      hasTerminalRuntime: Boolean(termRef.current),
+      isHibernated: hibernatedRef.current,
+    })) {
       return false;
     }
 
@@ -1159,6 +1164,20 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     hasRuntimeRef.current = false;
   };
 
+  const clearHibernateRuntimeState = useCallback(() => {
+    hibernatedRef.current = false;
+    softHiddenRef.current = false;
+    hibernateSnapshotRef.current = "";
+    hibernateViewportSnapshotRef.current = "";
+    hibernateScrollbackSnapshotRef.current = "";
+    hibernateContextSnapshotRef.current = "";
+    hibernateContextViewportSnapshotRef.current = "";
+    hibernateContextScrollbackSnapshotRef.current = "";
+    hibernatePendingBufferRef.current = "";
+    hibernateAlternateScreenRef.current = false;
+    terminalHiddenRendererStore.clearSoftHidden(sessionId);
+  }, [sessionId]);
+
   const forceCloseHibernatedSession = useCallback(() => {
     if (!terminalDataCapturedRef.current) {
       const hibernatedData = hibernateSnapshotRef.current + hibernatePendingBufferRef.current;
@@ -1184,18 +1203,8 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       }
     }
     sessionRef.current = null;
-    hibernatedRef.current = false;
-    softHiddenRef.current = false;
-    hibernateSnapshotRef.current = "";
-    hibernateViewportSnapshotRef.current = "";
-    hibernateScrollbackSnapshotRef.current = "";
-    hibernateContextSnapshotRef.current = "";
-    hibernateContextViewportSnapshotRef.current = "";
-    hibernateContextScrollbackSnapshotRef.current = "";
-    hibernatePendingBufferRef.current = "";
-    hibernateAlternateScreenRef.current = false;
-    terminalHiddenRendererStore.clearSoftHidden(sessionId);
-  }, [handleTerminalDataCaptureOnce, sessionId, terminalBackend]);
+    clearHibernateRuntimeState();
+  }, [clearHibernateRuntimeState, handleTerminalDataCaptureOnce, sessionId, terminalBackend]);
 
   const beginHibernatedSessionListeners = useCallback((backendId: string) => {
     disposeDataRef.current?.();
@@ -2112,6 +2121,21 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   };
 
   const startReconnect = (mode: "manual" | "auto" = "manual") => {
+    if (!termRef.current && mode === "auto" && hibernatedRef.current) {
+      const wakeForReconnect = wakeHibernatedRuntimeForReconnectRef.current;
+      if (!wakeForReconnect) {
+        updateStatus("disconnected");
+        return;
+      }
+      void wakeForReconnect().then((woke) => {
+        if (woke) {
+          startReconnectRef.current?.("auto");
+          return;
+        }
+        updateStatus("disconnected");
+      });
+      return;
+    }
     if (!termRef.current) return;
     if (mode === "manual") {
       clearAutoReconnect();
@@ -2561,6 +2585,36 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       wakeInProgressRef.current = false;
     });
   }, [sessionId, terminalBackend, terminalRuntimeRefs, resizeSession, terminalSettings]);
+
+  wakeHibernatedRuntimeForReconnectRef.current = async () => {
+    if (!hibernatedRef.current) {
+      return Boolean(termRef.current);
+    }
+
+    const getPayload = (): TerminalHibernateWakePayload => ({
+      snapshot: hibernateSnapshotRef.current,
+      viewportSnapshot: hibernateViewportSnapshotRef.current || hibernateSnapshotRef.current,
+      scrollbackSnapshot: hibernateScrollbackSnapshotRef.current,
+      pendingBuffer: hibernatePendingBufferRef.current,
+      alternateScreen: hibernateAlternateScreenRef.current,
+    });
+
+    logger.info("[Terminal] Waking hibernated runtime for auto reconnect", {
+      sessionId,
+      snapshotChars: hibernateSnapshotRef.current.length,
+      viewportChars: hibernateViewportSnapshotRef.current.length,
+      scrollbackChars: hibernateScrollbackSnapshotRef.current.length,
+      pendingChars: hibernatePendingBufferRef.current.length,
+    });
+
+    const accepted = await Promise.resolve(wakeFromHibernateRuntime(getPayload, { sessionConnected: false }));
+    if (accepted === false || !termRef.current) {
+      return false;
+    }
+
+    clearHibernateRuntimeState();
+    return true;
+  };
 
   useTerminalHibernateEffect({
     sessionId,

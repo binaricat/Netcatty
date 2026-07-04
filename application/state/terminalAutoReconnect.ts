@@ -54,3 +54,13 @@ export function shouldContinueAutoReconnectAfterFailure({
 }): boolean {
   return loopActive && isTerminalAutoReconnectEnabled(terminalSettings) && isAutoReconnectableSshHost(host);
 }
+
+export function canAttemptTerminalAutoReconnect({
+  hasTerminalRuntime,
+  isHibernated,
+}: {
+  hasTerminalRuntime: boolean;
+  isHibernated: boolean;
+}): boolean {
+  return hasTerminalRuntime || isHibernated;
+}
