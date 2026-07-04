@@ -6,7 +6,7 @@
  * and a bottom toolbar with muted controls + subtle send button.
  */
 
-import { AtSign, Check, ChevronDown, ChevronRight, Cpu, Expand, Eye, FileText, ImageIcon, MessageSquare, Package, Plus, ShieldCheck, SquareTerminal, X, Zap } from 'lucide-react';
+import { AtSign, Check, ChevronDown, ChevronRight, Cpu, Expand, Eye, FileText, ImageIcon, MessageSquare, Package, Plus, RefreshCw, ShieldCheck, SquareTerminal, X, Zap } from 'lucide-react';
 import { filterQuickMessages, buildSlashCommandItems, filterUserSkillsForSlash, getSlashCommandItemKey, isSystemStopSlashCommand, type AIQuickMessage, type SlashCommandItem, type UserSkillSlashOption } from '../../infrastructure/ai/quickMessages';
 import { SlashCommandPicker } from './SlashCommandPicker';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -23,23 +23,31 @@ import {
 import type { PromptInputStatus } from '../ai-elements/prompt-input';
 import { formatThinkingLabel } from '../../infrastructure/ai/types';
 import type { AgentModelPreset, AIPermissionMode, ProviderConfig, UploadedFile } from '../../infrastructure/ai/types';
+import { buildModelDiscoveryHeaders } from '../../infrastructure/ai/modelDiscoveryHeaders';
 import { ProviderIconBadge } from '../settings/tabs/ai/ProviderIconBadge';
+import { getFetchBridge } from '../settings/tabs/ai/types';
+import { parseFetchedModels } from '../settings/tabs/ai/modelMetadata';
+import {
+  buildProviderModelOptions,
+  getProviderModelDiscoveryConfig,
+  type ProviderModelOption,
+} from './providerSwitcherModels';
 import { ScrollArea } from '../ui/scroll-area';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 
 // Keep in sync with the popover's Tailwind max-width below.
 const MODEL_PICKER_MAX_WIDTH = 360;
-// Slightly wider for the provider picker so the per-row default-model
-// caption doesn't truncate.
-const PROVIDER_PICKER_MAX_WIDTH = 320;
+// Wide enough for the provider column plus the model column.
+const PROVIDER_PICKER_MAX_WIDTH = 520;
+// Must match the main-process AI bridge placeholder; the real key is injected
+// there so renderer UI never handles decrypted provider secrets.
+const API_KEY_PLACEHOLDER = '__IPC_SECURED__';
 
 /**
  * Provider picker payload used by Catty Agent. When set, the model chip
- * switches to a flat provider list (provider icon + name + the provider's
- * configured default model as caption) in place of the generic Cpu glyph
- * + model-preset dropdown. Each provider exposes a single model — its
- * `defaultModel` — so a two-level menu would be empty noise; picking a
- * provider implicitly picks its model.
+ * switches to a provider-aware picker in place of the generic Cpu glyph +
+ * model-preset dropdown. Users choose a provider first, then choose one of
+ * that provider's remembered, preset, or discovered models.
  */
 export interface ProviderSwitcherConfig {
   /** Every configured provider — Settings-level visibility, not the
@@ -53,6 +61,13 @@ export interface ProviderSwitcherConfig {
   /** Fires when the user picks a (providerId, modelId) pair. */
   onSelect: (providerId: string, modelId: string) => void;
 }
+
+type ProviderModelCatalogState = {
+  status: 'idle' | 'loading' | 'loaded' | 'error';
+  models: ProviderModelOption[];
+  error?: string;
+  requestKey?: string;
+};
 
 interface ChatInputProps {
   value: string;
@@ -138,6 +153,8 @@ const ChatInput: React.FC<ChatInputProps> = ({
   const [menuPos, setMenuPos] = useState<{ left: number; bottom: number } | null>(null);
   const [inputPanelPos, setInputPanelPos] = useState<{ left: number; bottom: number; width: number } | null>(null);
   const [hoveredModelId, setHoveredModelId] = useState<string | null>(null);
+  const [activeProviderMenuId, setActiveProviderMenuId] = useState<string | null>(null);
+  const [providerModelCatalogs, setProviderModelCatalogs] = useState<Record<string, ProviderModelCatalogState>>({});
   const [slashQuery, setSlashQuery] = useState('');
   const [slashRange, setSlashRange] = useState<{ start: number; end: number } | null>(null);
   // Active highlight index for @ mention / slash skill keyboard navigation
@@ -155,6 +172,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
     setMenuPos(null);
     setInputPanelPos(null);
     setHoveredModelId(null);
+    setActiveProviderMenuId(null);
     setSlashQuery('');
     setSlashRange(null);
   }, []);
@@ -165,6 +183,11 @@ const ChatInput: React.FC<ChatInputProps> = ({
   const attachBtnRef = useRef<HTMLButtonElement>(null);
   const slashPickerListRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const providerModelCatalogsRef = useRef(providerModelCatalogs);
+
+  useEffect(() => {
+    providerModelCatalogsRef.current = providerModelCatalogs;
+  }, [providerModelCatalogs]);
 
   const findSlashTrigger = useCallback((text: string, caretPosition: number) => {
     const beforeCaret = text.slice(0, caretPosition);
@@ -454,6 +477,80 @@ const ChatInput: React.FC<ChatInputProps> = ({
     }
   }, [onAddFiles]);
 
+  const loadProviderModels = useCallback(async (provider: ProviderConfig, options: { force?: boolean } = {}) => {
+    const discovery = getProviderModelDiscoveryConfig(provider);
+    if (!discovery.canFetch || !discovery.endpoint) return;
+
+    const requestKey = JSON.stringify({
+      providerId: provider.id,
+      baseURL: discovery.baseURL,
+      endpoint: discovery.endpoint,
+      apiKeyPresent: Boolean(provider.apiKey),
+      style: discovery.style,
+      skipTLSVerify: provider.skipTLSVerify,
+    });
+
+    const current = providerModelCatalogsRef.current[provider.id];
+    if (!options.force && current?.requestKey === requestKey && (current.status === 'loading' || current.status === 'loaded')) return;
+
+    const bridge = getFetchBridge();
+    if (!bridge?.aiFetch) return;
+
+    setProviderModelCatalogs((prev) => ({
+      ...prev,
+      [provider.id]: {
+        status: 'loading',
+        models: prev[provider.id]?.models ?? [],
+        requestKey,
+      },
+    }));
+
+    try {
+      if (bridge.aiAllowlistAddHost && discovery.baseURL) {
+        await bridge.aiAllowlistAddHost(discovery.baseURL);
+      }
+      const result = await bridge.aiFetch(
+        `${discovery.baseURL}${discovery.endpoint}`,
+        'GET',
+        buildModelDiscoveryHeaders(discovery.style, provider.apiKey ? API_KEY_PLACEHOLDER : undefined),
+        undefined,
+        provider.id,
+        undefined,
+        undefined,
+        provider.skipTLSVerify,
+      );
+      if (!result.ok) {
+        throw new Error(result.error || 'Failed to fetch models');
+      }
+      const models = parseFetchedModels(JSON.parse(result.data));
+      models.sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id));
+      setProviderModelCatalogs((prev) => {
+        if (prev[provider.id]?.requestKey !== requestKey) return prev;
+        return {
+          ...prev,
+          [provider.id]: {
+            status: 'loaded',
+            models,
+            requestKey,
+          },
+        };
+      });
+    } catch (err) {
+      setProviderModelCatalogs((prev) => {
+        if (prev[provider.id]?.requestKey !== requestKey) return prev;
+        return {
+          ...prev,
+          [provider.id]: {
+            status: 'error',
+            models: prev[provider.id]?.models ?? [],
+            error: err instanceof Error ? err.message : 'Failed to fetch models',
+            requestKey,
+          },
+        };
+      });
+    }
+  }, []);
+
   const defaultPlaceholder = agentName
     ? t('ai.chat.placeholder').replace('{agent}', agentName)
     : t('ai.chat.placeholderDefault');
@@ -505,6 +602,39 @@ const ChatInput: React.FC<ChatInputProps> = ({
   const selectedSwitcherProvider = hasProviderSwitcher
     ? providerSwitcher!.providers.find((p) => p.id === providerSwitcher!.selectedProviderId)
     : undefined;
+  const activeProviderMenuProvider = hasProviderSwitcher
+    ? (
+        providerSwitcher!.providers.find((p) => p.id === activeProviderMenuId)
+        ?? selectedSwitcherProvider
+        ?? providerSwitcher!.providers[0]
+      )
+    : undefined;
+  const activeProviderModelCatalog = activeProviderMenuProvider
+    ? providerModelCatalogs[activeProviderMenuProvider.id]
+    : undefined;
+  const activeProviderModelOptions = useMemo(
+    () => activeProviderMenuProvider
+      ? buildProviderModelOptions(activeProviderMenuProvider, activeProviderModelCatalog?.models ?? [])
+      : [],
+    [activeProviderMenuProvider, activeProviderModelCatalog?.models],
+  );
+  const activeProviderDiscovery = activeProviderMenuProvider
+    ? getProviderModelDiscoveryConfig(activeProviderMenuProvider)
+    : undefined;
+
+  useEffect(() => {
+    if (!showModelPicker || !hasProviderSwitcher || !activeProviderMenuProvider) return;
+    if (activeProviderModelCatalog?.status === 'loading') return;
+    void loadProviderModels(activeProviderMenuProvider);
+  }, [
+    activeProviderMenuProvider,
+    activeProviderModelCatalog?.requestKey,
+    activeProviderModelCatalog?.status,
+    hasProviderSwitcher,
+    loadProviderModels,
+    showModelPicker,
+  ]);
+
   const providerSwitcherChipLabel = hasProviderSwitcher
     ? (selectedSwitcherProvider
         ? (providerSwitcher!.selectedModelId
@@ -830,6 +960,9 @@ const ChatInput: React.FC<ChatInputProps> = ({
                   if (selectedPreset?.thinkingLevels?.length) {
                     setHoveredModelId(selectedPreset.id);
                   }
+                  if (hasProviderSwitcher) {
+                    setActiveProviderMenuId(selectedSwitcherProvider?.id ?? providerSwitcher!.providers[0]?.id ?? null);
+                  }
                   setActiveMenu('model');
                 } else {
                   closeAllMenus();
@@ -859,50 +992,107 @@ const ChatInput: React.FC<ChatInputProps> = ({
                   onMouseLeave={() => setHoveredModelId(null)}
                 >
                   {hasProviderSwitcher ? (
-                    <div className="min-w-[260px] max-h-[320px] overflow-y-auto">
-                      {providerSwitcher!.providers.map((p) => {
-                        const isSelected = providerSwitcher!.selectedProviderId === p.id;
-                        const defaultModel = p.defaultModel?.trim() ?? '';
-                        const hasModel = defaultModel.length > 0;
-                        // Rows without a defaultModel are inert — picking
-                        // one would save a binding with an empty model id
-                        // and produce a confusing model error at send time.
-                        // User has to set a defaultModel in Settings first.
-                        const disabled = !hasModel;
-                        const modelCaption = hasModel
-                          ? defaultModel
-                          : t('ai.chat.noProviderModel');
-                        return (
-                          <button
-                            key={p.id}
-                            type="button"
-                            role="option"
-                            aria-selected={isSelected}
-                            aria-disabled={disabled}
-                            disabled={disabled}
-                            title={disabled ? t('ai.chat.noProviderModel') : undefined}
-                            onClick={() => {
-                              if (disabled) return;
-                              providerSwitcher!.onSelect(p.id, defaultModel);
-                              closeAllMenus();
-                            }}
-                            className={`w-full flex items-center gap-2.5 px-2.5 py-2 text-left transition-colors ${
-                              disabled
-                                ? 'opacity-55 cursor-not-allowed'
-                                : 'hover:bg-muted/30 cursor-pointer'
-                            }`}
-                          >
-                            <ProviderIconBadge provider={p} size="md" />
-                            <div className="flex-1 min-w-0">
-                              <div className="truncate text-[12px] text-foreground/85">{p.name}</div>
-                              <div className={`truncate text-[10.5px] ${hasModel ? 'text-muted-foreground/70 font-mono' : 'text-muted-foreground/55 italic'}`}>
-                                {modelCaption}
+                    <div className="grid min-w-[420px] grid-cols-[minmax(130px,0.85fr)_minmax(190px,1.15fr)]">
+                      <div className="max-h-[340px] overflow-y-auto border-r border-border/40 p-1">
+                        {providerSwitcher!.providers.map((p) => {
+                          const isMenuActive = activeProviderMenuProvider?.id === p.id;
+                          const isBound = providerSwitcher!.selectedProviderId === p.id;
+                          const catalog = providerModelCatalogs[p.id];
+                          const caption =
+                            (isBound ? providerSwitcher!.selectedModelId : undefined)
+                            || p.defaultModel
+                            || buildProviderModelOptions(p, catalog?.models ?? [])[0]?.id
+                            || t('ai.chat.noModel');
+                          return (
+                            <button
+                              key={p.id}
+                              type="button"
+                              role="option"
+                              aria-selected={isMenuActive}
+                              onClick={() => {
+                                setActiveProviderMenuId(p.id);
+                                void loadProviderModels(p);
+                              }}
+                              className={`w-full flex items-center gap-2 px-2 py-2 text-left transition-colors rounded-md cursor-pointer ${
+                                isMenuActive ? 'bg-muted/42' : 'hover:bg-muted/28'
+                              }`}
+                            >
+                              <ProviderIconBadge provider={p} size="sm" />
+                              <div className="min-w-0 flex-1">
+                                <div className="flex min-w-0 items-center gap-1.5">
+                                  <span className="truncate text-[12px] text-foreground/86">{p.name}</span>
+                                  {isBound && <Check size={11} className="text-primary shrink-0" />}
+                                </div>
+                                <div className="truncate font-mono text-[10px] text-muted-foreground/62">
+                                  {caption}
+                                </div>
                               </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <div className="max-h-[340px] min-w-0 overflow-y-auto">
+                        <div className="sticky top-0 z-[1] flex items-center justify-between gap-2 border-b border-border/35 bg-popover px-2.5 py-1.5">
+                          <div className="min-w-0">
+                            <div className="truncate text-[11px] font-medium text-foreground/78">
+                              {activeProviderMenuProvider?.name ?? t('ai.chat.selectProvider')}
                             </div>
-                            {isSelected && <Check size={12} className="text-primary shrink-0" />}
-                          </button>
-                        );
-                      })}
+                            {activeProviderModelCatalog?.status === 'loading' && (
+                              <div className="text-[10px] text-muted-foreground/55">{t('ai.providers.loadingModels')}</div>
+                            )}
+                          </div>
+                          {activeProviderMenuProvider && activeProviderDiscovery?.canFetch && (
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <button
+                                  type="button"
+                                  onClick={() => void loadProviderModels(activeProviderMenuProvider, { force: true })}
+                                  disabled={activeProviderModelCatalog?.status === 'loading'}
+                                  className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground/62 hover:bg-muted/35 hover:text-foreground disabled:opacity-50"
+                                  aria-label={t('ai.providers.refreshModels')}
+                                >
+                                  <RefreshCw size={12} className={activeProviderModelCatalog?.status === 'loading' ? 'animate-spin' : ''} />
+                                </button>
+                              </TooltipTrigger>
+                              <TooltipContent>{t('ai.providers.refreshModels')}</TooltipContent>
+                            </Tooltip>
+                          )}
+                        </div>
+                        {activeProviderModelOptions.length > 0 ? (
+                          <div className="p-1">
+                            {activeProviderModelOptions.slice(0, 100).map((model) => {
+                              const isSelected =
+                                providerSwitcher!.selectedProviderId === activeProviderMenuProvider?.id
+                                && providerSwitcher!.selectedModelId === model.id;
+                              return (
+                                <button
+                                  key={model.id}
+                                  type="button"
+                                  role="option"
+                                  aria-selected={isSelected}
+                                  onClick={() => {
+                                    if (!activeProviderMenuProvider) return;
+                                    providerSwitcher!.onSelect(activeProviderMenuProvider.id, model.id);
+                                    closeAllMenus();
+                                  }}
+                                  className="flex w-full min-w-0 items-center gap-1.5 rounded-md px-2.5 py-1.5 text-left text-[12px] transition-colors hover:bg-muted/30 cursor-pointer"
+                                >
+                                  {isSelected ? <Check size={11} className="text-primary shrink-0" /> : <span className="w-[11px] shrink-0" />}
+                                  <span className="min-w-0 flex-1 truncate font-mono text-foreground/86">{model.id}</span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <div className="px-3 py-8 text-center text-[11px] text-muted-foreground/58">
+                            {activeProviderModelCatalog?.status === 'loading'
+                              ? t('ai.providers.loadingModels')
+                              : activeProviderModelCatalog?.status === 'error'
+                                ? activeProviderModelCatalog.error
+                                : t('ai.chat.noProviderModel')}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   ) : (
                     <div className="min-w-[260px] max-h-[320px] overflow-y-auto">
