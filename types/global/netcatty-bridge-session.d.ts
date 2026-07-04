@@ -246,6 +246,11 @@ declare global {
           rxSpeed: number;            // Receive speed (bytes/sec)
           txSpeed: number;            // Transmit speed (bytes/sec)
         }>;
+        hostname?: string;             // Hostname reported by the server
+        osName?: string;               // Friendly OS name when available
+        kernelRelease?: string;        // Kernel release from uname
+        uptimeSeconds?: number | null; // Server uptime in seconds
+        loadAverage?: number[];        // 1/5/15-minute load average
       };
     }>;
     setSessionEncoding?(sessionId: string, encoding: string): Promise<{ ok: boolean; encoding: string }>;

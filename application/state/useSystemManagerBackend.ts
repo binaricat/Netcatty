@@ -19,6 +19,14 @@ export function useSystemManagerBackend() {
     return bridge.listSystemProcesses(sessionId);
   }, []);
 
+  const getServerStats = useCallback(async (sessionId: string) => {
+    const bridge = netcattyBridge.get();
+    if (!bridge?.getServerStats) {
+      return { success: false as const, error: 'getServerStats unavailable' };
+    }
+    return bridge.getServerStats(sessionId);
+  }, []);
+
   const signalSystemProcess = useCallback(async (options: {
     sessionId: string;
     pid: number;
@@ -162,6 +170,7 @@ export function useSystemManagerBackend() {
   return useMemo(() => ({
     probeSystemCapabilities,
     listSystemProcesses,
+    getServerStats,
     signalSystemProcess,
     listTmuxSessions,
     createTmuxSession,
@@ -180,6 +189,7 @@ export function useSystemManagerBackend() {
   }), [
     probeSystemCapabilities,
     listSystemProcesses,
+    getServerStats,
     signalSystemProcess,
     listTmuxSessions,
     createTmuxSession,

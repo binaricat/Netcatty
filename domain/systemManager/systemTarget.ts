@@ -41,7 +41,7 @@ export function buildSystemManagerTabs(
   capabilities: SessionCapabilities | undefined,
   session: TerminalSession | null | undefined,
 ): SystemManagerSubTab[] {
-  const tabs: SystemManagerSubTab[] = ['processes'];
+  const tabs: SystemManagerSubTab[] = ['overview', 'processes'];
   if (shouldShowTmuxTab(host, capabilities, session)) tabs.push('tmux');
   if (shouldShowDockerTab(host, capabilities, session)) tabs.push('docker');
   return tabs;

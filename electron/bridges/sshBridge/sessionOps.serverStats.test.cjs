@@ -126,6 +126,27 @@ test("getServerStats does not touch the companion path for a normal SSH session"
   assert.equal(result.success, true);
 });
 
+test("getServerStats includes host identity, load average, and uptime", async () => {
+  const sessions = new Map();
+  const session = {
+    type: "ssh",
+    conn: fakeConn(
+      "CPURAW:1000 900|CORES:4|PERCORERAW:|MEMINFO:8000 4000 100 900 0 0|PROCS:|DISKS:/:20:80:25|NET:eth0:1000:2000|HOST:demo-box|OS:Ubuntu 24.04 LTS|KERNEL:6.8.0|UPTIME:12345|LOAD:0.10 0.20 0.30",
+    ),
+  };
+  sessions.set("sid", session);
+
+  const api = makeSessionOps(sessions);
+  const result = await api.getServerStats({ sender: {} }, { sessionId: "sid" });
+
+  assert.equal(result.success, true);
+  assert.equal(result.stats.hostname, "demo-box");
+  assert.equal(result.stats.osName, "Ubuntu 24.04 LTS");
+  assert.equal(result.stats.kernelRelease, "6.8.0");
+  assert.equal(result.stats.uptimeSeconds, 12345);
+  assert.deepEqual(result.stats.loadAverage, [0.1, 0.2, 0.3]);
+});
+
 test("getServerStats parses macOS stats and avoids blocking top command", async () => {
   const sessions = new Map();
   let command = "";

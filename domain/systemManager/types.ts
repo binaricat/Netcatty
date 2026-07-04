@@ -20,6 +20,54 @@ export interface SystemProcessInfo {
   command: string;
 }
 
+export interface SystemDiskInfo {
+  mountPoint: string;
+  used: number;
+  total: number;
+  percent: number;
+}
+
+export interface SystemNetworkInterfaceInfo {
+  name: string;
+  rxBytes: number;
+  txBytes: number;
+  rxSpeed: number;
+  txSpeed: number;
+}
+
+export interface SystemTopProcessInfo {
+  pid: string;
+  memPercent: number;
+  command: string;
+}
+
+export interface SystemOverviewStats {
+  cpu: number | null;
+  cpuCores: number | null;
+  cpuPerCore: number[];
+  memTotal: number | null;
+  memUsed: number | null;
+  memFree: number | null;
+  memBuffers: number | null;
+  memCached: number | null;
+  swapTotal: number | null;
+  swapUsed: number | null;
+  topProcesses: SystemTopProcessInfo[];
+  diskPercent: number | null;
+  diskUsed: number | null;
+  diskTotal: number | null;
+  disks: SystemDiskInfo[];
+  netRxSpeed: number;
+  netTxSpeed: number;
+  latencyMs: number | null;
+  netInterfaces: SystemNetworkInterfaceInfo[];
+  hostname?: string;
+  osName?: string;
+  kernelRelease?: string;
+  uptimeSeconds?: number | null;
+  loadAverage?: number[];
+}
+
 export interface TmuxSessionInfo {
   name: string;
   windows: number;
@@ -119,7 +167,7 @@ export type DockerImageManageAction =
   | { action: 'prune'; all?: boolean }
   | { action: 'tag'; imageId: string; repository: string; tag?: string };
 
-export type SystemManagerSubTab = 'processes' | 'tmux' | 'docker';
+export type SystemManagerSubTab = 'overview' | 'processes' | 'tmux' | 'docker';
 
 export interface TerminalPopupIcon {
   kind: 'image';

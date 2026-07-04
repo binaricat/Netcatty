@@ -752,7 +752,14 @@ function createSessionOpsApi(ctx) {
         `disks=$(df -kP 2>/dev/null | awk 'NR>1&&index($1,"/dev/")==1{m=$6;if(m=="/"||index(m,"/Volumes/")==1){u=$3/1048576;t=$2/1048576;p=$5;gsub(/%/,"",p);printf "%s:%.0f:%.0f:%s,",m,u,t,p}}' | sed 's/,$//')`,
         // Network: Link# lines only, exclude loopback, detect column shift (no MAC addr → cols shift left)
         `net=$(netstat -ibn 2>/dev/null | awk 'NR==1{for(i=1;i<=NF;i++){if($i=="Ibytes")ib=i;if($i=="Obytes")ob=i}next} ib&&ob&&$1~/^[[:alpha:]]/&&$1!~/^lo/&&$0~/<Link#/{name=$1;gsub(/[*]/,"",name);rx=$(ib)+0;tx=$(ob)+0;if(rx>0||tx>0){seen[name]=rx ":" tx}} END{for(name in seen)printf "%s:%s,",name,seen[name]}' | sed 's/,$//')`,
-        `echo "CPU:$cpupct|CORES:$cores|MEMINFO:$memtotal $memfree 0 $memcached $swaptotal $swapfree|PROCS:$procs|DISKS:$disks|NET:$net"`,
+        `hostname_value=$(hostname 2>/dev/null || uname -n 2>/dev/null || echo "")`,
+        `osname=$(printf "%s %s" "$(sw_vers -productName 2>/dev/null)" "$(sw_vers -productVersion 2>/dev/null)" | sed 's/[[:space:]]*$//')`,
+        `kernel=$(uname -r 2>/dev/null || echo "")`,
+        `bootsec=$(sysctl -n kern.boottime 2>/dev/null | awk -F'[ ,]+' '{for(i=1;i<=NF;i++){if($i=="sec"){print $(i+2);exit}}}')`,
+        `nowsec=$(date +%s 2>/dev/null || echo "0")`,
+        `uptime=$(awk -v n="$nowsec" -v b="$bootsec" 'BEGIN{if(n>0&&b>0)printf "%.0f",n-b}')`,
+        `loadavg=$(sysctl -n vm.loadavg 2>/dev/null | tr -d '{}' | awk '{print $1" "$2" "$3"}')`,
+        `echo "CPU:$cpupct|CORES:$cores|MEMINFO:$memtotal $memfree 0 $memcached $swaptotal $swapfree|PROCS:$procs|DISKS:$disks|NET:$net|HOST:$hostname_value|OS:$osname|KERNEL:$kernel|UPTIME:$uptime|LOAD:$loadavg"`,
       ].join('; ');
     
       // Command to get CPU (overall + per-core), Memory, Disk, and Network stats
@@ -779,8 +786,13 @@ function createSessionOpsApi(ctx) {
         `disks=$(df -BG 2>/dev/null | awk 'NR>1 && $1 ~ /^\\/dev/ {gsub(/G/,"",$2); gsub(/G/,"",$3); gsub(/%/,"",$5); printf "%s:%s:%s:%s,", $6, $3, $2, $5}' | sed 's/,$//' || df 2>/dev/null | awk 'NR>1 && $1 ~ /^\\/dev/ {total=$2/1048576; used=$3/1048576; pct=$5; gsub(/%/,"",pct); printf "%s:%.0f:%.0f:%s,", $6, used, total, pct}' | sed 's/,$//' || echo "")`,
         // Get network interface stats from /proc/net/dev (interface:rx_bytes:tx_bytes), excluding lo and virtual interfaces
         `net=$(cat /proc/net/dev 2>/dev/null | awk 'NR>2 {gsub(/^[ \\t]+/, ""); split($0, a, ":"); iface=a[1]; if(iface != "lo" && iface !~ /^veth/ && iface !~ /^docker/ && iface !~ /^br-/) {split(a[2], b); printf "%s:%s:%s,", iface, b[1], b[9]}}' | sed 's/,$//' || echo "")`,
+        `hostname_value=$(hostname 2>/dev/null || uname -n 2>/dev/null || echo "")`,
+        `osname=$(awk -F= '/^PRETTY_NAME=/{gsub(/"/,"",$2);print $2;exit}' /etc/os-release 2>/dev/null || uname -s 2>/dev/null || echo "")`,
+        `kernel=$(uname -r 2>/dev/null || echo "")`,
+        `uptime=$(awk '{printf "%.0f",$1}' /proc/uptime 2>/dev/null || echo "")`,
+        `loadavg=$(awk '{print $1" "$2" "$3}' /proc/loadavg 2>/dev/null || echo "")`,
         // Output all stats (using CPURAW and PERCORERAW instead of CPU and PERCORE)
-        `echo "CPURAW:$cpuraw|CORES:$cores|PERCORERAW:$percoreraw|MEMINFO:$meminfo|PROCS:$procs|DISKS:$disks|NET:$net"`
+        `echo "CPURAW:$cpuraw|CORES:$cores|PERCORERAW:$percoreraw|MEMINFO:$meminfo|PROCS:$procs|DISKS:$disks|NET:$net|HOST:$hostname_value|OS:$osname|KERNEL:$kernel|UPTIME:$uptime|LOAD:$loadavg"`
       ].join('; ');
     
       // Auto-detect OS via uname — only Linux and macOS are supported
@@ -843,6 +855,11 @@ function createSessionOpsApi(ctx) {
             let topProcesses = [];  // Array of { pid, memPercent, command }
             let disks = [];  // Array of { mountPoint, used, total, percent }
             let networkInterfaces = [];  // Array of { name, rxBytes, txBytes }
+            let hostname = "";
+            let osName = "";
+            let kernelRelease = "";
+            let uptimeSeconds = null;
+            let loadAverage = [];
     
             for (const part of parts) {
               if (part.startsWith('CPU:')) {
@@ -950,6 +967,20 @@ function createSessionOpsApi(ctx) {
                     }
                   }
                 }
+              } else if (part.startsWith('HOST:')) {
+                hostname = part.substring(5).trim();
+              } else if (part.startsWith('OS:')) {
+                osName = part.substring(3).trim();
+              } else if (part.startsWith('KERNEL:')) {
+                kernelRelease = part.substring(7).trim();
+              } else if (part.startsWith('UPTIME:')) {
+                const uptime = Number(part.substring(7).trim());
+                if (Number.isFinite(uptime) && uptime >= 0) uptimeSeconds = uptime;
+              } else if (part.startsWith('LOAD:')) {
+                loadAverage = part.substring(5).trim().split(/\s+/)
+                  .map((value) => Number(value))
+                  .filter((value) => Number.isFinite(value) && value >= 0)
+                  .slice(0, 3);
               }
             }
     
@@ -1094,6 +1125,11 @@ function createSessionOpsApi(ctx) {
                 netTxSpeed,    // Total network transmit speed (bytes/sec)
                 latencyMs,      // Approximate SSH stats round-trip latency (ms)
                 netInterfaces, // Per-interface network stats
+                hostname,
+                osName,
+                kernelRelease,
+                uptimeSeconds,
+                loadAverage,
               },
             });
           });
