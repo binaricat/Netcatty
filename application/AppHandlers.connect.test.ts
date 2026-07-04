@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { handleConnectToHostImpl } from './app/AppHandlers.ts';
+import {
+  flushQueuedTrayPanelConnectHostsImpl,
+  handleConnectToHostImpl,
+  handleTrayPanelConnectRequestImpl,
+} from './app/AppHandlers.ts';
 import type { Host } from '../types';
 
 const baseHost: Host = {
@@ -61,4 +65,54 @@ test('connect serial host handler returns the created terminal tab id', () => {
   );
 
   assert.equal(result, 'serial-session');
+});
+
+test('tray panel connect request queues until the vault is initialized', () => {
+  const queuedHostIds: string[] = [];
+  const connectedHostIds: string[] = [];
+
+  handleTrayPanelConnectRequestImpl(
+    () => ({
+      connectNow: (hostId: string) => connectedHostIds.push(hostId),
+      isVaultInitialized: false,
+      queueConnect: (hostId: string) => queuedHostIds.push(hostId),
+    }),
+    'host-1',
+  );
+
+  assert.deepEqual(queuedHostIds, ['host-1']);
+  assert.deepEqual(connectedHostIds, []);
+});
+
+test('tray panel connect request runs immediately after the vault is initialized', () => {
+  const queuedHostIds: string[] = [];
+  const connectedHostIds: string[] = [];
+
+  handleTrayPanelConnectRequestImpl(
+    () => ({
+      connectNow: (hostId: string) => connectedHostIds.push(hostId),
+      isVaultInitialized: true,
+      queueConnect: (hostId: string) => queuedHostIds.push(hostId),
+    }),
+    'host-1',
+  );
+
+  assert.deepEqual(queuedHostIds, []);
+  assert.deepEqual(connectedHostIds, ['host-1']);
+});
+
+test('queued tray panel connects flush in order', () => {
+  const connectedHostIds: string[] = [];
+  let pendingHostIds = ['host-1', 'host-2'];
+
+  flushQueuedTrayPanelConnectHostsImpl(() => ({
+    connectNow: (hostId: string) => connectedHostIds.push(hostId),
+    pendingHostIds,
+    setPendingHostIds: (nextHostIds: string[]) => {
+      pendingHostIds = nextHostIds;
+    },
+  }));
+
+  assert.deepEqual(connectedHostIds, ['host-1', 'host-2']);
+  assert.deepEqual(pendingHostIds, []);
 });
