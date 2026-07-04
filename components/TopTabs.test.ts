@@ -32,12 +32,15 @@ const {
 } = await import("../application/state/terminalDragData.ts");
 const {
   activateLogViewTab,
+  createSessionTopTabDoubleClickHandler,
   formatSessionTopTabLabel,
   formatSessionTopTabTooltip,
+  stopCloseButtonDoubleClickPropagation,
 } = await import("./top-tabs/TopTabItems.tsx");
 const { activeTabStore } = await import("../application/state/activeTabStore.ts");
 const indexCss = readFileSync(new URL("../index.css", import.meta.url), "utf8");
 const topTabsSource = readFileSync(new URL("./TopTabs.tsx", import.meta.url), "utf8");
+const topTabItemsSource = readFileSync(new URL("./top-tabs/TopTabItems.tsx", import.meta.url), "utf8");
 const terminalViewSource = readFileSync(new URL("./terminal/TerminalView.tsx", import.meta.url), "utf8");
 
 test("host tree tab gutter fills the remaining sidebar width", () => {
@@ -108,12 +111,37 @@ test("quick switcher plus button exposes a custom CSS hook", () => {
 });
 
 test("SessionTabIcon checks custom host icon appearance before distro logos", () => {
-  const source = readFileSync(new URL("./top-tabs/TopTabItems.tsx", import.meta.url), "utf8");
-  assert.match(source, /resolveHostIconAppearance\(host\)/);
+  assert.match(topTabItemsSource, /resolveHostIconAppearance\(host\)/);
   assert.ok(
-    source.indexOf("resolveHostIconAppearance(host)") < source.indexOf("getEffectiveHostDistro(host)"),
+    topTabItemsSource.indexOf("resolveHostIconAppearance(host)") < topTabItemsSource.indexOf("getEffectiveHostDistro(host)"),
     "custom host icon should be checked before distro fallback",
   );
+});
+
+test("session top tabs copy the session on double click through the existing copy handler", () => {
+  const copiedSessionIds: string[] = [];
+  const handleDoubleClick = createSessionTopTabDoubleClickHandler(
+    (sessionId) => copiedSessionIds.push(sessionId),
+    "session-1",
+  );
+
+  handleDoubleClick({} as Parameters<typeof handleDoubleClick>[0]);
+
+  assert.deepEqual(copiedSessionIds, ["session-1"]);
+  assert.match(topTabItemsSource, /onDoubleClick=\{handleDoubleClick\}/);
+});
+
+test("session close button double click stays on the close button", () => {
+  let stopPropagationCount = 0;
+
+  stopCloseButtonDoubleClickPropagation({
+    stopPropagation: () => {
+      stopPropagationCount += 1;
+    },
+  });
+
+  assert.equal(stopPropagationCount, 1);
+  assert.match(topTabItemsSource, /onDoubleClick=\{stopCloseButtonDoubleClickPropagation\}/);
 });
 
 test("session top tab label only shows the host label for ssh sessions", () => {
