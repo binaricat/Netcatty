@@ -45,6 +45,11 @@ import { classifyDistroId, shouldProbeSessionCwd } from "../domain/host";
 import { supportsZmodemTerminalDragDrop } from "../lib/zmodemDragDrop";
 import { resolveHostAuth } from "../domain/sshAuth";
 import { useTerminalBackend } from "../application/state/useTerminalBackend";
+import {
+  TERMINAL_AUTO_RECONNECT_DELAY_MS,
+  shouldAutoReconnectAfterExit,
+  shouldContinueAutoReconnectAfterFailure,
+} from "../application/state/terminalAutoReconnect";
 import { useStoredBoolean } from "../application/state/useStoredBoolean";
 import { readOptionalStoredStringValue, useStoredString } from "../application/state/useStoredString";
 import { useSessionLogBackend } from "../application/state/useSessionLogBackend";
@@ -363,6 +368,10 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   // chained xterm.write callbacks verify the token before proceeding so a
   // cancelled retry can't fire a startNewSession after the fact.
   const retryTokenRef = useRef<symbol | null>(null);
+  const autoReconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const autoReconnectLoopActiveRef = useRef(false);
+  const autoReconnectAttemptRef = useRef(0);
+  const startReconnectRef = useRef<((mode: "manual" | "auto") => void) | null>(null);
   const terminalDataCapturedRef = useRef(false);
   const connectionLogBufferRef = useRef(createConnectionLogBuffer(MAX_CONNECTION_LOG_DATA_CHARS));
   const terminalLogSanitizerRef = useRef(createReplaySafeTerminalLogSanitizer());
@@ -560,6 +569,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   const [status, setStatus] = useState<TerminalSession["status"]>(() => (
     getInitialTerminalStatus()
   ));
+  const hasEverConnectedRef = useRef(status === "connected");
   const [error, setError] = useState<string | null>(null);
   const lastToastedErrorRef = useRef<string | null>(null);
   const [showLogs, setShowLogs] = useState(false);
@@ -999,13 +1009,70 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   const resolvedChainHosts =
     chainHosts;
 
-  const updateStatus = (next: TerminalSession["status"]) => {
+  const clearAutoReconnect = useCallback((options?: { stopLoop?: boolean }) => {
+    if (autoReconnectTimerRef.current) {
+      clearTimeout(autoReconnectTimerRef.current);
+      autoReconnectTimerRef.current = null;
+    }
+    if (options?.stopLoop !== false) {
+      autoReconnectLoopActiveRef.current = false;
+      autoReconnectAttemptRef.current = 0;
+    }
+  }, []);
+
+  const updateStatus = useCallback((next: TerminalSession["status"]) => {
     setStatus(next);
     hasConnectedRef.current = next === "connected";
+    if (next === "connected") {
+      hasEverConnectedRef.current = true;
+      clearAutoReconnect();
+    }
     onStatusChange?.(sessionId, next);
-  };
+  }, [clearAutoReconnect, onStatusChange, sessionId]);
   const updateStatusRef = useRef(updateStatus);
   updateStatusRef.current = updateStatus;
+
+  const scheduleAutoReconnect = useCallback((trigger?: { evt?: Parameters<typeof shouldAutoReconnectAfterExit>[0]["evt"] }) => {
+    const shouldSchedule = trigger?.evt
+      ? shouldAutoReconnectAfterExit({
+        evt: trigger.evt,
+        host,
+        terminalSettings,
+        hasEverConnected: hasEverConnectedRef.current,
+      })
+      : shouldContinueAutoReconnectAfterFailure({
+        host,
+        terminalSettings,
+        loopActive: autoReconnectLoopActiveRef.current,
+      });
+
+    if (!shouldSchedule || !termRef.current) {
+      return false;
+    }
+
+    autoReconnectLoopActiveRef.current = true;
+    if (autoReconnectTimerRef.current) {
+      return true;
+    }
+
+    autoReconnectAttemptRef.current += 1;
+    const attempt = autoReconnectAttemptRef.current;
+    const seconds = Math.round(TERMINAL_AUTO_RECONNECT_DELAY_MS / 1000);
+    const scheduledMessage = t("terminal.progress.autoReconnectScheduled", { seconds, attempt });
+
+    setError(null);
+    setShowLogs(true);
+    setIsDisconnectedDialogDismissed(false);
+    setProgressLogs((prev) => [...prev, scheduledMessage]);
+    updateStatus("connecting");
+
+    autoReconnectTimerRef.current = setTimeout(() => {
+      autoReconnectTimerRef.current = null;
+      startReconnectRef.current?.("auto");
+    }, TERMINAL_AUTO_RECONNECT_DELAY_MS);
+
+    return true;
+  }, [host, t, terminalSettings, updateStatus]);
 
   const prepareRestoredReconnect = useCallback(() => {
     if (restoreState !== "restored-disconnected") {
@@ -1162,8 +1229,9 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         exitMessage,
       );
       onSessionExit?.(sessionId, evt);
+      scheduleAutoReconnect({ evt });
     });
-  }, [onSessionExit, sessionId, terminalBackend]);
+  }, [onSessionExit, scheduleAutoReconnect, sessionId, terminalBackend]);
 
   const applyHibernateSnapshot = useCallback((
     snapshot: {
@@ -1282,6 +1350,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     retryTokenRef.current = null;
     restoreCwdIntentRef.current = null;
     suppressHostStartupCommandRef.current = false;
+    clearAutoReconnect();
     cleanupSession();
     disposeRuntimeOnly();
   };
@@ -1371,6 +1440,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     onSessionExit: (closedSessionId, evt) => {
       clearTerminalCwd();
       onSessionExit?.(closedSessionId, evt);
+      scheduleAutoReconnect({ evt });
     },
     onTerminalDataCapture: handleTerminalDataCaptureOnce,
     onTerminalOutput: onTerminalOutput
@@ -1400,11 +1470,26 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   sessionStartersRef.current = sessionStarters;
 
   useEffect(() => {
-    if (status === 'disconnected') {
+    if (status === 'disconnected' && !autoReconnectLoopActiveRef.current) {
       connectScriptsConsumedRef.current = false;
       connectScriptsCompletedIdsRef.current = new Set();
     }
   }, [status]);
+
+  useEffect(() => {
+    if (status !== "disconnected") return;
+    scheduleAutoReconnect();
+  }, [scheduleAutoReconnect, status]);
+
+  useEffect(() => {
+    if (!autoReconnectLoopActiveRef.current) return;
+    if (shouldContinueAutoReconnectAfterFailure({ host, terminalSettings, loopActive: true })) return;
+    const hadPendingReconnect = autoReconnectTimerRef.current !== null;
+    clearAutoReconnect();
+    if (hadPendingReconnect) {
+      updateStatus("disconnected");
+    }
+  }, [clearAutoReconnect, host, terminalSettings, updateStatus]);
 
   useEffect(() => {
     pendingScriptRunIdRef.current = null;
@@ -1960,6 +2045,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     if (pendingHostKeyRequestId) {
       void terminalBackend.respondHostKeyVerification(pendingHostKeyRequestId, false);
     }
+    clearAutoReconnect();
     retryTokenRef.current = null;
     restoreCwdIntentRef.current = null;
     setIsCancelling(true);
@@ -1983,6 +2069,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   };
 
   const handleCloseDisconnectedSession = () => {
+    clearAutoReconnect();
     retryTokenRef.current = null;
     restoreCwdIntentRef.current = null;
     onCloseSession?.(sessionId);
@@ -2024,9 +2111,15 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     setPendingHostKeyRequestId(null);
   };
 
-  const handleRetry = () => {
+  const startReconnect = (mode: "manual" | "auto" = "manual") => {
     if (!termRef.current) return;
-    prepareRestoredReconnect();
+    if (mode === "manual") {
+      clearAutoReconnect();
+      prepareRestoredReconnect();
+    } else {
+      restoreCwdIntentRef.current = null;
+      suppressHostStartupCommandRef.current = true;
+    }
     cleanupSession();
     const term = termRef.current;
     // Claim a fresh retry token. If the user cancels / closes / unmounts /
@@ -2040,12 +2133,18 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     isBootActiveRef.current = true;
     auth.resetForRetry();
     terminalDataCapturedRef.current = false;
-    hasRunStartupCommandRef.current = false;
+    if (mode === "manual") {
+      hasRunStartupCommandRef.current = false;
+    }
     setIsDisconnectedDialogDismissed(false);
     setConnectionReuseFellBack(false);
     updateStatus("connecting");
     setError(null);
-    setProgressLogs(["Retrying secure channel..."]);
+    setProgressLogs((prev) => (
+      mode === "auto"
+        ? [...prev, t("terminal.progress.autoReconnectAttempt", { attempt: autoReconnectAttemptRef.current })]
+        : ["Retrying secure channel..."]
+    ));
     setShowLogs(true);
 
     const startNewSession = () => {
@@ -2094,6 +2193,11 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         startNewSession,
       );
     });
+  };
+  startReconnectRef.current = startReconnect;
+
+  const handleRetry = () => {
+    startReconnect("manual");
   };
 
   const shouldShowConnectionDialog = shouldShowTerminalConnectionDialog({

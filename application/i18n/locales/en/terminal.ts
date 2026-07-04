@@ -167,6 +167,8 @@ export const enTerminalMessages: Messages = {
   'terminal.progress.cancelling': 'Cancelling...',
   'terminal.progress.startOver': 'Start over',
   'terminal.progress.enterReconnectHint': 'Press Enter to reconnect',
+  'terminal.progress.autoReconnectScheduled': 'Connection lost. Reconnecting in {seconds}s (attempt {attempt}).',
+  'terminal.progress.autoReconnectAttempt': 'Auto reconnect attempt {attempt}...',
   'terminal.connection.dismissDisconnectedDialog': 'Dismiss disconnected notice',
   'terminal.connection.chainOf': 'Chain {current} of {total}',
   'terminal.connection.showLogs': 'Show logs',

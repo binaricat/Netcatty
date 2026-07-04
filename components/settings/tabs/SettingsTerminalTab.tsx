@@ -830,6 +830,15 @@ function SettingsTerminalTab(props: {
           />
         </SettingRow>
         <SettingRow
+          label={t("settings.terminal.connection.sshAutoReconnectEnabled")}
+          description={t("settings.terminal.connection.sshAutoReconnectEnabled.desc")}
+        >
+          <Toggle
+            checked={terminalSettings.sshAutoReconnectEnabled}
+            onChange={(v) => updateTerminalSetting("sshAutoReconnectEnabled", v)}
+          />
+        </SettingRow>
+        <SettingRow
           label={t("settings.terminal.connection.keepaliveInterval")}
           description={t("settings.terminal.connection.keepaliveInterval.desc")}
         >

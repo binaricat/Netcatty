@@ -82,6 +82,7 @@ export interface TerminalSettings {
   verifyHostKeys: boolean; // Verify SSH host keys before authenticating
   keepaliveInterval: number; // Seconds between SSH-level keepalive packets (0 = disabled)
   keepaliveCountMax: number; // Unanswered keepalives before declaring the connection dead
+  sshAutoReconnectEnabled: boolean; // Automatically reconnect SSH sessions after unexpected disconnects
   x11Display: string; // Optional local X11 DISPLAY override (empty = use system DISPLAY/default)
 
   // Mosh Connection
@@ -350,6 +351,7 @@ const DEFAULT_TERMINAL_SETTINGS: TerminalSettings = {
   verifyHostKeys: true,
   keepaliveInterval: 30,
   keepaliveCountMax: 10,
+  sshAutoReconnectEnabled: true,
   x11Display: '', // Empty = use DISPLAY/default local X server
   moshClientPath: '', // Legacy mosh-client override; normal UI uses bundled mosh-client
   showServerStats: true, // Show server stats by default

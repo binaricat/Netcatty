@@ -56,10 +56,11 @@ test("manual reconnect captures restore cwd intent before clearing restored stat
   const prepareDefinitionIndex = source.indexOf("const prepareRestoredReconnect = useCallback");
   const captureAssignIndex = source.indexOf("restoreCwdIntentRef.current =", prepareDefinitionIndex);
   const captureCallIndex = source.indexOf("resolveRestoreCwdIntent", captureAssignIndex);
-  const manualRetryIndex = source.indexOf("const handleRetry = () =>");
-  const manualPrepareIndex = source.indexOf("prepareRestoredReconnect();", manualRetryIndex);
+  const reconnectIndex = source.indexOf("const startReconnect = ");
+  const manualBranchIndex = source.indexOf('if (mode === "manual")', reconnectIndex);
+  const manualPrepareIndex = source.indexOf("prepareRestoredReconnect();", manualBranchIndex);
   const bootActiveIndex = source.indexOf("isBootActiveRef.current = true", manualPrepareIndex);
-  const connectingIndex = source.indexOf('updateStatus("connecting")');
+  const connectingIndex = source.indexOf('updateStatus("connecting")', manualPrepareIndex);
   const startNewSessionIndex = source.indexOf("const startNewSession = () =>", connectingIndex);
 
   assert.notEqual(importIndex, -1);
@@ -68,7 +69,8 @@ test("manual reconnect captures restore cwd intent before clearing restored stat
   assert.notEqual(prepareDefinitionIndex, -1);
   assert.notEqual(captureCallIndex, -1);
   assert.notEqual(captureAssignIndex, -1);
-  assert.notEqual(manualRetryIndex, -1);
+  assert.notEqual(reconnectIndex, -1);
+  assert.notEqual(manualBranchIndex, -1);
   assert.notEqual(manualPrepareIndex, -1);
   assert.notEqual(bootActiveIndex, -1);
   assert.notEqual(connectingIndex, -1);
@@ -80,6 +82,19 @@ test("manual reconnect captures restore cwd intent before clearing restored stat
   assert.ok(
     bootActiveIndex < startNewSessionIndex,
     "manual retry must reactivate the boot guard before opening a backend session",
+  );
+});
+
+test("auto reconnect connected history ref is initialized after status state exists", () => {
+  const source = readFileSync(new URL("../Terminal.tsx", import.meta.url), "utf8");
+  const statusStateIndex = source.indexOf('const [status, setStatus] = useState<TerminalSession["status"]>');
+  const hasEverConnectedIndex = source.indexOf("const hasEverConnectedRef = useRef");
+
+  assert.notEqual(statusStateIndex, -1);
+  assert.notEqual(hasEverConnectedIndex, -1);
+  assert.ok(
+    statusStateIndex < hasEverConnectedIndex,
+    "auto reconnect refs must not read status before the status state is initialized",
   );
 });
 
