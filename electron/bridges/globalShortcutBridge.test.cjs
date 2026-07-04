@@ -701,6 +701,63 @@ test("mac dock host click waits for a newly created main window to be ready", as
   });
 });
 
+test("mac dock host click waits for a tracked main window to be ready", async () => {
+  await withPlatform("darwin", async () => {
+    const bridge = loadBridge();
+    const electronModule = createElectronStub();
+    const sentMessages = [];
+    const win = new FakeWindow();
+    win.webContents = {
+      send(channel, ...args) {
+        sentMessages.push([channel, ...args]);
+      },
+    };
+    electronModule.BrowserWindow.getAllWindows = () => [win];
+    let releaseReady;
+    let createCalls = 0;
+
+    bridge.init({
+      electronModule,
+      getMainWindow: () => win,
+      ensureMainWindow: async () => {
+        createCalls += 1;
+        return win;
+      },
+      sendWhenRendererReady: async (target, channel, payload) => {
+        assert.equal(target, win);
+        await new Promise((resolve) => {
+          releaseReady = resolve;
+        });
+        target.webContents.send(channel, payload);
+        return { success: true };
+      },
+    });
+    const ipcMain = createIpcMainStub();
+    bridge.registerHandlers(ipcMain);
+
+    await ipcMain.handlers.get("netcatty:tray:updateMenuData")(null, {
+      hosts: [
+        { id: "target", label: "Target Host", hostname: "target.example" },
+      ],
+    });
+
+    const dockTemplate = electronModule.app.dock.menu?.template ?? [];
+    const connectionMenu = dockTemplate.find((item) => item.label === "New Connection");
+    const clickPromise = connectionMenu.submenu[0].click();
+
+    for (let i = 0; i < 5 && !releaseReady; i += 1) {
+      await Promise.resolve();
+    }
+    assert.equal(createCalls, 0);
+    assert.deepEqual(sentMessages, []);
+
+    releaseReady();
+    await clickPromise;
+
+    assert.deepEqual(sentMessages, [["netcatty:trayPanel:connectToHost", "target"]]);
+  });
+});
+
 test("mac dock open main window creates a main window when none exists", async () => {
   await withPlatform("darwin", async () => {
     const bridge = loadBridge();

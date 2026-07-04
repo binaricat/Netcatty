@@ -218,14 +218,14 @@ async function openMainWindowReady() {
 }
 
 async function sendToMainWindow(channel, ...args) {
-  const { win, created } = await getOrCreateMainWindow();
+  const { win } = await getOrCreateMainWindow();
   bringMainWindowToForeground(win);
   try {
-    if (created && typeof sendWhenRendererReady === "function") {
+    if (typeof sendWhenRendererReady === "function") {
       const result = await sendWhenRendererReady(win, channel, args[0], { timeoutMs: 8000 });
       if (!result?.success) {
         console.warn(
-          `[GlobalShortcut] Failed to deliver ${channel} after creating main window:`,
+          `[GlobalShortcut] Failed to deliver ${channel} to main window:`,
           result?.error || result?.reason || "unknown",
         );
       }
