@@ -215,8 +215,8 @@ async function withPlatform(platform, run) {
   }
 }
 
-async function enableCloseToTray(bridge, electronModule = createElectronStub()) {
-  bridge.init({ electronModule });
+async function enableCloseToTray(bridge, electronModule = createElectronStub(), extraDeps = {}) {
+  bridge.init({ electronModule, ...extraDeps });
   const ipcMain = createIpcMainStub();
   bridge.registerHandlers(ipcMain);
   await ipcMain.handlers.get("netcatty:tray:setCloseToTray")(null, { enabled: true });
@@ -377,7 +377,9 @@ test("focusing a visible window cancels a pending fullscreen hide", async () => 
         toggleWindow = handler;
         return true;
       };
-      const { ipcMain } = await enableCloseToTray(bridge, electronModule);
+      const { ipcMain } = await enableCloseToTray(bridge, electronModule, {
+        getMainWindow: () => win,
+      });
 
       await ipcMain.handlers.get("netcatty:globalHotkey:register")(null, { hotkey: "Ctrl + `" });
       const result = bridge.handleWindowClose({ preventDefault() {} }, win);
@@ -405,7 +407,9 @@ test("openMainWindow cancels a pending fullscreen hide before showing the window
         this.visible = true;
       };
       electronModule.BrowserWindow.getAllWindows = () => [win];
-      const { ipcMain } = await enableCloseToTray(bridge, electronModule);
+      const { ipcMain } = await enableCloseToTray(bridge, electronModule, {
+        getMainWindow: () => win,
+      });
 
       const result = bridge.handleWindowClose({ preventDefault() {} }, win);
       assert.equal(result, true);
@@ -456,7 +460,9 @@ test("disabling close-to-tray clears a pending fullscreen hide", async () => {
       const electronModule = createElectronStub();
       const win = new FakeWindow({ fullscreen: true });
       electronModule.BrowserWindow.getAllWindows = () => [win];
-      const { ipcMain } = await enableCloseToTray(bridge, electronModule);
+      const { ipcMain } = await enableCloseToTray(bridge, electronModule, {
+        getMainWindow: () => win,
+      });
 
       const result = bridge.handleWindowClose({ preventDefault() {} }, win);
       assert.equal(result, true);
@@ -574,7 +580,10 @@ test("mac dock menu lists saved hosts and forwards connect actions", async () =>
     };
     electronModule.BrowserWindow.getAllWindows = () => [win];
 
-    bridge.init({ electronModule });
+    bridge.init({
+      electronModule,
+      getMainWindow: () => win,
+    });
     const ipcMain = createIpcMainStub();
     bridge.registerHandlers(ipcMain);
 
@@ -595,9 +604,194 @@ test("mac dock menu lists saved hosts and forwards connect actions", async () =>
       ["Pinned Host", "Recent Host", "Plain Host"],
     );
 
-    connectionMenu.submenu[0].click();
+    await connectionMenu.submenu[0].click();
 
     assert.deepEqual(sentMessages, [["netcatty:trayPanel:connectToHost", "pinned"]]);
+  });
+});
+
+test("mac dock host click creates a main window when none exists", async () => {
+  await withPlatform("darwin", async () => {
+    const bridge = loadBridge();
+    const electronModule = createElectronStub();
+    const sentMessages = [];
+    const createdWin = new FakeWindow();
+    createdWin.webContents = {
+      send(channel, ...args) {
+        sentMessages.push([channel, ...args]);
+      },
+    };
+    electronModule.BrowserWindow.getAllWindows = () => [];
+    let createCalls = 0;
+
+    bridge.init({
+      electronModule,
+      ensureMainWindow: async () => {
+        createCalls += 1;
+        return createdWin;
+      },
+    });
+    const ipcMain = createIpcMainStub();
+    bridge.registerHandlers(ipcMain);
+
+    await ipcMain.handlers.get("netcatty:tray:updateMenuData")(null, {
+      hosts: [
+        { id: "target", label: "Target Host", hostname: "target.example" },
+      ],
+    });
+
+    const dockTemplate = electronModule.app.dock.menu?.template ?? [];
+    const connectionMenu = dockTemplate.find((item) => item.label === "New Connection");
+
+    await connectionMenu.submenu[0].click();
+
+    assert.equal(createCalls, 1);
+    assert.deepEqual(sentMessages, [["netcatty:trayPanel:connectToHost", "target"]]);
+  });
+});
+
+test("mac dock host click waits for a newly created main window to be ready", async () => {
+  await withPlatform("darwin", async () => {
+    const bridge = loadBridge();
+    const electronModule = createElectronStub();
+    const sentMessages = [];
+    const createdWin = new FakeWindow();
+    createdWin.webContents = {
+      send(channel, ...args) {
+        sentMessages.push([channel, ...args]);
+      },
+    };
+    electronModule.BrowserWindow.getAllWindows = () => [];
+    let releaseReady;
+
+    bridge.init({
+      electronModule,
+      ensureMainWindow: async () => createdWin,
+      sendWhenRendererReady: async (win, channel, payload) => {
+        assert.equal(win, createdWin);
+        await new Promise((resolve) => {
+          releaseReady = resolve;
+        });
+        win.webContents.send(channel, payload);
+        return { success: true };
+      },
+    });
+    const ipcMain = createIpcMainStub();
+    bridge.registerHandlers(ipcMain);
+
+    await ipcMain.handlers.get("netcatty:tray:updateMenuData")(null, {
+      hosts: [
+        { id: "target", label: "Target Host", hostname: "target.example" },
+      ],
+    });
+
+    const dockTemplate = electronModule.app.dock.menu?.template ?? [];
+    const connectionMenu = dockTemplate.find((item) => item.label === "New Connection");
+    const clickPromise = connectionMenu.submenu[0].click();
+
+    for (let i = 0; i < 5 && !releaseReady; i += 1) {
+      await Promise.resolve();
+    }
+    assert.deepEqual(sentMessages, []);
+
+    releaseReady();
+    await clickPromise;
+
+    assert.deepEqual(sentMessages, [["netcatty:trayPanel:connectToHost", "target"]]);
+  });
+});
+
+test("mac dock open main window creates a main window when none exists", async () => {
+  await withPlatform("darwin", async () => {
+    const bridge = loadBridge();
+    const electronModule = createElectronStub();
+    const createdWin = new FakeWindow();
+    electronModule.BrowserWindow.getAllWindows = () => [];
+    let createCalls = 0;
+
+    bridge.init({
+      electronModule,
+      ensureMainWindow: async () => {
+        createCalls += 1;
+        return createdWin;
+      },
+    });
+
+    const dockTemplate = electronModule.app.dock.menu?.template ?? [];
+    const openMainItem = dockTemplate.find((item) => item.label === "Open Main Window");
+
+    await openMainItem.click();
+
+    assert.equal(createCalls, 1);
+    assert.equal(createdWin.showCalls, 1);
+  });
+});
+
+test("tray panel open main window creates a main window when none exists", async () => {
+  await withPlatform("darwin", async () => {
+    const bridge = loadBridge();
+    const electronModule = createElectronStub();
+    const createdWin = new FakeWindow();
+    electronModule.BrowserWindow.getAllWindows = () => [];
+    let createCalls = 0;
+
+    bridge.init({
+      electronModule,
+      ensureMainWindow: async () => {
+        createCalls += 1;
+        return createdWin;
+      },
+    });
+    const ipcMain = createIpcMainStub();
+    bridge.registerHandlers(ipcMain);
+
+    await ipcMain.handlers.get("netcatty:trayPanel:openMainWindow")();
+
+    assert.equal(createCalls, 1);
+    assert.equal(createdWin.showCalls, 1);
+  });
+});
+
+test("tray panel session jump waits for a newly created main window to be ready", async () => {
+  await withPlatform("darwin", async () => {
+    const bridge = loadBridge();
+    const electronModule = createElectronStub();
+    const sentMessages = [];
+    const createdWin = new FakeWindow();
+    createdWin.webContents = {
+      send(channel, ...args) {
+        sentMessages.push([channel, ...args]);
+      },
+    };
+    electronModule.BrowserWindow.getAllWindows = () => [];
+    let releaseReady;
+
+    bridge.init({
+      electronModule,
+      ensureMainWindow: async () => createdWin,
+      sendWhenRendererReady: async (win, channel, payload) => {
+        assert.equal(win, createdWin);
+        await new Promise((resolve) => {
+          releaseReady = resolve;
+        });
+        win.webContents.send(channel, payload);
+        return { success: true };
+      },
+    });
+    const ipcMain = createIpcMainStub();
+    bridge.registerHandlers(ipcMain);
+
+    const jumpPromise = ipcMain.handlers.get("netcatty:trayPanel:jumpToSession")(null, "session-1");
+
+    for (let i = 0; i < 5 && !releaseReady; i += 1) {
+      await Promise.resolve();
+    }
+    assert.deepEqual(sentMessages, []);
+
+    releaseReady();
+    await jumpPromise;
+
+    assert.deepEqual(sentMessages, [["netcatty:trayPanel:jumpToSession", "session-1"]]);
   });
 });
 
@@ -669,7 +863,9 @@ test("openMainWindow delegates to showAndFocusMainWindow on win32", async () => 
       const win = new FakeWindow();
       win.visible = false;
       electronModule.BrowserWindow.getAllWindows = () => [win];
-      const { ipcMain } = await enableCloseToTray(bridge, electronModule);
+      const { ipcMain } = await enableCloseToTray(bridge, electronModule, {
+        getMainWindow: () => win,
+      });
 
       await ipcMain.handlers.get("netcatty:trayPanel:openMainWindow")();
 

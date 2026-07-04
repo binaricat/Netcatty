@@ -7,6 +7,9 @@ const path = require("node:path");
 const fs = require("node:fs");
 
 let electronModule = null;
+let ensureMainWindow = null;
+let sendWhenRendererReady = null;
+let getSystemMenuMainWindow = null;
 let tray = null;
 let closeToTray = false;
 let currentHotkey = null;
@@ -181,19 +184,62 @@ function openMainWindow() {
   bringMainWindowToForeground(getMainWindow());
 }
 
-function sendToMainWindow(channel, ...args) {
-  openMainWindow();
+function getTrackedMainWindow() {
+  if (typeof getSystemMenuMainWindow === "function") {
+    const win = getSystemMenuMainWindow();
+    if (win && !win.isDestroyed?.()) return win;
+  }
   try {
-    const win = getMainWindow();
+    const windowManager = require("./windowManager.cjs");
+    const tracked = windowManager.getMainWindow?.();
+    if (tracked && !tracked.isDestroyed?.()) return tracked;
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+async function getOrCreateMainWindow() {
+  const tracked = getTrackedMainWindow();
+  if (tracked) {
+    return { win: tracked, created: false };
+  }
+  if (typeof ensureMainWindow === "function") {
+    const win = await ensureMainWindow();
+    return { win, created: true };
+  }
+  return { win: null, created: false };
+}
+
+async function openMainWindowReady() {
+  const { win } = await getOrCreateMainWindow();
+  bringMainWindowToForeground(win);
+  return win;
+}
+
+async function sendToMainWindow(channel, ...args) {
+  const { win, created } = await getOrCreateMainWindow();
+  bringMainWindowToForeground(win);
+  try {
+    if (created && typeof sendWhenRendererReady === "function") {
+      const result = await sendWhenRendererReady(win, channel, args[0], { timeoutMs: 8000 });
+      if (!result?.success) {
+        console.warn(
+          `[GlobalShortcut] Failed to deliver ${channel} after creating main window:`,
+          result?.error || result?.reason || "unknown",
+        );
+      }
+      return;
+    }
     win?.webContents?.send(channel, ...args);
   } catch {
     // ignore
   }
 }
 
-function connectToHostFromSystemMenu(hostId) {
+async function connectToHostFromSystemMenu(hostId) {
   if (!hostId) return;
-  sendToMainWindow("netcatty:trayPanel:connectToHost", hostId);
+  await sendToMainWindow("netcatty:trayPanel:connectToHost", hostId);
 }
 
 function getTrayPanelUrl() {
@@ -353,6 +399,9 @@ function resolveTrayIconPath() {
  */
 function init(deps) {
   electronModule = deps.electronModule;
+  ensureMainWindow = deps.ensureMainWindow || null;
+  sendWhenRendererReady = deps.sendWhenRendererReady || null;
+  getSystemMenuMainWindow = deps.getMainWindow || null;
   updateDockMenu();
 }
 
@@ -771,16 +820,16 @@ function getDockMenuHosts() {
 function buildDockMenuTemplate() {
   const hostItems = getDockMenuHosts().map((host) => ({
     label: getDockHostLabel(host),
-    click: () => {
-      connectToHostFromSystemMenu(host.id);
+    click: async () => {
+      await connectToHostFromSystemMenu(host.id);
     },
   }));
 
   return [
     {
       label: "Open Main Window",
-      click: () => {
-        openMainWindow();
+      click: async () => {
+        await openMainWindowReady();
       },
     },
     { type: "separator" },
@@ -950,17 +999,17 @@ function registerHandlers(ipcMain) {
   });
 
   ipcMain.handle("netcatty:trayPanel:openMainWindow", async () => {
-    openMainWindow();
+    await openMainWindowReady();
     return { success: true };
   });
 
   ipcMain.handle("netcatty:trayPanel:jumpToSession", async (_event, sessionId) => {
-    sendToMainWindow("netcatty:trayPanel:jumpToSession", sessionId);
+    await sendToMainWindow("netcatty:trayPanel:jumpToSession", sessionId);
     return { success: true };
   });
 
   ipcMain.handle("netcatty:trayPanel:connectToHost", async (_event, hostId) => {
-    connectToHostFromSystemMenu(hostId);
+    await connectToHostFromSystemMenu(hostId);
     return { success: true };
   });
 

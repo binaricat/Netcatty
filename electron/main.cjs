@@ -423,6 +423,7 @@ const registerBridges = createBridgeRegistrar({
   terminalBridge,
   crashLogBridge,
   ptyProcessTree,
+  ensureMainWindow: createAndShowMainWindow,
   getOauthBridge,
   getGithubAuthBridge,
   getGoogleAuthBridge,
