@@ -91,6 +91,18 @@ export const shouldRenderTerminalContextMenuContent = ({
   allowSuppressedMenuContent ||
   !shouldSuppressMouseTrackingContextMenu({ isAlternateScreen, showReconnectAction });
 
+export const shouldAllowSuppressedTerminalContextMenuContent = ({
+  event,
+  isAlternateScreen,
+  showReconnectAction,
+}: {
+  event: { shiftKey?: boolean; nativeEvent: MouseEvent };
+  isAlternateScreen?: boolean;
+  showReconnectAction?: boolean;
+}): boolean =>
+  isMiddleClickContextMenuEvent(event.nativeEvent)
+  || Boolean(event.shiftKey && shouldSuppressMouseTrackingContextMenu({ isAlternateScreen, showReconnectAction }));
+
 export const shouldOpenTerminalContextMenu = ({
   event,
   rightClickBehavior = 'context-menu',
@@ -106,11 +118,15 @@ export const shouldOpenTerminalContextMenu = ({
     return true;
   }
 
+  if (event.shiftKey) {
+    return true;
+  }
+
   if (shouldSuppressMouseTrackingContextMenu({ isAlternateScreen, showReconnectAction })) {
     return false;
   }
 
-  return Boolean(event.shiftKey || rightClickBehavior === 'context-menu');
+  return rightClickBehavior === 'context-menu';
 };
 
 export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
@@ -187,7 +203,6 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
         isAlternateScreen,
         showReconnectAction,
       });
-      const isMiddleClickMenu = isMiddleClickContextMenuEvent(e.nativeEvent);
 
       if (!shouldOpenMenu && shouldSuppressMouseTrackingContextMenu({ isAlternateScreen, showReconnectAction })) {
         e.preventDefault();
@@ -202,7 +217,11 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
           pane.setAttribute('data-menu-open', '');
           markedPaneRef.current = pane;
         }
-        setAllowSuppressedMenuContent(isMiddleClickMenu);
+        setAllowSuppressedMenuContent(shouldAllowSuppressedTerminalContextMenuContent({
+          event: e,
+          isAlternateScreen,
+          showReconnectAction,
+        }));
         return;
       }
 

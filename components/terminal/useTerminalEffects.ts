@@ -2,8 +2,14 @@
 import { useRef } from 'react';
 import { resolveFontWeightBold } from '../../lib/fontWeightAvailability';
 import { bundledFamiliesInStack } from '../../lib/fontAvailability';
+import { isMacPlatform } from '../../lib/utils';
 import { resolveXTermScrollback } from '../../infrastructure/config/xtermPerformance';
-import { shouldInterceptMouseTrackingContextMenu } from './runtime/middleClickBehavior';
+import {
+  createMacOptionForcedSelectionMouseEvent,
+  shouldInterceptMouseTrackingContextMenu,
+  shouldReplayShiftMouseSelectionAsMacOption,
+  shouldStopShiftRightClickMouseTrackingMouseDown,
+} from './runtime/middleClickBehavior';
 import {
   hasOpenAppDialog,
   TERMINAL_SESSION_RESTORE_FOCUS_EVENT,
@@ -1360,6 +1366,11 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
 
   // Prevent xterm.js's built-in rightClickHandler and right-button mouseup
   // from interfering with tmux/vim popup menus when mouse tracking is active.
+  // On macOS, xterm forces selection with Option, while most terminal users
+  // expect Shift to bypass mouse reporting. Replay Shift+left-click as that
+  // native xterm force-selection gesture before xterm receives the original.
+  // - mousedown (button 2 + Shift): keep Shift+right-click local so the
+  //   terminal app does not also receive the right-button press
   // - contextmenu: xterm.js calls textarea.select() which steals focus
   // - mouseup (button 2): tmux interprets the right-button release as a
   //   dismiss action, closing the popup menu immediately after it appears
@@ -1398,15 +1409,44 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
       // does not intercept.
     };
 
+    const handleMouseDownCapture = (e: MouseEvent) => {
+      if (shouldStopShiftRightClickMouseTrackingMouseDown({
+        event: e,
+        mouseTracking: mouseTrackingRef.current,
+        status: statusRef.current,
+      })) {
+        e.stopImmediatePropagation();
+        return;
+      }
+
+      if (!shouldReplayShiftMouseSelectionAsMacOption({
+        event: e,
+        mouseTracking: mouseTrackingRef.current,
+        status: statusRef.current,
+        isMacPlatform: isMacPlatform(),
+      })) {
+        return;
+      }
+
+      const target = e.target as EventTarget | null;
+      if (!target || typeof target.dispatchEvent !== 'function') return;
+
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      target.dispatchEvent(createMacOptionForcedSelectionMouseEvent(e));
+    };
+
     const handleMouseUpCapture = (e: MouseEvent) => {
       if (e.button === 2 && mouseTrackingRef.current && statusRef.current === 'connected') {
         e.stopImmediatePropagation();
       }
     };
 
+    el.addEventListener('mousedown', handleMouseDownCapture, true);
     el.addEventListener('contextmenu', handleContextMenuCapture, true);
     el.addEventListener('mouseup', handleMouseUpCapture, true);
     return () => {
+      el.removeEventListener('mousedown', handleMouseDownCapture, true);
       el.removeEventListener('contextmenu', handleContextMenuCapture, true);
       el.removeEventListener('mouseup', handleMouseUpCapture, true);
     };

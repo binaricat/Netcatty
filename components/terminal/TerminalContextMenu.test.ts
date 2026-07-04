@@ -53,6 +53,15 @@ const shouldRenderTerminalContextMenuContent = (
     }) => boolean;
   }
 ).shouldRenderTerminalContextMenuContent;
+const shouldAllowSuppressedTerminalContextMenuContent = (
+  terminalContextMenu as {
+    shouldAllowSuppressedTerminalContextMenuContent?: (options: {
+      event: { shiftKey?: boolean; nativeEvent: MouseEvent };
+      isAlternateScreen?: boolean;
+      showReconnectAction?: boolean;
+    }) => boolean;
+  }
+).shouldAllowSuppressedTerminalContextMenuContent;
 
 test("shows reconnect only for reconnectable terminals with a handler", () => {
   assert.equal(typeof shouldShowReconnectAction, "function");
@@ -216,30 +225,40 @@ test("opens a middle-click menu even when right-click is configured to paste", (
 test("opens and renders middle-click menu while alternate-screen mouse tracking suppresses right-click menus", () => {
   assert.equal(typeof shouldOpenTerminalContextMenu, "function");
   assert.equal(typeof shouldRenderTerminalContextMenuContent, "function");
+  assert.equal(typeof shouldAllowSuppressedTerminalContextMenuContent, "function");
   if (
     typeof shouldOpenTerminalContextMenu !== "function" ||
-    typeof shouldRenderTerminalContextMenuContent !== "function"
+    typeof shouldRenderTerminalContextMenuContent !== "function" ||
+    typeof shouldAllowSuppressedTerminalContextMenuContent !== "function"
   ) {
     return;
   }
 
+  const middleClickEvent = {
+    shiftKey: false,
+    nativeEvent: markMiddleClickContextMenuEvent({} as MouseEvent),
+  };
+
   assert.equal(
     shouldOpenTerminalContextMenu({
-      event: {
-        shiftKey: false,
-        nativeEvent: markMiddleClickContextMenuEvent({} as MouseEvent),
-      },
+      event: middleClickEvent,
       rightClickBehavior: "paste",
       isAlternateScreen: true,
       showReconnectAction: false,
     }),
     true,
   );
+  const allowSuppressedMenuContent = shouldAllowSuppressedTerminalContextMenuContent({
+    event: middleClickEvent,
+    isAlternateScreen: true,
+    showReconnectAction: false,
+  });
+  assert.equal(allowSuppressedMenuContent, true);
   assert.equal(
     shouldRenderTerminalContextMenuContent({
       isAlternateScreen: true,
       showReconnectAction: false,
-      allowSuppressedMenuContent: true,
+      allowSuppressedMenuContent,
     }),
     true,
   );
@@ -257,10 +276,88 @@ test("opens and renders middle-click menu while alternate-screen mouse tracking 
     false,
   );
   assert.equal(
+    shouldAllowSuppressedTerminalContextMenuContent({
+      event: {
+        nativeEvent: {} as MouseEvent,
+      },
+      isAlternateScreen: true,
+      showReconnectAction: false,
+    }),
+    false,
+  );
+  assert.equal(
     shouldRenderTerminalContextMenuContent({
       isAlternateScreen: true,
       showReconnectAction: false,
       allowSuppressedMenuContent: false,
+    }),
+    false,
+  );
+});
+
+test("opens Shift right-click menu content for all right-click modes while mouse tracking suppresses unmodified menus", () => {
+  assert.equal(typeof shouldOpenTerminalContextMenu, "function");
+  assert.equal(typeof shouldRenderTerminalContextMenuContent, "function");
+  assert.equal(typeof shouldAllowSuppressedTerminalContextMenuContent, "function");
+  if (
+    typeof shouldOpenTerminalContextMenu !== "function" ||
+    typeof shouldRenderTerminalContextMenuContent !== "function" ||
+    typeof shouldAllowSuppressedTerminalContextMenuContent !== "function"
+  ) {
+    return;
+  }
+
+  const event = {
+    shiftKey: true,
+    nativeEvent: {} as MouseEvent,
+  };
+
+  for (const rightClickBehavior of ["context-menu", "paste", "select-word"] as const) {
+    assert.equal(
+      shouldOpenTerminalContextMenu({
+        event,
+        rightClickBehavior,
+        isAlternateScreen: true,
+        showReconnectAction: false,
+      }),
+      true,
+    );
+
+    const allowSuppressedMenuContent = shouldAllowSuppressedTerminalContextMenuContent({
+      event,
+      isAlternateScreen: true,
+      showReconnectAction: false,
+    });
+
+    assert.equal(allowSuppressedMenuContent, true);
+    assert.equal(
+      shouldRenderTerminalContextMenuContent({
+        isAlternateScreen: true,
+        showReconnectAction: false,
+        allowSuppressedMenuContent,
+      }),
+      true,
+    );
+  }
+
+  assert.equal(
+    shouldOpenTerminalContextMenu({
+      event: {
+        nativeEvent: {} as MouseEvent,
+      },
+      rightClickBehavior: "context-menu",
+      isAlternateScreen: true,
+      showReconnectAction: false,
+    }),
+    false,
+  );
+  assert.equal(
+    shouldAllowSuppressedTerminalContextMenuContent({
+      event: {
+        nativeEvent: {} as MouseEvent,
+      },
+      isAlternateScreen: true,
+      showReconnectAction: false,
     }),
     false,
   );
