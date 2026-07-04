@@ -1,10 +1,13 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const path = require("node:path");
 
 const {
   buildNetcattySkillsOpenCodePathAllowlist,
   buildOpenCodeSkillsPermissionRules,
+  toOpenCodeDirectoryPermissionPatterns,
   toOpenCodeDirectoryGlob,
+  toOpenCodeFileParentPermissionPatterns,
   toOpenCodeFileParentGlob,
 } = require("./netcattySkillsOpenCodePermissions.cjs");
 
@@ -26,6 +29,31 @@ test("toOpenCodeDirectoryGlob keeps directory roots stable when missing on disk"
   );
 });
 
+test("toOpenCodeDirectoryPermissionPatterns includes exact and wildcard forms", () => {
+  assert.deepEqual(
+    toOpenCodeDirectoryPermissionPatterns("/Users/me/Library/Application Support/netcatty/netcatty-tool-cli"),
+    [
+      "/Users/me/Library/Application Support/netcatty/netcatty-tool-cli",
+      "/Users/me/Library/Application Support/netcatty/netcatty-tool-cli/*",
+      "/Users/me/Library/Application Support/netcatty/netcatty-tool-cli/**",
+    ],
+  );
+});
+
+test("toOpenCodeFileParentPermissionPatterns normalizes Windows paths", () => {
+  assert.deepEqual(
+    toOpenCodeFileParentPermissionPatterns(
+      "C:\\Users\\me\\AppData\\Local\\Programs\\Netcatty\\resources\\app.asar.unpacked\\electron\\cli\\netcatty-tool-cli.cmd",
+      { platform: "win32", pathModule: path.win32 },
+    ),
+    [
+      "C:/Users/me/AppData/Local/Programs/Netcatty/resources/app.asar.unpacked/electron/cli",
+      "C:/Users/me/AppData/Local/Programs/Netcatty/resources/app.asar.unpacked/electron/cli/*",
+      "C:/Users/me/AppData/Local/Programs/Netcatty/resources/app.asar.unpacked/electron/cli/**",
+    ],
+  );
+});
+
 test("buildNetcattySkillsOpenCodePathAllowlist dedupes launcher and script roots", () => {
   const launcher = "/Applications/Netcatty.app/Contents/MacOS/netcatty-tool-cli";
   const script = "/Applications/Netcatty.app/Contents/Resources/app.asar.unpacked/electron/cli/netcatty-tool-cli.cjs";
@@ -39,9 +67,17 @@ test("buildNetcattySkillsOpenCodePathAllowlist dedupes launcher and script roots
   });
 
   assert.deepEqual(patterns, [
+    "/Applications/Netcatty.app/Contents/MacOS",
+    "/Applications/Netcatty.app/Contents/MacOS/*",
     "/Applications/Netcatty.app/Contents/MacOS/**",
+    "/Applications/Netcatty.app/Contents/Resources/app.asar.unpacked/electron/cli",
+    "/Applications/Netcatty.app/Contents/Resources/app.asar.unpacked/electron/cli/*",
     "/Applications/Netcatty.app/Contents/Resources/app.asar.unpacked/electron/cli/**",
+    "/Applications/Netcatty.app/Contents/Resources/app.asar.unpacked/skills/netcatty-tool-cli",
+    "/Applications/Netcatty.app/Contents/Resources/app.asar.unpacked/skills/netcatty-tool-cli/*",
     "/Applications/Netcatty.app/Contents/Resources/app.asar.unpacked/skills/netcatty-tool-cli/**",
+    "/Users/me/Library/Application Support/netcatty/netcatty-tool-cli",
+    "/Users/me/Library/Application Support/netcatty/netcatty-tool-cli/*",
     "/Users/me/Library/Application Support/netcatty/netcatty-tool-cli/**",
   ]);
 });
@@ -54,9 +90,30 @@ test("buildNetcattySkillsOpenCodePathAllowlist includes temp dir and extra attac
   });
 
   assert.deepEqual(patterns, [
+    "/Users/me/Library/Application Support/netcatty/netcatty-tool-cli",
+    "/Users/me/Library/Application Support/netcatty/netcatty-tool-cli/*",
     "/Users/me/Library/Application Support/netcatty/netcatty-tool-cli/**",
+    "/var/folders/tmp/Netcatty",
+    "/var/folders/tmp/Netcatty/*",
     "/var/folders/tmp/Netcatty/**",
   ]);
+});
+
+test("buildNetcattySkillsOpenCodePathAllowlist includes OpenCode-compatible Windows directory resources", () => {
+  const patterns = buildNetcattySkillsOpenCodePathAllowlist({
+    launcherPath: "C:\\Users\\me\\AppData\\Local\\Programs\\Netcatty\\resources\\app.asar.unpacked\\electron\\cli\\netcatty-tool-cli.cmd",
+    cliScriptPath: "C:\\Users\\me\\AppData\\Local\\Programs\\Netcatty\\resources\\app.asar.unpacked\\electron\\cli\\netcatty-tool-cli.cjs",
+    skillPath: "C:\\Users\\me\\AppData\\Local\\Programs\\Netcatty\\resources\\app.asar.unpacked\\skills\\netcatty-tool-cli\\SKILL.md",
+    discoveryFilePath: "C:\\Users\\me\\AppData\\Roaming\\netcatty\\netcatty-tool-cli\\discovery.json",
+    runtimeBinaryPath: "C:\\Users\\me\\AppData\\Local\\Programs\\Netcatty\\Netcatty.exe",
+    tempDir: "C:\\Users\\me\\AppData\\Local\\Temp\\Netcatty",
+    extraFilePaths: ["C:\\Users\\me\\AppData\\Local\\Temp\\Netcatty\\attachment.png"],
+  }, { platform: "win32", pathModule: path.win32 });
+
+  assert.equal(patterns.includes("C:/Users/me/AppData/Local/Programs/Netcatty/resources/app.asar.unpacked/electron/cli/*"), true);
+  assert.equal(patterns.includes("C:/Users/me/AppData/Roaming/netcatty/netcatty-tool-cli/*"), true);
+  assert.equal(patterns.includes("C:/Users/me/AppData/Local/Temp/Netcatty/*"), true);
+  assert.equal(patterns.includes("C:/Users/me/AppData/Local/Programs/Netcatty/*"), true);
 });
 
 test("buildOpenCodeSkillsPermissionRules allowlists Netcatty CLI paths and denies other external access", () => {

@@ -3,32 +3,68 @@
 const fs = require("node:fs");
 const path = require("node:path");
 
-function normalizeOpenCodePath(targetPath) {
-  return process.platform === "win32"
+function normalizeOpenCodePath(targetPath, platform = process.platform) {
+  return platform === "win32"
     ? targetPath.replace(/\\/g, "/")
     : targetPath;
 }
 
-function toOpenCodeDirectoryGlob(dirPath) {
+function appendOpenCodePathPattern(baseDir, suffix) {
+  const trimmedSuffix = suffix.replace(/^\//, "");
+  return baseDir.endsWith("/")
+    ? `${baseDir}${trimmedSuffix}`
+    : `${baseDir}/${trimmedSuffix}`;
+}
+
+function toOpenCodeDirectoryBase(dirPath, options = {}) {
   if (!dirPath || typeof dirPath !== "string") return null;
+  const pathModule = options.pathModule || path;
+  const platform = options.platform || process.platform;
   try {
-    const resolved = path.resolve(dirPath);
+    const resolved = pathModule.resolve(dirPath);
     let baseDir = resolved;
     if (fs.existsSync(resolved) && fs.statSync(resolved).isFile()) {
-      baseDir = path.dirname(resolved);
+      baseDir = pathModule.dirname(resolved);
     }
-    return `${normalizeOpenCodePath(baseDir)}/**`;
+    return normalizeOpenCodePath(baseDir, platform);
   } catch {
     return null;
   }
 }
 
-function toOpenCodeFileParentGlob(filePath) {
+function toOpenCodeDirectoryGlob(dirPath, options = {}) {
+  const baseDir = toOpenCodeDirectoryBase(dirPath, options);
+  return baseDir ? appendOpenCodePathPattern(baseDir, "**") : null;
+}
+
+function toOpenCodeDirectoryPermissionPatterns(dirPath, options = {}) {
+  const baseDir = toOpenCodeDirectoryBase(dirPath, options);
+  return baseDir
+    ? [
+        baseDir,
+        appendOpenCodePathPattern(baseDir, "*"),
+        appendOpenCodePathPattern(baseDir, "**"),
+      ]
+    : [];
+}
+
+function toOpenCodeFileParentGlob(filePath, options = {}) {
   if (!filePath || typeof filePath !== "string") return null;
+  const pathModule = options.pathModule || path;
   try {
-    return toOpenCodeDirectoryGlob(path.dirname(path.resolve(filePath)));
+    return toOpenCodeDirectoryGlob(pathModule.dirname(pathModule.resolve(filePath)), options);
   } catch {
     return null;
+  }
+}
+
+function toOpenCodeFileParentPermissionPatterns(filePath, options = {}) {
+  if (!filePath || typeof filePath !== "string") return [];
+  const pathModule = options.pathModule || path;
+  try {
+    return toOpenCodeDirectoryPermissionPatterns(pathModule.dirname(pathModule.resolve(filePath)), options);
+  } catch {
+    return [];
   }
 }
 
@@ -45,7 +81,7 @@ function buildNetcattySkillsOpenCodePathAllowlist({
   runtimeBinaryPath,
   tempDir,
   extraFilePaths,
-} = {}) {
+} = {}, options = {}) {
   const filePaths = [
     launcherPath,
     cliScriptPath,
@@ -55,9 +91,9 @@ function buildNetcattySkillsOpenCodePathAllowlist({
     ...(Array.isArray(extraFilePaths) ? extraFilePaths : []),
   ];
   return dedupePatterns([
-    ...filePaths.map((filePath) => filePath && toOpenCodeFileParentGlob(filePath)),
-    cliStateDir && toOpenCodeDirectoryGlob(cliStateDir),
-    tempDir && toOpenCodeDirectoryGlob(tempDir),
+    ...filePaths.flatMap((filePath) => toOpenCodeFileParentPermissionPatterns(filePath, options)),
+    ...(cliStateDir ? toOpenCodeDirectoryPermissionPatterns(cliStateDir, options) : []),
+    ...(tempDir ? toOpenCodeDirectoryPermissionPatterns(tempDir, options) : []),
   ]);
 }
 
@@ -83,6 +119,8 @@ function buildOpenCodeSkillsPermissionRules(pathAllowlist = []) {
 module.exports = {
   buildNetcattySkillsOpenCodePathAllowlist,
   buildOpenCodeSkillsPermissionRules,
+  toOpenCodeDirectoryPermissionPatterns,
   toOpenCodeDirectoryGlob,
+  toOpenCodeFileParentPermissionPatterns,
   toOpenCodeFileParentGlob,
 };
