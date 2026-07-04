@@ -166,6 +166,7 @@ export const enTerminalMessages: Messages = {
   'terminal.progress.disconnected': 'Disconnected',
   'terminal.progress.cancelling': 'Cancelling...',
   'terminal.progress.startOver': 'Start over',
+  'terminal.progress.enterReconnectHint': 'Press Enter to reconnect',
   'terminal.connection.dismissDisconnectedDialog': 'Dismiss disconnected notice',
   'terminal.connection.chainOf': 'Chain {current} of {total}',
   'terminal.connection.showLogs': 'Show logs',

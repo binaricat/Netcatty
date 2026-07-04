@@ -20,6 +20,7 @@ export const zhCNTerminalMessages: Messages = {
   'terminal.osc7Setup.sent': '目录追踪配置已发送到终端',
   'terminal.toolbar.timestampsEnable': '显示时间戳',
   'terminal.toolbar.timestampsDisable': '隐藏时间戳',
+  'terminal.progress.enterReconnectHint': '按 Enter 重新连接',
   'terminal.connection.protocol.et': 'EternalTerminal',
   'terminal.et.proxyUnsupported': 'EternalTerminal 目前不支持 Netcatty 的代理设置。请改用 SSH，或移除该主机的代理。',
   'terminal.et.multiJumpUnsupported': 'EternalTerminal 目前在 Netcatty 中最多支持一个跳板机。',

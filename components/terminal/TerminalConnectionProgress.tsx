@@ -13,6 +13,7 @@ export interface TerminalConnectionProgressProps {
     error: string | null;
     timeLeft: number;
     isAwaitingUserInput?: boolean;
+    showEnterReconnectHint?: boolean;
     isCancelling: boolean;
     showLogs: boolean;
     progressLogs: string[];
@@ -56,6 +57,7 @@ export const TerminalConnectionProgress: React.FC<TerminalConnectionProgressProp
     error,
     timeLeft,
     isAwaitingUserInput = false,
+    showEnterReconnectHint = false,
     isCancelling: _isCancelling,
     showLogs,
     progressLogs,
@@ -94,18 +96,23 @@ export const TerminalConnectionProgress: React.FC<TerminalConnectionProgressProp
                 <TerminalConnectionLogList progressLogs={progressLogs} error={error} />
             )}
 
-            <div className="flex justify-end gap-2">
-                {status !== 'connecting' && (
-                    <>
+            {status !== 'connecting' && (
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                    {showEnterReconnectHint && (
+                        <div className="min-w-0 break-words text-[11px] leading-5 text-muted-foreground">
+                            {t('terminal.progress.enterReconnectHint')}
+                        </div>
+                    )}
+                    <div className="ml-auto flex shrink-0 justify-end gap-2">
                         <Button variant="ghost" size="sm" className="h-7 px-3 text-[11px]" onClick={onCloseSession}>
                             {t('terminal.toolbar.closeSession')}
                         </Button>
                         <Button size="sm" className="h-7 px-3 text-[11px]" onClick={onRetry}>
                             <Play className="h-3 w-3 mr-1.5" /> {reconnectLabel ?? t('terminal.progress.startOver')}
                         </Button>
-                    </>
-                )}
-            </div>
+                    </div>
+                </div>
+            )}
         </>
     );
 };

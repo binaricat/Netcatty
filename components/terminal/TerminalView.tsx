@@ -204,6 +204,17 @@ function TerminalViewInner({ ctx }: { ctx: TerminalViewContext }) {
     ? t("terminal.toolbar.timestampsDisable")
     : t("terminal.toolbar.timestampsEnable");
   const titleConnectionAddress = formatTerminalTitleConnectionAddress(host);
+  const hasBlockingReconnectOverlay = Boolean(osc52ReadPromptVisible || osc7SetupOpen || scriptExecutionOverlay || zmodem.active || zmodem.overwriteRequest);
+  const showEnterReconnectHint = shouldReconnectTerminalOnEnterKey({
+    key: "Enter",
+    status,
+    hasRetryHandler: Boolean(handleRetry),
+    isSearchOpen,
+    isComposeBarOpen,
+    needsAuth: Boolean(auth.needsAuth),
+    needsHostKeyVerification: Boolean(needsHostKeyVerification),
+    hasBlockingOverlay: hasBlockingReconnectOverlay,
+  });
   const handleTerminalKeyDownCapture = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
     if (!shouldReconnectTerminalOnEnterKey({
       key: event.key,
@@ -213,7 +224,7 @@ function TerminalViewInner({ ctx }: { ctx: TerminalViewContext }) {
       isComposeBarOpen,
       needsAuth: Boolean(auth.needsAuth),
       needsHostKeyVerification: Boolean(needsHostKeyVerification),
-      hasBlockingOverlay: Boolean(osc52ReadPromptVisible || osc7SetupOpen || scriptExecutionOverlay || zmodem.active || zmodem.overwriteRequest),
+      hasBlockingOverlay: hasBlockingReconnectOverlay,
       altKey: event.altKey,
       ctrlKey: event.ctrlKey,
       metaKey: event.metaKey,
@@ -231,15 +242,11 @@ function TerminalViewInner({ ctx }: { ctx: TerminalViewContext }) {
   }, [
     auth.needsAuth,
     handleRetry,
+    hasBlockingReconnectOverlay,
     isComposeBarOpen,
     isSearchOpen,
     needsHostKeyVerification,
-    osc52ReadPromptVisible,
-    osc7SetupOpen,
-    scriptExecutionOverlay,
     status,
-    zmodem.active,
-    zmodem.overwriteRequest,
   ]);
   return (
     <TerminalContextMenu
@@ -664,6 +671,7 @@ function TerminalViewInner({ ctx }: { ctx: TerminalViewContext }) {
                 _setShowLogs={setShowLogs}
                 keys={keys}
                 onDismissDisconnected={handleDismissDisconnectedDialog}
+                showEnterReconnectHint={showEnterReconnectHint}
                 hostKeyVerification={needsHostKeyVerification && pendingHostKeyInfo ? {
                   hostKeyInfo: pendingHostKeyInfo,
                   onClose: handleHostKeyClose,

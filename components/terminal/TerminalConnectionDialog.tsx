@@ -35,6 +35,7 @@ export interface TerminalConnectionDialogProps {
     authProps: Omit<TerminalAuthDialogProps, 'keys'>;
     keys: SSHKey[];
     onDismissDisconnected?: () => void;
+    showEnterReconnectHint?: boolean;
     hostKeyVerification?: {
         hostKeyInfo: HostKeyInfo;
         onClose: () => void;
@@ -42,7 +43,7 @@ export interface TerminalConnectionDialogProps {
         onAddAndContinue: () => void;
     };
     // Progress props
-    progressProps: Omit<TerminalConnectionProgressProps, 'status' | 'error' | 'showLogs'>;
+    progressProps: Omit<TerminalConnectionProgressProps, 'status' | 'error' | 'showLogs' | 'showEnterReconnectHint'>;
 }
 
 // Helper to get protocol display info
@@ -89,6 +90,7 @@ export const TerminalConnectionDialog: React.FC<TerminalConnectionDialogProps> =
     authProps,
     keys,
     onDismissDisconnected,
+    showEnterReconnectHint,
     hostKeyVerification,
     progressProps,
 }) => {
@@ -324,6 +326,7 @@ export const TerminalConnectionDialog: React.FC<TerminalConnectionDialogProps> =
                             status={status}
                             error={error}
                             showLogs={showLogs}
+                            showEnterReconnectHint={showEnterReconnectHint}
                             reconnectLabel={isRestoredDisconnected ? t('terminal.restore.placeholder.reconnect') : undefined}
                             {...progressProps}
                         />

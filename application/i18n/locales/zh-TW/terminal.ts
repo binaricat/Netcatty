@@ -20,6 +20,7 @@ export const zhTWTerminalMessages: Messages = {
   'terminal.osc7Setup.sent': '目錄追蹤設定已傳送到終端',
   'terminal.toolbar.timestampsEnable': '顯示時間戳',
   'terminal.toolbar.timestampsDisable': '隱藏時間戳',
+  'terminal.progress.enterReconnectHint': '按 Enter 重新連線',
   'terminal.connection.protocol.et': 'EternalTerminal',
   'terminal.et.proxyUnsupported': 'EternalTerminal 目前不支援 Netcatty 的代理設定。請改用 SSH，或移除該主機的代理。',
   'terminal.et.multiJumpUnsupported': 'EternalTerminal 目前在 Netcatty 中最多支援一個跳板機。',

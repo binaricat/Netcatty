@@ -108,6 +108,25 @@ test("does not show a countdown while waiting for user input", () => {
   assert.equal(markup.includes("Timeout in"), false);
 });
 
+test("shows enter reconnect hint when disconnected reconnect is available", () => {
+  const markup = renderDialog({
+    status: "disconnected",
+    error: null,
+    showEnterReconnectHint: true,
+  });
+
+  assert.match(markup, /Press Enter to reconnect/);
+});
+
+test("does not show enter reconnect hint until the caller marks enter reconnect available", () => {
+  const markup = renderDialog({
+    status: "disconnected",
+    error: null,
+  });
+
+  assert.equal(markup.includes("Press Enter to reconnect"), false);
+});
+
 test("renders changed host key warning in the same connection dialog", () => {
   const markup = renderDialog({
     hostKeyVerification: {
