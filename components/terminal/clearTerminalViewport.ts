@@ -1,10 +1,26 @@
-import type { Terminal as XTerm } from "@xterm/xterm";
+import type { IDisposable, IParser, Terminal as XTerm } from "@xterm/xterm";
 
 type CsiParam = number | number[];
+type EraseInDisplayTerminal = XTerm & {
+  parser: Pick<IParser, "registerCsiHandler">;
+};
 type InternalTerminal = XTerm & {
   _core?: {
+    buffer?: {
+      lines?: {
+        length: number;
+        trimStart?: (count: number) => void;
+      };
+      scrollTop: number;
+      scrollBottom: number;
+      ybase?: number;
+      ydisp?: number;
+    };
     scroll?: (eraseAttr: unknown, isWrapped?: boolean) => void;
     _inputHandler?: {
+      _onScroll?: {
+        fire?: (position: number) => void;
+      };
       _eraseAttrData?: () => unknown;
     };
   };
@@ -17,6 +33,12 @@ type ClearTerminalViewportOptions = {
 type AppendEraseScrollbackOptions = {
   wipeScrollback: boolean;
   normalScreen: boolean;
+};
+
+type EraseInDisplayHandlerOptions = {
+  getClearWipesScrollback: () => boolean;
+  isInDec2026SyncBlock: () => boolean;
+  scheduleMicrotask?: (callback: () => void) => void;
 };
 
 const getVisibleContentRowCount = (term: XTerm): number => {
@@ -39,6 +61,25 @@ const getVisibleContentRowCount = (term: XTerm): number => {
   return 0;
 };
 
+const getInternalScrollRegion = (term: XTerm): { scrollTop: number; scrollBottom: number } | undefined => {
+  const internalBuffer = (term as InternalTerminal)._core?.buffer;
+  if (
+    typeof internalBuffer?.scrollTop !== "number"
+    || typeof internalBuffer.scrollBottom !== "number"
+  ) {
+    return undefined;
+  }
+  return internalBuffer;
+};
+
+const hasDefaultScrollRegion = (term: XTerm): boolean => {
+  const scrollRegion = getInternalScrollRegion(term);
+  if (!scrollRegion) {
+    return true;
+  }
+  return scrollRegion.scrollTop === 0 && scrollRegion.scrollBottom === term.rows - 1;
+};
+
 export const preserveTerminalViewportInScrollback = (term: XTerm): void => {
   const rowsToPreserve = getVisibleContentRowCount(term);
   if (rowsToPreserve <= 0) {
@@ -53,8 +94,28 @@ export const preserveTerminalViewportInScrollback = (term: XTerm): void => {
     return;
   }
 
-  for (let row = 0; row < rowsToPreserve; row++) {
-    scroll.call(internal._core, eraseAttr, false);
+  const scrollRegion = getInternalScrollRegion(term);
+  const previousScrollTop = scrollRegion?.scrollTop;
+  const previousScrollBottom = scrollRegion?.scrollBottom;
+
+  try {
+    // xterm scrolls inside active DECSTBM margins; widen them while preserving.
+    if (scrollRegion) {
+      scrollRegion.scrollTop = 0;
+      scrollRegion.scrollBottom = term.rows - 1;
+    }
+    for (let row = 0; row < rowsToPreserve; row++) {
+      scroll.call(internal._core, eraseAttr, false);
+    }
+  } finally {
+    if (
+      scrollRegion
+      && previousScrollTop !== undefined
+      && previousScrollBottom !== undefined
+    ) {
+      scrollRegion.scrollTop = previousScrollTop;
+      scrollRegion.scrollBottom = previousScrollBottom;
+    }
   }
 };
 
@@ -97,6 +158,20 @@ export const isEraseScrollbackSequence = (params: CsiParam[]): boolean =>
 export const isEraseViewportSequence = (params: CsiParam[]): boolean =>
   params.length > 0 && params[0] === 2;
 
+export const isEraseBelowSequence = (params: CsiParam[]): boolean =>
+  params.length === 0 || params[0] === 0;
+
+export const shouldScrollOnEraseInDisplay = (
+  term: XTerm,
+  inDec2026SyncBlock: boolean,
+  clearWipesScrollback: boolean,
+): boolean => {
+  if (clearWipesScrollback || inDec2026SyncBlock) {
+    return false;
+  }
+  return term.buffer.active.type === "normal" && hasDefaultScrollRegion(term);
+};
+
 /**
  * Netcatty preserves visible rows in scrollback before CSI 2 J so shell `clear`
  * does not discard history. TUIs inside DEC 2026 sync blocks or the alternate
@@ -107,13 +182,49 @@ export const shouldPreserveViewportBeforeFullErase = (
   inDec2026SyncBlock: boolean,
   clearWipesScrollback = false,
 ): boolean => {
-  if (inDec2026SyncBlock) {
-    return false;
-  }
-  if (clearWipesScrollback) {
+  if (inDec2026SyncBlock || clearWipesScrollback) {
     return false;
   }
   return term.buffer.active.type === "normal";
+};
+
+export const shouldPreserveViewportBeforeEraseBelow = (
+  term: XTerm,
+  inDec2026SyncBlock: boolean,
+  clearWipesScrollback = false,
+): boolean => {
+  if (!shouldPreserveViewportBeforeFullErase(term, inDec2026SyncBlock, clearWipesScrollback)) {
+    return false;
+  }
+  const buffer = term.buffer.active;
+  return buffer.cursorX === 0 && buffer.cursorY === 0;
+};
+
+export const shouldWipeScrollbackAfterEraseBelow = (
+  term: XTerm,
+  inDec2026SyncBlock: boolean,
+  clearWipesScrollback: boolean,
+): boolean => {
+  if (!shouldWipeScrollbackAfterFullErase(term, inDec2026SyncBlock, clearWipesScrollback)) {
+    return false;
+  }
+  const buffer = term.buffer.active;
+  return buffer.cursorX === 0 && buffer.cursorY === 0;
+};
+
+const wipeTerminalScrollback = (term: XTerm): void => {
+  const internal = term as InternalTerminal;
+  const buffer = internal._core?.buffer;
+  const lines = buffer?.lines;
+  const scrollBackSize = (lines?.length ?? 0) - term.rows;
+  if (!buffer || !lines || scrollBackSize <= 0 || typeof lines.trimStart !== "function") {
+    return;
+  }
+
+  lines.trimStart(scrollBackSize);
+  buffer.ybase = Math.max((buffer.ybase ?? 0) - scrollBackSize, 0);
+  buffer.ydisp = Math.max((buffer.ydisp ?? 0) - scrollBackSize, 0);
+  internal._core?._inputHandler?._onScroll?.fire?.(0);
 };
 
 export const shouldWipeScrollbackAfterFullErase = (
@@ -125,6 +236,71 @@ export const shouldWipeScrollbackAfterFullErase = (
     return false;
   }
   return term.buffer.active.type === "normal";
+};
+
+export const installEraseInDisplayHandlers = (
+  term: EraseInDisplayTerminal,
+  {
+    getClearWipesScrollback,
+    isInDec2026SyncBlock,
+    scheduleMicrotask = queueMicrotask,
+  }: EraseInDisplayHandlerOptions,
+): IDisposable => {
+  const setScrollOnEraseInDisplayOnce = (enabled: boolean): void => {
+    term.options.scrollOnEraseInDisplay = enabled;
+    if (enabled) {
+      scheduleMicrotask(() => {
+        term.options.scrollOnEraseInDisplay = false;
+      });
+    }
+  };
+
+  const eraseDisposable = term.parser.registerCsiHandler({ final: "J" }, (params) => {
+    const wipeAllowed = getClearWipesScrollback();
+    const inDec2026SyncBlock = isInDec2026SyncBlock();
+    // Scope xterm's native preservation to shell clears, not TUI redraws.
+    if (isEraseViewportSequence(params)) {
+      const useNativeScrollPreservation = shouldScrollOnEraseInDisplay(
+        term,
+        inDec2026SyncBlock,
+        wipeAllowed,
+      );
+      setScrollOnEraseInDisplayOnce(useNativeScrollPreservation);
+      if (
+        !useNativeScrollPreservation
+        && shouldPreserveViewportBeforeFullErase(term, inDec2026SyncBlock, wipeAllowed)
+      ) {
+        preserveTerminalViewportInScrollback(term);
+      }
+      return false;
+    }
+    setScrollOnEraseInDisplayOnce(false);
+    if (isEraseBelowSequence(params)) {
+      if (shouldPreserveViewportBeforeEraseBelow(term, inDec2026SyncBlock, wipeAllowed)) {
+        preserveTerminalViewportInScrollback(term);
+      } else if (shouldWipeScrollbackAfterEraseBelow(term, inDec2026SyncBlock, wipeAllowed)) {
+        wipeTerminalScrollback(term);
+      }
+      return false;
+    }
+    if (!isEraseScrollbackSequence(params)) {
+      return false;
+    }
+    // CSI 3 J — POSIX/ncurses default `clear` emits this to wipe scrollback.
+    // Honor it unless the user opts into the legacy "preserve history" behavior.
+    return !wipeAllowed;
+  });
+  const selectiveEraseDisposable = term.parser.registerCsiHandler({ prefix: "?", final: "J" }, () => {
+    setScrollOnEraseInDisplayOnce(false);
+    return false;
+  });
+
+  return {
+    dispose: () => {
+      eraseDisposable.dispose();
+      selectiveEraseDisposable.dispose();
+    },
+  };
 };
 
 export const appendEraseScrollbackAfterFullErases = (

@@ -36,10 +36,7 @@ import { isMacPlatform } from "../../../lib/utils";
 import { netcattyBridge } from "../../../infrastructure/services/netcattyBridge";
 import {
   clearTerminalViewport,
-  isEraseScrollbackSequence,
-  isEraseViewportSequence,
-  preserveTerminalViewportInScrollback,
-  shouldPreserveViewportBeforeFullErase,
+  installEraseInDisplayHandlers,
 } from "../clearTerminalViewport";
 import {
   createKittyKeyboardModeState,
@@ -1206,20 +1203,9 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     },
   );
 
-  const eraseScrollbackDisposable = term.parser.registerCsiHandler({ final: "J" }, (params) => {
-    const wipeAllowed = ctx.terminalSettingsRef.current?.clearWipesScrollback ?? true;
-    if (isEraseViewportSequence(params)) {
-      if (shouldPreserveViewportBeforeFullErase(term, inDec2026SyncBlock, wipeAllowed)) {
-        preserveTerminalViewportInScrollback(term);
-      }
-      return false;
-    }
-    if (!isEraseScrollbackSequence(params)) {
-      return false;
-    }
-    // CSI 3 J — POSIX/ncurses default `clear` emits this to wipe scrollback.
-    // Honor it unless the user opts into the legacy "preserve history" behavior.
-    return !wipeAllowed;
+  const eraseScrollbackDisposable = installEraseInDisplayHandlers(term, {
+    getClearWipesScrollback: () => ctx.terminalSettingsRef.current?.clearWipesScrollback ?? true,
+    isInDec2026SyncBlock: () => inDec2026SyncBlock,
   });
 
   const markCursorPositionReportRequest = (params: readonly (number | number[])[]): boolean => {
