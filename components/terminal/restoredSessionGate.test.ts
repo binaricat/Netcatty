@@ -83,6 +83,23 @@ test("manual reconnect captures restore cwd intent before clearing restored stat
   );
 });
 
+test("dismissing the disconnected dialog returns focus to the terminal for enter reconnect", () => {
+  const source = readFileSync(new URL("../Terminal.tsx", import.meta.url), "utf8");
+  const dismissIndex = source.indexOf("const handleDismissDisconnectedDialog = () =>");
+  const dismissedIndex = source.indexOf("setIsDisconnectedDialogDismissed(true)", dismissIndex);
+  const focusIndex = source.indexOf("queueMicrotask(() => termRef.current?.focus())", dismissIndex);
+  const closeSessionIndex = source.indexOf("const handleCloseDisconnectedSession = () =>", dismissIndex);
+
+  assert.notEqual(dismissIndex, -1);
+  assert.notEqual(dismissedIndex, -1);
+  assert.notEqual(focusIndex, -1);
+  assert.notEqual(closeSessionIndex, -1);
+  assert.ok(
+    dismissedIndex < focusIndex && focusIndex < closeSessionIndex,
+    "dismissing the disconnected dialog should leave Enter routed back through the terminal",
+  );
+});
+
 test("startup and attach cwd cache clears preserve restore cwd metadata", () => {
   const terminalSource = readFileSync(new URL("../Terminal.tsx", import.meta.url), "utf8");
   const effectsSource = readFileSync(new URL("./useTerminalEffects.ts", import.meta.url), "utf8");

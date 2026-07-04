@@ -1979,6 +1979,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
 
   const handleDismissDisconnectedDialog = () => {
     setIsDisconnectedDialogDismissed(true);
+    queueMicrotask(() => termRef.current?.focus());
   };
 
   const handleCloseDisconnectedSession = () => {
