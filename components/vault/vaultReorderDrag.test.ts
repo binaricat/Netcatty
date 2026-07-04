@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   getVaultDropIntent,
   getVaultDropPosition,
+  handleVaultRootDrop,
 } from "./vaultReorderDrag.ts";
 
 const makeElement = (rect: Partial<DOMRect>): HTMLElement => ({
@@ -39,4 +40,55 @@ test("vault drop intent uses edges for sorting and middle for nesting", () => {
   assert.equal(getVaultDropIntent(element, 150, 45, false), "before");
   assert.equal(getVaultDropIntent(element, 150, 95, false), "after");
   assert.equal(getVaultDropIntent(element, 150, 70, false), "inside");
+});
+
+test("root host drop resets host drag state after moving the host to all hosts", () => {
+  const calls: string[] = [];
+
+  handleVaultRootDrop({
+    dataTransfer: {
+      getData: (type: string) => (type === "host-id" ? "host-1" : ""),
+    },
+    preventDefault: () => calls.push("preventDefault"),
+    setDragOverDropTarget: (target) => calls.push(`drop:${String(target)}`),
+    moveGroup: (groupPath, targetPath) => {
+      calls.push(`group:${groupPath}:${String(targetPath)}`);
+    },
+    moveHostToGroup: (hostId, targetPath) => {
+      calls.push(`host:${hostId}:${String(targetPath)}`);
+    },
+    resetHostDragState: () => calls.push("resetHostDragState"),
+  });
+
+  assert.deepEqual(calls, [
+    "preventDefault",
+    "drop:null",
+    "host:host-1:null",
+    "resetHostDragState",
+  ]);
+});
+
+test("root group drop moves the group to all hosts without resetting host drag state", () => {
+  const calls: string[] = [];
+
+  handleVaultRootDrop({
+    dataTransfer: {
+      getData: (type: string) => (type === "group-path" ? "team/prod" : ""),
+    },
+    preventDefault: () => calls.push("preventDefault"),
+    setDragOverDropTarget: (target) => calls.push(`drop:${String(target)}`),
+    moveGroup: (groupPath, targetPath) => {
+      calls.push(`group:${groupPath}:${String(targetPath)}`);
+    },
+    moveHostToGroup: (hostId, targetPath) => {
+      calls.push(`host:${hostId}:${String(targetPath)}`);
+    },
+    resetHostDragState: () => calls.push("resetHostDragState"),
+  });
+
+  assert.deepEqual(calls, [
+    "preventDefault",
+    "drop:null",
+    "group:team/prod:null",
+  ]);
 });

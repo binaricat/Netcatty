@@ -7,6 +7,7 @@ import {
   getVaultDropIntent,
   getVaultDropPosition,
   hasVaultDragType,
+  handleVaultRootDrop,
   markVaultDropIndicator,
   useVaultGridLayoutAnimation,
 } from "./vaultReorderDrag";
@@ -163,12 +164,14 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
                           );
                         }}
                         onDrop={(e) => {
-                          e.preventDefault();
-                          setDragOverDropTarget(null);
-                          const groupPath = e.dataTransfer.getData("group-path");
-                          const hostId = e.dataTransfer.getData("host-id");
-                          if (groupPath) moveGroup(groupPath, null);
-                          if (hostId) moveHostToGroup(hostId, null);
+                          handleVaultRootDrop({
+                            dataTransfer: e.dataTransfer,
+                            preventDefault: () => e.preventDefault(),
+                            setDragOverDropTarget,
+                            moveGroup,
+                            moveHostToGroup,
+                            resetHostDragState,
+                          });
                         }}
                       >
                         {t("vault.hosts.allHosts")}
