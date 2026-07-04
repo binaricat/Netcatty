@@ -411,8 +411,8 @@ jobs:
       - name: Install deps
         run: npm ci
 
-      - name: Install pacman packaging dependencies
-        run: sudo apt-get update && sudo apt-get install -y libarchive-tools
+      - name: Install Linux packaging dependencies
+        run: sudo apt-get update && sudo apt-get install -y libarchive-tools rpm
 
       - name: Set version
         shell: bash
@@ -452,6 +452,9 @@ jobs:
 
       - name: Verify packaged deb artifact
         run: bash scripts/verify-linux-deb-artifact.sh amd64
+
+      - name: Verify packaged rpm artifact
+        run: bash scripts/verify-linux-rpm-artifact.sh x86_64
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -565,6 +568,9 @@ jobs:
 
       - name: Verify packaged deb artifact
         run: bash scripts/verify-linux-deb-artifact.sh arm64
+
+      - name: Verify packaged rpm artifact
+        run: bash scripts/verify-linux-rpm-artifact.sh aarch64
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4

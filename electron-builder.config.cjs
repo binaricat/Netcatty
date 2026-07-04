@@ -234,6 +234,11 @@ module.exports = {
         // Deepin OS and other distros that have issues with lzma decompression
         compression: 'gz'
     },
+    rpm: {
+        // Avoid rpm's generated /usr/lib/.build-id symlinks. Those hashes are
+        // global on the host, so owning them can conflict with other RPMs.
+        fpm: ['--rpm-rpmbuild-define', '_build_id_links none']
+    },
     pacman: {
         // FPM-generated .pacman packages bypass Arch's alpm hooks that
         // normally refresh the hicolor icon cache. Without this, KDE cannot

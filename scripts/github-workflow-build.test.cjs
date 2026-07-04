@@ -44,3 +44,14 @@ test("build workflow installs bsdtar for Arch pacman packaging", () => {
     "both Linux package jobs must install libarchive-tools for pacman metadata generation",
   );
 });
+
+test("build workflow verifies RPM artifacts for both Linux architectures", () => {
+  assert.ok(
+    buildWorkflow.includes("bash scripts/verify-linux-rpm-artifact.sh x86_64"),
+    "Linux x64 package job must verify the RPM artifact",
+  );
+  assert.ok(
+    buildWorkflow.includes("bash scripts/verify-linux-rpm-artifact.sh aarch64"),
+    "Linux arm64 package job must verify the RPM artifact",
+  );
+});

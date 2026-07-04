@@ -162,6 +162,14 @@ test("linux packaging includes an Arch Linux pacman package target", () => {
   );
 });
 
+test("rpm packaging disables generated build-id symlinks", () => {
+  assert.deepEqual(
+    config.rpm?.fpm,
+    ["--rpm-rpmbuild-define", "_build_id_links none"],
+    "RPM packages must not own /usr/lib/.build-id links that can conflict with other RPMs",
+  );
+});
+
 test("windows packaging includes a zip archive target", () => {
   const winTargets = config.win.target.map((entry) => entry.target);
   assert.ok(
