@@ -131,9 +131,22 @@ export function useAppStartupEffects(ctx: StartupEffectsContext) {
         };
       });
 
+      const hostsForSystemMenu = hosts
+        .filter((host: any) => typeof host?.id === "string" && host.id.length > 0)
+        .map((host: any) => ({
+          id: host.id,
+          label: host.label,
+          hostname: host.hostname,
+          group: host.group,
+          pinned: host.pinned,
+          lastConnectedAt: host.lastConnectedAt,
+          protocol: host.protocol,
+        }));
+
       void bridge.updateTrayMenuData({
         sessions: sessionsForTray,
         portForwardRules: portForwardingRules,
+        hosts: hostsForSystemMenu,
       });
     }, 250);
 
@@ -141,7 +154,7 @@ export function useAppStartupEffects(ctx: StartupEffectsContext) {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [enabled, sessions, portForwardingRules, workspaces]);
+  }, [enabled, hosts, sessions, portForwardingRules, workspaces]);
 
   // Quit guard: block app exit while any editor tab has unsaved changes.
   // Main process sends "app:query-dirty-editors"; we respond with the result.

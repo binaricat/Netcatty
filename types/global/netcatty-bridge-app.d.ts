@@ -58,6 +58,7 @@ declare global {
     isCloseToTray?(): Promise<{ enabled: boolean }>;
     updateTrayMenuData?(data: {
       sessions?: Array<{ id: string; label: string; hostLabel: string; status: "connecting" | "connected" | "disconnected"; workspaceId?: string; workspaceTitle?: string }>;
+      hosts?: Array<{ id: string; label?: string; hostname?: string; group?: string; pinned?: boolean; lastConnectedAt?: number; protocol?: string }>;
       portForwardRules?: Array<{
         id: string;
         label: string;
@@ -83,6 +84,7 @@ declare global {
     onTrayPanelRefresh?(callback: () => void): () => void;
     onTrayPanelMenuData?(callback: (data: {
       sessions?: Array<{ id: string; label: string; hostLabel: string; status: "connecting" | "connected" | "disconnected"; workspaceId?: string; workspaceTitle?: string }>;
+      hosts?: Array<{ id: string; label?: string; hostname?: string; group?: string; pinned?: boolean; lastConnectedAt?: number; protocol?: string }>;
       portForwardRules?: Array<{
         id: string;
         label: string;

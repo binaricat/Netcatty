@@ -116,6 +116,12 @@ function createElectronStub() {
       },
     },
     app: {
+      dock: {
+        menu: null,
+        setMenu(menu) {
+          this.menu = menu;
+        },
+      },
       getAppPath() {
         return process.cwd();
       },
@@ -552,6 +558,46 @@ test("tray icon event registration is platform-dependent", async () => {
     assert.ok(!trayInstance.handlers.has("right-click"), "darwin tray should not have right-click handler");
     assert.equal(trayInstance.contextMenu, null, "darwin tray should not set a context menu");
     bridge.cleanup();
+  });
+});
+
+test("mac dock menu lists saved hosts and forwards connect actions", async () => {
+  await withPlatform("darwin", async () => {
+    const bridge = loadBridge();
+    const electronModule = createElectronStub();
+    const sentMessages = [];
+    const win = new FakeWindow();
+    win.webContents = {
+      send(channel, ...args) {
+        sentMessages.push([channel, ...args]);
+      },
+    };
+    electronModule.BrowserWindow.getAllWindows = () => [win];
+
+    bridge.init({ electronModule });
+    const ipcMain = createIpcMainStub();
+    bridge.registerHandlers(ipcMain);
+
+    await ipcMain.handlers.get("netcatty:tray:updateMenuData")(null, {
+      hosts: [
+        { id: "plain", label: "Plain Host", hostname: "plain.example" },
+        { id: "pinned", label: "Pinned Host", hostname: "pinned.example", pinned: true },
+        { id: "recent", label: "Recent Host", hostname: "recent.example", lastConnectedAt: 20 },
+      ],
+    });
+
+    const dockTemplate = electronModule.app.dock.menu?.template ?? [];
+    const connectionMenu = dockTemplate.find((item) => item.label === "New Connection");
+
+    assert.ok(connectionMenu, "dock menu should expose a new connection submenu");
+    assert.deepEqual(
+      connectionMenu.submenu.map((item) => item.label),
+      ["Pinned Host", "Recent Host", "Plain Host"],
+    );
+
+    connectionMenu.submenu[0].click();
+
+    assert.deepEqual(sentMessages, [["netcatty:trayPanel:connectToHost", "pinned"]]);
   });
 });
 
