@@ -248,13 +248,30 @@ export const SystemPanelError = memo(function SystemPanelError({
 
 export const SystemPanelInlineError = memo(function SystemPanelInlineError({
   message,
+  onRetry,
+  retryLabel,
+  loading,
 }: {
   message: string;
+  onRetry?: () => void;
+  retryLabel?: string;
+  loading?: boolean;
 }) {
   return (
     <div className="shrink-0 flex items-center gap-2 px-3 py-2 text-[11px] text-muted-foreground border-b border-border/30 bg-muted/20">
       <Unplug size={12} className="shrink-0 opacity-60" />
       <span className="min-w-0 truncate">{message}</span>
+      {onRetry && retryLabel && (
+        <button
+          type="button"
+          onClick={onRetry}
+          disabled={loading}
+          className="ml-auto inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[10px] transition-colors hover:bg-muted/60 hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
+        >
+          <RefreshCw size={10} className={cn(loading && 'animate-spin')} />
+          {retryLabel}
+        </button>
+      )}
     </div>
   );
 });

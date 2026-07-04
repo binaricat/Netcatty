@@ -974,13 +974,19 @@ function createSessionOpsApi(ctx) {
               } else if (part.startsWith('KERNEL:')) {
                 kernelRelease = part.substring(7).trim();
               } else if (part.startsWith('UPTIME:')) {
-                const uptime = Number(part.substring(7).trim());
-                if (Number.isFinite(uptime) && uptime >= 0) uptimeSeconds = uptime;
+                const uptimeText = part.substring(7).trim();
+                if (uptimeText !== '') {
+                  const uptime = Number(uptimeText);
+                  if (Number.isFinite(uptime) && uptime >= 0) uptimeSeconds = uptime;
+                }
               } else if (part.startsWith('LOAD:')) {
-                loadAverage = part.substring(5).trim().split(/\s+/)
-                  .map((value) => Number(value))
-                  .filter((value) => Number.isFinite(value) && value >= 0)
-                  .slice(0, 3);
+                const loadText = part.substring(5).trim();
+                if (loadText !== '') {
+                  loadAverage = loadText.split(/\s+/)
+                    .map((value) => Number(value))
+                    .filter((value) => Number.isFinite(value) && value >= 0)
+                    .slice(0, 3);
+                }
               }
             }
     

@@ -147,6 +147,24 @@ test("getServerStats includes host identity, load average, and uptime", async ()
   assert.deepEqual(result.stats.loadAverage, [0.1, 0.2, 0.3]);
 });
 
+test("getServerStats keeps blank load average and uptime as missing data", async () => {
+  const sessions = new Map();
+  const session = {
+    type: "ssh",
+    conn: fakeConn(
+      "CPURAW:1000 900|CORES:4|PERCORERAW:|MEMINFO:8000 4000 100 900 0 0|PROCS:|DISKS:|NET:|UPTIME:|LOAD:",
+    ),
+  };
+  sessions.set("sid", session);
+
+  const api = makeSessionOps(sessions);
+  const result = await api.getServerStats({ sender: {} }, { sessionId: "sid" });
+
+  assert.equal(result.success, true);
+  assert.equal(result.stats.uptimeSeconds, null);
+  assert.deepEqual(result.stats.loadAverage, []);
+});
+
 test("getServerStats parses macOS stats and avoids blocking top command", async () => {
   const sessions = new Map();
   let command = "";

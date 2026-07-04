@@ -6,11 +6,10 @@ import {
   MemoryStick,
   Network,
 } from 'lucide-react';
-import React, { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import React, { memo, useEffect, useMemo, useState } from 'react';
 import { useI18n } from '../../application/i18n/I18nProvider';
-import type { useSystemManagerBackend } from '../../application/state/useSystemManagerBackend';
-import type { SystemOverviewStats } from '../../domain/systemManager/types';
 import { cn } from '../../lib/utils';
+import { useServerStats } from '../terminal/hooks/useServerStats';
 import { ResourceBar } from './ResourceBar';
 import {
   SystemPanelEmpty,
@@ -19,14 +18,11 @@ import {
   SystemPanelLoading,
   SystemPanelShell,
 } from './SystemPanelUi';
-import { usePolling, useStableTranslate } from './hooks/useSystemManager';
-
-type Backend = ReturnType<typeof useSystemManagerBackend>;
 
 interface SystemOverviewTabProps {
   sessionId: string;
   isVisible: boolean;
-  backend: Backend;
+  isSupportedOs: boolean;
   refreshIntervalSec: number;
 }
 
@@ -80,15 +76,15 @@ function formatMemoryMb(mb: number | null | undefined): string {
   return `${Math.round(value)} MB`;
 }
 
-function formatDuration(seconds: number | null | undefined): string {
+function formatDuration(seconds: number | null | undefined, t: ReturnType<typeof useI18n>['t']): string {
   if (!Number.isFinite(seconds) || Number(seconds) < 0) return '--';
   const totalHours = Math.floor(Number(seconds) / 3600);
   const days = Math.floor(totalHours / 24);
   const hours = totalHours % 24;
   const minutes = Math.floor((Number(seconds) % 3600) / 60);
-  if (days > 0) return `${days}d ${hours}h`;
-  if (hours > 0) return `${hours}h ${minutes}m`;
-  return `${minutes}m`;
+  if (days > 0) return t('systemManager.overview.duration.daysHours', { days, hours });
+  if (hours > 0) return t('systemManager.overview.duration.hoursMinutes', { hours, minutes });
+  return t('systemManager.overview.duration.minutes', { minutes });
 }
 
 function formatLoad(loadAverage: number[] | undefined): string {
@@ -212,30 +208,26 @@ function InfoPill({
 export const SystemOverviewTab = memo(function SystemOverviewTab({
   sessionId,
   isVisible,
-  backend,
+  isSupportedOs,
   refreshIntervalSec,
 }: SystemOverviewTabProps) {
   const { t } = useI18n();
-  const stableT = useStableTranslate();
   const [history, setHistory] = useState<OverviewSample[]>([]);
 
-  const fetcher = useCallback(async () => {
-    const result = await backend.getServerStats(sessionId);
-    if (result.pending) return null;
-    if (!result.success || !result.stats) {
-      throw new Error(result.error || stableT('systemManager.errors.loadOverview'));
-    }
-    return result.stats as SystemOverviewStats;
-  }, [backend, sessionId, stableT]);
-
-  const intervalMs = Math.max(5, refreshIntervalSec) * 1000;
-  const { data: stats, error, loading, refresh } = usePolling<SystemOverviewStats>(
-    fetcher,
-    intervalMs,
+  const {
+    stats,
+    error,
+    isLoading: loading,
+    refresh,
+  } = useServerStats({
+    sessionId,
+    enabled: true,
+    refreshInterval: refreshIntervalSec,
+    isSupportedOs,
+    isConnected: true,
     isVisible,
-    undefined,
-    { resetKey: sessionId },
-  );
+  });
+  const hasStats = Boolean(stats.lastUpdated);
 
   const memoryPercent = ratioPercent(stats?.memUsed, stats?.memTotal);
   const diskPercent = clampPercent(stats?.diskPercent);
@@ -245,7 +237,11 @@ export const SystemOverviewTab = memo(function SystemOverviewTab({
   const loadPercent = ratioPercent(loadOne, stats?.cpuCores);
 
   useEffect(() => {
-    if (!stats) return;
+    setHistory([]);
+  }, [sessionId]);
+
+  useEffect(() => {
+    if (!isVisible || !hasStats) return;
     setHistory((prev) => {
       const next = [
         ...prev,
@@ -259,7 +255,7 @@ export const SystemOverviewTab = memo(function SystemOverviewTab({
       ];
       return next.slice(-24);
     });
-  }, [diskPercent, memoryPercent, networkSpeed, stats]);
+  }, [diskPercent, hasStats, isVisible, memoryPercent, networkSpeed, stats.cpu]);
 
   const trends = useMemo(() => ({
     cpu: history.map((sample) => sample.cpu),
@@ -268,18 +264,25 @@ export const SystemOverviewTab = memo(function SystemOverviewTab({
     network: history.map((sample) => sample.network),
   }), [history]);
 
-  const showBlockingError = Boolean(error && !stats && !loading);
-  const showInitialLoading = Boolean(loading && !stats);
+  const showBlockingError = Boolean(error && !hasStats && !loading);
+  const showInitialLoading = Boolean(loading && !hasStats);
 
   return (
     <SystemPanelShell section="system-manager-overview">
-      {error && stats && !loading && <SystemPanelInlineError message={error} />}
+      {error && hasStats && !loading && (
+        <SystemPanelInlineError
+          message={error}
+          onRetry={() => void refresh()}
+          retryLabel={t('history.action.retry')}
+          loading={loading}
+        />
+      )}
 
       {showBlockingError && error ? (
         <SystemPanelError message={error} onRetry={() => void refresh()} retryLabel={t('history.action.retry')} loading={loading} />
       ) : showInitialLoading ? (
         <SystemPanelLoading message={t('systemManager.overview.loading')} />
-      ) : !stats ? (
+      ) : !hasStats ? (
         <SystemPanelEmpty icon={Activity} message={t('systemManager.overview.empty')} />
       ) : (
         <div className="flex-1 min-h-0 overflow-y-auto px-3 py-3">
@@ -327,7 +330,7 @@ export const SystemOverviewTab = memo(function SystemOverviewTab({
 
           <div className="mt-3 grid grid-cols-2 gap-2">
             <InfoPill label={t('systemManager.overview.load')} value={formatLoad(stats.loadAverage)} />
-            <InfoPill label={t('systemManager.overview.uptime')} value={formatDuration(stats.uptimeSeconds)} />
+            <InfoPill label={t('systemManager.overview.uptime')} value={formatDuration(stats.uptimeSeconds, t)} />
             <InfoPill label={t('systemManager.overview.system')} value={stats.osName || '--'} />
             <InfoPill label={t('systemManager.overview.kernel')} value={stats.kernelRelease || '--'} />
             <InfoPill label={t('systemManager.overview.swap')} value={`${formatMemoryMb(stats.swapUsed)} / ${formatMemoryMb(stats.swapTotal)}`} />

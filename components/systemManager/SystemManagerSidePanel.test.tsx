@@ -50,8 +50,21 @@ test("system side panel renders the graphical overview as the first tab", () => 
   assert.doesNotMatch(markup, /System overview/);
 });
 
-test("overview metric cards receive their optional trend scale", () => {
+test("overview tab reuses the shared server stats source", () => {
   const source = readFileSync(new URL("./SystemOverviewTab.tsx", import.meta.url), "utf8");
 
   assert.match(source, /function MetricCard\(\{[\s\S]*trendValues,\s*trendMax,\s*tone,/);
+  assert.match(source, /useServerStats\(\{/);
+  assert.match(source, /setHistory\(\[\]\)/);
+  assert.match(source, /if \(!isVisible \|\| !hasStats\) return/);
+  assert.match(source, /SystemPanelInlineError[\s\S]*onRetry=\{\(\) => void refresh\(\)\}/);
+  assert.doesNotMatch(source, /usePolling/);
+  assert.doesNotMatch(source, /backend\.getServerStats/);
+});
+
+test("overview tab unsubscribes while another system tab is active", () => {
+  const source = readFileSync(new URL("./SystemManagerSidePanel.tsx", import.meta.url), "utf8");
+
+  assert.match(source, /resolvedTab === 'overview' && \(/);
+  assert.match(source, /<SystemOverviewTab/);
 });

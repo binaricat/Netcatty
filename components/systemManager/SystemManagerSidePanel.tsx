@@ -7,7 +7,7 @@ import type { TerminalSettings } from '../../domain/models';
 import type { Host } from '../../domain/models/connection';
 import type { SystemManagerSubTab } from '../../domain/systemManager/types';
 import { resolveCapabilityPanelState } from '../../domain/systemManagerPanelState';
-import { buildSystemManagerTabs } from '../../domain/systemManager/systemTarget';
+import { buildSystemManagerTabs, shouldCollectServerStats } from '../../domain/systemManager/systemTarget';
 import type { Snippet, TerminalSession } from '../../types';
 import { cn } from '../../lib/utils';
 import { DockerManagerTab } from './DockerManagerTab';
@@ -61,6 +61,10 @@ export const SystemManagerSidePanel = memo(function SystemManagerSidePanel({
 
   const availableTabs = useMemo(
     () => buildSystemManagerTabs(sessionHost, capabilities, session),
+    [capabilities, session, sessionHost],
+  );
+  const isStatsSupportedOs = useMemo(
+    () => shouldCollectServerStats(sessionHost, capabilities, session),
     [capabilities, session, sessionHost],
   );
 
@@ -199,12 +203,14 @@ export const SystemManagerSidePanel = memo(function SystemManagerSidePanel({
 
       <div className="flex-1 min-h-0 flex flex-col">
         <div className={cn('flex-1 min-h-0 flex flex-col', resolvedTab !== 'overview' && 'hidden')}>
-          <SystemOverviewTab
-            sessionId={sessionId}
-            isVisible={isVisible && resolvedTab === 'overview'}
-            backend={backend}
-            refreshIntervalSec={terminalSettings.serverStatsRefreshInterval}
-          />
+          {resolvedTab === 'overview' && (
+            <SystemOverviewTab
+              sessionId={sessionId}
+              isVisible={isVisible}
+              isSupportedOs={isStatsSupportedOs}
+              refreshIntervalSec={terminalSettings.serverStatsRefreshInterval}
+            />
+          )}
         </div>
         <div className={cn('flex-1 min-h-0 flex flex-col', resolvedTab !== 'processes' && 'hidden')}>
           <ProcessManagerTab

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { netcattyBridge } from '../../../infrastructure/services/netcattyBridge';
 
 export interface DiskInfo {
@@ -23,6 +23,11 @@ export interface ProcessInfo {
 }
 
 export interface ServerStats {
+  hostname?: string;            // Remote hostname
+  osName?: string;              // Remote operating system name
+  kernelRelease?: string;       // Remote kernel release
+  uptimeSeconds?: number | null;// Remote uptime in seconds
+  loadAverage?: number[];       // 1/5/15 minute load average
   cpu: number | null;           // CPU usage percentage (0-100)
   cpuCores: number | null;      // Number of CPU cores
   cpuPerCore: number[];         // Per-core CPU usage array
@@ -54,15 +59,51 @@ interface UseServerStatsOptions {
   isVisible: boolean;         // Pause background polling for hidden terminals
 }
 
-export function useServerStats({
-  sessionId,
-  enabled,
-  refreshInterval,
-  isSupportedOs,
-  isConnected,
-  isVisible,
-}: UseServerStatsOptions) {
-  const [stats, setStats] = useState<ServerStats>({
+interface ServerStatsState {
+  stats: ServerStats;
+  isLoading: boolean;
+  error: string | null;
+}
+
+interface ServerStatsClient {
+  enabled: boolean;
+  refreshInterval: number;
+  isSupportedOs: boolean;
+  isConnected: boolean;
+  isVisible: boolean;
+}
+
+type ServerStatsListener = (state: ServerStatsState) => void;
+
+interface SharedServerStatsSession {
+  sessionId: string;
+  state: ServerStatsState;
+  listeners: Set<ServerStatsListener>;
+  clients: Map<number, ServerStatsClient>;
+  intervalRef: ReturnType<typeof setInterval> | null;
+  initialTimerRef: ReturnType<typeof setTimeout> | null;
+  connectedAt: number;
+  hasFetched: boolean;
+  fetchGeneration: number;
+  consecutiveFailures: number;
+  givenUp: boolean;
+  pollIntervalMs: number | null;
+  pollingActive: boolean;
+  inflight: Promise<void> | null;
+  inflightGeneration: number | null;
+}
+
+const CONSECUTIVE_FAILURE_LIMIT = 3;
+const serverStatsSessions = new Map<string, SharedServerStatsSession>();
+let nextClientId = 1;
+
+function createEmptyServerStats(): ServerStats {
+  return {
+    hostname: undefined,
+    osName: undefined,
+    kernelRelease: undefined,
+    uptimeSeconds: null,
+    loadAverage: [],
     cpu: null,
     cpuCores: null,
     cpuPerCore: [],
@@ -83,238 +124,325 @@ export function useServerStats({
     latencyMs: null,
     netInterfaces: [],
     lastUpdated: null,
-  });
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const isMountedRef = useRef(true);
-  const hasFetchedRef = useRef(false);
-  const connectedAtRef = useRef(0);
-  const fetchGenerationRef = useRef(0);
-  // Auto-disable polling after a few consecutive failures. This covers
-  // hosts the banner classifier could not identify (e.g. Juniper JUNOS,
-  // Arista EOS, Cisco NX-OS — all of which advertise themselves as
-  // OpenSSH but do not support the POSIX stats shell command). Without
-  // this, the hook would keep retrying forever and generate an AAA
-  // session log every refresh interval.
-  const CONSECUTIVE_FAILURE_LIMIT = 3;
-  const consecutiveFailuresRef = useRef(0);
-  const givenUpRef = useRef(false);
+  };
+}
 
-  const fetchStats = useCallback(async () => {
-    if (!enabled || !isSupportedOs || !isConnected || !isVisible || !sessionId) {
-      return;
-    }
-    if (givenUpRef.current) {
-      return;
-    }
+function createInitialState(): ServerStatsState {
+  return {
+    stats: createEmptyServerStats(),
+    isLoading: false,
+    error: null,
+  };
+}
 
-    const bridge = netcattyBridge.get();
-    if (!bridge?.getServerStats) {
-      return;
-    }
+function getSharedServerStatsSession(sessionId: string): SharedServerStatsSession {
+  const existing = serverStatsSessions.get(sessionId);
+  if (existing) return existing;
 
-    const generation = ++fetchGenerationRef.current;
-    setIsLoading(true);
-    setError(null);
+  const session: SharedServerStatsSession = {
+    sessionId,
+    state: createInitialState(),
+    listeners: new Set(),
+    clients: new Map(),
+    intervalRef: null,
+    initialTimerRef: null,
+    connectedAt: 0,
+    hasFetched: false,
+    fetchGeneration: 0,
+    consecutiveFailures: 0,
+    givenUp: false,
+    pollIntervalMs: null,
+    pollingActive: false,
+    inflight: null,
+    inflightGeneration: null,
+  };
+  serverStatsSessions.set(sessionId, session);
+  return session;
+}
 
-    const markFailure = (message: string) => {
-      consecutiveFailuresRef.current += 1;
-      setError(message);
-      if (consecutiveFailuresRef.current >= CONSECUTIVE_FAILURE_LIMIT) {
-        // Stop polling this session. The caller's useEffect sees the
-        // givenUp flag via the next render cycle and we also clear the
-        // interval locally so no further ticks fire.
-        givenUpRef.current = true;
-        if (intervalRef.current) {
-          clearInterval(intervalRef.current);
-          intervalRef.current = null;
-        }
-      }
-    };
+function emitServerStatsState(session: SharedServerStatsSession): void {
+  for (const listener of session.listeners) {
+    listener(session.state);
+  }
+}
 
+function updateServerStatsState(session: SharedServerStatsSession, patch: Partial<ServerStatsState>): void {
+  session.state = { ...session.state, ...patch };
+  emitServerStatsState(session);
+}
+
+function clearServerStatsTimers(session: SharedServerStatsSession): void {
+  if (session.initialTimerRef) {
+    clearTimeout(session.initialTimerRef);
+    session.initialTimerRef = null;
+  }
+  if (session.intervalRef) {
+    clearInterval(session.intervalRef);
+    session.intervalRef = null;
+  }
+  session.pollingActive = false;
+  session.pollIntervalMs = null;
+}
+
+function resetServerStatsSession(session: SharedServerStatsSession): void {
+  clearServerStatsTimers(session);
+  session.connectedAt = 0;
+  session.hasFetched = false;
+  session.fetchGeneration += 1;
+  session.consecutiveFailures = 0;
+  session.givenUp = false;
+  updateServerStatsState(session, createInitialState());
+}
+
+function getActiveServerStatsClients(session: SharedServerStatsSession): ServerStatsClient[] {
+  return Array.from(session.clients.values()).filter((client) => (
+    client.enabled && client.isSupportedOs && client.isConnected
+  ));
+}
+
+function getVisibleServerStatsClients(session: SharedServerStatsSession): ServerStatsClient[] {
+  return getActiveServerStatsClients(session).filter((client) => client.isVisible);
+}
+
+function normalizeServerStats(stats: Partial<ServerStats>): ServerStats {
+  return {
+    hostname: stats.hostname,
+    osName: stats.osName,
+    kernelRelease: stats.kernelRelease,
+    uptimeSeconds: Number.isFinite(stats.uptimeSeconds) ? Number(stats.uptimeSeconds) : null,
+    loadAverage: Array.isArray(stats.loadAverage) ? stats.loadAverage : [],
+    cpu: stats.cpu ?? null,
+    cpuCores: stats.cpuCores ?? null,
+    cpuPerCore: stats.cpuPerCore || [],
+    memTotal: stats.memTotal ?? null,
+    memUsed: stats.memUsed ?? null,
+    memFree: stats.memFree ?? null,
+    memBuffers: stats.memBuffers ?? null,
+    memCached: stats.memCached ?? null,
+    swapTotal: stats.swapTotal ?? null,
+    swapUsed: stats.swapUsed ?? null,
+    topProcesses: stats.topProcesses || [],
+    diskPercent: stats.diskPercent ?? null,
+    diskUsed: stats.diskUsed ?? null,
+    diskTotal: stats.diskTotal ?? null,
+    disks: stats.disks || [],
+    netRxSpeed: stats.netRxSpeed || 0,
+    netTxSpeed: stats.netTxSpeed || 0,
+    latencyMs: Number.isFinite(stats.latencyMs) ? Number(stats.latencyMs) : null,
+    netInterfaces: stats.netInterfaces || [],
+    lastUpdated: Date.now(),
+  };
+}
+
+function markServerStatsFailure(session: SharedServerStatsSession, message: string): void {
+  session.consecutiveFailures += 1;
+  updateServerStatsState(session, { error: message });
+  if (session.consecutiveFailures >= CONSECUTIVE_FAILURE_LIMIT) {
+    // Stop polling this session. This covers network devices that advertise
+    // OpenSSH but do not support the POSIX stats shell command.
+    session.givenUp = true;
+    clearServerStatsTimers(session);
+  }
+}
+
+async function fetchSharedServerStats(session: SharedServerStatsSession, force = false): Promise<void> {
+  if (!session.sessionId) return;
+  if (session.inflight && session.inflightGeneration === session.fetchGeneration) {
+    await session.inflight;
+    return;
+  }
+  if (session.givenUp && !force) return;
+  if (getActiveServerStatsClients(session).length === 0) return;
+  if (!force && getVisibleServerStatsClients(session).length === 0) return;
+
+  const bridge = netcattyBridge.get();
+  if (!bridge?.getServerStats) return;
+
+  if (force) {
+    session.givenUp = false;
+    session.consecutiveFailures = 0;
+  }
+
+  const generation = session.fetchGeneration;
+  session.inflightGeneration = generation;
+  updateServerStatsState(session, { isLoading: true, error: null });
+
+  const request = (async () => {
     try {
-      const result = await bridge.getServerStats(sessionId);
+      const result = await bridge.getServerStats(session.sessionId);
 
-      // Discard stale responses from before a hide/show cycle or reconnect
-      if (!isMountedRef.current || generation !== fetchGenerationRef.current) return;
+      // Discard stale responses from before a hide/show cycle or reconnect.
+      if (generation !== session.fetchGeneration) return;
 
       if (result.pending) {
-        // Transient "not ready yet" — e.g. a Mosh session whose SSH handshake
-        // hasn't finished, so the stats companion connection can't exist yet
-        // (issue #1198). Do NOT count this toward the consecutive-failure
-        // give-up, or a slow/manual handshake would permanently disable stats
-        // before the credentials become available. Just wait for the next poll.
+        // Transient "not ready yet", e.g. a Mosh session whose SSH handshake
+        // has not finished. Do not count this toward the hard-failure cutoff.
         return;
       }
 
       if (result.success && result.stats) {
-        hasFetchedRef.current = true;
-        consecutiveFailuresRef.current = 0;
-        setStats({
-          cpu: result.stats.cpu,
-          cpuCores: result.stats.cpuCores,
-          cpuPerCore: result.stats.cpuPerCore || [],
-          memTotal: result.stats.memTotal,
-          memUsed: result.stats.memUsed,
-          memFree: result.stats.memFree,
-          memBuffers: result.stats.memBuffers,
-          memCached: result.stats.memCached,
-          swapTotal: result.stats.swapTotal ?? null,
-          swapUsed: result.stats.swapUsed ?? null,
-          topProcesses: result.stats.topProcesses || [],
-          diskPercent: result.stats.diskPercent,
-          diskUsed: result.stats.diskUsed,
-          diskTotal: result.stats.diskTotal,
-          disks: result.stats.disks || [],
-          netRxSpeed: result.stats.netRxSpeed || 0,
-          netTxSpeed: result.stats.netTxSpeed || 0,
-          latencyMs: Number.isFinite(result.stats.latencyMs) ? result.stats.latencyMs : null,
-          netInterfaces: result.stats.netInterfaces || [],
-          lastUpdated: Date.now(),
+        session.hasFetched = true;
+        session.consecutiveFailures = 0;
+        updateServerStatsState(session, {
+          stats: normalizeServerStats(result.stats),
+          error: null,
         });
       } else if (result.error) {
-        markFailure(result.error);
+        markServerStatsFailure(session, result.error);
       } else {
-        // Response was not marked as success but has no error — treat as
-        // a soft failure. This happens e.g. when the stats shell pipeline
-        // returns a parse failure on a host that isn't a typical Linux
-        // distro (JUNOS, NX-OS, EOS).
-        markFailure('No stats returned');
+        markServerStatsFailure(session, 'No stats returned');
       }
     } catch (err) {
-      if (isMountedRef.current && generation === fetchGenerationRef.current) {
-        markFailure(err instanceof Error ? err.message : 'Unknown error');
+      if (generation === session.fetchGeneration) {
+        markServerStatsFailure(session, err instanceof Error ? err.message : 'Unknown error');
       }
     } finally {
-      if (isMountedRef.current && generation === fetchGenerationRef.current) {
-        setIsLoading(false);
+      if (generation === session.fetchGeneration) {
+        updateServerStatsState(session, { isLoading: false });
       }
     }
-  }, [sessionId, enabled, isSupportedOs, isConnected, isVisible]);
+  })();
 
-  // When the session changes (e.g., same tab reconnects to a different host
-  // while staying connected), reset the failure counter. Without this, a
-  // JUNOS session that tripped the counter would permanently suppress
-  // polling even after the tab reconnects to a Linux host.
-  useEffect(() => {
-    consecutiveFailuresRef.current = 0;
-    givenUpRef.current = false;
-  }, [sessionId]);
-
-  // Initial fetch and periodic refresh
-  useEffect(() => {
-    isMountedRef.current = true;
-
-    // Clear any existing interval
-    if (intervalRef.current) {
-      clearInterval(intervalRef.current);
-      intervalRef.current = null;
+  session.inflight = request;
+  try {
+    await request;
+  } finally {
+    if (session.inflight === request) {
+      session.inflight = null;
+      session.inflightGeneration = null;
     }
+  }
+}
 
-    if (!enabled || !isSupportedOs || !isConnected) {
-      // Reset stats and fetch state when disabled or not connected.
-      // Also reset the give-up flag so that a reconnect (possibly to a
-      // different host at the same sessionId slot) gets a fresh chance.
-      hasFetchedRef.current = false;
-      connectedAtRef.current = 0;
-      consecutiveFailuresRef.current = 0;
-      givenUpRef.current = false;
+function reconcileSharedServerStatsSession(session: SharedServerStatsSession): void {
+  const activeClients = getActiveServerStatsClients(session);
 
-      setStats({
-        cpu: null,
-        cpuCores: null,
-        cpuPerCore: [],
-        memTotal: null,
-        memUsed: null,
-        memFree: null,
-        memBuffers: null,
-        memCached: null,
-        swapTotal: null,
-        swapUsed: null,
-        topProcesses: [],
-        diskPercent: null,
-        diskUsed: null,
-        diskTotal: null,
-        disks: [],
+  if (activeClients.length === 0) {
+    resetServerStatsSession(session);
+    return;
+  }
+
+  if (session.connectedAt === 0) {
+    session.connectedAt = Date.now();
+  }
+
+  const visibleClients = activeClients.filter((client) => client.isVisible);
+  if (visibleClients.length === 0) {
+    clearServerStatsTimers(session);
+    session.fetchGeneration += 1;
+    return;
+  }
+
+  const intervalMs = Math.max(5, Math.min(...visibleClients.map((client) => client.refreshInterval))) * 1000;
+  const shouldRestartPolling = !session.pollingActive || session.pollIntervalMs !== intervalMs;
+  if (!shouldRestartPolling) return;
+  if (session.givenUp) return;
+
+  const wasPolling = session.pollingActive;
+  clearServerStatsTimers(session);
+  session.fetchGeneration += 1;
+  session.pollingActive = true;
+  session.pollIntervalMs = intervalMs;
+
+  // When resuming from hidden, reset delta-based network stats so the first
+  // visible sample does not show throughput averaged across the hidden time.
+  if (session.hasFetched && !wasPolling) {
+    updateServerStatsState(session, {
+      stats: {
+        ...session.state.stats,
         netRxSpeed: 0,
         netTxSpeed: 0,
-        latencyMs: null,
-        netInterfaces: [],
-        lastUpdated: null,
-      });
-      return;
-    }
+        netInterfaces: session.state.stats.netInterfaces.map((iface) => ({
+          ...iface,
+          rxSpeed: 0,
+          txSpeed: 0,
+        })),
+      },
+    });
+  }
 
-    // Track when the connection became available for delay calculation
-    // (must be before the isVisible check so hidden tabs record connection time)
-    if (connectedAtRef.current === 0) {
-      connectedAtRef.current = Date.now();
-    }
+  const connectionAge = Date.now() - session.connectedAt;
+  const needsWarmup = !session.hasFetched && connectionAge < 2000;
 
-    if (!isVisible) {
-      return () => {
-        isMountedRef.current = false;
-  
-        if (intervalRef.current) {
-          clearInterval(intervalRef.current);
-          intervalRef.current = null;
-        }
-      };
-    }
+  session.initialTimerRef = setTimeout(() => {
+    session.initialTimerRef = null;
+    void fetchSharedServerStats(session);
+  }, needsWarmup ? 2000 : 0);
+  session.intervalRef = setInterval(() => {
+    void fetchSharedServerStats(session);
+  }, intervalMs);
+}
 
-    // Invalidate any in-flight request from a previous visible/hidden cycle
-    // so stale responses don't overwrite the reset network stats below.
-    fetchGenerationRef.current++;
+function maybeDisposeSharedServerStatsSession(session: SharedServerStatsSession): void {
+  if (session.clients.size > 0 || session.listeners.size > 0) return;
+  clearServerStatsTimers(session);
+  session.fetchGeneration += 1;
+  serverStatsSessions.delete(session.sessionId);
+}
 
-    // Fetch immediately when resuming from hidden, or with a delay on first connect.
-    // When resuming, reset delta-based network stats (both aggregate and per-interface)
-    // so the first sample doesn't show averaged-over-hidden-interval throughput.
-    if (hasFetchedRef.current) {
-      setStats(prev => ({
-        ...prev,
-        netRxSpeed: 0,
-        netTxSpeed: 0,
-        netInterfaces: prev.netInterfaces.map(iface => ({ ...iface, rxSpeed: 0, txSpeed: 0 })),
-      }));
-    }
-    // Skip the warmup delay if the connection has been established long enough
-    // (e.g., tab was hidden while connected and is now becoming visible).
-    const connectionAge = Date.now() - connectedAtRef.current;
-    const needsWarmup = !hasFetchedRef.current && connectionAge < 2000;
-    // If we already gave up on this session (exceeded the consecutive
-    // failure limit), don't even schedule new timers on effect reruns
-    // such as visibility/tab-focus/settings changes. The cleanup at
-    // disconnect/sessionId change clears the flag for a fresh attempt.
-    const initialTimer = givenUpRef.current
-      ? null
-      : setTimeout(fetchStats, needsWarmup ? 2000 : 0);
+export function useServerStats({
+  sessionId,
+  enabled,
+  refreshInterval,
+  isSupportedOs,
+  isConnected,
+  isVisible,
+}: UseServerStatsOptions) {
+  const clientIdRef = useRef<number | null>(null);
+  if (clientIdRef.current === null) {
+    clientIdRef.current = nextClientId;
+    nextClientId += 1;
+  }
 
-    // Set up periodic refresh
-    const intervalMs = Math.max(5, refreshInterval) * 1000; // Minimum 5 seconds
-    if (!givenUpRef.current) {
-      intervalRef.current = setInterval(fetchStats, intervalMs);
-    }
+  const [state, setState] = useState<ServerStatsState>(() => getSharedServerStatsSession(sessionId).state);
+
+  useEffect(() => {
+    const session = getSharedServerStatsSession(sessionId);
+    const clientId = clientIdRef.current;
+    if (clientId === null) return;
+
+    const listener: ServerStatsListener = (nextState) => {
+      setState(nextState);
+    };
+
+    session.listeners.add(listener);
+    setState(session.state);
 
     return () => {
-      isMountedRef.current = false;
-      if (initialTimer) clearTimeout(initialTimer);
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-        intervalRef.current = null;
-      }
+      session.listeners.delete(listener);
+      session.clients.delete(clientId);
+      reconcileSharedServerStatsSession(session);
+      maybeDisposeSharedServerStatsSession(session);
     };
-  }, [enabled, isSupportedOs, isConnected, isVisible, refreshInterval, fetchStats]);
+  }, [sessionId]);
 
-  // Manual refresh function
+  useEffect(() => {
+    const session = getSharedServerStatsSession(sessionId);
+    const clientId = clientIdRef.current;
+    if (clientId === null) return;
+
+    session.clients.set(clientId, {
+      enabled,
+      refreshInterval,
+      isSupportedOs,
+      isConnected,
+      isVisible,
+    });
+    setState(session.state);
+    reconcileSharedServerStatsSession(session);
+  }, [sessionId, enabled, refreshInterval, isSupportedOs, isConnected, isVisible]);
+
   const refresh = useCallback(() => {
-    fetchStats();
-  }, [fetchStats]);
+    const session = getSharedServerStatsSession(sessionId);
+    void fetchSharedServerStats(session, true).finally(() => {
+      reconcileSharedServerStatsSession(session);
+    });
+  }, [sessionId]);
 
   return {
-    stats,
-    isLoading,
-    error,
+    stats: state.stats,
+    isLoading: state.isLoading,
+    error: state.error,
     refresh,
   };
 }
