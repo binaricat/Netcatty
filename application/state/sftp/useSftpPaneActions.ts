@@ -43,10 +43,15 @@ interface UseSftpPaneActionsParams {
   dirCacheTtlMs: number;
 }
 
-export type SftpNavigateResult = "reached" | "failed" | "aborted";
+export type SftpNavigateResult = "reached" | "failed" | "aborted" | "superseded";
+export type SftpNavigateOptions = {
+  force?: boolean;
+  tabId?: string;
+  shouldApply?: () => boolean;
+};
 
 interface UseSftpPaneActionsResult {
-  navigateTo: (side: "left" | "right", path: string, options?: { force?: boolean; tabId?: string }) => Promise<SftpNavigateResult>;
+  navigateTo: (side: "left" | "right", path: string, options?: SftpNavigateOptions) => Promise<SftpNavigateResult>;
   refresh: (side: "left" | "right", options?: { tabId?: string }) => Promise<void>;
   navigateUp: (side: "left" | "right") => Promise<void>;
   openEntry: (side: "left" | "right", entry: SftpFileEntry) => Promise<void>;
@@ -161,7 +166,7 @@ export const useSftpPaneActions = ({
     async (
       side: "left" | "right",
       path: string,
-      options?: { force?: boolean; tabId?: string },
+      options?: SftpNavigateOptions,
     ): Promise<SftpNavigateResult> => {
       const sideTabs = side === "left" ? leftTabsRef.current : rightTabsRef.current;
       // When tabId is specified, target that specific tab instead of the active one.
@@ -173,6 +178,10 @@ export const useSftpPaneActions = ({
         : getActivePane(side);
 
       if (!pane?.connection || !targetTabId) {
+        return "aborted";
+      }
+
+      if (options?.shouldApply?.() === false) {
         return "aborted";
       }
 
@@ -244,6 +253,31 @@ export const useSftpPaneActions = ({
       const previousFiles = confirmed.files;
       const previousSelection = confirmed.selectedFiles;
       const previousFilter = confirmed.filter;
+      const previousError = pane.error;
+      const isTargetRequestCurrent = () => tabNavSeqRef.current.get(targetTabId) === requestId;
+      const getTargetPane = () => {
+        const currentSideTabs = side === "left" ? leftTabsRef.current : rightTabsRef.current;
+        return currentSideTabs.tabs.find((t) => t.id === targetTabId) ?? null;
+      };
+      const shouldApplyNavigationState = () => (
+        getTargetPane()?.connection?.id === connectionId
+        && (options?.shouldApply?.() ?? true)
+      );
+      const restoreConfirmedStateIfCurrent = () => {
+        if (!isTargetRequestCurrent()) return;
+        updateTab(side, targetTabId, (prev) => {
+          if (prev.connection?.id !== connectionId || !isTargetRequestCurrent()) return prev;
+          return {
+            ...prev,
+            connection: { ...prev.connection, currentPath: previousPath },
+            files: previousFiles,
+            selectedFiles: previousSelection,
+            filter: previousFilter,
+            error: previousError,
+            loading: false,
+          };
+        });
+      };
       tabNavSeqRef.current.set(targetTabId, requestId);
       // Keep existing files visible during loading — the loading overlay
       // (pointer-events-none) prevents interaction. This avoids blanking a tab
@@ -267,6 +301,13 @@ export const useSftpPaneActions = ({
         } else {
           const sftpId = sftpSessionsRef.current.get(pane.connection.id);
           if (!sftpId) {
+            if (!isTargetRequestCurrent()) {
+              return "superseded";
+            }
+            if (!shouldApplyNavigationState()) {
+              restoreConfirmedStateIfCurrent();
+              return "aborted";
+            }
             clearCacheForConnection(pane.connection.id);
             // For background tabs (explicit tabId), update that tab directly
             // instead of handleSessionError which targets the active tab.
@@ -286,6 +327,13 @@ export const useSftpPaneActions = ({
             files = await listRemoteFiles(sftpId, path, pane.filenameEncoding);
           } catch (err) {
             if (isSessionError(err)) {
+              if (!isTargetRequestCurrent()) {
+                return "superseded";
+              }
+              if (!shouldApplyNavigationState()) {
+                restoreConfirmedStateIfCurrent();
+                return "aborted";
+              }
               sftpSessionsRef.current.delete(pane.connection.id);
               clearCacheForConnection(pane.connection.id);
               if (options?.tabId) {
@@ -306,13 +354,17 @@ export const useSftpPaneActions = ({
         if (navSeqRef.current[side] !== requestId) {
           // Side-level sequence was bumped by another tab's navigation or
           // a connect/disconnect. Check if THIS tab's request is still current.
-          if (tabNavSeqRef.current.get(targetTabId) !== requestId) {
+          if (!isTargetRequestCurrent()) {
             // This tab also has a newer navigation — drop completely.
-            return "aborted";
+            return "superseded";
           }
           // Side was superseded by another tab, but this tab's request is
           // still current. The fetched files are valid — fall through to
           // apply them instead of restoring previousPath.
+        }
+        if (!shouldApplyNavigationState()) {
+          restoreConfirmedStateIfCurrent();
+          return "aborted";
         }
 
         dirCacheRef.current.set(cacheKey, {
@@ -349,11 +401,15 @@ export const useSftpPaneActions = ({
         return "reached";
       } catch (err) {
         if (navSeqRef.current[side] !== requestId) {
-          if (tabNavSeqRef.current.get(targetTabId) !== requestId) {
-            return "aborted";
+          if (!isTargetRequestCurrent()) {
+            return "superseded";
           }
           // Side superseded by another tab, but this tab's request is
           // current — fall through to show the error on this tab.
+        }
+        if (!shouldApplyNavigationState()) {
+          restoreConfirmedStateIfCurrent();
+          return "aborted";
         }
         let navigationFailed = false;
         updateTab(side, targetTabId, (prev) => {
