@@ -13,7 +13,7 @@ type AutoReconnectHost = {
 type AutoReconnectSettings = Pick<TerminalSettings, "sshAutoReconnectEnabled"> | undefined | null;
 
 export function isTerminalAutoReconnectEnabled(settings: AutoReconnectSettings): boolean {
-  return settings?.sshAutoReconnectEnabled !== false;
+  return settings?.sshAutoReconnectEnabled === true;
 }
 
 export function isAutoReconnectableSshHost(host: AutoReconnectHost): boolean {

@@ -336,7 +336,7 @@ export const zhTWTerminalMessages: Messages = {
   'settings.terminal.localShell.startDir.isFile': '路徑是檔案，不是目錄',
   'settings.terminal.section.connection': '連線',
   'settings.terminal.connection.sshAutoReconnectEnabled': 'SSH 斷線後自動重連',
-  'settings.terminal.connection.sshAutoReconnectEnabled.desc': '已連上的 SSH 工作階段意外斷開後，每 5 秒嘗試重新連線，直到關閉標籤頁或連線恢復。',
+  'settings.terminal.connection.sshAutoReconnectEnabled.desc': '開啟後，已連上的 SSH 工作階段意外斷開時會每 5 秒嘗試重新連線，直到關閉標籤頁或連線恢復。',
   'settings.terminal.connection.keepaliveInterval': '工作階段保持間隔',
   'settings.terminal.connection.keepaliveInterval.desc': '向伺服器傳送 SSH 保活資料包的頻率（秒）。設為 0 表示全域停用——單個主機可在自己的設定裡覆蓋此值。',
   'settings.terminal.connection.keepaliveCountMax': '最大無響應保活次數',

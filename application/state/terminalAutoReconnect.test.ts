@@ -18,8 +18,8 @@ test("terminal auto reconnect uses a five second retry delay", () => {
   assert.equal(TERMINAL_AUTO_RECONNECT_DELAY_MS, 5000);
 });
 
-test("terminal auto reconnect is enabled unless the setting is explicitly false", () => {
-  assert.equal(isTerminalAutoReconnectEnabled(undefined), true);
+test("terminal auto reconnect is disabled unless the setting is explicitly true", () => {
+  assert.equal(isTerminalAutoReconnectEnabled(undefined), false);
   assert.equal(isTerminalAutoReconnectEnabled({ sshAutoReconnectEnabled: true }), true);
   assert.equal(isTerminalAutoReconnectEnabled({ sshAutoReconnectEnabled: false }), false);
 });

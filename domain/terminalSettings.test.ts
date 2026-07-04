@@ -34,11 +34,12 @@ test("normalizeTerminalSettings enables font smoothing by default", () => {
   assert.equal(normalizeTerminalSettings().fontSmoothing, true);
 });
 
-test("normalizeTerminalSettings enables SSH auto reconnect by default", () => {
-  assert.equal(normalizeTerminalSettings().sshAutoReconnectEnabled, true);
+test("normalizeTerminalSettings disables SSH auto reconnect by default", () => {
+  assert.equal(normalizeTerminalSettings().sshAutoReconnectEnabled, false);
 });
 
-test("normalizeTerminalSettings preserves disabled SSH auto reconnect", () => {
+test("normalizeTerminalSettings preserves explicit SSH auto reconnect settings", () => {
+  assert.equal(normalizeTerminalSettings({ sshAutoReconnectEnabled: true }).sshAutoReconnectEnabled, true);
   assert.equal(normalizeTerminalSettings({ sshAutoReconnectEnabled: false }).sshAutoReconnectEnabled, false);
 });
 

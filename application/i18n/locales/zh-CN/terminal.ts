@@ -336,7 +336,7 @@ export const zhCNTerminalMessages: Messages = {
   'settings.terminal.localShell.startDir.isFile': '路径是文件，不是目录',
   'settings.terminal.section.connection': '连接',
   'settings.terminal.connection.sshAutoReconnectEnabled': 'SSH 断线后自动重连',
-  'settings.terminal.connection.sshAutoReconnectEnabled.desc': '已连上的 SSH 会话意外断开后，每 5 秒尝试重新连接，直到关闭标签页或连接恢复。',
+  'settings.terminal.connection.sshAutoReconnectEnabled.desc': '打开后，已连上的 SSH 会话意外断开时会每 5 秒尝试重新连接，直到关闭标签页或连接恢复。',
   'settings.terminal.connection.keepaliveInterval': '会话保持间隔',
   'settings.terminal.connection.keepaliveInterval.desc': '向服务器发送 SSH 保活数据包的频率（秒）。设为 0 表示全局禁用——单个主机可在自己的设置里覆盖此值。',
   'settings.terminal.connection.keepaliveCountMax': '最大无响应保活次数',

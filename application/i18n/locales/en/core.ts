@@ -489,7 +489,7 @@ export const enCoreMessages: Messages = {
   'settings.terminal.connection.verifyHostKeys': 'Verify SSH host keys',
   'settings.terminal.connection.verifyHostKeys.desc': 'Ask before connecting to a new or changed SSH host key. Turn this off only for trusted private networks.',
   'settings.terminal.connection.sshAutoReconnectEnabled': 'Automatically reconnect SSH sessions',
-  'settings.terminal.connection.sshAutoReconnectEnabled.desc': 'After an established SSH session drops unexpectedly, try to reconnect every 5 seconds until the tab is closed or the connection succeeds.',
+  'settings.terminal.connection.sshAutoReconnectEnabled.desc': 'When turned on, established SSH sessions that drop unexpectedly try to reconnect every 5 seconds until the tab is closed or the connection succeeds.',
   'settings.terminal.connection.keepaliveInterval': 'Keepalive Interval',
   'settings.terminal.connection.keepaliveInterval.desc': 'How often (in seconds) to send SSH-level keepalive packets. Set to 0 to disable globally — note that individual hosts can override this in their own settings.',
   'settings.terminal.connection.keepaliveCountMax': 'Max unanswered keepalives',
