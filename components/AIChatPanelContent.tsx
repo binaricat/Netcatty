@@ -4,6 +4,7 @@ import type { AIPermissionMode, AISession, ChatMessage, DiscoveredAgent, Externa
 import type { Host, VaultNote } from '../types';
 import type { UserSkillOption } from './ai/userSkillsState';
 import type { AIQuickMessage } from '../infrastructure/ai/quickMessages';
+import type { ProviderModelOption } from './ai/providerSwitcherModels';
 import { Button } from './ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 import AgentSelector from './ai/AgentSelector';
@@ -61,7 +62,7 @@ interface AIChatPanelContentProps {
   cattyConfiguredProviders: ProviderConfig[];
   effectiveActiveProvider?: ProviderConfig;
   effectiveActiveModelId?: string;
-  handleAgentProviderModelSelect: (providerId: string, modelId: string) => void;
+  handleAgentProviderModelSelect: (providerId: string, modelId: string, model?: ProviderModelOption) => void;
   files: UploadedFile[];
   addFiles: (inputFiles: File[]) => Promise<void>;
   removeFile: (fileId: string) => void;

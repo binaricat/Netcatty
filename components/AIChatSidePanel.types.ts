@@ -54,6 +54,7 @@ export interface AIChatSidePanelProps {
   providers: ProviderConfig[];
   activeProviderId: string;
   activeModelId: string;
+  updateProvider: (id: string, updates: Partial<ProviderConfig>) => void;
 
   // Agent info
   defaultAgentId: string;

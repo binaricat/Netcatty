@@ -93,6 +93,7 @@ const baseProps = (overrides: Partial<AIChatSidePanelProps> = {}): AIChatSidePan
   providers: [],
   activeProviderId: '',
   activeModelId: '',
+  updateProvider: () => undefined,
   defaultAgentId: 'catty',
   toolIntegrationMode: 'mcp',
   externalAgents: [],

@@ -65,6 +65,7 @@ import {
   type SdkRuntimeModelCatalog,
 } from './AIChatSidePanelHelpers';
 import { AIChatPanelContent } from './AIChatPanelContent';
+import { mergeProviderModelContextWindow, type ProviderModelOption } from './ai/providerSwitcherModels';
 import {
   getAIPanelProfilerProps,
   profileAIPanelCalculation,
@@ -252,6 +253,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
   providers,
   activeProviderId,
   activeModelId,
+  updateProvider,
   defaultAgentId,
   toolIntegrationMode,
   externalAgents,
@@ -618,11 +620,24 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
   );
 
   const handleAgentProviderModelSelect = useCallback(
-    (providerId: string, modelId: string) => {
+    (providerId: string, modelId: string, model?: ProviderModelOption) => {
       setAgentProvider(currentAgentId, providerId);
       setAgentModel(currentAgentId, modelId);
+      if (!model) return;
+
+      const provider = providers.find((p) => p.id === providerId);
+      if (!provider) return;
+      const nextModelContextWindows = mergeProviderModelContextWindow(provider.modelContextWindows, model);
+      if (
+        !nextModelContextWindows
+        || nextModelContextWindows === provider.modelContextWindows
+        || nextModelContextWindows[model.id] === provider.modelContextWindows?.[model.id]
+      ) {
+        return;
+      }
+      updateProvider(providerId, { modelContextWindows: nextModelContextWindows });
     },
-    [currentAgentId, setAgentProvider, setAgentModel],
+    [currentAgentId, providers, setAgentProvider, setAgentModel, updateProvider],
   );
 
   const providerDisplayName = effectiveActiveProvider?.name ?? '';
@@ -1316,6 +1331,7 @@ const AI_CHAT_SIDE_PANEL_AI_STATE_KEYS = [
   'providers',
   'activeProviderId',
   'activeModelId',
+  'updateProvider',
   'defaultAgentId',
   'toolIntegrationMode',
   'externalAgents',

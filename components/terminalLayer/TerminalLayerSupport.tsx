@@ -542,6 +542,7 @@ const AIChatPanelsHostInner: React.FC<AIChatPanelsHostProps> = ({
                     providers={aiState.providers}
                     activeProviderId={aiState.activeProviderId}
                     activeModelId={aiState.activeModelId}
+                    updateProvider={aiState.updateProvider}
                     defaultAgentId={aiState.defaultAgentId}
                     toolIntegrationMode={aiState.toolIntegrationMode}
                     externalAgents={aiState.externalAgents}

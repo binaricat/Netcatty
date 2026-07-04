@@ -29,7 +29,10 @@ import { getFetchBridge } from '../settings/tabs/ai/types';
 import { parseFetchedModels } from '../settings/tabs/ai/modelMetadata';
 import {
   buildProviderModelOptions,
+  buildProviderModelCatalogRequestKey,
   getProviderModelDiscoveryConfig,
+  shouldLoadProviderModelCatalog,
+  type ProviderModelCatalogState,
   type ProviderModelOption,
 } from './providerSwitcherModels';
 import { ScrollArea } from '../ui/scroll-area';
@@ -58,16 +61,9 @@ export interface ProviderSwitcherConfig {
   selectedProviderId?: string;
   /** Currently bound model id under the selected provider. */
   selectedModelId?: string;
-  /** Fires when the user picks a (providerId, modelId) pair. */
-  onSelect: (providerId: string, modelId: string) => void;
+  /** Fires when the user picks a provider/model pair. */
+  onSelect: (providerId: string, modelId: string, model?: ProviderModelOption) => void;
 }
-
-type ProviderModelCatalogState = {
-  status: 'idle' | 'loading' | 'loaded' | 'error';
-  models: ProviderModelOption[];
-  error?: string;
-  requestKey?: string;
-};
 
 interface ChatInputProps {
   value: string;
@@ -481,17 +477,10 @@ const ChatInput: React.FC<ChatInputProps> = ({
     const discovery = getProviderModelDiscoveryConfig(provider);
     if (!discovery.canFetch || !discovery.endpoint) return;
 
-    const requestKey = JSON.stringify({
-      providerId: provider.id,
-      baseURL: discovery.baseURL,
-      endpoint: discovery.endpoint,
-      apiKeyPresent: Boolean(provider.apiKey),
-      style: discovery.style,
-      skipTLSVerify: provider.skipTLSVerify,
-    });
+    const requestKey = buildProviderModelCatalogRequestKey(provider, discovery);
 
     const current = providerModelCatalogsRef.current[provider.id];
-    if (!options.force && current?.requestKey === requestKey && (current.status === 'loading' || current.status === 'loaded')) return;
+    if (!shouldLoadProviderModelCatalog(current, requestKey, options.force)) return;
 
     const bridge = getFetchBridge();
     if (!bridge?.aiFetch) return;
@@ -1058,6 +1047,11 @@ const ChatInput: React.FC<ChatInputProps> = ({
                             </Tooltip>
                           )}
                         </div>
+                        {activeProviderModelOptions.length > 0 && activeProviderModelCatalog?.status === 'error' && activeProviderModelCatalog.error && (
+                          <div className="border-b border-border/25 px-2.5 py-1 text-[10px] leading-snug text-destructive/75">
+                            {activeProviderModelCatalog.error}
+                          </div>
+                        )}
                         {activeProviderModelOptions.length > 0 ? (
                           <div className="p-1">
                             {activeProviderModelOptions.slice(0, 100).map((model) => {
@@ -1072,7 +1066,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
                                   aria-selected={isSelected}
                                   onClick={() => {
                                     if (!activeProviderMenuProvider) return;
-                                    providerSwitcher!.onSelect(activeProviderMenuProvider.id, model.id);
+                                    providerSwitcher!.onSelect(activeProviderMenuProvider.id, model.id, model);
                                     closeAllMenus();
                                   }}
                                   className="flex w-full min-w-0 items-center gap-1.5 rounded-md px-2.5 py-1.5 text-left text-[12px] transition-colors hover:bg-muted/30 cursor-pointer"

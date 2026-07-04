@@ -5,6 +5,7 @@ import {
   type ProviderStyle,
 } from '../../infrastructure/ai/types';
 import { resolveModelsDiscoveryEndpoint } from '../../infrastructure/ai/modelDiscoveryHeaders';
+import { sanitizeContextWindow } from '../../infrastructure/ai/contextCompaction';
 
 export interface ProviderModelOption {
   id: string;
@@ -17,6 +18,15 @@ export interface ProviderModelDiscoveryConfig {
   endpoint?: string;
   style: ProviderStyle;
   canFetch: boolean;
+}
+
+export type ProviderModelCatalogStatus = 'idle' | 'loading' | 'loaded' | 'error';
+
+export interface ProviderModelCatalogState {
+  status: ProviderModelCatalogStatus;
+  models: ProviderModelOption[];
+  error?: string;
+  requestKey?: string;
 }
 
 export function buildProviderModelOptions(
@@ -42,7 +52,9 @@ export function buildProviderModelOptions(
 
   addModel(provider.defaultModel);
   for (const model of fetchedModels) addModel(model);
-  for (const modelId of Object.keys(provider.modelContextWindows ?? {})) addModel(modelId);
+  for (const [modelId, contextWindow] of Object.entries(provider.modelContextWindows ?? {})) {
+    addModel({ id: modelId, contextWindow });
+  }
   for (const modelId of PROVIDER_PRESETS[provider.providerId]?.defaultModels ?? []) addModel(modelId);
 
   return Array.from(byId.values());
@@ -63,4 +75,37 @@ export function getProviderModelDiscoveryConfig(
     style,
     canFetch: Boolean(baseURL && endpoint && (!needsApiKey || provider.apiKey)),
   };
+}
+
+export function buildProviderModelCatalogRequestKey(
+  provider: Pick<ProviderConfig, 'id' | 'apiKey' | 'skipTLSVerify'>,
+  discovery: Pick<ProviderModelDiscoveryConfig, 'baseURL' | 'endpoint' | 'style'>,
+): string {
+  return JSON.stringify({
+    providerId: provider.id,
+    baseURL: discovery.baseURL,
+    endpoint: discovery.endpoint,
+    apiKeyFingerprint: provider.apiKey ?? '',
+    style: discovery.style,
+    skipTLSVerify: provider.skipTLSVerify,
+  });
+}
+
+export function shouldLoadProviderModelCatalog(
+  current: Pick<ProviderModelCatalogState, 'requestKey' | 'status'> | undefined,
+  requestKey: string,
+  force = false,
+): boolean {
+  if (force) return true;
+  if (current?.requestKey !== requestKey) return true;
+  return current.status === 'idle';
+}
+
+export function mergeProviderModelContextWindow(
+  current: Record<string, number> | undefined,
+  model: ProviderModelOption,
+): Record<string, number> | undefined {
+  const sanitized = sanitizeContextWindow(model.contextWindow);
+  if (!model.id || sanitized == null) return current;
+  return { ...(current ?? {}), [model.id]: sanitized };
 }
