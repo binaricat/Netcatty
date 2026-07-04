@@ -8,8 +8,10 @@ type YmodemFileMemoryStore = {
 
 const getParentDirectory = (filePath: string): string | null => {
   const lastForwardSlash = filePath.lastIndexOf("/");
-  const lastBackslash = filePath.lastIndexOf("\\");
-  const lastSeparator = Math.max(lastForwardSlash, lastBackslash);
+  const isWindowsPath = /^[A-Za-z]:[\\/]/.test(filePath) || filePath.startsWith("\\\\");
+  const lastSeparator = isWindowsPath
+    ? Math.max(lastForwardSlash, filePath.lastIndexOf("\\"))
+    : lastForwardSlash;
 
   if (lastSeparator < 0) return null;
   if (lastSeparator === 0) return filePath.slice(0, 1);
@@ -21,8 +23,9 @@ const getParentDirectory = (filePath: string): string | null => {
 export const getRememberedYmodemSendDefaultPath = (
   store: YmodemFileMemoryStore = localStorageAdapter,
 ): string | undefined => {
-  const rememberedPath = store.readString(STORAGE_KEY_TERMINAL_YMODEM_SEND_DIR)?.trim();
-  return rememberedPath || undefined;
+  const rememberedPath = store.readString(STORAGE_KEY_TERMINAL_YMODEM_SEND_DIR);
+  if (!rememberedPath || rememberedPath.trim() === "") return undefined;
+  return rememberedPath;
 };
 
 export const rememberYmodemSendFilePath = (
