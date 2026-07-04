@@ -274,7 +274,6 @@ async function startManualSessionLog(event, payload = {}) {
       defaultPath,
       filters: [
         { name: "Log Files", extensions: ["log"] },
-        { name: "Text Files", extensions: ["txt"] },
         { name: "All Files", extensions: ["*"] },
       ],
     });
@@ -283,15 +282,18 @@ async function startManualSessionLog(event, payload = {}) {
       return { success: true, started: false, canceled: true };
     }
 
-    const filePath = path.extname(result.filePath)
-      ? result.filePath
-      : `${result.filePath}.log`;
+    const filePath = normalizeManualSessionLogFilePath(result.filePath);
+    if (filePath !== result.filePath && !(await confirmManualSessionLogOverwrite(filePath))) {
+      return { success: true, started: false, canceled: true };
+    }
+
     const startResult = sessionLogStreamManager.startStreamToFile(sessionId, {
       filePath,
-      format: "txt",
+      format: "raw",
       hostLabel: safeSessionName,
       startTime: Date.now(),
       initialLine: typeof initialLine === "string" ? initialLine : "",
+      separateInitialLineBeforeLeadingCarriageReturn: true,
       stopRequiresToken: true,
     });
 
@@ -304,6 +306,32 @@ async function startManualSessionLog(event, payload = {}) {
   } catch (err) {
     return { success: false, started: false, error: err?.message || String(err) };
   }
+}
+
+function normalizeManualSessionLogFilePath(filePath) {
+  return path.extname(filePath).toLowerCase() === ".log" ? filePath : `${filePath}.log`;
+}
+
+async function confirmManualSessionLogOverwrite(filePath) {
+  try {
+    await fs.promises.access(filePath, fs.constants.F_OK);
+  } catch (err) {
+    if (err?.code === "ENOENT") return true;
+    throw err;
+  }
+
+  const result = await dialog.showMessageBox({
+    type: "warning",
+    buttons: ["Overwrite", "Cancel"],
+    defaultId: 1,
+    cancelId: 1,
+    noLink: true,
+    title: "Overwrite session log?",
+    message: `"${path.basename(filePath)}" already exists.`,
+    detail: "Choose Overwrite to replace it, or Cancel to keep the existing file.",
+  });
+
+  return result.response === 0;
 }
 
 async function stopManualSessionLog(event, payload = {}) {

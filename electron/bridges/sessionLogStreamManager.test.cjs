@@ -203,6 +203,142 @@ test("startStreamToFile writes to an explicit raw log file path", async () => {
   }
 });
 
+test("startStreamToFile keeps unterminated initial line joined to ordinary raw output", async () => {
+  const directory = path.join(TEMP_ROOT, `manual-ordinary-raw-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+  const filePath = path.join(directory, "manual.log");
+  const sessionId = `session-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+  try {
+    const result = startStreamToFile(sessionId, {
+      filePath,
+      format: "raw",
+      hostLabel: "manual",
+      startTime: Date.UTC(2026, 0, 2, 3, 4, 5),
+      initialLine: "root@host:~# ",
+      separateInitialLineBeforeLeadingCarriageReturn: true,
+    });
+
+    assert.equal(result.ok, true);
+    appendData(sessionId, "ls\r\nfile\r\n");
+    const finalPath = await stopStream(sessionId);
+
+    assert.equal(finalPath, filePath);
+    assert.equal(fs.readFileSync(filePath, "utf8"), "root@host:~# ls\r\nfile\r\n");
+  } finally {
+    await stopStream(sessionId);
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("startStreamToFile separates unterminated initial line before leading carriage return", async () => {
+  const directory = path.join(TEMP_ROOT, `manual-leading-cr-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+  const filePath = path.join(directory, "manual.log");
+  const sessionId = `session-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+  try {
+    const result = startStreamToFile(sessionId, {
+      filePath,
+      format: "raw",
+      hostLabel: "manual",
+      startTime: Date.UTC(2026, 0, 2, 3, 4, 5),
+      initialLine: "H3C>",
+      separateInitialLineBeforeLeadingCarriageReturn: true,
+    });
+
+    assert.equal(result.ok, true);
+    appendData(sessionId, "\rdisplay version\r\n");
+    const finalPath = await stopStream(sessionId);
+
+    assert.equal(finalPath, filePath);
+    assert.equal(fs.readFileSync(filePath, "utf8"), "H3C>\n\rdisplay version\r\n");
+  } finally {
+    await stopStream(sessionId);
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("startStreamToFile does not add a separator before leading CRLF", async () => {
+  const directory = path.join(TEMP_ROOT, `manual-leading-crlf-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+  const filePath = path.join(directory, "manual.log");
+  const sessionId = `session-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+  try {
+    const result = startStreamToFile(sessionId, {
+      filePath,
+      format: "raw",
+      hostLabel: "manual",
+      startTime: Date.UTC(2026, 0, 2, 3, 4, 5),
+      initialLine: "root@host:~# command",
+      separateInitialLineBeforeLeadingCarriageReturn: true,
+    });
+
+    assert.equal(result.ok, true);
+    appendData(sessionId, "\r\noutput\r\n");
+    const finalPath = await stopStream(sessionId);
+
+    assert.equal(finalPath, filePath);
+    assert.equal(fs.readFileSync(filePath, "utf8"), "root@host:~# command\r\noutput\r\n");
+  } finally {
+    await stopStream(sessionId);
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("startStreamToFile does not add a separator before split leading CRLF", async () => {
+  const directory = path.join(TEMP_ROOT, `manual-split-leading-crlf-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+  const filePath = path.join(directory, "manual.log");
+  const sessionId = `session-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+  try {
+    const result = startStreamToFile(sessionId, {
+      filePath,
+      format: "raw",
+      hostLabel: "manual",
+      startTime: Date.UTC(2026, 0, 2, 3, 4, 5),
+      initialLine: "root@host:~# command",
+      separateInitialLineBeforeLeadingCarriageReturn: true,
+    });
+
+    assert.equal(result.ok, true);
+    appendData(sessionId, "\r");
+    appendData(sessionId, "\noutput\r\n");
+    const finalPath = await stopStream(sessionId);
+
+    assert.equal(finalPath, filePath);
+    assert.equal(fs.readFileSync(filePath, "utf8"), "root@host:~# command\r\noutput\r\n");
+  } finally {
+    await stopStream(sessionId);
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("startStreamToFile flushes a pending leading carriage return on stop", async () => {
+  const directory = path.join(TEMP_ROOT, `manual-pending-leading-cr-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+  const filePath = path.join(directory, "manual.log");
+  const sessionId = `session-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+  try {
+    const result = startStreamToFile(sessionId, {
+      filePath,
+      format: "raw",
+      hostLabel: "manual",
+      startTime: Date.UTC(2026, 0, 2, 3, 4, 5),
+      initialLine: "H3C>",
+      separateInitialLineBeforeLeadingCarriageReturn: true,
+    });
+
+    assert.equal(result.ok, true);
+    appendData(sessionId, "\r");
+    const finalPath = await stopStream(sessionId);
+
+    assert.equal(finalPath, filePath);
+    assert.equal(fs.readFileSync(filePath, "utf8"), "H3C>\n\r");
+  } finally {
+    await stopStream(sessionId);
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("startStreamToFile can write human-readable text logs from ANSI terminal output", async () => {
   const directory = path.join(TEMP_ROOT, `manual-txt-${Date.now()}-${Math.random().toString(16).slice(2)}`);
   const filePath = path.join(directory, "manual.log");

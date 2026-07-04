@@ -232,6 +232,8 @@ function createStreamEntry(sessionId, opts) {
     disabled: false,
     startToken,
     stopRequiresToken: Boolean(opts.stopRequiresToken),
+    separateInitialLineBeforeLeadingCarriageReturn: false,
+    pendingInitialLineLeadingCarriageReturn: false,
   };
 
   entry.flushTimer = setInterval(() => {
@@ -267,6 +269,10 @@ function startStreamToFile(sessionId, opts = {}) {
     });
     if (typeof initialLine === "string" && initialLine.length > 0) {
       appendData(sessionId, initialLine);
+      const entry = activeStreams.get(sessionId);
+      if (entry && opts.separateInitialLineBeforeLeadingCarriageReturn && !/[\r\n]$/.test(initialLine)) {
+        entry.separateInitialLineBeforeLeadingCarriageReturn = true;
+      }
     }
     return { ok: true, token };
   } catch (err) {
@@ -368,6 +374,24 @@ function appendData(sessionId, dataChunk) {
   const entry = activeStreams.get(sessionId);
   if (!entry || entry.disabled) return;
 
+  if (entry.pendingInitialLineLeadingCarriageReturn && dataChunk) {
+    entry.pendingInitialLineLeadingCarriageReturn = false;
+    dataChunk = dataChunk.startsWith("\n") ? `\r${dataChunk}` : `\n\r${dataChunk}`;
+  } else if (entry.separateInitialLineBeforeLeadingCarriageReturn && dataChunk) {
+    entry.separateInitialLineBeforeLeadingCarriageReturn = false;
+    if (dataChunk === "\r") {
+      entry.pendingInitialLineLeadingCarriageReturn = true;
+      return;
+    }
+    if (dataChunk.startsWith("\r") && !dataChunk.startsWith("\r\n")) {
+      dataChunk = `\n${dataChunk}`;
+    }
+  }
+
+  appendBufferedData(entry, dataChunk);
+}
+
+function appendBufferedData(entry, dataChunk) {
   const readableData = entry.programmaticCommandLogRewriter
     ? entry.programmaticCommandLogRewriter.append(dataChunk)
     : dataChunk;
@@ -417,6 +441,10 @@ async function stopStream(sessionId, expectedToken) {
   }
 
   // Flush remaining buffer
+  if (entry.pendingInitialLineLeadingCarriageReturn) {
+    entry.pendingInitialLineLeadingCarriageReturn = false;
+    appendBufferedData(entry, "\n\r");
+  }
   const readablePending = entry.programmaticCommandLogRewriter?.finish();
   if (readablePending) {
     entry.buffer += sanitizeSudoAutofillLogData(entry, readablePending);
