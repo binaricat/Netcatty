@@ -203,6 +203,7 @@ export const STORAGE_KEY_TERMINAL_HOST_TREE_COLLAPSED = 'netcatty_terminal_host_
 export const STORAGE_KEY_TERMINAL_COMPOSE_BAR_OPEN = 'netcatty_terminal_compose_bar_open_v1';
 export const STORAGE_KEY_TERMINAL_SEARCH_OPEN = 'netcatty_terminal_search_open_v1';
 export const STORAGE_KEY_TERMINAL_ENCODING_BY_HOST_PREFIX = 'netcatty_terminal_encoding_by_host_v1:';
+export const STORAGE_KEY_TERMINAL_YMODEM_SEND_DIR = 'netcatty_terminal_ymodem_send_dir_v1';
 
 // Port Forwarding (transient cross-window broadcast key)
 export const STORAGE_KEY_PF_RECONNECT_CANCEL = '__netcatty_pf_cancel_reconnect';

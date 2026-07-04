@@ -126,6 +126,7 @@ import { useTerminalContextActions } from "./terminal/hooks/useTerminalContextAc
 import { useTerminalAuthState } from "./terminal/hooks/useTerminalAuthState";
 import { useTerminalDragDrop } from "./terminal/hooks/useTerminalDragDrop";
 import { useTerminalFilePaste } from "./terminal/hooks/useTerminalFilePaste";
+import { getRememberedYmodemSendDefaultPath, rememberYmodemSendFilePath } from "../application/state/ymodemFileMemory";
 import { TerminalAutocomplete } from "./terminal/TerminalAutocomplete";
 import { resolveTerminalAutocompleteSettings } from "./terminal/autocomplete/terminalAutocompleteSettings";
 import { buildOsc7SetupExecCommand, runOsc7SetupAction, shouldOfferOsc7SetupAction } from "./terminal/osc7Setup";
@@ -1893,12 +1894,14 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     }
 
     try {
+      const defaultPath = getRememberedYmodemSendDefaultPath();
       const filePath = await selectFile(
         t("terminal.ymodem.selectFile"),
-        undefined,
+        defaultPath,
         [{ name: t("terminal.ymodem.allFiles"), extensions: ["*"] }],
       );
       if (!filePath) return;
+      rememberYmodemSendFilePath(filePath);
 
       const fileName = filePath.split(/[\\/]/).pop() || filePath;
       toast.info(t("terminal.ymodem.started", { fileName }));
