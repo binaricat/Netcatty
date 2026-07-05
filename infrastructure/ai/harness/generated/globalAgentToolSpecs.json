@@ -69,7 +69,7 @@
     "toolName": "terminal_execute",
     "rpcMethod": "netcatty/exec",
     "localExecution": false,
-    "description": "Execute a short command in a terminal session and wait for completion. Use only for commands expected to finish within about 60 seconds. For long-running commands use terminal_start and terminal_poll.",
+    "description": "Execute a short command in a terminal session and wait for completion. Use only for commands expected to finish within about 60 seconds. For long-running commands use terminal_start and terminal_poll. Commands run in an isolated subshell of the visible terminal: the user sees the output live, but shell state such as cd, export, or set does not persist between calls — use absolute paths or combine cd with the command (cd /path && cmd).",
     "inputShape": {
       "sessionId": {
         "type": "string",
@@ -98,7 +98,7 @@
     "toolName": "terminal_start",
     "rpcMethod": "netcatty/jobStart",
     "localExecution": false,
-    "description": "Start a long-running command in a terminal session. Prefer for builds, scans, log-following, or anything likely to exceed about 2 minutes.",
+    "description": "Start a long-running command in a terminal session. Prefer for builds, scans, log-following, or anything likely to exceed about 2 minutes. Shell state such as cd or export does not persist between calls — combine cd with the command.",
     "inputShape": {
       "sessionId": {
         "type": "string",

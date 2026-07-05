@@ -7,7 +7,7 @@ const {
   execViaChannel,
   execViaRawPty,
 } = require("../bridges/ai/ptyExec.cjs");
-const { getFreshIdlePrompt } = require("../bridges/ai/shellUtils.cjs");
+const { getFreshIdlePrompt, formatSyntheticEcho } = require("../bridges/ai/shellUtils.cjs");
 
 const DEFAULT_BACKGROUND_JOB_TIMEOUT_MS = 60 * 60 * 1000;
 const DEFAULT_BACKGROUND_JOB_POLL_INTERVAL_MS = 30 * 1000;
@@ -270,7 +270,7 @@ function createWorkerAiExecHandler({
         echoCommand: (rawCommand) => {
           event?.sender?.send?.("netcatty:data", {
             sessionId,
-            data: `${rawCommand}\r\n`,
+            data: formatSyntheticEcho(rawCommand),
             syntheticEcho: true,
           });
         },
@@ -375,7 +375,7 @@ function createWorkerAiJobStartHandler({
         echoCommand: (rawCommand) => {
           event?.sender?.send?.("netcatty:data", {
             sessionId,
-            data: `${rawCommand}\r\n`,
+            data: formatSyntheticEcho(rawCommand),
             syntheticEcho: true,
           });
         },

@@ -177,8 +177,31 @@ function buildWrappedCommand(command, shellKind, marker) {
       //    cannot cause bash to flush the end marker from the input buffer.
       //    trap ':' INT lets child processes receive SIGINT normally while
       //    preventing the shell from aborting the compound command.
+      //
+      // 4) The eval runs inside a subshell ( ... ) so shell-terminating
+      //    constructs in the generated command — set -e / set -o errexit
+      //    followed by a failure, exit, shell option changes, traps,
+      //    function/alias definitions — end or mutate only the subshell,
+      //    never the user's active login shell (issue #1850). set -e still
+      //    behaves normally *inside* the command, and the subshell shares
+      //    the PTY so the user sees all output live. The intentional
+      //    trade-off is that cd/export no longer persist into the user's
+      //    shell or across agent commands; the terminal.execute tool
+      //    description tells the model to combine cd with its command.
+      //    Earlier attempts (PRs #1852/#1882) that instead tried to detect
+      //    dangerous commands grew into shell parsing and were abandoned —
+      //    do not reintroduce detection here.
       const noPager = "PAGER=cat SYSTEMD_PAGER= GIT_PAGER=cat LESS= ";
-      const escaped = escapePosixSingleQuoted(command);
+      // Multi-line commands must not embed raw newlines in the typed
+      // wrapper: the interactive shell would echo PS2 continuation lines
+      // ("> cd ...") that don't contain the marker and leak past the
+      // preload filter. Rebuild the newlines inside the shell instead via
+      // printf so the wrapper stays one physical line. Single-line
+      // commands keep the plain assignment.
+      const commandLines = String(command || "").replace(/\r\n?/g, "\n").split("\n");
+      const cmdAssign = commandLines.length > 1
+        ? `${marker}_cmd=$(printf '%s\\n' ${commandLines.map((line) => `'${escapePosixSingleQuoted(line)}'`).join(" ")})`
+        : `${marker}_cmd='${escapePosixSingleQuoted(command)}'`;
       // Leading single space: lets bash/zsh skip recording this command
       // in history when the user already has HISTCONTROL=ignorespace
       // (bash) or HIST_IGNORE_SPACE (zsh) configured — Debian/Ubuntu and
@@ -187,7 +210,7 @@ function buildWrappedCommand(command, shellKind, marker) {
       // Without that config the prefix is harmless; it just doesn't
       // suppress history recording.
       return (
-        ` ${marker}=0; ${marker}_cmd='${escaped}'; { printf '%s\\n' '${marker}_S'; trap ':' INT; ${noPager}eval "$${marker}_cmd"; __NCMCP_rc=$?; trap - INT; printf '%s\\n' '${marker}_E:'\"$__NCMCP_rc\"; (exit $__NCMCP_rc); }\n`
+        ` ${marker}=0; ${cmdAssign}; { printf '%s\\n' '${marker}_S'; trap ':' INT; ( ${noPager}eval "$${marker}_cmd" ); __NCMCP_rc=$?; trap - INT; printf '%s\\n' '${marker}_E:'\"$__NCMCP_rc\"; (exit $__NCMCP_rc); }\n`
       );
     }
   }

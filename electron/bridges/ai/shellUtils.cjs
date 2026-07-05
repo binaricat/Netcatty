@@ -38,6 +38,17 @@ function stripAnsi(input) {
   return String(input || "").replace(ANSI_OSC_REGEX, "").replace(ANSI_ESCAPE_REGEX, "");
 }
 
+// ── Synthetic command echo ──
+//
+// The agent's typed command is not echoed by the PTY as-is (the wrapper
+// line is filtered out in preload), so exec bridges emit a synthetic echo
+// for the user to see. xterm.js treats a bare \n as "move down, keep
+// column", which renders multi-line commands as a staircase. Normalize
+// every line break to \r\n so each line starts at column 0.
+function formatSyntheticEcho(command) {
+  return `${String(command ?? "").replace(/\r?\n/g, "\r\n")}\r\n`;
+}
+
 // Default PowerShell prompt (e.g. `PS C:\Users\alice>`, `PS>`,
 // `PS /home/alice>`). Anchored so command output that merely starts with
 // `PS` (e.g. `PSO>`) doesn't match. The `\S` after `\s+` rejects literal
@@ -838,6 +849,7 @@ function invalidateShellEnvCache() {
 
 module.exports = {
   stripAnsi,
+  formatSyntheticEcho,
   extractTrailingIdlePrompt,
   getFreshIdlePrompt,
   isDefaultPowerShellPromptLine,

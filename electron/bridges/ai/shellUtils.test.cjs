@@ -5,6 +5,7 @@ const {
   addCodexExecutableEnvForSdk,
   buildWindowsShellCommandLine,
   extractTrailingIdlePrompt,
+  formatSyntheticEcho,
   getFreshIdlePrompt,
   isDefaultPowerShellPromptLine,
   isPlausibleCliVersionOutput,
@@ -23,6 +24,17 @@ const {
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
+
+test("formatSyntheticEcho normalizes multi-line commands to CRLF so xterm doesn't staircase", () => {
+  assert.equal(
+    formatSyntheticEcho("set -e\ncd /tmp\necho done"),
+    "set -e\r\ncd /tmp\r\necho done\r\n",
+  );
+  // Already-CRLF input is not doubled.
+  assert.equal(formatSyntheticEcho("a\r\nb"), "a\r\nb\r\n");
+  // Single-line commands keep the original shape.
+  assert.equal(formatSyntheticEcho("npm test"), "npm test\r\n");
+});
 
 test("extracts a trailing PowerShell idle prompt", () => {
   assert.equal(

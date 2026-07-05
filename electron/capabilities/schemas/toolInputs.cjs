@@ -285,9 +285,9 @@ const TOOL_INPUT_FIELDS = Object.freeze({
 /** Long-form model guidance appended to terminal tool descriptions from catalog. */
 const MODEL_DESCRIPTION_HINTS = Object.freeze({
   "terminal.execute":
-    "Use only for commands expected to finish within about 60 seconds. For long-running commands use terminal_start and terminal_poll.",
+    "Use only for commands expected to finish within about 60 seconds. For long-running commands use terminal_start and terminal_poll. Commands run in an isolated subshell of the visible terminal: the user sees the output live, but shell state such as cd, export, or set does not persist between calls — use absolute paths or combine cd with the command (cd /path && cmd).",
   "terminal.start":
-    "Prefer for builds, scans, log-following, or anything likely to exceed about 2 minutes.",
+    "Prefer for builds, scans, log-following, or anything likely to exceed about 2 minutes. Shell state such as cd or export does not persist between calls — combine cd with the command.",
   "terminal.poll":
     "Wait at least about 30 seconds between polls unless output justifies checking sooner.",
   "vault.host.notes.get":

@@ -161,10 +161,11 @@ function registerCattyExecHandlers(ctx) {
           expectedPrompt: getFreshIdlePrompt(session),
           typedInput: true,
           echoCommand: (rawCommand) => {
+            const { formatSyntheticEcho } = require("./ai/shellUtils.cjs");
             const contents = electronModule?.webContents?.fromId?.(session.webContentsId);
             safeSend(contents, "netcatty:data", {
               sessionId,
-              data: `${rawCommand}\r\n`,
+              data: formatSyntheticEcho(rawCommand),
               syntheticEcho: true,
             });
           },

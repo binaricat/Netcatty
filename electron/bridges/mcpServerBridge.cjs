@@ -12,7 +12,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { existsSync } = require("node:fs");
 
-const { toUnpackedAsarPath, getFreshIdlePrompt } = require("./ai/shellUtils.cjs");
+const { toUnpackedAsarPath, getFreshIdlePrompt, formatSyntheticEcho } = require("./ai/shellUtils.cjs");
 const { appendVaultAgentGuidance } = require("../shared/vaultAgentGuidance.cjs");
 const { execViaPty, startPtyJob, execViaChannel, execViaRawPty } = require("./ai/ptyExec.cjs");
 const { safeSend } = require("./ipcUtils.cjs");
@@ -318,7 +318,7 @@ function echoCommandToSession(session, sessionId, command) {
   const contents = electronModule.webContents?.fromId?.(session.webContentsId);
   safeSend(contents, "netcatty:data", {
     sessionId,
-    data: `${command}\r\n`,
+    data: formatSyntheticEcho(command),
     syntheticEcho: true,
   });
 }

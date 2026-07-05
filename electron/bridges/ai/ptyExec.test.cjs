@@ -1,5 +1,9 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const { spawnSync } = require("node:child_process");
+const { mkdtempSync, rmSync, realpathSync } = require("node:fs");
+const { tmpdir } = require("node:os");
+const { join } = require("node:path");
 
 const {
   resolveEffectiveShellKind,
@@ -98,7 +102,7 @@ test("treats a CR-redrawn last line as the effective prompt, not the doubled str
   );
 });
 
-test("rejects spoofed `PS >` (literal space then `>`) ‚Äî default PowerShell never emits this", () => {
+test("rejects spoofed `PS >` (literal space then `>`) ù default PowerShell never emits this", () => {
   assert.equal(resolveEffectiveShellKind(undefined, "PS >"), "posix");
 });
 
@@ -118,6 +122,83 @@ test("cmd wrapper uses interactive cmd variable expansion", () => {
   assert.doesNotMatch(wrapped, /"%%__NCMCP_TEST___CMD%%"/);
 });
 
+// Issue #1850: agent-generated commands run inside a subshell so that
+// shell-terminating constructs (set -e + failure, exit, ...) end only the
+// subshell, never the user's active login shell / SSH session.
+test("posix wrapper isolates set -e failures from the active shell", () => {
+  const marker = "__NCMCP_TEST__";
+  const wrapped = buildWrappedCommand(
+    "set -e\ncd /nonexistent-dir-1850\necho SHOULD_NOT_PRINT",
+    "posix",
+    marker,
+  );
+  const result = spawnSync("sh", ["-c", `${wrapped}printf 'PARENT_STILL_ALIVE\\n'`], {
+    encoding: "utf8",
+  });
+
+  assert.equal(result.error, undefined);
+  assert.equal(result.status, 0);
+  assert.match(result.stdout, new RegExp(`${marker}_S`));
+  assert.match(result.stdout, new RegExp(`${marker}_E:[1-9]`));
+  assert.match(result.stdout, /PARENT_STILL_ALIVE/);
+  assert.doesNotMatch(result.stdout, /SHOULD_NOT_PRINT/);
+});
+
+test("posix wrapper types multi-line commands as one physical line (no PS2 leak) and preserves semantics", () => {
+  const marker = "__NCMCP_TEST__";
+  const wrapped = buildWrappedCommand(
+    "echo first\necho \"it's quoted\"\n\necho last",
+    "posix",
+    marker,
+  );
+  // A single physical line: the interactive shell must never show PS2
+  // ("> ") continuation echoes, which would leak past the preload filter.
+  assert.equal(wrapped.indexOf("\n"), wrapped.length - 1);
+
+  const result = spawnSync("sh", ["-c", wrapped], { encoding: "utf8" });
+  assert.equal(result.error, undefined);
+  assert.match(result.stdout, /first\n/);
+  assert.match(result.stdout, /it's quoted\n/);
+  assert.match(result.stdout, /last\n/);
+  assert.match(result.stdout, new RegExp(`${marker}_E:0`));
+});
+
+test("posix wrapper isolates explicit exit from the active shell and reports its code", () => {
+  const marker = "__NCMCP_TEST__";
+  const wrapped = buildWrappedCommand("exit 7", "posix", marker);
+  const result = spawnSync("sh", ["-c", `${wrapped}printf 'PARENT_STILL_ALIVE\\n'`], {
+    encoding: "utf8",
+  });
+
+  assert.equal(result.error, undefined);
+  assert.equal(result.status, 0);
+  assert.match(result.stdout, new RegExp(`${marker}_E:7`));
+  assert.match(result.stdout, /PARENT_STILL_ALIVE/);
+});
+
+test("posix wrapper keeps cd contained in the subshell (documented trade-off)", () => {
+  const marker = "__NCMCP_TEST__";
+  const cwd = realpathSync(mkdtempSync(join(tmpdir(), "netcatty-pty-cd-")));
+  try {
+    const wrapped = buildWrappedCommand("cd / && pwd", "posix", marker);
+    const result = spawnSync("sh", ["-c", `${wrapped}pwd`], {
+      encoding: "utf8",
+      cwd,
+    });
+
+    assert.equal(result.error, undefined);
+    assert.equal(result.status, 0);
+    assert.match(result.stdout, new RegExp(`${marker}_E:0`));
+    const lines = result.stdout.trim().split("\n");
+    // The command itself sees the cd take effect (pwd inside prints /)...
+    assert.ok(lines.includes("/"), `expected command pwd "/" in: ${result.stdout}`);
+    // ...but the active shell's cwd is untouched (trailing pwd prints cwd).
+    assert.equal(lines[lines.length - 1], cwd);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 test("execViaChannel registers a pending-cancel marker before the SSH channel opens", () => {
   // Regression for the IPC-transit race surfaced by codex on #1101
   // problem 3: if `cancelPtyExecsForSession` runs while we're still
@@ -128,7 +209,7 @@ test("execViaChannel registers a pending-cancel marker before the SSH channel op
   let execCallback;
   const fakeClient = {
     exec(_command, callback) {
-      // Capture but do not invoke yet ‚Äî simulates the channel-open
+      // Capture but do not invoke yet ù simulates the channel-open
       // delay where the race window lives.
       execCallback = callback;
     },
@@ -182,7 +263,7 @@ test("execViaChannel short-circuits when cancel fires before the SSH channel ope
     if (entry.chatSessionId === "chat-2") entry.cancel();
   }
 
-  // Now the channel "opens" ‚Äî even though `sshClient.exec` would
+  // Now the channel "opens" ù even though `sshClient.exec` would
   // hand us a working stream, we must short-circuit because the user
   // already cancelled.
   const fakeExecStream = {
