@@ -164,6 +164,10 @@ function writeToSession(sessionId, data, options = {}) {
   };
   const webContentsId = getMainWindow?.()?.webContents?.id;
   if (terminalWorkerManager) {
+    // Mirror input-based log rewrites into the main-process stream manager
+    // (see the netcatty:write forwarder in terminalBridge.registerHandlers);
+    // the real write handler runs in the terminal worker process.
+    sessionLogStreamManager.registerSudoAutofillInput(sessionId, data);
     terminalWorkerManager.send("netcatty:write", payload, { webContentsId });
   } else {
     terminalBridge?.writeToSession?.(

@@ -272,6 +272,59 @@ test("manual session log save dialog only offers log files and normalizes extens
   }
 });
 
+test("registerHandlers taps terminal worker output into main-process manual session logs", async () => {
+  const directory = path.join(TEMP_ROOT, `manual-worker-tap-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+  const filePath = path.join(directory, "manual.log");
+  const sessionId = `session-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const dialogMock = {
+    showSaveDialog: async () => ({ canceled: false, filePath }),
+  };
+  const bridge = loadBridgeWithDialog(dialogMock);
+  const sessionLogStreamManager = require("./sessionLogStreamManager.cjs");
+
+  const handlers = new Map();
+  const ipcMainMock = {
+    handle(channel, handler) {
+      handlers.set(channel, handler);
+    },
+  };
+  let outputTap = null;
+  bridge.registerHandlers(ipcMainMock, {
+    terminalWorkerManager: {
+      addOutputTap(listener) {
+        outputTap = listener;
+        return () => {};
+      },
+    },
+  });
+  assert.equal(typeof outputTap, "function");
+
+  try {
+    const startResult = await handlers.get("netcatty:sessionLog:manualStart")(null, {
+      sessionId,
+      sessionName: "worker host",
+      preferredDirectory: directory,
+      initialLine: "root@host:~# ",
+    });
+    assert.equal(startResult.success, true);
+    assert.equal(startResult.started, true);
+
+    // Terminal output produced in the worker process reaches the main
+    // process only through the output tap.
+    outputTap(sessionId, "ls\r\nfile\r\n");
+    outputTap("other-session", "ignored\r\n");
+    outputTap(sessionId, undefined);
+
+    const stopResult = await handlers.get("netcatty:sessionLog:manualStop")(null, { sessionId });
+    assert.equal(stopResult.success, true);
+    assert.equal(stopResult.stopped, true);
+    assert.equal(fs.readFileSync(filePath, "utf8"), "root@host:~# ls\r\nfile\r\n");
+  } finally {
+    await sessionLogStreamManager.cleanupAll();
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("manual session log canceling normalized overwrite keeps existing file", async () => {
   const directory = path.join(TEMP_ROOT, `manual-log-overwrite-cancel-${Date.now()}-${Math.random().toString(16).slice(2)}`);
   const selectedPath = path.join(directory, "manual.txt");

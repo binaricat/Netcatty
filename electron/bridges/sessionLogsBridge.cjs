@@ -373,7 +373,7 @@ async function getManualSessionLogStatus(event, payload = {}) {
 /**
  * Register IPC handlers for session logs operations
  */
-function registerHandlers(ipcMain) {
+function registerHandlers(ipcMain, options = {}) {
   ipcMain.handle("netcatty:sessionLogs:export", exportSessionLog);
   ipcMain.handle("netcatty:sessionLogs:selectDir", selectSessionLogsDir);
   ipcMain.handle("netcatty:sessionLogs:autoSave", autoSaveSessionLog);
@@ -381,6 +381,20 @@ function registerHandlers(ipcMain) {
   ipcMain.handle("netcatty:sessionLog:manualStart", startManualSessionLog);
   ipcMain.handle("netcatty:sessionLog:manualStop", stopManualSessionLog);
   ipcMain.handle("netcatty:sessionLog:manualStatus", getManualSessionLogStatus);
+
+  // In the default terminal-worker runtime, sessions run in a utilityProcess
+  // and call appendData() on the worker's own sessionLogStreamManager module
+  // instance. Manual session logs (and script session logs) are started in
+  // the *main* process, so without this tap their streams never receive any
+  // terminal output — the saved file would only contain the initial prompt
+  // line captured from the renderer buffer (issue #1938). The worker already
+  // mirrors every output chunk to the main process for script output buffers;
+  // feed that same stream into the main-process log streams. appendData() is
+  // a no-op for sessions without an active main-process stream.
+  options.terminalWorkerManager?.addOutputTap?.((sessionId, data) => {
+    if (typeof data !== "string" || data.length === 0) return;
+    require("./sessionLogStreamManager.cjs").appendData(sessionId, data);
+  });
 }
 
 module.exports = {

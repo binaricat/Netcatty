@@ -1394,8 +1394,21 @@ function registerHandlers(ipcMain, options = {}) {
       "netcatty:shells:discover",
       "netcatty:terminal:setEncoding",
     ].forEach((channel) => registerWorkerHandle(ipcMain, terminalWorkerManager, channel));
+    ipcMain.on("netcatty:write", (event, payload) => {
+      // Session log streams started in the main process (manual/script logs)
+      // sanitize sudo-autofill markers and programmatic command echoes based
+      // on the *input* that produced them. In worker mode the real write
+      // handler runs in the utilityProcess, so mirror the rewrite
+      // registrations into the main-process stream manager before
+      // forwarding. Both calls are no-ops without an active main-process
+      // stream for the session.
+      sessionLogStreamManager.registerSudoAutofillInput(payload?.sessionId, payload?.data);
+      sessionLogStreamManager.registerProgrammaticCommandLogRewrite(payload?.sessionId, payload?.logRewrite);
+      terminalWorkerManager.send("netcatty:write", payload, {
+        webContentsId: event?.sender?.id,
+      });
+    });
     [
-      "netcatty:write",
       "netcatty:interrupt",
       "netcatty:resize",
       "netcatty:flow",
