@@ -42,24 +42,41 @@ const getOrCreateState = (term: XTerm): TerminalOutputPressureState => {
   return state;
 };
 
+const LINE_BREAK_SCAN = /[\n\r]/g;
+
 const measureUnbrokenRuns = (
   data: string,
   initialRunBytes: number,
 ): { maxRunBytes: number; trailingRunBytes: number } => {
-  let currentRunBytes = initialRunBytes;
+  // Hot path for every output batch: hop between line breaks with a native
+  // regex scan instead of visiting each character in JS. A run only counts
+  // toward the max when this chunk actually appended characters to it,
+  // matching the original per-char accounting.
   let maxRunBytes = 0;
-  for (let index = 0; index < data.length; index += 1) {
-    const char = data[index];
-    if (char === "\n" || char === "\r") {
-      currentRunBytes = 0;
-      continue;
+  let runStart = 0;
+  let carriedRunBytes = initialRunBytes;
+  LINE_BREAK_SCAN.lastIndex = 0;
+  for (
+    let match = LINE_BREAK_SCAN.exec(data);
+    match !== null;
+    match = LINE_BREAK_SCAN.exec(data)
+  ) {
+    const appendedBytes = match.index - runStart;
+    if (appendedBytes > 0) {
+      const runBytes = carriedRunBytes + appendedBytes;
+      if (runBytes > maxRunBytes) {
+        maxRunBytes = runBytes;
+      }
     }
-    currentRunBytes += 1;
-    if (currentRunBytes > maxRunBytes) {
-      maxRunBytes = currentRunBytes;
-    }
+    carriedRunBytes = 0;
+    runStart = match.index + 1;
   }
-  return { maxRunBytes, trailingRunBytes: currentRunBytes };
+  const trailingAppendedBytes = data.length - runStart;
+  const trailingRunBytes = carriedRunBytes + trailingAppendedBytes;
+  if (trailingAppendedBytes > 0 && trailingRunBytes > maxRunBytes) {
+    maxRunBytes = trailingRunBytes;
+  }
+  return { maxRunBytes, trailingRunBytes };
 };
 
 export const noteTerminalOutputPressureData = (

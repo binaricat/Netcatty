@@ -40,6 +40,9 @@ const CURSOR_HOME_EXPLICIT = "\x1b[1;1H";
 
 const MARKERS = [SYNC_START, SYNC_END, CLEAR, CURSOR_HOME, CURSOR_HOME_EXPLICIT] as const;
 
+/** Shared prefix of SYNC_START / SYNC_END, used to hop across plain spans. */
+const SYNC_PREFIX = "\x1b[?2026";
+
 const maxMarkerPrefixLength = Math.max(...MARKERS.map((marker) => marker.length)) - 1;
 
 const isIncompleteEscapePrefix = (suffix: string): boolean => {
@@ -80,6 +83,34 @@ const isIncompleteEscapePrefix = (suffix: string): boolean => {
   return false;
 };
 
+const hasCsiFinalByte = (input: string, from: number): boolean => {
+  for (let index = from; index < input.length; index += 1) {
+    const code = input.charCodeAt(index);
+    if (code >= 0x40 && code <= 0x7e) {
+      return true;
+    }
+  }
+  return false;
+};
+
+/**
+ * True when some suffix of `input` could parse as an incomplete escape
+ * sequence. An incomplete parse requires either a trailing lone ESC, or an
+ * `\x1b[` occurrence with no CSI final byte after it. Since `[` itself is in
+ * the final-byte range (0x40-0x7e), it is sufficient to check the last
+ * `\x1b[`: every earlier one scans a superset that includes that `[`.
+ */
+const mayEndWithIncompleteEscape = (input: string): boolean => {
+  if (input.length === 0) {
+    return false;
+  }
+  if (input.charCodeAt(input.length - 1) === 0x1b) {
+    return true;
+  }
+  const lastCsiIntro = input.lastIndexOf("\x1b[");
+  return lastCsiIntro !== -1 && !hasCsiFinalByte(input, lastCsiIntro + 2);
+};
+
 const splitPendingMarkerSuffix = (input: string): { emit: string; pending: string } => {
   const markerMax = Math.min(input.length, maxMarkerPrefixLength);
   for (let length = markerMax; length > 0; length -= 1) {
@@ -92,7 +123,19 @@ const splitPendingMarkerSuffix = (input: string): { emit: string; pending: strin
     }
   }
 
+  // Without this gate, every ESC-bearing chunk pays an O(n * escapes) scan
+  // below (quadratic on colored output floods); the gate settles the common
+  // complete-tail case with one native lastIndexOf.
+  if (!mayEndWithIncompleteEscape(input)) {
+    return { emit: input, pending: "" };
+  }
+
+  // Only suffixes that start with ESC can qualify; skip other start positions
+  // with a charCode probe so no substring is allocated for them.
   for (let length = input.length; length > 0; length -= 1) {
+    if (input.charCodeAt(input.length - length) !== 0x1b) {
+      continue;
+    }
     const suffix = input.slice(-length);
     if (isIncompleteEscapePrefix(suffix)) {
       return {
@@ -172,15 +215,15 @@ const scanSyncBlockClears = (
       continue;
     }
 
-    if (!state.inSyncBlock) {
-      result += input[index];
-      index += 1;
-      continue;
-    }
-
-    if (state.fullRedrawBlock === false) {
-      result += input[index];
-      index += 1;
+    if (!state.inSyncBlock || state.fullRedrawBlock === false) {
+      // Pass-through span: nothing to rewrite until the next possible sync
+      // marker. Hop there with a native scan instead of copying per char.
+      // The current position is known not to start SYNC_START/SYNC_END, so
+      // consuming at least one character here is safe.
+      const nextMarker = input.indexOf(SYNC_PREFIX, index + 1);
+      const end = nextMarker === -1 ? input.length : nextMarker;
+      result += input.slice(index, end);
+      index = end;
       continue;
     }
 
@@ -227,8 +270,12 @@ const scanSyncBlockClears = (
       state.pendingCursorHome = null;
     }
 
-    result += input[index];
-    index += 1;
+    // Inside an active sync block every marker starts with ESC; hop to the
+    // next ESC and copy the plain span in one slice.
+    const nextEsc = input.indexOf("\x1b", index + 1);
+    const end = nextEsc === -1 ? input.length : nextEsc;
+    result += input.slice(index, end);
+    index = end;
   }
 
   return { output: result, startedSyncBlock };

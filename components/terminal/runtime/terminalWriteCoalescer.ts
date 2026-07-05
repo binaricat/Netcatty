@@ -69,20 +69,27 @@ const splitIngressBytes = (
 const isPlainTerminalOutput = (data: string): boolean =>
   !data.includes("\x1b") && !data.includes("\x9b");
 
+const LINE_BREAK_SCAN = /[\n\r]/g;
+
 const hasLongUnbrokenRun = (data: string, maxRunBytes: number): boolean => {
-  let runBytes = 0;
-  for (let index = 0; index < data.length; index += 1) {
-    const char = data[index];
-    if (char === "\n" || char === "\r") {
-      runBytes = 0;
-      continue;
-    }
-    runBytes += 1;
-    if (runBytes > maxRunBytes) {
+  if (data.length <= maxRunBytes) {
+    return false;
+  }
+  // Hot path for every flushed batch: hop between line breaks with a native
+  // regex scan instead of visiting each character in JS.
+  let runStart = 0;
+  LINE_BREAK_SCAN.lastIndex = 0;
+  for (
+    let match = LINE_BREAK_SCAN.exec(data);
+    match !== null;
+    match = LINE_BREAK_SCAN.exec(data)
+  ) {
+    if (match.index - runStart > maxRunBytes) {
       return true;
     }
+    runStart = match.index + 1;
   }
-  return false;
+  return data.length - runStart > maxRunBytes;
 };
 
 const resolveTerminalWriteBatchBytes = (

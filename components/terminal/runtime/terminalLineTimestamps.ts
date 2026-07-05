@@ -200,6 +200,17 @@ const pushDataSegment = (
   segments.push({ kind: "data", data });
 };
 
+/** Characters that can change segmenter state outside alternate screen. */
+// eslint-disable-next-line no-control-regex
+const SEGMENTER_BOUNDARY_SCAN = /[\u001b\n\r]/g;
+
+/** Index of the next ESC/LF/CR at or after `from`, or `input.length`. */
+const nextSegmenterBoundary = (input: string, from: number): number => {
+  SEGMENTER_BOUNDARY_SCAN.lastIndex = from;
+  const match = SEGMENTER_BOUNDARY_SCAN.exec(input);
+  return match === null ? input.length : match.index;
+};
+
 export const createTerminalLineTimestampSegmenter = (
   options: TerminalLineTimestampSegmenterOptions = {},
 ): TerminalLineTimestampSegmenter => {
@@ -230,7 +241,7 @@ export const createTerminalLineTimestampSegmenter = (
       pendingEscapeSequence = "";
       const segments: TerminalLineTimestampSegment[] = [];
 
-      for (let index = 0; index < input.length; index += 1) {
+      for (let index = 0; index < input.length;) {
         const char = input[index];
 
         if (char === "\x1b") {
@@ -242,40 +253,49 @@ export const createTerminalLineTimestampSegmenter = (
             }
             const alternateScreenAction = getAlternateScreenAction(sequence.sequence);
             if (alternateScreenAction === "enter") {
-              pushDataSegment(segments, sequence.sequence);
               suspendedForAlternateScreen = true;
               resetLineState();
-              index = sequence.endIndex;
-              continue;
-            }
-            if (alternateScreenAction === "leave") {
-              pushDataSegment(segments, sequence.sequence);
+            } else if (alternateScreenAction === "leave") {
               suspendedForAlternateScreen = false;
               resetLineState();
-              index = sequence.endIndex;
-              continue;
             }
             pushDataSegment(segments, sequence.sequence);
-            index = sequence.endIndex;
+            index = sequence.endIndex + 1;
             continue;
           }
         }
 
-        if (!suspendedForAlternateScreen && isPrintableOutput(char)) {
-          pushTimestampIfNeeded(segments);
-        }
-        pushDataSegment(segments, char);
-
         if (suspendedForAlternateScreen) {
+          // Nothing but an ESC sequence can change state while suspended;
+          // hop to the next ESC and append the span in one slice.
+          const nextEsc = input.indexOf("\x1b", index + 1);
+          const end = nextEsc === -1 ? input.length : nextEsc;
+          pushDataSegment(segments, input.slice(index, end));
+          index = end;
           continue;
         }
-        if (char === "\n") {
-          resetLineState();
-        } else if (char === "\r") {
-          atLineStart = true;
-        } else if (isPrintableOutput(char)) {
-          atLineStart = false;
+
+        if (!isPrintableOutput(char)) {
+          // Single control character (e.g. \n, \r, BEL, backspace).
+          pushDataSegment(segments, char);
+          if (char === "\n") {
+            resetLineState();
+          } else if (char === "\r") {
+            atLineStart = true;
+          }
+          index += 1;
+          continue;
         }
+
+        // Printable character: stamp the line if needed, then hop to the next
+        // state-changing character (ESC/LF/CR) and append the span in one
+        // slice. Control chars inside the span (BEL, backspace, DEL, C1)
+        // never change segmenter state, matching the per-char loop.
+        pushTimestampIfNeeded(segments);
+        atLineStart = false;
+        const end = nextSegmenterBoundary(input, index + 1);
+        pushDataSegment(segments, input.slice(index, end));
+        index = end;
       }
 
       return segments;

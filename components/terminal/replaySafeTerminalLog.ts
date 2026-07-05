@@ -147,14 +147,21 @@ const isC1SingleCharCursorControl = (ch: string): boolean =>
 const isEscSingleCharCursorControl = (ch: string): boolean =>
   ch === "D" || ch === "E" || ch === "M";
 
-const hasReplayControlCandidate = (input: string): boolean => {
-  for (let i = 0; i < input.length; i += 1) {
-    const code = input.charCodeAt(i);
-    if (input[i] === ESC || (code >= 0x80 && code <= 0x9f)) {
-      return true;
-    }
-  }
-  return false;
+// ESC or any C1 control (0x80-0x9f): every branch of the sanitizer's parser
+// that can rewrite output starts at one of these characters.
+// eslint-disable-next-line no-control-regex
+const REPLAY_CONTROL_CANDIDATE = /[\u001b\u0080-\u009f]/;
+// eslint-disable-next-line no-control-regex
+const REPLAY_CONTROL_CANDIDATE_SCAN = /[\u001b\u0080-\u009f]/g;
+
+const hasReplayControlCandidate = (input: string): boolean =>
+  REPLAY_CONTROL_CANDIDATE.test(input);
+
+/** Index of the next ESC/C1 control at or after `from`, or -1. */
+const nextReplayControlCandidate = (input: string, from: number): number => {
+  REPLAY_CONTROL_CANDIDATE_SCAN.lastIndex = from;
+  const match = REPLAY_CONTROL_CANDIDATE_SCAN.exec(input);
+  return match === null ? -1 : match.index;
 };
 
 class ReplaySafeTerminalLogSanitizerImpl implements ReplaySafeTerminalLogSanitizer {
@@ -335,10 +342,14 @@ class ReplaySafeTerminalLogSanitizerImpl implements ReplaySafeTerminalLogSanitiz
         }
       }
 
+      // Plain span: no branch above can trigger until the next ESC/C1
+      // control. Hop there with a native scan and append it in one slice.
       flushPendingCursorHome();
-      appendOutput(data[i]);
+      const nextControl = nextReplayControlCandidate(data, i + 1);
+      const end = nextControl === -1 ? data.length : nextControl;
+      appendOutput(data.slice(i, end));
       this.inClearCluster = false;
-      i += 1;
+      i = end;
     }
 
     return output;

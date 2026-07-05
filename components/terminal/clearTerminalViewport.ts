@@ -311,6 +311,13 @@ export const appendEraseScrollbackAfterFullErases = (
     return data;
   }
 
+  // Hot path: all rewrites below only ever trigger on a literal \x1b[2J, and
+  // the sync-block/alt-screen tracking is chunk-local, so a chunk without it
+  // passes through verbatim. One native scan replaces the per-char loop.
+  if (!data.includes("\x1b[2J")) {
+    return data;
+  }
+
   let result = "";
   let index = 0;
   let inDec2026SyncBlock = false;
