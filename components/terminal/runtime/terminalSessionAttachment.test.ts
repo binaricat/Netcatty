@@ -83,13 +83,18 @@ const createContext = (showLineTimestamps: boolean, host: Record<string, unknown
   promptLineBreakStateRef: { current: undefined },
 });
 
-const withDocumentVisibility = (visibilityState: "visible" | "hidden", run: () => void) => {
+const withDocumentVisibility = (
+  visibilityState: "visible" | "hidden",
+  run: () => void,
+  options: { hasFocus?: boolean } = {},
+) => {
+  const hasFocus = options.hasFocus ?? visibilityState === "visible";
   const original = Object.getOwnPropertyDescriptor(globalThis, "document");
   Object.defineProperty(globalThis, "document", {
     configurable: true,
     value: {
       visibilityState,
-      hasFocus: () => visibilityState === "visible",
+      hasFocus: () => hasFocus,
     },
   });
   try {
@@ -219,6 +224,52 @@ test("writeSessionData flushes xterm writes while the page is hidden", () => {
 
   assert.equal(writes.join(""), payload);
   assert.deepEqual(writes.map((write) => write.length), [FLOW_CHAR_COUNT_ACK_SIZE, 1]);
+  assert.equal(pendingCallbacks.length, 0);
+  assert.equal(getFlowController(ctx as never, term).pendingBytes(), 0);
+  assert.equal(getDeferredTerminalWriteAckBytes(term), 0);
+  assert.equal(acked.reduce((total, bytes) => total + bytes, 0), payload.length);
+  clearTerminalSessionFlowAck("session-1");
+});
+
+test("writeSessionData flushes xterm writes while the window is unfocused but visible", () => {
+  clearTerminalSessionFlowAck("session-1");
+  const payload = "x".repeat(FLOW_CHAR_COUNT_ACK_SIZE + 1);
+  const writes: string[] = [];
+  const pendingCallbacks: Array<() => void> = [];
+  const writeBuffer = {
+    flushSync() {
+      while (pendingCallbacks.length > 0) {
+        pendingCallbacks.shift()?.();
+      }
+    },
+  };
+  const term = {
+    buffer: { active: { type: "normal" } },
+    _core: { _writeBuffer: writeBuffer },
+    write(data: string, callback?: () => void) {
+      writes.push(data);
+      if (callback) pendingCallbacks.push(callback);
+    },
+    scrollToBottom() {},
+  } as unknown as XTerm;
+  const acked: number[] = [];
+  const ctx = {
+    ...createContext(false),
+    isVisibleRef: { current: true },
+    sessionRef: { current: "session-1" },
+    terminalBackend: {
+      ackSessionFlow: (_sessionId: string, bytes: number) => {
+        acked.push(bytes);
+      },
+    },
+  };
+
+  withDocumentVisibility("visible", () => {
+    writeSessionData(ctx as never, term, payload);
+  }, { hasFocus: false });
+  flushTerminalSessionFlowAck("session-1");
+
+  assert.equal(writes.join(""), payload);
   assert.equal(pendingCallbacks.length, 0);
   assert.equal(getFlowController(ctx as never, term).pendingBytes(), 0);
   assert.equal(getDeferredTerminalWriteAckBytes(term), 0);

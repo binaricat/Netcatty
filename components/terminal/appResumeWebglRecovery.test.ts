@@ -2,15 +2,12 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-const assertHandlerRecoversWebglBeforeRefit = (
-  source: string,
-  handlerName: string,
-): void => {
-  const handlerIndex = source.indexOf(`const ${handlerName} = () => {`);
-  assert.notEqual(handlerIndex, -1, `${handlerName} must exist`);
+const assertRecoverTerminalOnAppResumeOrder = (source: string): void => {
+  const handlerIndex = source.indexOf("const recoverTerminalOnAppResume = () => {");
+  assert.notEqual(handlerIndex, -1, "recoverTerminalOnAppResume must exist");
 
   const bodyStart = source.indexOf("{", handlerIndex);
-  assert.notEqual(bodyStart, -1, `${handlerName} must have a body`);
+  assert.notEqual(bodyStart, -1, "recoverTerminalOnAppResume must have a body");
 
   let depth = 0;
   let bodyEnd = -1;
@@ -25,23 +22,25 @@ const assertHandlerRecoversWebglBeforeRefit = (
       }
     }
   }
-  assert.notEqual(bodyEnd, -1, `${handlerName} body must close`);
+  assert.notEqual(bodyEnd, -1, "recoverTerminalOnAppResume body must close");
 
   const handlerSource = source.slice(handlerIndex, bodyEnd);
+  const flushIndex = handlerSource.indexOf("flushPendingTerminalWritesOnResume(term)");
   const recoveryIndex = handlerSource.indexOf("recoverWebglRendererOnAppResume()");
   const refitIndex = handlerSource.indexOf("scheduleLayoutRecoveryRefit()");
 
-  assert.notEqual(recoveryIndex, -1, `${handlerName} must recover WebGL on app resume`);
-  assert.notEqual(refitIndex, -1, `${handlerName} must schedule layout recovery`);
-  assert.ok(
-    recoveryIndex < refitIndex,
-    `${handlerName} must recover WebGL before layout recovery`,
-  );
+  assert.notEqual(flushIndex, -1, "recoverTerminalOnAppResume must flush pending writes");
+  assert.notEqual(recoveryIndex, -1, "recoverTerminalOnAppResume must recover WebGL");
+  assert.notEqual(refitIndex, -1, "recoverTerminalOnAppResume must schedule layout recovery");
+  assert.ok(flushIndex < recoveryIndex, "flush pending writes before WebGL recovery");
+  assert.ok(recoveryIndex < refitIndex, "recover WebGL before layout recovery");
 };
 
-test("app resume handlers recover the terminal renderer before refit", () => {
+test("app resume handlers flush backlog and recover the terminal renderer before refit", () => {
   const source = readFileSync(new URL("./useTerminalEffects.ts", import.meta.url), "utf8");
 
-  assertHandlerRecoversWebglBeforeRefit(source, "handleVisibilityChange");
-  assertHandlerRecoversWebglBeforeRefit(source, "handleWindowFocus");
+  assertRecoverTerminalOnAppResumeOrder(source);
+  assert.match(source, /handleVisibilityChange[\s\S]*recoverTerminalOnAppResume\(\)/);
+  assert.match(source, /handleWindowFocus[\s\S]*recoverTerminalOnAppResume\(\)/);
+  assert.match(source, /onWindowShown\?\.\(\(\) => \{[\s\S]*recoverTerminalOnAppResume\(\)/);
 });

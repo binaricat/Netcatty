@@ -6,9 +6,11 @@ import {
   refreshTerminalViewport,
 } from "../terminalHibernateRuntime";
 import { flushTerminalWriteCoalescer } from "./terminalWriteCoalescer";
+import { flushTerminalWriteQueueBypassingTimers } from "./terminalWriteQueue";
 
 const UNFOCUSED_REPAINT_DEBOUNCE_MS = 16;
 const UNFOCUSED_FLUSH_DEBOUNCE_MS = 67;
+const RESUME_FLUSH_MAX_PASSES = 64;
 const unfocusedRepaintTimers = new WeakMap<XTerm, ReturnType<typeof setTimeout>>();
 const unfocusedFlushTimers = new WeakMap<XTerm, ReturnType<typeof setTimeout>>();
 
@@ -39,7 +41,11 @@ export function isTerminalPageHidden(): boolean {
 }
 
 export function shouldFlushTerminalWritesForHiddenPage(isPaneVisible: boolean): boolean {
-  return isPaneVisible && isTerminalPageHidden();
+  if (!isPaneVisible) return false;
+  // Minimized/hidden pages and occluded-but-visible windows (common on Windows
+  // when Alt+Tabbing away) both throttle requestAnimationFrame, which lets the
+  // write coalescer backlog grow and replay slowly on foreground return (#1880).
+  return isTerminalPageHidden() || isTerminalWindowUnfocusedButVisible();
 }
 
 function normalizeXtermWriteBufferOffset(writeBuffer: XTermPrivateWriteBuffer): void {
@@ -106,11 +112,24 @@ export function cancelScheduledUnfocusedRepaint(term: XTerm): void {
   unfocusedFlushTimers.delete(term);
 }
 
+export function flushPendingTerminalWritesOnResume(term: XTerm): void {
+  flushTerminalWriteCoalescer(term);
+  flushTerminalWriteBufferBypassingTimers(term);
+  for (let pass = 0; pass < RESUME_FLUSH_MAX_PASSES; pass += 1) {
+    if (!flushTerminalWriteQueueBypassingTimers(term)) {
+      return;
+    }
+    flushTerminalWriteBufferBypassingTimers(term);
+  }
+}
+
 export function maybeFlushTerminalWriteCoalescerWhenUnfocused(
   term: XTerm,
   isPaneVisible: boolean,
 ): void {
-  if (!isPaneVisible || !isTerminalWindowUnfocusedButVisible()) return;
+  // Background fast path already drains coalescer/queue synchronously.
+  if (!isPaneVisible || shouldFlushTerminalWritesForHiddenPage(isPaneVisible)) return;
+  if (!isTerminalWindowUnfocusedButVisible()) return;
   if (unfocusedFlushTimers.has(term)) return;
 
   const timer = setTimeout(() => {

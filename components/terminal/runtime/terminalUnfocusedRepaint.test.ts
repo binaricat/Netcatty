@@ -8,13 +8,18 @@ import {
   shouldFlushTerminalWritesForHiddenPage,
 } from "./terminalUnfocusedRepaint.ts";
 
-const withDocumentVisibility = (visibilityState: "visible" | "hidden", run: () => void) => {
+const withDocumentVisibility = (
+  visibilityState: "visible" | "hidden",
+  run: () => void,
+  options: { hasFocus?: boolean } = {},
+) => {
+  const hasFocus = options.hasFocus ?? visibilityState === "visible";
   const original = Object.getOwnPropertyDescriptor(globalThis, "document");
   Object.defineProperty(globalThis, "document", {
     configurable: true,
     value: {
       visibilityState,
-      hasFocus: () => visibilityState === "visible",
+      hasFocus: () => hasFocus,
     },
   });
   try {
@@ -60,14 +65,18 @@ test("forceTerminalRepaintBypassingAnimationFrame refreshes alternate-screen vie
   assert.equal(renderRowsCalled, true);
 });
 
-test("shouldFlushTerminalWritesForHiddenPage only flushes visible panes on hidden pages", () => {
+test("shouldFlushTerminalWritesForHiddenPage flushes visible panes on hidden or unfocused pages", () => {
   withDocumentVisibility("hidden", () => {
     assert.equal(shouldFlushTerminalWritesForHiddenPage(true), true);
     assert.equal(shouldFlushTerminalWritesForHiddenPage(false), false);
   });
   withDocumentVisibility("visible", () => {
+    assert.equal(shouldFlushTerminalWritesForHiddenPage(true), true);
+    assert.equal(shouldFlushTerminalWritesForHiddenPage(false), false);
+  }, { hasFocus: false });
+  withDocumentVisibility("visible", () => {
     assert.equal(shouldFlushTerminalWritesForHiddenPage(true), false);
-  });
+  }, { hasFocus: true });
 });
 
 test("flushTerminalWriteBufferBypassingTimers drains xterm's internal write buffer", () => {
@@ -123,6 +132,16 @@ test("flushTerminalWriteBufferBypassingTimers skips already parsed xterm chunks"
   assert.equal(writeBuffer._pendingData, 0);
 });
 
+test("flushPendingTerminalWritesOnResume drains coalescer, queue, and xterm write buffer", () => {
+  const source = readFileSync(
+    new URL("./terminalUnfocusedRepaint.ts", import.meta.url),
+    "utf8",
+  );
+  assert.match(source, /flushTerminalWriteCoalescer\(term\)/);
+  assert.match(source, /flushTerminalWriteQueueBypassingTimers\(term\)/);
+  assert.match(source, /flushTerminalWriteBufferBypassingTimers\(term\)/);
+});
+
 test("maybeFlushTerminalWriteCoalescerWhenUnfocused throttles coalescer flushes", () => {
   const source = readFileSync(
     new URL("./terminalUnfocusedRepaint.ts", import.meta.url),
@@ -164,26 +183,29 @@ test("writeSessionData bypasses animation-frame coalescing on hidden pages", () 
   assert.match(source, /const deferFlowAck = !writeOptions\.flushXtermWriteBuffer/);
 });
 
-test("writeSessionDataImmediate schedules unfocused repaint only for visible panes", () => {
+test("writeSessionDataImmediate skips unfocused repaint during background fast path", () => {
   const source = readFileSync(
     new URL("./terminalSessionAttachment.ts", import.meta.url),
     "utf8",
   );
-  assert.match(source, /if \(ctx\.isVisibleRef\?\.current !== false\) \{\s*scheduleTerminalRepaintWhenUnfocused\(term\)/);
+  assert.match(source, /!writeOptions\.flushXtermWriteBuffer\)/);
+  assert.match(source, /scheduleTerminalRepaintWhenUnfocused\(term\)/);
 });
 
-test("window focus cancels pending unfocused repaint before layout recovery", () => {
+test("writeSessionDataImmediate schedules unfocused repaint only for focused visible panes", () => {
+  const source = readFileSync(
+    new URL("./terminalSessionAttachment.ts", import.meta.url),
+    "utf8",
+  );
+  assert.match(source, /if \(ctx\.isVisibleRef\?\.current !== false && !writeOptions\.flushXtermWriteBuffer\) \{\s*scheduleTerminalRepaintWhenUnfocused\(term\)/);
+});
+
+test("app resume recovery flushes pending writes before WebGL recovery", () => {
   const source = readFileSync(
     new URL("../useTerminalEffects.ts", import.meta.url),
     "utf8",
   );
-  const handlerIndex = source.indexOf("const handleWindowFocus = () => {");
-  assert.notEqual(handlerIndex, -1);
-  const handlerEnd = source.indexOf("document.addEventListener('visibilitychange'", handlerIndex);
-  assert.notEqual(handlerEnd, -1);
-  const handlerSource = source.slice(handlerIndex, handlerEnd);
-  const cancelIndex = handlerSource.indexOf("cancelScheduledUnfocusedRepaint(term)");
-  const recoveryIndex = handlerSource.indexOf("recoverWebglRendererOnAppResume()");
-  assert.notEqual(cancelIndex, -1);
-  assert.ok(cancelIndex < recoveryIndex);
+  assert.match(source, /const recoverTerminalOnAppResume = \(\) => \{/);
+  assert.match(source, /flushPendingTerminalWritesOnResume\(term\)/);
+  assert.match(source, /recoverWebglRendererOnAppResume\(\)/);
 });

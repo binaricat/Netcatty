@@ -30,6 +30,7 @@ import {
 } from './terminalHibernateRuntime';
 import {
   cancelScheduledUnfocusedRepaint,
+  flushPendingTerminalWritesOnResume,
   forceTerminalRepaintBypassingAnimationFrame,
 } from './runtime/terminalUnfocusedRepaint';
 import {
@@ -1494,26 +1495,35 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
       xtermRuntimeRef.current?.ensureWebglRenderer();
     };
 
-    const handleVisibilityChange = () => {
-      if (document.visibilityState !== 'visible') return;
-      if (!shouldRecoverOnAppResume()) return;
-      recoverWebglRendererOnAppResume();
-      scheduleLayoutRecoveryRefit();
-    };
-
-    const handleWindowFocus = () => {
-      if (!shouldRecoverOnAppResume()) return;
-      let term = termRef.current;
+    const recoverTerminalOnAppResume = () => {
+      const term = termRef.current;
       if (term) {
         cancelScheduledUnfocusedRepaint(term);
+        flushPendingTerminalWritesOnResume(term);
         forceTerminalRepaintBypassingAnimationFrame(term);
       }
       recoverWebglRendererOnAppResume();
       scheduleLayoutRecoveryRefit();
     };
 
+    const handleVisibilityChange = () => {
+      if (document.visibilityState !== 'visible') return;
+      if (!shouldRecoverOnAppResume()) return;
+      recoverTerminalOnAppResume();
+    };
+
+    const handleWindowFocus = () => {
+      if (!shouldRecoverOnAppResume()) return;
+      recoverTerminalOnAppResume();
+    };
+
     document.addEventListener('visibilitychange', handleVisibilityChange);
     window.addEventListener('focus', handleWindowFocus);
+
+    const unsubscribeWindowShown = terminalBackend.onWindowShown?.(() => {
+      if (!shouldRecoverOnAppResume()) return;
+      recoverTerminalOnAppResume();
+    });
 
     // Fullscreen changes layout for every visible pane.
     const unsubscribeFullscreen = terminalBackend.onWindowFullScreenChanged?.((isFullscreen) => {
@@ -1524,6 +1534,7 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
       clearLayoutRecoveryTimers();
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('focus', handleWindowFocus);
+      unsubscribeWindowShown?.();
       unsubscribeFullscreen?.();
     };
   }, [isVisible, inWorkspace, isFocusMode, isFocused, terminalBackend]);

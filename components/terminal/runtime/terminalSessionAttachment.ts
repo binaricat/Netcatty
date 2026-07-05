@@ -282,7 +282,7 @@ const writeSessionDataImmediate = (
       if (shouldScrollOnTerminalOutput(settings)) {
         handleTerminalOutputAutoScroll(ctx, term);
       }
-      if (ctx.isVisibleRef?.current !== false) {
+      if (ctx.isVisibleRef?.current !== false && !writeOptions.flushXtermWriteBuffer) {
         scheduleTerminalRepaintWhenUnfocused(term);
       }
       done();
