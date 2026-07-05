@@ -686,6 +686,46 @@ test("worker output notifies output taps before renderer routing", () => {
   assert.deepEqual(routed, [{ sessionId: "session-1", data: "hello" }]);
 });
 
+test("worker fallback output already announced via output-tap does not notify taps twice", () => {
+  const child = new FakeChild();
+  const routed = [];
+  const tapped = [];
+  const manager = createTerminalWorkerManager({
+    utilityProcess: {
+      fork() {
+        return child;
+      },
+    },
+    terminalOutputChannel: {
+      send(sessionId, data) {
+        routed.push({ sessionId, data });
+        return true;
+      },
+    },
+    workerScriptPath: "/worker.cjs",
+  });
+
+  manager.addOutputTap((sessionId, data) => tapped.push({ sessionId, data }));
+  manager.ensureStarted();
+  // The runtime sender emits an output-tap message, then falls back to a
+  // plain output message for the same chunk when the output port is not
+  // usable. Taps must fire exactly once for that chunk.
+  child.emit("message", {
+    kind: "output-tap",
+    sessionId: "session-1",
+    data: "hello",
+  });
+  child.emit("message", {
+    kind: "output",
+    sessionId: "session-1",
+    data: "hello",
+    tapped: true,
+  });
+
+  assert.deepEqual(tapped, [{ sessionId: "session-1", data: "hello" }]);
+  assert.deepEqual(routed, [{ sessionId: "session-1", data: "hello" }]);
+});
+
 test("worker output-tap messages notify taps without duplicate renderer routing", () => {
   const child = new FakeChild();
   const routed = [];

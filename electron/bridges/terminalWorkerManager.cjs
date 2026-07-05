@@ -480,7 +480,14 @@ function createTerminalWorkerManager(options = {}) {
     }
     if (message.kind === "output") {
       if (closedSessions.has(message.sessionId)) return;
-      notifyOutputTaps(message.sessionId, message.data);
+      // Chunks sent through the runtime sender's port fallback were already
+      // announced via a dedicated output-tap message (message.tapped);
+      // notifying taps again here would double-write session logs and
+      // script output buffers. Plain output messages (e.g. from the early
+      // worker sender) still need the notification.
+      if (!message.tapped) {
+        notifyOutputTaps(message.sessionId, message.data);
+      }
       if (outputPortPending.has(message.sessionId)) {
         bufferOutput(message.sessionId, message.data, message.meta);
         return;

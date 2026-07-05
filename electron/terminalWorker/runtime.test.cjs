@@ -174,6 +174,7 @@ test("runtime routes terminal data over output messages", async () => {
     kind: "output",
     sessionId: "s1",
     data: "hello",
+    tapped: true,
   });
 });
 

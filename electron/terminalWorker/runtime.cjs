@@ -167,6 +167,11 @@ function createSender(parentPort, webContentsId, outputPorts) {
           kind: "output",
           sessionId: payload?.sessionId,
           data: payload?.data,
+          // The output-tap message above already notified main-process taps
+          // for this chunk; flag the fallback delivery so the worker manager
+          // does not notify them a second time (would double-write session
+          // logs and script output buffers).
+          tapped: true,
         };
         if (payload?.meta) outputMessage.meta = payload.meta;
         parentPort.postMessage(outputMessage);
