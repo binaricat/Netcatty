@@ -183,21 +183,15 @@ test("writeSessionData bypasses animation-frame coalescing on hidden pages", () 
   assert.match(source, /const deferFlowAck = !writeOptions\.flushXtermWriteBuffer/);
 });
 
-test("writeSessionDataImmediate skips unfocused repaint during background fast path", () => {
+test("writeSessionDataImmediate schedules unfocused repaint for visible panes on every path", () => {
   const source = readFileSync(
     new URL("./terminalSessionAttachment.ts", import.meta.url),
     "utf8",
   );
-  assert.match(source, /!writeOptions\.flushXtermWriteBuffer\)/);
-  assert.match(source, /scheduleTerminalRepaintWhenUnfocused\(term\)/);
-});
-
-test("writeSessionDataImmediate schedules unfocused repaint only for focused visible panes", () => {
-  const source = readFileSync(
-    new URL("./terminalSessionAttachment.ts", import.meta.url),
-    "utf8",
-  );
-  assert.match(source, /if \(ctx\.isVisibleRef\?\.current !== false && !writeOptions\.flushXtermWriteBuffer\) \{\s*scheduleTerminalRepaintWhenUnfocused\(term\)/);
+  // The background fast path must NOT skip this: unfocused-but-visible windows
+  // have no rAF render loop, so the debounced sync repaint is the only way
+  // pixels update (#1761 regression guard).
+  assert.match(source, /if \(ctx\.isVisibleRef\?\.current !== false\) \{[^}]*scheduleTerminalRepaintWhenUnfocused\(term\)/);
 });
 
 test("app resume recovery flushes pending writes before WebGL recovery", () => {

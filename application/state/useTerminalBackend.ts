@@ -168,6 +168,11 @@ export const useTerminalBackend = () => {
     return bridge?.onWindowFullScreenChanged?.(cb);
   }, []);
 
+  const onWindowShown = useCallback((cb: () => void) => {
+    const bridge = netcattyBridge.get();
+    return bridge?.onWindowShown?.(cb);
+  }, []);
+
   const onHostKeyVerification = useCallback((cb: Parameters<NonNullable<NetcattyBridge["onHostKeyVerification"]>>[0]) => {
     const bridge = netcattyBridge.get();
     return bridge?.onHostKeyVerification?.(cb);
@@ -370,6 +375,7 @@ export const useTerminalBackend = () => {
       onChainProgress,
       onConnectionReuseFallback,
       onWindowFullScreenChanged,
+      onWindowShown,
       onHostKeyVerification,
       respondHostKeyVerification,
       openExternal,
@@ -422,6 +428,7 @@ export const useTerminalBackend = () => {
       onChainProgress,
       onConnectionReuseFallback,
       onWindowFullScreenChanged,
+      onWindowShown,
       onHostKeyVerification,
       respondHostKeyVerification,
       openExternal,
