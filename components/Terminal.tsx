@@ -928,7 +928,9 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     }).then((result) => {
       handleOsc7SetupOpenChange(false);
       if (result.success) {
-        toast.success(t("terminal.osc7Setup.configured"));
+        toast.success(result.sentToTerminal
+          ? t("terminal.osc7Setup.sent")
+          : t("terminal.osc7Setup.configured"));
         return;
       }
       toast.error(result.error || t("terminal.osc7Setup.failed"));

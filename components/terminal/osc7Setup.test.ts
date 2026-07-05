@@ -7,9 +7,11 @@ import { basename, join } from "node:path";
 
 import {
   OSC7_MARKER,
+  OSC7_SETUP_OTHER_USER_MARKER,
   buildOsc7ReloadCommand,
   buildOsc7SetupCommand,
   buildOsc7SetupExecCommand,
+  buildOsc7TypedSetupCommand,
   runOsc7SetupAction,
   shouldOfferOsc7SetupAction,
 } from "./osc7Setup";
@@ -125,6 +127,62 @@ test("runOsc7SetupAction configures in the background and only sends a small rel
   assert.deepEqual(localData, ["\u001b]7;file://host/home/me\u0007"]);
 });
 
+test("runOsc7SetupAction retypes the setup into the terminal for user-switched shells", async () => {
+  const writes: Array<{ sessionId: string; data: string; automated?: boolean }> = [];
+  const localData: string[] = [];
+
+  const result = await runOsc7SetupAction({
+    status: "connected",
+    sessionId: "session-1",
+    setupCommand: "printf setup-script",
+    setupOsc7Tracking: async () => ({
+      success: false,
+      stdout: `${OSC7_SETUP_OTHER_USER_MARKER}bash\n`,
+      stderr: "Netcatty OSC 7 setup: the active terminal shell belongs to another user\n",
+      code: 5,
+      error: "Netcatty OSC 7 setup: the active terminal shell belongs to another user",
+    }),
+    writeToSession: (sessionId, data, options) => {
+      writes.push({ sessionId, data, automated: options?.automated });
+    },
+    writeLocalTerminalData: (data) => {
+      localData.push(data);
+    },
+  });
+
+  assert.equal(result.success, true);
+  assert.equal(result.sentToTerminal, true);
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].sessionId, "session-1");
+  assert.equal(writes[0].automated, true);
+  assert.match(writes[0].data, /NETCATTY_OSC7_FORCE_SHELL=bash/);
+  assert.match(writes[0].data, /\.bashrc/);
+  assert.deepEqual(localData, []);
+});
+
+test("runOsc7SetupAction reports unsupported user-switched shells instead of typing", async () => {
+  const writes: string[] = [];
+
+  const result = await runOsc7SetupAction({
+    status: "connected",
+    sessionId: "session-1",
+    setupCommand: "printf setup-script",
+    setupOsc7Tracking: async () => ({
+      success: false,
+      stdout: `${OSC7_SETUP_OTHER_USER_MARKER}dash\n`,
+      stderr: "",
+      code: 5,
+    }),
+    writeToSession: (_sessionId, data) => {
+      writes.push(data);
+    },
+  });
+
+  assert.equal(result.success, false);
+  assert.match(result.error || "", /does not support/);
+  assert.deepEqual(writes, []);
+});
+
 test("runOsc7SetupAction fails without reload metadata instead of reporting a partial setup", async () => {
   const writes: string[] = [];
   const localData: string[] = [];
@@ -205,6 +263,76 @@ test("buildOsc7SetupExecCommand configures bash through a background exec shell"
     assert.match(output, new RegExp(`__NETCATTY_OSC7_SETUP_CONFIG__=${home.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/\\.bashrc`));
     const bashrc = readFileSync(join(home, ".bashrc"), "utf8");
     assert.equal(markerCount(bashrc), 2);
+  });
+});
+
+test("buildOsc7TypedSetupCommand configures bash without leaking setup markers", () => {
+  withTempHome("netcatty-osc7-typed-bash-", (home) => {
+    const command = buildOsc7TypedSetupCommand("bash").replace(/\r/g, "\n");
+    const output = execFileSync("/bin/bash", ["-c", command], {
+      env: { ...process.env, HOME: home, SHELL: "/bin/bash", ZDOTDIR: "", XDG_CONFIG_HOME: "" },
+      stdio: "pipe",
+    }).toString("utf8");
+
+    const bashrc = readFileSync(join(home, ".bashrc"), "utf8");
+    assert.equal(markerCount(bashrc), 2);
+    assert.match(bashrc, /PROMPT_COMMAND/);
+    assert.doesNotMatch(output, /__NETCATTY_OSC7_SETUP_SHELL__|__NETCATTY_OSC7_SETUP_CONFIG__/);
+    assert.ok(output.includes("\u001b]7;file://"), "expected OSC 7 output");
+  });
+});
+
+test("buildOsc7TypedSetupCommand stays idempotent for bash", () => {
+  withTempHome("netcatty-osc7-typed-bash-idempotent-", (home) => {
+    const command = buildOsc7TypedSetupCommand("bash").replace(/\r/g, "\n");
+    const env = { ...process.env, HOME: home, SHELL: "/bin/bash", ZDOTDIR: "", XDG_CONFIG_HOME: "" };
+    execFileSync("/bin/bash", ["-c", command], { env, stdio: "pipe" });
+    execFileSync("/bin/bash", ["-c", command], { env, stdio: "pipe" });
+
+    assert.equal(markerCount(readFileSync(join(home, ".bashrc"), "utf8")), 2);
+  });
+});
+
+test("buildOsc7TypedSetupCommand configures zsh through its typed fallback", (t) => {
+  const zshPath = existingShells(["/bin/zsh", "/usr/bin/zsh"])[0];
+  if (!zshPath) {
+    t.skip("zsh is not installed on this runner");
+    return;
+  }
+
+  withTempHome("netcatty-osc7-typed-zsh-", (home) => {
+    const zdotdir = join(home, ".config", "zsh");
+    const command = buildOsc7TypedSetupCommand("zsh").replace(/\r/g, "\n");
+    const output = execFileSync(zshPath, ["-c", command], {
+      env: { ...process.env, HOME: home, SHELL: zshPath, ZDOTDIR: zdotdir, XDG_CONFIG_HOME: "" },
+      stdio: "pipe",
+    }).toString("utf8");
+
+    const zshrc = readFileSync(join(zdotdir, ".zshrc"), "utf8");
+    assert.equal(markerCount(zshrc), 2);
+    assert.match(zshrc, /precmd_functions/);
+    assert.ok(output.includes("\u001b]7;file://"), "expected OSC 7 output");
+  });
+});
+
+test("buildOsc7TypedSetupCommand configures fish through its typed fallback", (t) => {
+  const fishPath = existingShells(["/opt/homebrew/bin/fish", "/usr/bin/fish"])[0];
+  if (!fishPath) {
+    t.skip("fish is not installed on this runner");
+    return;
+  }
+
+  withTempHome("netcatty-osc7-typed-fish-", (home) => {
+    const command = buildOsc7TypedSetupCommand("fish").replace(/\r/g, "\n");
+    const output = execFileSync(fishPath, ["-c", command], {
+      env: { ...process.env, HOME: home, SHELL: fishPath, ZDOTDIR: "", XDG_CONFIG_HOME: "" },
+      stdio: "pipe",
+    }).toString("utf8");
+
+    const fishConfig = readFileSync(join(home, ".config", "fish", "config.fish"), "utf8");
+    assert.equal(markerCount(fishConfig), 2);
+    assert.match(fishConfig, /fish_prompt/);
+    assert.ok(output.includes("\u001b]7;file://"), "expected OSC 7 output");
   });
 });
 

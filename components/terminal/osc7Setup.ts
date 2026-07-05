@@ -8,6 +8,11 @@ export const OSC7_SETUP_TARGETS = [
 
 export const OSC7_SETUP_SHELL_MARKER = "__NETCATTY_OSC7_SETUP_SHELL__=";
 export const OSC7_SETUP_CONFIG_MARKER = "__NETCATTY_OSC7_SETUP_CONFIG__=";
+// Emitted when the silent exec-channel setup finds the active terminal shell
+// owned by another user (after `su` / `sudo su`); the exec channel cannot
+// configure that shell, so the renderer retypes the setup inside the terminal
+// where it runs as the target user (#1942).
+export const OSC7_SETUP_OTHER_USER_MARKER = "__NETCATTY_OSC7_SETUP_OTHER_USER_SHELL__=";
 
 export type Osc7SetupActionContext = {
   protocol?: string;
@@ -31,6 +36,8 @@ export type Osc7SetupRunResult = {
   code?: number | null;
   error?: string;
   reloadCommand?: string;
+  /** Setup was retyped into the terminal for a user-switched (su/sudo) shell. */
+  sentToTerminal?: boolean;
 };
 
 export type RunOsc7SetupActionOptions = {
@@ -97,6 +104,7 @@ const POSIX_SETUP_SCRIPT = String.raw`set -eu
 marker="# >>> Netcatty OSC 7 cwd tracking >>>"
 SELF=$$
 expected_cwd="${DOLLAR}{NETCATTY_OSC7_EXPECTED_CWD:-}"
+forced_shell="${DOLLAR}{NETCATTY_OSC7_FORCE_SHELL:-}"
 
 find_login_shell() {
   _shell=$(ps -e -o pid=,ppid=,tty=,comm= 2>/dev/null | awk -v pp="$1" -v self="$SELF" '
@@ -158,11 +166,26 @@ read_proc_env_value() {
 
 active_shell_pid=""
 login_shell_pid=""
-if [ -d /proc ]; then
+if [ -z "$forced_shell" ] && [ -d /proc ]; then
   login_shell_pid=$(find_login_shell "$PPID" || true)
   if [ -n "$login_shell_pid" ]; then
     active_shell_pid=$(find_active_shell "$login_shell_pid" || true)
     [ -n "$active_shell_pid" ] || active_shell_pid="$login_shell_pid"
+  fi
+fi
+
+# After su / sudo su the foreground shell belongs to another user. This exec
+# channel runs as the login user, so it can neither verify nor configure that
+# shell (ptrace-scoped /proc access). Report the target shell so the caller
+# can retype the setup inside the terminal, where it runs as that user (#1942).
+if [ -n "$active_shell_pid" ]; then
+  active_uid=$(sed -n "s/^Uid:[[:space:]]*\([0-9]*\).*/\1/p" "/proc/$active_shell_pid/status" 2>/dev/null | head -n1 || true)
+  self_uid=$(id -u 2>/dev/null || true)
+  if [ -n "$active_uid" ] && [ -n "$self_uid" ] && [ "$active_uid" != "$self_uid" ]; then
+    other_shell=$(cat "/proc/$active_shell_pid/comm" 2>/dev/null | sed "s/^-//" | tr -d "[:space:]" || true)
+    printf '%s%s\n' '${OSC7_SETUP_OTHER_USER_MARKER}' "${DOLLAR}{other_shell:-unknown}"
+    printf "Netcatty OSC 7 setup: the active terminal shell belongs to another user\n" >&2
+    exit 5
   fi
 fi
 
@@ -205,6 +228,9 @@ case "$parent_shell" in
 esac
 case "$active_comm" in
   bash|zsh|fish) shell_name="$active_comm" ;;
+esac
+case "$forced_shell" in
+  bash|zsh|fish) shell_name="$forced_shell" ;;
 esac
 
 home_dir="${DOLLAR}{active_home:-$HOME}"
@@ -293,8 +319,10 @@ NETCATTY_OSC7_FISH
   esac
 fi
 
-printf '%s%s\n' '${OSC7_SETUP_SHELL_MARKER}' "$shell_name"
-printf '%s%s\n' '${OSC7_SETUP_CONFIG_MARKER}' "$config"
+if [ -z "$forced_shell" ]; then
+  printf '%s%s\n' '${OSC7_SETUP_SHELL_MARKER}' "$shell_name"
+  printf '%s%s\n' '${OSC7_SETUP_CONFIG_MARKER}' "$config"
+fi
 host=$(hostname 2>/dev/null || printf localhost)
 printf '\033]7;file://%s%s\a' "$host" "$(__netcatty_osc7_url_path "$PWD")"`;
 
@@ -306,6 +334,25 @@ export const buildOsc7SetupExecCommand = (expectedCwd?: string): string => {
     ? `env NETCATTY_OSC7_EXPECTED_CWD=${quoteForSingleQuotedShellString(expectedCwd)} `
     : "";
   return `exec ${envPrefix}sh -c ${quoteForSingleQuotedShellString(POSIX_SETUP_SCRIPT)}\n`;
+};
+
+/**
+ * Setup command typed into the interactive terminal itself. Used when the
+ * silent exec-channel setup cannot configure the active shell because it is
+ * owned by another user (after `su` / `sudo su`, #1942): typed input runs as
+ * that user, so the config lands in the target user's rc file and OSC 7
+ * reporting resumes for this and every future user-switched shell.
+ */
+export const buildOsc7TypedSetupCommand = (shell: Osc7SetupShell): string => {
+  const pipe = `printf "%s\\n" ${quoteForSingleQuotedShellString(POSIX_SETUP_SCRIPT)} | env NETCATTY_OSC7_FORCE_SHELL=${shell} sh`;
+  if (shell === "bash") {
+    return `${pipe}; . "${DOLLAR}HOME/.bashrc" >/dev/null 2>&1; osc7_cwd 2>/dev/null; true; ${BASH_DELETE_MARKED_HISTORY_COMMAND}\r`;
+  }
+  if (shell === "zsh") {
+    // Leading space keeps the command out of history when HIST_IGNORE_SPACE is set.
+    return ` ${pipe}; . "${DOLLAR}{ZDOTDIR:-${DOLLAR}HOME}/.zshrc" >/dev/null 2>&1; osc7_cwd 2>/dev/null; true\r`;
+  }
+  return ` ${pipe}; source (test -n "${DOLLAR}XDG_CONFIG_HOME"; and echo "${DOLLAR}XDG_CONFIG_HOME"; or echo "${DOLLAR}HOME/.config")/fish/config.fish >/dev/null 2>&1; __netcatty_osc7_cwd 2>/dev/null; true\r`;
 };
 
 const isOsc7SetupShell = (value: string): value is Osc7SetupShell =>
@@ -322,6 +369,10 @@ export const parseOsc7SetupMetadata = (stdout: string): Osc7SetupMetadata | null
   if (!shell || !isOsc7SetupShell(shell) || !configPath) return null;
   return { shell, configPath };
 };
+
+/** Shell of the other-user foreground shell reported by the setup script, if any. */
+export const parseOsc7SetupOtherUserShell = (stdout: string): string | null =>
+  readMarkerLine(stdout, OSC7_SETUP_OTHER_USER_MARKER);
 
 export const extractOsc7SetupTerminalData = (stdout: string): string => {
   const escape = String.fromCharCode(0x1b);
@@ -376,6 +427,27 @@ export const runOsc7SetupAction = async ({
   }
 
   const result = await setupOsc7Tracking(sessionId, setupCommand);
+
+  // The exec channel cannot configure a shell owned by another user (after
+  // su / sudo su). Fall back to typing the setup into the terminal, where it
+  // runs as that user (#1942).
+  const otherUserShell = parseOsc7SetupOtherUserShell(result.stdout || "");
+  if (otherUserShell) {
+    if (!isOsc7SetupShell(otherUserShell)) {
+      return {
+        ...result,
+        success: false,
+        error: `Directory tracking does not support the current shell (${otherUserShell})`,
+      };
+    }
+    const typedCommand = buildOsc7TypedSetupCommand(otherUserShell);
+    writeToSession(sessionId, typedCommand, {
+      automated: true,
+      logRewrite: { sentCommand: typedCommand, displayCommand: "" },
+    });
+    return { ...result, success: true, sentToTerminal: true };
+  }
+
   if (!result.success || (typeof result.code === "number" && result.code !== 0)) {
     return {
       ...result,
