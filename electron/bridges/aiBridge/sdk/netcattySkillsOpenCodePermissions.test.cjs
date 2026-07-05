@@ -4,6 +4,7 @@ const path = require("node:path");
 
 const {
   buildNetcattySkillsOpenCodePathAllowlist,
+  buildOpenCodeNativeSkillEnvDenyPatterns,
   buildOpenCodeNativeSkillPermissionPatterns,
   buildOpenCodeNativeSkillsPermissionRules,
   buildOpenCodeSkillsPermissionRules,
@@ -28,6 +29,16 @@ function openCodeWildcardMatch(input, pattern) {
 
 function matchesAnyPattern(input, patterns) {
   return patterns.some((pattern) => openCodeWildcardMatch(input, pattern));
+}
+
+// Mirrors OpenCode's Permission.evaluate: rules come from Object.entries of
+// the config map in insertion order, and the last matching rule wins.
+function evaluateOpenCodeRuleMap(input, ruleMap) {
+  let action;
+  for (const [pattern, ruleAction] of Object.entries(ruleMap)) {
+    if (openCodeWildcardMatch(input, pattern)) action = ruleAction;
+  }
+  return action;
 }
 
 test("toOpenCodeFileParentGlob maps files to parent directory globs", () => {
@@ -163,6 +174,23 @@ test("buildOpenCodeNativeSkillsPermissionRules keeps OpenCode native skill dirs 
     assert.equal(rules.external_directory[pattern], "allow");
     assert.equal(rules.read[pattern], "allow");
   }
+  for (const pattern of buildOpenCodeNativeSkillEnvDenyPatterns()) {
+    assert.equal(rules.read[pattern], "deny");
+  }
+});
+
+test("native skill read rules re-deny dot-env files inside skill dirs (last match wins)", () => {
+  const { read } = buildOpenCodeNativeSkillsPermissionRules();
+
+  // Regular skill files stay allowed.
+  assert.equal(evaluateOpenCodeRuleMap("../../.opencode/skills/foo/references/doc.md", read), "allow");
+  assert.equal(evaluateOpenCodeRuleMap("C:/Users/me/.config/opencode/skills/foo/SKILL.md", read), "allow");
+
+  // Dot-env secret files under skill dirs must not be silently readable.
+  assert.equal(evaluateOpenCodeRuleMap("../../.opencode/skills/foo/.env", read), "deny");
+  assert.equal(evaluateOpenCodeRuleMap("C:/Users/me/.config/opencode/skills/foo/.env", read), "deny");
+  assert.equal(evaluateOpenCodeRuleMap("/home/me/.claude/skills/foo/.env.local", read), "deny");
+  assert.equal(evaluateOpenCodeRuleMap("..\\..\\.agents\\skills\\foo\\references\\prod.env", read), "deny");
 });
 
 test("native skill patterns match OpenCode permission requests for skill files (issue #1939)", () => {

@@ -102,6 +102,17 @@ function buildOpenCodeNativeSkillPermissionPatterns() {
   ]);
 }
 
+// OpenCode's default rules gate `.env` secret files behind approval. The
+// broad skill-directory read allows above would win over those defaults
+// (last matching rule wins), so re-deny dot-env files inside skill dirs
+// after the allow entries to keep secret-file protection intact.
+function buildOpenCodeNativeSkillEnvDenyPatterns() {
+  return OPENCODE_NATIVE_SKILL_DIR_SUFFIXES.flatMap((suffix) => [
+    `*${suffix}/**.env`,
+    `*${suffix}/**.env.*`,
+  ]);
+}
+
 // Base rules shared by every tool-integration mode so OpenCode's native
 // skills keep working: allow loading skills and reading their files while
 // still denying all other external directory access.
@@ -111,6 +122,9 @@ function buildOpenCodeNativeSkillsPermissionRules() {
   for (const pattern of buildOpenCodeNativeSkillPermissionPatterns()) {
     external_directory[pattern] = "allow";
     read[pattern] = "allow";
+  }
+  for (const pattern of buildOpenCodeNativeSkillEnvDenyPatterns()) {
+    read[pattern] = "deny";
   }
   return {
     skill: "allow",
@@ -164,6 +178,7 @@ function buildOpenCodeSkillsPermissionRules(pathAllowlist = []) {
 
 module.exports = {
   buildNetcattySkillsOpenCodePathAllowlist,
+  buildOpenCodeNativeSkillEnvDenyPatterns,
   buildOpenCodeNativeSkillPermissionPatterns,
   buildOpenCodeNativeSkillsPermissionRules,
   buildOpenCodeSkillsPermissionRules,
