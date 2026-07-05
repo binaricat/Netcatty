@@ -6,6 +6,7 @@ const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 const { mcpEnvPairsToObject } = require("./injectMcp.cjs");
 const {
+  buildOpenCodeNativeSkillsPermissionRules,
   buildOpenCodeSkillsPermissionRules,
 } = require("./netcattySkillsOpenCodePermissions.cjs");
 
@@ -64,7 +65,10 @@ function buildOpenCodeConfig({ model, injectedMcpServers, toolIntegrationMode, s
     edit: "deny",
     bash: allowBash ? "allow" : "deny",
     webfetch: "deny",
-    external_directory: "deny",
+    // Keep external access locked down, but let OpenCode's native skills
+    // (e.g. ~/.opencode/skills, ~/.config/opencode/skills) read their own
+    // reference files in every mode (issue #1939).
+    ...buildOpenCodeNativeSkillsPermissionRules(),
   };
   if (allowBash && Array.isArray(skillsPathAllowlist) && skillsPathAllowlist.length > 0) {
     Object.assign(permission, buildOpenCodeSkillsPermissionRules(skillsPathAllowlist));

@@ -4,12 +4,31 @@ const path = require("node:path");
 
 const {
   buildNetcattySkillsOpenCodePathAllowlist,
+  buildOpenCodeNativeSkillPermissionPatterns,
+  buildOpenCodeNativeSkillsPermissionRules,
   buildOpenCodeSkillsPermissionRules,
   toOpenCodeDirectoryPermissionPatterns,
   toOpenCodeDirectoryGlob,
   toOpenCodeFileParentPermissionPatterns,
   toOpenCodeFileParentGlob,
 } = require("./netcattySkillsOpenCodePermissions.cjs");
+
+// Mirrors OpenCode's Wildcard.match (packages/core/src/util/wildcard.ts):
+// inputs and patterns are normalized to forward slashes, "*" matches any
+// run of characters, and matching is anchored to the whole string.
+function openCodeWildcardMatch(input, pattern) {
+  const normalized = input.replaceAll("\\", "/");
+  const escaped = pattern
+    .replaceAll("\\", "/")
+    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+    .replace(/\*/g, ".*")
+    .replace(/\?/g, ".");
+  return new RegExp(`^${escaped}$`, "s").test(normalized);
+}
+
+function matchesAnyPattern(input, patterns) {
+  return patterns.some((pattern) => openCodeWildcardMatch(input, pattern));
+}
 
 test("toOpenCodeFileParentGlob maps files to parent directory globs", () => {
   assert.equal(
@@ -125,13 +144,45 @@ test("buildOpenCodeSkillsPermissionRules allowlists Netcatty CLI paths and denie
   assert.equal(rules.bash, "allow");
   assert.equal(rules.skill, "allow");
   assert.equal(rules.list, "deny");
-  assert.deepEqual(rules.external_directory, {
-    "/Applications/Netcatty.app/Contents/MacOS/**": "allow",
-    "/Users/me/Library/Application Support/netcatty/netcatty-tool-cli/**": "allow",
-    "*": "deny",
-  });
-  assert.deepEqual(rules.read, {
-    "/Applications/Netcatty.app/Contents/MacOS/**": "allow",
-    "/Users/me/Library/Application Support/netcatty/netcatty-tool-cli/**": "allow",
-  });
+  assert.equal(rules.external_directory["*"], "deny");
+  assert.equal(rules.external_directory["/Applications/Netcatty.app/Contents/MacOS/**"], "allow");
+  assert.equal(rules.external_directory["/Users/me/Library/Application Support/netcatty/netcatty-tool-cli/**"], "allow");
+  assert.equal(rules.read["/Applications/Netcatty.app/Contents/MacOS/**"], "allow");
+  assert.equal(rules.read["/Users/me/Library/Application Support/netcatty/netcatty-tool-cli/**"], "allow");
+  assert.equal(rules.read["*"], undefined);
+  // Allowlist entries must come after the catch-all deny so OpenCode's
+  // last-matching-rule-wins evaluation keeps them effective.
+  assert.equal(Object.keys(rules.external_directory)[0], "*");
+});
+
+test("buildOpenCodeNativeSkillsPermissionRules keeps OpenCode native skill dirs readable", () => {
+  const rules = buildOpenCodeNativeSkillsPermissionRules();
+  assert.equal(rules.skill, "allow");
+  assert.equal(rules.external_directory["*"], "deny");
+  for (const pattern of buildOpenCodeNativeSkillPermissionPatterns()) {
+    assert.equal(rules.external_directory[pattern], "allow");
+    assert.equal(rules.read[pattern], "allow");
+  }
+});
+
+test("native skill patterns match OpenCode permission requests for skill files (issue #1939)", () => {
+  const patterns = buildOpenCodeNativeSkillPermissionPatterns();
+
+  // external_directory asks with an absolute parent-directory glob
+  // (forward slashes on Windows after FSUtil.normalizePathPattern).
+  assert.equal(matchesAnyPattern("C:/Users/me/.opencode/skills/my-skill/references/*", patterns), true);
+  assert.equal(matchesAnyPattern("/home/me/.config/opencode/skills/my-skill/*", patterns), true);
+  assert.equal(matchesAnyPattern("/Users/me/.claude/skills/my-skill/references/*", patterns), true);
+  assert.equal(matchesAnyPattern("/Users/me/.agents/skills/my-skill/*", patterns), true);
+  assert.equal(matchesAnyPattern("/Users/me/.cache/opencode/skills/abc123/my-skill/*", patterns), true);
+
+  // read asks with a worktree-relative path (Windows backslashes included).
+  assert.equal(matchesAnyPattern("..\\..\\.opencode\\skills\\my-skill\\references\\doc.md", patterns), true);
+  assert.equal(matchesAnyPattern("../.config/opencode/skills/my-skill/SKILL.md", patterns), true);
+  assert.equal(matchesAnyPattern(".opencode/skills/my-skill/references/doc.md", patterns), true);
+
+  // unrelated external paths stay denied
+  assert.equal(matchesAnyPattern("C:/Users/me/Documents/secret.txt/*", patterns), false);
+  assert.equal(matchesAnyPattern("../../etc/passwd", patterns), false);
+  assert.equal(matchesAnyPattern("C:/Users/me/.ssh/id_rsa", patterns), false);
 });

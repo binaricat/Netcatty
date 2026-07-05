@@ -72,6 +72,53 @@ function dedupePatterns(patterns) {
   return [...new Set(patterns.filter(Boolean))];
 }
 
+// OpenCode discovers native agent skills from these well-known directories:
+// its global config dirs (~/.opencode and ~/.config/opencode, both "skill"
+// and "skills" spellings), Claude/agents-compatible dirs, project-level
+// .opencode/.claude/.agents dirs, and the remote-skill download cache.
+// Reads inside them must stay allowed even though Netcatty otherwise locks
+// external directory access down, or loading a skill's reference files fails
+// with an OpenCode permission error (issue #1939).
+const OPENCODE_NATIVE_SKILL_DIR_SUFFIXES = [
+  ".opencode/skill",
+  ".opencode/skills",
+  ".config/opencode/skill",
+  ".config/opencode/skills",
+  ".claude/skills",
+  ".agents/skills",
+  ".cache/opencode/skills",
+];
+
+// OpenCode's `read` permission checks match worktree-relative paths (e.g.
+// "../../.opencode/skills/foo/references/doc.md") while `external_directory`
+// checks match absolute directory globs ("C:/Users/me/.opencode/skills/foo/*").
+// Anchoring each well-known suffix behind a leading wildcard covers both
+// forms on every platform (OpenCode normalizes "\\" to "/" before matching).
+function buildOpenCodeNativeSkillPermissionPatterns() {
+  return OPENCODE_NATIVE_SKILL_DIR_SUFFIXES.flatMap((suffix) => [
+    `*${suffix}`,
+    `*${suffix}/*`,
+    `*${suffix}/**`,
+  ]);
+}
+
+// Base rules shared by every tool-integration mode so OpenCode's native
+// skills keep working: allow loading skills and reading their files while
+// still denying all other external directory access.
+function buildOpenCodeNativeSkillsPermissionRules() {
+  const external_directory = { "*": "deny" };
+  const read = {};
+  for (const pattern of buildOpenCodeNativeSkillPermissionPatterns()) {
+    external_directory[pattern] = "allow";
+    read[pattern] = "allow";
+  }
+  return {
+    skill: "allow",
+    read,
+    external_directory,
+  };
+}
+
 function buildNetcattySkillsOpenCodePathAllowlist({
   launcherPath,
   cliScriptPath,
@@ -98,8 +145,7 @@ function buildNetcattySkillsOpenCodePathAllowlist({
 }
 
 function buildOpenCodeSkillsPermissionRules(pathAllowlist = []) {
-  const external_directory = { "*": "deny" };
-  const read = {};
+  const { read, external_directory } = buildOpenCodeNativeSkillsPermissionRules();
   for (const pattern of pathAllowlist) {
     external_directory[pattern] = "allow";
     read[pattern] = "allow";
@@ -118,6 +164,8 @@ function buildOpenCodeSkillsPermissionRules(pathAllowlist = []) {
 
 module.exports = {
   buildNetcattySkillsOpenCodePathAllowlist,
+  buildOpenCodeNativeSkillPermissionPatterns,
+  buildOpenCodeNativeSkillsPermissionRules,
   buildOpenCodeSkillsPermissionRules,
   toOpenCodeDirectoryPermissionPatterns,
   toOpenCodeDirectoryGlob,

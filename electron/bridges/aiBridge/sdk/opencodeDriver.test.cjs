@@ -50,12 +50,15 @@ test("buildOpenCodeConfig isolates local tools and injects Netcatty MCP", () => 
   });
 
   assert.equal(cfg.model, "openai/gpt-5.1");
-  assert.deepEqual(cfg.permission, {
-    edit: "deny",
-    bash: "deny",
-    webfetch: "deny",
-    external_directory: "deny",
-  });
+  assert.equal(cfg.permission.edit, "deny");
+  assert.equal(cfg.permission.bash, "deny");
+  assert.equal(cfg.permission.webfetch, "deny");
+  assert.equal(cfg.permission.skill, "allow");
+  assert.equal(cfg.permission.external_directory["*"], "deny");
+  // Native OpenCode skill directories stay readable in MCP mode (issue #1939).
+  assert.equal(cfg.permission.external_directory["*.opencode/skills/**"], "allow");
+  assert.equal(cfg.permission.read["*.config/opencode/skills/**"], "allow");
+  assert.equal(cfg.permission.read["*"], undefined);
   assert.deepEqual(cfg.mcp["netcatty-remote-hosts"], {
     type: "local",
     command: ["/abs/electron", "/abs/server.cjs"],
@@ -76,11 +79,15 @@ test("buildOpenCodeConfig allowlists Netcatty CLI paths in skills mode", () => {
   assert.equal(cfg.permission.bash, "allow");
   assert.equal(cfg.permission.skill, "allow");
   assert.equal(cfg.permission.list, "deny");
-  assert.deepEqual(cfg.permission.external_directory, {
-    "/Applications/Netcatty.app/Contents/MacOS/**": "allow",
-    "/Users/me/Library/Application Support/netcatty/netcatty-tool-cli/**": "allow",
-    "*": "deny",
-  });
+  assert.equal(cfg.permission.external_directory["*"], "deny");
+  assert.equal(cfg.permission.external_directory["/Applications/Netcatty.app/Contents/MacOS/**"], "allow");
+  assert.equal(
+    cfg.permission.external_directory["/Users/me/Library/Application Support/netcatty/netcatty-tool-cli/**"],
+    "allow",
+  );
+  // Native OpenCode skill directories stay readable in skills mode too (issue #1939).
+  assert.equal(cfg.permission.external_directory["*.opencode/skills/**"], "allow");
+  assert.equal(cfg.permission.read["*.claude/skills/**"], "allow");
 });
 
 test("buildOpenCodePromptParts includes supported images as file parts", () => {
