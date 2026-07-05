@@ -14,6 +14,7 @@ import {
   buildOsc7SetupExecCommand,
   buildOsc7StageScriptCommand,
   buildOsc7TypedSetupCommand,
+  getOsc7StagedScriptSha256,
   parseOsc7SetupStagedPath,
   runOsc7SetupAction,
   shouldOfferOsc7SetupAction,
@@ -329,18 +330,20 @@ const withStagedSetupScript = (fn: (scriptPath: string) => void) => {
   }
 };
 
-test("buildOsc7TypedSetupCommand stays a single line for reliable history cleanup", () => {
+test("buildOsc7TypedSetupCommand stays a single line for reliable history cleanup", async () => {
+  const sha256 = await getOsc7StagedScriptSha256();
   for (const shell of ["bash", "zsh", "fish"] as const) {
-    const command = buildOsc7TypedSetupCommand(shell, "/tmp/.netcatty-osc7-setup.abc123");
+    const command = buildOsc7TypedSetupCommand(shell, "/tmp/.netcatty-osc7-setup.abc123", sha256);
     assert.ok(command.endsWith("\r"), shell);
     assert.doesNotMatch(command.slice(0, -1), /[\r\n]/, shell);
   }
 });
 
-test("buildOsc7TypedSetupCommand configures bash and removes the staged script", () => {
+test("buildOsc7TypedSetupCommand configures bash and removes the staged script", async () => {
+  const sha256 = await getOsc7StagedScriptSha256();
   withTempHome("netcatty-osc7-typed-bash-", (home) => {
     withStagedSetupScript((scriptPath) => {
-      const command = buildOsc7TypedSetupCommand("bash", scriptPath).replace(/\r/g, "\n");
+      const command = buildOsc7TypedSetupCommand("bash", scriptPath, sha256).replace(/\r/g, "\n");
       const output = execFileSync("/bin/bash", ["-c", command], {
         env: { ...process.env, HOME: home, SHELL: "/bin/bash", ZDOTDIR: "", XDG_CONFIG_HOME: "" },
         stdio: "pipe",
@@ -351,12 +354,33 @@ test("buildOsc7TypedSetupCommand configures bash and removes the staged script",
       assert.match(bashrc, /PROMPT_COMMAND/);
       assert.doesNotMatch(output, /__NETCATTY_OSC7_SETUP_SHELL__|__NETCATTY_OSC7_SETUP_CONFIG__/);
       assert.ok(output.includes("\u001b]7;file://"), "expected OSC 7 output");
-      assert.equal(existsSync(scriptPath), false, "staged script should remove itself");
+      assert.equal(existsSync(scriptPath), false, "staged script should be removed");
     });
   });
 });
 
-test("buildOsc7TypedSetupCommand does not leave the typed runner in bash history", () => {
+test("buildOsc7TypedSetupCommand refuses to run a tampered staged script", async () => {
+  const sha256 = await getOsc7StagedScriptSha256();
+  withTempHome("netcatty-osc7-typed-tampered-", (home) => {
+    withStagedSetupScript((scriptPath) => {
+      writeFileSync(scriptPath, `echo pwned > "$HOME/pwned"\n`);
+      const command = buildOsc7TypedSetupCommand("bash", scriptPath, sha256).replace(/\r/g, "\n");
+      const result = spawnSync("/bin/bash", ["-c", command], {
+        env: { ...process.env, HOME: home, SHELL: "/bin/bash", ZDOTDIR: "", XDG_CONFIG_HOME: "" },
+        encoding: "utf8",
+      });
+
+      assert.equal(result.status, 0, result.stderr || result.stdout);
+      assert.match(result.stderr, /verification failed/);
+      assert.equal(existsSync(join(home, "pwned")), false, "tampered script must not run");
+      assert.equal(existsSync(join(home, ".bashrc")), false);
+      assert.equal(existsSync(scriptPath), false, "staged script should be removed before verification");
+    });
+  });
+});
+
+test("buildOsc7TypedSetupCommand does not leave the typed runner in bash history", async () => {
+  const sha256 = await getOsc7StagedScriptSha256();
   withTempHome("netcatty-osc7-typed-history-bash-", (home) => {
     withStagedSetupScript((scriptPath) => {
       const dumpPath = join(home, "bash-history-dump");
@@ -370,7 +394,7 @@ test("buildOsc7TypedSetupCommand does not leave the typed runner in bash history
           HISTFILE: join(home, ".bash_history"),
           SHELL: "/bin/bash",
         },
-        input: `echo keepme\n${buildOsc7TypedSetupCommand("bash", scriptPath)}`,
+        input: `echo keepme\n${buildOsc7TypedSetupCommand("bash", scriptPath, sha256)}`,
       });
 
       assert.match(output, /echo keepme/);
@@ -379,12 +403,13 @@ test("buildOsc7TypedSetupCommand does not leave the typed runner in bash history
   });
 });
 
-test("buildOsc7TypedSetupCommand stays idempotent for bash", () => {
+test("buildOsc7TypedSetupCommand stays idempotent for bash", async () => {
+  const sha256 = await getOsc7StagedScriptSha256();
   withTempHome("netcatty-osc7-typed-bash-idempotent-", (home) => {
     const env = { ...process.env, HOME: home, SHELL: "/bin/bash", ZDOTDIR: "", XDG_CONFIG_HOME: "" };
     for (let run = 0; run < 2; run += 1) {
       withStagedSetupScript((scriptPath) => {
-        const command = buildOsc7TypedSetupCommand("bash", scriptPath).replace(/\r/g, "\n");
+        const command = buildOsc7TypedSetupCommand("bash", scriptPath, sha256).replace(/\r/g, "\n");
         execFileSync("/bin/bash", ["-c", command], { env, stdio: "pipe" });
       });
     }
@@ -393,17 +418,18 @@ test("buildOsc7TypedSetupCommand stays idempotent for bash", () => {
   });
 });
 
-test("buildOsc7TypedSetupCommand honors shell-local unexported zsh ZDOTDIR", (t) => {
+test("buildOsc7TypedSetupCommand honors shell-local unexported zsh ZDOTDIR", async (t) => {
   const zshPath = existingShells(["/bin/zsh", "/usr/bin/zsh"])[0];
   if (!zshPath) {
     t.skip("zsh is not installed on this runner");
     return;
   }
 
+  const sha256 = await getOsc7StagedScriptSha256();
   withTempHome("netcatty-osc7-typed-zsh-", (home) => {
     const zdotdir = join(home, ".config", "zsh");
     withStagedSetupScript((scriptPath) => {
-      const command = buildOsc7TypedSetupCommand("zsh", scriptPath).replace(/\r/g, "\n");
+      const command = buildOsc7TypedSetupCommand("zsh", scriptPath, sha256).replace(/\r/g, "\n");
       // ZDOTDIR is a shell-local (unexported) parameter, like a user setting
       // it in .zshenv without export; the typed wrapper must forward it.
       const output = execFileSync(zshPath, ["-c", `ZDOTDIR=${JSON.stringify(zdotdir)}; ${command}`], {
@@ -420,16 +446,17 @@ test("buildOsc7TypedSetupCommand honors shell-local unexported zsh ZDOTDIR", (t)
   });
 });
 
-test("buildOsc7TypedSetupCommand configures fish through its typed fallback", (t) => {
+test("buildOsc7TypedSetupCommand configures fish through its typed fallback", async (t) => {
   const fishPath = existingShells(["/opt/homebrew/bin/fish", "/usr/bin/fish"])[0];
   if (!fishPath) {
     t.skip("fish is not installed on this runner");
     return;
   }
 
+  const sha256 = await getOsc7StagedScriptSha256();
   withTempHome("netcatty-osc7-typed-fish-", (home) => {
     withStagedSetupScript((scriptPath) => {
-      const command = buildOsc7TypedSetupCommand("fish", scriptPath).replace(/\r/g, "\n");
+      const command = buildOsc7TypedSetupCommand("fish", scriptPath, sha256).replace(/\r/g, "\n");
       const output = execFileSync(fishPath, ["-c", command], {
         env: { ...process.env, HOME: home, SHELL: fishPath, ZDOTDIR: "", XDG_CONFIG_HOME: "" },
         stdio: "pipe",

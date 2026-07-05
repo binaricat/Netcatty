@@ -338,25 +338,59 @@ export const buildOsc7SetupExecCommand = (expectedCwd?: string): string => {
 
 export const OSC7_SETUP_STAGED_MARKER = "__NETCATTY_OSC7_SETUP_STAGED__=";
 
+/** Exact bytes the stage command writes (printf '%s\n' appends the newline). */
+const STAGED_SETUP_SCRIPT_BYTES = `${POSIX_SETUP_SCRIPT}\n`;
+
+let stagedScriptSha256Promise: Promise<string> | null = null;
+
+/**
+ * SHA-256 (hex) of the staged setup script bytes, computed locally so the
+ * typed runner can verify the remote file was not tampered with.
+ */
+export const getOsc7StagedScriptSha256 = (): Promise<string> => {
+  if (!stagedScriptSha256Promise) {
+    stagedScriptSha256Promise = crypto.subtle
+      .digest("SHA-256", new TextEncoder().encode(STAGED_SETUP_SCRIPT_BYTES))
+      .then((digest) =>
+        Array.from(new Uint8Array(digest))
+          .map((byte) => byte.toString(16).padStart(2, "0"))
+          .join(""),
+      );
+  }
+  return stagedScriptSha256Promise;
+};
+
 /**
  * Exec-channel command that stages the setup script into a world-readable
  * remote temp file. Typed fallback (#1942) runs that file instead of pasting
  * the multi-line script into the terminal: the typed command stays a single
  * line, so it is one history entry that the bash cleanup reliably deletes.
- * The staged file removes itself when executed (root can always unlink it;
- * for non-root su targets the sticky bit on /tmp may keep the 0644 file
- * around, which is harmless).
  */
 export const buildOsc7StageScriptCommand = (): string => {
-  const stagedScript = `rm -f -- "${DOLLAR}0" 2>/dev/null || true\n${POSIX_SETUP_SCRIPT}`;
   const stageScript = `set -eu
 umask 022
 file=$(mktemp /tmp/.netcatty-osc7-setup.XXXXXX)
-printf '%s\\n' ${quoteForSingleQuotedShellString(stagedScript)} > "$file"
+printf '%s\\n' ${quoteForSingleQuotedShellString(POSIX_SETUP_SCRIPT)} > "$file"
 chmod 644 "$file"
 printf '%s%s\\n' '${OSC7_SETUP_STAGED_MARKER}' "$file"`;
   return `exec sh -c ${quoteForSingleQuotedShellString(stageScript)}\n`;
 };
+
+/**
+ * POSIX runner that executes the staged script without a TOCTOU window: it
+ * reads the file into memory ONCE, deletes it, verifies the local SHA-256 of
+ * the in-memory copy, and only then pipes that same copy to sh. The staged
+ * file stays writable by the login user until this runs, so a same-uid
+ * process could otherwise swap its contents and have the su-target shell
+ * (e.g. root) execute them.
+ */
+const buildVerifiedStagedRunner = (contentSha256: string): string =>
+  `c=$(cat -- "$1" 2>/dev/null); rm -f -- "$1" 2>/dev/null; `
+  + `h=$(printf "%s\\n" "$c" | sha256sum 2>/dev/null | cut -d" " -f1); `
+  + `[ -n "$h" ] || h=$(printf "%s\\n" "$c" | shasum -a 256 2>/dev/null | cut -d" " -f1); `
+  + `[ -n "$h" ] || h=$(printf "%s\\n" "$c" | openssl dgst -sha256 2>/dev/null | sed "s/^.* //"); `
+  + `if [ "x$h" = "x${contentSha256}" ]; then printf "%s\\n" "$c" | sh; `
+  + `else printf "%s\\n" "Netcatty OSC 7 setup: staged script verification failed" >&2; fi`;
 
 /**
  * Setup command typed into the interactive terminal itself. Used when the
@@ -365,23 +399,29 @@ printf '%s%s\\n' '${OSC7_SETUP_STAGED_MARKER}' "$file"`;
  * that user, so the config lands in the target user's rc file and OSC 7
  * reporting resumes for this and every future user-switched shell.
  *
- * The command runs the staged script file (see buildOsc7StageScriptCommand)
- * and forwards shell-local (possibly unexported) ZDOTDIR / XDG_CONFIG_HOME to
- * the child sh via the NETCATTY_* overrides the setup script already honors,
- * mirroring buildOsc7SetupCommand.
+ * The command hash-verifies and runs the staged script (see
+ * buildOsc7StageScriptCommand / buildVerifiedStagedRunner) inside a POSIX
+ * `sh -c` child, and forwards shell-local (possibly unexported) ZDOTDIR /
+ * XDG_CONFIG_HOME via the NETCATTY_* overrides the setup script already
+ * honors, mirroring buildOsc7SetupCommand.
  */
-export const buildOsc7TypedSetupCommand = (shell: Osc7SetupShell, scriptPath: string): string => {
+export const buildOsc7TypedSetupCommand = (
+  shell: Osc7SetupShell,
+  scriptPath: string,
+  contentSha256: string,
+): string => {
   const quotedPath = quoteForSingleQuotedShellString(scriptPath);
+  const quotedRunner = quoteForSingleQuotedShellString(buildVerifiedStagedRunner(contentSha256));
   if (shell === "bash") {
-    const run = `env NETCATTY_OSC7_FORCE_SHELL=bash sh ${quotedPath}`;
+    const run = `env NETCATTY_OSC7_FORCE_SHELL=bash sh -c ${quotedRunner} sh ${quotedPath}`;
     return `${run}; . "${DOLLAR}HOME/.bashrc" >/dev/null 2>&1; osc7_cwd 2>/dev/null; true; ${BASH_DELETE_MARKED_HISTORY_COMMAND}\r`;
   }
   if (shell === "zsh") {
-    const run = `env NETCATTY_OSC7_FORCE_SHELL=zsh NETCATTY_ZDOTDIR="${DOLLAR}{ZDOTDIR:-}" sh ${quotedPath}`;
+    const run = `env NETCATTY_OSC7_FORCE_SHELL=zsh NETCATTY_ZDOTDIR="${DOLLAR}{ZDOTDIR:-}" sh -c ${quotedRunner} sh ${quotedPath}`;
     // Leading space keeps the command out of history when HIST_IGNORE_SPACE is set.
     return ` ${run}; . "${DOLLAR}{ZDOTDIR:-${DOLLAR}HOME}/.zshrc" >/dev/null 2>&1; osc7_cwd 2>/dev/null; true\r`;
   }
-  const run = `env NETCATTY_OSC7_FORCE_SHELL=fish NETCATTY_XDG_CONFIG_HOME="${DOLLAR}XDG_CONFIG_HOME" sh ${quotedPath}`;
+  const run = `env NETCATTY_OSC7_FORCE_SHELL=fish NETCATTY_XDG_CONFIG_HOME="${DOLLAR}XDG_CONFIG_HOME" sh -c ${quotedRunner} sh ${quotedPath}`;
   return ` ${run}; source (test -n "${DOLLAR}XDG_CONFIG_HOME"; and echo "${DOLLAR}XDG_CONFIG_HOME"; or echo "${DOLLAR}HOME/.config")/fish/config.fish >/dev/null 2>&1; __netcatty_osc7_cwd 2>/dev/null; true\r`;
 };
 
@@ -489,7 +529,8 @@ export const runOsc7SetupAction = async ({
         error: stageResult.error || stageResult.stderr?.trim() || "Directory tracking setup failed",
       };
     }
-    const typedCommand = buildOsc7TypedSetupCommand(otherUserShell, stagedPath);
+    const contentSha256 = await getOsc7StagedScriptSha256();
+    const typedCommand = buildOsc7TypedSetupCommand(otherUserShell, stagedPath, contentSha256);
     writeToSession(sessionId, typedCommand, {
       automated: true,
       logRewrite: { sentCommand: typedCommand, displayCommand: "" },
