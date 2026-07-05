@@ -1,4 +1,9 @@
 /* eslint-disable no-undef */
+// Module-level require on purpose: code inside registerCattyExecHandlers
+// runs under `with (ctx)` where bare `require` resolves to ctx.require
+// (based in electron/bridges/). Requiring here keeps the path unambiguous.
+const { formatSyntheticEcho } = require("../ai/shellUtils.cjs");
+
 function getWorkerExecutionMeta(mcpServerBridge, sessionId, chatSessionId) {
   return mcpServerBridge.getSessionMeta?.(sessionId, chatSessionId) || {};
 }
@@ -161,7 +166,6 @@ function registerCattyExecHandlers(ctx) {
           expectedPrompt: getFreshIdlePrompt(session),
           typedInput: true,
           echoCommand: (rawCommand) => {
-            const { formatSyntheticEcho } = require("./ai/shellUtils.cjs");
             const contents = electronModule?.webContents?.fromId?.(session.webContentsId);
             safeSend(contents, "netcatty:data", {
               sessionId,
