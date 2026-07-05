@@ -336,23 +336,53 @@ export const buildOsc7SetupExecCommand = (expectedCwd?: string): string => {
   return `exec ${envPrefix}sh -c ${quoteForSingleQuotedShellString(POSIX_SETUP_SCRIPT)}\n`;
 };
 
+export const OSC7_SETUP_STAGED_MARKER = "__NETCATTY_OSC7_SETUP_STAGED__=";
+
+/**
+ * Exec-channel command that stages the setup script into a world-readable
+ * remote temp file. Typed fallback (#1942) runs that file instead of pasting
+ * the multi-line script into the terminal: the typed command stays a single
+ * line, so it is one history entry that the bash cleanup reliably deletes.
+ * The staged file removes itself when executed (root can always unlink it;
+ * for non-root su targets the sticky bit on /tmp may keep the 0644 file
+ * around, which is harmless).
+ */
+export const buildOsc7StageScriptCommand = (): string => {
+  const stagedScript = `rm -f -- "${DOLLAR}0" 2>/dev/null || true\n${POSIX_SETUP_SCRIPT}`;
+  const stageScript = `set -eu
+umask 022
+file=$(mktemp /tmp/.netcatty-osc7-setup.XXXXXX)
+printf '%s\\n' ${quoteForSingleQuotedShellString(stagedScript)} > "$file"
+chmod 644 "$file"
+printf '%s%s\\n' '${OSC7_SETUP_STAGED_MARKER}' "$file"`;
+  return `exec sh -c ${quoteForSingleQuotedShellString(stageScript)}\n`;
+};
+
 /**
  * Setup command typed into the interactive terminal itself. Used when the
  * silent exec-channel setup cannot configure the active shell because it is
  * owned by another user (after `su` / `sudo su`, #1942): typed input runs as
  * that user, so the config lands in the target user's rc file and OSC 7
  * reporting resumes for this and every future user-switched shell.
+ *
+ * The command runs the staged script file (see buildOsc7StageScriptCommand)
+ * and forwards shell-local (possibly unexported) ZDOTDIR / XDG_CONFIG_HOME to
+ * the child sh via the NETCATTY_* overrides the setup script already honors,
+ * mirroring buildOsc7SetupCommand.
  */
-export const buildOsc7TypedSetupCommand = (shell: Osc7SetupShell): string => {
-  const pipe = `printf "%s\\n" ${quoteForSingleQuotedShellString(POSIX_SETUP_SCRIPT)} | env NETCATTY_OSC7_FORCE_SHELL=${shell} sh`;
+export const buildOsc7TypedSetupCommand = (shell: Osc7SetupShell, scriptPath: string): string => {
+  const quotedPath = quoteForSingleQuotedShellString(scriptPath);
   if (shell === "bash") {
-    return `${pipe}; . "${DOLLAR}HOME/.bashrc" >/dev/null 2>&1; osc7_cwd 2>/dev/null; true; ${BASH_DELETE_MARKED_HISTORY_COMMAND}\r`;
+    const run = `env NETCATTY_OSC7_FORCE_SHELL=bash sh ${quotedPath}`;
+    return `${run}; . "${DOLLAR}HOME/.bashrc" >/dev/null 2>&1; osc7_cwd 2>/dev/null; true; ${BASH_DELETE_MARKED_HISTORY_COMMAND}\r`;
   }
   if (shell === "zsh") {
+    const run = `env NETCATTY_OSC7_FORCE_SHELL=zsh NETCATTY_ZDOTDIR="${DOLLAR}{ZDOTDIR:-}" sh ${quotedPath}`;
     // Leading space keeps the command out of history when HIST_IGNORE_SPACE is set.
-    return ` ${pipe}; . "${DOLLAR}{ZDOTDIR:-${DOLLAR}HOME}/.zshrc" >/dev/null 2>&1; osc7_cwd 2>/dev/null; true\r`;
+    return ` ${run}; . "${DOLLAR}{ZDOTDIR:-${DOLLAR}HOME}/.zshrc" >/dev/null 2>&1; osc7_cwd 2>/dev/null; true\r`;
   }
-  return ` ${pipe}; source (test -n "${DOLLAR}XDG_CONFIG_HOME"; and echo "${DOLLAR}XDG_CONFIG_HOME"; or echo "${DOLLAR}HOME/.config")/fish/config.fish >/dev/null 2>&1; __netcatty_osc7_cwd 2>/dev/null; true\r`;
+  const run = `env NETCATTY_OSC7_FORCE_SHELL=fish NETCATTY_XDG_CONFIG_HOME="${DOLLAR}XDG_CONFIG_HOME" sh ${quotedPath}`;
+  return ` ${run}; source (test -n "${DOLLAR}XDG_CONFIG_HOME"; and echo "${DOLLAR}XDG_CONFIG_HOME"; or echo "${DOLLAR}HOME/.config")/fish/config.fish >/dev/null 2>&1; __netcatty_osc7_cwd 2>/dev/null; true\r`;
 };
 
 const isOsc7SetupShell = (value: string): value is Osc7SetupShell =>
@@ -373,6 +403,12 @@ export const parseOsc7SetupMetadata = (stdout: string): Osc7SetupMetadata | null
 /** Shell of the other-user foreground shell reported by the setup script, if any. */
 export const parseOsc7SetupOtherUserShell = (stdout: string): string | null =>
   readMarkerLine(stdout, OSC7_SETUP_OTHER_USER_MARKER);
+
+/** Remote path of the staged setup script, if the stage command reported one. */
+export const parseOsc7SetupStagedPath = (stdout: string): string | null => {
+  const path = readMarkerLine(stdout, OSC7_SETUP_STAGED_MARKER);
+  return path && path.startsWith("/") ? path : null;
+};
 
 export const extractOsc7SetupTerminalData = (stdout: string): string => {
   const escape = String.fromCharCode(0x1b);
@@ -429,8 +465,9 @@ export const runOsc7SetupAction = async ({
   const result = await setupOsc7Tracking(sessionId, setupCommand);
 
   // The exec channel cannot configure a shell owned by another user (after
-  // su / sudo su). Fall back to typing the setup into the terminal, where it
-  // runs as that user (#1942).
+  // su / sudo su). Stage the setup script into a remote temp file over the
+  // exec channel, then type a short single-line command into the terminal to
+  // run it as that user (#1942).
   const otherUserShell = parseOsc7SetupOtherUserShell(result.stdout || "");
   if (otherUserShell) {
     if (!isOsc7SetupShell(otherUserShell)) {
@@ -440,7 +477,19 @@ export const runOsc7SetupAction = async ({
         error: `Directory tracking does not support the current shell (${otherUserShell})`,
       };
     }
-    const typedCommand = buildOsc7TypedSetupCommand(otherUserShell);
+    const stageResult = await setupOsc7Tracking(sessionId, buildOsc7StageScriptCommand());
+    const stagedPath =
+      stageResult.success && (typeof stageResult.code !== "number" || stageResult.code === 0)
+        ? parseOsc7SetupStagedPath(stageResult.stdout || "")
+        : null;
+    if (!stagedPath) {
+      return {
+        ...stageResult,
+        success: false,
+        error: stageResult.error || stageResult.stderr?.trim() || "Directory tracking setup failed",
+      };
+    }
+    const typedCommand = buildOsc7TypedSetupCommand(otherUserShell, stagedPath);
     writeToSession(sessionId, typedCommand, {
       automated: true,
       logRewrite: { sentCommand: typedCommand, displayCommand: "" },
