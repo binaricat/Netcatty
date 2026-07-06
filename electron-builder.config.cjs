@@ -12,6 +12,10 @@ module.exports = {
         {
             name: 'SSH URL',
             schemes: ['ssh']
+        },
+        {
+            name: 'JumpServer URL',
+            schemes: ['jms']
         }
     ],
     electronLanguages: ['en', 'en-US', 'zh_CN', 'zh-CN', 'zh_TW', 'zh-TW', 'ru'],

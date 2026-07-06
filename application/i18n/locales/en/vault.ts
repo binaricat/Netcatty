@@ -385,6 +385,9 @@ export const enVaultMessages: Messages = {
   'settings.sshDeepLink.title': 'SSH links',
   'settings.sshDeepLink.enable': 'Open ssh:// links with Netcatty',
   'settings.sshDeepLink.enableDesc': 'Allow Netcatty to handle ssh:// links from browsers and other apps.',
+  'settings.jmsDeepLink.title': 'JumpServer Links',
+  'settings.jmsDeepLink.enable': 'Handle jms:// links',
+  'settings.jmsDeepLink.enableDesc': 'Register Netcatty as the handler for JumpServer jms:// client links. May conflict with the official JumpServer client.',
 
   // Settings > SFTP Auto Sync
   'settings.sftp.autoSync': 'Auto-sync to remote',

@@ -26,6 +26,7 @@ import { resolveGroupDefaults, applyGroupDefaults } from './domain/groupConfig';
 import { upsertKnownHost } from './domain/knownHosts';
 import { materializeHostProxyProfile } from './domain/proxyProfiles';
 import { buildSshDeepLinkConnectionHost, buildSshDeepLinkEphemeralHost, buildSshDeepLinkHostDraft, findSshDeepLinkHost, parseSshDeepLink } from './domain/sshDeepLink';
+import { buildJmsDeepLinkEphemeralHost, isSupportedJmsProtocol, parseJmsDeepLink } from './domain/jmsDeepLink';
 import { resolveHostAuth } from './domain/sshAuth';
 import { isEncryptedCredentialPlaceholder } from './domain/credentials';
 import {
@@ -1031,6 +1032,34 @@ function App({ settings }: { settings: SettingsState }) {
     if (!bridge?.onSshDeepLink) return;
     return bridge.onSshDeepLink((payload) => {
       _handleSshDeepLink(payload);
+    });
+  }, [isPeerSessionWindow]);
+
+  const _handleJmsDeepLink = useEffectEvent((payload: { url?: string }) => {
+    const rawUrl = payload?.url || '';
+    const target = parseJmsDeepLink(rawUrl);
+    if (!target) {
+      toast.warning(t('deepLink.jms.invalid'));
+      return;
+    }
+    if (!isSupportedJmsProtocol(target.protocol)) {
+      toast.warning(t('deepLink.jms.unsupported', { protocol: target.protocol }));
+      return;
+    }
+    const ephemeralHost = buildJmsDeepLinkEphemeralHost(target, {
+      id: crypto.randomUUID(),
+      now: Date.now(),
+    });
+    setEphemeralHosts((prev) => [...prev, ephemeralHost]);
+    handleConnectToHost(ephemeralHost);
+  });
+
+  useEffect(() => {
+    if (isPeerSessionWindow) return;
+    const bridge = netcattyBridge.get();
+    if (!bridge?.onJmsDeepLink) return;
+    return bridge.onJmsDeepLink((payload) => {
+      _handleJmsDeepLink(payload);
     });
   }, [isPeerSessionWindow]);
 
