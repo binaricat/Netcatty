@@ -4,6 +4,7 @@ export const zhTWCoreMessages: Messages = {
   // Common
   'common.save': '儲存',
   'common.cancel': '取消',
+  'common.confirm': '確認',
   'common.close': '關閉',
   'common.reset': '重置',
   'common.zoomIn': '放大',

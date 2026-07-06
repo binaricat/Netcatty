@@ -1,6 +1,7 @@
 import { Layers, Loader2, Tag, Trash2 } from 'lucide-react';
 import React, { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { useI18n } from '../../application/i18n/I18nProvider';
+import { useConfirm } from '../ui/confirm';
 import type { useSystemManagerBackend } from '../../application/state/useSystemManagerBackend';
 import { dockerImageRowKey, type DockerImageInfo } from '../../domain/systemManager/types';
 import { dockerImageInfoEqual } from '../../domain/systemManager/pollEquals';
@@ -90,6 +91,7 @@ export const DockerImagesPanel = memo(function DockerImagesPanel({
   listRefreshIntervalSec,
 }: DockerImagesPanelProps) {
   const { t } = useI18n();
+  const confirm = useConfirm();
   const stableT = useStableTranslate();
   const [query, setQuery] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -169,7 +171,10 @@ export const DockerImagesPanel = memo(function DockerImagesPanel({
 
   const handleRemove = useCallback(async (image: DockerImageInfo) => {
     const label = image.name || image.id.slice(0, 12);
-    const ok = window.confirm(t('systemManager.docker.confirmRemoveImage', { name: label }));
+    const ok = await confirm({
+      message: t('systemManager.docker.confirmRemoveImage', { name: label }),
+      destructive: true,
+    });
     if (!ok) return;
     const result = await backend.dockerImageAction({
       sessionId,
@@ -186,12 +191,15 @@ export const DockerImagesPanel = memo(function DockerImagesPanel({
     }
     invalidateImageInspect(getImageInspectKey(image));
     await refresh();
-  }, [backend, getImageInspectKey, invalidateImageInspect, refresh, selectedId, sessionId, t]);
+  }, [backend, getImageInspectKey, invalidateImageInspect, refresh, selectedId, sessionId, t, confirm]);
 
   const handlePrune = async (all: boolean) => {
-    const ok = window.confirm(all
-      ? t('systemManager.docker.confirmPruneAll')
-      : t('systemManager.docker.confirmPrune'));
+    const ok = await confirm({
+      message: all
+        ? t('systemManager.docker.confirmPruneAll')
+        : t('systemManager.docker.confirmPrune'),
+      destructive: true,
+    });
     if (!ok) return;
     const result = await backend.dockerImageAction({ sessionId, action: 'prune', all });
     if (!result.success) {

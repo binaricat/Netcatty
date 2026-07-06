@@ -3,6 +3,7 @@ import {
 } from 'lucide-react';
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useI18n } from '../../application/i18n/I18nProvider';
+import { useConfirm } from '../ui/confirm';
 import type { useSystemManagerBackend } from '../../application/state/useSystemManagerBackend';
 import {
   getProcessFlags,
@@ -248,6 +249,7 @@ export const ProcessManagerTab = memo(function ProcessManagerTab({
   refreshIntervalSec,
 }: ProcessManagerTabProps) {
   const { t } = useI18n();
+  const confirm = useConfirm();
   const stableT = useStableTranslate();
   const [query, setQuery] = useState('');
   const [sortKey, setSortKey] = useState<SortKey>('cpuPercent');
@@ -381,7 +383,10 @@ export const ProcessManagerTab = memo(function ProcessManagerTab({
     const confirmKey = signal === 'KILL'
       ? 'systemManager.processes.confirmKill'
       : 'systemManager.processes.confirmSignal';
-    const ok = window.confirm(t(confirmKey, { pid: String(pid), signal }));
+    const ok = await confirm({
+      message: t(confirmKey, { pid: String(pid), signal }),
+      destructive: true,
+    });
     if (!ok) return;
     setActionError(null);
     const result = await backend.signalSystemProcess({ sessionId, pid, signal });
@@ -390,7 +395,7 @@ export const ProcessManagerTab = memo(function ProcessManagerTab({
       return;
     }
     void refresh();
-  }, [backend, refresh, sessionId, t]);
+  }, [backend, refresh, sessionId, t, confirm]);
 
   const reniceProcess = useCallback(async (pid: number, nice: number) => {
     setActionError(null);

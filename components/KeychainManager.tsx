@@ -14,6 +14,7 @@ import {
   UserPlus,
 } from "lucide-react";
 import React, { useCallback, useMemo, useRef, useState } from "react";
+import { useConfirm } from "./ui/confirm";
 import { useI18n } from "../application/i18n/I18nProvider";
 import { useStoredViewMode } from "../application/state/useStoredViewMode";
 import type { GroupConfig } from "../domain/models";
@@ -112,6 +113,7 @@ const KeychainManager: React.FC<KeychainManagerProps> = ({
   onCreateGroup,
 }) => {
   const { t } = useI18n();
+  const confirm = useConfirm();
   const { generateKeyPair, execCommand } = useKeychainBackend();
   const [activeFilter, setActiveFilter] = useState<FilterTab>("key");
   const [search, setSearch] = useState("");
@@ -837,12 +839,13 @@ echo $3 >> "$FILE"`);
                         <ContextMenuSeparator />
                         <ContextMenuItem
                           className="text-destructive"
-                          onClick={() => {
-                            const ok = window.confirm(
-                              t("confirm.deleteIdentity", {
+                          onClick={async () => {
+                            const ok = await confirm({
+                              message: t("confirm.deleteIdentity", {
                                 name: identity.label || "",
                               }),
-                            );
+                              destructive: true,
+                            });
                             if (!ok) return;
                             _handleDeleteIdentity(identity.id);
                           }}
@@ -875,12 +878,13 @@ echo $3 >> "$FILE"`);
                 <AsideActionMenuItem
                   variant="destructive"
                   icon={<Trash2 size={14} />}
-                  onClick={() => {
-                    const ok = window.confirm(
-                      t("confirm.deleteIdentity", {
+                  onClick={async () => {
+                    const ok = await confirm({
+                      message: t("confirm.deleteIdentity", {
                         name: panel.identity?.label || "",
                       }),
-                    );
+                      destructive: true,
+                    });
                     if (!ok || !panel.identity) return;
                     _handleDeleteIdentity(panel.identity.id);
                   }}

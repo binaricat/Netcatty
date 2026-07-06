@@ -1,6 +1,7 @@
 import { Box, FileText, Play, RotateCcw, Square, Terminal } from 'lucide-react';
 import React, { memo, useCallback, useMemo, useState } from 'react';
 import { useI18n } from '../../application/i18n/I18nProvider';
+import { useConfirm } from '../ui/confirm';
 import type { useSystemManagerBackend } from '../../application/state/useSystemManagerBackend';
 import { writeSystemManagerDiagnostic } from '../../application/state/systemManagerDiagnostics';
 import type { TerminalSession } from '../../types';
@@ -159,6 +160,7 @@ export const DockerContainersPanel = memo(function DockerContainersPanel({
   statsRefreshIntervalSec,
 }: DockerContainersPanelProps) {
   const { t } = useI18n();
+  const confirm = useConfirm();
   const stableT = useStableTranslate();
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<ContainerFilter>('all');
@@ -285,11 +287,11 @@ export const DockerContainersPanel = memo(function DockerContainersPanel({
     newName?: string,
   ) => {
     if (action === 'rm') {
-      const ok = globalThis.confirm(t('systemManager.docker.confirmRemove'));
+      const ok = await confirm({ message: t('systemManager.docker.confirmRemove'), destructive: true });
       if (!ok) return;
     }
     if (action === 'kill') {
-      const ok = globalThis.confirm(t('systemManager.docker.confirmKill'));
+      const ok = await confirm({ message: t('systemManager.docker.confirmKill'), destructive: true });
       if (!ok) return;
     }
     setPendingAction({ id: containerId, action });
@@ -323,6 +325,7 @@ export const DockerContainersPanel = memo(function DockerContainersPanel({
     refreshContainerInspect,
     sessionId,
     t,
+    confirm,
   ]);
 
   const handleRowAction = useCallback((container: DockerContainerInfo, action: DockerContainerAction) => {

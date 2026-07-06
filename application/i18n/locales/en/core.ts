@@ -4,6 +4,7 @@ export const enCoreMessages: Messages = {
   // Common
   'common.save': 'Save',
   'common.cancel': 'Cancel',
+  'common.confirm': 'Confirm',
   'common.close': 'Close',
   'common.reset': 'Reset',
   'common.zoomIn': 'Zoom in',

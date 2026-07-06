@@ -57,6 +57,7 @@ import {
 import { getEffectiveKnownHosts } from './infrastructure/syncHelpers';
 import { ToastProvider, toast } from './components/ui/toast';
 import { TooltipProvider } from './components/ui/tooltip';
+import { ConfirmProvider, useConfirm } from './components/ui/confirm';
 import { PortForwardHostKeyDialog } from './components/port-forwarding';
 import { VaultSection } from './components/VaultView';
 import { KeyboardInteractiveRequest } from './components/KeyboardInteractiveModal';
@@ -91,6 +92,7 @@ const HOTKEY_DEBUG =
 
 function App({ settings }: { settings: SettingsState }) {
   const { t } = useI18n();
+  const confirm = useConfirm();
 
   const [isQuickSwitcherOpen, setIsQuickSwitcherOpen] = useState(false);
   const [isCreateWorkspaceOpen, setIsCreateWorkspaceOpen] = useState(false);
@@ -902,12 +904,15 @@ function App({ settings }: { settings: SettingsState }) {
       .map((entry) => entry.host);
   }, [quickSearch, hosts, isQuickSwitcherOpen]);
 
-  const handleDeleteHost = useCallback((hostId: string) => {
+  const handleDeleteHost = useCallback(async (hostId: string) => {
     const target = hosts.find(h => h.id === hostId);
-    const confirmed = window.confirm(t('confirm.deleteHost', { name: target?.label || hostId }));
+    const confirmed = await confirm({
+      message: t('confirm.deleteHost', { name: target?.label || hostId }),
+      destructive: true,
+    });
     if (!confirmed) return;
     updateHosts(hosts.filter(h => h.id !== hostId));
-  }, [hosts, updateHosts, t]);
+  }, [hosts, updateHosts, t, confirm]);
 
   const handleAddKnownHost = useCallback((kh: KnownHost) => {
     const nextKnownHosts = upsertKnownHost(knownHostsRef.current, kh);
@@ -1238,8 +1243,10 @@ function AppWithProviders() {
     <I18nProvider locale={settings.uiLanguage}>
       <ToastProvider>
         <TooltipProvider delayDuration={300}>
-          <ScriptAutomationRoot />
-          <App settings={settings} />
+          <ConfirmProvider>
+            <ScriptAutomationRoot />
+            <App settings={settings} />
+          </ConfirmProvider>
         </TooltipProvider>
       </ToastProvider>
     </I18nProvider>
