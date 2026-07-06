@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import type { Host } from "./models";
 import {
   buildSshDeepLinkConnectionHost,
+  buildSshDeepLinkEphemeralHost,
   buildSshDeepLinkHostDraft,
   buildSshDeepLinkOpenHost,
   buildSshNoteLinkOpenHost,
@@ -40,6 +41,64 @@ test("parseSshDeepLink accepts IPv6 hosts", () => {
     hostname: "2001:db8::10",
     port: 2222,
   });
+});
+
+test("parseSshDeepLink extracts and percent-decodes passwords", () => {
+  assert.deepEqual(parseSshDeepLink("ssh://alice:secret@example.com"), {
+    rawUrl: "ssh://alice:secret@example.com",
+    username: "alice",
+    password: "secret",
+    hostname: "example.com",
+  });
+  assert.deepEqual(parseSshDeepLink("ssh://alice:p%40ss@example.com:2200"), {
+    rawUrl: "ssh://alice:p%40ss@example.com:2200",
+    username: "alice",
+    password: "p@ss",
+    hostname: "example.com",
+    port: 2200,
+  });
+});
+
+test("parseSshDeepLink omits password when not present", () => {
+  const target = parseSshDeepLink("ssh://alice@example.com");
+  assert.ok(target);
+  assert.equal(target.password, undefined);
+});
+
+test("buildSshDeepLinkEphemeralHost includes password auth and disables mosh and et", () => {
+  const ephemeral = buildSshDeepLinkEphemeralHost(
+    parseSshDeepLink("ssh://alice:secret@example.com:2200")!,
+    { id: "ephemeral-id", now: 789 },
+  );
+
+  assert.equal(ephemeral.id, "ephemeral-id");
+  assert.equal(ephemeral.password, "secret");
+  assert.equal(ephemeral.authMethod, "password");
+  assert.equal(ephemeral.moshEnabled, false);
+  assert.equal(ephemeral.etEnabled, false);
+  assert.equal(ephemeral.protocol, "ssh");
+});
+
+test("buildSshDeepLinkEphemeralHost omits password fields when target has no password", () => {
+  const ephemeral = buildSshDeepLinkEphemeralHost(
+    parseSshDeepLink("ssh://alice@example.com")!,
+    { id: "ephemeral-id", now: 789 },
+  );
+
+  assert.equal(ephemeral.password, undefined);
+  assert.equal(ephemeral.authMethod, undefined);
+  assert.equal(ephemeral.moshEnabled, false);
+  assert.equal(ephemeral.etEnabled, false);
+});
+
+test("buildSshDeepLinkHostDraft never includes a password", () => {
+  const draft = buildSshDeepLinkHostDraft(
+    parseSshDeepLink("ssh://alice:secret@example.com")!,
+    { id: "draft-id", now: 123 },
+  );
+
+  assert.equal(draft.password, undefined);
+  assert.equal(draft.authMethod, undefined);
 });
 
 test("parseSshDeepLink rejects unsupported or incomplete links", () => {

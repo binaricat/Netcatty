@@ -3,6 +3,7 @@ import type { Host } from "./models";
 export interface SshDeepLinkTarget {
   rawUrl: string;
   username?: string;
+  password?: string;
   hostname: string;
   port?: number;
 }
@@ -57,10 +58,14 @@ export const parseSshDeepLink = (rawUrl: string): SshDeepLinkTarget | null => {
   const username = parsed.username
     ? decodeUrlComponent(parsed.username).trim()
     : undefined;
+  const password = parsed.password
+    ? decodeUrlComponent(parsed.password)
+    : undefined;
 
   return {
     rawUrl: trimmed,
     ...(username ? { username } : {}),
+    ...(password ? { password } : {}),
     hostname,
     ...(port ? { port } : {}),
   };
@@ -100,6 +105,16 @@ export const buildSshDeepLinkOpenHost = (
 ): Host => buildSshDeepLinkConnectionHost(
   findSshDeepLinkHost(hosts, target) ?? buildSshDeepLinkHostDraft(target, options),
 );
+
+export const buildSshDeepLinkEphemeralHost = (
+  target: SshDeepLinkTarget,
+  options: SshDeepLinkDraftOptions,
+): Host => ({
+  ...buildSshDeepLinkHostDraft(target, options),
+  ...(target.password ? { password: target.password, authMethod: "password" as const } : {}),
+  moshEnabled: false,
+  etEnabled: false,
+});
 
 export const buildSshDeepLinkHostDraft = (
   target: SshDeepLinkTarget,
