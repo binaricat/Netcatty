@@ -393,7 +393,10 @@ export function buildSessionRestorePayload(input: BuildSessionRestorePayloadInpu
     savedAt: input.now ?? Date.now(),
     activeTabId: input.activeTabId,
     tabOrder: input.tabOrder,
-    sessions: input.sessions.map(restoreSession),
+    // Ephemeral-host sessions (password deep links) cannot be restored: their
+    // in-memory credentials do not survive a relaunch, and persisting them
+    // would leak the supposedly ephemeral host metadata into restore storage.
+    sessions: input.sessions.filter((session) => !session.ephemeralHost).map(restoreSession),
     workspaces: input.workspaces,
   });
 }

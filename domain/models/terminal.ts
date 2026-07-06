@@ -457,6 +457,12 @@ export interface TerminalSession {
   codingCliProviderId?: CodingCliProviderId;
   /** Runtime marker for sessions reconstructed from startup restore. */
   restoreState?: 'restored-disconnected';
+  /**
+   * Runtime marker for sessions backed by an in-memory-only host (e.g. a
+   * password deep link). Excluded from session restore persistence because
+   * the one-time credentials cannot survive a relaunch.
+   */
+  ephemeralHost?: boolean;
   /** Latest known working directory captured from terminal cwd tracking. */
   lastCwd?: string;
 }

@@ -144,6 +144,9 @@ export interface Host {
   deviceType?: 'general' | 'network';
   identityFileId?: string; // Reference to SSHKey
   protocol?: 'ssh' | 'telnet' | 'local' | 'serial'; // Default/primary protocol
+  // Runtime marker for in-memory-only hosts (e.g. password deep links).
+  // Ephemeral hosts are never persisted to the vault or session restore.
+  ephemeral?: boolean;
   password?: string;
   savePassword?: boolean; // Whether to save the password (default: true)
   authMethod?: 'password' | 'key' | 'certificate';

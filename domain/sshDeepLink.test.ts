@@ -77,6 +77,7 @@ test("buildSshDeepLinkEphemeralHost includes password auth and disables mosh and
   assert.equal(ephemeral.moshEnabled, false);
   assert.equal(ephemeral.etEnabled, false);
   assert.equal(ephemeral.protocol, "ssh");
+  assert.equal(ephemeral.ephemeral, true);
 });
 
 test("buildSshDeepLinkEphemeralHost omits password fields when target has no password", () => {
