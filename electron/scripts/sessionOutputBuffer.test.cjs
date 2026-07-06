@@ -423,6 +423,30 @@ test("SessionOutputBuffer waitForAny matches pattern followed by long multi-line
   assert.equal(await pending, 0);
 });
 
+test("SessionOutputBuffer waitForText survives buffer trimming while waiting", async () => {
+  const buffer = new SessionOutputBuffer("s1", 1024);
+  buffer.append("x".repeat(1000));
+  const pending = buffer.waitForText("TARGET", 1000);
+  buffer.append(`${"y".repeat(100)}TARGET${"z".repeat(500)}`);
+  assert.equal(await pending, "TARGET");
+});
+
+test("SessionOutputBuffer waitForRegex survives buffer trimming while waiting", async () => {
+  const buffer = new SessionOutputBuffer("s1", 1024);
+  buffer.append("x".repeat(1000));
+  const pending = buffer.waitForRegex("TARGET", 1000);
+  buffer.append(`${"y".repeat(100)}TARGET${"z".repeat(500)}`);
+  assert.equal(await pending, "TARGET");
+});
+
+test("SessionOutputBuffer waitForAny survives buffer trimming while waiting", async () => {
+  const buffer = new SessionOutputBuffer("s1", 1024);
+  buffer.append("x".repeat(1000));
+  const pending = buffer.waitForAny(["TARGET"], 1000);
+  buffer.append(`${"y".repeat(100)}TARGET${"z".repeat(500)}`);
+  assert.equal(await pending, 0);
+});
+
 test("SessionOutputBuffer waitFor still rejects pre-registration scrollback beyond tail slack", async () => {
   const buffer = new SessionOutputBuffer("s1");
   buffer.append(`TARGET${"x".repeat(600)}`);

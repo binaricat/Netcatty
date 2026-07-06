@@ -267,6 +267,9 @@ class SessionOutputBuffer {
         if (typeof waiter.freshBoundary === "number") {
           waiter.freshBoundary = Math.max(0, waiter.freshBoundary - removedLength);
         }
+        if (waiter.custom && typeof waiter.custom.freshBoundary === "number") {
+          waiter.custom.freshBoundary = Math.max(0, waiter.custom.freshBoundary - removedLength);
+        }
       }
     }
     this.flushWaiters();
@@ -455,16 +458,17 @@ class SessionOutputBuffer {
     this.waiters = remaining;
   }
 
-  waitForWithMatcher({ pattern, timeoutMs, shouldAbort, consumeFreshMatch, timeoutLabel }) {
+  waitForWithMatcher({ pattern, timeoutMs, shouldAbort, consumeFreshMatch, timeoutLabel, freshBoundary }) {
     return new Promise((resolve, reject) => {
       const waiter = {
         pattern,
+        freshBoundary,
         resolve,
         reject,
         shouldAbort,
         timer: null,
         check: () => {
-          const matched = consumeFreshMatch();
+          const matched = consumeFreshMatch(waiter.freshBoundary);
           if (matched === null) return false;
           this.advanceScanOffset(matched.endOffset);
           clearTimeout(waiter.timer);
@@ -514,7 +518,8 @@ class SessionOutputBuffer {
         pattern,
         timeoutMs,
         shouldAbort,
-        consumeFreshMatch: () => this.consumeFreshPendingRegex(pattern, { minFreshStartAbsolute }),
+        freshBoundary: minFreshStartAbsolute,
+        consumeFreshMatch: (boundary) => this.consumeFreshPendingRegex(pattern, { minFreshStartAbsolute: boundary }),
         timeoutLabel: "waitFor",
       });
     }
@@ -564,7 +569,8 @@ class SessionOutputBuffer {
       pattern: text,
       timeoutMs,
       shouldAbort,
-      consumeFreshMatch: () => this.consumeFreshPendingText(text, freshBoundary),
+      freshBoundary,
+      consumeFreshMatch: (boundary) => this.consumeFreshPendingText(text, boundary),
       timeoutLabel: "waitForText",
     });
   }
@@ -584,7 +590,8 @@ class SessionOutputBuffer {
       pattern,
       timeoutMs,
       shouldAbort,
-      consumeFreshMatch: () => this.consumeFreshPendingRegex(pattern, { minFreshStartAbsolute }),
+      freshBoundary: minFreshStartAbsolute,
+      consumeFreshMatch: (boundary) => this.consumeFreshPendingRegex(pattern, { minFreshStartAbsolute: boundary }),
       timeoutLabel: "waitForRegex",
     });
   }
@@ -620,6 +627,7 @@ class SessionOutputBuffer {
     return new Promise((resolve, reject) => {
       const waiter = {
         patterns,
+        freshBoundary,
         resolve,
         reject,
         shouldAbort,
@@ -637,7 +645,7 @@ class SessionOutputBuffer {
               return true;
             }
           }
-          const fresh = this.consumeFreshPendingMatchAny(patterns, freshBoundary);
+          const fresh = this.consumeFreshPendingMatchAny(patterns, waiter.freshBoundary);
           if (fresh !== null) {
             this.advanceScanOffset(fresh.matched.endOffset);
             clearTimeout(waiter.timer);
