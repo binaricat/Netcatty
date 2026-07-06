@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import type { Host } from "./models";
+import { resolveHostAutofillPassword } from "./sshAuth";
 import {
   buildSshDeepLinkConnectionHost,
   buildSshDeepLinkEphemeralHost,
@@ -75,6 +76,8 @@ test("buildSshDeepLinkEphemeralHost includes password auth and disables mosh and
   assert.equal(ephemeral.id, "ephemeral-id");
   assert.equal(ephemeral.password, "secret");
   assert.equal(ephemeral.authMethod, "password");
+  assert.equal(ephemeral.savePassword, false);
+  assert.equal(resolveHostAutofillPassword({ host: ephemeral, keys: [] }), undefined);
   assert.equal(ephemeral.moshEnabled, false);
   assert.equal(ephemeral.etEnabled, false);
   assert.equal(ephemeral.protocol, "ssh");
@@ -89,6 +92,7 @@ test("buildSshDeepLinkEphemeralHost omits password fields when target has no pas
 
   assert.equal(ephemeral.password, undefined);
   assert.equal(ephemeral.authMethod, undefined);
+  assert.equal(ephemeral.savePassword, false);
   assert.equal(ephemeral.moshEnabled, false);
   assert.equal(ephemeral.etEnabled, false);
 });
@@ -132,7 +136,8 @@ test("buildSshDeepLinkEphemeralHostFromSaved keeps saved settings but overrides 
   assert.equal(ephemeral.identityId, undefined);
   assert.equal(ephemeral.identityFileId, undefined);
   assert.equal(ephemeral.identityFilePaths, undefined);
-  assert.equal(ephemeral.savePassword, undefined);
+  assert.equal(ephemeral.savePassword, false);
+  assert.equal(resolveHostAutofillPassword({ host: ephemeral, keys: [] }), undefined);
   // Group is cleared so effective-host resolution cannot re-inherit
   // group credentials over the one-time password.
   assert.equal(ephemeral.group, "");
