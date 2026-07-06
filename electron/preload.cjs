@@ -276,6 +276,8 @@ ipcRenderer.on("netcatty:data", (_event, payload) => {
   });
 });
 
+// ZMODEM listener maps intentionally survive exit: sessions can reconnect with
+// the same sessionId. Cleanup happens on explicit closeSession or subscriber dispose.
 ipcRenderer.on("netcatty:exit", (_event, payload) => {
   const sessionId = payload?.sessionId;
   if (!sessionId) return;
@@ -296,8 +298,6 @@ ipcRenderer.on("netcatty:exit", (_event, payload) => {
   telnetAutoLoginCompleteListeners.delete(sessionId);
   telnetAutoLoginCancelledListeners.delete(sessionId);
   telnetEchoModeListeners.delete(sessionId);
-  zmodemListeners.delete(sessionId);
-  zmodemOverwriteListeners.delete(sessionId);
   const pendingTimer = _mcpFlushTimers.get(sessionId);
   if (pendingTimer) {
     clearTimeout(pendingTimer);

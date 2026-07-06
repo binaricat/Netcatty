@@ -250,6 +250,8 @@ function createPreloadApi(ctx) {
   closeSession: (sessionId) => {
     markTerminalDataSessionClosed(sessionId);
     telnetEchoModeListeners.delete(sessionId);
+    zmodemListeners.delete(sessionId);
+    zmodemOverwriteListeners.delete(sessionId);
     ipcRenderer.send("netcatty:close", { sessionId });
   },
   setSessionEncoding: async (sessionId, encoding) => {
@@ -263,7 +265,12 @@ function createPreloadApi(ctx) {
   onZmodemEvent: (sessionId, cb) => {
     if (!zmodemListeners.has(sessionId)) zmodemListeners.set(sessionId, new Set());
     zmodemListeners.get(sessionId).add(cb);
-    return () => zmodemListeners.get(sessionId)?.delete(cb);
+    return () => {
+      const set = zmodemListeners.get(sessionId);
+      if (!set) return;
+      set.delete(cb);
+      if (set.size === 0) zmodemListeners.delete(sessionId);
+    };
   },
   cancelZmodem: (sessionId, options) => {
     ipcRenderer.send("netcatty:zmodem:cancel", { sessionId, options });
@@ -278,7 +285,12 @@ function createPreloadApi(ctx) {
   onZmodemOverwriteRequest: (sessionId, cb) => {
     if (!zmodemOverwriteListeners.has(sessionId)) zmodemOverwriteListeners.set(sessionId, new Set());
     zmodemOverwriteListeners.get(sessionId).add(cb);
-    return () => zmodemOverwriteListeners.get(sessionId)?.delete(cb);
+    return () => {
+      const set = zmodemOverwriteListeners.get(sessionId);
+      if (!set) return;
+      set.delete(cb);
+      if (set.size === 0) zmodemOverwriteListeners.delete(sessionId);
+    };
   },
   respondZmodemOverwrite: (payload) => {
     ipcRenderer.send("netcatty:zmodem:overwrite-response", payload);
