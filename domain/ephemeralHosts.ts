@@ -1,5 +1,13 @@
 import type { Host } from "./models";
 
+/**
+ * True when the host entry represents a persisted vault host. Ephemeral
+ * hosts (password deep links) live in the terminal host list but must not
+ * be treated as saved hosts for persistence-routing decisions.
+ */
+export const isSavedVaultHost = (host: Host | null | undefined): boolean =>
+  Boolean(host) && host?.ephemeral !== true;
+
 export interface EphemeralHostsUpdateSplit {
   vaultHosts: Host[];
   ephemeralHosts: Host[];

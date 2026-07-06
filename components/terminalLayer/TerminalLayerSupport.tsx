@@ -7,6 +7,7 @@ import { createTerminalSelectionAttachment } from '../../application/state/termi
 import { getTopTabInsertionTarget, isPointInsideRect, WORKSPACE_SESSION_DRAG_TYPE } from '../../application/state/terminalDragData';
 import { useAIState } from '../../application/state/useAIState';
 import { useStoredBoolean } from '../../application/state/useStoredBoolean';
+import { isSavedVaultHost } from '../../domain/ephemeralHosts';
 import { collectSessionIds, SplitDirection } from '../../domain/workspace';
 import { resolveSessionTabTitle } from '../../domain/sessionTabTitle';
 import { KeyBinding, TerminalSettings } from '../../domain/models';
@@ -787,7 +788,7 @@ interface TerminalPaneProps {
 }
 
 const getPaneAppearanceThemeId = (props: TerminalPaneProps): string => {
-  const isEphemeral = !props.hostMap.has(props.host.id);
+  const isEphemeral = !isSavedVaultHost(props.hostMap.get(props.host.id));
   return props.resolveSessionAppearance({ host: props.host, isEphemeral }).themeId;
 };
 
@@ -1066,7 +1067,7 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
   const splitHorizontalHandler = splitHorizontalHandlersRef.current.get(session.id);
   const splitVerticalHandler = splitVerticalHandlersRef.current.get(session.id);
   const broadcastEnabled = activeWorkspaceId ? !!isBroadcastEnabled?.(activeWorkspaceId) : false;
-  const isHostEphemeral = !hostMap.has(host.id);
+  const isHostEphemeral = !isSavedVaultHost(hostMap.get(host.id));
   const sessionAppearance = useMemo(
     () => resolveSessionAppearance({ host, isEphemeral: isHostEphemeral }),
     [resolveSessionAppearance, host, isHostEphemeral],
