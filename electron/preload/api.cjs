@@ -702,6 +702,16 @@ function createPreloadApi(ctx) {
   getSshDeepLinkEnabled: () =>
     ipcRenderer.invoke("netcatty:deepLink:ssh:getEnabled"),
 
+  onJmsDeepLink: (callback) => {
+    const handler = (_event, payload) => callback(payload);
+    ipcRenderer.on("netcatty:deepLink:jms", handler);
+    return () => ipcRenderer.removeListener("netcatty:deepLink:jms", handler);
+  },
+  setJmsDeepLinkEnabled: (enabled) =>
+    ipcRenderer.invoke("netcatty:deepLink:jms:setEnabled", { enabled }),
+  getJmsDeepLinkEnabled: () =>
+    ipcRenderer.invoke("netcatty:deepLink:jms:getEnabled"),
+
   // Quit guard: main process asks whether any editor tabs have unsaved changes.
   // Returns an unsubscribe function so React effects can clean up on unmount.
   onCheckDirtyEditors: (listener) => {

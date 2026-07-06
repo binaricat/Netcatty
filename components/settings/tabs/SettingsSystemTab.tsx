@@ -88,6 +88,8 @@ interface SettingsSystemTabProps {
   setSshDebugLogsEnabled: (enabled: boolean) => void;
   sshDeepLinkEnabled: boolean;
   setSshDeepLinkEnabled: (enabled: boolean) => void;
+  jmsDeepLinkEnabled: boolean;
+  setJmsDeepLinkEnabled: (enabled: boolean) => void;
   restorePreviousSession: boolean;
   setRestorePreviousSession: (enabled: boolean) => void;
   restoreTerminalCwd: boolean;
@@ -122,6 +124,8 @@ const SettingsSystemTab: React.FC<SettingsSystemTabProps> = ({
   setSshDebugLogsEnabled,
   sshDeepLinkEnabled,
   setSshDeepLinkEnabled,
+  jmsDeepLinkEnabled,
+  setJmsDeepLinkEnabled,
   restorePreviousSession,
   setRestorePreviousSession,
   restoreTerminalCwd,
@@ -925,6 +929,20 @@ const SettingsSystemTab: React.FC<SettingsSystemTabProps> = ({
                   checked={sshDeepLinkEnabled}
                   onChange={setSshDeepLinkEnabled}
                   ariaLabel={t('settings.sshDeepLink.enable')}
+                />
+              </SettingRow>
+            </SettingCard>
+
+          <SectionHeader title={t('settings.jmsDeepLink.title')} />
+            <SettingCard>
+              <SettingRow
+                label={t('settings.jmsDeepLink.enable')}
+                description={t('settings.jmsDeepLink.enableDesc')}
+              >
+                <Toggle
+                  checked={jmsDeepLinkEnabled}
+                  onChange={setJmsDeepLinkEnabled}
+                  ariaLabel={t('settings.jmsDeepLink.enable')}
                 />
               </SettingRow>
             </SettingCard>

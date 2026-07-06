@@ -65,13 +65,22 @@ const fs = require("node:fs");
 const { getCliDiscoveryFilePath } = require("./cli/discoveryPath.cjs");
 const {
   SSH_DEEP_LINK_CHANNEL,
+  JMS_DEEP_LINK_CHANNEL,
+  applyInitialJmsDeepLinkPreference,
   applyInitialSshDeepLinkPreference,
+  applyJmsProtocolClientPreference,
   applySshProtocolClientPreference,
+  collectJmsDeepLinkUrls,
   collectSshDeepLinkUrls,
+  isJmsDeepLinkUrl,
   isSshDeepLinkUrl,
+  readJmsDeepLinkEnabledPreference,
   readSshDeepLinkEnabledPreference,
+  shouldDeliverJmsDeepLink,
   shouldDeliverSshDeepLink,
+  updateJmsDeepLinkEnabledPreference,
   updateSshDeepLinkEnabledPreference,
+  writeJmsDeepLinkEnabledPreference,
   writeSshDeepLinkEnabledPreference,
 } = require("./deepLink.cjs");
 const {
@@ -535,6 +544,11 @@ let flushingSshDeepLinks = false;
 let flushingOpenTerminalPaths = false;
 let sshDeepLinkDeliveryGeneration = 0;
 
+let jmsDeepLinkEnabled = readJmsDeepLinkEnabledPreference({ app });
+const pendingJmsDeepLinkUrls = jmsDeepLinkEnabled ? collectJmsDeepLinkUrls(process.argv) : [];
+let flushingJmsDeepLinks = false;
+let jmsDeepLinkDeliveryGeneration = 0;
+
 function queueSshDeepLink(rawUrl) {
   if (!sshDeepLinkEnabled) return;
   if (!isSshDeepLinkUrl(rawUrl)) return;
@@ -578,6 +592,85 @@ ipcMain?.handle?.("netcatty:deepLink:ssh:setEnabled", async (_event, payload) =>
 });
 
 ipcMain?.handle?.("netcatty:deepLink:ssh:getEnabled", async () => sshDeepLinkEnabled);
+
+function queueJmsDeepLink(rawUrl) {
+  if (!jmsDeepLinkEnabled) return;
+  if (!isJmsDeepLinkUrl(rawUrl)) return;
+  pendingJmsDeepLinkUrls.push(rawUrl);
+  if (app.isReady?.()) {
+    void flushPendingJmsDeepLinks();
+  }
+}
+
+ipcMain?.handle?.("netcatty:deepLink:jms:setEnabled", async (_event, payload) => {
+  const enabled = payload?.enabled !== false;
+  const result = updateJmsDeepLinkEnabledPreference({
+    currentEnabled: jmsDeepLinkEnabled,
+    enabled,
+    applyPreference: (nextEnabled) => applyJmsProtocolClientPreference({ app, enabled: nextEnabled, isDev }),
+    writePreference: (nextEnabled) => writeJmsDeepLinkEnabledPreference({ app, enabled: nextEnabled }),
+    clearPending: () => {
+      pendingJmsDeepLinkUrls.length = 0;
+      jmsDeepLinkDeliveryGeneration += 1;
+    },
+  });
+  jmsDeepLinkEnabled = result.enabled;
+  return result;
+});
+
+ipcMain?.handle?.("netcatty:deepLink:jms:getEnabled", async () => jmsDeepLinkEnabled);
+
+async function deliverJmsDeepLink(rawUrl, expectedGeneration = jmsDeepLinkDeliveryGeneration) {
+  if (!shouldDeliverJmsDeepLink({
+    enabled: jmsDeepLinkEnabled,
+    deliveryGeneration: jmsDeepLinkDeliveryGeneration,
+    expectedGeneration,
+  })) return;
+  const win = await createAndShowMainWindow();
+  if (!shouldDeliverJmsDeepLink({
+    enabled: jmsDeepLinkEnabled,
+    deliveryGeneration: jmsDeepLinkDeliveryGeneration,
+    expectedGeneration,
+  })) return;
+  focusMainWindow();
+  const windowManager = getWindowManager();
+  const result = await windowManager.sendWhenRendererReady?.(
+    win,
+    JMS_DEEP_LINK_CHANNEL,
+    { url: rawUrl },
+    {
+      timeoutMs: isDev ? 30000 : 15000,
+      shouldSend: () => shouldDeliverJmsDeepLink({
+        enabled: jmsDeepLinkEnabled,
+        deliveryGeneration: jmsDeepLinkDeliveryGeneration,
+        expectedGeneration,
+      }),
+      cancelReason: "jms-deep-link-disabled",
+    },
+  );
+  if (result && result.success === false && result.reason !== "jms-deep-link-disabled") {
+    console.warn("[Main] Failed to deliver jms:// deep link:", result.error || result.reason);
+  }
+}
+
+async function flushPendingJmsDeepLinks() {
+  if (flushingJmsDeepLinks) return;
+  flushingJmsDeepLinks = true;
+  try {
+    while (jmsDeepLinkEnabled && pendingJmsDeepLinkUrls.length > 0) {
+      const rawUrl = pendingJmsDeepLinkUrls.shift();
+      if (!rawUrl) continue;
+      await deliverJmsDeepLink(rawUrl, jmsDeepLinkDeliveryGeneration);
+    }
+  } catch (err) {
+    console.warn("[Main] Failed to process jms:// deep link:", err);
+  } finally {
+    flushingJmsDeepLinks = false;
+    if (jmsDeepLinkEnabled && pendingJmsDeepLinkUrls.length > 0) {
+      void flushPendingJmsDeepLinks();
+    }
+  }
+}
 
 async function deliverSshDeepLink(rawUrl, expectedGeneration = sshDeepLinkDeliveryGeneration) {
   if (!shouldDeliverSshDeepLink({
@@ -699,6 +792,10 @@ if (!gotLock) {
 } else {
   app.on("open-url", (event, rawUrl) => {
     event.preventDefault();
+    if (isJmsDeepLinkUrl(rawUrl)) {
+      queueJmsDeepLink(rawUrl);
+      return;
+    }
     queueSshDeepLink(rawUrl);
   });
 
@@ -708,10 +805,17 @@ if (!gotLock) {
   });
 
   app.on("second-instance", (_event, argv, workingDirectory) => {
-    const deepLinkUrls = collectSshDeepLinkUrls(argv);
-    if (deepLinkUrls.length > 0) {
+    const jmsDeepLinkUrls = collectJmsDeepLinkUrls(argv);
+    const sshDeepLinkUrls = collectSshDeepLinkUrls(argv);
+    if (jmsDeepLinkUrls.length > 0) {
+      if (jmsDeepLinkEnabled) {
+        jmsDeepLinkUrls.forEach(queueJmsDeepLink);
+      }
+      return;
+    }
+    if (sshDeepLinkUrls.length > 0) {
       if (sshDeepLinkEnabled) {
-        deepLinkUrls.forEach(queueSshDeepLink);
+        sshDeepLinkUrls.forEach(queueSshDeepLink);
       }
       return;
     }
@@ -745,6 +849,16 @@ if (!gotLock) {
       },
     });
     sshDeepLinkEnabled = initialSshDeepLinkPreference.enabled;
+
+    const initialJmsDeepLinkPreference = applyInitialJmsDeepLinkPreference({
+      enabled: jmsDeepLinkEnabled,
+      applyPreference: (enabled) => applyJmsProtocolClientPreference({ app, enabled, isDev }),
+      clearPending: () => {
+        pendingJmsDeepLinkUrls.length = 0;
+        jmsDeepLinkDeliveryGeneration += 1;
+      },
+    });
+    jmsDeepLinkEnabled = initialJmsDeepLinkPreference.enabled;
 
     // Grant only the Chromium permissions the app actually uses, and only
     // to the app's own origin. The default session is shared with in-app
@@ -850,6 +964,7 @@ if (!gotLock) {
     // Create the main window
     void createAndShowMainWindow().then(() => {
       void flushPendingSshDeepLinks();
+      void flushPendingJmsDeepLinks();
       void flushPendingOpenTerminalPaths();
 
       // Trigger auto-update check 5 s after window creation.

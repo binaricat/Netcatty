@@ -771,5 +771,7 @@ export const enCoreMessages: Messages = {
   'vault.hosts.empty.title': 'Set up your hosts',
   'vault.hosts.empty.desc': 'Save hosts to quickly connect to your servers, VMs, and containers.',
   'deepLink.ssh.invalid': 'Invalid ssh:// link',
+  'deepLink.jms.invalid': 'Invalid JumpServer link',
+  'deepLink.jms.unsupported': 'Unsupported JumpServer protocol: {{protocol}}',
 
 };

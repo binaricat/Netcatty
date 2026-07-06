@@ -2,88 +2,227 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const SSH_DEEP_LINK_CHANNEL = "netcatty:deepLink:ssh";
+const JMS_DEEP_LINK_CHANNEL = "netcatty:deepLink:jms";
 const SSH_PROTOCOL = "ssh";
+const JMS_PROTOCOL = "jms";
 const SSH_DEEP_LINK_PREFERENCES_FILE = "ssh-deep-link-preferences.json";
+const JMS_DEEP_LINK_PREFERENCES_FILE = "jms-deep-link-preferences.json";
+
+function isDeepLinkUrl(rawUrl, protocol) {
+  if (typeof rawUrl !== "string" || !rawUrl.trim()) return false;
+  return rawUrl.trim().toLowerCase().startsWith(`${protocol}://`);
+}
+
+function collectDeepLinkUrls(argv, protocol) {
+  if (!Array.isArray(argv)) return [];
+  return argv.filter((rawUrl) => isDeepLinkUrl(rawUrl, protocol));
+}
 
 function isSshDeepLinkUrl(rawUrl) {
-  if (typeof rawUrl !== "string" || !rawUrl.trim()) return false;
-  return rawUrl.trim().toLowerCase().startsWith(`${SSH_PROTOCOL}://`);
+  return isDeepLinkUrl(rawUrl, SSH_PROTOCOL);
+}
+
+function isJmsDeepLinkUrl(rawUrl) {
+  return isDeepLinkUrl(rawUrl, JMS_PROTOCOL);
 }
 
 function collectSshDeepLinkUrls(argv) {
-  if (!Array.isArray(argv)) return [];
-  return argv.filter(isSshDeepLinkUrl);
+  return collectDeepLinkUrls(argv, SSH_PROTOCOL);
 }
 
-function registerSshProtocolClient({ app, isDev, argv = process.argv, execPath = process.execPath, logWarn = console.warn } = {}) {
+function collectJmsDeepLinkUrls(argv) {
+  return collectDeepLinkUrls(argv, JMS_PROTOCOL);
+}
+
+function registerProtocolClient({
+  app,
+  protocol,
+  isDev,
+  argv = process.argv,
+  execPath = process.execPath,
+  logWarn = console.warn,
+} = {}) {
   if (!app || typeof app.setAsDefaultProtocolClient !== "function") return false;
   try {
     if (isDev && process.defaultApp && argv[1]) {
-      return app.setAsDefaultProtocolClient(SSH_PROTOCOL, execPath, [argv[1]]);
+      return app.setAsDefaultProtocolClient(protocol, execPath, [argv[1]]);
     }
-    return app.setAsDefaultProtocolClient(SSH_PROTOCOL);
+    return app.setAsDefaultProtocolClient(protocol);
   } catch (err) {
-    logWarn("[Main] Failed to register ssh:// protocol handler:", err);
+    logWarn(`[Main] Failed to register ${protocol}:// protocol handler:`, err);
     return false;
   }
 }
 
-function removeSshProtocolClient({ app, isDev, argv = process.argv, execPath = process.execPath, logWarn = console.warn } = {}) {
+function removeProtocolClient({
+  app,
+  protocol,
+  isDev,
+  argv = process.argv,
+  execPath = process.execPath,
+  logWarn = console.warn,
+} = {}) {
   if (!app || typeof app.removeAsDefaultProtocolClient !== "function") return false;
   try {
     if (isDev && process.defaultApp && argv[1]) {
-      return app.removeAsDefaultProtocolClient(SSH_PROTOCOL, execPath, [argv[1]]);
+      return app.removeAsDefaultProtocolClient(protocol, execPath, [argv[1]]);
     }
-    return app.removeAsDefaultProtocolClient(SSH_PROTOCOL);
+    return app.removeAsDefaultProtocolClient(protocol);
   } catch (err) {
-    logWarn("[Main] Failed to remove ssh:// protocol handler:", err);
+    logWarn(`[Main] Failed to remove ${protocol}:// protocol handler:`, err);
     return false;
   }
 }
 
-function getSshDeepLinkPreferencePath({ app, pathModule = path } = {}) {
+function registerSshProtocolClient(options = {}) {
+  return registerProtocolClient({ ...options, protocol: SSH_PROTOCOL });
+}
+
+function removeSshProtocolClient(options = {}) {
+  return removeProtocolClient({ ...options, protocol: SSH_PROTOCOL });
+}
+
+function registerJmsProtocolClient(options = {}) {
+  return registerProtocolClient({ ...options, protocol: JMS_PROTOCOL });
+}
+
+function removeJmsProtocolClient(options = {}) {
+  return removeProtocolClient({ ...options, protocol: JMS_PROTOCOL });
+}
+
+function getDeepLinkPreferencePath({ app, preferencesFile, pathModule = path } = {}) {
   if (!app || typeof app.getPath !== "function") return null;
   try {
-    return pathModule.join(app.getPath("userData"), SSH_DEEP_LINK_PREFERENCES_FILE);
+    return pathModule.join(app.getPath("userData"), preferencesFile);
   } catch {
     return null;
   }
 }
 
-function readSshDeepLinkEnabledPreference({ app, fsModule = fs, pathModule = path, logWarn = console.warn } = {}) {
-  const filePath = getSshDeepLinkPreferencePath({ app, pathModule });
-  if (!filePath) return true;
+function getSshDeepLinkPreferencePath(options = {}) {
+  return getDeepLinkPreferencePath({
+    ...options,
+    preferencesFile: SSH_DEEP_LINK_PREFERENCES_FILE,
+  });
+}
+
+function getJmsDeepLinkPreferencePath(options = {}) {
+  return getDeepLinkPreferencePath({
+    ...options,
+    preferencesFile: JMS_DEEP_LINK_PREFERENCES_FILE,
+  });
+}
+
+function readDeepLinkEnabledPreference({
+  app,
+  preferencesFile,
+  defaultWhenMissing,
+  parseEnabled,
+  fsModule = fs,
+  pathModule = path,
+  logWarn = console.warn,
+  logLabel,
+} = {}) {
+  const filePath = getDeepLinkPreferencePath({ app, preferencesFile, pathModule });
+  if (!filePath) return defaultWhenMissing;
   try {
-    if (!fsModule.existsSync(filePath)) return true;
+    if (!fsModule.existsSync(filePath)) return defaultWhenMissing;
     const parsed = JSON.parse(fsModule.readFileSync(filePath, "utf8"));
-    return parsed?.enabled !== false;
+    return parseEnabled(parsed);
   } catch (err) {
-    logWarn("[Main] Failed to read ssh:// deep link preference:", err);
-    return true;
+    logWarn(`[Main] Failed to read ${logLabel} deep link preference:`, err);
+    return defaultWhenMissing;
   }
 }
 
-function writeSshDeepLinkEnabledPreference({ app, enabled, fsModule = fs, pathModule = path, logWarn = console.warn } = {}) {
-  const filePath = getSshDeepLinkPreferencePath({ app, pathModule });
+function readSshDeepLinkEnabledPreference(options = {}) {
+  return readDeepLinkEnabledPreference({
+    ...options,
+    preferencesFile: SSH_DEEP_LINK_PREFERENCES_FILE,
+    defaultWhenMissing: true,
+    parseEnabled: (parsed) => parsed?.enabled !== false,
+    logLabel: "ssh://",
+  });
+}
+
+function readJmsDeepLinkEnabledPreference(options = {}) {
+  return readDeepLinkEnabledPreference({
+    ...options,
+    preferencesFile: JMS_DEEP_LINK_PREFERENCES_FILE,
+    defaultWhenMissing: false,
+    parseEnabled: (parsed) => parsed?.enabled === true,
+    logLabel: "jms://",
+  });
+}
+
+function writeDeepLinkEnabledPreference({
+  app,
+  enabled,
+  preferencesFile,
+  fsModule = fs,
+  pathModule = path,
+  logWarn = console.warn,
+  logLabel,
+} = {}) {
+  const filePath = getDeepLinkPreferencePath({ app, preferencesFile, pathModule });
   if (!filePath) return false;
   try {
     fsModule.mkdirSync(pathModule.dirname(filePath), { recursive: true });
     fsModule.writeFileSync(filePath, JSON.stringify({ enabled: enabled !== false }, null, 2));
     return true;
   } catch (err) {
-    logWarn("[Main] Failed to write ssh:// deep link preference:", err);
+    logWarn(`[Main] Failed to write ${logLabel} deep link preference:`, err);
     return false;
   }
 }
 
-function applySshProtocolClientPreference(options = {}) {
-  if (options.enabled === false) {
-    return removeSshProtocolClient(options);
-  }
-  return registerSshProtocolClient(options);
+function writeSshDeepLinkEnabledPreference(options = {}) {
+  return writeDeepLinkEnabledPreference({
+    ...options,
+    preferencesFile: SSH_DEEP_LINK_PREFERENCES_FILE,
+    logLabel: "ssh://",
+  });
 }
 
-function updateSshDeepLinkEnabledPreference({
+function writeJmsDeepLinkEnabledPreference(options = {}) {
+  return writeDeepLinkEnabledPreference({
+    ...options,
+    preferencesFile: JMS_DEEP_LINK_PREFERENCES_FILE,
+    logLabel: "jms://",
+  });
+}
+
+function applyDeepLinkProtocolClientPreference({
+  enabled,
+  registerClient,
+  removeClient,
+  options = {},
+} = {}) {
+  if (enabled === false) {
+    return removeClient(options);
+  }
+  return registerClient(options);
+}
+
+function applySshProtocolClientPreference(options = {}) {
+  return applyDeepLinkProtocolClientPreference({
+    enabled: options.enabled,
+    registerClient: registerSshProtocolClient,
+    removeClient: removeSshProtocolClient,
+    options,
+  });
+}
+
+function applyJmsProtocolClientPreference(options = {}) {
+  return applyDeepLinkProtocolClientPreference({
+    enabled: options.enabled,
+    registerClient: registerJmsProtocolClient,
+    removeClient: removeJmsProtocolClient,
+    options,
+  });
+}
+
+function updateDeepLinkEnabledPreference({
   currentEnabled = true,
   enabled = true,
   applyPreference = () => false,
@@ -115,38 +254,85 @@ function updateSshDeepLinkEnabledPreference({
   return { enabled: nextEnabled, success: true };
 }
 
-function shouldDeliverSshDeepLink({ enabled = true, deliveryGeneration = 0, expectedGeneration = 0 } = {}) {
+function updateSshDeepLinkEnabledPreference(options = {}) {
+  return updateDeepLinkEnabledPreference(options);
+}
+
+function updateJmsDeepLinkEnabledPreference(options = {}) {
+  return updateDeepLinkEnabledPreference(options);
+}
+
+function shouldDeliverDeepLink({ enabled = true, deliveryGeneration = 0, expectedGeneration = 0 } = {}) {
   return enabled !== false && deliveryGeneration === expectedGeneration;
 }
 
-function applyInitialSshDeepLinkPreference({
+function shouldDeliverSshDeepLink(options = {}) {
+  return shouldDeliverDeepLink(options);
+}
+
+function shouldDeliverJmsDeepLink(options = {}) {
+  return shouldDeliverDeepLink(options);
+}
+
+function applyInitialDeepLinkPreference({
   enabled = true,
   applyPreference = () => false,
   clearPending,
   logWarn = console.warn,
+  logLabel,
+  warnOnFailure = true,
 } = {}) {
   const requestedEnabled = enabled !== false;
   const success = applyPreference(requestedEnabled) === true;
   if (success) {
     return { enabled: requestedEnabled, success: true };
   }
-  logWarn("[Main] Failed to apply saved ssh:// deep link preference.");
+  if (warnOnFailure && requestedEnabled) {
+    logWarn(`[Main] Failed to apply saved ${logLabel} deep link preference.`);
+  }
   if (requestedEnabled) {
     clearPending?.();
   }
   return { enabled: false, success: false };
 }
 
+function applyInitialSshDeepLinkPreference(options = {}) {
+  return applyInitialDeepLinkPreference({
+    ...options,
+    logLabel: "ssh://",
+    warnOnFailure: true,
+  });
+}
+
+function applyInitialJmsDeepLinkPreference(options = {}) {
+  return applyInitialDeepLinkPreference({
+    ...options,
+    logLabel: "jms://",
+    warnOnFailure: false,
+  });
+}
+
 module.exports = {
   SSH_DEEP_LINK_CHANNEL,
+  JMS_DEEP_LINK_CHANNEL,
+  applyInitialJmsDeepLinkPreference,
   applyInitialSshDeepLinkPreference,
-  collectSshDeepLinkUrls,
-  isSshDeepLinkUrl,
+  applyJmsProtocolClientPreference,
   applySshProtocolClientPreference,
-  registerSshProtocolClient,
-  removeSshProtocolClient,
+  collectJmsDeepLinkUrls,
+  collectSshDeepLinkUrls,
+  isJmsDeepLinkUrl,
+  isSshDeepLinkUrl,
+  readJmsDeepLinkEnabledPreference,
   readSshDeepLinkEnabledPreference,
+  registerJmsProtocolClient,
+  registerSshProtocolClient,
+  removeJmsProtocolClient,
+  removeSshProtocolClient,
+  shouldDeliverJmsDeepLink,
   shouldDeliverSshDeepLink,
+  updateJmsDeepLinkEnabledPreference,
   updateSshDeepLinkEnabledPreference,
+  writeJmsDeepLinkEnabledPreference,
   writeSshDeepLinkEnabledPreference,
 };

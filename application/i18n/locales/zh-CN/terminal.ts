@@ -107,6 +107,9 @@ export const zhCNTerminalMessages: Messages = {
   'settings.sshDeepLink.title': 'SSH 链接',
   'settings.sshDeepLink.enable': '用 Netcatty 打开 ssh:// 链接',
   'settings.sshDeepLink.enableDesc': '允许 Netcatty 接管来自浏览器和其他应用的 ssh:// 链接。',
+  'settings.jmsDeepLink.title': 'JumpServer 链接',
+  'settings.jmsDeepLink.enable': '处理 jms:// 链接',
+  'settings.jmsDeepLink.enableDesc': '将 Netcatty 注册为 JumpServer jms:// 客户端链接的处理程序，可能与官方 JumpServer 客户端冲突。',
 
   // Settings > SFTP Auto Sync
   'settings.sftp.autoSync': '自动同步到远程',

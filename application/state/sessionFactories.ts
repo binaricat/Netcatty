@@ -89,5 +89,6 @@ export const createHostTerminalSession = (
     etEnabled: host.etEnabled,
     charset: host.charset,
     ...(host.ephemeral ? { ephemeralHost: true } : {}),
+    ...(host.autoOpenSftpPanel ? { autoOpenSidePanel: "sftp" as const } : {}),
   };
 };

@@ -418,7 +418,8 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
 
     if (sidePanelOpenTabsRef.current.has(tabId)) return;
 
-    const autoOpenTarget = resolveTerminalSidePanelAutoOpen({
+    const sessionAutoOpenTarget = session.autoOpenSidePanel === 'sftp' && sftpAvailable ? 'sftp' : null;
+    const autoOpenTarget = sessionAutoOpenTarget ?? resolveTerminalSidePanelAutoOpen({
       enabled: terminalSidePanelAutoOpenRef.current,
       selectedTab: terminalSidePanelAutoOpenTabRef.current,
       sftpAvailable,

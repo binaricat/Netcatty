@@ -35,6 +35,9 @@ declare global {
     onOpenTerminalPath?(cb: (payload: { path?: string }) => void): () => void;
     setSshDeepLinkEnabled?(enabled: boolean): Promise<boolean | { success: boolean; enabled: boolean }>;
     getSshDeepLinkEnabled?(): Promise<boolean>;
+    onJmsDeepLink?(cb: (payload: { url?: string }) => void): () => void;
+    setJmsDeepLinkEnabled?(enabled: boolean): Promise<boolean | { success: boolean; enabled: boolean }>;
+    getJmsDeepLinkEnabled?(): Promise<boolean>;
 
     // Global Toggle Hotkey (Quake Mode)
     registerGlobalHotkey?(hotkey: string): Promise<{ success: boolean; enabled?: boolean; error?: string; accelerator?: string }>;

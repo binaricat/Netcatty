@@ -498,6 +498,8 @@ export const zhCNCoreMessages: Messages = {
   'vault.hosts.empty.title': '设置你的主机',
   'vault.hosts.empty.desc': '保存主机以快速连接到你的服务器、虚拟机和容器。',
   'deepLink.ssh.invalid': '无效的 ssh:// 链接',
+  'deepLink.jms.invalid': '无效的 JumpServer 链接',
+  'deepLink.jms.unsupported': '不支持的 JumpServer 协议：{{protocol}}',
 
   // Vault import
   'vault.import.title': '添加数据到你的 Vault',

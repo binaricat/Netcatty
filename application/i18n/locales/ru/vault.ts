@@ -420,6 +420,9 @@ export const ruVaultMessages: Messages = {
   'settings.sshDeepLink.title': 'SSH-ссылки',
   'settings.sshDeepLink.enable': 'Открывать ssh:// ссылки в Netcatty',
   'settings.sshDeepLink.enableDesc': 'Разрешить Netcatty обрабатывать ssh:// ссылки из браузеров и других приложений.',
+  'settings.jmsDeepLink.title': 'Ссылки JumpServer',
+  'settings.jmsDeepLink.enable': 'Обрабатывать ссылки jms://',
+  'settings.jmsDeepLink.enableDesc': 'Зарегистрировать Netcatty как обработчик клиентских ссылок JumpServer jms://. Может конфликтовать с официальным клиентом JumpServer.',
 
   // Settings > SFTP Auto Sync
   'settings.sftp.autoSync': 'Автосинхронизация с удалённым сервером',
