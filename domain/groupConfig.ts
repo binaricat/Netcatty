@@ -98,6 +98,8 @@ const INHERITABLE_KEYS: (keyof GroupConfig)[] = [
 const EMPTY_STRING_OVERRIDES_GROUP_DEFAULT = new Set<keyof GroupConfig>([
   'telnetUsername',
   'telnetPassword',
+  // Empty-string host identityId = explicitly no identity (auth-retry save, #1956); do not re-inherit group identity.
+  'identityId',
 ]);
 
 /**

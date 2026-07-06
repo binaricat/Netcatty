@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { applyGroupDefaults } from "../../domain/groupConfig";
 import { resolveHostAuth } from "../../domain/sshAuth";
 import type { Host, Identity } from "../../types";
 import { buildSavedAuthHostUpdate } from "./hooks/useTerminalAuthState";
@@ -26,7 +27,7 @@ test("password save clears identityId and identityFileId", () => {
     keyId: null,
   });
 
-  assert.equal(updated.identityId, undefined);
+  assert.equal(updated.identityId, "");
   assert.equal(updated.identityFileId, undefined);
   assert.equal(updated.password, "secret");
   assert.equal(updated.savePassword, true);
@@ -42,7 +43,7 @@ test("key save clears identityId and sets identityFileId", () => {
     keyId: "key-2",
   });
 
-  assert.equal(updated.identityId, undefined);
+  assert.equal(updated.identityId, "");
   assert.equal(updated.identityFileId, "key-2");
   assert.equal(updated.password, undefined);
 });
@@ -69,6 +70,40 @@ test("resolveHostAuth uses saved host credentials after identityId is cleared", 
 
   const resolved = resolveHostAuth({
     host: updated,
+    keys: [],
+    identities: [identity],
+  });
+
+  assert.equal(resolved.username, "root");
+  assert.equal(resolved.password, "correct");
+});
+
+test("saved credentials override a group-inherited identity", () => {
+  const identity: Identity = {
+    id: "identity-1",
+    label: "old",
+    username: "olduser",
+    authMethod: "password",
+    password: "wrong",
+    created: 0,
+  };
+
+  const updated = buildSavedAuthHostUpdate(
+    { ...baseHost, identityId: undefined },
+    {
+      authMethod: "password",
+      username: "root",
+      password: "correct",
+      keyId: null,
+    },
+  );
+
+  const effective = applyGroupDefaults(updated, { identityId: "identity-1" });
+
+  assert.equal(effective.identityId, "");
+
+  const resolved = resolveHostAuth({
+    host: effective,
     keys: [],
     identities: [identity],
   });

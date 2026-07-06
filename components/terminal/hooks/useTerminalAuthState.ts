@@ -26,7 +26,10 @@ export const buildSavedAuthHostUpdate = (
       : undefined,
   // Detach stale Keychain identity on explicit credential save (#1956):
   // resolveHostAuth prefers identity credentials over host fields.
-  identityId: undefined,
+  // Empty string (not undefined) so applyGroupDefaults treats this as an explicit
+  // host-level override and does not re-inherit a group-level identity; consumers
+  // check host.identityId truthiness so "" behaves as "no identity".
+  identityId: "",
 });
 
 export const useTerminalAuthState = ({
