@@ -103,7 +103,6 @@ export const buildJmsDeepLinkEphemeralHost = (
   target: JmsDeepLinkTarget,
   options: JmsDeepLinkDraftOptions,
 ): Host => {
-  const isTelnet = target.protocol === "telnet";
   return {
     id: options.id,
     label: target.label,
@@ -113,8 +112,7 @@ export const buildJmsDeepLinkEphemeralHost = (
     password: target.password,
     authMethod: "password",
     ephemeral: true,
-    protocol: isTelnet ? "telnet" : "ssh",
-    ...(isTelnet ? { telnetUsername: target.username, telnetPassword: target.password } : {}),
+    protocol: "ssh",
     // JumpServer sftp payloads target file transfer: connect the gateway
     // shell and surface Netcatty's SFTP side panel for that session.
     ...(target.protocol === "sftp" ? { autoOpenSftpPanel: true } : {}),
