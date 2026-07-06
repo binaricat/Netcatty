@@ -37,7 +37,6 @@ import {
 import type { DropEntry } from '../lib/sftpFileUtils';
 import { Host, KnownHost, TerminalSession, Workspace } from '../types';
 import { applySessionFontSizeToHost } from '../domain/terminalAppearance';
-import { isSavedVaultHost } from '../domain/ephemeralHosts';
 import { resolveHostAutofillPassword } from '../domain/sshAuth';
 import {
   resolveEffectiveTerminalHost,
@@ -66,6 +65,7 @@ import {
 import { ThemeSidePanel } from './terminal/ThemeSidePanel';
 import { focusTerminalSessionInput } from './terminal/focusTerminalSession';
 import { TerminalComposeBar } from './terminal/TerminalComposeBar';
+import { resolveTerminalFontSizeUpdateTarget } from './terminalLayer/terminalFontSizeUpdate';
 import {
   AUTO_RUN_SNIPPET_LINE_DELAY_MS,
   shouldDelayAutoRunSnippetInput,
@@ -905,32 +905,17 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
 
   const handleTerminalFontSizeChange = useCallback((sessionId: string, nextFontSize: number) => {
     const session = sessionsRef.current.find((candidate) => candidate.id === sessionId);
-    // Workspace panes keep per-session font size so zooming one split does not
-    // change global defaults or sibling panes (even when they share a host).
-    if (session?.workspaceId) {
-      onUpdateSessionFontSize?.(sessionId, nextFontSize);
-      return;
-    }
-
     const sessionHost = sessionHostsMapRef.current.get(sessionId);
-    if (!sessionHost) return;
-
-    const rawHost = hostMapRef.current.get(sessionHost.id);
-    const usesGlobalFontSize = sessionHost.protocol === 'local' || sessionHost.id?.startsWith('local-') || !rawHost;
-    if (usesGlobalFontSize) {
-      onUpdateTerminalFontSize?.(nextFontSize);
-      return;
-    }
-
-    // Ephemeral deep-link hosts are not in the persisted vault, so a host
-    // update would be silently dropped; keep their zoom per-session instead
-    // (rendered via applySessionFontSizeToHost), like workspace panes.
-    if (!isSavedVaultHost(rawHost)) {
+    const rawHost = sessionHost ? hostMapRef.current.get(sessionHost.id) : null;
+    const target = resolveTerminalFontSizeUpdateTarget({ session, sessionHost, rawHost });
+    if (target.kind === 'none') return;
+    if (target.kind === 'session') {
       onUpdateSessionFontSize?.(sessionId, nextFontSize);
-      return;
+    } else if (target.kind === 'global') {
+      onUpdateTerminalFontSize?.(nextFontSize);
+    } else {
+      onUpdateHost({ ...target.host, fontSize: nextFontSize, fontSizeOverride: true });
     }
-
-    onUpdateHost({ ...rawHost, fontSize: nextFontSize, fontSizeOverride: true });
   }, [onUpdateHost, onUpdateSessionFontSize, onUpdateTerminalFontSize]);
 
   const validAIScopeTargetIds = useMemo(() => {

@@ -21,6 +21,7 @@ export type RestoredTerminalSession = {
   localShellArgs?: string[];
   localShellName?: string;
   localShellIcon?: string;
+  localStartDir?: string;
   fontSize?: number;
   fontSizeOverride?: boolean;
   customName?: string;
@@ -133,6 +134,7 @@ const restoreSession = (session: TerminalSession): RestoredTerminalSession => {
     ...(session.localShellArgs ? { localShellArgs: [...session.localShellArgs] } : {}),
     ...(session.localShellName ? { localShellName: session.localShellName } : {}),
     ...(session.localShellIcon ? { localShellIcon: session.localShellIcon } : {}),
+    ...(session.localStartDir ? { localStartDir: session.localStartDir } : {}),
     ...(session.fontSize !== undefined ? { fontSize: session.fontSize } : {}),
     ...(session.fontSizeOverride !== undefined ? { fontSizeOverride: session.fontSizeOverride } : {}),
     ...(session.customName ? { customName: session.customName } : {}),
@@ -172,6 +174,7 @@ const restoreSessionFromUnknown = (value: unknown): RestoredTerminalSession | nu
     ...(Array.isArray(value.localShellArgs) ? { localShellArgs: value.localShellArgs.filter((arg): arg is string => typeof arg === "string") } : {}),
     ...(readString(value, "localShellName") ? { localShellName: readString(value, "localShellName") } : {}),
     ...(readString(value, "localShellIcon") ? { localShellIcon: readString(value, "localShellIcon") } : {}),
+    ...(readString(value, "localStartDir") ? { localStartDir: readString(value, "localStartDir") } : {}),
     ...(readNumber(value, "fontSize") !== undefined ? { fontSize: readNumber(value, "fontSize") } : {}),
     ...(readBoolean(value, "fontSizeOverride") !== undefined ? { fontSizeOverride: readBoolean(value, "fontSizeOverride") } : {}),
     ...(readString(value, "customName") ? { customName: readString(value, "customName") } : {}),

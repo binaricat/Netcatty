@@ -65,6 +65,7 @@ import {
   VaultTreeInlineRenameInput,
   VaultTreeItemRow,
 } from "../vault/VaultTreeRow";
+import { VaultDeleteConfirmDialog } from "../vault/VaultDeleteConfirmDialog";
 import {
   clearVaultDropIndicator,
   getVaultDropIntent,
@@ -126,7 +127,7 @@ export interface NotesManagerProps {
 }
 
 type HoverActionMenuProps = {
-  children: React.ReactNode;
+  children: React.ReactNode | ((closeMenu: () => void) => React.ReactNode);
   className?: string;
 };
 
@@ -147,6 +148,11 @@ const HoverActionMenu: React.FC<HoverActionMenuProps> = ({ children, className }
   };
 
   useEffect(() => () => cancelClose(), []);
+
+  const closeMenu = () => {
+    cancelClose();
+    setOpen(false);
+  };
 
   return (
     <Dropdown open={open} onOpenChange={setOpen}>
@@ -179,7 +185,7 @@ const HoverActionMenu: React.FC<HoverActionMenuProps> = ({ children, className }
         onMouseEnter={cancelClose}
         onMouseLeave={scheduleClose}
       >
-        {children}
+        {typeof children === "function" ? children(closeMenu) : children}
       </DropdownContent>
     </Dropdown>
   );
@@ -362,6 +368,11 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
   const [isTreeResizing, setIsTreeResizing] = useState(false);
   const [draggingNoteId, setDraggingNoteId] = useState<string | null>(null);
   const [draggingGroupPath, setDraggingGroupPath] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{
+    type: "note" | "group";
+    id: string;
+    name: string;
+  } | null>(null);
   const [treeWidth, setTreeWidth, persistTreeWidth] = useStoredNumber(
     STORAGE_KEY_VAULT_NOTES_TREE_WIDTH,
     NOTES_TREE_DEFAULT_WIDTH,
@@ -710,7 +721,7 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
     setOverlayNoteId(nextSelection.overlayNoteId);
   };
 
-  const deleteNoteById = (noteId: string) => {
+  const performDeleteNoteById = (noteId: string) => {
     const next = sortedNotes.filter((note) => note.id !== noteId);
     commitNotes(next);
     if (selectedNoteId === noteId) {
@@ -721,6 +732,15 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
       setEditingNoteId(null);
     }
     if (overlayNoteId === noteId) setOverlayNoteId(null);
+  };
+
+  const requestDeleteNoteById = (noteId: string) => {
+    const note = sortedNotes.find((item) => item.id === noteId);
+    setDeleteTarget({
+      type: "note",
+      id: noteId,
+      name: note?.title || t("notes.title.placeholder"),
+    });
   };
 
   const startCreateGroup = () => {
@@ -771,11 +791,29 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
     }
   };
 
-  const deleteGroup = (group: string) => {
+  const performDeleteGroup = (group: string) => {
     onUpdateNoteGroups(groups.filter((item) => !isNoteGroupInside(item, group)));
     commitNotes(sortedNotes.map((note) => isNoteGroupInside(note.group, group) ? { ...note, group: undefined } : note));
     if (selectedGroup && isNoteGroupInside(selectedGroup, group)) setSelectedGroup(null);
     setEditingGroupPath(null);
+  };
+
+  const requestDeleteGroup = (group: string) => {
+    setDeleteTarget({
+      type: "group",
+      id: group,
+      name: group,
+    });
+  };
+
+  const confirmDeleteTarget = () => {
+    if (!deleteTarget) return;
+    if (deleteTarget.type === "note") {
+      performDeleteNoteById(deleteTarget.id);
+    } else {
+      performDeleteGroup(deleteTarget.id);
+    }
+    setDeleteTarget(null);
   };
 
   const resetTreeDragState = () => {
@@ -904,7 +942,7 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
     resetTreeDragState();
   };
 
-  const renderNoteActions = (note: VaultNote, mode: "dropdown" | "context") => {
+  const renderNoteActions = (note: VaultNote, mode: "dropdown" | "context", closeMenu?: () => void) => {
     const actions = [
       {
         label: t("common.rename"),
@@ -920,7 +958,7 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
       },
       {
         label: t("action.delete"),
-        action: () => deleteNoteById(note.id),
+        action: () => requestDeleteNoteById(note.id),
         destructive: true,
       },
     ];
@@ -946,6 +984,7 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
         className={cn(menuItemClass, action.destructive && "text-destructive hover:bg-destructive/10")}
         onClick={(event) => {
           event.stopPropagation();
+          closeMenu?.();
           action.action();
         }}
       >
@@ -954,7 +993,7 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
     ));
   };
 
-  const renderGroupActions = (groupPath: string, mode: "dropdown" | "context") => {
+  const renderGroupActions = (groupPath: string, mode: "dropdown" | "context", closeMenu?: () => void) => {
     const actions = [
       {
         label: t("notes.action.newNote"),
@@ -981,7 +1020,7 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
       },
       {
         label: t("action.delete"),
-        action: () => deleteGroup(groupPath),
+        action: () => requestDeleteGroup(groupPath),
         destructive: true,
       },
     ];
@@ -1007,6 +1046,7 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
         className={cn(menuItemClass, action.destructive && "text-destructive hover:bg-destructive/10")}
         onClick={(event) => {
           event.stopPropagation();
+          closeMenu?.();
           action.action();
         }}
       >
@@ -1043,7 +1083,7 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
     return (
       <ContextMenu key={note.id}>
         <ContextMenuTrigger asChild>
-          <VaultTreeItemRow
+            <VaultTreeItemRow
             label={noteDisplayTitle(note.title)}
             depth={depth}
             selected={selectedNoteId === note.id}
@@ -1094,11 +1134,11 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
               setSelectedGroup(nextSelection.selectedGroup);
               setOverlayNoteId(nextSelection.overlayNoteId);
             }}
-            actions={(
-              <HoverActionMenu>
-                {renderNoteActions(note, "dropdown")}
-              </HoverActionMenu>
-            )}
+              actions={(
+                <HoverActionMenu>
+                  {(closeMenu) => renderNoteActions(note, "dropdown", closeMenu)}
+                </HoverActionMenu>
+              )}
           />
         </ContextMenuTrigger>
         <ContextMenuContent data-notes-context-menu="note">
@@ -1196,11 +1236,11 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
                 setOverlayNoteId(nextSelection.overlayNoteId);
                 if (hasChildren) toggleGroup(node.path);
               }}
-              actions={(
-                <HoverActionMenu>
-                  {renderGroupActions(node.path, "dropdown")}
-                </HoverActionMenu>
-              )}
+                actions={(
+                  <HoverActionMenu>
+                    {(closeMenu) => renderGroupActions(node.path, "dropdown", closeMenu)}
+                  </HoverActionMenu>
+                )}
             />
           </ContextMenuTrigger>
           <ContextMenuContent data-notes-context-menu="group">
@@ -1601,6 +1641,21 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
           </div>
         </div>
       )}
+      <VaultDeleteConfirmDialog
+        open={Boolean(deleteTarget)}
+        title={t("vault.deleteConfirm.title", {
+          name: deleteTarget?.name ?? "",
+        })}
+        description={
+          deleteTarget?.type === "group"
+            ? t("vault.deleteConfirm.noteGroupDesc")
+            : t("vault.deleteConfirm.desc")
+        }
+        onOpenChange={(open) => {
+          if (!open) setDeleteTarget(null);
+        }}
+        onConfirm={confirmDeleteTarget}
+      />
     </div>
   );
 };

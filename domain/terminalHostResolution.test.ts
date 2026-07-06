@@ -120,6 +120,25 @@ test("resolveTerminalSessionHost keeps explicit missing local sessions local", (
   assert.equal(resolved.os, "macos");
 });
 
+test("resolveTerminalSessionHost carries local session start directory into fallback host", () => {
+  const resolved = resolveTerminalSessionHost({
+    session: {
+      ...baseSession,
+      protocol: "local",
+      hostname: "localhost",
+      username: "local",
+      localStartDir: "/Users/alice/project",
+    },
+    hosts: [],
+    groupConfigs: [],
+    proxyProfiles,
+    localOs: "macos",
+  });
+
+  assert.equal(resolved.protocol, "local");
+  assert.equal(resolved.localStartDir, "/Users/alice/project");
+});
+
 test("resolveTerminalSessionHost suppresses inherited network device mode for Mosh sessions", () => {
   const host: Host = {
     id: "target",

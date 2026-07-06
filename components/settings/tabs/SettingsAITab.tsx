@@ -21,6 +21,7 @@ import type { ManagedAgentKey } from "../../../infrastructure/ai/managedAgents";
 import { PROVIDER_PRESETS } from "../../../infrastructure/ai/types";
 import { useI18n } from "../../../application/i18n/I18nProvider";
 import { Button } from "../../ui/button";
+import { ConfirmDialog } from "../../ui/confirm-dialog";
 import { Select, SettingCard, SettingsSection, SettingsTabContent, SettingRow, Toggle } from "../settings-ui";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../ui/tabs";
 import { AgentIconBadge } from "../../ai/AgentIconBadge";
@@ -199,6 +200,7 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
   } = useAIPermissionGrantsState();
   const { t } = useI18n();
   const [editingProviderId, setEditingProviderId] = useState<string | null>(null);
+  const [removeProviderConfirm, setRemoveProviderConfirm] = useState<{ id: string; name: string } | null>(null);
   const [codexIntegration, setCodexIntegration] = useState<CodexIntegrationStatus | null>(null);
   const [codexLoginSession, setCodexLoginSession] = useState<CodexLoginSession | null>(null);
   const [isCodexLoading, setIsCodexLoading] = useState(false);
@@ -512,16 +514,22 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
     (id: string) => {
       const provider = providers.find((p) => p.id === id);
       const name = provider?.name || id;
-      const ok = window.confirm(
-        t('confirm.removeProvider', { name }),
-      );
-      if (!ok) return;
+      setRemoveProviderConfirm({ id, name });
+    },
+    [providers],
+  );
+
+  const handleConfirmRemoveProvider = useCallback(
+    () => {
+      if (!removeProviderConfirm) return;
+      const { id } = removeProviderConfirm;
       removeProvider(id);
       if (editingProviderId === id) {
         setEditingProviderId(null);
       }
+      setRemoveProviderConfirm(null);
     },
-    [removeProvider, editingProviderId, providers, t],
+    [removeProvider, editingProviderId, removeProviderConfirm],
   );
 
   // Agent options for default agent
@@ -1173,6 +1181,16 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
           />
         </TabsContent>
       </Tabs>
+      <ConfirmDialog
+        open={removeProviderConfirm !== null}
+        title={removeProviderConfirm ? t('confirm.removeProvider', { name: removeProviderConfirm.name }) : ''}
+        confirmLabel={t('action.remove')}
+        destructive
+        onOpenChange={(open) => {
+          if (!open) setRemoveProviderConfirm(null);
+        }}
+        onConfirm={handleConfirmRemoveProvider}
+      />
     </SettingsTabContent>
   );
 };

@@ -932,3 +932,244 @@ test('continues OpenAI-compatible tool streams when arguments arrive before the 
   assert.ok(assistantMessage.tool_calls?.[0]?.id?.startsWith('call_netcatty_'));
   assert.equal(assistantMessage.tool_calls?.[0]?.function?.arguments, '{"command":"which docker"}');
 });
+
+test('recovers tool streams when the first named chunk carries a non-standard tool call type', async (t) => {
+  const originalWindow = (globalThis as typeof globalThis & { window?: unknown }).window;
+  t.after(() => {
+    (globalThis as typeof globalThis & { window?: unknown }).window = originalWindow;
+  });
+
+  const dataHandlers = new Map<string, (data: string) => void>();
+  const endHandlers = new Map<string, () => void>();
+  const sentBodies: Array<Record<string, unknown>> = [];
+  const emitChatChunk = (emit: (data: string) => void, delta: Record<string, unknown>, finishReason?: string) => {
+    emit(JSON.stringify({
+      id: 'chatcmpl-nonstandard-type-test',
+      object: 'chat.completion.chunk',
+      created: 1777600000,
+      model: 'deepseek-chat',
+      choices: [{ index: 0, delta, finish_reason: finishReason ?? null }],
+    }));
+  };
+
+  (globalThis as typeof globalThis & { window?: unknown }).window = {
+    netcatty: {
+      aiFetch: async () => ({ ok: true, status: 200, data: '{}' }),
+      aiChatCancel: async () => true,
+      onAiStreamData: (requestId: string, cb: (data: string) => void) => {
+        dataHandlers.set(requestId, cb);
+        return () => dataHandlers.delete(requestId);
+      },
+      onAiStreamEnd: (requestId: string, cb: () => void) => {
+        endHandlers.set(requestId, cb);
+        return () => endHandlers.delete(requestId);
+      },
+      onAiStreamError: () => () => undefined,
+      aiChatStream: async (
+        requestId: string,
+        _url: string,
+        _headers: Record<string, string>,
+        body: string,
+      ) => {
+        sentBodies.push(JSON.parse(body));
+        const requestNumber = sentBodies.length;
+        setTimeout(() => {
+          const emit = dataHandlers.get(requestId);
+          assert.ok(emit, 'stream data handler should be registered before aiChatStream starts');
+          if (requestNumber === 1) {
+            emitChatChunk(emit, {
+              tool_calls: [{
+                index: 0,
+                id: 'call_1',
+                type: 'tool_call',
+                function: { name: 'terminal_exec', arguments: '{"co' },
+              }],
+            });
+            emitChatChunk(emit, {
+              tool_calls: [{
+                index: 0,
+                id: '',
+                type: '',
+                function: { name: '', arguments: 'mmand":"pwd"}' },
+              }],
+            });
+            emitChatChunk(emit, {}, 'tool_calls');
+          } else {
+            emitChatChunk(emit, { content: 'tool completed' });
+            emitChatChunk(emit, {}, 'stop');
+          }
+          endHandlers.get(requestId)?.();
+        }, 0);
+        return { ok: true, statusCode: 200, statusText: 'OK' };
+      },
+    },
+  };
+
+  const executedCommands: string[] = [];
+  const model = createModelFromConfig({
+    id: 'deepseek-one-api',
+    providerId: 'custom',
+    name: 'DeepSeek One API',
+    apiKey: 'test-key',
+    baseURL: 'https://one-api.example/v1',
+    defaultModel: 'deepseek-chat',
+    enabled: true,
+  });
+
+  const result = streamText({
+    model,
+    messages: [{ role: 'user', content: 'inspect cwd' }],
+    tools: {
+      terminal_exec: tool({
+        inputSchema: z.object({ command: z.string() }),
+        execute: async ({ command }) => {
+          executedCommands.push(command);
+          return { ok: true };
+        },
+      }),
+    },
+    stopWhen: isStepCount(2),
+  });
+
+  let text = '';
+  for await (const chunk of result.stream) {
+    if (chunk.type === 'text-delta') {
+      text += chunk.text;
+    }
+  }
+
+  assert.deepEqual(executedCommands, ['pwd']);
+  assert.equal(text, 'tool completed');
+  const followUpMessages = sentBodies[1].messages as Array<Record<string, unknown>>;
+  const assistantMessage = followUpMessages[1] as {
+    tool_calls?: Array<{ id?: string; type?: string; function?: { name?: string; arguments?: string } }>;
+  };
+  const toolMessage = followUpMessages[2] as { tool_call_id?: string };
+  assert.equal(assistantMessage.tool_calls?.[0]?.type, 'function');
+  assert.equal(assistantMessage.tool_calls?.[0]?.function?.name, 'terminal_exec');
+  assert.equal(toolMessage.tool_call_id, assistantMessage.tool_calls?.[0]?.id);
+});
+
+test('re-injects the remembered tool name when the SDK missed the naming chunk', async (t) => {
+  const originalWindow = (globalThis as typeof globalThis & { window?: unknown }).window;
+  t.after(() => {
+    (globalThis as typeof globalThis & { window?: unknown }).window = originalWindow;
+  });
+
+  const dataHandlers = new Map<string, (data: string) => void>();
+  const endHandlers = new Map<string, () => void>();
+  const sentBodies: Array<Record<string, unknown>> = [];
+  const emitRawChunk = (emit: (data: string) => void, choices: unknown[]) => {
+    emit(JSON.stringify({
+      id: 'chatcmpl-choice-desync-test',
+      object: 'chat.completion.chunk',
+      created: 1777600000,
+      model: 'deepseek-chat',
+      choices,
+    }));
+  };
+
+  (globalThis as typeof globalThis & { window?: unknown }).window = {
+    netcatty: {
+      aiFetch: async () => ({ ok: true, status: 200, data: '{}' }),
+      aiChatCancel: async () => true,
+      onAiStreamData: (requestId: string, cb: (data: string) => void) => {
+        dataHandlers.set(requestId, cb);
+        return () => dataHandlers.delete(requestId);
+      },
+      onAiStreamEnd: (requestId: string, cb: () => void) => {
+        endHandlers.set(requestId, cb);
+        return () => endHandlers.delete(requestId);
+      },
+      onAiStreamError: () => () => undefined,
+      aiChatStream: async (
+        requestId: string,
+        _url: string,
+        _headers: Record<string, string>,
+        body: string,
+      ) => {
+        sentBodies.push(JSON.parse(body));
+        const requestNumber = sentBodies.length;
+        setTimeout(() => {
+          const emit = dataHandlers.get(requestId);
+          assert.ok(emit, 'stream data handler should be registered before aiChatStream starts');
+          if (requestNumber === 1) {
+            emitRawChunk(emit, [
+              { index: 0, delta: {}, finish_reason: null },
+              {
+                index: 1,
+                delta: {
+                  tool_calls: [{
+                    index: 0,
+                    id: 'call_1',
+                    type: 'function',
+                    function: { name: 'terminal_exec', arguments: '{"comm' },
+                  }],
+                },
+                finish_reason: null,
+              },
+            ]);
+            emitRawChunk(emit, [{
+              index: 1,
+              delta: {
+                tool_calls: [{
+                  index: 0,
+                  function: { arguments: 'and":"pwd"}' },
+                }],
+              },
+              finish_reason: null,
+            }]);
+            emitRawChunk(emit, [{ index: 0, delta: {}, finish_reason: 'tool_calls' }]);
+          } else {
+            emitRawChunk(emit, [{ index: 0, delta: { content: 'tool completed' }, finish_reason: null }]);
+            emitRawChunk(emit, [{ index: 0, delta: {}, finish_reason: 'stop' }]);
+          }
+          endHandlers.get(requestId)?.();
+        }, 0);
+        return { ok: true, statusCode: 200, statusText: 'OK' };
+      },
+    },
+  };
+
+  const executedCommands: string[] = [];
+  const model = createModelFromConfig({
+    id: 'deepseek-one-api',
+    providerId: 'custom',
+    name: 'DeepSeek One API',
+    apiKey: 'test-key',
+    baseURL: 'https://one-api.example/v1',
+    defaultModel: 'deepseek-chat',
+    enabled: true,
+  });
+
+  const result = streamText({
+    model,
+    messages: [{ role: 'user', content: 'inspect cwd' }],
+    tools: {
+      terminal_exec: tool({
+        inputSchema: z.object({ command: z.string() }),
+        execute: async ({ command }) => {
+          executedCommands.push(command);
+          return { ok: true };
+        },
+      }),
+    },
+    stopWhen: isStepCount(2),
+  });
+
+  const errorMessages: string[] = [];
+  let text = '';
+  for await (const chunk of result.fullStream) {
+    if (chunk.type === 'error') {
+      const error = chunk.error;
+      errorMessages.push(error instanceof Error ? error.message : String(error));
+    }
+    if (chunk.type === 'text-delta') {
+      text += chunk.text;
+    }
+  }
+
+  assert.ok(!errorMessages.some((message) => /Expected 'function\.name'/.test(message)));
+  assert.deepEqual(executedCommands, ['pwd']);
+  assert.equal(text, 'tool completed');
+});

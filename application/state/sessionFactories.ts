@@ -6,6 +6,7 @@ export interface LocalTerminalOptions {
   shellArgs?: string[];
   shellName?: string;
   shellIcon?: string;
+  localStartDir?: string;
 }
 
 export const createLocalTerminalSession = (
@@ -24,6 +25,7 @@ export const createLocalTerminalSession = (
   localShellArgs: options?.shellArgs,
   localShellName: options?.shellName,
   localShellIcon: options?.shellIcon,
+  localStartDir: options?.localStartDir,
 });
 
 export const createSerialTerminalSession = (

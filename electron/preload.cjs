@@ -229,8 +229,12 @@ const terminalUrgentInputPorts = createTerminalUrgentInputPortRegistry({
 });
 terminalUrgentInputPorts.register();
 
-// ZMODEM file transfer events
+// ZMODEM file transfer events. Listener sets are owned by renderer subscribers
+// (disposed on unmount); delivery is gated by closedTerminalDataSessions so
+// events stop after exit/close and resume automatically when a session
+// restarts with the same id.
 ipcRenderer.on("netcatty:zmodem:detect", (_event, payload) => {
+  if (closedTerminalDataSessions.has(payload.sessionId)) return;
   const set = zmodemListeners.get(payload.sessionId);
   if (!set) return;
   set.forEach((cb) => { try { cb({ type: "detect", ...payload }); } catch {} });
@@ -250,21 +254,25 @@ ipcRenderer.on("netcatty:window:terminalPopupConfig", (_event, payload) => {
   });
 });
 ipcRenderer.on("netcatty:zmodem:progress", (_event, payload) => {
+  if (closedTerminalDataSessions.has(payload.sessionId)) return;
   const set = zmodemListeners.get(payload.sessionId);
   if (!set) return;
   set.forEach((cb) => { try { cb({ type: "progress", ...payload }); } catch {} });
 });
 ipcRenderer.on("netcatty:zmodem:complete", (_event, payload) => {
+  if (closedTerminalDataSessions.has(payload.sessionId)) return;
   const set = zmodemListeners.get(payload.sessionId);
   if (!set) return;
   set.forEach((cb) => { try { cb({ type: "complete", ...payload }); } catch {} });
 });
 ipcRenderer.on("netcatty:zmodem:error", (_event, payload) => {
+  if (closedTerminalDataSessions.has(payload.sessionId)) return;
   const set = zmodemListeners.get(payload.sessionId);
   if (!set) return;
   set.forEach((cb) => { try { cb({ type: "error", ...payload }); } catch {} });
 });
 ipcRenderer.on("netcatty:zmodem:overwrite-request", (_event, payload) => {
+  if (closedTerminalDataSessions.has(payload.sessionId)) return;
   const set = zmodemOverwriteListeners.get(payload.sessionId);
   if (set) set.forEach((cb) => cb(payload));
 });
@@ -276,6 +284,10 @@ ipcRenderer.on("netcatty:data", (_event, payload) => {
   });
 });
 
+// ZMODEM listener sets deliberately survive exit: they are owned by renderer
+// subscribers and disposed on unmount. Delivery is gated by
+// closedTerminalDataSessions (see zmodem handlers above), so events stop after
+// exit/close and resume when a session restarts with the same id.
 ipcRenderer.on("netcatty:exit", (_event, payload) => {
   const sessionId = payload?.sessionId;
   if (!sessionId) return;
@@ -296,8 +308,6 @@ ipcRenderer.on("netcatty:exit", (_event, payload) => {
   telnetAutoLoginCompleteListeners.delete(sessionId);
   telnetAutoLoginCancelledListeners.delete(sessionId);
   telnetEchoModeListeners.delete(sessionId);
-  zmodemListeners.delete(sessionId);
-  zmodemOverwriteListeners.delete(sessionId);
   const pendingTimer = _mcpFlushTimers.get(sessionId);
   if (pendingTimer) {
     clearTimeout(pendingTimer);

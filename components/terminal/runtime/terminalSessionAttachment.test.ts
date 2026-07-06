@@ -367,13 +367,17 @@ test("writeSessionData flushes deferred IPC acks before small output can leave t
       },
     },
   };
+  // Deferred acks flush every time they reach XTERM_WRITE_CALLBACK_BATCH_BYTES,
+  // which sits far below FLOW_HIGH_WATER_MARK (issue #1961 raised the watermark
+  // to 1MB), so deferral alone can never push the main process into a pause.
+  assert.ok(XTERM_WRITE_CALLBACK_BATCH_BYTES < FLOW_HIGH_WATER_MARK);
   const chunk = "x".repeat(512);
-  const firstThresholdFlushBytes = Math.ceil(XTERM_WRITE_CALLBACK_BATCH_BYTES / chunk.length) * chunk.length;
-  const expectedDeferredBytes = Math.floor((FLOW_HIGH_WATER_MARK - FLOW_LOW_WATER_MARK) / chunk.length) * chunk.length;
-  const writeCount = (firstThresholdFlushBytes + expectedDeferredBytes) / chunk.length;
+  const chunksPerThresholdFlush = Math.ceil(XTERM_WRITE_CALLBACK_BATCH_BYTES / chunk.length);
+  const residueChunks = 7;
+  const writeCount = chunksPerThresholdFlush * 2 + residueChunks;
+  const expectedDeferredBytes = residueChunks * chunk.length;
   assert.ok(expectedDeferredBytes > 0);
-  assert.ok(expectedDeferredBytes < FLOW_HIGH_WATER_MARK);
-  assert.equal(Number.isInteger(writeCount), true);
+  assert.ok(expectedDeferredBytes < XTERM_WRITE_CALLBACK_BATCH_BYTES);
 
   for (let index = 0; index < writeCount; index += 1) {
     mainUnackedBytes += chunk.length;

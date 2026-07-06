@@ -112,6 +112,7 @@ export const buildSshDeepLinkEphemeralHost = (
 ): Host => ({
   ...buildSshDeepLinkHostDraft(target, options),
   ...(target.password ? { password: target.password, authMethod: "password" as const } : {}),
+  savePassword: false,
   ephemeral: true,
   moshEnabled: false,
   etEnabled: false,
@@ -142,7 +143,7 @@ export const buildSshDeepLinkEphemeralHostFromSaved = (
   identityId: undefined,
   identityFileId: undefined,
   identityFilePaths: undefined,
-  savePassword: undefined,
+  savePassword: false,
   group: "",
   ephemeral: true,
   protocol: "ssh",
