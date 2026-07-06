@@ -143,4 +143,17 @@ test("buildJmsDeepLinkEphemeralHost builds password ssh host with mosh and et di
   assert.equal(host.ephemeral, true);
   assert.equal(host.etEnabled, false);
   assert.equal(host.createdAt, 456);
+  assert.equal(host.autoOpenSftpPanel, undefined);
+});
+
+test("buildJmsDeepLinkEphemeralHost flags sftp payloads for the SFTP side panel", () => {
+  const target = parseJmsDeepLink(encodePayload({
+    ...validPayload,
+    protocol: "sftp",
+  }))!;
+  const host = buildJmsDeepLinkEphemeralHost(target, { id: "ephemeral-id", now: 456 });
+
+  assert.equal(host.protocol, "ssh");
+  assert.equal(host.autoOpenSftpPanel, true);
+  assert.equal(host.ephemeral, true);
 });

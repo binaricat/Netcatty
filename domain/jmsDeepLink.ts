@@ -112,6 +112,9 @@ export const buildJmsDeepLinkEphemeralHost = (
   authMethod: "password",
   ephemeral: true,
   protocol: "ssh",
+  // JumpServer sftp payloads target file transfer: connect the gateway
+  // shell and surface Netcatty's SFTP side panel for that session.
+  ...(target.protocol === "sftp" ? { autoOpenSftpPanel: true } : {}),
   group: "",
   tags: [],
   os: "linux",
