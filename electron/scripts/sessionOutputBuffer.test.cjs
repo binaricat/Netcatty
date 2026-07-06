@@ -393,6 +393,50 @@ test("SessionOutputBuffer preserved prompt can be consumed explicitly for waitFo
   );
 });
 
+test("SessionOutputBuffer waitFor slash regex matches output followed by long multi-line burst", async () => {
+  const buffer = new SessionOutputBuffer("s1");
+  const pending = buffer.waitFor("/SSH资源\\(/", 1000);
+  const menu = Array.from({ length: 15 }, (_, i) => `  [${i}] menu entry line`).join("\n");
+  buffer.append(`user login success\n\nSSH资源(5) :\n${menu}\n\n> `);
+  assert.equal(await pending, "SSH资源(");
+});
+
+test("SessionOutputBuffer waitForText matches literal text followed by long multi-line burst", async () => {
+  const buffer = new SessionOutputBuffer("s1");
+  const pending = buffer.waitForText("SSH资源(", 1000);
+  buffer.append(`SSH资源(5) :\n${"x".repeat(600)}`);
+  assert.equal(await pending, "SSH资源(");
+});
+
+test("SessionOutputBuffer waitForRegex matches core followed by long multi-line burst", async () => {
+  const buffer = new SessionOutputBuffer("s1");
+  const pending = buffer.waitForRegex(".*SSH资源\\(.*", 1000);
+  const burst = `SSH资源(5) :\n${"x".repeat(600)}`;
+  buffer.append(burst);
+  assert.equal(await pending, burst);
+});
+
+test("SessionOutputBuffer waitForAny matches pattern followed by long multi-line burst", async () => {
+  const buffer = new SessionOutputBuffer("s1");
+  const pending = buffer.waitForAny(["账户:", "密码:"], 1000);
+  buffer.append(`资源'[Empty]'账户:\n${"x".repeat(600)}`);
+  assert.equal(await pending, 0);
+});
+
+test("SessionOutputBuffer waitFor still rejects pre-registration scrollback beyond tail slack", async () => {
+  const buffer = new SessionOutputBuffer("s1");
+  buffer.append(`TARGET${"x".repeat(600)}`);
+  const pending = buffer.waitFor("TARGET", 200);
+  let resolvedEarly = false;
+  void pending.then(() => {
+    resolvedEarly = true;
+  });
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.equal(resolvedEarly, false);
+  buffer.append("\nTARGET");
+  assert.equal(await pending, "TARGET");
+});
+
 test("stepsToJavaScript sends sensitive prompt result", () => {
   const code = stepsToJavaScript([
     { type: "send", value: "secret", sensitive: true },
