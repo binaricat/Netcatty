@@ -49,7 +49,7 @@ const nonEmptyString = (value: unknown): string | null => {
 
 export const isSupportedJmsProtocol = (protocol: string): boolean => {
   const normalized = protocol.toLowerCase();
-  return normalized === "ssh" || normalized === "sftp";
+  return normalized === "ssh" || normalized === "sftp" || normalized === "telnet";
 };
 
 export const parseJmsDeepLink = (rawUrl: string): JmsDeepLinkTarget | null => {
@@ -102,23 +102,27 @@ export const parseJmsDeepLink = (rawUrl: string): JmsDeepLinkTarget | null => {
 export const buildJmsDeepLinkEphemeralHost = (
   target: JmsDeepLinkTarget,
   options: JmsDeepLinkDraftOptions,
-): Host => ({
-  id: options.id,
-  label: target.label,
-  hostname: target.hostname,
-  username: target.username,
-  port: target.port,
-  password: target.password,
-  authMethod: "password",
-  ephemeral: true,
-  protocol: "ssh",
-  // JumpServer sftp payloads target file transfer: connect the gateway
-  // shell and surface Netcatty's SFTP side panel for that session.
-  ...(target.protocol === "sftp" ? { autoOpenSftpPanel: true } : {}),
-  group: "",
-  tags: [],
-  os: "linux",
-  createdAt: options.now,
-  moshEnabled: false,
-  etEnabled: false,
-});
+): Host => {
+  const isTelnet = target.protocol === "telnet";
+  return {
+    id: options.id,
+    label: target.label,
+    hostname: target.hostname,
+    username: target.username,
+    port: target.port,
+    password: target.password,
+    authMethod: "password",
+    ephemeral: true,
+    protocol: isTelnet ? "telnet" : "ssh",
+    ...(isTelnet ? { telnetUsername: target.username, telnetPassword: target.password } : {}),
+    // JumpServer sftp payloads target file transfer: connect the gateway
+    // shell and surface Netcatty's SFTP side panel for that session.
+    ...(target.protocol === "sftp" ? { autoOpenSftpPanel: true } : {}),
+    group: "",
+    tags: [],
+    os: "linux",
+    createdAt: options.now,
+    moshEnabled: false,
+    etEnabled: false,
+  };
+};

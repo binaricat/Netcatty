@@ -120,10 +120,10 @@ test("parseJmsDeepLink uses name or hostname for label", () => {
   assert.equal(fromHostname?.label, "gw.example.com");
 });
 
-test("isSupportedJmsProtocol accepts ssh and sftp only", () => {
+test("isSupportedJmsProtocol accepts ssh, sftp, and telnet", () => {
   assert.equal(isSupportedJmsProtocol("ssh"), true);
   assert.equal(isSupportedJmsProtocol("SFTP"), true);
-  assert.equal(isSupportedJmsProtocol("telnet"), false);
+  assert.equal(isSupportedJmsProtocol("telnet"), true);
   assert.equal(isSupportedJmsProtocol("rdp"), false);
 });
 
@@ -155,5 +155,23 @@ test("buildJmsDeepLinkEphemeralHost flags sftp payloads for the SFTP side panel"
 
   assert.equal(host.protocol, "ssh");
   assert.equal(host.autoOpenSftpPanel, true);
+  assert.equal(host.ephemeral, true);
+});
+
+test("buildJmsDeepLinkEphemeralHost builds telnet payloads as telnet hosts", () => {
+  const target = parseJmsDeepLink(encodePayload({
+    ...validPayload,
+    protocol: "telnet",
+  }))!;
+  const host = buildJmsDeepLinkEphemeralHost(target, { id: "ephemeral-id", now: 456 });
+
+  assert.equal(host.protocol, "telnet");
+  assert.equal(host.hostname, "gw.example.com");
+  assert.equal(host.port, 2222);
+  assert.equal(host.username, "JMS-token-id");
+  assert.equal(host.password, "token-secret");
+  assert.equal(host.telnetUsername, "JMS-token-id");
+  assert.equal(host.telnetPassword, "token-secret");
+  assert.equal(host.autoOpenSftpPanel, undefined);
   assert.equal(host.ephemeral, true);
 });
