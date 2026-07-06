@@ -117,6 +117,32 @@ export const buildSshDeepLinkEphemeralHost = (
   etEnabled: false,
 });
 
+/**
+ * Ephemeral host for a password deep link that uniquely matches a saved
+ * vault host: keep the saved host's non-credential settings (proxy, jump
+ * chain, charset, group defaults, ...) but authenticate with exactly the
+ * URL credentials, so vault identities and key references never override
+ * the one-time password.
+ */
+export const buildSshDeepLinkEphemeralHostFromSaved = (
+  savedHost: Host,
+  target: SshDeepLinkTarget,
+  options: SshDeepLinkDraftOptions,
+): Host => ({
+  ...savedHost,
+  id: options.id,
+  createdAt: options.now,
+  ...(target.username ? { username: target.username } : {}),
+  ...(target.password ? { password: target.password, authMethod: "password" as const } : {}),
+  identityId: undefined,
+  identityFileId: undefined,
+  savePassword: undefined,
+  ephemeral: true,
+  protocol: "ssh",
+  moshEnabled: false,
+  etEnabled: false,
+});
+
 export const buildSshDeepLinkHostDraft = (
   target: SshDeepLinkTarget,
   options: SshDeepLinkDraftOptions,

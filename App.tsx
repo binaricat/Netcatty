@@ -25,7 +25,7 @@ import { matchesKeyBinding } from './domain/models';
 import { resolveGroupDefaults, applyGroupDefaults } from './domain/groupConfig';
 import { upsertKnownHost } from './domain/knownHosts';
 import { materializeHostProxyProfile } from './domain/proxyProfiles';
-import { buildSshDeepLinkConnectionHost, buildSshDeepLinkEphemeralHost, buildSshDeepLinkHostDraft, findSshDeepLinkHost, parseSshDeepLink } from './domain/sshDeepLink';
+import { buildSshDeepLinkConnectionHost, buildSshDeepLinkEphemeralHost, buildSshDeepLinkEphemeralHostFromSaved, buildSshDeepLinkHostDraft, findSshDeepLinkHost, parseSshDeepLink } from './domain/sshDeepLink';
 import { applyEphemeralHostsUpdate, splitHostsUpdateByEphemeral } from './domain/ephemeralHosts';
 import { resolveHostAuth } from './domain/sshAuth';
 import { isEncryptedCredentialPlaceholder } from './domain/credentials';
@@ -997,16 +997,6 @@ function App({ settings }: { settings: SettingsState }) {
       return;
     }
 
-    if (target.password) {
-      const ephemeralHost = buildSshDeepLinkEphemeralHost(target, {
-        id: crypto.randomUUID(),
-        now: Date.now(),
-      });
-      setEphemeralHosts((prev) => [...prev, ephemeralHost]);
-      handleConnectToHost(ephemeralHost);
-      return;
-    }
-
     const effectiveHosts = hosts.map((host) => {
       const effectiveHost = resolveEffectiveHost(host);
       const resolvedAuth = resolveHostAuth({ host: effectiveHost, keys, identities });
@@ -1016,9 +1006,25 @@ function App({ settings }: { settings: SettingsState }) {
       };
     });
     const matchedEffectiveHost = findSshDeepLinkHost(effectiveHosts, target);
-    if (matchedEffectiveHost) {
-      const originalHost = hosts.find((host) => host.id === matchedEffectiveHost.id) ?? matchedEffectiveHost;
-      handleConnectToHost(buildSshDeepLinkConnectionHost(originalHost));
+    const matchedHost = matchedEffectiveHost
+      ? hosts.find((host) => host.id === matchedEffectiveHost.id) ?? matchedEffectiveHost
+      : null;
+
+    if (target.password) {
+      // One-time-password link: connect ephemerally with exactly the URL
+      // credentials. A uniquely matched saved host still contributes its
+      // non-credential settings (proxy, jump chain, charset, ...).
+      const draftOptions = { id: crypto.randomUUID(), now: Date.now() };
+      const ephemeralHost = matchedHost
+        ? buildSshDeepLinkEphemeralHostFromSaved(matchedHost, target, draftOptions)
+        : buildSshDeepLinkEphemeralHost(target, draftOptions);
+      setEphemeralHosts((prev) => [...prev, ephemeralHost]);
+      handleConnectToHost(ephemeralHost);
+      return;
+    }
+
+    if (matchedHost) {
+      handleConnectToHost(buildSshDeepLinkConnectionHost(matchedHost));
       return;
     }
 

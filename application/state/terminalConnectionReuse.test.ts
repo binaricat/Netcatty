@@ -49,6 +49,21 @@ test("split session clones reuse only connected SSH sources", () => {
   );
 });
 
+test("session clones preserve the ephemeral-host marker", () => {
+  assert.equal(
+    createSplitTerminalSessionClone(session({ ephemeralHost: true }), { id: "split-1" }).ephemeralHost,
+    true,
+  );
+  assert.equal(
+    createCopiedTerminalSessionClone(session({ ephemeralHost: true }), { id: "copy-1" }).ephemeralHost,
+    true,
+  );
+  assert.equal(
+    createSplitTerminalSessionClone(session(), { id: "split-2" }).ephemeralHost,
+    undefined,
+  );
+});
+
 test("copy session clones reuse SSH sources and preserve serial config", () => {
   const copied = createCopiedTerminalSessionClone(
     session({
