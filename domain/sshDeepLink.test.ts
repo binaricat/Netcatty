@@ -94,7 +94,9 @@ test("buildSshDeepLinkEphemeralHost omits password fields when target has no pas
 });
 
 test("buildSshDeepLinkEphemeralHostFromSaved keeps saved settings but overrides credentials", () => {
-  const savedHost = {
+  // Effective host: group defaults already resolved, including
+  // group-inherited credentials that must not survive the build.
+  const effectiveSavedHost = {
     id: "saved-id",
     label: "Saved Host",
     hostname: "example.com",
@@ -103,8 +105,10 @@ test("buildSshDeepLinkEphemeralHostFromSaved keeps saved settings but overrides 
     group: "prod",
     tags: ["bastion"],
     os: "linux" as const,
-    identityId: "identity-1",
-    identityFileId: "key-1",
+    identityId: "group-identity-1",
+    identityFileId: "group-key-1",
+    identityFilePaths: ["/home/user/.ssh/id_ed25519"],
+    password: "vault-password",
     savePassword: true,
     authMethod: "key" as const,
     proxyProfileId: "proxy-1",
@@ -115,7 +119,7 @@ test("buildSshDeepLinkEphemeralHostFromSaved keeps saved settings but overrides 
   };
 
   const ephemeral = buildSshDeepLinkEphemeralHostFromSaved(
-    savedHost,
+    effectiveSavedHost,
     parseSshDeepLink("ssh://alice:otp@example.com:2200")!,
     { id: "ephemeral-id", now: 789 },
   );
@@ -127,11 +131,14 @@ test("buildSshDeepLinkEphemeralHostFromSaved keeps saved settings but overrides 
   assert.equal(ephemeral.authMethod, "password");
   assert.equal(ephemeral.identityId, undefined);
   assert.equal(ephemeral.identityFileId, undefined);
+  assert.equal(ephemeral.identityFilePaths, undefined);
   assert.equal(ephemeral.savePassword, undefined);
+  // Group is cleared so effective-host resolution cannot re-inherit
+  // group credentials over the one-time password.
+  assert.equal(ephemeral.group, "");
   assert.equal(ephemeral.proxyProfileId, "proxy-1");
   assert.deepEqual(ephemeral.hostChain, { hostIds: ["jump-1"] });
   assert.equal(ephemeral.charset, "utf8");
-  assert.equal(ephemeral.group, "prod");
   assert.equal(ephemeral.protocol, "ssh");
   assert.equal(ephemeral.moshEnabled, false);
   assert.equal(ephemeral.etEnabled, false);
