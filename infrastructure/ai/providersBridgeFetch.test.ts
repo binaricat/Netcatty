@@ -1103,7 +1103,7 @@ test('re-injects the remembered tool name when the SDK missed the naming chunk',
                     index: 0,
                     id: 'call_1',
                     type: 'function',
-                    function: { name: 'terminal_exec', arguments: '' },
+                    function: { name: 'terminal_exec', arguments: '{"comm' },
                   }],
                 },
                 finish_reason: null,
@@ -1114,7 +1114,7 @@ test('re-injects the remembered tool name when the SDK missed the naming chunk',
               delta: {
                 tool_calls: [{
                   index: 0,
-                  function: { arguments: '{"command":"pwd"}' },
+                  function: { arguments: 'and":"pwd"}' },
                 }],
               },
               finish_reason: null,
@@ -1158,15 +1158,18 @@ test('re-injects the remembered tool name when the SDK missed the naming chunk',
   });
 
   const errorMessages: string[] = [];
+  let text = '';
   for await (const chunk of result.fullStream) {
     if (chunk.type === 'error') {
       const error = chunk.error;
       errorMessages.push(error instanceof Error ? error.message : String(error));
     }
+    if (chunk.type === 'text-delta') {
+      text += chunk.text;
+    }
   }
 
   assert.ok(!errorMessages.some((message) => /Expected 'function\.name'/.test(message)));
-  if (executedCommands.length > 0) {
-    assert.deepEqual(executedCommands, ['pwd']);
-  }
+  assert.deepEqual(executedCommands, ['pwd']);
+  assert.equal(text, 'tool completed');
 });
