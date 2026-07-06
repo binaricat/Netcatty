@@ -46,6 +46,42 @@ test("copySessionToNewWindowWithCurrentShellImpl asks Electron to open a peer wi
   });
 });
 
+test("copySessionToNewWindowWithCurrentShellImpl preserves local start directory in the source session", async () => {
+  const openedPayloads: unknown[] = [];
+  const localSession = sourceSession({
+    hostLabel: "Local Terminal",
+    hostname: "localhost",
+    protocol: "local",
+    localStartDir: "/Users/alice/project with spaces ",
+  });
+
+  await copySessionToNewWindowWithCurrentShellImpl(
+    () => ({
+      classifyLocalShellType: () => "zsh",
+      discoveredShells: [],
+      netcattyBridge: {
+        get: () => ({
+          openSessionInNewWindow: async (payload: unknown) => {
+            openedPayloads.push(payload);
+            return { success: true };
+          },
+        }),
+      },
+      resolveShellSetting: () => ({ command: "/bin/zsh" }),
+      sessions: [localSession],
+      terminalSettings: { localShell: "system-default" },
+    }),
+    "session-1",
+  );
+
+  assert.equal(openedPayloads.length, 1);
+  assert.deepEqual(openedPayloads[0], {
+    title: "Local Terminal",
+    sourceSession: localSession,
+    localShellType: "zsh",
+  });
+});
+
 test("copySessionToNewWindowWithCurrentShellImpl does nothing when the source session is gone", async () => {
   let called = false;
 

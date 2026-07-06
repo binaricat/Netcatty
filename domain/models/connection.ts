@@ -246,6 +246,7 @@ export interface Host {
   localShellArgs?: string[];
   localShellName?: string;
   localShellIcon?: string;
+  localStartDir?: string;
   /** User-authored Markdown notes (project, hardware, region, etc.) */
   notes?: string;
   order?: number;

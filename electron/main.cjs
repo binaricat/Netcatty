@@ -78,6 +78,7 @@ const {
   OPEN_TERMINAL_PATH_CHANNEL,
   collectOpenTerminalPathArgs,
   resolveOpenTerminalPath,
+  resolveOpenTerminalPathsFromArgs,
 } = require("./openTerminalPath.cjs");
 
 try {
@@ -529,9 +530,7 @@ async function createAndShowMainWindow() {
 
 let sshDeepLinkEnabled = readSshDeepLinkEnabledPreference({ app });
 const pendingSshDeepLinkUrls = sshDeepLinkEnabled ? collectSshDeepLinkUrls(process.argv) : [];
-const pendingOpenTerminalPaths = collectOpenTerminalPathArgs(process.argv)
-  .map((rawPath) => resolveOpenTerminalPath(rawPath))
-  .filter(Boolean);
+const pendingOpenTerminalPaths = resolveOpenTerminalPathsFromArgs(process.argv);
 let flushingSshDeepLinks = false;
 let flushingOpenTerminalPaths = false;
 let sshDeepLinkDeliveryGeneration = 0;
@@ -545,10 +544,18 @@ function queueSshDeepLink(rawUrl) {
   }
 }
 
-function queueOpenTerminalPath(rawPath) {
-  const resolvedPath = resolveOpenTerminalPath(rawPath);
+function queueOpenTerminalPath(rawPath, options = {}) {
+  const resolvedPath = resolveOpenTerminalPath(rawPath, options);
   if (!resolvedPath) return;
   pendingOpenTerminalPaths.push(resolvedPath);
+  if (app.isReady?.()) {
+    void flushPendingOpenTerminalPaths();
+  }
+}
+
+function queueResolvedOpenTerminalPaths(paths) {
+  if (!Array.isArray(paths) || paths.length === 0) return;
+  pendingOpenTerminalPaths.push(...paths);
   if (app.isReady?.()) {
     void flushPendingOpenTerminalPaths();
   }
@@ -700,7 +707,7 @@ if (!gotLock) {
     queueOpenTerminalPath(filePath);
   });
 
-  app.on("second-instance", (_event, argv) => {
+  app.on("second-instance", (_event, argv, workingDirectory) => {
     const deepLinkUrls = collectSshDeepLinkUrls(argv);
     if (deepLinkUrls.length > 0) {
       if (sshDeepLinkEnabled) {
@@ -708,9 +715,10 @@ if (!gotLock) {
       }
       return;
     }
-    const openTerminalPaths = collectOpenTerminalPathArgs(argv);
-    if (openTerminalPaths.length > 0) {
-      openTerminalPaths.forEach(queueOpenTerminalPath);
+    if (collectOpenTerminalPathArgs(argv).length > 0) {
+      const baseDirectory = typeof workingDirectory === "string" ? workingDirectory : undefined;
+      const openTerminalPaths = resolveOpenTerminalPathsFromArgs(argv, { baseDirectory });
+      queueResolvedOpenTerminalPaths(openTerminalPaths);
       return;
     }
     if (!focusMainWindow()) {

@@ -5,6 +5,7 @@ const {
   collectOpenTerminalPathArgs,
   expandHomePath,
   resolveOpenTerminalPath,
+  resolveOpenTerminalPathsFromArgs,
 } = require("./openTerminalPath.cjs");
 
 test("collectOpenTerminalPathArgs extracts explicit open terminal paths", () => {
@@ -32,6 +33,51 @@ test("resolveOpenTerminalPath accepts directories", () => {
   assert.equal(
     resolveOpenTerminalPath("/tmp/project", { fsModule, logWarn: () => {} }),
     "/tmp/project",
+  );
+});
+
+test("resolveOpenTerminalPath resolves relative paths against the provided base directory", () => {
+  const seen = [];
+  const fsModule = {
+    statSync: (target) => {
+      seen.push(target);
+      return {
+        isDirectory: () => true,
+        isFile: () => false,
+      };
+    },
+  };
+
+  assert.equal(
+    resolveOpenTerminalPath("project", {
+      baseDirectory: "/Users/alice",
+      fsModule,
+      logWarn: () => {},
+    }),
+    "/Users/alice/project",
+  );
+  assert.deepEqual(seen, ["/Users/alice/project"]);
+});
+
+test("resolveOpenTerminalPathsFromArgs resolves second-instance relative paths against its working directory", () => {
+  const fsModule = {
+    statSync: () => ({
+      isDirectory: () => true,
+      isFile: () => false,
+    }),
+  };
+
+  assert.deepEqual(
+    resolveOpenTerminalPathsFromArgs([
+      "/Applications/Netcatty.app/Contents/MacOS/Netcatty",
+      "--open-terminal-path",
+      ".",
+    ], {
+      baseDirectory: "/Users/alice/project",
+      fsModule,
+      logWarn: () => {},
+    }),
+    ["/Users/alice/project"],
   );
 });
 

@@ -64,6 +64,22 @@ test("buildSessionRestorePayload only stores allowlisted session fields", () => 
   ].sort());
 });
 
+test("buildSessionRestorePayload preserves local terminal start directory", () => {
+  const payload = buildSessionRestorePayload({
+    sessions: [{
+      ...session("s1"),
+      protocol: "local",
+      localStartDir: "/Users/alice/project",
+    }],
+    workspaces: [],
+    tabOrder: ["s1"],
+    activeTabId: "s1",
+    now: 123,
+  });
+
+  assert.equal(payload.sessions[0].localStartDir, "/Users/alice/project");
+});
+
 test("buildSessionRestorePayload deeply allowlists serial config fields", () => {
   const payload = buildSessionRestorePayload({
     sessions: [{
@@ -214,6 +230,23 @@ test("sanitizeSessionRestorePayload drops malformed session and workspace record
   assert.deepEqual(sanitized.workspaces, []);
   assert.deepEqual(sanitized.tabOrder, ["s1"]);
   assert.equal(sanitized.activeTabId, "s1");
+});
+
+test("sanitizeSessionRestorePayload preserves local terminal start directory", () => {
+  const sanitized = sanitizeSessionRestorePayload({
+    version: 1,
+    savedAt: 1,
+    activeTabId: "s1",
+    tabOrder: ["s1"],
+    sessions: [{
+      ...session("s1"),
+      protocol: "local",
+      localStartDir: "/Users/alice/project",
+    }],
+    workspaces: [],
+  });
+
+  assert.equal(sanitized.sessions[0].localStartDir, "/Users/alice/project");
 });
 
 test("sanitizeSessionRestorePayload enforces workspace session ownership", () => {

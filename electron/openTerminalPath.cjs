@@ -40,6 +40,7 @@ function collectOpenTerminalPathArgs(argv) {
 }
 
 function resolveOpenTerminalPath(rawPath, {
+  baseDirectory,
   fsModule = fs,
   pathModule = path,
   logWarn = console.warn,
@@ -47,7 +48,10 @@ function resolveOpenTerminalPath(rawPath, {
   if (typeof rawPath !== "string" || !rawPath.trim()) return null;
 
   try {
-    const resolved = pathModule.resolve(expandHomePath(rawPath));
+    const expanded = expandHomePath(rawPath);
+    const resolved = pathModule.isAbsolute(expanded)
+      ? pathModule.resolve(expanded)
+      : pathModule.resolve(baseDirectory || process.cwd(), expanded);
     const stat = fsModule.statSync(resolved);
     if (stat.isDirectory()) return resolved;
     if (stat.isFile()) return pathModule.dirname(resolved);
@@ -58,10 +62,17 @@ function resolveOpenTerminalPath(rawPath, {
   }
 }
 
+function resolveOpenTerminalPathsFromArgs(argv, options = {}) {
+  return collectOpenTerminalPathArgs(argv)
+    .map((rawPath) => resolveOpenTerminalPath(rawPath, options))
+    .filter(Boolean);
+}
+
 module.exports = {
   OPEN_TERMINAL_PATH_ARG,
   OPEN_TERMINAL_PATH_CHANNEL,
   collectOpenTerminalPathArgs,
   expandHomePath,
   resolveOpenTerminalPath,
+  resolveOpenTerminalPathsFromArgs,
 };

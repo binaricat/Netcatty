@@ -60,3 +60,19 @@ test("copy session clones reuse SSH sources and preserve serial config", () => {
   assert.equal(copied.reuseConnectionFromSessionId, "session-1");
   assert.deepEqual(copied.serialConfig, { path: "/dev/tty.usbserial", baudRate: 115200 });
 });
+
+test("split and copy session clones preserve local start directory", () => {
+  const source = session({
+    protocol: "local",
+    localStartDir: "/Users/alice/project with spaces ",
+  });
+
+  assert.equal(
+    createSplitTerminalSessionClone(source, { id: "split-local" }).localStartDir,
+    "/Users/alice/project with spaces ",
+  );
+  assert.equal(
+    createCopiedTerminalSessionClone(source, { id: "copy-local" }).localStartDir,
+    "/Users/alice/project with spaces ",
+  );
+});

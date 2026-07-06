@@ -1029,8 +1029,8 @@ function App({ settings }: { settings: SettingsState }) {
   }, [isPeerSessionWindow]);
 
   const _handleOpenTerminalPath = useEffectEvent((payload: { path?: string }) => {
-    const localStartDir = typeof payload?.path === 'string' ? payload.path.trim() : '';
-    if (!localStartDir) return;
+    const localStartDir = typeof payload?.path === 'string' ? payload.path : '';
+    if (!localStartDir.trim()) return;
     handleCreateLocalTerminal(undefined, { localStartDir });
   });
 
