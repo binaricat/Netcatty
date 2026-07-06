@@ -227,6 +227,13 @@ export function useTerminalThemePanelState({
         return;
       }
       if (isFocusedHostEphemeral) {
+        // Ephemeral hosts cannot persist host-level overrides; keep the
+        // change per-session (same path Ctrl+zoom uses) when possible.
+        const targetSessionId = focusedSessionId ?? activeSession?.id;
+        if (targetSessionId) {
+          onUpdateSessionFontSize?.(targetSessionId, newFontSize);
+          return;
+        }
         onUpdateTerminalFontSize?.(newFontSize);
         return;
       }
@@ -234,7 +241,7 @@ export function useTerminalThemePanelState({
         onUpdateHost({ ...rawFocusedHost, fontSize: newFontSize, fontSizeOverride: true });
       }
     });
-  }, [activeWorkspace, focusedHost, focusedFontSize, focusedSessionId, isFocusedHostEphemeral, onUpdateSessionFontSize, onUpdateTerminalFontSize, onUpdateHost, rawFocusedHost]);
+  }, [activeSession, activeWorkspace, focusedHost, focusedFontSize, focusedSessionId, isFocusedHostEphemeral, onUpdateSessionFontSize, onUpdateTerminalFontSize, onUpdateHost, rawFocusedHost]);
 
   const handleFontSizeResetForFocusedSession = useCallback(() => {
     if (!focusedHost) return;
@@ -242,9 +249,14 @@ export function useTerminalThemePanelState({
       onClearSessionFontSizeOverride?.(focusedSessionId);
       return;
     }
-    if (isFocusedHostEphemeral || !rawFocusedHost) return;
+    if (isFocusedHostEphemeral) {
+      const targetSessionId = focusedSessionId ?? activeSession?.id;
+      if (targetSessionId) onClearSessionFontSizeOverride?.(targetSessionId);
+      return;
+    }
+    if (!rawFocusedHost) return;
     onUpdateHost(clearHostFontSizeOverride(rawFocusedHost));
-  }, [activeWorkspace, focusedHost, focusedSessionId, isFocusedHostEphemeral, onClearSessionFontSizeOverride, onUpdateHost, rawFocusedHost]);
+  }, [activeSession, activeWorkspace, focusedHost, focusedSessionId, isFocusedHostEphemeral, onClearSessionFontSizeOverride, onUpdateHost, rawFocusedHost]);
 
   const handleFontWeightChangeForFocusedSession = useCallback((newFontWeight: number) => {
     if (!focusedHost || newFontWeight === focusedFontWeight) return;
