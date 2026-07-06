@@ -1006,25 +1006,26 @@ function App({ settings }: { settings: SettingsState }) {
       };
     });
     const matchedEffectiveHost = findSshDeepLinkHost(effectiveHosts, target);
-    const matchedHost = matchedEffectiveHost
-      ? hosts.find((host) => host.id === matchedEffectiveHost.id) ?? matchedEffectiveHost
-      : null;
 
     if (target.password) {
       // One-time-password link: connect ephemerally with exactly the URL
       // credentials. A uniquely matched saved host still contributes its
-      // non-credential settings (proxy, jump chain, charset, ...).
+      // non-credential settings (proxy, jump chain, charset, ...). Build
+      // from the group-resolved effective host so the builder can clear
+      // `group` and block group credential inheritance from later
+      // effective-host resolution.
       const draftOptions = { id: crypto.randomUUID(), now: Date.now() };
-      const ephemeralHost = matchedHost
-        ? buildSshDeepLinkEphemeralHostFromSaved(matchedHost, target, draftOptions)
+      const ephemeralHost = matchedEffectiveHost
+        ? buildSshDeepLinkEphemeralHostFromSaved(matchedEffectiveHost, target, draftOptions)
         : buildSshDeepLinkEphemeralHost(target, draftOptions);
       setEphemeralHosts((prev) => [...prev, ephemeralHost]);
       handleConnectToHost(ephemeralHost);
       return;
     }
 
-    if (matchedHost) {
-      handleConnectToHost(buildSshDeepLinkConnectionHost(matchedHost));
+    if (matchedEffectiveHost) {
+      const originalHost = hosts.find((host) => host.id === matchedEffectiveHost.id) ?? matchedEffectiveHost;
+      handleConnectToHost(buildSshDeepLinkConnectionHost(originalHost));
       return;
     }
 

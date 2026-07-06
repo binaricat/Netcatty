@@ -120,23 +120,30 @@ export const buildSshDeepLinkEphemeralHost = (
 /**
  * Ephemeral host for a password deep link that uniquely matches a saved
  * vault host: keep the saved host's non-credential settings (proxy, jump
- * chain, charset, group defaults, ...) but authenticate with exactly the
- * URL credentials, so vault identities and key references never override
- * the one-time password.
+ * chain, charset, ...) but authenticate with exactly the URL credentials,
+ * so vault identities and key references never override the one-time
+ * password.
+ *
+ * Pass the group-resolved effective host (not the raw vault host): group
+ * defaults must already be materialized here, because this builder clears
+ * `group` so that later effective-host resolution cannot re-inherit group
+ * credentials (identity, key, password) over the URL password.
  */
 export const buildSshDeepLinkEphemeralHostFromSaved = (
-  savedHost: Host,
+  effectiveSavedHost: Host,
   target: SshDeepLinkTarget,
   options: SshDeepLinkDraftOptions,
 ): Host => ({
-  ...savedHost,
+  ...effectiveSavedHost,
   id: options.id,
   createdAt: options.now,
   ...(target.username ? { username: target.username } : {}),
   ...(target.password ? { password: target.password, authMethod: "password" as const } : {}),
   identityId: undefined,
   identityFileId: undefined,
+  identityFilePaths: undefined,
   savePassword: undefined,
+  group: "",
   ephemeral: true,
   protocol: "ssh",
   moshEnabled: false,
