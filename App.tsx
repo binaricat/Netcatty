@@ -940,7 +940,16 @@ function App({ settings }: { settings: SettingsState }) {
   }, []);
 
   // Wrapper to create local terminal with logging
-  const handleCreateLocalTerminal = useCallback((shell?: { command: string; args?: string[]; name?: string; icon?: string }) => { return handleCreateLocalTerminalImpl(() => ({ addConnectionLog, classifyLocalShellType, createLocalTerminal, discoveredShells, resolveShellSetting, shell, systemInfoRef, terminalSettings, undefined }), shell); }, [addConnectionLog, createLocalTerminal, terminalSettings, discoveredShells]);
+  const handleCreateLocalTerminal = useCallback((
+    shell?: { command: string; args?: string[]; name?: string; icon?: string },
+    options?: { localStartDir?: string },
+  ) => {
+    return handleCreateLocalTerminalImpl(
+      () => ({ addConnectionLog, classifyLocalShellType, createLocalTerminal, discoveredShells, resolveShellSetting, shell, systemInfoRef, terminalSettings, undefined }),
+      shell,
+      options,
+    );
+  }, [addConnectionLog, createLocalTerminal, terminalSettings, discoveredShells]);
 
   const proxyProfileIdSet = useMemo(
     () => new Set(proxyProfiles.map((profile) => profile.id)),
@@ -1016,6 +1025,21 @@ function App({ settings }: { settings: SettingsState }) {
     if (!bridge?.onSshDeepLink) return;
     return bridge.onSshDeepLink((payload) => {
       _handleSshDeepLink(payload);
+    });
+  }, [isPeerSessionWindow]);
+
+  const _handleOpenTerminalPath = useEffectEvent((payload: { path?: string }) => {
+    const localStartDir = typeof payload?.path === 'string' ? payload.path.trim() : '';
+    if (!localStartDir) return;
+    handleCreateLocalTerminal(undefined, { localStartDir });
+  });
+
+  useEffect(() => {
+    if (isPeerSessionWindow) return;
+    const bridge = netcattyBridge.get();
+    if (!bridge?.onOpenTerminalPath) return;
+    return bridge.onOpenTerminalPath((payload) => {
+      _handleOpenTerminalPath(payload);
     });
   }, [isPeerSessionWindow]);
 
