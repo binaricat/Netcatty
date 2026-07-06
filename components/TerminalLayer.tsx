@@ -37,6 +37,7 @@ import {
 import type { DropEntry } from '../lib/sftpFileUtils';
 import { Host, KnownHost, TerminalSession, Workspace } from '../types';
 import { applySessionFontSizeToHost } from '../domain/terminalAppearance';
+import { isSavedVaultHost } from '../domain/ephemeralHosts';
 import { resolveHostAutofillPassword } from '../domain/sshAuth';
 import {
   resolveEffectiveTerminalHost,
@@ -918,6 +919,14 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     const usesGlobalFontSize = sessionHost.protocol === 'local' || sessionHost.id?.startsWith('local-') || !rawHost;
     if (usesGlobalFontSize) {
       onUpdateTerminalFontSize?.(nextFontSize);
+      return;
+    }
+
+    // Ephemeral deep-link hosts are not in the persisted vault, so a host
+    // update would be silently dropped; keep their zoom per-session instead
+    // (rendered via applySessionFontSizeToHost), like workspace panes.
+    if (!isSavedVaultHost(rawHost)) {
+      onUpdateSessionFontSize?.(sessionId, nextFontSize);
       return;
     }
 
