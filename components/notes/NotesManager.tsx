@@ -127,7 +127,7 @@ export interface NotesManagerProps {
 }
 
 type HoverActionMenuProps = {
-  children: React.ReactNode;
+  children: React.ReactNode | ((closeMenu: () => void) => React.ReactNode);
   className?: string;
 };
 
@@ -148,6 +148,11 @@ const HoverActionMenu: React.FC<HoverActionMenuProps> = ({ children, className }
   };
 
   useEffect(() => () => cancelClose(), []);
+
+  const closeMenu = () => {
+    cancelClose();
+    setOpen(false);
+  };
 
   return (
     <Dropdown open={open} onOpenChange={setOpen}>
@@ -180,7 +185,7 @@ const HoverActionMenu: React.FC<HoverActionMenuProps> = ({ children, className }
         onMouseEnter={cancelClose}
         onMouseLeave={scheduleClose}
       >
-        {children}
+        {typeof children === "function" ? children(closeMenu) : children}
       </DropdownContent>
     </Dropdown>
   );
@@ -937,7 +942,7 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
     resetTreeDragState();
   };
 
-  const renderNoteActions = (note: VaultNote, mode: "dropdown" | "context") => {
+  const renderNoteActions = (note: VaultNote, mode: "dropdown" | "context", closeMenu?: () => void) => {
     const actions = [
       {
         label: t("common.rename"),
@@ -979,6 +984,7 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
         className={cn(menuItemClass, action.destructive && "text-destructive hover:bg-destructive/10")}
         onClick={(event) => {
           event.stopPropagation();
+          closeMenu?.();
           action.action();
         }}
       >
@@ -987,7 +993,7 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
     ));
   };
 
-  const renderGroupActions = (groupPath: string, mode: "dropdown" | "context") => {
+  const renderGroupActions = (groupPath: string, mode: "dropdown" | "context", closeMenu?: () => void) => {
     const actions = [
       {
         label: t("notes.action.newNote"),
@@ -1040,6 +1046,7 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
         className={cn(menuItemClass, action.destructive && "text-destructive hover:bg-destructive/10")}
         onClick={(event) => {
           event.stopPropagation();
+          closeMenu?.();
           action.action();
         }}
       >
@@ -1076,7 +1083,7 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
     return (
       <ContextMenu key={note.id}>
         <ContextMenuTrigger asChild>
-          <VaultTreeItemRow
+            <VaultTreeItemRow
             label={noteDisplayTitle(note.title)}
             depth={depth}
             selected={selectedNoteId === note.id}
@@ -1127,11 +1134,11 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
               setSelectedGroup(nextSelection.selectedGroup);
               setOverlayNoteId(nextSelection.overlayNoteId);
             }}
-            actions={(
-              <HoverActionMenu>
-                {renderNoteActions(note, "dropdown")}
-              </HoverActionMenu>
-            )}
+              actions={(
+                <HoverActionMenu>
+                  {(closeMenu) => renderNoteActions(note, "dropdown", closeMenu)}
+                </HoverActionMenu>
+              )}
           />
         </ContextMenuTrigger>
         <ContextMenuContent data-notes-context-menu="note">
@@ -1229,11 +1236,11 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
                 setOverlayNoteId(nextSelection.overlayNoteId);
                 if (hasChildren) toggleGroup(node.path);
               }}
-              actions={(
-                <HoverActionMenu>
-                  {renderGroupActions(node.path, "dropdown")}
-                </HoverActionMenu>
-              )}
+                actions={(
+                  <HoverActionMenu>
+                    {(closeMenu) => renderGroupActions(node.path, "dropdown", closeMenu)}
+                  </HoverActionMenu>
+                )}
             />
           </ContextMenuTrigger>
           <ContextMenuContent data-notes-context-menu="group">

@@ -21,19 +21,27 @@ interface VaultDeleteConfirmDialogProps {
   onConfirm: () => void;
 }
 
-const VaultDeleteConfirmDialogContent: React.FC<Omit<
-  VaultDeleteConfirmDialogProps,
-  "open" | "onOpenChange"
-> & { onCancel: () => void }> = ({
+interface VaultDeleteConfirmDialogContentProps {
+  title: string;
+  description: string;
+  descriptionId?: string;
+  cancelLabel: string;
+  confirmLabel: string;
+  disabled?: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}
+
+export const VaultDeleteConfirmDialogContent: React.FC<VaultDeleteConfirmDialogContentProps> = ({
   title,
   description,
+  descriptionId,
+  cancelLabel,
   confirmLabel,
   disabled = false,
   onCancel,
   onConfirm,
 }) => {
-  const { t } = useI18n();
-
   return (
     <>
       <DialogHeader>
@@ -41,7 +49,7 @@ const VaultDeleteConfirmDialogContent: React.FC<Omit<
           <AlertTriangle size={20} />
           {title}
         </DialogTitle>
-        <DialogDescription>{description}</DialogDescription>
+        <DialogDescription id={descriptionId}>{description}</DialogDescription>
       </DialogHeader>
       <DialogFooter className="gap-2 sm:gap-0">
         <Button
@@ -49,14 +57,14 @@ const VaultDeleteConfirmDialogContent: React.FC<Omit<
           onClick={onCancel}
           disabled={disabled}
         >
-          {t("common.cancel")}
+          {cancelLabel}
         </Button>
         <Button
           variant="destructive"
           onClick={onConfirm}
           disabled={disabled}
         >
-          {confirmLabel ?? t("action.delete")}
+          {confirmLabel}
         </Button>
       </DialogFooter>
     </>
@@ -72,15 +80,20 @@ export const VaultDeleteConfirmDialog: React.FC<VaultDeleteConfirmDialogProps> =
   onOpenChange,
   onConfirm,
 }) => {
+  const { t } = useI18n();
+  const descriptionId = React.useId();
+
   return (
     <Dialog open={open} onOpenChange={(nextOpen) => {
       if (!disabled) onOpenChange(nextOpen);
     }}>
-      <DialogContent className="sm:max-w-[400px]">
+      <DialogContent className="sm:max-w-[400px]" aria-describedby={descriptionId}>
         <VaultDeleteConfirmDialogContent
           title={title}
           description={description}
-          confirmLabel={confirmLabel}
+          descriptionId={descriptionId}
+          cancelLabel={t("common.cancel")}
+          confirmLabel={confirmLabel ?? t("action.delete")}
           disabled={disabled}
           onCancel={() => onOpenChange(false)}
           onConfirm={onConfirm}
