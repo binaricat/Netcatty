@@ -5,6 +5,7 @@ import {
   isSupportedJmsProtocol,
   parseJmsDeepLink,
 } from "./jmsDeepLink";
+import { resolveHostAutofillPassword } from "./sshAuth";
 
 const encodePayload = (payload: Record<string, unknown>): string =>
   `jms://${Buffer.from(JSON.stringify(payload), "utf8").toString("base64")}`;
@@ -138,6 +139,8 @@ test("buildJmsDeepLinkEphemeralHost builds password ssh host with mosh and et di
   assert.equal(host.username, "JMS-token-id");
   assert.equal(host.password, "token-secret");
   assert.equal(host.authMethod, "password");
+  assert.equal(host.savePassword, false);
+  assert.equal(resolveHostAutofillPassword({ host, keys: [] }), undefined);
   assert.equal(host.protocol, "ssh");
   assert.equal(host.moshEnabled, false);
   assert.equal(host.ephemeral, true);

@@ -111,6 +111,7 @@ export const buildJmsDeepLinkEphemeralHost = (
     port: target.port,
     password: target.password,
     authMethod: "password",
+    savePassword: false,
     ephemeral: true,
     protocol: "ssh",
     // JumpServer sftp payloads target file transfer: connect the gateway
