@@ -9,6 +9,7 @@ import {
   slugFromQuickMessageName,
 } from "../../../../infrastructure/ai/quickMessages";
 import { useI18n } from "../../../../application/i18n/I18nProvider";
+import { useConfirm } from "../../../ui/confirm";
 import { Button } from "../../../ui/button";
 import { SettingCard, SettingsSection } from "../../settings-ui";
 
@@ -38,6 +39,7 @@ export const QuickMessagesSettings: React.FC<QuickMessagesSettingsProps> = ({
   reservedUserSkillSlugs = [],
 }) => {
   const { t } = useI18n();
+  const confirm = useConfirm();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
   const [draft, setDraft] = useState<DraftQuickMessage>(emptyDraft);
@@ -142,14 +144,17 @@ export const QuickMessagesSettings: React.FC<QuickMessagesSettingsProps> = ({
     resetEditor();
   }, [draft, editingId, resetEditor, setQuickMessages, validateDraft]);
 
-  const handleDelete = useCallback((message: AIQuickMessage) => {
-    const ok = window.confirm(t("ai.quickMessages.confirmDelete", { name: message.name }));
+  const handleDelete = useCallback(async (message: AIQuickMessage) => {
+    const ok = await confirm({
+      message: t("ai.quickMessages.confirmDelete", { name: message.name }),
+      destructive: true,
+    });
     if (!ok) return;
     setQuickMessages((prev) => prev.filter((item) => item.id !== message.id));
     if (editingId === message.id) {
       resetEditor();
     }
-  }, [editingId, resetEditor, setQuickMessages, t]);
+  }, [editingId, resetEditor, setQuickMessages, t, confirm]);
 
   const showEditor = isCreating || editingId != null;
 

@@ -4,6 +4,7 @@
 import { FileType, Pencil, Trash2 } from "lucide-react";
 import React, { useCallback, useMemo, useState } from "react";
 import { useI18n } from "../../../application/i18n/I18nProvider";
+import { useConfirm } from "../../ui/confirm";
 import { useSftpFileAssociations } from "../../../application/state/useSftpFileAssociations";
 import { useSettingsState } from "../../../application/state/useSettingsState";
 import type { FileOpenerType, SystemAppInfo } from "../../../lib/sftpFileUtils";
@@ -34,6 +35,7 @@ const getOpenerLabel = (
 
 export default function SettingsFileAssociationsTab() {
   const { t } = useI18n();
+  const confirm = useConfirm();
   const { getAllAssociations, removeAssociation, setOpenerForExtension, getDefaultOpener, setDefaultOpener, removeDefaultOpener } = useSftpFileAssociations();
   const { sftpDoubleClickBehavior, setSftpDoubleClickBehavior, sftpAutoSync, setSftpAutoSync, sftpShowHiddenFiles, setSftpShowHiddenFiles, sftpUseCompressedUpload, setSftpUseCompressedUpload, sftpAutoOpenSidebar, setSftpAutoOpenSidebar, sftpFollowTerminalCwd, setSftpFollowTerminalCwd, sftpDefaultViewMode, setSftpDefaultViewMode, sftpTransferConcurrency, setSftpTransferConcurrency } = useSettingsState();
   const associations = getAllAssociations();
@@ -47,11 +49,14 @@ export default function SettingsFileAssociationsTab() {
     return 'system-app';
   }, [defaultOpener]);
 
-  const handleRemove = useCallback((extension: string) => {
-    if (confirm(t('settings.sftpFileAssociations.removeConfirm', { ext: extension === 'file' ? t('sftp.opener.noExtension') : extension }))) {
+  const handleRemove = useCallback(async (extension: string) => {
+    if (await confirm({
+      message: t('settings.sftpFileAssociations.removeConfirm', { ext: extension === 'file' ? t('sftp.opener.noExtension') : extension }),
+      destructive: true,
+    })) {
       removeAssociation(extension);
     }
-  }, [removeAssociation, t]);
+  }, [removeAssociation, t, confirm]);
 
   const handleSelectDefaultSystemApp = useCallback(async () => {
     setIsSelectingDefaultApp(true);

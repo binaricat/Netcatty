@@ -20,6 +20,7 @@ import type {
 import type { ManagedAgentKey } from "../../../infrastructure/ai/managedAgents";
 import { PROVIDER_PRESETS } from "../../../infrastructure/ai/types";
 import { useI18n } from "../../../application/i18n/I18nProvider";
+import { useConfirm } from "../../ui/confirm";
 import { Button } from "../../ui/button";
 import { Select, SettingCard, SettingsSection, SettingsTabContent, SettingRow, Toggle } from "../settings-ui";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../ui/tabs";
@@ -198,6 +199,7 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
     exportGrants,
   } = useAIPermissionGrantsState();
   const { t } = useI18n();
+  const confirm = useConfirm();
   const [editingProviderId, setEditingProviderId] = useState<string | null>(null);
   const [codexIntegration, setCodexIntegration] = useState<CodexIntegrationStatus | null>(null);
   const [codexLoginSession, setCodexLoginSession] = useState<CodexLoginSession | null>(null);
@@ -509,19 +511,20 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
 
   // Remove provider with confirmation
   const handleRemoveProvider = useCallback(
-    (id: string) => {
+    async (id: string) => {
       const provider = providers.find((p) => p.id === id);
       const name = provider?.name || id;
-      const ok = window.confirm(
-        t('confirm.removeProvider', { name }),
-      );
+      const ok = await confirm({
+        message: t('confirm.removeProvider', { name }),
+        destructive: true,
+      });
       if (!ok) return;
       removeProvider(id);
       if (editingProviderId === id) {
         setEditingProviderId(null);
       }
     },
-    [removeProvider, editingProviderId, providers, t],
+    [removeProvider, editingProviderId, providers, t, confirm],
   );
 
   // Agent options for default agent

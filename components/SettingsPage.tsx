@@ -12,6 +12,7 @@ import { useVaultState } from "../application/state/useVaultState";
 import { useWindowControls } from "../application/state/useWindowControls";
 import { useUpdateCheck } from "../application/state/useUpdateCheck";
 import { I18nProvider, useI18n } from "../application/i18n/I18nProvider";
+import { ConfirmProvider } from "./ui/confirm";
 import { sanitizePortForwardingRulesForSync } from "../application/syncPayload";
 import { toast } from "./ui/toast";
 import { SettingsTabContent } from "./settings/settings-ui";
@@ -580,7 +581,9 @@ export default function SettingsPage() {
 
     return (
         <I18nProvider locale={settings.uiLanguage}>
-            <SettingsPageContent settings={settings} />
+            <ConfirmProvider>
+                <SettingsPageContent settings={settings} />
+            </ConfirmProvider>
         </I18nProvider>
     );
 }

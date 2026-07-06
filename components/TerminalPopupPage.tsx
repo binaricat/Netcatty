@@ -1,6 +1,7 @@
 import { Copy, Minus, Square, Unplug, X } from 'lucide-react';
 import React, { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { I18nProvider, useI18n } from '../application/i18n/I18nProvider';
+import { ConfirmProvider } from './ui/confirm';
 import { useSettingsState } from '../application/state/useSettingsState';
 import { useTerminalPopupWindow } from '../application/state/useTerminalPopupWindow';
 import { useVaultState } from '../application/state/useVaultState';
@@ -425,7 +426,9 @@ export default function TerminalPopupPage() {
   const settings = useSettingsState();
   return (
     <I18nProvider locale={settings.uiLanguage}>
-      <TerminalPopupPageInner />
+      <ConfirmProvider>
+        <TerminalPopupPageInner />
+      </ConfirmProvider>
     </I18nProvider>
   );
 }

@@ -3,6 +3,7 @@ import {
 } from 'lucide-react';
 import React, { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { useI18n } from '../../application/i18n/I18nProvider';
+import { useConfirm } from '../ui/confirm';
 import type { useSystemManagerBackend } from '../../application/state/useSystemManagerBackend';
 import { buildTmuxAttachCommand } from '../../domain/systemManager/tmuxShell';
 import type {
@@ -85,6 +86,7 @@ export const TmuxSessionCard = memo(function TmuxSessionCard({
   onRequestTerminalFocus,
 }: TmuxSessionCardProps) {
   const { t } = useI18n();
+  const confirm = useConfirm();
   const [expanded, setExpanded] = useState(false);
   const [renamePrompt, setRenamePrompt] = useState<RenamePromptTarget | null>(null);
   const [detachConfirmOpen, setDetachConfirmOpen] = useState(false);
@@ -206,8 +208,8 @@ export const TmuxSessionCard = memo(function TmuxSessionCard({
               destructive
               disabled={busy}
               loading={isPending('killSession')}
-              onClick={() => {
-                if (globalThis.confirm(t('systemManager.tmux.confirmKillSession', { name: session.name }))) {
+              onClick={async () => {
+                if (await confirm({ message: t('systemManager.tmux.confirmKillSession', { name: session.name }), destructive: true })) {
                   void runAction({ action: 'killSession', sessionName: session.name });
                 }
               }}
@@ -282,10 +284,10 @@ export const TmuxSessionCard = memo(function TmuxSessionCard({
                   destructive
                   disabled={busy}
                   loading={isPending('killWindow', tmuxWindow.index)}
-                  onClick={() => {
-                    if (globalThis.confirm(t('systemManager.tmux.confirmKillWindow', {
+                  onClick={async () => {
+                    if (await confirm({ message: t('systemManager.tmux.confirmKillWindow', {
                       name: tmuxWindow.name || String(tmuxWindow.index),
-                    }))) {
+                    }), destructive: true })) {
                       void runAction({
                         action: 'killWindow',
                         sessionName: session.name,

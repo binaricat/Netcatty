@@ -8,6 +8,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 import { cn } from "../lib/utils";
 import { useI18n } from "../application/i18n/I18nProvider";
 import { I18nProvider } from "../application/i18n/I18nProvider";
+import { ConfirmProvider } from "./ui/confirm";
 import { useSettingsState } from "../application/state/useSettingsState";
 import { useTrayPanelBackend } from "../application/state/useTrayPanelBackend";
 import { useActiveTabId } from "../application/state/activeTabStore";
@@ -451,7 +452,9 @@ const TrayPanel: React.FC = () => {
   const settings = useSettingsState();
   return (
     <I18nProvider locale={settings.uiLanguage}>
-      <TrayPanelContent terminalSettings={settings.terminalSettings} />
+      <ConfirmProvider>
+        <TrayPanelContent terminalSettings={settings.terminalSettings} />
+      </ConfirmProvider>
     </I18nProvider>
   );
 };

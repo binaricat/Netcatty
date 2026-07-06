@@ -4,6 +4,7 @@ export const ruCoreMessages: Messages = {
   // Common
   'common.save': 'Сохранить',
   'common.cancel': 'Отмена',
+  'common.confirm': 'Подтвердить',
   'common.close': 'Закрыть',
   'common.reset': 'Сбросить',
   'common.zoomIn': 'Увеличить',
