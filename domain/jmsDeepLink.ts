@@ -110,6 +110,7 @@ export const buildJmsDeepLinkEphemeralHost = (
   port: target.port,
   password: target.password,
   authMethod: "password",
+  ephemeral: true,
   protocol: "ssh",
   group: "",
   tags: [],

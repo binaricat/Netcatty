@@ -140,6 +140,7 @@ test("buildJmsDeepLinkEphemeralHost builds password ssh host with mosh and et di
   assert.equal(host.authMethod, "password");
   assert.equal(host.protocol, "ssh");
   assert.equal(host.moshEnabled, false);
+  assert.equal(host.ephemeral, true);
   assert.equal(host.etEnabled, false);
   assert.equal(host.createdAt, 456);
 });
