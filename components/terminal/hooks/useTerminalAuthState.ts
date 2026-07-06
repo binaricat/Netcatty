@@ -6,6 +6,32 @@ import type { PendingAuth } from "../runtime/createTerminalSessionStarters";
 import type { TerminalAuthMethod } from "../TerminalAuthDialog";
 import { logger } from "../../../lib/logger";
 
+export const buildSavedAuthHostUpdate = (
+  host: Host,
+  auth: {
+    authMethod: TerminalAuthMethod;
+    username: string;
+    password: string;
+    keyId: string | null;
+  },
+): Host => ({
+  ...host,
+  username: auth.username,
+  authMethod: auth.authMethod,
+  password: auth.authMethod === "password" ? auth.password : undefined,
+  savePassword: auth.authMethod === "password" ? true : host.savePassword,
+  identityFileId:
+    auth.authMethod === "key" || auth.authMethod === "certificate"
+      ? (auth.keyId ?? undefined)
+      : undefined,
+  // Detach stale Keychain identity on explicit credential save (#1956):
+  // resolveHostAuth prefers identity credentials over host fields.
+  // Empty string (not undefined) so applyGroupDefaults treats this as an explicit
+  // host-level override and does not re-inherit a group-level identity; consumers
+  // check host.identityId truthiness so "" behaves as "no identity".
+  identityId: "",
+});
+
 export const useTerminalAuthState = ({
   host,
   pendingAuthRef,
@@ -80,18 +106,14 @@ export const useTerminalAuthState = ({
       };
 
       if (shouldSave && onUpdateHost) {
-        const updatedHost: Host = {
-          ...host,
-          username: authUsername,
-          authMethod: authMethod,
-          password: authMethod === "password" ? authPassword : undefined,
-          savePassword: authMethod === "password" ? true : host.savePassword,
-          identityFileId:
-            authMethod === "key" || authMethod === "certificate"
-              ? (authKeyId ?? undefined)
-              : undefined,
-        };
-        onUpdateHost(updatedHost);
+        onUpdateHost(
+          buildSavedAuthHostUpdate(host, {
+            authMethod,
+            username: authUsername,
+            password: authPassword,
+            keyId: authKeyId,
+          }),
+        );
       }
 
       setNeedsAuth(false);

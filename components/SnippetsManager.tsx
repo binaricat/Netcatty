@@ -43,6 +43,7 @@ import {
   vaultPrimaryIconClass,
   vaultSnippetIconClass,
 } from './vault/VaultEntityIcon';
+import { VaultDeleteConfirmDialog } from './vault/VaultDeleteConfirmDialog';
 import {
   clearVaultDropIndicator as clearSnippetDropIndicator,
   getVaultDropIntent as getPackageDropIntent,
@@ -498,6 +499,11 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
   const [draggingPackagePath, setDraggingPackagePath] = useState<string | null>(null);
   const [isMultiSelectMode, setIsMultiSelectMode] = useState(false);
   const [selectedSnippetIds, setSelectedSnippetIds] = useState<Set<string>>(new Set());
+  const [deleteTarget, setDeleteTarget] = useState<{
+    type: 'snippet' | 'package';
+    id: string;
+    name: string;
+  } | null>(null);
   const [isSnippetImportDialogOpen, setIsSnippetImportDialogOpen] = useState(false);
   const [pendingImport, setPendingImport] = useState<PendingSnippetImport | null>(null);
   const prepareGridLayoutAnimation = useVaultGridLayoutAnimation(listRef);
@@ -1189,7 +1195,7 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
     setIsPackageDialogOpen(false);
   };
 
-  const deletePackage = (path: string) => {
+  const performDeletePackage = (path: string) => {
     const keep = packages.filter((p) => !(p === path || p.startsWith(path + '/')));
     
     const updatedSnippets = snippets.map((s) => {
@@ -1207,6 +1213,44 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
     if (selectedPackage && (selectedPackage === path || selectedPackage.startsWith(path + '/'))) {
       setSelectedPackage(null);
     }
+  };
+
+  const requestDeletePackage = (path: string) => {
+    setDeleteTarget({
+      type: 'package',
+      id: path,
+      name: path,
+    });
+  };
+
+  const requestDeleteSnippet = (id: string) => {
+    const snippet = snippets.find((item) => item.id === id);
+    setDeleteTarget({
+      type: 'snippet',
+      id,
+      name: snippet?.label || t('snippets.panel.editTitle'),
+    });
+  };
+
+  const confirmDeleteTarget = () => {
+    if (!deleteTarget) return;
+
+    if (deleteTarget.type === 'package') {
+      performDeletePackage(deleteTarget.id);
+    } else {
+      onDelete(deleteTarget.id);
+      setSelectedSnippetIds((prev) => {
+        if (!prev.has(deleteTarget.id)) return prev;
+        const next = new Set(prev);
+        next.delete(deleteTarget.id);
+        return next;
+      });
+      if (editingSnippet.id === deleteTarget.id) {
+        handleClosePanel();
+      }
+    }
+
+    setDeleteTarget(null);
   };
 
   const movePackage = (source: string, target: string | null) => {
@@ -1581,7 +1625,7 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
       t={t}
       handleClosePanel={handleClosePanel}
       editingSnippet={editingSnippet}
-      onDelete={onDelete}
+      onDelete={requestDeleteSnippet}
       handleSave={handleSave}
       handleSaveAndRun={handleSaveAndRun}
       setEditingSnippet={setEditingSnippet}
@@ -1869,7 +1913,7 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
                         <Download className="mr-2 h-4 w-4" /> {t('snippets.export.package')}
                       </ContextMenuItem>
                       <ContextMenuItem onClick={() => openRenameDialog(pkg.path)}>{t('common.rename')}</ContextMenuItem>
-                      <ContextMenuItem className="text-destructive" onClick={() => deletePackage(pkg.path)}>{t('action.delete')}</ContextMenuItem>
+                      <ContextMenuItem className="text-destructive" onClick={() => requestDeletePackage(pkg.path)}>{t('action.delete')}</ContextMenuItem>
                     </ContextMenuContent>
                   </ContextMenu>
                 ))}
@@ -2007,7 +2051,7 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
                       <ContextMenuItem onClick={() => exportSingleSnippet(snippet)}>
                         <Download className="mr-2 h-4 w-4" /> {t('snippets.export.snippet')}
                       </ContextMenuItem>
-                      <ContextMenuItem className="text-destructive" onClick={() => onDelete(snippet.id)}>
+                      <ContextMenuItem className="text-destructive" onClick={() => requestDeleteSnippet(snippet.id)}>
                         <Trash2 className="mr-2 h-4 w-4" /> {t('action.delete')}
                       </ContextMenuItem>
                     </ContextMenuContent>
@@ -2069,6 +2113,22 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
         onConfirmOverwrite={() => {
           if (pendingImport) applySnippetImport(pendingImport.payload, 'overwrite');
         }}
+      />
+
+      <VaultDeleteConfirmDialog
+        open={Boolean(deleteTarget)}
+        title={t('vault.deleteConfirm.title', {
+          name: deleteTarget?.name ?? '',
+        })}
+        description={
+          deleteTarget?.type === 'package'
+            ? t('vault.deleteConfirm.packageDesc')
+            : t('vault.deleteConfirm.desc')
+        }
+        onOpenChange={(open) => {
+          if (!open) setDeleteTarget(null);
+        }}
+        onConfirm={confirmDeleteTarget}
       />
 
       {renderRightPanel()}

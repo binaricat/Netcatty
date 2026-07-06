@@ -1273,7 +1273,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
       // otherwise omit them so the backend uses its own default shell detection.
       const sessionShell = ctx.host.localShell;
       const sessionShellArgs = ctx.host.localShellArgs;
-      const localStartDir = ctx.terminalSettings?.localStartDir;
+      const localStartDir = ctx.host.localStartDir || ctx.terminalSettings?.localStartDir;
 
       const id = await ctx.terminalBackend.startLocalSession({
         sessionId: ctx.sessionId,

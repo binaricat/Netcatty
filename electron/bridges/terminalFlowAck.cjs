@@ -50,6 +50,12 @@ function applyResume(session, target) {
   }
 }
 
+// NOTE on FLOW_HIGH_WATER_MARK size (issue #1961): for SSH sessions the flow
+// target is the ssh2 channel, so pause() stops the remote until resume() plus a
+// full round-trip. The watermark is kept near ssh2's own 2MB channel window
+// (WINDOW_THRESHOLD 1MB); a small watermark pauses/resumes dozens of times
+// during a multi-MB dump (e.g. `tail -2000f big.log`) and adds ~1 RTT per cycle
+// on WAN links, which is what made those dumps crawl.
 function reconcileSessionFlow(session) {
   if (!session) return;
   const state = ensureFlowState(session);

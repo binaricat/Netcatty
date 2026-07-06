@@ -58,6 +58,7 @@ import {
 import { getEffectiveKnownHosts } from './infrastructure/syncHelpers';
 import { ToastProvider, toast } from './components/ui/toast';
 import { TooltipProvider } from './components/ui/tooltip';
+import { ConfirmDialog } from './components/ui/confirm-dialog';
 import { PortForwardHostKeyDialog } from './components/port-forwarding';
 import { VaultSection } from './components/VaultView';
 import { KeyboardInteractiveRequest } from './components/KeyboardInteractiveModal';
@@ -115,6 +116,7 @@ function App({ settings }: { settings: SettingsState }) {
   const [keyboardInteractiveQueue, setKeyboardInteractiveQueue] = useState<KeyboardInteractiveRequest[]>([]);
   // Passphrase request queue for encrypted SSH keys
   const [passphraseQueue, setPassphraseQueue] = useState<PassphraseRequest[]>([]);
+  const [deleteHostConfirm, setDeleteHostConfirm] = useState<{ hostId: string; name: string } | null>(null);
   const [pendingNewWindowSession, setPendingNewWindowSession] = useState<OpenSessionInNewWindowPayload | null>(null);
   const [pendingTrayPanelConnectHostIds, setPendingTrayPanelConnectHostIds] = useState<string[]>([]);
   const isPeerSessionWindow = typeof window !== 'undefined' && window.location.hash.startsWith('#/session-window');
@@ -914,10 +916,14 @@ function App({ settings }: { settings: SettingsState }) {
 
   const handleDeleteHost = useCallback((hostId: string) => {
     const target = hosts.find(h => h.id === hostId);
-    const confirmed = window.confirm(t('confirm.deleteHost', { name: target?.label || hostId }));
-    if (!confirmed) return;
-    updateHosts(hosts.filter(h => h.id !== hostId));
-  }, [hosts, updateHosts, t]);
+    setDeleteHostConfirm({ hostId, name: target?.label || hostId });
+  }, [hosts]);
+
+  const handleConfirmDeleteHost = useCallback(() => {
+    if (!deleteHostConfirm) return;
+    updateHosts(hosts.filter(h => h.id !== deleteHostConfirm.hostId));
+    setDeleteHostConfirm(null);
+  }, [deleteHostConfirm, hosts, updateHosts]);
 
   const handleAddKnownHost = useCallback((kh: KnownHost) => {
     const nextKnownHosts = upsertKnownHost(knownHostsRef.current, kh);
@@ -950,7 +956,16 @@ function App({ settings }: { settings: SettingsState }) {
   }, []);
 
   // Wrapper to create local terminal with logging
-  const handleCreateLocalTerminal = useCallback((shell?: { command: string; args?: string[]; name?: string; icon?: string }) => { return handleCreateLocalTerminalImpl(() => ({ addConnectionLog, classifyLocalShellType, createLocalTerminal, discoveredShells, resolveShellSetting, shell, systemInfoRef, terminalSettings, undefined }), shell); }, [addConnectionLog, createLocalTerminal, terminalSettings, discoveredShells]);
+  const handleCreateLocalTerminal = useCallback((
+    shell?: { command: string; args?: string[]; name?: string; icon?: string },
+    options?: { localStartDir?: string },
+  ) => {
+    return handleCreateLocalTerminalImpl(
+      () => ({ addConnectionLog, classifyLocalShellType, createLocalTerminal, discoveredShells, resolveShellSetting, shell, systemInfoRef, terminalSettings, undefined }),
+      shell,
+      options,
+    );
+  }, [addConnectionLog, createLocalTerminal, terminalSettings, discoveredShells]);
 
   const proxyProfileIdSet = useMemo(
     () => new Set(proxyProfiles.map((profile) => profile.id)),
@@ -1056,6 +1071,21 @@ function App({ settings }: { settings: SettingsState }) {
       return next.length === prev.length ? prev : next;
     });
   }, [sessions]);
+
+  const _handleOpenTerminalPath = useEffectEvent((payload: { path?: string }) => {
+    const localStartDir = typeof payload?.path === 'string' ? payload.path : '';
+    if (!localStartDir.trim()) return;
+    handleCreateLocalTerminal(undefined, { localStartDir });
+  });
+
+  useEffect(() => {
+    if (isPeerSessionWindow) return;
+    const bridge = netcattyBridge.get();
+    if (!bridge?.onOpenTerminalPath) return;
+    return bridge.onOpenTerminalPath((payload) => {
+      _handleOpenTerminalPath(payload);
+    });
+  }, [isPeerSessionWindow]);
 
   const handleOpenHostFromVaultNote = useCallback((host: Host, source?: { noteId?: string }) => {
     const tabId = handleConnectToHost(host);
@@ -1238,6 +1268,16 @@ function App({ settings }: { settings: SettingsState }) {
   return (
     <>
       <PortForwardHostKeyDialog onAddKnownHost={handleAddKnownHost} />
+      <ConfirmDialog
+        open={deleteHostConfirm !== null}
+        title={deleteHostConfirm ? t('confirm.deleteHost', { name: deleteHostConfirm.name }) : ''}
+        confirmLabel={t('action.delete')}
+        destructive
+        onOpenChange={(open) => {
+          if (!open) setDeleteHostConfirm(null);
+        }}
+        onConfirm={handleConfirmDeleteHost}
+      />
       <AppActiveTabChrome
         showSftpTab={settings.showSftpTab}
         setActiveTabId={setActiveTabId}

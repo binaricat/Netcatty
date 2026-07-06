@@ -71,6 +71,7 @@ function buildFallbackHostFromSession(
     localShellArgs: session.localShellArgs,
     localShellName: session.localShellName,
     localShellIcon: session.localShellIcon,
+    localStartDir: session.localStartDir,
   };
 }
 

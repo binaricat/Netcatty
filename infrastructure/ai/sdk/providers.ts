@@ -119,7 +119,14 @@ function createOpenAIChatStreamFieldCapture(
 
 function createOpenAIChatToolCallNormalizer(requestId: string): (data: string) => string {
   const toolCallIdsByChoiceAndIndex = new Map<string, string>();
+  const toolCallNamesByChoiceAndIndex = new Map<string, string>();
   const pendingToolCallsByChoiceAndIndex = new Map<string, Record<string, unknown>>();
+  // Full concatenation of every arguments fragment seen for a tool call key,
+  // so a tool call the SDK has not seen yet can be forwarded self-describing.
+  const argumentsSeenByKey = new Map<string, string>();
+  // Keys forwarded inside choices array position 0 — the only element the
+  // AI SDK reads. Tool calls living at position > 0 are invisible to it.
+  const sdkVisibleKeys = new Set<string>();
   const requestIdToken = requestId.replace(/[^a-zA-Z0-9_-]/g, '_');
 
   return (data: string): string => {
@@ -157,6 +164,13 @@ function createOpenAIChatToolCallNormalizer(requestId: string): (data: string) =
         const toolCallRecord = toolCall as Record<string, unknown>;
         const toolCallIndex = typeof toolCallRecord.index === 'number' ? toolCallRecord.index : toolCallPosition;
         const key = `${choiceIndex}:${toolCallIndex}`;
+        const recordFn = toolCallRecord.function;
+        const recordArguments = recordFn && typeof recordFn === 'object'
+          ? (recordFn as Record<string, unknown>).arguments
+          : undefined;
+        if (typeof recordArguments === 'string') {
+          argumentsSeenByKey.set(key, (argumentsSeenByKey.get(key) ?? '') + recordArguments);
+        }
         const existingId = toolCallIdsByChoiceAndIndex.get(key);
         const pendingToolCall = pendingToolCallsByChoiceAndIndex.get(key);
         const candidateToolCall = pendingToolCall
@@ -164,11 +178,27 @@ function createOpenAIChatToolCallNormalizer(requestId: string): (data: string) =
           : toolCallRecord;
 
         if (existingId) {
-          const normalizedToolCall = normalizeOpenAIChatToolCall(toolCallRecord, existingId);
+          const rememberedName = toolCallNamesByChoiceAndIndex.get(key);
+          const needsFullArguments = choicePosition === 0 && !sdkVisibleKeys.has(key);
+          let normalizedToolCall = normalizeOpenAIChatToolCall(
+            toolCallRecord,
+            existingId,
+            rememberedName,
+          );
+          if (needsFullArguments) {
+            normalizedToolCall = injectFullOpenAIChatToolCallArguments(
+              normalizedToolCall,
+              argumentsSeenByKey.get(key),
+            );
+          }
+          if (choicePosition === 0) {
+            sdkVisibleKeys.add(key);
+          }
           if (
             normalizedToolCall.id === toolCallRecord.id &&
             normalizedToolCall.type === toolCallRecord.type &&
-            normalizedToolCall.function === toolCallRecord.function
+            normalizedToolCall.function === toolCallRecord.function &&
+            (!rememberedName || hasFunctionName(toolCallRecord))
           ) {
             normalizedToolCalls.push(toolCall);
           } else {
@@ -190,13 +220,30 @@ function createOpenAIChatToolCallNormalizer(requestId: string): (data: string) =
           ? candidateToolCall.id
           : `call_netcatty_${requestIdToken}_${choiceIndex}_${toolCallIndex}`;
         toolCallIdsByChoiceAndIndex.set(key, toolCallId);
+        const candidateFunction = candidateToolCall.function;
+        if (candidateFunction && typeof candidateFunction === 'object') {
+          toolCallNamesByChoiceAndIndex.set(
+            key,
+            (candidateFunction as Record<string, unknown>).name as string,
+          );
+        }
         pendingToolCallsByChoiceAndIndex.delete(key);
-        const normalizedToolCall = normalizeOpenAIChatToolCall(candidateToolCall, toolCallId);
+        let normalizedToolCall = normalizeOpenAIChatToolCall(candidateToolCall, toolCallId);
+        if (choicePosition === 0 && !sdkVisibleKeys.has(key)) {
+          normalizedToolCall = injectFullOpenAIChatToolCallArguments(
+            normalizedToolCall,
+            argumentsSeenByKey.get(key),
+          );
+        }
+        if (choicePosition === 0) {
+          sdkVisibleKeys.add(key);
+        }
 
         if (
           candidateToolCall === toolCallRecord &&
           toolCallId === toolCallRecord.id &&
-          normalizedToolCall.type === toolCallRecord.type
+          normalizedToolCall.type === toolCallRecord.type &&
+          normalizedToolCall.function === toolCallRecord.function
         ) {
           normalizedToolCalls.push(toolCall);
           continue;
@@ -264,18 +311,46 @@ function mergeOpenAIChatToolCallDeltas(
 function normalizeOpenAIChatToolCall(
   toolCall: Record<string, unknown>,
   toolCallId: string,
+  rememberedName?: string,
 ): Record<string, unknown> {
   const normalized = { ...toolCall, id: toolCallId };
-  if (normalized.type === '') {
+  if (
+    normalized.type === '' ||
+    normalized.type == null ||
+    (typeof normalized.type === 'string' && normalized.type !== 'function')
+  ) {
     normalized.type = 'function';
   }
   const fn = normalized.function;
-  if (fn && typeof fn === 'object' && (fn as Record<string, unknown>).name === '') {
-    const normalizedFunction = { ...(fn as Record<string, unknown>) };
-    delete normalizedFunction.name;
-    normalized.function = normalizedFunction;
+  if (fn && typeof fn === 'object') {
+    const fnRecord = fn as Record<string, unknown>;
+    if (!hasFunctionName({ function: fnRecord })) {
+      const normalizedFunction = { ...fnRecord };
+      if (rememberedName) {
+        normalizedFunction.name = rememberedName;
+      } else if (fnRecord.name === '' || fnRecord.name === null) {
+        delete normalizedFunction.name;
+      }
+      normalized.function = normalizedFunction;
+    }
+  } else if (rememberedName) {
+    normalized.function = { name: rememberedName };
   }
   return normalized;
+}
+
+function injectFullOpenAIChatToolCallArguments(
+  toolCall: Record<string, unknown>,
+  fullArguments: string | undefined,
+): Record<string, unknown> {
+  if (fullArguments === undefined) return toolCall;
+  const fn = toolCall.function;
+  const fnRecord = fn && typeof fn === 'object' ? fn as Record<string, unknown> : undefined;
+  if (fnRecord?.arguments === fullArguments) return toolCall;
+  return {
+    ...toolCall,
+    function: { ...(fnRecord ?? {}), arguments: fullArguments },
+  };
 }
 
 function hasFunctionName(toolCall: Record<string, unknown>): boolean {

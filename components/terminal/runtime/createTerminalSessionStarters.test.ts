@@ -1803,6 +1803,49 @@ test("restored local reconnect does not fall back to host startup command", asyn
   assert.deepEqual(sessionWrites, []);
 });
 
+test("local session start uses per-session directory before global default", async () => {
+  let capturedOptions: Record<string, unknown> | null = null;
+  const terminalBackend = {
+    backendAvailable: () => true,
+    telnetAvailable: () => true,
+    moshAvailable: () => true,
+    localAvailable: () => true,
+    serialAvailable: () => true,
+    execAvailable: () => true,
+    startSSHSession: async () => "ssh-session",
+    startTelnetSession: async () => "telnet-session",
+    startMoshSession: async () => "mosh-session",
+    startLocalSession: async (options: Record<string, unknown>) => {
+      capturedOptions = options;
+      return "local-session";
+    },
+    startSerialSession: async () => "serial-session",
+    execCommand: async () => ({}),
+    onSessionData: () => noop,
+    onSessionExit: () => noop,
+    onChainProgress: () => noop,
+    writeToSession: noop,
+    resizeSession: noop,
+  };
+
+  const ctx = createStarterContext({
+    host: {
+      id: "local-host",
+      label: "Local",
+      hostname: "local",
+      username: "",
+      protocol: "local",
+      localStartDir: "/Users/alice/project",
+    },
+    terminalSettings: { localStartDir: "/Users/alice/default" },
+    terminalBackend,
+  });
+
+  await createTerminalSessionStarters(ctx as never).startLocal(createTermStub() as never);
+
+  assert.equal(capturedOptions?.cwd, "/Users/alice/project");
+});
+
 test("local session restores cwd before startup command after attaching", async () => {
   const sessionWrites: Array<{ id: string; data: string; automated?: boolean }> = [];
   const executedCommands: string[] = [];

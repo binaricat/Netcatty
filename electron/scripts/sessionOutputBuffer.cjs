@@ -263,6 +263,14 @@ class SessionOutputBuffer {
       const removedLength = removed.length;
       this.totalLength -= removedLength;
       this.scanOffset = Math.max(0, this.scanOffset - removedLength);
+      for (const waiter of this.waiters) {
+        if (typeof waiter.freshBoundary === "number") {
+          waiter.freshBoundary = Math.max(0, waiter.freshBoundary - removedLength);
+        }
+        if (waiter.custom && typeof waiter.custom.freshBoundary === "number") {
+          waiter.custom.freshBoundary = Math.max(0, waiter.custom.freshBoundary - removedLength);
+        }
+      }
     }
     this.flushWaiters();
   }
@@ -287,24 +295,28 @@ class SessionOutputBuffer {
     return tryRegexMatchWithEnd(this.getPendingText(), pattern);
   }
 
-  consumeFreshPendingMatch(pattern) {
+  currentFreshBoundary() {
+    return Math.max(this.scanOffset, this.getText().length - FRESH_MATCH_TAIL_SLACK);
+  }
+
+  consumeFreshPendingMatch(pattern, freshBoundary = this.currentFreshBoundary()) {
     while (true) {
       const matched = this.tryMatchPending(pattern);
       if (matched === null) return null;
       const absoluteEnd = this.scanOffset + matched.endOffset;
-      if (isFreshTailMatch(this.getText().length, absoluteEnd)) {
+      if (absoluteEnd >= freshBoundary) {
         return matched;
       }
       this.advanceScanOffset(staleAdvanceEndOffset(matched));
     }
   }
 
-  consumeFreshPendingText(text) {
+  consumeFreshPendingText(text, freshBoundary = this.currentFreshBoundary()) {
     while (true) {
       const matched = this.tryMatchPendingText(text);
       if (matched === null) return null;
       const absoluteEnd = this.scanOffset + matched.endOffset;
-      if (isFreshTailMatch(this.getText().length, absoluteEnd)) {
+      if (absoluteEnd >= freshBoundary) {
         return matched;
       }
       this.advanceScanOffset(staleAdvanceEndOffset(matched));
@@ -312,6 +324,7 @@ class SessionOutputBuffer {
   }
 
   consumeFreshPendingRegex(pattern, options = {}) {
+    const fallbackBoundary = this.currentFreshBoundary();
     const text = this.getText();
     const baseOffset = this.scanOffset;
     const pendingText = text.slice(baseOffset);
@@ -328,12 +341,9 @@ class SessionOutputBuffer {
         ? options.minFreshStartAbsolute
         : null;
       const absoluteStart = baseOffset + relativeOffset + matched.freshStartOffset;
-      const absoluteEnd = baseOffset + relativeOffset + matched.freshEndOffset;
       const matchStartAbsolute = baseOffset + relativeOffset + matched.startOffset;
-      if (
-        isFreshTailMatch(text.length, absoluteEnd)
-        && (minFreshStartAbsolute === null || absoluteStart >= minFreshStartAbsolute)
-      ) {
+      const freshBoundary = minFreshStartAbsolute === null ? fallbackBoundary : minFreshStartAbsolute;
+      if (absoluteStart >= freshBoundary) {
         let value = matched.value;
         if (minFreshStartAbsolute !== null && matchStartAbsolute < minFreshStartAbsolute) {
           const valueFreshStart = matched.freshStartOffset - matched.startOffset;
@@ -353,14 +363,14 @@ class SessionOutputBuffer {
     return null;
   }
 
-  consumeFreshPendingMatchAny(patterns) {
+  consumeFreshPendingMatchAny(patterns, freshBoundary = this.currentFreshBoundary()) {
     for (let index = 0; index < patterns.length; index += 1) {
       const pattern = patterns[index];
       while (true) {
         const matched = this.tryMatchPending(pattern);
         if (matched === null) break;
         const absoluteEnd = this.scanOffset + matched.endOffset;
-        if (isFreshTailMatch(this.getText().length, absoluteEnd)) {
+        if (absoluteEnd >= freshBoundary) {
           return { index, matched };
         }
         this.advanceScanOffset(staleAdvanceEndOffset(matched));
@@ -432,7 +442,10 @@ class SessionOutputBuffer {
         }
         continue;
       }
-      const matched = this.consumeFreshPendingMatch(waiter.pattern);
+      const matched = this.consumeFreshPendingMatch(
+        waiter.pattern,
+        waiter.freshBoundary ?? this.currentFreshBoundary(),
+      );
       if (matched !== null) {
         this.advanceScanOffset(matched.endOffset);
         clearTimeout(waiter.timer);
@@ -445,16 +458,17 @@ class SessionOutputBuffer {
     this.waiters = remaining;
   }
 
-  waitForWithMatcher({ pattern, timeoutMs, shouldAbort, consumeFreshMatch, timeoutLabel }) {
+  waitForWithMatcher({ pattern, timeoutMs, shouldAbort, consumeFreshMatch, timeoutLabel, freshBoundary }) {
     return new Promise((resolve, reject) => {
       const waiter = {
         pattern,
+        freshBoundary,
         resolve,
         reject,
         shouldAbort,
         timer: null,
         check: () => {
-          const matched = consumeFreshMatch();
+          const matched = consumeFreshMatch(waiter.freshBoundary);
           if (matched === null) return false;
           this.advanceScanOffset(matched.endOffset);
           clearTimeout(waiter.timer);
@@ -504,12 +518,14 @@ class SessionOutputBuffer {
         pattern,
         timeoutMs,
         shouldAbort,
-        consumeFreshMatch: () => this.consumeFreshPendingRegex(pattern, { minFreshStartAbsolute }),
+        freshBoundary: minFreshStartAbsolute,
+        consumeFreshMatch: (boundary) => this.consumeFreshPendingRegex(pattern, { minFreshStartAbsolute: boundary }),
         timeoutLabel: "waitFor",
       });
     }
 
-    const immediate = this.consumeFreshPendingMatch(pattern);
+    const freshBoundary = this.currentFreshBoundary();
+    const immediate = this.consumeFreshPendingMatch(pattern, freshBoundary);
     if (immediate !== null) {
       this.advanceScanOffset(immediate.endOffset);
       return Promise.resolve(immediate.value);
@@ -518,6 +534,7 @@ class SessionOutputBuffer {
     return new Promise((resolve, reject) => {
       const waiter = {
         pattern,
+        freshBoundary,
         resolve,
         reject,
         shouldAbort,
@@ -541,7 +558,8 @@ class SessionOutputBuffer {
   }
 
   waitForText(text, timeoutMs = 30000, shouldAbort) {
-    const immediate = this.consumeFreshPendingText(text);
+    const freshBoundary = this.currentFreshBoundary();
+    const immediate = this.consumeFreshPendingText(text, freshBoundary);
     if (immediate !== null) {
       this.advanceScanOffset(immediate.endOffset);
       return Promise.resolve(immediate.value);
@@ -551,7 +569,8 @@ class SessionOutputBuffer {
       pattern: text,
       timeoutMs,
       shouldAbort,
-      consumeFreshMatch: () => this.consumeFreshPendingText(text),
+      freshBoundary,
+      consumeFreshMatch: (boundary) => this.consumeFreshPendingText(text, boundary),
       timeoutLabel: "waitForText",
     });
   }
@@ -571,7 +590,8 @@ class SessionOutputBuffer {
       pattern,
       timeoutMs,
       shouldAbort,
-      consumeFreshMatch: () => this.consumeFreshPendingRegex(pattern, { minFreshStartAbsolute }),
+      freshBoundary: minFreshStartAbsolute,
+      consumeFreshMatch: (boundary) => this.consumeFreshPendingRegex(pattern, { minFreshStartAbsolute: boundary }),
       timeoutLabel: "waitForRegex",
     });
   }
@@ -597,7 +617,8 @@ class SessionOutputBuffer {
         return preserved.index;
       }
     }
-    const fresh = this.consumeFreshPendingMatchAny(patterns);
+    const freshBoundary = this.currentFreshBoundary();
+    const fresh = this.consumeFreshPendingMatchAny(patterns, freshBoundary);
     if (fresh !== null) {
       this.advanceScanOffset(fresh.matched.endOffset);
       return fresh.index;
@@ -606,6 +627,7 @@ class SessionOutputBuffer {
     return new Promise((resolve, reject) => {
       const waiter = {
         patterns,
+        freshBoundary,
         resolve,
         reject,
         shouldAbort,
@@ -623,7 +645,7 @@ class SessionOutputBuffer {
               return true;
             }
           }
-          const fresh = this.consumeFreshPendingMatchAny(patterns);
+          const fresh = this.consumeFreshPendingMatchAny(patterns, waiter.freshBoundary);
           if (fresh !== null) {
             this.advanceScanOffset(fresh.matched.endOffset);
             clearTimeout(waiter.timer);

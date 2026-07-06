@@ -171,7 +171,15 @@ module.exports = {
         extendInfo: {
             NSCameraUsageDescription: 'Netcatty may use the camera for video calls',
             NSMicrophoneUsageDescription: 'Netcatty may use the microphone for audio',
-            NSLocalNetworkUsageDescription: 'Netcatty needs local network access for SSH connections'
+            NSLocalNetworkUsageDescription: 'Netcatty needs local network access for SSH connections',
+            CFBundleDocumentTypes: [
+                {
+                    CFBundleTypeName: 'Folder',
+                    CFBundleTypeRole: 'Viewer',
+                    LSHandlerRank: 'Alternate',
+                    LSItemContentTypes: ['public.folder']
+                }
+            ]
         },
         extraResources: [...moshExtraResources('darwin'), ...etExtraResources('darwin')]
     },

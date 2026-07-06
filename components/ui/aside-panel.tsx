@@ -62,6 +62,7 @@ interface AsidePanelContextType {
 }
 
 const AsidePanelContext = createContext<AsidePanelContextType | null>(null);
+const AsideActionMenuContext = createContext<(() => void) | null>(null);
 
 export const useAsidePanel = () => {
     const context = useContext(AsidePanelContext);
@@ -172,18 +173,31 @@ interface AsideActionMenuProps {
 }
 
 export const AsideActionMenu: React.FC<AsideActionMenuProps> = ({ children }) => {
+    const [open, setOpen] = useState(false);
+    const close = useCallback(() => setOpen(false), []);
+
     return (
-        <Popover>
+        <Popover open={open} onOpenChange={setOpen}>
             <PopoverTrigger asChild>
                 <button className="p-1.5 hover:bg-muted rounded-md transition-colors cursor-pointer">
                     <MoreVertical size={18} />
                 </button>
             </PopoverTrigger>
             <PopoverContent className="w-40 p-1" align="end">
-                {children}
+                <AsideActionMenuContext.Provider value={close}>
+                    {children}
+                </AsideActionMenuContext.Provider>
             </PopoverContent>
         </Popover>
     );
+};
+
+export const invokeAsideActionMenuItemClick = (
+    closeMenu: (() => void) | null,
+    onClick?: () => void,
+) => {
+    closeMenu?.();
+    onClick?.();
 };
 
 // Action Menu Item
@@ -193,9 +207,11 @@ export const AsideActionMenuItem: React.FC<{
     onClick?: () => void;
     variant?: 'default' | 'destructive';
 }> = ({ icon, children, onClick, variant = 'default' }) => {
+    const closeMenu = useContext(AsideActionMenuContext);
+
     return (
         <button
-            onClick={onClick}
+            onClick={() => invokeAsideActionMenuItemClick(closeMenu, onClick)}
             className={cn(
                 "w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded-md transition-colors cursor-pointer",
                 variant === 'destructive'

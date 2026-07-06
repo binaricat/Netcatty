@@ -1,5 +1,4 @@
 import {
-  AlertTriangle,
   Check,
   ChevronDown,
   Globe,
@@ -32,14 +31,6 @@ import {
   AsidePanelFooter,
 } from "./ui/aside-panel";
 import { Button } from "./ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "./ui/dialog";
 import { Dropdown, DropdownContent, DropdownTrigger } from "./ui/dropdown";
 import { SortDropdown } from "./ui/sort-dropdown";
 import { toast } from "./ui/toast";
@@ -50,6 +41,7 @@ import {
   vaultHeaderSecondaryButtonClass,
   vaultSectionTitleClass,
 } from "./vault/VaultPageHeader";
+import { VaultDeleteConfirmDialog } from "./vault/VaultDeleteConfirmDialog";
 import { useVaultItemReorder } from "./vault/vaultReorderDrag";
 
 // Import components and utilities from port-forwarding module
@@ -436,33 +428,24 @@ const PortForwarding: React.FC<PortForwardingProps> = ({
     setSelectedRuleId(null);
   }, [setSelectedRuleId]);
 
-  // Handle delete with confirmation for active tunnels
+  // Handle delete with confirmation
   const handleDeleteRule = useCallback(
     (rule: PortForwardingRule) => {
-      // If tunnel is active or connecting, show confirmation dialog
-      if (rule.status === "active" || rule.status === "connecting") {
-        setRuleToDelete(rule);
-        setShowDeleteConfirm(true);
-      } else {
-        // If inactive, delete directly
-        if (editingRule?.id === rule.id) {
-          closeEditPanel();
-        }
-        deleteRule(rule.id);
-      }
+      setRuleToDelete(rule);
+      setShowDeleteConfirm(true);
     },
-    [editingRule, deleteRule, closeEditPanel],
+    [],
   );
 
-  // Confirm delete of active tunnel: stop first, then delete
-  const confirmDeleteActiveRule = useCallback(async () => {
+  // Confirm delete; active tunnels are stopped first.
+  const confirmDeleteRule = useCallback(async () => {
     if (!ruleToDelete) return;
 
     setIsDeleting(true);
     try {
-      // Stop the tunnel first
-      await stopTunnel(ruleToDelete.id);
-      // Then delete the rule
+      if (ruleToDelete.status === "active" || ruleToDelete.status === "connecting") {
+        await stopTunnel(ruleToDelete.id);
+      }
       if (editingRule?.id === ruleToDelete.id) {
         closeEditPanel();
       }
@@ -473,6 +456,8 @@ const PortForwarding: React.FC<PortForwardingProps> = ({
       setRuleToDelete(null);
     }
   }, [ruleToDelete, stopTunnel, deleteRule, editingRule, closeEditPanel]);
+
+  const deleteTargetIsActive = ruleToDelete?.status === "active" || ruleToDelete?.status === "connecting";
 
   // Handle wizard navigation
   // Flow for local: type -> local-config -> destination -> host-selection
@@ -923,44 +908,26 @@ const PortForwarding: React.FC<PortForwardingProps> = ({
         />
       )}
 
-      {/* Delete Active Tunnel Confirmation Dialog */}
-      <Dialog open={showDeleteConfirm} onOpenChange={(open) => {
-        if (!isDeleting) {
+      <VaultDeleteConfirmDialog
+        open={showDeleteConfirm}
+        title={t("vault.deleteConfirm.title", {
+          name: ruleToDelete?.label ?? "",
+        })}
+        description={
+          deleteTargetIsActive
+            ? t("pf.deleteActive.desc", { label: ruleToDelete?.label ?? "" })
+            : t("vault.deleteConfirm.portForwardingDesc")
+        }
+        confirmLabel={deleteTargetIsActive ? t("pf.deleteActive.confirm") : undefined}
+        disabled={isDeleting}
+        onOpenChange={(open) => {
           setShowDeleteConfirm(open);
           if (!open) setRuleToDelete(null);
-        }
-      }}>
-        <DialogContent className="sm:max-w-[400px]">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-destructive">
-              <AlertTriangle size={20} />
-              {t("pf.deleteActive.title")}
-            </DialogTitle>
-            <DialogDescription>
-              {t("pf.deleteActive.desc", { label: ruleToDelete?.label ?? "" })}
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter className="gap-2 sm:gap-0">
-            <Button
-              variant="outline"
-              onClick={() => {
-                setShowDeleteConfirm(false);
-                setRuleToDelete(null);
-              }}
-              disabled={isDeleting}
-            >
-              {t("common.cancel")}
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={confirmDeleteActiveRule}
-              disabled={isDeleting}
-            >
-              {t("pf.deleteActive.confirm")}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        }}
+        onConfirm={() => {
+          void confirmDeleteRule();
+        }}
+      />
     </div>
   );
 };

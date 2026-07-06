@@ -74,6 +74,12 @@ const {
   updateSshDeepLinkEnabledPreference,
   writeSshDeepLinkEnabledPreference,
 } = require("./deepLink.cjs");
+const {
+  OPEN_TERMINAL_PATH_CHANNEL,
+  collectOpenTerminalPathArgs,
+  resolveOpenTerminalPath,
+  resolveOpenTerminalPathsFromArgs,
+} = require("./openTerminalPath.cjs");
 
 try {
   protocol?.registerSchemesAsPrivileged?.([
@@ -524,7 +530,9 @@ async function createAndShowMainWindow() {
 
 let sshDeepLinkEnabled = readSshDeepLinkEnabledPreference({ app });
 const pendingSshDeepLinkUrls = sshDeepLinkEnabled ? collectSshDeepLinkUrls(process.argv) : [];
+const pendingOpenTerminalPaths = resolveOpenTerminalPathsFromArgs(process.argv);
 let flushingSshDeepLinks = false;
+let flushingOpenTerminalPaths = false;
 let sshDeepLinkDeliveryGeneration = 0;
 
 function queueSshDeepLink(rawUrl) {
@@ -533,6 +541,23 @@ function queueSshDeepLink(rawUrl) {
   pendingSshDeepLinkUrls.push(rawUrl);
   if (app.isReady?.()) {
     void flushPendingSshDeepLinks();
+  }
+}
+
+function queueOpenTerminalPath(rawPath, options = {}) {
+  const resolvedPath = resolveOpenTerminalPath(rawPath, options);
+  if (!resolvedPath) return;
+  pendingOpenTerminalPaths.push(resolvedPath);
+  if (app.isReady?.()) {
+    void flushPendingOpenTerminalPaths();
+  }
+}
+
+function queueResolvedOpenTerminalPaths(paths) {
+  if (!Array.isArray(paths) || paths.length === 0) return;
+  pendingOpenTerminalPaths.push(...paths);
+  if (app.isReady?.()) {
+    void flushPendingOpenTerminalPaths();
   }
 }
 
@@ -606,6 +631,40 @@ async function flushPendingSshDeepLinks() {
   }
 }
 
+async function deliverOpenTerminalPath(targetPath) {
+  const win = await createAndShowMainWindow();
+  focusMainWindow();
+  const windowManager = getWindowManager();
+  const result = await windowManager.sendWhenRendererReady?.(
+    win,
+    OPEN_TERMINAL_PATH_CHANNEL,
+    { path: targetPath },
+    { timeoutMs: isDev ? 30000 : 15000 },
+  );
+  if (result && result.success === false) {
+    console.warn("[Main] Failed to deliver open terminal path:", result.error || result.reason);
+  }
+}
+
+async function flushPendingOpenTerminalPaths() {
+  if (flushingOpenTerminalPaths) return;
+  flushingOpenTerminalPaths = true;
+  try {
+    while (pendingOpenTerminalPaths.length > 0) {
+      const targetPath = pendingOpenTerminalPaths.shift();
+      if (!targetPath) continue;
+      await deliverOpenTerminalPath(targetPath);
+    }
+  } catch (err) {
+    console.warn("[Main] Failed to process open terminal path:", err);
+  } finally {
+    flushingOpenTerminalPaths = false;
+    if (pendingOpenTerminalPaths.length > 0) {
+      void flushPendingOpenTerminalPaths();
+    }
+  }
+}
+
 function hasUsableWindow() {
   try {
     const windowManager = getWindowManager();
@@ -643,12 +702,23 @@ if (!gotLock) {
     queueSshDeepLink(rawUrl);
   });
 
-  app.on("second-instance", (_event, argv) => {
+  app.on("open-file", (event, filePath) => {
+    event.preventDefault();
+    queueOpenTerminalPath(filePath);
+  });
+
+  app.on("second-instance", (_event, argv, workingDirectory) => {
     const deepLinkUrls = collectSshDeepLinkUrls(argv);
     if (deepLinkUrls.length > 0) {
       if (sshDeepLinkEnabled) {
         deepLinkUrls.forEach(queueSshDeepLink);
       }
+      return;
+    }
+    if (collectOpenTerminalPathArgs(argv).length > 0) {
+      const baseDirectory = typeof workingDirectory === "string" ? workingDirectory : undefined;
+      const openTerminalPaths = resolveOpenTerminalPathsFromArgs(argv, { baseDirectory });
+      queueResolvedOpenTerminalPaths(openTerminalPaths);
       return;
     }
     if (!focusMainWindow()) {
@@ -780,6 +850,7 @@ if (!gotLock) {
     // Create the main window
     void createAndShowMainWindow().then(() => {
       void flushPendingSshDeepLinks();
+      void flushPendingOpenTerminalPaths();
 
       // Trigger auto-update check 5 s after window creation.
       // startAutoCheck() is a no-op on unsupported platforms (Linux deb/rpm/snap).
