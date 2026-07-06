@@ -15,6 +15,7 @@ import {
   resolveHostTerminalFontWeight,
   resolveHostTerminalThemeId,
 } from '../../domain/terminalAppearance';
+import { isSavedVaultHost } from '../../domain/ephemeralHosts';
 import { isSameResolvedTerminalFont } from '../../infrastructure/config/fonts';
 import type { Host, TerminalSession, TerminalTheme, Workspace } from '../../types';
 import { getScopedTopTabsThemeId } from '../terminalTopTabsTheme';
@@ -102,7 +103,7 @@ export function useTerminalThemePanelState({
   const isFocusedHostEphemeral = useMemo(() => {
     if (isFocusedHostLocal) return true;
     if (!focusedHost) return true;
-    return !hostMap.has(focusedHost.id);
+    return !isSavedVaultHost(hostMap.get(focusedHost.id));
   }, [focusedHost, isFocusedHostLocal, hostMap]);
 
   const rawFocusedHost = useMemo(() => {
@@ -148,7 +149,7 @@ export function useTerminalThemePanelState({
       previewedOrVisibleThemeId,
       resolveSessionThemeId: (sessionId) => {
         const host = sessionHostsMap.get(sessionId) ?? null;
-        const isEphemeral = !host || !hostMap.has(host.id);
+        const isEphemeral = !host || !isSavedVaultHost(hostMap.get(host.id));
         return resolveFocusedAppearance({ host, isEphemeral }).themeId;
       },
     }),
