@@ -450,6 +450,12 @@ export const zhTWCoreMessages: Messages = {
   'vault.groups.errors.invalidChars': "分組名稱不能包含 '/' 或 '\\\\'.",
   'vault.groups.errors.duplicatePath': '該位置已存在同名分組。',
 
+  'vault.deleteConfirm.title': '刪除「{name}」？',
+  'vault.deleteConfirm.desc': '此操作不可復原。',
+  'vault.deleteConfirm.packageDesc': '這會刪除程式碼包，包內程式碼片段會保留，並移出該程式碼包。',
+  'vault.deleteConfirm.noteGroupDesc': '這會刪除資料夾，資料夾內筆記會保留，並移出該資料夾。',
+  'vault.deleteConfirm.portForwardingDesc': '這會刪除此埠轉發規則。',
+
   'vault.managedSource.unmanage': '取消託管',
   'vault.managedSource.unmanageSuccess': '已取消託管分組',
 

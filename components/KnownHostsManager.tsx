@@ -45,6 +45,7 @@ import {
   vaultHeaderIconButtonClass,
   vaultHeaderSecondaryButtonClass,
 } from "./vault/VaultPageHeader";
+import { VaultDeleteConfirmDialog } from "./vault/VaultDeleteConfirmDialog";
 import { VaultEntityIcon, vaultPrimaryIconClass } from "./vault/VaultEntityIcon";
 import { useVaultItemReorder } from "./vault/vaultReorderDrag";
 
@@ -294,6 +295,7 @@ const KnownHostsManager: React.FC<KnownHostsManagerProps> = ({
   const [search, setSearch] = useState("");
   const deferredSearch = useDeferredValue(search);
   const [isScanning, setIsScanning] = useState(false);
+  const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useStoredViewMode(
     STORAGE_KEY_VAULT_KNOWN_HOSTS_VIEW_MODE,
     "grid",
@@ -471,9 +473,23 @@ const KnownHostsManager: React.FC<KnownHostsManagerProps> = ({
   // Memoized handlers to prevent re-renders
   const handleDelete = useCallback(
     (id: string) => {
-      onDelete(id);
+      setDeleteTargetId(id);
     },
-    [onDelete],
+    [],
+  );
+
+  const deleteTarget = useMemo(
+    () => knownHosts.find((knownHost) => knownHost.id === deleteTargetId) ?? null,
+    [deleteTargetId, knownHosts],
+  );
+
+  const confirmDelete = useCallback(
+    () => {
+      if (!deleteTargetId) return;
+      onDelete(deleteTargetId);
+      setDeleteTargetId(null);
+    },
+    [deleteTargetId, onDelete],
   );
 
   const handleConvertToHost = useCallback(
@@ -670,6 +686,17 @@ const KnownHostsManager: React.FC<KnownHostsManagerProps> = ({
           )}
         </div>
       </ScrollArea>
+      <VaultDeleteConfirmDialog
+        open={Boolean(deleteTargetId)}
+        title={t("vault.deleteConfirm.title", {
+          name: deleteTarget?.hostname ?? "",
+        })}
+        description={t("vault.deleteConfirm.desc")}
+        onOpenChange={(open) => {
+          if (!open) setDeleteTargetId(null);
+        }}
+        onConfirm={confirmDelete}
+      />
     </div>
   );
 };

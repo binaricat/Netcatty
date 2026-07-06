@@ -156,7 +156,6 @@ export const SnippetsRightPanel: React.FC<SnippetsRightPanelProps> = ({
                         const id = editingSnippet.id;
                         if (!id) return;
                         onDelete(id);
-                        handleClosePanel();
                       }}
                       aria-label={t('common.delete')}
                     >

@@ -51,6 +51,7 @@ import {
   vaultHeaderIconButtonClass,
   vaultSectionTitleClass,
 } from "./vault/VaultPageHeader";
+import { VaultDeleteConfirmDialog } from "./vault/VaultDeleteConfirmDialog";
 import { useVaultItemReorder } from "./vault/vaultReorderDrag";
 
 // Import utilities and components from keychain module
@@ -115,6 +116,11 @@ const KeychainManager: React.FC<KeychainManagerProps> = ({
   const { generateKeyPair, execCommand } = useKeychainBackend();
   const [activeFilter, setActiveFilter] = useState<FilterTab>("key");
   const [search, setSearch] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState<{
+    type: "key" | "identity";
+    id: string;
+    name: string;
+  } | null>(null);
   const [viewMode, setViewMode] = useStoredViewMode(
     STORAGE_KEY_VAULT_KEYS_VIEW_MODE,
     "grid",
@@ -468,24 +474,49 @@ echo $3 >> "$FILE"`);
 
   // Handle delete
   const handleDelete = useCallback(
-    async (id: string) => {
-      onDelete(id);
-      if (panel.type === "view" && panel.key.id === id) {
-        closePanel();
-      }
+    (id: string) => {
+      const key = keys.find((item) => item.id === id);
+      setDeleteTarget({
+        type: "key",
+        id,
+        name: key?.label || t("keychain.panel.keyDetails"),
+      });
     },
-    [onDelete, panel, closePanel],
+    [keys, t],
   );
 
   // Handle delete identity
   const _handleDeleteIdentity = useCallback(
     (id: string) => {
-      onDeleteIdentity?.(id);
-      if (panel.type === "identity" && panel.identity?.id === id) {
-        closePanel();
-      }
+      const identity = identities.find((item) => item.id === id);
+      setDeleteTarget({
+        type: "identity",
+        id,
+        name: identity?.label || t("keychain.panel.editIdentity"),
+      });
     },
-    [onDeleteIdentity, panel, closePanel],
+    [identities, t],
+  );
+
+  const confirmDeleteTarget = useCallback(
+    () => {
+      if (!deleteTarget) return;
+
+      if (deleteTarget.type === "key") {
+        onDelete(deleteTarget.id);
+        if (panel.type === "view" && panel.key.id === deleteTarget.id) {
+          closePanel();
+        }
+      } else {
+        onDeleteIdentity?.(deleteTarget.id);
+        if (panel.type === "identity" && panel.identity?.id === deleteTarget.id) {
+          closePanel();
+        }
+      }
+
+      setDeleteTarget(null);
+    },
+    [closePanel, deleteTarget, onDelete, onDeleteIdentity, panel],
   );
 
   // Get icon for key source
@@ -837,15 +868,7 @@ echo $3 >> "$FILE"`);
                         <ContextMenuSeparator />
                         <ContextMenuItem
                           className="text-destructive"
-                          onClick={() => {
-                            const ok = window.confirm(
-                              t("confirm.deleteIdentity", {
-                                name: identity.label || "",
-                              }),
-                            );
-                            if (!ok) return;
-                            _handleDeleteIdentity(identity.id);
-                          }}
+                          onClick={() => _handleDeleteIdentity(identity.id)}
                         >
                           <Trash2 className="mr-2 h-4 w-4" />{" "}
                           {t("action.delete")}
@@ -876,13 +899,7 @@ echo $3 >> "$FILE"`);
                   variant="destructive"
                   icon={<Trash2 size={14} />}
                   onClick={() => {
-                    const ok = window.confirm(
-                      t("confirm.deleteIdentity", {
-                        name: panel.identity?.label || "",
-                      }),
-                    );
-                    if (!ok || !panel.identity) return;
-                    _handleDeleteIdentity(panel.identity.id);
+                    if (panel.identity) _handleDeleteIdentity(panel.identity.id);
                   }}
                 >
                   {t("common.delete")}
@@ -1031,6 +1048,18 @@ echo $3 >> "$FILE"`);
           )}
         </AsidePanel>
       )}
+
+      <VaultDeleteConfirmDialog
+        open={Boolean(deleteTarget)}
+        title={t("vault.deleteConfirm.title", {
+          name: deleteTarget?.name ?? "",
+        })}
+        description={t("vault.deleteConfirm.desc")}
+        onOpenChange={(open) => {
+          if (!open) setDeleteTarget(null);
+        }}
+        onConfirm={confirmDeleteTarget}
+      />
     </div>
   );
 };
