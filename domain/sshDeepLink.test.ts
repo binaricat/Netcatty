@@ -4,6 +4,7 @@ import type { Host } from "./models";
 import {
   buildSshDeepLinkConnectionHost,
   buildSshDeepLinkEphemeralHost,
+  buildSshDeepLinkEphemeralHostFromSaved,
   buildSshDeepLinkHostDraft,
   buildSshDeepLinkOpenHost,
   buildSshNoteLinkOpenHost,
@@ -88,6 +89,50 @@ test("buildSshDeepLinkEphemeralHost omits password fields when target has no pas
 
   assert.equal(ephemeral.password, undefined);
   assert.equal(ephemeral.authMethod, undefined);
+  assert.equal(ephemeral.moshEnabled, false);
+  assert.equal(ephemeral.etEnabled, false);
+});
+
+test("buildSshDeepLinkEphemeralHostFromSaved keeps saved settings but overrides credentials", () => {
+  const savedHost = {
+    id: "saved-id",
+    label: "Saved Host",
+    hostname: "example.com",
+    username: "vault-user",
+    port: 2200,
+    group: "prod",
+    tags: ["bastion"],
+    os: "linux" as const,
+    identityId: "identity-1",
+    identityFileId: "key-1",
+    savePassword: true,
+    authMethod: "key" as const,
+    proxyProfileId: "proxy-1",
+    hostChain: { hostIds: ["jump-1"] },
+    charset: "utf8",
+    moshEnabled: true,
+    createdAt: 1,
+  };
+
+  const ephemeral = buildSshDeepLinkEphemeralHostFromSaved(
+    savedHost,
+    parseSshDeepLink("ssh://alice:otp@example.com:2200")!,
+    { id: "ephemeral-id", now: 789 },
+  );
+
+  assert.equal(ephemeral.id, "ephemeral-id");
+  assert.equal(ephemeral.ephemeral, true);
+  assert.equal(ephemeral.username, "alice");
+  assert.equal(ephemeral.password, "otp");
+  assert.equal(ephemeral.authMethod, "password");
+  assert.equal(ephemeral.identityId, undefined);
+  assert.equal(ephemeral.identityFileId, undefined);
+  assert.equal(ephemeral.savePassword, undefined);
+  assert.equal(ephemeral.proxyProfileId, "proxy-1");
+  assert.deepEqual(ephemeral.hostChain, { hostIds: ["jump-1"] });
+  assert.equal(ephemeral.charset, "utf8");
+  assert.equal(ephemeral.group, "prod");
+  assert.equal(ephemeral.protocol, "ssh");
   assert.equal(ephemeral.moshEnabled, false);
   assert.equal(ephemeral.etEnabled, false);
 });
