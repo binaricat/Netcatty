@@ -250,8 +250,6 @@ function createPreloadApi(ctx) {
   closeSession: (sessionId) => {
     markTerminalDataSessionClosed(sessionId);
     telnetEchoModeListeners.delete(sessionId);
-    zmodemListeners.delete(sessionId);
-    zmodemOverwriteListeners.delete(sessionId);
     ipcRenderer.send("netcatty:close", { sessionId });
   },
   setSessionEncoding: async (sessionId, encoding) => {

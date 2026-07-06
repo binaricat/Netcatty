@@ -557,7 +557,7 @@ test("backend exit preserves live listeners for same-id reconnect", async () => 
   }
 });
 
-test("backend exit after explicit close still cleans per-session listeners", () => {
+test("zmodem events after explicit close and backend exit are gated", () => {
   const preload = loadPreloadWithFakeElectron();
   try {
     const zmodemEvents = [];
@@ -620,6 +620,43 @@ test("zmodem listeners survive backend exit and fire after same-session reconnec
       requestId: "r1",
       filename: "f",
     }]);
+  } finally {
+    preload.cleanup();
+  }
+});
+
+test("zmodem listeners survive reconnect-style closeSession and resume after restart", async () => {
+  const preload = loadPreloadWithFakeElectron();
+  try {
+    const zmodemEvents = [];
+    const overwriteRequests = [];
+    preload.api.onZmodemEvent("session-1", (evt) => {
+      zmodemEvents.push(evt.type);
+    });
+    preload.api.onZmodemOverwriteRequest("session-1", (payload) => {
+      overwriteRequests.push(payload.requestId);
+    });
+
+    // Reconnect path: closeSession is called while the terminal component
+    // stays mounted, then the session restarts with the same id.
+    preload.api.closeSession("session-1");
+    preload.handlers.get("netcatty:zmodem:detect")?.({}, {
+      sessionId: "session-1",
+    });
+    assert.deepEqual(zmodemEvents, []);
+
+    await preload.api.startLocalSession({ sessionId: "session-1" });
+    preload.handlers.get("netcatty:zmodem:detect")?.({}, {
+      sessionId: "session-1",
+    });
+    preload.handlers.get("netcatty:zmodem:overwrite-request")?.({}, {
+      sessionId: "session-1",
+      requestId: "r1",
+      filename: "f",
+    });
+
+    assert.deepEqual(zmodemEvents, ["detect"]);
+    assert.deepEqual(overwriteRequests, ["r1"]);
   } finally {
     preload.cleanup();
   }
@@ -733,8 +770,10 @@ test("closeSession clears terminal data state and marks the session closed", () 
   assert.equal(terminalDataBacklog.take("session-1"), "");
   assert.equal(closedTerminalDataSessions.has("session-1"), true);
   assert.equal(telnetEchoModeListeners.has("session-1"), false);
-  assert.equal(zmodemListeners.has("session-1"), false);
-  assert.equal(zmodemOverwriteListeners.has("session-1"), false);
+  // Zmodem listeners are preserved: reconnect closes the session without
+  // unmounting the subscriber, so cleanup is left to subscriber dispose.
+  assert.equal(zmodemListeners.has("session-1"), true);
+  assert.equal(zmodemOverwriteListeners.has("session-1"), true);
   assert.deepEqual(closedPorts, ["session-1"]);
   assert.deepEqual(sent, [
     { channel: "netcatty:close", payload: { sessionId: "session-1" } },
