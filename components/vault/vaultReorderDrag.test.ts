@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   getVaultDropIntent,
   getVaultDropPosition,
+  handleVaultHostDropToGroup,
   handleVaultRootDrop,
 } from "./vaultReorderDrag.ts";
 
@@ -91,4 +92,43 @@ test("root group drop moves the group to all hosts without resetting host drag s
     "drop:null",
     "group:team/prod:null",
   ]);
+});
+
+test("group host drop resets host drag state after moving the host to the group", () => {
+  const calls: string[] = [];
+
+  const handled = handleVaultHostDropToGroup({
+    dataTransfer: {
+      getData: (type: string) => (type === "host-id" ? "host-1" : ""),
+    },
+    groupPath: "team/prod",
+    moveHostToGroup: (hostId, targetPath) => {
+      calls.push(`host:${hostId}:${String(targetPath)}`);
+    },
+    resetHostDragState: () => calls.push("resetHostDragState"),
+  });
+
+  assert.equal(handled, true);
+  assert.deepEqual(calls, [
+    "host:host-1:team/prod",
+    "resetHostDragState",
+  ]);
+});
+
+test("group drop without a host leaves host drag state alone", () => {
+  const calls: string[] = [];
+
+  const handled = handleVaultHostDropToGroup({
+    dataTransfer: {
+      getData: () => "",
+    },
+    groupPath: "team/prod",
+    moveHostToGroup: (hostId, targetPath) => {
+      calls.push(`host:${hostId}:${String(targetPath)}`);
+    },
+    resetHostDragState: () => calls.push("resetHostDragState"),
+  });
+
+  assert.equal(handled, false);
+  assert.deepEqual(calls, []);
 });

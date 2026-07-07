@@ -67,6 +67,25 @@ export const handleVaultRootDrop = ({
   }
 };
 
+export const handleVaultHostDropToGroup = ({
+  dataTransfer,
+  groupPath,
+  moveHostToGroup,
+  resetHostDragState,
+}: {
+  dataTransfer: Pick<DataTransfer, "getData">;
+  groupPath: string | null;
+  moveHostToGroup: (hostId: string, targetPath: string | null) => void;
+  resetHostDragState: () => void;
+}) => {
+  const hostId = dataTransfer.getData("host-id");
+  if (!hostId) return false;
+
+  moveHostToGroup(hostId, groupPath);
+  resetHostDragState();
+  return true;
+};
+
 let activeVaultDropIndicator: HTMLElement | null = null;
 
 export const clearVaultDropIndicator = () => {

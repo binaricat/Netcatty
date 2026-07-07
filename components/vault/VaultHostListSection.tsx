@@ -7,6 +7,7 @@ import {
   getVaultDropIntent,
   getVaultDropPosition,
   hasVaultDragType,
+  handleVaultHostDropToGroup,
   handleVaultRootDrop,
   markVaultDropIndicator,
   useVaultGridLayoutAnimation,
@@ -480,9 +481,13 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
                       onDrop={(e) => {
                         e.preventDefault();
                         e.stopPropagation();
-                        const hostId = e.dataTransfer.getData("host-id");
+                        if (handleVaultHostDropToGroup({
+                          dataTransfer: e.dataTransfer,
+                          groupPath: selectedGroupPath,
+                          moveHostToGroup,
+                          resetHostDragState,
+                        })) return;
                         const groupPath = e.dataTransfer.getData("group-path");
-                        if (hostId) moveHostToGroup(hostId, selectedGroupPath);
                         if (groupPath && selectedGroupPath !== null)
                           moveGroup(groupPath, selectedGroupPath);
                       }}
@@ -535,11 +540,14 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
                                 e.preventDefault();
                                 e.stopPropagation();
                                 setDragOverDropTarget(null);
-                                const hostId =
-                                  e.dataTransfer.getData("host-id");
+                                if (handleVaultHostDropToGroup({
+                                  dataTransfer: e.dataTransfer,
+                                  groupPath: node.path,
+                                  moveHostToGroup,
+                                  resetHostDragState,
+                                })) return;
                                 const groupPath =
                                   e.dataTransfer.getData("group-path");
-                                if (hostId) moveHostToGroup(hostId, node.path);
                                 if (groupPath) {
                                   const intent = getVaultDropIntent(e.currentTarget, e.clientX, e.clientY, viewMode === "grid");
                                   if (intent === "inside") moveGroup(groupPath, node.path);
