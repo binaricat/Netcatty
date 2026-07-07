@@ -27,6 +27,59 @@ test("getReusableMainWindow returns the tracked healthy main window", () => {
   );
 });
 
+test("getReusableMainWindow uses the window manager health check before reusing", () => {
+  const checked = [];
+  const win = {
+    isDestroyed() {
+      return false;
+    },
+    webContents: {
+      isCrashed() {
+        return false;
+      },
+    },
+  };
+
+  assert.equal(
+    getReusableMainWindow({
+      getWindowManager: () => ({
+        getMainWindow: () => win,
+        isWindowUsable(candidate) {
+          checked.push(candidate);
+          return true;
+        },
+      }),
+    }),
+    win,
+  );
+  assert.deepEqual(checked, [win]);
+});
+
+test("getReusableMainWindow ignores windows rejected by the window manager health check", () => {
+  const win = {
+    isDestroyed() {
+      return false;
+    },
+    webContents: {
+      isCrashed() {
+        return false;
+      },
+    },
+  };
+
+  assert.equal(
+    getReusableMainWindow({
+      getWindowManager: () => ({
+        getMainWindow: () => win,
+        isWindowUsable() {
+          return false;
+        },
+      }),
+    }),
+    null,
+  );
+});
+
 test("getReusableMainWindow ignores destroyed windows", () => {
   const win = {
     isDestroyed() {
