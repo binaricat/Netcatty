@@ -272,7 +272,7 @@ test("local terminal exit waits for paced buffered output drain", async () => {
     { sessionId: "local-flood-exit", shell: "/bin/sh", cols: 80, rows: 24 },
   );
 
-  const output = "x".repeat(140000);
+  const output = "x".repeat(2_400_000);
   spawns[0].emitData(Buffer.from(output));
   spawns[0].emitExit({ exitCode: 0, signal: 0 });
 
@@ -280,7 +280,7 @@ test("local terminal exit waits for paced buffered output drain", async () => {
 
   bridge.ackSessionFlow(
     { sender: {} },
-    { sessionId: "local-flood-exit", bytes: 140000 },
+    { sessionId: "local-flood-exit", bytes: output.length },
   );
 
   await new Promise((resolve) => setTimeout(resolve, 20));

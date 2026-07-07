@@ -184,4 +184,5 @@ export type TerminalSessionStartersContext = {
 export type TerminalSessionDataMeta = {
   droppedOutputMayAffectTerminalState?: boolean;
   droppedOutputAlternateScreenAction?: 'enter' | 'leave';
+  terminalPerf?: NetcattyTerminalOutputPerfMeta;
 };

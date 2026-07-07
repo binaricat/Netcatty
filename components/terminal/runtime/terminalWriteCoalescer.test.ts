@@ -76,7 +76,10 @@ test("splits large plain terminal output into cooperative chunks", () => {
     ingressBytes: number;
     options?: CoalescedTerminalWriteOptions;
   }> = [];
-  const payload = `${Array.from({ length: 40 }, () => "x".repeat(1000)).join("\n")}\n12345`;
+  const payload = `${Array.from(
+    { length: Math.ceil((MAX_TERMINAL_PLAIN_WRITE_CHUNK_BYTES * 2 + 5000) / 1001) },
+    () => "x".repeat(1000),
+  ).join("\n")}\n12345`;
 
   setTerminalWriteCoalescerByteCapResolver(term, () => payload.length + 100);
   enqueueCoalescedTerminalWrite(

@@ -45,8 +45,48 @@ export type TerminalTimestampGutterRow = {
   label: string;
 };
 
+export type TerminalLineTimestampPerfStep =
+  | {
+    kind: "segment";
+    durationMs: number;
+    dataChars: number;
+    segmentCount: number;
+    dataSegmentCount: number;
+    timestampSegmentCount: number;
+    parsedChars: number;
+  }
+  | {
+    kind: "batched-write";
+    dataChars: number;
+    timestamps: number;
+    measureMs: number;
+    writeCallbackMs: number;
+    markerMs: number;
+    rowOffset: number;
+    columns: number;
+  }
+  | {
+    kind: "segmented-write";
+    dataChars: number;
+    timestamps: number;
+    writeCalls: number;
+    writeChars: number;
+    writeCallbackMs: number;
+    totalMs: number;
+  }
+  | {
+    kind: "fallback-write";
+    dataChars: number;
+    writeCallbackMs: number;
+  };
+
+export type TerminalLineTimestampDiagnostics = {
+  onStep?: (step: TerminalLineTimestampPerfStep) => void;
+};
+
 const stores = new WeakMap<XTerm, TimestampStore>();
 const MAX_SEGMENTED_TIMESTAMP_WRITES = 64;
+const BULK_TIMESTAMP_BATCH_MIN_BYTES = 4096;
 
 const pad2 = (value: number): string => value.toString().padStart(2, "0");
 
@@ -506,12 +546,14 @@ const writeBatchedTimestampSegments = (
   data: string,
   segments: TerminalLineTimestampSegment[],
   done: () => void,
+  diagnostics?: TerminalLineTimestampDiagnostics,
 ): void => {
   const timestamps: Array<{ label: string; rowOffset: number }> = [];
   const columns = getTerminalColumnCount(term);
   let column = getTerminalCursorColumn(term);
   let wraparoundMode = getTerminalWraparoundMode(term);
   let rowOffset = 0;
+  const measureStartedAt = performance.now();
 
   for (const segment of segments) {
     if (segment.kind === "timestamp") {
@@ -525,8 +567,12 @@ const writeBatchedTimestampSegments = (
     column = measured.column;
     wraparoundMode = measured.wraparoundMode;
   }
+  const measureMs = performance.now() - measureStartedAt;
 
+  const writeStartedAt = performance.now();
   term.write(data, () => {
+    const writeCallbackMs = performance.now() - writeStartedAt;
+    const markerStartedAt = performance.now();
     let timestampRecorded = false;
     for (const timestamp of timestamps) {
       timestampRecorded = recordTerminalLineTimestamp(
@@ -540,6 +586,16 @@ const writeBatchedTimestampSegments = (
     if (timestampRecorded) {
       notifyTimestampStore(store);
     }
+    diagnostics?.onStep?.({
+      kind: "batched-write",
+      dataChars: data.length,
+      timestamps: timestamps.length,
+      measureMs,
+      writeCallbackMs,
+      markerMs: performance.now() - markerStartedAt,
+      rowOffset,
+      columns,
+    });
     done();
   });
 };
@@ -637,10 +693,19 @@ export const writeTerminalDataWithLineTimestamps = (
   term: XTerm,
   data: string,
   done: () => void,
+  diagnostics?: TerminalLineTimestampDiagnostics,
 ) => {
   const registerMarker = (term as XTerm & { registerMarker?: unknown }).registerMarker;
   if (typeof registerMarker !== "function") {
-    term.write(data, done);
+    const writeStartedAt = performance.now();
+    term.write(data, () => {
+      diagnostics?.onStep?.({
+        kind: "fallback-write",
+        dataChars: data.length,
+        writeCallbackMs: performance.now() - writeStartedAt,
+      });
+      done();
+    });
     return;
   }
 
@@ -651,6 +716,7 @@ export const writeTerminalDataWithLineTimestamps = (
   const timestampOnlyPrefix = store.timestampOnlyPrefix;
   store.timestampOnlyPrefix = "";
   const dataForTimestamps = `${timestampOnlyPrefix}${data}`;
+  const segmentStartedAt = performance.now();
   const segments = store.segmenter.append(dataForTimestamps);
   const parsedData = segments
     .filter((segment): segment is { kind: "data"; data: string } => segment.kind === "data")
@@ -659,12 +725,24 @@ export const writeTerminalDataWithLineTimestamps = (
   const dataSegmentCount = segments.reduce((count, segment) => (
     segment.kind === "data" && segment.data ? count + 1 : count
   ), 0);
+  diagnostics?.onStep?.({
+    kind: "segment",
+    durationMs: performance.now() - segmentStartedAt,
+    dataChars: data.length,
+    segmentCount: segments.length,
+    dataSegmentCount,
+    timestampSegmentCount: segments.length - dataSegmentCount,
+    parsedChars: parsedData.length,
+  });
   if (
     timestampOnlyPrefix.length === 0
     && parsedData === dataForTimestamps
-    && dataSegmentCount > MAX_SEGMENTED_TIMESTAMP_WRITES
+    && (
+      dataSegmentCount > MAX_SEGMENTED_TIMESTAMP_WRITES
+      || (data.length >= BULK_TIMESTAMP_BATCH_MIN_BYTES && canMeasureVisualRows(data))
+    )
   ) {
-    writeBatchedTimestampSegments(term, store, data, segments, done);
+    writeBatchedTimestampSegments(term, store, data, segments, done, diagnostics);
     return;
   }
   const writeSegments = (
@@ -674,11 +752,25 @@ export const writeTerminalDataWithLineTimestamps = (
     let index = 0;
     let remainingSkipLength = skipLeadingDataLength;
     let timestampRecorded = false;
+    let timestampCount = 0;
+    let writeCalls = 0;
+    let writeChars = 0;
+    let writeCallbackMs = 0;
+    const startedAt = performance.now();
 
     const complete = () => {
       if (timestampRecorded) {
         notifyTimestampStore(store);
       }
+      diagnostics?.onStep?.({
+        kind: "segmented-write",
+        dataChars: data.length,
+        timestamps: timestampCount,
+        writeCalls,
+        writeChars,
+        writeCallbackMs,
+        totalMs: performance.now() - startedAt,
+      });
       onComplete();
     };
 
@@ -692,6 +784,7 @@ export const writeTerminalDataWithLineTimestamps = (
       }
 
       if (segment.kind === "timestamp") {
+        timestampCount += 1;
         timestampRecorded = recordTerminalLineTimestamp(term, store, segment.label, false)
           || timestampRecorded;
         writeNext();
@@ -710,7 +803,13 @@ export const writeTerminalDataWithLineTimestamps = (
         return;
       }
 
-      term.write(segmentData, writeNext);
+      const writeStartedAt = performance.now();
+      term.write(segmentData, () => {
+        writeCalls += 1;
+        writeChars += segmentData.length;
+        writeCallbackMs += performance.now() - writeStartedAt;
+        writeNext();
+      });
     };
 
     writeNext();
@@ -722,7 +821,15 @@ export const writeTerminalDataWithLineTimestamps = (
       store.timestampOnlyPrefix = pendingEscapeSequence;
     }
     if (!parsedData || !dataForTimestamps.startsWith(parsedData)) {
-      term.write(data, done);
+      const writeStartedAt = performance.now();
+      term.write(data, () => {
+        diagnostics?.onStep?.({
+          kind: "fallback-write",
+          dataChars: data.length,
+          writeCallbackMs: performance.now() - writeStartedAt,
+        });
+        done();
+      });
       return;
     }
 

@@ -125,13 +125,12 @@ test("default hard cap keeps flood-sized renderer sends bounded", () => {
     maxBufferSize: 4,
     floodFlushDelayMs: 50,
   });
+  const hardCap = 768 * 1024;
+  const payload = `${"x".repeat(hardCap)}y`;
 
-  buffer.bufferData("abcd");
-  buffer.bufferData("efgh");
-  buffer.bufferData("ijkl");
-  buffer.bufferData("mnop");
+  buffer.bufferData(payload);
 
-  assert.deepEqual(sends, ["abcdefghijklmnop"]);
+  assert.deepEqual(sends.map((send) => send.length), [hardCap]);
 });
 
 test("flush() forces a synchronous send and cancels the pending turn", async () => {

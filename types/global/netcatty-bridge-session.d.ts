@@ -20,6 +20,14 @@ declare global {
     };
   }
 
+  interface NetcattyTerminalOutputPerfMeta {
+    id: string;
+    emittedAt: number;
+    sessionId?: string;
+    chars: number;
+    lineFeeds: number;
+  }
+
   interface NetcattyBridge {
     getWindowsPtyInfo?(): NetcattyWindowsPtyInfo | null;
     startSSHSession(options: NetcattySSHOptions): Promise<string>;
@@ -311,6 +319,7 @@ declare global {
         meta?: {
           droppedOutputMayAffectTerminalState?: boolean;
           droppedOutputAlternateScreenAction?: "enter" | "leave";
+          terminalPerf?: NetcattyTerminalOutputPerfMeta;
         },
       ) => void,
       options?: { replayBacklog?: boolean },
