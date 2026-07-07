@@ -35,13 +35,13 @@ export const ConfirmDialog = memo(function ConfirmDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[380px]">
-        <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
+      <DialogContent className="max-w-[calc(100vw-2rem)] overflow-hidden sm:max-w-[380px]">
+        <DialogHeader className="min-w-0 pr-6">
+          <DialogTitle className="truncate">{title}</DialogTitle>
         </DialogHeader>
 
         {message ? (
-          <p className="text-sm text-muted-foreground whitespace-pre-wrap">{message}</p>
+          <p className="min-w-0 whitespace-pre-wrap break-words text-sm text-muted-foreground [overflow-wrap:anywhere]">{message}</p>
         ) : null}
 
         <DialogFooter>

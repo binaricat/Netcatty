@@ -33,3 +33,19 @@ test("host and AI provider deletion use in-app confirmation dialogs", () => {
   assert.match(aiSettingsSource, /<ConfirmDialog[\s\S]*confirm\.removeProvider/);
   assert.doesNotMatch(functionBody(aiSettingsSource, "handleRemoveProvider"), /window\.confirm|globalThis\.confirm|\bconfirm\(/);
 });
+
+test("delete confirmation dialogs constrain long names", () => {
+  const confirmDialogSource = readProjectFile("components/ui/confirm-dialog.tsx");
+  const vaultDeleteDialogSource = readProjectFile("components/vault/VaultDeleteConfirmDialog.tsx");
+  const sftpDialogSource = readProjectFile("components/sftp/SftpPaneDialogs.tsx");
+
+  assert.match(confirmDialogSource, /DialogTitle className="truncate"/);
+  assert.match(confirmDialogSource, /overflow-hidden sm:max-w-\[380px\]/);
+
+  assert.match(vaultDeleteDialogSource, /<span className="min-w-0 truncate">\{title\}<\/span>/);
+  assert.match(vaultDeleteDialogSource, /overflow-hidden sm:max-w-\[400px\]/);
+
+  assert.match(sftpDialogSource, /<DialogTitle className="truncate">/);
+  assert.match(sftpDialogSource, /<span className="min-w-0 truncate">\{name\}<\/span>/);
+  assert.match(sftpDialogSource, /overflow-hidden sm:max-w-sm/);
+});

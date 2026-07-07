@@ -44,12 +44,17 @@ export const VaultDeleteConfirmDialogContent: React.FC<VaultDeleteConfirmDialogC
 }) => {
   return (
     <>
-      <DialogHeader>
-        <DialogTitle className="flex items-center gap-2 text-destructive">
-          <AlertTriangle size={20} />
-          {title}
+      <DialogHeader className="min-w-0 pr-6">
+        <DialogTitle className="flex min-w-0 items-center gap-2 text-destructive">
+          <AlertTriangle size={20} className="shrink-0" />
+          <span className="min-w-0 truncate">{title}</span>
         </DialogTitle>
-        <DialogDescription id={descriptionId}>{description}</DialogDescription>
+        <DialogDescription
+          id={descriptionId}
+          className="break-words [overflow-wrap:anywhere]"
+        >
+          {description}
+        </DialogDescription>
       </DialogHeader>
       <DialogFooter className="gap-2 sm:gap-0">
         <Button
@@ -87,7 +92,10 @@ export const VaultDeleteConfirmDialog: React.FC<VaultDeleteConfirmDialogProps> =
     <Dialog open={open} onOpenChange={(nextOpen) => {
       if (!disabled) onOpenChange(nextOpen);
     }}>
-      <DialogContent className="sm:max-w-[400px]" aria-describedby={descriptionId}>
+      <DialogContent
+        className="max-w-[calc(100vw-2rem)] overflow-hidden sm:max-w-[400px]"
+        aria-describedby={descriptionId}
+      >
         <VaultDeleteConfirmDialogContent
           title={title}
           description={description}
