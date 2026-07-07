@@ -81,11 +81,19 @@ test('short unchanged tab reveals still flush pending hidden-output scroll', () 
 test('visible tab recovery drains hidden terminal writes before any fast-path return', () => {
   const recoverIndex = source.indexOf('const recoverTerminalAfterBecomeVisible = () => {');
   const fastPathIndex = source.indexOf('getHiddenDurationMs() < CSS_ONLY_TAB_REVEAL_MAX_HIDDEN_MS', recoverIndex);
-  const flushIndex = source.indexOf('flushPendingTerminalWritesOnResume(term)', recoverIndex);
+  const flushCallIndex = source.indexOf('flushTerminalWritesAfterBecomeVisible();', recoverIndex);
 
   assert.ok(recoverIndex >= 0);
   assert.ok(fastPathIndex > recoverIndex);
-  assert.ok(flushIndex > recoverIndex && flushIndex < fastPathIndex);
+  assert.ok(flushCallIndex > recoverIndex && flushCallIndex < fastPathIndex);
+});
+
+test('deferred visible tab recovery also drains hidden terminal writes', () => {
+  const deferredBranchIndex = source.indexOf('} else {\n        flushTerminalWritesAfterBecomeVisible();');
+  const scheduleIndex = source.indexOf('scheduleLayoutRecoveryRefit([120, 350])', deferredBranchIndex);
+
+  assert.ok(deferredBranchIndex >= 0);
+  assert.ok(scheduleIndex > deferredBranchIndex);
 });
 
 test('immediate tab recovery marks webgl recovery to skip the delayed duplicate pass', () => {

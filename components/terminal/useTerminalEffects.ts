@@ -850,7 +850,7 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
     pendingOutputScrollRef.current = false;
   };
 
-  const recoverTerminalAfterBecomeVisible = () => {
+  const flushTerminalWritesAfterBecomeVisible = () => {
     lastCommittedVisibleLayoutKeyRef.current = null;
     const term = termRef.current;
     if (term) {
@@ -858,6 +858,10 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
       flushPendingTerminalWritesOnResume(term);
       forceTerminalRepaintBypassingAnimationFrame(term);
     }
+  };
+
+  const recoverTerminalAfterBecomeVisible = () => {
+    flushTerminalWritesAfterBecomeVisible();
 
     if (
       getHiddenDurationMs() < CSS_ONLY_TAB_REVEAL_MAX_HIDDEN_MS
@@ -910,7 +914,7 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
       if (shouldRefitImmediatelyOnShow()) {
         recoverTerminalAfterBecomeVisible();
       } else {
-        lastCommittedVisibleLayoutKeyRef.current = null;
+        flushTerminalWritesAfterBecomeVisible();
         scheduleLayoutRecoveryRefit([120, 350]);
       }
       return;
