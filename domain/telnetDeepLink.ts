@@ -159,7 +159,9 @@ export const buildTelnetDeepLinkOpenHost = (
   hosts: Host[],
   target: TelnetDeepLinkTarget,
   options: TelnetDeepLinkDraftOptions,
-): Host =>
-  buildTelnetDeepLinkConnectionHost(
-    findTelnetDeepLinkHost(hosts, target) ?? buildTelnetDeepLinkHostDraft(target, options),
+): Host => {
+  const matchedHost = target.password ? null : findTelnetDeepLinkHost(hosts, target);
+  return buildTelnetDeepLinkConnectionHost(
+    matchedHost ?? buildTelnetDeepLinkHostDraft(target, options),
   );
+};

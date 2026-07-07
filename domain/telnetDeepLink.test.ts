@@ -250,3 +250,25 @@ test("buildTelnetDeepLinkOpenHost falls back to a draft host when no saved host 
   assert.equal(openHost.telnetEnabled, true);
   assert.equal(openHost.ephemeral, true);
 });
+
+test("buildTelnetDeepLinkOpenHost keeps URL password instead of strict matching a saved host", () => {
+  const openHost = buildTelnetDeepLinkOpenHost(
+    [
+      host({
+        id: "saved-alice",
+        hostname: "example.com",
+        port: 23,
+        telnetUsername: "alice",
+        telnetPassword: "saved-password",
+      }),
+    ],
+    parseTelnetDeepLink("telnet://alice:new-password@example.com")!,
+    { id: "draft-id", now: 456 },
+  );
+
+  assert.equal(openHost.id, "draft-id");
+  assert.equal(openHost.username, "alice");
+  assert.equal(openHost.telnetUsername, "alice");
+  assert.equal(openHost.telnetPassword, "new-password");
+  assert.equal(openHost.ephemeral, true);
+});

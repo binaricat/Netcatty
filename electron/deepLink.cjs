@@ -229,12 +229,20 @@ function applySshProtocolClientPreference(options = {}) {
     removeClient: removeSshProtocolClient,
     options,
   });
-  applyDeepLinkProtocolClientPreference({
+  const telnetApplied = applyDeepLinkProtocolClientPreference({
     enabled: options.enabled,
     registerClient: registerTelnetProtocolClient,
     removeClient: removeTelnetProtocolClient,
     options,
   });
+  if (sshApplied !== true && telnetApplied === true) {
+    applyDeepLinkProtocolClientPreference({
+      enabled: options.enabled === false,
+      registerClient: registerTelnetProtocolClient,
+      removeClient: removeTelnetProtocolClient,
+      options,
+    });
+  }
   return sshApplied === true;
 }
 

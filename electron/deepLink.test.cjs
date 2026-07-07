@@ -89,6 +89,48 @@ test("applySshProtocolClientPreference keeps ssh successful when telnet registra
   ]);
 });
 
+test("applySshProtocolClientPreference rolls back telnet registration when ssh enable fails", () => {
+  const calls = [];
+  const app = {
+    setAsDefaultProtocolClient: (protocol) => {
+      calls.push(["set", protocol]);
+      return protocol === "telnet";
+    },
+    removeAsDefaultProtocolClient: (protocol) => {
+      calls.push(["remove", protocol]);
+      return true;
+    },
+  };
+
+  assert.equal(applySshProtocolClientPreference({ app, enabled: true, isDev: false }), false);
+  assert.deepEqual(calls, [
+    ["set", "ssh"],
+    ["set", "telnet"],
+    ["remove", "telnet"],
+  ]);
+});
+
+test("applySshProtocolClientPreference restores telnet registration when ssh disable fails", () => {
+  const calls = [];
+  const app = {
+    setAsDefaultProtocolClient: (protocol) => {
+      calls.push(["set", protocol]);
+      return true;
+    },
+    removeAsDefaultProtocolClient: (protocol) => {
+      calls.push(["remove", protocol]);
+      return protocol === "telnet";
+    },
+  };
+
+  assert.equal(applySshProtocolClientPreference({ app, enabled: false, isDev: false }), false);
+  assert.deepEqual(calls, [
+    ["remove", "ssh"],
+    ["remove", "telnet"],
+    ["set", "telnet"],
+  ]);
+});
+
 test("isTelnetDeepLinkUrl accepts only telnet URLs", () => {
   assert.equal(isTelnetDeepLinkUrl("telnet://example.com:2001"), true);
   assert.equal(isTelnetDeepLinkUrl("TELNET://example.com:2001"), true);
