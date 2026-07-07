@@ -184,12 +184,15 @@ export class S3Adapter {
 
   private getClient(): S3Client {
     if (!this.config || !this.client) {
+      if (this.config?.allowInsecure) {
+        throw new Error('S3 insecure connections require the Netcatty desktop sync bridge');
+      }
       throw new Error('Missing S3 config');
     }
     return this.client;
   }
 
-  private createClient(config: S3Config): S3Client {
+  private createClient(config: S3Config): S3Client | null {
     const clientConfig: ConstructorParameters<typeof S3Client>[0] = {
       region: config.region,
       endpoint: config.endpoint,
@@ -209,6 +212,8 @@ export class S3Adapter {
       clientConfig.requestHandler = new NodeHttpHandler({
         httpsAgent: new https.Agent({ rejectUnauthorized: false }),
       });
+    } else if (config.allowInsecure) {
+      return null;
     }
 
     return new S3Client(clientConfig);

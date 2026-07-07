@@ -24,9 +24,10 @@ test("S3 client only validates response checksums when required", async () => {
   assert.equal(await client.config.responseChecksumValidation(), "WHEN_REQUIRED");
 });
 
-test("S3 client keeps default certificate verification unless explicitly disabled", () => {
+test("S3 client keeps default certificate verification unless explicitly disabled", async () => {
   const client = buildS3Client(config);
-  assert.equal(client.config.requestHandler?.constructor?.name, "NodeHttpHandler");
+  const handlerConfig = await client.config.requestHandler.configProvider;
+  assert.notEqual(handlerConfig.httpsAgent.options.rejectUnauthorized, false);
 });
 
 test("S3 client can disable certificate verification for self-hosted endpoints", async () => {
