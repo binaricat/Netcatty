@@ -206,7 +206,11 @@ export class S3Adapter {
       },
     };
 
-    if (config.allowInsecure && typeof globalThis.process !== 'undefined') {
+    if (
+      config.allowInsecure
+      && typeof globalThis.process !== 'undefined'
+      && typeof require === 'function'
+    ) {
       const https = require('https');
       const { NodeHttpHandler } = require('@smithy/node-http-handler');
       clientConfig.requestHandler = new NodeHttpHandler({
