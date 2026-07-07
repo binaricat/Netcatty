@@ -352,6 +352,7 @@ function registerHandlers(ipcMain) {
       if (shouldMirrorTerminalPerfDiagnostics()) {
         console.info(message);
       }
+      return { success: true };
     }
     captureDiagnostic(source, message, payload?.extra);
     return { success: true };

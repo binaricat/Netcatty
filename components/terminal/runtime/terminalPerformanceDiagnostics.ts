@@ -27,6 +27,10 @@ const DEBUG_KEYS = [
   "NETCATTY_TERMINAL_DEBUG",
 ];
 const PERF_LOG_PREFIX = "[Netcatty Terminal Perf]";
+const LOCAL_STORAGE_DEBUG_CACHE_TTL_MS = 1000;
+
+let localStorageDebugCache = false;
+let localStorageDebugCacheAt = 0;
 
 const countLineFeeds = (data: string): number => {
   let count = 0;
@@ -59,12 +63,21 @@ const sendRendererDiagnostic = (
   }
 };
 
-const isLocalStorageDebugEnabled = (): boolean => {
+const readLocalStorageDebugEnabled = (): boolean => {
   try {
     return DEBUG_KEYS.some((key) => window.localStorage?.getItem(key) === "1");
   } catch {
     return false;
   }
+};
+
+const isLocalStorageDebugEnabled = (): boolean => {
+  const now = Date.now();
+  if (now - localStorageDebugCacheAt > LOCAL_STORAGE_DEBUG_CACHE_TTL_MS) {
+    localStorageDebugCache = readLocalStorageDebugEnabled();
+    localStorageDebugCacheAt = now;
+  }
+  return localStorageDebugCache;
 };
 
 export const isTerminalPerformanceDebugEnabled = (

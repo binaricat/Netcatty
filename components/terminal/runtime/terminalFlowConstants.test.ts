@@ -79,6 +79,18 @@ test("terminal flood limits keep interactive acks responsive", () => {
   assert.ok(XTERM_WRITE_CALLBACK_BATCH_BYTES <= FLOW_HIGH_WATER_MARK);
 });
 
+test("terminal bulk output limits preserve large renderer write batches", () => {
+  const bulkWriteFloorBytes = 1024 * 1024;
+  assert.ok(
+    MAX_PENDING_WRITE_COALESCE_BYTES >= bulkWriteFloorBytes,
+    `MAX_PENDING_WRITE_COALESCE_BYTES (${MAX_PENDING_WRITE_COALESCE_BYTES}) should keep multi-MB tail output in large batches`,
+  );
+  assert.ok(
+    MAX_TERMINAL_PLAIN_WRITE_CHUNK_BYTES >= bulkWriteFloorBytes,
+    `MAX_TERMINAL_PLAIN_WRITE_CHUNK_BYTES (${MAX_TERMINAL_PLAIN_WRITE_CHUNK_BYTES}) should not split bulk plain output into small writes`,
+  );
+});
+
 test("terminal flow allows a large TUI repaint before applying back-pressure", () => {
   const events: string[] = [];
   const controller = createOutputFlowController({

@@ -235,7 +235,10 @@ const flushTerminalWritesForHiddenPage = (term: XTerm): void => {
 
 const scheduleVisibleTerminalWriteIdleFlush = (term: XTerm, isPaneVisible: boolean): void => {
   if (!isPaneVisible) return;
-  if (visibleWriteIdleFlushTimers.has(term)) return;
+  const existingTimer = visibleWriteIdleFlushTimers.get(term);
+  if (existingTimer !== undefined) {
+    clearTimeout(existingTimer);
+  }
 
   const timer = setTimeout(() => {
     visibleWriteIdleFlushTimers.delete(term);
@@ -448,8 +451,9 @@ const writeSessionDataImmediate = (
       );
 
     const writePreparedDisplayData = (callback: () => void): void => {
-      const lineTimestampPerf = createLineTimestampPerfTotals();
-      const writeStartedAt = performance.now();
+      const shouldMeasurePerf = Boolean(writeOptions.perfTrace);
+      const lineTimestampPerf = shouldMeasurePerf ? createLineTimestampPerfTotals() : null;
+      const writeStartedAt = shouldMeasurePerf ? performance.now() : 0;
       let completed = false;
       let watchdog: ReturnType<typeof setTimeout> | undefined;
       const finishWrite = () => {
@@ -459,22 +463,29 @@ const writeSessionDataImmediate = (
           clearTimeout(watchdog);
           watchdog = undefined;
         }
-        const writeMs = performance.now() - writeStartedAt;
-        logTerminalOutputPerf("renderer-write-done", writeOptions.perfTrace, {
-          batchChars: data.length,
-          preparedChars: preparedDisplayData.length,
-          ingressBytes,
-          prepareMs: roundMs(prepareMs),
-          writeMs: roundMs(writeMs),
-          totalMs: roundMs(performance.now() - queueItemStartedAt),
-          deferredAck: deferFlowAck,
-          lineTimestamps: summarizeLineTimestampPerf(lineTimestampPerf),
-        });
+        if (shouldMeasurePerf && lineTimestampPerf) {
+          const now = performance.now();
+          logTerminalOutputPerf("renderer-write-done", writeOptions.perfTrace, {
+            batchChars: data.length,
+            preparedChars: preparedDisplayData.length,
+            ingressBytes,
+            prepareMs: roundMs(prepareMs),
+            writeMs: roundMs(now - writeStartedAt),
+            totalMs: roundMs(now - queueItemStartedAt),
+            deferredAck: deferFlowAck,
+            lineTimestamps: summarizeLineTimestampPerf(lineTimestampPerf),
+          });
+        }
         callback();
       };
-      writeTerminalDataWithLineTimestamps(term, preparedDisplayData, finishWrite, {
-        onStep: (step) => recordLineTimestampPerfStep(lineTimestampPerf, step),
-      });
+      writeTerminalDataWithLineTimestamps(
+        term,
+        preparedDisplayData,
+        finishWrite,
+        shouldMeasurePerf && lineTimestampPerf
+          ? { onStep: (step) => recordLineTimestampPerfStep(lineTimestampPerf, step) }
+          : undefined,
+      );
       if (
         !writeOptions.flushXtermWriteBuffer
         && !completed

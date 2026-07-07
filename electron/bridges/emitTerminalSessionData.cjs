@@ -75,7 +75,7 @@ function emitTerminalSessionData(contents, sessionId, data, options = {}) {
   if (getSession && sessionId && data) {
     const session = getSession(sessionId);
     if (session) {
-      trackEmitted(session, typeof data === "string" ? data.length : 0);
+      trackEmitted(session, typeof data === "string" ? data.length : 0, sessionId);
     }
   }
   if (sessionId && data) {

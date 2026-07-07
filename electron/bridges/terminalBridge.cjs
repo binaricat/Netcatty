@@ -1220,7 +1220,7 @@ function ackSessionFlow(event, payload) {
     bytes: Number(payload.bytes),
     senderId: event?.sender?.id,
   });
-  trackAck(session, Number(payload.bytes));
+  trackAck(session, Number(payload.bytes), payload.sessionId);
   session.flushPendingData?.();
 }
 

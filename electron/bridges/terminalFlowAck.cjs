@@ -22,6 +22,7 @@ function ensureFlowState(session) {
       lastEmittedAt: 0,
       lastAckAt: 0,
       lastPerfAckLogAt: 0,
+      sessionId: null,
     };
   }
   const state = session.flowState;
@@ -33,6 +34,7 @@ function ensureFlowState(session) {
   state.lastEmittedAt = Number.isFinite(state.lastEmittedAt) ? Math.max(0, state.lastEmittedAt) : 0;
   state.lastAckAt = Number.isFinite(state.lastAckAt) ? Math.max(0, state.lastAckAt) : 0;
   state.lastPerfAckLogAt = Number.isFinite(state.lastPerfAckLogAt) ? Math.max(0, state.lastPerfAckLogAt) : 0;
+  state.sessionId = typeof state.sessionId === "string" && state.sessionId ? state.sessionId : null;
   if (typeof state.outputPaused !== "boolean") {
     state.outputPaused = state.appliedPause && (state.rendererPaused || state.unackedBytes >= FLOW_HIGH_WATER_MARK);
   }
@@ -62,7 +64,7 @@ function applyResume(session, target) {
 function getFlowPerfDetails(session, extra = {}) {
   const state = ensureFlowState(session);
   return {
-    sessionId: session?.id || session?.sessionId || null,
+    sessionId: state.sessionId || session?.id || session?.sessionId || null,
     protocol: session?.protocol || session?.type || null,
     rendererPaused: state.rendererPaused,
     outputPaused: state.outputPaused,
@@ -73,6 +75,12 @@ function getFlowPerfDetails(session, extra = {}) {
     lowWaterMark: FLOW_LOW_WATER_MARK,
     ...extra,
   };
+}
+
+function rememberSessionId(state, sessionId) {
+  if (typeof sessionId === "string" && sessionId) {
+    state.sessionId = sessionId;
+  }
 }
 
 // NOTE on FLOW_HIGH_WATER_MARK size (issue #1961): for SSH sessions the flow
@@ -118,9 +126,10 @@ function setRendererFlowPaused(session, paused) {
   reconcileSessionFlow(session);
 }
 
-function trackEmitted(session, bytes) {
+function trackEmitted(session, bytes, sessionId) {
   if (!session || !Number.isFinite(bytes) || bytes <= 0) return;
   const state = ensureFlowState(session);
+  rememberSessionId(state, sessionId);
   const now = Date.now();
   if (state.unackedBytes === 0) {
     state.firstUnackedAt = now;
@@ -130,9 +139,10 @@ function trackEmitted(session, bytes) {
   reconcileSessionFlow(session);
 }
 
-function trackAck(session, bytes) {
+function trackAck(session, bytes, sessionId) {
   if (!session || !Number.isFinite(bytes) || bytes <= 0) return;
   const state = ensureFlowState(session);
+  rememberSessionId(state, sessionId);
   const now = Date.now();
   const unackedBefore = state.unackedBytes;
   state.unackedBytes = Math.max(0, state.unackedBytes - bytes);
@@ -204,6 +214,7 @@ function clearSessionFlowState(session, options = {}) {
     lastEmittedAt: 0,
     lastAckAt: 0,
     lastPerfAckLogAt: 0,
+    sessionId: null,
   };
 }
 

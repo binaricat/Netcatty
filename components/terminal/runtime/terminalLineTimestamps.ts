@@ -553,7 +553,8 @@ const writeBatchedTimestampSegments = (
   let column = getTerminalCursorColumn(term);
   let wraparoundMode = getTerminalWraparoundMode(term);
   let rowOffset = 0;
-  const measureStartedAt = performance.now();
+  const shouldMeasureDiagnostics = Boolean(diagnostics);
+  const measureStartedAt = shouldMeasureDiagnostics ? performance.now() : 0;
 
   for (const segment of segments) {
     if (segment.kind === "timestamp") {
@@ -567,12 +568,12 @@ const writeBatchedTimestampSegments = (
     column = measured.column;
     wraparoundMode = measured.wraparoundMode;
   }
-  const measureMs = performance.now() - measureStartedAt;
+  const measureMs = shouldMeasureDiagnostics ? performance.now() - measureStartedAt : 0;
 
-  const writeStartedAt = performance.now();
+  const writeStartedAt = shouldMeasureDiagnostics ? performance.now() : 0;
   term.write(data, () => {
-    const writeCallbackMs = performance.now() - writeStartedAt;
-    const markerStartedAt = performance.now();
+    const writeCallbackMs = shouldMeasureDiagnostics ? performance.now() - writeStartedAt : 0;
+    const markerStartedAt = shouldMeasureDiagnostics ? performance.now() : 0;
     let timestampRecorded = false;
     for (const timestamp of timestamps) {
       timestampRecorded = recordTerminalLineTimestamp(
@@ -586,16 +587,18 @@ const writeBatchedTimestampSegments = (
     if (timestampRecorded) {
       notifyTimestampStore(store);
     }
-    diagnostics?.onStep?.({
-      kind: "batched-write",
-      dataChars: data.length,
-      timestamps: timestamps.length,
-      measureMs,
-      writeCallbackMs,
-      markerMs: performance.now() - markerStartedAt,
-      rowOffset,
-      columns,
-    });
+    if (diagnostics) {
+      diagnostics.onStep?.({
+        kind: "batched-write",
+        dataChars: data.length,
+        timestamps: timestamps.length,
+        measureMs,
+        writeCallbackMs,
+        markerMs: performance.now() - markerStartedAt,
+        rowOffset,
+        columns,
+      });
+    }
     done();
   });
 };
@@ -695,15 +698,18 @@ export const writeTerminalDataWithLineTimestamps = (
   done: () => void,
   diagnostics?: TerminalLineTimestampDiagnostics,
 ) => {
+  const shouldMeasureDiagnostics = Boolean(diagnostics);
   const registerMarker = (term as XTerm & { registerMarker?: unknown }).registerMarker;
   if (typeof registerMarker !== "function") {
-    const writeStartedAt = performance.now();
+    const writeStartedAt = shouldMeasureDiagnostics ? performance.now() : 0;
     term.write(data, () => {
-      diagnostics?.onStep?.({
-        kind: "fallback-write",
-        dataChars: data.length,
-        writeCallbackMs: performance.now() - writeStartedAt,
-      });
+      if (diagnostics) {
+        diagnostics.onStep?.({
+          kind: "fallback-write",
+          dataChars: data.length,
+          writeCallbackMs: performance.now() - writeStartedAt,
+        });
+      }
       done();
     });
     return;
@@ -716,7 +722,7 @@ export const writeTerminalDataWithLineTimestamps = (
   const timestampOnlyPrefix = store.timestampOnlyPrefix;
   store.timestampOnlyPrefix = "";
   const dataForTimestamps = `${timestampOnlyPrefix}${data}`;
-  const segmentStartedAt = performance.now();
+  const segmentStartedAt = shouldMeasureDiagnostics ? performance.now() : 0;
   const segments = store.segmenter.append(dataForTimestamps);
   const parsedData = segments
     .filter((segment): segment is { kind: "data"; data: string } => segment.kind === "data")
@@ -725,15 +731,17 @@ export const writeTerminalDataWithLineTimestamps = (
   const dataSegmentCount = segments.reduce((count, segment) => (
     segment.kind === "data" && segment.data ? count + 1 : count
   ), 0);
-  diagnostics?.onStep?.({
-    kind: "segment",
-    durationMs: performance.now() - segmentStartedAt,
-    dataChars: data.length,
-    segmentCount: segments.length,
-    dataSegmentCount,
-    timestampSegmentCount: segments.length - dataSegmentCount,
-    parsedChars: parsedData.length,
-  });
+  if (diagnostics) {
+    diagnostics.onStep?.({
+      kind: "segment",
+      durationMs: performance.now() - segmentStartedAt,
+      dataChars: data.length,
+      segmentCount: segments.length,
+      dataSegmentCount,
+      timestampSegmentCount: segments.length - dataSegmentCount,
+      parsedChars: parsedData.length,
+    });
+  }
   if (
     timestampOnlyPrefix.length === 0
     && parsedData === dataForTimestamps
@@ -756,21 +764,23 @@ export const writeTerminalDataWithLineTimestamps = (
     let writeCalls = 0;
     let writeChars = 0;
     let writeCallbackMs = 0;
-    const startedAt = performance.now();
+    const startedAt = shouldMeasureDiagnostics ? performance.now() : 0;
 
     const complete = () => {
       if (timestampRecorded) {
         notifyTimestampStore(store);
       }
-      diagnostics?.onStep?.({
-        kind: "segmented-write",
-        dataChars: data.length,
-        timestamps: timestampCount,
-        writeCalls,
-        writeChars,
-        writeCallbackMs,
-        totalMs: performance.now() - startedAt,
-      });
+      if (diagnostics) {
+        diagnostics.onStep?.({
+          kind: "segmented-write",
+          dataChars: data.length,
+          timestamps: timestampCount,
+          writeCalls,
+          writeChars,
+          writeCallbackMs,
+          totalMs: performance.now() - startedAt,
+        });
+      }
       onComplete();
     };
 
@@ -803,11 +813,13 @@ export const writeTerminalDataWithLineTimestamps = (
         return;
       }
 
-      const writeStartedAt = performance.now();
+      const writeStartedAt = shouldMeasureDiagnostics ? performance.now() : 0;
       term.write(segmentData, () => {
         writeCalls += 1;
         writeChars += segmentData.length;
-        writeCallbackMs += performance.now() - writeStartedAt;
+        if (shouldMeasureDiagnostics) {
+          writeCallbackMs += performance.now() - writeStartedAt;
+        }
         writeNext();
       });
     };
@@ -821,13 +833,15 @@ export const writeTerminalDataWithLineTimestamps = (
       store.timestampOnlyPrefix = pendingEscapeSequence;
     }
     if (!parsedData || !dataForTimestamps.startsWith(parsedData)) {
-      const writeStartedAt = performance.now();
+      const writeStartedAt = shouldMeasureDiagnostics ? performance.now() : 0;
       term.write(data, () => {
-        diagnostics?.onStep?.({
-          kind: "fallback-write",
-          dataChars: data.length,
-          writeCallbackMs: performance.now() - writeStartedAt,
-        });
+        if (diagnostics) {
+          diagnostics.onStep?.({
+            kind: "fallback-write",
+            dataChars: data.length,
+            writeCallbackMs: performance.now() - writeStartedAt,
+          });
+        }
         done();
       });
       return;
