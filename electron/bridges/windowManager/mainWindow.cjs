@@ -136,6 +136,17 @@ function createMainWindowApi(ctx) {
         } catch {}
         console.error("[WindowManager] Renderer process gone:", details);
       });
+
+      win.webContents.on("did-start-navigation", (_event, _url, _isInPlace, isMainFrame) => {
+        if (isMainFrame === false) return;
+        try {
+          if (typeof clearRendererReadyForWebContents === "function") {
+            clearRendererReadyForWebContents(win.webContents?.id);
+          }
+        } catch {
+          // ignore
+        }
+      });
     
       // Prevent top-level navigation away from the app origin. If a remote origin ever
       // loads in a privileged window (with preload), it can become an RCE vector.
