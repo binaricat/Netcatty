@@ -914,6 +914,17 @@ function buildMcpToolHints() {
   };
 }
 
+function buildTerminalToolGuidance(toolHints) {
+  const terminal = toolHints?.terminal || {};
+  if (terminal.execute && terminal.start && terminal.poll && terminal.stop) {
+    return `For terminal commands, use \`${terminal.execute}\` for short commands and \`${terminal.start}\`, \`${terminal.poll}\`, and \`${terminal.stop}\` for long-running commands. `;
+  }
+  if (Object.keys(terminal).length > 0) {
+    return "For terminal commands, use the terminal tools listed in tools.terminal. ";
+  }
+  return "";
+}
+
 async function handleWorkerTerminalExec(params = {}) {
   const { sessionId, command } = params;
   if (!sessionId || !command) throw new Error("sessionId and command are required");
@@ -1185,11 +1196,12 @@ async function dispatch(method, params) {
 
 async function handleGetContext(params) {
   debugLog("handleGetContext:start", { params, sessionCount: sessions?.size || 0 });
+  const toolHints = buildMcpToolHints();
   if (!sessions) {
     return {
       hosts: [],
       instructions: "No sessions available.",
-      tools: buildMcpToolHints(),
+      tools: toolHints,
     };
   }
 
@@ -1215,7 +1227,7 @@ async function handleGetContext(params) {
       description: "No hosts are available in the current scope.",
       hosts: [],
       hostCount: 0,
-      tools: buildMcpToolHints(),
+      tools: toolHints,
     };
   }
   for (const [sessionId, session] of sessions.entries()) {
@@ -1269,7 +1281,7 @@ async function handleGetContext(params) {
       "You are operating inside Netcatty, a multi-session terminal manager. " +
       "The available sessions may be remote hosts, local terminals, Mosh-backed shells, or serial port connections (network devices, embedded systems). " +
       "Use the provided tools to execute commands through the sessions exposed by Netcatty. " +
-      "For terminal commands, use `terminal_execute` for short commands and `terminal_start`, `terminal_poll`, and `terminal_stop` for long-running commands. " +
+      buildTerminalToolGuidance(toolHints) +
       "Serial sessions (protocol: serial, shellType: raw) do not run a standard shell — commands are sent as-is. " +
       "Network device sessions (deviceType: network) use vendor CLIs (Huawei VRP, Cisco IOS, etc.) — commands are sent as-is without shell wrapping, and exit codes are unavailable. " +
       "Vault snippets, port forwarding rules/tunnels, and SFTP read/write tools are available when exposed in the tool list. " +
@@ -1278,7 +1290,7 @@ async function handleGetContext(params) {
     hosts,
     hostCount: hosts.length,
     activePortForwardTunnels,
-    tools: buildMcpToolHints(),
+    tools: toolHints,
   };
 }
 
