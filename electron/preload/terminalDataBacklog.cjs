@@ -1,5 +1,7 @@
 "use strict";
 
+const { mergeTerminalDataMeta } = require("./terminalDataMeta.cjs");
+
 function createTerminalDataBacklog(options = {}) {
   const maxBytesPerSession = options.maxBytesPerSession ?? 64 * 1024;
   const pendingBySession = new Map();
@@ -12,21 +14,11 @@ function createTerminalDataBacklog(options = {}) {
   function append(sessionId, data, meta) {
     if (!sessionId || !data) return;
     const previous = pendingBySession.get(sessionId) || { data: "", meta: undefined };
-    const droppedOutputMayAffectTerminalState = Boolean(
-      previous.meta?.droppedOutputMayAffectTerminalState
-      || meta?.droppedOutputMayAffectTerminalState
-    );
-    const droppedOutputAlternateScreenAction = meta?.droppedOutputMayAffectTerminalState
-      ? meta?.droppedOutputAlternateScreenAction
-      : (meta?.droppedOutputAlternateScreenAction ?? previous.meta?.droppedOutputAlternateScreenAction);
-    const nextMeta = droppedOutputMayAffectTerminalState || droppedOutputAlternateScreenAction
-      ? {
-        ...(droppedOutputMayAffectTerminalState ? { droppedOutputMayAffectTerminalState: true } : {}),
-        ...(droppedOutputAlternateScreenAction ? { droppedOutputAlternateScreenAction } : {}),
-      }
-      : undefined;
+    const nextData = trimToLimit(previous.data + data);
+    const preserveTerminalPerf = previous.data.length === 0 && nextData === data;
+    const nextMeta = mergeTerminalDataMeta(previous.meta, meta, { preserveTerminalPerf });
     pendingBySession.set(sessionId, {
-      data: trimToLimit(previous.data + data),
+      data: nextData,
       meta: nextMeta,
     });
   }

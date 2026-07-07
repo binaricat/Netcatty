@@ -43,6 +43,7 @@ import {
   flushTerminalWriteCoalescer,
   resolveFloodCoalescerByteCap,
   setTerminalWriteCoalescerByteCapResolver,
+  setTerminalWriteCoalescerFlushGate,
 } from "./terminalWriteCoalescer";
 import {
   accumulateDeferredTerminalWriteAck,
@@ -233,8 +234,8 @@ const flushTerminalWritesForBackgroundOutput = (term: XTerm): void => {
   }
 };
 
-const scheduleVisibleTerminalWriteIdleFlush = (term: XTerm, isPaneVisible: boolean): void => {
-  if (!isPaneVisible) return;
+const scheduleVisibleTerminalWriteIdleFlush = (term: XTerm, isPaneVisible: () => boolean): void => {
+  if (!isPaneVisible()) return;
   const existingTimer = visibleWriteIdleFlushTimers.get(term);
   if (existingTimer !== undefined) {
     clearTimeout(existingTimer);
@@ -242,6 +243,7 @@ const scheduleVisibleTerminalWriteIdleFlush = (term: XTerm, isPaneVisible: boole
 
   const timer = setTimeout(() => {
     visibleWriteIdleFlushTimers.delete(term);
+    if (!isPaneVisible()) return;
     flushTerminalWriteCoalescer(term);
     flushTerminalWriteBufferBypassingTimers(term);
     flushTerminalWriteQueueBypassingTimers(term);
@@ -275,12 +277,6 @@ export const getFlowController = (
       },
     });
     terminalFlowControllers.set(term, controller);
-    setTerminalWriteCoalescerByteCapResolver(term, () => (
-      resolveFloodCoalescerByteCap(
-        controller!.isPaused(),
-        isTerminalWriteQueueInFloodMode(term),
-      )
-    ));
     setTerminalWriteQueueDropHandler(term, (bytes) => {
       if (bytes <= 0) return;
       controller?.written(bytes);
@@ -291,6 +287,13 @@ export const getFlowController = (
       }
     });
   }
+  setTerminalWriteCoalescerByteCapResolver(term, () => (
+    resolveFloodCoalescerByteCap(
+      controller!.isPaused(),
+      isTerminalWriteQueueInFloodMode(term),
+    )
+  ));
+  setTerminalWriteCoalescerFlushGate(term, () => ctx.isVisibleRef?.current !== false);
   return controller;
 };
 
@@ -346,10 +349,12 @@ export const writeSessionData = (
     const writeBackgroundOutputData = (
       batch: string,
       batchIngress: number,
+      writeOptions?: CoalescedTerminalWriteOptions,
     ): void => {
       writeSessionDataImmediate(ctx, term, batch, batchIngress, {
+        ...writeOptions,
         flushXtermWriteBuffer: true,
-        perfTrace,
+        perfTrace: writeOptions?.preservePerfTrace === false ? null : perfTrace,
       });
       flushTerminalWritesForBackgroundOutput(term);
     };
@@ -363,10 +368,10 @@ export const writeSessionData = (
   enqueueCoalescedTerminalWrite(term, data, (batch, batchIngress, writeOptions) => {
     writeSessionDataImmediate(ctx, term, batch, batchIngress, {
       ...writeOptions,
-      perfTrace,
+      perfTrace: writeOptions?.preservePerfTrace === false ? null : perfTrace,
     });
   }, ingressBytes);
-  scheduleVisibleTerminalWriteIdleFlush(term, isPaneVisible);
+  scheduleVisibleTerminalWriteIdleFlush(term, () => ctx.isVisibleRef?.current !== false);
   maybeFlushTerminalWriteCoalescerWhenUnfocused(
     term,
     isPaneVisible,
@@ -382,8 +387,9 @@ const writeSessionDataImmediate = (
 ) => {
   const flow = getFlowController(ctx, term);
   enqueueTerminalWrite(term, ingressBytes, (done) => {
-    const queueItemStartedAt = performance.now();
-    const prepareStartedAt = performance.now();
+    const shouldMeasurePerf = Boolean(writeOptions.perfTrace);
+    const queueItemStartedAt = shouldMeasurePerf ? performance.now() : 0;
+    const prepareStartedAt = shouldMeasurePerf ? performance.now() : 0;
     const settings = ctx.terminalSettingsRef?.current ?? ctx.terminalSettings;
     const filteredData = filterTerminalSessionData(term, data);
     const displayData = appendEraseScrollbackAfterFullErases(filteredData, {
@@ -402,7 +408,7 @@ const writeSessionDataImmediate = (
       ctx.promptLineBreakStateRef?.current,
       forcePromptNewLine,
     );
-    const prepareMs = performance.now() - prepareStartedAt;
+    const prepareMs = shouldMeasurePerf ? performance.now() - prepareStartedAt : 0;
     ctx.onTerminalLogData?.(pasteDisplayData);
     const clearPasteResidualAndCapture = () => {
       const cleanupData = clearPasteResidualAfterTerminalWrite(term);
@@ -451,7 +457,6 @@ const writeSessionDataImmediate = (
       );
 
     const writePreparedDisplayData = (callback: () => void): void => {
-      const shouldMeasurePerf = Boolean(writeOptions.perfTrace);
       const lineTimestampPerf = shouldMeasurePerf ? createLineTimestampPerfTotals() : null;
       const writeStartedAt = shouldMeasurePerf ? performance.now() : 0;
       let completed = false;

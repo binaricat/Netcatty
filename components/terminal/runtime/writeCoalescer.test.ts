@@ -117,6 +117,27 @@ test("uses a tighter pending-byte cap when getMaxPendingBytes is set", () => {
   assert.equal(writes[0]?.length, cap + 1);
 });
 
+test("does not flush cap-sized pending bytes while automatic flushing is gated", () => {
+  const writes: string[] = [];
+  let canFlush = false;
+  const cap = 8;
+  const coalescer = createTestCoalescer((data) => writes.push(data), {
+    getMaxPendingBytes: () => cap,
+    shouldFlushScheduledFrame: () => canFlush,
+  });
+
+  coalescer.push("x".repeat(cap));
+  coalescer.push("y");
+  fireFrame();
+
+  assert.deepEqual(writes, []);
+
+  canFlush = true;
+  coalescer.flushSync();
+
+  assert.deepEqual(writes, ["x".repeat(cap) + "y"]);
+});
+
 test("dispose flushes remaining bytes and stops accepting new chunks", () => {
   const writes: string[] = [];
   const coalescer = createTestCoalescer((data) => writes.push(data));

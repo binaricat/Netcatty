@@ -7,6 +7,7 @@ import {
   FLOW_CHAR_COUNT_ACK_SIZE,
   FLOW_LOW_WATER_MARK,
   MAX_TERMINAL_PLAIN_WRITE_CHUNK_BYTES,
+  XTERM_WRITE_CALLBACK_FAST_PATH_MAX_BYTES,
   XTERM_WRITE_CALLBACK_BATCH_BYTES,
 } from "./terminalFlowConstants.ts";
 import {
@@ -20,7 +21,13 @@ import {
   clearTerminalSessionFlowAck,
   flushTerminalSessionFlowAck,
 } from "./terminalFlowAckBuffer.ts";
-import { flushTerminalWriteCoalescer } from "./terminalWriteCoalescer.ts";
+import {
+  flushTerminalWriteCoalescer,
+  resetTerminalWriteCoalescer,
+} from "./terminalWriteCoalescer.ts";
+import {
+  flushPendingTerminalWritesOnResume,
+} from "./terminalUnfocusedRepaint.ts";
 import {
   clearDeferredTerminalWriteAck,
   getDeferredTerminalWriteAckBytes,
@@ -384,6 +391,134 @@ test("hidden tab output is written completely while the tab remains hidden", () 
 
   assert.equal(writes.join(""), payload);
   assert.equal(getFlowController(ctx as never, term).pendingBytes(), 0);
+  assert.equal(acked.reduce((total, bytes) => total + bytes, 0), payload.length);
+  clearTerminalSessionFlowAck("session-1");
+});
+
+test("writeSessionData keeps the current perf trace when hidden output is flushed", () => {
+  const payload = "hidden current output\n";
+  const writes: string[] = [];
+  const logs: string[] = [];
+  const originalInfo = console.info;
+  const term = {
+    buffer: { active: { type: "normal" } },
+    write(data: string, callback?: () => void) {
+      writes.push(data);
+      callback?.();
+    },
+    scrollToBottom() {},
+  } as unknown as XTerm;
+  const ctx = {
+    ...createContext(false),
+    isVisibleRef: { current: true },
+    sessionRef: { current: "session-1" },
+    terminalBackend: {},
+  };
+
+  console.info = (message?: unknown) => {
+    logs.push(String(message));
+  };
+  try {
+    withDocumentVisibility("hidden", () => {
+      writeSessionData(ctx as never, term, payload, payload.length, {
+        terminalPerf: {
+          id: "hidden-current",
+          emittedAt: Date.now(),
+          chars: payload.length,
+          lineFeeds: 1,
+        },
+      });
+    });
+  } finally {
+    console.info = originalInfo;
+  }
+
+  assert.deepEqual(writes, [payload]);
+  assert.equal(logs.some((log) => log.includes('"event":"renderer-receive"') && log.includes('"id":"hidden-current"')), true);
+  assert.equal(logs.some((log) => log.includes('"event":"renderer-write-done"') && log.includes('"id":"hidden-current"')), true);
+});
+
+test("writeSessionData skips the visible idle flush after the pane becomes hidden", async () => {
+  const payload = "pending while visible\n";
+  const writes: string[] = [];
+  const term = {
+    buffer: { active: { type: "normal" } },
+    write(data: string, callback?: () => void) {
+      writes.push(data);
+      callback?.();
+    },
+    scrollToBottom() {},
+  } as unknown as XTerm;
+  const ctx = {
+    ...createContext(false),
+    isVisibleRef: { current: true },
+    sessionRef: { current: "session-1" },
+    terminalBackend: {},
+  };
+  let queuedFrames = 0;
+
+  withAnimationFrameQueue((frames) => {
+    withDocumentVisibility("visible", () => {
+      writeSessionData(ctx as never, term, payload);
+    });
+    queuedFrames = frames.length;
+    ctx.isVisibleRef.current = false;
+    frames[0]?.(0);
+  });
+
+  await new Promise((resolve) => { setTimeout(resolve, 90); });
+
+  assert.equal(queuedFrames, 1);
+  assert.deepEqual(writes, []);
+
+  flushTerminalWriteCoalescer(term);
+  flushTerminalWriteQueueBypassingTimers(term);
+});
+
+test("writeSessionData keeps the hidden flush gate after coalescer reset and flushes on reveal", () => {
+  clearTerminalSessionFlowAck("session-1");
+  const payload = "x".repeat(XTERM_WRITE_CALLBACK_FAST_PATH_MAX_BYTES + 1);
+  const writes: string[] = [];
+  const term = {
+    buffer: { active: { type: "normal" } },
+    write(data: string, callback?: () => void) {
+      writes.push(data);
+      callback?.();
+    },
+    scrollToBottom() {},
+  } as unknown as XTerm;
+  const acked: number[] = [];
+  const ctx = {
+    ...createContext(false),
+    isVisibleRef: { current: true },
+    sessionRef: { current: "session-1" },
+    terminalBackend: {
+      ackSessionFlow: (_sessionId: string, bytes: number) => {
+        acked.push(bytes);
+      },
+    },
+  };
+
+  getFlowController(ctx as never, term);
+  resetTerminalWriteCoalescer(term);
+  withAnimationFrameQueue((frames) => {
+    withDocumentVisibility("visible", () => {
+      writeSessionData(ctx as never, term, payload);
+    });
+    assert.equal(frames.length, 1);
+
+    ctx.isVisibleRef.current = false;
+    frames[0]?.(0);
+    assert.deepEqual(writes, []);
+
+    ctx.isVisibleRef.current = true;
+    flushPendingTerminalWritesOnResume(term);
+  });
+  flushTerminalSessionFlowAck("session-1");
+
+  assert.deepEqual(writes, [payload]);
+  assert.equal(getFlowController(ctx as never, term).pendingBytes(), 0);
+  assert.equal(getDeferredTerminalWriteAckBytes(term), 0);
   assert.equal(acked.reduce((total, bytes) => total + bytes, 0), payload.length);
   clearTerminalSessionFlowAck("session-1");
 });

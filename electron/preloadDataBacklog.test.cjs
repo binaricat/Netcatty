@@ -11,6 +11,24 @@ const {
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+const createTerminalPerfMeta = (id = "perf-1") => ({
+  id,
+  emittedAt: 1234,
+  sessionId: "session-1",
+  chars: 5,
+  lineFeeds: 0,
+});
+
+function createFakePort() {
+  return {
+    onmessage: null,
+    close() {},
+    emit(data) {
+      this.onmessage?.({ data });
+    },
+  };
+}
+
 function loadPreloadWithFakeElectron() {
   const handlers = new Map();
   let exposedApi = null;
@@ -114,6 +132,33 @@ test("keeps terminal output metadata while trimming backlog data", () => {
 
   assert.deepEqual(backlog.takeEntry("session-1"), {
     data: "world",
+    meta: { droppedOutputMayAffectTerminalState: true },
+  });
+});
+
+test("keeps terminal perf metadata for a single backlog chunk", () => {
+  const backlog = createTerminalDataBacklog({ maxBytesPerSession: 64 });
+  const terminalPerf = createTerminalPerfMeta();
+
+  backlog.append("session-1", "hello", { terminalPerf });
+
+  assert.deepEqual(backlog.takeEntry("session-1"), {
+    data: "hello",
+    meta: { terminalPerf },
+  });
+});
+
+test("drops terminal perf metadata after backlog data is merged or trimmed", () => {
+  const backlog = createTerminalDataBacklog({ maxBytesPerSession: 8 });
+
+  backlog.append("session-1", "hello", { terminalPerf: createTerminalPerfMeta("perf-1") });
+  backlog.append("session-1", " world", {
+    terminalPerf: createTerminalPerfMeta("perf-2"),
+    droppedOutputMayAffectTerminalState: true,
+  });
+
+  assert.deepEqual(backlog.takeEntry("session-1"), {
+    data: "lo world",
     meta: { droppedOutputMayAffectTerminalState: true },
   });
 });
@@ -223,8 +268,10 @@ test("onSessionData replays pending terminal data metadata on subscribe", () => 
   const dataListeners = new Map();
   const displayDataListeners = new Map();
   const terminalDataBacklog = createTerminalDataBacklog();
+  const terminalPerf = createTerminalPerfMeta();
   terminalDataBacklog.append("session-1", "early output", {
     droppedOutputMayAffectTerminalState: true,
+    terminalPerf,
   });
 
   const api = createPreloadApi({
@@ -249,8 +296,85 @@ test("onSessionData replays pending terminal data metadata on subscribe", () => 
 
   assert.deepEqual(received, [{
     chunk: "early output",
-    meta: { droppedOutputMayAffectTerminalState: true },
+    meta: { droppedOutputMayAffectTerminalState: true, terminalPerf },
   }]);
+});
+
+test("legacy terminal data delivery preserves terminal perf metadata", () => {
+  const preload = loadPreloadWithFakeElectron();
+  try {
+    const terminalPerf = createTerminalPerfMeta();
+    const received = [];
+    preload.api.onSessionData("session-1", (chunk, meta) => {
+      received.push({ chunk, meta });
+    });
+
+    preload.handlers.get("netcatty:data")?.({}, {
+      sessionId: "session-1",
+      data: "hello",
+      meta: { terminalPerf },
+    });
+
+    assert.deepEqual(received, [{
+      chunk: "hello",
+      meta: { terminalPerf },
+    }]);
+  } finally {
+    preload.cleanup();
+  }
+});
+
+test("terminal output port delivery preserves terminal perf metadata", () => {
+  const preload = loadPreloadWithFakeElectron();
+  try {
+    const terminalPerf = createTerminalPerfMeta();
+    const received = [];
+    const port = createFakePort();
+    preload.api.onSessionData("session-1", (chunk, meta) => {
+      received.push({ chunk, meta });
+    });
+
+    preload.handlers.get("netcatty:terminal-output-port")?.({ ports: [port] }, { sessionId: "session-1" });
+    port.emit({
+      sessionId: "session-1",
+      data: "hello",
+      meta: { terminalPerf },
+    });
+
+    assert.deepEqual(received, [{
+      chunk: "hello",
+      meta: { terminalPerf },
+    }]);
+  } finally {
+    preload.cleanup();
+  }
+});
+
+test("MCP-filtered terminal perf metadata is not carried to later output", () => {
+  const preload = loadPreloadWithFakeElectron();
+  try {
+    const received = [];
+    preload.api.onSessionData("session-1", (chunk, meta) => {
+      received.push({ chunk, meta });
+    });
+
+    preload.handlers.get("netcatty:data")?.({}, {
+      sessionId: "session-1",
+      data: "__NCMCP_TEST\n",
+      meta: { terminalPerf: createTerminalPerfMeta() },
+    });
+    preload.handlers.get("netcatty:data")?.({}, {
+      sessionId: "session-1",
+      data: "READY\n",
+    });
+
+    assert.deepEqual(received, [{
+      chunk: "READY\n",
+      meta: undefined,
+    }]);
+  } finally {
+    preload.cleanup();
+  }
 });
 
 test("delayed MCP terminal data flush preserves metadata", async () => {

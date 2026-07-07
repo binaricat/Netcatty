@@ -4,10 +4,12 @@ import test from "node:test";
 import type { Terminal as XTerm } from "@xterm/xterm";
 
 import {
+  abortTerminalWriteCoalescer,
   enqueueCoalescedTerminalWrite,
   flushTerminalWriteCoalescer,
   resetTerminalWriteCoalescer,
   setTerminalWriteCoalescerByteCapResolver,
+  setTerminalWriteCoalescerFlushGate,
   type CoalescedTerminalWriteOptions,
 } from "./terminalWriteCoalescer.ts";
 import {
@@ -29,6 +31,37 @@ const withAnimationFrameQueue = (run: () => void) => {
   });
   try {
     run();
+  } finally {
+    if (originalRequest) {
+      Object.defineProperty(globalThis, "requestAnimationFrame", originalRequest);
+    } else {
+      Reflect.deleteProperty(globalThis, "requestAnimationFrame");
+    }
+    if (originalCancel) {
+      Object.defineProperty(globalThis, "cancelAnimationFrame", originalCancel);
+    } else {
+      Reflect.deleteProperty(globalThis, "cancelAnimationFrame");
+    }
+  }
+};
+
+const withQueuedAnimationFrame = (run: (frames: Array<FrameRequestCallback>) => void) => {
+  const originalRequest = Object.getOwnPropertyDescriptor(globalThis, "requestAnimationFrame");
+  const originalCancel = Object.getOwnPropertyDescriptor(globalThis, "cancelAnimationFrame");
+  const frames: Array<FrameRequestCallback> = [];
+  Object.defineProperty(globalThis, "requestAnimationFrame", {
+    configurable: true,
+    value: (callback: FrameRequestCallback) => {
+      frames.push(callback);
+      return frames.length;
+    },
+  });
+  Object.defineProperty(globalThis, "cancelAnimationFrame", {
+    configurable: true,
+    value: () => {},
+  });
+  try {
+    run(frames);
   } finally {
     if (originalRequest) {
       Object.defineProperty(globalThis, "requestAnimationFrame", originalRequest);
@@ -65,6 +98,189 @@ test("splits a single flood-sized terminal batch before it reaches xterm", () =>
     writes.map((write) => write.ingressBytes),
     [12, 12, 6],
   );
+
+  resetTerminalWriteCoalescer(term);
+});
+
+test("marks merged coalesced output as not preserving single-chunk perf metadata", () => {
+  const term = createFakeTerm();
+  const writes: Array<{ data: string; options?: CoalescedTerminalWriteOptions }> = [];
+
+  setTerminalWriteCoalescerByteCapResolver(term, () => 100);
+  withAnimationFrameQueue(() => {
+    enqueueCoalescedTerminalWrite(
+      term,
+      "first",
+      () => {},
+      "first".length,
+    );
+    enqueueCoalescedTerminalWrite(
+      term,
+      "second",
+      (data, _ingressBytes, options) => {
+        writes.push({ data, options });
+      },
+      "second".length,
+    );
+    flushTerminalWriteCoalescer(term);
+  });
+
+  assert.deepEqual(writes, [{
+    data: "firstsecond",
+    options: { preservePerfTrace: false },
+  }]);
+
+  resetTerminalWriteCoalescer(term);
+});
+
+test("uses the pending writer when a new chunk forces an old single chunk flush", () => {
+  const term = createFakeTerm();
+  const firstWriter: string[] = [];
+  const secondWriter: string[] = [];
+
+  setTerminalWriteCoalescerByteCapResolver(term, () => 10);
+  withAnimationFrameQueue(() => {
+    enqueueCoalescedTerminalWrite(
+      term,
+      "old",
+      (data) => {
+        firstWriter.push(data);
+      },
+      "old".length,
+    );
+    enqueueCoalescedTerminalWrite(
+      term,
+      "new-data",
+      (data) => {
+        secondWriter.push(data);
+      },
+      "new-data".length,
+    );
+    flushTerminalWriteCoalescer(term);
+  });
+
+  assert.deepEqual(firstWriter, ["old"]);
+  assert.deepEqual(secondWriter, ["new-data"]);
+
+  resetTerminalWriteCoalescer(term);
+});
+
+test("aborting pending coalesced output clears merge bookkeeping for the next write", () => {
+  const term = createFakeTerm();
+  const writes: Array<{ data: string; options?: CoalescedTerminalWriteOptions }> = [];
+
+  setTerminalWriteCoalescerByteCapResolver(term, () => 100);
+  withAnimationFrameQueue(() => {
+    enqueueCoalescedTerminalWrite(term, "dropped", () => {}, "dropped".length);
+    enqueueCoalescedTerminalWrite(term, " output", () => {}, " output".length);
+    abortTerminalWriteCoalescer(term);
+    enqueueCoalescedTerminalWrite(
+      term,
+      "next",
+      (data, _ingressBytes, options) => {
+        writes.push({ data, options });
+      },
+      "next".length,
+    );
+    flushTerminalWriteCoalescer(term);
+  });
+
+  assert.deepEqual(writes, [{ data: "next", options: undefined }]);
+
+  resetTerminalWriteCoalescer(term);
+});
+
+test("pending output skipped while hidden can be flushed after the pane is shown", () => {
+  const term = createFakeTerm();
+  const writes: string[] = [];
+  let isPaneVisible = true;
+
+  setTerminalWriteCoalescerByteCapResolver(term, () => 100);
+  setTerminalWriteCoalescerFlushGate(term, () => isPaneVisible);
+  withQueuedAnimationFrame((frames) => {
+    enqueueCoalescedTerminalWrite(
+      term,
+      "hidden output",
+      (data) => {
+        writes.push(data);
+      },
+      "hidden output".length,
+    );
+
+    isPaneVisible = false;
+    frames.shift()?.(0);
+    assert.deepEqual(writes, []);
+
+    isPaneVisible = true;
+    flushTerminalWriteCoalescer(term);
+  });
+
+  assert.deepEqual(writes, ["hidden output"]);
+
+  resetTerminalWriteCoalescer(term);
+});
+
+test("cap-triggered coalescer flushes wait until a hidden pane is visible", () => {
+  const term = createFakeTerm();
+  const writes: string[] = [];
+  let isPaneVisible = false;
+
+  setTerminalWriteCoalescerByteCapResolver(term, () => 10);
+  setTerminalWriteCoalescerFlushGate(term, () => isPaneVisible);
+  withQueuedAnimationFrame((frames) => {
+    enqueueCoalescedTerminalWrite(
+      term,
+      "123456",
+      () => {},
+      "123456".length,
+    );
+    enqueueCoalescedTerminalWrite(
+      term,
+      "abcdef",
+      (data) => {
+        writes.push(data);
+      },
+      "abcdef".length,
+    );
+    frames.splice(0).forEach((frame) => frame(0));
+
+    assert.deepEqual(writes, []);
+
+    isPaneVisible = true;
+    flushTerminalWriteCoalescer(term);
+  });
+
+  assert.equal(writes.join(""), "123456abcdef");
+  assert.deepEqual(writes.map((write) => write.length), [10, 2]);
+
+  resetTerminalWriteCoalescer(term);
+});
+
+test("oversized coalesced output waits while hidden instead of writing directly", () => {
+  const term = createFakeTerm();
+  const writes: string[] = [];
+  let isPaneVisible = false;
+
+  setTerminalWriteCoalescerByteCapResolver(term, () => 4);
+  setTerminalWriteCoalescerFlushGate(term, () => isPaneVisible);
+  withQueuedAnimationFrame((frames) => {
+    enqueueCoalescedTerminalWrite(
+      term,
+      "oversized",
+      (data) => {
+        writes.push(data);
+      },
+      "oversized".length,
+    );
+    frames.splice(0).forEach((frame) => frame(0));
+
+    assert.deepEqual(writes, []);
+
+    isPaneVisible = true;
+    flushTerminalWriteCoalescer(term);
+  });
+
+  assert.deepEqual(writes.join(""), "oversized");
 
   resetTerminalWriteCoalescer(term);
 });

@@ -207,6 +207,13 @@ const getWraparoundAction = (sequence: string): boolean | null => {
   return modes.includes(7) ? final === "h" : null;
 };
 
+const isSgrSequence = (sequence: string): boolean =>
+  getCsiFinal(sequence) === "m";
+
+const isBulkMeasurableEscapeSequence = (sequence: string): boolean =>
+  getAlternateScreenAction(sequence) === null
+  && (getWraparoundAction(sequence) !== null || isSgrSequence(sequence));
+
 const isPotentialAlternateScreenSequence = (sequence: string): boolean => {
   if (!sequence.startsWith("\x1b[?")) return false;
 
@@ -444,9 +451,79 @@ const getTerminalWraparoundMode = (term: XTerm): boolean => (
   ((term as XTerm & { modes?: { wraparoundMode?: boolean } }).modes?.wraparoundMode) !== false
 );
 
+const unicodeMarkPattern = /\p{Mark}/u;
+
+const isCombiningCodePoint = (codePoint: number): boolean => (
+  unicodeMarkPattern.test(String.fromCodePoint(codePoint))
+);
+
+const isWideCodePoint = (codePoint: number): boolean => (
+  (codePoint >= 0x1100 && codePoint <= 0x115f)
+  || (codePoint >= 0x2e80 && codePoint <= 0x303e)
+  || (codePoint >= 0x3041 && codePoint <= 0x33ff)
+  || (codePoint >= 0x3400 && codePoint <= 0x4dbf)
+  || (codePoint >= 0x4e00 && codePoint <= 0x9fff)
+  || (codePoint >= 0xa000 && codePoint <= 0xa4cf)
+  || (codePoint >= 0xac00 && codePoint <= 0xd7a3)
+  || (codePoint >= 0xf900 && codePoint <= 0xfaff)
+  || (codePoint >= 0xfe30 && codePoint <= 0xfe4f)
+  || (codePoint >= 0xff00 && codePoint <= 0xff60)
+  || (codePoint >= 0xffe0 && codePoint <= 0xffe6)
+  || (codePoint >= 0x1f300 && codePoint <= 0x1faff)
+  || (codePoint >= 0x20000 && codePoint <= 0x3fffd)
+);
+
+const isUnsafeGraphemeSequenceCodePoint = (codePoint: number): boolean => (
+  codePoint === 0x200d
+  || codePoint === 0x20e3
+  || (codePoint >= 0x1f1e6 && codePoint <= 0x1f1ff)
+  || (codePoint >= 0x1f3fb && codePoint <= 0x1f3ff)
+  || (codePoint >= 0xfe00 && codePoint <= 0xfe0f)
+  || (codePoint >= 0xe0020 && codePoint <= 0xe007f)
+  || (codePoint >= 0xe0100 && codePoint <= 0xe01ef)
+);
+
+const isUnsafeFormatCodePoint = (codePoint: number): boolean => (
+  (codePoint >= 0x200b && codePoint <= 0x200f)
+  || (codePoint >= 0x202a && codePoint <= 0x202e)
+  || (codePoint >= 0x2060 && codePoint <= 0x206f)
+  || codePoint === 0xfeff
+  || (codePoint >= 0xfff9 && codePoint <= 0xfffb)
+);
+
+const getCodePointCellWidth = (codePoint: number): number => {
+  if (isCombiningCodePoint(codePoint)) return 0;
+  return isWideCodePoint(codePoint) ? 2 : 1;
+};
+
 const canMeasureVisualRows = (data: string): boolean => {
   for (let index = 0; index < data.length; index += 1) {
-    if (data.charCodeAt(index) > 0x7f) return false;
+    const char = data[index];
+    const codePoint = data.codePointAt(index);
+    if (codePoint === undefined) return false;
+    if (char === "\x1b") {
+      const sequence = readEscapeSequence(data, index);
+      if (!sequence?.complete || !isBulkMeasurableEscapeSequence(sequence.sequence)) {
+        return false;
+      }
+      index = sequence.endIndex;
+      continue;
+    }
+    if (char === "\n" || char === "\r" || char === "\b" || char === "\t") {
+      continue;
+    }
+    if (
+      codePoint < 0x20
+      || codePoint === 0x7f
+      || (codePoint >= 0x80 && codePoint <= 0x9f)
+      || isUnsafeGraphemeSequenceCodePoint(codePoint)
+      || isUnsafeFormatCodePoint(codePoint)
+    ) {
+      return false;
+    }
+    if (codePoint > 0xffff) {
+      index += 1;
+    }
   }
   return true;
 };
@@ -534,7 +611,20 @@ const measureTerminalRows = (
     if (char < " " || char === "\u007f") {
       continue;
     }
-    ({ column, rowOffset } = advanceMeasuredColumns(column, rowOffset, columns, 1, wraparoundMode));
+    const codePoint = data.codePointAt(index);
+    if (codePoint === undefined) {
+      continue;
+    }
+    ({ column, rowOffset } = advanceMeasuredColumns(
+      column,
+      rowOffset,
+      columns,
+      getCodePointCellWidth(codePoint),
+      wraparoundMode,
+    ));
+    if (codePoint > 0xffff) {
+      index += 1;
+    }
   }
 
   return { rowOffset, column, wraparoundMode };
@@ -561,7 +651,7 @@ const writeBatchedTimestampSegments = (
       timestamps.push({ label: segment.label, rowOffset });
       continue;
     }
-    const measured = Number.isFinite(columns) && canMeasureVisualRows(segment.data)
+    const measured = canMeasureVisualRows(segment.data)
       ? measureTerminalRows(segment.data, column, columns, wraparoundMode)
       : { rowOffset: countLineFeeds(segment.data), column, wraparoundMode };
     rowOffset += measured.rowOffset;
@@ -742,12 +832,26 @@ export const writeTerminalDataWithLineTimestamps = (
       parsedChars: parsedData.length,
     });
   }
+  const writeFallbackData = (fallbackData: string, onComplete: () => void): void => {
+    const writeStartedAt = shouldMeasureDiagnostics ? performance.now() : 0;
+    term.write(fallbackData, () => {
+      if (diagnostics) {
+        diagnostics.onStep?.({
+          kind: "fallback-write",
+          dataChars: fallbackData.length,
+          writeCallbackMs: performance.now() - writeStartedAt,
+        });
+      }
+      onComplete();
+    });
+  };
   if (
     timestampOnlyPrefix.length === 0
     && parsedData === dataForTimestamps
+    && canMeasureVisualRows(data)
     && (
       dataSegmentCount > MAX_SEGMENTED_TIMESTAMP_WRITES
-      || (data.length >= BULK_TIMESTAMP_BATCH_MIN_BYTES && canMeasureVisualRows(data))
+      || data.length >= BULK_TIMESTAMP_BATCH_MIN_BYTES
     )
   ) {
     writeBatchedTimestampSegments(term, store, data, segments, done, diagnostics);
@@ -833,23 +937,14 @@ export const writeTerminalDataWithLineTimestamps = (
       store.timestampOnlyPrefix = pendingEscapeSequence;
     }
     if (!parsedData || !dataForTimestamps.startsWith(parsedData)) {
-      const writeStartedAt = shouldMeasureDiagnostics ? performance.now() : 0;
-      term.write(data, () => {
-        if (diagnostics) {
-          diagnostics.onStep?.({
-            kind: "fallback-write",
-            dataChars: data.length,
-            writeCallbackMs: performance.now() - writeStartedAt,
-          });
-        }
-        done();
-      });
+      writeFallbackData(data, done);
       return;
     }
 
     const parsedCurrentDataLength = Math.max(0, parsedData.length - timestampOnlyPrefix.length);
+    const trailingData = data.slice(parsedCurrentDataLength);
     writeSegments(
-      () => term.write(data.slice(parsedCurrentDataLength), done),
+      () => writeFallbackData(trailingData, done),
       timestampOnlyPrefix.length,
     );
     return;

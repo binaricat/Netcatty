@@ -35,6 +35,7 @@ type ScheduleWriteFrame = (callback: () => void) => (() => void) | null;
 export type WriteCoalescerOptions = {
   scheduleFrame?: ScheduleWriteFrame;
   getMaxPendingBytes?: () => number;
+  shouldFlushScheduledFrame?: () => boolean;
 };
 
 const scheduleWriteFrame = (callback: () => void): (() => void) | null => {
@@ -61,6 +62,7 @@ export const createWriteCoalescer = (
   const scheduleFrame = options.scheduleFrame ?? scheduleWriteFrame;
   const getMaxPendingBytes = options.getMaxPendingBytes
     ?? (() => MAX_PENDING_WRITE_COALESCE_BYTES);
+  const shouldFlushScheduledFrame = options.shouldFlushScheduledFrame ?? (() => true);
 
   const cancelScheduledFrame = (): void => {
     if (cancelPendingFrame !== null) {
@@ -98,15 +100,24 @@ export const createWriteCoalescer = (
     pending.push(chunk);
     pendingBytes += chunk.length;
     if (pendingBytes > getMaxPendingBytes()) {
+      if (!shouldFlushScheduledFrame()) {
+        return;
+      }
       flushSync();
       return;
     }
     if (cancelPendingFrame === null) {
       const cancelFrame = scheduleFrame(() => {
         cancelPendingFrame = null;
+        if (!shouldFlushScheduledFrame()) {
+          return;
+        }
         flushSync();
       });
       if (cancelFrame === null) {
+        if (!shouldFlushScheduledFrame()) {
+          return;
+        }
         flushSync();
         return;
       }
