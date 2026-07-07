@@ -26,7 +26,7 @@ import { resolveGroupDefaults, applyGroupDefaults } from './domain/groupConfig';
 import { upsertKnownHost } from './domain/knownHosts';
 import { materializeHostProxyProfile } from './domain/proxyProfiles';
 import { buildSshDeepLinkConnectionHost, buildSshDeepLinkEphemeralHost, buildSshDeepLinkEphemeralHostFromSaved, buildSshDeepLinkHostDraft, findSshDeepLinkHost, parseSshDeepLink } from './domain/sshDeepLink';
-import { buildTelnetDeepLinkConnectionHost, buildTelnetDeepLinkOpenHost, findTelnetDeepLinkHost, parseTelnetDeepLink } from './domain/telnetDeepLink';
+import { buildTelnetDeepLinkConnectionHost, buildTelnetDeepLinkEphemeralHostFromSaved, buildTelnetDeepLinkOpenHost, findTelnetDeepLinkHost, materializeTelnetDeepLinkMatchHost, parseTelnetDeepLink } from './domain/telnetDeepLink';
 import { buildJmsDeepLinkEphemeralHost, isSupportedJmsProtocol, parseJmsDeepLink } from './domain/jmsDeepLink';
 import { applyEphemeralHostsUpdate, splitHostsUpdateByEphemeral } from './domain/ephemeralHosts';
 import { resolveHostAuth } from './domain/sshAuth';
@@ -1071,10 +1071,23 @@ function App({ settings }: { settings: SettingsState }) {
       return;
     }
 
-    const effectiveHosts = hosts.map(resolveEffectiveHost);
-    const matchedEffectiveHost = findTelnetDeepLinkHost(effectiveHosts, target);
+    const effectiveHosts = hosts.map((host) =>
+      materializeTelnetDeepLinkMatchHost(resolveEffectiveHost(host), identities),
+    );
+    const matchedEffectiveHost = findTelnetDeepLinkHost(effectiveHosts, target, {
+      ignoreTargetUsername: Boolean(target.password),
+    });
 
     if (matchedEffectiveHost) {
+      if (target.password) {
+        const ephemeralHost = buildTelnetDeepLinkEphemeralHostFromSaved(matchedEffectiveHost, target, {
+          id: crypto.randomUUID(),
+          now: Date.now(),
+        });
+        setEphemeralHosts((prev) => [...prev, ephemeralHost]);
+        handleConnectToHost(ephemeralHost);
+        return;
+      }
       handleConnectToHost(buildTelnetDeepLinkConnectionHost(matchedEffectiveHost));
       return;
     }

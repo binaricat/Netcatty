@@ -1,4 +1,4 @@
-import type { Host } from "./models";
+import type { Host, Identity } from "./models";
 
 export interface TelnetDeepLinkTarget {
   rawUrl: string;
@@ -34,6 +34,16 @@ const getHostUsername = (host: Host): string =>
 
 const isTelnetHost = (host: Host): boolean =>
   host.protocol === "telnet" || host.telnetEnabled === true;
+
+export const materializeTelnetDeepLinkMatchHost = (
+  host: Host,
+  identities: Pick<Identity, "id" | "username">[],
+): Host => {
+  if (!host.telnetIdentityId) return host;
+  const identity = identities.find((item) => item.id === host.telnetIdentityId);
+  const username = identity?.username?.trim();
+  return username ? { ...host, telnetUsername: username } : host;
+};
 
 export const parseTelnetDeepLink = (rawUrl: string): TelnetDeepLinkTarget | null => {
   if (typeof rawUrl !== "string") return null;
@@ -80,13 +90,14 @@ export const shouldHandleTelnetDeepLink = (rawUrl: string, enabled: boolean): bo
 export const findTelnetDeepLinkHost = (
   hosts: Host[],
   target: TelnetDeepLinkTarget,
+  options?: { ignoreTargetUsername?: boolean },
 ): Host | null => {
   const targetHost = normalizeHostname(target.hostname);
   const targetPort = target.port ?? DEFAULT_TELNET_PORT;
   const candidates = hosts.filter((host) => {
     if (!isTelnetHost(host)) return false;
     if (normalizeHostname(host.hostname) !== targetHost) return false;
-    if (target.username && getHostUsername(host) !== target.username) return false;
+    if (!options?.ignoreTargetUsername && target.username && getHostUsername(host) !== target.username) return false;
     if (getHostPort(host) !== targetPort) return false;
     return true;
   });
@@ -97,10 +108,27 @@ export const findTelnetDeepLinkHost = (
 export const buildTelnetDeepLinkConnectionHost = (host: Host): Host => ({
   ...host,
   protocol: "telnet",
+  port: getHostPort(host),
   telnetEnabled: true,
-  telnetPort: host.telnetPort ?? host.port ?? DEFAULT_TELNET_PORT,
+  telnetPort: getHostPort(host),
   moshEnabled: false,
   etEnabled: false,
+});
+
+export const buildTelnetDeepLinkEphemeralHostFromSaved = (
+  effectiveSavedHost: Host,
+  target: TelnetDeepLinkTarget,
+  options: TelnetDeepLinkDraftOptions,
+): Host => ({
+  ...buildTelnetDeepLinkConnectionHost(effectiveSavedHost),
+  id: options.id,
+  createdAt: options.now,
+  ...(target.username ? { username: target.username, telnetUsername: target.username } : {}),
+  ...(target.password ? { telnetPassword: target.password } : {}),
+  telnetIdentityId: undefined,
+  savePassword: false,
+  group: "",
+  ephemeral: true,
 });
 
 export const buildTelnetDeepLinkHostDraft = (

@@ -3,9 +3,11 @@ import assert from "node:assert/strict";
 import type { Host } from "./models";
 import {
   buildTelnetDeepLinkConnectionHost,
+  buildTelnetDeepLinkEphemeralHostFromSaved,
   buildTelnetDeepLinkHostDraft,
   buildTelnetDeepLinkOpenHost,
   findTelnetDeepLinkHost,
+  materializeTelnetDeepLinkMatchHost,
   parseTelnetDeepLink,
   shouldHandleTelnetDeepLink,
 } from "./telnetDeepLink";
@@ -87,6 +89,30 @@ test("findTelnetDeepLinkHost avoids ambiguous saved hosts", () => {
   assert.equal(match, null);
 });
 
+test("findTelnetDeepLinkHost can ignore URL username for one-time credential links", () => {
+  const hosts = [
+    host({
+      id: "saved",
+      hostname: "example.com",
+      port: 23,
+      telnetUsername: "vault-user",
+    }),
+  ];
+
+  const strictMatch = findTelnetDeepLinkHost(
+    hosts,
+    parseTelnetDeepLink("telnet://link-user:link-password@example.com")!,
+  );
+  const credentialMatch = findTelnetDeepLinkHost(
+    hosts,
+    parseTelnetDeepLink("telnet://link-user:link-password@example.com")!,
+    { ignoreTargetUsername: true },
+  );
+
+  assert.equal(strictMatch, null);
+  assert.equal(credentialMatch?.id, "saved");
+});
+
 test("buildTelnetDeepLinkConnectionHost forces a saved host to open with telnet", () => {
   const savedHost = host({
     id: "saved",
@@ -105,6 +131,60 @@ test("buildTelnetDeepLinkConnectionHost forces a saved host to open with telnet"
   assert.equal(connectionHost.telnetPort, 2323);
   assert.equal(connectionHost.moshEnabled, false);
   assert.equal(connectionHost.etEnabled, false);
+});
+
+test("buildTelnetDeepLinkConnectionHost uses the telnet default for ssh hosts with telnet enabled", () => {
+  const savedHost = host({
+    id: "saved",
+    hostname: "example.com",
+    protocol: "ssh",
+    port: 22,
+    telnetEnabled: true,
+  });
+
+  const connectionHost = buildTelnetDeepLinkConnectionHost(savedHost);
+
+  assert.equal(connectionHost.protocol, "telnet");
+  assert.equal(connectionHost.port, 23);
+  assert.equal(connectionHost.telnetPort, 23);
+});
+
+test("buildTelnetDeepLinkEphemeralHostFromSaved keeps saved settings but uses URL credentials", () => {
+  const savedHost = host({
+    id: "saved",
+    label: "Saved",
+    hostname: "example.com",
+    username: "vault-user",
+    port: 22,
+    protocol: "ssh",
+    telnetEnabled: true,
+    telnetUsername: "vault-telnet-user",
+    telnetPassword: "vault-password",
+    telnetIdentityId: "identity-1",
+    proxyProfileId: "proxy-1",
+    charset: "gb18030",
+    group: "network",
+  });
+
+  const ephemeral = buildTelnetDeepLinkEphemeralHostFromSaved(
+    savedHost,
+    parseTelnetDeepLink("telnet://link-user:link-password@example.com")!,
+    { id: "ephemeral-id", now: 789 },
+  );
+
+  assert.equal(ephemeral.id, "ephemeral-id");
+  assert.equal(ephemeral.ephemeral, true);
+  assert.equal(ephemeral.protocol, "telnet");
+  assert.equal(ephemeral.telnetEnabled, true);
+  assert.equal(ephemeral.telnetPort, 23);
+  assert.equal(ephemeral.username, "link-user");
+  assert.equal(ephemeral.telnetUsername, "link-user");
+  assert.equal(ephemeral.telnetPassword, "link-password");
+  assert.equal(ephemeral.telnetIdentityId, undefined);
+  assert.equal(ephemeral.savePassword, false);
+  assert.equal(ephemeral.group, "");
+  assert.equal(ephemeral.proxyProfileId, "proxy-1");
+  assert.equal(ephemeral.charset, "gb18030");
 });
 
 test("buildTelnetDeepLinkHostDraft prepares an ephemeral telnet host", () => {
@@ -133,6 +213,27 @@ test("buildTelnetDeepLinkHostDraft prepares an ephemeral telnet host", () => {
     etEnabled: false,
     createdAt: 123,
   });
+});
+
+test("materializeTelnetDeepLinkMatchHost makes telnet identity usernames matchable", () => {
+  const savedHost = host({
+    id: "saved",
+    hostname: "example.com",
+    username: "",
+    protocol: "ssh",
+    telnetEnabled: true,
+    telnetIdentityId: "identity-1",
+  });
+
+  const materialized = materializeTelnetDeepLinkMatchHost(savedHost, [
+    { id: "identity-1", username: "identity-user" },
+  ]);
+  const match = findTelnetDeepLinkHost(
+    [materialized],
+    parseTelnetDeepLink("telnet://identity-user@example.com")!,
+  );
+
+  assert.equal(match?.id, "saved");
 });
 
 test("buildTelnetDeepLinkOpenHost falls back to a draft host when no saved host matches", () => {
