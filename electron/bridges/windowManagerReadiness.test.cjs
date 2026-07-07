@@ -768,6 +768,17 @@ test("main window clears renderer readiness when the main frame starts navigatin
   assert.equal(rendererReadyIds.has(7), true);
   assert.deepEqual(clearedReadyIds, []);
 
+  let blockedAppPortNavigation = false;
+  webContentsHandlers["will-navigate"](
+    { preventDefault() { blockedAppPortNavigation = true; } },
+    "app://netcatty:123/index.html",
+  );
+  assert.equal(blockedAppPortNavigation, true);
+
+  webContentsHandlers["did-start-navigation"]({}, "app://netcatty:123/index.html", false, true);
+  assert.equal(rendererReadyIds.has(7), true);
+  assert.deepEqual(clearedReadyIds, []);
+
   webContentsHandlers["did-start-navigation"]({}, "app://netcatty/index.html", false, true);
   assert.equal(rendererReadyIds.has(7), false);
   assert.deepEqual(clearedReadyIds, [7]);
