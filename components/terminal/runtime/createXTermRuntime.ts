@@ -59,6 +59,7 @@ import {
   resolveShiftEnterText,
   shouldSendShiftEnterText,
 } from "./shiftEnterText";
+import { formatSerialLocalEcho } from "./serialLocalEcho";
 import { formatTelnetLocalEcho } from "./telnetLocalEcho";
 import {
   isTerminalFontSizeAction,
@@ -834,15 +835,8 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
 
         // Local echo for serial connections only when explicitly enabled
         if (ctx.host.protocol === "serial" && ctx.serialLocalEcho) {
-          if (dataToWrite === "\r") {
-            writeLocalTerminalData("\r\n");
-          } else if (dataToWrite === "\x7f" || dataToWrite === "\b") {
-            writeLocalTerminalData("\b \b");
-          } else if (dataToWrite === "\x03") {
-            writeLocalTerminalData("^C");
-          } else if (dataToWrite.charCodeAt(0) >= 32 || dataToWrite.length > 1) {
-            writeLocalTerminalData(dataToWrite);
-          }
+          const localEcho = formatSerialLocalEcho(dataToWrite);
+          if (localEcho) writeLocalTerminalData(localEcho);
         }
         if (ctx.host.protocol === "telnet" && ctx.telnetLocalEchoRef?.current) {
           const localEcho = formatTelnetLocalEcho(dataToWrite);
