@@ -5,12 +5,20 @@ import {
   isTerminalAlternateScreenActive,
   refreshTerminalViewport,
 } from "../terminalHibernateRuntime";
-import { flushTerminalWriteCoalescer } from "./terminalWriteCoalescer";
-import { flushTerminalWriteQueueBypassingTimers } from "./terminalWriteQueue";
+import {
+  flushTerminalWriteCoalescer,
+  getTerminalWriteCoalescerPendingBytes,
+} from "./terminalWriteCoalescer";
+import {
+  flushTerminalWriteQueueBypassingTimers,
+  hasPendingTerminalWriteQueueWork,
+} from "./terminalWriteQueue";
 
 const UNFOCUSED_REPAINT_DEBOUNCE_MS = 16;
 const UNFOCUSED_FLUSH_DEBOUNCE_MS = 67;
 const RESUME_FLUSH_MAX_PASSES = 64;
+const HIBERNATE_FLUSH_MAX_PASSES = 4096;
+const HIBERNATE_FLUSH_YIELD_EVERY_PASSES = 64;
 const unfocusedRepaintTimers = new WeakMap<XTerm, ReturnType<typeof setTimeout>>();
 const unfocusedFlushTimers = new WeakMap<XTerm, ReturnType<typeof setTimeout>>();
 
@@ -81,6 +89,45 @@ export function flushTerminalWriteBufferBypassingTimers(term: XTerm): void {
   }
 }
 
+function getPendingTerminalWriteBufferBytes(term: XTerm): number {
+  const writeBuffer = (term as XTermWithPrivateWriteBuffer)._core?._writeBuffer;
+  if (!writeBuffer) return 0;
+
+  if (
+    typeof writeBuffer._pendingData === "number"
+    && Number.isFinite(writeBuffer._pendingData)
+    && writeBuffer._pendingData > 0
+  ) {
+    return writeBuffer._pendingData;
+  }
+
+  const buffer = writeBuffer._writeBuffer;
+  if (!Array.isArray(buffer) || buffer.length === 0) return 0;
+  const offset = typeof writeBuffer._bufferOffset === "number"
+    && Number.isFinite(writeBuffer._bufferOffset)
+    ? Math.max(0, writeBuffer._bufferOffset)
+    : 0;
+
+  let bytes = 0;
+  for (let index = Math.min(offset, buffer.length); index < buffer.length; index += 1) {
+    const chunk = buffer[index];
+    if (typeof chunk === "string") {
+      bytes += chunk.length;
+    } else if (chunk instanceof Uint8Array) {
+      bytes += chunk.byteLength;
+    }
+  }
+  return bytes;
+}
+
+export function hasPendingTerminalWrites(term: XTerm): boolean {
+  return (
+    getTerminalWriteCoalescerPendingBytes(term) > 0
+    || hasPendingTerminalWriteQueueWork(term)
+    || getPendingTerminalWriteBufferBytes(term) > 0
+  );
+}
+
 export function forceTerminalRepaintBypassingAnimationFrame(term: XTerm): void {
   if (isTerminalAlternateScreenActive(term)) {
     refreshTerminalViewport(term);
@@ -123,6 +170,32 @@ export function flushPendingTerminalWritesOnResume(term: XTerm): void {
     }
     flushTerminalWriteBufferBypassingTimers(term);
   }
+}
+
+const waitForTerminalWriteCallbacks = (): Promise<void> =>
+  new Promise((resolve) => {
+    setTimeout(resolve, 0);
+  });
+
+export async function flushPendingTerminalWritesBeforeHibernate(term: XTerm): Promise<boolean> {
+  for (let pass = 0; pass < HIBERNATE_FLUSH_MAX_PASSES; pass += 1) {
+    flushTerminalWriteCoalescer(term);
+    flushTerminalWriteQueueBypassingTimers(term);
+    flushTerminalWriteBufferBypassingTimers(term);
+
+    if (!hasPendingTerminalWrites(term)) {
+      return true;
+    }
+
+    if ((pass + 1) % HIBERNATE_FLUSH_YIELD_EVERY_PASSES === 0) {
+      await waitForTerminalWriteCallbacks();
+    }
+  }
+
+  flushTerminalWriteCoalescer(term);
+  flushTerminalWriteQueueBypassingTimers(term);
+  flushTerminalWriteBufferBypassingTimers(term);
+  return !hasPendingTerminalWrites(term);
 }
 
 export function maybeFlushTerminalWriteCoalescerWhenUnfocused(

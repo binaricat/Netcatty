@@ -27,7 +27,9 @@ const createFakeTerm = (options: { cols?: number; wraparoundMode?: boolean } = {
     if (code === undefined) return 1;
     if (isCombiningMark(char)) return 0;
     if (
-      (code >= 0x1100 && code <= 0x115f)
+      code === 0x2329
+      || code === 0x232a
+      || (code >= 0x1100 && code <= 0x115f)
       || (code >= 0x2e80 && code <= 0x303e)
       || (code >= 0x3041 && code <= 0x33ff)
       || (code >= 0x3400 && code <= 0x4dbf)
@@ -35,6 +37,7 @@ const createFakeTerm = (options: { cols?: number; wraparoundMode?: boolean } = {
       || (code >= 0xac00 && code <= 0xd7a3)
       || (code >= 0xf900 && code <= 0xfaff)
       || (code >= 0xff00 && code <= 0xff60)
+      || (code >= 0x1f000 && code <= 0x1f02f)
       || (code >= 0x1f300 && code <= 0x1faff)
     ) {
       return 2;
@@ -65,7 +68,18 @@ const createFakeTerm = (options: { cols?: number; wraparoundMode?: boolean } = {
       cursorLine += count;
     }
   };
+  const unicodeService = {
+    wcwidth(codePoint: number) {
+      if (this !== unicodeService) {
+        throw new Error("wcwidth must be called with its unicode service receiver");
+      }
+      return cellWidth(String.fromCodePoint(codePoint));
+    },
+  };
   const term = {
+    _core: {
+      unicodeService,
+    },
     buffer: {
       active: { type: "normal", viewportY: 0 },
     },
@@ -379,13 +393,21 @@ test("accounts for tab stops without soft wrapping timestamp markers", () => {
   assert.deepEqual(markerLines, Array.from({ length: 80 }, (_, index) => index));
 });
 
-test("keeps batched timestamp markers aligned for combining characters", () => {
+test("falls back from batched timestamp markers for combining characters", () => {
   const { term, writes, markerLines } = createFakeTerm({ cols: 5 });
+  const steps: string[] = [];
   const lines = Array.from({ length: 80 }, () => "e\u0301e\u0301e\u0301").join("\r\n");
 
-  writeTerminalDataWithLineTimestamps(term as never, lines, () => {});
+  writeTerminalDataWithLineTimestamps(
+    term as never,
+    lines,
+    () => {},
+    { onStep: (step) => steps.push(step.kind) },
+  );
 
-  assert.deepEqual(writes, [lines]);
+  assert.equal(writes.join(""), lines);
+  assert.equal(steps.includes("batched-write"), false);
+  assert.equal(steps.includes("segmented-write"), true);
   assert.deepEqual(markerLines, Array.from({ length: 80 }, (_, index) => index));
 });
 
@@ -399,7 +421,24 @@ test("accounts for wide character soft wraps when batching timestamp markers", (
   assert.deepEqual(markerLines, Array.from({ length: 80 }, (_, index) => index * 2));
 });
 
-test("accounts for non-Latin combining marks when batching timestamp markers", () => {
+test("uses xterm unicode widths for less common wide characters", () => {
+  const { term, writes, markerLines } = createFakeTerm({ cols: 5 });
+  const steps: string[] = [];
+  const lines = Array.from({ length: 80 }, () => "🀄〈🀄").join("\r\n");
+
+  writeTerminalDataWithLineTimestamps(
+    term as never,
+    lines,
+    () => {},
+    { onStep: (step) => steps.push(step.kind) },
+  );
+
+  assert.deepEqual(writes, [lines]);
+  assert.equal(steps.includes("batched-write"), true);
+  assert.deepEqual(markerLines, Array.from({ length: 80 }, (_, index) => index * 2));
+});
+
+test("falls back from batched timestamp markers for non-Latin combining marks", () => {
   const { term, writes, markerLines } = createFakeTerm({ cols: 5 });
   const steps: string[] = [];
   const lines = Array.from({ length: 80 }, () => "س\u0651س\u0651س\u0651").join("\r\n");
@@ -411,9 +450,28 @@ test("accounts for non-Latin combining marks when batching timestamp markers", (
     { onStep: (step) => steps.push(step.kind) },
   );
 
-  assert.deepEqual(writes, [lines]);
-  assert.equal(steps.includes("batched-write"), true);
+  assert.equal(writes.join(""), lines);
+  assert.equal(steps.includes("batched-write"), false);
+  assert.equal(steps.includes("segmented-write"), true);
   assert.deepEqual(markerLines, Array.from({ length: 80 }, (_, index) => index));
+});
+
+test("falls back from batched timestamp markers for Hangul jamo joins", () => {
+  const { term, writes, markerLines } = createFakeTerm({ cols: 5 });
+  const steps: string[] = [];
+  const lines = Array.from({ length: 80 }, () => "\u1100\u1161\u1100\u1161").join("\r\n");
+
+  writeTerminalDataWithLineTimestamps(
+    term as never,
+    lines,
+    () => {},
+    { onStep: (step) => steps.push(step.kind) },
+  );
+
+  assert.equal(writes.join(""), lines);
+  assert.equal(steps.includes("batched-write"), false);
+  assert.equal(steps.includes("segmented-write"), true);
+  assert.deepEqual(markerLines, Array.from({ length: 80 }, (_, index) => index * 2));
 });
 
 test("falls back from batched timestamp markers for zero-width format characters", () => {

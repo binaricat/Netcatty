@@ -237,13 +237,13 @@ export const flushTerminalWriteCoalescer = (
   }
   coalescer.flushSync((batch) => {
     const batchIngress = takePendingIngressBytes(term, batch.length);
-    takePendingChunkCount(term);
+    const chunkCount = takePendingChunkCount(term);
     writeLargeTerminalBatch(
       batch,
       batchIngress,
       resolveTerminalWriteBatchBytes(batch, resolveCoalescerByteCap(term)),
       writeNow,
-      { preservePerfTrace: false },
+      chunkCount === 1 ? {} : { preservePerfTrace: false },
     );
   });
 };

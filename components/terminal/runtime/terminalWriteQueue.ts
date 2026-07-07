@@ -269,6 +269,20 @@ export const setTerminalWriteQueueDropHandler = (
 export const getTerminalWriteQueueDepth = (term: XTerm): number =>
   terminalWriteQueues.get(term)?.pending.length ?? 0;
 
+export const hasPendingTerminalWriteQueueWork = (term: XTerm): boolean => {
+  const queue = terminalWriteQueues.get(term);
+  if (!queue) return false;
+  return (
+    queue.writing
+    || queue.active !== undefined
+    || queue.pending.length > 0
+    || queue.pendingBytes > 0
+    || queue.drainTimer !== undefined
+    || queue.stepTimer !== undefined
+    || queue.stepContinuation !== undefined
+  );
+};
+
 export const isTerminalWriteQueueInFloodMode = (term: XTerm): boolean =>
   terminalWriteQueues.get(term)?.floodMode ?? false;
 

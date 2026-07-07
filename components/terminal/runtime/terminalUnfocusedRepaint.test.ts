@@ -1,11 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
+import type { Terminal as XTerm } from "@xterm/xterm";
 
 import {
   cancelScheduledUnfocusedRepaint,
+  flushPendingTerminalWritesBeforeHibernate,
   flushTerminalWriteBufferBypassingTimers,
   forceTerminalRepaintBypassingAnimationFrame,
+  hasPendingTerminalWrites,
   scheduleTerminalRepaintWhenUnfocused,
   shouldFlushTerminalWritesForBackgroundOutput,
 } from "./terminalUnfocusedRepaint.ts";
@@ -58,6 +61,41 @@ const withDocumentVisibilityAsync = async (
       Reflect.deleteProperty(globalThis, "document");
     }
   }
+};
+
+const createBufferedFakeTerm = () => {
+  const writes: string[] = [];
+  const writeBuffer = {
+    _bufferOffset: 0,
+    _callbacks: [] as Array<(() => void) | undefined>,
+    _pendingData: 0,
+    _writeBuffer: [] as string[],
+    flushSync() {
+      const offset = Math.min(this._bufferOffset, this._writeBuffer.length);
+      const chunks = this._writeBuffer.slice(offset);
+      const callbacks = this._callbacks.slice(offset);
+      this._bufferOffset = 0;
+      this._callbacks = [];
+      this._pendingData = 0;
+      this._writeBuffer = [];
+      for (let index = 0; index < chunks.length; index += 1) {
+        writes.push(chunks[index]!);
+        callbacks[index]?.();
+      }
+    },
+  };
+  const term = {
+    buffer: { active: { type: "normal" } },
+    _core: { _writeBuffer: writeBuffer },
+    write(data: string, callback?: () => void) {
+      writeBuffer._writeBuffer.push(data);
+      writeBuffer._callbacks.push(callback);
+      writeBuffer._pendingData += data.length;
+    },
+    scrollToBottom() {},
+  } as unknown as XTerm;
+
+  return { term, writes };
 };
 
 test("isTerminalWindowUnfocusedButVisible checks visible page without focus", () => {
@@ -170,6 +208,22 @@ test("flushPendingTerminalWritesOnResume drains coalescer, queue, and xterm writ
   assert.match(source, /flushTerminalWriteCoalescer\(term\)/);
   assert.match(source, /flushTerminalWriteQueueBypassingTimers\(term\)/);
   assert.match(source, /flushTerminalWriteBufferBypassingTimers\(term\)/);
+});
+
+test("flushPendingTerminalWritesBeforeHibernate drains pending xterm output completely", async () => {
+  const { term, writes } = createBufferedFakeTerm();
+  const payload = "x".repeat(300000);
+
+  term.write(payload);
+
+  assert.equal(writes.join("").length, 0);
+  assert.equal(hasPendingTerminalWrites(term), true);
+
+  const flushed = await flushPendingTerminalWritesBeforeHibernate(term);
+
+  assert.equal(flushed, true);
+  assert.equal(writes.join(""), payload);
+  assert.equal(hasPendingTerminalWrites(term), false);
 });
 
 test("maybeFlushTerminalWriteCoalescerWhenUnfocused throttles coalescer flushes", () => {

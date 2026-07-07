@@ -155,6 +155,7 @@ import {
   flushTerminalSessionFlowAck,
 } from "./terminal/runtime/terminalFlowAckBuffer";
 import { releaseTerminalFlowBeforeHibernate } from "./terminal/runtime/terminalSessionAttachment";
+import { flushPendingTerminalWritesBeforeHibernate } from "./terminal/runtime/terminalUnfocusedRepaint";
 import {
   isTerminalFileTransferActive,
   resolveHibernateKeepRendererCount,
@@ -186,6 +187,8 @@ import {
   type TerminalProps,
 } from "./terminal/terminalHelpers";
 import { terminalPropsAreEqual } from "./terminal/terminalMemo";
+
+const HIBERNATE_RETRY_AFTER_DRAIN_MS = 250;
 
 const TerminalComponent: React.FC<TerminalProps> = ({
   host,
@@ -358,6 +361,8 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   const hibernateContextScrollbackSnapshotRef = useRef("");
   const hibernatePendingBufferRef = useRef("");
   const hibernateAlternateScreenRef = useRef(false);
+  const hibernateRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const fullHibernateRuntimeRef = useRef<(() => Promise<void>) | null>(null);
   const wakeInProgressRef = useRef(false);
   const sessionRef = useRef<string | null>(null);
   const isBootActiveRef = useRef(false);
@@ -389,6 +394,9 @@ const TerminalComponent: React.FC<TerminalProps> = ({
 
   const terminalSettingsRef = useRef(terminalSettings);
   terminalSettingsRef.current = terminalSettings;
+  const isSearchOpenRef = useRef(isSearchOpen);
+  isSearchOpenRef.current = isSearchOpen;
+  const hibernateFileTransferActiveRef = useRef(false);
   const handleUpdateHostFromTerminal = useCallback((hostUpdate: TerminalHostUpdate) => {
     onUpdateHost?.(hostUpdate as Host);
   }, [onUpdateHost]);
@@ -1245,6 +1253,32 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     });
   }, [onSessionExit, scheduleAutoReconnect, sessionId, terminalBackend]);
 
+  const clearHibernateRetry = useCallback(() => {
+    if (hibernateRetryTimerRef.current === null) return;
+    clearTimeout(hibernateRetryTimerRef.current);
+    hibernateRetryTimerRef.current = null;
+  }, []);
+
+  const scheduleHibernateRetry = useCallback(() => {
+    if (hibernateRetryTimerRef.current !== null) return;
+    hibernateRetryTimerRef.current = setTimeout(() => {
+      hibernateRetryTimerRef.current = null;
+      if (
+        isVisibleRef.current
+        || hibernatedRef.current
+        || softHiddenRef.current
+        || !hasRuntimeRef.current
+        || statusRef.current !== "connected"
+        || isSearchOpenRef.current
+        || hibernateFileTransferActiveRef.current
+        || !resolveTerminalHibernateEnabled(terminalSettingsRef.current)
+      ) {
+        return;
+      }
+      void fullHibernateRuntimeRef.current?.();
+    }, HIBERNATE_RETRY_AFTER_DRAIN_MS);
+  }, []);
+
   const applyHibernateSnapshot = useCallback((
     snapshot: {
       snapshot: string;
@@ -1265,16 +1299,47 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     hibernateAlternateScreenRef.current = snapshot.alternateScreen;
   }, []);
 
+  const shouldSkipHibernateForActiveAlternateScreen = useCallback((term: XTerm): boolean => {
+    if (
+      !isTerminalAlternateScreenActive(term)
+      || !resolveHibernateSkipAltScreen(terminalSettings)
+    ) {
+      return false;
+    }
+    logger.info("[Terminal] Skipping hibernate: alternate screen active", { sessionId });
+    return true;
+  }, [sessionId, terminalSettings]);
+
   const fullHibernateRuntime = useCallback(async () => {
     if (hibernatedRef.current || softHiddenRef.current || !termRef.current || !serializeAddonRef.current) return;
+    clearHibernateRetry();
     const backendId = sessionRef.current;
     if (!backendId) return;
+    const term = termRef.current;
 
     terminalHiddenRendererStore.clearSoftHidden(sessionId);
     softHiddenRef.current = false;
+    const flushedBeforeHibernate = await flushPendingTerminalWritesBeforeHibernate(term);
+    if (!flushedBeforeHibernate) {
+      logger.info("[Terminal] Skipping hibernate: terminal output is still draining", { sessionId });
+      scheduleHibernateRetry();
+      return;
+    }
+    if (
+      isVisibleRef.current
+      || hibernatedRef.current
+      || termRef.current !== term
+      || sessionRef.current !== backendId
+      || !serializeAddonRef.current
+    ) {
+      return;
+    }
+    if (shouldSkipHibernateForActiveAlternateScreen(term)) {
+      return;
+    }
 
     const snapshot = await serializeTerminalForHibernate(
-      termRef.current,
+      term,
       serializeAddonRef.current,
       { preferWasm: resolveHibernatePreferWasmSerialize(terminalSettings) },
     );
@@ -1286,9 +1351,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
 
     applyHibernateSnapshot(snapshot);
     isBootActiveRef.current = false;
-    if (termRef.current) {
-      releaseTerminalFlowBeforeHibernate(terminalBackend, termRef.current, backendId);
-    }
+    releaseTerminalFlowBeforeHibernate(terminalBackend, term, backendId);
     disposeDataRef.current?.();
     disposeDataRef.current = null;
     disposeExitRef.current?.();
@@ -1306,10 +1369,14 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   }, [
     applyHibernateSnapshot,
     beginHibernatedSessionListeners,
+    clearHibernateRetry,
+    scheduleHibernateRetry,
     sessionId,
+    shouldSkipHibernateForActiveAlternateScreen,
     terminalBackend,
     terminalSettings,
   ]);
+  fullHibernateRuntimeRef.current = fullHibernateRuntime;
 
   const hideRuntimeOnly = useCallback(() => {
     if (hibernatedRef.current || softHiddenRef.current || !hasRuntimeRef.current) return;
@@ -1322,11 +1389,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   const hibernateRuntime = useCallback(() => {
     if (hibernatedRef.current || softHiddenRef.current || !termRef.current) return;
 
-    if (
-      isTerminalAlternateScreenActive(termRef.current)
-      && resolveHibernateSkipAltScreen(terminalSettings)
-    ) {
-      logger.info("[Terminal] Skipping hibernate: alternate screen active", { sessionId });
+    if (shouldSkipHibernateForActiveAlternateScreen(termRef.current)) {
       return;
     }
 
@@ -1344,7 +1407,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     }
 
     void fullHibernateRuntime();
-  }, [fullHibernateRuntime, hideRuntimeOnly, sessionId, terminalSettings]);
+  }, [fullHibernateRuntime, hideRuntimeOnly, sessionId, shouldSkipHibernateForActiveAlternateScreen, terminalSettings]);
 
   const terminalRuntimeRefs = useMemo<TerminalRuntimeRefs>(() => ({
     xtermRuntimeRef,
@@ -1362,6 +1425,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     retryTokenRef.current = null;
     restoreCwdIntentRef.current = null;
     suppressHostStartupCommandRef.current = false;
+    clearHibernateRetry();
     clearAutoReconnect();
     cleanupSession();
     disposeRuntimeOnly();
@@ -2621,6 +2685,13 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     return true;
   };
 
+  const hibernateFileTransferActive = isTerminalFileTransferActive({
+    zmodemActive: zmodem.active,
+    ymodemInProgress,
+    isDraggingOver,
+  });
+  hibernateFileTransferActiveRef.current = hibernateFileTransferActive;
+
   useTerminalHibernateEffect({
     sessionId,
     isVisible,
@@ -2630,11 +2701,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     isSearchOpen,
     hibernateEnabled: resolveTerminalHibernateEnabled(terminalSettings),
     hibernateDelayMs: resolveTerminalHibernateDelayMs(terminalSettings),
-    fileTransferActive: isTerminalFileTransferActive({
-      zmodemActive: zmodem.active,
-      ymodemInProgress,
-      isDraggingOver,
-    }),
+    fileTransferActive: hibernateFileTransferActive,
     hibernatedRef,
     softHiddenRef,
     hibernatePendingBufferRef,

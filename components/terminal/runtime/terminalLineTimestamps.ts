@@ -35,6 +35,14 @@ type TimestampStore = {
   timestampOnlyPrefix: string;
 };
 
+type XTermWithUnicodeService = XTerm & {
+  _core?: {
+    unicodeService?: {
+      wcwidth?: (codePoint: number) => 0 | 1 | 2;
+    };
+  };
+};
+
 export type TerminalTimestampGutterEntry = {
   marker: { line: number; isDisposed?: boolean };
   label: string;
@@ -451,28 +459,6 @@ const getTerminalWraparoundMode = (term: XTerm): boolean => (
   ((term as XTerm & { modes?: { wraparoundMode?: boolean } }).modes?.wraparoundMode) !== false
 );
 
-const unicodeMarkPattern = /\p{Mark}/u;
-
-const isCombiningCodePoint = (codePoint: number): boolean => (
-  unicodeMarkPattern.test(String.fromCodePoint(codePoint))
-);
-
-const isWideCodePoint = (codePoint: number): boolean => (
-  (codePoint >= 0x1100 && codePoint <= 0x115f)
-  || (codePoint >= 0x2e80 && codePoint <= 0x303e)
-  || (codePoint >= 0x3041 && codePoint <= 0x33ff)
-  || (codePoint >= 0x3400 && codePoint <= 0x4dbf)
-  || (codePoint >= 0x4e00 && codePoint <= 0x9fff)
-  || (codePoint >= 0xa000 && codePoint <= 0xa4cf)
-  || (codePoint >= 0xac00 && codePoint <= 0xd7a3)
-  || (codePoint >= 0xf900 && codePoint <= 0xfaff)
-  || (codePoint >= 0xfe30 && codePoint <= 0xfe4f)
-  || (codePoint >= 0xff00 && codePoint <= 0xff60)
-  || (codePoint >= 0xffe0 && codePoint <= 0xffe6)
-  || (codePoint >= 0x1f300 && codePoint <= 0x1faff)
-  || (codePoint >= 0x20000 && codePoint <= 0x3fffd)
-);
-
 const isUnsafeGraphemeSequenceCodePoint = (codePoint: number): boolean => (
   codePoint === 0x200d
   || codePoint === 0x20e3
@@ -491,12 +477,32 @@ const isUnsafeFormatCodePoint = (codePoint: number): boolean => (
   || (codePoint >= 0xfff9 && codePoint <= 0xfffb)
 );
 
-const getCodePointCellWidth = (codePoint: number): number => {
-  if (isCombiningCodePoint(codePoint)) return 0;
-  return isWideCodePoint(codePoint) ? 2 : 1;
+const unicodeMarkPattern = /\p{Mark}/u;
+
+const isHangulJamoCodePoint = (codePoint: number): boolean => (
+  (codePoint >= 0x1100 && codePoint <= 0x11ff)
+  || (codePoint >= 0xa960 && codePoint <= 0xa97f)
+  || (codePoint >= 0xd7b0 && codePoint <= 0xd7ff)
+);
+
+const isContextSensitiveGraphemeCodePoint = (codePoint: number): boolean => (
+  unicodeMarkPattern.test(String.fromCodePoint(codePoint))
+  || isHangulJamoCodePoint(codePoint)
+);
+
+const getCodePointCellWidth = (term: XTerm, codePoint: number): 0 | 1 | 2 | null => {
+  if (codePoint < 0x80) return 1;
+  const unicodeService = (term as XTermWithUnicodeService)._core?.unicodeService;
+  if (typeof unicodeService?.wcwidth !== "function") return null;
+  try {
+    const width = unicodeService.wcwidth(codePoint);
+    return width === 0 || width === 1 || width === 2 ? width : null;
+  } catch {
+    return null;
+  }
 };
 
-const canMeasureVisualRows = (data: string): boolean => {
+const canMeasureVisualRows = (term: XTerm, data: string): boolean => {
   for (let index = 0; index < data.length; index += 1) {
     const char = data[index];
     const codePoint = data.codePointAt(index);
@@ -518,7 +524,11 @@ const canMeasureVisualRows = (data: string): boolean => {
       || (codePoint >= 0x80 && codePoint <= 0x9f)
       || isUnsafeGraphemeSequenceCodePoint(codePoint)
       || isUnsafeFormatCodePoint(codePoint)
+      || isContextSensitiveGraphemeCodePoint(codePoint)
     ) {
+      return false;
+    }
+    if (getCodePointCellWidth(term, codePoint) === null) {
       return false;
     }
     if (codePoint > 0xffff) {
@@ -571,6 +581,7 @@ const advanceMeasuredTab = (
 };
 
 const measureTerminalRows = (
+  term: XTerm,
   data: string,
   startColumn: number,
   columns: number,
@@ -615,11 +626,15 @@ const measureTerminalRows = (
     if (codePoint === undefined) {
       continue;
     }
+    const width = getCodePointCellWidth(term, codePoint);
+    if (width === null) {
+      continue;
+    }
     ({ column, rowOffset } = advanceMeasuredColumns(
       column,
       rowOffset,
       columns,
-      getCodePointCellWidth(codePoint),
+      width,
       wraparoundMode,
     ));
     if (codePoint > 0xffff) {
@@ -651,8 +666,8 @@ const writeBatchedTimestampSegments = (
       timestamps.push({ label: segment.label, rowOffset });
       continue;
     }
-    const measured = canMeasureVisualRows(segment.data)
-      ? measureTerminalRows(segment.data, column, columns, wraparoundMode)
+    const measured = canMeasureVisualRows(term, segment.data)
+      ? measureTerminalRows(term, segment.data, column, columns, wraparoundMode)
       : { rowOffset: countLineFeeds(segment.data), column, wraparoundMode };
     rowOffset += measured.rowOffset;
     column = measured.column;
@@ -848,7 +863,7 @@ export const writeTerminalDataWithLineTimestamps = (
   if (
     timestampOnlyPrefix.length === 0
     && parsedData === dataForTimestamps
-    && canMeasureVisualRows(data)
+    && canMeasureVisualRows(term, data)
     && (
       dataSegmentCount > MAX_SEGMENTED_TIMESTAMP_WRITES
       || data.length >= BULK_TIMESTAMP_BATCH_MIN_BYTES
