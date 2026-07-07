@@ -28,6 +28,7 @@ declare global {
     onWindowCommandCloseRequested?(cb: () => void): () => void;
     onWindowFullScreenChanged?(cb: (isFullscreen: boolean) => void): () => void;
     onWindowShown?(cb: () => void): () => void;
+    onWindowFocusRequested?(cb: () => void): () => void;
     onWindowWillHide?(cb: () => void): () => void;
 
     // Settings window

@@ -43,6 +43,7 @@ test("main-window input focus recovery ignores generic focus and visible visibil
   let cancelFocusCalls = 0;
   let hiddenCalls = 0;
   let shownHandler: Listener | null = null;
+  let focusRequestedHandler: Listener | null = null;
   let willHideHandler: Listener | null = null;
 
   const documentTarget = createEventTargetStub();
@@ -62,6 +63,10 @@ test("main-window input focus recovery ignores generic focus and visible visibil
         onWindowShown(cb: Listener) {
           shownHandler = cb;
           return () => { shownHandler = null; };
+        },
+        onWindowFocusRequested(cb: Listener) {
+          focusRequestedHandler = cb;
+          return () => { focusRequestedHandler = null; };
         },
         onWindowWillHide(cb: Listener) {
           willHideHandler = cb;
@@ -85,6 +90,10 @@ test("main-window input focus recovery ignores generic focus and visible visibil
 
   shownHandler?.();
 
+  assert.equal(scheduleFocusCalls, 0);
+
+  focusRequestedHandler?.();
+
   assert.equal(scheduleFocusCalls, 1);
 
   willHideHandler?.();
@@ -93,6 +102,10 @@ test("main-window input focus recovery ignores generic focus and visible visibil
   assert.equal(cancelFocusCalls, 1);
 
   shownHandler?.();
+
+  assert.equal(scheduleFocusCalls, 1);
+
+  focusRequestedHandler?.();
 
   assert.equal(scheduleFocusCalls, 2);
 
@@ -105,11 +118,11 @@ test("main-window input focus recovery ignores generic focus and visible visibil
   cleanup();
 });
 
-test("main-window input focus recovery retries an explicit show when visibility catches up", () => {
+test("main-window input focus recovery retries an explicit foreground request when visibility catches up", () => {
   let visibilityState: DocumentVisibilityState = "hidden";
   let scheduleFocusCalls = 0;
   let hiddenCalls = 0;
-  let shownHandler: Listener | null = null;
+  let focusRequestedHandler: Listener | null = null;
 
   const documentTarget = createEventTargetStub();
 
@@ -123,9 +136,9 @@ test("main-window input focus recovery retries an explicit show when visibility 
         },
       },
       bridge: {
-        onWindowShown(cb: Listener) {
-          shownHandler = cb;
-          return () => { shownHandler = null; };
+        onWindowFocusRequested(cb: Listener) {
+          focusRequestedHandler = cb;
+          return () => { focusRequestedHandler = null; };
         },
       },
       scheduleFocus: () => {
@@ -135,7 +148,7 @@ test("main-window input focus recovery retries an explicit show when visibility 
     },
   );
 
-  shownHandler?.();
+  focusRequestedHandler?.();
 
   assert.equal(scheduleFocusCalls, 0);
 
@@ -152,12 +165,13 @@ test("main-window input focus recovery retries an explicit show when visibility 
   cleanup();
 });
 
-test("useMainWindowInputFocusRecovery restores input focus only after explicit window-shown IPC", () => {
+test("useMainWindowInputFocusRecovery restores input focus only after explicit foreground IPC", () => {
   const source = readProjectFile("application/state/useMainWindowInputFocusRecovery.ts");
 
   assert.match(source, /visibilityState !== "visible"/);
   assert.match(source, /scheduleFocus\(\)/);
-  assert.match(source, /onWindowShown\?\.\(\(\) => \{\s*pendingExplicitShowRecovery = true;\s*recoverFocus\(\);\s*\}\)/);
+  assert.match(source, /onWindowFocusRequested\?\.\(\(\) => \{\s*pendingExplicitFocusRecovery = true;\s*recoverFocus\(\);\s*\}\)/);
+  assert.doesNotMatch(source, /onWindowShown\?\.\(\(\) => \{[\s\S]*recoverFocus\(\)/);
   assert.doesNotMatch(source, /window\.addEventListener\("focus"/);
   assert.doesNotMatch(source, /window\.removeEventListener\("focus"/);
 });

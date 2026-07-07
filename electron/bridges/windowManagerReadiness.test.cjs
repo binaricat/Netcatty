@@ -11,6 +11,7 @@ const {
   resolveSettingsWindowBounds,
   restoreWindowInputFocus,
   showAndFocusMainWindow,
+  notifyWindowFocusRequested,
   notifyWindowWillHide,
   requestWindowCommandClose,
   sendWhenRendererReady,
@@ -209,6 +210,9 @@ test("restoreWindowInputFocus can show the window when requested", () => {
       focus() {
         calls.push("webContents.focus");
       },
+      send(channel) {
+        calls.push(`send:${channel}`);
+      },
     },
   };
 
@@ -243,13 +247,43 @@ test("showAndFocusMainWindow restores minimized windows before focusing", () => 
       focus() {
         calls.push("webContents.focus");
       },
+      send(channel) {
+        calls.push(`send:${channel}`);
+      },
     },
   };
 
   const restored = showAndFocusMainWindow(win);
 
   assert.equal(restored, true);
-  assert.deepEqual(calls, ["restore", "show", "focus", "webContents.focus"]);
+  assert.deepEqual(calls, [
+    "restore",
+    "show",
+    "focus",
+    "webContents.focus",
+    "send:netcatty:window:focus-requested",
+  ]);
+});
+
+test("notifyWindowFocusRequested sends only the explicit focus IPC", () => {
+  const sent = [];
+  const win = {
+    isDestroyed() {
+      return false;
+    },
+    webContents: {
+      isDestroyed() {
+        return false;
+      },
+      send(channel) {
+        sent.push(channel);
+      },
+    },
+  };
+
+  notifyWindowFocusRequested(win);
+
+  assert.deepEqual(sent, ["netcatty:window:focus-requested"]);
 });
 
 test("notifyWindowWillHide sends will-hide IPC before native hide", () => {

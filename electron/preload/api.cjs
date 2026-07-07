@@ -598,6 +598,10 @@ function createPreloadApi(ctx) {
     windowShownListeners.add(cb);
     return () => windowShownListeners.delete(cb);
   },
+  onWindowFocusRequested: (cb) => {
+    windowFocusRequestedListeners.add(cb);
+    return () => windowFocusRequestedListeners.delete(cb);
+  },
   onWindowWillHide: (cb) => {
     windowWillHideListeners.add(cb);
     return () => windowWillHideListeners.delete(cb);

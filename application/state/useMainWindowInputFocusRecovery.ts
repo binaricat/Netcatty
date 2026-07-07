@@ -26,6 +26,7 @@ type MainWindowInputFocusRecoveryWindow = {
 
 type MainWindowInputFocusRecoveryBridge = {
   onWindowShown?: (callback: Listener) => Listener;
+  onWindowFocusRequested?: (callback: Listener) => Listener;
   onWindowWillHide?: (callback: Listener) => Listener;
 };
 
@@ -53,7 +54,7 @@ export function startMainWindowInputFocusRecovery(
   } = dependencies;
 
   let pendingFocusRecovery: ScheduledWindowInputFocus | null = null;
-  let pendingExplicitShowRecovery = false;
+  let pendingExplicitFocusRecovery = false;
 
   const cancelPendingFocusRecovery = () => {
     pendingFocusRecovery?.cancel();
@@ -62,14 +63,14 @@ export function startMainWindowInputFocusRecovery(
 
   const recoverFocus = (): boolean => {
     if (documentRef.visibilityState !== "visible") return false;
-    pendingExplicitShowRecovery = false;
+    pendingExplicitFocusRecovery = false;
     cancelPendingFocusRecovery();
     pendingFocusRecovery = scheduleFocus();
     return true;
   };
 
   const dismissTransientUi = () => {
-    pendingExplicitShowRecovery = false;
+    pendingExplicitFocusRecovery = false;
     cancelPendingFocusRecovery();
     onPageHidden?.();
   };
@@ -79,15 +80,15 @@ export function startMainWindowInputFocusRecovery(
       dismissTransientUi();
       return;
     }
-    if (pendingExplicitShowRecovery) {
+    if (pendingExplicitFocusRecovery) {
       recoverFocus();
     }
   };
 
   documentRef.addEventListener("visibilitychange", onVisibilityChange);
 
-  const unsubscribeShown = bridge?.onWindowShown?.(() => {
-    pendingExplicitShowRecovery = true;
+  const unsubscribeFocusRequested = bridge?.onWindowFocusRequested?.(() => {
+    pendingExplicitFocusRecovery = true;
     recoverFocus();
   });
   const unsubscribeWillHide = bridge?.onWindowWillHide?.(() => {
@@ -95,16 +96,16 @@ export function startMainWindowInputFocusRecovery(
   });
 
   return () => {
-    pendingExplicitShowRecovery = false;
+    pendingExplicitFocusRecovery = false;
     cancelPendingFocusRecovery();
     documentRef.removeEventListener("visibilitychange", onVisibilityChange);
-    unsubscribeShown?.();
+    unsubscribeFocusRequested?.();
     unsubscribeWillHide?.();
   };
 }
 
 /**
- * Recover OS/renderer input focus when the main process explicitly shows the
+ * Recover OS/renderer input focus when the main process explicitly foregrounds the
  * main window (#760, #1714, #1722).
  */
 export function useMainWindowInputFocusRecovery(
