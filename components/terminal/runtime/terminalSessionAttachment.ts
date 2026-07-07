@@ -120,11 +120,11 @@ type TerminalSessionWriteOptions = CoalescedTerminalWriteOptions & {
   flushXtermWriteBuffer?: boolean;
 };
 
-const HIDDEN_PAGE_FLUSH_MAX_PASSES = 64;
+const BACKGROUND_OUTPUT_FLUSH_MAX_PASSES = 64;
 
-const flushTerminalWritesForHiddenPage = (term: XTerm): void => {
+const flushTerminalWritesForBackgroundOutput = (term: XTerm): void => {
   flushTerminalWriteBufferBypassingTimers(term);
-  for (let pass = 0; pass < HIDDEN_PAGE_FLUSH_MAX_PASSES; pass += 1) {
+  for (let pass = 0; pass < BACKGROUND_OUTPUT_FLUSH_MAX_PASSES; pass += 1) {
     if (!flushTerminalWriteQueueBypassingTimers(term)) {
       return;
     }
@@ -212,20 +212,20 @@ export const writeSessionData = (
   setTerminalOutputPressureVisibility(term, isPaneVisible);
   noteTerminalOutputPressureData(term, data);
   if (shouldFlushTerminalWritesForBackgroundOutput(isPaneVisible)) {
-    const writeHiddenPageData = (
+    const writeBackgroundOutputData = (
       batch: string,
       batchIngress: number,
     ): void => {
       writeSessionDataImmediate(ctx, term, batch, batchIngress, {
         flushXtermWriteBuffer: true,
       });
-      flushTerminalWritesForHiddenPage(term);
+      flushTerminalWritesForBackgroundOutput(term);
     };
-    flushTerminalWriteCoalescer(term, writeHiddenPageData);
-    flushTerminalWritesForHiddenPage(term);
-    enqueueCoalescedTerminalWrite(term, data, writeHiddenPageData, ingressBytes);
-    flushTerminalWriteCoalescer(term, writeHiddenPageData);
-    flushTerminalWritesForHiddenPage(term);
+    flushTerminalWriteCoalescer(term, writeBackgroundOutputData);
+    flushTerminalWritesForBackgroundOutput(term);
+    enqueueCoalescedTerminalWrite(term, data, writeBackgroundOutputData, ingressBytes);
+    flushTerminalWriteCoalescer(term, writeBackgroundOutputData);
+    flushTerminalWritesForBackgroundOutput(term);
     return;
   }
   enqueueCoalescedTerminalWrite(term, data, (batch, batchIngress, writeOptions) => {

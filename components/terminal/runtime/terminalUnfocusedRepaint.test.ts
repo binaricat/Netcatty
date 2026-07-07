@@ -180,8 +180,8 @@ test("writeSessionData bypasses animation-frame coalescing for background output
     "utf8",
   );
   assert.match(source, /shouldFlushTerminalWritesForBackgroundOutput\(isPaneVisible\)/);
-  assert.match(source, /flushTerminalWriteCoalescer\(term, writeHiddenPageData\)/);
-  assert.match(source, /enqueueCoalescedTerminalWrite\(term, data, writeHiddenPageData, ingressBytes\)/);
+  assert.match(source, /flushTerminalWriteCoalescer\(term, writeBackgroundOutputData\)/);
+  assert.match(source, /enqueueCoalescedTerminalWrite\(term, data, writeBackgroundOutputData, ingressBytes\)/);
   assert.match(source, /flushTerminalWriteQueueBypassingTimers\(term\)/);
   assert.match(source, /const deferFlowAck = !writeOptions\.flushXtermWriteBuffer/);
 });
