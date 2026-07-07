@@ -954,19 +954,19 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
           }
         }}
       >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{t("vault.groups.deleteDialogTitle")}</DialogTitle>
-            <DialogDescription>
+        <DialogContent className="max-w-[calc(100vw-2rem)] overflow-hidden sm:max-w-lg">
+          <DialogHeader className="min-w-0 pr-6">
+            <DialogTitle className="truncate">{t("vault.groups.deleteDialogTitle")}</DialogTitle>
+            <DialogDescription className="break-words [overflow-wrap:anywhere]">
               {deleteTargetPath && managedGroupPaths.has(deleteTargetPath)
                 ? t("vault.groups.deleteDialog.managedDesc")
                 : t("vault.groups.deleteDialog.desc")}
             </DialogDescription>
           </DialogHeader>
-          <div className="py-4 space-y-4">
+          <div className="min-w-0 space-y-4 py-4">
             {deleteTargetPath && (
               <>
-                <p className="text-sm text-muted-foreground">
+                <p className="min-w-0 break-words text-sm text-muted-foreground [overflow-wrap:anywhere]">
                   {t("vault.groups.pathLabel")}:{" "}
                   <span className="font-mono">{deleteTargetPath}</span>
                 </p>
