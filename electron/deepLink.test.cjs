@@ -66,6 +66,29 @@ test("applySshProtocolClientPreference registers or removes ssh and telnet handl
   ]);
 });
 
+test("applySshProtocolClientPreference keeps ssh successful when telnet registration fails", () => {
+  const calls = [];
+  const app = {
+    setAsDefaultProtocolClient: (protocol) => {
+      calls.push(["set", protocol]);
+      return protocol === "ssh";
+    },
+    removeAsDefaultProtocolClient: (protocol) => {
+      calls.push(["remove", protocol]);
+      return protocol === "ssh";
+    },
+  };
+
+  assert.equal(applySshProtocolClientPreference({ app, enabled: true, isDev: false }), true);
+  assert.equal(applySshProtocolClientPreference({ app, enabled: false, isDev: false }), true);
+  assert.deepEqual(calls, [
+    ["set", "ssh"],
+    ["set", "telnet"],
+    ["remove", "ssh"],
+    ["remove", "telnet"],
+  ]);
+});
+
 test("isTelnetDeepLinkUrl accepts only telnet URLs", () => {
   assert.equal(isTelnetDeepLinkUrl("telnet://example.com:2001"), true);
   assert.equal(isTelnetDeepLinkUrl("TELNET://example.com:2001"), true);

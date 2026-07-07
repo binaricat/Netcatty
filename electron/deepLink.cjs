@@ -229,13 +229,13 @@ function applySshProtocolClientPreference(options = {}) {
     removeClient: removeSshProtocolClient,
     options,
   });
-  const telnetApplied = applyDeepLinkProtocolClientPreference({
+  applyDeepLinkProtocolClientPreference({
     enabled: options.enabled,
     registerClient: registerTelnetProtocolClient,
     removeClient: removeTelnetProtocolClient,
     options,
   });
-  return sshApplied === true && telnetApplied === true;
+  return sshApplied === true;
 }
 
 function applyJmsProtocolClientPreference(options = {}) {
