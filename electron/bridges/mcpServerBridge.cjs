@@ -800,6 +800,7 @@ const {
 } = require("../capabilities/policy.cjs");
 const { CAPABILITY_SURFACES } = require("../capabilities/constants.cjs");
 const { getCapabilityByRpcMethod } = require("../capabilities/registry.cjs");
+const { listMcpTools } = require("../capabilities/codegen/toolSurfaces.cjs");
 const {
   createCapabilityRpcDispatcher,
   UNROUTED,
@@ -877,6 +878,39 @@ function buildHostFromMetadata(sessionId, meta) {
     hostId: meta.hostId || "",
     hostChain: Array.isArray(meta.hostChain) ? meta.hostChain : [],
     activePortForwards: Array.isArray(meta.activePortForwards) ? meta.activePortForwards : [],
+  };
+}
+
+function pickToolHints(toolMap, hints) {
+  return Object.fromEntries(
+    Object.entries(hints)
+      .map(([key, capabilityId]) => [key, toolMap.get(capabilityId)])
+      .filter(([, toolName]) => Boolean(toolName)),
+  );
+}
+
+function buildMcpToolHints() {
+  const toolMap = new Map(listMcpTools().map((tool) => [tool.capabilityId, tool.mcpTool]));
+
+  return {
+    environment: toolMap.get("session.environment"),
+    terminal: pickToolHints(toolMap, {
+      execute: "terminal.execute",
+      start: "terminal.start",
+      poll: "terminal.poll",
+      stop: "terminal.stop",
+    }),
+    attachments: pickToolHints(toolMap, {
+      list: "attachment.list",
+      read: "attachment.read",
+    }),
+    sftp: pickToolHints(toolMap, {
+      list: "sftp.list",
+      read: "sftp.read",
+      write: "sftp.write",
+      download: "sftp.download",
+      upload: "sftp.upload",
+    }),
   };
 }
 
@@ -1151,7 +1185,13 @@ async function dispatch(method, params) {
 
 async function handleGetContext(params) {
   debugLog("handleGetContext:start", { params, sessionCount: sessions?.size || 0 });
-  if (!sessions) return { hosts: [], instructions: "No sessions available." };
+  if (!sessions) {
+    return {
+      hosts: [],
+      instructions: "No sessions available.",
+      tools: buildMcpToolHints(),
+    };
+  }
 
   // chatSessionId may be passed via env for per-scope metadata lookup
   const chatSessionId = params?.chatSessionId || null;
@@ -1175,6 +1215,7 @@ async function handleGetContext(params) {
       description: "No hosts are available in the current scope.",
       hosts: [],
       hostCount: 0,
+      tools: buildMcpToolHints(),
     };
   }
   for (const [sessionId, session] of sessions.entries()) {
@@ -1228,6 +1269,7 @@ async function handleGetContext(params) {
       "You are operating inside Netcatty, a multi-session terminal manager. " +
       "The available sessions may be remote hosts, local terminals, Mosh-backed shells, or serial port connections (network devices, embedded systems). " +
       "Use the provided tools to execute commands through the sessions exposed by Netcatty. " +
+      "For terminal commands, use `terminal_execute` for short commands and `terminal_start`, `terminal_poll`, and `terminal_stop` for long-running commands. " +
       "Serial sessions (protocol: serial, shellType: raw) do not run a standard shell — commands are sent as-is. " +
       "Network device sessions (deviceType: network) use vendor CLIs (Huawei VRP, Cisco IOS, etc.) — commands are sent as-is without shell wrapping, and exit codes are unavailable. " +
       "Vault snippets, port forwarding rules/tunnels, and SFTP read/write tools are available when exposed in the tool list. " +
@@ -1236,6 +1278,7 @@ async function handleGetContext(params) {
     hosts,
     hostCount: hosts.length,
     activePortForwardTunnels,
+    tools: buildMcpToolHints(),
   };
 }
 

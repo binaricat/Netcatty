@@ -38,6 +38,9 @@ test("MCP/Catty capability context uses scoped metadata when terminal sessions l
   });
 
   assert.equal(result.hostCount, 1);
+  assert.equal(result.tools.terminal.execute, "terminal_execute");
+  assert.equal(result.tools.terminal.start, "terminal_start");
+  assert.match(result.description, /terminal_execute/);
   assert.deepEqual(result.hosts[0], {
     sessionId: "ssh-1",
     hostname: "host.example",
