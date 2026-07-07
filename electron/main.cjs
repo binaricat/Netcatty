@@ -65,6 +65,7 @@ const fs = require("node:fs");
 const { getCliDiscoveryFilePath } = require("./cli/discoveryPath.cjs");
 const {
   SSH_DEEP_LINK_CHANNEL,
+  TELNET_DEEP_LINK_CHANNEL,
   JMS_DEEP_LINK_CHANNEL,
   applyInitialJmsDeepLinkPreference,
   applyInitialSshDeepLinkPreference,
@@ -72,12 +73,15 @@ const {
   applySshProtocolClientPreference,
   collectJmsDeepLinkUrls,
   collectSshDeepLinkUrls,
+  collectTelnetDeepLinkUrls,
   isJmsDeepLinkUrl,
   isSshDeepLinkUrl,
+  isTelnetDeepLinkUrl,
   readJmsDeepLinkEnabledPreference,
   readSshDeepLinkEnabledPreference,
   shouldDeliverJmsDeepLink,
   shouldDeliverSshDeepLink,
+  shouldDeliverTelnetDeepLink,
   updateJmsDeepLinkEnabledPreference,
   updateSshDeepLinkEnabledPreference,
   writeJmsDeepLinkEnabledPreference,
@@ -539,8 +543,10 @@ async function createAndShowMainWindow() {
 
 let sshDeepLinkEnabled = readSshDeepLinkEnabledPreference({ app });
 const pendingSshDeepLinkUrls = sshDeepLinkEnabled ? collectSshDeepLinkUrls(process.argv) : [];
+const pendingTelnetDeepLinkUrls = sshDeepLinkEnabled ? collectTelnetDeepLinkUrls(process.argv) : [];
 const pendingOpenTerminalPaths = resolveOpenTerminalPathsFromArgs(process.argv);
 let flushingSshDeepLinks = false;
+let flushingTelnetDeepLinks = false;
 let flushingOpenTerminalPaths = false;
 let sshDeepLinkDeliveryGeneration = 0;
 
@@ -555,6 +561,15 @@ function queueSshDeepLink(rawUrl) {
   pendingSshDeepLinkUrls.push(rawUrl);
   if (app.isReady?.()) {
     void flushPendingSshDeepLinks();
+  }
+}
+
+function queueTelnetDeepLink(rawUrl) {
+  if (!sshDeepLinkEnabled) return;
+  if (!isTelnetDeepLinkUrl(rawUrl)) return;
+  pendingTelnetDeepLinkUrls.push(rawUrl);
+  if (app.isReady?.()) {
+    void flushPendingTelnetDeepLinks();
   }
 }
 
@@ -584,6 +599,7 @@ ipcMain?.handle?.("netcatty:deepLink:ssh:setEnabled", async (_event, payload) =>
     writePreference: (nextEnabled) => writeSshDeepLinkEnabledPreference({ app, enabled: nextEnabled }),
     clearPending: () => {
       pendingSshDeepLinkUrls.length = 0;
+      pendingTelnetDeepLinkUrls.length = 0;
       sshDeepLinkDeliveryGeneration += 1;
     },
   });
@@ -705,6 +721,39 @@ async function deliverSshDeepLink(rawUrl, expectedGeneration = sshDeepLinkDelive
   }
 }
 
+async function deliverTelnetDeepLink(rawUrl, expectedGeneration = sshDeepLinkDeliveryGeneration) {
+  if (!shouldDeliverTelnetDeepLink({
+    enabled: sshDeepLinkEnabled,
+    deliveryGeneration: sshDeepLinkDeliveryGeneration,
+    expectedGeneration,
+  })) return;
+  const win = await createAndShowMainWindow();
+  if (!shouldDeliverTelnetDeepLink({
+    enabled: sshDeepLinkEnabled,
+    deliveryGeneration: sshDeepLinkDeliveryGeneration,
+    expectedGeneration,
+  })) return;
+  focusMainWindow();
+  const windowManager = getWindowManager();
+  const result = await windowManager.sendWhenRendererReady?.(
+    win,
+    TELNET_DEEP_LINK_CHANNEL,
+    { url: rawUrl },
+    {
+      timeoutMs: isDev ? 30000 : 15000,
+      shouldSend: () => shouldDeliverTelnetDeepLink({
+        enabled: sshDeepLinkEnabled,
+        deliveryGeneration: sshDeepLinkDeliveryGeneration,
+        expectedGeneration,
+      }),
+      cancelReason: "telnet-deep-link-disabled",
+    },
+  );
+  if (result && result.success === false && result.reason !== "telnet-deep-link-disabled") {
+    console.warn("[Main] Failed to deliver telnet:// deep link:", result.error || result.reason);
+  }
+}
+
 async function flushPendingSshDeepLinks() {
   if (flushingSshDeepLinks) return;
   flushingSshDeepLinks = true;
@@ -720,6 +769,25 @@ async function flushPendingSshDeepLinks() {
     flushingSshDeepLinks = false;
     if (sshDeepLinkEnabled && pendingSshDeepLinkUrls.length > 0) {
       void flushPendingSshDeepLinks();
+    }
+  }
+}
+
+async function flushPendingTelnetDeepLinks() {
+  if (flushingTelnetDeepLinks) return;
+  flushingTelnetDeepLinks = true;
+  try {
+    while (sshDeepLinkEnabled && pendingTelnetDeepLinkUrls.length > 0) {
+      const rawUrl = pendingTelnetDeepLinkUrls.shift();
+      if (!rawUrl) continue;
+      await deliverTelnetDeepLink(rawUrl, sshDeepLinkDeliveryGeneration);
+    }
+  } catch (err) {
+    console.warn("[Main] Failed to process telnet:// deep link:", err);
+  } finally {
+    flushingTelnetDeepLinks = false;
+    if (sshDeepLinkEnabled && pendingTelnetDeepLinkUrls.length > 0) {
+      void flushPendingTelnetDeepLinks();
     }
   }
 }
@@ -796,6 +864,10 @@ if (!gotLock) {
       queueJmsDeepLink(rawUrl);
       return;
     }
+    if (isTelnetDeepLinkUrl(rawUrl)) {
+      queueTelnetDeepLink(rawUrl);
+      return;
+    }
     queueSshDeepLink(rawUrl);
   });
 
@@ -806,10 +878,17 @@ if (!gotLock) {
 
   app.on("second-instance", (_event, argv, workingDirectory) => {
     const jmsDeepLinkUrls = collectJmsDeepLinkUrls(argv);
+    const telnetDeepLinkUrls = collectTelnetDeepLinkUrls(argv);
     const sshDeepLinkUrls = collectSshDeepLinkUrls(argv);
     if (jmsDeepLinkUrls.length > 0) {
       if (jmsDeepLinkEnabled) {
         jmsDeepLinkUrls.forEach(queueJmsDeepLink);
+      }
+      return;
+    }
+    if (telnetDeepLinkUrls.length > 0) {
+      if (sshDeepLinkEnabled) {
+        telnetDeepLinkUrls.forEach(queueTelnetDeepLink);
       }
       return;
     }
@@ -845,6 +924,7 @@ if (!gotLock) {
       applyPreference: (enabled) => applySshProtocolClientPreference({ app, enabled, isDev }),
       clearPending: () => {
         pendingSshDeepLinkUrls.length = 0;
+        pendingTelnetDeepLinkUrls.length = 0;
         sshDeepLinkDeliveryGeneration += 1;
       },
     });
@@ -964,6 +1044,7 @@ if (!gotLock) {
     // Create the main window
     void createAndShowMainWindow().then(() => {
       void flushPendingSshDeepLinks();
+      void flushPendingTelnetDeepLinks();
       void flushPendingJmsDeepLinks();
       void flushPendingOpenTerminalPaths();
 

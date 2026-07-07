@@ -692,6 +692,11 @@ function createPreloadApi(ctx) {
     ipcRenderer.on("netcatty:deepLink:ssh", handler);
     return () => ipcRenderer.removeListener("netcatty:deepLink:ssh", handler);
   },
+  onTelnetDeepLink: (callback) => {
+    const handler = (_event, payload) => callback(payload);
+    ipcRenderer.on("netcatty:deepLink:telnet", handler);
+    return () => ipcRenderer.removeListener("netcatty:deepLink:telnet", handler);
+  },
   onOpenTerminalPath: (callback) => {
     const handler = (_event, payload) => callback(payload);
     ipcRenderer.on("netcatty:openTerminalPath", handler);
