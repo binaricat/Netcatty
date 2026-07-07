@@ -577,6 +577,7 @@ export const zhTWVaultMessages: Messages = {
   'cloudSync.s3.sessionToken': 'Session Token（可選）',
   'cloudSync.s3.prefix': 'Key 字首（可選）',
   'cloudSync.s3.forcePathStyle': '強制使用 path-style URL（適用於 MinIO/R2 等）',
+  'cloudSync.s3.allowInsecure': '允許不安全的連線（忽略憑證錯誤）',
   'cloudSync.s3.showSecret': '顯示金鑰',
   'cloudSync.s3.validation.required': '端點、Region、Bucket、Access Key 與 Secret 必填。',
   'cloudSync.smb.title': 'SMB 設定',

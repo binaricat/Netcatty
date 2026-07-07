@@ -68,6 +68,7 @@ export interface S3Config {
   sessionToken?: string;
   prefix?: string;
   forcePathStyle?: boolean;
+  allowInsecure?: boolean;
 }
 
 /**

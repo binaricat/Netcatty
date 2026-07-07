@@ -190,7 +190,7 @@ export class S3Adapter {
   }
 
   private createClient(config: S3Config): S3Client {
-    return new S3Client({
+    const clientConfig: ConstructorParameters<typeof S3Client>[0] = {
       region: config.region,
       endpoint: config.endpoint,
       forcePathStyle: config.forcePathStyle ?? true,
@@ -201,7 +201,17 @@ export class S3Adapter {
         secretAccessKey: config.secretAccessKey,
         sessionToken: config.sessionToken,
       },
-    });
+    };
+
+    if (config.allowInsecure && typeof globalThis.process !== 'undefined') {
+      const https = require('https');
+      const { NodeHttpHandler } = require('@smithy/node-http-handler');
+      clientConfig.requestHandler = new NodeHttpHandler({
+        httpsAgent: new https.Agent({ rejectUnauthorized: false }),
+      });
+    }
+
+    return new S3Client(clientConfig);
   }
 
   private isNotFound(error: unknown): boolean {

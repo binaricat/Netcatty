@@ -95,6 +95,8 @@ interface CloudSyncDialogsProps {
   setS3Prefix: StringSetter;
   s3ForcePathStyle: boolean;
   setS3ForcePathStyle: BooleanSetter;
+  s3AllowInsecure: boolean;
+  setS3AllowInsecure: BooleanSetter;
   showS3Secret: boolean;
   setShowS3Secret: BooleanSetter;
   s3Error: string | null;
@@ -199,6 +201,8 @@ export const CloudSyncDialogs: React.FC<CloudSyncDialogsProps> = ({
   setS3Prefix,
   s3ForcePathStyle,
   setS3ForcePathStyle,
+  s3AllowInsecure,
+  setS3AllowInsecure,
   showS3Secret,
   setShowS3Secret,
   s3Error,
@@ -568,6 +572,16 @@ export const CloudSyncDialogs: React.FC<CloudSyncDialogsProps> = ({
                                 className="accent-primary"
                             />
                             {t('cloudSync.s3.forcePathStyle')}
+                        </label>
+
+                        <label className="flex items-center gap-2 text-sm text-muted-foreground select-none">
+                            <input
+                                type="checkbox"
+                                checked={s3AllowInsecure}
+                                onChange={(e) => setS3AllowInsecure(e.target.checked)}
+                                className="accent-primary"
+                            />
+                            {t('cloudSync.s3.allowInsecure')}
                         </label>
 
                         <label className="flex items-center gap-2 text-sm text-muted-foreground select-none">

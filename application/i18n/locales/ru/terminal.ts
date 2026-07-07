@@ -316,6 +316,7 @@ export const ruTerminalMessages: Messages = {
   'cloudSync.s3.sessionToken': 'Токен сессии (необязательно)',
   'cloudSync.s3.prefix': 'Префикс ключа (необязательно)',
   'cloudSync.s3.forcePathStyle': 'Принудительно использовать path-style URL (для MinIO/R2 и т. д.)',
+  'cloudSync.s3.allowInsecure': 'Разрешить небезопасное соединение (игнорировать ошибки сертификата)',
   'cloudSync.s3.showSecret': 'Показать секреты',
   'cloudSync.s3.validation.required': 'Endpoint, регион, бакет, access key и secret обязательны.',
   'cloudSync.smb.title': 'Настройки SMB',

@@ -218,6 +218,7 @@ const SyncDashboard: React.FC<SyncDashboardProps> = ({
     const [s3SessionToken, setS3SessionToken] = useState('');
     const [s3Prefix, setS3Prefix] = useState('');
     const [s3ForcePathStyle, setS3ForcePathStyle] = useState(true);
+    const [s3AllowInsecure, setS3AllowInsecure] = useState(false);
     const [showS3Secret, setShowS3Secret] = useState(false);
     const [s3Error, setS3Error] = useState<string | null>(null);
     const [s3ErrorDetail, setS3ErrorDetail] = useState<string | null>(null);
@@ -417,6 +418,7 @@ const SyncDashboard: React.FC<SyncDashboardProps> = ({
         setS3SessionToken(config?.sessionToken || '');
         setS3Prefix(config?.prefix || '');
         setS3ForcePathStyle(config?.forcePathStyle ?? true);
+        setS3AllowInsecure(config?.allowInsecure || false);
         setShowS3Secret(false);
         setS3Error(null);
         setS3ErrorDetail(null);
@@ -489,6 +491,7 @@ const SyncDashboard: React.FC<SyncDashboardProps> = ({
             sessionToken: s3SessionToken.trim() ? s3SessionToken.trim() : undefined,
             prefix: s3Prefix.trim() ? s3Prefix.trim() : undefined,
             forcePathStyle: s3ForcePathStyle,
+            allowInsecure: s3AllowInsecure ? true : undefined,
         };
 
         setIsSavingS3(true);
@@ -508,6 +511,7 @@ const SyncDashboard: React.FC<SyncDashboardProps> = ({
                     region: s3Region.trim(),
                     bucket: s3Bucket.trim(),
                     forcePathStyle: s3ForcePathStyle,
+                    allowInsecure: s3AllowInsecure,
                 }),
             );
             toast.error(message, t('cloudSync.connect.s3.failedTitle'));
@@ -808,6 +812,8 @@ const SyncDashboard: React.FC<SyncDashboardProps> = ({
                 setS3Prefix={setS3Prefix}
                 s3ForcePathStyle={s3ForcePathStyle}
                 setS3ForcePathStyle={setS3ForcePathStyle}
+                s3AllowInsecure={s3AllowInsecure}
+                setS3AllowInsecure={setS3AllowInsecure}
                 showS3Secret={showS3Secret}
                 setShowS3Secret={setShowS3Secret}
                 s3Error={s3Error}

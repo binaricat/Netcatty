@@ -1,5 +1,6 @@
 const { createClient, AuthType } = require("webdav");
 const https = require("https");
+const { NodeHttpHandler } = require("@smithy/node-http-handler");
 const {
   S3Client,
   HeadObjectCommand,
@@ -93,8 +94,8 @@ const buildWebdavClient = (config) => {
 
 const getWebdavPath = () => ensureLeadingSlash(SYNC_FILE_NAME);
 
-const buildS3Client = (config) =>
-  new S3Client({
+const buildS3Client = (config) => {
+  const clientOptions = {
     region: config.region,
     endpoint: normalizeEndpoint(config.endpoint),
     forcePathStyle: config.forcePathStyle ?? true,
@@ -105,7 +106,16 @@ const buildS3Client = (config) =>
       secretAccessKey: config.secretAccessKey,
       sessionToken: config.sessionToken,
     },
-  });
+  };
+
+  if (config.allowInsecure) {
+    clientOptions.requestHandler = new NodeHttpHandler({
+      httpsAgent: new https.Agent({ rejectUnauthorized: false }),
+    });
+  }
+
+  return new S3Client(clientOptions);
+};
 
 const getS3ObjectKey = (config) => {
   const prefix = String(config.prefix || "").trim().replace(/^\/+|\/+$/g, "");
@@ -139,6 +149,7 @@ const wrapS3Error = (operation, error, config) => {
     region: config?.region,
     bucket: config?.bucket,
     forcePathStyle: config?.forcePathStyle ?? true,
+    allowInsecure: Boolean(config?.allowInsecure),
     code: error?.code || error?.name,
     status: error?.$metadata?.httpStatusCode,
   };
@@ -210,6 +221,7 @@ const handleS3Initialize = async (config) => {
         region: config.region,
         bucket: config.bucket,
         forcePathStyle: config.forcePathStyle ?? true,
+        allowInsecure: Boolean(config.allowInsecure),
         status: error?.$metadata?.httpStatusCode,
       });
     } else {
