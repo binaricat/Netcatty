@@ -394,8 +394,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
 
   const terminalSettingsRef = useRef(terminalSettings);
   terminalSettingsRef.current = terminalSettings;
-  const isSearchOpenRef = useRef(isSearchOpen);
-  isSearchOpenRef.current = isSearchOpen;
+  const isSearchOpenRef = useRef(false);
   const hibernateFileTransferActiveRef = useRef(false);
   const handleUpdateHostFromTerminal = useCallback((hostUpdate: TerminalHostUpdate) => {
     onUpdateHost?.(hostUpdate as Host);
@@ -657,6 +656,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     handleFindPrevious,
     handleCloseSearch,
   } = terminalSearch;
+  isSearchOpenRef.current = isSearchOpen;
 
   const prepareProgrammaticSudoInput = useCallback((data: string): string => {
     if (
