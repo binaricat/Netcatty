@@ -1,8 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import {
   decodeTerminalTextEscapes,
+  getShiftEnterSubmittedInput,
+  isShiftEnterLineContinuationText,
   resolveShiftEnterText,
   shouldSendShiftEnterText,
 } from "./shiftEnterText";
@@ -33,6 +36,31 @@ test("shift enter text can represent Tabby-style shell continuation", () => {
   assert.equal(decodeTerminalTextEscapes(" \\\\\\n"), " \\\n");
 });
 
+test("shift enter continuation detection only matches backslash-newline endings", () => {
+  assert.equal(isShiftEnterLineContinuationText(" \\\n"), true);
+  assert.equal(isShiftEnterLineContinuationText(" \\\r\n"), true);
+  assert.equal(isShiftEnterLineContinuationText(" \\\r"), true);
+  assert.equal(isShiftEnterLineContinuationText("foo\n"), false);
+  assert.equal(isShiftEnterLineContinuationText("\r\n"), false);
+});
+
+test("shift enter submitted input detects single command text with a line ending", () => {
+  assert.deepEqual(getShiftEnterSubmittedInput("\n"), {
+    text: "",
+    lineEnding: "\n",
+  });
+  assert.deepEqual(getShiftEnterSubmittedInput("\r\n"), {
+    text: "",
+    lineEnding: "\r\n",
+  });
+  assert.deepEqual(getShiftEnterSubmittedInput("sudo whoami\n"), {
+    text: "sudo whoami",
+    lineEnding: "\n",
+  });
+  assert.equal(getShiftEnterSubmittedInput(" \\\n"), null);
+  assert.equal(getShiftEnterSubmittedInput("foo\nbar\n"), null);
+});
+
 test("shift enter handler only matches plain Shift+Enter keydown", () => {
   assert.equal(shouldSendShiftEnterText(keyEvent()), true);
   assert.equal(shouldSendShiftEnterText(keyEvent({ type: "keyup" })), false);
@@ -49,4 +77,28 @@ test("shift enter handler respects the terminal setting toggle", () => {
     shouldSendShiftEnterText(keyEvent(), { shiftEnterNewlineEnabled: false }),
     false,
   );
+});
+
+test("runtime routes Shift+Enter text through the shared input handler", () => {
+  const source = readFileSync(
+    new URL("./createXTermRuntime.ts", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(
+    source,
+    /const handleTerminalInputData = \(\s+data: string,\s+options\?: \{ source\?: "terminal" \| "shift-enter" \},\s+\) => \{/s,
+  );
+  assert.match(
+    source,
+    /if \(textToSend\) \{\s+handleTerminalInputData\(textToSend, \{ source: "shift-enter" \}\);/s,
+  );
+  assert.match(source, /getShiftEnterSubmittedInput\(data\)/);
+  assert.match(source, /inputSource !== "shift-enter"/);
+  assert.match(
+    source,
+    /if \(shouldSendShiftEnterText\(e, ctx\.terminalSettingsRef\.current\)\) \{\s+sudoAutofill\.cancelHint\(\);/s,
+  );
+  assert.match(source, /term\.onData\(\(data\) => handleTerminalInputData\(data\)\);/);
+  assert.doesNotMatch(source, /writeToSession\(id, textToSend\)/);
 });

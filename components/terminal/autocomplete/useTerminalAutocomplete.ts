@@ -50,6 +50,8 @@ export interface AutocompleteSettings {
   maxSuggestions: number;
   /** Typing speed threshold — suppress suggestions when typing faster than this (ms between keystrokes) */
   fastTypingThresholdMs: number;
+  /** Whether Shift+Enter is reserved for the terminal's configured send text. */
+  shiftEnterNewlineEnabled: boolean;
 }
 
 export const DEFAULT_AUTOCOMPLETE_SETTINGS: AutocompleteSettings = {
@@ -62,6 +64,7 @@ export const DEFAULT_AUTOCOMPLETE_SETTINGS: AutocompleteSettings = {
   minChars: 1,
   maxSuggestions: 8,
   fastTypingThresholdMs: 40,
+  shiftEnterNewlineEnabled: true,
 };
 
 /**

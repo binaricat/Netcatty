@@ -683,6 +683,8 @@ test("buildSyncPayload includes syncable terminal options from settings", () => 
   localStorage.setItem(storageKeys.STORAGE_KEY_TERM_SETTINGS, JSON.stringify({
     terminalEmulationType: "vt100",
     altAsMeta: true,
+    shiftEnterNewlineEnabled: false,
+    shiftEnterNewlineText: " \\\\\\n",
     middleClickBehavior: "context-menu",
     fontSmoothing: false,
     showServerStats: false,
@@ -697,6 +699,8 @@ test("buildSyncPayload includes syncable terminal options from settings", () => 
   assert.deepEqual(payload.settings?.terminalSettings, {
     terminalEmulationType: "vt100",
     altAsMeta: true,
+    shiftEnterNewlineEnabled: false,
+    shiftEnterNewlineText: " \\\\\\n",
     middleClickBehavior: "context-menu",
     fontSmoothing: false,
     showServerStats: false,
@@ -981,6 +985,39 @@ test("applySyncPayload writes incoming fallbackFont into local TERM_SETTINGS", a
   assert.ok(raw, "TERM_SETTINGS should be written");
   const parsed = JSON.parse(raw!);
   assert.equal(parsed.fallbackFont, "Sarasa Mono SC");
+});
+
+test("applySyncPayload writes incoming Shift+Enter terminal settings", async () => {
+  localStorage.setItem(
+    storageKeys.STORAGE_KEY_TERM_SETTINGS,
+    JSON.stringify({ scrollback: 5000 }),
+  );
+
+  const payload: SyncPayload = {
+    hosts: [],
+    keys: [],
+    identities: [],
+    snippets: [],
+    customGroups: [],
+    syncedAt: 1,
+    settings: {
+      terminalSettings: {
+        shiftEnterNewlineEnabled: false,
+        shiftEnterNewlineText: " \\\\\\n",
+      },
+    },
+  };
+
+  await applySyncPayload(payload, {
+    importVaultData: () => {},
+  });
+
+  const raw = localStorage.getItem(storageKeys.STORAGE_KEY_TERM_SETTINGS);
+  assert.ok(raw, "TERM_SETTINGS should be written");
+  const parsed = JSON.parse(raw!);
+  assert.equal(parsed.scrollback, 5000);
+  assert.equal(parsed.shiftEnterNewlineEnabled, false);
+  assert.equal(parsed.shiftEnterNewlineText, " \\\\\\n");
 });
 
 test("applySyncPayload lets legacy middle-click paste update the new middle-click behavior", async () => {

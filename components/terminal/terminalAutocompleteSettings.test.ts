@@ -14,6 +14,7 @@ test("keeps autocomplete enabled for shell-like terminal protocols", () => {
         autocompleteDebounceMs: 120,
         autocompleteMinChars: 2,
         autocompleteMaxSuggestions: 6,
+        shiftEnterNewlineEnabled: false,
       },
     }),
     {
@@ -25,6 +26,7 @@ test("keeps autocomplete enabled for shell-like terminal protocols", () => {
       debounceMs: 120,
       minChars: 2,
       maxSuggestions: 6,
+      shiftEnterNewlineEnabled: false,
     },
   );
 });
@@ -51,6 +53,7 @@ test("keeps serial autocomplete available but disables input-line preview and re
       maxSuggestions: 8,
       livePreview: false,
       allowLineReplacement: false,
+      shiftEnterNewlineEnabled: true,
     },
   );
 });

@@ -7,6 +7,7 @@ type TerminalAutocompleteSettingFields = {
   autocompleteDebounceMs?: number;
   autocompleteMinChars?: number;
   autocompleteMaxSuggestions?: number;
+  shiftEnterNewlineEnabled?: boolean;
 };
 
 export function resolveTerminalAutocompleteSettings(input: {
@@ -25,6 +26,7 @@ export function resolveTerminalAutocompleteSettings(input: {
       debounceMs: terminalSettings?.autocompleteDebounceMs ?? 100,
       minChars: terminalSettings?.autocompleteMinChars ?? 1,
       maxSuggestions: terminalSettings?.autocompleteMaxSuggestions ?? 8,
+      shiftEnterNewlineEnabled: terminalSettings?.shiftEnterNewlineEnabled ?? true,
     };
   }
 
@@ -39,5 +41,6 @@ export function resolveTerminalAutocompleteSettings(input: {
     debounceMs: terminalSettings.autocompleteDebounceMs ?? 100,
     minChars: terminalSettings.autocompleteMinChars ?? 1,
     maxSuggestions: terminalSettings.autocompleteMaxSuggestions ?? 8,
+    shiftEnterNewlineEnabled: terminalSettings.shiftEnterNewlineEnabled ?? true,
   };
 }

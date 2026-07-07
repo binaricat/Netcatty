@@ -64,6 +64,7 @@ function createContext(overrides: Record<string, unknown> = {}) {
           maxSuggestions: 8,
           livePreview: false,
           allowLineReplacement: false,
+          shiftEnterNewlineEnabled: true,
         },
       },
       stateRef,
@@ -174,5 +175,30 @@ test("serial-style popup Shift+Enter is not treated as candidate confirmation", 
   assert.equal(result, true);
   assert.equal(event.defaultPrevented, false);
   assert.deepEqual(accepted, []);
+  assert.deepEqual(clears, []);
+});
+
+test("serial-style popup Shift+Enter confirms candidate when terminal shortcut is disabled", () => {
+  const { context, accepted, clears } = createContext({
+    stateRef: {
+      current: {
+        suggestions: [suggestion("show version")],
+        selectedIndex: 0,
+        popupVisible: true,
+        popupAnchorViewport: { left: 0, top: 0, bottom: 0 },
+        expandUpward: false,
+        subDirPanels: [],
+        subDirFocusLevel: -1,
+      },
+    },
+  });
+  context.settingsRef.current.shiftEnterNewlineEnabled = false;
+  const event = shiftKeyEvent("Enter");
+
+  const result = handleTerminalAutocompleteKeyEvent(event, context);
+
+  assert.equal(result, false);
+  assert.equal(event.defaultPrevented, true);
+  assert.deepEqual(accepted, [0]);
   assert.deepEqual(clears, []);
 });

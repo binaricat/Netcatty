@@ -23,6 +23,17 @@ interface TerminalAutocompleteKeyEventContext {
   acceptSnippet: (snippet: Snippet) => boolean;
 }
 
+const isAutocompleteConfirmEnter = (
+  e: KeyboardEvent,
+  settings: AutocompleteSettings,
+): boolean => (
+  e.key === "Enter" &&
+  !e.ctrlKey &&
+  !e.metaKey &&
+  !e.altKey &&
+  (!e.shiftKey || settings.shiftEnterNewlineEnabled === false)
+);
+
 export function handleTerminalAutocompleteKeyEvent(
   e: KeyboardEvent,
   context: TerminalAutocompleteKeyEventContext,
@@ -229,10 +240,7 @@ export function handleTerminalAutocompleteKeyEvent(
           return false;
         }
       }
-      if (
-        (e.key === "Enter" && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) ||
-        e.key === "Tab"
-      ) {
+      if (isAutocompleteConfirmEnter(e, settingsRef.current) || e.key === "Tab") {
         const entry = focusedPanel.entries[focusedPanel.selectedIndex];
         if (entry && focusedPanel.selectedIndex >= 0) {
           e.preventDefault();
@@ -292,7 +300,7 @@ export function handleTerminalAutocompleteKeyEvent(
     // lastAcceptedCommandRef (set on select) but falls back to the live
     // buffer when the user edited the previewed command (typing nulls that
     // ref), so recording stays accurate in both cases.
-    if (e.key === "Enter" && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
+    if (isAutocompleteConfirmEnter(e, settingsRef.current)) {
       const selected = s.selectedIndex >= 0 ? s.suggestions[s.selectedIndex] : null;
       if (selected?.source === "snippet" && selected.snippet) {
         if (!acceptSnippet(selected.snippet)) {

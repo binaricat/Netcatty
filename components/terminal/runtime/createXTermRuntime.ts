@@ -55,6 +55,7 @@ import {
 } from "./middleClickBehavior";
 import { handleSerialLineModeInput } from "./serialLineInput";
 import {
+  getShiftEnterSubmittedInput,
   resolveShiftEnterText,
   shouldSendShiftEnterText,
 } from "./shiftEnterText";
@@ -732,6 +733,166 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     hideHistoryPreview();
   });
 
+  const writeLocalTerminalData = (nextData: string) => {
+    ctx.onTerminalLogData?.(nextData);
+    term.write(nextData);
+  };
+
+  const handleTerminalInputData = (
+    data: string,
+    options?: { source?: "terminal" | "shift-enter" },
+  ) => {
+    const inputSource = options?.source ?? "terminal";
+    const id = ctx.sessionRef.current;
+    const dataToWrite = data;
+    let handledSubmittedInput = false;
+    const submittedInput: { text: string; lineEnding: "\r\n" | "\r" | "\n" } | null =
+      inputSource === "shift-enter"
+        ? getShiftEnterSubmittedInput(data)
+        : data === "\r" || data === "\n"
+          ? { text: "", lineEnding: data as "\r" | "\n" }
+          : null;
+    const onBroadcastInput = ctx.onBroadcastInputRef.current;
+    const broadcastDataBeforeSudo = (data === "\x7f" && ctx.host.backspaceBehavior === "ctrl-h") ? "\x08" : data;
+    const willBroadcastInput = !!id && shouldBroadcastTerminalUserInput(term, broadcastDataBeforeSudo, {
+      isBroadcastEnabled: ctx.isBroadcastEnabledRef.current,
+      hasBroadcastInputHandler: !!onBroadcastInput,
+    });
+    if (ctx.statusRef.current === "connected" && submittedInput) {
+      if (submittedInput.text) {
+        ctx.commandBufferRef.current += submittedInput.text;
+        ctx.scriptRecorderRef?.current?.recordInput(submittedInput.text);
+      }
+      if (ctx.scriptRecorderRef?.current?.isRecording) {
+        void ctx.scriptRecorderRef.current.recordEnter({
+          sensitive: ctx.passwordPromptActiveRef?.current,
+        });
+        if (ctx.passwordPromptActiveRef) {
+          ctx.passwordPromptActiveRef.current = false;
+        }
+      }
+      const recordedCommand = recordTerminalCommandExecution(ctx.commandBufferRef.current, ctx, term);
+      handledSubmittedInput = true;
+      if (!willBroadcastInput) {
+        prepareSudoAutofillInput(
+          submittedInput.lineEnding === "\r\n" ? "\n" : submittedInput.lineEnding,
+          recordedCommand,
+          ctx.sudoAutofillRef?.current,
+        );
+      }
+    } else if (
+      ctx.statusRef.current === "connected" &&
+      !willBroadcastInput &&
+      inputSource !== "shift-enter"
+    ) {
+      const pastedCommand = getSinglePastedCommand(data);
+      if (pastedCommand) {
+        const recordedCommand = recordTerminalCommandExecution(
+          `${ctx.commandBufferRef.current}${pastedCommand.command}`,
+          ctx,
+          term,
+        );
+        handledSubmittedInput = true;
+        if (recordedCommand) {
+          prepareSudoAutofillInput(
+            `${recordedCommand}${pastedCommand.lineEnding}`,
+            null,
+            ctx.sudoAutofillRef?.current,
+          );
+        }
+      }
+    }
+
+    if (id) {
+      prioritizeTerminalInput(
+        term,
+        id,
+        getFlowControllerForTerm(term),
+        ctx.terminalBackend,
+      );
+
+      // Serial line mode: buffer input and send on Enter
+      if (ctx.host.protocol === "serial" && ctx.serialLineMode && ctx.serialLineBufferRef) {
+        handleSerialLineModeInput(dataToWrite, {
+          bufferRef: ctx.serialLineBufferRef,
+          localEcho: ctx.serialLocalEcho,
+          writeToSession: (nextData) => {
+            ctx.onOutputTriggerUserInputRef?.current?.(nextData);
+            ctx.terminalBackend.writeToSession(id, nextData);
+          },
+          writeToTerminal: writeLocalTerminalData,
+        });
+      } else {
+        // Character mode (default): send immediately
+        // When backspaceBehavior is configured, remap the Backspace key output
+        let outData = dataToWrite;
+        if (dataToWrite === "\x7f" && ctx.host.backspaceBehavior === "ctrl-h") {
+          outData = "\x08";
+        }
+        ctx.onOutputTriggerUserInputRef?.current?.(outData);
+        ctx.terminalBackend.writeToSession(id, outData);
+
+        // Local echo for serial connections only when explicitly enabled
+        if (ctx.host.protocol === "serial" && ctx.serialLocalEcho) {
+          if (dataToWrite === "\r") {
+            writeLocalTerminalData("\r\n");
+          } else if (dataToWrite === "\x7f" || dataToWrite === "\b") {
+            writeLocalTerminalData("\b \b");
+          } else if (dataToWrite === "\x03") {
+            writeLocalTerminalData("^C");
+          } else if (dataToWrite.charCodeAt(0) >= 32 || dataToWrite.length > 1) {
+            writeLocalTerminalData(dataToWrite);
+          }
+        }
+        if (ctx.host.protocol === "telnet" && ctx.telnetLocalEchoRef?.current) {
+          const localEcho = formatTelnetLocalEcho(dataToWrite);
+          if (localEcho) writeLocalTerminalData(localEcho);
+        }
+      }
+
+      // Use remapped data so broadcast peers also receive the correct byte
+      const broadcastData = (dataToWrite === "\x7f" && ctx.host.backspaceBehavior === "ctrl-h") ? "\x08" : data;
+      if (willBroadcastInput) {
+        onBroadcastInput?.(broadcastData, ctx.sessionId);
+      }
+
+      if (!shouldSuppressTerminalInputScrollForUserPaste(term, data)) {
+        scrollToBottomAfterInput(data);
+      }
+
+      // Notify autocomplete of input
+      ctx.onAutocompleteInput?.(data);
+
+      if (ctx.statusRef.current === "connected") {
+        if (handledSubmittedInput || submittedInput) {
+          // Command recording and sudo command preparation happen before the
+          // input is written so sudo can receive a one-time prompt marker.
+        } else if (data === "\x7f" || data === "\b") {
+          ctx.commandBufferRef.current = ctx.commandBufferRef.current.slice(0, -1);
+          ctx.scriptRecorderRef?.current?.recordBackspace();
+        } else if (data === "\x03") {
+          ctx.commandBufferRef.current = "";
+          ctx.scriptRecorderRef?.current?.recordClearLine();
+        } else if (data === "\x15") {
+          ctx.commandBufferRef.current = "";
+          ctx.scriptRecorderRef?.current?.recordClearLine();
+        } else if (data.length === 1 && data.charCodeAt(0) >= 32) {
+          ctx.commandBufferRef.current += data;
+          ctx.scriptRecorderRef?.current?.recordInput(data);
+        } else if (data.length > 1 && !data.startsWith("\x1b")) {
+          ctx.commandBufferRef.current += data;
+          ctx.scriptRecorderRef?.current?.recordInput(data);
+        } else {
+          const pastedLine = getSingleBracketedPasteLine(data);
+          if (pastedLine) {
+            ctx.commandBufferRef.current += pastedLine;
+            ctx.scriptRecorderRef?.current?.recordInput(pastedLine);
+          }
+        }
+      }
+    }
+  };
+
   term.attachCustomKeyEventHandler((e: KeyboardEvent) => {
     // Preserve mouse selection across keystrokes when enabled. xterm.js
     // unconditionally clears the selection on user input
@@ -799,9 +960,11 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     // pastes the password instead of submitting an empty line.
     const sudoAutofill = ctx.sudoAutofillRef?.current;
     if (sudoAutofill?.isPromptPending()) {
-      if (
+      if (shouldSendShiftEnterText(e, ctx.terminalSettingsRef.current)) {
+        sudoAutofill.cancelHint();
+        // fall through: Shift+Enter sends the configured terminal text
+      } else if (
         e.key === "Enter" &&
-        !e.shiftKey &&
         !e.altKey &&
         !e.ctrlKey &&
         !e.metaKey
@@ -1003,17 +1166,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
         e.stopPropagation();
         const textToSend = resolveShiftEnterText(ctx.terminalSettingsRef.current);
         if (textToSend) {
-          ctx.onAutocompleteInput?.(textToSend);
-          ctx.onOutputTriggerUserInputRef?.current?.(textToSend);
-          ctx.terminalBackend.writeToSession(id, textToSend);
-          if (ctx.isBroadcastEnabledRef.current && ctx.onBroadcastInputRef.current) {
-            ctx.onBroadcastInputRef.current(textToSend, ctx.sessionId);
-          }
-          scrollToBottomAfterInput(textToSend);
-          if (!textToSend.startsWith("\x1b")) {
-            ctx.commandBufferRef.current += textToSend;
-            ctx.scriptRecorderRef?.current?.recordInput(textToSend);
-          }
+          handleTerminalInputData(textToSend, { source: "shift-enter" });
         }
         return false;
       }
@@ -1079,143 +1232,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
   fitAddon.fit();
   term.focus();
 
-  const writeLocalTerminalData = (nextData: string) => {
-    ctx.onTerminalLogData?.(nextData);
-    term.write(nextData);
-  };
-
-  term.onData((data) => {
-    const id = ctx.sessionRef.current;
-    let dataToWrite = data;
-    let handledSubmittedInput = false;
-    const onBroadcastInput = ctx.onBroadcastInputRef.current;
-    const broadcastDataBeforeSudo = (data === "\x7f" && ctx.host.backspaceBehavior === "ctrl-h") ? "\x08" : data;
-    const willBroadcastInput = !!id && shouldBroadcastTerminalUserInput(term, broadcastDataBeforeSudo, {
-      isBroadcastEnabled: ctx.isBroadcastEnabledRef.current,
-      hasBroadcastInputHandler: !!onBroadcastInput,
-    });
-    if (ctx.statusRef.current === "connected" && (data === "\r" || data === "\n")) {
-      if (ctx.scriptRecorderRef?.current?.isRecording) {
-        void ctx.scriptRecorderRef.current.recordEnter({
-          sensitive: ctx.passwordPromptActiveRef?.current,
-        });
-        if (ctx.passwordPromptActiveRef) {
-          ctx.passwordPromptActiveRef.current = false;
-        }
-      }
-      const recordedCommand = recordTerminalCommandExecution(ctx.commandBufferRef.current, ctx, term);
-      handledSubmittedInput = true;
-      if (!willBroadcastInput) {
-        prepareSudoAutofillInput(data, recordedCommand, ctx.sudoAutofillRef?.current);
-      }
-    } else if (ctx.statusRef.current === "connected" && !willBroadcastInput) {
-      const pastedCommand = getSinglePastedCommand(data);
-      if (pastedCommand) {
-        const recordedCommand = recordTerminalCommandExecution(
-          `${ctx.commandBufferRef.current}${pastedCommand.command}`,
-          ctx,
-          term,
-        );
-        handledSubmittedInput = true;
-        if (recordedCommand) {
-          prepareSudoAutofillInput(
-            `${recordedCommand}${pastedCommand.lineEnding}`,
-            null,
-            ctx.sudoAutofillRef?.current,
-          );
-        }
-      }
-    }
-
-    if (id) {
-      prioritizeTerminalInput(
-        term,
-        id,
-        getFlowControllerForTerm(term),
-        ctx.terminalBackend,
-      );
-
-      // Serial line mode: buffer input and send on Enter
-      if (ctx.host.protocol === "serial" && ctx.serialLineMode && ctx.serialLineBufferRef) {
-        handleSerialLineModeInput(dataToWrite, {
-          bufferRef: ctx.serialLineBufferRef,
-          localEcho: ctx.serialLocalEcho,
-          writeToSession: (nextData) => {
-            ctx.onOutputTriggerUserInputRef?.current?.(nextData);
-            ctx.terminalBackend.writeToSession(id, nextData);
-          },
-          writeToTerminal: writeLocalTerminalData,
-        });
-      } else {
-        // Character mode (default): send immediately
-        // When backspaceBehavior is configured, remap the Backspace key output
-        let outData = dataToWrite;
-        if (dataToWrite === "\x7f" && ctx.host.backspaceBehavior === "ctrl-h") {
-          outData = "\x08";
-        }
-        ctx.onOutputTriggerUserInputRef?.current?.(outData);
-        ctx.terminalBackend.writeToSession(id, outData);
-
-        // Local echo for serial connections only when explicitly enabled
-        if (ctx.host.protocol === "serial" && ctx.serialLocalEcho) {
-          if (dataToWrite === "\r") {
-            writeLocalTerminalData("\r\n");
-          } else if (dataToWrite === "\x7f" || dataToWrite === "\b") {
-            writeLocalTerminalData("\b \b");
-          } else if (dataToWrite === "\x03") {
-            writeLocalTerminalData("^C");
-          } else if (dataToWrite.charCodeAt(0) >= 32 || dataToWrite.length > 1) {
-            writeLocalTerminalData(dataToWrite);
-          }
-        }
-        if (ctx.host.protocol === "telnet" && ctx.telnetLocalEchoRef?.current) {
-          const localEcho = formatTelnetLocalEcho(dataToWrite);
-          if (localEcho) writeLocalTerminalData(localEcho);
-        }
-      }
-
-      // Use remapped data so broadcast peers also receive the correct byte
-      const broadcastData = (dataToWrite === "\x7f" && ctx.host.backspaceBehavior === "ctrl-h") ? "\x08" : data;
-      if (willBroadcastInput) {
-        onBroadcastInput?.(broadcastData, ctx.sessionId);
-      }
-
-      if (!shouldSuppressTerminalInputScrollForUserPaste(term, data)) {
-        scrollToBottomAfterInput(data);
-      }
-
-      // Notify autocomplete of input
-      ctx.onAutocompleteInput?.(data);
-
-      if (ctx.statusRef.current === "connected") {
-        if (handledSubmittedInput || data === "\r" || data === "\n") {
-          // Command recording and sudo command preparation happen before the
-          // input is written so sudo can receive a one-time prompt marker.
-        } else if (data === "\x7f" || data === "\b") {
-          ctx.commandBufferRef.current = ctx.commandBufferRef.current.slice(0, -1);
-          ctx.scriptRecorderRef?.current?.recordBackspace();
-        } else if (data === "\x03") {
-          ctx.commandBufferRef.current = "";
-          ctx.scriptRecorderRef?.current?.recordClearLine();
-        } else if (data === "\x15") {
-          ctx.commandBufferRef.current = "";
-          ctx.scriptRecorderRef?.current?.recordClearLine();
-        } else if (data.length === 1 && data.charCodeAt(0) >= 32) {
-          ctx.commandBufferRef.current += data;
-          ctx.scriptRecorderRef?.current?.recordInput(data);
-        } else if (data.length > 1 && !data.startsWith("\x1b")) {
-          ctx.commandBufferRef.current += data;
-          ctx.scriptRecorderRef?.current?.recordInput(data);
-        } else {
-          const pastedLine = getSingleBracketedPasteLine(data);
-          if (pastedLine) {
-            ctx.commandBufferRef.current += pastedLine;
-            ctx.scriptRecorderRef?.current?.recordInput(pastedLine);
-          }
-        }
-      }
-    }
-  });
+  term.onData((data) => handleTerminalInputData(data));
 
   // Track current working directory via OSC 7 escape sequences
   // OSC 7 format: \x1b]7;file://hostname/path\x07 or \x1b]7;file://hostname/path\x1b\\

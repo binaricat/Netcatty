@@ -70,3 +70,24 @@ export function resolveShiftEnterText(
     typeof configured === "string" ? configured : DEFAULT_SHIFT_ENTER_TEXT,
   );
 }
+
+export function isShiftEnterLineContinuationText(text: string): boolean {
+  return /\\(?:\r\n|\r|\n)$/.test(text);
+}
+
+export type ShiftEnterSubmittedInput = {
+  text: string;
+  lineEnding: "\r\n" | "\r" | "\n";
+};
+
+export function getShiftEnterSubmittedInput(
+  text: string,
+): ShiftEnterSubmittedInput | null {
+  if (isShiftEnterLineContinuationText(text)) return null;
+  const match = text.match(/^([^\r\n]*)(\r\n|\r|\n)$/);
+  if (!match) return null;
+  return {
+    text: match[1],
+    lineEnding: match[2] as ShiftEnterSubmittedInput["lineEnding"],
+  };
+}
