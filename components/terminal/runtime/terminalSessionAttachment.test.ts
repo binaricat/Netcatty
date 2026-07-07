@@ -277,7 +277,7 @@ test("writeSessionData flushes xterm writes while the window is unfocused but vi
   clearTerminalSessionFlowAck("session-1");
 });
 
-test("writeSessionData flushes pending coalesced output with the hidden-page fast path", () => {
+test("writeSessionData flushes pending coalesced output with the background fast path", () => {
   clearTerminalSessionFlowAck("session-1");
   const pendingPayload = `${Array.from({ length: 20 }, () => "x".repeat(1000)).join("\n")}\n`;
   assert.ok(pendingPayload.length > MAX_TERMINAL_PLAIN_WRITE_CHUNK_BYTES);
@@ -341,6 +341,46 @@ test("writeSessionData flushes pending coalesced output with the hidden-page fas
     acked.reduce((total, bytes) => total + bytes, 0),
     pendingPayload.length + currentPayload.length,
   );
+  clearTerminalSessionFlowAck("session-1");
+});
+
+test("hidden tab output is written completely while the tab remains hidden", () => {
+  clearTerminalSessionFlowAck("session-1");
+  const payload = Array.from(
+    { length: 1_200 },
+    (_entry, index) => `${String(index + 1).padStart(5)}  echo history-${index + 1}\r\n`,
+  ).join("");
+  assert.ok(payload.length > MAX_TERMINAL_PLAIN_WRITE_CHUNK_BYTES);
+  const writes: string[] = [];
+  const term = {
+    buffer: { active: { type: "normal" } },
+    _core: { _writeBuffer: { flushSync() {} } },
+    write(data: string, callback?: () => void) {
+      writes.push(data);
+      callback?.();
+    },
+    scrollToBottom() {},
+  } as unknown as XTerm;
+  const acked: number[] = [];
+  const ctx = {
+    ...createContext(false),
+    isVisibleRef: { current: false },
+    sessionRef: { current: "session-1" },
+    terminalBackend: {
+      ackSessionFlow: (_sessionId: string, bytes: number) => {
+        acked.push(bytes);
+      },
+    },
+  };
+
+  withAnimationFrameQueue(() => {
+    writeSessionData(ctx as never, term, payload);
+  });
+  flushTerminalSessionFlowAck("session-1");
+
+  assert.equal(writes.join(""), payload);
+  assert.equal(getFlowController(ctx as never, term).pendingBytes(), 0);
+  assert.equal(acked.reduce((total, bytes) => total + bytes, 0), payload.length);
   clearTerminalSessionFlowAck("session-1");
 });
 

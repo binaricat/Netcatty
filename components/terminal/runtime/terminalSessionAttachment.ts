@@ -68,7 +68,7 @@ import {
   flushTerminalWriteBufferBypassingTimers,
   maybeFlushTerminalWriteCoalescerWhenUnfocused,
   scheduleTerminalRepaintWhenUnfocused,
-  shouldFlushTerminalWritesForHiddenPage,
+  shouldFlushTerminalWritesForBackgroundOutput,
 } from "./terminalUnfocusedRepaint";
 
 export { FLOW_HIGH_WATER_MARK, FLOW_LOW_WATER_MARK };
@@ -211,7 +211,7 @@ export const writeSessionData = (
   flow.received(ingressBytes);
   setTerminalOutputPressureVisibility(term, isPaneVisible);
   noteTerminalOutputPressureData(term, data);
-  if (shouldFlushTerminalWritesForHiddenPage(isPaneVisible)) {
+  if (shouldFlushTerminalWritesForBackgroundOutput(isPaneVisible)) {
     const writeHiddenPageData = (
       batch: string,
       batchIngress: number,

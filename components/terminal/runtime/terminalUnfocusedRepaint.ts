@@ -40,8 +40,10 @@ export function isTerminalPageHidden(): boolean {
   return document.visibilityState !== "visible";
 }
 
-export function shouldFlushTerminalWritesForHiddenPage(isPaneVisible: boolean): boolean {
-  if (!isPaneVisible) return false;
+export function shouldFlushTerminalWritesForBackgroundOutput(isPaneVisible: boolean): boolean {
+  // Hidden panes should keep their xterm buffer current so tab switches do not
+  // reveal a delayed replay of long-running output (#1985).
+  if (!isPaneVisible) return true;
   // Minimized/hidden pages and occluded-but-visible windows (common on Windows
   // when Alt+Tabbing away) both throttle requestAnimationFrame, which lets the
   // write coalescer backlog grow and replay slowly on foreground return (#1880).
@@ -128,7 +130,7 @@ export function maybeFlushTerminalWriteCoalescerWhenUnfocused(
   isPaneVisible: boolean,
 ): void {
   // Background fast path already drains coalescer/queue synchronously.
-  if (!isPaneVisible || shouldFlushTerminalWritesForHiddenPage(isPaneVisible)) return;
+  if (!isPaneVisible || shouldFlushTerminalWritesForBackgroundOutput(isPaneVisible)) return;
   if (!isTerminalWindowUnfocusedButVisible()) return;
   if (unfocusedFlushTimers.has(term)) return;
 

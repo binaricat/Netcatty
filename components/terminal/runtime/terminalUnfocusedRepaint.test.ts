@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import {
   flushTerminalWriteBufferBypassingTimers,
   forceTerminalRepaintBypassingAnimationFrame,
-  shouldFlushTerminalWritesForHiddenPage,
+  shouldFlushTerminalWritesForBackgroundOutput,
 } from "./terminalUnfocusedRepaint.ts";
 
 const withDocumentVisibility = (
@@ -65,17 +65,20 @@ test("forceTerminalRepaintBypassingAnimationFrame refreshes alternate-screen vie
   assert.equal(renderRowsCalled, true);
 });
 
-test("shouldFlushTerminalWritesForHiddenPage flushes visible panes on hidden or unfocused pages", () => {
+test("shouldFlushTerminalWritesForBackgroundOutput flushes hidden panes and unfocused pages", () => {
+  withDocumentVisibility("visible", () => {
+    assert.equal(shouldFlushTerminalWritesForBackgroundOutput(false), true);
+  }, { hasFocus: true });
   withDocumentVisibility("hidden", () => {
-    assert.equal(shouldFlushTerminalWritesForHiddenPage(true), true);
-    assert.equal(shouldFlushTerminalWritesForHiddenPage(false), false);
+    assert.equal(shouldFlushTerminalWritesForBackgroundOutput(true), true);
+    assert.equal(shouldFlushTerminalWritesForBackgroundOutput(false), true);
   });
   withDocumentVisibility("visible", () => {
-    assert.equal(shouldFlushTerminalWritesForHiddenPage(true), true);
-    assert.equal(shouldFlushTerminalWritesForHiddenPage(false), false);
+    assert.equal(shouldFlushTerminalWritesForBackgroundOutput(true), true);
+    assert.equal(shouldFlushTerminalWritesForBackgroundOutput(false), true);
   }, { hasFocus: false });
   withDocumentVisibility("visible", () => {
-    assert.equal(shouldFlushTerminalWritesForHiddenPage(true), false);
+    assert.equal(shouldFlushTerminalWritesForBackgroundOutput(true), false);
   }, { hasFocus: true });
 });
 
@@ -171,12 +174,12 @@ test("writeSessionData schedules a throttled coalescer flush when unfocused", ()
   );
 });
 
-test("writeSessionData bypasses animation-frame coalescing on hidden pages", () => {
+test("writeSessionData bypasses animation-frame coalescing for background output", () => {
   const source = readFileSync(
     new URL("./terminalSessionAttachment.ts", import.meta.url),
     "utf8",
   );
-  assert.match(source, /shouldFlushTerminalWritesForHiddenPage\(isPaneVisible\)/);
+  assert.match(source, /shouldFlushTerminalWritesForBackgroundOutput\(isPaneVisible\)/);
   assert.match(source, /flushTerminalWriteCoalescer\(term, writeHiddenPageData\)/);
   assert.match(source, /enqueueCoalescedTerminalWrite\(term, data, writeHiddenPageData, ingressBytes\)/);
   assert.match(source, /flushTerminalWriteQueueBypassingTimers\(term\)/);

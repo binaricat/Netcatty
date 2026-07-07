@@ -852,6 +852,12 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
 
   const recoverTerminalAfterBecomeVisible = () => {
     lastCommittedVisibleLayoutKeyRef.current = null;
+    const term = termRef.current;
+    if (term) {
+      cancelScheduledUnfocusedRepaint(term);
+      flushPendingTerminalWritesOnResume(term);
+      forceTerminalRepaintBypassingAnimationFrame(term);
+    }
 
     if (
       getHiddenDurationMs() < CSS_ONLY_TAB_REVEAL_MAX_HIDDEN_MS
