@@ -54,6 +54,10 @@ import {
   resolveMiddleClickBehavior,
 } from "./middleClickBehavior";
 import { handleSerialLineModeInput } from "./serialLineInput";
+import {
+  resolveShiftEnterText,
+  shouldSendShiftEnterText,
+} from "./shiftEnterText";
 import { formatTelnetLocalEcho } from "./telnetLocalEcho";
 import {
   isTerminalFontSizeAction,
@@ -795,7 +799,13 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     // pastes the password instead of submitting an empty line.
     const sudoAutofill = ctx.sudoAutofillRef?.current;
     if (sudoAutofill?.isPromptPending()) {
-      if (e.key === "Enter") {
+      if (
+        e.key === "Enter" &&
+        !e.shiftKey &&
+        !e.altKey &&
+        !e.ctrlKey &&
+        !e.metaKey
+      ) {
         e.preventDefault();
         sudoAutofill.confirmFill();
         return false;
@@ -982,6 +992,29 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
           ctx.onBroadcastInputRef.current(kittyControlSequence, ctx.sessionId);
         }
         scrollToBottomAfterInput(kittyControlSequence);
+        return false;
+      }
+    }
+
+    if (shouldSendShiftEnterText(e, ctx.terminalSettingsRef.current)) {
+      const id = ctx.sessionRef.current;
+      if (id) {
+        e.preventDefault();
+        e.stopPropagation();
+        const textToSend = resolveShiftEnterText(ctx.terminalSettingsRef.current);
+        if (textToSend) {
+          ctx.onAutocompleteInput?.(textToSend);
+          ctx.onOutputTriggerUserInputRef?.current?.(textToSend);
+          ctx.terminalBackend.writeToSession(id, textToSend);
+          if (ctx.isBroadcastEnabledRef.current && ctx.onBroadcastInputRef.current) {
+            ctx.onBroadcastInputRef.current(textToSend, ctx.sessionId);
+          }
+          scrollToBottomAfterInput(textToSend);
+          if (!textToSend.startsWith("\x1b")) {
+            ctx.commandBufferRef.current += textToSend;
+            ctx.scriptRecorderRef?.current?.recordInput(textToSend);
+          }
+        }
         return false;
       }
     }

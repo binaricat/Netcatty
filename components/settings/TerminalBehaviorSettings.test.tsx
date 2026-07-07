@@ -39,3 +39,11 @@ test("terminal behavior settings expose word separator editing", () => {
   assert.match(source, /terminalSettings\.wordSeparators/);
   assert.match(source, /updateTerminalSetting\("wordSeparators", e\.target\.value\)/);
 });
+
+test("terminal behavior settings expose Shift+Enter text controls", () => {
+  assert.match(source, /settings\.terminal\.behavior\.shiftEnterNewline/);
+  assert.match(source, /terminalSettings\.shiftEnterNewlineEnabled/);
+  assert.match(source, /updateTerminalSetting\("shiftEnterNewlineEnabled", v\)/);
+  assert.match(source, /terminalSettings\.shiftEnterNewlineText/);
+  assert.match(source, /updateTerminalSetting\("shiftEnterNewlineText", e\.target\.value\)/);
+});

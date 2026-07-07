@@ -56,6 +56,8 @@ export interface TerminalSettings {
   // Keyboard
   altAsMeta: boolean; // Use ⌥ as the Meta key
   optionArrowWordJump: boolean; // macOS: Option+←/→ send Meta-b/f for word jump
+  shiftEnterNewlineEnabled: boolean; // Send configured text on Shift+Enter
+  shiftEnterNewlineText: string; // Backslash-escaped text sent by Shift+Enter
   scrollOnInput: boolean; // Scroll terminal to bottom on input
   scrollOnOutput: boolean; // Scroll terminal to bottom on output
   scrollOnKeyPress: boolean; // Scroll terminal to bottom on key press
@@ -280,12 +282,16 @@ export const normalizeTerminalSettings = (
   const wordSeparators = typeof settings?.wordSeparators === 'string'
     ? settings.wordSeparators
     : DEFAULT_TERMINAL_SETTINGS.wordSeparators;
+  const shiftEnterNewlineText = typeof settings?.shiftEnterNewlineText === 'string'
+    ? settings.shiftEnterNewlineText
+    : DEFAULT_TERMINAL_SETTINGS.shiftEnterNewlineText;
   const mergedSettings = {
     ...DEFAULT_TERMINAL_SETTINGS,
     ...(settings ?? {}),
     middleClickBehavior,
     middleClickPaste: middleClickBehavior === 'paste',
     wordSeparators,
+    shiftEnterNewlineText,
     dynamicTabTitleMode: isDynamicTabTitleMode(settings?.dynamicTabTitleMode)
       ? settings.dynamicTabTitleMode
       : DEFAULT_TERMINAL_SETTINGS.dynamicTabTitleMode,
@@ -333,6 +339,8 @@ const DEFAULT_TERMINAL_SETTINGS: TerminalSettings = {
   minimumContrastRatio: 1,
   altAsMeta: false,
   optionArrowWordJump: false,
+  shiftEnterNewlineEnabled: true,
+  shiftEnterNewlineText: '\\n',
   scrollOnInput: true,
   scrollOnOutput: false,
   scrollOnKeyPress: false,

@@ -259,6 +259,12 @@ export const zhCNTerminalMessages: Messages = {
   'settings.terminal.behavior.bracketedPaste': '括号粘贴模式',
   'settings.terminal.behavior.bracketedPaste.desc':
     '粘贴文本时使用转义序列包裹，以便终端区分粘贴和键入。如果出现 ^[[200~ 字样请关闭此选项。',
+  'settings.terminal.behavior.shiftEnterNewline': 'Shift+Enter 发送文本',
+  'settings.terminal.behavior.shiftEnterNewline.desc':
+    '在终端中按 Shift+Enter 时发送配置的文本，而不是普通回车。',
+  'settings.terminal.behavior.shiftEnterNewlineText': '发送内容',
+  'settings.terminal.behavior.shiftEnterNewlineText.desc':
+    '使用 \\n 表示换行，\\t 表示 Tab，\\\\ 表示反斜杠。',
   'settings.terminal.behavior.clearWipesScrollback': '`clear` 同时清空回滚历史',
   'settings.terminal.behavior.clearWipesScrollback.desc':
     '`clear` 命令同时清空回滚历史（POSIX 默认行为）。关闭则保留历史。',

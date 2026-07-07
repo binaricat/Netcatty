@@ -98,6 +98,26 @@ export const TerminalBehaviorSettings: React.FC<TerminalBehaviorSettingsProps> =
         </SettingRow>
 
         <SettingRow
+          label={t("settings.terminal.behavior.shiftEnterNewline")}
+          description={t("settings.terminal.behavior.shiftEnterNewline.desc")}
+        >
+          <Toggle checked={terminalSettings.shiftEnterNewlineEnabled ?? true} onChange={(v) => updateTerminalSetting("shiftEnterNewlineEnabled", v)} />
+        </SettingRow>
+
+        <SettingRow
+          label={t("settings.terminal.behavior.shiftEnterNewlineText")}
+          description={t("settings.terminal.behavior.shiftEnterNewlineText.desc")}
+        >
+          <Input
+            value={terminalSettings.shiftEnterNewlineText ?? "\\n"}
+            onChange={(e) => updateTerminalSetting("shiftEnterNewlineText", e.target.value)}
+            placeholder="\\n"
+            className="w-56 font-mono"
+            spellCheck={false}
+          />
+        </SettingRow>
+
+        <SettingRow
           label={t("settings.terminal.behavior.clearWipesScrollback")}
           description={t("settings.terminal.behavior.clearWipesScrollback.desc")}
         >

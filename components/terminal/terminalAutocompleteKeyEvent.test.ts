@@ -25,6 +25,13 @@ function keyEvent(key: string) {
   } as KeyboardEvent & { defaultPrevented: boolean };
 }
 
+function shiftKeyEvent(key: string) {
+  return {
+    ...keyEvent(key),
+    shiftKey: true,
+  } as KeyboardEvent & { defaultPrevented: boolean };
+}
+
 function createContext(overrides: Record<string, unknown> = {}) {
   let state = {
     suggestions: [suggestion("show version")],
@@ -144,4 +151,28 @@ test("serial-style popup Enter passes through when the selected candidate is sta
   assert.equal(event.defaultPrevented, false);
   assert.deepEqual(accepted, [0]);
   assert.deepEqual(clears, [1]);
+});
+
+test("serial-style popup Shift+Enter is not treated as candidate confirmation", () => {
+  const { context, accepted, clears } = createContext({
+    stateRef: {
+      current: {
+        suggestions: [suggestion("show version")],
+        selectedIndex: 0,
+        popupVisible: true,
+        popupAnchorViewport: { left: 0, top: 0, bottom: 0 },
+        expandUpward: false,
+        subDirPanels: [],
+        subDirFocusLevel: -1,
+      },
+    },
+  });
+  const event = shiftKeyEvent("Enter");
+
+  const result = handleTerminalAutocompleteKeyEvent(event, context);
+
+  assert.equal(result, true);
+  assert.equal(event.defaultPrevented, false);
+  assert.deepEqual(accepted, []);
+  assert.deepEqual(clears, []);
 });
