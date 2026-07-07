@@ -384,6 +384,45 @@ test("hidden tab output is written completely while the tab remains hidden", () 
   clearTerminalSessionFlowAck("session-1");
 });
 
+test("hidden tab output marks pending scroll without scrolling immediately", () => {
+  const writes: string[] = [];
+  let scrollCalls = 0;
+  const term = {
+    buffer: { active: { type: "normal" } },
+    _core: { _writeBuffer: { flushSync() {} } },
+    write(data: string, callback?: () => void) {
+      writes.push(data);
+      callback?.();
+    },
+    scrollToBottom() {
+      scrollCalls += 1;
+    },
+  } as unknown as XTerm;
+  const ctx = {
+    ...createContext(false),
+    isVisibleRef: { current: false },
+    pendingOutputScrollRef: { current: false },
+    terminalSettingsRef: {
+      current: {
+        showLineTimestamps: false,
+        scrollOnOutput: true,
+        forcePromptNewLine: false,
+      },
+    },
+    terminalSettings: {
+      showLineTimestamps: false,
+      scrollOnOutput: true,
+      forcePromptNewLine: false,
+    },
+  };
+
+  writeSessionData(ctx as never, term, "fresh output");
+
+  assert.equal(writes.join(""), "fresh output");
+  assert.equal(ctx.pendingOutputScrollRef.current, true);
+  assert.equal(scrollCalls, 0);
+});
+
 test("writeSessionData flushes deferred IPC acks before small output can leave the source paused", async () => {
   clearTerminalSessionFlowAck("session-1");
   const term = {

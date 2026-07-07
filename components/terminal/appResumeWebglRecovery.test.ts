@@ -41,11 +41,28 @@ const assertRecoverTerminalOnAppResumeOrder = (source: string): void => {
 
 test("app resume handlers flush backlog and recover the terminal renderer before refit", () => {
   const source = readFileSync(new URL("./useTerminalEffects.ts", import.meta.url), "utf8");
+  const resumeEffectIndex = source.indexOf("const recoverWebglRendererOnAppResume = () => {");
+  const resumeEffectEnd = source.indexOf("// Only register the snippet executor", resumeEffectIndex);
+  const resumeEffectSource = source.slice(resumeEffectIndex, resumeEffectEnd);
 
+  assert.ok(resumeEffectIndex >= 0);
+  assert.ok(resumeEffectEnd > resumeEffectIndex);
   assertRecoverTerminalOnAppResumeOrder(source);
-  assert.match(source, /handleVisibilityChange[\s\S]*recoverTerminalOnAppResume\(\)/);
-  assert.match(source, /handleWindowFocus[\s\S]*recoverTerminalOnAppResume\(\)/);
-  assert.match(source, /onWindowShown\?\.\(\(\) => \{[\s\S]*recoverTerminalOnAppResume\(\)/);
+  assert.match(
+    resumeEffectSource,
+    /const handleVisibilityChange = \(\) => \{\s*if \(document\.visibilityState !== 'visible'\) return;\s*recoverTerminalOnAppResume\(\);\s*\};/,
+  );
+  assert.match(
+    resumeEffectSource,
+    /const handleWindowFocus = \(\) => \{\s*recoverTerminalOnAppResume\(\);\s*\};/,
+  );
+  assert.match(
+    resumeEffectSource,
+    /const unsubscribeWindowShown = terminalBackend\.onWindowShown\?\.\(\(\) => \{\s*recoverTerminalOnAppResume\(\);\s*\}\);/,
+  );
+  assert.doesNotMatch(resumeEffectSource, /\binWorkspace\b/);
+  assert.doesNotMatch(resumeEffectSource, /\bisFocusMode\b/);
+  assert.doesNotMatch(resumeEffectSource, /\bisFocused\b/);
   assert.doesNotMatch(source, /shouldRecoverOnAppResume/);
 });
 

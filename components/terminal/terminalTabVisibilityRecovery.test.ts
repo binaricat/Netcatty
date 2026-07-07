@@ -89,10 +89,19 @@ test('visible tab recovery drains hidden terminal writes before any fast-path re
 });
 
 test('visible split-pane recovery no longer defers background panes', () => {
+  const effectIndex = source.indexOf('const becameVisible = isVisible && !wasVisibleRef.current');
+  const effectEnd = source.indexOf('}, [isVisible, paneLayoutKey, splitResizeActive]);', effectIndex);
+  const effectSource = source.slice(effectIndex, effectEnd);
+
+  assert.ok(effectIndex >= 0);
+  assert.ok(effectEnd > effectIndex);
   assert.match(
     source,
     /if \(becameVisible\) \{\s*recoverTerminalAfterBecomeVisible\(\);\s*return;\s*\}/,
   );
+  assert.doesNotMatch(effectSource, /\binWorkspace\b/);
+  assert.doesNotMatch(effectSource, /\bisFocusMode\b/);
+  assert.doesNotMatch(effectSource, /\bisFocused\b/);
   assert.doesNotMatch(source, /shouldRefitImmediatelyOnShow/);
   assert.doesNotMatch(source, /shouldRecoverWebglOnShow/);
   assert.doesNotMatch(source, /const runDeferred = \(\) => \{/);
