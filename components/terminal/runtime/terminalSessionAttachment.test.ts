@@ -25,6 +25,7 @@ import {
   clearDeferredTerminalWriteAck,
   getDeferredTerminalWriteAckBytes,
 } from "./terminalWriteAckDeferral.ts";
+import { flushTerminalWriteQueueBypassingTimers } from "./terminalWriteQueue.ts";
 import { prioritizeTerminalInput } from "./terminalOutputPipeline";
 
 const createFakeTerm = (activeType = "normal") => {
@@ -279,8 +280,7 @@ test("writeSessionData flushes xterm writes while the window is unfocused but vi
 
 test("writeSessionData flushes pending coalesced output with the background fast path", () => {
   clearTerminalSessionFlowAck("session-1");
-  const pendingPayload = `${Array.from({ length: 20 }, () => "x".repeat(1000)).join("\n")}\n`;
-  assert.ok(pendingPayload.length > MAX_TERMINAL_PLAIN_WRITE_CHUNK_BYTES);
+  const pendingPayload = "pending output\n";
   const currentPayload = "current\n";
   const writes: string[] = [];
   const pendingCallbacks: Array<() => void> = [];
@@ -329,8 +329,7 @@ test("writeSessionData flushes pending coalesced output with the background fast
   assert.deepEqual(
     writes.map((write) => write.length),
     [
-      MAX_TERMINAL_PLAIN_WRITE_CHUNK_BYTES,
-      pendingPayload.length - MAX_TERMINAL_PLAIN_WRITE_CHUNK_BYTES,
+      pendingPayload.length,
       currentPayload.length,
     ],
   );
@@ -346,10 +345,15 @@ test("writeSessionData flushes pending coalesced output with the background fast
 
 test("hidden tab output is written completely while the tab remains hidden", () => {
   clearTerminalSessionFlowAck("session-1");
-  const payload = Array.from(
-    { length: 1_200 },
-    (_entry, index) => `${String(index + 1).padStart(5)}  echo history-${index + 1}\r\n`,
-  ).join("");
+  const lines: string[] = [];
+  let payloadLength = 0;
+  while (payloadLength <= MAX_TERMINAL_PLAIN_WRITE_CHUNK_BYTES) {
+    const lineNumber = lines.length + 1;
+    const line = `${String(lineNumber).padStart(5)}  echo history-${lineNumber}\r\n`;
+    lines.push(line);
+    payloadLength += line.length;
+  }
+  const payload = lines.join("");
   assert.ok(payload.length > MAX_TERMINAL_PLAIN_WRITE_CHUNK_BYTES);
   const writes: string[] = [];
   const term = {
@@ -659,6 +663,24 @@ test("writeSessionData preserves timestamps across host gutter visibility change
   assert.equal(writes.join(""), "before\r\nenabled\r\ndisabled");
   assert.deepEqual(markerLines, [0, 1, 2]);
   assert.deepEqual(disposedMarkerLines, []);
+});
+
+test("writeSessionData batches timestamp bookkeeping for bulk line output", () => {
+  const { term, writes, markerLines } = createFakeTerm();
+  const payload = `${Array.from({ length: 2000 }, () => "x".repeat(1023)).join("\n")}\n`;
+
+  writeSessionData(createContext(false, { showLineTimestamps: false }) as never, term, payload, payload.length);
+  flushTerminalWriteCoalescer(term);
+  for (let guard = 0; guard < 1000 && flushTerminalWriteQueueBypassingTimers(term); guard += 1) {
+    // Drain cooperative bulk-output timers so the assertion observes the full write plan.
+  }
+
+  assert.equal(writes.join(""), payload);
+  assert.equal(markerLines.length, 2000);
+  assert.ok(
+    writes.length <= Math.ceil(payload.length / MAX_TERMINAL_PLAIN_WRITE_CHUNK_BYTES) + 1,
+    `expected bulk output to write in chunks, got ${writes.length} writes`,
+  );
 });
 
 test("attachSessionToTerminal resets timestamp state for a reused terminal", () => {

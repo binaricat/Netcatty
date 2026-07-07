@@ -577,6 +577,7 @@ export const zhCNVaultMessages: Messages = {
   'cloudSync.s3.sessionToken': 'Session Token（可选）',
   'cloudSync.s3.prefix': 'Key 前缀（可选）',
   'cloudSync.s3.forcePathStyle': '强制使用 path-style URL（适用于 MinIO/R2 等）',
+  'cloudSync.s3.allowInsecure': '允许不安全的连接（忽略证书错误）',
   'cloudSync.s3.showSecret': '显示密钥',
   'cloudSync.s3.validation.required': '端点、Region、Bucket、Access Key 与 Secret 必填。',
   'cloudSync.smb.title': 'SMB 设置',

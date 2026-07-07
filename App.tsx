@@ -26,6 +26,7 @@ import { resolveGroupDefaults, applyGroupDefaults } from './domain/groupConfig';
 import { upsertKnownHost } from './domain/knownHosts';
 import { materializeHostProxyProfile } from './domain/proxyProfiles';
 import { buildSshDeepLinkConnectionHost, buildSshDeepLinkEphemeralHost, buildSshDeepLinkEphemeralHostFromSaved, buildSshDeepLinkHostDraft, findSshDeepLinkHost, parseSshDeepLink } from './domain/sshDeepLink';
+import { buildTelnetDeepLinkConnectionHost, buildTelnetDeepLinkEphemeralHostFromSaved, buildTelnetDeepLinkOpenHost, findTelnetDeepLinkHost, materializeTelnetDeepLinkMatchHost, parseTelnetDeepLink } from './domain/telnetDeepLink';
 import { buildJmsDeepLinkEphemeralHost, isSupportedJmsProtocol, parseJmsDeepLink } from './domain/jmsDeepLink';
 import { applyEphemeralHostsUpdate, splitHostsUpdateByEphemeral } from './domain/ephemeralHosts';
 import { resolveHostAuth } from './domain/sshAuth';
@@ -1059,6 +1060,52 @@ function App({ settings }: { settings: SettingsState }) {
     if (!bridge?.onSshDeepLink) return;
     return bridge.onSshDeepLink((payload) => {
       _handleSshDeepLink(payload);
+    });
+  }, [isPeerSessionWindow]);
+
+  const _handleTelnetDeepLink = useEffectEvent((payload: { url?: string }) => {
+    const rawUrl = payload?.url || '';
+    const target = parseTelnetDeepLink(rawUrl);
+    if (!target) {
+      toast.warning(t('deepLink.telnet.invalid'));
+      return;
+    }
+
+    const effectiveHosts = hosts.map((host) =>
+      materializeTelnetDeepLinkMatchHost(resolveEffectiveHost(host), identities),
+    );
+    const matchedEffectiveHost = findTelnetDeepLinkHost(effectiveHosts, target, {
+      ignoreTargetUsername: Boolean(target.password),
+    });
+
+    if (matchedEffectiveHost) {
+      if (target.password) {
+        const ephemeralHost = buildTelnetDeepLinkEphemeralHostFromSaved(matchedEffectiveHost, target, {
+          id: crypto.randomUUID(),
+          now: Date.now(),
+        });
+        setEphemeralHosts((prev) => [...prev, ephemeralHost]);
+        handleConnectToHost(ephemeralHost);
+        return;
+      }
+      handleConnectToHost(buildTelnetDeepLinkConnectionHost(matchedEffectiveHost));
+      return;
+    }
+
+    const ephemeralHost = buildTelnetDeepLinkOpenHost(effectiveHosts, target, {
+      id: crypto.randomUUID(),
+      now: Date.now(),
+    });
+    setEphemeralHosts((prev) => [...prev, ephemeralHost]);
+    handleConnectToHost(ephemeralHost);
+  });
+
+  useEffect(() => {
+    if (isPeerSessionWindow) return;
+    const bridge = netcattyBridge.get();
+    if (!bridge?.onTelnetDeepLink) return;
+    return bridge.onTelnetDeepLink((payload) => {
+      _handleTelnetDeepLink(payload);
     });
   }, [isPeerSessionWindow]);
 

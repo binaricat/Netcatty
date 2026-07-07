@@ -9,6 +9,10 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const os = require("node:os");
+const {
+  appendTerminalPerfLogLine,
+  configureTerminalPerformanceDiagnostics,
+} = require("./terminalPerformanceDiagnostics.cjs");
 
 // ---------------------------------------------------------------------------
 // State
@@ -20,6 +24,11 @@ let electronShell = null;
 let sessionsMap = null;
 
 const LOG_RETENTION_DAYS = 30;
+const TERMINAL_PERF_DEBUG_ENV_KEYS = [
+  "NETCATTY_TERMINAL_PERF_DEBUG",
+  "NETCATTY_TERMINAL_DEBUG",
+];
+const TERMINAL_PERF_LOG_PREFIX = "[Netcatty Terminal Perf]";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -130,6 +139,10 @@ function captureError(source, err, extra) {
 
 function captureDiagnostic(source, message, extra) {
   captureError(source, new Error(String(message || "diagnostic")), extra);
+}
+
+function shouldMirrorTerminalPerfDiagnostics() {
+  return TERMINAL_PERF_DEBUG_ENV_KEYS.some((key) => process.env[key] === "1");
 }
 
 /**
@@ -311,6 +324,12 @@ function init(deps) {
   sessionsMap = sessions || null;
 
   ensureLogDir();
+  try {
+    const userDataPath = electronApp?.getPath?.("userData");
+    configureTerminalPerformanceDiagnostics({ userDataPath });
+  } catch {
+    // ignore
+  }
   pruneOldLogs();
 
   console.log(`[CrashLog] Crash log directory: ${logDir}`);
@@ -328,6 +347,13 @@ function registerHandlers(ipcMain) {
     const message = typeof payload?.message === "string" && payload.message.trim()
       ? payload.message.trim()
       : "diagnostic";
+    if (source === "terminal-perf" && message.startsWith(TERMINAL_PERF_LOG_PREFIX)) {
+      appendTerminalPerfLogLine(message);
+      if (shouldMirrorTerminalPerfDiagnostics()) {
+        console.info(message);
+      }
+      return { success: true };
+    }
     captureDiagnostic(source, message, payload?.extra);
     return { success: true };
   });

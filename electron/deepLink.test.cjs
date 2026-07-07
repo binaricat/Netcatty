@@ -8,8 +8,10 @@ const {
   applySshProtocolClientPreference,
   collectJmsDeepLinkUrls,
   collectSshDeepLinkUrls,
+  collectTelnetDeepLinkUrls,
   isJmsDeepLinkUrl,
   isSshDeepLinkUrl,
+  isTelnetDeepLinkUrl,
   readJmsDeepLinkEnabledPreference,
   readSshDeepLinkEnabledPreference,
   shouldDeliverJmsDeepLink,
@@ -41,7 +43,7 @@ test("collectSshDeepLinkUrls extracts ssh URLs from process arguments", () => {
   );
 });
 
-test("applySshProtocolClientPreference registers or removes the ssh handler", () => {
+test("applySshProtocolClientPreference registers or removes ssh and telnet handlers", () => {
   const calls = [];
   const app = {
     setAsDefaultProtocolClient: (...args) => {
@@ -58,8 +60,95 @@ test("applySshProtocolClientPreference registers or removes the ssh handler", ()
   assert.equal(applySshProtocolClientPreference({ app, enabled: false, isDev: false }), true);
   assert.deepEqual(calls, [
     ["set", "ssh"],
+    ["set", "telnet"],
     ["remove", "ssh"],
+    ["remove", "telnet"],
   ]);
+});
+
+test("applySshProtocolClientPreference keeps ssh successful when telnet registration fails", () => {
+  const calls = [];
+  const app = {
+    setAsDefaultProtocolClient: (protocol) => {
+      calls.push(["set", protocol]);
+      return protocol === "ssh";
+    },
+    removeAsDefaultProtocolClient: (protocol) => {
+      calls.push(["remove", protocol]);
+      return protocol === "ssh";
+    },
+  };
+
+  assert.equal(applySshProtocolClientPreference({ app, enabled: true, isDev: false }), true);
+  assert.equal(applySshProtocolClientPreference({ app, enabled: false, isDev: false }), true);
+  assert.deepEqual(calls, [
+    ["set", "ssh"],
+    ["set", "telnet"],
+    ["remove", "ssh"],
+    ["remove", "telnet"],
+  ]);
+});
+
+test("applySshProtocolClientPreference rolls back telnet registration when ssh enable fails", () => {
+  const calls = [];
+  const app = {
+    setAsDefaultProtocolClient: (protocol) => {
+      calls.push(["set", protocol]);
+      return protocol === "telnet";
+    },
+    removeAsDefaultProtocolClient: (protocol) => {
+      calls.push(["remove", protocol]);
+      return true;
+    },
+  };
+
+  assert.equal(applySshProtocolClientPreference({ app, enabled: true, isDev: false }), false);
+  assert.deepEqual(calls, [
+    ["set", "ssh"],
+    ["set", "telnet"],
+    ["remove", "telnet"],
+  ]);
+});
+
+test("applySshProtocolClientPreference restores telnet registration when ssh disable fails", () => {
+  const calls = [];
+  const app = {
+    setAsDefaultProtocolClient: (protocol) => {
+      calls.push(["set", protocol]);
+      return true;
+    },
+    removeAsDefaultProtocolClient: (protocol) => {
+      calls.push(["remove", protocol]);
+      return protocol === "telnet";
+    },
+  };
+
+  assert.equal(applySshProtocolClientPreference({ app, enabled: false, isDev: false }), false);
+  assert.deepEqual(calls, [
+    ["remove", "ssh"],
+    ["remove", "telnet"],
+    ["set", "telnet"],
+  ]);
+});
+
+test("isTelnetDeepLinkUrl accepts only telnet URLs", () => {
+  assert.equal(isTelnetDeepLinkUrl("telnet://example.com:2001"), true);
+  assert.equal(isTelnetDeepLinkUrl("TELNET://example.com:2001"), true);
+  assert.equal(isTelnetDeepLinkUrl("ssh://alice@example.com"), false);
+  assert.equal(isTelnetDeepLinkUrl("--flag"), false);
+});
+
+test("collectTelnetDeepLinkUrls extracts telnet URLs from process arguments", () => {
+  assert.deepEqual(
+    collectTelnetDeepLinkUrls([
+      "/Applications/Netcatty.app/Contents/MacOS/Netcatty",
+      "--flag",
+      "telnet://example.com:2001",
+      "file:///tmp/example",
+      "telnet://router.local:23",
+    ]),
+    ["telnet://example.com:2001", "telnet://router.local:23"],
+  );
 });
 
 test("ssh deep link enabled preference persists outside renderer localStorage", () => {

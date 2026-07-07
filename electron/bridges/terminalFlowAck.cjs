@@ -4,6 +4,7 @@ const {
   FLOW_HIGH_WATER_MARK,
   FLOW_LOW_WATER_MARK,
 } = require("../../infrastructure/config/terminalFlowConstants.cjs");
+const { logTerminalOutputPerf } = require("./terminalPerformanceDiagnostics.cjs");
 
 function getFlowTarget(session) {
   return session?.stream || session?.proc || session?.socket || session?.serialPort || null;
@@ -17,6 +18,11 @@ function ensureFlowState(session) {
       bufferedBytes: 0,
       appliedPause: false,
       outputPaused: false,
+      firstUnackedAt: 0,
+      lastEmittedAt: 0,
+      lastAckAt: 0,
+      lastPerfAckLogAt: 0,
+      sessionId: null,
     };
   }
   const state = session.flowState;
@@ -24,6 +30,11 @@ function ensureFlowState(session) {
   state.unackedBytes = Number.isFinite(state.unackedBytes) ? Math.max(0, state.unackedBytes) : 0;
   state.bufferedBytes = Number.isFinite(state.bufferedBytes) ? Math.max(0, state.bufferedBytes) : 0;
   state.appliedPause = Boolean(state.appliedPause);
+  state.firstUnackedAt = Number.isFinite(state.firstUnackedAt) ? Math.max(0, state.firstUnackedAt) : 0;
+  state.lastEmittedAt = Number.isFinite(state.lastEmittedAt) ? Math.max(0, state.lastEmittedAt) : 0;
+  state.lastAckAt = Number.isFinite(state.lastAckAt) ? Math.max(0, state.lastAckAt) : 0;
+  state.lastPerfAckLogAt = Number.isFinite(state.lastPerfAckLogAt) ? Math.max(0, state.lastPerfAckLogAt) : 0;
+  state.sessionId = typeof state.sessionId === "string" && state.sessionId ? state.sessionId : null;
   if (typeof state.outputPaused !== "boolean") {
     state.outputPaused = state.appliedPause && (state.rendererPaused || state.unackedBytes >= FLOW_HIGH_WATER_MARK);
   }
@@ -50,6 +61,28 @@ function applyResume(session, target) {
   }
 }
 
+function getFlowPerfDetails(session, extra = {}) {
+  const state = ensureFlowState(session);
+  return {
+    sessionId: state.sessionId || session?.id || session?.sessionId || null,
+    protocol: session?.protocol || session?.type || null,
+    rendererPaused: state.rendererPaused,
+    outputPaused: state.outputPaused,
+    appliedPause: state.appliedPause,
+    unackedBytes: state.unackedBytes,
+    bufferedBytes: state.bufferedBytes,
+    highWaterMark: FLOW_HIGH_WATER_MARK,
+    lowWaterMark: FLOW_LOW_WATER_MARK,
+    ...extra,
+  };
+}
+
+function rememberSessionId(state, sessionId) {
+  if (typeof sessionId === "string" && sessionId) {
+    state.sessionId = sessionId;
+  }
+}
+
 // NOTE on FLOW_HIGH_WATER_MARK size (issue #1961): for SSH sessions the flow
 // target is the ssh2 channel, so pause() stops the remote until resume() plus a
 // full round-trip. The watermark is kept near ssh2's own 2MB channel window
@@ -73,12 +106,14 @@ function reconcileSessionFlow(session) {
   const shouldResume = !state.outputPaused && pendingBytes <= FLOW_LOW_WATER_MARK;
 
   if (!state.appliedPause && shouldPause) {
+    logTerminalOutputPerf("backend-flow-pause", getFlowPerfDetails(session, { pendingBytes }));
     applyPause(session, target);
     state.appliedPause = true;
     return;
   }
 
   if (state.appliedPause && shouldResume) {
+    logTerminalOutputPerf("backend-flow-resume", getFlowPerfDetails(session, { pendingBytes }));
     applyResume(session, target);
     state.appliedPause = false;
   }
@@ -91,17 +126,50 @@ function setRendererFlowPaused(session, paused) {
   reconcileSessionFlow(session);
 }
 
-function trackEmitted(session, bytes) {
+function trackEmitted(session, bytes, sessionId) {
   if (!session || !Number.isFinite(bytes) || bytes <= 0) return;
   const state = ensureFlowState(session);
+  rememberSessionId(state, sessionId);
+  const now = Date.now();
+  if (state.unackedBytes === 0) {
+    state.firstUnackedAt = now;
+  }
+  state.lastEmittedAt = now;
   state.unackedBytes += bytes;
   reconcileSessionFlow(session);
 }
 
-function trackAck(session, bytes) {
+function trackAck(session, bytes, sessionId) {
   if (!session || !Number.isFinite(bytes) || bytes <= 0) return;
   const state = ensureFlowState(session);
+  rememberSessionId(state, sessionId);
+  const now = Date.now();
+  const unackedBefore = state.unackedBytes;
   state.unackedBytes = Math.max(0, state.unackedBytes - bytes);
+  state.lastAckAt = now;
+  const ackAgeMs = state.firstUnackedAt ? now - state.firstUnackedAt : 0;
+  if (
+    unackedBefore > 0
+    && (
+      now - state.lastPerfAckLogAt >= 1000
+      || (
+        state.unackedBytes === 0
+        && (ackAgeMs >= 250 || unackedBefore >= 64 * 1024)
+      )
+    )
+  ) {
+    state.lastPerfAckLogAt = now;
+    logTerminalOutputPerf("backend-flow-ack", getFlowPerfDetails(session, {
+      bytes,
+      unackedBefore,
+      unackedAfter: state.unackedBytes,
+      ackAgeMs,
+      sinceLastEmitMs: state.lastEmittedAt ? now - state.lastEmittedAt : null,
+    }));
+  }
+  if (state.unackedBytes === 0) {
+    state.firstUnackedAt = 0;
+  }
   reconcileSessionFlow(session);
 }
 
@@ -142,6 +210,11 @@ function clearSessionFlowState(session, options = {}) {
     bufferedBytes: 0,
     appliedPause: false,
     outputPaused: false,
+    firstUnackedAt: 0,
+    lastEmittedAt: 0,
+    lastAckAt: 0,
+    lastPerfAckLogAt: 0,
+    sessionId: null,
   };
 }
 

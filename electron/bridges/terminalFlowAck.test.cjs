@@ -69,6 +69,14 @@ test("trackAck resumes after draining to the low watermark", () => {
   assert.deepEqual(session._calls, ["pause", "resume"]);
 });
 
+test("flow diagnostics remember the renderer session id", () => {
+  const session = makeSession();
+  trackEmitted(session, 1024, "session-1");
+  trackAck(session, 512, "session-1");
+
+  assert.equal(session.flowState.sessionId, "session-1");
+});
+
 test("renderer pause flag keeps the stream paused until cleared", () => {
   const session = makeSession();
   trackEmitted(session, FLOW_HIGH_WATER_MARK);

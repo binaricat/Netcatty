@@ -301,6 +301,7 @@ export const enTerminalMessages: Messages = {
   'cloudSync.s3.sessionToken': 'Session Token (optional)',
   'cloudSync.s3.prefix': 'Key Prefix (optional)',
   'cloudSync.s3.forcePathStyle': 'Force path-style URLs (for MinIO/R2, etc.)',
+  'cloudSync.s3.allowInsecure': 'Allow insecure connection (ignore certificate errors)',
   'cloudSync.s3.showSecret': 'Show secrets',
   'cloudSync.s3.validation.required': 'Endpoint, region, bucket, access key, and secret are required.',
   'cloudSync.smb.title': 'SMB Settings',

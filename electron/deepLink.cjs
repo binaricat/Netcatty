@@ -2,8 +2,10 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const SSH_DEEP_LINK_CHANNEL = "netcatty:deepLink:ssh";
+const TELNET_DEEP_LINK_CHANNEL = "netcatty:deepLink:telnet";
 const JMS_DEEP_LINK_CHANNEL = "netcatty:deepLink:jms";
 const SSH_PROTOCOL = "ssh";
+const TELNET_PROTOCOL = "telnet";
 const JMS_PROTOCOL = "jms";
 const SSH_DEEP_LINK_PREFERENCES_FILE = "ssh-deep-link-preferences.json";
 const JMS_DEEP_LINK_PREFERENCES_FILE = "jms-deep-link-preferences.json";
@@ -22,12 +24,20 @@ function isSshDeepLinkUrl(rawUrl) {
   return isDeepLinkUrl(rawUrl, SSH_PROTOCOL);
 }
 
+function isTelnetDeepLinkUrl(rawUrl) {
+  return isDeepLinkUrl(rawUrl, TELNET_PROTOCOL);
+}
+
 function isJmsDeepLinkUrl(rawUrl) {
   return isDeepLinkUrl(rawUrl, JMS_PROTOCOL);
 }
 
 function collectSshDeepLinkUrls(argv) {
   return collectDeepLinkUrls(argv, SSH_PROTOCOL);
+}
+
+function collectTelnetDeepLinkUrls(argv) {
+  return collectDeepLinkUrls(argv, TELNET_PROTOCOL);
 }
 
 function collectJmsDeepLinkUrls(argv) {
@@ -78,8 +88,16 @@ function registerSshProtocolClient(options = {}) {
   return registerProtocolClient({ ...options, protocol: SSH_PROTOCOL });
 }
 
+function registerTelnetProtocolClient(options = {}) {
+  return registerProtocolClient({ ...options, protocol: TELNET_PROTOCOL });
+}
+
 function removeSshProtocolClient(options = {}) {
   return removeProtocolClient({ ...options, protocol: SSH_PROTOCOL });
+}
+
+function removeTelnetProtocolClient(options = {}) {
+  return removeProtocolClient({ ...options, protocol: TELNET_PROTOCOL });
 }
 
 function registerJmsProtocolClient(options = {}) {
@@ -205,12 +223,27 @@ function applyDeepLinkProtocolClientPreference({
 }
 
 function applySshProtocolClientPreference(options = {}) {
-  return applyDeepLinkProtocolClientPreference({
+  const sshApplied = applyDeepLinkProtocolClientPreference({
     enabled: options.enabled,
     registerClient: registerSshProtocolClient,
     removeClient: removeSshProtocolClient,
     options,
   });
+  const telnetApplied = applyDeepLinkProtocolClientPreference({
+    enabled: options.enabled,
+    registerClient: registerTelnetProtocolClient,
+    removeClient: removeTelnetProtocolClient,
+    options,
+  });
+  if (sshApplied !== true && telnetApplied === true) {
+    applyDeepLinkProtocolClientPreference({
+      enabled: options.enabled === false,
+      registerClient: registerTelnetProtocolClient,
+      removeClient: removeTelnetProtocolClient,
+      options,
+    });
+  }
+  return sshApplied === true;
 }
 
 function applyJmsProtocolClientPreference(options = {}) {
@@ -270,6 +303,10 @@ function shouldDeliverSshDeepLink(options = {}) {
   return shouldDeliverDeepLink(options);
 }
 
+function shouldDeliverTelnetDeepLink(options = {}) {
+  return shouldDeliverDeepLink(options);
+}
+
 function shouldDeliverJmsDeepLink(options = {}) {
   return shouldDeliverDeepLink(options);
 }
@@ -314,6 +351,7 @@ function applyInitialJmsDeepLinkPreference(options = {}) {
 
 module.exports = {
   SSH_DEEP_LINK_CHANNEL,
+  TELNET_DEEP_LINK_CHANNEL,
   JMS_DEEP_LINK_CHANNEL,
   applyInitialJmsDeepLinkPreference,
   applyInitialSshDeepLinkPreference,
@@ -321,16 +359,21 @@ module.exports = {
   applySshProtocolClientPreference,
   collectJmsDeepLinkUrls,
   collectSshDeepLinkUrls,
+  collectTelnetDeepLinkUrls,
   isJmsDeepLinkUrl,
   isSshDeepLinkUrl,
+  isTelnetDeepLinkUrl,
   readJmsDeepLinkEnabledPreference,
   readSshDeepLinkEnabledPreference,
   registerJmsProtocolClient,
   registerSshProtocolClient,
+  registerTelnetProtocolClient,
   removeJmsProtocolClient,
   removeSshProtocolClient,
+  removeTelnetProtocolClient,
   shouldDeliverJmsDeepLink,
   shouldDeliverSshDeepLink,
+  shouldDeliverTelnetDeepLink,
   updateJmsDeepLinkEnabledPreference,
   updateSshDeepLinkEnabledPreference,
   writeJmsDeepLinkEnabledPreference,

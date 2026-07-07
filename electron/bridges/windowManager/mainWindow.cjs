@@ -136,7 +136,7 @@ function createMainWindowApi(ctx) {
         } catch {}
         console.error("[WindowManager] Renderer process gone:", details);
       });
-    
+
       // Prevent top-level navigation away from the app origin. If a remote origin ever
       // loads in a privileged window (with preload), it can become an RCE vector.
       const allowedOrigins = new Set(["app://netcatty"]);
@@ -149,11 +149,23 @@ function createMainWindowApi(ctx) {
       }
       const isAllowedTopLevelUrl = (targetUrl) => {
         try {
-          return allowedOrigins.has(new URL(String(targetUrl)).origin);
+          const parsedUrl = new URL(String(targetUrl));
+          if (parsedUrl.protocol === "app:" && parsedUrl.host === "netcatty") return true;
+          return allowedOrigins.has(parsedUrl.origin);
         } catch {
           return false;
         }
       };
+      win.webContents.on("did-start-navigation", (_event, targetUrl, isInPlace, isMainFrame) => {
+        if (isMainFrame === false || isInPlace === true || !isAllowedTopLevelUrl(targetUrl)) return;
+        try {
+          if (typeof clearRendererReadyForWebContents === "function") {
+            clearRendererReadyForWebContents(win.webContents?.id);
+          }
+        } catch {
+          // ignore
+        }
+      });
       const blockUntrustedNavigation = (event, targetUrl) => {
         if (isAllowedTopLevelUrl(targetUrl)) return;
         try {

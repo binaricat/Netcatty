@@ -639,6 +639,151 @@ test("main window leaves primary-modifier reload-like shortcuts available to ren
   assert.deepEqual(ignoreMenuShortcutValues, [false]);
 });
 
+test("main window clears renderer readiness when the main frame starts navigating", async () => {
+  const webContentsHandlers = {};
+  const rendererReadyIds = new Set([7]);
+  const clearedReadyIds = [];
+
+  class BrowserWindowStub {
+    constructor() {
+      this.webContents = {
+        id: 7,
+        on(channel, handler) {
+          webContentsHandlers[channel] = handler;
+        },
+        once() {},
+        isDestroyed() {
+          return false;
+        },
+        isCrashed() {
+          return false;
+        },
+        setIgnoreMenuShortcuts() {},
+        setWindowOpenHandler() {},
+        openDevTools() {},
+      };
+    }
+
+    on() {}
+    once() {}
+    isDestroyed() { return false; }
+    isMaximized() { return false; }
+    isFullScreen() { return false; }
+    getBounds() { return { x: 0, y: 0, width: 1400, height: 900 }; }
+    setBackgroundColor() {}
+    setOpacity() {}
+    async loadURL() {}
+    close() {}
+  }
+
+  const api = createMainWindowApi({
+    mainWindow: null,
+    electronApp: null,
+    currentTheme: "light",
+    isQuitting: false,
+    pendingWindowStateWrite: null,
+    queuedWindowState: null,
+    windowStateCloseRequested: false,
+    DEFAULT_WINDOW_WIDTH: 1400,
+    DEFAULT_WINDOW_HEIGHT: 900,
+    MIN_WINDOW_WIDTH: 1100,
+    MIN_WINDOW_HEIGHT: 640,
+    V8_CACHE_OPTIONS: "bypassHeatCheck",
+    THEME_COLORS: { light: { background: "#fff" } },
+    unhealthyWebContentsIds: new Set(),
+    rendererReadySeenByWebContentsId: rendererReadyIds,
+    __dirname,
+    URL,
+    require,
+    console,
+    setTimeout,
+    clearTimeout,
+    getGlobalShortcutBridge() {
+      return { handleWindowClose: () => false };
+    },
+    debugLog() {},
+    resolveFrontendBackgroundColor() { return null; },
+    loadWindowState() { return null; },
+    getDevRendererBaseUrl(url) { return url; },
+    getWindowBoundsState() { return null; },
+    queueWindowStateSave() {},
+    saveWindowStateSync() {},
+    setupDeferredShow() {},
+    clearRendererReadyForWebContents(id) {
+      clearedReadyIds.push(id);
+      rendererReadyIds.delete(id);
+    },
+    createExternalOnlyWindowOpenHandler() { return {}; },
+    createAppWindowOpenHandler() { return {}; },
+    attachOAuthLoadingOverlay() {},
+    registerWindowHandlers() {},
+    requestWindowCommandClose() {
+      return true;
+    },
+    shouldCloseWindowFromInput,
+    applyWindowOpacityToWindow() {},
+    closeSettingsWindow() {},
+    hideSettingsWindow() {},
+  });
+
+  await api.createWindow(
+    {
+      BrowserWindow: BrowserWindowStub,
+      nativeTheme: {},
+      app: {},
+      screen: {},
+      shell: {},
+      ipcMain: {},
+    },
+    {
+      preload: "/tmp/preload.cjs",
+      devServerUrl: "http://localhost:5173",
+      isDev: true,
+      appIcon: null,
+      isMac: false,
+      electronDir: __dirname,
+    },
+  );
+
+  assert.equal(rendererReadyIds.has(7), true);
+  assert.equal(typeof webContentsHandlers["did-start-navigation"], "function");
+  assert.equal(typeof webContentsHandlers["will-navigate"], "function");
+
+  webContentsHandlers["did-start-navigation"]({}, "app://netcatty/index.html", false, false);
+  assert.equal(rendererReadyIds.has(7), true);
+  assert.deepEqual(clearedReadyIds, []);
+
+  webContentsHandlers["did-start-navigation"]({}, "app://netcatty/index.html#/vault", true, true);
+  assert.equal(rendererReadyIds.has(7), true);
+  assert.deepEqual(clearedReadyIds, []);
+
+  let blockedNavigation = false;
+  webContentsHandlers["will-navigate"](
+    { preventDefault() { blockedNavigation = true; } },
+    "https://example.com/",
+  );
+  assert.equal(blockedNavigation, true);
+
+  webContentsHandlers["did-start-navigation"]({}, "https://example.com/", false, true);
+  assert.equal(rendererReadyIds.has(7), true);
+  assert.deepEqual(clearedReadyIds, []);
+
+  let blockedAppPortNavigation = false;
+  webContentsHandlers["will-navigate"](
+    { preventDefault() { blockedAppPortNavigation = true; } },
+    "app://netcatty:123/index.html",
+  );
+  assert.equal(blockedAppPortNavigation, true);
+
+  webContentsHandlers["did-start-navigation"]({}, "app://netcatty:123/index.html", false, true);
+  assert.equal(rendererReadyIds.has(7), true);
+  assert.deepEqual(clearedReadyIds, []);
+
+  webContentsHandlers["did-start-navigation"]({}, "app://netcatty/index.html", false, true);
+  assert.equal(rendererReadyIds.has(7), false);
+  assert.deepEqual(clearedReadyIds, [7]);
+});
+
 test("createWindow registers each main window as an independent app window", async () => {
   const registered = [];
   const unregistered = [];

@@ -685,6 +685,11 @@ function resolveRendererReady(wcId) {
   }
 }
 
+function clearRendererReadyForWebContents(wcId) {
+  if (!wcId) return;
+  rendererReadySeenByWebContentsId.delete(wcId);
+}
+
 function isWindowUsable(win, options = {}) {
   const requireVisible = options.requireVisible === true;
   if (!win || typeof win.isDestroyed !== "function" || win.isDestroyed()) {
@@ -881,6 +886,7 @@ const mainWindowApi = createMainWindowApi({
   queueWindowStateSave,
   saveWindowStateSync,
   setupDeferredShow,
+  clearRendererReadyForWebContents,
   createExternalOnlyWindowOpenHandler,
   createAppWindowOpenHandler,
   attachOAuthLoadingOverlay,

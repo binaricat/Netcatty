@@ -14,6 +14,10 @@ module.exports = {
             schemes: ['ssh']
         },
         {
+            name: 'Telnet URL',
+            schemes: ['telnet']
+        },
+        {
             name: 'JumpServer URL',
             schemes: ['jms']
         }

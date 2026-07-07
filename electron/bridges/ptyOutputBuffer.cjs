@@ -31,13 +31,14 @@
  * @returns {{ bufferData: (data: string, meta?: object) => void, flush: () => void, flushPaced: (onDrained?: () => void) => void, takePending: () => string, takePendingEntry: () => { data: string, meta?: object }, discard: () => number }}
  */
 function createPtyOutputBuffer(sendFn, options = {}) {
-  const maxBufferSize = options.maxBufferSize ?? 16384; // 16KB
-  const maxFloodBufferSize = options.maxFloodBufferSize ?? Math.max(maxBufferSize * 4, maxBufferSize);
+  const maxBufferSize = options.maxBufferSize ?? 128 * 1024;
+  const maxFloodBufferSize = options.maxFloodBufferSize ?? Math.max(768 * 1024, maxBufferSize);
+  const defaultMaxPendingBytes = Math.max(maxFloodBufferSize * 4, 8 * 1024 * 1024);
   const maxPendingBytes = Math.max(
     maxFloodBufferSize,
-    options.maxPendingBytes ?? (2 * 1024 * 1024),
+    options.maxPendingBytes ?? defaultMaxPendingBytes,
   );
-  const floodFlushDelayMs = options.floodFlushDelayMs ?? 8;
+  const floodFlushDelayMs = options.floodFlushDelayMs ?? 1;
   const maxDroppedStateScanBytes = Math.max(256, options.maxDroppedStateScanBytes ?? 2048);
   const shouldAcceptOutput = options.shouldAcceptOutput ?? (() => true);
   const onPendingBytesChange = typeof options.onPendingBytesChange === "function"
