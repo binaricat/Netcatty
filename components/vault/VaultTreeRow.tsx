@@ -94,6 +94,7 @@ type VaultTreeGroupRowProps = Omit<React.HTMLAttributes<HTMLDivElement>, "childr
   onRenameCommit?: (name: string) => void;
   onRenameCancel?: () => void;
   actions?: React.ReactNode;
+  labelActions?: React.ReactNode;
   icon?: React.ReactNode;
   iconSize?: number;
   meta?: React.ReactNode;
@@ -113,6 +114,7 @@ export const VaultTreeGroupRow: React.FC<VaultTreeGroupRowProps> = ({
   onRenameCommit,
   onRenameCancel,
   actions,
+  labelActions,
   icon,
   iconSize = 18,
   meta,
@@ -161,7 +163,10 @@ export const VaultTreeGroupRow: React.FC<VaultTreeGroupRowProps> = ({
           className="flex-1 font-semibold"
         />
       ) : (
-        <span className="flex h-5 min-w-0 flex-1 translate-y-px items-center truncate leading-none">{name}</span>
+        <span className="flex h-5 min-w-0 flex-1 translate-y-px items-center gap-1.5 leading-none">
+          <span className="min-w-0 truncate">{name}</span>
+          {labelActions}
+        </span>
       )}
       {meta}
       {typeof count === "number" && count > 0 && (

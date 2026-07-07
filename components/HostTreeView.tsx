@@ -272,15 +272,17 @@ const TreeNode: React.FC<TreeNodeProps> = ({
                     Managed
                   </span>
                 )}
-                actions={(
+                labelActions={(
                   <button
-                    className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md opacity-0 transition-colors hover:bg-secondary/80 group-hover:opacity-100"
+                    aria-label={`Edit ${node.name}`}
+                    data-host-tree-group-edit-button={node.path}
+                    className="flex h-5 w-5 shrink-0 items-center justify-center rounded opacity-0 transition-colors hover:bg-secondary/80 group-hover:opacity-100"
                     onClick={(e) => {
                       e.stopPropagation();
                       onEditGroup(node.path);
                     }}
                   >
-                    <Edit2 size={13} />
+                    <Edit2 size={12} />
                   </button>
                 )}
               />
@@ -463,6 +465,17 @@ const HostTreeItem: React.FC<HostTreeItemProps> = ({
             <div className="min-w-0 flex-1 leading-tight">
               <div className="flex items-center gap-1.5 truncate font-medium leading-4">
                 <span className="truncate">{host.label}</span>
+                <button
+                  aria-label={`Edit ${host.label}`}
+                  data-host-tree-host-edit-button={host.id}
+                  className="flex h-5 w-5 shrink-0 items-center justify-center rounded transition-colors opacity-0 hover:bg-secondary/80 group-hover:opacity-100"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onEditHost(host);
+                  }}
+                >
+                  <Edit2 size={12} />
+                </button>
                 <HostNotesIndicator notes={host.notes} />
               </div>
               <div className="truncate text-[11px] leading-4 text-muted-foreground">
@@ -470,7 +483,7 @@ const HostTreeItem: React.FC<HostTreeItemProps> = ({
               </div>
             </div>
           )}
-          actions={(
+          actions={(displayProtocol && displayProtocol !== 'ssh') || tags.length > 0 ? (
             <div className="ml-2 flex shrink-0 items-center gap-1.5 opacity-0 transition-opacity group-hover:opacity-100">
               {displayProtocol && displayProtocol !== 'ssh' && (
                 <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[10px] leading-none text-primary">
@@ -483,17 +496,8 @@ const HostTreeItem: React.FC<HostTreeItemProps> = ({
                   {tags.length > 2 && '...'}
                 </span>
               )}
-              <button
-                className="flex h-6 w-6 items-center justify-center rounded-md transition-colors hover:bg-secondary/80"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onEditHost(host);
-                }}
-              >
-                <Edit2 size={12} />
-              </button>
             </div>
-          )}
+          ) : undefined}
         />
       </ContextMenuTrigger>
       <HostTreeHostContextMenuContent

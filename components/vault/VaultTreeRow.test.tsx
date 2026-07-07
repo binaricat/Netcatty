@@ -29,6 +29,29 @@ test("VaultTreeGroupRow exposes shared selected and expanded tree row state", ()
   assert.match(markup, /3/);
 });
 
+test("VaultTreeGroupRow can render an action beside the group label", () => {
+  const markup = renderToStaticMarkup(
+    <VaultTreeGroupRow
+      name="Production"
+      depth={1}
+      count={3}
+      labelActions={<button data-label-action="edit">Edit</button>}
+      actions={<span data-row-action="count">Row action</span>}
+    />,
+  );
+
+  const labelIndex = markup.indexOf("Production");
+  const labelActionIndex = markup.indexOf('data-label-action="edit"');
+  const countIndex = markup.indexOf(">3<", labelActionIndex);
+  const rowActionIndex = markup.indexOf('data-row-action="count"', countIndex);
+
+  assert.ok(labelIndex >= 0);
+  assert.ok(labelActionIndex > labelIndex);
+  assert.ok(countIndex > labelActionIndex);
+  assert.ok(rowActionIndex > countIndex);
+});
+
+
 test("VaultTreeItemRow exposes shared selected item state", () => {
   const markup = renderToStaticMarkup(
     <VaultTreeItemRow
