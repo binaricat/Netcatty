@@ -397,6 +397,9 @@ export const enCoreMessages: Messages = {
   'settings.terminal.behavior.middleClick.menu': 'Show menu',
   'settings.terminal.behavior.middleClick.paste': 'Paste',
   'settings.terminal.behavior.middleClick.disabled': 'Do nothing',
+  'settings.terminal.behavior.wordSeparators': 'Word separators',
+  'settings.terminal.behavior.wordSeparators.desc':
+    'Characters treated as word boundaries for double-click selection. Spaces count too; add =, comma, or : for strings like uid=name.',
   'settings.terminal.behavior.bracketedPaste': 'Bracketed paste mode',
   'settings.terminal.behavior.bracketedPaste.desc':
     'Wrap pasted text with escape sequences so the shell can distinguish paste from typed input. Disable if you see ^[[200~ artifacts.',

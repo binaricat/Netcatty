@@ -15,6 +15,8 @@ export type LinkModifier = 'none' | 'ctrl' | 'alt' | 'meta';
 export type TerminalEmulationType = 'xterm-256color' | 'xterm-16color' | 'xterm';
 export type DynamicTabTitleMode = 'off' | 'agent' | 'all';
 
+export const DEFAULT_TERMINAL_WORD_SEPARATORS = ' ()[]{}\'"';
+
 // Keyword highlighting configuration
 export interface KeywordHighlightRule {
   id: string;
@@ -275,11 +277,15 @@ export const normalizeTerminalSettings = (
   settings?: Partial<TerminalSettings> | null,
 ): TerminalSettings => {
   const middleClickBehavior = resolveMiddleClickBehavior(settings);
+  const wordSeparators = typeof settings?.wordSeparators === 'string'
+    ? settings.wordSeparators
+    : DEFAULT_TERMINAL_SETTINGS.wordSeparators;
   const mergedSettings = {
     ...DEFAULT_TERMINAL_SETTINGS,
     ...(settings ?? {}),
     middleClickBehavior,
     middleClickPaste: middleClickBehavior === 'paste',
+    wordSeparators,
     dynamicTabTitleMode: isDynamicTabTitleMode(settings?.dynamicTabTitleMode)
       ? settings.dynamicTabTitleMode
       : DEFAULT_TERMINAL_SETTINGS.dynamicTabTitleMode,
@@ -336,7 +342,7 @@ const DEFAULT_TERMINAL_SETTINGS: TerminalSettings = {
   middleClickBehavior: 'paste',
   copyOnSelect: false,
   middleClickPaste: true,
-  wordSeparators: ' ()[]{}\'"',
+  wordSeparators: DEFAULT_TERMINAL_WORD_SEPARATORS,
   linkModifier: 'none',
   keywordHighlightEnabled: true,
   keywordHighlightRules: DEFAULT_KEYWORD_HIGHLIGHT_RULES,

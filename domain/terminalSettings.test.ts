@@ -80,6 +80,23 @@ test("normalizeTerminalSettings defaults middle-click behavior to paste", () => 
   assert.equal(settings.middleClickPaste, true);
 });
 
+test("normalizeTerminalSettings defaults word separators to xterm-compatible boundaries", () => {
+  assert.equal(normalizeTerminalSettings().wordSeparators, " ()[]{}'\"");
+});
+
+test("normalizeTerminalSettings preserves custom word separators", () => {
+  const custom = " ()[]{}'\"=,:";
+
+  assert.equal(normalizeTerminalSettings({ wordSeparators: custom }).wordSeparators, custom);
+});
+
+test("normalizeTerminalSettings falls back when word separators are not a string", () => {
+  assert.equal(
+    normalizeTerminalSettings({ wordSeparators: null as never }).wordSeparators,
+    " ()[]{}'\"",
+  );
+});
+
 test("normalizeTerminalSettings migrates disabled legacy middle-click paste", () => {
   const settings = normalizeTerminalSettings({ middleClickPaste: false });
 

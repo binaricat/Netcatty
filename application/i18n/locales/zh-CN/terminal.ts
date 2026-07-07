@@ -253,6 +253,9 @@ export const zhCNTerminalMessages: Messages = {
   'settings.terminal.behavior.middleClick.menu': '显示菜单',
   'settings.terminal.behavior.middleClick.paste': '粘贴',
   'settings.terminal.behavior.middleClick.disabled': '无动作',
+  'settings.terminal.behavior.wordSeparators': '单词分隔符',
+  'settings.terminal.behavior.wordSeparators.desc':
+    '双击选择文本时作为边界的字符。空格也算；可添加 =、逗号或 :，方便选择 uid=name 里的部分内容。',
   'settings.terminal.behavior.bracketedPaste': '括号粘贴模式',
   'settings.terminal.behavior.bracketedPaste.desc':
     '粘贴文本时使用转义序列包裹，以便终端区分粘贴和键入。如果出现 ^[[200~ 字样请关闭此选项。',

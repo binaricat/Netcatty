@@ -1,4 +1,5 @@
 import React from "react";
+import { DEFAULT_TERMINAL_WORD_SEPARATORS } from "../../../domain/models";
 import type { DynamicTabTitleMode, LinkModifier, MiddleClickBehavior, RightClickBehavior, TerminalSettings } from "../../../domain/models";
 import { Input } from "../../ui/input";
 import { Label } from "../../ui/label";
@@ -73,6 +74,19 @@ export const TerminalBehaviorSettings: React.FC<TerminalBehaviorSettingsProps> =
             }))}
             onChange={(v) => updateTerminalSetting("middleClickBehavior", v as MiddleClickBehavior)}
             className="w-36"
+          />
+        </SettingRow>
+
+        <SettingRow
+          label={t("settings.terminal.behavior.wordSeparators")}
+          description={t("settings.terminal.behavior.wordSeparators.desc")}
+        >
+          <Input
+            value={terminalSettings.wordSeparators}
+            onChange={(e) => updateTerminalSetting("wordSeparators", e.target.value)}
+            placeholder={`${DEFAULT_TERMINAL_WORD_SEPARATORS}=,:`}
+            className="w-56 font-mono"
+            spellCheck={false}
           />
         </SettingRow>
 

@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import * as terminalBehaviorSettings from "./tabs/TerminalBehaviorSettings.tsx";
+
+const source = readFileSync(new URL("./tabs/TerminalBehaviorSettings.tsx", import.meta.url), "utf8");
 
 const middleClickBehaviorOptions = (
   terminalBehaviorSettings as {
@@ -29,4 +32,10 @@ test("dynamic tab title settings expose off, agent-only, and all modes", () => {
     dynamicTabTitleModeOptions.map((option) => option.value),
     ["off", "agent", "all"],
   );
+});
+
+test("terminal behavior settings expose word separator editing", () => {
+  assert.match(source, /settings\.terminal\.behavior\.wordSeparators/);
+  assert.match(source, /terminalSettings\.wordSeparators/);
+  assert.match(source, /updateTerminalSetting\("wordSeparators", e\.target\.value\)/);
 });

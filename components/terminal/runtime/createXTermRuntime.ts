@@ -105,7 +105,11 @@ import type {
   TerminalSettings,
   TerminalTheme,
 } from "../../../types";
-import { matchesKeyBinding, type Snippet } from "../../../domain/models";
+import {
+  DEFAULT_TERMINAL_WORD_SEPARATORS,
+  matchesKeyBinding,
+  type Snippet,
+} from "../../../domain/models";
 
 type TerminalBackendApi = {
   openExternalAvailable: () => boolean;
@@ -330,7 +334,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     ? performanceConfig.options.smoothScrollDuration
     : 0;
   const altIsMeta = settings?.altAsMeta ?? false;
-  const wordSeparator = settings?.wordSeparators ?? " ()[]{}'\"";
+  const wordSeparator = settings?.wordSeparators ?? DEFAULT_TERMINAL_WORD_SEPARATORS;
   const keywordHighlightRules = settings?.keywordHighlightRules ?? [];
   const keywordHighlightEnabled = settings?.keywordHighlightEnabled ?? false;
   const kittyKeyboardMode = createKittyKeyboardModeState();

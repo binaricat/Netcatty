@@ -374,6 +374,9 @@ export const ruCoreMessages: Messages = {
   'settings.terminal.behavior.middleClick.menu': 'Показать меню',
   'settings.terminal.behavior.middleClick.paste': 'Вставить',
   'settings.terminal.behavior.middleClick.disabled': 'Ничего не делать',
+  'settings.terminal.behavior.wordSeparators': 'Разделители слов',
+  'settings.terminal.behavior.wordSeparators.desc':
+    'Символы, которые считаются границами слова при выделении двойным щелчком. Пробел тоже учитывается; добавьте =, запятую или : для строк вроде uid=name.',
   'settings.terminal.behavior.bracketedPaste': 'Режим bracketed paste',
   'settings.terminal.behavior.bracketedPaste.desc':
     'Оборачивать вставляемый текст escape-последовательностями, чтобы оболочка отличала вставку от обычного ввода. Отключите, если видите артефакты вида ^[[200~.',
