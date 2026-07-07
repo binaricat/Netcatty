@@ -83,6 +83,7 @@ const {
   writeJmsDeepLinkEnabledPreference,
   writeSshDeepLinkEnabledPreference,
 } = require("./deepLink.cjs");
+const { getReusableMainWindow } = require("./mainWindowReuse.cjs");
 const {
   OPEN_TERMINAL_PATH_CHANNEL,
   collectOpenTerminalPathArgs,
@@ -345,18 +346,8 @@ function registerAppProtocol() {
 
 function focusMainWindow() {
   try {
-    const mainWin = getWindowManager().getMainWindow?.();
-    const win = mainWin && !mainWin.isDestroyed?.() ? mainWin : null;
+    const win = getReusableMainWindow({ getWindowManager });
     if (!win) return false;
-
-    // Check if the webContents has crashed or been destroyed
-    try {
-      if (win.webContents?.isCrashed?.()) {
-        console.warn('[Main] Main window webContents has crashed, destroying window');
-        win.destroy();
-        return false;
-      }
-    } catch {}
 
     // Cancel any in-flight close-to-tray hide so second-instance / dock-click
     // re-entry beats a pending leave-full-screen → hide sequence.
@@ -513,6 +504,12 @@ let mainWindowStartupPromise = null;
 
 async function createAndShowMainWindow() {
   if (mainWindowStartupPromise) return mainWindowStartupPromise;
+
+  const existingWin = getReusableMainWindow({ getWindowManager });
+  if (existingWin) {
+    focusMainWindow();
+    return existingWin;
+  }
 
   mainWindowStartupPromise = (async () => {
     processErrorController.beginMainWindowStartup();
