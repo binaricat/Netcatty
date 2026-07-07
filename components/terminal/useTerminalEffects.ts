@@ -915,6 +915,7 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
         recoverTerminalAfterBecomeVisible();
       } else {
         flushTerminalWritesAfterBecomeVisible();
+        flushPendingOutputScroll();
         scheduleLayoutRecoveryRefit([120, 350]);
       }
       return;
