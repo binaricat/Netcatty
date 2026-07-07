@@ -88,14 +88,15 @@ test('visible tab recovery drains hidden terminal writes before any fast-path re
   assert.ok(flushCallIndex > recoverIndex && flushCallIndex < fastPathIndex);
 });
 
-test('deferred visible tab recovery also drains hidden writes and scroll', () => {
-  const deferredBranchIndex = source.indexOf('} else {\n        flushTerminalWritesAfterBecomeVisible();');
-  const scrollIndex = source.indexOf('flushPendingOutputScroll();', deferredBranchIndex);
-  const scheduleIndex = source.indexOf('scheduleLayoutRecoveryRefit([120, 350])', deferredBranchIndex);
-
-  assert.ok(deferredBranchIndex >= 0);
-  assert.ok(scrollIndex > deferredBranchIndex);
-  assert.ok(scheduleIndex > scrollIndex);
+test('visible split-pane recovery no longer defers background panes', () => {
+  assert.match(
+    source,
+    /if \(becameVisible\) \{\s*recoverTerminalAfterBecomeVisible\(\);\s*return;\s*\}/,
+  );
+  assert.doesNotMatch(source, /shouldRefitImmediatelyOnShow/);
+  assert.doesNotMatch(source, /shouldRecoverWebglOnShow/);
+  assert.doesNotMatch(source, /const runDeferred = \(\) => \{/);
+  assert.doesNotMatch(source, /scheduleLayoutRecoveryRefit\(\[120, 350\]\)/);
 });
 
 test('immediate tab recovery marks webgl recovery to skip the delayed duplicate pass', () => {

@@ -810,12 +810,6 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
     return () => window.removeEventListener(TERMINAL_SESSION_RESTORE_FOCUS_EVENT, handleRestoreFocus);
   }, [sessionId]);
 
-  const shouldRefitImmediatelyOnShow = () => (
-    !inWorkspace || isFocusMode || isFocused
-  );
-
-  const shouldRecoverWebglOnShow = () => shouldRefitImmediatelyOnShow();
-
   const layoutAlreadyCommitted = () => (
     lastCommittedVisibleLayoutKeyRef.current === paneLayoutKey
   );
@@ -896,8 +890,8 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
   // Tab switches hide inactive panes without resizing xterm; becoming visible
   // again does not always fire ResizeObserver, leaving a gap below content.
   // Skip during split-divider drag — refit runs once when split resizing ends.
-  // In multi-split workspaces only the focused pane refits on tab switch; other
-  // visible panes defer so N terminals don't block the main thread together.
+  // Recover every visible pane immediately so split workspaces return with
+  // fresh terminal buffers, scroll positions, and PTY sizes.
   useLayoutEffect(() => {
     const becameVisible = isVisible && !wasVisibleRef.current;
 
@@ -911,17 +905,9 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
     wasVisibleRef.current = true;
 
     if (becameVisible) {
-      if (shouldRefitImmediatelyOnShow()) {
-        recoverTerminalAfterBecomeVisible();
-      } else {
-        flushTerminalWritesAfterBecomeVisible();
-        flushPendingOutputScroll();
-        scheduleLayoutRecoveryRefit([120, 350]);
-      }
+      recoverTerminalAfterBecomeVisible();
       return;
     }
-
-    if (!shouldRefitImmediatelyOnShow()) return;
 
     if (layoutAlreadyCommitted()) {
       safeFit({ requireVisible: true });
@@ -931,36 +917,7 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
     commitVisibleLayout();
     runImmediateRefit({ force: true, repeatOnNextFrame: false });
     finishLayoutRecoveryAfterFit();
-  }, [isVisible, paneLayoutKey, splitResizeActive, inWorkspace, isFocusMode, isFocused]);
-
-  // Defer refit for non-focused split panes that became visible on a tab switch.
-  useEffect(() => {
-    if (!isVisible || isResizing || shouldRefitImmediatelyOnShow()) return;
-    if (layoutAlreadyCommitted()) return;
-
-    let cancelled = false;
-    const runDeferred = () => {
-      if (cancelled || !isVisibleRef.current) return;
-      if (lastCommittedVisibleLayoutKeyRef.current === paneLayoutKey) return;
-      runImmediateRefit({ force: true, repeatOnNextFrame: false });
-      finishLayoutRecoveryAfterFit();
-      commitVisibleLayout();
-    };
-
-    if (typeof requestIdleCallback === 'function') {
-      const idleId = requestIdleCallback(runDeferred, { timeout: 250 });
-      return () => {
-        cancelled = true;
-        cancelIdleCallback(idleId);
-      };
-    }
-
-    const timerId = setTimeout(runDeferred, 120);
-    return () => {
-      cancelled = true;
-      clearTimeout(timerId);
-    };
-  }, [isVisible, paneLayoutKey, isResizing, inWorkspace, isFocusMode, isFocused]);
+  }, [isVisible, paneLayoutKey, splitResizeActive]);
 
   useLayoutEffect(() => {
     if (isVisible) return;
@@ -972,7 +929,7 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
   }, [isVisible]);
 
   useEffect(() => {
-    if (!isVisible || !shouldRecoverWebglOnShow()) return;
+    if (!isVisible) return;
 
     const hiddenMs = hiddenAtRef.current
       ? Date.now() - hiddenAtRef.current
@@ -1007,7 +964,7 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
       flushPendingOutputScroll();
     }, 50);
     return () => clearTimeout(timer);
-  }, [isVisible, paneLayoutKey, inWorkspace, isFocusMode, isFocused]);
+  }, [isVisible, paneLayoutKey]);
 
 
   useEffect(() => {
@@ -1496,12 +1453,6 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
   useEffect(() => {
     if (!isVisible) return;
 
-    // App resume / refocus only needs a GPU+fit recovery on the active pane;
-    // non-focused split panes already refit when focused (see shouldRefitImmediatelyOnShow).
-    const shouldRecoverOnAppResume = () => (
-      !inWorkspace || isFocusMode || isFocused
-    );
-
     const recoverWebglRendererOnAppResume = () => {
       xtermRuntimeRef.current?.ensureWebglRenderer();
     };
@@ -1513,18 +1464,17 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
         flushPendingTerminalWritesOnResume(term);
         forceTerminalRepaintBypassingAnimationFrame(term);
       }
+      flushPendingOutputScroll();
       recoverWebglRendererOnAppResume();
-      scheduleLayoutRecoveryRefit();
+      scheduleLayoutRecoveryRefit([0, 100, 300]);
     };
 
     const handleVisibilityChange = () => {
       if (document.visibilityState !== 'visible') return;
-      if (!shouldRecoverOnAppResume()) return;
       recoverTerminalOnAppResume();
     };
 
     const handleWindowFocus = () => {
-      if (!shouldRecoverOnAppResume()) return;
       recoverTerminalOnAppResume();
     };
 
@@ -1532,7 +1482,6 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
     window.addEventListener('focus', handleWindowFocus);
 
     const unsubscribeWindowShown = terminalBackend.onWindowShown?.(() => {
-      if (!shouldRecoverOnAppResume()) return;
       recoverTerminalOnAppResume();
     });
 
@@ -1548,7 +1497,7 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
       unsubscribeWindowShown?.();
       unsubscribeFullscreen?.();
     };
-  }, [isVisible, inWorkspace, isFocusMode, isFocused, terminalBackend]);
+  }, [isVisible, terminalBackend]);
 
 
   // Only register the snippet executor once the terminal session is ready.
