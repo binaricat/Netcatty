@@ -137,8 +137,8 @@ function createMainWindowApi(ctx) {
         console.error("[WindowManager] Renderer process gone:", details);
       });
 
-      win.webContents.on("did-start-navigation", (_event, _url, _isInPlace, isMainFrame) => {
-        if (isMainFrame === false) return;
+      win.webContents.on("did-start-navigation", (_event, _url, isInPlace, isMainFrame) => {
+        if (isMainFrame === false || isInPlace === true) return;
         try {
           if (typeof clearRendererReadyForWebContents === "function") {
             clearRendererReadyForWebContents(win.webContents?.id);
