@@ -786,6 +786,27 @@ test("zmodem listeners survive reconnect-style closeSession and resume after res
   }
 });
 
+test("onWindowFocusRequested is wired to the focus-requested IPC", () => {
+  const preload = loadPreloadWithFakeElectron();
+  try {
+    const calls = [];
+    const unsubscribe = preload.api.onWindowFocusRequested(() => {
+      calls.push("focus");
+    });
+
+    preload.handlers.get("netcatty:window:focus-requested")?.();
+
+    assert.deepEqual(calls, ["focus"]);
+
+    unsubscribe();
+    preload.handlers.get("netcatty:window:focus-requested")?.();
+
+    assert.deepEqual(calls, ["focus"]);
+  } finally {
+    preload.cleanup();
+  }
+});
+
 test("onZmodemEvent unsubscribe removes empty listener set", () => {
   const zmodemListeners = new Map();
   const api = createPreloadApi({

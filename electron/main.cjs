@@ -1209,10 +1209,10 @@ if (!gotLock) {
           commitQuit();
           return;
         }
+        const wm = getWindowManager();
         for (const win of dirtyWindows) {
           try {
-            if (typeof win.show === "function" && !win.isVisible?.()) win.show();
-            if (typeof win.focus === "function") win.focus();
+            wm.showAndFocusMainWindow?.(win);
           } catch {
             // ignore
           }
@@ -1228,7 +1228,6 @@ if (!gotLock) {
         // autoUpdateBridge's watchdog; otherwise close-to-tray and other
         // !isQuitting-gated behavior stay bypassed while the app keeps running
         // (#1215 review).
-        const wm = getWindowManager();
         if (wm.isQuittingForUpdate?.()) wm.setQuittingForUpdate(false);
       })
       .catch((err) => {
