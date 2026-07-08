@@ -10,13 +10,22 @@ import {
 import { resolveAppIconVariant, type AppIconVariant } from '../../domain/appIconVariant';
 import { localStorageAdapter } from '../../infrastructure/persistence/localStorageAdapter';
 import { netcattyBridge } from '../../infrastructure/services/netcattyBridge';
+import {
+  parseWindowOpacityRecord,
+  serializeWindowOpacityRecord,
+  shouldApplyWindowOpacityRecord,
+  shouldBroadcastWindowOpacityChange,
+  type WindowOpacityMutationSource,
+  type WindowOpacityRecord,
+} from './windowOpacitySync';
 
 interface UseSystemSettingsEffectsParams {
   enabled?: boolean;
   toggleWindowHotkey: string;
   globalHotkeyEnabled: boolean;
   closeToTray: boolean;
-  windowOpacity: number;
+  windowOpacityRecord: WindowOpacityRecord;
+  windowOpacityMutationSourceRef: MutableRefObject<WindowOpacityMutationSource>;
   appIconVariant: AppIconVariant;
   autoUpdateEnabled: boolean;
   persistMountedRef: MutableRefObject<boolean>;
@@ -31,7 +40,8 @@ export function useSystemSettingsEffects({
   toggleWindowHotkey,
   globalHotkeyEnabled,
   closeToTray,
-  windowOpacity,
+  windowOpacityRecord,
+  windowOpacityMutationSourceRef,
   appIconVariant,
   autoUpdateEnabled,
   persistMountedRef,
@@ -110,13 +120,36 @@ export function useSystemSettingsEffects({
   useEffect(() => {
     if (!enabled) return;
     const bridge = netcattyBridge.get();
-    bridge?.setWindowOpacity?.(windowOpacity).catch((err) => {
+    bridge?.setWindowOpacity?.(windowOpacityRecord.opacity).catch((err) => {
       console.warn('[WindowOpacity] Failed to apply window opacity:', err);
     });
-    localStorageAdapter.writeString(STORAGE_KEY_WINDOW_OPACITY, String(windowOpacity));
-    if (!persistMountedRef.current) return;
-    notifySettingsChanged(STORAGE_KEY_WINDOW_OPACITY, windowOpacity);
-  }, [enabled, windowOpacity, notifySettingsChanged, persistMountedRef]);
+    // Never let a stale effect overwrite a newer revision already on disk.
+    const stored = parseWindowOpacityRecord(
+      localStorageAdapter.readString(STORAGE_KEY_WINDOW_OPACITY),
+    );
+    if (
+      shouldApplyWindowOpacityRecord(stored, windowOpacityRecord)
+      || stored.version === windowOpacityRecord.version
+    ) {
+      localStorageAdapter.writeString(
+        STORAGE_KEY_WINDOW_OPACITY,
+        serializeWindowOpacityRecord(windowOpacityRecord),
+      );
+    }
+    const decision = shouldBroadcastWindowOpacityChange(
+      windowOpacityMutationSourceRef.current,
+      persistMountedRef.current,
+    );
+    windowOpacityMutationSourceRef.current = decision.nextSource;
+    if (!decision.shouldBroadcast) return;
+    notifySettingsChanged(STORAGE_KEY_WINDOW_OPACITY, windowOpacityRecord);
+  }, [
+    enabled,
+    windowOpacityRecord,
+    windowOpacityMutationSourceRef,
+    notifySettingsChanged,
+    persistMountedRef,
+  ]);
 
   // Persist and sync app icon variant
   useEffect(() => {

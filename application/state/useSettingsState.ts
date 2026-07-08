@@ -132,6 +132,12 @@ import {
   isTerminalSidePanelAutoOpenTab,
   type TerminalSidePanelAutoOpenTab,
 } from '../../domain/terminalSidePanelAutoOpen';
+import {
+  parseWindowOpacityRecord,
+  shouldApplyWindowOpacityRecord,
+  type WindowOpacityMutationSource,
+  type WindowOpacityRecord,
+} from './windowOpacitySync';
 
 export const useSettingsState = (options: { enableSettingsSync?: boolean; enableSystemEffects?: boolean } = {}) => {
   const enableSettingsSync = options.enableSettingsSync !== false;
@@ -354,17 +360,34 @@ export const useSettingsState = (options: { enableSettingsSync?: boolean; enable
     if (stored === null) return true; // Default to enabled
     return stored === 'true';
   });
-  const [windowOpacity, setWindowOpacityState] = useState<number>(() => {
+  const [windowOpacityRecord, setWindowOpacityRecord] = useState<WindowOpacityRecord>(() => {
     const stored = readStoredString(STORAGE_KEY_WINDOW_OPACITY);
-    if (stored === null) return DEFAULT_WINDOW_OPACITY;
-    return clampWindowOpacity(stored);
+    if (stored === null) return { opacity: DEFAULT_WINDOW_OPACITY, version: 0 };
+    return parseWindowOpacityRecord(stored);
   });
+  const windowOpacity = windowOpacityRecord.opacity;
+  const windowOpacityMutationSourceRef = useRef<WindowOpacityMutationSource>('local');
   const setWindowOpacity = useCallback((nextValue: SetStateAction<number>) => {
-    setWindowOpacityState((prev) => {
+    windowOpacityMutationSourceRef.current = 'local';
+    setWindowOpacityRecord((prev) => {
       const candidate = typeof nextValue === 'function'
-        ? (nextValue as (prevState: number) => number)(prev)
+        ? (nextValue as (prevState: number) => number)(prev.opacity)
         : nextValue;
-      return clampWindowOpacity(candidate);
+      const nextOpacity = clampWindowOpacity(candidate);
+      if (nextOpacity === prev.opacity) return prev;
+      return { opacity: nextOpacity, version: prev.version + 1 };
+    });
+  }, []);
+  const applyIncomingWindowOpacity = useCallback((raw: unknown) => {
+    const incoming = parseWindowOpacityRecord(raw);
+    // Version gate so stale IPC/storage echoes cannot clobber a newer local
+    // drag revision (see #2018).
+    setWindowOpacityRecord((prev) => {
+      if (!shouldApplyWindowOpacityRecord(prev, incoming)) {
+        return prev;
+      }
+      windowOpacityMutationSourceRef.current = 'incoming';
+      return incoming;
     });
   }, []);
   const [appIconVariant, setAppIconVariantState] = useState<AppIconVariant>(() => {
@@ -749,7 +772,7 @@ export const useSettingsState = (options: { enableSettingsSync?: boolean; enable
     applyIncomingCustomKeyBindings,
     setIsHotkeyRecordingState,
     setGlobalHotkeyEnabled,
-    setWindowOpacity,
+    setWindowOpacity: applyIncomingWindowOpacity,
     setAppIconVariant,
     setAutoUpdateEnabled,
     setSftpAutoOpenSidebar,
@@ -801,7 +824,7 @@ export const useSettingsState = (options: { enableSettingsSync?: boolean; enable
     setSftpUseCompressedUpload, setSftpAutoOpenSidebar, setSftpFollowTerminalCwd, setSftpDefaultViewMode,
     setShowRecentHostsState, setShowOnlyUngroupedHostsInRootState, setShowSftpTabState, setShowHostTreeSidebarState, setTerminalSidePanelAutoOpenState, setTerminalSidePanelAutoOpenTabState, setShellOnlyTabNumberShortcutsState, setDisableTerminalFontZoomState, setRestorePreviousSessionState, setRestoreTerminalCwdState,
     setEditorWordWrapState, setSessionLogsEnabled, setSessionLogsDir, setSessionLogsFormat, setSessionLogsTimestampsEnabled, setSshDebugLogsEnabled, setSshDeepLinkEnabledState: applyIncomingSshDeepLinkEnabled, setJmsDeepLinkEnabledState: applyIncomingJmsDeepLinkEnabled,
-    setGlobalHotkeyEnabled, setWindowOpacity, setAppIconVariant, setAutoUpdateEnabled, setWorkspaceFocusStyleState,
+    setGlobalHotkeyEnabled, setWindowOpacity: applyIncomingWindowOpacity, setAppIconVariant, setAutoUpdateEnabled, setWorkspaceFocusStyleState,
     setSftpTransferConcurrencyState, applyIncomingCustomKeyBindings, mergeIncomingTerminalSettings,
   });
 
@@ -1173,7 +1196,8 @@ export const useSettingsState = (options: { enableSettingsSync?: boolean; enable
     toggleWindowHotkey,
     globalHotkeyEnabled,
     closeToTray,
-    windowOpacity,
+    windowOpacityRecord,
+    windowOpacityMutationSourceRef,
     appIconVariant,
     autoUpdateEnabled,
     persistMountedRef,

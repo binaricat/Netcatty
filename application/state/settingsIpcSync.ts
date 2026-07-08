@@ -48,7 +48,6 @@ import {
 import { resolveAppIconVariant, type AppIconVariant } from '../../domain/appIconVariant';
 import { netcattyBridge } from '../../infrastructure/services/netcattyBridge';
 import {
-  clampWindowOpacity,
   isValidUiFontId,
   migrateIncomingTerminalFontId,
 } from './settingsStateDefaults';
@@ -79,7 +78,7 @@ interface UseSettingsIpcSyncParams {
   applyIncomingCustomKeyBindings: (incoming: { bindings: CustomKeyBindings; version: number; origin: string }) => void;
   setIsHotkeyRecordingState: Dispatch<SetStateAction<boolean>>;
   setGlobalHotkeyEnabled: Dispatch<SetStateAction<boolean>>;
-  setWindowOpacity: Dispatch<SetStateAction<number>>;
+  setWindowOpacity: (raw: unknown) => void;
   setAppIconVariant: Dispatch<SetStateAction<AppIconVariant>>;
   setAutoUpdateEnabled: Dispatch<SetStateAction<boolean>>;
   setSftpAutoOpenSidebar: Dispatch<SetStateAction<boolean>>;
@@ -239,9 +238,8 @@ export function useSettingsIpcSync({
       if (key === STORAGE_KEY_GLOBAL_HOTKEY_ENABLED && typeof value === 'boolean') {
         setGlobalHotkeyEnabled((prev) => (prev === value ? prev : value));
       }
-      if (key === STORAGE_KEY_WINDOW_OPACITY && (typeof value === 'number' || typeof value === 'string')) {
-        const nextOpacity = clampWindowOpacity(value);
-        setWindowOpacity((prev) => (prev === nextOpacity ? prev : nextOpacity));
+      if (key === STORAGE_KEY_WINDOW_OPACITY) {
+        setWindowOpacity(value);
       }
       if (key === STORAGE_KEY_APP_ICON_VARIANT) {
         const nextVariant = resolveAppIconVariant(value);

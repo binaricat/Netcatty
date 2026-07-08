@@ -54,7 +54,6 @@ import {
 } from '../../infrastructure/config/storageKeys';
 import { resolveAppIconVariant, type AppIconVariant } from '../../domain/appIconVariant';
 import {
-  clampWindowOpacity,
   isValidHslToken,
   isValidTheme,
   isValidUiFontId,
@@ -148,7 +147,7 @@ interface UseSettingsStorageSyncParams {
   setSshDeepLinkEnabledState: (enabled: boolean) => void;
   setJmsDeepLinkEnabledState: (enabled: boolean) => void;
   setGlobalHotkeyEnabled: Dispatch<SetStateAction<boolean>>;
-  setWindowOpacity: Dispatch<SetStateAction<number>>;
+  setWindowOpacity: (raw: unknown) => void;
   setAppIconVariant: Dispatch<SetStateAction<AppIconVariant>>;
   setAutoUpdateEnabled: Dispatch<SetStateAction<boolean>>;
   setWorkspaceFocusStyleState: Dispatch<SetStateAction<'dim' | 'border'>>;
@@ -474,10 +473,7 @@ export function useSettingsStorageSync({
         }
       }
       if (e.key === STORAGE_KEY_WINDOW_OPACITY && e.newValue !== null) {
-        const newValue = clampWindowOpacity(e.newValue);
-        if (newValue !== s.windowOpacity) {
-          setWindowOpacity(newValue);
-        }
+        setWindowOpacity(e.newValue);
       }
       if (e.key === STORAGE_KEY_APP_ICON_VARIANT && e.newValue !== null) {
         const newValue = resolveAppIconVariant(e.newValue);
