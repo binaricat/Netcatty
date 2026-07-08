@@ -645,6 +645,28 @@ test("SessionOutputBuffer trims partial overlap from sync-race trailingFresh", a
   assert.equal(await pending, "READY");
 });
 
+test("SessionOutputBuffer waitForPrompt does not rematch short seeded prompt after live output", async () => {
+  const buffer = new SessionOutputBuffer("s1");
+  buffer.replaceWithVisibleScreen("root@host:~# ");
+
+  // Live output clears preservedTailMatch; the old prompt must not win via the
+  // normal 512-byte window on a short seeded screen.
+  buffer.append("echo hi\nhi\n");
+
+  const pending = buffer.waitForAny(shellPromptPatterns(), 200, undefined, {
+    allowPreservedTailMatch: true,
+  });
+  let resolvedEarly = false;
+  void pending.then(() => {
+    resolvedEarly = true;
+  });
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.equal(resolvedEarly, false);
+
+  buffer.append("root@host:~# ");
+  assert.equal(await pending, 0);
+});
+
 test("stepsToJavaScript sends sensitive prompt result", () => {
   const code = stepsToJavaScript([
     { type: "send", value: "secret", sensitive: true },

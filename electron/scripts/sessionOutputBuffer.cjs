@@ -350,16 +350,23 @@ class SessionOutputBuffer {
   }
 
   /**
-   * Freshness for waitForPrompt (allowPreservedTailMatch): always the live
-   * tail window. Seeded full-viewport freshness must not make every visible
-   * prompt-looking line a readiness signal (e.g. an older `user@host:~$`
-   * above a long job). Generic waitForAny uses currentFreshBoundary instead.
+   * Freshness for waitForPrompt (allowPreservedTailMatch): live tail only, and
+   * never rematch prompts that only exist inside the still-unconsumed seeded
+   * viewport. After live output clears preservedTailMatch, a short seed like
+   * `root# ` must not satisfy waitForPrompt via the normal 512-byte window.
+   * Generic waitForAny uses currentFreshBoundary instead.
    */
   currentTailFreshBoundary() {
-    if (typeof this.seededLength === "number" && this.scanOffset >= this.seededLength) {
-      this.seededLength = null;
+    const textLength = this.getText().length;
+    let boundary = Math.max(this.scanOffset, textLength - FRESH_MATCH_TAIL_SLACK);
+    if (typeof this.seededLength === "number") {
+      if (this.scanOffset >= this.seededLength) {
+        this.seededLength = null;
+      } else {
+        boundary = Math.max(boundary, this.seededLength);
+      }
     }
-    return Math.max(this.scanOffset, this.getText().length - FRESH_MATCH_TAIL_SLACK);
+    return boundary;
   }
 
   /**
