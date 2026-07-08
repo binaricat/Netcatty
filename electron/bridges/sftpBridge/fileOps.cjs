@@ -313,6 +313,24 @@ function createFileOpsApi(ctx) {
     
       try {
         await client.put(readableStream, encodedPath);
+
+        // Guard against silent truncation on servers that mishandle large writes (#2022).
+        if (typeof client.stat === "function") {
+          const attrs = await client.stat(encodedPath);
+          const remoteSize = Number(attrs?.size);
+          if (Number.isFinite(remoteSize) && remoteSize !== totalBytes) {
+            try {
+              if (typeof client.delete === "function") {
+                await client.delete(encodedPath);
+              }
+            } catch {
+              // Best-effort cleanup of the corrupt remote file.
+            }
+            throw new Error(
+              `Upload size mismatch for ${remotePath}: expected ${totalBytes} bytes, got ${remoteSize}`,
+            );
+          }
+        }
     
         // Call the complete callback if provided, otherwise send IPC event
         if (typeof onComplete === 'function') {

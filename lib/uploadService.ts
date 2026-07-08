@@ -806,7 +806,9 @@ async function uploadEntries(
     settle(taskId);
   };
 
-  const UPLOAD_CONCURRENCY = 4;
+  // Keep external multi-file uploads conservative: each file may open an
+  // isolated fastPut channel with its own in-flight WRITE fanout.
+  const UPLOAD_CONCURRENCY = 2;
 
   try {
     let entryIndex = 0;
