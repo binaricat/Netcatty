@@ -84,6 +84,25 @@ function createMoshSessionApi(ctx) {
         fs.existsSync(path.join(terminfoDir, "78", "xterm-256color"));
       return hasXterm256 ? terminfoDir : null;
     }
+
+    /**
+     * Convert a Windows path into the POSIX form Cygwin ncurses expects for
+     * TERMINFO / TERMINFO_DIRS. A raw `C:\...\terminfo` value is unusable:
+     * ncurses splits TERMINFO_DIRS on `:`, so the drive letter becomes a
+     * one-character bogus directory and the real path is never searched.
+     * Issue #2025.
+     */
+    function toCygwinPath(winPath) {
+      if (typeof winPath !== "string" || !winPath) return winPath;
+      const normalized = winPath.replace(/\\/g, "/");
+      const drive = normalized.match(/^([A-Za-z]):(\/.*)?$/);
+      if (drive) {
+        const rest = drive[2] || "/";
+        return `/cygdrive/${drive[1].toLowerCase()}${rest}`;
+      }
+      if (normalized.startsWith("/")) return normalized;
+      return normalized;
+    }
     
     // Standard locations where distros / package managers install the compiled
     // terminfo database. Used as a fallback only — the bundled directory ships
@@ -108,8 +127,11 @@ function createMoshSessionApi(ctx) {
     
       if (platform === "win32") {
         if (!terminfoDir) return env;
-        env.TERMINFO = terminfoDir;
-        env.TERMINFO_DIRS = terminfoDir;
+        // Cygwin mosh-client reads these as POSIX paths. Keep the Windows
+        // form only when the caller already supplied a cygdrive path.
+        const cygTerminfo = toCygwinPath(terminfoDir);
+        env.TERMINFO = cygTerminfo;
+        env.TERMINFO_DIRS = cygTerminfo;
         return env;
       }
     
@@ -488,6 +510,24 @@ function createMoshSessionApi(ctx) {
           return;
         }
         cleanupMoshAuthTempFiles(moshAuth.tempFiles);
+
+        // Final chance: ConPTY / ssh often ends the stream on the MOSH CONNECT
+        // line with no trailing newline. Flush the sniffer's pending buffer so
+        // we still swap to mosh-client (issue #2025).
+        if (session.moshHandshakePhase === "ssh") {
+          const flushed = sniffer.flush();
+          if (flushed.visible && (flushed.visible.length || (typeof flushed.visible === "string" && flushed.visible))) {
+            const str = Buffer.isBuffer(flushed.visible) ? flushed.visible.toString("utf8") : flushed.visible;
+            if (str.length > 0) {
+              bufferData(str);
+              sessionLogStreamManager.appendData(sessionId, str);
+            }
+          }
+          if (flushed.parsed) {
+            session.moshHandshakePhase = "parsed";
+            session.moshHandshakeResult = flushed.parsed;
+          }
+        }
     
         if (session.moshHandshakePhase === "parsed" && session.moshHandshakeResult) {
           try {
@@ -725,6 +765,7 @@ function createMoshSessionApi(ctx) {
       addBundledMoshDllPath,
       addBundledMoshTerminfoEnv,
       addBundledMoshRuntimeEnv,
+      toCygwinPath,
       createMoshUtf8Decoder,
       buildMoshSshAuthArgs,
       cleanupMoshAuthTempFiles,

@@ -355,6 +355,17 @@ test("startMoshSession writes the saved passphrase when ssh prompts for the temp
   assert.deepEqual(h.spawns[0].writes, ["key-passphrase\r"]);
 });
 
+test("startMoshSession swaps to mosh-client when MOSH CONNECT has no trailing newline", async (t) => {
+  const h = makeHarness(t);
+  await h.bridge.startMoshSession(h.event, h.options, { moshClientLookup: h.lookupOpts });
+  // ConPTY / OpenSSH often exit immediately after printing the magic line
+  // with no final newline. The sniffer must flush on ssh exit (issue #2025).
+  h.spawns[0].emitData("MOSH CONNECT 60002 ABCDEFGHIJKLMNOPQRSTUV==");
+  h.spawns[0].emitExit({ exitCode: 0, signal: 0 });
+  assert.equal(h.spawns.length, 2);
+  assert.deepEqual(h.spawns[1].args.slice(-2), [h.options.hostname, "60002"]);
+});
+
 test("startMoshSession handshake path sends the existing exit event after mosh-client exits", async (t) => {
   const h = makeHarness(t);
   await h.bridge.startMoshSession(h.event, h.options, { moshClientLookup: h.lookupOpts });

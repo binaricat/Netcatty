@@ -30,8 +30,14 @@
 const path = require("node:path");
 const net = require("node:net");
 
-const MOSH_CONNECT_RE = /MOSH CONNECT[ \t]+(\d{1,5})[ \t]+([A-Za-z0-9+/]+={0,2})[ \t]*$/;
-const MOSH_IP_RE = /MOSH IP[ \t]+(\S+)[ \t]*/;
+// ConPTY (Windows) and some remote shells inject CSI / OSC sequences into
+// the SSH byte stream. Strip them before matching MOSH CONNECT so a line
+// like `MOSH CONNECT 60001 KEY==\x1b[?25h` still parses. Keep the original
+// offsets so the sniffer can redact the marker from the visible stream.
+// eslint-disable-next-line no-control-regex
+const ANSI_ESCAPE_RE = /\u001b(?:\[[0-9;?]*[ -/]*[@-~]|\][^\u0007\u001b]*(?:\u0007|\u001b\\)|[PX^_][^\u001b]*\u001b\\|.)/g;
+const MOSH_CONNECT_RE = /MOSH CONNECT[ \t]+(\d{1,5})[ \t]+([A-Za-z0-9+/]+={0,2})(?![A-Za-z0-9+/=])/;
+const MOSH_IP_RE = /MOSH IP[ \t]+(\S+)/;
 const PROTOCOL_MARKERS = ["MOSH CONNECT", "MOSH IP"];
 
 function shellQuote(value) {
@@ -43,23 +49,53 @@ function validMoshKey(key) {
   return key.length === 22 || (key.length === 24 && key.endsWith("=="));
 }
 
+function stripAnsiEscapes(text) {
+  return String(text || "").replace(ANSI_ESCAPE_RE, "");
+}
+
 function parseConnectLine(line) {
-  const m = MOSH_CONNECT_RE.exec(line);
+  const cleaned = stripAnsiEscapes(line);
+  const m = MOSH_CONNECT_RE.exec(cleaned);
   if (!m) return null;
   const port = Number(m[1]);
   const key = m[2];
   if (!Number.isFinite(port) || port <= 0 || port > 65535) return null;
   if (!validMoshKey(key)) return null;
+
+  // Map the cleaned match back onto the original line so redaction still
+  // covers ConPTY CSI that trailed the key (e.g. `\x1b[?25h`).
+  const connectIdx = line.indexOf("MOSH CONNECT");
+  if (connectIdx === -1) return null;
+  const keyIdx = line.indexOf(key, connectIdx);
+  if (keyIdx === -1) return null;
+  let matchEndOffset = keyIdx + key.length;
+  while (matchEndOffset < line.length) {
+    const ch = line[matchEndOffset];
+    if (ch === "\u001b") {
+      ANSI_ESCAPE_RE.lastIndex = matchEndOffset;
+      const esc = ANSI_ESCAPE_RE.exec(line);
+      if (esc && esc.index === matchEndOffset) {
+        matchEndOffset = ANSI_ESCAPE_RE.lastIndex;
+        continue;
+      }
+    }
+    if (ch === " " || ch === "\t") {
+      matchEndOffset += 1;
+      continue;
+    }
+    break;
+  }
+
   return {
     port,
     key,
-    matchStartOffset: m.index,
-    matchEndOffset: m.index + m[0].length,
+    matchStartOffset: connectIdx,
+    matchEndOffset,
   };
 }
 
 function parseMoshIpLine(line) {
-  const m = MOSH_IP_RE.exec(line);
+  const m = MOSH_IP_RE.exec(stripAnsiEscapes(line));
   if (!m) return null;
   const host = m[1];
   return net.isIP(host) ? host : null;
@@ -233,6 +269,22 @@ function createMoshConnectSniffer() {
   let parsed = null;
   let moshHost = null;
 
+  function makeParsed(connect) {
+    const result = { port: connect.port, key: connect.key };
+    if (moshHost) result.host = moshHost;
+    return result;
+  }
+
+  function tryParseRemainder(text) {
+    // ssh/mosh-server often exits right after printing MOSH CONNECT with no
+    // trailing newline. Also try the unterminated remainder so Windows ConPTY
+    // handshakes that end on the magic line still swap to mosh-client.
+    if (!text) return null;
+    const ip = parseMoshIpLine(text);
+    if (ip) moshHost = ip;
+    return parseConnectLine(text);
+  }
+
   return {
     feed(chunk) {
       if (parsed) return { visible: chunk, parsed: null };
@@ -256,8 +308,7 @@ function createMoshConnectSniffer() {
 
         const connect = parseConnectLine(line);
         if (connect) {
-          parsed = { port: connect.port, key: connect.key };
-          if (moshHost) parsed.host = moshHost;
+          parsed = makeParsed(connect);
           visibleText += line.slice(0, connect.matchStartOffset);
           const suffix = line.slice(connect.matchEndOffset);
           if (suffix) visibleText += suffix + newline;
@@ -277,6 +328,22 @@ function createMoshConnectSniffer() {
       }
 
       pending = pending.slice(consumed);
+
+      // Prefer parsing a held protocol fragment even before a newline arrives.
+      // ConPTY commonly appends CSI after MOSH CONNECT and then the PTY exits.
+      const heldConnect = tryParseRemainder(pending);
+      if (heldConnect && /MOSH CONNECT/.test(pending)) {
+        // Only accept when the held text looks like a complete CONNECT line
+        // (marker + key present). tryParseRemainder already validates the key.
+        parsed = makeParsed(heldConnect);
+        visibleText += pending.slice(0, heldConnect.matchStartOffset);
+        const suffix = pending.slice(heldConnect.matchEndOffset);
+        if (suffix) visibleText += suffix;
+        pending = "";
+        const visible = Buffer.isBuffer(chunk) ? Buffer.from(visibleText, "utf8") : visibleText;
+        return { visible, parsed };
+      }
+
       const holdIndex = potentialProtocolStart(pending);
       if (holdIndex === -1) {
         visibleText += pending;
@@ -296,7 +363,25 @@ function createMoshConnectSniffer() {
         pending = pending.slice(overflow);
       }
       const visible = Buffer.isBuffer(chunk) ? Buffer.from(visibleText, "utf8") : visibleText;
-      return { visible, parsed };
+      return { visible, parsed: null };
+    },
+    /**
+     * Drain any unterminated trailing protocol line when the SSH PTY exits.
+     * Returns { visible, parsed } using the same shape as feed().
+     */
+    flush() {
+      if (parsed || !pending) return { visible: "", parsed: null };
+      const connect = tryParseRemainder(pending);
+      if (connect) {
+        parsed = makeParsed(connect);
+        const visible = pending.slice(0, connect.matchStartOffset)
+          + pending.slice(connect.matchEndOffset);
+        pending = "";
+        return { visible, parsed };
+      }
+      const visible = pending;
+      pending = "";
+      return { visible, parsed: null };
     },
     isParsed() { return parsed !== null; },
   };

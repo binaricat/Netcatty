@@ -42,6 +42,42 @@ test("parseMoshConnect handles a Buffer chunk", () => {
   assert.equal(got && got.port, 60010);
 });
 
+test("parseMoshConnect tolerates ConPTY CSI controls after the key", () => {
+  // Windows ConPTY often appends cursor-visibility / SGR sequences to the
+  // same logical line as MOSH CONNECT. Without stripping them the $ anchor
+  // rejects a perfectly valid handshake (issue #2025).
+  const line = "MOSH CONNECT 60001 ABCDEFGHIJKLMNOPQRSTUV==\u001b[?25h\r\n";
+  const got = parseMoshConnect(line);
+  assert.deepEqual(got && { port: got.port, key: got.key }, {
+    port: 60001,
+    key: "ABCDEFGHIJKLMNOPQRSTUV==",
+  });
+});
+
+test("createMoshConnectSniffer parses ConPTY-mangled MOSH CONNECT lines", () => {
+  const sniffer = createMoshConnectSniffer();
+  const r = sniffer.feed(
+    "mosh-server (mosh 1.4.0)\r\n"
+    + "MOSH CONNECT 60002 ABCDEFGHIJKLMNOPQRSTUV==\u001b[?25h\r\n"
+    + "[mosh-server detached, pid = 908918]\r\n",
+  );
+  assert.deepEqual(r.parsed, { port: 60002, key: "ABCDEFGHIJKLMNOPQRSTUV==" });
+  assert.ok(!String(r.visible).includes("MOSH CONNECT"));
+  assert.ok(String(r.visible).includes("mosh-server detached"));
+});
+
+test("createMoshConnectSniffer.flush recovers a trailing MOSH CONNECT without newline", () => {
+  // ssh can exit before ConPTY emits the final CRLF. Without an EOF flush
+  // the sniffer would leave the CONNECT line in `pending` and the bridge
+  // would treat the handshake as a failure (issue #2025 error #2).
+  const sniffer = createMoshConnectSniffer();
+  const r1 = sniffer.feed("MOSH CONNECT 60003 ABCDEFGHIJKLMNOPQRSTUV==");
+  assert.equal(r1.parsed, null);
+  const r2 = sniffer.flush();
+  assert.deepEqual(r2.parsed, { port: 60003, key: "ABCDEFGHIJKLMNOPQRSTUV==" });
+  assert.ok(!String(r2.visible).includes("MOSH CONNECT"));
+});
+
 test("buildSshHandshakeCommand omits -t and uses default port", () => {
   const got = buildSshHandshakeCommand({ host: "example.com", username: "alice" });
   assert.equal(got.command, "ssh");
