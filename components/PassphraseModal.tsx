@@ -23,6 +23,9 @@ export interface PassphraseRequest {
   hostname?: string;
 }
 
+/** Opt-in only: do not default to remembering key passphrases (#2024). */
+export const DEFAULT_REMEMBER_PASSPHRASE = false;
+
 interface PassphraseModalProps {
   request: PassphraseRequest | null;
   onSubmit: (requestId: string, passphrase: string, remember: boolean) => void;
@@ -40,7 +43,7 @@ export const PassphraseModal: React.FC<PassphraseModalProps> = ({
   const [passphrase, setPassphrase] = useState("");
   const [showPassphrase, setShowPassphrase] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [rememberPassphrase, setRememberPassphrase] = useState(true);
+  const [rememberPassphrase, setRememberPassphrase] = useState(DEFAULT_REMEMBER_PASSPHRASE);
 
   // Reset state when request changes
   useEffect(() => {
@@ -48,7 +51,7 @@ export const PassphraseModal: React.FC<PassphraseModalProps> = ({
       setPassphrase("");
       setShowPassphrase(false);
       setIsSubmitting(false);
-      setRememberPassphrase(true);
+      setRememberPassphrase(DEFAULT_REMEMBER_PASSPHRASE);
     }
   }, [request]);
 
