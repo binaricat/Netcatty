@@ -1078,3 +1078,99 @@ test("script waitForPrompt can still use the current startup prompt", async () =
   assert.match(finalRun.logs.map((entry) => entry.message).join("\n"), /prompt index/);
   scriptBridge.removeSessionBuffer(sessionId);
 });
+
+test("script sendLine invalidates startup seed before later waits", async () => {
+  const handlers = new Map();
+  const sentRunUpdates = [];
+  const sessionId = "session-send-invalidates-seed";
+  const writes = [];
+
+  scriptBridge.removeSessionBuffer(sessionId);
+  scriptBridge.init({
+    sessions: new Map(),
+    electronModule: {
+      app: {
+        getVersion: () => "test",
+        getPath: () => process.cwd(),
+      },
+      webContents: {
+        fromId: () => null,
+      },
+    },
+    terminalBridge: {
+      writeToSession(_event, payload) {
+        writes.push(payload.data);
+      },
+    },
+    terminalWorkerManager: null,
+    getMainWindow: () => ({
+      webContents: {
+        id: 1,
+        send(channel, payload) {
+          if (channel === "netcatty:script:runs-updated") {
+            sentRunUpdates.push(payload.runs);
+          }
+          if (channel === "netcatty:script:screen-snapshot-request") {
+            setImmediate(() => {
+              handlers.get("netcatty:script:screen-snapshot-response")({}, {
+                requestId: payload.requestId,
+                snapshot: {
+                  rows: 24,
+                  cols: 80,
+                  currentRow: 0,
+                  lines: ["root@host:~# ", "old READY"],
+                },
+              });
+            });
+          }
+          if (channel === "netcatty:script:dialog-request") {
+            setImmediate(() => {
+              handlers.get("netcatty:script:dialog-response")({}, {
+                requestId: payload.requestId,
+                value: "abort",
+              });
+            });
+          }
+        },
+      },
+    }),
+  });
+  scriptBridge.registerHandlers({
+    handle(channel, handler) {
+      handlers.set(channel, handler);
+    },
+  });
+
+  const runPromise = handlers.get("netcatty:script:run")({}, {
+    scriptId: "send-invalidates-seed",
+    scriptLabel: "Send invalidates seed",
+    sessionId,
+    content: `
+      await nct.screen.sendLine('echo hi');
+      const prompt = await nct.screen.waitForPrompt(1000);
+      nct.log('prompt ' + prompt);
+      const value = await nct.screen.waitForText('READY', 1000);
+      nct.log('matched ' + value);
+    `,
+    permissionMode: "auto",
+  });
+
+  await delay(40);
+  assert.ok(writes.some((data) => String(data).includes("echo hi")));
+
+  // Startup seed must be gone: waits should not resolve on old READY / old prompt.
+  await delay(80);
+  const midRun = sentRunUpdates.at(-1).find((run) => run.scriptId === "send-invalidates-seed");
+  assert.equal(midRun.status, "running");
+
+  // Prompt first, then post-command READY — matching the common send-then-wait flow.
+  scriptBridge.appendSessionOutput(sessionId, "\necho hi\nroot@host:~# \nfresh READY\n");
+
+  await runPromise;
+
+  const finalRun = sentRunUpdates.at(-1).find((run) => run.scriptId === "send-invalidates-seed");
+  assert.equal(finalRun.status, "completed");
+  assert.match(finalRun.logs.map((entry) => entry.message).join("\n"), /prompt 0/);
+  assert.match(finalRun.logs.map((entry) => entry.message).join("\n"), /matched READY/);
+  scriptBridge.removeSessionBuffer(sessionId);
+});

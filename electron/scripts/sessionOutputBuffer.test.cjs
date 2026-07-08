@@ -689,6 +689,47 @@ test("SessionOutputBuffer keeps duplicate trailingFresh when stale viewport is a
   assert.equal(await buffer.waitForText("NEXT", 200), "NEXT");
 });
 
+test("SessionOutputBuffer invalidateStartupSeed blocks seeded waits after input", async () => {
+  const buffer = new SessionOutputBuffer("s1");
+  buffer.replaceWithVisibleScreen("root@host:~# \nold READY\n");
+
+  buffer.invalidateStartupSeed();
+
+  const pendingPrompt = buffer.waitForAny(
+    shellPromptPatterns(),
+    200,
+    undefined,
+    { allowPreservedTailMatch: true },
+  );
+  const pendingText = buffer.waitForText("READY", 200);
+  let promptEarly = false;
+  let textEarly = false;
+  void pendingPrompt.then(() => {
+    promptEarly = true;
+  });
+  void pendingText.then(() => {
+    textEarly = true;
+  });
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.equal(promptEarly, false);
+  assert.equal(textEarly, false);
+
+  buffer.append("command output\nroot@host:~# ");
+  assert.equal(await pendingPrompt, 0);
+
+  buffer.append("\nfresh READY\n");
+  assert.equal(await pendingText, "READY");
+});
+
+test("SessionOutputBuffer invalidateStartupSeed keeps sync-race trailingFresh matchable", async () => {
+  const buffer = new SessionOutputBuffer("s1");
+  buffer.replaceWithVisibleScreen("root@host:~# ", "\nfresh READY\n");
+
+  buffer.invalidateStartupSeed();
+
+  assert.equal(await buffer.waitForText("READY", 200), "READY");
+});
+
 test("SessionOutputBuffer waitForPrompt does not rematch short seeded prompt after live output", async () => {
   const buffer = new SessionOutputBuffer("s1");
   buffer.replaceWithVisibleScreen("root@host:~# ");

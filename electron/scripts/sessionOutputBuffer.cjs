@@ -435,6 +435,19 @@ class SessionOutputBuffer {
     }
   }
 
+  /**
+   * After the script sends automated input, startup snapshot content must not
+   * satisfy later waits (sendLine then waitForPrompt / waitForText). Consume
+   * through the seeded viewport only so sync-race trailingFresh stays matchable.
+   */
+  invalidateStartupSeed() {
+    if (typeof this.seededLength === "number") {
+      this.scanOffset = Math.max(this.scanOffset, this.seededLength);
+      this.seededLength = null;
+    }
+    this.preservedTailMatch = null;
+  }
+
   consumeFreshPendingMatch(pattern, freshBoundary = this.currentFreshBoundary()) {
     while (true) {
       const matched = this.tryMatchPending(pattern);

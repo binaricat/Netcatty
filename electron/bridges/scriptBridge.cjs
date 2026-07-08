@@ -176,6 +176,9 @@ function writeToSession(sessionId, data, options = {}) {
     );
   }
   if (options.automated !== false && data && data !== "\x03") {
+    // Sending a command means later waits must observe post-input output, not
+    // the startup viewport / preserved prompt that was seeded for #1960.
+    getOrCreateBuffer(sessionId).invalidateStartupSeed();
     notifyScriptSessionInput(sessionId, data);
   }
 }
