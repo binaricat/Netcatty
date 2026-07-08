@@ -313,6 +313,55 @@ test("resolveCodexExecutableForSdk returns null for Windows cmd shim when native
   }
 });
 
+test("resolveCodexExecutableForSdk maps Windows nvmd bin shim to native codex.exe", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-codex-nvmd-shim-"));
+  try {
+    const nvmdHome = path.join(tmp, ".nvmd");
+    const binDir = path.join(nvmdHome, "bin");
+    const versionRoot = path.join(nvmdHome, "versions", "22.14.0");
+    fs.mkdirSync(binDir, { recursive: true });
+    fs.writeFileSync(path.join(nvmdHome, "default"), "22.14.0\n", "utf8");
+    fs.writeFileSync(
+      path.join(nvmdHome, "packages.json"),
+      JSON.stringify({ codex: ["22.14.0"] }),
+      "utf8",
+    );
+
+    // nvmd Windows package shims are copies of npm.cmd / nvmd.exe, not npm's
+    // @openai/codex launcher. The real install lives under versions/<ver>/.
+    const shimPath = path.join(binDir, "codex.cmd");
+    fs.writeFileSync(shimPath, '@echo off\r\n"%~dpn0.exe" %*\r\n', "utf8");
+    fs.writeFileSync(path.join(binDir, "codex.exe"), "", "utf8");
+    fs.writeFileSync(path.join(binDir, "nvmd.exe"), "", "utf8");
+
+    const nativeExe = writeCodexWin32NativeLayout(versionRoot);
+
+    assert.equal(resolveCodexExecutableForSdk(shimPath, "win32"), nativeExe);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("resolveCodexExecutableForSdk maps Windows nvmd.exe package shim to native codex.exe", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-codex-nvmd-exe-"));
+  try {
+    const nvmdHome = path.join(tmp, ".nvmd");
+    const binDir = path.join(nvmdHome, "bin");
+    const versionRoot = path.join(nvmdHome, "versions", "20.18.0");
+    fs.mkdirSync(binDir, { recursive: true });
+    fs.writeFileSync(path.join(nvmdHome, "default"), "20.18.0\n", "utf8");
+
+    const shimPath = path.join(binDir, "codex.exe");
+    fs.writeFileSync(shimPath, "", "utf8");
+    fs.writeFileSync(path.join(binDir, "nvmd.exe"), "", "utf8");
+    const nativeExe = writeCodexWin32NativeLayout(versionRoot);
+
+    assert.equal(resolveCodexExecutableForSdk(shimPath, "win32"), nativeExe);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test("resolveCodexExecutableForSdk maps Windows PowerShell shim to native codex.exe", () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-codex-ps1-shim-"));
   try {

@@ -349,6 +349,74 @@ function resolveCodexNativeExecutableWin32(moduleSearchDirs, arch = process.arch
   return null;
 }
 
+function getNvmdHomeFromShimDir(shimDir) {
+  const normalized = String(shimDir || "").trim();
+  if (!normalized) return null;
+  if (path.basename(normalized).toLowerCase() !== "bin") return null;
+  const home = path.dirname(normalized);
+  // nvm-desktop / nvmd-command layout: $NVMD_HOME/{bin,versions,default,packages.json}
+  if (
+    existsSync(path.join(home, "versions")) ||
+    existsSync(path.join(home, "packages.json")) ||
+    existsSync(path.join(home, "default"))
+  ) {
+    return home;
+  }
+  return null;
+}
+
+function readNvmdDefaultVersion(nvmdHome) {
+  try {
+    const raw = readFileSync(path.join(nvmdHome, "default"), "utf8").trim();
+    return raw || null;
+  } catch {
+    return null;
+  }
+}
+
+function readNvmdPackageVersions(nvmdHome, packageBinName) {
+  try {
+    const raw = readFileSync(path.join(nvmdHome, "packages.json"), "utf8");
+    const data = JSON.parse(raw);
+    const versions = data && data[packageBinName];
+    if (!Array.isArray(versions)) return [];
+    return versions.map((v) => String(v || "").trim()).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+function getNvmdVersionsDirectory(nvmdHome) {
+  try {
+    const raw = readFileSync(path.join(nvmdHome, "setting.json"), "utf8");
+    const data = JSON.parse(raw);
+    const custom = data && typeof data.directory === "string" ? data.directory.trim() : "";
+    if (custom) return custom;
+  } catch {
+    // Fall back to the default versions/ directory.
+  }
+  return path.join(nvmdHome, "versions");
+}
+
+function getNvmdCodexVersionRoots(nvmdHome) {
+  if (!nvmdHome) return [];
+  const versionsDir = getNvmdVersionsDirectory(nvmdHome);
+  const candidates = [
+    ...readNvmdPackageVersions(nvmdHome, "codex").reverse(),
+    readNvmdDefaultVersion(nvmdHome),
+  ].filter(Boolean);
+
+  const roots = [];
+  const seen = new Set();
+  for (const version of candidates) {
+    const root = path.join(versionsDir, version);
+    if (seen.has(root) || !existsSync(root)) continue;
+    seen.add(root);
+    roots.push(root);
+  }
+  return roots;
+}
+
 function getCodexNativeSearchDirsForShim(shimDir) {
   const dirs = [shimDir];
   const parentDir = path.dirname(shimDir);
@@ -359,6 +427,17 @@ function getCodexNativeSearchDirsForShim(shimDir) {
     dirs.push(path.dirname(parentDir));
   }
   dirs.push(path.join(shimDir, "node_modules", "@openai", "codex"));
+
+  // nvm-desktop installs global CLIs under $NVMD_HOME/versions/<ver>/, while
+  // $NVMD_HOME/bin/codex{.cmd,.exe} are only nvmd router shims. Expand search
+  // into the active/recorded Node version roots so the SDK can spawn the real
+  // native codex.exe (codexPathOverride) instead of falling back to bundled
+  // optional deps that Netcatty deliberately does not ship.
+  const nvmdHome = getNvmdHomeFromShimDir(shimDir);
+  for (const versionRoot of getNvmdCodexVersionRoots(nvmdHome)) {
+    dirs.push(versionRoot);
+    dirs.push(path.join(versionRoot, "node_modules", "@openai", "codex"));
+  }
   return dirs;
 }
 
@@ -411,10 +490,19 @@ function resolveCodexExecutableForSdk(codexExecutablePath, platform = process.pl
   if (platform !== "win32") return normalized;
 
   const ext = path.extname(normalized).toLowerCase();
-  if (ext === ".exe") return normalized;
-
   const baseDir = path.dirname(normalized);
   const moduleSearchDirs = getCodexNativeSearchDirsForShim(baseDir);
+  const nvmdHome = getNvmdHomeFromShimDir(baseDir);
+
+  // nvmd's Windows package shim is a copy of nvmd.exe named codex.exe. Prefer
+  // the real native binary under versions/<ver>/ when that layout is present.
+  if (ext === ".exe") {
+    if (nvmdHome) {
+      const nativeExe = resolveCodexNativeExecutableWin32(moduleSearchDirs);
+      if (nativeExe) return nativeExe;
+    }
+    return normalized;
+  }
 
   if (ext === ".js" && /[\\/]codex\.js$/i.test(normalized)) {
     const codexPackageRoot = path.dirname(path.dirname(normalized));
