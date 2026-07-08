@@ -489,6 +489,13 @@ class SessionOutputBuffer {
     if (fresh === null) return null;
 
     this.preservedTailMatch = null;
+    // Consuming the startup prompt must also consume the seeded viewport above
+    // it; otherwise waitForText can rematch older visible lines (e.g. READY)
+    // that were already on screen before the prompt.
+    this.scanOffset = Math.max(this.scanOffset, fresh.matched.endOffset);
+    if (typeof this.seededLength === "number" && this.scanOffset >= this.seededLength) {
+      this.seededLength = null;
+    }
     return fresh;
   }
 
