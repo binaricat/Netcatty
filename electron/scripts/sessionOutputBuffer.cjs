@@ -488,6 +488,15 @@ class SessionOutputBuffer {
   advanceScanOffset(endOffset) {
     const absoluteEnd = this.scanOffset + endOffset;
     this.scanOffset = Math.min(absoluteEnd, this.getText().length);
+    // Normal waits that consume past a preserved startup prompt invalidate it
+    // (e.g. waitForText matched trailingFresh after the prompt). Baseline via
+    // markOutputConsumedThrough sets scanOffset directly and keeps the prompt.
+    if (this.preservedTailMatch && this.scanOffset > this.preservedTailMatch.endOffset) {
+      this.preservedTailMatch = null;
+    }
+    if (typeof this.seededLength === "number" && this.scanOffset >= this.seededLength) {
+      this.seededLength = null;
+    }
   }
 
   markCurrentOutputConsumed(options = {}) {

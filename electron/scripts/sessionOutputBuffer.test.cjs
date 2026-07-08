@@ -667,6 +667,27 @@ test("SessionOutputBuffer waitForPrompt does not rematch short seeded prompt aft
   assert.equal(await pending, 0);
 });
 
+test("SessionOutputBuffer waitForPrompt ignores preserved prompt after newer output is consumed", async () => {
+  const buffer = new SessionOutputBuffer("s1");
+  buffer.replaceWithVisibleScreen("root@host:~# ", "\nfresh READY\n");
+
+  assert.equal(await buffer.waitForText("READY", 200), "READY");
+  assert.ok(buffer.scanOffset > 0);
+
+  const pending = buffer.waitForAny(shellPromptPatterns(), 200, undefined, {
+    allowPreservedTailMatch: true,
+  });
+  let resolvedEarly = false;
+  void pending.then(() => {
+    resolvedEarly = true;
+  });
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.equal(resolvedEarly, false);
+
+  buffer.append("root@host:~# ");
+  assert.equal(await pending, 0);
+});
+
 test("stepsToJavaScript sends sensitive prompt result", () => {
   const code = stepsToJavaScript([
     { type: "send", value: "secret", sensitive: true },
