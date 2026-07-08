@@ -1,0 +1,50 @@
+name: spam-comments
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  delete-spam:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout filter rules
+        uses: actions/checkout@v4
+
+      - name: Delete suspected malware spam
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const path = require('node:path');
+            const { detectSpamComment } = require(
+              path.join(process.env.GITHUB_WORKSPACE, 'scripts/spam-comment-filter.cjs')
+            );
+
+            const comment = context.payload.comment;
+            const result = detectSpamComment({
+              body: comment.body || '',
+              authorAssociation: comment.author_association,
+              userType: comment.user && comment.user.type,
+            });
+
+            core.info(JSON.stringify(result, null, 2));
+
+            if (!result.spam) {
+              core.info('Comment did not match the high-confidence spam filter.');
+              return;
+            }
+
+            await github.rest.issues.deleteComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: comment.id,
+            });
+
+            core.notice(
+              `Deleted suspected malware spam comment by @${comment.user.login} on #${context.payload.issue.number}: ${result.reasons.join('; ')}`
+            );
