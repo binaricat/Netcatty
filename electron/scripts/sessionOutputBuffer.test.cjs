@@ -645,6 +645,38 @@ test("SessionOutputBuffer trims partial overlap from sync-race trailingFresh", a
   assert.equal(await pending, "READY");
 });
 
+test("SessionOutputBuffer trims blank-padded partial overlap from trailingFresh", async () => {
+  const buffer = new SessionOutputBuffer("s1");
+  // Full-viewport snapshot often pads with blank rows after live content.
+  buffer.replaceWithVisibleScreen("READY\n\n", "READY\nNEXT\n");
+  assert.equal(buffer.getText(), "READY\n\nNEXT\n");
+
+  assert.equal(await buffer.waitForText("READY", 200), "READY");
+  assert.equal(await buffer.waitForText("NEXT", 200), "NEXT");
+
+  const pending = buffer.waitForText("READY", 200);
+  let resolvedEarly = false;
+  void pending.then(() => {
+    resolvedEarly = true;
+  });
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.equal(resolvedEarly, false);
+
+  buffer.append("\nfresh READY\n");
+  assert.equal(await pending, "READY");
+});
+
+test("SessionOutputBuffer keeps duplicate trailingFresh when snapshot is still pre-sync", async () => {
+  const buffer = new SessionOutputBuffer("s1");
+  // Viewport still matches syncStart while an identical READY arrived during
+  // the snapshot IPC — that second marker must stay matchable.
+  buffer.replaceWithVisibleScreen("READY\n", "READY\n", "READY\n");
+  assert.equal(buffer.getText(), "READY\nREADY\n");
+
+  assert.equal(await buffer.waitForText("READY", 200), "READY");
+  assert.equal(await buffer.waitForText("READY", 200), "READY");
+});
+
 test("SessionOutputBuffer waitForPrompt does not rematch short seeded prompt after live output", async () => {
   const buffer = new SessionOutputBuffer("s1");
   buffer.replaceWithVisibleScreen("root@host:~# ");

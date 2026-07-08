@@ -300,7 +300,7 @@ async function syncOutputBufferFromSnapshot(sessionId) {
     const trailingFresh = currentText.startsWith(syncStartText)
       ? currentText.slice(syncStartText.length)
       : "";
-    buffer.replaceWithVisibleScreen(screenText, trailingFresh);
+    buffer.replaceWithVisibleScreen(screenText, trailingFresh, syncStartText);
   } catch {
     // Snapshot failed: baseline existing buffer so waits require new output.
     if (buffer.getText() === syncStartText) {

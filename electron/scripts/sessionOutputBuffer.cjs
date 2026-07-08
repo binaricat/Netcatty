@@ -18,25 +18,44 @@ function stripTrailingBlankLines(text) {
  * Drop any prefix of trailingFresh that the viewport snapshot already shows.
  * Handles blank-padded full-viewport snapshots and partial overlaps where the
  * snapshot captured only the start of the sync-race bytes.
+ *
+ * `syncStartText` is the live buffer at snapshot-request time. When the
+ * viewport still matches that pre-sync content, trailingFresh is genuinely new
+ * even if it happens to equal the visible suffix (e.g. a second READY).
  */
-function trimOverlappingTrailingFresh(viewportText, trailingFresh) {
+function trimOverlappingTrailingFresh(viewportText, trailingFresh, syncStartText = "") {
   const trailing = String(trailingFresh || "");
   if (!trailing) return "";
   const viewport = String(viewportText || "");
   const viewportCore = stripTrailingBlankLines(viewport);
   const trailingCore = stripTrailingBlankLines(trailing);
+  const syncCore = stripTrailingBlankLines(syncStartText);
+
+  // Stale snapshot: still showing pre-sync content → keep all trailingFresh.
+  if (syncCore && viewportCore === syncCore) {
+    return trailing;
+  }
+
   if (
     viewport.endsWith(trailing)
     || (trailingCore && viewportCore.endsWith(trailingCore))
   ) {
     return "";
   }
-  // Prefer the full viewport for partial overlap so a trailing newline that is
-  // part of the overlapped text is not left behind as a phantom blank line.
-  const max = Math.min(viewport.length, trailing.length);
-  for (let len = max; len > 0; len -= 1) {
-    if (viewport.endsWith(trailing.slice(0, len))) {
-      return trailing.slice(len);
+
+  // Partial overlap: prefer the unpadded core so blank-padded snapshots still
+  // trim, then fall back to the full viewport for newline-accurate matches.
+  const candidates = [viewportCore, viewport].filter(Boolean);
+  for (const candidate of candidates) {
+    const max = Math.min(candidate.length, trailing.length);
+    for (let len = max; len > 0; len -= 1) {
+      if (!candidate.endsWith(trailing.slice(0, len))) continue;
+      let remainder = trailing.slice(len);
+      // Avoid turning blank padding + overlapped newline into an extra blank.
+      while (remainder.startsWith("\n") && viewport.endsWith("\n")) {
+        remainder = remainder.slice(1);
+      }
+      return remainder;
     }
   }
   return trailing;
@@ -376,14 +395,14 @@ class SessionOutputBuffer {
    * window. `trailingFresh` (bytes that arrived during snapshot sync) stays
    * outside seededLength so consuming a startup prompt does not discard it.
    */
-  replaceWithVisibleScreen(screenText, trailingFresh = "") {
+  replaceWithVisibleScreen(screenText, trailingFresh = "", syncStartText = "") {
     const normalized = String(screenText || "").endsWith("\n")
       ? String(screenText || "")
       : `${String(screenText || "")}\n`;
     // Snapshot and live taps can both observe the same suffix. Full-viewport
     // snapshots often pad with blank rows, and the snapshot may only include a
     // prefix of trailingFresh — trim any overlapping prefix before appending.
-    const trailing = trimOverlappingTrailingFresh(normalized, trailingFresh);
+    const trailing = trimOverlappingTrailingFresh(normalized, trailingFresh, syncStartText);
     this.clear();
     this.append(normalized);
     // Seed only the visible viewport — not sync-race trailing bytes.
