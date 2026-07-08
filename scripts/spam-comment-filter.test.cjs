@@ -2,7 +2,11 @@
 
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { detectSpamComment, extractDangerousFiles } = require("./spam-comment-filter.cjs");
+const {
+  detectSpamComment,
+  extractDangerousFiles,
+  isGitHubUserAttachment,
+} = require("./spam-comment-filter.cjs");
 
 test("flags the fake Netcatty patch spam pattern", () => {
   const result = detectSpamComment({
@@ -25,11 +29,21 @@ test("flags fake patch spam when the filename ends a sentence", () => {
   assert.deepEqual(result.dangerousFiles, ["patch.zip"]);
 });
 
+test("flags suspicious GitHub attachment spam without bait wording", () => {
+  const result = detectSpamComment({
+    authorAssociation: "NONE",
+    userType: "User",
+    body: "[netcatty_fix.zip](https://github.com/user-attachments/files/29784176/netcatty_fix.zip)\nI attached the fix I used.",
+  });
+
+  assert.equal(result.spam, true);
+});
+
 test("does not flag ordinary log attachments from outside users", () => {
   const result = detectSpamComment({
     authorAssociation: "FIRST_TIME_CONTRIBUTOR",
     userType: "User",
-    body: "I attached debug-logs.zip from a failed connection. The app hangs after I click connect, and the logs show the SSH handshake timing out.",
+    body: "[debug-logs.zip](https://github.com/user-attachments/files/29784176/debug-logs.zip)\nI attached logs from a failed connection. The app hangs after I click connect, and the logs show the SSH handshake timing out.",
   });
 
   assert.equal(result.spam, false);
@@ -50,4 +64,12 @@ test("extracts risky file names from markdown links and plain text", () => {
     extractDangerousFiles("[fix.zip](https://example.com/fix.zip) also hotfix.dmg."),
     ["fix.zip", "https://example.com/fix.zip", "hotfix.dmg"]
   );
+});
+
+test("identifies GitHub user attachment URLs", () => {
+  assert.equal(
+    isGitHubUserAttachment("https://github.com/user-attachments/files/29784176/netcatty_fix.zip"),
+    true
+  );
+  assert.equal(isGitHubUserAttachment("https://example.com/netcatty_fix.zip"), false);
 });

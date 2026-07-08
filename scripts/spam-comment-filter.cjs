@@ -27,6 +27,9 @@ const baitPatterns = [
   /\b(?:backend|encoding|character mapping|black boxes|terminal rendering|sftp module)\b/i,
 ];
 
+const githubUserAttachmentPattern =
+  /^https:\/\/github\.com\/user-attachments\/files\/\d+\//i;
+
 function normalizeAssociation(authorAssociation) {
   return String(authorAssociation || "").trim().toUpperCase();
 }
@@ -49,6 +52,10 @@ function matchingBaitPatterns(body) {
     .map((pattern) => pattern.source);
 }
 
+function isGitHubUserAttachment(file) {
+  return githubUserAttachmentPattern.test(file);
+}
+
 function detectSpamComment({ body, authorAssociation, userType } = {}) {
   const normalizedBody = String(body || "").replace(/\s+/g, " ").trim();
   const dangerousFiles = extractDangerousFiles(normalizedBody);
@@ -56,6 +63,8 @@ function detectSpamComment({ body, authorAssociation, userType } = {}) {
   const hasSuspiciousFileName = dangerousFiles.some((file) =>
     suspiciousFileNamePattern.test(file)
   );
+  const hasSuspiciousGitHubAttachment =
+    hasSuspiciousFileName && dangerousFiles.some(isGitHubUserAttachment);
   const trustedAuthor = isTrustedAuthor(authorAssociation);
   const botAuthor = String(userType || "").toLowerCase() === "bot";
 
@@ -70,6 +79,11 @@ function detectSpamComment({ body, authorAssociation, userType } = {}) {
   if (hasSuspiciousFileName) {
     score += 2;
     reasons.push("download name looks like a patch or hotfix");
+  }
+
+  if (hasSuspiciousGitHubAttachment) {
+    score += 1;
+    reasons.push("GitHub attachment uses a patch/fix-style archive name");
   }
 
   if (baitMatches.length > 0) {
@@ -87,7 +101,9 @@ function detectSpamComment({ body, authorAssociation, userType } = {}) {
     !botAuthor &&
     dangerousFiles.length > 0 &&
     score >= 6 &&
-    (baitMatches.length >= 2 || (hasSuspiciousFileName && baitMatches.length >= 1));
+    (baitMatches.length >= 2 ||
+      (hasSuspiciousFileName && baitMatches.length >= 1) ||
+      hasSuspiciousGitHubAttachment);
 
   return {
     spam,
@@ -102,5 +118,6 @@ function detectSpamComment({ body, authorAssociation, userType } = {}) {
 module.exports = {
   detectSpamComment,
   extractDangerousFiles,
+  isGitHubUserAttachment,
   isTrustedAuthor,
 };
