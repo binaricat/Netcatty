@@ -591,6 +591,78 @@ test("script waitFor ignores keywords that have scrolled off the visible screen"
   scriptBridge.removeSessionBuffer(sessionId);
 });
 
+test("script waitFor does not seed buffer-fallback scrollback as visible screen", async () => {
+  const handlers = new Map();
+  const sentRunUpdates = [];
+  const sessionId = "session-buffer-fallback-scrollback";
+
+  scriptBridge.removeSessionBuffer(sessionId);
+  // When the session's webContents is missing, requestScreenSnapshot falls back
+  // to the full script buffer. That must stay consumed so scrolled-off keywords
+  // do not rematch (#1821 / Codex review on #2035).
+  scriptBridge.appendSessionOutput(sessionId, "old deployment READY marker\nuser@host:~$ \n");
+  scriptBridge.init({
+    sessions: new Map([
+      [sessionId, { webContentsId: 999 }],
+    ]),
+    electronModule: {
+      app: {
+        getVersion: () => "test",
+        getPath: () => process.cwd(),
+      },
+      webContents: {
+        fromId: () => null,
+      },
+    },
+    terminalBridge: {
+      writeToSession() {},
+    },
+    terminalWorkerManager: null,
+    getMainWindow: () => ({
+      webContents: {
+        id: 1,
+        send(channel, payload) {
+          if (channel === "netcatty:script:runs-updated") {
+            sentRunUpdates.push(payload.runs);
+          }
+        },
+      },
+    }),
+  });
+  scriptBridge.registerHandlers({
+    handle(channel, handler) {
+      handlers.set(channel, handler);
+    },
+  });
+
+  const runPromise = handlers.get("netcatty:script:run")({}, {
+    scriptId: "buffer-fallback",
+    scriptLabel: "Buffer fallback",
+    sessionId,
+    content: `
+      const value = await nct.screen.waitFor('READY', 1000);
+      nct.log('matched ' + value);
+    `,
+    permissionMode: "auto",
+  });
+
+  await delay(50);
+  const earlyRun = sentRunUpdates.at(-1)?.find((run) => run.scriptId === "buffer-fallback");
+  assert.notEqual(earlyRun?.status, "completed");
+  assert.doesNotMatch(
+    (earlyRun?.logs || []).map((entry) => entry.message).join("\n"),
+    /matched READY/,
+  );
+
+  scriptBridge.appendSessionOutput(sessionId, "fresh READY\n");
+  await runPromise;
+
+  const finalRun = sentRunUpdates.at(-1).find((run) => run.scriptId === "buffer-fallback");
+  assert.equal(finalRun.status, "completed");
+  assert.match(finalRun.logs.map((entry) => entry.message).join("\n"), /matched READY/);
+  scriptBridge.removeSessionBuffer(sessionId);
+});
+
 test("script waitForRegex matches bastion menu already on screen at script start", async () => {
   const handlers = new Map();
   const sentRunUpdates = [];

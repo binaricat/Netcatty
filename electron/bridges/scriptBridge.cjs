@@ -180,30 +180,35 @@ function writeToSession(sessionId, data, options = {}) {
   }
 }
 
+function bufferFallbackSnapshot(sessionId) {
+  return {
+    rows: 24,
+    cols: 80,
+    currentRow: 0,
+    lines: getOrCreateBuffer(sessionId).getText().split("\n"),
+    // Not a real terminal viewport — full script buffer / scrollback only.
+    source: "buffer-fallback",
+  };
+}
+
+function isViewportSnapshot(snapshot) {
+  return snapshot?.source !== "buffer-fallback";
+}
+
 async function requestScreenSnapshot(sessionId) {
   const session = sessions?.get(sessionId);
   const webContents = session?.webContentsId
     ? electronModule.webContents.fromId(session.webContentsId)
     : getMainWindow?.()?.webContents;
   if (!webContents) {
-    return {
-      rows: 24,
-      cols: 80,
-      currentRow: 0,
-      lines: getOrCreateBuffer(sessionId).getText().split("\n"),
-    };
+    return bufferFallbackSnapshot(sessionId);
   }
 
   const requestId = randomUUID();
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       pendingScreenSnapshots.delete(requestId);
-      resolve({
-        rows: 24,
-        cols: 80,
-        currentRow: 0,
-        lines: getOrCreateBuffer(sessionId).getText().split("\n"),
-      });
+      resolve(bufferFallbackSnapshot(sessionId));
     }, 3000);
     pendingScreenSnapshots.set(requestId, {
       sessionId,
@@ -272,8 +277,11 @@ async function syncOutputBufferFromSnapshot(sessionId) {
   try {
     const snapshot = await requestScreenSnapshot(sessionId);
     const screenText = (snapshot.lines || []).join("\n");
-    if (!screenText) {
-      // Blank viewport: ignore prior scrollback so waits only see new output.
+
+    // Buffer-fallback snapshots are the full script output/scrollback, not the
+    // visible viewport. Seeding them as waitable would rematch scrolled-off
+    // text (#1821). Keep the consumed baseline for that path.
+    if (!isViewportSnapshot(snapshot) || !screenText) {
       buffer.markOutputConsumedThrough(buffer.getText().length, {
         preserveTailPatterns: shellPromptPatterns(),
       });
@@ -536,12 +544,7 @@ function handleScriptScreenSnapshotResponse(_event, payload = {}) {
   const pending = pendingScreenSnapshots.get(payload.requestId);
   if (!pending) return { ok: false };
   pendingScreenSnapshots.delete(payload.requestId);
-  pending.resolve(payload.snapshot || {
-    rows: 24,
-    cols: 80,
-    currentRow: 0,
-    lines: getOrCreateBuffer(pending.sessionId).getText().split("\n"),
-  });
+  pending.resolve(payload.snapshot || bufferFallbackSnapshot(pending.sessionId));
   return { ok: true };
 }
 
