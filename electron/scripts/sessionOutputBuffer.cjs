@@ -32,7 +32,18 @@ function trimOverlappingTrailingFresh(viewportText, trailingFresh, syncStartText
   const syncCore = stripTrailingBlankLines(syncStartText);
 
   // Stale snapshot: still showing pre-sync content → keep all trailingFresh.
-  if (syncCore && viewportCore === syncCore) {
+  // Exact match covers a second identical marker while the snapshot IPC is in
+  // flight. Proper-suffix match covers scrollback-backed buffers where the
+  // visible viewport is only the tail of syncStartText (e.g. banner\nREADY vs
+  // READY) so equality alone would miss the stale case and trim a real duplicate.
+  if (
+    syncCore
+    && viewportCore
+    && (
+      viewportCore === syncCore
+      || (syncCore.length > viewportCore.length && syncCore.endsWith(viewportCore))
+    )
+  ) {
     return trailing;
   }
 

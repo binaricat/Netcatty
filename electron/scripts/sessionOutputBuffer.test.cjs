@@ -677,6 +677,18 @@ test("SessionOutputBuffer keeps duplicate trailingFresh when snapshot is still p
   assert.equal(await buffer.waitForText("READY", 200), "READY");
 });
 
+test("SessionOutputBuffer keeps duplicate trailingFresh when stale viewport is a syncStart suffix", async () => {
+  const buffer = new SessionOutputBuffer("s1");
+  // Pre-sync buffer had scrollback; stale snapshot still shows only the old
+  // visible suffix while a second READY arrived during the IPC round-trip.
+  buffer.replaceWithVisibleScreen("READY\n", "READY\nNEXT\n", "banner\nREADY\n");
+  assert.equal(buffer.getText(), "READY\nREADY\nNEXT\n");
+
+  assert.equal(await buffer.waitForText("READY", 200), "READY");
+  assert.equal(await buffer.waitForText("READY", 200), "READY");
+  assert.equal(await buffer.waitForText("NEXT", 200), "NEXT");
+});
+
 test("SessionOutputBuffer waitForPrompt does not rematch short seeded prompt after live output", async () => {
   const buffer = new SessionOutputBuffer("s1");
   buffer.replaceWithVisibleScreen("root@host:~# ");
