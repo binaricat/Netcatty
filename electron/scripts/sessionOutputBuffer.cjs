@@ -251,6 +251,8 @@ class SessionOutputBuffer {
     this.scanOffset = 0;
     this.waiters = [];
     this.preservedTailMatch = null;
+    /** @type {number | null} Absolute end of a seeded visible viewport that stays fully waitable. */
+    this.seededLength = null;
   }
 
   append(data) {
@@ -263,6 +265,9 @@ class SessionOutputBuffer {
       const removedLength = removed.length;
       this.totalLength -= removedLength;
       this.scanOffset = Math.max(0, this.scanOffset - removedLength);
+      if (typeof this.seededLength === "number") {
+        this.seededLength = Math.max(0, this.seededLength - removedLength);
+      }
       for (const waiter of this.waiters) {
         if (typeof waiter.freshBoundary === "number") {
           waiter.freshBoundary = Math.max(0, waiter.freshBoundary - removedLength);
@@ -296,7 +301,38 @@ class SessionOutputBuffer {
   }
 
   currentFreshBoundary() {
-    return Math.max(this.scanOffset, this.getText().length - FRESH_MATCH_TAIL_SLACK);
+    const textLength = this.getText().length;
+    const normalBoundary = Math.max(this.scanOffset, textLength - FRESH_MATCH_TAIL_SLACK);
+    if (typeof this.seededLength === "number" && this.scanOffset < this.seededLength) {
+      // Startup viewport rows must all be waitable, even when the visible screen
+      // is longer than FRESH_MATCH_TAIL_SLACK (bastion menus, etc.).
+      return this.scanOffset;
+    }
+    if (typeof this.seededLength === "number" && this.scanOffset >= this.seededLength) {
+      this.seededLength = null;
+    }
+    return normalBoundary;
+  }
+
+  /**
+   * Replace buffer contents with the current visible terminal screen.
+   * The entire seeded viewport is treated as fresh for waitFor* matching.
+   */
+  replaceWithVisibleScreen(screenText, trailingFresh = "") {
+    const normalized = String(screenText || "").endsWith("\n")
+      ? String(screenText || "")
+      : `${String(screenText || "")}\n`;
+    let trailing = String(trailingFresh || "");
+    // Snapshot and live taps can both observe the same suffix; don't duplicate it.
+    if (trailing && normalized.endsWith(trailing)) {
+      trailing = "";
+    }
+    this.clear();
+    this.append(normalized);
+    if (trailing) {
+      this.append(trailing);
+    }
+    this.seededLength = this.getText().length;
   }
 
   consumeFreshPendingMatch(pattern, freshBoundary = this.currentFreshBoundary()) {
@@ -394,6 +430,9 @@ class SessionOutputBuffer {
     const consumedText = text.slice(0, consumedLength);
     this.scanOffset = consumedLength;
     this.preservedTailMatch = null;
+    if (typeof this.seededLength === "number" && this.scanOffset >= this.seededLength) {
+      this.seededLength = null;
+    }
 
     const preserveTailPatterns = Array.isArray(options.preserveTailPatterns)
       ? options.preserveTailPatterns
@@ -430,6 +469,7 @@ class SessionOutputBuffer {
     this.totalLength = 0;
     this.scanOffset = 0;
     this.preservedTailMatch = null;
+    this.seededLength = null;
   }
 
   flushWaiters() {
@@ -504,10 +544,7 @@ class SessionOutputBuffer {
 
   waitFor(pattern, timeoutMs = 30000, shouldAbort) {
     if (isRegexCompatibleWaitPattern(pattern)) {
-      const minFreshStartAbsolute = Math.max(
-        this.scanOffset,
-        this.getText().length - FRESH_MATCH_TAIL_SLACK,
-      );
+      const minFreshStartAbsolute = this.currentFreshBoundary();
       const immediate = this.consumeFreshPendingRegex(pattern, { minFreshStartAbsolute });
       if (immediate !== null) {
         this.advanceScanOffset(immediate.endOffset);
@@ -576,10 +613,7 @@ class SessionOutputBuffer {
   }
 
   waitForRegex(pattern, timeoutMs = 30000, shouldAbort) {
-    const minFreshStartAbsolute = Math.max(
-      this.scanOffset,
-      this.getText().length - FRESH_MATCH_TAIL_SLACK,
-    );
+    const minFreshStartAbsolute = this.currentFreshBoundary();
     const immediate = this.consumeFreshPendingRegex(pattern, { minFreshStartAbsolute });
     if (immediate !== null) {
       this.advanceScanOffset(immediate.endOffset);
@@ -700,6 +734,7 @@ class SessionOutputBuffer {
     this.totalLength = 0;
     this.scanOffset = 0;
     this.preservedTailMatch = null;
+    this.seededLength = null;
   }
 }
 

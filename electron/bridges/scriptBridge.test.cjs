@@ -595,6 +595,8 @@ test("script waitForRegex matches bastion menu already on screen at script start
   const handlers = new Map();
   const sentRunUpdates = [];
   const sessionId = "session-bastion-menu-startup";
+  // Keep the header near the top and pad past the 512-byte freshness slack so
+  // the whole seeded viewport must stay waitable (#1960 / Codex review).
   const menuLines = [
     "Welcome to SSHD",
     "",
@@ -613,8 +615,17 @@ test("script waitForRegex matches bastion menu already on screen at script start
     "",
     "操作命令:",
     "[l] 显示SSH资源列表",
+    "[i] 显示Telnet资源列表",
+    "[r] 显示Rlogin资源列表",
+    "[s] 搜索资源，根据IP/name/account/label",
+    "[k] 显示历史会话列表",
+    "[x] English",
+    "[n] encoding UTF8",
+    "[h] 显示帮助",
     "[e] 退出",
+    ...Array.from({ length: 20 }, (_, i) => `  filler line ${i} ${"x".repeat(24)}`),
   ];
+  assert.ok(menuLines.join("\n").length > 512);
 
   scriptBridge.removeSessionBuffer(sessionId);
   scriptBridge.appendSessionOutput(sessionId, `${menuLines.join("\n")}\n`);
@@ -645,7 +656,7 @@ test("script waitForRegex matches bastion menu already on screen at script start
               handlers.get("netcatty:script:screen-snapshot-response")({}, {
                 requestId: payload.requestId,
                 snapshot: {
-                  rows: 24,
+                  rows: 40,
                   cols: 80,
                   currentRow: menuLines.length - 1,
                   lines: menuLines,
@@ -675,6 +686,95 @@ test("script waitForRegex matches bastion menu already on screen at script start
   });
 
   const finalRun = sentRunUpdates.at(-1).find((run) => run.scriptId === "bastion-menu");
+  assert.equal(finalRun.status, "completed");
+  assert.match(finalRun.logs.map((entry) => entry.message).join("\n"), /matched SSH资源\(5\) :/);
+  scriptBridge.removeSessionBuffer(sessionId);
+});
+
+test("script waitForRegex keeps visible menu when BEL arrives during startup snapshot sync", async () => {
+  const handlers = new Map();
+  const sentRunUpdates = [];
+  const sessionId = "session-bastion-menu-bel-during-sync";
+  const menuLines = [
+    "Welcome to SSHD",
+    "",
+    "user login success",
+    "",
+    "SSH资源(5) :",
+    "  [1] [Empty]@192.168.233.11",
+    "  [2] [Empty]@192.168.238.34",
+    "  [3] [Empty]@192.168.242.11",
+    ...Array.from({ length: 25 }, (_, i) => `  filler ${i} ${"y".repeat(20)}`),
+  ];
+  assert.ok(menuLines.join("\n").length > 512);
+  let snapshotRequestId;
+
+  scriptBridge.removeSessionBuffer(sessionId);
+  scriptBridge.appendSessionOutput(sessionId, `${menuLines.join("\n")}\n`);
+  scriptBridge.init({
+    sessions: new Map(),
+    electronModule: {
+      app: {
+        getVersion: () => "test",
+        getPath: () => process.cwd(),
+      },
+      webContents: {
+        fromId: () => null,
+      },
+    },
+    terminalBridge: {
+      writeToSession() {},
+    },
+    terminalWorkerManager: null,
+    getMainWindow: () => ({
+      webContents: {
+        id: 1,
+        send(channel, payload) {
+          if (channel === "netcatty:script:runs-updated") {
+            sentRunUpdates.push(payload.runs);
+          }
+          if (channel === "netcatty:script:screen-snapshot-request") {
+            snapshotRequestId = payload.requestId;
+          }
+        },
+      },
+    }),
+  });
+  scriptBridge.registerHandlers({
+    handle(channel, handler) {
+      handlers.set(channel, handler);
+    },
+  });
+
+  const runPromise = handlers.get("netcatty:script:run")({}, {
+    scriptId: "bastion-bel",
+    scriptLabel: "Bastion BEL during sync",
+    sessionId,
+    content: `
+      const value = await nct.screen.waitForRegex("SSH资源\\\\s*\\\\(\\\\d+\\\\)\\\\s*:", 1000);
+      nct.log("matched " + value);
+    `,
+    permissionMode: "auto",
+  });
+
+  await delay(20);
+  assert.ok(snapshotRequestId);
+  // Bastion keepalives / BEL can land while the snapshot IPC is in flight.
+  scriptBridge.appendSessionOutput(sessionId, "\x07");
+  scriptBridge.appendSessionOutput(sessionId, "\x07");
+  handlers.get("netcatty:script:screen-snapshot-response")({}, {
+    requestId: snapshotRequestId,
+    snapshot: {
+      rows: 40,
+      cols: 80,
+      currentRow: menuLines.length - 1,
+      lines: menuLines,
+    },
+  });
+
+  await runPromise;
+
+  const finalRun = sentRunUpdates.at(-1).find((run) => run.scriptId === "bastion-bel");
   assert.equal(finalRun.status, "completed");
   assert.match(finalRun.logs.map((entry) => entry.message).join("\n"), /matched SSH资源\(5\) :/);
   scriptBridge.removeSessionBuffer(sessionId);

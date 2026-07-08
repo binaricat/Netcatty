@@ -461,6 +461,25 @@ test("SessionOutputBuffer waitFor still rejects pre-registration scrollback beyo
   assert.equal(await pending, "TARGET");
 });
 
+test("SessionOutputBuffer replaceWithVisibleScreen makes the whole viewport waitable", async () => {
+  const buffer = new SessionOutputBuffer("s1");
+  const header = "Welcome\n\nSSH资源(5) :\n";
+  const body = Array.from({ length: 40 }, (_, i) => `  [${i}] host-${i} ${"x".repeat(20)}`).join("\n");
+  const menu = `${header}${body}\n`;
+  assert.ok(menu.length > 512);
+
+  buffer.replaceWithVisibleScreen(menu);
+  assert.equal(await buffer.waitForRegex("SSH资源\\s*\\(\\d+\\)\\s*:", 200), "SSH资源(5) :");
+});
+
+test("SessionOutputBuffer replaceWithVisibleScreen keeps trailing fresh output from sync race", async () => {
+  const buffer = new SessionOutputBuffer("s1");
+  const menu = `SSH资源(5) :\n${"x".repeat(600)}\n`;
+  buffer.replaceWithVisibleScreen(menu, "\x07\x07");
+  assert.equal(await buffer.waitForRegex("SSH资源\\s*\\(\\d+\\)\\s*:", 200), "SSH资源(5) :");
+  assert.match(buffer.getText(), /\x07\x07$/);
+});
+
 test("stepsToJavaScript sends sensitive prompt result", () => {
   const code = stepsToJavaScript([
     { type: "send", value: "secret", sensitive: true },

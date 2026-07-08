@@ -280,24 +280,17 @@ async function syncOutputBufferFromSnapshot(sessionId) {
       return;
     }
 
+    // Seed the script buffer from the current visible screen so waits can match
+    // text already on screen (e.g. bastion "SSH资源" near the top of a long menu).
+    // Marking the whole buffer consumed made those waits time out (#1960).
+    // If live output arrived during the snapshot IPC round-trip (BEL keepalives,
+    // etc.), keep that trailing fresh data after the viewport instead of
+    // discarding the snapshot.
     const currentText = buffer.getText();
-    if (currentText !== syncStartText) {
-      // Output arrived while the snapshot was in flight — keep that fresh
-      // tail matchable, but do not rematch pre-sync scrollback.
-      buffer.markOutputConsumedThrough(syncStartText.length, {
-        preserveTailPatterns: shellPromptPatterns(),
-      });
-      return;
-    }
-
-    // Replace the script buffer with the current visible screen. Auto-login
-    // and menu scripts need to waitFor text that is already on screen
-    // (e.g. bastion "SSH资源" near the top of a multi-line menu). Marking the
-    // whole buffer consumed made those waits time out (#1960). Using only the
-    // viewport also avoids rematching older scrollback that has left the screen.
-    const normalized = screenText.endsWith("\n") ? screenText : `${screenText}\n`;
-    buffer.clear();
-    buffer.append(normalized);
+    const trailingFresh = currentText.startsWith(syncStartText)
+      ? currentText.slice(syncStartText.length)
+      : "";
+    buffer.replaceWithVisibleScreen(screenText, trailingFresh);
   } catch {
     // Snapshot failed: baseline existing buffer so waits require new output.
     if (buffer.getText() === syncStartText) {
