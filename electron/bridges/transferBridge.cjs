@@ -394,20 +394,22 @@ async function uploadFile(localPath, remotePath, client, fileSize, transfer, sen
   }
 
   // Fallback: sequential stream piping.
-  // Wait for writeStream 'finish' (all bytes flushed) — 'close' alone can fire
-  // after an early destroy and would otherwise report a truncated upload as success.
+  // Require both 'finish' (bytes flushed) and 'close' (remote handle closed).
+  // Resolving on finish alone can miss close-time server errors (quota/disk full);
+  // resolving on close alone can treat a premature destroy as success (#2022).
   await new Promise((resolve, reject) => {
     const readStream = fs.createReadStream(localPath, { highWaterMark: TRANSFER_CHUNK_SIZE });
     const writeStream = sftp.createWriteStream(remotePath, { highWaterMark: TRANSFER_CHUNK_SIZE });
     let transferred = 0;
-    let finished = false;
+    let settled = false;
+    let sawFinish = false;
 
     transfer.readStream = readStream;
     transfer.writeStream = writeStream;
 
     const cleanup = (err) => {
-      if (finished) return;
-      finished = true;
+      if (settled) return;
+      settled = true;
       readStream.removeAllListeners();
       writeStream.removeAllListeners();
       if (err) {
@@ -427,11 +429,22 @@ async function uploadFile(localPath, remotePath, client, fileSize, transfer, sen
     readStream.on('error', cleanup);
     writeStream.on('error', cleanup);
     writeStream.on('finish', () => {
-      if (transfer.cancelled) cleanup(new Error('Transfer cancelled'));
-      else cleanup(null);
+      if (transfer.cancelled) {
+        cleanup(new Error('Transfer cancelled'));
+        return;
+      }
+      sawFinish = true;
     });
     writeStream.on('close', () => {
-      if (transfer.cancelled) cleanup(new Error('Transfer cancelled'));
+      if (transfer.cancelled) {
+        cleanup(new Error('Transfer cancelled'));
+        return;
+      }
+      if (!sawFinish) {
+        cleanup(new Error('Upload stream closed before finish'));
+        return;
+      }
+      cleanup(null);
     });
     readStream.pipe(writeStream);
   });
