@@ -1,5 +1,7 @@
 "use strict";
 
+const { shellPromptPatterns } = require("./shellPromptPatterns.cjs");
+
 const DEFAULT_BUFFER_SIZE = 1024 * 1024;
 /** Matches within this many bytes of buffer end count as live terminal output. */
 const FRESH_MATCH_TAIL_SLACK = 512;
@@ -304,8 +306,9 @@ class SessionOutputBuffer {
     const textLength = this.getText().length;
     const normalBoundary = Math.max(this.scanOffset, textLength - FRESH_MATCH_TAIL_SLACK);
     if (typeof this.seededLength === "number" && this.scanOffset < this.seededLength) {
-      // Startup viewport rows must all be waitable, even when the visible screen
-      // is longer than FRESH_MATCH_TAIL_SLACK (bastion menus, etc.).
+      // Startup viewport rows must all be waitable for waitFor / waitForText /
+      // waitForRegex, even when the visible screen is longer than
+      // FRESH_MATCH_TAIL_SLACK (bastion menus, etc.).
       return this.scanOffset;
     }
     if (typeof this.seededLength === "number" && this.scanOffset >= this.seededLength) {
@@ -315,8 +318,21 @@ class SessionOutputBuffer {
   }
 
   /**
+   * Freshness for waitForAny / waitForPrompt: always the live tail window.
+   * Seeded full-viewport freshness must not make every visible prompt-looking
+   * line a readiness signal (e.g. an older `user@host:~$` above a long job).
+   */
+  currentTailFreshBoundary() {
+    if (typeof this.seededLength === "number" && this.scanOffset >= this.seededLength) {
+      this.seededLength = null;
+    }
+    return Math.max(this.scanOffset, this.getText().length - FRESH_MATCH_TAIL_SLACK);
+  }
+
+  /**
    * Replace buffer contents with the current visible terminal screen.
-   * The entire seeded viewport is treated as fresh for waitFor* matching.
+   * The entire seeded viewport is treated as fresh for waitFor / waitForText /
+   * waitForRegex. waitForAny / waitForPrompt still use the live tail window.
    */
   replaceWithVisibleScreen(screenText, trailingFresh = "") {
     const normalized = String(screenText || "").endsWith("\n")
@@ -333,6 +349,18 @@ class SessionOutputBuffer {
       this.append(trailing);
     }
     this.seededLength = this.getText().length;
+    // Preserve a live-tail shell prompt for waitForPrompt, matching the old
+    // markOutputConsumedThrough(preserveTailPatterns) startup behavior.
+    this.preservedTailMatch = null;
+    const text = this.getText();
+    const fresh = findFreshTailMatchAny(text, shellPromptPatterns());
+    if (fresh !== null) {
+      this.preservedTailMatch = {
+        textLength: text.length,
+        value: fresh.matched.value,
+        endOffset: fresh.matched.endOffset,
+      };
+    }
   }
 
   consumeFreshPendingMatch(pattern, freshBoundary = this.currentFreshBoundary()) {
@@ -651,7 +679,7 @@ class SessionOutputBuffer {
         return preserved.index;
       }
     }
-    const freshBoundary = this.currentFreshBoundary();
+    const freshBoundary = this.currentTailFreshBoundary();
     const fresh = this.consumeFreshPendingMatchAny(patterns, freshBoundary);
     if (fresh !== null) {
       this.advanceScanOffset(fresh.matched.endOffset);

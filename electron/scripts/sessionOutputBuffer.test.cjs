@@ -480,6 +480,44 @@ test("SessionOutputBuffer replaceWithVisibleScreen keeps trailing fresh output f
   assert.match(buffer.getText(), /\x07\x07$/);
 });
 
+test("SessionOutputBuffer seeded viewport does not make mid-screen prompts waitable via waitForAny", async () => {
+  const buffer = new SessionOutputBuffer("s1");
+  const screen = [
+    "user@host:~$ ",
+    "running long job...",
+    ...Array.from({ length: 30 }, (_, i) => `output line ${i} ${"x".repeat(20)}`),
+  ].join("\n");
+  assert.ok(screen.length > 512);
+
+  buffer.replaceWithVisibleScreen(screen);
+
+  const pending = buffer.waitForAny(shellPromptPatterns(), 200);
+  let resolvedEarly = false;
+  void pending.then(() => {
+    resolvedEarly = true;
+  });
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.equal(resolvedEarly, false);
+
+  buffer.append("\nuser@host:~$ ");
+  assert.equal(await pending, 1);
+});
+
+test("SessionOutputBuffer seeded viewport still preserves a live-tail prompt for waitForPrompt", async () => {
+  const buffer = new SessionOutputBuffer("s1");
+  buffer.replaceWithVisibleScreen(`menu header\n${"x".repeat(600)}\nroot@host:~# `);
+
+  assert.equal(
+    await buffer.waitForAny(
+      shellPromptPatterns(),
+      1000,
+      undefined,
+      { allowPreservedTailMatch: true },
+    ),
+    0,
+  );
+});
+
 test("stepsToJavaScript sends sensitive prompt result", () => {
   const code = stepsToJavaScript([
     { type: "send", value: "secret", sensitive: true },
