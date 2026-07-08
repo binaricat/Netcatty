@@ -10,6 +10,36 @@ function isFreshTailMatch(textLength, matchEndAbsolute) {
   return matchEndAbsolute >= textLength - FRESH_MATCH_TAIL_SLACK;
 }
 
+function stripTrailingBlankLines(text) {
+  return String(text || "").replace(/(?:[ \t]*\r?\n)*$/u, "");
+}
+
+/**
+ * Drop any prefix of trailingFresh that the viewport snapshot already shows.
+ * Handles blank-padded full-viewport snapshots and partial overlaps where the
+ * snapshot captured only the start of the sync-race bytes.
+ */
+function trimOverlappingTrailingFresh(viewportText, trailingFresh) {
+  const trailing = String(trailingFresh || "");
+  if (!trailing) return "";
+  const viewport = String(viewportText || "");
+  const viewportCore = stripTrailingBlankLines(viewport);
+  const trailingCore = stripTrailingBlankLines(trailing);
+  if (
+    viewport.endsWith(trailing)
+    || (trailingCore && viewportCore.endsWith(trailingCore))
+  ) {
+    return "";
+  }
+  const max = Math.min(viewportCore.length, trailing.length);
+  for (let len = max; len > 0; len -= 1) {
+    if (viewportCore.endsWith(trailing.slice(0, len))) {
+      return trailing.slice(len);
+    }
+  }
+  return trailing;
+}
+
 function isRegExpLike(pattern) {
   return Boolean(
     pattern
@@ -341,21 +371,10 @@ class SessionOutputBuffer {
     const normalized = String(screenText || "").endsWith("\n")
       ? String(screenText || "")
       : `${String(screenText || "")}\n`;
-    let trailing = String(trailingFresh || "");
     // Snapshot and live taps can both observe the same suffix. Full-viewport
-    // snapshots often pad with blank rows after the live content, so a plain
-    // endsWith check misses duplicates — also compare after stripping trailing
-    // blank lines.
-    if (trailing) {
-      const trailingCore = trailing.replace(/(?:[ \t]*\r?\n)*$/u, "");
-      const viewportCore = normalized.replace(/(?:[ \t]*\r?\n)*$/u, "");
-      if (
-        normalized.endsWith(trailing)
-        || (trailingCore && viewportCore.endsWith(trailingCore))
-      ) {
-        trailing = "";
-      }
-    }
+    // snapshots often pad with blank rows, and the snapshot may only include a
+    // prefix of trailingFresh — trim any overlapping prefix before appending.
+    const trailing = trimOverlappingTrailingFresh(normalized, trailingFresh);
     this.clear();
     this.append(normalized);
     // Seed only the visible viewport — not sync-race trailing bytes.

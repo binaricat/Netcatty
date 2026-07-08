@@ -624,6 +624,27 @@ test("SessionOutputBuffer does not duplicate trailingFresh already in blank-padd
   assert.equal(await pending, "READY");
 });
 
+test("SessionOutputBuffer trims partial overlap from sync-race trailingFresh", async () => {
+  const buffer = new SessionOutputBuffer("s1");
+  // Snapshot captured READY\\n while the live buffer already has READY\\nNEXT\\n.
+  buffer.replaceWithVisibleScreen("READY\n", "READY\nNEXT\n");
+  assert.equal(buffer.getText(), "READY\nNEXT\n");
+
+  assert.equal(await buffer.waitForText("READY", 200), "READY");
+  assert.equal(await buffer.waitForText("NEXT", 200), "NEXT");
+
+  const pending = buffer.waitForText("READY", 200);
+  let resolvedEarly = false;
+  void pending.then(() => {
+    resolvedEarly = true;
+  });
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.equal(resolvedEarly, false);
+
+  buffer.append("\nfresh READY\n");
+  assert.equal(await pending, "READY");
+});
+
 test("stepsToJavaScript sends sensitive prompt result", () => {
   const code = stepsToJavaScript([
     { type: "send", value: "secret", sensitive: true },
