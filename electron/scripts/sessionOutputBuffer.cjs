@@ -333,6 +333,8 @@ class SessionOutputBuffer {
    * Replace buffer contents with the current visible terminal screen.
    * The entire seeded viewport is treated as fresh for waitFor / waitForText /
    * waitForRegex. waitForAny / waitForPrompt still use the live tail window.
+   * `trailingFresh` (bytes that arrived during snapshot sync) stays outside
+   * seededLength so consuming a startup prompt does not discard it.
    */
   replaceWithVisibleScreen(screenText, trailingFresh = "") {
     const normalized = String(screenText || "").endsWith("\n")
@@ -345,18 +347,19 @@ class SessionOutputBuffer {
     }
     this.clear();
     this.append(normalized);
+    // Seed only the visible viewport — not sync-race trailing bytes.
+    this.seededLength = this.getText().length;
+    // Preserve a live-tail shell prompt from the viewport for waitForPrompt,
+    // matching the old markOutputConsumedThrough(preserveTailPatterns) behavior.
+    this.preservedTailMatch = null;
+    const viewportText = this.getText();
+    const fresh = findFreshTailMatchAny(viewportText, shellPromptPatterns());
     if (trailing) {
       this.append(trailing);
     }
-    this.seededLength = this.getText().length;
-    // Preserve a live-tail shell prompt for waitForPrompt, matching the old
-    // markOutputConsumedThrough(preserveTailPatterns) startup behavior.
-    this.preservedTailMatch = null;
-    const text = this.getText();
-    const fresh = findFreshTailMatchAny(text, shellPromptPatterns());
     if (fresh !== null) {
       this.preservedTailMatch = {
-        textLength: text.length,
+        textLength: this.getText().length,
         value: fresh.matched.value,
         endOffset: fresh.matched.endOffset,
       };

@@ -571,6 +571,23 @@ test("SessionOutputBuffer consuming startup prompt also consumes seeded text aft
   assert.equal(await pending, "READY");
 });
 
+test("SessionOutputBuffer waitForPrompt does not consume sync-race trailingFresh", async () => {
+  const buffer = new SessionOutputBuffer("s1");
+  buffer.replaceWithVisibleScreen("root@host:~# ", "\nfresh READY\n");
+
+  assert.equal(
+    await buffer.waitForAny(
+      shellPromptPatterns(),
+      1000,
+      undefined,
+      { allowPreservedTailMatch: true },
+    ),
+    0,
+  );
+
+  assert.equal(await buffer.waitForText("READY", 200), "READY");
+});
+
 test("stepsToJavaScript sends sensitive prompt result", () => {
   const code = stepsToJavaScript([
     { type: "send", value: "secret", sensitive: true },
