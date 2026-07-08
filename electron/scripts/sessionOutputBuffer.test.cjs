@@ -544,6 +544,33 @@ test("SessionOutputBuffer consuming startup prompt also consumes seeded viewport
   assert.equal(await pending, "READY");
 });
 
+test("SessionOutputBuffer consuming startup prompt also consumes seeded text after the prompt", async () => {
+  const buffer = new SessionOutputBuffer("s1");
+  // Short snapshot where the live-tail prompt is not the final visible text.
+  buffer.replaceWithVisibleScreen("root@host:~# \nold READY\n");
+
+  assert.equal(
+    await buffer.waitForAny(
+      shellPromptPatterns(),
+      1000,
+      undefined,
+      { allowPreservedTailMatch: true },
+    ),
+    0,
+  );
+
+  const pending = buffer.waitForText("READY", 200);
+  let resolvedEarly = false;
+  void pending.then(() => {
+    resolvedEarly = true;
+  });
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.equal(resolvedEarly, false);
+
+  buffer.append("fresh READY\n");
+  assert.equal(await pending, "READY");
+});
+
 test("stepsToJavaScript sends sensitive prompt result", () => {
   const code = stepsToJavaScript([
     { type: "send", value: "secret", sensitive: true },
