@@ -269,35 +269,42 @@ function showWaitForTimeoutDialog(pattern, timeoutMs) {
 async function syncOutputBufferFromSnapshot(sessionId) {
   const buffer = getOrCreateBuffer(sessionId);
   const syncStartText = buffer.getText();
-  let consumedLength = syncStartText.length;
   try {
     const snapshot = await requestScreenSnapshot(sessionId);
     const screenText = (snapshot.lines || []).join("\n");
-    if (!screenText) return;
-    if (buffer.getText() !== syncStartText) return;
-    const existing = buffer.getText();
-    if (!existing) {
-      buffer.append(screenText.endsWith("\n") ? screenText : `${screenText}\n`);
-      consumedLength = buffer.getText().length;
+    if (!screenText) {
+      // Blank viewport: ignore prior scrollback so waits only see new output.
+      buffer.markOutputConsumedThrough(buffer.getText().length, {
+        preserveTailPatterns: shellPromptPatterns(),
+      });
       return;
     }
-    const tail = screenText.slice(-8192);
-    if (!tail) return;
-    const existingTail = existing.slice(-8192);
-    if (tail === existingTail || existing.endsWith(tail)) return;
-    if (existingTail && tail.includes(existingTail)) {
-      buffer.append(tail.slice(tail.indexOf(existingTail) + existingTail.length));
-      consumedLength = buffer.getText().length;
+
+    const currentText = buffer.getText();
+    if (currentText !== syncStartText) {
+      // Output arrived while the snapshot was in flight — keep that fresh
+      // tail matchable, but do not rematch pre-sync scrollback.
+      buffer.markOutputConsumedThrough(syncStartText.length, {
+        preserveTailPatterns: shellPromptPatterns(),
+      });
       return;
     }
-    if (!existing.includes(tail.trim())) {
-      buffer.append(tail.startsWith("\n") ? tail : `\n${tail}`);
-      consumedLength = buffer.getText().length;
-    }
+
+    // Replace the script buffer with the current visible screen. Auto-login
+    // and menu scripts need to waitFor text that is already on screen
+    // (e.g. bastion "SSH资源" near the top of a multi-line menu). Marking the
+    // whole buffer consumed made those waits time out (#1960). Using only the
+    // viewport also avoids rematching older scrollback that has left the screen.
+    const normalized = screenText.endsWith("\n") ? screenText : `${screenText}\n`;
+    buffer.clear();
+    buffer.append(normalized);
   } catch {
-    // Keep startup synchronization best-effort; the current buffer is still baselined below.
-  } finally {
-    buffer.markOutputConsumedThrough(consumedLength, { preserveTailPatterns: shellPromptPatterns() });
+    // Snapshot failed: baseline existing buffer so waits require new output.
+    if (buffer.getText() === syncStartText) {
+      buffer.markOutputConsumedThrough(syncStartText.length, {
+        preserveTailPatterns: shellPromptPatterns(),
+      });
+    }
   }
 }
 

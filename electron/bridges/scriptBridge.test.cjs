@@ -442,12 +442,14 @@ test("script run treats cancelled form dialogs as script failures", async () => 
   scriptBridge.removeSessionBuffer(sessionId);
 });
 
-test("script waitFor ignores keywords from the startup screen snapshot until new output arrives", async () => {
+test("script waitFor matches text already visible on the startup screen", async () => {
   const handlers = new Map();
   const sentRunUpdates = [];
-  const sessionId = "session-stale-startup-output";
+  const sessionId = "session-visible-startup-output";
 
   scriptBridge.removeSessionBuffer(sessionId);
+  // Prior scrollback that has left the viewport must not rematch.
+  scriptBridge.appendSessionOutput(sessionId, "scrolled-off READY marker\n");
   scriptBridge.init({
     sessions: new Map(),
     electronModule: {
@@ -479,7 +481,7 @@ test("script waitFor ignores keywords from the startup screen snapshot until new
                   cols: 80,
                   currentRow: 1,
                   lines: [
-                    "old deployment READY marker",
+                    "visible READY marker",
                     "user@host:~$ ",
                   ],
                 },
@@ -496,9 +498,9 @@ test("script waitFor ignores keywords from the startup screen snapshot until new
     },
   });
 
-  const runPromise = handlers.get("netcatty:script:run")({}, {
-    scriptId: "stale-output",
-    scriptLabel: "Stale output",
+  await handlers.get("netcatty:script:run")({}, {
+    scriptId: "visible-output",
+    scriptLabel: "Visible output",
     sessionId,
     content: `
       const value = await nct.screen.waitFor('READY', 1000);
@@ -507,20 +509,174 @@ test("script waitFor ignores keywords from the startup screen snapshot until new
     permissionMode: "auto",
   });
 
-  await delay(50);
-  const earlyRun = sentRunUpdates.at(-1)?.find((run) => run.scriptId === "stale-output");
-  assert.notEqual(earlyRun?.status, "completed");
-  assert.doesNotMatch(
-    (earlyRun?.logs || []).map((entry) => entry.message).join("\n"),
-    /matched READY/,
-  );
-
-  scriptBridge.appendSessionOutput(sessionId, "fresh READY\n");
-  await runPromise;
-
-  const finalRun = sentRunUpdates.at(-1).find((run) => run.scriptId === "stale-output");
+  const finalRun = sentRunUpdates.at(-1).find((run) => run.scriptId === "visible-output");
   assert.equal(finalRun.status, "completed");
   assert.match(finalRun.logs.map((entry) => entry.message).join("\n"), /matched READY/);
+  scriptBridge.removeSessionBuffer(sessionId);
+});
+
+test("script waitFor ignores keywords that have scrolled off the visible screen", async () => {
+  const handlers = new Map();
+  const sentRunUpdates = [];
+  const sessionId = "session-scrolled-off-startup-output";
+
+  scriptBridge.removeSessionBuffer(sessionId);
+  scriptBridge.appendSessionOutput(sessionId, "old deployment READY marker\nuser@host:~$ \n");
+  scriptBridge.init({
+    sessions: new Map(),
+    electronModule: {
+      app: {
+        getVersion: () => "test",
+        getPath: () => process.cwd(),
+      },
+      webContents: {
+        fromId: () => null,
+      },
+    },
+    terminalBridge: {
+      writeToSession() {},
+    },
+    terminalWorkerManager: null,
+    getMainWindow: () => ({
+      webContents: {
+        id: 1,
+        send(channel, payload) {
+          if (channel === "netcatty:script:runs-updated") {
+            sentRunUpdates.push(payload.runs);
+          }
+          if (channel === "netcatty:script:screen-snapshot-request") {
+            setImmediate(() => {
+              handlers.get("netcatty:script:screen-snapshot-response")({}, {
+                requestId: payload.requestId,
+                snapshot: {
+                  rows: 24,
+                  cols: 80,
+                  currentRow: 0,
+                  lines: ["user@host:~$ "],
+                },
+              });
+            });
+          }
+          if (channel === "netcatty:script:dialog-request") {
+            setImmediate(() => {
+              handlers.get("netcatty:script:dialog-response")({}, {
+                requestId: payload.requestId,
+                value: "abort",
+              });
+            });
+          }
+        },
+      },
+    }),
+  });
+  scriptBridge.registerHandlers({
+    handle(channel, handler) {
+      handlers.set(channel, handler);
+    },
+  });
+
+  await handlers.get("netcatty:script:run")({}, {
+    scriptId: "scrolled-off-output",
+    scriptLabel: "Scrolled off output",
+    sessionId,
+    content: `
+      await nct.screen.waitFor('READY', 200);
+    `,
+    permissionMode: "auto",
+  });
+
+  const finalRun = sentRunUpdates.at(-1).find((run) => run.scriptId === "scrolled-off-output");
+  assert.equal(finalRun.status, "failed");
+  assert.match(String(finalRun.error || ""), /timed out|stopped/i);
+  scriptBridge.removeSessionBuffer(sessionId);
+});
+
+test("script waitForRegex matches bastion menu already on screen at script start", async () => {
+  const handlers = new Map();
+  const sentRunUpdates = [];
+  const sessionId = "session-bastion-menu-startup";
+  const menuLines = [
+    "Welcome to SSHD",
+    "",
+    "user login success",
+    "",
+    "SSH资源(5) :",
+    "  [1] [Empty]@192.168.233.11  (联通助理自研NLP01) ",
+    "  [2] [Empty]@192.168.238.34  (192.168.238.34) ",
+    "  [3] [Empty]@192.168.242.11  (192.168.242.11) ",
+    "  [4] [Empty]@192.168.80.18",
+    "  [5] [Empty]@192.168.80.19",
+    "",
+    "Telnet资源(0) :",
+    "",
+    "Rlogin资源(0) :",
+    "",
+    "操作命令:",
+    "[l] 显示SSH资源列表",
+    "[e] 退出",
+  ];
+
+  scriptBridge.removeSessionBuffer(sessionId);
+  scriptBridge.appendSessionOutput(sessionId, `${menuLines.join("\n")}\n`);
+  scriptBridge.init({
+    sessions: new Map(),
+    electronModule: {
+      app: {
+        getVersion: () => "test",
+        getPath: () => process.cwd(),
+      },
+      webContents: {
+        fromId: () => null,
+      },
+    },
+    terminalBridge: {
+      writeToSession() {},
+    },
+    terminalWorkerManager: null,
+    getMainWindow: () => ({
+      webContents: {
+        id: 1,
+        send(channel, payload) {
+          if (channel === "netcatty:script:runs-updated") {
+            sentRunUpdates.push(payload.runs);
+          }
+          if (channel === "netcatty:script:screen-snapshot-request") {
+            setImmediate(() => {
+              handlers.get("netcatty:script:screen-snapshot-response")({}, {
+                requestId: payload.requestId,
+                snapshot: {
+                  rows: 24,
+                  cols: 80,
+                  currentRow: menuLines.length - 1,
+                  lines: menuLines,
+                },
+              });
+            });
+          }
+        },
+      },
+    }),
+  });
+  scriptBridge.registerHandlers({
+    handle(channel, handler) {
+      handlers.set(channel, handler);
+    },
+  });
+
+  await handlers.get("netcatty:script:run")({}, {
+    scriptId: "bastion-menu",
+    scriptLabel: "Bastion menu",
+    sessionId,
+    content: `
+      const value = await nct.screen.waitForRegex("SSH资源\\\\s*\\\\(\\\\d+\\\\)\\\\s*:", 1000);
+      nct.log("matched " + value);
+    `,
+    permissionMode: "auto",
+  });
+
+  const finalRun = sentRunUpdates.at(-1).find((run) => run.scriptId === "bastion-menu");
+  assert.equal(finalRun.status, "completed");
+  assert.match(finalRun.logs.map((entry) => entry.message).join("\n"), /matched SSH资源\(5\) :/);
   scriptBridge.removeSessionBuffer(sessionId);
 });
 
