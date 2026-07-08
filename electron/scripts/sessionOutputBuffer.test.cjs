@@ -721,11 +721,37 @@ test("SessionOutputBuffer invalidateStartupSeed blocks seeded waits after input"
   assert.equal(await pendingText, "READY");
 });
 
-test("SessionOutputBuffer invalidateStartupSeed keeps sync-race trailingFresh matchable", async () => {
+test("SessionOutputBuffer invalidateStartupSeed also consumes pre-input trailingFresh", async () => {
   const buffer = new SessionOutputBuffer("s1");
   buffer.replaceWithVisibleScreen("root@host:~# ", "\nfresh READY\n");
 
   buffer.invalidateStartupSeed();
+
+  const pending = buffer.waitForText("READY", 200);
+  let resolvedEarly = false;
+  void pending.then(() => {
+    resolvedEarly = true;
+  });
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.equal(resolvedEarly, false);
+
+  buffer.append("\npost-command READY\n");
+  assert.equal(await pending, "READY");
+});
+
+test("SessionOutputBuffer waitForPrompt keeps long sync-race trailingFresh matchable", async () => {
+  const buffer = new SessionOutputBuffer("s1");
+  buffer.replaceWithVisibleScreen("root@host:~# ", `\nREADY\n${"x".repeat(600)}`);
+
+  assert.equal(
+    await buffer.waitForAny(
+      shellPromptPatterns(),
+      1000,
+      undefined,
+      { allowPreservedTailMatch: true },
+    ),
+    0,
+  );
 
   assert.equal(await buffer.waitForText("READY", 200), "READY");
 });

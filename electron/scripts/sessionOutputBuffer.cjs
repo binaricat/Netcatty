@@ -438,14 +438,13 @@ class SessionOutputBuffer {
   /**
    * After the script sends automated input, startup snapshot content must not
    * satisfy later waits (sendLine then waitForPrompt / waitForText). Consume
-   * through the seeded viewport only so sync-race trailingFresh stays matchable.
+   * everything currently buffered — including sync-race trailingFresh that
+   * arrived before the input — so waits require post-command output.
    */
   invalidateStartupSeed() {
-    if (typeof this.seededLength === "number") {
-      this.scanOffset = Math.max(this.scanOffset, this.seededLength);
-      this.seededLength = null;
-    }
+    this.seededLength = null;
     this.preservedTailMatch = null;
+    this.scanOffset = this.getText().length;
   }
 
   consumeFreshPendingMatch(pattern, freshBoundary = this.currentFreshBoundary()) {
@@ -591,7 +590,13 @@ class SessionOutputBuffer {
       ? Math.max(fresh.matched.endOffset, this.seededLength)
       : Math.max(fresh.matched.endOffset, preserved.textLength);
     this.scanOffset = Math.max(this.scanOffset, consumeThrough);
-    if (typeof this.seededLength === "number" && this.scanOffset >= this.seededLength) {
+    // Sync-race trailingFresh sits past the original seededLength. Keep it fully
+    // waitable even when longer than FRESH_MATCH_TAIL_SLACK; otherwise a marker
+    // near the start of a large burst (READY + long menu) times out after prompt.
+    const textLength = this.getText().length;
+    if (textLength > this.scanOffset) {
+      this.seededLength = textLength;
+    } else {
       this.seededLength = null;
     }
     return fresh;
