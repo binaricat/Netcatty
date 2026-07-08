@@ -1833,6 +1833,13 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         if (term.cols !== dimensions.cols || term.rows !== dimensions.rows) {
           term.resize(dimensions.cols, dimensions.rows);
           forceSyncRenderAfterResize(term);
+        } else {
+          // Pixel-only layout changes (opening the SFTP side panel, compose
+          // bar, etc.) shrink the container without changing cols/rows, so
+          // term.onResize — which clears the WebGL atlas — never fires.
+          // Stale atlas glyphs then paint as black squares (#2013).
+          xtermRuntimeRef.current?.clearTextureAtlas();
+          forceSyncRenderAfterResize(term);
         }
 
         // Preserve scroll position across resize (superset/Tabby pattern).
