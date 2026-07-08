@@ -1241,18 +1241,10 @@ function resizeSession(event, payload) {
     } else if (session.socket && session.type === 'telnet-native') {
       session.cols = payload.cols;
       session.rows = payload.rows;
-      // Only push a NAWS update once the peer has activated the protocol;
-      // sending an IAC sequence to a raw-TCP server would corrupt its stream.
+      // Only push a NAWS update once Telnet is active and the peer has enabled
+      // NAWS with DO NAWS; partial console wrappers may leak SB payload bytes.
       if (session.telnetProtocolActive) {
-        const colsByte = Buffer.from([
-          (payload.cols >> 8) & 0xff, payload.cols & 0xff,
-          (payload.rows >> 8) & 0xff, payload.rows & 0xff,
-        ]);
-        session.socket.write(Buffer.concat([
-          Buffer.from([telnetProtocol.IAC, telnetProtocol.SB, telnetProtocol.OPT.NAWS]),
-          telnetProtocol.escapeIacForWire(colsByte),
-          Buffer.from([telnetProtocol.IAC, telnetProtocol.SE]),
-        ]));
+        session.sendTelnetWindowSize?.();
       }
     }
   } catch (err) {

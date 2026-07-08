@@ -215,9 +215,9 @@ function createTelnetSessionApi(ctx) {
               remoteEcho: remoteEchoEnabled,
               localEcho: localEchoEnabled,
             },
+            sendTelnetWindowSize: () => negotiator.sendWindowSize(),
             // Mirror of the closure-local `telnetProtocolActive` so the resize
-            // handler (which only sees the session record) can decide whether
-            // to push a NAWS subnegotiation.
+            // handler can avoid sending Telnet control bytes to raw-TCP peers.
             get telnetProtocolActive() {
               return telnetProtocolActive;
             },

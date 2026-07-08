@@ -286,6 +286,7 @@ function createTelnetNegotiator({
   const localEchoSink = typeof onLocalEchoChange === "function" ? onLocalEchoChange : () => {};
 
   const naws = () => {
+    if (!enabledLocalOptions.has(OPT.NAWS)) return false;
     const { cols, rows } = sizeFn() || {};
     const safeCols = Number.isFinite(cols) && cols > 0 ? cols : 80;
     const safeRows = Number.isFinite(rows) && rows > 0 ? rows : 24;
@@ -294,6 +295,7 @@ function createTelnetNegotiator({
       (safeRows >> 8) & 0xff, safeRows & 0xff,
     ]);
     sbSink(OPT.NAWS, escapeIacForWire(payload));
+    return true;
   };
 
   const sendTerminalType = () => {

@@ -315,6 +315,16 @@ test("peer's independent DO NAWS (no WILL pending) replies WILL + size subneg", 
   assert.equal(subnegs[0].opt, OPT.NAWS);
 });
 
+test("sendWindowSize is silent until the peer enables NAWS", () => {
+  const { negotiator, subnegs } = recordNegotiator();
+  negotiator.start();
+
+  const sent = negotiator.sendWindowSize();
+
+  assert.equal(sent, false);
+  assert.equal(subnegs.length, 0);
+});
+
 test("peer's repeated DO for enabled local options is ignored", () => {
   const { negotiator, commands, subnegs } = recordNegotiator();
   negotiator.handleCommand(DO, OPT.NAWS);
@@ -463,7 +473,10 @@ test("sendWindowSize falls back to 80x24 when getWindowSize returns garbage", ()
   const { negotiator, subnegs } = recordNegotiator({
     getWindowSize: () => ({ cols: NaN, rows: -3 }),
   });
-  negotiator.sendWindowSize();
+  negotiator.handleCommand(DO, OPT.NAWS);
+  subnegs.length = 0;
+  const sent = negotiator.sendWindowSize();
+  assert.equal(sent, true);
   assert.deepEqual([...subnegs[0].payload], [0, 80, 0, 24]);
 });
 
