@@ -280,9 +280,11 @@ async function syncOutputBufferFromSnapshot(sessionId) {
 
     // Buffer-fallback snapshots are the full script output/scrollback, not the
     // visible viewport. Seeding them as waitable would rematch scrolled-off
-    // text (#1821). Keep the consumed baseline for that path.
+    // text (#1821). Keep the consumed baseline for that path — but only through
+    // the pre-sync length so bytes that arrived during the await stay fresh
+    // (same trailingFresh idea as the viewport path).
     if (!isViewportSnapshot(snapshot) || !screenText) {
-      buffer.markOutputConsumedThrough(buffer.getText().length, {
+      buffer.markOutputConsumedThrough(syncStartText.length, {
         preserveTailPatterns: shellPromptPatterns(),
       });
       return;

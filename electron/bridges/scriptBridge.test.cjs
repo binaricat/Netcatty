@@ -663,6 +663,83 @@ test("script waitFor does not seed buffer-fallback scrollback as visible screen"
   scriptBridge.removeSessionBuffer(sessionId);
 });
 
+test("script waitFor keeps output that arrives during empty/fallback snapshot sync", async () => {
+  const handlers = new Map();
+  const sentRunUpdates = [];
+  const sessionId = "session-output-during-empty-snapshot";
+  let snapshotRequestId;
+
+  scriptBridge.removeSessionBuffer(sessionId);
+  scriptBridge.appendSessionOutput(sessionId, "old scrollback without keyword\n");
+  scriptBridge.init({
+    sessions: new Map(),
+    electronModule: {
+      app: {
+        getVersion: () => "test",
+        getPath: () => process.cwd(),
+      },
+      webContents: {
+        fromId: () => null,
+      },
+    },
+    terminalBridge: {
+      writeToSession() {},
+    },
+    terminalWorkerManager: null,
+    getMainWindow: () => ({
+      webContents: {
+        id: 1,
+        send(channel, payload) {
+          if (channel === "netcatty:script:runs-updated") {
+            sentRunUpdates.push(payload.runs);
+          }
+          if (channel === "netcatty:script:screen-snapshot-request") {
+            snapshotRequestId = payload.requestId;
+          }
+        },
+      },
+    }),
+  });
+  scriptBridge.registerHandlers({
+    handle(channel, handler) {
+      handlers.set(channel, handler);
+    },
+  });
+
+  const runPromise = handlers.get("netcatty:script:run")({}, {
+    scriptId: "empty-snapshot-race",
+    scriptLabel: "Empty snapshot race",
+    sessionId,
+    content: `
+      const value = await nct.screen.waitFor('READY', 1000);
+      nct.log('matched ' + value);
+    `,
+    permissionMode: "auto",
+  });
+
+  await delay(20);
+  assert.ok(snapshotRequestId);
+  // Live output during the snapshot wait must stay matchable even when the
+  // snapshot is empty / falls through to the consumed-baseline path.
+  scriptBridge.appendSessionOutput(sessionId, "fresh READY\n");
+  handlers.get("netcatty:script:screen-snapshot-response")({}, {
+    requestId: snapshotRequestId,
+    snapshot: {
+      rows: 24,
+      cols: 80,
+      currentRow: 0,
+      lines: [],
+    },
+  });
+
+  await runPromise;
+
+  const finalRun = sentRunUpdates.at(-1).find((run) => run.scriptId === "empty-snapshot-race");
+  assert.equal(finalRun.status, "completed");
+  assert.match(finalRun.logs.map((entry) => entry.message).join("\n"), /matched READY/);
+  scriptBridge.removeSessionBuffer(sessionId);
+});
+
 test("script waitForRegex matches bastion menu already on screen at script start", async () => {
   const handlers = new Map();
   const sentRunUpdates = [];
