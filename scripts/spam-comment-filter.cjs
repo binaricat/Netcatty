@@ -10,7 +10,7 @@ const DANGEROUS_FILE_EXTENSION =
   "(?:zip|7z|rar|tar\\.gz|tgz|exe|msi|dmg|pkg|deb|rpm|appimage|bat|cmd|ps1|scr|vbs)";
 
 const dangerousFilePattern = new RegExp(
-  `(?:^|[\\s([<"'=])([^\\s()[\\]<>\"']+\\.${DANGEROUS_FILE_EXTENSION})(?=$|[\\s)\\]>\"'])`,
+  `(?:^|[\\s([<"'=])([^\\s()[\\]<>\"']+\\.${DANGEROUS_FILE_EXTENSION})(?=$|[\\s)\\]>\"']|[.,!?;:](?:$|\\s))`,
   "gi"
 );
 

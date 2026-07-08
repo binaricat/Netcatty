@@ -14,6 +14,17 @@ test("flags the fake Netcatty patch spam pattern", () => {
   assert.equal(result.spam, true);
 });
 
+test("flags fake patch spam when the filename ends a sentence", () => {
+  const result = detectSpamComment({
+    authorAssociation: "NONE",
+    userType: "User",
+    body: "Download this patch.zip. It fixes the backend encoding so the terminal rendering black boxes disappear.",
+  });
+
+  assert.equal(result.spam, true);
+  assert.deepEqual(result.dangerousFiles, ["patch.zip"]);
+});
+
 test("does not flag ordinary log attachments from outside users", () => {
   const result = detectSpamComment({
     authorAssociation: "FIRST_TIME_CONTRIBUTOR",
@@ -36,7 +47,7 @@ test("does not flag trusted maintainers even when sharing patch archives", () =>
 
 test("extracts risky file names from markdown links and plain text", () => {
   assert.deepEqual(
-    extractDangerousFiles("[fix.zip](https://example.com/fix.zip) also hotfix.dmg"),
+    extractDangerousFiles("[fix.zip](https://example.com/fix.zip) also hotfix.dmg."),
     ["fix.zip", "https://example.com/fix.zip", "hotfix.dmg"]
   );
 });
