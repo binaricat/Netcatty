@@ -31,9 +31,11 @@ function trimOverlappingTrailingFresh(viewportText, trailingFresh) {
   ) {
     return "";
   }
-  const max = Math.min(viewportCore.length, trailing.length);
+  // Prefer the full viewport for partial overlap so a trailing newline that is
+  // part of the overlapped text is not left behind as a phantom blank line.
+  const max = Math.min(viewport.length, trailing.length);
   for (let len = max; len > 0; len -= 1) {
-    if (viewportCore.endsWith(trailing.slice(0, len))) {
+    if (viewport.endsWith(trailing.slice(0, len))) {
       return trailing.slice(len);
     }
   }
