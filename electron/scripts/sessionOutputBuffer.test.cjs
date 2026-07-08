@@ -480,7 +480,7 @@ test("SessionOutputBuffer replaceWithVisibleScreen keeps trailing fresh output f
   assert.match(buffer.getText(), /\x07\x07$/);
 });
 
-test("SessionOutputBuffer seeded viewport does not make mid-screen prompts waitable via waitForAny", async () => {
+test("SessionOutputBuffer seeded viewport does not make mid-screen prompts waitable via waitForPrompt", async () => {
   const buffer = new SessionOutputBuffer("s1");
   const screen = [
     "user@host:~$ ",
@@ -491,7 +491,10 @@ test("SessionOutputBuffer seeded viewport does not make mid-screen prompts waita
 
   buffer.replaceWithVisibleScreen(screen);
 
-  const pending = buffer.waitForAny(shellPromptPatterns(), 200);
+  // waitForPrompt uses allowPreservedTailMatch — mid-screen prompts must not win.
+  const pending = buffer.waitForAny(shellPromptPatterns(), 200, undefined, {
+    allowPreservedTailMatch: true,
+  });
   let resolvedEarly = false;
   void pending.then(() => {
     resolvedEarly = true;
@@ -501,6 +504,17 @@ test("SessionOutputBuffer seeded viewport does not make mid-screen prompts waita
 
   buffer.append("\nuser@host:~$ ");
   assert.equal(await pending, 1);
+});
+
+test("SessionOutputBuffer seeded viewport keeps generic waitForAny matches outside the live tail", async () => {
+  const buffer = new SessionOutputBuffer("s1");
+  const header = "Option A\nOption B\n";
+  const body = Array.from({ length: 40 }, (_, i) => `filler ${i} ${"x".repeat(20)}`).join("\n");
+  const screen = `${header}${body}\n`;
+  assert.ok(screen.length > 512);
+
+  buffer.replaceWithVisibleScreen(screen);
+  assert.equal(await buffer.waitForAny(["Option A", "Option B"], 200), 0);
 });
 
 test("SessionOutputBuffer seeded viewport still preserves a live-tail prompt for waitForPrompt", async () => {

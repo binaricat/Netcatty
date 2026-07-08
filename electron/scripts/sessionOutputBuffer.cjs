@@ -318,9 +318,10 @@ class SessionOutputBuffer {
   }
 
   /**
-   * Freshness for waitForAny / waitForPrompt: always the live tail window.
-   * Seeded full-viewport freshness must not make every visible prompt-looking
-   * line a readiness signal (e.g. an older `user@host:~$` above a long job).
+   * Freshness for waitForPrompt (allowPreservedTailMatch): always the live
+   * tail window. Seeded full-viewport freshness must not make every visible
+   * prompt-looking line a readiness signal (e.g. an older `user@host:~$`
+   * above a long job). Generic waitForAny uses currentFreshBoundary instead.
    */
   currentTailFreshBoundary() {
     if (typeof this.seededLength === "number" && this.scanOffset >= this.seededLength) {
@@ -332,9 +333,9 @@ class SessionOutputBuffer {
   /**
    * Replace buffer contents with the current visible terminal screen.
    * The entire seeded viewport is treated as fresh for waitFor / waitForText /
-   * waitForRegex. waitForAny / waitForPrompt still use the live tail window.
-   * `trailingFresh` (bytes that arrived during snapshot sync) stays outside
-   * seededLength so consuming a startup prompt does not discard it.
+   * waitForRegex / generic waitForAny. waitForPrompt still uses the live tail
+   * window. `trailingFresh` (bytes that arrived during snapshot sync) stays
+   * outside seededLength so consuming a startup prompt does not discard it.
    */
   replaceWithVisibleScreen(screenText, trailingFresh = "") {
     const normalized = String(screenText || "").endsWith("\n")
@@ -703,7 +704,12 @@ class SessionOutputBuffer {
         return preserved.index;
       }
     }
-    const freshBoundary = this.currentTailFreshBoundary();
+    // Generic waitForAny must see the full seeded viewport (menu labels near
+    // the top). waitForPrompt passes allowPreservedTailMatch and stays on the
+    // live-tail window so older visible prompts are not readiness signals.
+    const freshBoundary = options.allowPreservedTailMatch === true
+      ? this.currentTailFreshBoundary()
+      : this.currentFreshBoundary();
     const fresh = this.consumeFreshPendingMatchAny(patterns, freshBoundary);
     if (fresh !== null) {
       this.advanceScanOffset(fresh.matched.endOffset);
