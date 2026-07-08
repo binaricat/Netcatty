@@ -341,9 +341,19 @@ class SessionOutputBuffer {
       ? String(screenText || "")
       : `${String(screenText || "")}\n`;
     let trailing = String(trailingFresh || "");
-    // Snapshot and live taps can both observe the same suffix; don't duplicate it.
-    if (trailing && normalized.endsWith(trailing)) {
-      trailing = "";
+    // Snapshot and live taps can both observe the same suffix. Full-viewport
+    // snapshots often pad with blank rows after the live content, so a plain
+    // endsWith check misses duplicates — also compare after stripping trailing
+    // blank lines.
+    if (trailing) {
+      const trailingCore = trailing.replace(/(?:[ \t]*\r?\n)*$/u, "");
+      const viewportCore = normalized.replace(/(?:[ \t]*\r?\n)*$/u, "");
+      if (
+        normalized.endsWith(trailing)
+        || (trailingCore && viewportCore.endsWith(trailingCore))
+      ) {
+        trailing = "";
+      }
     }
     this.clear();
     this.append(normalized);

@@ -588,6 +588,28 @@ test("SessionOutputBuffer waitForPrompt does not consume sync-race trailingFresh
   assert.equal(await buffer.waitForText("READY", 200), "READY");
 });
 
+test("SessionOutputBuffer does not duplicate trailingFresh already in blank-padded viewport", async () => {
+  const buffer = new SessionOutputBuffer("s1");
+  // Renderer snapshots include the full viewport, often with blank rows after
+  // the live content. Sync-race trailingFresh that is already painted must not
+  // be appended again or waitForText can match a phantom second copy.
+  buffer.replaceWithVisibleScreen("READY\n\n\n", "READY\n");
+  assert.equal(buffer.getText(), "READY\n\n\n");
+
+  assert.equal(await buffer.waitForText("READY", 200), "READY");
+
+  const pending = buffer.waitForText("READY", 200);
+  let resolvedEarly = false;
+  void pending.then(() => {
+    resolvedEarly = true;
+  });
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.equal(resolvedEarly, false);
+
+  buffer.append("\nfresh READY\n");
+  assert.equal(await pending, "READY");
+});
+
 test("stepsToJavaScript sends sensitive prompt result", () => {
   const code = stepsToJavaScript([
     { type: "send", value: "secret", sensitive: true },
