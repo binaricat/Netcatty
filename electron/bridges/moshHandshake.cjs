@@ -329,20 +329,10 @@ function createMoshConnectSniffer() {
 
       pending = pending.slice(consumed);
 
-      // Prefer parsing a held protocol fragment even before a newline arrives.
-      // ConPTY commonly appends CSI after MOSH CONNECT and then the PTY exits.
-      const heldConnect = tryParseRemainder(pending);
-      if (heldConnect && /MOSH CONNECT/.test(pending)) {
-        // Only accept when the held text looks like a complete CONNECT line
-        // (marker + key present). tryParseRemainder already validates the key.
-        parsed = makeParsed(heldConnect);
-        visibleText += pending.slice(0, heldConnect.matchStartOffset);
-        const suffix = pending.slice(heldConnect.matchEndOffset);
-        if (suffix) visibleText += suffix;
-        pending = "";
-        const visible = Buffer.isBuffer(chunk) ? Buffer.from(visibleText, "utf8") : visibleText;
-        return { visible, parsed };
-      }
+      // Do NOT parse an unterminated MOSH CONNECT here. A 22-char key prefix can
+      // still receive trailing "==" padding in a later chunk; accepting early would
+      // start mosh-client with a truncated MOSH_KEY (Codex review on #2028).
+      // Unterminated recovery happens in flush() when the SSH PTY exits.
 
       const holdIndex = potentialProtocolStart(pending);
       if (holdIndex === -1) {

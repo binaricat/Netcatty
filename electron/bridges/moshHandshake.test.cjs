@@ -72,10 +72,31 @@ test("createMoshConnectSniffer.flush recovers a trailing MOSH CONNECT without ne
   // would treat the handshake as a failure (issue #2025 error #2).
   const sniffer = createMoshConnectSniffer();
   const r1 = sniffer.feed("MOSH CONNECT 60003 ABCDEFGHIJKLMNOPQRSTUV==");
-  assert.equal(r1.parsed, null);
+  assert.equal(r1.parsed, null, "unterminated CONNECT must wait for flush/EOF");
   const r2 = sniffer.flush();
   assert.deepEqual(r2.parsed, { port: 60003, key: "ABCDEFGHIJKLMNOPQRSTUV==" });
   assert.ok(!String(r2.visible).includes("MOSH CONNECT"));
+});
+
+test("createMoshConnectSniffer does not accept a 22-char key prefix before padding arrives", () => {
+  // Codex #2028: if feed() eagerly parses an unterminated remainder, a chunk
+  // boundary after the 22 base64 chars of a padded key would truncate MOSH_KEY
+  // and leak the trailing "==" into the visible stream.
+  const sniffer = createMoshConnectSniffer();
+  const r1 = sniffer.feed("MOSH CONNECT 60004 ABCDEFGHIJKLMNOPQRSTUV");
+  assert.equal(r1.parsed, null);
+  assert.ok(!String(r1.visible).includes("MOSH CONNECT"));
+  const r2 = sniffer.feed("==\r\n");
+  assert.deepEqual(r2.parsed, { port: 60004, key: "ABCDEFGHIJKLMNOPQRSTUV==" });
+  assert.ok(!String(r2.visible).includes("=="));
+});
+
+test("createMoshConnectSniffer.flush recovers ConPTY CSI after an unterminated CONNECT", () => {
+  const sniffer = createMoshConnectSniffer();
+  const r1 = sniffer.feed("MOSH CONNECT 60005 ABCDEFGHIJKLMNOPQRSTUV==\u001b[?25h");
+  assert.equal(r1.parsed, null);
+  const r2 = sniffer.flush();
+  assert.deepEqual(r2.parsed, { port: 60005, key: "ABCDEFGHIJKLMNOPQRSTUV==" });
 });
 
 test("buildSshHandshakeCommand omits -t and uses default port", () => {
