@@ -435,21 +435,23 @@ jobs:
             | tar -xJ -C /usr/local --strip-components=1
           node -v
           npm -v
+          # Buster ships Python 3.7; node-gyp 12 needs >=3.8 (walrus syntax).
+          # actions/setup-python is not reliable inside this old glibc container,
+          # so install a manylinux-compatible CPython via uv instead.
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          export PATH="${HOME}/.local/bin:${PATH}"
+          uv python install 3.11
+          PYTHON_BIN="$(uv python find 3.11)"
+          ln -sfn "${PYTHON_BIN}" /usr/local/bin/python3.11
+          ln -sfn python3.11 /usr/local/bin/python3
+          python3 --version
+          echo "PYTHON=${PYTHON_BIN}" >> "${GITHUB_ENV}"
+          echo "npm_config_python=${PYTHON_BIN}" >> "${GITHUB_ENV}"
 
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Buster ships Python 3.7; node-gyp 12 uses 3.8+ syntax (walrus) and
-      # fails during npm ci / electron-rebuild without a newer interpreter.
-      - name: Setup Python for node-gyp
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
       - name: Install deps
-        env:
-          PYTHON: python3
-          npm_config_python: python3
         run: |
           python3 --version
           npm ci
@@ -471,8 +473,6 @@ jobs:
       - name: Prepare node-pty Linux runtime
         env:
           npm_config_arch: x64
-          PYTHON: python3
-          npm_config_python: python3
         run: bash scripts/ensure-node-pty-linux.sh prepare x64
 
       - name: Fetch bundled mosh-client
