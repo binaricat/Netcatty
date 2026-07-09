@@ -70,10 +70,16 @@ test("renderer flow constants match shared terminalFlowConstants.json", () => {
 test("terminal flood limits keep interactive acks responsive", () => {
   assert.ok(FLOW_LOW_WATER_MARK <= 8 * 1024);
   assert.ok(FLOW_CHAR_COUNT_ACK_SIZE <= 4 * 1024);
-  assert.ok(MAX_PENDING_WRITE_COALESCE_BYTES_FLOOD <= 8 * 1024);
+  // Flood coalesce must stay below bulk so TUI frames can interleave, but stay
+  // large enough that plain-text dumps (#1961) do not collapse into 8KB shards.
+  assert.ok(MAX_PENDING_WRITE_COALESCE_BYTES_FLOOD <= 256 * 1024);
+  assert.ok(MAX_PENDING_WRITE_COALESCE_BYTES_FLOOD >= 64 * 1024);
   assert.ok(MAX_TERMINAL_PLAIN_WRITE_CHUNK_BYTES <= FLOW_HIGH_WATER_MARK);
   assert.ok(MAX_TERMINAL_UNBROKEN_WRITE_CHUNK_BYTES <= 4 * 1024);
   assert.ok(MAX_TERMINAL_WRITE_QUEUE_DRAIN_BYTES <= FLOW_HIGH_WATER_MARK);
+  // Drain enough per event-loop turn that a 1MB high-water backlog does not
+  // require dozens of setTimeout(0) yields before SSH can resume.
+  assert.ok(MAX_TERMINAL_WRITE_QUEUE_DRAIN_BYTES >= 128 * 1024);
   assert.ok(TERMINAL_LONG_LINE_PRESSURE_BYTES >= MAX_TERMINAL_UNBROKEN_WRITE_CHUNK_BYTES);
   assert.ok(TERMINAL_AUX_LONG_LINE_SCAN_LIMIT_CHARS >= TERMINAL_LONG_LINE_PRESSURE_BYTES);
   assert.ok(XTERM_WRITE_CALLBACK_BATCH_BYTES <= FLOW_HIGH_WATER_MARK);

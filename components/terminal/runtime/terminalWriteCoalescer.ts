@@ -281,11 +281,28 @@ export const abortTerminalWriteCoalescer = (
   }
 };
 
+/**
+ * Choose the coalescer pending-byte cap based on flow/flood state.
+ *
+ * Important for issue #1961 (`tail -2000f` over SSH): when flow is paused we
+ * must drain the renderer backlog as fast as possible so the SSH channel can
+ * resume (each pause/resume costs ~1 RTT). Shrinking to tiny flood batches
+ * while paused *slows* that drain and multiplies wall-clock time.
+ *
+ * - Flow paused → keep the bulk cap so large plain dumps drain quickly.
+ * - Queue flood only → use the flood cap (large enough for bulk, smaller than
+ *   bulk so interactive frames can interleave).
+ * - Normal → bulk cap.
+ */
 export const resolveFloodCoalescerByteCap = (
   isFlowPaused: boolean,
   queueInFloodMode: boolean,
-): number => (
-  isFlowPaused || queueInFloodMode
-    ? MAX_PENDING_WRITE_COALESCE_BYTES_FLOOD
-    : MAX_PENDING_WRITE_COALESCE_BYTES
-);
+): number => {
+  if (isFlowPaused) {
+    return MAX_PENDING_WRITE_COALESCE_BYTES;
+  }
+  if (queueInFloodMode) {
+    return MAX_PENDING_WRITE_COALESCE_BYTES_FLOOD;
+  }
+  return MAX_PENDING_WRITE_COALESCE_BYTES;
+};

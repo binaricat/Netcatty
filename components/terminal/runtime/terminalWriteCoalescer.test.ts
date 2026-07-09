@@ -8,11 +8,14 @@ import {
   enqueueCoalescedTerminalWrite,
   flushTerminalWriteCoalescer,
   resetTerminalWriteCoalescer,
+  resolveFloodCoalescerByteCap,
   setTerminalWriteCoalescerByteCapResolver,
   setTerminalWriteCoalescerFlushGate,
   type CoalescedTerminalWriteOptions,
 } from "./terminalWriteCoalescer.ts";
 import {
+  MAX_PENDING_WRITE_COALESCE_BYTES,
+  MAX_PENDING_WRITE_COALESCE_BYTES_FLOOD,
   MAX_TERMINAL_PLAIN_WRITE_CHUNK_BYTES,
   MAX_TERMINAL_UNBROKEN_WRITE_CHUNK_BYTES,
 } from "./terminalFlowConstants.ts";
@@ -450,4 +453,27 @@ test("uses the latest coalesced writer when pending output is flushed", () => {
   assert.deepEqual(secondWriter, ["pending output"]);
 
   resetTerminalWriteCoalescer(term);
+});
+
+test("resolveFloodCoalescerByteCap keeps bulk batches while flow is paused (#1961)", () => {
+  // Paused drain must not shrink to tiny flood shards — that multiplies
+  // pause/resume RTTs on WAN SSH for `tail -2000f` style dumps.
+  assert.equal(
+    resolveFloodCoalescerByteCap(true, false),
+    MAX_PENDING_WRITE_COALESCE_BYTES,
+  );
+  assert.equal(
+    resolveFloodCoalescerByteCap(true, true),
+    MAX_PENDING_WRITE_COALESCE_BYTES,
+  );
+  assert.equal(
+    resolveFloodCoalescerByteCap(false, true),
+    MAX_PENDING_WRITE_COALESCE_BYTES_FLOOD,
+  );
+  assert.equal(
+    resolveFloodCoalescerByteCap(false, false),
+    MAX_PENDING_WRITE_COALESCE_BYTES,
+  );
+  assert.ok(MAX_PENDING_WRITE_COALESCE_BYTES_FLOOD >= 64 * 1024);
+  assert.ok(MAX_PENDING_WRITE_COALESCE_BYTES_FLOOD < MAX_PENDING_WRITE_COALESCE_BYTES);
 });
