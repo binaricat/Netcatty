@@ -251,6 +251,11 @@ module.exports = {
         compression: 'gz'
     },
     rpm: {
+        // Default fpm/electron-builder RPM compression is "xzmt" (multi-threaded
+        // xz). AlmaLinux/RHEL 8 images provide `xz` but not the `xzmt` shim, so
+        // rpmbuild fails with exit 127 during packaging. gzip is portable and
+        // matches our deb preference for older distros.
+        compression: 'gzip',
         // Avoid rpm's generated /usr/lib/.build-id symlinks. Those hashes are
         // global on the host, so owning them can conflict with other RPMs.
         fpm: ['--rpm-rpmbuild-define', '_build_id_links none']

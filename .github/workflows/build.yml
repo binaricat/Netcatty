@@ -418,7 +418,8 @@ jobs:
             curl ca-certificates \
             gcc-toolset-13-gcc gcc-toolset-13-gcc-c++ make \
             python3.11 python3.11-pip \
-            git file rpm-build libarchive xz tar which findutils \
+            git file rpm-build binutils cpio elfutils \
+            libarchive xz tar which findutils \
             dpkg fakeroot \
             fuse fuse-libs gtk3 nss libXScrnSaver libXtst alsa-lib \
             at-spi2-atk libdrm mesa-libgbm libX11 libX11-xcb libxcb \
@@ -432,6 +433,10 @@ jobs:
           export PATH="${GCC_TOOLSET_ROOT}/usr/bin:${PATH}"
           gcc --version
           g++ --version
+          # rpmbuild helpers used by fpm; fail early if packaging tools are missing.
+          command -v rpmbuild
+          command -v strip
+          command -v xz
           # Official Node 22 linux-x64 tarball (same major as other package jobs).
           NODE_VERSION="$(curl -fsSL https://nodejs.org/dist/latest-v22.x/SHASUMS256.txt \
             | awk '/node-v[0-9.]+-linux-x64\.tar\.xz$/{print $2; exit}' \

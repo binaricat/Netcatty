@@ -178,6 +178,16 @@ test("rpm packaging disables generated build-id symlinks", () => {
   );
 });
 
+test("rpm packaging uses gzip compression for RHEL-family package hosts", () => {
+  // Default electron-builder/fpm RPM compression is xzmt. AlmaLinux/RHEL 8 CI
+  // images provide `xz` but not the `xzmt` shim, which makes rpmbuild exit 127.
+  assert.equal(
+    config.rpm?.compression,
+    "gzip",
+    "RPM compression must avoid xzmt on RHEL 8 / AlmaLinux 8 package builders",
+  );
+});
+
 test("windows packaging includes a zip archive target", () => {
   const winTargets = config.win.target.map((entry) => entry.target);
   assert.ok(
