@@ -440,12 +440,13 @@ jobs:
           # electron-builder's portable fpm injects its own LD_LIBRARY_PATH.
           # Spawning system rpmbuild under that path can make the dynamic
           # linker fail immediately (exit 127). Prefer a clean-env wrapper.
+          # Use printf (not a bare heredoc): unindented heredoc body breaks GHA YAML.
           if [[ -x /usr/bin/rpmbuild && ! -e /usr/local/bin/rpmbuild ]]; then
-            cat > /usr/local/bin/rpmbuild <<'EOF'
-#!/bin/bash
-unset LD_LIBRARY_PATH
-exec /usr/bin/rpmbuild "$@"
-EOF
+            printf '%s\n' \
+              '#!/bin/bash' \
+              'unset LD_LIBRARY_PATH' \
+              'exec /usr/bin/rpmbuild "$@"' \
+              > /usr/local/bin/rpmbuild
             chmod +x /usr/local/bin/rpmbuild
           fi
           # rpmbuild helpers used by fpm; fail early if packaging tools are missing.
