@@ -437,12 +437,25 @@ jobs:
           # compression is gzip; provide a multi-thread xz shim.
           printf '%s\n' '#!/bin/sh' 'exec xz -T0 "$@"' > /usr/local/bin/xzmt
           chmod +x /usr/local/bin/xzmt
+          # electron-builder's portable fpm injects its own LD_LIBRARY_PATH.
+          # Spawning system rpmbuild under that path can make the dynamic
+          # linker fail immediately (exit 127). Prefer a clean-env wrapper.
+          if [[ -x /usr/bin/rpmbuild && ! -e /usr/local/bin/rpmbuild ]]; then
+            cat > /usr/local/bin/rpmbuild <<'EOF'
+#!/bin/bash
+unset LD_LIBRARY_PATH
+exec /usr/bin/rpmbuild "$@"
+EOF
+            chmod +x /usr/local/bin/rpmbuild
+          fi
           # rpmbuild helpers used by fpm; fail early if packaging tools are missing.
           command -v rpmbuild
           command -v strip
           command -v gzip
           command -v xz
           command -v xzmt
+          # Smoke-test: system rpmbuild must actually start under a clean env.
+          rpmbuild --version
           # Official Node 22 linux-x64 tarball (same major as other package jobs).
           NODE_VERSION="$(curl -fsSL https://nodejs.org/dist/latest-v22.x/SHASUMS256.txt \
             | awk '/node-v[0-9.]+-linux-x64\.tar\.xz$/{print $2; exit}' \
@@ -503,7 +516,8 @@ jobs:
           npm_config_arch: x64
           ELECTRON_BUILDER_PUBLISH: "never"
           # Natives are already rebuilt. Prefer system packaging tools so
-          # rpmbuild brp scripts do not pick up a toolset-only binary.
+          # rpmbuild brp scripts do not pick up a toolset-only binary, and so
+          # /usr/local/bin/rpmbuild (clean-env wrapper) wins over /usr/bin.
           PATH: /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
         run: |
           set -euo pipefail
@@ -511,6 +525,10 @@ jobs:
           command -v rpmbuild
           command -v gzip
           command -v xzmt
+          # Confirm the wrapper is the one on PATH (portable fpm LD_LIBRARY_PATH issue).
+          if ! head -n 2 "$(command -v rpmbuild)" | grep -q 'unset LD_LIBRARY_PATH'; then
+            echo "::warning::rpmbuild on PATH is not the clean-env wrapper; rpm packaging may fail with exit 127"
+          fi
           npm run pack:linux-x64
 
       - name: Verify packaged node-pty Linux runtime

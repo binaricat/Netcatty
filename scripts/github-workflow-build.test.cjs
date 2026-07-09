@@ -103,6 +103,11 @@ test("build workflow builds Linux x64 native modules in a glibc 2.28 container",
   );
   assert.match(
     x64Job[0],
+    /unset LD_LIBRARY_PATH/,
+    "Linux x64 job must wrap rpmbuild to clear portable-fpm LD_LIBRARY_PATH",
+  );
+  assert.match(
+    x64Job[0],
     /python3\.11/,
     "Linux x64 job must use Python >=3.8 for node-gyp 12",
   );
