@@ -8,6 +8,7 @@ const {
   execViaRawPty,
 } = require("../bridges/ai/ptyExec.cjs");
 const { getFreshIdlePrompt, formatSyntheticEcho } = require("../bridges/ai/shellUtils.cjs");
+const { ensureSessionShellKind } = require("../bridges/ai/sessionShellKind.cjs");
 
 const DEFAULT_BACKGROUND_JOB_TIMEOUT_MS = 60 * 60 * 1000;
 const DEFAULT_BACKGROUND_JOB_POLL_INTERVAL_MS = 30 * 1000;
@@ -259,6 +260,9 @@ function createWorkerAiExecHandler({
     }
 
     if (ptyStream && typeof ptyStream.write === "function") {
+      // Remote sessions may not set shellKind at connect time; probe once so
+      // fish login shells get the fish wrapper (issue #1854).
+      await ensureSessionShellKind(session);
       return execViaPty(ptyStream, command, {
         stripMarkers: true,
         trackForCancellation: activePtyExecs,
@@ -312,7 +316,7 @@ function createWorkerAiJobStartHandler({
   backgroundJobs = new Map(),
   activeSessionJobs = new Map(),
 }) {
-  return function handleWorkerAiJobStart(event, payload = {}) {
+  return async function handleWorkerAiJobStart(event, payload = {}) {
     const {
       sessionId,
       command,
@@ -358,6 +362,10 @@ function createWorkerAiJobStartHandler({
         error: "Background execution requires a writable PTY-backed terminal session.",
       };
     }
+
+    // Same shellKind probe as foreground exec so background jobs on fish
+    // remote shells are not wrapped as posix (issue #1854).
+    await ensureSessionShellKind(session);
 
     const jobId = createWorkerBackgroundJobId();
     const timeoutMs = Math.max(

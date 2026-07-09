@@ -96,10 +96,15 @@ function isPowerShellPrompt(prompt) {
 
 // Prompt-driven override is intentionally narrow: only flip to PowerShell
 // when the session has no confirmed shell type. This keeps the issue #841
-// fix working (SSH/Telnet sessions never set shellKind — see
-// sshBridge.cjs:1265) while preventing a malicious remote process from
-// spoofing a `PS ...>` line on a real bash/zsh/fish/cmd session to coerce
-// a single mis-wrapped command.
+// fix working for remote Windows shells that never set shellKind at connect
+// time, while preventing a malicious remote process from spoofing a
+// `PS ...>` line on a real bash/zsh/fish/cmd session to coerce a single
+// mis-wrapped command.
+//
+// Remote fish (and other non-posix login shells) are handled separately:
+// ensureSessionShellKind() probes the remote login shell once before AI
+// exec and caches session.shellKind (issue #1854). Once set, the probe
+// result is treated as confirmed and is never overridden here.
 //
 // Universe of shellKind values (see lib/localShell.cjs:23-33 and
 // terminalBridge.cjs:368, :932, :1074):

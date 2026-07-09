@@ -432,7 +432,9 @@ function createMoshSessionApi(ctx) {
         hostname: options.hostname || "",
         username: options.username || "",
         label: options.label || options.hostname || "Mosh Session",
-        shellKind: "posix",
+        // Leave unset so ensureSessionShellKind can probe via companion SSH
+        // exec before AI wrappers (fish login shells — issue #1854).
+        shellKind: undefined,
         shellExecutable: "remote-shell",
         flushPendingData: null,
         lastIdlePrompt: "",
