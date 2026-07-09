@@ -3,6 +3,8 @@ export type ScreenSnapshotProvider = () => {
   cols: number;
   currentRow: number;
   lines: string[];
+  /** Optional origin marker (e.g. hibernate-viewport). */
+  source?: string;
 };
 
 const providers = new Map<string, ScreenSnapshotProvider>();

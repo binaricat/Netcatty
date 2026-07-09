@@ -64,11 +64,17 @@ test("script run writes through terminal worker manager when enabled", async () 
   });
 
   assert.deepEqual(terminalWrites, []);
-  assert.equal(workerSends.length, 1);
+  // sendLine emits body then CR as separate keyboard-like writes (#1960).
+  assert.equal(workerSends.length, 2);
   assert.equal(workerSends[0].channel, "netcatty:write");
   assert.deepEqual(workerSends[0].payload, {
     sessionId: "session-1",
-    data: "echo hi\r",
+    data: "echo hi",
+    automated: true,
+  });
+  assert.deepEqual(workerSends[1].payload, {
+    sessionId: "session-1",
+    data: "\r",
     automated: true,
   });
 });
@@ -1279,16 +1285,15 @@ test("script waitFor ignores keywords that have scrolled off the visible screen"
   scriptBridge.removeSessionBuffer(sessionId);
 });
 
-test("script waitFor does not seed buffer-fallback scrollback as visible screen", async () => {
+test("script waitFor seeds buffer-fallback so connection banners stay waitable (#1960)", async () => {
   const handlers = new Map();
   const sentRunUpdates = [];
   const sessionId = "session-buffer-fallback-scrollback";
 
   scriptBridge.removeSessionBuffer(sessionId);
-  // When the session's webContents is missing, requestScreenSnapshot falls back
-  // to the full script buffer. That must stay consumed so scrolled-off keywords
-  // do not rematch (#1821 / Codex review on #2035).
-  scriptBridge.appendSessionOutput(sessionId, "old deployment READY marker\nuser@host:~$ \n");
+  // Buffer-fallback must seed the live buffer so bastion menus already
+  // received stay waitable. Scrolled-off rematch is covered by viewport tests.
+  scriptBridge.appendSessionOutput(sessionId, "Welcome to SSHD\nSSH资源(5) :\n> \n");
   scriptBridge.init({
     sessions: new Map([
       [sessionId, { webContentsId: 999 }],
@@ -1323,31 +1328,20 @@ test("script waitFor does not seed buffer-fallback scrollback as visible screen"
     },
   });
 
-  const runPromise = handlers.get("netcatty:script:run")({}, {
+  await handlers.get("netcatty:script:run")({}, {
     scriptId: "buffer-fallback",
     scriptLabel: "Buffer fallback",
     sessionId,
     content: `
-      const value = await nct.screen.waitFor('READY', 1000);
+      const value = await nct.screen.waitForRegex("SSH资源\\\\s*\\\\(\\\\d+\\\\)\\\\s*:", 1000);
       nct.log('matched ' + value);
     `,
     permissionMode: "auto",
   });
 
-  await delay(50);
-  const earlyRun = sentRunUpdates.at(-1)?.find((run) => run.scriptId === "buffer-fallback");
-  assert.notEqual(earlyRun?.status, "completed");
-  assert.doesNotMatch(
-    (earlyRun?.logs || []).map((entry) => entry.message).join("\n"),
-    /matched READY/,
-  );
-
-  scriptBridge.appendSessionOutput(sessionId, "fresh READY\n");
-  await runPromise;
-
   const finalRun = sentRunUpdates.at(-1).find((run) => run.scriptId === "buffer-fallback");
-  assert.equal(finalRun.status, "completed");
-  assert.match(finalRun.logs.map((entry) => entry.message).join("\n"), /matched READY/);
+  assert.equal(finalRun.status, "completed", finalRun.error || "expected completed");
+  assert.match(finalRun.logs.map((entry) => entry.message).join("\n"), /matched SSH资源\(5\) :/);
   scriptBridge.removeSessionBuffer(sessionId);
 });
 
@@ -1843,7 +1837,7 @@ test("script sendLine invalidates startup seed before later waits", async () => 
     permissionMode: "auto",
   });
 
-  await delay(40);
+  await delay(80);
   assert.ok(writes.some((data) => String(data).includes("echo hi")));
 
   // Startup seed must be gone: waits should not resolve on old READY / old prompt.
@@ -1861,4 +1855,114 @@ test("script sendLine invalidates startup seed before later waits", async () => 
   assert.match(finalRun.logs.map((entry) => entry.message).join("\n"), /prompt 0/);
   assert.match(finalRun.logs.map((entry) => entry.message).join("\n"), /matched READY/);
   scriptBridge.removeSessionBuffer(sessionId);
+});
+
+test("script sendLine keeps prompts that arrive between body and CR waitable", async () => {
+  const handlers = new Map();
+  const sentRunUpdates = [];
+  const sessionId = "session-sendline-gap-prompt";
+  const writes = [];
+
+  scriptBridge.removeSessionBuffer(sessionId);
+  scriptBridge.init({
+    sessions: new Map(),
+    electronModule: {
+      app: {
+        getVersion: () => "test",
+        getPath: () => process.cwd(),
+      },
+      webContents: {
+        fromId: () => null,
+      },
+    },
+    terminalBridge: {
+      writeToSession(_event, payload) {
+        writes.push(payload.data);
+        if (payload.data === "3") {
+          setTimeout(() => {
+            scriptBridge.appendSessionOutput(sessionId, "\n资源'[Empty]'账户:");
+          }, 5);
+        }
+      },
+    },
+    terminalWorkerManager: null,
+    getMainWindow: () => ({
+      webContents: {
+        id: 1,
+        send(channel, payload) {
+          if (channel === "netcatty:script:runs-updated") {
+            sentRunUpdates.push(payload.runs);
+          }
+          if (channel === "netcatty:script:screen-snapshot-request") {
+            setImmediate(() => {
+              handlers.get("netcatty:script:screen-snapshot-response")({}, {
+                requestId: payload.requestId,
+                snapshot: {
+                  rows: 24,
+                  cols: 80,
+                  currentRow: 0,
+                  lines: ["SSH资源(5) :", "> "],
+                },
+              });
+            });
+          }
+          if (channel === "netcatty:script:dialog-request") {
+            setImmediate(() => {
+              handlers.get("netcatty:script:dialog-response")({}, {
+                requestId: payload.requestId,
+                value: "abort",
+              });
+            });
+          }
+        },
+      },
+    }),
+  });
+  scriptBridge.registerHandlers({
+    handle(channel, handler) {
+      handlers.set(channel, handler);
+    },
+  });
+
+  await handlers.get("netcatty:script:run")({}, {
+    scriptId: "sendline-gap",
+    scriptLabel: "SendLine gap prompt",
+    sessionId,
+    content: `
+      await nct.screen.waitForRegex("SSH资源\\\\s*\\\\(\\\\d+\\\\)\\\\s*:", 1000);
+      await nct.screen.sendLine("3");
+      await nct.screen.waitForText("资源'[Empty]'账户:", 1000);
+      await nct.screen.sendLine("zxadmin");
+      nct.log("account sent");
+    `,
+    permissionMode: "auto",
+  });
+
+  const finalRun = sentRunUpdates.at(-1).find((run) => run.scriptId === "sendline-gap");
+  assert.equal(finalRun.status, "completed", finalRun.error || "expected completed");
+  assert.deepEqual(writes.filter((w) => w === "3" || w === "\r" || w === "zxadmin"), [
+    "3",
+    "\r",
+    "zxadmin",
+    "\r",
+  ]);
+  assert.match(finalRun.logs.map((entry) => entry.message).join("\n"), /account sent/);
+  scriptBridge.removeSessionBuffer(sessionId);
+});
+
+test("resolveStartupSeedText prefers buffer when viewport paint lags bastion menu", () => {
+  const buffer =
+    "Welcome to SSHD\n\nuser login success\n\nSSH资源(5) :\n  [1] host\n";
+  const laggingViewport = "Welcome to SSHD\n\nuser login success\n";
+  const seed = scriptBridge.resolveStartupSeedText(laggingViewport, buffer);
+  assert.match(seed, /SSH资源\(5\)/);
+  assert.equal(scriptBridge.resolveStartupSeedText("", buffer), buffer);
+});
+
+test("resolveStartupSeedText prefers viewport when buffer only adds scrolled-off prefix", () => {
+  const viewport = "SSH资源(5) :\n  [1] host\n";
+  const buffer = `old deployment READY marker\nuser@host:~$ \n${viewport}`;
+  const seed = scriptBridge.resolveStartupSeedText(viewport, buffer);
+  assert.equal(seed, viewport);
+  assert.doesNotMatch(seed, /READY marker/);
 });

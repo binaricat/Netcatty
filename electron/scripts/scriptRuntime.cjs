@@ -629,7 +629,25 @@ function createScriptRuntime(deps) {
         await trackStep(`sendLine: ${truncateActivityLabel(line, 60)}`);
         if (deps.isAborted?.()) return;
         appendLog(runId, `→ ${line}`);
-        writeToSession(sessionId, `${line}\r`, { automated: true });
+        // Bastion menus can ignore a single "line\r" packet even when
+        // stream.write succeeds. Match xterm: body, then Enter (#1960).
+        // Consume only pre-send buffer length so prompts that arrive between
+        // body and CR stay waitable for the next step.
+        const buffer = getOutputBuffer(sessionId);
+        const lengthBeforeSend = buffer.getText().length;
+        if (line.length > 0) {
+          writeToSession(sessionId, line, {
+            automated: true,
+            invalidateStartupSeed: false,
+          });
+          await interruptibleSleep(30, deps.isAborted);
+          if (deps.isAborted?.()) return;
+        }
+        writeToSession(sessionId, "\r", {
+          automated: true,
+          invalidateStartupSeed: false,
+        });
+        buffer.consumeThroughAbsolute(lengthBeforeSend);
       }));
     },
     waitFor(pattern, timeoutMs = 30000) {

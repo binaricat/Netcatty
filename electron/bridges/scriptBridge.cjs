@@ -180,10 +180,13 @@ function writeToSession(sessionId, data, options = {}) {
       payload,
     );
   }
+  // sendLine may emit body and CR as two writes. Only the final write should
+  // invalidate the startup seed — otherwise prompt text that arrives in the
+  // gap is marked consumed and the next wait never sees it (#1960).
   if (options.automated !== false && data && data !== "\x03") {
-    // Sending a command means later waits must observe post-input output, not
-    // the startup viewport / preserved prompt that was seeded for #1960.
-    getOrCreateBuffer(sessionId).invalidateStartupSeed();
+    if (options.invalidateStartupSeed !== false) {
+      getOrCreateBuffer(sessionId).invalidateStartupSeed();
+    }
     notifyScriptSessionInput(sessionId, data);
   }
 }
@@ -201,6 +204,45 @@ function bufferFallbackSnapshot(sessionId) {
 
 function isViewportSnapshot(snapshot) {
   return snapshot?.source !== "buffer-fallback";
+}
+
+function stripTrailingBlankLines(text) {
+  return String(text || "").replace(/(?:[ \t]*\r?\n)*$/u, "");
+}
+
+function normalizeNewlines(text) {
+  return String(text || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+}
+
+/**
+ * Prefer viewport when it is the live screen suffix (drops scrolled-off
+ * scrollback — #1821). Prefer live buffer when the viewport is empty or a
+ * lagging/incomplete paint of the menu already on the tap path (#1960).
+ */
+function resolveStartupSeedText(viewportText, bufferText) {
+  const viewportRaw = String(viewportText || "");
+  const bufferRaw = String(bufferText || "");
+  const viewportCore = stripTrailingBlankLines(normalizeNewlines(viewportRaw));
+  const bufferCore = stripTrailingBlankLines(normalizeNewlines(bufferRaw));
+
+  if (!viewportCore) return bufferRaw;
+  if (!bufferCore) return viewportRaw;
+  if (viewportCore === bufferCore) return viewportRaw;
+  if (bufferCore.endsWith(viewportCore)) return viewportRaw;
+  if (bufferCore.startsWith(viewportCore) || bufferCore.includes(viewportCore)) {
+    return bufferRaw;
+  }
+  return viewportRaw;
+}
+
+function seedBufferFromScreen(buffer, screenText, syncStartText) {
+  const currentText = buffer.getText();
+  const trailingFresh = currentText.startsWith(syncStartText)
+    ? currentText.slice(syncStartText.length)
+    : "";
+  const seedText = resolveStartupSeedText(screenText, syncStartText);
+  if (!seedText && !trailingFresh) return;
+  buffer.replaceWithVisibleScreen(seedText || "", trailingFresh, syncStartText);
 }
 
 function defaultDialogValue(type) {
@@ -328,38 +370,21 @@ async function syncOutputBufferFromSnapshot(sessionId, runId, isAborted = () => 
     if (isAborted()) return;
     const screenText = (snapshot.lines || []).join("\n");
 
-    // Buffer-fallback snapshots are the full script output/scrollback, not the
-    // visible viewport. Seeding them as waitable would rematch scrolled-off
-    // text (#1821). Keep the consumed baseline for that path — but only through
-    // the pre-sync length so bytes that arrived during the await stay fresh
-    // (same trailingFresh idea as the viewport path).
-    if (!isViewportSnapshot(snapshot) || !screenText) {
-      if (isAborted()) return;
-      buffer.markOutputConsumedThrough(syncStartText.length, {
-        preserveTailPatterns: shellPromptPatterns(),
-      });
-      return;
-    }
-
-    // Seed the script buffer from the current visible screen so waits can match
-    // text already on screen (e.g. bastion "SSH资源" near the top of a long menu).
-    // Marking the whole buffer consumed made those waits time out (#1960).
-    // If live output arrived during the snapshot IPC round-trip (BEL keepalives,
-    // etc.), keep that trailing fresh data after the viewport instead of
-    // discarding the snapshot.
-    const currentText = buffer.getText();
-    const trailingFresh = currentText.startsWith(syncStartText)
-      ? currentText.slice(syncStartText.length)
-      : "";
+    // #1960: never mark the startup buffer as fully consumed. Bastion menus
+    // already on screen must stay waitable. Prefer a real viewport when it is
+    // the live screen (drops scrolled-off scrollback for #1821); otherwise seed
+    // the live main-process buffer (empty / lagging / buffer-fallback).
     if (isAborted()) return;
-    buffer.replaceWithVisibleScreen(screenText, trailingFresh, syncStartText);
+    if (isViewportSnapshot(snapshot) && stripTrailingBlankLines(screenText)) {
+      seedBufferFromScreen(buffer, screenText, syncStartText);
+    } else {
+      seedBufferFromScreen(buffer, syncStartText, syncStartText);
+    }
   } catch {
     if (isAborted()) return;
-    // Snapshot failed: baseline existing buffer so waits require new output.
-    if (buffer.getText() === syncStartText) {
-      buffer.markOutputConsumedThrough(syncStartText.length, {
-        preserveTailPatterns: shellPromptPatterns(),
-      });
+    // Snapshot failed: still seed whatever the script buffer already has.
+    if (syncStartText) {
+      seedBufferFromScreen(buffer, "", syncStartText);
     }
   }
 }
@@ -685,4 +710,5 @@ module.exports = {
   registerHandlers,
   appendSessionOutput,
   removeSessionBuffer,
+  resolveStartupSeedText,
 };

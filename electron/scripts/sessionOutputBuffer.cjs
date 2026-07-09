@@ -418,6 +418,16 @@ class SessionOutputBuffer {
     this.append(normalized);
     // Seed only the visible viewport — not sync-race trailing bytes.
     this.seededLength = this.getText().length;
+    this.scanOffset = 0;
+    // Re-open pending waiters onto the seeded viewport (#1960).
+    for (const waiter of this.waiters) {
+      if (typeof waiter.freshBoundary === "number") {
+        waiter.freshBoundary = 0;
+      }
+      if (waiter.custom && typeof waiter.custom.freshBoundary === "number") {
+        waiter.custom.freshBoundary = 0;
+      }
+    }
     // Preserve a live-tail shell prompt from the viewport for waitForPrompt,
     // matching the old markOutputConsumedThrough(preserveTailPatterns) behavior.
     this.preservedTailMatch = null;
@@ -433,6 +443,7 @@ class SessionOutputBuffer {
         endOffset: fresh.matched.endOffset,
       };
     }
+    this.flushWaiters();
   }
 
   /**
@@ -445,6 +456,18 @@ class SessionOutputBuffer {
     this.seededLength = null;
     this.preservedTailMatch = null;
     this.scanOffset = this.getText().length;
+  }
+
+  /**
+   * Mark output through `absoluteLength` as already seen, without consuming
+   * anything that arrived after that point. Used by sendLine so peer prompts
+   * that land between body and CR stay waitable (#1960).
+   */
+  consumeThroughAbsolute(absoluteLength) {
+    this.seededLength = null;
+    this.preservedTailMatch = null;
+    const capped = Math.max(0, Math.min(this.getText().length, Number(absoluteLength) || 0));
+    this.scanOffset = Math.max(this.scanOffset, capped);
   }
 
   consumeFreshPendingMatch(pattern, freshBoundary = this.currentFreshBoundary()) {

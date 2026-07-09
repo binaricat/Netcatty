@@ -1720,6 +1720,21 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     return registerScreenSnapshotProvider(sessionId, () => {
       const term = termRef.current;
       if (!term?.buffer?.active) {
+        // Hibernated terminals: prefer last captured viewport for script sync.
+        const hibernatedViewport =
+          hibernateViewportSnapshotRef.current
+          || hibernateSnapshotRef.current
+          || hibernatePendingBufferRef.current;
+        if (hibernatedViewport) {
+          const lines = hibernatedViewport.split("\n");
+          return {
+            rows: Math.max(lines.length, 1),
+            cols: 80,
+            currentRow: Math.max(lines.length - 1, 0),
+            lines,
+            source: "hibernate-viewport",
+          };
+        }
         return { rows: 24, cols: 80, currentRow: 0, lines: [] };
       }
       const buffer = term.buffer.active;
