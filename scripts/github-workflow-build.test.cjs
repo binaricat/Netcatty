@@ -49,6 +49,13 @@ test("build workflow installs bsdtar for Arch pacman packaging", () => {
     /build-linux-x64:[\s\S]*\blibarchive\b/,
     "Linux x64 package job must install libarchive (bsdtar) for pacman metadata generation",
   );
+  // Pin a filename that actually exists on archive.debian.org so CI does not
+  // 404 when AlmaLinux's libarchive RPM ships without /usr/bin/bsdtar.
+  assert.match(
+    buildWorkflow,
+    /libarchive-tools_3\.3\.3-4\+deb10u1_amd64\.deb/,
+    "Linux x64 job must download a published Buster libarchive-tools deb for bsdtar",
+  );
 });
 
 test("build workflow verifies RPM artifacts for both Linux architectures", () => {

@@ -435,12 +435,28 @@ jobs:
           g++ --version
           # AlmaLinux 8's libarchive package is often library-only in minimal
           # images (no /usr/bin/bsdtar). electron-builder pacman packaging needs
-          # bsdtar; pull the Debian Buster CLI package (also glibc 2.28).
+          # bsdtar; pull a Debian tools package that runs on glibc 2.28.
+          # Prefer Buster (published as +deb10u1 on archive.debian.org).
           if [[ ! -x /usr/bin/bsdtar ]]; then
-            echo "bsdtar missing; installing CLI from Debian Buster libarchive-tools"
+            echo "bsdtar missing; installing CLI from Debian libarchive-tools"
             mkdir -p /tmp/bsdtar-deb
-            curl -fsSL -o /tmp/libarchive-tools.deb \
-              "http://archive.debian.org/debian/pool/main/liba/libarchive/libarchive-tools_3.3.3-4+deb10u3_amd64.deb"
+            BSDTAR_DEB_URLS=(
+              "http://archive.debian.org/debian/pool/main/liba/libarchive/libarchive-tools_3.3.3-4+deb10u1_amd64.deb"
+              "http://archive.debian.org/debian/pool/main/liba/libarchive/libarchive-tools_3.2.2-2+deb9u2_amd64.deb"
+            )
+            BSDTAR_DEB_OK=0
+            for url in "${BSDTAR_DEB_URLS[@]}"; do
+              echo "trying ${url}"
+              if curl -fsSL -o /tmp/libarchive-tools.deb "${url}"; then
+                BSDTAR_DEB_OK=1
+                break
+              fi
+              echo "download failed for ${url}"
+            done
+            if [[ "${BSDTAR_DEB_OK}" -ne 1 ]]; then
+              echo "::error::Could not download Debian libarchive-tools for bsdtar"
+              exit 1
+            fi
             dpkg-deb -x /tmp/libarchive-tools.deb /tmp/bsdtar-deb
             install -m 0755 /tmp/bsdtar-deb/usr/bin/bsdtar /usr/local/bin/bsdtar-bin
             # Prefer system libarchive.so if present; fall back to the deb's.
