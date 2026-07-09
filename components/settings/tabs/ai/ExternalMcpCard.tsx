@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Check, Copy, RefreshCw } from "lucide-react";
+import { Check, Copy, HelpCircle, RefreshCw } from "lucide-react";
 import { useI18n } from "../../../../application/i18n/I18nProvider";
 import {
   normalizeExternalMcpIdleTimeoutMinutes,
@@ -17,6 +17,7 @@ import { localStorageAdapter } from "../../../../infrastructure/persistence/loca
 import { emitAIStateChanged } from "../../../../application/state/aiStateEvents";
 import { cn } from "../../../../lib/utils";
 import { Button } from "../../../ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "../../../ui/tooltip";
 import { Select, Toggle } from "../../../settings/settings-ui";
 import { getBridge } from "./types";
 
@@ -128,6 +129,33 @@ function getBridgeStatusView(status: ExternalMcpStatus | null, enabled: boolean)
     return { labelKey: "ai.externalMcp.status.error", className: "text-destructive" };
   }
   return { labelKey: "ai.externalMcp.status.disabled", className: "text-muted-foreground" };
+}
+
+/** Map bridge permissionMode to a Safety i18n key for display. */
+function getPermissionModeLabelKey(mode: string | null | undefined): string {
+  switch (mode) {
+    case "observer":
+      return "ai.safety.permissionMode.observer";
+    case "auto":
+      return "ai.safety.permissionMode.auto";
+    case "confirm":
+      return "ai.safety.permissionMode.confirm";
+    default:
+      return "ai.externalMcp.permissionMode.unknown";
+  }
+}
+
+function getPermissionModeToneClass(mode: string | null | undefined): string {
+  switch (mode) {
+    case "auto":
+      return "text-emerald-500";
+    case "observer":
+      return "text-amber-500";
+    case "confirm":
+      return "text-foreground";
+    default:
+      return "text-muted-foreground";
+  }
 }
 
 function getCodexStatusView(status: ClientSetupStatus | null): StatusView {
@@ -319,6 +347,9 @@ export const ExternalMcpCard: React.FC = () => {
         discoveryPath: null,
         launcherPath: null,
         exposedSessionCount: 0,
+        // Bridge default when IPC is missing; keeps the permission row from
+        // looking blank while Safety settings remain the source of truth.
+        permissionMode: "confirm",
         error: bridgeUnavailableMessage,
       });
       const unavailableClientStatus: ClientSetupStatus = {
@@ -565,9 +596,35 @@ export const ExternalMcpCard: React.FC = () => {
   return (
     <div className="rounded-lg border bg-card p-4 space-y-3">
       <div className="flex items-start justify-between gap-4">
-        <p className="min-w-0 text-xs text-muted-foreground leading-5">
-          {t("ai.externalMcp.description")}
-        </p>
+        <div className="min-w-0 flex items-start gap-1.5">
+          <p className="min-w-0 text-xs text-muted-foreground leading-5">
+            {t("ai.externalMcp.description")}
+          </p>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                className="relative -top-px mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                aria-label={t("ai.externalMcp.help.ariaLabel")}
+              >
+                <HelpCircle size={13} />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent
+              side="bottom"
+              align="start"
+              className="max-w-[320px] space-y-1.5 bg-popover text-popover-foreground border border-border px-3 py-2.5 text-left text-xs leading-relaxed shadow-md"
+            >
+              <div className="font-medium text-foreground">{t("ai.externalMcp.usage.title")}</div>
+              <p>{t("ai.externalMcp.usage.keepRunning")}</p>
+              <p>{t("ai.externalMcp.usage.localhost")}</p>
+              <p>{t("ai.externalMcp.usage.permissions")}</p>
+              <p>{t("ai.externalMcp.usage.capabilities")}</p>
+              <div className="pt-1 font-medium text-foreground">{t("ai.externalMcp.security")}</div>
+              <p>{t("ai.externalMcp.security.description")}</p>
+            </TooltipContent>
+          </Tooltip>
+        </div>
         <div className={cn("text-xs font-medium shrink-0", bridgeStatusView.className)}>
           {t(bridgeStatusView.labelKey)}
         </div>
@@ -588,6 +645,26 @@ export const ExternalMcpCard: React.FC = () => {
             window.setTimeout(() => { void refreshStatus(); }, 0);
           }}
         />
+      </div>
+
+      {/* Permission mode is controlled in Safety settings; surface it here so External MCP
+          users see why write tools may still prompt (confirm) or run freely (auto). */}
+      <div className="flex items-start justify-between gap-4 rounded-md border border-border/60 bg-background/70 px-3 py-2">
+        <div className="min-w-0 space-y-1">
+          <div className="text-sm font-medium">{t("ai.externalMcp.permissionMode.label")}</div>
+          <div className="text-xs text-muted-foreground leading-5">
+            {t("ai.externalMcp.permissionMode.hint")}
+          </div>
+        </div>
+        <div
+          className={cn(
+            "shrink-0 text-xs font-medium text-right max-w-[12rem]",
+            getPermissionModeToneClass(status?.permissionMode),
+          )}
+          data-testid="external-mcp-permission-mode"
+        >
+          {t(getPermissionModeLabelKey(status?.permissionMode))}
+        </div>
       </div>
 
       <div className="rounded-md border border-border/60 bg-background/70 px-3 py-2 space-y-2">
@@ -628,22 +705,6 @@ export const ExternalMcpCard: React.FC = () => {
               <span className="text-xs text-muted-foreground">{t("ai.externalMcp.idleTimeout.minutes")}</span>
             </div>
           </div>
-        ) : null}
-      </div>
-
-      <div className="rounded-md border border-border/60 bg-background/70 px-3 py-2 space-y-1.5 text-xs text-muted-foreground leading-5">
-        <div className="text-sm font-medium text-foreground">{t("ai.externalMcp.usage.title")}</div>
-        <p>{t("ai.externalMcp.usage.keepRunning")}</p>
-        <p>{t("ai.externalMcp.usage.localhost")}</p>
-        <p>{t("ai.externalMcp.usage.permissions")}</p>
-        <p>{t("ai.externalMcp.usage.capabilities")}</p>
-      </div>
-
-      <div className="rounded-md border border-border/60 bg-background/70 px-3 py-2 space-y-1.5 text-xs text-muted-foreground leading-5">
-        <div className="text-sm font-medium text-foreground">{t("ai.externalMcp.security")}</div>
-        <p>{t("ai.externalMcp.security.description")}</p>
-        {status?.permissionMode ? (
-          <p>{t("ai.externalMcp.permissionMode", { mode: status.permissionMode })}</p>
         ) : null}
       </div>
 
