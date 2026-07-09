@@ -354,12 +354,16 @@ jobs:
             release/*.blockmap
           if-no-files-found: ignore
 
-  # Dedicated job for Linux x64 — builds inside Debian Buster (GLIBC 2.28)
+  # Dedicated job for Linux x64 — builds inside AlmaLinux 8 (GLIBC 2.28)
   # so native modules (node-pty, serialport) stay compatible with RHEL 8 /
   # CentOS 8 / UOS / Deepin. Ubuntu 22.04 links against GLIBC 2.32–2.35,
-  # which crashes on those older hosts (see #2062). Buster is preferred over
-  # Bullseye (2.31) because some RHEL 8 derivatives only export symbols up
-  # through GLIBC_2.30 even when `ldd --version` reports 2.31.
+  # which crashes on those older hosts (see #2062).
+  #
+  # We previously used debian:buster for the same glibc floor, but Buster's
+  # g++ 8 cannot compile Electron 42 natives (`-std=gnu++20`). AlmaLinux 8
+  # keeps glibc 2.28 while gcc-toolset-13 provides a real C++20 toolchain.
+  # Link natives with -static-libstdc++ so the result does not require a
+  # newer system libstdc++ on RHEL 8 derivatives.
   # Key: GLIBC < 2.34 also avoids the libpthread-merge symbol requirement.
   build-linux-x64:
     name: ${{ needs.dedupe.outputs.skip_heavy_ci == 'true' && 'deduped build-linux-x64' || 'build-linux-x64' }}
@@ -370,12 +374,14 @@ jobs:
       && needs.dedupe.outputs.skip_heavy_ci != 'true'
     runs-on: ubuntu-latest
     container:
-      image: debian:buster
+      image: almalinux:8
     env:
       MOSH_BIN_RELEASE: ${{ needs.resolve-mosh.outputs.mosh_bin_release }}
       ET_BIN_RELEASE: ${{ needs.resolve-et.outputs.et_bin_release }}
       npm_config_arch: x64
       npm_config_target_arch: x64
+      # Keep rebuilt natives portable to stock RHEL 8 libstdc++.
+      LDFLAGS: "-static-libstdc++ -static-libgcc"
       VITE_SYNC_GITHUB_CLIENT_ID: ${{ secrets.VITE_SYNC_GITHUB_CLIENT_ID }}
       VITE_SYNC_GOOGLE_CLIENT_ID: ${{ secrets.VITE_SYNC_GOOGLE_CLIENT_ID }}
       VITE_SYNC_GOOGLE_CLIENT_SECRET: ${{ secrets.VITE_SYNC_GOOGLE_CLIENT_SECRET }}
@@ -404,25 +410,29 @@ jobs:
           fi
 
       - name: Install build dependencies
-        # Container jobs default to /bin/sh; Buster's dash rejects `[[`.
         shell: bash
         run: |
-          # Buster is archived; redirect apt to archive.debian.org and
-          # disable Valid-Until so expired security metadata still works.
-          if [[ -f /etc/apt/sources.list ]]; then
-            sed -i 's/deb.debian.org/archive.debian.org/g' /etc/apt/sources.list
-            sed -i 's/security.debian.org/archive.debian.org/g' /etc/apt/sources.list
-            sed -i '/buster-updates/d' /etc/apt/sources.list || true
-          fi
-          echo 'Acquire::Check-Valid-Until "false";' > /etc/apt/apt.conf.d/99no-check-valid-until
-          apt-get update
-          apt-get install -y curl ca-certificates build-essential python3 git libfuse2 file rpm \
-            libarchive-tools xz-utils \
-            libglib2.0-0 libgtk-3-0 libnss3 libxss1 libxtst6 libasound2 \
-            libatk-bridge2.0-0 libdrm2 libgbm1 libx11-xcb1 libxcb-dri3-0
-          # NodeSource no longer ships Node 22 for Buster; install the
-          # official linux-x64 binary tarball instead (matches major 22
-          # used by the other package jobs).
+          set -euo pipefail
+          dnf -y install epel-release
+          dnf -y install \
+            curl ca-certificates \
+            gcc-toolset-13-gcc gcc-toolset-13-gcc-c++ make \
+            python3.11 python3.11-pip \
+            git file rpm-build libarchive xz tar which findutils \
+            dpkg fakeroot \
+            fuse fuse-libs gtk3 nss libXScrnSaver libXtst alsa-lib \
+            at-spi2-atk libdrm mesa-libgbm libX11 libX11-xcb libxcb \
+            mesa-libGL pango cairo
+          # gcc-toolset-13: C++20 for Electron 42 natives; still links glibc 2.28.
+          GCC_TOOLSET_ROOT="/opt/rh/gcc-toolset-13/root"
+          echo "PATH=${GCC_TOOLSET_ROOT}/usr/bin:${PATH}" >> "${GITHUB_ENV}"
+          echo "CC=${GCC_TOOLSET_ROOT}/usr/bin/gcc" >> "${GITHUB_ENV}"
+          echo "CXX=${GCC_TOOLSET_ROOT}/usr/bin/g++" >> "${GITHUB_ENV}"
+          echo "DEVTOOLSET_ROOTPATH=${GCC_TOOLSET_ROOT}" >> "${GITHUB_ENV}"
+          export PATH="${GCC_TOOLSET_ROOT}/usr/bin:${PATH}"
+          gcc --version
+          g++ --version
+          # Official Node 22 linux-x64 tarball (same major as other package jobs).
           NODE_VERSION="$(curl -fsSL https://nodejs.org/dist/latest-v22.x/SHASUMS256.txt \
             | awk '/node-v[0-9.]+-linux-x64\.tar\.xz$/{print $2; exit}' \
             | sed -E 's/^node-(v[0-9.]+)-linux-x64\.tar\.xz$/\1/')"
@@ -435,18 +445,11 @@ jobs:
             | tar -xJ -C /usr/local --strip-components=1
           node -v
           npm -v
-          # Buster ships Python 3.7; node-gyp 12 needs >=3.8 (walrus syntax).
-          # actions/setup-python is not reliable inside this old glibc container,
-          # so install a manylinux-compatible CPython via uv instead.
-          curl -LsSf https://astral.sh/uv/install.sh | sh
-          export PATH="${HOME}/.local/bin:${PATH}"
-          uv python install 3.11
-          PYTHON_BIN="$(uv python find 3.11)"
-          ln -sfn "${PYTHON_BIN}" /usr/local/bin/python3.11
-          ln -sfn python3.11 /usr/local/bin/python3
+          # node-gyp 12 needs Python >=3.8; AlmaLinux 8 default is older.
+          alternatives --set python3 /usr/bin/python3.11 || ln -sfn /usr/bin/python3.11 /usr/local/bin/python3
           python3 --version
-          echo "PYTHON=${PYTHON_BIN}" >> "${GITHUB_ENV}"
-          echo "npm_config_python=${PYTHON_BIN}" >> "${GITHUB_ENV}"
+          echo "PYTHON=/usr/bin/python3.11" >> "${GITHUB_ENV}"
+          echo "npm_config_python=/usr/bin/python3.11" >> "${GITHUB_ENV}"
 
       - name: Checkout
         uses: actions/checkout@v4
@@ -454,6 +457,7 @@ jobs:
       - name: Install deps
         run: |
           python3 --version
+          g++ --version
           npm ci
 
       - name: Set version
