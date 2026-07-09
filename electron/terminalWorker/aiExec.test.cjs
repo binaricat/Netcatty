@@ -300,3 +300,45 @@ test("worker background job reserves the session while shellKind probe is pendin
   pty.emit("data", `${marker}_S\r\n${marker}_E:0\r\n`);
   await nextTick();
 });
+
+test("worker chat cancel during shellKind probe aborts job start before PTY write", async () => {
+  // Codex P2 on #2061: first jobStart on an unprobed remote session awaits
+  // ensureSessionShellKind with no backgroundJobs entry historically, so
+  // catty:cancel missed it and the command was still typed after the probe.
+  const pty = new FakePty();
+  const deferred = createDeferredShellProbeConn();
+  const sessions = new Map([
+    ["ssh-fish", {
+      protocol: "ssh",
+      stream: pty,
+      conn: deferred.conn,
+    }],
+  ]);
+  const ipcMain = createFakeIpcMain();
+  registerWorkerAiExecHandlers(ipcMain, { sessions });
+
+  const event = createFakeEvent();
+  const pendingStart = ipcMain.handlers.get("netcatty:ai:jobStart")(event, {
+    sessionId: "ssh-fish",
+    command: "sleep 999",
+    chatSessionId: "chat-cancel-probe",
+    commandTimeoutMs: 5000,
+  });
+  await nextTick();
+
+  // Cancel while the shell probe is still in-flight.
+  ipcMain.listeners.get("netcatty:ai:catty:cancel")(event, {
+    chatSessionId: "chat-cancel-probe",
+  });
+
+  deferred.release();
+  const started = await pendingStart;
+
+  assert.equal(started.ok, false);
+  assert.equal(started.error, "Cancelled");
+  assert.equal(
+    pty.writes.filter((entry) => entry.includes("__NCMCP_")).length,
+    0,
+    "cancelled pending start must not type a wrapper into the PTY",
+  );
+});

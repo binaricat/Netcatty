@@ -232,13 +232,56 @@ function createExecHandlerApi(ctx) {
     
       const jobId = createBackgroundJobId();
       const timeoutMs = Math.max(commandTimeoutMs, DEFAULT_BACKGROUND_JOB_TIMEOUT_MS);
+      const startedAt = Date.now();
 
-      // Background jobs use the same wrapper selection as foreground exec.
-      // Probe before startPtyJob so a fish login shell is not mis-wrapped.
-      // Job start is not chat-cancellable the same way foreground exec is
-      // (terminal_start survives SDK Stop), but still use the settled probe
-      // path so shellKind is consistent with foreground.
+      // Register the job *before* the shell-kind probe so chat-delete /
+      // cancelBackgroundJobsForSession can see it while we await. Without
+      // this, the first terminal_start on an unprobed remote session has no
+      // backgroundJobs entry during the probe and still starts the PTY job
+      // after cancel (Codex P2 on #2061). Not registered in activePtyExecs —
+      // terminal_start is designed to survive SDK Stop; only chat cancel
+      // (which walks backgroundJobs) should abort a pending start.
+      let probeCancelRequested = false;
+      const job = {
+        id: jobId,
+        sessionId,
+        chatSessionId: chatSessionId || null,
+        command,
+        status: "running",
+        startedAt,
+        updatedAt: startedAt,
+        exitCode: null,
+        error: null,
+        stdout: "",
+        outputBaseOffset: 0,
+        totalOutputChars: 0,
+        outputTruncated: false,
+        pendingShellProbe: true,
+        handle: {
+          cancel: () => {
+            probeCancelRequested = true;
+          },
+        },
+      };
+      backgroundJobs.set(jobId, job);
+
+      // Probe so fish login shells are not mis-wrapped as posix (#1854).
       return Promise.resolve(ensureSessionShellKind(session)).then(() => {
+        if (probeCancelRequested || job.status === "stopping") {
+          job.status = "cancelled";
+          job.error = "Cancelled";
+          job.updatedAt = Date.now();
+          job.pendingShellProbe = false;
+          releaseSessionExecution(sessionId, sessionToken);
+          return {
+            ok: false,
+            error: "Cancelled",
+            jobId,
+            sessionId,
+            status: "cancelled",
+          };
+        }
+
         let handle;
         try {
           handle = startPtyJob(ptyStream, command, {
@@ -256,28 +299,16 @@ function createExecHandlerApi(ctx) {
             normalizeFinalOutput: false,
           });
         } catch (err) {
+          job.status = "failed";
+          job.error = err?.message || String(err);
+          job.updatedAt = Date.now();
+          job.pendingShellProbe = false;
           releaseSessionExecution(sessionId, sessionToken);
           return { ok: false, error: err?.message || String(err) };
         }
 
-        const startedAt = Date.now();
-        const job = {
-          id: jobId,
-          sessionId,
-          chatSessionId: chatSessionId || null,
-          command,
-          status: "running",
-          startedAt,
-          updatedAt: startedAt,
-          exitCode: null,
-          error: null,
-          stdout: "",
-          outputBaseOffset: 0,
-          totalOutputChars: 0,
-          outputTruncated: false,
-          handle,
-        };
-        backgroundJobs.set(jobId, job);
+        job.handle = handle;
+        job.pendingShellProbe = false;
 
         handle.resultPromise.then((result) => {
           job.updatedAt = Date.now();
@@ -333,6 +364,10 @@ function createExecHandlerApi(ctx) {
         };
       }).catch((err) => {
         // Probe (or unexpected rejection) must not leave the session lock held.
+        job.status = "failed";
+        job.error = err?.message || String(err);
+        job.updatedAt = Date.now();
+        job.pendingShellProbe = false;
         releaseSessionExecution(sessionId, sessionToken);
         return { ok: false, error: err?.message || String(err) };
       });

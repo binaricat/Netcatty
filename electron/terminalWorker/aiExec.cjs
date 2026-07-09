@@ -372,16 +372,65 @@ function createWorkerAiJobStartHandler({
     }
 
     const jobId = createWorkerBackgroundJobId();
+    const startedAt = Date.now();
     activeSessionJobs.set(sessionId, jobId);
 
+    // Insert into backgroundJobs *before* the shell-kind probe so
+    // netcatty:ai:catty:cancel / cancelWorkerBackgroundJobsForSession can
+    // latch cancellation while we await. Without this, the first job on an
+    // unprobed remote session has no map entry during the probe and still
+    // writes to the PTY after chat cancel (Codex P2 on #2061).
+    let probeCancelRequested = false;
+    const job = {
+      id: jobId,
+      sessionId,
+      chatSessionId: chatSessionId || null,
+      command,
+      status: "running",
+      startedAt,
+      updatedAt: startedAt,
+      exitCode: null,
+      error: null,
+      stdout: "",
+      outputBaseOffset: 0,
+      totalOutputChars: 0,
+      outputTruncated: false,
+      pendingShellProbe: true,
+      handle: {
+        cancel: () => {
+          probeCancelRequested = true;
+        },
+      },
+    };
+    backgroundJobs.set(jobId, job);
+
     // Same shellKind probe as foreground exec so background jobs on fish
-    // remote shells are not wrapped as posix (issue #1854). Reserve the
-    // session before awaiting so concurrent starts cannot pass the busy check.
+    // remote shells are not wrapped as posix (issue #1854). Session is
+    // reserved above so concurrent starts cannot pass the busy check.
     try {
       await ensureSessionShellKind(session);
     } catch (err) {
+      job.status = "failed";
+      job.error = err?.message || String(err);
+      job.updatedAt = Date.now();
+      job.pendingShellProbe = false;
       if (activeSessionJobs.get(sessionId) === jobId) activeSessionJobs.delete(sessionId);
       return { ok: false, error: err?.message || String(err) };
+    }
+
+    if (probeCancelRequested || job.status === "stopping") {
+      job.status = "cancelled";
+      job.error = "Cancelled";
+      job.updatedAt = Date.now();
+      job.pendingShellProbe = false;
+      if (activeSessionJobs.get(sessionId) === jobId) activeSessionJobs.delete(sessionId);
+      return {
+        ok: false,
+        error: "Cancelled",
+        jobId,
+        sessionId,
+        status: "cancelled",
+      };
     }
 
     const timeoutMs = Math.max(
@@ -407,28 +456,16 @@ function createWorkerAiJobStartHandler({
         normalizeFinalOutput: false,
       });
     } catch (err) {
+      job.status = "failed";
+      job.error = err?.message || String(err);
+      job.updatedAt = Date.now();
+      job.pendingShellProbe = false;
       if (activeSessionJobs.get(sessionId) === jobId) activeSessionJobs.delete(sessionId);
       return { ok: false, error: err?.message || String(err) };
     }
 
-    const startedAt = Date.now();
-    const job = {
-      id: jobId,
-      sessionId,
-      chatSessionId: chatSessionId || null,
-      command,
-      status: "running",
-      startedAt,
-      updatedAt: startedAt,
-      exitCode: null,
-      error: null,
-      stdout: "",
-      outputBaseOffset: 0,
-      totalOutputChars: 0,
-      outputTruncated: false,
-      handle,
-    };
-    backgroundJobs.set(jobId, job);
+    job.handle = handle;
+    job.pendingShellProbe = false;
 
     handle.resultPromise.then((result) => {
       job.updatedAt = Date.now();
