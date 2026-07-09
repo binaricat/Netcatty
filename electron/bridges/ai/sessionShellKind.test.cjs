@@ -182,6 +182,12 @@ test("probed posix login shell does not block live PowerShell prompt override (C
     }),
     "posix",
   );
+  const marker = "__NCMCP_POSIX_NATIVE__";
+  const wrapped = buildWrappedCommand("echo native-posix", "posix", marker);
+  assert.doesNotMatch(wrapped, /\bsh\s+-c\b/);
+  assert.doesNotMatch(wrapped, /posix_sh/);
+  assert.match(wrapped, new RegExp(`${marker}=0;`));
+  assert.match(wrapped, new RegExp(`${marker}_cmd=`));
 });
 
 test("probed fish login shell is a soft hint, not a permanent pin (Codex P2)", async () => {
