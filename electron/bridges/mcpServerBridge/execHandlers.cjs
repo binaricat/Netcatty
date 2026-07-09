@@ -1,7 +1,10 @@
 /* eslint-disable no-undef */
 // Module-level require: code inside createExecHandlerApi runs under `with (ctx)`
 // where bare `require` resolves to ctx.require (based in electron/bridges/).
-const { ensureSessionShellKind } = require("../ai/sessionShellKind.cjs");
+const {
+  ensureSessionShellKind,
+  ensureSessionShellKindForExec,
+} = require("../ai/sessionShellKind.cjs");
 
 function createExecHandlerApi(ctx) {
   with (ctx) {
@@ -134,8 +137,13 @@ function createExecHandlerApi(ctx) {
       if (ptyStream && typeof ptyStream.write === "function") {
         // Probe remote login shell once when shellKind is unset so fish
         // sessions get the fish wrapper instead of the posix default (#1854).
+        // Cancellable: Stop during the probe must not still type the command.
         return runExecution(async () => {
-          await ensureSessionShellKind(session);
+          const probed = await ensureSessionShellKindForExec(session, {
+            trackForCancellation: activePtyExecs,
+            chatSessionId,
+          });
+          if (!probed.ok) return probed;
           return execViaPty(ptyStream, command, {
             trackForCancellation: activePtyExecs,
             timeoutMs: commandTimeoutMs,
@@ -227,6 +235,9 @@ function createExecHandlerApi(ctx) {
 
       // Background jobs use the same wrapper selection as foreground exec.
       // Probe before startPtyJob so a fish login shell is not mis-wrapped.
+      // Job start is not chat-cancellable the same way foreground exec is
+      // (terminal_start survives SDK Stop), but still use the settled probe
+      // path so shellKind is consistent with foreground.
       return Promise.resolve(ensureSessionShellKind(session)).then(() => {
         let handle;
         try {

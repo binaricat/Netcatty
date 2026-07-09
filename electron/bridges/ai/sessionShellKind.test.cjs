@@ -12,6 +12,7 @@ const {
   createSshConnExecProbe,
   createSessionExecProbe,
   ensureSessionShellKind,
+  ensureSessionShellKindForExec,
 } = require("./sessionShellKind.cjs");
 
 const {
@@ -210,6 +211,65 @@ test("ensureSessionShellKind uses a session-level exec probe when provided", asy
   assert.equal(kind, "fish");
   assert.equal(session.shellKind, "fish");
   assert.equal(probes, 1);
+});
+
+test("ensureSessionShellKindForExec cancels when Stop fires during the probe", async () => {
+  // Codex P2 on #2061: probe can take up to the timeout before execViaPty
+  // registers a real marker. Pending marker must latch cancel so the command
+  // is not typed after the probe resolves.
+  let release;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  const session = { protocol: "ssh" };
+  const activePtyExecs = new Map();
+  const probe = async () => {
+    await gate;
+    return `${PROBE_OUTPUT_MARKER}/usr/bin/fish\n`;
+  };
+
+  const pending = ensureSessionShellKindForExec(session, {
+    execProbe: probe,
+    trackForCancellation: activePtyExecs,
+    chatSessionId: "chat-cancel-probe",
+  });
+
+  // Wait until the pending marker is registered.
+  for (let i = 0; i < 20 && activePtyExecs.size === 0; i += 1) {
+    await new Promise((r) => setTimeout(r, 0));
+  }
+  assert.equal(activePtyExecs.size, 1);
+  const [marker, entry] = [...activePtyExecs.entries()][0];
+  assert.match(marker, /^__NCMCP_SK_PENDING_/);
+  assert.equal(entry.chatSessionId, "chat-cancel-probe");
+
+  // Simulate cancelPtyExecsForSession during the probe window.
+  entry.cancel();
+  release();
+
+  const result = await pending;
+  assert.equal(result.ok, false);
+  assert.equal(result.cancelled, true);
+  assert.equal(result.error, "Cancelled");
+  assert.equal(result.exitCode, 130);
+  assert.equal(activePtyExecs.size, 0, "pending marker cleaned up after probe");
+  // Probe still settled fish on the session (harmless); we must not have
+  // started a PTY write — callers check probed.ok before execViaPty.
+  assert.equal(session.shellKind, "fish");
+});
+
+test("ensureSessionShellKindForExec proceeds when not cancelled", async () => {
+  const session = { protocol: "ssh" };
+  const activePtyExecs = new Map();
+  const result = await ensureSessionShellKindForExec(session, {
+    execProbe: async () => `${PROBE_OUTPUT_MARKER}/usr/bin/fish\n`,
+    trackForCancellation: activePtyExecs,
+    chatSessionId: "chat-ok",
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.shellKind, "fish");
+  assert.equal(session.shellKind, "fish");
+  assert.equal(activePtyExecs.size, 0);
 });
 
 test("ensureSessionShellKind times out a hanging session-level exec probe", async () => {

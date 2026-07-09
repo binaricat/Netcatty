@@ -12,6 +12,7 @@
  */
 "use strict";
 
+const crypto = require("node:crypto");
 const { classifyLocalShellType } = require("../../../lib/localShell.cjs");
 
 // Kinds that buildWrappedCommand / resolveEffectiveShellKind already trust.
@@ -272,6 +273,65 @@ async function ensureSessionShellKind(session, options = {}) {
   return session._shellKindProbePromise;
 }
 
+/**
+ * Probe shell kind while remaining cancellable via activePtyExecs.
+ *
+ * The first AI exec on a remote session may await ensureSessionShellKind for up
+ * to the probe timeout before execViaPty registers a real marker. Stop during
+ * that window would otherwise find nothing in activePtyExecs and the command
+ * would still be typed after the probe resolves (Codex P2 on PR #2061).
+ *
+ * Mirrors the pending-marker pattern used by execViaChannel: register a
+ * cancel latch synchronously, await the probe, then short-circuit if Stop
+ * fired before we write to the PTY.
+ *
+ * @returns {Promise<{ ok: true, shellKind: string|undefined } | { ok: false, cancelled: true, error: string, exitCode: number, stdout: string, stderr: string }>}
+ */
+async function ensureSessionShellKindForExec(session, options = {}) {
+  const {
+    trackForCancellation = null,
+    chatSessionId = null,
+    execProbe,
+    timeoutMs,
+  } = options;
+
+  let cancelled = false;
+  const pendingMarker = trackForCancellation
+    ? `__NCMCP_SK_PENDING_${Date.now().toString(36)}_${crypto.randomBytes(8).toString("hex")}__`
+    : null;
+
+  if (pendingMarker) {
+    trackForCancellation.set(pendingMarker, {
+      chatSessionId: chatSessionId || null,
+      cancel: () => {
+        cancelled = true;
+      },
+      cleanup: () => {
+        // Nothing to tear down before the real PTY job starts.
+      },
+    });
+  }
+
+  try {
+    await ensureSessionShellKind(session, { execProbe, timeoutMs });
+    if (cancelled) {
+      return {
+        ok: false,
+        cancelled: true,
+        stdout: "",
+        stderr: "",
+        exitCode: 130,
+        error: "Cancelled",
+      };
+    }
+    return { ok: true, shellKind: session.shellKind };
+  } finally {
+    if (pendingMarker && trackForCancellation) {
+      trackForCancellation.delete(pendingMarker);
+    }
+  }
+}
+
 module.exports = {
   CONFIRMED_SHELL_KINDS,
   DEFAULT_PROBE_TIMEOUT_MS,
@@ -284,4 +344,5 @@ module.exports = {
   createSessionExecProbe,
   applyProbedShellKind,
   ensureSessionShellKind,
+  ensureSessionShellKindForExec,
 };

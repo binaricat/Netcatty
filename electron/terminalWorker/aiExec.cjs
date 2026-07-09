@@ -8,7 +8,10 @@ const {
   execViaRawPty,
 } = require("../bridges/ai/ptyExec.cjs");
 const { getFreshIdlePrompt, formatSyntheticEcho } = require("../bridges/ai/shellUtils.cjs");
-const { ensureSessionShellKind } = require("../bridges/ai/sessionShellKind.cjs");
+const {
+  ensureSessionShellKind,
+  ensureSessionShellKindForExec,
+} = require("../bridges/ai/sessionShellKind.cjs");
 
 const DEFAULT_BACKGROUND_JOB_TIMEOUT_MS = 60 * 60 * 1000;
 const DEFAULT_BACKGROUND_JOB_POLL_INTERVAL_MS = 30 * 1000;
@@ -261,8 +264,13 @@ function createWorkerAiExecHandler({
 
     if (ptyStream && typeof ptyStream.write === "function") {
       // Remote sessions may not set shellKind at connect time; probe once so
-      // fish login shells get the fish wrapper (issue #1854).
-      await ensureSessionShellKind(session);
+      // fish login shells get the fish wrapper (issue #1854). Cancellable so
+      // Stop during the probe window does not still type the command.
+      const probed = await ensureSessionShellKindForExec(session, {
+        trackForCancellation: activePtyExecs,
+        chatSessionId,
+      });
+      if (!probed.ok) return probed;
       return execViaPty(ptyStream, command, {
         stripMarkers: true,
         trackForCancellation: activePtyExecs,
