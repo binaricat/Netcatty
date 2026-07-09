@@ -176,6 +176,32 @@ function withProbeTimeout(promise, timeoutMs) {
 }
 
 /**
+ * Apply a successful remote probe result onto the session.
+ *
+ * Non-posix kinds (fish / powershell / cmd) are pinned on session.shellKind so
+ * wrappers stay correct. Posix login shells are intentionally NOT pinned:
+ * resolveEffectiveShellKind already defaults unset → posix, and leaving
+ * shellKind open preserves the live PowerShell prompt override for the case
+ * "login shell is bash/zsh but the interactive shell is now pwsh" (issue #841
+ * path; Codex P2 on PR #2061). Mark the probe settled so we do not re-probe
+ * every AI exec.
+ */
+function applyProbedShellKind(session, kind) {
+  if (!kind) return session.shellKind;
+  session._shellKindProbeSettled = true;
+  if (kind === "posix") {
+    return session.shellKind;
+  }
+  session.shellKind = kind;
+  return session.shellKind;
+}
+
+function isShellKindProbeSettled(session) {
+  return Boolean(session?._shellKindProbeSettled)
+    || isConfirmedShellKind(session?.shellKind);
+}
+
+/**
  * Ensure session.shellKind is set when we can detect it. Safe to call on every
  * AI exec — confirmed kinds short-circuit; concurrent callers share one probe.
  *
@@ -187,6 +213,13 @@ async function ensureSessionShellKind(session, options = {}) {
   if (!session || typeof session !== "object") return undefined;
 
   if (isConfirmedShellKind(session.shellKind)) {
+    return session.shellKind;
+  }
+
+  // Probe already decided "generic posix login shell" (or pinned a kind).
+  // Do not re-hit the network; leave shellKind unset for the posix case so
+  // resolveEffectiveShellKind can still honor a live PowerShell prompt.
+  if (session._shellKindProbeSettled) {
     return session.shellKind;
   }
 
@@ -225,15 +258,12 @@ async function ensureSessionShellKind(session, options = {}) {
         timeoutMs,
       );
       const kind = parseRemoteLoginShellProbeOutput(stdout);
-      if (kind) {
-        session.shellKind = kind;
-      }
-      return session.shellKind;
+      return applyProbedShellKind(session, kind);
     } catch {
       return session.shellKind;
     } finally {
-      // Allow a later retry only when we still have no confirmed kind.
-      if (!isConfirmedShellKind(session.shellKind)) {
+      // Retry only when the probe failed to classify anything.
+      if (!isShellKindProbeSettled(session)) {
         session._shellKindProbePromise = null;
       }
     }
@@ -252,5 +282,6 @@ module.exports = {
   parseRemoteLoginShellProbeOutput,
   createSshConnExecProbe,
   createSessionExecProbe,
+  applyProbedShellKind,
   ensureSessionShellKind,
 };

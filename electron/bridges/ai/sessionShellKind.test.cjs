@@ -134,9 +134,43 @@ test("ensureSessionShellKind shares one in-flight probe across concurrent caller
   release();
   const [a, b] = await Promise.all([p1, p2]);
 
-  assert.equal(a, "posix");
-  assert.equal(b, "posix");
+  // Posix login shells are not pinned on session.shellKind (see below).
+  assert.equal(a, undefined);
+  assert.equal(b, undefined);
+  assert.equal(session.shellKind, undefined);
+  assert.equal(session._shellKindProbeSettled, true);
   assert.equal(probes, 1);
+});
+
+test("probed posix login shell does not block live PowerShell prompt override (Codex P2)", async () => {
+  // Login shell is bash/zsh, but the user may have entered pwsh interactively
+  // (or startup files exec'd it). Previously unset shellKind let
+  // resolveEffectiveShellKind honor PS ...> prompts (#841). Pinning posix
+  // permanently would type the bash wrapper into PowerShell.
+  let probes = 0;
+  const session = { protocol: "ssh" };
+  const probe = async () => {
+    probes += 1;
+    return `${PROBE_OUTPUT_MARKER}/bin/bash\n`;
+  };
+
+  await ensureSessionShellKind(session, { execProbe: probe });
+  await ensureSessionShellKind(session, { execProbe: probe });
+
+  assert.equal(probes, 1, "posix probe should settle without re-probing");
+  assert.equal(session.shellKind, undefined);
+  assert.equal(session._shellKindProbeSettled, true);
+
+  // Live PowerShell prompt still wins when shellKind is unset.
+  assert.equal(
+    resolveEffectiveShellKind(session.shellKind, "PS C:\\Users\\alice>"),
+    "powershell",
+  );
+  // And a normal bash-style prompt still falls through to posix wrapping.
+  assert.equal(
+    resolveEffectiveShellKind(session.shellKind, "alice@host:~$"),
+    "posix",
+  );
 });
 
 test("ensureSessionShellKind allows retry after a failed probe", async () => {
