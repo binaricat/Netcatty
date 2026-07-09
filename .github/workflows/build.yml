@@ -404,6 +404,8 @@ jobs:
           fi
 
       - name: Install build dependencies
+        # Container jobs default to /bin/sh; Buster's dash rejects `[[`.
+        shell: bash
         run: |
           # Buster is archived; redirect apt to archive.debian.org.
           if [[ -f /etc/apt/sources.list ]]; then

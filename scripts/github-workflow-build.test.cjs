@@ -79,4 +79,9 @@ test("build workflow builds Linux x64 native modules in a glibc 2.28 container",
     false,
     "Linux x64 package job must install Node inside the container like arm64",
   );
+  assert.match(
+    x64Job[0],
+    /name:\s*Install build dependencies[\s\S]*?\n\s+shell:\s*bash\n\s+run:/,
+    "Linux x64 install step must use bash so archive-mirror rewrite works under Buster",
+  );
 });
