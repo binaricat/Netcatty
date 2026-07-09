@@ -84,4 +84,9 @@ test("build workflow builds Linux x64 native modules in a glibc 2.28 container",
     /name:\s*Install build dependencies[\s\S]*?\n\s+shell:\s*bash\n\s+run:/,
     "Linux x64 install step must use bash so archive-mirror rewrite works under Buster",
   );
+  assert.match(
+    x64Job[0],
+    /uses:\s*actions\/setup-python@v5[\s\S]*?python-version:\s*["']3\.11["']/,
+    "Linux x64 job must install Python >=3.8 for node-gyp 12 on Buster",
+  );
 });

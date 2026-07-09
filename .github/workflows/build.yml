@@ -439,8 +439,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Buster ships Python 3.7; node-gyp 12 uses 3.8+ syntax (walrus) and
+      # fails during npm ci / electron-rebuild without a newer interpreter.
+      - name: Setup Python for node-gyp
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
       - name: Install deps
-        run: npm ci
+        env:
+          PYTHON: python3
+          npm_config_python: python3
+        run: |
+          python3 --version
+          npm ci
 
       - name: Set version
         shell: bash
@@ -459,6 +471,8 @@ jobs:
       - name: Prepare node-pty Linux runtime
         env:
           npm_config_arch: x64
+          PYTHON: python3
+          npm_config_python: python3
         run: bash scripts/ensure-node-pty-linux.sh prepare x64
 
       - name: Fetch bundled mosh-client
