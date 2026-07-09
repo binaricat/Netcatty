@@ -251,10 +251,13 @@ test("worker background job probes unset remote shellKind before wrapping", asyn
   });
 
   assert.equal(started.ok, true);
-  assert.equal(sessions.get("ssh-fish").shellKind, "fish");
+  // Login fish is recorded but not pinned; dual-compatible posix_sh is used.
+  assert.equal(sessions.get("ssh-fish").shellKind, undefined);
+  assert.equal(sessions.get("ssh-fish")._loginShellKind, "fish");
   const wrapper = pty.writes.find((entry) => entry.includes("__NCMCP_"));
-  assert.match(wrapper, /set -l __NCMCP_.*_cmd/);
-  assert.doesNotMatch(wrapper, /__NCMCP_.*_cmd=/);
+  assert.match(wrapper, / sh -c '/);
+  // Must not type native fish syntax (would break if interactive shell is bash).
+  assert.doesNotMatch(wrapper, /set -l __NCMCP_/);
 
   const marker = extractMarker(pty.writes);
   pty.emit("data", `${marker}_S\r\n${marker}_E:0\r\n`);

@@ -102,18 +102,30 @@ test("treats a CR-redrawn last line as the effective prompt, not the doubled str
   );
 });
 
-test("rejects spoofed `PS >` (literal space then `>`) ù default PowerShell never emits this", () => {
-  assert.equal(resolveEffectiveShellKind(undefined, "PS >"), "posix");
+test("rejects spoofed `PS >` (literal space then `>`) ‚Äî default PowerShell never emits this", () => {
+  assert.equal(resolveEffectiveShellKind(undefined, "PS >"), "posix_sh");
 });
 
-test("falls back to posix when neither shell kind nor prompt is informative", () => {
-  assert.equal(resolveEffectiveShellKind(undefined, ""), "posix");
-  assert.equal(resolveEffectiveShellKind(null, undefined), "posix");
+test("falls back to posix_sh when neither shell kind nor prompt is informative", () => {
+  // Dual-compatible default for unset remote shellKind (fish + bash).
+  assert.equal(resolveEffectiveShellKind(undefined, ""), "posix_sh");
+  assert.equal(resolveEffectiveShellKind(null, undefined), "posix_sh");
 });
 
 test("does not misclassify command output that happens to contain 'PS'", () => {
-  assert.equal(resolveEffectiveShellKind(undefined, "PSO>"), "posix");
-  assert.equal(resolveEffectiveShellKind(undefined, "ZIPS>"), "posix");
+  assert.equal(resolveEffectiveShellKind(undefined, "PSO>"), "posix_sh");
+  assert.equal(resolveEffectiveShellKind(undefined, "ZIPS>"), "posix_sh");
+});
+
+test("posix_sh wrapper is fish-parseable and emits markers under real sh", () => {
+  const marker = "__NCMCP_TEST__";
+  const wrapped = buildWrappedCommand("echo dual-ok", "posix_sh", marker);
+  assert.match(wrapped, /^ sh -c '/);
+  assert.match(wrapped, new RegExp(marker));
+  const result = spawnSync("sh", ["-c", wrapped.trim()], { encoding: "utf8" });
+  assert.equal(result.error, undefined);
+  assert.match(result.stdout, /dual-ok/);
+  assert.match(result.stdout, new RegExp(`${marker}_E:0`));
 });
 
 test("cmd wrapper uses interactive cmd variable expansion", () => {
@@ -209,7 +221,7 @@ test("execViaChannel registers a pending-cancel marker before the SSH channel op
   let execCallback;
   const fakeClient = {
     exec(_command, callback) {
-      // Capture but do not invoke yet ù simulates the channel-open
+      // Capture but do not invoke yet ÔøΩ simulates the channel-open
       // delay where the race window lives.
       execCallback = callback;
     },
@@ -263,7 +275,7 @@ test("execViaChannel short-circuits when cancel fires before the SSH channel ope
     if (entry.chatSessionId === "chat-2") entry.cancel();
   }
 
-  // Now the channel "opens" ù even though `sshClient.exec` would
+  // Now the channel "opens" ÔøΩ even though `sshClient.exec` would
   // hand us a working stream, we must short-circuit because the user
   // already cancelled.
   const fakeExecStream = {

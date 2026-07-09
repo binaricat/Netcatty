@@ -7,8 +7,11 @@
  * wrapper into fish login shells (issue #1854).
  *
  * Before AI exec we probe the remote login shell once via a separate SSH exec
- * channel (silent — does not touch the interactive PTY), classify it, and
- * cache session.shellKind for subsequent commands.
+ * channel (silent — does not touch the interactive PTY). Only Windows login
+ * shells (powershell/cmd) are pinned on session.shellKind. Unix login shells
+ * (fish/posix) only settle the probe: the default typed wrapper is dual-
+ * compatible `posix_sh` so fish login works without assuming login shell ===
+ * active interactive shell.
  */
 "use strict";
 
@@ -179,21 +182,25 @@ function withProbeTimeout(promise, timeoutMs) {
 /**
  * Apply a successful remote probe result onto the session.
  *
- * Non-posix kinds (fish / powershell / cmd) are pinned on session.shellKind so
- * wrappers stay correct. Posix login shells are intentionally NOT pinned:
- * resolveEffectiveShellKind already defaults unset → posix, and leaving
- * shellKind open preserves the live PowerShell prompt override for the case
- * "login shell is bash/zsh but the interactive shell is now pwsh" (issue #841
- * path; Codex P2 on PR #2061). Mark the probe settled so we do not re-probe
- * every AI exec.
+ * Login-shell probe is NOT treated as the active interactive shell:
+ * - posix / fish: never pin session.shellKind. Unset shellKind defaults to the
+ *   dual-compatible `posix_sh` wrapper (parseable by both bash and fish), and
+ *   live PowerShell prompts can still override (issue #841 / #1854; Codex P2
+ *   on PR #2061: login fish but interactive bash must not get fish syntax).
+ * - powershell / cmd: pin — these are not recoverable from Unix dual wrappers
+ *   and match Windows remote shells where the login shell is the interactive one.
+ *
+ * Always mark the probe settled so we do not re-probe every AI exec.
  */
 function applyProbedShellKind(session, kind) {
   if (!kind) return session.shellKind;
   session._shellKindProbeSettled = true;
-  if (kind === "posix") {
+  session._loginShellKind = kind;
+  if (kind === "powershell" || kind === "cmd") {
+    session.shellKind = kind;
     return session.shellKind;
   }
-  session.shellKind = kind;
+  // fish / posix — leave shellKind unset for dual-compatible default + PS override.
   return session.shellKind;
 }
 

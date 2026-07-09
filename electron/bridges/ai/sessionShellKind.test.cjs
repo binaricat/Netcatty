@@ -97,7 +97,10 @@ test("ensureSessionShellKind does not probe local unknown shells", async () => {
   assert.equal(probes, 0);
 });
 
-test("ensureSessionShellKind probes once and caches fish on SSH sessions", async () => {
+test("ensureSessionShellKind probes fish once but does not pin it as active shell", async () => {
+  // Login shell = fish must not permanently set session.shellKind: the user
+  // may have switched to bash/pwsh in the interactive PTY (Codex P2).
+  // Unset → posix_sh dual wrapper still works when the interactive shell is fish.
   let probes = 0;
   const session = { protocol: "ssh" };
   const probe = async () => {
@@ -108,13 +111,13 @@ test("ensureSessionShellKind probes once and caches fish on SSH sessions", async
   const first = await ensureSessionShellKind(session, { execProbe: probe });
   const second = await ensureSessionShellKind(session, { execProbe: probe });
 
-  assert.equal(first, "fish");
-  assert.equal(second, "fish");
-  assert.equal(session.shellKind, "fish");
+  assert.equal(first, undefined);
+  assert.equal(second, undefined);
+  assert.equal(session.shellKind, undefined);
+  assert.equal(session._loginShellKind, "fish");
+  assert.equal(session._shellKindProbeSettled, true);
   assert.equal(probes, 1);
-  // After a confirmed kind, resolveEffectiveShellKind must keep fish wrapping
-  // even if the idle prompt looks empty/custom.
-  assert.equal(resolveEffectiveShellKind(session.shellKind, ""), "fish");
+  assert.equal(resolveEffectiveShellKind(session.shellKind, ""), "posix_sh");
 });
 
 test("ensureSessionShellKind shares one in-flight probe across concurrent callers", async () => {
@@ -167,10 +170,26 @@ test("probed posix login shell does not block live PowerShell prompt override (C
     resolveEffectiveShellKind(session.shellKind, "PS C:\\Users\\alice>"),
     "powershell",
   );
-  // And a normal bash-style prompt still falls through to posix wrapping.
+  // Normal bash-style prompt → dual-compatible posix_sh (not native posix).
   assert.equal(
     resolveEffectiveShellKind(session.shellKind, "alice@host:~$"),
-    "posix",
+    "posix_sh",
+  );
+});
+
+test("probed fish login shell does not pin fish when interactive shell may differ (Codex P2)", async () => {
+  const session = { protocol: "ssh" };
+  await ensureSessionShellKind(session, {
+    execProbe: async () => `${PROBE_OUTPUT_MARKER}/usr/bin/fish\n`,
+  });
+  assert.equal(session.shellKind, undefined);
+  assert.equal(session._loginShellKind, "fish");
+  // Unset + non-PS prompt → posix_sh, not fish-native wrapper.
+  assert.equal(resolveEffectiveShellKind(session.shellKind, "root@host ~# "), "posix_sh");
+  // And PS prompt still overrides to powershell.
+  assert.equal(
+    resolveEffectiveShellKind(session.shellKind, "PS C:\\Users\\alice>"),
+    "powershell",
   );
 });
 
@@ -192,7 +211,9 @@ test("ensureSessionShellKind allows retry after a failed probe", async () => {
   const second = await ensureSessionShellKind(session, {
     execProbe: failThenSucceed,
   });
-  assert.equal(second, "fish");
+  assert.equal(second, undefined);
+  assert.equal(session._loginShellKind, "fish");
+  assert.equal(session._shellKindProbeSettled, true);
   assert.equal(probes, 2);
 });
 
@@ -208,9 +229,19 @@ test("ensureSessionShellKind uses a session-level exec probe when provided", asy
 
   const kind = await ensureSessionShellKind(session);
 
-  assert.equal(kind, "fish");
-  assert.equal(session.shellKind, "fish");
+  assert.equal(kind, undefined);
+  assert.equal(session.shellKind, undefined);
+  assert.equal(session._loginShellKind, "fish");
   assert.equal(probes, 1);
+});
+
+test("ensureSessionShellKind pins powershell login shells", async () => {
+  const session = { protocol: "ssh" };
+  await ensureSessionShellKind(session, {
+    execProbe: async () => `${PROBE_OUTPUT_MARKER}/usr/bin/pwsh\n`,
+  });
+  assert.equal(session.shellKind, "powershell");
+  assert.equal(session._loginShellKind, "powershell");
 });
 
 test("ensureSessionShellKindForExec cancels when Stop fires during the probe", async () => {
@@ -253,9 +284,9 @@ test("ensureSessionShellKindForExec cancels when Stop fires during the probe", a
   assert.equal(result.error, "Cancelled");
   assert.equal(result.exitCode, 130);
   assert.equal(activePtyExecs.size, 0, "pending marker cleaned up after probe");
-  // Probe still settled fish on the session (harmless); we must not have
-  // started a PTY write — callers check probed.ok before execViaPty.
-  assert.equal(session.shellKind, "fish");
+  // Login fish is recorded but not pinned as active shellKind.
+  assert.equal(session._loginShellKind, "fish");
+  assert.equal(session.shellKind, undefined);
 });
 
 test("ensureSessionShellKindForExec proceeds when not cancelled", async () => {
@@ -267,8 +298,9 @@ test("ensureSessionShellKindForExec proceeds when not cancelled", async () => {
     chatSessionId: "chat-ok",
   });
   assert.equal(result.ok, true);
-  assert.equal(result.shellKind, "fish");
-  assert.equal(session.shellKind, "fish");
+  assert.equal(result.shellKind, undefined);
+  assert.equal(session.shellKind, undefined);
+  assert.equal(session._loginShellKind, "fish");
   assert.equal(activePtyExecs.size, 0);
 });
 
@@ -419,19 +451,22 @@ test(
 );
 
 test(
-  "after ensureSessionShellKind(fish), wrapped AI command succeeds in fish",
+  "after ensureSessionShellKind(fish login), posix_sh wrapper succeeds under real fish",
   { skip: !fishBinary ? "fish binary not available" : false },
   async () => {
+    // Remote fish login is not pinned; default posix_sh must still run in fish.
     const session = { protocol: "ssh" };
     await ensureSessionShellKind(session, {
       execProbe: async () => `${PROBE_OUTPUT_MARKER}/usr/bin/fish\n`,
     });
-    assert.equal(session.shellKind, "fish");
+    assert.equal(session.shellKind, undefined);
+    assert.equal(session._loginShellKind, "fish");
 
     const marker = "__NCMCP_FISHTEST__";
     const effective = resolveEffectiveShellKind(session.shellKind, "root at host # ");
-    assert.equal(effective, "fish");
+    assert.equal(effective, "posix_sh");
     const wrapped = buildWrappedCommand("printf 'ok\\n'", effective, marker);
+    assert.match(wrapped, /^ sh -c '/);
     const result = spawnSync(
       fishBinary,
       ["--no-config", "-c", wrapped.trim()],

@@ -101,16 +101,17 @@ function isPowerShellPrompt(prompt) {
 // `PS ...>` line on a real bash/zsh/fish/cmd session to coerce a single
 // mis-wrapped command.
 //
-// Remote fish (and other non-posix login shells) are handled separately:
-// ensureSessionShellKind() probes the remote login shell once before AI
-// exec and caches session.shellKind (issue #1854). Once set, the probe
-// result is treated as confirmed and is never overridden here.
+// Remote Unix sessions leave shellKind unset after login-shell probing
+// (sessionShellKind.cjs). The default is then `posix_sh`: a `sh -c '...'`
+// outer form that both fish and bash interactive shells can parse, so we
+// do not need to permanently pin login shell = fish (issue #1854 + Codex
+// "don't pin login shell as active shell" on PR #2061).
 //
 // Universe of shellKind values (see lib/localShell.cjs:23-33 and
 // terminalBridge.cjs:368, :932, :1074):
-//   "posix" | "powershell" | "cmd" | "fish" | "unknown" | "raw" | "" | undefined
+//   "posix" | "posix_sh" | "powershell" | "cmd" | "fish" | "unknown" | "raw" | "" | undefined
 // Excluded on purpose:
-//   - "posix" / "fish" / "cmd": confirmed POSIX-family or cmd.exe — never override.
+//   - "posix" / "posix_sh" / "fish" / "cmd": confirmed kinds — never override.
 //   - "powershell": already correct; no override needed (would be a no-op).
 //   - "raw": serial / network device — execViaRawPty bypasses buildWrappedCommand.
 const SHELL_KINDS_OPEN_TO_PROMPT_OVERRIDE = new Set([
@@ -126,7 +127,20 @@ function resolveEffectiveShellKind(shellKind, expectedPrompt) {
   ) {
     return "powershell";
   }
-  return baseKind || "posix";
+  // Unset remote/local-unknown → dual-compatible wrapper (fish + bash).
+  // Confirmed local shells set shellKind at spawn and never hit this.
+  return baseKind || "posix_sh";
+}
+
+function buildPosixWrapperBody(command, marker) {
+  const noPager = "PAGER=cat SYSTEMD_PAGER= GIT_PAGER=cat LESS= ";
+  const commandLines = String(command || "").replace(/\r\n?/g, "\n").split("\n");
+  const cmdAssign = commandLines.length > 1
+    ? `${marker}_cmd=$(printf '%s\\n' ${commandLines.map((line) => `'${escapePosixSingleQuoted(line)}'`).join(" ")})`
+    : `${marker}_cmd='${escapePosixSingleQuoted(command)}'`;
+  return (
+    `${marker}=0; ${cmdAssign}; { printf '%s\\n' '${marker}_S'; trap ':' INT; ( ${noPager}eval "$${marker}_cmd" ); __NCMCP_rc=$?; trap - INT; printf '%s\\n' '${marker}_E:'\"$__NCMCP_rc\"; (exit $__NCMCP_rc); }`
+  );
 }
 
 function buildWrappedCommand(command, shellKind, marker) {
@@ -158,6 +172,17 @@ function buildWrappedCommand(command, shellKind, marker) {
         `printf '%s\\n' '${marker}_S'; eval \$${marker}_cmd; set __NCMCP_rc $status; ` +
         `functions -e __ncmcp_int; printf '%s\\n' '${marker}_E:'\$__NCMCP_rc; end\n`
       );
+
+    case "posix_sh": {
+      // Dual-compatible outer form: both fish and bash interactive shells can
+      // parse `sh -c '...'`. The inner body is the normal POSIX wrapper, so
+      // fish never has to parse `VAR=0` assignment syntax (issue #1854) and we
+      // do not permanently assume login shell === active shell (Codex P2).
+      // Leading space: history ignorespace (see posix branch). The typed line
+      // still contains __NCMCP_ for preload echo filtering.
+      const body = buildPosixWrapperBody(command, marker);
+      return ` sh -c '${escapePosixSingleQuoted(body)}'\n`;
+    }
 
     case "posix":
     default: {
@@ -196,17 +221,7 @@ function buildWrappedCommand(command, shellKind, marker) {
       //    Earlier attempts (PRs #1852/#1882) that instead tried to detect
       //    dangerous commands grew into shell parsing and were abandoned —
       //    do not reintroduce detection here.
-      const noPager = "PAGER=cat SYSTEMD_PAGER= GIT_PAGER=cat LESS= ";
-      // Multi-line commands must not embed raw newlines in the typed
-      // wrapper: the interactive shell would echo PS2 continuation lines
-      // ("> cd ...") that don't contain the marker and leak past the
-      // preload filter. Rebuild the newlines inside the shell instead via
-      // printf so the wrapper stays one physical line. Single-line
-      // commands keep the plain assignment.
-      const commandLines = String(command || "").replace(/\r\n?/g, "\n").split("\n");
-      const cmdAssign = commandLines.length > 1
-        ? `${marker}_cmd=$(printf '%s\\n' ${commandLines.map((line) => `'${escapePosixSingleQuoted(line)}'`).join(" ")})`
-        : `${marker}_cmd='${escapePosixSingleQuoted(command)}'`;
+      //
       // Leading single space: lets bash/zsh skip recording this command
       // in history when the user already has HISTCONTROL=ignorespace
       // (bash) or HIST_IGNORE_SPACE (zsh) configured — Debian/Ubuntu and
@@ -214,9 +229,7 @@ function buildWrappedCommand(command, shellKind, marker) {
       // can opt in by adding `HISTCONTROL=ignoreboth` to ~/.bashrc.
       // Without that config the prefix is harmless; it just doesn't
       // suppress history recording.
-      return (
-        ` ${marker}=0; ${cmdAssign}; { printf '%s\\n' '${marker}_S'; trap ':' INT; ( ${noPager}eval "$${marker}_cmd" ); __NCMCP_rc=$?; trap - INT; printf '%s\\n' '${marker}_E:'\"$__NCMCP_rc\"; (exit $__NCMCP_rc); }\n`
-      );
+      return ` ${buildPosixWrapperBody(command, marker)}\n`;
     }
   }
 }
