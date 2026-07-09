@@ -25,6 +25,7 @@ function printHelp() {
     "  netcatty-tool-cli session --session sess_123 --json --chat-session ai_123\n" +
     "  netcatty-tool-cli exec --session sess_123 --chat-session ai_123 --json -- \"pwd\"\n" +
     "  netcatty-tool-cli vault host get --host-id host_123 --json\n" +
+    "  netcatty-tool-cli vault host open --host-id host_123 --json\n" +
     "  netcatty-tool-cli snippets run --snippet-id snip_1 --session sess_123 --chat-session ai_123 --json\n" +
     "  netcatty-tool-cli portforward rules list --json\n\n" +
     "Notes:\n" +

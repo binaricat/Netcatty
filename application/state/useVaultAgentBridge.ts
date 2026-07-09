@@ -23,6 +23,7 @@ export interface UseVaultAgentBridgeInput {
   updateNotes: (notes: VaultNote[]) => void;
   startTunnel: VaultAgentApiDeps['startTunnel'];
   stopTunnel: VaultAgentApiDeps['stopTunnel'];
+  openHost?: VaultAgentApiDeps['openHost'];
 }
 
 type VaultAgentSnapshot = {
@@ -107,6 +108,9 @@ export function useVaultAgentBridge(input: UseVaultAgentBridgeInput): void {
         },
         startTunnel: current.startTunnel,
         stopTunnel: current.stopTunnel,
+        openHost: current.openHost
+          ? (hostId) => current.openHost!(hostId)
+          : undefined,
       });
     });
     return setupVaultAgentBridge();

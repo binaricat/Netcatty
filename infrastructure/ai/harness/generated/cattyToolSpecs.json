@@ -537,6 +537,29 @@
     }
   },
   {
+    "capabilityId": "vault.host.open",
+    "toolName": "host_open",
+    "rpcMethod": "vault/hosts/open",
+    "localExecution": false,
+    "description": "Open a vault host by creating a new terminal tab and starting the connection. Returns the new sessionId so you can run terminal/SFTP tools against it. Use vault_hosts_list first when you only know the label or hostname. Opens a terminal tab for a saved vault host (same as clicking the host in Netcatty). Connection may still be establishing when the tool returns — use get_environment or wait briefly before terminal_execute if needed. Auth prompts (passphrase / keyboard-interactive) still require the user in the Netcatty UI.",
+    "inputShape": {
+      "hostId": {
+        "type": "string",
+        "optional": false,
+        "description": "Vault host ID to open. Use vault_hosts_list / host_get to resolve id from label or hostname."
+      }
+    },
+    "policy": {
+      "write": true,
+      "sensitiveRead": false,
+      "longRunning": false,
+      "requiresChatSession": false,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": false,
+      "bypassesChatCancel": false
+    }
+  },
+  {
     "capabilityId": "vault.hosts.create",
     "toolName": "vault_hosts_create",
     "rpcMethod": "vault/hosts/create",

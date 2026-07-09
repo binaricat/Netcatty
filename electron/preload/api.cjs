@@ -1150,6 +1150,9 @@ function createPreloadApi(ctx) {
   aiMcpUpdateSessions: async (sessions, chatSessionId) => {
     return ipcRenderer.invoke("netcatty:ai:mcp:update-sessions", { sessions, chatSessionId });
   },
+  aiMcpMergeSessions: async (sessions, chatSessionId) => {
+    return ipcRenderer.invoke("netcatty:ai:mcp:merge-sessions", { sessions, chatSessionId });
+  },
   aiMcpUpdateAttachments: async (attachments, chatSessionId) => {
     return ipcRenderer.invoke("netcatty:ai:mcp:update-attachments", { attachments, chatSessionId });
   },

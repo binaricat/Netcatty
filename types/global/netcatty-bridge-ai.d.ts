@@ -106,6 +106,21 @@ declare global {
       hostChain?: Array<{ hostId: string; label?: string; hostname?: string }>;
       activePortForwards?: Array<{ ruleId: string; label?: string; type?: string; localPort?: number; status?: string }>;
     }>, chatSessionId?: string): Promise<{ ok: boolean }>;
+    /** Merge sessions into a chat scope without dropping existing entries. */
+    aiMcpMergeSessions?(sessions: Array<{
+      sessionId: string;
+      hostId?: string;
+      hostname: string;
+      label: string;
+      os?: string;
+      username?: string;
+      protocol?: string;
+      shellType?: string;
+      deviceType?: string;
+      connected: boolean;
+      hostChain?: Array<{ hostId: string; label?: string; hostname?: string }>;
+      activePortForwards?: Array<{ ruleId: string; label?: string; type?: string; localPort?: number; status?: string }>;
+    }>, chatSessionId: string): Promise<{ ok: boolean; count?: number; error?: string }>;
     onVaultAgentRequest?(cb: (payload: { requestId: string; op: string; params: Record<string, unknown> }) => void): () => void;
     respondVaultAgent?(requestId: string, result: Record<string, unknown>): Promise<{ ok: boolean; error?: string }>;
     aiMcpSetToolIntegrationMode?(mode: 'mcp' | 'skills'): Promise<{ ok: boolean; error?: string }>;

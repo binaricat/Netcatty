@@ -304,6 +304,71 @@ export interface VaultAgentApiDeps {
     ruleId: string,
     onStatusChange?: (status: PortForwardingRule['status']) => void,
   ) => Promise<{ success: boolean; error?: string }>;
+  /**
+   * Open a vault host as a terminal tab (same path as tray / host list click).
+   * Must return the new sessionId so MCP can target terminal tools.
+   */
+  openHost?: (hostId: string) => {
+    ok: true;
+    sessionId: string;
+    host: Host;
+  } | {
+    ok: false;
+    error: string;
+  };
+}
+
+async function registerOpenedSessionInMcpScope(
+  sessionId: string,
+  host: Host,
+  chatSessionId?: string,
+): Promise<void> {
+  let bridge: ReturnType<typeof netcattyBridge.get> | undefined;
+  try {
+    bridge = netcattyBridge.get();
+  } catch {
+    // Node unit tests / non-renderer contexts have no window.
+    return;
+  }
+  if (!bridge?.aiMcpMergeSessions) return;
+
+  const protocol = host.etEnabled
+    ? 'et'
+    : host.moshEnabled
+      ? 'mosh'
+      : (host.protocol || 'ssh');
+  const sessionInfo = {
+    sessionId,
+    hostId: host.id,
+    hostname: host.hostname || '',
+    label: host.label || host.hostname || sessionId,
+    os: host.os || '',
+    username: host.username || '',
+    protocol,
+    deviceType: host.deviceType || '',
+    connected: false,
+    hostChain: [],
+    activePortForwards: [],
+  };
+
+  const scopes = new Set<string>();
+  if (chatSessionId && chatSessionId.trim()) {
+    scopes.add(chatSessionId.trim());
+  }
+  // Always merge into the reserved external MCP scope when that surface is
+  // active; External MCP agents can then terminal_execute without waiting for
+  // the next React session-sync tick.
+  scopes.add('__external_mcp__');
+
+  await Promise.all(
+    [...scopes].map(async (scopeId) => {
+      try {
+        await bridge.aiMcpMergeSessions?.([sessionInfo], scopeId);
+      } catch {
+        // Scope merge is best-effort; open itself already succeeded.
+      }
+    }),
+  );
 }
 
 export async function handleVaultAgentOp(
@@ -322,6 +387,41 @@ export async function handleVaultAgentOp(
       return {
         ok: true,
         hosts: deps.getHosts().map((host) => summarizeHostForList(deps.resolveEffectiveHost(host))),
+      };
+    }
+    case 'host.open': {
+      const hostId = String(params.hostId || '').trim();
+      if (!hostId) return { ok: false, error: 'hostId is required.' };
+      if (typeof deps.openHost !== 'function') {
+        return { ok: false, error: 'Host open is not available in this window.' };
+      }
+
+      const opened = deps.openHost(hostId);
+      if (!opened.ok) {
+        return { ok: false, error: opened.error };
+      }
+
+      const effectiveHost = deps.resolveEffectiveHost(opened.host);
+      const chatSessionId = typeof params.chatSessionId === 'string'
+        ? params.chatSessionId
+        : undefined;
+      await registerOpenedSessionInMcpScope(opened.sessionId, effectiveHost, chatSessionId);
+
+      const protocol = effectiveHost.etEnabled
+        ? 'et'
+        : effectiveHost.moshEnabled
+          ? 'mosh'
+          : (effectiveHost.protocol || 'ssh');
+
+      return {
+        ok: true,
+        sessionId: opened.sessionId,
+        hostId: effectiveHost.id,
+        status: 'connecting',
+        protocol,
+        host: summarizeHostForList(effectiveHost),
+        message:
+          'Terminal tab opened. Connection may still be establishing; use get_environment or wait briefly before terminal_execute if the session is not ready yet.',
       };
     }
     case 'hosts.create': {

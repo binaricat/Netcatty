@@ -11,6 +11,7 @@ const UNROUTED = Symbol("capability-rpc-unrouted");
 const SERVICE_BINDINGS = Object.freeze({
   "vault.host.get": { domain: "vault", method: "getHost" },
   "vault.host.list": { domain: "vault", method: "listHosts" },
+  "vault.host.open": { domain: "vault", method: "openHost" },
   "vault.hosts.create": { domain: "vault", method: "createHosts" },
   "vault.host.import": { domain: "vault", method: "importHosts" },
   "vault.host.notes.get": { domain: "vault", method: "getHostNotes" },

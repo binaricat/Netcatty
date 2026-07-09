@@ -1007,6 +1007,23 @@ function App({ settings }: { settings: SettingsState }) {
     return materializeHostProxyProfile(withGroupDefaults, proxyProfiles);
   }, [groupConfigs, proxyProfileIdSet, proxyProfiles]);
 
+  // Wrapper to connect to host with logging
+  const handleConnectToHost = useCallback((host: Host) => { return handleConnectToHostImpl(() => ({ addConnectionLog, connectToHost, host, identities, keys, resolveEffectiveHost, resolveHostAuth, systemInfoRef }), host); }, [addConnectionLog, connectToHost, resolveEffectiveHost, identities, keys]);
+
+  const openHostForVaultAgent = useCallback((hostId: string) => {
+    const host = hosts.find((item) => item.id === hostId);
+    if (!host) {
+      return { ok: false as const, error: `Host "${hostId}" was not found.` };
+    }
+    const sessionId = handleConnectToHost(host);
+    if (!sessionId) {
+      return { ok: false as const, error: `Failed to open host "${hostId}".` };
+    }
+    // Surface the main window for external MCP / CLI open requests.
+    void netcattyBridge.get()?.openMainWindow?.();
+    return { ok: true as const, sessionId, host };
+  }, [handleConnectToHost, hosts]);
+
   useVaultAgentBridge({
     hosts,
     snippets,
@@ -1023,10 +1040,8 @@ function App({ settings }: { settings: SettingsState }) {
     updateNotes,
     startTunnel,
     stopTunnel,
+    openHost: openHostForVaultAgent,
   });
-
-  // Wrapper to connect to host with logging
-  const handleConnectToHost = useCallback((host: Host) => { return handleConnectToHostImpl(() => ({ addConnectionLog, connectToHost, host, identities, keys, resolveEffectiveHost, resolveHostAuth, systemInfoRef }), host); }, [addConnectionLog, connectToHost, resolveEffectiveHost, identities, keys]);
 
   const _handleSshDeepLink = useEffectEvent((payload: { url?: string }) => {
     const rawUrl = payload?.url || '';

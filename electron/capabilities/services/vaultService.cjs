@@ -41,6 +41,14 @@ function createVaultService(ctx = {}) {
       if (bridgeErr) return bridgeErr;
       return invokeVaultAgent("host.list", {});
     },
+    openHost: async (params = {}) => {
+      const bridgeErr = requireBridge();
+      if (bridgeErr) return bridgeErr;
+      return invokeVaultAgent("host.open", {
+        hostId: params.hostId,
+        chatSessionId: params.chatSessionId,
+      });
+    },
     createHosts: async (params = {}) => {
       const bridgeErr = requireBridge();
       if (bridgeErr) return bridgeErr;

@@ -42,6 +42,11 @@ function createDeps(
     },
     startTunnel: async () => ({ success: true }),
     stopTunnel: async () => ({ success: true }),
+    openHost: (hostId) => {
+      const host = hosts.find((entry) => entry.id === hostId);
+      if (!host) return { ok: false, error: `Host "${hostId}" was not found.` };
+      return { ok: true, sessionId: `session-${hostId}`, host };
+    },
   };
 
   return {
@@ -212,6 +217,42 @@ describe('handleVaultAgentOp vault hosts', () => {
     assert.equal(hosts?.length, 1);
     assert.equal(hosts?.[0]?.hostname, '10.0.0.1');
     assert.equal('password' in (hosts?.[0] ?? {}), false);
+  });
+
+  it('host.open creates a terminal session for a vault host', async () => {
+    const host: Host = {
+      id: 'host-open-1',
+      label: 'edge',
+      hostname: 'edge.example.com',
+      username: 'ops',
+      port: 22,
+    };
+    const result = await handleVaultAgentOp(
+      'host.open',
+      { hostId: 'host-open-1', chatSessionId: 'chat-1' },
+      createDeps({ hosts: [host] }),
+    );
+    assert.equal(result.ok, true);
+    assert.equal((result as { sessionId?: string }).sessionId, 'session-host-open-1');
+    assert.equal((result as { hostId?: string }).hostId, 'host-open-1');
+    assert.equal((result as { status?: string }).status, 'connecting');
+    assert.equal((result as { host?: { hostname?: string } }).host?.hostname, 'edge.example.com');
+  });
+
+  it('host.open fails for missing host ids', async () => {
+    const result = await handleVaultAgentOp(
+      'host.open',
+      { hostId: 'missing' },
+      createDeps({ hosts: [] }),
+    );
+    assert.equal(result.ok, false);
+    assert.match(String((result as { error?: string }).error), /not found/i);
+  });
+
+  it('host.open requires hostId', async () => {
+    const result = await handleVaultAgentOp('host.open', {}, createDeps({ hosts: [] }));
+    assert.equal(result.ok, false);
+    assert.match(String((result as { error?: string }).error), /hostId/i);
   });
 
   it('hosts.create maps structured JSON from arbitrary text into vault hosts', async () => {

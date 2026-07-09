@@ -27,6 +27,31 @@ function registerAgentProcessHandlers(ctx) {
     return { ok: true, count: list.length };
   });
 
+  // Merge (do not replace) session metadata into a chat scope. Used when agents
+  // open a host mid-turn so terminal tools can target the new sessionId
+  // without waiting for the next full scope push.
+  ipcMain.handle("netcatty:ai:mcp:merge-sessions", async (event, { sessions: sessionList, chatSessionId }) => {
+    if (!validateSenderOrSettings(event)) return { ok: false, error: "Unauthorized IPC sender" };
+    if (!chatSessionId || typeof chatSessionId !== "string") {
+      return { ok: false, error: "chatSessionId is required" };
+    }
+    const list = Array.isArray(sessionList) ? sessionList : [];
+    const externalId = mcpServerBridge.EXTERNAL_MCP_CHAT_SESSION_ID;
+    if (chatSessionId === externalId) {
+      try {
+        const external = typeof getExternalMcpController === "function"
+          ? getExternalMcpController()
+          : null;
+        if (!external?.isEnabled?.()) {
+          return { ok: false, error: "External MCP is disabled" };
+        }
+      } catch {
+        return { ok: false, error: "External MCP is unavailable" };
+      }
+    }
+    return mcpServerBridge.mergeSessionMetadata(list, chatSessionId);
+  });
+
   ipcMain.handle("netcatty:ai:mcp:update-attachments", async (event, { attachments, chatSessionId }) => {
     if (!validateSenderOrSettings(event)) return { ok: false, error: "Unauthorized IPC sender" };
     mcpServerBridge.updateAttachmentMetadata(attachments || [], chatSessionId);

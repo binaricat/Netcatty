@@ -29,6 +29,7 @@ const IMPLEMENTED_CLI_COMMANDS = [
   ["cancel"],
   ["resume"],
   ["vault", "host", "get"],
+  ["vault", "host", "open"],
   ["vault", "host-notes", "get"],
   ["vault", "host-notes", "set"],
   ["snippets", "list"],

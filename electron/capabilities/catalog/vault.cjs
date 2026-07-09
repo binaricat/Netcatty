@@ -44,6 +44,27 @@ const VAULT_CAPABILITIES = [
     },
   },
   {
+    id: "vault.host.open",
+    domain: "vault",
+    status: CAPABILITY_STATUS.IMPLEMENTED,
+    description:
+      "Open a vault host by creating a new terminal tab and starting the connection. Returns the new sessionId so you can run terminal/SFTP tools against it. Use vault_hosts_list first when you only know the label or hostname.",
+    policy: {
+      write: true,
+      sensitiveRead: false,
+      longRunning: false,
+      requiresChatSession: false,
+      bypassesObserverBlock: false,
+      bypassesApproval: false,
+      bypassesChatCancel: false,
+    },
+    surfaces: {
+      cli: { command: ["vault", "host", "open"] },
+      global: { rpcMethod: "vault/hosts/open" },
+      public: { rpcMethod: "public/vault/hosts/open", mcpTool: "host_open" },
+    },
+  },
+  {
     id: "vault.hosts.create",
     domain: "vault",
     status: CAPABILITY_STATUS.IMPLEMENTED,

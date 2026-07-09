@@ -39,12 +39,21 @@ test("listCattyToolSpecs includes vault host tools and SFTP transfer", () => {
   const capabilityIds = listCattyToolSpecs().map((spec) => spec.capabilityId);
   assert.ok(capabilityIds.includes("vault.host.get"));
   assert.ok(capabilityIds.includes("vault.host.list"));
+  assert.ok(capabilityIds.includes("vault.host.open"));
   assert.ok(capabilityIds.includes("vault.hosts.create"));
   assert.ok(capabilityIds.includes("vault.host.import"));
   assert.ok(capabilityIds.includes("vault.note.create"));
   assert.ok(capabilityIds.includes("vault.note.list"));
   assert.ok(capabilityIds.includes("sftp.download"));
   assert.ok(capabilityIds.includes("sftp.upload"));
+});
+
+test("listMcpTools includes host_open for external MCP clients", () => {
+  const tools = listMcpTools();
+  const hostOpen = tools.find((tool) => tool.mcpTool === "host_open");
+  assert.ok(hostOpen);
+  assert.equal(hostOpen.capabilityId, "vault.host.open");
+  assert.equal(hostOpen.publicRpcMethod, "public/vault/hosts/open");
 });
 
 test("vault host import tool description routes unknown attached host text to host creation", () => {
