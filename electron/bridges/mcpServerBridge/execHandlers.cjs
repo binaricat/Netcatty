@@ -331,6 +331,10 @@ function createExecHandlerApi(ctx) {
           outputMode: "foreground-mirrored",
           recommendedPollIntervalMs: DEFAULT_BACKGROUND_JOB_POLL_INTERVAL_MS,
         };
+      }).catch((err) => {
+        // Probe (or unexpected rejection) must not leave the session lock held.
+        releaseSessionExecution(sessionId, sessionToken);
+        return { ok: false, error: err?.message || String(err) };
       });
     }
     
