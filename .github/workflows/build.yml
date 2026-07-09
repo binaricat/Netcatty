@@ -354,11 +354,13 @@ jobs:
             release/*.blockmap
           if-no-files-found: ignore
 
-  # Linux x64 — pin to ubuntu-22.04 for broader glibc compatibility.
-  # ubuntu-latest (24.04) links native modules against glibc 2.39 which
-  # can cause dlopen failures on some distros. 22.04 uses glibc 2.35,
-  # compatible with most current Linux distributions including Arch.
-  # See #264.
+  # Dedicated job for Linux x64 — builds inside Debian Buster (GLIBC 2.28)
+  # so native modules (node-pty, serialport) stay compatible with RHEL 8 /
+  # CentOS 8 / UOS / Deepin. Ubuntu 22.04 links against GLIBC 2.32–2.35,
+  # which crashes on those older hosts (see #2062). Buster is preferred over
+  # Bullseye (2.31) because some RHEL 8 derivatives only export symbols up
+  # through GLIBC_2.30 even when `ldd --version` reports 2.31.
+  # Key: GLIBC < 2.34 also avoids the libpthread-merge symbol requirement.
   build-linux-x64:
     name: ${{ needs.dedupe.outputs.skip_heavy_ci == 'true' && 'deduped build-linux-x64' || 'build-linux-x64' }}
     needs: [dedupe, resolve-mosh, resolve-et]
@@ -366,7 +368,9 @@ jobs:
       always()
       && needs.dedupe.result == 'success'
       && needs.dedupe.outputs.skip_heavy_ci != 'true'
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
+    container:
+      image: debian:buster
     env:
       MOSH_BIN_RELEASE: ${{ needs.resolve-mosh.outputs.mosh_bin_release }}
       ET_BIN_RELEASE: ${{ needs.resolve-et.outputs.et_bin_release }}
@@ -399,20 +403,40 @@ jobs:
             exit 1
           fi
 
+      - name: Install build dependencies
+        run: |
+          # Buster is archived; redirect apt to archive.debian.org.
+          if [[ -f /etc/apt/sources.list ]]; then
+            sed -i 's/deb.debian.org/archive.debian.org/g' /etc/apt/sources.list
+            sed -i 's/security.debian.org/archive.debian.org/g' /etc/apt/sources.list
+            sed -i '/buster-updates/d' /etc/apt/sources.list || true
+          fi
+          apt-get update
+          apt-get install -y curl ca-certificates build-essential python3 git libfuse2 file rpm \
+            libarchive-tools xz-utils \
+            libglib2.0-0 libgtk-3-0 libnss3 libxss1 libxtst6 libasound2 \
+            libatk-bridge2.0-0 libdrm2 libgbm1 libx11-xcb1 libxcb-dri3-0
+          # NodeSource no longer ships Node 22 for Buster; install the
+          # official linux-x64 binary tarball instead (matches major 22
+          # used by the other package jobs).
+          NODE_VERSION="$(curl -fsSL https://nodejs.org/dist/latest-v22.x/SHASUMS256.txt \
+            | awk '/node-v[0-9.]+-linux-x64\.tar\.xz$/{print $2; exit}' \
+            | sed -E 's/^node-(v[0-9.]+)-linux-x64\.tar\.xz$/\1/')"
+          if [[ -z "${NODE_VERSION}" ]]; then
+            echo "::error::Could not resolve latest Node 22 linux-x64 tarball version."
+            exit 1
+          fi
+          echo "Installing Node ${NODE_VERSION} from nodejs.org"
+          curl -fsSL "https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-linux-x64.tar.xz" \
+            | tar -xJ -C /usr/local --strip-components=1
+          node -v
+          npm -v
+
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-
       - name: Install deps
         run: npm ci
-
-      - name: Install Linux packaging dependencies
-        run: sudo apt-get update && sudo apt-get install -y libarchive-tools rpm
 
       - name: Set version
         shell: bash

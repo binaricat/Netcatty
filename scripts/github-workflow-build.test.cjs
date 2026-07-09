@@ -55,3 +55,28 @@ test("build workflow verifies RPM artifacts for both Linux architectures", () =>
     "Linux arm64 package job must verify the RPM artifact",
   );
 });
+
+test("build workflow builds Linux x64 native modules in a glibc 2.28 container", () => {
+  // Keep x64 packages loadable on RHEL 8 / UOS / Deepin (see #2062).
+  // Buster (2.28) is stricter than the prior ubuntu-22.04 host (2.35) and
+  // slightly older than the arm64 Bullseye container (2.31).
+  const x64Job = buildWorkflow.match(
+    /build-linux-x64:[\s\S]*?(?=\n  build-linux-arm64:)/,
+  );
+  assert.ok(x64Job, "build-linux-x64 job must be present before build-linux-arm64");
+  assert.match(
+    x64Job[0],
+    /container:\s*\n\s*image:\s*debian:buster/,
+    "Linux x64 package job must build inside debian:buster for glibc 2.28",
+  );
+  assert.equal(
+    x64Job[0].includes("ubuntu-22.04"),
+    false,
+    "Linux x64 package job must not build on the host ubuntu-22.04 glibc",
+  );
+  assert.equal(
+    x64Job[0].includes("actions/setup-node@"),
+    false,
+    "Linux x64 package job must install Node inside the container like arm64",
+  );
+});
