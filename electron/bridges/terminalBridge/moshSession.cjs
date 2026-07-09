@@ -5,6 +5,20 @@ const {
   shouldAcceptSessionOutput,
   shouldProcessSessionOutput,
 } = require("../terminalFlowAck.cjs");
+const { createSshConnExecProbe } = require("../ai/sessionShellKind.cjs");
+
+function withShellProbeTimeout(promise, timeoutMs) {
+  const ms = Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 3000;
+  let timer = null;
+  return Promise.race([
+    Promise.resolve(promise),
+    new Promise((resolve) => {
+      timer = setTimeout(() => resolve(null), ms);
+    }),
+  ]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
+}
 
 function createMoshSessionApi(ctx) {
   with (ctx) {
@@ -435,6 +449,16 @@ function createMoshSessionApi(ctx) {
         // Leave unset so ensureSessionShellKind can probe via companion SSH
         // exec before AI wrappers (fish login shells — issue #1854).
         shellKind: undefined,
+        _shellKindExecProbe: async (command, timeoutMs) => {
+          if (typeof ensureMoshStatsConnection !== "function") return null;
+          const contents = electronModule?.webContents?.fromId?.(session.webContentsId);
+          const conn = await withShellProbeTimeout(
+            ensureMoshStatsConnection(session, sessionId, contents),
+            timeoutMs,
+          );
+          const probe = createSshConnExecProbe(conn);
+          return probe ? probe(command, timeoutMs) : null;
+        },
         shellExecutable: "remote-shell",
         flushPendingData: null,
         lastIdlePrompt: "",

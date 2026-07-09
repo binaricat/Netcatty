@@ -575,6 +575,7 @@ const moshSessionApi = createMoshSessionApi({
   openTerminalOutputSession, closeTerminalOutputSession,
   get selectZmodemUploadFiles() { return selectZmodemUploadFiles; },
   get selectZmodemDownloadDirectory() { return selectZmodemDownloadDirectory; },
+  ensureMoshStatsConnection: (...args) => require("./sshBridge.cjs").ensureMoshStatsConnection(...args),
   bundledMoshClient: (...args) => bundledMoshClient(...args),
 });
 const {

@@ -26,6 +26,7 @@ const CONFIRMED_SHELL_KINDS = new Set([
 ]);
 
 const DEFAULT_PROBE_TIMEOUT_MS = 3000;
+const PROBE_OUTPUT_MARKER = "__NETCATTY_SHELL_KIND__:";
 
 function isConfirmedShellKind(shellKind) {
   return CONFIRMED_SHELL_KINDS.has(shellKind);
@@ -58,19 +59,24 @@ function buildRemoteLoginShellProbeCommand() {
   const script = [
     'SH="$(getent passwd "$(id -un)" 2>/dev/null | cut -d: -f7)"',
     '[ -n "$SH" ] || SH="${SHELL:-}"',
-    'printf "%s\\n" "$SH"',
+    `printf "${PROBE_OUTPUT_MARKER}%s\\n" "$SH"`,
   ].join("; ");
   return `exec sh -c ${quoteShellArg(script)}`;
 }
 
 function parseRemoteLoginShellProbeOutput(stdout) {
-  const firstLine = String(stdout || "")
+  const lines = String(stdout || "")
     .replace(/\r/g, "")
     .split("\n")
     .map((line) => line.trim())
-    .find(Boolean);
-  if (!firstLine) return null;
-  return classifyShellKindFromRemotePath(firstLine);
+    .filter(Boolean);
+
+  for (const line of lines) {
+    if (!line.startsWith(PROBE_OUTPUT_MARKER)) continue;
+    const kind = classifyShellKindFromRemotePath(line.slice(PROBE_OUTPUT_MARKER.length));
+    if (kind) return kind;
+  }
+  return null;
 }
 
 /**
@@ -104,6 +110,14 @@ function createSshConnExecProbe(conn) {
             settle(null);
             return;
           }
+          if (settled) {
+            try {
+              stream.close?.();
+            } catch {
+              // ignore
+            }
+            return;
+          }
           activeStream = stream;
           let stdout = "";
           stream.on("data", (chunk) => {
@@ -134,6 +148,9 @@ function createSshConnExecProbe(conn) {
  */
 function createSessionExecProbe(session) {
   if (!session || typeof session !== "object") return null;
+  if (typeof session._shellKindExecProbe === "function") {
+    return (command, timeoutMs) => session._shellKindExecProbe(command, timeoutMs);
+  }
   return (
     createSshConnExecProbe(session.conn)
     || createSshConnExecProbe(session.sshClient)
@@ -141,6 +158,21 @@ function createSessionExecProbe(session) {
     || createSshConnExecProbe(session.etStatsConn)
     || null
   );
+}
+
+function withProbeTimeout(promise, timeoutMs) {
+  const ms = Number.isFinite(timeoutMs) && timeoutMs > 0
+    ? timeoutMs
+    : DEFAULT_PROBE_TIMEOUT_MS;
+  let timer = null;
+  return Promise.race([
+    Promise.resolve(promise),
+    new Promise((resolve) => {
+      timer = setTimeout(() => resolve(null), ms);
+    }),
+  ]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
 }
 
 /**
@@ -185,8 +217,11 @@ async function ensureSessionShellKind(session, options = {}) {
 
   session._shellKindProbePromise = (async () => {
     try {
-      const stdout = await execProbe(
-        buildRemoteLoginShellProbeCommand(),
+      const stdout = await withProbeTimeout(
+        execProbe(
+          buildRemoteLoginShellProbeCommand(),
+          timeoutMs,
+        ),
         timeoutMs,
       );
       const kind = parseRemoteLoginShellProbeOutput(stdout);
@@ -210,6 +245,7 @@ async function ensureSessionShellKind(session, options = {}) {
 module.exports = {
   CONFIRMED_SHELL_KINDS,
   DEFAULT_PROBE_TIMEOUT_MS,
+  PROBE_OUTPUT_MARKER,
   isConfirmedShellKind,
   classifyShellKindFromRemotePath,
   buildRemoteLoginShellProbeCommand,

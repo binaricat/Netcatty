@@ -363,11 +363,19 @@ function createWorkerAiJobStartHandler({
       };
     }
 
-    // Same shellKind probe as foreground exec so background jobs on fish
-    // remote shells are not wrapped as posix (issue #1854).
-    await ensureSessionShellKind(session);
-
     const jobId = createWorkerBackgroundJobId();
+    activeSessionJobs.set(sessionId, jobId);
+
+    // Same shellKind probe as foreground exec so background jobs on fish
+    // remote shells are not wrapped as posix (issue #1854). Reserve the
+    // session before awaiting so concurrent starts cannot pass the busy check.
+    try {
+      await ensureSessionShellKind(session);
+    } catch (err) {
+      if (activeSessionJobs.get(sessionId) === jobId) activeSessionJobs.delete(sessionId);
+      return { ok: false, error: err?.message || String(err) };
+    }
+
     const timeoutMs = Math.max(
       Number.isFinite(commandTimeoutMs) ? commandTimeoutMs : 60000,
       DEFAULT_BACKGROUND_JOB_TIMEOUT_MS,
@@ -391,6 +399,7 @@ function createWorkerAiJobStartHandler({
         normalizeFinalOutput: false,
       });
     } catch (err) {
+      if (activeSessionJobs.get(sessionId) === jobId) activeSessionJobs.delete(sessionId);
       return { ok: false, error: err?.message || String(err) };
     }
 
@@ -412,7 +421,6 @@ function createWorkerAiJobStartHandler({
       handle,
     };
     backgroundJobs.set(jobId, job);
-    activeSessionJobs.set(sessionId, jobId);
 
     handle.resultPromise.then((result) => {
       job.updatedAt = Date.now();

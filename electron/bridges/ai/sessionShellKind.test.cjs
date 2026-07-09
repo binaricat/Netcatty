@@ -5,6 +5,7 @@ const { existsSync } = require("node:fs");
 
 const {
   isConfirmedShellKind,
+  PROBE_OUTPUT_MARKER,
   classifyShellKindFromRemotePath,
   buildRemoteLoginShellProbeCommand,
   parseRemoteLoginShellProbeOutput,
@@ -30,15 +31,20 @@ test("classifies remote login shell paths", () => {
   assert.equal(classifyShellKindFromRemotePath(""), null);
 });
 
-test("parseRemoteLoginShellProbeOutput reads the first non-empty line", () => {
+test("parseRemoteLoginShellProbeOutput reads classifiable probe output lines", () => {
   assert.equal(
-    parseRemoteLoginShellProbeOutput("\n/usr/bin/fish\n"),
+    parseRemoteLoginShellProbeOutput(`\n${PROBE_OUTPUT_MARKER}/usr/bin/fish\n`),
     "fish",
   );
   assert.equal(
-    parseRemoteLoginShellProbeOutput("  /bin/bash\r\n"),
+    parseRemoteLoginShellProbeOutput(`  ${PROBE_OUTPUT_MARKER}/bin/bash\r\n`),
     "posix",
   );
+  assert.equal(
+    parseRemoteLoginShellProbeOutput(`SHELL=/bin/bash\n${PROBE_OUTPUT_MARKER}/usr/bin/fish\n`),
+    "fish",
+  );
+  assert.equal(parseRemoteLoginShellProbeOutput("SHELL=/bin/bash\n"), null);
   assert.equal(parseRemoteLoginShellProbeOutput("   \n"), null);
 });
 
@@ -48,6 +54,7 @@ test("probe command is fish-parseable and forces POSIX sh", () => {
   // routes the remote command through the login shell.
   assert.match(command, /^exec sh -c '/);
   assert.match(command, /getent passwd/);
+  assert.match(command, new RegExp(PROBE_OUTPUT_MARKER));
   // ${SHELL:-} lives inside the single-quoted sh script body, not as an
   // outer-shell expansion — fish must not see it unquoted.
   assert.match(command, /\$\{SHELL:-\}/);
@@ -69,7 +76,7 @@ test("ensureSessionShellKind short-circuits confirmed kinds without probing", as
   const kind = await ensureSessionShellKind(session, {
     execProbe: async () => {
       probes += 1;
-      return "/usr/bin/fish";
+      return `${PROBE_OUTPUT_MARKER}/usr/bin/fish\n`;
     },
   });
   assert.equal(kind, "posix");
@@ -82,7 +89,7 @@ test("ensureSessionShellKind does not probe local unknown shells", async () => {
   const kind = await ensureSessionShellKind(session, {
     execProbe: async () => {
       probes += 1;
-      return "/usr/bin/fish";
+      return `${PROBE_OUTPUT_MARKER}/usr/bin/fish\n`;
     },
   });
   assert.equal(kind, "unknown");
@@ -94,7 +101,7 @@ test("ensureSessionShellKind probes once and caches fish on SSH sessions", async
   const session = { protocol: "ssh" };
   const probe = async () => {
     probes += 1;
-    return "/usr/bin/fish\n";
+    return `${PROBE_OUTPUT_MARKER}/usr/bin/fish\n`;
   };
 
   const first = await ensureSessionShellKind(session, { execProbe: probe });
@@ -119,7 +126,7 @@ test("ensureSessionShellKind shares one in-flight probe across concurrent caller
   const probe = async () => {
     probes += 1;
     await gate;
-    return "/bin/zsh\n";
+    return `${PROBE_OUTPUT_MARKER}/bin/zsh\n`;
   };
 
   const p1 = ensureSessionShellKind(session, { execProbe: probe });
@@ -138,7 +145,7 @@ test("ensureSessionShellKind allows retry after a failed probe", async () => {
   const failThenSucceed = async () => {
     probes += 1;
     if (probes === 1) return null;
-    return "/usr/bin/fish\n";
+    return `${PROBE_OUTPUT_MARKER}/usr/bin/fish\n`;
   };
 
   const first = await ensureSessionShellKind(session, {
@@ -152,6 +159,41 @@ test("ensureSessionShellKind allows retry after a failed probe", async () => {
   });
   assert.equal(second, "fish");
   assert.equal(probes, 2);
+});
+
+test("ensureSessionShellKind uses a session-level exec probe when provided", async () => {
+  let probes = 0;
+  const session = {
+    protocol: "mosh",
+    _shellKindExecProbe: async () => {
+      probes += 1;
+      return `${PROBE_OUTPUT_MARKER}/usr/bin/fish\n`;
+    },
+  };
+
+  const kind = await ensureSessionShellKind(session);
+
+  assert.equal(kind, "fish");
+  assert.equal(session.shellKind, "fish");
+  assert.equal(probes, 1);
+});
+
+test("ensureSessionShellKind times out a hanging session-level exec probe", async () => {
+  let probes = 0;
+  const session = {
+    protocol: "mosh",
+    _shellKindExecProbe: async () => {
+      probes += 1;
+      return new Promise(() => {});
+    },
+  };
+
+  const kind = await ensureSessionShellKind(session, { timeoutMs: 1 });
+
+  assert.equal(kind, undefined);
+  assert.equal(session.shellKind, undefined);
+  assert.equal(session._shellKindProbePromise, null);
+  assert.equal(probes, 1);
 });
 
 test("createSshConnExecProbe returns stdout from conn.exec", async () => {
@@ -185,6 +227,29 @@ test("createSshConnExecProbe returns stdout from conn.exec", async () => {
   const command = buildRemoteLoginShellProbeCommand();
   assert.equal(await probe(command, 1000), "/usr/bin/fish\n");
   assert.equal(seenCommand, command);
+});
+
+test("createSshConnExecProbe closes a channel that arrives after timeout", async () => {
+  let execCallback;
+  let closed = false;
+  const conn = {
+    exec(_command, cb) {
+      execCallback = cb;
+    },
+  };
+  const probe = createSshConnExecProbe(conn);
+  const result = await probe(buildRemoteLoginShellProbeCommand(), 1);
+  assert.equal(result, null);
+
+  const stream = {
+    on() { return stream; },
+    stderr: { on() { return this; } },
+    close() {
+      closed = true;
+    },
+  };
+  execCallback(null, stream);
+  assert.equal(closed, true);
 });
 
 test("createSessionExecProbe prefers session.conn over companions", () => {
@@ -265,7 +330,7 @@ test(
   async () => {
     const session = { protocol: "ssh" };
     await ensureSessionShellKind(session, {
-      execProbe: async () => "/usr/bin/fish\n",
+      execProbe: async () => `${PROBE_OUTPUT_MARKER}/usr/bin/fish\n`,
     });
     assert.equal(session.shellKind, "fish");
 

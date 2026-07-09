@@ -5,6 +5,7 @@ const { EventEmitter } = require("node:events");
 const test = require("node:test");
 
 const { registerWorkerAiExecHandlers } = require("./aiExec.cjs");
+const { PROBE_OUTPUT_MARKER } = require("../bridges/ai/sessionShellKind.cjs");
 
 class FakePty extends EventEmitter {
   constructor() {
@@ -54,6 +55,46 @@ function extractMarker(writes) {
 
 function nextTick() {
   return new Promise((resolve) => setImmediate(resolve));
+}
+
+function createShellProbeConn(stdout = `${PROBE_OUTPUT_MARKER}/usr/bin/fish\n`) {
+  const conn = {
+    exec(_command, callback) {
+      const stream = new EventEmitter();
+      stream.stderr = new EventEmitter();
+      stream.close = () => stream.emit("close");
+      queueMicrotask(() => {
+        callback(null, stream);
+        queueMicrotask(() => {
+          stream.emit("data", Buffer.from(stdout));
+          stream.emit("close");
+        });
+      });
+    },
+  };
+  return conn;
+}
+
+function createDeferredShellProbeConn(stdout = `${PROBE_OUTPUT_MARKER}/usr/bin/fish\n`) {
+  let execCallback;
+  const conn = {
+    exec(_command, callback) {
+      execCallback = callback;
+    },
+  };
+  return {
+    conn,
+    release() {
+      const stream = new EventEmitter();
+      stream.stderr = new EventEmitter();
+      stream.close = () => stream.emit("close");
+      execCallback(null, stream);
+      queueMicrotask(() => {
+        stream.emit("data", Buffer.from(stdout));
+        stream.emit("close");
+      });
+    },
+  };
 }
 
 test("worker AI background jobs start, poll, stop, and block overlapping exec", async () => {
@@ -187,4 +228,75 @@ test("worker chat cancellation stops matching background jobs", async () => {
   });
   assert.equal(cancelled.status, "cancelled");
   assert.equal(cancelled.completed, true);
+});
+
+test("worker background job probes unset remote shellKind before wrapping", async () => {
+  const pty = new FakePty();
+  const sessions = new Map([
+    ["ssh-fish", {
+      protocol: "ssh",
+      stream: pty,
+      conn: createShellProbeConn(),
+    }],
+  ]);
+  const ipcMain = createFakeIpcMain();
+  registerWorkerAiExecHandlers(ipcMain, { sessions });
+
+  const event = createFakeEvent();
+  const started = await ipcMain.handlers.get("netcatty:ai:jobStart")(event, {
+    sessionId: "ssh-fish",
+    command: "echo fish",
+    chatSessionId: "chat-1",
+    commandTimeoutMs: 5000,
+  });
+
+  assert.equal(started.ok, true);
+  assert.equal(sessions.get("ssh-fish").shellKind, "fish");
+  const wrapper = pty.writes.find((entry) => entry.includes("__NCMCP_"));
+  assert.match(wrapper, /set -l __NCMCP_.*_cmd/);
+  assert.doesNotMatch(wrapper, /__NCMCP_.*_cmd=/);
+
+  const marker = extractMarker(pty.writes);
+  pty.emit("data", `${marker}_S\r\n${marker}_E:0\r\n`);
+  await nextTick();
+});
+
+test("worker background job reserves the session while shellKind probe is pending", async () => {
+  const pty = new FakePty();
+  const deferred = createDeferredShellProbeConn();
+  const sessions = new Map([
+    ["ssh-fish", {
+      protocol: "ssh",
+      stream: pty,
+      conn: deferred.conn,
+    }],
+  ]);
+  const ipcMain = createFakeIpcMain();
+  registerWorkerAiExecHandlers(ipcMain, { sessions });
+
+  const event = createFakeEvent();
+  const firstStart = ipcMain.handlers.get("netcatty:ai:jobStart")(event, {
+    sessionId: "ssh-fish",
+    command: "sleep 1",
+    chatSessionId: "chat-1",
+    commandTimeoutMs: 5000,
+  });
+  await nextTick();
+
+  const second = await ipcMain.handlers.get("netcatty:ai:jobStart")(event, {
+    sessionId: "ssh-fish",
+    command: "pwd",
+    chatSessionId: "chat-1",
+    commandTimeoutMs: 5000,
+  });
+  assert.equal(second.ok, false);
+  assert.match(second.error, /already has a long-running command in progress/);
+
+  deferred.release();
+  const first = await firstStart;
+  assert.equal(first.ok, true);
+
+  const marker = extractMarker(pty.writes);
+  pty.emit("data", `${marker}_S\r\n${marker}_E:0\r\n`);
+  await nextTick();
 });
