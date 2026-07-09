@@ -42,6 +42,12 @@ OPENSSL_VER=3.0.13
 PROTOBUF_VER=21.12
 NCURSES_VER=6.4
 
+curl_retry() {
+  local url="$1"
+  local dest="$2"
+  curl -fsSL --retry 8 --retry-delay 5 --retry-max-time 600 "$url" -o "$dest"
+}
+
 # Install build tools when they are not already present on the runner.
 brew list autoconf >/dev/null 2>&1 || brew install autoconf
 brew list automake >/dev/null 2>&1 || brew install automake
@@ -55,9 +61,9 @@ NATIVE_PROTOC_DIR=""
 
 # Pre-fetch sources once.
 cd "$WORK"
-curl -fsSL "https://www.openssl.org/source/openssl-$OPENSSL_VER.tar.gz" -o openssl.tgz
-curl -fsSL "https://github.com/protocolbuffers/protobuf/releases/download/v$PROTOBUF_VER/protobuf-cpp-3.$PROTOBUF_VER.tar.gz" -o protobuf.tgz
-curl -fsSL "https://invisible-island.net/archives/ncurses/ncurses-$NCURSES_VER.tar.gz" -o ncurses.tgz
+curl_retry "https://www.openssl.org/source/openssl-$OPENSSL_VER.tar.gz" openssl.tgz
+curl_retry "https://github.com/protocolbuffers/protobuf/releases/download/v$PROTOBUF_VER/protobuf-cpp-3.$PROTOBUF_VER.tar.gz" protobuf.tgz
+curl_retry "https://invisible-island.net/archives/ncurses/ncurses-$NCURSES_VER.tar.gz" ncurses.tgz
 git init mosh-src
 git -C mosh-src remote add origin https://github.com/mobile-shell/mosh.git
 git -C mosh-src fetch --depth 1 origin "$MOSH_REF"

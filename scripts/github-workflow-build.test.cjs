@@ -7,6 +7,10 @@ const buildWorkflow = fs.readFileSync(
   path.join(__dirname, "..", ".github", "workflows", "build.yml"),
   "utf8",
 );
+const moshLinuxScript = fs.readFileSync(path.join(__dirname, "build-mosh", "build-linux.sh"), "utf8");
+const moshMacScript = fs.readFileSync(path.join(__dirname, "build-mosh", "build-macos.sh"), "utf8");
+const etLinuxScript = fs.readFileSync(path.join(__dirname, "build-et", "build-linux.sh"), "utf8");
+const etMacScript = fs.readFileSync(path.join(__dirname, "build-et", "build-macos.sh"), "utf8");
 
 test("build workflow no longer installs removed legacy agent binaries", () => {
   for (const stale of [
@@ -128,4 +132,27 @@ test("build workflow builds Linux x64 native modules in a glibc 2.28 container",
     false,
     "Linux x64 job must not rely on actions/setup-python inside the glibc container",
   );
+});
+
+test("mosh binary build scripts retry source downloads before failing CI", () => {
+  for (const [name, script] of [
+    ["linux", moshLinuxScript],
+    ["macos", moshMacScript],
+  ]) {
+    assert.match(script, /curl_retry\(\)/, `${name} mosh build must use retrying downloads`);
+    assert.match(script, /--retry 8/, `${name} mosh build must retry transient HTTP failures`);
+    assert.match(script, /--retry-max-time 600/, `${name} mosh build must bound retry time`);
+  }
+});
+
+test("et binary build scripts retry dependency configure and pin ninja", () => {
+  for (const [name, script] of [
+    ["linux", etLinuxScript],
+    ["macos", etMacScript],
+  ]) {
+    assert.match(script, /retry_command\(\)/, `${name} et build must retry transient dependency failures`);
+    assert.match(script, /retry_command cmake -S/, `${name} et build must retry CMake configure`);
+    assert.match(script, /NINJA_BIN=\$\(command -v ninja\)/, `${name} et build must resolve ninja before configure`);
+    assert.match(script, /-DCMAKE_MAKE_PROGRAM="\$NINJA_BIN"/, `${name} et build must pass the resolved ninja path`);
+  }
 });

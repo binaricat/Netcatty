@@ -44,6 +44,12 @@ OPENSSL_VER=3.0.13
 PROTOBUF_VER=21.12
 NCURSES_VER=6.4
 
+curl_retry() {
+  local url="$1"
+  local dest="$2"
+  curl -fsSL --retry 8 --retry-delay 5 --retry-max-time 600 "$url" -o "$dest"
+}
+
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 PREFIX="$WORK/prefix"
@@ -54,21 +60,24 @@ yum install -y -q autoconf automake libtool perl perl-IPC-Cmd make gcc gcc-c++ p
 cd "$WORK"
 
 # OpenSSL static
-curl -fsSL "https://www.openssl.org/source/openssl-$OPENSSL_VER.tar.gz" | tar xz
+curl_retry "https://www.openssl.org/source/openssl-$OPENSSL_VER.tar.gz" openssl.tgz
+tar xzf openssl.tgz
 ( cd "openssl-$OPENSSL_VER"
   ./config no-shared no-tests --prefix="$PREFIX" --openssldir="$PREFIX/ssl"
   make -j"$(nproc)"
   make install_sw )
 
 # protobuf static (3.x stays compatible with mosh's generated proto code)
-curl -fsSL "https://github.com/protocolbuffers/protobuf/releases/download/v$PROTOBUF_VER/protobuf-cpp-3.$PROTOBUF_VER.tar.gz" | tar xz
+curl_retry "https://github.com/protocolbuffers/protobuf/releases/download/v$PROTOBUF_VER/protobuf-cpp-3.$PROTOBUF_VER.tar.gz" protobuf.tgz
+tar xzf protobuf.tgz
 ( cd "protobuf-3.$PROTOBUF_VER"
   ./configure --prefix="$PREFIX" --enable-static --disable-shared --with-pic
   make -j"$(nproc)"
   make install )
 
 # ncurses static
-curl -fsSL "https://invisible-island.net/archives/ncurses/ncurses-$NCURSES_VER.tar.gz" | tar xz
+curl_retry "https://invisible-island.net/archives/ncurses/ncurses-$NCURSES_VER.tar.gz" ncurses.tgz
+tar xzf ncurses.tgz
 ( cd "ncurses-$NCURSES_VER"
   CFLAGS="-fPIC -O2" CXXFLAGS="-fPIC -O2" \
   ./configure --prefix="$PREFIX" --without-shared --without-debug --without-cxx-shared --without-tests --disable-pc-files --enable-widec

@@ -33,6 +33,23 @@ validate_et_ref
 command -v ninja >/dev/null 2>&1 || brew install ninja
 command -v cmake >/dev/null 2>&1 || brew install cmake
 command -v autoconf >/dev/null 2>&1 || brew install automake autoconf libtool
+NINJA_BIN=$(command -v ninja)
+
+retry_command() {
+  local attempt=1
+  local max_attempts=4
+  local delay=15
+  until "$@"; do
+    local status=$?
+    if [ "$attempt" -ge "$max_attempts" ]; then
+      return "$status"
+    fi
+    echo "WARN: command failed with exit $status; retrying in ${delay}s (attempt $((attempt + 1))/$max_attempts): $*" >&2
+    sleep "$delay"
+    attempt=$((attempt + 1))
+    delay=$((delay * 2))
+  done
+}
 
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
@@ -72,9 +89,10 @@ build_arch() {
   local arch="$1"       # arm64 | x86_64
   local triplet="$2"    # arm64-osx | x64-osx
   local build_dir="$WORK/build-$arch"
-  echo "=== building et for $arch ($triplet) ==="
-  cmake -S "$WORK/et" -B "$build_dir" \
+  echo "=== building et for $arch ($triplet) ===" >&2
+  retry_command cmake -S "$WORK/et" -B "$build_dir" \
     -GNinja \
+    -DCMAKE_MAKE_PROGRAM="$NINJA_BIN" \
     -DCMAKE_BUILD_TYPE=RelWithDebInfo \
     -DDISABLE_TELEMETRY=ON \
     -DCMAKE_OSX_ARCHITECTURES="$arch" \

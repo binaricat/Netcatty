@@ -65,6 +65,23 @@ python3 -m pip install --quiet --upgrade pip
 # cleanly under cmake 4.x. ninja is unconstrained.
 python3 -m pip install --quiet "cmake>=3.25,<4" ninja
 export PATH="$(python3 -c 'import sysconfig,os;print(os.path.join(sysconfig.get_path("scripts")))'):$PATH"
+NINJA_BIN=$(command -v ninja)
+
+retry_command() {
+  local attempt=1
+  local max_attempts=4
+  local delay=15
+  until "$@"; do
+    local status=$?
+    if [ "$attempt" -ge "$max_attempts" ]; then
+      return "$status"
+    fi
+    echo "WARN: command failed with exit $status; retrying in ${delay}s (attempt $((attempt + 1))/$max_attempts): $*" >&2
+    sleep "$delay"
+    attempt=$((attempt + 1))
+    delay=$((delay * 2))
+  done
+}
 
 cd "$WORK"
 
@@ -115,8 +132,9 @@ BUILD_DIR="$WORK/et/build"
 # link line omits -lanl, so linking `et` fails with "undefined reference to
 # getaddrinfo_a". STANDARD_LIBRARIES is appended after all other libraries —
 # exactly where the linker needs it to resolve those symbols.
-cmake -S "$WORK/et" -B "$BUILD_DIR" \
+retry_command cmake -S "$WORK/et" -B "$BUILD_DIR" \
   -GNinja \
+  -DCMAKE_MAKE_PROGRAM="$NINJA_BIN" \
   -DCMAKE_BUILD_TYPE=RelWithDebInfo \
   -DDISABLE_TELEMETRY=ON \
   -DCMAKE_CXX_STANDARD_LIBRARIES=-lanl
