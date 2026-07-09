@@ -419,7 +419,7 @@ jobs:
             gcc-toolset-13-gcc gcc-toolset-13-gcc-c++ make \
             python3.11 python3.11-pip \
             git file rpm-build binutils cpio elfutils \
-            libarchive xz tar which findutils \
+            libarchive gzip bzip2 xz zstd tar which findutils \
             dpkg fakeroot \
             fuse fuse-libs gtk3 nss libXScrnSaver libXtst alsa-lib \
             at-spi2-atk libdrm mesa-libgbm libX11 libX11-xcb libxcb \
@@ -433,10 +433,16 @@ jobs:
           export PATH="${GCC_TOOLSET_ROOT}/usr/bin:${PATH}"
           gcc --version
           g++ --version
+          # Some fpm/rpmbuild paths still look for xzmt even when payload
+          # compression is gzip; provide a multi-thread xz shim.
+          printf '%s\n' '#!/bin/sh' 'exec xz -T0 "$@"' > /usr/local/bin/xzmt
+          chmod +x /usr/local/bin/xzmt
           # rpmbuild helpers used by fpm; fail early if packaging tools are missing.
           command -v rpmbuild
           command -v strip
+          command -v gzip
           command -v xz
+          command -v xzmt
           # Official Node 22 linux-x64 tarball (same major as other package jobs).
           NODE_VERSION="$(curl -fsSL https://nodejs.org/dist/latest-v22.x/SHASUMS256.txt \
             | awk '/node-v[0-9.]+-linux-x64\.tar\.xz$/{print $2; exit}' \
@@ -496,7 +502,16 @@ jobs:
         env:
           npm_config_arch: x64
           ELECTRON_BUILDER_PUBLISH: "never"
-        run: npm run pack:linux-x64
+          # Natives are already rebuilt. Prefer system packaging tools so
+          # rpmbuild brp scripts do not pick up a toolset-only binary.
+          PATH: /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+        run: |
+          set -euo pipefail
+          command -v node
+          command -v rpmbuild
+          command -v gzip
+          command -v xzmt
+          npm run pack:linux-x64
 
       - name: Verify packaged node-pty Linux runtime
         run: bash scripts/ensure-node-pty-linux.sh verify x64

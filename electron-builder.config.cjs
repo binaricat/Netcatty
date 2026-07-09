@@ -256,9 +256,15 @@ module.exports = {
         // rpmbuild fails with exit 127 during packaging. gzip is portable and
         // matches our deb preference for older distros.
         compression: 'gzip',
-        // Avoid rpm's generated /usr/lib/.build-id symlinks. Those hashes are
-        // global on the host, so owning them can conflict with other RPMs.
-        fpm: ['--rpm-rpmbuild-define', '_build_id_links none']
+        fpm: [
+            // Avoid rpm's generated /usr/lib/.build-id symlinks. Those hashes
+            // are global on the host, so owning them can conflict with other RPMs.
+            '--rpm-rpmbuild-define', '_build_id_links none',
+            // Electron ships prebuilt binaries. RHEL/Alma brp post-install
+            // scripts (strip/compress/etc.) can exit 127 when a helper is
+            // missing or a gcc-toolset `strip` is on PATH; skip them.
+            '--rpm-rpmbuild-define', '__os_install_post %{nil}',
+        ]
     },
     pacman: {
         // FPM-generated .pacman packages bypass Arch's alpm hooks that

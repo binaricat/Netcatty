@@ -173,8 +173,13 @@ test("linux packaging includes an Arch Linux pacman package target", () => {
 test("rpm packaging disables generated build-id symlinks", () => {
   assert.deepEqual(
     config.rpm?.fpm,
-    ["--rpm-rpmbuild-define", "_build_id_links none"],
-    "RPM packages must not own /usr/lib/.build-id links that can conflict with other RPMs",
+    [
+      "--rpm-rpmbuild-define",
+      "_build_id_links none",
+      "--rpm-rpmbuild-define",
+      "__os_install_post %{nil}",
+    ],
+    "RPM packages must skip build-id links and host brp post scripts on RHEL builders",
   );
 });
 
