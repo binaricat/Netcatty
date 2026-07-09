@@ -433,30 +433,33 @@ jobs:
           export PATH="${GCC_TOOLSET_ROOT}/usr/bin:${PATH}"
           gcc --version
           g++ --version
-          # Some fpm/rpmbuild paths still look for xzmt even when payload
-          # compression is gzip; provide a multi-thread xz shim.
+          # Some fpm paths still look for xzmt even when payload compression
+          # is gzip; provide a multi-thread xz shim.
           printf '%s\n' '#!/bin/sh' 'exec xz -T0 "$@"' > /usr/local/bin/xzmt
           chmod +x /usr/local/bin/xzmt
           # electron-builder's portable fpm injects its own LD_LIBRARY_PATH.
-          # Spawning system rpmbuild under that path can make the dynamic
-          # linker fail immediately (exit 127). Prefer a clean-env wrapper.
+          # System tools (rpmbuild, bsdtar, ...) then exit 127 under that path.
+          # Wrap every packaging helper so child processes see a clean env.
           # Use printf (not a bare heredoc): unindented heredoc body breaks GHA YAML.
-          if [[ -x /usr/bin/rpmbuild && ! -e /usr/local/bin/rpmbuild ]]; then
-            printf '%s\n' \
-              '#!/bin/bash' \
-              'unset LD_LIBRARY_PATH' \
-              'exec /usr/bin/rpmbuild "$@"' \
-              > /usr/local/bin/rpmbuild
-            chmod +x /usr/local/bin/rpmbuild
-          fi
-          # rpmbuild helpers used by fpm; fail early if packaging tools are missing.
+          for cmd in rpmbuild bsdtar bsdcpio tar gzip xz strip; do
+            if [[ -x "/usr/bin/${cmd}" ]]; then
+              printf '%s\n' \
+                '#!/bin/bash' \
+                'unset LD_LIBRARY_PATH' \
+                "exec /usr/bin/${cmd} \"\$@\"" \
+                > "/usr/local/bin/${cmd}"
+              chmod +x "/usr/local/bin/${cmd}"
+            fi
+          done
+          # rpm/pacman helpers used by fpm; fail early if packaging tools are missing.
           command -v rpmbuild
+          command -v bsdtar
           command -v strip
           command -v gzip
           command -v xz
           command -v xzmt
-          # Smoke-test: system rpmbuild must actually start under a clean env.
           rpmbuild --version
+          bsdtar --version | head -n 1
           # Official Node 22 linux-x64 tarball (same major as other package jobs).
           NODE_VERSION="$(curl -fsSL https://nodejs.org/dist/latest-v22.x/SHASUMS256.txt \
             | awk '/node-v[0-9.]+-linux-x64\.tar\.xz$/{print $2; exit}' \
@@ -524,12 +527,14 @@ jobs:
           set -euo pipefail
           command -v node
           command -v rpmbuild
+          command -v bsdtar
           command -v gzip
           command -v xzmt
-          # Confirm the wrapper is the one on PATH (portable fpm LD_LIBRARY_PATH issue).
-          if ! head -n 2 "$(command -v rpmbuild)" | grep -q 'unset LD_LIBRARY_PATH'; then
-            echo "::warning::rpmbuild on PATH is not the clean-env wrapper; rpm packaging may fail with exit 127"
-          fi
+          for cmd in rpmbuild bsdtar; do
+            if ! head -n 2 "$(command -v "${cmd}")" | grep -q 'unset LD_LIBRARY_PATH'; then
+              echo "::warning::${cmd} on PATH is not the clean-env wrapper; packaging may fail with exit 127"
+            fi
+          done
           npm run pack:linux-x64
 
       - name: Verify packaged node-pty Linux runtime
