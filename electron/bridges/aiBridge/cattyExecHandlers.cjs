@@ -173,6 +173,7 @@ function registerCattyExecHandlers(ctx) {
             trackForCancellation: mcpServerBridge.activePtyExecs,
             timeoutMs,
             shellKind: session.shellKind,
+            loginShellHint: session._loginShellKind,
             chatSessionId,
             expectedPrompt: getFreshIdlePrompt(session),
             typedInput: true,

@@ -101,17 +101,18 @@ function isPowerShellPrompt(prompt) {
 // `PS ...>` line on a real bash/zsh/fish/cmd session to coerce a single
 // mis-wrapped command.
 //
-// Remote Unix sessions leave shellKind unset after login-shell probing
-// (sessionShellKind.cjs). The default is then `posix_sh`: a `sh -c '...'`
-// outer form that both fish and bash interactive shells can parse, so we
-// do not need to permanently pin login shell = fish (issue #1854 + Codex
-// "don't pin login shell as active shell" on PR #2061).
+// Remote login-shell probing stores a *soft* hint (`loginShellHint` /
+// session._loginShellKind) without pinning session.shellKind for fish/posix:
+//   - hint "fish"  → fish wrapper (issue #1854) without permanent pin
+//   - hint "posix" → native posix wrapper evaluated by interactive bash/zsh
+//                    (NOT sh -c / dash — Codex P2 on #2061)
+//   - live PS ...> still overrides when base kind is open
 //
 // Universe of shellKind values (see lib/localShell.cjs:23-33 and
 // terminalBridge.cjs:368, :932, :1074):
-//   "posix" | "posix_sh" | "powershell" | "cmd" | "fish" | "unknown" | "raw" | "" | undefined
-// Excluded on purpose:
-//   - "posix" / "posix_sh" / "fish" / "cmd": confirmed kinds — never override.
+//   "posix" | "powershell" | "cmd" | "fish" | "unknown" | "raw" | "" | undefined
+// Excluded on purpose from prompt override:
+//   - "posix" / "fish" / "cmd": confirmed — never override.
 //   - "powershell": already correct; no override needed (would be a no-op).
 //   - "raw": serial / network device — execViaRawPty bypasses buildWrappedCommand.
 const SHELL_KINDS_OPEN_TO_PROMPT_OVERRIDE = new Set([
@@ -119,7 +120,9 @@ const SHELL_KINDS_OPEN_TO_PROMPT_OVERRIDE = new Set([
   "unknown",
 ]);
 
-function resolveEffectiveShellKind(shellKind, expectedPrompt) {
+const LOGIN_SHELL_HINTS = new Set(["posix", "fish", "powershell", "cmd"]);
+
+function resolveEffectiveShellKind(shellKind, expectedPrompt, options = {}) {
   const baseKind = shellKind || "";
   if (
     SHELL_KINDS_OPEN_TO_PROMPT_OVERRIDE.has(baseKind) &&
@@ -127,9 +130,13 @@ function resolveEffectiveShellKind(shellKind, expectedPrompt) {
   ) {
     return "powershell";
   }
-  // Unset remote/local-unknown → dual-compatible wrapper (fish + bash).
-  // Confirmed local shells set shellKind at spawn and never hit this.
-  return baseKind || "posix_sh";
+  if (baseKind) return baseKind;
+
+  // Soft login-shell hint from remote probe (not a permanent pin).
+  const hint = options.loginShellHint || "";
+  if (LOGIN_SHELL_HINTS.has(hint)) return hint;
+
+  return "posix";
 }
 
 function buildPosixWrapperBody(command, marker) {
@@ -172,17 +179,6 @@ function buildWrappedCommand(command, shellKind, marker) {
         `printf '%s\\n' '${marker}_S'; eval \$${marker}_cmd; set __NCMCP_rc $status; ` +
         `functions -e __ncmcp_int; printf '%s\\n' '${marker}_E:'\$__NCMCP_rc; end\n`
       );
-
-    case "posix_sh": {
-      // Dual-compatible outer form: both fish and bash interactive shells can
-      // parse `sh -c '...'`. The inner body is the normal POSIX wrapper, so
-      // fish never has to parse `VAR=0` assignment syntax (issue #1854) and we
-      // do not permanently assume login shell === active shell (Codex P2).
-      // Leading space: history ignorespace (see posix branch). The typed line
-      // still contains __NCMCP_ for preload echo filtering.
-      const body = buildPosixWrapperBody(command, marker);
-      return ` sh -c '${escapePosixSingleQuoted(body)}'\n`;
-    }
 
     case "posix":
     default: {

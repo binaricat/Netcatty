@@ -276,6 +276,7 @@ function createWorkerAiExecHandler({
         trackForCancellation: activePtyExecs,
         timeoutMs,
         shellKind: session.shellKind,
+        loginShellHint: session._loginShellKind,
         chatSessionId,
         expectedPrompt: getFreshIdlePrompt(session),
         typedInput: true,
@@ -442,6 +443,7 @@ function createWorkerAiJobStartHandler({
       handle = startPtyJob(ptyStream, command, {
         timeoutMs,
         shellKind: session.shellKind,
+        loginShellHint: session._loginShellKind,
         chatSessionId,
         expectedPrompt: getFreshIdlePrompt(session),
         typedInput: true,

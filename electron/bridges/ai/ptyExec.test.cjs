@@ -103,29 +103,42 @@ test("treats a CR-redrawn last line as the effective prompt, not the doubled str
 });
 
 test("rejects spoofed `PS >` (literal space then `>`) — default PowerShell never emits this", () => {
-  assert.equal(resolveEffectiveShellKind(undefined, "PS >"), "posix_sh");
+  assert.equal(resolveEffectiveShellKind(undefined, "PS >"), "posix");
 });
 
-test("falls back to posix_sh when neither shell kind nor prompt is informative", () => {
-  // Dual-compatible default for unset remote shellKind (fish + bash).
-  assert.equal(resolveEffectiveShellKind(undefined, ""), "posix_sh");
-  assert.equal(resolveEffectiveShellKind(null, undefined), "posix_sh");
+test("falls back to posix when neither shell kind nor prompt is informative", () => {
+  assert.equal(resolveEffectiveShellKind(undefined, ""), "posix");
+  assert.equal(resolveEffectiveShellKind(null, undefined), "posix");
 });
 
 test("does not misclassify command output that happens to contain 'PS'", () => {
-  assert.equal(resolveEffectiveShellKind(undefined, "PSO>"), "posix_sh");
-  assert.equal(resolveEffectiveShellKind(undefined, "ZIPS>"), "posix_sh");
+  assert.equal(resolveEffectiveShellKind(undefined, "PSO>"), "posix");
+  assert.equal(resolveEffectiveShellKind(undefined, "ZIPS>"), "posix");
 });
 
-test("posix_sh wrapper is fish-parseable and emits markers under real sh", () => {
-  const marker = "__NCMCP_TEST__";
-  const wrapped = buildWrappedCommand("echo dual-ok", "posix_sh", marker);
-  assert.match(wrapped, /^ sh -c '/);
-  assert.match(wrapped, new RegExp(marker));
-  const result = spawnSync("sh", ["-c", wrapped.trim()], { encoding: "utf8" });
-  assert.equal(result.error, undefined);
-  assert.match(result.stdout, /dual-ok/);
-  assert.match(result.stdout, new RegExp(`${marker}_E:0`));
+test("loginShellHint selects fish/posix without pinning confirmed shellKind", () => {
+  assert.equal(
+    resolveEffectiveShellKind(undefined, "user@host:~$", { loginShellHint: "fish" }),
+    "fish",
+  );
+  assert.equal(
+    resolveEffectiveShellKind(undefined, "user@host:~$", { loginShellHint: "posix" }),
+    "posix",
+  );
+  // Live PowerShell prompt still wins over a posix/fish login hint.
+  assert.equal(
+    resolveEffectiveShellKind(undefined, "PS C:\\Users\\alice>", { loginShellHint: "posix" }),
+    "powershell",
+  );
+  assert.equal(
+    resolveEffectiveShellKind(undefined, "PS C:\\Users\\alice>", { loginShellHint: "fish" }),
+    "powershell",
+  );
+  // Confirmed shellKind is never overridden by a login hint.
+  assert.equal(
+    resolveEffectiveShellKind("posix", "user@host:~$", { loginShellHint: "fish" }),
+    "posix",
+  );
 });
 
 test("cmd wrapper uses interactive cmd variable expansion", () => {

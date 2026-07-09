@@ -98,9 +98,8 @@ test("ensureSessionShellKind does not probe local unknown shells", async () => {
 });
 
 test("ensureSessionShellKind probes fish once but does not pin it as active shell", async () => {
-  // Login shell = fish must not permanently set session.shellKind: the user
-  // may have switched to bash/pwsh in the interactive PTY (Codex P2).
-  // Unset → posix_sh dual wrapper still works when the interactive shell is fish.
+  // Login shell = fish must not permanently set session.shellKind (Codex P2).
+  // Soft hint still selects the fish wrapper for the common fish-login case.
   let probes = 0;
   const session = { protocol: "ssh" };
   const probe = async () => {
@@ -117,7 +116,10 @@ test("ensureSessionShellKind probes fish once but does not pin it as active shel
   assert.equal(session._loginShellKind, "fish");
   assert.equal(session._shellKindProbeSettled, true);
   assert.equal(probes, 1);
-  assert.equal(resolveEffectiveShellKind(session.shellKind, ""), "posix_sh");
+  assert.equal(
+    resolveEffectiveShellKind(session.shellKind, "", { loginShellHint: session._loginShellKind }),
+    "fish",
+  );
 });
 
 test("ensureSessionShellKind shares one in-flight probe across concurrent callers", async () => {
@@ -167,28 +169,40 @@ test("probed posix login shell does not block live PowerShell prompt override (C
 
   // Live PowerShell prompt still wins when shellKind is unset.
   assert.equal(
-    resolveEffectiveShellKind(session.shellKind, "PS C:\\Users\\alice>"),
+    resolveEffectiveShellKind(session.shellKind, "PS C:\\Users\\alice>", {
+      loginShellHint: session._loginShellKind,
+    }),
     "powershell",
   );
-  // Normal bash-style prompt → dual-compatible posix_sh (not native posix).
+  // Soft posix hint → native posix wrapper (evaluated by interactive bash/zsh,
+  // NOT routed through /bin/sh / dash).
   assert.equal(
-    resolveEffectiveShellKind(session.shellKind, "alice@host:~$"),
-    "posix_sh",
+    resolveEffectiveShellKind(session.shellKind, "alice@host:~$", {
+      loginShellHint: session._loginShellKind,
+    }),
+    "posix",
   );
 });
 
-test("probed fish login shell does not pin fish when interactive shell may differ (Codex P2)", async () => {
+test("probed fish login shell is a soft hint, not a permanent pin (Codex P2)", async () => {
   const session = { protocol: "ssh" };
   await ensureSessionShellKind(session, {
     execProbe: async () => `${PROBE_OUTPUT_MARKER}/usr/bin/fish\n`,
   });
   assert.equal(session.shellKind, undefined);
   assert.equal(session._loginShellKind, "fish");
-  // Unset + non-PS prompt → posix_sh, not fish-native wrapper.
-  assert.equal(resolveEffectiveShellKind(session.shellKind, "root@host ~# "), "posix_sh");
-  // And PS prompt still overrides to powershell.
+  // Soft hint selects fish wrapper for the common case.
   assert.equal(
-    resolveEffectiveShellKind(session.shellKind, "PS C:\\Users\\alice>"),
+    resolveEffectiveShellKind(session.shellKind, "root@host ~# ", {
+      loginShellHint: session._loginShellKind,
+    }),
+    "fish",
+  );
+  // PS prompt still overrides the fish login hint.
+  assert.equal(
+    resolveEffectiveShellKind(session.shellKind, "PS C:\\Users\\alice>", {
+      loginShellHint: session._loginShellKind,
+    }),
     "powershell",
   );
 });
@@ -451,10 +465,10 @@ test(
 );
 
 test(
-  "after ensureSessionShellKind(fish login), posix_sh wrapper succeeds under real fish",
+  "after ensureSessionShellKind(fish login), fish wrapper succeeds under real fish",
   { skip: !fishBinary ? "fish binary not available" : false },
   async () => {
-    // Remote fish login is not pinned; default posix_sh must still run in fish.
+    // Soft login hint selects fish wrapper without pinning session.shellKind.
     const session = { protocol: "ssh" };
     await ensureSessionShellKind(session, {
       execProbe: async () => `${PROBE_OUTPUT_MARKER}/usr/bin/fish\n`,
@@ -463,10 +477,11 @@ test(
     assert.equal(session._loginShellKind, "fish");
 
     const marker = "__NCMCP_FISHTEST__";
-    const effective = resolveEffectiveShellKind(session.shellKind, "root at host # ");
-    assert.equal(effective, "posix_sh");
+    const effective = resolveEffectiveShellKind(session.shellKind, "root at host # ", {
+      loginShellHint: session._loginShellKind,
+    });
+    assert.equal(effective, "fish");
     const wrapped = buildWrappedCommand("printf 'ok\\n'", effective, marker);
-    assert.match(wrapped, /^ sh -c '/);
     const result = spawnSync(
       fishBinary,
       ["--no-config", "-c", wrapped.trim()],

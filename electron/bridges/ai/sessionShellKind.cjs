@@ -9,9 +9,10 @@
  * Before AI exec we probe the remote login shell once via a separate SSH exec
  * channel (silent — does not touch the interactive PTY). Only Windows login
  * shells (powershell/cmd) are pinned on session.shellKind. Unix login shells
- * (fish/posix) only settle the probe: the default typed wrapper is dual-
- * compatible `posix_sh` so fish login works without assuming login shell ===
- * active interactive shell.
+ * (fish/posix) are stored as session._loginShellKind (soft hint) so
+ * resolveEffectiveShellKind can pick fish vs native posix wrappers without
+ * permanently assuming login shell === active interactive shell, and without
+ * routing bash sessions through /bin/sh (dash).
  */
 "use strict";
 
@@ -182,13 +183,12 @@ function withProbeTimeout(promise, timeoutMs) {
 /**
  * Apply a successful remote probe result onto the session.
  *
- * Login-shell probe is NOT treated as the active interactive shell:
- * - posix / fish: never pin session.shellKind. Unset shellKind defaults to the
- *   dual-compatible `posix_sh` wrapper (parseable by both bash and fish), and
- *   live PowerShell prompts can still override (issue #841 / #1854; Codex P2
- *   on PR #2061: login fish but interactive bash must not get fish syntax).
- * - powershell / cmd: pin — these are not recoverable from Unix dual wrappers
- *   and match Windows remote shells where the login shell is the interactive one.
+ * Login-shell probe is a soft hint, not a permanent active-shell pin:
+ * - posix / fish: store on session._loginShellKind only. resolveEffectiveShellKind
+ *   uses the hint for the wrapper (native posix for bash/zsh, fish for fish)
+ *   while leaving session.shellKind unset so live PowerShell prompts can still
+ *   override (issue #841 / #1854; Codex P2s on PR #2061).
+ * - powershell / cmd: also pin session.shellKind (Windows remote shells).
  *
  * Always mark the probe settled so we do not re-probe every AI exec.
  */
@@ -200,7 +200,7 @@ function applyProbedShellKind(session, kind) {
     session.shellKind = kind;
     return session.shellKind;
   }
-  // fish / posix — leave shellKind unset for dual-compatible default + PS override.
+  // fish / posix — soft hint only; do not pin session.shellKind.
   return session.shellKind;
 }
 

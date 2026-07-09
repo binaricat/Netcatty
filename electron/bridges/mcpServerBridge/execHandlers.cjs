@@ -148,6 +148,7 @@ function createExecHandlerApi(ctx) {
             trackForCancellation: activePtyExecs,
             timeoutMs: commandTimeoutMs,
             shellKind: session.shellKind,
+            loginShellHint: session._loginShellKind,
             expectedPrompt: getFreshIdlePrompt(session),
             typedInput: true,
             echoCommand: (rawCommand) => echoCommandToSession(session, sessionId, rawCommand),
@@ -291,6 +292,7 @@ function createExecHandlerApi(ctx) {
             // managed via terminal_stop and the per-session execution lock.
             timeoutMs,
             shellKind: session.shellKind,
+            loginShellHint: session._loginShellKind,
             chatSessionId,
             expectedPrompt: getFreshIdlePrompt(session),
             typedInput: true,

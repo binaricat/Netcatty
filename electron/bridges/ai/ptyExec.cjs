@@ -30,6 +30,7 @@ function startPtyJob(ptyStream, command, options) {
     trackForCancellation = null,
     timeoutMs = 60000,
     shellKind,
+    loginShellHint,
     chatSessionId,
     abortSignal,
     expectedPrompt,
@@ -41,7 +42,9 @@ function startPtyJob(ptyStream, command, options) {
   } = options || {};
 
   const marker = `__NCMCP_${Date.now().toString(36)}_${crypto.randomBytes(16).toString('hex')}__`;
-  const resolvedShellKind = resolveEffectiveShellKind(shellKind, expectedPrompt);
+  const resolvedShellKind = resolveEffectiveShellKind(shellKind, expectedPrompt, {
+    loginShellHint,
+  });
   const CANCEL_RETRY_MS = 5000;
   const CANCEL_WALL_TIMEOUT_MS = 30000;
 
