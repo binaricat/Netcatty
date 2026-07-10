@@ -8,6 +8,7 @@ import {
   parseTerminalPaneRenderSnapshot,
   resolveInactiveTerminalPaneStyle,
   resolveTerminalLayerSurfaceStyle,
+  shouldMeasureTerminalLayerLayout,
   shouldUseTerminalPaneSplitLayout,
 } from "./terminalPaneVisibility";
 import type { Workspace } from "../types";
@@ -165,6 +166,29 @@ test("hidden focus workspaces keep the focused pane full-size and other panes sp
     isVisible: false,
     hibernateHiddenTabs: true,
   }), false);
+});
+
+test("hidden terminal layers measure once only when hibernation is disabled", () => {
+  assert.equal(shouldMeasureTerminalLayerLayout({
+    isTerminalLayerVisible: false,
+    hibernateHiddenTabs: false,
+    workspaceArea: { width: 0, height: 0 },
+  }), true);
+  assert.equal(shouldMeasureTerminalLayerLayout({
+    isTerminalLayerVisible: false,
+    hibernateHiddenTabs: false,
+    workspaceArea: { width: 1200, height: 800 },
+  }), false);
+  assert.equal(shouldMeasureTerminalLayerLayout({
+    isTerminalLayerVisible: false,
+    hibernateHiddenTabs: true,
+    workspaceArea: { width: 0, height: 0 },
+  }), false);
+  assert.equal(shouldMeasureTerminalLayerLayout({
+    isTerminalLayerVisible: true,
+    hibernateHiddenTabs: true,
+    workspaceArea: { width: 0, height: 0 },
+  }), true);
 });
 
 test("inactive terminal pane keeps rendering when hibernate is disabled", () => {

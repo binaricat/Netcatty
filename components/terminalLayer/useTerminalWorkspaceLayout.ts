@@ -354,6 +354,7 @@ export function useTerminalWorkspaceLayout({
     setDropHint,
     setResizing,
     setWorkspaceArea,
+    workspaceArea,
     workspaceInnerRef,
     workspaceOuterRef,
     workspaceOverlayRef,

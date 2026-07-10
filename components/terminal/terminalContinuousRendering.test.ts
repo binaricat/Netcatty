@@ -49,7 +49,11 @@ test("background split workspaces keep their live geometry without hibernate", (
   );
   assert.match(
     layerEffectsSource,
-    /if \(!isTerminalLayerVisible\) return;[\s\S]*?remeasureWorkspaceArea\(\)/,
+    /if \(!shouldMeasureTerminalLayerLayout\) return;[\s\S]*?remeasureWorkspaceArea\(\)/,
+  );
+  assert.match(
+    tabBridgeSource,
+    /shouldMeasureTerminalLayerLayout: shouldMeasureTerminalLayerLayout\(\{[\s\S]*hibernateHiddenTabs,[\s\S]*workspaceArea/,
   );
   assert.doesNotMatch(tabBridgeSource, /isTerminalLayerRendererActive/);
 });

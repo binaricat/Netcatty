@@ -44,6 +44,19 @@ export function shouldUseTerminalPaneSplitLayout({
     && workspace.focusedSessionId !== sessionId;
 }
 
+export function shouldMeasureTerminalLayerLayout({
+  isTerminalLayerVisible,
+  hibernateHiddenTabs,
+  workspaceArea,
+}: {
+  isTerminalLayerVisible: boolean;
+  hibernateHiddenTabs: boolean;
+  workspaceArea: TerminalPaneHiddenSize;
+}): boolean {
+  return isTerminalLayerVisible
+    || (!hibernateHiddenTabs && (workspaceArea.width <= 0 || workspaceArea.height <= 0));
+}
+
 export function resolveInactiveTerminalPaneStyle<T extends TerminalPaneStyle>(
   layoutStyle: T,
   lastVisibleSize: TerminalPaneHiddenSize | null,
