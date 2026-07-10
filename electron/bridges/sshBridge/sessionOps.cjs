@@ -710,8 +710,9 @@ function createSessionOpsApi(ctx) {
         typeof execOnEtSession === "function" &&
         !!session.sshUserHost &&
         !session.externalAuthArtifactsCleaned;
-      const conn = session.conn || session.moshStatsConn || session.etStatsConn ||
-        (canExecEtStats ? createEtStatsExecConn(session) : null);
+      const sshStatsConn = session.conn || session.moshStatsConn || session.etStatsConn;
+      const usesEtStatsFallback = !sshStatsConn && canExecEtStats;
+      const conn = sshStatsConn || (usesEtStatsFallback ? createEtStatsExecConn(session) : null);
       if (!conn) {
         // A Mosh session can be marked "connected" (and start polling) from
         // the SSH bootstrap's visible output before swapToMoshClient stores
@@ -797,12 +798,16 @@ function createSessionOpsApi(ctx) {
     
       // Auto-detect OS via uname — only Linux and macOS are supported
       const latencyMarker = "NC_LATENCY_MARK";
-      const statsCommand = `printf "${latencyMarker}|"; ostype=$(uname -s 2>/dev/null || echo "Unknown"); if [ "$ostype" = "Darwin" ]; then ${macosStatsCommand}; elif [ "$ostype" = "Linux" ]; then ${linuxStatsCommand}; else echo "UNSUPPORTED_OS:$ostype"; fi`;
+      // On an ssh2 channel, wait for a one-byte client probe before printing
+      // the marker. Timing that data round-trip excludes channel setup and the
+      // stats command itself. The buffered system-ssh ET fallback cannot expose
+      // first-byte timing, so it reports no latency instead of a misleading one.
+      const latencyProbeCommand = usesEtStatsFallback ? '' : 'read -r nc_latency_probe; ';
+      const statsCommand = `${latencyProbeCommand}printf "${latencyMarker}|"; ostype=$(uname -s 2>/dev/null || echo "Unknown"); if [ "$ostype" = "Darwin" ]; then ${macosStatsCommand}; elif [ "$ostype" = "Linux" ]; then ${linuxStatsCommand}; else echo "UNSUPPORTED_OS:$ostype"; fi`;
       return new Promise((resolve) => {
         const timeout = setTimeout(() => {
           resolve({ success: false, error: 'Timeout getting server stats' });
         }, 10000);
-        const latencyStartedAt = Date.now();
     
         conn.exec(statsCommand, (err, stream) => {
           if (err) {
@@ -814,12 +819,17 @@ function createSessionOpsApi(ctx) {
           let stdout = '';
           let stderr = '';
           let latencyMs = null;
+          let latencyStartedAt = null;
     
           stream.on('data', (data) => {
-            if (latencyMs === null) {
+            stdout += data.toString();
+            if (
+              latencyMs === null &&
+              latencyStartedAt !== null &&
+              stdout.includes(latencyMarker)
+            ) {
               latencyMs = Math.max(0, Date.now() - latencyStartedAt);
             }
-            stdout += data.toString();
           });
     
           stream.stderr.on('data', (data) => {
@@ -1129,7 +1139,7 @@ function createSessionOpsApi(ctx) {
                 disks,         // Array of all mounted disks
                 netRxSpeed,    // Total network receive speed (bytes/sec)
                 netTxSpeed,    // Total network transmit speed (bytes/sec)
-                latencyMs,      // Stats request start through its first observable output (ms)
+                latencyMs,      // Approximate network round-trip over the SSH stats channel (ms)
                 netInterfaces, // Per-interface network stats
                 hostname,
                 osName,
@@ -1139,6 +1149,11 @@ function createSessionOpsApi(ctx) {
               },
             });
           });
+
+          if (!usesEtStatsFallback) {
+            latencyStartedAt = Date.now();
+            stream.write('\n');
+          }
         });
       });
     }

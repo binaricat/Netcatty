@@ -8,6 +8,7 @@ const { createSessionOpsApi } = require("./sessionOps.cjs");
 function fakeStream(stdout) {
   const stream = new EventEmitter();
   stream.stderr = new EventEmitter();
+  stream.write = () => true;
   setImmediate(() => {
     if (stdout) stream.emit("data", Buffer.from(stdout));
     stream.emit("close", 0);
@@ -19,8 +20,11 @@ function fakeStream(stdout) {
 // line so getServerStats parses a successful result.
 function fakeConn(stdout) {
   return {
-    exec(_command, cb) {
-      cb(null, fakeStream(stdout));
+    exec(command, cb) {
+      const output = command.includes("NC_LATENCY_MARK") && !stdout.includes("NC_LATENCY_MARK")
+        ? `NC_LATENCY_MARK|${stdout}`
+        : stdout;
+      cb(null, fakeStream(output));
     },
   };
 }
@@ -124,6 +128,50 @@ test("getServerStats does not touch the companion path for a normal SSH session"
 
   assert.equal(ensureCalls, 0);
   assert.equal(result.success, true);
+});
+
+test("getServerStats reports network round-trip without SSH stats channel setup time", async () => {
+  let now = 1_000;
+  let command = "";
+  let probeWrites = 0;
+  const stream = new EventEmitter();
+  stream.stderr = new EventEmitter();
+  stream.write = (data) => {
+    probeWrites += 1;
+    assert.equal(data, "\n");
+    now += 1;
+    stream.emit("data", Buffer.from("remote shell notice\n"));
+    now += 4;
+    stream.emit("data", Buffer.from(`NC_LATENCY_MARK|${LINUX_STATS}`));
+    stream.emit("close", 0);
+    return true;
+  };
+  const sessions = new Map([
+    ["sid", {
+      type: "ssh",
+      conn: {
+        exec(statsCommand, callback) {
+          command = statsCommand;
+          now += 75;
+          callback(null, stream);
+        },
+      },
+    }],
+  ]);
+  const api = createSessionOpsApi({
+    sessions,
+    Date: { now: () => now },
+    setTimeout,
+    clearTimeout,
+    Buffer,
+  });
+
+  const result = await api.getServerStats({ sender: {} }, { sessionId: "sid" });
+
+  assert.equal(result.success, true);
+  assert.equal(result.stats.latencyMs, 5);
+  assert.equal(probeWrites, 1);
+  assert.match(command, /^read -r nc_latency_probe; printf "NC_LATENCY_MARK\|";/);
 });
 
 test("getServerStats includes host identity, load average, and uptime", async () => {

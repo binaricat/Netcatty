@@ -41,7 +41,7 @@ export const ruSystemManagerMessages: Messages = {
   'systemManager.overview.system': 'Система',
   'systemManager.overview.kernel': 'Ядро',
   'systemManager.overview.swap': 'Swap',
-  'systemManager.overview.latency': 'Время ответа статистики SSH',
+  'systemManager.overview.latency': 'Сетевая задержка',
   'systemManager.overview.cpuCores': 'Ядра CPU',
   'systemManager.overview.disks': 'Диски',
   'systemManager.overview.interfaces': 'Сетевые интерфейсы',

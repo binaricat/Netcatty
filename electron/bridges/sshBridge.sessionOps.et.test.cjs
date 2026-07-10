@@ -7,6 +7,7 @@ const { createSessionOpsApi } = require("./sshBridge/sessionOps.cjs");
 function fakeStream(stdout) {
   const stream = new EventEmitter();
   stream.stderr = new EventEmitter();
+  stream.write = () => true;
   setImmediate(() => {
     if (stdout) stream.emit("data", Buffer.from(stdout));
     stream.emit("close", 0);
@@ -16,8 +17,11 @@ function fakeStream(stdout) {
 
 function fakeConn(stdout) {
   return {
-    exec(_command, cb) {
-      cb(null, fakeStream(stdout));
+    exec(command, cb) {
+      const output = command.includes("NC_LATENCY_MARK") && !stdout.includes("NC_LATENCY_MARK")
+        ? `NC_LATENCY_MARK|${stdout}`
+        : stdout;
+      cb(null, fakeStream(output));
     },
   };
 }
@@ -97,6 +101,7 @@ test("getServerStats opens an ET stats companion connection for direct ET sessio
   assert.equal(result.success, true);
   assert.equal(result.stats.memTotal, 8000);
   assert.equal(result.stats.cpuCores, 4);
+  assert.equal(typeof result.stats.latencyMs, "number");
 });
 
 test("getServerStats falls back to execOnEtSession for jumped ET sessions", async () => {
@@ -128,6 +133,8 @@ test("getServerStats falls back to execOnEtSession for jumped ET sessions", asyn
   assert.match(command, /CPURAW|UNSUPPORTED_OS/);
   assert.equal(result.success, true);
   assert.equal(result.stats.memTotal, 8000);
+  assert.equal(result.stats.latencyMs, null);
+  assert.doesNotMatch(command, /read -r nc_latency_probe/);
 });
 
 test("getServerStats falls back to execOnEtSession when the direct ET companion is unavailable", async () => {
@@ -157,6 +164,7 @@ test("getServerStats falls back to execOnEtSession when the direct ET companion 
   assert.equal(execFallbackCalls, 1);
   assert.equal(result.success, true);
   assert.equal(result.stats.memTotal, 8000);
+  assert.equal(result.stats.latencyMs, null);
 });
 
 test("readRemoteHistory probes ET sessions and parses the detected shell", async () => {
