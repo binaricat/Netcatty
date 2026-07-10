@@ -7,6 +7,13 @@ const {
 } = require("../terminalFlowAck.cjs");
 const { createSshConnExecProbe } = require("../ai/sessionShellKind.cjs");
 
+// MoshCatty normally emits this cleanup together with an alternate-screen
+// exit. Netcatty keeps the primary screen, so restore only terminal modes that
+// can leak from a full-screen remote program and leave scrollback untouched.
+const MOSH_PRIMARY_SCREEN_RESET = "\x1b[?1l\x1b[0m\x1b[?25h"
+  + "\x1b[?1003l\x1b[?1002l\x1b[?1001l\x1b[?1000l"
+  + "\x1b[?1015l\x1b[?1006l\x1b[?1005l";
+
 function withShellProbeTimeout(promise, timeoutMs) {
   const ms = Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 3000;
   let timer = null;
@@ -584,6 +591,7 @@ function createMoshSessionApi(ctx) {
         // #1198) if one was opened — it lives on moshStatsConn and outlives
         // the mosh-client PTY otherwise.
         try { session.moshStatsConn?.end(); } catch { /* ignore */ }
+        bufferData(MOSH_PRIMARY_SCREEN_RESET);
         flushPaced(() => {
           sessionLogStreamManager.stopStream(sessionId, session.logStreamToken);
           const contents = electronModule.webContents.fromId(session.webContentsId);

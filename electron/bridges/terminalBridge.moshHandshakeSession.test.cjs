@@ -393,6 +393,30 @@ test("startMoshSession keeps MoshCatty on Netcatty's primary terminal screen", a
   assert.equal(h.spawns[1].opts.env.MOSH_NO_TERM_INIT, "1");
 });
 
+test("startMoshSession restores terminal modes on exit without leaving the primary screen", async (t) => {
+  const h = makeHarness(t);
+  await h.bridge.startMoshSession(h.event, h.options, { moshClientLookup: h.lookupOpts });
+
+  h.spawns[0].emitData("MOSH CONNECT 60002 ABCDEFGHIJKLMNOPQRSTUV==\r\n");
+  h.spawns[0].emitExit({ exitCode: 0, signal: 0 });
+  h.spawns[1].emitData("\x1b[?25l\x1b[?1000h");
+  h.spawns[1].emitExit({ exitCode: 1, signal: 0 });
+
+  const terminalData = h.sent
+    .filter((evt) => evt.channel === "netcatty:data")
+    .map((evt) => evt.payload.data)
+    .join("");
+  const exitIndex = h.sent.findIndex((evt) => evt.channel === "netcatty:exit");
+  const cleanupIndex = h.sent.findIndex(
+    (evt) => evt.channel === "netcatty:data" && evt.payload.data.includes("\x1b[?25h"),
+  );
+
+  assert.match(terminalData, /\x1b\[\?25h/);
+  assert.match(terminalData, /\x1b\[\?1000l/);
+  assert.doesNotMatch(terminalData, /\x1b\[\?1049l/);
+  assert.ok(cleanupIndex >= 0 && cleanupIndex < exitIndex);
+});
+
 test("startMoshSession forwards terminal shortcut escape sequences after the client swap", async (t) => {
   const h = makeHarness(t);
   await h.bridge.startMoshSession(h.event, h.options, { moshClientLookup: h.lookupOpts });
