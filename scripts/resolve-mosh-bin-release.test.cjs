@@ -21,15 +21,16 @@ function makeTmp(t) {
 
 test("validateReleaseTag accepts only mosh binary release tags", () => {
   assert.equal(validateReleaseTag("mosh-bin-1.4.0-1"), "mosh-bin-1.4.0-1");
+  assert.equal(validateReleaseTag("moshcatty-0.1.0"), "moshcatty-0.1.0");
   assert.throws(() => validateReleaseTag("v1.2.3"), /invalid mosh binary release tag/);
   assert.throws(() => validateReleaseTag("mosh-bin-../bad"), /invalid mosh binary release tag/);
 });
 
-test("parseRepository falls back to the dedicated mosh binary repository", () => {
-  assert.deepEqual(parseRepository({}), { owner: "binaricat", repo: "Netcatty-mosh-bin" });
+test("parseRepository falls back to the MoshCatty binary repository", () => {
+  assert.deepEqual(parseRepository({}), { owner: "binaricat", repo: "MoshCatty" });
   assert.deepEqual(parseRepository({ GITHUB_REPOSITORY: "owner/project" }), {
     owner: "owner",
-    repo: "Netcatty-mosh-bin",
+    repo: "MoshCatty",
   });
   assert.deepEqual(
     parseRepository({ GITHUB_REPOSITORY: "owner/project", MOSH_BIN_OWNER: "bin", MOSH_BIN_REPO: "binaries" }),
@@ -44,9 +45,10 @@ test("pickLatestMoshBinRelease ignores non-packaging releases", () => {
     { tag_name: "mosh-bin-1.4.0-4", prerelease: true, published_at: "2026-04-02T00:00:00Z" },
     { tag_name: "mosh-bin-1.4.0-1", published_at: "2026-02-01T00:00:00Z" },
     { tag_name: "mosh-bin-1.4.0-2", published_at: "2026-03-01T00:00:00Z" },
+    { tag_name: "moshcatty-0.1.0", published_at: "2026-05-01T00:00:00Z" },
   ]);
 
-  assert.equal(got, "mosh-bin-1.4.0-2");
+  assert.equal(got, "moshcatty-0.1.0");
 });
 
 test("parseNextLink reads the next GitHub pagination URL", () => {

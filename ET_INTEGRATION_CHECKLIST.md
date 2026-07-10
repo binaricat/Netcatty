@@ -35,7 +35,7 @@
 | `scripts/fetch-mosh-binaries.cjs` | `scripts/fetch-et-binaries.cjs` |
 | `scripts/resolve-mosh-bin-release.cjs` | `scripts/resolve-et-bin-release.cjs` |
 | `scripts/mosh-extra-resources.cjs` | `scripts/et-extra-resources.cjs` |
-| env `MOSH_BIN_RELEASE` / 仓库 `Netcatty-mosh-bin` / tag `mosh-bin-*` | env `ET_BIN_RELEASE` / 仓库 `Netcatty-et-bin` / tag `et-bin-*` |
+| env `MOSH_BIN_RELEASE` / 仓库 `MoshCatty` / tag `moshcatty-*` | env `ET_BIN_RELEASE` / 仓库 `Netcatty-et-bin` / tag `et-bin-*` |
 | `npm run fetch:mosh[:dev]` | `npm run fetch:et[:dev]` |
 | `bundledMoshClient()` / `resolveBareMoshClient()` | `bundledEtClient()` / `resolveBareEtClient()` |
 | `.github/workflows/build-mosh-binaries.yml` | `.github/workflows/build-et-binaries.yml` |

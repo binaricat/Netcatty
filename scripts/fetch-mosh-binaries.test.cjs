@@ -40,11 +40,11 @@ function makeTarGz(t, entries) {
   return fs.readFileSync(tarPath);
 }
 
-test("fetch-mosh-binaries defaults to the dedicated mosh binary repository", () => {
-  assert.deepEqual(parseMoshBinRepository({}), { owner: "binaricat", repo: "Netcatty-mosh-bin" });
+test("fetch-mosh-binaries defaults to the MoshCatty binary repository", () => {
+  assert.deepEqual(parseMoshBinRepository({}), { owner: "binaricat", repo: "MoshCatty" });
   assert.deepEqual(parseMoshBinRepository({ GITHUB_REPOSITORY: "owner/project" }), {
     owner: "owner",
-    repo: "Netcatty-mosh-bin",
+    repo: "MoshCatty",
   });
   assert.deepEqual(
     parseMoshBinRepository({ GITHUB_REPOSITORY: "owner/project", MOSH_BIN_OWNER: "bin", MOSH_BIN_REPO: "binaries" }),

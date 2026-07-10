@@ -17,8 +17,7 @@
 //                       Skip the whole step if unset (printed as a notice
 //                       so the build doesn't silently miss the bundling).
 //   MOSH_BIN_OWNER    — defaults to the GITHUB_REPOSITORY owner, or 'binaricat'
-//   MOSH_BIN_REPO     — default 'Netcatty-mosh-bin' (a dedicated binary
-//                       repository so the client repo stays source-only).
+//   MOSH_BIN_REPO     — default 'MoshCatty'.
 //   MOSH_BIN_BASE_URL — full override (e.g. for staging / local mirror).
 //   MOSH_BIN_RES_DIR  — override output dir for tests.
 //   MOSH_BIN_ALLOW_UNVERIFIED=true — explicit local escape hatch for mirrors
@@ -218,7 +217,7 @@ function parseMoshBinRepository(env) {
   const githubOwner = (env.GITHUB_REPOSITORY || "").split("/")[0];
   return {
     owner: env.MOSH_BIN_OWNER || githubOwner || "binaricat",
-    repo: env.MOSH_BIN_REPO || "Netcatty-mosh-bin",
+    repo: env.MOSH_BIN_REPO || "MoshCatty",
   };
 }
 
@@ -406,7 +405,7 @@ async function main(argv = process.argv.slice(2), env = process.env) {
     release = await resolveMoshBinRelease(env);
   }
   if (!release) {
-    log("MOSH_BIN_RELEASE is unset - skipping. Set it (e.g. mosh-bin-1.4.0-1) to bundle mosh-client into the package.");
+    log("MOSH_BIN_RELEASE is unset - skipping. Set it (e.g. moshcatty-0.1.0) to bundle mosh-client into the package.");
     return 0;
   }
 

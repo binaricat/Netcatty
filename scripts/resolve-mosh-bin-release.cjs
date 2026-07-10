@@ -6,8 +6,8 @@
 // Priority:
 //   1. MOSH_BIN_RELEASE from workflow input / repository variable.
 //   2. Latest non-draft, non-prerelease GitHub Release whose tag is
-//      mosh-bin-* in MOSH_BIN_OWNER/MOSH_BIN_REPO. By default this is a
-//      dedicated sibling binary repository named Netcatty-mosh-bin.
+//      moshcatty-* (or legacy mosh-bin-*) in MOSH_BIN_OWNER/MOSH_BIN_REPO.
+//      Default repository is binaricat/MoshCatty.
 //
 // In GitHub Actions, the resolved tag is written back to $GITHUB_ENV so
 // later steps can run scripts/fetch-mosh-binaries.cjs without duplicating
@@ -16,7 +16,9 @@
 const fs = require("node:fs");
 const https = require("node:https");
 
-const TAG_RE = /^mosh-bin-[A-Za-z0-9._-]+$/;
+// MoshCatty pure-Rust releases: moshcatty-0.1.0
+// Legacy Cygwin-era binary repo: mosh-bin-1.4.0-2
+const TAG_RE = /^(?:mosh-bin|moshcatty)-[A-Za-z0-9._-]+$/;
 
 function log(msg) {
   console.log(`[resolve-mosh-bin-release] ${msg}`);
@@ -32,7 +34,7 @@ function validateReleaseTag(tag) {
 
 function parseRepository(env) {
   const owner = env.MOSH_BIN_OWNER || (env.GITHUB_REPOSITORY || "").split("/")[0] || "binaricat";
-  const repo = env.MOSH_BIN_REPO || "Netcatty-mosh-bin";
+  const repo = env.MOSH_BIN_REPO || "MoshCatty";
   return { owner, repo };
 }
 
@@ -122,7 +124,7 @@ async function loadReleases(env, request = requestJsonWithHeaders) {
   const { owner, repo } = parseRepository(env);
   const apiBase = (env.GITHUB_API_URL || "https://api.github.com").replace(/\/+$/, "");
   let url = `${apiBase}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/releases?per_page=100`;
-  log(`looking up latest mosh-bin-* release in ${owner}/${repo}`);
+  log(`looking up latest moshcatty-* / mosh-bin-* release in ${owner}/${repo}`);
   const releases = [];
   const seen = new Set();
   while (url) {

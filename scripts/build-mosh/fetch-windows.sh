@@ -1,12 +1,11 @@
 #!/usr/bin/env bash
-# Source: pin the last known-good Windows mosh bundle built by Netcatty's
-# Cygwin workflow. The bundle carries mosh-client.exe, runtime DLLs, and the
-# xterm-256color terminfo entry needed by packaged Windows builds.
+# LEGACY only — used by the optional C++/Cygwin build-mosh-binaries matrix.
+# App packaging / npm run dev pull pure Rust binaries from binaricat/MoshCatty
+# via scripts/fetch-mosh-binaries.cjs. Do not use this script for Netcatty
+# installers.
 #
-# Keep the old FluentTerminal standalone exe as a release fallback. It is
-# PE32+ x86-64 with no cygwin1.dll dependency. FluentTerminal is GPL-3.0, same
-# license as Netcatty, and the binary itself is GPL-3.0 from upstream
-# mobile-shell/mosh.
+# Pins a historical Windows Cygwin mosh-client bundle (+ FluentTerminal
+# standalone fallback) from Netcatty-mosh-bin / FluentTerminal.
 #
 # Inputs (env): OUT_DIR
 # Output:       $OUT_DIR/mosh-client-win32-x64.tar.gz (+ .sha256)

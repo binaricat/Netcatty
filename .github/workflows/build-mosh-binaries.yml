@@ -22,7 +22,7 @@ on:
         type: string
         default: ""
       release_repo:
-        description: "Repository that stores mosh-client binary releases."
+        description: "Legacy C++ mosh-client publish target only. App packaging uses binaricat/MoshCatty via fetch-mosh-binaries."
         type: string
         default: "binaricat/Netcatty-mosh-bin"
   push:
