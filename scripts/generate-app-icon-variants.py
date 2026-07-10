@@ -1,21 +1,22 @@
 #!/usr/bin/env python3
 """Generate runtime app icon variants from public/icon.svg.
 
-Outputs PNG files under public/icons/variants/ for Electron dock/taskbar switching.
+Outputs desktop PNGs under public/icons/variants/ and HIG-sized macOS PNGs
+under public/icons/variants/macos/ for Electron dock/taskbar switching.
 Run: python3 scripts/generate-app-icon-variants.py
 Requires: rsvg-convert (librsvg)
 """
 from __future__ import annotations
 
 import re
-import shutil
 import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE_SVG = ROOT / "public" / "icon.svg"
-SOURCE_PNG = ROOT / "public" / "icon.png"
 OUT_DIR = ROOT / "public" / "icons" / "variants"
+MACOS_OUT_DIR = OUT_DIR / "macos"
+DESKTOP_VIEWBOX = "44 44 936 936"
 
 DETAIL_COLORS = [
     "#1f2657",
@@ -150,6 +151,13 @@ def load_template() -> str:
     return SOURCE_SVG.read_text(encoding="utf-8")
 
 
+def set_viewbox(svg: str, viewbox: str) -> str:
+    out, count = re.subn(r'viewBox="[^"]+"', f'viewBox="{viewbox}"', svg, count=1)
+    if count != 1:
+        raise SystemExit("source svg is missing a root viewBox")
+    return out
+
+
 def inject_rainbow_gradient(svg: str) -> str:
     if "id=\"netcatty-rainbow\"" in svg:
         return svg
@@ -210,23 +218,24 @@ def render_png(svg_content: str, target: Path) -> None:
 
 
 def main() -> None:
-    template = load_template()
+    macos_template = load_template()
+    desktop_template = set_viewbox(macos_template, DESKTOP_VIEWBOX)
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-
-    original_out = OUT_DIR / "original.png"
-    if SOURCE_PNG.exists():
-        shutil.copy2(SOURCE_PNG, original_out)
-        print(f"wrote {original_out.relative_to(ROOT)} (copied from public/icon.png)")
-    else:
-        render_png(template, original_out)
-        print(f"wrote {original_out.relative_to(ROOT)} (from svg)")
+    MACOS_OUT_DIR.mkdir(parents=True, exist_ok=True)
 
     for variant_id, spec in VARIANTS.items():
         if spec is None:
+            desktop_path = OUT_DIR / f"{variant_id}.png"
+            render_png(desktop_template, desktop_path)
+            print(f"wrote {desktop_path.relative_to(ROOT)}")
             continue
-        out_path = OUT_DIR / f"{variant_id}.png"
-        render_png(apply_variant(template, spec), out_path)
-        print(f"wrote {out_path.relative_to(ROOT)}")
+        desktop_path = OUT_DIR / f"{variant_id}.png"
+        render_png(apply_variant(desktop_template, spec), desktop_path)
+        print(f"wrote {desktop_path.relative_to(ROOT)}")
+
+        macos_path = MACOS_OUT_DIR / f"{variant_id}.png"
+        render_png(apply_variant(macos_template, spec), macos_path)
+        print(f"wrote {macos_path.relative_to(ROOT)}")
 
 
 if __name__ == "__main__":

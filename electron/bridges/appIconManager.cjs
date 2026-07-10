@@ -23,6 +23,7 @@ const DEFAULT_VARIANT = "original";
 let currentVariant = DEFAULT_VARIANT;
 let currentIconPath = null;
 let preferPublicSources = false;
+let useMacIconSources = false;
 
 function isValidAppIconVariant(variant) {
   return typeof variant === "string" && VALID_VARIANTS.has(variant);
@@ -53,8 +54,24 @@ function buildSourceCandidates(appPath, relativeParts) {
 }
 
 function resolveOriginalIconPath(appPath) {
-  const candidates = buildSourceCandidates(appPath, ["icon.png"]);
+  const primaryParts = useMacIconSources
+    ? ["icon.png"]
+    : ["icons", "variants", "original.png"];
+  const candidates = useMacIconSources
+    ? buildSourceCandidates(appPath, primaryParts)
+    : [
+        ...buildSourceCandidates(appPath, primaryParts),
+        ...buildSourceCandidates(appPath, ["icon-win.png"]),
+        ...buildSourceCandidates(appPath, ["icon.png"]),
+      ];
   return pickExistingPath(candidates) || candidates[0];
+}
+
+function buildVariantSourceCandidates(appPath, fileName) {
+  const relativeParts = useMacIconSources
+    ? ["icons", "variants", "macos", fileName]
+    : ["icons", "variants", fileName];
+  return buildSourceCandidates(appPath, relativeParts);
 }
 
 function resolveVariantIconPath(variant, appPath) {
@@ -64,7 +81,7 @@ function resolveVariantIconPath(variant, appPath) {
   }
 
   const fileName = `${normalized}.png`;
-  const candidates = buildSourceCandidates(appPath, ["icons", "variants", fileName]);
+  const candidates = buildVariantSourceCandidates(appPath, fileName);
   const resolved = pickExistingPath(candidates);
   if (resolved) return resolved;
   return resolveOriginalIconPath(appPath);
@@ -77,12 +94,13 @@ function resolveStrictVariantIconPath(variant, appPath) {
   }
 
   const fileName = `${normalized}.png`;
-  const candidates = buildSourceCandidates(appPath, ["icons", "variants", fileName]);
+  const candidates = buildVariantSourceCandidates(appPath, fileName);
   return pickExistingPath(candidates) || null;
 }
 
 function initializeAppIconManager(appPath, options = {}) {
   preferPublicSources = options.preferPublic === true;
+  useMacIconSources = options.isMac === true;
   currentVariant = DEFAULT_VARIANT;
   currentIconPath = resolveVariantIconPath(currentVariant, appPath);
   return currentIconPath;
@@ -130,6 +148,7 @@ function applyIconToWindow(win, iconPath, nativeImage) {
 function applyAppIconVariant(variant, context) {
   const { app, BrowserWindow, nativeImage, appPath, isMac } = context;
   preferPublicSources = !isPackagedApp(app);
+  useMacIconSources = isMac === true;
   const normalized = normalizeAppIconVariant(variant);
   const iconPath = resolveStrictVariantIconPath(normalized, appPath);
   if (!iconPath || !fs.existsSync(iconPath)) {

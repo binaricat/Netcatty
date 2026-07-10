@@ -212,7 +212,10 @@ const preload = path.join(__dirname, "preload.cjs");
 const isMac = process.platform === "darwin";
 const appIconManager = require("./bridges/appIconManager.cjs");
 const appPath = path.join(__dirname, "..");
-appIconManager.initializeAppIconManager(appPath, { preferPublic: !app.isPackaged });
+appIconManager.initializeAppIconManager(appPath, {
+  preferPublic: !app.isPackaged,
+  isMac,
+});
 const electronDir = __dirname;
 
 const APP_PROTOCOL_HEADERS = {

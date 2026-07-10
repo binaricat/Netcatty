@@ -39,13 +39,48 @@ test("resolveVariantIconPath prefers dist sources when packaged", () => {
   assert.equal(appIconManager.resolveVariantIconPath("bright", tmp), distPath);
 });
 
+test("original icon uses platform-specific sizing", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-icon-platform-"));
+  const publicDir = path.join(tmp, "public");
+  fs.mkdirSync(publicDir, { recursive: true });
+  const macPath = path.join(publicDir, "icon.png");
+  const desktopPath = path.join(publicDir, "icons", "variants", "original.png");
+  fs.mkdirSync(path.dirname(desktopPath), { recursive: true });
+  fs.writeFileSync(macPath, "mac");
+  fs.writeFileSync(desktopPath, "desktop");
+
+  appIconManager.initializeAppIconManager(tmp, { preferPublic: true, isMac: true });
+  assert.equal(appIconManager.resolveVariantIconPath("original", tmp), macPath);
+
+  appIconManager.initializeAppIconManager(tmp, { preferPublic: true, isMac: false });
+  assert.equal(appIconManager.resolveVariantIconPath("original", tmp), desktopPath);
+});
+
+test("macOS variants use HIG-sized assets without changing other platforms", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-icon-variant-platform-"));
+  const variantsDir = path.join(tmp, "public", "icons", "variants");
+  const macVariantsDir = path.join(variantsDir, "macos");
+  fs.mkdirSync(macVariantsDir, { recursive: true });
+  const desktopPath = path.join(variantsDir, "bright.png");
+  const macPath = path.join(macVariantsDir, "bright.png");
+  fs.writeFileSync(desktopPath, "desktop");
+  fs.writeFileSync(macPath, "mac");
+
+  appIconManager.initializeAppIconManager(tmp, { preferPublic: true, isMac: true });
+  assert.equal(appIconManager.resolveVariantIconPath("bright", tmp), macPath);
+
+  appIconManager.initializeAppIconManager(tmp, { preferPublic: true, isMac: false });
+  assert.equal(appIconManager.resolveVariantIconPath("bright", tmp), desktopPath);
+});
+
 test("applyAppIconVariant updates current icon path", () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-icon-apply-"));
   const publicDir = path.join(tmp, "public");
   const variantsDir = path.join(publicDir, "icons", "variants");
   fs.mkdirSync(variantsDir, { recursive: true });
   const originalPath = path.join(publicDir, "icon.png");
-  const brightPath = path.join(variantsDir, "bright.png");
+  const brightPath = path.join(variantsDir, "macos", "bright.png");
+  fs.mkdirSync(path.dirname(brightPath), { recursive: true });
   fs.writeFileSync(originalPath, "orig");
   fs.writeFileSync(brightPath, "bright");
 

@@ -7,7 +7,7 @@ import {
 export { APP_ICON_VARIANTS, DEFAULT_APP_ICON_VARIANT, type AppIconVariant };
 
 export const APP_ICON_VARIANT_ASSET_PATH: Record<AppIconVariant, string> = {
-  original: '/icon.png',
+  original: '/icons/variants/original.png',
   bright: '/icons/variants/bright.png',
   dark: '/icons/variants/dark.png',
   colorful: '/icons/variants/colorful.png',
