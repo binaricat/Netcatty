@@ -81,11 +81,13 @@ function makeReusableConn() {
   conn._remoteVer = "OpenSSH_9.0";
   conn.ended = 0;
   conn.openedShells = [];
+  conn.openedShellOptions = [];
   conn.end = () => { conn.ended += 1; };
   conn.destroy = () => {};
-  conn.shell = (_opts, _shellOpts, cb) => {
+  conn.shell = (_opts, shellOpts, cb) => {
     const stream = makeStream();
     conn.openedShells.push(stream);
+    conn.openedShellOptions.push(shellOpts);
     // ssh2 invokes the callback asynchronously.
     setImmediate(() => cb(null, stream));
   };
@@ -186,6 +188,46 @@ test("Copy Tab reuses the source connection instead of dialing fresh", async (t)
   const progress = sender.sent.filter((m) => m.channel === "netcatty:chain:progress");
   assert.ok(progress.some((m) => m.payload.status === "connected"));
   assert.equal(getConnectionReuseFallbackEvents(sender).length, 0, "successful reuse should not emit fallback");
+});
+
+test("Copy Tab preserves the server locale unless the host explicitly overrides it", async (t) => {
+  const { bridge } = loadBridgeWithMockedSsh2(t);
+  const sessions = new Map();
+  const sourceConn = makeReusableConn();
+  sessions.set("source", makeSourceSession(sourceConn, { hostname: "10.0.0.1", username: "alice" }));
+
+  const start = registerStartHandler(bridge, sessions);
+
+  await start(
+    { sender: makeSender() },
+    {
+      sessionId: "copy-default-locale",
+      hostname: "10.0.0.1",
+      username: "alice",
+      sourceSessionId: "source",
+      charset: "UTF-8",
+      env: { TERM: "xterm-256color" },
+    },
+  );
+
+  assert.deepEqual(sourceConn.openedShellOptions[0].env, {
+    COLORTERM: "truecolor",
+    TERM: "xterm-256color",
+  });
+
+  await start(
+    { sender: makeSender() },
+    {
+      sessionId: "copy-explicit-locale",
+      hostname: "10.0.0.1",
+      username: "alice",
+      sourceSessionId: "source",
+      charset: "UTF-8",
+      env: { LANG: "zh_CN.UTF-8" },
+    },
+  );
+
+  assert.equal(sourceConn.openedShellOptions[1].env.LANG, "zh_CN.UTF-8");
 });
 
 test("closing the reused channel keeps the source connection alive", async (t) => {

@@ -404,7 +404,6 @@ function createStartSessionApi(ctx) {
 
       const shellOptions = {
         env: {
-          LANG: resolveLangFromCharset(options.charset),
           COLORTERM: "truecolor",
           ...(options.env || {}),
         },
@@ -1180,7 +1179,6 @@ function createStartSessionApi(ctx) {
 
             const shellOptions = {
               env: {
-                LANG: resolveLangFromCharset(options.charset),
                 COLORTERM: "truecolor",
                 ...(options.env || {}),
               },

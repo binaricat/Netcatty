@@ -450,20 +450,6 @@ function clearCachedAuthMethod(username, hostname, port) {
   authMethodCache.delete(key);
 }
 
-// Normalize charset inputs (often provided as bare encodings like "UTF-8")
-// into a usable LANG locale for remote shells.
-function resolveLangFromCharset(charset) {
-  if (!charset) return "en_US.UTF-8";
-  const trimmed = String(charset).trim();
-  if (/^utf-?8$/i.test(trimmed) || /^utf8$/i.test(trimmed)) {
-    return "en_US.UTF-8";
-  }
-  if (normalizeTerminalEncoding(trimmed) === "gb18030" && !trimmed.includes(".")) {
-    return "zh_CN.GB18030";
-  }
-  return trimmed;
-}
-
 const { safeSend } = require("./ipcUtils.cjs");
 const {
   createConnectionRef,
@@ -879,7 +865,7 @@ const startSessionApi = createStartSessionApi({
   iconv, getSessionDecoder, resetSessionDecoders, sessionEncodings, sessionDecoders, encodeTerminalInput,
   normalizeTerminalEncoding,
   connectThroughChain, getAvailableAgentSocket, getCachedAuthMethod, setCachedAuthMethod, clearCachedAuthMethod,
-  attachSshDebugLogger, logSshAlgorithms, resolveLangFromCharset, safeSend, zmodemOverwritePending,
+  attachSshDebugLogger, logSshAlgorithms, safeSend, zmodemOverwritePending,
   shouldLogSshDebugMessage, log, createSshDiagnosticLogger,
   buildAlgorithms, randomUUID, findDefaultPrivateKey, findAllDefaultPrivateKeys,
   openTerminalOutputSession, closeTerminalOutputSession,
@@ -1174,7 +1160,7 @@ const sessionOpsApi = createSessionOpsApi({
   get electronModule() { return electronModule; },
   fs, path, os, exec, randomUUID, iconv, Buffer, process, console, setTimeout, clearTimeout,
   getSessionDecoder, resetSessionDecoders, sessionEncodings, normalizeTerminalEncoding,
-  resolveLangFromCharset, safeSend,
+  safeSend,
   quoteShellArg, log, ensureMoshStatsConnection, ensureEtStatsConnection,
   execOnEtSession: (...args) => require("./terminalBridge.cjs").execOnEtSession(...args),
   getServerStats: undefined,

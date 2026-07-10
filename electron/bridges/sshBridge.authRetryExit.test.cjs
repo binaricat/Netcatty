@@ -126,7 +126,8 @@ function loadBridgeWithAuthRetryMocks(t, options = {}) {
       setImmediate(() => cb(null, new EventEmitter()));
     }
 
-    shell(_pty, _opts, cb) {
+    shell(_pty, shellOptions, cb) {
+      this.shellOptions = shellOptions;
       setImmediate(() => cb(null, createShellStream()));
     }
 
@@ -178,6 +179,34 @@ function loadBridgeWithAuthRetryMocks(t, options = {}) {
 
   return { bridge, MockSSHClient };
 }
+
+test("fresh SSH sessions preserve the server locale for the default UTF-8 charset", async (t) => {
+  const { bridge, MockSSHClient } = loadBridgeWithAuthRetryMocks(t, {
+    connectEvents: ["ready"],
+  });
+  const ipcMain = makeIpcMain();
+  bridge.init({ sessions: new Map(), electronModule: {} });
+  bridge.registerHandlers(ipcMain);
+
+  const result = await ipcMain.handlers.get("netcatty:start")(
+    { sender: makeSender() },
+    {
+      sessionId: "default-locale-session",
+      hostname: "example.test",
+      username: "alice",
+      port: 22,
+      charset: "UTF-8",
+      env: { TERM: "xterm-256color" },
+      knownHosts: [],
+    },
+  );
+
+  assert.deepEqual(result, { sessionId: "default-locale-session" });
+  assert.deepEqual(MockSSHClient.instances[0].shellOptions.env, {
+    COLORTERM: "truecolor",
+    TERM: "xterm-256color",
+  });
+});
 
 test("retryable encrypted-key auth failure does not emit exit before retry success", async (t) => {
   const { bridge, MockSSHClient } = loadBridgeWithAuthRetryMocks(t, {
