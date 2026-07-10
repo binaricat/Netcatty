@@ -48,6 +48,10 @@ test("background split workspaces keep their live geometry without hibernate", (
     /shouldUseTerminalPaneSplitLayout\(\{[\s\S]*workspace: layoutWorkspace,[\s\S]*sessionId: session\.id,[\s\S]*isVisible,[\s\S]*hibernateHiddenTabs/,
   );
   assert.match(
+    supportSource,
+    /const initializeHiddenFullSize = !hibernateHiddenTabs[\s\S]*&& !rect[\s\S]*&& !lastVisiblePaneSizeRef\.current;[\s\S]*bumpHiddenPaneSizeVersion/,
+  );
+  assert.match(
     layerEffectsSource,
     /if \(!shouldMeasureTerminalLayerLayout\) return;[\s\S]*?remeasureWorkspaceArea\(\)/,
   );

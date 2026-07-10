@@ -983,6 +983,7 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
   const isVisible = paneState.isVisible;
   const paneElementRef = useRef<HTMLDivElement | null>(null);
   const lastVisiblePaneSizeRef = useRef<TerminalPaneHiddenSize | null>(null);
+  const [, bumpHiddenPaneSizeVersion] = useState(0);
 
   // Publish visibility before paint so hibernate / write-path readers see the
   // new value in the same frame as the CSS hide/show (#1985).
@@ -1054,19 +1055,45 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
   const style: React.CSSProperties = { ...layoutStyle };
 
   useLayoutEffect(() => {
-    if (!isVisible) return;
     const element = paneElementRef.current;
     if (!element) return;
-    const width = element.clientWidth;
-    const height = element.clientHeight;
-    if (width > 0 && height > 0) {
+
+    const capturePaneSize = () => {
+      const width = element.clientWidth;
+      const height = element.clientHeight;
+      if (width <= 0 || height <= 0) return false;
       lastVisiblePaneSizeRef.current = { width, height };
+      return true;
+    };
+
+    if (isVisible) {
+      capturePaneSize();
+      return;
     }
+
+    const initializeHiddenFullSize = !hibernateHiddenTabs
+      && !rect
+      && !lastVisiblePaneSizeRef.current;
+    if (!initializeHiddenFullSize) return;
+    if (capturePaneSize()) {
+      bumpHiddenPaneSizeVersion((version) => version + 1);
+      return;
+    }
+
+    const observer = new ResizeObserver(() => {
+      if (!capturePaneSize()) return;
+      observer.disconnect();
+      bumpHiddenPaneSizeVersion((version) => version + 1);
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
   }, [
+    hibernateHiddenTabs,
     isVisible,
     layoutStyle.height,
     layoutStyle.width,
     activeWorkspaceId,
+    rect,
   ]);
 
   if (!isVisible) {
