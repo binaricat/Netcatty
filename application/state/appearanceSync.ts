@@ -57,10 +57,18 @@ export function resolveIncomingAppearanceValue<T>(
   incoming: AppearanceSyncEvent | undefined,
   key: string,
   storedValue: T,
+  currentValue: T,
   isValid: (value: unknown) => value is T,
 ): T {
   if (incoming?.key === key && isValid(incoming.value)) {
     return incoming.value;
+  }
+  // Keyed IPC updates only trust the announced key. Non-matching fields keep
+  // the in-memory current value so sequential notifies for one multi-field
+  // change cannot clobber each other with a still-stale storage read.
+  // Full rehydrate (no incoming) continues to prefer shared storage.
+  if (incoming) {
+    return currentValue;
   }
   return storedValue;
 }
@@ -74,30 +82,35 @@ export function resolveAppearanceSyncState(
     incoming,
     STORAGE_KEY_THEME,
     stored.theme,
+    current.theme,
     isValidTheme,
   );
   const lightUiThemeId = resolveIncomingAppearanceValue(
     incoming,
     STORAGE_KEY_UI_THEME_LIGHT,
     stored.lightUiThemeId,
+    current.lightUiThemeId,
     (value): value is string => typeof value === 'string' && isValidUiThemeId('light', value),
   );
   const darkUiThemeId = resolveIncomingAppearanceValue(
     incoming,
     STORAGE_KEY_UI_THEME_DARK,
     stored.darkUiThemeId,
+    current.darkUiThemeId,
     (value): value is string => typeof value === 'string' && isValidUiThemeId('dark', value),
   );
   const accentMode = resolveIncomingAppearanceValue(
     incoming,
     STORAGE_KEY_ACCENT_MODE,
     stored.accentMode,
+    current.accentMode,
     (value): value is AppearanceState['accentMode'] => value === 'theme' || value === 'custom',
   );
   const customAccent = resolveIncomingAppearanceValue(
     incoming,
     STORAGE_KEY_COLOR,
     stored.customAccent,
+    current.customAccent,
     (value): value is string => typeof value === 'string' && isValidHslToken(value),
   );
 

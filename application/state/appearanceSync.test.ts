@@ -59,20 +59,34 @@ test("an appearance IPC value wins over stale local storage for the changed key"
       incoming,
       STORAGE_KEY_THEME,
       "system",
+      "system",
       (value): value is "light" | "dark" | "system" => (
         value === "light" || value === "dark" || value === "system"
       ),
     ),
     "dark",
   );
+  // Non-matching keyed IPC must keep the current in-memory value, not storage.
   assert.equal(
     resolveIncomingAppearanceValue(
       incoming,
       STORAGE_KEY_UI_THEME_DARK,
+      "stale-from-storage",
       "midnight",
       (value): value is string => typeof value === "string",
     ),
     "midnight",
+  );
+  // Full rehydrate (no incoming) still prefers storage.
+  assert.equal(
+    resolveIncomingAppearanceValue(
+      undefined,
+      STORAGE_KEY_UI_THEME_DARK,
+      "from-storage",
+      "midnight",
+      (value): value is string => typeof value === "string",
+    ),
+    "from-storage",
   );
 });
 
@@ -137,12 +151,42 @@ test("a non-theme appearance IPC value wins over stale local storage for that ke
   }, customAccentSelection);
   assert.equal(nextCustomAccent.customAccent, "221.2 83.2% 53.3%");
 
-  // Without an announced key, a stale storage read must not invent a change.
+  // Without an announced key, full rehydrate still reads storage.
   const noIncoming = resolveAppearanceSyncState(current, {
     ...staleStored,
-    darkUiThemeId: "midnight",
+    darkUiThemeId: "github",
   });
-  assert.equal(noIncoming.darkUiThemeId, "midnight");
+  assert.equal(noIncoming.darkUiThemeId, "github");
+});
+
+test("sequential keyed appearance IPC updates compose without stale-storage clobber", () => {
+  // One action changes theme + dark UI theme; the sender emits two keyed notifies.
+  // Storage still holds the pre-change values for the entire sequence.
+  const initial: AppearanceState = {
+    theme: "system",
+    lightUiThemeId: "snow",
+    darkUiThemeId: "midnight",
+    accentMode: "theme",
+    customAccent: "208 100% 50%",
+  };
+  const staleStored: StoredAppearanceValues = { ...initial };
+
+  let next = resolveAppearanceSyncState(initial, staleStored, {
+    key: STORAGE_KEY_THEME,
+    value: "dark",
+  });
+  assert.equal(next.theme, "dark");
+  assert.equal(next.darkUiThemeId, "midnight");
+
+  // Later theme-id message must not revert theme back to the stale stored System.
+  next = resolveAppearanceSyncState(next, staleStored, {
+    key: STORAGE_KEY_UI_THEME_DARK,
+    value: "github",
+  });
+  assert.equal(next.theme, "dark");
+  assert.equal(next.darkUiThemeId, "github");
+  assert.equal(next.lightUiThemeId, "snow");
+  assert.equal(next.accentMode, "theme");
 });
 
 test("System on a light OS changes to Dark in every open follow-app terminal", () => {
@@ -270,6 +314,8 @@ test("the race guards are wired into the real settings paths", () => {
     stateSource,
     /previousAppearance\.darkUiThemeId !== darkUiThemeId[\s\S]*notifySettingsChanged\(STORAGE_KEY_UI_THEME_DARK, darkUiThemeId\)/,
   );
+  // Sequential keyed IPC must compose via a ref, not a render-stale closure.
+  assert.match(stateSource, /appearanceStateRef\.current = nextAppearance/);
   assert.match(ipcSource, /syncAppearanceFromStorage\(\{ key, value \}\)/);
   assert.match(storageSource, /resolveAppearanceStorageEvent\(s, e\.key, e\.newValue\)/);
   assert.match(popupSource, /terminalTheme=\{settings\.currentTerminalTheme\}/);

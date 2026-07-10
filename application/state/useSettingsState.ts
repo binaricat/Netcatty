@@ -449,6 +449,22 @@ export const useSettingsState = (options: { enableSettingsSync?: boolean; enable
   const persistMountedRef = useRef(false);
   const appearanceTransitionModeRef = useRef<ThemeTransitionMode>('view');
   const previousAppearanceRenderRef = useRef<AppearanceRenderSnapshot | null>(null);
+  // Latest appearance kept in a ref so sequential keyed IPC updates (one multi-field
+  // change -> multiple notifies) can compose without waiting for a React re-render.
+  const appearanceStateRef = useRef({
+    theme,
+    lightUiThemeId,
+    darkUiThemeId,
+    accentMode,
+    customAccent,
+  });
+  appearanceStateRef.current = {
+    theme,
+    lightUiThemeId,
+    darkUiThemeId,
+    accentMode,
+    customAccent,
+  };
 
   const setTerminalSettings = useCallback((nextValue: SetStateAction<TerminalSettings>) => {
     setTerminalSettingsState((prev) => {
@@ -575,8 +591,9 @@ export const useSettingsState = (options: { enableSettingsSync?: boolean; enable
   }, [notifySettingsChanged]);
 
   const syncAppearanceFromStorage = useCallback((incoming?: AppearanceSyncEvent) => {
+    const current = appearanceStateRef.current;
     const nextAppearance = resolveAppearanceSyncState(
-      { theme, lightUiThemeId, darkUiThemeId, accentMode, customAccent },
+      current,
       {
         theme: readStoredString(STORAGE_KEY_THEME),
         lightUiThemeId: readStoredString(STORAGE_KEY_UI_THEME_LIGHT),
@@ -596,15 +613,17 @@ export const useSettingsState = (options: { enableSettingsSync?: boolean; enable
 
     // Fix 2: Skip expensive DOM operations if nothing actually changed
     if (
-      nextTheme === theme &&
-      nextLightId === lightUiThemeId &&
-      nextDarkId === darkUiThemeId &&
-      nextAccentMode === accentMode &&
-      nextAccent === customAccent
+      nextTheme === current.theme &&
+      nextLightId === current.lightUiThemeId &&
+      nextDarkId === current.darkUiThemeId &&
+      nextAccentMode === current.accentMode &&
+      nextAccent === current.customAccent
     ) {
       return;
     }
 
+    // Publish synchronously so a later keyed IPC in the same turn composes on top.
+    appearanceStateRef.current = nextAppearance;
     setTheme(nextTheme);
     setLightUiThemeId(nextLightId);
     setDarkUiThemeId(nextDarkId);
@@ -616,7 +635,7 @@ export const useSettingsState = (options: { enableSettingsSync?: boolean; enable
     runThemeTransition(() => {
       applyThemeTokens(nextTheme, effective, tokens, nextAccentMode, nextAccent);
     });
-  }, [theme, lightUiThemeId, darkUiThemeId, accentMode, customAccent]);
+  }, []);
 
   const syncCustomCssFromStorage = useCallback(() => {
     const storedCss = localStorageAdapter.readString(STORAGE_KEY_CUSTOM_CSS) || '';
