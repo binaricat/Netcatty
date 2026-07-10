@@ -10,12 +10,12 @@ import { zhCNVaultMessages } from "./zh-CN/vault";
 import { zhTwSystemManagerMessages } from "./zh-TW/systemManager";
 import { zhTWVaultMessages } from "./zh-TW/vault";
 
-test("network latency is explicit in every locale and UI surface", () => {
+test("SSH network latency is explicit in every locale and UI surface", () => {
   const labels = [
-    [enTerminalMessages, enSystemManagerMessages, "Network latency"],
-    [ruTerminalMessages, ruSystemManagerMessages, "Сетевая задержка"],
-    [zhCNVaultMessages, zhCnSystemManagerMessages, "网络延迟"],
-    [zhTWVaultMessages, zhTwSystemManagerMessages, "網路延遲"],
+    [enTerminalMessages, enSystemManagerMessages, "SSH network latency"],
+    [ruTerminalMessages, ruSystemManagerMessages, "Сетевая задержка SSH"],
+    [zhCNVaultMessages, zhCnSystemManagerMessages, "SSH 网络延迟"],
+    [zhTWVaultMessages, zhTwSystemManagerMessages, "SSH 網路延遲"],
   ] as const;
 
   for (const [terminalMessages, systemManagerMessages, expected] of labels) {

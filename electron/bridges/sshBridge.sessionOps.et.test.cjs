@@ -4,14 +4,21 @@ const { EventEmitter } = require("node:events");
 
 const { createSessionOpsApi } = require("./sshBridge/sessionOps.cjs");
 
-function fakeStream(stdout) {
+function fakeStream(stdout, waitForWrite = false) {
   const stream = new EventEmitter();
   stream.stderr = new EventEmitter();
-  stream.write = () => true;
-  setImmediate(() => {
+  let sent = false;
+  const send = () => {
+    if (sent) return;
+    sent = true;
     if (stdout) stream.emit("data", Buffer.from(stdout));
     stream.emit("close", 0);
-  });
+  };
+  stream.write = () => {
+    if (waitForWrite) setImmediate(send);
+    return true;
+  };
+  if (!waitForWrite) setImmediate(send);
   return stream;
 }
 
@@ -21,7 +28,7 @@ function fakeConn(stdout) {
       const output = command.includes("NC_LATENCY_MARK") && !stdout.includes("NC_LATENCY_MARK")
         ? `NC_LATENCY_MARK|${stdout}`
         : stdout;
-      cb(null, fakeStream(output));
+      cb(null, fakeStream(output, command.includes("NC_LATENCY_MARK")));
     },
   };
 }

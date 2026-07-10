@@ -8,11 +8,17 @@ const { createSessionOpsApi } = require("./sessionOps.cjs");
 function fakeStream(stdout) {
   const stream = new EventEmitter();
   stream.stderr = new EventEmitter();
-  stream.write = () => true;
-  setImmediate(() => {
+  let sent = false;
+  const send = () => {
+    if (sent) return;
+    sent = true;
     if (stdout) stream.emit("data", Buffer.from(stdout));
     stream.emit("close", 0);
-  });
+  };
+  stream.write = () => {
+    setImmediate(send);
+    return true;
+  };
   return stream;
 }
 
@@ -141,8 +147,10 @@ test("getServerStats reports network round-trip without SSH stats channel setup 
     assert.equal(data, "\n");
     now += 1;
     stream.emit("data", Buffer.from("remote shell notice\n"));
-    now += 4;
-    stream.emit("data", Buffer.from(`NC_LATENCY_MARK|${LINUX_STATS}`));
+    now += 2;
+    stream.emit("data", Buffer.from("NC_LATENCY_"));
+    now += 2;
+    stream.emit("data", Buffer.from(`MARK|${LINUX_STATS}`));
     stream.emit("close", 0);
     return true;
   };
@@ -172,6 +180,78 @@ test("getServerStats reports network round-trip without SSH stats channel setup 
   assert.equal(result.stats.latencyMs, 5);
   assert.equal(probeWrites, 1);
   assert.match(command, /^read -r nc_latency_probe; printf "NC_LATENCY_MARK\|";/);
+});
+
+test("getServerStats closes a blocked probe channel when stats time out", async () => {
+  let fireTimeout;
+  let closeCalls = 0;
+  const stream = new EventEmitter();
+  stream.stderr = new EventEmitter();
+  stream.write = () => true;
+  stream.close = () => { closeCalls += 1; };
+  const api = createSessionOpsApi({
+    sessions: new Map([["sid", { type: "ssh", conn: { exec: (_command, cb) => cb(null, stream) } }]]),
+    Date,
+    setTimeout: (callback) => {
+      fireTimeout = callback;
+      return 1;
+    },
+    clearTimeout: () => {},
+    Buffer,
+  });
+
+  const pending = api.getServerStats({ sender: {} }, { sessionId: "sid" });
+  fireTimeout();
+  const result = await pending;
+
+  assert.equal(result.success, false);
+  assert.match(result.error, /Timeout/);
+  assert.equal(closeCalls, 1);
+});
+
+test("getServerStats closes a stats stream delivered after timeout", async () => {
+  let execCallback;
+  let fireTimeout;
+  let closeCalls = 0;
+  const api = createSessionOpsApi({
+    sessions: new Map([["sid", {
+      type: "ssh",
+      conn: { exec: (_command, callback) => { execCallback = callback; } },
+    }]]),
+    Date,
+    setTimeout: (callback) => {
+      fireTimeout = callback;
+      return 1;
+    },
+    clearTimeout: () => {},
+    Buffer,
+  });
+
+  const pending = api.getServerStats({ sender: {} }, { sessionId: "sid" });
+  fireTimeout();
+  const result = await pending;
+  const lateStream = new EventEmitter();
+  lateStream.stderr = new EventEmitter();
+  lateStream.close = () => { closeCalls += 1; };
+  execCallback(null, lateStream);
+
+  assert.equal(result.success, false);
+  assert.equal(closeCalls, 1);
+});
+
+test("getServerStats closes the channel when the latency probe cannot be written", async () => {
+  let closeCalls = 0;
+  const stream = new EventEmitter();
+  stream.stderr = new EventEmitter();
+  stream.write = () => { throw new Error("probe write failed"); };
+  stream.close = () => { closeCalls += 1; };
+  const api = makeSessionOps(new Map([["sid", { type: "ssh", conn: { exec: (_command, cb) => cb(null, stream) } }]]));
+
+  const result = await api.getServerStats({ sender: {} }, { sessionId: "sid" });
+
+  assert.equal(result.success, false);
+  assert.match(result.error, /probe write failed/);
+  assert.equal(closeCalls, 1);
 });
 
 test("getServerStats includes host identity, load average, and uptime", async () => {

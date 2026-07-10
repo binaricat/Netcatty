@@ -41,7 +41,7 @@ export const zhCnSystemManagerMessages: Messages = {
   'systemManager.overview.system': '系统',
   'systemManager.overview.kernel': '内核',
   'systemManager.overview.swap': '交换区',
-  'systemManager.overview.latency': '网络延迟',
+  'systemManager.overview.latency': 'SSH 网络延迟',
   'systemManager.overview.cpuCores': 'CPU 核心',
   'systemManager.overview.disks': '磁盘',
   'systemManager.overview.interfaces': '网络接口',

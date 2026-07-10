@@ -41,7 +41,7 @@ export const enSystemManagerMessages: Messages = {
   'systemManager.overview.system': 'System',
   'systemManager.overview.kernel': 'Kernel',
   'systemManager.overview.swap': 'Swap',
-  'systemManager.overview.latency': 'Network latency',
+  'systemManager.overview.latency': 'SSH network latency',
   'systemManager.overview.cpuCores': 'CPU cores',
   'systemManager.overview.disks': 'Disks',
   'systemManager.overview.interfaces': 'Network interfaces',

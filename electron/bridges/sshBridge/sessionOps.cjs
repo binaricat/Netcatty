@@ -805,16 +805,43 @@ function createSessionOpsApi(ctx) {
       const latencyProbeCommand = usesEtStatsFallback ? '' : 'read -r nc_latency_probe; ';
       const statsCommand = `${latencyProbeCommand}printf "${latencyMarker}|"; ostype=$(uname -s 2>/dev/null || echo "Unknown"); if [ "$ostype" = "Darwin" ]; then ${macosStatsCommand}; elif [ "$ostype" = "Linux" ]; then ${linuxStatsCommand}; else echo "UNSUPPORTED_OS:$ostype"; fi`;
       return new Promise((resolve) => {
-        const timeout = setTimeout(() => {
-          resolve({ success: false, error: 'Timeout getting server stats' });
+        let activeStream = null;
+        let settled = false;
+        let timeout = null;
+        const disposeStream = (stream) => {
+          if (!stream) return;
+          try {
+            if (typeof stream.close === 'function') stream.close();
+            else if (typeof stream.destroy === 'function') stream.destroy();
+          } catch {
+            try { stream.destroy?.(); } catch { /* ignore cleanup errors */ }
+          }
+        };
+        const settle = (result) => {
+          if (settled) return false;
+          settled = true;
+          if (timeout) clearTimeout(timeout);
+          resolve(result);
+          return true;
+        };
+        timeout = setTimeout(() => {
+          const stream = activeStream;
+          activeStream = null;
+          if (settle({ success: false, error: 'Timeout getting server stats' })) {
+            disposeStream(stream);
+          }
         }, 10000);
     
         conn.exec(statsCommand, (err, stream) => {
-          if (err) {
-            clearTimeout(timeout);
-            resolve({ success: false, error: err.message });
+          if (settled) {
+            disposeStream(stream);
             return;
           }
+          if (err) {
+            settle({ success: false, error: err.message });
+            return;
+          }
+          activeStream = stream;
     
           let stdout = '';
           let stderr = '';
@@ -837,14 +864,15 @@ function createSessionOpsApi(ctx) {
           });
     
           stream.on('close', () => {
-            clearTimeout(timeout);
+            if (settled) return;
+            activeStream = null;
     
             // Parse the output
             const output = stdout.trim().replace(new RegExp(`^${latencyMarker}\\|?`), '');
     
             // Unsupported OS — stop polling this session
             if (output.startsWith('UNSUPPORTED_OS:')) {
-              resolve({ success: false, error: `Server stats not supported on this OS (${output.substring(15)})` });
+              settle({ success: false, error: `Server stats not supported on this OS (${output.substring(15)})` });
               return;
             }
     
@@ -1115,11 +1143,11 @@ function createSessionOpsApi(ctx) {
     
             // If no meaningful data was parsed, treat as failure to stop futile polling
             if (cpu === null && memTotal === null && cpuCores === null) {
-              resolve({ success: false, error: 'Unable to parse server stats (unsupported OS or shell)' });
+              settle({ success: false, error: 'Unable to parse server stats (unsupported OS or shell)' });
               return;
             }
     
-            resolve({
+            settle({
               success: true,
               stats: {
                 cpu,           // CPU usage percentage (0-100)
@@ -1151,8 +1179,14 @@ function createSessionOpsApi(ctx) {
           });
 
           if (!usesEtStatsFallback) {
-            latencyStartedAt = Date.now();
-            stream.write('\n');
+            try {
+              latencyStartedAt = Date.now();
+              stream.write('\n');
+            } catch (err) {
+              if (settle({ success: false, error: err?.message || String(err) })) {
+                disposeStream(stream);
+              }
+            }
           }
         });
       });
