@@ -133,7 +133,7 @@ test("fetch-mosh-binaries host mode skips unsupported local targets", async (t) 
     {
       env: {
         ...process.env,
-        MOSH_BIN_RELEASE: "moshcatty-0.1.1",
+        MOSH_BIN_RELEASE: "moshcatty-0.1.2",
         MOSH_BIN_BASE_URL: baseUrl,
         MOSH_BIN_RES_DIR: resDir,
         CI: "true",
@@ -159,7 +159,7 @@ test("fetch-mosh-binaries unpacks pure Windows MoshCatty tarball", async (t) => 
   await execFileAsync(process.execPath, [script, "--platform=win32", "--arch=x64"], {
     env: {
       ...process.env,
-      MOSH_BIN_RELEASE: "moshcatty-0.1.1",
+      MOSH_BIN_RELEASE: "moshcatty-0.1.2",
       MOSH_BIN_BASE_URL: baseUrl,
       MOSH_BIN_RES_DIR: resDir,
       CI: "true",
@@ -190,7 +190,7 @@ test("fetch-mosh-binaries strips accidental dll/terminfo from Windows tarball", 
   await execFileAsync(process.execPath, [script, "--platform=win32", "--arch=x64"], {
     env: {
       ...process.env,
-      MOSH_BIN_RELEASE: "moshcatty-0.1.1",
+      MOSH_BIN_RELEASE: "moshcatty-0.1.2",
       MOSH_BIN_BASE_URL: baseUrl,
       MOSH_BIN_RES_DIR: resDir,
       CI: "true",
@@ -216,7 +216,7 @@ test("fetch-mosh-binaries unpacks pure Linux MoshCatty tarball", async (t) => {
   await execFileAsync(process.execPath, [script, "--platform=linux", "--arch=x64"], {
     env: {
       ...process.env,
-      MOSH_BIN_RELEASE: "moshcatty-0.1.1",
+      MOSH_BIN_RELEASE: "moshcatty-0.1.2",
       MOSH_BIN_BASE_URL: baseUrl,
       MOSH_BIN_RES_DIR: resDir,
       CI: "true",
@@ -242,7 +242,7 @@ test("fetch-mosh-binaries rejects tarball without mosh-client", async (t) => {
     execFileAsync(process.execPath, [script, "--platform=linux", "--arch=x64"], {
       env: {
         ...process.env,
-        MOSH_BIN_RELEASE: "moshcatty-0.1.1",
+        MOSH_BIN_RELEASE: "moshcatty-0.1.2",
         MOSH_BIN_BASE_URL: baseUrl,
         MOSH_BIN_RES_DIR: resDir,
         CI: "true",
@@ -265,7 +265,7 @@ test("fetch-mosh-binaries fails when SHA256SUMS lacks the asset", async (t) => {
     execFileAsync(process.execPath, [script, "--platform=win32", "--arch=x64"], {
       env: {
         ...process.env,
-        MOSH_BIN_RELEASE: "moshcatty-0.1.1",
+        MOSH_BIN_RELEASE: "moshcatty-0.1.2",
         MOSH_BIN_BASE_URL: baseUrl,
         MOSH_BIN_RES_DIR: resDir,
         CI: "true",
@@ -293,7 +293,7 @@ test("fetch-mosh-binaries rejects symlinks inside tarballs", { skip: process.pla
     execFileAsync(process.execPath, [script, "--platform=win32", "--arch=x64"], {
       env: {
         ...process.env,
-        MOSH_BIN_RELEASE: "moshcatty-0.1.1",
+        MOSH_BIN_RELEASE: "moshcatty-0.1.2",
         MOSH_BIN_BASE_URL: baseUrl,
         MOSH_BIN_RES_DIR: resDir,
         CI: "true",

@@ -11,6 +11,8 @@ const {
   parseNextLink,
   pickLatestMoshBinRelease,
   validateReleaseTag,
+  isAtLeastMinRelease,
+  MIN_TAG,
 } = require("./resolve-mosh-bin-release.cjs");
 
 function makeTmp(t) {
@@ -19,11 +21,22 @@ function makeTmp(t) {
   return dir;
 }
 
-test("validateReleaseTag accepts only moshcatty-* tags", () => {
-  assert.equal(validateReleaseTag("moshcatty-0.1.1"), "moshcatty-0.1.1");
+test("validateReleaseTag accepts only moshcatty-* tags at min version", () => {
+  assert.equal(validateReleaseTag("moshcatty-0.1.2"), "moshcatty-0.1.2");
+  assert.equal(validateReleaseTag("moshcatty-0.2.0"), "moshcatty-0.2.0");
   assert.throws(() => validateReleaseTag("mosh-bin-1.4.0-1"), /invalid mosh binary release tag/);
   assert.throws(() => validateReleaseTag("v1.2.3"), /invalid mosh binary release tag/);
   assert.throws(() => validateReleaseTag("moshcatty-../bad"), /invalid mosh binary release tag/);
+  assert.throws(() => validateReleaseTag("moshcatty-0.1.0"), /below minimum/);
+  assert.throws(() => validateReleaseTag("moshcatty-0.1.1"), /below minimum/);
+});
+
+test("isAtLeastMinRelease enforces moshcatty-0.1.2 floor", () => {
+  assert.equal(MIN_TAG, "moshcatty-0.1.2");
+  assert.equal(isAtLeastMinRelease("moshcatty-0.1.1"), false);
+  assert.equal(isAtLeastMinRelease("moshcatty-0.1.2"), true);
+  assert.equal(isAtLeastMinRelease("moshcatty-0.1.2-rc1"), true);
+  assert.equal(isAtLeastMinRelease("moshcatty-not-a-version"), false);
 });
 
 test("parseRepository falls back to the MoshCatty binary repository", () => {
@@ -38,16 +51,17 @@ test("parseRepository falls back to the MoshCatty binary repository", () => {
   );
 });
 
-test("pickLatestMoshBinRelease ignores non-moshcatty tags", () => {
+test("pickLatestMoshBinRelease ignores non-moshcatty and pre-0.1.2 tags", () => {
   const got = pickLatestMoshBinRelease([
     { tag_name: "v1.0.0", published_at: "2026-03-01T00:00:00Z" },
     { tag_name: "mosh-bin-1.4.0-2", published_at: "2026-06-01T00:00:00Z" },
-    { tag_name: "moshcatty-0.1.0", draft: true, published_at: "2026-07-01T00:00:00Z" },
+    { tag_name: "moshcatty-0.1.2", draft: true, published_at: "2026-07-11T00:00:00Z" },
     { tag_name: "moshcatty-0.1.0", published_at: "2026-05-01T00:00:00Z" },
     { tag_name: "moshcatty-0.1.1", published_at: "2026-07-10T00:00:00Z" },
+    { tag_name: "moshcatty-0.1.2", published_at: "2026-07-10T12:00:00Z" },
   ]);
 
-  assert.equal(got, "moshcatty-0.1.1");
+  assert.equal(got, "moshcatty-0.1.2");
 });
 
 test("parseNextLink reads the next GitHub pagination URL", () => {
@@ -70,7 +84,7 @@ test("loadReleases follows GitHub pagination until the last page", async () => {
     requested.push(url);
     if (url.includes("page=2")) {
       return {
-        json: [{ tag_name: "moshcatty-0.1.0", published_at: "2026-01-01T00:00:00Z" }],
+        json: [{ tag_name: "moshcatty-0.1.2", published_at: "2026-01-01T00:00:00Z" }],
         headers: {},
       };
     }
@@ -82,7 +96,7 @@ test("loadReleases follows GitHub pagination until the last page", async () => {
     };
   });
 
-  assert.deepEqual(got.map((release) => release.tag_name), ["v1.0.0", "moshcatty-0.1.0"]);
+  assert.deepEqual(got.map((release) => release.tag_name), ["v1.0.0", "moshcatty-0.1.2"]);
   assert.equal(requested.length, 2);
 });
 
@@ -100,12 +114,19 @@ test("main keeps an explicit MOSH_BIN_RELEASE and exports it", async (t) => {
   const githubEnv = path.join(makeTmp(t), "github-env");
 
   const got = await main({
-    MOSH_BIN_RELEASE: "moshcatty-0.1.1",
+    MOSH_BIN_RELEASE: "moshcatty-0.1.2",
     GITHUB_ENV: githubEnv,
   });
 
-  assert.equal(got, "moshcatty-0.1.1");
-  assert.equal(fs.readFileSync(githubEnv, "utf8"), "MOSH_BIN_RELEASE=moshcatty-0.1.1\n");
+  assert.equal(got, "moshcatty-0.1.2");
+  assert.equal(fs.readFileSync(githubEnv, "utf8"), "MOSH_BIN_RELEASE=moshcatty-0.1.2\n");
+});
+
+test("main rejects explicit pre-0.1.2 MOSH_BIN_RELEASE", async () => {
+  await assert.rejects(
+    main({ MOSH_BIN_RELEASE: "moshcatty-0.1.1" }),
+    /below minimum/,
+  );
 });
 
 test("main resolves the latest moshcatty release from the list and exports it", async (t) => {
@@ -115,12 +136,13 @@ test("main resolves the latest moshcatty release from the list and exports it", 
     MOSH_BIN_RELEASES_JSON: JSON.stringify([
       { tag_name: "moshcatty-0.1.0", published_at: "2026-01-01T00:00:00Z" },
       { tag_name: "moshcatty-0.1.1", published_at: "2026-07-10T00:00:00Z" },
+      { tag_name: "moshcatty-0.1.2", published_at: "2026-07-10T12:00:00Z" },
       { tag_name: "mosh-bin-1.4.0-2", published_at: "2026-08-01T00:00:00Z" },
     ]),
   });
 
-  assert.equal(got, "moshcatty-0.1.1");
-  assert.equal(fs.readFileSync(githubEnv, "utf8"), "MOSH_BIN_RELEASE=moshcatty-0.1.1\n");
+  assert.equal(got, "moshcatty-0.1.2");
+  assert.equal(fs.readFileSync(githubEnv, "utf8"), "MOSH_BIN_RELEASE=moshcatty-0.1.2\n");
 });
 
 test("main fails when no usable moshcatty release exists", async () => {
@@ -129,7 +151,8 @@ test("main fails when no usable moshcatty release exists", async () => {
       MOSH_BIN_RELEASES_JSON: JSON.stringify([
         { tag_name: "v1.0.0", published_at: "2026-01-01T00:00:00Z" },
         { tag_name: "mosh-bin-1.4.0-1", published_at: "2026-02-01T00:00:00Z" },
-        { tag_name: "moshcatty-0.1.0", draft: true, published_at: "2026-02-01T00:00:00Z" },
+        { tag_name: "moshcatty-0.1.1", published_at: "2026-02-01T00:00:00Z" },
+        { tag_name: "moshcatty-0.1.2", draft: true, published_at: "2026-02-01T00:00:00Z" },
       ]),
     }),
     /could not find/,

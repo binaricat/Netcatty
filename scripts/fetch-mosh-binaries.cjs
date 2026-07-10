@@ -31,7 +31,10 @@ const https = require("node:https");
 const os = require("node:os");
 const crypto = require("node:crypto");
 const { execFileSync } = require("node:child_process");
-const { main: resolveMoshBinRelease } = require("./resolve-mosh-bin-release.cjs");
+const {
+  main: resolveMoshBinRelease,
+  validateReleaseTag,
+} = require("./resolve-mosh-bin-release.cjs");
 
 const ROOT = path.resolve(__dirname, "..");
 const DEFAULT_RES_DIR = path.join(ROOT, "resources", "mosh");
@@ -312,6 +315,9 @@ async function main(argv = process.argv.slice(2), env = process.env) {
     log("MOSH_BIN_RELEASE is unset - skipping. Set it (e.g. moshcatty-0.1.2) to bundle mosh-client into the package.");
     return 0;
   }
+  // Reject pre-0.1.2 pins (Linux GLIBC 2.34) even when MOSH_BIN_RELEASE is set
+  // without going through --resolve-release.
+  release = validateReleaseTag(release);
 
   const { owner, repo } = parseMoshBinRepository(env);
   const baseUrl = env.MOSH_BIN_BASE_URL ||

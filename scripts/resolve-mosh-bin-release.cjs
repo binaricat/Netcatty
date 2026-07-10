@@ -13,17 +13,47 @@
 const fs = require("node:fs");
 const https = require("node:https");
 
-// MoshCatty pure-Rust releases only (prefer moshcatty-0.1.2+ for Linux glibc floors).
+// MoshCatty pure-Rust releases only.
+// Minimum 0.1.2: earlier Linux builds linked GLIBC 2.34 (above Netcatty floors).
 const TAG_RE = /^moshcatty-[A-Za-z0-9._-]+$/;
+const MIN_VERSION = { major: 0, minor: 1, patch: 2 };
+const MIN_TAG = `moshcatty-${MIN_VERSION.major}.${MIN_VERSION.minor}.${MIN_VERSION.patch}`;
 
 function log(msg) {
   console.log(`[resolve-mosh-bin-release] ${msg}`);
+}
+
+/** Parse moshcatty-X.Y.Z (+ optional pre/build suffix). Returns null if not semver-ish. */
+function parseMoshCattyVersion(tag) {
+  const match = String(tag || "").trim().match(
+    /^moshcatty-(\d+)\.(\d+)\.(\d+)(?:[-+][A-Za-z0-9._-]+)?$/,
+  );
+  if (!match) return null;
+  return {
+    major: Number(match[1]),
+    minor: Number(match[2]),
+    patch: Number(match[3]),
+  };
+}
+
+function isAtLeastMinRelease(tag) {
+  const version = parseMoshCattyVersion(tag);
+  if (!version) return false;
+  if (version.major !== MIN_VERSION.major) return version.major > MIN_VERSION.major;
+  if (version.minor !== MIN_VERSION.minor) return version.minor > MIN_VERSION.minor;
+  return version.patch >= MIN_VERSION.patch;
 }
 
 function validateReleaseTag(tag) {
   const value = String(tag || "").trim();
   if (!TAG_RE.test(value)) {
     throw new Error(`invalid mosh binary release tag: ${tag} (expected moshcatty-*)`);
+  }
+  if (!isAtLeastMinRelease(value)) {
+    throw new Error(
+      `mosh binary release ${value} is below minimum ${MIN_TAG} `
+        + "(Linux glibc floors: x64 ≤ 2.28, arm64 ≤ 2.31; 0.1.0/0.1.1 require GLIBC 2.34)",
+    );
   }
   return value;
 }
@@ -44,8 +74,10 @@ function pickLatestMoshBinRelease(releases) {
   return releases
     .map((release, index) => ({ release, index }))
     .filter(({ release }) => {
+      const tag = String(release?.tag_name || "");
       return release
-        && TAG_RE.test(String(release.tag_name || ""))
+        && TAG_RE.test(tag)
+        && isAtLeastMinRelease(tag)
         && release.draft !== true
         && release.prerelease !== true;
     })
@@ -157,7 +189,8 @@ async function main(env = process.env) {
   const release = pickLatestMoshBinRelease(releases);
   if (!release) {
     throw new Error(
-      "could not find a non-draft moshcatty-* release in binaricat/MoshCatty. Publish a MoshCatty GitHub Release (e.g. moshcatty-0.1.2) before packaging.",
+      `could not find a non-draft ${MIN_TAG}+ release in binaricat/MoshCatty. `
+        + `Publish a MoshCatty GitHub Release (e.g. ${MIN_TAG}) before packaging.`,
     );
   }
 
@@ -178,7 +211,10 @@ module.exports = {
   loadReleases,
   parseNextLink,
   validateReleaseTag,
+  parseMoshCattyVersion,
+  isAtLeastMinRelease,
   parseRepository,
   pickLatestMoshBinRelease,
+  MIN_TAG,
   main,
 };
