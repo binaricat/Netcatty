@@ -992,7 +992,8 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
   const hibernateHiddenTabs = resolveTerminalHibernateEnabled(terminalSettings);
   const layoutWorkspaceId = activeWorkspaceId ?? (!hibernateHiddenTabs ? session.workspaceId : undefined);
   const layoutWorkspace = layoutWorkspaceId ? workspaceById.get(layoutWorkspaceId) : undefined;
-  const usesSplitLayout = layoutWorkspace?.viewMode === 'split';
+  const usesSplitLayout = layoutWorkspace?.viewMode === 'split'
+    || (!isVisible && !hibernateHiddenTabs && !!layoutWorkspace);
   const rect = layoutWorkspaceId && usesSplitLayout
     ? workspaceRectsById.get(layoutWorkspaceId)?.[session.id] ?? null
     : null;

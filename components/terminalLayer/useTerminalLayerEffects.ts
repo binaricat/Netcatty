@@ -8,7 +8,7 @@ import { getTerminalSidePanelShellWidth } from './TerminalLayerSidePanelSection'
 type TerminalLayerEffectsContext = Record<string, any>;
 
 export function useTerminalLayerEffects(ctx: TerminalLayerEffectsContext) {
-  const { activeSidePanelTab, activeTabId, activeTabIdRef, activeWorkspace, activityTrackedSessions, cancelAnimationFrame, ChunkedEscapeFilter, clearTimeout, clearTopTabsPreviewVars, document, dropHint, filterTabsMap, focusedSessionId, getSessionActivityIdsToClear, handleToggleAiFromTopBar, handleToggleScriptsSidePanel, handleToggleSidePanel, hasNotifiableTerminalOutput, isComposeBarOpen, isFocusMode, isTerminalLayerRendererActive, isTerminalLayerVisible, lastSidePanelTabRef, Map, onSessionData, onSplitSessionRef, onToggleBroadcastRef, onToggleWorkspaceViewModeRef, prevFocusedSessionIdRef, refocusActiveTerminalSession, requestAnimationFrame, ResizeObserver, sessionActivityStore, sessions, Set, setAiMountedTabIds, setDropHint, setNotesMountedTabIds, setScriptsMountedTabIds, setSystemMountedTabIds, setSftpHostForTab, setSftpInitialLocationForTab, setSftpPendingUploadsForTab, setSidePanelOpenTabs, setThemeMountedTabIds, setTimeout, setWorkspaceArea, sidePanelPosition, sidePanelWidth, sftpActiveHost, sftpHostForTab, shouldMarkSessionActivity, sidePanelOpenTabs, splitHorizontalHandlersRef, splitVerticalHandlersRef, terminalRendererCwdBySessionRef, toggleScriptsSidePanelRef, toggleSidePanelRef, validAIScopeTargetIds, validSessionActivityIds, window, workspaceBroadcastHandlersRef, workspaceFocusHandlersRef, workspaceInnerRef, workspaces } = ctx;
+  const { activeSidePanelTab, activeTabId, activeTabIdRef, activeWorkspace, activityTrackedSessions, cancelAnimationFrame, ChunkedEscapeFilter, clearTimeout, clearTopTabsPreviewVars, document, dropHint, filterTabsMap, focusedSessionId, getSessionActivityIdsToClear, handleToggleAiFromTopBar, handleToggleScriptsSidePanel, handleToggleSidePanel, hasNotifiableTerminalOutput, isComposeBarOpen, isFocusMode, isTerminalLayerVisible, lastSidePanelTabRef, Map, onSessionData, onSplitSessionRef, onToggleBroadcastRef, onToggleWorkspaceViewModeRef, prevFocusedSessionIdRef, refocusActiveTerminalSession, requestAnimationFrame, ResizeObserver, sessionActivityStore, sessions, Set, setAiMountedTabIds, setDropHint, setNotesMountedTabIds, setScriptsMountedTabIds, setSystemMountedTabIds, setSftpHostForTab, setSftpInitialLocationForTab, setSftpPendingUploadsForTab, setSidePanelOpenTabs, setThemeMountedTabIds, setTimeout, setWorkspaceArea, sidePanelPosition, sidePanelWidth, sftpActiveHost, sftpHostForTab, shouldMarkSessionActivity, sidePanelOpenTabs, splitHorizontalHandlersRef, splitVerticalHandlersRef, terminalRendererCwdBySessionRef, toggleScriptsSidePanelRef, toggleSidePanelRef, validAIScopeTargetIds, validSessionActivityIds, window, workspaceBroadcastHandlersRef, workspaceFocusHandlersRef, workspaceInnerRef, workspaces } = ctx;
 
   const activeWorkspaceId = activeWorkspace?.id;
   const activeWorkspaceViewMode = activeWorkspace?.viewMode;
@@ -158,7 +158,7 @@ export function useTerminalLayerEffects(ctx: TerminalLayerEffectsContext) {
       const updateSize = () => {
         // Ignore zero-size reads while the layer is hidden so split rects are
         // not recomputed from a 1×1 fallback until the real layout is available.
-        if (!isTerminalLayerRendererActive) return;
+        if (!isTerminalLayerVisible) return;
         remeasureWorkspaceArea();
       };
       updateSize();
@@ -174,13 +174,13 @@ export function useTerminalLayerEffects(ctx: TerminalLayerEffectsContext) {
         unsubscribeSuppress();
         observer.disconnect();
       };
-    }, [isTerminalLayerRendererActive, remeasureWorkspaceArea, scheduleWorkspaceAreaRemeasure, workspaceInnerRef]);
+    }, [isTerminalLayerVisible, remeasureWorkspaceArea, scheduleWorkspaceAreaRemeasure, workspaceInnerRef]);
 
   // Discrete layout changes (side panel toggle, compose bar, workspace tab/view mode)
   // can miss a ResizeObserver tick; host-tree width is handled by the observer
   // because it updates continuously during drag.
   useLayoutEffect(() => {
-    if (!isTerminalLayerRendererActive) return;
+    if (!isTerminalLayerVisible) return;
     const el = workspaceInnerRef.current;
     const width = el?.clientWidth ?? 0;
     const height = el?.clientHeight ?? 0;
@@ -211,7 +211,7 @@ export function useTerminalLayerEffects(ctx: TerminalLayerEffectsContext) {
     activeWorkspaceId,
     activeWorkspaceViewMode,
     isComposeBarOpen,
-    isTerminalLayerRendererActive,
+    isTerminalLayerVisible,
     scheduleWorkspaceAreaRemeasure,
     sidePanelPosition,
     sidePanelShellWidth,

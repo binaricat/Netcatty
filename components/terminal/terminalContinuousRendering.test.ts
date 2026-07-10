@@ -37,18 +37,19 @@ test("background split workspaces keep their live geometry without hibernate", (
   );
   assert.match(
     workspaceLayoutSource,
-    /const workspacesToLayout = keepHiddenWorkspacesLaidOut\s*\? workspaces/,
+    /if \(keepHiddenWorkspacesLaidOut\) \{[\s\S]*map\.set\(workspace\.id, cached\.rects\)/,
   );
   assert.match(
     supportSource,
     /const layoutWorkspaceId = activeWorkspaceId \?\? \(!hibernateHiddenTabs \? session\.workspaceId : undefined\)/,
   );
   assert.match(
-    tabBridgeSource,
-    /isTerminalLayerRendererActive: isTerminalLayerVisible \|\| !hibernateHiddenTabs/,
+    supportSource,
+    /layoutWorkspace\?\.viewMode === 'split'\s*\|\| \(!isVisible && !hibernateHiddenTabs && !!layoutWorkspace\)/,
   );
   assert.match(
     layerEffectsSource,
-    /if \(!isTerminalLayerRendererActive\) return;[\s\S]*?remeasureWorkspaceArea\(\)/,
+    /if \(!isTerminalLayerVisible\) return;[\s\S]*?remeasureWorkspaceArea\(\)/,
   );
+  assert.doesNotMatch(tabBridgeSource, /isTerminalLayerRendererActive/);
 });

@@ -310,7 +310,6 @@ export function TerminalLayerTabBridge({ stableRef }: { stableRef: StableRef }) 
     isComposeBarOpen: s.isComposeBarOpen,
     isFocusMode,
     isTerminalLayerVisible,
-    isTerminalLayerRendererActive: isTerminalLayerVisible || !hibernateHiddenTabs,
     lastSidePanelTabRef: s.lastSidePanelTabRef,
     Map,
     Math,

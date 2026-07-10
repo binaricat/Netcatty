@@ -152,39 +152,44 @@ export function useTerminalWorkspaceLayout({
           }
         }
 
-        const workspacesToLayout = keepHiddenWorkspacesLaidOut
-          ? workspaces
-          : activeWorkspace
-            ? [workspaces.find((candidate) => candidate.id === activeWorkspace.id) ?? activeWorkspace]
-            : [];
-
-        for (const workspace of workspacesToLayout) {
-          const layoutWorkspace = workspaceForLayout(workspace);
-          const previewKey = resizing?.workspaceId === workspace.id
-            ? `${resizing.workspaceId}:${resizing.splitId}:${resizePreviewDelta}`
-            : 'still';
-          const cached = workspaceRectsCacheRef.current.get(workspace.id);
-          if (
-            cached
-            && cached.root === layoutWorkspace.root
-            && cached.previewKey === previewKey
-            && cached.width === workspaceArea.width
-            && cached.height === workspaceArea.height
-          ) {
-            map.set(workspace.id, cached.rects);
-            continue;
+        if (keepHiddenWorkspacesLaidOut) {
+          for (const workspace of workspaces) {
+            if (workspace.id === activeWorkspace?.id) continue;
+            const cached = workspaceRectsCacheRef.current.get(workspace.id);
+            if (cached) {
+              map.set(workspace.id, cached.rects);
+            }
           }
-
-          const rects = computeWorkspaceRects(layoutWorkspace, workspaceArea);
-          workspaceRectsCacheRef.current.set(workspace.id, {
-            root: layoutWorkspace.root,
-            previewKey,
-            width: workspaceArea.width,
-            height: workspaceArea.height,
-            rects,
-          });
-          map.set(workspace.id, rects);
         }
+
+        if (!activeWorkspace) return map;
+
+        const workspace = workspaces.find((candidate) => candidate.id === activeWorkspace.id) ?? activeWorkspace;
+        const layoutWorkspace = workspaceForLayout(workspace);
+        const previewKey = resizing?.workspaceId === workspace.id
+          ? `${resizing.workspaceId}:${resizing.splitId}:${resizePreviewDelta}`
+          : 'still';
+        const cached = workspaceRectsCacheRef.current.get(workspace.id);
+        if (
+          cached
+          && cached.root === layoutWorkspace.root
+          && cached.previewKey === previewKey
+          && cached.width === workspaceArea.width
+          && cached.height === workspaceArea.height
+        ) {
+          map.set(workspace.id, cached.rects);
+          return map;
+        }
+
+        const rects = computeWorkspaceRects(layoutWorkspace, workspaceArea);
+        workspaceRectsCacheRef.current.set(workspace.id, {
+          root: layoutWorkspace.root,
+          previewKey,
+          width: workspaceArea.width,
+          height: workspaceArea.height,
+          rects,
+        });
+        map.set(workspace.id, rects);
         return map;
       },
       [activeWorkspace, computeWorkspaceRects, keepHiddenWorkspacesLaidOut, resizePreviewDelta, resizing, workspaceArea, workspaceForLayout, workspaces],
