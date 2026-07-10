@@ -782,8 +782,8 @@ export const useSettingsState = (options: { enableSettingsSync?: boolean; enable
     localStorageAdapter.writeString(STORAGE_KEY_COLOR, customAccent);
     // Fix 1: Skip IPC broadcast on initial mount (values already match localStorage)
     if (!persistMountedRef.current) return;
-    // Fix 3: Send a single IPC instead of 5 — the receiver calls syncAppearanceFromStorage()
-    // which re-reads ALL appearance values from localStorage.
+    // Send one ordered notification. The receiver uses this theme value
+    // directly and reads the other appearance fields from shared storage.
     notifySettingsChanged(STORAGE_KEY_THEME, theme);
   }, [theme, resolvedTheme, lightUiThemeId, darkUiThemeId, accentMode, customAccent, notifySettingsChanged]);
 

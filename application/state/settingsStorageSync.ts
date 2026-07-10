@@ -53,7 +53,6 @@ import {
   STORAGE_KEY_APP_ICON_VARIANT,
 } from '../../infrastructure/config/storageKeys';
 import { resolveAppIconVariant, type AppIconVariant } from '../../domain/appIconVariant';
-import { isAppearanceStorageKey } from './appearanceSync';
 import {
   isValidHslToken,
   isValidTheme,
@@ -206,10 +205,6 @@ export function useSettingsStorageSync({
   useEffect(() => {
     if (!enabled) return;
     const handleStorageChange = (e: StorageEvent) => {
-      // Appearance changes already carry their authoritative value over IPC.
-      // Handling the unordered storage echo as a second source can replay an
-      // older System value after a newer explicit Light/Dark selection.
-      if (isAppearanceStorageKey(e.key)) return;
       const s = settingsSnapshotRef.current;
       if (e.key === STORAGE_KEY_THEME && e.newValue) {
         if (isValidTheme(e.newValue) && e.newValue !== s.theme) {
