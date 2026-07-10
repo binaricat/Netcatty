@@ -1069,7 +1069,11 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
 
     if (isVisible) {
       capturePaneSize();
-      return;
+      const observer = new ResizeObserver(() => {
+        capturePaneSize();
+      });
+      observer.observe(element);
+      return () => observer.disconnect();
     }
 
     const initializeHiddenFullSize = !hibernateHiddenTabs
@@ -1400,7 +1404,7 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
         isBroadcastEnabled={broadcastEnabled}
         onToggleBroadcast={inActiveWorkspace ? workspaceBroadcastHandler : undefined}
         onToggleComposeBar={inActiveWorkspace ? onToggleWorkspaceComposeBar : undefined}
-        isWorkspaceComposeBarOpen={keepsWorkspacePresentation ? isComposeBarOpen : undefined}
+        isWorkspaceComposeBarOpen={inActiveWorkspace ? isComposeBarOpen : undefined}
         onBroadcastInput={broadcastEnabled ? onBroadcastInput : undefined}
         onBroadcastInterruptPriorityChange={onBroadcastInterruptPriorityChange}
         onSnippetExecutorChange={onSnippetExecutorChange}

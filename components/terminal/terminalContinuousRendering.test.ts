@@ -46,7 +46,7 @@ test("background split workspaces keep their live geometry without hibernate", (
   assert.match(supportSource, /inWorkspace=\{keepsWorkspacePresentation\}/);
   assert.match(
     supportSource,
-    /isWorkspaceComposeBarOpen=\{keepsWorkspacePresentation \? isComposeBarOpen : undefined\}/,
+    /isWorkspaceComposeBarOpen=\{inActiveWorkspace \? isComposeBarOpen : undefined\}/,
   );
   assert.match(
     supportSource,
@@ -55,6 +55,10 @@ test("background split workspaces keep their live geometry without hibernate", (
   assert.match(
     supportSource,
     /const initializeHiddenFullSize = !hibernateHiddenTabs[\s\S]*&& !rect[\s\S]*&& !lastVisiblePaneSizeRef\.current;[\s\S]*bumpHiddenPaneSizeVersion/,
+  );
+  assert.match(
+    supportSource,
+    /if \(isVisible\) \{[\s\S]*const observer = new ResizeObserver\(\(\) => \{[\s\S]*capturePaneSize\(\)/,
   );
   assert.match(
     layerEffectsSource,
