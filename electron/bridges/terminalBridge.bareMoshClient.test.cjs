@@ -6,11 +6,8 @@ const path = require("node:path");
 const { StringDecoder } = require("node:string_decoder");
 
 const {
-  addBundledMoshDllPath,
   addBundledMoshRuntimeEnv,
-  addBundledMoshTerminfoEnv,
   resolveBareMoshClient,
-  toCygwinPath,
 } = require("./terminalBridge.cjs");
 const { createMoshSessionApi } = require("./terminalBridge/moshSession.cjs");
 
@@ -96,149 +93,13 @@ test("mosh runtime does not fall back to system mosh or mosh-client", () => {
   assert.equal(source.includes("brew install mosh"), false);
 });
 
-test("Windows dev mosh-client prepends the bundled DLL directory", () => {
-  const tmp = makeTmp();
-  const client = path.join(tmp, "resources", "mosh", "win32-x64", "mosh-client.exe");
-  const dllDir = path.join(tmp, "resources", "mosh", "win32-x64", "mosh-client-win32-x64-dlls");
-  writeExecutable(client);
-  fs.mkdirSync(dllDir, { recursive: true });
-  fs.writeFileSync(path.join(dllDir, "cygwin1.dll"), "dll");
-
-  const env = { Path: "C:\\Windows\\System32" };
-  addBundledMoshDllPath(env, client, { platform: "win32", arch: "x64" });
-
-  assert.equal(env.Path.split(";")[0], dllDir);
-});
-
-test("Windows dev mosh-client updates the PATH key used by child process env", () => {
-  const tmp = makeTmp();
-  const client = path.join(tmp, "resources", "mosh", "win32-x64", "mosh-client.exe");
-  const dllDir = path.join(tmp, "resources", "mosh", "win32-x64", "mosh-client-win32-x64-dlls");
-  writeExecutable(client);
-  fs.mkdirSync(dllDir, { recursive: true });
-  fs.writeFileSync(path.join(dllDir, "cygwin1.dll"), "dll");
-
-  const env = {
-    Path: "C:\\Windows\\System32",
-    PATH: "C:\\Tools",
-  };
-  addBundledMoshDllPath(env, client, { platform: "win32", arch: "x64" });
-
-  assert.equal(env.PATH.split(";")[0], dllDir);
-  assert.equal(Object.prototype.hasOwnProperty.call(env, "Path"), false);
-});
-
-test("Linux mosh-client prefers a sibling bundled terminfo dir", () => {
-  const tmp = makeTmp();
-  const client = path.join(tmp, "resources", "mosh", "linux-x64", "mosh-client");
-  const terminfo = path.join(tmp, "resources", "mosh", "linux-x64", "terminfo");
-  writeExecutable(client);
-  fs.mkdirSync(path.join(terminfo, "x"), { recursive: true });
-  fs.writeFileSync(path.join(terminfo, "x", "xterm-256color"), "terminfo");
-
-  const env = {};
-  addBundledMoshTerminfoEnv(env, client, { platform: "linux" });
-
-  assert.equal(env.TERMINFO, terminfo);
-  const dirs = env.TERMINFO_DIRS.split(":");
-  assert.equal(dirs[0], terminfo);
-  assert.ok(dirs.includes("/usr/share/terminfo"));
-});
-
-test("Linux mosh-client falls back to distro paths when no bundle present", () => {
-  const tmp = makeTmp();
-  const client = path.join(tmp, "resources", "mosh", "linux-x64", "mosh-client");
-  writeExecutable(client);
-
-  const env = {};
-  addBundledMoshTerminfoEnv(env, client, { platform: "linux" });
-
+test("MoshCatty runtime env is a no-op (no DLL bag / terminfo)", () => {
+  const env = { Path: "C:\\Windows\\System32", TERM: "xterm-256color" };
+  const out = addBundledMoshRuntimeEnv(env, "C:\\app\\mosh-client.exe", { platform: "win32" });
+  assert.equal(out, env);
   assert.equal(env.TERMINFO, undefined);
-  const dirs = env.TERMINFO_DIRS.split(":");
-  assert.ok(dirs.includes("/etc/terminfo"));
-  assert.ok(dirs.includes("/lib/terminfo"));
-  assert.ok(dirs.includes("/usr/share/terminfo"));
-});
-
-test("Linux mosh-client merges caller-supplied TERMINFO_DIRS between bundle and system defaults", () => {
-  const tmp = makeTmp();
-  const client = path.join(tmp, "resources", "mosh", "linux-x64", "mosh-client");
-  const terminfo = path.join(tmp, "resources", "mosh", "linux-x64", "terminfo");
-  writeExecutable(client);
-  fs.mkdirSync(path.join(terminfo, "x"), { recursive: true });
-  fs.writeFileSync(path.join(terminfo, "x", "xterm-256color"), "terminfo");
-
-  const env = { TERMINFO_DIRS: "/home/user/.terminfo" };
-  addBundledMoshTerminfoEnv(env, client, { platform: "linux" });
-
-  const dirs = env.TERMINFO_DIRS.split(":");
-  assert.equal(dirs[0], terminfo);
-  assert.equal(dirs[1], "/home/user/.terminfo");
-  assert.ok(dirs.includes("/usr/share/terminfo"));
-});
-
-test("Darwin mosh-client uses macOS-aware terminfo search paths", () => {
-  const tmp = makeTmp();
-  const client = path.join(tmp, "resources", "mosh", "darwin-universal", "mosh-client");
-  writeExecutable(client);
-
-  const env = {};
-  addBundledMoshTerminfoEnv(env, client, { platform: "darwin" });
-
-  const dirs = env.TERMINFO_DIRS.split(":");
-  assert.ok(dirs.includes("/usr/share/terminfo"));
-  assert.ok(dirs.includes("/opt/homebrew/share/terminfo"));
-});
-
-test("toCygwinPath converts Windows drive paths for Cygwin ncurses", () => {
-  assert.equal(
-    toCygwinPath("C:\\Program Files\\Netcatty\\resources\\mosh\\terminfo"),
-    "/cygdrive/c/Program Files/Netcatty/resources/mosh/terminfo",
-  );
-  assert.equal(
-    toCygwinPath("D:/Netcatty/resources/mosh/terminfo"),
-    "/cygdrive/d/Netcatty/resources/mosh/terminfo",
-  );
-  assert.equal(toCygwinPath("/already/posix"), "/already/posix");
-});
-
-test("Windows mosh-client points ncurses at bundled terminfo via Cygwin path", () => {
-  const tmp = makeTmp();
-  const client = path.join(tmp, "resources", "mosh", "win32-x64", "mosh-client.exe");
-  const terminfo = path.join(tmp, "resources", "mosh", "win32-x64", "terminfo");
-  writeExecutable(client);
-  fs.mkdirSync(path.join(terminfo, "x"), { recursive: true });
-  fs.writeFileSync(path.join(terminfo, "x", "xterm-256color"), "terminfo");
-
-  const env = {};
-  addBundledMoshTerminfoEnv(env, client, { platform: "win32" });
-
-  // On macOS/Linux hosts the temp path is already POSIX, so toCygwinPath is a
-  // no-op. On Windows hosts it becomes /cygdrive/<drive>/.... Either way the
-  // value must not contain a drive-letter colon that would split TERMINFO_DIRS.
-  assert.equal(env.TERMINFO, toCygwinPath(terminfo));
-  assert.equal(env.TERMINFO_DIRS, env.TERMINFO);
-  assert.ok(!/[A-Za-z]:/.test(env.TERMINFO), "Cygwin TERMINFO must not contain a Windows drive letter");
-});
-
-test("Windows mosh runtime env includes DLL path and Cygwin terminfo", () => {
-  const tmp = makeTmp();
-  const client = path.join(tmp, "resources", "mosh", "win32-x64", "mosh-client.exe");
-  const dllDir = path.join(tmp, "resources", "mosh", "win32-x64", "mosh-client-win32-x64-dlls");
-  const terminfo = path.join(tmp, "resources", "mosh", "win32-x64", "terminfo");
-  writeExecutable(client);
-  fs.mkdirSync(dllDir, { recursive: true });
-  fs.writeFileSync(path.join(dllDir, "cygwin1.dll"), "dll");
-  fs.mkdirSync(path.join(terminfo, "78"), { recursive: true });
-  fs.writeFileSync(path.join(terminfo, "78", "xterm-256color"), "terminfo");
-
-  const env = { Path: "C:\\Windows\\System32" };
-  addBundledMoshRuntimeEnv(env, client, { platform: "win32", arch: "x64" });
-
-  assert.equal(env.Path.split(";")[0], dllDir);
-  assert.equal(env.TERMINFO, toCygwinPath(terminfo));
-  assert.equal(env.TERMINFO_DIRS, env.TERMINFO);
-  assert.ok(!/[A-Za-z]:/.test(env.TERMINFO));
+  assert.equal(env.TERMINFO_DIRS, undefined);
+  assert.equal(env.Path, "C:\\Windows\\System32");
 });
 
 test("mosh UTF-8 decoder preserves fragmented Chinese output", () => {
@@ -272,4 +133,12 @@ test("removed Mosh client detection APIs are not exposed to the renderer", () =>
     assert.equal(source.includes("netcatty:mosh:detectClient"), false);
     assert.equal(source.includes("netcatty:mosh:pickClient"), false);
   }
+});
+
+test("Cygwin / terminfo helpers are gone from the mosh session module", () => {
+  const source = fs.readFileSync(path.join(__dirname, "terminalBridge", "moshSession.cjs"), "utf8");
+  assert.equal(source.includes("toCygwinPath"), false);
+  assert.equal(source.includes("findBundledMoshDllDir"), false);
+  assert.equal(source.includes("findBundledMoshTerminfoDir"), false);
+  assert.equal(source.includes("cygwin1"), false);
 });

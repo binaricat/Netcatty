@@ -1,24 +1,20 @@
 #!/usr/bin/env node
 /* eslint-disable no-console */
 //
-// Resolve the mosh-client binary release used by build-packages.
+// Resolve the MoshCatty mosh-client binary release used by packaging / dev.
 //
 // Priority:
 //   1. MOSH_BIN_RELEASE from workflow input / repository variable.
 //   2. Latest non-draft, non-prerelease GitHub Release whose tag is
-//      moshcatty-* (or legacy mosh-bin-*) in MOSH_BIN_OWNER/MOSH_BIN_REPO.
-//      Default repository is binaricat/MoshCatty.
+//      moshcatty-* in MOSH_BIN_OWNER/MOSH_BIN_REPO (default binaricat/MoshCatty).
 //
-// In GitHub Actions, the resolved tag is written back to $GITHUB_ENV so
-// later steps can run scripts/fetch-mosh-binaries.cjs without duplicating
-// release discovery logic.
+// In GitHub Actions, the resolved tag is written to $GITHUB_ENV.
 
 const fs = require("node:fs");
 const https = require("node:https");
 
-// MoshCatty pure-Rust releases: moshcatty-0.1.1
-// Legacy Cygwin-era binary repo: mosh-bin-1.4.0-2
-const TAG_RE = /^(?:mosh-bin|moshcatty)-[A-Za-z0-9._-]+$/;
+// MoshCatty pure-Rust releases only: moshcatty-0.1.1
+const TAG_RE = /^moshcatty-[A-Za-z0-9._-]+$/;
 
 function log(msg) {
   console.log(`[resolve-mosh-bin-release] ${msg}`);
@@ -27,7 +23,7 @@ function log(msg) {
 function validateReleaseTag(tag) {
   const value = String(tag || "").trim();
   if (!TAG_RE.test(value)) {
-    throw new Error(`invalid mosh binary release tag: ${tag}`);
+    throw new Error(`invalid mosh binary release tag: ${tag} (expected moshcatty-*)`);
   }
   return value;
 }
@@ -124,7 +120,7 @@ async function loadReleases(env, request = requestJsonWithHeaders) {
   const { owner, repo } = parseRepository(env);
   const apiBase = (env.GITHUB_API_URL || "https://api.github.com").replace(/\/+$/, "");
   let url = `${apiBase}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/releases?per_page=100`;
-  log(`looking up latest moshcatty-* / mosh-bin-* release in ${owner}/${repo}`);
+  log(`looking up latest moshcatty-* release in ${owner}/${repo}`);
   const releases = [];
   const seen = new Set();
   while (url) {
@@ -161,7 +157,7 @@ async function main(env = process.env) {
   const release = pickLatestMoshBinRelease(releases);
   if (!release) {
     throw new Error(
-      "could not find a non-draft mosh-bin-* release in the mosh binary repository. Publish build-mosh-binaries artifacts with release_tag (for example mosh-bin-1.4.0-1) before packaging.",
+      "could not find a non-draft moshcatty-* release in binaricat/MoshCatty. Publish a MoshCatty GitHub Release (e.g. moshcatty-0.1.1) before packaging.",
     );
   }
 

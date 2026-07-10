@@ -25,158 +25,10 @@ function createMoshSessionApi(ctx) {
     function resolveBareMoshClient(_options, opts = {}) {
       return bundledMoshClient(opts);
     }
-    
-    function getEnvPathKey(env) {
-      const pathKeys = Object.keys(env).filter((key) => key.toLowerCase() === "path");
-      if (pathKeys.length === 0) return "PATH";
-      return pathKeys.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))[0];
-    }
-    
-    function getEnvPathDelimiter(opts = {}) {
-      return (opts.platform || process.platform) === "win32" ? ";" : path.delimiter;
-    }
-    
-    function normalizeEnvPathPart(part, opts = {}) {
-      const pathApi = (opts.platform || process.platform) === "win32" ? path.win32 : path;
-      return pathApi.normalize(part).toLowerCase();
-    }
-    
-    function prependEnvPath(env, dir, opts = {}) {
-      if (!dir) return env;
-      const pathKey = getEnvPathKey(env);
-      const duplicatePathKeys = Object.keys(env)
-        .filter((key) => key.toLowerCase() === "path" && key !== pathKey);
-      for (const key of duplicatePathKeys) {
-        delete env[key];
-      }
-      const current = env[pathKey] || "";
-      const delimiter = getEnvPathDelimiter(opts);
-      const parts = String(current).split(delimiter).filter(Boolean);
-      const normalizedDir = normalizeEnvPathPart(dir, opts);
-      if (!parts.some((part) => normalizeEnvPathPart(part, opts) === normalizedDir)) {
-        env[pathKey] = current ? `${dir}${delimiter}${current}` : dir;
-      }
-      return env;
-    }
-    
-    function findBundledMoshDllDir(bareClient, opts = {}) {
-      const platform = opts.platform || process.platform;
-      if (platform !== "win32" || !bareClient) return null;
-    
-      const clientDir = path.dirname(bareClient);
-      const arch = opts.arch || process.arch;
-      const preferred = path.join(clientDir, `mosh-client-win32-${arch}-dlls`);
-      if (fs.existsSync(preferred) && fs.statSync(preferred).isDirectory()) {
-        return preferred;
-      }
-    
-      try {
-        const match = fs.readdirSync(clientDir)
-          .map((name) => path.join(clientDir, name))
-          .find((candidate) => {
-            const name = path.basename(candidate);
-            return /^mosh-client-win32-.+-dlls$/.test(name)
-              && fs.existsSync(candidate)
-              && fs.statSync(candidate).isDirectory();
-          });
-        return match || null;
-      } catch {
-        return null;
-      }
-    }
-    
-    function addBundledMoshDllPath(env, bareClient, opts = {}) {
-      const dllDir = findBundledMoshDllDir(bareClient, opts);
-      return dllDir ? prependEnvPath(env, dllDir, opts) : env;
-    }
-    
-    function findBundledMoshTerminfoDir(bareClient, _opts = {}) {
-      if (!bareClient) return null;
-      const terminfoDir = path.join(path.dirname(bareClient), "terminfo");
-      const hasXterm256 =
-        fs.existsSync(path.join(terminfoDir, "x", "xterm-256color")) ||
-        fs.existsSync(path.join(terminfoDir, "78", "xterm-256color"));
-      return hasXterm256 ? terminfoDir : null;
-    }
 
-    /**
-     * Convert a Windows path into the POSIX form Cygwin ncurses expects for
-     * TERMINFO / TERMINFO_DIRS. A raw `C:\...\terminfo` value is unusable:
-     * ncurses splits TERMINFO_DIRS on `:`, so the drive letter becomes a
-     * one-character bogus directory and the real path is never searched.
-     * Issue #2025.
-     */
-    function toCygwinPath(winPath) {
-      if (typeof winPath !== "string" || !winPath) return winPath;
-      const normalized = winPath.replace(/\\/g, "/");
-      const drive = normalized.match(/^([A-Za-z]):(\/.*)?$/);
-      if (drive) {
-        const rest = drive[2] || "/";
-        return `/cygdrive/${drive[1].toLowerCase()}${rest}`;
-      }
-      if (normalized.startsWith("/")) return normalized;
-      return normalized;
-    }
-    
-    // Standard locations where distros / package managers install the compiled
-    // terminfo database. Used as a fallback only — the bundled directory ships
-    // with the mosh release and is preferred. See issue #890 for context.
-    const LINUX_SYSTEM_TERMINFO_DIRS = [
-      "/etc/terminfo",
-      "/lib/terminfo",
-      "/usr/share/terminfo",
-      "/usr/lib/terminfo",
-    ];
-    
-    const DARWIN_SYSTEM_TERMINFO_DIRS = [
-      "/usr/share/terminfo",
-      "/opt/homebrew/share/terminfo",
-      "/usr/local/share/terminfo",
-      "/opt/local/share/terminfo",
-    ];
-    
-    function addBundledMoshTerminfoEnv(env, bareClient, opts = {}) {
-      const platform = opts.platform || process.platform;
-      const terminfoDir = findBundledMoshTerminfoDir(bareClient, opts);
-    
-      if (platform === "win32") {
-        if (!terminfoDir) return env;
-        // Cygwin mosh-client reads these as POSIX paths. Keep the Windows
-        // form only when the caller already supplied a cygdrive path.
-        const cygTerminfo = toCygwinPath(terminfoDir);
-        env.TERMINFO = cygTerminfo;
-        env.TERMINFO_DIRS = cygTerminfo;
-        return env;
-      }
-    
-      // POSIX. The bundled terminfo is the source of truth — our static
-      // ncurses' compiled-in default points at a build-time temp dir that no
-      // longer exists on the user's machine. Fall back to standard distro
-      // paths when the bundle is absent (e.g. running against an older mosh
-      // binary release that pre-dates the bundle). A caller-supplied
-      // TERMINFO_DIRS is preserved between the bundle and the system defaults.
-      const existing = (typeof env.TERMINFO_DIRS === "string" && env.TERMINFO_DIRS.length > 0)
-        ? env.TERMINFO_DIRS.split(":").filter(Boolean)
-        : [];
-      const systemDirs = platform === "darwin" ? DARWIN_SYSTEM_TERMINFO_DIRS : LINUX_SYSTEM_TERMINFO_DIRS;
-      const dirs = [];
-      if (terminfoDir) dirs.push(terminfoDir);
-      for (const dir of existing) {
-        if (!dirs.includes(dir)) dirs.push(dir);
-      }
-      for (const dir of systemDirs) {
-        if (!dirs.includes(dir)) dirs.push(dir);
-      }
-      if (terminfoDir) {
-        env.TERMINFO = terminfoDir;
-      }
-      env.TERMINFO_DIRS = dirs.join(":");
-      return env;
-    }
-    
-    function addBundledMoshRuntimeEnv(env, bareClient, opts = {}) {
-      addBundledMoshDllPath(env, bareClient, opts);
-      addBundledMoshTerminfoEnv(env, bareClient, opts);
+    // MoshCatty is a pure single binary (no Cygwin DLL bag, no terminfo).
+    // Runtime env only needs MOSH_KEY / TERM / LANG from the handshake path.
+    function addBundledMoshRuntimeEnv(env, _bareClient, _opts = {}) {
       return env;
     }
 
@@ -790,10 +642,7 @@ function createMoshSessionApi(ctx) {
 
     return {
       resolveBareMoshClient,
-      addBundledMoshDllPath,
-      addBundledMoshTerminfoEnv,
       addBundledMoshRuntimeEnv,
-      toCygwinPath,
       createMoshUtf8Decoder,
       buildMoshSshAuthArgs,
       cleanupMoshAuthTempFiles,

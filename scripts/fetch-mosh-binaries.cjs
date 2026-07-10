@@ -1,32 +1,28 @@
 #!/usr/bin/env node
 /* eslint-disable no-console */
 //
-// Download platform-specific mosh-client binaries built by the
-// `build-mosh-binaries` GitHub Actions workflow into resources/mosh/, so
-// electron-builder can bundle them via `extraResources`. Designed to be
-// idempotent and safe to skip in dev / CI matrix legs that don't ship
-// mosh (e.g. when MOSH_BIN_RELEASE is unset).
+// Download platform-specific mosh-client binaries from binaricat/MoshCatty
+// releases into resources/mosh/, so electron-builder can bundle them via
+// extraResources.
+//
+// Layout (MoshCatty only — pure single binary per platform, no Cygwin DLLs,
+// no terminfo bag):
+//   mosh-client-linux-x64.tar.gz      -> resources/mosh/linux-x64/mosh-client
+//   mosh-client-linux-arm64.tar.gz    -> resources/mosh/linux-arm64/mosh-client
+//   mosh-client-darwin-universal.tar.gz -> resources/mosh/darwin-universal/mosh-client
+//   mosh-client-win32-x64.tar.gz      -> resources/mosh/win32-x64/mosh-client.exe
 //
 // Usage:
-//   node scripts/fetch-mosh-binaries.cjs                # all platforms
+//   node scripts/fetch-mosh-binaries.cjs
 //   node scripts/fetch-mosh-binaries.cjs --platform=darwin --arch=universal
 //   node scripts/fetch-mosh-binaries.cjs --host --resolve-release
 //
-// Env knobs:
-//   MOSH_BIN_RELEASE  — release tag in ${MOSH_BIN_OWNER}/${MOSH_BIN_REPO}.
-//                       Skip the whole step if unset (printed as a notice
-//                       so the build doesn't silently miss the bundling).
-//   MOSH_BIN_OWNER    — defaults to the GITHUB_REPOSITORY owner, or 'binaricat'
-//   MOSH_BIN_REPO     — default 'MoshCatty'.
-//   MOSH_BIN_BASE_URL — full override (e.g. for staging / local mirror).
-//   MOSH_BIN_RES_DIR  — override output dir for tests.
-//   MOSH_BIN_ALLOW_UNVERIFIED=true — explicit local escape hatch for mirrors
-//                       without SHA256SUMS. Never use for release builds.
-//   MOSH_BIN_FORCE_WINDOWS_CYGWIN=true — legacy debug knob kept for older
-//                       automation. Windows now prefers the released bundle
-//                       with its runtime helpers when SHA256SUMS lists it.
-//   MOSH_BIN_WINDOWS_LEGACY_URL / MOSH_BIN_WINDOWS_LEGACY_SHA256 — test/mirror
-//                       overrides for that pinned Windows fallback.
+// Env:
+//   MOSH_BIN_RELEASE          — required for fetch unless --resolve-release
+//   MOSH_BIN_OWNER / MOSH_BIN_REPO — default binaricat / MoshCatty
+//   MOSH_BIN_BASE_URL         — full release download base override
+//   MOSH_BIN_RES_DIR          — output dir override (tests)
+//   MOSH_BIN_ALLOW_UNVERIFIED — accept missing SHA256SUMS (local mirrors only)
 
 const fs = require("node:fs");
 const path = require("node:path");
@@ -39,85 +35,25 @@ const { main: resolveMoshBinRelease } = require("./resolve-mosh-bin-release.cjs"
 
 const ROOT = path.resolve(__dirname, "..");
 const DEFAULT_RES_DIR = path.join(ROOT, "resources", "mosh");
-const WINDOWS_LEGACY_FLUENT_MOSH_CLIENT = {
-  id: "windows-fluentterminal-standalone",
-  file: "mosh-client-win32-x64.exe",
-  local: "win32-x64/mosh-client.exe",
-  url: "https://raw.githubusercontent.com/felixse/FluentTerminal/bad0f85/Dependencies/MoshExecutables/x64/mosh-client.exe",
-  sha256: "5a8d84ff205c6a0711e53b961f909484a892f42648807e52d46d4fa93c05e286",
-};
 
-// (file basename in the release -> relative subpath under resources/mosh/)
-// Using flat names in the release for SHA256SUMS readability, then
-// fanning out into platform-arch subdirs locally.
-//
-// Linux/macOS/Windows bundle targets are tar.gz archives.
-// MoshCatty pure-Rust releases ship only mosh-client[.exe] (no Cygwin DLL bag,
-// no terminfo). Legacy Cygwin-era Windows bundles may still include
-// mosh-client-win32-*-dlls/ + terminfo; those remain optional/compatible.
-// Posix terminfo in older bundles is optional — warn if missing (issue #890).
-//
-// `legacy` describes the pre-bundle artifact name some published mosh
-// binary releases still ship (Linux/Darwin used flat files before the
-// bundle layout). When SHA256SUMS lists only the legacy name we fall
-// back to it so existing releases keep working until a new tag is
-// republished with the bundle layout.
 const TARGETS = [
   {
     platform: "linux", arch: "x64",
-    file: "mosh-client-linux-x64.tar.gz", localDir: "linux-x64", extract: "tar.gz",
-    legacy: { file: "mosh-client-linux-x64", local: "linux-x64/mosh-client" },
+    file: "mosh-client-linux-x64.tar.gz", localDir: "linux-x64", binary: "mosh-client",
   },
   {
     platform: "linux", arch: "arm64",
-    file: "mosh-client-linux-arm64.tar.gz", localDir: "linux-arm64", extract: "tar.gz",
-    legacy: { file: "mosh-client-linux-arm64", local: "linux-arm64/mosh-client" },
+    file: "mosh-client-linux-arm64.tar.gz", localDir: "linux-arm64", binary: "mosh-client",
   },
   {
     platform: "darwin", arch: "universal",
-    file: "mosh-client-darwin-universal.tar.gz", localDir: "darwin-universal", extract: "tar.gz",
-    legacy: { file: "mosh-client-darwin-universal", local: "darwin-universal/mosh-client" },
+    file: "mosh-client-darwin-universal.tar.gz", localDir: "darwin-universal", binary: "mosh-client",
   },
   {
     platform: "win32", arch: "x64",
-    file: "mosh-client-win32-x64.tar.gz", localDir: "win32-x64", extract: "tar.gz",
-    legacy: WINDOWS_LEGACY_FLUENT_MOSH_CLIENT,
+    file: "mosh-client-win32-x64.tar.gz", localDir: "win32-x64", binary: "mosh-client.exe",
   },
 ];
-
-function applyReleaseAssetOverrides(asset, opts = {}) {
-  if (asset.id !== WINDOWS_LEGACY_FLUENT_MOSH_CLIENT.id) return asset;
-  return {
-    ...asset,
-    url: opts.windowsLegacyUrl || asset.url,
-    sha256: opts.windowsLegacySha256 || asset.sha256,
-  };
-}
-
-function selectReleaseAsset(target, sums, opts = {}) {
-  const primary = { file: target.file, extract: target.extract, local: target.local, localDir: target.localDir };
-  if (!target.legacy) return primary;
-  if (target.preferLegacy && !opts.forceWindowsCygwin) {
-    const legacy = applyReleaseAssetOverrides(target.legacy, opts);
-    if (sums.get(target.legacy.file) === legacy.sha256) {
-      return { file: target.legacy.file, local: target.legacy.local, sha256: legacy.sha256 };
-    }
-    return legacy;
-  }
-  // SHA256SUMS unavailable (allowUnverified mirror) — keep the primary
-  // and let download / extraction errors surface naturally.
-  if (sums.size === 0) return primary;
-  if (sums.has(target.file)) return primary;
-  if (sums.has(target.legacy.file)) {
-    const expected = sums.get(target.legacy.file);
-    const fallback = applyReleaseAssetOverrides(target.legacy, opts);
-    if (fallback.id && fallback.sha256 && expected !== fallback.sha256) {
-      return fallback;
-    }
-    return { file: target.legacy.file, local: target.legacy.local, sha256: expected };
-  }
-  return primary;
-}
 
 function log(msg) { console.log(`[fetch-mosh-binaries] ${msg}`); }
 function warn(msg) { console.warn(`[fetch-mosh-binaries] WARN ${msg}`); }
@@ -251,58 +187,46 @@ function assertExtractedTreeSafe(root) {
   }
 }
 
-function assertBundledTerminfo(extractDir, target, { required = false } = {}) {
-  const terminfoDir = path.join(extractDir, "terminfo");
-  const terminfoEntry = [
-    path.join(terminfoDir, "x", "xterm-256color"),
-    path.join(terminfoDir, "78", "xterm-256color"),
-  ].find((entry) => fs.existsSync(entry));
-  if (terminfoEntry && !fs.lstatSync(terminfoEntry).isFile()) {
-    throw new Error(`${target.file} contained invalid terminfo for xterm-256color`);
+/** Keep only the pure MoshCatty client binary under extractDir. */
+function normalizeMoshCattyBundle(extractDir, target) {
+  const wanted = target.binary;
+  const candidates = [
+    path.join(extractDir, wanted),
+    path.join(extractDir, `mosh-client-${target.platform}-${target.arch}${wanted.endsWith(".exe") ? ".exe" : ""}`),
+    path.join(extractDir, wanted.endsWith(".exe") ? "mosh-client.exe" : "mosh-client"),
+  ];
+  let found = candidates.find((p) => fs.existsSync(p) && fs.lstatSync(p).isFile());
+  if (!found) {
+    // Search one level deep for a correctly named binary
+    for (const name of fs.readdirSync(extractDir)) {
+      const child = path.join(extractDir, name);
+      if (!fs.statSync(child).isDirectory()) continue;
+      const nested = path.join(child, wanted);
+      if (fs.existsSync(nested) && fs.lstatSync(nested).isFile()) {
+        found = nested;
+        break;
+      }
+    }
   }
-  if (!terminfoEntry) {
-    const msg = `${target.file} did not contain terminfo for xterm-256color; ${target.platform}-${target.arch} mosh packaging will fall back to host system terminfo (issue #890).`;
-    if (required) throw new Error(msg);
-    warn(msg);
+  if (!found) {
+    throw new Error(`${target.file} did not contain ${wanted}`);
   }
-}
 
-function normalizeWindowsBundle(extractDir, target) {
-  const genericExe = path.join(extractDir, "mosh-client.exe");
-  const legacyExe = path.join(extractDir, `mosh-client-${target.platform}-${target.arch}.exe`);
-  if (!fs.existsSync(genericExe) && fs.existsSync(legacyExe)) {
-    fs.renameSync(legacyExe, genericExe);
-  }
-  if (!fs.existsSync(genericExe) || !fs.lstatSync(genericExe).isFile()) {
-    throw new Error(`${target.file} did not contain mosh-client.exe`);
-  }
-  // MoshCatty pure-Rust packages ship only mosh-client.exe (no Cygwin DLL bag,
-  // no terminfo). Legacy Cygwin-era bundles may still include dlls + terminfo;
-  // terminfo is optional either way (warn if missing).
-  const dllDir = path.join(extractDir, `mosh-client-${target.platform}-${target.arch}-dlls`);
-  if (fs.existsSync(dllDir) && fs.statSync(dllDir).isDirectory()) {
-    assertBundledTerminfo(extractDir, target, { required: false });
-  }
-  chmodExecutable(genericExe);
-}
+  // Stage a clean tree with only the client binary (drop any accidental extras).
+  const cleanDir = path.join(extractDir, ".moshcatty-clean");
+  fs.mkdirSync(cleanDir, { recursive: true });
+  const destBinary = path.join(cleanDir, wanted);
+  fs.copyFileSync(found, destBinary);
+  chmodExecutable(destBinary);
 
-function normalizePosixBundle(extractDir, target) {
-  const binary = path.join(extractDir, "mosh-client");
-  const legacyBinary = path.join(extractDir, `mosh-client-${target.platform}-${target.arch}`);
-  if (!fs.existsSync(binary) && fs.existsSync(legacyBinary)) {
-    fs.renameSync(legacyBinary, binary);
+  for (const name of fs.readdirSync(extractDir)) {
+    if (name === ".moshcatty-clean") continue;
+    fs.rmSync(path.join(extractDir, name), { recursive: true, force: true });
   }
-  if (!fs.existsSync(binary) || !fs.lstatSync(binary).isFile()) {
-    throw new Error(`${target.file} did not contain mosh-client`);
+  for (const name of fs.readdirSync(cleanDir)) {
+    fs.renameSync(path.join(cleanDir, name), path.join(extractDir, name));
   }
-  // Posix MoshCatty is also pure (no terminfo required). Warn only.
-  assertBundledTerminfo(extractDir, target, { required: false });
-  chmodExecutable(binary);
-}
-
-function normalizeBundle(extractDir, target) {
-  if (target.platform === "win32") return normalizeWindowsBundle(extractDir, target);
-  return normalizePosixBundle(extractDir, target);
+  fs.rmSync(cleanDir, { recursive: true, force: true });
 }
 
 function replaceDir(srcDir, destDir) {
@@ -332,7 +256,7 @@ function unpackTarGz(buf, target, { resDir }) {
       stdio: "inherit",
     });
     assertExtractedTreeSafe(extractDir);
-    normalizeBundle(extractDir, target);
+    normalizeMoshCattyBundle(extractDir, target);
     replaceDir(extractDir, destDir);
   } finally {
     fs.rmSync(tmpRoot, { recursive: true, force: true });
@@ -340,55 +264,30 @@ function unpackTarGz(buf, target, { resDir }) {
   return destDir;
 }
 
-function writeFlatAsset(buf, target, asset, { resDir }) {
-  const dest = path.join(resDir, asset.local);
-  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-mosh-flat-"));
-  const tmpDest = path.join(tmpRoot, path.basename(dest));
-  try {
-    fs.writeFileSync(tmpDest, buf);
-    if (target.platform !== "win32") fs.chmodSync(tmpDest, 0o755);
-    replaceDir(tmpRoot, path.dirname(dest));
-  } catch (err) {
-    fs.rmSync(tmpRoot, { recursive: true, force: true });
-    throw err;
-  }
-  return dest;
-}
-
 async function fetchOne(target, sums, opts) {
   const { baseUrl, resDir, allowUnverified = false } = opts;
-  const asset = selectReleaseAsset(target, sums, opts);
-  if (asset.file !== target.file) {
-    log(`using legacy asset ${asset.file} for ${target.platform}-${target.arch}`);
-  }
-  const url = asset.url || `${baseUrl}/${asset.file}`;
+  const url = `${baseUrl}/${target.file}`;
   let buf;
   try {
     buf = await follow(url);
   } catch (err) {
-    throw new Error(`download failed for ${asset.file}: ${err.message}`);
+    throw new Error(`download failed for ${target.file}: ${err.message}`);
   }
 
-  const expected = asset.sha256 || sums.get(asset.file);
+  const expected = sums.get(target.file);
   const actual = crypto.createHash("sha256").update(buf).digest("hex");
   if (expected && expected !== actual) {
-    throw new Error(`SHA256 mismatch for ${asset.file}: expected ${expected}, got ${actual}`);
+    throw new Error(`SHA256 mismatch for ${target.file}: expected ${expected}, got ${actual}`);
   }
   if (!expected) {
     if (!allowUnverified) {
-      throw new Error(`no SHA256 entry for ${asset.file}`);
+      throw new Error(`no SHA256 entry for ${target.file}`);
     }
-    warn(`no SHA256 entry for ${asset.file} - accepting actual ${actual}`);
+    warn(`no SHA256 entry for ${target.file} - accepting actual ${actual}`);
   }
 
-  if (asset.extract === "tar.gz") {
-    const destDir = unpackTarGz(buf, target, { resDir });
-    log(`unpacked ${asset.file} into ${path.relative(ROOT, destDir)}/ (sha256=${actual})`);
-    return true;
-  }
-
-  const dest = writeFlatAsset(buf, target, asset, { resDir });
-  log(`wrote ${path.relative(ROOT, dest)} (${buf.length} bytes, sha256=${actual})`);
+  const destDir = unpackTarGz(buf, target, { resDir });
+  log(`unpacked ${target.file} into ${path.relative(ROOT, destDir)}/ (sha256=${actual})`);
   return true;
 }
 
@@ -410,7 +309,7 @@ async function main(argv = process.argv.slice(2), env = process.env) {
     release = await resolveMoshBinRelease(env);
   }
   if (!release) {
-    log("MOSH_BIN_RELEASE is unset - skipping. Set it (e.g. moshcatty-0.1.0) to bundle mosh-client into the package.");
+    log("MOSH_BIN_RELEASE is unset - skipping. Set it (e.g. moshcatty-0.1.1) to bundle mosh-client into the package.");
     return 0;
   }
 
@@ -419,7 +318,6 @@ async function main(argv = process.argv.slice(2), env = process.env) {
     `https://github.com/${owner}/${repo}/releases/download/${encodeURIComponent(release)}`;
   const resDir = path.resolve(env.MOSH_BIN_RES_DIR || DEFAULT_RES_DIR);
   const allowUnverified = env.MOSH_BIN_ALLOW_UNVERIFIED === "true";
-  const forceWindowsCygwin = env.MOSH_BIN_FORCE_WINDOWS_CYGWIN === "true";
   const platformFilter = hostTarget?.platform || platformArg;
   const archFilter = hostTarget?.arch || archArg;
 
@@ -431,14 +329,7 @@ async function main(argv = process.argv.slice(2), env = process.env) {
     if (platformFilter && target.platform !== platformFilter) continue;
     if (archFilter && target.arch !== archFilter) continue;
     total += 1;
-    if (await fetchOne(target, sums, {
-      baseUrl,
-      resDir,
-      allowUnverified,
-      forceWindowsCygwin,
-      windowsLegacyUrl: env.MOSH_BIN_WINDOWS_LEGACY_URL,
-      windowsLegacySha256: env.MOSH_BIN_WINDOWS_LEGACY_SHA256,
-    })) ok += 1;
+    if (await fetchOne(target, sums, { baseUrl, resDir, allowUnverified })) ok += 1;
   }
   log(`done - ${ok}/${total} binaries written`);
   if (ok < total) throw new Error(`only wrote ${ok}/${total} requested binaries`);
@@ -459,11 +350,9 @@ module.exports = {
   resolveHostTarget,
   resolveTarArchiveInvocation,
   parseSums,
-  selectReleaseAsset,
   validateTarEntries,
   assertExtractedTreeSafe,
-  normalizeWindowsBundle,
+  normalizeMoshCattyBundle,
   unpackTarGz,
-  writeFlatAsset,
   main,
 };

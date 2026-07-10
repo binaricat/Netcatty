@@ -580,10 +580,7 @@ const moshSessionApi = createMoshSessionApi({
 });
 const {
   resolveBareMoshClient,
-  addBundledMoshDllPath,
-  addBundledMoshTerminfoEnv,
   addBundledMoshRuntimeEnv,
-  toCygwinPath,
   createMoshUtf8Decoder,
   buildMoshSshAuthArgs,
   cleanupMoshAuthTempFiles,
@@ -1444,7 +1441,7 @@ const { getDefaultShell, validatePath } = pathValidationApi;
 /**
  * Locate the mosh-client binary bundled by electron-builder via
  * `extraResources` (see electron-builder.config.cjs and
- * .github/workflows/build-mosh-binaries.yml).
+ * binaricat/MoshCatty releases).
  *
  * Returns an absolute path when the binary is on disk, otherwise null.
  * In dev / non-packaged runs the path is computed against the project
@@ -1586,10 +1583,7 @@ module.exports = {
   startMoshSession,
   bundledMoshClient,
   resolveBareMoshClient,
-  addBundledMoshDllPath,
-  addBundledMoshTerminfoEnv,
   addBundledMoshRuntimeEnv,
-  toCygwinPath,
   createMoshUtf8Decoder,
   startEtSession,
   execOnEtSession,

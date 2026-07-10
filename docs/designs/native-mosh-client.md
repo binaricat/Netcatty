@@ -5,14 +5,14 @@ Related: [#2025](https://github.com/binaricat/Netcatty/issues/2025), [#2072](htt
 
 ## Canonical repository
 
-Implementation, CI, and multi-platform releases live in:
-
 **https://github.com/binaricat/MoshCatty**
 
-Netcatty only **consumes** release binaries into `resources/mosh/` via
-`scripts/fetch-mosh-binaries.cjs` (default `MOSH_BIN_REPO=MoshCatty`).
+Netcatty only **consumes** `moshcatty-*` release binaries into `resources/mosh/`
+via `scripts/fetch-mosh-binaries.cjs` / `scripts/resolve-mosh-bin-release.cjs`
+(default `MOSH_BIN_REPO=MoshCatty`).
 
-There is **no** in-tree Rust source for the client anymore.
+There is **no** in-tree Rust source, no Cygwin packaging path, and no
+FluentTerminal / `mosh-bin-*` fallback.
 
 ## Integration contract
 
@@ -20,30 +20,25 @@ There is **no** in-tree Rust source for the client anymore.
 MOSH_KEY=<key> mosh-client <host> <port>
 ```
 
-Netcatty still owns SSH bootstrap (`moshHandshake` + PTY), then swaps to the
+Netcatty owns SSH bootstrap (`moshHandshake` + PTY), then swaps to the
 bundled MoshCatty binary under `node-pty`.
 
 | Concern | Owner |
 |---------|--------|
 | SSH auth / `MOSH CONNECT` parse | Netcatty Electron |
 | UDP Mosh data plane | MoshCatty binary |
-| Packaging / fetch / electron-builder | Netcatty scripts |
+| Packaging / fetch / electron-builder | Netcatty scripts → MoshCatty releases |
 
-## Why (summary)
+## Why
 
 Windows Cygwin `mosh-client` + partial runtime + ConPTY sandwich was
 architecturally broken. MoshCatty is a pure Rust, wire-compatible client with
-one code path on Linux / macOS / Windows.
-
-See the [MoshCatty README](https://github.com/binaricat/MoshCatty#readme) for
-protocol stack, build, and release details.
+one code path on Linux / macOS / Windows (static CRT on Windows).
 
 ## Decision log
 
-- **2026-07-10:** Feasibility accepted; Rust client developed in-tree then
-  extracted to `binaricat/MoshCatty`.
-- **2026-07-10:** Netcatty defaults packaging to MoshCatty releases; in-tree
-  `native/netcatty-mosh` vendor snapshot removed.
-- **2026-07-10:** `fetch-mosh-binaries` accepts pure Windows tarballs (exe only;
-  no Cygwin dlls / terminfo required). MoshCatty `moshcatty-0.1.1` ships
-  ConPTY Ctrl+C fix + static MSVC CRT (no `VCRUNTIME140`).
+- **2026-07-10:** Feasibility accepted; client extracted to `binaricat/MoshCatty`.
+- **2026-07-10:** Netcatty defaults packaging to MoshCatty releases.
+- **2026-07-10:** Removed legacy Cygwin build pipeline, FluentTerminal fallback,
+  `mosh-bin-*` tags, dll/terminfo runtime helpers. Pure MoshCatty only
+  (`moshcatty-0.1.1`: ConPTY Ctrl+C + static MSVC CRT).

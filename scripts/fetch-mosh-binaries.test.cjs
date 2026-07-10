@@ -15,7 +15,7 @@ const {
   replaceDir,
   resolveHostTarget,
   resolveTarArchiveInvocation,
-  selectReleaseAsset,
+  TARGETS,
 } = require("./fetch-mosh-binaries.cjs");
 
 function makeTmp(t) {
@@ -40,34 +40,42 @@ function makeTarGz(t, entries) {
   return fs.readFileSync(tarPath);
 }
 
+async function serveAssets(t, assets) {
+  const server = http.createServer((req, res) => {
+    const name = decodeURIComponent(req.url.split("/").pop());
+    if (!Object.prototype.hasOwnProperty.call(assets, name)) {
+      res.writeHead(404);
+      res.end("missing");
+      return;
+    }
+    res.writeHead(200);
+    res.end(assets[name]);
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => server.close());
+  return `http://127.0.0.1:${server.address().port}`;
+}
+
 test("fetch-mosh-binaries defaults to the MoshCatty binary repository", () => {
   assert.deepEqual(parseMoshBinRepository({}), { owner: "binaricat", repo: "MoshCatty" });
   assert.deepEqual(parseMoshBinRepository({ GITHUB_REPOSITORY: "owner/project" }), {
     owner: "owner",
     repo: "MoshCatty",
   });
-  assert.deepEqual(
-    parseMoshBinRepository({ GITHUB_REPOSITORY: "owner/project", MOSH_BIN_OWNER: "bin", MOSH_BIN_REPO: "binaries" }),
-    { owner: "bin", repo: "binaries" },
-  );
+});
+
+test("TARGETS are pure MoshCatty tarball assets only", () => {
+  for (const t of TARGETS) {
+    assert.match(t.file, /^mosh-client-.+\.tar\.gz$/);
+    assert.ok(t.binary === "mosh-client" || t.binary === "mosh-client.exe");
+    assert.equal(Object.prototype.hasOwnProperty.call(t, "legacy"), false);
+  }
 });
 
 test("resolveHostTarget maps the local platform to the bundled target", () => {
   assert.deepEqual(resolveHostTarget({ platform: "darwin", arch: "arm64" }), {
     platform: "darwin",
     arch: "universal",
-  });
-  assert.deepEqual(resolveHostTarget({ platform: "darwin", arch: "x64" }), {
-    platform: "darwin",
-    arch: "universal",
-  });
-  assert.deepEqual(resolveHostTarget({ platform: "linux", arch: "x64" }), {
-    platform: "linux",
-    arch: "x64",
-  });
-  assert.deepEqual(resolveHostTarget({ platform: "linux", arch: "arm64" }), {
-    platform: "linux",
-    arch: "arm64",
   });
   assert.deepEqual(resolveHostTarget({ platform: "win32", arch: "x64" }), {
     platform: "win32",
@@ -117,9 +125,7 @@ test("replaceDir falls back to copy when rename crosses devices", (t) => {
 
 test("fetch-mosh-binaries host mode skips unsupported local targets", async (t) => {
   const resDir = path.join(makeTmp(t), "resources", "mosh");
-  const baseUrl = await serveAssets(t, {
-    SHA256SUMS: "",
-  });
+  const baseUrl = await serveAssets(t, { SHA256SUMS: "" });
 
   const { stderr } = await execFileAsync(
     process.execPath,
@@ -127,7 +133,7 @@ test("fetch-mosh-binaries host mode skips unsupported local targets", async (t) 
     {
       env: {
         ...process.env,
-        MOSH_BIN_RELEASE: "test",
+        MOSH_BIN_RELEASE: "moshcatty-0.1.1",
         MOSH_BIN_BASE_URL: baseUrl,
         MOSH_BIN_RES_DIR: resDir,
         CI: "true",
@@ -140,102 +146,7 @@ test("fetch-mosh-binaries host mode skips unsupported local targets", async (t) 
   assert.equal(fs.existsSync(resDir), false);
 });
 
-test("fetch-mosh-binaries host mode skips unsupported targets before resolving release", async (t) => {
-  const resDir = path.join(makeTmp(t), "resources", "mosh");
-
-  const { stdout, stderr } = await execFileAsync(
-    process.execPath,
-    [script, "--host", "--resolve-release", "--platform=win32", "--arch=arm64"],
-    {
-      env: {
-        ...process.env,
-        MOSH_BIN_RELEASE: "",
-        MOSH_BIN_RELEASES_JSON: "[]",
-        MOSH_BIN_RES_DIR: resDir,
-        CI: "true",
-      },
-      stdio: "pipe",
-    },
-  );
-
-  assert.match(stderr, /No bundled mosh-client target for win32-arm64/);
-  assert.doesNotMatch(stdout, /MOSH_BIN_RELEASE is unset/);
-  assert.equal(fs.existsSync(resDir), false);
-});
-
-async function serveAssets(t, assets) {
-  const server = http.createServer((req, res) => {
-    const name = decodeURIComponent(req.url.split("/").pop());
-    if (!Object.prototype.hasOwnProperty.call(assets, name)) {
-      res.writeHead(404);
-      res.end("missing");
-      return;
-    }
-    res.writeHead(200);
-    res.end(assets[name]);
-  });
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  t.after(() => server.close());
-  return `http://127.0.0.1:${server.address().port}`;
-}
-
-test("fetch-mosh-binaries normalizes the Windows tarball to mosh-client.exe", async (t) => {
-  const resDir = path.join(makeTmp(t), "resources", "mosh");
-  const tar = makeTarGz(t, {
-    "mosh-client-win32-x64.exe": "exe",
-    "mosh-client-win32-x64-dlls/cygwin1.dll": "dll",
-    "terminfo/x/xterm-256color": "terminfo",
-  });
-  const baseUrl = await serveAssets(t, {
-    "mosh-client-win32-x64.tar.gz": tar,
-    SHA256SUMS: `${sha256(tar)}  mosh-client-win32-x64.tar.gz\n`,
-  });
-
-  await execFileAsync(process.execPath, [script, "--platform=win32", "--arch=x64"], {
-    env: {
-      ...process.env,
-      MOSH_BIN_RELEASE: "test",
-      MOSH_BIN_BASE_URL: baseUrl,
-      MOSH_BIN_RES_DIR: resDir,
-      MOSH_BIN_FORCE_WINDOWS_CYGWIN: "true",
-      CI: "true",
-    },
-    stdio: "pipe",
-  });
-
-  assert.equal(fs.existsSync(path.join(resDir, "win32-x64", "mosh-client.exe")), true);
-  assert.equal(fs.existsSync(path.join(resDir, "win32-x64", "mosh-client-win32-x64-dlls", "cygwin1.dll")), true);
-  assert.equal(fs.existsSync(path.join(resDir, "win32-x64", "terminfo", "x", "xterm-256color")), true);
-});
-
-test("fetch-mosh-binaries accepts legacy Windows bundles without terminfo", async (t) => {
-  const resDir = path.join(makeTmp(t), "resources", "mosh");
-  const tar = makeTarGz(t, {
-    "mosh-client.exe": "exe",
-    "mosh-client-win32-x64-dlls/cygwin1.dll": "dll",
-  });
-  const baseUrl = await serveAssets(t, {
-    "mosh-client-win32-x64.tar.gz": tar,
-    SHA256SUMS: `${sha256(tar)}  mosh-client-win32-x64.tar.gz\n`,
-  });
-
-  const { stderr } = await execFileAsync(process.execPath, [script, "--platform=win32", "--arch=x64"], {
-    env: {
-      ...process.env,
-      MOSH_BIN_RELEASE: "test",
-      MOSH_BIN_BASE_URL: baseUrl,
-      MOSH_BIN_RES_DIR: resDir,
-      MOSH_BIN_FORCE_WINDOWS_CYGWIN: "true",
-      CI: "true",
-    },
-    stdio: "pipe",
-  });
-
-  assert.match(stderr, /did not contain terminfo for xterm-256color/);
-  assert.equal(fs.existsSync(path.join(resDir, "win32-x64", "mosh-client.exe")), true);
-});
-
-test("fetch-mosh-binaries accepts pure MoshCatty Windows tarball without dlls or terminfo", async (t) => {
+test("fetch-mosh-binaries unpacks pure Windows MoshCatty tarball", async (t) => {
   const resDir = path.join(makeTmp(t), "resources", "mosh");
   const tar = makeTarGz(t, {
     "mosh-client.exe": "pure-moshcatty-exe",
@@ -256,175 +167,21 @@ test("fetch-mosh-binaries accepts pure MoshCatty Windows tarball without dlls or
     stdio: "pipe",
   });
 
-  assert.equal(fs.existsSync(path.join(resDir, "win32-x64", "mosh-client.exe")), true);
-  assert.equal(fs.existsSync(path.join(resDir, "win32-x64", "mosh-client-win32-x64-dlls")), false);
-  assert.equal(fs.existsSync(path.join(resDir, "win32-x64", "mosh-client-core.exe")), false);
   assert.equal(
     fs.readFileSync(path.join(resDir, "win32-x64", "mosh-client.exe"), "utf8"),
     "pure-moshcatty-exe",
   );
+  assert.equal(fs.existsSync(path.join(resDir, "win32-x64", "mosh-client-win32-x64-dlls")), false);
+  assert.equal(fs.existsSync(path.join(resDir, "win32-x64", "terminfo")), false);
 });
 
-test("fetch-mosh-binaries rejects invalid Windows terminfo entries", async (t) => {
-  const resDir = path.join(makeTmp(t), "resources", "mosh");
-  const srcDir = makeTmp(t);
-  fs.writeFileSync(path.join(srcDir, "mosh-client.exe"), "exe");
-  fs.mkdirSync(path.join(srcDir, "mosh-client-win32-x64-dlls"), { recursive: true });
-  fs.writeFileSync(path.join(srcDir, "mosh-client-win32-x64-dlls", "cygwin1.dll"), "dll");
-  fs.mkdirSync(path.join(srcDir, "terminfo", "x", "xterm-256color"), { recursive: true });
-  const tarPath = path.join(makeTmp(t), "invalid-terminfo.tar.gz");
-  execFileSync("tar", ["-czf", tarPath, "-C", srcDir, "mosh-client.exe", "mosh-client-win32-x64-dlls", "terminfo"], { stdio: "pipe" });
-  const tar = fs.readFileSync(tarPath);
-  const baseUrl = await serveAssets(t, {
-    "mosh-client-win32-x64.tar.gz": tar,
-    SHA256SUMS: `${sha256(tar)}  mosh-client-win32-x64.tar.gz\n`,
-  });
-
-  await assert.rejects(
-    execFileAsync(process.execPath, [script, "--platform=win32", "--arch=x64"], {
-      env: {
-        ...process.env,
-        MOSH_BIN_RELEASE: "test",
-        MOSH_BIN_BASE_URL: baseUrl,
-        MOSH_BIN_RES_DIR: resDir,
-        MOSH_BIN_FORCE_WINDOWS_CYGWIN: "true",
-        CI: "true",
-      },
-      stdio: "pipe",
-    }),
-    /invalid terminfo for xterm-256color/,
-  );
-});
-
-test("fetch-mosh-binaries fails when SHA256SUMS lacks the requested asset", async (t) => {
+test("fetch-mosh-binaries strips accidental dll/terminfo from Windows tarball", async (t) => {
   const resDir = path.join(makeTmp(t), "resources", "mosh");
   const tar = makeTarGz(t, {
     "mosh-client.exe": "exe",
     "mosh-client-win32-x64-dlls/cygwin1.dll": "dll",
     "terminfo/x/xterm-256color": "terminfo",
   });
-  const baseUrl = await serveAssets(t, {
-    "mosh-client-win32-x64.tar.gz": tar,
-    SHA256SUMS: `${sha256(Buffer.from("other"))}  other-file\n`,
-  });
-
-  await assert.rejects(
-    execFileAsync(process.execPath, [script, "--platform=win32", "--arch=x64"], {
-      env: {
-        ...process.env,
-        MOSH_BIN_RELEASE: "test",
-        MOSH_BIN_BASE_URL: baseUrl,
-        MOSH_BIN_RES_DIR: resDir,
-        MOSH_BIN_FORCE_WINDOWS_CYGWIN: "true",
-        CI: "true",
-      },
-      stdio: "pipe",
-    }),
-  );
-});
-
-test("selectReleaseAsset prefers the bundled tarball when listed in SHA256SUMS", () => {
-  const target = {
-    platform: "linux", arch: "x64",
-    file: "mosh-client-linux-x64.tar.gz", localDir: "linux-x64", extract: "tar.gz",
-    legacy: { file: "mosh-client-linux-x64", local: "linux-x64/mosh-client" },
-  };
-  const sums = new Map([
-    ["mosh-client-linux-x64.tar.gz", "abc"],
-    ["mosh-client-linux-x64", "def"],
-  ]);
-  assert.equal(selectReleaseAsset(target, sums).file, "mosh-client-linux-x64.tar.gz");
-});
-
-test("selectReleaseAsset falls back to the legacy flat asset when only it is published", () => {
-  const target = {
-    platform: "linux", arch: "x64",
-    file: "mosh-client-linux-x64.tar.gz", localDir: "linux-x64", extract: "tar.gz",
-    legacy: { file: "mosh-client-linux-x64", local: "linux-x64/mosh-client" },
-  };
-  const sums = new Map([["mosh-client-linux-x64", "def"]]);
-  const asset = selectReleaseAsset(target, sums);
-  assert.equal(asset.file, "mosh-client-linux-x64");
-  assert.equal(asset.local, "linux-x64/mosh-client");
-  assert.equal(asset.extract, undefined);
-});
-
-test("selectReleaseAsset stays on the primary when SHA256SUMS is empty (unverified mirror)", () => {
-  const target = {
-    platform: "linux", arch: "x64",
-    file: "mosh-client-linux-x64.tar.gz", localDir: "linux-x64", extract: "tar.gz",
-    legacy: { file: "mosh-client-linux-x64", local: "linux-x64/mosh-client" },
-  };
-  assert.equal(selectReleaseAsset(target, new Map()).file, "mosh-client-linux-x64.tar.gz");
-});
-
-test("selectReleaseAsset prefers the released Windows bundle by default", () => {
-  const target = {
-    platform: "win32", arch: "x64",
-    file: "mosh-client-win32-x64.tar.gz", localDir: "win32-x64", extract: "tar.gz",
-    legacy: {
-      id: "windows-fluentterminal-standalone",
-      file: "mosh-client-win32-x64.exe",
-      local: "win32-x64/mosh-client.exe",
-      url: "https://example.test/mosh-client.exe",
-      sha256: "abc",
-    },
-  };
-  const sums = new Map([["mosh-client-win32-x64.tar.gz", "def"]]);
-
-  assert.equal(selectReleaseAsset(target, sums).file, "mosh-client-win32-x64.tar.gz");
-  assert.equal(selectReleaseAsset(target, sums, { forceWindowsCygwin: true }).file, "mosh-client-win32-x64.tar.gz");
-});
-
-test("selectReleaseAsset falls back to the Windows standalone asset when the bundle is absent", () => {
-  const target = {
-    platform: "win32", arch: "x64",
-    file: "mosh-client-win32-x64.tar.gz", localDir: "win32-x64", extract: "tar.gz",
-    legacy: {
-      id: "windows-fluentterminal-standalone",
-      file: "mosh-client-win32-x64.exe",
-      local: "win32-x64/mosh-client.exe",
-      url: "https://example.test/mosh-client.exe",
-      sha256: "abc",
-    },
-  };
-  const asset = selectReleaseAsset(target, new Map([["mosh-client-win32-x64.exe", "abc"]]));
-
-  assert.equal(asset.file, "mosh-client-win32-x64.exe");
-  assert.equal(asset.local, "win32-x64/mosh-client.exe");
-  assert.equal(asset.url, undefined);
-  assert.equal(asset.sha256, "abc");
-});
-
-test("selectReleaseAsset ignores a released Windows asset when its checksum is not the pinned standalone", () => {
-  const target = {
-    platform: "win32", arch: "x64",
-    file: "mosh-client-win32-x64.tar.gz", localDir: "win32-x64", extract: "tar.gz",
-    legacy: {
-      id: "windows-fluentterminal-standalone",
-      file: "mosh-client-win32-x64.exe",
-      local: "win32-x64/mosh-client.exe",
-      url: "https://example.test/mosh-client.exe",
-      sha256: "abc",
-    },
-  };
-  const asset = selectReleaseAsset(target, new Map([["mosh-client-win32-x64.exe", "def"]]));
-
-  assert.equal(asset.file, "mosh-client-win32-x64.exe");
-  assert.equal(asset.local, "win32-x64/mosh-client.exe");
-  assert.equal(asset.url, "https://example.test/mosh-client.exe");
-  assert.equal(asset.sha256, "abc");
-});
-
-test("fetch-mosh-binaries downloads the released Windows bundle by default", async (t) => {
-  const resDir = path.join(makeTmp(t), "resources", "mosh");
-  const tar = makeTarGz(t, {
-    "mosh-client.exe": "exe",
-    "mosh-client-win32-x64-dlls/cygwin1.dll": "dll",
-    "terminfo/x/xterm-256color": "terminfo",
-  });
-  fs.mkdirSync(path.join(resDir, "win32-x64", "mosh-client-win32-x64-dlls"), { recursive: true });
-  fs.writeFileSync(path.join(resDir, "win32-x64", "mosh-client-win32-x64-dlls", "cygwin1.dll"), "stale");
   const baseUrl = await serveAssets(t, {
     "mosh-client-win32-x64.tar.gz": tar,
     SHA256SUMS: `${sha256(tar)}  mosh-client-win32-x64.tar.gz\n`,
@@ -433,7 +190,7 @@ test("fetch-mosh-binaries downloads the released Windows bundle by default", asy
   await execFileAsync(process.execPath, [script, "--platform=win32", "--arch=x64"], {
     env: {
       ...process.env,
-      MOSH_BIN_RELEASE: "test",
+      MOSH_BIN_RELEASE: "moshcatty-0.1.1",
       MOSH_BIN_BASE_URL: baseUrl,
       MOSH_BIN_RES_DIR: resDir,
       CI: "true",
@@ -442,24 +199,24 @@ test("fetch-mosh-binaries downloads the released Windows bundle by default", asy
   });
 
   assert.equal(fs.readFileSync(path.join(resDir, "win32-x64", "mosh-client.exe"), "utf8"), "exe");
-  assert.equal(fs.readFileSync(path.join(resDir, "win32-x64", "mosh-client-win32-x64-dlls", "cygwin1.dll"), "utf8"), "dll");
-  assert.equal(fs.readFileSync(path.join(resDir, "win32-x64", "terminfo", "x", "xterm-256color"), "utf8"), "terminfo");
+  assert.equal(fs.existsSync(path.join(resDir, "win32-x64", "mosh-client-win32-x64-dlls")), false);
+  assert.equal(fs.existsSync(path.join(resDir, "win32-x64", "terminfo")), false);
 });
 
-test("fetch-mosh-binaries falls back to the legacy flat asset for older releases", async (t) => {
+test("fetch-mosh-binaries unpacks pure Linux MoshCatty tarball", async (t) => {
   const resDir = path.join(makeTmp(t), "resources", "mosh");
-  const flat = Buffer.from("legacy-binary");
-  fs.mkdirSync(path.join(resDir, "linux-x64", "terminfo", "78"), { recursive: true });
-  fs.writeFileSync(path.join(resDir, "linux-x64", "terminfo", "78", "xterm-256color"), "stale");
+  const tar = makeTarGz(t, {
+    "mosh-client": "linux-client",
+  });
   const baseUrl = await serveAssets(t, {
-    "mosh-client-linux-x64": flat,
-    SHA256SUMS: `${sha256(flat)}  mosh-client-linux-x64\n`,
+    "mosh-client-linux-x64.tar.gz": tar,
+    SHA256SUMS: `${sha256(tar)}  mosh-client-linux-x64.tar.gz\n`,
   });
 
   await execFileAsync(process.execPath, [script, "--platform=linux", "--arch=x64"], {
     env: {
       ...process.env,
-      MOSH_BIN_RELEASE: "test",
+      MOSH_BIN_RELEASE: "moshcatty-0.1.1",
       MOSH_BIN_BASE_URL: baseUrl,
       MOSH_BIN_RES_DIR: resDir,
       CI: "true",
@@ -467,92 +224,14 @@ test("fetch-mosh-binaries falls back to the legacy flat asset for older releases
     stdio: "pipe",
   });
 
-  assert.equal(fs.existsSync(path.join(resDir, "linux-x64", "mosh-client")), true);
-  assert.equal(fs.readFileSync(path.join(resDir, "linux-x64", "mosh-client"), "utf8"), "legacy-binary");
+  assert.equal(fs.readFileSync(path.join(resDir, "linux-x64", "mosh-client"), "utf8"), "linux-client");
   assert.equal(fs.existsSync(path.join(resDir, "linux-x64", "terminfo")), false);
 });
 
-test("fetch-mosh-binaries unpacks the Linux tarball with bundled terminfo", async (t) => {
+test("fetch-mosh-binaries rejects tarball without mosh-client", async (t) => {
   const resDir = path.join(makeTmp(t), "resources", "mosh");
   const tar = makeTarGz(t, {
-    "mosh-client": "binary",
-    "terminfo/x/xterm-256color": "terminfo",
-  });
-  const baseUrl = await serveAssets(t, {
-    "mosh-client-linux-x64.tar.gz": tar,
-    SHA256SUMS: `${sha256(tar)}  mosh-client-linux-x64.tar.gz\n`,
-  });
-
-  await execFileAsync(process.execPath, [script, "--platform=linux", "--arch=x64"], {
-    env: {
-      ...process.env,
-      MOSH_BIN_RELEASE: "test",
-      MOSH_BIN_BASE_URL: baseUrl,
-      MOSH_BIN_RES_DIR: resDir,
-      CI: "true",
-    },
-    stdio: "pipe",
-  });
-
-  assert.equal(fs.existsSync(path.join(resDir, "linux-x64", "mosh-client")), true);
-  assert.equal(fs.existsSync(path.join(resDir, "linux-x64", "terminfo", "x", "xterm-256color")), true);
-});
-
-test("fetch-mosh-binaries warns when the Linux tarball lacks terminfo", async (t) => {
-  const resDir = path.join(makeTmp(t), "resources", "mosh");
-  const tar = makeTarGz(t, {
-    "mosh-client": "binary",
-  });
-  const baseUrl = await serveAssets(t, {
-    "mosh-client-linux-x64.tar.gz": tar,
-    SHA256SUMS: `${sha256(tar)}  mosh-client-linux-x64.tar.gz\n`,
-  });
-
-  const { stderr } = await execFileAsync(process.execPath, [script, "--platform=linux", "--arch=x64"], {
-    env: {
-      ...process.env,
-      MOSH_BIN_RELEASE: "test",
-      MOSH_BIN_BASE_URL: baseUrl,
-      MOSH_BIN_RES_DIR: resDir,
-      CI: "true",
-    },
-    stdio: "pipe",
-  });
-
-  assert.match(stderr, /did not contain terminfo for xterm-256color/);
-  assert.equal(fs.existsSync(path.join(resDir, "linux-x64", "mosh-client")), true);
-});
-
-test("fetch-mosh-binaries unpacks the Darwin tarball with bundled terminfo", async (t) => {
-  const resDir = path.join(makeTmp(t), "resources", "mosh");
-  const tar = makeTarGz(t, {
-    "mosh-client": "binary",
-    "terminfo/x/xterm-256color": "terminfo",
-  });
-  const baseUrl = await serveAssets(t, {
-    "mosh-client-darwin-universal.tar.gz": tar,
-    SHA256SUMS: `${sha256(tar)}  mosh-client-darwin-universal.tar.gz\n`,
-  });
-
-  await execFileAsync(process.execPath, [script, "--platform=darwin", "--arch=universal"], {
-    env: {
-      ...process.env,
-      MOSH_BIN_RELEASE: "test",
-      MOSH_BIN_BASE_URL: baseUrl,
-      MOSH_BIN_RES_DIR: resDir,
-      CI: "true",
-    },
-    stdio: "pipe",
-  });
-
-  assert.equal(fs.existsSync(path.join(resDir, "darwin-universal", "mosh-client")), true);
-  assert.equal(fs.existsSync(path.join(resDir, "darwin-universal", "terminfo", "x", "xterm-256color")), true);
-});
-
-test("fetch-mosh-binaries rejects a Linux tarball without mosh-client", async (t) => {
-  const resDir = path.join(makeTmp(t), "resources", "mosh");
-  const tar = makeTarGz(t, {
-    "terminfo/x/xterm-256color": "terminfo",
+    "README.txt": "no binary here",
   });
   const baseUrl = await serveAssets(t, {
     "mosh-client-linux-x64.tar.gz": tar,
@@ -563,7 +242,7 @@ test("fetch-mosh-binaries rejects a Linux tarball without mosh-client", async (t
     execFileAsync(process.execPath, [script, "--platform=linux", "--arch=x64"], {
       env: {
         ...process.env,
-        MOSH_BIN_RELEASE: "test",
+        MOSH_BIN_RELEASE: "moshcatty-0.1.1",
         MOSH_BIN_BASE_URL: baseUrl,
         MOSH_BIN_RES_DIR: resDir,
         CI: "true",
@@ -574,14 +253,36 @@ test("fetch-mosh-binaries rejects a Linux tarball without mosh-client", async (t
   );
 });
 
-test("fetch-mosh-binaries rejects symlinks inside Windows tarballs", { skip: process.platform === "win32" }, async (t) => {
+test("fetch-mosh-binaries fails when SHA256SUMS lacks the asset", async (t) => {
+  const resDir = path.join(makeTmp(t), "resources", "mosh");
+  const tar = makeTarGz(t, { "mosh-client.exe": "exe" });
+  const baseUrl = await serveAssets(t, {
+    "mosh-client-win32-x64.tar.gz": tar,
+    SHA256SUMS: `${sha256(Buffer.from("other"))}  other-file\n`,
+  });
+
+  await assert.rejects(
+    execFileAsync(process.execPath, [script, "--platform=win32", "--arch=x64"], {
+      env: {
+        ...process.env,
+        MOSH_BIN_RELEASE: "moshcatty-0.1.1",
+        MOSH_BIN_BASE_URL: baseUrl,
+        MOSH_BIN_RES_DIR: resDir,
+        CI: "true",
+      },
+      stdio: "pipe",
+    }),
+    /no SHA256 entry/,
+  );
+});
+
+test("fetch-mosh-binaries rejects symlinks inside tarballs", { skip: process.platform === "win32" }, async (t) => {
+  const resDir = path.join(makeTmp(t), "resources", "mosh");
   const srcDir = makeTmp(t);
-  fs.writeFileSync(path.join(srcDir, "outside.exe"), "outside");
-  fs.symlinkSync(path.join(srcDir, "outside.exe"), path.join(srcDir, "mosh-client.exe"));
-  fs.mkdirSync(path.join(srcDir, "mosh-client-win32-x64-dlls"));
-  fs.writeFileSync(path.join(srcDir, "mosh-client-win32-x64-dlls", "cygwin1.dll"), "dll");
+  fs.writeFileSync(path.join(srcDir, "mosh-client.exe"), "exe");
+  fs.symlinkSync("mosh-client.exe", path.join(srcDir, "link.exe"));
   const tarPath = path.join(makeTmp(t), "symlink.tar.gz");
-  execFileSync("tar", ["-czf", tarPath, "-C", srcDir, "mosh-client.exe", "mosh-client-win32-x64-dlls"], { stdio: "pipe" });
+  execFileSync("tar", ["-czf", tarPath, "-C", srcDir, "mosh-client.exe", "link.exe"], { stdio: "pipe" });
   const tar = fs.readFileSync(tarPath);
   const baseUrl = await serveAssets(t, {
     "mosh-client-win32-x64.tar.gz": tar,
@@ -592,14 +293,13 @@ test("fetch-mosh-binaries rejects symlinks inside Windows tarballs", { skip: pro
     execFileAsync(process.execPath, [script, "--platform=win32", "--arch=x64"], {
       env: {
         ...process.env,
-        MOSH_BIN_RELEASE: "test",
+        MOSH_BIN_RELEASE: "moshcatty-0.1.1",
         MOSH_BIN_BASE_URL: baseUrl,
-        MOSH_BIN_RES_DIR: path.join(makeTmp(t), "resources", "mosh"),
-        MOSH_BIN_FORCE_WINDOWS_CYGWIN: "true",
+        MOSH_BIN_RES_DIR: resDir,
         CI: "true",
       },
       stdio: "pipe",
     }),
-    /symbolic link|did not contain mosh-client\.exe/,
+    /symbolic link/,
   );
 });

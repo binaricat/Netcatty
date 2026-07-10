@@ -77,16 +77,11 @@ Directory.Build.targets
 build_with_vs.bat
 build_with_vs2022.bat
 
-# Bundled mosh-client binaries fetched at pack time by
-# scripts/fetch-mosh-binaries.cjs. resources/mosh/README.md is
-# committed; the actual binaries, the Cygwin DLL bundle (Windows),
-# and the bundled ncurses terminfo database are all pulled from the
-# dedicated mosh binary repository, never committed.
+# Bundled MoshCatty mosh-client binaries fetched at pack time by
+# scripts/fetch-mosh-binaries.cjs. resources/mosh/README.md is committed;
+# pure single-binary artifacts from binaricat/MoshCatty are never committed.
 /resources/mosh/*/mosh-client
 /resources/mosh/*/mosh-client.exe
-/resources/mosh/*/mosh-client-*-dlls/
-/resources/mosh/*/*.dll
-/resources/mosh/*/terminfo/
 
 # Bundled EternalTerminal `et` client binaries fetched at pack time by
 # scripts/fetch-et-binaries.cjs. resources/et/README.md is committed; the

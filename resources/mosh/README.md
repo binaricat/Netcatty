@@ -1,60 +1,44 @@
-# Bundled `mosh-client`
+# Bundled `mosh-client` (MoshCatty)
 
-This directory holds the network-protocol-only `mosh-client` binary
-bundled with the Netcatty installer. Netcatty drives the `ssh` +
-`mosh-server` bootstrap itself and then launches this bundled client
-directly (see `electron/bridges/moshHandshake.cjs` and
-`electron/bridges/terminalBridge.cjs`).
+This directory holds the pure Rust `mosh-client` from
+[binaricat/MoshCatty](https://github.com/binaricat/MoshCatty).
 
-## Source: [MoshCatty](https://github.com/binaricat/MoshCatty)
+Netcatty runs SSH + `mosh-server` bootstrap itself, then launches this binary
+(see `electron/bridges/moshHandshake.cjs` and `terminalBridge/moshSession.cjs`).
 
-All platforms ship the pure Rust client from
-[`binaricat/MoshCatty`](https://github.com/binaricat/MoshCatty)
-(no Cygwin, no terminfo, no Cygwin DLL bag). Windows builds static-link the
-MSVC CRT so there is also no `VCRUNTIME140` redistributable requirement
-(from `moshcatty-0.1.1`).
+## Layout
 
-| Target | Asset |
-|--------|--------|
-| `linux-x64` | `mosh-client-linux-x64.tar.gz` |
-| `linux-arm64` | `mosh-client-linux-arm64.tar.gz` |
-| `darwin-universal` | `mosh-client-darwin-universal.tar.gz` |
-| `win32-x64` | `mosh-client-win32-x64.tar.gz` (exe only) |
+| Target | Release asset | Local path |
+|--------|---------------|------------|
+| Linux x64 | `mosh-client-linux-x64.tar.gz` | `linux-x64/mosh-client` |
+| Linux arm64 | `mosh-client-linux-arm64.tar.gz` | `linux-arm64/mosh-client` |
+| macOS universal | `mosh-client-darwin-universal.tar.gz` | `darwin-universal/mosh-client` |
+| Windows x64 | `mosh-client-win32-x64.tar.gz` | `win32-x64/mosh-client.exe` |
 
-Release tags: `moshcatty-*` (e.g. `moshcatty-0.1.1`). Every release includes
-`SHA256SUMS`.
+Each tarball contains **only** the client binary (no Cygwin DLLs, no terminfo).
+Windows builds static-link the MSVC CRT (`moshcatty-0.1.1+`).
 
-Fetch accepts pure tarballs that contain only `mosh-client[.exe]`. Legacy
-Cygwin-era bundles with `*-dlls/` / terminfo still unpack if present.
+Release tags: `moshcatty-*` (e.g. `moshcatty-0.1.1`) from
+`binaricat/MoshCatty`, with `SHA256SUMS`.
 
-### How binaries land here
-
-1. MoshCatty CI builds multi-platform `mosh-client` and publishes a GitHub
-   Release.
-2. Netcatty packaging / `npm run dev` runs
-   `scripts/resolve-mosh-bin-release.cjs` then
-   `scripts/fetch-mosh-binaries.cjs`:
-   - Explicit `MOSH_BIN_RELEASE` if set
-   - else latest non-draft `moshcatty-*` (or legacy `mosh-bin-*`) from
-     `binaricat/MoshCatty` (override with `MOSH_BIN_OWNER` /
-     `MOSH_BIN_REPO` only for staging mirrors)
-3. `electron-builder.config.cjs` copies the host binary into
-   `Resources/mosh/mosh-client[.exe]`.
+## Fetch
 
 ```sh
-# Pin a release (optional)
+# Optional pin
 export MOSH_BIN_RELEASE=moshcatty-0.1.1
 npm run fetch:mosh
 
-# Dev: host platform only (resolves latest moshcatty-* by default)
+# Dev: host platform; resolves latest moshcatty-* if unset
 npm run fetch:mosh:dev
 ```
 
-Development of the client itself lives in the MoshCatty repo — not in this
-tree.
+Env: `MOSH_BIN_OWNER` / `MOSH_BIN_REPO` (default `binaricat` / `MoshCatty`),
+`MOSH_BIN_BASE_URL` for mirrors.
+
+`electron-builder` packages `Resources/mosh/mosh-client[.exe]` only.
 
 ## Licenses
 
 - MoshCatty client: **GPL-3.0-or-later**
 - Upstream Mosh protocol reference: **GPL-3.0**
-- Netcatty is **GPL-3.0**, so redistribution in the installer is fine
+- Netcatty is **GPL-3.0**
