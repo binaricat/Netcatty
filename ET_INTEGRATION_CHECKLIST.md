@@ -8,37 +8,42 @@
 >    后端 + UI 重新落到上游重构后的目录结构上，并让它启动**捆绑的** `et`。
 >
 > 旧实现参考：`git show 67e81616`（共 7 个 ET 提交，见 `feat/eternal-terminal`）。
-> Mosh 模板参考：`resources/mosh/README.md`、`scripts/*mosh*`、
-> `electron/bridges/terminalBridge/moshSession.cjs`、`.github/workflows/build-mosh-binaries.yml`。
+> Mosh 模板参考（**仅 MoshCatty 纯二进制路径**）：`resources/mosh/README.md`、
+> `scripts/fetch-mosh-binaries.cjs`、`scripts/resolve-mosh-bin-release.cjs`、
+> `scripts/mosh-extra-resources.cjs`、`electron/bridges/terminalBridge/moshSession.cjs`。
+> 客户端本体在独立仓库 [binaricat/MoshCatty](https://github.com/binaricat/MoshCatty)
+> （`moshcatty-*` releases）；Netcatty 内已无 Cygwin 构建流水线 / FluentTerminal 回退。
 
 ## 关键设计差异（ET vs Mosh）
 
-- **协议**：Mosh 需要 Node 重写 Perl 包装器（SSH bootstrap + 抓 `MOSH CONNECT` +
-  换 PTY）。**ET 不需要** —— `et` 客户端自己完成 SSH 引导 + 协议握手，我们只要
-  把 `et` 当作普通 PTY 进程 `pty.spawn` 即可。所以**没有** `etHandshake.cjs`。
+- **协议**：Mosh 需要 Node 做 SSH bootstrap + 抓 `MOSH CONNECT` + 换 PTY
+  （`moshHandshake` + `moshSession`）。**ET 不需要** —— `et` 客户端自己完成 SSH
+  引导 + 协议握手，我们只要把 `et` 当作普通 PTY 进程 `pty.spawn` 即可。所以**没有**
+  `etHandshake.cjs`。
 - **凭证注入**：Mosh 自己驱动 ssh、直接往 PTY 里敲密码；ET 内部驱动 ssh，需用
   **SSH_ASKPASS + 临时 ~/.ssh 环境**把保存的密码/密钥/跳板/算法喂给 et 内部的 ssh
   （旧实现 `prepareEtSshEnvironment` 已完整实现，直接搬运）。
-- **terminfo**：`et` 是纯传输客户端、本地不渲染终端，**无需** 捆绑 terminfo
-  （Mosh 因静态 ncurses 才需要）。打包目录里只放 `et[.exe]`（+ Windows DLL）。
-- **构建系统**：Mosh 用 autotools；**ET 用 CMake + Ninja + vcpkg**
+- **纯二进制**：MoshCatty 与理想 ET 打包都是「每平台一个客户端文件」。Mosh 侧已
+  无 terminfo / Cygwin DLL 袋；`et` 同样本地不渲染终端。Windows 若动态链 CRT
+  才考虑可选 DLL 目录，否则只放 `et[.exe]`。
+- **构建系统**：Mosh 客户端在 **MoshCatty** 仓库用 Rust 构建并发布；Netcatty 只
+  `fetch`。**ET** 用 CMake + Ninja + vcpkg
   （`cmake -DDISABLE_TELEMETRY=ON -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo`），
-  产物是单个 `et`（Windows `et.exe`）。
+  产物是单个 `et`（Windows `et.exe`），由 `scripts/build-et/` + `build-et-binaries.yml` 发布。
 
-## 命名约定（镜像 Mosh）
+## 命名约定（镜像 Mosh / MoshCatty）
 
-| Mosh | ET |
+| Mosh (MoshCatty) | ET |
 |------|----|
 | `resources/mosh/<plat-arch>/mosh-client[.exe]` | `resources/et/<plat-arch>/et[.exe]` |
 | 打包后 `<Resources>/mosh/mosh-client` | 打包后 `<Resources>/et/et` |
-| `scripts/build-mosh/` | `scripts/build-et/` |
+| 上游构建：`binaricat/MoshCatty` CI releases | `scripts/build-et/` + `build-et-binaries.yml` |
 | `scripts/fetch-mosh-binaries.cjs` | `scripts/fetch-et-binaries.cjs` |
 | `scripts/resolve-mosh-bin-release.cjs` | `scripts/resolve-et-bin-release.cjs` |
 | `scripts/mosh-extra-resources.cjs` | `scripts/et-extra-resources.cjs` |
 | env `MOSH_BIN_RELEASE` / 仓库 `MoshCatty` / tag `moshcatty-*` | env `ET_BIN_RELEASE` / 仓库 `Netcatty-et-bin` / tag `et-bin-*` |
 | `npm run fetch:mosh[:dev]` | `npm run fetch:et[:dev]` |
 | `bundledMoshClient()` / `resolveBareMoshClient()` | `bundledEtClient()` / `resolveBareEtClient()` |
-| `.github/workflows/build-mosh-binaries.yml` | `.github/workflows/build-et-binaries.yml` |
 
 ---
 
@@ -52,7 +57,7 @@
       `/resources/et/*/et-win32-*-dlls/`。保留 `resources/et/README.md`。
 - [x] **1.3** `scripts/build-et/build-linux.sh` —— manylinux2014 + vcpkg 静态三元组
       构建 `et`（x64/arm64），产物 `et-linux-<arch>.tar.gz`(+.sha256)，内含单个 `et`。
-      校验非系统动态库（同 mosh 的 ldd 白名单）。
+      校验非系统动态库（ldd 白名单）。
 - [x] **1.4** `scripts/build-et/build-macos.sh` —— arm64 + x86_64 分别构建后 `lipo`
       成 universal，`MACOSX_DEPLOYMENT_TARGET=11.0`，产物 `et-darwin-universal.tar.gz`。
 - [x] **1.5** `scripts/build-et/build-windows.ps1`（或 `.sh`）—— MSVC + vcpkg
@@ -60,13 +65,12 @@
       则随附 DLL 目录 `et-win32-x64-dlls/`，否则纯静态无 DLL）。
 - [x] **1.6** `scripts/et-extra-resources.cjs` —— 镜像 `mosh-extra-resources.cjs`：
       按平台/arch 仅当 `resources/et/<plat-arch>/et[.exe]` 存在时才产出 extraResources
-      指令（`to: "et/"`）；Windows 额外处理可选 DLL 目录。**去掉 terminfo 分支**。
+      指令（`to: "et/"`）；Windows 额外处理可选 DLL 目录。纯客户端文件为主。
 - [x] **1.7** `scripts/resolve-et-bin-release.cjs` —— 镜像 `resolve-mosh-bin-release.cjs`：
       `TAG_RE=/^et-bin-.../`，默认仓库 `Netcatty-et-bin`，env `ET_BIN_RELEASE` 优先。
 - [x] **1.8** `scripts/fetch-et-binaries.cjs` —— 镜像 `fetch-mosh-binaries.cjs`：
       `TARGETS` 四项（linux-x64/arm64、darwin-universal、win32-x64），全部 tar.gz；
-      SHA256SUMS 校验；解包到 `resources/et/<plat-arch>/`。**Windows 用自建产物**
-      （ET 官方有 Windows 构建，无需 FluentTerminal 那种 fallback）。去掉 terminfo 校验。
+      SHA256SUMS 校验；解包到 `resources/et/<plat-arch>/`。**Windows 用自建产物**。
 - [x] **1.9** 单元测试：`scripts/fetch-et-binaries.test.cjs`、
       `scripts/resolve-et-bin-release.test.cjs`、`scripts/et-extra-resources.test.cjs`
       （镜像对应 mosh 测试，改名/改路径）。
@@ -77,13 +81,12 @@
       `scripts/*.test.cjs`（确认即可）。
 - [x] **1.11** `electron-builder.config.cjs`：引入 `etExtraResources`，在 darwin/win32/
       linux 三处把 `etExtraResources(plat)` 合并进 `extraResources`（与 mosh 数组拼接）。
-- [x] **1.12** `.github/workflows/build-et-binaries.yml` —— 镜像
-      `build-mosh-binaries.yml`：四个构建 job + 一个 `release` job（dispatch 且
-      `release_tag` 非空时发布到 `Netcatty-et-bin`，附 `SHA256SUMS`）。`paths` 过滤
-      指向 `scripts/build-et/**`、`scripts/fetch-et-binaries.cjs`、`scripts/et-extra-resources.cjs`。
-      env 用 `ET_REF`（默认 ET release tag，如 `et-v6.2.x`）。
+- [x] **1.12** `.github/workflows/build-et-binaries.yml` —— 四个构建 job + 一个
+      `release` job（dispatch 且 `release_tag` 非空时发布到 `Netcatty-et-bin`，附
+      `SHA256SUMS`）。`paths` 过滤指向 `scripts/build-et/**`、`scripts/fetch-et-binaries.cjs`、
+      `scripts/et-extra-resources.cjs`。env 用 `ET_REF`（默认 ET release tag，如 `et-v6.2.x`）。
       > 注：实际二进制由用户手动 `workflow_dispatch` 触发产出；本地/CI 未设
-      > `ET_BIN_RELEASE` 时 fetch 步骤安静跳过（同 mosh）。
+      > `ET_BIN_RELEASE` 时 fetch 步骤安静跳过（同 mosh 的 `MOSH_BIN_RELEASE`）。
 
 ## Phase 2 — 运行时定位捆绑客户端
 
@@ -100,7 +103,7 @@
       `cleanupSessionExternalAuthArtifacts`、`execOnEtSession`、`startEtSession`。
       **改动点**：`etCmd` 由 `findExecutable('et')` 改为 `resolveBareEtClient()`
       （取捆绑二进制）；找不到时抛错（同 mosh：提示跑 `npm run fetch:et:dev`）。
-      Windows 若有 DLL 目录，复用 `prependEnvPath` 思路把 DLL 目录加进 PATH。
+      Windows 若有动态链接 DLL 目录，可把该目录加进 PATH（MoshCatty 路径已无此需求）。
 - [x] **3.2** `terminalBridge.cjs` 接线 `createEtSessionApi(ctx)`（镜像 moshSessionApi
       的 ctx），传入 `bundledEtClient`、`tempDirBridge`、`execFile/execFileSync` 等；
       解构出 `startEtSession`、`execOnEtSession`、`cleanupStaleEtTempDirs`、
