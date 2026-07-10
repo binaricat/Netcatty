@@ -13,7 +13,7 @@
 const fs = require("node:fs");
 const https = require("node:https");
 
-// MoshCatty pure-Rust releases only: moshcatty-0.1.1
+// MoshCatty pure-Rust releases only (prefer moshcatty-0.1.2+ for Linux glibc floors).
 const TAG_RE = /^moshcatty-[A-Za-z0-9._-]+$/;
 
 function log(msg) {
@@ -157,7 +157,7 @@ async function main(env = process.env) {
   const release = pickLatestMoshBinRelease(releases);
   if (!release) {
     throw new Error(
-      "could not find a non-draft moshcatty-* release in binaricat/MoshCatty. Publish a MoshCatty GitHub Release (e.g. moshcatty-0.1.1) before packaging.",
+      "could not find a non-draft moshcatty-* release in binaricat/MoshCatty. Publish a MoshCatty GitHub Release (e.g. moshcatty-0.1.2) before packaging.",
     );
   }
 
