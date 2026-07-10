@@ -13,13 +13,13 @@ const layerEffectsSource = readFileSync(new URL("../terminalLayer/useTerminalLay
 test("renderer activity follows the hibernate setting instead of active-tab visibility", () => {
   assert.match(
     terminalSource,
-    /const isRendererActive = isVisible \|\| !resolveTerminalHibernateEnabled\(terminalSettings\)/,
+    /const isRendererActive = resolveTerminalRendererActive\(isVisible, terminalSettings\)/,
   );
   assert.match(terminalSource, /isVisibleRef: isRendererActiveRef/);
   assert.match(terminalSource, /if \(!isRendererActiveRef\.current && !options\?\.allowHidden\)/);
   assert.match(
     effectsSource,
-    /const isRendererActive = isVisible \|\| !hibernateHiddenTabs;[\s\S]*const isRendererActiveRef = useRef\(isRendererActive\)/,
+    /const isRendererActive = resolveTerminalRendererActive\(isVisible, terminalSettings\);[\s\S]*const isRendererActiveRef = useRef\(isRendererActive\)/,
   );
 });
 

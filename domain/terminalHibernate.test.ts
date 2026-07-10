@@ -8,6 +8,7 @@ import {
   normalizeHibernateHiddenTabsDelaySec,
   resolveTerminalHibernateDelayMs,
   resolveTerminalHibernateEnabled,
+  resolveTerminalRendererActive,
   TERMINAL_HIBERNATE_BUFFER_MAX_CHARS,
   TERMINAL_HIBERNATE_DELAY_SEC_DEFAULT,
   TERMINAL_HIBERNATE_DELAY_SEC_MAX,
@@ -30,6 +31,13 @@ test("resolveTerminalHibernateEnabled defaults to disabled", () => {
   assert.equal(resolveTerminalHibernateEnabled(), false);
   assert.equal(resolveTerminalHibernateEnabled({ hibernateHiddenTabs: true }), true);
   assert.equal(resolveTerminalHibernateEnabled({ hibernateHiddenTabs: false }), false);
+});
+
+test("renderer stays active unless an enabled hibernation setting hides it", () => {
+  assert.equal(resolveTerminalRendererActive(true, { hibernateHiddenTabs: true }), true);
+  assert.equal(resolveTerminalRendererActive(true, { hibernateHiddenTabs: false }), true);
+  assert.equal(resolveTerminalRendererActive(false, { hibernateHiddenTabs: false }), true);
+  assert.equal(resolveTerminalRendererActive(false, { hibernateHiddenTabs: true }), false);
 });
 
 test("isTerminalFileTransferActive is true when any transfer signal is active", () => {

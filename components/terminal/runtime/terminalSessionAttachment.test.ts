@@ -239,11 +239,12 @@ test("writeSessionData flushes xterm writes while the page is hidden", () => {
   clearTerminalSessionFlowAck("session-1");
 });
 
-test("writeSessionData flushes xterm writes while the window is unfocused but visible", () => {
+test("writeSessionData flushes xterm writes without repaint compensation while the window is unfocused", async () => {
   clearTerminalSessionFlowAck("session-1");
   const payload = "x".repeat(FLOW_CHAR_COUNT_ACK_SIZE + 1);
   const writes: string[] = [];
   const pendingCallbacks: Array<() => void> = [];
+  let renderCalls = 0;
   const writeBuffer = {
     flushSync() {
       while (pendingCallbacks.length > 0) {
@@ -252,8 +253,16 @@ test("writeSessionData flushes xterm writes while the window is unfocused but vi
     },
   };
   const term = {
+    rows: 24,
     buffer: { active: { type: "normal" } },
-    _core: { _writeBuffer: writeBuffer },
+    _core: {
+      _writeBuffer: writeBuffer,
+      _renderService: {
+        _renderRows() {
+          renderCalls += 1;
+        },
+      },
+    },
     write(data: string, callback?: () => void) {
       writes.push(data);
       if (callback) pendingCallbacks.push(callback);
@@ -276,12 +285,14 @@ test("writeSessionData flushes xterm writes while the window is unfocused but vi
     writeSessionData(ctx as never, term, payload);
   }, { hasFocus: false });
   flushTerminalSessionFlowAck("session-1");
+  await new Promise((resolve) => { setTimeout(resolve, 25); });
 
   assert.equal(writes.join(""), payload);
   assert.equal(pendingCallbacks.length, 0);
   assert.equal(getFlowController(ctx as never, term).pendingBytes(), 0);
   assert.equal(getDeferredTerminalWriteAckBytes(term), 0);
   assert.equal(acked.reduce((total, bytes) => total + bytes, 0), payload.length);
+  assert.equal(renderCalls, 0);
   clearTerminalSessionFlowAck("session-1");
 });
 
