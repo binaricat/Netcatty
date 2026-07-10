@@ -25,9 +25,11 @@ test("validateReleaseTag accepts only moshcatty-* tags at min version", () => {
   assert.equal(validateReleaseTag("moshcatty-0.1.2"), "moshcatty-0.1.2");
   assert.equal(validateReleaseTag("moshcatty-0.2.0"), "moshcatty-0.2.0");
   assert.equal(validateReleaseTag("moshcatty-0.1.3-rc1"), "moshcatty-0.1.3-rc1");
+  assert.equal(validateReleaseTag("moshcatty-0.1.2+build.1"), "moshcatty-0.1.2+build.1");
   assert.throws(() => validateReleaseTag("mosh-bin-1.4.0-1"), /invalid mosh binary release tag/);
   assert.throws(() => validateReleaseTag("v1.2.3"), /invalid mosh binary release tag/);
   assert.throws(() => validateReleaseTag("moshcatty-../bad"), /invalid mosh binary release tag/);
+  assert.throws(() => validateReleaseTag("moshcatty-not-a-version"), /invalid mosh binary release tag/);
   assert.throws(() => validateReleaseTag("moshcatty-0.1.0"), /below minimum/);
   assert.throws(() => validateReleaseTag("moshcatty-0.1.1"), /below minimum/);
   assert.throws(() => validateReleaseTag("moshcatty-0.1.2-rc1"), /below minimum/);

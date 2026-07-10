@@ -15,7 +15,8 @@ const https = require("node:https");
 
 // MoshCatty pure-Rust releases only.
 // Minimum 0.1.2: earlier Linux builds linked GLIBC 2.34 (above Netcatty floors).
-const TAG_RE = /^moshcatty-[A-Za-z0-9._-]+$/;
+// Allow semver prerelease (-rc1) and build metadata (+meta); no path separators.
+const TAG_RE = /^moshcatty-[A-Za-z0-9._+-]+$/;
 const MIN_VERSION = { major: 0, minor: 1, patch: 2 };
 const MIN_TAG = `moshcatty-${MIN_VERSION.major}.${MIN_VERSION.minor}.${MIN_VERSION.patch}`;
 
@@ -63,8 +64,8 @@ function isAtLeastMinRelease(tag) {
 
 function validateReleaseTag(tag) {
   const value = String(tag || "").trim();
-  if (!TAG_RE.test(value)) {
-    throw new Error(`invalid mosh binary release tag: ${tag} (expected moshcatty-*)`);
+  if (!TAG_RE.test(value) || !parseMoshCattyVersion(value)) {
+    throw new Error(`invalid mosh binary release tag: ${tag} (expected moshcatty-X.Y.Z[(-pre)|(+build)])`);
   }
   if (!isAtLeastMinRelease(value)) {
     throw new Error(
