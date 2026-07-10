@@ -353,7 +353,8 @@ function TerminalLayerSidePanelInner({ ctx }: { ctx: SidePanelContext }) {
                       {item.icon}
                     </Btn>
                   </TooltipTrigger>
-                  <TooltipContent>{item.label}</TooltipContent>
+                  {/* bottom: left-docked panel tooltips must not cover macOS traffic lights (#2095) */}
+                  <TooltipContent side="bottom">{item.label}</TooltipContent>
                 </Tooltip>
               );
             })}
@@ -370,7 +371,7 @@ function TerminalLayerSidePanelInner({ ctx }: { ctx: SidePanelContext }) {
                   {sidePanelPosition === 'left' ? <PanelRight size={15} /> : <PanelLeft size={15} />}
                 </Btn>
               </TooltipTrigger>
-              <TooltipContent>
+              <TooltipContent side="bottom">
                 {sidePanelPosition === 'left' ? t('terminal.layer.movePanelRight') : t('terminal.layer.movePanelLeft')}
               </TooltipContent>
             </Tooltip>
@@ -386,7 +387,7 @@ function TerminalLayerSidePanelInner({ ctx }: { ctx: SidePanelContext }) {
                   <X size={15} />
                 </Btn>
               </TooltipTrigger>
-              <TooltipContent>{t('terminal.layer.closePanel')}</TooltipContent>
+              <TooltipContent side="bottom">{t('terminal.layer.closePanel')}</TooltipContent>
             </Tooltip>
           </div>
         )}
