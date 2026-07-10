@@ -19,6 +19,58 @@ function createMainWindowApi(ctx) {
       const rendererHash = typeof route === "string" && route.trim()
         ? `#/${route.trim().replace(/^#?\/*/, "")}`
         : "";
+      const CHROMIUM_ZOOM_FACTORS = [
+        0.25, 0.33, 0.5, 0.67, 0.75, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3, 4, 5,
+      ];
+
+      const isPrimaryZoomInEqualInput = (input) => {
+        if (input?.type !== "keyDown") return false;
+        if (input.alt) return false;
+        const hasPrimaryModifier = isMac
+          ? Boolean(input.meta) && !input.control
+          : Boolean(input.control) && !input.meta;
+        if (!hasPrimaryModifier || input.shift) return false;
+        return String(input.key || "") === "=";
+      };
+
+      const isPrimaryZoomOutMinusInput = (input) => {
+        if (input?.type !== "keyDown") return false;
+        if (input.alt) return false;
+        const hasPrimaryModifier = isMac
+          ? Boolean(input.meta) && !input.control
+          : Boolean(input.control) && !input.meta;
+        if (!hasPrimaryModifier || input.shift) return false;
+        return String(input.key || "") === "-";
+      };
+
+      const isPrimaryResetZoomInput = (input) => {
+        if (input?.type !== "keyDown") return false;
+        if (input.alt) return false;
+        const hasPrimaryModifier = isMac
+          ? Boolean(input.meta) && !input.control
+          : Boolean(input.control) && !input.meta;
+        if (!hasPrimaryModifier || input.shift) return false;
+        return String(input.key || "") === "0";
+      };
+
+      const adjustWindowZoom = (mode) => {
+        const webContents = win?.webContents;
+        if (!webContents || webContents.isDestroyed?.()) return false;
+        const currentFactor = Number(webContents.getZoomFactor?.());
+        const safeCurrentFactor = Number.isFinite(currentFactor) ? currentFactor : 1;
+        const nextFactor = mode === "in"
+          ? CHROMIUM_ZOOM_FACTORS.find((factor) => factor > safeCurrentFactor + 0.0001)
+          : mode === "out"
+            ? [...CHROMIUM_ZOOM_FACTORS].reverse().find((factor) => factor < safeCurrentFactor - 0.0001)
+            : 1;
+        if (!nextFactor) return false;
+        try {
+          webContents.setZoomFactor?.(nextFactor);
+          return true;
+        } catch {
+          return false;
+        }
+      };
     
       // Store app reference for window state persistence
       electronApp = app;
@@ -186,6 +238,21 @@ function createMainWindowApi(ctx) {
         if (isMac && shouldCloseWindowFromInput(input)) {
           event.preventDefault();
           requestWindowCommandClose(win);
+          return;
+        }
+
+        if (isPrimaryZoomInEqualInput(input) && adjustWindowZoom("in")) {
+          event.preventDefault();
+          return;
+        }
+
+        if (isPrimaryZoomOutMinusInput(input) && adjustWindowZoom("out")) {
+          event.preventDefault();
+          return;
+        }
+
+        if (isPrimaryResetZoomInput(input) && adjustWindowZoom("reset")) {
+          event.preventDefault();
           return;
         }
 
