@@ -58,10 +58,15 @@ async function serveAssets(t, assets) {
 
 test("fetch-mosh-binaries defaults to the MoshCatty binary repository", () => {
   assert.deepEqual(parseMoshBinRepository({}), { owner: "binaricat", repo: "MoshCatty" });
+  // Fork CI must not inherit GITHUB_REPOSITORY owner for MoshCatty downloads.
   assert.deepEqual(parseMoshBinRepository({ GITHUB_REPOSITORY: "owner/project" }), {
-    owner: "owner",
+    owner: "binaricat",
     repo: "MoshCatty",
   });
+  assert.deepEqual(
+    parseMoshBinRepository({ MOSH_BIN_OWNER: "other", MOSH_BIN_REPO: "fork-mosh" }),
+    { owner: "other", repo: "fork-mosh" },
+  );
 });
 
 test("TARGETS are pure MoshCatty tarball assets only", () => {

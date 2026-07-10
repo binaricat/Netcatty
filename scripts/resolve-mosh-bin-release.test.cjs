@@ -24,25 +24,31 @@ function makeTmp(t) {
 test("validateReleaseTag accepts only moshcatty-* tags at min version", () => {
   assert.equal(validateReleaseTag("moshcatty-0.1.2"), "moshcatty-0.1.2");
   assert.equal(validateReleaseTag("moshcatty-0.2.0"), "moshcatty-0.2.0");
+  assert.equal(validateReleaseTag("moshcatty-0.1.3-rc1"), "moshcatty-0.1.3-rc1");
   assert.throws(() => validateReleaseTag("mosh-bin-1.4.0-1"), /invalid mosh binary release tag/);
   assert.throws(() => validateReleaseTag("v1.2.3"), /invalid mosh binary release tag/);
   assert.throws(() => validateReleaseTag("moshcatty-../bad"), /invalid mosh binary release tag/);
   assert.throws(() => validateReleaseTag("moshcatty-0.1.0"), /below minimum/);
   assert.throws(() => validateReleaseTag("moshcatty-0.1.1"), /below minimum/);
+  assert.throws(() => validateReleaseTag("moshcatty-0.1.2-rc1"), /below minimum/);
 });
 
-test("isAtLeastMinRelease enforces moshcatty-0.1.2 floor", () => {
+test("isAtLeastMinRelease enforces moshcatty-0.1.2 floor with semver prerelease rules", () => {
   assert.equal(MIN_TAG, "moshcatty-0.1.2");
   assert.equal(isAtLeastMinRelease("moshcatty-0.1.1"), false);
   assert.equal(isAtLeastMinRelease("moshcatty-0.1.2"), true);
-  assert.equal(isAtLeastMinRelease("moshcatty-0.1.2-rc1"), true);
+  // Prerelease of the floor sorts below the final floor release.
+  assert.equal(isAtLeastMinRelease("moshcatty-0.1.2-rc1"), false);
+  // Above the floor, prereleases are fine.
+  assert.equal(isAtLeastMinRelease("moshcatty-0.1.3-rc1"), true);
+  assert.equal(isAtLeastMinRelease("moshcatty-0.1.2+build.1"), true);
   assert.equal(isAtLeastMinRelease("moshcatty-not-a-version"), false);
 });
 
-test("parseRepository falls back to the MoshCatty binary repository", () => {
+test("parseRepository defaults to binaricat/MoshCatty (ignores GITHUB_REPOSITORY fork owner)", () => {
   assert.deepEqual(parseRepository({}), { owner: "binaricat", repo: "MoshCatty" });
   assert.deepEqual(parseRepository({ GITHUB_REPOSITORY: "owner/project" }), {
-    owner: "owner",
+    owner: "binaricat",
     repo: "MoshCatty",
   });
   assert.deepEqual(

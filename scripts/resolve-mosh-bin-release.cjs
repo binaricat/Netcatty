@@ -23,25 +23,42 @@ function log(msg) {
   console.log(`[resolve-mosh-bin-release] ${msg}`);
 }
 
-/** Parse moshcatty-X.Y.Z (+ optional pre/build suffix). Returns null if not semver-ish. */
+/**
+ * Parse moshcatty-X.Y.Z with optional prerelease (-rc1) and build (+meta).
+ * Returns null if not semver-ish.
+ */
 function parseMoshCattyVersion(tag) {
   const match = String(tag || "").trim().match(
-    /^moshcatty-(\d+)\.(\d+)\.(\d+)(?:[-+][A-Za-z0-9._-]+)?$/,
+    /^moshcatty-(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/,
   );
   if (!match) return null;
   return {
     major: Number(match[1]),
     minor: Number(match[2]),
     patch: Number(match[3]),
+    // Present when tag is e.g. moshcatty-0.1.2-rc1 (semver: prerelease < final).
+    prerelease: match[4] || null,
   };
 }
 
+function compareCoreVersion(a, b) {
+  if (a.major !== b.major) return a.major - b.major;
+  if (a.minor !== b.minor) return a.minor - b.minor;
+  return a.patch - b.patch;
+}
+
+/**
+ * True when tag is usable for packaging (core version ≥ min, with semver
+ * prerelease rules: X.Y.Z-rcN is below final X.Y.Z).
+ */
 function isAtLeastMinRelease(tag) {
   const version = parseMoshCattyVersion(tag);
   if (!version) return false;
-  if (version.major !== MIN_VERSION.major) return version.major > MIN_VERSION.major;
-  if (version.minor !== MIN_VERSION.minor) return version.minor > MIN_VERSION.minor;
-  return version.patch >= MIN_VERSION.patch;
+  const core = compareCoreVersion(version, MIN_VERSION);
+  if (core > 0) return true;
+  if (core < 0) return false;
+  // Equal to the floor: final only (no prerelease suffix).
+  return !version.prerelease;
 }
 
 function validateReleaseTag(tag) {
@@ -52,14 +69,18 @@ function validateReleaseTag(tag) {
   if (!isAtLeastMinRelease(value)) {
     throw new Error(
       `mosh binary release ${value} is below minimum ${MIN_TAG} `
-        + "(Linux glibc floors: x64 ≤ 2.28, arm64 ≤ 2.31; 0.1.0/0.1.1 require GLIBC 2.34)",
+        + "(Linux glibc floors: x64 ≤ 2.28, arm64 ≤ 2.31; 0.1.0/0.1.1 require GLIBC 2.34; "
+        + "prereleases of the floor e.g. 0.1.2-rc1 are not accepted)",
     );
   }
   return value;
 }
 
 function parseRepository(env) {
-  const owner = env.MOSH_BIN_OWNER || (env.GITHUB_REPOSITORY || "").split("/")[0] || "binaricat";
+  // Canonical default is always binaricat/MoshCatty. Do not derive owner from
+  // GITHUB_REPOSITORY — fork packaging would otherwise look for
+  // <fork-owner>/MoshCatty and fail. Override only via MOSH_BIN_OWNER/REPO.
+  const owner = env.MOSH_BIN_OWNER || "binaricat";
   const repo = env.MOSH_BIN_REPO || "MoshCatty";
   return { owner, repo };
 }

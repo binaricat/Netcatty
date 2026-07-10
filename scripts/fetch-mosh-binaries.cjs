@@ -153,9 +153,10 @@ function chmodExecutable(filePath) {
 }
 
 function parseMoshBinRepository(env) {
-  const githubOwner = (env.GITHUB_REPOSITORY || "").split("/")[0];
+  // Canonical default binaricat/MoshCatty — never inherit fork owner from
+  // GITHUB_REPOSITORY (same policy as resolve-mosh-bin-release).
   return {
-    owner: env.MOSH_BIN_OWNER || githubOwner || "binaricat",
+    owner: env.MOSH_BIN_OWNER || "binaricat",
     repo: env.MOSH_BIN_REPO || "MoshCatty",
   };
 }
