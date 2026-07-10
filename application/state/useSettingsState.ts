@@ -745,8 +745,11 @@ export const useSettingsState = (options: { enableSettingsSync?: boolean; enable
       accentMode,
       customAccent,
     };
-    const persistedAppearanceChanged = previousAppearanceRenderRef.current === null
-      || hasPersistedAppearanceChanged(previousAppearanceRenderRef.current, appearanceRender);
+    // Capture previous snapshot before overwrite so we can notify only the
+    // appearance fields that actually changed on this render.
+    const previousAppearance = previousAppearanceRenderRef.current;
+    const persistedAppearanceChanged = previousAppearance === null
+      || hasPersistedAppearanceChanged(previousAppearance, appearanceRender);
     previousAppearanceRenderRef.current = appearanceRender;
     const tokens = getUiThemeById(resolvedTheme, resolvedTheme === 'dark' ? darkUiThemeId : lightUiThemeId).tokens;
     const apply = () => applyThemeTokens(theme, resolvedTheme, tokens, accentMode, customAccent);
@@ -765,9 +768,25 @@ export const useSettingsState = (options: { enableSettingsSync?: boolean; enable
     localStorageAdapter.writeString(STORAGE_KEY_COLOR, customAccent);
     // Fix 1: Skip IPC broadcast on initial mount (values already match localStorage)
     if (!persistMountedRef.current) return;
-    // Send one ordered notification. The receiver uses this theme value
-    // directly and reads the other appearance fields from shared storage.
-    notifySettingsChanged(STORAGE_KEY_THEME, theme);
+    // Emit a keyed IPC notification for each changed appearance field so the
+    // receiver can apply the payload value even if shared storage is still stale.
+    // resolveAppearanceSyncState only trusts the announced key's value; other
+    // fields fall back to storage, so every changed field must be announced.
+    if (!previousAppearance || previousAppearance.theme !== theme) {
+      notifySettingsChanged(STORAGE_KEY_THEME, theme);
+    }
+    if (!previousAppearance || previousAppearance.lightUiThemeId !== lightUiThemeId) {
+      notifySettingsChanged(STORAGE_KEY_UI_THEME_LIGHT, lightUiThemeId);
+    }
+    if (!previousAppearance || previousAppearance.darkUiThemeId !== darkUiThemeId) {
+      notifySettingsChanged(STORAGE_KEY_UI_THEME_DARK, darkUiThemeId);
+    }
+    if (!previousAppearance || previousAppearance.accentMode !== accentMode) {
+      notifySettingsChanged(STORAGE_KEY_ACCENT_MODE, accentMode);
+    }
+    if (!previousAppearance || previousAppearance.customAccent !== customAccent) {
+      notifySettingsChanged(STORAGE_KEY_COLOR, customAccent);
+    }
   }, [theme, resolvedTheme, lightUiThemeId, darkUiThemeId, accentMode, customAccent, notifySettingsChanged]);
 
   // Listen for OS color scheme changes to keep systemPreference in sync

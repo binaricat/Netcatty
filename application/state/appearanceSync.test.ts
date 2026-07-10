@@ -12,7 +12,13 @@ import {
   type AppearanceRenderSnapshot,
   type StoredAppearanceValues,
 } from "./appearanceSync.ts";
-import { STORAGE_KEY_THEME } from "../../infrastructure/config/storageKeys.ts";
+import {
+  STORAGE_KEY_ACCENT_MODE,
+  STORAGE_KEY_COLOR,
+  STORAGE_KEY_THEME,
+  STORAGE_KEY_UI_THEME_DARK,
+  STORAGE_KEY_UI_THEME_LIGHT,
+} from "../../infrastructure/config/storageKeys.ts";
 
 const systemLight: AppearanceRenderSnapshot = {
   theme: "system",
@@ -46,12 +52,12 @@ test("an explicit theme choice remains a persisted appearance change", () => {
 });
 
 test("an appearance IPC value wins over stale local storage for the changed key", () => {
-  const incoming = { key: "netcatty_theme_v1", value: "dark" };
+  const incoming = { key: STORAGE_KEY_THEME, value: "dark" };
 
   assert.equal(
     resolveIncomingAppearanceValue(
       incoming,
-      "netcatty_theme_v1",
+      STORAGE_KEY_THEME,
       "system",
       (value): value is "light" | "dark" | "system" => (
         value === "light" || value === "dark" || value === "system"
@@ -62,12 +68,81 @@ test("an appearance IPC value wins over stale local storage for the changed key"
   assert.equal(
     resolveIncomingAppearanceValue(
       incoming,
-      "netcatty_ui_theme_dark_v1",
+      STORAGE_KEY_UI_THEME_DARK,
       "midnight",
       (value): value is string => typeof value === "string",
     ),
     "midnight",
   );
+});
+
+test("a non-theme appearance IPC value wins over stale local storage for that key", () => {
+  const current: AppearanceState = {
+    theme: "dark",
+    lightUiThemeId: "snow",
+    darkUiThemeId: "midnight",
+    accentMode: "theme",
+    customAccent: "208 100% 50%",
+  };
+  // Storage still lags for every non-theme field (the race the review covers).
+  const staleStored: StoredAppearanceValues = {
+    theme: "dark",
+    lightUiThemeId: "snow",
+    darkUiThemeId: "midnight",
+    accentMode: "theme",
+    customAccent: "208 100% 50%",
+  };
+
+  // Picking a follow-app terminal theme updates darkUiThemeId; only that key is
+  // announced on the IPC payload, so the reducer must prefer the payload.
+  const darkUiSelection = {
+    key: STORAGE_KEY_UI_THEME_DARK,
+    value: "github",
+  };
+  const nextDarkUi = resolveAppearanceSyncState(current, {
+    ...staleStored,
+    darkUiThemeId: "midnight",
+  }, darkUiSelection);
+  assert.equal(nextDarkUi.darkUiThemeId, "github");
+  assert.equal(nextDarkUi.theme, "dark");
+  assert.equal(nextDarkUi.lightUiThemeId, "snow");
+
+  const lightUiSelection = {
+    key: STORAGE_KEY_UI_THEME_LIGHT,
+    value: "flexoki",
+  };
+  const nextLightUi = resolveAppearanceSyncState(current, {
+    ...staleStored,
+    lightUiThemeId: "snow",
+  }, lightUiSelection);
+  assert.equal(nextLightUi.lightUiThemeId, "flexoki");
+
+  const accentModeSelection = {
+    key: STORAGE_KEY_ACCENT_MODE,
+    value: "custom",
+  };
+  const nextAccentMode = resolveAppearanceSyncState(current, {
+    ...staleStored,
+    accentMode: "theme",
+  }, accentModeSelection);
+  assert.equal(nextAccentMode.accentMode, "custom");
+
+  const customAccentSelection = {
+    key: STORAGE_KEY_COLOR,
+    value: "221.2 83.2% 53.3%",
+  };
+  const nextCustomAccent = resolveAppearanceSyncState(current, {
+    ...staleStored,
+    customAccent: "208 100% 50%",
+  }, customAccentSelection);
+  assert.equal(nextCustomAccent.customAccent, "221.2 83.2% 53.3%");
+
+  // Without an announced key, a stale storage read must not invent a change.
+  const noIncoming = resolveAppearanceSyncState(current, {
+    ...staleStored,
+    darkUiThemeId: "midnight",
+  });
+  assert.equal(noIncoming.darkUiThemeId, "midnight");
 });
 
 test("System on a light OS changes to Dark in every open follow-app terminal", () => {
@@ -169,9 +244,32 @@ test("the race guards are wired into the real settings paths", () => {
   const guardIndex = stateSource.indexOf("hasPersistedAppearanceChanged(");
   const returnIndex = stateSource.indexOf("if (!persistedAppearanceChanged && persistMountedRef.current)", guardIndex);
   const writeIndex = stateSource.indexOf("localStorageAdapter.writeString(STORAGE_KEY_THEME", guardIndex);
+  const themeNotifyIndex = stateSource.indexOf("notifySettingsChanged(STORAGE_KEY_THEME, theme)", writeIndex);
+  const lightNotifyIndex = stateSource.indexOf("notifySettingsChanged(STORAGE_KEY_UI_THEME_LIGHT, lightUiThemeId)", writeIndex);
+  const darkNotifyIndex = stateSource.indexOf("notifySettingsChanged(STORAGE_KEY_UI_THEME_DARK, darkUiThemeId)", writeIndex);
+  const accentModeNotifyIndex = stateSource.indexOf("notifySettingsChanged(STORAGE_KEY_ACCENT_MODE, accentMode)", writeIndex);
+  const colorNotifyIndex = stateSource.indexOf("notifySettingsChanged(STORAGE_KEY_COLOR, customAccent)", writeIndex);
 
   assert.ok(guardIndex >= 0, "the settings effect must compare persisted appearance fields");
   assert.ok(returnIndex > guardIndex && returnIndex < writeIndex, "the stale render must stop before storage is written");
+  assert.ok(themeNotifyIndex > writeIndex, "theme changes must be announced over IPC with the new value");
+  assert.ok(lightNotifyIndex > writeIndex, "light UI theme changes must be announced over IPC with the new value");
+  assert.ok(darkNotifyIndex > writeIndex, "dark UI theme changes must be announced over IPC with the new value");
+  assert.ok(accentModeNotifyIndex > writeIndex, "accent mode changes must be announced over IPC with the new value");
+  assert.ok(colorNotifyIndex > writeIndex, "custom accent changes must be announced over IPC with the new value");
+  // Source still only notifies fields that actually changed (keyed, not a single theme-only broadcast).
+  assert.match(
+    stateSource,
+    /previousAppearance\.theme !== theme[\s\S]*notifySettingsChanged\(STORAGE_KEY_THEME, theme\)/,
+  );
+  assert.match(
+    stateSource,
+    /previousAppearance\.lightUiThemeId !== lightUiThemeId[\s\S]*notifySettingsChanged\(STORAGE_KEY_UI_THEME_LIGHT, lightUiThemeId\)/,
+  );
+  assert.match(
+    stateSource,
+    /previousAppearance\.darkUiThemeId !== darkUiThemeId[\s\S]*notifySettingsChanged\(STORAGE_KEY_UI_THEME_DARK, darkUiThemeId\)/,
+  );
   assert.match(ipcSource, /syncAppearanceFromStorage\(\{ key, value \}\)/);
   assert.match(storageSource, /resolveAppearanceStorageEvent\(s, e\.key, e\.newValue\)/);
   assert.match(popupSource, /terminalTheme=\{settings\.currentTerminalTheme\}/);
