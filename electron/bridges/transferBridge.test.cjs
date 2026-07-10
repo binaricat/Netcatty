@@ -212,6 +212,77 @@ test("SFTP stream-fallback uploads wait for close after finish", async (t) => {
   assert.ok(sender.sent.some((entry) => entry.channel === "netcatty:transfer:complete"));
 });
 
+test("SFTP stream-fallback uploads accept ssh2 close without finish", async (t) => {
+  const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-transfer-ssh2-close-"));
+  t.after(async () => {
+    await fs.promises.rm(tempDir, { recursive: true, force: true });
+  });
+
+  const localPath = path.join(tempDir, "payload.bin");
+  const payload = Buffer.alloc(64 * 1024, 9);
+  await fs.promises.writeFile(localPath, payload);
+
+  let remoteBytes = 0;
+  let sawFinish = false;
+  const streamSftp = createFastSftp({
+    createWriteStream() {
+      const { Writable } = require("node:stream");
+      const writeStream = new Writable({
+        autoDestroy: false,
+        emitClose: false,
+        write(chunk, _encoding, callback) {
+          remoteBytes += chunk.length;
+          callback();
+        },
+        final(callback) {
+          // ssh2 closes the remote handle from _final. On current Node versions,
+          // destroying here suppresses the normal Writable "finish" event.
+          this.destroy();
+          callback();
+        },
+        destroy(error, callback) {
+          queueMicrotask(() => {
+            callback(error);
+            if (!error) this.emit("close");
+          });
+        },
+      });
+      writeStream.on("finish", () => {
+        sawFinish = true;
+      });
+      return writeStream;
+    },
+  });
+
+  const client = {
+    __netcattySudoMode: true,
+    sftp: streamSftp,
+    stat() {
+      return Promise.resolve({ size: remoteBytes });
+    },
+  };
+  transferBridge.init({ sftpClients: new Map([["target", client]]) });
+
+  const sender = createSender();
+  const result = await transferBridge.startTransfer(
+    { sender },
+    {
+      transferId: "upload-stream-close-only",
+      sourcePath: localPath,
+      targetPath: "/tmp/payload.bin",
+      sourceType: "local",
+      targetType: "sftp",
+      targetSftpId: "target",
+      totalBytes: payload.length,
+    },
+  );
+
+  assert.equal(sawFinish, false);
+  assert.equal(remoteBytes, payload.length);
+  assert.equal(result.error, undefined);
+  assert.ok(sender.sent.some((entry) => entry.channel === "netcatty:transfer:complete"));
+});
+
 test("SFTP stream-fallback uploads fail on premature close", async (t) => {
   const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-transfer-premature-close-"));
   t.after(async () => {

@@ -394,15 +394,14 @@ async function uploadFile(localPath, remotePath, client, fileSize, transfer, sen
   }
 
   // Fallback: sequential stream piping.
-  // Require both 'finish' (bytes flushed) and 'close' (remote handle closed).
-  // Resolving on finish alone can miss close-time server errors (quota/disk full);
-  // resolving on close alone can treat a premature destroy as success (#2022).
+  // ssh2 closes the remote handle from _final and may suppress Node's normal
+  // 'finish' event. Treat a successful close after the complete local read as
+  // completion, then verify the persisted remote size below.
   await new Promise((resolve, reject) => {
     const readStream = fs.createReadStream(localPath, { highWaterMark: TRANSFER_CHUNK_SIZE });
     const writeStream = sftp.createWriteStream(remotePath, { highWaterMark: TRANSFER_CHUNK_SIZE });
     let transferred = 0;
     let settled = false;
-    let sawFinish = false;
 
     transfer.readStream = readStream;
     transfer.writeStream = writeStream;
@@ -428,19 +427,12 @@ async function uploadFile(localPath, remotePath, client, fileSize, transfer, sen
     });
     readStream.on('error', cleanup);
     writeStream.on('error', cleanup);
-    writeStream.on('finish', () => {
-      if (transfer.cancelled) {
-        cleanup(new Error('Transfer cancelled'));
-        return;
-      }
-      sawFinish = true;
-    });
     writeStream.on('close', () => {
       if (transfer.cancelled) {
         cleanup(new Error('Transfer cancelled'));
         return;
       }
-      if (!sawFinish) {
+      if (!readStream.readableEnded || transferred !== fileSize) {
         cleanup(new Error('Upload stream closed before finish'));
         return;
       }
