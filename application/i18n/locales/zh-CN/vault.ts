@@ -382,7 +382,7 @@ export const zhCNVaultMessages: Messages = {
   'terminal.serverStats.disk': '磁盘使用（根分区）',
   'terminal.serverStats.diskDetails': '已挂载磁盘',
   'terminal.serverStats.network': '网络速度',
-  'terminal.serverStats.latency': '延迟',
+  'terminal.serverStats.latency': 'SSH 统计响应时间',
   'terminal.serverStats.networkDetails': '网络接口',
   'terminal.serverStats.noData': '暂无数据',
   'terminal.dragDrop.localTitle': '拖放以插入路径',

@@ -45,7 +45,7 @@ export interface ServerStats {
   disks: DiskInfo[];            // All mounted disks
   netRxSpeed: number;           // Total network receive speed (bytes/sec)
   netTxSpeed: number;           // Total network transmit speed (bytes/sec)
-  latencyMs: number | null;     // Approximate SSH stats round-trip latency
+  latencyMs: number | null;     // SSH stats response time: channel open through first output
   netInterfaces: NetInterfaceInfo[];  // Per-interface network stats
   lastUpdated: number | null;   // Timestamp of last successful update
 }

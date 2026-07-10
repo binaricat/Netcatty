@@ -1129,7 +1129,7 @@ function createSessionOpsApi(ctx) {
                 disks,         // Array of all mounted disks
                 netRxSpeed,    // Total network receive speed (bytes/sec)
                 netTxSpeed,    // Total network transmit speed (bytes/sec)
-                latencyMs,      // Approximate SSH stats round-trip latency (ms)
+                latencyMs,      // SSH stats response time: channel open through first output (ms)
                 netInterfaces, // Per-interface network stats
                 hostname,
                 osName,

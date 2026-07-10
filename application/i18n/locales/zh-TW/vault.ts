@@ -382,7 +382,7 @@ export const zhTWVaultMessages: Messages = {
   'terminal.serverStats.disk': '磁碟使用（根分割槽）',
   'terminal.serverStats.diskDetails': '已掛載磁碟',
   'terminal.serverStats.network': '網路速度',
-  'terminal.serverStats.latency': '延遲',
+  'terminal.serverStats.latency': 'SSH 統計回應時間',
   'terminal.serverStats.networkDetails': '網路介面',
   'terminal.serverStats.noData': '暫無資料',
   'terminal.dragDrop.localTitle': '拖放以插入路徑',
