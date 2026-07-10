@@ -14,10 +14,11 @@ const fs = require("node:fs");
 const https = require("node:https");
 
 // MoshCatty pure-Rust releases only.
-// Minimum 0.1.2: earlier Linux builds linked GLIBC 2.34 (above Netcatty floors).
+// Minimum 0.1.4: includes the Windows ConPTY shortcut-input fix. Linux builds
+// have matched Netcatty's GLIBC floors since 0.1.2.
 // Allow semver prerelease (-rc1) and build metadata (+meta); no path separators.
 const TAG_RE = /^moshcatty-[A-Za-z0-9._+-]+$/;
-const MIN_VERSION = { major: 0, minor: 1, patch: 2 };
+const MIN_VERSION = { major: 0, minor: 1, patch: 4 };
 const MIN_TAG = `moshcatty-${MIN_VERSION.major}.${MIN_VERSION.minor}.${MIN_VERSION.patch}`;
 
 function log(msg) {
@@ -37,7 +38,7 @@ function parseMoshCattyVersion(tag) {
     major: Number(match[1]),
     minor: Number(match[2]),
     patch: Number(match[3]),
-    // Present when tag is e.g. moshcatty-0.1.2-rc1 (semver: prerelease < final).
+    // Present when tag is e.g. moshcatty-0.1.4-rc1 (semver: prerelease < final).
     prerelease: match[4] || null,
   };
 }
@@ -70,8 +71,8 @@ function validateReleaseTag(tag) {
   if (!isAtLeastMinRelease(value)) {
     throw new Error(
       `mosh binary release ${value} is below minimum ${MIN_TAG} `
-        + "(Linux glibc floors: x64 ≤ 2.28, arm64 ≤ 2.31; 0.1.0/0.1.1 require GLIBC 2.34; "
-        + "prereleases of the floor e.g. 0.1.2-rc1 are not accepted)",
+        + "(0.1.4 includes the Windows ConPTY shortcut-input fix; "
+        + "prereleases of the floor e.g. 0.1.4-rc1 are not accepted)",
     );
   }
   return value;

@@ -472,6 +472,10 @@ function createMoshSessionApi(ctx) {
         key: parsed.key,
         lang,
       });
+      // Netcatty owns the terminal buffer. Keeping MoshCatty on the primary
+      // screen preserves scrollback and lets renderer features such as keyword
+      // highlighting keep observing the active buffer.
+      env.MOSH_NO_TERM_INIT = "1";
       addBundledMoshRuntimeEnv(env, bareClient);
       if (options.agentForwarding && process.env.SSH_AUTH_SOCK) {
         env.SSH_AUTH_SOCK = process.env.SSH_AUTH_SOCK;

@@ -382,6 +382,43 @@ test("startMoshSession handshake path sends the existing exit event after mosh-c
   assert.equal(exit.payload.reason, "exited");
 });
 
+test("startMoshSession keeps MoshCatty on Netcatty's primary terminal screen", async (t) => {
+  const h = makeHarness(t);
+  await h.bridge.startMoshSession(h.event, h.options, { moshClientLookup: h.lookupOpts });
+
+  h.spawns[0].emitData("MOSH CONNECT 60002 ABCDEFGHIJKLMNOPQRSTUV==\r\n");
+  h.spawns[0].emitExit({ exitCode: 0, signal: 0 });
+
+  assert.equal(h.spawns.length, 2);
+  assert.equal(h.spawns[1].opts.env.MOSH_NO_TERM_INIT, "1");
+});
+
+test("startMoshSession forwards terminal shortcut escape sequences after the client swap", async (t) => {
+  const h = makeHarness(t);
+  await h.bridge.startMoshSession(h.event, h.options, { moshClientLookup: h.lookupOpts });
+
+  h.spawns[0].emitData("MOSH CONNECT 60002 ABCDEFGHIJKLMNOPQRSTUV==\r\n");
+  h.spawns[0].emitExit({ exitCode: 0, signal: 0 });
+
+  const shortcuts = [
+    "\x1b[A",
+    "\x1b[B",
+    "\x1b[C",
+    "\x1b[D",
+    "\x1b[1;5A",
+    "\x1b[1;5B",
+    "\x1b[1;5C",
+    "\x1b[1;5D",
+    "\x1b.",
+  ];
+  for (const data of shortcuts) {
+    h.bridge.writeToSession(h.event, { sessionId: h.options.sessionId, data });
+  }
+
+  assert.deepEqual(h.spawns[1].writes, shortcuts);
+  assert.deepEqual(h.spawns[0].writes, []);
+});
+
 test("startMoshSession stashes stats-companion auth after a successful handshake", async (t) => {
   const h = makeHarness(t);
   await h.bridge.startMoshSession(

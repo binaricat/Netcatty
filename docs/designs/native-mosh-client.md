@@ -49,6 +49,12 @@ Enforced upstream from `moshcatty-0.1.2` via MoshCatty release CI
 (`scripts/assert-max-glibc.sh`). Do not pin packaging to pre-0.1.2 Linux
 assets (they require GLIBC 2.34).
 
+## Windows compatibility floor
+
+Netcatty requires `moshcatty-0.1.4+`. That release preserves arrow keys,
+Ctrl/Alt-modified shortcuts, and Ctrl+C through Windows ConPTY. Packaging must
+not resolve or accept an older MoshCatty release.
+
 ## Decision log
 
 - **2026-07-10:** Feasibility accepted; client extracted to `binaricat/MoshCatty`.
@@ -58,3 +64,6 @@ assets (they require GLIBC 2.34).
   (`moshcatty-0.1.1`: ConPTY Ctrl+C + static MSVC CRT).
 - **2026-07-10:** Require `moshcatty-0.1.2+` for Linux glibc floors matching
   Netcatty (x64 ≤ 2.28, arm64 ≤ 2.31).
+- **2026-07-11:** Require `moshcatty-0.1.4+` for Windows ConPTY shortcut input;
+  keep Mosh sessions on Netcatty's primary terminal screen so highlighting and
+  scrollback remain available.

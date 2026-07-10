@@ -313,10 +313,10 @@ async function main(argv = process.argv.slice(2), env = process.env) {
     release = await resolveMoshBinRelease(env);
   }
   if (!release) {
-    log("MOSH_BIN_RELEASE is unset - skipping. Set it (e.g. moshcatty-0.1.2) to bundle mosh-client into the package.");
+    log("MOSH_BIN_RELEASE is unset - skipping. Set it (e.g. moshcatty-0.1.4) to bundle mosh-client into the package.");
     return 0;
   }
-  // Reject pre-0.1.2 pins (Linux GLIBC 2.34) even when MOSH_BIN_RELEASE is set
+  // Reject pre-0.1.4 pins (missing the Windows ConPTY shortcut-input fix) even when MOSH_BIN_RELEASE is set
   // without going through --resolve-release.
   release = validateReleaseTag(release);
 
