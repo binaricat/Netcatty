@@ -55,7 +55,7 @@ function buildSourceCandidates(appPath, relativeParts) {
 
 function resolveOriginalIconPath(appPath) {
   const primaryParts = useMacIconSources
-    ? ["icon.png"]
+    ? ["icons", "variants", "macos", "original.png"]
     : ["icons", "variants", "original.png"];
   const candidates = useMacIconSources
     ? buildSourceCandidates(appPath, primaryParts)

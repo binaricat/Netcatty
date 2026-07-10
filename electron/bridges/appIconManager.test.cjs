@@ -43,8 +43,9 @@ test("original icon uses platform-specific sizing", () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-icon-platform-"));
   const publicDir = path.join(tmp, "public");
   fs.mkdirSync(publicDir, { recursive: true });
-  const macPath = path.join(publicDir, "icon.png");
+  const macPath = path.join(publicDir, "icons", "variants", "macos", "original.png");
   const desktopPath = path.join(publicDir, "icons", "variants", "original.png");
+  fs.mkdirSync(path.dirname(macPath), { recursive: true });
   fs.mkdirSync(path.dirname(desktopPath), { recursive: true });
   fs.writeFileSync(macPath, "mac");
   fs.writeFileSync(desktopPath, "desktop");
@@ -71,6 +72,30 @@ test("macOS variants use HIG-sized assets without changing other platforms", () 
 
   appIconManager.initializeAppIconManager(tmp, { preferPublic: true, isMac: false });
   assert.equal(appIconManager.resolveVariantIconPath("bright", tmp), desktopPath);
+});
+
+test("macOS leaves the Dock icon unchanged when its runtime original asset is missing", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-icon-mac-missing-"));
+  const publicDir = path.join(tmp, "public");
+  fs.mkdirSync(publicDir, { recursive: true });
+  fs.writeFileSync(path.join(publicDir, "icon.png"), "packaged-mac");
+  fs.writeFileSync(path.join(publicDir, "icon-win.png"), "full-bleed");
+
+  appIconManager.initializeAppIconManager(tmp, { preferPublic: true, isMac: true });
+  let dockSetCount = 0;
+  const applied = appIconManager.applyAppIconVariant("original", {
+    app: { isPackaged: false, dock: { setIcon() { dockSetCount += 1; } } },
+    BrowserWindow: { getAllWindows: () => [] },
+    nativeImage: {
+      createFromBuffer: (buf) => ({ buffer: buf.toString() }),
+      createFromPath: (p) => ({ path: p }),
+    },
+    appPath: tmp,
+    isMac: true,
+  });
+
+  assert.equal(applied, false);
+  assert.equal(dockSetCount, 0);
 });
 
 test("applyAppIconVariant updates current icon path", () => {

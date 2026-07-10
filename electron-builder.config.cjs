@@ -30,10 +30,11 @@ module.exports = {
     beforePack: './scripts/beforePackCursorSdk.cjs',
     afterPack: './scripts/afterPackMacUuid.cjs',
     // Platform-split icons (#813):
-    //   - public/icon.png keeps Apple's full 1024px HIG canvas so the
-    //     824px squircle sits at ~80% of the PNG canvas. macOS applies
-    //     its own Dock sizing and masking, so preserving the grid margin
-    //     keeps the icon aligned with neighboring apps (#2093).
+    //   - public/icon.png keeps Apple's HIG grid margin so the rendered
+    //     squircle sits at ~88% of the PNG canvas. macOS needs this —
+    //     the dock renders icons with its own rounding/shadow and most
+    //     third-party apps (#803) leave that grid margin alone so the
+    //     squircle lines up with neighbors.
     //   - public/icon-win.png uses a tight-crop viewBox so the squircle
     //     fills 100% of the PNG. Windows / Linux taskbars render icons
     //     full-bleed, so the Apple margin showed up as visible padding,

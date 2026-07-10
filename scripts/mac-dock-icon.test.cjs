@@ -6,7 +6,6 @@ const zlib = require("node:zlib");
 const { VALID_VARIANTS } = require("../electron/bridges/appIconManager.cjs");
 
 const APP_ICON_VARIANTS = [...VALID_VARIANTS];
-const MAC_ICON_VARIANTS = APP_ICON_VARIANTS.filter((variant) => variant !== "original");
 
 function paethPredictor(left, up, upperLeft) {
   const estimate = left + up - upperLeft;
@@ -105,34 +104,22 @@ test("main process leaves macOS Dock icon to the packaged app bundle", () => {
   );
 });
 
-test("macOS app icon preserves the HIG canvas margin", () => {
-  const iconSource = fs.readFileSync(
-    path.join(__dirname, "../public/icon.svg"),
-    "utf8",
-  );
-
-  assert.match(
-    iconSource,
-    /<svg[^>]+viewBox="0 0 1024 1024"/,
-    "Keep the full 1024px canvas; cropping the viewBox makes the Dock icon larger than neighboring apps.",
-  );
-  assert.match(
-    iconSource,
-    /<rect x="100\.0" y="100\.0" width="824" height="824"/,
-    "Keep the macOS squircle on the 824px app-icon grid.",
-  );
-
+test("macOS keeps the packaged icon unchanged and sizes only runtime Dock icons", () => {
   const projectRoot = path.join(__dirname, "..");
   const config = require("../electron-builder.config.cjs");
   assert.equal(config.mac?.icon ?? config.icon, "public/icon.png");
+  assert.deepEqual(
+    readRgbaPngAlphaBounds(path.join(projectRoot, "public/icon.png")),
+    { minX: 61, minY: 61, maxX: 962, maxY: 962 },
+    "The packaged icon already looks correct when Netcatty is not running",
+  );
 
-  const iconFiles = [
-    path.join(projectRoot, "public/icon.png"),
-    ...MAC_ICON_VARIANTS.map((variant) =>
-      path.join(projectRoot, "public/icons/variants/macos", `${variant}.png`),
-    ),
-  ];
-  for (const iconFile of iconFiles) {
+  for (const variant of APP_ICON_VARIANTS) {
+    const iconFile = path.join(
+      projectRoot,
+      "public/icons/variants/macos",
+      `${variant}.png`,
+    );
     assert.deepEqual(
       readRgbaPngAlphaBounds(iconFile),
       { minX: 100, minY: 100, maxX: 923, maxY: 923 },

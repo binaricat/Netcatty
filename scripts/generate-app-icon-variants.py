@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SOURCE_SVG = ROOT / "public" / "icon.svg"
 OUT_DIR = ROOT / "public" / "icons" / "variants"
 MACOS_OUT_DIR = OUT_DIR / "macos"
-DESKTOP_VIEWBOX = "44 44 936 936"
+MACOS_RUNTIME_VIEWBOX = "0 0 1024 1024"
 
 DETAIL_COLORS = [
     "#1f2657",
@@ -218,8 +218,8 @@ def render_png(svg_content: str, target: Path) -> None:
 
 
 def main() -> None:
-    macos_template = load_template()
-    desktop_template = set_viewbox(macos_template, DESKTOP_VIEWBOX)
+    desktop_template = load_template()
+    macos_template = set_viewbox(desktop_template, MACOS_RUNTIME_VIEWBOX)
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     MACOS_OUT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -228,6 +228,10 @@ def main() -> None:
             desktop_path = OUT_DIR / f"{variant_id}.png"
             render_png(desktop_template, desktop_path)
             print(f"wrote {desktop_path.relative_to(ROOT)}")
+
+            macos_path = MACOS_OUT_DIR / f"{variant_id}.png"
+            render_png(macos_template, macos_path)
+            print(f"wrote {macos_path.relative_to(ROOT)}")
             continue
         desktop_path = OUT_DIR / f"{variant_id}.png"
         render_png(apply_variant(desktop_template, spec), desktop_path)

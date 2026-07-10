@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="44 44 936 936" width="1024" height="1024">
   <defs>
     <clipPath id="round">
       <rect x="100.0" y="100.0" width="824" height="824" rx="185" ry="185" />
