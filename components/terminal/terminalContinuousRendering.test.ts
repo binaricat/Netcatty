@@ -37,7 +37,7 @@ test("background split workspaces keep their live geometry without hibernate", (
   );
   assert.match(
     workspaceLayoutSource,
-    /if \(keepHiddenWorkspacesLaidOut\) \{[\s\S]*map\.set\(workspace\.id, cached\.rects\)/,
+    /if \(keepHiddenWorkspacesLaidOut\) \{[\s\S]*cachedSizeIsUsable[\s\S]*computeWorkspaceRects\(layoutWorkspace, layoutSize\)/,
   );
   assert.match(
     supportSource,
@@ -45,7 +45,7 @@ test("background split workspaces keep their live geometry without hibernate", (
   );
   assert.match(
     supportSource,
-    /layoutWorkspace\?\.viewMode === 'split'\s*\|\| \(!isVisible && !hibernateHiddenTabs && !!layoutWorkspace\)/,
+    /shouldUseTerminalPaneSplitLayout\(\{[\s\S]*workspace: layoutWorkspace,[\s\S]*sessionId: session\.id,[\s\S]*isVisible,[\s\S]*hibernateHiddenTabs/,
   );
   assert.match(
     layerEffectsSource,

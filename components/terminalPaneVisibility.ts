@@ -26,6 +26,24 @@ export type TerminalPaneStyle = {
   zIndex?: number;
 };
 
+export function shouldUseTerminalPaneSplitLayout({
+  workspace,
+  sessionId,
+  isVisible,
+  hibernateHiddenTabs,
+}: {
+  workspace: Workspace | undefined;
+  sessionId: string;
+  isVisible: boolean;
+  hibernateHiddenTabs: boolean;
+}): boolean {
+  if (!workspace) return false;
+  if (workspace.viewMode === "split") return true;
+  return !isVisible
+    && !hibernateHiddenTabs
+    && workspace.focusedSessionId !== sessionId;
+}
+
 export function resolveInactiveTerminalPaneStyle<T extends TerminalPaneStyle>(
   layoutStyle: T,
   lastVisibleSize: TerminalPaneHiddenSize | null,

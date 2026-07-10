@@ -26,6 +26,7 @@ import {
   getTerminalPaneRenderSnapshot,
   parseTerminalPaneRenderSnapshot,
   resolveInactiveTerminalPaneStyle,
+  shouldUseTerminalPaneSplitLayout,
   type TerminalPaneHiddenSize,
 } from '../terminalPaneVisibility';
 import type { ResolvedAppearance, TerminalAppearanceHostScope } from '../../domain/terminalAppearanceRuntime';
@@ -803,8 +804,11 @@ const getPaneRenderedWorkspaceRect = (props: Pick<TerminalPaneProps, 'session' |
   const workspaceId = props.session.workspaceId;
   if (!workspaceId) return null;
   const workspace = props.workspaceById.get(workspaceId);
-  if (!workspace || workspace.viewMode === 'focus') return null;
+  if (!workspace) return null;
   if (resolveTerminalHibernateEnabled(props.terminalSettings) && activeTabStore.getActiveTabId() !== workspaceId) {
+    return null;
+  }
+  if (workspace.viewMode === 'focus' && workspace.focusedSessionId === props.session.id) {
     return null;
   }
   return props.workspaceRectsById.get(workspaceId)?.[props.session.id] ?? null;
@@ -992,8 +996,12 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
   const hibernateHiddenTabs = resolveTerminalHibernateEnabled(terminalSettings);
   const layoutWorkspaceId = activeWorkspaceId ?? (!hibernateHiddenTabs ? session.workspaceId : undefined);
   const layoutWorkspace = layoutWorkspaceId ? workspaceById.get(layoutWorkspaceId) : undefined;
-  const usesSplitLayout = layoutWorkspace?.viewMode === 'split'
-    || (!isVisible && !hibernateHiddenTabs && !!layoutWorkspace);
+  const usesSplitLayout = shouldUseTerminalPaneSplitLayout({
+    workspace: layoutWorkspace,
+    sessionId: session.id,
+    isVisible,
+    hibernateHiddenTabs,
+  });
   const rect = layoutWorkspaceId && usesSplitLayout
     ? workspaceRectsById.get(layoutWorkspaceId)?.[session.id] ?? null
     : null;

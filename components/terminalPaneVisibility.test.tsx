@@ -8,6 +8,7 @@ import {
   parseTerminalPaneRenderSnapshot,
   resolveInactiveTerminalPaneStyle,
   resolveTerminalLayerSurfaceStyle,
+  shouldUseTerminalPaneSplitLayout,
 } from "./terminalPaneVisibility";
 import type { Workspace } from "../types";
 
@@ -138,6 +139,32 @@ test("terminal pane render snapshot combines visibility and focus in one token",
   assert.equal(parsed.paneState.isVisible, true);
   assert.equal(parsed.paneState.mode, "split");
   assert.equal(parsed.isFocusedPane, true);
+});
+
+test("hidden focus workspaces keep the focused pane full-size and other panes split", () => {
+  const workspace = createWorkspace("ws-focus", ["f-1", "f-2"], {
+    viewMode: "focus",
+    focusedSessionId: "f-2",
+  });
+
+  assert.equal(shouldUseTerminalPaneSplitLayout({
+    workspace,
+    sessionId: "f-2",
+    isVisible: false,
+    hibernateHiddenTabs: false,
+  }), false);
+  assert.equal(shouldUseTerminalPaneSplitLayout({
+    workspace,
+    sessionId: "f-1",
+    isVisible: false,
+    hibernateHiddenTabs: false,
+  }), true);
+  assert.equal(shouldUseTerminalPaneSplitLayout({
+    workspace,
+    sessionId: "f-1",
+    isVisible: false,
+    hibernateHiddenTabs: true,
+  }), false);
 });
 
 test("inactive terminal pane keeps rendering when hibernate is disabled", () => {

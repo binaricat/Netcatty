@@ -155,10 +155,36 @@ export function useTerminalWorkspaceLayout({
         if (keepHiddenWorkspacesLaidOut) {
           for (const workspace of workspaces) {
             if (workspace.id === activeWorkspace?.id) continue;
+            const layoutWorkspace = workspaceForLayout(workspace);
+            const previewKey = resizing?.workspaceId === workspace.id
+              ? `${resizing.workspaceId}:${resizing.splitId}:${resizePreviewDelta}`
+              : 'still';
             const cached = workspaceRectsCacheRef.current.get(workspace.id);
-            if (cached) {
+            const cachedSizeIsUsable = !!cached && cached.width > 0 && cached.height > 0;
+            if (
+              cached
+              && cached.root === layoutWorkspace.root
+              && cached.previewKey === previewKey
+              && (cachedSizeIsUsable || workspaceArea.width <= 0 || workspaceArea.height <= 0)
+            ) {
               map.set(workspace.id, cached.rects);
+              continue;
             }
+
+            const layoutSize = cachedSizeIsUsable
+              ? { width: cached.width, height: cached.height }
+              : workspaceArea;
+            if (layoutSize.width <= 0 || layoutSize.height <= 0) continue;
+
+            const rects = computeWorkspaceRects(layoutWorkspace, layoutSize);
+            workspaceRectsCacheRef.current.set(workspace.id, {
+              root: layoutWorkspace.root,
+              previewKey,
+              width: layoutSize.width,
+              height: layoutSize.height,
+              rects,
+            });
+            map.set(workspace.id, rects);
           }
         }
 
