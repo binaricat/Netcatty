@@ -51,11 +51,11 @@ const WINDOWS_LEGACY_FLUENT_MOSH_CLIENT = {
 // Using flat names in the release for SHA256SUMS readability, then
 // fanning out into platform-arch subdirs locally.
 //
-// Linux/macOS/Windows bundle targets are tar.gz archives containing the
-// binary plus the runtime helpers each platform needs.
-// Bundling terminfo lets bundled Posix mosh-client builds work on
-// minimal hosts that don't have a
-// system ncurses-base — see issue #890.
+// Linux/macOS/Windows bundle targets are tar.gz archives.
+// MoshCatty pure-Rust releases ship only mosh-client[.exe] (no Cygwin DLL bag,
+// no terminfo). Legacy Cygwin-era Windows bundles may still include
+// mosh-client-win32-*-dlls/ + terminfo; those remain optional/compatible.
+// Posix terminfo in older bundles is optional — warn if missing (issue #890).
 //
 // `legacy` describes the pre-bundle artifact name some published mosh
 // binary releases still ship (Linux/Darwin used flat files before the
@@ -251,7 +251,7 @@ function assertExtractedTreeSafe(root) {
   }
 }
 
-function assertBundledTerminfo(extractDir, target) {
+function assertBundledTerminfo(extractDir, target, { required = false } = {}) {
   const terminfoDir = path.join(extractDir, "terminfo");
   const terminfoEntry = [
     path.join(terminfoDir, "x", "xterm-256color"),
@@ -261,7 +261,9 @@ function assertBundledTerminfo(extractDir, target) {
     throw new Error(`${target.file} contained invalid terminfo for xterm-256color`);
   }
   if (!terminfoEntry) {
-    warn(`${target.file} did not contain terminfo for xterm-256color; ${target.platform}-${target.arch} mosh packaging will fall back to host system terminfo (issue #890).`);
+    const msg = `${target.file} did not contain terminfo for xterm-256color; ${target.platform}-${target.arch} mosh packaging will fall back to host system terminfo (issue #890).`;
+    if (required) throw new Error(msg);
+    warn(msg);
   }
 }
 
@@ -274,11 +276,13 @@ function normalizeWindowsBundle(extractDir, target) {
   if (!fs.existsSync(genericExe) || !fs.lstatSync(genericExe).isFile()) {
     throw new Error(`${target.file} did not contain mosh-client.exe`);
   }
+  // MoshCatty pure-Rust packages ship only mosh-client.exe (no Cygwin DLL bag,
+  // no terminfo). Legacy Cygwin-era bundles may still include dlls + terminfo;
+  // terminfo is optional either way (warn if missing).
   const dllDir = path.join(extractDir, `mosh-client-${target.platform}-${target.arch}-dlls`);
-  if (!fs.existsSync(dllDir) || !fs.statSync(dllDir).isDirectory()) {
-    throw new Error(`${target.file} did not contain ${path.basename(dllDir)}/`);
+  if (fs.existsSync(dllDir) && fs.statSync(dllDir).isDirectory()) {
+    assertBundledTerminfo(extractDir, target, { required: false });
   }
-  assertBundledTerminfo(extractDir, target);
   chmodExecutable(genericExe);
 }
 
@@ -291,7 +295,8 @@ function normalizePosixBundle(extractDir, target) {
   if (!fs.existsSync(binary) || !fs.lstatSync(binary).isFile()) {
     throw new Error(`${target.file} did not contain mosh-client`);
   }
-  assertBundledTerminfo(extractDir, target);
+  // Posix MoshCatty is also pure (no terminfo required). Warn only.
+  assertBundledTerminfo(extractDir, target, { required: false });
   chmodExecutable(binary);
 }
 
@@ -457,6 +462,7 @@ module.exports = {
   selectReleaseAsset,
   validateTarEntries,
   assertExtractedTreeSafe,
+  normalizeWindowsBundle,
   unpackTarGz,
   writeFlatAsset,
   main,

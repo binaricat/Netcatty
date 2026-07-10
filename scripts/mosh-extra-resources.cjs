@@ -57,8 +57,8 @@ function moshExtraResources(platform) {
   }
 
   if (platform === "win32") {
-    // Windows normally ships the pinned runtime bundle. Keep DLL/terminfo
-    // packaging optional so the standalone fallback remains packageable.
+    // Windows: MoshCatty pure packages ship only mosh-client.exe.
+    // Legacy Cygwin bundles may still include a DLL bag and terminfo.
     const arch = requestedArch();
     const exe = path.join(moshRoot, `win32-${arch}`, "mosh-client.exe");
     const dllDir = path.join(moshRoot, `win32-${arch}`, `mosh-client-win32-${arch}-dlls`);

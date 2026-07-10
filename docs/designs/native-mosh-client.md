@@ -44,3 +44,6 @@ protocol stack, build, and release details.
   extracted to `binaricat/MoshCatty`.
 - **2026-07-10:** Netcatty defaults packaging to MoshCatty releases; in-tree
   `native/netcatty-mosh` vendor snapshot removed.
+- **2026-07-10:** `fetch-mosh-binaries` accepts pure Windows tarballs (exe only;
+  no Cygwin dlls / terminfo required). MoshCatty `moshcatty-0.1.1` ships
+  ConPTY Ctrl+C fix + static MSVC CRT (no `VCRUNTIME140`).

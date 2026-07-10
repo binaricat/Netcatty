@@ -10,17 +10,22 @@ directly (see `electron/bridges/moshHandshake.cjs` and
 
 All platforms ship the pure Rust client from
 [`binaricat/MoshCatty`](https://github.com/binaricat/MoshCatty)
-(no Cygwin, no terminfo runtime, no DLL bag).
+(no Cygwin, no terminfo, no Cygwin DLL bag). Windows builds static-link the
+MSVC CRT so there is also no `VCRUNTIME140` redistributable requirement
+(from `moshcatty-0.1.1`).
 
 | Target | Asset |
 |--------|--------|
 | `linux-x64` | `mosh-client-linux-x64.tar.gz` |
 | `linux-arm64` | `mosh-client-linux-arm64.tar.gz` |
 | `darwin-universal` | `mosh-client-darwin-universal.tar.gz` |
-| `win32-x64` | `mosh-client-win32-x64.tar.gz` |
+| `win32-x64` | `mosh-client-win32-x64.tar.gz` (exe only) |
 
-Release tags: `moshcatty-*` (e.g. `moshcatty-0.1.0`). Every release includes
+Release tags: `moshcatty-*` (e.g. `moshcatty-0.1.1`). Every release includes
 `SHA256SUMS`.
+
+Fetch accepts pure tarballs that contain only `mosh-client[.exe]`. Legacy
+Cygwin-era bundles with `*-dlls/` / terminfo still unpack if present.
 
 ### How binaries land here
 
@@ -38,10 +43,10 @@ Release tags: `moshcatty-*` (e.g. `moshcatty-0.1.0`). Every release includes
 
 ```sh
 # Pin a release (optional)
-export MOSH_BIN_RELEASE=moshcatty-0.1.0
+export MOSH_BIN_RELEASE=moshcatty-0.1.1
 npm run fetch:mosh
 
-# Dev: host platform only
+# Dev: host platform only (resolves latest moshcatty-* by default)
 npm run fetch:mosh:dev
 ```
 

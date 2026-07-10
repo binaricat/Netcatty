@@ -16,7 +16,7 @@
 const fs = require("node:fs");
 const https = require("node:https");
 
-// MoshCatty pure-Rust releases: moshcatty-0.1.0
+// MoshCatty pure-Rust releases: moshcatty-0.1.1
 // Legacy Cygwin-era binary repo: mosh-bin-1.4.0-2
 const TAG_RE = /^(?:mosh-bin|moshcatty)-[A-Za-z0-9._-]+$/;
 

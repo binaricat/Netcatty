@@ -235,6 +235,36 @@ test("fetch-mosh-binaries accepts legacy Windows bundles without terminfo", asyn
   assert.equal(fs.existsSync(path.join(resDir, "win32-x64", "mosh-client.exe")), true);
 });
 
+test("fetch-mosh-binaries accepts pure MoshCatty Windows tarball without dlls or terminfo", async (t) => {
+  const resDir = path.join(makeTmp(t), "resources", "mosh");
+  const tar = makeTarGz(t, {
+    "mosh-client.exe": "pure-moshcatty-exe",
+  });
+  const baseUrl = await serveAssets(t, {
+    "mosh-client-win32-x64.tar.gz": tar,
+    SHA256SUMS: `${sha256(tar)}  mosh-client-win32-x64.tar.gz\n`,
+  });
+
+  await execFileAsync(process.execPath, [script, "--platform=win32", "--arch=x64"], {
+    env: {
+      ...process.env,
+      MOSH_BIN_RELEASE: "moshcatty-0.1.1",
+      MOSH_BIN_BASE_URL: baseUrl,
+      MOSH_BIN_RES_DIR: resDir,
+      CI: "true",
+    },
+    stdio: "pipe",
+  });
+
+  assert.equal(fs.existsSync(path.join(resDir, "win32-x64", "mosh-client.exe")), true);
+  assert.equal(fs.existsSync(path.join(resDir, "win32-x64", "mosh-client-win32-x64-dlls")), false);
+  assert.equal(fs.existsSync(path.join(resDir, "win32-x64", "mosh-client-core.exe")), false);
+  assert.equal(
+    fs.readFileSync(path.join(resDir, "win32-x64", "mosh-client.exe"), "utf8"),
+    "pure-moshcatty-exe",
+  );
+});
+
 test("fetch-mosh-binaries rejects invalid Windows terminfo entries", async (t) => {
   const resDir = path.join(makeTmp(t), "resources", "mosh");
   const srcDir = makeTmp(t);
