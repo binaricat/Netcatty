@@ -8,6 +8,7 @@ const supportSource = readFileSync(new URL("../terminalLayer/TerminalLayerSuppor
 const viewSource = readFileSync(new URL("../terminalLayer/TerminalLayerView.tsx", import.meta.url), "utf8");
 const tabBridgeSource = readFileSync(new URL("../terminalLayer/TerminalLayerTabBridge.tsx", import.meta.url), "utf8");
 const workspaceLayoutSource = readFileSync(new URL("../terminalLayer/useTerminalWorkspaceLayout.ts", import.meta.url), "utf8");
+const layerEffectsSource = readFileSync(new URL("../terminalLayer/useTerminalLayerEffects.ts", import.meta.url), "utf8");
 
 test("renderer activity follows the hibernate setting instead of active-tab visibility", () => {
   assert.match(
@@ -32,7 +33,7 @@ test("inactive terminal surfaces remain painted and non-interactive without hibe
 test("background split workspaces keep their live geometry without hibernate", () => {
   assert.match(
     tabBridgeSource,
-    /keepHiddenWorkspacesLaidOut: !resolveTerminalHibernateEnabled\(s\.terminalSettings\)/,
+    /keepHiddenWorkspacesLaidOut: !hibernateHiddenTabs/,
   );
   assert.match(
     workspaceLayoutSource,
@@ -41,5 +42,13 @@ test("background split workspaces keep their live geometry without hibernate", (
   assert.match(
     supportSource,
     /const layoutWorkspaceId = activeWorkspaceId \?\? \(!hibernateHiddenTabs \? session\.workspaceId : undefined\)/,
+  );
+  assert.match(
+    tabBridgeSource,
+    /isTerminalLayerRendererActive: isTerminalLayerVisible \|\| !hibernateHiddenTabs/,
+  );
+  assert.match(
+    layerEffectsSource,
+    /if \(!isTerminalLayerRendererActive\) return;[\s\S]*?remeasureWorkspaceArea\(\)/,
   );
 });

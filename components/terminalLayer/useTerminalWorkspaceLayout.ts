@@ -145,9 +145,6 @@ export function useTerminalWorkspaceLayout({
   const workspaceRectsById = useMemo(
       () => {
         const map = new Map<string, Record<string, WorkspaceRect>>();
-        const previewKey = resizing
-          ? `${resizing.workspaceId}:${resizing.splitId}:${resizePreviewDelta}`
-          : 'still';
         const liveWorkspaceIds = new Set(workspaces.map((workspace) => workspace.id));
         for (const workspaceId of workspaceRectsCacheRef.current.keys()) {
           if (!liveWorkspaceIds.has(workspaceId)) {
@@ -163,6 +160,9 @@ export function useTerminalWorkspaceLayout({
 
         for (const workspace of workspacesToLayout) {
           const layoutWorkspace = workspaceForLayout(workspace);
+          const previewKey = resizing?.workspaceId === workspace.id
+            ? `${resizing.workspaceId}:${resizing.splitId}:${resizePreviewDelta}`
+            : 'still';
           const cached = workspaceRectsCacheRef.current.get(workspace.id);
           if (
             cached

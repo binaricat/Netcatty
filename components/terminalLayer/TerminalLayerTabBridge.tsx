@@ -47,6 +47,7 @@ export function TerminalLayerTabBridge({ stableRef }: { stableRef: StableRef }) 
   );
   const isFocusMode = activeWorkspace?.viewMode === 'focus';
   const focusedSessionId = activeWorkspace?.focusedSessionId;
+  const hibernateHiddenTabs = resolveTerminalHibernateEnabled(s.terminalSettings);
   const effectiveFocusedSessionId = useMemo((): string | null => {
     if (activeWorkspace) {
       if (focusedSessionId) return focusedSessionId;
@@ -80,7 +81,7 @@ export function TerminalLayerTabBridge({ stableRef }: { stableRef: StableRef }) 
     activeSession,
     activeWorkspace,
     isFocusMode,
-    keepHiddenWorkspacesLaidOut: !resolveTerminalHibernateEnabled(s.terminalSettings),
+    keepHiddenWorkspacesLaidOut: !hibernateHiddenTabs,
     onAddSessionToWorkspace: s.onAddSessionToWorkspace,
     onCreateWorkspaceFromSessions: s.onCreateWorkspaceFromSessions,
     onSetDraggingSessionId: s.onSetDraggingSessionId,
@@ -309,6 +310,7 @@ export function TerminalLayerTabBridge({ stableRef }: { stableRef: StableRef }) 
     isComposeBarOpen: s.isComposeBarOpen,
     isFocusMode,
     isTerminalLayerVisible,
+    isTerminalLayerRendererActive: isTerminalLayerVisible || !hibernateHiddenTabs,
     lastSidePanelTabRef: s.lastSidePanelTabRef,
     Map,
     Math,

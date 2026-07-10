@@ -68,3 +68,23 @@ test("hibernate retry preserves normal hibernate blockers", () => {
   assert.ok(searchBlockerIndex < retryIndex, "search blocker must run before retrying hibernate");
   assert.ok(transferBlockerIndex < retryIndex, "file-transfer blocker must run before retrying hibernate");
 });
+
+test("full hibernate rechecks live state after every asynchronous step", () => {
+  const source = readFileSync(new URL("../Terminal.tsx", import.meta.url), "utf8");
+  const body = readFunctionBody(source, "const fullHibernateRuntime = useCallback(async () =>");
+
+  const flushIndex = body.indexOf("await flushPendingTerminalWritesBeforeHibernate(term)");
+  const afterFlushGuardIndex = body.indexOf("if (!canFinishHibernate()) return;", flushIndex);
+  const serializeIndex = body.indexOf("await serializeTerminalForHibernate(");
+  const afterSerializeGuardIndex = body.indexOf("if (!canFinishHibernate()) return;", serializeIndex);
+  const releaseIndex = body.indexOf("releaseTerminalFlowBeforeHibernate(terminalBackend, term, backendId)");
+
+  assert.match(body, /!isVisibleRef\.current/);
+  assert.match(body, /resolveTerminalHibernateEnabled\(terminalSettingsRef\.current\)/);
+  assert.match(body, /termRef\.current === term/);
+  assert.match(body, /sessionRef\.current === backendId/);
+  assert.ok(flushIndex < afterFlushGuardIndex, "visibility and settings must be rechecked after draining output");
+  assert.ok(afterFlushGuardIndex < serializeIndex, "the post-drain guard must run before serialization");
+  assert.ok(serializeIndex < afterSerializeGuardIndex, "visibility and settings must be rechecked after serialization");
+  assert.ok(afterSerializeGuardIndex < releaseIndex, "the final guard must run before releasing the live runtime");
+});

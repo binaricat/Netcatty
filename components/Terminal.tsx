@@ -1319,6 +1319,22 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     const backendId = sessionRef.current;
     if (!backendId) return;
     const term = termRef.current;
+    const serializeAddon = serializeAddonRef.current;
+    const canFinishHibernate = () => (
+      !isVisibleRef.current
+      && !hibernatedRef.current
+      && !softHiddenRef.current
+      && hasRuntimeRef.current
+      && statusRef.current === "connected"
+      && !isSearchOpenRef.current
+      && !hibernateFileTransferActiveRef.current
+      && resolveTerminalHibernateEnabled(terminalSettingsRef.current)
+      && termRef.current === term
+      && sessionRef.current === backendId
+      && serializeAddonRef.current === serializeAddon
+    );
+
+    if (!canFinishHibernate()) return;
 
     terminalHiddenRendererStore.clearSoftHidden(sessionId);
     softHiddenRef.current = false;
@@ -1328,24 +1344,18 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       scheduleHibernateRetry();
       return;
     }
-    if (
-      isVisibleRef.current
-      || hibernatedRef.current
-      || termRef.current !== term
-      || sessionRef.current !== backendId
-      || !serializeAddonRef.current
-    ) {
-      return;
-    }
+    if (!canFinishHibernate()) return;
     if (shouldSkipHibernateForActiveAlternateScreen(term)) {
       return;
     }
 
     const snapshot = await serializeTerminalForHibernate(
       term,
-      serializeAddonRef.current,
-      { preferWasm: resolveHibernatePreferWasmSerialize(terminalSettings) },
+      serializeAddon,
+      { preferWasm: resolveHibernatePreferWasmSerialize(terminalSettingsRef.current) },
     );
+
+    if (!canFinishHibernate()) return;
 
     if (snapshot.alternateScreen && snapshot.snapshot.length === 0) {
       logger.info("[Terminal] Skipping hibernate: alternate screen snapshot unavailable", { sessionId });
@@ -1377,7 +1387,6 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     sessionId,
     shouldSkipHibernateForActiveAlternateScreen,
     terminalBackend,
-    terminalSettings,
   ]);
   fullHibernateRuntimeRef.current = fullHibernateRuntime;
 
