@@ -2,9 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { TerminalSession, Workspace } from "../../domain/models";
 import {
+  applyCloseSessionToSessions,
   closeSessionWorkspaceLayoutState,
   detachSessionFromWorkspaceState,
   replaceDissolvedWorkspaceTabOrder,
+  resolveActiveTabAfterCloseSession,
 } from "./sessionWorkspaceDetach";
 
 const session = (id: string, workspaceId = "ws-1"): TerminalSession => ({
@@ -119,5 +121,59 @@ test("closing a workspace session dissolves the workspace when one terminal rema
       result.lastRemainingSessionId ? [result.lastRemainingSessionId] : undefined,
     ),
     ["log-1", "s2", "session-3"],
+  );
+});
+
+test("closing one split pane keeps the other terminal as an orphan tab", () => {
+  const layoutResult = closeSessionWorkspaceLayoutState(
+    [workspace(["s1", "s2"])],
+    "ws-1",
+    "s1",
+  );
+  const nextSessions = applyCloseSessionToSessions(
+    [session("s1"), session("s2")],
+    "s1",
+    layoutResult,
+  );
+
+  assert.deepEqual(nextSessions.map((s) => [s.id, s.workspaceId]), [
+    ["s2", undefined],
+  ]);
+  assert.equal(
+    resolveActiveTabAfterCloseSession({
+      currentActiveTabId: "ws-1",
+      closedSessionId: "s1",
+      workspaceId: "ws-1",
+      layoutResult,
+      remainingSessions: nextSessions,
+    }),
+    "s2",
+  );
+});
+
+test("closing the last workspace session does not invent a surviving terminal", () => {
+  const layoutResult = closeSessionWorkspaceLayoutState(
+    [workspace(["s1"])],
+    "ws-1",
+    "s1",
+  );
+  const nextSessions = applyCloseSessionToSessions(
+    [session("s1")],
+    "s1",
+    layoutResult,
+  );
+
+  assert.deepEqual(nextSessions, []);
+  assert.equal(layoutResult.removedWorkspaceId, "ws-1");
+  assert.equal(layoutResult.lastRemainingSessionId, undefined);
+  assert.equal(
+    resolveActiveTabAfterCloseSession({
+      currentActiveTabId: "ws-1",
+      closedSessionId: "s1",
+      workspaceId: "ws-1",
+      layoutResult,
+      remainingSessions: nextSessions,
+    }),
+    "vault",
   );
 });

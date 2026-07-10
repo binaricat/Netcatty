@@ -101,6 +101,59 @@ export function closeSessionWorkspaceLayoutState(
   };
 }
 
+/**
+ * Apply a close-session action to the session list using the layout result.
+ * When a 2-pane workspace dissolves to one terminal, that remaining session
+ * must become an orphan tab — not stay bound to a deleted workspaceId.
+ */
+export function applyCloseSessionToSessions(
+  sessions: readonly TerminalSession[],
+  sessionId: string,
+  layoutResult: Pick<CloseSessionWorkspaceLayoutResult, "lastRemainingSessionId">,
+): TerminalSession[] {
+  const remaining = sessions.filter((session) => session.id !== sessionId);
+  const lastRemainingSessionId = layoutResult.lastRemainingSessionId;
+  if (!lastRemainingSessionId) return remaining;
+
+  return remaining.map((session) => (
+    session.id === lastRemainingSessionId
+      ? { ...session, workspaceId: undefined }
+      : session
+  ));
+}
+
+export function resolveActiveTabAfterCloseSession({
+  currentActiveTabId,
+  closedSessionId,
+  workspaceId,
+  layoutResult,
+  remainingSessions,
+}: {
+  currentActiveTabId: string | null;
+  closedSessionId: string;
+  workspaceId: string | undefined;
+  layoutResult: CloseSessionWorkspaceLayoutResult;
+  remainingSessions: readonly TerminalSession[];
+}): string | null {
+  const fallbackWorkspace = layoutResult.workspaces[layoutResult.workspaces.length - 1];
+  const fallbackSolo = remainingSessions.filter((session) => !session.workspaceId).slice(-1)[0];
+  const fallback = layoutResult.lastRemainingSessionId
+    ?? fallbackWorkspace?.id
+    ?? fallbackSolo?.id
+    ?? "vault";
+
+  if (
+    currentActiveTabId === closedSessionId
+    || (layoutResult.dissolvedWorkspaceId && currentActiveTabId === layoutResult.dissolvedWorkspaceId)
+    || (layoutResult.removedWorkspaceId && currentActiveTabId === layoutResult.removedWorkspaceId)
+    || (workspaceId && currentActiveTabId === workspaceId && !layoutResult.workspaces.some((ws) => ws.id === workspaceId))
+  ) {
+    return fallback;
+  }
+
+  return null;
+}
+
 export function detachSessionFromWorkspaceState({
   sessions,
   workspaces,
