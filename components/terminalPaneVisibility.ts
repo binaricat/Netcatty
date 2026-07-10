@@ -34,7 +34,7 @@ export function resolveInactiveTerminalPaneStyle<T extends TerminalPaneStyle>(
     ...layoutStyle,
     visibility: hibernateHiddenTabs ? "hidden" : "visible",
     pointerEvents: "none",
-    ...(lastVisibleSize
+    ...(hibernateHiddenTabs && lastVisibleSize
       ? {
         width: `${lastVisibleSize.width}px`,
         height: `${lastVisibleSize.height}px`,

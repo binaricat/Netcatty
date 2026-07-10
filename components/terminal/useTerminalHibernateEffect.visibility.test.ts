@@ -39,3 +39,16 @@ test("disabling hibernate wakes already soft-hidden or hibernated panes", () => 
   assert.ok(applyVisibilityCallIndex !== -1);
   assert.ok(applyVisibilityCallIndex > disableWakeIndex);
 });
+
+test("soft-hidden wake keeps its marker until the runtime has resumed", () => {
+  const source = readFileSync(
+    new URL("./useTerminalHibernateEffect.ts", import.meta.url),
+    "utf8",
+  );
+  const softWakeBranch = source.match(
+    /if \(softHiddenRef\.current\) \{([\s\S]*?)return;\s*\}/,
+  )?.[1] ?? "";
+
+  assert.match(softWakeBranch, /onSoftHideWakeRef\.current\(\)/);
+  assert.doesNotMatch(softWakeBranch, /softHiddenRef\.current\s*=\s*false/);
+});

@@ -116,7 +116,6 @@ export function useTerminalHibernateEffect({
 
     const tryWake = () => {
       if (softHiddenRef.current) {
-        softHiddenRef.current = false;
         onSoftHideWakeRef.current();
         return;
       }

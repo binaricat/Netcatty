@@ -26,6 +26,7 @@ interface UseTerminalWorkspaceLayoutOptions {
   activeSession: TerminalSession | undefined;
   activeWorkspace: Workspace | undefined;
   isFocusMode: boolean;
+  keepHiddenWorkspacesLaidOut: boolean;
   onAddSessionToWorkspace: (workspaceId: string, sessionId: string, hint: Exclude<SplitHint, null>) => void;
   onCreateWorkspaceFromSessions: (baseSessionId: string, joiningSessionId: string, hint: Exclude<SplitHint, null>) => void;
   onSetDraggingSessionId: (id: string | null) => void;
@@ -38,6 +39,7 @@ export function useTerminalWorkspaceLayout({
   activeSession,
   activeWorkspace,
   isFocusMode,
+  keepHiddenWorkspacesLaidOut,
   onAddSessionToWorkspace,
   onCreateWorkspaceFromSessions,
   onSetDraggingSessionId,
@@ -153,37 +155,39 @@ export function useTerminalWorkspaceLayout({
           }
         }
 
-        // Hidden workspaces do not need fresh geometry. Recomputing every
-        // workspace on a side-panel width change makes tab switches fan out to
-        // panes that cannot currently be seen.
-        if (!activeWorkspace) return map;
+        const workspacesToLayout = keepHiddenWorkspacesLaidOut
+          ? workspaces
+          : activeWorkspace
+            ? [workspaces.find((candidate) => candidate.id === activeWorkspace.id) ?? activeWorkspace]
+            : [];
 
-        const workspace = workspaces.find((candidate) => candidate.id === activeWorkspace.id) ?? activeWorkspace;
-        const layoutWorkspace = workspaceForLayout(workspace);
-        const cached = workspaceRectsCacheRef.current.get(workspace.id);
-        if (
-          cached
-          && cached.root === layoutWorkspace.root
-          && cached.previewKey === previewKey
-          && cached.width === workspaceArea.width
-          && cached.height === workspaceArea.height
-        ) {
-          map.set(workspace.id, cached.rects);
-          return map;
+        for (const workspace of workspacesToLayout) {
+          const layoutWorkspace = workspaceForLayout(workspace);
+          const cached = workspaceRectsCacheRef.current.get(workspace.id);
+          if (
+            cached
+            && cached.root === layoutWorkspace.root
+            && cached.previewKey === previewKey
+            && cached.width === workspaceArea.width
+            && cached.height === workspaceArea.height
+          ) {
+            map.set(workspace.id, cached.rects);
+            continue;
+          }
+
+          const rects = computeWorkspaceRects(layoutWorkspace, workspaceArea);
+          workspaceRectsCacheRef.current.set(workspace.id, {
+            root: layoutWorkspace.root,
+            previewKey,
+            width: workspaceArea.width,
+            height: workspaceArea.height,
+            rects,
+          });
+          map.set(workspace.id, rects);
         }
-
-        const rects = computeWorkspaceRects(layoutWorkspace, workspaceArea);
-        workspaceRectsCacheRef.current.set(workspace.id, {
-          root: layoutWorkspace.root,
-          previewKey,
-          width: workspaceArea.width,
-          height: workspaceArea.height,
-          rects,
-        });
-        map.set(workspace.id, rects);
         return map;
       },
-      [activeWorkspace, computeWorkspaceRects, resizePreviewDelta, resizing, workspaceArea, workspaceForLayout, workspaces],
+      [activeWorkspace, computeWorkspaceRects, keepHiddenWorkspacesLaidOut, resizePreviewDelta, resizing, workspaceArea, workspaceForLayout, workspaces],
     );
   
   const activeWorkspaceRects = useMemo<Record<string, WorkspaceRect>>(

@@ -10,6 +10,7 @@ import type { TerminalContextReader } from '../../domain/terminalContextRead';
 import { useSystemCapabilitiesWarmup } from '../systemManager/hooks/useSystemManager';
 import { cn } from '../../lib/utils';
 import type { Host, TerminalSession, Workspace } from '../../types';
+import { resolveTerminalHibernateEnabled } from '../../domain/terminalHibernate';
 import { TerminalLayerView } from './TerminalLayerView';
 import { useTerminalAiContexts } from './useTerminalAiContexts';
 import { useTerminalLayerEffects } from './useTerminalLayerEffects';
@@ -79,6 +80,7 @@ export function TerminalLayerTabBridge({ stableRef }: { stableRef: StableRef }) 
     activeSession,
     activeWorkspace,
     isFocusMode,
+    keepHiddenWorkspacesLaidOut: !resolveTerminalHibernateEnabled(s.terminalSettings),
     onAddSessionToWorkspace: s.onAddSessionToWorkspace,
     onCreateWorkspaceFromSessions: s.onCreateWorkspaceFromSessions,
     onSetDraggingSessionId: s.onSetDraggingSessionId,

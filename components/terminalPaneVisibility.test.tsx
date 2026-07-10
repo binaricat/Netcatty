@@ -142,17 +142,17 @@ test("terminal pane render snapshot combines visibility and focus in one token",
 
 test("inactive terminal pane keeps rendering when hibernate is disabled", () => {
   const inactiveStyle = resolveInactiveTerminalPaneStyle(
-    { left: 0, top: 0, width: "100%", height: "100%" },
+    { left: "40px", top: 0, width: "640px", height: "480px" },
     { width: 1180, height: 720 },
     false,
   );
 
-  assert.equal(inactiveStyle.left, 0);
+  assert.equal(inactiveStyle.left, "40px");
   assert.equal(inactiveStyle.top, 0);
   assert.equal(inactiveStyle.visibility, "visible");
   assert.equal(inactiveStyle.pointerEvents, "none");
-  assert.equal(inactiveStyle.width, "1180px");
-  assert.equal(inactiveStyle.height, "720px");
+  assert.equal(inactiveStyle.width, "640px");
+  assert.equal(inactiveStyle.height, "480px");
 });
 
 test("inactive terminal pane is hidden only when hibernate is enabled", () => {

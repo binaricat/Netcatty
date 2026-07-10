@@ -799,12 +799,14 @@ const getPaneWorkspaceRect = (props: Pick<TerminalPaneProps, 'session' | 'worksp
   return props.workspaceRectsById.get(workspaceId)?.[props.session.id] ?? null;
 };
 
-const getPaneActiveWorkspaceRect = (props: Pick<TerminalPaneProps, 'session' | 'workspaceById' | 'workspaceRectsById'>): WorkspaceRect | null => {
+const getPaneRenderedWorkspaceRect = (props: Pick<TerminalPaneProps, 'session' | 'workspaceById' | 'workspaceRectsById' | 'terminalSettings'>): WorkspaceRect | null => {
   const workspaceId = props.session.workspaceId;
   if (!workspaceId) return null;
-  if (activeTabStore.getActiveTabId() !== workspaceId) return null;
   const workspace = props.workspaceById.get(workspaceId);
   if (!workspace || workspace.viewMode === 'focus') return null;
+  if (resolveTerminalHibernateEnabled(props.terminalSettings) && activeTabStore.getActiveTabId() !== workspaceId) {
+    return null;
+  }
   return props.workspaceRectsById.get(workspaceId)?.[props.session.id] ?? null;
 };
 
@@ -824,7 +826,7 @@ const terminalPanePropsAreEqual = (
   prev.chainHosts === next.chainHosts &&
   prev.sudoAutofillPassword === next.sudoAutofillPassword &&
   prev.workspaceById === next.workspaceById &&
-  workspaceRectsEqual(getPaneActiveWorkspaceRect(prev), getPaneActiveWorkspaceRect(next)) &&
+  workspaceRectsEqual(getPaneRenderedWorkspaceRect(prev), getPaneRenderedWorkspaceRect(next)) &&
   prev.isTerminalLayerVisible === next.isTerminalLayerVisible &&
   prev.workspaceFocusHandlersRef === next.workspaceFocusHandlersRef &&
   prev.workspaceBroadcastHandlersRef === next.workspaceBroadcastHandlersRef &&
@@ -987,8 +989,12 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
   const inActiveWorkspace = !!activeWorkspaceId;
   const isFocusMode = paneState.mode === 'focus';
   const isSplitViewVisible = paneState.mode === 'split';
-  const rect = activeWorkspaceId && isSplitViewVisible
-    ? workspaceRectsById.get(activeWorkspaceId)?.[session.id] ?? null
+  const hibernateHiddenTabs = resolveTerminalHibernateEnabled(terminalSettings);
+  const layoutWorkspaceId = activeWorkspaceId ?? (!hibernateHiddenTabs ? session.workspaceId : undefined);
+  const layoutWorkspace = layoutWorkspaceId ? workspaceById.get(layoutWorkspaceId) : undefined;
+  const usesSplitLayout = layoutWorkspace?.viewMode === 'split';
+  const rect = layoutWorkspaceId && usesSplitLayout
+    ? workspaceRectsById.get(layoutWorkspaceId)?.[session.id] ?? null
     : null;
   const layoutStyle = rect
     ? {
@@ -998,7 +1004,7 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
       height: `${rect.h}px`,
     }
     : { left: 0, top: 0, width: '100%', height: '100%' };
-  const livePaneLayoutKey = isSplitViewVisible && rect
+  const livePaneLayoutKey = usesSplitLayout && rect
     ? `${Math.round(rect.w)}x${Math.round(rect.h)}`
     : 'full';
   const paneLayoutKeyRef = useRef(livePaneLayoutKey);
@@ -1058,7 +1064,7 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
     Object.assign(style, resolveInactiveTerminalPaneStyle(
       style,
       lastVisiblePaneSizeRef.current,
-      resolveTerminalHibernateEnabled(terminalSettings),
+      hibernateHiddenTabs,
     ));
   }
 
@@ -1535,6 +1541,13 @@ const terminalPanesHostPropsAreEqual = (
   if (prev.onEndSessionDrag !== next.onEndSessionDrag) return false;
 
   if (prev.workspaceRectsById === next.workspaceRectsById) return true;
+
+  if (!resolveTerminalHibernateEnabled(next.terminalSettings)) {
+    return prev.sessions.every((session) => workspaceRectsEqual(
+      getPaneWorkspaceRect({ session, workspaceRectsById: prev.workspaceRectsById }),
+      getPaneWorkspaceRect({ session, workspaceRectsById: next.workspaceRectsById }),
+    ));
+  }
 
   const activeTabId = activeTabStore.getActiveTabId();
   const activeWorkspace = activeTabId ? next.workspaceById.get(activeTabId) : undefined;
