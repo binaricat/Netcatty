@@ -92,11 +92,14 @@ test("full hibernate rechecks live state after every asynchronous step", () => {
 test("a cancelled soft-hidden upgrade resumes its renderer", () => {
   const source = readFileSync(new URL("../Terminal.tsx", import.meta.url), "utf8");
   const subscribeIndex = source.indexOf("terminalHiddenRendererStore.subscribe");
+  const wakeIndex = source.indexOf("wakeSoftHiddenRuntime()", subscribeIndex);
   const upgradeIndex = source.indexOf("fullHibernateRuntime().then(", subscribeIndex);
   const cancelResumeIndex = source.indexOf("resumeRendererAfterCancelledHibernateUpgrade()", upgradeIndex);
   const helperBody = readFunctionBody(source, "const resumeRendererAfterCancelledHibernateUpgrade = useCallback(() =>");
 
+  assert.notEqual(wakeIndex, -1, "soft-hidden eviction must resume the renderer before upgrading");
   assert.notEqual(upgradeIndex, -1, "soft-hidden eviction must await the full hibernate result");
+  assert.ok(wakeIndex < upgradeIndex, "the renderer must be live throughout the asynchronous upgrade");
   assert.notEqual(cancelResumeIndex, -1, "a cancelled upgrade must resume the suspended renderer");
   assert.match(helperBody, /ensureWebglRenderer\(\)/);
   assert.match(helperBody, /clearTextureAtlas\(\)/);

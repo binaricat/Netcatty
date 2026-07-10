@@ -1074,6 +1074,7 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
       style,
       lastVisiblePaneSizeRef.current,
       hibernateHiddenTabs,
+      !rect,
     ));
   }
 

@@ -2622,8 +2622,11 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     return terminalHiddenRendererStore.subscribe(() => {
       if (!terminalHiddenRendererStore.consumeEvictionRequest(sessionId)) return;
       if (!softHiddenRef.current || hibernatedRef.current) return;
-      softHiddenRef.current = false;
-      terminalHiddenRendererStore.clearSoftHidden(sessionId);
+      // Resume the soft-hidden renderer before the asynchronous full-hibernate
+      // upgrade. If the pane is revealed while the upgrade is draining output
+      // or serializing, it then already has a live renderer instead of waiting
+      // on the upgrade promise to settle.
+      wakeSoftHiddenRuntime();
       void fullHibernateRuntime().then(
         (completed) => {
           if (!completed) resumeRendererAfterCancelledHibernateUpgrade();
@@ -2634,7 +2637,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         },
       );
     });
-  }, [fullHibernateRuntime, resumeRendererAfterCancelledHibernateUpgrade, sessionId]);
+  }, [fullHibernateRuntime, resumeRendererAfterCancelledHibernateUpgrade, sessionId, wakeSoftHiddenRuntime]);
 
   const wakeFromHibernateRuntime = useCallback((
     getPayload: () => TerminalHibernateWakePayload,

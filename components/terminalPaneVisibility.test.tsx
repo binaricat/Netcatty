@@ -207,6 +207,19 @@ test("inactive terminal pane keeps rendering when hibernate is disabled", () => 
   assert.equal(inactiveStyle.height, "480px");
 });
 
+test("inactive full-size panes keep their last visible dimensions without hibernate", () => {
+  const inactiveStyle = resolveInactiveTerminalPaneStyle(
+    { left: 0, top: 0, width: "100%", height: "100%" },
+    { width: 1180, height: 720 },
+    false,
+    true,
+  );
+
+  assert.equal(inactiveStyle.visibility, "visible");
+  assert.equal(inactiveStyle.width, "1180px");
+  assert.equal(inactiveStyle.height, "720px");
+});
+
 test("inactive terminal pane is hidden only when hibernate is enabled", () => {
   const inactiveStyle = resolveInactiveTerminalPaneStyle(
     { left: 0, top: 0, width: "100%", height: "100%" },

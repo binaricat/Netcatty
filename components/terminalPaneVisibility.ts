@@ -61,13 +61,14 @@ export function resolveInactiveTerminalPaneStyle<T extends TerminalPaneStyle>(
   layoutStyle: T,
   lastVisibleSize: TerminalPaneHiddenSize | null,
   hibernateHiddenTabs: boolean,
+  preserveLastVisibleSize = false,
 ): T {
   return {
     ...layoutStyle,
     visibility: hibernateHiddenTabs ? "hidden" : "visible",
     pointerEvents: "none",
     zIndex: 0,
-    ...(hibernateHiddenTabs && lastVisibleSize
+    ...((hibernateHiddenTabs || preserveLastVisibleSize) && lastVisibleSize
       ? {
         width: `${lastVisibleSize.width}px`,
         height: `${lastVisibleSize.height}px`,
