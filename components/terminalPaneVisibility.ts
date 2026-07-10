@@ -38,10 +38,15 @@ export function shouldUseTerminalPaneSplitLayout({
   hibernateHiddenTabs: boolean;
 }): boolean {
   if (!workspace) return false;
-  if (workspace.viewMode === "split") return true;
-  return !isVisible
-    && !hibernateHiddenTabs
-    && workspace.focusedSessionId !== sessionId;
+  // Default viewMode is tiled split (including undefined from createWorkspaceFromSessions).
+  // Only focus mode uses a full-size focused pane; other panes keep split geometry while
+  // continuously rendered in the background.
+  if (workspace.viewMode === "focus") {
+    return !isVisible
+      && !hibernateHiddenTabs
+      && workspace.focusedSessionId !== sessionId;
+  }
+  return true;
 }
 
 export function shouldMeasureTerminalLayerLayout({

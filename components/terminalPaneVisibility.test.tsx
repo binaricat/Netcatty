@@ -168,6 +168,39 @@ test("hidden focus workspaces keep the focused pane full-size and other panes sp
   }), false);
 });
 
+test("default and explicit split workspaces always use split layout geometry", () => {
+  // Drag-to-split workspaces omit viewMode (undefined means tiled split).
+  const defaultSplit: Workspace = {
+    ...createWorkspace("ws-default", ["d-1", "d-2"], { focusedSessionId: "d-1" }),
+    viewMode: undefined,
+  };
+  const explicitSplit = createWorkspace("ws-split", ["s-1", "s-2"], {
+    viewMode: "split",
+    focusedSessionId: "s-1",
+  });
+
+  for (const workspace of [defaultSplit, explicitSplit]) {
+    assert.equal(shouldUseTerminalPaneSplitLayout({
+      workspace,
+      sessionId: workspace.focusedSessionId ?? "x",
+      isVisible: true,
+      hibernateHiddenTabs: false,
+    }), true);
+    assert.equal(shouldUseTerminalPaneSplitLayout({
+      workspace,
+      sessionId: "other",
+      isVisible: false,
+      hibernateHiddenTabs: false,
+    }), true);
+    assert.equal(shouldUseTerminalPaneSplitLayout({
+      workspace,
+      sessionId: "other",
+      isVisible: false,
+      hibernateHiddenTabs: true,
+    }), true);
+  }
+});
+
 test("hidden terminal layers measure once only when hibernation is disabled", () => {
   assert.equal(shouldMeasureTerminalLayerLayout({
     isTerminalLayerVisible: false,
