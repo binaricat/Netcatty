@@ -3,9 +3,7 @@ import type { CustomKeyBindings, HotkeyScheme, SessionLogFormat, TerminalSetting
 import { parseCustomKeyBindingsStorageRecord } from '../../domain/customKeyBindings';
 import { resolveSupportedLocale } from '../../infrastructure/config/i18n';
 import {
-  STORAGE_KEY_ACCENT_MODE,
   STORAGE_KEY_AUTO_UPDATE_ENABLED,
-  STORAGE_KEY_COLOR,
   STORAGE_KEY_CUSTOM_CSS,
   STORAGE_KEY_CUSTOM_KEY_BINDINGS,
   STORAGE_KEY_EDITOR_WORD_WRAP,
@@ -43,21 +41,16 @@ import {
   STORAGE_KEY_TERM_THEME,
   STORAGE_KEY_TERM_THEME_DARK,
   STORAGE_KEY_TERM_THEME_LIGHT,
-  STORAGE_KEY_THEME,
   STORAGE_KEY_UI_FONT_FAMILY,
   STORAGE_KEY_UI_LANGUAGE,
-  STORAGE_KEY_UI_THEME_DARK,
-  STORAGE_KEY_UI_THEME_LIGHT,
   STORAGE_KEY_WORKSPACE_FOCUS_STYLE,
   STORAGE_KEY_WINDOW_OPACITY,
   STORAGE_KEY_APP_ICON_VARIANT,
 } from '../../infrastructure/config/storageKeys';
 import { resolveAppIconVariant, type AppIconVariant } from '../../domain/appIconVariant';
+import { resolveAppearanceStorageEvent } from './appearanceSync';
 import {
-  isValidHslToken,
-  isValidTheme,
   isValidUiFontId,
-  isValidUiThemeId,
   migrateIncomingTerminalFontId,
 } from './settingsStateDefaults';
 import { isTerminalSidePanelAutoOpenTab, type TerminalSidePanelAutoOpenTab } from '../../domain/terminalSidePanelAutoOpen';
@@ -206,30 +199,14 @@ export function useSettingsStorageSync({
     if (!enabled) return;
     const handleStorageChange = (e: StorageEvent) => {
       const s = settingsSnapshotRef.current;
-      if (e.key === STORAGE_KEY_THEME && e.newValue) {
-        if (isValidTheme(e.newValue) && e.newValue !== s.theme) {
-          setTheme(e.newValue);
-        }
-      }
-      if (e.key === STORAGE_KEY_UI_THEME_LIGHT && e.newValue) {
-        if (isValidUiThemeId('light', e.newValue) && e.newValue !== s.lightUiThemeId) {
-          setLightUiThemeId(e.newValue);
-        }
-      }
-      if (e.key === STORAGE_KEY_UI_THEME_DARK && e.newValue) {
-        if (isValidUiThemeId('dark', e.newValue) && e.newValue !== s.darkUiThemeId) {
-          setDarkUiThemeId(e.newValue);
-        }
-      }
-      if (e.key === STORAGE_KEY_ACCENT_MODE && e.newValue) {
-        if ((e.newValue === 'theme' || e.newValue === 'custom') && e.newValue !== s.accentMode) {
-          setAccentMode(e.newValue);
-        }
-      }
-      if (e.key === STORAGE_KEY_COLOR && e.newValue) {
-        if (isValidHslToken(e.newValue) && e.newValue !== s.customAccent) {
-          setCustomAccent(e.newValue.trim());
-        }
+      const appearance = resolveAppearanceStorageEvent(s, e.key, e.newValue);
+      if (appearance.handled) {
+        if (appearance.next.theme !== s.theme) setTheme(appearance.next.theme);
+        if (appearance.next.lightUiThemeId !== s.lightUiThemeId) setLightUiThemeId(appearance.next.lightUiThemeId);
+        if (appearance.next.darkUiThemeId !== s.darkUiThemeId) setDarkUiThemeId(appearance.next.darkUiThemeId);
+        if (appearance.next.accentMode !== s.accentMode) setAccentMode(appearance.next.accentMode);
+        if (appearance.next.customAccent !== s.customAccent) setCustomAccent(appearance.next.customAccent);
+        return;
       }
       if (e.key === STORAGE_KEY_CUSTOM_CSS && e.newValue !== null) {
         if (e.newValue !== s.customCSS) {

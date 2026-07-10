@@ -147,7 +147,7 @@ import {
 } from './windowOpacitySync';
 import {
   hasPersistedAppearanceChanged,
-  resolveIncomingAppearanceValue,
+  resolveAppearanceSyncState,
   type AppearanceRenderSnapshot,
   type AppearanceSyncEvent,
 } from './appearanceSync';
@@ -575,41 +575,24 @@ export const useSettingsState = (options: { enableSettingsSync?: boolean; enable
   }, [notifySettingsChanged]);
 
   const syncAppearanceFromStorage = useCallback((incoming?: AppearanceSyncEvent) => {
-    const storedTheme = resolveIncomingAppearanceValue(
+    const nextAppearance = resolveAppearanceSyncState(
+      { theme, lightUiThemeId, darkUiThemeId, accentMode, customAccent },
+      {
+        theme: readStoredString(STORAGE_KEY_THEME),
+        lightUiThemeId: readStoredString(STORAGE_KEY_UI_THEME_LIGHT),
+        darkUiThemeId: readStoredString(STORAGE_KEY_UI_THEME_DARK),
+        accentMode: readStoredString(STORAGE_KEY_ACCENT_MODE),
+        customAccent: readStoredString(STORAGE_KEY_COLOR),
+      },
       incoming,
-      STORAGE_KEY_THEME,
-      readStoredString(STORAGE_KEY_THEME),
-      (value): value is string => typeof value === 'string' && isValidTheme(value),
     );
-    const nextTheme = storedTheme && isValidTheme(storedTheme) ? storedTheme : theme;
-    const storedLightId = resolveIncomingAppearanceValue(
-      incoming,
-      STORAGE_KEY_UI_THEME_LIGHT,
-      readStoredString(STORAGE_KEY_UI_THEME_LIGHT),
-      (value): value is string => typeof value === 'string' && isValidUiThemeId('light', value),
-    );
-    const nextLightId = storedLightId && isValidUiThemeId('light', storedLightId) ? storedLightId : lightUiThemeId;
-    const storedDarkId = resolveIncomingAppearanceValue(
-      incoming,
-      STORAGE_KEY_UI_THEME_DARK,
-      readStoredString(STORAGE_KEY_UI_THEME_DARK),
-      (value): value is string => typeof value === 'string' && isValidUiThemeId('dark', value),
-    );
-    const nextDarkId = storedDarkId && isValidUiThemeId('dark', storedDarkId) ? storedDarkId : darkUiThemeId;
-    const storedAccentMode = resolveIncomingAppearanceValue(
-      incoming,
-      STORAGE_KEY_ACCENT_MODE,
-      readStoredString(STORAGE_KEY_ACCENT_MODE),
-      (value): value is 'theme' | 'custom' => value === 'theme' || value === 'custom',
-    );
-    const nextAccentMode = storedAccentMode === 'theme' || storedAccentMode === 'custom' ? storedAccentMode : accentMode;
-    const storedAccent = resolveIncomingAppearanceValue(
-      incoming,
-      STORAGE_KEY_COLOR,
-      readStoredString(STORAGE_KEY_COLOR),
-      (value): value is string => typeof value === 'string' && isValidHslToken(value),
-    );
-    const nextAccent = storedAccent && isValidHslToken(storedAccent) ? storedAccent.trim() : customAccent;
+    const {
+      theme: nextTheme,
+      lightUiThemeId: nextLightId,
+      darkUiThemeId: nextDarkId,
+      accentMode: nextAccentMode,
+      customAccent: nextAccent,
+    } = nextAppearance;
 
     // Fix 2: Skip expensive DOM operations if nothing actually changed
     if (
