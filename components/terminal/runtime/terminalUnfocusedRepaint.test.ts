@@ -342,12 +342,12 @@ test("writeSessionDataImmediate schedules unfocused repaint for visible panes on
   assert.match(source, /if \(ctx\.isVisibleRef\?\.current !== false\) \{[^}]*scheduleTerminalRepaintWhenUnfocused\(term\)/);
 });
 
-test("app resume no longer runs a terminal recovery path", () => {
+test("app resume recovery flushes pending writes before WebGL recovery", () => {
   const source = readFileSync(
     new URL("../useTerminalEffects.ts", import.meta.url),
     "utf8",
   );
-  assert.doesNotMatch(source, /recoverTerminalOnAppResume/);
-  assert.doesNotMatch(source, /document\.addEventListener\('visibilitychange'/);
-  assert.doesNotMatch(source, /window\.addEventListener\('focus'/);
+  assert.match(source, /const recoverTerminalOnAppResume = \(\) => \{/);
+  assert.match(source, /flushPendingTerminalWritesOnResume\(term\)/);
+  assert.match(source, /recoverWebglRendererOnAppResume\(\)/);
 });

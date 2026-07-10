@@ -34,6 +34,7 @@ import {
 import {
   cancelScheduledUnfocusedRepaint,
   flushPendingTerminalWritesOnResume,
+  forceTerminalRepaintBypassingAnimationFrame,
   repaintTerminalAfterReveal,
 } from './runtime/terminalUnfocusedRepaint';
 import {
@@ -912,9 +913,7 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
     wasVisibleRef.current = true;
 
     if (becameVisible) {
-      if (hibernateHiddenTabs) {
-        recoverTerminalAfterBecomeVisible();
-      }
+      recoverTerminalAfterBecomeVisible();
       return;
     }
 
@@ -926,19 +925,19 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
     commitVisibleLayout();
     runImmediateRefit({ force: true, repeatOnNextFrame: false });
     finishLayoutRecoveryAfterFit();
-  }, [hibernateHiddenTabs, isVisible, paneLayoutKey, splitResizeActive]);
+  }, [isVisible, paneLayoutKey, splitResizeActive]);
 
   useLayoutEffect(() => {
-    if (isVisible || !hibernateHiddenTabs) return;
+    if (isVisible) return;
     lastCommittedVisibleLayoutKeyRef.current = null;
     lastWebglRecoveryLayoutKeyRef.current = null;
     if (hiddenAtRef.current === null) {
       hiddenAtRef.current = Date.now();
     }
-  }, [hibernateHiddenTabs, isVisible]);
+  }, [isVisible]);
 
   useEffect(() => {
-    if (!isVisible || !hibernateHiddenTabs) return;
+    if (!isVisible) return;
 
     const hiddenMs = hiddenAtRef.current
       ? Date.now() - hiddenAtRef.current
@@ -973,7 +972,7 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
       flushPendingOutputScroll();
     }, 50);
     return () => clearTimeout(timer);
-  }, [hibernateHiddenTabs, isVisible, paneLayoutKey]);
+  }, [isVisible, paneLayoutKey]);
 
 
   useEffect(() => {
@@ -1462,6 +1461,38 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
   useEffect(() => {
     if (!isVisible) return;
 
+    const recoverWebglRendererOnAppResume = () => {
+      xtermRuntimeRef.current?.ensureWebglRenderer();
+    };
+
+    const recoverTerminalOnAppResume = () => {
+      const term = termRef.current;
+      if (term) {
+        cancelScheduledUnfocusedRepaint(term);
+        flushPendingTerminalWritesOnResume(term);
+        forceTerminalRepaintBypassingAnimationFrame(term);
+      }
+      flushPendingOutputScroll();
+      recoverWebglRendererOnAppResume();
+      scheduleLayoutRecoveryRefit([0, 100, 300]);
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState !== 'visible') return;
+      recoverTerminalOnAppResume();
+    };
+
+    const handleWindowFocus = () => {
+      recoverTerminalOnAppResume();
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('focus', handleWindowFocus);
+
+    const unsubscribeWindowShown = terminalBackend.onWindowShown?.(() => {
+      recoverTerminalOnAppResume();
+    });
+
     // Fullscreen changes layout for every visible pane.
     const unsubscribeFullscreen = terminalBackend.onWindowFullScreenChanged?.((isFullscreen) => {
       scheduleLayoutRecoveryRefit(isFullscreen ? [0, 150, 400] : [0, 100, 300]);
@@ -1469,6 +1500,9 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
 
     return () => {
       clearLayoutRecoveryTimers();
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', handleWindowFocus);
+      unsubscribeWindowShown?.();
       unsubscribeFullscreen?.();
     };
   }, [isVisible, terminalBackend]);
