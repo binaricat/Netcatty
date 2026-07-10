@@ -997,6 +997,7 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
   const hibernateHiddenTabs = resolveTerminalHibernateEnabled(terminalSettings);
   const layoutWorkspaceId = activeWorkspaceId ?? (!hibernateHiddenTabs ? session.workspaceId : undefined);
   const layoutWorkspace = layoutWorkspaceId ? workspaceById.get(layoutWorkspaceId) : undefined;
+  const keepsWorkspacePresentation = !!layoutWorkspace;
   const usesSplitLayout = shouldUseTerminalPaneSplitLayout({
     workspace: layoutWorkspace,
     sessionId: session.id,
@@ -1346,9 +1347,9 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
         knownHosts={knownHosts}
         isVisible={isVisible}
         paneLayoutKey={paneLayoutKey}
-        inWorkspace={inActiveWorkspace}
+        inWorkspace={keepsWorkspacePresentation}
         isResizing={isResizing}
-        isFocusMode={isFocusMode}
+        isFocusMode={layoutWorkspace?.viewMode === 'focus'}
         isFocused={isFocusedPane}
         fontFamilyId={terminalFontFamilyId}
         fontSize={fontSize}
@@ -1399,7 +1400,7 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
         isBroadcastEnabled={broadcastEnabled}
         onToggleBroadcast={inActiveWorkspace ? workspaceBroadcastHandler : undefined}
         onToggleComposeBar={inActiveWorkspace ? onToggleWorkspaceComposeBar : undefined}
-        isWorkspaceComposeBarOpen={inActiveWorkspace ? isComposeBarOpen : undefined}
+        isWorkspaceComposeBarOpen={keepsWorkspacePresentation ? isComposeBarOpen : undefined}
         onBroadcastInput={broadcastEnabled ? onBroadcastInput : undefined}
         onBroadcastInterruptPriorityChange={onBroadcastInterruptPriorityChange}
         onSnippetExecutorChange={onSnippetExecutorChange}

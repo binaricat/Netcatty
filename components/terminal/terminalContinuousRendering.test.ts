@@ -43,6 +43,11 @@ test("background split workspaces keep their live geometry without hibernate", (
     supportSource,
     /const layoutWorkspaceId = activeWorkspaceId \?\? \(!hibernateHiddenTabs \? session\.workspaceId : undefined\)/,
   );
+  assert.match(supportSource, /inWorkspace=\{keepsWorkspacePresentation\}/);
+  assert.match(
+    supportSource,
+    /isWorkspaceComposeBarOpen=\{keepsWorkspacePresentation \? isComposeBarOpen : undefined\}/,
+  );
   assert.match(
     supportSource,
     /shouldUseTerminalPaneSplitLayout\(\{[\s\S]*workspace: layoutWorkspace,[\s\S]*sessionId: session\.id,[\s\S]*isVisible,[\s\S]*hibernateHiddenTabs/,
