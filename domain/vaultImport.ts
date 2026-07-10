@@ -798,6 +798,7 @@ const importFromMobaXterm = (text: string): VaultImportResult => {
 
   type Entry = { section: string; key: string; value: string };
   const entries: Entry[] = [];
+  const sectionGroups = new Map<string, string | undefined>();
 
   let section = "";
   for (const line of lines) {
@@ -813,11 +814,21 @@ const importFromMobaXterm = (text: string): VaultImportResult => {
 
     const mKv = trimmed.match(/^([^=]+)=(.*)$/);
     if (!mKv) continue;
-    entries.push({ section, key: mKv[1].trim(), value: mKv[2].trim() });
+    const key = mKv[1].trim();
+    const value = mKv[2].trim();
+    const isBookmarkSection = /^bookmarks(?:_\d+)?$/i.test(section.trim());
+
+    if (isBookmarkSection && key.toLowerCase() === "subrep") {
+      sectionGroups.set(section, normalizeGroupPath(value));
+      continue;
+    }
+    if (isBookmarkSection && key.toLowerCase() === "imgnum") continue;
+
+    entries.push({ section, key, value });
   }
 
   const candidateEntries = entries.filter((e) =>
-    ["sessions", "bookmarks", "bookmarks2", "bookmark"].includes(e.section.trim().toLowerCase()),
+    /^(?:sessions|bookmarks(?:_\d+)?|bookmarks2|bookmark)$/i.test(e.section.trim()),
   );
 
   const parsedHosts: Host[] = [];
@@ -831,55 +842,81 @@ const importFromMobaXterm = (text: string): VaultImportResult => {
 
     parsed++;
 
+    const isBookmarkSection = /^bookmarks(?:_\d+)?$/i.test(e.section.trim());
+    const hasBookmarkGroup = sectionGroups.has(e.section);
     const keyParts = rawKey.replace(/\\/g, "/").split("/").filter(Boolean);
-    const label = keyParts[keyParts.length - 1] || rawKey;
-    const group =
-      keyParts.length > 1 ? keyParts.slice(0, -1).join("/") : undefined;
+    const label = isBookmarkSection && hasBookmarkGroup
+      ? rawKey
+      : keyParts[keyParts.length - 1] || rawKey;
+    const group = isBookmarkSection && hasBookmarkGroup
+      ? sectionGroups.get(e.section)
+      : keyParts.length > 1
+        ? keyParts.slice(0, -1).join("/")
+        : undefined;
 
     let protocol: Exclude<HostProtocol, "mosh" | "et"> | undefined;
     let hostname: string | undefined;
     let username: string | undefined;
     let port: number | undefined;
 
-    const tokens = rawValue
-      .split("#")
-      .map((t) => t.trim())
-      .filter(Boolean);
+    const outerFields = rawValue.split("#");
+    const sessionFields = outerFields.length >= 3 ? outerFields[2].split("%") : [];
+    const sessionType = sessionFields[0]?.trim();
+    const isStandardSession = /^(?:;\s*logout)?\s*#\d+(?:#|$)/i.test(rawValue);
 
-    if (tokens.length > 0) {
-      protocol =
-        normalizeProtocol(tokens[0]) ??
-        tokens.map((t) => normalizeProtocol(t)).find(Boolean);
-
-      // Find a token that looks like [user@]host[:port]
-      for (const tok of tokens) {
-        const t = tok.replace(/^ssh:/i, "").trim();
-        const target = parseTarget(t);
-        if (target) {
-          hostname = target.hostname;
-          username = target.username ?? username;
-          port = target.port ?? port;
-          protocol = target.protocol ?? protocol;
-          break;
-        }
+    if (isStandardSession) {
+      if (!/^\d+$/.test(sessionType ?? "")) {
+        skipped++;
+        issues.push({
+          level: "warning",
+          message: `MobaXterm entry "${label}": invalid session type.`,
+        });
+        continue;
+      }
+      if (sessionType !== "0" && sessionType !== "7") {
+        skipped++;
+        issues.push({
+          level: "warning",
+          message: `MobaXterm entry "${label}": unsupported session type.`,
+        });
+        continue;
       }
 
-      if (!hostname) {
-        const hostToken = tokens.find(looksLikeHostnameToken);
-        if (hostToken) {
-          const target = parseTarget(hostToken);
-          hostname = target?.hostname;
-          username = target?.username;
-          port = target?.port;
+      protocol = "ssh";
+      hostname = sessionFields[1]?.trim() || undefined;
+      port = parsePort(sessionFields[2]);
+      const rawUsername = sessionFields[3]?.trim();
+      username = rawUsername && rawUsername !== "<default>" ? rawUsername : undefined;
+    } else {
+      // Retain support for the simpler token layouts accepted by older imports.
+      const tokens = rawValue
+        .split("#")
+        .map((t) => t.trim())
+        .filter(Boolean);
+
+      if (tokens.length > 0) {
+        protocol =
+          normalizeProtocol(tokens[0]) ??
+          tokens.map((t) => normalizeProtocol(t)).find(Boolean);
+
+        for (const tok of tokens) {
+          const target = parseTarget(tok.replace(/^ssh:/i, "").trim());
+          if (target) {
+            hostname = target.hostname;
+            username = target.username ?? username;
+            port = target.port ?? port;
+            protocol = target.protocol ?? protocol;
+            break;
+          }
         }
-      }
 
-      const numericPort = tokens.map((t) => parsePort(t)).find(Boolean);
-      if (numericPort) port = numericPort;
+        const numericPort = tokens.map((t) => parsePort(t)).find(Boolean);
+        if (numericPort) port = numericPort;
 
-      if (!username) {
-        const userToken = tokens.find((t) => t.includes("@"));
-        if (userToken) username = userToken.split("@")[0];
+        if (!username) {
+          const userToken = tokens.find((t) => t.includes("@"));
+          if (userToken) username = userToken.split("@")[0];
+        }
       }
     }
 
@@ -949,7 +986,13 @@ export function detectVaultImportFormat(text: string): VaultImportFormat | null 
     return "putty";
   }
 
-  if (/\[Bookmarks_\]/m.test(input) || /\[MobaXterm\]/i.test(input)) {
+  const hasMobaBookmarkSection = /^\[Bookmarks(?:_\d+)?\]\s*$/im.test(input);
+  const hasMobaBookmarkMetadata = /^SubRep=.*$/im.test(input) && /^ImgNum=\d+\s*$/im.test(input);
+  const hasMobaSessionLine = /^[^=\r\n]+=\s*(?:; logout)?\s*#\d+#\d+%[^%\r\n]+%\d+/im.test(input);
+  if (
+    /\[MobaXterm\]/i.test(input)
+    || (hasMobaBookmarkSection && (hasMobaBookmarkMetadata || hasMobaSessionLine))
+  ) {
     return "mobaxterm";
   }
 
