@@ -455,7 +455,7 @@ const SftpViewInner: React.FC<SftpViewProps> = ({
       <div
         ref={rootRef}
         className={cn(
-          "absolute inset-0 min-h-0 flex flex-col",
+          "absolute inset-0 min-h-0 flex flex-col bg-background",
           isActive ? "z-20" : "",
         )}
         style={containerStyle}
