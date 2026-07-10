@@ -25,13 +25,14 @@ export type TerminalPaneStyle = {
   pointerEvents?: string;
 };
 
-export function resolveHiddenTerminalPaneStyle<T extends TerminalPaneStyle>(
+export function resolveInactiveTerminalPaneStyle<T extends TerminalPaneStyle>(
   layoutStyle: T,
   lastVisibleSize: TerminalPaneHiddenSize | null,
+  hibernateHiddenTabs: boolean,
 ): T {
   return {
     ...layoutStyle,
-    visibility: "hidden",
+    visibility: hibernateHiddenTabs ? "hidden" : "visible",
     pointerEvents: "none",
     ...(lastVisibleSize
       ? {
@@ -39,6 +40,17 @@ export function resolveHiddenTerminalPaneStyle<T extends TerminalPaneStyle>(
         height: `${lastVisibleSize.height}px`,
       }
       : {}),
+  };
+}
+
+export function resolveTerminalLayerSurfaceStyle(
+  isActive: boolean,
+  hibernateHiddenTabs: boolean,
+): { visibility: "visible" | "hidden"; pointerEvents: "auto" | "none"; zIndex: number } {
+  return {
+    visibility: isActive || !hibernateHiddenTabs ? "visible" : "hidden",
+    pointerEvents: isActive ? "auto" : "none",
+    zIndex: isActive ? 10 : 0,
   };
 }
 

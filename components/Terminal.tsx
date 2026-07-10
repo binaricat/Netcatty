@@ -402,6 +402,9 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   onTerminalDataCaptureRef.current = onTerminalDataCapture;
   const isVisibleRef = useRef(isVisible);
   isVisibleRef.current = isVisible;
+  const isRendererActive = isVisible || !resolveTerminalHibernateEnabled(terminalSettings);
+  const isRendererActiveRef = useRef(isRendererActive);
+  isRendererActiveRef.current = isRendererActive;
   const pendingOutputScrollRef = useRef(false);
   const lastFittedSizeRef = useRef<{ width: number; height: number } | null>(null);
   const fontWeightFixupDoneRef = useRef(false);
@@ -1449,7 +1452,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     terminalBackend,
     serialConfig,
     telnetLocalEchoRef,
-    isVisibleRef,
+    isVisibleRef: isRendererActiveRef,
     isBootActiveRef,
     pendingOutputScrollRef,
     sessionRef,
@@ -1802,7 +1805,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   const safeFit = (options?: { force?: boolean; requireVisible?: boolean; immediate?: boolean; allowHidden?: boolean }) => {
     const fitAddon = fitAddonRef.current;
     if (!fitAddon) return;
-    if (!isVisibleRef.current && !options?.allowHidden) {
+    if (!isRendererActiveRef.current && !options?.allowHidden) {
       lastFittedSizeRef.current = null;
       return;
     }

@@ -10,6 +10,7 @@ import { useStoredBoolean } from '../../application/state/useStoredBoolean';
 import { isSavedVaultHost } from '../../domain/ephemeralHosts';
 import { collectSessionIds, SplitDirection } from '../../domain/workspace';
 import { resolveSessionTabTitle } from '../../domain/sessionTabTitle';
+import { resolveTerminalHibernateEnabled } from '../../domain/terminalHibernate';
 import { KeyBinding, TerminalSettings } from '../../domain/models';
 import { STORAGE_KEY_AI_SHOW_TERMINAL_SELECTION_ACTION } from '../../infrastructure/config/storageKeys';
 import { cn } from '../../lib/utils';
@@ -24,7 +25,7 @@ import type { TerminalContextReader } from '../../domain/terminalContextRead';
 import {
   getTerminalPaneRenderSnapshot,
   parseTerminalPaneRenderSnapshot,
-  resolveHiddenTerminalPaneStyle,
+  resolveInactiveTerminalPaneStyle,
   type TerminalPaneHiddenSize,
 } from '../terminalPaneVisibility';
 import type { ResolvedAppearance, TerminalAppearanceHostScope } from '../../domain/terminalAppearanceRuntime';
@@ -1054,7 +1055,11 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
   ]);
 
   if (!isVisible) {
-    Object.assign(style, resolveHiddenTerminalPaneStyle(style, lastVisiblePaneSizeRef.current));
+    Object.assign(style, resolveInactiveTerminalPaneStyle(
+      style,
+      lastVisiblePaneSizeRef.current,
+      resolveTerminalHibernateEnabled(terminalSettings),
+    ));
   }
 
   const workspaceFocusHandler = activeWorkspaceId
@@ -1278,6 +1283,7 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
       data-session-id={session.id}
       data-section="terminal-split-pane"
       data-focused={isFocusedPane ? 'true' : undefined}
+      inert={isVisible ? undefined : true}
       className={cn(
         "absolute bg-background",
         inActiveWorkspace && "workspace-pane",

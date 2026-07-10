@@ -135,6 +135,29 @@ export function forceTerminalRepaintBypassingAnimationFrame(term: XTerm): void {
   forceSyncRenderAfterResize(term);
 }
 
+type RevealFrameScheduler = (callback: () => void) => void;
+
+const scheduleRevealFrame: RevealFrameScheduler | undefined =
+  typeof globalThis.requestAnimationFrame === "function"
+    ? (callback) => { globalThis.requestAnimationFrame(() => callback()); }
+    : undefined;
+
+export function repaintTerminalAfterReveal(
+  term: XTerm,
+  shouldRepaint: () => boolean = () => true,
+  scheduleFrame: RevealFrameScheduler | undefined = scheduleRevealFrame,
+): void {
+  // The layout-effect pass makes the tab feel immediate, but on Windows the
+  // compositor can still treat a just-revealed WebGL canvas as hidden and
+  // discard this draw. Repeat once in the first visible browser frame so the
+  // final rows and cursor are guaranteed to reach the screen (#1985).
+  forceTerminalRepaintBypassingAnimationFrame(term);
+  scheduleFrame?.(() => {
+    if (!shouldRepaint()) return;
+    forceTerminalRepaintBypassingAnimationFrame(term);
+  });
+}
+
 export function scheduleTerminalRepaintWhenUnfocused(term: XTerm): void {
   if (!isTerminalWindowUnfocusedButVisible()) return;
 

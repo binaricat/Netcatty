@@ -4,14 +4,14 @@ import test from 'node:test';
 
 const source = readFileSync(new URL('../Terminal.tsx', import.meta.url), 'utf8');
 
-test('safeFit skips hidden terminal panes unless explicitly allowed', () => {
+test('safeFit skips only renderers suspended by hibernate unless explicitly allowed', () => {
   assert.match(
     source,
-    /if \(!isVisibleRef\.current && !options\?\.allowHidden\) \{\s*lastFittedSizeRef\.current = null;\s*return;\s*\}/,
+    /if \(!isRendererActiveRef\.current && !options\?\.allowHidden\) \{\s*lastFittedSizeRef\.current = null;\s*return;\s*\}/,
   );
 });
 
-test('safeFit can run synchronously for first-frame tab recovery', () => {
+test('safeFit can run synchronously for immediate layout changes', () => {
   assert.match(source, /immediate\?: boolean/);
   assert.match(
     source,

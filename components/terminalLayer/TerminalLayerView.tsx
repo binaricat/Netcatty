@@ -6,21 +6,26 @@ import { TerminalLayerSidePanelSection } from './TerminalLayerSidePanelSection';
 import { TerminalLayerWorkspaceSection } from './TerminalLayerWorkspaceSection';
 import { terminalLayerViewCtxEqual } from './terminalLayerViewMemo';
 import { useTerminalHostTreeLayoutWidth } from '../../application/state/terminalHostTreeStore';
+import { resolveTerminalHibernateEnabled } from '../../domain/terminalHibernate';
+import { resolveTerminalLayerSurfaceStyle } from '../terminalPaneVisibility';
 
 type TerminalLayerViewContext = Record<string, any>;
 
 function TerminalLayerViewInner({ ctx }: { ctx: TerminalLayerViewContext }) {
   const hostTreeLayoutWidth = useTerminalHostTreeLayoutWidth();
+  const surfaceStyle = resolveTerminalLayerSurfaceStyle(
+    ctx.isTerminalLayerVisible,
+    resolveTerminalHibernateEnabled(ctx.terminalSettings),
+  );
 
   return (
     <div
       ref={ctx.workspaceOuterRef}
       className="absolute inset-0 bg-background flex min-h-0"
       data-section="terminal-workspace"
+      inert={ctx.isTerminalLayerVisible ? undefined : true}
       style={{
-        visibility: ctx.isTerminalLayerVisible ? 'visible' : 'hidden',
-        pointerEvents: ctx.isTerminalLayerVisible ? 'auto' : 'none',
-        zIndex: ctx.isTerminalLayerVisible ? 10 : 0,
+        ...surfaceStyle,
         left: hostTreeLayoutWidth,
       }}
     >

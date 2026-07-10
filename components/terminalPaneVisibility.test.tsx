@@ -6,7 +6,8 @@ import {
   getTerminalPaneSnapshot,
   HIDDEN_TERMINAL_PANE_SNAPSHOT,
   parseTerminalPaneRenderSnapshot,
-  resolveHiddenTerminalPaneStyle,
+  resolveInactiveTerminalPaneStyle,
+  resolveTerminalLayerSurfaceStyle,
 } from "./terminalPaneVisibility";
 import type { Workspace } from "../types";
 
@@ -139,16 +140,46 @@ test("terminal pane render snapshot combines visibility and focus in one token",
   assert.equal(parsed.isFocusedPane, true);
 });
 
-test("hidden terminal pane keeps its last visible size without moving offscreen", () => {
-  const hiddenStyle = resolveHiddenTerminalPaneStyle(
+test("inactive terminal pane keeps rendering when hibernate is disabled", () => {
+  const inactiveStyle = resolveInactiveTerminalPaneStyle(
     { left: 0, top: 0, width: "100%", height: "100%" },
     { width: 1180, height: 720 },
+    false,
   );
 
-  assert.equal(hiddenStyle.left, 0);
-  assert.equal(hiddenStyle.top, 0);
-  assert.equal(hiddenStyle.visibility, "hidden");
-  assert.equal(hiddenStyle.pointerEvents, "none");
-  assert.equal(hiddenStyle.width, "1180px");
-  assert.equal(hiddenStyle.height, "720px");
+  assert.equal(inactiveStyle.left, 0);
+  assert.equal(inactiveStyle.top, 0);
+  assert.equal(inactiveStyle.visibility, "visible");
+  assert.equal(inactiveStyle.pointerEvents, "none");
+  assert.equal(inactiveStyle.width, "1180px");
+  assert.equal(inactiveStyle.height, "720px");
+});
+
+test("inactive terminal pane is hidden only when hibernate is enabled", () => {
+  const inactiveStyle = resolveInactiveTerminalPaneStyle(
+    { left: 0, top: 0, width: "100%", height: "100%" },
+    { width: 1180, height: 720 },
+    true,
+  );
+
+  assert.equal(inactiveStyle.visibility, "hidden");
+  assert.equal(inactiveStyle.pointerEvents, "none");
+});
+
+test("terminal layer stays rendered behind other app surfaces unless hibernate is enabled", () => {
+  assert.deepEqual(resolveTerminalLayerSurfaceStyle(false, false), {
+    visibility: "visible",
+    pointerEvents: "none",
+    zIndex: 0,
+  });
+  assert.deepEqual(resolveTerminalLayerSurfaceStyle(false, true), {
+    visibility: "hidden",
+    pointerEvents: "none",
+    zIndex: 0,
+  });
+  assert.deepEqual(resolveTerminalLayerSurfaceStyle(true, true), {
+    visibility: "visible",
+    pointerEvents: "auto",
+    zIndex: 10,
+  });
 });
