@@ -53,6 +53,56 @@ test("listProcesses uses a ps format that works on CentOS 7 procps", async () =>
   assert.doesNotMatch(seenCommand, /head\s+-n\s+2000/);
 });
 
+test("listProcesses returns processes from the default OpenWrt BusyBox ps format", async () => {
+  const openWrtOutput = [
+    "  PID USER       VSZ STAT COMMAND",
+    "    1 root      1356 S    /sbin/procd",
+    "  411 root      1216 S    /sbin/ubusd",
+  ].join("\n");
+  const unsupportedProcpsError = [
+    "ps: unrecognized option: e",
+    "BusyBox v1.36.1 multi-call binary.",
+    "Usage: ps",
+  ].join("\n");
+
+  let seenCommand = "";
+  const conn = {
+    exec(command, callback) {
+      seenCommand = command;
+      const hasBusyBoxFallback = /ps ww/.test(command);
+      callback(null, createFakeExecStream(
+        hasBusyBoxFallback ? openWrtOutput : "",
+        hasBusyBoxFallback
+          ? { code: 0 }
+          : { code: 1, stderr: unsupportedProcpsError },
+      ));
+    },
+  };
+  const sessions = new Map([["openwrt", { conn, type: "ssh" }]]);
+  const bridge = createSystemManagerBridge({
+    getSessions: () => sessions,
+    process,
+  });
+
+  const result = await bridge.listProcesses(null, { sessionId: "openwrt" });
+
+  assert.equal(result.success, true);
+  assert.equal(result.processes.length, 2);
+  assert.deepEqual(result.processes[0], {
+    pid: 1,
+    ppid: 0,
+    user: "root",
+    stat: "S",
+    cpuPercent: 0,
+    memPercent: 0,
+    rssKb: 0,
+    vszKb: 1356,
+    elapsed: "",
+    command: "/sbin/procd",
+  });
+  assert.match(seenCommand, /ps ww/);
+});
+
 test("process listing commands do not hard-cap the visible list at 2000 entries", () => {
   const source = fs.readFileSync(path.join(__dirname, "systemManagerBridge.cjs"), "utf8");
 
