@@ -23,6 +23,7 @@ export type TerminalPaneStyle = {
   height?: string | number;
   visibility?: string;
   pointerEvents?: string;
+  zIndex?: number;
 };
 
 export function resolveInactiveTerminalPaneStyle<T extends TerminalPaneStyle>(
@@ -34,6 +35,7 @@ export function resolveInactiveTerminalPaneStyle<T extends TerminalPaneStyle>(
     ...layoutStyle,
     visibility: hibernateHiddenTabs ? "hidden" : "visible",
     pointerEvents: "none",
+    zIndex: 0,
     ...(hibernateHiddenTabs && lastVisibleSize
       ? {
         width: `${lastVisibleSize.width}px`,

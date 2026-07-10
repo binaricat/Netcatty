@@ -151,6 +151,7 @@ test("inactive terminal pane keeps rendering when hibernate is disabled", () => 
   assert.equal(inactiveStyle.top, 0);
   assert.equal(inactiveStyle.visibility, "visible");
   assert.equal(inactiveStyle.pointerEvents, "none");
+  assert.equal(inactiveStyle.zIndex, 0);
   assert.equal(inactiveStyle.width, "640px");
   assert.equal(inactiveStyle.height, "480px");
 });
@@ -164,6 +165,7 @@ test("inactive terminal pane is hidden only when hibernate is enabled", () => {
 
   assert.equal(inactiveStyle.visibility, "hidden");
   assert.equal(inactiveStyle.pointerEvents, "none");
+  assert.equal(inactiveStyle.zIndex, 0);
 });
 
 test("terminal layer stays rendered behind other app surfaces unless hibernate is enabled", () => {
