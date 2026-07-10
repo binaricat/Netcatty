@@ -26,7 +26,7 @@ const readFunctionBody = (source: string, marker: string): string => {
 
 test("full hibernate flushes pending hidden output before taking the snapshot", () => {
   const source = readFileSync(new URL("../Terminal.tsx", import.meta.url), "utf8");
-  const body = readFunctionBody(source, "const fullHibernateRuntime = useCallback(async () =>");
+  const body = readFunctionBody(source, "const fullHibernateRuntime = useCallback(async (): Promise<boolean> =>");
 
   const termCaptureIndex = body.indexOf("const term = termRef.current");
   const clearHiddenIndex = body.indexOf("terminalHiddenRendererStore.clearSoftHidden(sessionId)");
@@ -71,12 +71,12 @@ test("hibernate retry preserves normal hibernate blockers", () => {
 
 test("full hibernate rechecks live state after every asynchronous step", () => {
   const source = readFileSync(new URL("../Terminal.tsx", import.meta.url), "utf8");
-  const body = readFunctionBody(source, "const fullHibernateRuntime = useCallback(async () =>");
+  const body = readFunctionBody(source, "const fullHibernateRuntime = useCallback(async (): Promise<boolean> =>");
 
   const flushIndex = body.indexOf("await flushPendingTerminalWritesBeforeHibernate(term)");
-  const afterFlushGuardIndex = body.indexOf("if (!canFinishHibernate()) return;", flushIndex);
+  const afterFlushGuardIndex = body.indexOf("if (!canFinishHibernate()) return false;", flushIndex);
   const serializeIndex = body.indexOf("await serializeTerminalForHibernate(");
-  const afterSerializeGuardIndex = body.indexOf("if (!canFinishHibernate()) return;", serializeIndex);
+  const afterSerializeGuardIndex = body.indexOf("if (!canFinishHibernate()) return false;", serializeIndex);
   const releaseIndex = body.indexOf("releaseTerminalFlowBeforeHibernate(terminalBackend, term, backendId)");
 
   assert.match(body, /!isVisibleRef\.current/);
@@ -87,4 +87,18 @@ test("full hibernate rechecks live state after every asynchronous step", () => {
   assert.ok(afterFlushGuardIndex < serializeIndex, "the post-drain guard must run before serialization");
   assert.ok(serializeIndex < afterSerializeGuardIndex, "visibility and settings must be rechecked after serialization");
   assert.ok(afterSerializeGuardIndex < releaseIndex, "the final guard must run before releasing the live runtime");
+});
+
+test("a cancelled soft-hidden upgrade resumes its renderer", () => {
+  const source = readFileSync(new URL("../Terminal.tsx", import.meta.url), "utf8");
+  const subscribeIndex = source.indexOf("terminalHiddenRendererStore.subscribe");
+  const upgradeIndex = source.indexOf("fullHibernateRuntime().then(", subscribeIndex);
+  const cancelResumeIndex = source.indexOf("resumeRendererAfterCancelledHibernateUpgrade()", upgradeIndex);
+  const helperBody = readFunctionBody(source, "const resumeRendererAfterCancelledHibernateUpgrade = useCallback(() =>");
+
+  assert.notEqual(upgradeIndex, -1, "soft-hidden eviction must await the full hibernate result");
+  assert.notEqual(cancelResumeIndex, -1, "a cancelled upgrade must resume the suspended renderer");
+  assert.match(helperBody, /ensureWebglRenderer\(\)/);
+  assert.match(helperBody, /clearTextureAtlas\(\)/);
+  assert.match(helperBody, /safeFitRef\.current\(\{ force: true \}\)/);
 });
