@@ -14,9 +14,13 @@ import {
   hasPendingTerminalWriteQueueWork,
 } from "./terminalWriteQueue";
 
+const UNFOCUSED_REPAINT_DEBOUNCE_MS = 16;
+const UNFOCUSED_FLUSH_DEBOUNCE_MS = 67;
 const RESUME_FLUSH_MAX_PASSES = 64;
 const HIBERNATE_FLUSH_MAX_PASSES = 4096;
 const HIBERNATE_FLUSH_YIELD_EVERY_PASSES = 64;
+const unfocusedRepaintTimers = new WeakMap<XTerm, ReturnType<typeof setTimeout>>();
+const unfocusedFlushTimers = new WeakMap<XTerm, ReturnType<typeof setTimeout>>();
 
 type XTermWithPrivateWriteBuffer = XTerm & {
   _core?: {
@@ -154,6 +158,32 @@ export function repaintTerminalAfterReveal(
   });
 }
 
+export function scheduleTerminalRepaintWhenUnfocused(term: XTerm): void {
+  if (!isTerminalWindowUnfocusedButVisible()) return;
+
+  if (unfocusedRepaintTimers.has(term)) return;
+
+  const timer = setTimeout(() => {
+    unfocusedRepaintTimers.delete(term);
+    if (!isTerminalWindowUnfocusedButVisible()) return;
+    forceTerminalRepaintBypassingAnimationFrame(term);
+  }, UNFOCUSED_REPAINT_DEBOUNCE_MS);
+  unfocusedRepaintTimers.set(term, timer);
+}
+
+export function cancelScheduledUnfocusedRepaint(term: XTerm): void {
+  const timer = unfocusedRepaintTimers.get(term);
+  if (timer !== undefined) {
+    clearTimeout(timer);
+    unfocusedRepaintTimers.delete(term);
+  }
+
+  const flushTimer = unfocusedFlushTimers.get(term);
+  if (flushTimer === undefined) return;
+  clearTimeout(flushTimer);
+  unfocusedFlushTimers.delete(term);
+}
+
 export function flushPendingTerminalWritesOnResume(term: XTerm): void {
   flushTerminalWriteCoalescer(term);
   flushTerminalWriteBufferBypassingTimers(term);
@@ -189,4 +219,21 @@ export async function flushPendingTerminalWritesBeforeHibernate(term: XTerm): Pr
   flushTerminalWriteQueueBypassingTimers(term);
   flushTerminalWriteBufferBypassingTimers(term);
   return !hasPendingTerminalWrites(term);
+}
+
+export function maybeFlushTerminalWriteCoalescerWhenUnfocused(
+  term: XTerm,
+  isPaneVisible: boolean,
+): void {
+  // Background fast path already drains coalescer/queue synchronously.
+  if (!isPaneVisible || shouldFlushTerminalWritesForBackgroundOutput(isPaneVisible)) return;
+  if (!isTerminalWindowUnfocusedButVisible()) return;
+  if (unfocusedFlushTimers.has(term)) return;
+
+  const timer = setTimeout(() => {
+    unfocusedFlushTimers.delete(term);
+    if (!isTerminalWindowUnfocusedButVisible()) return;
+    flushTerminalWriteCoalescer(term);
+  }, UNFOCUSED_FLUSH_DEBOUNCE_MS);
+  unfocusedFlushTimers.set(term, timer);
 }

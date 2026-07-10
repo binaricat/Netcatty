@@ -4,11 +4,13 @@ import { readFileSync } from "node:fs";
 import type { Terminal as XTerm } from "@xterm/xterm";
 
 import {
+  cancelScheduledUnfocusedRepaint,
   flushPendingTerminalWritesBeforeHibernate,
   flushTerminalWriteBufferBypassingTimers,
   forceTerminalRepaintBypassingAnimationFrame,
   hasPendingTerminalWrites,
   repaintTerminalAfterReveal,
+  scheduleTerminalRepaintWhenUnfocused,
   shouldFlushTerminalWritesForBackgroundOutput,
 } from "./terminalUnfocusedRepaint.ts";
 
@@ -28,6 +30,31 @@ const withDocumentVisibility = (
   });
   try {
     run();
+  } finally {
+    if (original) {
+      Object.defineProperty(globalThis, "document", original);
+    } else {
+      Reflect.deleteProperty(globalThis, "document");
+    }
+  }
+};
+
+const withDocumentVisibilityAsync = async (
+  visibilityState: "visible" | "hidden",
+  run: () => Promise<void>,
+  options: { hasFocus?: boolean } = {},
+) => {
+  const hasFocus = options.hasFocus ?? visibilityState === "visible";
+  const original = Object.getOwnPropertyDescriptor(globalThis, "document");
+  Object.defineProperty(globalThis, "document", {
+    configurable: true,
+    value: {
+      visibilityState,
+      hasFocus: () => hasFocus,
+    },
+  });
+  try {
+    await run();
   } finally {
     if (original) {
       Object.defineProperty(globalThis, "document", original);
@@ -235,6 +262,63 @@ test("flushPendingTerminalWritesBeforeHibernate drains pending xterm output comp
   assert.equal(hasPendingTerminalWrites(term), false);
 });
 
+test("maybeFlushTerminalWriteCoalescerWhenUnfocused throttles coalescer flushes", () => {
+  const source = readFileSync(
+    new URL("./terminalUnfocusedRepaint.ts", import.meta.url),
+    "utf8",
+  );
+  assert.match(source, /flushTerminalWriteCoalescer\(term\)/);
+  assert.match(source, /unfocusedFlushTimers/);
+});
+
+test("scheduleTerminalRepaintWhenUnfocused debounces repaint scheduling", () => {
+  const source = readFileSync(
+    new URL("./terminalUnfocusedRepaint.ts", import.meta.url),
+    "utf8",
+  );
+  assert.match(source, /if \(unfocusedRepaintTimers\.has\(term\)\) return;/);
+  assert.match(source, /UNFOCUSED_REPAINT_DEBOUNCE_MS/);
+});
+
+test("scheduleTerminalRepaintWhenUnfocused repaints while the window is visible but unfocused", async () => {
+  let renderCalls = 0;
+  const renderRanges: Array<[number, number]> = [];
+  const renderService = {
+    _renderRows(start: number, end: number) {
+      renderCalls += 1;
+      renderRanges.push([start, end]);
+    },
+  };
+  const term = {
+    rows: 24,
+    buffer: { active: { type: "normal" } },
+    _core: {
+      _renderService: renderService,
+    },
+  } as unknown as Parameters<typeof scheduleTerminalRepaintWhenUnfocused>[0];
+
+  await withDocumentVisibilityAsync("visible", async () => {
+    scheduleTerminalRepaintWhenUnfocused(term);
+    scheduleTerminalRepaintWhenUnfocused(term);
+    await new Promise((resolve) => { setTimeout(resolve, 25); });
+  }, { hasFocus: false });
+
+  assert.equal(renderCalls, 1);
+  assert.deepEqual(renderRanges, [[0, 23]]);
+  cancelScheduledUnfocusedRepaint(term);
+});
+
+test("writeSessionData schedules a throttled coalescer flush when unfocused", () => {
+  const source = readFileSync(
+    new URL("./terminalSessionAttachment.ts", import.meta.url),
+    "utf8",
+  );
+  assert.match(
+    source,
+    /maybeFlushTerminalWriteCoalescerWhenUnfocused\(\s*term,\s*isPaneVisible,\s*\)/,
+  );
+});
+
 test("writeSessionData bypasses animation-frame coalescing for background output", () => {
   const source = readFileSync(
     new URL("./terminalSessionAttachment.ts", import.meta.url),
@@ -247,12 +331,15 @@ test("writeSessionData bypasses animation-frame coalescing for background output
   assert.match(source, /const deferFlowAck = !writeOptions\.flushXtermWriteBuffer/);
 });
 
-test("writeSessionData never schedules unfocused repaint compensation", () => {
+test("writeSessionDataImmediate schedules unfocused repaint for visible panes on every path", () => {
   const source = readFileSync(
     new URL("./terminalSessionAttachment.ts", import.meta.url),
     "utf8",
   );
-  assert.doesNotMatch(source, /scheduleTerminalRepaintWhenUnfocused/);
+  // The background fast path must NOT skip this: unfocused-but-visible windows
+  // have no rAF render loop, so the debounced sync repaint is the only way
+  // pixels update (#1761 regression guard).
+  assert.match(source, /if \(ctx\.isVisibleRef\?\.current !== false\) \{[^}]*scheduleTerminalRepaintWhenUnfocused\(term\)/);
 });
 
 test("app resume no longer runs a terminal recovery path", () => {

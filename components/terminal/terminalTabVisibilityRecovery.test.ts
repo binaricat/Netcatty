@@ -18,12 +18,6 @@ test('tab-return recovery is restricted to hibernate mode', () => {
     source,
     /if \(isVisible \|\| !hibernateHiddenTabs\) return;\s*lastCommittedVisibleLayoutKeyRef\.current = null/,
   );
-  assert.match(source, /\}, \[inWorkspace, isRendererActive\]\);/);
-  assert.doesNotMatch(source, /\}, \[inWorkspace, isVisible\]\);/);
-  assert.match(
-    source,
-    /\}, \[effectiveThemeKey, isRendererActive, sessionId, effectiveTheme\]\);/,
-  );
 });
 
 test('app visibility and focus do not trigger terminal recovery', () => {

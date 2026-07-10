@@ -11,16 +11,12 @@ type PendingUpdate = {
 
 const pendingBySession = new Map<string, PendingUpdate>();
 let flushScheduled = false;
-let appliedThemeFingerprintByTerminal = new WeakMap<Terminal, string>();
 
 function themeFingerprint(theme: TerminalTheme): string {
   return `${theme.id}:${theme.colors.background}:${theme.colors.foreground}:${theme.colors.cursor}`;
 }
 
 function applyThemeToTerminal(term: Terminal, theme: TerminalTheme): void {
-  const fingerprint = themeFingerprint(theme);
-  if (appliedThemeFingerprintByTerminal.get(term) === fingerprint) return;
-
   term.options.theme = {
     ...theme.colors,
     selectionBackground: theme.colors.selection,
@@ -29,7 +25,6 @@ function applyThemeToTerminal(term: Terminal, theme: TerminalTheme): void {
     scrollbarSliderActiveBackground: theme.colors.foreground + '80',
   };
   forceSyncRenderAfterResize(term);
-  appliedThemeFingerprintByTerminal.set(term, fingerprint);
 }
 
 export function applyTerminalThemeSync(term: Terminal, theme: TerminalTheme): void {
@@ -101,5 +96,4 @@ export function scheduleTerminalThemeUpdate(
 export function resetTerminalThemeSchedulerForTests(): void {
   pendingBySession.clear();
   flushScheduled = false;
-  appliedThemeFingerprintByTerminal = new WeakMap<Terminal, string>();
 }

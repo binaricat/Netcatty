@@ -163,7 +163,6 @@ import {
   resolveHibernateSkipAltScreen,
   resolveTerminalHibernateDelayMs,
   resolveTerminalHibernateEnabled,
-  resolveTerminalRendererActive,
   resolveTerminalHibernateReplayChunkBytes,
   type TerminalHibernateWakePayload,
 } from "../domain/terminalHibernate";
@@ -403,7 +402,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   onTerminalDataCaptureRef.current = onTerminalDataCapture;
   const isVisibleRef = useRef(isVisible);
   isVisibleRef.current = isVisible;
-  const isRendererActive = resolveTerminalRendererActive(isVisible, terminalSettings);
+  const isRendererActive = isVisible || !resolveTerminalHibernateEnabled(terminalSettings);
   const isRendererActiveRef = useRef(isRendererActive);
   isRendererActiveRef.current = isRendererActive;
   const pendingOutputScrollRef = useRef(false);

@@ -18,7 +18,6 @@ import {
 import {
   resolveHibernatePreferWasmSerialize,
   resolveTerminalHibernateEnabled,
-  resolveTerminalRendererActive,
 } from '../../domain/terminalHibernate';
 import { applyUserCursorBlinkPreference } from './runtime/cursorPreference';
 import { getFlowControllerForTerm } from './runtime/terminalSessionAttachment';
@@ -33,6 +32,7 @@ import {
   nudgeAlternateScreenRedraw,
 } from './terminalHibernateRuntime';
 import {
+  cancelScheduledUnfocusedRepaint,
   flushPendingTerminalWritesOnResume,
   repaintTerminalAfterReveal,
 } from './runtime/terminalUnfocusedRepaint';
@@ -161,7 +161,7 @@ export function resolveSelectionOverlayPosition(term: any, container: HTMLElemen
 export function useTerminalEffects(ctx: TerminalEffectsContext) {
   const { CONNECTION_TIMEOUT, Error, XTERM_PERFORMANCE_CONFIG, applyUserCursorPreference, auth, autocompleteCloseRef, autocompleteInputRef, autocompleteKeyEventRef, captureTerminalLogData, clearTerminalCwd, commandBufferRef, connectionLogBufferRef, containerRef, createPromptLineBreakState, createReplaySafeTerminalLogSanitizer, createXTermRuntime, deferTerminalResizeRef, disableTerminalFontZoomRef, effectiveFontSize, effectiveFontWeight, effectiveTheme, error, executeSnippetCommand, finalizeTerminalLogData, fitAddonRef, fontFamilyId, fontSize, fontWeightFixupDoneRef, forceCloseHibernatedSession, forceSyncRenderAfterResize, handleOsc52ReadRequest, handleTerminalDataCaptureOnce, hasConnectedRef, hasRuntimeRef, host, hotkeySchemeRef, hibernatedRef, identities, inWorkspace, isBootActiveRef, isBroadcastEnabledRef, isComposeBarOpen, isConnectionAwaitingUserInput, isConnectionPastTcpDial, isFocusMode, isFocused, isLocalConnection, isNetworkDevice, isResizing, isRestoringSelectionRef, isSearchOpen, isSerialConnection, isVisible, isVisibleRef, keyBindingsRef, keys, knownCwdRef, lastFittedSizeRef, lastToastedErrorRef, logger, mouseTrackingRef, needsHostKeyVerification, onBroadcastInputRef, onBroadcastInterruptPriorityChange, onCommandExecuted, onCommandSubmitted, onHotkeyActionRef, onOutputTriggerUserInputRef, onSnippetExecutorChange, onTerminalCwdChange, onTerminalTitleChange, onTerminalBell, onTerminalFontSizeChange, paneLayoutKey, passwordPromptActiveRef, pendingAuthRef, pendingOutputScrollRef, prepareRestoredReconnect, prevIsResizingRef, promptLineBreakStateRef, resizeSession, resolveHostAuth, resolvedFontFamily, safeFit, scriptRecorderRef, searchAddonRef, serialConfig, serialLineBufferRef, serializeAddonRef, sessionId, sessionRef, sessionStarters, setError, setHasMouseTracking, setHasSelection, setIsCancelling, setIsDisconnectedDialogDismissed, requestSearchFocus, setNeedsHostKeyVerification, setPendingHostKeyInfo, setPendingHostKeyRequestId, setProgressLogs, setProgressValue, setSelectionOverlayPosition, setShowLogs, setStatus, setTimeLeft, shouldEnableNativeUserInputAutoScroll, shouldProbeSessionCwd, shouldStartTerminalBackend, onSnippetShortkeyRef, snippetsRef, splitResizeActive, status, statusRef, sudoAutofillRef, t, teardown, telnetLocalEchoRef, termRef, terminalAltKeyOptions, terminalBackend, terminalContextActionsRef, terminalCwdTracker, terminalDataCapturedRef, terminalLogSanitizerRef, terminalSettings, terminalSettingsRef, toHostKeyInfo, toast, updateStatus, useEffect, useLayoutEffect, xtermRuntimeRef, zmodem, zmodemToastedRef, restoreState } = ctx;
   const hibernateHiddenTabs = resolveTerminalHibernateEnabled(terminalSettings);
-  const isRendererActive = resolveTerminalRendererActive(isVisible, terminalSettings);
+  const isRendererActive = isVisible || !hibernateHiddenTabs;
   const isRendererActiveRef = useRef(isRendererActive);
   isRendererActiveRef.current = isRendererActive;
 
@@ -631,7 +631,7 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
     const term = termRef.current;
     if (!term) return;
 
-    if (isRendererActive) {
+    if (isRendererActiveRef.current || isFocused) {
       cancelTerminalThemeUpdate(sessionId);
       applyTerminalThemeSync(term, effectiveTheme);
       injectTerminalPaneAppearanceVars(sessionId, effectiveTheme);
@@ -644,7 +644,7 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
       { visible: false, focused: false },
       () => termRef.current,
     );
-  }, [effectiveThemeKey, isRendererActive, sessionId, effectiveTheme]);
+  }, [effectiveThemeKey, isFocused, isVisible, sessionId, effectiveTheme]);
 
 
   // Keep font-size sync separate from terminalSettings so unrelated setting
@@ -855,6 +855,7 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
     lastCommittedVisibleLayoutKeyRef.current = null;
     const term = termRef.current;
     if (term) {
+      cancelScheduledUnfocusedRepaint(term);
       flushPendingTerminalWritesOnResume(term);
       repaintTerminalAfterReveal(term, () => isVisibleRef.current);
     }
@@ -1159,7 +1160,7 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
 
 
   useEffect(() => {
-    if (!isRendererActive || !fitAddonRef.current) return;
+    if (!isVisible || !fitAddonRef.current) return;
     // Fit twice: once after initial layout (100ms) and again after layout settles
     // (350ms) to handle race conditions during split operations where the container
     // dimensions may not be final on the first pass.
@@ -1172,7 +1173,7 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
       finishLayoutRecoveryAfterFit();
     }, 350);
     return () => { clearTimeout(timer1); clearTimeout(timer2); };
-  }, [inWorkspace, isRendererActive]);
+  }, [inWorkspace, isVisible]);
 
 
   // When search bar opens/closes, re-fit terminal and maintain scroll position

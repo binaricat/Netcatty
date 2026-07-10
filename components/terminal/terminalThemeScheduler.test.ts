@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
-  applyTerminalThemeSync,
   cancelTerminalThemeUpdate,
   resetTerminalThemeSchedulerForTests,
   scheduleTerminalThemeUpdate,
@@ -63,25 +62,4 @@ test('cancelTerminalThemeUpdate drops a pending hidden-pane theme flush', async 
 
   appliedThemeId = fakeTerm.options.theme.background ?? null;
   assert.equal(appliedThemeId, null);
-});
-
-test('reapplying an unchanged theme does not repaint the terminal', () => {
-  resetTerminalThemeSchedulerForTests();
-  let renderCalls = 0;
-  const fakeTerm = {
-    rows: 24,
-    options: { theme: {} as Record<string, string> },
-    _core: {
-      _renderService: {
-        _renderRows() {
-          renderCalls += 1;
-        },
-      },
-    },
-  };
-
-  applyTerminalThemeSync(fakeTerm as never, theme('stable-theme'));
-  applyTerminalThemeSync(fakeTerm as never, theme('stable-theme'));
-
-  assert.equal(renderCalls, 1);
 });
