@@ -145,6 +145,12 @@ import {
   type WindowOpacityMutationSource,
   type WindowOpacityRecord,
 } from './windowOpacitySync';
+import {
+  hasPersistedAppearanceChanged,
+  resolveIncomingAppearanceValue,
+  type AppearanceRenderSnapshot,
+  type AppearanceSyncEvent,
+} from './appearanceSync';
 
 export const useSettingsState = (options: { enableSettingsSync?: boolean; enableSystemEffects?: boolean } = {}) => {
   const enableSettingsSync = options.enableSettingsSync !== false;
@@ -442,6 +448,7 @@ export const useSettingsState = (options: { enableSettingsSync?: boolean; enable
   // Set to true by the LAST useEffect declaration; all persist effects see false on first render.
   const persistMountedRef = useRef(false);
   const appearanceTransitionModeRef = useRef<ThemeTransitionMode>('view');
+  const previousAppearanceRenderRef = useRef<AppearanceRenderSnapshot | null>(null);
 
   const setTerminalSettings = useCallback((nextValue: SetStateAction<TerminalSettings>) => {
     setTerminalSettingsState((prev) => {
@@ -567,16 +574,41 @@ export const useSettingsState = (options: { enableSettingsSync?: boolean; enable
     notifySettingsChanged(STORAGE_KEY_WORKSPACE_FOCUS_STYLE, style);
   }, [notifySettingsChanged]);
 
-  const syncAppearanceFromStorage = useCallback(() => {
-    const storedTheme = readStoredString(STORAGE_KEY_THEME);
+  const syncAppearanceFromStorage = useCallback((incoming?: AppearanceSyncEvent) => {
+    const storedTheme = resolveIncomingAppearanceValue(
+      incoming,
+      STORAGE_KEY_THEME,
+      readStoredString(STORAGE_KEY_THEME),
+      (value): value is string => typeof value === 'string' && isValidTheme(value),
+    );
     const nextTheme = storedTheme && isValidTheme(storedTheme) ? storedTheme : theme;
-    const storedLightId = readStoredString(STORAGE_KEY_UI_THEME_LIGHT);
+    const storedLightId = resolveIncomingAppearanceValue(
+      incoming,
+      STORAGE_KEY_UI_THEME_LIGHT,
+      readStoredString(STORAGE_KEY_UI_THEME_LIGHT),
+      (value): value is string => typeof value === 'string' && isValidUiThemeId('light', value),
+    );
     const nextLightId = storedLightId && isValidUiThemeId('light', storedLightId) ? storedLightId : lightUiThemeId;
-    const storedDarkId = readStoredString(STORAGE_KEY_UI_THEME_DARK);
+    const storedDarkId = resolveIncomingAppearanceValue(
+      incoming,
+      STORAGE_KEY_UI_THEME_DARK,
+      readStoredString(STORAGE_KEY_UI_THEME_DARK),
+      (value): value is string => typeof value === 'string' && isValidUiThemeId('dark', value),
+    );
     const nextDarkId = storedDarkId && isValidUiThemeId('dark', storedDarkId) ? storedDarkId : darkUiThemeId;
-    const storedAccentMode = readStoredString(STORAGE_KEY_ACCENT_MODE);
+    const storedAccentMode = resolveIncomingAppearanceValue(
+      incoming,
+      STORAGE_KEY_ACCENT_MODE,
+      readStoredString(STORAGE_KEY_ACCENT_MODE),
+      (value): value is 'theme' | 'custom' => value === 'theme' || value === 'custom',
+    );
     const nextAccentMode = storedAccentMode === 'theme' || storedAccentMode === 'custom' ? storedAccentMode : accentMode;
-    const storedAccent = readStoredString(STORAGE_KEY_COLOR);
+    const storedAccent = resolveIncomingAppearanceValue(
+      incoming,
+      STORAGE_KEY_COLOR,
+      readStoredString(STORAGE_KEY_COLOR),
+      (value): value is string => typeof value === 'string' && isValidHslToken(value),
+    );
     const nextAccent = storedAccent && isValidHslToken(storedAccent) ? storedAccent.trim() : customAccent;
 
     // Fix 2: Skip expensive DOM operations if nothing actually changed
@@ -722,6 +754,17 @@ export const useSettingsState = (options: { enableSettingsSync?: boolean; enable
   }, [applyIncomingCustomKeyBindings, applyIncomingJmsDeepLinkEnabled, applyIncomingSshDeepLinkEnabled, syncAppearanceFromStorage, syncCustomCssFromStorage, setTerminalSettings]);
 
   useLayoutEffect(() => {
+    const appearanceRender: AppearanceRenderSnapshot = {
+      theme,
+      resolvedTheme,
+      lightUiThemeId,
+      darkUiThemeId,
+      accentMode,
+      customAccent,
+    };
+    const persistedAppearanceChanged = previousAppearanceRenderRef.current === null
+      || hasPersistedAppearanceChanged(previousAppearanceRenderRef.current, appearanceRender);
+    previousAppearanceRenderRef.current = appearanceRender;
     const tokens = getUiThemeById(resolvedTheme, resolvedTheme === 'dark' ? darkUiThemeId : lightUiThemeId).tokens;
     const apply = () => applyThemeTokens(theme, resolvedTheme, tokens, accentMode, customAccent);
     const transitionMode = appearanceTransitionModeRef.current;
@@ -731,6 +774,7 @@ export const useSettingsState = (options: { enableSettingsSync?: boolean; enable
     } else {
       apply();
     }
+    if (!persistedAppearanceChanged && persistMountedRef.current) return;
     localStorageAdapter.writeString(STORAGE_KEY_THEME, theme);
     localStorageAdapter.writeString(STORAGE_KEY_UI_THEME_LIGHT, lightUiThemeId);
     localStorageAdapter.writeString(STORAGE_KEY_UI_THEME_DARK, darkUiThemeId);

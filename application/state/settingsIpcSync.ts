@@ -58,10 +58,11 @@ import {
   migrateIncomingTerminalFontId,
 } from './settingsStateDefaults';
 import { isTerminalSidePanelAutoOpenTab, type TerminalSidePanelAutoOpenTab } from '../../domain/terminalSidePanelAutoOpen';
+import type { AppearanceSyncEvent } from './appearanceSync';
 
 interface UseSettingsIpcSyncParams {
   enabled?: boolean;
-  syncAppearanceFromStorage: () => void;
+  syncAppearanceFromStorage: (incoming?: AppearanceSyncEvent) => void;
   syncCustomCssFromStorage: () => void;
   setUiLanguage: Dispatch<SetStateAction<UILanguage>>;
   setUiFontFamilyId: Dispatch<SetStateAction<string>>;
@@ -156,7 +157,7 @@ export function useSettingsIpcSync({
         key === STORAGE_KEY_ACCENT_MODE ||
         key === STORAGE_KEY_COLOR
       ) {
-        syncAppearanceFromStorage();
+        syncAppearanceFromStorage({ key, value });
         return;
       }
       if (key === STORAGE_KEY_UI_LANGUAGE && typeof value === 'string') {
