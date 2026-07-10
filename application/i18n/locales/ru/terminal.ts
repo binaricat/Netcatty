@@ -109,6 +109,7 @@ export const ruTerminalMessages: Messages = {
   'terminal.serverStats.disk': 'Использование диска (корень)',
   'terminal.serverStats.diskDetails': 'Смонтированные диски',
   'terminal.serverStats.network': 'Скорость сети',
+  'terminal.serverStats.latency': 'Время ответа статистики SSH',
   'terminal.serverStats.networkDetails': 'Сетевые интерфейсы',
   'terminal.serverStats.noData': 'Данные недоступны',
   'terminal.dragDrop.localTitle': 'Перетащите для вставки путей',

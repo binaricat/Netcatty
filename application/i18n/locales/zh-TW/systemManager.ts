@@ -41,7 +41,7 @@ export const zhTwSystemManagerMessages: Messages = {
   'systemManager.overview.system': '系統',
   'systemManager.overview.kernel': '核心',
   'systemManager.overview.swap': '交換區',
-  'systemManager.overview.latency': '延遲',
+  'systemManager.overview.latency': 'SSH 統計回應時間',
   'systemManager.overview.cpuCores': 'CPU 核心',
   'systemManager.overview.disks': '磁碟',
   'systemManager.overview.interfaces': '網路介面',

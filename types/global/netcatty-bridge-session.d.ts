@@ -246,7 +246,7 @@ declare global {
         }>;
         netRxSpeed: number;           // Total network receive speed (bytes/sec)
         netTxSpeed: number;           // Total network transmit speed (bytes/sec)
-        latencyMs: number | null;     // SSH stats response time: channel open through first output
+        latencyMs: number | null;     // Stats request start through its first observable output
         netInterfaces: Array<{        // Per-interface network stats
           name: string;               // Interface name (e.g., eth0, ens33)
           rxBytes: number;            // Total received bytes
