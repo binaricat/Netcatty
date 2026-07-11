@@ -203,6 +203,24 @@ test("applyGroupDefaults still inherits telnet credentials when host fields are 
   assert.equal(resolveTelnetPassword(result), "group-telnet-password");
 });
 
+test("applyGroupDefaults inherits a reusable Telnet identity from the group", () => {
+  const result = applyGroupDefaults(
+    host({ telnetIdentityId: undefined }),
+    { telnetIdentityId: "group-telnet-identity" },
+  );
+
+  assert.equal(result.telnetIdentityId, "group-telnet-identity");
+});
+
+test("applyGroupDefaults preserves an explicitly cleared Telnet identity", () => {
+  const result = applyGroupDefaults(
+    host({ telnetIdentityId: "" }),
+    { telnetIdentityId: "group-telnet-identity" },
+  );
+
+  assert.equal(result.telnetIdentityId, "");
+});
+
 test("applyGroupDefaults preserves explicit empty identityId instead of inheriting group identity", () => {
   const result = applyGroupDefaults(
     host({ identityId: "" }),

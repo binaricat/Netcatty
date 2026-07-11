@@ -53,6 +53,7 @@ import {
   prepareProxyConfigForSave,
 } from "./HostDetailsPanel.helpers";
 export { parseOptionalPortInput } from "./HostDetailsPanel.helpers";
+import { TerminalEncodingSelect } from "./TerminalEncodingSelect";
 import { Button } from "./ui/button";
 import { Combobox, ComboboxOption, MultiCombobox } from "./ui/combobox";
 import { Input } from "./ui/input";
@@ -1094,11 +1095,10 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
               </>
             )}
 
-            <Input
-              placeholder={groupDefaults?.charset || t("hostDetails.charset.placeholder")}
-              value={form.charset || "UTF-8"}
-              onChange={(e) => update("charset", e.target.value)}
-              className="h-10"
+            <TerminalEncodingSelect
+              value={form.charset}
+              inheritedValue={groupDefaults?.charset}
+              onValueChange={(value) => update("charset", value)}
             />
 
             <button

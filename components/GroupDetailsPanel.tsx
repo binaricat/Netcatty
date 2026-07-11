@@ -54,6 +54,7 @@ import { useAvailableFonts } from "../application/state/fontStore";
 import { toast } from "./ui/toast";
 import { GroupSshSettingsSection } from "./GroupSshSettingsSection";
 import { prepareProxyConfigForSave } from "./HostDetailsPanel.helpers";
+import { TerminalEncodingSelect } from "./TerminalEncodingSelect";
 
 type SubPanel = "none" | "proxy" | "chain" | "env-vars" | "theme-select";
 
@@ -85,9 +86,38 @@ type GroupDetailsPanelPropsWithResize = GroupDetailsPanelProps & AsidePanelResiz
 
 export const hasGroupTelnetFields = (c: Partial<GroupConfig>): boolean =>
   c.telnetPort !== undefined ||
+  c.telnetIdentityId !== undefined ||
   c.telnetUsername !== undefined ||
   c.telnetPassword !== undefined ||
   c.telnetEnabled === true;
+
+export const selectGroupSshIdentity = (
+  form: Partial<GroupConfig>,
+  identity: Identity | undefined,
+  identityId = identity?.id || "",
+): Partial<GroupConfig> => {
+  if (!identityId) return { ...form, identityId: undefined };
+  if (!identity) return { ...form, identityId };
+  return {
+    ...form,
+    identityId,
+    username: identity.username,
+    authMethod: identity.authMethod,
+    password: undefined,
+    savePassword: undefined,
+    identityFileId: undefined,
+    identityFilePaths: undefined,
+  };
+};
+
+export const selectGroupTelnetIdentity = (
+  form: Partial<GroupConfig>,
+  identityId: string,
+): Partial<GroupConfig> => ({
+  ...form,
+  telnetIdentityId: identityId || undefined,
+  ...(identityId ? { telnetUsername: undefined, telnetPassword: undefined } : {}),
+});
 
 const GroupDetailsPanel: React.FC<GroupDetailsPanelPropsWithResize> = ({
   groupPath,
@@ -220,6 +250,7 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelPropsWithResize> = ({
       const next = { ...prev };
       delete next.telnetEnabled;
       delete next.telnetPort;
+      delete next.telnetIdentityId;
       delete next.telnetUsername;
       delete next.telnetPassword;
       return next;
@@ -319,6 +350,29 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelPropsWithResize> = ({
       certificate: availableKeys.filter((k) => k.category === "certificate"),
     };
   }, [availableKeys]);
+
+  const identityOptions = useMemo(
+    () => identities.map((identity) => ({
+      value: identity.id,
+      label: identity.label,
+      sublabel: identity.username,
+    })),
+    [identities],
+  );
+
+  const updateSshIdentity = useCallback((identityId: string) => {
+    setForm((prev) => selectGroupSshIdentity(
+      prev,
+      identities.find((item) => item.id === identityId),
+      identityId,
+    ));
+    setSelectedCredentialType(null);
+    setCredentialPopoverOpen(false);
+  }, [identities]);
+
+  const updateTelnetIdentity = useCallback((identityId: string) => {
+    setForm((prev) => selectGroupTelnetIdentity(prev, identityId));
+  }, []);
 
   // Parent group options — exclude self and children
   const parentGroupOptions = useMemo(() => {
@@ -453,6 +507,7 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelPropsWithResize> = ({
       ...(telnetEnabled && {
         telnetEnabled: true,
         ...(form.telnetPort !== undefined && { telnetPort: form.telnetPort }),
+        ...(form.telnetIdentityId !== undefined && { telnetIdentityId: form.telnetIdentityId }),
         ...(form.telnetUsername !== undefined && { telnetUsername: form.telnetUsername }),
         ...(form.telnetPassword !== undefined && { telnetPassword: form.telnetPassword }),
       }),
@@ -630,6 +685,9 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelPropsWithResize> = ({
           showPassword={showPassword}
           setShowPassword={setShowPassword}
           availableKeys={availableKeys}
+          identities={identities}
+          identityOptions={identityOptions}
+          updateSshIdentity={updateSshIdentity}
           setSelectedCredentialType={setSelectedCredentialType}
           selectedCredentialType={selectedCredentialType}
           credentialPopoverOpen={credentialPopoverOpen}
@@ -715,28 +773,40 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelPropsWithResize> = ({
               </div>
             </div>
 
-            <Input
-              placeholder={t("hostDetails.username.placeholder")}
-              value={form.telnetUsername || ""}
-              onChange={(e) => update("telnetUsername", e.target.value)}
-              className="h-10"
-            />
-            <div className="relative">
-              <Input
-                placeholder={t("hostDetails.password.placeholder")}
-                type={showTelnetPassword ? "text" : "password"}
-                value={form.telnetPassword || ""}
-                onChange={(e) => update("telnetPassword", e.target.value)}
-                className="h-10 pr-10"
+            {identities.length > 0 && (
+              <Combobox
+                options={identityOptions}
+                value={form.telnetIdentityId || ""}
+                onValueChange={updateTelnetIdentity}
+                placeholder={t("hostDetails.identity.suggestions")}
+                emptyText={t("common.noResultsFound")}
+                className="w-full"
               />
-              <button
-                type="button"
-                onClick={() => setShowTelnetPassword(!showTelnetPassword)}
-                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-muted-foreground hover:text-foreground transition-colors"
-              >
-                {showTelnetPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-              </button>
-            </div>
+            )}
+            {!form.telnetIdentityId && (<>
+              <Input
+                placeholder={t("hostDetails.username.placeholder")}
+                value={form.telnetUsername || ""}
+                onChange={(e) => update("telnetUsername", e.target.value)}
+                className="h-10"
+              />
+              <div className="relative">
+                <Input
+                  placeholder={t("hostDetails.password.placeholder")}
+                  type={showTelnetPassword ? "text" : "password"}
+                  value={form.telnetPassword || ""}
+                  onChange={(e) => update("telnetPassword", e.target.value)}
+                  className="h-10 pr-10"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowTelnetPassword(!showTelnetPassword)}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  {showTelnetPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
+            </>)}
           </HostDetailsSection>
         )}
 
@@ -746,11 +816,9 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelPropsWithResize> = ({
           icon={<Globe size={14} className="text-muted-foreground" />}
           title={t("vault.groups.details.advanced")}
         >
-          <Input
-            placeholder="UTF-8"
-            value={form.charset || ""}
-            onChange={(e) => update("charset", e.target.value || undefined)}
-            className="h-10"
+          <TerminalEncodingSelect
+            value={form.charset}
+            onValueChange={(value) => update("charset", value)}
           />
         </HostDetailsSection>
 

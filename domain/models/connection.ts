@@ -383,6 +383,7 @@ export interface GroupConfig {
   etPort?: number;
   telnetEnabled?: boolean;
   telnetPort?: number;
+  telnetIdentityId?: string;
   telnetUsername?: string;
   telnetPassword?: string;
   theme?: string;

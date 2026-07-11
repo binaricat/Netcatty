@@ -90,7 +90,7 @@ const INHERITABLE_KEYS: (keyof GroupConfig)[] = [
   'legacyAlgorithms', 'skipEcdsaHostKey', 'algorithms',
   'environmentVariables', 'charset', 'moshEnabled', 'moshServerPath',
   'etEnabled', 'etPort',
-  'telnetEnabled', 'telnetPort', 'telnetUsername', 'telnetPassword',
+  'telnetEnabled', 'telnetPort', 'telnetIdentityId', 'telnetUsername', 'telnetPassword',
   'theme', 'themeOverride', 'fontFamily', 'fontFamilyOverride', 'fontSize', 'fontSizeOverride', 'fontWeight', 'fontWeightOverride',
   'backspaceBehavior',
 ];
@@ -98,6 +98,7 @@ const INHERITABLE_KEYS: (keyof GroupConfig)[] = [
 const EMPTY_STRING_OVERRIDES_GROUP_DEFAULT = new Set<keyof GroupConfig>([
   'telnetUsername',
   'telnetPassword',
+  'telnetIdentityId',
   // Empty-string host identityId = explicitly no identity (auth-retry save, #1956); do not re-inherit group identity.
   'identityId',
 ]);

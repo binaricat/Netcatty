@@ -34,6 +34,9 @@ export const GroupSshSettingsSection: React.FC<GroupSshSettingsSectionProps> = (
   showPassword,
   setShowPassword,
   availableKeys,
+  identities,
+  identityOptions,
+  updateSshIdentity,
   setSelectedCredentialType,
   selectedCredentialType,
   credentialPopoverOpen,
@@ -100,32 +103,45 @@ export const GroupSshSettingsSection: React.FC<GroupSshSettingsSectionProps> = (
               </div>
             </div>
 
-            <Input
-              placeholder={t("hostDetails.username.placeholder")}
-              value={form.username || ""}
-              onChange={(e) => update("username", e.target.value || undefined)}
-              className="h-10"
-            />
-
-            <div className="relative">
-              <Input
-                placeholder={t("hostDetails.password.placeholder")}
-                type={showPassword ? "text" : "password"}
-                value={form.password || ""}
-                onChange={(e) => update("password", e.target.value || undefined)}
-                className="h-10 pr-10"
+            {identities.length > 0 && (
+              <Combobox
+                options={identityOptions}
+                value={form.identityId || ""}
+                onValueChange={updateSshIdentity}
+                placeholder={t("hostDetails.identity.suggestions")}
+                emptyText={t("common.noResultsFound")}
+                className="w-full"
               />
-              <button
-                type="button"
-                onClick={() => setShowPassword(!showPassword)}
-                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-muted-foreground hover:text-foreground transition-colors"
-              >
-                {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-              </button>
-            </div>
+            )}
+
+            {!form.identityId && (<>
+              <Input
+                placeholder={t("hostDetails.username.placeholder")}
+                value={form.username || ""}
+                onChange={(e) => update("username", e.target.value || undefined)}
+                className="h-10"
+              />
+
+              <div className="relative">
+                <Input
+                  placeholder={t("hostDetails.password.placeholder")}
+                  type={showPassword ? "text" : "password"}
+                  value={form.password || ""}
+                  onChange={(e) => update("password", e.target.value || undefined)}
+                  className="h-10 pr-10"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
+            </>)}
 
             {/* Selected credential display */}
-            {form.identityFileId && (
+            {!form.identityId && form.identityFileId && (
               <div className="flex items-center gap-2 p-2 rounded-md bg-secondary/50 border border-border/60">
                 {form.authMethod === "certificate" ? (
                   <Shield size={14} className="text-primary" />
@@ -151,7 +167,7 @@ export const GroupSshSettingsSection: React.FC<GroupSshSettingsSectionProps> = (
             )}
 
             {/* Local key file paths display */}
-            {!form.identityFileId && form.identityFilePaths && form.identityFilePaths.length > 0 && (
+            {!form.identityId && !form.identityFileId && form.identityFilePaths && form.identityFilePaths.length > 0 && (
               <div className="space-y-1">
                 {form.identityFilePaths.map((keyPath, idx) => (
                   <div key={idx} className="flex items-center gap-2 h-8 px-2 rounded-md bg-secondary/50 border border-border/60" style={{ maxWidth: '100%' }}>
@@ -175,7 +191,7 @@ export const GroupSshSettingsSection: React.FC<GroupSshSettingsSectionProps> = (
             )}
 
             {/* Credential type selection with inline popover - hidden when credential is selected */}
-            {!form.identityFileId &&
+            {!form.identityId && !form.identityFileId &&
               !selectedCredentialType && (
                 <Popover
                   open={credentialPopoverOpen}
@@ -244,7 +260,7 @@ export const GroupSshSettingsSection: React.FC<GroupSshSettingsSectionProps> = (
 
             {/* Key selection combobox - appears after selecting "Key" type */}
             {selectedCredentialType === "key" &&
-              !form.identityFileId && (
+              !form.identityId && !form.identityFileId && (
                 <div className="flex items-center gap-1">
                   <Combobox
                     options={keysByCategory.key.map((k) => ({
@@ -277,7 +293,7 @@ export const GroupSshSettingsSection: React.FC<GroupSshSettingsSectionProps> = (
 
             {/* Certificate selection combobox - appears after selecting "Certificate" type */}
             {selectedCredentialType === "certificate" &&
-              !form.identityFileId && (
+              !form.identityId && !form.identityFileId && (
                 <div className="flex items-center gap-1">
                   <Combobox
                     options={keysByCategory.certificate.map((k) => ({
@@ -312,7 +328,7 @@ export const GroupSshSettingsSection: React.FC<GroupSshSettingsSectionProps> = (
               )}
 
             {/* Local key file path input - appears after selecting "Local Key File" type */}
-            {!form.identityFileId && selectedCredentialType === "localKeyFile" && (
+            {!form.identityId && !form.identityFileId && selectedCredentialType === "localKeyFile" && (
               <div className="space-y-1.5">
                 <div className="flex items-center gap-1 w-full">
                   <input
