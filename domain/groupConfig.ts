@@ -165,7 +165,6 @@ export function applyGroupDefaults(
   const effective = { ...host };
   const hostHasUsableProxyProfile = hasUsableProxyProfileId(host.proxyProfileId, options);
   const hostHasManualSshCredentials = !host.identityId && Boolean(
-    host.username?.trim() ||
     host.password !== undefined ||
     host.identityFileId ||
     host.identityFilePaths?.length,
