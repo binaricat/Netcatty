@@ -371,6 +371,36 @@ test("applyGroupDefaults keeps host manual Telnet credentials instead of a group
   assert.equal(result.telnetPassword, "host-password");
 });
 
+test("applyGroupDefaults preserves imported primary Telnet credentials", () => {
+  const result = applyGroupDefaults(
+    host({
+      protocol: "telnet",
+      username: "operator",
+      password: "host-password",
+      telnetIdentityId: undefined,
+    }),
+    { telnetIdentityId: "group-telnet-identity" },
+  );
+
+  assert.equal(result.telnetIdentityId, undefined);
+  assert.equal(resolveTelnetUsername(result), "operator");
+  assert.equal(resolveTelnetPassword(result), "host-password");
+});
+
+test("applyGroupDefaults lets a default primary Telnet host inherit a group identity", () => {
+  const result = applyGroupDefaults(
+    host({
+      protocol: "telnet",
+      username: "root",
+      password: undefined,
+      telnetIdentityId: undefined,
+    }),
+    { telnetIdentityId: "group-telnet-identity" },
+  );
+
+  assert.equal(result.telnetIdentityId, "group-telnet-identity");
+});
+
 test("applyGroupDefaults preserves explicit empty identityId instead of inheriting group identity", () => {
   const result = applyGroupDefaults(
     host({ identityId: "" }),
@@ -388,6 +418,23 @@ test("applyGroupDefaults inherits group identityId when host only has default SS
 
   assert.equal(result.identityId, "group-identity");
   assert.equal(result.username, "root");
+});
+
+test("applyGroupDefaults preserves a custom username instead of inheriting a group identity", () => {
+  const result = applyGroupDefaults(
+    host({ identityId: undefined, username: "ubuntu", authMethod: "password" }),
+    {
+      identityId: "group-identity",
+      username: "group-user",
+      password: "group-password",
+      authMethod: "password",
+    },
+  );
+
+  assert.equal(result.identityId, undefined);
+  assert.equal(result.username, "ubuntu");
+  assert.equal(result.password, undefined);
+  assert.equal(result.authMethod, "password");
 });
 
 test("applyGroupDefaults treats an explicit empty identity as a host opt-out", () => {

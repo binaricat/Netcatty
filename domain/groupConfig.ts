@@ -174,7 +174,9 @@ export function applyGroupDefaults(
 ): Host {
   const effective = { ...host };
   const hostHasUsableProxyProfile = hasUsableProxyProfileId(host.proxyProfileId, options);
+  const hostUsername = host.username?.trim();
   const hostHasManualSshCredentials = !host.identityId && Boolean(
+    (hostUsername && hostUsername !== 'root') ||
     host.password !== undefined ||
     host.savePassword === false ||
     host.identityFileId ||
@@ -184,8 +186,15 @@ export function applyGroupDefaults(
     Boolean(groupDefaults.identityId) &&
     (host.identityId === '' || hostHasManualSshCredentials)
   );
+  const primaryTelnetHasManualSharedCredentials = host.protocol === 'telnet' && Boolean(
+    (hostUsername && hostUsername !== 'root') ||
+    host.password !== undefined ||
+    host.savePassword === false
+  );
   const hostHasManualTelnetCredentials = !host.telnetIdentityId && (
-    host.telnetUsername !== undefined || host.telnetPassword !== undefined
+    host.telnetUsername !== undefined ||
+    host.telnetPassword !== undefined ||
+    primaryTelnetHasManualSharedCredentials
   );
 
   for (const key of INHERITABLE_KEYS) {
