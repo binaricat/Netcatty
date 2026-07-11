@@ -222,6 +222,10 @@ function TerminalViewInner({ ctx }: { ctx: TerminalViewContext }) {
 
     const handlePointerDown = (event: PointerEvent) => {
       if (compactActionsRef.current?.contains(event.target as Node)) return;
+      if (
+        event.target instanceof Element
+        && event.target.closest('[data-radix-popper-content-wrapper]')
+      ) return;
       setCompactActionsOpen(false);
     };
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -404,6 +408,7 @@ function TerminalViewInner({ ctx }: { ctx: TerminalViewContext }) {
           )}
           <div
             id={`terminal-actions-${sessionId}`}
+            aria-hidden={!showHostInfoBar && !isSearchOpen && !compactActionsOpen ? true : undefined}
             className={cn(
               "terminal-topbar flex items-center gap-1 py-0.5 backdrop-blur-md min-w-0",
               showHostInfoBar
@@ -411,7 +416,9 @@ function TerminalViewInner({ ctx }: { ctx: TerminalViewContext }) {
                 : "ml-auto w-fit rounded-bl-md px-1",
               !showHostInfoBar && !isSearchOpen && [
                 "absolute right-8 top-0 -translate-y-1 pointer-events-none transition-[opacity,transform]",
-                compactActionsOpen ? "opacity-100 translate-y-0 pointer-events-auto" : "opacity-0",
+                compactActionsOpen
+                  ? "visible opacity-100 translate-y-0 pointer-events-auto"
+                  : "invisible opacity-0",
               ],
               !showHostInfoBar && isSearchOpen && "pointer-events-auto",
             )}

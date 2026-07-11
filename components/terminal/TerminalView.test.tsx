@@ -246,8 +246,11 @@ test("hidden host information reveals actions without permanently covering termi
   assert.match(source, /id=\{`terminal-actions-\$\{sessionId\}`\}/);
   assert.match(source, /onClick=\{\(\) => setCompactActionsOpen/);
   assert.match(source, /right: terminalRightInset/);
-  assert.match(source, /compactActionsOpen \? "opacity-100 translate-y-0 pointer-events-auto" : "opacity-0"/);
+  assert.match(source, /\? "visible opacity-100 translate-y-0 pointer-events-auto"/);
+  assert.match(source, /: "invisible opacity-0"/);
+  assert.match(source, /aria-hidden=\{!showHostInfoBar && !isSearchOpen && !compactActionsOpen \? true : undefined\}/);
   assert.match(source, /document\.addEventListener\("pointerdown", handlePointerDown\)/);
+  assert.match(source, /closest\('\[data-radix-popper-content-wrapper\]'\)/);
   assert.match(source, /event\.key !== "Escape"/);
   assert.match(source, /compactActionsButtonRef\.current\?\.focus\(\)/);
 });
