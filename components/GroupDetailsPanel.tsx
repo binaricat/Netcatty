@@ -97,7 +97,14 @@ export const selectGroupSshIdentity = (
   identityId = identity?.id || "",
   inheritedIdentityId?: string,
 ): Partial<GroupConfig> => {
-  if (!identityId) return { ...form, identityId: inheritedIdentityId ? "" : undefined };
+  if (!identityId) {
+    return {
+      ...form,
+      identityId: inheritedIdentityId ? "" : undefined,
+      username: undefined,
+      authMethod: undefined,
+    };
+  }
   if (!identity) return { ...form, identityId };
   return {
     ...form,

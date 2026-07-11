@@ -58,6 +58,27 @@ test("GroupDetailsPanel explicitly clears inherited identities for manual creden
   assert.equal(telnet.telnetIdentityId, "");
 });
 
+test("GroupDetailsPanel clears key authentication before switching to a manual password", () => {
+  const selected = selectGroupSshIdentity(
+    {},
+    {
+      id: "key-identity",
+      label: "Key identity",
+      username: "admin",
+      authMethod: "key",
+      keyId: "key-1",
+      created: 1,
+    },
+  );
+  const cleared = selectGroupSshIdentity(selected, undefined);
+  const manual = { ...cleared, username: "operator", password: "secret" };
+
+  assert.equal(manual.identityId, undefined);
+  assert.equal(manual.authMethod, undefined);
+  assert.equal(manual.username, "operator");
+  assert.equal(manual.password, "secret");
+});
+
 test("GroupDetailsPanel keeps a deleted identity visible so it can be cleared", () => {
   const options = includeMissingIdentityOption([], "deleted-identity", "Identity not found");
 
