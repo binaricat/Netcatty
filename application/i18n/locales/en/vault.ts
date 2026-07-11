@@ -186,6 +186,7 @@ export const enVaultMessages: Messages = {
   'sftp.moveTo.pathNotFound': 'Directory not found or inaccessible',
   'sftp.context.download': 'Download',
   'sftp.context.copyToOtherPane': 'Copy to other pane',
+  'sftp.copyToOtherPane.unavailable': 'Open the two-pane SFTP view and connect the destination pane before copying files.',
   'sftp.copyCurrentPath': 'Copy current path',
   'sftp.copyCurrentPath.success': 'Current path copied',
   'sftp.copyCurrentPath.error': 'Could not copy current path',

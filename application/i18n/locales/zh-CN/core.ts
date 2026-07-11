@@ -642,6 +642,7 @@ export const zhCNCoreMessages: Messages = {
   'sftp.moveTo.pathNotFound': '目录不存在或无法访问',
   'sftp.context.download': '下载',
   'sftp.context.copyToOtherPane': '复制到另一侧',
+  'sftp.copyToOtherPane.unavailable': '请打开双栏 SFTP 文件管理，并连接目标侧后再复制文件。',
   'sftp.copyCurrentPath': '复制当前路径',
   'sftp.copyCurrentPath.success': '已复制当前路径',
   'sftp.copyCurrentPath.error': '无法复制当前路径',

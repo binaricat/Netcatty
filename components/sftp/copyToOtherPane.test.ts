@@ -1,0 +1,43 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import {
+  canCopyToOtherPane,
+  requireCopyToOtherPaneTarget,
+  type SftpPaneSide,
+} from "./copyToOtherPane";
+
+test("copy to other pane is unavailable when the destination pane is missing or disconnected", () => {
+  assert.equal(canCopyToOtherPane({ getActivePane: () => null }, "right"), false);
+  assert.equal(canCopyToOtherPane({ getActivePane: () => ({}) }, "right"), false);
+});
+
+test("copy to other pane is available when the requested destination is connected", () => {
+  const requestedSides: SftpPaneSide[] = [];
+  const state = {
+    getActivePane: (side: SftpPaneSide) => {
+      requestedSides.push(side);
+      return { connection: { id: "destination" } };
+    },
+  };
+
+  assert.equal(canCopyToOtherPane(state, "left"), true);
+  assert.deepEqual(requestedSides, ["left"]);
+});
+
+test("copy to other pane reports why it cannot start instead of silently returning", () => {
+  let unavailableCount = 0;
+  const disconnectedState = { getActivePane: () => ({}) };
+  const connectedState = { getActivePane: () => ({ connection: { id: "destination" } }) };
+
+  assert.equal(
+    requireCopyToOtherPaneTarget(disconnectedState, "right", () => { unavailableCount += 1; }),
+    false,
+  );
+  assert.equal(unavailableCount, 1);
+
+  assert.equal(
+    requireCopyToOtherPaneTarget(connectedState, "right", () => { unavailableCount += 1; }),
+    true,
+  );
+  assert.equal(unavailableCount, 1);
+});

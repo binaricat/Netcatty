@@ -642,6 +642,7 @@ export const zhTWCoreMessages: Messages = {
   'sftp.moveTo.pathNotFound': '目錄不存在或無法存取',
   'sftp.context.download': '下載',
   'sftp.context.copyToOtherPane': '複製到另一側',
+  'sftp.copyToOtherPane.unavailable': '請開啟雙欄 SFTP 檔案管理，並連線目標側後再複製檔案。',
   'sftp.copyCurrentPath': '複製目前路徑',
   'sftp.copyCurrentPath.success': '已複製目前路徑',
   'sftp.copyCurrentPath.error': '無法複製目前路徑',

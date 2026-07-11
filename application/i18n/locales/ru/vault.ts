@@ -221,6 +221,7 @@ export const ruVaultMessages: Messages = {
   'sftp.moveTo.pathNotFound': 'Каталог не найден или недоступен',
   'sftp.context.download': 'Скачать',
   'sftp.context.copyToOtherPane': 'Копировать в другую панель',
+  'sftp.copyToOtherPane.unavailable': 'Откройте двухпанельный режим SFTP и подключите панель назначения перед копированием файлов.',
   'sftp.copyCurrentPath': 'Копировать текущий путь',
   'sftp.copyCurrentPath.success': 'Текущий путь скопирован',
   'sftp.copyCurrentPath.error': 'Не удалось скопировать текущий путь',

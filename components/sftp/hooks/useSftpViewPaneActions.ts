@@ -7,9 +7,12 @@ import { editorTabStore } from "../../../application/state/editorTabStore";
 import type { EditorTab, EditorTabId } from "../../../application/state/editorTabStore";
 import { releaseEditorTabSaveCoordinator, saveEditorTab } from "../../../application/state/editorTabSave";
 import { promptUnsavedChanges } from "../../editor/UnsavedChangesDialog";
+import { toast } from "../../ui/toast";
+import { requireCopyToOtherPaneTarget } from "../copyToOtherPane";
 
 interface UseSftpViewPaneActionsParams {
   sftpRef: MutableRefObject<SftpStateApi>;
+  t: (key: string, vars?: Record<string, string | number>) => string;
 }
 
 interface UseSftpViewPaneActionsResult {
@@ -71,6 +74,7 @@ interface UseSftpViewPaneActionsResult {
 
 export const useSftpViewPaneActions = ({
   sftpRef,
+  t,
 }: UseSftpViewPaneActionsParams): UseSftpViewPaneActionsResult => {
   const [draggedFiles, setDraggedFiles] = useState<
     (SftpTransferSource & { side: "left" | "right" })[] | null
@@ -92,6 +96,14 @@ export const useSftpViewPaneActions = ({
 
   const startGroupedTransfer = useCallback(
     (files: SftpTransferSource[], sourceSide: "left" | "right", targetSide: "left" | "right") => {
+      if (!requireCopyToOtherPaneTarget(
+        sftpRef.current,
+        targetSide,
+        () => toast.info(t("sftp.copyToOtherPane.unavailable"), "SFTP"),
+      )) {
+        return;
+      }
+
       const groups = new Map<string, SftpTransferSource[]>();
       for (const file of files) {
         const key = `${file.sourceConnectionId ?? ""}::${file.sourcePath ?? ""}`;
@@ -109,7 +121,7 @@ export const useSftpViewPaneActions = ({
         });
       }
     },
-    [sftpRef],
+    [sftpRef, t],
   );
 
   const onCopyToOtherPaneLeft = useCallback(

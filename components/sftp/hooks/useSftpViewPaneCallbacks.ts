@@ -66,7 +66,7 @@ export const useSftpViewPaneCallbacks = ({
   listLocalFiles,
   listDrives,
 }: UseSftpViewPaneCallbacksParams) => {
-  const paneActions = useSftpViewPaneActions({ sftpRef });
+  const paneActions = useSftpViewPaneActions({ sftpRef, t });
   const fileOps = useSftpViewFileOps({
     sftpRef,
     behaviorRef,
