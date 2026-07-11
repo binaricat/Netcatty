@@ -243,6 +243,55 @@ test("resolveGroupDefaults lets child manual Telnet credentials replace a parent
   assert.equal(resolved.telnetPassword, "child-password");
 });
 
+test("resolveGroupDefaults clears a parent key identity bundle for a child password opt-out", () => {
+  const resolved = resolveGroupDefaults("prod/manual", [
+    {
+      path: "prod",
+      identityId: "parent-identity",
+      username: "parent-user",
+      authMethod: "key",
+      identityFileId: "parent-key",
+    },
+    {
+      path: "prod/manual",
+      identityId: "",
+      username: "child-user",
+      password: "child-password",
+      authMethod: "password",
+    },
+  ]);
+
+  assert.equal(resolved.identityId, "");
+  assert.equal(resolved.username, "child-user");
+  assert.equal(resolved.password, "child-password");
+  assert.equal(resolved.authMethod, "password");
+  assert.equal(resolved.identityFileId, undefined);
+});
+
+test("resolveGroupDefaults clears parent identity credentials for an empty child marker", () => {
+  const resolved = resolveGroupDefaults("prod/manual", [
+    {
+      path: "prod",
+      identityId: "parent-identity",
+      username: "parent-user",
+      authMethod: "key",
+      telnetIdentityId: "parent-telnet-identity",
+      telnetUsername: "parent-telnet-user",
+    },
+    {
+      path: "prod/manual",
+      identityId: "",
+      telnetIdentityId: "",
+    },
+  ]);
+
+  assert.equal(resolved.identityId, "");
+  assert.equal(resolved.username, undefined);
+  assert.equal(resolved.authMethod, undefined);
+  assert.equal(resolved.telnetIdentityId, "");
+  assert.equal(resolved.telnetUsername, undefined);
+});
+
 test("applyGroupDefaults keeps host manual SSH credentials instead of a group identity", () => {
   const result = applyGroupDefaults(
     host({ username: "host-user", password: "host-password" }),

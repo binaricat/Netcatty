@@ -49,7 +49,7 @@ export function resolveGroupDefaults(
         config.identityFileId,
         config.identityFilePaths,
       ].some((value) => value !== undefined);
-      if (hasSshIdentitySetting && config.identityId) {
+      if (hasSshIdentitySetting) {
         delete merged.username;
         delete merged.password;
         delete merged.savePassword;
@@ -74,7 +74,7 @@ export function resolveGroupDefaults(
         config.telnetUsername,
         config.telnetPassword,
       ].some((value) => value !== undefined);
-      if (hasTelnetIdentitySetting && config.telnetIdentityId) {
+      if (hasTelnetIdentitySetting) {
         delete merged.telnetUsername;
         delete merged.telnetPassword;
       } else if (!hasTelnetIdentitySetting && hasManualTelnetCredentials) {
