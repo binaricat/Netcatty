@@ -56,6 +56,7 @@ export const enTerminalMessages: Messages = {
   'terminal.toolbar.focusMode': 'Focus Mode',
   'terminal.toolbar.detach': 'Detach to standalone tab',
   'terminal.toolbar.dragPane': 'Drag terminal pane',
+  'terminal.toolbar.showActions': 'Show terminal actions',
   'terminal.toolbar.encoding': 'Terminal Encoding',
   'terminal.toolbar.encoding.utf8': 'UTF-8',
   'terminal.toolbar.encoding.gb18030': 'GB18030',

@@ -168,6 +168,18 @@ export function resolveTerminalTopOffsets({
   };
 }
 
+export function resolveTerminalRightInset({
+  showHostInfoBar,
+  isSearchOpen,
+  terminalBodyInset = 4,
+}: {
+  showHostInfoBar: boolean;
+  isSearchOpen: boolean;
+  terminalBodyInset?: number;
+}): number {
+  return terminalBodyInset + (!showHostInfoBar && !isSearchOpen ? 28 : 0);
+}
+
 /**
  * Shallow-compare every ctx value. <Terminal> rebuilds the ctx object on every
  * render, but many re-renders (layout/fit/visibility-of-other-panes, suppress
@@ -202,7 +214,13 @@ function TerminalViewInner({ ctx }: { ctx: TerminalViewContext }) {
   });
   const terminalBodyInset = 4;
   const showHostInfoBar = terminalSettings?.showHostInfoBar !== false;
+  const [compactActionsOpen, setCompactActionsOpen] = useState(false);
   const { toolbarOffset: terminalToolbarOffset, contentTop: terminalContentTop } = resolveTerminalTopOffsets({
+    showHostInfoBar,
+    isSearchOpen,
+    terminalBodyInset,
+  });
+  const terminalRightInset = resolveTerminalRightInset({
     showHostInfoBar,
     isSearchOpen,
     terminalBodyInset,
@@ -333,11 +351,32 @@ function TerminalViewInner({ ctx }: { ctx: TerminalViewContext }) {
         )}
         <div className="group/terminal-actions absolute left-0 right-0 top-0 z-20 pointer-events-none">
           {!showHostInfoBar && !isSearchOpen && (
-            <div
-              aria-hidden="true"
-              className="absolute right-0 top-0 h-1 w-16 pointer-events-auto opacity-40"
-              style={{ backgroundColor: 'var(--terminal-ui-border)' }}
-            />
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  className="absolute right-1 top-1 h-6 w-6 rounded-md border pointer-events-auto opacity-70 hover:opacity-100 focus-visible:opacity-100"
+                  style={{
+                    backgroundColor: 'var(--terminal-ui-bg)',
+                    borderColor: 'var(--terminal-ui-border)',
+                    color: 'var(--terminal-ui-fg)',
+                  }}
+                  aria-label={t("terminal.toolbar.showActions")}
+                  aria-expanded={compactActionsOpen}
+                  onClick={() => setCompactActionsOpen((open) => !open)}
+                >
+                  <span
+                    aria-hidden="true"
+                    className="mx-auto block h-3 w-3"
+                    style={{
+                      backgroundImage: 'radial-gradient(circle, currentColor 1px, transparent 1px)',
+                      backgroundSize: '4px 4px',
+                    }}
+                  />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">{t("terminal.toolbar.showActions")}</TooltipContent>
+            </Tooltip>
           )}
           <div
             className={cn(
@@ -346,7 +385,8 @@ function TerminalViewInner({ ctx }: { ctx: TerminalViewContext }) {
                 ? "px-2 pointer-events-auto"
                 : "ml-auto w-fit rounded-bl-md px-1",
               !showHostInfoBar && !isSearchOpen && [
-                "absolute right-0 top-0 opacity-0 -translate-y-1 pointer-events-none transition-[opacity,transform]",
+                "absolute right-8 top-0 -translate-y-1 pointer-events-none transition-[opacity,transform]",
+                compactActionsOpen ? "opacity-100 translate-y-0 pointer-events-auto" : "opacity-0",
                 "group-hover/terminal-actions:opacity-100 group-hover/terminal-actions:translate-y-0 group-hover/terminal-actions:pointer-events-auto",
                 "group-focus-within/terminal-actions:opacity-100 group-focus-within/terminal-actions:translate-y-0 group-focus-within/terminal-actions:pointer-events-auto",
               ],
@@ -372,22 +412,17 @@ function TerminalViewInner({ ctx }: { ctx: TerminalViewContext }) {
               )}
             >
               {!showHostInfoBar && inWorkspace && onDetachPointerDown && (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button
-                      type="button"
-                      className="h-5 w-3 rounded cursor-grab active:cursor-grabbing opacity-60 hover:opacity-100 flex-shrink-0"
-                      style={{
-                        backgroundImage: 'radial-gradient(circle, currentColor 1px, transparent 1px)',
-                        backgroundSize: '4px 4px',
-                      }}
-                      data-terminal-detach-drag-handle="true"
-                      onPointerDown={onDetachPointerDown}
-                      aria-label={t("terminal.toolbar.dragPane")}
-                    />
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom">{t("terminal.toolbar.dragPane")}</TooltipContent>
-                </Tooltip>
+                <div
+                  aria-hidden="true"
+                  title={t("terminal.toolbar.dragPane")}
+                  className="h-5 w-3 rounded cursor-grab active:cursor-grabbing opacity-60 hover:opacity-100 flex-shrink-0"
+                  style={{
+                    backgroundImage: 'radial-gradient(circle, currentColor 1px, transparent 1px)',
+                    backgroundSize: '4px 4px',
+                  }}
+                  data-terminal-detach-drag-handle="true"
+                  onPointerDown={onDetachPointerDown}
+                />
               )}
               {showHostInfoBar && <div
                 className={cn(
@@ -571,7 +606,7 @@ function TerminalViewInner({ ctx }: { ctx: TerminalViewContext }) {
             style={{
               top: terminalContentTop,
               left: activeLineTimestampGutterWidth + terminalBodyInset,
-              right: terminalBodyInset,
+              right: terminalRightInset,
               bottom: terminalBodyInset,
               paddingLeft: 6,
               backgroundColor: 'var(--terminal-ui-bg)',
