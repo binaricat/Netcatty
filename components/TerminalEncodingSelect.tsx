@@ -5,7 +5,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 interface TerminalEncodingSelectProps {
   value?: string;
   inheritedValue?: string;
-  onValueChange: (value: string) => void;
+  onValueChange: (value: string | undefined) => void;
   className?: string;
 }
 
@@ -36,13 +36,24 @@ export const TerminalEncodingSelect: React.FC<TerminalEncodingSelectProps> = ({
   const { t } = useI18n();
   const effectiveValue = resolveTerminalEncodingSelectValue(value || inheritedValue);
   const options = getTerminalEncodingOptions(effectiveValue);
+  const fallbackValue = "__fallback__";
+  const selectedValue = value ? resolveTerminalEncodingSelectValue(value) : fallbackValue;
+  const fallbackLabel = inheritedValue
+    ? `${t("vault.groups.details.inherited")} (${resolveTerminalEncodingSelectValue(inheritedValue)})`
+    : value
+      ? `${t("common.reset")} (UTF-8)`
+      : "UTF-8";
 
   return (
-    <Select value={effectiveValue} onValueChange={onValueChange}>
+    <Select
+      value={selectedValue}
+      onValueChange={(nextValue) => onValueChange(nextValue === fallbackValue ? undefined : nextValue)}
+    >
       <SelectTrigger className={className}>
         <SelectValue placeholder={t("terminal.toolbar.encoding")} />
       </SelectTrigger>
       <SelectContent>
+        <SelectItem value={fallbackValue}>{fallbackLabel}</SelectItem>
         {options.map((encoding) => (
           <SelectItem key={encoding} value={encoding}>
             {encoding}

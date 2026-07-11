@@ -95,8 +95,9 @@ export const selectGroupSshIdentity = (
   form: Partial<GroupConfig>,
   identity: Identity | undefined,
   identityId = identity?.id || "",
+  inheritedIdentityId?: string,
 ): Partial<GroupConfig> => {
-  if (!identityId) return { ...form, identityId: undefined };
+  if (!identityId) return { ...form, identityId: inheritedIdentityId ? "" : undefined };
   if (!identity) return { ...form, identityId };
   return {
     ...form,
@@ -113,9 +114,10 @@ export const selectGroupSshIdentity = (
 export const selectGroupTelnetIdentity = (
   form: Partial<GroupConfig>,
   identityId: string,
+  inheritedIdentityId?: string,
 ): Partial<GroupConfig> => ({
   ...form,
-  telnetIdentityId: identityId || undefined,
+  telnetIdentityId: identityId || (inheritedIdentityId ? "" : undefined),
   ...(identityId ? { telnetUsername: undefined, telnetPassword: undefined } : {}),
 });
 
@@ -360,19 +362,35 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelPropsWithResize> = ({
     [identities],
   );
 
+  const inheritedConnectionDefaults = useMemo(() => {
+    if (!parentGroup || groupConfigs.length === 0) return {};
+    return resolveGroupDefaults(parentGroup, groupConfigs);
+  }, [groupConfigs, parentGroup]);
+  const effectiveSshIdentityId = form.identityId !== undefined
+    ? form.identityId
+    : inheritedConnectionDefaults.identityId;
+  const effectiveTelnetIdentityId = form.telnetIdentityId !== undefined
+    ? form.telnetIdentityId
+    : inheritedConnectionDefaults.telnetIdentityId;
+
   const updateSshIdentity = useCallback((identityId: string) => {
     setForm((prev) => selectGroupSshIdentity(
       prev,
       identities.find((item) => item.id === identityId),
       identityId,
+      inheritedConnectionDefaults.identityId,
     ));
     setSelectedCredentialType(null);
     setCredentialPopoverOpen(false);
-  }, [identities]);
+  }, [identities, inheritedConnectionDefaults.identityId]);
 
   const updateTelnetIdentity = useCallback((identityId: string) => {
-    setForm((prev) => selectGroupTelnetIdentity(prev, identityId));
-  }, []);
+    setForm((prev) => selectGroupTelnetIdentity(
+      prev,
+      identityId,
+      inheritedConnectionDefaults.telnetIdentityId,
+    ));
+  }, [inheritedConnectionDefaults.telnetIdentityId]);
 
   // Parent group options — exclude self and children
   const parentGroupOptions = useMemo(() => {
@@ -688,6 +706,7 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelPropsWithResize> = ({
           identities={identities}
           identityOptions={identityOptions}
           updateSshIdentity={updateSshIdentity}
+          effectiveSshIdentityId={effectiveSshIdentityId}
           setSelectedCredentialType={setSelectedCredentialType}
           selectedCredentialType={selectedCredentialType}
           credentialPopoverOpen={credentialPopoverOpen}
@@ -776,14 +795,14 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelPropsWithResize> = ({
             {identities.length > 0 && (
               <Combobox
                 options={identityOptions}
-                value={form.telnetIdentityId || ""}
+                value={effectiveTelnetIdentityId || ""}
                 onValueChange={updateTelnetIdentity}
                 placeholder={t("hostDetails.identity.suggestions")}
                 emptyText={t("common.noResultsFound")}
                 className="w-full"
               />
             )}
-            {!form.telnetIdentityId && (<>
+            {!effectiveTelnetIdentityId && (<>
               <Input
                 placeholder={t("hostDetails.username.placeholder")}
                 value={form.telnetUsername || ""}
@@ -818,6 +837,7 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelPropsWithResize> = ({
         >
           <TerminalEncodingSelect
             value={form.charset}
+            inheritedValue={inheritedConnectionDefaults.charset}
             onValueChange={(value) => update("charset", value)}
           />
         </HostDetailsSection>

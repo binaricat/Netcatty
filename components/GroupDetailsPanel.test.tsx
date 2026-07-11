@@ -48,3 +48,11 @@ test("GroupDetailsPanel replaces manual Telnet credentials with a reusable ident
   assert.equal(result.telnetUsername, undefined);
   assert.equal(result.telnetPassword, undefined);
 });
+
+test("GroupDetailsPanel explicitly clears inherited identities for manual credentials", () => {
+  const ssh = selectGroupSshIdentity({}, undefined, "", "parent-ssh-identity");
+  const telnet = selectGroupTelnetIdentity({}, "", "parent-telnet-identity");
+
+  assert.equal(ssh.identityId, "");
+  assert.equal(telnet.telnetIdentityId, "");
+});

@@ -37,6 +37,7 @@ export const GroupSshSettingsSection: React.FC<GroupSshSettingsSectionProps> = (
   identities,
   identityOptions,
   updateSshIdentity,
+  effectiveSshIdentityId,
   setSelectedCredentialType,
   selectedCredentialType,
   credentialPopoverOpen,
@@ -106,7 +107,7 @@ export const GroupSshSettingsSection: React.FC<GroupSshSettingsSectionProps> = (
             {identities.length > 0 && (
               <Combobox
                 options={identityOptions}
-                value={form.identityId || ""}
+                value={effectiveSshIdentityId || ""}
                 onValueChange={updateSshIdentity}
                 placeholder={t("hostDetails.identity.suggestions")}
                 emptyText={t("common.noResultsFound")}
@@ -114,7 +115,7 @@ export const GroupSshSettingsSection: React.FC<GroupSshSettingsSectionProps> = (
               />
             )}
 
-            {!form.identityId && (<>
+            {!effectiveSshIdentityId && (<>
               <Input
                 placeholder={t("hostDetails.username.placeholder")}
                 value={form.username || ""}
@@ -141,7 +142,7 @@ export const GroupSshSettingsSection: React.FC<GroupSshSettingsSectionProps> = (
             </>)}
 
             {/* Selected credential display */}
-            {!form.identityId && form.identityFileId && (
+            {!effectiveSshIdentityId && form.identityFileId && (
               <div className="flex items-center gap-2 p-2 rounded-md bg-secondary/50 border border-border/60">
                 {form.authMethod === "certificate" ? (
                   <Shield size={14} className="text-primary" />
@@ -167,7 +168,7 @@ export const GroupSshSettingsSection: React.FC<GroupSshSettingsSectionProps> = (
             )}
 
             {/* Local key file paths display */}
-            {!form.identityId && !form.identityFileId && form.identityFilePaths && form.identityFilePaths.length > 0 && (
+            {!effectiveSshIdentityId && !form.identityFileId && form.identityFilePaths && form.identityFilePaths.length > 0 && (
               <div className="space-y-1">
                 {form.identityFilePaths.map((keyPath, idx) => (
                   <div key={idx} className="flex items-center gap-2 h-8 px-2 rounded-md bg-secondary/50 border border-border/60" style={{ maxWidth: '100%' }}>
@@ -191,7 +192,7 @@ export const GroupSshSettingsSection: React.FC<GroupSshSettingsSectionProps> = (
             )}
 
             {/* Credential type selection with inline popover - hidden when credential is selected */}
-            {!form.identityId && !form.identityFileId &&
+            {!effectiveSshIdentityId && !form.identityFileId &&
               !selectedCredentialType && (
                 <Popover
                   open={credentialPopoverOpen}
@@ -260,7 +261,7 @@ export const GroupSshSettingsSection: React.FC<GroupSshSettingsSectionProps> = (
 
             {/* Key selection combobox - appears after selecting "Key" type */}
             {selectedCredentialType === "key" &&
-              !form.identityId && !form.identityFileId && (
+              !effectiveSshIdentityId && !form.identityFileId && (
                 <div className="flex items-center gap-1">
                   <Combobox
                     options={keysByCategory.key.map((k) => ({
@@ -293,7 +294,7 @@ export const GroupSshSettingsSection: React.FC<GroupSshSettingsSectionProps> = (
 
             {/* Certificate selection combobox - appears after selecting "Certificate" type */}
             {selectedCredentialType === "certificate" &&
-              !form.identityId && !form.identityFileId && (
+              !effectiveSshIdentityId && !form.identityFileId && (
                 <div className="flex items-center gap-1">
                   <Combobox
                     options={keysByCategory.certificate.map((k) => ({
@@ -328,7 +329,7 @@ export const GroupSshSettingsSection: React.FC<GroupSshSettingsSectionProps> = (
               )}
 
             {/* Local key file path input - appears after selecting "Local Key File" type */}
-            {!form.identityId && !form.identityFileId && selectedCredentialType === "localKeyFile" && (
+            {!effectiveSshIdentityId && !form.identityFileId && selectedCredentialType === "localKeyFile" && (
               <div className="space-y-1.5">
                 <div className="flex items-center gap-1 w-full">
                   <input

@@ -40,6 +40,36 @@ export function resolveGroupDefaults(
     const ancestorPath = parts.slice(0, i + 1).join('/');
     const config = configMap.get(ancestorPath);
     if (config) {
+      const hasSshIdentitySetting = config.identityId !== undefined;
+      const hasManualSshCredentials = [
+        config.username,
+        config.password,
+        config.savePassword,
+        config.authMethod,
+        config.identityFileId,
+        config.identityFilePaths,
+      ].some((value) => value !== undefined);
+      if (hasSshIdentitySetting && config.identityId) {
+        delete merged.password;
+        delete merged.savePassword;
+        delete merged.identityFileId;
+        delete merged.identityFilePaths;
+      } else if (!hasSshIdentitySetting && hasManualSshCredentials) {
+        delete merged.identityId;
+      }
+
+      const hasTelnetIdentitySetting = config.telnetIdentityId !== undefined;
+      const hasManualTelnetCredentials = [
+        config.telnetUsername,
+        config.telnetPassword,
+      ].some((value) => value !== undefined);
+      if (hasTelnetIdentitySetting && config.telnetIdentityId) {
+        delete merged.telnetUsername;
+        delete merged.telnetPassword;
+      } else if (!hasTelnetIdentitySetting && hasManualTelnetCredentials) {
+        delete merged.telnetIdentityId;
+      }
+
       for (const [key, value] of Object.entries(config)) {
         if (
           key === 'proxyProfileId' &&
@@ -114,8 +144,20 @@ export function applyGroupDefaults(
 ): Host {
   const effective = { ...host };
   const hostHasUsableProxyProfile = hasUsableProxyProfileId(host.proxyProfileId, options);
+  const hostHasManualSshCredentials = !host.identityId && Boolean(
+    host.username?.trim() ||
+    host.password !== undefined ||
+    host.authMethod !== undefined ||
+    host.identityFileId ||
+    host.identityFilePaths?.length,
+  );
+  const hostHasManualTelnetCredentials = !host.telnetIdentityId && (
+    host.telnetUsername !== undefined || host.telnetPassword !== undefined
+  );
 
   for (const key of INHERITABLE_KEYS) {
+    if (key === 'identityId' && hostHasManualSshCredentials) continue;
+    if (key === 'telnetIdentityId' && hostHasManualTelnetCredentials) continue;
     if (key === 'proxyProfileId') {
       if (host.proxyConfig !== undefined || !groupDefaults.proxyProfileId) continue;
     }

@@ -221,6 +221,50 @@ test("applyGroupDefaults preserves an explicitly cleared Telnet identity", () =>
   assert.equal(result.telnetIdentityId, "");
 });
 
+test("resolveGroupDefaults lets child manual SSH credentials replace a parent identity", () => {
+  const resolved = resolveGroupDefaults("prod/manual", [
+    { path: "prod", identityId: "parent-identity", username: "parent-user" },
+    { path: "prod/manual", username: "child-user", password: "child-password" },
+  ]);
+
+  assert.equal(resolved.identityId, undefined);
+  assert.equal(resolved.username, "child-user");
+  assert.equal(resolved.password, "child-password");
+});
+
+test("resolveGroupDefaults lets child manual Telnet credentials replace a parent identity", () => {
+  const resolved = resolveGroupDefaults("prod/manual", [
+    { path: "prod", telnetIdentityId: "parent-identity" },
+    { path: "prod/manual", telnetUsername: "child-user", telnetPassword: "child-password" },
+  ]);
+
+  assert.equal(resolved.telnetIdentityId, undefined);
+  assert.equal(resolved.telnetUsername, "child-user");
+  assert.equal(resolved.telnetPassword, "child-password");
+});
+
+test("applyGroupDefaults keeps host manual SSH credentials instead of a group identity", () => {
+  const result = applyGroupDefaults(
+    host({ username: "host-user", password: "host-password" }),
+    { identityId: "group-identity", username: "group-user" },
+  );
+
+  assert.equal(result.identityId, undefined);
+  assert.equal(result.username, "host-user");
+  assert.equal(result.password, "host-password");
+});
+
+test("applyGroupDefaults keeps host manual Telnet credentials instead of a group identity", () => {
+  const result = applyGroupDefaults(
+    host({ telnetUsername: "host-user", telnetPassword: "host-password" }),
+    { telnetIdentityId: "group-identity" },
+  );
+
+  assert.equal(result.telnetIdentityId, undefined);
+  assert.equal(result.telnetUsername, "host-user");
+  assert.equal(result.telnetPassword, "host-password");
+});
+
 test("applyGroupDefaults preserves explicit empty identityId instead of inheriting group identity", () => {
   const result = applyGroupDefaults(
     host({ identityId: "" }),
@@ -232,7 +276,7 @@ test("applyGroupDefaults preserves explicit empty identityId instead of inheriti
 
 test("applyGroupDefaults inherits group identityId when host identityId is unset", () => {
   const result = applyGroupDefaults(
-    host({ identityId: undefined }),
+    host({ identityId: undefined, username: "" }),
     { identityId: "group-identity" },
   );
 
