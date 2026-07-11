@@ -20,6 +20,18 @@ test("copy to other pane is unavailable until the destination connection is read
   }
 });
 
+test("copy to other pane is unavailable while the destination is reconnecting", () => {
+  assert.equal(
+    canCopyToOtherPane({
+      getActivePane: () => ({
+        connection: { status: "connected" },
+        reconnecting: true,
+      }),
+    }, "right"),
+    false,
+  );
+});
+
 test("copy to other pane is available when the requested destination is connected", () => {
   const requestedSides: SftpPaneSide[] = [];
   const state = {
