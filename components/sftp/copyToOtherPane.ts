@@ -1,13 +1,15 @@
 export type SftpPaneSide = "left" | "right";
 
 type CopyTargetState = {
-  getActivePane: (side: SftpPaneSide) => { connection?: unknown } | null | undefined;
+  getActivePane: (side: SftpPaneSide) => {
+    connection?: { status?: "connecting" | "connected" | "disconnected" | "error" } | null;
+  } | null | undefined;
 };
 
 export const canCopyToOtherPane = (
   state: CopyTargetState,
   targetSide: SftpPaneSide,
-): boolean => Boolean(state.getActivePane(targetSide)?.connection);
+): boolean => state.getActivePane(targetSide)?.connection?.status === "connected";
 
 export const requireCopyToOtherPaneTarget = (
   state: CopyTargetState,

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import type { MutableRefObject } from "react";
 import type { SftpStateApi } from "../../../application/state/useSftpState";
 import type { SftpDragCallbacks, SftpTransferSource } from "../SftpContext";
@@ -76,6 +76,9 @@ export const useSftpViewPaneActions = ({
   sftpRef,
   t,
 }: UseSftpViewPaneActionsParams): UseSftpViewPaneActionsResult => {
+  const tRef = useRef(t);
+  tRef.current = t;
+
   const [draggedFiles, setDraggedFiles] = useState<
     (SftpTransferSource & { side: "left" | "right" })[] | null
   >(null);
@@ -99,7 +102,7 @@ export const useSftpViewPaneActions = ({
       if (!requireCopyToOtherPaneTarget(
         sftpRef.current,
         targetSide,
-        () => toast.info(t("sftp.copyToOtherPane.unavailable"), "SFTP"),
+        () => toast.info(tRef.current("sftp.copyToOtherPane.unavailable"), "SFTP"),
       )) {
         return;
       }
@@ -121,7 +124,7 @@ export const useSftpViewPaneActions = ({
         });
       }
     },
-    [sftpRef, t],
+    [sftpRef],
   );
 
   const onCopyToOtherPaneLeft = useCallback(
