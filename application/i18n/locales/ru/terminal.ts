@@ -76,6 +76,7 @@ export const ruTerminalMessages: Messages = {
   'terminal.toolbar.focus': 'Фокус',
   'terminal.toolbar.focusMode': 'Режим фокуса',
   'terminal.toolbar.detach': 'Открепить в отдельную вкладку',
+  'terminal.toolbar.dragPane': 'Перетащить панель терминала',
   'terminal.toolbar.encoding': 'Кодировка терминала',
   'terminal.toolbar.encoding.utf8': 'UTF-8',
   'terminal.toolbar.encoding.gb18030': 'GB18030',

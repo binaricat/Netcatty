@@ -8,6 +8,7 @@ export const zhTWTerminalMessages: Messages = {
   'terminal.clipboardImageUpload.failed': '無法上傳剪貼簿圖片',
   'terminal.toolbar.configureOsc7': '設定目錄追蹤',
   'terminal.toolbar.detach': '移出到獨立標籤',
+  'terminal.toolbar.dragPane': '拖動終端窗格',
   'terminal.menu.detach': '從工作區移出',
   'terminal.osc7Setup.title': '設定目錄追蹤',
   'terminal.osc7Setup.desc': 'Netcatty 會為目前遠端使用者新增 OSC 7 提示字元設定。這樣在 sudo 或 su 之後，SFTP 也能繼續跟隨終端目錄。',

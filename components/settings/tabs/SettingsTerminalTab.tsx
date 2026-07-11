@@ -908,7 +908,7 @@ function SettingsTerminalTab(props: {
           />
         </SettingRow>
 
-        {terminalSettings.showHostInfoBar && terminalSettings.showServerStats && (
+        {terminalSettings.showServerStats && (
           <SettingRow
             label={t("settings.terminal.serverStats.refreshInterval")}
             description={t("settings.terminal.serverStats.refreshInterval.desc")}

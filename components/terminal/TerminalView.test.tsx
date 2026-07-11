@@ -211,6 +211,7 @@ test("hidden host information keeps terminal actions rendered", () => {
   const systemAction = source.indexOf('aria-label={t("terminal.layer.system")}', timestampAction);
   const actionsStart = source.indexOf('className="flex items-center gap-0.5 flex-shrink-0"');
   const controls = source.indexOf("{renderControls({ showClose: inWorkspace })}");
+  const compactDragHandle = source.indexOf('aria-label={t("terminal.toolbar.dragPane")}');
 
   assert.notEqual(hostInfoStart, -1);
   assert.notEqual(hostInfoEnd, -1);
@@ -219,12 +220,23 @@ test("hidden host information keeps terminal actions rendered", () => {
   assert.notEqual(systemAction, -1);
   assert.notEqual(actionsStart, -1);
   assert.notEqual(controls, -1);
+  assert.notEqual(compactDragHandle, -1);
   assert.ok(hostInfoStart < hostInfoEnd);
   assert.ok(hostInfoEnd < copyAction);
   assert.ok(copyAction < timestampAction);
   assert.ok(timestampAction < systemAction);
   assert.ok(systemAction < actionsStart);
   assert.ok(actionsStart < controls);
+  assert.ok(compactDragHandle < hostInfoStart);
+});
+
+test("hidden host information reveals actions without permanently covering terminal content", () => {
+  const source = readFileSync(new URL("./TerminalView.tsx", import.meta.url), "utf8");
+
+  assert.match(source, /h-1 w-16 pointer-events-auto/);
+  assert.match(source, /group-hover\/terminal-actions:pointer-events-auto/);
+  assert.match(source, /group-focus-within\/terminal-actions:pointer-events-auto/);
+  assert.match(source, /opacity-0 -translate-y-1 pointer-events-none/);
 });
 
 test("terminal theme updates force xterm renderer to repaint immediately", () => {

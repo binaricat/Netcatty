@@ -955,6 +955,44 @@ test("buildSyncPayload includes fallbackFont when present in TERM_SETTINGS", () 
   assert.equal(termSettings.fallbackFont, "PingFang SC");
 });
 
+test("buildSyncPayload includes the terminal host information bar preference", () => {
+  localStorage.setItem(
+    storageKeys.STORAGE_KEY_TERM_SETTINGS,
+    JSON.stringify({ showHostInfoBar: false }),
+  );
+
+  const payload = buildSyncPayload(vault());
+  const termSettings = (payload.settings?.terminalSettings ?? {}) as Record<string, unknown>;
+  assert.equal(termSettings.showHostInfoBar, false);
+});
+
+test("applySyncPayload restores the terminal host information bar preference", async () => {
+  localStorage.setItem(
+    storageKeys.STORAGE_KEY_TERM_SETTINGS,
+    JSON.stringify({ showHostInfoBar: true, scrollback: 5000 }),
+  );
+
+  const payload: SyncPayload = {
+    hosts: [],
+    keys: [],
+    identities: [],
+    snippets: [],
+    customGroups: [],
+    syncedAt: 1,
+    settings: { terminalSettings: { showHostInfoBar: false } },
+  };
+
+  await applySyncPayload(payload, {
+    importVaultData: () => {},
+  });
+
+  const raw = localStorage.getItem(storageKeys.STORAGE_KEY_TERM_SETTINGS);
+  assert.ok(raw, "TERM_SETTINGS should be written");
+  const parsed = JSON.parse(raw!);
+  assert.equal(parsed.showHostInfoBar, false);
+  assert.equal(parsed.scrollback, 5000);
+});
+
 test("buildSyncPayload omits fallbackFont when TERM_SETTINGS does not set it", () => {
   localStorage.setItem(
     storageKeys.STORAGE_KEY_TERM_SETTINGS,

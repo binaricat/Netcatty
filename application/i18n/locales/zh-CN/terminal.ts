@@ -8,6 +8,7 @@ export const zhCNTerminalMessages: Messages = {
   'terminal.clipboardImageUpload.failed': '无法上传剪贴板图片',
   'terminal.toolbar.configureOsc7': '配置目录追踪',
   'terminal.toolbar.detach': '移出到独立标签',
+  'terminal.toolbar.dragPane': '拖动终端窗格',
   'terminal.menu.detach': '从工作区移出',
   'terminal.osc7Setup.title': '配置目录追踪',
   'terminal.osc7Setup.desc': 'Netcatty 会为当前远端用户添加 OSC 7 提示符配置。这样在 sudo 或 su 之后，SFTP 也能继续跟随终端目录。',
