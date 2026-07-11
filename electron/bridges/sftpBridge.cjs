@@ -364,11 +364,19 @@ const closeFileAsync = (sftp, handle) =>
 
 const normalizeRemotePathString = async (client, inputPath) => {
   if (typeof inputPath !== "string") return inputPath;
-  if (inputPath.startsWith("..")) {
+  if (inputPath === "..") {
+    const root = await client.realPath("..");
+    return `${root}/`;
+  }
+  if (inputPath.startsWith("../") || inputPath.startsWith("..\\")) {
     const root = await client.realPath("..");
     return `${root}/${inputPath.slice(3)}`;
   }
-  if (inputPath.startsWith(".")) {
+  if (inputPath === ".") {
+    const root = await client.realPath(".");
+    return `${root}/`;
+  }
+  if (inputPath.startsWith("./") || inputPath.startsWith(".\\")) {
     const root = await client.realPath(".");
     return `${root}/${inputPath.slice(2)}`;
   }
