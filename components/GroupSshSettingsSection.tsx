@@ -104,7 +104,7 @@ export const GroupSshSettingsSection: React.FC<GroupSshSettingsSectionProps> = (
               </div>
             </div>
 
-            {identities.length > 0 && (
+            {(identities.length > 0 || effectiveSshIdentityId) && (
               <Combobox
                 options={identityOptions}
                 value={effectiveSshIdentityId || ""}

@@ -121,6 +121,15 @@ export const selectGroupTelnetIdentity = (
   ...(identityId ? { telnetUsername: undefined, telnetPassword: undefined } : {}),
 });
 
+export const includeMissingIdentityOption = (
+  options: Array<{ value: string; label: string; sublabel?: string }>,
+  identityId: string | undefined,
+  missingLabel: string,
+): Array<{ value: string; label: string; sublabel?: string }> => {
+  if (!identityId || options.some((option) => option.value === identityId)) return options;
+  return [{ value: identityId, label: missingLabel }, ...options];
+};
+
 const GroupDetailsPanel: React.FC<GroupDetailsPanelPropsWithResize> = ({
   groupPath,
   config,
@@ -372,6 +381,22 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelPropsWithResize> = ({
   const effectiveTelnetIdentityId = form.telnetIdentityId !== undefined
     ? form.telnetIdentityId
     : inheritedConnectionDefaults.telnetIdentityId;
+  const sshIdentityOptions = useMemo(
+    () => includeMissingIdentityOption(
+      identityOptions,
+      effectiveSshIdentityId,
+      t("hostDetails.identity.missing"),
+    ),
+    [effectiveSshIdentityId, identityOptions, t],
+  );
+  const telnetIdentityOptions = useMemo(
+    () => includeMissingIdentityOption(
+      identityOptions,
+      effectiveTelnetIdentityId,
+      t("hostDetails.identity.missing"),
+    ),
+    [effectiveTelnetIdentityId, identityOptions, t],
+  );
 
   const updateSshIdentity = useCallback((identityId: string) => {
     setForm((prev) => selectGroupSshIdentity(
@@ -704,7 +729,7 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelPropsWithResize> = ({
           setShowPassword={setShowPassword}
           availableKeys={availableKeys}
           identities={identities}
-          identityOptions={identityOptions}
+          identityOptions={sshIdentityOptions}
           updateSshIdentity={updateSshIdentity}
           effectiveSshIdentityId={effectiveSshIdentityId}
           setSelectedCredentialType={setSelectedCredentialType}
@@ -792,9 +817,9 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelPropsWithResize> = ({
               </div>
             </div>
 
-            {identities.length > 0 && (
+            {(identities.length > 0 || effectiveTelnetIdentityId) && (
               <Combobox
-                options={identityOptions}
+                options={telnetIdentityOptions}
                 value={effectiveTelnetIdentityId || ""}
                 onValueChange={updateTelnetIdentity}
                 placeholder={t("hostDetails.identity.suggestions")}

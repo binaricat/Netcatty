@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   hasGroupTelnetFields,
+  includeMissingIdentityOption,
   selectGroupSshIdentity,
   selectGroupTelnetIdentity,
 } from "./GroupDetailsPanel.tsx";
@@ -55,4 +56,10 @@ test("GroupDetailsPanel explicitly clears inherited identities for manual creden
 
   assert.equal(ssh.identityId, "");
   assert.equal(telnet.telnetIdentityId, "");
+});
+
+test("GroupDetailsPanel keeps a deleted identity visible so it can be cleared", () => {
+  const options = includeMissingIdentityOption([], "deleted-identity", "Identity not found");
+
+  assert.deepEqual(options, [{ value: "deleted-identity", label: "Identity not found" }]);
 });

@@ -1097,7 +1097,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
 
             <TerminalEncodingSelect
               value={form.charset}
-              inheritedValue={groupDefaults?.charset}
+              inheritedValue={effectiveGroupDefaults?.charset}
               onValueChange={(value) => update("charset", value)}
             />
 
