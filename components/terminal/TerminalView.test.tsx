@@ -255,6 +255,17 @@ test("hidden host information reveals actions without permanently covering termi
   assert.match(source, /compactActionsButtonRef\.current\?\.focus\(\)/);
 });
 
+test("compact action toggle preserves terminal focus like the visible toolbar", () => {
+  const source = readFileSync(new URL("./TerminalView.tsx", import.meta.url), "utf8");
+  const overlayStart = source.indexOf('ref={compactActionsRef}');
+  const toggleStart = source.indexOf('ref={compactActionsButtonRef}', overlayStart);
+
+  assert.notEqual(overlayStart, -1);
+  assert.notEqual(toggleStart, -1);
+  assert.ok(overlayStart < toggleStart);
+  assert.match(source.slice(overlayStart, toggleStart), /onMouseDownCapture=\{handleTopOverlayMouseDownCapture\}/);
+});
+
 test("terminal theme updates force xterm renderer to repaint immediately", () => {
   const source = readFileSync(new URL("./useTerminalEffects.ts", import.meta.url), "utf8");
   const schedulerSource = readFileSync(new URL("./terminalThemeScheduler.ts", import.meta.url), "utf8");

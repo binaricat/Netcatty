@@ -375,7 +375,11 @@ function TerminalViewInner({ ctx }: { ctx: TerminalViewContext }) {
             </div>
           </div>
         )}
-        <div ref={compactActionsRef} className="absolute left-0 right-0 top-0 z-20 pointer-events-none">
+        <div
+          ref={compactActionsRef}
+          className="absolute left-0 right-0 top-0 z-20 pointer-events-none"
+          onMouseDownCapture={handleTopOverlayMouseDownCapture}
+        >
           {!showHostInfoBar && !isSearchOpen && (
             <Tooltip>
               <TooltipTrigger asChild>
@@ -423,7 +427,6 @@ function TerminalViewInner({ ctx }: { ctx: TerminalViewContext }) {
               !showHostInfoBar && isSearchOpen && "pointer-events-auto",
             )}
             data-host-info-visible={showHostInfoBar ? "true" : "false"}
-            onMouseDownCapture={handleTopOverlayMouseDownCapture}
             style={{
               backgroundColor: 'var(--terminal-ui-bg)',
               color: 'var(--terminal-ui-fg)',
