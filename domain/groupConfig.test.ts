@@ -295,12 +295,69 @@ test("resolveGroupDefaults clears parent identity credentials for an empty child
 test("applyGroupDefaults keeps host manual SSH credentials instead of a group identity", () => {
   const result = applyGroupDefaults(
     host({ username: "host-user", password: "host-password" }),
-    { identityId: "group-identity", username: "group-user" },
+    {
+      identityId: "group-identity",
+      username: "group-user",
+      password: "group-password",
+      savePassword: false,
+      authMethod: "key",
+      identityFileId: "group-key",
+      identityFilePaths: ["~/.ssh/group-key"],
+    },
   );
 
   assert.equal(result.identityId, undefined);
   assert.equal(result.username, "host-user");
   assert.equal(result.password, "host-password");
+  assert.equal(result.savePassword, undefined);
+  assert.equal(result.authMethod, undefined);
+  assert.equal(result.identityFileId, undefined);
+  assert.equal(result.identityFilePaths, undefined);
+});
+
+test("applyGroupDefaults lets a host password inherit a manual group username", () => {
+  const result = applyGroupDefaults(
+    host({ username: "", password: "host-password" }),
+    { username: "group-user" },
+  );
+
+  assert.equal(result.identityId, undefined);
+  assert.equal(result.username, "group-user");
+  assert.equal(result.password, "host-password");
+});
+
+test("applyGroupDefaults lets an empty host identity inherit manual group credentials", () => {
+  const result = applyGroupDefaults(
+    host({ identityId: "", username: "", authMethod: undefined }),
+    {
+      username: "group-user",
+      password: "group-password",
+      authMethod: "password",
+    },
+  );
+
+  assert.equal(result.identityId, "");
+  assert.equal(result.username, "group-user");
+  assert.equal(result.password, "group-password");
+  assert.equal(result.authMethod, "password");
+});
+
+test("applyGroupDefaults does not bypass a host no-save choice with a group identity", () => {
+  const result = applyGroupDefaults(
+    host({ username: "", password: undefined, savePassword: false }),
+    {
+      identityId: "group-identity",
+      username: "group-user",
+      password: "group-password",
+      authMethod: "password",
+    },
+  );
+
+  assert.equal(result.identityId, undefined);
+  assert.equal(result.username, "");
+  assert.equal(result.password, undefined);
+  assert.equal(result.savePassword, false);
+  assert.equal(result.authMethod, undefined);
 });
 
 test("applyGroupDefaults keeps host manual Telnet credentials instead of a group identity", () => {

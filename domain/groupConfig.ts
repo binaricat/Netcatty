@@ -153,6 +153,16 @@ const EMPTY_STRING_OVERRIDES_GROUP_DEFAULT = new Set<keyof GroupConfig>([
   'identityId',
 ]);
 
+const SSH_CREDENTIAL_KEYS = new Set<keyof GroupConfig>([
+  'username',
+  'password',
+  'savePassword',
+  'authMethod',
+  'identityId',
+  'identityFileId',
+  'identityFilePaths',
+]);
+
 /**
  * Apply group defaults to a host. Only fills in fields the host doesn't already have.
  * Returns a new host object — does NOT mutate the original.
@@ -166,15 +176,20 @@ export function applyGroupDefaults(
   const hostHasUsableProxyProfile = hasUsableProxyProfileId(host.proxyProfileId, options);
   const hostHasManualSshCredentials = !host.identityId && Boolean(
     host.password !== undefined ||
+    host.savePassword === false ||
     host.identityFileId ||
     host.identityFilePaths?.length,
+  );
+  const shouldSkipGroupSshCredentialBundle = Boolean(host.identityId) || (
+    Boolean(groupDefaults.identityId) &&
+    (host.identityId === '' || hostHasManualSshCredentials)
   );
   const hostHasManualTelnetCredentials = !host.telnetIdentityId && (
     host.telnetUsername !== undefined || host.telnetPassword !== undefined
   );
 
   for (const key of INHERITABLE_KEYS) {
-    if (key === 'identityId' && hostHasManualSshCredentials) continue;
+    if (shouldSkipGroupSshCredentialBundle && SSH_CREDENTIAL_KEYS.has(key)) continue;
     if (key === 'telnetIdentityId' && hostHasManualTelnetCredentials) continue;
     if (key === 'proxyProfileId') {
       if (host.proxyConfig !== undefined || !groupDefaults.proxyProfileId) continue;

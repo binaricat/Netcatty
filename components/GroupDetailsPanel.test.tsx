@@ -2,12 +2,18 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  hasGroupSshFields,
   hasGroupTelnetFields,
   includeMissingIdentityOption,
   resolveGroupFormIdentityId,
   selectGroupSshIdentity,
   selectGroupTelnetIdentity,
 } from "./GroupDetailsPanel.tsx";
+
+test("GroupDetailsPanel treats an empty SSH identity as an explicit setting", () => {
+  assert.equal(hasGroupSshFields({ identityId: "" }), true);
+  assert.equal(hasGroupSshFields({}), false);
+});
 
 test("GroupDetailsPanel treats cleared telnet credentials as explicit settings", () => {
   assert.equal(hasGroupTelnetFields({ telnetUsername: "" }), true);

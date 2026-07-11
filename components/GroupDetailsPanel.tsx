@@ -96,6 +96,17 @@ export const hasGroupTelnetFields = (c: Partial<GroupConfig>): boolean =>
   c.telnetPassword !== undefined ||
   c.telnetEnabled === true;
 
+export const hasGroupSshFields = (c: Partial<GroupConfig>): boolean =>
+  c.protocol === 'ssh' ||
+  c.port !== undefined || !!c.username || !!c.password || !!c.identityFileId ||
+  c.deviceType !== undefined ||
+  c.agentForwarding !== undefined || c.authMethod !== undefined || c.identityId !== undefined ||
+  !!c.proxyProfileId || !!c.proxyConfig || !!c.hostChain || !!c.startupCommand || c.startupCommandRunMode !== undefined || c.legacyAlgorithms !== undefined || c.skipEcdsaHostKey !== undefined || c.algorithms !== undefined || c.backspaceBehavior !== undefined ||
+  Boolean(c.environmentVariables && c.environmentVariables.length > 0) ||
+  c.moshEnabled !== undefined || !!c.moshServerPath ||
+  c.etEnabled !== undefined || c.etPort !== undefined ||
+  Boolean(c.identityFilePaths && c.identityFilePaths.length > 0);
+
 export const selectGroupSshIdentity = (
   form: Partial<GroupConfig>,
   identity: Identity | undefined,
@@ -196,18 +207,7 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelPropsWithResize> = ({
   const [nameError, setNameError] = useState<string | null>(null);
 
   // Protocol sections enabled state
-  const hasSshFields = (c: Partial<GroupConfig>) =>
-    c.protocol === 'ssh' ||
-    c.port !== undefined || !!c.username || !!c.password || !!c.identityFileId ||
-    c.deviceType !== undefined ||
-    c.agentForwarding !== undefined || c.authMethod !== undefined || !!c.identityId ||
-    !!c.proxyProfileId || !!c.proxyConfig || !!c.hostChain || !!c.startupCommand || c.startupCommandRunMode !== undefined || c.legacyAlgorithms !== undefined || c.skipEcdsaHostKey !== undefined || c.algorithms !== undefined || c.backspaceBehavior !== undefined ||
-    (c.environmentVariables && c.environmentVariables.length > 0) ||
-    c.moshEnabled !== undefined || !!c.moshServerPath ||
-    c.etEnabled !== undefined || c.etPort !== undefined ||
-    (c.identityFilePaths && c.identityFilePaths.length > 0);
-
-  const [sshEnabled, setSshEnabled] = useState(() => hasSshFields(config || {}));
+  const [sshEnabled, setSshEnabled] = useState(() => hasGroupSshFields(config || {}));
   const [telnetEnabled, setTelnetEnabled] = useState(() => hasGroupTelnetFields(config || {}));
 
   // Sub-panel state
