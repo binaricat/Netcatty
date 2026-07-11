@@ -242,11 +242,14 @@ test("hidden host information reveals actions without permanently covering termi
 
   assert.match(source, /aria-label=\{t\("terminal\.toolbar\.showActions"\)\}/);
   assert.match(source, /aria-expanded=\{compactActionsOpen\}/);
+  assert.match(source, /aria-controls=\{`terminal-actions-\$\{sessionId\}`\}/);
+  assert.match(source, /id=\{`terminal-actions-\$\{sessionId\}`\}/);
   assert.match(source, /onClick=\{\(\) => setCompactActionsOpen/);
   assert.match(source, /right: terminalRightInset/);
-  assert.match(source, /group-hover\/terminal-actions:pointer-events-auto/);
-  assert.match(source, /group-focus-within\/terminal-actions:pointer-events-auto/);
   assert.match(source, /compactActionsOpen \? "opacity-100 translate-y-0 pointer-events-auto" : "opacity-0"/);
+  assert.match(source, /document\.addEventListener\("pointerdown", handlePointerDown\)/);
+  assert.match(source, /event\.key !== "Escape"/);
+  assert.match(source, /compactActionsButtonRef\.current\?\.focus\(\)/);
 });
 
 test("terminal theme updates force xterm renderer to repaint immediately", () => {

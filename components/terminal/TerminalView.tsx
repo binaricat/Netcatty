@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import React, { memo, useCallback, useEffect, useState } from 'react';
+import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
 
 import { OSC7_SETUP_TARGETS } from './osc7Setup';
 import { TerminalServerStats } from './TerminalServerStats';
@@ -215,6 +215,28 @@ function TerminalViewInner({ ctx }: { ctx: TerminalViewContext }) {
   const terminalBodyInset = 4;
   const showHostInfoBar = terminalSettings?.showHostInfoBar !== false;
   const [compactActionsOpen, setCompactActionsOpen] = useState(false);
+  const compactActionsRef = useRef<HTMLDivElement | null>(null);
+  const compactActionsButtonRef = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => {
+    if (!compactActionsOpen) return;
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (compactActionsRef.current?.contains(event.target as Node)) return;
+      setCompactActionsOpen(false);
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setCompactActionsOpen(false);
+      compactActionsButtonRef.current?.focus();
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [compactActionsOpen]);
   const { toolbarOffset: terminalToolbarOffset, contentTop: terminalContentTop } = resolveTerminalTopOffsets({
     showHostInfoBar,
     isSearchOpen,
@@ -349,11 +371,12 @@ function TerminalViewInner({ ctx }: { ctx: TerminalViewContext }) {
             </div>
           </div>
         )}
-        <div className="group/terminal-actions absolute left-0 right-0 top-0 z-20 pointer-events-none">
+        <div ref={compactActionsRef} className="absolute left-0 right-0 top-0 z-20 pointer-events-none">
           {!showHostInfoBar && !isSearchOpen && (
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
+                  ref={compactActionsButtonRef}
                   type="button"
                   className="absolute right-1 top-1 h-6 w-6 rounded-md border pointer-events-auto opacity-70 hover:opacity-100 focus-visible:opacity-100"
                   style={{
@@ -363,6 +386,7 @@ function TerminalViewInner({ ctx }: { ctx: TerminalViewContext }) {
                   }}
                   aria-label={t("terminal.toolbar.showActions")}
                   aria-expanded={compactActionsOpen}
+                  aria-controls={`terminal-actions-${sessionId}`}
                   onClick={() => setCompactActionsOpen((open) => !open)}
                 >
                   <span
@@ -379,6 +403,7 @@ function TerminalViewInner({ ctx }: { ctx: TerminalViewContext }) {
             </Tooltip>
           )}
           <div
+            id={`terminal-actions-${sessionId}`}
             className={cn(
               "terminal-topbar flex items-center gap-1 py-0.5 backdrop-blur-md min-w-0",
               showHostInfoBar
@@ -387,8 +412,6 @@ function TerminalViewInner({ ctx }: { ctx: TerminalViewContext }) {
               !showHostInfoBar && !isSearchOpen && [
                 "absolute right-8 top-0 -translate-y-1 pointer-events-none transition-[opacity,transform]",
                 compactActionsOpen ? "opacity-100 translate-y-0 pointer-events-auto" : "opacity-0",
-                "group-hover/terminal-actions:opacity-100 group-hover/terminal-actions:translate-y-0 group-hover/terminal-actions:pointer-events-auto",
-                "group-focus-within/terminal-actions:opacity-100 group-focus-within/terminal-actions:translate-y-0 group-focus-within/terminal-actions:pointer-events-auto",
               ],
               !showHostInfoBar && isSearchOpen && "pointer-events-auto",
             )}
