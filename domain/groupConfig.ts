@@ -15,6 +15,20 @@ export interface ApplyGroupDefaultsOptions {
   validProxyProfileIds?: ReadonlySet<string>;
 }
 
+export const hasManualGroupSshCredentials = (config: Partial<GroupConfig>): boolean => [
+  config.username,
+  config.password,
+  config.savePassword,
+  config.authMethod,
+  config.identityFileId,
+  config.identityFilePaths,
+].some((value) => value !== undefined);
+
+export const hasManualGroupTelnetCredentials = (config: Partial<GroupConfig>): boolean => [
+  config.telnetUsername,
+  config.telnetPassword,
+].some((value) => value !== undefined);
+
 const hasUsableProxyProfileId = (
   proxyProfileId: string | undefined,
   options?: ApplyGroupDefaultsOptions,
@@ -41,14 +55,7 @@ export function resolveGroupDefaults(
     const config = configMap.get(ancestorPath);
     if (config) {
       const hasSshIdentitySetting = config.identityId !== undefined;
-      const hasManualSshCredentials = [
-        config.username,
-        config.password,
-        config.savePassword,
-        config.authMethod,
-        config.identityFileId,
-        config.identityFilePaths,
-      ].some((value) => value !== undefined);
+      const hasManualSshCredentials = hasManualGroupSshCredentials(config);
       if (hasSshIdentitySetting) {
         delete merged.username;
         delete merged.password;
@@ -70,10 +77,7 @@ export function resolveGroupDefaults(
       }
 
       const hasTelnetIdentitySetting = config.telnetIdentityId !== undefined;
-      const hasManualTelnetCredentials = [
-        config.telnetUsername,
-        config.telnetPassword,
-      ].some((value) => value !== undefined);
+      const hasManualTelnetCredentials = hasManualGroupTelnetCredentials(config);
       if (hasTelnetIdentitySetting) {
         delete merged.telnetUsername;
         delete merged.telnetPassword;

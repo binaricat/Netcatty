@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   hasGroupTelnetFields,
   includeMissingIdentityOption,
+  resolveGroupFormIdentityId,
   selectGroupSshIdentity,
   selectGroupTelnetIdentity,
 } from "./GroupDetailsPanel.tsx";
@@ -83,4 +84,23 @@ test("GroupDetailsPanel keeps a deleted identity visible so it can be cleared", 
   const options = includeMissingIdentityOption([], "deleted-identity", "Identity not found");
 
   assert.deepEqual(options, [{ value: "deleted-identity", label: "Identity not found" }]);
+});
+
+test("GroupDetailsPanel shows saved child manual credentials instead of a parent identity", () => {
+  assert.equal(
+    resolveGroupFormIdentityId(
+      { username: "child-user", password: "child-password" },
+      "parent-ssh-identity",
+      "ssh",
+    ),
+    undefined,
+  );
+  assert.equal(
+    resolveGroupFormIdentityId(
+      { telnetUsername: "child-user", telnetPassword: "child-password" },
+      "parent-telnet-identity",
+      "telnet",
+    ),
+    undefined,
+  );
 });

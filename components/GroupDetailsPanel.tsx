@@ -14,7 +14,12 @@ import {
 import React, { useCallback, useMemo, useState } from "react";
 import { useI18n } from "../application/i18n/I18nProvider";
 import { customThemeStore } from "../application/state/customThemeStore";
-import { resolveGroupDefaults, resolveGroupTerminalThemeId } from "../domain/groupConfig";
+import {
+  hasManualGroupSshCredentials,
+  hasManualGroupTelnetCredentials,
+  resolveGroupDefaults,
+  resolveGroupTerminalThemeId,
+} from "../domain/groupConfig";
 import {
   formatProxyConfigEndpoint,
   formatProxyConfigType,
@@ -135,6 +140,19 @@ export const includeMissingIdentityOption = (
 ): Array<{ value: string; label: string; sublabel?: string }> => {
   if (!identityId || options.some((option) => option.value === identityId)) return options;
   return [{ value: identityId, label: missingLabel }, ...options];
+};
+
+export const resolveGroupFormIdentityId = (
+  form: Partial<GroupConfig>,
+  inheritedIdentityId: string | undefined,
+  protocol: "ssh" | "telnet",
+): string | undefined => {
+  const formIdentityId = protocol === "ssh" ? form.identityId : form.telnetIdentityId;
+  if (formIdentityId !== undefined) return formIdentityId;
+  const hasManualCredentials = protocol === "ssh"
+    ? hasManualGroupSshCredentials(form)
+    : hasManualGroupTelnetCredentials(form);
+  return hasManualCredentials ? undefined : inheritedIdentityId;
 };
 
 const GroupDetailsPanel: React.FC<GroupDetailsPanelPropsWithResize> = ({
@@ -382,12 +400,16 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelPropsWithResize> = ({
     if (!parentGroup || groupConfigs.length === 0) return {};
     return resolveGroupDefaults(parentGroup, groupConfigs);
   }, [groupConfigs, parentGroup]);
-  const effectiveSshIdentityId = form.identityId !== undefined
-    ? form.identityId
-    : inheritedConnectionDefaults.identityId;
-  const effectiveTelnetIdentityId = form.telnetIdentityId !== undefined
-    ? form.telnetIdentityId
-    : inheritedConnectionDefaults.telnetIdentityId;
+  const effectiveSshIdentityId = resolveGroupFormIdentityId(
+    form,
+    inheritedConnectionDefaults.identityId,
+    "ssh",
+  );
+  const effectiveTelnetIdentityId = resolveGroupFormIdentityId(
+    form,
+    inheritedConnectionDefaults.telnetIdentityId,
+    "telnet",
+  );
   const sshIdentityOptions = useMemo(
     () => includeMissingIdentityOption(
       identityOptions,
