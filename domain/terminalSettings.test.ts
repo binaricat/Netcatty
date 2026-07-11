@@ -64,6 +64,14 @@ test("normalizeTerminalSettings preserves explicit SSH auto reconnect settings",
   assert.equal(normalizeTerminalSettings({ sshAutoReconnectEnabled: false }).sshAutoReconnectEnabled, false);
 });
 
+test("normalizeTerminalSettings shows the host information bar by default", () => {
+  assert.equal(normalizeTerminalSettings().showHostInfoBar, true);
+});
+
+test("normalizeTerminalSettings preserves a hidden host information bar", () => {
+  assert.equal(normalizeTerminalSettings({ showHostInfoBar: false }).showHostInfoBar, false);
+});
+
 test("normalizeTerminalSettings disables hibernate for hidden tabs by default", () => {
   assert.equal(normalizeTerminalSettings().hibernateHiddenTabs, false);
   assert.equal(normalizeTerminalSettings().hibernateHiddenTabsDelaySec, 5);

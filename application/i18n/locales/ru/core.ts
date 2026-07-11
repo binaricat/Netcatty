@@ -495,6 +495,8 @@ export const ruCoreMessages: Messages = {
   'settings.terminal.connection.x11Display.desc': 'Необязательный адрес локального дисплея для перенаправления X11. Оставьте пустым, чтобы использовать системное значение по умолчанию.',
   'settings.terminal.connection.x11Display.placeholder': 'Авто (:0 или DISPLAY)',
   'settings.terminal.section.serverStats': 'Статистика сервера (Linux)',
+  'settings.terminal.hostInfoBar.show': 'Показывать сведения о хосте',
+  'settings.terminal.hostInfoBar.show.desc': 'Показывать адрес хоста и сведения о сервере над терминалом. Кнопки действий остаются доступными после скрытия.',
   'settings.terminal.section.systemManager': 'Системный менеджер',
   'settings.terminal.systemManager.processRefreshInterval': 'Обновление списка процессов',
   'settings.terminal.systemManager.processRefreshInterval.desc': 'Как часто обновлять список процессов в боковой панели системного менеджера.',

@@ -152,6 +152,22 @@ export function formatTerminalTitleConnectionAddress(host?: TerminalTitleAddress
   return `${username}${host.hostname}${port}`;
 }
 
+export function resolveTerminalTopOffsets({
+  showHostInfoBar,
+  isSearchOpen,
+  terminalBodyInset = 4,
+}: {
+  showHostInfoBar: boolean;
+  isSearchOpen: boolean;
+  terminalBodyInset?: number;
+}): { toolbarOffset: number; contentTop: string } {
+  const toolbarOffset = isSearchOpen ? 64 : showHostInfoBar ? 30 : 0;
+  return {
+    toolbarOffset,
+    contentTop: `${toolbarOffset + terminalBodyInset}px`,
+  };
+}
+
 /**
  * Shallow-compare every ctx value. <Terminal> rebuilds the ctx object on every
  * render, but many re-renders (layout/fit/visibility-of-other-panes, suppress
@@ -184,9 +200,13 @@ function TerminalViewInner({ ctx }: { ctx: TerminalViewContext }) {
     handleSendYmodem,
     handleReceiveYmodem,
   });
-  const terminalToolbarOffset = isSearchOpen ? 64 : 30;
   const terminalBodyInset = 4;
-  const terminalContentTop = `${terminalToolbarOffset + terminalBodyInset}px`;
+  const showHostInfoBar = terminalSettings?.showHostInfoBar !== false;
+  const { toolbarOffset: terminalToolbarOffset, contentTop: terminalContentTop } = resolveTerminalTopOffsets({
+    showHostInfoBar,
+    isSearchOpen,
+    terminalBodyInset,
+  });
   const showLineTimestampGutter = lineTimestampsAvailable !== false && host.showLineTimestamps === true;
   const lineTimestampColor = resolveTerminalTimestampGutterColor(effectiveTheme.colors);
   const [lineTimestampGutterWidth, setLineTimestampGutterWidth] = useState(() => (
@@ -313,7 +333,11 @@ function TerminalViewInner({ ctx }: { ctx: TerminalViewContext }) {
         )}
         <div className="absolute left-0 right-0 top-0 z-20 pointer-events-none">
           <div
-            className="terminal-topbar flex items-center gap-1 px-2 py-0.5 backdrop-blur-md pointer-events-auto min-w-0"
+            className={cn(
+              "terminal-topbar flex items-center gap-1 py-0.5 backdrop-blur-md pointer-events-auto min-w-0",
+              showHostInfoBar ? "px-2" : "ml-auto w-fit rounded-bl-md px-1",
+            )}
+            data-host-info-visible={showHostInfoBar ? "true" : "false"}
             onMouseDownCapture={handleTopOverlayMouseDownCapture}
             style={{
               backgroundColor: 'var(--terminal-ui-bg)',
@@ -328,10 +352,11 @@ function TerminalViewInner({ ctx }: { ctx: TerminalViewContext }) {
           >
             <div
               className={cn(
-                "terminal-title-cluster flex items-center gap-1 text-[11px] font-semibold min-w-0 overflow-hidden shrink",
+                "flex items-center gap-1 text-[11px] font-semibold min-w-0 overflow-hidden shrink",
+                showHostInfoBar && "terminal-title-cluster",
               )}
             >
-              <div
+              {showHostInfoBar && <div
                 className={cn(
                   "flex items-center gap-1 min-w-0",
                   inWorkspace && onDetachPointerDown && "cursor-grab active:cursor-grabbing",
@@ -342,29 +367,29 @@ function TerminalViewInner({ ctx }: { ctx: TerminalViewContext }) {
                 <span className="whitespace-nowrap truncate min-w-0 max-w-[18rem]" title={titleConnectionAddress || sessionDisplayName || host.label}>
                   {titleConnectionAddress || sessionDisplayName || host.label}
                 </span>
-                {host.protocol !== "local" && host.hostname && host.hostname !== "localhost" && (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        type="button"
-                        className="ml-0.5 p-0.5 rounded hover:bg-[color:var(--terminal-toolbar-btn-hover)] transition-colors opacity-60 hover:opacity-100 flex-shrink-0"
-                        onPointerDown={(event) => event.stopPropagation()}
-                        onClick={() => {
-                          void navigator.clipboard.writeText(host.hostname).then(() => {
-                            toast.success(t("terminal.statusbar.copyHostname.toast", { hostname: host.hostname }));
-                          }).catch(() => {
-                            toast.error(t("terminal.statusbar.copyHostname.error"));
-                          });
-                        }}
-                        aria-label={t("terminal.statusbar.copyHostname.label")}
-                      >
-                        <Copy size={10} />
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom">{t("terminal.statusbar.copyHostname.tooltip", { hostname: host.hostname })}</TooltipContent>
-                  </Tooltip>
-                )}
-              </div>
+              </div>}
+              {host.protocol !== "local" && host.hostname && host.hostname !== "localhost" && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      className="ml-0.5 p-0.5 rounded hover:bg-[color:var(--terminal-toolbar-btn-hover)] transition-colors opacity-60 hover:opacity-100 flex-shrink-0"
+                      onPointerDown={(event) => event.stopPropagation()}
+                      onClick={() => {
+                        void navigator.clipboard.writeText(host.hostname).then(() => {
+                          toast.success(t("terminal.statusbar.copyHostname.toast", { hostname: host.hostname }));
+                        }).catch(() => {
+                          toast.error(t("terminal.statusbar.copyHostname.error"));
+                        });
+                      }}
+                      aria-label={t("terminal.statusbar.copyHostname.label")}
+                    >
+                      <Copy size={10} />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">{t("terminal.statusbar.copyHostname.tooltip", { hostname: host.hostname })}</TooltipContent>
+                </Tooltip>
+              )}
               {shouldShowLineTimestampToolbarToggle(lineTimestampsAvailable, onUpdateHost) && (
                 <Tooltip>
                   <TooltipTrigger asChild>
@@ -409,7 +434,7 @@ function TerminalViewInner({ ctx }: { ctx: TerminalViewContext }) {
                 </Tooltip>
               )}
             </div>
-            {!compactToolbar && (
+            {showHostInfoBar && !compactToolbar && (
               <TerminalServerStats
                 sessionId={sessionId}
                 enabled={terminalSettings?.showServerStats ?? true}
@@ -419,7 +444,7 @@ function TerminalViewInner({ ctx }: { ctx: TerminalViewContext }) {
                 isVisible={isVisible}
               />
             )}
-            <div className="flex-1 min-w-0" />
+            {showHostInfoBar && <div className="flex-1 min-w-0" />}
             <div className="flex items-center gap-0.5 flex-shrink-0">
               {inWorkspace && onToggleBroadcast && (
                 <Tooltip>
@@ -500,7 +525,10 @@ function TerminalViewInner({ ctx }: { ctx: TerminalViewContext }) {
         </div>
 
         <div
-          className="flex-1 min-h-0 min-w-0 relative overflow-hidden pt-8"
+          className={cn(
+            "flex-1 min-h-0 min-w-0 relative overflow-hidden",
+            showHostInfoBar && "pt-8",
+          )}
           style={{ backgroundColor: 'var(--terminal-ui-bg)' }}
         >
           <div

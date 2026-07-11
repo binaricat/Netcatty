@@ -357,6 +357,8 @@ export const zhCNTerminalMessages: Messages = {
   'settings.terminal.connection.x11Display.desc': '可选的本机 X11 显示地址。留空则使用系统默认值。',
   'settings.terminal.connection.x11Display.placeholder': '自动（:0 或 DISPLAY）',
   'settings.terminal.section.serverStats': '服务器状态（Linux）',
+  'settings.terminal.hostInfoBar.show': '显示主机信息栏',
+  'settings.terminal.hostInfoBar.show.desc': '在终端上方显示主机地址和服务器信息。隐藏后仍可使用操作按钮。',
   'settings.terminal.serverStats.show': '显示服务器状态',
   'settings.terminal.serverStats.show.desc': '在终端状态栏显示 CPU、内存和磁盘使用情况（仅限 Linux 服务器）。',
   'settings.terminal.serverStats.refreshInterval': '刷新间隔',

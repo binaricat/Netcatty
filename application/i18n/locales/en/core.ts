@@ -522,6 +522,8 @@ export const enCoreMessages: Messages = {
   'settings.terminal.connection.x11Display.desc': 'Optional local display address for X11 forwarding. Leave empty to use the system default.',
   'settings.terminal.connection.x11Display.placeholder': 'Auto (:0 or DISPLAY)',
   'settings.terminal.section.serverStats': 'Server Stats (Linux)',
+  'settings.terminal.hostInfoBar.show': 'Show host information bar',
+  'settings.terminal.hostInfoBar.show.desc': 'Show the host address and server information above the terminal. Action buttons remain available when hidden.',
   'settings.terminal.section.systemManager': 'System Manager',
   'settings.terminal.systemManager.processRefreshInterval': 'Process list refresh',
   'settings.terminal.systemManager.processRefreshInterval.desc': 'How often to refresh the process list in the system manager side panel.',

@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 import {
   formatTerminalTitleConnectionAddress,
   getLineTimestampToggleHostUpdate,
+  resolveTerminalTopOffsets,
   shouldBlockTerminalReconnectForTarget,
   shouldReconnectTerminalOnEnterKey,
   shouldShowSelectionAIOverlay,
@@ -181,6 +182,49 @@ test("terminal body keeps a slight inset from the surrounding chrome", () => {
   assert.match(source, /bottom: terminalBodyInset/);
   assert.match(source, /left=\{terminalBodyInset\}/);
   assert.match(source, /bottom=\{terminalBodyInset\}/);
+});
+
+test("hidden host information bar gives its vertical space back to the terminal", () => {
+  assert.deepEqual(
+    resolveTerminalTopOffsets({ showHostInfoBar: false, isSearchOpen: false }),
+    { toolbarOffset: 0, contentTop: "4px" },
+  );
+  assert.deepEqual(
+    resolveTerminalTopOffsets({ showHostInfoBar: true, isSearchOpen: false }),
+    { toolbarOffset: 30, contentTop: "34px" },
+  );
+});
+
+test("terminal search keeps enough space when host information is hidden", () => {
+  assert.deepEqual(
+    resolveTerminalTopOffsets({ showHostInfoBar: false, isSearchOpen: true }),
+    { toolbarOffset: 64, contentTop: "68px" },
+  );
+});
+
+test("hidden host information keeps terminal actions rendered", () => {
+  const source = readFileSync(new URL("./TerminalView.tsx", import.meta.url), "utf8");
+  const hostInfoStart = source.indexOf("{showHostInfoBar && <div");
+  const hostInfoEnd = source.indexOf("</div>}", hostInfoStart);
+  const copyAction = source.indexOf('aria-label={t("terminal.statusbar.copyHostname.label")}');
+  const timestampAction = source.indexOf("shouldShowLineTimestampToolbarToggle", copyAction);
+  const systemAction = source.indexOf('aria-label={t("terminal.layer.system")}', timestampAction);
+  const actionsStart = source.indexOf('className="flex items-center gap-0.5 flex-shrink-0"');
+  const controls = source.indexOf("{renderControls({ showClose: inWorkspace })}");
+
+  assert.notEqual(hostInfoStart, -1);
+  assert.notEqual(hostInfoEnd, -1);
+  assert.notEqual(copyAction, -1);
+  assert.notEqual(timestampAction, -1);
+  assert.notEqual(systemAction, -1);
+  assert.notEqual(actionsStart, -1);
+  assert.notEqual(controls, -1);
+  assert.ok(hostInfoStart < hostInfoEnd);
+  assert.ok(hostInfoEnd < copyAction);
+  assert.ok(copyAction < timestampAction);
+  assert.ok(timestampAction < systemAction);
+  assert.ok(systemAction < actionsStart);
+  assert.ok(actionsStart < controls);
 });
 
 test("terminal theme updates force xterm renderer to repaint immediately", () => {

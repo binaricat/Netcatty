@@ -357,6 +357,8 @@ export const zhTWTerminalMessages: Messages = {
   'settings.terminal.connection.x11Display.desc': '可選的本機 X11 顯示地址。留空則使用系統預設值。',
   'settings.terminal.connection.x11Display.placeholder': '自動（:0 或 DISPLAY）',
   'settings.terminal.section.serverStats': '伺服器狀態（Linux）',
+  'settings.terminal.hostInfoBar.show': '顯示主機資訊列',
+  'settings.terminal.hostInfoBar.show.desc': '在終端上方顯示主機地址和伺服器資訊。隱藏後仍可使用操作按鈕。',
   'settings.terminal.serverStats.show': '顯示伺服器狀態',
   'settings.terminal.serverStats.show.desc': '在終端狀態列顯示 CPU、記憶體和磁碟使用情況（僅限 Linux 伺服器）。',
   'settings.terminal.serverStats.refreshInterval': '重新整理間隔',

@@ -24,3 +24,8 @@ test("terminal settings expose SSH auto reconnect toggle", () => {
   assert.match(source, /checked=\{terminalSettings\.sshAutoReconnectEnabled\}/);
   assert.match(source, /updateTerminalSetting\("sshAutoReconnectEnabled", v\)/);
 });
+
+test("terminal settings expose the host information bar toggle", () => {
+  assert.match(source, /checked=\{terminalSettings\.showHostInfoBar\}/);
+  assert.match(source, /updateTerminalSetting\("showHostInfoBar", v\)/);
+});

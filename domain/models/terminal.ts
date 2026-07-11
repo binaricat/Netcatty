@@ -95,6 +95,7 @@ export interface TerminalSettings {
   moshClientPath: string;
 
   // Server Stats Display (Linux only)
+  showHostInfoBar: boolean; // Show host identity and server stats above the terminal
   showServerStats: boolean; // Show CPU/Memory/Disk in terminal statusbar
   serverStatsRefreshInterval: number; // Seconds between stats refresh (default: 30)
 
@@ -368,6 +369,7 @@ const DEFAULT_TERMINAL_SETTINGS: TerminalSettings = {
   sshAutoReconnectEnabled: false,
   x11Display: '', // Empty = use DISPLAY/default local X server
   moshClientPath: '', // Legacy mosh-client override; normal UI uses bundled mosh-client
+  showHostInfoBar: true, // Preserve the existing host information bar by default
   showServerStats: true, // Show server stats by default
   serverStatsRefreshInterval: 5, // Refresh every 5 seconds
   systemManagerProcessRefreshInterval: 3,
