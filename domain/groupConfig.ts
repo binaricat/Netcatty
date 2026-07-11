@@ -50,12 +50,23 @@ export function resolveGroupDefaults(
         config.identityFilePaths,
       ].some((value) => value !== undefined);
       if (hasSshIdentitySetting && config.identityId) {
+        delete merged.username;
         delete merged.password;
         delete merged.savePassword;
+        delete merged.authMethod;
         delete merged.identityFileId;
         delete merged.identityFilePaths;
       } else if (!hasSshIdentitySetting && hasManualSshCredentials) {
+        const replacesInheritedIdentity = Boolean(merged.identityId);
         delete merged.identityId;
+        if (replacesInheritedIdentity) {
+          delete merged.username;
+          delete merged.password;
+          delete merged.savePassword;
+          delete merged.authMethod;
+          delete merged.identityFileId;
+          delete merged.identityFilePaths;
+        }
       }
 
       const hasTelnetIdentitySetting = config.telnetIdentityId !== undefined;
@@ -67,7 +78,12 @@ export function resolveGroupDefaults(
         delete merged.telnetUsername;
         delete merged.telnetPassword;
       } else if (!hasTelnetIdentitySetting && hasManualTelnetCredentials) {
+        const replacesInheritedIdentity = Boolean(merged.telnetIdentityId);
         delete merged.telnetIdentityId;
+        if (replacesInheritedIdentity) {
+          delete merged.telnetUsername;
+          delete merged.telnetPassword;
+        }
       }
 
       for (const [key, value] of Object.entries(config)) {
@@ -147,7 +163,6 @@ export function applyGroupDefaults(
   const hostHasManualSshCredentials = !host.identityId && Boolean(
     host.username?.trim() ||
     host.password !== undefined ||
-    host.authMethod !== undefined ||
     host.identityFileId ||
     host.identityFilePaths?.length,
   );

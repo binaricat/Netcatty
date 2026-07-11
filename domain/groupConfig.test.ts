@@ -276,11 +276,21 @@ test("applyGroupDefaults preserves explicit empty identityId instead of inheriti
 
 test("applyGroupDefaults inherits group identityId when host identityId is unset", () => {
   const result = applyGroupDefaults(
-    host({ identityId: undefined, username: "" }),
+    host({ identityId: undefined, username: "", authMethod: "password" }),
     { identityId: "group-identity" },
   );
 
   assert.equal(result.identityId, "group-identity");
+});
+
+test("applyGroupDefaults treats an explicit empty identity as a host opt-out", () => {
+  const result = applyGroupDefaults(
+    host({ identityId: "", username: "host-user", authMethod: "password" }),
+    { identityId: "group-identity", username: "group-user" },
+  );
+
+  assert.equal(result.identityId, "");
+  assert.equal(result.username, "host-user");
 });
 
 test("applyGroupDefaults continues to inherit empty ssh username from the group", () => {
