@@ -313,7 +313,15 @@ export const createSudoPasswordAutofill = (_options: {
         return;
       }
       options.write(`${secret}\n`);
-      disarm();
+      // Clear the pending UI but keep (and refresh) the arm window so a
+      // wrong-password re-prompt can reopen the full picker / hint. Full
+      // disarm would force unarmed host-only fallback on the next [sudo] line.
+      pending = false;
+      hideUi();
+      if (hasFillMaterial()) {
+        armedUntil = options.now() + armWindowMs;
+        tail = "";
+      }
     },
     cancelHint: () => {
       if (!pending) return;

@@ -387,6 +387,34 @@ test("picker confirmFill can target a specific candidate id", () => {
   assert.deepEqual(writes, ["root-secret\n"]);
 });
 
+test("picker reopens after a wrong password when still armed", () => {
+  const writes: string[] = [];
+  const pickerActives: boolean[] = [];
+  const autofill = createSudoPasswordAutofill({
+    mode: "picker",
+    candidates: [
+      { id: "host", label: "Host", password: "wrong" },
+      { id: "identity:root", label: "Root", password: "right" },
+    ],
+    write: (d) => writes.push(d),
+    onPicker: (active) => {
+      pickerActives.push(active);
+      return true;
+    },
+  });
+  autofill.armForCommand("su -");
+  autofill.handleOutput("Password: ");
+  assert.equal(autofill.isPickerPending(), true);
+  autofill.confirmFill("host");
+  assert.deepEqual(writes, ["wrong\n"]);
+  assert.equal(autofill.isPickerPending(), false);
+  // Remote rejects and re-prompts — picker should open again for another pick
+  autofill.handleOutput("\r\nSorry, try again.\r\nPassword: ");
+  assert.equal(autofill.isPickerPending(), true);
+  autofill.confirmFill("identity:root");
+  assert.deepEqual(writes, ["wrong\n", "right\n"]);
+});
+
 test("picker mode requires arm before offering the full keychain list", () => {
   // Unarmed explicit [sudo] must not surface every identity — a remote can
   // forge that line. Host-password hint remains allowed (#2156 security).
