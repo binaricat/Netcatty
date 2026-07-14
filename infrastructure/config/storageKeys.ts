@@ -119,6 +119,12 @@ export const STORAGE_KEY_SFTP_FOLLOW_TERMINAL_CWD = 'netcatty_sftp_follow_termin
 export const STORAGE_KEY_SFTP_DEFAULT_VIEW_MODE = 'netcatty_sftp_default_view_mode_v1';
 export const STORAGE_KEY_SFTP_HOST_VIEW_MODES = 'netcatty_sftp_host_view_modes_v1';
 export const STORAGE_KEY_SFTP_VISIBLE_COLUMNS = 'netcatty_sftp_visible_columns_v1';
+/** Dense SFTP toolbar actions: show / collapse / hide + order. */
+export const STORAGE_KEY_SFTP_TOOLBAR_LAYOUT = 'netcatty_sftp_toolbar_layout_v1';
+/** Dense terminal session toolbar actions: show / collapse / hide + order. */
+export const STORAGE_KEY_TERMINAL_TOOLBAR_LAYOUT = 'netcatty_terminal_toolbar_layout_v1';
+/** Side-panel tab strip: show / collapse / hide + order (supersedes order-only key when present). */
+export const STORAGE_KEY_TERMINAL_SIDE_PANEL_TAB_LAYOUT = 'netcatty_terminal_side_panel_tab_layout_v1';
 export const STORAGE_KEY_SFTP_TRANSFER_PANEL_HEIGHT = 'netcatty_sftp_transfer_panel_height_v1';
 export const STORAGE_KEY_SFTP_TRANSFER_CHILD_NAME_WIDTH = 'netcatty_sftp_transfer_child_name_width_v1';
 

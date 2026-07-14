@@ -51,7 +51,16 @@ test('closed side panel shell has no width', () => {
 
 test('side panel tab order falls back to the default order', () => {
   assert.deepEqual(normalizeTerminalSidePanelTabOrder(null), TERMINAL_SIDE_PANEL_TAB_DEFAULT_ORDER);
-  assert.deepEqual(normalizeTerminalSidePanelTabOrder(['scripts', 'bad-tab']), TERMINAL_SIDE_PANEL_TAB_DEFAULT_ORDER);
+  // Partial / dirty lists keep known ids in order and append the rest of the defaults.
+  assert.deepEqual(normalizeTerminalSidePanelTabOrder(['scripts', 'bad-tab']), [
+    'scripts',
+    'sftp',
+    'history',
+    'theme',
+    'system',
+    'notes',
+    'ai',
+  ]);
 });
 
 test('side panel tab order accepts a stored permutation', () => {

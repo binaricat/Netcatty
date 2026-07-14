@@ -10,6 +10,7 @@ import React, { memo, useCallback, useLayoutEffect, useMemo, useRef, useState } 
 import { useActiveTabId } from '../../application/state/activeTabStore';
 import {
   reorderTerminalSidePanelTab,
+  TERMINAL_SIDE_PANEL_TAB_DEFAULT_ORDER,
   TERMINAL_SIDE_PANEL_TAB_IDS,
   type TerminalSidePanelTabId,
   useTerminalSidePanelTabOrder,
@@ -17,6 +18,10 @@ import {
 import { terminalLayoutSuppressStore } from '../../application/state/terminalLayoutSuppressStore';
 import { AI_PANEL_FORCE_HIDE_SHELL } from '../ai/aiPanelDiagnostics';
 
+import {
+  ToolbarCustomizeContextMenu,
+  ToolbarOverflowMenu,
+} from '../ui/toolbar-item-layout';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 import type { SidePanelTab } from './TerminalLayerSupport';
 import { terminalLayerSidePanelStableCtxEqual } from './terminalLayerViewMemo';
@@ -113,7 +118,15 @@ function TerminalLayerSidePanelInner({ ctx }: { ctx: SidePanelContext }) {
   } = ctx;
 
   const [resizePreviewWidth, setResizePreviewWidth] = useState<number | null>(null);
-  const { sidePanelTabOrder, setSidePanelTabOrder } = useTerminalSidePanelTabOrder();
+  const {
+    sidePanelTabOrder,
+    setSidePanelTabOrder,
+    layout: sidePanelTabLayout,
+    setPlacement: setSidePanelTabPlacement,
+    move: moveSidePanelTab,
+    resetLayout: resetSidePanelTabLayout,
+    partition: partitionSidePanelTabs,
+  } = useTerminalSidePanelTabOrder();
   const resolvedSidePanelTerminalTheme = useMemo(() => (
     followAppTerminalTheme
       ? terminalTheme
@@ -265,6 +278,24 @@ function TerminalLayerSidePanelInner({ ctx }: { ctx: SidePanelContext }) {
     [sidePanelTabItems],
   );
 
+  const { shown: shownSidePanelTabs, collapsed: collapsedSidePanelTabs } = useMemo(
+    () => partitionSidePanelTabs(TERMINAL_SIDE_PANEL_TAB_DEFAULT_ORDER),
+    [partitionSidePanelTabs],
+  );
+
+  const sidePanelCustomizeItems = useMemo(
+    () =>
+      sidePanelTabOrder.map((tabId) => {
+        const item = sidePanelTabItemById.get(tabId);
+        return {
+          id: tabId,
+          label: item?.label ?? tabId,
+          icon: item?.icon,
+        };
+      }),
+    [sidePanelTabItemById, sidePanelTabOrder],
+  );
+
   return (
     <div
       style={{ width: shellWidth, contain: 'layout paint style' }}
@@ -307,100 +338,135 @@ function TerminalLayerSidePanelInner({ ctx }: { ctx: SidePanelContext }) {
         }}
       >
         {isSidePanelOpenForCurrentTab && !isAiShellForceHidden && (
-          <div
-            className="flex h-9 items-center px-1.5 py-1 flex-shrink-0 gap-1"
-            data-section="terminal-side-panel-tabs"
+          <ToolbarCustomizeContextMenu
+            items={sidePanelCustomizeItems}
+            placementOf={(id) => sidePanelTabLayout.placement[id] ?? 'show'}
+            onSetPlacement={setSidePanelTabPlacement}
+            onMove={moveSidePanelTab}
+            onReset={resetSidePanelTabLayout}
+            t={t}
+            className="flex h-9 items-center px-1.5 py-1 flex-shrink-0 gap-1 w-full"
+            dataSection="terminal-side-panel-tabs"
             style={{
               backgroundColor: sidePanelTheme.termBg,
               borderBottom: `1px solid ${sidePanelTheme.separator}`,
             }}
           >
-            {sidePanelTabOrder.map((tabId) => {
-              const item = sidePanelTabItemById.get(tabId);
-              if (!item) return null;
-              const isActive = activeSidePanelTab === item.id;
-              const showDropIndicator = dragOverSidePanelTab?.tab === item.id
-                && draggedSidePanelTabRef.current !== null
-                && draggedSidePanelTabRef.current !== item.id;
-              return (
-                <Tooltip key={item.id}>
-                  <TooltipTrigger asChild>
-                    <Btn
-                      variant="ghost"
-                      size="icon"
-                      draggable
-                      data-tab-id={item.id}
-                      data-tab-type="sidepanel"
-                      data-state={isActive ? 'active' : 'inactive'}
-                      className="netcatty-tab relative h-7 w-7 rounded-md p-0 hover:bg-transparent"
-                      style={{
-                        backgroundColor: isActive
-                          ? `color-mix(in srgb, ${sidePanelTheme.accent} 24%, transparent)`
-                          : 'transparent',
-                        color: isActive
-                          ? sidePanelTheme.termFg
-                          : sidePanelTheme.mutedFg,
-                      }}
-                      onClick={item.onClick}
-                      onDragStart={(event: React.DragEvent) => handleSidePanelTabDragStart(event, item.id)}
-                      onDragOver={(event: React.DragEvent) => handleSidePanelTabDragOver(event, item.id)}
-                      onDragLeave={(event: React.DragEvent) => handleSidePanelTabDragLeave(event, item.id)}
-                      onDrop={(event: React.DragEvent) => handleSidePanelTabDrop(event, item.id)}
-                      onDragEnd={() => {
-                        draggedSidePanelTabRef.current = null;
-                        setDragOverSidePanelTab(null);
-                      }}
-                    >
-                      {showDropIndicator && (
-                        <span
-                          aria-hidden="true"
-                          className={cn(
-                            'pointer-events-none absolute top-1 bottom-1 w-0.5 rounded-none',
-                            dragOverSidePanelTab?.placement === 'after' ? 'right-0' : 'left-0',
-                          )}
-                          style={{ backgroundColor: sidePanelTheme.accent }}
-                        />
-                      )}
-                      {item.icon}
-                    </Btn>
-                  </TooltipTrigger>
-                  {/* bottom: left-docked panel tooltips must not cover macOS traffic lights (#2095) */}
-                  <TooltipContent side="bottom">{item.label}</TooltipContent>
-                </Tooltip>
-              );
-            })}
-            <div className="flex-1" />
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Btn
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7 rounded-md p-0 hover:bg-transparent"
-                  style={{ color: sidePanelTheme.mutedFg }}
-                  onClick={() => setSidePanelPosition((p: 'left' | 'right') => (p === 'left' ? 'right' : 'left'))}
-                >
-                  {sidePanelPosition === 'left' ? <PanelRight size={15} /> : <PanelLeft size={15} />}
-                </Btn>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">
-                {sidePanelPosition === 'left' ? t('terminal.layer.movePanelRight') : t('terminal.layer.movePanelLeft')}
-              </TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Btn
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7 rounded-md p-0 hover:bg-transparent"
-                  style={{ color: sidePanelTheme.mutedFg }}
-                  onClick={handleCloseSidePanel}
-                >
-                  <X size={15} />
-                </Btn>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">{t('terminal.layer.closePanel')}</TooltipContent>
-            </Tooltip>
-          </div>
+              {shownSidePanelTabs.map((tabId) => {
+                const item = sidePanelTabItemById.get(tabId as TerminalSidePanelTabId);
+                if (!item) return null;
+                const isActive = activeSidePanelTab === item.id;
+                const showDropIndicator = dragOverSidePanelTab?.tab === item.id
+                  && draggedSidePanelTabRef.current !== null
+                  && draggedSidePanelTabRef.current !== item.id;
+                return (
+                  <Tooltip key={item.id}>
+                    <TooltipTrigger asChild>
+                      <Btn
+                        variant="ghost"
+                        size="icon"
+                        draggable
+                        data-tab-id={item.id}
+                        data-tab-type="sidepanel"
+                        data-state={isActive ? 'active' : 'inactive'}
+                        className="netcatty-tab relative h-7 w-7 rounded-md p-0 hover:bg-transparent"
+                        style={{
+                          backgroundColor: isActive
+                            ? `color-mix(in srgb, ${sidePanelTheme.accent} 24%, transparent)`
+                            : 'transparent',
+                          color: isActive
+                            ? sidePanelTheme.termFg
+                            : sidePanelTheme.mutedFg,
+                        }}
+                        onClick={item.onClick}
+                        onDragStart={(event: React.DragEvent) => handleSidePanelTabDragStart(event, item.id)}
+                        onDragOver={(event: React.DragEvent) => handleSidePanelTabDragOver(event, item.id)}
+                        onDragLeave={(event: React.DragEvent) => handleSidePanelTabDragLeave(event, item.id)}
+                        onDrop={(event: React.DragEvent) => handleSidePanelTabDrop(event, item.id)}
+                        onDragEnd={() => {
+                          draggedSidePanelTabRef.current = null;
+                          setDragOverSidePanelTab(null);
+                        }}
+                      >
+                        {showDropIndicator && (
+                          <span
+                            aria-hidden="true"
+                            className={cn(
+                              'pointer-events-none absolute top-1 bottom-1 w-0.5 rounded-none',
+                              dragOverSidePanelTab?.placement === 'after' ? 'right-0' : 'left-0',
+                            )}
+                            style={{ backgroundColor: sidePanelTheme.accent }}
+                          />
+                        )}
+                        {item.icon}
+                      </Btn>
+                    </TooltipTrigger>
+                    {/* bottom: left-docked panel tooltips must not cover macOS traffic lights (#2095) */}
+                    <TooltipContent side="bottom">{item.label}</TooltipContent>
+                  </Tooltip>
+                );
+              })}
+              <ToolbarOverflowMenu
+                hasItems={collapsedSidePanelTabs.length > 0}
+                label={t('common.more')}
+                orientation="horizontal"
+                buttonClassName="h-7 w-7 rounded-md p-0 hover:bg-transparent"
+                contentClassName="min-w-[10rem] p-1"
+              >
+                <div className="flex flex-col min-w-[10rem]">
+                  {collapsedSidePanelTabs.map((tabId) => {
+                    const item = sidePanelTabItemById.get(tabId as TerminalSidePanelTabId);
+                    if (!item) return null;
+                    const isActive = activeSidePanelTab === item.id;
+                    return (
+                      <button
+                        key={item.id}
+                        type="button"
+                        className={cn(
+                          'w-full flex items-center gap-2 px-2 py-1.5 text-xs rounded-sm hover:bg-secondary transition-colors text-left',
+                          isActive && 'bg-secondary font-medium',
+                        )}
+                        onClick={item.onClick}
+                      >
+                        <span className="shrink-0">{item.icon}</span>
+                        <span className="truncate">{item.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </ToolbarOverflowMenu>
+              <div className="flex-1" />
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Btn
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 rounded-md p-0 hover:bg-transparent"
+                    style={{ color: sidePanelTheme.mutedFg }}
+                    onClick={() => setSidePanelPosition((p: 'left' | 'right') => (p === 'left' ? 'right' : 'left'))}
+                  >
+                    {sidePanelPosition === 'left' ? <PanelRight size={15} /> : <PanelLeft size={15} />}
+                  </Btn>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">
+                  {sidePanelPosition === 'left' ? t('terminal.layer.movePanelRight') : t('terminal.layer.movePanelLeft')}
+                </TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Btn
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 rounded-md p-0 hover:bg-transparent"
+                    style={{ color: sidePanelTheme.mutedFg }}
+                    onClick={handleCloseSidePanel}
+                  >
+                    <X size={15} />
+                  </Btn>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">{t('terminal.layer.closePanel')}</TooltipContent>
+              </Tooltip>
+          </ToolbarCustomizeContextMenu>
         )}
         <div className="flex-1 min-h-0 relative" data-section="terminal-side-panel-content">
           <MemoizedSidePanelMountedContent ctx={ctx} />

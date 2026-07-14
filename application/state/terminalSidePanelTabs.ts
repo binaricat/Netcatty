@@ -1,9 +1,27 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo } from 'react';
 
-import { STORAGE_KEY_TERMINAL_SIDE_PANEL_TAB_ORDER } from '../../infrastructure/config/storageKeys';
+import {
+  normalizeToolbarItemLayout,
+  reorderToolbarItems,
+  type ToolbarItemLayout,
+  type ToolbarItemLayoutDefaults,
+  type ToolbarItemPlacement,
+} from '../../domain/toolbarItemLayout';
+import {
+  STORAGE_KEY_TERMINAL_SIDE_PANEL_TAB_LAYOUT,
+  STORAGE_KEY_TERMINAL_SIDE_PANEL_TAB_ORDER,
+} from '../../infrastructure/config/storageKeys';
 import { localStorageAdapter } from '../../infrastructure/persistence/localStorageAdapter';
+import { useToolbarItemLayout } from './useToolbarItemLayout';
 
-export type TerminalSidePanelTabId = 'sftp' | 'scripts' | 'history' | 'theme' | 'system' | 'notes' | 'ai';
+export type TerminalSidePanelTabId =
+  | 'sftp'
+  | 'scripts'
+  | 'history'
+  | 'theme'
+  | 'system'
+  | 'notes'
+  | 'ai';
 
 export const TERMINAL_SIDE_PANEL_TAB_DEFAULT_ORDER: TerminalSidePanelTabId[] = [
   'sftp',
@@ -15,27 +33,21 @@ export const TERMINAL_SIDE_PANEL_TAB_DEFAULT_ORDER: TerminalSidePanelTabId[] = [
   'ai',
 ];
 
-export const TERMINAL_SIDE_PANEL_TAB_IDS = new Set<TerminalSidePanelTabId>(TERMINAL_SIDE_PANEL_TAB_DEFAULT_ORDER);
+export const TERMINAL_SIDE_PANEL_TAB_IDS = new Set<TerminalSidePanelTabId>(
+  TERMINAL_SIDE_PANEL_TAB_DEFAULT_ORDER,
+);
 
+export const TERMINAL_SIDE_PANEL_TAB_LAYOUT_DEFAULTS: ToolbarItemLayoutDefaults = {
+  order: [...TERMINAL_SIDE_PANEL_TAB_DEFAULT_ORDER],
+  placement: Object.fromEntries(
+    TERMINAL_SIDE_PANEL_TAB_DEFAULT_ORDER.map((id) => [id, 'show' as const]),
+  ),
+};
+
+/** Order-only normalizer (legacy + tests). */
 export function normalizeTerminalSidePanelTabOrder(value: unknown): TerminalSidePanelTabId[] {
-  if (!Array.isArray(value) || value.length !== TERMINAL_SIDE_PANEL_TAB_DEFAULT_ORDER.length) {
-    return [...TERMINAL_SIDE_PANEL_TAB_DEFAULT_ORDER];
-  }
-
-  const seen = new Set<TerminalSidePanelTabId>();
-  const normalized: TerminalSidePanelTabId[] = [];
-  for (const candidate of value) {
-    if (typeof candidate !== 'string') return [...TERMINAL_SIDE_PANEL_TAB_DEFAULT_ORDER];
-    if (!TERMINAL_SIDE_PANEL_TAB_IDS.has(candidate as TerminalSidePanelTabId)) {
-      return [...TERMINAL_SIDE_PANEL_TAB_DEFAULT_ORDER];
-    }
-    const tab = candidate as TerminalSidePanelTabId;
-    if (seen.has(tab)) return [...TERMINAL_SIDE_PANEL_TAB_DEFAULT_ORDER];
-    seen.add(tab);
-    normalized.push(tab);
-  }
-
-  return normalized;
+  return normalizeToolbarItemLayout(value, TERMINAL_SIDE_PANEL_TAB_LAYOUT_DEFAULTS)
+    .order as TerminalSidePanelTabId[];
 }
 
 export function reorderTerminalSidePanelTab(
@@ -44,50 +56,75 @@ export function reorderTerminalSidePanelTab(
   targetTab: TerminalSidePanelTabId,
   placement: 'before' | 'after' = 'before',
 ): TerminalSidePanelTabId[] {
-  if (draggedTab === targetTab) return order;
-  if (!order.includes(draggedTab) || !order.includes(targetTab)) return order;
-
-  const withoutDragged = order.filter((tab) => tab !== draggedTab);
-  const targetIndex = withoutDragged.indexOf(targetTab);
-  if (targetIndex === -1) return order;
-  const insertionIndex = placement === 'after' ? targetIndex + 1 : targetIndex;
-  return [
-    ...withoutDragged.slice(0, insertionIndex),
-    draggedTab,
-    ...withoutDragged.slice(insertionIndex),
-  ];
+  const layout: ToolbarItemLayout = {
+    order,
+    placement: Object.fromEntries(order.map((id) => [id, 'show' as ToolbarItemPlacement])),
+  };
+  return reorderToolbarItems(layout, draggedTab, targetTab, placement)
+    .order as TerminalSidePanelTabId[];
 }
 
-function readTerminalSidePanelTabOrder(): TerminalSidePanelTabId[] {
+/**
+ * Seed the modern layout storage from the legacy order-only key when needed.
+ */
+function migrateSidePanelTabLayoutIfNeeded(): void {
   try {
-    return normalizeTerminalSidePanelTabOrder(
-      localStorageAdapter.read<TerminalSidePanelTabId[]>(STORAGE_KEY_TERMINAL_SIDE_PANEL_TAB_ORDER),
-    );
+    const modern = localStorageAdapter.read(STORAGE_KEY_TERMINAL_SIDE_PANEL_TAB_LAYOUT);
+    if (modern != null) return;
+    const legacy = localStorageAdapter.read(STORAGE_KEY_TERMINAL_SIDE_PANEL_TAB_ORDER);
+    if (legacy == null) return;
+    const layout = normalizeToolbarItemLayout(legacy, TERMINAL_SIDE_PANEL_TAB_LAYOUT_DEFAULTS);
+    localStorageAdapter.write(STORAGE_KEY_TERMINAL_SIDE_PANEL_TAB_LAYOUT, layout);
   } catch {
-    return [...TERMINAL_SIDE_PANEL_TAB_DEFAULT_ORDER];
+    // Best effort.
   }
 }
 
-function persistTerminalSidePanelTabOrder(order: TerminalSidePanelTabId[]): void {
-  try {
-    localStorageAdapter.write(STORAGE_KEY_TERMINAL_SIDE_PANEL_TAB_ORDER, order);
-  } catch {
-    // Best effort only; the toolbar still works with the in-memory order.
-  }
-}
+migrateSidePanelTabLayoutIfNeeded();
 
 export function useTerminalSidePanelTabOrder(): {
   sidePanelTabOrder: TerminalSidePanelTabId[];
   setSidePanelTabOrder: (order: TerminalSidePanelTabId[]) => void;
+  layout: ToolbarItemLayout;
+  setPlacement: (id: string, placement: ToolbarItemPlacement) => void;
+  move: (id: string, direction: 'earlier' | 'later') => void;
+  reorder: (draggedId: string, targetId: string, placement?: 'before' | 'after') => void;
+  resetLayout: () => void;
+  partition: ReturnType<typeof useToolbarItemLayout>['partition'];
 } {
-  const [sidePanelTabOrder, setSidePanelTabOrderRaw] = useState<TerminalSidePanelTabId[]>(
-    readTerminalSidePanelTabOrder,
+  const {
+    layout,
+    setPlacement,
+    setOrder,
+    move,
+    reorder,
+    reset,
+    partition,
+  } = useToolbarItemLayout(
+    STORAGE_KEY_TERMINAL_SIDE_PANEL_TAB_LAYOUT,
+    TERMINAL_SIDE_PANEL_TAB_LAYOUT_DEFAULTS,
   );
 
-  const setSidePanelTabOrder = useCallback((order: TerminalSidePanelTabId[]) => {
-    setSidePanelTabOrderRaw(order);
-    persistTerminalSidePanelTabOrder(order);
-  }, []);
+  const sidePanelTabOrder = layout.order as TerminalSidePanelTabId[];
 
-  return { sidePanelTabOrder, setSidePanelTabOrder };
+  const setSidePanelTabOrder = useCallback(
+    (order: TerminalSidePanelTabId[]) => {
+      setOrder(order);
+    },
+    [setOrder],
+  );
+
+  return useMemo(
+    () => ({
+      sidePanelTabOrder,
+      setSidePanelTabOrder,
+      layout,
+      setPlacement,
+      move,
+      reorder,
+      resetLayout: reset,
+      partition,
+    }),
+    [layout, move, partition, reorder, reset, setPlacement, setSidePanelTabOrder, sidePanelTabOrder],
+  );
 }
