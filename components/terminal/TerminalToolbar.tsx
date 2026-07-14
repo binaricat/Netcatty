@@ -72,6 +72,8 @@ export const TERMINAL_TOOLBAR_LAYOUT_DEFAULTS: ToolbarItemLayoutDefaults = {
     recording: 'collapse',
     encoding: 'collapse',
   },
+  // Always-present action so reachability cannot rely on session-only ids.
+  lockedIds: ['search'],
 };
 
 export interface TerminalToolbarProps {
@@ -259,11 +261,25 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
           id,
           label: itemLabels[id],
           icon: itemIcons[id],
+          locked: id === 'search',
+          // Host-highlight popover is inline-only; collapse would be a silent hide.
+          supportsCollapse: id !== 'highlight',
         })),
     [availableIds, itemIcons, itemLabels, toolbarLayout.layout.order],
   );
 
-  const { shown, collapsed } = toolbarLayout.partition(availableIds);
+  const { shown, collapsed } = useMemo(() => {
+    const parts = toolbarLayout.partition(availableIds);
+    // highlight is show/hide only — never leave it stranded as "collapsed but null".
+    if (parts.collapsed.includes('highlight')) {
+      return {
+        shown: [...parts.shown, 'highlight'],
+        collapsed: parts.collapsed.filter((id) => id !== 'highlight'),
+        hidden: parts.hidden,
+      };
+    }
+    return parts;
+  }, [availableIds, toolbarLayout]);
 
   if (compactToolbar) {
     return (
@@ -876,12 +892,17 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
     <TooltipProvider delayDuration={500} skipDelayDuration={100} disableHoverableContent>
       <ToolbarCustomizeContextMenu
         items={customizeItems}
-        placementOf={(id) => toolbarLayout.layout.placement[id] ?? 'show'}
-        onSetPlacement={toolbarLayout.setPlacement}
-        onMove={toolbarLayout.move}
+        placementOf={(id) => {
+          const placement = toolbarLayout.layout.placement[id] ?? 'show';
+          // Highlight cannot collapse; treat stored collapse as show for display.
+          if (id === 'highlight' && placement === 'collapse') return 'show';
+          return placement;
+        }}
+        onSetPlacement={(id, placement) => toolbarLayout.setPlacement(id, placement, availableIds)}
+        onMove={(id, direction) => toolbarLayout.move(id, direction, availableIds)}
         onReset={toolbarLayout.reset}
         t={t}
-        className="inline-flex items-center"
+        className="inline-flex items-center min-h-6 min-w-6"
       >
         {shown.map(renderInline)}
 

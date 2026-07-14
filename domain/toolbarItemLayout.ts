@@ -127,23 +127,45 @@ export function normalizeToolbarItemLayout(
   return ensureReachable({ order, placement }, defaults, known);
 }
 
+function toIdSet(ids?: readonly string[] | ReadonlySet<string> | null): Set<string> | null {
+  if (ids == null) return null;
+  return ids instanceof Set ? ids : new Set(ids);
+}
+
 function ensureReachable(
   layout: ToolbarItemLayout,
   defaults: ToolbarItemLayoutDefaults,
   known: Set<string>,
+  /**
+   * When provided, reachability is computed only over currently available ids
+   * (e.g. session-specific toolbar actions). Unavailable "show" entries must
+   * not keep an empty visible toolbar looking "reachable".
+   */
+  availableIds?: readonly string[] | ReadonlySet<string> | null,
 ): ToolbarItemLayout {
   if (defaults.requireReachable === false) return layout;
 
-  const hasReachable = layout.order.some((id) => {
+  const available = toIdSet(availableIds);
+
+  const isCandidate = (id: string): boolean => {
     if (!known.has(id)) return false;
+    if (available && !available.has(id)) return false;
+    return true;
+  };
+
+  const hasReachable = layout.order.some((id) => {
+    if (!isCandidate(id)) return false;
     const p = layout.placement[id] ?? 'show';
     return p === 'show' || p === 'collapse';
   });
   if (hasReachable) return layout;
 
-  // Prefer restoring the first non-locked default "show" item.
+  // Prefer restoring the first always-present (available) non-locked default.
   const restoreId =
-    defaults.order.find((id) => !(defaults.lockedIds?.includes(id) ?? false)) ??
+    defaults.order.find(
+      (id) => isCandidate(id) && !(defaults.lockedIds?.includes(id) ?? false),
+    ) ??
+    defaults.order.find((id) => isCandidate(id)) ??
     defaults.order[0];
   if (!restoreId) return layout;
   return {
@@ -187,6 +209,7 @@ export function setToolbarItemPlacement(
   id: string,
   placement: ToolbarItemPlacement,
   defaults: ToolbarItemLayoutDefaults,
+  availableIds?: readonly string[] | ReadonlySet<string> | null,
 ): ToolbarItemLayout {
   if (!layout.order.includes(id) && !defaults.order.includes(id)) return layout;
   if ((defaults.lockedIds?.includes(id) ?? false) && placement === 'hide') {
@@ -200,7 +223,7 @@ export function setToolbarItemPlacement(
       [id]: placement,
     },
   };
-  return ensureReachable(next, defaults, new Set(defaults.order));
+  return ensureReachable(next, defaults, new Set(defaults.order), availableIds);
 }
 
 /**
@@ -232,18 +255,33 @@ export function reorderToolbarItems(
   };
 }
 
-/** Move an item one step earlier/later in the full order. */
+/**
+ * Move an item one step earlier/later in order.
+ * When `availableIds` is set, skip unavailable neighbors so the UI reorder
+ * matches the filtered customize list.
+ */
 export function moveToolbarItem(
   layout: ToolbarItemLayout,
   id: string,
   direction: 'earlier' | 'later',
+  availableIds?: readonly string[] | ReadonlySet<string> | null,
 ): ToolbarItemLayout {
-  const index = layout.order.indexOf(id);
+  const available = toIdSet(availableIds);
+  const sequence = available
+    ? layout.order.filter((candidate) => available.has(candidate))
+    : layout.order;
+  const index = sequence.indexOf(id);
   if (index === -1) return layout;
   const swapWith = direction === 'earlier' ? index - 1 : index + 1;
-  if (swapWith < 0 || swapWith >= layout.order.length) return layout;
-  const order = [...layout.order];
-  [order[index], order[swapWith]] = [order[swapWith], order[index]];
+  if (swapWith < 0 || swapWith >= sequence.length) return layout;
+
+  const a = sequence[index];
+  const b = sequence[swapWith];
+  const order = layout.order.map((candidate) => {
+    if (candidate === a) return b;
+    if (candidate === b) return a;
+    return candidate;
+  });
   return { ...layout, order };
 }
 

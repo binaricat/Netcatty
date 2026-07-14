@@ -341,8 +341,16 @@ function TerminalLayerSidePanelInner({ ctx }: { ctx: SidePanelContext }) {
           <ToolbarCustomizeContextMenu
             items={sidePanelCustomizeItems}
             placementOf={(id) => sidePanelTabLayout.placement[id] ?? 'show'}
-            onSetPlacement={setSidePanelTabPlacement}
-            onMove={moveSidePanelTab}
+            onSetPlacement={(id, placement) => {
+              setSidePanelTabPlacement(id, placement, TERMINAL_SIDE_PANEL_TAB_DEFAULT_ORDER);
+              // Hiding the open tab without switching leaves content with no chip.
+              if (placement === 'hide' && activeSidePanelTab === id) {
+                handleCloseSidePanel?.();
+              }
+            }}
+            onMove={(id, direction) =>
+              moveSidePanelTab(id, direction, TERMINAL_SIDE_PANEL_TAB_DEFAULT_ORDER)
+            }
             onReset={resetSidePanelTabLayout}
             t={t}
             className="flex h-9 items-center px-1.5 py-1 flex-shrink-0 gap-1 w-full"

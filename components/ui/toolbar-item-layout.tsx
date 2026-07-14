@@ -26,7 +26,7 @@ import {
   ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from './context-menu';
-import { Dropdown, DropdownContent, DropdownTrigger } from './dropdown';
+import { Popover, PopoverContent, PopoverTrigger } from './popover';
 import { Tooltip, TooltipContent, TooltipTrigger } from './tooltip';
 
 export type ToolbarCustomizeItem = {
@@ -36,6 +36,8 @@ export type ToolbarCustomizeItem = {
   icon?: React.ReactNode;
   /** When true, hide option is disabled (locked items). */
   locked?: boolean;
+  /** When false, collapse is not offered (item is show/hide only). Default true. */
+  supportsCollapse?: boolean;
 };
 
 export type ToolbarCustomizeContextMenuProps = {
@@ -129,9 +131,12 @@ export const ToolbarCustomizeContextMenu: React.FC<ToolbarCustomizeContextMenuPr
               </ContextMenuSubTrigger>
               <ContextMenuSubContent className="min-w-[10rem]">
                 <ContextMenuRadioGroup
-                  value={placement}
+                  value={
+                    item.supportsCollapse === false && placement === 'collapse' ? 'show' : placement
+                  }
                   onValueChange={(value) => {
                     if (value === 'show' || value === 'collapse' || value === 'hide') {
+                      if (value === 'collapse' && item.supportsCollapse === false) return;
                       onSetPlacement(item.id, value);
                     }
                   }}
@@ -140,10 +145,12 @@ export const ToolbarCustomizeContextMenu: React.FC<ToolbarCustomizeContextMenuPr
                     <Eye size={12} className="shrink-0" />
                     {t('toolbar.layout.show')}
                   </ContextMenuRadioItem>
-                  <ContextMenuRadioItem value="collapse" className="gap-2">
-                    <LayoutList size={12} className="shrink-0" />
-                    {t('toolbar.layout.collapse')}
-                  </ContextMenuRadioItem>
+                  {item.supportsCollapse !== false && (
+                    <ContextMenuRadioItem value="collapse" className="gap-2">
+                      <LayoutList size={12} className="shrink-0" />
+                      {t('toolbar.layout.collapse')}
+                    </ContextMenuRadioItem>
+                  )}
                   <ContextMenuRadioItem value="hide" disabled={item.locked} className="gap-2">
                     <EyeOff size={12} className="shrink-0" />
                     {t('toolbar.layout.hide')}
@@ -199,6 +206,8 @@ export type ToolbarOverflowMenuProps = {
 
 /**
  * ⋮ button that opens the collapsed-item region. Hidden when nothing is collapsed.
+ * Uses Popover (not Dropdown) so nested portaled menus (encoding, bookmark list)
+ * can opt out of outside-dismiss via data-toolbar-nested-menu.
  */
 export const ToolbarOverflowMenu: React.FC<ToolbarOverflowMenuProps> = ({
   hasItems,
@@ -213,10 +222,10 @@ export const ToolbarOverflowMenu: React.FC<ToolbarOverflowMenuProps> = ({
   const Icon = orientation === 'vertical' ? MoreVertical : MoreHorizontal;
 
   return (
-    <Dropdown>
+    <Popover>
       <Tooltip>
         <TooltipTrigger asChild>
-          <DropdownTrigger asChild>
+          <PopoverTrigger asChild>
             <Button
               variant="ghost"
               size="icon"
@@ -226,13 +235,23 @@ export const ToolbarOverflowMenu: React.FC<ToolbarOverflowMenuProps> = ({
             >
               <Icon size={14} />
             </Button>
-          </DropdownTrigger>
+          </PopoverTrigger>
         </TooltipTrigger>
         <TooltipContent side="bottom">{label}</TooltipContent>
       </Tooltip>
-      <DropdownContent align={align} className={cn('p-1', contentClassName)}>
+      <PopoverContent
+        align={align}
+        className={cn('p-1 w-auto', contentClassName)}
+        data-toolbar-overflow-menu="true"
+        onInteractOutside={(e) => {
+          const target = e.target as Element | null;
+          if (target?.closest('[data-toolbar-nested-menu="true"]')) {
+            e.preventDefault();
+          }
+        }}
+      >
         {children}
-      </DropdownContent>
-    </Dropdown>
+      </PopoverContent>
+    </Popover>
   );
 };

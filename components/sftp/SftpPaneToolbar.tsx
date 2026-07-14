@@ -409,6 +409,20 @@ export const SftpPaneToolbar: React.FC<SftpPaneToolbarProps> = React.memo(({
     [availableIds, itemIcons, itemLabels, toolbarLayout.layout.order],
   );
 
+  const setSftpPlacement = useCallback(
+    (id: string, placement: "show" | "collapse" | "hide") => {
+      toolbarLayout.setPlacement(id, placement, availableIds);
+    },
+    [availableIds, toolbarLayout],
+  );
+
+  const moveSftpItem = useCallback(
+    (id: string, direction: "earlier" | "later") => {
+      toolbarLayout.move(id, direction, availableIds);
+    },
+    [availableIds, toolbarLayout],
+  );
+
   const { shown, collapsed } = toolbarLayout.partition(availableIds);
 
   const bookmarkPopoverBody = (
@@ -518,7 +532,13 @@ export const SftpPaneToolbar: React.FC<SftpPaneToolbarProps> = React.memo(({
           {bookmarkButtonLabel}
         </button>
       </PopoverTrigger>
-      <PopoverContent className="w-64 p-0" align="start" side="left" sideOffset={6}>
+      <PopoverContent
+        className="w-64 p-0"
+        align="start"
+        side="left"
+        sideOffset={6}
+        data-toolbar-nested-menu="true"
+      >
         {bookmarkPopoverBody}
       </PopoverContent>
     </Popover>
@@ -569,7 +589,13 @@ export const SftpPaneToolbar: React.FC<SftpPaneToolbarProps> = React.memo(({
           {t("sftp.encoding.label")}
         </button>
       </PopoverTrigger>
-      <PopoverContent className="w-36 p-1" align="start" side="right">
+      <PopoverContent
+        className="w-36 p-1"
+        align="start"
+        side="left"
+        sideOffset={6}
+        data-toolbar-nested-menu="true"
+      >
         {(["auto", "utf-8", "gb18030"] as const).map((encoding) => (
           <PopoverClose asChild key={encoding}>
             <button
@@ -867,15 +893,10 @@ export const SftpPaneToolbar: React.FC<SftpPaneToolbarProps> = React.memo(({
 
   return (
     <TooltipProvider delayDuration={500} skipDelayDuration={100} disableHoverableContent>
-      <ToolbarCustomizeContextMenu
-        items={customizeItems}
-        placementOf={(id) => toolbarLayout.layout.placement[id] ?? "show"}
-        onSetPlacement={toolbarLayout.setPlacement}
-        onMove={toolbarLayout.move}
-        onReset={toolbarLayout.reset}
-        t={t}
+      {/* Path chrome stays outside customize so path right-click keeps native/browser menus. */}
+      <div
         className="h-7 px-2 flex items-center gap-1 border-b border-border/40 bg-secondary/20"
-        dataSection="terminal-sftp-toolbar"
+        data-section="terminal-sftp-toolbar"
       >
           {/* Editable Breadcrumb with autocomplete */}
           {isEditingPath ? (
@@ -946,7 +967,15 @@ export const SftpPaneToolbar: React.FC<SftpPaneToolbarProps> = React.memo(({
             </Tooltip>
           )}
 
-          <div className="ml-auto flex items-center gap-0.5 shrink-0">
+          <ToolbarCustomizeContextMenu
+            items={customizeItems}
+            placementOf={(id) => toolbarLayout.layout.placement[id] ?? "show"}
+            onSetPlacement={setSftpPlacement}
+            onMove={moveSftpItem}
+            onReset={toolbarLayout.reset}
+            t={t}
+            className="ml-auto flex items-center gap-0.5 shrink-0"
+          >
             {shown.map(renderInline)}
             <ToolbarOverflowMenu
               hasItems={collapsedNodes.length > 0}
@@ -957,8 +986,8 @@ export const SftpPaneToolbar: React.FC<SftpPaneToolbarProps> = React.memo(({
             >
               <div className="flex flex-col min-w-[140px]">{collapsedNodes}</div>
             </ToolbarOverflowMenu>
-          </div>
-      </ToolbarCustomizeContextMenu>
+          </ToolbarCustomizeContextMenu>
+      </div>
 
       {showFilterBar && (
         <div

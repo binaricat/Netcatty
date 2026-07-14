@@ -89,6 +89,40 @@ test('set placement forces at least one reachable item', () => {
   assert.equal(next.placement.a, 'show');
 });
 
+test('requireReachable ignores unavailable filler ids', () => {
+  const layout = normalizeToolbarItemLayout(
+    {
+      order: ['a', 'b', 'serialOnly'],
+      placement: { a: 'hide', b: 'hide', serialOnly: 'show' },
+    },
+    {
+      order: ['a', 'b', 'serialOnly'],
+      requireReachable: true,
+    },
+  );
+  // serialOnly is still "show" but not available for this session — must restore a/b.
+  const next = setToolbarItemPlacement(
+    layout,
+    'a',
+    'hide',
+    { order: ['a', 'b', 'serialOnly'], requireReachable: true },
+    ['a', 'b'],
+  );
+  assert.equal(next.placement.a === 'show' || next.placement.b === 'show', true);
+});
+
+test('move skips unavailable neighbors when availableIds is provided', () => {
+  const layout = normalizeToolbarItemLayout(
+    {
+      order: ['a', 'serialOnly', 'b'],
+      placement: { a: 'show', serialOnly: 'show', b: 'show' },
+    },
+    { order: ['a', 'serialOnly', 'b'] },
+  );
+  const moved = moveToolbarItem(layout, 'a', 'later', ['a', 'b']);
+  assert.deepEqual(moved.order, ['b', 'serialOnly', 'a']);
+});
+
 test('reorder and move preserve placement map', () => {
   const layout = normalizeToolbarItemLayout(null, defaults);
   const reordered = reorderToolbarItems(layout, 'c', 'a', 'before');

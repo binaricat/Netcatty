@@ -20,11 +20,19 @@ import {
 export type UseToolbarItemLayoutResult = {
   layout: ToolbarItemLayout;
   partition: (availableIds?: readonly string[] | ReadonlySet<string>) => ToolbarItemPartition;
-  setPlacement: (id: string, placement: ToolbarItemPlacement) => void;
+  setPlacement: (
+    id: string,
+    placement: ToolbarItemPlacement,
+    availableIds?: readonly string[] | ReadonlySet<string> | null,
+  ) => void;
   /** Replace full order while preserving placements (normalized against defaults). */
   setOrder: (order: string[]) => void;
   reorder: (draggedId: string, targetId: string, placement?: 'before' | 'after') => void;
-  move: (id: string, direction: 'earlier' | 'later') => void;
+  move: (
+    id: string,
+    direction: 'earlier' | 'later',
+    availableIds?: readonly string[] | ReadonlySet<string> | null,
+  ) => void;
   reset: () => void;
 };
 
@@ -77,9 +85,13 @@ export function useToolbarItemLayout(
   );
 
   const setPlacement = useCallback(
-    (id: string, placement: ToolbarItemPlacement) => {
+    (
+      id: string,
+      placement: ToolbarItemPlacement,
+      availableIds?: readonly string[] | ReadonlySet<string> | null,
+    ) => {
       setLayout((current) => {
-        const next = setToolbarItemPlacement(current, id, placement, defaults);
+        const next = setToolbarItemPlacement(current, id, placement, defaults, availableIds);
         writeLayout(storageKey, next);
         return next;
       });
@@ -113,9 +125,13 @@ export function useToolbarItemLayout(
   );
 
   const move = useCallback(
-    (id: string, direction: 'earlier' | 'later') => {
+    (
+      id: string,
+      direction: 'earlier' | 'later',
+      availableIds?: readonly string[] | ReadonlySet<string> | null,
+    ) => {
       setLayout((current) => {
-        const next = moveToolbarItem(current, id, direction);
+        const next = moveToolbarItem(current, id, direction, availableIds);
         writeLayout(storageKey, next);
         return next;
       });
