@@ -530,6 +530,7 @@ export function TerminalLayerTabBridge({ stableRef }: { stableRef: StableRef }) 
     resolvedSessionHostIds: s.resolvedSessionHostIds,
     sessionLogConfig: s.sessionLogConfig,
     sessionSudoAutofillPasswordsMap: s.sessionSudoAutofillPasswordsMap,
+    sessionSudoAutofillCandidatesMap: s.sessionSudoAutofillCandidatesMap,
     sessions,
     setDropHint,
     setEditorWordWrap: s.setEditorWordWrap,

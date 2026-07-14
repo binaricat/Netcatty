@@ -38,6 +38,7 @@ import type { DropEntry } from '../lib/sftpFileUtils';
 import { Host, KnownHost, TerminalSession, Workspace } from '../types';
 import { applySessionFontSizeToHost } from '../domain/terminalAppearance';
 import { resolveHostAutofillPassword } from '../domain/sshAuth';
+import { listPasswordPromptFillCandidates } from '../domain/passwordPromptAssist';
 import {
   resolveEffectiveTerminalHost,
   resolveTerminalChainHosts,
@@ -902,6 +903,23 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     return map;
   }, [hostMap, sessions, keys, identities]);
 
+  const sessionSudoAutofillCandidatesMap = useMemo(() => {
+    const map = new Map<
+      string,
+      ReturnType<typeof listPasswordPromptFillCandidates> | undefined
+    >();
+    for (const session of sessions) {
+      const rawHost = hostMap.get(session.hostId);
+      if (rawHost) {
+        map.set(
+          session.id,
+          listPasswordPromptFillCandidates({ host: rawHost, keys, identities }),
+        );
+      }
+    }
+    return map;
+  }, [hostMap, sessions, keys, identities]);
+
   const handleTerminalFontSizeChange = useCallback((sessionId: string, nextFontSize: number) => {
     const session = sessionsRef.current.find((candidate) => candidate.id === sessionId);
     const sessionHost = sessionHostsMapRef.current.get(sessionId);
@@ -1708,6 +1726,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     resolvedSessionHostIds,
     sessionLogConfig,
     sessionSudoAutofillPasswordsMap,
+    sessionSudoAutofillCandidatesMap,
     sessions,
     sessionsRef,
     setEditorWordWrap,

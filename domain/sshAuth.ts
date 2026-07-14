@@ -214,11 +214,12 @@ export const resolveHostAuthMethodForPersistence = (args: {
 };
 
 /**
- * Resolve the password to use for sudo autofill the same way SSH login does
+ * Resolve the password to use for sudo/su autofill the same way SSH login does
  * (through resolveHostAuth), so a password stored in a referenced Keychain
  * identity (host.identityId) is found — not just host.password (issue #1284).
  * Returns undefined when the host opts out of saving its password, or none is
  * available (pure key auth, or an undecryptable placeholder).
+ * Used for both sudo and su confirm-to-fill hints (#2156).
  */
 export const resolveHostAutofillPassword = (args: {
   host: Host;

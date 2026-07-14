@@ -1,7 +1,9 @@
 import type { Messages } from '../types';
 
 export const ruTerminalMessages: Messages = {
-  'terminal.sudoHint.pressEnter': 'Нажмите Enter, чтобы вставить пароль sudo',
+  'terminal.sudoHint.pressEnter': 'Нажмите Enter, чтобы вставить сохранённый пароль',
+  'terminal.passwordPicker.title': 'Сохранённые пароли',
+  'terminal.passwordPicker.empty': 'Нет сохранённых паролей',
   // Connection logs
   'logs.table.date': 'Дата',
   'logs.table.user': 'Пользователь',

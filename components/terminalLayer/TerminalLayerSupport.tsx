@@ -701,6 +701,7 @@ interface TerminalPaneProps {
   sessionHostResolved: boolean;
   chainHosts?: Host[];
   sudoAutofillPassword?: string;
+  sudoAutofillCandidates?: import("../terminal/runtime/terminalSudoAutofill").SudoPasswordAutofillCandidate[];
   workspaceById: Map<string, Workspace>;
   workspaceRectsById: Map<string, Record<string, WorkspaceRect>>;
   isTerminalLayerVisible: boolean;
@@ -829,6 +830,7 @@ const terminalPanePropsAreEqual = (
   prev.sessionHostResolved === next.sessionHostResolved &&
   prev.chainHosts === next.chainHosts &&
   prev.sudoAutofillPassword === next.sudoAutofillPassword &&
+  prev.sudoAutofillCandidates === next.sudoAutofillCandidates &&
   prev.workspaceById === next.workspaceById &&
   workspaceRectsEqual(getPaneRenderedWorkspaceRect(prev), getPaneRenderedWorkspaceRect(next)) &&
   prev.isTerminalLayerVisible === next.isTerminalLayerVisible &&
@@ -899,6 +901,7 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
   sessionHostResolved,
   chainHosts,
   sudoAutofillPassword,
+  sudoAutofillCandidates,
   workspaceById,
   workspaceRectsById,
   isTerminalLayerVisible,
@@ -1412,6 +1415,7 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
         sessionLog={sessionLog}
         sshDebugLogEnabled={sshDebugLogEnabled}
         sudoAutofillPassword={sudoAutofillPassword}
+        sudoAutofillCandidates={sudoAutofillCandidates}
         sessionDisplayName={resolveSessionTabTitle(session, terminalSettings?.dynamicTabTitleMode)}
         showSelectionAIAction={showSelectionAIAction}
         onAddSelectionToAI={onAddSelectionToAI}
@@ -1433,6 +1437,10 @@ interface TerminalPanesHostProps {
   sessionHostsMap: Map<string, Host>;
   sessionChainHostsMap: Map<string, Host[]>;
   sessionSudoAutofillPasswordsMap: Map<string, string | undefined>;
+  sessionSudoAutofillCandidatesMap: Map<
+    string,
+    import("../terminal/runtime/terminalSudoAutofill").SudoPasswordAutofillCandidate[] | undefined
+  >;
   resolvedSessionHostIds: Set<string>;
   workspaceById: Map<string, Workspace>;
   workspaceRectsById: Map<string, Record<string, WorkspaceRect>>;
@@ -1518,6 +1526,7 @@ const terminalPanesHostPropsAreEqual = (
   if (prev.sessionHostsMap !== next.sessionHostsMap) return false;
   if (prev.sessionChainHostsMap !== next.sessionChainHostsMap) return false;
   if (prev.sessionSudoAutofillPasswordsMap !== next.sessionSudoAutofillPasswordsMap) return false;
+  if (prev.sessionSudoAutofillCandidatesMap !== next.sessionSudoAutofillCandidatesMap) return false;
   if (prev.resolvedSessionHostIds !== next.resolvedSessionHostIds) return false;
   if (prev.workspaceById !== next.workspaceById) return false;
   if (prev.isTerminalLayerVisible !== next.isTerminalLayerVisible) return false;
@@ -1609,6 +1618,7 @@ export const TerminalPanesHost: React.FC<TerminalPanesHostProps> = memo(({
   sessionHostsMap,
   sessionChainHostsMap,
   sessionSudoAutofillPasswordsMap,
+  sessionSudoAutofillCandidatesMap,
   resolvedSessionHostIds,
   ...sharedProps
 }) => {
@@ -1630,6 +1640,7 @@ export const TerminalPanesHost: React.FC<TerminalPanesHostProps> = memo(({
             sessionHostResolved={resolvedSessionHostIds.has(session.id)}
             chainHosts={sessionChainHostsMap.get(session.id)}
             sudoAutofillPassword={sessionSudoAutofillPasswordsMap.get(session.id)}
+            sudoAutofillCandidates={sessionSudoAutofillCandidatesMap.get(session.id)}
             showSelectionAIAction={showSelectionAIAction}
             {...sharedProps}
           />

@@ -31,7 +31,10 @@ import {
   resetTerminalOutputPressure,
   setTerminalOutputPressureVisibility,
 } from "./terminalOutputPressure";
-import { createSudoPasswordAutofill } from "./terminalSudoAutofill";
+import {
+  createSudoPasswordAutofill,
+  type SudoPasswordAutofillCandidate,
+} from "./terminalSudoAutofill";
 import {
   filterTerminalSessionData,
   resetTerminalSyncBlockFilter,
@@ -601,6 +604,7 @@ export const tryAttachSessionToTerminal = (
     onExit?: (evt: { exitCode?: number; signal?: number; error?: string; reason?: string }) => void;
     convertLfToCrlf?: boolean;
     sudoAutofillPassword?: string;
+    sudoAutofillCandidates?: SudoPasswordAutofillCandidate[];
   },
 ): boolean => {
   if (!isTerminalBootActive(ctx)) {
@@ -651,6 +655,7 @@ export const attachSessionToTerminal = (
     onExit?: (evt: { exitCode?: number; signal?: number; error?: string; reason?: string }) => void;
     convertLfToCrlf?: boolean;
     sudoAutofillPassword?: string;
+    sudoAutofillCandidates?: SudoPasswordAutofillCandidate[];
   },
 ) => {
   if (!isTerminalBootActive(ctx)) {
@@ -666,10 +671,26 @@ export const attachSessionToTerminal = (
   resetTerminalLineTimestamps(term);
   resetTerminalOutputPressure(term);
   ctx.onSessionAttached?.(id);
+  const assistMode =
+    ctx.terminalSettingsRef?.current?.passwordPromptAssist
+    ?? ctx.terminalSettings?.passwordPromptAssist
+    ?? "hint";
+  const candidates =
+    opts?.sudoAutofillCandidates
+    ?? ctx.sudoAutofillCandidatesRef?.current
+    ?? ctx.sudoAutofillCandidates
+    ?? [];
+  const password =
+    opts?.sudoAutofillPassword
+    ?? ctx.sudoAutofillPasswordRef?.current
+    ?? ctx.sudoAutofillPassword;
   const sudoAutofill = createSudoPasswordAutofill({
-    password: opts?.sudoAutofillPassword,
+    mode: assistMode,
+    password,
+    candidates,
     write: (data) => ctx.terminalBackend.writeToSession(id, data, { automated: true }),
     onHint: (active) => ctx.onSudoHint?.(active) ?? false,
+    onPicker: (active, state) => ctx.onPasswordPromptPicker?.(active, state) ?? false,
   });
   if (ctx.sudoAutofillRef) {
     ctx.sudoAutofillRef.current = sudoAutofill;

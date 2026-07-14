@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState, useMemo } from "react"
 import { AlertCircle, Import, Minus, Palette, Pencil, Plus, Trash2 } from "lucide-react";
 import type {
   CursorShape,
+  PasswordPromptAssistMode,
   TerminalEmulationType,
   TerminalSettings,
 } from "../../../domain/models";
@@ -1176,6 +1177,27 @@ function SettingsTerminalTab(props: {
             checked={terminalSettings.autocompletePopupMenu}
             onChange={handleAutocompletePopupMenuChange}
             disabled={!terminalSettings.autocompleteEnabled}
+          />
+        </SettingRow>
+      </div>
+
+      <SectionHeader title={t("settings.terminal.section.passwordPromptAssist")} />
+      <div className="space-y-0 divide-y divide-border rounded-lg border bg-card px-4">
+        <SettingRow
+          label={t("settings.terminal.passwordPromptAssist.mode")}
+          description={t("settings.terminal.passwordPromptAssist.mode.desc")}
+        >
+          <Select
+            value={terminalSettings.passwordPromptAssist ?? "hint"}
+            onChange={(v) =>
+              updateTerminalSetting("passwordPromptAssist", v as PasswordPromptAssistMode)
+            }
+            options={[
+              { value: "off", label: t("settings.terminal.passwordPromptAssist.off") },
+              { value: "hint", label: t("settings.terminal.passwordPromptAssist.hint") },
+              { value: "picker", label: t("settings.terminal.passwordPromptAssist.picker") },
+            ]}
+            className="w-48"
           />
         </SettingRow>
       </div>

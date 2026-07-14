@@ -208,6 +208,8 @@ export interface TerminalProps {
   sessionLog?: { enabled: boolean; directory: string; format: string; timestampsEnabled?: boolean };
   sshDebugLogEnabled?: boolean;
   sudoAutofillPassword?: string;
+  /** Host + keychain password identities for picker mode (#2156). */
+  sudoAutofillCandidates?: import("./runtime/terminalSudoAutofill").SudoPasswordAutofillCandidate[];
   showSelectionAIAction?: boolean;
   onAddSelectionToAI?: (sessionId: string, selection: string) => void;
   /** Override display name for the pane title bar (customName || hostLabel) */

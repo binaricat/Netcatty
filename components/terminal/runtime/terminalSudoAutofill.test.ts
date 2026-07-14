@@ -222,7 +222,10 @@ test("an expired arm shows no hint for a bare prompt", () => {
     password: "secret",
     now: () => now,
     write: (d) => writes.push(d),
-    onHint: (a) => hints.push(a),
+    onHint: (a) => {
+      hints.push(a);
+      return true;
+    },
   });
   autofill.armForCommand("sudo whoami");
   now += 31_000;
@@ -244,10 +247,125 @@ test("getSingleBracketedPasteLine extracts single-line bracketed paste content",
   assert.equal(getSingleBracketedPasteLine("\x1b[200~sudo whoami\rpwd\x1b[201~"), null);
 });
 
-test("shouldArmSudoPasswordAutofill only arms direct sudo commands", () => {
+test("shouldArmSudoPasswordAutofill arms direct sudo and su commands", () => {
   assert.equal(shouldArmSudoPasswordAutofill("sudo whoami"), true);
   assert.equal(shouldArmSudoPasswordAutofill("command sudo whoami"), true);
   assert.equal(shouldArmSudoPasswordAutofill("builtin sudo whoami"), true);
+  assert.equal(shouldArmSudoPasswordAutofill("su"), true);
+  assert.equal(shouldArmSudoPasswordAutofill("su -"), true);
+  assert.equal(shouldArmSudoPasswordAutofill("su root"), true);
+  assert.equal(shouldArmSudoPasswordAutofill("su - root"), true);
+  assert.equal(shouldArmSudoPasswordAutofill("su -l alice"), true);
+  assert.equal(shouldArmSudoPasswordAutofill("command su -"), true);
+  assert.equal(shouldArmSudoPasswordAutofill("builtin su"), true);
   assert.equal(shouldArmSudoPasswordAutofill("echo '[sudo] password for alice:'"), false);
   assert.equal(shouldArmSudoPasswordAutofill("cat sudo.log"), false);
+  // Word-boundary: do not arm unrelated commands that only start with "su"
+  assert.equal(shouldArmSudoPasswordAutofill("sum file"), false);
+  assert.equal(shouldArmSudoPasswordAutofill("suspend"), false);
+  assert.equal(shouldArmSudoPasswordAutofill("suricata -T"), false);
+  assert.equal(shouldArmSudoPasswordAutofill("echo su"), false);
+});
+
+test("shows a hint for su Password prompt when armed", () => {
+  // su asks for the target account password with a bare "Password:" line
+  // (no [sudo] tag), so arming is required (#2156).
+  const { autofill, writes, hints } = make();
+  autofill.armForCommand("su -");
+  assert.equal(autofill.handleOutput("Password: "), "Password: ");
+  assert.deepEqual(hints, [true]);
+  assert.deepEqual(writes, []);
+  assert.equal(autofill.isPromptPending(), true);
+  autofill.confirmFill();
+  assert.deepEqual(writes, ["secret\n"]);
+});
+
+test("su to a named user arms the same confirm-to-fill path", () => {
+  const { autofill, writes, hints } = make();
+  autofill.armForCommand("su alice");
+  autofill.handleOutput("Password: ");
+  assert.deepEqual(hints, [true]);
+  autofill.confirmFill();
+  assert.deepEqual(writes, ["secret\n"]);
+});
+
+test("mode off never hints even for explicit sudo prompts", () => {
+  const writes: string[] = [];
+  const hints: boolean[] = [];
+  const autofill = createSudoPasswordAutofill({
+    mode: "off",
+    password: "secret",
+    write: (d) => writes.push(d),
+    onHint: (a) => {
+      hints.push(a);
+      return true;
+    },
+  });
+  autofill.handleOutput("[sudo] password for alice: ");
+  assert.deepEqual(hints, []);
+  assert.equal(autofill.isPromptPending(), false);
+});
+
+test("picker mode opens the credential list and fills the selected secret", () => {
+  const writes: string[] = [];
+  const pickerStates: Array<{ items: { id: string }[]; selectedIndex: number } | null> = [];
+  const autofill = createSudoPasswordAutofill({
+    mode: "picker",
+    candidates: [
+      { id: "host", label: "Host", username: "alice", password: "host-secret" },
+      { id: "identity:root", label: "Root", username: "root", password: "root-secret" },
+    ],
+    write: (d) => writes.push(d),
+    onPicker: (active, state) => {
+      pickerStates.push(active ? { items: state!.items, selectedIndex: state!.selectedIndex } : null);
+      return true;
+    },
+  });
+  autofill.armForCommand("su -");
+  autofill.handleOutput("Password: ");
+  assert.equal(autofill.isPromptPending(), true);
+  assert.equal(pickerStates.length, 1);
+  assert.equal(pickerStates[0]?.items.length, 2);
+  assert.equal(pickerStates[0]?.selectedIndex, 0);
+
+  autofill.moveSelection(1);
+  assert.equal(pickerStates.at(-1)?.selectedIndex, 1);
+
+  autofill.confirmFill();
+  assert.deepEqual(writes, ["root-secret\n"]);
+  assert.equal(pickerStates.at(-1), null);
+});
+
+test("picker confirmFill can target a specific candidate id", () => {
+  const writes: string[] = [];
+  const autofill = createSudoPasswordAutofill({
+    mode: "picker",
+    candidates: [
+      { id: "host", label: "Host", password: "host-secret" },
+      { id: "identity:root", label: "Root", password: "root-secret" },
+    ],
+    write: (d) => writes.push(d),
+    onPicker: () => true,
+  });
+  autofill.armForCommand("su root");
+  autofill.handleOutput("Password: ");
+  autofill.confirmFill("identity:root");
+  assert.deepEqual(writes, ["root-secret\n"]);
+});
+
+test("picker mode does not expose passwords in onPicker payload", () => {
+  let seen: unknown = null;
+  const autofill = createSudoPasswordAutofill({
+    mode: "picker",
+    candidates: [{ id: "host", label: "Host", password: "top-secret" }],
+    write: () => {},
+    onPicker: (_active, state) => {
+      seen = state;
+      return true;
+    },
+  });
+  autofill.handleOutput("[sudo] password for alice: ");
+  assert.ok(seen && typeof seen === "object");
+  const json = JSON.stringify(seen);
+  assert.equal(json.includes("top-secret"), false);
 });

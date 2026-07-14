@@ -300,6 +300,7 @@ const WORKSPACE_CTX_KEYS = [
   'sessionHostsMap',
   'sessionChainHostsMap',
   'sessionSudoAutofillPasswordsMap',
+  'sessionSudoAutofillCandidatesMap',
   'workspaceById',
   'workspaceRectsById',
   'isTerminalLayerVisible',

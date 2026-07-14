@@ -32,6 +32,7 @@ test("workspace section passes resolved session host ids to terminal panes", () 
     sessionHostsMap: new Map(),
     sessionChainHostsMap: new Map(),
     sessionSudoAutofillPasswordsMap: new Map(),
+    sessionSudoAutofillCandidatesMap: new Map(),
     resolvedSessionHostIds,
     workspaceById: new Map(),
     workspaceRectsById: new Map(),

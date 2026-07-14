@@ -537,6 +537,15 @@ export const ruCoreMessages: Messages = {
   'settings.terminal.autocomplete.popupMenu': 'Всплывающее меню',
   'settings.terminal.autocomplete.popupMenu.desc': 'Показывать плавающий список из нескольких подсказок.',
 
+  // Settings > Terminal > Password prompt assist (sudo/su)
+  'settings.terminal.section.passwordPromptAssist': 'Подсказки пароля',
+  'settings.terminal.passwordPromptAssist.mode': 'Режим подсказки',
+  'settings.terminal.passwordPromptAssist.mode.desc':
+    'Когда sudo или su запрашивают пароль, предложить сохранённые учётные данные. Никогда не отправляет пароль без подтверждения.',
+  'settings.terminal.passwordPromptAssist.off': 'Выкл.',
+  'settings.terminal.passwordPromptAssist.hint': 'Быстрая вставка (Enter)',
+  'settings.terminal.passwordPromptAssist.picker': 'Список учётных данных',
+
   // Settings > Shortcuts
   'settings.shortcuts.section.scheme': 'Схема горячих клавиш',
   'settings.shortcuts.scheme.label': 'Сочетания клавиш',

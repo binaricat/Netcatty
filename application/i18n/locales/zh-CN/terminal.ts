@@ -1,7 +1,9 @@
 import type { Messages } from '../types';
 
 export const zhCNTerminalMessages: Messages = {
-  'terminal.sudoHint.pressEnter': '按 Enter 粘贴 sudo 密码',
+  'terminal.sudoHint.pressEnter': '按 Enter 粘贴已保存的密码',
+  'terminal.passwordPicker.title': '已保存的密码',
+  'terminal.passwordPicker.empty': '没有已保存的密码',
   'terminal.menu.rename': '重命名',
   'terminal.menu.uploadClipboardImage': '上传剪贴板图片',
   'terminal.clipboardImageUpload.noImage': '剪贴板中没有图片',
@@ -412,6 +414,13 @@ export const zhCNTerminalMessages: Messages = {
   'settings.terminal.autocomplete.ghostText.desc': '在光标后显示灰色的建议文本（类似 fish shell）。',
   'settings.terminal.autocomplete.popupMenu': '弹出菜单',
   'settings.terminal.autocomplete.popupMenu.desc': '显示包含多个建议的浮动列表。',
+  'settings.terminal.section.passwordPromptAssist': '密码提示辅助',
+  'settings.terminal.passwordPromptAssist.mode': '辅助模式',
+  'settings.terminal.passwordPromptAssist.mode.desc':
+    '当 sudo 或 su 要求输入密码时，提供已保存的凭据。不会在未经确认时自动发送。',
+  'settings.terminal.passwordPromptAssist.off': '关闭',
+  'settings.terminal.passwordPromptAssist.hint': '快速填充（Enter）',
+  'settings.terminal.passwordPromptAssist.picker': '凭据选择列表',
 
   // Settings > Shortcuts
   'settings.shortcuts.section.scheme': '快捷键方案',

@@ -3,7 +3,11 @@ import type { SerializeAddon } from "@xterm/addon-serialize";
 import type { Dispatch, RefObject, SetStateAction } from "react";
 import type { Host, Identity, KnownHost, SerialConfig, SSHKey, TerminalSession, TerminalSettings } from "../../../types";
 import type { PromptLineBreakState } from "./promptLineBreak";
-import type { SudoPasswordAutofill } from "./terminalSudoAutofill";
+import type {
+  PasswordPromptPickerState,
+  SudoPasswordAutofill,
+  SudoPasswordAutofillCandidate,
+} from "./terminalSudoAutofill";
 import type { ProgrammaticCommandLogRewrite } from "../programmaticCommandLog";
 
 export type TerminalBackendApi = {
@@ -128,7 +132,13 @@ export type TerminalSessionStartersContext = {
   sshDebugLogEnabled?: boolean;
   sudoAutofillPassword?: string;
   sudoAutofillPasswordRef?: RefObject<string | undefined>;
+  sudoAutofillCandidates?: SudoPasswordAutofillCandidate[];
+  sudoAutofillCandidatesRef?: RefObject<SudoPasswordAutofillCandidate[] | undefined>;
   onSudoHint?: (active: boolean) => boolean;
+  onPasswordPromptPicker?: (
+    active: boolean,
+    state: PasswordPromptPickerState | null,
+  ) => boolean;
   isVisibleRef?: RefObject<boolean>;
   /** False after unmount/teardown so in-flight session starts skip attach. */
   isBootActiveRef?: RefObject<boolean>;

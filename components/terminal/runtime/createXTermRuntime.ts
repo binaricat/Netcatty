@@ -969,15 +969,23 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     }
     hideHistoryPreview();
 
-    // Sudo password hint: while a hint is pending, Enter confirms (paste the
-    // saved password + submit); any other visible key dismisses it so the user
-    // can type the password manually. Checked before autocomplete so Enter
-    // pastes the password instead of submitting an empty line.
+    // Password prompt assist (sudo/su): while pending, Enter confirms the
+    // selected/host password; arrows move the picker; any other visible key
+    // dismisses so the user can type manually. Checked before autocomplete so
+    // Enter pastes the password instead of submitting an empty line.
     const sudoAutofill = ctx.sudoAutofillRef?.current;
     if (sudoAutofill?.isPromptPending()) {
       if (shouldSendShiftEnterText(e, ctx.terminalSettingsRef.current)) {
         sudoAutofill.cancelHint();
         // fall through: Shift+Enter sends the configured terminal text
+      } else if (e.key === "ArrowDown" && !e.altKey && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        sudoAutofill.moveSelection(1);
+        return false;
+      } else if (e.key === "ArrowUp" && !e.altKey && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        sudoAutofill.moveSelection(-1);
+        return false;
       } else if (
         e.key === "Enter" &&
         !e.altKey &&

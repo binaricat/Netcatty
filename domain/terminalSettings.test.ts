@@ -9,6 +9,23 @@ test("normalizeTerminalSettings disables prompt line breaks by default", () => {
   assert.equal(settings.forcePromptNewLine, false);
 });
 
+test("normalizeTerminalSettings defaults password prompt assist to hint", () => {
+  assert.equal(normalizeTerminalSettings().passwordPromptAssist, "hint");
+});
+
+test("normalizeTerminalSettings preserves password prompt assist modes", () => {
+  assert.equal(normalizeTerminalSettings({ passwordPromptAssist: "off" }).passwordPromptAssist, "off");
+  assert.equal(normalizeTerminalSettings({ passwordPromptAssist: "hint" }).passwordPromptAssist, "hint");
+  assert.equal(normalizeTerminalSettings({ passwordPromptAssist: "picker" }).passwordPromptAssist, "picker");
+});
+
+test("normalizeTerminalSettings falls back for unsupported password prompt assist modes", () => {
+  assert.equal(
+    normalizeTerminalSettings({ passwordPromptAssist: "legacy" as never }).passwordPromptAssist,
+    "hint",
+  );
+});
+
 test("normalizeTerminalSettings enables Shift+Enter newline by default", () => {
   const settings = normalizeTerminalSettings();
 

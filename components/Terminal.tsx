@@ -119,6 +119,7 @@ import {
 } from "./terminal/runtime/promptLineBreak";
 import {
   prepareSudoAutofillInput,
+  type PasswordPromptPickerState,
   type SudoPasswordAutofill,
 } from "./terminal/runtime/terminalSudoAutofill";
 import {
@@ -266,6 +267,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   sessionLog,
   sshDebugLogEnabled,
   sudoAutofillPassword,
+  sudoAutofillCandidates,
   showSelectionAIAction = true,
   onAddSelectionToAI,
   sessionDisplayName,
@@ -607,6 +609,16 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   const sudoAutofillRef = useRef<SudoPasswordAutofill | null>(null);
   const sudoAutofillPasswordRef = useRef(sudoAutofillPassword);
   sudoAutofillPasswordRef.current = sudoAutofillPassword;
+  const sudoAutofillCandidatesRef = useRef(sudoAutofillCandidates);
+  sudoAutofillCandidatesRef.current = sudoAutofillCandidates;
+  const [passwordPickerState, setPasswordPickerState] = useState<PasswordPromptPickerState | null>(null);
+  const passwordPickerRef = useRef<
+    ((active: boolean, state: PasswordPromptPickerState | null) => boolean) | undefined
+  >(undefined);
+  passwordPickerRef.current = (active, state) => {
+    setPasswordPickerState(active && state ? state : null);
+    return true;
+  };
 
   const [chainProgress, setChainProgress] = useState<{
     currentHop: number;
@@ -863,6 +875,13 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   useEffect(() => {
     sudoAutofillRef.current?.updatePassword(sudoAutofillPassword);
   }, [sudoAutofillPassword]);
+  useEffect(() => {
+    sudoAutofillRef.current?.updateCandidates(sudoAutofillCandidates ?? []);
+  }, [sudoAutofillCandidates]);
+  useEffect(() => {
+    const mode = terminalSettings?.passwordPromptAssist ?? "hint";
+    sudoAutofillRef.current?.updateMode(mode);
+  }, [terminalSettings?.passwordPromptAssist]);
   const sessionStartersRef = useRef<ReturnType<typeof createTerminalSessionStarters> | null>(null);
   const auth = useTerminalAuthState({
     host,
@@ -1482,6 +1501,9 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     promptLineBreakStateRef,
     sudoAutofillRef,
     onSudoHint: (active: boolean) => sudoHintRef.current?.(active) ?? false,
+    onPasswordPromptPicker: (active, state) => passwordPickerRef.current?.(active, state) ?? false,
+    sudoAutofillCandidates,
+    sudoAutofillCandidatesRef,
     updateStatus,
     setStatus,
     setError,
@@ -1559,6 +1581,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     sshDebugLogEnabled,
     sudoAutofillPassword,
     sudoAutofillPasswordRef,
+    // candidates already assigned above via sudoAutofillCandidates / Ref
   });
   sessionStartersRef.current = sessionStarters;
 
@@ -2798,7 +2821,9 @@ const TerminalComponent: React.FC<TerminalProps> = ({
           onDismiss={dismissScriptOverlay}
           compactTopChrome={terminalSettings?.showHostInfoBar === false}
         />
-      ) : null, selectionOverlayPosition, sessionDisplayName, sessionId, sessionRef, setIsComposeBarOpen, setShowLogs, shouldShowConnectionDialog, showLogs, showSelectionAIAction, snippets, status, sudoHintRef, sudoHintText: t("terminal.sudoHint.pressEnter"), t, termRef, terminalBackend, terminalContextActions, terminalCwdTracker, terminalPreviewVars, terminalSettings, timeLeft, toast, zmodem }} />
+      ) : null, selectionOverlayPosition, sessionDisplayName, sessionId, sessionRef, setIsComposeBarOpen, setShowLogs, shouldShowConnectionDialog, showLogs, showSelectionAIAction, snippets, status, sudoHintRef, sudoHintText: t("terminal.sudoHint.pressEnter"), passwordPickerState, onPasswordPickerSelect: (id: string) => {
+        sudoAutofillRef.current?.confirmFill(id);
+      }, passwordPickerTitle: t("terminal.passwordPicker.title"), passwordPickerEmptyText: t("terminal.passwordPicker.empty"), t, termRef, terminalBackend, terminalContextActions, terminalCwdTracker, terminalPreviewVars, terminalSettings, timeLeft, toast, zmodem }} />
       <ScriptSaveRecordingDialog
         open={saveRecordingOpen}
         code={recordedCode}

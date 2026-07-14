@@ -576,6 +576,15 @@ export const enCoreMessages: Messages = {
   'settings.terminal.autocomplete.popupMenu': 'Popup menu',
   'settings.terminal.autocomplete.popupMenu.desc': 'Show a floating list of multiple suggestions.',
 
+  // Settings > Terminal > Password prompt assist (sudo/su)
+  'settings.terminal.section.passwordPromptAssist': 'Password prompt assist',
+  'settings.terminal.passwordPromptAssist.mode': 'Assist mode',
+  'settings.terminal.passwordPromptAssist.mode.desc':
+    'When sudo or su asks for a password, offer a saved credential. Never auto-sends without confirmation.',
+  'settings.terminal.passwordPromptAssist.off': 'Off',
+  'settings.terminal.passwordPromptAssist.hint': 'Quick fill (Enter)',
+  'settings.terminal.passwordPromptAssist.picker': 'Credential picker',
+
   // Settings > Shortcuts
   'settings.shortcuts.section.scheme': 'Hotkey Scheme',
   'settings.shortcuts.scheme.label': 'Keyboard shortcuts',

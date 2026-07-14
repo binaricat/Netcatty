@@ -14,6 +14,13 @@ export type MiddleClickBehavior = 'context-menu' | 'paste' | 'disabled';
 export type LinkModifier = 'none' | 'ctrl' | 'alt' | 'meta';
 export type TerminalEmulationType = 'xterm-256color' | 'xterm-16color' | 'xterm';
 export type DynamicTabTitleMode = 'off' | 'agent' | 'all';
+/**
+ * How to assist when a sudo/su password prompt appears (#2156).
+ * - off: no assist
+ * - hint: ghost "press Enter" fill of the host session password
+ * - picker: WindTerm-like list of host + keychain password identities
+ */
+export type PasswordPromptAssistMode = 'off' | 'hint' | 'picker';
 
 export const DEFAULT_TERMINAL_WORD_SEPARATORS = ' ()[]{}\'"';
 
@@ -160,6 +167,12 @@ export interface TerminalSettings {
   autocompleteDebounceMs: number; // Debounce delay for fetching suggestions (ms)
   autocompleteMinChars: number; // Minimum characters before showing suggestions
   autocompleteMaxSuggestions: number; // Maximum suggestions in popup menu
+
+  /**
+   * Assist for sudo/su password prompts: off, quick Enter-to-paste (hint),
+   * or multi-credential picker. Default hint preserves historical sudo UX.
+   */
+  passwordPromptAssist: PasswordPromptAssistMode;
 }
 
 const STRICT_IPV4_OCTET_PATTERN = '(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)';
@@ -282,6 +295,12 @@ const isDynamicTabTitleMode = (value: unknown): value is DynamicTabTitleMode => 
   value === 'all'
 );
 
+const isPasswordPromptAssistMode = (value: unknown): value is PasswordPromptAssistMode => (
+  value === 'off' ||
+  value === 'hint' ||
+  value === 'picker'
+);
+
 export const normalizeTerminalSettings = (
   settings?: Partial<TerminalSettings> | null,
 ): TerminalSettings => {
@@ -302,6 +321,9 @@ export const normalizeTerminalSettings = (
     dynamicTabTitleMode: isDynamicTabTitleMode(settings?.dynamicTabTitleMode)
       ? settings.dynamicTabTitleMode
       : DEFAULT_TERMINAL_SETTINGS.dynamicTabTitleMode,
+    passwordPromptAssist: isPasswordPromptAssistMode(settings?.passwordPromptAssist)
+      ? settings.passwordPromptAssist
+      : DEFAULT_TERMINAL_SETTINGS.passwordPromptAssist,
   };
 
   // Migrate legacy 'canvas' renderer to 'dom' (canvas removed in xterm.js 6.0)
@@ -403,6 +425,7 @@ const DEFAULT_TERMINAL_SETTINGS: TerminalSettings = {
   autocompleteDebounceMs: 100, // 100ms debounce
   autocompleteMinChars: 1, // Start suggesting after 1 character
   autocompleteMaxSuggestions: 8, // Show up to 8 suggestions
+  passwordPromptAssist: 'hint', // Historical sudo confirm-to-fill; picker is opt-in (#2156)
 };
 
 export interface TerminalTheme {

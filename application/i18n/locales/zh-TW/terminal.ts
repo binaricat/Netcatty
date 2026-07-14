@@ -1,7 +1,9 @@
 import type { Messages } from '../types';
 
 export const zhTWTerminalMessages: Messages = {
-  'terminal.sudoHint.pressEnter': '按 Enter 貼上 sudo 密碼',
+  'terminal.sudoHint.pressEnter': '按 Enter 貼上已儲存的密碼',
+  'terminal.passwordPicker.title': '已儲存的密碼',
+  'terminal.passwordPicker.empty': '沒有已儲存的密碼',
   'terminal.menu.rename': '重新命名',
   'terminal.menu.uploadClipboardImage': '上傳剪貼簿圖片',
   'terminal.clipboardImageUpload.noImage': '剪貼簿中沒有圖片',
@@ -412,6 +414,13 @@ export const zhTWTerminalMessages: Messages = {
   'settings.terminal.autocomplete.ghostText.desc': '在游標後顯示灰色的建議文字（類似 fish shell）。',
   'settings.terminal.autocomplete.popupMenu': '彈出選單',
   'settings.terminal.autocomplete.popupMenu.desc': '顯示包含多個建議的浮動列表。',
+  'settings.terminal.section.passwordPromptAssist': '密碼提示輔助',
+  'settings.terminal.passwordPromptAssist.mode': '輔助模式',
+  'settings.terminal.passwordPromptAssist.mode.desc':
+    '當 sudo 或 su 要求輸入密碼時，提供已儲存的憑證。不會在未經確認時自動傳送。',
+  'settings.terminal.passwordPromptAssist.off': '關閉',
+  'settings.terminal.passwordPromptAssist.hint': '快速填入（Enter）',
+  'settings.terminal.passwordPromptAssist.picker': '憑證選擇列表',
 
   // Settings > Shortcuts
   'settings.shortcuts.section.scheme': '快捷鍵方案',

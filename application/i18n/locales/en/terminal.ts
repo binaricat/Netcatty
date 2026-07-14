@@ -1,7 +1,9 @@
 import type { Messages } from '../types';
 
 export const enTerminalMessages: Messages = {
-  'terminal.sudoHint.pressEnter': 'Press Enter to paste sudo password',
+  'terminal.sudoHint.pressEnter': 'Press Enter to paste saved password',
+  'terminal.passwordPicker.title': 'Saved passwords',
+  'terminal.passwordPicker.empty': 'No saved passwords',
   // Terminal toolbar / search / context menu / auth
   'terminal.toolbar.openSftp': 'Open SFTP',
   'terminal.toolbar.availableAfterConnect': 'Available after connect',

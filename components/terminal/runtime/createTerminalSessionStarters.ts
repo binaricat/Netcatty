@@ -121,6 +121,9 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
     return sanitizeCredentialValue(ctx.sudoAutofillPassword);
   };
 
+  const resolveSudoAutofillCandidates = () =>
+    ctx.sudoAutofillCandidatesRef?.current ?? ctx.sudoAutofillCandidates ?? [];
+
   const clearTelnetEchoMode = ({ resetLocalEcho = true }: { resetLocalEcho?: boolean } = {}) => {
     ctx.disposeTelnetEchoModeRef?.current?.();
     if (ctx.disposeTelnetEchoModeRef) ctx.disposeTelnetEchoModeRef.current = null;
@@ -631,6 +634,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         onExitMessage: (evt) =>
           `\r\n[session closed${evt?.exitCode !== undefined ? ` (code ${evt.exitCode})` : ""}]`,
         sudoAutofillPassword: resolveSavedSudoAutofillPassword(),
+        sudoAutofillCandidates: resolveSudoAutofillCandidates(),
       })) {
         abortSessionStartAfterUnmount();
         return;
@@ -1012,6 +1016,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         onExitMessage: (evt) =>
           `\r\n[Mosh session closed${evt?.exitCode !== undefined ? ` (code ${evt.exitCode})` : ""}]`,
         sudoAutofillPassword: resolveSavedSudoAutofillPassword(),
+        sudoAutofillCandidates: resolveSudoAutofillCandidates(),
       })) {
         abortSessionStartAfterUnmount();
         return;
@@ -1300,6 +1305,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         onExitMessage: (evt) =>
           `\r\n[EternalTerminal session closed${evt?.exitCode !== undefined ? ` (code ${evt.exitCode})` : ""}]`,
         sudoAutofillPassword: resolveSavedSudoAutofillPassword(),
+        sudoAutofillCandidates: resolveSudoAutofillCandidates(),
       })) {
         abortSessionStartAfterUnmount();
         return;
@@ -1495,6 +1501,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
     attachSessionToTerminal(ctx, term, id, {
       convertLfToCrlf: isSerial,
       sudoAutofillPassword: ctx.sudoAutofillPassword,
+      sudoAutofillCandidates: resolveSudoAutofillCandidates(),
     });
     attachTelnetEchoMode(id, { resetLocalEcho: false });
     ctx.hasConnectedRef.current = true;

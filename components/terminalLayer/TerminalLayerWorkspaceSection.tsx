@@ -20,6 +20,7 @@ function TerminalLayerWorkspaceSectionInner({ ctx }: { ctx: WorkspaceContext }) 
     sessionHostsMap,
     sessionChainHostsMap,
     sessionSudoAutofillPasswordsMap,
+    sessionSudoAutofillCandidatesMap,
     resolvedSessionHostIds,
     workspaceById,
     workspaceRectsById,
@@ -144,6 +145,7 @@ function TerminalLayerWorkspaceSectionInner({ ctx }: { ctx: WorkspaceContext }) 
           sessionHostsMap={sessionHostsMap}
           sessionChainHostsMap={sessionChainHostsMap}
           sessionSudoAutofillPasswordsMap={sessionSudoAutofillPasswordsMap}
+          sessionSudoAutofillCandidatesMap={sessionSudoAutofillCandidatesMap}
           resolvedSessionHostIds={resolvedSessionHostIds}
           workspaceById={workspaceById}
           workspaceRectsById={workspaceRectsById}
