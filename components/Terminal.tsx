@@ -44,7 +44,8 @@ import {
 import { classifyDistroId, shouldProbeSessionCwd } from "../domain/host";
 import { resolveHostSshConnectionTimeouts } from "../domain/sshConnectionTimeouts";
 import { supportsZmodemTerminalDragDrop } from "../lib/zmodemDragDrop";
-import { resolveHostAuth } from "../domain/sshAuth";
+import { resolveHostAuth, resolveHostAutofillPassword } from "../domain/sshAuth";
+import { listPasswordPromptFillCandidates } from "../domain/passwordPromptAssist";
 import { useTerminalBackend } from "../application/state/useTerminalBackend";
 import {
   TERMINAL_AUTO_RECONNECT_DELAY_MS,
@@ -607,10 +608,24 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   const getSessionConnectedRef = useRef(() => statusRef.current === "connected" && Boolean(sessionRef.current));
   getSessionConnectedRef.current = () => statusRef.current === "connected" && Boolean(sessionRef.current);
   const sudoAutofillRef = useRef<SudoPasswordAutofill | null>(null);
-  const sudoAutofillPasswordRef = useRef(sudoAutofillPassword);
-  sudoAutofillPasswordRef.current = sudoAutofillPassword;
-  const sudoAutofillCandidatesRef = useRef(sudoAutofillCandidates);
-  sudoAutofillCandidatesRef.current = sudoAutofillCandidates;
+  // Prefer parent-supplied candidates (TerminalLayer); otherwise derive from
+  // host/keys/identities so standalone popups (TerminalPopupPage) still work.
+  const resolvedSudoAutofillCandidates = useMemo(
+    () =>
+      sudoAutofillCandidates
+      ?? listPasswordPromptFillCandidates({ host, keys, identities }),
+    [sudoAutofillCandidates, host, keys, identities],
+  );
+  const resolvedSudoAutofillPassword = useMemo(
+    () =>
+      sudoAutofillPassword
+      ?? resolveHostAutofillPassword({ host, keys, identities }),
+    [sudoAutofillPassword, host, keys, identities],
+  );
+  const sudoAutofillPasswordRef = useRef(resolvedSudoAutofillPassword);
+  sudoAutofillPasswordRef.current = resolvedSudoAutofillPassword;
+  const sudoAutofillCandidatesRef = useRef(resolvedSudoAutofillCandidates);
+  sudoAutofillCandidatesRef.current = resolvedSudoAutofillCandidates;
   const [passwordPickerState, setPasswordPickerState] = useState<PasswordPromptPickerState | null>(null);
   const passwordPickerRef = useRef<
     ((active: boolean, state: PasswordPromptPickerState | null) => boolean) | undefined
@@ -873,11 +888,11 @@ const TerminalComponent: React.FC<TerminalProps> = ({
 
   const pendingAuthRef = useRef<PendingAuth>(null);
   useEffect(() => {
-    sudoAutofillRef.current?.updatePassword(sudoAutofillPassword);
-  }, [sudoAutofillPassword]);
+    sudoAutofillRef.current?.updatePassword(resolvedSudoAutofillPassword);
+  }, [resolvedSudoAutofillPassword]);
   useEffect(() => {
-    sudoAutofillRef.current?.updateCandidates(sudoAutofillCandidates ?? []);
-  }, [sudoAutofillCandidates]);
+    sudoAutofillRef.current?.updateCandidates(resolvedSudoAutofillCandidates);
+  }, [resolvedSudoAutofillCandidates]);
   useEffect(() => {
     const mode = terminalSettings?.passwordPromptAssist ?? "hint";
     sudoAutofillRef.current?.updateMode(mode);
@@ -1518,7 +1533,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     sudoAutofillRef,
     onSudoHint: (active: boolean) => sudoHintRef.current?.(active) ?? false,
     onPasswordPromptPicker: (active, state) => passwordPickerRef.current?.(active, state) ?? false,
-    sudoAutofillCandidates,
+    sudoAutofillCandidates: resolvedSudoAutofillCandidates,
     sudoAutofillCandidatesRef,
     updateStatus,
     setStatus,
@@ -1595,9 +1610,10 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     onCommandSubmitted,
     sessionLog,
     sshDebugLogEnabled,
-    sudoAutofillPassword,
+    sudoAutofillPassword: resolvedSudoAutofillPassword,
     sudoAutofillPasswordRef,
-    // candidates already assigned above via sudoAutofillCandidates / Ref
+    sudoAutofillCandidates: resolvedSudoAutofillCandidates,
+    sudoAutofillCandidatesRef,
   });
   sessionStartersRef.current = sessionStarters;
 

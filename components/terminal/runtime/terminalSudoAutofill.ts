@@ -451,12 +451,13 @@ export const createSudoPasswordAutofill = (_options: {
         return;
       }
       // Mode change while pending: re-show the appropriate UI. Keep the full
-      // picker available only while the command arm is still valid.
+      // picker available only for armed su (same gate as first detection).
       if (pending) {
         const armStillActive =
           armedUntil !== Number.NEGATIVE_INFINITY && options.now() <= armedUntil;
+        const allowFullPicker = armStillActive && armedKind === "su";
         hideUi();
-        if (!showAssist(armStillActive)) {
+        if (!showAssist(allowFullPicker)) {
           pending = false;
         }
       }
