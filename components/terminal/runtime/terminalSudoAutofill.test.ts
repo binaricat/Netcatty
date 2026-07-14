@@ -472,6 +472,48 @@ test("picker does not open for Enter password when sudo is already cached", () =
   assert.deepEqual(writes, []);
 });
 
+test("picker does not open for database-style Password for user prompts after sudo", () => {
+  const hints: boolean[] = [];
+  const pickerActives: boolean[] = [];
+  const autofill = createSudoPasswordAutofill({
+    mode: "picker",
+    password: "host-secret",
+    candidates: [
+      { id: "host", label: "Host", password: "host-secret" },
+      { id: "identity:root", label: "Root", password: "root-secret" },
+    ],
+    write: () => {},
+    onHint: (a) => {
+      hints.push(a);
+      return true;
+    },
+    onPicker: (active) => {
+      pickerActives.push(active);
+      return true;
+    },
+  });
+  autofill.armForCommand("sudo -u postgres psql -h db");
+  autofill.handleOutput("Password for user postgres: ");
+  assert.equal(autofill.isPickerPending(), false);
+  assert.deepEqual(pickerActives, []);
+  assert.deepEqual(hints, []);
+});
+
+test("picker opens for su bare Password after arm", () => {
+  const autofill = createSudoPasswordAutofill({
+    mode: "picker",
+    candidates: [
+      { id: "host", label: "Host", password: "host-secret" },
+      { id: "identity:root", label: "Root", password: "root-secret" },
+    ],
+    write: () => {},
+    onPicker: () => true,
+  });
+  autofill.armForCommand("su -");
+  autofill.handleOutput("Password: ");
+  assert.equal(autofill.isPickerPending(), true);
+});
+
 test("picker mode requires arm before offering the full keychain list", () => {
   // Unarmed explicit [sudo] must not surface every identity — a remote can
   // forge that line. Host-password hint remains allowed (#2156 security).

@@ -39,10 +39,12 @@ const SUDO_OR_SU_COMMAND_PATTERN =
 const AUTH_RETRY_FAILURE_PATTERN =
   /sorry,\s*try\s*again|incorrect\s+password|authentication\s+failure|auth(?:entication)?\s+fail|密码(?:错误|不正确)|认证失败|鉴权失败|口令错误/i;
 // Sudo without the [sudo] tag (Kylin #1293) still scopes the prompt to the user
-// ("password for alice", "输入密码"). Generic "Enter password:" / bare
-// "Password:" is left for child programs after a cached sudo auth.
+// ("password for alice", "输入密码"). Generic child-program prompts are excluded:
+// "Enter password:", "Password for user postgres:", etc.
 const SUDO_SCOPED_BARE_PROMPT_PATTERN =
   /(?:password\s+for\b|的密码|输入密码|input\s+password)/i;
+const CHILD_PROGRAM_PASSWORD_PROMPT_PATTERN =
+  /(?:enter\s+password\b|password\s+for\s+user\b)/i;
 
 type ArmedCommandKind = "sudo" | "su";
 
@@ -68,12 +70,22 @@ export const resolveArmedCommandKind = (command: string): ArmedCommandKind | nul
   return null;
 };
 
-/** Sudo prompts without [sudo] that still look like sudo/PAM, not mysql/ssh. */
+/** Sudo prompts without [sudo] that still look like sudo/PAM, not mysql/psql. */
 export const isSudoScopedBarePasswordPrompt = (data: string): boolean => {
   if (CONCEAL_PATTERN.test(data)) return false;
   const plain = stripTerminalControlSequences(data);
   if (!isSudoPasswordPrompt(plain)) return false;
+  if (CHILD_PROGRAM_PASSWORD_PROMPT_PATTERN.test(plain)) return false;
   return SUDO_SCOPED_BARE_PROMPT_PATTERN.test(plain);
+};
+
+/** su typically prints a bare Password: line (not "Enter password" / DB style). */
+export const isSuBarePasswordPrompt = (data: string): boolean => {
+  if (CONCEAL_PATTERN.test(data)) return false;
+  const plain = stripTerminalControlSequences(data);
+  if (!isSudoPasswordPrompt(plain)) return false;
+  if (CHILD_PROGRAM_PASSWORD_PROMPT_PATTERN.test(plain)) return false;
+  return true;
 };
 
 /** Public picker row — never includes the secret. */
@@ -248,11 +260,22 @@ export const createSudoPasswordAutofill = (_options: {
   const isArmedPromptLine = (line: string, armActive: boolean): boolean => {
     if (isExplicitSudoPrompt(line)) return true;
     if (!armActive) return false;
-    // su always prompts with a bare Password: line.
-    if (armedKind === "su") return isSudoPasswordPrompt(line);
+    // su always prompts with a bare Password: line (not Enter password / DB).
+    if (armedKind === "su") return isSuBarePasswordPrompt(line);
     // sudo: only sudo-scoped prompts, never generic "Enter password:" from
     // child programs when sudo credentials are already cached.
     if (armedKind === "sudo") return isSudoScopedBarePasswordPrompt(line);
+    return false;
+  };
+
+  /** Full keychain picker only when the prompt is clearly su/sudo, not a child. */
+  const allowFullPickerForLine = (line: string, armActive: boolean): boolean => {
+    if (!armActive || !armedKind) return false;
+    if (isExplicitSudoPrompt(line)) return true;
+    // su Password: is the normal su UX; DB-style lines are rejected above.
+    if (armedKind === "su") return isSuBarePasswordPrompt(line);
+    // For sudo, only the [sudo] tag is strong enough for the multi-identity
+    // picker. Kylin bare "输入密码" still gets host-password hint only.
     return false;
   };
 
@@ -349,9 +372,9 @@ export const createSudoPasswordAutofill = (_options: {
           }
           armActive = true;
         }
-        // Full picker only when we armed a real su/sudo command. Unarmed
-        // explicit [sudo] is host-password-only.
-        const allowFullPicker = armActive && armedKind !== null;
+        // Full picker only with strong evidence the prompt is su/sudo itself.
+        // Unarmed / Kylin bare / ambiguous lines stay host-password hint only.
+        const allowFullPicker = allowFullPickerForLine(lastLine, armActive);
         // Only mark pending if the UI actually rendered. If the overlay is
         // unavailable, don't intercept Enter — the user would have no visible
         // cue and could leak the password.
