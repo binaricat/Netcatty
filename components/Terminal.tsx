@@ -882,6 +882,13 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     const mode = terminalSettings?.passwordPromptAssist ?? "hint";
     sudoAutofillRef.current?.updateMode(mode);
   }, [terminalSettings?.passwordPromptAssist]);
+  // Drop a stale picker if the session disconnects/reconnects — exit teardown
+  // nulls sudoAutofillRef without calling onPicker(false).
+  useEffect(() => {
+    if (status === "disconnected" || status === "connecting") {
+      setPasswordPickerState(null);
+    }
+  }, [status]);
   const sessionStartersRef = useRef<ReturnType<typeof createTerminalSessionStarters> | null>(null);
   const auth = useTerminalAuthState({
     host,

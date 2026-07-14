@@ -174,15 +174,15 @@ export const createSudoPasswordAutofill = (_options: {
 
   const hasFillMaterial = (): boolean => {
     if (mode === "off") return false;
-    // Host password alone is enough for hint (and for picker fall-back to hint
-    // when no keychain candidates were supplied).
-    return Boolean(password) || candidates.length > 0;
+    // Hint mode only uses the session host password — never an arbitrary
+    // keychain identity (that would silently send the wrong secret on Enter).
+    // Picker mode uses the full candidate list.
+    if (mode === "hint") return Boolean(password);
+    return candidates.length > 0 || Boolean(password);
   };
 
-  const defaultPassword = (): string => {
-    if (password) return password;
-    return candidates[0]?.password ?? "";
-  };
+  /** Hint / single-password path: session password only (not candidates[0]). */
+  const defaultPassword = (): string => password || "";
 
   const notifyPicker = (active: boolean): boolean => {
     if (!active) {
@@ -212,15 +212,25 @@ export const createSudoPasswordAutofill = (_options: {
 
   const showAssist = (): boolean => {
     if (mode === "off" || !hasFillMaterial()) return false;
-    if (mode === "picker" && candidates.length > 0) {
-      selectedIndex = Math.min(selectedIndex, candidates.length - 1);
-      if (notifyPicker(true)) {
-        pendingUi = "picker";
+    if (mode === "picker") {
+      if (candidates.length > 0) {
+        selectedIndex = Math.min(selectedIndex, candidates.length - 1);
+        if (notifyPicker(true)) {
+          pendingUi = "picker";
+          return true;
+        }
+        return false;
+      }
+      // Picker with only a host password and no multi-candidate list: fall
+      // back to the single-password hint so the user still gets assist.
+      if (!defaultPassword()) return false;
+      if (options.onHint(true)) {
+        pendingUi = "hint";
         return true;
       }
       return false;
     }
-    // hint mode (or picker with no candidates but a host password)
+    // hint mode: host session password only
     if (!defaultPassword()) return false;
     if (options.onHint(true)) {
       pendingUi = "hint";
@@ -289,6 +299,7 @@ export const createSudoPasswordAutofill = (_options: {
       } else if (pendingUi === "picker" && candidates.length > 0) {
         secret = candidates[selectedIndex]?.password ?? "";
       } else {
+        // Hint path: only the explicit session password.
         secret = defaultPassword();
       }
       if (!secret) {

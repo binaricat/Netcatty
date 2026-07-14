@@ -289,6 +289,30 @@ test("su to a named user arms the same confirm-to-fill path", () => {
   assert.deepEqual(writes, ["secret\n"]);
 });
 
+test("hint mode does not fall back to an unrelated keychain identity", () => {
+  // Without a session password, hint must stay silent even when password
+  // identities exist — Enter would otherwise paste the wrong secret.
+  const writes: string[] = [];
+  const hints: boolean[] = [];
+  const autofill = createSudoPasswordAutofill({
+    mode: "hint",
+    candidates: [
+      { id: "identity:root", label: "Root", username: "root", password: "root-secret" },
+    ],
+    write: (d) => writes.push(d),
+    onHint: (a) => {
+      hints.push(a);
+      return true;
+    },
+  });
+  autofill.armForCommand("sudo whoami");
+  autofill.handleOutput("[sudo] password for alice: ");
+  assert.deepEqual(hints, []);
+  assert.equal(autofill.isPromptPending(), false);
+  autofill.confirmFill();
+  assert.deepEqual(writes, []);
+});
+
 test("mode off never hints even for explicit sudo prompts", () => {
   const writes: string[] = [];
   const hints: boolean[] = [];
