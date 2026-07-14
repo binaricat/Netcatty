@@ -117,6 +117,37 @@ test("cancelHint clears the hint without filling", () => {
   assert.equal(autofill.isPromptPending(), false);
 });
 
+test("Esc soft-dismiss keeps arm so assist can re-open on the same Password prompt", () => {
+  const writes: string[] = [];
+  const pickerActives: boolean[] = [];
+  const autofill = createSudoPasswordAutofill({
+    mode: "picker",
+    candidates: [
+      { id: "host", label: "Host", password: "host-secret" },
+      { id: "identity:root", label: "Root", password: "root-secret" },
+    ],
+    write: (d) => writes.push(d),
+    onPicker: (active) => {
+      pickerActives.push(active);
+      return true;
+    },
+  });
+  autofill.armForCommand("su root");
+  autofill.handleOutput("Password: ");
+  assert.equal(autofill.isPickerPending(), true);
+  autofill.cancelHint();
+  assert.equal(autofill.isPickerPending(), false);
+  assert.equal(autofill.canReshowAssist(), true);
+  // Same static prompt: more output without a new line must not auto-reopen
+  autofill.handleOutput("");
+  assert.equal(autofill.isPickerPending(), false);
+  // Explicit re-open (Esc / arrows in the UI)
+  assert.equal(autofill.tryReshowAssist(), true);
+  assert.equal(autofill.isPickerPending(), true);
+  autofill.confirmFill("host");
+  assert.deepEqual(writes, ["host-secret\n"]);
+});
+
 test("confirmFill does nothing when no prompt is pending", () => {
   const { autofill, writes } = make();
   autofill.confirmFill();

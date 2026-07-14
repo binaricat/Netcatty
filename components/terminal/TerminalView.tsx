@@ -790,6 +790,8 @@ function TerminalViewInner({ ctx }: { ctx: TerminalViewContext }) {
             title={passwordPickerTitle ?? "Saved passwords"}
             emptyText={passwordPickerEmptyText ?? "No saved passwords"}
             themeColors={effectiveTheme.colors}
+            termRef={termRef}
+            containerRef={containerRef}
           />
 
           {scriptExecutionOverlay}

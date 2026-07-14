@@ -120,10 +120,19 @@ export type SudoPasswordAutofill = {
   handleOutput: (data: string) => string;
   /** Confirm with the selected (or host) password, or a specific candidate id. */
   confirmFill: (candidateId?: string) => void;
+  /** Dismiss the open UI without clearing the su/sudo arm (Esc). */
   cancelHint: () => void;
   isPromptPending: () => boolean;
   /** True only while the multi-credential picker UI is open (not the hint). */
   isPickerPending: () => boolean;
+  /**
+   * True when the user dismissed the UI with Esc but the command arm is still
+   * live and the last line still looks like a password prompt — Esc/↑/↓ can
+   * re-open the assist without re-running su/sudo.
+   */
+  canReshowAssist: () => boolean;
+  /** Re-open assist after a soft dismiss. Returns whether the UI showed. */
+  tryReshowAssist: () => boolean;
   /**
    * Picker mode: move selection while the list is open.
    * Returns true when the selection changed so callers can consume the key.
@@ -226,6 +235,13 @@ export const createSudoPasswordAutofill = (_options: {
   let pendingUi: "hint" | "picker" | null = null;
   /** True after confirmFill until we see success (non-prompt output) or expire. */
   let postFillRetry = false;
+  /**
+   * User hit Esc while a prompt assist was open. Keep the arm so they can
+   * re-open (Esc/arrows) or so a real re-prompt can auto-show again — but do
+   * not immediately re-fire on the same static Password: line with no new
+   * output.
+   */
+  let dismissedWhileArmed = false;
 
   const hasFillMaterial = (): boolean => {
     if (mode === "off") return false;
@@ -255,16 +271,36 @@ export const createSudoPasswordAutofill = (_options: {
     pendingUi = null;
   };
 
+  const isArmActiveNow = (): boolean =>
+    armedUntil !== Number.NEGATIVE_INFINITY && options.now() <= armedUntil;
+
+  const lastPromptLine = (): string => tail.split(/[\r\n]/).pop() ?? tail;
+
   const disarm = () => {
     armedUntil = Number.NEGATIVE_INFINITY;
     armedKind = null;
     postFillRetry = false;
+    dismissedWhileArmed = false;
     tail = "";
     selectedIndex = 0;
     if (pending) {
       pending = false;
       hideUi();
     }
+  };
+
+  const tryShowForCurrentTail = (): boolean => {
+    const armActive = isArmActiveNow();
+    const lastLine = lastPromptLine();
+    // Explicit [sudo] may show host-password hint without an arm; full picker
+    // still requires armed su (allowFullPickerForLine).
+    if (!isArmedPromptLine(lastLine, armActive)) return false;
+    const allowFullPicker = allowFullPickerForLine(lastLine, armActive);
+    if (!showAssist(allowFullPicker)) return false;
+    pending = true;
+    postFillRetry = false;
+    dismissedWhileArmed = false;
+    return true;
   };
 
   const isArmedPromptLine = (line: string, armActive: boolean): boolean => {
@@ -345,11 +381,11 @@ export const createSudoPasswordAutofill = (_options: {
       ) {
         return data;
       }
-      const lastLine = tail.split(/[\r\n]/).pop() ?? tail;
-      let armActive =
-        armedUntil !== Number.NEGATIVE_INFINITY && options.now() <= armedUntil;
+      const lastLine = lastPromptLine();
+      let armActive = isArmActiveNow();
       if (!armActive) {
         postFillRetry = false;
+        dismissedWhileArmed = false;
         armedKind = null;
       }
       // Explicit "[sudo] …" always; su arm accepts bare Password:; sudo arm only
@@ -364,6 +400,15 @@ export const createSudoPasswordAutofill = (_options: {
         return data;
       }
       if (isPrompt) {
+        // Soft-dismissed (Esc): do not auto-reopen on the same static prompt
+        // with no new line. A real re-prompt (newline / auth-failure text)
+        // clears the dismiss flag and may show again.
+        if (dismissedWhileArmed) {
+          const looksLikeNewPromptCycle =
+            /[\r\n]/.test(data) || AUTH_RETRY_FAILURE_PATTERN.test(tail);
+          if (!looksLikeNewPromptCycle) return data;
+          dismissedWhileArmed = false;
+        }
         // After a fill, only re-assist when this looks like a real auth retry
         // (explicit [sudo] again, or failure text in the tail). A bare
         // Password: from a child program after successful sudo must not reopen.
@@ -384,14 +429,7 @@ export const createSudoPasswordAutofill = (_options: {
         }
         // Full picker only with strong evidence the prompt is su/sudo itself.
         // Unarmed / Kylin bare / ambiguous lines stay host-password hint only.
-        const allowFullPicker = allowFullPickerForLine(lastLine, armActive);
-        // Only mark pending if the UI actually rendered. If the overlay is
-        // unavailable, don't intercept Enter — the user would have no visible
-        // cue and could leak the password.
-        if (showAssist(allowFullPicker)) {
-          pending = true;
-          postFillRetry = false;
-        }
+        tryShowForCurrentTail();
       }
       return data;
     },
@@ -416,6 +454,7 @@ export const createSudoPasswordAutofill = (_options: {
       // Password: (e.g. after `sudo mysql -p`) will not (#2156 review).
       pending = false;
       hideUi();
+      dismissedWhileArmed = false;
       postFillRetry = true;
       if (hasFillMaterial()) {
         armedUntil = options.now() + armWindowMs;
@@ -424,10 +463,31 @@ export const createSudoPasswordAutofill = (_options: {
     },
     cancelHint: () => {
       if (!pending) return;
-      disarm();
+      // Soft dismiss: hide UI but keep arm + tail so Esc/arrows can re-open
+      // while still on the Password: line, and so a re-prompt can auto-show.
+      pending = false;
+      hideUi();
+      dismissedWhileArmed = isArmActiveNow();
+      if (!dismissedWhileArmed) {
+        armedKind = null;
+        armedUntil = Number.NEGATIVE_INFINITY;
+      }
     },
     isPromptPending: () => pending,
     isPickerPending: () => pending && pendingUi === "picker",
+    canReshowAssist: () => {
+      if (pending || !dismissedWhileArmed || !hasFillMaterial()) return false;
+      if (!isArmActiveNow()) return false;
+      return isArmedPromptLine(lastPromptLine(), true);
+    },
+    tryReshowAssist: () => {
+      if (pending || !hasFillMaterial()) return false;
+      if (!isArmActiveNow()) {
+        dismissedWhileArmed = false;
+        return false;
+      }
+      return tryShowForCurrentTail();
+    },
     moveSelection: (delta: number) => {
       if (!pending || pendingUi !== "picker" || candidates.length === 0) return false;
       const next =

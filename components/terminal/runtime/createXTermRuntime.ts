@@ -970,9 +970,9 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     hideHistoryPreview();
 
     // Password prompt assist (sudo/su): while pending, Enter confirms the
-    // selected/host password; arrows move the picker; any other visible key
-    // dismisses so the user can type manually. Checked before autocomplete so
-    // Enter pastes the password instead of submitting an empty line.
+    // selected/host password; arrows move the picker; Esc soft-dismisses (keeps
+    // arm so the list can re-open). Checked before autocomplete so Enter pastes
+    // the password instead of submitting an empty line.
     const sudoAutofill = ctx.sudoAutofillRef?.current;
     if (sudoAutofill?.isPromptPending()) {
       if (shouldSendShiftEnterText(e, ctx.terminalSettingsRef.current)) {
@@ -1017,6 +1017,20 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
         sudoAutofill.cancelHint();
         // fall through: key becomes the first char of the manually typed password
       }
+    } else if (
+      sudoAutofill?.canReshowAssist()
+      && !e.altKey
+      && !e.ctrlKey
+      && !e.metaKey
+      && (e.key === "Escape" || e.key === "ArrowDown" || e.key === "ArrowUp")
+    ) {
+      // Soft-dismissed but still on Password: — Esc/arrows re-open the assist.
+      e.preventDefault();
+      if (sudoAutofill.tryReshowAssist()) {
+        if (e.key === "ArrowDown") sudoAutofill.moveSelection(1);
+        if (e.key === "ArrowUp") sudoAutofill.moveSelection(-1);
+      }
+      return false;
     }
 
     // Autocomplete key handler (must be checked before other handlers)
