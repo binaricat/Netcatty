@@ -889,6 +889,12 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       setPasswordPickerState(null);
     }
   }, [status]);
+  const handlePasswordPickerSelect = useCallback((id: string) => {
+    sudoAutofillRef.current?.confirmFill(id);
+  }, []);
+  const passwordPickerTitle = t("terminal.passwordPicker.title");
+  const passwordPickerEmptyText = t("terminal.passwordPicker.empty");
+  const sudoHintText = t("terminal.sudoHint.pressEnter");
   const sessionStartersRef = useRef<ReturnType<typeof createTerminalSessionStarters> | null>(null);
   const auth = useTerminalAuthState({
     host,
@@ -2832,9 +2838,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
           onDismiss={dismissScriptOverlay}
           compactTopChrome={terminalSettings?.showHostInfoBar === false}
         />
-      ) : null, selectionOverlayPosition, sessionDisplayName, sessionId, sessionRef, setIsComposeBarOpen, setShowLogs, shouldShowConnectionDialog, showLogs, showSelectionAIAction, snippets, status, sudoHintRef, sudoHintText: t("terminal.sudoHint.pressEnter"), passwordPickerState, onPasswordPickerSelect: (id: string) => {
-        sudoAutofillRef.current?.confirmFill(id);
-      }, passwordPickerTitle: t("terminal.passwordPicker.title"), passwordPickerEmptyText: t("terminal.passwordPicker.empty"), t, termRef, terminalBackend, terminalContextActions, terminalCwdTracker, terminalPreviewVars, terminalSettings, timeLeft, toast, zmodem }} />
+      ) : null, selectionOverlayPosition, sessionDisplayName, sessionId, sessionRef, setIsComposeBarOpen, setShowLogs, shouldShowConnectionDialog, showLogs, showSelectionAIAction, snippets, status, sudoHintRef, sudoHintText, passwordPickerState, onPasswordPickerSelect: handlePasswordPickerSelect, passwordPickerTitle, passwordPickerEmptyText, t, termRef, terminalBackend, terminalContextActions, terminalCwdTracker, terminalPreviewVars, terminalSettings, timeLeft, toast, zmodem }} />
       <ScriptSaveRecordingDialog
         open={saveRecordingOpen}
         code={recordedCode}
