@@ -269,17 +269,19 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
   );
 
   const { shown, collapsed } = useMemo(() => {
-    const parts = toolbarLayout.partition(availableIds);
-    // highlight is show/hide only — never leave it stranded as "collapsed but null".
-    if (parts.collapsed.includes('highlight')) {
-      return {
-        shown: [...parts.shown, 'highlight'],
-        collapsed: parts.collapsed.filter((id) => id !== 'highlight'),
-        hidden: parts.hidden,
-      };
+    const available = new Set(availableIds);
+    const shownIds: string[] = [];
+    const collapsedIds: string[] = [];
+    for (const id of toolbarLayout.layout.order) {
+      if (!available.has(id)) continue;
+      let placement = toolbarLayout.layout.placement[id] ?? 'show';
+      // highlight is show/hide only — never leave it stranded as collapsed-but-null.
+      if (id === 'highlight' && placement === 'collapse') placement = 'show';
+      if (placement === 'show') shownIds.push(id);
+      else if (placement === 'collapse') collapsedIds.push(id);
     }
-    return parts;
-  }, [availableIds, toolbarLayout]);
+    return { shown: shownIds, collapsed: collapsedIds };
+  }, [availableIds, toolbarLayout.layout]);
 
   if (compactToolbar) {
     return (

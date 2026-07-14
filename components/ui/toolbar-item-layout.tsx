@@ -43,7 +43,7 @@ export type ToolbarCustomizeItem = {
 export type ToolbarCustomizeContextMenuProps = {
   items: ToolbarCustomizeItem[];
   placementOf: (id: string) => ToolbarItemPlacement;
-  onSetPlacement: (id: string, placement: ToolbarItemPlacement) => void;
+  onSetPlacement: (id: string, placement: ToolbarItemPlacement) => unknown;
   onMove?: (id: string, direction: 'earlier' | 'later') => void;
   onReset: () => void;
   t: (key: string, params?: Record<string, unknown>) => string;

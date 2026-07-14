@@ -278,10 +278,22 @@ function TerminalLayerSidePanelInner({ ctx }: { ctx: SidePanelContext }) {
     [sidePanelTabItems],
   );
 
-  const { shown: shownSidePanelTabs, collapsed: collapsedSidePanelTabs } = useMemo(
-    () => partitionSidePanelTabs(TERMINAL_SIDE_PANEL_TAB_DEFAULT_ORDER),
-    [partitionSidePanelTabs],
-  );
+  const { shown: shownSidePanelTabs, collapsed: collapsedSidePanelTabs } = useMemo(() => {
+    const parts = partitionSidePanelTabs(TERMINAL_SIDE_PANEL_TAB_DEFAULT_ORDER);
+    // If an external path opens a hidden tab, still show its chip while active.
+    if (
+      activeSidePanelTab &&
+      !parts.shown.includes(activeSidePanelTab) &&
+      !parts.collapsed.includes(activeSidePanelTab)
+    ) {
+      return {
+        shown: [...parts.shown, activeSidePanelTab],
+        collapsed: parts.collapsed,
+        hidden: parts.hidden.filter((id) => id !== activeSidePanelTab),
+      };
+    }
+    return parts;
+  }, [activeSidePanelTab, partitionSidePanelTabs, sidePanelTabLayout]);
 
   const sidePanelCustomizeItems = useMemo(
     () =>
@@ -342,9 +354,13 @@ function TerminalLayerSidePanelInner({ ctx }: { ctx: SidePanelContext }) {
             items={sidePanelCustomizeItems}
             placementOf={(id) => sidePanelTabLayout.placement[id] ?? 'show'}
             onSetPlacement={(id, placement) => {
-              setSidePanelTabPlacement(id, placement, TERMINAL_SIDE_PANEL_TAB_DEFAULT_ORDER);
-              // Hiding the open tab without switching leaves content with no chip.
-              if (placement === 'hide' && activeSidePanelTab === id) {
+              const next = setSidePanelTabPlacement(
+                id,
+                placement,
+                TERMINAL_SIDE_PANEL_TAB_DEFAULT_ORDER,
+              );
+              // Only close when hide actually stuck (not reverted by requireReachable).
+              if (activeSidePanelTab === id && (next.placement[id] ?? 'show') === 'hide') {
                 handleCloseSidePanel?.();
               }
             }}

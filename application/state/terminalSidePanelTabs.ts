@@ -86,8 +86,8 @@ export function useTerminalSidePanelTabOrder(): {
   sidePanelTabOrder: TerminalSidePanelTabId[];
   setSidePanelTabOrder: (order: TerminalSidePanelTabId[]) => void;
   layout: ToolbarItemLayout;
-  setPlacement: (id: string, placement: ToolbarItemPlacement) => void;
-  move: (id: string, direction: 'earlier' | 'later') => void;
+  setPlacement: ReturnType<typeof useToolbarItemLayout>['setPlacement'];
+  move: ReturnType<typeof useToolbarItemLayout>['move'];
   reorder: (draggedId: string, targetId: string, placement?: 'before' | 'after') => void;
   resetLayout: () => void;
   partition: ReturnType<typeof useToolbarItemLayout>['partition'];

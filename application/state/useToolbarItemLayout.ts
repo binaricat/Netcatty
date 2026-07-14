@@ -24,7 +24,7 @@ export type UseToolbarItemLayoutResult = {
     id: string,
     placement: ToolbarItemPlacement,
     availableIds?: readonly string[] | ReadonlySet<string> | null,
-  ) => void;
+  ) => ToolbarItemLayout;
   /** Replace full order while preserving placements (normalized against defaults). */
   setOrder: (order: string[]) => void;
   reorder: (draggedId: string, targetId: string, placement?: 'before' | 'after') => void;
@@ -89,12 +89,14 @@ export function useToolbarItemLayout(
       id: string,
       placement: ToolbarItemPlacement,
       availableIds?: readonly string[] | ReadonlySet<string> | null,
-    ) => {
+    ): ToolbarItemLayout => {
+      let nextLayout!: ToolbarItemLayout;
       setLayout((current) => {
-        const next = setToolbarItemPlacement(current, id, placement, defaults, availableIds);
-        writeLayout(storageKey, next);
-        return next;
+        nextLayout = setToolbarItemPlacement(current, id, placement, defaults, availableIds);
+        writeLayout(storageKey, nextLayout);
+        return nextLayout;
       });
+      return nextLayout;
     },
     [defaults, storageKey],
   );
