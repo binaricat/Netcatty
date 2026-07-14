@@ -140,10 +140,17 @@ test("does not arm when the hint cannot be shown (overlay unavailable)", () => {
   assert.deepEqual(writes, []);
 });
 
-test("a bare Password prompt does not hint until a sudo command is submitted", () => {
+test("a bare Password prompt does not hint until a su command is submitted", () => {
   const { autofill, hints } = make();
   autofill.handleOutput("Password: ");
   assert.deepEqual(hints, []);
+  // sudo-armed bare Password: is too generic (mysql/ssh); su-armed is expected
+  autofill.armForCommand("sudo whoami");
+  autofill.handleOutput("Password: ");
+  assert.deepEqual(hints, []);
+  autofill.armForCommand("su -");
+  autofill.handleOutput("Password: ");
+  assert.deepEqual(hints, [true]);
 });
 
 test("an explicit [sudo] prompt hints without a recorded sudo command", () => {
@@ -171,22 +178,36 @@ test("hint fires once across chunked prompt output", () => {
   assert.deepEqual(hints, [true]);
 });
 
-test("relaxed detection still only hints, never auto-fills child prompts", () => {
-  // sudo creds warm -> mysql asks for its own password. We may hint, but we
-  // must not send anything without an explicit confirm.
+test("cached sudo then child Enter password does not assist", () => {
+  // sudo auth already cached: `sudo mysql -p` goes straight to mysql's
+  // "Enter password:" — must not offer the host SSH password.
   const { autofill, hints, writes } = make();
   autofill.armForCommand("sudo mysql -p");
   autofill.handleOutput("Enter password: ");
-  assert.deepEqual(hints, [true]);
+  assert.deepEqual(hints, []);
   assert.deepEqual(writes, []);
+  assert.equal(autofill.isPromptPending(), false);
+});
+
+test("sudo-scoped bare prompts still assist when armed", () => {
+  // Kylin / PAM without [sudo] tag (#1293)
+  const kylink = make();
+  kylink.autofill.armForCommand("sudo -s");
+  kylink.autofill.handleOutput("输入密码");
+  assert.deepEqual(kylink.hints, [true]);
+
+  const scoped = make();
+  scoped.autofill.armForCommand("sudo whoami");
+  scoped.autofill.handleOutput("password for alice: ");
+  assert.deepEqual(scoped.hints, [true]);
 });
 
 test("a later non-sudo command disarms the pending hint", () => {
   const { autofill, writes, hints } = make();
-  autofill.armForCommand("sudo -n true");
+  autofill.armForCommand("su -");
   autofill.handleOutput("Password: ");
   assert.deepEqual(hints, [true]);
-  autofill.armForCommand("mysql -p"); // non-sudo command clears the arm
+  autofill.armForCommand("mysql -p"); // non-sudo/su command clears the arm
   assert.deepEqual(hints, [true, false]);
   autofill.confirmFill();
   assert.deepEqual(writes, []);
@@ -227,7 +248,7 @@ test("an expired arm shows no hint for a bare prompt", () => {
       return true;
     },
   });
-  autofill.armForCommand("sudo whoami");
+  autofill.armForCommand("su -");
   now += 31_000;
   autofill.handleOutput("Password: ");
   assert.deepEqual(hints, []);
@@ -427,6 +448,28 @@ test("does not re-assist a child password prompt after successful fill", () => {
   autofill.handleOutput("\r\nEnter password: ");
   assert.equal(autofill.isPromptPending(), false);
   assert.deepEqual(hints, [true, false]); // only the original sudo hint
+});
+
+test("picker does not open for Enter password when sudo is already cached", () => {
+  const writes: string[] = [];
+  const pickerActives: boolean[] = [];
+  const autofill = createSudoPasswordAutofill({
+    mode: "picker",
+    candidates: [
+      { id: "host", label: "Host", password: "host-secret" },
+      { id: "identity:root", label: "Root", password: "root-secret" },
+    ],
+    write: (d) => writes.push(d),
+    onPicker: (active) => {
+      pickerActives.push(active);
+      return true;
+    },
+  });
+  autofill.armForCommand("sudo mysql -p");
+  autofill.handleOutput("Enter password: ");
+  assert.equal(autofill.isPickerPending(), false);
+  assert.deepEqual(pickerActives, []);
+  assert.deepEqual(writes, []);
 });
 
 test("picker mode requires arm before offering the full keychain list", () => {

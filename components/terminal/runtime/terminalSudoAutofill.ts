@@ -28,16 +28,23 @@ const SUDO_PROMPT_PATTERN =
 // Colon is optional for Kylin (#1293).
 const EXPLICIT_SUDO_PROMPT_PATTERN =
   /(?:^|[\r\n])[^\r\n]*?\[sudo[^\]]*\][^\r\n]*?(?:\bpassword\b|密\s*码|口\s*令)[^\r\n:：]*(?:[:：]\s*)?$/i;
-// Arm for direct sudo *and* su commands (#2156). `su(?:do)?` matches `su` or
-// `sudo` as a whole word (trailing space/end), so `sum`/`suspend`/`suuser` stay
-// out. Bare su prompts are just "Password:", so they only hint inside the arm
-// window — same safety model as a non-[sudo] password line after sudo.
+// Arm for direct sudo *and* su commands (#2156). Trailing space/end keeps
+// `sum`/`suspend`/`suuser` out. `sudo` is checked before bare `su`.
+const SUDO_COMMAND_PATTERN = /^\s*(?:builtin\s+|command\s+)?sudo(?:\s|$)/;
+const SU_COMMAND_PATTERN = /^\s*(?:builtin\s+|command\s+)?su(?:\s|$)/;
 const SUDO_OR_SU_COMMAND_PATTERN =
   /^\s*(?:builtin\s+|command\s+)?su(?:do)?(?:\s|$)/;
 // Used after confirm-to-fill: only re-open assist on a real auth retry, not on a
 // subsequent child-program password prompt (e.g. `sudo mysql -p`).
 const AUTH_RETRY_FAILURE_PATTERN =
   /sorry,\s*try\s*again|incorrect\s+password|authentication\s+failure|auth(?:entication)?\s+fail|密码(?:错误|不正确)|认证失败|鉴权失败|口令错误/i;
+// Sudo without the [sudo] tag (Kylin #1293) still scopes the prompt to the user
+// ("password for alice", "输入密码"). Generic "Enter password:" / bare
+// "Password:" is left for child programs after a cached sudo auth.
+const SUDO_SCOPED_BARE_PROMPT_PATTERN =
+  /(?:password\s+for\b|的密码|输入密码|input\s+password)/i;
+
+type ArmedCommandKind = "sudo" | "su";
 
 export const stripTerminalControlSequences = (data: string): string =>
   data.replace(OSC_PATTERN, "").replace(ANSI_PATTERN, "");
@@ -54,6 +61,20 @@ export const isExplicitSudoPrompt = (data: string): boolean => {
 
 export const shouldArmSudoPasswordAutofill = (command: string): boolean =>
   SUDO_OR_SU_COMMAND_PATTERN.test(command);
+
+export const resolveArmedCommandKind = (command: string): ArmedCommandKind | null => {
+  if (SUDO_COMMAND_PATTERN.test(command)) return "sudo";
+  if (SU_COMMAND_PATTERN.test(command)) return "su";
+  return null;
+};
+
+/** Sudo prompts without [sudo] that still look like sudo/PAM, not mysql/ssh. */
+export const isSudoScopedBarePasswordPrompt = (data: string): boolean => {
+  if (CONCEAL_PATTERN.test(data)) return false;
+  const plain = stripTerminalControlSequences(data);
+  if (!isSudoPasswordPrompt(plain)) return false;
+  return SUDO_SCOPED_BARE_PROMPT_PATTERN.test(plain);
+};
 
 /** Public picker row — never includes the secret. */
 export type PasswordPromptPickerItem = {
@@ -177,6 +198,7 @@ export const createSudoPasswordAutofill = (_options: {
   const armWindowMs = 10_000;
   let tail = "";
   let armedUntil = Number.NEGATIVE_INFINITY;
+  let armedKind: ArmedCommandKind | null = null;
   let pending = false;
   let selectedIndex = 0;
   let pendingUi: "hint" | "picker" | null = null;
@@ -213,6 +235,7 @@ export const createSudoPasswordAutofill = (_options: {
 
   const disarm = () => {
     armedUntil = Number.NEGATIVE_INFINITY;
+    armedKind = null;
     postFillRetry = false;
     tail = "";
     selectedIndex = 0;
@@ -220,6 +243,17 @@ export const createSudoPasswordAutofill = (_options: {
       pending = false;
       hideUi();
     }
+  };
+
+  const isArmedPromptLine = (line: string, armActive: boolean): boolean => {
+    if (isExplicitSudoPrompt(line)) return true;
+    if (!armActive) return false;
+    // su always prompts with a bare Password: line.
+    if (armedKind === "su") return isSudoPasswordPrompt(line);
+    // sudo: only sudo-scoped prompts, never generic "Enter password:" from
+    // child programs when sudo credentials are already cached.
+    if (armedKind === "sudo") return isSudoScopedBarePasswordPrompt(line);
+    return false;
   };
 
   const showHostPasswordHint = (): boolean => {
@@ -256,7 +290,9 @@ export const createSudoPasswordAutofill = (_options: {
       // Clear any prior arm/hint first: a non-sudo/su command must not leave a
       // stale hint that a later prompt could satisfy.
       disarm();
-      if (!hasFillMaterial() || !shouldArmSudoPasswordAutofill(command)) return;
+      const kind = resolveArmedCommandKind(command);
+      if (!hasFillMaterial() || !kind) return;
+      armedKind = kind;
       armedUntil = options.now() + armWindowMs;
       tail = "";
     },
@@ -279,14 +315,13 @@ export const createSudoPasswordAutofill = (_options: {
       const lastLine = tail.split(/[\r\n]/).pop() ?? tail;
       let armActive =
         armedUntil !== Number.NEGATIVE_INFINITY && options.now() <= armedUntil;
-      if (!armActive) postFillRetry = false;
-      // Explicit "[sudo] …" prompts are sudo-specific → assist regardless of arm,
-      // so it's reliable even when arming didn't fire (#1284). Bare "Password:"
-      // only assists inside the arm window, to avoid noise on unrelated prompts
-      // (ssh, mysql, …). Unarmed explicit prompts still only expose the host
-      // session password (never the full keychain picker).
-      const isPrompt =
-        isExplicitSudoPrompt(lastLine) || (armActive && isSudoPasswordPrompt(lastLine));
+      if (!armActive) {
+        postFillRetry = false;
+        armedKind = null;
+      }
+      // Explicit "[sudo] …" always; su arm accepts bare Password:; sudo arm only
+      // accepts sudo-scoped bare prompts (not generic Enter password from mysql).
+      const isPrompt = isArmedPromptLine(lastLine, armActive);
       if (pending) {
         // The prompt moved on: a new line arrived and the latest line is no
         // longer a password prompt (sudo timed out / failed / returned to the
@@ -301,18 +336,26 @@ export const createSudoPasswordAutofill = (_options: {
         // Password: from a child program after successful sudo must not reopen.
         if (postFillRetry) {
           const looksLikeAuthRetry =
-            isExplicitSudoPrompt(lastLine) || AUTH_RETRY_FAILURE_PATTERN.test(tail);
+            isExplicitSudoPrompt(lastLine)
+            || (armedKind === "su" && AUTH_RETRY_FAILURE_PATTERN.test(tail))
+            || (armedKind === "sudo" && (
+              isExplicitSudoPrompt(lastLine) || AUTH_RETRY_FAILURE_PATTERN.test(tail)
+            ));
           if (!looksLikeAuthRetry) {
             postFillRetry = false;
             armedUntil = Number.NEGATIVE_INFINITY;
+            armedKind = null;
             return data;
           }
           armActive = true;
         }
+        // Full picker only when we armed a real su/sudo command. Unarmed
+        // explicit [sudo] is host-password-only.
+        const allowFullPicker = armActive && armedKind !== null;
         // Only mark pending if the UI actually rendered. If the overlay is
         // unavailable, don't intercept Enter — the user would have no visible
         // cue and could leak the password.
-        if (showAssist(armActive)) {
+        if (showAssist(allowFullPicker)) {
           pending = true;
           postFillRetry = false;
         }
