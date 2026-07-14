@@ -215,33 +215,33 @@ export const createSudoPasswordAutofill = (_options: {
     }
   };
 
-  const showAssist = (): boolean => {
-    if (mode === "off" || !hasFillMaterial()) return false;
-    if (mode === "picker") {
-      if (candidates.length > 0) {
-        selectedIndex = Math.min(selectedIndex, candidates.length - 1);
-        if (notifyPicker(true)) {
-          pendingUi = "picker";
-          return true;
-        }
-        return false;
-      }
-      // Picker with only a host password and no multi-candidate list: fall
-      // back to the single-password hint so the user still gets assist.
-      if (!defaultPassword()) return false;
-      if (options.onHint(true)) {
-        pendingUi = "hint";
-        return true;
-      }
-      return false;
-    }
-    // hint mode: host session password only
+  const showHostPasswordHint = (): boolean => {
     if (!defaultPassword()) return false;
     if (options.onHint(true)) {
       pendingUi = "hint";
       return true;
     }
     return false;
+  };
+
+  /**
+   * @param allowFullPicker When false (unarmed explicit [sudo] path), only
+   * the session host password may be offered — never the full keychain list.
+   * A forged remote `[sudo] password…` line must not surface other systems'
+   * secrets even though filling still requires a user click (#2156 review).
+   */
+  const showAssist = (allowFullPicker: boolean): boolean => {
+    if (mode === "off" || !hasFillMaterial()) return false;
+    if (mode === "picker" && allowFullPicker && candidates.length > 0) {
+      selectedIndex = Math.min(selectedIndex, candidates.length - 1);
+      if (notifyPicker(true)) {
+        pendingUi = "picker";
+        return true;
+      }
+      return false;
+    }
+    // hint mode, or picker without arm / without multi candidates
+    return showHostPasswordHint();
   };
 
   return {
@@ -275,7 +275,8 @@ export const createSudoPasswordAutofill = (_options: {
       // Explicit "[sudo] …" prompts are sudo-specific → assist regardless of arm,
       // so it's reliable even when arming didn't fire (#1284). Bare "Password:"
       // only assists inside the arm window, to avoid noise on unrelated prompts
-      // (ssh, mysql, …).
+      // (ssh, mysql, …). Unarmed explicit prompts still only expose the host
+      // session password (never the full keychain picker).
       const isPrompt =
         isExplicitSudoPrompt(lastLine) || (armActive && isSudoPasswordPrompt(lastLine));
       if (pending) {
@@ -290,7 +291,7 @@ export const createSudoPasswordAutofill = (_options: {
         // Only mark pending if the UI actually rendered. If the overlay is
         // unavailable, don't intercept Enter — the user would have no visible
         // cue and could leak the password.
-        if (showAssist()) {
+        if (showAssist(armActive)) {
           pending = true;
         }
       }
