@@ -34,6 +34,10 @@ const EXPLICIT_SUDO_PROMPT_PATTERN =
 // window — same safety model as a non-[sudo] password line after sudo.
 const SUDO_OR_SU_COMMAND_PATTERN =
   /^\s*(?:builtin\s+|command\s+)?su(?:do)?(?:\s|$)/;
+// Used after confirm-to-fill: only re-open assist on a real auth retry, not on a
+// subsequent child-program password prompt (e.g. `sudo mysql -p`).
+const AUTH_RETRY_FAILURE_PATTERN =
+  /sorry,\s*try\s*again|incorrect\s+password|authentication\s+failure|auth(?:entication)?\s+fail|密码(?:错误|不正确)|认证失败|鉴权失败|口令错误/i;
 
 export const stripTerminalControlSequences = (data: string): string =>
   data.replace(OSC_PATTERN, "").replace(ANSI_PATTERN, "");
@@ -176,6 +180,8 @@ export const createSudoPasswordAutofill = (_options: {
   let pending = false;
   let selectedIndex = 0;
   let pendingUi: "hint" | "picker" | null = null;
+  /** True after confirmFill until we see success (non-prompt output) or expire. */
+  let postFillRetry = false;
 
   const hasFillMaterial = (): boolean => {
     if (mode === "off") return false;
@@ -207,6 +213,7 @@ export const createSudoPasswordAutofill = (_options: {
 
   const disarm = () => {
     armedUntil = Number.NEGATIVE_INFINITY;
+    postFillRetry = false;
     tail = "";
     selectedIndex = 0;
     if (pending) {
@@ -270,8 +277,9 @@ export const createSudoPasswordAutofill = (_options: {
         return data;
       }
       const lastLine = tail.split(/[\r\n]/).pop() ?? tail;
-      const armActive =
+      let armActive =
         armedUntil !== Number.NEGATIVE_INFINITY && options.now() <= armedUntil;
+      if (!armActive) postFillRetry = false;
       // Explicit "[sudo] …" prompts are sudo-specific → assist regardless of arm,
       // so it's reliable even when arming didn't fire (#1284). Bare "Password:"
       // only assists inside the arm window, to avoid noise on unrelated prompts
@@ -288,11 +296,25 @@ export const createSudoPasswordAutofill = (_options: {
         return data;
       }
       if (isPrompt) {
+        // After a fill, only re-assist when this looks like a real auth retry
+        // (explicit [sudo] again, or failure text in the tail). A bare
+        // Password: from a child program after successful sudo must not reopen.
+        if (postFillRetry) {
+          const looksLikeAuthRetry =
+            isExplicitSudoPrompt(lastLine) || AUTH_RETRY_FAILURE_PATTERN.test(tail);
+          if (!looksLikeAuthRetry) {
+            postFillRetry = false;
+            armedUntil = Number.NEGATIVE_INFINITY;
+            return data;
+          }
+          armActive = true;
+        }
         // Only mark pending if the UI actually rendered. If the overlay is
         // unavailable, don't intercept Enter — the user would have no visible
         // cue and could leak the password.
         if (showAssist(armActive)) {
           pending = true;
+          postFillRetry = false;
         }
       }
       return data;
@@ -313,11 +335,12 @@ export const createSudoPasswordAutofill = (_options: {
         return;
       }
       options.write(`${secret}\n`);
-      // Clear the pending UI but keep (and refresh) the arm window so a
-      // wrong-password re-prompt can reopen the full picker / hint. Full
-      // disarm would force unarmed host-only fallback on the next [sudo] line.
+      // Clear pending UI. Keep a short arm + postFillRetry flag so a real
+      // sudo/su rejection re-prompt can reopen assist, but a later child
+      // Password: (e.g. after `sudo mysql -p`) will not (#2156 review).
       pending = false;
       hideUi();
+      postFillRetry = true;
       if (hasFillMaterial()) {
         armedUntil = options.now() + armWindowMs;
         tail = "";

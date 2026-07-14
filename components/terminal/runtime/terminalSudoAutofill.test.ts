@@ -415,6 +415,20 @@ test("picker reopens after a wrong password when still armed", () => {
   assert.deepEqual(writes, ["wrong\n", "right\n"]);
 });
 
+test("does not re-assist a child password prompt after successful fill", () => {
+  // `sudo mysql -p`: after the sudo password is accepted, mysql's own
+  // "Enter password:" must not reopen assist with the host secret.
+  const { autofill, hints, writes } = make();
+  autofill.armForCommand("sudo mysql -p");
+  autofill.handleOutput("[sudo] password for alice: ");
+  assert.deepEqual(hints, [true]);
+  autofill.confirmFill();
+  assert.deepEqual(writes, ["secret\n"]);
+  autofill.handleOutput("\r\nEnter password: ");
+  assert.equal(autofill.isPromptPending(), false);
+  assert.deepEqual(hints, [true, false]); // only the original sudo hint
+});
+
 test("picker mode requires arm before offering the full keychain list", () => {
   // Unarmed explicit [sudo] must not surface every identity — a remote can
   // forge that line. Host-password hint remains allowed (#2156 security).
