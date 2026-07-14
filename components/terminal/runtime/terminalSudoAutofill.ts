@@ -79,13 +79,23 @@ export const isSudoScopedBarePasswordPrompt = (data: string): boolean => {
   return SUDO_SCOPED_BARE_PROMPT_PATTERN.test(plain);
 };
 
-/** su typically prints a bare Password: line (not "Enter password" / DB style). */
+/**
+ * su typically prints a short bare Password: / 密码： line.
+ * Reject SSH/scp style "user@host's password:" and long child prompts even
+ * while an su command arm is still active (e.g. passwordless su -c ssh).
+ */
 export const isSuBarePasswordPrompt = (data: string): boolean => {
   if (CONCEAL_PATTERN.test(data)) return false;
-  const plain = stripTerminalControlSequences(data);
-  if (!isSudoPasswordPrompt(plain)) return false;
+  const plain = stripTerminalControlSequences(data).replace(/\s+/g, " ").trim();
+  if (!plain) return false;
   if (CHILD_PROGRAM_PASSWORD_PROMPT_PATTERN.test(plain)) return false;
-  return true;
+  // SSH/scp/rsync remote password prompts always include user@host.
+  if (plain.includes("@")) return false;
+  if (!isSudoPasswordPrompt(plain)) return false;
+  // Whole line should be essentially the password word (+ optional colon).
+  // Keep a small budget for locale variants like "Password: " / "密码：".
+  if (plain.length > 24) return false;
+  return /^(?:password|passwd|密\s*码|口\s*令)\s*[:：]?\s*$/i.test(plain);
 };
 
 /** Public picker row — never includes the secret. */

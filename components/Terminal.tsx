@@ -1612,8 +1612,6 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     sshDebugLogEnabled,
     sudoAutofillPassword: resolvedSudoAutofillPassword,
     sudoAutofillPasswordRef,
-    sudoAutofillCandidates: resolvedSudoAutofillCandidates,
-    sudoAutofillCandidatesRef,
   });
   sessionStartersRef.current = sessionStarters;
 

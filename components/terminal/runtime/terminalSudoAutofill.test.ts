@@ -543,6 +543,22 @@ test("picker opens for su bare Password after arm", () => {
   assert.equal(autofill.isPickerPending(), true);
 });
 
+test("passwordless su -c ssh does not open picker for remote password", () => {
+  const autofill = createSudoPasswordAutofill({
+    mode: "picker",
+    candidates: [
+      { id: "host", label: "Host", password: "host-secret" },
+      { id: "identity:other", label: "Other", password: "other-secret" },
+    ],
+    write: () => {},
+    onPicker: () => true,
+  });
+  autofill.armForCommand("su bob -c 'ssh other-host'");
+  autofill.handleOutput("bob@other-host's password: ");
+  assert.equal(autofill.isPickerPending(), false);
+  assert.equal(autofill.isPromptPending(), false);
+});
+
 test("picker mode requires arm before offering the full keychain list", () => {
   // Unarmed explicit [sudo] must not surface every identity — a remote can
   // forge that line. Host-password hint remains allowed (#2156 security).
