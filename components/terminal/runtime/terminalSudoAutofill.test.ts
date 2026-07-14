@@ -430,6 +430,7 @@ test("picker mode does not expose passwords in onPicker payload", () => {
       return true;
     },
   });
+  autofill.armForCommand("sudo whoami");
   autofill.handleOutput("[sudo] password for alice: ");
   assert.ok(seen && typeof seen === "object");
   const json = JSON.stringify(seen);

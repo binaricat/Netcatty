@@ -353,10 +353,13 @@ export const createSudoPasswordAutofill = (_options: {
         disarm();
         return;
       }
-      // Mode change while pending: re-show the appropriate UI.
+      // Mode change while pending: re-show the appropriate UI. Keep the full
+      // picker available only while the command arm is still valid.
       if (pending) {
+        const armStillActive =
+          armedUntil !== Number.NEGATIVE_INFINITY && options.now() <= armedUntil;
         hideUi();
-        if (!showAssist()) {
+        if (!showAssist(armStillActive)) {
           pending = false;
         }
       }
