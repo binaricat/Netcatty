@@ -10,6 +10,7 @@ import { cn } from "../../lib/utils";
 import {
   ToolbarCustomizeContextMenu,
   ToolbarOverflowMenu,
+  useToolbarOverflowClose,
 } from "../ui/toolbar-item-layout";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../ui/tooltip";
 import { SftpBreadcrumb } from "./SftpBreadcrumb";
@@ -51,6 +52,49 @@ export const SFTP_TOOLBAR_LAYOUT_DEFAULTS: ToolbarItemLayoutDefaults = {
   },
   lockedIds: ["refresh"],
 };
+
+/**
+ * When the toolbar is narrow, keep these user-shown actions inline so the path
+ * still has room. Other user-shown actions temporarily join the ⋮ list.
+ * User "hide" / permanent "collapse" are always respected (never re-shown).
+ */
+export const SFTP_TOOLBAR_NARROW_INLINE_IDS = new Set<SftpToolbarItemId>([
+  "bookmark",
+  "goToTerminalCwd",
+  "followTerminalCwd",
+  "copyPath",
+  "viewMode",
+  "filter",
+]);
+
+/** Prioritize path space; same threshold as the pre-customize toolbar. */
+export const SFTP_TOOLBAR_NARROW_WIDTH = 400;
+
+/** Apply user placement, then optional narrow-width temporary spill of show → overflow. */
+export function resolveSftpToolbarVisibleIds({
+  shown,
+  collapsed,
+  narrow,
+}: {
+  shown: string[];
+  collapsed: string[];
+  narrow: boolean;
+}): { inlineIds: string[]; overflowIds: string[] } {
+  if (!narrow) {
+    return { inlineIds: shown, overflowIds: collapsed };
+  }
+  const inlineIds = shown.filter((id) =>
+    SFTP_TOOLBAR_NARROW_INLINE_IDS.has(id as SftpToolbarItemId),
+  );
+  // If the user hid every pinned id, keep at least the first shown item so ⋮ isn't the only control.
+  const safeInline =
+    inlineIds.length > 0 ? inlineIds : shown.length > 0 ? [shown[0]] : [];
+  const spilled = shown.filter((id) => !safeInline.includes(id));
+  return {
+    inlineIds: safeInline,
+    overflowIds: [...spilled, ...collapsed],
+  };
+}
 
 type SftpPaneViewMode = "list" | "tree";
 
@@ -425,50 +469,39 @@ export const SftpPaneToolbar: React.FC<SftpPaneToolbarProps> = React.memo(({
 
   const { shown, collapsed } = toolbarLayout.partition(availableIds);
 
-  const bookmarkPopoverBody = (
-    <>
-      <div className="px-3 py-2 border-b border-border/40">
-        <div className="text-xs font-medium">{t("sftp.bookmark.list")}</div>
-      </div>
-      <div className="p-2 border-b border-border/40 flex gap-1">
-        <Button
-          variant={isCurrentPathBookmarked ? "secondary" : "ghost"}
-          size="sm"
-          className="flex-1 justify-start text-xs h-7"
-          onClick={onToggleBookmark}
-        >
-          <Bookmark
-            size={12}
-            fill={isCurrentPathBookmarked ? "currentColor" : "none"}
-            className={cn("mr-2", isCurrentPathBookmarked && "text-yellow-500")}
-          />
-          {isCurrentPathBookmarked ? t("sftp.bookmark.remove") : t("sftp.bookmark.add")}
-        </Button>
-        {pane.connection?.currentPath && !isCurrentPathGlobalBookmarked && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="text-xs h-7 px-2 shrink-0"
-                onClick={() =>
-                  pane.connection?.currentPath && onAddGlobalBookmark(pane.connection.currentPath)
-                }
-              >
-                {t("sftp.bookmark.addGlobal")}
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{t("sftp.bookmark.addGlobalTooltip")}</TooltipContent>
-          </Tooltip>
-        )}
-      </div>
-      <SftpBookmarkList
-        bookmarks={bookmarks}
-        onNavigateToBookmark={onNavigateToBookmark}
-        onDeleteBookmark={onDeleteBookmark}
-        t={t}
-      />
-    </>
+  const outerRef = useRef<HTMLDivElement>(null);
+  const [narrow, setNarrow] = useState(false);
+
+  useEffect(() => {
+    const el = outerRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        setNarrow(entry.contentRect.width < SFTP_TOOLBAR_NARROW_WIDTH);
+      }
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const { inlineIds, overflowIds } = useMemo(
+    () => resolveSftpToolbarVisibleIds({ shown, collapsed, narrow }),
+    [shown, collapsed, narrow],
+  );
+
+  const renderBookmarkPopoverBody = (onAfterLeafAction?: () => void) => (
+    <SftpBookmarkPopoverBody
+      t={t}
+      bookmarks={bookmarks}
+      isCurrentPathBookmarked={isCurrentPathBookmarked}
+      isCurrentPathGlobalBookmarked={isCurrentPathGlobalBookmarked}
+      currentPath={pane.connection?.currentPath}
+      onToggleBookmark={onToggleBookmark}
+      onAddGlobalBookmark={onAddGlobalBookmark}
+      onNavigateToBookmark={onNavigateToBookmark}
+      onDeleteBookmark={onDeleteBookmark}
+      onAfterLeafAction={onAfterLeafAction}
+    />
   );
 
   const renderBookmarkButton = (size: "sm" | "md" = "sm") => (
@@ -499,49 +532,22 @@ export const SftpPaneToolbar: React.FC<SftpPaneToolbarProps> = React.memo(({
         <TooltipContent>{bookmarkButtonLabel}</TooltipContent>
       </Tooltip>
       <PopoverContent className="w-64 p-0" align="start">
-        {bookmarkPopoverBody}
+        {renderBookmarkPopoverBody()}
       </PopoverContent>
     </Popover>
   );
 
   /** Collapsed (⋮) entry: same path list as the inline bookmark button. */
   const renderBookmarkMenuItem = () => (
-    <Popover>
-      <PopoverTrigger asChild>
-        <button
-          type="button"
-          className={cn(
-            menuItemClass,
-            isCurrentPathBookmarked && "text-yellow-500",
-            !isCurrentPathBookmarked && bookmarks.length > 0 && "text-primary",
-          )}
-          aria-label={bookmarkButtonLabel}
-          onClick={(e) => {
-            // Match inline: first-time add is one click; otherwise open the list.
-            if (shouldToggleBookmarkFromButton) {
-              e.preventDefault();
-              onToggleBookmark();
-            }
-          }}
-        >
-          <Bookmark
-            size={14}
-            className="shrink-0"
-            fill={isCurrentPathBookmarked ? "currentColor" : "none"}
-          />
-          {bookmarkButtonLabel}
-        </button>
-      </PopoverTrigger>
-      <PopoverContent
-        className="w-64 p-0"
-        align="start"
-        side="left"
-        sideOffset={6}
-        data-toolbar-nested-menu="true"
-      >
-        {bookmarkPopoverBody}
-      </PopoverContent>
-    </Popover>
+    <SftpOverflowNestedBookmark
+      menuItemClass={menuItemClass}
+      bookmarkButtonLabel={bookmarkButtonLabel}
+      isCurrentPathBookmarked={isCurrentPathBookmarked}
+      bookmarksCount={bookmarks.length}
+      shouldToggleBookmarkFromButton={shouldToggleBookmarkFromButton}
+      onToggleBookmark={onToggleBookmark}
+      renderBody={(closeOverflow) => renderBookmarkPopoverBody(closeOverflow)}
+    />
   );
 
   const renderEncodingInline = () => (
@@ -582,42 +588,13 @@ export const SftpPaneToolbar: React.FC<SftpPaneToolbarProps> = React.memo(({
   );
 
   const renderEncodingMenu = () => (
-    <Popover>
-      <PopoverTrigger asChild>
-        <button type="button" className={menuItemClass}>
-          <Languages size={14} className="shrink-0" />
-          {t("sftp.encoding.label")}
-        </button>
-      </PopoverTrigger>
-      <PopoverContent
-        className="w-36 p-1"
-        align="start"
-        side="left"
-        sideOffset={6}
-        data-toolbar-nested-menu="true"
-      >
-        {(["auto", "utf-8", "gb18030"] as const).map((encoding) => (
-          <PopoverClose asChild key={encoding}>
-            <button
-              className={cn(
-                menuItemClass,
-                pane.filenameEncoding === encoding && "bg-secondary",
-              )}
-              onClick={() => onSetFilenameEncoding(encoding)}
-            >
-              <Check
-                size={12}
-                className={cn(
-                  "shrink-0",
-                  pane.filenameEncoding === encoding ? "opacity-100" : "opacity-0",
-                )}
-              />
-              {t(`sftp.encoding.${encoding === "utf-8" ? "utf8" : encoding}`)}
-            </button>
-          </PopoverClose>
-        ))}
-      </PopoverContent>
-    </Popover>
+    <SftpOverflowNestedEncoding
+      menuItemClass={menuItemClass}
+      label={t("sftp.encoding.label")}
+      filenameEncoding={pane.filenameEncoding}
+      onSetFilenameEncoding={onSetFilenameEncoding}
+      t={t}
+    />
   );
 
   const renderInline = (id: string): React.ReactNode => {
@@ -889,12 +866,13 @@ export const SftpPaneToolbar: React.FC<SftpPaneToolbarProps> = React.memo(({
     }
   };
 
-  const collapsedNodes = collapsed.map(renderCollapsed).filter(Boolean);
+  const overflowNodes = overflowIds.map(renderCollapsed).filter(Boolean);
 
   return (
     <TooltipProvider delayDuration={500} skipDelayDuration={100} disableHoverableContent>
       {/* Path chrome stays outside customize so path right-click keeps native/browser menus. */}
       <div
+        ref={outerRef}
         className="h-7 px-2 flex items-center gap-1 border-b border-border/40 bg-secondary/20"
         data-section="terminal-sftp-toolbar"
       >
@@ -976,15 +954,15 @@ export const SftpPaneToolbar: React.FC<SftpPaneToolbarProps> = React.memo(({
             t={t}
             className="ml-auto flex items-center gap-0.5 shrink-0"
           >
-            {shown.map(renderInline)}
+            {inlineIds.map(renderInline)}
             <ToolbarOverflowMenu
-              hasItems={collapsedNodes.length > 0}
+              hasItems={overflowNodes.length > 0}
               label={t("common.more")}
               orientation="horizontal"
               buttonClassName="h-6 w-6"
               contentClassName="min-w-[140px]"
             >
-              <div className="flex flex-col min-w-[140px]">{collapsedNodes}</div>
+              <div className="flex flex-col min-w-[140px]">{overflowNodes}</div>
             </ToolbarOverflowMenu>
           </ToolbarCustomizeContextMenu>
       </div>
@@ -1045,3 +1023,195 @@ export const SftpPaneToolbar: React.FC<SftpPaneToolbarProps> = React.memo(({
     </TooltipProvider>
   );
 });
+
+function SftpBookmarkPopoverBody({
+  t,
+  bookmarks,
+  isCurrentPathBookmarked,
+  isCurrentPathGlobalBookmarked,
+  currentPath,
+  onToggleBookmark,
+  onAddGlobalBookmark,
+  onNavigateToBookmark,
+  onDeleteBookmark,
+  onAfterLeafAction,
+}: {
+  t: (key: string, params?: Record<string, unknown>) => string;
+  bookmarks: SftpBookmark[];
+  isCurrentPathBookmarked: boolean;
+  isCurrentPathGlobalBookmarked: boolean;
+  currentPath?: string;
+  onToggleBookmark: () => void;
+  onAddGlobalBookmark: (path: string) => void;
+  onNavigateToBookmark: (path: string) => void;
+  onDeleteBookmark: (id: string) => void;
+  onAfterLeafAction?: () => void;
+}) {
+  const runThenClose = (action: () => void) => {
+    action();
+    onAfterLeafAction?.();
+  };
+
+  return (
+    <>
+      <div className="px-3 py-2 border-b border-border/40">
+        <div className="text-xs font-medium">{t("sftp.bookmark.list")}</div>
+      </div>
+      <div className="p-2 border-b border-border/40 flex gap-1">
+        <Button
+          variant={isCurrentPathBookmarked ? "secondary" : "ghost"}
+          size="sm"
+          className="flex-1 justify-start text-xs h-7"
+          onClick={() => runThenClose(onToggleBookmark)}
+        >
+          <Bookmark
+            size={12}
+            fill={isCurrentPathBookmarked ? "currentColor" : "none"}
+            className={cn("mr-2", isCurrentPathBookmarked && "text-yellow-500")}
+          />
+          {isCurrentPathBookmarked ? t("sftp.bookmark.remove") : t("sftp.bookmark.add")}
+        </Button>
+        {currentPath && !isCurrentPathGlobalBookmarked && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-xs h-7 px-2 shrink-0"
+                onClick={() => runThenClose(() => onAddGlobalBookmark(currentPath))}
+              >
+                {t("sftp.bookmark.addGlobal")}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{t("sftp.bookmark.addGlobalTooltip")}</TooltipContent>
+          </Tooltip>
+        )}
+      </div>
+      <SftpBookmarkList
+        bookmarks={bookmarks}
+        onNavigateToBookmark={(path) => runThenClose(() => onNavigateToBookmark(path))}
+        onDeleteBookmark={(id) => runThenClose(() => onDeleteBookmark(id))}
+        t={t}
+      />
+    </>
+  );
+}
+
+/** Nested bookmark opener inside ⋮ — keeps overflow open until a leaf action. */
+function SftpOverflowNestedBookmark({
+  menuItemClass,
+  bookmarkButtonLabel,
+  isCurrentPathBookmarked,
+  bookmarksCount,
+  shouldToggleBookmarkFromButton,
+  onToggleBookmark,
+  renderBody,
+}: {
+  menuItemClass: string;
+  bookmarkButtonLabel: string;
+  isCurrentPathBookmarked: boolean;
+  bookmarksCount: number;
+  shouldToggleBookmarkFromButton: boolean;
+  onToggleBookmark: () => void;
+  renderBody: (closeOverflow: () => void) => React.ReactNode;
+}) {
+  const closeOverflow = useToolbarOverflowClose();
+
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          data-toolbar-overflow-keep-open="true"
+          className={cn(
+            menuItemClass,
+            isCurrentPathBookmarked && "text-yellow-500",
+            !isCurrentPathBookmarked && bookmarksCount > 0 && "text-primary",
+          )}
+          aria-label={bookmarkButtonLabel}
+          onClick={(e) => {
+            if (shouldToggleBookmarkFromButton) {
+              e.preventDefault();
+              onToggleBookmark();
+              closeOverflow();
+            }
+          }}
+        >
+          <Bookmark
+            size={14}
+            className="shrink-0"
+            fill={isCurrentPathBookmarked ? "currentColor" : "none"}
+          />
+          {bookmarkButtonLabel}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent
+        className="w-64 p-0"
+        align="start"
+        side="left"
+        sideOffset={6}
+        data-toolbar-nested-menu="true"
+      >
+        {renderBody(closeOverflow)}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+function SftpOverflowNestedEncoding({
+  menuItemClass,
+  label,
+  filenameEncoding,
+  onSetFilenameEncoding,
+  t,
+}: {
+  menuItemClass: string;
+  label: string;
+  filenameEncoding: SftpFilenameEncoding;
+  onSetFilenameEncoding: (encoding: SftpFilenameEncoding) => void;
+  t: (key: string, params?: Record<string, unknown>) => string;
+}) {
+  const closeOverflow = useToolbarOverflowClose();
+
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button type="button" data-toolbar-overflow-keep-open="true" className={menuItemClass}>
+          <Languages size={14} className="shrink-0" />
+          {label}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent
+        className="w-36 p-1"
+        align="start"
+        side="left"
+        sideOffset={6}
+        data-toolbar-nested-menu="true"
+      >
+        {(["auto", "utf-8", "gb18030"] as const).map((encoding) => (
+          <PopoverClose asChild key={encoding}>
+            <button
+              className={cn(
+                menuItemClass,
+                filenameEncoding === encoding && "bg-secondary",
+              )}
+              onClick={() => {
+                onSetFilenameEncoding(encoding);
+                closeOverflow();
+              }}
+            >
+              <Check
+                size={12}
+                className={cn(
+                  "shrink-0",
+                  filenameEncoding === encoding ? "opacity-100" : "opacity-0",
+                )}
+              />
+              {t(`sftp.encoding.${encoding === "utf-8" ? "utf8" : encoding}`)}
+            </button>
+          </PopoverClose>
+        ))}
+      </PopoverContent>
+    </Popover>
+  );
+}

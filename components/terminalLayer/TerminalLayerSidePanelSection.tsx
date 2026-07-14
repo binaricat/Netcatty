@@ -442,6 +442,7 @@ function TerminalLayerSidePanelInner({ ctx }: { ctx: SidePanelContext }) {
                     const item = sidePanelTabItemById.get(tabId as TerminalSidePanelTabId);
                     if (!item) return null;
                     const isActive = activeSidePanelTab === item.id;
+                    // Leaf click is closed by ToolbarOverflowMenu onClick capture.
                     return (
                       <button
                         key={item.id}

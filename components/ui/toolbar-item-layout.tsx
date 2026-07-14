@@ -8,7 +8,7 @@ import {
   MoreVertical,
   PanelTop,
 } from 'lucide-react';
-import React from 'react';
+import React, { createContext, useCallback, useContext, useState } from 'react';
 
 import type { ToolbarItemPlacement } from '../../domain/toolbarItemLayout';
 import { cn } from '../../lib/utils';
@@ -28,6 +28,13 @@ import {
 } from './context-menu';
 import { Popover, PopoverContent, PopoverTrigger } from './popover';
 import { Tooltip, TooltipContent, TooltipTrigger } from './tooltip';
+
+const ToolbarOverflowCloseContext = createContext<(() => void) | null>(null);
+
+/** Close the parent ⋮ overflow menu after a leaf action (no-op outside overflow). */
+export function useToolbarOverflowClose(): () => void {
+  return useContext(ToolbarOverflowCloseContext) ?? (() => {});
+}
 
 export type ToolbarCustomizeItem = {
   id: string;
@@ -206,8 +213,9 @@ export type ToolbarOverflowMenuProps = {
 
 /**
  * ⋮ button that opens the collapsed-item region. Hidden when nothing is collapsed.
- * Uses Popover (not Dropdown) so nested portaled menus (encoding, bookmark list)
- * can opt out of outside-dismiss via data-toolbar-nested-menu.
+ * Uses controlled Popover so leaf actions can close via useToolbarOverflowClose().
+ * Nested portaled menus (encoding, bookmark list) use data-toolbar-nested-menu
+ * to stay open while the nested panel is used.
  */
 export const ToolbarOverflowMenu: React.FC<ToolbarOverflowMenuProps> = ({
   hasItems,
@@ -218,11 +226,14 @@ export const ToolbarOverflowMenu: React.FC<ToolbarOverflowMenuProps> = ({
   contentClassName,
   align = 'end',
 }) => {
+  const [open, setOpen] = useState(false);
+  const close = useCallback(() => setOpen(false), []);
+
   if (!hasItems) return null;
   const Icon = orientation === 'vertical' ? MoreVertical : MoreHorizontal;
 
   return (
-    <Popover>
+    <Popover open={open} onOpenChange={setOpen}>
       <Tooltip>
         <TooltipTrigger asChild>
           <PopoverTrigger asChild>
@@ -249,8 +260,21 @@ export const ToolbarOverflowMenu: React.FC<ToolbarOverflowMenuProps> = ({
             e.preventDefault();
           }
         }}
+        onClick={(e) => {
+          // Leaf clicks close; nested openers keep the menu for the child panel.
+          const target = e.target as Element | null;
+          if (!target) return;
+          if (target.closest('[data-toolbar-overflow-keep-open="true"]')) return;
+          if (target.closest('[data-toolbar-nested-menu="true"]')) return;
+          if (target.closest('button, [role="menuitem"], a')) {
+            // Defer so the leaf onClick still runs first.
+            requestAnimationFrame(() => setOpen(false));
+          }
+        }}
       >
-        {children}
+        <ToolbarOverflowCloseContext.Provider value={close}>
+          {children}
+        </ToolbarOverflowCloseContext.Provider>
       </PopoverContent>
     </Popover>
   );

@@ -10,6 +10,7 @@ import {
   getNextSftpToolbarDisplayPath,
   getSftpViewModeToggleTarget,
   getSftpViewModeToggleLabelKey,
+  resolveSftpToolbarVisibleIds,
   shouldToggleSftpBookmarkFromButton,
   SftpBookmarkList,
   SftpPaneToolbar,
@@ -20,6 +21,23 @@ import { TooltipProvider } from "../ui/tooltip.tsx";
 test("single SFTP view-mode button toggles to the other mode", () => {
   assert.equal(getNextSftpViewMode("list"), "tree");
   assert.equal(getNextSftpViewMode("tree"), "list");
+});
+
+test("narrow SFTP toolbar spills non-pinned show items into overflow without changing hide/collapse", () => {
+  const shown = ["bookmark", "copyPath", "viewMode", "filter", "newFolder", "newFile", "refresh"];
+  const collapsed = ["encoding"];
+  const wide = resolveSftpToolbarVisibleIds({ shown, collapsed, narrow: false });
+  assert.deepEqual(wide.inlineIds, shown);
+  assert.deepEqual(wide.overflowIds, collapsed);
+
+  const narrow = resolveSftpToolbarVisibleIds({ shown, collapsed, narrow: true });
+  assert.ok(narrow.inlineIds.includes("bookmark"));
+  assert.ok(narrow.inlineIds.includes("filter"));
+  assert.ok(!narrow.inlineIds.includes("newFolder"));
+  assert.ok(narrow.overflowIds.includes("newFolder"));
+  assert.ok(narrow.overflowIds.includes("encoding"));
+  // hide is already excluded from shown/collapsed by partition — not reintroduced here
+  assert.ok(!narrow.inlineIds.includes("encoding"));
 });
 
 test("single SFTP view-mode button describes the target mode", () => {
