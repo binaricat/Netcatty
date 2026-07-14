@@ -1402,6 +1402,9 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     disposeRuntimeOnly();
     beginHibernatedSessionListeners(backendId);
     hibernatedRef.current = true;
+    // Hibernation rebuilds the autofill controller on wake; drop any open
+    // picker so it cannot stay visible against a non-pending controller.
+    setPasswordPickerState(null);
     logger.info("[Terminal] Hibernated runtime", {
       sessionId,
       snapshotChars: hibernateSnapshotRef.current.length,
@@ -2711,6 +2714,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     }
 
     wakeInProgressRef.current = true;
+    setPasswordPickerState(null);
 
     const stopHibernateListeners = () => {
       const backendId = sessionRef.current;

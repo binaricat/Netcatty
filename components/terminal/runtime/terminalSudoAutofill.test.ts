@@ -330,6 +330,15 @@ test("mode off never hints even for explicit sudo prompts", () => {
   assert.equal(autofill.isPromptPending(), false);
 });
 
+test("isPickerPending is false during hint mode", () => {
+  const { autofill } = make();
+  autofill.armForCommand("sudo whoami");
+  autofill.handleOutput("[sudo] password for alice: ");
+  assert.equal(autofill.isPromptPending(), true);
+  assert.equal(autofill.isPickerPending(), false);
+  assert.equal(autofill.moveSelection(1), false);
+});
+
 test("picker mode opens the credential list and fills the selected secret", () => {
   const writes: string[] = [];
   const pickerStates: Array<{ items: { id: string }[]; selectedIndex: number } | null> = [];
@@ -352,7 +361,8 @@ test("picker mode opens the credential list and fills the selected secret", () =
   assert.equal(pickerStates[0]?.items.length, 2);
   assert.equal(pickerStates[0]?.selectedIndex, 0);
 
-  autofill.moveSelection(1);
+  assert.equal(autofill.isPickerPending(), true);
+  assert.equal(autofill.moveSelection(1), true);
   assert.equal(pickerStates.at(-1)?.selectedIndex, 1);
 
   autofill.confirmFill();

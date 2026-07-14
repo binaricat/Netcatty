@@ -978,11 +978,23 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
       if (shouldSendShiftEnterText(e, ctx.terminalSettingsRef.current)) {
         sudoAutofill.cancelHint();
         // fall through: Shift+Enter sends the configured terminal text
-      } else if (e.key === "ArrowDown" && !e.altKey && !e.ctrlKey && !e.metaKey) {
+      } else if (
+        sudoAutofill.isPickerPending()
+        && e.key === "ArrowDown"
+        && !e.altKey
+        && !e.ctrlKey
+        && !e.metaKey
+      ) {
         e.preventDefault();
         sudoAutofill.moveSelection(1);
         return false;
-      } else if (e.key === "ArrowUp" && !e.altKey && !e.ctrlKey && !e.metaKey) {
+      } else if (
+        sudoAutofill.isPickerPending()
+        && e.key === "ArrowUp"
+        && !e.altKey
+        && !e.ctrlKey
+        && !e.metaKey
+      ) {
         e.preventDefault();
         sudoAutofill.moveSelection(-1);
         return false;

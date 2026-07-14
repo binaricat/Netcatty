@@ -75,8 +75,13 @@ export type SudoPasswordAutofill = {
   confirmFill: (candidateId?: string) => void;
   cancelHint: () => void;
   isPromptPending: () => boolean;
-  /** Picker mode: move selection while the list is open. */
-  moveSelection: (delta: number) => void;
+  /** True only while the multi-credential picker UI is open (not the hint). */
+  isPickerPending: () => boolean;
+  /**
+   * Picker mode: move selection while the list is open.
+   * Returns true when the selection changed so callers can consume the key.
+   */
+  moveSelection: (delta: number) => boolean;
   updatePassword: (password?: string) => void;
   updateCandidates: (candidates: SudoPasswordAutofillCandidate[]) => void;
   updateMode: (mode: PasswordPromptAssistMode) => void;
@@ -314,13 +319,15 @@ export const createSudoPasswordAutofill = (_options: {
       disarm();
     },
     isPromptPending: () => pending,
+    isPickerPending: () => pending && pendingUi === "picker",
     moveSelection: (delta: number) => {
-      if (!pending || pendingUi !== "picker" || candidates.length === 0) return;
+      if (!pending || pendingUi !== "picker" || candidates.length === 0) return false;
       const next =
         (selectedIndex + delta + candidates.length * 10) % candidates.length;
-      if (next === selectedIndex) return;
+      if (next === selectedIndex) return false;
       selectedIndex = next;
       notifyPicker(true);
+      return true;
     },
     updatePassword: (nextPassword?: string) => {
       password = nextPassword ?? "";

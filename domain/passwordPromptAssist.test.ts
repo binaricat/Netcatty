@@ -114,6 +114,18 @@ test("listPasswordPromptFillCandidates resolves host password from referenced id
   assert.equal(candidates[0].password, "via-identity");
 });
 
+test("listPasswordPromptFillCandidates uses the resolved identity username for host row", () => {
+  const candidates = listPasswordPromptFillCandidates({
+    host: baseHost({ username: "stale-host-user", password: undefined, identityId: "i-root" }),
+    keys: [],
+    identities: [identity({ id: "i-root", username: "root", password: "root-secret", label: "Root ID" })],
+  });
+  assert.equal(candidates.length, 1);
+  assert.equal(candidates[0].source, "host");
+  assert.equal(candidates[0].username, "root");
+  assert.equal(candidates[0].password, "root-secret");
+});
+
 test("resolveDefaultPasswordPromptFillPassword prefers host", () => {
   assert.equal(
     resolveDefaultPasswordPromptFillPassword([

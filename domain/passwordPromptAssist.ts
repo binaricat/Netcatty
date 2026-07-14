@@ -1,6 +1,6 @@
 import type { Host, Identity, SSHKey } from "./models";
 import { sanitizeCredentialValue } from "./credentials";
-import { resolveHostAutofillPassword } from "./sshAuth";
+import { resolveHostAuth, resolveHostAutofillPassword } from "./sshAuth";
 
 export type PasswordPromptFillCandidate = {
   id: string;
@@ -33,18 +33,22 @@ export const listPasswordPromptFillCandidates = (args: {
     candidates.push(candidate);
   };
 
+  // Same resolution path as login so group-inherited identities and identityId
+  // references surface the correct username next to the session password.
+  const resolvedAuth = resolveHostAuth(args);
   const hostPassword = resolveHostAutofillPassword(args);
   if (hostPassword) {
     const hostLabel =
       args.host.label?.trim()
       || args.host.hostname?.trim()
+      || resolvedAuth.username?.trim()
       || args.host.username?.trim()
       || "Host";
     push({
       id: hostCandidateId,
       source: "host",
       label: hostLabel,
-      username: args.host.username?.trim() || undefined,
+      username: resolvedAuth.username?.trim() || args.host.username?.trim() || undefined,
       password: hostPassword,
     });
   }
