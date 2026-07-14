@@ -268,15 +268,15 @@ export const createSudoPasswordAutofill = (_options: {
     return false;
   };
 
-  /** Full keychain picker only when the prompt is clearly su/sudo, not a child. */
+  /**
+   * Full keychain picker is only for armed `su` prompts (#2156). Sudo keeps
+   * host-password quick-fill only — a multi-identity list after `sudo …` is
+   * too easy to confuse with a child-program password prompt (or a forged
+   * [sudo] line once auth is cached).
+   */
   const allowFullPickerForLine = (line: string, armActive: boolean): boolean => {
-    if (!armActive || !armedKind) return false;
-    if (isExplicitSudoPrompt(line)) return true;
-    // su Password: is the normal su UX; DB-style lines are rejected above.
-    if (armedKind === "su") return isSuBarePasswordPrompt(line);
-    // For sudo, only the [sudo] tag is strong enough for the multi-identity
-    // picker. Kylin bare "输入密码" still gets host-password hint only.
-    return false;
+    if (!armActive || armedKind !== "su") return false;
+    return isSuBarePasswordPrompt(line);
   };
 
   const showHostPasswordHint = (): boolean => {

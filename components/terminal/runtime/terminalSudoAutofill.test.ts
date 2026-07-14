@@ -363,13 +363,19 @@ test("isPickerPending is false during hint mode", () => {
 test("picker mode opens the credential list and fills the selected secret", () => {
   const writes: string[] = [];
   const pickerStates: Array<{ items: { id: string }[]; selectedIndex: number } | null> = [];
+  const hints: boolean[] = [];
   const autofill = createSudoPasswordAutofill({
     mode: "picker",
+    password: "host-secret",
     candidates: [
       { id: "host", label: "Host", username: "alice", password: "host-secret" },
       { id: "identity:root", label: "Root", username: "root", password: "root-secret" },
     ],
     write: (d) => writes.push(d),
+    onHint: (a) => {
+      hints.push(a);
+      return true;
+    },
     onPicker: (active, state) => {
       pickerStates.push(active ? { items: state!.items, selectedIndex: state!.selectedIndex } : null);
       return true;
@@ -389,6 +395,29 @@ test("picker mode opens the credential list and fills the selected secret", () =
   autofill.confirmFill();
   assert.deepEqual(writes, ["root-secret\n"]);
   assert.equal(pickerStates.at(-1), null);
+
+  // sudo never opens the multi-identity picker — host-password hint only
+  const sudoPicker = createSudoPasswordAutofill({
+    mode: "picker",
+    password: "host-secret",
+    candidates: [
+      { id: "host", label: "Host", password: "host-secret" },
+      { id: "identity:root", label: "Root", password: "root-secret" },
+    ],
+    write: () => {},
+    onHint: (a) => {
+      hints.push(a);
+      return true;
+    },
+    onPicker: (active, state) => {
+      pickerStates.push(active ? { items: state!.items, selectedIndex: state!.selectedIndex } : null);
+      return true;
+    },
+  });
+  sudoPicker.armForCommand("sudo whoami");
+  sudoPicker.handleOutput("[sudo] password for alice: ");
+  assert.equal(sudoPicker.isPickerPending(), false);
+  assert.equal(sudoPicker.isPromptPending(), true);
 });
 
 test("picker confirmFill can target a specific candidate id", () => {
@@ -557,8 +586,8 @@ test("picker mode does not expose passwords in onPicker payload", () => {
       return true;
     },
   });
-  autofill.armForCommand("sudo whoami");
-  autofill.handleOutput("[sudo] password for alice: ");
+  autofill.armForCommand("su -");
+  autofill.handleOutput("Password: ");
   assert.ok(seen && typeof seen === "object");
   const json = JSON.stringify(seen);
   assert.equal(json.includes("top-secret"), false);
