@@ -111,9 +111,9 @@ export const useTerminalBackend = () => {
     bridge?.ackSessionFlow?.(sessionId, bytes);
   }, []);
 
-  const closeSession = useCallback((sessionId: string) => {
+  const closeSession = useCallback(async (sessionId: string) => {
     const bridge = netcattyBridge.get();
-    bridge?.closeSession?.(sessionId);
+    await bridge?.closeSession?.(sessionId);
   }, []);
 
   const setSessionEncoding = useCallback(async (sessionId: string, encoding: string) => {

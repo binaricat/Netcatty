@@ -83,6 +83,7 @@ export type TerminalBackendApi = {
   writeToSession: (sessionId: string, data: string, options?: { automated?: boolean; lineDelayMs?: number; logRewrite?: ProgrammaticCommandLogRewrite }) => void;
   interruptSession?: (sessionId: string, trace?: NetcattyTerminalInterruptTrace) => void;
   resizeSession: (sessionId: string, cols: number, rows: number) => void;
+  closeSession: (sessionId: string) => void | Promise<void>;
   /** Pause/resume the source stream for output back-pressure (optional). */
   setSessionFlowPaused?: (sessionId: string, paused: boolean) => void;
   /** Acknowledge rendered terminal output bytes for main-process IPC back-pressure. */

@@ -621,7 +621,10 @@ export const closeOrphanBackendSession = (
   sessionBackendId: string,
 ) => {
   try {
-    ctx.terminalBackend.closeSession(sessionBackendId);
+    const closeResult = ctx.terminalBackend.closeSession(sessionBackendId);
+    void Promise.resolve(closeResult).catch((err) => {
+      logger.warn("Failed to close orphan session after terminal unmount", err);
+    });
   } catch (err) {
     logger.warn("Failed to close orphan session after terminal unmount", err);
   }

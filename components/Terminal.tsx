@@ -1206,7 +1206,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     captureHandler(capturedSessionId, capturedData);
   }, [finalizeTerminalLogData]);
 
-  const cleanupSession = () => {
+  const cleanupSession = async () => {
     const closingSessionId = sessionRef.current;
     disposeDataRef.current?.();
     disposeDataRef.current = null;
@@ -1227,7 +1227,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         clearTerminalSessionFlowAck(closingSessionId);
       }
       try {
-        terminalBackend.closeSession(closingSessionId);
+        await terminalBackend.closeSession(closingSessionId);
       } catch (err) {
         logger.warn("Failed to close SSH session", err);
       }
@@ -1278,7 +1278,10 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       flushTerminalSessionFlowAck(closingSessionId);
       clearTerminalSessionFlowAck(closingSessionId);
       try {
-        terminalBackend.closeSession(closingSessionId);
+        const closeResult = terminalBackend.closeSession(closingSessionId);
+        void Promise.resolve(closeResult).catch((err) => {
+          logger.warn("Failed to close hibernated session", err);
+        });
       } catch (err) {
         logger.warn("Failed to close hibernated session", err);
       }
@@ -1510,7 +1513,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     suppressHostStartupCommandRef.current = false;
     clearHibernateRetry();
     clearAutoReconnect();
-    cleanupSession();
+    void cleanupSession();
     disposeRuntimeOnly();
   };
 
@@ -2283,7 +2286,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     setPendingHostKeyRequestId(null);
     setError("Connection cancelled");
     setProgressLogs((prev) => [...prev, "Cancelled by user."]);
-    cleanupSession();
+    void cleanupSession();
     updateStatus("disconnected");
     setChainProgress(null);
     setTimeout(() => setIsCancelling(false), 600);
@@ -2338,7 +2341,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     setPendingHostKeyRequestId(null);
   };
 
-  const startReconnect = (mode: "manual" | "auto" = "manual") => {
+  const startReconnect = async (mode: "manual" | "auto" = "manual") => {
     if (!termRef.current && hibernatedRef.current) {
       if (reconnectWakeInFlightRef.current) return;
       const wakeForReconnect = wakeHibernatedRuntimeForReconnectRef.current;
@@ -2381,8 +2384,8 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       restoreCwdIntentRef.current = null;
       suppressHostStartupCommandRef.current = true;
     }
-    cleanupSession();
-    // closeSession wiped preload ready listeners — re-arm before startMosh so a
+    await cleanupSession();
+    // closeSession wiped preload ready listeners; re-arm before startMosh so a
     // fast handshake cannot emit netcatty:mosh:ready into an empty map.
     prepareMoshReadySubscription();
     const term = termRef.current;

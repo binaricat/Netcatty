@@ -859,7 +859,7 @@ test("onSessionExit unsubscribe removes empty listener set", () => {
   assert.equal(exitListeners.has("session-1"), false);
 });
 
-test("closeSession clears terminal data state and marks the session closed", () => {
+test("closeSession clears terminal data state and waits for close acknowledgement", async () => {
   const listener = () => {};
   const dataListeners = new Map([
     ["session-1", new Set([listener])],
@@ -878,15 +878,18 @@ test("closeSession clears terminal data state and marks the session closed", () 
   const zmodemOverwriteListeners = new Map([
     ["session-1", new Set([listener])],
   ]);
-  const sent = [];
+  const invoked = [];
   const closedPorts = [];
   terminalDataBacklog.append("session-1", "pending");
 
   const api = createPreloadApi({
     ipcRenderer: {
-      invoke() {},
+      invoke(channel, payload) {
+        invoked.push({ channel, payload });
+        return Promise.resolve();
+      },
       send(channel, payload) {
-        sent.push({ channel, payload });
+        throw new Error(`unexpected send ${channel}`);
       },
       on() {},
       removeListener() {},
@@ -908,7 +911,7 @@ test("closeSession clears terminal data state and marks the session closed", () 
     },
   });
 
-  api.closeSession("session-1");
+  await api.closeSession("session-1");
 
   assert.equal(dataListeners.has("session-1"), false);
   assert.equal(displayDataListeners.has("session-1"), false);
@@ -920,6 +923,36 @@ test("closeSession clears terminal data state and marks the session closed", () 
   assert.equal(zmodemListeners.has("session-1"), true);
   assert.equal(zmodemOverwriteListeners.has("session-1"), true);
   assert.deepEqual(closedPorts, ["session-1"]);
+  assert.deepEqual(invoked, [
+    { channel: "netcatty:close:await", payload: { sessionId: "session-1" } },
+  ]);
+});
+
+test("closeSession falls back to fire-and-forget close when acknowledgement is unavailable", async () => {
+  const sent = [];
+  const api = createPreloadApi({
+    ipcRenderer: {
+      invoke() {
+        return Promise.reject(new Error("missing handler"));
+      },
+      send(channel, payload) {
+        sent.push({ channel, payload });
+      },
+      on() {},
+      removeListener() {},
+    },
+    os: {
+      release: () => "10.0.19045",
+    },
+    dataListeners: new Map(),
+    displayDataListeners: new Map(),
+    terminalDataBacklog: createTerminalDataBacklog(),
+    closedTerminalDataSessions: new Set(),
+    telnetEchoModeListeners: new Map(),
+  });
+
+  await api.closeSession("session-1");
+
   assert.deepEqual(sent, [
     { channel: "netcatty:close", payload: { sessionId: "session-1" } },
   ]);

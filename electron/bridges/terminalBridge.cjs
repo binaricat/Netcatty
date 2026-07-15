@@ -1393,6 +1393,7 @@ function registerHandlers(ipcMain, options = {}) {
       "netcatty:local:validatePath",
       "netcatty:shells:discover",
       "netcatty:terminal:setEncoding",
+      "netcatty:close:await",
     ].forEach((channel) => registerWorkerHandle(ipcMain, terminalWorkerManager, channel));
     ipcMain.on("netcatty:write", (event, payload) => {
       // Session log streams started in the main process (manual/script logs)
@@ -1435,6 +1436,7 @@ function registerHandlers(ipcMain, options = {}) {
   ipcMain.on("netcatty:flow", setSessionFlowPaused);
   ipcMain.on("netcatty:flow:ack", ackSessionFlow);
   ipcMain.on("netcatty:close", closeSession);
+  ipcMain.handle("netcatty:close:await", closeSession);
 }
 
 /**

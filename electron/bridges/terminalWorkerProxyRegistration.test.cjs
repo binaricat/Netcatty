@@ -52,6 +52,7 @@ test("terminal worker mode proxies all terminal starts and control commands", as
     "netcatty:mosh:start",
     "netcatty:et:start",
     "netcatty:serial:start",
+    "netcatty:close:await",
   ]) {
     assert.equal(ipcMain.handlers.has(channel), true, `${channel} should be proxied as a request`);
     await ipcMain.handlers.get(channel)(fakeEvent, { sessionId: channel });
@@ -77,6 +78,7 @@ test("terminal worker mode proxies all terminal starts and control commands", as
       "netcatty:mosh:start",
       "netcatty:et:start",
       "netcatty:serial:start",
+      "netcatty:close:await",
     ],
   );
   assert.deepEqual(

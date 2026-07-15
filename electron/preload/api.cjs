@@ -251,13 +251,17 @@ function createPreloadApi(ctx) {
     if (!sessionId || !Number.isFinite(bytes) || bytes <= 0) return;
     ipcRenderer.send("netcatty:flow:ack", { sessionId, bytes });
   },
-  closeSession: (sessionId) => {
+  closeSession: async (sessionId) => {
     markTerminalDataSessionClosed(sessionId);
     telnetEchoModeListeners.delete(sessionId);
     // closeSession sets session.closed before kill; mosh exit handlers skip
     // the exit event in that case, so clear ready listeners here too.
     moshSessionReadyListeners.delete(sessionId);
-    ipcRenderer.send("netcatty:close", { sessionId });
+    try {
+      await ipcRenderer.invoke("netcatty:close:await", { sessionId });
+    } catch {
+      ipcRenderer.send("netcatty:close", { sessionId });
+    }
   },
   setSessionEncoding: async (sessionId, encoding) => {
     // Try the SSH handler first; it returns { ok: false } for non-SSH

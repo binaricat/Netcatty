@@ -310,7 +310,7 @@ declare global {
     resizeSession(sessionId: string, cols: number, rows: number): void;
     setSessionFlowPaused(sessionId: string, paused: boolean): void;
     ackSessionFlow(sessionId: string, bytes: number): void;
-    closeSession(sessionId: string): void;
+    closeSession(sessionId: string): void | Promise<void>;
     // ZMODEM file transfer
     onZmodemEvent?(
       sessionId: string,
