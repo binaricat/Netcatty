@@ -59,6 +59,24 @@ function payload(label = 'Production'): SyncPayload {
   };
 }
 
+function emptyPayload(settings?: SyncPayload['settings']): SyncPayload {
+  return {
+    hosts: [],
+    keys: [],
+    identities: [],
+    proxyProfiles: [],
+    snippets: [],
+    customGroups: [],
+    snippetPackages: [],
+    notes: [],
+    noteGroups: [],
+    portForwardingRules: [],
+    groupConfigs: [],
+    settings,
+    syncedAt: NOW,
+  };
+}
+
 function meta(overrides: Partial<SyncFileMeta> = {}): SyncFileMeta {
   return {
     version: 1,
@@ -397,4 +415,48 @@ test('joining existing v2 data blocks changed legacy writers without a trusted b
 
   assert.equal(plan.preview.canInitialize, false);
   assert.match(plan.preview.blockedReasons.join(' '), /no trusted legacy baseline/);
+});
+
+test('a fresh empty device adopts existing v2 data without a trusted baseline', () => {
+  const remoteState = createConvergentSyncStateFromPayload(payload('Remote'), 'remote', NOW);
+  const remotePayload = withConvergentSyncEnvelope(remoteState, { syncedAt: NOW });
+  const plan = planConvergentSyncMigration({
+    localPayload: emptyPayload({ theme: 'light' }),
+    localTrustedBaseline: null,
+    providers: [{
+      provider: 'github',
+      status: 'ready',
+      meta: meta({ syncSchemaVersion: 2 }),
+      payload: remotePayload,
+      trustedBaseline: null,
+    }],
+    deviceId: 'fresh-device',
+    now: NOW + 1,
+  });
+
+  assert.equal(plan.preview.canInitialize, true);
+  assert.equal(plan.payload?.hosts[0].label, 'Remote');
+  assert.equal(plan.payload?.settings?.theme, 'dark');
+});
+
+test('an empty local snapshot with a trusted baseline remains a real deletion', () => {
+  const baseline = payload('Remote');
+  const remoteState = createConvergentSyncStateFromPayload(baseline, 'remote', NOW);
+  const remotePayload = withConvergentSyncEnvelope(remoteState, { syncedAt: NOW });
+  const plan = planConvergentSyncMigration({
+    localPayload: emptyPayload(),
+    localTrustedBaseline: baseline,
+    providers: [{
+      provider: 'github',
+      status: 'ready',
+      meta: meta({ syncSchemaVersion: 2 }),
+      payload: remotePayload,
+      trustedBaseline: null,
+    }],
+    deviceId: 'legacy-device',
+    now: NOW + 1,
+  });
+
+  assert.equal(plan.preview.canInitialize, true);
+  assert.deepEqual(plan.payload?.hosts, []);
 });

@@ -80,9 +80,12 @@ replica, and only then marks v2 initialized. A crash or failure leaves the
 existing apply sentinel set so auto-sync cannot publish a partial migration.
 
 Before a local backup restore mutates local data, the restored snapshot is
-diffed against the current materialized replica and persisted as normal device
-writes. If the replica cannot be loaded or saved, the restore fails without
-touching local data. Causal history and tombstones therefore survive restore
+diffed against the current materialized replica and prepared as normal device
+writes without persisting them. The replica load is therefore validated before
+the import, while the prepared writes are committed only after every local
+import step succeeds. An import failure leaves the replica unchanged; a later
+replica commit failure leaves the protected-apply sentinel set so the partial
+restore cannot be published. Causal history and tombstones survive restore
 instead of being replaced by an unrelated replica copied from the backup.
 
 Trusted legacy diffs also compare collection positions. A reorder-only edit is

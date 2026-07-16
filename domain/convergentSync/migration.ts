@@ -1,9 +1,11 @@
-import type {
-  CloudProvider,
-  ConvergentMigrationPreview,
-  ConvergentProviderMigrationStatus,
-  SyncFileMeta,
-  SyncPayload,
+import {
+  CLOUD_SYNC_PAYLOAD_ENTITY_KEYS,
+  hasSyncPayloadEntityData,
+  type CloudProvider,
+  type ConvergentMigrationPreview,
+  type ConvergentProviderMigrationStatus,
+  type SyncFileMeta,
+  type SyncPayload,
 } from '../sync';
 import { detectSuspiciousShrink } from '../syncGuards';
 import { mergeSyncPayloads } from '../syncMerge';
@@ -22,6 +24,20 @@ import {
   materializeSyncPayloadFromConvergentState,
   withConvergentSyncEnvelope,
 } from './payload';
+
+/*
+ * A local snapshot with no cloud entities and no trusted base is a fresh
+ * device, not an untrusted deletion. Settings are intentionally ignored here
+ * because first-launch defaults must not prevent adoption of an existing v2
+ * vault. Once a trusted base exists, an empty snapshot remains a real deletion.
+ */
+function shouldIncludeLegacyLocalSource(
+  payload: SyncPayload,
+  trustedBaseline: SyncPayload | null,
+): boolean {
+  return trustedBaseline !== null
+    || hasSyncPayloadEntityData(payload, CLOUD_SYNC_PAYLOAD_ENTITY_KEYS);
+}
 
 export type ConvergentMigrationProviderInput =
   | { provider: CloudProvider; status: 'empty' }
@@ -176,12 +192,15 @@ export function planConvergentSyncMigration(options: {
       baseline: SyncPayload | null;
       now: number;
     }> = [
-      {
+      ...(shouldIncludeLegacyLocalSource(
+        options.localPayload,
+        options.localTrustedBaseline,
+      ) ? [{
         id: `legacy-local:${options.deviceId}`,
         payload: options.localPayload,
         baseline: options.localTrustedBaseline,
         now: options.now,
-      },
+      }] : []),
       ...v1Inputs.map((input) => ({
         id: `legacy-provider:${input.provider}:${input.meta.deviceId}`,
         payload: input.payload,

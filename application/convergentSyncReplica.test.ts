@@ -31,21 +31,27 @@ function payload(label: string): SyncPayload {
 test('local restore is recorded as writes on the active replica instead of replacing it', async () => {
   const state = createConvergentSyncStateFromPayload(payload('Before'), 'seed', NOW);
   let savedState = state;
+  let saveCount = 0;
   const manager = {
     loadConvergentReplica: async () => ({ schemaVersion: 2 as const, state, updatedAt: NOW }),
     getState: () => ({ deviceId: 'local-device' }),
     saveConvergentReplica: async (record: { state: typeof state }) => {
+      saveCount += 1;
       savedState = record.state;
     },
   } as unknown as CloudSyncManager;
 
-  await prepareRestoredPayloadConvergentWrites(
+  const commit = await prepareRestoredPayloadConvergentWrites(
     payload('Restored'),
     NOW + 1,
     { manager, initialized: true },
   );
+  assert.equal(saveCount, 0);
+
+  await commit();
 
   const materialized = materializeSyncPayloadFromConvergentState(savedState, { syncedAt: NOW + 1 });
+  assert.equal(saveCount, 1);
   assert.equal(materialized.hosts[0].label, 'Restored');
   assert.equal(savedState.vector['local-device'] > 0, true);
   assert.equal(savedState.vector.seed > 0, true);

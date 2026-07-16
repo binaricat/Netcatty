@@ -8,11 +8,13 @@ import { getCloudSyncManager } from '../infrastructure/services/CloudSyncManager
 import type { CloudSyncManager } from '../infrastructure/services/CloudSyncManager';
 import { getConvergentSyncLocalConfig } from '../infrastructure/services/convergentSyncConfig';
 
+export type CommitRestoredPayloadConvergentWrites = () => Promise<void>;
+
 /**
  * Local backups intentionally contain no active CRDT replica. Before applying
- * a restore, translate the restored materialized snapshot into ordinary local
- * writes so failures cannot overwrite local data and then strand the active
- * replica. Tombstones and causal history remain intact.
+ * a restore, validate the active replica and prepare ordinary local writes.
+ * The returned commit persists them only after the local import succeeds, so
+ * the replica never claims a restore that the local import rejected.
  */
 export async function prepareRestoredPayloadConvergentWrites(
   restoredPayload: SyncPayload,
@@ -21,10 +23,10 @@ export async function prepareRestoredPayloadConvergentWrites(
     manager?: CloudSyncManager;
     initialized?: boolean;
   } = {},
-): Promise<void> {
+): Promise<CommitRestoredPayloadConvergentWrites> {
   const initialized = dependencies.initialized
     ?? getConvergentSyncLocalConfig().initialized;
-  if (!initialized) return;
+  if (!initialized) return async () => {};
   const manager = dependencies.manager ?? getCloudSyncManager();
   const replica = await manager.loadConvergentReplica();
   if (!replica) {
@@ -40,5 +42,5 @@ export async function prepareRestoredPayloadConvergentWrites(
     manager.getState().deviceId,
     now,
   );
-  await manager.saveConvergentReplica({ schemaVersion: 2, state, updatedAt: now });
+  return () => manager.saveConvergentReplica({ schemaVersion: 2, state, updatedAt: now });
 }

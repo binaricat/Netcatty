@@ -952,12 +952,15 @@ export function applyLocalVaultPayload(
   payload: SyncPayload,
   importers: SyncPayloadImporters,
   dependencies: {
-    prepareConvergentRestore?: (payload: SyncPayload) => Promise<void>;
+    prepareConvergentRestore?: (
+      payload: SyncPayload,
+    ) => Promise<() => Promise<void>>;
   } = {},
 ): Promise<void> {
   const prepareConvergentRestore = dependencies.prepareConvergentRestore
     ?? prepareRestoredPayloadConvergentWrites;
-  return prepareConvergentRestore(payload).then(() =>
-    applyPayload(payload, importers, { includeLocalOnlyData: true }),
-  );
+  return prepareConvergentRestore(payload).then(async (commitConvergentRestore) => {
+    await applyPayload(payload, importers, { includeLocalOnlyData: true });
+    await commitConvergentRestore();
+  });
 }

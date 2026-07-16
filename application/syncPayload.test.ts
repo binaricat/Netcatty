@@ -1142,7 +1142,7 @@ test("applyLocalVaultPayload restores known hosts from local backups", async () 
   assert.deepEqual(imported.knownHosts, [knownHost("kh-backup")]);
 });
 
-test("applyLocalVaultPayload prepares convergent writes before mutating local data", async () => {
+test("applyLocalVaultPayload prepares before import and commits after it succeeds", async () => {
   const calls: string[] = [];
   const payload: SyncPayload = {
     hosts: [],
@@ -1160,10 +1160,13 @@ test("applyLocalVaultPayload prepares convergent writes before mutating local da
   }, {
     prepareConvergentRestore: async () => {
       calls.push("prepare");
+      return async () => {
+        calls.push("commit");
+      };
     },
   });
 
-  assert.deepEqual(calls, ["prepare", "import"]);
+  assert.deepEqual(calls, ["prepare", "import", "commit"]);
 });
 
 test("applyLocalVaultPayload leaves local data untouched when convergent preparation fails", async () => {
@@ -1191,4 +1194,31 @@ test("applyLocalVaultPayload leaves local data untouched when convergent prepara
   );
 
   assert.equal(imported, false);
+});
+
+test("applyLocalVaultPayload does not commit convergent writes when local import fails", async () => {
+  let committed = false;
+  const payload: SyncPayload = {
+    hosts: [],
+    keys: [],
+    identities: [],
+    snippets: [],
+    customGroups: [],
+    syncedAt: 1,
+  };
+
+  await assert.rejects(
+    () => applyLocalVaultPayload(payload, {
+      importVaultData: async () => {
+        throw new Error("local import failed");
+      },
+    }, {
+      prepareConvergentRestore: async () => async () => {
+        committed = true;
+      },
+    }),
+    /local import failed/,
+  );
+
+  assert.equal(committed, false);
 });
