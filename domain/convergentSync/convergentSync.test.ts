@@ -10,6 +10,7 @@ import {
   hydrateConvergentSyncState,
   materializeConvergentSyncState,
   mergeConvergentSyncStates,
+  registerId,
   serializeConvergentSyncState,
   tickHybridLogicalClock,
   type ConvergentSyncStateV2,
@@ -831,10 +832,17 @@ test('validation rejects vector counters without a retained causal witness', () 
   }], BASE_TIME);
   const missingCandidate = createConvergentSyncState();
   missingCandidate.vector['device-a'] = 1;
+  missingCandidate.dotOrigins['device-a'] = {
+    1: registerId({ kind: 'setting', path: ['theme'] }),
+  };
   const inflatedVector = JSON.parse(
     serializeConvergentSyncState(local),
   ) as ConvergentSyncStateV2;
   inflatedVector.vector['device-a'] = 2;
+  inflatedVector.dotOrigins['device-a']['2'] = registerId({
+    kind: 'setting',
+    path: ['theme'],
+  });
 
   assert.throws(
     () => hydrateConvergentSyncState(JSON.stringify(missingCandidate)),
@@ -899,6 +907,28 @@ test('unrelated register context cannot witness an omitted register', () => {
   );
 });
 
+test('copied cross-register context cannot witness an omitted register', () => {
+  const state = applyConvergentMutations(createConvergentSyncState(), 'device-a', [
+    { kind: 'setting-set', path: ['theme'], value: 'dark' },
+    { kind: 'setting-set', path: ['terminal', 'fontSize'], value: 14 },
+  ], BASE_TIME);
+  const corrupted = JSON.parse(
+    serializeConvergentSyncState(state),
+  ) as ConvergentSyncStateV2;
+  const omittedDot = { ...corrupted.settings['/theme'].candidates[0].dot };
+  delete corrupted.settings['/theme'];
+  corrupted.settings['/terminal/fontSize'].candidates[0].context = [omittedDot];
+
+  assert.throws(
+    () => hydrateConvergentSyncState(JSON.stringify(corrupted)),
+    /context\[0\] is assigned to a different register origin/,
+  );
+  assert.throws(
+    () => mergeConvergentSyncStates(state, corrupted),
+    /context\[0\] is assigned to a different register origin/,
+  );
+});
+
 test('exact contexts detect missing dots between writes to the same register', () => {
   const state = applyConvergentMutations(createConvergentSyncState(), 'device-a', [
     { kind: 'setting-set', path: ['theme'], value: 'dark' },
@@ -934,7 +964,7 @@ test('validation rejects a context dot retained in another register', () => {
 
   assert.throws(
     () => hydrateConvergentSyncState(JSON.stringify(corrupted)),
-    /references candidate dot device-a:1 retained in another register/,
+    /context\[0\] is assigned to a different register origin/,
   );
 });
 
@@ -1065,7 +1095,25 @@ test('hydration fails closed when a dot is reused by two registers', () => {
 
   assert.throws(
     () => hydrateConvergentSyncState(JSON.stringify(corrupted)),
-    /Dot device-a:1 is reused/,
+    /dot is assigned to a different register origin/,
+  );
+});
+
+test('merge rejects the same dot allocated to different register origins', () => {
+  const left = applyConvergentMutations(createConvergentSyncState(), 'device-a', [{
+    kind: 'setting-set',
+    path: ['theme'],
+    value: 'dark',
+  }], BASE_TIME);
+  const right = applyConvergentMutations(createConvergentSyncState(), 'device-a', [{
+    kind: 'setting-set',
+    path: ['terminal', 'fontSize'],
+    value: 14,
+  }], BASE_TIME);
+
+  assert.throws(
+    () => mergeConvergentSyncStates(left, right),
+    /Dot origin mismatch/,
   );
 });
 

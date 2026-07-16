@@ -29,6 +29,7 @@ ordering hint without defining causality.
 The replica contains:
 
 - one global dotted version vector and HLC;
+- a compact dot-origin index mapping every device counter to its register;
 - an MV-register for entity presence;
 - an MV-register for collection position;
 - an MV-register for every top-level entity field;
@@ -98,7 +99,10 @@ Hydration rejects dangling observations so a malformed or partial state cannot
 use an unsubstantiated vector to discard local candidates during join. It also
 rejects a context that references any currently retained candidate dot: exact
 contexts contain dominated history only, so retained references would represent
-invalid causal dominance or a cycle.
+invalid causal dominance or a cycle. The permanent dot-origin index proves that
+each candidate and context dot belongs to the register claiming it, so copying
+an omitted register's dot into unrelated context cannot satisfy validation.
+Origin indexes join by dot and reject conflicting register identities.
 
 ## Materialization and conflicts
 

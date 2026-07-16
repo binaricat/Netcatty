@@ -5,6 +5,7 @@ import {
 import { compareDots, compareHybridLogicalClocks, dotKey } from './clock';
 import { canonicalizeJson, cloneJson, isJsonValue } from './json';
 import { getOwnRecordValue } from './record';
+import { registerId } from './registerId';
 import {
   ConvergentSyncInvariantError,
   type ConvergentCollectionState,
@@ -13,6 +14,7 @@ import {
   type ConvergentStringEntryState,
   type ConvergentSyncStateV2,
   type Dot,
+  type DotOriginIndex,
   type JsonValue,
   type MultiValueRegister,
   type RegisterCandidate,
@@ -48,6 +50,42 @@ function assertVersionVector(value: unknown, label: string): asserts value is Ve
   for (const [deviceId, counter] of Object.entries(value)) {
     assertNonEmptyKey(deviceId, `${label} device ID`);
     assertPositiveInteger(counter, `${label}.${deviceId}`);
+  }
+}
+
+function assertDotOrigins(
+  value: unknown,
+  vector: VersionVector,
+): asserts value is DotOriginIndex {
+  if (!isRecord(value)) {
+    throw new ConvergentSyncInvariantError('dotOrigins must be an object');
+  }
+  for (const [deviceId, origins] of Object.entries(value)) {
+    assertNonEmptyKey(deviceId, 'dotOrigins device ID');
+    if (!isRecord(origins)) {
+      throw new ConvergentSyncInvariantError(`dotOrigins.${deviceId} must be an object`);
+    }
+    const vectorCounter = getOwnRecordValue(vector, deviceId);
+    if (!vectorCounter || Object.keys(origins).length !== vectorCounter) {
+      throw new ConvergentSyncInvariantError(
+        `dotOrigins.${deviceId} must cover every counter in the state vector`,
+      );
+    }
+    for (let counter = 1; counter <= vectorCounter; counter += 1) {
+      const origin = getOwnRecordValue(origins, String(counter));
+      if (typeof origin !== 'string' || origin.length === 0) {
+        throw new ConvergentSyncInvariantError(
+          `dotOrigins.${deviceId}.${counter} must contain a register identity`,
+        );
+      }
+    }
+  }
+  for (const deviceId of Object.keys(vector)) {
+    if (!Object.hasOwn(value, deviceId)) {
+      throw new ConvergentSyncInvariantError(
+        `dotOrigins.${deviceId} must cover every counter in the state vector`,
+      );
+    }
   }
 }
 
@@ -87,13 +125,30 @@ function recordVectorWitness(
 
 interface DotLocation {
   candidateLabel: string;
-  registerLabel: string;
+  registerIdentity: string;
 }
 
 interface ContextReference {
   key: string;
   label: string;
-  registerLabel: string;
+  registerIdentity: string;
+}
+
+function assertDotOrigin(
+  state: ConvergentSyncStateV2,
+  dot: Dot,
+  expectedRegisterId: string,
+  label: string,
+): void {
+  const deviceOrigins = getOwnRecordValue(state.dotOrigins, dot.deviceId);
+  const origin = deviceOrigins
+    ? getOwnRecordValue(deviceOrigins, String(dot.counter))
+    : undefined;
+  if (origin !== expectedRegisterId) {
+    throw new ConvergentSyncInvariantError(
+      `${label} is assigned to a different register origin`,
+    );
+  }
 }
 
 function assertVectorIsExactlyWitnessed(
@@ -114,7 +169,7 @@ function assertCandidate(
   value: unknown,
   state: ConvergentSyncStateV2,
   label: string,
-  registerLabel: string,
+  registerIdentity: string,
   globalDots: Map<string, DotLocation>,
   witnessedDots: Map<string, Set<number>>,
   contextReferences: ContextReference[],
@@ -124,6 +179,7 @@ function assertCandidate(
   }
   const candidateDot = value.dot;
   assertCoveredDot(candidateDot, state, `${label}.dot`);
+  assertDotOrigin(state, candidateDot, registerIdentity, `${label}.dot`);
   if (!Array.isArray(value.context)) {
     throw new ConvergentSyncInvariantError(`${label}.context must be an array of dots`);
   }
@@ -131,6 +187,7 @@ function assertCandidate(
   value.context.forEach((contextDot, index) => {
     const contextLabel = `${label}.context[${index}]`;
     assertCoveredDot(contextDot, state, contextLabel);
+    assertDotOrigin(state, contextDot, registerIdentity, contextLabel);
     const contextKey = dotKey(contextDot);
     if (contextKeys.has(contextKey)) {
       throw new ConvergentSyncInvariantError(`${label}.context contains duplicate dot ${contextKey}`);
@@ -145,7 +202,7 @@ function assertCandidate(
       throw new ConvergentSyncInvariantError(`${contextLabel} must precede its own device dot`);
     }
     contextKeys.add(contextKey);
-    contextReferences.push({ key: contextKey, label: contextLabel, registerLabel });
+    contextReferences.push({ key: contextKey, label: contextLabel, registerIdentity });
     recordVectorWitness(witnessedDots, contextDot);
   });
 
@@ -179,7 +236,7 @@ function assertCandidate(
       `Dot ${key} is reused by ${previousLocation.candidateLabel} and ${label}`,
     );
   }
-  globalDots.set(key, { candidateLabel: label, registerLabel });
+  globalDots.set(key, { candidateLabel: label, registerIdentity });
   recordVectorWitness(witnessedDots, candidateDot);
 }
 
@@ -187,6 +244,7 @@ function assertRegister(
   value: unknown,
   state: ConvergentSyncStateV2,
   label: string,
+  registerIdentity: string,
   globalDots: Map<string, DotLocation>,
   witnessedDots: Map<string, Set<number>>,
   contextReferences: ContextReference[],
@@ -201,7 +259,7 @@ function assertRegister(
       candidate,
       state,
       candidateLabel,
-      label,
+      registerIdentity,
       globalDots,
       witnessedDots,
       contextReferences,
@@ -253,6 +311,7 @@ export function assertValidConvergentSyncState(
     throw new ConvergentSyncInvariantError('Expected convergent sync schema version 2');
   }
   assertVersionVector(value.vector, 'vector');
+  assertDotOrigins(value.dotOrigins, value.vector);
   assertClock(value.hlc, 'hlc');
   if (!isRecord(value.collections) || !isRecord(value.settings) || !isRecord(value.stringCollections)) {
     throw new ConvergentSyncInvariantError('Collections, settings, and stringCollections must be objects');
@@ -277,6 +336,7 @@ export function assertValidConvergentSyncState(
         entity.presence,
         state,
         `${entityLabel}.presence`,
+        registerId({ kind: 'entity-presence', collection: collectionName, entityId }),
         globalDots,
         witnessedDots,
         contextReferences,
@@ -287,6 +347,7 @@ export function assertValidConvergentSyncState(
           entity.position,
           state,
           `${entityLabel}.position`,
+          registerId({ kind: 'entity-position', collection: collectionName, entityId }),
           globalDots,
           witnessedDots,
           contextReferences,
@@ -302,6 +363,7 @@ export function assertValidConvergentSyncState(
           register,
           state,
           `${entityLabel}.fields.${field}`,
+          registerId({ kind: 'entity-field', collection: collectionName, entityId, field }),
           globalDots,
           witnessedDots,
           contextReferences,
@@ -316,6 +378,7 @@ export function assertValidConvergentSyncState(
       register,
       state,
       `settings.${encodedPath}`,
+      registerId({ kind: 'setting', path: decodeSettingPath(encodedPath) }),
       globalDots,
       witnessedDots,
       contextReferences,
@@ -337,6 +400,11 @@ export function assertValidConvergentSyncState(
         entry.presence,
         state,
         `${entryLabel}.presence`,
+        registerId({
+          kind: 'string-entry-presence',
+          collection: collectionName,
+          value: entryValue,
+        }),
         globalDots,
         witnessedDots,
         contextReferences,
@@ -347,6 +415,11 @@ export function assertValidConvergentSyncState(
           entry.position,
           state,
           `${entryLabel}.position`,
+          registerId({
+            kind: 'string-entry-position',
+            collection: collectionName,
+            value: entryValue,
+          }),
           globalDots,
           witnessedDots,
           contextReferences,
@@ -359,7 +432,7 @@ export function assertValidConvergentSyncState(
   for (const reference of contextReferences) {
     const retainedLocation = globalDots.get(reference.key);
     if (retainedLocation) {
-      const location = retainedLocation.registerLabel === reference.registerLabel
+      const location = retainedLocation.registerIdentity === reference.registerIdentity
         ? 'the same register'
         : 'another register';
       throw new ConvergentSyncInvariantError(
@@ -434,6 +507,18 @@ function canonicalStringCollection(
   return { entries: sortRecord(collection.entries, canonicalStringEntry) };
 }
 
+function canonicalDotOrigins(origins: DotOriginIndex): DotOriginIndex {
+  return Object.fromEntries(
+    Object.keys(origins).sort().map((deviceId) => [
+      deviceId,
+      Object.fromEntries(
+        Object.entries(origins[deviceId])
+          .sort(([left], [right]) => Number(left) - Number(right)),
+      ),
+    ]),
+  );
+}
+
 export function canonicalizeConvergentSyncState(
   state: ConvergentSyncStateV2,
 ): ConvergentSyncStateV2 {
@@ -441,6 +526,7 @@ export function canonicalizeConvergentSyncState(
   return {
     schemaVersion: 2,
     vector: sortRecord(state.vector, (counter) => counter),
+    dotOrigins: canonicalDotOrigins(state.dotOrigins),
     hlc: {
       wallTime: state.hlc.wallTime,
       logical: state.hlc.logical,

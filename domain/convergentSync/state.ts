@@ -27,6 +27,7 @@ import {
   getOwnRecordValue,
   setOwnRecordValue,
 } from './record';
+import { registerId } from './registerId';
 import {
   ConvergentSyncInvariantError,
   type CollectionPosition,
@@ -39,6 +40,7 @@ import {
   type ConvergentStringCollectionState,
   type ConvergentStringEntryState,
   type ConvergentSyncStateV2,
+  type DotOriginIndex,
   type JsonObject,
   type JsonValue,
   type MaterializedConvergentSyncState,
@@ -51,6 +53,7 @@ export function createConvergentSyncState(): ConvergentSyncStateV2 {
   return {
     schemaVersion: 2,
     vector: createEmptyRecord(),
+    dotOrigins: createEmptyRecord(),
     hlc: { wallTime: 0, logical: 0 },
     collections: createEmptyRecord(),
     settings: createEmptyRecord(),
@@ -68,6 +71,7 @@ function writeRegister<T extends JsonValue>(
   state: ConvergentSyncStateV2,
   deviceId: string,
   now: number,
+  registerIdentity: string,
   currentRegister: MultiValueRegister<T> | undefined,
   value?: T,
   tombstone = false,
@@ -81,6 +85,10 @@ function writeRegister<T extends JsonValue>(
   const counter = currentCounter + 1;
   const dot = { deviceId, counter };
   setOwnRecordValue(state.vector, deviceId, counter);
+  const deviceOrigins = getOwnRecordValue(state.dotOrigins, deviceId)
+    ?? createEmptyRecord<string>();
+  setOwnRecordValue(deviceOrigins, String(counter), registerIdentity);
+  setOwnRecordValue(state.dotOrigins, deviceId, deviceOrigins);
   state.hlc = tickHybridLogicalClock(state.hlc, now);
   return {
     candidates: [createRegisterCandidate({
@@ -182,6 +190,16 @@ function applyEntityUpsert(
     mutation.collection,
     mutation.entityId,
   );
+  const presenceRegisterId = registerId({
+    kind: 'entity-presence',
+    collection: mutation.collection,
+    entityId: mutation.entityId,
+  });
+  const positionRegisterId = registerId({
+    kind: 'entity-position',
+    collection: mutation.collection,
+    entityId: mutation.entityId,
+  });
   let changed = created
     || !registerIsPresent(entity.presence)
     || registerHasConflict(entity.presence);
@@ -195,6 +213,12 @@ function applyEntityUpsert(
 
   for (const field of [...fieldNames].sort()) {
     requireNonEmpty(field, 'Entity field');
+    const fieldRegisterId = registerId({
+      kind: 'entity-field',
+      collection: mutation.collection,
+      entityId: mutation.entityId,
+      field,
+    });
     const incoming = getOwnRecordValue(incomingFields, field);
     const currentRegister = getOwnRecordValue(entity.fields, field);
     if (incoming === undefined) {
@@ -203,7 +227,15 @@ function applyEntityUpsert(
         setOwnRecordValue(
           entity.fields,
           field,
-          writeRegister(state, deviceId, now, currentRegister, undefined, true),
+          writeRegister(
+            state,
+            deviceId,
+            now,
+            fieldRegisterId,
+            currentRegister,
+            undefined,
+            true,
+          ),
         );
         changed = true;
       }
@@ -215,7 +247,14 @@ function applyEntityUpsert(
       setOwnRecordValue(
         entity.fields,
         field,
-        writeRegister(state, deviceId, now, currentRegister, incoming),
+        writeRegister(
+          state,
+          deviceId,
+          now,
+          fieldRegisterId,
+          currentRegister,
+          incoming,
+        ),
       );
       changed = true;
     }
@@ -233,6 +272,7 @@ function applyEntityUpsert(
       state,
       deviceId,
       now,
+      positionRegisterId,
       entity.position,
       mutation.position,
     );
@@ -242,7 +282,14 @@ function applyEntityUpsert(
   if (changed) {
     // Refreshing presence makes a concurrent delete/update visible as an
     // MV-register conflict instead of allowing a deletion to hide the edit.
-    entity.presence = writeRegister(state, deviceId, now, entity.presence, true);
+    entity.presence = writeRegister(
+      state,
+      deviceId,
+      now,
+      presenceRegisterId,
+      entity.presence,
+      true,
+    );
   }
 }
 
@@ -266,6 +313,17 @@ function applyEntityFieldMutation(
   if (mutation.kind === 'entity-field-delete' && !existingEntity) return;
 
   const { entity } = ensureEntity(state, mutation.collection, mutation.entityId);
+  const fieldRegisterId = registerId({
+    kind: 'entity-field',
+    collection: mutation.collection,
+    entityId: mutation.entityId,
+    field: mutation.field,
+  });
+  const presenceRegisterId = registerId({
+    kind: 'entity-presence',
+    collection: mutation.collection,
+    entityId: mutation.entityId,
+  });
   const currentRegister = getOwnRecordValue(entity.fields, mutation.field);
   const currentWinner = selectRegisterWinner(currentRegister);
 
@@ -274,10 +332,25 @@ function applyEntityFieldMutation(
     setOwnRecordValue(
       entity.fields,
       mutation.field,
-      writeRegister(state, deviceId, now, currentRegister, undefined, true),
+      writeRegister(
+        state,
+        deviceId,
+        now,
+        fieldRegisterId,
+        currentRegister,
+        undefined,
+        true,
+      ),
     );
     if (registerIsPresent(entity.presence)) {
-      entity.presence = writeRegister(state, deviceId, now, entity.presence, true);
+      entity.presence = writeRegister(
+        state,
+        deviceId,
+        now,
+        presenceRegisterId,
+        entity.presence,
+        true,
+      );
     }
     return;
   }
@@ -291,9 +364,23 @@ function applyEntityFieldMutation(
   setOwnRecordValue(
     entity.fields,
     mutation.field,
-    writeRegister(state, deviceId, now, currentRegister, mutation.value),
+    writeRegister(
+      state,
+      deviceId,
+      now,
+      fieldRegisterId,
+      currentRegister,
+      mutation.value,
+    ),
   );
-  entity.presence = writeRegister(state, deviceId, now, entity.presence, true);
+  entity.presence = writeRegister(
+    state,
+    deviceId,
+    now,
+    presenceRegisterId,
+    entity.presence,
+    true,
+  );
 }
 
 function settingPathIsPrefix(prefix: string[], path: string[]): boolean {
@@ -326,7 +413,15 @@ function tombstoneRelatedSettingPaths(
     setOwnRecordValue(
       state.settings,
       otherEncodedPath,
-      writeRegister(state, deviceId, now, register, undefined, true),
+      writeRegister(
+        state,
+        deviceId,
+        now,
+        registerId({ kind: 'setting', path: otherPath }),
+        register,
+        undefined,
+        true,
+      ),
     );
   }
 }
@@ -364,6 +459,7 @@ function writeSettingRegister(
       state,
       deviceId,
       now,
+      registerId({ kind: 'setting', path }),
       currentRegister,
       value,
       tombstone,
@@ -467,6 +563,11 @@ function applyMutation(
         state,
         deviceId,
         now,
+        registerId({
+          kind: 'entity-presence',
+          collection: mutation.collection,
+          entityId: mutation.entityId,
+        }),
         entity.presence,
         undefined,
         true,
@@ -509,13 +610,29 @@ function applyMutation(
           state,
           deviceId,
           now,
+          registerId({
+            kind: 'string-entry-position',
+            collection: mutation.collection,
+            value: mutation.value,
+          }),
           entry.position,
           mutation.position,
         );
         changed = true;
       }
       if (changed) {
-        entry.presence = writeRegister(state, deviceId, now, entry.presence, true);
+        entry.presence = writeRegister(
+          state,
+          deviceId,
+          now,
+          registerId({
+            kind: 'string-entry-presence',
+            collection: mutation.collection,
+            value: mutation.value,
+          }),
+          entry.presence,
+          true,
+        );
       }
       break;
     }
@@ -534,6 +651,11 @@ function applyMutation(
         state,
         deviceId,
         now,
+        registerId({
+          kind: 'string-entry-presence',
+          collection: mutation.collection,
+          value: mutation.value,
+        }),
         entry.presence,
         undefined,
         true,
@@ -569,6 +691,7 @@ function applyMutation(
           state,
           deviceId,
           now,
+          registerId(mutation.address),
           currentRegister,
           mutation.value,
           mutation.tombstone === true,
@@ -612,6 +735,26 @@ function mergeRecord<T>(
     if (merged !== undefined) setOwnRecordValue(result, key, merged);
   }
   return result;
+}
+
+function mergeDotOrigins(
+  left: DotOriginIndex,
+  right: DotOriginIndex,
+): DotOriginIndex {
+  return mergeRecord(left, right, (leftDevice, rightDevice) =>
+    mergeRecord(
+      leftDevice ?? createEmptyRecord<string>(),
+      rightDevice ?? createEmptyRecord<string>(),
+      (leftOrigin, rightOrigin) => {
+        if (leftOrigin && rightOrigin && leftOrigin !== rightOrigin) {
+          throw new ConvergentSyncInvariantError(
+            `Dot origin mismatch: ${leftOrigin} !== ${rightOrigin}`,
+          );
+        }
+        return leftOrigin ?? rightOrigin;
+      },
+    ),
+  );
 }
 
 export function mergeConvergentSyncStates(
@@ -674,6 +817,7 @@ export function mergeConvergentSyncStates(
   const merged: ConvergentSyncStateV2 = {
     schemaVersion: 2,
     vector: mergeVersionVectors(left.vector, right.vector),
+    dotOrigins: mergeDotOrigins(left.dotOrigins, right.dotOrigins),
     hlc: maxHybridLogicalClock(left.hlc, right.hlc),
     collections,
     settings,

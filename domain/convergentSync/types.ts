@@ -11,6 +11,10 @@ export interface VersionVector {
   [deviceId: string]: number;
 }
 
+export interface DotOriginIndex {
+  [deviceId: string]: Record<string, string>;
+}
+
 export interface Dot {
   deviceId: string;
   counter: number;
@@ -74,6 +78,8 @@ export interface ConvergentStringCollectionState {
 export interface ConvergentSyncStateV2 {
   schemaVersion: 2;
   vector: VersionVector;
+  /** Register identity for every allocated device counter. */
+  dotOrigins: DotOriginIndex;
   hlc: HybridLogicalClock;
   collections: Record<string, ConvergentCollectionState>;
   settings: Record<string, MultiValueRegister>;
