@@ -36,6 +36,26 @@ function hasDefinedOwnProperty(payload: SyncPayload, property: string): boolean 
     && record[property] !== undefined;
 }
 
+/** Preserve fields that an older client did not provide for safety checks. */
+export function inheritOmittedLegacySyncFields(
+  baseline: SyncPayload,
+  legacy: SyncPayload,
+): SyncPayload {
+  const result = { ...legacy } as SyncPayload;
+  const resultRecord = result as unknown as Record<string, unknown>;
+  const baselineRecord = baseline as unknown as Record<string, unknown>;
+  for (const property of [
+    ...CONVERGENT_ENTITY_COLLECTIONS,
+    ...CONVERGENT_STRING_COLLECTIONS,
+    'settings',
+  ]) {
+    if (!hasDefinedOwnProperty(legacy, property)) {
+      resultRecord[property] = baselineRecord[property];
+    }
+  }
+  return result;
+}
+
 function normalizedEntityValue(
   collection: string,
   id: string,

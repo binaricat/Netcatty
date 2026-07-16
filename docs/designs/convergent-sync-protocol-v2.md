@@ -48,7 +48,9 @@ blocked rather than guessing whether an absent field means deletion.
 Optional top-level collections omitted by an old client, or present only as an
 in-memory `undefined` property, are treated as unsupported and left unchanged.
 Explicitly present empty collections are real deletions. Arrays inside settings
-remain atomic, matching the CRDT core.
+remain atomic, matching the CRDT core. Every legacy branch also passes the
+suspicious-shrink guard before its writes can join an existing v2 state; fields
+omitted by that client inherit the trusted baseline for this safety check.
 A device with no cloud entities and no trusted local baseline is treated as a
 fresh install: v1 and v2 migrations seed from cloud instead of turning local
 first-launch settings into edits. With a trusted baseline, an empty local

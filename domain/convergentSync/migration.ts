@@ -15,6 +15,7 @@ import type { ConvergentSyncStateV2 } from './types';
 import {
   cloudSyncPayloadsEqual,
   applyLegacySyncPayload,
+  inheritOmittedLegacySyncFields,
 } from './legacy';
 import {
   CONVERGENT_ENTITY_COLLECTIONS,
@@ -209,6 +210,7 @@ export function planConvergentSyncMigration(options: {
       payload: SyncPayload;
       baseline: SyncPayload | null;
       now: number;
+      provider?: CloudProvider;
     }> = [
       ...(shouldIncludeLegacyLocalSource(
         options.localPayload,
@@ -224,6 +226,7 @@ export function planConvergentSyncMigration(options: {
         payload: input.payload,
         baseline: input.trustedBaseline,
         now: input.meta.updatedAt,
+        provider: input.provider,
       })),
     ];
     const branches: ConvergentSyncStateV2[] = [];
@@ -231,6 +234,17 @@ export function planConvergentSyncMigration(options: {
       if (cloudSyncPayloadsEqual(source.payload, joinedPayload)) continue;
       if (!source.baseline) {
         blockedReasons.push(`${source.id}: no trusted legacy baseline is available`);
+        continue;
+      }
+      const shrink = detectSuspiciousShrink(
+        inheritOmittedLegacySyncFields(source.baseline, source.payload),
+        source.baseline,
+      );
+      if (shrink.suspicious) {
+        if (source.provider) {
+          shrinkFindings.push({ provider: source.provider, finding: shrink });
+        }
+        blockedReasons.push(`${source.id}: legacy migration would remove too many entities`);
         continue;
       }
       branches.push(applyLegacySyncPayload(state, source.baseline, source.payload, source.id, source.now));

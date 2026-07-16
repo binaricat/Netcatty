@@ -508,6 +508,112 @@ test('joining existing v2 data blocks changed legacy writers without a trusted b
   assert.match(plan.preview.blockedReasons.join(' '), /no trusted legacy baseline/);
 });
 
+test('joining existing v2 data blocks a shrunk legacy local source', () => {
+  const baseline = payload('Remote');
+  baseline.hosts = Array.from({ length: 4 }, (_, index) => ({
+    ...baseline.hosts[0],
+    id: `host-${index + 1}`,
+    label: `Host ${index + 1}`,
+  }));
+  const local: SyncPayload = {
+    ...baseline,
+    hosts: baseline.hosts.slice(0, 1),
+    syncedAt: NOW + 1,
+  };
+  const remoteState = createConvergentSyncStateFromPayload(baseline, 'remote', NOW);
+  const plan = planConvergentSyncMigration({
+    localPayload: local,
+    localTrustedBaseline: baseline,
+    providers: [{
+      provider: 'github',
+      status: 'ready',
+      meta: meta({ syncSchemaVersion: 2 }),
+      payload: withConvergentSyncEnvelope(remoteState, { syncedAt: NOW }),
+      trustedBaseline: null,
+    }],
+    deviceId: 'local-device',
+    now: NOW + 1,
+  });
+
+  assert.equal(plan.preview.canInitialize, false);
+  assert.match(plan.preview.blockedReasons.join(' '), /legacy-local:local-device.*remove too many entities/);
+});
+
+test('joining existing v2 data blocks a shrunk legacy provider source', () => {
+  const baseline = payload('Remote');
+  baseline.hosts = Array.from({ length: 4 }, (_, index) => ({
+    ...baseline.hosts[0],
+    id: `host-${index + 1}`,
+    label: `Host ${index + 1}`,
+  }));
+  const legacy: SyncPayload = {
+    ...baseline,
+    hosts: baseline.hosts.slice(0, 1),
+    syncedAt: NOW + 1,
+  };
+  const remoteState = createConvergentSyncStateFromPayload(baseline, 'remote', NOW);
+  const plan = planConvergentSyncMigration({
+    localPayload: emptyPayload(),
+    localTrustedBaseline: null,
+    providers: [
+      {
+        provider: 'github',
+        status: 'ready',
+        meta: meta({ syncSchemaVersion: 2 }),
+        payload: withConvergentSyncEnvelope(remoteState, { syncedAt: NOW }),
+        trustedBaseline: null,
+      },
+      {
+        provider: 'webdav',
+        status: 'ready',
+        meta: meta({ deviceId: 'legacy-device' }),
+        payload: legacy,
+        trustedBaseline: baseline,
+      },
+    ],
+    deviceId: 'fresh-device',
+    now: NOW + 1,
+  });
+
+  assert.equal(plan.preview.canInitialize, false);
+  assert.equal(plan.preview.shrinkFindings[0]?.provider, 'webdav');
+  assert.equal(plan.preview.shrinkFindings[0]?.finding.lost, 3);
+});
+
+test('v2 migration shrink checks preserve optional collections omitted by legacy clients', () => {
+  const baseline = payload('Remote');
+  baseline.identities = Array.from({ length: 4 }, (_, index) => ({
+    id: `identity-${index + 1}`,
+    label: `Identity ${index + 1}`,
+    username: `user-${index + 1}`,
+    authMethod: 'password' as const,
+    created: NOW,
+  }));
+  const local = {
+    ...baseline,
+    identities: undefined,
+    syncedAt: NOW + 1,
+  } as unknown as SyncPayload;
+  const remoteState = createConvergentSyncStateFromPayload(baseline, 'remote', NOW);
+  const plan = planConvergentSyncMigration({
+    localPayload: local,
+    localTrustedBaseline: baseline,
+    providers: [{
+      provider: 'github',
+      status: 'ready',
+      meta: meta({ syncSchemaVersion: 2 }),
+      payload: withConvergentSyncEnvelope(remoteState, { syncedAt: NOW }),
+      trustedBaseline: null,
+    }],
+    deviceId: 'local-device',
+    now: NOW + 1,
+  });
+
+  assert.equal(plan.preview.canInitialize, true);
+  assert.equal(plan.preview.shrinkFindings.length, 0);
+  assert.equal(plan.payload?.identities?.length, 4);
+});
+
 test('a fresh entity-empty device adopts existing v2 data without a trusted baseline', () => {
   const remoteState = createConvergentSyncStateFromPayload(payload('Remote'), 'remote', NOW);
   const remotePayload = withConvergentSyncEnvelope(remoteState, { syncedAt: NOW });
