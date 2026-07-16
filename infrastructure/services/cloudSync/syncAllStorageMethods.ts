@@ -737,6 +737,7 @@ export function clearSyncBaseImpl(this: any): void {
     }
     for (const p of ['github', 'google', 'onedrive', 'webdav', 's3'] as const) {
       this.removeFromStorage(this.syncBaseKey(p));
+      this.removeFromStorage(this.convergentProviderBaselineKey(p));
       if (typeof this.syncSnapshotsKey === 'function') {
         this.removeFromStorage(this.syncSnapshotsKey(p));
       }

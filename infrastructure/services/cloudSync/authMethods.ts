@@ -25,6 +25,12 @@ import type {
 
 const SYNC_REMOTE_ANCHOR_STORAGE_KEY = 'netcatty_sync_remote_anchor_v1';
 
+export function clearProviderMergeStateImpl(this: any, provider: CloudProvider): void {
+  this.removeFromStorage(this.syncBaseKey(provider));
+  this.removeFromStorage(this.convergentProviderBaselineKey(provider));
+  this.clearSyncAnchor(provider);
+}
+
 export async function startProviderAuthImpl(this: any,
   provider: CloudProvider,
   redirectUri?: string
@@ -145,8 +151,7 @@ export async function completeGitHubAuthImpl(this: any,
       const previousId = this.loadProviderAccountId('github') ?? previousAccount?.id ?? null;
       const sameAccount = newId !== null && previousId !== null && newId === previousId;
       if (!sameAccount) {
-        this.removeFromStorage(this.syncBaseKey('github'));
-        this.clearSyncAnchor('github');
+        clearProviderMergeStateImpl.call(this, 'github');
       }
       if (newId) {
         this.saveProviderAccountId('github', newId);
@@ -244,8 +249,7 @@ export async function completePKCEAuthImpl(this: any,
       const previousId = this.loadProviderAccountId(provider) ?? previousAccount?.id ?? null;
       const sameAccount = newId !== null && previousId !== null && newId === previousId;
       if (!sameAccount) {
-        this.removeFromStorage(this.syncBaseKey(provider));
-        this.clearSyncAnchor(provider);
+        clearProviderMergeStateImpl.call(this, provider);
       }
       if (newId) {
         this.saveProviderAccountId(provider, newId);
@@ -292,9 +296,8 @@ export async function connectConfigProviderImpl(this: any,
       };
 
       await this.saveProviderConnection(provider, this.state.providers[provider]);
-      // Clear merge base when (re)configuring to a different endpoint/bucket
-      this.removeFromStorage(this.syncBaseKey(provider));
-      this.clearSyncAnchor(provider);
+      // Clear all trusted merge state when changing endpoint or bucket.
+      clearProviderMergeStateImpl.call(this, provider);
       this.emit({
         type: 'AUTH_COMPLETED',
         provider,
@@ -387,10 +390,9 @@ export async function disconnectProviderImpl(this: any,provider: CloudProvider):
     };
 
     await this.saveProviderConnection(provider, this.state.providers[provider]);
-    // Clear the merge base for this provider so reconnecting to a different
-    // account/resource doesn't reuse an unrelated snapshot
-    this.removeFromStorage(this.syncBaseKey(provider));
-    this.clearSyncAnchor(provider);
+    // Clear all trusted merge state so a later account/resource cannot reuse
+    // an unrelated snapshot or convergent baseline.
+    clearProviderMergeStateImpl.call(this, provider);
     this.removeFromStorage(this.providerAccountIdKey(provider));
     // Reset BLOCKED state if it was present — disconnect implicitly resolves
     // any pending shrink-block warning since there's no provider to push to.

@@ -55,6 +55,9 @@ The canonical replica and provider-specific v2 baselines are encrypted with the
 same master-derived AES-GCM key used for existing sync bases and sync snapshots.
 Loading an existing v2 record is strict: corruption and unsupported schemas are
 errors, never `null` fallbacks.
+Provider-specific v2 baselines are invalidated together with the existing merge
+base and remote anchor whenever an account, endpoint, bucket, or connection is
+replaced, so a new remote identity can never inherit trust from the old one.
 
 Master-key rotation prepares replacement ciphertext for all derived-key sync
 records before writing anything. It verifies the originals did not change

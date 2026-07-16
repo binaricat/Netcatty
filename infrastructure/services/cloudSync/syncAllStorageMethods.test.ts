@@ -2,9 +2,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { EncryptionService } from "../EncryptionService.ts";
-import { commitRemoteInspectionImpl } from "./authMethods.ts";
+import {
+  clearProviderMergeStateImpl,
+  commitRemoteInspectionImpl,
+} from "./authMethods.ts";
 import { syncToProviderImpl, uploadToProviderImpl } from "./providerSyncMethods.ts";
 import {
+  clearSyncBaseImpl,
   loadSyncSnapshotsImpl,
   saveSyncBaseImpl,
   syncAllProvidersImpl,
@@ -56,6 +60,38 @@ function remoteFile(provider: CloudProvider, version: number, updatedAt: number)
     payload: provider,
   };
 }
+
+test("provider identity changes clear v1 base, v2 baseline, and remote anchor together", () => {
+  const removed: string[] = [];
+  const manager = {
+    syncBaseKey: (provider: CloudProvider) => `base:${provider}`,
+    convergentProviderBaselineKey: (provider: CloudProvider) => `convergent:${provider}`,
+    removeFromStorage: (key: string) => removed.push(key),
+    clearSyncAnchor: (provider: CloudProvider) => removed.push(`anchor:${provider}`),
+  };
+
+  clearProviderMergeStateImpl.call(manager, "github");
+
+  assert.deepEqual(removed, ["base:github", "convergent:github", "anchor:github"]);
+});
+
+test("clearing all merge bases also removes every convergent provider baseline", () => {
+  const removed = new Set<string>();
+  const providers: CloudProvider[] = ["github", "google", "onedrive", "webdav", "s3"];
+  const manager = {
+    removeFromStorage: (key: string) => removed.add(key),
+    syncBaseKey: (provider?: CloudProvider) => `base:${provider ?? "default"}`,
+    syncSnapshotsKey: (provider?: CloudProvider) => `snapshots:${provider ?? "default"}`,
+    convergentProviderBaselineKey: (provider: CloudProvider) => `convergent:${provider}`,
+    clearSyncAnchor: () => {},
+  };
+
+  clearSyncBaseImpl.call(manager);
+
+  for (const provider of providers) {
+    assert.equal(removed.has(`convergent:${provider}`), true);
+  }
+});
 
 test("syncAllProviders uses the newest cloud payload without merging other remotes when cloud wins", async () => {
   const originalDecryptPayload = EncryptionService.decryptPayload;
