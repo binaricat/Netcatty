@@ -158,8 +158,8 @@ export function loadFromStorageImpl<T>(this: any,key: string): T | null {
     return localStorageAdapter.read<T>(key);
   }
 
-export function saveToStorageImpl(this: any,key: string, value: unknown): void {
-    localStorageAdapter.write(key, value);
+export function saveToStorageImpl(this: any,key: string, value: unknown): boolean {
+    return localStorageAdapter.write(key, value);
   }
 
 export function removeFromStorageImpl(this: any,key: string): void {
@@ -565,18 +565,33 @@ export async function changeMasterKeyImpl(this: any,oldPassword: string, newPass
       return false;
     }
 
+    const oldUnlockedKey = await EncryptionService.unlockMasterKey(
+      oldPassword,
+      this.state.masterKeyConfig,
+    );
+    const newUnlockedKey = await EncryptionService.unlockMasterKey(
+      newPassword,
+      newConfig,
+    );
+    if (!oldUnlockedKey || !newUnlockedKey) {
+      throw new Error('Failed to derive keys for master key rotation');
+    }
+
+    // Local provider baselines, snapshots and the canonical CRDT replica use
+    // the master-derived key. Re-encrypt them before publishing the new master
+    // config so a failed rotation cannot strand records under mismatched keys.
+    await this.reencryptSyncStorage(
+      oldUnlockedKey.derivedKey,
+      newUnlockedKey.derivedKey,
+      newConfig,
+    );
+
     this.bumpSyncSecurityGeneration?.();
     this.state.masterKeyConfig = newConfig;
     this.state.securityState = 'UNLOCKED';
     this.masterPassword = newPassword;
 
-    // Re-derive key with new password
-    this.state.unlockedKey = await EncryptionService.unlockMasterKey(
-      newPassword,
-      newConfig
-    );
-
-    this.saveToStorage(SYNC_STORAGE_KEYS.MASTER_KEY_CONFIG, newConfig);
+    this.state.unlockedKey = newUnlockedKey;
 
     // Notify UI and restart auto-sync (actual re-upload requires a payload from app state)
     this.emit({ type: 'SECURITY_STATE_CHANGED', state: 'UNLOCKED' });

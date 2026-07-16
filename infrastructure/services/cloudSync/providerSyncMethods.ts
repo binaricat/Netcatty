@@ -7,6 +7,7 @@ import { mergeSyncPayloads } from '../../../domain/syncMerge';
 import { summarizeSyncChanges, withSyncReliabilityMeta } from '../../../domain/syncReliability';
 import { detectSuspiciousShrink, type ShrinkFinding } from '../../../domain/syncGuards';
 import { resolveCloudSyncConflictAction } from '../../../domain/syncStrategy';
+import { assertConvergentSyncWriteCompatible } from '../../../domain/convergentSync';
 import type { CloudAdapter } from '../adapters';
 import type GitHubAdapter from '../adapters/GitHubAdapter';
 import type {
@@ -56,6 +57,7 @@ async function uploadLocalPayloadImpl(this: any,
   remoteFile?: SyncedFile | null,
   syncSecurityGeneration?: number,
 ): Promise<SyncResult> {
+  assertConvergentSyncWriteCompatible(remoteFile?.meta, payload);
   const overrideShrinkRequested = opts.overrideShrink === true;
   const directBase = await this.loadSyncBase(provider);
   assertSyncSecurityGeneration(this, syncSecurityGeneration);
@@ -364,6 +366,7 @@ export async function syncToProviderImpl(this: any,
             deviceId: this.state.deviceId,
             now: Date.now(),
           });
+          assertConvergentSyncWriteCompatible(checkResult.remoteFile.meta, mergedPayload);
 
           console.info('[CloudSyncManager] Three-way merge completed', mergeResult.summary);
 

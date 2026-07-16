@@ -20,6 +20,7 @@ import {
   type SyncFileMeta,
   type SyncPayload,
 } from '../../domain/sync';
+import { validateConvergentSyncPayload } from '../../domain/convergentSync';
 
 // ============================================================================
 // Utility Functions
@@ -257,6 +258,13 @@ export const encryptPayload = async (
   appVersion: string,
   existingVersion?: number
 ): Promise<SyncedFile> => {
+  const syncSchemaVersion = payload.convergentSync?.schemaVersion;
+  if (syncSchemaVersion !== undefined) {
+    validateConvergentSyncPayload(
+      { syncSchemaVersion },
+      payload,
+    );
+  }
   // Generate new salt for each encryption
   const salt = generateRandomBytes(SYNC_CONSTANTS.SALT_LENGTH);
   
@@ -279,6 +287,7 @@ export const encryptPayload = async (
     algorithm: 'AES-256-GCM',
     kdf: 'PBKDF2',
     kdfIterations: SYNC_CONSTANTS.PBKDF2_ITERATIONS,
+    ...(syncSchemaVersion ? { syncSchemaVersion } : {}),
   };
 
   return {
@@ -318,7 +327,9 @@ export const decryptPayload = async (
     key
   );
   
-  return JSON.parse(decrypted) as SyncPayload;
+  const parsed = JSON.parse(decrypted) as SyncPayload;
+  validateConvergentSyncPayload(meta, parsed);
+  return parsed;
 };
 
 /**

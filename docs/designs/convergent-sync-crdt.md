@@ -145,7 +145,8 @@ behavior is visible during review.
 
 ## Follow-up boundaries
 
-The next change will define the encrypted v2 envelope, legacy baselines,
-migration preview, protection snapshots, key rotation, and fail-closed protocol
-rules. The final change will integrate provider read-merge-write-verify loops,
-multi-window locking, conflict resolution state, and localized settings UI.
+The encrypted v2 envelope, legacy baselines, migration preview, protection
+snapshots, key rotation, and fail-closed protocol rules are described in
+[`convergent-sync-protocol-v2.md`](./convergent-sync-protocol-v2.md). The final
+change will integrate provider read-merge-write-verify loops, multi-window
+locking, conflict resolution state, and localized settings UI.

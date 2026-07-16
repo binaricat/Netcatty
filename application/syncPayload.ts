@@ -92,6 +92,7 @@ import {
   STORAGE_KEY_PORT_FORWARDING,
 } from '../infrastructure/config/storageKeys';
 import { isTerminalSidePanelAutoOpenTab } from '../domain/terminalSidePanelAutoOpen';
+import { recordRestoredPayloadAsConvergentWrites } from './convergentSyncReplica';
 
 // ---------------------------------------------------------------------------
 // Input types
@@ -951,5 +952,7 @@ export function applyLocalVaultPayload(
   payload: SyncPayload,
   importers: SyncPayloadImporters,
 ): Promise<void> {
-  return applyPayload(payload, importers, { includeLocalOnlyData: true });
+  return applyPayload(payload, importers, { includeLocalOnlyData: true }).then(() =>
+    recordRestoredPayloadAsConvergentWrites(payload),
+  );
 }

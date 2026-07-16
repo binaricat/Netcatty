@@ -1,0 +1,318 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+
+import type { SyncFileMeta, SyncPayload } from '../sync.ts';
+import {
+  applyConvergentMutations,
+  assertConvergentSyncWriteCompatible,
+  applyLegacySyncPayload,
+  cloudSyncPayloadsEqual,
+  createConvergentSyncEnvelope,
+  createConvergentSyncStateFromPayload,
+  hydrateConvergentSyncEnvelope,
+  materializeSyncPayloadFromConvergentState,
+  mergeConvergentSyncStates,
+  planConvergentSyncMigration,
+  serializeConvergentSyncState,
+  validateConvergentSyncPayload,
+  withConvergentSyncEnvelope,
+  createConvergentSyncState,
+} from './index.ts';
+
+const NOW = 1_700_000_000_000;
+
+function payload(label = 'Production'): SyncPayload {
+  return {
+    hosts: [{
+      id: 'host-1',
+      label,
+      hostname: 'example.com',
+      username: 'root',
+      tags: ['prod'],
+      os: 'linux',
+      password: 'host-secret',
+    }],
+    keys: [{
+      id: 'key-1',
+      label: 'Deploy key',
+      type: 'ED25519',
+      privateKey: 'private-secret',
+      source: 'imported',
+      category: 'key',
+      created: NOW,
+    }],
+    identities: [],
+    proxyProfiles: [],
+    snippets: [],
+    customGroups: ['prod'],
+    snippetPackages: [],
+    notes: [],
+    noteGroups: [],
+    portForwardingRules: [],
+    groupConfigs: [],
+    settings: {
+      theme: 'dark',
+      ai: { providers: [{ id: 'provider-1', apiKey: 'api-secret' }] },
+    },
+    syncedAt: NOW,
+  };
+}
+
+function meta(overrides: Partial<SyncFileMeta> = {}): SyncFileMeta {
+  return {
+    version: 1,
+    updatedAt: NOW,
+    deviceId: 'remote-device',
+    appVersion: '1.0.0',
+    iv: 'iv',
+    salt: 'salt',
+    algorithm: 'AES-256-GCM',
+    kdf: 'PBKDF2',
+    ...overrides,
+  };
+}
+
+test('encrypted envelope omits materialized winner values and hydrates exactly', () => {
+  const state = createConvergentSyncStateFromPayload(payload(), 'device-a', NOW);
+  const materialized = materializeSyncPayloadFromConvergentState(state, { syncedAt: NOW });
+  const envelope = createConvergentSyncEnvelope(state, materialized);
+  const envelopeJson = JSON.stringify(envelope);
+
+  assert.equal(envelopeJson.includes('host-secret'), false);
+  assert.equal(envelopeJson.includes('private-secret'), false);
+  assert.equal(envelopeJson.includes('api-secret'), false);
+  assert.match(JSON.stringify(materialized), /private-secret/);
+  assert.equal(
+    serializeConvergentSyncState(hydrateConvergentSyncEnvelope(envelope, materialized)),
+    serializeConvergentSyncState(state),
+  );
+});
+
+test('envelope creation and hydration reject a materialized snapshot that disagrees with state', () => {
+  const state = createConvergentSyncStateFromPayload(payload('State value'), 'device-a', NOW);
+  const mismatched = payload('Different snapshot value');
+  assert.throws(
+    () => createConvergentSyncEnvelope(state, mismatched),
+    /does not match its materialized v1 snapshot/,
+  );
+  const materialized = materializeSyncPayloadFromConvergentState(state, { syncedAt: NOW });
+  const envelope = createConvergentSyncEnvelope(state, materialized);
+  const damaged = structuredClone(envelope);
+  const labelRegister = damaged.state.collections.hosts.entities['host-1'].fields.label;
+  const selected = labelRegister.candidates.find(
+    (candidate) => 'materialized' in candidate && candidate.materialized === true,
+  );
+  assert.ok(selected);
+  const damagedCandidate = selected as unknown as { materialized?: true; value?: string };
+  delete damagedCandidate.materialized;
+  damagedCandidate.value = 'Envelope-only value';
+  assert.throws(
+    () => hydrateConvergentSyncEnvelope(damaged, materialized),
+    /does not match its materialized v1 snapshot/,
+  );
+});
+
+test('envelope maps preserve prototype-like entity, field, setting, and string identifiers', () => {
+  const specialObject = JSON.parse('{"id":"__proto__","constructor":"safe"}') as {
+    id: string;
+    constructor: string;
+  };
+  const state = applyConvergentMutations(createConvergentSyncState(), 'device-a', [
+    {
+      kind: 'entity-upsert',
+      collection: 'hosts',
+      entityId: '__proto__',
+      value: specialObject,
+      position: 0,
+    },
+    { kind: 'setting-set', path: ['__proto__'], value: 'safe-setting' },
+    { kind: 'string-entry-add', collection: 'customGroups', value: '__proto__', position: 0 },
+  ], NOW);
+  const materialized = materializeSyncPayloadFromConvergentState(state, { syncedAt: NOW });
+  const envelope = createConvergentSyncEnvelope(state, materialized);
+  const hydrated = hydrateConvergentSyncEnvelope(
+    JSON.parse(JSON.stringify(envelope)),
+    JSON.parse(JSON.stringify(materialized)),
+  );
+
+  assert.equal(serializeConvergentSyncState(hydrated), serializeConvergentSyncState(state));
+});
+
+test('envelope retains concurrent alternatives while the selected winner remains materialized', () => {
+  const base = createConvergentSyncStateFromPayload(payload('Base'), 'seed', NOW);
+  const left = applyConvergentMutations(base, 'device-a', [{
+    kind: 'entity-field-set',
+    collection: 'hosts',
+    entityId: 'host-1',
+    field: 'label',
+    value: 'Left alternative',
+  }], NOW + 1);
+  const right = applyConvergentMutations(base, 'device-z', [{
+    kind: 'entity-field-set',
+    collection: 'hosts',
+    entityId: 'host-1',
+    field: 'label',
+    value: 'Right winner',
+  }], NOW + 1);
+  const state = mergeConvergentSyncStates(left, right);
+  const materialized = materializeSyncPayloadFromConvergentState(state, { syncedAt: NOW + 1 });
+  const envelopeJson = JSON.stringify(createConvergentSyncEnvelope(state, materialized));
+
+  assert.match(envelopeJson, /Left alternative/);
+  assert.equal(envelopeJson.includes('Right winner'), false);
+});
+
+test('schema validation fails closed for missing, mismatched, future, and damaged envelopes', () => {
+  const state = createConvergentSyncStateFromPayload(payload(), 'device-a', NOW);
+  const v2 = withConvergentSyncEnvelope(state, { syncedAt: NOW });
+  assert.equal(
+    serializeConvergentSyncState(validateConvergentSyncPayload(meta({ syncSchemaVersion: 2 }), v2)!),
+    serializeConvergentSyncState(state),
+  );
+  assert.throws(
+    () => validateConvergentSyncPayload(meta(), v2),
+    /without schema metadata/,
+  );
+  assert.throws(
+    () => validateConvergentSyncPayload(meta({ syncSchemaVersion: 2 }), payload()),
+    /missing its convergent envelope/,
+  );
+  assert.throws(
+    () => validateConvergentSyncPayload(
+      { ...meta(), syncSchemaVersion: 3 } as unknown as SyncFileMeta,
+      payload(),
+    ),
+    /Unsupported sync schema version/,
+  );
+  const damaged = structuredClone(v2);
+  damaged.convergentSync!.state.vector['device-a'] = 999;
+  assert.throws(
+    () => validateConvergentSyncPayload(meta({ syncSchemaVersion: 2 }), damaged),
+    /not witnessed|cover every counter/,
+  );
+});
+
+test('legacy writers cannot silently overwrite convergent or future cloud schemas', () => {
+  const state = createConvergentSyncStateFromPayload(payload(), 'device-a', NOW);
+  const v2 = withConvergentSyncEnvelope(state, { syncedAt: NOW });
+  assert.doesNotThrow(() => assertConvergentSyncWriteCompatible(meta(), payload()));
+  assert.doesNotThrow(() => assertConvergentSyncWriteCompatible(
+    meta({ syncSchemaVersion: 2 }),
+    v2,
+  ));
+  assert.throws(
+    () => assertConvergentSyncWriteCompatible(meta({ syncSchemaVersion: 2 }), payload()),
+    /Enable or migrate convergent sync/,
+  );
+  assert.throws(
+    () => assertConvergentSyncWriteCompatible(
+      { syncSchemaVersion: 3 } as unknown as SyncFileMeta,
+      v2,
+    ),
+    /unsupported sync schema/,
+  );
+});
+
+test('trusted legacy diff becomes causal CRDT writes without carrying transport metadata', () => {
+  const baseline = payload('Before');
+  const state = createConvergentSyncStateFromPayload(baseline, 'seed', NOW);
+  const legacy = {
+    ...payload('After'),
+    keys: [],
+    syncedAt: NOW + 100,
+  };
+  const next = applyLegacySyncPayload(
+    state,
+    baseline,
+    legacy,
+    'legacy:github:remote-device',
+    NOW + 100,
+  );
+  const materialized = materializeSyncPayloadFromConvergentState(next, { syncedAt: NOW + 100 });
+
+  assert.equal(materialized.hosts[0].label, 'After');
+  assert.deepEqual(materialized.keys, []);
+  assert.equal(cloudSyncPayloadsEqual(materialized, legacy), true);
+});
+
+test('v1-only migration previews and creates a backward-compatible v2 payload', () => {
+  const local = payload();
+  const remote = {
+    ...payload(),
+    snippets: [{ id: 'snippet-1', label: 'List', command: 'ls' }],
+  };
+  const plan = planConvergentSyncMigration({
+    localPayload: local,
+    localTrustedBaseline: null,
+    providers: [{
+      provider: 'github',
+      status: 'ready',
+      meta: meta(),
+      payload: remote,
+      trustedBaseline: local,
+    }],
+    deviceId: 'local-device',
+    now: NOW + 1,
+  });
+
+  assert.equal(plan.preview.canInitialize, true);
+  assert.equal(plan.preview.oldClientCompatibility, 'materialized-v1-snapshot');
+  assert.equal(plan.payload?.snippets.length, 1);
+  assert.equal(plan.payload?.convergentSync?.schemaVersion, 2);
+});
+
+test('migration blocks unresolved v1 conflicts and future provider schemas', () => {
+  const baseline = payload('Base');
+  const conflict = planConvergentSyncMigration({
+    localPayload: payload('Local'),
+    localTrustedBaseline: baseline,
+    providers: [{
+      provider: 'github',
+      status: 'ready',
+      meta: meta(),
+      payload: payload('Remote'),
+      trustedBaseline: baseline,
+    }],
+    deviceId: 'local-device',
+    now: NOW + 1,
+  });
+  assert.equal(conflict.preview.canInitialize, false);
+  assert.match(conflict.preview.blockedReasons.join(' '), /unresolved conflicts/);
+
+  const future = planConvergentSyncMigration({
+    localPayload: baseline,
+    localTrustedBaseline: null,
+    providers: [{
+      provider: 'github',
+      status: 'ready',
+      meta: { ...meta(), syncSchemaVersion: 3 } as unknown as SyncFileMeta,
+      payload: baseline,
+      trustedBaseline: null,
+    }],
+    deviceId: 'local-device',
+    now: NOW + 1,
+  });
+  assert.equal(future.preview.canInitialize, false);
+  assert.equal(future.preview.providers[0].schemaVersion, 'future');
+});
+
+test('joining existing v2 data blocks changed legacy writers without a trusted baseline', () => {
+  const remoteState = createConvergentSyncStateFromPayload(payload('Remote'), 'remote', NOW);
+  const remotePayload = withConvergentSyncEnvelope(remoteState, { syncedAt: NOW });
+  const plan = planConvergentSyncMigration({
+    localPayload: payload('Unbased local edit'),
+    localTrustedBaseline: null,
+    providers: [{
+      provider: 'github',
+      status: 'ready',
+      meta: meta({ syncSchemaVersion: 2 }),
+      payload: remotePayload,
+      trustedBaseline: null,
+    }],
+    deviceId: 'local-device',
+    now: NOW + 1,
+  });
+
+  assert.equal(plan.preview.canInitialize, false);
+  assert.match(plan.preview.blockedReasons.join(' '), /no trusted legacy baseline/);
+});

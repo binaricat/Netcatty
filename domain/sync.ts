@@ -6,6 +6,17 @@
  */
 
 import type { ShrinkFinding } from './syncGuards';
+import type {
+  ConvergentFieldConflict,
+  ConvergentSyncEnvelopeV2,
+  ConvergentSyncStateV2,
+} from './convergentSync';
+
+export type {
+  ConvergentFieldConflict,
+  ConvergentSyncEnvelopeV2,
+  ConvergentSyncStateV2,
+} from './convergentSync';
 
 // ============================================================================
 // Security State Machine
@@ -178,6 +189,8 @@ export interface SyncFileMeta {
   algorithm: 'AES-256-GCM'; // Encryption algorithm identifier
   kdf: 'PBKDF2' | 'Argon2id'; // Key derivation function
   kdfIterations?: number;   // PBKDF2 iterations (if applicable)
+  /** Present only for convergent-sync payloads. Unknown future versions fail closed. */
+  syncSchemaVersion?: 2;
 }
 
 /**
@@ -291,6 +304,9 @@ export interface SyncPayload {
 
   // Reliability metadata used to make sync decisions auditable across devices.
   syncMeta?: SyncReliabilityMeta;
+
+  /** Encrypted convergent-sync metadata. The adjacent fields remain a complete v1 snapshot. */
+  convergentSync?: ConvergentSyncEnvelopeV2;
 }
 
 export const SYNC_PAYLOAD_ENTITY_KEYS = [
@@ -372,6 +388,44 @@ export interface SyncSnapshotEntry {
   timestamp: number;
   provider?: CloudProvider;
   payload: SyncPayload;
+}
+
+export interface ConvergentProviderMigrationStatus {
+  provider: CloudProvider;
+  status: 'ready' | 'empty' | 'unavailable' | 'blocked';
+  schemaVersion: 1 | 2 | 'future' | 'invalid';
+  entityCount: number;
+  hasTrustedBaseline: boolean;
+  message?: string;
+}
+
+export interface ConvergentMigrationPreview {
+  schemaVersion: 2;
+  canInitialize: boolean;
+  entityCounts: Partial<Record<CloudSyncPayloadEntityKey, number>>;
+  settingsLeafCount: number;
+  conflictCount: number;
+  conflicts: ConvergentFieldConflict[];
+  shrinkFindings: Array<{ provider: CloudProvider; finding: Extract<ShrinkFinding, { suspicious: true }> }>;
+  providers: ConvergentProviderMigrationStatus[];
+  oldClientCompatibility: 'materialized-v1-snapshot';
+  blockedReasons: string[];
+}
+
+export interface ConvergentReplicaRecordV2 {
+  schemaVersion: 2;
+  state: ConvergentSyncStateV2;
+  updatedAt: number;
+}
+
+export interface ConvergentProviderBaselineV2 {
+  schemaVersion: 2;
+  provider: CloudProvider;
+  remoteVersion: number;
+  remoteUpdatedAt: number;
+  remoteDeviceId: string;
+  materializedPayload: SyncPayload;
+  state: ConvergentSyncStateV2;
 }
 
 export function hasSyncPayloadEntityData(
@@ -566,6 +620,8 @@ export const SYNC_STORAGE_KEYS = {
   PROVIDER_SMB: 'netcatty_provider_smb_v1',
   LOCAL_SYNC_META: 'netcatty_local_sync_meta_v1',
   SYNC_BASE_PAYLOAD: 'netcatty_sync_base_payload_v1',
+  CONVERGENT_REPLICA: 'netcatty_convergent_sync_replica_v2',
+  CONVERGENT_PROVIDER_BASELINE: 'netcatty_convergent_sync_provider_baseline_v2',
 } as const;
 
 // ============================================================================

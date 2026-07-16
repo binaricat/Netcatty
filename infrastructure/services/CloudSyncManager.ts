@@ -28,6 +28,8 @@ import {
   type WebDAVConfig,
   type S3Config,
   type SyncedFile,
+  type ConvergentProviderBaselineV2,
+  type ConvergentReplicaRecordV2,
 } from '../../domain/sync';
 import type { CloudSyncConflictAction, CloudSyncStrategy } from '../../domain/syncStrategy';
 import { type CloudAdapter } from './adapters';
@@ -114,6 +116,15 @@ import {
   verifyPasswordImpl,
   handleProviderReauthRequiredImpl,
 } from './cloudSync/stateAndSecurityMethods';
+import {
+  clearConvergentSyncStorageImpl,
+  convergentProviderBaselineKeyImpl,
+  loadConvergentProviderBaselineImpl,
+  loadConvergentReplicaImpl,
+  reencryptSyncStorageImpl,
+  saveConvergentProviderBaselineImpl,
+  saveConvergentReplicaImpl,
+} from './cloudSync/convergentSyncStorageMethods';
 
 // ============================================================================
 // Types
@@ -251,7 +262,7 @@ export class CloudSyncManager {
     return loadFromStorageImpl.call(this, key);
   }
 
-  private saveToStorage(key: string, value: unknown): void {
+  private saveToStorage(key: string, value: unknown): boolean {
     return saveToStorageImpl.call(this, key, value);
   }
 
@@ -811,6 +822,10 @@ export class CloudSyncManager {
     return syncSnapshotsKeyImpl.call(this, provider);
   }
 
+  private convergentProviderBaselineKey(provider: CloudProvider): string {
+    return convergentProviderBaselineKeyImpl.call(this, provider);
+  }
+
   private providerAccountIdKey(provider: CloudProvider): string {
     return providerAccountIdKeyImpl.call(this, provider);
   }
@@ -833,6 +848,36 @@ export class CloudSyncManager {
 
   async loadSyncSnapshots(provider?: CloudProvider): Promise<SyncSnapshotEntry[]> {
     return loadSyncSnapshotsImpl.call(this, provider);
+  }
+
+  async saveConvergentReplica(record: ConvergentReplicaRecordV2): Promise<void> {
+    return saveConvergentReplicaImpl.call(this, record);
+  }
+
+  async loadConvergentReplica(): Promise<ConvergentReplicaRecordV2 | null> {
+    return loadConvergentReplicaImpl.call(this);
+  }
+
+  async saveConvergentProviderBaseline(baseline: ConvergentProviderBaselineV2): Promise<void> {
+    return saveConvergentProviderBaselineImpl.call(this, baseline);
+  }
+
+  async loadConvergentProviderBaseline(
+    provider: CloudProvider,
+  ): Promise<ConvergentProviderBaselineV2 | null> {
+    return loadConvergentProviderBaselineImpl.call(this, provider);
+  }
+
+  clearConvergentSyncStorage(confirmed = false): void {
+    return clearConvergentSyncStorageImpl.call(this, confirmed);
+  }
+
+  private async reencryptSyncStorage(
+    oldKey: CryptoKey,
+    newKey: CryptoKey,
+    newConfig: MasterKeyConfig,
+  ): Promise<void> {
+    return reencryptSyncStorageImpl.call(this, oldKey, newKey, newConfig);
   }
 
   private clearSyncBase(): void {

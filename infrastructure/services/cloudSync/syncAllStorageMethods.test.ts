@@ -193,6 +193,46 @@ test("syncToProvider uses the checked remote as metadata base when no stored bas
   }
 });
 
+test("syncToProvider refuses to downgrade a checked convergent remote", async () => {
+  const checkedRemote = remoteFile("github", 3, 300);
+  checkedRemote.meta.syncSchemaVersion = 2;
+  let encrypted = false;
+  const originalEncryptPayload = EncryptionService.encryptPayload;
+  EncryptionService.encryptPayload = async () => {
+    encrypted = true;
+    return checkedRemote;
+  };
+  try {
+    const manager = {
+      masterPassword: "pw",
+      adapters: new Map(),
+      state: {
+        securityState: "UNLOCKED",
+        providers: { github: { status: "connected" } },
+        lastError: null,
+        syncState: "IDLE",
+        syncStrategy: "smartMerge",
+        localVersion: 1,
+        deviceId: "local-device",
+        deviceName: "Local",
+      },
+      getConnectedAdapter: async () => ({ provider: "github" }),
+      updateProviderStatus: () => {},
+      emit: () => {},
+      checkProviderConflict: async () => ({ conflict: false, remoteFile: checkedRemote }),
+      addSyncHistoryEntry: () => {},
+    };
+
+    const result = await syncToProviderImpl.call(manager, "github", payload("local"));
+
+    assert.equal(result.success, false);
+    assert.equal(encrypted, false);
+    assert.match(result.error ?? "", /Enable or migrate convergent sync/);
+  } finally {
+    EncryptionService.encryptPayload = originalEncryptPayload;
+  }
+});
+
 test("syncToProvider aborts an upload when the master key changes after encryption", async () => {
   const originalEncryptPayload = EncryptionService.encryptPayload;
   const localPayload = payload("local");

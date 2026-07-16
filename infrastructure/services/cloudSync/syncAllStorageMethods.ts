@@ -14,15 +14,21 @@ import {
 } from '../../../domain/syncReliability';
 import { detectSuspiciousShrink, type ShrinkFinding } from '../../../domain/syncGuards';
 import { resolveCloudSyncConflictAction, type CloudSyncConflictAction } from '../../../domain/syncStrategy';
+import { assertConvergentSyncWriteCompatible } from '../../../domain/convergentSync';
 import type { CloudAdapter } from '../adapters';
 import type {
   CloudProvider,
+  ProviderConnection,
   SyncedFile,
   SyncHistoryEntry,
   SyncSnapshotEntry,
   SyncPayload,
   SyncResult,
 } from '../../../domain/sync';
+import {
+  decryptLocalStorageValue,
+  encryptLocalStorageValue,
+} from './encryptedLocalStorage';
 
 function getSyncSecurityGeneration(manager: any): number | undefined {
   return typeof manager.getSyncSecurityGeneration === 'function'
@@ -61,35 +67,12 @@ async function downloadRemoteForSyncAllImpl(this: any,
 const SYNC_HISTORY_STORAGE_KEY = 'netcatty_sync_history_v1';
 const SYNC_SNAPSHOTS_STORAGE_KEY = 'netcatty_sync_snapshots_v1';
 
-async function encryptForLocalStorage(payload: unknown, key: CryptoKey): Promise<string> {
-  const data = new TextEncoder().encode(JSON.stringify(payload));
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-  const encrypted = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, data);
-  const combined = new Uint8Array(iv.length + encrypted.byteLength);
-  combined.set(iv);
-  combined.set(new Uint8Array(encrypted), iv.length);
-  let binary = '';
-  const CHUNK = 8192;
-  for (let i = 0; i < combined.length; i += CHUNK) {
-    binary += String.fromCharCode(...combined.subarray(i, i + CHUNK));
-  }
-  return btoa(binary);
-}
-
-async function decryptFromLocalStorage<T>(encoded: string, key: CryptoKey): Promise<T> {
-  const combined = Uint8Array.from(atob(encoded), (c) => c.charCodeAt(0));
-  const iv = combined.slice(0, 12);
-  const ciphertext = combined.slice(12);
-  const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ciphertext);
-  return JSON.parse(new TextDecoder().decode(decrypted)) as T;
-}
-
 async function loadRawSyncBase(this: any, provider?: CloudProvider): Promise<SyncPayload | null> {
   const key = this.state.unlockedKey?.derivedKey;
   if (!key || typeof this.loadFromStorage !== 'function') return null;
   const encoded = this.loadFromStorage(this.syncBaseKey(provider));
   if (!encoded || typeof encoded !== 'string') return null;
-  return decryptFromLocalStorage<SyncPayload>(encoded, key);
+  return decryptLocalStorageValue<SyncPayload>(encoded, key);
 }
 
 async function rememberCurrentSyncBaseSnapshot(this: any, provider?: CloudProvider): Promise<void> {
@@ -130,7 +113,9 @@ export async function syncAllProvidersImpl(this: any,
       return results;
     }
 
-    const connectedProviders = Object.entries(this.state.providers)
+    const connectedProviders = Object.entries(
+      this.state.providers as Record<CloudProvider, ProviderConnection>,
+    )
       .filter(([provider, connection]) => {
         if (!isProviderReadyForSync(connection)) return false;
         if (connection.status === 'error') {
@@ -515,10 +500,11 @@ export async function syncAllProvidersImpl(this: any,
     // fresh anchor paired with a stale base.
     const uploadTasks = validUploads.map(async ({ provider, adapter }) => {
       try {
+        const entry = checkResults.find((result) => result.provider === provider);
+        assertConvergentSyncWriteCompatible(entry?.check?.remoteFile?.meta, payload);
         const providerBase = await this.loadSyncBase(provider);
         let providerRemoteRef: SyncPayload | null = null;
         if (!providerBase) {
-          const entry = checkResults.find((r) => r.provider === provider);
           const remoteFile = entry?.check?.remoteFile;
           if (remoteFile) {
             assertSyncSecurityGeneration(this, syncSecurityGeneration);
@@ -670,7 +656,8 @@ export function providerAccountIdKeyImpl(this: any,provider: CloudProvider): str
   }
 
 export function loadProviderAccountIdImpl(this: any,provider: CloudProvider): string | null {
-    return this.loadFromStorage<string>(this.providerAccountIdKey(provider)) ?? null;
+    const stored = this.loadFromStorage(this.providerAccountIdKey(provider));
+    return typeof stored === 'string' ? stored : null;
   }
 
 export function saveProviderAccountIdImpl(this: any,provider: CloudProvider, id: string): void {
@@ -688,7 +675,14 @@ export async function saveSyncBaseImpl(this: any,payload: SyncPayload, provider?
       } catch (snapshotError) {
         console.warn('[CloudSyncManager] Failed to save previous sync snapshot', snapshotError);
       }
-      this.saveToStorage(this.syncBaseKey(provider), await encryptForLocalStorage(payload, key));
+      if (
+        this.saveToStorage(
+          this.syncBaseKey(provider),
+          await encryptLocalStorageValue(payload, key),
+        ) === false
+      ) {
+        throw new Error('Unable to persist sync base');
+      }
     } catch (error) {
       console.warn('[CloudSyncManager] Failed to save sync base', error);
       throw error;
@@ -699,9 +693,9 @@ export async function loadSyncBaseImpl(this: any,provider?: CloudProvider): Prom
     const key = this.state.unlockedKey?.derivedKey;
     if (!key) return null;
     try {
-      const encoded = this.loadFromStorage<string>(this.syncBaseKey(provider));
+      const encoded = this.loadFromStorage(this.syncBaseKey(provider)) as unknown;
       if (!encoded || typeof encoded !== 'string') return null;
-      return decryptFromLocalStorage<SyncPayload>(encoded, key);
+      return decryptLocalStorageValue<SyncPayload>(encoded, key);
     } catch {
       return null;
     }
@@ -716,9 +710,9 @@ export async function loadSyncSnapshotsImpl(this: any,provider?: CloudProvider):
     const key = this.state.unlockedKey?.derivedKey;
     if (!key) return [];
     try {
-      const encoded = this.loadFromStorage<string>(this.syncSnapshotsKey(provider));
+      const encoded = this.loadFromStorage(this.syncSnapshotsKey(provider)) as unknown;
       if (!encoded || typeof encoded !== 'string') return [];
-      const snapshots = await decryptFromLocalStorage<SyncSnapshotEntry[]>(encoded, key);
+      const snapshots = await decryptLocalStorageValue<SyncSnapshotEntry[]>(encoded, key);
       return Array.isArray(snapshots) ? snapshots : [];
     } catch {
       return [];
@@ -730,10 +724,10 @@ export async function saveSyncSnapshotsImpl(this: any,snapshots: SyncSnapshotEnt
     if (!key) {
       throw new Error('Sync snapshot encryption key is unavailable');
     }
-    this.saveToStorage(
+    if (this.saveToStorage(
       this.syncSnapshotsKey(provider),
-      await encryptForLocalStorage(snapshots.slice(0, SYNC_SNAPSHOT_LIMIT), key),
-    );
+      await encryptLocalStorageValue(snapshots.slice(0, SYNC_SNAPSHOT_LIMIT), key),
+    ) === false) throw new Error('Unable to persist sync snapshots');
   }
 
 export function clearSyncBaseImpl(this: any): void {

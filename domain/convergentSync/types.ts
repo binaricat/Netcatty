@@ -86,6 +86,61 @@ export interface ConvergentSyncStateV2 {
   stringCollections: Record<string, ConvergentStringCollectionState>;
 }
 
+/**
+ * A register candidate stored in the encrypted cloud envelope. Winner values
+ * that already exist in the adjacent materialized v1 snapshot may be omitted
+ * and reconstructed during hydration. Structural values (presence and
+ * position) remain inline so the envelope is self-describing.
+ */
+export type ConvergentEnvelopeCandidate<T extends JsonValue = JsonValue> =
+  | RegisterTombstoneCandidate
+  | (Omit<RegisterValueCandidate<T>, 'value'> & {
+      value?: T;
+      materialized?: true;
+    });
+
+export interface ConvergentEnvelopeRegister<T extends JsonValue = JsonValue> {
+  candidates: ConvergentEnvelopeCandidate<T>[];
+}
+
+export interface ConvergentEnvelopeEntityState {
+  presence: ConvergentEnvelopeRegister<boolean>;
+  position?: ConvergentEnvelopeRegister<CollectionPosition>;
+  fields: Record<string, ConvergentEnvelopeRegister>;
+}
+
+export interface ConvergentEnvelopeCollectionState {
+  entities: Record<string, ConvergentEnvelopeEntityState>;
+}
+
+export interface ConvergentEnvelopeStringEntryState {
+  presence: ConvergentEnvelopeRegister<boolean>;
+  position?: ConvergentEnvelopeRegister<CollectionPosition>;
+}
+
+export interface ConvergentEnvelopeStringCollectionState {
+  entries: Record<string, ConvergentEnvelopeStringEntryState>;
+}
+
+export interface ConvergentEnvelopeStateV2 {
+  vector: VersionVector;
+  dotOrigins: DotOriginIndex;
+  hlc: HybridLogicalClock;
+  collections: Record<string, ConvergentEnvelopeCollectionState>;
+  settings: Record<string, ConvergentEnvelopeRegister>;
+  stringCollections: Record<string, ConvergentEnvelopeStringCollectionState>;
+}
+
+/**
+ * Stored inside the AES-256-GCM encrypted SyncPayload. Plaintext metadata only
+ * advertises `syncSchemaVersion: 2`; candidate values never leave ciphertext.
+ */
+export interface ConvergentSyncEnvelopeV2 {
+  schemaVersion: 2;
+  encoding: 'materialized-winner-v1';
+  state: ConvergentEnvelopeStateV2;
+}
+
 export type RegisterAddress =
   | {
     kind: 'entity-presence';
