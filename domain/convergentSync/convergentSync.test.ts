@@ -377,6 +377,97 @@ test('settings are leaf registers while arrays remain atomic values', () => {
   assert.deepEqual(decodeSettingPath('/key~1with~0escapes'), ['key/with~escapes']);
 });
 
+test('unchanged setting writes do not advance the replica clock', () => {
+  const initial = applyConvergentMutations(createConvergentSyncState(), 'device-a', [{
+    kind: 'setting-set',
+    path: ['theme'],
+    value: 'dark',
+  }], BASE_TIME);
+  const unchanged = applyConvergentMutations(initial, 'device-a', [{
+    kind: 'setting-set',
+    path: ['theme'],
+    value: 'dark',
+  }], BASE_TIME + 1);
+
+  assert.equal(
+    serializeConvergentSyncState(unchanged),
+    serializeConvergentSyncState(initial),
+  );
+});
+
+test('setting writes matching the selected conflict candidate still resolve the conflict', () => {
+  const dark = applyConvergentMutations(createConvergentSyncState(), 'device-z', [{
+    kind: 'setting-set',
+    path: ['theme'],
+    value: 'dark',
+  }], BASE_TIME);
+  const light = applyConvergentMutations(createConvergentSyncState(), 'device-a', [{
+    kind: 'setting-set',
+    path: ['theme'],
+    value: 'light',
+  }], BASE_TIME);
+  const conflicted = mergeConvergentSyncStates(dark, light);
+  const resolved = applyConvergentMutations(conflicted, 'resolver', [{
+    kind: 'setting-set',
+    path: ['theme'],
+    value: 'dark',
+  }], BASE_TIME + 1);
+  const materialized = materializeConvergentSyncState(resolved);
+
+  assert.equal(materialized.settings.theme, 'dark');
+  assert.equal(materialized.conflicts.length, 0);
+  assert.equal(resolved.vector.resolver, 1);
+});
+
+test('unchanged setting writes still tombstone overlapping active paths', () => {
+  const parent = applyConvergentMutations(createConvergentSyncState(), 'device-a', [{
+    kind: 'setting-set',
+    path: ['terminal'],
+    value: 'atomic',
+  }], BASE_TIME);
+  const child = applyConvergentMutations(createConvergentSyncState(), 'device-z', [{
+    kind: 'setting-set',
+    path: ['terminal', 'fontSize'],
+    value: 14,
+  }], BASE_TIME);
+  const conflicted = mergeConvergentSyncStates(parent, child);
+  const normalized = applyConvergentMutations(conflicted, 'resolver', [{
+    kind: 'setting-set',
+    path: ['terminal', 'fontSize'],
+    value: 14,
+  }], BASE_TIME + 1);
+  const materialized = materializeConvergentSyncState(normalized);
+
+  assert.deepEqual(materialized.settings, { terminal: { fontSize: 14 } });
+  assert.equal(materialized.conflicts.length, 0);
+  assert.equal(normalized.vector.resolver, 1);
+  assert.deepEqual(
+    normalized.settings['/terminal/fontSize'].candidates[0]?.dot,
+    child.settings['/terminal/fontSize'].candidates[0]?.dot,
+  );
+});
+
+test('repeated setting deletes do not advance the replica clock', () => {
+  const initial = applyConvergentMutations(createConvergentSyncState(), 'device-a', [{
+    kind: 'setting-set',
+    path: ['theme'],
+    value: 'dark',
+  }], BASE_TIME);
+  const deleted = applyConvergentMutations(initial, 'device-a', [{
+    kind: 'setting-delete',
+    path: ['theme'],
+  }], BASE_TIME + 1);
+  const repeated = applyConvergentMutations(deleted, 'device-a', [{
+    kind: 'setting-delete',
+    path: ['theme'],
+  }], BASE_TIME + 2);
+
+  assert.equal(
+    serializeConvergentSyncState(repeated),
+    serializeConvergentSyncState(deleted),
+  );
+});
+
 test('causal setting shape changes tombstone overlapping leaf paths', () => {
   const nested = applyConvergentMutations(createConvergentSyncState(), 'device-a', [
     { kind: 'setting-set', path: ['terminal'], value: ['atomic'] },

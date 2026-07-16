@@ -335,6 +335,18 @@ function writeSettingRegister(
   // targets a path beneath it.
   tombstoneRelatedSettingPaths(state, deviceId, path, now, !tombstone);
   const encodedPath = encodeSettingPath(path);
+  const currentRegister = getOwnRecordValue(state.settings, encodedPath);
+  const currentWinner = selectRegisterWinner(currentRegister);
+  if (
+    currentRegister
+    && !registerHasConflict(currentRegister)
+    && (
+      (tombstone && currentWinner && isTombstoneCandidate(currentWinner))
+      || (!tombstone && value !== undefined && candidateValueEquals(currentRegister, value))
+    )
+  ) {
+    return;
+  }
   setOwnRecordValue(
     state.settings,
     encodedPath,
@@ -342,7 +354,7 @@ function writeSettingRegister(
       state,
       deviceId,
       now,
-      getOwnRecordValue(state.settings, encodedPath),
+      currentRegister,
       value,
       tombstone,
     ),

@@ -40,6 +40,11 @@ A string-entry remove is emitted only after the replica has observed a currently
 visible add. Deleting a locally absent entry is a no-op, so a concurrent add on
 another replica survives without creating an artificial value/tombstone conflict.
 
+Mutation application is idempotent for already-selected entity fields, string
+entries, and settings. A same-value settings write still tombstones active
+ancestor or descendant paths, and a same-value write against an MV-register
+conflict still emits a causally dominating resolution.
+
 Deletion is a register candidate, not absence from the serialized structure.
 Tombstones are retained indefinitely in v2. A later recreation replaces a
 tombstone only when its new dot causally observes the deletion.
