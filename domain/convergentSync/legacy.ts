@@ -30,6 +30,12 @@ function fingerprint(value: unknown): string {
   return JSON.stringify(stableValue(value));
 }
 
+function hasDefinedOwnProperty(payload: SyncPayload, property: string): boolean {
+  const record = payload as unknown as Record<string, unknown>;
+  return Object.prototype.hasOwnProperty.call(record, property)
+    && record[property] !== undefined;
+}
+
 function normalizedEntityValue(
   collection: string,
   id: string,
@@ -105,8 +111,9 @@ export function cloudSyncPayloadsEqual(left: SyncPayload, right: SyncPayload): b
 
 /**
  * Convert a trusted v1 baseline diff into deterministic CRDT writes. A missing
- * optional top-level collection is treated as "unsupported by that client",
- * while an explicitly present empty collection is a real deletion.
+ * or undefined optional top-level collection is treated as "unsupported by
+ * that client", while an explicitly present empty collection is a real
+ * deletion.
  */
 export function diffLegacySyncPayload(
   baseline: SyncPayload,
@@ -114,7 +121,7 @@ export function diffLegacySyncPayload(
 ): ConvergentMutation[] {
   const mutations: ConvergentMutation[] = [];
   for (const collection of CONVERGENT_ENTITY_COLLECTIONS) {
-    if (!Object.prototype.hasOwnProperty.call(legacy, collection)) continue;
+    if (!hasDefinedOwnProperty(legacy, collection)) continue;
     const before = entityMap(baseline, collection);
     const after = entityMap(legacy, collection);
     const beforePositions = positionMap(before.keys());
@@ -144,7 +151,7 @@ export function diffLegacySyncPayload(
     }
   }
   for (const collection of CONVERGENT_STRING_COLLECTIONS) {
-    if (!Object.prototype.hasOwnProperty.call(legacy, collection)) continue;
+    if (!hasDefinedOwnProperty(legacy, collection)) continue;
     const before = stringSet(baseline, collection);
     const after = stringSet(legacy, collection);
     const beforePositions = positionMap(before);
@@ -163,7 +170,7 @@ export function diffLegacySyncPayload(
       }
     }
   }
-  if (Object.prototype.hasOwnProperty.call(legacy, 'settings')) {
+  if (hasDefinedOwnProperty(legacy, 'settings')) {
     const before = flattenSettings(baseline.settings);
     const after = flattenSettings(legacy.settings);
     const paths = new Set([...before.keys(), ...after.keys()]);

@@ -10,6 +10,7 @@ import {
   cloudSyncPayloadsEqual,
   createConvergentSyncEnvelope,
   createConvergentSyncStateFromPayload,
+  diffLegacySyncPayload,
   hydrateConvergentSyncEnvelope,
   materializeSyncPayloadFromConvergentState,
   mergeConvergentSyncStates,
@@ -290,6 +291,42 @@ test('payload and legacy conversion normalize undefined fields with JSON semanti
   assert.equal(materialized.hosts[0].label, 'After');
   assert.equal(Object.hasOwn(materialized.hosts[0], 'iconMode'), false);
   assert.equal(Object.hasOwn(materialized.hosts[0].proxyConfig!, 'username'), false);
+});
+
+test('trusted legacy diff treats own undefined optional fields as omitted', () => {
+  const baseline = payload();
+  baseline.identities = [{
+    id: 'identity-1',
+    label: 'Production identity',
+    username: 'root',
+    authMethod: 'password',
+    password: 'identity-secret',
+    created: NOW,
+  }];
+  baseline.noteGroups = ['operations'];
+  const legacy = {
+    ...baseline,
+    identities: undefined,
+    noteGroups: undefined,
+    settings: undefined,
+    syncedAt: NOW + 1,
+  } as unknown as SyncPayload;
+
+  assert.deepEqual(diffLegacySyncPayload(baseline, legacy), []);
+
+  const state = createConvergentSyncStateFromPayload(baseline, 'seed', NOW);
+  const next = applyLegacySyncPayload(
+    state,
+    baseline,
+    legacy,
+    'legacy:github:remote-device',
+    NOW + 1,
+  );
+  const materialized = materializeSyncPayloadFromConvergentState(next, { syncedAt: NOW + 1 });
+
+  assert.equal(materialized.identities?.[0]?.id, 'identity-1');
+  assert.deepEqual(materialized.noteGroups, ['operations']);
+  assert.equal(materialized.settings?.theme, 'dark');
 });
 
 test('payload conversion still rejects entities that JSON cannot serialize', () => {
