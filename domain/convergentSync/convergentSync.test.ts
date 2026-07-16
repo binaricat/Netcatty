@@ -121,6 +121,116 @@ test('concurrent delete and update remains visible as a presence conflict', () =
   ));
 });
 
+test('full entity upserts resolve an accepted presence conflict', () => {
+  const base = hostBase();
+  const deleted = applyConvergentMutations(base, 'device-a', [{
+    kind: 'entity-delete',
+    collection: 'hosts',
+    entityId: 'host-1',
+  }], BASE_TIME + 1);
+  const updated = applyConvergentMutations(base, 'device-b', [{
+    kind: 'entity-field-set',
+    collection: 'hosts',
+    entityId: 'host-1',
+    field: 'hostname',
+    value: 'edited.example.com',
+  }], BASE_TIME + 1);
+  const conflicted = mergeConvergentSyncStates(deleted, updated);
+  const selected = materializeConvergentSyncState(conflicted).collections.hosts[0];
+  const resolved = applyConvergentMutations(conflicted, 'resolver', [{
+    kind: 'entity-upsert',
+    collection: 'hosts',
+    entityId: 'host-1',
+    value: selected,
+    position: 0,
+  }], BASE_TIME + 2);
+  const materialized = materializeConvergentSyncState(resolved);
+
+  assert.equal(materialized.collections.hosts[0]?.hostname, 'edited.example.com');
+  assert.equal(materialized.conflicts.length, 0);
+  assert.equal(resolved.vector.resolver, 1);
+});
+
+test('full entity upserts resolve same-value field conflicts', () => {
+  const base = hostBase();
+  const left = applyConvergentMutations(base, 'device-a', [{
+    kind: 'entity-field-set',
+    collection: 'hosts',
+    entityId: 'host-1',
+    field: 'label',
+    value: 'Left',
+  }], BASE_TIME + 1);
+  const right = applyConvergentMutations(base, 'device-z', [{
+    kind: 'entity-field-set',
+    collection: 'hosts',
+    entityId: 'host-1',
+    field: 'label',
+    value: 'Right',
+  }], BASE_TIME + 1);
+  const conflicted = mergeConvergentSyncStates(left, right);
+  const selected = materializeConvergentSyncState(conflicted).collections.hosts[0];
+  const resolved = applyConvergentMutations(conflicted, 'resolver', [{
+    kind: 'entity-upsert',
+    collection: 'hosts',
+    entityId: 'host-1',
+    value: selected,
+    position: 0,
+  }], BASE_TIME + 2);
+  const materialized = materializeConvergentSyncState(resolved);
+
+  assert.equal(materialized.collections.hosts[0]?.label, 'Right');
+  assert.equal(materialized.conflicts.length, 0);
+  assert.equal(resolved.vector.resolver, 2);
+});
+
+test('full entity upserts resolve same-value position conflicts', () => {
+  const base = hostBase();
+  const value = materializeConvergentSyncState(base).collections.hosts[0];
+  const left = applyConvergentMutations(base, 'device-a', [{
+    kind: 'entity-upsert',
+    collection: 'hosts',
+    entityId: 'host-1',
+    value,
+    position: 1,
+  }], BASE_TIME + 1);
+  const right = applyConvergentMutations(base, 'device-z', [{
+    kind: 'entity-upsert',
+    collection: 'hosts',
+    entityId: 'host-1',
+    value,
+    position: 2,
+  }], BASE_TIME + 1);
+  const conflicted = mergeConvergentSyncStates(left, right);
+  const selected = materializeConvergentSyncState(conflicted).collections.hosts[0];
+  const resolved = applyConvergentMutations(conflicted, 'resolver', [{
+    kind: 'entity-upsert',
+    collection: 'hosts',
+    entityId: 'host-1',
+    value: selected,
+    position: 2,
+  }], BASE_TIME + 2);
+
+  assert.equal(materializeConvergentSyncState(resolved).conflicts.length, 0);
+  assert.equal(resolved.vector.resolver, 2);
+});
+
+test('unchanged full entity upserts do not advance the replica clock', () => {
+  const initial = hostBase();
+  const value = materializeConvergentSyncState(initial).collections.hosts[0];
+  const unchanged = applyConvergentMutations(initial, 'seed', [{
+    kind: 'entity-upsert',
+    collection: 'hosts',
+    entityId: 'host-1',
+    value,
+    position: 0,
+  }], BASE_TIME + 1);
+
+  assert.equal(
+    serializeConvergentSyncState(unchanged),
+    serializeConvergentSyncState(initial),
+  );
+});
+
 test('no-op field sets do not resurrect concurrent entity deletions', () => {
   const base = hostBase();
   const unchanged = applyConvergentMutations(base, 'device-b', [{

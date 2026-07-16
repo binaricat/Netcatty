@@ -182,7 +182,9 @@ function applyEntityUpsert(
     mutation.collection,
     mutation.entityId,
   );
-  let changed = created || !registerIsPresent(entity.presence);
+  let changed = created
+    || !registerIsPresent(entity.presence)
+    || registerHasConflict(entity.presence);
   const incomingFields = Object.fromEntries(
     Object.entries(mutation.value).filter(([field]) => field !== 'id'),
   );
@@ -205,7 +207,11 @@ function applyEntityUpsert(
         );
         changed = true;
       }
-    } else if (!candidateValueEquals(currentRegister, incoming)) {
+    } else if (
+      !currentRegister
+      || registerHasConflict(currentRegister)
+      || !candidateValueEquals(currentRegister, incoming)
+    ) {
       setOwnRecordValue(
         entity.fields,
         field,
@@ -217,7 +223,11 @@ function applyEntityUpsert(
 
   if (
     mutation.position !== undefined
-    && !candidateValueEquals(entity.position, mutation.position)
+    && (
+      !entity.position
+      || registerHasConflict(entity.position)
+      || !candidateValueEquals(entity.position, mutation.position)
+    )
   ) {
     entity.position = writeRegister(
       state,

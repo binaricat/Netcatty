@@ -45,6 +45,11 @@ entries, and settings. A same-value settings write still tombstones active
 ancestor or descendant paths, and a same-value write against an MV-register
 conflict still emits a causally dominating resolution.
 
+A full entity upsert follows the same rule for presence, fields, and collection
+position: unchanged conflict-free registers are preserved, while accepting a
+currently selected conflicted value emits a new candidate that dominates every
+retained alternative.
+
 Deletion is a register candidate, not absence from the serialized structure.
 Tombstones are retained indefinitely in v2. A later recreation replaces a
 tombstone only when its new dot causally observes the deletion.
