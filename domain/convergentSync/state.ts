@@ -249,11 +249,40 @@ function applyEntityFieldMutation(
   if (mutation.field === 'id') {
     throw new ConvergentSyncInvariantError('Entity IDs are structural and cannot be field registers');
   }
+  const collection = getOwnRecordValue(state.collections, mutation.collection);
+  const existingEntity = collection
+    ? getOwnRecordValue(collection.entities, mutation.entityId)
+    : undefined;
+  if (mutation.kind === 'entity-field-delete' && !existingEntity) return;
+
   const { entity } = ensureEntity(state, mutation.collection, mutation.entityId);
   const currentRegister = getOwnRecordValue(entity.fields, mutation.field);
-  setOwnRecordValue(entity.fields, mutation.field, mutation.kind === 'entity-field-delete'
-    ? writeRegister(state, deviceId, now, currentRegister, undefined, true)
-    : writeRegister(state, deviceId, now, currentRegister, mutation.value));
+  const currentWinner = selectRegisterWinner(currentRegister);
+
+  if (mutation.kind === 'entity-field-delete') {
+    if (!currentWinner || isTombstoneCandidate(currentWinner)) return;
+    setOwnRecordValue(
+      entity.fields,
+      mutation.field,
+      writeRegister(state, deviceId, now, currentRegister, undefined, true),
+    );
+    if (registerIsPresent(entity.presence)) {
+      entity.presence = writeRegister(state, deviceId, now, entity.presence, true);
+    }
+    return;
+  }
+
+  if (
+    (!currentRegister || !registerHasConflict(currentRegister))
+    && candidateValueEquals(currentRegister, mutation.value)
+  ) {
+    return;
+  }
+  setOwnRecordValue(
+    entity.fields,
+    mutation.field,
+    writeRegister(state, deviceId, now, currentRegister, mutation.value),
+  );
   entity.presence = writeRegister(state, deviceId, now, entity.presence, true);
 }
 

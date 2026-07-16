@@ -121,6 +121,75 @@ test('concurrent delete and update remains visible as a presence conflict', () =
   ));
 });
 
+test('no-op field sets do not resurrect concurrent entity deletions', () => {
+  const base = hostBase();
+  const unchanged = applyConvergentMutations(base, 'device-b', [{
+    kind: 'entity-field-set',
+    collection: 'hosts',
+    entityId: 'host-1',
+    field: 'label',
+    value: 'Production',
+  }], BASE_TIME + 1);
+  const deleted = applyConvergentMutations(base, 'device-a', [{
+    kind: 'entity-delete',
+    collection: 'hosts',
+    entityId: 'host-1',
+  }], BASE_TIME + 1);
+
+  assert.equal(
+    serializeConvergentSyncState(unchanged),
+    serializeConvergentSyncState(base),
+  );
+  assert.deepEqual(
+    materializeConvergentSyncState(
+      mergeConvergentSyncStates(deleted, unchanged),
+    ).collections.hosts,
+    [],
+  );
+});
+
+test('deleting an absent field is a no-op and does not refresh presence', () => {
+  const base = hostBase();
+  const unchanged = applyConvergentMutations(base, 'device-b', [{
+    kind: 'entity-field-delete',
+    collection: 'hosts',
+    entityId: 'host-1',
+    field: 'description',
+  }], BASE_TIME + 1);
+
+  assert.equal(
+    serializeConvergentSyncState(unchanged),
+    serializeConvergentSyncState(base),
+  );
+});
+
+test('field deletion on a non-present entity does not recreate it', () => {
+  const deleted = applyConvergentMutations(hostBase(), 'device-a', [{
+    kind: 'entity-delete',
+    collection: 'hosts',
+    entityId: 'host-1',
+  }], BASE_TIME + 1);
+  const fieldDeleted = applyConvergentMutations(deleted, 'device-b', [{
+    kind: 'entity-field-delete',
+    collection: 'hosts',
+    entityId: 'host-1',
+    field: 'label',
+  }], BASE_TIME + 2);
+
+  assert.deepEqual(
+    materializeConvergentSyncState(fieldDeleted).collections.hosts,
+    [],
+  );
+  assert.equal(
+    fieldDeleted.collections.hosts.entities['host-1'].presence.candidates[0]?.tombstone,
+    true,
+  );
+  assert.equal(
+    fieldDeleted.collections.hosts.entities['host-1'].fields.label.candidates[0]?.tombstone,
+    true,
+  );
+});
+
 test('causal deletion is not resurrected by a stale replica', () => {
   const base = hostBase();
   const deleted = applyConvergentMutations(base, 'device-a', [{

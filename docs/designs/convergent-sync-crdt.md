@@ -52,7 +52,9 @@ explicit resolution.
 
 Entity field updates also write a fresh present candidate. Consequently, an
 offline deletion racing an offline edit becomes a presence conflict; it cannot
-silently hide the edit.
+silently hide the edit. No-op field writes allocate no dot and do not refresh
+presence. Deleting a field from a non-present entity may tombstone stale field
+data but never recreates the entity.
 
 ## Join
 
