@@ -122,6 +122,82 @@ test('concurrent delete and update remains visible as a presence conflict', () =
   ));
 });
 
+test('deleted entities suppress stale field and position conflicts', () => {
+  const base = hostBase();
+  const left = applyConvergentMutations(base, 'device-a', [{
+    kind: 'entity-upsert',
+    collection: 'hosts',
+    entityId: 'host-1',
+    value: {
+      id: 'host-1',
+      label: 'Left',
+      hostname: 'old.example.com',
+      tags: ['prod'],
+    },
+    position: 1,
+  }], BASE_TIME + 1);
+  const right = applyConvergentMutations(base, 'device-b', [{
+    kind: 'entity-upsert',
+    collection: 'hosts',
+    entityId: 'host-1',
+    value: {
+      id: 'host-1',
+      label: 'Right',
+      hostname: 'old.example.com',
+      tags: ['prod'],
+    },
+    position: 2,
+  }], BASE_TIME + 1);
+  const conflicted = mergeConvergentSyncStates(left, right);
+  const deleted = applyConvergentMutations(conflicted, 'device-c', [{
+    kind: 'entity-delete',
+    collection: 'hosts',
+    entityId: 'host-1',
+  }], BASE_TIME + 2);
+  const entity = deleted.collections.hosts.entities['host-1'];
+  const materialized = materializeConvergentSyncState(deleted);
+
+  assert.equal(entity.fields.label.candidates.length, 2);
+  assert.equal(entity.position?.candidates.length, 2);
+  assert.deepEqual(materialized.collections.hosts, []);
+  assert.deepEqual(materialized.conflicts, []);
+});
+
+test('visible entities retain internal conflicts during a presence conflict', () => {
+  const base = hostBase();
+  const left = applyConvergentMutations(base, 'device-a', [{
+    kind: 'entity-field-set',
+    collection: 'hosts',
+    entityId: 'host-1',
+    field: 'label',
+    value: 'Left',
+  }], BASE_TIME + 1);
+  const right = applyConvergentMutations(base, 'device-b', [{
+    kind: 'entity-field-set',
+    collection: 'hosts',
+    entityId: 'host-1',
+    field: 'label',
+    value: 'Right',
+  }], BASE_TIME + 1);
+  const deleted = applyConvergentMutations(base, 'device-c', [{
+    kind: 'entity-delete',
+    collection: 'hosts',
+    entityId: 'host-1',
+  }], BASE_TIME + 1);
+  const materialized = materializeConvergentSyncState(
+    mergeConvergentSyncStates(mergeConvergentSyncStates(left, right), deleted),
+  );
+
+  assert.equal(materialized.collections.hosts.length, 1);
+  assert.ok(materialized.conflicts.some(
+    (conflict) => conflict.address.kind === 'entity-presence',
+  ));
+  assert.ok(materialized.conflicts.some(
+    (conflict) => conflict.address.kind === 'entity-field'
+      && conflict.address.field === 'label',
+  ));
+});
+
 test('full entity upserts resolve an accepted presence conflict', () => {
   const base = hostBase();
   const deleted = applyConvergentMutations(base, 'device-a', [{
@@ -455,6 +531,39 @@ test('string-entry adds resolve a same-value position conflict', () => {
   assert.deepEqual(materialized.stringCollections.customGroups, ['Alpha']);
   assert.equal(materialized.conflicts.length, 0);
   assert.equal(resolved.vector.resolver, 2);
+});
+
+test('deleted string entries suppress stale position conflicts', () => {
+  const seeded = applyConvergentMutations(createConvergentSyncState(), 'seed', [{
+    kind: 'string-entry-add',
+    collection: 'customGroups',
+    value: 'Alpha',
+    position: 0,
+  }], BASE_TIME);
+  const left = applyConvergentMutations(seeded, 'device-a', [{
+    kind: 'string-entry-add',
+    collection: 'customGroups',
+    value: 'Alpha',
+    position: 1,
+  }], BASE_TIME + 1);
+  const right = applyConvergentMutations(seeded, 'device-b', [{
+    kind: 'string-entry-add',
+    collection: 'customGroups',
+    value: 'Alpha',
+    position: 2,
+  }], BASE_TIME + 1);
+  const conflicted = mergeConvergentSyncStates(left, right);
+  const deleted = applyConvergentMutations(conflicted, 'device-c', [{
+    kind: 'string-entry-delete',
+    collection: 'customGroups',
+    value: 'Alpha',
+  }], BASE_TIME + 2);
+  const entry = deleted.stringCollections.customGroups.entries.Alpha;
+  const materialized = materializeConvergentSyncState(deleted);
+
+  assert.equal(entry.position?.candidates.length, 2);
+  assert.deepEqual(materialized.stringCollections.customGroups, []);
+  assert.deepEqual(materialized.conflicts, []);
 });
 
 test('unchanged string-entry adds do not advance the replica clock', () => {

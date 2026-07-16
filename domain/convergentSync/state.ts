@@ -1056,6 +1056,7 @@ export function materializeConvergentSyncState(
         collection: collectionName,
         entityId,
       }, entity.presence);
+      if (!registerIsPresent(entity.presence)) continue;
       maybeRecordConflict(conflicts, {
         kind: 'entity-position',
         collection: collectionName,
@@ -1070,7 +1071,6 @@ export function materializeConvergentSyncState(
         }, getOwnRecordValue(entity.fields, field));
       }
 
-      if (!registerIsPresent(entity.presence)) continue;
       const value: JsonObject = { id: entityId };
       for (const field of Object.keys(entity.fields).sort()) {
         const fieldValue = materializedValue(getOwnRecordValue(entity.fields, field));
@@ -1106,12 +1106,12 @@ export function materializeConvergentSyncState(
         collection: collectionName,
         value,
       }, entry.presence);
+      if (!registerIsPresent(entry.presence)) continue;
       maybeRecordConflict(conflicts, {
         kind: 'string-entry-position',
         collection: collectionName,
         value,
       }, entry.position);
-      if (!registerIsPresent(entry.presence)) continue;
       const rawPosition = materializedValue(entry.position);
       const position = typeof rawPosition === 'string' || typeof rawPosition === 'number'
         ? rawPosition

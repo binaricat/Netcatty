@@ -122,6 +122,13 @@ Resolving a conflict creates a new write whose causal context covers all
 observed candidates, so the resolution remains stable when stale replicas
 return.
 
+Internal field and position conflicts are emitted only while their parent
+entity or string entry is materialized. An accepted parent deletion retains
+the underlying causal metadata for future explicit recreation but suppresses
+non-actionable child conflicts from the current conflict list. A concurrent
+delete/update whose selected presence remains visible still exposes both the
+presence conflict and all active internal conflicts.
+
 ## Complexity
 
 State validation and canonical serialization are linear in registers,
