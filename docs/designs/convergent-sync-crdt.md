@@ -19,9 +19,12 @@ follow-up changes after this core is reviewed.
 ## State model
 
 Each device owns a monotonically increasing counter. A write allocates a unique
-dot `(deviceId, counter)` and records the version vector observed immediately
-before that dot. A Hybrid Logical Clock (HLC) supplies a user-facing ordering
-hint without defining causality.
+dot `(deviceId, counter)`. The global version vector allocates collision-free
+dots, while each candidate records the exact prior dots observed in its own
+register. The register context is an exact dot set rather than another compact
+version vector because one device's global counters can interleave writes to
+different registers. A Hybrid Logical Clock (HLC) supplies a user-facing
+ordering hint without defining causality.
 
 The replica contains:
 
@@ -56,20 +59,24 @@ silently hide the edit.
 For each register, the join keeps:
 
 1. candidates present on both sides;
-2. left-only candidates not covered by the right causal context;
-3. right-only candidates not covered by the left causal context.
+2. left-only candidates not covered by the right register's causal context;
+3. right-only candidates not covered by the left register's causal context.
 
 Candidates causally dominated by another surviving candidate are removed. The
-replica vector is the pointwise maximum. This makes join commutative,
-associative, and idempotent. Property tests exercise those laws directly and
-also reduce 2-20 randomly generated offline replicas using reordered,
-partitioned, and duplicated joins.
+replica vector is the pointwise maximum. A global vector is never used as proof
+that a candidate from an absent register was superseded; only a candidate in
+that same register can carry such proof. This makes partial provider states
+fail validation instead of silently deleting unrelated local data. Join remains
+commutative, associative, and idempotent. Property tests exercise those laws
+directly and also reduce 2-20 randomly generated offline replicas using
+reordered, partitioned, and duplicated joins.
 
 Reusing a dot for different data or different register addresses is an
 invariant violation and fails closed. Every global vector counter must also be
-witnessed by a retained candidate dot or candidate context. Hydration rejects
-dangling observations so a malformed or partial state cannot use an
-unsubstantiated vector to discard local candidates during join.
+witnessed by a retained candidate dot or same-register candidate context.
+Hydration rejects dangling observations so a malformed or partial state cannot
+use an unsubstantiated vector to discard local candidates during join. It also
+rejects a context that references a currently retained dot in another register.
 
 ## Materialization and conflicts
 
@@ -78,7 +85,7 @@ snapshot is selected for legacy readers and immediate application:
 
 1. a value sorts after a tombstone;
 2. then HLC wall time and logical counter;
-3. then device ID;
+3. then device ID using locale-independent UTF-16 code-unit order;
 4. then device counter.
 
 Candidate ordering in canonical serialization uses the dot, not the selected
@@ -91,12 +98,13 @@ return.
 
 ## Complexity
 
-State validation, canonical serialization, and join are linear in the number
-of registers plus candidates, with sorting bounded by keys within each map.
-Batch mutation clones the replica once, avoiding a full-state copy per imported
-entity. `npm run bench:sync-crdt` reports non-gating measurements for 1,000,
-5,000, and 10,000 entities so accidental quadratic behavior is visible during
-review.
+State validation and canonical serialization are linear in registers,
+candidates, and retained context dots. Join additionally compares the bounded
+set of concurrent candidates within each register. Sorting is bounded by keys
+within each map. Batch mutation clones the replica once, avoiding a full-state
+copy per imported entity. `npm run bench:sync-crdt` reports non-gating
+measurements for 1,000, 5,000, and 10,000 entities so accidental quadratic
+behavior is visible during review.
 
 ## Follow-up boundaries
 

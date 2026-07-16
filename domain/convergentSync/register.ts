@@ -1,8 +1,8 @@
 import {
   compareDots,
   compareHybridLogicalClocks,
+  compareStrings,
   dotKey,
-  observesDot,
 } from './clock';
 import { canonicalJsonString, cloneJson } from './json';
 import {
@@ -12,7 +12,6 @@ import {
   type JsonValue,
   type MultiValueRegister,
   type RegisterCandidate,
-  type VersionVector,
 } from './types';
 
 export function isTombstoneCandidate(
@@ -29,7 +28,10 @@ export function cloneCandidate<T extends JsonValue>(
       deviceId: candidate.dot.deviceId,
       counter: candidate.dot.counter,
     },
-    context: { ...candidate.context },
+    context: candidate.context.map((dot) => ({
+      deviceId: dot.deviceId,
+      counter: dot.counter,
+    })),
     hlc: {
       wallTime: candidate.hlc.wallTime,
       logical: candidate.hlc.logical,
@@ -43,7 +45,7 @@ export function cloneCandidate<T extends JsonValue>(
 
 export function createRegisterCandidate<T extends JsonValue>(options: {
   dot: Dot;
-  context: VersionVector;
+  context: Dot[];
   hlc: HybridLogicalClock;
   value?: T;
   tombstone?: boolean;
@@ -53,7 +55,10 @@ export function createRegisterCandidate<T extends JsonValue>(options: {
       deviceId: options.dot.deviceId,
       counter: options.dot.counter,
     },
-    context: { ...options.context },
+    context: options.context.map((dot) => ({
+      deviceId: dot.deviceId,
+      counter: dot.counter,
+    })),
     hlc: {
       wallTime: options.hlc.wallTime,
       logical: options.hlc.logical,
@@ -71,11 +76,11 @@ export function createRegisterCandidate<T extends JsonValue>(options: {
   return { ...base, value: cloneJson(options.value) };
 }
 
-function canonicalVector(vector: VersionVector): string {
+function canonicalContext(context: Dot[]): string {
   return JSON.stringify(
-    Object.fromEntries(
-      Object.keys(vector).sort().map((deviceId) => [deviceId, vector[deviceId]]),
-    ),
+    context
+      .map((dot) => ({ deviceId: dot.deviceId, counter: dot.counter }))
+      .sort(compareDots),
   );
 }
 
@@ -85,7 +90,7 @@ function candidateFingerprint(candidate: RegisterCandidate): string {
       deviceId: candidate.dot.deviceId,
       counter: candidate.dot.counter,
     },
-    context: canonicalVector(candidate.context),
+    context: canonicalContext(candidate.context),
     hlc: {
       wallTime: candidate.hlc.wallTime,
       logical: candidate.hlc.logical,
@@ -112,7 +117,24 @@ function candidateDominates(
   winner: RegisterCandidate,
   candidate: RegisterCandidate,
 ): boolean {
-  return observesDot(winner.context, candidate.dot);
+  return winner.context.some((dot) => dotKey(dot) === dotKey(candidate.dot));
+}
+
+export function registerCausalContext(
+  register: MultiValueRegister | undefined,
+): Dot[] {
+  const context = new Map<string, Dot>();
+  const observe = (dot: Dot) => {
+    context.set(dotKey(dot), {
+      deviceId: dot.deviceId,
+      counter: dot.counter,
+    });
+  };
+  for (const candidate of register?.candidates ?? []) {
+    candidate.context.forEach(observe);
+    observe(candidate.dot);
+  }
+  return [...context.values()].sort(compareDots);
 }
 
 export function compareRegisterCandidates(
@@ -126,7 +148,7 @@ export function compareRegisterCandidates(
   const clockOrder = compareHybridLogicalClocks(left.hlc, right.hlc);
   if (clockOrder !== 0) return clockOrder;
 
-  const deviceOrder = left.dot.deviceId.localeCompare(right.dot.deviceId);
+  const deviceOrder = compareStrings(left.dot.deviceId, right.dot.deviceId);
   if (deviceOrder !== 0) return deviceOrder;
   return left.dot.counter - right.dot.counter;
 }
@@ -150,11 +172,11 @@ export function selectRegisterWinner<T extends JsonValue>(
 export function mergeMultiValueRegisters<T extends JsonValue>(
   left: MultiValueRegister<T> | undefined,
   right: MultiValueRegister<T> | undefined,
-  leftVector: VersionVector,
-  rightVector: VersionVector,
 ): MultiValueRegister<T> | undefined {
   const leftCandidates = left?.candidates ?? [];
   const rightCandidates = right?.candidates ?? [];
+  const leftContext = registerCausalContext(left);
+  const rightContext = registerCausalContext(right);
   const leftByDot = new Map(leftCandidates.map((candidate) => [dotKey(candidate.dot), candidate]));
   const rightByDot = new Map(rightCandidates.map((candidate) => [dotKey(candidate.dot), candidate]));
   const candidates: RegisterCandidate<T>[] = [];
@@ -166,9 +188,15 @@ export function mergeMultiValueRegisters<T extends JsonValue>(
     if (leftCandidate && rightCandidate) {
       assertEquivalentCandidates(leftCandidate, rightCandidate);
       candidates.push(cloneCandidate(leftCandidate));
-    } else if (leftCandidate && !observesDot(rightVector, leftCandidate.dot)) {
+    } else if (
+      leftCandidate
+      && !rightContext.some((dot) => dotKey(dot) === dotKey(leftCandidate.dot))
+    ) {
       candidates.push(cloneCandidate(leftCandidate));
-    } else if (rightCandidate && !observesDot(leftVector, rightCandidate.dot)) {
+    } else if (
+      rightCandidate
+      && !leftContext.some((dot) => dotKey(dot) === dotKey(rightCandidate.dot))
+    ) {
       candidates.push(cloneCandidate(rightCandidate));
     }
   }

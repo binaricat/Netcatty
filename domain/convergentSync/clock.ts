@@ -6,8 +6,14 @@ import type {
 import { ConvergentSyncInvariantError } from './types';
 import { getOwnRecordValue, setOwnRecordValue } from './record';
 
+export function compareStrings(left: string, right: string): number {
+  if (left < right) return -1;
+  if (left > right) return 1;
+  return 0;
+}
+
 export function compareDots(left: Dot, right: Dot): number {
-  const deviceOrder = left.deviceId.localeCompare(right.deviceId);
+  const deviceOrder = compareStrings(left.deviceId, right.deviceId);
   return deviceOrder !== 0 ? deviceOrder : left.counter - right.counter;
 }
 

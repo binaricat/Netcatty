@@ -23,8 +23,8 @@ export interface HybridLogicalClock {
 
 interface RegisterCandidateBase {
   dot: Dot;
-  /** Causal context observed immediately before this dot was allocated. */
-  context: VersionVector;
+  /** Dots observed in this register before this candidate was written. */
+  context: Dot[];
   hlc: HybridLogicalClock;
 }
 

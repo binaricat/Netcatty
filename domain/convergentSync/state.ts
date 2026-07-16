@@ -1,4 +1,5 @@
 import {
+  compareStrings,
   dotKey,
   maxHybridLogicalClock,
   mergeVersionVectors,
@@ -11,6 +12,7 @@ import {
   compareRegisterCandidates,
   isTombstoneCandidate,
   mergeMultiValueRegisters,
+  registerCausalContext,
   registerHasConflict,
   selectRegisterWinner,
 } from './register';
@@ -66,11 +68,12 @@ function writeRegister<T extends JsonValue>(
   state: ConvergentSyncStateV2,
   deviceId: string,
   now: number,
+  currentRegister: MultiValueRegister<T> | undefined,
   value?: T,
   tombstone = false,
 ): MultiValueRegister<T> {
   requireNonEmpty(deviceId, 'Device ID');
-  const context = { ...state.vector };
+  const context = registerCausalContext(currentRegister);
   const currentCounter = getOwnRecordValue(state.vector, deviceId) ?? 0;
   if (currentCounter >= Number.MAX_SAFE_INTEGER) {
     throw new ConvergentSyncInvariantError(`Device counter exhausted for ${deviceId}`);
@@ -191,18 +194,23 @@ function applyEntityUpsert(
   for (const field of [...fieldNames].sort()) {
     requireNonEmpty(field, 'Entity field');
     const incoming = getOwnRecordValue(incomingFields, field);
+    const currentRegister = getOwnRecordValue(entity.fields, field);
     if (incoming === undefined) {
-      const winner = selectRegisterWinner(getOwnRecordValue(entity.fields, field));
+      const winner = selectRegisterWinner(currentRegister);
       if (winner && !isTombstoneCandidate(winner)) {
         setOwnRecordValue(
           entity.fields,
           field,
-          writeRegister(state, deviceId, now, undefined, true),
+          writeRegister(state, deviceId, now, currentRegister, undefined, true),
         );
         changed = true;
       }
-    } else if (!candidateValueEquals(getOwnRecordValue(entity.fields, field), incoming)) {
-      setOwnRecordValue(entity.fields, field, writeRegister(state, deviceId, now, incoming));
+    } else if (!candidateValueEquals(currentRegister, incoming)) {
+      setOwnRecordValue(
+        entity.fields,
+        field,
+        writeRegister(state, deviceId, now, currentRegister, incoming),
+      );
       changed = true;
     }
   }
@@ -211,14 +219,20 @@ function applyEntityUpsert(
     mutation.position !== undefined
     && !candidateValueEquals(entity.position, mutation.position)
   ) {
-    entity.position = writeRegister(state, deviceId, now, mutation.position);
+    entity.position = writeRegister(
+      state,
+      deviceId,
+      now,
+      entity.position,
+      mutation.position,
+    );
     changed = true;
   }
 
   if (changed) {
     // Refreshing presence makes a concurrent delete/update visible as an
     // MV-register conflict instead of allowing a deletion to hide the edit.
-    entity.presence = writeRegister(state, deviceId, now, true);
+    entity.presence = writeRegister(state, deviceId, now, entity.presence, true);
   }
 }
 
@@ -236,10 +250,11 @@ function applyEntityFieldMutation(
     throw new ConvergentSyncInvariantError('Entity IDs are structural and cannot be field registers');
   }
   const { entity } = ensureEntity(state, mutation.collection, mutation.entityId);
+  const currentRegister = getOwnRecordValue(entity.fields, mutation.field);
   setOwnRecordValue(entity.fields, mutation.field, mutation.kind === 'entity-field-delete'
-    ? writeRegister(state, deviceId, now, undefined, true)
-    : writeRegister(state, deviceId, now, mutation.value));
-  entity.presence = writeRegister(state, deviceId, now, true);
+    ? writeRegister(state, deviceId, now, currentRegister, undefined, true)
+    : writeRegister(state, deviceId, now, currentRegister, mutation.value));
+  entity.presence = writeRegister(state, deviceId, now, entity.presence, true);
 }
 
 function settingPathIsPrefix(prefix: string[], path: string[]): boolean {
@@ -272,7 +287,7 @@ function tombstoneRelatedSettingPaths(
     setOwnRecordValue(
       state.settings,
       otherEncodedPath,
-      writeRegister(state, deviceId, now, undefined, true),
+      writeRegister(state, deviceId, now, register, undefined, true),
     );
   }
 }
@@ -290,10 +305,18 @@ function writeSettingRegister(
   // they remove descendants without erasing an atomic ancestor when a caller
   // targets a path beneath it.
   tombstoneRelatedSettingPaths(state, deviceId, path, now, !tombstone);
+  const encodedPath = encodeSettingPath(path);
   setOwnRecordValue(
     state.settings,
-    encodeSettingPath(path),
-    writeRegister(state, deviceId, now, value, tombstone),
+    encodedPath,
+    writeRegister(
+      state,
+      deviceId,
+      now,
+      getOwnRecordValue(state.settings, encodedPath),
+      value,
+      tombstone,
+    ),
   );
 }
 
@@ -389,7 +412,14 @@ function applyMutation(
       break;
     case 'entity-delete': {
       const { entity } = ensureEntity(state, mutation.collection, mutation.entityId);
-      entity.presence = writeRegister(state, deviceId, now, undefined, true);
+      entity.presence = writeRegister(
+        state,
+        deviceId,
+        now,
+        entity.presence,
+        undefined,
+        true,
+      );
       break;
     }
     case 'setting-set':
@@ -418,19 +448,35 @@ function applyMutation(
         mutation.position !== undefined
         && !candidateValueEquals(entry.position, mutation.position)
       ) {
-        entry.position = writeRegister(state, deviceId, now, mutation.position);
+        entry.position = writeRegister(
+          state,
+          deviceId,
+          now,
+          entry.position,
+          mutation.position,
+        );
         changed = true;
       }
-      if (changed) entry.presence = writeRegister(state, deviceId, now, true);
+      if (changed) {
+        entry.presence = writeRegister(state, deviceId, now, entry.presence, true);
+      }
       break;
     }
     case 'string-entry-delete': {
       const { entry } = ensureStringEntry(state, mutation.collection, mutation.value);
-      entry.presence = writeRegister(state, deviceId, now, undefined, true);
+      entry.presence = writeRegister(
+        state,
+        deviceId,
+        now,
+        entry.presence,
+        undefined,
+        true,
+      );
       break;
     }
     case 'resolve-register': {
-      if (!getRegisterAtAddress(state, mutation.address)) {
+      const currentRegister = getRegisterAtAddress(state, mutation.address);
+      if (!currentRegister) {
         throw new ConvergentSyncInvariantError('Cannot resolve a register that does not exist');
       }
       if (mutation.tombstone && mutation.value !== undefined) {
@@ -457,6 +503,7 @@ function applyMutation(
           state,
           deviceId,
           now,
+          currentRegister,
           mutation.value,
           mutation.tombstone === true,
         ),
@@ -507,8 +554,6 @@ export function mergeConvergentSyncStates(
 ): ConvergentSyncStateV2 {
   assertValidConvergentSyncState(left);
   assertValidConvergentSyncState(right);
-  const leftVector = left.vector;
-  const rightVector = right.vector;
 
   const mergeRegister = <T extends JsonValue>(
     leftRegister: MultiValueRegister<T> | undefined,
@@ -516,8 +561,6 @@ export function mergeConvergentSyncStates(
   ): MultiValueRegister<T> | undefined => mergeMultiValueRegisters(
     leftRegister,
     rightRegister,
-    leftVector,
-    rightVector,
   );
 
   const collections = mergeRecord(
@@ -584,7 +627,7 @@ function comparePositions(
   if (typeof left === 'number' && typeof right === 'number') return left - right;
   if (typeof left === 'number') return -1;
   if (typeof right === 'number') return 1;
-  return left.localeCompare(right);
+  return compareStrings(left, right);
 }
 
 function materializedValue(register: MultiValueRegister | undefined): JsonValue | undefined {
@@ -685,7 +728,7 @@ function selectMaterializedSettingEntries(
     const candidateOrder = compareRegisterCandidates(right.winner, left.winner);
     return candidateOrder !== 0
       ? candidateOrder
-      : left.encodedPath.localeCompare(right.encodedPath);
+      : compareStrings(left.encodedPath, right.encodedPath);
   });
 
   for (const entry of prioritized) {
@@ -728,7 +771,7 @@ function recordSettingStructureConflicts(
   for (const rootPath of [...groups.keys()].sort()) {
     const group = groups.get(rootPath);
     if (!group || group.length < 2) continue;
-    group.sort((left, right) => left.encodedPath.localeCompare(right.encodedPath));
+    group.sort((left, right) => compareStrings(left.encodedPath, right.encodedPath));
     conflicts.push({
       address: {
         kind: 'setting-structure',
@@ -830,7 +873,7 @@ export function materializeConvergentSyncState(
       materializedEntities.push({ id: entityId, position, value });
     }
     materializedEntities.sort((left, right) =>
-      comparePositions(left.position, right.position) || left.id.localeCompare(right.id),
+      comparePositions(left.position, right.position) || compareStrings(left.id, right.id),
     );
     setOwnRecordValue(
       collections,
@@ -866,7 +909,7 @@ export function materializeConvergentSyncState(
       entries.push({ value, position });
     }
     entries.sort((left, right) =>
-      comparePositions(left.position, right.position) || left.value.localeCompare(right.value),
+      comparePositions(left.position, right.position) || compareStrings(left.value, right.value),
     );
     setOwnRecordValue(
       stringCollections,
@@ -876,7 +919,7 @@ export function materializeConvergentSyncState(
   }
 
   conflicts.sort((left, right) =>
-    addressSortKey(left.address).localeCompare(addressSortKey(right.address)),
+    compareStrings(addressSortKey(left.address), addressSortKey(right.address)),
   );
   return { collections, settings, stringCollections, conflicts };
 }

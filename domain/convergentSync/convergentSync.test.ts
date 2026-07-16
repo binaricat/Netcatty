@@ -435,21 +435,113 @@ test('candidate context can witness causally dominated vector counters', () => {
     value: 'light',
   }], BASE_TIME + 1);
 
-  assert.deepEqual(overwritten.settings['/theme'].candidates[0]?.context, {
-    'device-a': 1,
-  });
+  assert.deepEqual(overwritten.settings['/theme'].candidates[0]?.context, [{
+    deviceId: 'device-a',
+    counter: 1,
+  }]);
   assert.deepEqual(
     hydrateConvergentSyncState(serializeConvergentSyncState(overwritten)),
     overwritten,
   );
 });
 
-test('candidate metadata key order cannot change canonical serialization or merge identity', () => {
-  const state = applyConvergentMutations(createConvergentSyncState(), 'device-a', [{
+test('unrelated register context cannot witness an omitted register', () => {
+  const local = applyConvergentMutations(createConvergentSyncState(), 'device-a', [{
     kind: 'setting-set',
     path: ['theme'],
     value: 'dark',
   }], BASE_TIME);
+  const remote = applyConvergentMutations(local, 'device-b', [{
+    kind: 'setting-set',
+    path: ['terminal', 'fontSize'],
+    value: 14,
+  }], BASE_TIME + 1);
+  delete remote.settings['/theme'];
+
+  assert.deepEqual(
+    remote.settings['/terminal/fontSize'].candidates[0]?.context,
+    [],
+  );
+  assert.throws(
+    () => hydrateConvergentSyncState(JSON.stringify(remote)),
+    /vector\.device-a is not witnessed/,
+  );
+  assert.throws(
+    () => mergeConvergentSyncStates(local, remote),
+    /vector\.device-a is not witnessed/,
+  );
+});
+
+test('exact contexts detect missing dots between writes to the same register', () => {
+  const state = applyConvergentMutations(createConvergentSyncState(), 'device-a', [
+    { kind: 'setting-set', path: ['theme'], value: 'dark' },
+    { kind: 'setting-set', path: ['terminal', 'fontSize'], value: 14 },
+    { kind: 'setting-set', path: ['theme'], value: 'light' },
+  ], BASE_TIME);
+  const partial = JSON.parse(
+    serializeConvergentSyncState(state),
+  ) as ConvergentSyncStateV2;
+  delete partial.settings['/terminal/fontSize'];
+
+  assert.deepEqual(state.settings['/theme'].candidates[0]?.context, [{
+    deviceId: 'device-a',
+    counter: 1,
+  }]);
+  assert.throws(
+    () => hydrateConvergentSyncState(JSON.stringify(partial)),
+    /vector\.device-a is not witnessed/,
+  );
+});
+
+test('validation rejects a context dot retained in another register', () => {
+  const state = applyConvergentMutations(createConvergentSyncState(), 'device-a', [
+    { kind: 'setting-set', path: ['theme'], value: 'dark' },
+    { kind: 'setting-set', path: ['terminal', 'fontSize'], value: 14 },
+  ], BASE_TIME);
+  const corrupted = JSON.parse(
+    serializeConvergentSyncState(state),
+  ) as ConvergentSyncStateV2;
+  corrupted.settings['/terminal/fontSize'].candidates[0].context = [{
+    ...corrupted.settings['/theme'].candidates[0].dot,
+  }];
+
+  assert.throws(
+    () => hydrateConvergentSyncState(JSON.stringify(corrupted)),
+    /references dot device-a:1 retained in another register/,
+  );
+});
+
+test('candidate ordering uses locale-independent code-unit comparison', () => {
+  const ascii = applyConvergentMutations(createConvergentSyncState(), 'device-z', [{
+    kind: 'setting-set',
+    path: ['theme'],
+    value: 'ascii',
+  }], BASE_TIME);
+  const nonAscii = applyConvergentMutations(createConvergentSyncState(), 'device-ä', [{
+    kind: 'setting-set',
+    path: ['theme'],
+    value: 'non-ascii',
+  }], BASE_TIME);
+  const merged = mergeConvergentSyncStates(ascii, nonAscii);
+
+  assert.deepEqual(
+    merged.settings['/theme'].candidates.map((candidate) => candidate.dot.deviceId),
+    ['device-z', 'device-ä'],
+  );
+  assert.equal(materializeConvergentSyncState(merged).settings.theme, 'non-ascii');
+});
+
+test('candidate metadata key order cannot change canonical serialization or merge identity', () => {
+  const first = applyConvergentMutations(createConvergentSyncState(), 'device-a', [{
+    kind: 'setting-set',
+    path: ['theme'],
+    value: 'dark',
+  }], BASE_TIME);
+  const state = applyConvergentMutations(first, 'device-b', [{
+    kind: 'setting-set',
+    path: ['theme'],
+    value: 'light',
+  }], BASE_TIME + 1);
   const reordered = JSON.parse(
     serializeConvergentSyncState(state),
   ) as ConvergentSyncStateV2;
@@ -461,6 +553,10 @@ test('candidate metadata key order cannot change canonical serialization or merg
   candidate.hlc = {
     logical: candidate.hlc.logical,
     wallTime: candidate.hlc.wallTime,
+  };
+  candidate.context[0] = {
+    counter: candidate.context[0].counter,
+    deviceId: candidate.context[0].deviceId,
   };
   reordered.hlc = {
     logical: reordered.hlc.logical,
@@ -511,9 +607,8 @@ test('hydration fails closed when a dot is reused by two registers', () => {
   corrupted.settings['/b'].candidates[0].dot = {
     ...corrupted.settings['/a'].candidates[0].dot,
   };
-  corrupted.settings['/b'].candidates[0].context = {
-    ...corrupted.settings['/a'].candidates[0].context,
-  };
+  corrupted.settings['/b'].candidates[0].context =
+    corrupted.settings['/a'].candidates[0].context.map((dot) => ({ ...dot }));
 
   assert.throws(
     () => hydrateConvergentSyncState(JSON.stringify(corrupted)),
