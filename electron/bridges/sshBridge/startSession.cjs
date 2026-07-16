@@ -1052,6 +1052,12 @@ function createStartSessionApi(ctx) {
             let firstSuccessfulMethod = null;
             // Track if we've gone through a partialSuccess flow (multi-step auth)
             let hadPartialSuccess = false;
+            // Some EDR servers advertise keyboard-interactive next to password,
+            // then remove it after a rejected password request. The wrapper can
+            // recover by retrying once with the password method omitted so the
+            // login password flows through keyboard-interactive.
+            let passwordAttemptSawKeyboardInteractive = false;
+            let shouldRetryKeyboardInteractiveFirst = false;
 
             connectOpts.authHandler = (methodsLeft, partialSuccess, callback) => {
               log("authHandler called", { methodsLeft, partialSuccess, attemptedMethodIds: Array.from(attemptedMethodIds) });
@@ -1059,6 +1065,17 @@ function createStartSessionApi(ctx) {
               // Log rejection of previous method
               if (lastTriedMethod && !partialSuccess) {
                 sendProgress(totalHops, totalHops, options.hostname, 'auth-attempt', `${lastTriedMethod} rejected`);
+                if (
+                  lastTriedMethod === "password" &&
+                  passwordAttemptSawKeyboardInteractive &&
+                  Array.isArray(methodsLeft) &&
+                  !methodsLeft.includes("keyboard-interactive")
+                ) {
+                  shouldRetryKeyboardInteractiveFirst = true;
+                  log("password rejection removed keyboard-interactive; scheduling KI-first retry", {
+                    methodsLeft,
+                  });
+                }
                 if (lastTriedMethod !== "none") {
                   failedMethodIds.add(lastTriedMethod);
                 }
@@ -1224,6 +1241,7 @@ function createStartSessionApi(ctx) {
                 } else if (method.type === "password") {
                   log("Trying password auth", { id: method.id });
                   sendProgress(totalHops, totalHops, options.hostname, 'auth-attempt', 'password');
+                  passwordAttemptSawKeyboardInteractive = availableMethods.includes("keyboard-interactive");
                   return callback({
                     type: "password",
                     username: connectOpts.username,
@@ -1254,6 +1272,7 @@ function createStartSessionApi(ctx) {
               }
               return lastTriedMethod;
             };
+            connectOpts._shouldRetryKeyboardInteractiveFirst = () => shouldRetryKeyboardInteractiveFirst;
           }
         }
 
@@ -1525,6 +1544,17 @@ function createStartSessionApi(ctx) {
 
             // Clear cached auth method on auth failure so next attempt tries all methods
             if (isAuthError) {
+              if (
+                !options._skipPasswordMethod &&
+                connectOpts.password &&
+                connectOpts._shouldRetryKeyboardInteractiveFirst?.()
+              ) {
+                err.retryKeyboardInteractiveFirst = true;
+                log("auth failure marked for KI-first retry", {
+                  sessionId,
+                  hostname: options.hostname,
+                });
+              }
               clearCachedAuthMethod(connectOpts.username, options.hostname, options.port);
               console.log(`${logPrefix} ${options.hostname} auth failed:`, err.message);
               log("authentication failed", {

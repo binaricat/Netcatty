@@ -1109,6 +1109,7 @@ async function startSSHSessionWrapper(event, options) {
   let loadedRetryableEncryptedKeys = false;
   let shouldSuppressInitialAuthExit = false;
   const canRetryEncryptedDefaults = canRetryWithEncryptedDefaultKeys(options);
+  const canRetryKeyboardInteractiveFirst = Boolean(options.password && !options._skipPasswordMethod);
   const mayReuseExistingSession = canRetryEncryptedDefaults && canReuseExistingSession(options);
   const loadRetryableEncryptedKeys = async () => {
     const allKeysWithEncrypted = await findAllDefaultPrivateKeysFromHelper({ includeEncrypted: true });
@@ -1119,11 +1120,13 @@ async function startSSHSessionWrapper(event, options) {
 
   if (canRetryEncryptedDefaults && !mayReuseExistingSession) {
     await loadRetryableEncryptedKeys();
-    shouldSuppressInitialAuthExit = retryableEncryptedKeys.length > 0;
+    shouldSuppressInitialAuthExit = retryableEncryptedKeys.length > 0 || canRetryKeyboardInteractiveFirst;
   } else if (mayReuseExistingSession) {
     // Let Copy Tab reuse an authenticated transport without waiting on key
     // discovery. If reuse falls back to a fresh connection and auth fails, the
     // catch path below lazily loads encrypted keys before deciding final failure.
+    shouldSuppressInitialAuthExit = true;
+  } else if (canRetryKeyboardInteractiveFirst) {
     shouldSuppressInitialAuthExit = true;
   }
 
@@ -1136,6 +1139,34 @@ async function startSSHSessionWrapper(event, options) {
     const isAuthError = isStartAuthError(err);
 
     if (isAuthError) {
+      if (canRetryKeyboardInteractiveFirst && err.retryKeyboardInteractiveFirst) {
+        console.log('[SSH] Password auth removed keyboard-interactive; retrying with keyboard-interactive first...');
+        try {
+          return await startSSHSession(event, {
+            ...options,
+            _skipPasswordMethod: true,
+          });
+        } catch (retryErr) {
+          const isRetryAuthError = isStartAuthError(retryErr);
+          if (isRetryAuthError) {
+            const authError = new Error(retryErr.message);
+            authError.level = 'client-authentication';
+            authError.isAuthError = true;
+            if (retryErr.isJumpHostAuthError) {
+              authError.isJumpHostAuthError = true;
+              authError.jumpHostIndex = retryErr.jumpHostIndex;
+              authError.jumpHostLabel = retryErr.jumpHostLabel;
+              authError.jumpHostHostname = retryErr.jumpHostHostname;
+            }
+            throw authError;
+          }
+          const connError = new Error(retryErr.message);
+          connError.level = retryErr.level || 'client-socket';
+          connError.code = retryErr.code;
+          throw connError;
+        }
+      }
+
       // Check if there are encrypted default keys we haven't tried yet
       // Only offer retry if no unlocked keys were provided in this attempt
       if (

@@ -755,6 +755,21 @@ test("buildAuthHandler prefers password over keyboard-interactive by default", (
   assert.deepEqual(offered, ["none", "password"]);
 });
 
+test("buildAuthHandler skipPasswordMethod retries keyboard-interactive before password", () => {
+  const auth = buildAuthHandler({
+    authMethod: "password",
+    username: "alice",
+    password: "login-password",
+    skipPasswordMethod: true,
+  });
+
+  const offered = [];
+  auth.authHandler(null, null, (method) => offered.push(method));
+  auth.authHandler(["publickey", "password", "keyboard-interactive"], false, (method) => offered.push(method));
+
+  assert.deepEqual(offered, ["none", "keyboard-interactive"]);
+});
+
 test("buildAuthHandler prefers keyboard-interactive after partial success without host MFA flag", () => {
   const auth = buildAuthHandler({
     authMethod: "password",
