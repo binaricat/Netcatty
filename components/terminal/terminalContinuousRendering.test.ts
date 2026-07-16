@@ -33,11 +33,11 @@ test("inactive terminal surfaces remain painted and non-interactive without hibe
 test("background split workspaces keep their live geometry without hibernate", () => {
   assert.match(
     tabBridgeSource,
-    /keepHiddenWorkspacesLaidOut: !hibernateHiddenTabs/,
+    /shouldKeepHiddenWorkspaceLaidOut/,
   );
   assert.match(
     workspaceLayoutSource,
-    /if \(keepHiddenWorkspacesLaidOut\) \{[\s\S]*cachedSizeIsUsable[\s\S]*computeWorkspaceRects\(layoutWorkspace, layoutSize\)/,
+    /if \(shouldKeepHiddenWorkspaceLaidOut\(workspace\)\) \{[\s\S]*cachedSizeIsUsable[\s\S]*computeWorkspaceRects\(layoutWorkspace, layoutSize\)/,
   );
   assert.match(
     supportSource,

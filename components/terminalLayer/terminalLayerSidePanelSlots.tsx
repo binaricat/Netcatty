@@ -8,7 +8,7 @@ import {
   subscribeSidePanelLiveSnapshot,
 } from '../../application/state/sidePanelLiveStore';
 import { resolveTerminalFontFamilyId } from '../../infrastructure/config/fonts';
-import type { Host } from '../../types';
+import type { Host, TerminalSession } from '../../types';
 import { SystemManagerSidePanel } from '../systemManager/SystemManagerSidePanel';
 import { resolveSftpFollowTerminalCwdTargetHost } from '../sftp/sftpFollowTerminalCwd';
 import { AI_PANEL_FORCE_HIDE_SHELL } from '../ai/aiPanelDiagnostics';
@@ -192,7 +192,14 @@ function SidePanelSystemSlotInner({
   const panelSelected = sidePanelTab === 'system';
   const isVisible = isTabActive && panelSelected;
   const hibernateHiddenTabs = Boolean(ctx.hibernateHiddenTabs);
-  const keepSystemWorkActive = panelSelected && (!hibernateHiddenTabs || isTabActive);
+  const sessions = ctx.sessions as TerminalSession[];
+  const sessionHostsMap = ctx.sessionHostsMap as Map<string, Host>;
+  const tabContainsLocalTerminal = sessions.some((session) => (
+    (session.id === tabId || session.workspaceId === tabId)
+    && sessionHostsMap.get(session.id)?.protocol === 'local'
+  ));
+  const keepSystemWorkActive = panelSelected
+    && (!hibernateHiddenTabs || isTabActive || tabContainsLocalTerminal);
   const live = useSidePanelLiveSnapshotForTab(tabId, keepSystemWorkActive);
 
   const {

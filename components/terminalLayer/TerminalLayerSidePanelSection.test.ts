@@ -101,10 +101,11 @@ test('notes side panel forwards repeated open-note requests', () => {
   assert.match(slotsSource, /openNoteRequestId=\{openNoteRequest\?\.requestId \?\? null\}/);
 });
 
-test('system monitoring keeps running on background tabs unless tab hibernation is enabled', () => {
+test('system monitoring only pauses for hidden remote tabs when hibernation is enabled', () => {
   const source = readFileSync(new URL('./terminalLayerSidePanelSlots.tsx', import.meta.url), 'utf8');
 
-  assert.match(source, /const keepSystemWorkActive = panelSelected && \(!hibernateHiddenTabs \|\| isTabActive\)/);
+  assert.match(source, /const tabContainsLocalTerminal = sessions\.some/);
+  assert.match(source, /!hibernateHiddenTabs \|\| isTabActive \|\| tabContainsLocalTerminal/);
   assert.match(source, /useSidePanelLiveSnapshotForTab\(tabId, keepSystemWorkActive\)/);
   assert.match(source, /isVisible=\{keepSystemWorkActive\}/);
 });

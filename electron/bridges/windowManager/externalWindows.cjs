@@ -64,7 +64,6 @@ function createExternalWindowApi(ctx) {
           nodeIntegration: false,
           sandbox: true,
           webSecurity: true,
-          backgroundThrottling: false,
           // Isolated session so users' browsing does not mix with main app state.
           partition: "persist:netcatty-fallback-browser",
         },
@@ -280,7 +279,6 @@ function createExternalWindowApi(ctx) {
               nodeIntegration: false,
               // Sandboxed because this window renders remote content and does not need a preload bridge.
               sandbox: true,
-              backgroundThrottling: false,
               v8CacheOptions: V8_CACHE_OPTIONS,
             },
           },

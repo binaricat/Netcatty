@@ -9,28 +9,28 @@ function read(relativePath) {
   return readFileSync(path.join(root, relativePath), 'utf8');
 }
 
-test('Netcatty windows do not throttle work while hidden or unfocused', () => {
+test('terminal windows do not throttle work while hidden or unfocused', () => {
   const windowSources = [
     'bridges/windowManager/mainWindow.cjs',
     'bridges/windowManager/terminalPopupWindow.cjs',
-    'bridges/windowManager/settingsWindow.cjs',
-    'bridges/windowManager/externalWindows.cjs',
-    'bridges/globalShortcutBridge.cjs',
   ];
 
   for (const relativePath of windowSources) {
     const source = read(relativePath);
     assert.match(source, /webPreferences:\s*\{[\s\S]*?backgroundThrottling:\s*false/, relativePath);
   }
-
-  const externalWindowsSource = read('bridges/windowManager/externalWindows.cjs');
-  assert.equal(externalWindowsSource.match(/backgroundThrottling:\s*false/g)?.length, 2);
 });
 
-test('the app asks the operating system not to suspend background work', () => {
-  const source = read('main.cjs');
+test('non-terminal windows and the app itself do not block ordinary power saving', () => {
+  const sources = [
+    'main.cjs',
+    'bridges/windowManager/settingsWindow.cjs',
+    'bridges/windowManager/externalWindows.cjs',
+    'bridges/globalShortcutBridge.cjs',
+  ];
 
-  assert.match(source, /powerSaveBlocker/);
-  assert.match(source, /powerSaveBlocker\.start\(['"]prevent-app-suspension['"]\)/);
-  assert.match(source, /powerSaveBlocker\.stop\(/);
+  for (const relativePath of sources) {
+    const source = read(relativePath);
+    assert.doesNotMatch(source, /backgroundThrottling:\s*false|powerSaveBlocker/, relativePath);
+  }
 });

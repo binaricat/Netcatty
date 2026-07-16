@@ -221,11 +221,10 @@ export const SystemOverviewTab = memo(function SystemOverviewTab({
     refresh,
   } = useServerStats({
     sessionId,
-    enabled: true,
+    enabled: isVisible,
     refreshInterval: refreshIntervalSec,
     isSupportedOs,
     isConnected: true,
-    isVisible,
   });
   const hasStats = Boolean(stats.lastUpdated);
 

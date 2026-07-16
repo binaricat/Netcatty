@@ -2,6 +2,7 @@
 import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { ChevronsLeft, GripVertical, X as XIcon } from 'lucide-react';
 
+import { shouldKeepTerminalBackgroundWorkActive } from '../../domain/terminalHibernate';
 import { OSC7_SETUP_TARGETS } from './osc7Setup';
 import PasswordCredentialPicker from './PasswordCredentialPicker';
 import { TerminalServerStats } from './TerminalServerStats';
@@ -507,11 +508,14 @@ function TerminalViewInner({ ctx }: { ctx: TerminalViewContext }) {
                 {showHostInfoBar && !compactToolbar && (
                   <TerminalServerStats
                     sessionId={sessionId}
-                    enabled={terminalSettings?.showServerStats ?? true}
+                    enabled={(terminalSettings?.showServerStats ?? true) && shouldKeepTerminalBackgroundWorkActive(
+                      terminalSettings,
+                      host.protocol,
+                      isVisible,
+                    )}
                     refreshInterval={terminalSettings?.serverStatsRefreshInterval ?? 5}
                     isSupportedOs={isSupportedOs}
                     isConnected={status === 'connected'}
-                    isVisible={isVisible}
                   />
                 )}
                 {showHostInfoBar && <div className="flex-1 min-w-0" />}

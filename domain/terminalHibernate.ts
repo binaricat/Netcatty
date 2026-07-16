@@ -43,6 +43,14 @@ export function resolveTerminalHibernateEnabledForProtocol(
   return protocol !== "local" && resolveTerminalHibernateEnabled(settings);
 }
 
+export function shouldKeepTerminalBackgroundWorkActive(
+  settings: Pick<TerminalSettings, "hibernateHiddenTabs"> | null | undefined,
+  protocol: string | null | undefined,
+  isVisible: boolean,
+): boolean {
+  return isVisible || !resolveTerminalHibernateEnabledForProtocol(settings, protocol);
+}
+
 /** Block hibernate while a file transfer or drag-drop session is in progress. */
 export function isTerminalFileTransferActive(options: {
   zmodemActive: boolean;

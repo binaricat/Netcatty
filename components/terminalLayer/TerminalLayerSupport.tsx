@@ -1597,10 +1597,7 @@ const terminalPanesHostPropsAreEqual = (
 
   if (prev.workspaceRectsById === next.workspaceRectsById) return true;
 
-  const hasLocalTerminal = next.sessions.some(
-    (session) => next.sessionHostsMap.get(session.id)?.protocol === 'local',
-  );
-  if (!resolveTerminalHibernateEnabled(next.terminalSettings) || hasLocalTerminal) {
+  if (!resolveTerminalHibernateEnabled(next.terminalSettings)) {
     return prev.sessions.every((session) => workspaceRectsEqual(
       getPaneWorkspaceRect({ session, workspaceRectsById: prev.workspaceRectsById }),
       getPaneWorkspaceRect({ session, workspaceRectsById: next.workspaceRectsById }),
@@ -1609,10 +1606,12 @@ const terminalPanesHostPropsAreEqual = (
 
   const activeTabId = activeTabStore.getActiveTabId();
   const activeWorkspace = activeTabId ? next.workspaceById.get(activeTabId) : undefined;
-  if (!activeWorkspace || activeWorkspace.viewMode === 'focus') return true;
 
   return prev.sessions.every((session) => {
-    if (session.workspaceId !== activeWorkspace.id) return true;
+    const isLocalTerminal = next.sessionHostsMap.get(session.id)?.protocol === 'local';
+    const isInVisibleSplitWorkspace = activeWorkspace?.viewMode !== 'focus'
+      && session.workspaceId === activeWorkspace?.id;
+    if (!isLocalTerminal && !isInVisibleSplitWorkspace) return true;
     return workspaceRectsEqual(
       getPaneWorkspaceRect({ session, workspaceRectsById: prev.workspaceRectsById }),
       getPaneWorkspaceRect({ session, workspaceRectsById: next.workspaceRectsById }),

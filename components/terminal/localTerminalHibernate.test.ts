@@ -17,6 +17,7 @@ test("local terminals stay out of hibernate and hidden-renderer paths", () => {
   assert.match(terminalSource, /hibernateEnabled: hibernateEnabled/);
   assert.match(effectsSource, /resolveTerminalHibernateEnabledForProtocol\(terminalSettings, host\.protocol\)/);
   assert.match(layerSupportSource, /resolveTerminalHibernateEnabledForProtocol\(terminalSettings, host\.protocol\)/);
-  assert.match(layerBridgeSource, /const hasLocalTerminal = sessions\.some\(/);
+  assert.match(layerBridgeSource, /const localWorkspaceIds = useMemo\(\(\) => new Set\(/);
+  assert.match(layerBridgeSource, /!hibernateHiddenTabs \|\| localWorkspaceIds\.has\(workspace\.id\)/);
   assert.match(layerViewSource, /ctx\.hibernateHiddenTabs/);
 });

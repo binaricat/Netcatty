@@ -54,7 +54,7 @@ try {
   electronModule = require("electron");
 }
 
-const { app, BrowserWindow, Menu, protocol, shell, clipboard, session, ipcMain, powerSaveBlocker } = electronModule || {};
+const { app, BrowserWindow, Menu, protocol, shell, clipboard, session, ipcMain } = electronModule || {};
 if (!app || !BrowserWindow) {
   throw new Error("Failed to load Electron runtime. Ensure the app is launched with the Electron binary.");
 }
@@ -62,7 +62,6 @@ if (!app || !BrowserWindow) {
 const path = require("node:path");
 const os = require("node:os");
 const fs = require("node:fs");
-let backgroundWorkBlockerId = null;
 const { getCliDiscoveryFilePath } = require("./cli/discoveryPath.cjs");
 const {
   SSH_DEEP_LINK_CHANNEL,
@@ -921,14 +920,6 @@ if (!gotLock) {
 
   // Application lifecycle
   app.whenReady().then(() => {
-    try {
-      if (powerSaveBlocker?.start) {
-        backgroundWorkBlockerId = powerSaveBlocker.start('prevent-app-suspension');
-      }
-    } catch (err) {
-      console.warn('[Main] Failed to prevent background app suspension:', err);
-    }
-
     registerAppProtocol();
     const initialSshDeepLinkPreference = applyInitialSshDeepLinkPreference({
       enabled: sshDeepLinkEnabled,
@@ -1256,14 +1247,6 @@ if (!gotLock) {
 
   // Cleanup all PTY sessions and port forwarding tunnels before quitting
   app.on("will-quit", () => {
-    try {
-      if (backgroundWorkBlockerId !== null && powerSaveBlocker?.isStarted?.(backgroundWorkBlockerId)) {
-        powerSaveBlocker.stop(backgroundWorkBlockerId);
-      }
-      backgroundWorkBlockerId = null;
-    } catch (err) {
-      console.warn("Error while releasing background work blocker:", err);
-    }
     try {
       sessionLogStreamManager.cleanupAll();
     } catch (err) {

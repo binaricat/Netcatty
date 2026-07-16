@@ -26,7 +26,7 @@ interface UseTerminalWorkspaceLayoutOptions {
   activeSession: TerminalSession | undefined;
   activeWorkspace: Workspace | undefined;
   isFocusMode: boolean;
-  keepHiddenWorkspacesLaidOut: boolean;
+  shouldKeepHiddenWorkspaceLaidOut: (workspace: Workspace) => boolean;
   onAddSessionToWorkspace: (workspaceId: string, sessionId: string, hint: Exclude<SplitHint, null>) => void;
   onCreateWorkspaceFromSessions: (baseSessionId: string, joiningSessionId: string, hint: Exclude<SplitHint, null>) => void;
   onSetDraggingSessionId: (id: string | null) => void;
@@ -39,7 +39,7 @@ export function useTerminalWorkspaceLayout({
   activeSession,
   activeWorkspace,
   isFocusMode,
-  keepHiddenWorkspacesLaidOut,
+  shouldKeepHiddenWorkspaceLaidOut,
   onAddSessionToWorkspace,
   onCreateWorkspaceFromSessions,
   onSetDraggingSessionId,
@@ -152,8 +152,8 @@ export function useTerminalWorkspaceLayout({
           }
         }
 
-        if (keepHiddenWorkspacesLaidOut) {
-          for (const workspace of workspaces) {
+        for (const workspace of workspaces) {
+          if (shouldKeepHiddenWorkspaceLaidOut(workspace)) {
             if (workspace.id === activeWorkspace?.id) continue;
             const layoutWorkspace = workspaceForLayout(workspace);
             const previewKey = resizing?.workspaceId === workspace.id
@@ -218,7 +218,7 @@ export function useTerminalWorkspaceLayout({
         map.set(workspace.id, rects);
         return map;
       },
-      [activeWorkspace, computeWorkspaceRects, keepHiddenWorkspacesLaidOut, resizePreviewDelta, resizing, workspaceArea, workspaceForLayout, workspaces],
+      [activeWorkspace, computeWorkspaceRects, resizePreviewDelta, resizing, shouldKeepHiddenWorkspaceLaidOut, workspaceArea, workspaceForLayout, workspaces],
     );
   
   const activeWorkspaceRects = useMemo<Record<string, WorkspaceRect>>(
