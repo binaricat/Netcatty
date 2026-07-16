@@ -13,7 +13,7 @@ const layerEffectsSource = readFileSync(new URL("../terminalLayer/useTerminalLay
 test("renderer activity follows the hibernate setting instead of active-tab visibility", () => {
   assert.match(
     terminalSource,
-    /const isRendererActive = isVisible \|\| !resolveTerminalHibernateEnabled\(terminalSettings\)/,
+    /const isRendererActive = isVisible \|\| !hibernateEnabled/,
   );
   assert.match(terminalSource, /isVisibleRef: isRendererActiveRef/);
   assert.match(terminalSource, /if \(!isRendererActiveRef\.current && !options\?\.allowHidden\)/);
@@ -24,9 +24,9 @@ test("renderer activity follows the hibernate setting instead of active-tab visi
 });
 
 test("inactive terminal surfaces remain painted and non-interactive without hibernate", () => {
-  assert.match(supportSource, /resolveTerminalHibernateEnabled\(terminalSettings\)/);
+  assert.match(supportSource, /resolveTerminalHibernateEnabledForProtocol\(terminalSettings, host\.protocol\)/);
   assert.match(supportSource, /inert=\{isVisible \? undefined : true\}/);
-  assert.match(viewSource, /resolveTerminalHibernateEnabled\(ctx\.terminalSettings\)/);
+  assert.match(viewSource, /ctx\.hibernateHiddenTabs/);
   assert.match(viewSource, /inert=\{ctx\.isTerminalLayerVisible \? undefined : true\}/);
 });
 

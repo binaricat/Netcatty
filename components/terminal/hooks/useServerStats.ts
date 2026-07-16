@@ -56,7 +56,6 @@ interface UseServerStatsOptions {
   refreshInterval: number;    // Refresh interval in seconds
   isSupportedOs: boolean;     // Only collect stats for Linux/macOS servers
   isConnected: boolean;       // Only collect when connected
-  isVisible: boolean;         // Pause background polling for hidden terminals
 }
 
 interface ServerStatsState {
@@ -70,7 +69,6 @@ interface ServerStatsClient {
   refreshInterval: number;
   isSupportedOs: boolean;
   isConnected: boolean;
-  isVisible: boolean;
 }
 
 type ServerStatsListener = (state: ServerStatsState) => void;
@@ -200,10 +198,6 @@ function getActiveServerStatsClients(session: SharedServerStatsSession): ServerS
   ));
 }
 
-function getVisibleServerStatsClients(session: SharedServerStatsSession): ServerStatsClient[] {
-  return getActiveServerStatsClients(session).filter((client) => client.isVisible);
-}
-
 function normalizeServerStats(stats: Partial<ServerStats>): ServerStats {
   return {
     hostname: stats.hostname,
@@ -253,7 +247,6 @@ async function fetchSharedServerStats(session: SharedServerStatsSession, force =
   }
   if (session.givenUp && !force) return;
   if (getActiveServerStatsClients(session).length === 0) return;
-  if (!force && getVisibleServerStatsClients(session).length === 0) return;
 
   const bridge = netcattyBridge.get();
   if (!bridge?.getServerStats) return;
@@ -271,7 +264,7 @@ async function fetchSharedServerStats(session: SharedServerStatsSession, force =
     try {
       const result = await bridge.getServerStats(session.sessionId);
 
-      // Discard stale responses from before a hide/show cycle or reconnect.
+      // Discard stale responses from before a polling restart or reconnect.
       if (generation !== session.fetchGeneration) return;
 
       if (result.pending) {
@@ -326,40 +319,15 @@ function reconcileSharedServerStatsSession(session: SharedServerStatsSession): v
     session.connectedAt = Date.now();
   }
 
-  const visibleClients = activeClients.filter((client) => client.isVisible);
-  if (visibleClients.length === 0) {
-    clearServerStatsTimers(session);
-    session.fetchGeneration += 1;
-    return;
-  }
-
-  const intervalMs = Math.max(5, Math.min(...visibleClients.map((client) => client.refreshInterval))) * 1000;
+  const intervalMs = Math.max(5, Math.min(...activeClients.map((client) => client.refreshInterval))) * 1000;
   const shouldRestartPolling = !session.pollingActive || session.pollIntervalMs !== intervalMs;
   if (!shouldRestartPolling) return;
   if (session.givenUp) return;
 
-  const wasPolling = session.pollingActive;
   clearServerStatsTimers(session);
   session.fetchGeneration += 1;
   session.pollingActive = true;
   session.pollIntervalMs = intervalMs;
-
-  // When resuming from hidden, reset delta-based network stats so the first
-  // visible sample does not show throughput averaged across the hidden time.
-  if (session.hasFetched && !wasPolling) {
-    updateServerStatsState(session, {
-      stats: {
-        ...session.state.stats,
-        netRxSpeed: 0,
-        netTxSpeed: 0,
-        netInterfaces: session.state.stats.netInterfaces.map((iface) => ({
-          ...iface,
-          rxSpeed: 0,
-          txSpeed: 0,
-        })),
-      },
-    });
-  }
 
   const connectionAge = Date.now() - session.connectedAt;
   const needsWarmup = !session.hasFetched && connectionAge < 2000;
@@ -386,7 +354,6 @@ export function useServerStats({
   refreshInterval,
   isSupportedOs,
   isConnected,
-  isVisible,
 }: UseServerStatsOptions) {
   const clientIdRef = useRef<number | null>(null);
   if (clientIdRef.current === null) {
@@ -426,11 +393,10 @@ export function useServerStats({
       refreshInterval,
       isSupportedOs,
       isConnected,
-      isVisible,
     });
     setState(session.state);
     reconcileSharedServerStatsSession(session);
-  }, [sessionId, enabled, refreshInterval, isSupportedOs, isConnected, isVisible]);
+  }, [sessionId, enabled, refreshInterval, isSupportedOs, isConnected]);
 
   const refresh = useCallback(() => {
     const session = getSharedServerStatsSession(sessionId);

@@ -189,8 +189,11 @@ function SidePanelSystemSlotInner({
   const isTabActive = useIsTabActive(tabId);
   const sidePanelOpenTabs = ctx.sidePanelOpenTabs as Map<string, SidePanelTab>;
   const sidePanelTab = useSidePanelTabType(tabId, sidePanelOpenTabs);
-  const isVisible = isTabActive && sidePanelTab === 'system';
-  const live = useSidePanelLiveSnapshotForTab(tabId, isTabActive);
+  const panelSelected = sidePanelTab === 'system';
+  const isVisible = isTabActive && panelSelected;
+  const hibernateHiddenTabs = Boolean(ctx.hibernateHiddenTabs);
+  const keepSystemWorkActive = panelSelected && (!hibernateHiddenTabs || isTabActive);
+  const live = useSidePanelLiveSnapshotForTab(tabId, keepSystemWorkActive);
 
   const {
     refocusActiveTerminalSession,
@@ -205,7 +208,7 @@ function SidePanelSystemSlotInner({
         session={live.activeTerminalSessionForSystem ?? null}
         sessionHost={live.activeSystemSessionHost ?? null}
         showWorkspaceHostHeader={isVisible && !!live.activeWorkspace}
-        isVisible={isVisible}
+        isVisible={keepSystemWorkActive}
         terminalSettings={terminalSettings}
         snippets={snippets}
         onRequestTerminalFocus={refocusActiveTerminalSession}

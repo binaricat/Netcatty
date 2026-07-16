@@ -149,6 +149,7 @@ function createSettingsWindowApi(ctx) {
           contextIsolation: true,
           nodeIntegration: false,
           sandbox: false,
+          backgroundThrottling: false,
           v8CacheOptions: V8_CACHE_OPTIONS,
         },
       });

@@ -296,7 +296,7 @@ export const getTerminalOutputPressure = (
  */
 export const shouldDegradeTerminalSideWork = (term: XTerm): boolean => {
   const pressure = getTerminalOutputPressure(term);
-  return pressure.background || pressure.largeOutput || pressure.longLine;
+  return pressure.largeOutput || pressure.longLine;
 };
 
 /**

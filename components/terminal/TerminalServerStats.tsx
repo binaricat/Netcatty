@@ -7,7 +7,6 @@ import { HoverCard, HoverCardContent, HoverCardTrigger } from '../ui/hover-card'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 import { formatNetSpeed } from './terminalHelpers';
 import { useServerStats } from './hooks/useServerStats';
-import { usePaneVisible } from './paneVisibilityStore';
 
 interface TerminalServerStatsProps {
   sessionId: string;
@@ -38,14 +37,12 @@ export const TerminalServerStats: React.FC<TerminalServerStatsProps> = ({
   isConnected,
 }) => {
   const { t } = useI18n();
-  const isVisible = usePaneVisible(sessionId);
   const { stats: serverStats } = useServerStats({
     sessionId,
     enabled,
     refreshInterval,
     isSupportedOs,
     isConnected,
-    isVisible,
   });
   const hasNetworkDetails = serverStats.netInterfaces.length > 0;
   const hasLatency = serverStats.latencyMs !== null;

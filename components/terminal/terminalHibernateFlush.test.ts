@@ -80,7 +80,7 @@ test("full hibernate rechecks live state after every asynchronous step", () => {
   const releaseIndex = body.indexOf("releaseTerminalFlowBeforeHibernate(terminalBackend, term, backendId)");
 
   assert.match(body, /!isVisibleRef\.current/);
-  assert.match(body, /resolveTerminalHibernateEnabled\(terminalSettingsRef\.current\)/);
+  assert.match(body, /hibernateEnabledRef\.current/);
   assert.match(body, /termRef\.current === term/);
   assert.match(body, /sessionRef\.current === backendId/);
   assert.ok(flushIndex < afterFlushGuardIndex, "visibility and settings must be rechecked after draining output");

@@ -63,3 +63,20 @@ test('cancelTerminalThemeUpdate drops a pending hidden-pane theme flush', async 
   appliedThemeId = fakeTerm.options.theme.background ?? null;
   assert.equal(appliedThemeId, null);
 });
+
+test('hidden terminal theme updates do not wait for browser idle time', async () => {
+  resetTerminalThemeSchedulerForTests();
+  const fakeTerm = {
+    options: { theme: {} as Record<string, string> },
+  };
+
+  scheduleTerminalThemeUpdate(
+    'session-2',
+    theme('new-theme'),
+    { visible: false, focused: false },
+    () => fakeTerm as never,
+  );
+
+  await Promise.resolve();
+  assert.equal(fakeTerm.options.theme.background, '#111111');
+});

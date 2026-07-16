@@ -23,3 +23,11 @@ test("server stats stale requests do not block a fresh visible fetch", () => {
   assert.match(source, /session\.inflight && session\.inflightGeneration === session\.fetchGeneration/);
   assert.match(source, /session\.inflightGeneration = generation/);
 });
+
+test("server stats polling does not stop when its terminal is in the background", () => {
+  const source = readFileSync(new URL("./hooks/useServerStats.ts", import.meta.url), "utf8");
+
+  assert.doesNotMatch(source, /isVisible/);
+  assert.doesNotMatch(source, /getVisibleServerStatsClients/);
+  assert.doesNotMatch(source, /resuming from hidden/);
+});

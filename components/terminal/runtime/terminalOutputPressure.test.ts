@@ -63,6 +63,7 @@ test("reports background pressure separately from output volume", () => {
   setTerminalOutputPressureVisibility(term, false);
   assert.equal(getTerminalOutputPressure(term).background, true);
   assert.equal(getTerminalOutputPressure(term).mode, "background");
+  assert.equal(shouldDegradeTerminalSideWork(term), false);
 
   setTerminalOutputPressureVisibility(term, true);
   assert.equal(getTerminalOutputPressure(term).background, false);

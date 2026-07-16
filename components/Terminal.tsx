@@ -166,7 +166,7 @@ import {
   resolveHibernatePreferWasmSerialize,
   resolveHibernateSkipAltScreen,
   resolveTerminalHibernateDelayMs,
-  resolveTerminalHibernateEnabled,
+  resolveTerminalHibernateEnabledForProtocol,
   resolveTerminalHibernateReplayChunkBytes,
   type TerminalHibernateWakePayload,
 } from "../domain/terminalHibernate";
@@ -425,7 +425,10 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   onTerminalDataCaptureRef.current = onTerminalDataCapture;
   const isVisibleRef = useRef(isVisible);
   isVisibleRef.current = isVisible;
-  const isRendererActive = isVisible || !resolveTerminalHibernateEnabled(terminalSettings);
+  const hibernateEnabled = resolveTerminalHibernateEnabledForProtocol(terminalSettings, host.protocol);
+  const hibernateEnabledRef = useRef(hibernateEnabled);
+  hibernateEnabledRef.current = hibernateEnabled;
+  const isRendererActive = isVisible || !hibernateEnabled;
   const isRendererActiveRef = useRef(isRendererActive);
   isRendererActiveRef.current = isRendererActive;
   const pendingOutputScrollRef = useRef(false);
@@ -1361,7 +1364,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         || statusRef.current !== "connected"
         || isSearchOpenRef.current
         || hibernateFileTransferActiveRef.current
-        || !resolveTerminalHibernateEnabled(terminalSettingsRef.current)
+        || !hibernateEnabledRef.current
       ) {
         return;
       }
@@ -1415,7 +1418,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       && statusRef.current === "connected"
       && !isSearchOpenRef.current
       && !hibernateFileTransferActiveRef.current
-      && resolveTerminalHibernateEnabled(terminalSettingsRef.current)
+      && hibernateEnabledRef.current
       && termRef.current === term
       && sessionRef.current === backendId
       && serializeAddonRef.current === serializeAddon
@@ -2931,7 +2934,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     getSessionConnectedRef,
     status,
     isSearchOpen,
-    hibernateEnabled: resolveTerminalHibernateEnabled(terminalSettings),
+    hibernateEnabled: hibernateEnabled,
     hibernateDelayMs: resolveTerminalHibernateDelayMs(terminalSettings),
     fileTransferActive: hibernateFileTransferActive,
     hibernatedRef,

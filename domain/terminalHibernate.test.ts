@@ -8,6 +8,7 @@ import {
   normalizeHibernateHiddenTabsDelaySec,
   resolveTerminalHibernateDelayMs,
   resolveTerminalHibernateEnabled,
+  resolveTerminalHibernateEnabledForProtocol,
   TERMINAL_HIBERNATE_BUFFER_MAX_CHARS,
   TERMINAL_HIBERNATE_DELAY_SEC_DEFAULT,
   TERMINAL_HIBERNATE_DELAY_SEC_MAX,
@@ -30,6 +31,13 @@ test("resolveTerminalHibernateEnabled defaults to disabled", () => {
   assert.equal(resolveTerminalHibernateEnabled(), false);
   assert.equal(resolveTerminalHibernateEnabled({ hibernateHiddenTabs: true }), true);
   assert.equal(resolveTerminalHibernateEnabled({ hibernateHiddenTabs: false }), false);
+});
+
+test("local terminals never hibernate even when hidden-tab hibernation is enabled", () => {
+  const settings = { hibernateHiddenTabs: true };
+
+  assert.equal(resolveTerminalHibernateEnabledForProtocol(settings, "local"), false);
+  assert.equal(resolveTerminalHibernateEnabledForProtocol(settings, "ssh"), true);
 });
 
 test("isTerminalFileTransferActive is true when any transfer signal is active", () => {

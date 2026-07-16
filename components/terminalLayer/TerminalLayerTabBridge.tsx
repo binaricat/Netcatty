@@ -48,7 +48,10 @@ export function TerminalLayerTabBridge({ stableRef }: { stableRef: StableRef }) 
   );
   const isFocusMode = activeWorkspace?.viewMode === 'focus';
   const focusedSessionId = activeWorkspace?.focusedSessionId;
-  const hibernateHiddenTabs = resolveTerminalHibernateEnabled(s.terminalSettings);
+  const hasLocalTerminal = sessions.some(
+    (session) => sessionHostsMap.get(session.id)?.protocol === 'local',
+  );
+  const hibernateHiddenTabs = resolveTerminalHibernateEnabled(s.terminalSettings) && !hasLocalTerminal;
   const effectiveFocusedSessionId = useMemo((): string | null => {
     if (activeWorkspace) {
       if (focusedSessionId) return focusedSessionId;
@@ -431,6 +434,7 @@ export function TerminalLayerTabBridge({ stableRef }: { stableRef: StableRef }) 
     History: s.History,
     historySessionId,
     HistorySidePanel: s.HistorySidePanel,
+    hibernateHiddenTabs,
     handleOsDetected: s.handleOsDetected,
     handlePendingTerminalSelectionConsumed: s.handlePendingTerminalSelectionConsumed,
     handlePendingUploadHandled: s.handlePendingUploadHandled,
@@ -608,6 +612,7 @@ export function TerminalLayerTabBridge({ stableRef }: { stableRef: StableRef }) 
     s.noteGroups,
     handleWorkspaceDrop,
     handleTerminalContextReaderChange,
+    hibernateHiddenTabs,
     historySessionId,
     isFocusMode,
     isSidePanelOpenForCurrentTab,

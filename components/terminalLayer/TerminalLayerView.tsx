@@ -6,7 +6,6 @@ import { TerminalLayerSidePanelSection } from './TerminalLayerSidePanelSection';
 import { TerminalLayerWorkspaceSection } from './TerminalLayerWorkspaceSection';
 import { terminalLayerViewCtxEqual } from './terminalLayerViewMemo';
 import { useTerminalHostTreeLayoutWidth } from '../../application/state/terminalHostTreeStore';
-import { resolveTerminalHibernateEnabled } from '../../domain/terminalHibernate';
 import { resolveTerminalLayerSurfaceStyle } from '../terminalPaneVisibility';
 
 type TerminalLayerViewContext = Record<string, any>;
@@ -15,7 +14,7 @@ function TerminalLayerViewInner({ ctx }: { ctx: TerminalLayerViewContext }) {
   const hostTreeLayoutWidth = useTerminalHostTreeLayoutWidth();
   const surfaceStyle = resolveTerminalLayerSurfaceStyle(
     ctx.isTerminalLayerVisible,
-    resolveTerminalHibernateEnabled(ctx.terminalSettings),
+    ctx.hibernateHiddenTabs,
   );
 
   return (

@@ -403,6 +403,7 @@ export function terminalLayerWorkspaceCtxEqual(prev: Ctx, next: Ctx): boolean {
 
 export function terminalLayerViewCtxEqual(prev: Ctx, next: Ctx): boolean {
   if (prev.isTerminalLayerVisible !== next.isTerminalLayerVisible) return false;
+  if (prev.hibernateHiddenTabs !== next.hibernateHiddenTabs) return false;
   if (prev.isComposeBarOpen !== next.isComposeBarOpen) return false;
   if (!activeWorkspaceEqual(prev.activeWorkspace, next.activeWorkspace)) return false;
   if (prev.focusedSessionId !== next.focusedSessionId) return false;

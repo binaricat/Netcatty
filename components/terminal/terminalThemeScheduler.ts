@@ -4,8 +4,6 @@ import { forceSyncRenderAfterResize } from './terminalHelpers';
 
 type PendingUpdate = {
   theme: TerminalTheme;
-  visible: boolean;
-  focused: boolean;
   getTerminal: () => Terminal | null;
 };
 
@@ -36,28 +34,10 @@ function flushPendingUpdates(): void {
   const entries = [...pendingBySession.entries()];
   pendingBySession.clear();
 
-  const visible = entries.filter(([, update]) => update.visible || update.focused);
-  const hidden = entries.filter(([, update]) => !update.visible && !update.focused);
-
-  for (const [, update] of visible) {
+  for (const [, update] of entries) {
     const term = update.getTerminal();
     if (!term) continue;
     applyThemeToTerminal(term, update.theme);
-  }
-
-  const runHidden = () => {
-    for (const [, update] of hidden) {
-      const term = update.getTerminal();
-      if (!term) continue;
-      applyThemeToTerminal(term, update.theme);
-    }
-  };
-
-  if (hidden.length === 0) return;
-  if (typeof requestIdleCallback === 'function') {
-    requestIdleCallback(runHidden);
-  } else {
-    setTimeout(runHidden, 0);
   }
 }
 
@@ -68,22 +48,18 @@ export function cancelTerminalThemeUpdate(sessionId: string): void {
 export function scheduleTerminalThemeUpdate(
   sessionId: string,
   theme: TerminalTheme,
-  options: { visible: boolean; focused: boolean },
+  _options: { visible: boolean; focused: boolean },
   getTerminal: () => Terminal | null,
 ): void {
   const existing = pendingBySession.get(sessionId);
   if (existing && themeFingerprint(existing.theme) === themeFingerprint(theme)) {
     pendingBySession.set(sessionId, {
       theme,
-      visible: existing.visible || options.visible,
-      focused: existing.focused || options.focused,
       getTerminal,
     });
   } else {
     pendingBySession.set(sessionId, {
       theme,
-      visible: options.visible,
-      focused: options.focused,
       getTerminal,
     });
   }
