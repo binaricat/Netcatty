@@ -86,8 +86,10 @@ it snapshots the live vault when the user confirms, creates a required encrypted
 safety backup, holds the cross-window restore barrier, applies the previewed
 materialized payload, persists the canonical replica, and only then marks v2
 initialized. Edits made while the preview was open are therefore recoverable.
-A crash or failure leaves the existing apply sentinel set so auto-sync cannot
-publish a partial migration.
+The sync manager must still be unlocked immediately before this transaction;
+otherwise initialization fails before any backup, sentinel, or local mutation.
+A crash or failure after mutation starts leaves the existing apply sentinel set
+so auto-sync cannot publish a partial migration.
 
 Before a local backup restore mutates local data, the restored snapshot is
 diffed against the current materialized replica and prepared as normal device

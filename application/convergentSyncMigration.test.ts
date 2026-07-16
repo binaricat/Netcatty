@@ -48,6 +48,7 @@ test('initialization applies the protected preview before persisting and enablin
   assert.equal(plan.preview.canInitialize, true);
   const calls: string[] = [];
   const manager = {
+    isUnlocked: () => true,
     saveConvergentReplica: async () => {
       calls.push('replica');
     },
@@ -105,5 +106,46 @@ test('blocked previews cannot enter the protected initialization transaction', a
     /migration is blocked/,
   );
   assert.equal(entered, false);
+  assert.deepEqual(getConvergentSyncLocalConfig(), { enabled: false, initialized: false });
+});
+
+test('a locked manager cannot enter the protected initialization transaction', async () => {
+  const localPayload = payload();
+  const plan = planConvergentSyncMigration({
+    localPayload,
+    localTrustedBaseline: null,
+    providers: [],
+    deviceId: 'device-a',
+    now: NOW,
+  });
+  let entered = false;
+  let applied = false;
+  let snapshotBuilt = false;
+  const manager = {
+    isUnlocked: () => false,
+  } as unknown as CloudSyncManager;
+
+  await assert.rejects(
+    () => initializePreparedConvergentMigration({
+      prepared: { plan, providerBaselines: [] },
+      manager,
+      buildPreApplyPayload: () => {
+        snapshotBuilt = true;
+        return localPayload;
+      },
+      translateProtectiveBackupFailure: (message) => message,
+      applyPayload: () => {
+        applied = true;
+      },
+      runProtectedApply: async () => {
+        entered = true;
+      },
+    }),
+    /Unlock cloud sync before initializing convergent migration/,
+  );
+
+  assert.equal(entered, false);
+  assert.equal(snapshotBuilt, false);
+  assert.equal(applied, false);
   assert.deepEqual(getConvergentSyncLocalConfig(), { enabled: false, initialized: false });
 });

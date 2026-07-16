@@ -116,6 +116,9 @@ export async function initializePreparedConvergentMigration(options: {
   if (!prepared.plan.preview.canInitialize || !prepared.plan.state || !prepared.plan.payload) {
     throw new Error(`Convergent migration is blocked: ${prepared.plan.preview.blockedReasons.join('; ')}`);
   }
+  if (!manager.isUnlocked()) {
+    throw new Error('Unlock cloud sync before initializing convergent migration');
+  }
   const runProtectedApply = options.runProtectedApply ?? applyProtectedSyncPayload;
   await runProtectedApply({
     buildPreApplyPayload: options.buildPreApplyPayload,
