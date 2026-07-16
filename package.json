@@ -44,6 +44,8 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "test": "node --test --import tsx electron/*.test.cjs electron/scripts/*.test.cjs electron/terminalWorker/*.test.cjs electron/capabilities/*.test.cjs electron/capabilities/*/*.test.cjs electron/capabilities/*/*/*.test.cjs electron/cli/*.test.cjs electron/bridges/*.test.cjs electron/bridges/*/*.test.cjs electron/bridges/aiBridge/codexAppServer/*.test.cjs electron/bridges/aiBridge/sdk/*.test.cjs scripts/*.test.cjs application/*.test.ts application/app/*.test.ts application/i18n/locales/*.test.ts application/state/*.test.ts application/state/*/*.test.ts components/*.test.ts components/*.test.tsx components/editor/*.test.ts components/editor/*.test.tsx components/notes/*.test.tsx components/port-forwarding/*.test.ts components/scripts/*.test.tsx components/systemManager/*.test.ts components/terminalLayer/*.test.ts components/settings/*.test.tsx components/settings/tabs/*.test.ts components/settings/tabs/ai/*.test.ts components/settings/tabs/ai/*.test.tsx components/ai/*.test.ts components/ai/*.test.tsx components/ai/toolArtifacts/*.test.ts components/ai/toolArtifacts/*.test.tsx components/ai-elements/*.test.tsx components/sftp/*.test.ts components/terminal/*.test.ts components/terminal/*.test.tsx components/terminal/runtime/*.test.ts components/vault/*.test.ts components/vault/*.test.tsx domain/*.test.ts domain/*/*.test.ts infrastructure/ai/*.test.ts infrastructure/ai/*/*.test.ts infrastructure/ai/sdk/*.test.ts infrastructure/config/*.test.ts infrastructure/persistence/*.test.ts infrastructure/services/*.test.ts infrastructure/services/*/*.test.ts lib/*.test.ts",
+    "test:sync-crdt": "node --test --import tsx domain/convergentSync/*.test.ts",
+    "bench:sync-crdt": "tsx scripts/bench-sync-crdt.ts",
     "test:ssh-mfa-models": "node --test electron/bridges/sshMfaModels.live.test.cjs",
     "test:ssh-mfa-models:live": "SSH_MFA_LIVE=1 node --test electron/bridges/sshMfaModels.live.test.cjs"
   },
@@ -118,6 +120,7 @@
     "eslint": "^9.39.1",
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-unused-imports": "^4.3.0",
+    "fast-check": "^4.9.0",
     "patch-package": "^8.0.0",
     "simple-icons": "^16.23.0",
     "tailwindcss": "^4.1.17",
