@@ -863,6 +863,70 @@ test("close immediately clears the output route and drops pending output", async
   assert.deepEqual(routed, []);
 });
 
+test("await close immediately clears the output route and drops pending output", async () => {
+  const child = new FakeChild();
+  const closed = [];
+  const routed = [];
+  let opened = false;
+  const manager = createTerminalWorkerManager({
+    utilityProcess: {
+      fork() {
+        return child;
+      },
+    },
+    terminalOutputChannel: {
+      openSession() {
+        opened = true;
+      },
+      send(sessionId, data) {
+        if (!opened) return false;
+        routed.push({ sessionId, data });
+        return true;
+      },
+      closeSession(sessionId) {
+        closed.push(sessionId);
+        opened = false;
+      },
+    },
+    electronModule: {
+      webContents: {
+        fromId(id) {
+          return { id };
+        },
+      },
+    },
+    workerScriptPath: "/worker.cjs",
+  });
+
+  const startPromise = manager.request("netcatty:local:start", {}, { webContentsId: 7 });
+  child.emit("message", {
+    kind: "response",
+    requestId: child.messages[0].requestId,
+    result: { sessionId: "session-1" },
+  });
+  await startPromise;
+  assert.equal(manager.hasOpenSession("session-1"), true);
+
+  const closePromise = manager.request("netcatty:close:await", { sessionId: "session-1" }, { webContentsId: 7 });
+  assert.equal(manager.hasOpenSession("session-1"), false);
+  child.emit("message", {
+    kind: "output",
+    sessionId: "session-1",
+    data: "late",
+  });
+  const closeRequest = child.messages.find((message) => message.channel === "netcatty:close:await");
+  child.emit("message", {
+    kind: "response",
+    requestId: closeRequest.requestId,
+    result: { sessionId: "session-1" },
+  });
+  await closePromise;
+
+  assert.deepEqual(closed, ["session-1"]);
+  assert.deepEqual(routed, []);
+  assert.equal(manager.hasOpenSession("session-1"), false);
+});
+
 test("worker renderer events are forwarded to their original webContents", () => {
   const child = new FakeChild();
   const forwarded = [];

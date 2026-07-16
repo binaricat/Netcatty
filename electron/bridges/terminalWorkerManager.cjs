@@ -629,7 +629,9 @@ function createTerminalWorkerManager(options = {}) {
     const promise = new Promise((resolve, reject) => {
       pending.set(requestId, { resolve, reject, webContentsId: optionsForRequest.webContentsId });
     });
-    if (payload?.sessionId) {
+    if (channel === "netcatty:close:await" && payload?.sessionId) {
+      closeOutputSession(payload.sessionId);
+    } else if (payload?.sessionId) {
       closedSessions.delete(payload.sessionId);
     }
     worker.postMessage({
