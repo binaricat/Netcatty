@@ -173,6 +173,45 @@ test("terminal layer side panel stable ctx ignores session title-only updates", 
   );
 });
 
+test("terminal layer side panel stable ctx re-renders when session tab ownership changes", () => {
+  const baseCtx = {
+    sessions: [{ id: "s1", hostId: "h1", protocol: "local", status: "connected", workspaceId: "ws-1" }],
+  };
+
+  assert.equal(
+    terminalLayerSidePanelStableCtxEqual(
+      baseCtx,
+      {
+        ...baseCtx,
+        sessions: [{ id: "s1", hostId: "h1", protocol: "local", status: "connected", workspaceId: "ws-2" }],
+      },
+    ),
+    false,
+  );
+});
+
+test("terminal layer side panel stable ctx tracks session hosts and workspaces", () => {
+  const baseCtx = {
+    sessionHostsMap: new Map([["s1", { protocol: "ssh" }]]),
+    workspaceById: new Map([["ws-1", workspace()]]),
+  };
+
+  assert.equal(
+    terminalLayerSidePanelStableCtxEqual(baseCtx, {
+      ...baseCtx,
+      sessionHostsMap: new Map([["s1", { protocol: "local" }]]),
+    }),
+    false,
+  );
+  assert.equal(
+    terminalLayerSidePanelStableCtxEqual(baseCtx, {
+      ...baseCtx,
+      workspaceById: new Map([["ws-1", workspace({ focusedSessionId: "session-2" })]]),
+    }),
+    false,
+  );
+});
+
 test("terminal layer side panel stable ctx re-renders when session transport flags change", () => {
   const baseCtx = {
     mountedSftpTabIds: ["workspace-1"],

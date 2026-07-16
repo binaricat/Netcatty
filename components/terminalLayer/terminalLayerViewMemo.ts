@@ -161,8 +161,14 @@ function sidePanelCtxKeyEqual(prev: Ctx, next: Ctx, key: string): boolean {
     return terminalThemeEqual(prev, next, key);
   }
   if (key === 'sessions') {
-    // Connected picker only needs id/hostId/protocol/status — ignore title/cwd churn.
-    return sftpPickerSessionsEqual(prev.sessions, next.sessions);
+    // Connected picker and retained system panels need transport and tab ownership,
+    // while title/cwd churn can still be ignored.
+    if (prev.sessions === next.sessions) return true;
+    if (!sftpPickerSessionsEqual(prev.sessions, next.sessions)) return false;
+    if (!Array.isArray(prev.sessions) || !Array.isArray(next.sessions)) return false;
+    return prev.sessions.every((session: any, index: number) => (
+      session.workspaceId === next.sessions[index]?.workspaceId
+    ));
   }
   return prev[key] === next[key];
 }
@@ -212,6 +218,8 @@ const SIDE_PANEL_STABLE_CTX_KEYS = [
   'hosts',
   // SFTP Connected picker reads live terminal sessions from stable ctx.
   'sessions',
+  'sessionHostsMap',
+  'workspaceById',
   'keys',
   'identities',
   'updateHosts',

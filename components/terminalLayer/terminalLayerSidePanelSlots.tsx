@@ -7,8 +7,10 @@ import {
   getSidePanelLiveSnapshot,
   subscribeSidePanelLiveSnapshot,
 } from '../../application/state/sidePanelLiveStore';
+import { resolveSystemSidebarSession } from '../../domain/systemManager/resolveSystemSession';
+import { shouldKeepTerminalBackgroundWorkActive } from '../../domain/terminalHibernate';
 import { resolveTerminalFontFamilyId } from '../../infrastructure/config/fonts';
-import type { Host, TerminalSession } from '../../types';
+import type { Host, TerminalSession, Workspace } from '../../types';
 import { SystemManagerSidePanel } from '../systemManager/SystemManagerSidePanel';
 import { resolveSftpFollowTerminalCwdTargetHost } from '../sftp/sftpFollowTerminalCwd';
 import { AI_PANEL_FORCE_HIDE_SHELL } from '../ai/aiPanelDiagnostics';
@@ -191,16 +193,23 @@ function SidePanelSystemSlotInner({
   const sidePanelTab = useSidePanelTabType(tabId, sidePanelOpenTabs);
   const panelSelected = sidePanelTab === 'system';
   const isVisible = isTabActive && panelSelected;
-  const hibernateHiddenTabs = Boolean(ctx.hibernateHiddenTabs);
   const sessions = ctx.sessions as TerminalSession[];
   const sessionHostsMap = ctx.sessionHostsMap as Map<string, Host>;
-  const tabContainsLocalTerminal = sessions.some((session) => (
-    (session.id === tabId || session.workspaceId === tabId)
-    && sessionHostsMap.get(session.id)?.protocol === 'local'
-  ));
+  const workspace = (ctx.workspaceById as Map<string, Workspace>).get(tabId);
+  const standaloneSession = sessions.find((session) => session.id === tabId);
+  const systemSession = resolveSystemSidebarSession(
+    sessions,
+    workspace,
+    workspace?.focusedSessionId,
+    standaloneSession,
+  );
+  const systemHost = systemSession ? sessionHostsMap.get(systemSession.id) ?? null : null;
   const keepSystemWorkActive = panelSelected
-    && (!hibernateHiddenTabs || isTabActive || tabContainsLocalTerminal);
-  const live = useSidePanelLiveSnapshotForTab(tabId, keepSystemWorkActive);
+    && shouldKeepTerminalBackgroundWorkActive(
+      ctx.terminalSettings,
+      systemHost?.protocol,
+      isTabActive,
+    );
 
   const {
     refocusActiveTerminalSession,
@@ -211,10 +220,10 @@ function SidePanelSystemSlotInner({
   return (
     <div className={sidePanelHiddenPanelClassName(!isVisible)}>
       <SystemManagerSidePanel
-        key={live.activeTerminalSessionForSystem?.id ?? 'system-none'}
-        session={live.activeTerminalSessionForSystem ?? null}
-        sessionHost={live.activeSystemSessionHost ?? null}
-        showWorkspaceHostHeader={isVisible && !!live.activeWorkspace}
+        key={systemSession?.id ?? 'system-none'}
+        session={systemSession ?? null}
+        sessionHost={systemHost}
+        showWorkspaceHostHeader={isVisible && !!workspace}
         isVisible={keepSystemWorkActive}
         terminalSettings={terminalSettings}
         snippets={snippets}

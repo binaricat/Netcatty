@@ -104,9 +104,9 @@ test('notes side panel forwards repeated open-note requests', () => {
 test('system monitoring only pauses for hidden remote tabs when hibernation is enabled', () => {
   const source = readFileSync(new URL('./terminalLayerSidePanelSlots.tsx', import.meta.url), 'utf8');
 
-  assert.match(source, /const tabContainsLocalTerminal = sessions\.some/);
-  assert.match(source, /!hibernateHiddenTabs \|\| isTabActive \|\| tabContainsLocalTerminal/);
-  assert.match(source, /useSidePanelLiveSnapshotForTab\(tabId, keepSystemWorkActive\)/);
+  assert.match(source, /const systemSession = resolveSystemSidebarSession\(/);
+  assert.match(source, /shouldKeepTerminalBackgroundWorkActive\([\s\S]*systemHost\?\.protocol,[\s\S]*isTabActive/);
+  assert.doesNotMatch(source, /useSidePanelLiveSnapshotForTab\(tabId, keepSystemWorkActive\)/);
   assert.match(source, /isVisible=\{keepSystemWorkActive\}/);
 });
 
