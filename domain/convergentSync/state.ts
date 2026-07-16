@@ -7,6 +7,8 @@ import {
 import { cloneJson, jsonValuesEqual } from './json';
 import {
   createRegisterCandidate,
+  compareCandidatesByDot,
+  compareRegisterCandidates,
   isTombstoneCandidate,
   mergeMultiValueRegisters,
   registerHasConflict,
@@ -27,6 +29,7 @@ import {
   ConvergentSyncInvariantError,
   type CollectionPosition,
   type ConvergentCollectionState,
+  type ConvergentConflictAddress,
   type ConvergentConflictCandidate,
   type ConvergentEntityState,
   type ConvergentFieldConflict,
@@ -239,6 +242,55 @@ function applyEntityFieldMutation(
   entity.presence = writeRegister(state, deviceId, now, true);
 }
 
+function settingPathIsPrefix(prefix: string[], path: string[]): boolean {
+  return prefix.length <= path.length
+    && prefix.every((segment, index) => segment === path[index]);
+}
+
+function settingPathsOverlap(left: string[], right: string[]): boolean {
+  return settingPathIsPrefix(left, right) || settingPathIsPrefix(right, left);
+}
+
+function tombstoneOverlappingSettingPaths(
+  state: ConvergentSyncStateV2,
+  deviceId: string,
+  path: string[],
+  now: number,
+): void {
+  const encodedPath = encodeSettingPath(path);
+  for (const otherEncodedPath of Object.keys(state.settings).sort()) {
+    if (otherEncodedPath === encodedPath) continue;
+    const otherPath = decodeSettingPath(otherEncodedPath);
+    if (!settingPathsOverlap(path, otherPath)) continue;
+    const register = getOwnRecordValue(state.settings, otherEncodedPath);
+    const winner = selectRegisterWinner(register);
+    if (!winner || isTombstoneCandidate(winner)) continue;
+    setOwnRecordValue(
+      state.settings,
+      otherEncodedPath,
+      writeRegister(state, deviceId, now, undefined, true),
+    );
+  }
+}
+
+function writeSettingRegister(
+  state: ConvergentSyncStateV2,
+  deviceId: string,
+  path: string[],
+  now: number,
+  value?: JsonValue,
+  tombstone = false,
+): void {
+  if (!tombstone) {
+    tombstoneOverlappingSettingPaths(state, deviceId, path, now);
+  }
+  setOwnRecordValue(
+    state.settings,
+    encodeSettingPath(path),
+    writeRegister(state, deviceId, now, value, tombstone),
+  );
+}
+
 function findEntity(
   state: ConvergentSyncStateV2,
   collectionName: string,
@@ -335,21 +387,23 @@ function applyMutation(
       break;
     }
     case 'setting-set':
-      setOwnRecordValue(state.settings, encodeSettingPath(mutation.path), writeRegister(
+      writeSettingRegister(
         state,
         deviceId,
+        mutation.path,
         now,
         mutation.value,
-      ));
+      );
       break;
     case 'setting-delete':
-      setOwnRecordValue(state.settings, encodeSettingPath(mutation.path), writeRegister(
+      writeSettingRegister(
         state,
         deviceId,
+        mutation.path,
         now,
         undefined,
         true,
-      ));
+      );
       break;
     case 'string-entry-add': {
       const { entry, created } = ensureStringEntry(state, mutation.collection, mutation.value);
@@ -378,6 +432,17 @@ function applyMutation(
       }
       if (!mutation.tombstone && mutation.value === undefined) {
         throw new ConvergentSyncInvariantError('A value resolution requires a value');
+      }
+      if (mutation.address.kind === 'setting') {
+        writeSettingRegister(
+          state,
+          deviceId,
+          mutation.address.path,
+          now,
+          mutation.value,
+          mutation.tombstone === true,
+        );
+        break;
       }
       setRegisterAtAddress(
         state,
@@ -525,12 +590,20 @@ function materializedValue(register: MultiValueRegister | undefined): JsonValue 
 function conflictCandidate(
   candidate: RegisterCandidate,
   selectedDot: string,
+  settingPath?: string[],
 ): ConvergentConflictCandidate {
   return {
-    dot: { ...candidate.dot },
-    hlc: { ...candidate.hlc },
+    dot: {
+      deviceId: candidate.dot.deviceId,
+      counter: candidate.dot.counter,
+    },
+    hlc: {
+      wallTime: candidate.hlc.wallTime,
+      logical: candidate.hlc.logical,
+    },
     tombstone: isTombstoneCandidate(candidate),
     ...(!isTombstoneCandidate(candidate) ? { value: cloneJson(candidate.value) } : {}),
+    ...(settingPath ? { settingPath: [...settingPath] } : {}),
     selected: dotKey(candidate.dot) === selectedDot,
   };
 }
@@ -545,13 +618,13 @@ function maybeRecordConflict(
   if (!winner) return;
   conflicts.push({
     address,
-    candidates: register.candidates.map((candidate) =>
-      conflictCandidate(candidate, dotKey(winner.dot)),
-    ),
+    candidates: [...register.candidates]
+      .sort(compareCandidatesByDot)
+      .map((candidate) => conflictCandidate(candidate, dotKey(winner.dot))),
   });
 }
 
-function addressSortKey(address: RegisterAddress): string {
+function addressSortKey(address: ConvergentConflictAddress): string {
   switch (address.kind) {
     case 'entity-presence':
       return `0:${address.collection}:${address.entityId}:0`;
@@ -560,7 +633,9 @@ function addressSortKey(address: RegisterAddress): string {
     case 'entity-field':
       return `0:${address.collection}:${address.entityId}:2:${address.field}`;
     case 'setting':
-      return `1:${encodeSettingPath(address.path)}`;
+      return `1:0:${encodeSettingPath(address.path)}`;
+    case 'setting-structure':
+      return `1:1:${address.paths.map(encodeSettingPath).join('|')}`;
     case 'string-entry-presence':
       return `2:${address.collection}:${address.value}:0`;
     case 'string-entry-position':
@@ -585,6 +660,116 @@ function setNestedSetting(root: JsonObject, path: string[], value: JsonValue): v
     }
   }
   setOwnRecordValue(target, path[path.length - 1], cloneJson(value));
+}
+
+interface ActiveSettingEntry {
+  encodedPath: string;
+  path: string[];
+  register: MultiValueRegister;
+  winner: RegisterCandidate;
+  value: JsonValue;
+}
+
+function selectMaterializedSettingEntries(
+  entries: ActiveSettingEntry[],
+): Set<string> {
+  const selectedPaths = new Set<string>();
+  const selectedPrefixes = new Set<string>();
+  const prioritized = [...entries].sort((left, right) => {
+    const candidateOrder = compareRegisterCandidates(right.winner, left.winner);
+    return candidateOrder !== 0
+      ? candidateOrder
+      : left.encodedPath.localeCompare(right.encodedPath);
+  });
+
+  for (const entry of prioritized) {
+    const hasSelectedAncestor = entry.path.slice(0, -1).some((_, index) =>
+      selectedPaths.has(encodeSettingPath(entry.path.slice(0, index + 1))),
+    );
+    const hasSelectedDescendant = selectedPrefixes.has(entry.encodedPath);
+    if (hasSelectedAncestor || hasSelectedDescendant) continue;
+
+    selectedPaths.add(entry.encodedPath);
+    for (let length = 1; length < entry.path.length; length += 1) {
+      selectedPrefixes.add(encodeSettingPath(entry.path.slice(0, length)));
+    }
+  }
+  return selectedPaths;
+}
+
+function recordSettingStructureConflicts(
+  entries: ActiveSettingEntry[],
+  selectedPaths: Set<string>,
+  conflicts: ConvergentFieldConflict[],
+): void {
+  const byEncodedPath = new Map(entries.map((entry) => [entry.encodedPath, entry]));
+  const groups = new Map<string, ActiveSettingEntry[]>();
+
+  for (const entry of entries) {
+    let rootPath = entry.encodedPath;
+    for (let length = 1; length < entry.path.length; length += 1) {
+      const ancestor = encodeSettingPath(entry.path.slice(0, length));
+      if (byEncodedPath.has(ancestor)) {
+        rootPath = ancestor;
+        break;
+      }
+    }
+    const group = groups.get(rootPath) ?? [];
+    group.push(entry);
+    groups.set(rootPath, group);
+  }
+
+  for (const rootPath of [...groups.keys()].sort()) {
+    const group = groups.get(rootPath);
+    if (!group || group.length < 2) continue;
+    group.sort((left, right) => left.encodedPath.localeCompare(right.encodedPath));
+    conflicts.push({
+      address: {
+        kind: 'setting-structure',
+        paths: group.map((entry) => [...entry.path]),
+      },
+      candidates: group.flatMap((entry) =>
+        [...entry.register.candidates]
+          .sort(compareCandidatesByDot)
+          .map((candidate) => conflictCandidate(
+            candidate,
+            selectedPaths.has(entry.encodedPath) ? dotKey(entry.winner.dot) : '',
+            entry.path,
+          )),
+      ),
+    });
+  }
+}
+
+function materializeSettings(
+  state: ConvergentSyncStateV2,
+  settings: JsonObject,
+  conflicts: ConvergentFieldConflict[],
+): void {
+  const activeEntries: ActiveSettingEntry[] = [];
+  for (const encodedPath of Object.keys(state.settings).sort()) {
+    const register = getOwnRecordValue(state.settings, encodedPath);
+    if (!register) continue;
+    const path = decodeSettingPath(encodedPath);
+    maybeRecordConflict(conflicts, { kind: 'setting', path }, register);
+    const winner = selectRegisterWinner(register);
+    if (!winner || isTombstoneCandidate(winner)) continue;
+    activeEntries.push({
+      encodedPath,
+      path,
+      register,
+      winner,
+      value: cloneJson(winner.value),
+    });
+  }
+
+  const selectedPaths = selectMaterializedSettingEntries(activeEntries);
+  recordSettingStructureConflicts(activeEntries, selectedPaths, conflicts);
+  for (const entry of activeEntries) {
+    if (selectedPaths.has(entry.encodedPath)) {
+      setNestedSetting(settings, entry.path, entry.value);
+    }
+  }
 }
 
 export function materializeConvergentSyncState(
@@ -648,14 +833,7 @@ export function materializeConvergentSyncState(
     );
   }
 
-  for (const encodedPath of Object.keys(state.settings).sort()) {
-    const register = getOwnRecordValue(state.settings, encodedPath);
-    if (!register) continue;
-    const path = decodeSettingPath(encodedPath);
-    maybeRecordConflict(conflicts, { kind: 'setting', path }, register);
-    const value = materializedValue(register);
-    if (value !== undefined) setNestedSetting(settings, path, value);
-  }
+  materializeSettings(state, settings, conflicts);
 
   for (const collectionName of Object.keys(state.stringCollections).sort()) {
     const entries: Array<{ value: string; position?: CollectionPosition }> = [];

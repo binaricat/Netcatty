@@ -243,9 +243,15 @@ function canonicalCandidate<T extends JsonValue>(
   candidate: RegisterCandidate<T>,
 ): RegisterCandidate<T> {
   const base = {
-    dot: { ...candidate.dot },
+    dot: {
+      deviceId: candidate.dot.deviceId,
+      counter: candidate.dot.counter,
+    },
     context: sortRecord(candidate.context, (counter) => counter),
-    hlc: { ...candidate.hlc },
+    hlc: {
+      wallTime: candidate.hlc.wallTime,
+      logical: candidate.hlc.logical,
+    },
   };
   if (isTombstoneCandidate(candidate)) return { ...base, tombstone: true };
   return { ...base, value: canonicalizeJson(cloneJson(candidate.value)) };
@@ -293,7 +299,10 @@ export function canonicalizeConvergentSyncState(
   return {
     schemaVersion: 2,
     vector: sortRecord(state.vector, (counter) => counter),
-    hlc: { ...state.hlc },
+    hlc: {
+      wallTime: state.hlc.wallTime,
+      logical: state.hlc.logical,
+    },
     collections: sortRecord(state.collections, canonicalCollection),
     settings: sortRecord(state.settings, canonicalRegister),
     stringCollections: sortRecord(state.stringCollections, canonicalStringCollection),

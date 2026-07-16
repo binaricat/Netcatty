@@ -37,6 +37,13 @@ Deletion is a register candidate, not absence from the serialized structure.
 Tombstones are retained indefinitely in v2. A later recreation replaces a
 tombstone only when its new dot causally observes the deletion.
 
+Settings writes keep the active leaf set prefix-free. Replacing an object leaf
+with an atomic parent (or the reverse) causally tombstones the overlapping
+paths. Independent replicas can still create a parent/descendant shape
+conflict; materialization then selects a deterministic maximal prefix-free set,
+keeps non-overlapping siblings, and reports the competing paths and candidates
+for explicit resolution.
+
 Entity field updates also write a fresh present candidate. Consequently, an
 offline deletion racing an offline edit becomes a presence conflict; it cannot
 silently hide the edit.
@@ -69,8 +76,10 @@ snapshot is selected for legacy readers and immediate application:
 4. then device counter.
 
 Candidate ordering in canonical serialization uses the dot, not the selected
-winner order. Conflicts are emitted in collection, entity, field-path, and dot
-order. Resolving a conflict creates a new write whose causal context covers all
+winner order. Dot and HLC objects are rebuilt with fixed property order so
+provider JSON key ordering cannot change identity or serialized bytes.
+Conflicts are emitted in collection, entity, field-path, and dot order.
+Resolving a conflict creates a new write whose causal context covers all
 observed candidates, so the resolution remains stable when stale replicas
 return.
 

@@ -25,9 +25,15 @@ export function cloneCandidate<T extends JsonValue>(
   candidate: RegisterCandidate<T>,
 ): RegisterCandidate<T> {
   const base = {
-    dot: { ...candidate.dot },
+    dot: {
+      deviceId: candidate.dot.deviceId,
+      counter: candidate.dot.counter,
+    },
     context: { ...candidate.context },
-    hlc: { ...candidate.hlc },
+    hlc: {
+      wallTime: candidate.hlc.wallTime,
+      logical: candidate.hlc.logical,
+    },
   };
   if (isTombstoneCandidate(candidate)) {
     return { ...base, tombstone: true };
@@ -43,9 +49,15 @@ export function createRegisterCandidate<T extends JsonValue>(options: {
   tombstone?: boolean;
 }): RegisterCandidate<T> {
   const base = {
-    dot: { ...options.dot },
+    dot: {
+      deviceId: options.dot.deviceId,
+      counter: options.dot.counter,
+    },
     context: { ...options.context },
-    hlc: { ...options.hlc },
+    hlc: {
+      wallTime: options.hlc.wallTime,
+      logical: options.hlc.logical,
+    },
   };
   if (options.tombstone) {
     if (options.value !== undefined) {
@@ -69,9 +81,15 @@ function canonicalVector(vector: VersionVector): string {
 
 function candidateFingerprint(candidate: RegisterCandidate): string {
   return JSON.stringify({
-    dot: candidate.dot,
+    dot: {
+      deviceId: candidate.dot.deviceId,
+      counter: candidate.dot.counter,
+    },
     context: canonicalVector(candidate.context),
-    hlc: candidate.hlc,
+    hlc: {
+      wallTime: candidate.hlc.wallTime,
+      logical: candidate.hlc.logical,
+    },
     tombstone: isTombstoneCandidate(candidate),
     value: isTombstoneCandidate(candidate)
       ? undefined

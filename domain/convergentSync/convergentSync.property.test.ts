@@ -6,6 +6,7 @@ import fc from 'fast-check';
 import {
   applyConvergentMutations,
   createConvergentSyncState,
+  materializeConvergentSyncState,
   mergeConvergentSyncStates,
   serializeConvergentSyncState,
   type ConvergentMutation,
@@ -22,9 +23,14 @@ const jsonValueArbitrary: fc.Arbitrary<JsonValue> = fc.oneof(
 
 const settingPathArbitrary: fc.Arbitrary<string[]> = fc.constantFrom(
   'theme',
+  'terminalRoot',
   'fontSize',
   'palette',
-).map((value) => value === 'theme' ? ['theme'] : ['terminal', value]);
+).map((value) => {
+  if (value === 'theme') return ['theme'];
+  if (value === 'terminalRoot') return ['terminal'];
+  return ['terminal', value];
+});
 
 const mutationArbitrary: fc.Arbitrary<ConvergentMutation> = fc.oneof(
   fc.record({
@@ -79,9 +85,15 @@ test('merge is commutative', () => {
     (leftMutations, rightMutations) => {
       const left = replica('device-a', leftMutations, 100);
       const right = replica('device-b', rightMutations, 100);
+      const leftRight = mergeConvergentSyncStates(left, right);
+      const rightLeft = mergeConvergentSyncStates(right, left);
       assert.equal(
-        serializeConvergentSyncState(mergeConvergentSyncStates(left, right)),
-        serializeConvergentSyncState(mergeConvergentSyncStates(right, left)),
+        serializeConvergentSyncState(leftRight),
+        serializeConvergentSyncState(rightLeft),
+      );
+      assert.deepEqual(
+        materializeConvergentSyncState(leftRight),
+        materializeConvergentSyncState(rightLeft),
       );
     },
   ), { numRuns: 150 });

@@ -233,6 +233,92 @@ test('settings are leaf registers while arrays remain atomic values', () => {
   assert.deepEqual(decodeSettingPath('/key~1with~0escapes'), ['key/with~escapes']);
 });
 
+test('causal setting shape changes tombstone overlapping leaf paths', () => {
+  const nested = applyConvergentMutations(createConvergentSyncState(), 'device-a', [
+    { kind: 'setting-set', path: ['terminal'], value: ['atomic'] },
+    { kind: 'setting-set', path: ['terminal', 'fontSize'], value: 14 },
+  ], BASE_TIME);
+  const atomic = applyConvergentMutations(nested, 'device-a', [{
+    kind: 'setting-set',
+    path: ['terminal'],
+    value: ['replacement'],
+  }], BASE_TIME + 1);
+
+  assert.deepEqual(materializeConvergentSyncState(nested).settings, {
+    terminal: { fontSize: 14 },
+  });
+  assert.deepEqual(materializeConvergentSyncState(atomic).settings, {
+    terminal: ['replacement'],
+  });
+  assert.equal(
+    atomic.settings['/terminal/fontSize'].candidates[0]?.tombstone,
+    true,
+  );
+});
+
+test('concurrent setting shape changes materialize deterministically and remain resolvable', () => {
+  const parent = applyConvergentMutations(createConvergentSyncState(), 'device-a', [{
+    kind: 'setting-set',
+    path: ['terminal'],
+    value: ['atomic'],
+  }], BASE_TIME);
+  const child = applyConvergentMutations(createConvergentSyncState(), 'device-z', [{
+    kind: 'setting-set',
+    path: ['terminal', 'fontSize'],
+    value: 14,
+  }], BASE_TIME);
+  const merged = mergeConvergentSyncStates(parent, child);
+  const materialized = materializeConvergentSyncState(merged);
+  const structureConflict = materialized.conflicts.find(
+    (conflict) => conflict.address.kind === 'setting-structure',
+  );
+
+  assert.deepEqual(materialized.settings, { terminal: { fontSize: 14 } });
+  assert.deepEqual(
+    structureConflict?.address.kind === 'setting-structure'
+      ? structureConflict.address.paths
+      : [],
+    [['terminal'], ['terminal', 'fontSize']],
+  );
+  assert.equal(structureConflict?.candidates.length, 2);
+  assert.deepEqual(
+    structureConflict?.candidates.filter((candidate) => candidate.selected)
+      .map((candidate) => candidate.settingPath),
+    [['terminal', 'fontSize']],
+  );
+
+  const resolved = applyConvergentMutations(merged, 'resolver', [{
+    kind: 'resolve-register',
+    address: { kind: 'setting', path: ['terminal'] },
+    value: ['reviewed'],
+  }], BASE_TIME + 1);
+  const resolvedMaterialized = materializeConvergentSyncState(resolved);
+  assert.deepEqual(resolvedMaterialized.settings, { terminal: ['reviewed'] });
+  assert.equal(
+    resolvedMaterialized.conflicts.some(
+      (conflict) => conflict.address.kind === 'setting-structure',
+    ),
+    false,
+  );
+});
+
+test('setting structure selection keeps non-overlapping siblings', () => {
+  const parent = applyConvergentMutations(createConvergentSyncState(), 'device-a', [{
+    kind: 'setting-set',
+    path: ['terminal'],
+    value: 'atomic',
+  }], BASE_TIME);
+  const children = applyConvergentMutations(createConvergentSyncState(), 'device-z', [
+    { kind: 'setting-set', path: ['terminal', 'fontSize'], value: 14 },
+    { kind: 'setting-set', path: ['terminal', 'fontFamily'], value: 'Mono' },
+  ], BASE_TIME);
+
+  assert.deepEqual(
+    materializeConvergentSyncState(mergeConvergentSyncStates(parent, children)).settings,
+    { terminal: { fontFamily: 'Mono', fontSize: 14 } },
+  );
+});
+
 test('canonical serialization is stable and hydration validates the state', () => {
   const first = applyConvergentMutations(createConvergentSyncState(), 'device-a', [
     { kind: 'setting-set', path: ['z'], value: { b: 2, a: 1 } },
@@ -244,6 +330,39 @@ test('canonical serialization is stable and hydration validates the state', () =
   assert.throws(
     () => hydrateConvergentSyncState('{"schemaVersion":3}'),
     ConvergentSyncInvariantError,
+  );
+});
+
+test('candidate metadata key order cannot change canonical serialization or merge identity', () => {
+  const state = applyConvergentMutations(createConvergentSyncState(), 'device-a', [{
+    kind: 'setting-set',
+    path: ['theme'],
+    value: 'dark',
+  }], BASE_TIME);
+  const reordered = JSON.parse(
+    serializeConvergentSyncState(state),
+  ) as ConvergentSyncStateV2;
+  const candidate = reordered.settings['/theme'].candidates[0];
+  candidate.dot = {
+    counter: candidate.dot.counter,
+    deviceId: candidate.dot.deviceId,
+  };
+  candidate.hlc = {
+    logical: candidate.hlc.logical,
+    wallTime: candidate.hlc.wallTime,
+  };
+  reordered.hlc = {
+    logical: reordered.hlc.logical,
+    wallTime: reordered.hlc.wallTime,
+  };
+
+  assert.equal(
+    serializeConvergentSyncState(reordered),
+    serializeConvergentSyncState(state),
+  );
+  assert.equal(
+    serializeConvergentSyncState(mergeConvergentSyncStates(state, reordered)),
+    serializeConvergentSyncState(state),
   );
 });
 

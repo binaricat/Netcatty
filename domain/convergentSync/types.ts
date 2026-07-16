@@ -112,6 +112,11 @@ export type RegisterAddress =
     value: string;
   };
 
+export type ConvergentConflictAddress = RegisterAddress | {
+  kind: 'setting-structure';
+  paths: string[][];
+};
+
 export type ConvergentMutation =
   | {
     kind: 'entity-upsert';
@@ -170,11 +175,13 @@ export interface ConvergentConflictCandidate {
   hlc: HybridLogicalClock;
   tombstone: boolean;
   value?: JsonValue;
+  /** Present when candidates from multiple setting leaf paths conflict. */
+  settingPath?: string[];
   selected: boolean;
 }
 
 export interface ConvergentFieldConflict {
-  address: RegisterAddress;
+  address: ConvergentConflictAddress;
   candidates: ConvergentConflictCandidate[];
 }
 
