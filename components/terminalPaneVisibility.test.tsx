@@ -201,25 +201,25 @@ test("default and explicit split workspaces always use split layout geometry", (
   }
 });
 
-test("hidden terminal layers measure once only when hibernation is disabled", () => {
+test("hidden terminal layers measure once when their layout must stay active", () => {
   assert.equal(shouldMeasureTerminalLayerLayout({
     isTerminalLayerVisible: false,
-    hibernateHiddenTabs: false,
+    keepHiddenLayoutActive: true,
     workspaceArea: { width: 0, height: 0 },
   }), true);
   assert.equal(shouldMeasureTerminalLayerLayout({
     isTerminalLayerVisible: false,
-    hibernateHiddenTabs: false,
+    keepHiddenLayoutActive: true,
     workspaceArea: { width: 1200, height: 800 },
   }), false);
   assert.equal(shouldMeasureTerminalLayerLayout({
     isTerminalLayerVisible: false,
-    hibernateHiddenTabs: true,
+    keepHiddenLayoutActive: false,
     workspaceArea: { width: 0, height: 0 },
   }), false);
   assert.equal(shouldMeasureTerminalLayerLayout({
     isTerminalLayerVisible: true,
-    hibernateHiddenTabs: true,
+    keepHiddenLayoutActive: false,
     workspaceArea: { width: 0, height: 0 },
   }), true);
 });

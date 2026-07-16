@@ -58,6 +58,7 @@ export function TerminalLayerTabBridge({ stableRef }: { stableRef: StableRef }) 
     (workspace: Workspace) => !hibernateHiddenTabs || localWorkspaceIds.has(workspace.id),
     [hibernateHiddenTabs, localWorkspaceIds],
   );
+  const keepHiddenLayoutActive = !hibernateHiddenTabs || localWorkspaceIds.size > 0;
   const effectiveFocusedSessionId = useMemo((): string | null => {
     if (activeWorkspace) {
       if (focusedSessionId) return focusedSessionId;
@@ -323,7 +324,7 @@ export function TerminalLayerTabBridge({ stableRef }: { stableRef: StableRef }) 
     isTerminalLayerVisible,
     shouldMeasureTerminalLayerLayout: shouldMeasureTerminalLayerLayout({
       isTerminalLayerVisible,
-      hibernateHiddenTabs,
+      keepHiddenLayoutActive,
       workspaceArea,
     }),
     lastSidePanelTabRef: s.lastSidePanelTabRef,
