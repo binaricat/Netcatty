@@ -37,3 +37,18 @@ test("system manager destructive actions use in-app confirm dialogs", () => {
     );
   }
 });
+
+test("process and docker confirm dialogs reset when sessionId changes", () => {
+  const processSource = readProjectFile("components/systemManager/ProcessManagerTab.tsx");
+  const containersSource = readProjectFile("components/systemManager/DockerContainersPanel.tsx");
+  const imagesSource = readProjectFile("components/systemManager/DockerImagesPanel.tsx");
+
+  assert.match(processSource, /setPendingSignal\(null\)/);
+  assert.match(processSource, /}, \[sessionId\]\);/);
+
+  assert.match(containersSource, /setConfirmAction\(null\)/);
+  assert.match(containersSource, /}, \[sessionId\]\);/);
+
+  assert.match(imagesSource, /setConfirmTarget\(null\)/);
+  assert.match(imagesSource, /}, \[sessionId\]\);/);
+});

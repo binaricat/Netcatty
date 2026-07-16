@@ -290,6 +290,12 @@ export const ProcessManagerTab = memo(function ProcessManagerTab({
     setCachedProcesses(getCachedProcesses(sessionId));
     setCachedProcessesSessionId(sessionId);
     setProcessListPending(false);
+    // Drop in-flight dialogs so a confirm cannot act on a different host/session.
+    setPendingSignal(null);
+    setSignalBusy(false);
+    setReniceTarget(null);
+    setSelectedPid(null);
+    setActionError(null);
   }, [sessionId]);
 
   useEffect(() => () => {

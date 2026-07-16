@@ -1,5 +1,5 @@
 import { Box, FileText, Play, RotateCcw, Square, Terminal } from 'lucide-react';
-import React, { memo, useCallback, useMemo, useState } from 'react';
+import React, { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { useI18n } from '../../application/i18n/I18nProvider';
 import type { useSystemManagerBackend } from '../../application/state/useSystemManagerBackend';
 import { writeSystemManagerDiagnostic } from '../../application/state/systemManagerDiagnostics';
@@ -172,6 +172,14 @@ export const DockerContainersPanel = memo(function DockerContainersPanel({
   // cleared only after the follow-up list refresh lands.
   const [pendingAction, setPendingAction] = useState<{ id: string; action: DockerContainerAction } | null>(null);
   const [confirmAction, setConfirmAction] = useState<PendingContainerConfirm | null>(null);
+
+  useEffect(() => {
+    // Drop pending confirms/selection when the active terminal session changes so
+    // a confirm opened for host A cannot run against host B.
+    setConfirmAction(null);
+    setPendingAction(null);
+    setSelectedId(null);
+  }, [sessionId]);
 
   const containersFetcher = useCallback(async () => {
     const result = await backend.listDockerContainers(sessionId);
