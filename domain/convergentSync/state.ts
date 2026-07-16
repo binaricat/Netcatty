@@ -710,7 +710,7 @@ export function applyConvergentMutations(
   state: ConvergentSyncStateV2,
   deviceId: string,
   mutations: ConvergentMutation[],
-  now = Date.now(),
+  now: number,
 ): ConvergentSyncStateV2 {
   assertValidConvergentSyncState(state);
   requireNonEmpty(deviceId, 'Device ID');

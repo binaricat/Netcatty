@@ -16,6 +16,10 @@ This first change intentionally contains only pure domain logic. Encryption,
 legacy migration, provider verification, persistence, and UI are separate
 follow-up changes after this core is reviewed.
 
+Mutation callers must provide the wall-clock sample used to advance the HLC.
+The domain layer never reads `Date.now()`, so replaying the same state, device,
+mutation batch, and timestamp produces identical serialized state.
+
 ## State model
 
 Each device owns a monotonically increasing counter. A write allocates a unique
