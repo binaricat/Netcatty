@@ -36,7 +36,7 @@ const net = require("node:net");
 // offsets so the sniffer can redact the marker from the visible stream.
 // eslint-disable-next-line no-control-regex
 const ANSI_ESCAPE_RE = /\u001b(?:\[[0-9;?]*[ -/]*[@-~]|\][^\u0007\u001b]*(?:\u0007|\u001b\\)|[PX^_][^\u001b]*\u001b\\|.)/g;
-const MOSH_CONNECT_RE = /MOSH CONNECT[ \t]+(\d{1,5})[ \t]+([A-Za-z0-9+/]+={0,2})(?![A-Za-z0-9+/=])/;
+const MOSH_CONNECT_PREFIX_RE = /MOSH CONNECT[ \t]+(\d{1,5})[ \t]+/;
 const MOSH_IP_RE = /MOSH IP[ \t]+(\S+)/;
 const PROTOCOL_MARKERS = ["MOSH CONNECT", "MOSH IP"];
 const MOSH_LOCALE_NAMES = [
@@ -94,19 +94,60 @@ function stripAnsiEscapesWithMap(text) {
 
 function parseConnectLine(line) {
   const { cleaned, cleanToOriginal } = stripAnsiEscapesWithMap(line);
-  const m = MOSH_CONNECT_RE.exec(cleaned);
+  const m = MOSH_CONNECT_PREFIX_RE.exec(cleaned);
   if (!m) return null;
   const port = Number(m[1]);
-  const key = m[2];
   if (!Number.isFinite(port) || port <= 0 || port > 65535) return null;
+
+  const connectIdx = cleanToOriginal[m.index];
+  const keyStartOffset = cleanToOriginal[m.index + m[0].length];
+  if (connectIdx === undefined || keyStartOffset === undefined) return null;
+
+  let key = "";
+  let pos = keyStartOffset;
+  while (pos < line.length && key.length < 22) {
+    const ch = line[pos];
+    if (ch === "\u001b") {
+      ANSI_ESCAPE_RE.lastIndex = pos;
+      const esc = ANSI_ESCAPE_RE.exec(line);
+      if (esc && esc.index === pos) {
+        pos = ANSI_ESCAPE_RE.lastIndex;
+        continue;
+      }
+    }
+    if (!/[A-Za-z0-9+/]/.test(ch)) return null;
+    key += ch;
+    pos += 1;
+  }
+
+  if (key.length !== 22) return null;
+
+  let paddingLookahead = pos;
+  while (paddingLookahead < line.length) {
+    const ch = line[paddingLookahead];
+    if (ch !== "\u001b") break;
+    ANSI_ESCAPE_RE.lastIndex = paddingLookahead;
+    const esc = ANSI_ESCAPE_RE.exec(line);
+    if (!esc || esc.index !== paddingLookahead) break;
+    paddingLookahead = ANSI_ESCAPE_RE.lastIndex;
+  }
+
+  if (line.startsWith("==", paddingLookahead)) {
+    key += "==";
+    pos = paddingLookahead + 2;
+  } else if (paddingLookahead === pos && /[A-Za-z0-9+/=]/.test(line[pos] || "")) {
+    return null;
+  }
+
+  if (/[A-Za-z0-9+/=]/.test(line[pos] || "")) {
+    return null;
+  }
+
   if (!validMoshKey(key)) return null;
 
   // Map the cleaned match back onto the original line so redaction still
   // covers ConPTY CSI that trailed or split the key (e.g. `\x1b[?25h`).
-  const connectIdx = cleanToOriginal[m.index];
-  const cleanMatchEnd = m.index + m[0].length;
-  if (connectIdx === undefined || cleanToOriginal[cleanMatchEnd] === undefined) return null;
-  let matchEndOffset = cleanToOriginal[cleanMatchEnd];
+  let matchEndOffset = pos;
   while (matchEndOffset < line.length) {
     const ch = line[matchEndOffset];
     if (ch === "\u001b") {

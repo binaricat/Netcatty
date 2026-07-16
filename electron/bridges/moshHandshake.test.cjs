@@ -86,6 +86,18 @@ test("createMoshConnectSniffer redacts MOSH CONNECT when CSI splits the key", ()
   assert.ok(!String(r.visible).includes("34eg"));
 });
 
+test("createMoshConnectSniffer stops the key at a ConPTY cursor move before banner text", () => {
+  const sniffer = createMoshConnectSniffer();
+  const r = sniffer.feed(
+    "MOSH IP 207.58.174.82\r\n"
+    + "\u001b[?25l\u001b[6;1HMOSH CONNECT 60030 BArYj8zs1avy+l7+GaHoTg"
+    + "\u001b[8;1Hmosh-server (mosh 1.4.0)\r\n",
+  );
+  assert.deepEqual(r.parsed, { port: 60030, key: "BArYj8zs1avy+l7+GaHoTg", host: "207.58.174.82" });
+  assert.ok(!String(r.visible).includes("MOSH CONNECT"));
+  assert.ok(String(r.visible).includes("mosh-server (mosh 1.4.0)"));
+});
+
 test("createMoshConnectSniffer.flush recovers a trailing MOSH CONNECT without newline", () => {
   // ssh can exit before ConPTY emits the final CRLF. Without an EOF flush
   // the sniffer would leave the CONNECT line in `pending` and the bridge
