@@ -1147,6 +1147,7 @@ async function startSSHSessionWrapper(event, options) {
           return await startSSHSession(event, {
             ...options,
             _skipPasswordMethod: true,
+            _suppressPreShellAuthExit: shouldSuppressInitialAuthExit,
           });
         } catch (retryErr) {
           const isRetryAuthError = isStartAuthError(retryErr);

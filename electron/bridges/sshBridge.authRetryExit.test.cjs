@@ -579,9 +579,10 @@ test("failed keyboard-interactive retry still offers encrypted default key fallb
   const ipcMain = makeIpcMain();
   bridge.init({ sessions: new Map(), electronModule: {} });
   bridge.registerHandlers(ipcMain);
+  const sender = makeSender(events);
 
   const result = await ipcMain.handlers.get("netcatty:start")(
-    { sender: makeSender(events) },
+    { sender },
     {
       sessionId: "mfa-ki-encrypted-fallback-session",
       hostname: "corp-edr.example.com",
@@ -605,6 +606,13 @@ test("failed keyboard-interactive retry still offers encrypted default key fallb
     ],
   );
   assert.equal(events.includes("passphrase-request"), true);
+  assert.equal(
+    sender.sent.some((message) => (
+      message.channel === "netcatty:exit"
+      && message.payload.sessionId === "mfa-ki-encrypted-fallback-session"
+    )),
+    false,
+  );
 });
 
 test("terminal SSH password-first then keyboard-interactive when both methods are advertised", async (t) => {
