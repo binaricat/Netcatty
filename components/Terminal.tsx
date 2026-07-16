@@ -380,6 +380,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   const wakeInProgressRef = useRef(false);
   const wakePromiseRef = useRef<Promise<boolean> | null>(null);
   const sessionRef = useRef<string | null>(null);
+  const sessionCleanupPromiseRef = useRef<Promise<void> | null>(null);
   const isBootActiveRef = useRef(false);
   const hasConnectedRef = useRef(false);
   const hasRunStartupCommandRef = useRef(false);
@@ -1208,6 +1209,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
 
   const cleanupSession = async () => {
     const closingSessionId = sessionRef.current;
+    sessionRef.current = null;
     disposeDataRef.current?.();
     disposeDataRef.current = null;
     disposeExitRef.current?.();
@@ -1216,7 +1218,14 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     disposeTelnetEchoModeRef.current = null;
     telnetLocalEchoRef.current = false;
 
-    if (closingSessionId) {
+    const pendingCleanup = sessionCleanupPromiseRef.current;
+    if (pendingCleanup) {
+      await pendingCleanup;
+    }
+
+    if (!closingSessionId) return;
+
+    const cleanupPromise = (async () => {
       const activeTerm = termRef.current;
       if (activeTerm) {
         releaseTerminalFlowBeforeHibernate(terminalBackend, activeTerm, closingSessionId, {
@@ -1231,8 +1240,16 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       } catch (err) {
         logger.warn("Failed to close SSH session", err);
       }
+    })();
+
+    sessionCleanupPromiseRef.current = cleanupPromise;
+    try {
+      await cleanupPromise;
+    } finally {
+      if (sessionCleanupPromiseRef.current === cleanupPromise) {
+        sessionCleanupPromiseRef.current = null;
+      }
     }
-    sessionRef.current = null;
   };
 
   const disposeRuntimeOnly = () => {
