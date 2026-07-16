@@ -50,5 +50,6 @@ test("process and docker confirm dialogs reset when sessionId changes", () => {
   assert.match(containersSource, /}, \[sessionId\]\);/);
 
   assert.match(imagesSource, /setConfirmTarget\(null\)/);
+  assert.match(imagesSource, /setActionBusy\(false\)/);
   assert.match(imagesSource, /}, \[sessionId\]\);/);
 });
