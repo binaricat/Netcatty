@@ -235,6 +235,37 @@ test('trusted legacy diff becomes causal CRDT writes without carrying transport 
   assert.equal(cloudSyncPayloadsEqual(materialized, legacy), true);
 });
 
+test('trusted legacy diff preserves reorder-only entity and string collection edits', () => {
+  const baseline = payload();
+  baseline.hosts.push({
+    ...baseline.hosts[0],
+    id: 'host-2',
+    label: 'Staging',
+    hostname: 'staging.example.com',
+  });
+  baseline.customGroups = ['prod', 'staging'];
+  const state = createConvergentSyncStateFromPayload(baseline, 'seed', NOW);
+  const legacy: SyncPayload = {
+    ...baseline,
+    hosts: [baseline.hosts[1], baseline.hosts[0]],
+    customGroups: ['staging', 'prod'],
+    syncedAt: NOW + 1,
+  };
+
+  const next = applyLegacySyncPayload(
+    state,
+    baseline,
+    legacy,
+    'legacy:github:remote-device',
+    NOW + 1,
+  );
+  const materialized = materializeSyncPayloadFromConvergentState(next, { syncedAt: NOW + 1 });
+
+  assert.deepEqual(materialized.hosts.map((host) => host.id), ['host-2', 'host-1']);
+  assert.deepEqual(materialized.customGroups, ['staging', 'prod']);
+  assert.equal(cloudSyncPayloadsEqual(materialized, legacy), true);
+});
+
 test('v1-only migration previews and creates a backward-compatible v2 payload', () => {
   const local = payload();
   const remote = {

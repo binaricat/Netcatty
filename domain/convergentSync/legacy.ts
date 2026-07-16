@@ -51,6 +51,16 @@ function stringSet(payload: SyncPayload, collection: string): Set<string> {
   return new Set(Array.isArray(values) ? values.filter((value): value is string => typeof value === 'string') : []);
 }
 
+function positionMap(values: Iterable<string>): Map<string, number> {
+  const positions = new Map<string, number>();
+  let position = 0;
+  for (const value of values) {
+    positions.set(value, position);
+    position += 1;
+  }
+  return positions;
+}
+
 function flattenSettings(
   value: unknown,
   path: string[] = [],
@@ -92,20 +102,29 @@ export function diffLegacySyncPayload(
     if (!Object.prototype.hasOwnProperty.call(legacy, collection)) continue;
     const before = entityMap(baseline, collection);
     const after = entityMap(legacy, collection);
+    const beforePositions = positionMap(before.keys());
+    const afterPositions = positionMap(after.keys());
     const ids = new Set([...before.keys(), ...after.keys()]);
     for (const id of [...ids].sort()) {
       const previous = before.get(id);
       const next = after.get(id);
       if (previous && !next) {
         mutations.push({ kind: 'entity-delete', collection, entityId: id });
-      } else if (next && (!previous || fingerprint(previous) !== fingerprint(next))) {
+      } else if (
+        next
+        && (
+          !previous
+          || fingerprint(previous) !== fingerprint(next)
+          || beforePositions.get(id) !== afterPositions.get(id)
+        )
+      ) {
         const structural = { ...next, id } as JsonValue;
         mutations.push({
           kind: 'entity-upsert',
           collection,
           entityId: id,
           value: structural as Extract<ConvergentMutation, { kind: 'entity-upsert' }>['value'],
-          position: [...after.keys()].indexOf(id),
+          position: afterPositions.get(id),
         });
       }
     }
@@ -114,17 +133,18 @@ export function diffLegacySyncPayload(
     if (!Object.prototype.hasOwnProperty.call(legacy, collection)) continue;
     const before = stringSet(baseline, collection);
     const after = stringSet(legacy, collection);
+    const beforePositions = positionMap(before);
+    const afterPositions = positionMap(after);
     for (const value of [...before].sort()) {
       if (!after.has(value)) mutations.push({ kind: 'string-entry-delete', collection, value });
     }
-    const orderedAfter = [...after];
     for (const value of [...after].sort()) {
-      if (!before.has(value)) {
+      if (!before.has(value) || beforePositions.get(value) !== afterPositions.get(value)) {
         mutations.push({
           kind: 'string-entry-add',
           collection,
           value,
-          position: orderedAfter.indexOf(value),
+          position: afterPositions.get(value),
         });
       }
     }

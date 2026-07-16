@@ -1141,3 +1141,54 @@ test("applyLocalVaultPayload restores known hosts from local backups", async () 
   assert.ok(imported);
   assert.deepEqual(imported.knownHosts, [knownHost("kh-backup")]);
 });
+
+test("applyLocalVaultPayload prepares convergent writes before mutating local data", async () => {
+  const calls: string[] = [];
+  const payload: SyncPayload = {
+    hosts: [],
+    keys: [],
+    identities: [],
+    snippets: [],
+    customGroups: [],
+    syncedAt: 1,
+  };
+
+  await applyLocalVaultPayload(payload, {
+    importVaultData: () => {
+      calls.push("import");
+    },
+  }, {
+    prepareConvergentRestore: async () => {
+      calls.push("prepare");
+    },
+  });
+
+  assert.deepEqual(calls, ["prepare", "import"]);
+});
+
+test("applyLocalVaultPayload leaves local data untouched when convergent preparation fails", async () => {
+  let imported = false;
+  const payload: SyncPayload = {
+    hosts: [],
+    keys: [],
+    identities: [],
+    snippets: [],
+    customGroups: [],
+    syncedAt: 1,
+  };
+
+  await assert.rejects(
+    () => applyLocalVaultPayload(payload, {
+      importVaultData: () => {
+        imported = true;
+      },
+    }, {
+      prepareConvergentRestore: async () => {
+        throw new Error("replica unavailable");
+      },
+    }),
+    /replica unavailable/,
+  );
+
+  assert.equal(imported, false);
+});

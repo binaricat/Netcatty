@@ -76,10 +76,15 @@ barrier, applies the previewed materialized payload, persists the canonical
 replica, and only then marks v2 initialized. A crash or failure leaves the
 existing apply sentinel set so auto-sync cannot publish a partial migration.
 
-After a local backup restore, the restored snapshot is diffed against the
-current materialized replica and recorded as normal device writes. Causal
-history and tombstones therefore survive restore instead of being replaced by
-an unrelated replica copied from the backup.
+Before a local backup restore mutates local data, the restored snapshot is
+diffed against the current materialized replica and persisted as normal device
+writes. If the replica cannot be loaded or saved, the restore fails without
+touching local data. Causal history and tombstones therefore survive restore
+instead of being replaced by an unrelated replica copied from the backup.
+
+Trusted legacy diffs also compare collection positions. A reorder-only edit is
+converted into position-register writes for entity and string collections,
+rather than disappearing because the values themselves are unchanged.
 
 ## Follow-up boundary
 

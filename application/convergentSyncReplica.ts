@@ -9,11 +9,12 @@ import type { CloudSyncManager } from '../infrastructure/services/CloudSyncManag
 import { getConvergentSyncLocalConfig } from '../infrastructure/services/convergentSyncConfig';
 
 /**
- * Local backups intentionally contain no active CRDT replica. After a restore,
- * translate the restored materialized snapshot into ordinary local writes so
- * tombstones and causal history remain intact.
+ * Local backups intentionally contain no active CRDT replica. Before applying
+ * a restore, translate the restored materialized snapshot into ordinary local
+ * writes so failures cannot overwrite local data and then strand the active
+ * replica. Tombstones and causal history remain intact.
  */
-export async function recordRestoredPayloadAsConvergentWrites(
+export async function prepareRestoredPayloadConvergentWrites(
   restoredPayload: SyncPayload,
   now = Date.now(),
   dependencies: {

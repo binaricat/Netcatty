@@ -7,7 +7,7 @@ import {
 } from '../domain/convergentSync/index.ts';
 import type { SyncPayload } from '../domain/sync.ts';
 import type { CloudSyncManager } from '../infrastructure/services/CloudSyncManager.ts';
-import { recordRestoredPayloadAsConvergentWrites } from './convergentSyncReplica.ts';
+import { prepareRestoredPayloadConvergentWrites } from './convergentSyncReplica.ts';
 
 const NOW = 1_700_000_000_000;
 
@@ -39,7 +39,7 @@ test('local restore is recorded as writes on the active replica instead of repla
     },
   } as unknown as CloudSyncManager;
 
-  await recordRestoredPayloadAsConvergentWrites(
+  await prepareRestoredPayloadConvergentWrites(
     payload('Restored'),
     NOW + 1,
     { manager, initialized: true },
@@ -57,7 +57,7 @@ test('an initialized configuration fails closed when its active replica is missi
   } as unknown as CloudSyncManager;
 
   await assert.rejects(
-    () => recordRestoredPayloadAsConvergentWrites(
+    () => prepareRestoredPayloadConvergentWrites(
       payload('Restored'),
       NOW,
       { manager, initialized: true },
