@@ -50,6 +50,10 @@ position: unchanged conflict-free registers are preserved, while accepting a
 currently selected conflicted value emits a new candidate that dominates every
 retained alternative.
 
+String-entry add mutations likewise resolve visible presence and position
+conflicts even when the selected values are unchanged; conflict-free repeated
+adds remain no-ops.
+
 Deletion is a register candidate, not absence from the serialized structure.
 Tombstones are retained indefinitely in v2. A later recreation replaces a
 tombstone only when its new dot causally observes the deletion.

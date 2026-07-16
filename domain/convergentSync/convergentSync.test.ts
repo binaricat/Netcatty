@@ -394,6 +394,88 @@ test('string collections use observed-remove presence and stable positions', () 
   );
 });
 
+test('string-entry adds resolve a visible add/delete conflict', () => {
+  const seeded = applyConvergentMutations(createConvergentSyncState(), 'seed', [{
+    kind: 'string-entry-add',
+    collection: 'customGroups',
+    value: 'Alpha',
+  }], BASE_TIME);
+  const removed = applyConvergentMutations(seeded, 'device-a', [{
+    kind: 'string-entry-delete',
+    collection: 'customGroups',
+    value: 'Alpha',
+  }], BASE_TIME + 1);
+  const concurrentAdd = applyConvergentMutations(createConvergentSyncState(), 'device-b', [{
+    kind: 'string-entry-add',
+    collection: 'customGroups',
+    value: 'Alpha',
+  }], BASE_TIME + 1);
+  const conflicted = mergeConvergentSyncStates(removed, concurrentAdd);
+  const resolved = applyConvergentMutations(conflicted, 'resolver', [{
+    kind: 'string-entry-add',
+    collection: 'customGroups',
+    value: 'Alpha',
+  }], BASE_TIME + 2);
+  const materialized = materializeConvergentSyncState(resolved);
+
+  assert.deepEqual(materialized.stringCollections.customGroups, ['Alpha']);
+  assert.equal(materialized.conflicts.length, 0);
+  assert.equal(resolved.vector.resolver, 1);
+});
+
+test('string-entry adds resolve a same-value position conflict', () => {
+  const seeded = applyConvergentMutations(createConvergentSyncState(), 'seed', [{
+    kind: 'string-entry-add',
+    collection: 'customGroups',
+    value: 'Alpha',
+    position: 0,
+  }], BASE_TIME);
+  const left = applyConvergentMutations(seeded, 'device-a', [{
+    kind: 'string-entry-add',
+    collection: 'customGroups',
+    value: 'Alpha',
+    position: 1,
+  }], BASE_TIME + 1);
+  const right = applyConvergentMutations(seeded, 'device-z', [{
+    kind: 'string-entry-add',
+    collection: 'customGroups',
+    value: 'Alpha',
+    position: 2,
+  }], BASE_TIME + 1);
+  const conflicted = mergeConvergentSyncStates(left, right);
+  const resolved = applyConvergentMutations(conflicted, 'resolver', [{
+    kind: 'string-entry-add',
+    collection: 'customGroups',
+    value: 'Alpha',
+    position: 2,
+  }], BASE_TIME + 2);
+  const materialized = materializeConvergentSyncState(resolved);
+
+  assert.deepEqual(materialized.stringCollections.customGroups, ['Alpha']);
+  assert.equal(materialized.conflicts.length, 0);
+  assert.equal(resolved.vector.resolver, 2);
+});
+
+test('unchanged string-entry adds do not advance the replica clock', () => {
+  const initial = applyConvergentMutations(createConvergentSyncState(), 'device-a', [{
+    kind: 'string-entry-add',
+    collection: 'customGroups',
+    value: 'Alpha',
+    position: 0,
+  }], BASE_TIME);
+  const unchanged = applyConvergentMutations(initial, 'device-a', [{
+    kind: 'string-entry-add',
+    collection: 'customGroups',
+    value: 'Alpha',
+    position: 0,
+  }], BASE_TIME + 1);
+
+  assert.equal(
+    serializeConvergentSyncState(unchanged),
+    serializeConvergentSyncState(initial),
+  );
+});
+
 test('unobserved string-entry deletes are no-ops and do not conflict with concurrent adds', () => {
   const empty = createConvergentSyncState();
   const deleted = applyConvergentMutations(empty, 'device-a', [{

@@ -494,10 +494,16 @@ function applyMutation(
       break;
     case 'string-entry-add': {
       const { entry, created } = ensureStringEntry(state, mutation.collection, mutation.value);
-      let changed = created || !registerIsPresent(entry.presence);
+      let changed = created
+        || !registerIsPresent(entry.presence)
+        || registerHasConflict(entry.presence);
       if (
         mutation.position !== undefined
-        && !candidateValueEquals(entry.position, mutation.position)
+        && (
+          !entry.position
+          || registerHasConflict(entry.position)
+          || !candidateValueEquals(entry.position, mutation.position)
+        )
       ) {
         entry.position = writeRegister(
           state,
