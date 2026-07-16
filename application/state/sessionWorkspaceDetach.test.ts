@@ -3,6 +3,7 @@ import test from "node:test";
 import type { TerminalSession, Workspace } from "../../domain/models";
 import {
   applyCloseSessionToSessions,
+  closeSessionsState,
   closeSessionWorkspaceLayoutState,
   detachSessionFromWorkspaceState,
   replaceDissolvedWorkspaceTabOrder,
@@ -176,4 +177,41 @@ test("closing the last workspace session does not invent a surviving terminal", 
     }),
     "vault",
   );
+});
+
+test("closing several standalone sessions removes the whole batch", () => {
+  const standaloneSession = (id: string): TerminalSession => ({
+    ...session(id),
+    workspaceId: undefined,
+  });
+
+  const result = closeSessionsState({
+    sessions: [standaloneSession("s1"), standaloneSession("s2"), standaloneSession("s3")],
+    workspaces: [],
+    sessionIds: ["s1", "s2", "s3"],
+    currentActiveTabId: "s1",
+    tabOrder: ["s1", "s2", "s3"],
+  });
+
+  assert.deepEqual(result.sessions, []);
+  assert.deepEqual(result.workspaces, []);
+  assert.equal(result.activeTabId, "vault");
+});
+
+test("closing a subset of standalone sessions keeps tabs outside the batch", () => {
+  const standaloneSession = (id: string): TerminalSession => ({
+    ...session(id),
+    workspaceId: undefined,
+  });
+
+  const result = closeSessionsState({
+    sessions: [standaloneSession("s1"), standaloneSession("s2"), standaloneSession("s3")],
+    workspaces: [],
+    sessionIds: ["s2", "s3"],
+    currentActiveTabId: "s1",
+    tabOrder: ["s1", "s2", "s3"],
+  });
+
+  assert.deepEqual(result.sessions.map((candidate) => candidate.id), ["s1"]);
+  assert.equal(result.activeTabId, undefined);
 });

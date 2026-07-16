@@ -17,6 +17,13 @@ export type CloseSessionWorkspaceLayoutResult = {
   lastRemainingSessionId?: string;
 };
 
+export type CloseSessionsStateResult = {
+  sessions: TerminalSession[];
+  workspaces: Workspace[];
+  tabOrder: string[];
+  activeTabId?: string;
+};
+
 type DetachSessionFromWorkspaceStateOptions = {
   sessions: TerminalSession[];
   workspaces: Workspace[];
@@ -152,6 +159,67 @@ export function resolveActiveTabAfterCloseSession({
   }
 
   return null;
+}
+
+export function closeSessionsState({
+  sessions,
+  workspaces,
+  sessionIds,
+  currentActiveTabId,
+  tabOrder,
+}: {
+  sessions: readonly TerminalSession[];
+  workspaces: readonly Workspace[];
+  sessionIds: readonly string[];
+  currentActiveTabId: string | null;
+  tabOrder: readonly string[];
+}): CloseSessionsStateResult {
+  let nextSessions = [...sessions];
+  let nextWorkspaces = [...workspaces];
+  let nextTabOrder = [...tabOrder];
+  let nextActiveTabId = currentActiveTabId;
+  let resolvedActiveTabId: string | undefined;
+
+  for (const sessionId of new Set(sessionIds)) {
+    const targetSession = nextSessions.find((session) => session.id === sessionId);
+    if (!targetSession) continue;
+
+    const workspaceId = targetSession.workspaceId;
+    const layoutResult = closeSessionWorkspaceLayoutState(
+      nextWorkspaces,
+      workspaceId,
+      sessionId,
+    );
+    nextWorkspaces = layoutResult.workspaces;
+    nextSessions = applyCloseSessionToSessions(nextSessions, sessionId, layoutResult);
+
+    if (layoutResult.dissolvedWorkspaceId && layoutResult.lastRemainingSessionId) {
+      nextTabOrder = replaceDissolvedWorkspaceTabOrder(
+        nextTabOrder,
+        layoutResult.dissolvedWorkspaceId,
+        [layoutResult.lastRemainingSessionId],
+      );
+    }
+
+    const activeTabAfterClose = resolveActiveTabAfterCloseSession({
+      currentActiveTabId: nextActiveTabId,
+      closedSessionId: sessionId,
+      workspaceId,
+      layoutResult,
+      remainingSessions: nextSessions,
+    });
+    if (activeTabAfterClose) {
+      nextActiveTabId = activeTabAfterClose;
+      resolvedActiveTabId = activeTabAfterClose;
+    }
+  }
+
+  return {
+    sessions: nextSessions,
+    workspaces: nextWorkspaces,
+    tabOrder: nextTabOrder,
+    activeTabId: resolvedActiveTabId,
+  };
 }
 
 export function detachSessionFromWorkspaceState({

@@ -25,11 +25,9 @@ import { clearSessionFontSizeOverride as clearSessionFontSizeOverrideFields } fr
 import { buildOrderedWorkTabIds, reorderWorkTabIds } from '../app/workTabSurface';
 import { activeTabStore } from './activeTabStore';
 import {
-  applyCloseSessionToSessions,
-  closeSessionWorkspaceLayoutState,
+  closeSessionsState,
   detachSessionFromWorkspaceState,
   replaceDissolvedWorkspaceTabOrder,
-  resolveActiveTabAfterCloseSession,
 } from './sessionWorkspaceDetach';
 import {
   createCopiedTerminalSessionClone,
@@ -393,49 +391,27 @@ export const useSessionState = ({
     });
   }, [setActiveTabId]);
 
-  const closeSession = useCallback((sessionId: string, e?: MouseEvent) => {
-    e?.stopPropagation();
-
-    // Compute layout from the latest refs so dissolve/remove cannot desync from
-    // a stale workspaces/sessions render snapshot. Empty workspaces are already
-    // removed by closeSessionWorkspaceLayoutState — do NOT follow up with
-    // closeWorkspace(), which would race and delete remaining terminals that
-    // still briefly carry the old workspaceId.
-    const targetSession = sessionsRef.current.find((session) => session.id === sessionId);
-    const wsId = targetSession?.workspaceId;
-    const layoutResult = closeSessionWorkspaceLayoutState(
-      workspacesRef.current,
-      wsId,
-      sessionId,
-    );
-    const nextSessions = applyCloseSessionToSessions(
-      sessionsRef.current,
-      sessionId,
-      layoutResult,
-    );
-
-    setWorkspaces(layoutResult.workspaces);
-    setSessions(nextSessions);
-
-    if (layoutResult.dissolvedWorkspaceId && layoutResult.lastRemainingSessionId) {
-      setTabOrder((prevTabOrder) => replaceDissolvedWorkspaceTabOrder(
-        prevTabOrder,
-        layoutResult.dissolvedWorkspaceId,
-        [layoutResult.lastRemainingSessionId!],
-      ));
-    }
-
-    const nextActiveTabId = resolveActiveTabAfterCloseSession({
+  const closeSessions = useCallback((sessionIds: string[]) => {
+    const result = closeSessionsState({
+      sessions: sessionsRef.current,
+      workspaces: workspacesRef.current,
+      sessionIds,
       currentActiveTabId: activeTabStore.getActiveTabId(),
-      closedSessionId: sessionId,
-      workspaceId: wsId,
-      layoutResult,
-      remainingSessions: nextSessions,
+      tabOrder: tabOrderRef.current,
     });
-    if (nextActiveTabId) {
-      setActiveTabId(nextActiveTabId);
+
+    setWorkspaces(result.workspaces);
+    setSessions(result.sessions);
+    setTabOrder(result.tabOrder);
+    if (result.activeTabId) {
+      setActiveTabId(result.activeTabId);
     }
   }, [setActiveTabId]);
+
+  const closeSession = useCallback((sessionId: string, e?: MouseEvent) => {
+    e?.stopPropagation();
+    closeSessions([sessionId]);
+  }, [closeSessions]);
 
   const startSessionRename = useCallback((sessionId: string) => {
     setSessions(prevSessions => {
@@ -1156,6 +1132,7 @@ export const useSessionState = ({
     createSerialSession,
     connectToHost,
     closeSession,
+    closeSessions,
     closeWorkspace,
     updateSessionStatus,
     updateSessionFontSize,

@@ -456,7 +456,7 @@ export async function confirmIfBusyLocalTerminalImpl(getCtx: AppContextGetter, s
 }
 
 export async function closeTabsBatchImpl(getCtx: AppContextGetter, targetIds: string[]) {
-  const { closeLogView, closeSession, closeTabsInFlightRef, closeWorkspace, confirmIfBusyLocalTerminal, logViews, sessions, workspaces } = getCtx();
+  const { closeLogView, closeSessions, closeTabsInFlightRef, closeWorkspace, confirmIfBusyLocalTerminal, logViews, sessions, workspaces } = getCtx();
 {
       if (targetIds.length === 0) return;
       if (closeTabsInFlightRef.current) return;
@@ -479,11 +479,15 @@ export async function closeTabsBatchImpl(getCtx: AppContextGetter, targetIds: st
       try {
         const ok = await confirmIfBusyLocalTerminal(sessionIdsToProbe);
         if (!ok) return;
+        const standaloneSessionIds = targetIds.filter((tabId) => (
+          sessions.some((session) => session.id === tabId)
+        ));
+        if (standaloneSessionIds.length > 0) {
+          closeSessions(standaloneSessionIds);
+        }
         for (const tabId of targetIds) {
           if (workspaces.find((w) => w.id === tabId)) {
             closeWorkspace(tabId);
-          } else if (sessions.find((s) => s.id === tabId)) {
-            closeSession(tabId);
           } else if (logViews.find((lv) => lv.id === tabId)) {
             closeLogView(tabId);
           }
