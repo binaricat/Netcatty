@@ -420,6 +420,48 @@ test('a fresh entity-empty device adopts v1 cloud settings instead of merging lo
   assert.equal(plan.payload?.settings?.theme, 'dark');
 });
 
+test('v1-only migration blocks divergent provider data without a trusted baseline', () => {
+  const local = payload('Stale local host');
+  const remote = emptyPayload();
+  const plan = planConvergentSyncMigration({
+    localPayload: local,
+    localTrustedBaseline: null,
+    providers: [{
+      provider: 'github',
+      status: 'ready',
+      meta: meta(),
+      payload: remote,
+      trustedBaseline: null,
+    }],
+    deviceId: 'local-device',
+    now: NOW + 1,
+  });
+
+  assert.equal(plan.preview.canInitialize, false);
+  assert.match(plan.preview.blockedReasons.join(' '), /github: no trusted legacy baseline/);
+  assert.equal(plan.payload, null);
+});
+
+test('v1-only migration accepts matching provider data without a trusted baseline', () => {
+  const local = payload('Matching host');
+  const plan = planConvergentSyncMigration({
+    localPayload: local,
+    localTrustedBaseline: null,
+    providers: [{
+      provider: 'github',
+      status: 'ready',
+      meta: meta(),
+      payload: structuredClone(local),
+      trustedBaseline: null,
+    }],
+    deviceId: 'local-device',
+    now: NOW + 1,
+  });
+
+  assert.equal(plan.preview.canInitialize, true);
+  assert.equal(plan.payload?.hosts[0]?.label, 'Matching host');
+});
+
 test('a fresh device still blocks a shrunk v1 provider used as the migration seed', () => {
   const baseline = payload('Base');
   baseline.hosts = Array.from({ length: 4 }, (_, index) => ({

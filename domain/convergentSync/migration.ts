@@ -179,6 +179,12 @@ export function planConvergentSyncMigration(options: {
     }
     const remainingInputs = seedFromProvider ? v1Inputs.slice(1) : v1Inputs;
     for (const input of remainingInputs) {
+      if (!input.trustedBaseline) {
+        if (!cloudSyncPayloadsEqual(merged, input.payload)) {
+          blockedReasons.push(`${input.provider}: no trusted legacy baseline is available`);
+        }
+        continue;
+      }
       const result = mergeSyncPayloads(input.trustedBaseline, merged, input.payload);
       const changeSummary = summarizeSyncChanges(
         input.trustedBaseline,

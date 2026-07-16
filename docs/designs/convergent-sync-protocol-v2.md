@@ -32,10 +32,13 @@ Hydration fails closed when:
 ## Legacy import
 
 Initial v1-only migration downloads every connected provider and runs the
-existing smart merge against each provider-specific trusted base. Any
-unresolved entity/settings conflict, unavailable provider, or shrink guard
-blocks initialization. A successful result becomes one v2 CRDT lineage and is
-written back as a full v1 materialized snapshot plus the compact envelope.
+existing smart merge against each provider-specific trusted base. A provider
+without a trustworthy base may be adopted as a fresh-device seed, or accepted
+when it exactly matches the current merge; divergent data without a base blocks
+instead of guessing whether an absent entity was deleted. Any unresolved
+entity/settings conflict, unavailable provider, or shrink guard blocks
+initialization. A successful result becomes one v2 CRDT lineage and is written
+back as a full v1 materialized snapshot plus the compact envelope.
 
 If one or more providers already contain v2, their states are joined with the
 CRDT join. A legacy local or provider snapshot may then contribute writes only
