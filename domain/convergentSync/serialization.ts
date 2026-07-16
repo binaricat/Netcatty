@@ -358,12 +358,12 @@ export function assertValidConvergentSyncState(
 
   for (const reference of contextReferences) {
     const retainedLocation = globalDots.get(reference.key);
-    if (
-      retainedLocation
-      && retainedLocation.registerLabel !== reference.registerLabel
-    ) {
+    if (retainedLocation) {
+      const location = retainedLocation.registerLabel === reference.registerLabel
+        ? 'the same register'
+        : 'another register';
       throw new ConvergentSyncInvariantError(
-        `${reference.label} references dot ${reference.key} retained in another register`,
+        `${reference.label} references candidate dot ${reference.key} retained in ${location}`,
       );
     }
   }

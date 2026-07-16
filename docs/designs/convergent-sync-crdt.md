@@ -78,7 +78,9 @@ invariant violation and fails closed. Every global vector counter must also be
 witnessed by a retained candidate dot or same-register candidate context.
 Hydration rejects dangling observations so a malformed or partial state cannot
 use an unsubstantiated vector to discard local candidates during join. It also
-rejects a context that references a currently retained dot in another register.
+rejects a context that references any currently retained candidate dot: exact
+contexts contain dominated history only, so retained references would represent
+invalid causal dominance or a cycle.
 
 ## Materialization and conflicts
 

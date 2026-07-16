@@ -576,7 +576,33 @@ test('validation rejects a context dot retained in another register', () => {
 
   assert.throws(
     () => hydrateConvergentSyncState(JSON.stringify(corrupted)),
-    /references dot device-a:1 retained in another register/,
+    /references candidate dot device-a:1 retained in another register/,
+  );
+});
+
+test('validation rejects causal cycles between retained candidates', () => {
+  const left = applyConvergentMutations(createConvergentSyncState(), 'device-a', [{
+    kind: 'setting-set',
+    path: ['theme'],
+    value: 'left',
+  }], BASE_TIME);
+  const right = applyConvergentMutations(createConvergentSyncState(), 'device-b', [{
+    kind: 'setting-set',
+    path: ['theme'],
+    value: 'right',
+  }], BASE_TIME);
+  const corrupted = mergeConvergentSyncStates(left, right);
+  const [first, second] = corrupted.settings['/theme'].candidates;
+  first.context = [{ ...second.dot }];
+  second.context = [{ ...first.dot }];
+
+  assert.throws(
+    () => hydrateConvergentSyncState(JSON.stringify(corrupted)),
+    /references candidate dot device-b:1 retained in the same register/,
+  );
+  assert.throws(
+    () => mergeConvergentSyncStates(corrupted, corrupted),
+    /references candidate dot device-b:1 retained in the same register/,
   );
 });
 
