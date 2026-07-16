@@ -31,12 +31,28 @@ import {
   SystemPanelStatusBadge,
   SystemPanelToolbar,
 } from './SystemPanelUi';
+import { SystemPanelConfirmDialog } from './SystemPanelConfirmDialog';
 import { SystemPanelPromptDialog } from './SystemPanelPromptDialog';
 import { usePolling, useStableTranslate } from './hooks/useSystemManager';
 
 type Backend = ReturnType<typeof useSystemManagerBackend>;
 type SortKey = 'cpuPercent' | 'memPercent' | 'pid' | 'command' | 'user';
 type ProcessFilter = 'all' | 'running';
+type ProcessSignal = 'STOP' | 'CONT' | 'TERM' | 'KILL';
+
+interface PendingProcessSignal {
+  pid: number;
+  signal: ProcessSignal;
+}
+
+function processSignalTitleKey(signal: ProcessSignal): string {
+  switch (signal) {
+    case 'STOP': return 'systemManager.processes.stop';
+    case 'CONT': return 'systemManager.processes.cont';
+    case 'TERM': return 'systemManager.processes.term';
+    case 'KILL': return 'systemManager.processes.kill';
+  }
+}
 
 const PROCESS_CACHE_TTL_MS = 30_000;
 const PROCESS_ROW_HEIGHT = 56;
@@ -255,6 +271,8 @@ export const ProcessManagerTab = memo(function ProcessManagerTab({
   const [filter, setFilter] = useState<ProcessFilter>('all');
   const [selectedPid, setSelectedPid] = useState<number | null>(null);
   const [reniceTarget, setReniceTarget] = useState<number | null>(null);
+  const [pendingSignal, setPendingSignal] = useState<PendingProcessSignal | null>(null);
+  const [signalBusy, setSignalBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [cachedProcesses, setCachedProcesses] = useState<SystemProcessInfo[] | null>(() => getCachedProcesses(sessionId));
   const [cachedProcessesSessionId, setCachedProcessesSessionId] = useState(sessionId);
@@ -377,19 +395,24 @@ export const ProcessManagerTab = memo(function ProcessManagerTab({
     setSelectedPid((cur) => (cur === pid ? null : pid));
   }, []);
 
-  const signalProcess = useCallback(async (pid: number, signal: string) => {
-    const confirmKey = signal === 'KILL'
-      ? 'systemManager.processes.confirmKill'
-      : 'systemManager.processes.confirmSignal';
-    const ok = window.confirm(t(confirmKey, { pid: String(pid), signal }));
-    if (!ok) return;
+  const requestSignal = useCallback((pid: number, signal: string) => {
+    if (signal !== 'STOP' && signal !== 'CONT' && signal !== 'TERM' && signal !== 'KILL') return;
+    setPendingSignal({ pid, signal });
+  }, []);
+
+  const executeSignal = useCallback(async (pid: number, signal: ProcessSignal) => {
+    setSignalBusy(true);
     setActionError(null);
-    const result = await backend.signalSystemProcess({ sessionId, pid, signal });
-    if (!result.success) {
-      setActionError(result.error || t('systemManager.errors.actionFailed'));
-      return;
+    try {
+      const result = await backend.signalSystemProcess({ sessionId, pid, signal });
+      if (!result.success) {
+        setActionError(result.error || t('systemManager.errors.actionFailed'));
+        return;
+      }
+      void refresh();
+    } finally {
+      setSignalBusy(false);
     }
-    void refresh();
   }, [backend, refresh, sessionId, t]);
 
   const reniceProcess = useCallback(async (pid: number, nice: number) => {
@@ -478,10 +501,35 @@ export const ProcessManagerTab = memo(function ProcessManagerTab({
           processes={displayList}
           selectedPid={selectedPid}
           onToggle={togglePid}
-          onSignal={signalProcess}
+          onSignal={requestSignal}
           onRenice={openRenicePrompt}
         />
       )}
+
+      <SystemPanelConfirmDialog
+        open={pendingSignal !== null}
+        title={pendingSignal ? t(processSignalTitleKey(pendingSignal.signal)) : ''}
+        message={pendingSignal
+          ? t(
+            pendingSignal.signal === 'KILL'
+              ? 'systemManager.processes.confirmKill'
+              : 'systemManager.processes.confirmSignal',
+            { pid: String(pendingSignal.pid), signal: pendingSignal.signal },
+          )
+          : ''}
+        confirmLabel={pendingSignal ? t(processSignalTitleKey(pendingSignal.signal)) : ''}
+        destructive={pendingSignal?.signal === 'KILL' || pendingSignal?.signal === 'TERM'}
+        busy={signalBusy}
+        onOpenChange={(open) => {
+          if (!open && !signalBusy) setPendingSignal(null);
+        }}
+        onConfirm={() => {
+          const target = pendingSignal;
+          if (!target) return;
+          setPendingSignal(null);
+          void executeSignal(target.pid, target.signal);
+        }}
+      />
 
       <SystemPanelPromptDialog
         open={reniceTarget !== null}

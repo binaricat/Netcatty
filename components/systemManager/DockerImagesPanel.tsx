@@ -21,12 +21,17 @@ import {
   SystemPanelSearch,
   SystemPanelToolbar,
 } from './SystemPanelUi';
+import { SystemPanelConfirmDialog } from './SystemPanelConfirmDialog';
 import { SystemPanelPromptDialog } from './SystemPanelPromptDialog';
 import { useAsyncRecordCache } from './hooks/useAsyncRecordCache';
 import { usePolling, useStableTranslate } from './hooks/useSystemManager';
 import { showSystemManagerError } from './systemManagerToast';
 
 type Backend = ReturnType<typeof useSystemManagerBackend>;
+
+type PendingImageConfirm =
+  | { kind: 'remove'; image: DockerImageInfo; label: string }
+  | { kind: 'prune'; all: boolean };
 
 interface DockerImagesPanelProps {
   sessionId: string;
@@ -94,10 +99,13 @@ export const DockerImagesPanel = memo(function DockerImagesPanel({
   const [query, setQuery] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [tagTarget, setTagTarget] = useState<DockerImageInfo | null>(null);
+  const [confirmTarget, setConfirmTarget] = useState<PendingImageConfirm | null>(null);
+  const [actionBusy, setActionBusy] = useState(false);
 
   useEffect(() => {
     setSelectedId(null);
     setTagTarget(null);
+    setConfirmTarget(null);
   }, [sessionId]);
 
   const imagesFetcher = useCallback(async () => {
@@ -167,39 +175,51 @@ export const DockerImagesPanel = memo(function DockerImagesPanel({
     staleTimeMs: 20_000,
   });
 
-  const handleRemove = useCallback(async (image: DockerImageInfo) => {
-    const label = image.name || image.id.slice(0, 12);
-    const ok = window.confirm(t('systemManager.docker.confirmRemoveImage', { name: label }));
-    if (!ok) return;
-    const result = await backend.dockerImageAction({
-      sessionId,
-      action: 'rm',
-      imageId: image.id.slice(0, 12),
-      force: image.tag === '<none>',
-    });
-    if (!result.success) {
-      showSystemManagerError(result.error || t('systemManager.errors.actionFailed'), t('common.error'));
-      return;
+  const executeRemove = useCallback(async (image: DockerImageInfo) => {
+    setActionBusy(true);
+    try {
+      const result = await backend.dockerImageAction({
+        sessionId,
+        action: 'rm',
+        imageId: image.id.slice(0, 12),
+        force: image.tag === '<none>',
+      });
+      if (!result.success) {
+        showSystemManagerError(result.error || t('systemManager.errors.actionFailed'), t('common.error'));
+        return;
+      }
+      if (selectedId === dockerImageRowKey(image)) {
+        setSelectedId(null);
+      }
+      invalidateImageInspect(getImageInspectKey(image));
+      await refresh();
+    } finally {
+      setActionBusy(false);
     }
-    if (selectedId === dockerImageRowKey(image)) {
-      setSelectedId(null);
-    }
-    invalidateImageInspect(getImageInspectKey(image));
-    await refresh();
   }, [backend, getImageInspectKey, invalidateImageInspect, refresh, selectedId, sessionId, t]);
 
-  const handlePrune = async (all: boolean) => {
-    const ok = window.confirm(all
-      ? t('systemManager.docker.confirmPruneAll')
-      : t('systemManager.docker.confirmPrune'));
-    if (!ok) return;
-    const result = await backend.dockerImageAction({ sessionId, action: 'prune', all });
-    if (!result.success) {
-      showSystemManagerError(result.error || t('systemManager.errors.actionFailed'), t('common.error'));
-      return;
+  const handleRemove = useCallback((image: DockerImageInfo) => {
+    const label = image.name || image.id.slice(0, 12);
+    setConfirmTarget({ kind: 'remove', image, label });
+  }, []);
+
+  const executePrune = useCallback(async (all: boolean) => {
+    setActionBusy(true);
+    try {
+      const result = await backend.dockerImageAction({ sessionId, action: 'prune', all });
+      if (!result.success) {
+        showSystemManagerError(result.error || t('systemManager.errors.actionFailed'), t('common.error'));
+        return;
+      }
+      await refresh();
+    } finally {
+      setActionBusy(false);
     }
-    await refresh();
-  };
+  }, [backend, refresh, sessionId, t]);
+
+  const handlePrune = useCallback((all: boolean) => {
+    setConfirmTarget({ kind: 'prune', all });
+  }, []);
 
   const handleTagSubmit = async (image: DockerImageInfo, repository: string, tag: string) => {
     const result = await backend.dockerImageAction({
@@ -235,14 +255,14 @@ export const DockerImagesPanel = memo(function DockerImagesPanel({
           <>
             <button
               type="button"
-              onClick={() => void handlePrune(false)}
+              onClick={() => handlePrune(false)}
               className="shrink-0 h-7 px-2 rounded-md text-[10px] text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
             >
               {t('systemManager.docker.prune')}
             </button>
             <button
               type="button"
-              onClick={() => void handlePrune(true)}
+              onClick={() => handlePrune(true)}
               className="shrink-0 h-7 px-2 rounded-md text-[10px] text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
             >
               {t('systemManager.docker.pruneAll')}
@@ -343,6 +363,38 @@ export const DockerImagesPanel = memo(function DockerImagesPanel({
           setTagTarget(null);
           if (!image) return;
           void handleTagSubmit(image, values.repository, values.tag);
+        }}
+      />
+
+      <SystemPanelConfirmDialog
+        open={confirmTarget !== null}
+        title={confirmTarget?.kind === 'prune'
+          ? (confirmTarget.all ? t('systemManager.docker.pruneAll') : t('systemManager.docker.prune'))
+          : t('action.remove')}
+        message={confirmTarget?.kind === 'prune'
+          ? (confirmTarget.all
+            ? t('systemManager.docker.confirmPruneAll')
+            : t('systemManager.docker.confirmPrune'))
+          : t('systemManager.docker.confirmRemoveImage', {
+            name: confirmTarget?.kind === 'remove' ? confirmTarget.label : '',
+          })}
+        confirmLabel={confirmTarget?.kind === 'prune'
+          ? (confirmTarget.all ? t('systemManager.docker.pruneAll') : t('systemManager.docker.prune'))
+          : t('action.remove')}
+        destructive
+        busy={actionBusy}
+        onOpenChange={(open) => {
+          if (!open && !actionBusy) setConfirmTarget(null);
+        }}
+        onConfirm={() => {
+          const target = confirmTarget;
+          setConfirmTarget(null);
+          if (!target) return;
+          if (target.kind === 'remove') {
+            void executeRemove(target.image);
+            return;
+          }
+          void executePrune(target.all);
         }}
       />
     </div>

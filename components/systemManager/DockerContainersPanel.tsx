@@ -26,6 +26,7 @@ import {
   SystemPanelStatusBadge,
   SystemPanelToolbar,
 } from './SystemPanelUi';
+import { SystemPanelConfirmDialog } from './SystemPanelConfirmDialog';
 import { useAsyncRecordCache } from './hooks/useAsyncRecordCache';
 import { usePolling, useStableTranslate } from './hooks/useSystemManager';
 import { openInteractiveTerminal } from './openInteractiveTerminal';
@@ -33,6 +34,10 @@ import { showSystemManagerError } from './systemManagerToast';
 
 type Backend = ReturnType<typeof useSystemManagerBackend>;
 type ContainerFilter = 'all' | 'running' | 'stopped' | 'paused';
+type PendingContainerConfirm = {
+  containerId: string;
+  action: 'rm' | 'kill';
+};
 
 async function buildContainerPopupIcon(image: string): Promise<TerminalPopupIcon> {
   const {
@@ -166,6 +171,7 @@ export const DockerContainersPanel = memo(function DockerContainersPanel({
   // Spinner feedback while a container action (stop/restart/…) runs;
   // cleared only after the follow-up list refresh lands.
   const [pendingAction, setPendingAction] = useState<{ id: string; action: DockerContainerAction } | null>(null);
+  const [confirmAction, setConfirmAction] = useState<PendingContainerConfirm | null>(null);
 
   const containersFetcher = useCallback(async () => {
     const result = await backend.listDockerContainers(sessionId);
@@ -283,14 +289,11 @@ export const DockerContainersPanel = memo(function DockerContainersPanel({
     containerId: string,
     action: DockerContainerAction,
     newName?: string,
+    options?: { skipConfirm?: boolean },
   ) => {
-    if (action === 'rm') {
-      const ok = globalThis.confirm(t('systemManager.docker.confirmRemove'));
-      if (!ok) return;
-    }
-    if (action === 'kill') {
-      const ok = globalThis.confirm(t('systemManager.docker.confirmKill'));
-      if (!ok) return;
+    if (!options?.skipConfirm && (action === 'rm' || action === 'kill')) {
+      setConfirmAction({ containerId, action });
+      return;
     }
     setPendingAction({ id: containerId, action });
     try {
@@ -471,6 +474,28 @@ export const DockerContainersPanel = memo(function DockerContainersPanel({
           );
         })}
       </SystemPanelList>
+
+      <SystemPanelConfirmDialog
+        open={confirmAction !== null}
+        title={confirmAction?.action === 'kill'
+          ? t('systemManager.docker.kill')
+          : t('action.remove')}
+        message={confirmAction?.action === 'kill'
+          ? t('systemManager.docker.confirmKill')
+          : t('systemManager.docker.confirmRemove')}
+        confirmLabel={confirmAction?.action === 'kill'
+          ? t('systemManager.docker.kill')
+          : t('action.remove')}
+        destructive
+        busy={pendingAction !== null}
+        onOpenChange={(open) => { if (!open) setConfirmAction(null); }}
+        onConfirm={() => {
+          const target = confirmAction;
+          setConfirmAction(null);
+          if (!target) return;
+          void runAction(target.containerId, target.action, undefined, { skipConfirm: true });
+        }}
+      />
     </div>
   );
 });
