@@ -158,8 +158,14 @@ export function planConvergentSyncMigration(options: {
   let materialized: SyncPayload | null = null;
 
   if (blockedReasons.length === 0 && v2Inputs.length === 0) {
-    let merged = options.localPayload;
-    for (const input of v1Inputs) {
+    const includeLocalSource = shouldIncludeLegacyLocalSource(
+      options.localPayload,
+      options.localTrustedBaseline,
+    );
+    const seedFromProvider = !includeLocalSource && v1Inputs.length > 0;
+    let merged = seedFromProvider ? v1Inputs[0].payload : options.localPayload;
+    const remainingInputs = seedFromProvider ? v1Inputs.slice(1) : v1Inputs;
+    for (const input of remainingInputs) {
       const result = mergeSyncPayloads(input.trustedBaseline, merged, input.payload);
       const changeSummary = summarizeSyncChanges(
         input.trustedBaseline,

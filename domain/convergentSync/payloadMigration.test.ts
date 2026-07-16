@@ -361,6 +361,28 @@ test('v1-only migration previews and creates a backward-compatible v2 payload', 
   assert.equal(plan.payload?.convergentSync?.schemaVersion, 2);
 });
 
+test('a fresh entity-empty device adopts v1 cloud settings instead of merging local defaults', () => {
+  const remote = payload('Remote');
+  remote.settings = { theme: 'dark' };
+  const plan = planConvergentSyncMigration({
+    localPayload: emptyPayload({ theme: 'light' }),
+    localTrustedBaseline: null,
+    providers: [{
+      provider: 'github',
+      status: 'ready',
+      meta: meta(),
+      payload: remote,
+      trustedBaseline: null,
+    }],
+    deviceId: 'fresh-device',
+    now: NOW + 1,
+  });
+
+  assert.equal(plan.preview.canInitialize, true);
+  assert.equal(plan.payload?.hosts[0].label, 'Remote');
+  assert.equal(plan.payload?.settings?.theme, 'dark');
+});
+
 test('migration blocks unresolved v1 conflicts and future provider schemas', () => {
   const baseline = payload('Base');
   const conflict = planConvergentSyncMigration({
@@ -417,7 +439,7 @@ test('joining existing v2 data blocks changed legacy writers without a trusted b
   assert.match(plan.preview.blockedReasons.join(' '), /no trusted legacy baseline/);
 });
 
-test('a fresh empty device adopts existing v2 data without a trusted baseline', () => {
+test('a fresh entity-empty device adopts existing v2 data without a trusted baseline', () => {
   const remoteState = createConvergentSyncStateFromPayload(payload('Remote'), 'remote', NOW);
   const remotePayload = withConvergentSyncEnvelope(remoteState, { syncedAt: NOW });
   const plan = planConvergentSyncMigration({

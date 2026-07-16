@@ -125,6 +125,45 @@ test('master key rotation rolls ciphertext back when the config commit fails', a
   assert.deepEqual(await decryptLocalStorageValue(original, oldKey), { secret: 'value' });
 });
 
+test('master key rotation aborts when an initially absent sync record appears', async () => {
+  const storage = new Map<string, unknown>();
+  const oldKey = await key();
+  const newKey = await key();
+  const subject = manager(storage, oldKey);
+  const oldConfig: MasterKeyConfig = {
+    verificationHash: 'old',
+    salt: 'old-salt',
+    kdf: 'PBKDF2',
+    createdAt: NOW,
+  };
+  const newConfig: MasterKeyConfig = { ...oldConfig, verificationHash: 'new' };
+  const appearedKey = subject.convergentProviderBaselineKey('github');
+  const appearedCiphertext = await encryptLocalStorageValue({ created: 'concurrently' }, oldKey);
+  storage.set(SYNC_STORAGE_KEYS.MASTER_KEY_CONFIG, oldConfig);
+  const loadFromStorage = subject.loadFromStorage.bind(subject);
+  let appearedReads = 0;
+  subject.loadFromStorage = (storageKey: string) => {
+    if (storageKey === appearedKey) {
+      appearedReads += 1;
+      if (appearedReads === 1) return null;
+      storage.set(appearedKey, appearedCiphertext);
+      return appearedCiphertext;
+    }
+    return loadFromStorage(storageKey);
+  };
+
+  await assert.rejects(
+    () => reencryptSyncStorageImpl.call(subject, oldKey, newKey, newConfig),
+    /Sync data changed while the master key was being rotated/,
+  );
+
+  assert.deepEqual(storage.get(SYNC_STORAGE_KEYS.MASTER_KEY_CONFIG), oldConfig);
+  assert.equal(storage.get(appearedKey), appearedCiphertext);
+  assert.deepEqual(await decryptLocalStorageValue(appearedCiphertext, oldKey), {
+    created: 'concurrently',
+  });
+});
+
 test('master key state changes only after derived-key records are re-encrypted', async () => {
   const oldChange = EncryptionService.changeMasterPassword;
   const oldUnlock = EncryptionService.unlockMasterKey;

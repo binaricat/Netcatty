@@ -143,18 +143,22 @@ export async function reencryptSyncStorageImpl(
     this.loadFromStorage(SYNC_STORAGE_KEYS.MASTER_KEY_CONFIG)
     ?? this.state.masterKeyConfig
   ) as MasterKeyConfig | null;
-  const originals = new Map<string, string>();
+  const originals = new Map<string, string | null>();
   const replacements = new Map<string, string>();
   for (const key of keys) {
     const encoded = this.loadFromStorage(key) as unknown;
-    if (encoded == null) continue;
+    if (encoded == null) {
+      originals.set(key, null);
+      continue;
+    }
     if (typeof encoded !== 'string') throw new Error(`Encrypted sync record ${key} is invalid`);
     originals.set(key, encoded);
     const value = await decryptLocalStorageValue<unknown>(encoded, oldKey);
     replacements.set(key, await encryptLocalStorageValue(value, newKey));
   }
   for (const [key, original] of originals) {
-    if (this.loadFromStorage(key) !== original) {
+    const current = this.loadFromStorage(key) as unknown;
+    if ((current ?? null) !== original) {
       throw new Error('Sync data changed while the master key was being rotated');
     }
   }

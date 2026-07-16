@@ -48,6 +48,10 @@ blocked rather than guessing whether an absent field means deletion.
 Optional top-level collections omitted by an old client are treated as
 unsupported and left unchanged. Explicitly present empty collections are real
 deletions. Arrays inside settings remain atomic, matching the CRDT core.
+A device with no cloud entities and no trusted local baseline is treated as a
+fresh install: v1 and v2 migrations seed from cloud instead of turning local
+first-launch settings into edits. With a trusted baseline, an empty local
+snapshot remains a causal deletion.
 
 ## Local persistence and key rotation
 
@@ -60,10 +64,10 @@ base and remote anchor whenever an account, endpoint, bucket, or connection is
 replaced, so a new remote identity can never inherit trust from the old one.
 
 Master-key rotation prepares replacement ciphertext for all derived-key sync
-records before writing anything. It verifies the originals did not change
-during preparation, commits the new ciphertext, and publishes the new master
-configuration last. A write failure restores the exact prior ciphertext and
-configuration.
+records before writing anything. It snapshots both existing records and absent
+keys, then verifies neither changed during preparation. Only then does it commit
+the new ciphertext and publish the new master configuration. A write failure
+restores the exact prior ciphertext and configuration.
 
 The experimental enabled/paused flag is device-local and is intentionally not
 part of `SyncPayload.settings`. Disabling an initialized replica pauses it; it
