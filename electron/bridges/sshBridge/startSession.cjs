@@ -930,7 +930,7 @@ function createStartSessionApi(ctx) {
 
         if (authAgent) {
           const order = ["none", "agent"];
-          if (connectOpts.password) {
+          if (connectOpts.password && !options._skipPasswordMethod) {
             order.push("password");
           }
           // Default key fallback only when this is not password-only (issue #266 / #2079).
@@ -943,6 +943,7 @@ function createStartSessionApi(ctx) {
           // Function form so authPhase.hadPartialSuccess updates for cert/agent
           // first-factor + keyboard-interactive second-factor (#2150).
           connectOpts.authHandler = createOrderedStringAuthHandler(order, authPhase);
+          connectOpts._shouldRetryKeyboardInteractiveFirst = () => Boolean(authPhase.retryKeyboardInteractiveFirst);
           log("Auth order (agent mode)", { order, skipPasswordMethod: !!options._skipPasswordMethod });
         } else {
           // Build dynamic auth handler for fallback support

@@ -98,6 +98,8 @@ function loadBridgeWithAuthRetryMocks(t, options = {}) {
           eventName === "password-and-keyboard-interactive" ||
           eventName === "password-then-keyboard-interactive" ||
           eventName === "mfa-keyboard-interactive-before-password" ||
+          eventName === "agent-password-removes-keyboard-interactive" ||
+          eventName === "agent-then-keyboard-interactive-after-skip-password" ||
           eventName === "publickey-then-password-and-keyboard-interactive" ||
           eventName === "agent-then-password-and-keyboard-interactive"
         ) {
@@ -122,12 +124,79 @@ function loadBridgeWithAuthRetryMocks(t, options = {}) {
               ? ["password"]
               : eventName === "mfa-keyboard-interactive-before-password"
                 ? ["publickey", "password", "keyboard-interactive"]
-                : eventName === "publickey-then-password-and-keyboard-interactive"
-                  ? ["publickey"]
-                  : eventName === "agent-then-password-and-keyboard-interactive"
-                    ? ["agent"]
-                    : ["keyboard-interactive"];
+                : eventName === "agent-password-removes-keyboard-interactive" ||
+                    eventName === "agent-then-keyboard-interactive-after-skip-password"
+                  ? ["publickey", "password", "keyboard-interactive"]
+                  : eventName === "publickey-then-password-and-keyboard-interactive"
+                    ? ["publickey"]
+                    : eventName === "agent-then-password-and-keyboard-interactive"
+                      ? ["agent"]
+                      : ["keyboard-interactive"];
           const firstInteractive = offerNext(firstMethods, false);
+          if (eventName === "agent-password-removes-keyboard-interactive") {
+            if (firstInteractive !== "agent") {
+              const err = new Error("All configured authentication methods failed");
+              err.level = "client-authentication";
+              this.emit("error", err);
+              return;
+            }
+            const password = offerNext(firstMethods, false);
+            if (password !== "password") {
+              const err = new Error("All configured authentication methods failed");
+              err.level = "client-authentication";
+              this.emit("error", err);
+              return;
+            }
+            offerNext(["publickey"], false);
+            const err = new Error("All configured authentication methods failed");
+            err.level = "client-authentication";
+            this.emit("error", err);
+            return;
+          }
+          if (eventName === "agent-then-keyboard-interactive-after-skip-password") {
+            if (firstInteractive !== "agent") {
+              const err = new Error("All configured authentication methods failed");
+              err.level = "client-authentication";
+              this.emit("error", err);
+              return;
+            }
+            const firstKeyboardInteractive = offerNext(firstMethods, false);
+            if (firstKeyboardInteractive !== "keyboard-interactive") {
+              const err = new Error("All configured authentication methods failed");
+              err.level = "client-authentication";
+              this.emit("error", err);
+              return;
+            }
+            this.emit(
+              "keyboard-interactive",
+              "Login authentication",
+              "",
+              "",
+              [{ prompt: "Password:", echo: false }],
+              (responses) => {
+                this.keyboardInteractiveResponses.push(responses);
+                const secondKeyboardInteractive = offerNext(["keyboard-interactive"], true);
+                if (secondKeyboardInteractive !== "keyboard-interactive") {
+                  const err = new Error("All configured authentication methods failed");
+                  err.level = "client-authentication";
+                  this.emit("error", err);
+                  return;
+                }
+                this.emit(
+                  "keyboard-interactive",
+                  "Keyboard-interactive authentication prompts from server",
+                  "为保障主机安全，请输入二次认证密码，如有疑问，请联系xxx，电话xxx。",
+                  "",
+                  [{ prompt: "Secondary Authentication Password:", echo: false }],
+                  (secondResponses) => {
+                    this.keyboardInteractiveResponses.push(secondResponses);
+                    this.emit("ready");
+                  },
+                );
+              },
+            );
+            return;
+          }
           if (eventName === "mfa-keyboard-interactive-before-password") {
             if (opts._skipPasswordMethod) {
               if (firstInteractive !== "keyboard-interactive") {
@@ -815,6 +884,65 @@ test("terminal SSH certificate auth prefers keyboard-interactive after agent par
   assert.deepEqual(
     MockSSHClient.instances[0].keyboardInteractiveResponses,
     [["secondary-password"]],
+  );
+});
+
+test("terminal SSH certificate auth retries keyboard-interactive when password rejection removes KI", async (t) => {
+  const { bridge, MockSSHClient } = loadBridgeWithAuthRetryMocks(t, {
+    connectEvents: [
+      "agent-password-removes-keyboard-interactive",
+      "agent-then-keyboard-interactive-after-skip-password",
+    ],
+    parseKeyResult: {},
+  });
+  const ipcMain = makeIpcMain();
+  bridge.init({ sessions: new Map(), electronModule: {} });
+  bridge.registerHandlers(ipcMain);
+  const sender = makeSender();
+  const send = sender.send.bind(sender);
+  sender.send = (channel, payload) => {
+    send(channel, payload);
+    if (channel === "netcatty:keyboard-interactive") {
+      keyboardInteractiveHandler.handleResponse(
+        { sender },
+        {
+          requestId: payload.requestId,
+          responses: ["secondary-password"],
+          cancelled: false,
+        },
+      );
+    }
+  };
+
+  const result = await ipcMain.handlers.get("netcatty:start")(
+    { sender },
+    {
+      sessionId: "certificate-ki-first-retry-session",
+      hostname: "corp-edr.example.com",
+      username: "alice",
+      authMethod: "certificate",
+      certificate: "ssh-rsa-cert-v01@openssh.com AAAA test-cert",
+      privateKey: "INLINE_PRIVATE_KEY",
+      password: "login-password",
+      useSshAgent: false,
+      port: 22,
+      knownHosts: [],
+    },
+  );
+
+  assert.deepEqual(result, { sessionId: "certificate-ki-first-retry-session" });
+  assert.equal(MockSSHClient.instances.length, 2);
+  assert.deepEqual(
+    MockSSHClient.instances[0].authMethodsOffered,
+    ["none", "agent", "password", false],
+  );
+  assert.deepEqual(
+    MockSSHClient.instances[1].authMethodsOffered,
+    ["none", "agent", "keyboard-interactive", "keyboard-interactive"],
+  );
+  assert.deepEqual(
+    MockSSHClient.instances[1].keyboardInteractiveResponses,
+    [["login-password"], ["secondary-password"]],
   );
 });
 

@@ -1395,6 +1395,7 @@ function createAuthPhase() {
     hadPartialSuccess: false,
     passwordAlreadySucceeded: false,
     keyboardInteractiveSuccessCount: 0,
+    retryKeyboardInteractiveFirst: false,
   };
 }
 
@@ -1474,6 +1475,7 @@ function createOrderedStringAuthHandler(order, authPhase, onAuthAttempt) {
   // from an earlier methodsLeft list are intentionally not recorded here.
   const failed = new Set();
   let lastOffered = null;
+  let passwordAttemptSawKeyboardInteractive = false;
 
   const attemptLabel = (method) => {
     if (method === "none") return "none (no credentials)";
@@ -1503,6 +1505,14 @@ function createOrderedStringAuthHandler(order, authPhase, onAuthAttempt) {
       // Server rejected the previous method (or finished a failed factor).
       // Skip the initial methodsLeft===null probe which is not a rejection.
       onAuthAttempt?.(`${attemptLabel(lastOffered)} rejected`);
+      if (
+        lastOffered === "password" &&
+        passwordAttemptSawKeyboardInteractive &&
+        Array.isArray(methodsLeft) &&
+        !methodsLeft.includes("keyboard-interactive")
+      ) {
+        authPhase.retryKeyboardInteractiveFirst = true;
+      }
       failed.add(lastOffered);
     }
 
@@ -1535,6 +1545,11 @@ function createOrderedStringAuthHandler(order, authPhase, onAuthAttempt) {
       }
       attempted.add(method);
       lastOffered = method;
+      if (method === "password") {
+        passwordAttemptSawKeyboardInteractive = Boolean(
+          available && available.includes("keyboard-interactive"),
+        );
+      }
       onAuthAttempt?.(attemptLabel(method));
       return callback(method);
     }
