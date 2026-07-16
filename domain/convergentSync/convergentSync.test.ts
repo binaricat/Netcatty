@@ -396,6 +396,54 @@ test('canonical serialization is stable and hydration validates the state', () =
   );
 });
 
+test('validation rejects vector counters without a retained causal witness', () => {
+  const local = applyConvergentMutations(createConvergentSyncState(), 'device-a', [{
+    kind: 'setting-set',
+    path: ['theme'],
+    value: 'dark',
+  }], BASE_TIME);
+  const missingCandidate = createConvergentSyncState();
+  missingCandidate.vector['device-a'] = 1;
+  const inflatedVector = JSON.parse(
+    serializeConvergentSyncState(local),
+  ) as ConvergentSyncStateV2;
+  inflatedVector.vector['device-a'] = 2;
+
+  assert.throws(
+    () => hydrateConvergentSyncState(JSON.stringify(missingCandidate)),
+    /vector\.device-a is not witnessed/,
+  );
+  assert.throws(
+    () => mergeConvergentSyncStates(local, missingCandidate),
+    /vector\.device-a is not witnessed/,
+  );
+  assert.throws(
+    () => hydrateConvergentSyncState(JSON.stringify(inflatedVector)),
+    /vector\.device-a is not witnessed/,
+  );
+});
+
+test('candidate context can witness causally dominated vector counters', () => {
+  const first = applyConvergentMutations(createConvergentSyncState(), 'device-a', [{
+    kind: 'setting-set',
+    path: ['theme'],
+    value: 'dark',
+  }], BASE_TIME);
+  const overwritten = applyConvergentMutations(first, 'device-b', [{
+    kind: 'setting-set',
+    path: ['theme'],
+    value: 'light',
+  }], BASE_TIME + 1);
+
+  assert.deepEqual(overwritten.settings['/theme'].candidates[0]?.context, {
+    'device-a': 1,
+  });
+  assert.deepEqual(
+    hydrateConvergentSyncState(serializeConvergentSyncState(overwritten)),
+    overwritten,
+  );
+});
+
 test('candidate metadata key order cannot change canonical serialization or merge identity', () => {
   const state = applyConvergentMutations(createConvergentSyncState(), 'device-a', [{
     kind: 'setting-set',

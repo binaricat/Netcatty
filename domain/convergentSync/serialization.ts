@@ -4,7 +4,7 @@ import {
 } from './register';
 import { compareHybridLogicalClocks, dotKey } from './clock';
 import { canonicalizeJson, cloneJson, isJsonValue } from './json';
-import { getOwnRecordValue } from './record';
+import { getOwnRecordValue, setOwnRecordValue } from './record';
 import {
   ConvergentSyncInvariantError,
   type ConvergentCollectionState,
@@ -58,11 +58,22 @@ function assertClock(value: unknown, label: string): void {
   assertNonNegativeInteger(value.logical, `${label}.logical`);
 }
 
+function recordVectorWitness(
+  witnessedVector: VersionVector,
+  deviceId: string,
+  counter: number,
+): void {
+  if ((getOwnRecordValue(witnessedVector, deviceId) ?? 0) < counter) {
+    setOwnRecordValue(witnessedVector, deviceId, counter);
+  }
+}
+
 function assertCandidate(
   value: unknown,
   state: ConvergentSyncStateV2,
   label: string,
   globalDots: Map<string, string>,
+  witnessedVector: VersionVector,
 ): asserts value is RegisterCandidate {
   if (!isRecord(value) || !isRecord(value.dot)) {
     throw new ConvergentSyncInvariantError(`${label} must contain a dot`);
@@ -115,6 +126,11 @@ function assertCandidate(
     );
   }
   globalDots.set(key, label);
+
+  recordVectorWitness(witnessedVector, deviceId, value.dot.counter);
+  for (const [contextDeviceId, counter] of Object.entries(value.context)) {
+    recordVectorWitness(witnessedVector, contextDeviceId, counter);
+  }
 }
 
 function assertRegister(
@@ -122,6 +138,7 @@ function assertRegister(
   state: ConvergentSyncStateV2,
   label: string,
   globalDots: Map<string, string>,
+  witnessedVector: VersionVector,
   valueValidator?: (candidate: RegisterCandidate, label: string) => void,
 ): asserts value is MultiValueRegister {
   if (!isRecord(value) || !Array.isArray(value.candidates) || value.candidates.length === 0) {
@@ -129,7 +146,7 @@ function assertRegister(
   }
   value.candidates.forEach((candidate, index) => {
     const candidateLabel = `${label}.candidates[${index}]`;
-    assertCandidate(candidate, state, candidateLabel, globalDots);
+    assertCandidate(candidate, state, candidateLabel, globalDots, witnessedVector);
     valueValidator?.(candidate, candidateLabel);
   });
 }
@@ -184,6 +201,7 @@ export function assertValidConvergentSyncState(
 
   const state = value as unknown as ConvergentSyncStateV2;
   const globalDots = new Map<string, string>();
+  const witnessedVector: VersionVector = {};
   for (const [collectionName, collection] of Object.entries(state.collections)) {
     assertNonEmptyKey(collectionName, 'Collection name');
     if (!isRecord(collection) || !isRecord(collection.entities)) {
@@ -195,23 +213,49 @@ export function assertValidConvergentSyncState(
         throw new ConvergentSyncInvariantError(`Entity ${collectionName}/${entityId} is invalid`);
       }
       const entityLabel = `collections.${collectionName}.${entityId}`;
-      assertRegister(entity.presence, state, `${entityLabel}.presence`, globalDots, assertPresenceCandidate);
+      assertRegister(
+        entity.presence,
+        state,
+        `${entityLabel}.presence`,
+        globalDots,
+        witnessedVector,
+        assertPresenceCandidate,
+      );
       if (entity.position !== undefined) {
-        assertRegister(entity.position, state, `${entityLabel}.position`, globalDots, assertPositionCandidate);
+        assertRegister(
+          entity.position,
+          state,
+          `${entityLabel}.position`,
+          globalDots,
+          witnessedVector,
+          assertPositionCandidate,
+        );
       }
       for (const [field, register] of Object.entries(entity.fields)) {
         assertNonEmptyKey(field, `${entityLabel} field`);
         if (field === 'id') {
           throw new ConvergentSyncInvariantError(`${entityLabel} must not store structural ID as a field`);
         }
-        assertRegister(register, state, `${entityLabel}.fields.${field}`, globalDots);
+        assertRegister(
+          register,
+          state,
+          `${entityLabel}.fields.${field}`,
+          globalDots,
+          witnessedVector,
+        );
       }
     }
   }
 
   for (const [encodedPath, register] of Object.entries(state.settings)) {
     decodeSettingPath(encodedPath);
-    assertRegister(register, state, `settings.${encodedPath}`, globalDots);
+    assertRegister(
+      register,
+      state,
+      `settings.${encodedPath}`,
+      globalDots,
+      witnessedVector,
+    );
   }
 
   for (const [collectionName, collection] of Object.entries(state.stringCollections)) {
@@ -225,10 +269,32 @@ export function assertValidConvergentSyncState(
         throw new ConvergentSyncInvariantError(`String entry ${collectionName}/${entryValue} is invalid`);
       }
       const entryLabel = `stringCollections.${collectionName}.${entryValue}`;
-      assertRegister(entry.presence, state, `${entryLabel}.presence`, globalDots, assertPresenceCandidate);
+      assertRegister(
+        entry.presence,
+        state,
+        `${entryLabel}.presence`,
+        globalDots,
+        witnessedVector,
+        assertPresenceCandidate,
+      );
       if (entry.position !== undefined) {
-        assertRegister(entry.position, state, `${entryLabel}.position`, globalDots, assertPositionCandidate);
+        assertRegister(
+          entry.position,
+          state,
+          `${entryLabel}.position`,
+          globalDots,
+          witnessedVector,
+          assertPositionCandidate,
+        );
       }
+    }
+  }
+
+  for (const [deviceId, counter] of Object.entries(state.vector)) {
+    if ((getOwnRecordValue(witnessedVector, deviceId) ?? 0) !== counter) {
+      throw new ConvergentSyncInvariantError(
+        `vector.${deviceId} is not witnessed by any candidate dot or context`,
+      );
     }
   }
 }

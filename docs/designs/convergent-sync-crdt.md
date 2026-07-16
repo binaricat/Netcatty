@@ -66,7 +66,10 @@ also reduce 2-20 randomly generated offline replicas using reordered,
 partitioned, and duplicated joins.
 
 Reusing a dot for different data or different register addresses is an
-invariant violation and fails closed.
+invariant violation and fails closed. Every global vector counter must also be
+witnessed by a retained candidate dot or candidate context. Hydration rejects
+dangling observations so a malformed or partial state cannot use an
+unsubstantiated vector to discard local candidates during join.
 
 ## Materialization and conflicts
 
