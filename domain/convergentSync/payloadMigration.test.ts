@@ -383,6 +383,38 @@ test('a fresh entity-empty device adopts v1 cloud settings instead of merging lo
   assert.equal(plan.payload?.settings?.theme, 'dark');
 });
 
+test('a fresh device still blocks a shrunk v1 provider used as the migration seed', () => {
+  const baseline = payload('Base');
+  baseline.hosts = Array.from({ length: 4 }, (_, index) => ({
+    ...baseline.hosts[0],
+    id: `host-${index + 1}`,
+    label: `Host ${index + 1}`,
+  }));
+  const remote: SyncPayload = {
+    ...baseline,
+    hosts: baseline.hosts.slice(0, 1),
+    syncedAt: NOW + 1,
+  };
+  const plan = planConvergentSyncMigration({
+    localPayload: emptyPayload(),
+    localTrustedBaseline: null,
+    providers: [{
+      provider: 'github',
+      status: 'ready',
+      meta: meta(),
+      payload: remote,
+      trustedBaseline: baseline,
+    }],
+    deviceId: 'fresh-device',
+    now: NOW + 1,
+  });
+
+  assert.equal(plan.preview.canInitialize, false);
+  assert.equal(plan.preview.shrinkFindings[0]?.provider, 'github');
+  assert.equal(plan.preview.shrinkFindings[0]?.finding.lost, 3);
+  assert.match(plan.preview.blockedReasons.join(' '), /remove too many entities/);
+});
+
 test('migration blocks unresolved v1 conflicts and future provider schemas', () => {
   const baseline = payload('Base');
   const conflict = planConvergentSyncMigration({

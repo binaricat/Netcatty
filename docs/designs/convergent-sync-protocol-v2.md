@@ -51,7 +51,8 @@ deletions. Arrays inside settings remain atomic, matching the CRDT core.
 A device with no cloud entities and no trusted local baseline is treated as a
 fresh install: v1 and v2 migrations seed from cloud instead of turning local
 first-launch settings into edits. With a trusted baseline, an empty local
-snapshot remains a causal deletion.
+snapshot remains a causal deletion. A v1 provider selected as the fresh-device
+seed still passes the same suspicious-shrink guard before it can initialize v2.
 
 ## Local persistence and key rotation
 

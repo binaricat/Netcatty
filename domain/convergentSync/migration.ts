@@ -164,6 +164,18 @@ export function planConvergentSyncMigration(options: {
     );
     const seedFromProvider = !includeLocalSource && v1Inputs.length > 0;
     let merged = seedFromProvider ? v1Inputs[0].payload : options.localPayload;
+    if (seedFromProvider) {
+      const seed = v1Inputs[0];
+      const shrink = detectSuspiciousShrink(
+        seed.payload,
+        seed.trustedBaseline,
+        seed.payload,
+      );
+      if (shrink.suspicious) {
+        shrinkFindings.push({ provider: seed.provider, finding: shrink });
+        blockedReasons.push(`${seed.provider}: legacy migration would remove too many entities`);
+      }
+    }
     const remainingInputs = seedFromProvider ? v1Inputs.slice(1) : v1Inputs;
     for (const input of remainingInputs) {
       const result = mergeSyncPayloads(input.trustedBaseline, merged, input.payload);
