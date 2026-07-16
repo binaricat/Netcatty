@@ -14,6 +14,19 @@ export function isJsonValue(value: unknown): value is JsonValue {
   return Object.values(value).every(isJsonValue);
 }
 
+/** Normalize in-memory model values exactly as the encrypted JSON payload does. */
+export function normalizeJsonValue(value: unknown): JsonValue {
+  const serialized = JSON.stringify(value);
+  if (serialized === undefined) {
+    throw new TypeError('Value cannot be represented as JSON');
+  }
+  const normalized: unknown = JSON.parse(serialized);
+  if (!isJsonValue(normalized)) {
+    throw new TypeError('Value cannot be represented as JSON');
+  }
+  return normalized;
+}
+
 export function cloneJson<T extends JsonValue>(value: T): T {
   if (Array.isArray(value)) {
     return value.map((item) => cloneJson(item)) as T;

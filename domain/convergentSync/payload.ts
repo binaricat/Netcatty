@@ -5,7 +5,12 @@ import type {
   SyncReliabilityMeta,
 } from '../sync';
 import { dotKey } from './clock';
-import { cloneJson, isJsonValue, jsonValuesEqual } from './json';
+import {
+  cloneJson,
+  isJsonValue,
+  jsonValuesEqual,
+  normalizeJsonValue,
+} from './json';
 import { selectRegisterWinner, isTombstoneCandidate } from './register';
 import { createEmptyRecord, setOwnRecordValue } from './record';
 import {
@@ -64,10 +69,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function toJsonValue(value: unknown, label: string): JsonValue {
-  if (!isJsonValue(value)) {
+  try {
+    return normalizeJsonValue(value);
+  } catch {
     throw new Error(`${label} contains a value that cannot be represented as JSON`);
   }
-  return cloneJson(value);
 }
 
 function entityId(collection: ConvergentEntityCollection, value: Record<string, unknown>): string {

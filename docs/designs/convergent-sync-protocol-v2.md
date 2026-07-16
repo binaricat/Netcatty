@@ -85,6 +85,9 @@ instead of being replaced by an unrelated replica copied from the backup.
 Trusted legacy diffs also compare collection positions. A reorder-only edit is
 converted into position-register writes for entity and string collections,
 rather than disappearing because the values themselves are unchanged.
+In-memory entities are normalized with the same JSON serialization semantics
+as encrypted sync payloads before validation, so optional `undefined` model
+fields are omitted instead of preventing migration.
 
 ## Follow-up boundary
 

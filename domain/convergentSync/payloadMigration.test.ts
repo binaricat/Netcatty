@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { sanitizeHost } from '../host.ts';
 import type { SyncFileMeta, SyncPayload } from '../sync.ts';
 import {
   applyConvergentMutations,
@@ -233,6 +234,56 @@ test('trusted legacy diff becomes causal CRDT writes without carrying transport 
   assert.equal(materialized.hosts[0].label, 'After');
   assert.deepEqual(materialized.keys, []);
   assert.equal(cloudSyncPayloadsEqual(materialized, legacy), true);
+});
+
+test('payload and legacy conversion normalize undefined fields with JSON semantics', () => {
+  const baseline = payload('Before');
+  baseline.hosts = [sanitizeHost({
+    ...baseline.hosts[0],
+    proxyConfig: {
+      type: 'http',
+      host: 'proxy.example.com',
+      port: 8080,
+      username: undefined,
+    },
+  })];
+  assert.equal(Object.hasOwn(baseline.hosts[0], 'iconMode'), true);
+  assert.equal(Object.hasOwn(baseline.hosts[0].proxyConfig!, 'username'), true);
+
+  const state = createConvergentSyncStateFromPayload(baseline, 'seed', NOW);
+  const initial = materializeSyncPayloadFromConvergentState(state, { syncedAt: NOW });
+  assert.equal(Object.hasOwn(initial.hosts[0], 'iconMode'), false);
+  assert.equal(Object.hasOwn(initial.hosts[0].proxyConfig!, 'username'), false);
+
+  const legacy: SyncPayload = {
+    ...baseline,
+    hosts: [{ ...baseline.hosts[0], label: 'After' }],
+    syncedAt: NOW + 1,
+  };
+  const next = applyLegacySyncPayload(
+    state,
+    baseline,
+    legacy,
+    'legacy:github:remote-device',
+    NOW + 1,
+  );
+  const materialized = materializeSyncPayloadFromConvergentState(next, { syncedAt: NOW + 1 });
+
+  assert.equal(materialized.hosts[0].label, 'After');
+  assert.equal(Object.hasOwn(materialized.hosts[0], 'iconMode'), false);
+  assert.equal(Object.hasOwn(materialized.hosts[0].proxyConfig!, 'username'), false);
+});
+
+test('payload conversion still rejects entities that JSON cannot serialize', () => {
+  const invalid = payload();
+  const circular: Record<string, unknown> = {};
+  circular.self = circular;
+  (invalid.hosts[0] as unknown as Record<string, unknown>).invalid = circular;
+
+  assert.throws(
+    () => createConvergentSyncStateFromPayload(invalid, 'seed', NOW),
+    /cannot be represented as JSON/,
+  );
 });
 
 test('trusted legacy diff preserves reorder-only entity and string collection edits', () => {

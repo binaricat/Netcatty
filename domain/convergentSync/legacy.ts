@@ -1,4 +1,5 @@
 import type { SyncPayload } from '../sync';
+import { normalizeJsonValue } from './json';
 import { encodeSettingPath } from './serialization';
 import { applyConvergentMutations } from './state';
 import type {
@@ -27,6 +28,20 @@ function stableValue(value: unknown): unknown {
 
 function fingerprint(value: unknown): string {
   return JSON.stringify(stableValue(value));
+}
+
+function normalizedEntityValue(
+  collection: string,
+  id: string,
+  value: Record<string, unknown>,
+): Extract<ConvergentMutation, { kind: 'entity-upsert' }>['value'] {
+  try {
+    const normalized = normalizeJsonValue({ ...value, id });
+    if (!isRecord(normalized)) throw new TypeError('Entity is not an object');
+    return normalized as Extract<ConvergentMutation, { kind: 'entity-upsert' }>['value'];
+  } catch {
+    throw new Error(`${collection}/${id} contains a value that cannot be represented as JSON`);
+  }
 }
 
 function entityId(collection: string, value: Record<string, unknown>): string | undefined {
@@ -118,12 +133,11 @@ export function diffLegacySyncPayload(
           || beforePositions.get(id) !== afterPositions.get(id)
         )
       ) {
-        const structural = { ...next, id } as JsonValue;
         mutations.push({
           kind: 'entity-upsert',
           collection,
           entityId: id,
-          value: structural as Extract<ConvergentMutation, { kind: 'entity-upsert' }>['value'],
+          value: normalizedEntityValue(collection, id, next),
           position: afterPositions.get(id),
         });
       }
