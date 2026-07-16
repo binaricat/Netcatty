@@ -54,6 +54,18 @@ test("parseMoshConnect tolerates ConPTY CSI controls after the key", () => {
   });
 });
 
+test("parseMoshConnect tolerates ConPTY CSI controls inside the key", () => {
+  // ConPTY can inject cursor controls into the byte stream while the terminal
+  // still renders a visually contiguous key. Redaction must map cleaned offsets
+  // back to the original line instead of searching for the cleaned key.
+  const line = "MOSH CONNECT 60030 nDMmYnfKIKn2yAXiK/\u001b[?25h34eg\r\n";
+  const got = parseMoshConnect(line);
+  assert.deepEqual(got && { port: got.port, key: got.key }, {
+    port: 60030,
+    key: "nDMmYnfKIKn2yAXiK/34eg",
+  });
+});
+
 test("createMoshConnectSniffer parses ConPTY-mangled MOSH CONNECT lines", () => {
   const sniffer = createMoshConnectSniffer();
   const r = sniffer.feed(
@@ -64,6 +76,14 @@ test("createMoshConnectSniffer parses ConPTY-mangled MOSH CONNECT lines", () => 
   assert.deepEqual(r.parsed, { port: 60002, key: "ABCDEFGHIJKLMNOPQRSTUV==" });
   assert.ok(!String(r.visible).includes("MOSH CONNECT"));
   assert.ok(String(r.visible).includes("mosh-server detached"));
+});
+
+test("createMoshConnectSniffer redacts MOSH CONNECT when CSI splits the key", () => {
+  const sniffer = createMoshConnectSniffer();
+  const r = sniffer.feed("MOSH CONNECT 60030 nDMmYnfKIKn2yAXiK/\u001b[?25h34eg\r\n");
+  assert.deepEqual(r.parsed, { port: 60030, key: "nDMmYnfKIKn2yAXiK/34eg" });
+  assert.ok(!String(r.visible).includes("MOSH CONNECT"));
+  assert.ok(!String(r.visible).includes("34eg"));
 });
 
 test("createMoshConnectSniffer.flush recovers a trailing MOSH CONNECT without newline", () => {

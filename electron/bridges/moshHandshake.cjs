@@ -70,8 +70,30 @@ function stripAnsiEscapes(text) {
   return String(text || "").replace(ANSI_ESCAPE_RE, "");
 }
 
+function stripAnsiEscapesWithMap(text) {
+  const source = String(text || "");
+  let cleaned = "";
+  const cleanToOriginal = [];
+  let index = 0;
+  while (index < source.length) {
+    if (source[index] === "\u001b") {
+      ANSI_ESCAPE_RE.lastIndex = index;
+      const esc = ANSI_ESCAPE_RE.exec(source);
+      if (esc && esc.index === index) {
+        index = ANSI_ESCAPE_RE.lastIndex;
+        continue;
+      }
+    }
+    cleanToOriginal.push(index);
+    cleaned += source[index];
+    index += 1;
+  }
+  cleanToOriginal.push(source.length);
+  return { cleaned, cleanToOriginal };
+}
+
 function parseConnectLine(line) {
-  const cleaned = stripAnsiEscapes(line);
+  const { cleaned, cleanToOriginal } = stripAnsiEscapesWithMap(line);
   const m = MOSH_CONNECT_RE.exec(cleaned);
   if (!m) return null;
   const port = Number(m[1]);
@@ -80,12 +102,11 @@ function parseConnectLine(line) {
   if (!validMoshKey(key)) return null;
 
   // Map the cleaned match back onto the original line so redaction still
-  // covers ConPTY CSI that trailed the key (e.g. `\x1b[?25h`).
-  const connectIdx = line.indexOf("MOSH CONNECT");
-  if (connectIdx === -1) return null;
-  const keyIdx = line.indexOf(key, connectIdx);
-  if (keyIdx === -1) return null;
-  let matchEndOffset = keyIdx + key.length;
+  // covers ConPTY CSI that trailed or split the key (e.g. `\x1b[?25h`).
+  const connectIdx = cleanToOriginal[m.index];
+  const cleanMatchEnd = m.index + m[0].length;
+  if (connectIdx === undefined || cleanToOriginal[cleanMatchEnd] === undefined) return null;
+  let matchEndOffset = cleanToOriginal[cleanMatchEnd];
   while (matchEndOffset < line.length) {
     const ch = line[matchEndOffset];
     if (ch === "\u001b") {
