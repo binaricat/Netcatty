@@ -251,17 +251,21 @@ function settingPathsOverlap(left: string[], right: string[]): boolean {
   return settingPathIsPrefix(left, right) || settingPathIsPrefix(right, left);
 }
 
-function tombstoneOverlappingSettingPaths(
+function tombstoneRelatedSettingPaths(
   state: ConvergentSyncStateV2,
   deviceId: string,
   path: string[],
   now: number,
+  includeAncestors: boolean,
 ): void {
   const encodedPath = encodeSettingPath(path);
   for (const otherEncodedPath of Object.keys(state.settings).sort()) {
     if (otherEncodedPath === encodedPath) continue;
     const otherPath = decodeSettingPath(otherEncodedPath);
-    if (!settingPathsOverlap(path, otherPath)) continue;
+    const isRelated = includeAncestors
+      ? settingPathsOverlap(path, otherPath)
+      : settingPathIsPrefix(path, otherPath);
+    if (!isRelated) continue;
     const register = getOwnRecordValue(state.settings, otherEncodedPath);
     const winner = selectRegisterWinner(register);
     if (!winner || isTombstoneCandidate(winner)) continue;
@@ -281,9 +285,11 @@ function writeSettingRegister(
   value?: JsonValue,
   tombstone = false,
 ): void {
-  if (!tombstone) {
-    tombstoneOverlappingSettingPaths(state, deviceId, path, now);
-  }
+  // Replacements remove both atomic ancestors and nested descendants to keep
+  // the causal leaf set prefix-free. Deletions represent subtree removal, so
+  // they remove descendants without erasing an atomic ancestor when a caller
+  // targets a path beneath it.
+  tombstoneRelatedSettingPaths(state, deviceId, path, now, !tombstone);
   setOwnRecordValue(
     state.settings,
     encodeSettingPath(path),

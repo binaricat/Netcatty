@@ -134,6 +134,48 @@ test('merge is idempotent', () => {
   }), { numRuns: 150 });
 });
 
+test('causal parent deletion removes every generated descendant', () => {
+  fc.assert(fc.property(
+    fc.array(
+      fc.tuple(
+        fc.constantFrom('fontSize', 'fontFamily', 'palette', 'cursor'),
+        jsonValueArbitrary,
+      ),
+      { minLength: 1, maxLength: 12 },
+    ),
+    (leaves) => {
+      const populated = applyConvergentMutations(
+        createConvergentSyncState(),
+        'device-a',
+        leaves.map(([leaf, value]) => ({
+          kind: 'setting-set' as const,
+          path: ['terminal', leaf],
+          value,
+        })),
+        100,
+      );
+      const deleted = applyConvergentMutations(populated, 'device-a', [{
+        kind: 'setting-delete',
+        path: ['terminal'],
+      }], 101);
+
+      assert.equal(
+        Object.hasOwn(materializeConvergentSyncState(deleted).settings, 'terminal'),
+        false,
+      );
+      assert.equal(
+        Object.hasOwn(
+          materializeConvergentSyncState(
+            mergeConvergentSyncStates(populated, deleted),
+          ).settings,
+          'terminal',
+        ),
+        false,
+      );
+    },
+  ), { numRuns: 100 });
+});
+
 test('2-20 offline replicas converge across reordering, partitions, and duplicates', () => {
   fc.assert(fc.property(
     fc.array(mutationListArbitrary, { minLength: 2, maxLength: 20 }),

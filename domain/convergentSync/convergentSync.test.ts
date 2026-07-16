@@ -256,6 +256,69 @@ test('causal setting shape changes tombstone overlapping leaf paths', () => {
   );
 });
 
+test('causal setting deletion tombstones the complete subtree', () => {
+  const nested = applyConvergentMutations(createConvergentSyncState(), 'device-a', [
+    { kind: 'setting-set', path: ['terminal', 'fontSize'], value: 14 },
+    { kind: 'setting-set', path: ['terminal', 'fontFamily'], value: 'Mono' },
+    { kind: 'setting-set', path: ['theme'], value: 'dark' },
+  ], BASE_TIME);
+  const deleted = applyConvergentMutations(nested, 'device-a', [{
+    kind: 'setting-delete',
+    path: ['terminal'],
+  }], BASE_TIME + 1);
+
+  assert.deepEqual(materializeConvergentSyncState(deleted).settings, {
+    theme: 'dark',
+  });
+  assert.equal(deleted.settings['/terminal'].candidates[0]?.tombstone, true);
+  assert.equal(
+    deleted.settings['/terminal/fontFamily'].candidates[0]?.tombstone,
+    true,
+  );
+  assert.equal(
+    deleted.settings['/terminal/fontSize'].candidates[0]?.tombstone,
+    true,
+  );
+  assert.deepEqual(
+    materializeConvergentSyncState(
+      mergeConvergentSyncStates(nested, deleted),
+    ).settings,
+    { theme: 'dark' },
+  );
+});
+
+test('concurrent subtree deletion and descendant update remain a conflict', () => {
+  const base = applyConvergentMutations(createConvergentSyncState(), 'seed', [{
+    kind: 'setting-set',
+    path: ['terminal', 'fontSize'],
+    value: 14,
+  }], BASE_TIME);
+  const deleted = applyConvergentMutations(base, 'device-a', [{
+    kind: 'setting-delete',
+    path: ['terminal'],
+  }], BASE_TIME + 1);
+  const updated = applyConvergentMutations(base, 'device-b', [{
+    kind: 'setting-set',
+    path: ['terminal', 'fontSize'],
+    value: 16,
+  }], BASE_TIME + 1);
+
+  const materialized = materializeConvergentSyncState(
+    mergeConvergentSyncStates(deleted, updated),
+  );
+  const conflict = materialized.conflicts.find(
+    (item) => item.address.kind === 'setting'
+      && item.address.path.join('/') === 'terminal/fontSize',
+  );
+
+  assert.deepEqual(materialized.settings, { terminal: { fontSize: 16 } });
+  assert.equal(conflict?.candidates.length, 2);
+  assert.equal(
+    conflict?.candidates.some((candidate) => candidate.tombstone),
+    true,
+  );
+});
+
 test('concurrent setting shape changes materialize deterministically and remain resolvable', () => {
   const parent = applyConvergentMutations(createConvergentSyncState(), 'device-a', [{
     kind: 'setting-set',

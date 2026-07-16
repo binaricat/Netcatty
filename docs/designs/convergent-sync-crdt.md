@@ -39,10 +39,13 @@ tombstone only when its new dot causally observes the deletion.
 
 Settings writes keep the active leaf set prefix-free. Replacing an object leaf
 with an atomic parent (or the reverse) causally tombstones the overlapping
-paths. Independent replicas can still create a parent/descendant shape
-conflict; materialization then selects a deterministic maximal prefix-free set,
-keeps non-overlapping siblings, and reports the competing paths and candidates
-for explicit resolution.
+paths. Deleting a settings path tombstones that path and every causally observed
+descendant, so deleting a subtree cannot leave stale leaf registers visible;
+deleting a nested path does not implicitly remove an atomic ancestor.
+Independent replicas can still create a parent/descendant shape conflict;
+materialization then selects a deterministic maximal prefix-free set, keeps
+non-overlapping siblings, and reports the competing paths and candidates for
+explicit resolution.
 
 Entity field updates also write a fresh present candidate. Consequently, an
 offline deletion racing an offline edit becomes a presence conflict; it cannot
