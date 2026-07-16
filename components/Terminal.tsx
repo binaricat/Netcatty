@@ -2384,18 +2384,24 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       restoreCwdIntentRef.current = null;
       suppressHostStartupCommandRef.current = true;
     }
+    // Claim the retry before awaiting close. A close/cancel/unmount during the
+    // awaited backend cleanup invalidates this token and stops the continuation.
+    const retryToken = Symbol("retry");
+    retryTokenRef.current = retryToken;
+    const retryTokenStillCurrent = () => retryTokenRef.current === retryToken;
+
     await cleanupSession();
+    if (!retryTokenStillCurrent()) return;
+    const term = termRef.current;
+    if (!term) return;
     // closeSession wiped preload ready listeners; re-arm before startMosh so a
     // fast handshake cannot emit netcatty:mosh:ready into an empty map.
     prepareMoshReadySubscription();
-    const term = termRef.current;
-    // Claim a fresh retry token. If the user cancels / closes / unmounts /
-    // kicks off another retry while the chained writes below are still
-    // queued, the token will be invalidated and our callbacks will abort
-    // before opening a ghost backend session with no owning UI.
-    const retryToken = Symbol("retry");
-    retryTokenRef.current = retryToken;
-    const retryStillActive = () => retryTokenRef.current === retryToken && termRef.current === term;
+    // Keep the same retry token through the queued writes. If the user cancels /
+    // closes / unmounts / kicks off another retry while the chained writes are
+    // queued, the token is invalidated and callbacks abort before opening a
+    // ghost backend session with no owning UI.
+    const retryStillActive = () => retryTokenStillCurrent() && termRef.current === term;
 
     isBootActiveRef.current = true;
     auth.resetForRetry();
