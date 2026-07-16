@@ -387,17 +387,34 @@ function writeApplyInProgressSentinel(record: VaultApplyInProgressRecord): void 
  * current vault. Callers pass their own React-closure builder (hosts,
  * keys, port-forwarding rules) because the caller owns that state.
  *
+ * `prepareApply`, when provided, runs while the restore barrier is held but
+ * before the protective backup and apply-in-progress sentinel. It must not
+ * mutate local vault state; it returns the callback that performs the actual
+ * apply. This lets callers validate external state without leaving a false
+ * partial-apply sentinel when validation fails.
+ *
  * `translateProtectiveBackupFailure` converts the
  * `ProtectiveBackupUnavailableError` into a user-visible message in the
  * caller's locale. It runs only on the thrown-and-caught path.
  */
-export function applyProtectedSyncPayload(options: {
+type ProtectedApplyCallback = () => void | Promise<void>;
+
+export type ApplyProtectedSyncPayloadOptions = {
   buildPreApplyPayload: () => SyncPayload;
-  applyPayload: () => void | Promise<void>;
   translateProtectiveBackupFailure: (message: string) => string;
-}): Promise<void> {
-  const { buildPreApplyPayload, applyPayload, translateProtectiveBackupFailure } = options;
+} & (
+  | { applyPayload: ProtectedApplyCallback; prepareApply?: never }
+  | { applyPayload?: never; prepareApply: () => Promise<ProtectedApplyCallback> }
+);
+
+export function applyProtectedSyncPayload(
+  options: ApplyProtectedSyncPayloadOptions,
+): Promise<void> {
+  const { buildPreApplyPayload, translateProtectiveBackupFailure } = options;
   return withRestoreBarrier(async () => {
+    const applyPayload = options.prepareApply
+      ? await options.prepareApply()
+      : options.applyPayload;
     const pre = buildPreApplyPayload();
     let protectiveBackupId: string | null = null;
     try {

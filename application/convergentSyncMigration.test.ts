@@ -37,6 +37,7 @@ test.beforeEach(() => {
 
 test('initialization applies the protected preview before persisting and enabling the replica', async () => {
   const localPayload = payload();
+  const liveLocalPayload = { ...payload(), knownHosts: [] };
   const plan = planConvergentSyncMigration({
     localPayload,
     localTrustedBaseline: null,
@@ -56,9 +57,13 @@ test('initialization applies the protected preview before persisting and enablin
   } as unknown as CloudSyncManager;
 
   await initializePreparedConvergentMigration({
-    prepared: { plan, localPayload, providerBaselines: [] },
+    prepared: { plan, providerBaselines: [] },
     manager,
     now: NOW,
+    buildPreApplyPayload: () => {
+      calls.push('snapshot');
+      return liveLocalPayload;
+    },
     translateProtectiveBackupFailure: (message) => message,
     applyPayload: async (incoming) => {
       calls.push('apply');
@@ -66,12 +71,12 @@ test('initialization applies the protected preview before persisting and enablin
     },
     runProtectedApply: async (options) => {
       calls.push('protect');
-      assert.equal(options.buildPreApplyPayload(), localPayload);
+      assert.equal(options.buildPreApplyPayload(), liveLocalPayload);
       await options.applyPayload();
     },
   });
 
-  assert.deepEqual(calls, ['protect', 'apply', 'replica']);
+  assert.deepEqual(calls, ['protect', 'snapshot', 'apply', 'replica']);
   assert.deepEqual(getConvergentSyncLocalConfig(), { enabled: true, initialized: true });
 });
 
@@ -88,8 +93,9 @@ test('blocked previews cannot enter the protected initialization transaction', a
 
   await assert.rejects(
     () => initializePreparedConvergentMigration({
-      prepared: { plan, localPayload, providerBaselines: [] },
+      prepared: { plan, providerBaselines: [] },
       manager: {} as CloudSyncManager,
+      buildPreApplyPayload: () => localPayload,
       translateProtectiveBackupFailure: (message) => message,
       applyPayload: () => {},
       runProtectedApply: async () => {

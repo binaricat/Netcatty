@@ -82,19 +82,23 @@ downgrade confirmation.
 
 Local vault backups remain materialized snapshots and never carry the active
 replica. Migration initialization uses the existing protected-apply transaction:
-it creates a required encrypted safety backup, holds the cross-window restore
-barrier, applies the previewed materialized payload, persists the canonical
-replica, and only then marks v2 initialized. A crash or failure leaves the
-existing apply sentinel set so auto-sync cannot publish a partial migration.
+it snapshots the live vault when the user confirms, creates a required encrypted
+safety backup, holds the cross-window restore barrier, applies the previewed
+materialized payload, persists the canonical replica, and only then marks v2
+initialized. Edits made while the preview was open are therefore recoverable.
+A crash or failure leaves the existing apply sentinel set so auto-sync cannot
+publish a partial migration.
 
 Before a local backup restore mutates local data, the restored snapshot is
 diffed against the current materialized replica and prepared as normal device
 writes without persisting them. The replica load is therefore validated before
-the import, while the prepared writes are committed only after every local
-import step succeeds. An import failure leaves the replica unchanged; a later
-replica commit failure leaves the protected-apply sentinel set so the partial
-restore cannot be published. Causal history and tombstones survive restore
-instead of being replaced by an unrelated replica copied from the backup.
+the protective backup and partial-apply sentinel, while the prepared writes are
+committed only after every local import step succeeds. A preparation failure
+leaves no sentinel because the vault is still untouched. An import failure
+leaves the replica unchanged; a later replica commit failure leaves the
+protected-apply sentinel set so the partial restore cannot be published. Causal
+history and tombstones survive restore instead of being replaced by an unrelated
+replica copied from the backup.
 
 Trusted legacy diffs also compare collection positions. A reorder-only edit is
 converted into position-register writes for entity and string collections,

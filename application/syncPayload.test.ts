@@ -38,6 +38,7 @@ function installLocalStorage(): LocalStorageMock {
 const localStorage = installLocalStorage();
 const {
   applyLocalVaultPayload,
+  prepareLocalVaultPayloadApply,
   applySyncPayload,
   buildLocalVaultPayload,
   buildCloudSyncPayload,
@@ -1166,6 +1167,35 @@ test("applyLocalVaultPayload prepares before import and commits after it succeed
     },
   });
 
+  assert.deepEqual(calls, ["prepare", "import", "commit"]);
+});
+
+test("prepareLocalVaultPayloadApply does not import until the prepared callback runs", async () => {
+  const calls: string[] = [];
+  const payload: SyncPayload = {
+    hosts: [],
+    keys: [],
+    identities: [],
+    snippets: [],
+    customGroups: [],
+    syncedAt: 1,
+  };
+
+  const applyPreparedPayload = await prepareLocalVaultPayloadApply(payload, {
+    importVaultData: () => {
+      calls.push("import");
+    },
+  }, {
+    prepareConvergentRestore: async () => {
+      calls.push("prepare");
+      return async () => {
+        calls.push("commit");
+      };
+    },
+  });
+
+  assert.deepEqual(calls, ["prepare"]);
+  await applyPreparedPayload();
   assert.deepEqual(calls, ["prepare", "import", "commit"]);
 });
 

@@ -2,11 +2,11 @@ import React, { useCallback } from "react";
 import type { PortForwardingRule } from "../../../domain/models";
 import type { SyncPayload } from "../../../domain/sync";
 import {
-  applyLocalVaultPayload,
   buildCloudSyncPayload,
   buildLocalVaultPayload,
   applySyncPayload,
   getEffectivePortForwardingRulesForSync,
+  prepareLocalVaultPayloadApply,
 } from "../../../application/syncPayload";
 import { applyProtectedSyncPayload } from "../../../application/localVaultBackups";
 import type { SyncableVaultData } from "../../../application/syncPayload";
@@ -70,8 +70,8 @@ export default function SettingsSyncTab(props: {
     (payload: SyncPayload) =>
       applyProtectedSyncPayload({
         buildPreApplyPayload: onBuildLocalPayload,
-        applyPayload: () =>
-          applyLocalVaultPayload(payload, {
+        prepareApply: () =>
+          prepareLocalVaultPayloadApply(payload, {
             importVaultData: importDataFromString,
             importPortForwardingRules,
             onSettingsApplied,

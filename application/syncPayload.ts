@@ -948,7 +948,25 @@ export function applySyncPayload(
   return applyPayload(payload, importers, { includeLocalOnlyData: false });
 }
 
-export function applyLocalVaultPayload(
+export async function prepareLocalVaultPayloadApply(
+  payload: SyncPayload,
+  importers: SyncPayloadImporters,
+  dependencies: {
+    prepareConvergentRestore?: (
+      payload: SyncPayload,
+    ) => Promise<() => Promise<void>>;
+  } = {},
+): Promise<() => Promise<void>> {
+  const prepareConvergentRestore = dependencies.prepareConvergentRestore
+    ?? prepareRestoredPayloadConvergentWrites;
+  const commitConvergentRestore = await prepareConvergentRestore(payload);
+  return async () => {
+    await applyPayload(payload, importers, { includeLocalOnlyData: true });
+    await commitConvergentRestore();
+  };
+}
+
+export async function applyLocalVaultPayload(
   payload: SyncPayload,
   importers: SyncPayloadImporters,
   dependencies: {
@@ -957,10 +975,10 @@ export function applyLocalVaultPayload(
     ) => Promise<() => Promise<void>>;
   } = {},
 ): Promise<void> {
-  const prepareConvergentRestore = dependencies.prepareConvergentRestore
-    ?? prepareRestoredPayloadConvergentWrites;
-  return prepareConvergentRestore(payload).then(async (commitConvergentRestore) => {
-    await applyPayload(payload, importers, { includeLocalOnlyData: true });
-    await commitConvergentRestore();
-  });
+  const applyPreparedPayload = await prepareLocalVaultPayloadApply(
+    payload,
+    importers,
+    dependencies,
+  );
+  await applyPreparedPayload();
 }

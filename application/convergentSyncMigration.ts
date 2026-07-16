@@ -23,7 +23,6 @@ import { applyProtectedSyncPayload } from './localVaultBackups';
 
 export interface PreparedConvergentMigration {
   plan: ConvergentMigrationPlan;
-  localPayload: SyncPayload;
   providerBaselines: ConvergentProviderBaselineV2[];
 }
 
@@ -91,7 +90,6 @@ export async function prepareConvergentSyncMigration(
     [...baselineByProvider.values()].filter((value): value is SyncPayload => value !== null),
   );
   return {
-    localPayload: stripConvergentSyncEnvelope(localPayload),
     providerBaselines: providerBaselines.sort((left, right) => left.provider.localeCompare(right.provider)),
     plan: planConvergentSyncMigration({
       localPayload: stripConvergentSyncEnvelope(localPayload),
@@ -105,6 +103,7 @@ export async function prepareConvergentSyncMigration(
 
 export async function initializePreparedConvergentMigration(options: {
   prepared: PreparedConvergentMigration;
+  buildPreApplyPayload: () => SyncPayload;
   applyPayload: (payload: SyncPayload) => void | Promise<void>;
   translateProtectiveBackupFailure: (message: string) => string;
   manager?: CloudSyncManager;
@@ -119,7 +118,7 @@ export async function initializePreparedConvergentMigration(options: {
   }
   const runProtectedApply = options.runProtectedApply ?? applyProtectedSyncPayload;
   await runProtectedApply({
-    buildPreApplyPayload: () => prepared.localPayload,
+    buildPreApplyPayload: options.buildPreApplyPayload,
     translateProtectiveBackupFailure: options.translateProtectiveBackupFailure,
     applyPayload: async () => {
       await options.applyPayload(prepared.plan.payload as SyncPayload);
