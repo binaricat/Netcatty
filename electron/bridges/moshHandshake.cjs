@@ -92,6 +92,17 @@ function stripAnsiEscapesWithMap(text) {
   return { cleaned, cleanToOriginal };
 }
 
+function skipAnsiEscapes(text, offset) {
+  let pos = offset;
+  while (pos < text.length && text[pos] === "\u001b") {
+    ANSI_ESCAPE_RE.lastIndex = pos;
+    const esc = ANSI_ESCAPE_RE.exec(text);
+    if (!esc || esc.index !== pos) break;
+    pos = ANSI_ESCAPE_RE.lastIndex;
+  }
+  return pos;
+}
+
 function parseConnectLine(line) {
   const { cleaned, cleanToOriginal } = stripAnsiEscapesWithMap(line);
   const m = MOSH_CONNECT_PREFIX_RE.exec(cleaned);
@@ -122,19 +133,19 @@ function parseConnectLine(line) {
 
   if (key.length !== 22) return null;
 
-  let paddingLookahead = pos;
-  while (paddingLookahead < line.length) {
-    const ch = line[paddingLookahead];
-    if (ch !== "\u001b") break;
-    ANSI_ESCAPE_RE.lastIndex = paddingLookahead;
-    const esc = ANSI_ESCAPE_RE.exec(line);
-    if (!esc || esc.index !== paddingLookahead) break;
-    paddingLookahead = ANSI_ESCAPE_RE.lastIndex;
-  }
+  let paddingLookahead = skipAnsiEscapes(line, pos);
 
   if (line.startsWith("==", paddingLookahead)) {
     key += "==";
     pos = paddingLookahead + 2;
+  } else if (line[paddingLookahead] === "=") {
+    const secondPaddingOffset = skipAnsiEscapes(line, paddingLookahead + 1);
+    if (line[secondPaddingOffset] === "=") {
+      key += "==";
+      pos = secondPaddingOffset + 1;
+    } else if (paddingLookahead === pos) {
+      return null;
+    }
   } else if (paddingLookahead === pos && /[A-Za-z0-9+/=]/.test(line[pos] || "")) {
     return null;
   }

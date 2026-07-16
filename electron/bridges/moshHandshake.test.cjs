@@ -66,6 +66,33 @@ test("parseMoshConnect tolerates ConPTY CSI controls inside the key", () => {
   });
 });
 
+test("parseMoshConnect tolerates ConPTY CSI controls inside key padding", () => {
+  const line = "MOSH CONNECT 60031 ABCDEFGHIJKLMNOPQRSTUV=\u001b[?25h=\r\n";
+  const got = parseMoshConnect(line);
+  assert.deepEqual(got && { port: got.port, key: got.key }, {
+    port: 60031,
+    key: "ABCDEFGHIJKLMNOPQRSTUV==",
+  });
+});
+
+test("parseMoshConnect tolerates ConPTY CSI controls around both padding bytes", () => {
+  const line = "MOSH CONNECT 60033 ABCDEFGHIJKLMNOPQRSTUV\u001b[?25h=\u001b[?25h=\r\n";
+  const got = parseMoshConnect(line);
+  assert.deepEqual(got && { port: got.port, key: got.key }, {
+    port: 60033,
+    key: "ABCDEFGHIJKLMNOPQRSTUV==",
+  });
+});
+
+test("parseMoshConnect treats escaped equals after an unpadded key as banner text", () => {
+  const line = "MOSH CONNECT 60032 ABCDEFGHIJKLMNOPQRSTUV\u001b[8;1H= banner\r\n";
+  const got = parseMoshConnect(line);
+  assert.deepEqual(got && { port: got.port, key: got.key }, {
+    port: 60032,
+    key: "ABCDEFGHIJKLMNOPQRSTUV",
+  });
+});
+
 test("createMoshConnectSniffer parses ConPTY-mangled MOSH CONNECT lines", () => {
   const sniffer = createMoshConnectSniffer();
   const r = sniffer.feed(
@@ -84,6 +111,30 @@ test("createMoshConnectSniffer redacts MOSH CONNECT when CSI splits the key", ()
   assert.deepEqual(r.parsed, { port: 60030, key: "nDMmYnfKIKn2yAXiK/34eg" });
   assert.ok(!String(r.visible).includes("MOSH CONNECT"));
   assert.ok(!String(r.visible).includes("34eg"));
+});
+
+test("createMoshConnectSniffer redacts MOSH CONNECT when CSI splits key padding", () => {
+  const sniffer = createMoshConnectSniffer();
+  const r = sniffer.feed("MOSH CONNECT 60031 ABCDEFGHIJKLMNOPQRSTUV=\u001b[?25h=\r\n");
+  assert.deepEqual(r.parsed, { port: 60031, key: "ABCDEFGHIJKLMNOPQRSTUV==" });
+  assert.ok(!String(r.visible).includes("MOSH CONNECT"));
+  assert.ok(!String(r.visible).includes("ABCDEFGHIJKLMNOPQRSTUV"));
+});
+
+test("createMoshConnectSniffer redacts MOSH CONNECT when CSI surrounds padding bytes", () => {
+  const sniffer = createMoshConnectSniffer();
+  const r = sniffer.feed("MOSH CONNECT 60033 ABCDEFGHIJKLMNOPQRSTUV\u001b[?25h=\u001b[?25h=\r\n");
+  assert.deepEqual(r.parsed, { port: 60033, key: "ABCDEFGHIJKLMNOPQRSTUV==" });
+  assert.ok(!String(r.visible).includes("MOSH CONNECT"));
+  assert.ok(!String(r.visible).includes("ABCDEFGHIJKLMNOPQRSTUV"));
+});
+
+test("createMoshConnectSniffer preserves escaped equals banner after an unpadded key", () => {
+  const sniffer = createMoshConnectSniffer();
+  const r = sniffer.feed("MOSH CONNECT 60032 ABCDEFGHIJKLMNOPQRSTUV\u001b[8;1H= banner\r\n");
+  assert.deepEqual(r.parsed, { port: 60032, key: "ABCDEFGHIJKLMNOPQRSTUV" });
+  assert.ok(!String(r.visible).includes("MOSH CONNECT"));
+  assert.ok(String(r.visible).includes("= banner"));
 });
 
 test("createMoshConnectSniffer stops the key at a ConPTY cursor move before banner text", () => {
