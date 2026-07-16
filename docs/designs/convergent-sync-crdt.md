@@ -36,6 +36,10 @@ The replica contains:
 - observed-remove string entries with their own presence and position
   registers.
 
+A string-entry remove is emitted only after the replica has observed a currently
+visible add. Deleting a locally absent entry is a no-op, so a concurrent add on
+another replica survives without creating an artificial value/tombstone conflict.
+
 Deletion is a register candidate, not absence from the serialized structure.
 Tombstones are retained indefinitely in v2. A later recreation replaces a
 tombstone only when its new dot causally observes the deletion.

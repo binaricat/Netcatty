@@ -284,6 +284,81 @@ test('string collections use observed-remove presence and stable positions', () 
   );
 });
 
+test('unobserved string-entry deletes are no-ops and do not conflict with concurrent adds', () => {
+  const empty = createConvergentSyncState();
+  const deleted = applyConvergentMutations(empty, 'device-a', [{
+    kind: 'string-entry-delete',
+    collection: 'customGroups',
+    value: 'Alpha',
+  }], BASE_TIME);
+  const added = applyConvergentMutations(empty, 'device-b', [{
+    kind: 'string-entry-add',
+    collection: 'customGroups',
+    value: 'Alpha',
+  }], BASE_TIME);
+  const merged = materializeConvergentSyncState(
+    mergeConvergentSyncStates(deleted, added),
+  );
+
+  assert.equal(
+    serializeConvergentSyncState(deleted),
+    serializeConvergentSyncState(empty),
+  );
+  assert.deepEqual(merged.stringCollections.customGroups, ['Alpha']);
+  assert.equal(merged.conflicts.length, 0);
+});
+
+test('string-entry deletes dominate a currently visible add/tombstone conflict', () => {
+  const seeded = applyConvergentMutations(createConvergentSyncState(), 'seed', [{
+    kind: 'string-entry-add',
+    collection: 'customGroups',
+    value: 'Alpha',
+  }], BASE_TIME);
+  const removed = applyConvergentMutations(seeded, 'device-a', [{
+    kind: 'string-entry-delete',
+    collection: 'customGroups',
+    value: 'Alpha',
+  }], BASE_TIME + 1);
+  const concurrentAdd = applyConvergentMutations(createConvergentSyncState(), 'device-b', [{
+    kind: 'string-entry-add',
+    collection: 'customGroups',
+    value: 'Alpha',
+  }], BASE_TIME + 1);
+  const conflicted = mergeConvergentSyncStates(removed, concurrentAdd);
+  const resolved = applyConvergentMutations(conflicted, 'device-c', [{
+    kind: 'string-entry-delete',
+    collection: 'customGroups',
+    value: 'Alpha',
+  }], BASE_TIME + 2);
+  const materialized = materializeConvergentSyncState(resolved);
+
+  assert.deepEqual(materialized.stringCollections.customGroups, []);
+  assert.equal(materialized.conflicts.length, 0);
+});
+
+test('repeated string-entry deletes do not advance the replica clock', () => {
+  const added = applyConvergentMutations(createConvergentSyncState(), 'device-a', [{
+    kind: 'string-entry-add',
+    collection: 'customGroups',
+    value: 'Alpha',
+  }], BASE_TIME);
+  const deleted = applyConvergentMutations(added, 'device-a', [{
+    kind: 'string-entry-delete',
+    collection: 'customGroups',
+    value: 'Alpha',
+  }], BASE_TIME + 1);
+  const repeated = applyConvergentMutations(deleted, 'device-a', [{
+    kind: 'string-entry-delete',
+    collection: 'customGroups',
+    value: 'Alpha',
+  }], BASE_TIME + 2);
+
+  assert.equal(
+    serializeConvergentSyncState(repeated),
+    serializeConvergentSyncState(deleted),
+  );
+});
+
 test('settings are leaf registers while arrays remain atomic values', () => {
   const state = applyConvergentMutations(createConvergentSyncState(), 'device-a', [
     { kind: 'setting-set', path: ['terminal', 'fontSize'], value: 14 },

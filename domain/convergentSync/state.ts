@@ -492,7 +492,16 @@ function applyMutation(
       break;
     }
     case 'string-entry-delete': {
-      const { entry } = ensureStringEntry(state, mutation.collection, mutation.value);
+      requireNonEmpty(mutation.collection, 'String collection name');
+      requireNonEmpty(mutation.value, 'String collection value');
+      const collection = getOwnRecordValue(
+        state.stringCollections,
+        mutation.collection,
+      );
+      const entry = collection
+        ? getOwnRecordValue(collection.entries, mutation.value)
+        : undefined;
+      if (!entry || !registerIsPresent(entry.presence)) break;
       entry.presence = writeRegister(
         state,
         deviceId,
