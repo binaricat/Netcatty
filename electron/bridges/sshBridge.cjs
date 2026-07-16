@@ -1139,6 +1139,8 @@ async function startSSHSessionWrapper(event, options) {
     const isAuthError = isStartAuthError(err);
 
     if (isAuthError) {
+      let authErrorSource = err;
+
       if (canRetryKeyboardInteractiveFirst && err.retryKeyboardInteractiveFirst) {
         console.log('[SSH] Password auth removed keyboard-interactive; retrying with keyboard-interactive first...');
         try {
@@ -1149,21 +1151,14 @@ async function startSSHSessionWrapper(event, options) {
         } catch (retryErr) {
           const isRetryAuthError = isStartAuthError(retryErr);
           if (isRetryAuthError) {
-            const authError = new Error(retryErr.message);
-            authError.level = 'client-authentication';
-            authError.isAuthError = true;
-            if (retryErr.isJumpHostAuthError) {
-              authError.isJumpHostAuthError = true;
-              authError.jumpHostIndex = retryErr.jumpHostIndex;
-              authError.jumpHostLabel = retryErr.jumpHostLabel;
-              authError.jumpHostHostname = retryErr.jumpHostHostname;
-            }
-            throw authError;
+            authErrorSource = retryErr;
+            console.log('[SSH] Keyboard-interactive-first retry failed authentication; checking remaining auth fallbacks...');
+          } else {
+            const connError = new Error(retryErr.message);
+            connError.level = retryErr.level || 'client-socket';
+            connError.code = retryErr.code;
+            throw connError;
           }
-          const connError = new Error(retryErr.message);
-          connError.level = retryErr.level || 'client-socket';
-          connError.code = retryErr.code;
-          throw connError;
         }
       }
 
@@ -1171,8 +1166,8 @@ async function startSSHSessionWrapper(event, options) {
       // Only offer retry if no unlocked keys were provided in this attempt
       if (
         canRetryEncryptedDefaults
-        && canFailedHopRetryWithEncryptedDefaultKeys(options, err)
-        && !isStrictAgentAuthFailure(options, err)
+        && canFailedHopRetryWithEncryptedDefaultKeys(options, authErrorSource)
+        && !isStrictAgentAuthFailure(options, authErrorSource)
       ) {
         const encryptedKeys = loadedRetryableEncryptedKeys
           ? retryableEncryptedKeys
@@ -1245,19 +1240,19 @@ async function startSSHSessionWrapper(event, options) {
       }
 
       if (shouldSuppressInitialAuthExit) {
-        sendFinalStartFailureExit(event, options, err);
+        sendFinalStartFailureExit(event, options, authErrorSource);
       }
 
       // Re-throw with a clean error to avoid Electron printing full stack trace
       // The frontend will handle this as a normal auth failure for fallback
-      const authError = new Error(err.message);
+      const authError = new Error(authErrorSource.message);
       authError.level = 'client-authentication';
       authError.isAuthError = true;
-      if (err.isJumpHostAuthError) {
+      if (authErrorSource.isJumpHostAuthError) {
         authError.isJumpHostAuthError = true;
-        authError.jumpHostIndex = err.jumpHostIndex;
-        authError.jumpHostLabel = err.jumpHostLabel;
-        authError.jumpHostHostname = err.jumpHostHostname;
+        authError.jumpHostIndex = authErrorSource.jumpHostIndex;
+        authError.jumpHostLabel = authErrorSource.jumpHostLabel;
+        authError.jumpHostHostname = authErrorSource.jumpHostHostname;
       }
       throw authError;
     }

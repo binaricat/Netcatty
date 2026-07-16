@@ -552,6 +552,61 @@ test("terminal SSH retries keyboard-interactive first when password rejection re
   );
 });
 
+test("failed keyboard-interactive retry still offers encrypted default key fallback", async (t) => {
+  const events = [];
+  const { bridge, MockSSHClient } = loadBridgeWithAuthRetryMocks(t, {
+    connectEvents: ["mfa-keyboard-interactive-before-password", "auth-error", "ready"],
+    encryptedKeys: [
+      {
+        keyPath: "/Users/test/.ssh/id_ed25519",
+        keyName: "id_ed25519",
+        isEncrypted: true,
+      },
+    ],
+    passphraseResult: {
+      cancelled: false,
+      keys: [
+        {
+          keyPath: "/Users/test/.ssh/id_ed25519",
+          keyName: "id_ed25519",
+          privateKey: "UNLOCKED_PRIVATE_KEY",
+          passphrase: "secret",
+        },
+      ],
+    },
+    onPassphraseRequest: () => events.push("passphrase-request"),
+  });
+  const ipcMain = makeIpcMain();
+  bridge.init({ sessions: new Map(), electronModule: {} });
+  bridge.registerHandlers(ipcMain);
+
+  const result = await ipcMain.handlers.get("netcatty:start")(
+    { sender: makeSender(events) },
+    {
+      sessionId: "mfa-ki-encrypted-fallback-session",
+      hostname: "corp-edr.example.com",
+      username: "alice",
+      authMethod: "auto",
+      password: "login-password",
+      useSshAgent: false,
+      port: 22,
+      knownHosts: [],
+    },
+  );
+
+  assert.deepEqual(result, { sessionId: "mfa-ki-encrypted-fallback-session" });
+  assert.equal(MockSSHClient.instances.length, 3);
+  assert.deepEqual(
+    MockSSHClient.instances[0].authMethodsOffered,
+    [
+      "none",
+      { type: "password", username: "alice", password: "login-password" },
+      false,
+    ],
+  );
+  assert.equal(events.includes("passphrase-request"), true);
+});
+
 test("terminal SSH password-first then keyboard-interactive when both methods are advertised", async (t) => {
   const { bridge, MockSSHClient } = loadBridgeWithAuthRetryMocks(t, {
     connectEvents: ["password-and-keyboard-interactive"],
