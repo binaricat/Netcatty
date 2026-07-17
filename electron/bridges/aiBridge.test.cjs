@@ -148,7 +148,9 @@ function loadBridgeWithMocks(options = {}) {
       },
     },
     "./ipcUtils.cjs": {
-      safeSend() {},
+      safeSend: (...args) => {
+        if (typeof options.safeSend === "function") options.safeSend(...args);
+      },
     },
     "./windowManager.cjs": {
       getMainWindow() {
@@ -251,6 +253,73 @@ test("command timeout handler accepts one-day timeout values", async () => {
 
     assert.deepEqual(result, { ok: true });
     assert.deepEqual(calls, [86_400]);
+  } finally {
+    restore();
+  }
+});
+
+test("streaming AI responses preserve UTF-8 characters split across network chunks", async (t) => {
+  const sentEvents = [];
+  const { bridge, restore } = loadBridgeWithMocks({
+    safeSend: (_sender, channel, payload) => sentEvents.push({ channel, payload }),
+  });
+  const ipcMain = createIpcMainStub();
+  const server = require("node:http").createServer((req, res) => {
+    req.resume();
+    req.on("end", () => {
+      res.writeHead(200, { "content-type": "text/event-stream" });
+      const message = Buffer.from('data: {"choices":[{"delta":{"content":"环境正常"}}]}\n\n');
+      const splitAt = message.indexOf(Buffer.from("环")) + 1;
+      res.write(message.subarray(0, splitAt));
+      setImmediate(() => res.end(message.subarray(splitAt)));
+    });
+  });
+
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+
+  bridge.init({
+    sessions: new Map(),
+    sftpClients: new Map(),
+    electronModule: { app: { getPath: () => process.cwd() } },
+  });
+  bridge.registerHandlers(ipcMain);
+
+  try {
+    const address = server.address();
+    assert.ok(address && typeof address === "object");
+    const baseURL = `http://127.0.0.1:${address.port}`;
+    const sender = { id: 1 };
+    await ipcMain.handlers.get("netcatty:ai:sync-providers")(
+      { sender },
+      { providers: [{ id: "split-utf8", baseURL }] },
+    );
+
+    const ended = new Promise((resolve) => {
+      const poll = () => {
+        if (sentEvents.some(({ channel }) => channel === "netcatty:ai:stream:end")) resolve();
+        else setImmediate(poll);
+      };
+      poll();
+    });
+    const result = await ipcMain.handlers.get("netcatty:ai:chat:stream")(
+      { sender },
+      {
+        requestId: "split-utf8-request",
+        url: `${baseURL}/v1/chat/completions`,
+        headers: { "content-type": "application/json" },
+        body: '{"stream":true}',
+        providerId: "split-utf8",
+      },
+    );
+    await ended;
+
+    assert.equal(result.ok, true);
+    const dataEvent = sentEvents.find(({ channel }) => channel === "netcatty:ai:stream:data");
+    assert.equal(dataEvent?.payload.data, '{"choices":[{"delta":{"content":"环境正常"}}]}');
   } finally {
     restore();
   }
