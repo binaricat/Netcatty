@@ -39,6 +39,30 @@ test('keeps a synced or manually entered font visible when it is not installed',
   });
 });
 
+test('preserves the selected value when it matches an installed family after normalization', () => {
+  const options = buildTerminalCjkFontOptions({
+    installedFamilies: ['PingFang SC', 'Sarasa Mono SC'],
+    selectedValue: '  pingfang sc  ',
+  });
+
+  assert.deepEqual(options.find((option) => option.kind === 'installed'), {
+    value: '  pingfang sc  ',
+    kind: 'installed',
+  });
+});
+
+test('preserves an unavailable selected value exactly', () => {
+  const options = buildTerminalCjkFontOptions({
+    installedFamilies: [],
+    selectedValue: '  Missing Family  ',
+  });
+
+  assert.deepEqual(options.at(-1), {
+    value: '  Missing Family  ',
+    kind: 'unavailable',
+  });
+});
+
 test('reports safe, risky, and unavailable selections for user guidance', () => {
   assert.equal(
     getTerminalCjkFontSelectionStatus('', ['PingFang SC']),

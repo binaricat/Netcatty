@@ -51,7 +51,25 @@ export const applyComboboxWheelScroll = (
     return true
 }
 
-function ComboboxOptionsList({ children }: { children: React.ReactNode }) {
+export const getNextComboboxActiveIndex = (
+    currentIndex: number,
+    optionCount: number,
+    direction: 1 | -1,
+): number => {
+    if (optionCount <= 0) return -1
+    if (currentIndex < 0 || currentIndex >= optionCount) {
+        return direction === 1 ? 0 : optionCount - 1
+    }
+    return (currentIndex + direction + optionCount) % optionCount
+}
+
+function ComboboxOptionsList({
+    children,
+    id,
+}: {
+    children: React.ReactNode;
+    id: string;
+}) {
     const handleWheelCapture = (event: React.WheelEvent<HTMLDivElement>) => {
         const handled = applyComboboxWheelScroll(event.currentTarget, event.deltaY, event.deltaMode)
         if (!handled) return
@@ -63,6 +81,8 @@ function ComboboxOptionsList({ children }: { children: React.ReactNode }) {
 
     return (
         <div
+            id={id}
+            role="listbox"
             className="max-h-[280px] overflow-y-auto overscroll-contain p-1"
             onWheelCapture={handleWheelCapture}
         >
@@ -89,9 +109,12 @@ export function Combobox({
 }: ComboboxProps) {
     const [open, setOpen] = React.useState(false)
     const [inputValue, setInputValue] = React.useState("")
+    const [activeIndex, setActiveIndex] = React.useState(-1)
     // Track if user is actively searching (typed something after opening)
     const [isSearching, setIsSearching] = React.useState(false)
     const inputRef = React.useRef<HTMLInputElement>(null)
+    const activeOptionRef = React.useRef<HTMLButtonElement>(null)
+    const listboxId = React.useId()
 
     // Sync input value with external value when not focused
     React.useEffect(() => {
@@ -120,6 +143,13 @@ export function Combobox({
         return !options.some((opt) => opt.value.toLowerCase() === lower || opt.label.toLowerCase() === lower)
     }, [allowCreate, inputValue, options, isSearching])
 
+    const selectableOptionCount = filteredOptions.length + (showCreateOption ? 1 : 0)
+    const hasActiveOption = activeIndex >= 0 && activeIndex < selectableOptionCount
+
+    React.useEffect(() => {
+        activeOptionRef.current?.scrollIntoView({ block: 'nearest' })
+    }, [activeIndex])
+
     const handleSelect = (optValue: string) => {
         onValueChange?.(optValue)
         onInputValueChange?.(optValue)
@@ -142,18 +172,35 @@ export function Combobox({
         setInputValue(e.target.value)
         onInputValueChange?.(e.target.value)
         setIsSearching(true)
+        setActiveIndex(-1)
         if (!open) setOpen(true)
     }
 
     const handleOpenChange = (nextOpen: boolean) => {
         setOpen(nextOpen)
+        setActiveIndex(-1)
         if (!nextOpen) onInputValueChange?.(value ?? "")
     }
 
     const handleInputKeyDown = (e: React.KeyboardEvent) => {
-        if (e.key === 'Enter') {
+        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
             e.preventDefault()
-            if (showCreateOption) {
+            if (!open) setOpen(true)
+            const direction = e.key === 'ArrowDown' ? 1 : -1
+            setActiveIndex((current) =>
+                getNextComboboxActiveIndex(current, selectableOptionCount, direction)
+            )
+        } else if (e.key === 'Enter') {
+            e.preventDefault()
+            if (hasActiveOption) {
+                if (showCreateOption && activeIndex === 0) {
+                    handleCreate()
+                } else {
+                    const optionIndex = activeIndex - (showCreateOption ? 1 : 0)
+                    const activeOption = filteredOptions[optionIndex]
+                    if (activeOption) handleSelect(activeOption.value)
+                }
+            } else if (showCreateOption) {
                 handleCreate()
             } else if (filteredOptions.length === 1) {
                 handleSelect(filteredOptions[0].value)
@@ -189,6 +236,13 @@ export function Combobox({
                         value={inputValue}
                         onChange={handleInputChange}
                         onKeyDown={handleInputKeyDown}
+                        role="combobox"
+                        aria-autocomplete="list"
+                        aria-expanded={open}
+                        aria-controls={listboxId}
+                        aria-activedescendant={
+                            hasActiveOption ? `${listboxId}-option-${activeIndex}` : undefined
+                        }
                         placeholder={placeholder}
                         style={inputStyle}
                         className="flex-1 min-w-0 h-full px-3 bg-transparent outline-none placeholder:text-muted-foreground"
@@ -214,7 +268,7 @@ export function Combobox({
                 style={{ width: 'var(--radix-popover-trigger-width)' }}
             >
                 {/* Options List */}
-                <ComboboxOptionsList>
+                <ComboboxOptionsList id={listboxId}>
                     {filteredOptions.length === 0 && !showCreateOption ? (
                         <div className="py-4 text-center text-sm text-muted-foreground">
                             {emptyText}
@@ -224,9 +278,18 @@ export function Combobox({
                             {/* Create new option */}
                             {showCreateOption && (
                                 <button
+                                    ref={activeIndex === 0 ? activeOptionRef : undefined}
+                                    id={`${listboxId}-option-0`}
+                                    role="option"
+                                    aria-selected={false}
+                                    tabIndex={-1}
                                     type="button"
-                                    className="flex w-full items-center gap-3 px-3 py-2.5 rounded-md text-sm hover:bg-secondary/80 transition-colors text-left"
+                                    className={cn(
+                                        "flex w-full items-center gap-3 px-3 py-2.5 rounded-md text-sm hover:bg-secondary/80 transition-colors text-left",
+                                        activeIndex === 0 && "bg-secondary/80",
+                                    )}
                                     onClick={handleCreate}
+                                    onMouseEnter={() => setActiveIndex(0)}
                                 >
                                     <Plus size={16} className="text-primary shrink-0" />
                                     <span className="text-muted-foreground">{createText}</span>
@@ -240,34 +303,44 @@ export function Combobox({
                             )}
 
                             {/* Existing options */}
-                            {filteredOptions.map((option) => (
-                                <button
-                                    key={option.value}
-                                    type="button"
-                                    className={cn(
-                                        "flex w-full items-center gap-3 px-3 py-2.5 rounded-md text-sm transition-colors text-left",
-                                        value === option.value
-                                            ? "bg-primary/10 text-foreground"
-                                            : "hover:bg-secondary/80"
-                                    )}
-                                    onClick={() => handleSelect(option.value)}
-                                >
-                                    {option.icon && (
-                                        <span className="shrink-0 text-muted-foreground">{option.icon}</span>
-                                    )}
-                                    <div className="flex-1 min-w-0">
-                                        <div className="truncate font-medium" style={option.labelStyle}>{option.label}</div>
-                                        {option.sublabel && (
-                                            <div className="text-xs text-muted-foreground truncate">
-                                                {option.sublabel}
-                                            </div>
+                            {filteredOptions.map((option, optionIndex) => {
+                                const selectableIndex = optionIndex + (showCreateOption ? 1 : 0)
+                                return (
+                                    <button
+                                        key={option.value}
+                                        ref={activeIndex === selectableIndex ? activeOptionRef : undefined}
+                                        id={`${listboxId}-option-${selectableIndex}`}
+                                        role="option"
+                                        aria-selected={value === option.value}
+                                        tabIndex={-1}
+                                        type="button"
+                                        className={cn(
+                                            "flex w-full items-center gap-3 px-3 py-2.5 rounded-md text-sm transition-colors text-left",
+                                            value === option.value
+                                                ? "bg-primary/10 text-foreground"
+                                                : "hover:bg-secondary/80",
+                                            activeIndex === selectableIndex && "bg-secondary/80",
                                         )}
-                                    </div>
-                                    {value === option.value && (
-                                        <Check size={16} className="shrink-0 text-primary" />
-                                    )}
-                                </button>
-                            ))}
+                                        onClick={() => handleSelect(option.value)}
+                                        onMouseEnter={() => setActiveIndex(selectableIndex)}
+                                    >
+                                        {option.icon && (
+                                            <span className="shrink-0 text-muted-foreground">{option.icon}</span>
+                                        )}
+                                        <div className="flex-1 min-w-0">
+                                            <div className="truncate font-medium" style={option.labelStyle}>{option.label}</div>
+                                            {option.sublabel && (
+                                                <div className="text-xs text-muted-foreground truncate">
+                                                    {option.sublabel}
+                                                </div>
+                                            )}
+                                        </div>
+                                        {value === option.value && (
+                                            <Check size={16} className="shrink-0 text-primary" />
+                                        )}
+                                    </button>
+                                )
+                            })}
                         </>
                     )}
                 </ComboboxOptionsList>

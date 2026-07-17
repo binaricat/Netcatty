@@ -5,6 +5,7 @@ import test from "node:test";
 import {
   applyComboboxWheelScroll,
   comboboxWheelDeltaToPixels,
+  getNextComboboxActiveIndex,
   type ComboboxScrollableTarget,
 } from "./ui/combobox.tsx";
 
@@ -50,4 +51,20 @@ test("Escape closes the picker through the preview-reset path", () => {
     source,
     /else if \(e\.key === 'Escape'\) \{\s*handleOpenChange\(false\)\s*\}/,
   );
+});
+
+test("combobox arrow navigation wraps through every selectable option", () => {
+  assert.equal(getNextComboboxActiveIndex(-1, 3, 1), 0);
+  assert.equal(getNextComboboxActiveIndex(0, 3, 1), 1);
+  assert.equal(getNextComboboxActiveIndex(2, 3, 1), 0);
+  assert.equal(getNextComboboxActiveIndex(-1, 3, -1), 2);
+  assert.equal(getNextComboboxActiveIndex(0, 3, -1), 2);
+  assert.equal(getNextComboboxActiveIndex(0, 0, 1), -1);
+});
+
+test("combobox exposes active-option semantics for keyboard navigation", () => {
+  assert.match(source, /role="combobox"/);
+  assert.match(source, /aria-activedescendant=/);
+  assert.match(source, /role="listbox"/);
+  assert.match(source, /role="option"/);
 });

@@ -36,6 +36,10 @@ export function buildTerminalCjkFontOptions({
   selectedValue,
   availableRecommendedFamilies = [],
 }: BuildOptionsArgs): TerminalCjkFontOption[] {
+  const trimmedSelected = selectedValue.trim();
+  const selectedKey = normalize(trimmedSelected);
+  const preserveSelectedValue = (family: string): string =>
+    normalize(family) === selectedKey && trimmedSelected ? selectedValue : family;
   const installedByLower = new Map<string, string>();
   for (const rawFamily of installedFamilies ?? []) {
     const family = rawFamily.trim();
@@ -52,7 +56,7 @@ export function buildTerminalCjkFontOptions({
   for (const family of RECOMMENDED_CJK_FONT_FAMILIES) {
     const key = normalize(family);
     if (!installedByLower.has(key) && !availableRecommended.has(key)) continue;
-    options.push({ value: family, kind: 'recommended' });
+    options.push({ value: preserveSelectedValue(family), kind: 'recommended' });
     installedByLower.delete(key);
   }
 
@@ -61,16 +65,14 @@ export function buildTerminalCjkFontOptions({
   );
   options.push(
     ...remainingInstalled.map((value) => ({
-      value,
+      value: preserveSelectedValue(value),
       kind: 'installed' as const,
     })),
   );
 
-  const trimmedSelected = selectedValue.trim();
-  const selectedKey = normalize(trimmedSelected);
   const alreadyVisible = options.some((option) => normalize(option.value) === selectedKey);
   if (trimmedSelected && !alreadyVisible) {
-    options.push({ value: trimmedSelected, kind: 'unavailable' });
+    options.push({ value: selectedValue, kind: 'unavailable' });
   }
 
   return options;

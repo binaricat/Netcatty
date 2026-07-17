@@ -66,7 +66,7 @@ export const TerminalCjkFontSelect: React.FC<Props> = ({
     return built.map((option) => {
       const label = option.kind === 'auto'
         ? t('settings.terminal.font.cjk.option.auto')
-        : option.value;
+        : option.value.trim();
       return {
         value: option.value,
         label,
