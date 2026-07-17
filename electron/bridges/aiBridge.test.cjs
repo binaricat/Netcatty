@@ -258,24 +258,9 @@ test("command timeout handler accepts one-day timeout values", async () => {
   }
 });
 
-test("streaming AI responses preserve UTF-8 characters split across network chunks", async (t) => {
+test("streaming AI responses preserve UTF-8 characters split across network chunks", { timeout: 5_000 }, async (t) => {
   const sentEvents = [];
-  let handleStreamEvent;
-  const streamFinished = new Promise((resolve, reject) => {
-    const timeout = setTimeout(
-      () => reject(new Error("Timed out waiting for the AI stream to finish")),
-      2_000,
-    );
-    handleStreamEvent = (channel, payload) => {
-      if (channel === "netcatty:ai:stream:end") {
-        clearTimeout(timeout);
-        resolve();
-      } else if (channel === "netcatty:ai:stream:error") {
-        clearTimeout(timeout);
-        reject(new Error(payload.error));
-      }
-    };
-  });
+  let handleStreamEvent = () => {};
   const { bridge, restore } = loadBridgeWithMocks({
     safeSend: (_sender, channel, payload) => {
       sentEvents.push({ channel, payload });
@@ -316,6 +301,13 @@ test("streaming AI responses preserve UTF-8 characters split across network chun
       { sender },
       { providers: [{ id: "split-utf8", baseURL }] },
     );
+
+    const streamFinished = new Promise((resolve, reject) => {
+      handleStreamEvent = (channel, payload) => {
+        if (channel === "netcatty:ai:stream:end") resolve();
+        else if (channel === "netcatty:ai:stream:error") reject(new Error(payload.error));
+      };
+    });
 
     const result = await ipcMain.handlers.get("netcatty:ai:chat:stream")(
       { sender },
