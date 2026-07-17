@@ -3,7 +3,7 @@ import test from 'node:test';
 import {
   buildTerminalCjkFontOptions,
   getTerminalCjkFontSelectionStatus,
-} from './terminalCjkFontOptions';
+} from './terminalCjkFonts';
 
 test('builds recommended choices first and includes every installed family once', () => {
   const options = buildTerminalCjkFontOptions({

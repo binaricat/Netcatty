@@ -15,7 +15,7 @@ import {
   getTerminalCjkFontSelectionStatus,
   RECOMMENDED_CJK_FONT_FAMILIES,
   type TerminalCjkFontOptionKind,
-} from './terminalCjkFontOptions';
+} from '../../domain/terminalCjkFonts';
 
 const previewFontFamily = (family: string): string | undefined => {
   const trimmed = family.trim();
