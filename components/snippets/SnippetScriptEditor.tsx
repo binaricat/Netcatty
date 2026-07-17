@@ -4,7 +4,10 @@ import { useI18n } from '../../application/i18n/I18nProvider';
 import { STORAGE_KEY_SNIPPET_SCRIPT_EDITOR_HEIGHT } from '@/infrastructure/config/storageKeys.ts';
 import { localStorageAdapter } from '@/infrastructure/persistence/localStorageAdapter.ts';
 import { Button } from '../ui/button';
-import { ScriptCodeEditor } from '../scripts/ScriptCodeEditor';
+import {
+  ScriptCodeEditor,
+  type ScriptCodeEditorHandle,
+} from '../scripts/ScriptCodeEditor';
 import {
   Dialog,
   DialogContent,
@@ -72,6 +75,7 @@ export const SnippetScriptEditor: React.FC<SnippetScriptEditorProps> = ({
   }));
   const [modalOpen, setModalOpen] = useState(false);
   const dragRef = useRef<{ startY: number; startHeight: number } | null>(null);
+  const inlineEditorRef = useRef<ScriptCodeEditorHandle>(null);
   const heightRef = useRef(height);
   heightRef.current = height;
 
@@ -115,12 +119,13 @@ export const SnippetScriptEditor: React.FC<SnippetScriptEditorProps> = ({
         <div className="flex items-center justify-between gap-2 min-h-7">
           {label ? (
             id ? (
-              <span
+              <label
                 id={`${id}-label`}
-                className="text-xs font-semibold text-muted-foreground shrink-0"
+                className="text-xs font-semibold text-muted-foreground shrink-0 cursor-text"
+                onClick={() => inlineEditorRef.current?.focus()}
               >
                 {label}
-              </span>
+              </label>
             ) : (
               <p className="text-xs font-semibold text-muted-foreground shrink-0">{label}</p>
             )
@@ -149,6 +154,7 @@ export const SnippetScriptEditor: React.FC<SnippetScriptEditorProps> = ({
           style={{ height }}
         >
           <ScriptCodeEditor
+            ref={inlineEditorRef}
             value={value}
             onChange={onChange}
             language="shell"
@@ -156,6 +162,7 @@ export const SnippetScriptEditor: React.FC<SnippetScriptEditorProps> = ({
             height={height}
             ariaLabel={label || placeholder}
             placeholder={placeholder}
+            tabFocusMode
           />
           <div
             role="separator"

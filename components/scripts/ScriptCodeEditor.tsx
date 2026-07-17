@@ -1,6 +1,6 @@
 import Editor, { loader, type Monaco, type OnMount, useMonaco } from '@monaco-editor/react';
 import { Loader2 } from 'lucide-react';
-import React, { useCallback, useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useImperativeHandle, useRef } from 'react';
 import { useNetcattyMonacoTheme } from '@/infrastructure/monaco/useNetcattyMonacoTheme';
 import { registerNctMonacoCompletionProvider } from '@/infrastructure/scripts/nctMonacoCompletion.ts';
 
@@ -27,9 +27,15 @@ export interface ScriptCodeEditorProps {
   ariaLabel?: string;
   /** Hint shown while the editor is empty. */
   placeholder?: string;
+  /** Let Tab move to the next control instead of inserting indentation. */
+  tabFocusMode?: boolean;
 }
 
-export const ScriptCodeEditor: React.FC<ScriptCodeEditorProps> = ({
+export interface ScriptCodeEditorHandle {
+  focus: () => void;
+}
+
+export const ScriptCodeEditor = React.forwardRef<ScriptCodeEditorHandle, ScriptCodeEditorProps>(({
   value,
   onChange,
   language,
@@ -40,11 +46,16 @@ export const ScriptCodeEditor: React.FC<ScriptCodeEditorProps> = ({
   autoFocus = false,
   ariaLabel,
   placeholder,
-}) => {
+  tabFocusMode = false,
+}, forwardedRef) => {
   const monaco = useMonaco();
   const themeName = useNetcattyMonacoTheme(monaco ?? undefined);
   const editorRef = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null);
   const completionDisposableRef = useRef<{ dispose: () => void } | null>(null);
+
+  useImperativeHandle(forwardedRef, () => ({
+    focus: () => editorRef.current?.focus(),
+  }), []);
 
   useEffect(() => () => {
     completionDisposableRef.current?.dispose();
@@ -99,13 +110,19 @@ export const ScriptCodeEditor: React.FC<ScriptCodeEditorProps> = ({
           padding: { top: 8, bottom: 8 },
           bracketPairColorization: { enabled: true },
           ariaLabel,
+          tabFocusMode,
         }}
       />
       {placeholder && !value ? (
-        <span className="pointer-events-none absolute left-[52px] top-2 z-10 font-mono text-[13px] text-muted-foreground">
+        <span
+          aria-hidden
+          className="pointer-events-none absolute left-[52px] top-2 z-10 font-mono text-[13px] text-muted-foreground"
+        >
           {placeholder}
         </span>
       ) : null}
     </div>
   );
-};
+});
+
+ScriptCodeEditor.displayName = 'ScriptCodeEditor';
