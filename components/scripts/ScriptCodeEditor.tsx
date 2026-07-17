@@ -13,7 +13,7 @@ loader.config({ paths: { vs: monacoBasePath } });
 export interface ScriptCodeEditorProps {
   value: string;
   onChange: (value: string) => void;
-  language: 'javascript' | 'python';
+  language: 'javascript' | 'python' | 'shell';
   /** Fill parent flex container (modal). Parent must have explicit height. */
   fill?: boolean;
   /** Fixed pixel height (sidebar). Ignored when fill is true. */
@@ -21,6 +21,12 @@ export interface ScriptCodeEditorProps {
   minimap?: boolean;
   /** Re-layout when container becomes visible (e.g. dialog open). */
   active?: boolean;
+  /** Move keyboard focus into the editor after it mounts. */
+  autoFocus?: boolean;
+  /** Accessible name announced by screen readers. */
+  ariaLabel?: string;
+  /** Hint shown while the editor is empty. */
+  placeholder?: string;
 }
 
 export const ScriptCodeEditor: React.FC<ScriptCodeEditorProps> = ({
@@ -31,6 +37,9 @@ export const ScriptCodeEditor: React.FC<ScriptCodeEditorProps> = ({
   height = 240,
   minimap = false,
   active = true,
+  autoFocus = false,
+  ariaLabel,
+  placeholder,
 }) => {
   const monaco = useMonaco();
   const themeName = useNetcattyMonacoTheme(monaco ?? undefined);
@@ -53,9 +62,12 @@ export const ScriptCodeEditor: React.FC<ScriptCodeEditorProps> = ({
   const handleMount: OnMount = useCallback((editor, monacoInstance) => {
     editorRef.current = editor;
     completionDisposableRef.current?.dispose();
-    completionDisposableRef.current = registerNctMonacoCompletionProvider(monacoInstance);
+    completionDisposableRef.current = language === 'javascript'
+      ? registerNctMonacoCompletionProvider(monacoInstance)
+      : null;
     requestAnimationFrame(() => editor.layout());
-  }, []);
+    if (autoFocus) editor.focus();
+  }, [autoFocus, language]);
 
   const editorHeight = fill ? '100%' : `${height}px`;
 
@@ -86,8 +98,14 @@ export const ScriptCodeEditor: React.FC<ScriptCodeEditorProps> = ({
           renderLineHighlight: 'line',
           padding: { top: 8, bottom: 8 },
           bracketPairColorization: { enabled: true },
+          ariaLabel,
         }}
       />
+      {placeholder && !value ? (
+        <span className="pointer-events-none absolute left-[52px] top-2 z-10 font-mono text-[13px] text-muted-foreground">
+          {placeholder}
+        </span>
+      ) : null}
     </div>
   );
 };

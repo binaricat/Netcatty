@@ -3,9 +3,8 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useI18n } from '../../application/i18n/I18nProvider';
 import { STORAGE_KEY_SNIPPET_SCRIPT_EDITOR_HEIGHT } from '@/infrastructure/config/storageKeys.ts';
 import { localStorageAdapter } from '@/infrastructure/persistence/localStorageAdapter.ts';
-import { cn } from '@/lib/utils.ts';
 import { Button } from '../ui/button';
-import { CodeTextarea } from '../ui/code-textarea';
+import { ScriptCodeEditor } from '../scripts/ScriptCodeEditor';
 import {
   Dialog,
   DialogContent,
@@ -39,9 +38,6 @@ function readStoredHeight({
   if (stored === null) return clampHeight(defaultHeight, minHeight, maxHeight);
   return clampHeight(stored, minHeight, maxHeight);
 }
-
-const editorFillClass =
-  '[&>div]:h-full [&_textarea]:h-full [&_textarea]:min-h-0 [&_textarea]:overflow-auto';
 
 export interface SnippetScriptEditorProps {
   value: string;
@@ -119,12 +115,12 @@ export const SnippetScriptEditor: React.FC<SnippetScriptEditorProps> = ({
         <div className="flex items-center justify-between gap-2 min-h-7">
           {label ? (
             id ? (
-              <label
-                htmlFor={id}
-                className="text-xs font-semibold text-muted-foreground shrink-0 cursor-text"
+              <span
+                id={`${id}-label`}
+                className="text-xs font-semibold text-muted-foreground shrink-0"
               >
                 {label}
-              </label>
+              </span>
             ) : (
               <p className="text-xs font-semibold text-muted-foreground shrink-0">{label}</p>
             )
@@ -148,17 +144,19 @@ export const SnippetScriptEditor: React.FC<SnippetScriptEditorProps> = ({
             <TooltipContent>{t('snippets.scriptEditor.expand')}</TooltipContent>
           </Tooltip>
         </div>
-        <div className="relative rounded-md" style={{ height }}>
-          <div className={cn('h-full min-h-0 overflow-hidden', editorFillClass)}>
-            <CodeTextarea
-              id={id}
-              placeholder={placeholder}
-              value={value}
-              onChange={(e) => onChange(e.target.value)}
-              className="min-h-0"
-              wrapperClassName="h-full"
-            />
-          </div>
+        <div
+          className="relative overflow-hidden rounded-md border border-border/60 bg-background"
+          style={{ height }}
+        >
+          <ScriptCodeEditor
+            value={value}
+            onChange={onChange}
+            language="shell"
+            fill
+            height={height}
+            ariaLabel={label || placeholder}
+            placeholder={placeholder}
+          />
           <div
             role="separator"
             aria-orientation="horizontal"
@@ -176,14 +174,16 @@ export const SnippetScriptEditor: React.FC<SnippetScriptEditorProps> = ({
           <DialogHeader className="px-6 pt-6 pb-3 shrink-0">
             <DialogTitle>{t('snippets.scriptEditor.modalTitle')}</DialogTitle>
           </DialogHeader>
-          <div className={cn('flex-1 min-h-0 px-6 pb-3 overflow-hidden', editorFillClass)}>
-            <CodeTextarea
-              placeholder={placeholder}
+          <div className="flex-1 min-h-0 mx-6 mb-3 overflow-hidden rounded-md border border-border/60 bg-background">
+            <ScriptCodeEditor
               value={value}
-              onChange={(e) => onChange(e.target.value)}
-              className="min-h-0"
-              wrapperClassName="h-full"
+              onChange={onChange}
+              language="shell"
+              fill
               autoFocus
+              active={modalOpen}
+              ariaLabel={label || placeholder}
+              placeholder={placeholder}
             />
           </div>
           <DialogFooter className="px-6 pb-6 pt-2 shrink-0">
