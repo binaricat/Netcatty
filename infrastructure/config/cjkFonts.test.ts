@@ -87,6 +87,18 @@ describe('composeFontFamilyStack', () => {
     assert.ok(splitFontFamilyList(stack).includes('"Foo\\"Bar"'));
   });
 
+  it('quotes a manually entered font family containing an apostrophe', () => {
+    const stack = composeFontFamilyStack({
+      primaryFamily: 'Menlo, monospace',
+      userFallback: "Rock'nRoll",
+      latinFontId: 'menlo',
+      platform: 'darwin',
+    });
+
+    assert.ok(stack.includes('"Rock\'nRoll"'));
+    assert.ok(splitFontFamilyList(stack).includes('"Rock\'nRoll"'));
+  });
+
   it('does not duplicate identical fallback entries', () => {
     // User explicitly picks the same font the per-font pairing would,
     // and that font also lives in the system stack — should appear once.

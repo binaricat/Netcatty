@@ -117,7 +117,7 @@ function quoteIfNeeded(family: string): string {
   if (!trimmed) return '';
   if (trimmed === 'monospace') return trimmed;
   if (trimmed.startsWith('"') && trimmed.endsWith('"')) return trimmed;
-  if (/[\s,"\\]/.test(trimmed)) {
+  if (/[\s,'"\\]/.test(trimmed)) {
     const escaped = trimmed.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
     return `"${escaped}"`;
   }

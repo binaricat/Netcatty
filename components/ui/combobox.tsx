@@ -66,9 +66,11 @@ export const getNextComboboxActiveIndex = (
 function ComboboxOptionsList({
     children,
     id,
+    listbox = false,
 }: {
     children: React.ReactNode;
     id?: string;
+    listbox?: boolean;
 }) {
     const handleWheelCapture = (event: React.WheelEvent<HTMLDivElement>) => {
         const handled = applyComboboxWheelScroll(event.currentTarget, event.deltaY, event.deltaMode)
@@ -82,7 +84,7 @@ function ComboboxOptionsList({
     return (
         <div
             id={id}
-            role="listbox"
+            role={listbox ? "listbox" : undefined}
             className="max-h-[280px] overflow-y-auto overscroll-contain p-1"
             onWheelCapture={handleWheelCapture}
         >
@@ -268,7 +270,7 @@ export function Combobox({
                 style={{ width: 'var(--radix-popover-trigger-width)' }}
             >
                 {/* Options List */}
-                <ComboboxOptionsList id={listboxId}>
+                <ComboboxOptionsList id={listboxId} listbox>
                     {filteredOptions.length === 0 && !showCreateOption ? (
                         <div className="py-4 text-center text-sm text-muted-foreground">
                             {emptyText}

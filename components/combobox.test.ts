@@ -65,6 +65,8 @@ test("combobox arrow navigation wraps through every selectable option", () => {
 test("combobox exposes active-option semantics for keyboard navigation", () => {
   assert.match(source, /role="combobox"/);
   assert.match(source, /aria-activedescendant=/);
-  assert.match(source, /role="listbox"/);
+  assert.match(source, /role=\{listbox \? "listbox" : undefined\}/);
+  assert.match(source, /<ComboboxOptionsList id=\{listboxId\} listbox>/);
+  assert.match(source, /<ComboboxOptionsList>\s*\{/);
   assert.match(source, /role="option"/);
 });

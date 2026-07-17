@@ -79,11 +79,12 @@ export const TerminalCjkFontSelect: React.FC<Props> = ({
     });
   }, [availableRecommendedFamilies, installedFamilies, t, value]);
 
+  const previewSelection = previewValue.trim();
   const status = getTerminalCjkFontSelectionStatus(
-    value,
+    previewSelection,
     installedFamilies,
     availableRecommendedFamilies,
-    Boolean(value && isFontInstalled(value)),
+    Boolean(previewSelection && isFontInstalled(previewSelection)),
   );
   const selectedFontFamily = previewFontFamily(value);
   const previewFamily = previewFontFamily(previewValue);
