@@ -60,6 +60,7 @@ export const TerminalCjkFontSelect: React.FC<Props> = ({
       auto: '',
       recommended: t('settings.terminal.font.cjk.option.recommended'),
       installed: t('settings.terminal.font.cjk.option.installed'),
+      unverified: t('settings.terminal.font.cjk.option.unverified'),
       unavailable: t('settings.terminal.font.cjk.option.unavailable'),
     };
 

@@ -214,6 +214,7 @@ export const zhCNTerminalMessages: Messages = {
   'settings.terminal.font.cjk.option.legacy': '{font} · 不推荐（非等宽字体）',
   'settings.terminal.font.cjk.option.recommended': '推荐用于终端对齐',
   'settings.terminal.font.cjk.option.installed': '本机已安装字体',
+  'settings.terminal.font.cjk.option.unverified': '暂时无法检查是否安装',
   'settings.terminal.font.cjk.option.unavailable': '本机未安装',
   'settings.terminal.font.cjk.searchPlaceholder': '搜索本机字体…',
   'settings.terminal.font.cjk.empty': '没有匹配的本机字体',

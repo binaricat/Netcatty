@@ -63,6 +63,18 @@ test('preserves an unavailable selected value exactly', () => {
   });
 });
 
+test('does not claim a selected font is unavailable when detection did not run', () => {
+  const options = buildTerminalCjkFontOptions({
+    installedFamilies: null,
+    selectedValue: 'Unverified Local Font',
+  });
+
+  assert.deepEqual(options.at(-1), {
+    value: 'Unverified Local Font',
+    kind: 'unverified',
+  });
+});
+
 test('reports safe, risky, and unavailable selections for user guidance', () => {
   assert.equal(
     getTerminalCjkFontSelectionStatus('', ['PingFang SC']),

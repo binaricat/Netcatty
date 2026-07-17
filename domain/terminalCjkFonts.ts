@@ -2,6 +2,7 @@ export type TerminalCjkFontOptionKind =
   | 'auto'
   | 'recommended'
   | 'installed'
+  | 'unverified'
   | 'unavailable';
 
 export interface TerminalCjkFontOption {
@@ -72,7 +73,10 @@ export function buildTerminalCjkFontOptions({
 
   const alreadyVisible = options.some((option) => normalize(option.value) === selectedKey);
   if (trimmedSelected && !alreadyVisible) {
-    options.push({ value: selectedValue, kind: 'unavailable' });
+    options.push({
+      value: selectedValue,
+      kind: installedFamilies == null ? 'unverified' : 'unavailable',
+    });
   }
 
   return options;

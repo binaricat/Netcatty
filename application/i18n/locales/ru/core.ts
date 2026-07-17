@@ -454,6 +454,7 @@ export const ruCoreMessages: Messages = {
   'settings.terminal.font.cjk.option.legacy': '{font} · не рекомендуется (пропорциональный шрифт)',
   'settings.terminal.font.cjk.option.recommended': 'Рекомендуется для выравнивания в терминале',
   'settings.terminal.font.cjk.option.installed': 'Установленный шрифт',
+  'settings.terminal.font.cjk.option.unverified': 'Не удалось проверить доступность',
   'settings.terminal.font.cjk.option.unavailable': 'Не установлен на этом устройстве',
   'settings.terminal.font.cjk.searchPlaceholder': 'Поиск установленных шрифтов…',
   'settings.terminal.font.cjk.empty': 'Подходящие шрифты не найдены',

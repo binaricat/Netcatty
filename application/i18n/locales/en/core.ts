@@ -467,6 +467,7 @@ Highlight the focused split pane:
   'settings.terminal.font.cjk.option.legacy': '{font} · not recommended (proportional font)',
   'settings.terminal.font.cjk.option.recommended': 'Recommended for terminal alignment',
   'settings.terminal.font.cjk.option.installed': 'Installed font',
+  'settings.terminal.font.cjk.option.unverified': 'Availability could not be checked',
   'settings.terminal.font.cjk.option.unavailable': 'Not installed on this device',
   'settings.terminal.font.cjk.searchPlaceholder': 'Search installed fonts…',
   'settings.terminal.font.cjk.empty': 'No matching installed fonts',

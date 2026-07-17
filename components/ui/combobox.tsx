@@ -68,7 +68,7 @@ function ComboboxOptionsList({
     id,
 }: {
     children: React.ReactNode;
-    id: string;
+    id?: string;
 }) {
     const handleWheelCapture = (event: React.WheelEvent<HTMLDivElement>) => {
         const handled = applyComboboxWheelScroll(event.currentTarget, event.deltaY, event.deltaMode)
