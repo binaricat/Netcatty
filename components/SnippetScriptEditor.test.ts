@@ -32,6 +32,16 @@ test('snippet editor forwards the surrounding form submit shortcut', () => {
   assert.match(codeEditorSource, /onSubmitShortcutRef\.current\?\.\(\)/);
 });
 
+test('dialog submit handlers ignore shortcuts already handled by Monaco', () => {
+  const quickAddSource = readFileSync(new URL('./QuickAddSnippetDialog.tsx', import.meta.url), 'utf8');
+  const tmuxSource = readFileSync(
+    new URL('./systemManager/TmuxNewSessionModal.tsx', import.meta.url),
+    'utf8',
+  );
+  assert.match(quickAddSource, /if \(e\.defaultPrevented\) return/);
+  assert.match(tmuxSource, /if \(e\.defaultPrevented\) return/);
+});
+
 test('visual placeholder is hidden from assistive technology', () => {
   assert.match(codeEditorSource, /<span\s+aria-hidden/);
 });

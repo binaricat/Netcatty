@@ -78,6 +78,7 @@ export const TmuxNewSessionModal = memo(function TmuxNewSessionModal({
   }, [command, name, onCreate, t]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.defaultPrevented) return;
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && !creating && name.trim()) {
       e.preventDefault();
       void handleCreate();

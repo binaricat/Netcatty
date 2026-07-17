@@ -154,6 +154,7 @@ export const QuickAddSnippetDialog: React.FC<QuickAddSnippetDialogProps> = ({
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
+      if (e.defaultPrevented) return;
       // Cmd/Ctrl+Enter from anywhere in the dialog saves the snippet.
       if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && canSave) {
         e.preventDefault();
