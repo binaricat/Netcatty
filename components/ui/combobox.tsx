@@ -145,6 +145,11 @@ export function Combobox({
         if (!open) setOpen(true)
     }
 
+    const handleOpenChange = (nextOpen: boolean) => {
+        setOpen(nextOpen)
+        if (!nextOpen) onInputValueChange?.(value ?? "")
+    }
+
     const handleInputKeyDown = (e: React.KeyboardEvent) => {
         if (e.key === 'Enter') {
             e.preventDefault()
@@ -154,7 +159,7 @@ export function Combobox({
                 handleSelect(filteredOptions[0].value)
             }
         } else if (e.key === 'Escape') {
-            setOpen(false)
+            handleOpenChange(false)
         }
     }
 
@@ -164,11 +169,6 @@ export function Combobox({
         onInputValueChange?.("")
         onValueChange?.("")
         inputRef.current?.focus()
-    }
-
-    const handleOpenChange = (nextOpen: boolean) => {
-        setOpen(nextOpen)
-        if (!nextOpen) onInputValueChange?.(value ?? "")
     }
 
     return (

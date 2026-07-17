@@ -5,7 +5,10 @@ import {
   getAllSystemFontFamilyNames,
   getMonospaceFonts,
 } from '../../lib/localFonts';
-import { setSystemFamilies } from '../../lib/fontAvailability';
+import {
+  clearFontAvailabilityCache,
+  setSystemFamilies,
+} from '../../lib/fontAvailability';
 
 /**
  * Global font store - singleton pattern using useSyncExternalStore
@@ -121,6 +124,7 @@ class FontStore {
   refresh = async (): Promise<void> => {
     if (this.state.isLoading) return;
     clearLocalFontsCache();
+    clearFontAvailabilityCache();
     this.setState({ isLoaded: false });
     await this.initialize();
   };

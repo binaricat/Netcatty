@@ -44,3 +44,10 @@ test("combobox option popovers capture wheel events inside the popup list", () =
   assert.match(source, /app-no-drag p-0 border-border\/60/);
   assert.doesNotMatch(source, /from "\.\/scroll-area"/);
 });
+
+test("Escape closes the picker through the preview-reset path", () => {
+  assert.match(
+    source,
+    /else if \(e\.key === 'Escape'\) \{\s*handleOpenChange\(false\)\s*\}/,
+  );
+});
