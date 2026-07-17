@@ -87,6 +87,10 @@ export function splitFontFamilyList(css: string): string[] {
     const c = css[i];
     if (quote) {
       buf += c;
+      if (c === '\\' && i + 1 < css.length) {
+        buf += css[++i];
+        continue;
+      }
       if (c === quote) quote = null;
       continue;
     }
@@ -113,7 +117,7 @@ function quoteIfNeeded(family: string): string {
   if (!trimmed) return '';
   if (trimmed === 'monospace') return trimmed;
   if (trimmed.startsWith('"') && trimmed.endsWith('"')) return trimmed;
-  if (/[\s,]/.test(trimmed)) {
+  if (/[\s,"\\]/.test(trimmed)) {
     const escaped = trimmed.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
     return `"${escaped}"`;
   }

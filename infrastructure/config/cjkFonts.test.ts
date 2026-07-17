@@ -75,6 +75,18 @@ describe('composeFontFamilyStack', () => {
     assert.ok(splitFontFamilyList(stack).includes('"Foo, Inc. Mono"'));
   });
 
+  it('escapes quotes inside a manually entered font family', () => {
+    const stack = composeFontFamilyStack({
+      primaryFamily: 'Menlo, monospace',
+      userFallback: 'Foo"Bar',
+      latinFontId: 'menlo',
+      platform: 'darwin',
+    });
+
+    assert.ok(stack.includes('"Foo\\"Bar"'));
+    assert.ok(splitFontFamilyList(stack).includes('"Foo\\"Bar"'));
+  });
+
   it('does not duplicate identical fallback entries', () => {
     // User explicitly picks the same font the per-font pairing would,
     // and that font also lives in the system stack — should appear once.
@@ -235,6 +247,13 @@ describe('splitFontFamilyList', () => {
     assert.deepEqual(
       splitFontFamilyList("'Foo, Inc.', serif"),
       ["'Foo, Inc.'", 'serif'],
+    );
+  });
+
+  it('keeps escaped quotes inside a quoted family name', () => {
+    assert.deepEqual(
+      splitFontFamilyList('"Foo\\"Bar", monospace'),
+      ['"Foo\\"Bar"', 'monospace'],
     );
   });
 

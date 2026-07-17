@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, RefreshCw } from 'lucide-react';
 import { useI18n } from '../../application/i18n/I18nProvider';
 import {
@@ -40,6 +40,11 @@ export const TerminalCjkFontSelect: React.FC<Props> = ({
   const { t } = useI18n();
   const installedFamilies = useInstalledFontFamilies();
   const isLoading = useFontsLoading();
+  const [previewValue, setPreviewValue] = useState(value);
+
+  useEffect(() => {
+    setPreviewValue(value);
+  }, [value]);
 
   const availableRecommendedFamilies = RECOMMENDED_CJK_FONT_FAMILIES.filter(
     (family) => isFontInstalled(family),
@@ -80,6 +85,7 @@ export const TerminalCjkFontSelect: React.FC<Props> = ({
     Boolean(value && isFontInstalled(value)),
   );
   const selectedFontFamily = previewFontFamily(value);
+  const previewFamily = previewFontFamily(previewValue);
 
   return (
     <div className={cn('space-y-2', className)}>
@@ -94,6 +100,7 @@ export const TerminalCjkFontSelect: React.FC<Props> = ({
           createText={t('settings.terminal.font.cjk.useCustom')}
           triggerClassName="h-9"
           inputStyle={{ fontFamily: selectedFontFamily }}
+          onInputValueChange={setPreviewValue}
           disabled={disabled}
         />
         <Button
@@ -110,13 +117,13 @@ export const TerminalCjkFontSelect: React.FC<Props> = ({
         </Button>
       </div>
 
-      {value && (
-        <div
-          className="rounded-md border border-border/60 bg-muted/30 px-3 py-2 text-sm"
-          style={{ fontFamily: selectedFontFamily }}
+      {previewValue.trim() && (
+        <pre
+          className="overflow-hidden rounded-md border border-border/60 bg-muted/30 px-3 py-2 text-sm leading-5"
+          style={{ fontFamily: previewFamily }}
         >
-          ABC 你好 123 │ ──
-        </div>
+          {'你好 │ ABC  │ 123\n123  │ 测试 │ ABC'}
+        </pre>
       )}
 
       {status === 'alignment-risk' && (

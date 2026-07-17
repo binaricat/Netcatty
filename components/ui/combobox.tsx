@@ -24,6 +24,7 @@ interface ComboboxProps {
     className?: string;
     triggerClassName?: string;
     inputStyle?: React.CSSProperties;
+    onInputValueChange?: (value: string) => void;
     disabled?: boolean;
 }
 
@@ -83,6 +84,7 @@ export function Combobox({
     className,
     triggerClassName,
     inputStyle,
+    onInputValueChange,
     disabled = false,
 }: ComboboxProps) {
     const [open, setOpen] = React.useState(false)
@@ -120,6 +122,7 @@ export function Combobox({
 
     const handleSelect = (optValue: string) => {
         onValueChange?.(optValue)
+        onInputValueChange?.(optValue)
         setOpen(false)
         const selected = options.find((opt) => opt.value === optValue)
         setInputValue(selected?.label || optValue)
@@ -130,12 +133,14 @@ export function Combobox({
         if (newValue) {
             onCreateNew?.(newValue)
             onValueChange?.(newValue)
+            onInputValueChange?.(newValue)
             setOpen(false)
         }
     }
 
     const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         setInputValue(e.target.value)
+        onInputValueChange?.(e.target.value)
         setIsSearching(true)
         if (!open) setOpen(true)
     }
@@ -156,12 +161,18 @@ export function Combobox({
     const handleClear = (e: React.MouseEvent) => {
         e.stopPropagation()
         setInputValue("")
+        onInputValueChange?.("")
         onValueChange?.("")
         inputRef.current?.focus()
     }
 
+    const handleOpenChange = (nextOpen: boolean) => {
+        setOpen(nextOpen)
+        if (!nextOpen) onInputValueChange?.(value ?? "")
+    }
+
     return (
-        <Popover open={open} onOpenChange={setOpen}>
+        <Popover open={open} onOpenChange={handleOpenChange}>
             <PopoverTrigger asChild disabled={disabled}>
                 <div
                     className={cn(
