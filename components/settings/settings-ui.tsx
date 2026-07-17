@@ -179,10 +179,11 @@ interface SettingRowProps {
   label?: string;
   description?: string;
   children: React.ReactNode;
+  align?: "center" | "start";
 }
 
-export const SettingRow: React.FC<SettingRowProps> = ({ label, description, children }) => (
-  <div className="flex items-center justify-between py-3 gap-4">
+export const SettingRow: React.FC<SettingRowProps> = ({ label, description, children, align = "center" }) => (
+  <div className={cn("flex justify-between py-3 gap-4", align === "start" ? "items-start" : "items-center")}>
     <div className="flex-1 min-w-0">
       {label && <div className="text-sm font-medium">{label}</div>}
       {description && (

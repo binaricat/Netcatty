@@ -8,6 +8,7 @@ export interface ComboboxOption {
     label: string;
     sublabel?: string;
     icon?: React.ReactNode;
+    labelStyle?: React.CSSProperties;
 }
 
 interface ComboboxProps {
@@ -22,6 +23,7 @@ interface ComboboxProps {
     icon?: React.ReactNode;
     className?: string;
     triggerClassName?: string;
+    inputStyle?: React.CSSProperties;
     disabled?: boolean;
 }
 
@@ -80,6 +82,7 @@ export function Combobox({
     icon,
     className,
     triggerClassName,
+    inputStyle,
     disabled = false,
 }: ComboboxProps) {
     const [open, setOpen] = React.useState(false)
@@ -176,6 +179,7 @@ export function Combobox({
                         onChange={handleInputChange}
                         onKeyDown={handleInputKeyDown}
                         placeholder={placeholder}
+                        style={inputStyle}
                         className="flex-1 min-w-0 h-full px-3 bg-transparent outline-none placeholder:text-muted-foreground"
                         disabled={disabled}
                     />
@@ -241,7 +245,7 @@ export function Combobox({
                                         <span className="shrink-0 text-muted-foreground">{option.icon}</span>
                                     )}
                                     <div className="flex-1 min-w-0">
-                                        <div className="truncate font-medium">{option.label}</div>
+                                        <div className="truncate font-medium" style={option.labelStyle}>{option.label}</div>
                                         {option.sublabel && (
                                             <div className="text-xs text-muted-foreground truncate">
                                                 {option.sublabel}

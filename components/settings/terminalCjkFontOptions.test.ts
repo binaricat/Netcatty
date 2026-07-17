@@ -1,0 +1,75 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import {
+  buildTerminalCjkFontOptions,
+  getTerminalCjkFontSelectionStatus,
+} from './terminalCjkFontOptions';
+
+test('builds recommended choices first and includes every installed family once', () => {
+  const options = buildTerminalCjkFontOptions({
+    installedFamilies: [
+      'PingFang SC',
+      'sarasa mono sc',
+      'Custom CJK Mono',
+      'PINGFANG SC',
+    ],
+    selectedValue: '',
+  });
+
+  assert.deepEqual(
+    options.map(({ value, kind }) => ({ value, kind })),
+    [
+      { value: '', kind: 'auto' },
+      { value: 'Sarasa Mono SC', kind: 'recommended' },
+      { value: 'Custom CJK Mono', kind: 'installed' },
+      { value: 'PingFang SC', kind: 'installed' },
+    ],
+  );
+});
+
+test('keeps a synced or manually entered font visible when it is not installed', () => {
+  const options = buildTerminalCjkFontOptions({
+    installedFamilies: ['Sarasa Mono SC'],
+    selectedValue: 'Missing Family',
+  });
+
+  assert.deepEqual(options.at(-1), {
+    value: 'Missing Family',
+    kind: 'unavailable',
+  });
+});
+
+test('reports safe, risky, and unavailable selections for user guidance', () => {
+  assert.equal(
+    getTerminalCjkFontSelectionStatus('', ['PingFang SC']),
+    'auto',
+  );
+  assert.equal(
+    getTerminalCjkFontSelectionStatus('Sarasa Mono SC', ['Sarasa Mono SC']),
+    'recommended',
+  );
+  assert.equal(
+    getTerminalCjkFontSelectionStatus('Sarasa Mono SC', [], ['Sarasa Mono SC']),
+    'recommended',
+  );
+  assert.equal(
+    getTerminalCjkFontSelectionStatus('Maple Mono CN', ['PingFang SC']),
+    'unavailable',
+  );
+  assert.equal(
+    getTerminalCjkFontSelectionStatus('PingFang SC', ['PingFang SC']),
+    'alignment-risk',
+  );
+  assert.equal(
+    getTerminalCjkFontSelectionStatus('Missing Family', ['PingFang SC']),
+    'unavailable',
+  );
+  assert.equal(
+    getTerminalCjkFontSelectionStatus('PingFang SC', null, [], true),
+    'alignment-risk',
+  );
+  assert.equal(
+    getTerminalCjkFontSelectionStatus('Unverified Local Font', null),
+    'alignment-risk',
+  );
+});

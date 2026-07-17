@@ -2,6 +2,7 @@ import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   getAllSystemFontFamilies,
+  getAllSystemFontFamilyNames,
   getMonospaceFonts,
   __resetLocalFontsCacheForTesting,
 } from './localFonts';
@@ -76,10 +77,40 @@ describe('queryLocalFonts deduplication', () => {
     assert.equal(callCount, 1);
   });
 
+  it('returns display-ready family names with stable casing and case-insensitive deduplication', async () => {
+    installMockWindow(async () => [
+      { family: 'PingFang SC' },
+      { family: 'pingfang sc' },
+      { family: 'Sarasa Mono SC' },
+      { family: '  Noto Sans Mono CJK SC  ' },
+      { family: '' },
+    ]);
+
+    const result = await getAllSystemFontFamilyNames();
+
+    assert.deepEqual(result, [
+      'Noto Sans Mono CJK SC',
+      'PingFang SC',
+      'Sarasa Mono SC',
+    ]);
+  });
+
   it('returns null authoritative set when Local Font Access API is unavailable', async () => {
     // No window installed → API path skipped.
     const result = await getAllSystemFontFamilies();
     assert.equal(result, null);
+  });
+
+  it('treats an empty desktop font result as unavailable and allows retry', async () => {
+    let callCount = 0;
+    installMockWindow(async () => {
+      callCount++;
+      return callCount === 1 ? [] : [{ family: 'PingFang SC' }];
+    });
+
+    assert.equal(await getAllSystemFontFamilyNames(), null);
+    assert.deepEqual(await getAllSystemFontFamilyNames(), ['PingFang SC']);
+    assert.equal(callCount, 2);
   });
 
   it('retries on the next call after a transient failure (does not sticky-cache empty result)', async () => {

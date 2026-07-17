@@ -63,6 +63,18 @@ describe('composeFontFamilyStack', () => {
     assert.match(stack, /"Source Han Mono SC"/);
   });
 
+  it('keeps an unquoted user fallback containing a comma as one font family', () => {
+    const stack = composeFontFamilyStack({
+      primaryFamily: 'Menlo, monospace',
+      userFallback: 'Foo, Inc. Mono',
+      latinFontId: 'menlo',
+      platform: 'darwin',
+    });
+
+    assert.ok(stack.includes('"Foo, Inc. Mono"'));
+    assert.ok(splitFontFamilyList(stack).includes('"Foo, Inc. Mono"'));
+  });
+
   it('does not duplicate identical fallback entries', () => {
     // User explicitly picks the same font the per-font pairing would,
     // and that font also lives in the system stack — should appear once.

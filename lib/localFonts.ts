@@ -94,6 +94,7 @@ function isMonospaceFont(familyName: string): boolean {
 // queryAllSystemFontsOnce(), which both getMonospaceFonts() and
 // fontAvailability.ts read.
 let allSystemFamiliesCache: Set<string> | null = null;
+let allSystemFamilyNamesCache: string[] | null = null;
 
 // In-flight promise dedup: when fontStore.initialize() runs
 // getMonospaceFonts() and getAllSystemFontFamilies() in parallel, both
@@ -103,11 +104,15 @@ let allSystemFamiliesCache: Set<string> | null = null;
 // concurrent callers await the same single invocation.
 let queryPromise: Promise<LocalFontData[]> | null = null;
 
-/** Test-only: clears in-flight promise and cached set so each test gets a fresh module state. */
-export function __resetLocalFontsCacheForTesting(): void {
+/** Clears the cached font query so a user-initiated refresh sees changes. */
+export function clearLocalFontsCache(): void {
     queryPromise = null;
     allSystemFamiliesCache = null;
+    allSystemFamilyNamesCache = null;
 }
+
+/** Test alias kept explicit so existing tests communicate their intent. */
+export const __resetLocalFontsCacheForTesting = clearLocalFontsCache;
 
 function queryAllSystemFontsOnce(): Promise<LocalFontData[]> {
     if (queryPromise) return queryPromise;
@@ -120,9 +125,26 @@ function queryAllSystemFontsOnce(): Promise<LocalFontData[]> {
                 queryLocalFonts: () => Promise<LocalFontData[]>;
             }).queryLocalFonts;
             const fonts = await queryLocalFonts();
-            allSystemFamiliesCache = new Set(
-                fonts.map((f) => f.family.toLowerCase()),
+            // A desktop OS always has fonts. Chromium can still resolve the
+            // API with an empty list when access is temporarily unavailable;
+            // do not treat that as authoritative or cache it for the session.
+            if (fonts.length === 0) {
+                queryPromise = null;
+                return [];
+            }
+            const familyNamesByLower = new Map<string, string>();
+            for (const font of fonts) {
+                const family = font.family.trim();
+                if (!family) continue;
+                const normalized = family.toLowerCase();
+                if (!familyNamesByLower.has(normalized)) {
+                    familyNamesByLower.set(normalized, family);
+                }
+            }
+            allSystemFamilyNamesCache = [...familyNamesByLower.values()].sort((a, b) =>
+                a.localeCompare(b, undefined, { sensitivity: 'base' }),
             );
+            allSystemFamiliesCache = new Set(familyNamesByLower.keys());
             return fonts;
         } catch (error) {
             // Don't sticky-cache a transient failure (e.g. LFA permission
@@ -152,6 +174,17 @@ export async function getAllSystemFontFamilies(): Promise<Set<string> | null> {
     if (allSystemFamiliesCache) return allSystemFamiliesCache;
     await queryAllSystemFontsOnce();
     return allSystemFamiliesCache;
+}
+
+/**
+ * Returns installed font family names with display casing preserved.
+ * Families are trimmed, deduplicated case-insensitively, and sorted for
+ * stable searchable pickers.
+ */
+export async function getAllSystemFontFamilyNames(): Promise<string[] | null> {
+    if (allSystemFamilyNamesCache) return allSystemFamilyNamesCache;
+    await queryAllSystemFontsOnce();
+    return allSystemFamilyNamesCache;
 }
 
 /**
