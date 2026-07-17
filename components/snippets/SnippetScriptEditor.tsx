@@ -53,6 +53,8 @@ export interface SnippetScriptEditorProps {
   minHeight?: number;
   maxHeight?: number;
   persistHeight?: boolean;
+  /** Save or submit the surrounding form with Cmd/Ctrl+Enter. */
+  onSubmitShortcut?: () => void;
 }
 
 export const SnippetScriptEditor: React.FC<SnippetScriptEditorProps> = ({
@@ -65,6 +67,7 @@ export const SnippetScriptEditor: React.FC<SnippetScriptEditorProps> = ({
   minHeight = MIN_HEIGHT,
   maxHeight = MAX_HEIGHT,
   persistHeight = true,
+  onSubmitShortcut,
 }) => {
   const { t } = useI18n();
   const [height, setHeight] = useState(() => readStoredHeight({
@@ -163,6 +166,7 @@ export const SnippetScriptEditor: React.FC<SnippetScriptEditorProps> = ({
             ariaLabel={label || placeholder}
             placeholder={placeholder}
             tabFocusMode
+            onSubmitShortcut={onSubmitShortcut}
           />
           <div
             role="separator"
@@ -191,6 +195,7 @@ export const SnippetScriptEditor: React.FC<SnippetScriptEditorProps> = ({
               active={modalOpen}
               ariaLabel={label || placeholder}
               placeholder={placeholder}
+              onSubmitShortcut={onSubmitShortcut}
             />
           </div>
           <DialogFooter className="px-6 pb-6 pt-2 shrink-0">

@@ -199,6 +199,7 @@ export const QuickAddSnippetDialog: React.FC<QuickAddSnippetDialogProps> = ({
             label={t('snippets.field.scriptRequired')}
             value={command}
             onChange={setCommand}
+            onSubmitShortcut={canSave ? handleSave : undefined}
             placeholder="echo hello"
           />
 

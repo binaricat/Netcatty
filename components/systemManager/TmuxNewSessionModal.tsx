@@ -145,6 +145,7 @@ export const TmuxNewSessionModal = memo(function TmuxNewSessionModal({
                 label={t('systemManager.tmux.newSessionCommand')}
                 value={command}
                 onChange={handleCommandChange}
+                onSubmitShortcut={!creating && name.trim() ? () => void handleCreate() : undefined}
                 placeholder={t('systemManager.tmux.newSessionCommandPlaceholder')}
                 defaultHeight={150}
                 maxHeight={260}

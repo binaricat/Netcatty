@@ -25,6 +25,12 @@ test('inline snippet editing preserves form focus behavior', () => {
   assert.match(codeEditorSource, /tabFocusMode,/);
 });
 
+test('snippet editor forwards the surrounding form submit shortcut', () => {
+  assert.equal(snippetEditorSource.match(/onSubmitShortcut=\{onSubmitShortcut\}/g)?.length, 2);
+  assert.match(codeEditorSource, /KeyMod\.CtrlCmd \| monacoInstance\.KeyCode\.Enter/);
+  assert.match(codeEditorSource, /onSubmitShortcutRef\.current\?\.\(\)/);
+});
+
 test('visual placeholder is hidden from assistive technology', () => {
   assert.match(codeEditorSource, /<span\s+aria-hidden/);
 });

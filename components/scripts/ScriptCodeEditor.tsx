@@ -29,6 +29,8 @@ export interface ScriptCodeEditorProps {
   placeholder?: string;
   /** Let Tab move to the next control instead of inserting indentation. */
   tabFocusMode?: boolean;
+  /** Run the surrounding form's submit action for Cmd/Ctrl+Enter. */
+  onSubmitShortcut?: () => void;
 }
 
 export interface ScriptCodeEditorHandle {
@@ -47,11 +49,14 @@ export const ScriptCodeEditor = React.forwardRef<ScriptCodeEditorHandle, ScriptC
   ariaLabel,
   placeholder,
   tabFocusMode = false,
+  onSubmitShortcut,
 }, forwardedRef) => {
   const monaco = useMonaco();
   const themeName = useNetcattyMonacoTheme(monaco ?? undefined);
   const editorRef = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null);
   const completionDisposableRef = useRef<{ dispose: () => void } | null>(null);
+  const onSubmitShortcutRef = useRef(onSubmitShortcut);
+  onSubmitShortcutRef.current = onSubmitShortcut;
 
   useImperativeHandle(forwardedRef, () => ({
     focus: () => editorRef.current?.focus(),
@@ -76,6 +81,10 @@ export const ScriptCodeEditor = React.forwardRef<ScriptCodeEditorHandle, ScriptC
     completionDisposableRef.current = language === 'javascript'
       ? registerNctMonacoCompletionProvider(monacoInstance)
       : null;
+    editor.addCommand(
+      monacoInstance.KeyMod.CtrlCmd | monacoInstance.KeyCode.Enter,
+      () => onSubmitShortcutRef.current?.(),
+    );
     requestAnimationFrame(() => editor.layout());
     if (autoFocus) editor.focus();
   }, [autoFocus, language]);
