@@ -99,6 +99,29 @@ describe('composeFontFamilyStack', () => {
     assert.ok(splitFontFamilyList(stack).includes('"Rock\'nRoll"'));
   });
 
+  it('quotes a manually entered font family that starts with a digit', () => {
+    const stack = composeFontFamilyStack({
+      primaryFamily: 'Menlo, monospace',
+      userFallback: '3270font',
+      latinFontId: 'menlo',
+      platform: 'darwin',
+    });
+
+    assert.ok(stack.includes('"3270font"'));
+    assert.ok(splitFontFamilyList(stack).includes('"3270font"'));
+  });
+
+  it('keeps CSS generic font families unquoted', () => {
+    const stack = composeFontFamilyStack({
+      primaryFamily: 'Menlo, monospace',
+      userFallback: 'ui-monospace',
+      latinFontId: 'menlo',
+      platform: 'darwin',
+    });
+
+    assert.ok(splitFontFamilyList(stack).includes('ui-monospace'));
+  });
+
   it('does not duplicate identical fallback entries', () => {
     // User explicitly picks the same font the per-font pairing would,
     // and that font also lives in the system stack — should appear once.
