@@ -81,13 +81,15 @@ export const ScriptCodeEditor = React.forwardRef<ScriptCodeEditorHandle, ScriptC
     completionDisposableRef.current = language === 'javascript'
       ? registerNctMonacoCompletionProvider(monacoInstance)
       : null;
-    editor.addCommand(
-      monacoInstance.KeyMod.CtrlCmd | monacoInstance.KeyCode.Enter,
-      () => onSubmitShortcutRef.current?.(),
-    );
+    if (onSubmitShortcut) {
+      editor.addCommand(
+        monacoInstance.KeyMod.CtrlCmd | monacoInstance.KeyCode.Enter,
+        () => onSubmitShortcutRef.current?.(),
+      );
+    }
     requestAnimationFrame(() => editor.layout());
     if (autoFocus) editor.focus();
-  }, [autoFocus, language]);
+  }, [autoFocus, language, onSubmitShortcut]);
 
   const editorHeight = fill ? '100%' : `${height}px`;
 

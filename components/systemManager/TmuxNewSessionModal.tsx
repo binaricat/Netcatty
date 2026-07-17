@@ -84,6 +84,10 @@ export const TmuxNewSessionModal = memo(function TmuxNewSessionModal({
     }
   }, [creating, handleCreate, name]);
 
+  const handleSubmitShortcut = useCallback(() => {
+    if (!creating && name.trim()) void handleCreate();
+  }, [creating, handleCreate, name]);
+
   const handleCommandChange = useCallback((value: string) => {
     setCommand(value);
     if (selectedSnippetId) {
@@ -145,7 +149,7 @@ export const TmuxNewSessionModal = memo(function TmuxNewSessionModal({
                 label={t('systemManager.tmux.newSessionCommand')}
                 value={command}
                 onChange={handleCommandChange}
-                onSubmitShortcut={!creating && name.trim() ? () => void handleCreate() : undefined}
+                onSubmitShortcut={handleSubmitShortcut}
                 placeholder={t('systemManager.tmux.newSessionCommandPlaceholder')}
                 defaultHeight={150}
                 maxHeight={260}

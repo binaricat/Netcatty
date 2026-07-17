@@ -163,6 +163,10 @@ export const QuickAddSnippetDialog: React.FC<QuickAddSnippetDialogProps> = ({
     [canSave, handleSave],
   );
 
+  const handleSubmitShortcut = useCallback(() => {
+    if (canSave) handleSave();
+  }, [canSave, handleSave]);
+
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogContent
@@ -199,7 +203,7 @@ export const QuickAddSnippetDialog: React.FC<QuickAddSnippetDialogProps> = ({
             label={t('snippets.field.scriptRequired')}
             value={command}
             onChange={setCommand}
-            onSubmitShortcut={canSave ? handleSave : undefined}
+            onSubmitShortcut={handleSubmitShortcut}
             placeholder="echo hello"
           />
 

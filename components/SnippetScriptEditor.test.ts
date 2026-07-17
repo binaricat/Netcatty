@@ -27,6 +27,7 @@ test('inline snippet editing preserves form focus behavior', () => {
 
 test('snippet editor forwards the surrounding form submit shortcut', () => {
   assert.equal(snippetEditorSource.match(/onSubmitShortcut=\{onSubmitShortcut\}/g)?.length, 2);
+  assert.match(codeEditorSource, /if \(onSubmitShortcut\)/);
   assert.match(codeEditorSource, /KeyMod\.CtrlCmd \| monacoInstance\.KeyCode\.Enter/);
   assert.match(codeEditorSource, /onSubmitShortcutRef\.current\?\.\(\)/);
 });
