@@ -18,7 +18,7 @@ export function aggregateMountedDiskUsage(
 
   for (const disk of disks) {
     if (!Number.isFinite(disk.used) || !Number.isFinite(disk.total)) continue;
-    if (disk.used < 0 || disk.total <= 0 || disk.used > disk.total) continue;
+    if (disk.used < 0 || disk.total <= 0) continue;
     const identity = disk.capacityKey?.trim() || `mount:${disk.mountPoint}`;
     const existing = capacityGroups.get(identity);
     capacityGroups.set(identity, {

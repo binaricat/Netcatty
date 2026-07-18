@@ -19,7 +19,7 @@ test("aggregateMountedDiskUsage ignores unusable disk rows", () => {
       { mountPoint: "/", used: 25, total: 100 },
       { mountPoint: "/missing", used: Number.NaN, total: 20 },
       { mountPoint: "/zero", used: 0, total: 0 },
-      { mountPoint: "/invalid", used: 21, total: 20 },
+      { mountPoint: "/invalid", used: -1, total: 20 },
     ]),
     { used: 25, total: 100, percent: 25 },
   );
@@ -54,5 +54,21 @@ test("aggregateMountedDiskUsage counts shared APFS container capacity once", () 
       { capacityKey: "apfs:/dev/disk3", mountPoint: "/Volumes/Two", used: 90, total: 500 },
     ]),
     { used: 90, total: 500, percent: 18 },
+  );
+});
+
+test("aggregateMountedDiskUsage includes an overfull filesystem", () => {
+  assert.deepEqual(
+    aggregateMountedDiskUsage([
+      { capacityKey: "/dev/sda1", mountPoint: "/", used: 110, total: 100 },
+      { capacityKey: "/dev/sdb1", mountPoint: "/data", used: 25, total: 100 },
+    ]),
+    { used: 135, total: 200, percent: 67.5 },
+  );
+  assert.deepEqual(
+    aggregateMountedDiskUsage([
+      { capacityKey: "/dev/sda1", mountPoint: "/", used: 110, total: 100 },
+    ]),
+    { used: 110, total: 100, percent: 100 },
   );
 });
