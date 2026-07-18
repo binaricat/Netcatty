@@ -259,14 +259,14 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
       ctx.updateStatus("disconnected");
       return;
     }
-    if (findMissingProxyIdentityId(ctx.host.proxyConfig, ctx.identities)) {
+    if (findMissingProxyIdentityId(ctx.host.proxyConfig, vaultAuth.identities)) {
       const message = formatMissingProxyIdentityMessage(ctx.host.label || ctx.host.hostname);
       ctx.setError(message);
       writeTerminalLine(ctx, term, `\r\n[${message}]`);
       ctx.updateStatus("disconnected");
       return;
     }
-    if (findIncompleteProxyIdentityId(ctx.host.proxyConfig, ctx.identities)) {
+    if (findIncompleteProxyIdentityId(ctx.host.proxyConfig, vaultAuth.identities)) {
       const message = formatIncompleteProxyIdentityMessage(ctx.host.label || ctx.host.hostname);
       ctx.setError(message);
       writeTerminalLine(ctx, term, `\r\n[${message}]`);
@@ -274,7 +274,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
       return;
     }
     const proxyConfig = ctx.host.proxyConfig
-      ? resolveProxyConfigAuth(ctx.host.proxyConfig, ctx.identities)
+      ? resolveProxyConfigAuth(ctx.host.proxyConfig, vaultAuth.identities)
       : undefined;
 
     const jumpHostsWithUnavailableCredentials: string[] = [];
@@ -287,7 +287,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
       return;
     }
     const unresolvedJumpProxyIdentityHost = ctx.resolvedChainHosts.find((jumpHost) =>
-      findMissingProxyIdentityId(jumpHost.proxyConfig, ctx.identities),
+      findMissingProxyIdentityId(jumpHost.proxyConfig, vaultAuth.identities),
     );
     if (unresolvedJumpProxyIdentityHost) {
       const message = formatMissingProxyIdentityMessage(
@@ -299,7 +299,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
       return;
     }
     const incompleteJumpProxyIdentityHost = ctx.resolvedChainHosts.find((jumpHost) =>
-      findIncompleteProxyIdentityId(jumpHost.proxyConfig, ctx.identities),
+      findIncompleteProxyIdentityId(jumpHost.proxyConfig, vaultAuth.identities),
     );
     if (incompleteJumpProxyIdentityHost) {
       const message = formatIncompleteProxyIdentityMessage(
@@ -313,8 +313,8 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
     const jumpHosts = ctx.resolvedChainHosts.map<NetcattyJumpHost>((jumpHost, index) => {
       const jumpAuth = resolveHostAuth({
         host: jumpHost,
-        keys: ctx.keys,
-        identities: ctx.identities,
+        keys: vaultAuth.keys,
+        identities: vaultAuth.identities,
       });
       const jumpKey = jumpAuth.key;
       const rawJumpPassword = jumpAuth.password;
@@ -343,7 +343,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         hasUsableProxyConfig(jumpHost.proxyConfig);
       const hasEncryptedJumpProxyCredential =
         hasConfiguredJumpProxyEndpoint &&
-        hasUnreadableProxyCredential(jumpHost.proxyConfig, ctx.identities);
+        hasUnreadableProxyCredential(jumpHost.proxyConfig, vaultAuth.identities);
 
       const hasEncryptedJumpCredential =
         isEncryptedCredentialPlaceholder(rawJumpPassword) ||
@@ -380,7 +380,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         keySource: jumpKey?.source,
         label: jumpHost.label,
         proxy: hasUsableProxyConfig(jumpHost.proxyConfig)
-          ? resolveProxyConfigAuth(jumpHost.proxyConfig, ctx.identities)
+          ? resolveProxyConfigAuth(jumpHost.proxyConfig, vaultAuth.identities)
           : undefined,
         identityFilePaths: jumpIdentityFilePaths,
         ...jumpAgentAuth,
@@ -396,7 +396,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
     });
 
     const usesTargetProxyForFirstHop = !!proxyConfig && !jumpHosts[0]?.proxy;
-    if (usesTargetProxyForFirstHop && hasUnreadableProxyCredential(ctx.host.proxyConfig, ctx.identities)) {
+    if (usesTargetProxyForFirstHop && hasUnreadableProxyCredential(ctx.host.proxyConfig, vaultAuth.identities)) {
       const message = tr(
         "terminal.auth.proxyCredentialsUnavailable",
         "Proxy credentials cannot be decrypted on this device. Open host settings and re-enter the proxy password.",
@@ -934,15 +934,17 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         ctx.updateStatus("disconnected");
       };
 
+      const vaultAuth = await resolveVaultAuthCollections();
+
       if (ctx.host.proxyProfileId && !ctx.host.proxyConfig) {
         stopMosh(`Saved proxy for host "${ctx.host.label || ctx.host.hostname}" is missing. Open host settings and select a valid proxy.`);
         return;
       }
-      if (findMissingProxyIdentityId(ctx.host.proxyConfig, ctx.identities)) {
+      if (findMissingProxyIdentityId(ctx.host.proxyConfig, vaultAuth.identities)) {
         stopMosh(formatMissingProxyIdentityMessage(ctx.host.label || ctx.host.hostname));
         return;
       }
-      if (findIncompleteProxyIdentityId(ctx.host.proxyConfig, ctx.identities)) {
+      if (findIncompleteProxyIdentityId(ctx.host.proxyConfig, vaultAuth.identities)) {
         stopMosh(formatIncompleteProxyIdentityMessage(ctx.host.label || ctx.host.hostname));
         return;
       }
@@ -969,7 +971,6 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         return;
       }
 
-      const vaultAuth = await resolveVaultAuthCollections();
       const pendingAuth = ctx.pendingAuthRef.current;
       const resolvedAuth = resolveHostAuth({
         host: ctx.host,

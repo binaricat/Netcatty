@@ -9,6 +9,9 @@ import {
 import { createPromptLineBreakState } from "./promptLineBreak";
 import { resolveStartupCommand } from "./terminalStartupCommands";
 import { pasteTextIntoTerminal } from "./terminalUserPaste";
+import {
+  setVaultInitialized,
+} from "../../../application/state/vaultInitStore";
 
 const noop = () => undefined;
 const ENCRYPTED_CREDENTIAL_PLACEHOLDER = "enc:v1:djEwAAAA";
@@ -144,6 +147,74 @@ test("vault readiness ignores auth without vault-backed credentials", () => {
   }] as never;
 
   assert.equal(hasMissingConfiguredVaultCredentials(hosts, [], []), false);
+});
+
+test("startSSH resolves jump host auth from vault collections refreshed after readiness", async () => {
+  let capturedOptions: Record<string, unknown> | null = null;
+  const keysRef = { current: [] as Array<Record<string, unknown>> };
+  const identitiesRef = { current: [] as Array<Record<string, unknown>> };
+  const terminalBackend = {
+    backendAvailable: () => true,
+    startSSHSession: async (options: Record<string, unknown>) => {
+      capturedOptions = options;
+      return "ssh-session";
+    },
+    onSessionData: () => noop,
+    onSessionExit: () => noop,
+    onChainProgress: () => noop,
+    writeToSession: noop,
+    resizeSession: noop,
+  };
+  const ctx = createStarterContext({
+    host: {
+      id: "host-1",
+      label: "Target",
+      hostname: "target.example.test",
+      username: "alice",
+    },
+    resolvedChainHosts: [{
+      id: "jump-1",
+      label: "Jump",
+      hostname: "jump.example.test",
+      identityId: "jump-identity",
+    }],
+    keysRef,
+    identitiesRef,
+    terminalBackend,
+  });
+
+  setVaultInitialized(false);
+  try {
+    const startPromise = createTerminalSessionStarters(ctx as never)
+      .startSSH(createTermStub() as never);
+
+    keysRef.current = [{
+      id: "jump-key",
+      label: "Jump key",
+      privateKey: "actual-private-key",
+      publicKey: "ssh-ed25519 AAAAJUMP",
+      source: "imported",
+      created: 1,
+    }];
+    identitiesRef.current = [{
+      id: "jump-identity",
+      label: "Jump identity",
+      username: "vault-jumper",
+      authMethod: "key",
+      keyId: "jump-key",
+      created: 1,
+    }];
+    setVaultInitialized(true);
+    await startPromise;
+  } finally {
+    setVaultInitialized(true);
+  }
+
+  const jumpHosts = capturedOptions?.jumpHosts as Array<Record<string, unknown>>;
+  assert.equal(jumpHosts[0]?.username, "vault-jumper");
+  assert.equal(jumpHosts[0]?.keyId, "jump-key");
+  assert.equal(jumpHosts[0]?.privateKey, "actual-private-key");
+  assert.equal(jumpHosts[0]?.publicKey, "ssh-ed25519 AAAAJUMP");
 });
 
 test("startSSH forwards imported system agent authentication settings", async () => {
