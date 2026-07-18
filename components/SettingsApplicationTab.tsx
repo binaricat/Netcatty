@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { ArrowUpCircle, Bug, Check, Github, Loader2, MessageCircle, Newspaper, RefreshCcw } from "lucide-react";
 import AppLogo from "./AppLogo";
+import AppWordmark from "./AppWordmark";
 import { Button } from "./ui/button";
 import { cn } from "../lib/utils";
 import { useApplicationBackend } from "../application/state/useApplicationBackend";
@@ -173,14 +174,7 @@ export default function SettingsApplicationTab({ updateState, checkNow, openRele
           <div className="flex items-center gap-4">
             <AppLogo className="w-16 h-16" />
             <div>
-              {/* Match the Vault sidebar wordmark so the Netcatty brand
-                  reads consistently across surfaces — same italic heavy
-                  cut, just scaled up for the Settings hero area and
-                  using the branded mixed-case "Netcatty" instead of
-                  the lowercase electron app name. */}
-              <div className="text-3xl font-black italic tracking-tight leading-none text-foreground">
-                Netcatty
-              </div>
+              <AppWordmark className="h-8 w-auto text-foreground" />
               <div className="flex items-center gap-2 mt-1">
                 <span className="text-sm text-muted-foreground">
                   {appInfo.version ? appInfo.version : " "}

@@ -10,6 +10,7 @@ import {
   vaultHeaderSecondaryButtonClass,
 } from "./VaultPageHeader";
 import { LazyLoadBoundary } from "../ui/lazy-load-boundary";
+import { AppWordmark } from "../AppWordmark";
 
 type VaultViewLayoutContext = Record<string, any>;
 
@@ -106,9 +107,7 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
                 >
                   <AppLogo className="h-8 w-8 flex-shrink-0" />
                   {!sidebarCollapsed && (
-                    <p className="text-xl font-black italic tracking-tight text-foreground leading-none">
-                      Netcatty
-                    </p>
+                    <AppWordmark className="h-5 w-auto text-foreground" />
                   )}
                 </button>
               </TooltipTrigger>
