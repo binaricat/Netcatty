@@ -1,5 +1,5 @@
 export interface MountedDiskUsage {
-  filesystem?: string;
+  capacityKey?: string;
   mountPoint: string;
   used: number;
   total: number;
@@ -16,14 +16,14 @@ export function aggregateMountedDiskUsage(
 ): AggregatedDiskUsage | null {
   let used = 0;
   let total = 0;
-  const seenFilesystems = new Set<string>();
+  const seenCapacityKeys = new Set<string>();
 
   for (const disk of disks) {
     if (!Number.isFinite(disk.used) || !Number.isFinite(disk.total)) continue;
     if (disk.used < 0 || disk.total <= 0 || disk.used > disk.total) continue;
-    const identity = disk.filesystem?.trim() || `mount:${disk.mountPoint}`;
-    if (seenFilesystems.has(identity)) continue;
-    seenFilesystems.add(identity);
+    const identity = disk.capacityKey?.trim() || `mount:${disk.mountPoint}`;
+    if (seenCapacityKeys.has(identity)) continue;
+    seenCapacityKeys.add(identity);
     used += disk.used;
     total += disk.total;
   }

@@ -40,7 +40,7 @@ function fakeConn(stdout) {
 const LINUX_STATS =
   "CPURAW:1000 900|CORES:4|PERCORERAW:|MEMINFO:8000 4000 100 900 0 0|PROCS:|DISKS:|NET:";
 const MACOS_STATS =
-  "NC_LATENCY_MARK|CPU:27|CORES:10|MEMINFO:32768 4096 0 8192 2048 1536|PROCS:123;1.2;Finder|DISKS:/:120:460:26|NET:en0:1000:3000";
+  "NC_LATENCY_MARK|CPU:27|CORES:10|MEMINFO:32768 4096 0 8192 2048 1536|PROCS:123;1.2;Finder|DISKS:/:120:460:26:apfs:/dev/disk3|NET:en0:1000:3000";
 
 function makeSessionOps(sessions) {
   return createSessionOpsApi({
@@ -115,7 +115,7 @@ test("getServerStats falls back to BusyBox tools for process and root disk data"
     { pid: "1", memPercent: 2, command: "/sbin/procd" },
   ]);
   assert.deepEqual(result.stats.disks, [
-    { mountPoint: "/", used: 0.25, total: 1, percent: 25, filesystem: "overlayfs:/overlay" },
+    { mountPoint: "/", used: 0.25, total: 1, percent: 25, capacityKey: "overlayfs:/overlay" },
   ]);
   assert.equal(result.stats.diskPercent, 25);
 });
@@ -404,6 +404,7 @@ test("getServerStats parses macOS stats and avoids blocking top command", async 
   assert.equal(result.stats.memTotal, 32768);
   assert.equal(result.stats.memUsed, 20480);
   assert.equal(result.stats.diskPercent, 26);
+  assert.equal(result.stats.disks[0].capacityKey, "apfs:/dev/disk3");
   assert.equal(result.stats.netInterfaces.length, 1);
   assert.equal(result.stats.netInterfaces[0].name, "en0");
   assert.equal(result.stats.netInterfaces[0].rxBytes, 1000);

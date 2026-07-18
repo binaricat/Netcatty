@@ -763,7 +763,8 @@ function createSessionOpsApi(ctx) {
         // Top processes by memory%
         `procs=$(ps -A -o pid=,%mem=,comm= 2>/dev/null | sort -k2 -rn | head -10 | awk '{gsub(/;/,"_",$3);printf "%s;%.1f;%s,",$1,$2,$3}' | sed 's/,$//')`,
         // Disk: -P keeps a stable six-column POSIX layout on macOS.
-        `disks=$(df -kP 2>/dev/null | awk 'NR>1&&index($1,"/dev/")==1{m=$6;if(m=="/"||index(m,"/Volumes/")==1){u=$3/1048576;t=$2/1048576;p=$5;gsub(/%/,"",p);printf "%s:%.6f:%.6f:%s:%s,",m,u,t,p,$1}}' | sed 's/,$//')`,
+        `mounts=$(mount 2>/dev/null || true)`,
+        `disks=$({ printf "%s\n" "$mounts"; printf "__NETCATTY_DF__\n"; df -kP 2>/dev/null; } | awk '$0=="__NETCATTY_DF__"{in_df=1;next} !in_df{if($1~/^\/dev\/disk/&&(index($0,"(apfs,")||index($0,"(apfs)"))){key=$1;sub(/s[0-9].*$/,"",key);capacity[$1]="apfs:" key}next} $1=="Filesystem"{next} index($1,"/dev/")==1{m=$6;if(m=="/"||index(m,"/Volumes/")==1){u=$3/1048576;t=$2/1048576;p=$5;gsub(/%/,"",p);key=(($1 in capacity)?capacity[$1]:$1);printf "%s:%.6f:%.6f:%s:%s,",m,u,t,p,key}}' | sed 's/,$//')`,
         // Network: Link# lines only, exclude loopback, detect column shift (no MAC addr → cols shift left)
         `net=$(netstat -ibn 2>/dev/null | awk 'NR==1{for(i=1;i<=NF;i++){if($i=="Ibytes")ib=i;if($i=="Obytes")ob=i}next} ib&&ob&&$1~/^[[:alpha:]]/&&$1!~/^lo/&&$0~/<Link#/{name=$1;gsub(/[*]/,"",name);rx=$(ib)+0;tx=$(ob)+0;if(rx>0||tx>0){seen[name]=rx ":" tx}} END{for(name in seen)printf "%s:%s,",name,seen[name]}' | sed 's/,$//')`,
         `hostname_value=$(hostname 2>/dev/null || uname -n 2>/dev/null || echo "")`,
@@ -989,13 +990,13 @@ function createSessionOpsApi(ctx) {
                       const total = parseFloat(diskParts[2]);
                       const percent = parseInt(diskParts[3], 10);
                       if (!isNaN(used) && !isNaN(total) && !isNaN(percent)) {
-                        const filesystem = diskParts.slice(4).join(':').trim();
+                        const capacityKey = diskParts.slice(4).join(':').trim();
                         disks.push({
                           mountPoint,
                           used,
                           total,
                           percent,
-                          ...(filesystem ? { filesystem } : {}),
+                          ...(capacityKey ? { capacityKey } : {}),
                         });
                       }
                     }

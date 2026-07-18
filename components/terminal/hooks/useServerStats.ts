@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { netcattyBridge } from '../../../infrastructure/services/netcattyBridge';
 
 export interface DiskInfo {
-  filesystem?: string;        // Filesystem/device identity for deduplication
+  capacityKey?: string;       // Filesystem or shared-pool identity for deduplication
   mountPoint: string;
   used: number;               // Used in GB
   total: number;              // Total in GB

@@ -26,12 +26,12 @@ test("aggregateMountedDiskUsage ignores unusable disk rows", () => {
   assert.equal(aggregateMountedDiskUsage([]), null);
 });
 
-test("aggregateMountedDiskUsage counts a repeated filesystem only once", () => {
+test("aggregateMountedDiskUsage counts a repeated capacity group only once", () => {
   assert.deepEqual(
     aggregateMountedDiskUsage([
-      { filesystem: "/dev/sda1", mountPoint: "/", used: 20, total: 100 },
-      { filesystem: "/dev/sda1", mountPoint: "/bind-root", used: 20, total: 100 },
-      { filesystem: "/dev/sdb1", mountPoint: "/data", used: 60, total: 300 },
+      { capacityKey: "/dev/sda1", mountPoint: "/", used: 20, total: 100 },
+      { capacityKey: "/dev/sda1", mountPoint: "/bind-root", used: 20, total: 100 },
+      { capacityKey: "/dev/sdb1", mountPoint: "/data", used: 60, total: 300 },
     ]),
     { used: 80, total: 400, percent: 20 },
   );
@@ -40,9 +40,19 @@ test("aggregateMountedDiskUsage counts a repeated filesystem only once", () => {
 test("aggregateMountedDiskUsage preserves fractional capacity until display formatting", () => {
   assert.deepEqual(
     aggregateMountedDiskUsage([
-      { filesystem: "/dev/sda1", mountPoint: "/", used: 0.125, total: 0.5 },
-      { filesystem: "/dev/sdb1", mountPoint: "/data", used: 0.25, total: 1.5 },
+      { capacityKey: "/dev/sda1", mountPoint: "/", used: 0.125, total: 0.5 },
+      { capacityKey: "/dev/sdb1", mountPoint: "/data", used: 0.25, total: 1.5 },
     ]),
     { used: 0.375, total: 2, percent: 18.75 },
+  );
+});
+
+test("aggregateMountedDiskUsage counts shared APFS container capacity once", () => {
+  assert.deepEqual(
+    aggregateMountedDiskUsage([
+      { capacityKey: "apfs:/dev/disk3", mountPoint: "/Volumes/One", used: 40, total: 500 },
+      { capacityKey: "apfs:/dev/disk3", mountPoint: "/Volumes/Two", used: 40, total: 500 },
+    ]),
+    { used: 40, total: 500, percent: 8 },
   );
 });
