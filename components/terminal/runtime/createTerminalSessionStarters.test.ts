@@ -285,6 +285,117 @@ for (const protocol of ["SSH", "Mosh"] as const) {
   });
 }
 
+test("restored SSH resolves identity and group auth after vault readiness before prompting", async () => {
+  let capturedOptions: Record<string, unknown> | null = null;
+  const fallbackHost = {
+    id: "host-1",
+    label: "Restored target",
+    hostname: "target.test",
+    group: "Production",
+  };
+  const hostRef = { current: fallbackHost as Record<string, unknown> };
+  const keysRef = { current: [] as Array<Record<string, unknown>> };
+  const identitiesRef = { current: [] as Array<Record<string, unknown>> };
+  const terminalBackend = {
+    backendAvailable: () => true,
+    startSSHSession: async (options: Record<string, unknown>) => {
+      capturedOptions = options;
+      return "ssh-session";
+    },
+    onSessionData: () => noop,
+    onSessionExit: () => noop,
+    onChainProgress: () => noop,
+    writeToSession: noop,
+    resizeSession: noop,
+  };
+  const ctx = createStarterContext({
+    host: fallbackHost,
+    hostRef,
+    keysRef,
+    identitiesRef,
+    waitForVaultInitialization: true,
+    terminalBackend,
+  });
+  let authPrompts = 0;
+  ctx.setNeedsAuth = (needed: boolean) => {
+    if (needed) authPrompts += 1;
+  };
+
+  setVaultInitialized(false);
+  try {
+    const started = createTerminalSessionStarters(ctx as never).startSSH(createTermStub() as never);
+    hostRef.current = { ...fallbackHost, identityId: "identity-1" };
+    keysRef.current = [{
+      id: "key-1",
+      label: "Group identity key",
+      privateKey: "group-identity-private-key",
+    }];
+    identitiesRef.current = [{
+      id: "identity-1",
+      label: "Group identity",
+      username: "deploy",
+      authMethod: "key",
+      keyId: "key-1",
+      created: 1,
+    }];
+    setVaultInitialized(true);
+    await started;
+  } finally {
+    setVaultInitialized(true);
+  }
+
+  assert.equal(authPrompts, 0);
+  assert.equal(capturedOptions?.username, "deploy");
+  assert.equal(capturedOptions?.privateKey, "group-identity-private-key");
+});
+
+test("restored SSH prompts exactly once when live vault configuration still lacks auth", async () => {
+  let backendStarts = 0;
+  const fallbackHost = {
+    id: "host-1",
+    label: "Restored target",
+    hostname: "target.test",
+  };
+  const hostRef = { current: fallbackHost };
+  const terminalBackend = {
+    backendAvailable: () => true,
+    startSSHSession: async () => {
+      backendStarts += 1;
+      return "ssh-session";
+    },
+    onSessionData: () => noop,
+    onSessionExit: () => noop,
+    onChainProgress: () => noop,
+    writeToSession: noop,
+    resizeSession: noop,
+  };
+  const ctx = createStarterContext({
+    host: fallbackHost,
+    hostRef,
+    waitForVaultInitialization: true,
+    terminalBackend,
+  });
+  let authPrompts = 0;
+  const statuses: string[] = [];
+  ctx.setNeedsAuth = (needed: boolean) => {
+    if (needed) authPrompts += 1;
+  };
+  ctx.setStatus = (status: string) => statuses.push(status);
+
+  setVaultInitialized(false);
+  try {
+    const started = createTerminalSessionStarters(ctx as never).startSSH(createTermStub() as never);
+    setVaultInitialized(true);
+    await started;
+  } finally {
+    setVaultInitialized(true);
+  }
+
+  assert.equal(authPrompts, 1);
+  assert.deepEqual(statuses, ["disconnected"]);
+  assert.equal(backendStarts, 0);
+});
+
 for (const protocol of ["SSH", "Mosh"] as const) {
   test(`replaced ${protocol} boot ignores vault initialization failure while the latest boot reports it`, async () => {
     const host = {

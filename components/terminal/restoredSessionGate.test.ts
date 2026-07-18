@@ -35,6 +35,18 @@ test("restored disconnected sessions still create a terminal runtime before back
   );
 });
 
+test("only restored SSH sessions defer the initial auth prompt to the live vault configuration", () => {
+  const source = readFileSync(new URL("./useTerminalEffects.ts", import.meta.url), "utf8");
+  const restoredIndex = source.indexOf('const restoredReconnect = restoreState === "restored-disconnected"');
+  const authGateIndex = source.indexOf("!restoredReconnect &&", restoredIndex);
+  const startIndex = source.indexOf("await sessionStarters.startSSH(term)", authGateIndex);
+
+  assert.notEqual(restoredIndex, -1);
+  assert.notEqual(authGateIndex, -1);
+  assert.notEqual(startIndex, -1);
+  assert.ok(authGateIndex < startIndex);
+});
+
 test("auto reconnect prepares restored session state before clearing the restore marker", () => {
   const source = readFileSync(new URL("./useTerminalEffects.ts", import.meta.url), "utf8");
   const prepareIndex = source.indexOf("prepareRestoredReconnect?.()");

@@ -269,6 +269,24 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         : null,
     });
 
+    // Restored sessions begin with a fallback host while the vault is still
+    // hydrating. Their effective username and credentials may come from a
+    // group or identity, so the render-time gate cannot decide whether to
+    // prompt. Make that decision only after resolveVaultConfiguration has
+    // waited and reread the live refs. Fresh sessions retain the effect's
+    // immediate pre-start prompt behavior.
+    if (
+      ctx.waitForVaultInitialization &&
+      !pendingAuth &&
+      !resolvedAuth.username &&
+      !resolvedAuth.password &&
+      !resolvedAuth.keyId
+    ) {
+      ctx.setNeedsAuth(true);
+      ctx.setStatus("disconnected");
+      return;
+    }
+
     const effectiveUsername = resolvedAuth.username || "root";
     const key = resolvedAuth.key;
     const effectivePassword = sanitizeCredentialValue(resolvedAuth.password);

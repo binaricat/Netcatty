@@ -485,6 +485,7 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
           const hasPendingAuth = pendingAuthRef.current;
 
           if (
+            !restoredReconnect &&
             !hasPassword &&
             !hasKey &&
             !hasPendingAuth &&
