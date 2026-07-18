@@ -146,6 +146,19 @@ test("degrades side work for CR-heavy progress rewrites below the byte-rate thre
   resetTerminalOutputPressure(term);
 });
 
+test("does not degrade ordinary short CRLF output as rewrite-heavy", () => {
+  const term = createFakeTerm();
+
+  for (let index = 0; index < 8; index += 1) {
+    noteTerminalOutputPressureData(term, `ordinary line ${index}\r\n`);
+  }
+
+  assert.equal(getTerminalOutputPressure(term).largeOutput, false);
+  assert.equal(shouldDegradeTerminalSideWork(term), false);
+
+  resetTerminalOutputPressure(term);
+});
+
 test("arms large-output early on multi-line writes when scrollback is saturated", () => {
   // rows(24) + scrollback(1000) = 1024 max; length near cap → second-seq path.
   const term = createFakeTerm({

@@ -11,7 +11,10 @@ import {
   releaseTerminalFlowOutputForTerm,
   teardownTerminalOutputPipeline,
 } from "./terminalOutputPipeline.ts";
-import { FLOW_LOW_WATER_MARK } from "./terminalFlowConstants.ts";
+import {
+  FLOW_LOW_WATER_MARK,
+  TERMINAL_INPUT_PRIORITY_PRESSURE_BYTES,
+} from "./terminalFlowConstants.ts";
 import {
   enqueueCoalescedTerminalWrite,
   flushTerminalWriteCoalescer,
@@ -108,6 +111,35 @@ test("ordinary input priority preserves queued display output", () => {
   assert.deepEqual(acked, []);
   assert.deepEqual(deferred, []);
   assert.equal(completed, 0);
+});
+
+test("interrupt priority treats a 100 KiB backlog as input pressure", () => {
+  const term = createFakeTerm();
+  const flow = createOutputFlowController({
+    highWaterMark: 1024 * 1024,
+    lowWaterMark: FLOW_LOW_WATER_MARK,
+    onPause: () => {},
+    onResume: () => {},
+  });
+  const backend = {
+    setSessionFlowPaused: () => {},
+    ackSessionFlow: () => {},
+  };
+
+  assert.ok(100 * 1024 > TERMINAL_INPUT_PRIORITY_PRESSURE_BYTES);
+  assert.ok(100 * 1024 < FLOW_LOW_WATER_MARK);
+  flow.received(100 * 1024);
+
+  const priority = prioritizeTerminalInput(
+    term,
+    "sess-1",
+    flow,
+    backend,
+    { reason: "interrupt" },
+  );
+
+  assert.equal(priority.skippedReason, undefined);
+  assert.equal(priority.backlogBytes, 100 * 1024);
 });
 
 test("prioritizeTerminalInput flushes deferred xterm write ack bytes", () => {
@@ -234,7 +266,7 @@ test("ordinary input priority preserves a pending coalesced backlog above the pr
   scheduler.cancelAnimationFrame = () => {};
 
   const term = createFakeTerm();
-  const payload = "x".repeat(FLOW_LOW_WATER_MARK + 1024);
+  const payload = "x".repeat(TERMINAL_INPUT_PRIORITY_PRESSURE_BYTES + 1024);
   const written: string[] = [];
   const events: string[] = [];
   const deferred: Array<() => void> = [];

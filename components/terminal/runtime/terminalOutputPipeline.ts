@@ -1,7 +1,7 @@
 import type { Terminal as XTerm } from "@xterm/xterm";
 
 import type { TerminalSessionStartersContext } from "./createTerminalSessionStarters.types";
-import { FLOW_LOW_WATER_MARK } from "./terminalFlowConstants";
+import { TERMINAL_INPUT_PRIORITY_PRESSURE_BYTES } from "./terminalFlowConstants";
 import type { OutputFlowController } from "./outputFlowController";
 import {
   abortTerminalWriteCoalescer,
@@ -931,7 +931,11 @@ export const prioritizeTerminalInput = (
   const queueDepth = getTerminalWriteQueueDepth(term);
   const deferredAck = getDeferredTerminalWriteAckBytes(term);
 
-  if (backlog <= FLOW_LOW_WATER_MARK && queueDepth === 0 && deferredAck === 0) {
+  if (
+    backlog <= TERMINAL_INPUT_PRIORITY_PRESSURE_BYTES
+    && queueDepth === 0
+    && deferredAck === 0
+  ) {
     disarmTerminalInterruptDisplayGate(term);
     return {
       sessionId,
@@ -944,7 +948,8 @@ export const prioritizeTerminalInput = (
     };
   }
 
-  const hasVisibleBacklog = backlog > FLOW_LOW_WATER_MARK || queueDepth > 0;
+  const hasVisibleBacklog =
+    backlog > TERMINAL_INPUT_PRIORITY_PRESSURE_BYTES || queueDepth > 0;
   if (!hasVisibleBacklog && deferredAck > 0) {
     const ackAfterInput = clearDeferredTerminalWriteAck(term);
     scheduleResume(() => {

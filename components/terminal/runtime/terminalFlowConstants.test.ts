@@ -7,6 +7,7 @@ import {
   FLOW_CHAR_COUNT_ACK_SIZE,
   FLOW_HIGH_WATER_MARK,
   FLOW_LOW_WATER_MARK,
+  TERMINAL_INPUT_PRIORITY_PRESSURE_BYTES,
   MAX_PENDING_WRITE_COALESCE_BYTES,
   MAX_PENDING_WRITE_COALESCE_BYTES_FLOOD,
   MAX_TERMINAL_PLAIN_WRITE_CHUNK_BYTES,
@@ -25,6 +26,10 @@ const sharedConstantsCjs = require("../../../infrastructure/config/terminalFlowC
 test("renderer flow constants match shared terminalFlowConstants.json", () => {
   assert.equal(FLOW_HIGH_WATER_MARK, terminalFlowConstantsJson.FLOW_HIGH_WATER_MARK);
   assert.equal(FLOW_LOW_WATER_MARK, terminalFlowConstantsJson.FLOW_LOW_WATER_MARK);
+  assert.equal(
+    TERMINAL_INPUT_PRIORITY_PRESSURE_BYTES,
+    terminalFlowConstantsJson.TERMINAL_INPUT_PRIORITY_PRESSURE_BYTES,
+  );
   assert.equal(FLOW_CHAR_COUNT_ACK_SIZE, terminalFlowConstantsJson.FLOW_CHAR_COUNT_ACK_SIZE);
   assert.equal(
     MAX_PENDING_WRITE_COALESCE_BYTES,
@@ -64,6 +69,7 @@ test("renderer flow constants match shared terminalFlowConstants.json", () => {
   );
   assert.deepEqual(sharedConstantsCjs, terminalFlowConstantsJson);
   assert.ok(FLOW_CHAR_COUNT_ACK_SIZE <= FLOW_LOW_WATER_MARK);
+  assert.ok(TERMINAL_INPUT_PRIORITY_PRESSURE_BYTES < FLOW_LOW_WATER_MARK);
   assert.ok(MAX_PENDING_WRITE_COALESCE_BYTES_FLOOD < MAX_PENDING_WRITE_COALESCE_BYTES);
 });
 

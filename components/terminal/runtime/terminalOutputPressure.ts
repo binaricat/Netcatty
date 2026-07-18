@@ -119,7 +119,8 @@ const countCarriageReturns = (data: string): number => {
   let count = 0;
   let index = data.indexOf("\r");
   while (index !== -1) {
-    count += 1;
+    // CRLF is an ordinary line ending, not an in-place progress rewrite.
+    if (data[index + 1] !== "\n") count += 1;
     index = data.indexOf("\r", index + 1);
   }
   return count;
