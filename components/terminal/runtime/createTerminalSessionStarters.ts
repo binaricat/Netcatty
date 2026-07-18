@@ -103,16 +103,6 @@ export const mayHaveGroupInheritedConnectionConfiguration = (host: Host): boolea
   !host.identityFileId &&
   !host.identityFilePaths?.length;
 
-const hasResolvedGroupConnectionConfiguration = (host: Host): boolean => Boolean(
-  host.password !== undefined ||
-  host.identityId ||
-  host.identityFileId ||
-  host.identityFilePaths?.length ||
-  host.proxyProfileId ||
-  host.proxyConfig ||
-  host.hostChain?.hostIds.length
-);
-
 export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContext) => {
   const globalTerminalSettings = {
     verifyHostKeys: true,
@@ -129,10 +119,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
     let identities: NonNullable<TerminalSessionStartersContext["identities"]> =
       ctx.identitiesRef?.current ?? ctx.identities ?? [];
     const credentialHosts = [host, ...resolvedChainHosts];
-    const groupDependentHostIds = new Set(
-      credentialHosts.filter(mayHaveGroupInheritedConnectionConfiguration).map((candidate) => candidate.id),
-    );
-    const mayNeedGroupDefaults = groupDependentHostIds.size > 0;
+    const mayNeedGroupDefaults = credentialHosts.some(mayHaveGroupInheritedConnectionConfiguration);
     if (
       (hasMissingConfiguredVaultCredentials(credentialHosts, keys, identities) || mayNeedGroupDefaults)
       && !isVaultInitialized()
@@ -143,17 +130,6 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
       resolvedChainHosts = ctx.resolvedChainHostsRef?.current ?? ctx.resolvedChainHosts;
       keys = ctx.keysRef?.current ?? ctx.keys;
       identities = ctx.identitiesRef?.current ?? ctx.identities;
-      const refreshedHosts = [host, ...resolvedChainHosts];
-      const unresolvedGroupHostId = [...groupDependentHostIds].find((hostId) => {
-        const refreshedHost = refreshedHosts.find((candidate) => candidate.id === hostId);
-        return !refreshedHost || !hasResolvedGroupConnectionConfiguration(refreshedHost);
-      });
-      if (unresolvedGroupHostId) {
-        throw new Error(
-          `Group connection configuration is unavailable for host ${unresolvedGroupHostId}. ` +
-          "Open host settings and repair or remove its group configuration.",
-        );
-      }
     }
     return { host, resolvedChainHosts, keys, identities };
   };
