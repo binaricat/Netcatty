@@ -195,6 +195,13 @@ export function flushPendingTerminalWritesOnResume(term: XTerm): void {
   }
 }
 
+export function flushPendingTerminalWritesAfterInput(term: XTerm): void {
+  // The input byte is forwarded before this deferred drain runs. Catch the
+  // visible terminal up without dropping or reordering output so the remote
+  // echo does not remain behind renderer timers after a large dump.
+  flushPendingTerminalWritesOnResume(term);
+}
+
 const waitForTerminalWriteCallbacks = (): Promise<void> =>
   new Promise((resolve) => {
     setTimeout(resolve, 0);

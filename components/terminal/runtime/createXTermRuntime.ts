@@ -825,6 +825,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
         id,
         getFlowControllerForTerm(term),
         ctx.terminalBackend,
+        { reason: "input" },
       );
 
       // Serial line mode: buffer input and send on Enter

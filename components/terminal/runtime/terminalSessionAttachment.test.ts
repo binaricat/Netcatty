@@ -227,6 +227,79 @@ test("writeSessionData clears renderer backlog while deferring IPC ack", () => {
   clearDeferredTerminalWriteAck(term);
 });
 
+test("SSH key echo is displayed promptly while a large log is still draining", async (t) => {
+  clearTerminalSessionFlowAck("session-1");
+  const completedWrites: string[] = [];
+  const pendingWriteCallbacks: Array<() => void> = [];
+  const sentInput: string[] = [];
+  const term = {
+    buffer: { active: { type: "normal" } },
+    _core: {
+      _writeBuffer: {
+        flushSync() {
+          while (pendingWriteCallbacks.length > 0) {
+            pendingWriteCallbacks.shift()?.();
+          }
+        },
+      },
+    },
+    write(data: string, callback?: () => void) {
+      if (callback) {
+        pendingWriteCallbacks.push(() => {
+          completedWrites.push(data);
+          callback();
+        });
+      }
+    },
+    scrollToBottom() {},
+  } as unknown as XTerm;
+  const ctx = {
+    ...createContext(false),
+    isVisibleRef: { current: true },
+    terminalBackend: {
+      writeToSession: (_sessionId: string, data: string) => sentInput.push(data),
+      ackSessionFlow() {},
+      setSessionFlowPaused() {},
+    },
+  };
+  t.after(() => {
+    while (pendingWriteCallbacks.length > 0) {
+      pendingWriteCallbacks.shift()?.();
+    }
+    resetTerminalWriteCoalescer(term);
+    clearDeferredTerminalWriteAck(term);
+    clearTerminalSessionFlowAck("session-1");
+  });
+
+  const authLogLine = "Jul 18 12:34:56 test sshd[2306]: Accepted password for root\r\n";
+  const largeAuthLog = authLogLine.repeat(
+    Math.ceil((3 * 1024 * 1024) / authLogLine.length),
+  );
+  writeSessionData(ctx as never, term, largeAuthLog);
+  flushTerminalWriteCoalescer(term);
+  assert.ok(pendingWriteCallbacks.length > 0, "large log should still be draining");
+
+  const key = "k";
+  prioritizeTerminalInput(
+    term,
+    "session-1",
+    getFlowController(ctx as never, term),
+    ctx.terminalBackend,
+    { reason: "input" },
+  );
+  ctx.terminalBackend.writeToSession("session-1", key);
+  writeSessionData(ctx as never, term, key);
+  flushTerminalWriteCoalescer(term);
+  await new Promise((resolve) => { setTimeout(resolve, 0); });
+
+  assert.deepEqual(sentInput, [key], "the key should be forwarded immediately");
+  assert.equal(
+    completedWrites.join("").includes(key),
+    true,
+    "the echoed key should not wait for the old log backlog to finish",
+  );
+});
+
 test("writeSessionData flushes xterm writes while the page is hidden", () => {
   clearTerminalSessionFlowAck("session-1");
   const payload = "x".repeat(FLOW_CHAR_COUNT_ACK_SIZE + 1);
