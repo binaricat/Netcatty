@@ -19,6 +19,11 @@ test("WebGL context loss schedules a coalesced rebuild and viewport repaint", ()
 
 test("WebGL recovery has a circuit breaker and lifecycle cleanup", () => {
   assert.match(source, /WEBGL_MAX_RECOVERIES_PER_WINDOW = 2/);
+  assert.match(source, /let webglCircuitBroken = false/);
+  assert.match(
+    source,
+    /webglCircuitBroken = true;\s*cancelWebglRecovery\(\);\s*logger\.warn\("\[XTerm\] Repeated WebGL context loss, staying on DOM renderer"\);\s*return;/,
+  );
   assert.match(source, /Repeated WebGL context loss, staying on DOM renderer/);
   assert.match(source, /const suspendWebglRenderer = \(\) => \{\s*cancelWebglRecovery\(\)/);
   assert.match(source, /dispose: \(\) => \{\s*runtimeDisposed = true;\s*cancelWebglRecovery\(\)/);
@@ -27,6 +32,16 @@ test("WebGL recovery has a circuit breaker and lifecycle cleanup", () => {
 test("disabled WebGL remains a no-op", () => {
   assert.match(
     source,
-    /const loadWebglRenderer = \(\) => \{\s*if \(webglLoaded \|\| !performanceConfig\.useWebGLAddon\) return;/,
+    /const loadWebglRenderer = \(\) => \{\s*if \(webglLoaded \|\| webglCircuitBroken \|\| !performanceConfig\.useWebGLAddon\) return;/,
   );
+});
+
+test("ensureWebglRenderer remains a no-op after the circuit breaker trips", () => {
+  const loadStart = source.indexOf("const loadWebglRenderer = () => {");
+  const loadGuard = source.indexOf("webglCircuitBroken", loadStart);
+  const addonConstruction = source.indexOf("new WebglAddon()", loadStart);
+
+  assert.ok(loadStart >= 0);
+  assert.ok(loadGuard > loadStart && loadGuard < addonConstruction);
+  assert.match(source, /ensureWebglRenderer: loadWebglRenderer/);
 });

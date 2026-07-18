@@ -484,6 +484,11 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
 
   let webglAddon: WebglAddon | null = null;
   let webglLoaded = false;
+  // Once repeated context losses trip the breaker, this runtime stays on the
+  // DOM renderer. In particular, reveal/resume calls to ensureWebglRenderer and
+  // suspend/resume cycles must not rearm WebGL. A newly-created runtime (for
+  // example after a deliberate renderer preference change) gets a fresh flag.
+  let webglCircuitBroken = false;
   let webglRecoveryTimer: ReturnType<typeof setTimeout> | null = null;
   let runtimeDisposed = false;
   const webglContextLosses: number[] = [];
@@ -515,7 +520,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
   };
 
   const loadWebglRenderer = () => {
-    if (webglLoaded || !performanceConfig.useWebGLAddon) return;
+    if (webglLoaded || webglCircuitBroken || !performanceConfig.useWebGLAddon) return;
     let nextWebglAddon: WebglAddon | null = null;
     try {
       // WebglAddon constructor only accepts `preserveDrawingBuffer?: boolean`.
@@ -545,6 +550,8 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
         }
         webglContextLosses.push(now);
         if (webglContextLosses.length > WEBGL_MAX_RECOVERIES_PER_WINDOW) {
+          webglCircuitBroken = true;
+          cancelWebglRecovery();
           logger.warn("[XTerm] Repeated WebGL context loss, staying on DOM renderer");
           return;
         }
