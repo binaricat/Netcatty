@@ -5,7 +5,9 @@ const sharedConstants = require("../../infrastructure/config/terminalFlowConstan
 const {
   FLOW_HIGH_WATER_MARK,
   FLOW_LOW_WATER_MARK,
+  TERMINAL_INPUT_FLOW_HEADROOM_BYTES,
   clearSessionFlowState,
+  prioritizeSessionOutputAfterInput,
   setBufferedOutputBytes,
   setRendererFlowPaused,
   shouldAcceptSessionOutput,
@@ -67,6 +69,55 @@ test("trackAck resumes after draining to the low watermark", () => {
   assert.deepEqual(session._calls, ["pause"]);
   trackAck(session, FLOW_HIGH_WATER_MARK);
   assert.deepEqual(session._calls, ["pause", "resume"]);
+});
+
+test("user input briefly resumes paused output so a trailing echo can arrive", () => {
+  const session = makeSession();
+  trackEmitted(session, FLOW_HIGH_WATER_MARK);
+  assert.deepEqual(session._calls, ["pause"]);
+  assert.equal(shouldAcceptSessionOutput(session), false);
+
+  assert.equal(prioritizeSessionOutputAfterInput(session), true);
+  assert.deepEqual(session._calls, ["pause", "resume"]);
+  assert.equal(shouldAcceptSessionOutput(session), true);
+
+  trackEmitted(session, TERMINAL_INPUT_FLOW_HEADROOM_BYTES);
+  assert.deepEqual(session._calls, ["pause", "resume", "pause"]);
+  assert.equal(shouldAcceptSessionOutput(session), false);
+});
+
+test("input resume expires after the renderer catches up", () => {
+  const session = makeSession();
+  trackEmitted(session, FLOW_HIGH_WATER_MARK);
+  prioritizeSessionOutputAfterInput(session);
+  trackAck(session, FLOW_HIGH_WATER_MARK);
+
+  assert.equal(session.flowState.inputResumeActive, false);
+  trackEmitted(session, FLOW_HIGH_WATER_MARK);
+  assert.deepEqual(session._calls, ["pause", "resume", "pause"]);
+});
+
+test("repeated input cannot raise the bounded output headroom", () => {
+  const session = makeSession();
+  trackEmitted(
+    session,
+    FLOW_HIGH_WATER_MARK + TERMINAL_INPUT_FLOW_HEADROOM_BYTES,
+  );
+
+  assert.equal(prioritizeSessionOutputAfterInput(session), false);
+  assert.equal(prioritizeSessionOutputAfterInput(session), false);
+  assert.deepEqual(session._calls, ["pause"]);
+  assert.equal(shouldAcceptSessionOutput(session), false);
+});
+
+test("user input does not resume output while the renderer is paused", () => {
+  const session = makeSession();
+  trackEmitted(session, FLOW_HIGH_WATER_MARK);
+  setRendererFlowPaused(session, true);
+
+  assert.equal(prioritizeSessionOutputAfterInput(session), false);
+  assert.deepEqual(session._calls, ["pause"]);
+  assert.equal(shouldAcceptSessionOutput(session), false);
 });
 
 test("flow diagnostics remember the renderer session id", () => {

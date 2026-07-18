@@ -20,7 +20,6 @@ import {
   clearTerminalSessionFlowAck,
   flushTerminalSessionFlowAck,
 } from "./terminalFlowAckBuffer";
-import { flushPendingTerminalWritesAfterInput } from "./terminalUnfocusedRepaint";
 
 type FlowBackend = {
   setSessionFlowPaused?: (sessionId: string, paused: boolean) => void;
@@ -968,19 +967,13 @@ export const prioritizeTerminalInput = (
 
   if (hasVisibleBacklog && (!isInterrupt || options.drainStaleOutput !== true)) {
     let ackAfterInput = 0;
-    const shouldDrainAfterInput = options.reason === "input";
     if (deferredAck > 0) {
       ackAfterInput = clearDeferredTerminalWriteAck(term);
-    }
-    if (ackAfterInput > 0 || shouldDrainAfterInput) {
       scheduleResume(() => {
         if (ackAfterInput > 0) {
           ackTerminalSessionFlow(backend, sessionId, ackAfterInput);
         }
         flushTerminalSessionFlowAck(sessionId);
-        if (shouldDrainAfterInput) {
-          flushPendingTerminalWritesAfterInput(term);
-        }
       });
     }
 

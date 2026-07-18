@@ -33,6 +33,7 @@ const {
 } = require("./terminalInterruptDiagnostics.cjs");
 const {
   clearSessionFlowState,
+  prioritizeSessionOutputAfterInput,
   setBufferedOutputBytes,
   setRendererFlowPaused,
   shouldAcceptSessionOutput,
@@ -977,6 +978,9 @@ function writeToSessionNow(payload, data, logRewrite = payload.logRewrite) {
       session.socket.write(wireData);
     } else if (session.serialPort) {
       session.serialPort.write(outgoing);
+    }
+    if (data !== "\x03" && !payload.automated && !isTerminalReportSequence(data)) {
+      prioritizeSessionOutputAfterInput(session);
     }
   } catch (err) {
     logTerminalInterruptDebug("write-session-error", {

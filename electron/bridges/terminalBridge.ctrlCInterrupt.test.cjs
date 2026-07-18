@@ -332,6 +332,71 @@ test("ordinary SSH input still disarms a pending interrupt output drain", () => 
   assert.equal(session._interruptOutputGate?.active, false);
 });
 
+test("ordinary SSH input is written before paused output gets a bounded resume", () => {
+  const calls = [];
+  const sessions = new Map();
+  const session = {
+    flowState: {
+      rendererPaused: false,
+      unackedBytes: FLOW_HIGH_WATER_MARK,
+      bufferedBytes: 0,
+      appliedPause: true,
+      outputPaused: true,
+    },
+    stream: {
+      pause() {
+        calls.push(["pause"]);
+      },
+      resume() {
+        calls.push(["resume"]);
+      },
+      write(data) {
+        calls.push(["write", data]);
+      },
+    },
+  };
+  sessions.set("ssh-1", session);
+  initBridge(sessions);
+
+  terminalBridge.writeToSession({ sender: {} }, { sessionId: "ssh-1", data: "k" });
+
+  assert.deepEqual(calls, [
+    ["write", "k"],
+    ["resume"],
+  ]);
+  assert.equal(session.flowState.inputResumeActive, true);
+});
+
+test("automated SSH writes do not resume paused output", () => {
+  const calls = [];
+  const sessions = new Map();
+  sessions.set("ssh-1", {
+    flowState: {
+      rendererPaused: false,
+      unackedBytes: FLOW_HIGH_WATER_MARK,
+      bufferedBytes: 0,
+      appliedPause: true,
+      outputPaused: true,
+    },
+    stream: {
+      resume() {
+        calls.push(["resume"]);
+      },
+      write(data) {
+        calls.push(["write", data]);
+      },
+    },
+  });
+  initBridge(sessions);
+
+  terminalBridge.writeToSession(
+    { sender: {} },
+    { sessionId: "ssh-1", data: "automated", automated: true },
+  );
+
+  assert.deepEqual(calls, [["write", "automated"]]);
+});
+
 test("SSH Ctrl+C does not use channel signals even when the stream exposes them", () => {
   const calls = [];
   const sessions = new Map();

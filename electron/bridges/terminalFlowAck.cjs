@@ -6,6 +6,11 @@ const {
 } = require("../../infrastructure/config/terminalFlowConstants.cjs");
 const { logTerminalOutputPerf } = require("./terminalPerformanceDiagnostics.cjs");
 
+// User input may arrive just as a large output stream has been paused. Allow
+// one bounded window of additional output so a trailing remote echo can reach
+// the renderer, while keeping the total main/renderer backlog capped.
+const TERMINAL_INPUT_FLOW_HEADROOM_BYTES = 256 * 1024;
+
 function getFlowTarget(session) {
   return session?.stream || session?.proc || session?.socket || session?.serialPort || null;
 }
@@ -23,6 +28,7 @@ function ensureFlowState(session) {
       lastAckAt: 0,
       lastPerfAckLogAt: 0,
       sessionId: null,
+      inputResumeActive: false,
     };
   }
   const state = session.flowState;
@@ -35,6 +41,7 @@ function ensureFlowState(session) {
   state.lastAckAt = Number.isFinite(state.lastAckAt) ? Math.max(0, state.lastAckAt) : 0;
   state.lastPerfAckLogAt = Number.isFinite(state.lastPerfAckLogAt) ? Math.max(0, state.lastPerfAckLogAt) : 0;
   state.sessionId = typeof state.sessionId === "string" && state.sessionId ? state.sessionId : null;
+  state.inputResumeActive = Boolean(state.inputResumeActive);
   if (typeof state.outputPaused !== "boolean") {
     state.outputPaused = state.appliedPause && (state.rendererPaused || state.unackedBytes >= FLOW_HIGH_WATER_MARK);
   }
@@ -99,11 +106,25 @@ function reconcileSessionFlow(session) {
     state.outputPaused = true;
   } else if (state.outputPaused && !state.rendererPaused && state.unackedBytes <= FLOW_LOW_WATER_MARK) {
     state.outputPaused = false;
+    state.inputResumeActive = false;
   }
 
   const pendingBytes = state.unackedBytes + state.bufferedBytes;
-  const shouldPause = state.outputPaused || pendingBytes >= FLOW_HIGH_WATER_MARK;
-  const shouldResume = !state.outputPaused && pendingBytes <= FLOW_LOW_WATER_MARK;
+  const inputFlowLimit = FLOW_HIGH_WATER_MARK + TERMINAL_INPUT_FLOW_HEADROOM_BYTES;
+  if (state.inputResumeActive && (state.rendererPaused || pendingBytes >= inputFlowLimit)) {
+    state.inputResumeActive = false;
+  }
+  const shouldPause = (
+    state.rendererPaused
+    || (!state.inputResumeActive && (state.outputPaused || pendingBytes >= FLOW_HIGH_WATER_MARK))
+  );
+  const shouldResume = (
+    !state.rendererPaused
+    && (
+      (state.inputResumeActive && pendingBytes < inputFlowLimit)
+      || (!state.outputPaused && pendingBytes <= FLOW_LOW_WATER_MARK)
+    )
+  );
 
   if (!state.appliedPause && shouldPause) {
     logTerminalOutputPerf("backend-flow-pause", getFlowPerfDetails(session, { pendingBytes }));
@@ -117,6 +138,24 @@ function reconcileSessionFlow(session) {
     applyResume(session, target);
     state.appliedPause = false;
   }
+}
+
+function prioritizeSessionOutputAfterInput(session) {
+  if (!session) return false;
+  const state = ensureFlowState(session);
+  const pendingBytes = state.unackedBytes + state.bufferedBytes;
+  const inputFlowLimit = FLOW_HIGH_WATER_MARK + TERMINAL_INPUT_FLOW_HEADROOM_BYTES;
+  if (
+    state.rendererPaused
+    || !state.outputPaused
+    || !state.appliedPause
+    || pendingBytes >= inputFlowLimit
+  ) {
+    return false;
+  }
+  state.inputResumeActive = true;
+  reconcileSessionFlow(session);
+  return !state.appliedPause;
 }
 
 function setRendererFlowPaused(session, paused) {
@@ -183,7 +222,7 @@ function setBufferedOutputBytes(session, bytes) {
 function shouldAcceptSessionOutput(session) {
   if (!session) return true;
   const state = ensureFlowState(session);
-  return !state.outputPaused;
+  return !state.outputPaused || state.inputResumeActive;
 }
 
 function isTransferSentryActive(transferSentry) {
@@ -215,6 +254,7 @@ function clearSessionFlowState(session, options = {}) {
     lastAckAt: 0,
     lastPerfAckLogAt: 0,
     sessionId: null,
+    inputResumeActive: false,
   };
 }
 
@@ -229,4 +269,6 @@ module.exports = {
   shouldProcessSessionOutput,
   clearSessionFlowState,
   reconcileSessionFlow,
+  prioritizeSessionOutputAfterInput,
+  TERMINAL_INPUT_FLOW_HEADROOM_BYTES,
 };
