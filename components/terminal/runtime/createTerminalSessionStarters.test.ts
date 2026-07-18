@@ -171,11 +171,48 @@ test("vault readiness recognizes hosts that may inherit connection configuration
     id: "grouped", label: "Grouped", hostname: "grouped.test", username: "alice", group: "Production",
   } as never), true);
   assert.equal(mayHaveGroupInheritedConnectionConfiguration({
+    id: "password", label: "Password", hostname: "password.test", username: "alice",
+    group: "Production", password: "secret",
+  } as never), true);
+  assert.equal(mayHaveGroupInheritedConnectionConfiguration({
+    id: "key", label: "Key", hostname: "key.test", username: "alice",
+    group: "Production", identityFilePaths: ["~/.ssh/id_ed25519"],
+  } as never), true);
+  assert.equal(mayHaveGroupInheritedConnectionConfiguration({
     id: "plain", label: "Plain", hostname: "plain.test", username: "alice", password: "secret",
   } as never), false);
   assert.equal(mayHaveGroupInheritedConnectionConfiguration({
     id: "file", label: "File", hostname: "file.test", username: "alice", identityFilePaths: ["~/.ssh/id_ed25519"],
   } as never), false);
+});
+
+test("startSSH does not wait for vault initialization for an ungrouped explicit host", async () => {
+  let backendStarted = false;
+  const host = {
+    id: "host-1", label: "Target", hostname: "target.test", username: "alice", password: "secret",
+  };
+  const ctx = createStarterContext({
+    host,
+    hostRef: { current: host },
+    terminalBackend: {
+      backendAvailable: () => true,
+      startSSHSession: async () => { backendStarted = true; return "ssh-session"; },
+      onSessionData: () => noop,
+      onSessionExit: () => noop,
+      onChainProgress: () => noop,
+      writeToSession: noop,
+      resizeSession: noop,
+    },
+  });
+
+  setVaultInitialized(false);
+  try {
+    await createTerminalSessionStarters(ctx as never).startSSH(createTermStub() as never);
+  } finally {
+    setVaultInitialized(true);
+  }
+
+  assert.equal(backendStarted, true);
 });
 
 for (const inheritedAuth of ["password", "key"] as const) {
@@ -495,6 +532,73 @@ for (const location of ["target", "jump"] as const) {
 }
 
 for (const location of ["target", "jump"] as const) {
+  for (const explicitAuth of ["password", "key"] as const) {
+    test(`startSSH rereads a grouped ${location} with explicit ${explicitAuth} auth for an inherited proxy`, async () => {
+      let capturedOptions: Record<string, unknown> | null = null;
+      const auth = explicitAuth === "password"
+        ? { authMethod: "password", password: "explicit-secret" }
+        : { authMethod: "key", identityFilePaths: ["~/.ssh/id_ed25519"] };
+      const groupedHost = {
+        id: location === "target" ? "host-1" : "jump-1",
+        label: location === "target" ? "Target" : "Jump",
+        hostname: `${location}.test`,
+        username: "alice",
+        group: "Production",
+        ...auth,
+      };
+      const initialTarget = location === "target"
+        ? groupedHost
+        : {
+            id: "host-1", label: "Target", hostname: "target.test", username: "alice",
+            hostChain: { hostIds: ["jump-1"] },
+          };
+      const initialChain = location === "jump" ? [groupedHost] : [];
+      const hostRef = { current: initialTarget as Record<string, unknown> };
+      const resolvedChainHostsRef = { current: initialChain as Array<Record<string, unknown>> };
+      const terminalBackend = {
+        backendAvailable: () => true,
+        startSSHSession: async (options: Record<string, unknown>) => {
+          capturedOptions = options;
+          return "ssh-session";
+        },
+        onSessionData: () => noop,
+        onSessionExit: () => noop,
+        onChainProgress: () => noop,
+        writeToSession: noop,
+        resizeSession: noop,
+      };
+      const ctx = createStarterContext({
+        host: initialTarget,
+        hostRef,
+        resolvedChainHosts: initialChain,
+        resolvedChainHostsRef,
+        terminalBackend,
+      });
+
+      setVaultInitialized(false);
+      try {
+        const started = createTerminalSessionStarters(ctx as never).startSSH(createTermStub() as never);
+        const proxyConfig = { type: "socks5", host: `${location}-proxy.test`, port: 1080 };
+        if (location === "target") hostRef.current = { ...groupedHost, proxyConfig };
+        else resolvedChainHostsRef.current = [{ ...groupedHost, proxyConfig }];
+        setVaultInitialized(true);
+        await started;
+      } finally {
+        setVaultInitialized(true);
+      }
+
+      const connectionHost = location === "target"
+        ? capturedOptions
+        : (capturedOptions?.jumpHosts as Array<Record<string, unknown>>)?.[0];
+      const proxy = connectionHost?.proxy as Record<string, unknown>;
+      assert.equal(proxy?.host, `${location}-proxy.test`);
+      if (explicitAuth === "password") assert.equal(connectionHost?.password, "explicit-secret");
+      else assert.deepEqual(connectionHost?.identityFilePaths, ["~/.ssh/id_ed25519"]);
+    });
+  }
+}
+
+for (const location of ["target", "jump"] as const) {
   test(`startMosh waits for the live ${location} proxy profile before reporting it unsupported`, async () => {
     const errors: string[] = [];
     let backendStarted = false;
@@ -535,6 +639,64 @@ for (const location of ["target", "jump"] as const) {
     assert.equal(backendStarted, false);
     assert.match(errors.at(-1) || "", location === "target" ? /does not support proxy connections/ : /does not support jump host chains/);
   });
+}
+
+for (const location of ["target", "jump"] as const) {
+  for (const explicitAuth of ["password", "key"] as const) {
+    test(`startMosh rereads a grouped ${location} with explicit ${explicitAuth} auth before rejecting its inherited proxy`, async () => {
+      const errors: string[] = [];
+      let backendStarted = false;
+      const auth = explicitAuth === "password"
+        ? { authMethod: "password", password: "explicit-secret" }
+        : { authMethod: "key", identityFilePaths: ["~/.ssh/id_ed25519"] };
+      const groupedHost = {
+        id: location === "target" ? "host-1" : "jump-1",
+        label: location === "target" ? "Target" : "Jump",
+        hostname: `${location}.test`,
+        username: "alice",
+        group: "Production",
+        ...auth,
+      };
+      const initialTarget = location === "target"
+        ? groupedHost
+        : {
+            id: "host-1", label: "Target", hostname: "target.test", username: "alice",
+            hostChain: { hostIds: ["jump-1"] },
+          };
+      const initialChain = location === "jump" ? [groupedHost] : [];
+      const hostRef = { current: initialTarget as Record<string, unknown> };
+      const resolvedChainHostsRef = { current: initialChain as Array<Record<string, unknown>> };
+      const ctx = createStarterContext({
+        host: initialTarget,
+        hostRef,
+        resolvedChainHosts: initialChain,
+        resolvedChainHostsRef,
+        setError: (message: string) => errors.push(message),
+        terminalBackend: {
+          moshAvailable: () => true,
+          startMoshSession: async () => { backendStarted = true; return "mosh-session"; },
+        },
+      });
+
+      setVaultInitialized(false);
+      try {
+        const started = createTerminalSessionStarters(ctx as never).startMosh(createTermStub() as never);
+        const proxyConfig = { type: "socks5", host: `${location}-proxy.test`, port: 1080 };
+        if (location === "target") hostRef.current = { ...groupedHost, proxyConfig };
+        else resolvedChainHostsRef.current = [{ ...groupedHost, proxyConfig }];
+        setVaultInitialized(true);
+        await started;
+      } finally {
+        setVaultInitialized(true);
+      }
+
+      assert.equal(backendStarted, false);
+      assert.match(
+        errors.at(-1) || "",
+        location === "target" ? /does not support proxy connections/ : /does not support jump host chains/,
+      );
+    });
+  }
 }
 
 test("startSSH forwards imported system agent authentication settings", async () => {

@@ -97,11 +97,7 @@ export const hasMissingConfiguredVaultCredentials = (
 });
 
 export const mayHaveGroupInheritedConnectionConfiguration = (host: Host): boolean =>
-  Boolean(host.group?.trim()) &&
-  host.password === undefined &&
-  !host.identityId &&
-  !host.identityFileId &&
-  !host.identityFilePaths?.length;
+  Boolean(host.group?.trim());
 
 export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContext) => {
   const globalTerminalSettings = {
