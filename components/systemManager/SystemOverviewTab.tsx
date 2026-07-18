@@ -368,7 +368,7 @@ export const SystemOverviewTab = memo(function SystemOverviewTab({
             </div>
             {stats.disks.length > 0 ? (
               <div className="space-y-2">
-                {stats.disks.slice(0, 5).map((disk) => (
+                {stats.disks.map((disk) => (
                   <div key={disk.mountPoint} className="space-y-1">
                     <div className="flex items-center justify-between gap-2 text-[11px]">
                       <span className="min-w-0 truncate text-foreground">{disk.mountPoint}</span>

@@ -58,6 +58,8 @@ test("overview tab reuses the shared server stats source", () => {
   assert.match(source, /setHistory\(\[\]\)/);
   assert.match(source, /if \(!isVisible \|\| !hasStats\) return/);
   assert.match(source, /SystemPanelInlineError[\s\S]*onRetry=\{\(\) => void refresh\(\)\}/);
+  assert.match(source, /aggregateMountedDiskUsage\(stats\.disks\)/);
+  assert.doesNotMatch(source, /stats\.disks\.slice\(/);
   assert.doesNotMatch(source, /usePolling/);
   assert.doesNotMatch(source, /backend\.getServerStats/);
 });

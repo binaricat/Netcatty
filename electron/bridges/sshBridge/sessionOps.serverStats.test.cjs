@@ -115,7 +115,7 @@ test("getServerStats falls back to BusyBox tools for process and root disk data"
     { pid: "1", memPercent: 2, command: "/sbin/procd" },
   ]);
   assert.deepEqual(result.stats.disks, [
-    { mountPoint: "/", used: 0.25, total: 1, percent: 25 },
+    { mountPoint: "/", used: 0.25, total: 1, percent: 25, filesystem: "overlayfs:/overlay" },
   ]);
   assert.equal(result.stats.diskPercent, 25);
 });
