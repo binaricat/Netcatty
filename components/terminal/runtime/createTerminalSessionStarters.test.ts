@@ -444,6 +444,7 @@ test("restored ET rereads vault keys after hydration", async () => {
 
 test("restored SSH resolves identity and group auth after vault readiness before prompting", async () => {
   let capturedOptions: Record<string, unknown> | null = null;
+  const sessionWrites: string[] = [];
   const fallbackHost = {
     id: "host-1",
     label: "Restored target",
@@ -462,7 +463,7 @@ test("restored SSH resolves identity and group auth after vault readiness before
     onSessionData: () => noop,
     onSessionExit: () => noop,
     onChainProgress: () => noop,
-    writeToSession: noop,
+    writeToSession: (_id: string, data: string) => sessionWrites.push(data),
     resizeSession: noop,
   };
   const ctx = createStarterContext({
@@ -471,6 +472,8 @@ test("restored SSH resolves identity and group auth after vault readiness before
     keysRef,
     identitiesRef,
     waitForVaultInitialization: true,
+    terminalSettings: { startupCommandDelayMs: 0 },
+    promptLineBreakStateRef: undefined,
     terminalBackend,
   });
   let authPrompts = 0;
@@ -481,7 +484,12 @@ test("restored SSH resolves identity and group auth after vault readiness before
   setVaultInitialized(false);
   try {
     const started = createTerminalSessionStarters(ctx as never).startSSH(createTermStub() as never);
-    hostRef.current = { ...fallbackHost, identityId: "identity-1" };
+    hostRef.current = {
+      ...fallbackHost,
+      identityId: "identity-1",
+      startupCommand: "first hydrated command\nsecond hydrated command",
+      startupCommandRunMode: "lineDelay",
+    };
     keysRef.current = [{
       id: "key-1",
       label: "Group identity key",
@@ -497,6 +505,8 @@ test("restored SSH resolves identity and group auth after vault readiness before
     }];
     setVaultInitialized(true);
     await started;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
   } finally {
     setVaultInitialized(true);
   }
@@ -504,6 +514,7 @@ test("restored SSH resolves identity and group auth after vault readiness before
   assert.equal(authPrompts, 0);
   assert.equal(capturedOptions?.username, "deploy");
   assert.equal(capturedOptions?.privateKey, "group-identity-private-key");
+  assert.deepEqual(sessionWrites, ["first hydrated command\r", "second hydrated command\r"]);
 });
 
 test("restored SSH prompts exactly once when live vault configuration still lacks auth", async () => {
@@ -534,10 +545,12 @@ test("restored SSH prompts exactly once when live vault configuration still lack
   });
   let authPrompts = 0;
   const statuses: string[] = [];
+  const parentStatuses: string[] = [];
   ctx.setNeedsAuth = (needed: boolean) => {
     if (needed) authPrompts += 1;
   };
   ctx.setStatus = (status: string) => statuses.push(status);
+  ctx.updateStatus = (status: string) => parentStatuses.push(status);
 
   setVaultInitialized(false);
   try {
@@ -550,6 +563,7 @@ test("restored SSH prompts exactly once when live vault configuration still lack
 
   assert.equal(authPrompts, 1);
   assert.deepEqual(statuses, ["disconnected"]);
+  assert.deepEqual(parentStatuses, ["disconnected"]);
   assert.equal(backendStarts, 0);
 });
 

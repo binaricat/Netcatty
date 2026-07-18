@@ -2,6 +2,7 @@ import type { Terminal as XTerm } from "@xterm/xterm";
 import { normalizeLineEndings, wrapBracketedPaste } from "../../../lib/utils";
 import { markPromptLineBreakCommandPending } from "./promptLineBreak";
 import type { TerminalSessionStartersContext } from "./createTerminalSessionStarters.types";
+import type { Host } from "../../../domain/models";
 
 const STARTUP_COMMAND_DEFAULT_DELAY_MS = 600;
 const STARTUP_COMMAND_MAX_DELAY_MS = 10000;
@@ -36,9 +37,10 @@ const buildStartupPasteInput = (term: XTerm, commandText: string): string => {
 
 export const resolveStartupCommand = (
   ctx: TerminalSessionStartersContext,
-  options?: { consumeSuppressHostStartupCommand?: boolean },
+  options?: { consumeSuppressHostStartupCommand?: boolean; host?: Host },
 ): string | undefined => {
-  const command = ctx.startupCommand || (ctx.suppressHostStartupCommandRef?.current ? undefined : ctx.host.startupCommand);
+  const host = options?.host ?? ctx.host;
+  const command = ctx.startupCommand || (ctx.suppressHostStartupCommandRef?.current ? undefined : host.startupCommand);
   if (options?.consumeSuppressHostStartupCommand && ctx.suppressHostStartupCommandRef) {
     ctx.suppressHostStartupCommandRef.current = false;
   }
@@ -50,8 +52,9 @@ export const scheduleStartupCommand = (
   term: XTerm,
   id: string,
   onSettled?: () => void,
+  host: Host = ctx.host,
 ): (() => void) | undefined => {
-  const commandToRun = resolveStartupCommand(ctx, { consumeSuppressHostStartupCommand: true });
+  const commandToRun = resolveStartupCommand(ctx, { consumeSuppressHostStartupCommand: true, host });
   if (!commandToRun || ctx.hasRunStartupCommandRef.current) return undefined;
 
   ctx.hasRunStartupCommandRef.current = true;
@@ -90,7 +93,7 @@ export const scheduleStartupCommand = (
 
   const runMode = ctx.startupCommand
     ? (ctx.multiLineRunMode ?? "paste")
-    : (ctx.host.startupCommandRunMode ?? "paste");
+    : (host.startupCommandRunMode ?? "paste");
   if (runMode === "paste") {
     timeoutId = setTimeout(() => {
       if (cancelled) return;

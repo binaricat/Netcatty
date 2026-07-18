@@ -285,6 +285,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
     ) {
       ctx.setNeedsAuth(true);
       ctx.setStatus("disconnected");
+      ctx.updateStatus("disconnected");
       return;
     }
 
@@ -740,7 +741,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
       }
 
       consumeRestoreCwdIntent(term, id);
-      scheduleStartupCommand(ctx, term, id);
+      scheduleStartupCommand(ctx, term, id, undefined, host);
 
       // Run OS detection only after successful connection. Mint a fresh
       // token for this specific connection attempt and register it as
@@ -1115,7 +1116,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         disposeMoshReady = undefined;
         cancelPendingStartupCommand = scheduleStartupCommand(ctx, term, attachedSessionId, () => {
           cancelPendingStartupCommand = undefined;
-        });
+        }, host);
       };
       const onMoshReady = () => {
         if (!isBootActive(bootToken)) return;
@@ -1193,7 +1194,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         }
       } else {
         // Older bridges without the ready event: keep previous behavior.
-        scheduleStartupCommand(ctx, term, id);
+        scheduleStartupCommand(ctx, term, id, undefined, host);
       }
     } catch (err) {
       // Drop any pre-start ready subscription if handshake never attached.
@@ -1508,7 +1509,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         return;
       }
 
-      scheduleStartupCommand(ctx, term, id);
+      scheduleStartupCommand(ctx, term, id, undefined, host);
 
       // ET sessions are full remote shells, so run OS detection like SSH for
       // server stats / distro icons.
