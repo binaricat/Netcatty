@@ -366,6 +366,83 @@ for (const protocol of ["SSH", "Mosh", "ET"] as const) {
   });
 }
 
+for (const outcome of ["reject", "resolve"] as const) {
+  test(`superseded key-auth SSH ${outcome} disposes chain progress once without stale UI mutation`, async () => {
+    const bootTokenRef = { current: Symbol("old") as symbol | null };
+    const isBootActiveRef = { current: true };
+    let settleBackend: ((outcome: "reject" | "resolve") => void) | undefined;
+    let unsubscribeCalls = 0;
+    let invalidated = false;
+    const staleUiMutations: string[] = [];
+    const closed: string[] = [];
+    const noteUiMutation = (name: string) => {
+      if (invalidated) staleUiMutations.push(name);
+    };
+    const backend = {
+      backendAvailable: () => true,
+      startSSHSession: () => new Promise<string>((resolve, reject) => {
+        settleBackend = (result) => {
+          if (result === "resolve") resolve("orphan-session");
+          else reject(new Error("obsolete key-auth failure"));
+        };
+      }),
+      onSessionData: () => noop,
+      onSessionExit: () => noop,
+      onChainProgress: () => () => { unsubscribeCalls += 1; },
+      writeToSession: noop,
+      resizeSession: noop,
+      closeSession: (id: string) => { closed.push(id); },
+    };
+    const ctx = createStarterContext({
+      host: {
+        id: "host-1",
+        label: "Key host",
+        hostname: "key.example.test",
+        username: "alice",
+        authMethod: "key",
+        identityFileId: "key-1",
+      },
+      keys: [{
+        id: "key-1",
+        label: "Key",
+        type: "ED25519",
+        category: "key",
+        source: "imported",
+        created: 1,
+        privateKey: "PRIVATE KEY",
+      }],
+      bootTokenRef,
+      isBootActiveRef,
+      terminalBackend: backend,
+      setError: () => noteUiMutation("error"),
+      setNeedsAuth: () => noteUiMutation("needs-auth"),
+      setAuthRetryMessage: () => noteUiMutation("auth-retry"),
+      setAuthPassword: () => noteUiMutation("auth-password"),
+      setProgressLogs: () => noteUiMutation("progress-logs"),
+      setProgressValue: () => noteUiMutation("progress-value"),
+      setChainProgress: () => noteUiMutation("chain-progress"),
+      setIsConnectionAwaitingUserInput: () => noteUiMutation("awaiting-input"),
+      setIsConnectionPastTcpDial: () => noteUiMutation("past-tcp-dial"),
+      setStatus: () => noteUiMutation("status"),
+      updateStatus: () => noteUiMutation("status"),
+    });
+
+    const start = createTerminalSessionStarters(ctx as never).startSSH(createTermStub() as never);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.ok(settleBackend, "SSH backend start should be pending after subscription");
+
+    invalidated = true;
+    beginTerminalBootAttempt({ bootTokenRef, isBootActiveRef }, "replacement");
+    settleBackend?.(outcome);
+    await start;
+
+    assert.equal(unsubscribeCalls, 1);
+    assert.deepEqual(staleUiMutations, []);
+    assert.deepEqual(closed, outcome === "resolve" ? ["orphan-session"] : []);
+    assert.equal(ctx.sessionRef.current, null);
+  });
+}
+
 test("restored ET rereads grouped host credentials after vault hydration", async () => {
   const fallbackHost = {
     id: "host-1", label: "Target", hostname: "target.test", group: "Production",

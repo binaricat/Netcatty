@@ -479,6 +479,11 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
 
     const totalHops = jumpHosts.length + 1;
     let unsubscribeChainProgress: (() => void) | undefined;
+    const cleanupChainProgress = () => {
+      const unsubscribe = unsubscribeChainProgress;
+      unsubscribeChainProgress = undefined;
+      unsubscribe?.();
+    };
 
     ctx.setIsConnectionPastTcpDial?.(false);
     if (jumpHosts.length > 0) {
@@ -668,7 +673,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         (authMethod !== "password" && authMethod !== "auto" && hasEncryptedPrimaryKey && !hasKeyMaterial && !hasPassword);
 
       if (needsCredentialReentry) {
-        if (unsubscribeChainProgress) unsubscribeChainProgress();
+        cleanupChainProgress();
         ctx.setError(null);
         ctx.setNeedsAuth(true);
         ctx.setAuthRetryMessage(
@@ -721,12 +726,12 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
       }
 
       if (!isBootActive(bootToken)) {
-        if (unsubscribeChainProgress) unsubscribeChainProgress();
+        cleanupChainProgress();
         closeOrphanBackendSession(ctx, id);
         return;
       }
 
-      if (unsubscribeChainProgress) unsubscribeChainProgress();
+      cleanupChainProgress();
       ctx.setIsConnectionAwaitingUserInput?.(false);
 
       if (!tryAttachSessionToTerminal(ctx, term, id, {
@@ -758,7 +763,6 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
       }
     } catch (err) {
       if (!isBootActive(bootToken)) {
-        if (unsubscribeChainProgress) unsubscribeChainProgress();
         return;
       }
       const message = err instanceof Error ? err.message : String(err);
@@ -798,7 +802,12 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
       ctx.setChainProgress(null);
       ctx.setIsConnectionAwaitingUserInput?.(false);
       ctx.setIsConnectionPastTcpDial?.(false);
-      if (unsubscribeChainProgress) unsubscribeChainProgress();
+    } finally {
+      // The subscription is installed before the backend start so early
+      // progress is not lost. Own it for the complete boot attempt and release
+      // it even when a superseded key-auth rejection returns from the nested
+      // catch before the backend has produced a session id.
+      cleanupChainProgress();
     }
   };
 
