@@ -7,6 +7,7 @@ import { HoverCard, HoverCardContent, HoverCardTrigger } from '../ui/hover-card'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 import { formatNetSpeed } from './terminalHelpers';
 import { useServerStats } from './hooks/useServerStats';
+import { formatDiskCapacityGb } from './serverStatsFormat';
 
 interface TerminalServerStatsProps {
   sessionId: string;
@@ -261,7 +262,7 @@ export const TerminalServerStats: React.FC<TerminalServerStatsProps> = ({
                         serverStats.diskPercent !== null && serverStats.diskPercent >= 80 && serverStats.diskPercent < 90 && "text-amber-400"
                       )}>
                         {serverStats.diskUsed !== null && serverStats.diskTotal !== null && serverStats.diskPercent !== null
-                          ? `${serverStats.diskUsed}/${serverStats.diskTotal}G (${serverStats.diskPercent}%)`
+                          ? `${formatDiskCapacityGb(serverStats.diskUsed)}/${formatDiskCapacityGb(serverStats.diskTotal)}G (${serverStats.diskPercent}%)`
                           : serverStats.diskPercent !== null
                             ? `${serverStats.diskPercent}%`
                             : '--'}
@@ -293,7 +294,7 @@ export const TerminalServerStats: React.FC<TerminalServerStatsProps> = ({
                                   "text-[11px] font-medium whitespace-nowrap",
                                   disk.percent >= 90 ? "text-red-400" : disk.percent >= 80 ? "text-amber-400" : "text-emerald-400"
                                 )}>
-                                  {disk.used}/{disk.total}G ({disk.percent}%)
+                                  {formatDiskCapacityGb(disk.used)}/{formatDiskCapacityGb(disk.total)}G ({disk.percent}%)
                                 </span>
                               </div>
                               <div className="w-full h-1.5 bg-muted rounded-full overflow-hidden">
