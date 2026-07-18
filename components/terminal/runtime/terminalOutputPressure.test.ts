@@ -138,6 +138,8 @@ test("degrades side work for CR-heavy progress rewrites below the byte-rate thre
   for (let index = 0; index < 8; index += 1) {
     noteTerminalOutputPressureData(term, `Reading database ... ${index}%\r`);
   }
+  // Subsequent non-LF output confirms that the final CR was also bare.
+  noteTerminalOutputPressureData(term, "done");
 
   assert.equal(getTerminalOutputPressure(term).largeOutput, true);
   assert.equal(getTerminalOutputPressure(term).longLine, false);
@@ -151,6 +153,20 @@ test("does not degrade ordinary short CRLF output as rewrite-heavy", () => {
 
   for (let index = 0; index < 8; index += 1) {
     noteTerminalOutputPressureData(term, `ordinary line ${index}\r\n`);
+  }
+
+  assert.equal(getTerminalOutputPressure(term).largeOutput, false);
+  assert.equal(shouldDegradeTerminalSideWork(term), false);
+
+  resetTerminalOutputPressure(term);
+});
+
+test("does not degrade repeated CRLF split across chunk boundaries", () => {
+  const term = createFakeTerm();
+
+  for (let index = 0; index < 8; index += 1) {
+    noteTerminalOutputPressureData(term, `ordinary line ${index}\r`);
+    noteTerminalOutputPressureData(term, "\n");
   }
 
   assert.equal(getTerminalOutputPressure(term).largeOutput, false);

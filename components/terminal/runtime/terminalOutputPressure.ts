@@ -41,6 +41,8 @@ type TerminalOutputPressureState = {
   recentSamples: OutputRateSample[];
   recentSampleBytes: number;
   recentCarriageReturns: number;
+  /** A final CR is unresolved until the next non-empty chunk arrives. */
+  trailingCarriageReturn: boolean;
 };
 
 /**
@@ -84,6 +86,7 @@ const getOrCreateState = (term: XTerm): TerminalOutputPressureState => {
       recentSamples: [],
       recentSampleBytes: 0,
       recentCarriageReturns: 0,
+      trailingCarriageReturn: false,
     };
     pressureStates.set(term, state);
   }
@@ -115,12 +118,13 @@ const noteRecentOutputRate = (
 
 const LINE_BREAK_SCAN = /[\n\r]/g;
 
-const countCarriageReturns = (data: string): number => {
+const countBareCarriageReturns = (data: string): number => {
   let count = 0;
   let index = data.indexOf("\r");
   while (index !== -1) {
     // CRLF is an ordinary line ending, not an in-place progress rewrite.
-    if (data[index + 1] !== "\n") count += 1;
+    // Defer a final CR until the next chunk reveals whether its LF was split.
+    if (index < data.length - 1 && data[index + 1] !== "\n") count += 1;
     index = data.indexOf("\r", index + 1);
   }
   return count;
@@ -223,7 +227,11 @@ export const noteTerminalOutputPressureData = (
   const scrollbackSaturated = isTerminalScrollbackSaturated(term);
   const quietMs = resolveLargeOutputQuietMs(scrollbackSaturated);
 
-  const carriageReturns = countCarriageReturns(data);
+  const resolvesTrailingCarriageReturn = state.trailingCarriageReturn
+    && data[0] !== "\n";
+  const carriageReturns = countBareCarriageReturns(data)
+    + (resolvesTrailingCarriageReturn ? 1 : 0);
+  state.trailingCarriageReturn = data.endsWith("\r");
   const recent = noteRecentOutputRate(state, now, data.length, carriageReturns);
   const recentBytes = recent.bytes;
   const crHeavy = recent.carriageReturns >= CR_HEAVY_MIN_RETURNS
