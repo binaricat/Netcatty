@@ -132,6 +132,20 @@ test("detects large-output pressure from high-rate small chunks", () => {
   }
 });
 
+test("degrades side work for CR-heavy progress rewrites below the byte-rate threshold", () => {
+  const term = createFakeTerm();
+
+  for (let index = 0; index < 8; index += 1) {
+    noteTerminalOutputPressureData(term, `Reading database ... ${index}%\r`);
+  }
+
+  assert.equal(getTerminalOutputPressure(term).largeOutput, true);
+  assert.equal(getTerminalOutputPressure(term).longLine, false);
+  assert.equal(shouldDegradeTerminalSideWork(term), true);
+
+  resetTerminalOutputPressure(term);
+});
+
 test("arms large-output early on multi-line writes when scrollback is saturated", () => {
   // rows(24) + scrollback(1000) = 1024 max; length near cap → second-seq path.
   const term = createFakeTerm({

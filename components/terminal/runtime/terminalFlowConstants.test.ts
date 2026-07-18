@@ -68,7 +68,10 @@ test("renderer flow constants match shared terminalFlowConstants.json", () => {
 });
 
 test("terminal flood limits keep interactive acks responsive", () => {
-  assert.ok(FLOW_LOW_WATER_MARK <= 8 * 1024);
+  // Resume before the renderer drains nearly empty, but retain at least half
+  // the bounded backlog as hysteresis so a slow renderer cannot thrash pause.
+  assert.ok(FLOW_LOW_WATER_MARK >= 128 * 1024);
+  assert.ok(FLOW_LOW_WATER_MARK <= FLOW_HIGH_WATER_MARK / 2);
   assert.ok(FLOW_CHAR_COUNT_ACK_SIZE <= 4 * 1024);
   // Flood coalesce must stay below bulk so TUI frames can interleave, but stay
   // large enough that plain-text dumps (#1961) do not collapse into 8KB shards.

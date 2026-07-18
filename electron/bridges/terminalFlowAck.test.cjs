@@ -69,6 +69,16 @@ test("trackAck resumes after draining to the low watermark", () => {
   assert.deepEqual(session._calls, ["pause", "resume"]);
 });
 
+test("trackAck resumes at the low watermark without waiting for an empty backlog", () => {
+  const session = makeSession();
+  trackEmitted(session, FLOW_HIGH_WATER_MARK);
+  trackAck(session, FLOW_HIGH_WATER_MARK - FLOW_LOW_WATER_MARK - 1);
+  assert.deepEqual(session._calls, ["pause"]);
+  trackAck(session, 1);
+  assert.deepEqual(session._calls, ["pause", "resume"]);
+  assert.equal(session.flowState.unackedBytes, FLOW_LOW_WATER_MARK);
+});
+
 test("flow diagnostics remember the renderer session id", () => {
   const session = makeSession();
   trackEmitted(session, 1024, "session-1");

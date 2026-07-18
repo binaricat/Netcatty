@@ -22,6 +22,7 @@ export type TerminalOutputPressureSnapshot = {
 type OutputRateSample = {
   at: number;
   bytes: number;
+  carriageReturns: number;
 };
 
 type TerminalOutputPressureState = {
@@ -39,6 +40,7 @@ type TerminalOutputPressureState = {
   /** True rolling window samples for high-rate small-chunk detection. */
   recentSamples: OutputRateSample[];
   recentSampleBytes: number;
+  recentCarriageReturns: number;
 };
 
 /**
@@ -58,6 +60,9 @@ const LARGE_OUTPUT_RATE_BYTES = 16 * 1024;
  * product rule: each output line can get a gutter timestamp.
  */
 const TIMESTAMP_SKIP_RATE_BYTES = 64 * 1024;
+/** Progress renderers such as apt/dpkg rewrite short lines with carriage returns. */
+const CR_HEAVY_MIN_RETURNS = 8;
+const CR_HEAVY_MAX_BYTES_PER_RETURN = 256;
 /**
  * When scrollback is already full, any multi-line or modest chunk should arm
  * bulk mode: every new line trims, and marker/highlight work multiplies cost.
@@ -78,6 +83,7 @@ const getOrCreateState = (term: XTerm): TerminalOutputPressureState => {
       consecutiveUnbrokenBytes: 0,
       recentSamples: [],
       recentSampleBytes: 0,
+      recentCarriageReturns: 0,
     };
     pressureStates.set(term, state);
   }
@@ -88,19 +94,36 @@ const noteRecentOutputRate = (
   state: TerminalOutputPressureState,
   now: number,
   bytes: number,
-): number => {
-  state.recentSamples.push({ at: now, bytes });
+  carriageReturns: number,
+): { bytes: number; carriageReturns: number } => {
+  state.recentSamples.push({ at: now, bytes, carriageReturns });
   state.recentSampleBytes += bytes;
+  state.recentCarriageReturns += carriageReturns;
   const cutoff = now - LARGE_OUTPUT_RATE_WINDOW_MS;
   while (state.recentSamples.length > 0 && state.recentSamples[0]!.at < cutoff) {
     const dropped = state.recentSamples.shift()!;
     state.recentSampleBytes -= dropped.bytes;
+    state.recentCarriageReturns -= dropped.carriageReturns;
   }
   if (state.recentSampleBytes < 0) state.recentSampleBytes = 0;
-  return state.recentSampleBytes;
+  if (state.recentCarriageReturns < 0) state.recentCarriageReturns = 0;
+  return {
+    bytes: state.recentSampleBytes,
+    carriageReturns: state.recentCarriageReturns,
+  };
 };
 
 const LINE_BREAK_SCAN = /[\n\r]/g;
+
+const countCarriageReturns = (data: string): number => {
+  let count = 0;
+  let index = data.indexOf("\r");
+  while (index !== -1) {
+    count += 1;
+    index = data.indexOf("\r", index + 1);
+  }
+  return count;
+};
 
 const measureUnbrokenRuns = (
   data: string,
@@ -199,7 +222,11 @@ export const noteTerminalOutputPressureData = (
   const scrollbackSaturated = isTerminalScrollbackSaturated(term);
   const quietMs = resolveLargeOutputQuietMs(scrollbackSaturated);
 
-  const recentBytes = noteRecentOutputRate(state, now, data.length);
+  const carriageReturns = countCarriageReturns(data);
+  const recent = noteRecentOutputRate(state, now, data.length, carriageReturns);
+  const recentBytes = recent.bytes;
+  const crHeavy = recent.carriageReturns >= CR_HEAVY_MIN_RETURNS
+    && recentBytes <= recent.carriageReturns * CR_HEAVY_MAX_BYTES_PER_RETURN;
   const hasLineBreak = data.includes("\n") || data.includes("\r");
   // Full scrollback + multi-line (seq/logs) or a modest plain chunk → bulk.
   // Tiny single-key echoes without newlines stay on the normal path.
@@ -215,6 +242,7 @@ export const noteTerminalOutputPressureData = (
   if (
     data.length >= TERMINAL_LONG_LINE_PRESSURE_BYTES
     || recentBytes >= LARGE_OUTPUT_RATE_BYTES
+    || crHeavy
     || saturatedBulkChunk
   ) {
     markLargeOutput(state, now, quietMs);

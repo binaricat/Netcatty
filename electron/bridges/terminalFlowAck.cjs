@@ -89,6 +89,8 @@ function rememberSessionId(state, sessionId) {
 // (WINDOW_THRESHOLD 1MB); a small watermark pauses/resumes dozens of times
 // during a multi-MB dump (e.g. `tail -2000f big.log`) and adds ~1 RTT per cycle
 // on WAN links, which is what made those dumps crawl.
+// Resume with useful headroom instead of waiting for the renderer backlog to
+// become nearly empty. The high watermark remains the hard memory bound.
 function reconcileSessionFlow(session) {
   if (!session) return;
   const state = ensureFlowState(session);
