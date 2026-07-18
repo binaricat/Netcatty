@@ -14,7 +14,6 @@ import {
   buildTermEnv,
   closeOrphanBackendSession,
   getFlowController,
-  isTerminalBootActive,
   notePendingOutputScrollIfEnabled,
   resetTerminalLineTimestampState,
   tryAttachSessionToTerminal,
@@ -812,6 +811,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
   };
 
   const startTelnet = async (term: XTerm) => {
+    const bootToken = ctx.bootTokenRef?.current;
     if (!ctx.terminalBackend.telnetAvailable()) {
       ctx.setError("Telnet bridge unavailable. Please run the desktop build.");
       writeTerminalLine(ctx, term, "\r\n[Telnet bridge unavailable. Please run the desktop build.]");
@@ -945,6 +945,11 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         env: telnetEnv,
         sessionLog: ctx.sessionLog?.enabled ? ctx.sessionLog : undefined,
       });
+      if (!isBootActive(bootToken)) {
+        cleanupTelnetStartupWait();
+        closeOrphanBackendSession(ctx, id);
+        return;
+      }
       telnetSessionId = id;
       if (id !== ctx.sessionId) {
         attachTelnetEchoMode(id);
@@ -971,6 +976,10 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         return;
       }
     } catch (err) {
+      if (!isBootActive(bootToken)) {
+        cleanupTelnetStartupWait();
+        return;
+      }
       const message = err instanceof Error ? err.message : String(err);
       if (message.includes(TELNET_SESSION_REPLACED_ERROR)) {
         cleanupTelnetStartupWait();
@@ -1539,6 +1548,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
   };
 
   const startLocal = async (term: XTerm) => {
+    const bootToken = ctx.bootTokenRef?.current;
     if (!ctx.terminalBackend.localAvailable()) {
       ctx.setError("Local shell bridge unavailable. Please run the desktop build.");
       writeTerminalLine(
@@ -1573,7 +1583,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         sessionLog: ctx.sessionLog?.enabled ? ctx.sessionLog : undefined,
       });
 
-      if (!isTerminalBootActive(ctx)) {
+      if (!isBootActive(bootToken)) {
         closeOrphanBackendSession(ctx, id);
         return;
       }
@@ -1642,6 +1652,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
       consumeRestoreCwdIntent(term, id);
       scheduleStartupCommand(ctx, term, id);
     } catch (err) {
+      if (!isBootActive(bootToken)) return;
       const message = err instanceof Error ? err.message : String(err);
       ctx.setError(message);
       writeTerminalLine(ctx, term, `\r\n[Failed to start local shell: ${message}]`);
@@ -1651,6 +1662,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
 
   // Start Serial session
   const startSerial = async (term: XTerm) => {
+    const bootToken = ctx.bootTokenRef?.current;
     if (!ctx.serialConfig) {
       ctx.setError("No serial configuration provided");
       writeTerminalLine(ctx, term, "\r\n[Error: No serial configuration provided]");
@@ -1676,6 +1688,11 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         sessionLog: ctx.sessionLog?.enabled ? ctx.sessionLog : undefined,
       });
 
+      if (!isBootActive(bootToken)) {
+        closeOrphanBackendSession(ctx, id);
+        return;
+      }
+
       if (!tryAttachSessionToTerminal(ctx, term, id, {
         onExitMessage: (evt) =>
           `\r\n[serial port closed${evt?.exitCode !== undefined ? ` (code ${evt.exitCode})` : ""}]`,
@@ -1691,6 +1708,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
       ctx.setProgressValue(100);
       writeTerminalLine(ctx, term, `[Connected to ${ctx.serialConfig.path} at ${ctx.serialConfig.baudRate} baud]`);
     } catch (err) {
+      if (!isBootActive(bootToken)) return;
       const message = err instanceof Error ? err.message : String(err);
       ctx.setError(message);
       writeTerminalLine(ctx, term, `\r\n[Failed to connect to serial port: ${message}]`);

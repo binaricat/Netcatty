@@ -366,6 +366,101 @@ for (const protocol of ["SSH", "Mosh", "ET"] as const) {
   });
 }
 
+for (const protocol of ["Telnet", "Local", "Serial"] as const) {
+  const starterName = `start${protocol}` as "startTelnet" | "startLocal" | "startSerial";
+  const backendName = `start${protocol}Session` as
+    | "startTelnetSession"
+    | "startLocalSession"
+    | "startSerialSession";
+  const host = protocol === "Telnet"
+    ? { id: "host-1", label: "Telnet", hostname: "telnet.test", protocol: "telnet" }
+    : protocol === "Serial"
+      ? { id: "serial-host", label: "Serial", hostname: "COM3", protocol: "serial" }
+      : undefined;
+  const serialConfig = protocol === "Serial"
+    ? { path: "COM3", baudRate: 9600, dataBits: 8, stopBits: 1, parity: "none", flowControl: "none" }
+    : undefined;
+
+  test(`${protocol} retry closes an older backend that resolves after replacement`, async () => {
+    const bootTokenRef = { current: Symbol("old") as symbol | null };
+    const isBootActiveRef = { current: true };
+    const pending: Array<{ resolve: (id: string) => void; reject: (error: Error) => void }> = [];
+    const closed: string[] = [];
+    const backend = {
+      telnetAvailable: () => true,
+      localAvailable: () => true,
+      [backendName]: () => new Promise<string>((resolve, reject) => pending.push({ resolve, reject })),
+      onSessionData: () => noop,
+      onSessionExit: () => noop,
+      writeToSession: noop,
+      resizeSession: noop,
+      closeSession: (id: string) => { closed.push(id); },
+    };
+    const ctx = createStarterContext({
+      ...(host ? { host } : {}),
+      serialConfig,
+      bootTokenRef,
+      isBootActiveRef,
+      terminalBackend: backend,
+    });
+    const starters = createTerminalSessionStarters(ctx as never);
+
+    const oldStart = starters[starterName](createTermStub() as never);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    beginTerminalBootAttempt({ bootTokenRef, isBootActiveRef }, "replacement");
+    const latestStart = starters[starterName](createTermStub() as never);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(pending.length, 2);
+
+    pending[1].resolve("latest-session");
+    await latestStart;
+    pending[0].resolve("orphan-session");
+    await oldStart;
+
+    assert.equal(ctx.sessionRef.current, "latest-session");
+    assert.deepEqual(closed, ["orphan-session"]);
+  });
+
+  test(`${protocol} retry suppresses an older backend rejection`, async () => {
+    const bootTokenRef = { current: Symbol("old") as symbol | null };
+    const isBootActiveRef = { current: true };
+    const pending: Array<{ resolve: (id: string) => void; reject: (error: Error) => void }> = [];
+    const errors: string[] = [];
+    const backend = {
+      telnetAvailable: () => true,
+      localAvailable: () => true,
+      [backendName]: () => new Promise<string>((resolve, reject) => pending.push({ resolve, reject })),
+      onSessionData: () => noop,
+      onSessionExit: () => noop,
+      writeToSession: noop,
+      resizeSession: noop,
+      closeSession: noop,
+    };
+    const ctx = createStarterContext({
+      ...(host ? { host } : {}),
+      serialConfig,
+      bootTokenRef,
+      isBootActiveRef,
+      terminalBackend: backend,
+      setError: (error: string | null) => { if (error) errors.push(error); },
+    });
+    const starters = createTerminalSessionStarters(ctx as never);
+
+    const oldStart = starters[starterName](createTermStub() as never);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    beginTerminalBootAttempt({ bootTokenRef, isBootActiveRef }, "replacement");
+    const latestStart = starters[starterName](createTermStub() as never);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    pending[0].reject(new Error("obsolete failure"));
+    await oldStart;
+    pending[1].resolve("latest-session");
+    await latestStart;
+
+    assert.equal(ctx.sessionRef.current, "latest-session");
+    assert.deepEqual(errors, []);
+  });
+}
+
 for (const outcome of ["reject", "resolve"] as const) {
   test(`superseded key-auth SSH ${outcome} disposes chain progress once without stale UI mutation`, async () => {
     const bootTokenRef = { current: Symbol("old") as symbol | null };
