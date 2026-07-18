@@ -109,6 +109,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
   let fallbackDisposeTelnetEchoMode: (() => void) | null = null;
 
   const resolveVaultConfiguration = async () => {
+    const bootToken = ctx.bootTokenRef?.current;
     let host: Host = ctx.hostRef?.current ?? ctx.host;
     let resolvedChainHosts: Host[] = ctx.resolvedChainHostsRef?.current ?? ctx.resolvedChainHosts;
     let keys: SSHKey[] = ctx.keysRef?.current ?? ctx.keys;
@@ -124,7 +125,10 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
       && Boolean(ctx.hostRef || ctx.resolvedChainHostsRef || ctx.keysRef || ctx.identitiesRef)
     ) {
       await waitForVaultInitialized();
-      if (ctx.isBootActiveRef?.current === false) return null;
+      if (
+        ctx.isBootActiveRef?.current === false
+        || (ctx.bootTokenRef && ctx.bootTokenRef.current !== bootToken)
+      ) return null;
       host = ctx.hostRef?.current ?? ctx.host;
       resolvedChainHosts = ctx.resolvedChainHostsRef?.current ?? ctx.resolvedChainHosts;
       keys = ctx.keysRef?.current ?? ctx.keys;

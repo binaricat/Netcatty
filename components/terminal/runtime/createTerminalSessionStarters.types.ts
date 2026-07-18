@@ -153,6 +153,8 @@ export type TerminalSessionStartersContext = {
   isVisibleRef?: RefObject<boolean>;
   /** False after unmount/teardown so in-flight session starts skip attach. */
   isBootActiveRef?: RefObject<boolean>;
+  /** Identifies the current terminal boot so replaced vault waiters cannot resume. */
+  bootTokenRef?: RefObject<symbol | null>;
   pendingOutputScrollRef?: RefObject<boolean>;
 
   sessionRef: RefObject<string | null>;

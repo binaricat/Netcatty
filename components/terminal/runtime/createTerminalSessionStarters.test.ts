@@ -216,6 +216,76 @@ test("startSSH does not wait for vault initialization for an ungrouped explicit 
 });
 
 for (const protocol of ["SSH", "Mosh"] as const) {
+  test(`replacing a ${protocol} boot while vault initialization is pending starts only the latest boot`, async () => {
+    const host = {
+      id: "host-1",
+      label: "Target",
+      hostname: "target.test",
+      username: "alice",
+      password: "secret",
+      group: "Production",
+    };
+    const bootTokenRef = { current: Symbol("first-boot") as symbol | null };
+    const isBootActiveRef = { current: true };
+    let backendStarts = 0;
+    let activeSubscriptions = 0;
+    let moshReadyCallback: (() => void) | undefined;
+    const subscribe = () => {
+      activeSubscriptions += 1;
+      return () => { activeSubscriptions -= 1; };
+    };
+    const terminalBackend = {
+      backendAvailable: () => true,
+      moshAvailable: () => true,
+      startSSHSession: async () => { backendStarts += 1; return "ssh-session"; },
+      startMoshSession: async () => { backendStarts += 1; return "mosh-session"; },
+      onSessionData: subscribe,
+      onSessionExit: subscribe,
+      onChainProgress: subscribe,
+      onMoshSessionReady: (_sessionId: string, callback: () => void) => {
+        moshReadyCallback = callback;
+        return subscribe();
+      },
+      writeToSession: noop,
+      resizeSession: noop,
+    };
+    const ctx = createStarterContext({
+      host,
+      hostRef: { current: host },
+      bootTokenRef,
+      isBootActiveRef,
+      terminalBackend,
+    });
+    const starters = createTerminalSessionStarters(ctx as never);
+
+    setVaultInitialized(false);
+    try {
+      const firstStart = protocol === "SSH"
+        ? starters.startSSH(createTermStub() as never)
+        : starters.startMosh(createTermStub() as never);
+
+      bootTokenRef.current = Symbol("replacement-boot");
+      const latestStart = protocol === "SSH"
+        ? starters.startSSH(createTermStub() as never)
+        : starters.startMosh(createTermStub() as never);
+
+      setVaultInitialized(true);
+      await Promise.all([firstStart, latestStart]);
+    } finally {
+      setVaultInitialized(true);
+    }
+
+    assert.equal(backendStarts, 1);
+    assert.equal(ctx.sessionRef.current, protocol === "SSH" ? "ssh-session" : "mosh-session");
+    assert.ok(activeSubscriptions > 0);
+    ctx.disposeDataRef.current?.();
+    ctx.disposeExitRef.current?.();
+    moshReadyCallback?.();
+    assert.equal(activeSubscriptions, 0);
+  });
+}
+
+for (const protocol of ["SSH", "Mosh"] as const) {
   test(`restored ${protocol} rereads an ungrouped saved-key host after vault readiness`, async () => {
     let capturedOptions: Record<string, unknown> | null = null;
     const fallbackHost = {
