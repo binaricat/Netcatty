@@ -286,6 +286,79 @@ for (const protocol of ["SSH", "Mosh"] as const) {
 }
 
 for (const protocol of ["SSH", "Mosh"] as const) {
+  test(`replaced ${protocol} boot ignores vault initialization failure while the latest boot reports it`, async () => {
+    const host = {
+      id: "host-1",
+      label: "Target",
+      hostname: "target.test",
+      username: "alice",
+      password: "secret",
+      group: "Production",
+    };
+    const bootTokenRef = { current: Symbol("first-boot") as symbol | null };
+    const isBootActiveRef = { current: true };
+    let backendStarts = 0;
+    let activeSubscriptions = 0;
+    const subscribe = () => {
+      activeSubscriptions += 1;
+      return () => { activeSubscriptions -= 1; };
+    };
+    const terminalBackend = {
+      backendAvailable: () => true,
+      moshAvailable: () => true,
+      startSSHSession: async () => { backendStarts += 1; return "ssh-session"; },
+      startMoshSession: async () => { backendStarts += 1; return "mosh-session"; },
+      onSessionData: subscribe,
+      onSessionExit: subscribe,
+      onChainProgress: subscribe,
+      onMoshSessionReady: subscribe,
+      writeToSession: noop,
+      resizeSession: noop,
+    };
+    const mutations = () => ({ errors: [] as unknown[], statuses: [] as string[], writes: [] as string[] });
+    const firstMutations = mutations();
+    const latestMutations = mutations();
+    const createContext = (record: ReturnType<typeof mutations>) => createStarterContext({
+      host,
+      hostRef: { current: host },
+      bootTokenRef,
+      isBootActiveRef,
+      terminalBackend,
+      setError: (error: unknown) => record.errors.push(error),
+      updateStatus: (status: string) => record.statuses.push(status),
+    });
+    const firstContext = createContext(firstMutations);
+    const latestContext = createContext(latestMutations);
+    const firstTerm = createTermStub({ write: (data: string) => firstMutations.writes.push(data) });
+    const latestTerm = createTermStub({ write: (data: string) => latestMutations.writes.push(data) });
+
+    setVaultInitialized(false);
+    try {
+      const firstStart = protocol === "SSH"
+        ? createTerminalSessionStarters(firstContext as never).startSSH(firstTerm as never)
+        : createTerminalSessionStarters(firstContext as never).startMosh(firstTerm as never);
+
+      bootTokenRef.current = Symbol("replacement-boot");
+      const latestStart = protocol === "SSH"
+        ? createTerminalSessionStarters(latestContext as never).startSSH(latestTerm as never)
+        : createTerminalSessionStarters(latestContext as never).startMosh(latestTerm as never);
+
+      setVaultInitializationFailed(new Error("vault decrypt failed"));
+      await Promise.all([firstStart, latestStart]);
+    } finally {
+      setVaultInitialized(true);
+    }
+
+    assert.deepEqual(firstMutations, { errors: [], statuses: [], writes: [] });
+    assert.match(String(latestMutations.errors.at(-1)), /vault decrypt failed/);
+    assert.deepEqual(latestMutations.statuses, ["disconnected"]);
+    assert.match(latestMutations.writes.at(-1) || "", /vault decrypt failed/);
+    assert.equal(backendStarts, 0);
+    assert.equal(activeSubscriptions, 0);
+  });
+}
+
+for (const protocol of ["SSH", "Mosh"] as const) {
   test(`restored ${protocol} rereads an ungrouped saved-key host after vault readiness`, async () => {
     let capturedOptions: Record<string, unknown> | null = null;
     const fallbackHost = {

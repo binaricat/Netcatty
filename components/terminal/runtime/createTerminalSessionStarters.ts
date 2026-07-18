@@ -108,6 +108,10 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
   };
   let fallbackDisposeTelnetEchoMode: (() => void) | null = null;
 
+  const isBootActive = (bootToken: symbol | null | undefined): boolean =>
+    ctx.isBootActiveRef?.current !== false
+    && (!ctx.bootTokenRef || ctx.bootTokenRef.current === bootToken);
+
   const resolveVaultConfiguration = async () => {
     const bootToken = ctx.bootTokenRef?.current;
     let host: Host = ctx.hostRef?.current ?? ctx.host;
@@ -124,11 +128,13 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
       && !isVaultInitialized()
       && Boolean(ctx.hostRef || ctx.resolvedChainHostsRef || ctx.keysRef || ctx.identitiesRef)
     ) {
-      await waitForVaultInitialized();
-      if (
-        ctx.isBootActiveRef?.current === false
-        || (ctx.bootTokenRef && ctx.bootTokenRef.current !== bootToken)
-      ) return null;
+      try {
+        await waitForVaultInitialized();
+      } catch (error) {
+        if (!isBootActive(bootToken)) return null;
+        throw error;
+      }
+      if (!isBootActive(bootToken)) return null;
       host = ctx.hostRef?.current ?? ctx.host;
       resolvedChainHosts = ctx.resolvedChainHostsRef?.current ?? ctx.resolvedChainHosts;
       keys = ctx.keysRef?.current ?? ctx.keys;
