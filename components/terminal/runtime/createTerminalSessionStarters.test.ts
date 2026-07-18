@@ -215,6 +215,71 @@ test("startSSH does not wait for vault initialization for an ungrouped explicit 
   assert.equal(backendStarted, true);
 });
 
+for (const protocol of ["SSH", "Mosh"] as const) {
+  test(`restored ${protocol} rereads an ungrouped saved-key host after vault readiness`, async () => {
+    let capturedOptions: Record<string, unknown> | null = null;
+    const fallbackHost = {
+      id: "host-1",
+      label: "Restored target",
+      hostname: "target.test",
+      username: "alice",
+      authMethod: "auto",
+    };
+    const hostRef = { current: fallbackHost as Record<string, unknown> };
+    const keysRef = { current: [] as Array<Record<string, unknown>> };
+    const terminalBackend = {
+      backendAvailable: () => true,
+      moshAvailable: () => true,
+      startSSHSession: async (options: Record<string, unknown>) => {
+        capturedOptions = options;
+        return "ssh-session";
+      },
+      startMoshSession: async (options: Record<string, unknown>) => {
+        capturedOptions = options;
+        return "mosh-session";
+      },
+      onSessionData: () => noop,
+      onSessionExit: () => noop,
+      onChainProgress: () => noop,
+      writeToSession: noop,
+      resizeSession: noop,
+    };
+    const ctx = createStarterContext({
+      host: fallbackHost,
+      hostRef,
+      keysRef,
+      waitForVaultInitialization: true,
+      terminalBackend,
+    });
+
+    setVaultInitialized(false);
+    try {
+      const starters = createTerminalSessionStarters(ctx as never);
+      const started = protocol === "SSH"
+        ? starters.startSSH(createTermStub() as never)
+        : starters.startMosh(createTermStub() as never);
+
+      hostRef.current = {
+        ...fallbackHost,
+        authMethod: "key",
+        identityFileId: "stored-key",
+      };
+      keysRef.current = [{
+        id: "stored-key",
+        label: "Stored key",
+        privateKey: "stored-private-key",
+      }];
+      setVaultInitialized(true);
+      await started;
+    } finally {
+      setVaultInitialized(true);
+    }
+
+    assert.equal(capturedOptions?.authMethod, "key");
+    assert.equal(capturedOptions?.privateKey, "stored-private-key");
+  });
+}
+
 for (const inheritedAuth of ["password", "key"] as const) {
   test(`startSSH rereads group-inherited ${inheritedAuth} auth after vault readiness`, async () => {
     let capturedOptions: Record<string, unknown> | null = null;

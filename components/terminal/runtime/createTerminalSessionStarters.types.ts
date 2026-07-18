@@ -120,6 +120,8 @@ export type TerminalSessionStartersContext = {
   keysRef?: RefObject<SSHKey[]>;
   identities?: Identity[];
   identitiesRef?: RefObject<Identity[] | undefined>;
+  /** Restored sessions must resolve their saved host/auth after vault hydration. */
+  waitForVaultInitialization?: boolean;
   knownHosts?: KnownHost[];
   resolvedChainHosts: Host[];
   resolvedChainHostsRef?: RefObject<Host[]>;

@@ -117,11 +117,14 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
     const credentialHosts = [host, ...resolvedChainHosts];
     const mayNeedGroupDefaults = credentialHosts.some(mayHaveGroupInheritedConnectionConfiguration);
     if (
-      (hasMissingConfiguredVaultCredentials(credentialHosts, keys, identities) || mayNeedGroupDefaults)
+      (ctx.waitForVaultInitialization
+        || hasMissingConfiguredVaultCredentials(credentialHosts, keys, identities)
+        || mayNeedGroupDefaults)
       && !isVaultInitialized()
       && Boolean(ctx.hostRef || ctx.resolvedChainHostsRef || ctx.keysRef || ctx.identitiesRef)
     ) {
       await waitForVaultInitialized();
+      if (ctx.isBootActiveRef?.current === false) return null;
       host = ctx.hostRef?.current ?? ctx.host;
       resolvedChainHosts = ctx.resolvedChainHostsRef?.current ?? ctx.resolvedChainHosts;
       keys = ctx.keysRef?.current ?? ctx.keys;
@@ -219,6 +222,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
       ctx.updateStatus("disconnected");
       return;
     }
+    if (!vaultConfig) return;
     const { host, resolvedChainHosts, keys, identities } = vaultConfig;
 
     const missingChainHostIds = getMissingChainHostIds(host, resolvedChainHosts);
@@ -949,7 +953,9 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         ctx.updateStatus("disconnected");
       };
 
-      const { host, resolvedChainHosts, keys, identities } = await resolveVaultConfiguration();
+      const vaultConfig = await resolveVaultConfiguration();
+      if (!vaultConfig) return;
+      const { host, resolvedChainHosts, keys, identities } = vaultConfig;
 
       if (host.proxyProfileId && !host.proxyConfig) {
         stopMosh(`Saved proxy for host "${host.label || host.hostname}" is missing. Open host settings and select a valid proxy.`);

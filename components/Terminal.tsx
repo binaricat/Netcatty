@@ -1556,6 +1556,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     keysRef: vaultKeysRef,
     identities,
     identitiesRef: vaultIdentitiesRef,
+    waitForVaultInitialization: restoreState === "restored-disconnected",
     knownHosts,
     resolvedChainHosts,
     resolvedChainHostsRef: vaultChainHostsRef,
