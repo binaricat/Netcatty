@@ -216,6 +216,73 @@ test("startSSH does not wait for vault initialization for an ungrouped explicit 
   assert.equal(backendStarted, true);
 });
 
+test("startTelnet keeps the fresh ungrouped host fast path", async () => {
+  let backendStarted = false;
+  const host = {
+    id: "host-1", label: "Target", hostname: "target.test", protocol: "telnet", telnetPassword: "secret",
+  };
+  const ctx = createStarterContext({
+    host,
+    hostRef: { current: host },
+    terminalBackend: {
+      telnetAvailable: () => true,
+      startTelnetSession: async () => { backendStarted = true; return "telnet-session"; },
+      onSessionData: () => noop,
+      onSessionExit: () => noop,
+      writeToSession: noop,
+      resizeSession: noop,
+    },
+  });
+
+  setVaultInitialized(false);
+  try {
+    await createTerminalSessionStarters(ctx as never).startTelnet(createTermStub() as never);
+  } finally {
+    setVaultInitialized(true);
+  }
+
+  assert.equal(backendStarted, true);
+});
+
+test("replacing a restored Telnet boot during vault hydration starts only the exact latest token", async () => {
+  const host = {
+    id: "host-1", label: "Target", hostname: "target.test", protocol: "telnet", group: "Network",
+  };
+  const bootTokenRef = { current: Symbol("first-boot") as symbol | null };
+  const isBootActiveRef = { current: true };
+  let backendStarts = 0;
+  const ctx = createStarterContext({
+    host,
+    hostRef: { current: host },
+    waitForVaultInitialization: true,
+    bootTokenRef,
+    isBootActiveRef,
+    terminalBackend: {
+      telnetAvailable: () => true,
+      startTelnetSession: async () => { backendStarts += 1; return "telnet-session"; },
+      onSessionData: () => noop,
+      onSessionExit: () => noop,
+      writeToSession: noop,
+      resizeSession: noop,
+    },
+  });
+  const starters = createTerminalSessionStarters(ctx as never);
+
+  setVaultInitialized(false);
+  try {
+    const firstStart = starters.startTelnet(createTermStub() as never);
+    beginTerminalBootAttempt({ bootTokenRef, isBootActiveRef }, "replacement");
+    const latestStart = starters.startTelnet(createTermStub() as never);
+    setVaultInitialized(true);
+    await Promise.all([firstStart, latestStart]);
+  } finally {
+    setVaultInitialized(true);
+  }
+
+  assert.equal(backendStarts, 1);
+  assert.equal(ctx.sessionRef.current, "telnet-session");
+});
+
 for (const protocol of ["SSH", "Mosh"] as const) {
   test(`replacing a ${protocol} boot while vault initialization is pending starts only the latest boot`, async () => {
     const host = {
@@ -612,6 +679,118 @@ test("restored ET rereads vault keys after hydration", async () => {
 
   assert.equal(options?.keyId, "key-1");
   assert.equal(options?.privateKey, "private-key");
+});
+
+test("restored Telnet rereads a hydrated identity before starting", async () => {
+  const fallbackHost = {
+    id: "host-1", label: "Target", hostname: "target.test", protocol: "telnet", telnetIdentityId: "telnet-identity",
+  };
+  const hostRef = { current: fallbackHost };
+  const identitiesRef = { current: [] as Array<Record<string, unknown>> };
+  let options: Record<string, unknown> | undefined;
+  const ctx = createStarterContext({
+    host: fallbackHost,
+    hostRef,
+    identitiesRef,
+    waitForVaultInitialization: true,
+    terminalBackend: {
+      telnetAvailable: () => true,
+      startTelnetSession: async (value: Record<string, unknown>) => { options = value; return "telnet-session"; },
+      onSessionData: () => noop,
+      onSessionExit: () => noop,
+      writeToSession: noop,
+      resizeSession: noop,
+    },
+  });
+
+  setVaultInitialized(false);
+  try {
+    const started = createTerminalSessionStarters(ctx as never).startTelnet(createTermStub() as never);
+    identitiesRef.current = [{
+      id: "telnet-identity", label: "Telnet login", username: "console", password: "hydrated-secret",
+    }];
+    setVaultInitialized(true);
+    await started;
+  } finally {
+    setVaultInitialized(true);
+  }
+
+  assert.equal(options?.username, "console");
+  assert.equal(options?.password, "hydrated-secret");
+});
+
+test("restored Telnet uses group-inherited credentials after hydration", async () => {
+  const fallbackHost = {
+    id: "host-1", label: "Target", hostname: "target.test", protocol: "telnet", group: "Network",
+  };
+  const hostRef = { current: fallbackHost };
+  let options: Record<string, unknown> | undefined;
+  const ctx = createStarterContext({
+    host: fallbackHost,
+    hostRef,
+    waitForVaultInitialization: true,
+    terminalBackend: {
+      telnetAvailable: () => true,
+      startTelnetSession: async (value: Record<string, unknown>) => { options = value; return "telnet-session"; },
+      onSessionData: () => noop,
+      onSessionExit: () => noop,
+      writeToSession: noop,
+      resizeSession: noop,
+    },
+  });
+
+  setVaultInitialized(false);
+  try {
+    const started = createTerminalSessionStarters(ctx as never).startTelnet(createTermStub() as never);
+    hostRef.current = { ...fallbackHost, telnetUsername: "inherited-user", telnetPassword: "inherited-secret" };
+    setVaultInitialized(true);
+    await started;
+  } finally {
+    setVaultInitialized(true);
+  }
+
+  assert.equal(options?.username, "inherited-user");
+  assert.equal(options?.password, "inherited-secret");
+});
+
+test("restored Telnet rejects hydrated group proxy and missing identity configuration", async () => {
+  for (const invalid of ["proxy", "identity"] as const) {
+    const fallbackHost = {
+      id: "host-1", label: "Target", hostname: "target.test", protocol: "telnet", group: "Network",
+    };
+    const hostRef = { current: fallbackHost as Record<string, unknown> };
+    let backendStarts = 0;
+    let error = "";
+    const ctx = createStarterContext({
+      host: fallbackHost,
+      hostRef,
+      waitForVaultInitialization: true,
+      terminalBackend: {
+        telnetAvailable: () => true,
+        startTelnetSession: async () => { backendStarts += 1; return "telnet-session"; },
+        onSessionData: () => noop,
+        onSessionExit: () => noop,
+        writeToSession: noop,
+        resizeSession: noop,
+      },
+      setError: (value: string | null) => { error = value ?? ""; },
+    });
+
+    setVaultInitialized(false);
+    try {
+      const started = createTerminalSessionStarters(ctx as never).startTelnet(createTermStub() as never);
+      hostRef.current = invalid === "proxy"
+        ? { ...fallbackHost, proxyProfileId: "group-proxy", proxyConfig: { type: "http", host: "proxy.test", port: 3128 } }
+        : { ...fallbackHost, telnetIdentityId: "missing-after-hydration" };
+      setVaultInitialized(true);
+      await started;
+    } finally {
+      setVaultInitialized(true);
+    }
+
+    assert.equal(backendStarts, 0);
+    assert.match(error, invalid === "proxy" ? /does not support proxy connections/i : /identity is missing/i);
+  }
 });
 
 test("restored SSH resolves identity and group auth after vault readiness before prompting", async () => {

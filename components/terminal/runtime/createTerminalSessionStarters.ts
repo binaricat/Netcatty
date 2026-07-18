@@ -819,36 +819,6 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
       return;
     }
 
-    if (ctx.host.proxyProfileId && !ctx.host.proxyConfig) {
-      const message = `Saved proxy for host "${ctx.host.label || ctx.host.hostname}" is missing. Open host settings and select a valid proxy.`;
-      ctx.setError(message);
-      writeTerminalLine(ctx, term, `\r\n[${message}]`);
-      ctx.updateStatus("disconnected");
-      return;
-    }
-    if (findMissingProxyIdentityId(ctx.host.proxyConfig, ctx.identities)) {
-      const message = formatMissingProxyIdentityMessage(ctx.host.label || ctx.host.hostname);
-      ctx.setError(message);
-      writeTerminalLine(ctx, term, `\r\n[${message}]`);
-      ctx.updateStatus("disconnected");
-      return;
-    }
-    if (findIncompleteProxyIdentityId(ctx.host.proxyConfig, ctx.identities)) {
-      const message = formatIncompleteProxyIdentityMessage(ctx.host.label || ctx.host.hostname);
-      ctx.setError(message);
-      writeTerminalLine(ctx, term, `\r\n[${message}]`);
-      ctx.updateStatus("disconnected");
-      return;
-    }
-
-    if (hasUsableProxyConfig(ctx.host.proxyConfig)) {
-      const message = "Telnet does not support proxy connections. Use SSH for this host or remove the proxy from this connection.";
-      ctx.setError(message);
-      writeTerminalLine(ctx, term, `\r\n[${message}]`);
-      ctx.updateStatus("disconnected");
-      return;
-    }
-
     let disposeAutoLoginComplete: (() => void) | undefined;
     let disposeAutoLoginCancelled: (() => void) | undefined;
     let cancelPendingStartupCommand: (() => void) | undefined;
@@ -871,30 +841,54 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
       clearTelnetEchoMode();
     };
     try {
-      const telnetEnv = buildTermEnv(ctx.host, ctx.terminalSettings);
-      const telnetIdentity = ctx.host.telnetIdentityId
-        ? ctx.identities.find((identity) => identity.id === ctx.host.telnetIdentityId)
-        : undefined;
-      if (ctx.host.telnetIdentityId && !telnetIdentity) {
-        const message = "Telnet identity is missing. Open host settings and select a valid identity.";
+      const vaultConfig = await resolveVaultConfiguration(bootToken);
+      if (!vaultConfig) return;
+      const { host, resolvedChainHosts, identities } = vaultConfig;
+      const stopTelnet = (message: string) => {
         ctx.setError(message);
         writeTerminalLine(ctx, term, `\r\n[${message}]`);
         ctx.updateStatus("disconnected");
+      };
+
+      if ((host.hostChain?.hostIds.length ?? 0) > 0 || resolvedChainHosts.length > 0) {
+        stopTelnet("Telnet does not support jump host chains. Use SSH for this host or remove the jump hosts from this connection.");
+        return;
+      }
+      if (host.proxyProfileId && !host.proxyConfig) {
+        stopTelnet(`Saved proxy for host "${host.label || host.hostname}" is missing. Open host settings and select a valid proxy.`);
+        return;
+      }
+      if (findMissingProxyIdentityId(host.proxyConfig, identities)) {
+        stopTelnet(formatMissingProxyIdentityMessage(host.label || host.hostname));
+        return;
+      }
+      if (findIncompleteProxyIdentityId(host.proxyConfig, identities)) {
+        stopTelnet(formatIncompleteProxyIdentityMessage(host.label || host.hostname));
+        return;
+      }
+      if (hasUsableProxyConfig(host.proxyConfig)) {
+        stopTelnet("Telnet does not support proxy connections. Use SSH for this host or remove the proxy from this connection.");
+        return;
+      }
+
+      const telnetEnv = buildTermEnv(host, ctx.terminalSettings);
+      const telnetIdentity = host.telnetIdentityId
+        ? identities.find((identity) => identity.id === host.telnetIdentityId)
+        : undefined;
+      if (host.telnetIdentityId && !telnetIdentity) {
+        stopTelnet("Telnet identity is missing. Open host settings and select a valid identity.");
         return;
       }
       if (telnetIdentity && (!telnetIdentity.username?.trim() || telnetIdentity.password === undefined)) {
-        const message = "Telnet identity must include a username and password. Open host settings and select a password identity.";
-        ctx.setError(message);
-        writeTerminalLine(ctx, term, `\r\n[${message}]`);
-        ctx.updateStatus("disconnected");
+        stopTelnet("Telnet identity must include a username and password. Open host settings and select a password identity.");
         return;
       }
       const telnetUsername = telnetIdentity
         ? telnetIdentity.username?.trim()
-        : resolveTelnetUsername(ctx.host);
+        : resolveTelnetUsername(host);
       const rawTelnetPassword = telnetIdentity
         ? telnetIdentity.password
-        : resolveTelnetPassword(ctx.host);
+        : resolveTelnetPassword(host);
       const telnetPassword = sanitizeCredentialValue(rawTelnetPassword);
       const hasTelnetPasswordForAutoLogin = rawTelnetPassword !== undefined;
       if (isEncryptedCredentialPlaceholder(rawTelnetPassword)) {
@@ -935,13 +929,13 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
       attachTelnetEchoMode(ctx.sessionId);
       const id = await ctx.terminalBackend.startTelnetSession({
         sessionId: ctx.sessionId,
-        hostname: ctx.host.hostname,
-        port: resolveTelnetPort(ctx.host),
+        hostname: host.hostname,
+        port: resolveTelnetPort(host),
         username: telnetUsername,
         password: telnetPassword,
         cols: term.cols,
         rows: term.rows,
-        charset: ctx.host.charset,
+        charset: host.charset,
         env: telnetEnv,
         sessionLog: ctx.sessionLog?.enabled ? ctx.sessionLog : undefined,
       });
