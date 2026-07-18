@@ -102,6 +102,7 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
             <Tooltip delayDuration={500}>
               <TooltipTrigger asChild>
                 <button
+                  aria-label={sidebarCollapsed ? t("vault.sidebar.expand") : t("vault.sidebar.collapse")}
                   onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
                   className="flex items-center gap-2.5 hover:opacity-80 transition-opacity"
                 >
