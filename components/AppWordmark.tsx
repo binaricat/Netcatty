@@ -1,16 +1,19 @@
 import React from 'react';
 
 interface AppWordmarkProps {
+  accessibleLabel?: string;
   className?: string;
 }
 
 /** Fixed Mona Sans Black Italic outlines for the Netcatty brand wordmark. */
-export const AppWordmark: React.FC<AppWordmarkProps> = ({ className }) => (
+export const AppWordmark: React.FC<AppWordmarkProps> = ({ accessibleLabel, className }) => (
   <svg
-    aria-hidden="true"
+    aria-hidden={accessibleLabel ? undefined : true}
+    aria-label={accessibleLabel}
     className={className}
     fill="currentColor"
     focusable="false"
+    role={accessibleLabel ? "img" : undefined}
     viewBox="3 -729 4285 896"
     xmlns="http://www.w3.org/2000/svg"
   >

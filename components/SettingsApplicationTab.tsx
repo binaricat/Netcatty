@@ -174,7 +174,7 @@ export default function SettingsApplicationTab({ updateState, checkNow, openRele
           <div className="flex items-center gap-4">
             <AppLogo className="w-16 h-16" />
             <div>
-              <AppWordmark className="h-8 w-auto text-foreground" />
+              <AppWordmark accessibleLabel="Netcatty" className="h-8 w-auto text-foreground" />
               <div className="flex items-center gap-2 mt-1">
                 <span className="text-sm text-muted-foreground">
                   {appInfo.version ? appInfo.version : " "}
