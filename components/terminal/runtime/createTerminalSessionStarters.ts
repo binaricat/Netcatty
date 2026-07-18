@@ -903,7 +903,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         ctx.updateStatus("disconnected");
         return;
       }
-      const commandToRun = resolveStartupCommand(ctx);
+      const commandToRun = resolveStartupCommand(ctx, { host });
       const waitsForAutoLogin = Boolean(
         commandToRun &&
         (telnetUsername || hasTelnetPasswordForAutoLogin) &&
@@ -914,11 +914,17 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         disposeAutoLoginComplete = ctx.terminalBackend.onTelnetAutoLoginComplete?.(
           ctx.sessionId,
           () => {
+            if (!isBootActive(bootToken)) {
+              cleanupTelnetStartupWait();
+              return;
+            }
             disposeAutoLoginListener();
-            cancelPendingStartupCommand = scheduleStartupCommand(ctx, term, telnetSessionId, () => {
+            const cancelStartupCommand = scheduleStartupCommand(ctx, term, telnetSessionId, () => {
               cancelPendingStartupCommand = undefined;
               disposeAutoLoginCancelListener();
-            });
+            }, host, () => isBootActive(bootToken));
+            cancelPendingStartupCommand = cancelStartupCommand;
+            if (!cancelStartupCommand) disposeAutoLoginCancelListener();
           },
         );
         disposeAutoLoginCancelled = ctx.terminalBackend.onTelnetAutoLoginCancelled?.(

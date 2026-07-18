@@ -753,6 +753,106 @@ test("restored Telnet uses group-inherited credentials after hydration", async (
   assert.equal(options?.password, "inherited-secret");
 });
 
+test("stale Telnet auto-login completion cleans up without consuming or scheduling startup command", async () => {
+  const bootTokenRef = { current: Symbol("telnet-boot") as symbol | null };
+  const isBootActiveRef = { current: true };
+  const writes: string[] = [];
+  let autoLoginComplete: (() => void) | undefined;
+  let disposedComplete = 0;
+  let disposedCancelled = 0;
+  const hasRunStartupCommandRef = { current: false };
+  const host = {
+    id: "host-1",
+    label: "Target",
+    hostname: "target.test",
+    protocol: "telnet",
+    telnetUsername: "console",
+    telnetPassword: "secret",
+    startupCommand: "show version",
+  };
+  const ctx = createStarterContext({
+    host,
+    hostRef: { current: host },
+    bootTokenRef,
+    isBootActiveRef,
+    hasRunStartupCommandRef,
+    terminalSettings: { startupCommandDelayMs: 0 },
+    terminalBackend: {
+      telnetAvailable: () => true,
+      startTelnetSession: async () => "telnet-session",
+      onTelnetAutoLoginComplete: (_id: string, callback: () => void) => {
+        autoLoginComplete = callback;
+        return () => { disposedComplete += 1; };
+      },
+      onTelnetAutoLoginCancelled: () => () => { disposedCancelled += 1; },
+      onSessionData: () => noop,
+      onSessionExit: () => noop,
+      writeToSession: (_id: string, data: string) => { writes.push(data); },
+      resizeSession: noop,
+    },
+  });
+
+  await createTerminalSessionStarters(ctx as never).startTelnet(createTermStub() as never);
+  beginTerminalBootAttempt({ bootTokenRef, isBootActiveRef }, "replacement");
+  autoLoginComplete?.();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.deepEqual(writes, []);
+  assert.equal(hasRunStartupCommandRef.current, false);
+  assert.equal(disposedComplete, 1);
+  assert.equal(disposedCancelled, 1);
+});
+
+test("restored Telnet uses hydrated group startup command and run mode", async () => {
+  const fallbackHost = {
+    id: "host-1", label: "Target", hostname: "target.test", protocol: "telnet", group: "Network",
+  };
+  const hostRef = { current: fallbackHost as Record<string, unknown> };
+  const writes: string[] = [];
+  let autoLoginComplete: (() => void) | undefined;
+  const ctx = createStarterContext({
+    host: fallbackHost,
+    hostRef,
+    waitForVaultInitialization: true,
+    terminalSettings: { startupCommandDelayMs: 0 },
+    promptLineBreakStateRef: undefined,
+    terminalBackend: {
+      telnetAvailable: () => true,
+      startTelnetSession: async () => "telnet-session",
+      onTelnetAutoLoginComplete: (_id: string, callback: () => void) => {
+        autoLoginComplete = callback;
+        return noop;
+      },
+      onTelnetAutoLoginCancelled: () => noop,
+      onSessionData: () => noop,
+      onSessionExit: () => noop,
+      writeToSession: (_id: string, data: string) => { writes.push(data); },
+      resizeSession: noop,
+    },
+  });
+
+  setVaultInitialized(false);
+  try {
+    const started = createTerminalSessionStarters(ctx as never).startTelnet(createTermStub() as never);
+    hostRef.current = {
+      ...fallbackHost,
+      telnetUsername: "inherited-user",
+      telnetPassword: "inherited-secret",
+      startupCommand: "first inherited command\nsecond inherited command",
+      startupCommandRunMode: "lineDelay",
+    };
+    setVaultInitialized(true);
+    await started;
+    autoLoginComplete?.();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  } finally {
+    setVaultInitialized(true);
+  }
+
+  assert.deepEqual(writes, ["first inherited command\r", "second inherited command\r"]);
+});
+
 test("restored Telnet rejects hydrated group proxy and missing identity configuration", async () => {
   for (const invalid of ["proxy", "identity"] as const) {
     const fallbackHost = {
