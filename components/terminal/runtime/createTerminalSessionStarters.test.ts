@@ -5,11 +5,13 @@ import {
   createTerminalSessionStarters,
   getMissingChainHostIds,
   hasMissingConfiguredVaultCredentials,
+  mayHaveGroupInheritedConnectionConfiguration,
 } from "./createTerminalSessionStarters";
 import { createPromptLineBreakState } from "./promptLineBreak";
 import { resolveStartupCommand } from "./terminalStartupCommands";
 import { pasteTextIntoTerminal } from "./terminalUserPaste";
 import {
+  setVaultInitializationFailed,
   setVaultInitialized,
 } from "../../../application/state/vaultInitStore";
 
@@ -164,6 +166,110 @@ test("vault readiness ignores auth without vault-backed credentials", () => {
   assert.equal(hasMissingConfiguredVaultCredentials(hosts, [], []), false);
 });
 
+test("vault readiness recognizes hosts that may inherit connection configuration from a group", () => {
+  assert.equal(mayHaveGroupInheritedConnectionConfiguration({
+    id: "grouped", label: "Grouped", hostname: "grouped.test", username: "alice", group: "Production",
+  } as never), true);
+  assert.equal(mayHaveGroupInheritedConnectionConfiguration({
+    id: "plain", label: "Plain", hostname: "plain.test", username: "alice", password: "secret",
+  } as never), false);
+  assert.equal(mayHaveGroupInheritedConnectionConfiguration({
+    id: "file", label: "File", hostname: "file.test", username: "alice", identityFilePaths: ["~/.ssh/id_ed25519"],
+  } as never), false);
+});
+
+for (const inheritedAuth of ["password", "key"] as const) {
+  test(`startSSH rereads group-inherited ${inheritedAuth} auth after vault readiness`, async () => {
+    let capturedOptions: Record<string, unknown> | null = null;
+    const initialHost = {
+      id: "host-1", label: "Target", hostname: "target.test", username: "alice", group: "Production",
+    };
+    const hostRef = { current: initialHost as Record<string, unknown> };
+    const keysRef = { current: [] as Array<Record<string, unknown>> };
+    const terminalBackend = {
+      backendAvailable: () => true,
+      startSSHSession: async (options: Record<string, unknown>) => { capturedOptions = options; return "ssh-session"; },
+      onSessionData: () => noop,
+      onSessionExit: () => noop,
+      onChainProgress: () => noop,
+      writeToSession: noop,
+      resizeSession: noop,
+    };
+    const ctx = createStarterContext({ host: initialHost, hostRef, keysRef, terminalBackend });
+
+    setVaultInitialized(false);
+    try {
+      const started = createTerminalSessionStarters(ctx as never).startSSH(createTermStub() as never);
+      if (inheritedAuth === "password") {
+        hostRef.current = { ...initialHost, authMethod: "password", password: "group-secret" };
+      } else {
+        hostRef.current = { ...initialHost, authMethod: "key", identityFileId: "group-key" };
+        keysRef.current = [{ id: "group-key", label: "Group key", privateKey: "group-private-key" }];
+      }
+      setVaultInitialized(true);
+      await started;
+    } finally {
+      setVaultInitialized(true);
+    }
+
+    if (inheritedAuth === "password") assert.equal(capturedOptions?.password, "group-secret");
+    else assert.equal(capturedOptions?.privateKey, "group-private-key");
+  });
+}
+
+test("startSSH fails clearly when a restored group connection configuration is unavailable", async () => {
+  const errors: string[] = [];
+  let backendStarted = false;
+  const initialHost = {
+    id: "host-1", label: "Target", hostname: "target.test", username: "alice", group: "Deleted",
+  };
+  const ctx = createStarterContext({
+    host: initialHost,
+    hostRef: { current: initialHost },
+    setError: (message: string) => errors.push(message),
+    terminalBackend: {
+      backendAvailable: () => true,
+      startSSHSession: async () => { backendStarted = true; return "ssh-session"; },
+    },
+  });
+
+  setVaultInitialized(false);
+  try {
+    const started = createTerminalSessionStarters(ctx as never).startSSH(createTermStub() as never);
+    setVaultInitialized(true);
+    await started;
+  } finally {
+    setVaultInitialized(true);
+  }
+
+  assert.equal(backendStarted, false);
+  assert.match(errors.at(-1) || "", /Group connection configuration is unavailable/);
+});
+
+test("startMosh propagates permanent vault initialization failure for grouped restores", async () => {
+  const errors: string[] = [];
+  const initialHost = {
+    id: "host-1", label: "Target", hostname: "target.test", username: "alice", group: "Production",
+  };
+  const ctx = createStarterContext({
+    host: initialHost,
+    hostRef: { current: initialHost },
+    setError: (message: string) => errors.push(message),
+    terminalBackend: { moshAvailable: () => true },
+  });
+
+  setVaultInitialized(false);
+  try {
+    const started = createTerminalSessionStarters(ctx as never).startMosh(createTermStub() as never);
+    setVaultInitializationFailed(new Error("vault decrypt failed"));
+    await started;
+  } finally {
+    setVaultInitialized(true);
+  }
+
+  assert.match(errors.at(-1) || "", /vault decrypt failed/);
+});
+
 test("startSSH resolves jump host auth from vault collections refreshed after readiness", async () => {
   let capturedOptions: Record<string, unknown> | null = null;
   const keysRef = { current: [] as Array<Record<string, unknown>> };
@@ -237,6 +343,7 @@ for (const location of ["target", "jump"] as const) {
     let capturedOptions: Record<string, unknown> | null = null;
     const initialHost = {
       id: "host-1", label: "Target", hostname: "target.test", username: "alice",
+      group: "Production",
       ...(location === "target" ? { proxyProfileId: "proxy-1" } : { hostChain: { hostIds: ["jump-1"] } }),
     };
     const initialChain = location === "jump"
@@ -291,6 +398,7 @@ for (const location of ["target", "jump"] as const) {
     let backendStarted = false;
     const initialHost = {
       id: "host-1", label: "Target", hostname: "target.test", username: "alice",
+      group: "Production",
       ...(location === "target" ? { proxyProfileId: "proxy-1" } : { hostChain: { hostIds: ["jump-1"] } }),
     };
     const initialChain = location === "jump"
