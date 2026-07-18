@@ -51,7 +51,7 @@ import {
 } from "../../domain/connectionLogTerminalData";
 import { getNextVaultOrder, normalizeVaultOrder } from "../../domain/vaultOrder";
 import { loadSanitizedShellHistory } from "./shellHistoryPersistence";
-import { setVaultInitialized } from "./vaultInitStore";
+import { setVaultInitializationFailed, setVaultInitialized } from "./vaultInitStore";
 import {
   decryptGroupConfigs,
   decryptHosts,
@@ -196,6 +196,7 @@ const writeConnectionLogTerminalDataMap = (
 
 export const useVaultState = () => {
   const [isInitialized, setIsInitialized] = useState(false);
+  const [areCredentialsReady, setAreCredentialsReady] = useState(false);
   const [hosts, setHosts] = useState<Host[]>([]);
   const [keys, setKeys] = useState<SSHKey[]>([]);
   const [identities, setIdentities] = useState<Identity[]>([]);
@@ -800,14 +801,23 @@ export const useVaultState = () => {
             });
           }
         }
+        setAreCredentialsReady(true);
+      } catch (error) {
+        setVaultInitializationFailed(error);
       } finally {
         setIsInitialized(true);
-        setVaultInitialized(true);
       }
     };
 
     init();
   }, [updateHosts, updateSnippets]);
+
+  // Publish readiness after React has committed the decrypted vault state, so
+  // restored terminal sessions cannot observe the pre-decryption empty arrays.
+  useEffect(() => {
+    if (!areCredentialsReady) return;
+    setVaultInitialized(true);
+  }, [areCredentialsReady]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;

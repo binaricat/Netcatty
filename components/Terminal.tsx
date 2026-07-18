@@ -935,6 +935,10 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   const passwordPickerEmptyText = t("terminal.passwordPicker.empty");
   const sudoHintText = t("terminal.sudoHint.pressEnter");
   const sessionStartersRef = useRef<ReturnType<typeof createTerminalSessionStarters> | null>(null);
+  const vaultKeysRef = useRef(keys);
+  vaultKeysRef.current = keys;
+  const vaultIdentitiesRef = useRef(identities);
+  vaultIdentitiesRef.current = identities;
   const auth = useTerminalAuthState({
     host,
     pendingAuthRef,
@@ -1544,7 +1548,9 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   const sessionStarters = createTerminalSessionStarters({
     host,
     keys,
+    keysRef: vaultKeysRef,
     identities,
+    identitiesRef: vaultIdentitiesRef,
     knownHosts,
     resolvedChainHosts,
     sessionId,

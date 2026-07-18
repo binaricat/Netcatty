@@ -49,6 +49,7 @@ import {
 } from "../../../domain/proxyProfiles";
 import { hasConnectionPassedTcpDial } from "../connectionTimeouts";
 import { resolveHostSshConnectionTimeouts } from "../../../domain/sshConnectionTimeouts";
+import { isVaultInitialized, waitForVaultInitialized } from "../../../application/state/vaultInitStore";
 
 const TELNET_SESSION_REPLACED_ERROR = "Telnet session start was replaced";
 const JUMP_HOST_AUTH_FAILED_PREFIX = "Jump host authentication failed";
@@ -86,6 +87,17 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
     ...(ctx.terminalSettings ?? {}),
   };
   let fallbackDisposeTelnetEchoMode: (() => void) | null = null;
+
+  const resolveVaultAuthCollections = async () => {
+    let keys = ctx.keysRef?.current ?? ctx.keys;
+    const identities = ctx.identitiesRef?.current ?? ctx.identities;
+    const resolved = resolveHostAuth({ host: ctx.host, keys, identities });
+    if (resolved.keyId && !resolved.key && !isVaultInitialized()) {
+      await waitForVaultInitialized();
+      keys = ctx.keysRef?.current ?? ctx.keys;
+    }
+    return { keys, identities: ctx.identitiesRef?.current ?? identities };
+  };
 
   const tr = (key: string, fallback: string): string => {
     const translated = ctx.t?.(key);
@@ -184,11 +196,21 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
       return;
     }
 
+    let vaultAuth;
+    try {
+      vaultAuth = await resolveVaultAuthCollections();
+    } catch (error) {
+      const message = `Saved credentials could not be decrypted: ${error instanceof Error ? error.message : String(error)}`;
+      ctx.setError(message);
+      writeTerminalLine(ctx, term, `\r\n[${message}]`);
+      ctx.updateStatus("disconnected");
+      return;
+    }
     const pendingAuth = ctx.pendingAuthRef.current;
     const resolvedAuth = resolveHostAuth({
       host: ctx.host,
-      keys: ctx.keys,
-      identities: ctx.identities,
+      keys: vaultAuth.keys,
+      identities: vaultAuth.identities,
       override: pendingAuth
         ? {
           authMethod: pendingAuth.authMethod,
@@ -929,11 +951,12 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         return;
       }
 
+      const vaultAuth = await resolveVaultAuthCollections();
       const pendingAuth = ctx.pendingAuthRef.current;
       const resolvedAuth = resolveHostAuth({
         host: ctx.host,
-        keys: ctx.keys,
-        identities: ctx.identities,
+        keys: vaultAuth.keys,
+        identities: vaultAuth.identities,
         override: pendingAuth
           ? {
             authMethod: pendingAuth.authMethod,

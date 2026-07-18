@@ -116,7 +116,9 @@ export type SessionLogConfig = {
 export type TerminalSessionStartersContext = {
   host: Host & Pick<Partial<TerminalSession>, "localStartDir">;
   keys: SSHKey[];
+  keysRef?: RefObject<SSHKey[]>;
   identities?: Identity[];
+  identitiesRef?: RefObject<Identity[] | undefined>;
   knownHosts?: KnownHost[];
   resolvedChainHosts: Host[];
   sessionId: string;
