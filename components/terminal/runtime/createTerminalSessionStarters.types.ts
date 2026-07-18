@@ -115,12 +115,14 @@ export type SessionLogConfig = {
 
 export type TerminalSessionStartersContext = {
   host: Host & Pick<Partial<TerminalSession>, "localStartDir">;
+  hostRef?: RefObject<Host & Pick<Partial<TerminalSession>, "localStartDir">>;
   keys: SSHKey[];
   keysRef?: RefObject<SSHKey[]>;
   identities?: Identity[];
   identitiesRef?: RefObject<Identity[] | undefined>;
   knownHosts?: KnownHost[];
   resolvedChainHosts: Host[];
+  resolvedChainHostsRef?: RefObject<Host[]>;
   sessionId: string;
   // Source session id to reuse an authenticated SSH connection from when this
   // terminal was created from an existing SSH session.

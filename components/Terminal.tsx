@@ -939,6 +939,8 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   vaultKeysRef.current = keys;
   const vaultIdentitiesRef = useRef(identities);
   vaultIdentitiesRef.current = identities;
+  const vaultHostRef = useRef(host);
+  vaultHostRef.current = host;
   const auth = useTerminalAuthState({
     host,
     pendingAuthRef,
@@ -1103,6 +1105,8 @@ const TerminalComponent: React.FC<TerminalProps> = ({
 
   const resolvedChainHosts =
     chainHosts;
+  const vaultChainHostsRef = useRef(resolvedChainHosts);
+  vaultChainHostsRef.current = resolvedChainHosts;
 
   const clearAutoReconnect = useCallback((options?: { stopLoop?: boolean }) => {
     if (autoReconnectTimerRef.current) {
@@ -1547,12 +1551,14 @@ const TerminalComponent: React.FC<TerminalProps> = ({
 
   const sessionStarters = createTerminalSessionStarters({
     host,
+    hostRef: vaultHostRef,
     keys,
     keysRef: vaultKeysRef,
     identities,
     identitiesRef: vaultIdentitiesRef,
     knownHosts,
     resolvedChainHosts,
+    resolvedChainHostsRef: vaultChainHostsRef,
     sessionId,
     reuseConnectionFromSessionId,
     startupCommand,

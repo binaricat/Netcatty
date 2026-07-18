@@ -123,6 +123,21 @@ test("vault readiness detects missing jump-host credentials", () => {
   assert.equal(hasMissingConfiguredVaultCredentials([target, jump], [], []), true);
 });
 
+test("vault readiness detects unresolved proxy profiles and proxy identities", () => {
+  assert.equal(hasMissingConfiguredVaultCredentials([{
+    id: "host-1",
+    label: "Target",
+    hostname: "target.example.test",
+    proxyProfileId: "proxy-1",
+  } as never], [], []), true);
+  assert.equal(hasMissingConfiguredVaultCredentials([{
+    id: "jump-1",
+    label: "Jump",
+    hostname: "jump.example.test",
+    proxyConfig: { type: "socks5", host: "proxy.test", port: 1080, identityId: "proxy-identity" },
+  } as never], [], []), true);
+});
+
 test("vault readiness ignores auth without vault-backed credentials", () => {
   const hosts = [{
     id: "password-host",
@@ -216,6 +231,101 @@ test("startSSH resolves jump host auth from vault collections refreshed after re
   assert.equal(jumpHosts[0]?.privateKey, "actual-private-key");
   assert.equal(jumpHosts[0]?.publicKey, "ssh-ed25519 AAAAJUMP");
 });
+
+for (const location of ["target", "jump"] as const) {
+  test(`startSSH uses the live ${location} proxy profile materialized after vault readiness`, async () => {
+    let capturedOptions: Record<string, unknown> | null = null;
+    const initialHost = {
+      id: "host-1", label: "Target", hostname: "target.test", username: "alice",
+      ...(location === "target" ? { proxyProfileId: "proxy-1" } : { hostChain: { hostIds: ["jump-1"] } }),
+    };
+    const initialChain = location === "jump"
+      ? [{ id: "jump-1", label: "Jump", hostname: "jump.test", proxyProfileId: "proxy-1" }]
+      : [];
+    const hostRef = { current: initialHost as Record<string, unknown> };
+    const resolvedChainHostsRef = { current: initialChain as Array<Record<string, unknown>> };
+    const terminalBackend = {
+      backendAvailable: () => true,
+      startSSHSession: async (options: Record<string, unknown>) => {
+        capturedOptions = options;
+        return "ssh-session";
+      },
+      onSessionData: () => noop,
+      onSessionExit: () => noop,
+      onChainProgress: () => noop,
+      writeToSession: noop,
+      resizeSession: noop,
+    };
+    const ctx = createStarterContext({
+      host: initialHost,
+      hostRef,
+      resolvedChainHosts: initialChain,
+      resolvedChainHostsRef,
+      terminalBackend,
+    });
+
+    setVaultInitialized(false);
+    try {
+      const started = createTerminalSessionStarters(ctx as never).startSSH(createTermStub() as never);
+      const proxyConfig = { type: "socks5", host: `${location}-proxy.test`, port: 1080 };
+      if (location === "target") hostRef.current = { ...initialHost, proxyConfig };
+      else resolvedChainHostsRef.current = [{ ...initialChain[0], proxyConfig }];
+      setVaultInitialized(true);
+      await started;
+    } finally {
+      setVaultInitialized(true);
+    }
+
+    const proxy = location === "target"
+      ? capturedOptions?.proxy
+      : (capturedOptions?.jumpHosts as Array<Record<string, unknown>>)?.[0]?.proxy;
+    assert.equal((proxy as Record<string, unknown>)?.type, "socks5");
+    assert.equal((proxy as Record<string, unknown>)?.host, `${location}-proxy.test`);
+    assert.equal((proxy as Record<string, unknown>)?.port, 1080);
+  });
+}
+
+for (const location of ["target", "jump"] as const) {
+  test(`startMosh waits for the live ${location} proxy profile before reporting it unsupported`, async () => {
+    const errors: string[] = [];
+    let backendStarted = false;
+    const initialHost = {
+      id: "host-1", label: "Target", hostname: "target.test", username: "alice",
+      ...(location === "target" ? { proxyProfileId: "proxy-1" } : { hostChain: { hostIds: ["jump-1"] } }),
+    };
+    const initialChain = location === "jump"
+      ? [{ id: "jump-1", label: "Jump", hostname: "jump.test", proxyProfileId: "proxy-1" }]
+      : [];
+    const hostRef = { current: initialHost as Record<string, unknown> };
+    const resolvedChainHostsRef = { current: initialChain as Array<Record<string, unknown>> };
+    const ctx = createStarterContext({
+      host: initialHost,
+      hostRef,
+      resolvedChainHosts: initialChain,
+      resolvedChainHostsRef,
+      setError: (message: string) => errors.push(message),
+      terminalBackend: {
+        moshAvailable: () => true,
+        startMoshSession: async () => { backendStarted = true; return "mosh-session"; },
+      },
+    });
+
+    setVaultInitialized(false);
+    try {
+      const started = createTerminalSessionStarters(ctx as never).startMosh(createTermStub() as never);
+      const proxyConfig = { type: "socks5", host: `${location}-proxy.test`, port: 1080 };
+      if (location === "target") hostRef.current = { ...initialHost, proxyConfig };
+      else resolvedChainHostsRef.current = [{ ...initialChain[0], proxyConfig }];
+      setVaultInitialized(true);
+      await started;
+    } finally {
+      setVaultInitialized(true);
+    }
+
+    assert.equal(backendStarted, false);
+    assert.match(errors.at(-1) || "", location === "target" ? /does not support proxy connections/ : /does not support jump host chains/);
+  });
+}
 
 test("startSSH forwards imported system agent authentication settings", async () => {
   let capturedOptions: Record<string, unknown> | null = null;
