@@ -49,6 +49,11 @@ import {
   serializeTerminalCloseFallback,
 } from './runtime/terminalCloseCapture';
 import {
+  beginTerminalBootAttempt,
+  invalidateTerminalBootAttempt,
+  isTerminalBootAttemptCurrent,
+} from './runtime/terminalBootAttempt';
+import {
   getConnectionTimeoutMs,
   resolveActiveConnectionTimeoutHost,
   shouldRunConnectionTimeout,
@@ -324,9 +329,8 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
     let disposed = false;
     let initialFitTimer: ReturnType<typeof setTimeout> | undefined;
     const closeGeneration = ++terminalBootCloseGenerationRef.current;
-    const bootToken = Symbol("terminal-boot");
-    bootTokenRef.current = bootToken;
-    isBootActiveRef.current = true;
+    const bootAttemptRefs = { bootTokenRef, isBootActiveRef };
+    const bootToken = beginTerminalBootAttempt(bootAttemptRefs);
     terminalDataCapturedRef.current = false;
     connectionLogBufferRef.current.reset();
     terminalLogSanitizerRef.current = createReplaySafeTerminalLogSanitizer();
@@ -449,33 +453,40 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
         };
 
         if (!shouldStartTerminalBackend()) {
-          isBootActiveRef.current = false;
+          if (isTerminalBootAttemptCurrent(bootAttemptRefs, bootToken)) {
+            invalidateTerminalBootAttempt(bootAttemptRefs);
+          }
           return;
         }
 
         if (host.protocol === "serial") {
           setBackendConnectingStatus();
           setProgressLogs(["Initializing serial connection..."]);
+          if (!isTerminalBootAttemptCurrent(bootAttemptRefs, bootToken)) return;
           await sessionStarters.startSerial(term);
           if (disposed) return;
         } else if (host.protocol === "local" || host.hostname === "localhost") {
           setBackendConnectingStatus();
           setProgressLogs(["Initializing local shell..."]);
+          if (!isTerminalBootAttemptCurrent(bootAttemptRefs, bootToken)) return;
           await sessionStarters.startLocal(term);
           if (disposed) return;
         } else if (host.protocol === "telnet") {
           setBackendConnectingStatus();
           setProgressLogs(["Initializing Telnet connection..."]);
+          if (!isTerminalBootAttemptCurrent(bootAttemptRefs, bootToken)) return;
           await sessionStarters.startTelnet(term);
           if (disposed) return;
         } else if (host.moshEnabled) {
           setBackendConnectingStatus();
           setProgressLogs(["Initializing Mosh connection..."]);
+          if (!isTerminalBootAttemptCurrent(bootAttemptRefs, bootToken)) return;
           await sessionStarters.startMosh(term);
           if (disposed) return;
         } else if (host.etEnabled) {
           setBackendConnectingStatus();
           setProgressLogs(["Initializing EternalTerminal connection..."]);
+          if (!isTerminalBootAttemptCurrent(bootAttemptRefs, bootToken)) return;
           await sessionStarters.startEt(term);
           if (disposed) return;
         } else {
@@ -498,6 +509,7 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
 
           setBackendConnectingStatus();
           setProgressLogs(["Initializing secure channel..."]);
+          if (!isTerminalBootAttemptCurrent(bootAttemptRefs, bootToken)) return;
           await sessionStarters.startSSH(term);
           if (disposed) return;
         }
@@ -514,8 +526,10 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
     return () => {
       disposed = true;
       if (initialFitTimer !== undefined) clearTimeout(initialFitTimer);
-      if (bootTokenRef.current === bootToken) bootTokenRef.current = null;
-      isBootActiveRef.current = false;
+      if (bootTokenRef.current === bootToken) {
+        bootTokenRef.current = null;
+        isBootActiveRef.current = false;
+      }
       if (hibernatedRef?.current) {
         forceCloseHibernatedSession?.();
         return;

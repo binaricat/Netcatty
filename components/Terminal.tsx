@@ -112,6 +112,10 @@ import {
   type PendingAuth,
   type TerminalSessionDataMeta,
 } from "./terminal/runtime/createTerminalSessionStarters";
+import {
+  beginTerminalBootAttempt,
+  invalidateTerminalBootAttempt,
+} from "./terminal/runtime/terminalBootAttempt";
 import { createXTermRuntime, type XTermRuntime } from "./terminal/runtime/createXTermRuntime";
 import { applyUserCursorPreference } from "./terminal/runtime/cursorPreference";
 import { terminalAltKeyOptions } from "./terminal/runtime/altKeyOptions";
@@ -950,6 +954,8 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     onStartSession: (term) => {
       const starters = sessionStartersRef.current;
       if (!starters) return;
+      retryTokenRef.current = null;
+      beginTerminalBootAttempt({ bootTokenRef, isBootActiveRef }, "terminal-auth-retry");
       if (host.moshEnabled) {
         starters.startMosh(term);
         return;
@@ -1466,7 +1472,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     }
 
     applyHibernateSnapshot(snapshot);
-    isBootActiveRef.current = false;
+    invalidateTerminalBootAttempt({ bootTokenRef, isBootActiveRef });
     releaseTerminalFlowBeforeHibernate(terminalBackend, term, backendId);
     disposeDataRef.current?.();
     disposeDataRef.current = null;
@@ -1540,8 +1546,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   const xTermRuntimeContextRef = useRef<Omit<CreateXTermRuntimeContext, "container" | "initiallyVisible"> | null>(null);
 
   const teardown = () => {
-    isBootActiveRef.current = false;
-    bootTokenRef.current = null;
+    invalidateTerminalBootAttempt({ bootTokenRef, isBootActiveRef });
     retryTokenRef.current = null;
     restoreCwdIntentRef.current = null;
     suppressHostStartupCommandRef.current = false;
@@ -2425,6 +2430,11 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     retryTokenRef.current = retryToken;
     const retryTokenStillCurrent = () => retryTokenRef.current === retryToken;
 
+    // Supersede an initial/auth/reconnect attempt immediately. The replacement
+    // generation is minted only when the queued xterm reset actually reaches
+    // its guarded starter callback.
+    invalidateTerminalBootAttempt({ bootTokenRef, isBootActiveRef });
+
     await cleanupSession();
     if (!retryTokenStillCurrent()) return;
     const term = termRef.current;
@@ -2438,7 +2448,6 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     // ghost backend session with no owning UI.
     const retryStillActive = () => retryTokenStillCurrent() && termRef.current === term;
 
-    isBootActiveRef.current = true;
     auth.resetForRetry();
     terminalDataCapturedRef.current = false;
     if (mode === "manual") {
@@ -2457,6 +2466,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
 
     const startNewSession = () => {
       if (!retryStillActive()) return;
+      beginTerminalBootAttempt({ bootTokenRef, isBootActiveRef }, `terminal-${mode}-reconnect`);
       if (host.protocol === "serial") {
         sessionStarters.startSerial(term);
       } else if (host.protocol === "local" || host.hostname === "localhost") {

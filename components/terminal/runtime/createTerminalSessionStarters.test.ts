@@ -10,6 +10,7 @@ import {
 import { createPromptLineBreakState } from "./promptLineBreak";
 import { resolveStartupCommand } from "./terminalStartupCommands";
 import { pasteTextIntoTerminal } from "./terminalUserPaste";
+import { beginTerminalBootAttempt } from "./terminalBootAttempt";
 import {
   setVaultInitializationFailed,
   setVaultInitialized,
@@ -264,7 +265,7 @@ for (const protocol of ["SSH", "Mosh"] as const) {
         ? starters.startSSH(createTermStub() as never)
         : starters.startMosh(createTermStub() as never);
 
-      bootTokenRef.current = Symbol("replacement-boot");
+      beginTerminalBootAttempt({ bootTokenRef, isBootActiveRef }, "manual-or-auto-retry");
       const latestStart = protocol === "SSH"
         ? starters.startSSH(createTermStub() as never)
         : starters.startMosh(createTermStub() as never);
@@ -449,7 +450,7 @@ for (const protocol of ["SSH", "Mosh"] as const) {
         ? createTerminalSessionStarters(firstContext as never).startSSH(firstTerm as never)
         : createTerminalSessionStarters(firstContext as never).startMosh(firstTerm as never);
 
-      bootTokenRef.current = Symbol("replacement-boot");
+      beginTerminalBootAttempt({ bootTokenRef, isBootActiveRef }, "manual-or-auto-retry");
       const latestStart = protocol === "SSH"
         ? createTerminalSessionStarters(latestContext as never).startSSH(latestTerm as never)
         : createTerminalSessionStarters(latestContext as never).startMosh(latestTerm as never);
