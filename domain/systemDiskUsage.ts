@@ -14,18 +14,24 @@ export interface AggregatedDiskUsage {
 export function aggregateMountedDiskUsage(
   disks: readonly MountedDiskUsage[],
 ): AggregatedDiskUsage | null {
-  let used = 0;
-  let total = 0;
-  const seenCapacityKeys = new Set<string>();
+  const capacityGroups = new Map<string, { used: number; total: number }>();
 
   for (const disk of disks) {
     if (!Number.isFinite(disk.used) || !Number.isFinite(disk.total)) continue;
     if (disk.used < 0 || disk.total <= 0 || disk.used > disk.total) continue;
     const identity = disk.capacityKey?.trim() || `mount:${disk.mountPoint}`;
-    if (seenCapacityKeys.has(identity)) continue;
-    seenCapacityKeys.add(identity);
-    used += disk.used;
-    total += disk.total;
+    const existing = capacityGroups.get(identity);
+    capacityGroups.set(identity, {
+      used: Math.max(existing?.used ?? 0, disk.used),
+      total: Math.max(existing?.total ?? 0, disk.total),
+    });
+  }
+
+  let used = 0;
+  let total = 0;
+  for (const group of capacityGroups.values()) {
+    used += group.used;
+    total += group.total;
   }
 
   if (total <= 0) return null;

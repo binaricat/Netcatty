@@ -51,8 +51,8 @@ test("aggregateMountedDiskUsage counts shared APFS container capacity once", () 
   assert.deepEqual(
     aggregateMountedDiskUsage([
       { capacityKey: "apfs:/dev/disk3", mountPoint: "/Volumes/One", used: 40, total: 500 },
-      { capacityKey: "apfs:/dev/disk3", mountPoint: "/Volumes/Two", used: 40, total: 500 },
+      { capacityKey: "apfs:/dev/disk3", mountPoint: "/Volumes/Two", used: 90, total: 500 },
     ]),
-    { used: 40, total: 500, percent: 8 },
+    { used: 90, total: 500, percent: 18 },
   );
 });

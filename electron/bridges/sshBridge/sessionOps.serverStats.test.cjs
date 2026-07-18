@@ -398,6 +398,7 @@ test("getServerStats parses macOS stats and avoids blocking top command", async 
   assert.match(command, /ps -A -o %cpu=/);
   assert.match(command, /awk -v c="\$cores"/);
   assert.match(command, /s=s\/c/);
+  assert.match(command, /u=\(\$2-\$4\)\/1048576/);
   assert.doesNotMatch(command, /top -l/);
   assert.equal(result.stats.cpu, 27);
   assert.equal(result.stats.cpuCores, 10);
