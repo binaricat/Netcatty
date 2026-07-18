@@ -49,6 +49,7 @@ import { terminalAltKeyOptions } from "./altKeyOptions";
 import { optionArrowWordJumpSequence } from "./optionArrowWordJump";
 import { watchDevicePixelRatio } from "./rendererDprWatch";
 import { shouldDeferWebglUntilVisible } from "./webglRendererPolicy";
+import { createWebglRendererController } from "./webglRendererController";
 import {
   captureMiddleClickTerminalMouseEvent,
   markMiddleClickContextMenuEvent,
@@ -482,19 +483,8 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
   };
   term.element?.addEventListener("copy", handleNativeCopy, true);
 
-  let webglAddon: WebglAddon | null = null;
   let webglLoaded = false;
-  // Once repeated context losses trip the breaker, this runtime stays on the
-  // DOM renderer. In particular, reveal/resume calls to ensureWebglRenderer and
-  // suspend/resume cycles must not rearm WebGL. A newly-created runtime (for
-  // example after a deliberate renderer preference change) gets a fresh flag.
-  let webglCircuitBroken = false;
-  let webglRecoveryTimer: ReturnType<typeof setTimeout> | null = null;
   let runtimeDisposed = false;
-  const webglContextLosses: number[] = [];
-  const WEBGL_RECOVERY_DELAY_MS = 50;
-  const WEBGL_RECOVERY_WINDOW_MS = 10_000;
-  const WEBGL_MAX_RECOVERIES_PER_WINDOW = 2;
   const scopedWindow = window as Window & {
     __xtermWebGLLoaded?: boolean;
     __xtermRendererPreference?: string;
@@ -513,96 +503,22 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     }
   };
 
-  const cancelWebglRecovery = () => {
-    if (webglRecoveryTimer === null) return;
-    clearTimeout(webglRecoveryTimer);
-    webglRecoveryTimer = null;
-  };
-
-  const loadWebglRenderer = () => {
-    if (webglLoaded || webglCircuitBroken || !performanceConfig.useWebGLAddon) return;
-    let nextWebglAddon: WebglAddon | null = null;
-    try {
-      // WebglAddon constructor only accepts `preserveDrawingBuffer?: boolean`.
-      // Passing an object here (legacy API assumption) unintentionally enables
-      // preserveDrawingBuffer and can cause sporadic glyph artifacts/ghosting.
-      nextWebglAddon = new WebglAddon();
-      nextWebglAddon.onContextLoss(() => {
-        // Ignore a late event from an addon that has already been replaced.
-        if (webglAddon !== nextWebglAddon || runtimeDisposed) return;
-        logger.warn("[XTerm] WebGL context loss detected, rebuilding renderer");
-        try {
-          nextWebglAddon?.dispose();
-        } catch (webglErr) {
-          logger.warn("[XTerm] Failed to dispose lost WebGL renderer", webglErr);
-        }
-        webglAddon = null;
-        webglLoaded = false;
-        scopedWindow.__xtermWebGLLoaded = false;
-        repaintTerminal();
-
-        const now = Date.now();
-        while (
-          webglContextLosses.length > 0
-          && now - webglContextLosses[0] > WEBGL_RECOVERY_WINDOW_MS
-        ) {
-          webglContextLosses.shift();
-        }
-        webglContextLosses.push(now);
-        if (webglContextLosses.length > WEBGL_MAX_RECOVERIES_PER_WINDOW) {
-          webglCircuitBroken = true;
-          cancelWebglRecovery();
-          logger.warn("[XTerm] Repeated WebGL context loss, staying on DOM renderer");
-          return;
-        }
-
-        // Context loss events can arrive in bursts. Coalesce them and let xterm
-        // settle on its DOM renderer before attaching a fresh WebGL renderer.
-        cancelWebglRecovery();
-        webglRecoveryTimer = setTimeout(() => {
-          webglRecoveryTimer = null;
-          if (runtimeDisposed) return;
-          loadWebglRenderer();
-          // loadWebglRenderer catches failures, leaving xterm on DOM. Refresh in
-          // either case so the existing viewport never remains black.
-          repaintTerminal();
-        }, WEBGL_RECOVERY_DELAY_MS);
-      });
-      webglAddon = nextWebglAddon;
-      term.loadAddon(nextWebglAddon);
-      webglLoaded = true;
-    } catch (webglErr) {
-      try {
-        nextWebglAddon?.dispose();
-      } catch {
-        // The original load error is more useful than a cleanup error.
-      }
-      if (webglAddon === nextWebglAddon) webglAddon = null;
-      webglLoaded = false;
-      logger.warn(
-        "[XTerm] WebGL addon failed, using DOM renderer. Error:",
-        webglErr instanceof Error ? webglErr.message : webglErr,
-      );
-    }
-    scopedWindow.__xtermWebGLLoaded = webglLoaded;
-  };
-
-  const suspendWebglRenderer = () => {
-    cancelWebglRecovery();
-    if (!webglAddon) {
-      webglLoaded = false;
-      scopedWindow.__xtermWebGLLoaded = false;
-      return;
-    }
-    try {
-      webglAddon.dispose();
-    } catch (webglErr) {
-      logger.warn("[XTerm] Failed to suspend WebGL renderer", webglErr);
-    }
-    webglAddon = null;
-    webglLoaded = false;
-    scopedWindow.__xtermWebGLLoaded = false;
-  };
+  const webglController = createWebglRendererController({
+    enabled: performanceConfig.useWebGLAddon,
+    createAddon: () => new WebglAddon(),
+    loadAddon: (addon) => term.loadAddon(addon),
+    repaint: repaintTerminal,
+    setLoaded: (loaded) => {
+      webglLoaded = loaded;
+      scopedWindow.__xtermWebGLLoaded = loaded;
+    },
+    warn: (message, error) => {
+      if (error === undefined) logger.warn(message);
+      else logger.warn(message, error);
+    },
+  });
+  const loadWebglRenderer = webglController.ensure;
+  const suspendWebglRenderer = webglController.suspend;
 
   if (!performanceConfig.useWebGLAddon) {
     logger.info(
@@ -632,6 +548,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
   // the atlas forces glyphs to re-rasterize at the correct scale on the next
   // frame. No-op for the DOM renderer.
   const clearWebglTextureAtlas = () => {
+    const webglAddon = webglController.getAddon();
     if (!webglAddon) return;
     try {
       webglAddon.clearTextureAtlas();
@@ -1568,7 +1485,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     suspendWebglRenderer,
     dispose: () => {
       runtimeDisposed = true;
-      cancelWebglRecovery();
+      webglController.dispose();
       term.element?.removeEventListener("copy", handleNativeCopy, true);
       ctx.container.removeEventListener(
         "wheel",
@@ -1619,11 +1536,6 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
         searchAddon.dispose();
       } catch (err) {
         logger.warn("[XTerm] searchAddon dispose failed", err);
-      }
-      try {
-        webglAddon?.dispose();
-      } catch (err) {
-        logger.warn("[XTerm] webglAddon dispose failed", err);
       }
     },
     get currentCwd() {

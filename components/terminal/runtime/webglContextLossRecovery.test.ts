@@ -1,47 +1,160 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import test from "node:test";
+import { createWebglRendererController } from "./webglRendererController";
 
-const source = readFileSync(new URL("./createXTermRuntime.ts", import.meta.url), "utf8");
+class FakeAddon {
+  contextLoss: (() => void) | null = null;
+  disposeCalls = 0;
 
-test("WebGL context loss schedules a coalesced rebuild and viewport repaint", () => {
-  const handlerStart = source.indexOf("nextWebglAddon.onContextLoss");
-  const handlerEnd = source.indexOf("term.loadAddon(nextWebglAddon)", handlerStart);
-  const handler = source.slice(handlerStart, handlerEnd);
+  onContextLoss(callback: () => void) {
+    this.contextLoss = callback;
+  }
 
-  assert.ok(handlerStart >= 0 && handlerEnd > handlerStart);
-  assert.match(handler, /nextWebglAddon\?\.dispose\(\)/);
-  assert.match(handler, /webglLoaded = false/);
-  assert.match(handler, /cancelWebglRecovery\(\)/);
-  assert.match(handler, /webglRecoveryTimer = setTimeout/);
-  assert.match(handler, /loadWebglRenderer\(\);[\s\S]*repaintTerminal\(\)/);
+  dispose() {
+    this.disposeCalls += 1;
+  }
+
+  loseContext() {
+    assert.ok(this.contextLoss, "addon must install a context-loss handler");
+    this.contextLoss();
+  }
+}
+
+function createHarness(options: { failLoads?: Set<number>; enabled?: boolean } = {}) {
+  let time = 0;
+  let nextTimerId = 1;
+  const timers = new Map<number, () => void>();
+  const addons: FakeAddon[] = [];
+  const loadedStates: boolean[] = [];
+  const warnings: string[] = [];
+  let repaintCalls = 0;
+  let loadCalls = 0;
+
+  const controller = createWebglRendererController({
+    enabled: options.enabled ?? true,
+    createAddon: () => {
+      const addon = new FakeAddon();
+      addons.push(addon);
+      return addon;
+    },
+    loadAddon: () => {
+      loadCalls += 1;
+      if (options.failLoads?.has(loadCalls)) throw new Error(`load ${loadCalls} failed`);
+    },
+    repaint: () => {
+      repaintCalls += 1;
+    },
+    setLoaded: (loaded) => loadedStates.push(loaded),
+    warn: (message) => warnings.push(message),
+    now: () => time,
+    setTimer: (callback) => {
+      const id = nextTimerId++;
+      timers.set(id, callback);
+      return id as unknown as ReturnType<typeof setTimeout>;
+    },
+    clearTimer: (id) => timers.delete(id as unknown as number),
+  });
+
+  return {
+    controller,
+    addons,
+    loadedStates,
+    warnings,
+    get repaintCalls() { return repaintCalls; },
+    get loadCalls() { return loadCalls; },
+    get pendingTimers() { return timers.size; },
+    setTime(value: number) { time = value; },
+    runNextTimer() {
+      const entry = timers.entries().next().value as [number, () => void] | undefined;
+      assert.ok(entry, "expected a pending timer");
+      timers.delete(entry[0]);
+      entry[1]();
+    },
+  };
+}
+
+test("context loss schedules one recovery and repaints the DOM fallback", () => {
+  const harness = createHarness();
+  harness.controller.ensure();
+
+  harness.addons[0].loseContext();
+  harness.addons[0].loseContext();
+
+  assert.equal(harness.pendingTimers, 1);
+  assert.equal(harness.addons[0].disposeCalls, 1);
+  assert.equal(harness.repaintCalls, 1);
+  assert.equal(harness.loadedStates.at(-1), false);
+
+  harness.runNextTimer();
+  assert.equal(harness.loadCalls, 2);
+  assert.equal(harness.repaintCalls, 2);
+  assert.equal(harness.loadedStates.at(-1), true);
 });
 
-test("WebGL recovery has a circuit breaker and lifecycle cleanup", () => {
-  assert.match(source, /WEBGL_MAX_RECOVERIES_PER_WINDOW = 2/);
-  assert.match(source, /let webglCircuitBroken = false/);
-  assert.match(
-    source,
-    /webglCircuitBroken = true;\s*cancelWebglRecovery\(\);\s*logger\.warn\("\[XTerm\] Repeated WebGL context loss, staying on DOM renderer"\);\s*return;/,
-  );
-  assert.match(source, /Repeated WebGL context loss, staying on DOM renderer/);
-  assert.match(source, /const suspendWebglRenderer = \(\) => \{\s*cancelWebglRecovery\(\)/);
-  assert.match(source, /dispose: \(\) => \{\s*runtimeDisposed = true;\s*cancelWebglRecovery\(\)/);
+test("burst losses trip a persistent breaker that ensure and suspend cannot rearm", () => {
+  const harness = createHarness();
+  harness.controller.ensure();
+  for (let loss = 0; loss < 3; loss += 1) {
+    harness.setTime(loss * 100);
+    harness.addons[loss].loseContext();
+    if (loss < 2) harness.runNextTimer();
+  }
+
+  assert.equal(harness.pendingTimers, 0);
+  assert.ok(harness.warnings.some((warning) => warning.includes("staying on DOM renderer")));
+  assert.equal(harness.loadCalls, 3);
+
+  harness.controller.ensure();
+  harness.controller.suspend();
+  harness.controller.ensure();
+  assert.equal(harness.loadCalls, 3);
+  assert.equal(harness.loadedStates.at(-1), false);
 });
 
-test("disabled WebGL remains a no-op", () => {
-  assert.match(
-    source,
-    /const loadWebglRenderer = \(\) => \{\s*if \(webglLoaded \|\| webglCircuitBroken \|\| !performanceConfig\.useWebGLAddon\) return;/,
-  );
+test("suspend and dispose cancel pending recovery callbacks", () => {
+  for (const action of ["suspend", "dispose"] as const) {
+    const harness = createHarness();
+    harness.controller.ensure();
+    harness.addons[0].loseContext();
+    assert.equal(harness.pendingTimers, 1);
+
+    harness.controller[action]();
+    assert.equal(harness.pendingTimers, 0);
+    assert.equal(harness.loadCalls, 1);
+  }
 });
 
-test("ensureWebglRenderer remains a no-op after the circuit breaker trips", () => {
-  const loadStart = source.indexOf("const loadWebglRenderer = () => {");
-  const loadGuard = source.indexOf("webglCircuitBroken", loadStart);
-  const addonConstruction = source.indexOf("new WebglAddon()", loadStart);
+test("a stale context-loss callback from a replaced addon is ignored", () => {
+  const harness = createHarness();
+  harness.controller.ensure();
+  const staleAddon = harness.addons[0];
+  staleAddon.loseContext();
+  harness.runNextTimer();
+  const repaintCalls = harness.repaintCalls;
 
-  assert.ok(loadStart >= 0);
-  assert.ok(loadGuard > loadStart && loadGuard < addonConstruction);
-  assert.match(source, /ensureWebglRenderer: loadWebglRenderer/);
+  staleAddon.loseContext();
+  assert.equal(harness.pendingTimers, 0);
+  assert.equal(harness.repaintCalls, repaintCalls);
+  assert.equal(staleAddon.disposeCalls, 1);
+  assert.equal(harness.controller.getAddon(), harness.addons[1]);
+});
+
+test("recovery load failure stays on DOM and still repaints the viewport", () => {
+  const harness = createHarness({ failLoads: new Set([2]) });
+  harness.controller.ensure();
+  harness.addons[0].loseContext();
+  harness.runNextTimer();
+
+  assert.equal(harness.controller.getAddon(), null);
+  assert.equal(harness.loadedStates.at(-1), false);
+  assert.equal(harness.addons[1].disposeCalls, 1);
+  assert.equal(harness.repaintCalls, 2);
+  assert.ok(harness.warnings.some((warning) => warning.includes("using DOM renderer")));
+});
+
+test("disabled WebGL ensure is a no-op", () => {
+  const harness = createHarness({ enabled: false });
+  harness.controller.ensure();
+  assert.equal(harness.loadCalls, 0);
+  assert.equal(harness.addons.length, 0);
 });
