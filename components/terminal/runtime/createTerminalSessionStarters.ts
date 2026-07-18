@@ -79,6 +79,20 @@ export const getMissingChainHostIds = (
   return requestedIds.filter((hostId) => !resolvedIds.has(hostId));
 };
 
+export const hasMissingConfiguredVaultCredentials = (
+  hosts: Host[],
+  keys: SSHKey[],
+  identities: NonNullable<TerminalSessionStartersContext["identities"]> = [],
+): boolean => hosts.some((host) => {
+  const identity = host.identityId
+    ? identities.find((candidate) => candidate.id === host.identityId)
+    : undefined;
+  if (host.identityId && !identity) return true;
+
+  const resolved = resolveHostAuth({ host, keys, identities });
+  return Boolean(resolved.keyId && !resolved.key);
+});
+
 export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContext) => {
   const globalTerminalSettings = {
     verifyHostKeys: true,
@@ -90,13 +104,17 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
 
   const resolveVaultAuthCollections = async () => {
     let keys = ctx.keysRef?.current ?? ctx.keys;
-    const identities = ctx.identitiesRef?.current ?? ctx.identities;
-    const resolved = resolveHostAuth({ host: ctx.host, keys, identities });
-    if (resolved.keyId && !resolved.key && !isVaultInitialized()) {
+    let identities = ctx.identitiesRef?.current ?? ctx.identities;
+    const credentialHosts = [ctx.host, ...ctx.resolvedChainHosts];
+    if (
+      hasMissingConfiguredVaultCredentials(credentialHosts, keys, identities)
+      && !isVaultInitialized()
+    ) {
       await waitForVaultInitialized();
       keys = ctx.keysRef?.current ?? ctx.keys;
+      identities = ctx.identitiesRef?.current ?? ctx.identities;
     }
-    return { keys, identities: ctx.identitiesRef?.current ?? identities };
+    return { keys, identities };
   };
 
   const tr = (key: string, fallback: string): string => {

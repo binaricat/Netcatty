@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   createTerminalSessionStarters,
   getMissingChainHostIds,
+  hasMissingConfiguredVaultCredentials,
 } from "./createTerminalSessionStarters";
 import { createPromptLineBreakState } from "./promptLineBreak";
 import { resolveStartupCommand } from "./terminalStartupCommands";
@@ -79,6 +80,70 @@ test("getMissingChainHostIds reports unresolved jump hosts", () => {
     ),
     ["jump-2"],
   );
+});
+
+test("vault readiness detects a missing target key", () => {
+  assert.equal(hasMissingConfiguredVaultCredentials([{
+    id: "host-1",
+    label: "Target",
+    hostname: "target.example.test",
+    username: "alice",
+    identityFileId: "key-1",
+  } as never], [], []), true);
+});
+
+test("vault readiness detects a missing target identity", () => {
+  assert.equal(hasMissingConfiguredVaultCredentials([{
+    id: "host-1",
+    label: "Target",
+    hostname: "target.example.test",
+    username: "alice",
+    identityId: "identity-1",
+  } as never], [], []), true);
+});
+
+test("vault readiness detects missing jump-host credentials", () => {
+  const target = {
+    id: "host-1",
+    label: "Target",
+    hostname: "target.example.test",
+    username: "alice",
+  } as never;
+  const jump = {
+    id: "jump-1",
+    label: "Jump",
+    hostname: "jump.example.test",
+    username: "jumper",
+    identityId: "identity-jump",
+  } as never;
+
+  assert.equal(hasMissingConfiguredVaultCredentials([target, jump], [], []), true);
+});
+
+test("vault readiness ignores auth without vault-backed credentials", () => {
+  const hosts = [{
+    id: "password-host",
+    label: "Password",
+    hostname: "password.example.test",
+    username: "alice",
+    authMethod: "password",
+    password: "secret",
+  }, {
+    id: "file-host",
+    label: "File reference",
+    hostname: "file.example.test",
+    username: "alice",
+    authMethod: "key",
+    identityFilePaths: ["~/.ssh/id_ed25519"],
+  }, {
+    id: "agent-host",
+    label: "Agent",
+    hostname: "agent.example.test",
+    username: "alice",
+    authMethod: "auto",
+  }] as never;
+
+  assert.equal(hasMissingConfiguredVaultCredentials(hosts, [], []), false);
 });
 
 test("startSSH forwards imported system agent authentication settings", async () => {
