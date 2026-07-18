@@ -286,6 +286,162 @@ for (const protocol of ["SSH", "Mosh"] as const) {
   });
 }
 
+for (const protocol of ["SSH", "Mosh", "ET"] as const) {
+  const starterName = `start${protocol === "ET" ? "Et" : protocol}` as "startSSH" | "startMosh" | "startEt";
+  const backendName = `start${protocol === "ET" ? "Et" : protocol}Session`;
+
+  test(`${protocol} retry closes an older backend that resolves after replacement`, async () => {
+    const bootTokenRef = { current: Symbol("old") as symbol | null };
+    const isBootActiveRef = { current: true };
+    const pending: Array<{ resolve: (id: string) => void; reject: (error: Error) => void }> = [];
+    const closed: string[] = [];
+    const backend = {
+      backendAvailable: () => true,
+      moshAvailable: () => true,
+      etAvailable: () => true,
+      [backendName]: () => new Promise<string>((resolve, reject) => pending.push({ resolve, reject })),
+      onSessionData: () => noop,
+      onSessionExit: () => noop,
+      onChainProgress: () => noop,
+      writeToSession: noop,
+      resizeSession: noop,
+      closeSession: (id: string) => { closed.push(id); },
+    };
+    const ctx = createStarterContext({ bootTokenRef, isBootActiveRef, terminalBackend: backend });
+    const starters = createTerminalSessionStarters(ctx as never);
+
+    const oldStart = starters[starterName](createTermStub() as never);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    beginTerminalBootAttempt({ bootTokenRef, isBootActiveRef }, "replacement");
+    const latestStart = starters[starterName](createTermStub() as never);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(pending.length, 2);
+
+    pending[1].resolve("latest-session");
+    await latestStart;
+    pending[0].resolve("orphan-session");
+    await oldStart;
+
+    assert.equal(ctx.sessionRef.current, "latest-session");
+    assert.deepEqual(closed, ["orphan-session"]);
+  });
+
+  test(`${protocol} retry suppresses an older backend rejection`, async () => {
+    const bootTokenRef = { current: Symbol("old") as symbol | null };
+    const isBootActiveRef = { current: true };
+    const pending: Array<{ resolve: (id: string) => void; reject: (error: Error) => void }> = [];
+    const errors: string[] = [];
+    const backend = {
+      backendAvailable: () => true,
+      moshAvailable: () => true,
+      etAvailable: () => true,
+      [backendName]: () => new Promise<string>((resolve, reject) => pending.push({ resolve, reject })),
+      onSessionData: () => noop,
+      onSessionExit: () => noop,
+      onChainProgress: () => noop,
+      writeToSession: noop,
+      resizeSession: noop,
+      closeSession: noop,
+    };
+    const ctx = createStarterContext({
+      bootTokenRef,
+      isBootActiveRef,
+      terminalBackend: backend,
+      setError: (error: string | null) => { if (error) errors.push(error); },
+    });
+    const starters = createTerminalSessionStarters(ctx as never);
+
+    const oldStart = starters[starterName](createTermStub() as never);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    beginTerminalBootAttempt({ bootTokenRef, isBootActiveRef }, "replacement");
+    const latestStart = starters[starterName](createTermStub() as never);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    pending[0].reject(new Error("obsolete failure"));
+    await oldStart;
+    pending[1].resolve("latest-session");
+    await latestStart;
+
+    assert.equal(ctx.sessionRef.current, "latest-session");
+    assert.deepEqual(errors, []);
+  });
+}
+
+test("restored ET rereads grouped host credentials after vault hydration", async () => {
+  const fallbackHost = {
+    id: "host-1", label: "Target", hostname: "target.test", group: "Production",
+  };
+  const hydratedHost = {
+    ...fallbackHost, username: "group-user", password: "group-secret", authMethod: "password",
+  };
+  const hostRef = { current: fallbackHost };
+  let options: Record<string, unknown> | undefined;
+  const backend = {
+    etAvailable: () => true,
+    startEtSession: async (value: Record<string, unknown>) => { options = value; return "et-session"; },
+    onSessionData: () => noop,
+    onSessionExit: () => noop,
+    onChainProgress: () => noop,
+    writeToSession: noop,
+    resizeSession: noop,
+  };
+  const ctx = createStarterContext({
+    host: fallbackHost,
+    hostRef,
+    waitForVaultInitialization: true,
+    terminalBackend: backend,
+  });
+
+  setVaultInitialized(false);
+  try {
+    const start = createTerminalSessionStarters(ctx as never).startEt(createTermStub() as never);
+    hostRef.current = hydratedHost;
+    setVaultInitialized(true);
+    await start;
+  } finally {
+    setVaultInitialized(true);
+  }
+
+  assert.equal(options?.username, "group-user");
+  assert.equal(options?.password, "group-secret");
+});
+
+test("restored ET rereads vault keys after hydration", async () => {
+  const fallbackHost = {
+    id: "host-1", label: "Target", hostname: "target.test", identityFileId: "key-1", authMethod: "key",
+  };
+  const keysRef = { current: [] as Array<Record<string, unknown>> };
+  let options: Record<string, unknown> | undefined;
+  const backend = {
+    etAvailable: () => true,
+    startEtSession: async (value: Record<string, unknown>) => { options = value; return "et-session"; },
+    onSessionData: () => noop,
+    onSessionExit: () => noop,
+    onChainProgress: () => noop,
+    writeToSession: noop,
+    resizeSession: noop,
+  };
+  const ctx = createStarterContext({
+    host: fallbackHost,
+    hostRef: { current: fallbackHost },
+    keysRef,
+    waitForVaultInitialization: true,
+    terminalBackend: backend,
+  });
+
+  setVaultInitialized(false);
+  try {
+    const start = createTerminalSessionStarters(ctx as never).startEt(createTermStub() as never);
+    keysRef.current = [{ id: "key-1", name: "Vault key", privateKey: "private-key" }];
+    setVaultInitialized(true);
+    await start;
+  } finally {
+    setVaultInitialized(true);
+  }
+
+  assert.equal(options?.keyId, "key-1");
+  assert.equal(options?.privateKey, "private-key");
+});
+
 test("restored SSH resolves identity and group auth after vault readiness before prompting", async () => {
   let capturedOptions: Record<string, unknown> | null = null;
   const fallbackHost = {

@@ -71,9 +71,10 @@ test("manual reconnect captures restore cwd intent before clearing restored stat
   const reconnectIndex = source.indexOf("const startReconnect = ");
   const manualBranchIndex = source.indexOf('if (mode === "manual")', reconnectIndex);
   const manualPrepareIndex = source.indexOf("prepareRestoredReconnect();", manualBranchIndex);
-  const bootActiveIndex = source.indexOf("isBootActiveRef.current = true", manualPrepareIndex);
   const connectingIndex = source.indexOf('updateStatus("connecting")', manualPrepareIndex);
   const startNewSessionIndex = source.indexOf("const startNewSession = () =>", connectingIndex);
+  const bootActiveIndex = source.indexOf("beginTerminalBootAttempt", startNewSessionIndex);
+  const backendStartIndex = source.indexOf("sessionStarters.start", startNewSessionIndex);
 
   assert.notEqual(importIndex, -1);
   assert.notEqual(refIndex, -1);
@@ -87,12 +88,13 @@ test("manual reconnect captures restore cwd intent before clearing restored stat
   assert.notEqual(bootActiveIndex, -1);
   assert.notEqual(connectingIndex, -1);
   assert.notEqual(startNewSessionIndex, -1);
+  assert.notEqual(backendStartIndex, -1);
   assert.ok(
     captureAssignIndex < captureCallIndex && manualPrepareIndex < connectingIndex,
     "manual retry must capture cwd intent while restoreState is still available",
   );
   assert.ok(
-    bootActiveIndex < startNewSessionIndex,
+    startNewSessionIndex < bootActiveIndex && bootActiveIndex < backendStartIndex,
     "manual retry must reactivate the boot guard before opening a backend session",
   );
 });

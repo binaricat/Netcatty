@@ -112,8 +112,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
     ctx.isBootActiveRef?.current !== false
     && (!ctx.bootTokenRef || ctx.bootTokenRef.current === bootToken);
 
-  const resolveVaultConfiguration = async () => {
-    const bootToken = ctx.bootTokenRef?.current;
+  const resolveVaultConfiguration = async (bootToken = ctx.bootTokenRef?.current) => {
     let host: Host = ctx.hostRef?.current ?? ctx.host;
     let resolvedChainHosts: Host[] = ctx.resolvedChainHostsRef?.current ?? ctx.resolvedChainHosts;
     let keys: SSHKey[] = ctx.keysRef?.current ?? ctx.keys;
@@ -210,6 +209,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
   };
 
   const startSSH = async (term: XTerm) => {
+    const bootToken = ctx.bootTokenRef?.current;
     if (!ctx.terminalBackend.backendAvailable()) {
       ctx.setError("Native SSH bridge unavailable. Launch via Electron app.");
       writeTerminalLine(
@@ -224,8 +224,9 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
 
     let vaultConfig;
     try {
-      vaultConfig = await resolveVaultConfiguration();
+      vaultConfig = await resolveVaultConfiguration(bootToken);
     } catch (error) {
+      if (!isBootActive(bootToken)) return;
       const message = `Saved credentials could not be decrypted: ${error instanceof Error ? error.message : String(error)}`;
       ctx.setError(message);
       writeTerminalLine(ctx, term, `\r\n[${message}]`);
@@ -492,7 +493,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
     {
       const unsub = ctx.terminalBackend.onChainProgress((sid, hop, total, label, status, error) => {
         // P1: Only process events for this session
-        if (sid !== ctx.sessionId) return;
+        if (sid !== ctx.sessionId || !isBootActive(bootToken)) return;
 
         // P3: Only show chain progress UI for multi-hop connections
         if (total > 1) {
@@ -703,6 +704,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         try {
           id = await startAttempt({ key, password: hasPassword ? effectivePassword : undefined, useIdentityFiles: true });
         } catch (err) {
+          if (!isBootActive(bootToken)) return;
           if (isAuthError(err) && hasPassword) {
             ctx.setProgressLogs((prev) => [
               ...prev,
@@ -715,6 +717,12 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         }
       } else {
         id = await startAttempt({ password: effectivePassword });
+      }
+
+      if (!isBootActive(bootToken)) {
+        if (unsubscribeChainProgress) unsubscribeChainProgress();
+        closeOrphanBackendSession(ctx, id);
+        return;
       }
 
       if (unsubscribeChainProgress) unsubscribeChainProgress();
@@ -748,6 +756,10 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         }, 600);
       }
     } catch (err) {
+      if (!isBootActive(bootToken)) {
+        if (unsubscribeChainProgress) unsubscribeChainProgress();
+        return;
+      }
       const message = err instanceof Error ? err.message : String(err);
       const authError = isAuthError(err);
 
@@ -962,6 +974,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
   };
 
   const startMosh = async (term: XTerm) => {
+    const bootToken = ctx.bootTokenRef?.current;
     if (!ctx.terminalBackend.moshAvailable()) {
       ctx.setError("Mosh bridge unavailable. Please run the desktop build.");
       writeTerminalLine(ctx, term, "\r\n[Mosh bridge unavailable. Please run the desktop build.]");
@@ -981,7 +994,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         ctx.updateStatus("disconnected");
       };
 
-      const vaultConfig = await resolveVaultConfiguration();
+      const vaultConfig = await resolveVaultConfiguration(bootToken);
       if (!vaultConfig) return;
       const { host, resolvedChainHosts, keys, identities } = vaultConfig;
 
@@ -1105,6 +1118,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         });
       };
       const onMoshReady = () => {
+        if (!isBootActive(bootToken)) return;
         moshReadyFired = true;
         if (sessionAttached) {
           runMoshStartup();
@@ -1150,6 +1164,11 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         env: moshEnv,
         sessionLog: ctx.sessionLog?.enabled ? ctx.sessionLog : undefined,
       });
+      if (!isBootActive(bootToken)) {
+        cleanupMoshStartupWait();
+        closeOrphanBackendSession(ctx, id);
+        return;
+      }
       attachedSessionId = id;
 
       if (!tryAttachSessionToTerminal(ctx, term, id, {
@@ -1182,6 +1201,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
       disposeMoshReady = undefined;
       cancelPendingStartupCommand?.();
       cancelPendingStartupCommand = undefined;
+      if (!isBootActive(bootToken)) return;
       const message = err instanceof Error ? err.message : String(err);
       ctx.setError(message);
       writeTerminalLine(ctx, term, `\r\n[Failed to start Mosh: ${message}]`);
@@ -1190,6 +1210,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
   };
 
   const startEt = async (term: XTerm) => {
+    const bootToken = ctx.bootTokenRef?.current;
     if (!ctx.terminalBackend.etAvailable()) {
       ctx.setError("EternalTerminal bridge unavailable. Please run the desktop build.");
       writeTerminalLine(ctx, term, "\r\n[EternalTerminal bridge unavailable. Please run the desktop build.]");
@@ -1204,20 +1225,31 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         ctx.updateStatus("disconnected");
       };
 
-      if (ctx.host.proxyProfileId && !ctx.host.proxyConfig) {
-        stopEt(`Saved proxy for host "${ctx.host.label || ctx.host.hostname}" is missing. Open host settings and select a valid proxy.`);
+      let vaultConfig;
+      try {
+        vaultConfig = await resolveVaultConfiguration(bootToken);
+      } catch (error) {
+        if (!isBootActive(bootToken)) return;
+        stopEt(`Saved credentials could not be decrypted: ${error instanceof Error ? error.message : String(error)}`);
         return;
       }
-      if (findMissingProxyIdentityId(ctx.host.proxyConfig, ctx.identities)) {
-        stopEt(formatMissingProxyIdentityMessage(ctx.host.label || ctx.host.hostname));
+      if (!vaultConfig) return;
+      const { host, resolvedChainHosts, keys, identities } = vaultConfig;
+
+      if (host.proxyProfileId && !host.proxyConfig) {
+        stopEt(`Saved proxy for host "${host.label || host.hostname}" is missing. Open host settings and select a valid proxy.`);
         return;
       }
-      if (findIncompleteProxyIdentityId(ctx.host.proxyConfig, ctx.identities)) {
-        stopEt(formatIncompleteProxyIdentityMessage(ctx.host.label || ctx.host.hostname));
+      if (findMissingProxyIdentityId(host.proxyConfig, identities)) {
+        stopEt(formatMissingProxyIdentityMessage(host.label || host.hostname));
+        return;
+      }
+      if (findIncompleteProxyIdentityId(host.proxyConfig, identities)) {
+        stopEt(formatIncompleteProxyIdentityMessage(host.label || host.hostname));
         return;
       }
 
-      if (hasUsableProxyConfig(ctx.host.proxyConfig)) {
+      if (hasUsableProxyConfig(host.proxyConfig)) {
         stopEt(tr(
           "terminal.et.proxyUnsupported",
           "EternalTerminal does not currently support Netcatty proxy settings. Use SSH or remove the proxy for this host.",
@@ -1229,8 +1261,8 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
       // just the resolved list. A second hop whose host ID fails to resolve
       // would otherwise slip past a resolved-length check and silently drop to
       // a single (or zero) hop.
-      const configuredChainHostCount = ctx.host.hostChain?.hostIds?.length ?? 0;
-      if (configuredChainHostCount > 1 || ctx.resolvedChainHosts.length > 1) {
+      const configuredChainHostCount = host.hostChain?.hostIds?.length ?? 0;
+      if (configuredChainHostCount > 1 || resolvedChainHosts.length > 1) {
         stopEt(tr(
           "terminal.et.multiJumpUnsupported",
           "EternalTerminal currently supports at most one jump host in Netcatty.",
@@ -1241,7 +1273,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
       // Mirror startSSH: if a configured jump host could not be resolved (its
       // host ID is missing/invalid), fail loudly instead of silently falling
       // back to a direct connection that may reach the wrong target.
-      const missingChainHostIds = getMissingChainHostIds(ctx.host, ctx.resolvedChainHosts);
+      const missingChainHostIds = getMissingChainHostIds(host, resolvedChainHosts);
       if (missingChainHostIds.length > 0) {
         const base = tr(
           "terminal.auth.jumpHostMissing",
@@ -1254,13 +1286,13 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         return;
       }
 
-      const unresolvedJumpProxyHost = ctx.resolvedChainHosts.find((jumpHost) => jumpHost.proxyProfileId && !jumpHost.proxyConfig);
+      const unresolvedJumpProxyHost = resolvedChainHosts.find((jumpHost) => jumpHost.proxyProfileId && !jumpHost.proxyConfig);
       if (unresolvedJumpProxyHost) {
         stopEt(`Saved proxy for jump host "${unresolvedJumpProxyHost.label || unresolvedJumpProxyHost.hostname}" is missing. Open host settings and select a valid proxy.`);
         return;
       }
-      const unresolvedJumpProxyIdentityHost = ctx.resolvedChainHosts.find((jumpHost) =>
-        findMissingProxyIdentityId(jumpHost.proxyConfig, ctx.identities),
+      const unresolvedJumpProxyIdentityHost = resolvedChainHosts.find((jumpHost) =>
+        findMissingProxyIdentityId(jumpHost.proxyConfig, identities),
       );
       if (unresolvedJumpProxyIdentityHost) {
         stopEt(formatMissingProxyIdentityMessage(
@@ -1268,8 +1300,8 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         ));
         return;
       }
-      const incompleteJumpProxyIdentityHost = ctx.resolvedChainHosts.find((jumpHost) =>
-        findIncompleteProxyIdentityId(jumpHost.proxyConfig, ctx.identities),
+      const incompleteJumpProxyIdentityHost = resolvedChainHosts.find((jumpHost) =>
+        findIncompleteProxyIdentityId(jumpHost.proxyConfig, identities),
       );
       if (incompleteJumpProxyIdentityHost) {
         stopEt(formatIncompleteProxyIdentityMessage(
@@ -1280,9 +1312,9 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
 
       const pendingAuth = ctx.pendingAuthRef.current;
       const resolvedAuth = resolveHostAuth({
-        host: ctx.host,
-        keys: ctx.keys,
-        identities: ctx.identities,
+        host,
+        keys,
+        identities,
         override: pendingAuth
           ? {
             authMethod: pendingAuth.authMethod,
@@ -1306,13 +1338,13 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         : etReferenceKeyPath
           ? [etReferenceKeyPath]
           : allowsLocalIdentityFallback
-            ? ctx.host.identityFilePaths
+            ? host.identityFilePaths
             : undefined;
-      const etAgentAuth = resolveBridgeSshAgentAuth(ctx.host, key, authMethod);
+      const etAgentAuth = resolveBridgeSshAgentAuth(host, key, authMethod);
       const usesSystemAgent = etAgentAuth.useSshAgent === true;
       const hasKeyMaterial = usesSystemAgent || (
         (!!sanitizeCredentialValue(key?.privateKey) || !!etIdentityFilePaths?.length)
-        && (authMethod !== "password" || ctx.host.useSshAgent === true)
+        && (authMethod !== "password" || host.useSshAgent === true)
       );
       const hasPassword = !!effectivePassword;
       const needsCredentialReentry =
@@ -1335,11 +1367,11 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
 
       const jumpHostsWithUnavailableCredentials: string[] = [];
       const unsupportedJumpProxies: string[] = [];
-      const jumpHosts = ctx.resolvedChainHosts.map<NetcattyJumpHost>((jumpHost) => {
+      const jumpHosts = resolvedChainHosts.map<NetcattyJumpHost>((jumpHost) => {
         const jumpAuth = resolveHostAuth({
           host: jumpHost,
-          keys: ctx.keys,
-          identities: ctx.identities,
+          keys,
+          identities,
         });
         const jumpKey = jumpAuth.key;
         const rawJumpPassword = jumpAuth.password;
@@ -1428,11 +1460,11 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         return;
       }
 
-      const etEnv = buildTermEnv(ctx.host, ctx.terminalSettings);
+      const etEnv = buildTermEnv(host, ctx.terminalSettings);
       const id = await ctx.terminalBackend.startEtSession({
         sessionId: ctx.sessionId,
-        hostname: ctx.host.hostname,
-        hostId: ctx.host.id,
+        hostname: host.hostname,
+        hostId: host.id,
         username: resolvedAuth.username || "root",
         password: effectivePassword,
         privateKey: (usesSystemAgent && !key?.certificate) || key?.source === 'reference' ? undefined : sanitizeCredentialValue(key?.privateKey),
@@ -1444,22 +1476,27 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         authMethod,
         identityFilePaths: etIdentityFilePaths,
         ...etAgentAuth,
-        port: ctx.host.port || 22,
-        etPort: ctx.host.etPort,
-        legacyAlgorithms: ctx.host.legacyAlgorithms,
-        skipEcdsaHostKey: ctx.host.skipEcdsaHostKey,
-        algorithmOverrides: ctx.host.algorithms,
+        port: host.port || 22,
+        etPort: host.etPort,
+        legacyAlgorithms: host.legacyAlgorithms,
+        skipEcdsaHostKey: host.skipEcdsaHostKey,
+        algorithmOverrides: host.algorithms,
         knownHosts: ctx.knownHosts,
         verifyHostKeys: globalTerminalSettings.verifyHostKeys,
         jumpHosts: jumpHosts.length > 0 ? jumpHosts : undefined,
-        agentForwarding: ctx.host.agentForwarding,
+        agentForwarding: host.agentForwarding,
         sudoAutofillPassword: resolveSavedSudoAutofillPassword(),
         cols: term.cols,
         rows: term.rows,
-        charset: ctx.host.charset,
+        charset: host.charset,
         env: etEnv,
         sessionLog: ctx.sessionLog?.enabled ? ctx.sessionLog : undefined,
       });
+
+      if (!isBootActive(bootToken)) {
+        closeOrphanBackendSession(ctx, id);
+        return;
+      }
 
       if (!tryAttachSessionToTerminal(ctx, term, id, {
         onExitMessage: (evt) =>
@@ -1483,6 +1520,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         }, 600);
       }
     } catch (err) {
+      if (!isBootActive(bootToken)) return;
       const message = err instanceof Error ? err.message : String(err);
       ctx.setError(message);
       writeTerminalLine(ctx, term, `\r\n[Failed to start EternalTerminal: ${message}]`);
