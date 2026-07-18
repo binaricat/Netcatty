@@ -70,6 +70,7 @@ function runStatsCommandWithBusyBoxTools(command) {
     "  if [ \"$1\" = '-BG' ]; then return 1; fi",
     "  printf '%s\\n' 'Filesystem 1024-blocks Used Available Capacity Mounted on'",
     "  printf '%s\\n' 'overlayfs:/overlay 1048576 262144 786432 25% /'",
+    "  printf '%s\\n' '/dev/loop0 131072 131072 0 100% /snap/example/1'",
     "}",
     command,
   ].join("\n");
@@ -93,7 +94,7 @@ function runStatsCommandWithBusyBoxSmpTop(command) {
   return spawnSync("sh", ["-c", script], { encoding: "utf8" });
 }
 
-test("getServerStats falls back to BusyBox tools for process and root disk data", async () => {
+test("getServerStats falls back to BusyBox tools and excludes loop-backed images", async () => {
   const sessions = new Map();
   sessions.set("sid", {
     type: "ssh",
