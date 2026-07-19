@@ -306,7 +306,7 @@ export const sortSftpEntries = (
         const aIsDir = isNavigableDirectory(a);
         const bIsDir = isNavigableDirectory(b);
 
-        if (directoriesFirst && sortField !== 'type') {
+        if (directoriesFirst) {
             if (aIsDir && !bIsDir) return -1;
             if (!aIsDir && bIsDir) return 1;
         }

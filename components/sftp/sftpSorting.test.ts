@@ -34,3 +34,39 @@ test('SFTP sorting can mix files and directories in the selected order', () => {
 
   assert.deepEqual(sorted.map(({ name }) => name), ['newest.log', 'dir-b', 'dir-a']);
 });
+
+test('SFTP kind sorting keeps directories first when enabled', () => {
+  const kindEntries = [
+    entry('BUILD', 'file', 100),
+    entry('src', 'directory', 100),
+    entry('archive.zip', 'file', 100),
+  ];
+
+  const sorted = sortSftpEntries(kindEntries, 'type', 'asc', true);
+
+  assert.deepEqual(sorted.map(({ name }) => name), ['src', 'BUILD', 'archive.zip']);
+});
+
+test('SFTP descending kind sorting keeps directories first when enabled', () => {
+  const kindEntries = [
+    entry('BUILD', 'file', 100),
+    entry('src', 'directory', 100),
+    entry('archive.zip', 'file', 100),
+  ];
+
+  const sorted = sortSftpEntries(kindEntries, 'type', 'desc', true);
+
+  assert.deepEqual(sorted.map(({ name }) => name), ['src', 'archive.zip', 'BUILD']);
+});
+
+test('SFTP kind sorting can mix files and directories when folders first is disabled', () => {
+  const kindEntries = [
+    entry('BUILD', 'file', 100),
+    entry('src', 'directory', 100),
+    entry('archive.zip', 'file', 100),
+  ];
+
+  const sorted = sortSftpEntries(kindEntries, 'type', 'asc', false);
+
+  assert.deepEqual(sorted.map(({ name }) => name), ['BUILD', 'src', 'archive.zip']);
+});
