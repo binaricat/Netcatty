@@ -12,20 +12,24 @@ import {
   LOCAL_STORAGE_ADAPTER_CHANGED_EVENT,
   localStorageAdapter,
 } from "../../../infrastructure/persistence/localStorageAdapter";
+import { useSftpDirectoriesFirst } from "../../../application/state/sftp/useSftpDirectoriesFirst";
 
-interface UseSftpPaneSortingResult {
+export interface UseSftpPaneSortingResult {
   sortField: SortField;
   sortOrder: SortOrder;
+  directoriesFirst: boolean;
   columnWidths: ColumnWidths;
   visibleColumns: SftpColumnVisibility;
   handleSort: (field: SortField) => void;
   handleResizeStart: (field: keyof ColumnWidths, e: React.MouseEvent) => void;
   toggleColumnVisibility: (field: keyof ColumnWidths) => void;
+  toggleDirectoriesFirst: () => void;
 }
 
 export const useSftpPaneSorting = (): UseSftpPaneSortingResult => {
   const [sortField, setSortField] = useState<SortField>("name");
   const [sortOrder, setSortOrder] = useState<SortOrder>("asc");
+  const { directoriesFirst, toggleDirectoriesFirst } = useSftpDirectoriesFirst();
   const [columnWidths, setColumnWidths] = useState<ColumnWidths>({
     name: 56,
     modified: 28,
@@ -82,14 +86,14 @@ export const useSftpPaneSorting = (): UseSftpPaneSortingResult => {
     startWidth: number;
   } | null>(null);
 
-  const handleSort = (field: SortField) => {
+  const handleSort = useCallback((field: SortField) => {
     if (sortField === field) {
       setSortOrder((prev) => (prev === "asc" ? "desc" : "asc"));
     } else {
       setSortField(field);
       setSortOrder("asc");
     }
-  };
+  }, [sortField]);
 
   const rafIdRef = useRef<number | null>(null);
   const lastClientXRef = useRef(0);
@@ -153,10 +157,12 @@ export const useSftpPaneSorting = (): UseSftpPaneSortingResult => {
   return {
     sortField,
     sortOrder,
+    directoriesFirst,
     columnWidths,
     visibleColumns,
     handleSort,
     handleResizeStart,
     toggleColumnVisibility,
+    toggleDirectoriesFirst,
   };
 };

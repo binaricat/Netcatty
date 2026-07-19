@@ -5,7 +5,7 @@
  * Supports copy, cut, paste, select all, rename, delete, refresh, and new folder.
  */
 
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import type { MutableRefObject } from "react";
 import { KeyBinding, matchesKeyBinding } from "../../../domain/models";
 import { getParentPath, joinPath } from "../../../application/state/sftp/utils";
@@ -31,6 +31,7 @@ import {
   sftpClipboardUploadStore,
   type ClipboardLocalFile,
 } from "../clipboardUpload";
+import { advanceSftpTypeahead, type SftpTypeaheadState } from "../../../domain/sftpTypeahead";
 
 // SFTP action names that we handle
 const SFTP_ACTIONS = new Set([
@@ -169,6 +170,8 @@ export const useSftpKeyboardShortcuts = ({
   dialogActionScopeId,
   isActive,
 }: UseSftpKeyboardShortcutsParams) => {
+  const typeaheadRef = useRef<{ paneId: string; state: SftpTypeaheadState } | null>(null);
+
   const getFocusedPane = useCallback(() => {
     const sftp = sftpRef.current;
     const focusedSide = sftpFocusStore.getFocusedSide();
@@ -502,6 +505,46 @@ export const useSftpKeyboardShortcuts = ({
       // Skip when a dialog or overlay is open to prevent SFTP shortcuts from
       // firing while interacting with unrelated dialogs (e.g. settings, confirm).
       if (hasOpenDialog()) {
+        return;
+      }
+
+      // ── Printable keys: select the first visible name with this prefix ──
+      if (
+        e.key.length === 1
+        && !e.ctrlKey
+        && !e.metaKey
+        && !e.altKey
+        && !e.isComposing
+        && !/^\s$/u.test(e.key)
+        && !target.closest?.('[role="menu"], [role="listbox"]')
+      ) {
+        const { sftp, focusedSide, pane } = getFocusedPane();
+        if (!pane?.connection) return;
+
+        const listItems = sftpListOrderStore.getItems(pane.id);
+        const treeItems = listItems.length === 0
+          ? sftpTreeSelectionStore.getPaneState(pane.id).visibleItems
+          : [];
+        const names = listItems.length > 0 ? listItems : treeItems.map((item) => item.name);
+        if (names.length === 0) return;
+
+        const previous = typeaheadRef.current?.paneId === pane.id
+          ? typeaheadRef.current.state
+          : null;
+        const result = advanceSftpTypeahead(names, previous, e.key, Date.now());
+        typeaheadRef.current = { paneId: pane.id, state: result.state };
+
+        e.preventDefault();
+        e.stopPropagation();
+        if (result.matchIndex < 0) return;
+
+        keepOnlyPaneSelections(sftp, { side: focusedSide, tabId: pane.id });
+        if (listItems.length > 0) {
+          sftp.rangeSelect(focusedSide, [listItems[result.matchIndex]]);
+        } else {
+          sftpTreeSelectionStore.setSelection(pane.id, [treeItems[result.matchIndex].path]);
+        }
+        sftpKeyboardSelectionStore.set(pane.id, result.matchIndex, result.matchIndex);
         return;
       }
 
@@ -888,7 +931,7 @@ export const useSftpKeyboardShortcuts = ({
         }
       }
     },
-    [dialogActionScopeId, hotkeyScheme, isActive, keyBindings, pasteInternalSftpClipboard, sftpRef]
+    [dialogActionScopeId, getFocusedPane, hotkeyScheme, isActive, keyBindings, pasteInternalSftpClipboard, sftpRef]
   );
 
   useEffect(() => {

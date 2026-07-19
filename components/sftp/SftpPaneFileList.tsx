@@ -3,10 +3,8 @@ import { AppWindow, ArrowDown, ArrowRight, ArrowUp, ChevronDown, ClipboardCopy, 
 import { Button } from "../ui/button";
 import {
   ContextMenu,
-  ContextMenuCheckboxItem,
   ContextMenuContent,
   ContextMenuItem,
-  ContextMenuSeparator,
   ContextMenuTrigger,
 } from "../ui/context-menu";
 import { cn } from "../../lib/utils";
@@ -15,9 +13,12 @@ import type { SftpFileEntry } from "../../types";
 import type { SftpPane } from "../../application/state/sftp/types";
 import type { SftpTransferSource } from "./SftpContext";
 import { sftpListOrderStore } from "./hooks/useSftpListOrderStore";
-import { buildSftpColumnTemplate, isNavigableDirectory, isSftpColumnMenuKey, type ColumnWidths, type SftpColumnVisibility, type SortField, type SortOrder } from "./utils";
+import type { UseSftpPaneSortingResult } from "./hooks/useSftpPaneSorting";
+import { buildSftpColumnTemplate, isNavigableDirectory, isSftpColumnMenuKey } from "./utils";
 import { isKnownBinaryFile } from "../../lib/sftpFileUtils";
 import { SftpFileRow } from "./SftpFileRow";
+import { SftpColumnMenuItems } from "./SftpColumnMenuItems";
+import { getSftpVirtualListScrollTop } from "../../domain/sftpVirtualList";
 import {
   getSftpListUploadFilesTargetPath,
   getSftpUploadFilesLabelKey,
@@ -31,13 +32,7 @@ interface SftpPaneFileListProps {
   pane: SftpPane;
   side: "left" | "right";
   isPaneFocused: boolean;
-  columnWidths: ColumnWidths;
-  visibleColumns: SftpColumnVisibility;
-  sortField: SortField;
-  sortOrder: SortOrder;
-  handleSort: (field: SortField) => void;
-  handleResizeStart: (field: keyof ColumnWidths, e: React.MouseEvent) => void;
-  toggleColumnVisibility: (field: keyof ColumnWidths) => void;
+  sorting: UseSftpPaneSortingResult;
   fileListRef: React.RefObject<HTMLDivElement>;
   handleFileListScroll: (e: React.UIEvent<HTMLDivElement>) => void;
   shouldVirtualize: boolean;
@@ -126,13 +121,7 @@ export const SftpPaneFileList: React.FC<SftpPaneFileListProps> = React.memo(({
   pane,
   side,
   isPaneFocused,
-  columnWidths,
-  visibleColumns,
-  sortField,
-  sortOrder,
-  handleSort,
-  handleResizeStart,
-  toggleColumnVisibility,
+  sorting,
   fileListRef,
   handleFileListScroll,
   shouldVirtualize,
@@ -172,6 +161,17 @@ export const SftpPaneFileList: React.FC<SftpPaneFileListProps> = React.memo(({
   rowHeight,
   visibleRows,
 }) => {
+  const {
+    columnWidths,
+    visibleColumns,
+    directoriesFirst,
+    sortField,
+    sortOrder,
+    handleSort,
+    handleResizeStart,
+    toggleColumnVisibility,
+    toggleDirectoriesFirst,
+  } = sorting;
   const filesByName = useMemo(() => {
     const map = new Map<string, SftpFileEntry>();
     sortedDisplayFiles.forEach((entry) => {
@@ -199,8 +199,21 @@ export const SftpPaneFileList: React.FC<SftpPaneFileListProps> = React.memo(({
 
     const row = Array.from(container.querySelectorAll<HTMLElement>('[data-sftp-row="true"]'))
       .find((element) => element.dataset.entryName === selectedName);
-    row?.scrollIntoView({ block: "nearest" });
-  }, [fileListRef, pane.selectedFiles]);
+    if (row) {
+      row.scrollIntoView({ block: "nearest" });
+      return;
+    }
+
+    if (!shouldVirtualize || rowHeight <= 0) return;
+    const itemIndex = sortedDisplayFiles.findIndex((entry) => entry.name === selectedName);
+    if (itemIndex < 0) return;
+    container.scrollTop = getSftpVirtualListScrollTop({
+      itemIndex,
+      rowHeight,
+      currentScrollTop: container.scrollTop,
+      viewportHeight: container.clientHeight,
+    });
+  }, [fileListRef, pane.selectedFiles, rowHeight, shouldVirtualize, sortedDisplayFiles]);
 
   // Use refs for frequently-changing values in context-menu actions
   const selectedFilesRef = useRef(pane.selectedFiles);
@@ -597,18 +610,12 @@ export const SftpPaneFileList: React.FC<SftpPaneFileListProps> = React.memo(({
         </div>
       </ContextMenuTrigger>
       <ContextMenuContent>
-        <ContextMenuCheckboxItem checked disabled>
-          {t("sftp.columns.name")}
-        </ContextMenuCheckboxItem>
-        {(["modified", "size", "type"] as const).map((field) => (
-          <ContextMenuCheckboxItem
-            key={field}
-            checked={visibleColumns[field]}
-            onCheckedChange={() => toggleColumnVisibility(field)}
-          >
-            {t(field === "type" ? "sftp.columns.kind" : `sftp.columns.${field}`)}
-          </ContextMenuCheckboxItem>
-        ))}
+        <SftpColumnMenuItems
+          visibleColumns={visibleColumns}
+          directoriesFirst={directoriesFirst}
+          toggleColumnVisibility={toggleColumnVisibility}
+          toggleDirectoriesFirst={toggleDirectoriesFirst}
+        />
       </ContextMenuContent>
     </ContextMenu>
 

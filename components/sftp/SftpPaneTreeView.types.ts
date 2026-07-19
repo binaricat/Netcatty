@@ -1,8 +1,7 @@
-import type React from 'react';
 import type { SftpFileEntry } from '../../types';
 import type { SftpPane } from '../../application/state/sftp/types';
 import type { SftpTransferSource } from './SftpContext';
-import type { ColumnWidths, SftpColumnVisibility, SortField, SortOrder } from './utils';
+import type { UseSftpPaneSortingResult } from './hooks/useSftpPaneSorting';
 
 export interface SftpPaneTreeViewProps {
   pane: SftpPane;
@@ -31,12 +30,6 @@ export interface SftpPaneTreeViewProps {
   onUploadExternalFiles?: (dataTransfer: DataTransfer, targetPath?: string) => Promise<void>;
   onUploadExternalFileList?: (fileList: FileList, targetPath?: string) => Promise<void>;
   onUploadExternalFolder?: (targetPath?: string) => Promise<void>;
-  columnWidths: ColumnWidths;
-  visibleColumns: SftpColumnVisibility;
-  handleSort: (field: SortField) => void;
-  handleResizeStart: (field: keyof ColumnWidths, e: React.MouseEvent) => void;
-  toggleColumnVisibility: (field: keyof ColumnWidths) => void;
-  sortField: SortField;
-  sortOrder: SortOrder;
+  sorting: UseSftpPaneSortingResult;
   reloadRequest: { token: number; paths?: string[]; full?: boolean };
 }

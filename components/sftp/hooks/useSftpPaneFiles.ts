@@ -12,6 +12,7 @@ interface UseSftpPaneFilesParams {
   enableListView: boolean;
   sortField: SortField;
   sortOrder: SortOrder;
+  directoriesFirst: boolean;
 }
 
 interface UseSftpPaneFilesResult {
@@ -28,6 +29,7 @@ export const useSftpPaneFiles = ({
   enableListView,
   sortField,
   sortOrder,
+  directoriesFirst,
 }: UseSftpPaneFilesParams): UseSftpPaneFilesResult => {
   // Extract ".." once and process the remaining files through filter -> sort
   // in fewer passes, instead of repeatedly filtering/finding ".." entries.
@@ -75,12 +77,12 @@ export const useSftpPaneFiles = ({
 
     const display = parentEntry ? [parentEntry, ...otherFiles] : otherFiles;
     const sorted = otherFiles.length
-      ? sortSftpEntries(otherFiles, sortField, sortOrder)
+      ? sortSftpEntries(otherFiles, sortField, sortOrder, directoriesFirst)
       : otherFiles;
     const sortedDisplay = parentEntry ? [parentEntry, ...sorted] : sorted;
 
     return { displayFiles: display, sortedDisplayFiles: sortedDisplay };
-  }, [connection, enableListView, filteredFiles, sortField, sortOrder]);
+  }, [connection, directoriesFirst, enableListView, filteredFiles, sortField, sortOrder]);
 
   return { filteredFiles, displayFiles, sortedDisplayFiles };
 };

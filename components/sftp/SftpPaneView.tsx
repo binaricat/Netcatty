@@ -25,7 +25,7 @@ import { useSftpPaneDialogs } from "./hooks/useSftpPaneDialogs";
 import { useSftpPaneDragAndSelect } from "./hooks/useSftpPaneDragAndSelect";
 import { useSftpPaneFiles } from "./hooks/useSftpPaneFiles";
 import { useSftpPanePath } from "./hooks/useSftpPanePath";
-import { useSftpPaneSorting } from "./hooks/useSftpPaneSorting";
+import { useSftpPaneSorting, type UseSftpPaneSortingResult } from "./hooks/useSftpPaneSorting";
 import { useSftpPaneVirtualList } from "./hooks/useSftpPaneVirtualList";
 import { useSftpDialogActionHandler } from "./hooks/useSftpDialogAction";
 import { useSftpBookmarks } from "./hooks/useSftpBookmarks";
@@ -160,11 +160,13 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
   const {
     sortField,
     sortOrder,
+    directoriesFirst,
     columnWidths,
     visibleColumns,
     handleSort,
     handleResizeStart,
     toggleColumnVisibility,
+    toggleDirectoriesFirst,
   } = useSftpPaneSorting();
 
   // Bookmark support
@@ -224,6 +226,7 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
     enableListView: viewMode === 'list',
     sortField,
     sortOrder,
+    directoriesFirst,
   });
   const {
     isEditingPath,
@@ -407,9 +410,30 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
 
   useSftpDialogActionHandler(side, dialogActionScopeId, dialogActionHandlers, isActive);
 
-  const handleSortWithTransition = (field: typeof sortField) => {
+  const handleSortWithTransition = useCallback((field: typeof sortField) => {
     startTransition(() => handleSort(field));
-  };
+  }, [handleSort, startTransition]);
+  const sortingControls = useMemo<UseSftpPaneSortingResult>(() => ({
+    sortField,
+    sortOrder,
+    directoriesFirst,
+    columnWidths,
+    visibleColumns,
+    handleSort: handleSortWithTransition,
+    handleResizeStart,
+    toggleColumnVisibility,
+    toggleDirectoriesFirst,
+  }), [
+    columnWidths,
+    directoriesFirst,
+    handleResizeStart,
+    handleSortWithTransition,
+    sortField,
+    sortOrder,
+    toggleColumnVisibility,
+    toggleDirectoriesFirst,
+    visibleColumns,
+  ]);
 
   const handleRefresh = useCallback(() => {
     callbacks.onRefresh();
@@ -580,13 +604,7 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
             onUploadExternalFiles={handleUploadExternalFiles}
             onUploadExternalFileList={handleUploadExternalFileList}
             onUploadExternalFolder={handleUploadExternalFolder}
-            columnWidths={columnWidths}
-            visibleColumns={visibleColumns}
-            handleSort={handleSortWithTransition}
-            handleResizeStart={handleResizeStart}
-            toggleColumnVisibility={toggleColumnVisibility}
-            sortField={sortField}
-            sortOrder={sortOrder}
+            sorting={sortingControls}
             reloadRequest={treeReloadRequest}
           />
         </div>
@@ -599,13 +617,7 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
           pane={pane}
           side={side}
           isPaneFocused={isPaneFocused}
-          columnWidths={columnWidths}
-          visibleColumns={visibleColumns}
-          sortField={sortField}
-          sortOrder={sortOrder}
-          handleSort={handleSortWithTransition}
-          handleResizeStart={handleResizeStart}
-          toggleColumnVisibility={toggleColumnVisibility}
+          sorting={sortingControls}
           fileListRef={fileListRef}
           handleFileListScroll={handleFileListScroll}
           shouldVirtualize={shouldVirtualize}

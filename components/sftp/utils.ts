@@ -298,6 +298,7 @@ export const sortSftpEntries = (
     entries: SftpFileEntry[],
     sortField: SortField,
     sortOrder: SortOrder,
+    directoriesFirst = true,
 ): SftpFileEntry[] => {
     if (!entries.length) return entries;
 
@@ -305,7 +306,7 @@ export const sortSftpEntries = (
         const aIsDir = isNavigableDirectory(a);
         const bIsDir = isNavigableDirectory(b);
 
-        if (sortField !== 'type') {
+        if (directoriesFirst && sortField !== 'type') {
             if (aIsDir && !bIsDir) return -1;
             if (!aIsDir && bIsDir) return 1;
         }

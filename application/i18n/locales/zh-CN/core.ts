@@ -744,6 +744,7 @@ export const zhCNCoreMessages: Messages = {
   'sftp.columns.size': '大小',
   'sftp.columns.kind': '类型',
   'sftp.columns.actions': '操作',
+  'sftp.sort.directoriesFirst': '目录置顶',
   'sftp.emptyDirectory': '空目录',
   'sftp.nav.up': '返回上层',
   'sftp.nav.home': '返回主目录',

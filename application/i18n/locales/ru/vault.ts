@@ -211,6 +211,7 @@ export const ruVaultMessages: Messages = {
   'sftp.columns.kind': 'Тип',
   'sftp.columns.configure': 'Выбрать видимые столбцы',
   'sftp.columns.actions': 'Действия',
+  'sftp.sort.directoriesFirst': 'Папки сверху',
   'sftp.emptyDirectory': 'Пустой каталог',
   'sftp.nav.up': 'Наверх',
   'sftp.nav.home': 'Перейти в домашний каталог',

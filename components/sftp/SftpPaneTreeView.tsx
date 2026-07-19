@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { AlertCircle, Loader2, RefreshCw } from 'lucide-react';
 import { Button } from '../ui/button';
-import { ContextMenu, ContextMenuCheckboxItem, ContextMenuContent, ContextMenuTrigger } from '../ui/context-menu';
-import { type NodeDescriptor } from './SftpPaneTreeNode';
+import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from '../ui/context-menu';
+import { TREE_ROW_HEIGHT, type NodeDescriptor } from './SftpPaneTreeNode';
 import { INITIAL_TREE_PATHS_STATE, treePathsReducer } from './sftpTreePathsReducer';
 import { useSftpPaneTreeContextMenu } from './useSftpPaneTreeContextMenu';
 import { useSftpPaneTreeRows } from './useSftpPaneTreeRows';
@@ -15,6 +15,7 @@ import type { SftpPaneTreeViewProps } from './SftpPaneTreeView.types';
 import { sftpTreeSelectionStore, useSftpTreeSelectionState } from './hooks/useSftpTreeSelectionStore';
 import { sftpKeyboardSelectionStore, sftpTreeEnterStore } from './hooks/useSftpKeyboardShortcuts';
 import { useI18n } from '../../application/i18n/I18nProvider';
+import { SftpColumnMenuItems } from './SftpColumnMenuItems';
 import {
   shouldShowSftpUploadFolderMenu,
   shouldShowSftpUploadFilesMenu,
@@ -50,15 +51,20 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
   onUploadExternalFiles,
   onUploadExternalFileList,
   onUploadExternalFolder,
-  columnWidths,
-  visibleColumns,
-  handleSort,
-  handleResizeStart,
-  toggleColumnVisibility,
-  sortField,
-  sortOrder,
+  sorting,
   reloadRequest,
 }) => {
+  const {
+    columnWidths,
+    visibleColumns,
+    directoriesFirst,
+    handleSort,
+    handleResizeStart,
+    toggleColumnVisibility,
+    toggleDirectoriesFirst,
+    sortField,
+    sortOrder,
+  } = sorting;
   const { t } = useI18n();
   const columnTemplate = buildSftpColumnTemplate(columnWidths, visibleColumns);
   const tRef = useRef(t);
@@ -219,8 +225,8 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
     childrenCacheRef.current.delete(targetPath);
     sortedChildrenCacheRef.current.delete(targetPath);
   }, []);
-  const prevSortKeyRef = useRef(`${sortField}:${sortOrder}:${pane.showHiddenFiles}`);
-  const sortKey = `${sortField}:${sortOrder}:${pane.showHiddenFiles}`;
+  const prevSortKeyRef = useRef(`${sortField}:${sortOrder}:${directoriesFirst}:${pane.showHiddenFiles}`);
+  const sortKey = `${sortField}:${sortOrder}:${directoriesFirst}:${pane.showHiddenFiles}`;
   if (prevSortKeyRef.current !== sortKey) {
     prevSortKeyRef.current = sortKey;
     sortedChildrenCacheRef.current.clear();
@@ -470,7 +476,12 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
     const getSortedEntries = (entries: SftpFileEntry[], parentPath: string): SftpFileEntry[] => {
       const cached = sortedChildrenCacheRef.current.get(parentPath);
       if (cached) return cached;
-      const sorted = sortSftpEntries(filterHiddenFiles(entries, pane.showHiddenFiles), sortField, sortOrder);
+      const sorted = sortSftpEntries(
+        filterHiddenFiles(entries, pane.showHiddenFiles),
+        sortField,
+        sortOrder,
+        directoriesFirst,
+      );
       sortedChildrenCacheRef.current.set(parentPath, sorted);
       return sorted;
     };
@@ -507,12 +518,31 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
     pane.showHiddenFiles,
     sortField,
     sortOrder,
+    directoriesFirst,
     expandedPaths,
     loadingPaths,
     errorPaths,
   ]);
   const entryByPathRef = useRef(entryByPath);
   entryByPathRef.current = entryByPath;
+  useEffect(() => {
+    if (selectedPaths.size !== 1) return;
+    const selectedPath = selectedPaths.values().next().value;
+    if (!selectedPath) return;
+    const selectedIndex = nodeDescriptors.findIndex(
+      (descriptor) => descriptor.type === 'node' && descriptor.entryPath === selectedPath,
+    );
+    const container = scrollContainerRef.current;
+    if (selectedIndex < 0 || !container) return;
+
+    const rowTop = selectedIndex * TREE_ROW_HEIGHT;
+    const rowBottom = rowTop + TREE_ROW_HEIGHT;
+    if (rowTop < container.scrollTop) {
+      container.scrollTop = rowTop;
+    } else if (rowBottom > container.scrollTop + container.clientHeight) {
+      container.scrollTop = rowBottom - container.clientHeight;
+    }
+  }, [nodeDescriptors, selectedPaths]);
   const prevVisiblePathsRef = useRef<string[]>([]);
   useEffect(() => {
     const currentPaths = flatVisibleNodes
@@ -929,18 +959,12 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
           </div>
         </ContextMenuTrigger>
         <ContextMenuContent>
-          <ContextMenuCheckboxItem checked disabled>
-            {t('sftp.columns.name')}
-          </ContextMenuCheckboxItem>
-          {(['modified', 'size', 'type'] as const).map((field) => (
-            <ContextMenuCheckboxItem
-              key={field}
-              checked={visibleColumns[field]}
-              onCheckedChange={() => toggleColumnVisibility(field)}
-            >
-              {t(field === 'type' ? 'sftp.columns.kind' : `sftp.columns.${field}`)}
-            </ContextMenuCheckboxItem>
-          ))}
+          <SftpColumnMenuItems
+            visibleColumns={visibleColumns}
+            directoriesFirst={directoriesFirst}
+            toggleColumnVisibility={toggleColumnVisibility}
+            toggleDirectoriesFirst={toggleDirectoriesFirst}
+          />
         </ContextMenuContent>
       </ContextMenu>
       <ContextMenu>

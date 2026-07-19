@@ -744,6 +744,7 @@ export const zhTWCoreMessages: Messages = {
   'sftp.columns.size': '大小',
   'sftp.columns.kind': '型別',
   'sftp.columns.actions': '操作',
+  'sftp.sort.directoriesFirst': '資料夾置頂',
   'sftp.emptyDirectory': '空目錄',
   'sftp.nav.up': '返回上層',
   'sftp.nav.home': '返回主目錄',
