@@ -8,7 +8,26 @@ export interface SftpTypeaheadResult {
   matchIndex: number;
 }
 
+export type SftpViewMode = 'list' | 'tree';
+
+interface SftpTypeaheadTreeItem {
+  name: string;
+  path: string;
+}
+
+export type SftpTypeaheadSource =
+  | { kind: 'list'; names: string[] }
+  | { kind: 'tree'; names: string[]; items: SftpTypeaheadTreeItem[] };
+
 const SFTP_TYPEAHEAD_RESET_MS = 1000;
+
+export const resolveSftpTypeaheadSource = (
+  viewMode: SftpViewMode,
+  listItems: string[],
+  treeItems: SftpTypeaheadTreeItem[],
+): SftpTypeaheadSource => viewMode === 'list'
+  ? { kind: 'list', names: listItems }
+  : { kind: 'tree', names: treeItems.map((item) => item.name), items: treeItems };
 
 export const advanceSftpTypeahead = (
   names: string[],

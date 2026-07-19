@@ -15,6 +15,7 @@ import { sftpFocusStore } from "./useSftpFocusedPane";
 import { sftpDialogActionStore } from "./useSftpDialogAction";
 import { sftpTreeSelectionStore } from "./useSftpTreeSelectionStore";
 import { sftpListOrderStore } from "./useSftpListOrderStore";
+import { sftpPaneViewModeStore } from "../../../application/state/sftp/sftpPaneViewModeStore";
 import { keepOnlyPaneSelections } from "./selectionScope";
 import type { SftpStateApi } from "../../../application/state/useSftpState";
 import { filterHiddenFiles, isNavigableDirectory } from "../utils";
@@ -31,7 +32,15 @@ import {
   sftpClipboardUploadStore,
   type ClipboardLocalFile,
 } from "../clipboardUpload";
-import { advanceSftpTypeahead, type SftpTypeaheadState } from "../../../domain/sftpTypeahead";
+import {
+  advanceSftpTypeahead,
+  resolveSftpTypeaheadSource,
+  type SftpTypeaheadState,
+} from "../../../domain/sftpTypeahead";
+import {
+  resolveSftpActiveSelection,
+  resolveSftpSelectAllTarget,
+} from "../../../domain/sftpSelection";
 
 // SFTP action names that we handle
 const SFTP_ACTIONS = new Set([
@@ -182,13 +191,16 @@ export const useSftpKeyboardShortcuts = ({
   }, [sftpRef]);
 
   const getClipboardUploadTarget = useCallback((pane: NonNullable<ReturnType<typeof getFocusedPane>["pane"]>) => {
-    const treeSelection = sftpTreeSelectionStore.getSelectedItems(pane.id);
+    const { selectedFileNames, treeSelection } = resolveSftpActiveSelection(
+      sftpPaneViewModeStore.get(pane.id),
+      Array.from(pane.selectedFiles) as string[],
+      sftpTreeSelectionStore.getSelectedItems(pane.id),
+    );
     const treeActionSelection = treeSelection.filter((entry) => entry.name !== '..');
-    const selectedFiles = Array.from(pane.selectedFiles) as string[];
 
     return resolveSftpClipboardUploadTarget({
       currentPath: pane.connection!.currentPath,
-      selectedFileNames: selectedFiles,
+      selectedFileNames,
       files: pane.files as SftpFileEntry[],
       treeSelection: treeActionSelection,
     });
@@ -521,17 +533,17 @@ export const useSftpKeyboardShortcuts = ({
         const { sftp, focusedSide, pane } = getFocusedPane();
         if (!pane?.connection) return;
 
-        const listItems = sftpListOrderStore.getItems(pane.id);
-        const treeItems = listItems.length === 0
-          ? sftpTreeSelectionStore.getPaneState(pane.id).visibleItems
-          : [];
-        const names = listItems.length > 0 ? listItems : treeItems.map((item) => item.name);
-        if (names.length === 0) return;
+        const source = resolveSftpTypeaheadSource(
+          sftpPaneViewModeStore.get(pane.id),
+          sftpListOrderStore.getItems(pane.id),
+          sftpTreeSelectionStore.getPaneState(pane.id).visibleItems,
+        );
+        if (source.names.length === 0) return;
 
         const previous = typeaheadRef.current?.paneId === pane.id
           ? typeaheadRef.current.state
           : null;
-        const result = advanceSftpTypeahead(names, previous, e.key, Date.now());
+        const result = advanceSftpTypeahead(source.names, previous, e.key, Date.now());
         typeaheadRef.current = { paneId: pane.id, state: result.state };
 
         e.preventDefault();
@@ -539,10 +551,10 @@ export const useSftpKeyboardShortcuts = ({
         if (result.matchIndex < 0) return;
 
         keepOnlyPaneSelections(sftp, { side: focusedSide, tabId: pane.id });
-        if (listItems.length > 0) {
-          sftp.rangeSelect(focusedSide, [listItems[result.matchIndex]]);
+        if (source.kind === 'list') {
+          sftp.rangeSelect(focusedSide, [source.names[result.matchIndex]]);
         } else {
-          sftpTreeSelectionStore.setSelection(pane.id, [treeItems[result.matchIndex].path]);
+          sftpTreeSelectionStore.setSelection(pane.id, [source.items[result.matchIndex].path]);
         }
         sftpKeyboardSelectionStore.set(pane.id, result.matchIndex, result.matchIndex);
         return;
@@ -558,12 +570,13 @@ export const useSftpKeyboardShortcuts = ({
         if (!pane || !pane.connection) return;
 
         const delta = e.key === 'ArrowDown' ? 1 : -1;
+        const viewMode = sftpPaneViewModeStore.get(pane.id);
 
-        // List view: navigate sorted display files.
-        // Prefer the list store when it exists so stale tree selection state
-        // cannot swallow keyboard navigation after switching views.
+        // List view: navigate sorted display files. The explicit view mode is
+        // authoritative even when the active list has no visible items.
         const listItems = sftpListOrderStore.getItems(pane.id);
-        if (listItems.length > 0) {
+        if (viewMode === 'list') {
+          if (listItems.length === 0) return;
           e.preventDefault();
           e.stopPropagation();
 
@@ -681,8 +694,14 @@ export const useSftpKeyboardShortcuts = ({
         : sftp.rightTabs.tabs.find(p => p.id === sftp.rightTabs.activeTabId);
 
       if (!pane || !pane.connection) return;
+      const viewMode = sftpPaneViewModeStore.get(pane.id);
+      const isTreeView = viewMode === 'tree';
       const treeSelectionState = sftpTreeSelectionStore.getPaneState(pane.id);
-      const treeSelection = sftpTreeSelectionStore.getSelectedItems(pane.id);
+      const { selectedFileNames, treeSelection } = resolveSftpActiveSelection(
+        viewMode,
+        Array.from(pane.selectedFiles) as string[],
+        sftpTreeSelectionStore.getSelectedItems(pane.id),
+      );
       const treeActionSelection = treeSelection.filter((entry) => entry.name !== '..');
 
       switch (action) {
@@ -714,12 +733,11 @@ export const useSftpKeyboardShortcuts = ({
           }
 
           // Copy selected files to clipboard
-          const selectedFiles = Array.from(pane.selectedFiles) as string[];
-          if (selectedFiles.length === 0) return;
+          if (selectedFileNames.length === 0) return;
 
           {
             const filesByName = new Map((pane.files as SftpFileEntry[]).map(f => [f.name, f]));
-            const clipboardFiles: SftpClipboardFile[] = selectedFiles.map((name: string) => {
+            const clipboardFiles: SftpClipboardFile[] = selectedFileNames.map((name: string) => {
               const file = filesByName.get(name);
               return {
                 name,
@@ -735,7 +753,7 @@ export const useSftpKeyboardShortcuts = ({
             );
             await replaceSystemClipboardWithSftpPaths(getSftpClipboardSystemTextPaths({
               currentPath: pane.connection.currentPath,
-              selectedFileNames: selectedFiles,
+              selectedFileNames,
               treeSelection: [],
             }));
           }
@@ -770,12 +788,11 @@ export const useSftpKeyboardShortcuts = ({
           }
 
           // Cut selected files to clipboard
-          const selectedFiles = Array.from(pane.selectedFiles) as string[];
-          if (selectedFiles.length === 0) return;
+          if (selectedFileNames.length === 0) return;
 
           {
             const filesByName = new Map((pane.files as SftpFileEntry[]).map(f => [f.name, f]));
-            const clipboardFiles: SftpClipboardFile[] = selectedFiles.map((name: string) => {
+            const clipboardFiles: SftpClipboardFile[] = selectedFileNames.map((name: string) => {
               const file = filesByName.get(name);
               return {
                 name,
@@ -791,7 +808,7 @@ export const useSftpKeyboardShortcuts = ({
             );
             await replaceSystemClipboardWithSftpPaths(getSftpClipboardSystemTextPaths({
               currentPath: pane.connection.currentPath,
-              selectedFileNames: selectedFiles,
+              selectedFileNames,
               treeSelection: [],
             }));
           }
@@ -804,7 +821,12 @@ export const useSftpKeyboardShortcuts = ({
         }
 
         case "sftpSelectAll": {
-          if (treeSelectionState.visibleItems.length > 0) {
+          const selectAllTarget = resolveSftpSelectAllTarget(
+            viewMode,
+            treeSelectionState.visibleItems.length,
+          );
+          if (selectAllTarget === 'none') break;
+          if (selectAllTarget === 'tree') {
             keepOnlyPaneSelections(sftp, { side: focusedSide, tabId: pane.id });
             sftpTreeSelectionStore.selectAllVisible(pane.id);
             break;
@@ -837,9 +859,8 @@ export const useSftpKeyboardShortcuts = ({
           }
 
           // Trigger rename for the first selected file
-          const selectedFiles = Array.from(pane.selectedFiles) as string[];
-          if (selectedFiles.length !== 1) return;
-          sftpDialogActionStore.trigger("rename", dialogActionScopeId, selectedFiles);
+          if (selectedFileNames.length !== 1) return;
+          sftpDialogActionStore.trigger("rename", dialogActionScopeId, selectedFileNames);
           break;
         }
 
@@ -854,9 +875,8 @@ export const useSftpKeyboardShortcuts = ({
           }
 
           // Delete selected files
-          const selectedFiles = Array.from(pane.selectedFiles) as string[];
-          if (selectedFiles.length === 0) return;
-          sftpDialogActionStore.trigger("delete", dialogActionScopeId, selectedFiles);
+          if (selectedFileNames.length === 0) return;
+          sftpDialogActionStore.trigger("delete", dialogActionScopeId, selectedFileNames);
           break;
         }
 
@@ -873,11 +893,8 @@ export const useSftpKeyboardShortcuts = ({
         }
 
         case "sftpOpen": {
-          // Prefer list selection when the list store is active
-          const listItems = sftpListOrderStore.getItems(pane.id);
-          const selectedFiles = Array.from(pane.selectedFiles) as string[];
-          if (listItems.length > 0 && selectedFiles.length === 1) {
-            const fileName = selectedFiles[0];
+          if (!isTreeView && selectedFileNames.length === 1) {
+            const fileName = selectedFileNames[0];
             const entry = (pane.files as SftpFileEntry[]).find(f => f.name === fileName);
             if (entry) {
               if (isNavigableDirectory(entry)) {
@@ -890,11 +907,9 @@ export const useSftpKeyboardShortcuts = ({
             break;
           }
 
-          // Only fall through to tree view if list store is empty (tree view mode)
-          if (listItems.length > 0) break;
-          const treeOpenSelection = sftpTreeSelectionStore.getSelectedItems(pane.id);
-          if (treeOpenSelection.length === 1) {
-            const item = treeOpenSelection[0];
+          if (!isTreeView) break;
+          if (treeActionSelection.length === 1) {
+            const item = treeActionSelection[0];
             if (item.isDirectory) _kbSelectionState.delete(pane.id);
             sftpTreeEnterStore.trigger(pane.id, item.path, item.isDirectory);
           }
@@ -919,9 +934,8 @@ export const useSftpKeyboardShortcuts = ({
             break;
           }
           // In list view, navigate to selected directory
-          const selectedFiles = Array.from(pane.selectedFiles) as string[];
-          if (selectedFiles.length === 1) {
-            const entry = (pane.files as SftpFileEntry[]).find(f => f.name === selectedFiles[0]);
+          if (selectedFileNames.length === 1) {
+            const entry = (pane.files as SftpFileEntry[]).find(f => f.name === selectedFileNames[0]);
             if (entry && isNavigableDirectory(entry)) {
               _kbSelectionState.delete(pane.id);
               sftp.navigateTo(focusedSide, joinPath(pane.connection.currentPath, entry.name));

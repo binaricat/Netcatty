@@ -27,6 +27,7 @@ import { useSftpPaneFiles } from "./hooks/useSftpPaneFiles";
 import { useSftpPanePath } from "./hooks/useSftpPanePath";
 import { useSftpPaneSorting, type UseSftpPaneSortingResult } from "./hooks/useSftpPaneSorting";
 import { useSftpPaneVirtualList } from "./hooks/useSftpPaneVirtualList";
+import { sftpPaneViewModeStore } from "../../application/state/sftp/sftpPaneViewModeStore";
 import { useSftpDialogActionHandler } from "./hooks/useSftpDialogAction";
 import { useSftpBookmarks } from "./hooks/useSftpBookmarks";
 import { useLocalSftpBookmarks } from "./hooks/useLocalSftpBookmarks";
@@ -458,11 +459,13 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
   }, [saveHostViewMode]);
 
   useEffect(() => {
+    sftpPaneViewModeStore.set(pane.id, viewMode);
     if (viewMode === 'list') {
       sftpTreeSelectionStore.clearPane(pane.id);
-      return;
+    } else {
+      sftpListOrderStore.clearPane(pane.id);
     }
-    sftpListOrderStore.clearPane(pane.id);
+    return () => sftpPaneViewModeStore.clear(pane.id);
   }, [pane.id, viewMode]);
 
   // When connecting to a host, restore its saved view mode preference

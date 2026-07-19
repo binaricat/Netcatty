@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { advanceSftpTypeahead } from './sftpTypeahead.ts';
+import { advanceSftpTypeahead, resolveSftpTypeaheadSource } from './sftpTypeahead.ts';
 
 const names = ['config', 'Error.log', 'errors.old', 'readme'];
 
@@ -26,4 +26,13 @@ test('SFTP typeahead starts a new search after the typing pause', () => {
 
   assert.equal(afterPause.state.query, 'r');
   assert.equal(afterPause.matchIndex, 3);
+});
+
+test('SFTP typeahead never falls back to hidden tree items in list view', () => {
+  assert.deepEqual(resolveSftpTypeaheadSource('list', [], [
+    { name: 'hidden-tree-file.log', path: '/hidden-tree-file.log' },
+  ]), {
+    kind: 'list',
+    names: [],
+  });
 });
