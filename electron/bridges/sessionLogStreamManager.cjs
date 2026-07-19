@@ -471,7 +471,7 @@ async function stopStream(sessionId, expectedToken) {
   const finalPath = entry.filePath;
 
   console.log(`[SessionLogStream] Stopped stream for ${sessionId} -> ${finalPath}`);
-  return finalPath;
+  return entry.disabled ? null : finalPath;
 }
 
 /**

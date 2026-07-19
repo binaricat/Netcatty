@@ -356,6 +356,7 @@ async function stopManualSessionLog(event, payload = {}) {
     if (!filePath) {
       if (!sessionLogStreamManager.hasStream(sessionId)) {
         manualSessionLogTokens.delete(sessionId);
+        return { success: false, stopped: false, error: "Failed to finalize session log" };
       }
       return { success: true, stopped: false };
     }

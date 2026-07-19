@@ -355,6 +355,48 @@ test("manual session logs honor HTML format and timestamps", async () => {
   }
 });
 
+test("manual rendered logs report final write failures", async () => {
+  const directory = path.join(TEMP_ROOT, `manual-write-failure-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+  const filePath = path.join(directory, "manual.txt");
+  const sessionId = `session-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const dialogMock = {
+    showSaveDialog: async () => ({ canceled: false, filePath }),
+  };
+  const {
+    startManualSessionLog,
+    stopManualSessionLog,
+  } = loadBridgeWithDialog(dialogMock);
+  const sessionLogStreamManager = require("./sessionLogStreamManager.cjs");
+  const originalWriteFile = fs.promises.writeFile;
+
+  try {
+    const startResult = await startManualSessionLog(null, {
+      sessionId,
+      sessionName: "failing host",
+      preferredDirectory: directory,
+      format: "txt",
+      initialLine: "",
+    });
+    assert.equal(startResult.success, true);
+    sessionLogStreamManager.appendData(sessionId, "body\r\n");
+
+    fs.promises.writeFile = async () => {
+      throw new Error("disk full");
+    };
+    const stopResult = await stopManualSessionLog(null, { sessionId });
+
+    assert.deepEqual(stopResult, {
+      success: false,
+      stopped: false,
+      error: "Failed to finalize session log",
+    });
+  } finally {
+    fs.promises.writeFile = originalWriteFile;
+    await sessionLogStreamManager.cleanupAll();
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("registerHandlers taps terminal worker output into main-process manual session logs", async () => {
   const directory = path.join(TEMP_ROOT, `manual-worker-tap-${Date.now()}-${Math.random().toString(16).slice(2)}`);
   const filePath = path.join(directory, "manual.log");
