@@ -303,11 +303,14 @@ test("manual session logs honor the configured plain-text format", async () => {
     assert.match(dialogOptions.defaultPath, /\.txt$/);
     assert.deepEqual(dialogOptions.filters[0], { name: "Text Files", extensions: ["txt"] });
 
-    sessionLogStreamManager.appendData(sessionId, "\u001b[31mls\u001b[0m\r\nfile\r\n");
+    sessionLogStreamManager.appendData(
+      sessionId,
+      "\u001b[31mdisplay\u001b[0m\r\npage 1\r\n--More--\r        \rpage 2\r\n",
+    );
     const stopResult = await stopManualSessionLog(null, { sessionId });
 
     assert.equal(stopResult.filePath, expectedPath);
-    assert.equal(fs.readFileSync(expectedPath, "utf8"), "root@host:~# ls\nfile");
+    assert.equal(fs.readFileSync(expectedPath, "utf8"), "root@host:~# display\npage 1\npage 2");
   } finally {
     await sessionLogStreamManager.cleanupAll();
     fs.rmSync(directory, { recursive: true, force: true });
