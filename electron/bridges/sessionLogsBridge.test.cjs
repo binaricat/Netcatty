@@ -387,7 +387,7 @@ test("manual rendered logs report final write failures", async () => {
 
     assert.deepEqual(stopResult, {
       success: false,
-      stopped: false,
+      stopped: true,
       error: "Failed to finalize session log",
     });
   } finally {
