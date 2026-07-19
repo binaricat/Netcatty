@@ -5,6 +5,8 @@ type ManualStartPayload = {
   sessionId: string;
   sessionName?: string;
   preferredDirectory?: string;
+  format?: "txt" | "raw" | "html";
+  timestampsEnabled?: boolean;
   initialLine?: string;
 };
 

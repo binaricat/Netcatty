@@ -205,7 +205,7 @@ export interface TerminalProps {
     sessionId: string,
     queueRewrite: ((rewrite: ProgrammaticCommandLogRewrite) => void) | null,
   ) => void;
-  sessionLog?: { enabled: boolean; directory: string; format: string; timestampsEnabled?: boolean };
+  sessionLog?: { enabled: boolean; directory: string; format: "txt" | "raw" | "html"; timestampsEnabled?: boolean };
   sshDebugLogEnabled?: boolean;
   sudoAutofillPassword?: string;
   /** Host + keychain password identities for picker mode (#2156). */

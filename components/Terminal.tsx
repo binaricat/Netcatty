@@ -2570,6 +2570,8 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         sessionId: currentSessionId,
         sessionName: host.label || host.hostname || currentSessionId,
         preferredDirectory: sessionLog?.directory,
+        format: sessionLog?.format,
+        timestampsEnabled: sessionLog?.timestampsEnabled,
         initialLine: termRef.current ? getSessionLogInitialLine(termRef.current) : "",
       });
       if (startResult?.success) {
@@ -2588,6 +2590,8 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     host.label,
     sessionId,
     sessionLog?.directory,
+    sessionLog?.format,
+    sessionLog?.timestampsEnabled,
     startManualSessionLog,
     stopManualSessionLog,
   ]);
