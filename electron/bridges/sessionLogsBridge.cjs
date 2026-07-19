@@ -269,7 +269,8 @@ async function startManualSessionLog(event, payload = {}) {
     : require("node:os").homedir();
   const format = SESSION_LOG_FORMATS.has(payload.format) ? payload.format : "raw";
   const extension = format === "raw" ? "log" : format;
-  const safeSessionName = safePathSegment(sessionName || sessionId, "session");
+  const displaySessionName = sessionName || sessionId;
+  const safeSessionName = safePathSegment(displaySessionName, "session");
   const defaultPath = path.join(targetDirectory, `${safeSessionName}_${toLocalISOString(new Date())}.${extension}`);
 
   try {
@@ -293,7 +294,7 @@ async function startManualSessionLog(event, payload = {}) {
     const startResult = sessionLogStreamManager.startStreamToFile(sessionId, {
       filePath,
       format,
-      hostLabel: safeSessionName,
+      hostLabel: displaySessionName,
       startTime: Date.now(),
       timestampsEnabled: Boolean(payload.timestampsEnabled),
       initialLine: typeof initialLine === "string" ? initialLine : "",

@@ -333,7 +333,7 @@ test("manual session logs honor HTML format and timestamps", async () => {
   try {
     const startResult = await startManualSessionLog(null, {
       sessionId,
-      sessionName: "HTML host",
+      sessionName: "HTML / host:22",
       preferredDirectory: directory,
       format: "html",
       timestampsEnabled: true,
@@ -346,7 +346,8 @@ test("manual session logs honor HTML format and timestamps", async () => {
 
     const content = fs.readFileSync(filePath, "utf8");
     assert.match(content, /<!DOCTYPE html>/);
-    assert.match(content, /HTML host/);
+    assert.match(content, /HTML \/ host:22/);
+    assert.doesNotMatch(content, /HTML _ host_22/);
     assert.match(content, /\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\] ready/);
   } finally {
     await sessionLogStreamManager.cleanupAll();
