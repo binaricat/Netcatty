@@ -19,6 +19,10 @@ test('list and tree SFTP views share column visibility and keyboard-accessible m
   }
 
   assert.match(columnMenuSource, /ContextMenuCheckboxItem/);
+  assert.match(
+    listSource,
+    /import\s*\{[^}]*\bContextMenuSeparator\b[^}]*\}\s*from "\.\.\/ui\/context-menu";/,
+  );
 
   assert.match(treeNodeSource, /visibleColumns\.modified/);
   assert.match(treeNodeSource, /visibleColumns\.size/);

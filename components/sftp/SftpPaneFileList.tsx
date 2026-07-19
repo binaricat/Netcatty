@@ -5,6 +5,7 @@ import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
+  ContextMenuSeparator,
   ContextMenuTrigger,
 } from "../ui/context-menu";
 import { cn } from "../../lib/utils";
