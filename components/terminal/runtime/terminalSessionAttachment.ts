@@ -1,5 +1,8 @@
 import type { Terminal as XTerm } from "@xterm/xterm";
-import { shouldScrollOnTerminalOutput } from "../../../domain/terminalScroll";
+import {
+  scrollTerminalToBottomIfNeeded,
+  shouldScrollOnTerminalOutput,
+} from "../../../domain/terminalScroll";
 import { logger } from "../../../lib/logger";
 import type { Host, TerminalSettings } from "../../../types";
 import {
@@ -116,7 +119,7 @@ const handleTerminalOutputAutoScroll = (
     return;
   }
 
-  term.scrollToBottom();
+  scrollTerminalToBottomIfNeeded(term);
 };
 
 export const notePendingOutputScrollIfEnabled = (

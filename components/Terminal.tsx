@@ -16,8 +16,8 @@ import {
 } from "../types";
 import { resolveSnippetCommand } from "./SnippetExecutionProvider";
 import {
+  scrollTerminalToBottomAfterInputIfEnabled,
   shouldEnableNativeUserInputAutoScroll,
-  shouldScrollOnTerminalInput,
 } from "../domain/terminalScroll";
 import {
   applyCustomAccentToTerminalTheme,
@@ -2051,9 +2051,12 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   normalizeTextOnCopyRef.current = terminalSettings?.normalizeTextOnCopy ?? true;
 
   const scrollToBottomAfterProgrammaticInput = useCallback((data: string) => {
-    if (termRef.current && shouldScrollOnTerminalInput(terminalSettingsRef.current, data)) {
-      termRef.current.scrollToBottom();
-    }
+    if (!termRef.current) return;
+    scrollTerminalToBottomAfterInputIfEnabled(
+      termRef.current,
+      terminalSettingsRef.current,
+      data,
+    );
   }, []);
 
   useEffect(() => {

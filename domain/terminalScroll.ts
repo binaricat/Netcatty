@@ -1,5 +1,15 @@
 import type { TerminalSettings } from "./models";
 
+type TerminalScrollTarget = {
+  buffer: {
+    active: {
+      baseY: number;
+      viewportY: number;
+    };
+  };
+  scrollToBottom: () => void;
+};
+
 const hasPrintableTerminalInput = (data: string): boolean => {
   if (data.includes("\x1b")) {
     return false;
@@ -42,3 +52,27 @@ export const shouldScrollOnTerminalOutput = (
 export const shouldScrollOnTerminalPaste = (
   settings?: Partial<TerminalSettings> | null,
 ): boolean => settings?.scrollOnPaste ?? true;
+
+export const scrollTerminalToBottomIfNeeded = (
+  terminal: TerminalScrollTarget,
+): boolean => {
+  const { baseY, viewportY } = terminal.buffer.active;
+  if (viewportY >= baseY) {
+    return false;
+  }
+
+  terminal.scrollToBottom();
+  return true;
+};
+
+export const scrollTerminalToBottomAfterInputIfEnabled = (
+  terminal: TerminalScrollTarget,
+  settings: Partial<TerminalSettings> | null | undefined,
+  data: string,
+): boolean => {
+  if (!shouldScrollOnTerminalInput(settings, data)) {
+    return false;
+  }
+
+  return scrollTerminalToBottomIfNeeded(terminal);
+};

@@ -20,8 +20,8 @@ import {
   resolveXTermPerformanceConfig,
 } from "../../../infrastructure/config/xtermPerformance";
 import {
+  scrollTerminalToBottomAfterInputIfEnabled,
   shouldEnableNativeUserInputAutoScroll,
-  shouldScrollOnTerminalInput,
   shouldScrollOnTerminalPaste,
 } from "../../../domain/terminalScroll";
 import {
@@ -629,9 +629,11 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     return false;
   };
   const scrollToBottomAfterInput = (data: string) => {
-    if (shouldScrollOnTerminalInput(ctx.terminalSettingsRef.current, data)) {
-      term.scrollToBottom();
-    }
+    scrollTerminalToBottomAfterInputIfEnabled(
+      term,
+      ctx.terminalSettingsRef.current,
+      data,
+    );
   };
   const currentTerminalFontSize = () => {
     const optionFontSize = term.options.fontSize;

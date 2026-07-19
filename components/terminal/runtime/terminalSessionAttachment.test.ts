@@ -641,6 +641,101 @@ test("hidden tab output marks pending scroll without scrolling immediately", () 
   assert.equal(scrollCalls, 0);
 });
 
+test("visible output does not request another scroll when already at the bottom", () => {
+  let scrollCalls = 0;
+  const term = {
+    buffer: {
+      active: {
+        type: "normal",
+        baseY: 10_000,
+        viewportY: 10_000,
+      },
+    },
+    write(_data: string, callback?: () => void) {
+      callback?.();
+    },
+    scrollToBottom() {
+      scrollCalls += 1;
+    },
+  } as unknown as XTerm;
+  const ctx = {
+    ...createContext(false),
+    isVisibleRef: { current: true },
+    terminalSettingsRef: {
+      current: {
+        showLineTimestamps: false,
+        scrollOnOutput: true,
+        forcePromptNewLine: false,
+      },
+    },
+  };
+
+  writeSessionData(ctx as never, term, "fresh output");
+
+  assert.equal(scrollCalls, 0);
+});
+
+test("visible output scrolls when the user is viewing earlier output", () => {
+  let scrollCalls = 0;
+  const term = {
+    buffer: {
+      active: {
+        type: "normal",
+        baseY: 10_000,
+        viewportY: 9_900,
+      },
+    },
+    write(_data: string, callback?: () => void) {
+      callback?.();
+    },
+    scrollToBottom() {
+      scrollCalls += 1;
+    },
+  } as unknown as XTerm;
+  const ctx = {
+    ...createContext(false),
+    isVisibleRef: { current: true },
+    terminalSettingsRef: {
+      current: {
+        showLineTimestamps: false,
+        scrollOnOutput: true,
+        forcePromptNewLine: false,
+      },
+    },
+  };
+
+  writeSessionData(ctx as never, term, "fresh output");
+
+  assert.equal(scrollCalls, 1);
+});
+
+test("visible output does not scroll when output auto-scroll is disabled", () => {
+  let scrollCalls = 0;
+  const term = {
+    buffer: {
+      active: {
+        type: "normal",
+        baseY: 10_000,
+        viewportY: 9_900,
+      },
+    },
+    write(_data: string, callback?: () => void) {
+      callback?.();
+    },
+    scrollToBottom() {
+      scrollCalls += 1;
+    },
+  } as unknown as XTerm;
+  const ctx = {
+    ...createContext(false),
+    isVisibleRef: { current: true },
+  };
+
+  writeSessionData(ctx as never, term, "fresh output");
+
+  assert.equal(scrollCalls, 0);
+});
+
 test("writeSessionData flushes deferred IPC acks before small output can leave the source paused", async () => {
   clearTerminalSessionFlowAck("session-1");
   const term = {
