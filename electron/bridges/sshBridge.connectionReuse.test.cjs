@@ -316,6 +316,33 @@ test("concurrent Copy Tab requests serialize shell discovery per connection", as
   assert.equal(sessions.get("copy-2").shellPid, "333");
 });
 
+test("concurrent copies keep distinct shell IDs when the source closes immediately", async (t) => {
+  const { bridge } = loadBridgeWithMockedSsh2(t);
+  const terminalBridge = require("./terminalBridge.cjs");
+  const sessions = new Map();
+  const sourceConn = makePidTrackingReusableConn();
+  sessions.set("source", makeSourceSession(sourceConn, { hostname: "10.0.0.1", username: "alice" }));
+
+  terminalBridge.init({ sessions, electronModule: {} });
+  const start = registerStartHandler(bridge, sessions);
+  const copies = Promise.all([
+    start(
+      { sender: makeSender() },
+      { sessionId: "copy-1", hostname: "10.0.0.1", username: "alice", sourceSessionId: "source" },
+    ),
+    start(
+      { sender: makeSender() },
+      { sessionId: "copy-2", hostname: "10.0.0.1", username: "alice", sourceSessionId: "source" },
+    ),
+  ]);
+
+  terminalBridge.closeSession({ sender: {} }, { sessionId: "source" });
+  await copies;
+
+  assert.equal(sessions.get("copy-1").shellPid, "222");
+  assert.equal(sessions.get("copy-2").shellPid, "333");
+});
+
 test("Copy Tab preserves the server locale unless the host explicitly overrides it", async (t) => {
   const { bridge } = loadBridgeWithMockedSsh2(t);
   const sessions = new Map();
