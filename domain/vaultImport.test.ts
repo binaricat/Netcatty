@@ -1,7 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { importVaultHostsFromText, detectVaultImportFormat, applyVaultHostImport } from "./vaultImport.ts";
+import {
+  importVaultHostsFromText,
+  detectVaultImportFormat,
+  applyVaultHostImport,
+  resolveVaultImportKeyPassphraseConflicts,
+} from "./vaultImport.ts";
 import type { Host } from "./models.ts";
 
 const mobaXtermSshSession = (
@@ -195,6 +200,38 @@ test("CSV import rejects conflicting passphrases for a shared key path", () => {
   assert.equal(result.hosts.length, 2);
   assert.deepEqual(result.keyPassphrases, []);
   assert.match(result.issues[0]?.message ?? "", /conflicting passphrases/u);
+});
+
+test("CSV import keeps POSIX backslashes distinct from path separators", () => {
+  const result = importVaultHostsFromText(
+    "csv",
+    [
+      "Label,Hostname,Username,KeyPath,Passphrase",
+      "first,first.example.com,root,/home/alice/.ssh/team\\key,first-secret",
+      "second,second.example.com,root,/home/alice/.ssh/team/key,second-secret",
+    ].join("\n"),
+  );
+
+  assert.equal(result.hosts.length, 2);
+  assert.deepEqual(result.keyPassphrases?.map((entry) => entry.passphrase), [
+    "first-secret",
+    "second-secret",
+  ]);
+  assert.equal(result.issues.some((issue) => /conflicting passphrases/u.test(issue.message)), false);
+});
+
+test("CSV passphrase conflicts include home-relative path aliases", async () => {
+  const resolved = await resolveVaultImportKeyPassphraseConflicts([
+    { hostId: "first", keyPath: "~/.ssh/shared", passphrase: "first-secret" },
+    { hostId: "second", keyPath: "/Users/alice/.ssh/shared", passphrase: "second-secret" },
+  ], async (keyPath) => (
+    keyPath.startsWith("~/")
+      ? [keyPath, `/Users/alice/${keyPath.slice(2)}`]
+      : [keyPath, `~/${keyPath.slice("/Users/alice/".length)}`]
+  ));
+
+  assert.deepEqual(resolved.keyPassphrases, []);
+  assert.match(resolved.issues[0]?.message ?? "", /conflicting passphrases/u);
 });
 
 test("detectVaultImportFormat recognizes MobaXterm bookmark exports", () => {

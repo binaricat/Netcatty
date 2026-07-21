@@ -1,7 +1,7 @@
 import type { Host } from '../models';
+import { encodeCsvKeyPath, encodeCsvPassphrase } from './csvCredentialFields';
 
 const UTF8_BOM = "\uFEFF";
-const GUARDED_FORMULA_PREFIX = /^'*[=+\-@\t\r]/u;
 
 export interface VaultCsvTemplateOptions {
   includeExampleRows?: boolean;
@@ -74,7 +74,7 @@ const exportHostsToCsv = (hosts: Host[], options: VaultCsvExportOptions): string
       ? (host.telnetUsername ?? host.username ?? "")
       : (host.username ?? "");
     const keyPath = host.identityFilePaths?.find((path) => path.trim())?.trim() ?? "";
-    const guardedKeyPath = GUARDED_FORMULA_PREFIX.test(keyPath) ? `'${keyPath}` : keyPath;
+    const passphrase = keyPath ? (options.keyPassphrases?.get(keyPath) ?? "") : "";
 
     rows.push([
       host.group ?? "",
@@ -86,8 +86,8 @@ const exportHostsToCsv = (hosts: Host[], options: VaultCsvExportOptions): string
       String(effectivePort),
       effectiveUsername,
       host.password ?? "",
-      guardedKeyPath,
-      keyPath ? (options.keyPassphrases?.get(keyPath) ?? "") : "",
+      encodeCsvKeyPath(keyPath),
+      encodeCsvPassphrase(passphrase),
     ]);
   }
 

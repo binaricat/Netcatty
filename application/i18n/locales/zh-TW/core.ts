@@ -603,6 +603,7 @@ export const zhTWCoreMessages: Messages = {
   'vault.hosts.export': '匯出',
   'vault.hosts.export.toast.success': '已匯出 {count} 個主機到 CSV',
   'vault.hosts.export.toast.successWithSkipped': '已匯出 {count} 個主機到 CSV（跳過 {skipped} 個不支援的主機）',
+  'vault.hosts.export.toast.passphrasesSkipped': '有 {count} 個已儲存的金鑰密碼無法讀取，匯出時已留空',
   'vault.hosts.export.toast.noHosts': '沒有主機可匯出',
   'vault.hosts.allHosts': '全部主機',
   'vault.hosts.pinned': '已置頂',

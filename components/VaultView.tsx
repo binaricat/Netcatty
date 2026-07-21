@@ -584,10 +584,20 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
       host.identityFilePaths?.map((keyPath) => keyPath.trim()).filter(Boolean) ?? []
     ))));
     const keyPassphrases = new Map<string, string>();
-    await Promise.all(keyPaths.map(async (keyPath) => {
+    const passphraseResults = await Promise.allSettled(keyPaths.map(async (keyPath) => {
       const passphrase = await loadDefaultKeyPassphrase(keyPath);
-      if (passphrase) keyPassphrases.set(keyPath, passphrase);
+      return { keyPath, passphrase };
     }));
+    let unreadablePassphrases = 0;
+    for (const result of passphraseResults) {
+      if (result.status === "fulfilled") {
+        if (result.value.passphrase) {
+          keyPassphrases.set(result.value.keyPath, result.value.passphrase);
+        }
+      } else {
+        unreadablePassphrases++;
+      }
+    }
     const { csv, exportedCount, skippedCount } = exportHostsToCsvWithStats(hosts, { keyPassphrases });
 
     if (exportedCount === 0) {
@@ -605,6 +615,9 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
 
+    if (unreadablePassphrases > 0) {
+      toast.warning(t('vault.hosts.export.toast.passphrasesSkipped', { count: unreadablePassphrases }));
+    }
     if (skippedCount > 0) {
       toast.warning(t('vault.hosts.export.toast.successWithSkipped', { count: exportedCount, skipped: skippedCount }));
     } else {

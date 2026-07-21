@@ -41,6 +41,7 @@ import {
   applyVaultHostImport,
   detectVaultImportFormat,
   importVaultHostsFromText,
+  resolveVaultImportKeyPassphraseConflicts,
   VAULT_IMPORT_FORMATS,
   type VaultImportFormat,
 } from '../../domain/vaultImport';
@@ -408,6 +409,7 @@ export interface VaultAgentApiDeps {
   updateManagedSources: (sources: ManagedSource[]) => void;
   updateHosts: (hosts: Host[]) => void;
   saveKeyPassphrase: (keyPath: string, passphrase: string) => Promise<void>;
+  resolveKeyPassphraseAliases: (keyPath: string) => Promise<string[]>;
   removeKeyPassphrases: (keyPaths: string[]) => Promise<void> | void;
   updateNotes: (notes: VaultNote[]) => void;
   updateSnippets: (snippets: Snippet[]) => void;
@@ -806,17 +808,29 @@ export async function handleVaultAgentOp(
       }
 
       const addedHostIds = new Set(merged.addedHosts.map((host) => host.id));
-      const passphrasesByPath = new Map<string, NonNullable<typeof importResult.keyPassphrases>[number]>();
+      const addedPassphrases: NonNullable<typeof importResult.keyPassphrases> = [];
       for (const entry of importResult.keyPassphrases ?? []) {
         if (addedHostIds.has(entry.hostId)) {
-          passphrasesByPath.set(entry.keyPath, entry);
+          addedPassphrases.push(entry);
         }
       }
 
       deps.updateHosts(merged.hosts);
       deps.updateCustomGroups(merged.customGroups);
-      for (const entry of passphrasesByPath.values()) {
-        await deps.saveKeyPassphrase(entry.keyPath, entry.passphrase);
+      const resolved = await resolveVaultImportKeyPassphraseConflicts(
+        addedPassphrases,
+        deps.resolveKeyPassphraseAliases,
+      );
+      const saveIssues = [...resolved.issues];
+      for (const entry of resolved.keyPassphrases) {
+        try {
+          await deps.saveKeyPassphrase(entry.keyPath, entry.passphrase);
+        } catch {
+          saveIssues.push({
+            level: 'warning',
+            message: `Could not save the passphrase for KeyPath "${entry.keyPath}".`,
+          });
+        }
       }
 
       return {
@@ -824,7 +838,7 @@ export async function handleVaultAgentOp(
         dryRun: false,
         format: resolvedFormat,
         stats: importResult.stats,
-        issues: importResult.issues,
+        issues: [...importResult.issues, ...saveIssues],
         addedCount: merged.addedCount,
         skippedExistingCount: merged.skippedExistingCount,
         previewHosts: previewHosts.slice(0, 20),

@@ -1,9 +1,14 @@
 import { useCallback, useRef } from "react";
 
-import { rememberKeyPassphrase } from "../../application/defaultKeyPassphrases";
+import { rememberKeyPassphrase, resolveDefaultKeyPassphraseAliases } from "../../application/defaultKeyPassphrases";
 import { readVaultImportFile } from "../../application/state/vaultImportFile";
 import { sanitizeHost } from "../../domain/host";
-import { applyVaultHostImport, importVaultHostsFromText, type VaultImportFormat } from "../../domain/vaultImport";
+import {
+  applyVaultHostImport,
+  importVaultHostsFromText,
+  resolveVaultImportKeyPassphraseConflicts,
+  type VaultImportFormat,
+} from "../../domain/vaultImport";
 import type { Host, ManagedSource, SSHKey } from "../../types";
 import type { ImportOptions } from "./ImportVaultDialog";
 import { toast } from "../ui/toast";
@@ -162,25 +167,37 @@ export function useVaultImportHandlers({
           } else if (newHosts.length > 0) {
             const merged = applyVaultHostImport(hosts, customGroups, result, { skipDuplicates: true });
             const addedHostIds = new Set(merged.addedHosts.map((host) => host.id));
-            const passphrasesByPath = new Map<string, NonNullable<typeof result.keyPassphrases>[number]>();
+            const addedPassphrases: NonNullable<typeof result.keyPassphrases> = [];
             for (const entry of result.keyPassphrases ?? []) {
               if (addedHostIds.has(entry.hostId)) {
-                passphrasesByPath.set(entry.keyPath, entry);
+                addedPassphrases.push(entry);
               }
             }
             onUpdateHosts(merged.hosts);
             onUpdateCustomGroups(merged.customGroups);
-            for (const entry of passphrasesByPath.values()) {
-              await rememberKeyPassphrase({
-                keyPath: entry.keyPath,
-                passphrase: entry.passphrase,
-                keys: keysRef.current,
-                getKeys: () => keysRef.current,
-                updateKeys: onUpdateKeys,
-                setCurrentKeys: (updatedKeys) => {
-                  keysRef.current = updatedKeys;
-                },
-              });
+            const resolved = await resolveVaultImportKeyPassphraseConflicts(
+              addedPassphrases,
+              resolveDefaultKeyPassphraseAliases,
+            );
+            result.issues.push(...resolved.issues);
+            for (const entry of resolved.keyPassphrases) {
+              try {
+                await rememberKeyPassphrase({
+                  keyPath: entry.keyPath,
+                  passphrase: entry.passphrase,
+                  keys: keysRef.current,
+                  getKeys: () => keysRef.current,
+                  updateKeys: onUpdateKeys,
+                  setCurrentKeys: (updatedKeys) => {
+                    keysRef.current = updatedKeys;
+                  },
+                });
+              } catch {
+                result.issues.push({
+                  level: "warning",
+                  message: `Could not save the passphrase for KeyPath "${entry.keyPath}".`,
+                });
+              }
             }
           }
   

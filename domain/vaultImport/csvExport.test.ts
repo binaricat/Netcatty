@@ -38,6 +38,7 @@ test("CSV round-trips local key authentication and its saved passphrase", () => 
   const { csv } = exportHostsToCsvWithStats([host], {
     keyPassphrases: new Map([["~/.ssh/id_ed25519", "+secret"]]),
   });
+  assert.equal(csv.includes(",+secret"), false);
   const imported = importVaultHostsFromText("csv", csv);
 
   assert.deepEqual(imported.hosts[0]?.identityFilePaths, ["~/.ssh/id_ed25519"]);
@@ -51,7 +52,11 @@ test("CSV round-trips local key authentication and its saved passphrase", () => 
 });
 
 test("CSV reversibly guards key paths that spreadsheets treat as formulas", () => {
-  const hosts: Host[] = ["-relative-key", "'-literal-key"].map((keyPath, index) => ({
+  const hosts: Host[] = [
+    "-relative-key",
+    "'-literal-key",
+    "__netcatty_csv_keypath_v1__:literal",
+  ].map((keyPath, index) => ({
     id: `host-${index}`,
     label: `Host ${index}`,
     hostname: `host-${index}.example.com`,
@@ -67,5 +72,6 @@ test("CSV reversibly guards key paths that spreadsheets treat as formulas", () =
   assert.deepEqual(imported.hosts.map((host) => host.identityFilePaths?.[0]), [
     "-relative-key",
     "'-literal-key",
+    "__netcatty_csv_keypath_v1__:literal",
   ]);
 });

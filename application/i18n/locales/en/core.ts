@@ -910,6 +910,7 @@ Highlight the focused split pane:
   'vault.hosts.export': 'Export',
   'vault.hosts.export.toast.success': 'Exported {count} hosts to CSV',
   'vault.hosts.export.toast.successWithSkipped': 'Exported {count} hosts to CSV ({skipped} unsupported hosts skipped)',
+  'vault.hosts.export.toast.passphrasesSkipped': '{count} saved key passphrases could not be read and were left blank',
   'vault.hosts.export.toast.noHosts': 'No hosts to export',
   'vault.hosts.allHosts': 'All hosts',
   'vault.hosts.pinned': 'Pinned',

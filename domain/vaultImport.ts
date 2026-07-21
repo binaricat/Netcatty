@@ -11,6 +11,7 @@ import {
 export { buildVaultHostMergeKey } from "./vaultHostCreate";
 import { parseQuickConnectInput } from "./quickConnect";
 import { findExactHeaderIndex, findHeaderIndex, parseCsv } from "./vaultImport/csvUtils";
+import { decodeCsvKeyPath, decodeCsvPassphrase } from "./vaultImport/csvCredentialFields";
 export { exportHostsToCsvWithStats, getVaultCsvTemplate } from "./vaultImport/csvExport";
 
 interface ParsedJumpHost {
@@ -168,13 +169,8 @@ const hostKey = buildVaultHostMergeKey;
 
 const normalizeKeyPathKey = (keyPath: string): string => {
   const isWindowsPath = /^[A-Za-z]:[\\/]/u.test(keyPath) || /^[\\/]{2}/u.test(keyPath);
-  const normalized = keyPath.replace(/\\/g, "/");
-  return isWindowsPath ? normalized.toLowerCase() : normalized;
+  return isWindowsPath ? keyPath.replace(/\\/g, "/").toLowerCase() : keyPath;
 };
-
-const restoreGuardedKeyPath = (keyPath: string): string => (
-  /^'+[=+\-@\t\r]/u.test(keyPath) ? keyPath.slice(1) : keyPath
-);
 
 const createHost = (input: {
   label?: string;
@@ -355,8 +351,9 @@ const importFromCsv = (text: string): VaultImportResult => {
     const username = (usernameIdx >= 0 ? row[usernameIdx] : undefined)?.trim() || target.username;
     const password = (passwordIdx >= 0 ? row[passwordIdx] : undefined) || undefined;
     const keyPathRaw = (keyPathIdx >= 0 ? row[keyPathIdx] : undefined)?.trim();
-    const keyPath = keyPathRaw ? restoreGuardedKeyPath(keyPathRaw) : undefined;
-    const passphrase = (passphraseIdx >= 0 ? row[passphraseIdx] : undefined) || undefined;
+    const keyPath = keyPathRaw ? decodeCsvKeyPath(keyPathRaw) : undefined;
+    const passphraseRaw = (passphraseIdx >= 0 ? row[passphraseIdx] : undefined) || undefined;
+    const passphrase = passphraseRaw ? decodeCsvPassphrase(passphraseRaw) : undefined;
 
     if (passphrase && !keyPath) {
       issues.push({
@@ -1163,4 +1160,49 @@ export function applyVaultHostImport(
     skippedExistingCount,
     addedHosts: newHosts,
   };
+}
+
+export async function resolveVaultImportKeyPassphraseConflicts(
+  entries: VaultHostKeyPassphrase[],
+  resolveAliases: (keyPath: string) => Promise<string[]>,
+): Promise<{ keyPassphrases: VaultHostKeyPassphrase[]; issues: VaultImportIssue[] }> {
+  const groups: Array<{
+    aliases: Set<string>;
+    entries: VaultHostKeyPassphrase[];
+  }> = [];
+
+  for (const entry of entries) {
+    const aliases = new Set((await resolveAliases(entry.keyPath)).map(normalizeKeyPathKey));
+    aliases.add(normalizeKeyPathKey(entry.keyPath));
+    const matching = groups.filter((group) => (
+      [...aliases].some((alias) => group.aliases.has(alias))
+    ));
+    const mergedAliases = new Set([
+      ...aliases,
+      ...matching.flatMap((group) => [...group.aliases]),
+    ]);
+    const mergedEntries = [
+      ...matching.flatMap((group) => group.entries),
+      entry,
+    ];
+    for (const group of matching) {
+      groups.splice(groups.indexOf(group), 1);
+    }
+    groups.push({ aliases: mergedAliases, entries: mergedEntries });
+  }
+
+  const keyPassphrases: VaultHostKeyPassphrase[] = [];
+  const issues: VaultImportIssue[] = [];
+  for (const group of groups) {
+    const passphrases = new Set(group.entries.map((entry) => entry.passphrase));
+    if (passphrases.size > 1) {
+      issues.push({
+        level: "warning",
+        message: `CSV contains conflicting passphrases for KeyPath "${group.entries[0].keyPath}"; no passphrase was saved for that path.`,
+      });
+    } else {
+      keyPassphrases.push(group.entries[0]);
+    }
+  }
+  return { keyPassphrases, issues };
 }
