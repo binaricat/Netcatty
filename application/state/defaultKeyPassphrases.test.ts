@@ -218,6 +218,52 @@ test("export read reports unavailable encrypted passphrases without deleting the
   );
 });
 
+test("export read retries when the passphrase changes during decryption", async (t) => {
+  installLocalStorage(t);
+  const keyPath = "/Users/alice/.ssh/id_ed25519";
+  const encrypted = "enc:v1:djEwYWJj";
+  let releaseDecrypt: (() => void) | undefined;
+  const decryptGate = new Promise<void>((resolve) => {
+    releaseDecrypt = resolve;
+  });
+  let firstDecryptStarted: (() => void) | undefined;
+  const firstDecrypt = new Promise<void>((resolve) => {
+    firstDecryptStarted = resolve;
+  });
+  let decryptCount = 0;
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: {
+      netcatty: {
+        getHomeDir: async () => "/Users/alice",
+        credentialsDecrypt: async (value: string) => {
+          decryptCount += 1;
+          if (decryptCount === 1) {
+            firstDecryptStarted?.();
+            await decryptGate;
+            return "old-secret";
+          }
+          return value;
+        },
+      },
+    },
+  });
+  globalThis.localStorage.setItem(
+    STORAGE_KEY_DEFAULT_KEY_PASSPHRASES,
+    JSON.stringify({ [keyPath]: encrypted }),
+  );
+
+  const pendingRead = readDefaultKeyPassphraseForExport(keyPath);
+  await firstDecrypt;
+  globalThis.localStorage.setItem(
+    STORAGE_KEY_DEFAULT_KEY_PASSPHRASES,
+    JSON.stringify({ [keyPath]: "new-secret" }),
+  );
+  releaseDecrypt?.();
+
+  assert.deepEqual(await pendingRead, { status: "readable", value: "new-secret" });
+});
+
 test("loadDefaultKeyPassphrase cleanup preserves a passphrase saved concurrently", async (t) => {
   installLocalStorage(t);
   let releaseFirstHomeLookup: (() => void) | undefined;

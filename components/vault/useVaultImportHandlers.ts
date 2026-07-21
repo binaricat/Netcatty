@@ -167,17 +167,12 @@ export function useVaultImportHandlers({
           } else if (newHosts.length > 0) {
             const merged = applyVaultHostImport(hosts, customGroups, result, { skipDuplicates: true });
             const addedHostIds = new Set(merged.addedHosts.map((host) => host.id));
-            const addedPassphrases: NonNullable<typeof result.keyPassphrases> = [];
-            for (const entry of result.keyPassphrases ?? []) {
-              if (addedHostIds.has(entry.hostId)) {
-                addedPassphrases.push(entry);
-              }
-            }
             onUpdateHosts(merged.hosts);
             onUpdateCustomGroups(merged.customGroups);
             const resolved = await resolveVaultImportKeyPassphraseConflicts(
-              addedPassphrases,
+              result.keyPassphrases ?? [],
               resolveDefaultKeyPassphraseAliases,
+              addedHostIds,
             );
             result.issues.push(...resolved.issues);
             for (const entry of resolved.keyPassphrases) {

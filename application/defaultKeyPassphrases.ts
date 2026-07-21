@@ -149,13 +149,13 @@ export type DefaultKeyPassphraseExportRead =
   | { status: "readable"; value: string }
   | { status: "unreadable" };
 
-export async function readDefaultKeyPassphraseForExport(
+async function readDefaultKeyPassphraseForExportOnce(
   keyPath: string,
-): Promise<DefaultKeyPassphraseExportRead> {
+): Promise<{ retry: boolean; result: DefaultKeyPassphraseExportRead }> {
   const aliases = await resolveDefaultKeyPassphraseAliases(keyPath);
   const aliasKeys = matchingPathKeys(aliases);
   const store = localStorageAdapter.read<Record<string, string>>(STORAGE_KEY_DEFAULT_KEY_PASSPHRASES);
-  if (!store) return { status: "missing" };
+  if (!store) return { retry: false, result: { status: "missing" } };
 
   const storedPaths = Object.keys(store).filter((path) => (
     aliasKeys.has(defaultKeyPassphrasePathKey(path))
@@ -164,17 +164,35 @@ export async function readDefaultKeyPassphraseForExport(
   if (exactIndex > 0) {
     storedPaths.unshift(storedPaths.splice(exactIndex, 1)[0]);
   }
-  if (storedPaths.length === 0) return { status: "missing" };
+  if (storedPaths.length === 0) return { retry: false, result: { status: "missing" } };
 
   for (const storedPath of storedPaths) {
     try {
       const decrypted = await decryptField(store[storedPath]);
       if (decrypted && !isEncryptedCredentialPlaceholder(decrypted)) {
-        return { status: "readable", value: decrypted };
+        const latestStore = localStorageAdapter.read<Record<string, string>>(STORAGE_KEY_DEFAULT_KEY_PASSPHRASES);
+        if (matchingStoreEntriesChanged(store, latestStore, aliasKeys)) {
+          return { retry: true, result: { status: "unreadable" } };
+        }
+        return { retry: false, result: { status: "readable", value: decrypted } };
       }
     } catch {
       // Export must not mutate saved credentials when secure storage is unavailable.
     }
+  }
+  const latestStore = localStorageAdapter.read<Record<string, string>>(STORAGE_KEY_DEFAULT_KEY_PASSPHRASES);
+  if (matchingStoreEntriesChanged(store, latestStore, aliasKeys)) {
+    return { retry: true, result: { status: "unreadable" } };
+  }
+  return { retry: false, result: { status: "unreadable" } };
+}
+
+export async function readDefaultKeyPassphraseForExport(
+  keyPath: string,
+): Promise<DefaultKeyPassphraseExportRead> {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const read = await readDefaultKeyPassphraseForExportOnce(keyPath);
+    if (!read.retry) return read.result;
   }
   return { status: "unreadable" };
 }

@@ -777,29 +777,30 @@ export async function handleVaultAgentOp(
 
       const importResult = importVaultHostsFromText(resolvedFormat, text, { fileName });
       const previewHosts = importResult.hosts.map((host) => sanitizeHostForAgent(host));
-
-      if (dryRun) {
-        const resolvedPassphrases = await resolveVaultImportKeyPassphraseConflicts(
-          importResult.keyPassphrases ?? [],
-          deps.resolveKeyPassphraseAliases,
-        );
-        return {
-          ok: true,
-          dryRun: true,
-          format: resolvedFormat,
-          stats: importResult.stats,
-          issues: [...importResult.issues, ...resolvedPassphrases.issues],
-          groups: importResult.groups,
-          previewHosts,
-        };
-      }
-
       const merged = applyVaultHostImport(
         deps.getHosts(),
         deps.getCustomGroups(),
         importResult,
         { skipDuplicates },
       );
+      const addedHostIds = new Set(merged.addedHosts.map((host) => host.id));
+      const resolved = await resolveVaultImportKeyPassphraseConflicts(
+        importResult.keyPassphrases ?? [],
+        deps.resolveKeyPassphraseAliases,
+        addedHostIds,
+      );
+
+      if (dryRun) {
+        return {
+          ok: true,
+          dryRun: true,
+          format: resolvedFormat,
+          stats: importResult.stats,
+          issues: [...importResult.issues, ...resolved.issues],
+          groups: importResult.groups,
+          previewHosts,
+        };
+      }
 
       if (merged.addedCount === 0 && importResult.stats.parsed === 0) {
         return {
@@ -811,20 +812,8 @@ export async function handleVaultAgentOp(
         };
       }
 
-      const addedHostIds = new Set(merged.addedHosts.map((host) => host.id));
-      const addedPassphrases: NonNullable<typeof importResult.keyPassphrases> = [];
-      for (const entry of importResult.keyPassphrases ?? []) {
-        if (addedHostIds.has(entry.hostId)) {
-          addedPassphrases.push(entry);
-        }
-      }
-
       deps.updateHosts(merged.hosts);
       deps.updateCustomGroups(merged.customGroups);
-      const resolved = await resolveVaultImportKeyPassphraseConflicts(
-        addedPassphrases,
-        deps.resolveKeyPassphraseAliases,
-      );
       const saveIssues = [...resolved.issues];
       for (const entry of resolved.keyPassphrases) {
         try {

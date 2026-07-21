@@ -1165,6 +1165,7 @@ export function applyVaultHostImport(
 export async function resolveVaultImportKeyPassphraseConflicts(
   entries: VaultHostKeyPassphrase[],
   resolveAliases: (keyPath: string) => Promise<string[]>,
+  eligibleHostIds?: ReadonlySet<string>,
 ): Promise<{ keyPassphrases: VaultHostKeyPassphrase[]; issues: VaultImportIssue[] }> {
   const groups: Array<{
     aliases: Set<string>;
@@ -1201,7 +1202,10 @@ export async function resolveVaultImportKeyPassphraseConflicts(
         message: `CSV contains conflicting passphrases for KeyPath "${group.entries[0].keyPath}"; no passphrase was saved for that path.`,
       });
     } else {
-      keyPassphrases.push(group.entries[0]);
+      const selected = eligibleHostIds
+        ? group.entries.find((entry) => eligibleHostIds.has(entry.hostId))
+        : group.entries[0];
+      if (selected) keyPassphrases.push(selected);
     }
   }
   return { keyPassphrases, issues };
