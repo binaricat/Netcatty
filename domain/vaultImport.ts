@@ -124,6 +124,7 @@ export interface VaultImportResult {
   issues: VaultImportIssue[];
   stats: VaultImportStats;
   keyPassphrases?: VaultHostKeyPassphrase[];
+  keyPassphraseCandidates?: VaultHostKeyPassphrase[];
 }
 
 const DEFAULT_SSH_PORT = 22;
@@ -313,6 +314,8 @@ const importFromCsv = (text: string): VaultImportResult => {
   const keyPassphraseCandidates: Array<{
     hostKey: string;
     keyPathKey: string;
+    keyPath: string;
+    passphrase: string;
   }> = [];
   const keyPassphrasesByPath = new Map<string, {
     keyPath: string;
@@ -390,6 +393,8 @@ const importFromCsv = (text: string): VaultImportResult => {
       keyPassphraseCandidates.push({
         hostKey: buildVaultHostMergeKey(host),
         keyPathKey,
+        keyPath,
+        passphrase,
       });
     }
   }
@@ -408,12 +413,28 @@ const importFromCsv = (text: string): VaultImportResult => {
       ? [{ hostId: host.id, keyPath: entry.keyPath, passphrase: entry.passphrase }]
       : [];
   });
+  const allKeyPassphraseCandidates = hosts.flatMap((host) => {
+    const selectedKeyPath = host.identityFilePaths?.find((path) => path.trim())?.trim();
+    if (!selectedKeyPath) return [];
+    const selectedKeyPathKey = normalizeKeyPathKey(selectedKeyPath);
+    return keyPassphraseCandidates
+      .filter((entry) => (
+        entry.hostKey === buildVaultHostMergeKey(host)
+        && entry.keyPathKey === selectedKeyPathKey
+      ))
+      .map((entry) => ({
+        hostId: host.id,
+        keyPath: entry.keyPath,
+        passphrase: entry.passphrase,
+      }));
+  });
   const groups = uniq(hosts.map((h) => h.group).filter(Boolean) as string[]);
   return {
     hosts,
     groups,
     issues,
     keyPassphrases,
+    keyPassphraseCandidates: allKeyPassphraseCandidates,
     stats: {
       parsed,
       imported: hosts.length,

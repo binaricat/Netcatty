@@ -1139,6 +1139,39 @@ describe('handleVaultAgentOp vault hosts', () => {
     }]);
   });
 
+  it('host.import blocks an alias after an exact-path conflict', async () => {
+    const saved: Array<{ keyPath: string; passphrase: string }> = [];
+    const result = await handleVaultAgentOp(
+      'host.import',
+      {
+        format: 'csv',
+        text: [
+          'Label,Hostname,Username,KeyPath,Passphrase',
+          'one,one.example.com,root,~/.ssh/shared,one',
+          'two,two.example.com,root,~/.ssh/shared,two',
+          'three,three.example.com,root,/Users/alice/.ssh/shared,three',
+        ].join('\n'),
+      },
+      createDeps({
+        resolveKeyPassphraseAliases: async (keyPath) => (
+          keyPath.startsWith('~/')
+            ? [keyPath, `/Users/alice/${keyPath.slice(2)}`]
+            : [keyPath, `~/${keyPath.slice('/Users/alice/'.length)}`]
+        ),
+        saveKeyPassphrase: async (keyPath, passphrase) => {
+          saved.push({ keyPath, passphrase });
+        },
+      }),
+    );
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(saved, []);
+    assert.ok(
+      (result as { issues?: Array<{ message: string }> }).issues
+        ?.some((issue) => /conflicting passphrases/u.test(issue.message)),
+    );
+  });
+
   it('host.import applies hosts to the vault', async () => {
     const updatedHosts: Host[][] = [];
     const updatedGroups: string[][] = [];

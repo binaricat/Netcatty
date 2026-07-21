@@ -785,7 +785,7 @@ export async function handleVaultAgentOp(
       );
       const addedHostIds = new Set(merged.addedHosts.map((host) => host.id));
       const resolved = await resolveVaultImportKeyPassphraseConflicts(
-        importResult.keyPassphrases ?? [],
+        importResult.keyPassphraseCandidates ?? importResult.keyPassphrases ?? [],
         deps.resolveKeyPassphraseAliases,
         addedHostIds,
       );

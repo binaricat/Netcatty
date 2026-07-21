@@ -199,7 +199,31 @@ test("CSV import rejects conflicting passphrases for a shared key path", () => {
 
   assert.equal(result.hosts.length, 2);
   assert.deepEqual(result.keyPassphrases, []);
+  assert.equal(result.keyPassphraseCandidates?.length, 2);
   assert.match(result.issues[0]?.message ?? "", /conflicting passphrases/u);
+});
+
+test("CSV alias conflict resolution sees candidates rejected by exact-path checks", async () => {
+  const result = importVaultHostsFromText(
+    "csv",
+    [
+      "Label,Hostname,Username,KeyPath,Passphrase",
+      "one,one.example.com,root,~/.ssh/shared,one",
+      "two,two.example.com,root,~/.ssh/shared,two",
+      "three,three.example.com,root,/Users/alice/.ssh/shared,three",
+    ].join("\n"),
+  );
+  const resolved = await resolveVaultImportKeyPassphraseConflicts(
+    result.keyPassphraseCandidates ?? [],
+    async (keyPath) => (
+      keyPath.startsWith("~/")
+        ? [keyPath, `/Users/alice/${keyPath.slice(2)}`]
+        : [keyPath, `~/${keyPath.slice("/Users/alice/".length)}`]
+    ),
+  );
+
+  assert.deepEqual(resolved.keyPassphrases, []);
+  assert.match(resolved.issues[0]?.message ?? "", /conflicting passphrases/u);
 });
 
 test("CSV import keeps POSIX backslashes distinct from path separators", () => {

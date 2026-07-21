@@ -170,7 +170,7 @@ export function useVaultImportHandlers({
             onUpdateHosts(merged.hosts);
             onUpdateCustomGroups(merged.customGroups);
             const resolved = await resolveVaultImportKeyPassphraseConflicts(
-              result.keyPassphrases ?? [],
+              result.keyPassphraseCandidates ?? result.keyPassphrases ?? [],
               resolveDefaultKeyPassphraseAliases,
               addedHostIds,
             );
