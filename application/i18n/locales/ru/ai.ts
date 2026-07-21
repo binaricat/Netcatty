@@ -445,6 +445,8 @@ export const ruAiMessages: Messages = {
   'topTabs.openQuickSwitcher': 'Открыть быстрый переключатель',
   'topTabs.moreTabs': 'Больше вкладок',
   'topTabs.aiAssistant': 'AI-помощник',
+  'topTabs.externalMcp.enable': 'Включить внешний MCP',
+  'topTabs.externalMcp.disable': 'Отключить внешний MCP',
   'topTabs.windowOpacity': 'Прозрачность окна',
   'topTabs.toggleTheme': 'Переключить тему',
   'topTabs.openSettings': 'Открыть настройки',

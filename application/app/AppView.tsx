@@ -24,6 +24,7 @@ import { AppHostTreeLayer } from './AppHostTreeLayer';
 import { getUiThemeById } from '../../infrastructure/config/uiThemes';
 import { buildAppThemeCssVars } from '../state/settingsStateDefaults';
 import { useMainWindowInputFocusRecovery } from '../state/useMainWindowInputFocusRecovery';
+import { useExternalMcpToggleState } from '../state/useExternalMcpToggleState';
 import { PluginContributionHost } from '../../components/plugins/PluginContributionHost';
 import { resolveActivePluginKeybindingContext } from '../state/pluginContributionContexts';
 import { selectPluginThemeTokens } from '../state/pluginContributionEnvironment';
@@ -138,6 +139,7 @@ export function AppView({ ctx }: { ctx: AppViewContext }) {
     () => selectPluginThemeTokens(appThemeStyle as Record<string, unknown>),
     [appThemeStyle],
   );
+  const externalMcpToggle = useExternalMcpToggleState();
 
   const closePluginViewTab = useCallback((tabId: string) => {
     const index = orderedTabsWithEditors.indexOf(tabId);
@@ -231,6 +233,8 @@ export function AppView({ ctx }: { ctx: AppViewContext }) {
         onOpenQuickSwitcher={handleOpenQuickSwitcher}
         onToggleTheme={handleToggleTheme}
         onOpenSettings={handleOpenSettings}
+        externalMcpEnabled={externalMcpToggle.enabled}
+        onToggleExternalMcp={externalMcpToggle.setEnabled}
         windowOpacity={settings.windowOpacity}
         setWindowOpacity={settings.setWindowOpacity}
         onSyncNow={handleSyncNowManual}

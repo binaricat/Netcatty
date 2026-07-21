@@ -110,6 +110,13 @@ test("quick switcher plus button exposes a custom CSS hook", () => {
   assert.match(topTabsSource, /data-section="top-tabs-quick-switcher-toggle"/);
 });
 
+test("top tabs expose the External MCP quick toggle", () => {
+  assert.match(topTabsSource, /externalMcpEnabled: boolean/);
+  assert.match(topTabsSource, /onToggleExternalMcp: \(enabled: boolean\) => void/);
+  assert.match(topTabsSource, /onToggleExternalMcp\(!externalMcpEnabled\)/);
+  assert.match(topTabsSource, /topTabs\.externalMcp\.(enable|disable)/);
+});
+
 test("SessionTabIcon checks custom host icon appearance before distro logos", () => {
   assert.match(topTabItemsSource, /resolveHostIconAppearance\(host\)/);
   assert.ok(
