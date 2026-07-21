@@ -507,9 +507,9 @@ Highlight the focused split pane:
   'settings.terminal.keyboard.optionArrowWordJump': 'Option+←/→ jumps by word',
   'settings.terminal.keyboard.optionArrowWordJump.desc':
     'Send Meta-b / Meta-f on Option+Left/Right so the shell moves by word, instead of the default ^[[1;3D / ^[[1;3C',
-  'settings.terminal.keyboard.kittyProtocol': 'Kitty keyboard protocol (experimental)',
+  'settings.terminal.keyboard.kittyProtocol': 'Kitty keyboard protocol',
   'settings.terminal.keyboard.kittyProtocol.desc':
-    'Enable incomplete Kitty keyboard protocol support for new terminal sessions. Some TUI applications may stop accepting input.',
+    'Enable Kitty keyboard protocol support.',
   'settings.terminal.accessibility.minimumContrastRatio': 'Minimum contrast ratio',
   'settings.terminal.sidePanel.autoOpen': 'Open side panel with terminal',
   'settings.terminal.sidePanel.autoOpen.desc': 'Automatically open a side panel when a terminal connects.',
