@@ -42,6 +42,7 @@ const indexCss = readFileSync(new URL("../index.css", import.meta.url), "utf8");
 const topTabsSource = readFileSync(new URL("./TopTabs.tsx", import.meta.url), "utf8");
 const topTabsQuickControlsSource = readFileSync(new URL("./TopTabsQuickControls.tsx", import.meta.url), "utf8");
 const syncStatusButtonSource = readFileSync(new URL("./SyncStatusButton.tsx", import.meta.url), "utf8");
+const switchSource = readFileSync(new URL("./ui/switch.tsx", import.meta.url), "utf8");
 const appViewSource = readFileSync(new URL("../application/app/AppView.tsx", import.meta.url), "utf8");
 const appSource = readFileSync(new URL("../App.tsx", import.meta.url), "utf8");
 const externalMcpToggleSource = readFileSync(new URL("../application/state/useExternalMcpToggleState.ts", import.meta.url), "utf8");
@@ -148,11 +149,15 @@ test("quick controls panel hosts External MCP, opacity, and theme", () => {
   assert.match(topTabsQuickControlsSource, /isOpacityExpanded/);
   assert.match(topTabsQuickControlsSource, /isPresetActive/);
   assert.match(topTabsQuickControlsSource, /type="range"/);
+  assert.match(topTabsQuickControlsSource, /aria-labelledby=\{externalMcpLabelId\}/);
+  assert.doesNotMatch(topTabsQuickControlsSource, /onOpenAutoFocus/);
   assert.match(topTabsQuickControlsSource, /mt-1 border-t border-border\/60 pt-1/);
   assert.doesNotMatch(topTabsQuickControlsSource, /useCloudSync/);
   assert.doesNotMatch(topTabsQuickControlsSource, /border border-border\/60 bg-background\/70/);
   assert.doesNotMatch(syncStatusButtonSource, /topTabs\.controlPanel/);
   assert.doesNotMatch(syncStatusButtonSource, /externalMcpEnabled/);
+  assert.match(switchSource, /aria-label=\{ariaLabel\}/);
+  assert.match(switchSource, /role="switch"/);
 });
 
 test("External MCP top bar labels exist in Traditional Chinese", () => {

@@ -49,6 +49,7 @@ export const TopTabsQuickControls: React.FC<TopTabsQuickControlsProps> = ({
   const opacityPercent = Math.round(windowOpacity * 100);
   const isPresetActive = (value: number) => Math.round(value * 100) === opacityPercent;
   const isDark = theme === 'dark';
+  const externalMcpLabelId = React.useId();
   const triggerActive = (
     (showExternalMcpToggle && externalMcpEnabled)
     || opacityPercent < 100
@@ -89,7 +90,6 @@ export const TopTabsQuickControls: React.FC<TopTabsQuickControlsProps> = ({
         className="w-64 p-0 app-no-drag"
         align="end"
         sideOffset={6}
-        onOpenAutoFocus={(event) => event.preventDefault()}
       >
         <div className="px-3 py-2 border-b border-border/60">
           <div className="text-sm font-medium">{t('topTabs.controlPanel')}</div>
@@ -178,11 +178,12 @@ export const TopTabsQuickControls: React.FC<TopTabsQuickControlsProps> = ({
               <div className="flex items-center justify-between gap-3 rounded-md px-2 py-2 hover:bg-muted/40">
                 <div className="flex min-w-0 items-center gap-2 text-sm">
                   <Plug size={14} className="shrink-0 text-muted-foreground" />
-                  <span className="truncate">{t('topTabs.controlPanel.externalMcp')}</span>
+                  <span id={externalMcpLabelId} className="truncate">{t('topTabs.controlPanel.externalMcp')}</span>
                 </div>
                 <Switch
                   checked={externalMcpEnabled}
                   onCheckedChange={onToggleExternalMcp}
+                  aria-labelledby={externalMcpLabelId}
                   aria-label={t(externalMcpEnabled ? 'topTabs.externalMcp.disable' : 'topTabs.externalMcp.enable')}
                 />
               </div>

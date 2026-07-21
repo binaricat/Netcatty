@@ -457,7 +457,6 @@ export const ruAiMessages: Messages = {
   'topTabs.externalMcp.enable': 'Включить внешний MCP',
   'topTabs.externalMcp.disable': 'Отключить внешний MCP',
   'topTabs.windowOpacity': 'Прозрачность окна',
-  'topTabs.toggleTheme': 'Переключить тему',
   'topTabs.openSettings': 'Открыть настройки',
   'ai.chat.sessionHistory': 'История сессий',
   'ai.chat.attach': 'Прикрепить',
