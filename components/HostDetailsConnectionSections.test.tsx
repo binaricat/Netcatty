@@ -7,6 +7,7 @@ import type { Host, SSHKey } from "../types.ts";
 import {
   applyEffectiveHostAuthMethodSelection,
   detachEffectiveHostIdentity,
+  HOST_AUTH_METHOD_CHOICES,
   HostDetailsConnectionSections,
   removeSelectedHostCredential,
 } from "./HostDetailsConnectionSections.tsx";
@@ -112,9 +113,17 @@ test("host credentials expose automatic and password-only choices", () => {
     identityFileId: undefined,
   });
 
+  assert.deepEqual(
+    HOST_AUTH_METHOD_CHOICES.map(([value, labelKey]) => [value, labelKey]),
+    [
+      ["auto", "hostDetails.auth.auto"],
+      ["password", "hostDetails.auth.passwordOnly"],
+      ["key", "hostDetails.auth.key"],
+      ["certificate", "hostDetails.auth.certificate"],
+    ],
+  );
   assert.match(markup, /hostDetails\.auth\.method/);
-  assert.match(markup, /role="combobox"/);
-  assert.match(markup, /aria-label="hostDetails\.auth\.auto\.desc"/);
+  assert.match(markup, /role="combobox"[^>]*aria-label="hostDetails\.auth\.method"/);
   assert.match(markup, /hostDetails\.auth\.auto/);
   assert.match(markup, /hostDetails\.auth\.mfaFirst/);
   // Login method uses the same option-style setting row as other host form controls.
@@ -122,7 +131,7 @@ test("host credentials expose automatic and password-only choices", () => {
     markup,
     /hostDetails\.auth\.method[\s\S]*?role="combobox"[\s\S]*?hostDetails\.auth\.auto[\s\S]*?<\/div>\s*<div class="flex min-h-12 items-center justify-between gap-3 rounded-lg border border-border\/60 bg-secondary\/40 px-3 py-2">[\s\S]*hostDetails\.auth\.mfaFirst/,
   );
-  assert.match(markup, /class="[^"]*h-8 w-\[7\.5rem\][^"]*"/);
+  assert.match(markup, /class="[^"]*h-10 w-32[^"]*"/);
   assert.match(
     markup,
     /role="combobox"[\s\S]*?<span class="min-w-0 flex-1 truncate text-left">hostDetails\.auth\.auto<\/span>/,
@@ -151,8 +160,7 @@ test("host authentication choices remain visible for a selected identity", () =>
   });
 
   assert.match(markup, /hostDetails\.auth\.method/);
-  assert.match(markup, /role="combobox"/);
-  assert.match(markup, /aria-label="hostDetails\.auth\.password\.desc"/);
+  assert.match(markup, /role="combobox"[^>]*aria-label="hostDetails\.auth\.method"/);
   assert.match(
     markup,
     /role="combobox"[\s\S]*?<span class="min-w-0 flex-1 truncate text-left">hostDetails\.auth\.passwordOnly<\/span>/,
@@ -167,8 +175,7 @@ test("host authentication choices show the inherited effective method", () => {
   });
 
   assert.match(markup, /hostDetails\.auth\.method/);
-  assert.match(markup, /role="combobox"/);
-  assert.match(markup, /aria-label="hostDetails\.auth\.password\.desc"/);
+  assert.match(markup, /role="combobox"[^>]*aria-label="hostDetails\.auth\.method"/);
   assert.match(
     markup,
     /role="combobox"[\s\S]*?<span class="min-w-0 flex-1 truncate text-left">hostDetails\.auth\.passwordOnly<\/span>/,

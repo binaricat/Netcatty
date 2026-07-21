@@ -16,6 +16,13 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type HostDetailsConnectionSectionsProps = Record<string, any>;
 
+export const HOST_AUTH_METHOD_CHOICES = [
+  ["auto", "hostDetails.auth.auto"],
+  ["password", "hostDetails.auth.passwordOnly"],
+  ["key", "hostDetails.auth.key"],
+  ["certificate", "hostDetails.auth.certificate"],
+] as const;
+
 export const applyEffectiveHostAuthMethodSelection = (
   host: Host,
   authMethod: "auto" | "password" | "key" | "certificate",
@@ -99,17 +106,11 @@ export const HostDetailsConnectionSections: React.FC<HostDetailsConnectionSectio
     setCredentialPopoverOpen(false);
   };
 
-  const authChoices = [
-    ["auto", "hostDetails.auth.auto"],
-    ["password", "hostDetails.auth.passwordOnly"],
-    ["key", "hostDetails.auth.key"],
-    ["certificate", "hostDetails.auth.certificate"],
-  ] as const;
-  const resolvedAuthMethod = authChoices.some(([value]) => value === effectiveAuthMethod)
+  const resolvedAuthMethod = HOST_AUTH_METHOD_CHOICES.some(([value]) => value === effectiveAuthMethod)
     ? effectiveAuthMethod
     : "auto";
   const selectedAuthMethodLabel = t(
-    authChoices.find(([value]) => value === resolvedAuthMethod)?.[1] ?? "hostDetails.auth.auto",
+    HOST_AUTH_METHOD_CHOICES.find(([value]) => value === resolvedAuthMethod)?.[1] ?? "hostDetails.auth.auto",
   );
   const effectiveEtEnabled = form.etEnabled ?? groupDefaults?.etEnabled;
   const effectiveProtocol = form.protocol ?? groupDefaults?.protocol;
@@ -160,8 +161,8 @@ export const HostDetailsConnectionSections: React.FC<HostDetailsConnectionSectio
                 onValueChange={(val) => selectAuthMethod(val as "auto" | "password" | "key" | "certificate")}
               >
                 <SelectTrigger
-                  className="h-8 w-[7.5rem] gap-2"
-                  aria-label={selectedAuthMethodLabel}
+                  className="h-10 w-32 gap-2"
+                  aria-label={t("hostDetails.auth.method")}
                 >
                   {/*
                     Radix Select only mirrors the selected item text after the
@@ -173,7 +174,7 @@ export const HostDetailsConnectionSections: React.FC<HostDetailsConnectionSectio
                   </span>
                 </SelectTrigger>
                 <SelectContent>
-                  {authChoices.map(([value, labelKey]) => (
+                  {HOST_AUTH_METHOD_CHOICES.map(([value, labelKey]) => (
                     <SelectItem key={value} value={value} textValue={t(labelKey)}>
                       {t(labelKey)}
                     </SelectItem>
