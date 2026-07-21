@@ -1,16 +1,23 @@
 import { Host, HostChainConfig, HostProtocol } from "./models";
+import { isEncryptedCredentialPlaceholder } from "./credentials";
 import { sanitizeHost } from "./host";
 import { hasMacKeychainAgentDirectives } from "./sshAuth";
 import {
   buildVaultHostFromDraft,
   buildVaultHostMergeKey,
+  type VaultHostKeyPassphrase,
   type VaultHostDraftProtocol,
 } from "./vaultHostCreate";
 
 export { buildVaultHostMergeKey } from "./vaultHostCreate";
 import { parseQuickConnectInput } from "./quickConnect";
-import { findHeaderIndex, parseCsv } from "./vaultImport/csvUtils";
-export { exportHostsToCsvWithStats, getVaultCsvTemplate } from "./vaultImport/csvExport";
+import { findExactHeaderIndex, findHeaderIndex, parseCsv } from "./vaultImport/csvUtils";
+import { decodeCsvKeyPath, decodeCsvPassphrase } from "./vaultImport/csvCredentialFields";
+export {
+  exportHostsToCsvWithStats,
+  getVaultCsvTemplate,
+  resolveVaultCsvHostKeyPath,
+} from "./vaultImport/csvExport";
 
 interface ParsedJumpHost {
   hostname: string;
@@ -121,6 +128,20 @@ export interface VaultImportResult {
   groups: string[];
   issues: VaultImportIssue[];
   stats: VaultImportStats;
+  keyPassphrases?: VaultHostKeyPassphrase[];
+  keyPassphraseCandidates?: VaultHostKeyPassphrase[];
+}
+
+export function mergeVaultImportIssues(
+  ...groups: ReadonlyArray<ReadonlyArray<VaultImportIssue>>
+): VaultImportIssue[] {
+  const seen = new Set<string>();
+  return groups.flatMap((issues) => issues.filter((issue) => {
+    const key = `${issue.level}\u0000${issue.message}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }));
 }
 
 const DEFAULT_SSH_PORT = 22;
@@ -164,11 +185,17 @@ const splitTags = (raw: string | undefined): string[] => {
 
 const hostKey = buildVaultHostMergeKey;
 
+const normalizeKeyPathKey = (keyPath: string): string => {
+  const isWindowsPath = /^[A-Za-z]:[\\/]/u.test(keyPath) || /^[\\/]{2}/u.test(keyPath);
+  return isWindowsPath ? keyPath.replace(/\\/g, "/").toLowerCase() : keyPath;
+};
+
 const createHost = (input: {
   label?: string;
   hostname: string;
   username?: string;
   password?: string;
+  keyPath?: string;
   port?: number;
   protocol?: VaultHostDraftProtocol;
   group?: string;
@@ -197,6 +224,12 @@ const dedupeHosts = (hosts: Host[]): { hosts: Host[]; duplicates: number } => {
     const mergedTags = Array.from(new Set([...(existing.tags ?? []), ...(host.tags ?? [])]));
     existing.tags = mergedTags;
     if (!existing.password && host.password) existing.password = host.password;
+    if (!existing.identityFilePaths?.some((path) => path.trim()) && host.identityFilePaths?.length) {
+      existing.identityFilePaths = host.identityFilePaths;
+      existing.authMethod = host.authMethod;
+      existing.authPolicyVersion = host.authPolicyVersion;
+      existing.useSshAgent = host.useSshAgent;
+    }
     if (existing.group == null && host.group != null) existing.group = host.group;
     if (existing.label === existing.hostname && host.label && host.label !== host.hostname) {
       existing.label = host.label;
@@ -272,7 +305,24 @@ const importFromCsv = (text: string): VaultImportResult => {
   const protocolIdx = findHeaderIndex(header, ["protocol", "proto", "scheme"]);
   const portIdx = findHeaderIndex(header, ["port"]);
   const usernameIdx = findHeaderIndex(header, ["username", "user", "login"]);
-  const passwordIdx = findHeaderIndex(header, ["password", "pass", "passwd"]);
+  const keyPathIdx = findExactHeaderIndex(header, ["keypath", "key path", "identityfile", "identity file"]);
+  const explicitPassphraseIdx = findExactHeaderIndex(header, ["passphrase", "keypassphrase", "key passphrase"]);
+  const passphraseIdx = keyPathIdx >= 0 ? explicitPassphraseIdx : -1;
+  const exactPasswordIdx = findExactHeaderIndex(header, ["password", "pass", "passwd"]);
+  const fuzzyNamedPasswordIdx = findHeaderIndex(header, ["password", "passwd"]);
+  const fuzzyPassIdx = header.findIndex((value) => {
+    const normalized = value.trim().toLowerCase().replace(/[^a-z0-9]/gu, "");
+    if (!normalized.startsWith("pass")) return false;
+    if (!normalized.startsWith("passphrase")) return true;
+    const suffix = normalized.slice("passphrase".length);
+    return keyPathIdx < 0 && ["", "optional", "value"].includes(suffix);
+  });
+  const fuzzyPasswordIdx = fuzzyNamedPasswordIdx >= 0 ? fuzzyNamedPasswordIdx : fuzzyPassIdx;
+  const passwordIdx = exactPasswordIdx >= 0
+    ? exactPasswordIdx
+    : keyPathIdx < 0 && explicitPassphraseIdx >= 0
+      ? explicitPassphraseIdx
+      : fuzzyPasswordIdx;
 
   if (hostnameIdx === -1) {
     return {
@@ -290,6 +340,17 @@ const importFromCsv = (text: string): VaultImportResult => {
   }
 
   const parsedHosts: Host[] = [];
+  const keyPassphraseCandidates: Array<{
+    hostKey: string;
+    keyPathKey: string;
+    keyPath: string;
+    passphrase: string;
+  }> = [];
+  const keyPassphrasesByPath = new Map<string, {
+    keyPath: string;
+    passphrase?: string;
+    conflict: boolean;
+  }>();
   let parsed = 0;
   let skipped = 0;
 
@@ -321,28 +382,92 @@ const importFromCsv = (text: string): VaultImportResult => {
     const port = parsePort(portIdx >= 0 ? row[portIdx] : undefined) ?? target.port;
     const username = (usernameIdx >= 0 ? row[usernameIdx] : undefined)?.trim() || target.username;
     const password = (passwordIdx >= 0 ? row[passwordIdx] : undefined) || undefined;
+    const keyPathRaw = (keyPathIdx >= 0 ? row[keyPathIdx] : undefined)?.trim();
+    const keyPath = keyPathRaw ? decodeCsvKeyPath(keyPathRaw) : undefined;
+    const passphraseRaw = (passphraseIdx >= 0 ? row[passphraseIdx] : undefined) || undefined;
+    const decodedPassphrase = passphraseRaw ? decodeCsvPassphrase(passphraseRaw) : undefined;
+    const passphrase = decodedPassphrase && !isEncryptedCredentialPlaceholder(decodedPassphrase)
+      ? decodedPassphrase
+      : undefined;
 
-    parsedHosts.push(
-      createHost({
-        label,
-        hostname: target.hostname,
-        username,
-        password,
-        port,
-        protocol,
-        group,
-        tags,
-        notes,
-      }),
-    );
+    if (decodedPassphrase && isEncryptedCredentialPlaceholder(decodedPassphrase)) {
+      issues.push({
+        level: "warning",
+        message: `CSV row ${i + 2}: Passphrase was ignored because encrypted credential values cannot be imported.`,
+      });
+    }
+
+    if (passphrase && !keyPath) {
+      issues.push({
+        level: "warning",
+        message: `CSV row ${i + 2}: Passphrase was ignored because KeyPath is empty.`,
+      });
+    }
+
+    const host = createHost({
+      label,
+      hostname: target.hostname,
+      username,
+      password,
+      keyPath,
+      port,
+      protocol,
+      group,
+      tags,
+      notes,
+    });
+    parsedHosts.push(host);
+    if (keyPath && passphrase) {
+      const keyPathKey = normalizeKeyPathKey(keyPath);
+      const stored = keyPassphrasesByPath.get(keyPathKey);
+      if (!stored) {
+        keyPassphrasesByPath.set(keyPathKey, { keyPath, passphrase, conflict: false });
+      } else if (stored.passphrase !== passphrase && !stored.conflict) {
+        stored.conflict = true;
+        issues.push({
+          level: "warning",
+          message: `CSV contains conflicting passphrases for KeyPath "${keyPath}"; no passphrase was saved for that path.`,
+        });
+      }
+      keyPassphraseCandidates.push({
+        hostKey: buildVaultHostMergeKey(host),
+        keyPathKey,
+        keyPath,
+        passphrase,
+      });
+    }
   }
 
   const { hosts, duplicates } = dedupeHosts(parsedHosts);
+  const keyPassphrases = hosts.flatMap((host) => {
+    const selectedKeyPath = host.identityFilePaths?.find((path) => path.trim())?.trim();
+    if (!selectedKeyPath) return [];
+    const selectedKeyPathKey = normalizeKeyPathKey(selectedKeyPath);
+    const candidate = keyPassphraseCandidates.find((entry) => (
+      entry.hostKey === buildVaultHostMergeKey(host)
+      && entry.keyPathKey === selectedKeyPathKey
+    ));
+    const entry = candidate ? keyPassphrasesByPath.get(candidate.keyPathKey) : undefined;
+    return entry?.passphrase && !entry.conflict
+      ? [{ hostId: host.id, keyPath: entry.keyPath, passphrase: entry.passphrase }]
+      : [];
+  });
+  const allKeyPassphraseCandidates = hosts.flatMap((host) => {
+    return keyPassphraseCandidates
+      .filter((entry) => entry.hostKey === buildVaultHostMergeKey(host))
+      .map((entry) => ({
+        hostId: host.id,
+        keyPath: entry.keyPath,
+        passphrase: entry.passphrase,
+      }));
+  });
   const groups = uniq(hosts.map((h) => h.group).filter(Boolean) as string[]);
   return {
     hosts,
     groups,
     issues,
+    keyPassphrases,
+    keyPassphraseCandidates: allKeyPassphraseCandidates,
     stats: {
       parsed,
       imported: hosts.length,
@@ -1059,6 +1184,7 @@ export function applyVaultHostImport(
   customGroups: string[];
   addedCount: number;
   skippedExistingCount: number;
+  addedHosts: Host[];
 } {
   const skipDuplicates = options?.skipDuplicates !== false;
   const existingKeys = new Set(existingHosts.map(buildVaultHostMergeKey));
@@ -1086,5 +1212,98 @@ export function applyVaultHostImport(
     customGroups,
     addedCount: newHosts.length,
     skippedExistingCount,
+    addedHosts: newHosts,
   };
+}
+
+export async function resolveVaultImportKeyPassphraseConflicts(
+  entries: VaultHostKeyPassphrase[],
+  resolveAliases: (keyPath: string) => Promise<string[]>,
+  eligibleHostIds?: ReadonlySet<string>,
+  eligibleKeyPathsByHostId?: ReadonlyMap<string, string>,
+): Promise<{ keyPassphrases: VaultHostKeyPassphrase[]; issues: VaultImportIssue[] }> {
+  const groups: Array<{
+    aliases: Set<string>;
+    entries: VaultHostKeyPassphrase[];
+  }> = [];
+
+  for (const entry of entries) {
+    const aliases = new Set((await resolveAliases(entry.keyPath)).map(normalizeKeyPathKey));
+    aliases.add(normalizeKeyPathKey(entry.keyPath));
+    const eligibleKeyPath = eligibleKeyPathsByHostId?.get(entry.hostId);
+    if (eligibleKeyPath) {
+      const eligibleAliases = new Set(
+        (await resolveAliases(eligibleKeyPath)).map(normalizeKeyPathKey),
+      );
+      eligibleAliases.add(normalizeKeyPathKey(eligibleKeyPath));
+      if (![...aliases].some((alias) => eligibleAliases.has(alias))) continue;
+    } else if (eligibleKeyPathsByHostId && eligibleHostIds?.has(entry.hostId)) {
+      continue;
+    }
+    const matching = groups.filter((group) => (
+      [...aliases].some((alias) => group.aliases.has(alias))
+    ));
+    const mergedAliases = new Set([
+      ...aliases,
+      ...matching.flatMap((group) => [...group.aliases]),
+    ]);
+    const mergedEntries = [
+      ...matching.flatMap((group) => group.entries),
+      entry,
+    ];
+    for (const group of matching) {
+      groups.splice(groups.indexOf(group), 1);
+    }
+    groups.push({ aliases: mergedAliases, entries: mergedEntries });
+  }
+
+  const keyPassphrases: VaultHostKeyPassphrase[] = [];
+  const issues: VaultImportIssue[] = [];
+  for (const group of groups) {
+    const passphrases = new Set(group.entries.map((entry) => entry.passphrase));
+    if (passphrases.size > 1) {
+      issues.push({
+        level: "warning",
+        message: `CSV contains conflicting passphrases for KeyPath "${group.entries[0].keyPath}"; no passphrase was saved for that path.`,
+      });
+    } else {
+      const selected = eligibleHostIds
+        ? group.entries.find((entry) => eligibleHostIds.has(entry.hostId))
+        : group.entries[0];
+      if (selected) keyPassphrases.push(selected);
+    }
+  }
+  return { keyPassphrases, issues };
+}
+
+export interface VaultExistingKeyPassphraseRead {
+  values: string[];
+  unreadable: boolean;
+}
+
+export async function filterVaultImportKeyPassphrasesAgainstExisting(
+  entries: VaultHostKeyPassphrase[],
+  readExisting: (keyPath: string) => Promise<VaultExistingKeyPassphraseRead>,
+): Promise<{ keyPassphrases: VaultHostKeyPassphrase[]; issues: VaultImportIssue[] }> {
+  const keyPassphrases: VaultHostKeyPassphrase[] = [];
+  const issues: VaultImportIssue[] = [];
+  for (const entry of entries) {
+    const existing = await readExisting(entry.keyPath);
+    if (existing.unreadable) {
+      issues.push({
+        level: "warning",
+        message: `Could not verify the existing saved passphrase for KeyPath "${entry.keyPath}"; the imported passphrase was not saved.`,
+      });
+      continue;
+    }
+    if (existing.values.some((value) => value !== entry.passphrase)) {
+      issues.push({
+        level: "warning",
+        message: `CSV passphrase conflicts with an existing saved passphrase for KeyPath "${entry.keyPath}"; the existing passphrase was kept.`,
+      });
+      continue;
+    }
+    keyPassphrases.push(entry);
+  }
+  return { keyPassphrases, issues };
 }

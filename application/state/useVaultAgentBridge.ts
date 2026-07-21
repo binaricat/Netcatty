@@ -9,9 +9,11 @@ import {
   type VaultAgentApiDeps,
 } from '../../infrastructure/ai/vaultAgentBridgeClient';
 import {
-  clearReferenceKeyPassphrases,
+  clearRememberedKeyPassphrases,
+  readRememberedKeyPassphrases,
+  rememberImportedKeyPassphrase,
   rememberKeyPassphrase,
-  removeDefaultKeyPassphraseAliases,
+  resolveDefaultKeyPassphraseAliases,
 } from '../defaultKeyPassphrases';
 
 export interface UseVaultAgentBridgeInput {
@@ -151,20 +153,35 @@ export function useVaultAgentBridge(input: UseVaultAgentBridgeInput): void {
           keyPath,
           passphrase,
           keys: vaultSnapshotRef.current.keys,
+          getKeys: () => vaultSnapshotRef.current.keys,
           updateKeys: current.updateKeys,
           setCurrentKeys: (keys) => {
             vaultSnapshotRef.current.keys = keys;
           },
         }),
-        removeKeyPassphrases: async (keyPaths) => {
-          const aliases = await removeDefaultKeyPassphraseAliases(keyPaths);
-          const currentKeys = vaultSnapshotRef.current.keys;
-          const updatedKeys = clearReferenceKeyPassphrases(currentKeys, aliases);
-          if (updatedKeys !== currentKeys) {
-            vaultSnapshotRef.current.keys = updatedKeys;
-            await current.updateKeys(updatedKeys);
-          }
-        },
+        saveImportedKeyPassphrase: (keyPath, passphrase) => rememberImportedKeyPassphrase({
+          keyPath,
+          passphrase,
+          keys: vaultSnapshotRef.current.keys,
+          getKeys: () => vaultSnapshotRef.current.keys,
+          updateKeys: current.updateKeys,
+          setCurrentKeys: (keys) => {
+            vaultSnapshotRef.current.keys = keys;
+          },
+        }),
+        resolveKeyPassphraseAliases: resolveDefaultKeyPassphraseAliases,
+        readKeyPassphrases: (keyPath) => readRememberedKeyPassphrases(
+          keyPath,
+          vaultSnapshotRef.current.keys,
+        ),
+        removeKeyPassphrases: (keyPaths) => clearRememberedKeyPassphrases({
+          keyPaths,
+          getKeys: () => vaultSnapshotRef.current.keys,
+          setCurrentKeys: (keys) => {
+            vaultSnapshotRef.current.keys = keys;
+          },
+          updateKeys: current.updateKeys,
+        }),
         updateNotes: (notes) => {
           vaultSnapshotRef.current.notes = notes;
           current.updateNotes(notes);

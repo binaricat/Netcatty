@@ -234,6 +234,21 @@ function createSessionOpsApi(ctx) {
       if (!session || !session.conn) {
         return { success: false, error: 'Session not found or not connected' };
       }
+
+      const targetLoginPid = /^\d+$/.test(String(session.shellPid || ''))
+        ? String(session.shellPid)
+        : '';
+      const sharedTerminalCount = session.connRef
+        ? [...sessions.values()].filter(
+          (candidate) => candidate?.connRef === session.connRef && candidate?.stream,
+        ).length
+        : 1;
+      if (sharedTerminalCount > 1 && !targetLoginPid) {
+        return {
+          success: false,
+          error: 'Current directory is ambiguous across shared terminal channels',
+        };
+      }
     
       // Completely silent: uses a separate exec channel, nothing is printed
       // in the interactive terminal. The exec channel and the interactive
@@ -257,6 +272,7 @@ function createSessionOpsApi(ctx) {
         // so sh keeps the same PID and $PPID = sshd. Starting another shell
         // without exec would make $PPID point at the intermediate shell instead.
         const posixScript = `SELF=$$
+    TARGET_LOGIN=${targetLoginPid}
     ALLOW_FALLBACK=${allowHomeFallback ? "1" : "0"}
     # Find the user's interactive shell on this SSH connection.
     # Prefer the one attached to a controlling tty (the user's shell): probe exec
@@ -274,7 +290,7 @@ function createSessionOpsApi(ctx) {
     # entirely (#1123).
     find_login_shell() {
       _shell=$(ps -e -o pid=,ppid=,tty=,comm= 2>/dev/null | awk -v pp="$1" -v self="$SELF" '
-        $1 != self && $2 == pp && $4 ~ /^-?(ba|z|fi|k|da|a)?sh$/ {
+        $1 != self && $2 == pp && $4 ~ /^-?(ba|z|fi|k|da|a|c|tc)?sh$/ {
           if ($3 != "?") { print $1; found=1; exit }
           if (any == "") any=$1
         }
@@ -301,7 +317,7 @@ function createSessionOpsApi(ctx) {
         [ "$_conn2" = "$_conn" ] || continue
         _comm=$(cat "$_d/comm" 2>/dev/null)
         case "$_comm" in
-          sh|bash|zsh|fish|ksh|dash|ash) ;;
+          sh|bash|zsh|fish|ksh|dash|ash|csh|tcsh) ;;
           *) continue ;;
         esac
         _tty=$(ps -p "$_pid" -o tty= 2>/dev/null | tr -d '[:space:]')
@@ -323,7 +339,7 @@ function createSessionOpsApi(ctx) {
     find_active_shell() {
       ps -e -o pid=,ppid=,stat=,comm= 2>/dev/null | awk -v start="$1" '
         { pp[$1]=$2; st[$1]=$3; cm[$1]=$4; ord[NR]=$1 }
-        function isshell(c) { return c ~ /^-?(ba|z|fi|k|da|a)?sh$/ }
+        function isshell(c) { return c ~ /^-?(ba|z|fi|k|da|a|c|tc)?sh$/ }
         function depth(p,   d) { d=0; while (p != "" && d < 64) { if (p == start) return d; p=pp[p]; d++ } return -1 }
         END {
           best=-1; bp="";
@@ -338,8 +354,10 @@ function createSessionOpsApi(ctx) {
         }
       '
     }
-    login=$(find_login_shell "$PPID")
+    login="$TARGET_LOGIN"
+    [ -n "$login" ] || login=$(find_login_shell "$PPID")
     if [ -n "$login" ]; then
+      printf 'NETCATTY_LOGIN_PID=%s\\n' "$login" >&2
       pid=$(find_active_shell "$login")
       [ -n "$pid" ] || pid="$login"
       cwd=$(readlink /proc/$pid/cwd 2>/dev/null)
@@ -387,6 +405,10 @@ function createSessionOpsApi(ctx) {
           stream.on('close', (code) => {
             clearTimeout(timer);
             const path = out.trim();
+            const loginPidMatch = errOut.match(/(?:^|\n)NETCATTY_LOGIN_PID=(\d+)(?:\n|$)/);
+            if (loginPidMatch) {
+              session.shellPid = loginPidMatch[1];
+            }
             log('[getSessionPwd]', { stdout: path, stderr: errOut.trim(), exitCode: code });
             if (path && path.startsWith('/')) {
               resolve({ success: true, cwd: path });

@@ -8,6 +8,7 @@ import {
 import { createPromptLineBreakState } from "./promptLineBreak";
 import { resolveStartupCommand } from "./terminalStartupCommands";
 import { pasteTextIntoTerminal } from "./terminalUserPaste";
+import { shouldSuppressHostStartupCommandOnReconnect } from "../restoredSessionGate";
 
 const noop = () => undefined;
 const ENCRYPTED_CREDENTIAL_PLACEHOLDER = "enc:v1:djEwAAAA";
@@ -132,6 +133,32 @@ test("startSSH forwards imported system agent authentication settings", async ()
       useKeychain: true,
     },
   );
+});
+
+test("startSSH tells the bridge to skip shell discovery for network devices", async () => {
+  let capturedOptions: Record<string, unknown> | null = null;
+  const terminalBackend = {
+    backendAvailable: () => true,
+    startSSHSession: async (options: Record<string, unknown>) => {
+      capturedOptions = options;
+      return "ssh-session";
+    },
+    onSessionData: () => noop,
+    onSessionExit: () => noop,
+    onChainProgress: () => noop,
+    writeToSession: noop,
+    resizeSession: noop,
+  };
+  const ctx = createStarterContext({
+    isNetworkDevice: true,
+    reuseConnectionFromSessionId: "source-session",
+    terminalBackend,
+  });
+
+  await createTerminalSessionStarters(ctx as never).startSSH(createTermStub() as never);
+
+  assert.equal(capturedOptions?.sourceSessionId, "source-session");
+  assert.equal(capturedOptions?.skipShellPidDiscovery, true);
 });
 
 test("startSSH uses the system agent when a synced vault key cannot be decrypted", async () => {
@@ -2258,7 +2285,7 @@ test("startup command suppression is consumed only when scheduling", () => {
   assert.equal(resolveStartupCommand(ctx as never), "echo host-startup");
 });
 
-test("restored local reconnect does not fall back to host startup command", async () => {
+test("restored local reconnect runs the host startup command while automatic retry suppresses it", async () => {
   const sessionWrites: Array<{ id: string; data: string; automated?: boolean }> = [];
 
   const terminalBackend = {
@@ -2295,11 +2322,30 @@ test("restored local reconnect does not fall back to host startup command", asyn
     terminalSettings: { startupCommandDelayMs: 0 },
     terminalBackend,
     startupCommand: undefined,
-    suppressHostStartupCommandRef: { current: true },
+    suppressHostStartupCommandRef: {
+      current: shouldSuppressHostStartupCommandOnReconnect("restored"),
+    },
     promptLineBreakStateRef: undefined,
   });
 
   await createTerminalSessionStarters(ctx as never).startLocal(createTermStub() as never);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.deepEqual(sessionWrites, [
+    { id: "local-session", data: "echo host-startup\r", automated: true },
+  ]);
+
+  sessionWrites.length = 0;
+  const automaticReconnectCtx = createStarterContext({
+    ...ctx,
+    sessionRef: { current: null },
+    hasRunStartupCommandRef: { current: false },
+    suppressHostStartupCommandRef: {
+      current: shouldSuppressHostStartupCommandOnReconnect("automatic"),
+    },
+  });
+
+  await createTerminalSessionStarters(automaticReconnectCtx as never).startLocal(createTermStub() as never);
   await new Promise((resolve) => setTimeout(resolve, 0));
 
   assert.deepEqual(sessionWrites, []);

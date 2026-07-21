@@ -93,12 +93,14 @@ declare global {
 
     onTrayPanelJumpToSession?(callback: (sessionId: string) => void): () => void;
     onTrayPanelConnectToHost?(callback: (hostId: string) => void): () => void;
+    onTrayPanelCloseSession?(callback: (sessionId: string) => void): () => void;
 
     hideTrayPanel?(): Promise<{ success: boolean }>;
     openMainWindow?(): Promise<{ success: boolean }>;
     quitApp?(): Promise<{ success: boolean }>;
     jumpToSessionFromTrayPanel?(sessionId: string): Promise<{ success: boolean }>;
     connectToHostFromTrayPanel?(hostId: string): Promise<{ success: boolean }>;
+    closeSessionFromTrayPanel?(sessionId: string): Promise<{ success: boolean }>;
     onTrayPanelCloseRequest?(callback: () => void): () => void;
     onTrayPanelRefresh?(callback: () => void): () => void;
     onTrayPanelMenuData?(callback: (data: {

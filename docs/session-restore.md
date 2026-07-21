@@ -7,14 +7,13 @@ Session restore brings Netcatty back to the user's previous workspace shape on s
 Implemented behavior:
 
 - Restores terminal tabs, tab order, active tab, workspace split layout, and pane focus metadata.
-- Restores terminal sessions as disconnected placeholders.
-- Allows the user to manually reconnect a restored placeholder.
-- Optionally restores the last known working directory after a manual reconnect.
+- Restores terminal sessions and reconnects them automatically.
+- Allows the user to manually reconnect if the automatic reconnect fails.
+- Optionally restores the last known working directory when a restored terminal reconnects.
 - Flushes the lightweight restore payload on page hide / unload using the same sanitizer as normal persistence.
 
 Out of scope:
 
-- Automatic reconnect on startup.
 - Restoring terminal output, scrollback, command history, logs, snapshots, or process state.
 - Persisting passwords, passphrases, private keys, or other secret material.
 - Restoring mosh / ET / telnet / serial / network-device working directories.
@@ -24,13 +23,13 @@ Out of scope:
 
 ### Startup Restore
 
-When "Restore previous terminal tabs and workspace layout" is enabled, Netcatty restores the prior terminal workspace on launch. Restored terminals are marked with `restoreState: "restored-disconnected"` and stay disconnected until the user explicitly reconnects them.
+When "Restore previous terminal tabs and workspace layout" is enabled, Netcatty restores the prior terminal workspace on launch. Restored terminals are marked with `restoreState: "restored-disconnected"` while they reconnect.
 
-Startup restore must not start terminal backends, SSH connections, local shells, SFTP sessions, mosh, ET, telnet, serial sessions, cwd probes, or startup commands.
+After a restored terminal reconnects, it runs the startup command currently configured on its host. Per-session startup commands are not persisted or replayed by session restore.
 
 ### Manual Reconnect
 
-When the user reconnects a restored placeholder, the normal connection flow starts. The reconnect action is the boundary where side effects are allowed.
+If an automatic reconnect fails, the user can reconnect the restored terminal manually through the normal connection flow.
 
 If "Restore terminal working directory on reconnect" is enabled and the restored session has an eligible `lastCwd`, Netcatty sends an automated `cd -- ...` after backend attach. The command is shell-quoted, is not added to application command history, and is attempted at most once for that reconnect.
 
@@ -41,7 +40,7 @@ If the directory is missing, inaccessible, or rejected by the shell, the connect
 | Setting | Default | Effect |
 | --- | --- | --- |
 | Restore previous terminal tabs and workspace layout | On | Enables startup restore for tabs, workspaces, layout, and lightweight session metadata. |
-| Restore terminal working directory on reconnect | Off | Attempts a one-shot cwd restore after manually reconnecting an eligible restored terminal. |
+| Restore terminal working directory on reconnect | Off | Attempts a one-shot cwd restore when an eligible restored terminal reconnects. |
 
 The cwd setting is intentionally separate because it sends a command after reconnect. Keeping it off by default avoids surprising remote-side behavior.
 
@@ -72,9 +71,9 @@ Domain helpers do not read or write storage and do not start terminal runtime wo
 
 ### UI And Runtime Glue
 
-UI components display restored placeholders and reconnect actions. Terminal runtime helpers gate backend startup so restored placeholders remain disconnected until manual reconnect.
+UI components display reconnect progress and manual reconnect actions after failures. Terminal runtime helpers start restored sessions through the normal connection flow.
 
-Runtime code may consume a one-shot cwd restore intent after backend attach. It must not infer startup restore as permission to connect or run commands.
+Runtime code may consume a one-shot cwd restore intent after backend attach. A restored connection may run the startup command currently configured on its host, but it must never replay a per-session startup command from persisted restore data.
 
 ## Restore Payload Allowlist
 

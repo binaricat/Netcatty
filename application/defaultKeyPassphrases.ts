@@ -43,9 +43,19 @@ export async function resolveDefaultKeyPassphraseAliases(keyPath: string): Promi
   return [...aliases];
 }
 
-export async function saveDefaultKeyPassphrase(keyPath: string, passphrase: string): Promise<void> {
-  const aliases = await resolveDefaultKeyPassphraseAliases(keyPath);
-  const encrypted = await encryptField(passphrase) ?? passphrase;
+let passphraseMutationQueue: Promise<void> = Promise.resolve();
+
+function runPassphraseMutation<T>(mutation: () => Promise<T>): Promise<T> {
+  const result = passphraseMutationQueue.then(mutation, mutation);
+  passphraseMutationQueue = result.then(() => undefined, () => undefined);
+  return result;
+}
+
+function writeDefaultKeyPassphraseUnlocked(
+  keyPath: string,
+  encrypted: string,
+  aliases: string[],
+): void {
   const store = localStorageAdapter.read<Record<string, string>>(STORAGE_KEY_DEFAULT_KEY_PASSPHRASES) ?? {};
   const aliasKeys = matchingPathKeys(aliases);
   for (const storedPath of Object.keys(store)) {
@@ -55,6 +65,16 @@ export async function saveDefaultKeyPassphrase(keyPath: string, passphrase: stri
   }
   store[keyPath] = encrypted;
   localStorageAdapter.write(STORAGE_KEY_DEFAULT_KEY_PASSPHRASES, store);
+}
+
+async function saveDefaultKeyPassphraseUnlocked(keyPath: string, passphrase: string): Promise<void> {
+  const aliases = await resolveDefaultKeyPassphraseAliases(keyPath);
+  const encrypted = await encryptField(passphrase) ?? passphrase;
+  writeDefaultKeyPassphraseUnlocked(keyPath, encrypted, aliases);
+}
+
+export async function saveDefaultKeyPassphrase(keyPath: string, passphrase: string): Promise<void> {
+  return runPassphraseMutation(() => saveDefaultKeyPassphraseUnlocked(keyPath, passphrase));
 }
 
 function matchingStoreEntriesChanged(
@@ -144,7 +164,154 @@ export async function loadDefaultKeyPassphrase(keyPath: string): Promise<string 
   return null;
 }
 
-export function removeDefaultKeyPassphrases(keyPaths: string[]): void {
+export type DefaultKeyPassphraseExportRead =
+  | { status: "missing" }
+  | { status: "readable"; value: string }
+  | { status: "unreadable" };
+
+export interface DefaultKeyPassphraseVerificationRead {
+  values: string[];
+  unreadable: boolean;
+  present: boolean;
+}
+
+async function readDefaultKeyPassphrasesForVerificationOnce(
+  keyPath: string,
+): Promise<{ retry: boolean; result: DefaultKeyPassphraseVerificationRead }> {
+  const aliases = await resolveDefaultKeyPassphraseAliases(keyPath);
+  const aliasKeys = matchingPathKeys(aliases);
+  const store = localStorageAdapter.read<Record<string, string>>(STORAGE_KEY_DEFAULT_KEY_PASSPHRASES);
+  if (!store) {
+    return { retry: false, result: { values: [], unreadable: false, present: false } };
+  }
+
+  const storedPaths = Object.keys(store).filter((path) => (
+    aliasKeys.has(defaultKeyPassphrasePathKey(path))
+  ));
+  const exactIndex = storedPaths.indexOf(keyPath);
+  if (exactIndex > 0) {
+    storedPaths.unshift(storedPaths.splice(exactIndex, 1)[0]);
+  }
+  if (storedPaths.length === 0) {
+    return { retry: false, result: { values: [], unreadable: false, present: false } };
+  }
+
+  const values = new Set<string>();
+  let unreadable = false;
+  for (const storedPath of storedPaths) {
+    try {
+      const decrypted = await decryptField(store[storedPath]);
+      if (decrypted && !isEncryptedCredentialPlaceholder(decrypted)) {
+        values.add(decrypted);
+      } else {
+        unreadable = true;
+      }
+    } catch {
+      // Export must not mutate saved credentials when secure storage is unavailable.
+      unreadable = true;
+    }
+  }
+  const latestStore = localStorageAdapter.read<Record<string, string>>(STORAGE_KEY_DEFAULT_KEY_PASSPHRASES);
+  if (matchingStoreEntriesChanged(store, latestStore, aliasKeys)) {
+    return {
+      retry: true,
+      result: { values: [], unreadable: true, present: true },
+    };
+  }
+  return {
+    retry: false,
+    result: { values: [...values], unreadable, present: true },
+  };
+}
+
+export async function readDefaultKeyPassphrasesForVerification(
+  keyPath: string,
+): Promise<DefaultKeyPassphraseVerificationRead> {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const read = await readDefaultKeyPassphrasesForVerificationOnce(keyPath);
+    if (!read.retry) return read.result;
+  }
+  return { values: [], unreadable: true, present: true };
+}
+
+export async function readDefaultKeyPassphraseForExport(
+  keyPath: string,
+): Promise<DefaultKeyPassphraseExportRead> {
+  const read = await readDefaultKeyPassphrasesForVerification(keyPath);
+  if (read.values[0]) return { status: "readable", value: read.values[0] };
+  return read.unreadable ? { status: "unreadable" } : { status: "missing" };
+}
+
+export async function readRememberedKeyPassphrases(
+  keyPath: string,
+  keys: SSHKey[],
+): Promise<{ values: string[]; unreadable: boolean }> {
+  const aliases = await resolveDefaultKeyPassphraseAliases(keyPath);
+  const aliasKeys = matchingPathKeys(aliases);
+  const values = new Set<string>();
+  let unreadable = false;
+
+  const sideStore = await readDefaultKeyPassphrasesForVerification(keyPath);
+  for (const value of sideStore.values) values.add(value);
+  if (sideStore.unreadable) unreadable = true;
+
+  for (const key of keys) {
+    if (
+      key.source !== "reference"
+      || !key.filePath
+      || !aliasKeys.has(defaultKeyPassphrasePathKey(key.filePath))
+      || !key.passphrase
+    ) continue;
+    if (isEncryptedCredentialPlaceholder(key.passphrase)) {
+      unreadable = true;
+    } else {
+      values.add(key.passphrase);
+    }
+  }
+
+  return { values: [...values], unreadable };
+}
+
+export async function readExportableRememberedKeyPassphrases(
+  keyPath: string,
+  keys: SSHKey[],
+): Promise<{ values: string[]; unreadable: boolean }> {
+  const aliases = await resolveDefaultKeyPassphraseAliases(keyPath);
+  const aliasKeys = matchingPathKeys(aliases);
+  const values = new Set<string>();
+  let unreadable = false;
+
+  const hasExplicitOptOut = keys.some((key) => (
+    key.source === "reference"
+    && key.savePassphrase === false
+    && key.filePath
+    && aliasKeys.has(defaultKeyPassphrasePathKey(key.filePath))
+  ));
+  if (hasExplicitOptOut) return { values: [], unreadable: false };
+
+  const sideStore = await readDefaultKeyPassphrasesForVerification(keyPath);
+  for (const value of sideStore.values) values.add(value);
+  if (sideStore.unreadable) unreadable = true;
+
+  for (const key of keys) {
+    if (
+      key.source !== "reference"
+      || key.savePassphrase === false
+      || !key.filePath
+      || !aliasKeys.has(defaultKeyPassphrasePathKey(key.filePath))
+      || !key.passphrase
+    ) continue;
+    if (isEncryptedCredentialPlaceholder(key.passphrase)) {
+      unreadable = true;
+    } else {
+      values.add(key.passphrase);
+    }
+  }
+
+  return { values: [...values], unreadable };
+}
+
+function removeDefaultKeyPassphrasesUnlocked(keyPaths: string[]): void {
   const store = localStorageAdapter.read<Record<string, string>>(STORAGE_KEY_DEFAULT_KEY_PASSPHRASES);
   if (!store) return;
   const pathKeys = matchingPathKeys(keyPaths);
@@ -160,32 +327,41 @@ export function removeDefaultKeyPassphrases(keyPaths: string[]): void {
   }
 }
 
+export async function removeDefaultKeyPassphrases(keyPaths: string[]): Promise<void> {
+  return runPassphraseMutation(async () => {
+    removeDefaultKeyPassphrasesUnlocked(keyPaths);
+  });
+}
+
 export async function removeDefaultKeyPassphraseAliases(keyPaths: string[]): Promise<string[]> {
-  const before = localStorageAdapter.read<Record<string, string>>(STORAGE_KEY_DEFAULT_KEY_PASSPHRASES) ?? {};
-  const aliases = Array.from(new Set((await Promise.all(
-    keyPaths.map(resolveDefaultKeyPassphraseAliases),
-  )).flat()));
-  const aliasKeys = matchingPathKeys(aliases);
-  const latest = localStorageAdapter.read<Record<string, string>>(STORAGE_KEY_DEFAULT_KEY_PASSPHRASES) ?? {};
-  const matchingPaths = new Set([...Object.keys(before), ...Object.keys(latest)].filter((path) => (
-    aliasKeys.has(defaultKeyPassphrasePathKey(path))
-  )));
-  for (const path of matchingPaths) {
-    if (before[path] !== latest[path]) {
-      return [];
-    }
-  }
-  let changed = false;
-  for (const path of matchingPaths) {
-    if (path in latest) {
-      delete latest[path];
-      changed = true;
-    }
-  }
-  if (changed) {
-    localStorageAdapter.write(STORAGE_KEY_DEFAULT_KEY_PASSPHRASES, latest);
-  }
-  return aliases;
+  return runPassphraseMutation(async () => {
+    const aliases = Array.from(new Set((await Promise.all(
+      keyPaths.map(resolveDefaultKeyPassphraseAliases),
+    )).flat()));
+    removeDefaultKeyPassphrasesUnlocked(aliases);
+    return aliases;
+  });
+}
+
+export async function clearRememberedKeyPassphrases(args: {
+  keyPaths: string[];
+  keyIds?: string[];
+  getKeys: () => SSHKey[];
+  updateKeys: (keys: SSHKey[]) => Promise<unknown> | unknown;
+  setCurrentKeys?: (keys: SSHKey[]) => void;
+}): Promise<void> {
+  return runPassphraseMutation(async () => {
+    const aliases = Array.from(new Set((await Promise.all(
+      args.keyPaths.map(resolveDefaultKeyPassphraseAliases),
+    )).flat()));
+    removeDefaultKeyPassphrasesUnlocked(aliases);
+    const currentKeys = args.getKeys();
+    const withoutReferencePassphrases = clearReferenceKeyPassphrases(currentKeys, aliases);
+    const updatedKeys = clearKeyPassphrasesByIds(withoutReferencePassphrases, args.keyIds);
+    if (updatedKeys === currentKeys) return;
+    args.setCurrentKeys?.(updatedKeys);
+    await args.updateKeys(updatedKeys);
+  });
 }
 
 export async function deleteVaultKey(args: {
@@ -200,16 +376,18 @@ export async function deleteVaultKey(args: {
   args.updateKeys(keys.filter((candidate) => candidate.id !== args.keyId));
   if (key.source !== "reference" || !key.filePath) return;
 
-  const deletedAliases = await resolveDefaultKeyPassphraseAliases(key.filePath);
-  const deletedAliasKeys = matchingPathKeys(deletedAliases);
-  const currentReferencePathKeys = matchingPathKeys(args.getKeys()
-    .filter((candidate) => candidate.source === "reference" && candidate.filePath)
-    .map((candidate) => candidate.filePath!));
-  const pathStillReferenced = [...currentReferencePathKeys]
-    .some((path) => deletedAliasKeys.has(path));
-  if (!pathStillReferenced) {
-    removeDefaultKeyPassphrases(deletedAliases);
-  }
+  await runPassphraseMutation(async () => {
+    const deletedAliases = await resolveDefaultKeyPassphraseAliases(key.filePath!);
+    const deletedAliasKeys = matchingPathKeys(deletedAliases);
+    const currentReferencePathKeys = matchingPathKeys(args.getKeys()
+      .filter((candidate) => candidate.source === "reference" && candidate.filePath)
+      .map((candidate) => candidate.filePath!));
+    const pathStillReferenced = [...currentReferencePathKeys]
+      .some((path) => deletedAliasKeys.has(path));
+    if (!pathStillReferenced) {
+      removeDefaultKeyPassphrasesUnlocked(deletedAliases);
+    }
+  });
 }
 
 export function clearReferenceKeyPassphrases(keys: SSHKey[], keyPaths: string[]): SSHKey[] {
@@ -255,16 +433,29 @@ export async function rememberKeyPassphrase(args: {
   keyPath: string;
   passphrase: string;
   keys: SSHKey[];
+  getKeys?: () => SSHKey[];
   updateKeys: (keys: SSHKey[]) => Promise<unknown> | unknown;
   setCurrentKeys?: (keys: SSHKey[]) => void;
 }): Promise<void> {
-  const { keyPath, passphrase, keys, updateKeys, setCurrentKeys } = args;
+  return runPassphraseMutation(() => rememberKeyPassphraseUnlocked(args));
+}
+
+async function rememberKeyPassphraseUnlocked(args: {
+  keyPath: string;
+  passphrase: string;
+  keys: SSHKey[];
+  getKeys?: () => SSHKey[];
+  updateKeys: (keys: SSHKey[]) => Promise<unknown> | unknown;
+  setCurrentKeys?: (keys: SSHKey[]) => void;
+}): Promise<void> {
+  const { keyPath, passphrase, keys, getKeys, updateKeys, setCurrentKeys } = args;
   const aliases = await resolveDefaultKeyPassphraseAliases(keyPath);
   const aliasKeys = matchingPathKeys(aliases);
-  await saveDefaultKeyPassphrase(keyPath, passphrase);
+  const encrypted = await encryptField(passphrase) ?? passphrase;
+  writeDefaultKeyPassphraseUnlocked(keyPath, encrypted, aliases);
 
   let changed = false;
-  const updated = keys.map((key) => {
+  const updated = (getKeys?.() ?? keys).map((key) => {
     if (
       key.source !== "reference"
       || !key.filePath
@@ -276,4 +467,62 @@ export async function rememberKeyPassphrase(args: {
   if (!changed) return;
   setCurrentKeys?.(updated);
   await updateKeys(updated);
+}
+
+export type RememberImportedKeyPassphraseResult = "saved" | "conflict" | "unreadable";
+
+function referenceKeyPassphraseFingerprint(keys: SSHKey[], aliasKeys: Set<string>): string {
+  return JSON.stringify(keys
+    .filter((key) => (
+      key.source === "reference"
+      && key.filePath
+      && aliasKeys.has(defaultKeyPassphrasePathKey(key.filePath))
+    ))
+    .map((key) => ({
+      id: key.id,
+      filePath: key.filePath,
+      passphrase: key.passphrase,
+      savePassphrase: key.savePassphrase,
+    }))
+    .sort((left, right) => left.id.localeCompare(right.id)));
+}
+
+export async function rememberImportedKeyPassphrase(args: {
+  keyPath: string;
+  passphrase: string;
+  keys: SSHKey[];
+  getKeys?: () => SSHKey[];
+  updateKeys: (keys: SSHKey[]) => Promise<unknown> | unknown;
+  setCurrentKeys?: (keys: SSHKey[]) => void;
+}): Promise<RememberImportedKeyPassphraseResult> {
+  return runPassphraseMutation(async () => {
+    const aliases = await resolveDefaultKeyPassphraseAliases(args.keyPath);
+    const aliasKeys = matchingPathKeys(aliases);
+    const currentKeys = args.getKeys?.() ?? args.keys;
+    const initialKeyFingerprint = referenceKeyPassphraseFingerprint(currentKeys, aliasKeys);
+    const existing = await readRememberedKeyPassphrases(args.keyPath, currentKeys);
+    if (existing.unreadable) return "unreadable";
+    if (existing.values.some((value) => value !== args.passphrase)) return "conflict";
+    const encrypted = await encryptField(args.passphrase) ?? args.passphrase;
+    const latestKeys = args.getKeys?.() ?? args.keys;
+    if (referenceKeyPassphraseFingerprint(latestKeys, aliasKeys) !== initialKeyFingerprint) {
+      return "conflict";
+    }
+    writeDefaultKeyPassphraseUnlocked(args.keyPath, encrypted, aliases);
+    let changed = false;
+    const updated = latestKeys.map((key) => {
+      if (
+        key.source !== "reference"
+        || !key.filePath
+        || !aliasKeys.has(defaultKeyPassphrasePathKey(key.filePath))
+      ) return key;
+      changed = true;
+      return { ...key, passphrase: args.passphrase, savePassphrase: true };
+    });
+    if (changed) {
+      args.setCurrentKeys?.(updated);
+      await args.updateKeys(updated);
+    }
+    return "saved";
+  });
 }

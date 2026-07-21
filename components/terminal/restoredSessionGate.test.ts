@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 
 import {
   getInitialTerminalStatus,
+  shouldSuppressHostStartupCommandOnReconnect,
   shouldStartTerminalBackend,
 } from "./restoredSessionGate.ts";
 
@@ -20,6 +21,12 @@ test("normal sessions initialize as connecting", () => {
 
 test("restored disconnected sessions start terminal backend", () => {
   assert.equal(shouldStartTerminalBackend(), true);
+});
+
+test("host startup command policy distinguishes restored and automatic reconnects", () => {
+  assert.equal(shouldSuppressHostStartupCommandOnReconnect("restored"), false);
+  assert.equal(shouldSuppressHostStartupCommandOnReconnect("manual"), false);
+  assert.equal(shouldSuppressHostStartupCommandOnReconnect("automatic"), true);
 });
 
 test("restored disconnected sessions still create a terminal runtime before backend startup", () => {

@@ -30,6 +30,26 @@ type Item =
   | { type: 'local'; id: typeof LOCAL_ITEM_ID }
   | { type: 'host'; id: string; host: Host };
 
+export function shouldToggleWorkspaceTarget(
+  key: string,
+  query: string,
+  metaKey: boolean,
+  ctrlKey: boolean,
+): boolean {
+  if (metaKey || ctrlKey) return false;
+  return key === 'Enter' || (key === ' ' && query.length === 0);
+}
+
+export function getWorkspaceTargetRowStateClass(
+  isCursor: boolean,
+  isChecked: boolean,
+): string {
+  if (isCursor && isChecked) return 'bg-primary/20';
+  if (isCursor) return 'bg-primary/15';
+  if (isChecked) return 'bg-primary/10';
+  return 'hover:bg-muted/50';
+}
+
 export const AddToWorkspaceDialog: React.FC<AddToWorkspaceDialogProps> = ({
   open,
   onOpenChange,
@@ -104,6 +124,12 @@ export const AddToWorkspaceDialog: React.FC<AddToWorkspaceDialogProps> = ({
     });
   };
 
+  const handleTargetClick = (index: number, id: string) => {
+    setSelectedIndex(index);
+    toggle(id);
+    inputRef.current?.focus();
+  };
+
   const handleCommit = () => {
     if (selected.size === 0) return;
     const targets: AddTarget[] = [];
@@ -128,7 +154,7 @@ export const AddToWorkspaceDialog: React.FC<AddToWorkspaceDialogProps> = ({
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
       setSelectedIndex((i) => Math.max(i - 1, 0));
-    } else if (e.key === 'Enter' && !(e.metaKey || e.ctrlKey)) {
+    } else if (shouldToggleWorkspaceTarget(e.key, query, e.metaKey, e.ctrlKey)) {
       if (items.length === 0) return;
       e.preventDefault();
       toggle(items[selectedIndex].id);
@@ -180,7 +206,7 @@ export const AddToWorkspaceDialog: React.FC<AddToWorkspaceDialogProps> = ({
             {/* Jump-to hint */}
             <div className="px-4 py-2 flex items-center gap-2">
               <span className="text-xs text-muted-foreground">Pick one or more</span>
-              <kbd className="text-[10px] text-muted-foreground bg-muted px-1 py-0.5 rounded">Enter</kbd>
+              <kbd className="text-[10px] text-muted-foreground bg-muted px-1 py-0.5 rounded">Space / Enter</kbd>
               <span className="text-[10px] text-muted-foreground">toggle</span>
               <kbd className="text-[10px] text-muted-foreground bg-muted px-1 py-0.5 rounded">
                 {typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl'}+Enter
@@ -202,9 +228,8 @@ export const AddToWorkspaceDialog: React.FC<AddToWorkspaceDialogProps> = ({
                   const isChecked = selected.has(LOCAL_ITEM_ID);
                   return (
                     <div
-                      className={`flex items-center gap-3 px-4 py-2.5 cursor-pointer transition-colors ${isCursor ? 'bg-primary/15' : 'hover:bg-muted/50'}`}
-                      onClick={() => toggle(LOCAL_ITEM_ID)}
-                      onMouseEnter={() => setSelectedIndex(idx)}
+                      className={`flex items-center gap-3 px-4 py-2.5 cursor-pointer transition-colors ${getWorkspaceTargetRowStateClass(isCursor, isChecked)}`}
+                      onClick={() => handleTargetClick(idx, LOCAL_ITEM_ID)}
                     >
                       <div className="h-6 w-6 rounded flex items-center justify-center text-muted-foreground">
                         <Terminal size={16} />
@@ -230,9 +255,8 @@ export const AddToWorkspaceDialog: React.FC<AddToWorkspaceDialogProps> = ({
                   return (
                     <div
                       key={host.id}
-                      className={`flex items-center justify-between px-4 py-2.5 cursor-pointer transition-colors ${isCursor ? 'bg-primary/15' : 'hover:bg-muted/50'}`}
-                      onClick={() => toggle(host.id)}
-                      onMouseEnter={() => setSelectedIndex(idx)}
+                      className={`flex items-center justify-between px-4 py-2.5 cursor-pointer transition-colors ${getWorkspaceTargetRowStateClass(isCursor, isChecked)}`}
+                      onClick={() => handleTargetClick(idx, host.id)}
                     >
                       <div className="flex items-center gap-3 min-w-0">
                         <DistroAvatar host={host} fallback={(host.label || host.hostname).slice(0, 2).toUpperCase()} size="sm" />

@@ -1,4 +1,5 @@
 import type { GroupConfig, Host, Identity, KnownHost, ManagedSource, PortForwardingRule, ProxyProfile, Snippet, SSHKey, TerminalSettings, VaultNote } from '../../domain/models';
+import type { RememberImportedKeyPassphraseResult } from '../../application/defaultKeyPassphrases';
 import {
   normalizeVaultNotes,
   sanitizeNoteTitle,
@@ -40,7 +41,10 @@ import {
 import {
   applyVaultHostImport,
   detectVaultImportFormat,
+  filterVaultImportKeyPassphrasesAgainstExisting,
   importVaultHostsFromText,
+  mergeVaultImportIssues,
+  resolveVaultImportKeyPassphraseConflicts,
   VAULT_IMPORT_FORMATS,
   type VaultImportFormat,
 } from '../../domain/vaultImport';
@@ -408,6 +412,15 @@ export interface VaultAgentApiDeps {
   updateManagedSources: (sources: ManagedSource[]) => void;
   updateHosts: (hosts: Host[]) => void;
   saveKeyPassphrase: (keyPath: string, passphrase: string) => Promise<void>;
+  saveImportedKeyPassphrase?: (
+    keyPath: string,
+    passphrase: string,
+  ) => Promise<RememberImportedKeyPassphraseResult>;
+  resolveKeyPassphraseAliases: (keyPath: string) => Promise<string[]>;
+  readKeyPassphrases: (keyPath: string) => Promise<{
+    values: string[];
+    unreadable: boolean;
+  }>;
   removeKeyPassphrases: (keyPaths: string[]) => Promise<void> | void;
   updateNotes: (notes: VaultNote[]) => void;
   updateSnippets: (snippets: Snippet[]) => void;
@@ -775,6 +788,28 @@ export async function handleVaultAgentOp(
 
       const importResult = importVaultHostsFromText(resolvedFormat, text, { fileName });
       const previewHosts = importResult.hosts.map((host) => sanitizeHostForAgent(host));
+      const merged = applyVaultHostImport(
+        deps.getHosts(),
+        deps.getCustomGroups(),
+        importResult,
+        { skipDuplicates },
+      );
+      const addedHostIds = new Set(merged.addedHosts.map((host) => host.id));
+      const addedHostKeyPaths = new Map(merged.addedHosts.flatMap((host) => {
+        const keyPath = host.identityFilePaths?.find((path) => path.trim())?.trim();
+        return keyPath ? [[host.id, keyPath] as const] : [];
+      }));
+      const resolved = await resolveVaultImportKeyPassphraseConflicts(
+        importResult.keyPassphraseCandidates ?? importResult.keyPassphrases ?? [],
+        deps.resolveKeyPassphraseAliases,
+        addedHostIds,
+        addedHostKeyPaths,
+      );
+      const checked = await filterVaultImportKeyPassphrasesAgainstExisting(
+        resolved.keyPassphrases,
+        deps.readKeyPassphrases,
+      );
+      const credentialIssues = mergeVaultImportIssues(resolved.issues, checked.issues);
 
       if (dryRun) {
         return {
@@ -782,18 +817,11 @@ export async function handleVaultAgentOp(
           dryRun: true,
           format: resolvedFormat,
           stats: importResult.stats,
-          issues: importResult.issues,
+          issues: mergeVaultImportIssues(importResult.issues, credentialIssues),
           groups: importResult.groups,
           previewHosts,
         };
       }
-
-      const merged = applyVaultHostImport(
-        deps.getHosts(),
-        deps.getCustomGroups(),
-        importResult,
-        { skipDuplicates },
-      );
 
       if (merged.addedCount === 0 && importResult.stats.parsed === 0) {
         return {
@@ -807,13 +835,40 @@ export async function handleVaultAgentOp(
 
       deps.updateHosts(merged.hosts);
       deps.updateCustomGroups(merged.customGroups);
+      const saveIssues = [...credentialIssues];
+      for (const entry of checked.keyPassphrases) {
+        try {
+          let saved: RememberImportedKeyPassphraseResult = 'saved';
+          if (deps.saveImportedKeyPassphrase) {
+            saved = await deps.saveImportedKeyPassphrase(entry.keyPath, entry.passphrase);
+          } else {
+            await deps.saveKeyPassphrase(entry.keyPath, entry.passphrase);
+          }
+          if (saved === 'conflict') {
+            saveIssues.push({
+              level: 'warning',
+              message: `CSV passphrase conflicts with an existing saved passphrase for KeyPath "${entry.keyPath}"; the existing passphrase was kept.`,
+            });
+          } else if (saved === 'unreadable') {
+            saveIssues.push({
+              level: 'warning',
+              message: `Could not verify the existing saved passphrase for KeyPath "${entry.keyPath}"; the imported passphrase was not saved.`,
+            });
+          }
+        } catch {
+          saveIssues.push({
+            level: 'warning',
+            message: `Could not save the passphrase for KeyPath "${entry.keyPath}".`,
+          });
+        }
+      }
 
       return {
         ok: true,
         dryRun: false,
         format: resolvedFormat,
         stats: importResult.stats,
-        issues: importResult.issues,
+        issues: mergeVaultImportIssues(importResult.issues, saveIssues),
         addedCount: merged.addedCount,
         skippedExistingCount: merged.skippedExistingCount,
         previewHosts: previewHosts.slice(0, 20),

@@ -223,6 +223,7 @@ export const ruCoreMessages: Messages = {
   'tray.empty.title': 'Пока здесь ничего нет',
   'tray.empty.subtitle': 'Подключитесь к серверу, они по вам скучают 🚀',
   'tray.quit': 'Выйти из Netcatty',
+  'tray.closeSession': 'Закрыть сессию',
 
   // Vault Sidebar
   'vault.sidebar.collapse': 'Свернуть боковую панель',

@@ -217,23 +217,29 @@ async function openMainWindowReady() {
   return win;
 }
 
-async function sendToMainWindow(channel, ...args) {
-  const { win } = await getOrCreateMainWindow();
-  bringMainWindowToForeground(win);
+async function sendToMainWindow(channel, payload, { focus = true, createIfMissing = true } = {}) {
+  const { win } = createIfMissing
+    ? await getOrCreateMainWindow()
+    : { win: getTrackedMainWindow() };
+  if (!win) return false;
+  if (focus) {
+    bringMainWindowToForeground(win);
+  }
   try {
     if (typeof sendWhenRendererReady === "function") {
-      const result = await sendWhenRendererReady(win, channel, args[0], { timeoutMs: 8000 });
+      const result = await sendWhenRendererReady(win, channel, payload, { timeoutMs: 8000 });
       if (!result?.success) {
         console.warn(
           `[GlobalShortcut] Failed to deliver ${channel} to main window:`,
           result?.error || result?.reason || "unknown",
         );
       }
-      return;
+      return result?.success === true;
     }
-    win?.webContents?.send(channel, ...args);
+    win.webContents?.send(channel, payload);
+    return true;
   } catch {
-    // ignore
+    return false;
   }
 }
 
@@ -248,6 +254,15 @@ function getTrayPanelUrl() {
     return `${devServerUrl.replace(/\/$/, "")}/#/tray`;
   }
   return "app://netcatty/index.html#/tray";
+}
+
+function pushTrayMenuDataToPanel() {
+  if (!trayPanelWindow || trayPanelWindow.isDestroyed()) return;
+  try {
+    trayPanelWindow.webContents?.send("netcatty:trayPanel:setMenuData", trayMenuData);
+  } catch {
+    // ignore
+  }
 }
 
 function ensureTrayPanelWindow() {
@@ -294,11 +309,7 @@ function ensureTrayPanelWindow() {
   void trayPanelWindow.loadURL(url);
 
   trayPanelWindow.webContents.on("did-finish-load", () => {
-    try {
-      trayPanelWindow?.webContents?.send("netcatty:trayPanel:setMenuData", trayMenuData);
-    } catch {
-      // ignore
-    }
+    pushTrayMenuDataToPanel();
   });
 
   return trayPanelWindow;
@@ -324,11 +335,7 @@ function showTrayPanel() {
   win.show();
   win.focus();
 
-  try {
-    win.webContents?.send("netcatty:trayPanel:setMenuData", trayMenuData);
-  } catch {
-    // ignore
-  }
+  pushTrayMenuDataToPanel();
 
   if (trayPanelRefreshTimer) clearInterval(trayPanelRefreshTimer);
   trayPanelRefreshTimer = setInterval(() => {
@@ -892,6 +899,7 @@ function setTrayMenuData(data) {
   // Rebuild menu with new data
   updateTrayMenu();
   updateDockMenu();
+  pushTrayMenuDataToPanel();
 }
 
 /**
@@ -1012,6 +1020,16 @@ function registerHandlers(ipcMain) {
   ipcMain.handle("netcatty:trayPanel:connectToHost", async (_event, hostId) => {
     await connectToHostFromSystemMenu(hostId);
     return { success: true };
+  });
+
+  ipcMain.handle("netcatty:trayPanel:closeSession", async (_event, sessionId) => {
+    const delivered = await sendToMainWindow("netcatty:trayPanel:closeSession", sessionId, {
+      focus: false,
+      createIfMissing: false,
+    });
+    return delivered
+      ? { success: true }
+      : { success: false, error: "Main window is not available" };
   });
 
   ipcMain.handle("netcatty:trayPanel:quitApp", async () => {

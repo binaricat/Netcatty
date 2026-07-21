@@ -123,6 +123,7 @@ export type TerminalSessionStartersContext = {
   // Source session id to reuse an authenticated SSH connection from when this
   // terminal was created from an existing SSH session.
   reuseConnectionFromSessionId?: string;
+  isNetworkDevice?: boolean;
   startupCommand?: string;
   noAutoRun?: boolean;
   multiLineRunMode?: TerminalSession["multiLineRunMode"];

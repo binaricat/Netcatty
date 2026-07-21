@@ -939,6 +939,7 @@ const startSessionApi = createStartSessionApi({
   get sessions() { return sessions; },
   get electronModule() { return electronModule; },
   SSHClient, sshUtils, NetcattyAgent, keyboardInteractiveHandler, passphraseHandler, hostKeyVerifier,
+  quoteShellArg,
   fs, path, os, net, crypto, Buffer, process, console, setTimeout, clearTimeout,
   createProxySocket, attachX11Forwarding, createPtyOutputBuffer, sessionLogStreamManager,
   trackSessionIdlePrompt, looksLikeIdleAutoLogout, createZmodemSentry, enableSshNoDelay, enableTcpNoDelay,

@@ -337,6 +337,12 @@ const statAsync = (sftp, targetPath) =>
     sftp.stat(targetPath, (err, stats) => (err ? reject(err) : resolve(stats)));
   });
 
+const lstatAsync = (sftp, targetPath) =>
+  new Promise((resolve, reject) => {
+    const inspect = typeof sftp.lstat === "function" ? sftp.lstat.bind(sftp) : sftp.stat.bind(sftp);
+    inspect(targetPath, (err, stats) => (err ? reject(err) : resolve(stats)));
+  });
+
 const readdirAsync = (sftp, targetPath) =>
   new Promise((resolve, reject) => {
     sftp.readdir(targetPath, (err, items) => (err ? reject(err) : resolve(items || [])));
@@ -458,14 +464,16 @@ const removeRemotePathInternal = async (sftp, targetPath, encoding, signal = nul
   const encodedTarget = encodePath(targetPath, encoding);
   let stats;
   try {
-    stats = await statAsync(sftp, encodedTarget);
+    stats = await lstatAsync(sftp, encodedTarget);
   } catch (err) {
     if (err && err.code === 2) return;
     throw err;
   }
   throwIfAborted(signal);
 
-  if (stats.isDirectory()) {
+  if (stats.isSymbolicLink?.()) {
+    await unlinkAsync(sftp, encodedTarget);
+  } else if (stats.isDirectory()) {
     throwIfAborted(signal);
     const items = await readdirAsync(sftp, encodedTarget);
     throwIfAborted(signal);
@@ -1120,7 +1128,7 @@ const fileOpsApi = createFileOpsApi({
   requireSftpChannel, resolveEncodingForRequest, updateResolvedEncoding, encodePath, decodeName,
   detectEncodingFromList, statResultFromAttrs, normalizeRemotePathString, collectReadable, writeToWritable,
   throwIfAborted, pipeStreams, ensureRemoteDirForSession, removeRemotePathInternal, renameRemotePath,
-  realpathAsync, statAsync, readdirAsync, mkdirAsync, rmdirAsync, unlinkAsync, openFileAsync,
+  realpathAsync, statAsync, lstatAsync, readdirAsync, mkdirAsync, rmdirAsync, unlinkAsync, openFileAsync,
   writeFileChunkAsync, closeFileAsync, createAbortError, copySftpEncodingState, clearSftpEncodingState,
   safeSend, tempDirBridge, randomUUID,
 });
@@ -1134,7 +1142,6 @@ const {
   cancelSftpUpload,
   closeSftp,
   mkdirSftp,
-  execSshCommand,
   deleteSftp,
   renameSftp,
   statSftp,

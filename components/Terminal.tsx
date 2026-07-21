@@ -190,6 +190,7 @@ import type { CreateXTermRuntimeContext } from "./terminal/runtime/createXTermRu
 import { TerminalView } from "./terminal/TerminalView";
 import {
   getInitialTerminalStatus,
+  shouldSuppressHostStartupCommandOnReconnect,
   shouldStartTerminalBackend,
 } from "./terminal/restoredSessionGate";
 import {
@@ -1182,13 +1183,14 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   }, [host, t, terminalSettings, updateStatus]);
 
   const prepareRestoredReconnect = useCallback(() => {
+    suppressHostStartupCommandRef.current = shouldSuppressHostStartupCommandOnReconnect(
+      restoreState === "restored-disconnected" ? "restored" : "manual",
+    );
     if (restoreState !== "restored-disconnected") {
-      suppressHostStartupCommandRef.current = false;
       restoreCwdIntentRef.current = null;
       return;
     }
 
-    suppressHostStartupCommandRef.current = true;
     restoreCwdIntentRef.current = resolveRestoreCwdIntent({
       enabled: restoreTerminalCwd,
       session: {
@@ -1636,6 +1638,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     resolvedChainHosts,
     sessionId,
     reuseConnectionFromSessionId,
+    isNetworkDevice,
     startupCommand,
     noAutoRun,
     multiLineRunMode,
@@ -2507,7 +2510,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       prepareRestoredReconnect();
     } else {
       restoreCwdIntentRef.current = null;
-      suppressHostStartupCommandRef.current = true;
+      suppressHostStartupCommandRef.current = shouldSuppressHostStartupCommandOnReconnect("automatic");
     }
     // Claim the retry before awaiting close. A close/cancel/unmount during the
     // awaited backend cleanup invalidates this token and stops the continuation.

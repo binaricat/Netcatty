@@ -3,6 +3,7 @@ import * as React from "react"
 import { useCallback, useLayoutEffect, useState } from "react"
 
 import { cn } from "../../lib/utils"
+import { usePortalContainer } from "./portal-container"
 
 const Popover = PopoverPrimitive.Root
 
@@ -16,6 +17,7 @@ const PopoverContent = React.forwardRef<
   React.ElementRef<typeof PopoverPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof PopoverPrimitive.Content>
 >(({ className, align = "center", sideOffset = 4, ...props }, ref) => {
+  const portalContainer = usePortalContainer()
   // Fix for Electron: ensure position is calculated after content is fully rendered
   const [isPositioned, setIsPositioned] = useState(false)
   const [node, setNode] = useState<HTMLDivElement | null>(null)
@@ -46,7 +48,7 @@ const PopoverContent = React.forwardRef<
   }, [node])
 
   return (
-    <PopoverPrimitive.Portal>
+    <PopoverPrimitive.Portal container={portalContainer ?? undefined}>
       <PopoverPrimitive.Content
         ref={callbackRef}
         align={align}

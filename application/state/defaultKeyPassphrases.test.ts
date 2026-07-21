@@ -2,9 +2,14 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   clearKeyPassphrasesByIds,
+  clearRememberedKeyPassphrases,
   clearReferenceKeyPassphrases,
   deleteVaultKey,
   loadDefaultKeyPassphrase,
+  readDefaultKeyPassphraseForExport,
+  readDefaultKeyPassphrasesForVerification,
+  readRememberedKeyPassphrases,
+  rememberImportedKeyPassphrase,
   rememberKeyPassphrase,
   removeDefaultKeyPassphraseAliases,
   saveDefaultKeyPassphrase,
@@ -196,6 +201,237 @@ test("loadDefaultKeyPassphrase removes undecryptable credential placeholders", a
     JSON.parse(globalThis.localStorage.getItem(STORAGE_KEY_DEFAULT_KEY_PASSPHRASES) ?? "{}"),
     { "/Users/alice/.ssh/id_rsa": "still-valid" },
   );
+});
+
+test("export read reports unavailable encrypted passphrases without deleting them", async (t) => {
+  installLocalStorage(t);
+  const keyPath = "/Users/alice/.ssh/id_ed25519";
+  const encrypted = "enc:v1:djEwYWJj";
+  globalThis.localStorage.setItem(
+    STORAGE_KEY_DEFAULT_KEY_PASSPHRASES,
+    JSON.stringify({ [keyPath]: encrypted }),
+  );
+
+  assert.deepEqual(
+    await readDefaultKeyPassphraseForExport(keyPath),
+    { status: "unreadable" },
+  );
+  assert.deepEqual(
+    JSON.parse(globalThis.localStorage.getItem(STORAGE_KEY_DEFAULT_KEY_PASSPHRASES) ?? "{}"),
+    { [keyPath]: encrypted },
+  );
+});
+
+test("export read retries when the passphrase changes during decryption", async (t) => {
+  installLocalStorage(t);
+  const keyPath = "/Users/alice/.ssh/id_ed25519";
+  const encrypted = "enc:v1:djEwYWJj";
+  let releaseDecrypt: (() => void) | undefined;
+  const decryptGate = new Promise<void>((resolve) => {
+    releaseDecrypt = resolve;
+  });
+  let firstDecryptStarted: (() => void) | undefined;
+  const firstDecrypt = new Promise<void>((resolve) => {
+    firstDecryptStarted = resolve;
+  });
+  let decryptCount = 0;
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: {
+      netcatty: {
+        getHomeDir: async () => "/Users/alice",
+        credentialsDecrypt: async (value: string) => {
+          decryptCount += 1;
+          if (decryptCount === 1) {
+            firstDecryptStarted?.();
+            await decryptGate;
+            return "old-secret";
+          }
+          return value;
+        },
+      },
+    },
+  });
+  globalThis.localStorage.setItem(
+    STORAGE_KEY_DEFAULT_KEY_PASSPHRASES,
+    JSON.stringify({ [keyPath]: encrypted }),
+  );
+
+  const pendingRead = readDefaultKeyPassphraseForExport(keyPath);
+  await firstDecrypt;
+  globalThis.localStorage.setItem(
+    STORAGE_KEY_DEFAULT_KEY_PASSPHRASES,
+    JSON.stringify({ [keyPath]: "new-secret" }),
+  );
+  releaseDecrypt?.();
+
+  assert.deepEqual(await pendingRead, { status: "readable", value: "new-secret" });
+});
+
+test("remembered passphrase read includes Keychain reference-key values", async (t) => {
+  installLocalStorage(t);
+  const key = {
+    ...referenceKey(),
+    passphrase: "keychain-secret",
+    savePassphrase: true,
+  };
+
+  assert.deepEqual(
+    await readRememberedKeyPassphrases(key.filePath!, [key]),
+    { values: ["keychain-secret"], unreadable: false },
+  );
+});
+
+test("remembered passphrase read marks encrypted Keychain placeholders unreadable", async (t) => {
+  installLocalStorage(t);
+  const key = {
+    ...referenceKey(),
+    passphrase: "enc:v1:djEwYWJj",
+    savePassphrase: true,
+  };
+
+  assert.deepEqual(
+    await readRememberedKeyPassphrases(key.filePath!, [key]),
+    { values: [], unreadable: true },
+  );
+});
+
+test("passphrase verification reads every alias and preserves unreadable state", async (t) => {
+  installLocalStorage(t);
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: {
+      netcatty: {
+        getHomeDir: async () => "/Users/alice",
+        credentialsDecrypt: async (value: string) => value,
+      },
+    },
+  });
+  globalThis.localStorage.setItem(
+    STORAGE_KEY_DEFAULT_KEY_PASSPHRASES,
+    JSON.stringify({
+      "~/.ssh/id_ed25519": "readable-secret",
+      "/Users/alice/.ssh/id_ed25519": "enc:v1:djEwYWJj",
+    }),
+  );
+
+  assert.deepEqual(
+    await readDefaultKeyPassphrasesForVerification("~/.ssh/id_ed25519"),
+    { values: ["readable-secret"], unreadable: true, present: true },
+  );
+  assert.deepEqual(
+    await readRememberedKeyPassphrases("~/.ssh/id_ed25519", []),
+    { values: ["readable-secret"], unreadable: true },
+  );
+});
+
+test("passphrase verification preserves conflicting readable alias values", async (t) => {
+  installLocalStorage(t);
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: { netcatty: { getHomeDir: async () => "/Users/alice" } },
+  });
+  globalThis.localStorage.setItem(
+    STORAGE_KEY_DEFAULT_KEY_PASSPHRASES,
+    JSON.stringify({
+      "~/.ssh/id_ed25519": "relative-secret",
+      "/Users/alice/.ssh/id_ed25519": "absolute-secret",
+    }),
+  );
+
+  const read = await readRememberedKeyPassphrases("~/.ssh/id_ed25519", []);
+  assert.deepEqual(new Set(read.values), new Set(["relative-secret", "absolute-secret"]));
+  assert.equal(read.unreadable, false);
+});
+
+test("imported passphrase cannot overwrite a correction queued first", async (t) => {
+  installLocalStorage(t);
+  let releaseEncrypt: (() => void) | undefined;
+  const encryptGate = new Promise<void>((resolve) => {
+    releaseEncrypt = resolve;
+  });
+  let encryptStarted: (() => void) | undefined;
+  const firstEncrypt = new Promise<void>((resolve) => {
+    encryptStarted = resolve;
+  });
+  let encryptCount = 0;
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: {
+      netcatty: {
+        credentialsEncrypt: async (value: string) => {
+          encryptCount += 1;
+          if (encryptCount === 1) {
+            encryptStarted?.();
+            await encryptGate;
+          }
+          return value;
+        },
+      },
+    },
+  });
+
+  const correction = saveDefaultKeyPassphrase("~/.ssh/id_ed25519", "current-secret");
+  await firstEncrypt;
+  const imported = rememberImportedKeyPassphrase({
+    keyPath: "~/.ssh/id_ed25519",
+    passphrase: "stale-import-secret",
+    keys: [],
+    updateKeys: () => {},
+  });
+  releaseEncrypt?.();
+
+  await correction;
+  assert.equal(await imported, "conflict");
+  assert.equal(await loadDefaultKeyPassphrase("~/.ssh/id_ed25519"), "current-secret");
+});
+
+test("imported passphrase cannot overwrite a direct key correction during validation", async (t) => {
+  installLocalStorage(t);
+  let releaseEncrypt: (() => void) | undefined;
+  const encryptGate = new Promise<void>((resolve) => {
+    releaseEncrypt = resolve;
+  });
+  let encryptStarted: (() => void) | undefined;
+  const encryption = new Promise<void>((resolve) => {
+    encryptStarted = resolve;
+  });
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: {
+      netcatty: {
+        getHomeDir: async () => "/Users/alice",
+        credentialsEncrypt: async (value: string) => {
+          encryptStarted?.();
+          await encryptGate;
+          return value;
+        },
+      },
+    },
+  });
+  let keys: SSHKey[] = [{
+    ...referenceKey(),
+    passphrase: "stale-import",
+    savePassphrase: true,
+  }];
+
+  const imported = rememberImportedKeyPassphrase({
+    keyPath: "/Users/alice/.ssh/id_ed25519",
+    passphrase: "stale-import",
+    keys,
+    getKeys: () => keys,
+    setCurrentKeys: (updated) => {
+      keys = updated;
+    },
+    updateKeys: () => undefined,
+  });
+  await encryption;
+  keys = [{ ...keys[0], passphrase: "user-correction" }];
+  releaseEncrypt?.();
+
+  assert.equal(await imported, "conflict");
+  assert.equal(keys[0]?.passphrase, "user-correction");
+  assert.equal(await loadDefaultKeyPassphrase("/Users/alice/.ssh/id_ed25519"), null);
 });
 
 test("loadDefaultKeyPassphrase cleanup preserves a passphrase saved concurrently", async (t) => {
@@ -431,7 +667,7 @@ test("removeDefaultKeyPassphraseAliases clears relative and expanded paths", asy
   assert.equal(clearedKeys[0].savePassphrase, false);
 });
 
-test("removeDefaultKeyPassphraseAliases preserves a corrected passphrase saved during alias lookup", async (t) => {
+test("passphrase removal and save mutations run in request order", async (t) => {
   installLocalStorage(t);
   let releaseFirstHomeLookup: (() => void) | undefined;
   const firstHomeLookup = new Promise<void>((resolve) => {
@@ -457,11 +693,65 @@ test("removeDefaultKeyPassphraseAliases preserves a corrected passphrase saved d
   );
 
   const pendingRemoval = removeDefaultKeyPassphraseAliases([keyPath]);
-  await saveDefaultKeyPassphrase(keyPath, "corrected-passphrase");
+  const pendingSave = saveDefaultKeyPassphrase(keyPath, "corrected-passphrase");
   releaseFirstHomeLookup?.();
 
-  assert.deepEqual(await pendingRemoval, []);
+  assert.deepEqual(await pendingRemoval, [keyPath, "~/.ssh/id_ed25519"]);
+  await pendingSave;
   assert.equal(await loadDefaultKeyPassphrase(keyPath), "corrected-passphrase");
+});
+
+test("credential clearing holds the mutation queue until key state is persisted", async (t) => {
+  installLocalStorage(t);
+  const keyPath = "/Users/alice/.ssh/id_ed25519";
+  let keys: SSHKey[] = [{
+    ...referenceKey(),
+    passphrase: "old-secret",
+    savePassphrase: true,
+  }];
+  await saveDefaultKeyPassphrase(keyPath, "old-secret");
+  let releaseClear: (() => void) | undefined;
+  const clearPersisted = new Promise<void>((resolve) => {
+    releaseClear = resolve;
+  });
+  let clearUpdateStarted: (() => void) | undefined;
+  const clearStarted = new Promise<void>((resolve) => {
+    clearUpdateStarted = resolve;
+  });
+
+  const clearing = clearRememberedKeyPassphrases({
+    keyPaths: [keyPath],
+    getKeys: () => keys,
+    setCurrentKeys: (updated) => {
+      keys = updated;
+    },
+    updateKeys: async () => {
+      clearUpdateStarted?.();
+      await clearPersisted;
+    },
+  });
+  await clearStarted;
+  let importFinished = false;
+  const importing = rememberImportedKeyPassphrase({
+    keyPath,
+    passphrase: "imported-secret",
+    keys,
+    getKeys: () => keys,
+    setCurrentKeys: (updated) => {
+      keys = updated;
+    },
+    updateKeys: () => undefined,
+  }).then((result) => {
+    importFinished = true;
+    return result;
+  });
+  await Promise.resolve();
+  assert.equal(importFinished, false);
+
+  releaseClear?.();
+  await clearing;
+  assert.equal(await importing, "saved");
+  assert.equal(keys[0]?.passphrase, "imported-secret");
 });
 
 test("rememberKeyPassphrase updates a reference key stored under an expanded alias", async (t) => {
@@ -483,6 +773,36 @@ test("rememberKeyPassphrase updates a reference key stored under an expanded ali
 
   assert.equal(updatedKeys?.[0].passphrase, "replacement");
   assert.equal(updatedKeys?.[0].savePassphrase, true);
+});
+
+test("rememberKeyPassphrase reads the latest keys after saving the credential", async (t) => {
+  installLocalStorage(t);
+  const keyPath = "/Users/alice/.ssh/id_ed25519";
+  let currentKeys: SSHKey[] = [{
+    id: "key-1",
+    name: "Original",
+    type: "ed25519",
+    source: "reference",
+    filePath: keyPath,
+    createdAt: 1,
+  }];
+  const staleKeys = currentKeys;
+  const updatedNames: string[] = [];
+  currentKeys = [{ ...currentKeys[0], name: "Concurrent edit" }];
+
+  await rememberKeyPassphrase({
+    keyPath,
+    passphrase: "secret",
+    keys: staleKeys,
+    getKeys: () => currentKeys,
+    updateKeys: (updated) => {
+      currentKeys = updated;
+      updatedNames.push(updated[0]?.name ?? "");
+    },
+  });
+
+  assert.deepEqual(updatedNames, ["Concurrent edit"]);
+  assert.equal(currentKeys[0]?.passphrase, "secret");
 });
 
 test("path aliases replace and clear Windows reference-key spellings", async (t) => {
