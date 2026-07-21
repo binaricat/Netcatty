@@ -10,6 +10,7 @@ import {
   HOST_AUTH_METHOD_CHOICES,
   HostDetailsConnectionSections,
   removeSelectedHostCredential,
+  shouldForceAuthMethodReselect,
 } from "./HostDetailsConnectionSections.tsx";
 import { TooltipProvider } from "./ui/tooltip.tsx";
 
@@ -136,6 +137,14 @@ test("host credentials expose automatic and password-only choices", () => {
     markup,
     /role="combobox"[\s\S]*?<span class="min-w-0 flex-1 truncate text-left">hostDetails\.auth\.auto<\/span>/,
   );
+});
+
+test("reselecting the current key or certificate method still forces the chooser path", () => {
+  assert.equal(shouldForceAuthMethodReselect("key", "key"), true);
+  assert.equal(shouldForceAuthMethodReselect("certificate", "certificate"), true);
+  assert.equal(shouldForceAuthMethodReselect("password", "password"), false);
+  assert.equal(shouldForceAuthMethodReselect("auto", "auto"), false);
+  assert.equal(shouldForceAuthMethodReselect("key", "password"), false);
 });
 
 test("ET hosts do not offer the unsupported interactive-auth preference", () => {

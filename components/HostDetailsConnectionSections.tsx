@@ -23,6 +23,19 @@ export const HOST_AUTH_METHOD_CHOICES = [
   ["certificate", "hostDetails.auth.certificate"],
 ] as const;
 
+export function shouldForceAuthMethodReselect(
+  nextMethod: "auto" | "password" | "key" | "certificate",
+  currentMethod: "auto" | "password" | "key" | "certificate",
+): boolean {
+  // Radix Select skips onValueChange when the value is unchanged. Key/certificate
+  // still need that path so re-opening the chooser keeps working.
+  return (
+    nextMethod === currentMethod
+    && (nextMethod === "key" || nextMethod === "certificate")
+  );
+}
+
+
 export const applyEffectiveHostAuthMethodSelection = (
   host: Host,
   authMethod: "auto" | "password" | "key" | "certificate",
@@ -175,7 +188,16 @@ export const HostDetailsConnectionSections: React.FC<HostDetailsConnectionSectio
                 </SelectTrigger>
                 <SelectContent>
                   {HOST_AUTH_METHOD_CHOICES.map(([value, labelKey]) => (
-                    <SelectItem key={value} value={value} textValue={t(labelKey)}>
+                    <SelectItem
+                      key={value}
+                      value={value}
+                      textValue={t(labelKey)}
+                      onSelect={() => {
+                        if (shouldForceAuthMethodReselect(value, resolvedAuthMethod)) {
+                          selectAuthMethod(value);
+                        }
+                      }}
+                    >
                       {t(labelKey)}
                     </SelectItem>
                   ))}
