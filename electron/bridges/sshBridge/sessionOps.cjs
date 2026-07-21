@@ -234,6 +234,16 @@ function createSessionOpsApi(ctx) {
       if (!session || !session.conn) {
         return { success: false, error: 'Session not found or not connected' };
       }
+
+      const targetLoginPid = /^\d+$/.test(String(session.shellPid || ''))
+        ? String(session.shellPid)
+        : '';
+      if ((session.connRef?.count || 1) > 1 && !targetLoginPid) {
+        return {
+          success: false,
+          error: 'Current directory is ambiguous across shared terminal channels',
+        };
+      }
     
       // Completely silent: uses a separate exec channel, nothing is printed
       // in the interactive terminal. The exec channel and the interactive
@@ -257,6 +267,7 @@ function createSessionOpsApi(ctx) {
         // so sh keeps the same PID and $PPID = sshd. Starting another shell
         // without exec would make $PPID point at the intermediate shell instead.
         const posixScript = `SELF=$$
+    TARGET_LOGIN=${targetLoginPid}
     ALLOW_FALLBACK=${allowHomeFallback ? "1" : "0"}
     # Find the user's interactive shell on this SSH connection.
     # Prefer the one attached to a controlling tty (the user's shell): probe exec
@@ -338,8 +349,10 @@ function createSessionOpsApi(ctx) {
         }
       '
     }
-    login=$(find_login_shell "$PPID")
+    login="$TARGET_LOGIN"
+    [ -n "$login" ] || login=$(find_login_shell "$PPID")
     if [ -n "$login" ]; then
+      printf 'NETCATTY_LOGIN_PID=%s\\n' "$login" >&2
       pid=$(find_active_shell "$login")
       [ -n "$pid" ] || pid="$login"
       cwd=$(readlink /proc/$pid/cwd 2>/dev/null)
@@ -387,6 +400,10 @@ function createSessionOpsApi(ctx) {
           stream.on('close', (code) => {
             clearTimeout(timer);
             const path = out.trim();
+            const loginPidMatch = errOut.match(/(?:^|\n)NETCATTY_LOGIN_PID=(\d+)(?:\n|$)/);
+            if (loginPidMatch) {
+              session.shellPid = loginPidMatch[1];
+            }
             log('[getSessionPwd]', { stdout: path, stderr: errOut.trim(), exitCode: code });
             if (path && path.startsWith('/')) {
               resolve({ success: true, cwd: path });

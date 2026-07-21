@@ -94,6 +94,24 @@ function makeReusableConn() {
   return conn;
 }
 
+function makePidTrackingReusableConn() {
+  const conn = makeReusableConn();
+  conn.shellPidSnapshots = [];
+  conn.exec = (_command, callback) => {
+    const stream = new EventEmitter();
+    stream.stderr = new EventEmitter();
+    stream.close = () => {};
+    const pids = conn.openedShells.length === 0 ? "111\n" : "111\n222\n";
+    conn.shellPidSnapshots.push(pids.trim().split("\n"));
+    setImmediate(() => {
+      stream.emit("data", Buffer.from(pids));
+      stream.emit("close", 0);
+    });
+    callback(null, stream);
+  };
+  return conn;
+}
+
 // A reusable connection whose shell callback is held until released, so a test
 // can simulate the source tab closing while conn.shell() is still pending.
 function makeDeferredShellConn() {
@@ -188,6 +206,29 @@ test("Copy Tab reuses the source connection instead of dialing fresh", async (t)
   const progress = sender.sent.filter((m) => m.channel === "netcatty:chain:progress");
   assert.ok(progress.some((m) => m.payload.status === "connected"));
   assert.equal(getConnectionReuseFallbackEvents(sender).length, 0, "successful reuse should not emit fallback");
+});
+
+test("Copy Tab records a distinct remote shell for each shared terminal", async (t) => {
+  const { bridge } = loadBridgeWithMockedSsh2(t);
+  const sessions = new Map();
+  const sourceConn = makePidTrackingReusableConn();
+  const source = makeSourceSession(sourceConn, { hostname: "10.0.0.1", username: "alice" });
+  sessions.set("source", source);
+
+  const start = registerStartHandler(bridge, sessions);
+  await start(
+    { sender: makeSender() },
+    {
+      sessionId: "copy",
+      hostname: "10.0.0.1",
+      username: "alice",
+      sourceSessionId: "source",
+    },
+  );
+
+  assert.deepEqual(sourceConn.shellPidSnapshots, [["111"], ["111", "222"]]);
+  assert.equal(source.shellPid, "111");
+  assert.equal(sessions.get("copy").shellPid, "222");
 });
 
 test("Copy Tab preserves the server locale unless the host explicitly overrides it", async (t) => {

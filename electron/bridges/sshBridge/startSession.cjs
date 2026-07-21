@@ -99,6 +99,69 @@ function shouldPromoteCachedAuthMethod(authMethod, cachedMethod) {
 
 function createStartSessionApi(ctx) {
   with (ctx) {
+    const listInteractiveShellPids = (conn) => {
+      if (!conn || typeof conn.exec !== "function") return Promise.resolve([]);
+
+      const script = `SELF=$$
+{
+  ps -e -o pid=,ppid=,tty=,comm= 2>/dev/null | awk -v pp="$PPID" -v self="$SELF" '
+    $1 != self && $2 == pp && $3 != "?" && $4 ~ /^-?(ba|z|fi|k|da|a)?sh$/ { print $1 }
+  '
+  if [ -r /proc/$SELF/environ ]; then
+    conn=$(tr '\\0' '\\n' < /proc/$SELF/environ 2>/dev/null | sed -n 's/^SSH_CONNECTION=//p' | head -n1)
+    if [ -n "$conn" ]; then
+      for d in /proc/[0-9]*; do
+        pid=$(basename "$d")
+        [ "$pid" = "$SELF" ] && continue
+        [ -r "$d/environ" ] || continue
+        conn2=$(tr '\\0' '\\n' < "$d/environ" 2>/dev/null | sed -n 's/^SSH_CONNECTION=//p' | head -n1)
+        [ "$conn2" = "$conn" ] || continue
+        comm=$(cat "$d/comm" 2>/dev/null)
+        case "$comm" in sh|bash|zsh|fish|ksh|dash|ash) ;; *) continue ;; esac
+        ppid=$(awk '{ print $4 }' "$d/stat" 2>/dev/null)
+        pcomm=$(cat "/proc/$ppid/comm" 2>/dev/null)
+        case "$pcomm" in sshd|dropbear|dropbearmulti) ;; *) continue ;; esac
+        tty=$(ps -p "$pid" -o tty= 2>/dev/null | tr -d '[:space:]')
+        [ -n "$tty" ] && [ "$tty" != "?" ] && printf '%s\\n' "$pid"
+      done
+    fi
+  fi
+} | awk '/^[0-9]+$/ && !seen[$1]++ { print $1 }'`;
+
+      return new Promise((resolve) => {
+        let settled = false;
+        let activeStream = null;
+        const settle = (pids) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          resolve(pids);
+        };
+        const timer = setTimeout(() => {
+          try { activeStream?.close?.(); } catch { /* ignore */ }
+          settle([]);
+        }, 1500);
+
+        try {
+          conn.exec(`exec sh -c ${quoteShellArg(script)}`, (err, stream) => {
+            if (err || !stream) {
+              settle([]);
+              return;
+            }
+            activeStream = stream;
+            let stdout = "";
+            stream.on("data", (chunk) => { stdout += chunk.toString(); });
+            stream.stderr?.on("data", () => {});
+            stream.on("close", () => {
+              settle(stdout.split(/\r?\n/).filter((value) => /^\d+$/.test(value)));
+            });
+          });
+        } catch {
+          settle([]);
+        }
+      });
+    };
+
     /**
      * Wire up a freshly-opened shell channel (PTY stream) for a session:
      * output buffering, ZMODEM handling, encoding, exit/close reporting and
@@ -457,11 +520,41 @@ function createStartSessionApi(ctx) {
      * Resolves with `{ sessionId }` on success. Throws on failure so the caller
      * can fall back to a normal fresh connection.
      */
-    function reuseShellSession(event, options, sourceSession, sessionId, log) {
+    async function reuseShellSession(event, options, sourceSession, sessionId, log) {
       const cols = options.cols || 80;
       const rows = options.rows || 24;
       const sender = event.sender;
       const conn = sourceSession.conn;
+      // Pin before the discovery probe as well as before conn.shell(): the
+      // source tab can close while either async operation is in flight.
+      const connRef = sourceSession.connRef;
+      const refHolder = {};
+      acquireConnectionRef(refHolder, connRef);
+      let discoveryConnectionError = null;
+      const onDiscoveryConnectionError = (err) => {
+        discoveryConnectionError = err;
+      };
+      conn.once("error", onDiscoveryConnectionError);
+      const shellPidsBeforeOpen = await listInteractiveShellPids(conn);
+      conn.removeListener("error", onDiscoveryConnectionError);
+      if (discoveryConnectionError) {
+        releaseConnectionRef(refHolder);
+        throw discoveryConnectionError;
+      }
+      if (!sourceSession.shellPid) {
+        const assignedPids = new Set(
+          [...sessions.values()]
+            .filter((candidate) => candidate?.connRef === sourceSession.connRef && candidate.shellPid)
+            .map((candidate) => String(candidate.shellPid)),
+        );
+        const unclaimedPids = shellPidsBeforeOpen.filter((pid) => !assignedPids.has(pid));
+        const unassignedSessions = [...sessions.values()].filter(
+          (candidate) => candidate?.connRef === sourceSession.connRef && !candidate.shellPid,
+        );
+        if (unclaimedPids.length === 1 && unassignedSessions.length === 1) {
+          unassignedSessions[0].shellPid = unclaimedPids[0];
+        }
+      }
 
       log("reusing existing connection for new shell channel", {
         sessionId,
@@ -493,10 +586,6 @@ function createStartSessionApi(ctx) {
       // object as the ref holder, then hand the ref over to the real session
       // once the channel opens. On any failure we release this hold so the count
       // is restored.
-      const connRef = sourceSession.connRef;
-      const refHolder = {};
-      acquireConnectionRef(refHolder, connRef);
-
       return new Promise((resolve, reject) => {
         let settled = false;
 
@@ -560,9 +649,16 @@ function createStartSessionApi(ctx) {
                 chainConnections: [],
                 isReused: true,
               });
-
-              settled = true;
-              resolve({ sessionId });
+              void listInteractiveShellPids(conn).then((shellPidsAfterOpen) => {
+                const previousPids = new Set(shellPidsBeforeOpen);
+                const newPids = shellPidsAfterOpen.filter((pid) => !previousPids.has(pid));
+                const copiedSession = sessions.get(sessionId);
+                if (copiedSession && newPids.length === 1) {
+                  copiedSession.shellPid = newPids[0];
+                }
+                settled = true;
+                resolve({ sessionId });
+              });
             }
           );
         } catch (syncErr) {
