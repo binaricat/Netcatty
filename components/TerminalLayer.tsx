@@ -79,8 +79,10 @@ import { resolveAiSidePanelToggleIntent } from '../application/state/resolveAiSi
 import { terminalLayerAreEqual } from './terminalLayerMemo';
 import { TerminalLayerTabBridge } from './terminalLayer/TerminalLayerTabBridge';
 import {
+  SFTP_TRANSFER_HISTORY_RETENTION_MS,
   shouldClearSftpPanelAfterTransferChange,
   shouldKeepSftpMountedAfterClose,
+  shouldScheduleSftpRetainedPanelCleanup,
 } from './terminalLayer/sftpPanelLifecycle';
 import { resolveAiNoteArtifactPanelIntent } from './terminalLayer/aiNoteArtifactPanelIntent';
 import {
@@ -601,6 +603,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   sftpHostForTabRef.current = sftpHostForTab;
   const sftpActiveTransfersByTabRef = useRef<Map<string, number>>(new Map());
   const sftpRetainedAfterCloseTabIdsRef = useRef<Set<string>>(new Set());
+  const sftpRetainedCleanupTimersRef = useRef<Map<string, number>>(new Map());
   const sftpLastPathForSourceRef = useRef<Map<string, SftpRememberedLocation>>(new Map());
 
   const resolveSftpOpenTarget = useCallback((params: {
@@ -626,6 +629,11 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   }, []);
 
   const clearSftpPanelState = useCallback((tabId: string) => {
+    const cleanupTimer = sftpRetainedCleanupTimersRef.current.get(tabId);
+    if (cleanupTimer !== undefined) {
+      window.clearTimeout(cleanupTimer);
+      sftpRetainedCleanupTimersRef.current.delete(tabId);
+    }
     sftpActiveTransfersByTabRef.current.delete(tabId);
     sftpRetainedAfterCloseTabIdsRef.current.delete(tabId);
     setSftpHostForTab(prev => {
@@ -651,16 +659,40 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   const handleSftpActiveTransfersChange = useCallback((tabId: string, count: number) => {
     const activeTransfersCount = Math.max(0, count);
     if (activeTransfersCount > 0) {
+      const cleanupTimer = sftpRetainedCleanupTimersRef.current.get(tabId);
+      if (cleanupTimer !== undefined) {
+        window.clearTimeout(cleanupTimer);
+        sftpRetainedCleanupTimersRef.current.delete(tabId);
+      }
       sftpActiveTransfersByTabRef.current.set(tabId, activeTransfersCount);
       return;
     }
     sftpActiveTransfersByTabRef.current.delete(tabId);
-    if (shouldClearSftpPanelAfterTransferChange({
+    const lifecycle = {
       activeTransfersCount,
       panelOpen: sidePanelOpenTabsRef.current.has(tabId),
       retainedAfterClose: sftpRetainedAfterCloseTabIdsRef.current.has(tabId),
-    })) {
+    };
+    if (shouldClearSftpPanelAfterTransferChange(lifecycle)) {
       clearSftpPanelState(tabId);
+      return;
+    }
+    if (
+      shouldScheduleSftpRetainedPanelCleanup(lifecycle)
+      && !sftpRetainedCleanupTimersRef.current.has(tabId)
+    ) {
+      const cleanupTimer = window.setTimeout(() => {
+        sftpRetainedCleanupTimersRef.current.delete(tabId);
+        const currentCount = sftpActiveTransfersByTabRef.current.get(tabId) ?? 0;
+        if (
+          currentCount <= 0
+          && !sidePanelOpenTabsRef.current.has(tabId)
+          && sftpRetainedAfterCloseTabIdsRef.current.has(tabId)
+        ) {
+          clearSftpPanelState(tabId);
+        }
+      }, SFTP_TRANSFER_HISTORY_RETENTION_MS);
+      sftpRetainedCleanupTimersRef.current.set(tabId, cleanupTimer);
     }
   }, [clearSftpPanelState]);
 
@@ -705,6 +737,11 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     if (keepSftpMounted) {
       sftpRetainedAfterCloseTabIdsRef.current.add(tabId);
     } else if (!isClosing) {
+      const cleanupTimer = sftpRetainedCleanupTimersRef.current.get(tabId);
+      if (cleanupTimer !== undefined) {
+        window.clearTimeout(cleanupTimer);
+        sftpRetainedCleanupTimersRef.current.delete(tabId);
+      }
       sftpRetainedAfterCloseTabIdsRef.current.delete(tabId);
     }
 
@@ -1006,10 +1043,22 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     }
     for (const tabId of sftpRetainedAfterCloseTabIdsRef.current) {
       if (!validAIScopeTargetIds.has(tabId)) {
+        const cleanupTimer = sftpRetainedCleanupTimersRef.current.get(tabId);
+        if (cleanupTimer !== undefined) {
+          window.clearTimeout(cleanupTimer);
+          sftpRetainedCleanupTimersRef.current.delete(tabId);
+        }
         sftpRetainedAfterCloseTabIdsRef.current.delete(tabId);
       }
     }
   }, [validAIScopeTargetIds]);
+
+  useEffect(() => () => {
+    for (const cleanupTimer of sftpRetainedCleanupTimersRef.current.values()) {
+      window.clearTimeout(cleanupTimer);
+    }
+    sftpRetainedCleanupTimersRef.current.clear();
+  }, []);
 
   const validSessionActivityIds = useMemo(() => {
     return getValidSessionActivityIds(sessions);
@@ -1161,6 +1210,11 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     if (currentPanel === tab) return;
 
     if (tab === 'sftp') {
+      const cleanupTimer = sftpRetainedCleanupTimersRef.current.get(tabId);
+      if (cleanupTimer !== undefined) {
+        window.clearTimeout(cleanupTimer);
+        sftpRetainedCleanupTimersRef.current.delete(tabId);
+      }
       sftpRetainedAfterCloseTabIdsRef.current.delete(tabId);
     }
 

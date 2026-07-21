@@ -3,8 +3,10 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
+  SFTP_TRANSFER_HISTORY_RETENTION_MS,
   shouldClearSftpPanelAfterTransferChange,
   shouldKeepSftpMountedAfterClose,
+  shouldScheduleSftpRetainedPanelCleanup,
 } from "./sftpPanelLifecycle.ts";
 
 test("closing the panel keeps SFTP mounted while a transfer is active", () => {
@@ -22,6 +24,12 @@ test("a transfer retained by close keeps its history after completion", () => {
     panelOpen: false,
     retainedAfterClose: true,
   }), false);
+  assert.equal(shouldScheduleSftpRetainedPanelCleanup({
+    activeTransfersCount: 0,
+    panelOpen: false,
+    retainedAfterClose: true,
+  }), true);
+  assert.ok(SFTP_TRANSFER_HISTORY_RETENTION_MS > 0);
 });
 
 test("an unretained hidden idle panel can be released", () => {
@@ -41,4 +49,5 @@ test("terminal side panel reports transfer activity and uses it during close", (
   assert.match(slotsSource, /onActiveTransfersChange=\{handleActiveTransfersChange\}/);
   assert.match(layerSource, /shouldKeepSftpMountedAfterClose\(activeTransfersCount\)/);
   assert.match(layerSource, /sftpRetainedAfterCloseTabIdsRef/);
+  assert.match(layerSource, /sftpRetainedCleanupTimersRef/);
 });
