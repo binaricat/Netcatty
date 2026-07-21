@@ -200,11 +200,19 @@ function App({ settings }: { settings: SettingsState }) {
   // temporary-mode runtime that the main window already started.
   useEffect(() => {
     if (isPeerSessionWindow) return;
-    syncExternalMcpStartupState(netcattyBridge.get());
-    // Release always-mounted top-bar status polling only after reconcile starts.
-    // setEnabled is async; the poll still waits for runtime truth, but it must not
-    // run against the pre-reconcile disabled controller while storage still says on.
-    markExternalMcpStartupReady();
+    let cancelled = false;
+    void (async () => {
+      try {
+        // Wait for enable/disable reconcile to settle before top-bar runtime polling
+        // can clear the shared switch from a still-disabled controller.
+        await syncExternalMcpStartupState(netcattyBridge.get());
+      } finally {
+        if (!cancelled) markExternalMcpStartupReady();
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [isPeerSessionWindow]);
 
   const {

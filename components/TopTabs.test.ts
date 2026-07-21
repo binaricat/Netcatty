@@ -137,7 +137,13 @@ test("AppView hides External MCP toggle in peer session windows", () => {
 });
 
 test("External MCP top-bar status sync waits for App startup reconcile", () => {
+  assert.match(appSource, /await syncExternalMcpStartupState\(netcattyBridge\.get\(\)\)/);
   assert.match(appSource, /markExternalMcpStartupReady\(\)/);
+  assert.ok(
+    appSource.indexOf("await syncExternalMcpStartupState(netcattyBridge.get())")
+      < appSource.indexOf("markExternalMcpStartupReady()"),
+    "startup ready must be marked only after await syncExternalMcpStartupState",
+  );
   assert.match(externalMcpToggleSource, /waitForExternalMcpStartupReady\(\)/);
   assert.match(externalMcpToggleSource, /if \(isPeerSessionWindow \|\| !enabled\) return;/);
 });

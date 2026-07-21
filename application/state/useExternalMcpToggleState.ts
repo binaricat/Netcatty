@@ -203,16 +203,24 @@ export function syncExternalMcpConfig(bridge: ExternalMcpBridge | undefined = ne
  * Temporary mode never auto-starts, and we clear a stale stored enabled flag
  * so Settings remounts cannot accidentally re-enable temporary mode.
  */
-export function syncExternalMcpStartupState(
+export async function syncExternalMcpStartupState(
   bridge: ExternalMcpBridge | undefined = netcattyBridge.get(),
-): ExternalMcpStartupSyncPlan {
+): Promise<ExternalMcpStartupSyncPlan> {
   const plan = readExternalMcpStartupSyncPlan();
-  void bridge?.externalMcpSetConfig?.(plan.config);
+  try {
+    await Promise.resolve(bridge?.externalMcpSetConfig?.(plan.config));
+  } catch {
+    // Config sync is best-effort; continue with enable/disable reconcile.
+  }
   if (plan.shouldPersistStoredEnabled) {
     localStorageAdapter.writeBoolean(STORAGE_KEY_AI_EXTERNAL_MCP_ENABLED, plan.storedEnabled);
     emitAIStateChanged(STORAGE_KEY_AI_EXTERNAL_MCP_ENABLED);
   }
-  void bridge?.externalMcpSetEnabled?.(plan.runtimeEnabled);
+  try {
+    await Promise.resolve(bridge?.externalMcpSetEnabled?.(plan.runtimeEnabled));
+  } catch {
+    // Keep stored plan even if runtime enable fails; status polling can recover later.
+  }
   return plan;
 }
 

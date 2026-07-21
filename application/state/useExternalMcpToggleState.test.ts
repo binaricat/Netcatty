@@ -155,15 +155,22 @@ describe('useExternalMcpToggleState startup ready gate', () => {
     await waitForExternalMcpStartupReady();
   });
 
-  it('wires App startup reconcile to release the gate', async () => {
+  it('wires App startup reconcile to release the gate after enable settles', async () => {
     const appSource = await import('node:fs').then((fs) =>
       fs.readFileSync(new URL('../../App.tsx', import.meta.url), 'utf8'),
     );
     const hookSource = await import('node:fs').then((fs) =>
       fs.readFileSync(new URL('./useExternalMcpToggleState.ts', import.meta.url), 'utf8'),
     );
+    assert.match(appSource, /await syncExternalMcpStartupState\(netcattyBridge\.get\(\)\)/);
     assert.match(appSource, /markExternalMcpStartupReady\(\)/);
-    assert.match(appSource, /syncExternalMcpStartupState\(netcattyBridge\.get\(\)\)/);
+    assert.ok(
+      appSource.indexOf('await syncExternalMcpStartupState(netcattyBridge.get())')
+        < appSource.indexOf('markExternalMcpStartupReady()'),
+      'startup ready must be marked only after await syncExternalMcpStartupState',
+    );
+    assert.match(hookSource, /export async function syncExternalMcpStartupState/);
+    assert.match(hookSource, /await Promise\.resolve\(bridge\?\.externalMcpSetEnabled\?\.\(plan\.runtimeEnabled\)\)/);
     assert.match(hookSource, /waitForExternalMcpStartupReady\(\)/);
     assert.match(hookSource, /isPeerSessionWindowLocation/);
     assert.match(hookSource, /if \(isPeerSessionWindow \|\| !enabled\) return;/);
