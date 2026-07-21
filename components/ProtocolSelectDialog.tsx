@@ -151,7 +151,7 @@ const ProtocolSelectDialog: React.FC<ProtocolSelectDialogProps> = ({
 
                 {/* Protocol selection */}
                 <div className="px-6 py-4">
-                    <div className="space-y-2">
+                    <div className="space-y-3">
                     <h3 className="text-sm font-medium leading-none">{t("protocolSelect.chooseProtocol")}</h3>
                     <div className="space-y-3">
                         {protocolOptions.map((option) => (
