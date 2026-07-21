@@ -57,12 +57,20 @@ function createFakeLine(text: string, onTranslate?: () => void) {
 }
 
 let nextFakeMarkerId = 1;
+let fakeMarkerLineReadCount = 0;
 
 function createFakeMarker(line: number) {
   const listeners = new Set<() => void>();
+  let currentLine = line;
   return {
     id: nextFakeMarkerId++,
-    line,
+    get line() {
+      fakeMarkerLineReadCount += 1;
+      return currentLine;
+    },
+    set line(value: number) {
+      currentLine = value;
+    },
     isDisposed: false,
     onDispose(listener: () => void) {
       listeners.add(listener);
@@ -621,6 +629,43 @@ test("persistent highlight lookup follows uniform scrollback marker shifts", () 
 
     assert.equal(getTranslateCount(), term.rows);
     assert.equal(getActiveDecorationCount(), 8);
+    highlighter.dispose();
+  } finally {
+    raf.restore();
+  }
+});
+
+test("persistent marker index synchronization stays constant-time", () => {
+  const raf = installAnimationFrameQueue();
+  try {
+    const { term, handlers } = createFakeTerminal("hello DEPLOY world", { lineCount: 400 });
+    term.rows = 30;
+    const highlighter = new KeywordHighlighter(term as never);
+    const rules: KeywordHighlightRule[] = [
+      {
+        id: "deploy",
+        label: "Deploy",
+        patterns: ["DEPLOY"],
+        color: "#F87171",
+        enabled: true,
+      },
+    ];
+
+    highlighter.setRules(rules, true);
+    raf.flush();
+    term.buffer.active.baseY = 370;
+    for (const viewportY of [120, 180, 240, 300]) {
+      term.buffer.active.viewportY = viewportY;
+      handlers.scroll?.();
+    }
+
+    fakeMarkerLineReadCount = 0;
+    handlers.scroll?.();
+
+    assert.ok(
+      fakeMarkerLineReadCount < 10,
+      `expected constant marker reads, got ${fakeMarkerLineReadCount}`,
+    );
     highlighter.dispose();
   } finally {
     raf.restore();
