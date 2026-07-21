@@ -4,13 +4,9 @@ import {
   Eye,
   EyeOff,
   Key,
-  Link2,
   Lock,
   Plug,
   Plus,
-  Radio,
-  Shield,
-  Terminal as TerminalIcon,
   User,
 } from "lucide-react";
 import React, { useMemo, useState } from "react";
@@ -32,34 +28,9 @@ import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Dropdown, DropdownContent, DropdownTrigger } from "./ui/dropdown";
 import { ScrollArea } from "./ui/scroll-area";
+import { PROTOCOL_VISUAL_STYLES } from "./protocolVisuals";
 
 
-const PROTOCOL_ICON_STYLES: Record<QuickConnectProtocol, {
-  icon: React.ReactNode;
-  idle: string;
-  selected: string;
-}> = {
-  ssh: {
-    icon: <Shield size={18} />,
-    idle: "bg-sky-500/10 text-sky-500",
-    selected: "bg-sky-500/20 text-sky-500",
-  },
-  mosh: {
-    icon: <Radio size={18} />,
-    idle: "bg-violet-500/10 text-violet-500",
-    selected: "bg-violet-500/20 text-violet-500",
-  },
-  et: {
-    icon: <Link2 size={18} />,
-    idle: "bg-emerald-500/10 text-emerald-500",
-    selected: "bg-emerald-500/20 text-emerald-500",
-  },
-  telnet: {
-    icon: <TerminalIcon size={18} />,
-    idle: "bg-amber-500/10 text-amber-500",
-    selected: "bg-amber-500/20 text-amber-500",
-  },
-};
 
 // Wizard steps
 type WizardStep = "protocol" | "username" | "knownhost" | "auth";
@@ -305,11 +276,11 @@ const QuickConnectWizard: React.FC<QuickConnectWizardProps> = ({
               className={cn(
                 "h-10 w-10 rounded-lg flex items-center justify-center",
                 protocol === "ssh"
-                  ? PROTOCOL_ICON_STYLES.ssh.selected
-                  : PROTOCOL_ICON_STYLES.ssh.idle,
+                  ? PROTOCOL_VISUAL_STYLES.ssh.selected
+                  : PROTOCOL_VISUAL_STYLES.ssh.idle,
               )}
             >
-              {PROTOCOL_ICON_STYLES.ssh.icon}
+              {PROTOCOL_VISUAL_STYLES.ssh.icon}
             </div>
             <div>
               <div className="font-medium">SSH</div>
@@ -347,11 +318,11 @@ const QuickConnectWizard: React.FC<QuickConnectWizardProps> = ({
               className={cn(
                 "h-10 w-10 rounded-lg flex items-center justify-center",
                 protocol === "mosh"
-                  ? PROTOCOL_ICON_STYLES.mosh.selected
-                  : PROTOCOL_ICON_STYLES.mosh.idle,
+                  ? PROTOCOL_VISUAL_STYLES.mosh.selected
+                  : PROTOCOL_VISUAL_STYLES.mosh.idle,
               )}
             >
-              {PROTOCOL_ICON_STYLES.mosh.icon}
+              {PROTOCOL_VISUAL_STYLES.mosh.icon}
             </div>
             <div>
               <div className="font-medium">Mosh</div>
@@ -389,11 +360,11 @@ const QuickConnectWizard: React.FC<QuickConnectWizardProps> = ({
               className={cn(
                 "h-10 w-10 rounded-lg flex items-center justify-center",
                 protocol === "et"
-                  ? PROTOCOL_ICON_STYLES.et.selected
-                  : PROTOCOL_ICON_STYLES.et.idle,
+                  ? PROTOCOL_VISUAL_STYLES.et.selected
+                  : PROTOCOL_VISUAL_STYLES.et.idle,
               )}
             >
-              {PROTOCOL_ICON_STYLES.et.icon}
+              {PROTOCOL_VISUAL_STYLES.et.icon}
             </div>
             <div>
               <div className="font-medium">Eternal Terminal</div>
@@ -431,11 +402,11 @@ const QuickConnectWizard: React.FC<QuickConnectWizardProps> = ({
               className={cn(
                 "h-10 w-10 rounded-lg flex items-center justify-center",
                 protocol === "telnet"
-                  ? PROTOCOL_ICON_STYLES.telnet.selected
-                  : PROTOCOL_ICON_STYLES.telnet.idle,
+                  ? PROTOCOL_VISUAL_STYLES.telnet.selected
+                  : PROTOCOL_VISUAL_STYLES.telnet.idle,
               )}
             >
-              {PROTOCOL_ICON_STYLES.telnet.icon}
+              {PROTOCOL_VISUAL_STYLES.telnet.icon}
             </div>
             <div>
               <div className="font-medium">Telnet</div>
@@ -687,9 +658,17 @@ const QuickConnectWizard: React.FC<QuickConnectWizardProps> = ({
     </div>
   );
 
-  const connectTitle = t("quickConnect.connectTitle", {
-    host: formatHostPort(target.hostname, port || getQuickConnectDefaultPort(protocol)),
-  });
+  const hostEndpoint = formatHostPort(target.hostname, port || getQuickConnectDefaultPort(protocol));
+  const connectTitle = t("quickConnect.connectTitle", { host: hostEndpoint });
+  const protocolLabel = protocol === "et" ? "ET" : protocol.toUpperCase();
+  const effectiveUsername = username || target.username || "";
+  const connectSubtitle = step === "protocol"
+    ? null
+    : (
+      effectiveUsername
+        ? `${protocolLabel} ${effectiveUsername}@${hostEndpoint}`
+        : `${protocolLabel} ${hostEndpoint}`
+    );
 
   return (
     <div
@@ -708,7 +687,12 @@ const QuickConnectWizard: React.FC<QuickConnectWizardProps> = ({
         <div className="px-6 py-4 border-b border-border/50">
           <div className="flex items-center gap-2 min-w-0">
             <Plug size={18} className="shrink-0 text-foreground" />
-            <h2 className="text-base font-semibold truncate">{connectTitle}</h2>
+            <div className="min-w-0">
+              <h2 className="text-base font-semibold truncate">{connectTitle}</h2>
+              {connectSubtitle ? (
+                <p className="text-xs text-muted-foreground font-mono truncate">{connectSubtitle}</p>
+              ) : null}
+            </div>
           </div>
         </div>
 

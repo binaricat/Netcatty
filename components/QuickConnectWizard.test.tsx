@@ -4,6 +4,7 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { I18nProvider } from "../application/i18n/I18nProvider";
 import QuickConnectWizard from "./QuickConnectWizard";
+import { PROTOCOL_VISUAL_STYLES } from "./protocolVisuals";
 
 test("QuickConnectWizard offers ET without obsolete Mosh path or log controls", () => {
   const markup = renderToStaticMarkup(
@@ -66,10 +67,10 @@ test("quick connect protocol step uses simplified connect header and protocol ic
   assert.match(markup, /Connect to 10\.2\.0\.31:22/);
   assert.match(markup, /lucide-plug/);
   assert.doesNotMatch(markup, />_</);
-  assert.match(markup, /bg-sky-500\/20 text-sky-500/);
-  assert.match(markup, /bg-violet-500\/10 text-violet-500/);
-  assert.match(markup, /bg-emerald-500\/10 text-emerald-500/);
-  assert.match(markup, /bg-amber-500\/10 text-amber-500/);
+  assert.match(markup, new RegExp(PROTOCOL_VISUAL_STYLES.ssh.selected.replace("/", "\\/")));
+  assert.match(markup, new RegExp(PROTOCOL_VISUAL_STYLES.mosh.idle.replace("/", "\\/")));
+  assert.match(markup, new RegExp(PROTOCOL_VISUAL_STYLES.et.idle.replace("/", "\\/")));
+  assert.match(markup, new RegExp(PROTOCOL_VISUAL_STYLES.telnet.idle.replace("/", "\\/")));
   assert.match(markup, /lucide-shield/);
   assert.match(markup, /lucide-radio/);
   assert.match(markup, /lucide-link-2/);
