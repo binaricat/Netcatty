@@ -4,6 +4,7 @@ import test from "node:test";
 
 import {
   SFTP_TRANSFER_HISTORY_RETENTION_MS,
+  listInvalidSftpPanelTabIds,
   shouldClearSftpPanelAfterTransferChange,
   shouldKeepSftpMountedAfterClose,
   shouldScheduleSftpRetainedPanelCleanup,
@@ -26,10 +27,26 @@ test("a transfer retained by close keeps its history after completion", () => {
   }), false);
   assert.equal(shouldScheduleSftpRetainedPanelCleanup({
     activeTransfersCount: 0,
-    panelOpen: false,
     retainedAfterClose: true,
   }), true);
   assert.ok(SFTP_TRANSFER_HISTORY_RETENTION_MS > 0);
+});
+
+test("retained cleanup is scheduled even if close state has not committed yet", () => {
+  assert.equal(shouldScheduleSftpRetainedPanelCleanup({
+    activeTransfersCount: 0,
+    retainedAfterClose: true,
+  }), true);
+});
+
+test("closing a terminal tab finds every retained SFTP resource for cleanup", () => {
+  assert.deepEqual(listInvalidSftpPanelTabIds({
+    mountedTabIds: ["closed-tab", "open-tab"],
+    activeTransferTabIds: [],
+    retainedTabIds: ["closed-tab"],
+    cleanupTimerTabIds: ["closed-tab"],
+    validTabIds: new Set(["open-tab"]),
+  }), ["closed-tab"]);
 });
 
 test("an unretained hidden idle panel can be released", () => {

@@ -16,10 +16,24 @@ export function shouldClearSftpPanelAfterTransferChange(params: {
 
 export function shouldScheduleSftpRetainedPanelCleanup(params: {
   activeTransfersCount: number;
-  panelOpen: boolean;
   retainedAfterClose: boolean;
 }): boolean {
   return params.activeTransfersCount <= 0
-    && !params.panelOpen
     && params.retainedAfterClose;
+}
+
+export function listInvalidSftpPanelTabIds(params: {
+  mountedTabIds: Iterable<string>;
+  activeTransferTabIds: Iterable<string>;
+  retainedTabIds: Iterable<string>;
+  cleanupTimerTabIds: Iterable<string>;
+  validTabIds: ReadonlySet<string>;
+}): string[] {
+  const trackedTabIds = new Set([
+    ...params.mountedTabIds,
+    ...params.activeTransferTabIds,
+    ...params.retainedTabIds,
+    ...params.cleanupTimerTabIds,
+  ]);
+  return [...trackedTabIds].filter((tabId) => !params.validTabIds.has(tabId));
 }

@@ -80,6 +80,7 @@ import { terminalLayerAreEqual } from './terminalLayerMemo';
 import { TerminalLayerTabBridge } from './terminalLayer/TerminalLayerTabBridge';
 import {
   SFTP_TRANSFER_HISTORY_RETENTION_MS,
+  listInvalidSftpPanelTabIds,
   shouldClearSftpPanelAfterTransferChange,
   shouldKeepSftpMountedAfterClose,
   shouldScheduleSftpRetainedPanelCleanup,
@@ -678,7 +679,10 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       return;
     }
     if (
-      shouldScheduleSftpRetainedPanelCleanup(lifecycle)
+      shouldScheduleSftpRetainedPanelCleanup({
+        activeTransfersCount: lifecycle.activeTransfersCount,
+        retainedAfterClose: lifecycle.retainedAfterClose,
+      })
       && !sftpRetainedCleanupTimersRef.current.has(tabId)
     ) {
       const cleanupTimer = window.setTimeout(() => {
@@ -1036,22 +1040,17 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   }, [sessions, workspaces]);
 
   useEffect(() => {
-    for (const tabId of sftpActiveTransfersByTabRef.current.keys()) {
-      if (!validAIScopeTargetIds.has(tabId)) {
-        sftpActiveTransfersByTabRef.current.delete(tabId);
-      }
+    const invalidTabIds = listInvalidSftpPanelTabIds({
+      mountedTabIds: sftpHostForTab.keys(),
+      activeTransferTabIds: sftpActiveTransfersByTabRef.current.keys(),
+      retainedTabIds: sftpRetainedAfterCloseTabIdsRef.current,
+      cleanupTimerTabIds: sftpRetainedCleanupTimersRef.current.keys(),
+      validTabIds: validAIScopeTargetIds,
+    });
+    for (const tabId of invalidTabIds) {
+      clearSftpPanelState(tabId);
     }
-    for (const tabId of sftpRetainedAfterCloseTabIdsRef.current) {
-      if (!validAIScopeTargetIds.has(tabId)) {
-        const cleanupTimer = sftpRetainedCleanupTimersRef.current.get(tabId);
-        if (cleanupTimer !== undefined) {
-          window.clearTimeout(cleanupTimer);
-          sftpRetainedCleanupTimersRef.current.delete(tabId);
-        }
-        sftpRetainedAfterCloseTabIdsRef.current.delete(tabId);
-      }
-    }
-  }, [validAIScopeTargetIds]);
+  }, [clearSftpPanelState, sftpHostForTab, validAIScopeTargetIds]);
 
   useEffect(() => () => {
     for (const cleanupTimer of sftpRetainedCleanupTimersRef.current.values()) {
