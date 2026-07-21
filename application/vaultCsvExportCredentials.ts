@@ -54,12 +54,16 @@ export async function buildVaultCsvCredentialOptions(
     );
     if (host.identityFileId) {
       const key = referenceKeysById.get(host.identityFileId);
-      if (key?.source !== "reference" || key.savePassphrase !== true) continue;
+      if (key?.source !== "reference" || key.savePassphrase === false) continue;
       const keyValue = sanitizeCredentialValue(key.passphrase);
-      const selected = keyValue ?? verifiedSideStoreValue;
+      const hasSavedCredentialState = key.savePassphrase === true || Boolean(key.passphrase);
+      const selected = keyValue ?? (hasSavedCredentialState ? verifiedSideStoreValue : undefined);
       if (selected) {
         keyPassphrasesById.set(host.identityFileId, selected);
-      } else if (isEncryptedCredentialPlaceholder(key.passphrase) || sideStoreIsAmbiguous) {
+      } else if (
+        isEncryptedCredentialPlaceholder(key.passphrase)
+        || (hasSavedCredentialState && sideStoreIsAmbiguous)
+      ) {
         unreadableKeyPaths.add(keyPath);
       }
       continue;

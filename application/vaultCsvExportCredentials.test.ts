@@ -37,6 +37,28 @@ test("CSV credentials prefer a readable reference-key passphrase without a false
   assert.equal(result.unreadablePassphraseCount, 0);
 });
 
+test("CSV credentials preserve legacy reference-key passphrases without a save flag", async () => {
+  const result = await buildVaultCsvCredentialOptions(
+    [host("key-1")],
+    [referenceKey({ passphrase: "legacy-secret" })],
+    async () => ({ values: [], unreadable: false, present: false }),
+  );
+
+  assert.equal(result.keyPassphrasesById.get("key-1"), "legacy-secret");
+  assert.equal(result.unreadablePassphraseCount, 0);
+});
+
+test("CSV credentials do not use stale path storage for an uninitialized legacy reference key", async () => {
+  const result = await buildVaultCsvCredentialOptions(
+    [host("key-1")],
+    [referenceKey()],
+    async () => ({ values: ["stale-secret"], unreadable: false, present: true }),
+  );
+
+  assert.equal(result.keyPassphrasesById.has("key-1"), false);
+  assert.equal(result.unreadablePassphraseCount, 0);
+});
+
 test("CSV credentials warn when a saved reference-key passphrase cannot be read", async () => {
   const result = await buildVaultCsvCredentialOptions(
     [host("key-1")],
