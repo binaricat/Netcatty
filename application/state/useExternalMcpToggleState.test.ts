@@ -3,12 +3,16 @@ import { describe, it } from 'node:test';
 import {
   EXTERNAL_MCP_RUNTIME_STATUS_POLL_MS,
   createExternalMcpStartupSyncPlan,
+  isExternalMcpStartupReady,
+  markExternalMcpStartupReady,
   normalizeExternalMcpIdleTimeoutMinutes,
   normalizeExternalMcpMode,
   normalizeSessionIdleTimeoutMinutes,
   readExternalMcpFocusOnHostOpen,
   readExternalMcpSilentSessions,
+  resetExternalMcpStartupReadyForTests,
   shouldStartExternalMcpOnStartup,
+  waitForExternalMcpStartupReady,
   writeExternalMcpFocusOnHostOpen,
   writeExternalMcpSilentSessions,
 } from './useExternalMcpToggleState.ts';
@@ -126,5 +130,42 @@ describe('useExternalMcpToggleState runtime poll wiring', () => {
     assert.match(source, /EXTERNAL_MCP_RUNTIME_STATUS_POLL_MS = 3000/);
     assert.match(source, /setInterval\([\s\S]*EXTERNAL_MCP_RUNTIME_STATUS_POLL_MS\)/);
     assert.doesNotMatch(source, /setInterval\([\s\S]*,\s*30000\)/);
+  });
+});
+
+describe('useExternalMcpToggleState startup ready gate', () => {
+  it('blocks runtime poll consumers until startup reconcile marks ready', async () => {
+    resetExternalMcpStartupReadyForTests();
+    assert.equal(isExternalMcpStartupReady(), false);
+
+    let resolved = false;
+    const pending = waitForExternalMcpStartupReady().then(() => {
+      resolved = true;
+    });
+
+    await Promise.resolve();
+    assert.equal(resolved, false);
+
+    markExternalMcpStartupReady();
+    await pending;
+    assert.equal(isExternalMcpStartupReady(), true);
+    assert.equal(resolved, true);
+
+    // Subsequent waiters resolve immediately.
+    await waitForExternalMcpStartupReady();
+  });
+
+  it('wires App startup reconcile to release the gate', async () => {
+    const appSource = await import('node:fs').then((fs) =>
+      fs.readFileSync(new URL('../../App.tsx', import.meta.url), 'utf8'),
+    );
+    const hookSource = await import('node:fs').then((fs) =>
+      fs.readFileSync(new URL('./useExternalMcpToggleState.ts', import.meta.url), 'utf8'),
+    );
+    assert.match(appSource, /markExternalMcpStartupReady\(\)/);
+    assert.match(appSource, /syncExternalMcpStartupState\(netcattyBridge\.get\(\)\)/);
+    assert.match(hookSource, /waitForExternalMcpStartupReady\(\)/);
+    assert.match(hookSource, /isPeerSessionWindowLocation/);
+    assert.match(hookSource, /if \(isPeerSessionWindow \|\| !enabled\) return;/);
   });
 });

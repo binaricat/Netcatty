@@ -20,6 +20,40 @@ const DEFAULT_SESSION_IDLE_TIMEOUT_MINUTES = 30;
 /** Keep top-bar / settings switch state aligned with runtime auto-disable. */
 export const EXTERNAL_MCP_RUNTIME_STATUS_POLL_MS = 3000;
 
+// Always-mounted top-bar consumers can poll before App finishes startup reconcile.
+// Gate runtime auto-clear until that reconcile has run on the main window.
+let externalMcpStartupReady = false;
+const externalMcpStartupReadyWaiters = new Set<() => void>();
+
+function isPeerSessionWindowLocation(hash: string = typeof window !== 'undefined' ? window.location.hash : ''): boolean {
+  return hash.startsWith('#/session-window');
+}
+
+export function markExternalMcpStartupReady(): void {
+  if (externalMcpStartupReady) return;
+  externalMcpStartupReady = true;
+  for (const resolve of Array.from(externalMcpStartupReadyWaiters)) {
+    externalMcpStartupReadyWaiters.delete(resolve);
+    resolve();
+  }
+}
+
+export function resetExternalMcpStartupReadyForTests(): void {
+  externalMcpStartupReady = false;
+  externalMcpStartupReadyWaiters.clear();
+}
+
+export function isExternalMcpStartupReady(): boolean {
+  return externalMcpStartupReady;
+}
+
+export function waitForExternalMcpStartupReady(): Promise<void> {
+  if (externalMcpStartupReady) return Promise.resolve();
+  return new Promise((resolve) => {
+    externalMcpStartupReadyWaiters.add(resolve);
+  });
+}
+
 type ExternalMcpConfig = {
   mode: ExternalMcpMode;
   idleTimeoutMinutes: number;
@@ -185,6 +219,7 @@ export function syncExternalMcpStartupState(
 export function useExternalMcpToggleState() {
   // UI mirrors the stored switch. Startup reconcile (App mount, main window only)
   // decides whether temporary mode should clear/persist and start the runtime.
+  const isPeerSessionWindow = isPeerSessionWindowLocation();
   const [enabled, setEnabledRaw] = useState<boolean>(() => readExternalMcpStoredEnabled());
 
   const persistEnabled = useCallback((nextEnabled: boolean) => {
@@ -195,8 +230,11 @@ export function useExternalMcpToggleState() {
 
   const setEnabled = useCallback((nextEnabled: boolean) => {
     persistEnabled(nextEnabled);
+    // Peer session windows can mirror the stored switch, but they must not own
+    // the main-process External MCP lifecycle.
+    if (isPeerSessionWindow) return;
     void netcattyBridge.get()?.externalMcpSetEnabled?.(nextEnabled);
-  }, [persistEnabled]);
+  }, [isPeerSessionWindow, persistEnabled]);
 
   useEffect(() => {
     const syncFromStorage = () => {
@@ -223,10 +261,18 @@ export function useExternalMcpToggleState() {
   }, []);
 
   useEffect(() => {
-    if (!enabled) return;
+    // Peer windows must never auto-clear the shared stored switch from runtime status.
+    if (isPeerSessionWindow || !enabled) return;
+    let cancelled = false;
+
     const syncRuntimeStatus = async () => {
       try {
+        // Wait until App has finished startup reconcile so a still-disabled runtime
+        // is not mistaken for "user turned it off / idle timeout".
+        await waitForExternalMcpStartupReady();
+        if (cancelled) return;
         const status = await netcattyBridge.get()?.externalMcpGetStatus?.();
+        if (cancelled) return;
         if (status?.ok && !status.enabled) {
           persistEnabled(false);
         }
@@ -239,8 +285,11 @@ export function useExternalMcpToggleState() {
       void syncRuntimeStatus();
     }, EXTERNAL_MCP_RUNTIME_STATUS_POLL_MS);
     void syncRuntimeStatus();
-    return () => window.clearInterval(intervalId);
-  }, [enabled, persistEnabled]);
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [enabled, isPeerSessionWindow, persistEnabled]);
 
   return { enabled, setEnabled };
 }

@@ -41,6 +41,8 @@ const { activeTabStore } = await import("../application/state/activeTabStore.ts"
 const indexCss = readFileSync(new URL("../index.css", import.meta.url), "utf8");
 const topTabsSource = readFileSync(new URL("./TopTabs.tsx", import.meta.url), "utf8");
 const appViewSource = readFileSync(new URL("../application/app/AppView.tsx", import.meta.url), "utf8");
+const appSource = readFileSync(new URL("../App.tsx", import.meta.url), "utf8");
+const externalMcpToggleSource = readFileSync(new URL("../application/state/useExternalMcpToggleState.ts", import.meta.url), "utf8");
 const zhTwAiSource = readFileSync(new URL("../application/i18n/locales/zh-TW/ai.ts", import.meta.url), "utf8");
 const topTabItemsSource = readFileSync(new URL("./top-tabs/TopTabItems.tsx", import.meta.url), "utf8");
 const terminalViewSource = readFileSync(new URL("./terminal/TerminalView.tsx", import.meta.url), "utf8");
@@ -132,6 +134,12 @@ test("External MCP top bar labels exist in Traditional Chinese", () => {
 test("AppView hides External MCP toggle in peer session windows", () => {
   assert.match(appViewSource, /hash\.startsWith\('#\/session-window'\)/);
   assert.match(appViewSource, /showExternalMcpToggle=\{!isPeerSessionWindow\}/);
+});
+
+test("External MCP top-bar status sync waits for App startup reconcile", () => {
+  assert.match(appSource, /markExternalMcpStartupReady\(\)/);
+  assert.match(externalMcpToggleSource, /waitForExternalMcpStartupReady\(\)/);
+  assert.match(externalMcpToggleSource, /if \(isPeerSessionWindow \|\| !enabled\) return;/);
 });
 
 test("SessionTabIcon checks custom host icon appearance before distro logos", () => {

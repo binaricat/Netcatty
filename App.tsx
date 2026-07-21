@@ -58,6 +58,7 @@ import { getCredentialProtectionAvailability } from './infrastructure/services/c
 import { netcattyBridge } from './infrastructure/services/netcattyBridge';
 import { localStorageAdapter } from './infrastructure/persistence/localStorageAdapter';
 import {
+  markExternalMcpStartupReady,
   readExternalMcpFocusOnHostOpen,
   readExternalMcpSilentSessions,
   syncExternalMcpStartupState,
@@ -200,6 +201,10 @@ function App({ settings }: { settings: SettingsState }) {
   useEffect(() => {
     if (isPeerSessionWindow) return;
     syncExternalMcpStartupState(netcattyBridge.get());
+    // Release always-mounted top-bar status polling only after reconcile starts.
+    // setEnabled is async; the poll still waits for runtime truth, but it must not
+    // run against the pre-reconcile disabled controller while storage still says on.
+    markExternalMcpStartupReady();
   }, [isPeerSessionWindow]);
 
   const {
