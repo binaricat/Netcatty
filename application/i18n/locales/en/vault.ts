@@ -500,6 +500,7 @@ export const enVaultMessages: Messages = {
   'quickConnect.identity.unavailable': 'This identity is missing usable credentials on this device.',
   'quickConnect.identity.useCustom': 'Use custom credentials',
   'quickConnect.identity.connect': 'Connect with preset',
+  'quickConnect.connectTitle': 'Connect to {host}',
 
   // Terminal
   'terminal.connectionErrorTitle': 'Connection Error',

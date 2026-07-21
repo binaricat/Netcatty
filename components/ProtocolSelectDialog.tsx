@@ -1,13 +1,15 @@
 import {
-Globe,
+Link2,
+Plug,
+Radio,
+Shield,
 Terminal as TerminalIcon,
-Wifi
 } from 'lucide-react';
 import React,{ useMemo,useState } from 'react';
 import { useI18n } from '../application/i18n/I18nProvider';
+import { formatHostPort } from '../domain/host';
 import { cn } from '../lib/utils';
 import { Host,HostProtocol } from '../types';
-import { DistroAvatar } from './DistroAvatar';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 
@@ -18,6 +20,8 @@ interface ProtocolOption {
     icon: React.ReactNode;
     description: string;
     enabled: boolean;
+    iconIdleClass: string;
+    iconSelectedClass: string;
 }
 
 interface ProtocolSelectDialogProps {
@@ -44,9 +48,11 @@ const ProtocolSelectDialog: React.FC<ProtocolSelectDialogProps> = ({
                 protocol: 'ssh',
                 port: sshConfig?.port || host.port || 22,
                 label: 'SSH',
-                icon: <TerminalIcon size={18} />,
+                icon: <Shield size={18} />,
                 description: `ssh ${host.hostname}`,
                 enabled: true,
+                iconIdleClass: 'bg-sky-500/10 text-sky-500',
+                iconSelectedClass: 'bg-sky-500/20 text-sky-500',
             });
         }
 
@@ -57,9 +63,11 @@ const ProtocolSelectDialog: React.FC<ProtocolSelectDialogProps> = ({
                 protocol: 'mosh',
                 port: moshConfig?.port || host.port || 22,
                 label: 'Mosh',
-                icon: <Wifi size={18} />,
+                icon: <Radio size={18} />,
                 description: `mosh ${host.hostname}`,
                 enabled: true,
+                iconIdleClass: 'bg-violet-500/10 text-violet-500',
+                iconSelectedClass: 'bg-violet-500/20 text-violet-500',
             });
         }
 
@@ -69,9 +77,11 @@ const ProtocolSelectDialog: React.FC<ProtocolSelectDialogProps> = ({
                 protocol: 'et',
                 port: host.port || 22,
                 label: 'EternalTerminal',
-                icon: <Wifi size={18} />,
+                icon: <Link2 size={18} />,
                 description: `et ${host.hostname}`,
                 enabled: true,
+                iconIdleClass: 'bg-emerald-500/10 text-emerald-500',
+                iconSelectedClass: 'bg-emerald-500/20 text-emerald-500',
             });
         }
 
@@ -82,9 +92,11 @@ const ProtocolSelectDialog: React.FC<ProtocolSelectDialogProps> = ({
                 protocol: 'telnet',
                 port: telnetConfig?.port || host.telnetPort || 23,
                 label: 'Telnet',
-                icon: <Globe size={18} />,
+                icon: <TerminalIcon size={18} />,
                 description: `telnet ${host.hostname}`,
                 enabled: true,
+                iconIdleClass: 'bg-amber-500/10 text-amber-500',
+                iconSelectedClass: 'bg-amber-500/20 text-amber-500',
             });
         }
 
@@ -126,32 +138,16 @@ const ProtocolSelectDialog: React.FC<ProtocolSelectDialogProps> = ({
         <div className="fixed inset-0 z-50 flex items-center justify-center" onClick={onCancel}>
             <div className="w-[560px] max-w-[90vw] bg-background border border-border rounded-2xl animate-in fade-in-0 zoom-in-95 duration-200" style={{ boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25), 0 12px 24px -8px rgba(0, 0, 0, 0.15)' }} onClick={(e) => e.stopPropagation()}>
                 {/* Header */}
-                <div className="px-6 py-5 border-b border-border/50">
-                    <div className="flex items-center gap-3">
-                        <DistroAvatar
-                            host={host}
-                            fallback={host.label.slice(0, 2).toUpperCase()}
-                            className="h-12 w-12"
-                        />
-                        <div>
-                            <h2 className="text-base font-semibold">{host.label}</h2>
-                            <p className="text-xs text-muted-foreground font-mono">
-                                {host.hostname}
-                            </p>
+                <div className="px-6 py-4 border-b border-border/50">
+                    <div className="flex items-center gap-3 min-w-0">
+                        <div className="h-9 w-9 rounded-lg bg-primary/15 text-primary flex items-center justify-center shrink-0">
+                            <Plug size={18} />
                         </div>
-                    </div>
-                </div>
-
-                {/* Progress indicator */}
-                <div className="px-6 py-4">
-                    <div className="flex items-center gap-3">
-                        <div className="h-8 w-8 rounded-full bg-primary/20 text-primary flex items-center justify-center">
-                            <TerminalIcon size={14} />
-                        </div>
-                        <div className="flex-1 h-0.5 bg-muted" />
-                        <div className="h-8 w-8 rounded-full bg-muted text-muted-foreground flex items-center justify-center text-xs font-mono">
-                            {'>_'}
-                        </div>
+                        <h2 className="text-base font-semibold truncate">
+                            {t("quickConnect.connectTitle", {
+                                host: formatHostPort(host.hostname, ports[selectedProtocol] || host.port || 22),
+                            })}
+                        </h2>
                     </div>
                 </div>
 
@@ -174,8 +170,8 @@ const ProtocolSelectDialog: React.FC<ProtocolSelectDialogProps> = ({
                                     <div className={cn(
                                         "h-10 w-10 rounded-lg flex items-center justify-center",
                                         selectedProtocol === option.protocol
-                                            ? "bg-primary/20 text-primary"
-                                            : "bg-muted text-muted-foreground"
+                                            ? option.iconSelectedClass
+                                            : option.iconIdleClass
                                     )}>
                                         {option.icon}
                                     </div>

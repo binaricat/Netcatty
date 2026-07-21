@@ -536,6 +536,7 @@ export const ruVaultMessages: Messages = {
   'quickConnect.identity.unavailable': 'Для этого профиля нет доступных учётных данных на устройстве.',
   'quickConnect.identity.useCustom': 'Использовать другие данные',
   'quickConnect.identity.connect': 'Подключиться с профилем',
+  'quickConnect.connectTitle': 'Подключение к {host}',
 
   // Terminal
   'terminal.connectionErrorTitle': 'Ошибка подключения',

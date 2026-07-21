@@ -48,3 +48,31 @@ test("quick connect shows saved identities as credential presets", () => {
   assert.match(markup, /Credential preset/);
   assert.match(markup, /Choose a saved identity/);
 });
+
+test("quick connect protocol step uses simplified connect header and protocol icons", () => {
+  const markup = renderToStaticMarkup(
+    <I18nProvider locale="en">
+      <QuickConnectWizard
+        open
+        target={{ hostname: "10.2.0.31" }}
+        keys={[]}
+        identities={[]}
+        onConnect={() => undefined}
+        onClose={() => undefined}
+      />
+    </I18nProvider>,
+  );
+
+  assert.match(markup, /Connect to 10\.2\.0\.31:22/);
+  assert.match(markup, /lucide-plug/);
+  assert.doesNotMatch(markup, />_</);
+  assert.match(markup, /bg-sky-500\/20 text-sky-500/);
+  assert.match(markup, /bg-violet-500\/10 text-violet-500/);
+  assert.match(markup, /bg-emerald-500\/10 text-emerald-500/);
+  assert.match(markup, /bg-amber-500\/10 text-amber-500/);
+  assert.match(markup, /lucide-shield/);
+  assert.match(markup, /lucide-radio/);
+  assert.match(markup, /lucide-link-2/);
+  assert.match(markup, /lucide-terminal/);
+});
+
