@@ -430,14 +430,8 @@ const importFromCsv = (text: string): VaultImportResult => {
       : [];
   });
   const allKeyPassphraseCandidates = hosts.flatMap((host) => {
-    const selectedKeyPath = host.identityFilePaths?.find((path) => path.trim())?.trim();
-    if (!selectedKeyPath) return [];
-    const selectedKeyPathKey = normalizeKeyPathKey(selectedKeyPath);
     return keyPassphraseCandidates
-      .filter((entry) => (
-        entry.hostKey === buildVaultHostMergeKey(host)
-        && entry.keyPathKey === selectedKeyPathKey
-      ))
+      .filter((entry) => entry.hostKey === buildVaultHostMergeKey(host))
       .map((entry) => ({
         hostId: host.id,
         keyPath: entry.keyPath,
@@ -1203,6 +1197,7 @@ export async function resolveVaultImportKeyPassphraseConflicts(
   entries: VaultHostKeyPassphrase[],
   resolveAliases: (keyPath: string) => Promise<string[]>,
   eligibleHostIds?: ReadonlySet<string>,
+  eligibleKeyPathsByHostId?: ReadonlyMap<string, string>,
 ): Promise<{ keyPassphrases: VaultHostKeyPassphrase[]; issues: VaultImportIssue[] }> {
   const groups: Array<{
     aliases: Set<string>;
@@ -1212,6 +1207,16 @@ export async function resolveVaultImportKeyPassphraseConflicts(
   for (const entry of entries) {
     const aliases = new Set((await resolveAliases(entry.keyPath)).map(normalizeKeyPathKey));
     aliases.add(normalizeKeyPathKey(entry.keyPath));
+    const eligibleKeyPath = eligibleKeyPathsByHostId?.get(entry.hostId);
+    if (eligibleKeyPath) {
+      const eligibleAliases = new Set(
+        (await resolveAliases(eligibleKeyPath)).map(normalizeKeyPathKey),
+      );
+      eligibleAliases.add(normalizeKeyPathKey(eligibleKeyPath));
+      if (![...aliases].some((alias) => eligibleAliases.has(alias))) continue;
+    } else if (eligibleKeyPathsByHostId && eligibleHostIds?.has(entry.hostId)) {
+      continue;
+    }
     const matching = groups.filter((group) => (
       [...aliases].some((alias) => group.aliases.has(alias))
     ));

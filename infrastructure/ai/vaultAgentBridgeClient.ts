@@ -790,10 +790,15 @@ export async function handleVaultAgentOp(
         { skipDuplicates },
       );
       const addedHostIds = new Set(merged.addedHosts.map((host) => host.id));
+      const addedHostKeyPaths = new Map(merged.addedHosts.flatMap((host) => {
+        const keyPath = host.identityFilePaths?.find((path) => path.trim())?.trim();
+        return keyPath ? [[host.id, keyPath] as const] : [];
+      }));
       const resolved = await resolveVaultImportKeyPassphraseConflicts(
         importResult.keyPassphraseCandidates ?? importResult.keyPassphrases ?? [],
         deps.resolveKeyPassphraseAliases,
         addedHostIds,
+        addedHostKeyPaths,
       );
       const checked = await filterVaultImportKeyPassphrasesAgainstExisting(
         resolved.keyPassphrases,

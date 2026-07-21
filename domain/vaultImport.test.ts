@@ -188,6 +188,55 @@ test("CSV duplicate rows never attach a passphrase for a different retained key"
   assert.deepEqual(result.keyPassphrases, []);
 });
 
+test("CSV duplicate rows preserve alias candidates for conflict resolution", async () => {
+  const result = importVaultHostsFromText(
+    "csv",
+    [
+      "Label,Hostname,Username,KeyPath,Passphrase",
+      "first,duplicate.example.com,root,~/.ssh/shared,first-secret",
+      "second,duplicate.example.com,root,/Users/alice/.ssh/shared,second-secret",
+    ].join("\n"),
+  );
+  const host = result.hosts[0];
+  assert.ok(host);
+  const resolved = await resolveVaultImportKeyPassphraseConflicts(
+    result.keyPassphraseCandidates ?? [],
+    async (keyPath) => (
+      keyPath.startsWith("~/")
+        ? [keyPath, `/Users/alice/${keyPath.slice(2)}`]
+        : [keyPath, `~/${keyPath.slice("/Users/alice/".length)}`]
+    ),
+    new Set([host.id]),
+    new Map([[host.id, "~/.ssh/shared"]]),
+  );
+
+  assert.equal(result.keyPassphraseCandidates?.length, 2);
+  assert.deepEqual(resolved.keyPassphrases, []);
+  assert.match(resolved.issues[0]?.message ?? "", /conflicting passphrases/u);
+});
+
+test("CSV duplicate rows do not save candidates for a different retained key", async () => {
+  const result = importVaultHostsFromText(
+    "csv",
+    [
+      "Label,Hostname,Username,KeyPath,Passphrase",
+      "first,duplicate.example.com,root,~/.ssh/id_first,",
+      "second,duplicate.example.com,root,~/.ssh/id_second,secret",
+    ].join("\n"),
+  );
+  const host = result.hosts[0];
+  assert.ok(host);
+  const resolved = await resolveVaultImportKeyPassphraseConflicts(
+    result.keyPassphraseCandidates ?? [],
+    async (keyPath) => [keyPath],
+    new Set([host.id]),
+    new Map([[host.id, "~/.ssh/id_first"]]),
+  );
+
+  assert.deepEqual(resolved.keyPassphrases, []);
+  assert.deepEqual(resolved.issues, []);
+});
+
 test("CSV import rejects conflicting passphrases for a shared key path", () => {
   const result = importVaultHostsFromText(
     "csv",
