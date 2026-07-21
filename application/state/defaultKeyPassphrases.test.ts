@@ -5,6 +5,7 @@ import {
   clearReferenceKeyPassphrases,
   deleteVaultKey,
   loadDefaultKeyPassphrase,
+  readDefaultKeyPassphraseForExport,
   rememberKeyPassphrase,
   removeDefaultKeyPassphraseAliases,
   saveDefaultKeyPassphrase,
@@ -195,6 +196,25 @@ test("loadDefaultKeyPassphrase removes undecryptable credential placeholders", a
   assert.deepEqual(
     JSON.parse(globalThis.localStorage.getItem(STORAGE_KEY_DEFAULT_KEY_PASSPHRASES) ?? "{}"),
     { "/Users/alice/.ssh/id_rsa": "still-valid" },
+  );
+});
+
+test("export read reports unavailable encrypted passphrases without deleting them", async (t) => {
+  installLocalStorage(t);
+  const keyPath = "/Users/alice/.ssh/id_ed25519";
+  const encrypted = "enc:v1:djEwYWJj";
+  globalThis.localStorage.setItem(
+    STORAGE_KEY_DEFAULT_KEY_PASSPHRASES,
+    JSON.stringify({ [keyPath]: encrypted }),
+  );
+
+  assert.deepEqual(
+    await readDefaultKeyPassphraseForExport(keyPath),
+    { status: "unreadable" },
+  );
+  assert.deepEqual(
+    JSON.parse(globalThis.localStorage.getItem(STORAGE_KEY_DEFAULT_KEY_PASSPHRASES) ?? "{}"),
+    { [keyPath]: encrypted },
   );
 });
 

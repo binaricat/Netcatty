@@ -779,12 +779,16 @@ export async function handleVaultAgentOp(
       const previewHosts = importResult.hosts.map((host) => sanitizeHostForAgent(host));
 
       if (dryRun) {
+        const resolvedPassphrases = await resolveVaultImportKeyPassphraseConflicts(
+          importResult.keyPassphrases ?? [],
+          deps.resolveKeyPassphraseAliases,
+        );
         return {
           ok: true,
           dryRun: true,
           format: resolvedFormat,
           stats: importResult.stats,
-          issues: importResult.issues,
+          issues: [...importResult.issues, ...resolvedPassphrases.issues],
           groups: importResult.groups,
           previewHosts,
         };

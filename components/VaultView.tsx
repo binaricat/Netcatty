@@ -33,7 +33,7 @@ import {
   Zap,
 } from "lucide-react";
 import React, { Suspense, lazy, memo, startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { loadDefaultKeyPassphrase } from "../application/defaultKeyPassphrases";
+import { readDefaultKeyPassphraseForExport } from "../application/defaultKeyPassphrases";
 import { useI18n } from "../application/i18n/I18nProvider";
 import { useStoredViewMode } from "../application/state/useStoredViewMode";
 import { useStoredBoolean } from "../application/state/useStoredBoolean";
@@ -585,14 +585,16 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
     ))));
     const keyPassphrases = new Map<string, string>();
     const passphraseResults = await Promise.allSettled(keyPaths.map(async (keyPath) => {
-      const passphrase = await loadDefaultKeyPassphrase(keyPath);
+      const passphrase = await readDefaultKeyPassphraseForExport(keyPath);
       return { keyPath, passphrase };
     }));
     let unreadablePassphrases = 0;
     for (const result of passphraseResults) {
       if (result.status === "fulfilled") {
-        if (result.value.passphrase) {
-          keyPassphrases.set(result.value.keyPath, result.value.passphrase);
+        if (result.value.passphrase.status === "readable") {
+          keyPassphrases.set(result.value.keyPath, result.value.passphrase.value);
+        } else if (result.value.passphrase.status === "unreadable") {
+          unreadablePassphrases++;
         }
       } else {
         unreadablePassphrases++;

@@ -144,6 +144,41 @@ export async function loadDefaultKeyPassphrase(keyPath: string): Promise<string 
   return null;
 }
 
+export type DefaultKeyPassphraseExportRead =
+  | { status: "missing" }
+  | { status: "readable"; value: string }
+  | { status: "unreadable" };
+
+export async function readDefaultKeyPassphraseForExport(
+  keyPath: string,
+): Promise<DefaultKeyPassphraseExportRead> {
+  const aliases = await resolveDefaultKeyPassphraseAliases(keyPath);
+  const aliasKeys = matchingPathKeys(aliases);
+  const store = localStorageAdapter.read<Record<string, string>>(STORAGE_KEY_DEFAULT_KEY_PASSPHRASES);
+  if (!store) return { status: "missing" };
+
+  const storedPaths = Object.keys(store).filter((path) => (
+    aliasKeys.has(defaultKeyPassphrasePathKey(path))
+  ));
+  const exactIndex = storedPaths.indexOf(keyPath);
+  if (exactIndex > 0) {
+    storedPaths.unshift(storedPaths.splice(exactIndex, 1)[0]);
+  }
+  if (storedPaths.length === 0) return { status: "missing" };
+
+  for (const storedPath of storedPaths) {
+    try {
+      const decrypted = await decryptField(store[storedPath]);
+      if (decrypted && !isEncryptedCredentialPlaceholder(decrypted)) {
+        return { status: "readable", value: decrypted };
+      }
+    } catch {
+      // Export must not mutate saved credentials when secure storage is unavailable.
+    }
+  }
+  return { status: "unreadable" };
+}
+
 export function removeDefaultKeyPassphrases(keyPaths: string[]): void {
   const store = localStorageAdapter.read<Record<string, string>>(STORAGE_KEY_DEFAULT_KEY_PASSPHRASES);
   if (!store) return;
