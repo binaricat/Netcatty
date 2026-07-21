@@ -144,7 +144,10 @@ function makeFailedDiscoveryCommandConn() {
     const stream = new EventEmitter();
     stream.stderr = new EventEmitter();
     stream.close = () => {};
-    setImmediate(() => stream.emit("close", 127));
+    setImmediate(() => {
+      stream.emit("data", Buffer.from("111\n"));
+      stream.emit("close", 127);
+    });
     callback(null, stream);
   };
   return conn;
@@ -308,6 +311,7 @@ test("Copy Tab does not retry when remote shell discovery is unavailable", async
   );
 
   assert.equal(sourceConn.discoveryExecCalls, 1);
+  assert.equal(sessions.get("source").shellPid, undefined);
   assert.equal(sessions.get("copy").shellPid, undefined);
 });
 

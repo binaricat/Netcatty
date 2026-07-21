@@ -165,9 +165,10 @@ printf '%s\n' '${scanCompleteMarker}'`;
               const effectiveExitStatus = typeof code === "number" ? code : exitStatus;
               const lines = stdout.split(/\r?\n/);
               const completed = lines.includes(scanCompleteMarker);
+              const available = completed && (effectiveExitStatus === null || effectiveExitStatus === 0);
               settle({
-                available: completed && (effectiveExitStatus === null || effectiveExitStatus === 0),
-                pids: lines.filter((value) => /^\d+$/.test(value)),
+                available,
+                pids: available ? lines.filter((value) => /^\d+$/.test(value)) : [],
               });
             });
           });
