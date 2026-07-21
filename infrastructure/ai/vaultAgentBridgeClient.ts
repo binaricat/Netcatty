@@ -40,6 +40,7 @@ import {
 import {
   applyVaultHostImport,
   detectVaultImportFormat,
+  filterVaultImportKeyPassphrasesAgainstExisting,
   importVaultHostsFromText,
   mergeVaultImportIssues,
   resolveVaultImportKeyPassphraseConflicts,
@@ -411,6 +412,10 @@ export interface VaultAgentApiDeps {
   updateHosts: (hosts: Host[]) => void;
   saveKeyPassphrase: (keyPath: string, passphrase: string) => Promise<void>;
   resolveKeyPassphraseAliases: (keyPath: string) => Promise<string[]>;
+  readKeyPassphrases: (keyPath: string) => Promise<{
+    values: string[];
+    unreadable: boolean;
+  }>;
   removeKeyPassphrases: (keyPaths: string[]) => Promise<void> | void;
   updateNotes: (notes: VaultNote[]) => void;
   updateSnippets: (snippets: Snippet[]) => void;
@@ -790,6 +795,11 @@ export async function handleVaultAgentOp(
         deps.resolveKeyPassphraseAliases,
         addedHostIds,
       );
+      const checked = await filterVaultImportKeyPassphrasesAgainstExisting(
+        resolved.keyPassphrases,
+        deps.readKeyPassphrases,
+      );
+      const credentialIssues = mergeVaultImportIssues(resolved.issues, checked.issues);
 
       if (dryRun) {
         return {
@@ -797,7 +807,7 @@ export async function handleVaultAgentOp(
           dryRun: true,
           format: resolvedFormat,
           stats: importResult.stats,
-          issues: mergeVaultImportIssues(importResult.issues, resolved.issues),
+          issues: mergeVaultImportIssues(importResult.issues, credentialIssues),
           groups: importResult.groups,
           previewHosts,
         };
@@ -815,8 +825,8 @@ export async function handleVaultAgentOp(
 
       deps.updateHosts(merged.hosts);
       deps.updateCustomGroups(merged.customGroups);
-      const saveIssues = [...resolved.issues];
-      for (const entry of resolved.keyPassphrases) {
+      const saveIssues = [...credentialIssues];
+      for (const entry of checked.keyPassphrases) {
         try {
           await deps.saveKeyPassphrase(entry.keyPath, entry.passphrase);
         } catch {

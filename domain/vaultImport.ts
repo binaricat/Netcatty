@@ -1247,3 +1247,35 @@ export async function resolveVaultImportKeyPassphraseConflicts(
   }
   return { keyPassphrases, issues };
 }
+
+export interface VaultExistingKeyPassphraseRead {
+  values: string[];
+  unreadable: boolean;
+}
+
+export async function filterVaultImportKeyPassphrasesAgainstExisting(
+  entries: VaultHostKeyPassphrase[],
+  readExisting: (keyPath: string) => Promise<VaultExistingKeyPassphraseRead>,
+): Promise<{ keyPassphrases: VaultHostKeyPassphrase[]; issues: VaultImportIssue[] }> {
+  const keyPassphrases: VaultHostKeyPassphrase[] = [];
+  const issues: VaultImportIssue[] = [];
+  for (const entry of entries) {
+    const existing = await readExisting(entry.keyPath);
+    if (existing.unreadable) {
+      issues.push({
+        level: "warning",
+        message: `Could not verify the existing saved passphrase for KeyPath "${entry.keyPath}"; the imported passphrase was not saved.`,
+      });
+      continue;
+    }
+    if (existing.values.some((value) => value !== entry.passphrase)) {
+      issues.push({
+        level: "warning",
+        message: `CSV passphrase conflicts with an existing saved passphrase for KeyPath "${entry.keyPath}"; the existing passphrase was kept.`,
+      });
+      continue;
+    }
+    keyPassphrases.push(entry);
+  }
+  return { keyPassphrases, issues };
+}

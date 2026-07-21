@@ -66,7 +66,8 @@ test("CSV round-trips a referenced Keychain file path and saved passphrase", () 
 
   const { csv } = exportHostsToCsvWithStats([host], {
     keyPathsById: new Map([["key-reference", keyPath]]),
-    keyPassphrases: new Map([[keyPath, "reference-secret"]]),
+    keyPassphrasesById: new Map([["key-reference", "reference-secret"]]),
+    keyPassphrases: new Map([[keyPath, "stale-side-store-secret"]]),
   });
   const imported = importVaultHostsFromText("csv", csv);
 

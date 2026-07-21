@@ -585,6 +585,14 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
         ? [[key.id, key.filePath.trim()] as const]
         : []
     )));
+    const keyPassphrasesById = new Map(keys.flatMap((key) => {
+      const passphrase = key.savePassphrase === true
+        ? sanitizeCredentialValue(key.passphrase)
+        : undefined;
+      return key.source === "reference" && key.filePath?.trim() && passphrase
+        ? [[key.id, passphrase] as const]
+        : [];
+    }));
     const keyPaths = Array.from(new Set(hosts
       .map((host) => resolveVaultCsvHostKeyPath(host, { keyPathsById }))
       .filter(Boolean)));
@@ -607,6 +615,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
     }
     const { csv, exportedCount, skippedCount } = exportHostsToCsvWithStats(hosts, {
       keyPassphrases,
+      keyPassphrasesById,
       keyPathsById,
     });
 

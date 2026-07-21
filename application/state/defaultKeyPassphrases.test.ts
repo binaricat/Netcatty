@@ -6,6 +6,7 @@ import {
   deleteVaultKey,
   loadDefaultKeyPassphrase,
   readDefaultKeyPassphraseForExport,
+  readRememberedKeyPassphrases,
   rememberKeyPassphrase,
   removeDefaultKeyPassphraseAliases,
   saveDefaultKeyPassphrase,
@@ -262,6 +263,34 @@ test("export read retries when the passphrase changes during decryption", async 
   releaseDecrypt?.();
 
   assert.deepEqual(await pendingRead, { status: "readable", value: "new-secret" });
+});
+
+test("remembered passphrase read includes Keychain reference-key values", async (t) => {
+  installLocalStorage(t);
+  const key = {
+    ...referenceKey(),
+    passphrase: "keychain-secret",
+    savePassphrase: true,
+  };
+
+  assert.deepEqual(
+    await readRememberedKeyPassphrases(key.filePath!, [key]),
+    { values: ["keychain-secret"], unreadable: false },
+  );
+});
+
+test("remembered passphrase read marks encrypted Keychain placeholders unreadable", async (t) => {
+  installLocalStorage(t);
+  const key = {
+    ...referenceKey(),
+    passphrase: "enc:v1:djEwYWJj",
+    savePassphrase: true,
+  };
+
+  assert.deepEqual(
+    await readRememberedKeyPassphrases(key.filePath!, [key]),
+    { values: [], unreadable: true },
+  );
 });
 
 test("loadDefaultKeyPassphrase cleanup preserves a passphrase saved concurrently", async (t) => {

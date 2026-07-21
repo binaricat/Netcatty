@@ -197,6 +197,36 @@ export async function readDefaultKeyPassphraseForExport(
   return { status: "unreadable" };
 }
 
+export async function readRememberedKeyPassphrases(
+  keyPath: string,
+  keys: SSHKey[],
+): Promise<{ values: string[]; unreadable: boolean }> {
+  const aliases = await resolveDefaultKeyPassphraseAliases(keyPath);
+  const aliasKeys = matchingPathKeys(aliases);
+  const values = new Set<string>();
+  let unreadable = false;
+
+  const sideStore = await readDefaultKeyPassphraseForExport(keyPath);
+  if (sideStore.status === "readable") values.add(sideStore.value);
+  if (sideStore.status === "unreadable") unreadable = true;
+
+  for (const key of keys) {
+    if (
+      key.source !== "reference"
+      || !key.filePath
+      || !aliasKeys.has(defaultKeyPassphrasePathKey(key.filePath))
+      || !key.passphrase
+    ) continue;
+    if (isEncryptedCredentialPlaceholder(key.passphrase)) {
+      unreadable = true;
+    } else {
+      values.add(key.passphrase);
+    }
+  }
+
+  return { values: [...values], unreadable };
+}
+
 export function removeDefaultKeyPassphrases(keyPaths: string[]): void {
   const store = localStorageAdapter.read<Record<string, string>>(STORAGE_KEY_DEFAULT_KEY_PASSPHRASES);
   if (!store) return;

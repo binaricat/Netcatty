@@ -10,6 +10,7 @@ import {
 } from '../../infrastructure/ai/vaultAgentBridgeClient';
 import {
   clearReferenceKeyPassphrases,
+  readRememberedKeyPassphrases,
   rememberKeyPassphrase,
   removeDefaultKeyPassphraseAliases,
   resolveDefaultKeyPassphraseAliases,
@@ -159,6 +160,10 @@ export function useVaultAgentBridge(input: UseVaultAgentBridgeInput): void {
           },
         }),
         resolveKeyPassphraseAliases: resolveDefaultKeyPassphraseAliases,
+        readKeyPassphrases: (keyPath) => readRememberedKeyPassphrases(
+          keyPath,
+          vaultSnapshotRef.current.keys,
+        ),
         removeKeyPassphrases: async (keyPaths) => {
           const aliases = await removeDefaultKeyPassphraseAliases(keyPaths);
           const currentKeys = vaultSnapshotRef.current.keys;

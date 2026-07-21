@@ -56,6 +56,7 @@ function createDeps(
     },
     saveKeyPassphrase: async () => {},
     resolveKeyPassphraseAliases: async (keyPath) => [keyPath],
+    readKeyPassphrases: async () => ({ values: [], unreadable: false }),
     removeKeyPassphrases: () => {},
     updateNotes: (nextNotes) => {
       notes = nextNotes;
@@ -1330,6 +1331,36 @@ describe('handleVaultAgentOp vault hosts', () => {
     assert.match(
       (result as { issues?: Array<{ message: string }> }).issues?.[0]?.message ?? '',
       /Could not save the passphrase/u,
+    );
+  });
+
+  it('host.import keeps a different existing saved key passphrase', async () => {
+    const saved: Array<{ keyPath: string; passphrase: string }> = [];
+    const result = await handleVaultAgentOp(
+      'host.import',
+      {
+        format: 'csv',
+        text: [
+          'Label,Hostname,Username,KeyPath,Passphrase',
+          'new,new.example.com,root,~/.ssh/shared,stale-import',
+        ].join('\n'),
+      },
+      createDeps({
+        readKeyPassphrases: async () => ({
+          values: ['current-saved'],
+          unreadable: false,
+        }),
+        saveKeyPassphrase: async (keyPath, passphrase) => {
+          saved.push({ keyPath, passphrase });
+        },
+      }),
+    );
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(saved, []);
+    assert.ok(
+      (result as { issues?: Array<{ message: string }> }).issues
+        ?.some((issue) => /existing saved passphrase/u.test(issue.message)),
     );
   });
 });

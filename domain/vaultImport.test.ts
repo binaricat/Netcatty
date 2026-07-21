@@ -5,6 +5,7 @@ import {
   importVaultHostsFromText,
   detectVaultImportFormat,
   applyVaultHostImport,
+  filterVaultImportKeyPassphrasesAgainstExisting,
   resolveVaultImportKeyPassphraseConflicts,
 } from "./vaultImport.ts";
 import type { Host } from "./models.ts";
@@ -256,6 +257,31 @@ test("CSV passphrase conflicts include home-relative path aliases", async () => 
 
   assert.deepEqual(resolved.keyPassphrases, []);
   assert.match(resolved.issues[0]?.message ?? "", /conflicting passphrases/u);
+});
+
+test("CSV import keeps an existing saved passphrase on mismatch", async () => {
+  const entry = {
+    hostId: "new-host",
+    keyPath: "~/.ssh/shared",
+    passphrase: "stale-import",
+  };
+  const checked = await filterVaultImportKeyPassphrasesAgainstExisting(
+    [entry],
+    async () => ({ values: ["current-saved"], unreadable: false }),
+  );
+
+  assert.deepEqual(checked.keyPassphrases, []);
+  assert.match(checked.issues[0]?.message ?? "", /existing saved passphrase/u);
+});
+
+test("CSV import does not replace an unreadable saved passphrase", async () => {
+  const checked = await filterVaultImportKeyPassphrasesAgainstExisting(
+    [{ hostId: "new-host", keyPath: "~/.ssh/shared", passphrase: "imported" }],
+    async () => ({ values: [], unreadable: true }),
+  );
+
+  assert.deepEqual(checked.keyPassphrases, []);
+  assert.match(checked.issues[0]?.message ?? "", /Could not verify/u);
 });
 
 test("detectVaultImportFormat recognizes MobaXterm bookmark exports", () => {

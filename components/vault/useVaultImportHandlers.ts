@@ -1,10 +1,15 @@
 import { useCallback, useRef } from "react";
 
-import { rememberKeyPassphrase, resolveDefaultKeyPassphraseAliases } from "../../application/defaultKeyPassphrases";
+import {
+  readRememberedKeyPassphrases,
+  rememberKeyPassphrase,
+  resolveDefaultKeyPassphraseAliases,
+} from "../../application/defaultKeyPassphrases";
 import { readVaultImportFile } from "../../application/state/vaultImportFile";
 import { sanitizeHost } from "../../domain/host";
 import {
   applyVaultHostImport,
+  filterVaultImportKeyPassphrasesAgainstExisting,
   importVaultHostsFromText,
   mergeVaultImportIssues,
   resolveVaultImportKeyPassphraseConflicts,
@@ -175,8 +180,16 @@ export function useVaultImportHandlers({
               resolveDefaultKeyPassphraseAliases,
               addedHostIds,
             );
-            result.issues = mergeVaultImportIssues(result.issues, resolved.issues);
-            for (const entry of resolved.keyPassphrases) {
+            const checked = await filterVaultImportKeyPassphrasesAgainstExisting(
+              resolved.keyPassphrases,
+              (keyPath) => readRememberedKeyPassphrases(keyPath, keysRef.current),
+            );
+            result.issues = mergeVaultImportIssues(
+              result.issues,
+              resolved.issues,
+              checked.issues,
+            );
+            for (const entry of checked.keyPassphrases) {
               try {
                 await rememberKeyPassphrase({
                   keyPath: entry.keyPath,
