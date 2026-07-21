@@ -73,7 +73,7 @@ function createTelnetSessionApi(ctx) {
               localEcho: localEchoEnabled,
             };
           }
-          const contents = electronModule.webContents.fromId(event.sender.id);
+          const contents = electronModule.webContents.fromId(session?.webContentsId ?? event.sender.id);
           contents?.send("netcatty:telnet:echo-mode", {
             sessionId,
             remoteEcho: remoteEchoEnabled,
@@ -344,7 +344,7 @@ function createTelnetSessionApi(ctx) {
               if (session) {
                 session.zmodemSentry?.cancel();
                 const contents = electronModule.webContents.fromId(session.webContentsId);
-                fanoutSessionExit(sessionId, session?.webContentsId ?? contents?.id, { sessionId, exitCode: 1, error: err.message, reason: "error" });
+                fanoutSessionExit(sessionId, contents, { sessionId, exitCode: 1, error: err.message, reason: "error" });
               }
               ptyProcessTree.unregisterPid(sessionId);
               closeTerminalOutputSession?.(sessionId);
@@ -370,7 +370,7 @@ function createTelnetSessionApi(ctx) {
             if (session) {
               session.zmodemSentry?.cancel();
               const contents = electronModule.webContents.fromId(session.webContentsId);
-              fanoutSessionExit(sessionId, session?.webContentsId ?? contents?.id, { sessionId, exitCode: hadError ? 1 : 0, reason: hadError ? "error" : "closed" });
+              fanoutSessionExit(sessionId, contents, { sessionId, exitCode: hadError ? 1 : 0, reason: hadError ? "error" : "closed" });
             }
             ptyProcessTree.unregisterPid(sessionId);
             closeTerminalOutputSession?.(sessionId);

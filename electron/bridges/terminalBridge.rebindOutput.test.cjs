@@ -88,6 +88,11 @@ test("worker renderer-event forwarding prefers rebound webContentsId", () => {
   const captureIdx = source.indexOf("const displayWebContentsId =");
   const closeIdx = source.indexOf('if (message.channel === "netcatty:exit"');
   assert.ok(captureIdx > 0 && closeIdx > captureIdx, "capture targets before closeOutputSession on exit");
+  assert.match(
+    source,
+    /message\.channel === "netcatty:exit" && homeWebContentsId != null/,
+    "only exit events fan out to the attach home",
+  );
 });
 
 test("popup window closed lifecycle restores attach output", () => {
@@ -97,6 +102,139 @@ test("popup window closed lifecycle restores attach output", () => {
   );
   assert.match(source, /restoreAttachedSessionOutput\(attachSessionId\)/);
   assert.match(source, /terminalAttachRestore/);
+  const crashStart = source.indexOf('"render-process-gone"');
+  const crashEnd = source.indexOf('"console-message"', crashStart);
+  assert.match(source.slice(crashStart, crashEnd), /win\.destroy\(\)/);
+});
+
+test("attach close restores the output route before resuming the backend", () => {
+  const bridgeSource = require("node:fs").readFileSync(
+    path.join(__dirname, "terminalBridge.cjs"),
+    "utf8",
+  );
+  const restoreStart = bridgeSource.indexOf("function restoreAttachedSessionOutput");
+  const restoreEnd = bridgeSource.indexOf("function restoreTerminalSessionOutput", restoreStart);
+  const restoreSource = bridgeSource.slice(restoreStart, restoreEnd);
+  const routeIdx = restoreSource.indexOf("restoreAttachHome");
+  const resumeIdx = restoreSource.indexOf("resumeSessionOutputFlow");
+  assert.ok(routeIdx > 0 && resumeIdx > routeIdx, "restore route before resuming output");
+
+  const terminalSource = require("node:fs").readFileSync(
+    path.join(__dirname, "../../components/Terminal.tsx"),
+    "utf8",
+  );
+  const cleanupStart = terminalSource.indexOf("Observe/attach popups must not kill");
+  const cleanupEnd = terminalSource.indexOf("const cleanupPromise", cleanupStart);
+  const cleanupSource = terminalSource.slice(cleanupStart, cleanupEnd);
+  const pauseIdx = cleanupSource.indexOf("setSessionFlowPaused?.(closingSessionId, true)");
+  const snapshotIdx = cleanupSource.indexOf("applySessionSnapshot");
+  const rendererRestoreIdx = cleanupSource.indexOf("restoreSessionOutput");
+  const disposeIdx = cleanupSource.indexOf("disposeSessionListeners()");
+  const releaseIdx = cleanupSource.indexOf("releaseTerminalFlowBeforeHibernate");
+  assert.ok(pauseIdx > 0, "pause before final snapshot");
+  assert.ok(snapshotIdx > pauseIdx, "snapshot after pause");
+  assert.ok(rendererRestoreIdx > snapshotIdx, "restore route after snapshot");
+  assert.ok(disposeIdx > rendererRestoreIdx, "detach popup listener after route restore");
+  assert.ok(releaseIdx > disposeIdx, "resume only after popup listener detaches");
+  const mainRestoreStart = bridgeSource.indexOf("function restoreAttachedSessionOutput");
+  const mainRestoreEnd = bridgeSource.indexOf("function restoreTerminalSessionOutput", mainRestoreStart);
+  const mainRestoreSource = bridgeSource.slice(mainRestoreStart, mainRestoreEnd);
+  assert.match(mainRestoreSource, /if \(result\?\.success\) \{\s*resumeSessionOutputFlow/);
+});
+
+test("snapshot apply acknowledgements are emitted only by the matching terminal", () => {
+  const preloadSource = require("node:fs").readFileSync(
+    path.join(__dirname, "../preload/api.cjs"),
+    "utf8",
+  );
+  const terminalSource = require("node:fs").readFileSync(
+    path.join(__dirname, "../../components/Terminal.tsx"),
+    "utf8",
+  );
+  assert.match(preloadSource, /if \(handled !== true\) return/);
+  assert.match(terminalSource, /payload\.sessionId !== sessionId \|\| !payload\.snapshot\) return false/);
+});
+
+test("exit fanout preserves the original renderer before registry wiring", () => {
+  const attachRestore = require("./terminalAttachRestore.cjs");
+  attachRestore.setFanoutSessionExit(null);
+  const sent = [];
+  const contents = {
+    id: 42,
+    send(channel, payload) {
+      sent.push({ channel, payload });
+    },
+  };
+  const payload = { sessionId: "session-1", reason: "exited" };
+  assert.equal(attachRestore.fanoutSessionExit("session-1", contents, payload), true);
+  assert.deepEqual(sent, [{ channel: "netcatty:exit", payload }]);
+});
+
+test("attach authorization is bound to one session and renderer", () => {
+  const registry = require("./terminalAttachRestore.cjs");
+  registry.registerAttachPopupAuthorization("grant-1", "session-1", 42);
+  assert.equal(registry.validateAttachPopupAuthorization("grant-1", "session-1", 42), true);
+  assert.equal(registry.validateAttachPopupAuthorization("grant-1", "session-2", 42), false);
+  assert.equal(registry.validateAttachPopupAuthorization("grant-1", "session-1", 43), false);
+  assert.equal(registry.markAttachPopupClosePrepared("grant-1", "session-1", 42), true);
+  assert.equal(registry.isAttachPopupClosePrepared("grant-1"), true);
+  registry.releaseAttachPopupAuthorization("grant-1");
+  assert.equal(registry.validateAttachPopupAuthorization("grant-1", "session-1", 42), false);
+});
+
+test("failed attach restores retry when a main renderer becomes ready", () => {
+  const registry = require("./terminalAttachRestore.cjs");
+  let available = false;
+  let calls = 0;
+  registry.setRestoreAttachedSessionOutput(() => {
+    calls += 1;
+    return available
+      ? { success: true, restored: true }
+      : { success: false, restored: false, error: "Home renderer unavailable" };
+  });
+
+  assert.equal(registry.restoreAttachedSessionOutput("session-retry").success, false);
+  available = true;
+  registry.retryPendingAttachedSessionOutputs();
+  registry.retryPendingAttachedSessionOutputs();
+
+  assert.equal(calls, 2, "successful retry clears the pending restore");
+});
+
+test("a ready replacement main renderer becomes the explicit restore target", () => {
+  const registry = require("./terminalAttachRestore.cjs");
+  const targets = [];
+  registry.setRestoreAttachedSessionOutput((_sessionId, preferredHomeWebContentsId) => {
+    targets.push(preferredHomeWebContentsId);
+    return targets.length === 1
+      ? { success: false, restored: false }
+      : { success: true, restored: true };
+  });
+
+  registry.restoreAttachedSessionOutput("session-replacement");
+  registry.retryPendingAttachedSessionOutput("session-replacement", 99);
+
+  assert.deepEqual(targets, [null, 99]);
+});
+
+test("attach IPC handlers validate popup authorization and flow pause has an awaitable barrier", () => {
+  const source = require("node:fs").readFileSync(
+    path.join(__dirname, "terminalBridge.cjs"),
+    "utf8",
+  );
+  assert.match(source, /function isAuthorizedAttachIpc/);
+  for (const functionName of [
+    "requestTerminalSessionSnapshot",
+    "applyTerminalSessionSnapshot",
+    "rebindTerminalSessionOutput",
+    "restoreTerminalSessionOutput",
+  ]) {
+    const start = source.indexOf(`function ${functionName}`);
+    const end = source.indexOf("\nfunction ", start + 10);
+    assert.match(source.slice(start, end), /isAuthorizedAttachIpc/);
+  }
+  assert.match(source, /netcatty:terminal:setFlowPausedAndWait/);
+  assert.match(source, /terminalWorkerManager\.request\("netcatty:terminal:setFlowPausedAndWait"/);
 });
 
 test("terminal worker manager exposes rebindOutputSession", () => {

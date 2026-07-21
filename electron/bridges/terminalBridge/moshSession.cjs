@@ -575,7 +575,7 @@ function createMoshSessionApi(ctx) {
             flushPaced(() => {
               sessionLogStreamManager.stopStream(sessionId, logStreamToken);
               const contents = electronModule.webContents.fromId(session.webContentsId);
-              fanoutSessionExit(sessionId, session?.webContentsId ?? contents?.id, {
+              fanoutSessionExit(sessionId, contents, {
                 sessionId,
                 reason: "error",
                 error: `Failed to spawn mosh-client: ${err.message}`,
@@ -606,7 +606,7 @@ function createMoshSessionApi(ctx) {
         flushPaced(() => {
           sessionLogStreamManager.stopStream(sessionId, logStreamToken);
           const contents = electronModule.webContents.fromId(session.webContentsId);
-          fanoutSessionExit(sessionId, session?.webContentsId ?? contents?.id, {
+          fanoutSessionExit(sessionId, contents, {
             sessionId,
             exitCode,
             signal,
@@ -788,7 +788,7 @@ function createMoshSessionApi(ctx) {
         flushPaced(() => {
           sessionLogStreamManager.stopStream(sessionId, session.logStreamToken);
           const contents = electronModule.webContents.fromId(session.webContentsId);
-          fanoutSessionExit(sessionId, session?.webContentsId ?? contents?.id, {
+          fanoutSessionExit(sessionId, contents, {
             sessionId,
             exitCode,
             signal,

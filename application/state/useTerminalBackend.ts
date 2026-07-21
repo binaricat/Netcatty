@@ -106,9 +106,24 @@ export const useTerminalBackend = () => {
     bridge?.setSessionFlowPaused?.(sessionId, paused);
   }, []);
 
+  const setSessionFlowPausedAndWait = useCallback(async (sessionId: string, paused: boolean) => {
+    const bridge = netcattyBridge.get();
+    if (!bridge?.setSessionFlowPausedAndWait) {
+      bridge?.setSessionFlowPaused?.(sessionId, paused);
+      return paused
+        ? { success: false, error: "Output drain unavailable" }
+        : { success: true };
+    }
+    return bridge.setSessionFlowPausedAndWait(sessionId, paused);
+  }, []);
+
   const ackSessionFlow = useCallback((sessionId: string, bytes: number) => {
     const bridge = netcattyBridge.get();
     bridge?.ackSessionFlow?.(sessionId, bytes);
+  }, []);
+
+  const notifyTerminalSessionDisplayReady = useCallback((sessionId: string) => {
+    netcattyBridge.get()?.notifyTerminalSessionDisplayReady?.(sessionId);
   }, []);
 
   const closeSession = useCallback(async (sessionId: string) => {
@@ -116,39 +131,40 @@ export const useTerminalBackend = () => {
     await bridge?.closeSession?.(sessionId);
   }, []);
 
-  const rebindSessionOutput = useCallback(async (sessionId: string) => {
+  const rebindSessionOutput = useCallback(async (sessionId: string, authorization: string) => {
     const bridge = netcattyBridge.get();
     if (!bridge?.rebindTerminalSessionOutput) {
       return { success: false as const, error: "rebindTerminalSessionOutput unavailable" };
     }
-    return bridge.rebindTerminalSessionOutput(sessionId);
+    return bridge.rebindTerminalSessionOutput(sessionId, authorization);
   }, []);
 
   const restoreSessionOutput = useCallback(async (
     sessionId: string,
     webContentsId?: number | null,
+    authorization?: string,
   ) => {
     const bridge = netcattyBridge.get();
     if (!bridge?.restoreTerminalSessionOutput) {
       return { success: false as const, error: "restoreTerminalSessionOutput unavailable" };
     }
-    return bridge.restoreTerminalSessionOutput(sessionId, webContentsId);
+    return bridge.restoreTerminalSessionOutput(sessionId, webContentsId, authorization);
   }, []);
 
-  const requestSessionSnapshot = useCallback(async (sessionId: string) => {
+  const requestSessionSnapshot = useCallback(async (sessionId: string, authorization: string) => {
     const bridge = netcattyBridge.get();
     if (!bridge?.requestTerminalSessionSnapshot) {
       return { success: false as const, snapshot: "", error: "requestTerminalSessionSnapshot unavailable" };
     }
-    return bridge.requestTerminalSessionSnapshot(sessionId);
+    return bridge.requestTerminalSessionSnapshot(sessionId, authorization);
   }, []);
 
-  const applySessionSnapshot = useCallback(async (sessionId: string, snapshot: string) => {
+  const applySessionSnapshot = useCallback(async (sessionId: string, snapshot: string, authorization: string) => {
     const bridge = netcattyBridge.get();
     if (!bridge?.applyTerminalSessionSnapshot) {
       return { success: false as const, error: "applyTerminalSessionSnapshot unavailable" };
     }
-    return bridge.applyTerminalSessionSnapshot(sessionId, snapshot);
+    return bridge.applyTerminalSessionSnapshot(sessionId, snapshot, authorization);
   }, []);
 
   const setSessionEncoding = useCallback(async (sessionId: string, encoding: string) => {
@@ -191,6 +207,12 @@ export const useTerminalBackend = () => {
   const onTelnetEchoMode = useCallback((sessionId: string, cb: (evt: { sessionId: string; remoteEcho: boolean; localEcho: boolean }) => void) => {
     const bridge = netcattyBridge.get();
     return bridge?.onTelnetEchoMode?.(sessionId, cb);
+  }, []);
+
+  const getTelnetEchoMode = useCallback(async (sessionId: string) => {
+    const bridge = netcattyBridge.get();
+    if (!bridge?.getTelnetEchoMode) return { success: false as const, error: "getTelnetEchoMode unavailable" };
+    return bridge.getTelnetEchoMode(sessionId);
   }, []);
 
   const onChainProgress = useCallback((cb: (sessionId: string, hop: number, total: number, label: string, status: string, error?: string) => void) => {
@@ -405,7 +427,9 @@ export const useTerminalBackend = () => {
         interruptSession,
         resizeSession,
         setSessionFlowPaused,
+        setSessionFlowPausedAndWait,
         ackSessionFlow,
+        notifyTerminalSessionDisplayReady,
         closeSession,
         rebindSessionOutput,
         restoreSessionOutput,
@@ -417,6 +441,7 @@ export const useTerminalBackend = () => {
         onTelnetAutoLoginComplete,
         onTelnetAutoLoginCancelled,
         onTelnetEchoMode,
+        getTelnetEchoMode,
         onChainProgress,
         onConnectionReuseFallback,
         onWindowFullScreenChanged,
@@ -478,7 +503,9 @@ export const useTerminalBackend = () => {
       interruptSession,
       resizeSession,
       setSessionFlowPaused,
+      setSessionFlowPausedAndWait,
       ackSessionFlow,
+      notifyTerminalSessionDisplayReady,
       closeSession,
       rebindSessionOutput,
       restoreSessionOutput,
@@ -491,6 +518,7 @@ export const useTerminalBackend = () => {
       onTelnetAutoLoginCancelled,
       onMoshSessionReady,
       onTelnetEchoMode,
+      getTelnetEchoMode,
       onChainProgress,
       onConnectionReuseFallback,
       onWindowFullScreenChanged,

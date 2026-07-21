@@ -243,6 +243,8 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   pendingScript,
   reuseConnectionFromSessionId,
   attachExistingSession = false,
+  attachAuthorization,
+  onAttachClosePreparationChange,
   serialConfig,
   hotkeyScheme = "disabled",
   disableTerminalFontZoom = false,
@@ -1232,6 +1234,17 @@ const TerminalComponent: React.FC<TerminalProps> = ({
 
   const attachHomeWebContentsIdRef = useRef<number | null | undefined>(undefined);
 
+  useEffect(() => {
+    const bridge = netcattyBridge.get();
+    if (!bridge?.onTerminalOutputDrainRequest || !bridge?.respondTerminalOutputDrain) return undefined;
+    return bridge.onTerminalOutputDrainRequest(sessionId, async (payload) => {
+      const term = termRef.current;
+      if (term) await flushPendingTerminalWritesBeforeHibernate(term);
+      flushTerminalSessionFlowAck(sessionId);
+      bridge.respondTerminalOutputDrain?.(payload.requestId);
+    });
+  }, [sessionId]);
+
   // Home renderer for AI observe popups: serialize scrollback on demand, and
   // accept reverse snapshots when the observe popup restores the route.
   useEffect(() => {
@@ -1239,11 +1252,12 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     const bridge = netcattyBridge.get();
     const unsubs: Array<() => void> = [];
     if (bridge?.onTerminalSessionSnapshotRequest && bridge?.respondTerminalSessionSnapshot) {
-      unsubs.push(bridge.onTerminalSessionSnapshotRequest((payload) => {
+      unsubs.push(bridge.onTerminalSessionSnapshotRequest(async (payload) => {
         if (!payload || payload.sessionId !== sessionId) return;
         let snapshot = "";
         try {
           if (serializeAddonRef.current) {
+            if (termRef.current) await flushPendingTerminalWritesBeforeHibernate(termRef.current);
             snapshot = serializeAddonRef.current.serialize() || "";
           } else if (hibernatedRef.current || softHiddenRef.current) {
             // Hibernate path: live xterm is torn down; use retained snapshot.
@@ -1259,20 +1273,19 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       }));
     }
     if (bridge?.onTerminalSessionApplySnapshot) {
-      unsubs.push(bridge.onTerminalSessionApplySnapshot((payload) => {
-        if (!payload || payload.sessionId !== sessionId || !payload.snapshot) return;
-        try {
-          if (termRef.current) {
-            termRef.current.reset();
-            termRef.current.write(payload.snapshot);
-            try { termRef.current.scrollToBottom?.(); } catch { /* ignore */ }
-          } else if (hibernatedRef.current || softHiddenRef.current) {
-            hibernateSnapshotRef.current = payload.snapshot;
-            hibernatePendingBufferRef.current = "";
-          }
-        } catch (err) {
-          logger.warn("Failed to apply observe-popup snapshot to home terminal", err);
+      unsubs.push(bridge.onTerminalSessionApplySnapshot(async (payload) => {
+        if (!payload || payload.sessionId !== sessionId || !payload.snapshot) return false;
+        if (termRef.current) {
+          const term = termRef.current;
+          await flushPendingTerminalWritesBeforeHibernate(term);
+          term.reset();
+          await new Promise<void>((resolve) => term.write(payload.snapshot, resolve));
+          try { term.scrollToBottom?.(); } catch { /* ignore */ }
+        } else if (hibernatedRef.current || softHiddenRef.current) {
+          hibernateSnapshotRef.current = payload.snapshot;
+          hibernatePendingBufferRef.current = "";
         }
+        return true;
       }));
     }
     return () => {
@@ -1283,38 +1296,77 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   const cleanupSession = async () => {
     const closingSessionId = sessionRef.current;
     sessionRef.current = null;
-    disposeDataRef.current?.();
-    disposeDataRef.current = null;
-    disposeExitRef.current?.();
-    disposeExitRef.current = null;
-    disposeTelnetEchoModeRef.current?.();
-    disposeTelnetEchoModeRef.current = null;
-    telnetLocalEchoRef.current = false;
+    const disposeSessionListeners = () => {
+      disposeDataRef.current?.();
+      disposeDataRef.current = null;
+      disposeExitRef.current?.();
+      disposeExitRef.current = null;
+      disposeTelnetEchoModeRef.current?.();
+      disposeTelnetEchoModeRef.current = null;
+      telnetLocalEchoRef.current = false;
+    };
+
+    if (!attachExistingSession) {
+      disposeSessionListeners();
+    }
 
     const pendingCleanup = sessionCleanupPromiseRef.current;
     if (pendingCleanup) {
       await pendingCleanup;
     }
 
-    if (!closingSessionId) return;
+    if (!closingSessionId) {
+      disposeSessionListeners();
+      return;
+    }
 
     // Observe/attach popups must not kill the backend session — only release
     // the display route back to the home renderer.
     if (attachExistingSession) {
       const homeId = attachHomeWebContentsIdRef.current;
       attachHomeWebContentsIdRef.current = undefined;
+      let fallbackSnapshot = "";
       try {
-        // Push popup display state home first so reopen is not stale.
-        try {
-          const snap = serializeAddonRef.current?.serialize?.() || "";
-          if (snap) {
-            await terminalBackend.applySessionSnapshot?.(closingSessionId, snap);
+        fallbackSnapshot = serializeAddonRef.current?.serialize?.() || "";
+      } catch {
+        // The post-pause snapshot below remains authoritative when available.
+      }
+      try {
+        // Stop the source before detaching the popup listener. This lets any
+        // already-delivered writes settle into xterm before its final snapshot.
+        if (terminalBackend.setSessionFlowPausedAndWait) {
+          const paused = await terminalBackend.setSessionFlowPausedAndWait(closingSessionId, true);
+          if (!paused?.success && paused?.error === "Output drain unavailable") {
+            terminalBackend.setSessionFlowPaused?.(closingSessionId, true);
+            await new Promise((resolve) => setTimeout(resolve, 40));
+          } else if (!paused?.success) {
+            throw new Error(paused?.error || "Failed to drain terminal output");
           }
-        } catch (snapErr) {
-          logger.warn("Failed to push observe-popup snapshot home before restore", snapErr);
+        } else {
+          terminalBackend.setSessionFlowPaused?.(closingSessionId, true);
+          await new Promise((resolve) => setTimeout(resolve, 40));
         }
-        // If the popup paused the backend under output pressure, resume it and
-        // drain local queues before handing the route back to home.
+        const snapshotTerm = termRef.current;
+        if (snapshotTerm) await flushPendingTerminalWritesBeforeHibernate(snapshotTerm);
+        // Push popup display state home first so reopen is not stale.
+        const snap = serializeAddonRef.current?.serialize?.() || fallbackSnapshot;
+        if (snap) {
+          const applied = await terminalBackend.applySessionSnapshot?.(
+            closingSessionId,
+            snap,
+            attachAuthorization || "",
+          );
+          if (applied && !applied.success) throw new Error(applied.error || "Failed to apply terminal snapshot");
+        }
+        // Hand the route home while output is still paused, then detach the
+        // popup listener and resume so subsequent bytes land on the home route.
+        const restored = await terminalBackend.restoreSessionOutput?.(
+          closingSessionId,
+          homeId ?? null,
+          attachAuthorization || "",
+        );
+        if (restored && !restored.success) throw new Error(restored.error || "Failed to restore terminal output");
+        disposeSessionListeners();
         const activeTerm = termRef.current;
         if (activeTerm) {
           releaseTerminalFlowBeforeHibernate(terminalBackend, activeTerm, closingSessionId, {
@@ -1325,9 +1377,10 @@ const TerminalComponent: React.FC<TerminalProps> = ({
           clearTerminalSessionFlowAck(closingSessionId);
           terminalBackend.setSessionFlowPaused?.(closingSessionId, false);
         }
-        await terminalBackend.restoreSessionOutput?.(closingSessionId, homeId ?? null);
       } catch (err) {
         logger.warn("Failed to restore terminal output after attach popup close", err);
+        disposeSessionListeners();
+        throw err;
       }
       return;
     }
@@ -1358,6 +1411,15 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       }
     }
   };
+
+  const cleanupSessionRef = useRef(cleanupSession);
+  cleanupSessionRef.current = cleanupSession;
+  useEffect(() => {
+    if (!attachExistingSession || !onAttachClosePreparationChange) return undefined;
+    const prepare = () => cleanupSessionRef.current();
+    onAttachClosePreparationChange(prepare);
+    return () => onAttachClosePreparationChange(null);
+  }, [attachExistingSession, onAttachClosePreparationChange]);
 
   const disposeRuntimeOnly = () => {
     xtermRuntimeRef.current?.dispose();
@@ -1404,21 +1466,17 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       if (attachExistingSession) {
         const homeId = attachHomeWebContentsIdRef.current;
         attachHomeWebContentsIdRef.current = undefined;
-        try {
-          const term = termRef.current;
-          if (term) {
-            releaseTerminalFlowBeforeHibernate(terminalBackend, term, closingSessionId, {
-              resumeBackend: true,
-            });
-          } else {
-            flushTerminalSessionFlowAck(closingSessionId);
-            clearTerminalSessionFlowAck(closingSessionId);
-            terminalBackend.setSessionFlowPaused?.(closingSessionId, false);
-          }
-        } catch (err) {
-          logger.warn("Failed to release attach popup flow state on hibernate close", err);
-        }
-        void terminalBackend.restoreSessionOutput?.(closingSessionId, homeId ?? null).catch((err) => {
+        terminalBackend.setSessionFlowPaused?.(closingSessionId, true);
+        void terminalBackend.restoreSessionOutput?.(
+          closingSessionId,
+          homeId ?? null,
+          attachAuthorization || "",
+        ).then((result) => {
+          if (!result?.success) throw new Error(result?.error || "Failed to restore terminal output");
+          flushTerminalSessionFlowAck(closingSessionId);
+          clearTerminalSessionFlowAck(closingSessionId);
+          terminalBackend.setSessionFlowPaused?.(closingSessionId, false);
+        }).catch((err) => {
           logger.warn("Failed to restore terminal output after attach popup hibernate close", err);
         });
       } else {
@@ -1434,7 +1492,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     }
     sessionRef.current = null;
     clearHibernateRuntimeState();
-  }, [attachExistingSession, clearHibernateRuntimeState, handleTerminalDataCaptureOnce, sessionId, terminalBackend]);
+  }, [attachAuthorization, attachExistingSession, clearHibernateRuntimeState, handleTerminalDataCaptureOnce, sessionId, terminalBackend]);
 
   const beginHibernatedSessionListeners = useCallback((backendId: string) => {
     disposeDataRef.current?.();
@@ -3183,7 +3241,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     onWake: wakeFromHibernateRuntime,
   });
 
-  useTerminalEffects({ CONNECTION_TIMEOUT, Error, XTERM_PERFORMANCE_CONFIG, applyUserCursorPreference, auth, autocompleteCloseRef, autocompleteInputRef, autocompleteKeyEventRef, captureTerminalLogData, chainHosts: resolvedChainHosts, chainProgress, clearTerminalCwd, commandBufferRef, connectionLogBufferRef, containerRef, createPromptLineBreakState, createReplaySafeTerminalLogSanitizer, createXTermRuntime, deferTerminalResizeRef, disableTerminalFontZoomRef, effectiveFontSize, effectiveFontWeight, effectiveTheme, error, executeSnippetCommand, finalizeTerminalLogData, fitAddonRef, fontFamilyId, fontSize, fontWeightFixupDoneRef, forceCloseHibernatedSession, forceSyncRenderAfterResize, handleOsc52ReadRequest, handleTerminalDataCaptureOnce, hasConnectedRef, hasRuntimeRef, host, hotkeySchemeRef, hibernatedRef, identities, inWorkspace, isBootActiveRef, isBroadcastEnabledRef, isComposeBarOpen: effectiveComposeBarOpen, isConnectionAwaitingUserInput, isConnectionPastTcpDial, isFocusMode, isFocused, isLocalConnection, isNetworkDevice, isResizing: deferTerminalResize, isRestoringSelectionRef, isSearchOpen, isSerialConnection, isVisible, isVisibleRef, keyBindingsRef, keys, knownCwdRef, lastFittedSizeRef, lastToastedErrorRef, logger, mouseTrackingRef, needsHostKeyVerification, onBroadcastInputRef, onBroadcastInterruptPriorityChange, onCommandExecuted, onCommandSubmitted, onHotkeyActionRef, onOutputTriggerUserInputRef: noteOutputTriggerUserInputRef, onPluginRuntimeCwdChange: pluginAwareOnRuntimeCwdChange, onSnippetShortkeyRef, onSnippetExecutorChange, onTerminalCwdChange, onTerminalTitleChange, onTerminalBell, onTerminalFontSizeChange, paneLayoutKey, passwordPromptActiveRef, pendingAuthRef, pendingOutputScrollRef, pluginDecorationRefreshRef, pluginDecorationRules, pluginDecorationRulesRef, pluginTerminalLifecycle, pluginTerminalProviderRevision, isPluginTerminalProviderAvailable, requestPluginTerminalProviders, prepareRestoredReconnect, prevIsResizingRef, promptLineBreakStateRef, resizeSession, resolveHostAuth, resolvedFontFamily, safeFit, scriptRecorderRef: recorderRef, searchAddonRef, serialConfig, serialLineBufferRef, serializeAddonRef, sessionId, sessionRef, sessionStarters, setError, setHasMouseTracking, setHasSelection, setIsCancelling, setIsDisconnectedDialogDismissed, requestSearchFocus, setNeedsHostKeyVerification, setPendingHostKeyInfo, setPendingHostKeyRequestId, setProgressLogs, setProgressValue, setSelectionOverlayPosition, setShowLogs, setStatus, setTimeLeft, shellType, shouldEnableNativeUserInputAutoScroll, shouldProbeSessionCwd, shouldStartTerminalBackend, attachExistingSession, attachHomeWebContentsIdRef, snippetsRef, splitResizeActive: isResizing, status, statusRef, sudoAutofillRef, t, teardown, telnetLocalEchoRef, termRef, terminalAltKeyOptions, terminalBackend, terminalContextActionsRef, terminalCwdTracker, terminalDataCapturedRef, terminalLogSanitizerRef, terminalSettings, terminalSettingsRef, toHostKeyInfo, toast, updateStatus, useEffect, useLayoutEffect, workspaceId, xtermRuntimeRef, zmodem, zmodemToastedRef, restoreState });
+  useTerminalEffects({ CONNECTION_TIMEOUT, Error, XTERM_PERFORMANCE_CONFIG, applyUserCursorPreference, auth, autocompleteCloseRef, autocompleteInputRef, autocompleteKeyEventRef, captureTerminalLogData, chainHosts: resolvedChainHosts, chainProgress, clearTerminalCwd, commandBufferRef, connectionLogBufferRef, containerRef, createPromptLineBreakState, createReplaySafeTerminalLogSanitizer, createXTermRuntime, deferTerminalResizeRef, disableTerminalFontZoomRef, effectiveFontSize, effectiveFontWeight, effectiveTheme, error, executeSnippetCommand, finalizeTerminalLogData, fitAddonRef, fontFamilyId, fontSize, fontWeightFixupDoneRef, forceCloseHibernatedSession, forceSyncRenderAfterResize, handleOsc52ReadRequest, handleTerminalDataCaptureOnce, hasConnectedRef, hasRuntimeRef, host, hotkeySchemeRef, hibernatedRef, identities, inWorkspace, isBootActiveRef, isBroadcastEnabledRef, isComposeBarOpen: effectiveComposeBarOpen, isConnectionAwaitingUserInput, isConnectionPastTcpDial, isFocusMode, isFocused, isLocalConnection, isNetworkDevice, isResizing: deferTerminalResize, isRestoringSelectionRef, isSearchOpen, isSerialConnection, isVisible, isVisibleRef, keyBindingsRef, keys, knownCwdRef, lastFittedSizeRef, lastToastedErrorRef, logger, mouseTrackingRef, needsHostKeyVerification, onBroadcastInputRef, onBroadcastInterruptPriorityChange, onCommandExecuted, onCommandSubmitted, onHotkeyActionRef, onOutputTriggerUserInputRef: noteOutputTriggerUserInputRef, onPluginRuntimeCwdChange: pluginAwareOnRuntimeCwdChange, onSnippetShortkeyRef, onSnippetExecutorChange, onTerminalCwdChange, onTerminalTitleChange, onTerminalBell, onTerminalFontSizeChange, paneLayoutKey, passwordPromptActiveRef, pendingAuthRef, pendingOutputScrollRef, pluginDecorationRefreshRef, pluginDecorationRules, pluginDecorationRulesRef, pluginTerminalLifecycle, pluginTerminalProviderRevision, isPluginTerminalProviderAvailable, requestPluginTerminalProviders, prepareRestoredReconnect, prevIsResizingRef, promptLineBreakStateRef, resizeSession, resolveHostAuth, resolvedFontFamily, safeFit, scriptRecorderRef: recorderRef, searchAddonRef, serialConfig, serialLineBufferRef, serializeAddonRef, sessionId, sessionRef, sessionStarters, setError, setHasMouseTracking, setHasSelection, setIsCancelling, setIsDisconnectedDialogDismissed, requestSearchFocus, setNeedsHostKeyVerification, setPendingHostKeyInfo, setPendingHostKeyRequestId, setProgressLogs, setProgressValue, setSelectionOverlayPosition, setShowLogs, setStatus, setTimeLeft, shellType, shouldEnableNativeUserInputAutoScroll, shouldProbeSessionCwd, shouldStartTerminalBackend, attachExistingSession, attachAuthorization, attachHomeWebContentsIdRef, snippetsRef, splitResizeActive: isResizing, status, statusRef, sudoAutofillRef, t, teardown, telnetLocalEchoRef, termRef, terminalAltKeyOptions, terminalBackend, terminalContextActionsRef, terminalCwdTracker, terminalDataCapturedRef, terminalLogSanitizerRef, terminalSettings, terminalSettingsRef, toHostKeyInfo, toast, updateStatus, useEffect, useLayoutEffect, workspaceId, xtermRuntimeRef, zmodem, zmodemToastedRef, restoreState });
 
   return (
     <>

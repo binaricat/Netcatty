@@ -3,7 +3,14 @@
 const { randomUUID } = require("node:crypto");
 
 const crashLogBridge = require("../crashLogBridge.cjs");
-const { restoreAttachedSessionOutput } = require("../terminalAttachRestore.cjs");
+const {
+  isAttachPopupClosePrepared,
+  registerAttachPopupAuthorization,
+  releaseAttachPopupAuthorization,
+  restoreAttachedSessionOutput,
+} = require("../terminalAttachRestore.cjs");
+
+const ATTACH_CLOSE_PREPARE_TIMEOUT_MS = 2000;
 
 function createTerminalPopupWindowApi(ctx) {
   with (ctx) {
@@ -22,6 +29,7 @@ function createTerminalPopupWindowApi(ctx) {
       const attachSessionId = typeof payload?.attachSessionId === "string" && payload.attachSessionId
         ? payload.attachSessionId
         : null;
+      const attachAuthorization = attachSessionId ? randomUUID() : null;
       if (attachSessionId) {
         const existingPopupId = attachSessionPopups.get(attachSessionId);
         const existing = existingPopupId ? terminalPopupWindows.get(existingPopupId) : null;
@@ -88,9 +96,12 @@ function createTerminalPopupWindowApi(ctx) {
       });
 
       let lifecycleReleased = false;
+      let closePreparationRequested = false;
+      let closePreparationTimer = null;
       const releaseLifecycle = () => {
         if (lifecycleReleased) return;
         lifecycleReleased = true;
+        if (closePreparationTimer) clearTimeout(closePreparationTimer);
         terminalPopupWindows.delete(popupId);
         if (attachSessionId && attachSessionPopups.get(attachSessionId) === popupId) {
           attachSessionPopups.delete(attachSessionId);
@@ -106,12 +117,18 @@ function createTerminalPopupWindowApi(ctx) {
             });
           }
         }
+        releaseAttachPopupAuthorization(attachAuthorization);
         unregisterAppContentWindow(win);
         notifyAppContentWindowClosed(win);
       };
       terminalPopupWindows.set(popupId, { releaseLifecycle, win });
       if (attachSessionId) {
         attachSessionPopups.set(attachSessionId, popupId);
+        registerAttachPopupAuthorization(
+          attachAuthorization,
+          attachSessionId,
+          win.webContents.id,
+        );
       }
       registerAppContentWindow(win);
       crashLogBridge.captureDiagnostic("terminal-popup", "popup BrowserWindow created", {
@@ -128,6 +145,28 @@ function createTerminalPopupWindowApi(ctx) {
         // ignore
       }
 
+      win.on("close", (event) => {
+        if (!attachSessionId || isAttachPopupClosePrepared(attachAuthorization)) return;
+        event?.preventDefault?.();
+        if (closePreparationRequested) return;
+        closePreparationRequested = true;
+        try {
+          win.webContents.send("netcatty:terminal-popup:prepare-close", {
+            sessionId: attachSessionId,
+            authorization: attachAuthorization,
+          });
+        } catch {
+          // Timeout below force-closes and restores the route.
+        }
+        closePreparationTimer = setTimeout(() => {
+          closePreparationTimer = null;
+          try {
+            if (isLiveWindow(win)) win.destroy();
+          } catch {
+            releaseLifecycle();
+          }
+        }, ATTACH_CLOSE_PREPARE_TIMEOUT_MS);
+      });
       win.on("closed", releaseLifecycle);
 
       try {
@@ -141,6 +180,14 @@ function createTerminalPopupWindowApi(ctx) {
         });
         win.webContents?.on?.("render-process-gone", (_event, details) => {
           console.warn("[TerminalPopup] Renderer process gone", { popupId, details });
+          if (attachSessionId) {
+            restoreAttachedSessionOutput(attachSessionId);
+          }
+          try {
+            if (isLiveWindow(win)) win.destroy();
+          } catch {
+            releaseLifecycle();
+          }
         });
         win.webContents?.on?.("console-message", (_event, level, message, line, sourceId) => {
           crashLogBridge.captureDiagnostic("terminal-popup-console", message, {
@@ -204,7 +251,11 @@ function createTerminalPopupWindowApi(ctx) {
           await win.loadURL(`app://netcatty/index.html${popupPath}`);
         }
 
-        win.webContents.send("netcatty:window:terminalPopupConfig", { ...payload, popupId });
+        win.webContents.send("netcatty:window:terminalPopupConfig", {
+          ...payload,
+          popupId,
+          ...(attachAuthorization ? { attachAuthorization } : {}),
+        });
         crashLogBridge.captureDiagnostic("terminal-popup", "popup config delivered", {
           popupId,
           title,

@@ -9,6 +9,7 @@ function createTerminalOutputPortRegistry(options = {}) {
     filterData = null,
     closedTerminalDataSessions = new Set(),
     onPortError = console.error,
+    onDrain = null,
   } = options;
   const ports = new Map();
 
@@ -30,6 +31,10 @@ function createTerminalOutputPortRegistry(options = {}) {
     port.onmessage = (event) => {
       const message = event?.data || {};
       const targetSessionId = message.sessionId || sessionId;
+      if (message.kind === "drain" && message.requestId) {
+        onDrain?.(targetSessionId, message.requestId);
+        return;
+      }
       if (closedTerminalDataSessions.has(targetSessionId)) return;
       if (!message.data) return;
       try {

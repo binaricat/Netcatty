@@ -171,7 +171,7 @@ function createTerminalWorkerManager(options = {}) {
   const outputPortPending = new Set();
   const outputPortReady = new Set();
   const sessionWebContentsIds = new Map();
-  const urgentInputWebContentsIds = new Set();
+  const urgentInputPorts = new Map();
   const outputTaps = new Set();
   const maxPendingOutputChunks = Number.isFinite(options.maxPendingOutputChunks)
     ? Math.max(0, Math.trunc(options.maxPendingOutputChunks))
@@ -465,14 +465,8 @@ function createTerminalWorkerManager(options = {}) {
     return null;
   }
 
-  function restoreAttachHome(sessionId) {
+  function restoreAttachHome(sessionId, preferredHomeWebContentsId = null) {
     if (!sessionId) return { success: false, restored: false };
-    // Unpause backend if the observe popup left flow paused under pressure.
-    try {
-      send("netcatty:flow", { sessionId, paused: false }, {});
-    } catch {
-      // ignore
-    }
     const savedHomeId = attachHomeWebContentsIds.get(sessionId);
     if (savedHomeId == null) {
       return { success: true, restored: false };
@@ -481,7 +475,7 @@ function createTerminalWorkerManager(options = {}) {
       attachHomeWebContentsIds.delete(sessionId);
       return { success: true, restored: false };
     }
-    const homeId = findFallbackHomeWebContentsId(savedHomeId);
+    const homeId = findFallbackHomeWebContentsId(preferredHomeWebContentsId ?? savedHomeId);
     if (homeId == null) {
       // Keep the attach-home mapping so a later tray re-open can still recover.
       return {
@@ -538,8 +532,18 @@ function createTerminalWorkerManager(options = {}) {
     terminalOutputChannel?.closeSession?.(sessionId);
   }
 
+  function drainOutputSession(sessionId, requestId) {
+    if (!sessionId || !requestId || !outputPortReady.has(sessionId)) return false;
+    try {
+      ensureStarted().postMessage({ kind: "output-drain", sessionId, requestId });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   function openUrgentInputPort(webContentsId, contents) {
-    if (!webContentsId || urgentInputWebContentsIds.has(webContentsId)) return false;
+    if (!webContentsId || urgentInputPorts.has(webContentsId)) return false;
     if (typeof MessageChannelMain !== "function" || !contents?.postMessage || !child?.postMessage) {
       return false;
     }
@@ -550,12 +554,31 @@ function createTerminalWorkerManager(options = {}) {
         webContentsId,
       }, [port1]);
       contents.postMessage(TERMINAL_URGENT_INPUT_PORT_CHANNEL, {}, [port2]);
-      urgentInputWebContentsIds.add(webContentsId);
+      const onDestroyed = () => closeUrgentInputPort(webContentsId);
+      urgentInputPorts.set(webContentsId, { port1, port2, contents, onDestroyed });
+      contents.once?.("destroyed", onDestroyed);
       return true;
     } catch {
       try { port1?.close?.(); } catch {}
       try { port2?.close?.(); } catch {}
+      try { child?.postMessage?.({ kind: "close-urgent-input-port", webContentsId }); } catch {}
       return false;
+    }
+  }
+
+  function closeUrgentInputPort(webContentsId) {
+    const entry = urgentInputPorts.get(webContentsId);
+    if (!entry) return;
+    urgentInputPorts.delete(webContentsId);
+    entry.contents?.removeListener?.("destroyed", entry.onDestroyed);
+    try { entry.port1?.close?.(); } catch {}
+    try { entry.port2?.close?.(); } catch {}
+    try { child?.postMessage?.({ kind: "close-urgent-input-port", webContentsId }); } catch {}
+  }
+
+  function closeAllUrgentInputPorts() {
+    for (const webContentsId of Array.from(urgentInputPorts.keys())) {
+      closeUrgentInputPort(webContentsId);
     }
   }
 
@@ -658,8 +681,11 @@ function createTerminalWorkerManager(options = {}) {
       }
       const targets = new Set();
       if (displayWebContentsId != null) targets.add(displayWebContentsId);
-      // Keep the original owner in the loop for lifecycle (status/tray cleanup).
-      if (homeWebContentsId != null) targets.add(homeWebContentsId);
+      // Keep the original owner in the loop only for terminal lifecycle. Other
+      // renderer events may be interactive and must have a single responder.
+      if (message.channel === "netcatty:exit" && homeWebContentsId != null) {
+        targets.add(homeWebContentsId);
+      }
       if (targets.size === 0 && message.webContentsId != null) {
         targets.add(message.webContentsId);
       }
@@ -767,7 +793,7 @@ function createTerminalWorkerManager(options = {}) {
     outputPortReady.clear();
     sessionWebContentsIds.clear();
     attachHomeWebContentsIds.clear();
-    urgentInputWebContentsIds.clear();
+    closeAllUrgentInputPorts();
     terminalOutputChannel?.closeAll?.();
     rejectAllPending(error);
   }
@@ -837,7 +863,7 @@ function createTerminalWorkerManager(options = {}) {
       outputPortPending.clear();
       outputPortReady.clear();
       sessionWebContentsIds.clear();
-      urgentInputWebContentsIds.clear();
+      closeAllUrgentInputPorts();
       terminalOutputChannel?.closeAll?.();
       rejectAllPending(new Error("Terminal worker stopped"));
     }
@@ -849,6 +875,7 @@ function createTerminalWorkerManager(options = {}) {
     send,
     openOutputSession,
     rebindOutputSession,
+    drainOutputSession,
     restoreAttachHome,
     getAttachHomeWebContentsId,
     clearAttachHome,

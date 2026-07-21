@@ -39,6 +39,17 @@ function createTerminalOutputChannel(options = {}) {
     return true;
   }
 
+  function drainSession(sessionId, requestId) {
+    const entry = sessions.get(sessionId);
+    if (!entry || entry.transferToWorker || !requestId) return false;
+    try {
+      entry.port.postMessage({ kind: "drain", sessionId, requestId });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   function closeSession(sessionId) {
     const entry = sessions.get(sessionId);
     if (!entry) return;
@@ -56,6 +67,7 @@ function createTerminalOutputChannel(options = {}) {
   return {
     openSession,
     send,
+    drainSession,
     closeSession,
     closeAll,
     getSessionForTest: (sessionId) => sessions.get(sessionId),

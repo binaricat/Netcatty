@@ -103,6 +103,38 @@ test("runtime invokes fire-and-forget listeners", () => {
   assert.deepEqual(calls, [{ sessionId: "s1", data: "x" }]);
 });
 
+test("runtime sends output drain markers through the session output port", () => {
+  const parentPort = createParentPort();
+  const outputPort = new FakePort();
+  const runtime = createTerminalWorkerRuntime({ parentPort, registerBridges() {} });
+  runtime.start();
+
+  parentPort.emitMessage({
+    data: { kind: "output-port", sessionId: "s1" },
+    ports: [outputPort],
+  });
+  parentPort.emitMessage({ kind: "output-drain", sessionId: "s1", requestId: "drain-1" });
+
+  assert.deepEqual(outputPort.messages, [
+    { kind: "drain", requestId: "drain-1", sessionId: "s1" },
+  ]);
+});
+
+test("runtime closes an urgent input port when its renderer is destroyed", () => {
+  const parentPort = createParentPort();
+  const urgentPort = new FakePort();
+  const runtime = createTerminalWorkerRuntime({ parentPort, registerBridges() {} });
+  runtime.start();
+  parentPort.emitMessage({
+    data: { kind: "urgent-input-port", webContentsId: 7 },
+    ports: [urgentPort],
+  });
+
+  parentPort.emitMessage({ kind: "close-urgent-input-port", webContentsId: 7 });
+
+  assert.equal(urgentPort.closed, true);
+});
+
 test("runtime routes urgent input port interrupts to the interrupt listener", () => {
   const parentPort = createParentPort();
   const urgentPort = new FakePort();

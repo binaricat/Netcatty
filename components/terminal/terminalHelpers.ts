@@ -144,6 +144,10 @@ export interface TerminalProps {
    * backend session on unmount.
    */
   attachExistingSession?: boolean;
+  /** Ephemeral grant required for attach-session IPC. */
+  attachAuthorization?: string;
+  /** Registers the async handoff that must finish before an attach popup closes. */
+  onAttachClosePreparationChange?: (prepare: (() => Promise<void>) | null) => void;
   serialConfig?: SerialConfig;
   hotkeyScheme?: "disabled" | "mac" | "pc";
   disableTerminalFontZoom?: boolean;

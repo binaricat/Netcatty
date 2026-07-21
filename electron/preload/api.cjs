@@ -309,6 +309,27 @@ function createPreloadApi(ctx) {
   setSessionFlowPaused: (sessionId, paused) => {
     ipcRenderer.send("netcatty:flow", { sessionId, paused: Boolean(paused) });
   },
+  setSessionFlowPausedAndWait: (sessionId, paused) =>
+    ipcRenderer.invoke("netcatty:terminal:setFlowPausedAndWait", {
+      sessionId,
+      paused: Boolean(paused),
+    }),
+  onTerminalOutputDrainRequest: (sessionId, cb) => {
+    const listeners = ctx.terminalOutputDrainListeners;
+    if (!listeners.has(sessionId)) listeners.set(sessionId, new Set());
+    listeners.get(sessionId).add(cb);
+    return () => {
+      const set = listeners.get(sessionId);
+      set?.delete(cb);
+      if (set?.size === 0) listeners.delete(sessionId);
+    };
+  },
+  respondTerminalOutputDrain: (requestId) => {
+    ipcRenderer.send("netcatty:terminal:output-drain-response", { requestId });
+  },
+  notifyTerminalSessionDisplayReady: (sessionId) => {
+    ipcRenderer.send("netcatty:terminal:display-ready", { sessionId });
+  },
   ackSessionFlow: (sessionId, bytes) => {
     if (!sessionId || !Number.isFinite(bytes) || bytes <= 0) return;
     ipcRenderer.send("netcatty:flow:ack", { sessionId, bytes });
@@ -325,12 +346,12 @@ function createPreloadApi(ctx) {
       ipcRenderer.send("netcatty:close", { sessionId });
     }
   },
-  rebindTerminalSessionOutput: (sessionId) =>
-    ipcRenderer.invoke("netcatty:terminal:rebindOutput", { sessionId }),
-  restoreTerminalSessionOutput: (sessionId, webContentsId) =>
-    ipcRenderer.invoke("netcatty:terminal:restoreOutput", { sessionId, webContentsId }),
-  requestTerminalSessionSnapshot: (sessionId) =>
-    ipcRenderer.invoke("netcatty:terminal:requestSnapshot", { sessionId }),
+  rebindTerminalSessionOutput: (sessionId, authorization) =>
+    ipcRenderer.invoke("netcatty:terminal:rebindOutput", { sessionId, authorization }),
+  restoreTerminalSessionOutput: (sessionId, webContentsId, authorization) =>
+    ipcRenderer.invoke("netcatty:terminal:restoreOutput", { sessionId, webContentsId, authorization }),
+  requestTerminalSessionSnapshot: (sessionId, authorization) =>
+    ipcRenderer.invoke("netcatty:terminal:requestSnapshot", { sessionId, authorization }),
   onTerminalSessionSnapshotRequest: (cb) => {
     const handler = (_event, payload) => {
       try {
@@ -348,18 +369,35 @@ function createPreloadApi(ctx) {
       snapshot: typeof snapshot === "string" ? snapshot : "",
     });
   },
-  applyTerminalSessionSnapshot: (sessionId, snapshot) =>
+  applyTerminalSessionSnapshot: (sessionId, snapshot, authorization) =>
     ipcRenderer.invoke("netcatty:terminal:applySnapshot", {
       sessionId,
       snapshot: typeof snapshot === "string" ? snapshot : "",
+      authorization,
     }),
+  markAttachPopupClosePrepared: (sessionId, authorization) =>
+    ipcRenderer.invoke("netcatty:terminal:markAttachClosePrepared", { sessionId, authorization }),
+  onTerminalPopupPrepareClose: (cb) => {
+    const handler = (_event, payload) => cb?.(payload);
+    ipcRenderer.on("netcatty:terminal-popup:prepare-close", handler);
+    return () => ipcRenderer.removeListener("netcatty:terminal-popup:prepare-close", handler);
+  },
   onTerminalSessionApplySnapshot: (cb) => {
     const handler = (_event, payload) => {
-      try {
-        cb?.(payload);
-      } catch {
-        // ignore provider failures
-      }
+      Promise.resolve().then(() => cb?.(payload)).then(
+        (handled) => {
+          if (handled !== true) return;
+          ipcRenderer.send("netcatty:terminal:apply-snapshot-response", {
+            requestId: payload?.requestId,
+            success: true,
+          });
+        },
+        (err) => ipcRenderer.send("netcatty:terminal:apply-snapshot-response", {
+          requestId: payload?.requestId,
+          success: false,
+          error: err?.message || String(err),
+        }),
+      );
     };
     ipcRenderer.on("netcatty:terminal:apply-snapshot", handler);
     return () => ipcRenderer.removeListener("netcatty:terminal:apply-snapshot", handler);
@@ -470,6 +508,8 @@ function createPreloadApi(ctx) {
     telnetEchoModeListeners.get(sessionId).add(cb);
     return () => telnetEchoModeListeners.get(sessionId)?.delete(cb);
   },
+  getTelnetEchoMode: (sessionId) =>
+    ipcRenderer.invoke("netcatty:telnet:getEchoMode", { sessionId }),
   onAuthFailed: (sessionId, cb) => {
     if (!authFailedListeners.has(sessionId)) authFailedListeners.set(sessionId, new Set());
     authFailedListeners.get(sessionId).add(cb);

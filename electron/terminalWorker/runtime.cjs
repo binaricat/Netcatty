@@ -59,6 +59,18 @@ function createOutputPortRegistry(parentPort) {
     }
   }
 
+  function postControl(sessionId, message) {
+    const port = outputPorts.get(sessionId);
+    if (!port) return false;
+    try {
+      port.postMessage({ ...message, sessionId });
+      return true;
+    } catch {
+      closeSession(sessionId);
+      return false;
+    }
+  }
+
   function open(sessionId, port, bufferedOutput = []) {
     if (!sessionId || !port) return;
     closeSession(sessionId);
@@ -89,6 +101,7 @@ function createOutputPortRegistry(parentPort) {
   return {
     open,
     post,
+    postControl,
     flush,
     closeSession,
   };
@@ -141,6 +154,7 @@ function createUrgentInputPortRegistry(dispatch) {
 
   return {
     open,
+    close,
     closeAll,
   };
 }
@@ -265,6 +279,10 @@ function createTerminalWorkerRuntime(options = {}) {
       urgentInputPorts?.open(message.webContentsId, ports?.[0]);
       return;
     }
+    if (message?.kind === "close-urgent-input-port") {
+      urgentInputPorts?.close(message.webContentsId);
+      return;
+    }
     if (message?.kind === "output-port") {
       outputPorts.open(message.sessionId, ports?.[0], message.bufferedOutput);
       return;
@@ -275,6 +293,13 @@ function createTerminalWorkerRuntime(options = {}) {
     }
     if (message?.kind === "close-output-port") {
       outputPorts.closeSession(message.sessionId);
+      return;
+    }
+    if (message?.kind === "output-drain") {
+      outputPorts.postControl(message.sessionId, {
+        kind: "drain",
+        requestId: message.requestId,
+      });
       return;
     }
     if (message?.kind === "request") {

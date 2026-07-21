@@ -162,9 +162,9 @@ const _deliverToListeners = createTerminalDataDispatcher({
   shouldDropSession: (sessionId) => closedTerminalDataSessions.has(sessionId),
 });
 
-function scheduleMcpBufferedFlush(sessionId) {
-  if (!_mcpLineBufs.has(sessionId)) return;
-  _mcpFlushTimers.set(sessionId, setTimeout(() => {
+function flushMcpBufferedOutput(sessionId) {
+    const timer = _mcpFlushTimers.get(sessionId);
+    if (timer) clearTimeout(timer);
     const held = _mcpLineBufs.get(sessionId);
     const heldMeta = _mcpLineMetas.get(sessionId);
     _mcpLineBufs.delete(sessionId);
@@ -181,7 +181,11 @@ function scheduleMcpBufferedFlush(sessionId) {
       }));
       _mcpPendingMetas.delete(sessionId);
     }
-  }, 80));
+}
+
+function scheduleMcpBufferedFlush(sessionId) {
+  if (!_mcpLineBufs.has(sessionId)) return;
+  _mcpFlushTimers.set(sessionId, setTimeout(() => flushMcpBufferedOutput(sessionId), 80));
 }
 
 function deliverTerminalData(sessionId, data, options = {}) {
@@ -203,6 +207,7 @@ function deliverTerminalData(sessionId, data, options = {}) {
   scheduleMcpBufferedFlush(sessionId);
 }
 
+const terminalOutputDrainListeners = new Map();
 const terminalOutputPorts = createTerminalOutputPortRegistry({
   ipcRenderer,
   deliverToListeners: _deliverToListeners,
@@ -216,6 +221,12 @@ const terminalOutputPorts = createTerminalOutputPortRegistry({
     return filtered;
   },
   closedTerminalDataSessions,
+  onDrain(sessionId, requestId) {
+    flushMcpBufferedOutput(sessionId);
+    for (const listener of terminalOutputDrainListeners.get(sessionId) || []) {
+      try { listener({ sessionId, requestId }); } catch (err) { console.error("Terminal drain callback failed", err); }
+    }
+  },
 });
 terminalOutputPorts.register();
 
@@ -817,6 +828,7 @@ const api = createPreloadApi({
   moshSessionReadyListeners,
   terminalDataBacklog,
   terminalOutputPorts,
+  terminalOutputDrainListeners,
   terminalUrgentInputPorts,
   languageChangeListeners,
   fullscreenChangeListeners,

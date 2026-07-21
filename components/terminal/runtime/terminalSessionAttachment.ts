@@ -788,6 +788,7 @@ export const attachSessionToTerminal = (
     },
     { replayBacklog: true },
   );
+  ctx.terminalBackend.notifyTerminalSessionDisplayReady?.(id);
 
   ctx.disposeExitRef.current = ctx.terminalBackend.onSessionExit(id, (evt) => {
     ctx.updateStatus("disconnected");

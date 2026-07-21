@@ -141,4 +141,6 @@ export interface TerminalPopupPayload {
    * (same PTY) instead of starting a new shell. Used for AI silent sessions.
    */
   attachSessionId?: string;
+  /** Ephemeral main-process grant bound to the attach popup window. */
+  attachAuthorization?: string;
 }

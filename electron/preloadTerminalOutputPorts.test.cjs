@@ -91,6 +91,28 @@ test("terminal output ports forward terminal output metadata", () => {
   ]);
 });
 
+test("terminal output drain marker follows earlier data on the same port", () => {
+  const events = [];
+  const ipcRenderer = createFakeIpcRenderer();
+  const registry = createTerminalOutputPortRegistry({
+    ipcRenderer,
+    deliverToListeners(_sessionId, data) {
+      events.push(`data:${data}`);
+    },
+    onDrain(_sessionId, requestId) {
+      events.push(`drain:${requestId}`);
+    },
+  });
+  const port = createFakePort();
+
+  registry.register();
+  ipcRenderer.emitPort("session-1", port);
+  port.emit({ sessionId: "session-1", data: "tail" });
+  port.emit({ kind: "drain", sessionId: "session-1", requestId: "drain-1" });
+
+  assert.deepEqual(events, ["data:tail", "drain:drain-1"]);
+});
+
 test("terminal output ports filter data before delivery", () => {
   const delivered = [];
   const ipcRenderer = createFakeIpcRenderer();
