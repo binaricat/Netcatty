@@ -77,11 +77,11 @@ test('editor overlay leaves the work surface interactive outside the panel', () 
 
 test('editor stays mounted while another app surface is active', () => {
   assert.deepEqual(getAppHostEditorLayerStyle(false), {
-    visibility: 'hidden',
+    display: 'none',
     pointerEvents: 'none',
   });
   assert.deepEqual(getAppHostEditorLayerStyle(true), {
-    visibility: 'visible',
+    display: undefined,
     pointerEvents: undefined,
   });
 

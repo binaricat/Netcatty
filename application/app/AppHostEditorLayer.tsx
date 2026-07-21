@@ -54,7 +54,7 @@ export function collectWorkSurfaceHostTags(hosts: Host[]): string[] {
 
 export function getAppHostEditorLayerStyle(surfaceVisible: boolean): React.CSSProperties {
   return {
-    visibility: surfaceVisible ? 'visible' : 'hidden',
+    display: surfaceVisible ? undefined : 'none',
     pointerEvents: surfaceVisible ? undefined : 'none',
   };
 }
