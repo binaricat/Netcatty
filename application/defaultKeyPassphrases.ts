@@ -272,6 +272,45 @@ export async function readRememberedKeyPassphrases(
   return { values: [...values], unreadable };
 }
 
+export async function readExportableRememberedKeyPassphrases(
+  keyPath: string,
+  keys: SSHKey[],
+): Promise<{ values: string[]; unreadable: boolean }> {
+  const aliases = await resolveDefaultKeyPassphraseAliases(keyPath);
+  const aliasKeys = matchingPathKeys(aliases);
+  const values = new Set<string>();
+  let unreadable = false;
+
+  const hasExplicitOptOut = keys.some((key) => (
+    key.source === "reference"
+    && key.savePassphrase === false
+    && key.filePath
+    && aliasKeys.has(defaultKeyPassphrasePathKey(key.filePath))
+  ));
+  if (hasExplicitOptOut) return { values: [], unreadable: false };
+
+  const sideStore = await readDefaultKeyPassphrasesForVerification(keyPath);
+  for (const value of sideStore.values) values.add(value);
+  if (sideStore.unreadable) unreadable = true;
+
+  for (const key of keys) {
+    if (
+      key.source !== "reference"
+      || key.savePassphrase === false
+      || !key.filePath
+      || !aliasKeys.has(defaultKeyPassphrasePathKey(key.filePath))
+      || !key.passphrase
+    ) continue;
+    if (isEncryptedCredentialPlaceholder(key.passphrase)) {
+      unreadable = true;
+    } else {
+      values.add(key.passphrase);
+    }
+  }
+
+  return { values: [...values], unreadable };
+}
+
 function removeDefaultKeyPassphrasesUnlocked(keyPaths: string[]): void {
   const store = localStorageAdapter.read<Record<string, string>>(STORAGE_KEY_DEFAULT_KEY_PASSPHRASES);
   if (!store) return;

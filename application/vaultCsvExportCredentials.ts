@@ -2,7 +2,7 @@ import type { Host, SSHKey } from "../domain/models";
 import { isEncryptedCredentialPlaceholder, sanitizeCredentialValue } from "../domain/credentials";
 import { resolveVaultCsvHostKeyPath } from "../domain/vaultImport";
 import {
-  readDefaultKeyPassphrasesForVerification,
+  readExportableRememberedKeyPassphrases,
   type DefaultKeyPassphraseVerificationRead,
 } from "./defaultKeyPassphrases";
 
@@ -16,9 +16,9 @@ export interface VaultCsvCredentialOptions {
 export async function buildVaultCsvCredentialOptions(
   hosts: Host[],
   keys: SSHKey[],
-  readPassphrases: (
+  readPassphrases?: (
     keyPath: string,
-  ) => Promise<DefaultKeyPassphraseVerificationRead> = readDefaultKeyPassphrasesForVerification,
+  ) => Promise<DefaultKeyPassphraseVerificationRead>,
 ): Promise<VaultCsvCredentialOptions> {
   const exportableHosts = hosts.filter((host) => host.protocol !== "serial");
   const referenceKeysById = new Map(keys.map((key) => [key.id, key] as const));
@@ -31,9 +31,16 @@ export async function buildVaultCsvCredentialOptions(
     .map((host) => resolveVaultCsvHostKeyPath(host, { keyPathsById }))
     .filter(Boolean)));
   const reads = new Map<string, DefaultKeyPassphraseVerificationRead>();
+  const readForExport = readPassphrases ?? (async (keyPath: string) => {
+    const remembered = await readExportableRememberedKeyPassphrases(keyPath, keys);
+    return {
+      ...remembered,
+      present: remembered.unreadable || remembered.values.length > 0,
+    };
+  });
   await Promise.all(keyPaths.map(async (keyPath) => {
     try {
-      reads.set(keyPath, await readPassphrases(keyPath));
+      reads.set(keyPath, await readForExport(keyPath));
     } catch {
       reads.set(keyPath, { values: [], unreadable: true, present: true });
     }
