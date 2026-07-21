@@ -1,10 +1,12 @@
 import React, { useMemo, useState } from 'react';
 
 import type { WorkSurfaceHostEditorTarget } from '../state/useWorkSurfaceHostEditor';
+import { useI18n } from '../i18n/I18nProvider';
 import HostDetailsPanel from '../../components/HostDetailsPanel';
 import SerialHostDetailsPanel from '../../components/SerialHostDetailsPanel';
 import { PortalContainerProvider } from '../../components/ui/portal-container';
 import { resolveGroupDefaults } from '../../domain/groupConfig';
+import { STORAGE_KEY_VAULT_HOST_PANEL_WIDTH } from '@/infrastructure/config/storageKeys';
 import type {
   GroupConfig,
   Host,
@@ -100,6 +102,7 @@ export const AppHostEditorLayer: React.FC<AppHostEditorLayerProps> = ({
   onImportOrReuseKey,
   onUpdateSnippets,
 }) => {
+  const { t } = useI18n();
   const [portalContainer, setPortalContainer] = useState<HTMLDivElement | null>(null);
   const groups = useMemo(
     () => collectWorkSurfaceHostGroups(hosts, customGroups, groupConfigs),
@@ -113,6 +116,12 @@ export const AppHostEditorLayer: React.FC<AppHostEditorLayerProps> = ({
     () => (groupPath ? resolveGroupDefaults(groupPath, groupConfigs) : undefined),
     [groupConfigs, groupPath],
   );
+  // Share width persistence with Vault host details so both entry points feel consistent.
+  const hostPanelResizeProps = {
+    resizable: true as const,
+    persistWidthStorageKey: STORAGE_KEY_VAULT_HOST_PANEL_WIDTH,
+    resizeAriaLabel: t('vault.panel.resizeWidth'),
+  };
 
   if (!target || !editorKey) return null;
 
@@ -135,6 +144,7 @@ export const AppHostEditorLayer: React.FC<AppHostEditorLayerProps> = ({
             onCancel={onCancel}
             layout="overlay"
             className="pointer-events-auto"
+            {...hostPanelResizeProps}
           />
         ) : (
           <HostDetailsPanel
@@ -160,6 +170,7 @@ export const AppHostEditorLayer: React.FC<AppHostEditorLayerProps> = ({
             onCreateGroup={onCreateGroup}
             layout="overlay"
             className="pointer-events-auto"
+            {...hostPanelResizeProps}
           />
         )}
       </PortalContainerProvider>

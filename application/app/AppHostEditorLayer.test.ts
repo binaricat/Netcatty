@@ -75,6 +75,15 @@ test('editor overlay leaves the work surface interactive outside the panel', () 
   assert.equal((source.match(/layout="overlay"/g) ?? []).length, 2);
 });
 
+test('editor host panels share vault resize width persistence', () => {
+  const source = readFileSync(new URL('./AppHostEditorLayer.tsx', import.meta.url), 'utf8');
+
+  assert.match(source, /STORAGE_KEY_VAULT_HOST_PANEL_WIDTH/);
+  assert.match(source, /resizable:\s*true/);
+  assert.match(source, /\{\.\.\.hostPanelResizeProps\}/);
+  assert.equal((source.match(/\{\.\.\.hostPanelResizeProps\}/g) ?? []).length, 2);
+});
+
 test('editor stays mounted while another app surface is active', () => {
   assert.deepEqual(getAppHostEditorLayerStyle(false), {
     display: 'none',
