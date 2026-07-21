@@ -627,7 +627,7 @@ test("persistent highlight lookup follows uniform scrollback marker shifts", () 
   }
 });
 
-test("in-place redraw removes a persistent highlight when text stops matching", () => {
+test("in-place redraw removes a persistent highlight when text stops matching", async () => {
   const raf = installAnimationFrameQueue();
   try {
     const {
@@ -654,6 +654,7 @@ test("in-place redraw removes a persistent highlight when text stops matching", 
 
     setLineText(1, "hello SAFE world 1");
     handlers.writeParsed?.();
+    await new Promise((resolve) => { setTimeout(resolve, 120); });
     raf.flush();
 
     assert.equal(getActiveDecorationCount(), 8);
