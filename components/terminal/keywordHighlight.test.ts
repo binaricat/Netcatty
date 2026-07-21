@@ -11,6 +11,7 @@ import {
   TERMINAL_AUX_LONG_LINE_SCAN_LIMIT_CHARS,
   TERMINAL_LONG_LINE_PRESSURE_BYTES,
 } from "./runtime/terminalFlowConstants.ts";
+import { XTERM_PERFORMANCE_CONFIG } from "../../infrastructure/config/xtermPerformance.ts";
 
 type RafCallback = (time: number) => void;
 
@@ -666,6 +667,48 @@ test("persistent marker index synchronization stays constant-time", () => {
       fakeMarkerLineReadCount < 10,
       `expected constant marker reads, got ${fakeMarkerLineReadCount}`,
     );
+    highlighter.dispose();
+  } finally {
+    raf.restore();
+  }
+});
+
+test("persistent highlights stay bounded for broad matching rules", () => {
+  const raf = installAnimationFrameQueue();
+  try {
+    const {
+      term,
+      handlers,
+      getActiveDecorationCount,
+    } = createFakeTerminal("hello DEPLOY world", { lineCount: 2_000 });
+    term.rows = 30;
+    const highlighter = new KeywordHighlighter(term as never);
+    const rules: KeywordHighlightRule[] = [
+      {
+        id: "deploy",
+        label: "Deploy",
+        patterns: ["DEPLOY"],
+        color: "#F87171",
+        enabled: true,
+      },
+    ];
+
+    highlighter.setRules(rules, true);
+    raf.flush();
+    term.buffer.active.baseY = 1_970;
+    for (let viewportY = 120; viewportY <= 1_800; viewportY += term.rows) {
+      term.buffer.active.viewportY = viewportY;
+      handlers.scroll?.();
+    }
+
+    const expectedLimit = Math.min(
+      XTERM_PERFORMANCE_CONFIG.highlighting.maxPersistentDecorationLines,
+      Math.max(
+        XTERM_PERFORMANCE_CONFIG.highlighting.minPersistentDecorationLines,
+        term.rows * XTERM_PERFORMANCE_CONFIG.highlighting.persistentDecorationViewports,
+      ),
+    );
+    assert.equal(getActiveDecorationCount(), expectedLimit);
     highlighter.dispose();
   } finally {
     raf.restore();

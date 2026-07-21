@@ -110,6 +110,11 @@ export const XTERM_PERFORMANCE_CONFIG = {
     immediateMinIntervalMs: 16,
     // Number of unique line scan results to keep cached.
     cacheEntries: 1200,
+    // Retain matched-line markers across nearby scrollback without allowing a
+    // broad rule to register unbounded xterm trim listeners.
+    persistentDecorationViewports: 20,
+    minPersistentDecorationLines: 200,
+    maxPersistentDecorationLines: 1200,
     // Keep decorations for lines just outside the viewport so small scrolls
     // don't constantly dispose/recreate them. Scales with current terminal rows.
     overscanViewportRatio: 2.0,

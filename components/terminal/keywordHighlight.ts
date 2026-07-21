@@ -397,6 +397,7 @@ export class KeywordHighlighter implements IDisposable {
       }
     });
     this.lineDecorations.set(state.indexedLine, state);
+    this.prunePersistentDecorations();
     this.markTerminalRefreshNeeded(lineY);
   }
 
@@ -752,6 +753,23 @@ export class KeywordHighlighter implements IDisposable {
       if (markerLineBeforeDispose >= 0) {
         this.markTerminalRefreshNeeded(markerLineBeforeDispose);
       }
+    }
+  }
+
+  private prunePersistentDecorations() {
+    const config = XTERM_PERFORMANCE_CONFIG.highlighting;
+    const maxPersistentLines = Math.min(
+      config.maxPersistentDecorationLines,
+      Math.max(
+        config.minPersistentDecorationLines,
+        this.term.rows * config.persistentDecorationViewports,
+      ),
+    );
+
+    while (this.lineDecorations.size > maxPersistentLines) {
+      const oldest = this.lineDecorations.values().next().value as LineDecorationState | undefined;
+      if (!oldest) break;
+      this.disposeLineDecorations(oldest.marker.line, oldest);
     }
   }
 
