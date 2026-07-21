@@ -447,13 +447,16 @@ function createTerminalWorkerManager(options = {}) {
 
   function findFallbackHomeWebContentsId(preferredId) {
     if (isLiveWebContentsId(preferredId)) return preferredId;
+    // Only fall back to registered main app windows — never settings/prewarm/
+    // tray/popup renderers, which cannot host the hidden silent Terminal.
     try {
-      const wins = electronModule?.BrowserWindow?.getAllWindows?.() || [];
-      for (const win of wins) {
+      const wm = require("./windowManager.cjs");
+      const mains = typeof wm.getMainWindows === "function"
+        ? wm.getMainWindows()
+        : (typeof wm.getMainWindow === "function" ? [wm.getMainWindow()].filter(Boolean) : []);
+      for (const win of mains) {
         const wc = win?.webContents;
         if (!wc || wc.isDestroyed?.()) continue;
-        const url = typeof wc.getURL === "function" ? wc.getURL() : "";
-        if (url.includes("#/terminal-popup") || url.includes("#/tray")) continue;
         if (typeof wc.id === "number") return wc.id;
       }
     } catch {
