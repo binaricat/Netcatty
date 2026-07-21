@@ -192,8 +192,18 @@ export const HostDetailsConnectionSections: React.FC<HostDetailsConnectionSectio
                       key={value}
                       value={value}
                       textValue={t(labelKey)}
-                      onSelect={() => {
+                      onPointerUp={() => {
+                        // Radix skips consumer onValueChange for an unchanged value.
+                        // Key/certificate still need the same-item path to reopen the chooser.
                         if (shouldForceAuthMethodReselect(value, resolvedAuthMethod)) {
+                          selectAuthMethod(value);
+                        }
+                      }}
+                      onKeyDown={(event) => {
+                        if (
+                          (event.key === "Enter" || event.key === " ")
+                          && shouldForceAuthMethodReselect(value, resolvedAuthMethod)
+                        ) {
                           selectAuthMethod(value);
                         }
                       }}

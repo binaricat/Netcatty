@@ -139,6 +139,16 @@ test("host credentials expose automatic and password-only choices", () => {
   );
 });
 
+test("wires same-value key/certificate reselect through pointer and keyboard handlers", () => {
+  const source = require("node:fs").readFileSync(
+    new URL("./HostDetailsConnectionSections.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(source, /onPointerUp=\{\(\) => \{[\s\S]*shouldForceAuthMethodReselect/);
+  assert.match(source, /onKeyDown=\{\(event\) => \{[\s\S]*shouldForceAuthMethodReselect/);
+  assert.doesNotMatch(source, /onSelect=\{\(\) => \{[\s\S]*shouldForceAuthMethodReselect/);
+});
+
 test("reselecting the current key or certificate method still forces the chooser path", () => {
   assert.equal(shouldForceAuthMethodReselect("key", "key"), true);
   assert.equal(shouldForceAuthMethodReselect("certificate", "certificate"), true);
