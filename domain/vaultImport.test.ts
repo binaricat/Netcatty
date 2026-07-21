@@ -144,8 +144,57 @@ test("CSV import ignores a passphrase without a key path", () => {
   );
 
   assert.equal(result.hosts.length, 1);
+  assert.equal(result.hosts[0]?.password, undefined);
   assert.deepEqual(result.keyPassphrases, []);
   assert.match(result.issues[0]?.message ?? "", /KeyPath is empty/u);
+});
+
+test("CSV duplicate rows merge later key credentials into the retained host", () => {
+  const result = importVaultHostsFromText(
+    "csv",
+    [
+      "Label,Hostname,Username,KeyPath,Passphrase",
+      "first,duplicate.example.com,root,,",
+      "second,duplicate.example.com,root,~/.ssh/id_ed25519,secret",
+    ].join("\n"),
+  );
+
+  assert.equal(result.hosts.length, 1);
+  assert.deepEqual(result.hosts[0]?.identityFilePaths, ["~/.ssh/id_ed25519"]);
+  assert.deepEqual(result.keyPassphrases, [{
+    hostId: result.hosts[0]?.id,
+    keyPath: "~/.ssh/id_ed25519",
+    passphrase: "secret",
+  }]);
+});
+
+test("CSV duplicate rows never attach a passphrase for a different retained key", () => {
+  const result = importVaultHostsFromText(
+    "csv",
+    [
+      "Label,Hostname,Username,KeyPath,Passphrase",
+      "first,duplicate.example.com,root,~/.ssh/id_first,",
+      "second,duplicate.example.com,root,~/.ssh/id_second,secret",
+    ].join("\n"),
+  );
+
+  assert.deepEqual(result.hosts[0]?.identityFilePaths, ["~/.ssh/id_first"]);
+  assert.deepEqual(result.keyPassphrases, []);
+});
+
+test("CSV import rejects conflicting passphrases for a shared key path", () => {
+  const result = importVaultHostsFromText(
+    "csv",
+    [
+      "Label,Hostname,Username,KeyPath,Passphrase",
+      "first,first.example.com,root,~/.ssh/id_shared,first-secret",
+      "second,second.example.com,root,~/.ssh/id_shared,second-secret",
+    ].join("\n"),
+  );
+
+  assert.equal(result.hosts.length, 2);
+  assert.deepEqual(result.keyPassphrases, []);
+  assert.match(result.issues[0]?.message ?? "", /conflicting passphrases/u);
 });
 
 test("detectVaultImportFormat recognizes MobaXterm bookmark exports", () => {

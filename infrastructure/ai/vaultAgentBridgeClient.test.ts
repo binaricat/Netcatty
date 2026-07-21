@@ -1084,6 +1084,33 @@ describe('handleVaultAgentOp vault hosts', () => {
     assert.equal(duplicate.ok, true);
     assert.deepEqual(saved, []);
   });
+
+  it('host.import does not save conflicting passphrases for a shared key path', async () => {
+    const saved: Array<{ keyPath: string; passphrase: string }> = [];
+    const result = await handleVaultAgentOp(
+      'host.import',
+      {
+        format: 'csv',
+        text: [
+          'Label,Hostname,Username,KeyPath,Passphrase',
+          'first,first.example.com,root,~/.ssh/id_shared,first-secret',
+          'second,second.example.com,root,~/.ssh/id_shared,second-secret',
+        ].join('\n'),
+      },
+      createDeps({
+        saveKeyPassphrase: async (keyPath, passphrase) => {
+          saved.push({ keyPath, passphrase });
+        },
+      }),
+    );
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(saved, []);
+    assert.match(
+      (result as { issues?: Array<{ message: string }> }).issues?.[0]?.message ?? '',
+      /conflicting passphrases/u,
+    );
+  });
 });
 
 describe('handleVaultAgentOp vault management gaps', () => {

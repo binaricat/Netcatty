@@ -151,6 +151,7 @@ export function useVaultAgentBridge(input: UseVaultAgentBridgeInput): void {
           keyPath,
           passphrase,
           keys: vaultSnapshotRef.current.keys,
+          getKeys: () => vaultSnapshotRef.current.keys,
           updateKeys: current.updateKeys,
           setCurrentKeys: (keys) => {
             vaultSnapshotRef.current.keys = keys;

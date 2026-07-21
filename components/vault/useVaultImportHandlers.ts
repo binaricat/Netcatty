@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useRef } from "react";
 
 import { rememberKeyPassphrase } from "../../application/defaultKeyPassphrases";
 import { readVaultImportFile } from "../../application/state/vaultImportFile";
@@ -33,6 +33,8 @@ export function useVaultImportHandlers({
   setIsImportOpen,
   t,
 }: UseVaultImportHandlersOptions) {
+  const keysRef = useRef(keys);
+  keysRef.current = keys;
   const handleImportFileSelected = useCallback(
       async (format: VaultImportFormat, file: File, options?: ImportOptions) => {
         setIsImportOpen(false);
@@ -160,22 +162,26 @@ export function useVaultImportHandlers({
           } else if (newHosts.length > 0) {
             const merged = applyVaultHostImport(hosts, customGroups, result, { skipDuplicates: true });
             const addedHostIds = new Set(merged.addedHosts.map((host) => host.id));
-            let currentKeys = keys;
+            const passphrasesByPath = new Map<string, NonNullable<typeof result.keyPassphrases>[number]>();
             for (const entry of result.keyPassphrases ?? []) {
               if (addedHostIds.has(entry.hostId)) {
-                await rememberKeyPassphrase({
-                  keyPath: entry.keyPath,
-                  passphrase: entry.passphrase,
-                  keys: currentKeys,
-                  updateKeys: onUpdateKeys,
-                  setCurrentKeys: (updatedKeys) => {
-                    currentKeys = updatedKeys;
-                  },
-                });
+                passphrasesByPath.set(entry.keyPath, entry);
               }
             }
             onUpdateHosts(merged.hosts);
             onUpdateCustomGroups(merged.customGroups);
+            for (const entry of passphrasesByPath.values()) {
+              await rememberKeyPassphrase({
+                keyPath: entry.keyPath,
+                passphrase: entry.passphrase,
+                keys: keysRef.current,
+                getKeys: () => keysRef.current,
+                updateKeys: onUpdateKeys,
+                setCurrentKeys: (updatedKeys) => {
+                  keysRef.current = updatedKeys;
+                },
+              });
+            }
           }
   
           // Count total hosts affected (new + converted to managed)
@@ -232,7 +238,6 @@ export function useVaultImportHandlers({
       [
         customGroups,
         hosts,
-        keys,
         managedSources,
         onUpdateCustomGroups,
         onUpdateHosts,

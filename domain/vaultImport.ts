@@ -10,7 +10,7 @@ import {
 
 export { buildVaultHostMergeKey } from "./vaultHostCreate";
 import { parseQuickConnectInput } from "./quickConnect";
-import { findHeaderIndex, parseCsv } from "./vaultImport/csvUtils";
+import { findExactHeaderIndex, findHeaderIndex, parseCsv } from "./vaultImport/csvUtils";
 export { exportHostsToCsvWithStats, getVaultCsvTemplate } from "./vaultImport/csvExport";
 
 interface ParsedJumpHost {
@@ -166,6 +166,16 @@ const splitTags = (raw: string | undefined): string[] => {
 
 const hostKey = buildVaultHostMergeKey;
 
+const normalizeKeyPathKey = (keyPath: string): string => {
+  const isWindowsPath = /^[A-Za-z]:[\\/]/u.test(keyPath) || /^[\\/]{2}/u.test(keyPath);
+  const normalized = keyPath.replace(/\\/g, "/");
+  return isWindowsPath ? normalized.toLowerCase() : normalized;
+};
+
+const restoreGuardedKeyPath = (keyPath: string): string => (
+  /^'+[=+\-@\t\r]/u.test(keyPath) ? keyPath.slice(1) : keyPath
+);
+
 const createHost = (input: {
   label?: string;
   hostname: string;
@@ -200,6 +210,12 @@ const dedupeHosts = (hosts: Host[]): { hosts: Host[]; duplicates: number } => {
     const mergedTags = Array.from(new Set([...(existing.tags ?? []), ...(host.tags ?? [])]));
     existing.tags = mergedTags;
     if (!existing.password && host.password) existing.password = host.password;
+    if (!existing.identityFilePaths?.some((path) => path.trim()) && host.identityFilePaths?.length) {
+      existing.identityFilePaths = host.identityFilePaths;
+      existing.authMethod = host.authMethod;
+      existing.authPolicyVersion = host.authPolicyVersion;
+      existing.useSshAgent = host.useSshAgent;
+    }
     if (existing.group == null && host.group != null) existing.group = host.group;
     if (existing.label === existing.hostname && host.label && host.label !== host.hostname) {
       existing.label = host.label;
@@ -275,9 +291,12 @@ const importFromCsv = (text: string): VaultImportResult => {
   const protocolIdx = findHeaderIndex(header, ["protocol", "proto", "scheme"]);
   const portIdx = findHeaderIndex(header, ["port"]);
   const usernameIdx = findHeaderIndex(header, ["username", "user", "login"]);
-  const passwordIdx = findHeaderIndex(header, ["password", "pass", "passwd"]);
   const keyPathIdx = findHeaderIndex(header, ["keypath", "key path", "identityfile", "identity file"]);
   const passphraseIdx = findHeaderIndex(header, ["passphrase", "keypassphrase", "key passphrase"]);
+  const matchedPasswordIdx = findHeaderIndex(header, ["password", "pass", "passwd"]);
+  const passwordIdx = matchedPasswordIdx === passphraseIdx
+    ? findExactHeaderIndex(header, ["password", "pass", "passwd"])
+    : matchedPasswordIdx;
 
   if (hostnameIdx === -1) {
     return {
@@ -295,7 +314,15 @@ const importFromCsv = (text: string): VaultImportResult => {
   }
 
   const parsedHosts: Host[] = [];
-  const keyPassphrasesByHost = new Map<string, Omit<VaultHostKeyPassphrase, "hostId">>();
+  const keyPassphraseCandidates: Array<{
+    hostKey: string;
+    keyPathKey: string;
+  }> = [];
+  const keyPassphrasesByPath = new Map<string, {
+    keyPath: string;
+    passphrase?: string;
+    conflict: boolean;
+  }>();
   let parsed = 0;
   let skipped = 0;
 
@@ -327,7 +354,8 @@ const importFromCsv = (text: string): VaultImportResult => {
     const port = parsePort(portIdx >= 0 ? row[portIdx] : undefined) ?? target.port;
     const username = (usernameIdx >= 0 ? row[usernameIdx] : undefined)?.trim() || target.username;
     const password = (passwordIdx >= 0 ? row[passwordIdx] : undefined) || undefined;
-    const keyPath = (keyPathIdx >= 0 ? row[keyPathIdx] : undefined)?.trim() || undefined;
+    const keyPathRaw = (keyPathIdx >= 0 ? row[keyPathIdx] : undefined)?.trim();
+    const keyPath = keyPathRaw ? restoreGuardedKeyPath(keyPathRaw) : undefined;
     const passphrase = (passphraseIdx >= 0 ? row[passphraseIdx] : undefined) || undefined;
 
     if (passphrase && !keyPath) {
@@ -351,17 +379,37 @@ const importFromCsv = (text: string): VaultImportResult => {
     });
     parsedHosts.push(host);
     if (keyPath && passphrase) {
-      const mergeKey = buildVaultHostMergeKey(host);
-      if (!keyPassphrasesByHost.has(mergeKey)) {
-        keyPassphrasesByHost.set(mergeKey, { keyPath, passphrase });
+      const keyPathKey = normalizeKeyPathKey(keyPath);
+      const stored = keyPassphrasesByPath.get(keyPathKey);
+      if (!stored) {
+        keyPassphrasesByPath.set(keyPathKey, { keyPath, passphrase, conflict: false });
+      } else if (stored.passphrase !== passphrase && !stored.conflict) {
+        stored.conflict = true;
+        issues.push({
+          level: "warning",
+          message: `CSV contains conflicting passphrases for KeyPath "${keyPath}"; no passphrase was saved for that path.`,
+        });
       }
+      keyPassphraseCandidates.push({
+        hostKey: buildVaultHostMergeKey(host),
+        keyPathKey,
+      });
     }
   }
 
   const { hosts, duplicates } = dedupeHosts(parsedHosts);
   const keyPassphrases = hosts.flatMap((host) => {
-    const entry = keyPassphrasesByHost.get(buildVaultHostMergeKey(host));
-    return entry ? [{ hostId: host.id, ...entry }] : [];
+    const selectedKeyPath = host.identityFilePaths?.find((path) => path.trim())?.trim();
+    if (!selectedKeyPath) return [];
+    const selectedKeyPathKey = normalizeKeyPathKey(selectedKeyPath);
+    const candidate = keyPassphraseCandidates.find((entry) => (
+      entry.hostKey === buildVaultHostMergeKey(host)
+      && entry.keyPathKey === selectedKeyPathKey
+    ));
+    const entry = candidate ? keyPassphrasesByPath.get(candidate.keyPathKey) : undefined;
+    return entry?.passphrase && !entry.conflict
+      ? [{ hostId: host.id, keyPath: entry.keyPath, passphrase: entry.passphrase }]
+      : [];
   });
   const groups = uniq(hosts.map((h) => h.group).filter(Boolean) as string[]);
   return {

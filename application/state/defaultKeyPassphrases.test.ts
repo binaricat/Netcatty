@@ -485,6 +485,36 @@ test("rememberKeyPassphrase updates a reference key stored under an expanded ali
   assert.equal(updatedKeys?.[0].savePassphrase, true);
 });
 
+test("rememberKeyPassphrase reads the latest keys after saving the credential", async (t) => {
+  installLocalStorage(t);
+  const keyPath = "/Users/alice/.ssh/id_ed25519";
+  let currentKeys: SSHKey[] = [{
+    id: "key-1",
+    name: "Original",
+    type: "ed25519",
+    source: "reference",
+    filePath: keyPath,
+    createdAt: 1,
+  }];
+  const staleKeys = currentKeys;
+  const updatedNames: string[] = [];
+  currentKeys = [{ ...currentKeys[0], name: "Concurrent edit" }];
+
+  await rememberKeyPassphrase({
+    keyPath,
+    passphrase: "secret",
+    keys: staleKeys,
+    getKeys: () => currentKeys,
+    updateKeys: (updated) => {
+      currentKeys = updated;
+      updatedNames.push(updated[0]?.name ?? "");
+    },
+  });
+
+  assert.deepEqual(updatedNames, ["Concurrent edit"]);
+  assert.equal(currentKeys[0]?.passphrase, "secret");
+});
+
 test("path aliases replace and clear Windows reference-key spellings", async (t) => {
   installLocalStorage(t);
   Object.defineProperty(globalThis, "window", {

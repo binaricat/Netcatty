@@ -1,6 +1,7 @@
 import type { Host } from '../models';
 
 const UTF8_BOM = "\uFEFF";
+const GUARDED_FORMULA_PREFIX = /^'*[=+\-@\t\r]/u;
 
 export interface VaultCsvTemplateOptions {
   includeExampleRows?: boolean;
@@ -73,6 +74,7 @@ const exportHostsToCsv = (hosts: Host[], options: VaultCsvExportOptions): string
       ? (host.telnetUsername ?? host.username ?? "")
       : (host.username ?? "");
     const keyPath = host.identityFilePaths?.find((path) => path.trim())?.trim() ?? "";
+    const guardedKeyPath = GUARDED_FORMULA_PREFIX.test(keyPath) ? `'${keyPath}` : keyPath;
 
     rows.push([
       host.group ?? "",
@@ -84,16 +86,17 @@ const exportHostsToCsv = (hosts: Host[], options: VaultCsvExportOptions): string
       String(effectivePort),
       effectiveUsername,
       host.password ?? "",
-      keyPath,
+      guardedKeyPath,
       keyPath ? (options.keyPassphrases?.get(keyPath) ?? "") : "",
     ]);
   }
 
   const passwordColIdx = header.indexOf("Password");
+  const keyPathColIdx = header.indexOf("KeyPath");
   const passphraseColIdx = header.indexOf("Passphrase");
   return rows.map((r, rowIdx) => r.map((c, i) => escapeCsv(
     c,
-    rowIdx > 0 && (i === passwordColIdx || i === passphraseColIdx),
+    rowIdx > 0 && (i === passwordColIdx || i === keyPathColIdx || i === passphraseColIdx),
   )).join(",")).join("\r\n") + "\r\n";
 };
 

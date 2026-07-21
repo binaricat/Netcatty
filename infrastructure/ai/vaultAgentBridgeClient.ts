@@ -795,13 +795,6 @@ export async function handleVaultAgentOp(
         { skipDuplicates },
       );
 
-      const addedHostIds = new Set(merged.addedHosts.map((host) => host.id));
-      for (const entry of importResult.keyPassphrases ?? []) {
-        if (addedHostIds.has(entry.hostId)) {
-          await deps.saveKeyPassphrase(entry.keyPath, entry.passphrase);
-        }
-      }
-
       if (merged.addedCount === 0 && importResult.stats.parsed === 0) {
         return {
           ok: false,
@@ -812,8 +805,19 @@ export async function handleVaultAgentOp(
         };
       }
 
+      const addedHostIds = new Set(merged.addedHosts.map((host) => host.id));
+      const passphrasesByPath = new Map<string, NonNullable<typeof importResult.keyPassphrases>[number]>();
+      for (const entry of importResult.keyPassphrases ?? []) {
+        if (addedHostIds.has(entry.hostId)) {
+          passphrasesByPath.set(entry.keyPath, entry);
+        }
+      }
+
       deps.updateHosts(merged.hosts);
       deps.updateCustomGroups(merged.customGroups);
+      for (const entry of passphrasesByPath.values()) {
+        await deps.saveKeyPassphrase(entry.keyPath, entry.passphrase);
+      }
 
       return {
         ok: true,

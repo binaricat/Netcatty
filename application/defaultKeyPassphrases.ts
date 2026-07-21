@@ -255,16 +255,17 @@ export async function rememberKeyPassphrase(args: {
   keyPath: string;
   passphrase: string;
   keys: SSHKey[];
+  getKeys?: () => SSHKey[];
   updateKeys: (keys: SSHKey[]) => Promise<unknown> | unknown;
   setCurrentKeys?: (keys: SSHKey[]) => void;
 }): Promise<void> {
-  const { keyPath, passphrase, keys, updateKeys, setCurrentKeys } = args;
+  const { keyPath, passphrase, keys, getKeys, updateKeys, setCurrentKeys } = args;
   const aliases = await resolveDefaultKeyPassphraseAliases(keyPath);
   const aliasKeys = matchingPathKeys(aliases);
   await saveDefaultKeyPassphrase(keyPath, passphrase);
 
   let changed = false;
-  const updated = keys.map((key) => {
+  const updated = (getKeys?.() ?? keys).map((key) => {
     if (
       key.source !== "reference"
       || !key.filePath
