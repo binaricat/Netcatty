@@ -15,6 +15,8 @@ const host = (overrides: Partial<Host> = {}): Host => ({
   username: 'root',
   port: 22,
   protocol: 'ssh',
+  tags: [],
+  os: 'linux',
   createdAt: 1,
   ...overrides,
 });

@@ -16,6 +16,8 @@ const host = (overrides: Partial<Host> = {}): Host => ({
   username: 'root',
   port: 22,
   protocol: 'ssh',
+  tags: [],
+  os: 'linux',
   createdAt: 1,
   ...overrides,
 });
@@ -69,4 +71,14 @@ test('editor overlay leaves the work surface interactive outside the panel', () 
   assert.match(source, /pointer-events-none absolute inset-0 z-40/);
   assert.equal((source.match(/className="pointer-events-auto"/g) ?? []).length, 2);
   assert.equal((source.match(/layout="overlay"/g) ?? []).length, 2);
+});
+
+test('AppView composes host-tree actions with the work-surface editor', () => {
+  const source = readFileSync(new URL('./AppView.tsx', import.meta.url), 'utf8');
+
+  assert.match(source, /useWorkSurfaceHostEditor/);
+  assert.match(source, /<AppHostEditorLayer/);
+  assert.match(source, /onNewHost=\{workSurfaceHostEditor\.openNew\}/);
+  assert.match(source, /onEditHost=\{workSurfaceHostEditor\.openEdit\}/);
+  assert.match(source, /terminal\.layer\.hostTree\.hostSavedNextConnection/);
 });
