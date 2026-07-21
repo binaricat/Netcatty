@@ -102,36 +102,20 @@ export const TopTabsQuickControls: React.FC<TopTabsQuickControlsProps> = ({
           ) : null}
 
           <div className={cn(showExternalMcpToggle && 'mt-1 border-t border-border/60 pt-1')}>
-            <div className="rounded-md px-2 py-2">
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex min-w-0 items-center gap-2 text-sm">
-                  <Droplets size={14} className="shrink-0 text-muted-foreground" />
-                  <span className="truncate">{t('topTabs.windowOpacity')}</span>
-                </div>
-                <span className="w-9 text-right text-xs tabular-nums text-muted-foreground">
-                  {opacityPercent}%
-                </span>
+            <div className="flex items-center justify-between gap-3 rounded-md px-2 py-2">
+              <div className="flex min-w-0 items-center gap-2 text-sm">
+                <Droplets size={14} className="shrink-0 text-muted-foreground" />
+                <span className="truncate">{t('topTabs.windowOpacity')}</span>
               </div>
-              <div className="mt-2 flex items-center gap-2">
-                <input
-                  type="range"
-                  min={50}
-                  max={100}
-                  step={1}
-                  value={opacityPercent}
-                  onChange={(event) => setWindowOpacity(Number(event.target.value) / 100)}
-                  className="w-full accent-primary"
-                  aria-label={t('topTabs.windowOpacity')}
-                />
-              </div>
-              <div className="mt-2 flex items-center gap-1">
+              <div className="flex shrink-0 items-center gap-1" role="group" aria-label={t('topTabs.windowOpacity')}>
                 {OPACITY_PRESETS.map((preset) => (
                   <button
                     key={preset.label}
                     type="button"
                     onClick={() => setWindowOpacity(preset.value)}
+                    aria-pressed={windowOpacity === preset.value}
                     className={cn(
-                      'h-6 flex-1 rounded-md text-[11px] font-medium transition-colors',
+                      'h-6 min-w-10 rounded-md px-1.5 text-[11px] font-medium transition-colors',
                       windowOpacity === preset.value
                         ? 'bg-primary text-primary-foreground'
                         : 'bg-muted/50 text-muted-foreground hover:bg-muted hover:text-foreground',
