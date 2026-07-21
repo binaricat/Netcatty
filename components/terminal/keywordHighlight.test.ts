@@ -463,6 +463,7 @@ test("user scrollback browsing stays synchronous during a write burst", () => {
     for (let index = 0; index < 6; index += 1) {
       handlers.writeParsed?.();
     }
+    resetTranslateCount();
     term.buffer.active.baseY = 190;
     term.buffer.active.viewportY = 120;
     handlers.scroll?.();
