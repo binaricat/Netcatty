@@ -69,6 +69,7 @@ test('editor overlay leaves the work surface interactive outside the panel', () 
   const source = readFileSync(new URL('./AppHostEditorLayer.tsx', import.meta.url), 'utf8');
 
   assert.match(source, /pointer-events-none absolute inset-0 z-40/);
+  assert.match(source, /\[&>\*\]:pointer-events-auto/);
   assert.equal((source.match(/className="pointer-events-auto"/g) ?? []).length, 2);
   assert.equal((source.match(/layout="overlay"/g) ?? []).length, 2);
 });

@@ -109,7 +109,7 @@ export const AppHostEditorLayer: React.FC<AppHostEditorLayerProps> = ({
 
   return (
     <div
-      className="pointer-events-none absolute inset-0 z-40"
+      className="pointer-events-none absolute inset-0 z-40 [&>*]:pointer-events-auto"
       data-section="app-host-editor-layer"
     >
       {target.mode === 'edit' && target.openedHost.protocol === 'serial' ? (
