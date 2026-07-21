@@ -1134,7 +1134,6 @@ const {
   cancelSftpUpload,
   closeSftp,
   mkdirSftp,
-  execSshCommand,
   deleteSftp,
   renameSftp,
   statSftp,

@@ -680,37 +680,7 @@ function createFileOpsApi(ctx) {
     }
     
     /**
-     * Execute a command via SSH using the underlying ssh2 client
-     * Returns { stdout, stderr, code }
-     */
-    function execSshCommand(sshClient, command) {
-      return new Promise((resolve, reject) => {
-        sshClient.exec(command, (err, stream) => {
-          if (err) {
-            return reject(err);
-          }
-    
-          let stdout = '';
-          let stderr = '';
-    
-          stream.on('close', (code) => {
-            resolve({ stdout, stderr, code });
-          });
-    
-          stream.on('data', (data) => {
-            stdout += data.toString();
-          });
-    
-          stream.stderr.on('data', (data) => {
-            stderr += data.toString();
-          });
-        });
-      });
-    }
-    
-    /**
      * Delete a file or directory
-     * For directories, uses SSH exec with 'rm -rf' for much faster deletion
      */
     async function deleteSftp(event, payload) {
       const client = sftpClients.get(payload.sftpId);
@@ -729,13 +699,6 @@ function createFileOpsApi(ctx) {
     
       const signal = payload?.abortSignal || null;
       const encoding = resolveEncodingForRequest(payload.sftpId, payload.encoding);
-      const shouldUseFastDirectoryDelete = (
-        encoding === "utf-8" &&
-        !client.__netcattySessionBacked &&
-        !signal &&
-        !(Number.isFinite(payload?.timeoutMs) && payload.timeoutMs > 0)
-      );
-    
       if (encoding === "utf-8") {
         throwIfAborted(signal);
         const sftp = await requireSftpChannel(client, { signal, timeoutMs: payload?.timeoutMs });
@@ -743,37 +706,14 @@ function createFileOpsApi(ctx) {
         const stat = statResultFromAttrs(await statAsync(sftp, encodedPath));
         throwIfAborted(signal);
         if (stat.isDirectory) {
-          if (shouldUseFastDirectoryDelete) {
-            // Keep the SSH rm -rf fast path only for ordinary UI SFTP sessions.
-            // Session-backed / stop-sensitive flows must stay on the abort-aware
-            // recursive SFTP path so SDK agent Stop and command timeouts can interrupt
-            // large directory deletes promptly.
-            const sshClient = client.client;
-            if (sshClient && typeof sshClient.exec === 'function') {
-              try {
-                // Escape path for shell - wrap in single quotes and escape any single quotes in the path
-                const escapedPath = payload.path.replace(/'/g, "'\\''");
-                const command = `rm -rf '${escapedPath}'`;
-                console.log(`[SFTP] Using SSH exec for fast directory deletion: ${command}`);
-    
-                const result = await execSshCommand(sshClient, command);
-    
-                if (result.code !== 0) {
-                  console.warn(`[SFTP] rm -rf returned code ${result.code}: ${result.stderr}`);
-                  // Fall back to SFTP rmdir if rm -rf fails (e.g., permission denied)
-                  await client.rmdir(encodedPath, true);
-                }
-                return true;
-              } catch (execErr) {
-                console.warn('[SFTP] SSH exec failed, falling back to SFTP rmdir:', execErr.message);
-                // Fall back to slow SFTP rmdir
-                await client.rmdir(encodedPath, true);
-                return true;
-              }
-            }
-          }
           if (client.__netcattySessionBacked) {
             await client.rmdir(encodedPath, true, { signal });
+          } else if (
+            !signal
+            && !(Number.isFinite(payload?.timeoutMs) && payload.timeoutMs > 0)
+            && typeof client.rmdir === "function"
+          ) {
+            await client.rmdir(encodedPath, true);
           } else {
             const normalizedPath = await normalizeRemotePathString(client, payload.path);
             throwIfAborted(signal);
@@ -1029,7 +969,6 @@ function createFileOpsApi(ctx) {
       cancelSftpUpload,
       closeSftp,
       mkdirSftp,
-      execSshCommand,
       deleteSftp,
       renameSftp,
       statSftp,
