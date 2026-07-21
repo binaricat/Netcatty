@@ -135,7 +135,7 @@ test("host credentials expose automatic and password-only choices", () => {
     markup,
     /hostDetails\.auth\.method[\s\S]*?role="combobox"[\s\S]*?hostDetails\.auth\.auto[\s\S]*?<\/div>\s*<div class="flex min-h-12 items-center justify-between gap-3 rounded-lg border border-border\/60 bg-secondary\/40 px-3 py-2">[\s\S]*hostDetails\.auth\.mfaFirst/,
   );
-  assert.match(markup, /class="[^"]*h-10 w-32[^"]*"/);
+  assert.match(markup, /class="[^"]*h-8 w-32[^"]*"/);
   assert.match(
     markup,
     /role="combobox"[\s\S]*?<span class="min-w-0 flex-1 truncate text-left">hostDetails\.auth\.auto<\/span>/,

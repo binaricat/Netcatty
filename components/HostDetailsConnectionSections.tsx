@@ -174,7 +174,7 @@ export const HostDetailsConnectionSections: React.FC<HostDetailsConnectionSectio
                 onValueChange={(val) => selectAuthMethod(val as "auto" | "password" | "key" | "certificate")}
               >
                 <SelectTrigger
-                  className="h-10 w-32 gap-2"
+                  className="h-8 w-32 gap-2"
                   aria-label={t("hostDetails.auth.method")}
                 >
                   {/*
