@@ -316,7 +316,6 @@ function App({ settings }: { settings: SettingsState }) {
     moveFocusInWorkspace,
     runSnippet,
     orphanSessions,
-    orderedTabs,
     getOrderedWorkTabs,
     reorderTabs,
     toggleBroadcast,

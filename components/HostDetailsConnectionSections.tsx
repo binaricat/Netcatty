@@ -105,6 +105,12 @@ export const HostDetailsConnectionSections: React.FC<HostDetailsConnectionSectio
     ["key", "hostDetails.auth.key"],
     ["certificate", "hostDetails.auth.certificate"],
   ] as const;
+  const resolvedAuthMethod = authChoices.some(([value]) => value === effectiveAuthMethod)
+    ? effectiveAuthMethod
+    : "auto";
+  const selectedAuthMethodLabel = t(
+    authChoices.find(([value]) => value === resolvedAuthMethod)?.[1] ?? "hostDetails.auth.auto",
+  );
   const effectiveEtEnabled = form.etEnabled ?? groupDefaults?.etEnabled;
   const effectiveProtocol = form.protocol ?? groupDefaults?.protocol;
 
@@ -145,49 +151,47 @@ export const HostDetailsConnectionSections: React.FC<HostDetailsConnectionSectio
             </div>
           </div>
           <div className="grid gap-2">
-            <div className="space-y-2 rounded-md border border-border/60 bg-secondary/30 p-2.5">
-                <div>
-                  <div className="text-xs font-medium text-foreground">
-                    {t("hostDetails.auth.method")}
-                  </div>
-                  <div className="text-[11px] text-muted-foreground">
-                    {t(`hostDetails.auth.${effectiveAuthMethod}.desc`)}
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-1.5">
+            <HostDetailsSettingRow
+              label={t("hostDetails.auth.method")}
+              hint={t(`hostDetails.auth.${resolvedAuthMethod}.desc`)}
+            >
+              <Select
+                value={resolvedAuthMethod}
+                onValueChange={(val) => selectAuthMethod(val as "auto" | "password" | "key" | "certificate")}
+              >
+                <SelectTrigger
+                  className="h-8 w-[7.5rem] gap-2"
+                  aria-label={selectedAuthMethodLabel}
+                >
+                  {/*
+                    Radix Select only mirrors the selected item text after the
+                    closed control is measured. Render the current label directly
+                    so the default value is never blank on first paint.
+                  */}
+                  <span className="min-w-0 flex-1 truncate text-left">
+                    {selectedAuthMethodLabel}
+                  </span>
+                </SelectTrigger>
+                <SelectContent>
                   {authChoices.map(([value, labelKey]) => (
-                    <button
-                      key={value}
-                      type="button"
-                      aria-pressed={effectiveAuthMethod === value}
-                      onClick={() => selectAuthMethod(value)}
-                      className={`h-8 rounded-md border px-2 text-xs font-medium transition-colors ${
-                        effectiveAuthMethod === value
-                          ? "border-primary/60 bg-primary/10 text-primary"
-                          : "border-border/60 bg-background text-muted-foreground hover:text-foreground"
-                      }`}
-                    >
+                    <SelectItem key={value} value={value} textValue={t(labelKey)}>
                       {t(labelKey)}
-                    </button>
+                    </SelectItem>
                   ))}
-                </div>
-                {!effectiveEtEnabled && effectiveProtocol !== "et" && (
-                  <div className="mt-2 flex items-center justify-between gap-3 rounded-md border border-border/60 bg-background px-2.5 py-2">
-                    <div className="min-w-0">
-                      <div className="text-xs font-medium text-foreground">
-                        {t("hostDetails.auth.mfaFirst")}
-                      </div>
-                      <div className="text-[11px] text-muted-foreground">
-                        {t("hostDetails.auth.mfaFirst.desc")}
-                      </div>
-                    </div>
-                    <Switch
-                      checked={!!form.requiresMfa}
-                      onCheckedChange={(val) => update("requiresMfa" as keyof Host, val)}
-                    />
-                  </div>
-                )}
-            </div>
+                </SelectContent>
+              </Select>
+            </HostDetailsSettingRow>
+            {!effectiveEtEnabled && effectiveProtocol !== "et" && (
+              <HostDetailsSettingRow
+                label={t("hostDetails.auth.mfaFirst")}
+                hint={t("hostDetails.auth.mfaFirst.desc")}
+              >
+                <Switch
+                  checked={!!form.requiresMfa}
+                  onCheckedChange={(val) => update("requiresMfa" as keyof Host, val)}
+                />
+              </HostDetailsSettingRow>
+            )}
             {selectedIdentity ? (
               <div className="flex items-center gap-2 h-10 px-3 rounded-md border border-border/70 bg-secondary/60">
                 <User size={16} className="text-muted-foreground" />

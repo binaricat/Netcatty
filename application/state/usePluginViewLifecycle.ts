@@ -248,7 +248,7 @@ export function usePluginViewLifecycle({
           await setViewBounds(opened.id, nextBounds);
           await setViewVisibility(opened.id, true);
         } catch {
-          try { await closeView(opened.id); } catch {}
+          try { await closeView(opened.id); } catch { /* best-effort cleanup after restore failure */ }
           opened = null;
         }
       }

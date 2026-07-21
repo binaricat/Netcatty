@@ -6,7 +6,6 @@ import {
   Search,
   Terminal,
   TerminalSquare,
-  Puzzle,
 } from "lucide-react";
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useI18n } from "../application/i18n/I18nProvider";

@@ -113,11 +113,20 @@ test("host credentials expose automatic and password-only choices", () => {
   });
 
   assert.match(markup, /hostDetails\.auth\.method/);
+  assert.match(markup, /role="combobox"/);
+  assert.match(markup, /aria-label="hostDetails\.auth\.auto\.desc"/);
   assert.match(markup, /hostDetails\.auth\.auto/);
-  assert.match(markup, /hostDetails\.auth\.passwordOnly/);
-  assert.match(markup, /hostDetails\.auth\.key/);
-  assert.match(markup, /hostDetails\.auth\.certificate/);
   assert.match(markup, /hostDetails\.auth\.mfaFirst/);
+  // Login method uses the same option-style setting row as other host form controls.
+  assert.match(
+    markup,
+    /hostDetails\.auth\.method[\s\S]*?role="combobox"[\s\S]*?hostDetails\.auth\.auto[\s\S]*?<\/div>\s*<div class="flex min-h-12 items-center justify-between gap-3 rounded-lg border border-border\/60 bg-secondary\/40 px-3 py-2">[\s\S]*hostDetails\.auth\.mfaFirst/,
+  );
+  assert.match(markup, /class="[^"]*h-8 w-\[7\.5rem\][^"]*"/);
+  assert.match(
+    markup,
+    /role="combobox"[\s\S]*?<span class="min-w-0 flex-1 truncate text-left">hostDetails\.auth\.auto<\/span>/,
+  );
 });
 
 test("ET hosts do not offer the unsupported interactive-auth preference", () => {
@@ -141,7 +150,13 @@ test("host authentication choices remain visible for a selected identity", () =>
     authMethod: "password",
   });
 
-  assert.match(markup, /hostDetails\.auth\.passwordOnly/);
+  assert.match(markup, /hostDetails\.auth\.method/);
+  assert.match(markup, /role="combobox"/);
+  assert.match(markup, /aria-label="hostDetails\.auth\.password\.desc"/);
+  assert.match(
+    markup,
+    /role="combobox"[\s\S]*?<span class="min-w-0 flex-1 truncate text-left">hostDetails\.auth\.passwordOnly<\/span>/,
+  );
 });
 
 test("host authentication choices show the inherited effective method", () => {
@@ -151,7 +166,13 @@ test("host authentication choices show the inherited effective method", () => {
     effectiveAuthMethod: "password",
   });
 
-  assert.match(markup, /<button[^>]*aria-pressed="true"[^>]*>hostDetails\.auth\.passwordOnly<\/button>/);
+  assert.match(markup, /hostDetails\.auth\.method/);
+  assert.match(markup, /role="combobox"/);
+  assert.match(markup, /aria-label="hostDetails\.auth\.password\.desc"/);
+  assert.match(
+    markup,
+    /role="combobox"[\s\S]*?<span class="min-w-0 flex-1 truncate text-left">hostDetails\.auth\.passwordOnly<\/span>/,
+  );
 });
 
 test("reselecting an inherited authentication method preserves group credentials", () => {
