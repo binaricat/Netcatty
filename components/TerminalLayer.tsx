@@ -78,7 +78,10 @@ import { resolveSidePanelToggleIntent } from '../application/state/resolveSidePa
 import { resolveAiSidePanelToggleIntent } from '../application/state/resolveAiSidePanelToggleIntent';
 import { terminalLayerAreEqual } from './terminalLayerMemo';
 import { TerminalLayerTabBridge } from './terminalLayer/TerminalLayerTabBridge';
-import { shouldKeepSftpMountedAfterClose } from './terminalLayer/sftpPanelLifecycle';
+import {
+  shouldClearSftpPanelAfterTransferChange,
+  shouldKeepSftpMountedAfterClose,
+} from './terminalLayer/sftpPanelLifecycle';
 import { resolveAiNoteArtifactPanelIntent } from './terminalLayer/aiNoteArtifactPanelIntent';
 import {
   canUseDirectSessionWriteFallback,
@@ -597,6 +600,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   const sftpHostForTabRef = useRef(sftpHostForTab);
   sftpHostForTabRef.current = sftpHostForTab;
   const sftpActiveTransfersByTabRef = useRef<Map<string, number>>(new Map());
+  const sftpRetainedAfterCloseTabIdsRef = useRef<Set<string>>(new Set());
   const sftpLastPathForSourceRef = useRef<Map<string, SftpRememberedLocation>>(new Map());
 
   const resolveSftpOpenTarget = useCallback((params: {
@@ -622,6 +626,8 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   }, []);
 
   const clearSftpPanelState = useCallback((tabId: string) => {
+    sftpActiveTransfersByTabRef.current.delete(tabId);
+    sftpRetainedAfterCloseTabIdsRef.current.delete(tabId);
     setSftpHostForTab(prev => {
       if (!prev.has(tabId)) return prev;
       const next = new Map(prev);
@@ -649,7 +655,11 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       return;
     }
     sftpActiveTransfersByTabRef.current.delete(tabId);
-    if (!sidePanelOpenTabsRef.current.has(tabId)) {
+    if (shouldClearSftpPanelAfterTransferChange({
+      activeTransfersCount,
+      panelOpen: sidePanelOpenTabsRef.current.has(tabId),
+      retainedAfterClose: sftpRetainedAfterCloseTabIdsRef.current.has(tabId),
+    })) {
       clearSftpPanelState(tabId);
     }
   }, [clearSftpPanelState]);
@@ -692,6 +702,11 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     const activeTransfersCount = sftpActiveTransfersByTabRef.current.get(tabId) ?? 0;
     const keepSftpMounted = isClosing
       && shouldKeepSftpMountedAfterClose(activeTransfersCount);
+    if (keepSftpMounted) {
+      sftpRetainedAfterCloseTabIdsRef.current.add(tabId);
+    } else if (!isClosing) {
+      sftpRetainedAfterCloseTabIdsRef.current.delete(tabId);
+    }
 
     setSidePanelOpenTabs(prev => {
       const next = new Map(prev);
@@ -983,6 +998,19 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     return ids;
   }, [sessions, workspaces]);
 
+  useEffect(() => {
+    for (const tabId of sftpActiveTransfersByTabRef.current.keys()) {
+      if (!validAIScopeTargetIds.has(tabId)) {
+        sftpActiveTransfersByTabRef.current.delete(tabId);
+      }
+    }
+    for (const tabId of sftpRetainedAfterCloseTabIdsRef.current) {
+      if (!validAIScopeTargetIds.has(tabId)) {
+        sftpRetainedAfterCloseTabIdsRef.current.delete(tabId);
+      }
+    }
+  }, [validAIScopeTargetIds]);
+
   const validSessionActivityIds = useMemo(() => {
     return getValidSessionActivityIds(sessions);
   }, [sessions]);
@@ -1086,7 +1114,9 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       return next;
     });
     const activeTransfersCount = sftpActiveTransfersByTabRef.current.get(activeTabId) ?? 0;
-    if (!shouldKeepSftpMountedAfterClose(activeTransfersCount)) {
+    if (shouldKeepSftpMountedAfterClose(activeTransfersCount)) {
+      sftpRetainedAfterCloseTabIdsRef.current.add(activeTabId);
+    } else {
       clearSftpPanelState(activeTabId);
     }
     setAiMountedTabIds((prev) => removeMountedSidePanelTabId(prev, activeTabId));
@@ -1130,6 +1160,10 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     // If already on this tab, do nothing — user must click X to close
     if (currentPanel === tab) return;
 
+    if (tab === 'sftp') {
+      sftpRetainedAfterCloseTabIdsRef.current.delete(tabId);
+    }
+
     // If switching to SFTP and no host is stored yet, resolve it
     if (tab === 'sftp' && !sftpHostForTabRef.current.has(tabId)) {
       const host = resolveSftpHostForTab(tabId);
@@ -1156,9 +1190,9 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       });
     }
 
-    // Note: When switching away from SFTP, we keep the SFTP host state
-    // so the SftpSidePanel stays mounted (hidden) and preserves connections.
-    // SFTP state is only cleaned up when the panel is fully closed.
+    // Keep the hidden SFTP panel mounted while switching sub-panels. A panel
+    // closed during a transfer is also retained until the user reopens it and
+    // explicitly closes the now-idle panel, preserving the completed history.
 
     markSidePanelSubTabOpened(tabId, tab);
     startTransition(() => {
