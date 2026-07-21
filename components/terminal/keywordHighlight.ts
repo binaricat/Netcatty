@@ -70,8 +70,9 @@ const RE_ASCII_ONLY = /^[\x00-\x7f]*$/;
 
 /**
  * Manages terminal decorations for keyword highlighting.
- * Uses persistent xterm.js markers so indexed lines keep their decorations for
- * their full scrollback lifetime without modifying the terminal data stream.
+ * Uses persistent xterm.js markers so nearby indexed lines keep decorations
+ * across scrollback navigation without modifying the terminal data stream.
+ * Retention is bounded to protect xterm's marker listeners for broad rules.
  */
 export class KeywordHighlighter implements IDisposable {
   private term: XTerm;
