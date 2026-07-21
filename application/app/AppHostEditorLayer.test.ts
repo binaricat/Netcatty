@@ -6,6 +6,7 @@ import type { GroupConfig, Host } from '../../types';
 import {
   collectWorkSurfaceHostGroups,
   collectWorkSurfaceHostTags,
+  getAppHostEditorLayerStyle,
   resolveWorkSurfaceHostEditorKind,
 } from './AppHostEditorLayer';
 
@@ -72,6 +73,21 @@ test('editor overlay leaves the work surface interactive outside the panel', () 
   assert.match(source, /\[&>\*\]:pointer-events-auto/);
   assert.equal((source.match(/className="pointer-events-auto"/g) ?? []).length, 2);
   assert.equal((source.match(/layout="overlay"/g) ?? []).length, 2);
+});
+
+test('editor stays mounted while another app surface is active', () => {
+  assert.deepEqual(getAppHostEditorLayerStyle(false), {
+    visibility: 'hidden',
+    pointerEvents: 'none',
+  });
+  assert.deepEqual(getAppHostEditorLayerStyle(true), {
+    visibility: 'visible',
+    pointerEvents: undefined,
+  });
+
+  const source = readFileSync(new URL('./AppHostEditorLayer.tsx', import.meta.url), 'utf8');
+  assert.doesNotMatch(source, /!surfaceVisible\) return null/);
+  assert.match(source, /style=\{getAppHostEditorLayerStyle\(surfaceVisible\)\}/);
 });
 
 test('AppView composes host-tree actions with the work-surface editor', () => {

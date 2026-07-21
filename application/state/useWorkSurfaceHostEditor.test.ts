@@ -3,6 +3,7 @@ import test from 'node:test';
 import type { Host } from '../../types';
 import {
   buildWorkSurfaceHostEditorKey,
+  mergeWorkSurfaceHostDraft,
   saveWorkSurfaceHostDraft,
   shouldCloseDeletedWorkSurfaceHost,
   type WorkSurfaceHostEditorTarget,
@@ -45,6 +46,50 @@ test('saving an edited host updates in place and preserves a concurrent display 
     ),
     [host({ label: 'web-2', showLineTimestamps: true })],
   );
+});
+
+test('saving preserves every field that changed elsewhere while the editor was open', () => {
+  const opened = host({
+    group: 'old-group',
+    charset: 'utf-8',
+    distro: 'debian',
+    algorithms: { kex: ['base-kex'] },
+  });
+  const latest = host({
+    group: 'moved-group',
+    charset: 'gbk',
+    distro: 'ubuntu',
+    lastConnectedAt: 42,
+    algorithms: { kex: ['base-kex'], cipher: ['runtime-cipher'] },
+  });
+  const draft = host({
+    label: 'renamed-in-editor',
+    group: 'old-group',
+    charset: 'utf-8',
+    distro: 'debian',
+    algorithms: { kex: ['base-kex'], hmac: ['editor-hmac'] },
+  });
+
+  assert.deepEqual(mergeWorkSurfaceHostDraft(opened, draft, latest), host({
+    label: 'renamed-in-editor',
+    group: 'moved-group',
+    charset: 'gbk',
+    distro: 'ubuntu',
+    lastConnectedAt: 42,
+    algorithms: {
+      kex: ['base-kex'],
+      cipher: ['runtime-cipher'],
+      hmac: ['editor-hmac'],
+    },
+  }));
+});
+
+test('saving keeps intentional clears instead of restoring the latest value', () => {
+  const opened = host({ notes: 'old note' });
+  const draft = host();
+  const latest = host({ notes: 'changed elsewhere' });
+
+  assert.deepEqual(mergeWorkSurfaceHostDraft(opened, draft, latest), draft);
 });
 
 test('saving a new host appends it', () => {

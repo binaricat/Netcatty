@@ -51,6 +51,13 @@ export function collectWorkSurfaceHostTags(hosts: Host[]): string[] {
   return Array.from(tags).sort((left, right) => left.localeCompare(right));
 }
 
+export function getAppHostEditorLayerStyle(surfaceVisible: boolean): React.CSSProperties {
+  return {
+    visibility: surfaceVisible ? 'visible' : 'hidden',
+    pointerEvents: surfaceVisible ? undefined : 'none',
+  };
+}
+
 interface AppHostEditorLayerProps {
   surfaceVisible: boolean;
   target: WorkSurfaceHostEditorTarget | null;
@@ -105,12 +112,13 @@ export const AppHostEditorLayer: React.FC<AppHostEditorLayerProps> = ({
     [groupConfigs, groupPath],
   );
 
-  if (!target || !editorKey || !surfaceVisible) return null;
+  if (!target || !editorKey) return null;
 
   return (
     <div
       className="pointer-events-none absolute inset-0 z-40 [&>*]:pointer-events-auto"
       data-section="app-host-editor-layer"
+      style={getAppHostEditorLayerStyle(surfaceVisible)}
     >
       {target.mode === 'edit' && target.openedHost.protocol === 'serial' ? (
         <SerialHostDetailsPanel

@@ -1,4 +1,4 @@
-import { Check, Expand, FolderPlus, Minimize2, Search, Tag, TerminalSquare, X } from 'lucide-react';
+import { Check, Expand, FolderPlus, Minimize2, Plus, Search, Tag, TerminalSquare, X } from 'lucide-react';
 import React, { useEffect, useRef } from 'react';
 
 import { useI18n } from '../../application/i18n/I18nProvider';
@@ -26,6 +26,8 @@ interface TerminalHostTreeToolbarProps {
   allTags: string[];
   selectedTags: string[];
   onSelectedTagsChange: (tags: string[]) => void;
+  onNewHost: () => void;
+  canNewHost?: boolean;
   onNewRootGroup: () => void;
   canNewGroup?: boolean;
   onCreateLocalTerminal: () => void;
@@ -47,6 +49,8 @@ export const TerminalHostTreeToolbar: React.FC<TerminalHostTreeToolbarProps> = (
   allTags,
   selectedTags,
   onSelectedTagsChange,
+  onNewHost,
+  canNewHost = true,
   onNewRootGroup,
   canNewGroup = true,
   onCreateLocalTerminal,
@@ -97,6 +101,22 @@ export const TerminalHostTreeToolbar: React.FC<TerminalHostTreeToolbarProps> = (
           data-section="terminal-host-tree-toolbar-actions"
         >
           <div className="flex items-center gap-1">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className={iconButtonClass}
+                  style={{ color: theme.mutedFg }}
+                  disabled={!canNewHost}
+                  onClick={onNewHost}
+                >
+                  <Plus size={14} />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">{t('terminal.layer.hostTree.newHost')}</TooltipContent>
+            </Tooltip>
+
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button

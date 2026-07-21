@@ -1,9 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import {
-  preserveConcurrentHostLineTimestampUpdate,
-  upsertHostById,
-} from '../../domain/host';
+import { upsertHostById } from '../../domain/host';
 import type { Host } from '../../types';
 
 export type WorkSurfaceHostEditorMode = 'new' | 'edit';
@@ -33,6 +30,64 @@ export function shouldCloseDeletedWorkSurfaceHost(
     && !hosts.some((host) => host.id === target.openedHost.id);
 }
 
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function areDraftValuesEqual(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) return true;
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return Array.isArray(left)
+      && Array.isArray(right)
+      && left.length === right.length
+      && left.every((value, index) => areDraftValuesEqual(value, right[index]));
+  }
+  if (!isPlainRecord(left) || !isPlainRecord(right)) return false;
+  const leftKeys = Object.keys(left);
+  const rightKeys = Object.keys(right);
+  return leftKeys.length === rightKeys.length
+    && leftKeys.every((key) => Object.hasOwn(right, key)
+      && areDraftValuesEqual(left[key], right[key]));
+}
+
+function mergeWorkSurfaceDraftValue(
+  openedValue: unknown,
+  draftValue: unknown,
+  latestValue: unknown,
+): unknown {
+  if (areDraftValuesEqual(draftValue, openedValue)) return latestValue;
+  if (
+    !isPlainRecord(openedValue)
+    || !isPlainRecord(draftValue)
+    || !isPlainRecord(latestValue)
+  ) {
+    return draftValue;
+  }
+
+  const merged: Record<string, unknown> = { ...latestValue };
+  const draftKeys = new Set([...Object.keys(openedValue), ...Object.keys(draftValue)]);
+  for (const key of draftKeys) {
+    if (!Object.hasOwn(draftValue, key)) {
+      delete merged[key];
+      continue;
+    }
+    merged[key] = mergeWorkSurfaceDraftValue(
+      openedValue[key],
+      draftValue[key],
+      latestValue[key],
+    );
+  }
+  return merged;
+}
+
+export function mergeWorkSurfaceHostDraft(
+  openedHost: Host,
+  draft: Host,
+  latestHost: Host,
+): Host {
+  return mergeWorkSurfaceDraftValue(openedHost, draft, latestHost) as Host;
+}
+
 export function saveWorkSurfaceHostDraft(
   hosts: Host[],
   target: WorkSurfaceHostEditorTarget,
@@ -47,11 +102,7 @@ export function saveWorkSurfaceHostDraft(
 
   return upsertHostById(
     hosts,
-    preserveConcurrentHostLineTimestampUpdate({
-      draft,
-      openedHost: target.openedHost,
-      latestHost,
-    }),
+    mergeWorkSurfaceHostDraft(target.openedHost, draft, latestHost),
   );
 }
 
