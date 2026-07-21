@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
+  EXTERNAL_MCP_RUNTIME_STATUS_POLL_MS,
   createExternalMcpStartupSyncPlan,
   normalizeExternalMcpIdleTimeoutMinutes,
   normalizeExternalMcpMode,
@@ -99,6 +100,10 @@ describe('useExternalMcpToggleState helpers', () => {
     }
   });
 
+  it('polls runtime status on a short interval for the top-bar switch', () => {
+    assert.equal(EXTERNAL_MCP_RUNTIME_STATUS_POLL_MS, 3000);
+  });
+
   it('silent-sessions defaults to false and round-trips through storage', () => {
     const restore = installMemoryLocalStorage();
     try {
@@ -110,5 +115,16 @@ describe('useExternalMcpToggleState helpers', () => {
     } finally {
       restore();
     }
+  });
+});
+
+describe('useExternalMcpToggleState runtime poll wiring', () => {
+  it('uses the shared poll interval constant', async () => {
+    const source = await import('node:fs').then((fs) =>
+      fs.readFileSync(new URL('./useExternalMcpToggleState.ts', import.meta.url), 'utf8'),
+    );
+    assert.match(source, /EXTERNAL_MCP_RUNTIME_STATUS_POLL_MS = 3000/);
+    assert.match(source, /setInterval\([\s\S]*EXTERNAL_MCP_RUNTIME_STATUS_POLL_MS\)/);
+    assert.doesNotMatch(source, /setInterval\([\s\S]*,\s*30000\)/);
   });
 });

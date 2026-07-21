@@ -142,7 +142,9 @@ export function AppView({ ctx }: { ctx: AppViewContext }) {
     () => selectPluginThemeTokens(appThemeStyle as Record<string, unknown>),
     [appThemeStyle],
   );
-const externalMcpToggle = useExternalMcpToggleState();
+  const isPeerSessionWindow = typeof window !== 'undefined'
+    && window.location.hash.startsWith('#/session-window');
+  const externalMcpToggle = useExternalMcpToggleState();
   const handleWorkSurfaceHostSaved = useCallback((mode: 'new' | 'edit') => {
     if (mode === 'edit') {
       toast.success(t('terminal.layer.hostTree.hostSavedNextConnection'));
@@ -259,6 +261,7 @@ const externalMcpToggle = useExternalMcpToggleState();
         onOpenSettings={handleOpenSettings}
         externalMcpEnabled={externalMcpToggle.enabled}
         onToggleExternalMcp={externalMcpToggle.setEnabled}
+        showExternalMcpToggle={!isPeerSessionWindow}
         windowOpacity={settings.windowOpacity}
         setWindowOpacity={settings.setWindowOpacity}
         onSyncNow={handleSyncNowManual}

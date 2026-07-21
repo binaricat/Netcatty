@@ -139,6 +139,7 @@ interface TopTabsProps {
   onOpenSettings: () => void;
   externalMcpEnabled: boolean;
   onToggleExternalMcp: (enabled: boolean) => void;
+  showExternalMcpToggle?: boolean;
   windowOpacity: number;
   setWindowOpacity: (opacity: number) => void;
   onSyncNow?: () => Promise<void>;
@@ -182,6 +183,7 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
   onOpenSettings,
   externalMcpEnabled,
   onToggleExternalMcp,
+  showExternalMcpToggle = true,
   windowOpacity,
   setWindowOpacity,
   onSyncNow,
@@ -1101,28 +1103,30 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
             </TooltipTrigger>
             <TooltipContent>{t('topTabs.aiAssistant')}</TooltipContent>
           </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7 shrink-0 app-no-drag top-tab-utility-btn"
-                style={{
-                  color: externalMcpEnabled
-                    ? 'hsl(var(--primary))'
-                    : 'var(--top-tabs-muted, hsl(var(--muted-foreground)))',
-                }}
-                aria-label={t(externalMcpEnabled ? 'topTabs.externalMcp.disable' : 'topTabs.externalMcp.enable')}
-                aria-pressed={externalMcpEnabled}
-                onClick={() => onToggleExternalMcp(!externalMcpEnabled)}
-              >
-                <Radio size={16} />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>
-              {t(externalMcpEnabled ? 'topTabs.externalMcp.disable' : 'topTabs.externalMcp.enable')}
-            </TooltipContent>
-          </Tooltip>
+          {showExternalMcpToggle ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 shrink-0 app-no-drag top-tab-utility-btn"
+                  style={{
+                    color: externalMcpEnabled
+                      ? 'hsl(var(--primary))'
+                      : 'var(--top-tabs-muted, hsl(var(--muted-foreground)))',
+                  }}
+                  aria-label={t(externalMcpEnabled ? 'topTabs.externalMcp.disable' : 'topTabs.externalMcp.enable')}
+                  aria-pressed={externalMcpEnabled}
+                  onClick={() => onToggleExternalMcp(!externalMcpEnabled)}
+                >
+                  <Radio size={16} />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                {t(externalMcpEnabled ? 'topTabs.externalMcp.disable' : 'topTabs.externalMcp.enable')}
+              </TooltipContent>
+            </Tooltip>
+          ) : null}
           <WindowOpacityButton
             windowOpacity={windowOpacity}
             setWindowOpacity={setWindowOpacity}
@@ -1193,6 +1197,7 @@ const topTabsAreEqual = (prev: TopTabsProps, next: TopTabsProps): boolean => {
     prev.onOpenSettings === next.onOpenSettings &&
     prev.externalMcpEnabled === next.externalMcpEnabled &&
     prev.onToggleExternalMcp === next.onToggleExternalMcp &&
+    prev.showExternalMcpToggle === next.showExternalMcpToggle &&
     prev.windowOpacity === next.windowOpacity &&
     prev.setWindowOpacity === next.setWindowOpacity &&
     prev.onSyncNow === next.onSyncNow &&

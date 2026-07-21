@@ -17,6 +17,8 @@ const DEFAULT_EXTERNAL_MCP_IDLE_TIMEOUT_MINUTES = 10;
 const MIN_EXTERNAL_MCP_IDLE_TIMEOUT_MINUTES = 1;
 const MAX_EXTERNAL_MCP_IDLE_TIMEOUT_MINUTES = 24 * 60;
 const DEFAULT_SESSION_IDLE_TIMEOUT_MINUTES = 30;
+/** Keep top-bar / settings switch state aligned with runtime auto-disable. */
+export const EXTERNAL_MCP_RUNTIME_STATUS_POLL_MS = 3000;
 
 type ExternalMcpConfig = {
   mode: ExternalMcpMode;
@@ -235,7 +237,7 @@ export function useExternalMcpToggleState() {
 
     const intervalId = window.setInterval(() => {
       void syncRuntimeStatus();
-    }, 30000);
+    }, EXTERNAL_MCP_RUNTIME_STATUS_POLL_MS);
     void syncRuntimeStatus();
     return () => window.clearInterval(intervalId);
   }, [enabled, persistEnabled]);
