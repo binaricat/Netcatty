@@ -101,61 +101,63 @@ export const TopTabsQuickControls: React.FC<TopTabsQuickControlsProps> = ({
             </div>
           ) : null}
 
-          <div className="rounded-md px-2 py-2">
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex min-w-0 items-center gap-2 text-sm">
-                <Droplets size={14} className="shrink-0 text-muted-foreground" />
-                <span className="truncate">{t('topTabs.windowOpacity')}</span>
+          <div className={cn(showExternalMcpToggle && 'mt-1 border-t border-border/60 pt-1')}>
+            <div className="rounded-md px-2 py-2">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex min-w-0 items-center gap-2 text-sm">
+                  <Droplets size={14} className="shrink-0 text-muted-foreground" />
+                  <span className="truncate">{t('topTabs.windowOpacity')}</span>
+                </div>
+                <span className="w-9 text-right text-xs tabular-nums text-muted-foreground">
+                  {opacityPercent}%
+                </span>
               </div>
-              <span className="w-9 text-right text-xs tabular-nums text-muted-foreground">
-                {opacityPercent}%
-              </span>
+              <div className="mt-2 flex items-center gap-2">
+                <input
+                  type="range"
+                  min={50}
+                  max={100}
+                  step={1}
+                  value={opacityPercent}
+                  onChange={(event) => setWindowOpacity(Number(event.target.value) / 100)}
+                  className="w-full accent-primary"
+                  aria-label={t('topTabs.windowOpacity')}
+                />
+              </div>
+              <div className="mt-2 flex items-center gap-1">
+                {OPACITY_PRESETS.map((preset) => (
+                  <button
+                    key={preset.label}
+                    type="button"
+                    onClick={() => setWindowOpacity(preset.value)}
+                    className={cn(
+                      'h-6 flex-1 rounded-md text-[11px] font-medium transition-colors',
+                      windowOpacity === preset.value
+                        ? 'bg-primary text-primary-foreground'
+                        : 'bg-muted/50 text-muted-foreground hover:bg-muted hover:text-foreground',
+                    )}
+                  >
+                    {preset.label}
+                  </button>
+                ))}
+              </div>
             </div>
-            <div className="mt-2 flex items-center gap-2">
-              <input
-                type="range"
-                min={50}
-                max={100}
-                step={1}
-                value={opacityPercent}
-                onChange={(event) => setWindowOpacity(Number(event.target.value) / 100)}
-                className="w-full accent-primary"
-                aria-label={t('topTabs.windowOpacity')}
-              />
-            </div>
-            <div className="mt-2 flex items-center gap-1">
-              {OPACITY_PRESETS.map((preset) => (
-                <button
-                  key={preset.label}
-                  type="button"
-                  onClick={() => setWindowOpacity(preset.value)}
-                  className={cn(
-                    'h-6 flex-1 rounded-md text-[11px] font-medium transition-colors',
-                    windowOpacity === preset.value
-                      ? 'bg-primary text-primary-foreground'
-                      : 'bg-muted/50 text-muted-foreground hover:bg-muted hover:text-foreground',
-                  )}
-                >
-                  {preset.label}
-                </button>
-              ))}
-            </div>
-          </div>
 
-          <div className="flex items-center justify-between gap-3 rounded-md px-2 py-2 hover:bg-muted/40">
-            <div className="flex min-w-0 items-center gap-2 text-sm">
-              {isDark
-                ? <Sun size={14} className="shrink-0 text-muted-foreground" />
-                : <Moon size={14} className="shrink-0 text-muted-foreground" />}
-              <span className="truncate">{t('topTabs.controlPanel.theme')}</span>
+            <div className="flex items-center justify-between gap-3 rounded-md px-2 py-2 hover:bg-muted/40">
+              <div className="flex min-w-0 items-center gap-2 text-sm">
+                {isDark
+                  ? <Sun size={14} className="shrink-0 text-muted-foreground" />
+                  : <Moon size={14} className="shrink-0 text-muted-foreground" />}
+                <span className="truncate">{t('topTabs.controlPanel.theme')}</span>
+              </div>
+              <button
+                type="button"
+                onClick={onToggleTheme}
+                className="h-6 shrink-0 rounded-md bg-muted/50 px-2 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              >
+                {isDark ? t('topTabs.controlPanel.theme.light') : t('topTabs.controlPanel.theme.dark')}
+              </button>
             </div>
-            <button
-              type="button"
-              onClick={onToggleTheme}
-              className="h-6 shrink-0 rounded-md bg-muted/50 px-2 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-            >
-              {isDark ? t('topTabs.controlPanel.theme.light') : t('topTabs.controlPanel.theme.dark')}
-            </button>
           </div>
         </div>
       </PopoverContent>
