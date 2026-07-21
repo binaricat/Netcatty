@@ -415,7 +415,7 @@ export const GroupSshSettingsSection: React.FC<GroupSshSettingsSectionProps> = (
                   value === startupCommandRunModeFallback ? undefined : value,
                 )}
               >
-                <SelectTrigger className="h-9 w-[180px]">
+                <SelectTrigger className="h-8 w-[180px]">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>

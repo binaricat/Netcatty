@@ -745,7 +745,7 @@ export const HostDetailsConnectionSections: React.FC<HostDetailsConnectionSectio
                 }
               }}
             >
-              <SelectTrigger className="h-10 w-32">
+              <SelectTrigger className="h-8 w-32">
                 <SelectValue placeholder={t("hostDetails.sftp.fileProtocol.auto")} />
               </SelectTrigger>
               <SelectContent>
@@ -778,7 +778,7 @@ export const HostDetailsConnectionSections: React.FC<HostDetailsConnectionSectio
               value={form.sftpEncoding || "auto"}
               onValueChange={(val) => update("sftpEncoding", val as Host["sftpEncoding"])}
             >
-              <SelectTrigger className="h-10 w-32">
+              <SelectTrigger className="h-8 w-32">
                 <SelectValue placeholder={t("sftp.encoding.label")} />
               </SelectTrigger>
               <SelectContent>
