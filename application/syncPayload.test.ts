@@ -684,6 +684,7 @@ test("buildSyncPayload includes syncable terminal options from settings", () => 
   localStorage.setItem(storageKeys.STORAGE_KEY_TERM_SETTINGS, JSON.stringify({
     terminalEmulationType: "vt100",
     altAsMeta: true,
+    kittyKeyboardProtocolEnabled: true,
     shiftEnterNewlineEnabled: false,
     shiftEnterNewlineText: " \\\\\\n",
     middleClickBehavior: "context-menu",
@@ -700,6 +701,7 @@ test("buildSyncPayload includes syncable terminal options from settings", () => 
   assert.deepEqual(payload.settings?.terminalSettings, {
     terminalEmulationType: "vt100",
     altAsMeta: true,
+    kittyKeyboardProtocolEnabled: true,
     shiftEnterNewlineEnabled: false,
     shiftEnterNewlineText: " \\\\\\n",
     middleClickBehavior: "context-menu",

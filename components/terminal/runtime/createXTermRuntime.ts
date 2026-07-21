@@ -49,7 +49,7 @@ import {
   createKittyKeyboardModeState,
   encodeKittyControlKey,
 } from "./kittyKeyboardProtocol";
-import { installKittyKeyboardProtocolHandlers } from "./kittyKeyboardRuntime";
+import { installKittyKeyboardProtocolHandlersIfEnabled } from "./kittyKeyboardRuntime";
 import { installUserCursorPreferenceGuard } from "./cursorPreference";
 import { terminalAltKeyOptions } from "./altKeyOptions";
 import { optionArrowWordJumpSequence } from "./optionArrowWordJump";
@@ -1394,7 +1394,8 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     ctx.terminalBackend.writeToSession(id, payload);
   };
 
-  const kittyKeyboardDisposable = installKittyKeyboardProtocolHandlers(
+  const kittyKeyboardDisposable = installKittyKeyboardProtocolHandlersIfEnabled(
+    settings?.kittyKeyboardProtocolEnabled,
     term.parser,
     kittyKeyboardMode,
     writeKittyKeyboardReply,
@@ -1578,7 +1579,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
       for (const disposable of cursorPositionReportRequestDisposables) {
         disposable.dispose();
       }
-      kittyKeyboardDisposable.dispose();
+      kittyKeyboardDisposable?.dispose();
       osc7Disposable.dispose();
       osc133Disposable.dispose();
       osc52Disposable.dispose();

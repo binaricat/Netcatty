@@ -33,6 +33,14 @@ test("normalizeTerminalSettings enables Shift+Enter newline by default", () => {
   assert.equal(settings.shiftEnterNewlineText, "\\n");
 });
 
+test("normalizeTerminalSettings disables Kitty keyboard protocol by default", () => {
+  assert.equal(normalizeTerminalSettings().kittyKeyboardProtocolEnabled, false);
+  assert.equal(
+    normalizeTerminalSettings({ kittyKeyboardProtocolEnabled: true }).kittyKeyboardProtocolEnabled,
+    true,
+  );
+});
+
 test("normalizeTerminalSettings preserves Shift+Enter text", () => {
   assert.equal(
     normalizeTerminalSettings({ shiftEnterNewlineText: " \\\\\\n" }).shiftEnterNewlineText,
