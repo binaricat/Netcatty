@@ -26,6 +26,7 @@ import {
   type AsidePanelResizeProps,
 } from './ui/aside-panel';
 import { HostNotesEditor } from './host/HostNotesEditor';
+import { cn } from '../lib/utils';
 
 interface SerialPort {
   path: string;
@@ -45,6 +46,7 @@ interface SerialHostDetailsPanelProps {
   onSave: (host: Host) => void;
   onCancel: () => void;
   layout?: AsidePanelLayout;
+  className?: string;
 }
 
 type SerialHostDetailsPanelPropsWithResize = SerialHostDetailsPanelProps & AsidePanelResizeProps;
@@ -63,6 +65,7 @@ export const SerialHostDetailsPanel: React.FC<SerialHostDetailsPanelPropsWithRes
   onSave,
   onCancel,
   layout = 'overlay',
+  className,
   resizable,
   persistWidthStorageKey,
   resizeAriaLabel,
@@ -192,7 +195,7 @@ export const SerialHostDetailsPanel: React.FC<SerialHostDetailsPanelPropsWithRes
       onClose={onCancel}
       title={t('serial.edit.title')}
       subtitle={initialData.label}
-      className="z-40"
+      className={cn('z-40', className)}
       layout={layout}
       dataSection="serial-host-details-panel"
       resizable={resizable}
