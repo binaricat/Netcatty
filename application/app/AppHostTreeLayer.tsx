@@ -34,6 +34,8 @@ interface AppHostTreeLayerProps {
   themeById: ReadonlyMap<string, TerminalTheme>;
   resolveSessionAppearance?: (hostScope: TerminalAppearanceHostScope) => ResolvedAppearance;
   onConnect: (host: Host) => void;
+  onNewHost?: (defaultGroup?: string) => void;
+  onEditHost?: (host: Host) => void;
   onCreateLocalTerminal?: () => void;
 }
 
@@ -63,6 +65,8 @@ export const AppHostTreeLayer: React.FC<AppHostTreeLayerProps> = ({
   themeById,
   resolveSessionAppearance,
   onConnect,
+  onNewHost,
+  onEditHost,
   onCreateLocalTerminal,
 }) => {
   const activeTabId = useActiveTabId();
@@ -143,6 +147,8 @@ export const AppHostTreeLayer: React.FC<AppHostTreeLayerProps> = ({
         resolvedPreviewTheme={hostTreeTheme}
         activeHostId={activeHostId}
         onConnect={onConnect}
+        onNewHost={onNewHost}
+        onEditHost={onEditHost}
         onCreateLocalTerminal={onCreateLocalTerminal}
       />
     </div>
