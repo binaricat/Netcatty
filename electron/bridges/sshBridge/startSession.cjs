@@ -523,7 +523,9 @@ printf '%s\n' '${scanCompleteMarker}'`;
             const contents = event.sender;
             const liveSession = sessions.get(sessionId);
             const transportError = liveSession?._transportError;
-            if (transportError) {
+            if (liveSession?.closed) {
+              // Explicit close already notified every attached renderer.
+            } else if (transportError) {
               safeSendSessionExit({ safeSend, electronModule, sessions }, contents, sessionId, { sessionId, exitCode: 1, error: transportError, reason: "error" });
             } else {
               // A shell TMOUT auto-logout is a clean exit (numeric code, no

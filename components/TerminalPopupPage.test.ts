@@ -116,3 +116,8 @@ test('attach popup close preparation has a bounded timeout', () => {
   assert.match(source, /Attach close preparation timed out/);
   assert.match(source, /1500/);
 });
+
+test('an explicitly closed attached session closes its observe popup', () => {
+  assert.match(source, /isAttachMode && evt\.reason === 'closed'/);
+  assert.match(source, /void handleClose\(\)/);
+});

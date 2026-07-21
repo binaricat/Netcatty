@@ -948,6 +948,7 @@ function startLocalSession(event, payload) {
       sessionLogStreamManager.stopStream(sessionId, logStreamToken);
       ptyProcessTree.unregisterPid(sessionId);
       sessions.delete(sessionId);
+      if (session.closed) return;
       // Signal present = killed externally (show disconnected UI).
       // No signal = process exited normally, even with non-zero code
       // (e.g. user typed `exit` after a failed command), so auto-close.
@@ -1183,6 +1184,7 @@ async function startSerialSession(event, options) {
           const primaryId = session.webContentsId;
           ptyProcessTree.unregisterPid(sessionId);
           sessions.delete(sessionId);
+          if (session.closed) return;
           fanoutSessionLifecycleEvent(
             sessionId,
             primaryId,
@@ -1199,6 +1201,7 @@ async function startSerialSession(event, options) {
           const primaryId = session.webContentsId;
           ptyProcessTree.unregisterPid(sessionId);
           sessions.delete(sessionId);
+          if (session.closed) return;
           fanoutSessionLifecycleEvent(
             sessionId,
             primaryId,
@@ -1706,6 +1709,12 @@ function closeSession(event, payload) {
   const session = sessions.get(payload.sessionId);
   if (!session) return;
   session.closed = true;
+  fanoutSessionLifecycleEvent(
+    payload.sessionId,
+    session.webContentsId,
+    "netcatty:exit",
+    { sessionId: payload.sessionId, exitCode: 0, reason: "closed" },
+  );
   closeTerminalOutputSession(payload.sessionId);
 
   try {

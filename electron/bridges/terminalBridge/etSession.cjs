@@ -1113,6 +1113,7 @@ main();
             sessionLogStreamManager.stopStream(sessionId);
             closeTerminalOutputSession?.(sessionId);
             sessions.delete(sessionId);
+            if (session.closed) return;
             const contents = electronModule.webContents.fromId(session.webContentsId);
             fanoutSessionExit(sessionId, contents, { sessionId, ...evt, reason: evt.exitCode === 0 ? "exited" : "error" });
           });

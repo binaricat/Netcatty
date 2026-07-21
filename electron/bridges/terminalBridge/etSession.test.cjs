@@ -43,11 +43,12 @@ function makeApi(t, overrides = {}) {
     StringDecoder: require("node:string_decoder").StringDecoder,
     randomUUID: require("node:crypto").randomUUID,
     pty,
-    sessionLogStreamManager: {},
+    sessionLogStreamManager: overrides.sessionLogStreamManager || {},
     tempDirBridge,
     createZmodemSentry: () => ({}),
     trackSessionIdlePrompt: () => {},
-    createPtyOutputBuffer: () => ({ bufferData() {}, flush() {}, flushPaced() {} }),
+    createPtyOutputBuffer: overrides.createPtyOutputBuffer
+      || (() => ({ bufferData() {}, flush() {}, flushPaced() {} })),
     findExecutable: () => "ssh",
     bundledEtClient,
   });
@@ -107,6 +108,46 @@ test("startEtSession preserves discovered automatic identities for host informat
     [keyPath],
   );
   assert.equal(sessions.get("sess-auto-stats").etStatsAuth.authMethod, "auto");
+});
+
+test("explicitly closed ET sessions do not emit a second exit event", async (t) => {
+  let onExit = null;
+  const sent = [];
+  const proc = {
+    onData() {},
+    onExit(callback) { onExit = callback; },
+    write() {},
+  };
+  const { api, sessions } = makeApi(t, {
+    bundledEtClient: () => "/fake/et",
+    pty: { spawn: () => proc },
+    electronModule: {
+      webContents: {
+        fromId: () => ({ id: 7, send: (channel, payload) => sent.push({ channel, payload }) }),
+      },
+    },
+    openTerminalOutputSession: () => {},
+    closeTerminalOutputSession: () => {},
+    sessionLogStreamManager: { stopStream() {} },
+    createPtyOutputBuffer: () => ({
+      bufferData() {},
+      flush() {},
+      flushPaced(callback) { callback(); },
+    }),
+    selectZmodemUploadFiles: null,
+    selectZmodemDownloadDirectory: null,
+  });
+
+  await api.startEtSession({ sender: { id: 7 } }, {
+    sessionId: "sess-explicit-close",
+    hostname: "host.example",
+    username: "alice",
+  });
+  sessions.get("sess-explicit-close").closed = true;
+  onExit({ exitCode: 0 });
+
+  assert.deepEqual(sent, []);
+  assert.equal(sessions.has("sess-explicit-close"), false);
 });
 
 test("prepareEtSshEnvironment passes a non-default port via --ssh-option", (t) => {

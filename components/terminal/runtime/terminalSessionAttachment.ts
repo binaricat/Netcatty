@@ -791,6 +791,11 @@ export const attachSessionToTerminal = (
   ctx.terminalBackend.notifyTerminalSessionDisplayReady?.(id);
 
   ctx.disposeExitRef.current = ctx.terminalBackend.onSessionExit(id, (evt) => {
+    // The backend is already gone. In particular, an observe popup must not
+    // run its normal pause/snapshot/restore handoff while closing afterward.
+    if (ctx.sessionRef.current === id) {
+      ctx.sessionRef.current = null;
+    }
     ctx.updateStatus("disconnected");
     if (evt.error) {
       ctx.setError(evt.error);

@@ -142,6 +142,70 @@ test("attach close restores the output route before resuming the backend", () =>
   assert.match(mainRestoreSource, /if \(result\?\.success\) \{\s*resumeSessionOutputFlow/);
 });
 
+test("in-process explicit close sends an exit event before dropping the output route", () => {
+  const source = require("node:fs").readFileSync(
+    path.join(__dirname, "terminalBridge.cjs"),
+    "utf8",
+  );
+  const start = source.indexOf("function closeSession(event, payload)");
+  const end = source.indexOf("function setSessionEncoding", start);
+  const closeSource = source.slice(start, end);
+  assert.ok(
+    closeSource.indexOf("fanoutSessionLifecycleEvent") < closeSource.indexOf("closeTerminalOutputSession"),
+    "notify attached renderers before removing their output route",
+  );
+  assert.match(source, /if \(session\.closed\) return;/, "transport callbacks suppress duplicate explicit-close exits");
+  const sshSource = require("node:fs").readFileSync(
+    path.join(__dirname, "sshBridge/startSession.cjs"),
+    "utf8",
+  );
+  assert.match(sshSource, /if \(liveSession\?\.closed\)/, "SSH close callback suppresses duplicate explicit-close exits");
+});
+
+test("in-process explicit close notifies a rebound popup and its home renderer", () => {
+  const { bridge, fakeChannel } = loadTerminalBridgeWithMocks();
+  const sent = [];
+  const contents = new Map([7, 9].map((id) => [id, {
+    id,
+    isDestroyed: () => false,
+    send: (channel, payload) => sent.push({ id, channel, payload }),
+  }]));
+  const sessions = new Map([[
+    "session-close",
+    { webContentsId: 7, proc: { kill() {} } },
+  ]]);
+  bridge.init({
+    sessions,
+    electronModule: { webContents: { fromId: (id) => contents.get(id) } },
+    terminalOutputChannel: fakeChannel,
+  });
+  const registry = require("./terminalAttachRestore.cjs");
+  registry.registerAttachPopupAuthorization("close-grant", "session-close", 9);
+  assert.equal(bridge.registerHandlers != null, true);
+  const ipcMain = {
+    handlers: new Map(),
+    listeners: new Map(),
+    handle(channel, handler) { this.handlers.set(channel, handler); },
+    on(channel, handler) { this.listeners.set(channel, handler); },
+  };
+  bridge.registerHandlers(ipcMain);
+  assert.equal(
+    ipcMain.handlers.get("netcatty:terminal:rebindOutput")(
+      { sender: contents.get(9) },
+      { sessionId: "session-close", authorization: "close-grant" },
+    ).success,
+    true,
+  );
+
+  bridge.closeSession({ sender: contents.get(7) }, { sessionId: "session-close" });
+
+  assert.deepEqual(sent, [
+    { id: 9, channel: "netcatty:exit", payload: { sessionId: "session-close", exitCode: 0, reason: "closed" } },
+    { id: 7, channel: "netcatty:exit", payload: { sessionId: "session-close", exitCode: 0, reason: "closed" } },
+  ]);
+  registry.releaseAttachPopupAuthorization("close-grant");
+});
+
 test("snapshot apply acknowledgements are emitted only by the matching terminal", () => {
   const preloadSource = require("node:fs").readFileSync(
     path.join(__dirname, "../preload/api.cjs"),

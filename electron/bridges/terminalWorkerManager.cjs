@@ -154,6 +154,15 @@ function mergeTerminalOutputMeta(previous, next) {
   return merged;
 }
 
+const SESSION_START_CHANNELS = new Set([
+  "netcatty:start",
+  "netcatty:local:start",
+  "netcatty:telnet:start",
+  "netcatty:mosh:start",
+  "netcatty:et:start",
+  "netcatty:serial:start",
+]);
+
 function createTerminalWorkerManager(options = {}) {
   const {
     utilityProcess,
@@ -524,12 +533,33 @@ function createTerminalWorkerManager(options = {}) {
     outputPortPending.delete(sessionId);
     outputPortReady.delete(sessionId);
     sessionWebContentsIds.delete(sessionId);
+    clearAttachHome(sessionId);
     try {
       child?.postMessage?.({ kind: "close-output-port", sessionId });
     } catch {
       // The worker may already be gone while closing a tab or quitting.
     }
     terminalOutputChannel?.closeSession?.(sessionId);
+  }
+
+  function notifyExplicitSessionClose(sessionId) {
+    if (!sessionId) return;
+    const targets = new Set([
+      sessionWebContentsIds.get(sessionId),
+      attachHomeWebContentsIds.get(sessionId),
+    ]);
+    for (const targetId of targets) {
+      if (typeof targetId !== "number") continue;
+      try {
+        electronModule?.webContents?.fromId?.(targetId)?.send?.("netcatty:exit", {
+          sessionId,
+          exitCode: 0,
+          reason: "closed",
+        });
+      } catch {
+        // A closing renderer may disappear between lookup and notification.
+      }
+    }
   }
 
   function drainOutputSession(sessionId, requestId) {
@@ -675,10 +705,18 @@ function createTerminalWorkerManager(options = {}) {
       const homeWebContentsId =
         (typeof sessionId === "string" && attachHomeWebContentsIds.get(sessionId))
         || null;
+      const wasExplicitlyClosed = Boolean(
+        message.channel === "netcatty:exit"
+        && sessionId
+        && closedSessions.has(sessionId),
+      );
       if (message.channel === "netcatty:exit" && sessionId) {
         closeOutputSession(sessionId);
         clearAttachHome(sessionId);
       }
+      // Explicit close already notified both display and home before removing
+      // their routes. Ignore the worker's later transport-level exit event.
+      if (wasExplicitlyClosed) return;
       const targets = new Set();
       if (displayWebContentsId != null) targets.add(displayWebContentsId);
       // Keep the original owner in the loop only for terminal lifecycle. Other
@@ -816,8 +854,9 @@ function createTerminalWorkerManager(options = {}) {
       pending.set(requestId, { resolve, reject, webContentsId: optionsForRequest.webContentsId });
     });
     if (channel === "netcatty:close:await" && payload?.sessionId) {
+      notifyExplicitSessionClose(payload.sessionId);
       closeOutputSession(payload.sessionId);
-    } else if (payload?.sessionId) {
+    } else if (payload?.sessionId && SESSION_START_CHANNELS.has(channel)) {
       closedSessions.delete(payload.sessionId);
     }
     worker.postMessage({
@@ -832,6 +871,7 @@ function createTerminalWorkerManager(options = {}) {
 
   function send(channel, payload, optionsForSend = {}) {
     if (channel === "netcatty:close" && payload?.sessionId) {
+      notifyExplicitSessionClose(payload.sessionId);
       closeOutputSession(payload.sessionId);
     }
     if (channel === "netcatty:interrupt") {

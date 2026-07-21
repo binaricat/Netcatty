@@ -1126,6 +1126,68 @@ test("rebound interactive events target only the popup while exit also reaches h
   ]);
 });
 
+test("explicit close notifies both a rebound popup and its home renderer", async () => {
+  const child = new FakeChild();
+  const forwarded = [];
+  const manager = createTerminalWorkerManager({
+    utilityProcess: { fork: () => child },
+    terminalOutputChannel: { openSession: () => true, closeSession() {} },
+    electronModule: {
+      webContents: {
+        fromId: (id) => ({
+          id,
+          isDestroyed: () => false,
+          send: (channel, payload) => forwarded.push({ id, channel, payload }),
+        }),
+      },
+    },
+    workerScriptPath: "/worker.cjs",
+  });
+
+  const started = manager.request("netcatty:local:start", {}, { webContentsId: 7 });
+  child.emit("message", {
+    kind: "response",
+    requestId: child.messages[0].requestId,
+    result: { sessionId: "session-1" },
+  });
+  await started;
+  assert.equal(manager.rebindOutputSession("session-1", 9).success, true);
+
+  const closing = manager.request(
+    "netcatty:close:await",
+    { sessionId: "session-1" },
+    { webContentsId: 7 },
+  );
+  const closeRequest = child.messages.at(-1);
+  child.emit("message", { kind: "response", requestId: closeRequest.requestId, result: undefined });
+  await closing;
+
+  assert.deepEqual(forwarded, [
+    { id: 9, channel: "netcatty:exit", payload: { sessionId: "session-1", exitCode: 0, reason: "closed" } },
+    { id: 7, channel: "netcatty:exit", payload: { sessionId: "session-1", exitCode: 0, reason: "closed" } },
+  ]);
+  assert.equal(manager.getAttachHomeWebContentsId("session-1"), null);
+  assert.equal(manager.hasOpenSession("session-1"), false);
+
+  child.emit("message", {
+    kind: "renderer-event",
+    webContentsId: 7,
+    channel: "netcatty:exit",
+    payload: { sessionId: "session-1", reason: "closed" },
+  });
+  assert.equal(forwarded.length, 2, "worker transport close is not forwarded twice");
+
+  const lateFlow = manager.request(
+    "netcatty:terminal:setFlowPausedAndWait",
+    { sessionId: "session-1", paused: true },
+    { webContentsId: 9 },
+  );
+  const flowRequest = child.messages.at(-1);
+  child.emit("message", { kind: "response", requestId: flowRequest.requestId, result: { success: false } });
+  await lateFlow;
+  assert.equal(manager.hasOpenSession("session-1"), false, "late control requests cannot reopen a closed session");
+});
+
 test("worker exit events close the session output route", () => {
   const child = new FakeChild();
   const closed = [];
