@@ -94,15 +94,25 @@ function makeReusableConn() {
   return conn;
 }
 
-function makePidTrackingReusableConn() {
+function makePidTrackingReusableConn({ delayFirstNewPid = false } = {}) {
   const conn = makeReusableConn();
   conn.shellPidSnapshots = [];
+  let delayed = false;
   conn.exec = (_command, callback) => {
     const stream = new EventEmitter();
     stream.stderr = new EventEmitter();
     stream.close = () => {};
-    const pids = conn.openedShells.length === 0 ? "111\n" : "111\n222\n";
-    conn.shellPidSnapshots.push(pids.trim().split("\n"));
+    let visibleShellCount = conn.openedShells.length + 1;
+    if (delayFirstNewPid && conn.openedShells.length > 0 && !delayed) {
+      delayed = true;
+      visibleShellCount -= 1;
+    }
+    const snapshot = Array.from(
+      { length: visibleShellCount },
+      (_value, index) => String((index + 1) * 111),
+    );
+    const pids = `${snapshot.join("\n")}\n`;
+    conn.shellPidSnapshots.push(snapshot);
     setImmediate(() => {
       stream.emit("data", Buffer.from(pids));
       stream.emit("close", 0);
@@ -229,6 +239,50 @@ test("Copy Tab records a distinct remote shell for each shared terminal", async 
   assert.deepEqual(sourceConn.shellPidSnapshots, [["111"], ["111", "222"]]);
   assert.equal(source.shellPid, "111");
   assert.equal(sessions.get("copy").shellPid, "222");
+});
+
+test("Copy Tab waits briefly when the new remote shell is not visible immediately", async (t) => {
+  const { bridge } = loadBridgeWithMockedSsh2(t);
+  const sessions = new Map();
+  const sourceConn = makePidTrackingReusableConn({ delayFirstNewPid: true });
+  sessions.set("source", makeSourceSession(sourceConn, { hostname: "10.0.0.1", username: "alice" }));
+
+  const start = registerStartHandler(bridge, sessions);
+  await start(
+    { sender: makeSender() },
+    {
+      sessionId: "copy",
+      hostname: "10.0.0.1",
+      username: "alice",
+      sourceSessionId: "source",
+    },
+  );
+
+  assert.deepEqual(sourceConn.shellPidSnapshots, [["111"], ["111"], ["111", "222"]]);
+  assert.equal(sessions.get("copy").shellPid, "222");
+});
+
+test("concurrent Copy Tab requests serialize shell discovery per connection", async (t) => {
+  const { bridge } = loadBridgeWithMockedSsh2(t);
+  const sessions = new Map();
+  const sourceConn = makePidTrackingReusableConn();
+  sessions.set("source", makeSourceSession(sourceConn, { hostname: "10.0.0.1", username: "alice" }));
+
+  const start = registerStartHandler(bridge, sessions);
+  await Promise.all([
+    start(
+      { sender: makeSender() },
+      { sessionId: "copy-1", hostname: "10.0.0.1", username: "alice", sourceSessionId: "source" },
+    ),
+    start(
+      { sender: makeSender() },
+      { sessionId: "copy-2", hostname: "10.0.0.1", username: "alice", sourceSessionId: "source" },
+    ),
+  ]);
+
+  assert.equal(sessions.get("source").shellPid, "111");
+  assert.equal(sessions.get("copy-1").shellPid, "222");
+  assert.equal(sessions.get("copy-2").shellPid, "333");
 });
 
 test("Copy Tab preserves the server locale unless the host explicitly overrides it", async (t) => {

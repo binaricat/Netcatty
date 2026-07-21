@@ -285,7 +285,7 @@ function createSessionOpsApi(ctx) {
     # entirely (#1123).
     find_login_shell() {
       _shell=$(ps -e -o pid=,ppid=,tty=,comm= 2>/dev/null | awk -v pp="$1" -v self="$SELF" '
-        $1 != self && $2 == pp && $4 ~ /^-?(ba|z|fi|k|da|a)?sh$/ {
+        $1 != self && $2 == pp && $4 ~ /^-?(ba|z|fi|k|da|a|c|tc)?sh$/ {
           if ($3 != "?") { print $1; found=1; exit }
           if (any == "") any=$1
         }
@@ -312,7 +312,7 @@ function createSessionOpsApi(ctx) {
         [ "$_conn2" = "$_conn" ] || continue
         _comm=$(cat "$_d/comm" 2>/dev/null)
         case "$_comm" in
-          sh|bash|zsh|fish|ksh|dash|ash) ;;
+          sh|bash|zsh|fish|ksh|dash|ash|csh|tcsh) ;;
           *) continue ;;
         esac
         _tty=$(ps -p "$_pid" -o tty= 2>/dev/null | tr -d '[:space:]')
@@ -334,7 +334,7 @@ function createSessionOpsApi(ctx) {
     find_active_shell() {
       ps -e -o pid=,ppid=,stat=,comm= 2>/dev/null | awk -v start="$1" '
         { pp[$1]=$2; st[$1]=$3; cm[$1]=$4; ord[NR]=$1 }
-        function isshell(c) { return c ~ /^-?(ba|z|fi|k|da|a)?sh$/ }
+        function isshell(c) { return c ~ /^-?(ba|z|fi|k|da|a|c|tc)?sh$/ }
         function depth(p,   d) { d=0; while (p != "" && d < 64) { if (p == start) return d; p=pp[p]; d++ } return -1 }
         END {
           best=-1; bp="";

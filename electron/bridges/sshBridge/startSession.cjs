@@ -105,7 +105,7 @@ function createStartSessionApi(ctx) {
       const script = `SELF=$$
 {
   ps -e -o pid=,ppid=,tty=,comm= 2>/dev/null | awk -v pp="$PPID" -v self="$SELF" '
-    $1 != self && $2 == pp && $3 != "?" && $4 ~ /^-?(ba|z|fi|k|da|a)?sh$/ { print $1 }
+    $1 != self && $2 == pp && $3 != "?" && $4 ~ /^-?(ba|z|fi|k|da|a|c|tc)?sh$/ { print $1 }
   '
   if [ -r /proc/$SELF/environ ]; then
     conn=$(tr '\\0' '\\n' < /proc/$SELF/environ 2>/dev/null | sed -n 's/^SSH_CONNECTION=//p' | head -n1)
@@ -117,7 +117,7 @@ function createStartSessionApi(ctx) {
         conn2=$(tr '\\0' '\\n' < "$d/environ" 2>/dev/null | sed -n 's/^SSH_CONNECTION=//p' | head -n1)
         [ "$conn2" = "$conn" ] || continue
         comm=$(cat "$d/comm" 2>/dev/null)
-        case "$comm" in sh|bash|zsh|fish|ksh|dash|ash) ;; *) continue ;; esac
+        case "$comm" in sh|bash|zsh|fish|ksh|dash|ash|csh|tcsh) ;; *) continue ;; esac
         ppid=$(awk '{ print $4 }' "$d/stat" 2>/dev/null)
         pcomm=$(cat "/proc/$ppid/comm" 2>/dev/null)
         case "$pcomm" in sshd|dropbear|dropbearmulti) ;; *) continue ;; esac
@@ -160,6 +160,20 @@ function createStartSessionApi(ctx) {
           settle([]);
         }
       });
+    };
+
+    const waitForNewInteractiveShellPid = async (conn, previousPids) => {
+      const previous = new Set(previousPids);
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        const currentPids = await listInteractiveShellPids(conn);
+        const newPids = currentPids.filter((pid) => !previous.has(pid));
+        if (newPids.length === 1) return newPids[0];
+        if (newPids.length > 1) return null;
+        if (attempt < 4) {
+          await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)));
+        }
+      }
+      return null;
     };
 
     /**
@@ -520,16 +534,19 @@ function createStartSessionApi(ctx) {
      * Resolves with `{ sessionId }` on success. Throws on failure so the caller
      * can fall back to a normal fresh connection.
      */
-    async function reuseShellSession(event, options, sourceSession, sessionId, log) {
+    async function openReusedShellSerialized(
+      event,
+      options,
+      sourceSession,
+      sessionId,
+      log,
+      connRef,
+      refHolder,
+    ) {
       const cols = options.cols || 80;
       const rows = options.rows || 24;
       const sender = event.sender;
       const conn = sourceSession.conn;
-      // Pin before the discovery probe as well as before conn.shell(): the
-      // source tab can close while either async operation is in flight.
-      const connRef = sourceSession.connRef;
-      const refHolder = {};
-      acquireConnectionRef(refHolder, connRef);
       let discoveryConnectionError = null;
       const onDiscoveryConnectionError = (err) => {
         discoveryConnectionError = err;
@@ -649,12 +666,10 @@ function createStartSessionApi(ctx) {
                 chainConnections: [],
                 isReused: true,
               });
-              void listInteractiveShellPids(conn).then((shellPidsAfterOpen) => {
-                const previousPids = new Set(shellPidsBeforeOpen);
-                const newPids = shellPidsAfterOpen.filter((pid) => !previousPids.has(pid));
+              void waitForNewInteractiveShellPid(conn, shellPidsBeforeOpen).then((newShellPid) => {
                 const copiedSession = sessions.get(sessionId);
-                if (copiedSession && newPids.length === 1) {
-                  copiedSession.shellPid = newPids[0];
+                if (copiedSession && newShellPid) {
+                  copiedSession.shellPid = newShellPid;
                 }
                 settled = true;
                 resolve({ sessionId });
@@ -669,6 +684,35 @@ function createStartSessionApi(ctx) {
           conn.removeListener("error", onConnError);
           log("reused shell threw synchronously", { sessionId, hostname: options.hostname, error: syncErr?.message });
           failReuse(syncErr);
+        }
+      });
+    }
+
+    function reuseShellSession(event, options, sourceSession, sessionId, log) {
+      const connRef = sourceSession.connRef;
+      const refHolder = {};
+      // Pin while queued as well as while opening: the source tab may close
+      // before this copy reaches the front of the per-connection queue.
+      acquireConnectionRef(refHolder, connRef);
+
+      const previous = connRef.shellOpenQueue || Promise.resolve();
+      const operation = previous
+        .catch(() => {})
+        .then(() => openReusedShellSerialized(
+          event,
+          options,
+          sourceSession,
+          sessionId,
+          log,
+          connRef,
+          refHolder,
+        ));
+      const tail = operation.then(() => undefined, () => undefined);
+      connRef.shellOpenQueue = tail;
+
+      return operation.finally(() => {
+        if (connRef.shellOpenQueue === tail) {
+          delete connRef.shellOpenQueue;
         }
       });
     }
