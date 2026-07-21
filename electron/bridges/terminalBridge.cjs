@@ -137,19 +137,32 @@ function closeTerminalOutputSession(sessionId) {
  * Rebind a live session's output MessagePort to another renderer (e.g. AI
  * silent-session observe popup). Keeps the same PTY/stream; only the display
  * route moves. Returns the previous webContentsId so the caller can restore.
+ *
+ * Worker mode: sessions live in the utilityProcess; display routing is owned
+ * by terminalWorkerManager (sessionWebContentsIds + output ports).
+ * In-process mode: sessions Map in this bridge owns webContentsId.
  */
-function rebindTerminalSessionOutput(event, payload) {
+function rebindTerminalSessionOutput(event, payload, terminalWorkerManager = null) {
   const sessionId = typeof payload?.sessionId === "string" ? payload.sessionId : "";
   if (!sessionId) {
     return { success: false, error: "Missing sessionId" };
   }
-  const session = sessions?.get?.(sessionId);
-  if (!session) {
-    return { success: false, error: "Session not found" };
-  }
   const sender = event?.sender;
   if (!sender || sender.isDestroyed?.()) {
     return { success: false, error: "Invalid sender" };
+  }
+
+  if (terminalWorkerManager) {
+    try {
+      return terminalWorkerManager.rebindOutputSession(sessionId, sender.id);
+    } catch (err) {
+      return { success: false, error: err?.message || String(err) };
+    }
+  }
+
+  const session = sessions?.get?.(sessionId);
+  if (!session) {
+    return { success: false, error: "Session not found" };
   }
   const previousWebContentsId =
     typeof session.webContentsId === "number" ? session.webContentsId : null;
@@ -170,15 +183,10 @@ function rebindTerminalSessionOutput(event, payload) {
  * Restore output to a previous renderer after an attach popup closes.
  * Falls back to the first live main-ish window if the home webContents is gone.
  */
-function restoreTerminalSessionOutput(event, payload) {
+function restoreTerminalSessionOutput(event, payload, terminalWorkerManager = null) {
   const sessionId = typeof payload?.sessionId === "string" ? payload.sessionId : "";
   if (!sessionId) {
     return { success: false, error: "Missing sessionId" };
-  }
-  const session = sessions?.get?.(sessionId);
-  if (!session) {
-    // Session already closed — nothing to restore.
-    return { success: true, restored: false };
   }
 
   let target = null;
@@ -218,6 +226,28 @@ function restoreTerminalSessionOutput(event, payload) {
   }
   if (!target) {
     return { success: false, error: "No live renderer to restore output to" };
+  }
+
+  if (terminalWorkerManager) {
+    if (!terminalWorkerManager.hasOpenSession?.(sessionId)) {
+      // Session already closed — nothing to restore.
+      return { success: true, restored: false };
+    }
+    try {
+      const result = terminalWorkerManager.rebindOutputSession(sessionId, target.id);
+      if (!result?.success) {
+        return { success: false, error: result?.error || "Failed to restore session output" };
+      }
+      return { success: true, restored: true, webContentsId: target.id };
+    } catch (err) {
+      return { success: false, error: err?.message || String(err) };
+    }
+  }
+
+  const session = sessions?.get?.(sessionId);
+  if (!session) {
+    // Session already closed — nothing to restore.
+    return { success: true, restored: false };
   }
   try {
     openTerminalOutputSession(sessionId, target);
@@ -1485,6 +1515,13 @@ function registerWorkerSend(ipcMain, terminalWorkerManager, channel) {
 
 function registerHandlers(ipcMain, options = {}) {
   const terminalWorkerManager = options.terminalWorkerManager || null;
+  // Attach/observe popups rebind display routing in the main process even when
+  // PTY I/O is owned by the terminal worker. Always register these handlers.
+  ipcMain.handle("netcatty:terminal:rebindOutput", (event, payload) =>
+    rebindTerminalSessionOutput(event, payload, terminalWorkerManager));
+  ipcMain.handle("netcatty:terminal:restoreOutput", (event, payload) =>
+    restoreTerminalSessionOutput(event, payload, terminalWorkerManager));
+
   if (terminalWorkerManager) {
     [
       "netcatty:local:start",
@@ -1541,8 +1578,6 @@ function registerHandlers(ipcMain, options = {}) {
   ipcMain.handle("netcatty:local:validatePath", validatePath);
   ipcMain.handle("netcatty:shells:discover", () => discoverShells());
   ipcMain.handle("netcatty:terminal:setEncoding", setSessionEncoding);
-  ipcMain.handle("netcatty:terminal:rebindOutput", rebindTerminalSessionOutput);
-  ipcMain.handle("netcatty:terminal:restoreOutput", restoreTerminalSessionOutput);
   ipcMain.on("netcatty:write", writeToSession);
   ipcMain.on("netcatty:interrupt", interruptSession);
   ipcMain.on("netcatty:resize", resizeSession);

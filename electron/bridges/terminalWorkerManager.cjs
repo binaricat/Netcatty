@@ -373,13 +373,16 @@ function createTerminalWorkerManager(options = {}) {
   }
 
   function openOutputSession(sessionId, webContentsId) {
-    if (!sessionId || !webContentsId) return;
+    if (!sessionId || !webContentsId) return false;
     if (closedSessions.has(sessionId)) {
       clearBufferedOutput(sessionId);
-      return;
+      return false;
     }
     sessionWebContentsIds.set(sessionId, webContentsId);
     const contents = electronModule?.webContents?.fromId?.(webContentsId);
+    if (!contents || contents.isDestroyed?.()) {
+      return false;
+    }
     openUrgentInputPort(webContentsId, contents);
     const outputPort = terminalOutputChannel?.openSession?.(sessionId, contents, {
       transferToWorker: true,
@@ -391,9 +394,33 @@ function createTerminalWorkerManager(options = {}) {
         sessionId,
         bufferedOutput: takeBufferedOutput(sessionId),
       }, [outputPort]);
-      return;
+      return true;
     }
     flushBufferedOutput(sessionId);
+    return true;
+  }
+
+  /**
+   * Move a live session's renderer output route to another webContents
+   * (AI silent-session observe popup). Same PTY; only the display target changes.
+   */
+  function rebindOutputSession(sessionId, webContentsId) {
+    if (!sessionId || !webContentsId) {
+      return { success: false, error: "Missing sessionId or webContentsId" };
+    }
+    if (closedSessions.has(sessionId) || !sessionWebContentsIds.has(sessionId)) {
+      return { success: false, error: "Session not found" };
+    }
+    const previousWebContentsId = sessionWebContentsIds.get(sessionId) ?? null;
+    const ok = openOutputSession(sessionId, webContentsId);
+    if (!ok) {
+      return { success: false, error: "Failed to rebind session output" };
+    }
+    return {
+      success: true,
+      previousWebContentsId,
+      webContentsId,
+    };
   }
 
   function closeOutputSession(sessionId) {
@@ -687,12 +714,18 @@ function createTerminalWorkerManager(options = {}) {
     ensureStarted,
     request,
     send,
+    openOutputSession,
+    rebindOutputSession,
     hasOpenSession(sessionId) {
       return Boolean(
         sessionId
         && sessionWebContentsIds.has(sessionId)
         && !closedSessions.has(sessionId),
       );
+    },
+    getSessionWebContentsId(sessionId) {
+      if (!sessionId) return null;
+      return sessionWebContentsIds.get(sessionId) ?? null;
     },
     addOutputTap(listener) {
       if (typeof listener !== "function") return () => {};

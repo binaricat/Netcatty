@@ -53,6 +53,34 @@ test("rebindTerminalSessionOutput moves output and updates webContentsId", () =>
   assert.match(source, /session\.webContentsId = sender\.id/);
 });
 
+test("rebind and restore handlers register even when terminal worker is enabled", () => {
+  const source = require("node:fs").readFileSync(
+    path.join(__dirname, "terminalBridge.cjs"),
+    "utf8",
+  );
+  // Must be registered before the worker early-return, otherwise production
+  // (worker-on) hits "No handler registered for rebindOutput" on first attach.
+  const rebindIdx = source.indexOf('ipcMain.handle("netcatty:terminal:rebindOutput"');
+  const restoreIdx = source.indexOf('ipcMain.handle("netcatty:terminal:restoreOutput"');
+  const workerReturnIdx = source.indexOf("].forEach((channel) => registerWorkerSend");
+  assert.ok(rebindIdx > 0, "rebind handler present");
+  assert.ok(restoreIdx > 0, "restore handler present");
+  assert.ok(workerReturnIdx > 0, "worker send registration present");
+  assert.ok(rebindIdx < workerReturnIdx, "rebind registered before worker-only early return");
+  assert.ok(restoreIdx < workerReturnIdx, "restore registered before worker-only early return");
+  assert.match(source, /terminalWorkerManager\.rebindOutputSession/);
+});
+
+test("terminal worker manager exposes rebindOutputSession", () => {
+  const source = require("node:fs").readFileSync(
+    path.join(__dirname, "terminalWorkerManager.cjs"),
+    "utf8",
+  );
+  assert.match(source, /function rebindOutputSession/);
+  assert.match(source, /rebindOutputSession,/);
+  assert.match(source, /getSessionWebContentsId\(sessionId\)/);
+});
+
 test("attach popup payload field is consumed by terminal popup window", () => {
   const source = require("node:fs").readFileSync(
     path.join(__dirname, "windowManager/terminalPopupWindow.cjs"),
