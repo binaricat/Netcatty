@@ -100,7 +100,9 @@ function shouldPromoteCachedAuthMethod(authMethod, cachedMethod) {
 function createStartSessionApi(ctx) {
   with (ctx) {
     const listInteractiveShellPids = (conn) => {
-      if (!conn || typeof conn.exec !== "function") return Promise.resolve([]);
+      if (!conn || typeof conn.exec !== "function") {
+        return Promise.resolve({ available: false, pids: [] });
+      }
 
       const script = `SELF=$$
 {
@@ -131,21 +133,21 @@ function createStartSessionApi(ctx) {
       return new Promise((resolve) => {
         let settled = false;
         let activeStream = null;
-        const settle = (pids) => {
+        const settle = (result) => {
           if (settled) return;
           settled = true;
           clearTimeout(timer);
-          resolve(pids);
+          resolve(result);
         };
         const timer = setTimeout(() => {
           try { activeStream?.close?.(); } catch { /* ignore */ }
-          settle([]);
+          settle({ available: false, pids: [] });
         }, 1500);
 
         try {
           conn.exec(`exec sh -c ${quoteShellArg(script)}`, (err, stream) => {
             if (err || !stream) {
-              settle([]);
+              settle({ available: false, pids: [] });
               return;
             }
             activeStream = stream;
@@ -153,11 +155,14 @@ function createStartSessionApi(ctx) {
             stream.on("data", (chunk) => { stdout += chunk.toString(); });
             stream.stderr?.on("data", () => {});
             stream.on("close", () => {
-              settle(stdout.split(/\r?\n/).filter((value) => /^\d+$/.test(value)));
+              settle({
+                available: true,
+                pids: stdout.split(/\r?\n/).filter((value) => /^\d+$/.test(value)),
+              });
             });
           });
         } catch {
-          settle([]);
+          settle({ available: false, pids: [] });
         }
       });
     };
@@ -165,8 +170,9 @@ function createStartSessionApi(ctx) {
     const waitForNewInteractiveShellPid = async (conn, previousPids) => {
       const previous = new Set(previousPids);
       for (let attempt = 0; attempt < 5; attempt += 1) {
-        const currentPids = await listInteractiveShellPids(conn);
-        const newPids = currentPids.filter((pid) => !previous.has(pid));
+        const discovery = await listInteractiveShellPids(conn);
+        if (!discovery.available) return null;
+        const newPids = discovery.pids.filter((pid) => !previous.has(pid));
         if (newPids.length === 1) return newPids[0];
         if (newPids.length > 1) return null;
         if (attempt < 4) {
@@ -552,7 +558,8 @@ function createStartSessionApi(ctx) {
         discoveryConnectionError = err;
       };
       conn.once("error", onDiscoveryConnectionError);
-      const shellPidsBeforeOpen = await listInteractiveShellPids(conn);
+      const shellDiscoveryBeforeOpen = await listInteractiveShellPids(conn);
+      const shellPidsBeforeOpen = shellDiscoveryBeforeOpen.pids;
       conn.removeListener("error", onDiscoveryConnectionError);
       if (discoveryConnectionError) {
         releaseConnectionRef(refHolder);
@@ -664,7 +671,7 @@ function createStartSessionApi(ctx) {
                 chainConnections: [],
                 isReused: true,
               });
-              const newShellPidPromise = shellPidsBeforeOpen.length > 0
+              const newShellPidPromise = shellDiscoveryBeforeOpen.available
                 ? waitForNewInteractiveShellPid(conn, shellPidsBeforeOpen)
                 : Promise.resolve(null);
               void newShellPidPromise.then((newShellPid) => {

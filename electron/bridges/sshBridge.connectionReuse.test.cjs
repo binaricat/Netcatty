@@ -324,7 +324,7 @@ test("concurrent copies keep distinct shell IDs when the source closes immediate
   const { bridge } = loadBridgeWithMockedSsh2(t);
   const terminalBridge = require("./terminalBridge.cjs");
   const sessions = new Map();
-  const sourceConn = makePidTrackingReusableConn();
+  const sourceConn = makePidTrackingReusableConn({ delayFirstNewPid: true });
   const source = makeSourceSession(sourceConn, { hostname: "10.0.0.1", username: "alice" });
   source.shellPid = "111";
   const closeSourceStream = source.stream.close;
