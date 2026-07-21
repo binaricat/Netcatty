@@ -14,14 +14,10 @@ import React, { useState } from 'react';
 import {
     Cloud,
     CloudOff,
-    Droplets,
     Github,
     Loader2,
-    Moon,
-    Plug,
     RefreshCw,
     Settings,
-    Sun,
     X,
     ArrowUp,
     ArrowDown,
@@ -33,7 +29,6 @@ import { isProviderReadyForSync, type CloudProvider, formatSyncDateTime } from '
 import { useI18n } from '../application/i18n/I18nProvider';
 import { cn } from '../lib/utils';
 import { Button } from './ui/button';
-import { Switch } from './ui/switch';
 import {
     Popover,
     PopoverContent,
@@ -108,24 +103,11 @@ const StatusIndicator: React.FC<StatusIndicatorProps> = ({ status, size = 'sm', 
 // Main SyncStatusButton Component
 // ============================================================================
 
-const OPACITY_PRESETS = [
-    { label: '100%', value: 1 },
-    { label: '85%', value: 0.85 },
-    { label: '70%', value: 0.7 },
-] as const;
-
 interface SyncStatusButtonProps {
     onOpenSettings?: () => void;
     onSyncNow?: () => Promise<void>; // Callback to trigger sync with current data
     className?: string;
     style?: React.CSSProperties;
-    theme?: 'dark' | 'light';
-    onToggleTheme?: () => void;
-    externalMcpEnabled?: boolean;
-    onToggleExternalMcp?: (enabled: boolean) => void;
-    showExternalMcpToggle?: boolean;
-    windowOpacity?: number;
-    setWindowOpacity?: (opacity: number) => void;
 }
 
 export const SyncStatusButton: React.FC<SyncStatusButtonProps> = ({
@@ -133,13 +115,6 @@ export const SyncStatusButton: React.FC<SyncStatusButtonProps> = ({
     onSyncNow,
     className,
     style,
-    theme,
-    onToggleTheme,
-    externalMcpEnabled = false,
-    onToggleExternalMcp,
-    showExternalMcpToggle = false,
-    windowOpacity,
-    setWindowOpacity,
 }) => {
     const { t } = useI18n();
     const [isOpen, setIsOpen] = useState(false);
@@ -431,104 +406,6 @@ export const SyncStatusButton: React.FC<SyncStatusButtonProps> = ({
                         </div>
                     )}
                 </div>
-
-                {(
-                    showExternalMcpToggle
-                    || (typeof windowOpacity === 'number' && typeof setWindowOpacity === 'function')
-                    || typeof onToggleTheme === 'function'
-                ) ? (
-                    <div className="border-t border-border/60 px-3 py-3 space-y-3">
-                        <div className="text-xs font-medium text-muted-foreground">
-                            {t('topTabs.controlPanel')}
-                        </div>
-
-                        {showExternalMcpToggle && onToggleExternalMcp ? (
-                            <div className="flex items-center justify-between gap-3">
-                                <div className="min-w-0">
-                                    <div className="flex items-center gap-2 text-sm font-medium">
-                                        <Plug size={14} className="shrink-0" />
-                                        <span className="truncate">{t('topTabs.controlPanel.externalMcp')}</span>
-                                    </div>
-                                    <div className="text-xs text-muted-foreground mt-0.5">
-                                        {t(externalMcpEnabled ? 'topTabs.externalMcp.disable' : 'topTabs.externalMcp.enable')}
-                                    </div>
-                                </div>
-                                <Switch
-                                    checked={externalMcpEnabled}
-                                    onCheckedChange={onToggleExternalMcp}
-                                    aria-label={t(externalMcpEnabled ? 'topTabs.externalMcp.disable' : 'topTabs.externalMcp.enable')}
-                                />
-                            </div>
-                        ) : null}
-
-                        {typeof windowOpacity === 'number' && typeof setWindowOpacity === 'function' ? (
-                            <div className="space-y-2">
-                                <div className="flex items-center justify-between gap-2">
-                                    <div className="flex items-center gap-2 text-sm font-medium">
-                                        <Droplets size={14} className="shrink-0" />
-                                        <span>{t('topTabs.windowOpacity')}</span>
-                                    </div>
-                                    <span className="text-xs text-muted-foreground tabular-nums w-9 text-right">
-                                        {Math.round(windowOpacity * 100)}%
-                                    </span>
-                                </div>
-                                <input
-                                    type="range"
-                                    min={50}
-                                    max={100}
-                                    step={1}
-                                    value={Math.round(windowOpacity * 100)}
-                                    onChange={(event) => setWindowOpacity(Number(event.target.value) / 100)}
-                                    className="w-full accent-primary"
-                                    aria-label={t('topTabs.windowOpacity')}
-                                />
-                                <div className="flex items-center gap-1.5">
-                                    {OPACITY_PRESETS.map((preset) => (
-                                        <button
-                                            key={preset.label}
-                                            type="button"
-                                            onClick={() => setWindowOpacity(preset.value)}
-                                            className={cn(
-                                                'flex-1 px-2 py-1 rounded-md text-xs font-medium transition-colors border',
-                                                windowOpacity === preset.value
-                                                    ? 'bg-primary text-primary-foreground border-primary'
-                                                    : 'bg-muted/50 text-muted-foreground border-border hover:text-foreground',
-                                            )}
-                                        >
-                                            {preset.label}
-                                        </button>
-                                    ))}
-                                </div>
-                            </div>
-                        ) : null}
-
-                        {onToggleTheme ? (
-                            <div className="flex items-center justify-between gap-3">
-                                <div className="min-w-0">
-                                    <div className="flex items-center gap-2 text-sm font-medium">
-                                        {theme === 'dark'
-                                            ? <Sun size={14} className="shrink-0" />
-                                            : <Moon size={14} className="shrink-0" />}
-                                        <span className="truncate">{t('topTabs.controlPanel.theme')}</span>
-                                    </div>
-                                    <div className="text-xs text-muted-foreground mt-0.5">
-                                        {theme === 'dark'
-                                            ? t('topTabs.controlPanel.theme.dark')
-                                            : t('topTabs.controlPanel.theme.light')}
-                                    </div>
-                                </div>
-                                <Button
-                                    variant="outline"
-                                    size="sm"
-                                    className="h-8 shrink-0"
-                                    onClick={onToggleTheme}
-                                >
-                                    {t('topTabs.toggleTheme')}
-                                </Button>
-                            </div>
-                        ) : null}
-                    </div>
-                ) : null}
             </PopoverContent>
         </Popover>
     );

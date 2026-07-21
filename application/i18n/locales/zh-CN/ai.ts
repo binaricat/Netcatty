@@ -489,7 +489,7 @@ export const zhCNAiMessages: Messages = {
   'topTabs.moreTabs': '更多标签页',
   'topTabs.aiAssistant': 'AI 助手',
   'topTabs.controlPanel': '快捷控制',
-  'topTabs.controlPanel.description': '快捷控制',
+  'topTabs.controlPanel.description': '对外 MCP、外观和主题。',
   'topTabs.controlPanel.externalMcp': '对外 MCP',
   'topTabs.controlPanel.theme': '主题',
   'topTabs.controlPanel.theme.light': '浅色',

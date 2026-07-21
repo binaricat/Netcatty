@@ -450,7 +450,7 @@ export const ruAiMessages: Messages = {
   'topTabs.moreTabs': 'Больше вкладок',
   'topTabs.aiAssistant': 'AI-помощник',
   'topTabs.controlPanel': 'Быстрые настройки',
-  'topTabs.controlPanel.description': 'Быстрые настройки',
+  'topTabs.controlPanel.description': 'Внешний MCP, внешний вид и тема.',
   'topTabs.controlPanel.externalMcp': 'Внешний MCP',
   'topTabs.controlPanel.theme': 'Тема',
   'topTabs.controlPanel.theme.light': 'Светлая',

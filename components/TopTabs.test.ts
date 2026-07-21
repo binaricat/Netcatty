@@ -40,6 +40,7 @@ const {
 const { activeTabStore } = await import("../application/state/activeTabStore.ts");
 const indexCss = readFileSync(new URL("../index.css", import.meta.url), "utf8");
 const topTabsSource = readFileSync(new URL("./TopTabs.tsx", import.meta.url), "utf8");
+const topTabsQuickControlsSource = readFileSync(new URL("./TopTabsQuickControls.tsx", import.meta.url), "utf8");
 const syncStatusButtonSource = readFileSync(new URL("./SyncStatusButton.tsx", import.meta.url), "utf8");
 const appViewSource = readFileSync(new URL("../application/app/AppView.tsx", import.meta.url), "utf8");
 const appSource = readFileSync(new URL("../App.tsx", import.meta.url), "utf8");
@@ -115,29 +116,37 @@ test("quick switcher plus button exposes a custom CSS hook", () => {
   assert.match(topTabsSource, /data-section="top-tabs-quick-switcher-toggle"/);
 });
 
-test("top tabs host secondary utilities inside the cloud sync panel", () => {
+test("top tabs keep cloud sync separate from quick controls", () => {
   assert.match(topTabsSource, /SyncStatusButton/);
+  assert.match(topTabsSource, /TopTabsQuickControls/);
+  assert.match(topTabsSource, /onOpenSettings=\{onOpenSettings\}/);
+  assert.match(topTabsSource, /onSyncNow=\{onSyncNow\}/);
   assert.match(topTabsSource, /theme=\{theme\}/);
   assert.match(topTabsSource, /onToggleTheme=\{onToggleTheme\}/);
   assert.match(topTabsSource, /externalMcpEnabled=\{externalMcpEnabled\}/);
-  assert.match(topTabsSource, /onToggleExternalMcp=\{onToggleExternalMcp\}/);
-  assert.match(topTabsSource, /showExternalMcpToggle=\{showExternalMcpToggle\}/);
   assert.match(topTabsSource, /windowOpacity=\{windowOpacity\}/);
-  assert.match(topTabsSource, /setWindowOpacity=\{setWindowOpacity\}/);
-  assert.doesNotMatch(topTabsSource, /TopTabsControlPanel/);
   assert.doesNotMatch(topTabsSource, /WindowOpacityButton/);
   assert.doesNotMatch(topTabsSource, /onClick=\{onToggleTheme\}/);
+  const syncButtonUsage = topTabsSource.match(/<SyncStatusButton[\s\S]*?\/>/);
+  assert.ok(syncButtonUsage, 'expected a SyncStatusButton usage');
+  assert.doesNotMatch(syncButtonUsage[0], /externalMcpEnabled=/);
+  assert.doesNotMatch(syncButtonUsage[0], /windowOpacity=/);
+  assert.doesNotMatch(syncButtonUsage[0], /onToggleTheme=/);
 });
 
-test("cloud sync panel footer hosts External MCP, opacity, and theme controls", () => {
-  assert.match(syncStatusButtonSource, /topTabs\.controlPanel/);
-  assert.match(syncStatusButtonSource, /showExternalMcpToggle/);
-  assert.match(syncStatusButtonSource, /onToggleExternalMcp/);
-  assert.match(syncStatusButtonSource, /windowOpacity/);
-  assert.match(syncStatusButtonSource, /setWindowOpacity/);
-  assert.match(syncStatusButtonSource, /onToggleTheme/);
-  assert.match(syncStatusButtonSource, /<Plug size=\{14\}/);
-  assert.match(syncStatusButtonSource, /OPACITY_PRESETS/);
+test("quick controls panel hosts External MCP, opacity, and theme", () => {
+  assert.match(topTabsQuickControlsSource, /data-section="top-tabs-quick-controls"/);
+  assert.match(topTabsQuickControlsSource, /topTabs\.controlPanel/);
+  assert.match(topTabsQuickControlsSource, /externalMcpEnabled/);
+  assert.match(topTabsQuickControlsSource, /onToggleExternalMcp/);
+  assert.match(topTabsQuickControlsSource, /windowOpacity/);
+  assert.match(topTabsQuickControlsSource, /setWindowOpacity/);
+  assert.match(topTabsQuickControlsSource, /onToggleTheme/);
+  assert.match(topTabsQuickControlsSource, /<Plug size=\{14\}/);
+  assert.match(topTabsQuickControlsSource, /OPACITY_PRESETS/);
+  assert.doesNotMatch(topTabsQuickControlsSource, /useCloudSync/);
+  assert.doesNotMatch(syncStatusButtonSource, /topTabs\.controlPanel/);
+  assert.doesNotMatch(syncStatusButtonSource, /externalMcpEnabled/);
 });
 
 test("External MCP top bar labels exist in Traditional Chinese", () => {

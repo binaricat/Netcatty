@@ -23,6 +23,7 @@ import { Button } from './ui/button';
 import { ContextMenuItem, ContextMenuSeparator } from './ui/context-menu';
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 import { SyncStatusButton } from './SyncStatusButton';
+import { TopTabsQuickControls } from './TopTabsQuickControls';
 import {
   ActiveTabAutoScroller,
   EditorTopTab,
@@ -1105,6 +1106,10 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
           <SyncStatusButton
             onOpenSettings={onOpenSettings}
             onSyncNow={onSyncNow}
+            className="h-7 w-7 shrink-0 top-tab-utility-btn"
+            style={{ color: 'var(--top-tabs-muted, hsl(var(--muted-foreground)))' }}
+          />
+          <TopTabsQuickControls
             theme={theme}
             onToggleTheme={onToggleTheme}
             externalMcpEnabled={externalMcpEnabled}
@@ -1112,7 +1117,6 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
             showExternalMcpToggle={showExternalMcpToggle}
             windowOpacity={windowOpacity}
             setWindowOpacity={setWindowOpacity}
-            className="h-7 w-7 shrink-0 top-tab-utility-btn"
             style={{ color: 'var(--top-tabs-muted, hsl(var(--muted-foreground)))' }}
           />
           <Tooltip>
