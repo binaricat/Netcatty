@@ -77,29 +77,21 @@ export const TopTabsQuickControls: React.FC<TopTabsQuickControlsProps> = ({
       </Tooltip>
 
       <PopoverContent
-        className="w-72 p-0 app-no-drag"
+        className="w-64 p-0 app-no-drag"
         align="end"
         sideOffset={6}
         onOpenAutoFocus={(event) => event.preventDefault()}
       >
-        <div className="px-3 py-2.5 border-b border-border/60">
+        <div className="px-3 py-2 border-b border-border/60">
           <div className="text-sm font-medium">{t('topTabs.controlPanel')}</div>
-          <div className="text-xs text-muted-foreground mt-0.5">
-            {t('topTabs.controlPanel.description')}
-          </div>
         </div>
 
-        <div className="p-3 space-y-3">
+        <div className="p-2">
           {showExternalMcpToggle ? (
-            <div className="flex items-center justify-between gap-3 rounded-md border border-border/60 bg-background/70 px-3 py-2">
-              <div className="min-w-0">
-                <div className="flex items-center gap-2 text-sm font-medium">
-                  <Plug size={14} className="shrink-0" />
-                  <span className="truncate">{t('topTabs.controlPanel.externalMcp')}</span>
-                </div>
-                <div className="text-xs text-muted-foreground mt-0.5">
-                  {t(externalMcpEnabled ? 'topTabs.externalMcp.disable' : 'topTabs.externalMcp.enable')}
-                </div>
+            <div className="flex items-center justify-between gap-3 rounded-md px-2 py-2 hover:bg-muted/40">
+              <div className="flex min-w-0 items-center gap-2 text-sm">
+                <Plug size={14} className="shrink-0 text-muted-foreground" />
+                <span className="truncate">{t('topTabs.controlPanel.externalMcp')}</span>
               </div>
               <Switch
                 checked={externalMcpEnabled}
@@ -109,37 +101,39 @@ export const TopTabsQuickControls: React.FC<TopTabsQuickControlsProps> = ({
             </div>
           ) : null}
 
-          <div className="rounded-md border border-border/60 bg-background/70 px-3 py-2 space-y-2">
+          <div className="rounded-md px-2 py-2">
             <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2 text-sm font-medium">
-                <Droplets size={14} className="shrink-0" />
-                <span>{t('topTabs.windowOpacity')}</span>
+              <div className="flex min-w-0 items-center gap-2 text-sm">
+                <Droplets size={14} className="shrink-0 text-muted-foreground" />
+                <span className="truncate">{t('topTabs.windowOpacity')}</span>
               </div>
-              <span className="text-xs text-muted-foreground tabular-nums w-9 text-right">
+              <span className="w-9 text-right text-xs tabular-nums text-muted-foreground">
                 {opacityPercent}%
               </span>
             </div>
-            <input
-              type="range"
-              min={50}
-              max={100}
-              step={1}
-              value={opacityPercent}
-              onChange={(event) => setWindowOpacity(Number(event.target.value) / 100)}
-              className="w-full accent-primary"
-              aria-label={t('topTabs.windowOpacity')}
-            />
-            <div className="flex items-center gap-1.5">
+            <div className="mt-2 flex items-center gap-2">
+              <input
+                type="range"
+                min={50}
+                max={100}
+                step={1}
+                value={opacityPercent}
+                onChange={(event) => setWindowOpacity(Number(event.target.value) / 100)}
+                className="w-full accent-primary"
+                aria-label={t('topTabs.windowOpacity')}
+              />
+            </div>
+            <div className="mt-2 flex items-center gap-1">
               {OPACITY_PRESETS.map((preset) => (
                 <button
                   key={preset.label}
                   type="button"
                   onClick={() => setWindowOpacity(preset.value)}
                   className={cn(
-                    'flex-1 px-2 py-1 rounded-md text-xs font-medium transition-colors border',
+                    'h-6 flex-1 rounded-md text-[11px] font-medium transition-colors',
                     windowOpacity === preset.value
-                      ? 'bg-primary text-primary-foreground border-primary'
-                      : 'bg-muted/50 text-muted-foreground border-border hover:text-foreground',
+                      ? 'bg-primary text-primary-foreground'
+                      : 'bg-muted/50 text-muted-foreground hover:bg-muted hover:text-foreground',
                   )}
                 >
                   {preset.label}
@@ -148,24 +142,20 @@ export const TopTabsQuickControls: React.FC<TopTabsQuickControlsProps> = ({
             </div>
           </div>
 
-          <div className="flex items-center justify-between gap-3 rounded-md border border-border/60 bg-background/70 px-3 py-2">
-            <div className="min-w-0">
-              <div className="flex items-center gap-2 text-sm font-medium">
-                {isDark ? <Sun size={14} className="shrink-0" /> : <Moon size={14} className="shrink-0" />}
-                <span className="truncate">{t('topTabs.controlPanel.theme')}</span>
-              </div>
-              <div className="text-xs text-muted-foreground mt-0.5">
-                {isDark ? t('topTabs.controlPanel.theme.dark') : t('topTabs.controlPanel.theme.light')}
-              </div>
+          <div className="flex items-center justify-between gap-3 rounded-md px-2 py-2 hover:bg-muted/40">
+            <div className="flex min-w-0 items-center gap-2 text-sm">
+              {isDark
+                ? <Sun size={14} className="shrink-0 text-muted-foreground" />
+                : <Moon size={14} className="shrink-0 text-muted-foreground" />}
+              <span className="truncate">{t('topTabs.controlPanel.theme')}</span>
             </div>
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-8 shrink-0"
+            <button
+              type="button"
               onClick={onToggleTheme}
+              className="h-6 shrink-0 rounded-md bg-muted/50 px-2 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
             >
-              {t('topTabs.toggleTheme')}
-            </Button>
+              {isDark ? t('topTabs.controlPanel.theme.light') : t('topTabs.controlPanel.theme.dark')}
+            </button>
           </div>
         </div>
       </PopoverContent>

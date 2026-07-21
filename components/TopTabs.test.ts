@@ -137,6 +137,7 @@ test("top tabs keep cloud sync separate from quick controls", () => {
 test("quick controls panel hosts External MCP, opacity, and theme", () => {
   assert.match(topTabsQuickControlsSource, /data-section="top-tabs-quick-controls"/);
   assert.match(topTabsQuickControlsSource, /topTabs\.controlPanel/);
+  assert.doesNotMatch(topTabsQuickControlsSource, /topTabs\.controlPanel\.description/);
   assert.match(topTabsQuickControlsSource, /externalMcpEnabled/);
   assert.match(topTabsQuickControlsSource, /onToggleExternalMcp/);
   assert.match(topTabsQuickControlsSource, /windowOpacity/);
@@ -145,6 +146,7 @@ test("quick controls panel hosts External MCP, opacity, and theme", () => {
   assert.match(topTabsQuickControlsSource, /<Plug size=\{14\}/);
   assert.match(topTabsQuickControlsSource, /OPACITY_PRESETS/);
   assert.doesNotMatch(topTabsQuickControlsSource, /useCloudSync/);
+  assert.doesNotMatch(topTabsQuickControlsSource, /border border-border\/60 bg-background\/70/);
   assert.doesNotMatch(syncStatusButtonSource, /topTabs\.controlPanel/);
   assert.doesNotMatch(syncStatusButtonSource, /externalMcpEnabled/);
 });
