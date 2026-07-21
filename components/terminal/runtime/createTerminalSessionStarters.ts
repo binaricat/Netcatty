@@ -564,6 +564,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
           // bridge silently falls back to a fresh connection if the source is
           // gone, so reconnect/retry after the source closed still works.
           sourceSessionId: ctx.reuseConnectionFromSessionId,
+          skipShellPidDiscovery: ctx.isNetworkDevice === true,
         });
       };
 

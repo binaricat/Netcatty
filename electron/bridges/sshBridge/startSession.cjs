@@ -568,10 +568,13 @@ printf '%s\n' '${scanCompleteMarker}'`;
       const onDiscoveryConnectionError = (err) => {
         discoveryConnectionError = err;
       };
-      conn.once("error", onDiscoveryConnectionError);
-      const shellDiscoveryBeforeOpen = await listInteractiveShellPids(conn);
+      let shellDiscoveryBeforeOpen = { available: false, pids: [] };
+      if (!options.skipShellPidDiscovery) {
+        conn.once("error", onDiscoveryConnectionError);
+        shellDiscoveryBeforeOpen = await listInteractiveShellPids(conn);
+        conn.removeListener("error", onDiscoveryConnectionError);
+      }
       const shellPidsBeforeOpen = shellDiscoveryBeforeOpen.pids;
-      conn.removeListener("error", onDiscoveryConnectionError);
       if (discoveryConnectionError) {
         releaseConnectionRef(refHolder);
         throw discoveryConnectionError;

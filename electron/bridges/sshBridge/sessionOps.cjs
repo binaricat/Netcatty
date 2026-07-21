@@ -238,7 +238,12 @@ function createSessionOpsApi(ctx) {
       const targetLoginPid = /^\d+$/.test(String(session.shellPid || ''))
         ? String(session.shellPid)
         : '';
-      if ((session.connRef?.count || 1) > 1 && !targetLoginPid) {
+      const sharedTerminalCount = session.connRef
+        ? [...sessions.values()].filter(
+          (candidate) => candidate?.connRef === session.connRef && candidate?.stream,
+        ).length
+        : 1;
+      if (sharedTerminalCount > 1 && !targetLoginPid) {
         return {
           success: false,
           error: 'Current directory is ambiguous across shared terminal channels',

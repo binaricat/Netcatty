@@ -134,6 +134,32 @@ test("startSSH forwards imported system agent authentication settings", async ()
   );
 });
 
+test("startSSH tells the bridge to skip shell discovery for network devices", async () => {
+  let capturedOptions: Record<string, unknown> | null = null;
+  const terminalBackend = {
+    backendAvailable: () => true,
+    startSSHSession: async (options: Record<string, unknown>) => {
+      capturedOptions = options;
+      return "ssh-session";
+    },
+    onSessionData: () => noop,
+    onSessionExit: () => noop,
+    onChainProgress: () => noop,
+    writeToSession: noop,
+    resizeSession: noop,
+  };
+  const ctx = createStarterContext({
+    isNetworkDevice: true,
+    reuseConnectionFromSessionId: "source-session",
+    terminalBackend,
+  });
+
+  await createTerminalSessionStarters(ctx as never).startSSH(createTermStub() as never);
+
+  assert.equal(capturedOptions?.sourceSessionId, "source-session");
+  assert.equal(capturedOptions?.skipShellPidDiscovery, true);
+});
+
 test("startSSH uses the system agent when a synced vault key cannot be decrypted", async () => {
   let capturedOptions: Record<string, unknown> | null = null;
   const terminalBackend = {

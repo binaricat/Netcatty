@@ -272,6 +272,31 @@ test("Copy Tab records a distinct remote shell for each shared terminal", async 
   assert.equal(sessions.get("copy").shellPid, "222");
 });
 
+test("Copy Tab skips POSIX shell discovery for network devices", async (t) => {
+  const { bridge } = loadBridgeWithMockedSsh2(t);
+  const sessions = new Map();
+  const sourceConn = makeReusableConn();
+  let execCalls = 0;
+  sourceConn.exec = () => { execCalls += 1; };
+  sessions.set("source", makeSourceSession(sourceConn, { hostname: "10.0.0.1", username: "alice" }));
+
+  const start = registerStartHandler(bridge, sessions);
+  await start(
+    { sender: makeSender() },
+    {
+      sessionId: "copy",
+      hostname: "10.0.0.1",
+      username: "alice",
+      sourceSessionId: "source",
+      skipShellPidDiscovery: true,
+    },
+  );
+
+  assert.equal(execCalls, 0);
+  assert.equal(sourceConn.openedShells.length, 1);
+  assert.ok(sessions.get("copy"));
+});
+
 test("Copy Tab waits briefly when the new remote shell is not visible immediately", async (t) => {
   const { bridge } = loadBridgeWithMockedSsh2(t);
   const sessions = new Map();
