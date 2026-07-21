@@ -627,6 +627,44 @@ test("persistent highlight lookup follows uniform scrollback marker shifts", () 
   }
 });
 
+test("external marker reset invalidates persistent highlight coverage", () => {
+  const raf = installAnimationFrameQueue();
+  try {
+    const {
+      term,
+      handlers,
+      getActiveDecorationCount,
+      getTranslateCount,
+      markers,
+      resetTranslateCount,
+    } = createFakeTerminal("hello DEPLOY world", { lineCount: 9 });
+    term.rows = 3;
+    const highlighter = new KeywordHighlighter(term as never);
+    const rules: KeywordHighlightRule[] = [
+      {
+        id: "deploy",
+        label: "Deploy",
+        patterns: ["DEPLOY"],
+        color: "#F87171",
+        enabled: true,
+      },
+    ];
+
+    highlighter.setRules(rules, true);
+    raf.flush();
+    for (const marker of [...markers]) marker.dispose();
+    resetTranslateCount();
+
+    handlers.scroll?.();
+
+    assert.equal(getTranslateCount(), term.rows);
+    assert.equal(getActiveDecorationCount(), term.rows);
+    highlighter.dispose();
+  } finally {
+    raf.restore();
+  }
+});
+
 test("in-place redraw removes a persistent highlight when text stops matching", async () => {
   const raf = installAnimationFrameQueue();
   try {

@@ -78,6 +78,7 @@ export class KeywordHighlighter implements IDisposable {
   private compiledRules: CompiledRule[] = [];
   private lineDecorations = new Map<number, LineDecorationState>();
   private markerLineOffset = 0;
+  private lineDecorationIndexNeedsRebuild = false;
   private debounceTimer: NodeJS.Timeout | null = null;
   /** Single quiet-window catch-up after bulk dumps (no per-write schedule). */
   private bulkPressureCatchUpTimer: NodeJS.Timeout | null = null;
@@ -294,6 +295,7 @@ export class KeywordHighlighter implements IDisposable {
     }
     this.lineDecorations.clear();
     this.markerLineOffset = 0;
+    this.lineDecorationIndexNeedsRebuild = false;
     this.lastViewportRange = null;
     this.lastRenderRange = null;
     this.clearDirtySegments();
@@ -389,6 +391,7 @@ export class KeywordHighlighter implements IDisposable {
     };
     marker.onDispose(() => {
       this.removeLineDecorationState(state, lineY);
+      this.lastRenderRange = null;
       for (const decoration of decorations) {
         if (!decoration.isDisposed) decoration.dispose();
       }
@@ -612,10 +615,10 @@ export class KeywordHighlighter implements IDisposable {
     const rangeStart = Math.max(0, viewportY - overscan);
     const rangeEnd = viewportEnd + overscan;
 
-    const previousRange = this.lastRenderRange;
     this.beginTerminalRefreshTracking(viewportStart, viewportEnd);
     try {
       this.syncLineDecorationIndex();
+      const previousRange = this.lastRenderRange;
 
       if (reason === "write") {
         this.processDirtyLinesInRange(rangeStart, rangeEnd, cursorAbsoluteY, "write");
@@ -699,8 +702,10 @@ export class KeywordHighlighter implements IDisposable {
   }
 
   private syncLineDecorationIndex(force = false) {
+    force = force || this.lineDecorationIndexNeedsRebuild;
     if (this.lineDecorations.size === 0) {
       this.markerLineOffset = 0;
+      this.lineDecorationIndexNeedsRebuild = false;
       return;
     }
 
@@ -735,6 +740,7 @@ export class KeywordHighlighter implements IDisposable {
 
     this.lineDecorations = nextLineDecorations;
     this.markerLineOffset = 0;
+    this.lineDecorationIndexNeedsRebuild = false;
     if (staleStates.size > 0) {
       this.lastRenderRange = null;
     }
@@ -1012,6 +1018,7 @@ export class KeywordHighlighter implements IDisposable {
     // Detect in-place ANSI redraw chunks (cursor returns near original line while
     // multiple viewport regions are actually rewritten).
     if (sameWindow && cursorSpan <= Math.max(1, padding * 2) && probeDiffCount >= 2) {
+      this.lineDecorationIndexNeedsRebuild = true;
       this.markVisibleRangeDirty();
       return;
     }
