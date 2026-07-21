@@ -74,5 +74,31 @@ test("quick connect protocol step uses simplified connect header and protocol ic
   assert.match(markup, /lucide-radio/);
   assert.match(markup, /lucide-link-2/);
   assert.match(markup, /lucide-terminal/);
+  assert.match(markup, /text-sm font-medium leading-none[^>]*>Choose protocol</);
+});
+
+test("quick connect credential section title matches protocol section title style", () => {
+  const markup = renderToStaticMarkup(
+    <I18nProvider locale="en">
+      <QuickConnectWizard
+        open
+        target={{ hostname: "10.2.0.31" }}
+        keys={[]}
+        identities={[{
+          id: "identity-root",
+          label: "Root devices",
+          username: "root",
+          authMethod: "password",
+          password: "secret",
+          created: 1,
+        }]}
+        onConnect={() => undefined}
+        onClose={() => undefined}
+      />
+    </I18nProvider>,
+  );
+
+  assert.match(markup, /text-sm font-medium leading-none[^>]*>Choose protocol</);
+  assert.match(markup, /text-sm font-medium leading-none[^>]*>Credential preset</);
 });
 

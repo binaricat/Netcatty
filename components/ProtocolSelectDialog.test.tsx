@@ -22,4 +22,6 @@ test("protocol select dialog uses plug header and semantic protocol icons", () =
   assert.match(source, /<Shield size=\{18\} \/>/);
   assert.match(source, /<Radio size=\{18\} \/>/);
   assert.match(source, /<Link2 size=\{18\} \/>/);
+  assert.match(source, /text-sm font-medium leading-none/);
+  assert.doesNotMatch(source, /text-base font-semibold\}\{t\("protocolSelect\.chooseProtocol"\)\}/);
 });

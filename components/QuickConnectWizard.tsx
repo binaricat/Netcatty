@@ -286,8 +286,9 @@ const QuickConnectWizard: React.FC<QuickConnectWizardProps> = ({
 
   // Render protocol selection step
   const renderProtocolStep = () => (
-    <div className="space-y-4">
-      <h3 className="text-base font-semibold">{t("protocolSelect.chooseProtocol")}</h3>
+    <div className="space-y-5">
+      <div className="space-y-2">
+      <h3 className="text-sm font-medium leading-none">{t("protocolSelect.chooseProtocol")}</h3>
       <div className="space-y-3">
         {/* SSH */}
         <button
@@ -457,10 +458,11 @@ const QuickConnectWizard: React.FC<QuickConnectWizardProps> = ({
           </div>
         </button>
       </div>
+      </div>
 
       {protocol !== "telnet" && identities.length > 0 && (
-        <div className="space-y-2 pt-1">
-          <Label>{t("quickConnect.identity.label")}</Label>
+        <div className="space-y-2">
+          <Label className="text-sm font-medium leading-none">{t("quickConnect.identity.label")}</Label>
           <Combobox
             options={identityOptions}
             value={selectedIdentityId || undefined}
