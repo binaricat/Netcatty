@@ -95,21 +95,7 @@ export const TopTabsQuickControls: React.FC<TopTabsQuickControlsProps> = ({
         </div>
 
         <div className="p-2">
-          {showExternalMcpToggle ? (
-            <div className="flex items-center justify-between gap-3 rounded-md px-2 py-2 hover:bg-muted/40">
-              <div className="flex min-w-0 items-center gap-2 text-sm">
-                <Plug size={14} className="shrink-0 text-muted-foreground" />
-                <span className="truncate">{t('topTabs.controlPanel.externalMcp')}</span>
-              </div>
-              <Switch
-                checked={externalMcpEnabled}
-                onCheckedChange={onToggleExternalMcp}
-                aria-label={t(externalMcpEnabled ? 'topTabs.externalMcp.disable' : 'topTabs.externalMcp.enable')}
-              />
-            </div>
-          ) : null}
-
-          <div className={cn(showExternalMcpToggle && 'mt-1 border-t border-border/60 pt-1')}>
+          <div>
             <div className="rounded-md">
               <button
                 type="button"
@@ -185,6 +171,22 @@ export const TopTabsQuickControls: React.FC<TopTabsQuickControlsProps> = ({
               </button>
             </div>
           </div>
+
+          {showExternalMcpToggle ? (
+            <div className="mt-1 border-t border-border/60 pt-1">
+              <div className="flex items-center justify-between gap-3 rounded-md px-2 py-2 hover:bg-muted/40">
+                <div className="flex min-w-0 items-center gap-2 text-sm">
+                  <Plug size={14} className="shrink-0 text-muted-foreground" />
+                  <span className="truncate">{t('topTabs.controlPanel.externalMcp')}</span>
+                </div>
+                <Switch
+                  checked={externalMcpEnabled}
+                  onCheckedChange={onToggleExternalMcp}
+                  aria-label={t(externalMcpEnabled ? 'topTabs.externalMcp.disable' : 'topTabs.externalMcp.enable')}
+                />
+              </div>
+            </div>
+          ) : null}
         </div>
       </PopoverContent>
     </Popover>
