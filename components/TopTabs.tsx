@@ -1112,6 +1112,8 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
                     ? 'hsl(var(--primary))'
                     : 'var(--top-tabs-muted, hsl(var(--muted-foreground)))',
                 }}
+                aria-label={t(externalMcpEnabled ? 'topTabs.externalMcp.disable' : 'topTabs.externalMcp.enable')}
+                aria-pressed={externalMcpEnabled}
                 onClick={() => onToggleExternalMcp(!externalMcpEnabled)}
               >
                 <Radio size={16} />

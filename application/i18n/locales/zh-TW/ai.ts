@@ -483,6 +483,8 @@ export const zhTWAiMessages: Messages = {
   'topTabs.openQuickSwitcher': '開啟快速切換',
   'topTabs.moreTabs': '更多標籤頁',
   'topTabs.aiAssistant': 'AI 助手',
+  'topTabs.externalMcp.enable': '啟用對外 MCP',
+  'topTabs.externalMcp.disable': '停用對外 MCP',
   'topTabs.windowOpacity': '視窗透明度',
   'topTabs.toggleTheme': '切換主題',
   'topTabs.openSettings': '開啟設定',

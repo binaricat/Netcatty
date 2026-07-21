@@ -40,6 +40,7 @@ const {
 const { activeTabStore } = await import("../application/state/activeTabStore.ts");
 const indexCss = readFileSync(new URL("../index.css", import.meta.url), "utf8");
 const topTabsSource = readFileSync(new URL("./TopTabs.tsx", import.meta.url), "utf8");
+const zhTwAiSource = readFileSync(new URL("../application/i18n/locales/zh-TW/ai.ts", import.meta.url), "utf8");
 const topTabItemsSource = readFileSync(new URL("./top-tabs/TopTabItems.tsx", import.meta.url), "utf8");
 const terminalViewSource = readFileSync(new URL("./terminal/TerminalView.tsx", import.meta.url), "utf8");
 
@@ -115,6 +116,13 @@ test("top tabs expose the External MCP quick toggle", () => {
   assert.match(topTabsSource, /onToggleExternalMcp: \(enabled: boolean\) => void/);
   assert.match(topTabsSource, /onToggleExternalMcp\(!externalMcpEnabled\)/);
   assert.match(topTabsSource, /topTabs\.externalMcp\.(enable|disable)/);
+  assert.match(topTabsSource, /aria-label=\{t\(externalMcpEnabled \? 'topTabs\.externalMcp\.disable' : 'topTabs\.externalMcp\.enable'\)\}/);
+  assert.match(topTabsSource, /aria-pressed=\{externalMcpEnabled\}/);
+});
+
+test("External MCP top bar labels exist in Traditional Chinese", () => {
+  assert.match(zhTwAiSource, /'topTabs\.externalMcp\.enable':/);
+  assert.match(zhTwAiSource, /'topTabs\.externalMcp\.disable':/);
 });
 
 test("SessionTabIcon checks custom host icon appearance before distro logos", () => {
