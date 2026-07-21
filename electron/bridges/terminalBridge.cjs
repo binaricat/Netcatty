@@ -136,6 +136,11 @@ function closeTerminalOutputSession(sessionId) {
 /** @type {Map<string, { resolve: (value: any) => void, timeout: NodeJS.Timeout }>} */
 const pendingTerminalSnapshots = new Map();
 const TERMINAL_SNAPSHOT_TIMEOUT_MS = 2000;
+/** In-process (non-worker) attach home mapping: sessionId -> webContentsId */
+const attachHomeWebContentsIds = new Map();
+const {
+  setRestoreAttachedSessionOutput,
+} = require("./terminalAttachRestore.cjs");
 
 function resolveSessionHomeWebContentsId(sessionId, terminalWorkerManager = null) {
   if (!sessionId) return null;
@@ -235,6 +240,13 @@ function rebindTerminalSessionOutput(event, payload, terminalWorkerManager = nul
   const previousWebContentsId =
     typeof session.webContentsId === "number" ? session.webContentsId : null;
   try {
+    if (
+      previousWebContentsId != null
+      && previousWebContentsId !== sender.id
+      && !attachHomeWebContentsIds.has(sessionId)
+    ) {
+      attachHomeWebContentsIds.set(sessionId, previousWebContentsId);
+    }
     openTerminalOutputSession(sessionId, sender);
     session.webContentsId = sender.id;
     return {
@@ -244,6 +256,35 @@ function rebindTerminalSessionOutput(event, payload, terminalWorkerManager = nul
     };
   } catch (err) {
     return { success: false, error: err?.message || String(err) };
+  }
+}
+
+function restoreAttachedSessionOutput(sessionId, terminalWorkerManager = null) {
+  if (!sessionId) return { success: false, restored: false };
+  if (terminalWorkerManager?.restoreAttachHome) {
+    return terminalWorkerManager.restoreAttachHome(sessionId);
+  }
+  const homeId = attachHomeWebContentsIds.get(sessionId);
+  if (homeId == null) {
+    return { success: true, restored: false };
+  }
+  const session = sessions?.get?.(sessionId);
+  if (!session) {
+    attachHomeWebContentsIds.delete(sessionId);
+    return { success: true, restored: false };
+  }
+  try {
+    const home = electronModule?.webContents?.fromId?.(homeId);
+    if (!home || home.isDestroyed?.()) {
+      attachHomeWebContentsIds.delete(sessionId);
+      return { success: false, restored: false, error: "Home renderer destroyed" };
+    }
+    openTerminalOutputSession(sessionId, home);
+    session.webContentsId = homeId;
+    attachHomeWebContentsIds.delete(sessionId);
+    return { success: true, restored: true, webContentsId: homeId };
+  } catch (err) {
+    return { success: false, restored: false, error: err?.message || String(err) };
   }
 }
 
@@ -1592,6 +1633,8 @@ function registerHandlers(ipcMain, options = {}) {
   ipcMain.handle("netcatty:terminal:requestSnapshot", (event, payload) =>
     requestTerminalSessionSnapshot(event, payload, terminalWorkerManager));
   ipcMain.on("netcatty:terminal:snapshot-response", handleTerminalSessionSnapshotResponse);
+  setRestoreAttachedSessionOutput((sessionId) =>
+    restoreAttachedSessionOutput(sessionId, terminalWorkerManager));
 
   if (terminalWorkerManager) {
     [

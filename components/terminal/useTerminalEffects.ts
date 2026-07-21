@@ -543,6 +543,13 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
               attachHomeWebContentsIdRef.current = rebind.previousWebContentsId ?? null;
             }
             sessionRef.current = sessionId;
+            // Hidden home terminal may have paused the backend under pressure;
+            // resume so the popup's new flow controller can receive output.
+            try {
+              terminalBackend.setSessionFlowPaused?.(sessionId, false);
+            } catch {
+              // ignore
+            }
             const attached = sessionStarters.reattachSession(term);
             if (!attached) {
               setError("Failed to attach display to session");

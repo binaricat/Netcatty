@@ -404,6 +404,9 @@ function createTerminalWorkerManager(options = {}) {
    * Move a live session's renderer output route to another webContents
    * (AI silent-session observe popup). Same PTY; only the display target changes.
    */
+  /** sessionId -> home webContentsId while an attach/observe popup owns display */
+  const attachHomeWebContentsIds = new Map();
+
   function rebindOutputSession(sessionId, webContentsId) {
     if (!sessionId || !webContentsId) {
       return { success: false, error: "Missing sessionId or webContentsId" };
@@ -412,6 +415,15 @@ function createTerminalWorkerManager(options = {}) {
       return { success: false, error: "Session not found" };
     }
     const previousWebContentsId = sessionWebContentsIds.get(sessionId) ?? null;
+    // Remember the first home target so popup destruction / session exit can
+    // restore or dual-notify the original owner.
+    if (
+      previousWebContentsId != null
+      && previousWebContentsId !== webContentsId
+      && !attachHomeWebContentsIds.has(sessionId)
+    ) {
+      attachHomeWebContentsIds.set(sessionId, previousWebContentsId);
+    }
     const ok = openOutputSession(sessionId, webContentsId);
     if (!ok) {
       return { success: false, error: "Failed to rebind session output" };
@@ -421,6 +433,35 @@ function createTerminalWorkerManager(options = {}) {
       previousWebContentsId,
       webContentsId,
     };
+  }
+
+  function restoreAttachHome(sessionId) {
+    if (!sessionId) return { success: false, restored: false };
+    const homeId = attachHomeWebContentsIds.get(sessionId);
+    if (homeId == null) {
+      return { success: true, restored: false };
+    }
+    if (closedSessions.has(sessionId)) {
+      attachHomeWebContentsIds.delete(sessionId);
+      return { success: true, restored: false };
+    }
+    const ok = openOutputSession(sessionId, homeId);
+    attachHomeWebContentsIds.delete(sessionId);
+    return {
+      success: ok,
+      restored: ok,
+      webContentsId: ok ? homeId : undefined,
+      error: ok ? undefined : "Failed to restore attach home output",
+    };
+  }
+
+  function getAttachHomeWebContentsId(sessionId) {
+    if (!sessionId) return null;
+    return attachHomeWebContentsIds.get(sessionId) ?? null;
+  }
+
+  function clearAttachHome(sessionId) {
+    if (sessionId) attachHomeWebContentsIds.delete(sessionId);
   }
 
   function closeOutputSession(sessionId) {
@@ -546,21 +587,36 @@ function createTerminalWorkerManager(options = {}) {
       // Prefer the currently rebound display target. Worker-captured
       // webContentsId is from session start and goes stale after attach/rebind.
       const sessionId = message.payload?.sessionId;
-      const targetWebContentsId =
+      const displayWebContentsId =
         (typeof sessionId === "string" && sessionWebContentsIds.get(sessionId))
         || message.webContentsId;
+      const homeWebContentsId =
+        (typeof sessionId === "string" && attachHomeWebContentsIds.get(sessionId))
+        || null;
       if (message.channel === "netcatty:exit" && sessionId) {
         closeOutputSession(sessionId);
+        clearAttachHome(sessionId);
+      }
+      const targets = new Set();
+      if (displayWebContentsId != null) targets.add(displayWebContentsId);
+      // Keep the original owner in the loop for lifecycle (status/tray cleanup).
+      if (homeWebContentsId != null) targets.add(homeWebContentsId);
+      if (targets.size === 0 && message.webContentsId != null) {
+        targets.add(message.webContentsId);
       }
       if (onRendererEvent) {
-        onRendererEvent({
-          ...message,
-          webContentsId: targetWebContentsId,
-        });
+        for (const webContentsId of targets) {
+          onRendererEvent({
+            ...message,
+            webContentsId,
+          });
+        }
         return;
       }
-      const contents = electronModule?.webContents?.fromId?.(targetWebContentsId);
-      contents?.send?.(message.channel, message.payload);
+      for (const webContentsId of targets) {
+        const contents = electronModule?.webContents?.fromId?.(webContentsId);
+        contents?.send?.(message.channel, message.payload);
+      }
       return;
     }
     if (message.kind === "zmodem-upload-dialog") {
@@ -725,6 +781,9 @@ function createTerminalWorkerManager(options = {}) {
     send,
     openOutputSession,
     rebindOutputSession,
+    restoreAttachHome,
+    getAttachHomeWebContentsId,
+    clearAttachHome,
     hasOpenSession(sessionId) {
       return Boolean(
         sessionId

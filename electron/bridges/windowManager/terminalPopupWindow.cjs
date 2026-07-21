@@ -3,6 +3,7 @@
 const { randomUUID } = require("node:crypto");
 
 const crashLogBridge = require("../crashLogBridge.cjs");
+const { restoreAttachedSessionOutput } = require("../terminalAttachRestore.cjs");
 
 function createTerminalPopupWindowApi(ctx) {
   with (ctx) {
@@ -93,6 +94,17 @@ function createTerminalPopupWindowApi(ctx) {
         terminalPopupWindows.delete(popupId);
         if (attachSessionId && attachSessionPopups.get(attachSessionId) === popupId) {
           attachSessionPopups.delete(attachSessionId);
+          // Window may be destroyed before React cleanup runs; always restore
+          // the display route from the main-process lifecycle.
+          try {
+            restoreAttachedSessionOutput(attachSessionId);
+          } catch (err) {
+            crashLogBridge.captureError?.("terminal-popup", err, {
+              popupId,
+              attachSessionId,
+              step: "restore attach output on close",
+            });
+          }
         }
         unregisterAppContentWindow(win);
         notifyAppContentWindowClosed(win);

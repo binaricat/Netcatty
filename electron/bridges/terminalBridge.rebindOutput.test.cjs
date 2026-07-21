@@ -81,11 +81,22 @@ test("worker renderer-event forwarding prefers rebound webContentsId", () => {
     "utf8",
   );
   assert.match(source, /sessionWebContentsIds\.get\(sessionId\)/);
-  assert.match(source, /targetWebContentsId/);
-  // Exit cleanup must not run before we capture the rebound target.
-  const captureIdx = source.indexOf("const targetWebContentsId =");
+  assert.match(source, /displayWebContentsId/);
+  assert.match(source, /attachHomeWebContentsIds/);
+  assert.match(source, /restoreAttachHome/);
+  // Exit cleanup must not run before we capture display/home targets.
+  const captureIdx = source.indexOf("const displayWebContentsId =");
   const closeIdx = source.indexOf('if (message.channel === "netcatty:exit"');
-  assert.ok(captureIdx > 0 && closeIdx > captureIdx, "capture target before closeOutputSession on exit");
+  assert.ok(captureIdx > 0 && closeIdx > captureIdx, "capture targets before closeOutputSession on exit");
+});
+
+test("popup window closed lifecycle restores attach output", () => {
+  const source = require("node:fs").readFileSync(
+    path.join(__dirname, "windowManager/terminalPopupWindow.cjs"),
+    "utf8",
+  );
+  assert.match(source, /restoreAttachedSessionOutput\(attachSessionId\)/);
+  assert.match(source, /terminalAttachRestore/);
 });
 
 test("terminal worker manager exposes rebindOutputSession", () => {
