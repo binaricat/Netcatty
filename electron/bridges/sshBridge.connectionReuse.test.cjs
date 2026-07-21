@@ -115,7 +115,7 @@ function makePidTrackingReusableConn({ delayFirstNewPid = false } = {}) {
         (_value, index) => String((index + 2) * 111),
       ),
     ];
-    const pids = `${snapshot.join("\n")}\n`;
+    const pids = `${snapshot.join("\n")}\n__NETCATTY_SHELL_SCAN_COMPLETE__\n`;
     conn.shellPidSnapshots.push(snapshot);
     setImmediate(() => {
       stream.emit("data", Buffer.from(pids));
@@ -132,6 +132,20 @@ function makeUnavailableDiscoveryConn() {
   conn.exec = (_command, callback) => {
     conn.discoveryExecCalls += 1;
     callback(new Error("exec channels disabled"));
+  };
+  return conn;
+}
+
+function makeFailedDiscoveryCommandConn() {
+  const conn = makeReusableConn();
+  conn.discoveryExecCalls = 0;
+  conn.exec = (_command, callback) => {
+    conn.discoveryExecCalls += 1;
+    const stream = new EventEmitter();
+    stream.stderr = new EventEmitter();
+    stream.close = () => {};
+    setImmediate(() => stream.emit("close", 127));
+    callback(null, stream);
   };
   return conn;
 }
@@ -280,6 +294,27 @@ test("Copy Tab does not retry when remote shell discovery is unavailable", async
   const { bridge } = loadBridgeWithMockedSsh2(t);
   const sessions = new Map();
   const sourceConn = makeUnavailableDiscoveryConn();
+  sessions.set("source", makeSourceSession(sourceConn, { hostname: "10.0.0.1", username: "alice" }));
+
+  const start = registerStartHandler(bridge, sessions);
+  await start(
+    { sender: makeSender() },
+    {
+      sessionId: "copy",
+      hostname: "10.0.0.1",
+      username: "alice",
+      sourceSessionId: "source",
+    },
+  );
+
+  assert.equal(sourceConn.discoveryExecCalls, 1);
+  assert.equal(sessions.get("copy").shellPid, undefined);
+});
+
+test("Copy Tab does not retry when the remote discovery command fails", async (t) => {
+  const { bridge } = loadBridgeWithMockedSsh2(t);
+  const sessions = new Map();
+  const sourceConn = makeFailedDiscoveryCommandConn();
   sessions.set("source", makeSourceSession(sourceConn, { hostname: "10.0.0.1", username: "alice" }));
 
   const start = registerStartHandler(bridge, sessions);

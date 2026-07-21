@@ -104,9 +104,11 @@ function createStartSessionApi(ctx) {
         return Promise.resolve({ available: false, pids: [] });
       }
 
+      const scanCompleteMarker = "__NETCATTY_SHELL_SCAN_COMPLETE__";
       const script = `SELF=$$
+ps_output=$(ps -e -o pid=,ppid=,tty=,comm= 2>/dev/null) || exit 69
 {
-  ps -e -o pid=,ppid=,tty=,comm= 2>/dev/null | awk -v pp="$PPID" -v self="$SELF" '
+  printf '%s\n' "$ps_output" | awk -v pp="$PPID" -v self="$SELF" '
     $1 != self && $2 == pp && $3 != "?" && $4 ~ /^-?(ba|z|fi|k|da|a|c|tc)?sh$/ { print $1 }
   '
   if [ -r /proc/$SELF/environ ]; then
@@ -128,7 +130,8 @@ function createStartSessionApi(ctx) {
       done
     fi
   fi
-} | awk '/^[0-9]+$/ && !seen[$1]++ { print $1 }'`;
+} | awk '/^[0-9]+$/ && !seen[$1]++ { print $1 }'
+printf '%s\n' '${scanCompleteMarker}'`;
 
       return new Promise((resolve) => {
         let settled = false;
@@ -152,12 +155,19 @@ function createStartSessionApi(ctx) {
             }
             activeStream = stream;
             let stdout = "";
+            let exitStatus = null;
             stream.on("data", (chunk) => { stdout += chunk.toString(); });
             stream.stderr?.on("data", () => {});
-            stream.on("close", () => {
+            stream.on("exit", (code) => {
+              if (typeof code === "number") exitStatus = code;
+            });
+            stream.on("close", (code) => {
+              const effectiveExitStatus = typeof code === "number" ? code : exitStatus;
+              const lines = stdout.split(/\r?\n/);
+              const completed = lines.includes(scanCompleteMarker);
               settle({
-                available: true,
-                pids: stdout.split(/\r?\n/).filter((value) => /^\d+$/.test(value)),
+                available: completed && (effectiveExitStatus === null || effectiveExitStatus === 0),
+                pids: lines.filter((value) => /^\d+$/.test(value)),
               });
             });
           });
