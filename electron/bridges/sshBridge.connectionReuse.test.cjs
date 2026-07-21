@@ -97,20 +97,24 @@ function makeReusableConn() {
 function makePidTrackingReusableConn({ delayFirstNewPid = false } = {}) {
   const conn = makeReusableConn();
   conn.shellPidSnapshots = [];
+  conn.sourceShellVisible = true;
   let delayed = false;
   conn.exec = (_command, callback) => {
     const stream = new EventEmitter();
     stream.stderr = new EventEmitter();
     stream.close = () => {};
-    let visibleShellCount = conn.openedShells.length + 1;
+    let visibleShellCount = conn.openedShells.length;
     if (delayFirstNewPid && conn.openedShells.length > 0 && !delayed) {
       delayed = true;
       visibleShellCount -= 1;
     }
-    const snapshot = Array.from(
-      { length: visibleShellCount },
-      (_value, index) => String((index + 1) * 111),
-    );
+    const snapshot = [
+      ...(conn.sourceShellVisible ? ["111"] : []),
+      ...Array.from(
+        { length: visibleShellCount },
+        (_value, index) => String((index + 2) * 111),
+      ),
+    ];
     const pids = `${snapshot.join("\n")}\n`;
     conn.shellPidSnapshots.push(snapshot);
     setImmediate(() => {
@@ -321,7 +325,14 @@ test("concurrent copies keep distinct shell IDs when the source closes immediate
   const terminalBridge = require("./terminalBridge.cjs");
   const sessions = new Map();
   const sourceConn = makePidTrackingReusableConn();
-  sessions.set("source", makeSourceSession(sourceConn, { hostname: "10.0.0.1", username: "alice" }));
+  const source = makeSourceSession(sourceConn, { hostname: "10.0.0.1", username: "alice" });
+  source.shellPid = "111";
+  const closeSourceStream = source.stream.close;
+  source.stream.close = () => {
+    sourceConn.sourceShellVisible = false;
+    closeSourceStream();
+  };
+  sessions.set("source", source);
 
   terminalBridge.init({ sessions, electronModule: {} });
   const start = registerStartHandler(bridge, sessions);

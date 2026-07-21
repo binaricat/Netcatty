@@ -558,19 +558,17 @@ function createStartSessionApi(ctx) {
         releaseConnectionRef(refHolder);
         throw discoveryConnectionError;
       }
-      if (!sourceSession.shellPid) {
-        const assignedPids = new Set(
-          [...sessions.values()]
-            .filter((candidate) => candidate?.connRef === connRef && candidate.shellPid)
-            .map((candidate) => String(candidate.shellPid)),
-        );
-        const unclaimedPids = shellPidsBeforeOpen.filter((pid) => !assignedPids.has(pid));
-        const unassignedSessions = [...sessions.values()].filter(
-          (candidate) => candidate?.connRef === connRef && !candidate.shellPid,
-        );
-        if (unclaimedPids.length === 1 && unassignedSessions.length === 1) {
-          unassignedSessions[0].shellPid = unclaimedPids[0];
-        }
+      const assignedPids = new Set(
+        [...sessions.values()]
+          .filter((candidate) => candidate?.connRef === connRef && candidate.shellPid)
+          .map((candidate) => String(candidate.shellPid)),
+      );
+      const unclaimedPids = shellPidsBeforeOpen.filter((pid) => !assignedPids.has(pid));
+      const unassignedSessions = [...sessions.values()].filter(
+        (candidate) => candidate?.connRef === connRef && !candidate.shellPid,
+      );
+      if (unclaimedPids.length === 1 && unassignedSessions.length === 1) {
+        unassignedSessions[0].shellPid = unclaimedPids[0];
       }
 
       log("reusing existing connection for new shell channel", {
