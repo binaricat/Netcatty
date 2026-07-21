@@ -144,7 +144,9 @@ test("External MCP top-bar status sync waits for App startup reconcile", () => {
       < appSource.indexOf("markExternalMcpStartupReady()"),
     "startup ready must be marked only after await syncExternalMcpStartupState",
   );
-  assert.match(externalMcpToggleSource, /waitForExternalMcpStartupReady\(\)/);
+  assert.match(externalMcpToggleSource, /shouldWaitForExternalMcpStartupReady/);
+  assert.match(externalMcpToggleSource, /waitForExternalMcpStartupReady\(/);
+  assert.match(externalMcpToggleSource, /!status\.enabled && !status\.error/);
   assert.match(externalMcpToggleSource, /if \(isPeerSessionWindow \|\| !enabled\) return;/);
 });
 

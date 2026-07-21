@@ -23,35 +23,66 @@ export const EXTERNAL_MCP_RUNTIME_STATUS_POLL_MS = 3000;
 // Always-mounted top-bar consumers can poll before App finishes startup reconcile.
 // Gate runtime auto-clear until that reconcile has run on the main window.
 let externalMcpStartupReady = false;
-const externalMcpStartupReadyWaiters = new Set<() => void>();
+let externalMcpStartupReadyWaitPromise: Promise<void> | null = null;
+let externalMcpStartupReadyWaitResolve: (() => void) | null = null;
 
-function isPeerSessionWindowLocation(hash: string = typeof window !== 'undefined' ? window.location.hash : ''): boolean {
-  return hash.startsWith('#/session-window');
+function getWindowHash(hash?: string): string {
+  if (typeof hash === 'string') return hash;
+  return typeof window !== 'undefined' ? window.location.hash : '';
+}
+
+function isPeerSessionWindowLocation(hash?: string): boolean {
+  return getWindowHash(hash).startsWith('#/session-window');
+}
+
+/** Only the main App shell runs startup reconcile and owns the ready gate. */
+export function shouldWaitForExternalMcpStartupReady(hash?: string): boolean {
+  const current = getWindowHash(hash);
+  if (!current || current === '#' || current === '#/') return true;
+  // Peer windows never own External MCP lifecycle.
+  if (current.startsWith('#/session-window')) return false;
+  // Settings / tray / popup windows mount the shared hook but never run App reconcile.
+  if (current.startsWith('#/settings')) return false;
+  if (current.startsWith('#/tray')) return false;
+  if (current.startsWith('#/terminal-popup')) return false;
+  return true;
 }
 
 export function markExternalMcpStartupReady(): void {
   if (externalMcpStartupReady) return;
   externalMcpStartupReady = true;
-  for (const resolve of Array.from(externalMcpStartupReadyWaiters)) {
-    externalMcpStartupReadyWaiters.delete(resolve);
-    resolve();
-  }
+  const resolve = externalMcpStartupReadyWaitResolve;
+  externalMcpStartupReadyWaitResolve = null;
+  externalMcpStartupReadyWaitPromise = null;
+  resolve?.();
 }
 
 export function resetExternalMcpStartupReadyForTests(): void {
   externalMcpStartupReady = false;
-  externalMcpStartupReadyWaiters.clear();
+  externalMcpStartupReadyWaitPromise = null;
+  externalMcpStartupReadyWaitResolve = null;
 }
 
 export function isExternalMcpStartupReady(): boolean {
   return externalMcpStartupReady;
 }
 
-export function waitForExternalMcpStartupReady(): Promise<void> {
-  if (externalMcpStartupReady) return Promise.resolve();
-  return new Promise((resolve) => {
-    externalMcpStartupReadyWaiters.add(resolve);
-  });
+/** Exposed for tests: single-flight waiter count is 0 or 1. */
+export function getExternalMcpStartupReadyWaiterCountForTests(): number {
+  return externalMcpStartupReadyWaitResolve ? 1 : 0;
+}
+
+export function waitForExternalMcpStartupReady(hash?: string): Promise<void> {
+  // Non-main routes intentionally skip App reconcile; do not block forever there.
+  if (!shouldWaitForExternalMcpStartupReady(hash) || externalMcpStartupReady) {
+    return Promise.resolve();
+  }
+  if (!externalMcpStartupReadyWaitPromise) {
+    externalMcpStartupReadyWaitPromise = new Promise<void>((resolve) => {
+      externalMcpStartupReadyWaitResolve = resolve;
+    });
+  }
+  return externalMcpStartupReadyWaitPromise;
 }
 
 type ExternalMcpConfig = {
@@ -63,7 +94,12 @@ type ExternalMcpConfig = {
 type ExternalMcpBridge = {
   externalMcpSetConfig?: (config: ExternalMcpConfig) => Promise<unknown> | unknown;
   externalMcpSetEnabled?: (enabled: boolean) => Promise<unknown> | unknown;
-  externalMcpGetStatus?: () => Promise<{ ok?: boolean; enabled?: boolean } | undefined>;
+  externalMcpGetStatus?: () => Promise<{
+    ok?: boolean;
+    enabled?: boolean;
+    state?: string;
+    error?: string | null;
+  } | undefined>;
 };
 
 export type ExternalMcpStartupSyncPlan = {
@@ -206,12 +242,16 @@ export function syncExternalMcpConfig(bridge: ExternalMcpBridge | undefined = ne
 export async function syncExternalMcpStartupState(
   bridge: ExternalMcpBridge | undefined = netcattyBridge.get(),
 ): Promise<ExternalMcpStartupSyncPlan> {
-  const plan = readExternalMcpStartupSyncPlan();
+  // Snapshot once for config push; re-read after awaits so a concurrent top-bar
+  // toggle during boot wins over a stale enable/disable decision.
+  const initialPlan = readExternalMcpStartupSyncPlan();
   try {
-    await Promise.resolve(bridge?.externalMcpSetConfig?.(plan.config));
+    await Promise.resolve(bridge?.externalMcpSetConfig?.(initialPlan.config));
   } catch {
     // Config sync is best-effort; continue with enable/disable reconcile.
   }
+
+  const plan = readExternalMcpStartupSyncPlan();
   if (plan.shouldPersistStoredEnabled) {
     localStorageAdapter.writeBoolean(STORAGE_KEY_AI_EXTERNAL_MCP_ENABLED, plan.storedEnabled);
     emitAIStateChanged(STORAGE_KEY_AI_EXTERNAL_MCP_ENABLED);
@@ -219,7 +259,8 @@ export async function syncExternalMcpStartupState(
   try {
     await Promise.resolve(bridge?.externalMcpSetEnabled?.(plan.runtimeEnabled));
   } catch {
-    // Keep stored plan even if runtime enable fails; status polling can recover later.
+    // Keep stored preference on transient enable failure; runtime status + error
+    // surface can recover without wiping always-on intent.
   }
   return plan;
 }
@@ -281,7 +322,9 @@ export function useExternalMcpToggleState() {
         if (cancelled) return;
         const status = await netcattyBridge.get()?.externalMcpGetStatus?.();
         if (cancelled) return;
-        if (status?.ok && !status.enabled) {
+        // Only clear the shared switch for an intentional runtime-off (idle /
+        // explicit disable). Start failures set error and should keep preference.
+        if (status?.ok && !status.enabled && !status.error) {
           persistEnabled(false);
         }
       } catch {

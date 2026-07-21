@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 import {
   EXTERNAL_MCP_RUNTIME_STATUS_POLL_MS,
   createExternalMcpStartupSyncPlan,
+  getExternalMcpStartupReadyWaiterCountForTests,
   isExternalMcpStartupReady,
   markExternalMcpStartupReady,
   normalizeExternalMcpIdleTimeoutMinutes,
@@ -10,8 +11,11 @@ import {
   normalizeSessionIdleTimeoutMinutes,
   readExternalMcpFocusOnHostOpen,
   readExternalMcpSilentSessions,
+  readExternalMcpStoredEnabled,
   resetExternalMcpStartupReadyForTests,
   shouldStartExternalMcpOnStartup,
+  shouldWaitForExternalMcpStartupReady,
+  syncExternalMcpStartupState,
   waitForExternalMcpStartupReady,
   writeExternalMcpFocusOnHostOpen,
   writeExternalMcpSilentSessions,
@@ -133,26 +137,41 @@ describe('useExternalMcpToggleState runtime poll wiring', () => {
   });
 });
 
+
 describe('useExternalMcpToggleState startup ready gate', () => {
-  it('blocks runtime poll consumers until startup reconcile marks ready', async () => {
+  it('blocks main-window runtime poll consumers until startup reconcile marks ready', async () => {
     resetExternalMcpStartupReadyForTests();
     assert.equal(isExternalMcpStartupReady(), false);
+    assert.equal(shouldWaitForExternalMcpStartupReady(''), true);
+    assert.equal(shouldWaitForExternalMcpStartupReady('#/settings'), false);
+    assert.equal(shouldWaitForExternalMcpStartupReady('#/tray'), false);
+    assert.equal(shouldWaitForExternalMcpStartupReady('#/session-window'), false);
 
     let resolved = false;
-    const pending = waitForExternalMcpStartupReady().then(() => {
+    const pending = waitForExternalMcpStartupReady('').then(() => {
       resolved = true;
     });
-
+    // Single-flight: repeated waits share one waiter.
+    const pending2 = waitForExternalMcpStartupReady('');
     await Promise.resolve();
     assert.equal(resolved, false);
+    assert.equal(getExternalMcpStartupReadyWaiterCountForTests(), 1);
 
     markExternalMcpStartupReady();
     await pending;
+    await pending2;
     assert.equal(isExternalMcpStartupReady(), true);
     assert.equal(resolved, true);
+    assert.equal(getExternalMcpStartupReadyWaiterCountForTests(), 0);
+    await waitForExternalMcpStartupReady('');
+  });
 
-    // Subsequent waiters resolve immediately.
-    await waitForExternalMcpStartupReady();
+  it('does not block settings/tray consumers on the App-only gate', async () => {
+    resetExternalMcpStartupReadyForTests();
+    await waitForExternalMcpStartupReady('#/settings');
+    await waitForExternalMcpStartupReady('#/tray');
+    assert.equal(isExternalMcpStartupReady(), false);
+    assert.equal(getExternalMcpStartupReadyWaiterCountForTests(), 0);
   });
 
   it('wires App startup reconcile to release the gate after enable settles', async () => {
@@ -171,8 +190,57 @@ describe('useExternalMcpToggleState startup ready gate', () => {
     );
     assert.match(hookSource, /export async function syncExternalMcpStartupState/);
     assert.match(hookSource, /await Promise\.resolve\(bridge\?\.externalMcpSetEnabled\?\.\(plan\.runtimeEnabled\)\)/);
-    assert.match(hookSource, /waitForExternalMcpStartupReady\(\)/);
-    assert.match(hookSource, /isPeerSessionWindowLocation/);
+    assert.match(hookSource, /shouldWaitForExternalMcpStartupReady/);
+    assert.match(hookSource, /!status\.enabled && !status\.error/);
     assert.match(hookSource, /if \(isPeerSessionWindow \|\| !enabled\) return;/);
+  });
+
+  it('re-reads storage after config await so concurrent top-bar toggles win', async () => {
+    const restore = installMemoryLocalStorage();
+    try {
+      const storageKeys = await import('../../infrastructure/config/storageKeys.ts');
+      localStorage.setItem(storageKeys.STORAGE_KEY_AI_EXTERNAL_MCP_ENABLED, 'true');
+      localStorage.setItem(storageKeys.STORAGE_KEY_AI_EXTERNAL_MCP_MODE, 'persistent');
+
+      let enabledCalls: boolean[] = [];
+      const plan = await syncExternalMcpStartupState({
+        externalMcpSetConfig: async () => {
+          // Simulate a user turning the top-bar switch off while config sync is in flight.
+          localStorage.setItem(storageKeys.STORAGE_KEY_AI_EXTERNAL_MCP_ENABLED, 'false');
+          return { ok: true };
+        },
+        externalMcpSetEnabled: async (enabled) => {
+          enabledCalls.push(enabled);
+          return { ok: true, enabled };
+        },
+      });
+
+      assert.equal(plan.runtimeEnabled, false);
+      assert.deepEqual(enabledCalls, [false]);
+      assert.equal(readExternalMcpStoredEnabled(), false);
+    } finally {
+      restore();
+    }
+  });
+
+  it('keeps stored switch when startup enable reports disabled with error', async () => {
+    const restore = installMemoryLocalStorage();
+    try {
+      const storageKeys = await import('../../infrastructure/config/storageKeys.ts');
+      localStorage.setItem(storageKeys.STORAGE_KEY_AI_EXTERNAL_MCP_ENABLED, 'true');
+      localStorage.setItem(storageKeys.STORAGE_KEY_AI_EXTERNAL_MCP_MODE, 'persistent');
+      assert.equal(readExternalMcpStoredEnabled(), true);
+
+      const plan = await syncExternalMcpStartupState({
+        externalMcpSetConfig: async () => ({ ok: true }),
+        externalMcpSetEnabled: async () => ({ ok: true, enabled: false, state: 'error', error: 'boom' }),
+      });
+
+      assert.equal(plan.runtimeEnabled, true);
+      assert.equal(plan.storedEnabled, true);
+      assert.equal(readExternalMcpStoredEnabled(), true);
+    } finally {
+      restore();
+    }
   });
 });
