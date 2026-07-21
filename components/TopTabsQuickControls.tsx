@@ -92,10 +92,7 @@ export const TopTabsQuickControls: React.FC<TopTabsQuickControlsProps> = ({
         sideOffset={6}
       >
         <div className="px-3 py-2 border-b border-border/60">
-          <div className="flex items-center gap-2 text-sm font-medium">
-            <SlidersHorizontal size={14} className="shrink-0 text-muted-foreground" />
-            <span>{t('topTabs.controlPanel')}</span>
-          </div>
+          <div className="text-sm font-medium">{t('topTabs.controlPanel')}</div>
         </div>
 
         <div className="p-2">
