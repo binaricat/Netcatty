@@ -6,6 +6,7 @@ import { sanitizeHost } from "../../domain/host";
 import {
   applyVaultHostImport,
   importVaultHostsFromText,
+  mergeVaultImportIssues,
   resolveVaultImportKeyPassphraseConflicts,
   type VaultImportFormat,
 } from "../../domain/vaultImport";
@@ -174,7 +175,7 @@ export function useVaultImportHandlers({
               resolveDefaultKeyPassphraseAliases,
               addedHostIds,
             );
-            result.issues.push(...resolved.issues);
+            result.issues = mergeVaultImportIssues(result.issues, resolved.issues);
             for (const entry of resolved.keyPassphrases) {
               try {
                 await rememberKeyPassphrase({

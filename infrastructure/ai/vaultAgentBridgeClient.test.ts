@@ -1266,6 +1266,11 @@ describe('handleVaultAgentOp vault hosts', () => {
 
     assert.equal(result.ok, true);
     assert.deepEqual(saved, []);
+    assert.equal(
+      (result as { issues?: Array<{ message: string }> }).issues
+        ?.filter((issue) => /conflicting passphrases/u.test(issue.message)).length,
+      1,
+    );
     assert.match(
       (result as { issues?: Array<{ message: string }> }).issues?.[0]?.message ?? '',
       /conflicting passphrases/u,

@@ -127,6 +127,18 @@ export interface VaultImportResult {
   keyPassphraseCandidates?: VaultHostKeyPassphrase[];
 }
 
+export function mergeVaultImportIssues(
+  ...groups: ReadonlyArray<ReadonlyArray<VaultImportIssue>>
+): VaultImportIssue[] {
+  const seen = new Set<string>();
+  return groups.flatMap((issues) => issues.filter((issue) => {
+    const key = `${issue.level}\u0000${issue.message}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }));
+}
+
 const DEFAULT_SSH_PORT = 22;
 
 const normalizeGroupPath = (raw: string | undefined): string | undefined => {
