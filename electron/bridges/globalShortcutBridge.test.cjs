@@ -893,23 +893,31 @@ test("tray panel session jump waits for a newly created main window to be ready"
   });
 });
 
-test("tray panel session close forwards to the main window", async () => {
+test("tray panel session close forwards without focusing the main window", async () => {
   await withPlatform("darwin", async () => {
     const bridge = loadBridge();
     const electronModule = createElectronStub();
     const sentMessages = [];
-    const createdWin = new FakeWindow();
-    createdWin.webContents = {
+    const mainWin = new FakeWindow();
+    mainWin.visible = false;
+    mainWin.focused = false;
+    mainWin.webContents = {
       send(channel, ...args) {
         sentMessages.push([channel, ...args]);
       },
     };
-    electronModule.BrowserWindow.getAllWindows = () => [];
+    electronModule.BrowserWindow.getAllWindows = () => [mainWin];
+    let createCalls = 0;
 
     bridge.init({
       electronModule,
-      ensureMainWindow: async () => createdWin,
+      getMainWindow: () => mainWin,
+      ensureMainWindow: async () => {
+        createCalls += 1;
+        return mainWin;
+      },
       sendWhenRendererReady: async (win, channel, payload) => {
+        assert.equal(win, mainWin);
         win.webContents.send(channel, payload);
         return { success: true };
       },
@@ -921,6 +929,56 @@ test("tray panel session close forwards to the main window", async () => {
 
     assert.deepEqual(result, { success: true });
     assert.deepEqual(sentMessages, [["netcatty:trayPanel:closeSession", "session-1"]]);
+    assert.equal(createCalls, 0);
+    assert.equal(mainWin.showCalls, 0);
+    assert.equal(mainWin.focusCalls, 0);
+    assert.equal(mainWin.isVisible(), false);
+  });
+});
+
+test("tray menu updates refresh an already open tray panel", async () => {
+  await withPlatform("darwin", async () => {
+    const bridge = loadBridge();
+    const electronModule = createElectronStub();
+    const sentMessages = [];
+
+    class FakePanelWindow extends FakeWindow {
+      constructor() {
+        super();
+        const webContents = new EventEmitter();
+        webContents.send = (channel, ...args) => {
+          sentMessages.push([channel, ...args]);
+        };
+        this.webContents = webContents;
+      }
+
+      async loadURL() {}
+      getBounds() { return { width: 360, height: 520 }; }
+      setBounds() {}
+      destroy() { this.destroyed = true; }
+    }
+
+    FakePanelWindow.getAllWindows = () => [];
+    electronModule.BrowserWindow = FakePanelWindow;
+    electronModule.screen = {
+      getDisplayNearestPoint: () => ({ workArea: { x: 0, y: 0, width: 1440, height: 900 } }),
+    };
+
+    const { ipcMain } = await enableCloseToTray(bridge, electronModule);
+    const trayInstance = bridge.getTray();
+    trayInstance.getBounds = () => ({ x: 100, y: 0, width: 24, height: 24 });
+    trayInstance.handlers.get("click")();
+
+    sentMessages.length = 0;
+    const sessions = [{ id: "remaining", label: "Remaining", status: "connected" }];
+    await ipcMain.handlers.get("netcatty:tray:updateMenuData")(null, { sessions });
+
+    assert.deepEqual(sentMessages, [["netcatty:trayPanel:setMenuData", {
+      sessions,
+      portForwardRules: [],
+      hosts: [],
+    }]]);
+    bridge.cleanup();
   });
 });
 
