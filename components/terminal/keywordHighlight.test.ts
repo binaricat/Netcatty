@@ -211,12 +211,26 @@ function createFakeTerminal(lineText: string, options: { lineCount?: number } = 
   const lineCount = options.lineCount ?? 1;
   let translateCount = 0;
   const translatedLineIndexes: number[] = [];
-  const lines = Array.from({ length: lineCount }, (_, index) =>
-    createFakeLine(`${lineText} ${index}`, () => {
+  const lineTexts = Array.from({ length: lineCount }, (_, index) => `${lineText} ${index}`);
+  const lines = lineTexts.map((_, index) => ({
+    isWrapped: false,
+    get length() {
+      return lineTexts[index].length;
+    },
+    translateToString() {
       translateCount += 1;
       translatedLineIndexes.push(index);
-    })
-  );
+      return lineTexts[index];
+    },
+    getCell(cellIndex: number) {
+      const text = lineTexts[index];
+      if (cellIndex < 0 || cellIndex >= text.length) return undefined;
+      return {
+        getChars: () => text[cellIndex],
+        getWidth: () => 1,
+      };
+    },
+  }));
   const decorations: Array<{ x: number; width: number; foregroundColor: string }> = [];
   const decorationStates: Array<{ isDisposed: boolean; dispose: () => void }> = [];
   const markers: Array<{ line: number; isDisposed: boolean; dispose: () => void }> = [];
@@ -290,6 +304,9 @@ function createFakeTerminal(lineText: string, options: { lineCount?: number } = 
     getTranslatedLineIndexes: () => [...translatedLineIndexes],
     getActiveDecorationCount: () => decorationStates.filter((state) => !state.isDisposed).length,
     markers,
+    setLineText: (index: number, text: string) => {
+      lineTexts[index] = text;
+    },
     resetTranslateCount: () => {
       translateCount = 0;
       translatedLineIndexes.length = 0;
@@ -603,6 +620,42 @@ test("persistent highlight lookup follows uniform scrollback marker shifts", () 
     handlers.scroll?.();
 
     assert.equal(getTranslateCount(), 0);
+    assert.equal(getActiveDecorationCount(), 8);
+    highlighter.dispose();
+  } finally {
+    raf.restore();
+  }
+});
+
+test("in-place redraw removes a persistent highlight when text stops matching", () => {
+  const raf = installAnimationFrameQueue();
+  try {
+    const {
+      term,
+      handlers,
+      getActiveDecorationCount,
+      setLineText,
+    } = createFakeTerminal("hello DEPLOY world", { lineCount: 9 });
+    term.rows = 3;
+    const highlighter = new KeywordHighlighter(term as never);
+    const rules: KeywordHighlightRule[] = [
+      {
+        id: "deploy",
+        label: "Deploy",
+        patterns: ["DEPLOY"],
+        color: "#F87171",
+        enabled: true,
+      },
+    ];
+
+    highlighter.setRules(rules, true);
+    raf.flush();
+    assert.equal(getActiveDecorationCount(), 9);
+
+    setLineText(1, "hello SAFE world 1");
+    handlers.writeParsed?.();
+    raf.flush();
+
     assert.equal(getActiveDecorationCount(), 8);
     highlighter.dispose();
   } finally {
