@@ -25,7 +25,7 @@ import { emitAIStateChanged } from "../../../../application/state/aiStateEvents"
 import { cn } from "../../../../lib/utils";
 import { Button } from "../../../ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../../ui/tooltip";
-import { Select, Toggle } from "../../../settings/settings-ui";
+import { Select, SettingCard, SettingRow, Toggle } from "../../../settings/settings-ui";
 import { getBridge } from "./types";
 
 type ExternalMcpClient = "codex" | "claude" | "grok" | "cursor";
@@ -696,12 +696,11 @@ export const ExternalMcpCard: React.FC = () => {
         </div>
       </div>
 
-      <div className="rounded-md border border-border/60 bg-background/70 px-3 py-2 space-y-2">
-        <div className="flex items-center justify-between gap-4">
-          <div className="min-w-0">
-            <div className="text-sm font-medium">{t("ai.externalMcp.mode")}</div>
-            <div className="text-xs text-muted-foreground">{t("ai.externalMcp.mode.description")}</div>
-          </div>
+      <SettingCard divided className="rounded-md border-border/60 bg-background/70">
+        <SettingRow
+          label={t("ai.externalMcp.mode")}
+          description={t("ai.externalMcp.mode.description")}
+        >
           <Select
             value={mode}
             options={[
@@ -711,16 +710,16 @@ export const ExternalMcpCard: React.FC = () => {
             onChange={(value) => setMode(value === "persistent" ? "persistent" : "temporary")}
             className="w-36"
           />
-        </div>
+        </SettingRow>
         {mode === "temporary" ? (
-          <div className="flex items-center justify-between gap-4">
-            <div className="min-w-0">
-              <div className="text-sm font-medium">{t("ai.externalMcp.idleTimeout")}</div>
-              <div className="text-xs text-muted-foreground">{t("ai.externalMcp.idleTimeout.description")}</div>
-            </div>
+          <SettingRow
+            label={t("ai.externalMcp.idleTimeout")}
+            description={t("ai.externalMcp.idleTimeout.description")}
+          >
             <div className="flex items-center gap-2 shrink-0">
               <input
                 type="number"
+                aria-label={t("ai.externalMcp.idleTimeout")}
                 min={1}
                 max={24 * 60}
                 value={idleTimeoutMinutes}
@@ -733,30 +732,36 @@ export const ExternalMcpCard: React.FC = () => {
               />
               <span className="text-xs text-muted-foreground">{t("ai.externalMcp.idleTimeout.minutes")}</span>
             </div>
-          </div>
+          </SettingRow>
         ) : null}
-        <div className="flex items-center justify-between gap-4">
-          <div className="min-w-0">
-            <div className="text-sm font-medium">{t("ai.externalMcp.focusOnHostOpen")}</div>
-            <div className="text-xs text-muted-foreground">{t("ai.externalMcp.focusOnHostOpen.description")}</div>
-          </div>
-          <Toggle checked={focusOnHostOpen} onChange={setFocusOnHostOpen} />
-        </div>
-        <div className="flex items-center justify-between gap-4">
-          <div className="min-w-0">
-            <div className="text-sm font-medium">{t("ai.externalMcp.silentSessions")}</div>
-            <div className="text-xs text-muted-foreground">{t("ai.externalMcp.silentSessions.description")}</div>
-          </div>
-          <Toggle checked={silentSessions} onChange={setSilentSessions} />
-        </div>
-        <div className="flex items-center justify-between gap-4">
-          <div className="min-w-0">
-            <div className="text-sm font-medium">{t("ai.externalMcp.sessionIdleTimeout")}</div>
-            <div className="text-xs text-muted-foreground">{t("ai.externalMcp.sessionIdleTimeout.description")}</div>
-          </div>
+        <SettingRow
+          label={t("ai.externalMcp.focusOnHostOpen")}
+          description={t("ai.externalMcp.focusOnHostOpen.description")}
+        >
+          <Toggle
+            checked={focusOnHostOpen}
+            onChange={setFocusOnHostOpen}
+            ariaLabel={t("ai.externalMcp.focusOnHostOpen")}
+          />
+        </SettingRow>
+        <SettingRow
+          label={t("ai.externalMcp.silentSessions")}
+          description={t("ai.externalMcp.silentSessions.description")}
+        >
+          <Toggle
+            checked={silentSessions}
+            onChange={setSilentSessions}
+            ariaLabel={t("ai.externalMcp.silentSessions")}
+          />
+        </SettingRow>
+        <SettingRow
+          label={t("ai.externalMcp.sessionIdleTimeout")}
+          description={t("ai.externalMcp.sessionIdleTimeout.description")}
+        >
           <div className="flex items-center gap-2 shrink-0">
             <input
               type="number"
+              aria-label={t("ai.externalMcp.sessionIdleTimeout")}
               min={1}
               max={24 * 60}
               value={sessionIdleTimeoutMinutes}
@@ -769,8 +774,8 @@ export const ExternalMcpCard: React.FC = () => {
             />
             <span className="text-xs text-muted-foreground">{t("ai.externalMcp.idleTimeout.minutes")}</span>
           </div>
-        </div>
-      </div>
+        </SettingRow>
+      </SettingCard>
 
       <div className="space-y-2">
         <div className="flex min-h-8 items-center justify-between gap-2">
