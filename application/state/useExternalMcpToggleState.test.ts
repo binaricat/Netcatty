@@ -5,7 +5,6 @@ import {
   bumpExternalMcpEnableGenerationForTests,
   createExternalMcpStartupSyncPlan,
   getExternalMcpEnableGenerationForTests,
-  getExternalMcpEnableGenerationForTests,
   getExternalMcpStartupReadyWaiterCountForTests,
   isExternalMcpStartupReady,
   markExternalMcpStartupReady,
@@ -202,14 +201,14 @@ describe('useExternalMcpToggleState startup ready gate', () => {
     const restore = installMemoryLocalStorage();
     try {
       const storageKeys = await import('../../infrastructure/config/storageKeys.ts');
-      localStorage.setItem(storageKeys.STORAGE_KEY_AI_EXTERNAL_MCP_ENABLED, 'true');
-      localStorage.setItem(storageKeys.STORAGE_KEY_AI_EXTERNAL_MCP_MODE, 'persistent');
+      globalThis.localStorage.setItem(storageKeys.STORAGE_KEY_AI_EXTERNAL_MCP_ENABLED, 'true');
+      globalThis.localStorage.setItem(storageKeys.STORAGE_KEY_AI_EXTERNAL_MCP_MODE, 'persistent');
 
       let enabledCalls: boolean[] = [];
       const plan = await syncExternalMcpStartupState({
         externalMcpSetConfig: async () => {
           // Simulate a user turning the top-bar switch off while config sync is in flight.
-          localStorage.setItem(storageKeys.STORAGE_KEY_AI_EXTERNAL_MCP_ENABLED, 'false');
+          globalThis.localStorage.setItem(storageKeys.STORAGE_KEY_AI_EXTERNAL_MCP_ENABLED, 'false');
           return { ok: true };
         },
         externalMcpSetEnabled: async (enabled) => {
@@ -230,8 +229,8 @@ describe('useExternalMcpToggleState startup ready gate', () => {
     const restore = installMemoryLocalStorage();
     try {
       const storageKeys = await import('../../infrastructure/config/storageKeys.ts');
-      localStorage.setItem(storageKeys.STORAGE_KEY_AI_EXTERNAL_MCP_ENABLED, 'true');
-      localStorage.setItem(storageKeys.STORAGE_KEY_AI_EXTERNAL_MCP_MODE, 'persistent');
+      globalThis.localStorage.setItem(storageKeys.STORAGE_KEY_AI_EXTERNAL_MCP_ENABLED, 'true');
+      globalThis.localStorage.setItem(storageKeys.STORAGE_KEY_AI_EXTERNAL_MCP_MODE, 'persistent');
       assert.equal(readExternalMcpStoredEnabled(), true);
 
       const plan = await syncExternalMcpStartupState({
@@ -254,14 +253,14 @@ describe('syncExternalMcpStartupState generation guard', () => {
     try {
       resetExternalMcpStartupReadyForTests();
       const storageKeys = await import('../../infrastructure/config/storageKeys.ts');
-      localStorage.setItem(storageKeys.STORAGE_KEY_AI_EXTERNAL_MCP_ENABLED, 'true');
-      localStorage.setItem(storageKeys.STORAGE_KEY_AI_EXTERNAL_MCP_MODE, 'persistent');
+      globalThis.localStorage.setItem(storageKeys.STORAGE_KEY_AI_EXTERNAL_MCP_ENABLED, 'true');
+      globalThis.localStorage.setItem(storageKeys.STORAGE_KEY_AI_EXTERNAL_MCP_MODE, 'persistent');
 
       const enabledCalls: boolean[] = [];
       const plan = await syncExternalMcpStartupState({
         externalMcpSetConfig: async () => {
           // Simulate a top-bar toggle landing during config await.
-          localStorage.setItem(storageKeys.STORAGE_KEY_AI_EXTERNAL_MCP_ENABLED, 'false');
+          globalThis.localStorage.setItem(storageKeys.STORAGE_KEY_AI_EXTERNAL_MCP_ENABLED, 'false');
           bumpExternalMcpEnableGenerationForTests();
           return { ok: true };
         },
