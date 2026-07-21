@@ -1,4 +1,4 @@
-import { Copy, FileSymlink, Folder, FolderOpen, Monitor, Pencil, Server } from 'lucide-react';
+import { Copy, FileSymlink, Folder, FolderOpen, Monitor, Pencil, Plus, Server, Settings2 } from 'lucide-react';
 import React from 'react';
 
 import { useI18n } from '../../application/i18n/I18nProvider';
@@ -10,6 +10,7 @@ import { PluginContributionIcon } from '../plugins/PluginContributionIcon';
 
 export interface HostTreeHostContextMenuHandlers {
   onConnect: (host: Host) => void;
+  onEditHost?: (host: Host) => void;
   onRenameHost?: (host: Host) => void;
   onDuplicateHost: (host: Host) => void;
   onCopyCredentials: (host: Host) => void;
@@ -21,6 +22,7 @@ export const HostTreeHostContextMenuContent: React.FC<
 > = ({
   host,
   onConnect,
+  onEditHost,
   onRenameHost,
   onDuplicateHost,
   onCopyCredentials,
@@ -44,6 +46,11 @@ export const HostTreeHostContextMenuContent: React.FC<
       <ContextMenuItem onClick={() => onConnect(safeHost)}>
         <Monitor className="mr-2 h-4 w-4" /> {t('vault.hosts.connect')}
       </ContextMenuItem>
+      {onEditHost && (
+        <ContextMenuItem onClick={() => onEditHost(host)}>
+          <Settings2 className="mr-2 h-4 w-4" /> {t('terminal.layer.hostTree.editHost')}
+        </ContextMenuItem>
+      )}
       {onRenameHost && (
         <ContextMenuItem onClick={() => onRenameHost(host)}>
           <Pencil className="mr-2 h-4 w-4" /> {t('common.rename')}
@@ -82,6 +89,7 @@ export const HostTreeHostContextMenuContent: React.FC<
 };
 
 export interface HostTreeGroupContextMenuHandlers {
+  onNewHost?: (groupPath: string) => void;
   onNewGroup: (parentPath?: string) => void;
   onRenameGroup: (groupPath: string) => void;
   onDeleteGroup: (groupPath: string) => void;
@@ -93,6 +101,7 @@ export const HostTreeGroupContextMenuContent: React.FC<
 > = ({
   groupPath,
   isManaged,
+  onNewHost,
   onNewGroup,
   onRenameGroup,
   onDeleteGroup,
@@ -102,6 +111,11 @@ export const HostTreeGroupContextMenuContent: React.FC<
 
   return (
     <ContextMenuContent>
+      {onNewHost && (
+        <ContextMenuItem onClick={() => onNewHost(groupPath)}>
+          <Plus className="mr-2 h-4 w-4" /> {t('terminal.layer.hostTree.newHostInGroup')}
+        </ContextMenuItem>
+      )}
       <ContextMenuItem onClick={() => onNewGroup(groupPath)}>
         <Folder className="mr-2 h-4 w-4" /> {t('vault.hosts.newGroup')}
       </ContextMenuItem>

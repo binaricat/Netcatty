@@ -2,6 +2,9 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
+const toolbarSource = readFileSync(new URL('./TerminalHostTreeToolbar.tsx', import.meta.url), 'utf8');
+const menuSource = readFileSync(new URL('../host/HostTreeContextMenus.tsx', import.meta.url), 'utf8');
+
 test('host tree toolbar keeps the close button outside the clipped action row', () => {
   const source = readFileSync(new URL('./TerminalHostTreeToolbar.tsx', import.meta.url), 'utf8');
 
@@ -16,12 +19,26 @@ test('host tree toolbar keeps the close button outside the clipped action row', 
 });
 
 test('host tree toolbar keeps action buttons in the clipped row instead of hiding them', () => {
-  const source = readFileSync(new URL('./TerminalHostTreeToolbar.tsx', import.meta.url), 'utf8');
+  const source = toolbarSource;
 
   assert.match(source, /<FolderPlus size=\{14\} \/>/);
   assert.match(source, /<TerminalSquare size=\{14\} \/>/);
   assert.match(source, /<Expand size=\{14\} \/>/);
   assert.match(source, /disabled=\{!canExpandCollapse\}/);
+});
+
+test('host tree toolbar exposes a dedicated new-host action', () => {
+  assert.match(toolbarSource, /onNewHost: \(\) => void/);
+  assert.match(toolbarSource, /canNewHost\?: boolean/);
+  assert.match(toolbarSource, /<Plus size=\{14\} \/>/);
+  assert.match(toolbarSource, /terminal\.layer\.hostTree\.newHost/);
+});
+
+test('shared host tree menus expose optional full edit and group host creation actions', () => {
+  assert.match(menuSource, /onEditHost\?: \(host: Host\) => void/);
+  assert.match(menuSource, /onNewHost\?: \(groupPath: string\) => void/);
+  assert.match(menuSource, /terminal\.layer\.hostTree\.editHost/);
+  assert.match(menuSource, /terminal\.layer\.hostTree\.newHostInGroup/);
 });
 
 test('host tree sidebar wires expand/collapse availability without compact hiding', () => {
