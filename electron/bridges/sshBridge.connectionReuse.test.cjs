@@ -122,6 +122,16 @@ function makePidTrackingReusableConn({ delayFirstNewPid = false } = {}) {
   return conn;
 }
 
+function makeUnavailableDiscoveryConn() {
+  const conn = makeReusableConn();
+  conn.discoveryExecCalls = 0;
+  conn.exec = (_command, callback) => {
+    conn.discoveryExecCalls += 1;
+    callback(new Error("exec channels disabled"));
+  };
+  return conn;
+}
+
 // A reusable connection whose shell callback is held until released, so a test
 // can simulate the source tab closing while conn.shell() is still pending.
 function makeDeferredShellConn() {
@@ -260,6 +270,27 @@ test("Copy Tab waits briefly when the new remote shell is not visible immediatel
 
   assert.deepEqual(sourceConn.shellPidSnapshots, [["111"], ["111"], ["111", "222"]]);
   assert.equal(sessions.get("copy").shellPid, "222");
+});
+
+test("Copy Tab does not retry when remote shell discovery is unavailable", async (t) => {
+  const { bridge } = loadBridgeWithMockedSsh2(t);
+  const sessions = new Map();
+  const sourceConn = makeUnavailableDiscoveryConn();
+  sessions.set("source", makeSourceSession(sourceConn, { hostname: "10.0.0.1", username: "alice" }));
+
+  const start = registerStartHandler(bridge, sessions);
+  await start(
+    { sender: makeSender() },
+    {
+      sessionId: "copy",
+      hostname: "10.0.0.1",
+      username: "alice",
+      sourceSessionId: "source",
+    },
+  );
+
+  assert.equal(sourceConn.discoveryExecCalls, 1);
+  assert.equal(sessions.get("copy").shellPid, undefined);
 });
 
 test("concurrent Copy Tab requests serialize shell discovery per connection", async (t) => {

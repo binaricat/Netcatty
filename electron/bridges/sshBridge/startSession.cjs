@@ -551,9 +551,19 @@ function createStartSessionApi(ctx) {
       const onDiscoveryConnectionError = (err) => {
         discoveryConnectionError = err;
       };
-      conn.once("error", onDiscoveryConnectionError);
-      const shellPidsBeforeOpen = await listInteractiveShellPids(conn);
-      conn.removeListener("error", onDiscoveryConnectionError);
+      const sharedSessions = [...sessions.values()].filter(
+        (candidate) => candidate?.connRef === sourceSession.connRef,
+      );
+      const allSharedShellPidsKnown = sharedSessions.length > 0
+        && sharedSessions.every((candidate) => /^\d+$/.test(String(candidate.shellPid || "")));
+      let shellPidsBeforeOpen;
+      if (allSharedShellPidsKnown) {
+        shellPidsBeforeOpen = sharedSessions.map((candidate) => String(candidate.shellPid));
+      } else {
+        conn.once("error", onDiscoveryConnectionError);
+        shellPidsBeforeOpen = await listInteractiveShellPids(conn);
+        conn.removeListener("error", onDiscoveryConnectionError);
+      }
       if (discoveryConnectionError) {
         releaseConnectionRef(refHolder);
         throw discoveryConnectionError;
@@ -666,7 +676,10 @@ function createStartSessionApi(ctx) {
                 chainConnections: [],
                 isReused: true,
               });
-              void waitForNewInteractiveShellPid(conn, shellPidsBeforeOpen).then((newShellPid) => {
+              const newShellPidPromise = shellPidsBeforeOpen.length > 0
+                ? waitForNewInteractiveShellPid(conn, shellPidsBeforeOpen)
+                : Promise.resolve(null);
+              void newShellPidPromise.then((newShellPid) => {
                 const copiedSession = sessions.get(sessionId);
                 if (copiedSession && newShellPid) {
                   copiedSession.shellPid = newShellPid;
