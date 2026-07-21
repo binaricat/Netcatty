@@ -154,7 +154,10 @@ const TrayPanelContent: React.FC<TrayPanelContentProps> = ({ terminalSettings })
   } = useTrayPanelBackend();
 
   const { hosts, keys, identities, proxyProfiles, groupConfigs, knownHosts, updateKnownHosts } = useVaultState();
-  const { closeSession } = useSessionState({ persistSessionRestore: false });
+  // TrayPanel runs in its own BrowserWindow, so this hook's session state is
+  // independent from (and typically empty compared to) the main App's — it's
+  // used here only for its storage-sync side effects, never for closeSession.
+  useSessionState({ persistSessionRestore: false });
   const {
     rules: portForwardingRules,
     startTunnel,
@@ -175,9 +178,10 @@ const TrayPanelContent: React.FC<TrayPanelContentProps> = ({ terminalSettings })
   }, [effectiveKnownHosts, updateKnownHosts]);
 
   const handleCloseSession = useCallback((sessionId: string) => {
-    closeSessionFromTrayPanel(sessionId);
-    closeSession(sessionId);
-  }, [closeSession, closeSessionFromTrayPanel]);
+    // Forwarded to the main window's App-owned closeSession, which is the
+    // instance that actually owns `sessions` and republishes tray menu data.
+    void closeSessionFromTrayPanel(sessionId);
+  }, [closeSessionFromTrayPanel]);
 
   const [traySessions, setTraySessions] = useState<TraySession[]>([]);
 

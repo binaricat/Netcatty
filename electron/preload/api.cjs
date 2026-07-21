@@ -1071,6 +1071,11 @@ function createPreloadApi(ctx) {
     ipcRenderer.on("netcatty:trayPanel:connectToHost", handler);
     return () => ipcRenderer.removeListener("netcatty:trayPanel:connectToHost", handler);
   },
+  onTrayPanelCloseSession: (callback) => {
+    const handler = (_event, sessionId) => callback(sessionId);
+    ipcRenderer.on("netcatty:trayPanel:closeSession", handler);
+    return () => ipcRenderer.removeListener("netcatty:trayPanel:closeSession", handler);
+  },
 
   // Tray panel window
   hideTrayPanel: () => ipcRenderer.invoke("netcatty:trayPanel:hide"),
@@ -1080,6 +1085,8 @@ function createPreloadApi(ctx) {
     ipcRenderer.invoke("netcatty:trayPanel:jumpToSession", sessionId),
   connectToHostFromTrayPanel: (hostId) =>
     ipcRenderer.invoke("netcatty:trayPanel:connectToHost", hostId),
+  closeSessionFromTrayPanel: (sessionId) =>
+    ipcRenderer.invoke("netcatty:trayPanel:closeSession", sessionId),
   onTrayPanelCloseRequest: (callback) => {
     const handler = () => callback();
     ipcRenderer.on("netcatty:trayPanel:closeRequest", handler);

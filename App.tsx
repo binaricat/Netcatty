@@ -1151,6 +1151,15 @@ function App({ settings }: { settings: SettingsState }) {
     return { ok: true as const };
   }, [closeSession, sessions]);
 
+  useEffect(() => {
+    if (isPeerSessionWindow) return;
+    const bridge = netcattyBridge.get();
+    const unsubscribe = bridge?.onTrayPanelCloseSession?.((sessionId) => {
+      closeSessionForVaultAgent(sessionId);
+    });
+    return () => unsubscribe?.();
+  }, [isPeerSessionWindow, closeSessionForVaultAgent]);
+
   useVaultAgentBridge({
     hosts,
     snippets,

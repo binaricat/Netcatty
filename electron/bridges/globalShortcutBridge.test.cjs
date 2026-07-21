@@ -893,6 +893,37 @@ test("tray panel session jump waits for a newly created main window to be ready"
   });
 });
 
+test("tray panel session close forwards to the main window", async () => {
+  await withPlatform("darwin", async () => {
+    const bridge = loadBridge();
+    const electronModule = createElectronStub();
+    const sentMessages = [];
+    const createdWin = new FakeWindow();
+    createdWin.webContents = {
+      send(channel, ...args) {
+        sentMessages.push([channel, ...args]);
+      },
+    };
+    electronModule.BrowserWindow.getAllWindows = () => [];
+
+    bridge.init({
+      electronModule,
+      ensureMainWindow: async () => createdWin,
+      sendWhenRendererReady: async (win, channel, payload) => {
+        win.webContents.send(channel, payload);
+        return { success: true };
+      },
+    });
+    const ipcMain = createIpcMainStub();
+    bridge.registerHandlers(ipcMain);
+
+    const result = await ipcMain.handlers.get("netcatty:trayPanel:closeSession")(null, "session-1");
+
+    assert.deepEqual(result, { success: true });
+    assert.deepEqual(sentMessages, [["netcatty:trayPanel:closeSession", "session-1"]]);
+  });
+});
+
 test("toggleWindowVisibility show path delegates to showAndFocusMainWindow on win32", async () => {
   await withPlatform("win32", async () => {
     const windowManagerPath = require.resolve("./windowManager.cjs");

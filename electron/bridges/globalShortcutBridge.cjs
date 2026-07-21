@@ -1014,6 +1014,11 @@ function registerHandlers(ipcMain) {
     return { success: true };
   });
 
+  ipcMain.handle("netcatty:trayPanel:closeSession", async (_event, sessionId) => {
+    await sendToMainWindow("netcatty:trayPanel:closeSession", sessionId);
+    return { success: true };
+  });
+
   ipcMain.handle("netcatty:trayPanel:quitApp", async () => {
     const { app } = electronModule;
     closeToTray = false;
