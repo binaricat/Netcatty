@@ -50,7 +50,7 @@ import {
   sanitizeHost,
   upsertHostById,
 } from "../domain/host";
-import { exportHostsToCsvWithStats } from "../domain/vaultImport";
+import { exportHostsToCsvWithStats, resolveVaultCsvHostKeyPath } from "../domain/vaultImport";
 import {
   reorderVaultItems,
   reorderVaultStrings,
@@ -580,9 +580,14 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
       return;
     }
 
-    const keyPaths = Array.from(new Set(hosts.flatMap((host) => (
-      host.identityFilePaths?.map((keyPath) => keyPath.trim()).filter(Boolean) ?? []
-    ))));
+    const keyPathsById = new Map(keys.flatMap((key) => (
+      key.source === "reference" && key.filePath?.trim()
+        ? [[key.id, key.filePath.trim()] as const]
+        : []
+    )));
+    const keyPaths = Array.from(new Set(hosts
+      .map((host) => resolveVaultCsvHostKeyPath(host, { keyPathsById }))
+      .filter(Boolean)));
     const keyPassphrases = new Map<string, string>();
     const passphraseResults = await Promise.allSettled(keyPaths.map(async (keyPath) => {
       const passphrase = await readDefaultKeyPassphraseForExport(keyPath);
@@ -600,7 +605,10 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
         unreadablePassphrases++;
       }
     }
-    const { csv, exportedCount, skippedCount } = exportHostsToCsvWithStats(hosts, { keyPassphrases });
+    const { csv, exportedCount, skippedCount } = exportHostsToCsvWithStats(hosts, {
+      keyPassphrases,
+      keyPathsById,
+    });
 
     if (exportedCount === 0) {
       toast.warning(t('vault.hosts.export.toast.noHosts'));
@@ -625,7 +633,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
     } else {
       toast.success(t('vault.hosts.export.toast.success', { count: exportedCount }));
     }
-  }, [hosts, t]);
+  }, [hosts, keys, t]);
 
   // Copy host credentials to clipboard
   const handleCopyCredentials = useCallback((host: Host) => {

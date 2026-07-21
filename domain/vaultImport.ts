@@ -12,7 +12,11 @@ export { buildVaultHostMergeKey } from "./vaultHostCreate";
 import { parseQuickConnectInput } from "./quickConnect";
 import { findExactHeaderIndex, findHeaderIndex, parseCsv } from "./vaultImport/csvUtils";
 import { decodeCsvKeyPath, decodeCsvPassphrase } from "./vaultImport/csvCredentialFields";
-export { exportHostsToCsvWithStats, getVaultCsvTemplate } from "./vaultImport/csvExport";
+export {
+  exportHostsToCsvWithStats,
+  getVaultCsvTemplate,
+  resolveVaultCsvHostKeyPath,
+} from "./vaultImport/csvExport";
 
 interface ParsedJumpHost {
   hostname: string;

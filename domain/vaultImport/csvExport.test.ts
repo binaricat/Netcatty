@@ -51,6 +51,33 @@ test("CSV round-trips local key authentication and its saved passphrase", () => 
   }]);
 });
 
+test("CSV round-trips a referenced Keychain file path and saved passphrase", () => {
+  const host: Host = {
+    id: "host-reference-key",
+    label: "Reference key host",
+    hostname: "reference.example.com",
+    username: "ubuntu",
+    port: 22,
+    identityFileId: "key-reference",
+    identityFilePaths: ["/Users/alice/.ssh/stale"],
+    authMethod: "key",
+  };
+  const keyPath = "/Users/alice/.ssh/id_ed25519";
+
+  const { csv } = exportHostsToCsvWithStats([host], {
+    keyPathsById: new Map([["key-reference", keyPath]]),
+    keyPassphrases: new Map([[keyPath, "reference-secret"]]),
+  });
+  const imported = importVaultHostsFromText("csv", csv);
+
+  assert.deepEqual(imported.hosts[0]?.identityFilePaths, [keyPath]);
+  assert.deepEqual(imported.keyPassphrases, [{
+    hostId: imported.hosts[0]?.id,
+    keyPath,
+    passphrase: "reference-secret",
+  }]);
+});
+
 test("CSV reversibly guards key paths that spreadsheets treat as formulas", () => {
   const hosts: Host[] = [
     "-relative-key",

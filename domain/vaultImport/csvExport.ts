@@ -9,7 +9,20 @@ export interface VaultCsvTemplateOptions {
 
 export interface VaultCsvExportOptions {
   keyPassphrases?: ReadonlyMap<string, string>;
+  keyPathsById?: ReadonlyMap<string, string>;
 }
+
+export const resolveVaultCsvHostKeyPath = (
+  host: Host,
+  options: VaultCsvExportOptions = {},
+): string => {
+  const referencedPath = host.identityFileId
+    ? options.keyPathsById?.get(host.identityFileId)?.trim()
+    : undefined;
+  return referencedPath
+    || host.identityFilePaths?.find((path) => path.trim())?.trim()
+    || "";
+};
 
 export const getVaultCsvTemplate = (
   opts: VaultCsvTemplateOptions = {},
@@ -73,7 +86,7 @@ const exportHostsToCsv = (hosts: Host[], options: VaultCsvExportOptions): string
     const effectiveUsername = isTelnet
       ? (host.telnetUsername ?? host.username ?? "")
       : (host.username ?? "");
-    const keyPath = host.identityFilePaths?.find((path) => path.trim())?.trim() ?? "";
+    const keyPath = resolveVaultCsvHostKeyPath(host, options);
     const passphrase = keyPath ? (options.keyPassphrases?.get(keyPath) ?? "") : "";
 
     rows.push([
