@@ -235,6 +235,7 @@ export const enCoreMessages: Messages = {
   'tray.empty.title': 'Nothing here yet',
   'tray.empty.subtitle': 'Go connect to a server, they miss you 🚀',
   'tray.quit': 'Quit Netcatty',
+  'tray.closeSession': 'Close session',
 
   // Vault Sidebar
   'vault.sidebar.collapse': 'Collapse sidebar',

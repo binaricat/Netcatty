@@ -232,6 +232,7 @@ export const zhTWCoreMessages: Messages = {
   'tray.empty.title': '一切都很安靜',
   'tray.empty.subtitle': '去連線個伺服器吧，它們想念你了 🚀',
   'tray.quit': '結束 Netcatty',
+  'tray.closeSession': '關閉工作階段',
 
   // Vault Sidebar
   'vault.sidebar.collapse': '收起側邊欄',
