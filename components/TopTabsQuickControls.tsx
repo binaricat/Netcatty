@@ -47,6 +47,7 @@ export const TopTabsQuickControls: React.FC<TopTabsQuickControlsProps> = ({
   const [isOpen, setIsOpen] = useState(false);
   const [isOpacityExpanded, setIsOpacityExpanded] = useState(false);
   const opacityPercent = Math.round(windowOpacity * 100);
+  const isPresetActive = (value: number) => Math.round(value * 100) === opacityPercent;
   const isDark = theme === 'dark';
   const triggerActive = (
     (showExternalMcpToggle && externalMcpEnabled)
@@ -139,10 +140,10 @@ export const TopTabsQuickControls: React.FC<TopTabsQuickControlsProps> = ({
                         key={preset.label}
                         type="button"
                         onClick={() => setWindowOpacity(preset.value)}
-                        aria-pressed={windowOpacity === preset.value}
+                        aria-pressed={isPresetActive(preset.value)}
                         className={cn(
                           'h-6 flex-1 rounded-md text-[11px] font-medium transition-colors',
-                          windowOpacity === preset.value
+                          isPresetActive(preset.value)
                             ? 'bg-primary text-primary-foreground'
                             : 'bg-muted/50 text-muted-foreground hover:bg-muted hover:text-foreground',
                         )}

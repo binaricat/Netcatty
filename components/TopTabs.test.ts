@@ -146,8 +146,9 @@ test("quick controls panel hosts External MCP, opacity, and theme", () => {
   assert.match(topTabsQuickControlsSource, /<Plug size=\{14\}/);
   assert.match(topTabsQuickControlsSource, /OPACITY_PRESETS/);
   assert.match(topTabsQuickControlsSource, /isOpacityExpanded/);
+  assert.match(topTabsQuickControlsSource, /isPresetActive/);
   assert.match(topTabsQuickControlsSource, /type="range"/);
-  assert.match(topTabsQuickControlsSource, /showExternalMcpToggle \? \([\s\S]*mt-1 border-t border-border\/60 pt-1/);
+  assert.match(topTabsQuickControlsSource, /mt-1 border-t border-border\/60 pt-1/);
   assert.doesNotMatch(topTabsQuickControlsSource, /useCloudSync/);
   assert.doesNotMatch(topTabsQuickControlsSource, /border border-border\/60 bg-background\/70/);
   assert.doesNotMatch(syncStatusButtonSource, /topTabs\.controlPanel/);

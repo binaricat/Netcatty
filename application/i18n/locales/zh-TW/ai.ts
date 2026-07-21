@@ -488,7 +488,6 @@ export const zhTWAiMessages: Messages = {
   'topTabs.moreTabs': '更多標籤頁',
   'topTabs.aiAssistant': 'AI 助手',
   'topTabs.controlPanel': '快捷控制',
-  'topTabs.controlPanel.description': '對外 MCP、外觀與主題。',
   'topTabs.controlPanel.externalMcp': '對外 MCP',
   'topTabs.controlPanel.theme': '主題',
   'topTabs.controlPanel.theme.light': '淺色',

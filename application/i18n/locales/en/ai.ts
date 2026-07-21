@@ -489,7 +489,6 @@ export const enAiMessages: Messages = {
   'topTabs.moreTabs': 'More tabs',
   'topTabs.aiAssistant': 'AI Assistant',
   'topTabs.controlPanel': 'Quick controls',
-  'topTabs.controlPanel.description': 'External MCP, appearance, and theme.',
   'topTabs.controlPanel.externalMcp': 'External MCP',
   'topTabs.controlPanel.theme': 'Theme',
   'topTabs.controlPanel.theme.light': 'Light',
