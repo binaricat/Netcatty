@@ -435,6 +435,48 @@ test("distant user scroll synchronously highlights only the target viewport", as
   }
 });
 
+test("user scrollback browsing stays synchronous during a write burst", () => {
+  const raf = installAnimationFrameQueue();
+  try {
+    const {
+      term,
+      handlers,
+      getTranslatedLineIndexes,
+      resetTranslateCount,
+    } = createFakeTerminal("hello DEPLOY world", { lineCount: 220 });
+    term.rows = 30;
+    const highlighter = new KeywordHighlighter(term as never);
+    const rules: KeywordHighlightRule[] = [
+      {
+        id: "deploy",
+        label: "Deploy",
+        patterns: ["DEPLOY"],
+        color: "#F87171",
+        enabled: true,
+      },
+    ];
+
+    highlighter.setRules(rules, true);
+    raf.flush();
+    resetTranslateCount();
+
+    for (let index = 0; index < 6; index += 1) {
+      handlers.writeParsed?.();
+    }
+    term.buffer.active.baseY = 190;
+    term.buffer.active.viewportY = 120;
+    handlers.scroll?.();
+
+    assert.deepEqual(
+      getTranslatedLineIndexes(),
+      Array.from({ length: term.rows }, (_, index) => 120 + index),
+    );
+    highlighter.dispose();
+  } finally {
+    raf.restore();
+  }
+});
+
 test("continuous distant scrolls do not scan skipped viewport ranges", () => {
   const raf = installAnimationFrameQueue();
   try {

@@ -69,8 +69,8 @@ const RE_ASCII_ONLY = /^[\x00-\x7f]*$/;
 
 /**
  * Manages terminal decorations for keyword highlighting.
- * Uses xterm.js Decoration API to overlay styles without modifying the data stream.
- * This ensures zero impact on scrolling performance ("lazy" highlighting).
+ * Uses persistent xterm.js markers so indexed lines keep their decorations for
+ * their full scrollback lifetime without modifying the terminal data stream.
  */
 export class KeywordHighlighter implements IDisposable {
   private term: XTerm;
@@ -567,7 +567,7 @@ export class KeywordHighlighter implements IDisposable {
       !isBrowsingScrollback &&
       this.lastWriteAt > 0 &&
       now - this.lastWriteAt <= KeywordHighlighter.WRITE_BURST_HIGHLIGHT_PAUSE_MS;
-    if (isOutputDrivenViewportChange || this.isWriteBurstActive(now)) {
+    if (isOutputDrivenViewportChange || (!isBrowsingScrollback && this.isWriteBurstActive(now))) {
       this.markVisibleRangeDirty();
       this.triggerRefresh("debounced", "write");
       return;
