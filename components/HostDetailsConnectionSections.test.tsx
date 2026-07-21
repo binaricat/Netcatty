@@ -1,4 +1,7 @@
 import test from "node:test";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -140,8 +143,8 @@ test("host credentials expose automatic and password-only choices", () => {
 });
 
 test("wires same-value key/certificate reselect through pointer and keyboard handlers", () => {
-  const source = require("node:fs").readFileSync(
-    new URL("./HostDetailsConnectionSections.tsx", import.meta.url),
+  const source = fs.readFileSync(
+    path.join(path.dirname(fileURLToPath(import.meta.url)), "HostDetailsConnectionSections.tsx"),
     "utf8",
   );
   assert.match(source, /onPointerUp=\{\(\) => \{[\s\S]*shouldForceAuthMethodReselect/);
