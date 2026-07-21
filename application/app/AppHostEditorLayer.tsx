@@ -1,8 +1,9 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 
 import type { WorkSurfaceHostEditorTarget } from '../state/useWorkSurfaceHostEditor';
 import HostDetailsPanel from '../../components/HostDetailsPanel';
 import SerialHostDetailsPanel from '../../components/SerialHostDetailsPanel';
+import { PortalContainerProvider } from '../../components/ui/portal-container';
 import { resolveGroupDefaults } from '../../domain/groupConfig';
 import type {
   GroupConfig,
@@ -99,6 +100,7 @@ export const AppHostEditorLayer: React.FC<AppHostEditorLayerProps> = ({
   onImportOrReuseKey,
   onUpdateSnippets,
 }) => {
+  const [portalContainer, setPortalContainer] = useState<HTMLDivElement | null>(null);
   const groups = useMemo(
     () => collectWorkSurfaceHostGroups(hosts, customGroups, groupConfigs),
     [customGroups, groupConfigs, hosts],
@@ -116,48 +118,51 @@ export const AppHostEditorLayer: React.FC<AppHostEditorLayerProps> = ({
 
   return (
     <div
+      ref={setPortalContainer}
       className="pointer-events-none absolute inset-0 z-40 [&>*]:pointer-events-auto"
       data-section="app-host-editor-layer"
       style={getAppHostEditorLayerStyle(surfaceVisible)}
     >
-      {target.mode === 'edit' && target.openedHost.protocol === 'serial' ? (
-        <SerialHostDetailsPanel
-          key={editorKey}
-          initialData={target.openedHost}
-          allTags={allTags}
-          groups={groups}
-          groupDefaults={groupDefaults}
-          onSave={onSave}
-          onCancel={onCancel}
-          layout="overlay"
-          className="pointer-events-auto"
-        />
-      ) : (
-        <HostDetailsPanel
-          key={editorKey}
-          initialData={target.mode === 'edit' ? target.openedHost : null}
-          availableKeys={keys}
-          identities={identities}
-          proxyProfiles={proxyProfiles}
-          groups={groups}
-          managedSources={managedSources}
-          allTags={allTags}
-          allHosts={hosts}
-          defaultGroup={target.mode === 'new' ? target.defaultGroup : undefined}
-          terminalThemeId={terminalThemeId}
-          terminalFontSize={terminalFontSize}
-          groupDefaults={groupDefaults}
-          groupConfigs={groupConfigs}
-          snippets={snippets}
-          onSnippetsChange={onUpdateSnippets}
-          onImportKey={onImportOrReuseKey}
-          onSave={onSave}
-          onCancel={onCancel}
-          onCreateGroup={onCreateGroup}
-          layout="overlay"
-          className="pointer-events-auto"
-        />
-      )}
+      <PortalContainerProvider container={portalContainer}>
+        {target.mode === 'edit' && target.openedHost.protocol === 'serial' ? (
+          <SerialHostDetailsPanel
+            key={editorKey}
+            initialData={target.openedHost}
+            allTags={allTags}
+            groups={groups}
+            groupDefaults={groupDefaults}
+            onSave={onSave}
+            onCancel={onCancel}
+            layout="overlay"
+            className="pointer-events-auto"
+          />
+        ) : (
+          <HostDetailsPanel
+            key={editorKey}
+            initialData={target.mode === 'edit' ? target.openedHost : null}
+            availableKeys={keys}
+            identities={identities}
+            proxyProfiles={proxyProfiles}
+            groups={groups}
+            managedSources={managedSources}
+            allTags={allTags}
+            allHosts={hosts}
+            defaultGroup={target.mode === 'new' ? target.defaultGroup : undefined}
+            terminalThemeId={terminalThemeId}
+            terminalFontSize={terminalFontSize}
+            groupDefaults={groupDefaults}
+            groupConfigs={groupConfigs}
+            snippets={snippets}
+            onSnippetsChange={onUpdateSnippets}
+            onImportKey={onImportOrReuseKey}
+            onSave={onSave}
+            onCancel={onCancel}
+            onCreateGroup={onCreateGroup}
+            layout="overlay"
+            className="pointer-events-auto"
+          />
+        )}
+      </PortalContainerProvider>
     </div>
   );
 };

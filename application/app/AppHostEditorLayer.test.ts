@@ -88,6 +88,8 @@ test('editor stays mounted while another app surface is active', () => {
   const source = readFileSync(new URL('./AppHostEditorLayer.tsx', import.meta.url), 'utf8');
   assert.doesNotMatch(source, /!surfaceVisible\) return null/);
   assert.match(source, /style=\{getAppHostEditorLayerStyle\(surfaceVisible\)\}/);
+  assert.match(source, /ref=\{setPortalContainer\}/);
+  assert.match(source, /<PortalContainerProvider container=\{portalContainer\}>/);
 });
 
 test('AppView composes host-tree actions with the work-surface editor', () => {

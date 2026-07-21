@@ -3,6 +3,7 @@ import { Check, ChevronDown, ChevronUp } from "lucide-react"
 import * as React from "react"
 
 import { cn } from "../../lib/utils"
+import { usePortalContainer } from "./portal-container"
 
 const Select = SelectPrimitive.Root
 
@@ -77,9 +78,12 @@ type SelectContentProps = React.ComponentPropsWithoutRef<typeof SelectPrimitive.
 const SelectContent = React.forwardRef<
   React.ElementRef<typeof SelectPrimitive.Content>,
   SelectContentProps
->(({ className, children, position = "popper", hideScrollButtons = false, ...props }, ref) => (
-  <SelectPrimitive.Portal>
-    <SelectPrimitive.Content
+>(({ className, children, position = "popper", hideScrollButtons = false, ...props }, ref) => {
+  const portalContainer = usePortalContainer()
+
+  return (
+    <SelectPrimitive.Portal container={portalContainer ?? undefined}>
+      <SelectPrimitive.Content
       ref={ref}
       // Disable animations - they cause stacking/positioning issues on first open
       className={cn(
@@ -90,21 +94,22 @@ const SelectContent = React.forwardRef<
       )}
       position={position}
       {...props}
-    >
-      {!hideScrollButtons && <SelectScrollUpButton />}
-      <SelectPrimitive.Viewport
-        className={cn(
-          "p-1",
-          position === "popper" &&
-          "h-[var(--radix-select-trigger-height)] w-full min-w-[var(--radix-select-trigger-width)]"
-        )}
       >
-        {children}
-      </SelectPrimitive.Viewport>
-      {!hideScrollButtons && <SelectScrollDownButton />}
-    </SelectPrimitive.Content>
-  </SelectPrimitive.Portal>
-))
+        {!hideScrollButtons && <SelectScrollUpButton />}
+        <SelectPrimitive.Viewport
+          className={cn(
+            "p-1",
+            position === "popper" &&
+            "h-[var(--radix-select-trigger-height)] w-full min-w-[var(--radix-select-trigger-width)]"
+          )}
+        >
+          {children}
+        </SelectPrimitive.Viewport>
+        {!hideScrollButtons && <SelectScrollDownButton />}
+      </SelectPrimitive.Content>
+    </SelectPrimitive.Portal>
+  )
+})
 SelectContent.displayName = SelectPrimitive.Content.displayName
 
 const SelectLabel = React.forwardRef<

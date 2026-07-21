@@ -56,23 +56,20 @@ function mergeWorkSurfaceDraftValue(
   latestValue: unknown,
 ): unknown {
   if (areDraftValuesEqual(draftValue, openedValue)) return latestValue;
-  if (
-    !isPlainRecord(openedValue)
-    || !isPlainRecord(draftValue)
-    || !isPlainRecord(latestValue)
-  ) {
+  if (!isPlainRecord(draftValue) || !isPlainRecord(latestValue)) {
     return draftValue;
   }
 
+  const openedRecord = isPlainRecord(openedValue) ? openedValue : {};
   const merged: Record<string, unknown> = { ...latestValue };
-  const draftKeys = new Set([...Object.keys(openedValue), ...Object.keys(draftValue)]);
+  const draftKeys = new Set([...Object.keys(openedRecord), ...Object.keys(draftValue)]);
   for (const key of draftKeys) {
     if (!Object.hasOwn(draftValue, key)) {
       delete merged[key];
       continue;
     }
     merged[key] = mergeWorkSurfaceDraftValue(
-      openedValue[key],
+      openedRecord[key],
       draftValue[key],
       latestValue[key],
     );

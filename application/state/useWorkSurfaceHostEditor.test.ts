@@ -92,6 +92,19 @@ test('saving keeps intentional clears instead of restoring the latest value', ()
   assert.deepEqual(mergeWorkSurfaceHostDraft(opened, draft, latest), draft);
 });
 
+test('saving merges independently added settings inside a previously absent object', () => {
+  const opened = host();
+  const draft = host({ algorithms: { hmac: ['editor-hmac'] } });
+  const latest = host({ algorithms: { cipher: ['runtime-cipher'] } });
+
+  assert.deepEqual(mergeWorkSurfaceHostDraft(opened, draft, latest), host({
+    algorithms: {
+      cipher: ['runtime-cipher'],
+      hmac: ['editor-hmac'],
+    },
+  }));
+});
+
 test('saving a new host appends it', () => {
   const created = host({ id: 'host-2' });
 
