@@ -1,4 +1,4 @@
-import { Folder, FolderLock, Menu, Moon, MoreHorizontal, Plus, Radio, Settings, Sparkles, Sun } from 'lucide-react';
+import { Folder, FolderLock, Menu, Moon, MoreHorizontal, Plus, Plug, Settings, Sparkles, Sun } from 'lucide-react';
 import React, { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { fromEditorTabId, isEditorTabId, useActiveTabId } from '../application/state/activeTabStore';
 import { isHostTreeWorkTabSurface } from '../application/app/workTabSurface';
@@ -1119,7 +1119,7 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
                   aria-pressed={externalMcpEnabled}
                   onClick={() => onToggleExternalMcp(!externalMcpEnabled)}
                 >
-                  <Radio size={16} />
+                  <Plug size={16} />
                 </Button>
               </TooltipTrigger>
               <TooltipContent>

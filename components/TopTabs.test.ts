@@ -124,6 +124,7 @@ test("top tabs expose the External MCP quick toggle", () => {
   assert.match(topTabsSource, /topTabs\.externalMcp\.(enable|disable)/);
   assert.match(topTabsSource, /aria-label=\{t\(externalMcpEnabled \? 'topTabs\.externalMcp\.disable' : 'topTabs\.externalMcp\.enable'\)\}/);
   assert.match(topTabsSource, /aria-pressed=\{externalMcpEnabled\}/);
+  assert.match(topTabsSource, /<Plug size=\{16\} \/>/);
 });
 
 test("External MCP top bar labels exist in Traditional Chinese", () => {
