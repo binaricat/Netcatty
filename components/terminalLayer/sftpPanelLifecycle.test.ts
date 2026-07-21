@@ -44,9 +44,18 @@ test("closing a terminal tab finds every retained SFTP resource for cleanup", ()
     mountedTabIds: ["closed-tab", "open-tab"],
     activeTransferTabIds: [],
     retainedTabIds: ["closed-tab"],
+    openingTabIds: [],
     cleanupTimerTabIds: ["closed-tab"],
     validTabIds: new Set(["open-tab"]),
   }), ["closed-tab"]);
+});
+
+test("a reopening panel is not cleared before its open state commits", () => {
+  assert.equal(shouldClearSftpPanelAfterTransferChange({
+    activeTransfersCount: 0,
+    panelOpen: true,
+    retainedAfterClose: false,
+  }), false);
 });
 
 test("an unretained hidden idle panel can be released", () => {

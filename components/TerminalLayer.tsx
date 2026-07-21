@@ -604,6 +604,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   sftpHostForTabRef.current = sftpHostForTab;
   const sftpActiveTransfersByTabRef = useRef<Map<string, number>>(new Map());
   const sftpRetainedAfterCloseTabIdsRef = useRef<Set<string>>(new Set());
+  const sftpOpeningTabIdsRef = useRef<Set<string>>(new Set());
   const sftpRetainedCleanupTimersRef = useRef<Map<string, number>>(new Map());
   const sftpLastPathForSourceRef = useRef<Map<string, SftpRememberedLocation>>(new Map());
 
@@ -637,6 +638,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     }
     sftpActiveTransfersByTabRef.current.delete(tabId);
     sftpRetainedAfterCloseTabIdsRef.current.delete(tabId);
+    sftpOpeningTabIdsRef.current.delete(tabId);
     setSftpHostForTab(prev => {
       if (!prev.has(tabId)) return prev;
       const next = new Map(prev);
@@ -671,7 +673,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     sftpActiveTransfersByTabRef.current.delete(tabId);
     const lifecycle = {
       activeTransfersCount,
-      panelOpen: sidePanelOpenTabsRef.current.has(tabId),
+      panelOpen: sidePanelOpenTabsRef.current.has(tabId) || sftpOpeningTabIdsRef.current.has(tabId),
       retainedAfterClose: sftpRetainedAfterCloseTabIdsRef.current.has(tabId),
     };
     if (shouldClearSftpPanelAfterTransferChange(lifecycle)) {
@@ -691,6 +693,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
         if (
           currentCount <= 0
           && !sidePanelOpenTabsRef.current.has(tabId)
+          && !sftpOpeningTabIdsRef.current.has(tabId)
           && sftpRetainedAfterCloseTabIdsRef.current.has(tabId)
         ) {
           clearSftpPanelState(tabId);
@@ -738,9 +741,13 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     const activeTransfersCount = sftpActiveTransfersByTabRef.current.get(tabId) ?? 0;
     const keepSftpMounted = isClosing
       && shouldKeepSftpMountedAfterClose(activeTransfersCount);
+    if (isClosing) {
+      sftpOpeningTabIdsRef.current.delete(tabId);
+    }
     if (keepSftpMounted) {
       sftpRetainedAfterCloseTabIdsRef.current.add(tabId);
     } else if (!isClosing) {
+      sftpOpeningTabIdsRef.current.add(tabId);
       const cleanupTimer = sftpRetainedCleanupTimersRef.current.get(tabId);
       if (cleanupTimer !== undefined) {
         window.clearTimeout(cleanupTimer);
@@ -1044,6 +1051,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       mountedTabIds: sftpHostForTab.keys(),
       activeTransferTabIds: sftpActiveTransfersByTabRef.current.keys(),
       retainedTabIds: sftpRetainedAfterCloseTabIdsRef.current,
+      openingTabIds: sftpOpeningTabIdsRef.current,
       cleanupTimerTabIds: sftpRetainedCleanupTimersRef.current.keys(),
       validTabIds: validAIScopeTargetIds,
     });
@@ -1051,6 +1059,14 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       clearSftpPanelState(tabId);
     }
   }, [clearSftpPanelState, sftpHostForTab, validAIScopeTargetIds]);
+
+  useEffect(() => {
+    for (const tabId of sftpOpeningTabIdsRef.current) {
+      if (sidePanelOpenTabs.get(tabId) === 'sftp') {
+        sftpOpeningTabIdsRef.current.delete(tabId);
+      }
+    }
+  }, [sidePanelOpenTabs]);
 
   useEffect(() => () => {
     for (const cleanupTimer of sftpRetainedCleanupTimersRef.current.values()) {
@@ -1161,6 +1177,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       next.delete(activeTabId);
       return next;
     });
+    sftpOpeningTabIdsRef.current.delete(activeTabId);
     const activeTransfersCount = sftpActiveTransfersByTabRef.current.get(activeTabId) ?? 0;
     if (shouldKeepSftpMountedAfterClose(activeTransfersCount)) {
       sftpRetainedAfterCloseTabIdsRef.current.add(activeTabId);
@@ -1209,6 +1226,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     if (currentPanel === tab) return;
 
     if (tab === 'sftp') {
+      sftpOpeningTabIdsRef.current.add(tabId);
       const cleanupTimer = sftpRetainedCleanupTimersRef.current.get(tabId);
       if (cleanupTimer !== undefined) {
         window.clearTimeout(cleanupTimer);
