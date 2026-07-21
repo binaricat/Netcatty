@@ -703,17 +703,13 @@ function createFileOpsApi(ctx) {
         throwIfAborted(signal);
         const sftp = await requireSftpChannel(client, { signal, timeoutMs: payload?.timeoutMs });
         const encodedPath = encodePath(payload.path, encoding);
-        const stat = statResultFromAttrs(await statAsync(sftp, encodedPath));
+        const stat = statResultFromAttrs(await lstatAsync(sftp, encodedPath));
         throwIfAborted(signal);
-        if (stat.isDirectory) {
+        if (stat.isSymbolicLink) {
+          await unlinkAsync(sftp, encodedPath);
+        } else if (stat.isDirectory) {
           if (client.__netcattySessionBacked) {
             await client.rmdir(encodedPath, true, { signal });
-          } else if (
-            !signal
-            && !(Number.isFinite(payload?.timeoutMs) && payload.timeoutMs > 0)
-            && typeof client.rmdir === "function"
-          ) {
-            await client.rmdir(encodedPath, true);
           } else {
             const normalizedPath = await normalizeRemotePathString(client, payload.path);
             throwIfAborted(signal);
