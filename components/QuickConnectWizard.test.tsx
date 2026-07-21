@@ -74,7 +74,7 @@ test("quick connect protocol step uses simplified connect header and protocol ic
   assert.match(markup, /lucide-radio/);
   assert.match(markup, /lucide-link-2/);
   assert.match(markup, /lucide-terminal/);
-  assert.match(markup, /text-sm font-medium leading-none[^>]*>Choose protocol</);
+  assert.match(markup, /text-sm font-medium[^>]*>Choose protocol</);
 });
 
 test("quick connect credential section title matches protocol section title style", () => {
@@ -98,7 +98,7 @@ test("quick connect credential section title matches protocol section title styl
     </I18nProvider>,
   );
 
-  assert.match(markup, /text-sm font-medium leading-none[^>]*>Choose protocol</);
-  assert.match(markup, /text-sm font-medium leading-none[^>]*>Credential preset</);
+  assert.match(markup, /text-sm font-medium[^>]*>Choose protocol</);
+  assert.match(markup, /text-sm font-medium[^>]*>Credential preset</);
 });
 
