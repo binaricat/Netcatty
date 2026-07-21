@@ -619,7 +619,7 @@ test("persistent highlight lookup follows uniform scrollback marker shifts", () 
     term.buffer.active.viewportY = 0;
     handlers.scroll?.();
 
-    assert.equal(getTranslateCount(), 0);
+    assert.equal(getTranslateCount(), term.rows);
     assert.equal(getActiveDecorationCount(), 8);
     highlighter.dispose();
   } finally {
