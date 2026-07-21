@@ -106,7 +106,6 @@ test('host tree sidebar wires app-level host creation and editing actions', () =
   assert.match(sidebarSource, /onNewHost\?: \(defaultGroup\?: string\) => void/);
   assert.match(sidebarSource, /onEditHost\?: \(host: Host\) => void/);
   assert.match(sidebarSource, /onEditHost=\{onEditHost\}/);
-  assert.match(sidebarSource, /onNewHost=\{\(\) => onNewHost\?\.\(\)\}/);
   assert.match(sidebarSource, /onNewHost=\{\(groupPath\) => onNewHost\?\.\(groupPath\)\}/);
 });
 

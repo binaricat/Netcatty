@@ -4,9 +4,8 @@
 
 Users spend most of their time on terminal and editor work tabs, but currently must return to the Vault to create or fully edit a host. This feature adds host creation and editing directly to the terminal host-tree sidebar while preserving the active terminal session.
 
-The terminal host tree will gain these entry points:
+The terminal host tree will gain these entry points while keeping the existing toolbar unchanged:
 
-- A toolbar button that creates a host at the Vault root.
 - A root-list empty-area context-menu item that creates a host at the Vault root.
 - A group context-menu item that creates a host in that group.
 - A host context-menu item that opens the full editor for that host.
@@ -18,7 +17,7 @@ Creating a host from an existing host's context menu is intentionally excluded. 
 - Create and edit hosts without navigating away from the current work tab.
 - Reuse the existing host editors and Vault persistence behavior.
 - Keep active terminal sessions running when their saved host definition changes.
-- Make the new actions available from predictable toolbar and context-menu locations.
+- Make the new actions available from predictable context-menu locations.
 - Preserve protocol-specific editing, including serial hosts.
 
 ## Non-goals
@@ -33,9 +32,7 @@ Creating a host from an existing host's context menu is intentionally excluded. 
 
 ### Creating a host
 
-The terminal host-tree toolbar includes a new-host icon button. Selecting it opens the existing host details editor as a right-side overlay and creates an SSH host at the Vault root by default.
-
-Right-clicking unused space in the host-list content area opens a root context menu with a `New host` item. It has the same behavior as the toolbar button. This remains available when a search or tag filter has no matches.
+Right-clicking unused space in the host-list content area opens a root context menu with a `New host` item. It opens the existing host details editor as a right-side overlay and creates an SSH host at the Vault root by default. This remains available when a search or tag filter has no matches.
 
 Right-clicking a group includes an `New host in this group` item. The editor opens with that group preselected and with the group's inherited defaults available to the form.
 
@@ -97,7 +94,7 @@ The host-tree content region acts as the root context-menu trigger. Nested host 
 
 ## Data Flow
 
-1. The user invokes a toolbar or context-menu action in the terminal host tree.
+1. The user invokes a context-menu action in the terminal host tree.
 2. The host tree calls the app-level editor controller with either a host or an optional default group.
 3. The work-surface editor layer renders the appropriate existing details panel.
 4. On save, the controller upserts the host through the existing Vault state update callback.
@@ -117,7 +114,6 @@ The host-tree content region acts as the root context-menu trigger. Nested host 
 
 Add translation keys for:
 
-- New host toolbar tooltip.
 - Root `New host` context-menu item.
 - Group `New host in this group` context-menu item.
 - Host `Edit host` context-menu item if an existing suitable key is not already shared.
@@ -129,7 +125,6 @@ All shipped locale files must contain the new keys, using an English fallback tr
 
 Unit and component coverage should verify:
 
-- The toolbar new-host action opens a root-level draft.
 - The empty-area context menu opens a root-level draft, including for an empty filtered result.
 - The group context menu opens a draft with the correct default group and inherited defaults.
 - The host context menu opens the full editor for the selected host.
@@ -144,7 +139,6 @@ Unit and component coverage should verify:
 
 ## Acceptance Criteria
 
-- A user can create a root host from the terminal host-tree toolbar.
 - A user can create a root host by right-clicking unused host-list space.
 - A user can create a host in a group from that group's context menu.
 - A user can fully edit a host from its terminal-tree context menu.

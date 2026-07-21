@@ -27,11 +27,10 @@ test('host tree toolbar keeps action buttons in the clipped row instead of hidin
   assert.match(source, /disabled=\{!canExpandCollapse\}/);
 });
 
-test('host tree toolbar exposes a dedicated new-host action', () => {
-  assert.match(toolbarSource, /onNewHost: \(\) => void/);
-  assert.match(toolbarSource, /canNewHost\?: boolean/);
-  assert.match(toolbarSource, /<Plus size=\{14\} \/>/);
-  assert.match(toolbarSource, /terminal\.layer\.hostTree\.newHost/);
+test('host tree toolbar leaves host creation to context menus', () => {
+  assert.doesNotMatch(toolbarSource, /onNewHost: \(\) => void/);
+  assert.doesNotMatch(toolbarSource, /<Plus size=\{14\} \/>/);
+  assert.doesNotMatch(toolbarSource, /terminal\.layer\.hostTree\.newHost/);
 });
 
 test('shared host tree menus expose optional full edit and group host creation actions', () => {

@@ -1131,8 +1131,6 @@ const TerminalHostTreeSidebarInner: React.FC<TerminalHostTreeSidebarProps> = ({
           allTags={allTags}
           selectedTags={selectedTags}
           onSelectedTagsChange={setSelectedTags}
-          onNewHost={() => onNewHost?.()}
-          canNewHost={Boolean(onNewHost)}
           onNewRootGroup={handleNewRootGroup}
           canNewGroup={Boolean(menuActions)}
           onCreateLocalTerminal={handleCreateLocalTerminal}
