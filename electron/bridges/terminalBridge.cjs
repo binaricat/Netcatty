@@ -259,8 +259,47 @@ function rebindTerminalSessionOutput(event, payload, terminalWorkerManager = nul
   }
 }
 
+function resumeSessionOutputFlow(sessionId, terminalWorkerManager = null) {
+  if (!sessionId) return;
+  if (terminalWorkerManager?.send) {
+    try {
+      terminalWorkerManager.send("netcatty:flow", { sessionId, paused: false }, {});
+    } catch {
+      // ignore
+    }
+    return;
+  }
+  const session = sessions?.get?.(sessionId);
+  if (!session) return;
+  try {
+    setRendererFlowPaused(session, false);
+    session.flushPendingData?.();
+  } catch {
+    // ignore
+  }
+}
+
+function fanoutSessionLifecycleEvent(sessionId, primaryWebContentsId, channel, payload) {
+  const targets = new Set();
+  if (typeof primaryWebContentsId === "number") targets.add(primaryWebContentsId);
+  const homeId = attachHomeWebContentsIds.get(sessionId);
+  if (typeof homeId === "number") targets.add(homeId);
+  for (const id of targets) {
+    try {
+      const contents = electronModule?.webContents?.fromId?.(id);
+      contents?.send?.(channel, payload);
+    } catch {
+      // ignore destroyed renderers
+    }
+  }
+  attachHomeWebContentsIds.delete(sessionId);
+}
+
 function restoreAttachedSessionOutput(sessionId, terminalWorkerManager = null) {
   if (!sessionId) return { success: false, restored: false };
+  // Always unpause first: popup may have left the backend paused under pressure
+  // and React cleanup is not guaranteed when the window is force-closed.
+  resumeSessionOutputFlow(sessionId, terminalWorkerManager);
   if (terminalWorkerManager?.restoreAttachHome) {
     return terminalWorkerManager.restoreAttachHome(sessionId);
   }
@@ -770,12 +809,16 @@ function startLocalSession(event, payload) {
       sessionLogStreamManager.stopStream(sessionId, logStreamToken);
       ptyProcessTree.unregisterPid(sessionId);
       sessions.delete(sessionId);
-      const contents = electronModule.webContents.fromId(session.webContentsId);
       // Signal present = killed externally (show disconnected UI).
       // No signal = process exited normally, even with non-zero code
       // (e.g. user typed `exit` after a failed command), so auto-close.
       const reason = evt.signal ? "error" : "exited";
-      contents?.send("netcatty:exit", { sessionId, ...evt, reason });
+      fanoutSessionLifecycleEvent(
+        sessionId,
+        session.webContentsId,
+        "netcatty:exit",
+        { sessionId, ...evt, reason },
+      );
     };
     flushLocalPaced(finalizeExit);
   });
@@ -998,10 +1041,15 @@ async function startSerialSession(event, options) {
           session.zmodemSentry?.cancel();
           session.ymodemAbortController?.abort();
           sessionLogStreamManager.stopStream(sessionId, logStreamToken);
-          const contents = electronModule.webContents.fromId(session.webContentsId);
-          contents?.send("netcatty:exit", { sessionId, exitCode: 1, error: err.message, reason: "error" });
+          const primaryId = session.webContentsId;
           ptyProcessTree.unregisterPid(sessionId);
           sessions.delete(sessionId);
+          fanoutSessionLifecycleEvent(
+            sessionId,
+            primaryId,
+            "netcatty:exit",
+            { sessionId, exitCode: 1, error: err.message, reason: "error" },
+          );
         });
 
         serialPort.on('close', () => {
@@ -1009,10 +1057,15 @@ async function startSerialSession(event, options) {
           session.zmodemSentry?.cancel();
           session.ymodemAbortController?.abort();
           sessionLogStreamManager.stopStream(sessionId, logStreamToken);
-          const contents = electronModule.webContents.fromId(session.webContentsId);
-          contents?.send("netcatty:exit", { sessionId, exitCode: 0, reason: "closed" });
+          const primaryId = session.webContentsId;
           ptyProcessTree.unregisterPid(sessionId);
           sessions.delete(sessionId);
+          fanoutSessionLifecycleEvent(
+            sessionId,
+            primaryId,
+            "netcatty:exit",
+            { sessionId, exitCode: 0, reason: "closed" },
+          );
         });
 
         resolve({ sessionId });

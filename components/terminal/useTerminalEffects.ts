@@ -517,12 +517,20 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
         };
 
         if (attachExistingSession) {
-          // Observe popup: capture home scrollback, rebind the live PTY output,
-          // and attach without starting a new shell.
+          // Observe popup: pause → snapshot → rebind → resume so no live bytes
+          // fall into the gap between snapshot and route handoff.
           try {
-            // Snapshot while home still owns the display route.
+            try {
+              terminalBackend.setSessionFlowPaused?.(sessionId, true);
+            } catch {
+              // ignore
+            }
+            // Snapshot while home still owns the display route (and stream is paused).
             const snap = await terminalBackend.requestSessionSnapshot?.(sessionId);
-            if (disposed) return;
+            if (disposed) {
+              try { terminalBackend.setSessionFlowPaused?.(sessionId, false); } catch { /* ignore */ }
+              return;
+            }
             if (snap?.success && snap.snapshot) {
               try {
                 term.write(snap.snapshot);
@@ -532,8 +540,12 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
             }
 
             const rebind = await terminalBackend.rebindSessionOutput?.(sessionId);
-            if (disposed) return;
+            if (disposed) {
+              try { terminalBackend.setSessionFlowPaused?.(sessionId, false); } catch { /* ignore */ }
+              return;
+            }
             if (!rebind?.success) {
+              try { terminalBackend.setSessionFlowPaused?.(sessionId, false); } catch { /* ignore */ }
               setError(rebind?.error || "Failed to attach to session");
               updateStatus("disconnected");
               isBootActiveRef.current = false;
@@ -543,8 +555,7 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
               attachHomeWebContentsIdRef.current = rebind.previousWebContentsId ?? null;
             }
             sessionRef.current = sessionId;
-            // Hidden home terminal may have paused the backend under pressure;
-            // resume so the popup's new flow controller can receive output.
+            // Resume after rebind so buffered output lands on the popup route.
             try {
               terminalBackend.setSessionFlowPaused?.(sessionId, false);
             } catch {

@@ -437,6 +437,12 @@ function createTerminalWorkerManager(options = {}) {
 
   function restoreAttachHome(sessionId) {
     if (!sessionId) return { success: false, restored: false };
+    // Unpause backend if the observe popup left flow paused under pressure.
+    try {
+      send("netcatty:flow", { sessionId, paused: false }, {});
+    } catch {
+      // ignore
+    }
     const homeId = attachHomeWebContentsIds.get(sessionId);
     if (homeId == null) {
       return { success: true, restored: false };
