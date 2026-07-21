@@ -344,7 +344,17 @@ declare global {
     /** Home renderer: reply with serialized scrollback. */
     respondTerminalSessionSnapshot?(requestId: string, snapshot: string): void;
     /** Observe popup: push current state back to the home renderer before restore. */
-    applyTerminalSessionSnapshot?(sessionId: string, snapshot: string, authorization: string): Promise<{
+    applyTerminalSessionSnapshot?(
+      sessionId: string,
+      snapshot: string,
+      context: {
+        contextSnapshot: string;
+        contextViewportSnapshot: string;
+        contextScrollbackSnapshot: string;
+        alternateScreen: boolean;
+      },
+      authorization: string,
+    ): Promise<{
       success: boolean;
       error?: string;
     }>;
@@ -352,7 +362,15 @@ declare global {
     onTerminalPopupPrepareClose?(cb: (payload: { sessionId: string; authorization: string }) => void): () => void;
     /** Home renderer: apply a pushed snapshot from an observe popup. */
     onTerminalSessionApplySnapshot?(
-      cb: (payload: { sessionId: string; snapshot: string; requestId: string }) => boolean | Promise<boolean>,
+      cb: (payload: {
+        sessionId: string;
+        snapshot: string;
+        contextSnapshot: string;
+        contextViewportSnapshot: string;
+        contextScrollbackSnapshot: string;
+        alternateScreen: boolean;
+        requestId: string;
+      }) => boolean | Promise<boolean>,
     ): () => void;
     // ZMODEM file transfer
     onZmodemEvent?(

@@ -57,15 +57,111 @@ export function applyAuthoritativeHibernateSnapshot(
     alternateScreen: MutableValue<boolean>;
   },
   snapshot: string,
+  context: TerminalHibernateContextSnapshot,
 ): void {
   refs.snapshot.current = snapshot;
   refs.viewportSnapshot.current = snapshot;
   refs.scrollbackSnapshot.current = "";
-  refs.contextSnapshot.current = "";
-  refs.contextViewportSnapshot.current = "";
-  refs.contextScrollbackSnapshot.current = "";
+  refs.contextSnapshot.current = context.contextSnapshot;
+  refs.contextViewportSnapshot.current = context.contextViewportSnapshot;
+  refs.contextScrollbackSnapshot.current = context.contextScrollbackSnapshot;
   refs.pendingBuffer.current = "";
-  refs.alternateScreen.current = false;
+  refs.alternateScreen.current = context.alternateScreen;
+}
+
+export type TerminalHibernateContextSnapshot = Required<Pick<
+  TerminalHibernateSnapshot,
+  "contextSnapshot" | "contextViewportSnapshot" | "contextScrollbackSnapshot" | "alternateScreen"
+>>;
+
+export function resolveTerminalSnapshotCapture(
+  serialized: unknown,
+  context: TerminalHibernateContextSnapshot,
+): { snapshot: string; context: TerminalHibernateContextSnapshot } {
+  if (typeof serialized === "string") return { snapshot: serialized, context };
+  const plainText = context.alternateScreen
+    ? context.contextViewportSnapshot
+    : context.contextSnapshot;
+  const replayText = plainText.replace(/\r?\n/g, "\r\n");
+  return {
+    snapshot: context.alternateScreen
+      ? `\x1b[?1049h\x1b[H${replayText}`
+      : replayText,
+    context,
+  };
+}
+
+function isEmptyTerminalContext(text: string): boolean {
+  return text.split("\n").every((line) => line.length === 0);
+}
+
+export function readTerminalHibernateContext(
+  term: XTerm,
+): TerminalHibernateContextSnapshot {
+  const rows = Math.max(1, term.rows);
+  const bufferLength = resolveActiveBufferLength(term);
+
+  if (isTerminalAlternateScreenActive(term)) {
+    const contextViewportSnapshot = readActiveTerminalBufferTextRange(term, {
+      startLine: 0,
+      endLine: Math.max(0, rows - 1),
+    });
+    const empty = isEmptyTerminalContext(contextViewportSnapshot);
+    return {
+      contextSnapshot: empty ? "" : contextViewportSnapshot,
+      contextViewportSnapshot: empty ? "" : contextViewportSnapshot,
+      contextScrollbackSnapshot: "",
+      alternateScreen: true,
+    };
+  }
+
+  const activeBuffer = term.buffer.active as typeof term.buffer.active & { viewportY?: number };
+  const bottomViewportStart = Math.max(0, bufferLength - rows);
+  const viewportStart = Math.min(
+    bottomViewportStart,
+    Math.max(0, activeBuffer.viewportY ?? bottomViewportStart),
+  );
+  const viewportEnd = bufferLength > 0
+    ? Math.min(bufferLength - 1, viewportStart + rows - 1)
+    : -1;
+  const contextViewportSnapshot = readActiveTerminalBufferTextRange(term, {
+    startLine: viewportStart,
+    endLine: viewportEnd,
+  });
+  const contextStart = Math.min(
+    viewportStart,
+    Math.max(0, bufferLength - TERMINAL_HIBERNATE_SNAPSHOT_MAX_LINES),
+  );
+  const contextEnd = bufferLength > 0
+    ? Math.min(
+      bufferLength - 1,
+      Math.max(viewportEnd, contextStart + TERMINAL_HIBERNATE_SNAPSHOT_MAX_LINES - 1),
+    )
+    : -1;
+  const contextScrollbackSnapshot = viewportStart > 0
+    ? readActiveTerminalBufferTextRange(term, {
+      startLine: contextStart,
+      endLine: viewportStart - 1,
+    })
+    : "";
+  const contextSnapshot = readActiveTerminalBufferTextRange(term, {
+    startLine: contextStart,
+    endLine: contextEnd,
+  });
+  if (isEmptyTerminalContext(contextSnapshot)) {
+    return {
+      contextSnapshot: "",
+      contextViewportSnapshot: "",
+      contextScrollbackSnapshot: "",
+      alternateScreen: false,
+    };
+  }
+  return {
+    contextSnapshot,
+    contextViewportSnapshot,
+    contextScrollbackSnapshot,
+    alternateScreen: false,
+  };
 }
 
 function resolveActiveBufferLength(term: XTerm): number {
@@ -99,6 +195,17 @@ export async function serializeTerminalForHibernate(
   const preferWasm = options.preferWasm === true;
   const rows = Math.max(1, term.rows);
   const bufferLength = resolveActiveBufferLength(term);
+  let context: TerminalHibernateContextSnapshot = {
+    contextSnapshot: "",
+    contextViewportSnapshot: "",
+    contextScrollbackSnapshot: "",
+    alternateScreen,
+  };
+  try {
+    context = readTerminalHibernateContext(term);
+  } catch {
+    // A transient buffer read failure must not prevent visual snapshot capture.
+  }
 
   try {
     if (alternateScreen) {
@@ -111,17 +218,11 @@ export async function serializeTerminalForHibernate(
         }, preferWasm),
         rows,
       );
-      const contextViewportSnapshot = readActiveTerminalBufferTextRange(term, {
-        startLine: 0,
-        endLine: endRow,
-      });
       return {
         snapshot: viewportSnapshot,
         viewportSnapshot,
         scrollbackSnapshot: "",
-        contextSnapshot: contextViewportSnapshot,
-        contextViewportSnapshot,
-        contextScrollbackSnapshot: "",
+        ...context,
         alternateScreen: true,
       };
     }
@@ -133,13 +234,7 @@ export async function serializeTerminalForHibernate(
       excludeModes,
       range: { start: viewportStart, end: viewportEnd },
     }, preferWasm);
-    const contextViewportSnapshot = readActiveTerminalBufferTextRange(term, {
-      startLine: viewportStart,
-      endLine: viewportEnd,
-    });
-
     let scrollbackSnapshot = "";
-    let contextScrollbackSnapshot = "";
     if (viewportStart > 0) {
       const scrollbackStart = Math.max(0, viewportStart - TERMINAL_HIBERNATE_SNAPSHOT_MAX_LINES);
       scrollbackSnapshot = capHibernateBufferByLines(
@@ -150,10 +245,6 @@ export async function serializeTerminalForHibernate(
         }, preferWasm),
         TERMINAL_HIBERNATE_SNAPSHOT_MAX_LINES,
       );
-      contextScrollbackSnapshot = readActiveTerminalBufferTextRange(term, {
-        startLine: scrollbackStart,
-        endLine: viewportStart - 1,
-      });
     }
 
     const snapshot = capHibernateBufferByLines(
@@ -168,9 +259,7 @@ export async function serializeTerminalForHibernate(
       snapshot,
       viewportSnapshot,
       scrollbackSnapshot,
-      contextSnapshot: [contextScrollbackSnapshot, contextViewportSnapshot].filter(Boolean).join("\n"),
-      contextViewportSnapshot,
-      contextScrollbackSnapshot,
+      ...context,
       alternateScreen: false,
     };
   } catch {

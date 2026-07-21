@@ -264,7 +264,22 @@ function applyTerminalSessionSnapshot(event, payload, terminalWorkerManager = nu
   const sessionId = typeof payload?.sessionId === "string" ? payload.sessionId : "";
   const hasSnapshot = typeof payload?.snapshot === "string";
   const snapshot = hasSnapshot ? payload.snapshot : "";
-  if (!sessionId || !hasSnapshot) {
+  const hasContextSnapshot = typeof payload?.contextSnapshot === "string";
+  const contextSnapshot = hasContextSnapshot ? payload.contextSnapshot : "";
+  const hasContextViewportSnapshot = typeof payload?.contextViewportSnapshot === "string";
+  const contextViewportSnapshot = hasContextViewportSnapshot ? payload.contextViewportSnapshot : "";
+  const hasContextScrollbackSnapshot = typeof payload?.contextScrollbackSnapshot === "string";
+  const contextScrollbackSnapshot = hasContextScrollbackSnapshot ? payload.contextScrollbackSnapshot : "";
+  const hasAlternateScreen = typeof payload?.alternateScreen === "boolean";
+  const alternateScreen = payload?.alternateScreen === true;
+  if (
+    !sessionId
+    || !hasSnapshot
+    || !hasContextSnapshot
+    || !hasContextViewportSnapshot
+    || !hasContextScrollbackSnapshot
+    || !hasAlternateScreen
+  ) {
     return Promise.resolve({ success: false, error: "Missing sessionId or snapshot" });
   }
   if (!isAuthorizedAttachIpc(event, payload, sessionId)) {
@@ -293,7 +308,15 @@ function applyTerminalSessionSnapshot(event, payload, terminalWorkerManager = nu
       }, TERMINAL_SNAPSHOT_TIMEOUT_MS);
       pendingTerminalSnapshotApplies.set(requestId, { resolve, timeout, webContentsId: home.id });
       try {
-        home.send("netcatty:terminal:apply-snapshot", { sessionId, snapshot, requestId });
+        home.send("netcatty:terminal:apply-snapshot", {
+          sessionId,
+          snapshot,
+          contextSnapshot,
+          contextViewportSnapshot,
+          contextScrollbackSnapshot,
+          alternateScreen,
+          requestId,
+        });
       } catch (err) {
         clearTimeout(timeout);
         pendingTerminalSnapshotApplies.delete(requestId);

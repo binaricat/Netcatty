@@ -245,10 +245,13 @@ test("snapshot apply acknowledgements are emitted only by the matching terminal"
     "utf8",
   );
   assert.match(preloadSource, /if \(handled !== true\) return/);
-  assert.match(terminalSource, /payload\.sessionId !== sessionId \|\| typeof payload\.snapshot !== "string"\) return false/);
+  assert.match(terminalSource, /typeof payload\.contextViewportSnapshot !== "string"/);
   assert.doesNotMatch(terminalSource, /if \(snap\) \{\s*const applied = await terminalBackend\.applySessionSnapshot/);
   assert.match(terminalSource, /const applied = await terminalBackend\.applySessionSnapshot/);
   assert.match(bridgeSource, /const hasSnapshot = typeof payload\?\.snapshot === "string"/);
+  assert.match(bridgeSource, /const hasContextSnapshot = typeof payload\?\.contextSnapshot === "string"/);
+  assert.match(preloadSource, /contextSnapshot: typeof context\?\.contextSnapshot === "string"/);
+  assert.match(terminalSource, /finalContext = readTerminalHibernateContext\(snapshotTerm\)/);
 });
 
 test("exit fanout preserves the original renderer before registry wiring", () => {

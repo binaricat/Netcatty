@@ -369,10 +369,18 @@ function createPreloadApi(ctx) {
       snapshot: typeof snapshot === "string" ? snapshot : "",
     });
   },
-  applyTerminalSessionSnapshot: (sessionId, snapshot, authorization) =>
+  applyTerminalSessionSnapshot: (sessionId, snapshot, context, authorization) =>
     ipcRenderer.invoke("netcatty:terminal:applySnapshot", {
       sessionId,
       snapshot: typeof snapshot === "string" ? snapshot : "",
+      contextSnapshot: typeof context?.contextSnapshot === "string" ? context.contextSnapshot : "",
+      contextViewportSnapshot: typeof context?.contextViewportSnapshot === "string"
+        ? context.contextViewportSnapshot
+        : "",
+      contextScrollbackSnapshot: typeof context?.contextScrollbackSnapshot === "string"
+        ? context.contextScrollbackSnapshot
+        : "",
+      alternateScreen: context?.alternateScreen === true,
       authorization,
     }),
   markAttachPopupClosePrepared: (sessionId, authorization) =>

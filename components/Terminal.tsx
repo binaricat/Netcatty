@@ -163,6 +163,8 @@ import {
   applyAuthoritativeHibernateSnapshot,
   appendHibernatePendingBuffer,
   isTerminalAlternateScreenActive,
+  readTerminalHibernateContext,
+  resolveTerminalSnapshotCapture,
   serializeTerminalForHibernate,
 } from "./terminal/terminalHibernateRuntime";
 import {
@@ -172,7 +174,6 @@ import {
 } from "./terminal/runtime/terminalFlowAckBuffer";
 import {
   releaseTerminalFlowBeforeHibernate,
-  resolveAttachSnapshot,
 } from "./terminal/runtime/terminalSessionAttachment";
 import { flushPendingTerminalWritesBeforeHibernate } from "./terminal/runtime/terminalUnfocusedRepaint";
 import {
@@ -541,7 +542,13 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       viewportText: hibernateContextViewportSnapshotRef.current,
       pendingText: hibernatePendingBufferRef.current,
     });
-    const fullText = snapshot.fullText || hibernateContextSnapshotRef.current;
+    const retainedText = hibernateContextSnapshotRef.current;
+    const fullText = retainedText
+      ? [retainedText, hibernatePendingBufferRef.current].filter(Boolean).join("\n")
+      : snapshot.fullText;
+    const viewportEndLine = hibernatePendingBufferRef.current && fullText
+      ? fullText.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n").length - 1
+      : snapshot.viewportEndLine;
 
     if (!fullText) {
       return { ok: false, error: `Terminal session "${sessionId}" has no readable terminal buffer yet.` };
@@ -557,7 +564,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       source: 'snapshot',
       alternateScreen: hibernateAlternateScreenRef.current,
       viewportStartLine: snapshot.viewportStartLine,
-      viewportEndLine: snapshot.viewportEndLine,
+      viewportEndLine,
     });
   }, [host.label, sessionDisplayName, sessionId]);
 
@@ -1281,7 +1288,15 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     }
     if (bridge?.onTerminalSessionApplySnapshot) {
       unsubs.push(bridge.onTerminalSessionApplySnapshot(async (payload) => {
-        if (!payload || payload.sessionId !== sessionId || typeof payload.snapshot !== "string") return false;
+        if (
+          !payload
+          || payload.sessionId !== sessionId
+          || typeof payload.snapshot !== "string"
+          || typeof payload.contextSnapshot !== "string"
+          || typeof payload.contextViewportSnapshot !== "string"
+          || typeof payload.contextScrollbackSnapshot !== "string"
+          || typeof payload.alternateScreen !== "boolean"
+        ) return false;
         if (termRef.current) {
           const term = termRef.current;
           await flushPendingTerminalWritesBeforeHibernate(term);
@@ -1300,7 +1315,12 @@ const TerminalComponent: React.FC<TerminalProps> = ({
             contextScrollbackSnapshot: hibernateContextScrollbackSnapshotRef,
             pendingBuffer: hibernatePendingBufferRef,
             alternateScreen: hibernateAlternateScreenRef,
-          }, payload.snapshot);
+          }, payload.snapshot, {
+            contextSnapshot: payload.contextSnapshot,
+            contextViewportSnapshot: payload.contextViewportSnapshot,
+            contextScrollbackSnapshot: payload.contextScrollbackSnapshot,
+            alternateScreen: payload.alternateScreen,
+          });
         }
         return true;
       }));
@@ -1342,12 +1362,6 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     if (attachExistingSession) {
       const homeId = attachHomeWebContentsIdRef.current;
       attachHomeWebContentsIdRef.current = undefined;
-      let fallbackSnapshot = "";
-      try {
-        fallbackSnapshot = serializeAddonRef.current?.serialize?.() || "";
-      } catch {
-        // The post-pause snapshot below remains authoritative when available.
-      }
       try {
         // Stop the source before detaching the popup listener. This lets any
         // already-delivered writes settle into xterm before its final snapshot.
@@ -1366,16 +1380,30 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         const snapshotTerm = termRef.current;
         if (snapshotTerm) await flushPendingTerminalWritesBeforeHibernate(snapshotTerm);
         // Push popup display state home first so reopen is not stale.
-        let finalSnapshot: unknown;
+        let finalContext = {
+          contextSnapshot: "",
+          contextViewportSnapshot: "",
+          contextScrollbackSnapshot: "",
+          alternateScreen: snapshotTerm ? isTerminalAlternateScreenActive(snapshotTerm) : false,
+        };
         try {
-          finalSnapshot = serializeAddonRef.current?.serialize?.();
-        } catch {
-          finalSnapshot = undefined;
+          if (snapshotTerm) finalContext = readTerminalHibernateContext(snapshotTerm);
+        } catch (err) {
+          logger.warn("Failed to read terminal context for attach popup", err);
         }
-        const snap = resolveAttachSnapshot(finalSnapshot, fallbackSnapshot);
+        let serializedSnapshot: unknown;
+        try {
+          serializedSnapshot = serializeAddonRef.current?.serialize?.();
+        } catch (err) {
+          logger.warn("Failed to serialize terminal snapshot for attach popup", err);
+        }
+        const capture = resolveTerminalSnapshotCapture(serializedSnapshot, finalContext);
+        const snap = capture.snapshot;
+        finalContext = capture.context;
         const applied = await terminalBackend.applySessionSnapshot?.(
           closingSessionId,
           snap,
+          finalContext,
           attachAuthorization || "",
         );
         if (applied && !applied.success) throw new Error(applied.error || "Failed to apply terminal snapshot");

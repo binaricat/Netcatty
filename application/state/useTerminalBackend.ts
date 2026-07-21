@@ -159,12 +159,22 @@ export const useTerminalBackend = () => {
     return bridge.requestTerminalSessionSnapshot(sessionId, authorization);
   }, []);
 
-  const applySessionSnapshot = useCallback(async (sessionId: string, snapshot: string, authorization: string) => {
+  const applySessionSnapshot = useCallback(async (
+    sessionId: string,
+    snapshot: string,
+    context: {
+      contextSnapshot: string;
+      contextViewportSnapshot: string;
+      contextScrollbackSnapshot: string;
+      alternateScreen: boolean;
+    },
+    authorization: string,
+  ) => {
     const bridge = netcattyBridge.get();
     if (!bridge?.applyTerminalSessionSnapshot) {
       return { success: false as const, error: "applyTerminalSessionSnapshot unavailable" };
     }
-    return bridge.applyTerminalSessionSnapshot(sessionId, snapshot, authorization);
+    return bridge.applyTerminalSessionSnapshot(sessionId, snapshot, context, authorization);
   }, []);
 
   const setSessionEncoding = useCallback(async (sessionId: string, encoding: string) => {
