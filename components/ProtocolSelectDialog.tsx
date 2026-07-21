@@ -139,10 +139,8 @@ const ProtocolSelectDialog: React.FC<ProtocolSelectDialogProps> = ({
             <div className="w-[560px] max-w-[90vw] bg-background border border-border rounded-2xl animate-in fade-in-0 zoom-in-95 duration-200" style={{ boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25), 0 12px 24px -8px rgba(0, 0, 0, 0.15)' }} onClick={(e) => e.stopPropagation()}>
                 {/* Header */}
                 <div className="px-6 py-4 border-b border-border/50">
-                    <div className="flex items-center gap-3 min-w-0">
-                        <div className="h-9 w-9 rounded-lg bg-primary/15 text-primary flex items-center justify-center shrink-0">
-                            <Plug size={18} />
-                        </div>
+                    <div className="flex items-center gap-2 min-w-0">
+                        <Plug size={18} className="shrink-0 text-foreground" />
                         <h2 className="text-base font-semibold truncate">
                             {t("quickConnect.connectTitle", {
                                 host: formatHostPort(host.hostname, ports[selectedProtocol] || host.port || 22),

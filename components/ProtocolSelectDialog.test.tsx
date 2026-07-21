@@ -11,7 +11,8 @@ const source = fs.readFileSync(
 
 test("protocol select dialog uses plug header and semantic protocol icons", () => {
   assert.match(source, /quickConnect\.connectTitle/);
-  assert.match(source, /<Plug size=\{18\} \/>/);
+  assert.match(source, /<Plug size=\{18\} className="shrink-0 text-foreground" \/>/);
+  assert.doesNotMatch(source, /h-9 w-9 rounded-lg bg-primary\/15/);
   assert.doesNotMatch(source, /Progress indicator/);
   assert.doesNotMatch(source, /DistroAvatar/);
   assert.match(source, /bg-sky-500\/10 text-sky-500/);

@@ -702,10 +702,8 @@ const QuickConnectWizard: React.FC<QuickConnectWizardProps> = ({
       >
         {/* Header */}
         <div className="px-6 py-4 border-b border-border/50">
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="h-9 w-9 rounded-lg bg-primary/15 text-primary flex items-center justify-center shrink-0">
-              <Plug size={18} />
-            </div>
+          <div className="flex items-center gap-2 min-w-0">
+            <Plug size={18} className="shrink-0 text-foreground" />
             <h2 className="text-base font-semibold truncate">{connectTitle}</h2>
           </div>
         </div>
