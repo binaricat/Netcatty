@@ -124,8 +124,6 @@ export const XTERM_PERFORMANCE_CONFIG = {
     writeRefreshBudgetMs: 4,
     // Process dirty contiguous lines in chunks so budget checks can preempt.
     dirtySegmentChunkSize: 48,
-    // User-scroll catch-up should be almost invisible to the renderer.
-    scrollSettleDebounceMs: 120,
     // Keep highlighting deprioritized briefly after a large output burst.
     // Longer quiet window lets xterm paint bulk dumps (cat/yes/tail) without
     // competing decoration scans every few hundred ms.
