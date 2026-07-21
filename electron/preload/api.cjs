@@ -348,6 +348,22 @@ function createPreloadApi(ctx) {
       snapshot: typeof snapshot === "string" ? snapshot : "",
     });
   },
+  applyTerminalSessionSnapshot: (sessionId, snapshot) =>
+    ipcRenderer.invoke("netcatty:terminal:applySnapshot", {
+      sessionId,
+      snapshot: typeof snapshot === "string" ? snapshot : "",
+    }),
+  onTerminalSessionApplySnapshot: (cb) => {
+    const handler = (_event, payload) => {
+      try {
+        cb?.(payload);
+      } catch {
+        // ignore provider failures
+      }
+    };
+    ipcRenderer.on("netcatty:terminal:apply-snapshot", handler);
+    return () => ipcRenderer.removeListener("netcatty:terminal:apply-snapshot", handler);
+  },
   setSessionEncoding: async (sessionId, encoding) => {
     // Try the SSH handler first; it returns { ok: false } for non-SSH
     // sessions (no session.stream). Telnet and serial sessions fall

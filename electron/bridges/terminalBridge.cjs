@@ -140,6 +140,7 @@ const TERMINAL_SNAPSHOT_TIMEOUT_MS = 2000;
 const attachHomeWebContentsIds = new Map();
 const {
   setRestoreAttachedSessionOutput,
+  setAttachHomeLookup,
 } = require("./terminalAttachRestore.cjs");
 
 function resolveSessionHomeWebContentsId(sessionId, terminalWorkerManager = null) {
@@ -204,6 +205,38 @@ function handleTerminalSessionSnapshotResponse(_event, payload) {
     success: true,
     snapshot: typeof payload?.snapshot === "string" ? payload.snapshot : "",
   });
+}
+
+/**
+ * Push the observe-popup terminal state back to the home renderer before
+ * restoring the display route, so reopen/attach doesn't show a stale view.
+ */
+function applyTerminalSessionSnapshot(event, payload, terminalWorkerManager = null) {
+  const sessionId = typeof payload?.sessionId === "string" ? payload.sessionId : "";
+  const snapshot = typeof payload?.snapshot === "string" ? payload.snapshot : "";
+  if (!sessionId || !snapshot) {
+    return { success: false, error: "Missing sessionId or snapshot" };
+  }
+  let homeId = null;
+  if (terminalWorkerManager?.getAttachHomeWebContentsId) {
+    homeId = terminalWorkerManager.getAttachHomeWebContentsId(sessionId);
+  }
+  if (homeId == null) {
+    homeId = attachHomeWebContentsIds.get(sessionId) ?? null;
+  }
+  if (typeof homeId !== "number" || !electronModule?.webContents?.fromId) {
+    return { success: false, error: "Home renderer not found" };
+  }
+  try {
+    const home = electronModule.webContents.fromId(homeId);
+    if (!home || home.isDestroyed?.()) {
+      return { success: false, error: "Home renderer destroyed" };
+    }
+    home.send("netcatty:terminal:apply-snapshot", { sessionId, snapshot });
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err?.message || String(err) };
+  }
 }
 
 /**
@@ -1685,9 +1718,17 @@ function registerHandlers(ipcMain, options = {}) {
     restoreTerminalSessionOutput(event, payload, terminalWorkerManager));
   ipcMain.handle("netcatty:terminal:requestSnapshot", (event, payload) =>
     requestTerminalSessionSnapshot(event, payload, terminalWorkerManager));
+  ipcMain.handle("netcatty:terminal:applySnapshot", (event, payload) =>
+    applyTerminalSessionSnapshot(event, payload, terminalWorkerManager));
   ipcMain.on("netcatty:terminal:snapshot-response", handleTerminalSessionSnapshotResponse);
   setRestoreAttachedSessionOutput((sessionId) =>
     restoreAttachedSessionOutput(sessionId, terminalWorkerManager));
+  setAttachHomeLookup((sessionId) => {
+    if (terminalWorkerManager?.getAttachHomeWebContentsId) {
+      return terminalWorkerManager.getAttachHomeWebContentsId(sessionId);
+    }
+    return attachHomeWebContentsIds.get(sessionId) ?? null;
+  });
 
   if (terminalWorkerManager) {
     [

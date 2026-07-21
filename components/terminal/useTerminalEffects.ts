@@ -525,6 +525,13 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
             } catch {
               // ignore
             }
+            // Worker-mode pause is async; brief settle so most in-flight chunks
+            // drain before we snapshot+rebind (best-effort, not a full ack).
+            await new Promise((resolve) => setTimeout(resolve, 40));
+            if (disposed) {
+              try { terminalBackend.setSessionFlowPaused?.(sessionId, false); } catch { /* ignore */ }
+              return;
+            }
             // Snapshot while home still owns the display route (and stream is paused).
             const snap = await terminalBackend.requestSessionSnapshot?.(sessionId);
             if (disposed) {

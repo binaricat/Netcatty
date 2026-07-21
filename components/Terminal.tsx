@@ -1232,25 +1232,52 @@ const TerminalComponent: React.FC<TerminalProps> = ({
 
   const attachHomeWebContentsIdRef = useRef<number | null | undefined>(undefined);
 
-  // Home renderer for AI observe popups: serialize scrollback on demand.
+  // Home renderer for AI observe popups: serialize scrollback on demand, and
+  // accept reverse snapshots when the observe popup restores the route.
   useEffect(() => {
     if (attachExistingSession) return undefined;
     const bridge = netcattyBridge.get();
-    if (!bridge?.onTerminalSessionSnapshotRequest || !bridge?.respondTerminalSessionSnapshot) {
-      return undefined;
-    }
-    return bridge.onTerminalSessionSnapshotRequest((payload) => {
-      if (!payload || payload.sessionId !== sessionId) return;
-      let snapshot = "";
-      try {
-        if (sessionRef.current === sessionId && serializeAddonRef.current) {
-          snapshot = serializeAddonRef.current.serialize() || "";
+    const unsubs: Array<() => void> = [];
+    if (bridge?.onTerminalSessionSnapshotRequest && bridge?.respondTerminalSessionSnapshot) {
+      unsubs.push(bridge.onTerminalSessionSnapshotRequest((payload) => {
+        if (!payload || payload.sessionId !== sessionId) return;
+        let snapshot = "";
+        try {
+          if (serializeAddonRef.current) {
+            snapshot = serializeAddonRef.current.serialize() || "";
+          } else if (hibernatedRef.current || softHiddenRef.current) {
+            // Hibernate path: live xterm is torn down; use retained snapshot.
+            snapshot = [
+              hibernateSnapshotRef.current || "",
+              hibernatePendingBufferRef.current || "",
+            ].join("");
+          }
+        } catch (err) {
+          logger.warn("Failed to serialize terminal snapshot for attach popup", err);
         }
-      } catch (err) {
-        logger.warn("Failed to serialize terminal snapshot for attach popup", err);
-      }
-      bridge.respondTerminalSessionSnapshot?.(payload.requestId, snapshot);
-    });
+        bridge.respondTerminalSessionSnapshot?.(payload.requestId, snapshot);
+      }));
+    }
+    if (bridge?.onTerminalSessionApplySnapshot) {
+      unsubs.push(bridge.onTerminalSessionApplySnapshot((payload) => {
+        if (!payload || payload.sessionId !== sessionId || !payload.snapshot) return;
+        try {
+          if (termRef.current) {
+            termRef.current.reset();
+            termRef.current.write(payload.snapshot);
+            try { termRef.current.scrollToBottom?.(); } catch { /* ignore */ }
+          } else if (hibernatedRef.current || softHiddenRef.current) {
+            hibernateSnapshotRef.current = payload.snapshot;
+            hibernatePendingBufferRef.current = "";
+          }
+        } catch (err) {
+          logger.warn("Failed to apply observe-popup snapshot to home terminal", err);
+        }
+      }));
+    }
+    return () => {
+      for (const unsub of unsubs) unsub();
+    };
   }, [attachExistingSession, sessionId]);
 
   const cleanupSession = async () => {
@@ -1277,6 +1304,15 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       const homeId = attachHomeWebContentsIdRef.current;
       attachHomeWebContentsIdRef.current = undefined;
       try {
+        // Push popup display state home first so reopen is not stale.
+        try {
+          const snap = serializeAddonRef.current?.serialize?.() || "";
+          if (snap) {
+            await terminalBackend.applySessionSnapshot?.(closingSessionId, snap);
+          }
+        } catch (snapErr) {
+          logger.warn("Failed to push observe-popup snapshot home before restore", snapErr);
+        }
         // If the popup paused the backend under output pressure, resume it and
         // drain local queues before handing the route back to home.
         const activeTerm = termRef.current;

@@ -7,6 +7,7 @@
  */
 
 let restoreImpl = null;
+let attachHomeLookup = null;
 
 function setRestoreAttachedSessionOutput(fn) {
   restoreImpl = typeof fn === "function" ? fn : null;
@@ -23,7 +24,23 @@ function restoreAttachedSessionOutput(sessionId) {
   }
 }
 
+function setAttachHomeLookup(fn) {
+  attachHomeLookup = typeof fn === "function" ? fn : null;
+}
+
+function getAttachHomeWebContentsId(sessionId) {
+  if (!sessionId || typeof attachHomeLookup !== "function") return null;
+  try {
+    const id = attachHomeLookup(sessionId);
+    return typeof id === "number" ? id : null;
+  } catch {
+    return null;
+  }
+}
+
 module.exports = {
   setRestoreAttachedSessionOutput,
   restoreAttachedSessionOutput,
+  setAttachHomeLookup,
+  getAttachHomeWebContentsId,
 };

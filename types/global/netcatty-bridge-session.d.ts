@@ -335,6 +335,15 @@ declare global {
     ): () => void;
     /** Home renderer: reply with serialized scrollback. */
     respondTerminalSessionSnapshot?(requestId: string, snapshot: string): void;
+    /** Observe popup: push current state back to the home renderer before restore. */
+    applyTerminalSessionSnapshot?(sessionId: string, snapshot: string): Promise<{
+      success: boolean;
+      error?: string;
+    }>;
+    /** Home renderer: apply a pushed snapshot from an observe popup. */
+    onTerminalSessionApplySnapshot?(
+      cb: (payload: { sessionId: string; snapshot: string }) => void,
+    ): () => void;
     // ZMODEM file transfer
     onZmodemEvent?(
       sessionId: string,
