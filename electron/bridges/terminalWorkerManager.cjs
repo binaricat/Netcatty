@@ -372,17 +372,27 @@ function createTerminalWorkerManager(options = {}) {
     }
   }
 
+  function isLiveWebContentsId(webContentsId) {
+    if (typeof webContentsId !== "number") return false;
+    try {
+      const contents = electronModule?.webContents?.fromId?.(webContentsId);
+      return Boolean(contents && !contents.isDestroyed?.());
+    } catch {
+      return false;
+    }
+  }
+
   function openOutputSession(sessionId, webContentsId) {
     if (!sessionId || !webContentsId) return false;
     if (closedSessions.has(sessionId)) {
       clearBufferedOutput(sessionId);
       return false;
     }
-    sessionWebContentsIds.set(sessionId, webContentsId);
     const contents = electronModule?.webContents?.fromId?.(webContentsId);
     if (!contents || contents.isDestroyed?.()) {
       return false;
     }
+    sessionWebContentsIds.set(sessionId, webContentsId);
     openUrgentInputPort(webContentsId, contents);
     const outputPort = terminalOutputChannel?.openSession?.(sessionId, contents, {
       transferToWorker: true,
@@ -435,6 +445,23 @@ function createTerminalWorkerManager(options = {}) {
     };
   }
 
+  function findFallbackHomeWebContentsId(preferredId) {
+    if (isLiveWebContentsId(preferredId)) return preferredId;
+    try {
+      const wins = electronModule?.BrowserWindow?.getAllWindows?.() || [];
+      for (const win of wins) {
+        const wc = win?.webContents;
+        if (!wc || wc.isDestroyed?.()) continue;
+        const url = typeof wc.getURL === "function" ? wc.getURL() : "";
+        if (url.includes("#/terminal-popup") || url.includes("#/tray")) continue;
+        if (typeof wc.id === "number") return wc.id;
+      }
+    } catch {
+      // ignore
+    }
+    return null;
+  }
+
   function restoreAttachHome(sessionId) {
     if (!sessionId) return { success: false, restored: false };
     // Unpause backend if the observe popup left flow paused under pressure.
@@ -443,22 +470,45 @@ function createTerminalWorkerManager(options = {}) {
     } catch {
       // ignore
     }
-    const homeId = attachHomeWebContentsIds.get(sessionId);
-    if (homeId == null) {
+    const savedHomeId = attachHomeWebContentsIds.get(sessionId);
+    if (savedHomeId == null) {
       return { success: true, restored: false };
     }
     if (closedSessions.has(sessionId)) {
       attachHomeWebContentsIds.delete(sessionId);
       return { success: true, restored: false };
     }
+    const homeId = findFallbackHomeWebContentsId(savedHomeId);
+    if (homeId == null) {
+      // Keep the attach-home mapping so a later tray re-open can still recover.
+      return {
+        success: false,
+        restored: false,
+        error: "Home renderer unavailable",
+      };
+    }
     const ok = openOutputSession(sessionId, homeId);
-    attachHomeWebContentsIds.delete(sessionId);
+    if (ok) {
+      attachHomeWebContentsIds.delete(sessionId);
+    }
     return {
       success: ok,
       restored: ok,
       webContentsId: ok ? homeId : undefined,
       error: ok ? undefined : "Failed to restore attach home output",
     };
+  }
+
+  function resolveDialogWebContentsId(webContentsId) {
+    // Worker dialogs often still carry the original home id after rebind.
+    // Prefer the current display route when this id is a remembered attach home.
+    if (typeof webContentsId !== "number") return webContentsId;
+    for (const [sessionId, homeId] of attachHomeWebContentsIds.entries()) {
+      if (homeId !== webContentsId) continue;
+      const current = sessionWebContentsIds.get(sessionId);
+      if (isLiveWebContentsId(current)) return current;
+    }
+    return webContentsId;
   }
 
   function getAttachHomeWebContentsId(sessionId) {
@@ -636,7 +686,8 @@ function createTerminalWorkerManager(options = {}) {
 
   async function handleZmodemUploadDialogRequest(message) {
     try {
-      const contents = electronModule?.webContents?.fromId?.(message.webContentsId);
+      const webContentsId = resolveDialogWebContentsId(message.webContentsId);
+      const contents = electronModule?.webContents?.fromId?.(webContentsId);
       const win = contents && electronModule?.BrowserWindow?.fromWebContents
         ? electronModule.BrowserWindow.fromWebContents(contents)
         : null;
@@ -660,7 +711,8 @@ function createTerminalWorkerManager(options = {}) {
 
   async function handleZmodemDownloadDialogRequest(message) {
     try {
-      const contents = electronModule?.webContents?.fromId?.(message.webContentsId);
+      const webContentsId = resolveDialogWebContentsId(message.webContentsId);
+      const contents = electronModule?.webContents?.fromId?.(webContentsId);
       const win = contents && electronModule?.BrowserWindow?.fromWebContents
         ? electronModule.BrowserWindow.fromWebContents(contents)
         : null;
@@ -686,16 +738,22 @@ function createTerminalWorkerManager(options = {}) {
     const error = new Error(`Terminal worker exited${Number.isFinite(code) ? ` with code ${code}` : ""}`);
     const exitCode = Number.isFinite(code) ? code : 1;
     for (const [sessionId, webContentsId] of sessionWebContentsIds.entries()) {
-      try {
-        const contents = electronModule?.webContents?.fromId?.(webContentsId);
-        contents?.send?.("netcatty:exit", {
-          sessionId,
-          exitCode,
-          error: error.message,
-          reason: "error",
-        });
-      } catch {
-        // Ignore renderer notification failures while unwinding a crashed worker.
+      const targets = new Set();
+      if (webContentsId != null) targets.add(webContentsId);
+      const homeId = attachHomeWebContentsIds.get(sessionId);
+      if (homeId != null) targets.add(homeId);
+      for (const targetId of targets) {
+        try {
+          const contents = electronModule?.webContents?.fromId?.(targetId);
+          contents?.send?.("netcatty:exit", {
+            sessionId,
+            exitCode,
+            error: error.message,
+            reason: "error",
+          });
+        } catch {
+          // Ignore renderer notification failures while unwinding a crashed worker.
+        }
       }
     }
     child = null;
@@ -705,6 +763,7 @@ function createTerminalWorkerManager(options = {}) {
     outputPortPending.clear();
     outputPortReady.clear();
     sessionWebContentsIds.clear();
+    attachHomeWebContentsIds.clear();
     urgentInputWebContentsIds.clear();
     terminalOutputChannel?.closeAll?.();
     rejectAllPending(error);
