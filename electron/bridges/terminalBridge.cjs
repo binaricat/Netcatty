@@ -133,6 +133,74 @@ function closeTerminalOutputSession(sessionId) {
   terminalOutputChannel?.closeSession?.(sessionId);
 }
 
+/** @type {Map<string, { resolve: (value: any) => void, timeout: NodeJS.Timeout }>} */
+const pendingTerminalSnapshots = new Map();
+const TERMINAL_SNAPSHOT_TIMEOUT_MS = 2000;
+
+function resolveSessionHomeWebContentsId(sessionId, terminalWorkerManager = null) {
+  if (!sessionId) return null;
+  if (terminalWorkerManager?.getSessionWebContentsId) {
+    const id = terminalWorkerManager.getSessionWebContentsId(sessionId);
+    if (typeof id === "number") return id;
+  }
+  const session = sessions?.get?.(sessionId);
+  if (typeof session?.webContentsId === "number") return session.webContentsId;
+  return null;
+}
+
+/**
+ * Capture a serialize snapshot from the home renderer before rebinding output
+ * to an observe popup, so the popup is not an empty shell.
+ */
+function requestTerminalSessionSnapshot(event, payload, terminalWorkerManager = null) {
+  const sessionId = typeof payload?.sessionId === "string" ? payload.sessionId : "";
+  if (!sessionId) {
+    return Promise.resolve({ success: false, snapshot: "", error: "Missing sessionId" });
+  }
+  const homeId = resolveSessionHomeWebContentsId(sessionId, terminalWorkerManager);
+  if (typeof homeId !== "number" || !electronModule?.webContents?.fromId) {
+    return Promise.resolve({ success: false, snapshot: "", error: "Home renderer not found" });
+  }
+  let home;
+  try {
+    home = electronModule.webContents.fromId(homeId);
+  } catch {
+    home = null;
+  }
+  if (!home || home.isDestroyed?.()) {
+    return Promise.resolve({ success: false, snapshot: "", error: "Home renderer destroyed" });
+  }
+
+  const requestId = randomUUID();
+  return new Promise((resolve) => {
+    const timeout = setTimeout(() => {
+      pendingTerminalSnapshots.delete(requestId);
+      resolve({ success: false, snapshot: "", error: "timeout" });
+    }, TERMINAL_SNAPSHOT_TIMEOUT_MS);
+    pendingTerminalSnapshots.set(requestId, { resolve, timeout });
+    try {
+      home.send("netcatty:terminal:snapshot-request", { sessionId, requestId });
+    } catch (err) {
+      clearTimeout(timeout);
+      pendingTerminalSnapshots.delete(requestId);
+      resolve({ success: false, snapshot: "", error: err?.message || String(err) });
+    }
+  });
+}
+
+function handleTerminalSessionSnapshotResponse(_event, payload) {
+  const requestId = typeof payload?.requestId === "string" ? payload.requestId : "";
+  if (!requestId) return;
+  const pending = pendingTerminalSnapshots.get(requestId);
+  if (!pending) return;
+  clearTimeout(pending.timeout);
+  pendingTerminalSnapshots.delete(requestId);
+  pending.resolve({
+    success: true,
+    snapshot: typeof payload?.snapshot === "string" ? payload.snapshot : "",
+  });
+}
+
 /**
  * Rebind a live session's output MessagePort to another renderer (e.g. AI
  * silent-session observe popup). Keeps the same PTY/stream; only the display
@@ -1521,6 +1589,9 @@ function registerHandlers(ipcMain, options = {}) {
     rebindTerminalSessionOutput(event, payload, terminalWorkerManager));
   ipcMain.handle("netcatty:terminal:restoreOutput", (event, payload) =>
     restoreTerminalSessionOutput(event, payload, terminalWorkerManager));
+  ipcMain.handle("netcatty:terminal:requestSnapshot", (event, payload) =>
+    requestTerminalSessionSnapshot(event, payload, terminalWorkerManager));
+  ipcMain.on("netcatty:terminal:snapshot-response", handleTerminalSessionSnapshotResponse);
 
   if (terminalWorkerManager) {
     [

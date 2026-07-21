@@ -1232,6 +1232,27 @@ const TerminalComponent: React.FC<TerminalProps> = ({
 
   const attachHomeWebContentsIdRef = useRef<number | null | undefined>(undefined);
 
+  // Home renderer for AI observe popups: serialize scrollback on demand.
+  useEffect(() => {
+    if (attachExistingSession) return undefined;
+    const bridge = netcattyBridge.get();
+    if (!bridge?.onTerminalSessionSnapshotRequest || !bridge?.respondTerminalSessionSnapshot) {
+      return undefined;
+    }
+    return bridge.onTerminalSessionSnapshotRequest((payload) => {
+      if (!payload || payload.sessionId !== sessionId) return;
+      let snapshot = "";
+      try {
+        if (sessionRef.current === sessionId && serializeAddonRef.current) {
+          snapshot = serializeAddonRef.current.serialize() || "";
+        }
+      } catch (err) {
+        logger.warn("Failed to serialize terminal snapshot for attach popup", err);
+      }
+      bridge.respondTerminalSessionSnapshot?.(payload.requestId, snapshot);
+    });
+  }, [attachExistingSession, sessionId]);
+
   const cleanupSession = async () => {
     const closingSessionId = sessionRef.current;
     sessionRef.current = null;
@@ -1256,6 +1277,18 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       const homeId = attachHomeWebContentsIdRef.current;
       attachHomeWebContentsIdRef.current = undefined;
       try {
+        // If the popup paused the backend under output pressure, resume it and
+        // drain local queues before handing the route back to home.
+        const activeTerm = termRef.current;
+        if (activeTerm) {
+          releaseTerminalFlowBeforeHibernate(terminalBackend, activeTerm, closingSessionId, {
+            resumeBackend: true,
+          });
+        } else {
+          flushTerminalSessionFlowAck(closingSessionId);
+          clearTerminalSessionFlowAck(closingSessionId);
+          terminalBackend.setSessionFlowPaused?.(closingSessionId, false);
+        }
         await terminalBackend.restoreSessionOutput?.(closingSessionId, homeId ?? null);
       } catch (err) {
         logger.warn("Failed to restore terminal output after attach popup close", err);
@@ -1335,6 +1368,20 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       if (attachExistingSession) {
         const homeId = attachHomeWebContentsIdRef.current;
         attachHomeWebContentsIdRef.current = undefined;
+        try {
+          const term = termRef.current;
+          if (term) {
+            releaseTerminalFlowBeforeHibernate(terminalBackend, term, closingSessionId, {
+              resumeBackend: true,
+            });
+          } else {
+            flushTerminalSessionFlowAck(closingSessionId);
+            clearTerminalSessionFlowAck(closingSessionId);
+            terminalBackend.setSessionFlowPaused?.(closingSessionId, false);
+          }
+        } catch (err) {
+          logger.warn("Failed to release attach popup flow state on hibernate close", err);
+        }
         void terminalBackend.restoreSessionOutput?.(closingSessionId, homeId ?? null).catch((err) => {
           logger.warn("Failed to restore terminal output after attach popup hibernate close", err);
         });

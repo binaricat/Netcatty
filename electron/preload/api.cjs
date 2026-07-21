@@ -329,6 +329,25 @@ function createPreloadApi(ctx) {
     ipcRenderer.invoke("netcatty:terminal:rebindOutput", { sessionId }),
   restoreTerminalSessionOutput: (sessionId, webContentsId) =>
     ipcRenderer.invoke("netcatty:terminal:restoreOutput", { sessionId, webContentsId }),
+  requestTerminalSessionSnapshot: (sessionId) =>
+    ipcRenderer.invoke("netcatty:terminal:requestSnapshot", { sessionId }),
+  onTerminalSessionSnapshotRequest: (cb) => {
+    const handler = (_event, payload) => {
+      try {
+        cb?.(payload);
+      } catch {
+        // Provider failures must not break the main process request.
+      }
+    };
+    ipcRenderer.on("netcatty:terminal:snapshot-request", handler);
+    return () => ipcRenderer.removeListener("netcatty:terminal:snapshot-request", handler);
+  },
+  respondTerminalSessionSnapshot: (requestId, snapshot) => {
+    ipcRenderer.send("netcatty:terminal:snapshot-response", {
+      requestId,
+      snapshot: typeof snapshot === "string" ? snapshot : "",
+    });
+  },
   setSessionEncoding: async (sessionId, encoding) => {
     // Try the SSH handler first; it returns { ok: false } for non-SSH
     // sessions (no session.stream). Telnet and serial sessions fall

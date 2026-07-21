@@ -543,14 +543,23 @@ function createTerminalWorkerManager(options = {}) {
       return;
     }
     if (message.kind === "renderer-event") {
-      if (message.channel === "netcatty:exit" && message.payload?.sessionId) {
-        closeOutputSession(message.payload.sessionId);
+      // Prefer the currently rebound display target. Worker-captured
+      // webContentsId is from session start and goes stale after attach/rebind.
+      const sessionId = message.payload?.sessionId;
+      const targetWebContentsId =
+        (typeof sessionId === "string" && sessionWebContentsIds.get(sessionId))
+        || message.webContentsId;
+      if (message.channel === "netcatty:exit" && sessionId) {
+        closeOutputSession(sessionId);
       }
       if (onRendererEvent) {
-        onRendererEvent(message);
+        onRendererEvent({
+          ...message,
+          webContentsId: targetWebContentsId,
+        });
         return;
       }
-      const contents = electronModule?.webContents?.fromId?.(message.webContentsId);
+      const contents = electronModule?.webContents?.fromId?.(targetWebContentsId);
       contents?.send?.(message.channel, message.payload);
       return;
     }

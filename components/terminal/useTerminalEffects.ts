@@ -517,9 +517,22 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
         };
 
         if (attachExistingSession) {
-          // Observe popup: rebind the live PTY output here, do not start a new shell.
+          // Observe popup: capture home scrollback, rebind the live PTY output,
+          // and attach without starting a new shell.
           try {
+            // Snapshot while home still owns the display route.
+            const snap = await terminalBackend.requestSessionSnapshot?.(sessionId);
+            if (disposed) return;
+            if (snap?.success && snap.snapshot) {
+              try {
+                term.write(snap.snapshot);
+              } catch (writeErr) {
+                logger.warn("Failed to write attach snapshot to popup terminal", writeErr);
+              }
+            }
+
             const rebind = await terminalBackend.rebindSessionOutput?.(sessionId);
+            if (disposed) return;
             if (!rebind?.success) {
               setError(rebind?.error || "Failed to attach to session");
               updateStatus("disconnected");
@@ -542,6 +555,11 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
             setTimeout(() => {
               if (disposed) return;
               safeFit({ force: true, requireVisible: true });
+              try {
+                term.scrollToBottom?.();
+              } catch {
+                // ignore
+              }
               try {
                 terminalBackend.resizeSession?.(sessionId, term.cols, term.rows);
               } catch {

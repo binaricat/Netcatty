@@ -323,6 +323,18 @@ declare global {
       sessionId: string,
       webContentsId?: number | null,
     ): Promise<{ success: boolean; restored?: boolean; webContentsId?: number; error?: string }>;
+    /** Ask the home renderer to serialize current terminal scrollback. */
+    requestTerminalSessionSnapshot?(sessionId: string): Promise<{
+      success: boolean;
+      snapshot?: string;
+      error?: string;
+    }>;
+    /** Home renderer: listen for snapshot requests. */
+    onTerminalSessionSnapshotRequest?(
+      cb: (payload: { sessionId: string; requestId: string }) => void,
+    ): () => void;
+    /** Home renderer: reply with serialized scrollback. */
+    respondTerminalSessionSnapshot?(requestId: string, snapshot: string): void;
     // ZMODEM file transfer
     onZmodemEvent?(
       sessionId: string,

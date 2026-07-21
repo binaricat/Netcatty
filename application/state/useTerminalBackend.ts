@@ -135,6 +135,14 @@ export const useTerminalBackend = () => {
     return bridge.restoreTerminalSessionOutput(sessionId, webContentsId);
   }, []);
 
+  const requestSessionSnapshot = useCallback(async (sessionId: string) => {
+    const bridge = netcattyBridge.get();
+    if (!bridge?.requestTerminalSessionSnapshot) {
+      return { success: false as const, snapshot: "", error: "requestTerminalSessionSnapshot unavailable" };
+    }
+    return bridge.requestTerminalSessionSnapshot(sessionId);
+  }, []);
+
   const setSessionEncoding = useCallback(async (sessionId: string, encoding: string) => {
     const bridge = netcattyBridge.get();
     if (!bridge?.setSessionEncoding) return { ok: false, encoding };
@@ -393,6 +401,7 @@ export const useTerminalBackend = () => {
         closeSession,
         rebindSessionOutput,
         restoreSessionOutput,
+        requestSessionSnapshot,
         setSessionEncoding,
         onSessionData,
         onSessionExit,
@@ -464,6 +473,7 @@ export const useTerminalBackend = () => {
       closeSession,
       rebindSessionOutput,
       restoreSessionOutput,
+      requestSessionSnapshot,
       setSessionEncoding,
       onSessionData,
       onSessionExit,
