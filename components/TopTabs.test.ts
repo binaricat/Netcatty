@@ -142,6 +142,7 @@ test("top tabs keep cloud sync separate from quick controls", () => {
 
 test("quick controls panel hosts External MCP, opacity, and theme", () => {
   assert.match(topTabsQuickControlsSource, /data-section="top-tabs-quick-controls"/);
+  assert.match(topTabsQuickControlsSource, /SlidersHorizontal size=\{14\}/);
   assert.match(topTabsQuickControlsSource, /topTabs\.controlPanel/);
   assert.doesNotMatch(topTabsQuickControlsSource, /topTabs\.controlPanel\.description/);
   assert.match(topTabsQuickControlsSource, /externalMcpEnabled/);
