@@ -56,6 +56,28 @@ function createFakeLine(text: string, onTranslate?: () => void) {
   };
 }
 
+let nextFakeMarkerId = 1;
+
+function createFakeMarker(line: number) {
+  const listeners = new Set<() => void>();
+  return {
+    id: nextFakeMarkerId++,
+    line,
+    isDisposed: false,
+    onDispose(listener: () => void) {
+      listeners.add(listener);
+      return { dispose: () => listeners.delete(listener) };
+    },
+    dispose() {
+      if (this.isDisposed) return;
+      this.isDisposed = true;
+      this.line = -1;
+      for (const listener of listeners) listener();
+      listeners.clear();
+    },
+  };
+}
+
 function createFakeWrappedLine(text: string, isWrapped: boolean) {
   return {
     ...createFakeLine(text),
@@ -86,13 +108,7 @@ function createFakeTerminalFromLines(lines: Array<{ text: string; isWrapped: boo
     onResize: () => noopDisposable,
     onRender: () => noopDisposable,
     registerMarker(offset: number) {
-      return {
-        line: offset,
-        isDisposed: false,
-        dispose() {
-          this.isDisposed = true;
-        },
-      };
+      return createFakeMarker(offset);
     },
     registerDecoration(options: { x: number; width: number; foregroundColor: string }) {
       decorations.push(options);
@@ -167,13 +183,7 @@ function createFakeTerminalFromLargeWrappedBlock({
       return noopDisposable;
     },
     registerMarker(offset: number) {
-      return {
-        line: offset,
-        isDisposed: false,
-        dispose() {
-          this.isDisposed = true;
-        },
-      };
+      return createFakeMarker(offset);
     },
     registerDecoration(options: { x: number; width: number; foregroundColor: string }) {
       decorations.push(options);
@@ -252,13 +262,9 @@ function createFakeTerminal(lineText: string, options: { lineCount?: number } = 
       return noopDisposable;
     },
     registerMarker(offset: number) {
-      const marker = {
-        line: term.buffer.active.baseY + term.buffer.active.cursorY + offset,
-        isDisposed: false,
-        dispose() {
-          this.isDisposed = true;
-        },
-      };
+      const marker = createFakeMarker(
+        term.buffer.active.baseY + term.buffer.active.cursorY + offset,
+      );
       markers.push(marker);
       return marker;
     },
@@ -552,9 +558,52 @@ test("persistent highlights remain until xterm disposes their markers", () => {
     handlers.scroll?.();
     assert.equal(getActiveDecorationCount(), 12);
 
-    markers[0].isDisposed = true;
+    markers[0].dispose();
     handlers.scroll?.();
     assert.equal(getActiveDecorationCount(), 11);
+    highlighter.dispose();
+  } finally {
+    raf.restore();
+  }
+});
+
+test("persistent highlight lookup follows uniform scrollback marker shifts", () => {
+  const raf = installAnimationFrameQueue();
+  try {
+    const {
+      term,
+      handlers,
+      getActiveDecorationCount,
+      getTranslateCount,
+      markers,
+      resetTranslateCount,
+    } = createFakeTerminal("hello DEPLOY world", { lineCount: 30 });
+    term.rows = 3;
+    const highlighter = new KeywordHighlighter(term as never);
+    const rules: KeywordHighlightRule[] = [
+      {
+        id: "deploy",
+        label: "Deploy",
+        patterns: ["DEPLOY"],
+        color: "#F87171",
+        enabled: true,
+      },
+    ];
+
+    highlighter.setRules(rules, true);
+    raf.flush();
+    markers[0].dispose();
+    for (const marker of markers) {
+      if (!marker.isDisposed) marker.line -= 1;
+    }
+    resetTranslateCount();
+
+    term.buffer.active.baseY = 27;
+    term.buffer.active.viewportY = 0;
+    handlers.scroll?.();
+
+    assert.equal(getTranslateCount(), 0);
+    assert.equal(getActiveDecorationCount(), 8);
     highlighter.dispose();
   } finally {
     raf.restore();

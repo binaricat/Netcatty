@@ -31,6 +31,7 @@ interface LineDecorationState {
   marker: IMarker;
   decorations: IDecoration[];
   signature: string;
+  indexedLine: number;
 }
 
 type RefreshReason = "scroll" | "write" | "full";
@@ -76,6 +77,7 @@ export class KeywordHighlighter implements IDisposable {
   private term: XTerm;
   private compiledRules: CompiledRule[] = [];
   private lineDecorations = new Map<number, LineDecorationState>();
+  private markerLineOffset = 0;
   private debounceTimer: NodeJS.Timeout | null = null;
   /** Single quiet-window catch-up after bulk dumps (no per-write schedule). */
   private bulkPressureCatchUpTimer: NodeJS.Timeout | null = null;
@@ -165,6 +167,7 @@ export class KeywordHighlighter implements IDisposable {
       }),
       // Also refresh on resize as viewport content changes
       this.term.onResize(() => {
+        this.syncLineDecorationIndex(true);
         this.lastRenderRange = null;
         this.triggerRefresh("debounced", "full");
       }),
@@ -290,6 +293,7 @@ export class KeywordHighlighter implements IDisposable {
       this.disposeLineDecorations(lineY, state);
     }
     this.lineDecorations.clear();
+    this.markerLineOffset = 0;
     this.lastViewportRange = null;
     this.lastRenderRange = null;
     this.clearDirtySegments();
@@ -300,7 +304,7 @@ export class KeywordHighlighter implements IDisposable {
   }
 
   private disposeLineDecorations(lineY: number, state?: LineDecorationState) {
-    const target = state ?? this.lineDecorations.get(lineY);
+    const target = state ?? this.getLineDecorationState(lineY);
     if (!target) return;
     const removedLineY = this.removeLineDecorationState(target, lineY);
     const markerLineBeforeDispose = target.marker.isDisposed ? -1 : target.marker.line;
@@ -311,17 +315,26 @@ export class KeywordHighlighter implements IDisposable {
   }
 
   private removeLineDecorationState(target: LineDecorationState, lineHint?: number): number | null {
+    const indexedState = this.lineDecorations.get(target.indexedLine);
+    if (indexedState === target) {
+      this.lineDecorations.delete(target.indexedLine);
+      return target.marker.isDisposed
+        ? (lineHint ?? null)
+        : target.marker.line;
+    }
     if (lineHint != null) {
-      const hinted = this.lineDecorations.get(lineHint);
+      const hinted = this.lineDecorations.get(this.toIndexedLine(lineHint));
       if (hinted === target) {
-        this.lineDecorations.delete(lineHint);
+        this.lineDecorations.delete(hinted.indexedLine);
         return lineHint;
       }
     }
     for (const [mappedLineY, mappedState] of this.lineDecorations) {
       if (mappedState === target) {
         this.lineDecorations.delete(mappedLineY);
-        return mappedLineY;
+        return target.marker.isDisposed
+          ? (lineHint ?? null)
+          : target.marker.line;
       }
     }
     return null;
@@ -345,7 +358,7 @@ export class KeywordHighlighter implements IDisposable {
     const offset = lineY - cursorAbsoluteY;
     const marker = this.term.registerMarker(offset);
     if (!marker) {
-      this.lineDecorations.delete(lineY);
+      this.lineDecorations.delete(this.toIndexedLine(lineY));
       return;
     }
 
@@ -364,15 +377,23 @@ export class KeywordHighlighter implements IDisposable {
 
     if (decorations.length === 0) {
       marker.dispose();
-      this.lineDecorations.delete(lineY);
+      this.lineDecorations.delete(this.toIndexedLine(lineY));
       return;
     }
 
-    this.lineDecorations.set(lineY, {
+    const state: LineDecorationState = {
       marker,
       decorations,
       signature,
+      indexedLine: this.toIndexedLine(lineY),
+    };
+    marker.onDispose(() => {
+      this.removeLineDecorationState(state, lineY);
+      for (const decoration of decorations) {
+        if (!decoration.isDisposed) decoration.dispose();
+      }
     });
+    this.lineDecorations.set(state.indexedLine, state);
     this.markTerminalRefreshNeeded(lineY);
   }
 
@@ -594,7 +615,7 @@ export class KeywordHighlighter implements IDisposable {
     const previousRange = this.lastRenderRange;
     this.beginTerminalRefreshTracking(viewportStart, viewportEnd);
     try {
-      this.reindexLineDecorationsFromMarkers();
+      this.syncLineDecorationIndex();
 
       if (reason === "write") {
         this.processDirtyLinesInRange(rangeStart, rangeEnd, cursorAbsoluteY, "write");
@@ -663,8 +684,34 @@ export class KeywordHighlighter implements IDisposable {
     }
   }
 
-  private reindexLineDecorationsFromMarkers() {
-    if (this.lineDecorations.size === 0) return;
+  private toIndexedLine(lineY: number): number {
+    return lineY - this.markerLineOffset;
+  }
+
+  private getLineDecorationState(lineY: number): LineDecorationState | undefined {
+    this.syncLineDecorationIndex();
+    let state = this.lineDecorations.get(this.toIndexedLine(lineY));
+    if (state && state.marker.line !== lineY) {
+      this.syncLineDecorationIndex(true);
+      state = this.lineDecorations.get(this.toIndexedLine(lineY));
+    }
+    return state;
+  }
+
+  private syncLineDecorationIndex(force = false) {
+    if (this.lineDecorations.size === 0) {
+      this.markerLineOffset = 0;
+      return;
+    }
+
+    if (!force) {
+      const anchor = this.lineDecorations.values().next().value as LineDecorationState | undefined;
+      if (anchor && !anchor.marker.isDisposed && anchor.marker.line >= 0) {
+        this.markerLineOffset += anchor.marker.line - (anchor.indexedLine + this.markerLineOffset);
+        return;
+      }
+    }
+
     const nextLineDecorations = new Map<number, LineDecorationState>();
     const staleStates = new Set<LineDecorationState>();
 
@@ -674,11 +721,12 @@ export class KeywordHighlighter implements IDisposable {
         continue;
       }
       const markerLine = state.marker.line;
-      const existing = nextLineDecorations.get(markerLine);
+      state.indexedLine = markerLine;
+      const existing = nextLineDecorations.get(state.indexedLine);
       if (existing && existing !== state) {
         staleStates.add(existing);
       }
-      nextLineDecorations.set(markerLine, state);
+      nextLineDecorations.set(state.indexedLine, state);
     }
 
     for (const state of nextLineDecorations.values()) {
@@ -686,6 +734,10 @@ export class KeywordHighlighter implements IDisposable {
     }
 
     this.lineDecorations = nextLineDecorations;
+    this.markerLineOffset = 0;
+    if (staleStates.size > 0) {
+      this.lastRenderRange = null;
+    }
 
     for (const state of staleStates) {
       const markerLineBeforeDispose = state.marker.isDisposed ? -1 : state.marker.line;
@@ -1158,7 +1210,7 @@ export class KeywordHighlighter implements IDisposable {
       }
 
       const signature = this.buildRangesSignature(cachedRanges);
-      const existing = this.lineDecorations.get(lineY);
+      const existing = this.getLineDecorationState(lineY);
       if (
         existing &&
         !existing.marker.isDisposed &&
