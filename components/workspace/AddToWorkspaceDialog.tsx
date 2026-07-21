@@ -124,6 +124,12 @@ export const AddToWorkspaceDialog: React.FC<AddToWorkspaceDialogProps> = ({
     });
   };
 
+  const handleTargetClick = (index: number, id: string) => {
+    setSelectedIndex(index);
+    toggle(id);
+    inputRef.current?.focus();
+  };
+
   const handleCommit = () => {
     if (selected.size === 0) return;
     const targets: AddTarget[] = [];
@@ -223,7 +229,7 @@ export const AddToWorkspaceDialog: React.FC<AddToWorkspaceDialogProps> = ({
                   return (
                     <div
                       className={`flex items-center gap-3 px-4 py-2.5 cursor-pointer transition-colors ${getWorkspaceTargetRowStateClass(isCursor, isChecked)}`}
-                      onClick={() => toggle(LOCAL_ITEM_ID)}
+                      onClick={() => handleTargetClick(idx, LOCAL_ITEM_ID)}
                     >
                       <div className="h-6 w-6 rounded flex items-center justify-center text-muted-foreground">
                         <Terminal size={16} />
@@ -250,7 +256,7 @@ export const AddToWorkspaceDialog: React.FC<AddToWorkspaceDialogProps> = ({
                     <div
                       key={host.id}
                       className={`flex items-center justify-between px-4 py-2.5 cursor-pointer transition-colors ${getWorkspaceTargetRowStateClass(isCursor, isChecked)}`}
-                      onClick={() => toggle(host.id)}
+                      onClick={() => handleTargetClick(idx, host.id)}
                     >
                       <div className="flex items-center gap-3 min-w-0">
                         <DistroAvatar host={host} fallback={(host.label || host.hostname).slice(0, 2).toUpperCase()} size="sm" />

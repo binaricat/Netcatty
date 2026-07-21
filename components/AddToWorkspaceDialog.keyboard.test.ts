@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import {
@@ -25,4 +26,15 @@ test('checked targets keep a visible background after the cursor moves away', ()
   assert.equal(getWorkspaceTargetRowStateClass(true, false), 'bg-primary/15');
   assert.equal(getWorkspaceTargetRowStateClass(false, true), 'bg-primary/10');
   assert.equal(getWorkspaceTargetRowStateClass(true, true), 'bg-primary/20');
+});
+
+test('clicking a target aligns the keyboard cursor with that target', () => {
+  const source = readFileSync(
+    new URL('./workspace/AddToWorkspaceDialog.tsx', import.meta.url),
+    'utf8',
+  );
+
+  assert.match(source, /onClick=\{\(\) => handleTargetClick\(idx, LOCAL_ITEM_ID\)\}/);
+  assert.match(source, /onClick=\{\(\) => handleTargetClick\(idx, host\.id\)\}/);
+  assert.match(source, /handleTargetClick[\s\S]*inputRef\.current\?\.focus\(\)/);
 });
