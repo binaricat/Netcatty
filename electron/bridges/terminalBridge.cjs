@@ -262,8 +262,9 @@ function handleTerminalOutputDrainResponse(event, payload) {
  */
 function applyTerminalSessionSnapshot(event, payload, terminalWorkerManager = null) {
   const sessionId = typeof payload?.sessionId === "string" ? payload.sessionId : "";
-  const snapshot = typeof payload?.snapshot === "string" ? payload.snapshot : "";
-  if (!sessionId || !snapshot) {
+  const hasSnapshot = typeof payload?.snapshot === "string";
+  const snapshot = hasSnapshot ? payload.snapshot : "";
+  if (!sessionId || !hasSnapshot) {
     return Promise.resolve({ success: false, error: "Missing sessionId or snapshot" });
   }
   if (!isAuthorizedAttachIpc(event, payload, sessionId)) {

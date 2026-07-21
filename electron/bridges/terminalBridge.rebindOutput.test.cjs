@@ -215,8 +215,15 @@ test("snapshot apply acknowledgements are emitted only by the matching terminal"
     path.join(__dirname, "../../components/Terminal.tsx"),
     "utf8",
   );
+  const bridgeSource = require("node:fs").readFileSync(
+    path.join(__dirname, "terminalBridge.cjs"),
+    "utf8",
+  );
   assert.match(preloadSource, /if \(handled !== true\) return/);
-  assert.match(terminalSource, /payload\.sessionId !== sessionId \|\| !payload\.snapshot\) return false/);
+  assert.match(terminalSource, /payload\.sessionId !== sessionId \|\| typeof payload\.snapshot !== "string"\) return false/);
+  assert.doesNotMatch(terminalSource, /if \(snap\) \{\s*const applied = await terminalBackend\.applySessionSnapshot/);
+  assert.match(terminalSource, /const applied = await terminalBackend\.applySessionSnapshot/);
+  assert.match(bridgeSource, /const hasSnapshot = typeof payload\?\.snapshot === "string"/);
 });
 
 test("exit fanout preserves the original renderer before registry wiring", () => {

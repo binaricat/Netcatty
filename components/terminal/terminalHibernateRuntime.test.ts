@@ -2,11 +2,41 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  applyAuthoritativeHibernateSnapshot,
   isTerminalAlternateScreenActive,
   refreshTerminalViewport,
   resolveHibernateSerializeOptions,
   serializeTerminalForHibernate,
 } from "./terminalHibernateRuntime.ts";
+
+test("authoritative empty snapshots clear every hibernated copy", () => {
+  const ref = <T>(current: T) => ({ current });
+  const refs = {
+    snapshot: ref("old snapshot"),
+    viewportSnapshot: ref("old viewport"),
+    scrollbackSnapshot: ref("old scrollback"),
+    contextSnapshot: ref("old context"),
+    contextViewportSnapshot: ref("old context viewport"),
+    contextScrollbackSnapshot: ref("old context scrollback"),
+    pendingBuffer: ref("old pending"),
+    alternateScreen: ref(true),
+  };
+
+  applyAuthoritativeHibernateSnapshot(refs, "");
+
+  assert.deepEqual(Object.fromEntries(
+    Object.entries(refs).map(([key, value]) => [key, value.current]),
+  ), {
+    snapshot: "",
+    viewportSnapshot: "",
+    scrollbackSnapshot: "",
+    contextSnapshot: "",
+    contextViewportSnapshot: "",
+    contextScrollbackSnapshot: "",
+    pendingBuffer: "",
+    alternateScreen: false,
+  });
+});
 
 const createFakeTerm = (bufferType: "normal" | "alternate", rows = 24, length = 30) => ({
   rows,

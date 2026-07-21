@@ -14,9 +14,11 @@ import {
   attachSessionToTerminal,
   getFlowController,
   notePendingOutputScrollIfEnabled,
+  resolveAttachSnapshot,
   tryAttachSessionToTerminal,
   writeSessionData,
 } from "./terminalSessionAttachment.ts";
+
 import {
   clearTerminalSessionFlowAck,
   flushTerminalSessionFlowAck,
@@ -38,6 +40,12 @@ import {
   createPromptLineBreakState,
   markTerminalCommandCompletionPending,
 } from "./promptLineBreak";
+
+test("resolveAttachSnapshot keeps an authoritative empty final snapshot", () => {
+  assert.equal(resolveAttachSnapshot("", "stale fallback"), "");
+  assert.equal(resolveAttachSnapshot("fresh", "stale fallback"), "fresh");
+  assert.equal(resolveAttachSnapshot(undefined, "fallback"), "fallback");
+});
 
 const createFakeTerm = (activeType = "normal") => {
   const writes: string[] = [];

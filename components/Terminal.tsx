@@ -160,6 +160,7 @@ import { useTerminalEffects } from "./terminal/useTerminalEffects";
 import { useTerminalHibernateEffect } from "./terminal/useTerminalHibernateEffect";
 import { readActiveTerminalBufferTextRange } from "./terminal/terminalContextBuffer";
 import {
+  applyAuthoritativeHibernateSnapshot,
   appendHibernatePendingBuffer,
   isTerminalAlternateScreenActive,
   serializeTerminalForHibernate,
@@ -169,7 +170,10 @@ import {
   clearTerminalSessionFlowAck,
   flushTerminalSessionFlowAck,
 } from "./terminal/runtime/terminalFlowAckBuffer";
-import { releaseTerminalFlowBeforeHibernate } from "./terminal/runtime/terminalSessionAttachment";
+import {
+  releaseTerminalFlowBeforeHibernate,
+  resolveAttachSnapshot,
+} from "./terminal/runtime/terminalSessionAttachment";
 import { flushPendingTerminalWritesBeforeHibernate } from "./terminal/runtime/terminalUnfocusedRepaint";
 import {
   isTerminalFileTransferActive,
@@ -1277,16 +1281,26 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     }
     if (bridge?.onTerminalSessionApplySnapshot) {
       unsubs.push(bridge.onTerminalSessionApplySnapshot(async (payload) => {
-        if (!payload || payload.sessionId !== sessionId || !payload.snapshot) return false;
+        if (!payload || payload.sessionId !== sessionId || typeof payload.snapshot !== "string") return false;
         if (termRef.current) {
           const term = termRef.current;
           await flushPendingTerminalWritesBeforeHibernate(term);
           term.reset();
-          await new Promise<void>((resolve) => term.write(payload.snapshot, resolve));
+          if (payload.snapshot) {
+            await new Promise<void>((resolve) => term.write(payload.snapshot, resolve));
+          }
           try { term.scrollToBottom?.(); } catch { /* ignore */ }
         } else if (hibernatedRef.current || softHiddenRef.current) {
-          hibernateSnapshotRef.current = payload.snapshot;
-          hibernatePendingBufferRef.current = "";
+          applyAuthoritativeHibernateSnapshot({
+            snapshot: hibernateSnapshotRef,
+            viewportSnapshot: hibernateViewportSnapshotRef,
+            scrollbackSnapshot: hibernateScrollbackSnapshotRef,
+            contextSnapshot: hibernateContextSnapshotRef,
+            contextViewportSnapshot: hibernateContextViewportSnapshotRef,
+            contextScrollbackSnapshot: hibernateContextScrollbackSnapshotRef,
+            pendingBuffer: hibernatePendingBufferRef,
+            alternateScreen: hibernateAlternateScreenRef,
+          }, payload.snapshot);
         }
         return true;
       }));
@@ -1352,15 +1366,19 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         const snapshotTerm = termRef.current;
         if (snapshotTerm) await flushPendingTerminalWritesBeforeHibernate(snapshotTerm);
         // Push popup display state home first so reopen is not stale.
-        const snap = serializeAddonRef.current?.serialize?.() || fallbackSnapshot;
-        if (snap) {
-          const applied = await terminalBackend.applySessionSnapshot?.(
-            closingSessionId,
-            snap,
-            attachAuthorization || "",
-          );
-          if (applied && !applied.success) throw new Error(applied.error || "Failed to apply terminal snapshot");
+        let finalSnapshot: unknown;
+        try {
+          finalSnapshot = serializeAddonRef.current?.serialize?.();
+        } catch {
+          finalSnapshot = undefined;
         }
+        const snap = resolveAttachSnapshot(finalSnapshot, fallbackSnapshot);
+        const applied = await terminalBackend.applySessionSnapshot?.(
+          closingSessionId,
+          snap,
+          attachAuthorization || "",
+        );
+        if (applied && !applied.success) throw new Error(applied.error || "Failed to apply terminal snapshot");
         // Hand the route home while output is still paused, then detach the
         // popup listener and resume so subsequent bytes land on the home route.
         const restored = await terminalBackend.restoreSessionOutput?.(

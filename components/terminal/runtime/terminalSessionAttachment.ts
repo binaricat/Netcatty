@@ -680,6 +680,11 @@ export const releaseTerminalFlowBeforeHibernate = (
   terminalFlowControllers.delete(term);
 };
 
+export const resolveAttachSnapshot = (
+  finalSnapshot: unknown,
+  fallbackSnapshot: string,
+): string => (typeof finalSnapshot === "string" ? finalSnapshot : fallbackSnapshot);
+
 export const detachSessionDataListeners = (
   ctx: TerminalSessionStartersContext,
   term: XTerm,

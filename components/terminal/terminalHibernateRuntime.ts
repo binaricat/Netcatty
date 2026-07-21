@@ -43,6 +43,31 @@ export type TerminalHibernateSnapshot = {
   alternateScreen: boolean;
 };
 
+type MutableValue<T> = { current: T };
+
+export function applyAuthoritativeHibernateSnapshot(
+  refs: {
+    snapshot: MutableValue<string>;
+    viewportSnapshot: MutableValue<string>;
+    scrollbackSnapshot: MutableValue<string>;
+    contextSnapshot: MutableValue<string>;
+    contextViewportSnapshot: MutableValue<string>;
+    contextScrollbackSnapshot: MutableValue<string>;
+    pendingBuffer: MutableValue<string>;
+    alternateScreen: MutableValue<boolean>;
+  },
+  snapshot: string,
+): void {
+  refs.snapshot.current = snapshot;
+  refs.viewportSnapshot.current = snapshot;
+  refs.scrollbackSnapshot.current = "";
+  refs.contextSnapshot.current = "";
+  refs.contextViewportSnapshot.current = "";
+  refs.contextScrollbackSnapshot.current = "";
+  refs.pendingBuffer.current = "";
+  refs.alternateScreen.current = false;
+}
+
 function resolveActiveBufferLength(term: XTerm): number {
   return term.buffer.active.length;
 }
