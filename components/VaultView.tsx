@@ -33,6 +33,7 @@ import {
   Zap,
 } from "lucide-react";
 import React, { Suspense, lazy, memo, startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { loadDefaultKeyPassphrase } from "../application/defaultKeyPassphrases";
 import { useI18n } from "../application/i18n/I18nProvider";
 import { useStoredViewMode } from "../application/state/useStoredViewMode";
 import { useStoredBoolean } from "../application/state/useStoredBoolean";
@@ -573,13 +574,21 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
   }, [t]);
 
   // Export hosts to CSV
-  const handleExportHosts = useCallback(() => {
+  const handleExportHosts = useCallback(async () => {
     if (hosts.length === 0) {
       toast.warning(t('vault.hosts.export.toast.noHosts'));
       return;
     }
 
-    const { csv, exportedCount, skippedCount } = exportHostsToCsvWithStats(hosts);
+    const keyPaths = Array.from(new Set(hosts.flatMap((host) => (
+      host.identityFilePaths?.map((keyPath) => keyPath.trim()).filter(Boolean) ?? []
+    ))));
+    const keyPassphrases = new Map<string, string>();
+    await Promise.all(keyPaths.map(async (keyPath) => {
+      const passphrase = await loadDefaultKeyPassphrase(keyPath);
+      if (passphrase) keyPassphrases.set(keyPath, passphrase);
+    }));
+    const { csv, exportedCount, skippedCount } = exportHostsToCsvWithStats(hosts, { keyPassphrases });
 
     if (exportedCount === 0) {
       toast.warning(t('vault.hosts.export.toast.noHosts'));
@@ -705,9 +714,11 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
   const { handleImportFileSelected } = useVaultImportHandlers({
     customGroups,
     hosts,
+    keys,
     managedSources,
     onUpdateCustomGroups,
     onUpdateHosts,
+    onUpdateKeys,
     onUpdateManagedSources,
     setIsImportOpen,
     t,

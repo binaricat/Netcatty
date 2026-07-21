@@ -1033,6 +1033,57 @@ describe('handleVaultAgentOp vault hosts', () => {
     assert.ok(updatedGroups[0]?.includes('prod/web'));
     assert.equal((result as { addedCount?: number }).addedCount, 2);
   });
+
+  it('host.import saves CSV key passphrases only for newly added hosts', async () => {
+    const saved: Array<{ keyPath: string; passphrase: string }> = [];
+    const result = await handleVaultAgentOp(
+      'host.import',
+      {
+        format: 'csv',
+        text: [
+          'Label,Hostname,Username,KeyPath,Passphrase',
+          'key-host,key.example.com,ubuntu,~/.ssh/id_ed25519,secret',
+        ].join('\n'),
+      },
+      createDeps({
+        saveKeyPassphrase: async (keyPath, passphrase) => {
+          saved.push({ keyPath, passphrase });
+        },
+      }),
+    );
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(saved, [{ keyPath: '~/.ssh/id_ed25519', passphrase: 'secret' }]);
+
+    saved.length = 0;
+    const duplicate = await handleVaultAgentOp(
+      'host.import',
+      {
+        format: 'csv',
+        text: [
+          'Label,Hostname,Username,KeyPath,Passphrase',
+          'key-host,key.example.com,ubuntu,~/.ssh/id_ed25519,replacement',
+        ].join('\n'),
+      },
+      createDeps({
+        hosts: [{
+          id: 'existing-key-host',
+          label: 'key-host',
+          hostname: 'key.example.com',
+          username: 'ubuntu',
+          port: 22,
+          tags: [],
+          os: 'linux',
+        }],
+        saveKeyPassphrase: async (keyPath, passphrase) => {
+          saved.push({ keyPath, passphrase });
+        },
+      }),
+    );
+
+    assert.equal(duplicate.ok, true);
+    assert.deepEqual(saved, []);
+  });
 });
 
 describe('handleVaultAgentOp vault management gaps', () => {

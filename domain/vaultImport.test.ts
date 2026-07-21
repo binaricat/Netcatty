@@ -126,6 +126,28 @@ test("detectVaultImportFormat recognizes csv and ssh_config exports", () => {
   );
 });
 
+test("CSV import keeps working when KeyPath and Passphrase columns are absent", () => {
+  const result = importVaultHostsFromText(
+    "csv",
+    "Label,Hostname,Port,Username,Password\nlegacy,legacy.example.com,22,root,secret",
+  );
+
+  assert.equal(result.hosts.length, 1);
+  assert.equal(result.hosts[0]?.password, "secret");
+  assert.deepEqual(result.keyPassphrases, []);
+});
+
+test("CSV import ignores a passphrase without a key path", () => {
+  const result = importVaultHostsFromText(
+    "csv",
+    "Label,Hostname,Passphrase\nbroken,broken.example.com,secret",
+  );
+
+  assert.equal(result.hosts.length, 1);
+  assert.deepEqual(result.keyPassphrases, []);
+  assert.match(result.issues[0]?.message ?? "", /KeyPath is empty/u);
+});
+
 test("detectVaultImportFormat recognizes MobaXterm bookmark exports", () => {
   assert.equal(
     detectVaultImportFormat([

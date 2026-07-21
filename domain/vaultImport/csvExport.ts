@@ -6,16 +6,20 @@ export interface VaultCsvTemplateOptions {
   includeExampleRows?: boolean;
 }
 
+export interface VaultCsvExportOptions {
+  keyPassphrases?: ReadonlyMap<string, string>;
+}
+
 export const getVaultCsvTemplate = (
   opts: VaultCsvTemplateOptions = {},
 ): string => {
   const includeExampleRows = opts.includeExampleRows !== false;
-  const header = ["Groups", "Label", "Tags", "Notes", "Hostname/IP", "Protocol", "Port", "Username", "Password"];
+  const header = ["Groups", "Label", "Tags", "Notes", "Hostname/IP", "Protocol", "Port", "Username", "Password", "KeyPath", "Passphrase"];
   const rows: string[][] = [header];
   if (includeExampleRows) {
-    rows.push(["Project/Dev", "Web Server (dev)", "dev,web", "Dev web tier", "192.168.1.10", "ssh", "22", "root", ""]);
-    rows.push(["Project/Prod", "Web Server (prod)", "prod,web", "Production", "server-a.example.com", "ssh", "22", "ubuntu", ""]);
-    rows.push(["Database", "DB", "db,mysql", "MySQL primary", "db.example.com", "ssh", "4567", "admin", ""]);
+    rows.push(["Project/Dev", "Web Server (dev)", "dev,web", "Dev web tier", "192.168.1.10", "ssh", "22", "root", "", "~/.ssh/id_ed25519", ""]);
+    rows.push(["Project/Prod", "Web Server (prod)", "prod,web", "Production", "server-a.example.com", "ssh", "22", "ubuntu", "", "", ""]);
+    rows.push(["Database", "DB", "db,mysql", "MySQL primary", "db.example.com", "ssh", "4567", "admin", "", "", ""]);
   }
 
   const escapeCsv = (value: string) => {
@@ -27,8 +31,8 @@ export const getVaultCsvTemplate = (
   return rows.map((r) => r.map((c) => escapeCsv(c)).join(",")).join("\r\n") + "\r\n";
 };
 
-const exportHostsToCsv = (hosts: Host[]): string => {
-  const header = ["Groups", "Label", "Tags", "Notes", "Hostname/IP", "Protocol", "Port", "Username", "Password"];
+const exportHostsToCsv = (hosts: Host[], options: VaultCsvExportOptions): string => {
+  const header = ["Groups", "Label", "Tags", "Notes", "Hostname/IP", "Protocol", "Port", "Username", "Password", "KeyPath", "Passphrase"];
   const rows: string[][] = [header];
 
   const escapeCsv = (value: string, skipFormulaGuard = false) => {
@@ -68,6 +72,7 @@ const exportHostsToCsv = (hosts: Host[]): string => {
     const effectiveUsername = isTelnet
       ? (host.telnetUsername ?? host.username ?? "")
       : (host.username ?? "");
+    const keyPath = host.identityFilePaths?.find((path) => path.trim())?.trim() ?? "";
 
     rows.push([
       host.group ?? "",
@@ -79,11 +84,17 @@ const exportHostsToCsv = (hosts: Host[]): string => {
       String(effectivePort),
       effectiveUsername,
       host.password ?? "",
+      keyPath,
+      keyPath ? (options.keyPassphrases?.get(keyPath) ?? "") : "",
     ]);
   }
 
   const passwordColIdx = header.indexOf("Password");
-  return rows.map((r, rowIdx) => r.map((c, i) => escapeCsv(c, rowIdx > 0 && i === passwordColIdx)).join(",")).join("\r\n") + "\r\n";
+  const passphraseColIdx = header.indexOf("Passphrase");
+  return rows.map((r, rowIdx) => r.map((c, i) => escapeCsv(
+    c,
+    rowIdx > 0 && (i === passwordColIdx || i === passphraseColIdx),
+  )).join(",")).join("\r\n") + "\r\n";
 };
 
 interface ExportHostsResult {
@@ -92,14 +103,17 @@ interface ExportHostsResult {
   skippedCount: number;
 }
 
-export const exportHostsToCsvWithStats = (hosts: Host[]): ExportHostsResult => {
+export const exportHostsToCsvWithStats = (
+  hosts: Host[],
+  options: VaultCsvExportOptions = {},
+): ExportHostsResult => {
   // Only serial hosts are truly unsupported - mosh hosts are exported as SSH
   const isUnsupported = (h: Host) => h.protocol === "serial";
   const skippedHosts = hosts.filter((h) => isUnsupported(h));
   const exportableHosts = hosts.filter((h) => !isUnsupported(h));
 
   return {
-    csv: UTF8_BOM + exportHostsToCsv(hosts),
+    csv: UTF8_BOM + exportHostsToCsv(hosts, options),
     exportedCount: exportableHosts.length,
     skippedCount: skippedHosts.length,
   };

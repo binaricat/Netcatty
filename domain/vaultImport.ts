@@ -4,6 +4,7 @@ import { hasMacKeychainAgentDirectives } from "./sshAuth";
 import {
   buildVaultHostFromDraft,
   buildVaultHostMergeKey,
+  type VaultHostKeyPassphrase,
   type VaultHostDraftProtocol,
 } from "./vaultHostCreate";
 
@@ -121,6 +122,7 @@ export interface VaultImportResult {
   groups: string[];
   issues: VaultImportIssue[];
   stats: VaultImportStats;
+  keyPassphrases?: VaultHostKeyPassphrase[];
 }
 
 const DEFAULT_SSH_PORT = 22;
@@ -169,6 +171,7 @@ const createHost = (input: {
   hostname: string;
   username?: string;
   password?: string;
+  keyPath?: string;
   port?: number;
   protocol?: VaultHostDraftProtocol;
   group?: string;
@@ -273,6 +276,8 @@ const importFromCsv = (text: string): VaultImportResult => {
   const portIdx = findHeaderIndex(header, ["port"]);
   const usernameIdx = findHeaderIndex(header, ["username", "user", "login"]);
   const passwordIdx = findHeaderIndex(header, ["password", "pass", "passwd"]);
+  const keyPathIdx = findHeaderIndex(header, ["keypath", "key path", "identityfile", "identity file"]);
+  const passphraseIdx = findHeaderIndex(header, ["passphrase", "keypassphrase", "key passphrase"]);
 
   if (hostnameIdx === -1) {
     return {
@@ -290,6 +295,7 @@ const importFromCsv = (text: string): VaultImportResult => {
   }
 
   const parsedHosts: Host[] = [];
+  const keyPassphrasesByHost = new Map<string, Omit<VaultHostKeyPassphrase, "hostId">>();
   let parsed = 0;
   let skipped = 0;
 
@@ -321,28 +327,48 @@ const importFromCsv = (text: string): VaultImportResult => {
     const port = parsePort(portIdx >= 0 ? row[portIdx] : undefined) ?? target.port;
     const username = (usernameIdx >= 0 ? row[usernameIdx] : undefined)?.trim() || target.username;
     const password = (passwordIdx >= 0 ? row[passwordIdx] : undefined) || undefined;
+    const keyPath = (keyPathIdx >= 0 ? row[keyPathIdx] : undefined)?.trim() || undefined;
+    const passphrase = (passphraseIdx >= 0 ? row[passphraseIdx] : undefined) || undefined;
 
-    parsedHosts.push(
-      createHost({
-        label,
-        hostname: target.hostname,
-        username,
-        password,
-        port,
-        protocol,
-        group,
-        tags,
-        notes,
-      }),
-    );
+    if (passphrase && !keyPath) {
+      issues.push({
+        level: "warning",
+        message: `CSV row ${i + 2}: Passphrase was ignored because KeyPath is empty.`,
+      });
+    }
+
+    const host = createHost({
+      label,
+      hostname: target.hostname,
+      username,
+      password,
+      keyPath,
+      port,
+      protocol,
+      group,
+      tags,
+      notes,
+    });
+    parsedHosts.push(host);
+    if (keyPath && passphrase) {
+      const mergeKey = buildVaultHostMergeKey(host);
+      if (!keyPassphrasesByHost.has(mergeKey)) {
+        keyPassphrasesByHost.set(mergeKey, { keyPath, passphrase });
+      }
+    }
   }
 
   const { hosts, duplicates } = dedupeHosts(parsedHosts);
+  const keyPassphrases = hosts.flatMap((host) => {
+    const entry = keyPassphrasesByHost.get(buildVaultHostMergeKey(host));
+    return entry ? [{ hostId: host.id, ...entry }] : [];
+  });
   const groups = uniq(hosts.map((h) => h.group).filter(Boolean) as string[]);
   return {
     hosts,
     groups,
     issues,
+    keyPassphrases,
     stats: {
       parsed,
       imported: hosts.length,
@@ -1059,6 +1085,7 @@ export function applyVaultHostImport(
   customGroups: string[];
   addedCount: number;
   skippedExistingCount: number;
+  addedHosts: Host[];
 } {
   const skipDuplicates = options?.skipDuplicates !== false;
   const existingKeys = new Set(existingHosts.map(buildVaultHostMergeKey));
@@ -1086,5 +1113,6 @@ export function applyVaultHostImport(
     customGroups,
     addedCount: newHosts.length,
     skippedExistingCount,
+    addedHosts: newHosts,
   };
 }

@@ -23,3 +23,28 @@ test("CSV exports include a UTF-8 BOM and preserve Chinese text when imported ag
   assert.equal(imported.hosts[0]?.label, host.label);
   assert.equal(imported.hosts[0]?.hostname, host.hostname);
 });
+
+test("CSV round-trips local key authentication and its saved passphrase", () => {
+  const host: Host = {
+    id: "host-key",
+    label: "Key host",
+    hostname: "key.example.com",
+    username: "ubuntu",
+    port: 22,
+    identityFilePaths: ["~/.ssh/id_ed25519"],
+    authMethod: "key",
+  };
+
+  const { csv } = exportHostsToCsvWithStats([host], {
+    keyPassphrases: new Map([["~/.ssh/id_ed25519", "+secret"]]),
+  });
+  const imported = importVaultHostsFromText("csv", csv);
+
+  assert.deepEqual(imported.hosts[0]?.identityFilePaths, ["~/.ssh/id_ed25519"]);
+  assert.equal(imported.hosts[0]?.authMethod, "key");
+  assert.deepEqual(imported.keyPassphrases, [{
+    hostId: imported.hosts[0]?.id,
+    keyPath: "~/.ssh/id_ed25519",
+    passphrase: "+secret",
+  }]);
+});

@@ -1,18 +1,21 @@
 import { useCallback } from "react";
 
+import { rememberKeyPassphrase } from "../../application/defaultKeyPassphrases";
 import { readVaultImportFile } from "../../application/state/vaultImportFile";
 import { sanitizeHost } from "../../domain/host";
 import { applyVaultHostImport, importVaultHostsFromText, type VaultImportFormat } from "../../domain/vaultImport";
-import type { Host, ManagedSource } from "../../types";
+import type { Host, ManagedSource, SSHKey } from "../../types";
 import type { ImportOptions } from "./ImportVaultDialog";
 import { toast } from "../ui/toast";
 
 interface UseVaultImportHandlersOptions {
   customGroups: string[];
   hosts: Host[];
+  keys: SSHKey[];
   managedSources: ManagedSource[];
   onUpdateCustomGroups: (groups: string[]) => void;
   onUpdateHosts: (hosts: Host[]) => void;
+  onUpdateKeys: (keys: SSHKey[]) => void;
   onUpdateManagedSources: (sources: ManagedSource[]) => void;
   setIsImportOpen: (open: boolean) => void;
   t: (key: string, values?: Record<string, unknown>) => string;
@@ -21,9 +24,11 @@ interface UseVaultImportHandlersOptions {
 export function useVaultImportHandlers({
   customGroups,
   hosts,
+  keys,
   managedSources,
   onUpdateCustomGroups,
   onUpdateHosts,
+  onUpdateKeys,
   onUpdateManagedSources,
   setIsImportOpen,
   t,
@@ -154,6 +159,21 @@ export function useVaultImportHandlers({
             onUpdateCustomGroups(nextGroups);
           } else if (newHosts.length > 0) {
             const merged = applyVaultHostImport(hosts, customGroups, result, { skipDuplicates: true });
+            const addedHostIds = new Set(merged.addedHosts.map((host) => host.id));
+            let currentKeys = keys;
+            for (const entry of result.keyPassphrases ?? []) {
+              if (addedHostIds.has(entry.hostId)) {
+                await rememberKeyPassphrase({
+                  keyPath: entry.keyPath,
+                  passphrase: entry.passphrase,
+                  keys: currentKeys,
+                  updateKeys: onUpdateKeys,
+                  setCurrentKeys: (updatedKeys) => {
+                    currentKeys = updatedKeys;
+                  },
+                });
+              }
+            }
             onUpdateHosts(merged.hosts);
             onUpdateCustomGroups(merged.customGroups);
           }
@@ -212,9 +232,11 @@ export function useVaultImportHandlers({
       [
         customGroups,
         hosts,
+        keys,
         managedSources,
         onUpdateCustomGroups,
         onUpdateHosts,
+        onUpdateKeys,
         onUpdateManagedSources,
         setIsImportOpen,
         t,

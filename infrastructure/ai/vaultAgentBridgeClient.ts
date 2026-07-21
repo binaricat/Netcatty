@@ -795,6 +795,13 @@ export async function handleVaultAgentOp(
         { skipDuplicates },
       );
 
+      const addedHostIds = new Set(merged.addedHosts.map((host) => host.id));
+      for (const entry of importResult.keyPassphrases ?? []) {
+        if (addedHostIds.has(entry.hostId)) {
+          await deps.saveKeyPassphrase(entry.keyPath, entry.passphrase);
+        }
+      }
+
       if (merged.addedCount === 0 && importResult.stats.parsed === 0) {
         return {
           ok: false,
