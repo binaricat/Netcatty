@@ -25,6 +25,8 @@ export const EXTERNAL_MCP_RUNTIME_STATUS_POLL_MS = 3000;
 let externalMcpStartupReady = false;
 let externalMcpStartupReadyWaitPromise: Promise<void> | null = null;
 let externalMcpStartupReadyWaitResolve: (() => void) | null = null;
+/** Bumps on every intentional enable/disable so stale startup applies lose. */
+let externalMcpEnableGeneration = 0;
 
 function getWindowHash(hash?: string): string {
   if (typeof hash === 'string') return hash;
@@ -61,6 +63,16 @@ export function resetExternalMcpStartupReadyForTests(): void {
   externalMcpStartupReady = false;
   externalMcpStartupReadyWaitPromise = null;
   externalMcpStartupReadyWaitResolve = null;
+  externalMcpEnableGeneration = 0;
+}
+
+export function getExternalMcpEnableGenerationForTests(): number {
+  return externalMcpEnableGeneration;
+}
+
+export function bumpExternalMcpEnableGenerationForTests(): number {
+  externalMcpEnableGeneration += 1;
+  return externalMcpEnableGeneration;
 }
 
 export function isExternalMcpStartupReady(): boolean {
@@ -244,6 +256,7 @@ export async function syncExternalMcpStartupState(
 ): Promise<ExternalMcpStartupSyncPlan> {
   // Snapshot once for config push; re-read after awaits so a concurrent top-bar
   // toggle during boot wins over a stale enable/disable decision.
+  const startupGeneration = externalMcpEnableGeneration;
   const initialPlan = readExternalMcpStartupSyncPlan();
   try {
     await Promise.resolve(bridge?.externalMcpSetConfig?.(initialPlan.config));
@@ -251,10 +264,21 @@ export async function syncExternalMcpStartupState(
     // Config sync is best-effort; continue with enable/disable reconcile.
   }
 
+  // A user toggle during config await invalidates this startup apply.
+  if (externalMcpEnableGeneration !== startupGeneration) {
+    return readExternalMcpStartupSyncPlan();
+  }
+
   const plan = readExternalMcpStartupSyncPlan();
   if (plan.shouldPersistStoredEnabled) {
     localStorageAdapter.writeBoolean(STORAGE_KEY_AI_EXTERNAL_MCP_ENABLED, plan.storedEnabled);
     emitAIStateChanged(STORAGE_KEY_AI_EXTERNAL_MCP_ENABLED);
+  }
+
+  // Capture generation again immediately before applying runtime enable/disable.
+  const applyGeneration = externalMcpEnableGeneration;
+  if (applyGeneration !== startupGeneration) {
+    return plan;
   }
   try {
     await Promise.resolve(bridge?.externalMcpSetEnabled?.(plan.runtimeEnabled));
@@ -282,6 +306,7 @@ export function useExternalMcpToggleState() {
     // Peer session windows can mirror the stored switch, but they must not own
     // the main-process External MCP lifecycle.
     if (isPeerSessionWindow) return;
+    externalMcpEnableGeneration += 1;
     void netcattyBridge.get()?.externalMcpSetEnabled?.(nextEnabled);
   }, [isPeerSessionWindow, persistEnabled]);
 

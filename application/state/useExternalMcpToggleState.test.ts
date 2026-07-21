@@ -2,7 +2,10 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
   EXTERNAL_MCP_RUNTIME_STATUS_POLL_MS,
+  bumpExternalMcpEnableGenerationForTests,
   createExternalMcpStartupSyncPlan,
+  getExternalMcpEnableGenerationForTests,
+  getExternalMcpEnableGenerationForTests,
   getExternalMcpStartupReadyWaiterCountForTests,
   isExternalMcpStartupReady,
   markExternalMcpStartupReady,
@@ -239,6 +242,40 @@ describe('useExternalMcpToggleState startup ready gate', () => {
       assert.equal(plan.runtimeEnabled, true);
       assert.equal(plan.storedEnabled, true);
       assert.equal(readExternalMcpStoredEnabled(), true);
+    } finally {
+      restore();
+    }
+  });
+});
+
+describe('syncExternalMcpStartupState generation guard', () => {
+  it('skips stale startup enable after concurrent top-bar toggle generation bump', async () => {
+    const restore = installMemoryLocalStorage();
+    try {
+      resetExternalMcpStartupReadyForTests();
+      const storageKeys = await import('../../infrastructure/config/storageKeys.ts');
+      localStorage.setItem(storageKeys.STORAGE_KEY_AI_EXTERNAL_MCP_ENABLED, 'true');
+      localStorage.setItem(storageKeys.STORAGE_KEY_AI_EXTERNAL_MCP_MODE, 'persistent');
+
+      const enabledCalls: boolean[] = [];
+      const plan = await syncExternalMcpStartupState({
+        externalMcpSetConfig: async () => {
+          // Simulate a top-bar toggle landing during config await.
+          localStorage.setItem(storageKeys.STORAGE_KEY_AI_EXTERNAL_MCP_ENABLED, 'false');
+          bumpExternalMcpEnableGenerationForTests();
+          return { ok: true };
+        },
+        externalMcpSetEnabled: async (enabled) => {
+          enabledCalls.push(enabled);
+          return { ok: true, enabled };
+        },
+      });
+
+      assert.equal(plan.runtimeEnabled, false);
+      // Generation changed during config await, so stale startup enable is skipped.
+      assert.deepEqual(enabledCalls, []);
+      assert.equal(readExternalMcpStoredEnabled(), false);
+      assert.ok(getExternalMcpEnableGenerationForTests() > 0);
     } finally {
       restore();
     }
