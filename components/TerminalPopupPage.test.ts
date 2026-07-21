@@ -7,6 +7,7 @@ import type { TerminalPopupPayload } from '../domain/systemManager/types';
 import { resolveTerminalPopupHost, resolveTerminalPopupReuseId } from './TerminalPopupPage';
 
 const source = readFileSync(new URL('./TerminalPopupPage.tsx', import.meta.url), 'utf8');
+const terminalSource = readFileSync(new URL('./Terminal.tsx', import.meta.url), 'utf8');
 
 const vaultHost = (overrides: Partial<Host> = {}): Host => ({
   id: 'host-1',
@@ -118,6 +119,19 @@ test('attach popup close preparation has a bounded timeout', () => {
 });
 
 test('an explicitly closed attached session closes its observe popup', () => {
-  assert.match(source, /isAttachMode && evt\.reason === 'closed'/);
+  assert.match(source, /onSessionExit=\{\(_closedSessionId, evt\) => \{\s+if \(isAttachMode\)/);
   assert.match(source, /void handleClose\(\)/);
+});
+
+test('an attached observe popup never owns automatic reconnect', () => {
+  const reconnectStart = terminalSource.indexOf('const scheduleAutoReconnect = useCallback');
+  const reconnectEnd = terminalSource.indexOf('const prepareRestoredReconnect', reconnectStart);
+  const reconnectSource = terminalSource.slice(reconnectStart, reconnectEnd);
+  assert.match(reconnectSource, /if \(attachExistingSession\) return false;/);
+  assert.match(reconnectSource, /\[attachExistingSession, host, t, terminalSettings, updateStatus\]/);
+  assert.match(terminalSource, /const startReconnect = async[\s\S]*?if \(attachExistingSession\) return;/);
+  assert.match(
+    terminalSource,
+    /useEffect\(\(\) => \{\s+if \(attachExistingSession\) return undefined;\s+return terminalReconnectRegistry\.register/,
+  );
 });

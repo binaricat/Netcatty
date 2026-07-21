@@ -465,7 +465,7 @@ function TerminalPopupPageInner() {
                 void handleClose();
               }}
               onSessionExit={(_closedSessionId, evt) => {
-                if (isAttachMode && evt.reason === 'closed') {
+                if (isAttachMode) {
                   void handleClose();
                   return;
                 }

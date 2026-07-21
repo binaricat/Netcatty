@@ -1141,6 +1141,9 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   updateStatusRef.current = updateStatus;
 
   const scheduleAutoReconnect = useCallback((trigger?: { evt?: Parameters<typeof shouldAutoReconnectAfterExit>[0]["evt"] }) => {
+    // Observe popups display an existing backend; the hidden owner remains the
+    // sole authority for reconnecting or replacing that session.
+    if (attachExistingSession) return false;
     const shouldSchedule = trigger?.evt
       ? shouldAutoReconnectAfterExit({
         evt: trigger.evt,
@@ -1183,7 +1186,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     }, TERMINAL_AUTO_RECONNECT_DELAY_MS);
 
     return true;
-  }, [host, t, terminalSettings, updateStatus]);
+  }, [attachExistingSession, host, t, terminalSettings, updateStatus]);
 
   const prepareRestoredReconnect = useCallback(() => {
     suppressHostStartupCommandRef.current = shouldSuppressHostStartupCommandOnReconnect(
@@ -2635,6 +2638,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   };
 
   const startReconnect = async (mode: "manual" | "auto" = "manual") => {
+    if (attachExistingSession) return;
     if (!termRef.current && hibernatedRef.current) {
       if (reconnectWakeInFlightRef.current) return;
       const wakeForReconnect = wakeHibernatedRuntimeForReconnectRef.current;
@@ -2768,10 +2772,13 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     startReconnect("manual");
   };
   manualReconnectRequestRef.current = handleRetry;
-  useEffect(() => terminalReconnectRegistry.register(
-    sessionId,
-    () => manualReconnectRequestRef.current(),
-  ), [sessionId]);
+  useEffect(() => {
+    if (attachExistingSession) return undefined;
+    return terminalReconnectRegistry.register(
+      sessionId,
+      () => manualReconnectRequestRef.current(),
+    );
+  }, [attachExistingSession, sessionId]);
 
   const shouldShowConnectionDialog = shouldShowTerminalConnectionDialog({
     status,
