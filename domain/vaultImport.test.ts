@@ -8,6 +8,7 @@ import {
   filterVaultImportKeyPassphrasesAgainstExisting,
   resolveVaultImportKeyPassphraseConflicts,
 } from "./vaultImport.ts";
+import { encodeCsvPassphrase } from "./vaultImport/csvCredentialFields.ts";
 import type { Host } from "./models.ts";
 
 const mobaXtermSshSession = (
@@ -143,16 +144,79 @@ test("CSV import keeps working when KeyPath and Passphrase columns are absent", 
   assert.deepEqual(result.keyPassphrases, []);
 });
 
+test("CSV import preserves legacy Passphrase login-password columns without KeyPath", () => {
+  const result = importVaultHostsFromText(
+    "csv",
+    "Hostname,Username,Passphrase\nlegacy.example.com,root,login-secret",
+  );
+
+  assert.equal(result.hosts[0]?.password, "login-secret");
+  assert.deepEqual(result.keyPassphrases, []);
+  assert.deepEqual(result.issues, []);
+});
+
+test("CSV import preserves annotated legacy login-password columns", () => {
+  for (const header of [
+    "Password (optional)",
+    "Password_Value",
+    "Passphrase (optional)",
+    "Passphrase_Value",
+    "Pass (optional)",
+    "Passcode",
+  ]) {
+    const result = importVaultHostsFromText(
+      "csv",
+      `Hostname,Username,${header}\nlegacy.example.com,root,login-secret`,
+    );
+
+    assert.equal(result.hosts[0]?.password, "login-secret");
+  }
+});
+
+test("CSV import prefers an explicit Password column over legacy Passphrase", () => {
+  const result = importVaultHostsFromText(
+    "csv",
+    "Hostname,Username,Password,Passphrase\nlegacy.example.com,root,login-secret,legacy-fallback",
+  );
+
+  assert.equal(result.hosts[0]?.password, "login-secret");
+  assert.deepEqual(result.keyPassphrases, []);
+});
+
+test("CSV import does not treat descriptive headers as key credentials", () => {
+  const result = importVaultHostsFromText(
+    "csv",
+    "Hostname,KeyPathDescription,PassphraseHint\nhost.example.com,documentation,NOT_A_SECRET",
+  );
+
+  assert.equal(result.hosts[0]?.identityFilePaths, undefined);
+  assert.equal(result.hosts[0]?.password, undefined);
+  assert.deepEqual(result.keyPassphrases, []);
+});
+
 test("CSV import ignores a passphrase without a key path", () => {
   const result = importVaultHostsFromText(
     "csv",
-    "Label,Hostname,Passphrase\nbroken,broken.example.com,secret",
+    "Label,Hostname,KeyPath,Passphrase\nbroken,broken.example.com,,secret",
   );
 
   assert.equal(result.hosts.length, 1);
   assert.equal(result.hosts[0]?.password, undefined);
   assert.deepEqual(result.keyPassphrases, []);
   assert.match(result.issues[0]?.message ?? "", /KeyPath is empty/u);
+});
+
+test("CSV import rejects encrypted passphrase placeholders", () => {
+  const placeholder = "enc:v1:djEwYWJj";
+  for (const value of [placeholder, encodeCsvPassphrase(placeholder)]) {
+    const result = importVaultHostsFromText(
+      "csv",
+      `Hostname,KeyPath,Passphrase\nhost.example.com,~/.ssh/id_ed25519,${value}`,
+    );
+
+    assert.deepEqual(result.keyPassphrases, []);
+    assert.match(result.issues[0]?.message ?? "", /encrypted credential values/u);
+  }
 });
 
 test("CSV duplicate rows merge later key credentials into the retained host", () => {

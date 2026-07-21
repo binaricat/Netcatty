@@ -17,11 +17,9 @@ import {
   usePluginViewTabs,
 } from './application/state/pluginViewTabStore';
 import {
-  clearReferenceKeyPassphrases,
-  clearKeyPassphrasesByIds,
+  clearRememberedKeyPassphrases,
   loadDefaultKeyPassphrase,
   rememberKeyPassphrase,
-  removeDefaultKeyPassphraseAliases,
   shouldUpdateReferenceKeyPassphrase,
 } from './application/defaultKeyPassphrases';
 import { initializeFonts } from './application/state/fontStore';
@@ -805,14 +803,14 @@ function App({ settings }: { settings: SettingsState }) {
       const keyPaths = event.keyPaths ?? [];
       const keyIds = event.keyIds ?? [];
       console.log('[App] Passphrase auth failed for keys:', { keyPaths, keyIds });
-      void removeDefaultKeyPassphraseAliases(keyPaths).then((aliases) => {
-        if (keyPaths.length > 0 && aliases.length === 0) return;
-        const withoutReferencePassphrases = clearReferenceKeyPassphrases(keysRef.current, aliases);
-        const updated = clearKeyPassphrasesByIds(withoutReferencePassphrases, keyIds);
-        if (updated !== keysRef.current) {
-          keysRef.current = updated;
-          void updateKeys(updated);
-        }
+      void clearRememberedKeyPassphrases({
+        keyPaths,
+        keyIds,
+        getKeys: () => keysRef.current,
+        setCurrentKeys: (keys) => {
+          keysRef.current = keys;
+        },
+        updateKeys,
       });
     });
 

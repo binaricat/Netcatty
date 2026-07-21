@@ -79,6 +79,29 @@ test("CSV round-trips a referenced Keychain file path and saved passphrase", () 
   }]);
 });
 
+test("CSV never falls back to path storage for a referenced key", () => {
+  const host: Host = {
+    id: "host-reference-key",
+    label: "Reference key host",
+    hostname: "reference.example.com",
+    username: "ubuntu",
+    port: 22,
+    identityFileId: "key-reference",
+    authMethod: "key",
+  };
+  const keyPath = "/Users/alice/.ssh/id_ed25519";
+
+  const { csv } = exportHostsToCsvWithStats([host], {
+    keyPathsById: new Map([["key-reference", keyPath]]),
+    keyPassphrases: new Map([[keyPath, "stale-side-store-secret"]]),
+  });
+  const imported = importVaultHostsFromText("csv", csv);
+
+  assert.deepEqual(imported.hosts[0]?.identityFilePaths, [keyPath]);
+  assert.deepEqual(imported.keyPassphrases, []);
+  assert.equal(csv.includes("stale-side-store-secret"), false);
+});
+
 test("CSV reversibly guards key paths that spreadsheets treat as formulas", () => {
   const hosts: Host[] = [
     "-relative-key",
@@ -102,4 +125,34 @@ test("CSV reversibly guards key paths that spreadsheets treat as formulas", () =
     "'-literal-key",
     "__netcatty_csv_keypath_v1__:literal",
   ]);
+});
+
+test("CSV export never writes credentials from skipped serial hosts", () => {
+  const serialHost: Host = {
+    id: "serial-with-stale-key",
+    label: "Serial with stale key",
+    hostname: "ttyUSB0",
+    protocol: "serial",
+    port: 22,
+    identityFilePaths: ["~/.ssh/id_stale"],
+    authMethod: "key",
+  };
+  const sshHost: Host = {
+    id: "ssh-host",
+    label: "SSH host",
+    hostname: "ssh.example.com",
+    protocol: "ssh",
+    port: 22,
+  };
+
+  const result = exportHostsToCsvWithStats([serialHost, sshHost], {
+    keyPassphrases: new Map([["~/.ssh/id_stale", "must-not-leak"]]),
+  });
+
+  assert.equal(result.exportedCount, 1);
+  assert.equal(result.skippedCount, 1);
+  assert.equal(result.csv.includes(serialHost.label), false);
+  assert.equal(result.csv.includes("id_stale"), false);
+  assert.equal(result.csv.includes("must-not-leak"), false);
+  assert.equal(result.csv.includes(sshHost.hostname), true);
 });

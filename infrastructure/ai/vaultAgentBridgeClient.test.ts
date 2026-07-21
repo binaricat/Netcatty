@@ -1363,6 +1363,34 @@ describe('handleVaultAgentOp vault hosts', () => {
         ?.some((issue) => /existing saved passphrase/u.test(issue.message)),
     );
   });
+
+  it('host.import keeps a passphrase corrected after the initial check', async () => {
+    const saved: Array<{ keyPath: string; passphrase: string }> = [];
+    const result = await handleVaultAgentOp(
+      'host.import',
+      {
+        format: 'csv',
+        text: [
+          'Label,Hostname,Username,KeyPath,Passphrase',
+          'new,new.example.com,root,~/.ssh/shared,stale-import',
+        ].join('\n'),
+      },
+      createDeps({
+        readKeyPassphrases: async () => ({ values: [], unreadable: false }),
+        saveImportedKeyPassphrase: async () => 'conflict',
+        saveKeyPassphrase: async (keyPath, passphrase) => {
+          saved.push({ keyPath, passphrase });
+        },
+      }),
+    );
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(saved, []);
+    assert.ok(
+      (result as { issues?: Array<{ message: string }> }).issues
+        ?.some((issue) => /existing saved passphrase/u.test(issue.message)),
+    );
+  });
 });
 
 describe('handleVaultAgentOp vault management gaps', () => {

@@ -90,9 +90,9 @@ const exportHostsToCsv = (hosts: Host[], options: VaultCsvExportOptions): string
     const keyPath = resolveVaultCsvHostKeyPath(host, options);
     const passphrase = keyPath
       ? (
-          (host.identityFileId ? options.keyPassphrasesById?.get(host.identityFileId) : undefined)
-          ?? options.keyPassphrases?.get(keyPath)
-          ?? ""
+          host.identityFileId
+            ? (options.keyPassphrasesById?.get(host.identityFileId) ?? "")
+            : (options.keyPassphrases?.get(keyPath) ?? "")
         )
       : "";
 
@@ -136,7 +136,7 @@ export const exportHostsToCsvWithStats = (
   const exportableHosts = hosts.filter((h) => !isUnsupported(h));
 
   return {
-    csv: UTF8_BOM + exportHostsToCsv(hosts, options),
+    csv: UTF8_BOM + exportHostsToCsv(exportableHosts, options),
     exportedCount: exportableHosts.length,
     skippedCount: skippedHosts.length,
   };

@@ -33,13 +33,13 @@ import {
   Zap,
 } from "lucide-react";
 import React, { Suspense, lazy, memo, startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { readDefaultKeyPassphraseForExport } from "../application/defaultKeyPassphrases";
 import { useI18n } from "../application/i18n/I18nProvider";
 import { useStoredViewMode } from "../application/state/useStoredViewMode";
 import { useStoredBoolean } from "../application/state/useStoredBoolean";
 import { useStoredNumber } from "../application/state/useStoredNumber";
 import { useStoredString } from "../application/state/useStoredString";
 import { useTreeExpandedState } from "../application/state/useTreeExpandedState";
+import { buildVaultCsvCredentialOptions } from "../application/vaultCsvExportCredentials";
 import { sanitizeCredentialValue } from "../domain/credentials";
 import { resolveGroupDefaults, applyGroupDefaults } from "../domain/groupConfig";
 import {
@@ -50,7 +50,7 @@ import {
   sanitizeHost,
   upsertHostById,
 } from "../domain/host";
-import { exportHostsToCsvWithStats, resolveVaultCsvHostKeyPath } from "../domain/vaultImport";
+import { exportHostsToCsvWithStats } from "../domain/vaultImport";
 import {
   reorderVaultItems,
   reorderVaultStrings,
@@ -580,39 +580,12 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
       return;
     }
 
-    const keyPathsById = new Map(keys.flatMap((key) => (
-      key.source === "reference" && key.filePath?.trim()
-        ? [[key.id, key.filePath.trim()] as const]
-        : []
-    )));
-    const keyPassphrasesById = new Map(keys.flatMap((key) => {
-      const passphrase = key.savePassphrase === true
-        ? sanitizeCredentialValue(key.passphrase)
-        : undefined;
-      return key.source === "reference" && key.filePath?.trim() && passphrase
-        ? [[key.id, passphrase] as const]
-        : [];
-    }));
-    const keyPaths = Array.from(new Set(hosts
-      .map((host) => resolveVaultCsvHostKeyPath(host, { keyPathsById }))
-      .filter(Boolean)));
-    const keyPassphrases = new Map<string, string>();
-    const passphraseResults = await Promise.allSettled(keyPaths.map(async (keyPath) => {
-      const passphrase = await readDefaultKeyPassphraseForExport(keyPath);
-      return { keyPath, passphrase };
-    }));
-    let unreadablePassphrases = 0;
-    for (const result of passphraseResults) {
-      if (result.status === "fulfilled") {
-        if (result.value.passphrase.status === "readable") {
-          keyPassphrases.set(result.value.keyPath, result.value.passphrase.value);
-        } else if (result.value.passphrase.status === "unreadable") {
-          unreadablePassphrases++;
-        }
-      } else {
-        unreadablePassphrases++;
-      }
-    }
+    const {
+      keyPathsById,
+      keyPassphrasesById,
+      keyPassphrases,
+      unreadablePassphraseCount,
+    } = await buildVaultCsvCredentialOptions(hosts, keys);
     const { csv, exportedCount, skippedCount } = exportHostsToCsvWithStats(hosts, {
       keyPassphrases,
       keyPassphrasesById,
@@ -634,8 +607,8 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
 
-    if (unreadablePassphrases > 0) {
-      toast.warning(t('vault.hosts.export.toast.passphrasesSkipped', { count: unreadablePassphrases }));
+    if (unreadablePassphraseCount > 0) {
+      toast.warning(t('vault.hosts.export.toast.passphrasesSkipped', { count: unreadablePassphraseCount }));
     }
     if (skippedCount > 0) {
       toast.warning(t('vault.hosts.export.toast.successWithSkipped', { count: exportedCount, skipped: skippedCount }));

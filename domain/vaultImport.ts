@@ -1,4 +1,5 @@
 import { Host, HostChainConfig, HostProtocol } from "./models";
+import { isEncryptedCredentialPlaceholder } from "./credentials";
 import { sanitizeHost } from "./host";
 import { hasMacKeychainAgentDirectives } from "./sshAuth";
 import {
@@ -304,12 +305,24 @@ const importFromCsv = (text: string): VaultImportResult => {
   const protocolIdx = findHeaderIndex(header, ["protocol", "proto", "scheme"]);
   const portIdx = findHeaderIndex(header, ["port"]);
   const usernameIdx = findHeaderIndex(header, ["username", "user", "login"]);
-  const keyPathIdx = findHeaderIndex(header, ["keypath", "key path", "identityfile", "identity file"]);
-  const passphraseIdx = findHeaderIndex(header, ["passphrase", "keypassphrase", "key passphrase"]);
-  const matchedPasswordIdx = findHeaderIndex(header, ["password", "pass", "passwd"]);
-  const passwordIdx = matchedPasswordIdx === passphraseIdx
-    ? findExactHeaderIndex(header, ["password", "pass", "passwd"])
-    : matchedPasswordIdx;
+  const keyPathIdx = findExactHeaderIndex(header, ["keypath", "key path", "identityfile", "identity file"]);
+  const explicitPassphraseIdx = findExactHeaderIndex(header, ["passphrase", "keypassphrase", "key passphrase"]);
+  const passphraseIdx = keyPathIdx >= 0 ? explicitPassphraseIdx : -1;
+  const exactPasswordIdx = findExactHeaderIndex(header, ["password", "pass", "passwd"]);
+  const fuzzyNamedPasswordIdx = findHeaderIndex(header, ["password", "passwd"]);
+  const fuzzyPassIdx = header.findIndex((value) => {
+    const normalized = value.trim().toLowerCase().replace(/[^a-z0-9]/gu, "");
+    if (!normalized.startsWith("pass")) return false;
+    if (!normalized.startsWith("passphrase")) return true;
+    const suffix = normalized.slice("passphrase".length);
+    return keyPathIdx < 0 && ["", "optional", "value"].includes(suffix);
+  });
+  const fuzzyPasswordIdx = fuzzyNamedPasswordIdx >= 0 ? fuzzyNamedPasswordIdx : fuzzyPassIdx;
+  const passwordIdx = exactPasswordIdx >= 0
+    ? exactPasswordIdx
+    : keyPathIdx < 0 && explicitPassphraseIdx >= 0
+      ? explicitPassphraseIdx
+      : fuzzyPasswordIdx;
 
   if (hostnameIdx === -1) {
     return {
@@ -372,7 +385,17 @@ const importFromCsv = (text: string): VaultImportResult => {
     const keyPathRaw = (keyPathIdx >= 0 ? row[keyPathIdx] : undefined)?.trim();
     const keyPath = keyPathRaw ? decodeCsvKeyPath(keyPathRaw) : undefined;
     const passphraseRaw = (passphraseIdx >= 0 ? row[passphraseIdx] : undefined) || undefined;
-    const passphrase = passphraseRaw ? decodeCsvPassphrase(passphraseRaw) : undefined;
+    const decodedPassphrase = passphraseRaw ? decodeCsvPassphrase(passphraseRaw) : undefined;
+    const passphrase = decodedPassphrase && !isEncryptedCredentialPlaceholder(decodedPassphrase)
+      ? decodedPassphrase
+      : undefined;
+
+    if (decodedPassphrase && isEncryptedCredentialPlaceholder(decodedPassphrase)) {
+      issues.push({
+        level: "warning",
+        message: `CSV row ${i + 2}: Passphrase was ignored because encrypted credential values cannot be imported.`,
+      });
+    }
 
     if (passphrase && !keyPath) {
       issues.push({

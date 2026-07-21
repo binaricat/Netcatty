@@ -2,7 +2,7 @@ import { useCallback, useRef } from "react";
 
 import {
   readRememberedKeyPassphrases,
-  rememberKeyPassphrase,
+  rememberImportedKeyPassphrase,
   resolveDefaultKeyPassphraseAliases,
 } from "../../application/defaultKeyPassphrases";
 import { readVaultImportFile } from "../../application/state/vaultImportFile";
@@ -196,7 +196,7 @@ export function useVaultImportHandlers({
             );
             for (const entry of checked.keyPassphrases) {
               try {
-                await rememberKeyPassphrase({
+                const saved = await rememberImportedKeyPassphrase({
                   keyPath: entry.keyPath,
                   passphrase: entry.passphrase,
                   keys: keysRef.current,
@@ -206,6 +206,17 @@ export function useVaultImportHandlers({
                     keysRef.current = updatedKeys;
                   },
                 });
+                if (saved === "conflict") {
+                  result.issues.push({
+                    level: "warning",
+                    message: `CSV passphrase conflicts with an existing saved passphrase for KeyPath "${entry.keyPath}"; the existing passphrase was kept.`,
+                  });
+                } else if (saved === "unreadable") {
+                  result.issues.push({
+                    level: "warning",
+                    message: `Could not verify the existing saved passphrase for KeyPath "${entry.keyPath}"; the imported passphrase was not saved.`,
+                  });
+                }
               } catch {
                 result.issues.push({
                   level: "warning",
@@ -213,6 +224,7 @@ export function useVaultImportHandlers({
                 });
               }
             }
+            result.issues = mergeVaultImportIssues(result.issues);
           }
   
           // Count total hosts affected (new + converted to managed)

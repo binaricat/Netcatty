@@ -1,4 +1,5 @@
 import type { GroupConfig, Host, Identity, KnownHost, ManagedSource, PortForwardingRule, ProxyProfile, Snippet, SSHKey, TerminalSettings, VaultNote } from '../../domain/models';
+import type { RememberImportedKeyPassphraseResult } from '../../application/defaultKeyPassphrases';
 import {
   normalizeVaultNotes,
   sanitizeNoteTitle,
@@ -411,6 +412,10 @@ export interface VaultAgentApiDeps {
   updateManagedSources: (sources: ManagedSource[]) => void;
   updateHosts: (hosts: Host[]) => void;
   saveKeyPassphrase: (keyPath: string, passphrase: string) => Promise<void>;
+  saveImportedKeyPassphrase?: (
+    keyPath: string,
+    passphrase: string,
+  ) => Promise<RememberImportedKeyPassphraseResult>;
   resolveKeyPassphraseAliases: (keyPath: string) => Promise<string[]>;
   readKeyPassphrases: (keyPath: string) => Promise<{
     values: string[];
@@ -833,7 +838,23 @@ export async function handleVaultAgentOp(
       const saveIssues = [...credentialIssues];
       for (const entry of checked.keyPassphrases) {
         try {
-          await deps.saveKeyPassphrase(entry.keyPath, entry.passphrase);
+          let saved: RememberImportedKeyPassphraseResult = 'saved';
+          if (deps.saveImportedKeyPassphrase) {
+            saved = await deps.saveImportedKeyPassphrase(entry.keyPath, entry.passphrase);
+          } else {
+            await deps.saveKeyPassphrase(entry.keyPath, entry.passphrase);
+          }
+          if (saved === 'conflict') {
+            saveIssues.push({
+              level: 'warning',
+              message: `CSV passphrase conflicts with an existing saved passphrase for KeyPath "${entry.keyPath}"; the existing passphrase was kept.`,
+            });
+          } else if (saved === 'unreadable') {
+            saveIssues.push({
+              level: 'warning',
+              message: `Could not verify the existing saved passphrase for KeyPath "${entry.keyPath}"; the imported passphrase was not saved.`,
+            });
+          }
         } catch {
           saveIssues.push({
             level: 'warning',
