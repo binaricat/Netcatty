@@ -135,13 +135,13 @@ const SftpHostPickerInner: React.FC<SftpHostPickerProps> = ({
         onOpenChange(false);
     };
 
-    const handlePointerHover = useCallback((itemIndex: number, movementX: number, movementY: number) => {
+    // Match Quick Switcher: pointer movement only leaves keyboard-nav mode.
+    // It must not rewrite the keyboard-selected index until the user clicks.
+    const handlePointerHover = useCallback((movementX: number, movementY: number) => {
         if (!shouldUseQuickSwitcherPointerNavigation(movementX, movementY)) return;
-        if (isKeyboardNavigatingRef.current) {
-            isKeyboardNavigatingRef.current = false;
-            setIsKeyboardNavigating(false);
-        }
-        setSelectedIndex(itemIndex);
+        if (!isKeyboardNavigatingRef.current) return;
+        isKeyboardNavigatingRef.current = false;
+        setIsKeyboardNavigating(false);
     }, []);
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -179,7 +179,7 @@ const SftpHostPickerInner: React.FC<SftpHostPickerProps> = ({
                 key={itemId}
                 className={`flex items-center justify-between px-4 py-2.5 cursor-pointer transition-colors ${getQuickSwitcherRowStateClass(isSelected, isKeyboardNavigating)}`}
                 onClick={() => handleSelect(items[itemIndex])}
-                onMouseMove={(event) => handlePointerHover(itemIndex, event.movementX, event.movementY)}
+                onMouseMove={(event) => handlePointerHover(event.movementX, event.movementY)}
             >
                 <div className="flex items-center gap-3 min-w-0">
                     <DistroAvatar host={host} fallback={host.label.slice(0, 2).toUpperCase()} size="sm" />
@@ -232,7 +232,7 @@ const SftpHostPickerInner: React.FC<SftpHostPickerProps> = ({
                         <div
                             className={`flex items-center justify-between px-4 py-2.5 cursor-pointer transition-colors ${getQuickSwitcherRowStateClass(localSelected, isKeyboardNavigating)}`}
                             onClick={() => handleSelect(items[0])}
-                            onMouseMove={(event) => handlePointerHover(0, event.movementX, event.movementY)}
+                            onMouseMove={(event) => handlePointerHover(event.movementX, event.movementY)}
                         >
                             <div className="flex items-center gap-3 min-w-0">
                                 <div className="h-6 w-6 rounded flex items-center justify-center text-muted-foreground">

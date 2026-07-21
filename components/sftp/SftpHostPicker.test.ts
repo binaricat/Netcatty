@@ -13,7 +13,15 @@ test("sftp host picker rows reuse quick switcher selection classes", () => {
   assert.match(source, /getQuickSwitcherRowStateClass/);
   assert.match(source, /shouldUseQuickSwitcherPointerNavigation/);
   assert.match(source, /isKeyboardNavigating/);
-  assert.match(source, /onMouseMove=\{\(event\) => handlePointerHover/);
+  assert.match(source, /onMouseMove=\{\(event\) => handlePointerHover\(event\.movementX, event\.movementY\)\}/);
+  assert.match(
+    source,
+    /const handlePointerHover = useCallback\(\(movementX: number, movementY: number\) => \{[\s\S]*if \(!isKeyboardNavigatingRef\.current\) return;[\s\S]*setIsKeyboardNavigating\(false\);[\s\S]*\}, \[\]\);/,
+  );
+  assert.doesNotMatch(
+    source,
+    /const handlePointerHover = useCallback\(\(itemIndex: number, movementX: number, movementY: number\) => \{[\s\S]*setSelectedIndex\(itemIndex\);/,
+  );
 });
 
 test("sftp host picker uses single-line quick switcher row layout", () => {
