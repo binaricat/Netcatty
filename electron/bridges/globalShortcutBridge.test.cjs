@@ -936,6 +936,31 @@ test("tray panel session close forwards without focusing the main window", async
   });
 });
 
+test("tray panel session close does not create a missing main window", async () => {
+  await withPlatform("darwin", async () => {
+    const bridge = loadBridge();
+    const electronModule = createElectronStub();
+    electronModule.BrowserWindow.getAllWindows = () => [];
+    let createCalls = 0;
+
+    bridge.init({
+      electronModule,
+      getMainWindow: () => null,
+      ensureMainWindow: async () => {
+        createCalls += 1;
+        return new FakeWindow();
+      },
+    });
+    const ipcMain = createIpcMainStub();
+    bridge.registerHandlers(ipcMain);
+
+    const result = await ipcMain.handlers.get("netcatty:trayPanel:closeSession")(null, "stale-session");
+
+    assert.deepEqual(result, { success: false, error: "Main window is not available" });
+    assert.equal(createCalls, 0);
+  });
+});
+
 test("tray menu updates refresh an already open tray panel", async () => {
   await withPlatform("darwin", async () => {
     const bridge = loadBridge();

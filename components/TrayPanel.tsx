@@ -120,7 +120,7 @@ const WorkspaceGroup: React.FC<{
                       e.stopPropagation();
                       onCloseSession(s.id);
                     }}
-                    className="shrink-0 mr-1 h-6 w-6 rounded opacity-0 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100 hover:bg-destructive/10 hover:text-destructive text-muted-foreground transition-opacity focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                    className="shrink-0 mr-1 h-6 w-6 rounded inline-flex items-center justify-center opacity-0 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100 hover:bg-destructive/10 hover:text-destructive text-muted-foreground transition-opacity focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                     aria-label={t("tray.closeSession")}
                   >
                     <X size={12} />
@@ -374,7 +374,7 @@ const TrayPanelContent: React.FC<TrayPanelContentProps> = ({ terminalSettings })
                             e.stopPropagation();
                             handleCloseSession(s.id);
                           }}
-                          className="shrink-0 mr-1.5 h-6 w-6 rounded opacity-0 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100 hover:bg-destructive/10 hover:text-destructive text-muted-foreground transition-opacity focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                          className="shrink-0 mr-1.5 h-6 w-6 rounded inline-flex items-center justify-center opacity-0 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100 hover:bg-destructive/10 hover:text-destructive text-muted-foreground transition-opacity focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                           aria-label={t("tray.closeSession")}
                         >
                           <X size={12} />

@@ -217,8 +217,11 @@ async function openMainWindowReady() {
   return win;
 }
 
-async function sendToMainWindow(channel, payload, { focus = true } = {}) {
-  const { win } = await getOrCreateMainWindow();
+async function sendToMainWindow(channel, payload, { focus = true, createIfMissing = true } = {}) {
+  const { win } = createIfMissing
+    ? await getOrCreateMainWindow()
+    : { win: getTrackedMainWindow() };
+  if (!win) return false;
   if (focus) {
     bringMainWindowToForeground(win);
   }
@@ -231,11 +234,12 @@ async function sendToMainWindow(channel, payload, { focus = true } = {}) {
           result?.error || result?.reason || "unknown",
         );
       }
-      return;
+      return result?.success === true;
     }
-    win?.webContents?.send(channel, payload);
+    win.webContents?.send(channel, payload);
+    return true;
   } catch {
-    // ignore
+    return false;
   }
 }
 
@@ -1019,8 +1023,13 @@ function registerHandlers(ipcMain) {
   });
 
   ipcMain.handle("netcatty:trayPanel:closeSession", async (_event, sessionId) => {
-    await sendToMainWindow("netcatty:trayPanel:closeSession", sessionId, { focus: false });
-    return { success: true };
+    const delivered = await sendToMainWindow("netcatty:trayPanel:closeSession", sessionId, {
+      focus: false,
+      createIfMissing: false,
+    });
+    return delivered
+      ? { success: true }
+      : { success: false, error: "Main window is not available" };
   });
 
   ipcMain.handle("netcatty:trayPanel:quitApp", async () => {
