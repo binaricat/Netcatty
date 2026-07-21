@@ -126,6 +126,7 @@ test("top tabs keep cloud sync separate from quick controls", () => {
   assert.match(topTabsSource, /onToggleTheme=\{onToggleTheme\}/);
   assert.match(topTabsSource, /externalMcpEnabled=\{externalMcpEnabled\}/);
   assert.match(topTabsSource, /windowOpacity=\{windowOpacity\}/);
+  assert.match(topTabsSource, /showExternalMcpToggle=\{showExternalMcpToggle\}/);
   assert.doesNotMatch(topTabsSource, /WindowOpacityButton/);
   assert.doesNotMatch(topTabsSource, /onClick=\{onToggleTheme\}/);
   const syncButtonUsage = topTabsSource.match(/<SyncStatusButton[\s\S]*?\/>/);
@@ -133,6 +134,10 @@ test("top tabs keep cloud sync separate from quick controls", () => {
   assert.doesNotMatch(syncButtonUsage[0], /externalMcpEnabled=/);
   assert.doesNotMatch(syncButtonUsage[0], /windowOpacity=/);
   assert.doesNotMatch(syncButtonUsage[0], /onToggleTheme=/);
+  const quickControlsUsage = topTabsSource.match(/<TopTabsQuickControls[\s\S]*?\/>/);
+  assert.ok(quickControlsUsage, 'expected a TopTabsQuickControls usage');
+  assert.match(quickControlsUsage[0], /showExternalMcpToggle=\{showExternalMcpToggle\}/);
+  assert.match(quickControlsUsage[0], /externalMcpEnabled=\{externalMcpEnabled\}/);
 });
 
 test("quick controls panel hosts External MCP, opacity, and theme", () => {

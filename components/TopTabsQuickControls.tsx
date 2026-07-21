@@ -184,7 +184,6 @@ export const TopTabsQuickControls: React.FC<TopTabsQuickControlsProps> = ({
                   checked={externalMcpEnabled}
                   onCheckedChange={onToggleExternalMcp}
                   aria-labelledby={externalMcpLabelId}
-                  aria-label={t(externalMcpEnabled ? 'topTabs.externalMcp.disable' : 'topTabs.externalMcp.enable')}
                 />
               </div>
             </div>
