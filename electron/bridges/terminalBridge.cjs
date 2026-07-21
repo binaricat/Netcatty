@@ -141,6 +141,7 @@ const attachHomeWebContentsIds = new Map();
 const {
   setRestoreAttachedSessionOutput,
   setAttachHomeLookup,
+  setFanoutSessionExit,
 } = require("./terminalAttachRestore.cjs");
 
 function resolveSessionHomeWebContentsId(sessionId, terminalWorkerManager = null) {
@@ -1728,6 +1729,9 @@ function registerHandlers(ipcMain, options = {}) {
       return terminalWorkerManager.getAttachHomeWebContentsId(sessionId);
     }
     return attachHomeWebContentsIds.get(sessionId) ?? null;
+  });
+  setFanoutSessionExit((sessionId, primaryWebContentsId, payload) => {
+    fanoutSessionLifecycleEvent(sessionId, primaryWebContentsId, "netcatty:exit", payload);
   });
 
   if (terminalWorkerManager) {

@@ -8,6 +8,7 @@
 
 let restoreImpl = null;
 let attachHomeLookup = null;
+let fanoutExitImpl = null;
 
 function setRestoreAttachedSessionOutput(fn) {
   restoreImpl = typeof fn === "function" ? fn : null;
@@ -38,9 +39,28 @@ function getAttachHomeWebContentsId(sessionId) {
   }
 }
 
+function setFanoutSessionExit(fn) {
+  fanoutExitImpl = typeof fn === "function" ? fn : null;
+}
+
+function fanoutSessionExit(sessionId, primaryWebContentsId, payload) {
+  if (typeof fanoutExitImpl === "function") {
+    try {
+      fanoutExitImpl(sessionId, primaryWebContentsId, payload);
+      return;
+    } catch {
+      // fall through
+    }
+  }
+  // Best-effort: at least primary if fanout not wired yet.
+  // Callers that only have a contents object should keep using contents.send.
+}
+
 module.exports = {
   setRestoreAttachedSessionOutput,
   restoreAttachedSessionOutput,
   setAttachHomeLookup,
   getAttachHomeWebContentsId,
+  setFanoutSessionExit,
+  fanoutSessionExit,
 };

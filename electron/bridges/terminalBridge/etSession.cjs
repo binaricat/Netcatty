@@ -27,6 +27,7 @@ function createEtSessionApi(ctx) {
     const ET_ASKPASS_SCRIPT = String.raw`#!/usr/bin/env node
 const fs = require("node:fs");
 const path = require("node:path");
+const { fanoutSessionExit } = require("../terminalAttachRestore.cjs");
 
 function normalizePrompt(prompt) {
   return String(prompt || "").toLowerCase();
@@ -1113,7 +1114,7 @@ main();
             closeTerminalOutputSession?.(sessionId);
             sessions.delete(sessionId);
             const contents = electronModule.webContents.fromId(session.webContentsId);
-            contents?.send("netcatty:exit", { sessionId, ...evt, reason: evt.exitCode === 0 ? "exited" : "error" });
+            fanoutSessionExit(sessionId, session?.webContentsId ?? contents?.id, { sessionId, ...evt, reason: evt.exitCode === 0 ? "exited" : "error" });
           });
         });
 

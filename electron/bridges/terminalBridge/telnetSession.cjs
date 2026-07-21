@@ -5,6 +5,7 @@ const {
   shouldAcceptSessionOutput,
   shouldProcessSessionOutput,
 } = require("../terminalFlowAck.cjs");
+const { fanoutSessionExit } = require("../terminalAttachRestore.cjs");
 
 const TELNET_SESSION_REPLACED_ERROR = "Telnet session start was replaced";
 
@@ -343,7 +344,7 @@ function createTelnetSessionApi(ctx) {
               if (session) {
                 session.zmodemSentry?.cancel();
                 const contents = electronModule.webContents.fromId(session.webContentsId);
-                contents?.send("netcatty:exit", { sessionId, exitCode: 1, error: err.message, reason: "error" });
+                fanoutSessionExit(sessionId, session?.webContentsId ?? contents?.id, { sessionId, exitCode: 1, error: err.message, reason: "error" });
               }
               ptyProcessTree.unregisterPid(sessionId);
               closeTerminalOutputSession?.(sessionId);
@@ -369,7 +370,7 @@ function createTelnetSessionApi(ctx) {
             if (session) {
               session.zmodemSentry?.cancel();
               const contents = electronModule.webContents.fromId(session.webContentsId);
-              contents?.send("netcatty:exit", { sessionId, exitCode: hadError ? 1 : 0, reason: hadError ? "error" : "closed" });
+              fanoutSessionExit(sessionId, session?.webContentsId ?? contents?.id, { sessionId, exitCode: hadError ? 1 : 0, reason: hadError ? "error" : "closed" });
             }
             ptyProcessTree.unregisterPid(sessionId);
             closeTerminalOutputSession?.(sessionId);
