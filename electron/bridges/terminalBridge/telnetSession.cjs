@@ -242,13 +242,16 @@ function createTelnetSessionApi(ctx) {
           resolve({ sessionId });
         });
     
-        const telnetWebContentsId = event.sender.id;
+        const getCurrentTelnetWebContentsId = () =>
+          sessions.get(sessionId)?.webContentsId ?? event.sender.id;
+        const getCurrentTelnetWebContents = () =>
+          electronModule.webContents.fromId(getCurrentTelnetWebContentsId());
         const {
           bufferData: bufferTelnetData,
           flushPaced: flushTelnetPaced,
           discard: discardTelnet,
         } = createPtyOutputBuffer((data, meta) => {
-          const contents = electronModule.webContents.fromId(telnetWebContentsId);
+          const contents = getCurrentTelnetWebContents();
           emitTerminalSessionData(contents, sessionId, data, { cols, rows, meta });
         }, {
           onPendingBytesChange: (bytes) => {
@@ -290,13 +293,13 @@ function createTelnetSessionApi(ctx) {
             } catch { return true; }
           },
           getWebContents() {
-            return electronModule.webContents.fromId(telnetWebContentsId);
+            return getCurrentTelnetWebContents();
           },
           selectUploadFiles: selectZmodemUploadFiles
-            ? () => selectZmodemUploadFiles(telnetWebContentsId)
+            ? () => selectZmodemUploadFiles(getCurrentTelnetWebContentsId())
             : undefined,
           selectDownloadDirectory: selectZmodemDownloadDirectory
-            ? () => selectZmodemDownloadDirectory(telnetWebContentsId)
+            ? () => selectZmodemDownloadDirectory(getCurrentTelnetWebContentsId())
             : undefined,
           label: "Telnet",
         });

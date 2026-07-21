@@ -269,6 +269,49 @@ test("handleUpload completes when the remote confirms after progress reaches 100
   fs.rmSync(tempDir, { recursive: true, force: true });
 });
 
+test("handleUpload progress follows a display rebind during transfer", async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-zmodem-rebind-"));
+  const filePath = path.join(tempDir, "upload.txt");
+  fs.writeFileSync(filePath, "payload");
+  const events = [];
+  const contents = {
+    home: {
+      isDestroyed: () => false,
+      send: (channel, data) => events.push({ target: "home", channel, data }),
+    },
+    popup: {
+      isDestroyed: () => false,
+      send: (channel, data) => events.push({ target: "popup", channel, data }),
+    },
+  };
+  let target = "home";
+  const zsession = {
+    async send_offer() {
+      return {
+        send() { target = "popup"; },
+        async end() {},
+      };
+    },
+    async close() {},
+  };
+
+  await handleUpload(zsession, {
+    sessionId: "session-1",
+    getWebContents: () => contents[target],
+    takeDragDropUpload: () => ({
+      filePaths: [filePath],
+      remoteNames: ["upload.txt"],
+    }),
+  });
+
+  const progressTargets = events
+    .filter((event) => event.channel === "netcatty:zmodem:progress")
+    .map((event) => event.target);
+  assert.equal(progressTargets[0], "home");
+  assert.deepEqual(progressTargets.slice(1), ["popup", "popup"]);
+  fs.rmSync(tempDir, { recursive: true, force: true });
+});
+
 test("handleUpload uses injected file picker when no drag-drop upload is queued", async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-zmodem-"));
   const filePath = path.join(tempDir, "picker-upload.txt");

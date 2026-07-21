@@ -354,6 +354,17 @@ printf '%s\n' '${scanCompleteMarker}'`;
       session.takePendingData = takePendingBuffer;
       session.discardPendingData = discardBuffer;
 
+      const getCurrentSessionWebContents = () => {
+        const currentId = sessions.get(sessionId)?.webContentsId;
+        if (typeof currentId === "number") {
+          const current = electronModule?.webContents?.fromId?.(currentId);
+          if (current) return current;
+        }
+        return event.sender;
+      };
+      const getCurrentSessionWebContentsId = () =>
+        getCurrentSessionWebContents()?.id ?? event.sender.id;
+
       const sshZmodemSentry = createZmodemSentry({
         sessionId,
         onData(buf) {
@@ -411,19 +422,19 @@ printf '%s\n' '${scanCompleteMarker}'`;
               clearTimeout(timer);
               resolve({ action: payload.action, applyToRest: !!payload.applyToRest });
             });
-            safeSend(event.sender, "netcatty:zmodem:overwrite-request", {
+            safeSend(getCurrentSessionWebContents(), "netcatty:zmodem:overwrite-request", {
               sessionId, requestId, filename,
             });
           });
         },
         getWebContents() {
-          return event.sender;
+          return getCurrentSessionWebContents();
         },
         selectUploadFiles: selectZmodemUploadFiles
-          ? () => selectZmodemUploadFiles(event.sender.id)
+          ? () => selectZmodemUploadFiles(getCurrentSessionWebContentsId())
           : undefined,
         selectDownloadDirectory: selectZmodemDownloadDirectory
-          ? () => selectZmodemDownloadDirectory(event.sender.id)
+          ? () => selectZmodemDownloadDirectory(getCurrentSessionWebContentsId())
           : undefined,
         label: "SSH",
       });

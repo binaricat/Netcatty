@@ -95,6 +95,31 @@ test("worker renderer-event forwarding prefers rebound webContentsId", () => {
   );
 });
 
+test("in-process SSH and Telnet ZMODEM prompts follow the rebound display", () => {
+  const sshSource = require("node:fs").readFileSync(
+    path.join(__dirname, "sshBridge/startSession.cjs"),
+    "utf8",
+  );
+  const telnetSource = require("node:fs").readFileSync(
+    path.join(__dirname, "terminalBridge/telnetSession.cjs"),
+    "utf8",
+  );
+  const sshSentry = sshSource.slice(
+    sshSource.indexOf("const sshZmodemSentry"),
+    sshSource.indexOf("session.zmodemSentry = sshZmodemSentry"),
+  );
+  const telnetSentry = telnetSource.slice(
+    telnetSource.indexOf("const telnetZmodemSentry"),
+    telnetSource.indexOf("const attachTelnetSentry"),
+  );
+  assert.match(sshSentry, /getCurrentSessionWebContents/);
+  assert.match(sshSentry, /getCurrentSessionWebContentsId/);
+  assert.doesNotMatch(sshSentry, /event\.sender/);
+  assert.match(telnetSentry, /getCurrentTelnetWebContents/);
+  assert.match(telnetSentry, /getCurrentTelnetWebContentsId/);
+  assert.doesNotMatch(telnetSentry, /telnetWebContentsId/);
+});
+
 test("popup window closed lifecycle restores attach output", () => {
   const source = require("node:fs").readFileSync(
     path.join(__dirname, "windowManager/terminalPopupWindow.cjs"),
