@@ -249,7 +249,11 @@ function TerminalPopupPageInner() {
   const [config, setConfig] = useState<TerminalPopupPayload | null>(null);
   const [terminalReady, setTerminalReady] = useState(false);
   const [startupError, setStartupError] = useState<string | null>(null);
-  const sessionId = useMemo(() => crypto.randomUUID(), []);
+  const generatedSessionId = useMemo(() => crypto.randomUUID(), []);
+  const attachSessionId = config?.attachSessionId;
+  const isAttachMode = Boolean(attachSessionId);
+  // Attach mode must reuse the live backend session id so input/output hit the same PTY.
+  const sessionId = attachSessionId || generatedSessionId;
   const knownHostsRef = React.useRef(knownHosts);
   const effectiveKnownHosts = useMemo(
     () => getEffectiveKnownHosts(knownHosts) ?? [],
@@ -309,6 +313,8 @@ function TerminalPopupPageInner() {
 
   const ready = Boolean(config && host && vaultInitialized);
   const startupRevealDelayMs = useMemo(() => {
+    // Attach mode shows the live session immediately (no startup command).
+    if (isAttachMode) return 0;
     if (!config?.startupCommand) return 0;
     const configuredDelay = settings.terminalSettings?.startupCommandDelayMs;
     const startupDelay = typeof configuredDelay === 'number' && Number.isFinite(configuredDelay)
@@ -318,7 +324,7 @@ function TerminalPopupPageInner() {
       POPUP_STARTUP_REVEAL_MAX_DELAY_MS,
       Math.max(POPUP_STARTUP_REVEAL_MIN_DELAY_MS, startupDelay + POPUP_STARTUP_REVEAL_EXTRA_DELAY_MS),
     );
-  }, [config?.startupCommand, settings.terminalSettings?.startupCommandDelayMs]);
+  }, [config?.startupCommand, isAttachMode, settings.terminalSettings?.startupCommandDelayMs]);
   const revealTerminal = useCallback(() => {
     setTerminalReady(true);
   }, []);
@@ -330,9 +336,13 @@ function TerminalPopupPageInner() {
 
   useEffect(() => {
     if (!ready) return undefined;
+    if (isAttachMode) {
+      setTerminalReady(true);
+      return undefined;
+    }
     const timeout = window.setTimeout(() => setTerminalReady(true), startupRevealDelayMs);
     return () => window.clearTimeout(timeout);
-  }, [config?.popupId, ready, startupRevealDelayMs]);
+  }, [config?.popupId, isAttachMode, ready, startupRevealDelayMs]);
 
   return (
     <div
@@ -390,8 +400,9 @@ function TerminalPopupPageInner() {
               terminalSettings={settings.terminalSettings}
               disableTerminalFontZoom={settings.disableTerminalFontZoom}
               sessionId={sessionId}
-              startupCommand={config.startupCommand}
-              reuseConnectionFromSessionId={reuseId}
+              startupCommand={isAttachMode ? undefined : config.startupCommand}
+              reuseConnectionFromSessionId={isAttachMode ? undefined : reuseId}
+              attachExistingSession={isAttachMode}
               onCloseSession={() => {
                 void close();
               }}
@@ -400,11 +411,12 @@ function TerminalPopupPageInner() {
                   void close();
                   return;
                 }
-                if (!terminalReady && config.startupCommand) {
+                if (!terminalReady && config.startupCommand && !isAttachMode) {
                   setStartupError(t('systemManager.popup.startupFailed'));
                 }
               }}
               onStatusChange={(_changedSessionId, status) => {
+                if (isAttachMode && status === 'connected') revealTerminal();
                 if (!config.startupCommand && status === 'connected') revealTerminal();
               }}
               onTerminalDataCapture={revealTerminal}

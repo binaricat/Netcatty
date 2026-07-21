@@ -740,12 +740,11 @@ function buildTrayMenuTemplate() {
       menuTemplate.push({
         label: `  ${session.hostLabel || session.label}  (${statusText})`,
         click: () => {
-          // Focus window and switch to this session
-          const win = getMainWindow();
-          if (win && bringMainWindowToForeground(win)) {
-            // Notify renderer to focus this session
-            win.webContents?.send("netcatty:tray:focusSession", session.id);
-          }
+          // AI silent sessions open a terminal popup from the renderer and must
+          // not be force-focused into a tab-less main-window surface.
+          void sendToMainWindow("netcatty:tray:focusSession", session.id, {
+            focus: session.aiHidden !== true,
+          });
         },
       });
     }
@@ -1013,7 +1012,12 @@ function registerHandlers(ipcMain) {
   });
 
   ipcMain.handle("netcatty:trayPanel:jumpToSession", async (_event, sessionId) => {
-    await sendToMainWindow("netcatty:trayPanel:jumpToSession", sessionId);
+    // Do not force-focus the main window here. Visible sessions open/focus it
+    // from the renderer; AI silent sessions open a terminal popup instead and
+    // should not steal focus into a tab-less main-window surface.
+    await sendToMainWindow("netcatty:trayPanel:jumpToSession", sessionId, {
+      focus: false,
+    });
     return { success: true };
   });
 

@@ -1,7 +1,8 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import type React from 'react';
-import type { Host, HostProtocol } from '../../types';
+import type { Host, HostProtocol, TerminalSession } from '../../types';
 import type { PassphraseRequest } from '../../components/PassphraseModal';
+import type { TerminalPopupPayload } from '../../domain/systemManager/types';
 import { getEffectiveHostDistro } from '../../domain/host';
 import { sanitizeHostIconFields } from '../../domain/hostIcon';
 import { resolveEffectiveTerminalProtocol } from '../../domain/terminalProtocol';
@@ -49,17 +50,80 @@ export const getLogHostVisualSnapshot = (host: Host) => {
   };
 };
 
-export function handleTrayJumpToSessionImpl(getCtx: AppContextGetter, sessionId: string) {
-  const { sessions, setActiveTabId, setWorkspaceFocusedSession } = getCtx();
-{
-    const session = sessions.find((item) => item.id === sessionId);
-    if (session?.workspaceId) {
-      setActiveTabId(session.workspaceId);
-      setWorkspaceFocusedSession(session.workspaceId, sessionId);
+/**
+ * AI silent sessions stay out of the tab bar. Opening them via tray should
+ * attach a terminal-popup window to the same live PTY (same sessionId) instead
+ * of activating them as a main-window tab (tab-less terminal surface) or
+ * spawning a new shell via connection reuse.
+ */
+export function buildAiSilentSessionPopupPayload(session: TerminalSession): TerminalPopupPayload {
+  const { hiddenFromTabs: _hiddenFromTabs, ...sourceSession } = session;
+  return {
+    title: session.hostLabel || 'Terminal',
+    parentSessionId: session.id,
+    startupCommand: '',
+    attachSessionId: session.id,
+    sourceSession: {
+      ...sourceSession,
+    },
+  };
+}
+
+export async function handleTrayJumpToSessionImpl(getCtx: AppContextGetter, sessionId: string) {
+  const {
+    sessions,
+    setActiveTabId,
+    setWorkspaceFocusedSession,
+    netcattyBridge,
+    toast,
+    t,
+  } = getCtx();
+  const session = sessions.find((item: TerminalSession) => item.id === sessionId);
+  if (!session) return;
+
+  if (session.hiddenFromTabs) {
+    // Leave the main surface if this silent session was already activated
+    // (legacy jump path left a terminal with no tab chrome).
+    const getActiveTabId = getCtx().getActiveTabId as (() => string) | undefined;
+    if (!getActiveTabId || getActiveTabId() === sessionId) {
+      setActiveTabId('vault');
+    }
+
+    const bridge = netcattyBridge?.get?.();
+    if (!bridge?.openTerminalPopup) {
+      toast?.error?.(t?.('tabs.copyTabToNewWindowFailed') ?? 'Failed to open tab in a new window');
       return;
     }
-    setActiveTabId(sessionId);
+    try {
+      const result = await bridge.openTerminalPopup(buildAiSilentSessionPopupPayload(session));
+      if (!result?.success) {
+        toast?.error?.(
+          result?.error
+            || t?.('tabs.copyTabToNewWindowFailed')
+            || 'Failed to open tab in a new window',
+        );
+      }
+    } catch (err) {
+      toast?.error?.(
+        err instanceof Error
+          ? err.message
+          : (t?.('tabs.copyTabToNewWindowFailed') ?? 'Failed to open tab in a new window'),
+      );
+    }
+    return;
   }
+
+  // Visible sessions still live in the main window; bring it forward now that
+  // the tray jump IPC no longer auto-focuses main (silent AI sessions open a
+  // popup instead and must not steal main-window focus).
+  void netcattyBridge?.get?.()?.openMainWindow?.();
+
+  if (session.workspaceId) {
+    setActiveTabId(session.workspaceId);
+    setWorkspaceFocusedSession(session.workspaceId, sessionId);
+    return;
+  }
+  setActiveTabId(sessionId);
 }
 
 export function handleTrayTogglePortForwardImpl(getCtx: AppContextGetter, ruleId: string, start: boolean) {

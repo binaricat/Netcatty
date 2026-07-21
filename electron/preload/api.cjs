@@ -325,6 +325,10 @@ function createPreloadApi(ctx) {
       ipcRenderer.send("netcatty:close", { sessionId });
     }
   },
+  rebindTerminalSessionOutput: (sessionId) =>
+    ipcRenderer.invoke("netcatty:terminal:rebindOutput", { sessionId }),
+  restoreTerminalSessionOutput: (sessionId, webContentsId) =>
+    ipcRenderer.invoke("netcatty:terminal:restoreOutput", { sessionId, webContentsId }),
   setSessionEncoding: async (sessionId, encoding) => {
     // Try the SSH handler first; it returns { ok: false } for non-SSH
     // sessions (no session.stream). Telnet and serial sessions fall

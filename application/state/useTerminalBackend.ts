@@ -116,6 +116,25 @@ export const useTerminalBackend = () => {
     await bridge?.closeSession?.(sessionId);
   }, []);
 
+  const rebindSessionOutput = useCallback(async (sessionId: string) => {
+    const bridge = netcattyBridge.get();
+    if (!bridge?.rebindTerminalSessionOutput) {
+      return { success: false as const, error: "rebindTerminalSessionOutput unavailable" };
+    }
+    return bridge.rebindTerminalSessionOutput(sessionId);
+  }, []);
+
+  const restoreSessionOutput = useCallback(async (
+    sessionId: string,
+    webContentsId?: number | null,
+  ) => {
+    const bridge = netcattyBridge.get();
+    if (!bridge?.restoreTerminalSessionOutput) {
+      return { success: false as const, error: "restoreTerminalSessionOutput unavailable" };
+    }
+    return bridge.restoreTerminalSessionOutput(sessionId, webContentsId);
+  }, []);
+
   const setSessionEncoding = useCallback(async (sessionId: string, encoding: string) => {
     const bridge = netcattyBridge.get();
     if (!bridge?.setSessionEncoding) return { ok: false, encoding };
@@ -372,6 +391,8 @@ export const useTerminalBackend = () => {
         setSessionFlowPaused,
         ackSessionFlow,
         closeSession,
+        rebindSessionOutput,
+        restoreSessionOutput,
         setSessionEncoding,
         onSessionData,
         onSessionExit,
@@ -441,6 +462,8 @@ export const useTerminalBackend = () => {
       setSessionFlowPaused,
       ackSessionFlow,
       closeSession,
+      rebindSessionOutput,
+      restoreSessionOutput,
       setSessionEncoding,
       onSessionData,
       onSessionExit,

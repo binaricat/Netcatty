@@ -134,6 +134,101 @@ function closeTerminalOutputSession(sessionId) {
 }
 
 /**
+ * Rebind a live session's output MessagePort to another renderer (e.g. AI
+ * silent-session observe popup). Keeps the same PTY/stream; only the display
+ * route moves. Returns the previous webContentsId so the caller can restore.
+ */
+function rebindTerminalSessionOutput(event, payload) {
+  const sessionId = typeof payload?.sessionId === "string" ? payload.sessionId : "";
+  if (!sessionId) {
+    return { success: false, error: "Missing sessionId" };
+  }
+  const session = sessions?.get?.(sessionId);
+  if (!session) {
+    return { success: false, error: "Session not found" };
+  }
+  const sender = event?.sender;
+  if (!sender || sender.isDestroyed?.()) {
+    return { success: false, error: "Invalid sender" };
+  }
+  const previousWebContentsId =
+    typeof session.webContentsId === "number" ? session.webContentsId : null;
+  try {
+    openTerminalOutputSession(sessionId, sender);
+    session.webContentsId = sender.id;
+    return {
+      success: true,
+      previousWebContentsId,
+      webContentsId: sender.id,
+    };
+  } catch (err) {
+    return { success: false, error: err?.message || String(err) };
+  }
+}
+
+/**
+ * Restore output to a previous renderer after an attach popup closes.
+ * Falls back to the first live main-ish window if the home webContents is gone.
+ */
+function restoreTerminalSessionOutput(event, payload) {
+  const sessionId = typeof payload?.sessionId === "string" ? payload.sessionId : "";
+  if (!sessionId) {
+    return { success: false, error: "Missing sessionId" };
+  }
+  const session = sessions?.get?.(sessionId);
+  if (!session) {
+    // Session already closed — nothing to restore.
+    return { success: true, restored: false };
+  }
+
+  let target = null;
+  const homeId = payload?.webContentsId;
+  if (typeof homeId === "number" && electronModule?.webContents?.fromId) {
+    try {
+      const home = electronModule.webContents.fromId(homeId);
+      if (home && !home.isDestroyed?.()) target = home;
+    } catch {
+      // fall through
+    }
+  }
+  if (!target && electronModule?.BrowserWindow?.getAllWindows) {
+    try {
+      const wins = electronModule.BrowserWindow.getAllWindows() || [];
+      for (const win of wins) {
+        const wc = win?.webContents;
+        if (!wc || wc.isDestroyed?.()) continue;
+        // Prefer a non-popup / non-tray renderer if we can tell; otherwise first live.
+        const url = typeof wc.getURL === "function" ? wc.getURL() : "";
+        if (url.includes("#/terminal-popup") || url.includes("#/tray")) continue;
+        target = wc;
+        break;
+      }
+      if (!target) {
+        for (const win of wins) {
+          const wc = win?.webContents;
+          if (wc && !wc.isDestroyed?.()) {
+            target = wc;
+            break;
+          }
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+  if (!target) {
+    return { success: false, error: "No live renderer to restore output to" };
+  }
+  try {
+    openTerminalOutputSession(sessionId, target);
+    session.webContentsId = target.id;
+    return { success: true, restored: true, webContentsId: target.id };
+  } catch (err) {
+    return { success: false, error: err?.message || String(err) };
+  }
+}
+
+/**
  * Locate an executable on POSIX systems by name.
  *
  * macOS GUI Electron apps inherit launchd's minimal PATH
@@ -1446,6 +1541,8 @@ function registerHandlers(ipcMain, options = {}) {
   ipcMain.handle("netcatty:local:validatePath", validatePath);
   ipcMain.handle("netcatty:shells:discover", () => discoverShells());
   ipcMain.handle("netcatty:terminal:setEncoding", setSessionEncoding);
+  ipcMain.handle("netcatty:terminal:rebindOutput", rebindTerminalSessionOutput);
+  ipcMain.handle("netcatty:terminal:restoreOutput", restoreTerminalSessionOutput);
   ipcMain.on("netcatty:write", writeToSession);
   ipcMain.on("netcatty:interrupt", interruptSession);
   ipcMain.on("netcatty:resize", resizeSession);

@@ -7,6 +7,8 @@ const crashLogBridge = require("../crashLogBridge.cjs");
 function createTerminalPopupWindowApi(ctx) {
   with (ctx) {
     const terminalPopupWindows = new Map();
+    /** attachSessionId -> popupId for AI silent-session observe windows */
+    const attachSessionPopups = new Map();
 
     function isLiveWindow(win) {
       return Boolean(win && typeof win.isDestroyed === "function" && !win.isDestroyed());
@@ -15,6 +17,23 @@ function createTerminalPopupWindowApi(ctx) {
     async function openTerminalPopupWindow(electronModule, options, payload) {
       const { BrowserWindow, shell } = electronModule;
       const { preload, devServerUrl, isDev, appIcon, isMac, electronDir, sourceWindow } = options;
+
+      const attachSessionId = typeof payload?.attachSessionId === "string" && payload.attachSessionId
+        ? payload.attachSessionId
+        : null;
+      if (attachSessionId) {
+        const existingPopupId = attachSessionPopups.get(attachSessionId);
+        const existing = existingPopupId ? terminalPopupWindows.get(existingPopupId) : null;
+        if (existing && isLiveWindow(existing.win)) {
+          try {
+            showAndFocusWindow(existing.win);
+          } catch {
+            // ignore focus races
+          }
+          return { success: true, popupId: existingPopupId, reused: true };
+        }
+        if (existingPopupId) attachSessionPopups.delete(attachSessionId);
+      }
 
       const osTheme = electronModule?.nativeTheme?.shouldUseDarkColors ? "dark" : "light";
       const effectiveTheme = currentTheme === "dark" || currentTheme === "light" ? currentTheme : osTheme;
@@ -72,10 +91,16 @@ function createTerminalPopupWindowApi(ctx) {
         if (lifecycleReleased) return;
         lifecycleReleased = true;
         terminalPopupWindows.delete(popupId);
+        if (attachSessionId && attachSessionPopups.get(attachSessionId) === popupId) {
+          attachSessionPopups.delete(attachSessionId);
+        }
         unregisterAppContentWindow(win);
         notifyAppContentWindowClosed(win);
       };
       terminalPopupWindows.set(popupId, { releaseLifecycle, win });
+      if (attachSessionId) {
+        attachSessionPopups.set(attachSessionId, popupId);
+      }
       registerAppContentWindow(win);
       crashLogBridge.captureDiagnostic("terminal-popup", "popup BrowserWindow created", {
         popupId,

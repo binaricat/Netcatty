@@ -44,6 +44,7 @@ export const terminalPropsAreEqual = (
   && prev.pendingScriptId === next.pendingScriptId
   && prev.pendingScript === next.pendingScript
   && prev.reuseConnectionFromSessionId === next.reuseConnectionFromSessionId
+  && prev.attachExistingSession === next.attachExistingSession
   && prev.serialConfig === next.serialConfig
   && prev.hotkeyScheme === next.hotkeyScheme
   && prev.disableTerminalFontZoom === next.disableTerminalFontZoom

@@ -311,6 +311,18 @@ declare global {
     setSessionFlowPaused(sessionId: string, paused: boolean): void;
     ackSessionFlow(sessionId: string, bytes: number): void;
     closeSession(sessionId: string): void | Promise<void>;
+    /** Move a live session's output port to this renderer (same PTY). */
+    rebindTerminalSessionOutput?(sessionId: string): Promise<{
+      success: boolean;
+      previousWebContentsId?: number | null;
+      webContentsId?: number;
+      error?: string;
+    }>;
+    /** Restore output after an attach popup closes. */
+    restoreTerminalSessionOutput?(
+      sessionId: string,
+      webContentsId?: number | null,
+    ): Promise<{ success: boolean; restored?: boolean; webContentsId?: number; error?: string }>;
     // ZMODEM file transfer
     onZmodemEvent?(
       sessionId: string,
