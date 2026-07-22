@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   resolveTerminalSessionExitIntent,
   shouldCloseTerminalPopupOnExit,
+  shouldRevealTerminalPopupOnExit,
 } from "./resolveTerminalSessionExitIntent.ts";
 
 test("normal backend exited events close the session tab", () => {
@@ -73,6 +74,30 @@ test("disabled auto-close keeps command and attached terminal popups open", () =
   assert.equal(
     shouldCloseTerminalPopupOnExit(
       { reason: "closed", exitCode: 0 },
+      { autoCloseOnExit: false, isAttachMode: true },
+    ),
+    false,
+  );
+});
+
+test("disabled auto-close reveals a clean command popup exit instead of reporting startup failure", () => {
+  assert.equal(
+    shouldRevealTerminalPopupOnExit(
+      { reason: "exited", exitCode: 0 },
+      { autoCloseOnExit: false },
+    ),
+    true,
+  );
+  assert.equal(
+    shouldRevealTerminalPopupOnExit(
+      { reason: "exited", exitCode: 1 },
+      { autoCloseOnExit: false },
+    ),
+    false,
+  );
+  assert.equal(
+    shouldRevealTerminalPopupOnExit(
+      { reason: "exited", exitCode: 0 },
       { autoCloseOnExit: false, isAttachMode: true },
     ),
     false,

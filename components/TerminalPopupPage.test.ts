@@ -128,6 +128,10 @@ test('terminal exit auto-close setting reaches tabs, workspaces, and popups', ()
     source,
     /shouldCloseTerminalPopupOnExit\(evt, \{\s+autoCloseOnExit: settings\.terminalSettings\.autoCloseOnExit,\s+isAttachMode,\s+\}\)/,
   );
+  assert.match(
+    source,
+    /shouldRevealTerminalPopupOnExit\(evt, \{\s+autoCloseOnExit: settings\.terminalSettings\.autoCloseOnExit,\s+isAttachMode,\s+\}\)[\s\S]*?revealTerminal\(\);\s+return;[\s\S]*?setStartupError/,
+  );
 });
 
 test('an attached observe popup never owns automatic reconnect', () => {
