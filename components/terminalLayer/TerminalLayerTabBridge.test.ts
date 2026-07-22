@@ -21,16 +21,6 @@ test('terminal panes can gate cwd restore per session host resolution', () => {
   assert.match(layerSource, /session\.protocol === 'local'/);
 });
 
-test('terminal panes retain the broadcast dispatcher for paired Kitty releases', () => {
-  const supportSource = readFileSync(new URL('./TerminalLayerSupport.tsx', import.meta.url), 'utf8');
-
-  assert.match(supportSource, /onBroadcastInput=\{onBroadcastInput\}/);
-  assert.doesNotMatch(
-    supportSource,
-    /onBroadcastInput=\{broadcastEnabled \? onBroadcastInput : undefined\}/,
-  );
-});
-
 test('terminal layer bridge refreshes when terminal settings change', () => {
   assert.match(source, /terminalSettings: s\.terminalSettings/);
   assert.match(source, /\[\s*[\s\S]*s\.terminalSettings[\s\S]*\]\);/);

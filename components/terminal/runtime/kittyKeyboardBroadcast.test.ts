@@ -58,6 +58,7 @@ test("disposing an old registration does not remove its replacement", () => {
 
 test("a paired release is forwarded after broadcast is disabled", () => {
   let enabled = true;
+  let dispatcherAvailable = true;
   const forwarded: Array<{
     input: KittyKeyboardBroadcastInput;
     targetSessionIds?: string[];
@@ -66,14 +67,14 @@ test("a paired release is forwarded after broadcast is disabled", () => {
     sourceSessionId: "source",
     isHandlingBroadcast: () => false,
     isBroadcastEnabled: () => enabled,
-    getDispatcher: () => (_data, sourceSessionId, options) => {
+    getDispatcher: () => dispatcherAvailable ? (_data, sourceSessionId, options) => {
       assert.equal(sourceSessionId, "source");
       forwarded.push({
         input: options.kittyKeyboardInput,
         targetSessionIds: options.kittyKeyboardTargetSessionIds,
       });
       return ["target-a"];
-    },
+    } : undefined,
   });
   const keydown: KittyKeyboardBroadcastInput = {
     kind: "key",
@@ -85,6 +86,7 @@ test("a paired release is forwarded after broadcast is disabled", () => {
   };
   assert.deepEqual(forward(keydown), { targetSessionIds: ["target-a"] });
   enabled = false;
+  dispatcherAvailable = false;
   assert.equal(forward(keyup), null);
   assert.deepEqual(forward(keyup, true, ["target-a"]), {
     targetSessionIds: ["target-a"],

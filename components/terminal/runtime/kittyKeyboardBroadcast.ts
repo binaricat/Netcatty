@@ -44,22 +44,27 @@ export const createKittyKeyboardBroadcastForwarder = (options: {
       kittyKeyboardTargetSessionIds?: string[];
     },
   ) => string[] | void) | null | undefined;
-}) => (
-  input: KittyKeyboardBroadcastInput,
-  forcePairedRelease = false,
-  targetSessionIds?: string[],
-): { targetSessionIds: string[] } | null => {
-  const dispatcher = options.getDispatcher();
-  if (
-    options.isHandlingBroadcast() ||
-    (!forcePairedRelease && !options.isBroadcastEnabled()) ||
-    !dispatcher
-  ) return null;
-  const deliveredSessionIds = dispatcher("", options.sourceSessionId, {
-    kittyKeyboardInput: input,
-    ...(targetSessionIds ? { kittyKeyboardTargetSessionIds: targetSessionIds } : {}),
-  });
-  return { targetSessionIds: deliveredSessionIds ?? targetSessionIds ?? [] };
+}) => {
+  let lastDispatcher: ReturnType<typeof options.getDispatcher>;
+  return (
+    input: KittyKeyboardBroadcastInput,
+    forcePairedRelease = false,
+    targetSessionIds?: string[],
+  ): { targetSessionIds: string[] } | null => {
+    const currentDispatcher = options.getDispatcher();
+    if (currentDispatcher) lastDispatcher = currentDispatcher;
+    const dispatcher = currentDispatcher ?? (forcePairedRelease ? lastDispatcher : undefined);
+    if (
+      options.isHandlingBroadcast() ||
+      (!forcePairedRelease && !options.isBroadcastEnabled()) ||
+      !dispatcher
+    ) return null;
+    const deliveredSessionIds = dispatcher("", options.sourceSessionId, {
+      kittyKeyboardInput: input,
+      ...(targetSessionIds ? { kittyKeyboardTargetSessionIds: targetSessionIds } : {}),
+    });
+    return { targetSessionIds: deliveredSessionIds ?? targetSessionIds ?? [] };
+  };
 };
 
 export const clearKittyKeyboardBroadcastPairingState = (
