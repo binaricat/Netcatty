@@ -244,6 +244,10 @@ test("snapshot apply acknowledgements are emitted only by the matching terminal"
     path.join(__dirname, "terminalBridge.cjs"),
     "utf8",
   );
+  const effectsSource = require("node:fs").readFileSync(
+    path.join(__dirname, "../../components/terminal/useTerminalEffects.ts"),
+    "utf8",
+  );
   assert.match(preloadSource, /if \(handled !== true\) return/);
   assert.match(terminalSource, /typeof payload\.contextViewportSnapshot !== "string"/);
   assert.doesNotMatch(terminalSource, /if \(snap\) \{\s*const applied = await terminalBackend\.applySessionSnapshot/);
@@ -252,6 +256,17 @@ test("snapshot apply acknowledgements are emitted only by the matching terminal"
   assert.match(bridgeSource, /const hasContextSnapshot = typeof payload\?\.contextSnapshot === "string"/);
   assert.match(preloadSource, /contextSnapshot: typeof context\?\.contextSnapshot === "string"/);
   assert.match(terminalSource, /finalContext = readTerminalHibernateContext\(snapshotTerm\)/);
+  assert.match(bridgeSource, /kittyKeyboardModeState: normalizeKittyKeyboardModeState/);
+  assert.match(preloadSource, /sanitizeKittyKeyboardModeState\(kittyKeyboardModeState\)/);
+  assert.match(terminalSource, /getKittyKeyboardModeState\(\)/);
+  assert.match(terminalSource, /restoreKittyKeyboardModeState/);
+  assert.match(effectsSource, /runtime\.restoreKittyKeyboardModeState\(snap\.kittyKeyboardModeState\)/);
+  assert.match(bridgeSource, /kittyKeyboardProtocolEnabled: typeof payload\?\.kittyKeyboardProtocolEnabled/);
+  assert.match(preloadSource, /typeof kittyKeyboardProtocolEnabled === "boolean"/);
+  assert.match(terminalSource, /getKittyKeyboardProtocolEnabled\(\)/);
+  assert.match(terminalSource, /\?\? kittyKeyboardProtocolEnabledForSession/);
+  assert.match(terminalSource, /setKittyKeyboardProtocolEnabled/);
+  assert.match(effectsSource, /runtime\.setKittyKeyboardProtocolEnabled\(snap\.kittyKeyboardProtocolEnabled\)/);
 });
 
 test("exit fanout preserves the original renderer before registry wiring", () => {

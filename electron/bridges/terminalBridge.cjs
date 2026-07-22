@@ -168,6 +168,19 @@ function resolveSessionHomeWebContentsId(sessionId, terminalWorkerManager = null
   return null;
 }
 
+function normalizeKittyKeyboardModeState(value) {
+  if (!value || typeof value !== "object") return undefined;
+  const flags = (input) => Number.isFinite(input) ? Math.max(0, Math.floor(input)) & 31 : 0;
+  const stack = (input) => Array.isArray(input) ? input.slice(-32).map(flags) : [];
+  return {
+    mainFlags: flags(value.mainFlags),
+    alternateFlags: flags(value.alternateFlags),
+    mainStack: stack(value.mainStack),
+    alternateStack: stack(value.alternateStack),
+    alternateScreenActive: value.alternateScreenActive === true,
+  };
+}
+
 /**
  * Capture a serialize snapshot from the home renderer before rebinding output
  * to an observe popup, so the popup is not an empty shell.
@@ -222,6 +235,10 @@ function handleTerminalSessionSnapshotResponse(event, payload) {
   pending.resolve({
     success: true,
     snapshot: typeof payload?.snapshot === "string" ? payload.snapshot : "",
+    kittyKeyboardModeState: normalizeKittyKeyboardModeState(payload?.kittyKeyboardModeState),
+    kittyKeyboardProtocolEnabled: typeof payload?.kittyKeyboardProtocolEnabled === "boolean"
+      ? payload.kittyKeyboardProtocolEnabled
+      : undefined,
   });
 }
 
@@ -272,6 +289,10 @@ function applyTerminalSessionSnapshot(event, payload, terminalWorkerManager = nu
   const contextScrollbackSnapshot = hasContextScrollbackSnapshot ? payload.contextScrollbackSnapshot : "";
   const hasAlternateScreen = typeof payload?.alternateScreen === "boolean";
   const alternateScreen = payload?.alternateScreen === true;
+  const kittyKeyboardModeState = normalizeKittyKeyboardModeState(payload?.kittyKeyboardModeState);
+  const kittyKeyboardProtocolEnabled = typeof payload?.kittyKeyboardProtocolEnabled === "boolean"
+    ? payload.kittyKeyboardProtocolEnabled
+    : undefined;
   if (
     !sessionId
     || !hasSnapshot
@@ -315,6 +336,8 @@ function applyTerminalSessionSnapshot(event, payload, terminalWorkerManager = nu
           contextViewportSnapshot,
           contextScrollbackSnapshot,
           alternateScreen,
+          kittyKeyboardModeState,
+          kittyKeyboardProtocolEnabled,
           requestId,
         });
       } catch (err) {

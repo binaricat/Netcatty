@@ -87,11 +87,15 @@ test("runtime routes Shift+Enter text through the shared input handler", () => {
 
   assert.match(
     source,
-    /const handleTerminalInputData = \(\s+data: string,\s+options\?: \{ source\?: "terminal" \| "shift-enter" \},\s+\) => \{/s,
+    /const handleTerminalInputData = \(\s+data: string,\s+options\?: \{ source\?: "terminal" \| "shift-enter" \| "kitty" \},\s+\) => \{/s,
   );
   assert.match(
     source,
     /if \(textToSend\) \{\s+handleTerminalInputData\(textToSend, \{ source: "shift-enter" \}\);/s,
+  );
+  assert.match(
+    source,
+    /!isKittyKeyboardModeActive\(kittyKeyboardMode\) &&\s+shouldSendShiftEnterText/,
   );
   assert.match(source, /getShiftEnterSubmittedInput\(data\)/);
   assert.match(source, /inputSource !== "shift-enter"/);
@@ -99,6 +103,22 @@ test("runtime routes Shift+Enter text through the shared input handler", () => {
     source,
     /if \(shouldSendShiftEnterText\(e, ctx\.terminalSettingsRef\.current\)\) \{\s+sudoAutofill\.cancelHint\(\);/s,
   );
-  assert.match(source, /term\.onData\(\(data\) => handleTerminalInputData\(data\)\);/);
+  assert.match(
+    source,
+    /term\.onData\(\(data\) => \{[\s\S]*handleTerminalInputData\(data\);\s+\}\);/,
+  );
+  assert.match(
+    source,
+    /const encoded = encodeKittyCompositionText\(kittyKeyboardMode, data\);[\s\S]*if \(encoded\) \{[\s\S]*handleTerminalInputData\(encoded, \{ source: "kitty" \}\);[\s\S]*\} else \{[\s\S]*handleTerminalInputData\(data\);[\s\S]*broadcastKittyInput\(\{ kind: "text", text: data \}\);/,
+  );
+  assert.match(source, /ctx\.container\.addEventListener\("input", markKittyTextInput, true\);/);
+  assert.match(
+    source,
+    /if \(shouldMarkKittyTextInputEvent\(event\)\) markKittyCompositionPending\(true\);/,
+  );
+  assert.match(
+    source,
+    /flushKittyKeyboardBroadcastReleases\(\s+kittyForwardedKeys,[\s\S]*encodeKittyKeyEvent\(kittyKeyboardMode, input\.event\)[\s\S]*handleTerminalInputData\(sequence, \{ source: "kitty" \}\)/,
+  );
   assert.doesNotMatch(source, /writeToSession\(id, textToSend\)/);
 });

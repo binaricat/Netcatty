@@ -50,6 +50,20 @@ function createPreloadApi(ctx) {
       rendererPriority: priority,
     };
   };
+  const sanitizeKittyKeyboardModeState = (value) => {
+    if (!value || typeof value !== "object") return undefined;
+    const flags = (input) => Number.isFinite(input) ? Math.max(0, Math.floor(input)) & 31 : 0;
+    const stack = (input) => Array.isArray(input)
+      ? input.slice(-32).map(flags)
+      : [];
+    return {
+      mainFlags: flags(value.mainFlags),
+      alternateFlags: flags(value.alternateFlags),
+      mainStack: stack(value.mainStack),
+      alternateStack: stack(value.alternateStack),
+      alternateScreenActive: value.alternateScreenActive === true,
+    };
+  };
   with (ctx) {
     return {
   getPluginRuntimeStatus: () => ipcRenderer.invoke("netcatty:plugins:status"),
@@ -363,10 +377,19 @@ function createPreloadApi(ctx) {
     ipcRenderer.on("netcatty:terminal:snapshot-request", handler);
     return () => ipcRenderer.removeListener("netcatty:terminal:snapshot-request", handler);
   },
-  respondTerminalSessionSnapshot: (requestId, snapshot) => {
+  respondTerminalSessionSnapshot: (
+    requestId,
+    snapshot,
+    kittyKeyboardModeState,
+    kittyKeyboardProtocolEnabled,
+  ) => {
     ipcRenderer.send("netcatty:terminal:snapshot-response", {
       requestId,
       snapshot: typeof snapshot === "string" ? snapshot : "",
+      kittyKeyboardModeState: sanitizeKittyKeyboardModeState(kittyKeyboardModeState),
+      kittyKeyboardProtocolEnabled: typeof kittyKeyboardProtocolEnabled === "boolean"
+        ? kittyKeyboardProtocolEnabled
+        : undefined,
     });
   },
   applyTerminalSessionSnapshot: (sessionId, snapshot, context, authorization) =>
@@ -381,6 +404,10 @@ function createPreloadApi(ctx) {
         ? context.contextScrollbackSnapshot
         : "",
       alternateScreen: context?.alternateScreen === true,
+      kittyKeyboardModeState: sanitizeKittyKeyboardModeState(context?.kittyKeyboardModeState),
+      kittyKeyboardProtocolEnabled: typeof context?.kittyKeyboardProtocolEnabled === "boolean"
+        ? context.kittyKeyboardProtocolEnabled
+        : undefined,
       authorization,
     }),
   markAttachPopupClosePrepared: (sessionId, authorization) =>

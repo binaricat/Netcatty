@@ -1,5 +1,13 @@
 
 declare global {
+  interface NetcattyKittyKeyboardModeState {
+    mainFlags: number;
+    alternateFlags: number;
+    mainStack: number[];
+    alternateStack: number[];
+    alternateScreenActive: boolean;
+  }
+
   interface NetcattyTerminalInterruptTrace {
     debug?: boolean;
     traceId?: string;
@@ -335,6 +343,8 @@ declare global {
     requestTerminalSessionSnapshot?(sessionId: string, authorization: string): Promise<{
       success: boolean;
       snapshot?: string;
+      kittyKeyboardModeState?: NetcattyKittyKeyboardModeState;
+      kittyKeyboardProtocolEnabled?: boolean;
       error?: string;
     }>;
     /** Home renderer: listen for snapshot requests. */
@@ -342,7 +352,12 @@ declare global {
       cb: (payload: { sessionId: string; requestId: string }) => void,
     ): () => void;
     /** Home renderer: reply with serialized scrollback. */
-    respondTerminalSessionSnapshot?(requestId: string, snapshot: string): void;
+    respondTerminalSessionSnapshot?(
+      requestId: string,
+      snapshot: string,
+      kittyKeyboardModeState?: NetcattyKittyKeyboardModeState,
+      kittyKeyboardProtocolEnabled?: boolean,
+    ): void;
     /** Observe popup: push current state back to the home renderer before restore. */
     applyTerminalSessionSnapshot?(
       sessionId: string,
@@ -352,6 +367,8 @@ declare global {
         contextViewportSnapshot: string;
         contextScrollbackSnapshot: string;
         alternateScreen: boolean;
+        kittyKeyboardModeState?: NetcattyKittyKeyboardModeState;
+        kittyKeyboardProtocolEnabled?: boolean;
       },
       authorization: string,
     ): Promise<{
@@ -369,6 +386,8 @@ declare global {
         contextViewportSnapshot: string;
         contextScrollbackSnapshot: string;
         alternateScreen: boolean;
+        kittyKeyboardModeState?: NetcattyKittyKeyboardModeState;
+        kittyKeyboardProtocolEnabled?: boolean;
         requestId: string;
       }) => boolean | Promise<boolean>,
     ): () => void;

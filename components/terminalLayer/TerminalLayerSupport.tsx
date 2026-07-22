@@ -767,7 +767,7 @@ interface TerminalPaneProps {
     data: string,
     sourceSessionId: string,
     options?: TerminalBroadcastInputOptions,
-  ) => void;
+  ) => string[] | void;
   onToggleWorkspaceComposeBar: () => void;
   onBroadcastInterruptPriorityChange: (
     sessionId: string,
@@ -1504,7 +1504,7 @@ interface TerminalPanesHostProps {
     data: string,
     sourceSessionId: string,
     options?: TerminalBroadcastInputOptions,
-  ) => void;
+  ) => string[] | void;
   onToggleWorkspaceComposeBar: () => void;
   onBroadcastInterruptPriorityChange: (
     sessionId: string,

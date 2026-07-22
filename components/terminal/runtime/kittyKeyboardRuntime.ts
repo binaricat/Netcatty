@@ -6,6 +6,7 @@ import {
   pushKittyKeyboardModeFlags,
   setKittyKeyboardAlternateScreenActive,
   setKittyKeyboardModeFlags,
+  resetKittyKeyboardModeState,
   type KittyKeyboardModeApplyMode,
   type KittyKeyboardModeState,
 } from "./kittyKeyboardProtocol";
@@ -22,6 +23,10 @@ type KittyKeyboardParser = {
   registerCsiHandler: (
     id: CsiHandlerId,
     callback: (params: KittyKeyboardCsiParams) => boolean,
+  ) => IDisposable;
+  registerEscHandler: (
+    id: { intermediates?: string; final: string },
+    callback: () => boolean,
   ) => IDisposable;
 };
 
@@ -61,6 +66,13 @@ export const installKittyKeyboardProtocolHandlers = (
       () => {
         writeReply(buildKittyKeyboardModeQueryResponse(state));
         return true;
+      },
+    ),
+    parser.registerEscHandler(
+      { final: "c" },
+      () => {
+        resetKittyKeyboardModeState(state);
+        return false;
       },
     ),
     parser.registerCsiHandler(

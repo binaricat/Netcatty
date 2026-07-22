@@ -122,7 +122,12 @@ import {
   type PendingAuth,
   type TerminalSessionDataMeta,
 } from "./terminal/runtime/createTerminalSessionStarters";
-import { createXTermRuntime, type XTermRuntime } from "./terminal/runtime/createXTermRuntime";
+import {
+  createXTermRuntime,
+  resetKittyKeyboardModeStateForSession,
+  type XTermRuntime,
+} from "./terminal/runtime/createXTermRuntime";
+import { clearKittyKeyboardBroadcastSession } from "./terminal/runtime/kittyKeyboardBroadcast";
 import { applyUserCursorPreference } from "./terminal/runtime/cursorPreference";
 import { terminalAltKeyOptions } from "./terminal/runtime/altKeyOptions";
 import {
@@ -440,6 +445,14 @@ const TerminalComponent: React.FC<TerminalProps> = ({
 
   const terminalSettingsRef = useRef(terminalSettings);
   terminalSettingsRef.current = terminalSettings;
+  // The protocol capability is connection-scoped. A settings change applies
+  // to newly mounted terminals so an already-negotiated remote never sees the
+  // parser and encoder disagree or disappear during hibernation/reconnect.
+  const kittyKeyboardProtocolEnabledForSessionRef = useRef(
+    terminalSettings?.kittyKeyboardProtocolEnabled === true,
+  );
+  const kittyKeyboardProtocolEnabledForSession =
+    kittyKeyboardProtocolEnabledForSessionRef.current;
   const isSearchOpenRef = useRef(false);
   const hibernateFileTransferActiveRef = useRef(false);
   const handleUpdateHostFromTerminal = useCallback((hostUpdate: TerminalHostUpdate) => {
@@ -448,10 +461,10 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   onTerminalDataCaptureRef.current = onTerminalDataCapture;
   const isVisibleRef = useRef(isVisible);
   isVisibleRef.current = isVisible;
-  const hibernateEnabled = resolveTerminalHibernateEnabledForProtocol(
-    terminalSettings,
-    effectiveTerminalProtocol,
-  );
+  const hibernateEnabled =
+    resolveTerminalHibernateEnabledForProtocol(terminalSettings, effectiveTerminalProtocol) &&
+    !kittyKeyboardProtocolEnabledForSession &&
+    !isBroadcastEnabled;
   const hibernateEnabledRef = useRef(hibernateEnabled);
   hibernateEnabledRef.current = hibernateEnabled;
   const isRendererActive = isVisible || !hibernateEnabled;
@@ -1283,7 +1296,13 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         } catch (err) {
           logger.warn("Failed to serialize terminal snapshot for attach popup", err);
         }
-        bridge.respondTerminalSessionSnapshot?.(payload.requestId, snapshot);
+        bridge.respondTerminalSessionSnapshot?.(
+          payload.requestId,
+          snapshot,
+          xtermRuntimeRef.current?.getKittyKeyboardModeState(),
+          xtermRuntimeRef.current?.getKittyKeyboardProtocolEnabled()
+            ?? kittyKeyboardProtocolEnabledForSession,
+        );
       }));
     }
     if (bridge?.onTerminalSessionApplySnapshot) {
@@ -1297,6 +1316,16 @@ const TerminalComponent: React.FC<TerminalProps> = ({
           || typeof payload.contextScrollbackSnapshot !== "string"
           || typeof payload.alternateScreen !== "boolean"
         ) return false;
+        if (typeof payload.kittyKeyboardProtocolEnabled === "boolean") {
+          xtermRuntimeRef.current?.setKittyKeyboardProtocolEnabled(
+            payload.kittyKeyboardProtocolEnabled,
+          );
+        }
+        if (payload.kittyKeyboardModeState) {
+          xtermRuntimeRef.current?.restoreKittyKeyboardModeState(
+            payload.kittyKeyboardModeState,
+          );
+        }
         if (termRef.current) {
           const term = termRef.current;
           await flushPendingTerminalWritesBeforeHibernate(term);
@@ -1328,10 +1357,11 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     return () => {
       for (const unsub of unsubs) unsub();
     };
-  }, [attachExistingSession, sessionId]);
+  }, [attachExistingSession, kittyKeyboardProtocolEnabledForSession, sessionId]);
 
   const cleanupSession = async () => {
     const closingSessionId = sessionRef.current;
+    xtermRuntimeRef.current?.flushKittyKeyboardReleases();
     sessionRef.current = null;
     const disposeSessionListeners = () => {
       disposeDataRef.current?.();
@@ -1403,7 +1433,12 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         const applied = await terminalBackend.applySessionSnapshot?.(
           closingSessionId,
           snap,
-          finalContext,
+          {
+            ...finalContext,
+            kittyKeyboardModeState: xtermRuntimeRef.current?.getKittyKeyboardModeState(),
+            kittyKeyboardProtocolEnabled:
+              xtermRuntimeRef.current?.getKittyKeyboardProtocolEnabled(),
+          },
           attachAuthorization || "",
         );
         if (applied && !applied.success) throw new Error(applied.error || "Failed to apply terminal snapshot");
@@ -1761,6 +1796,10 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   const xTermRuntimeContextRef = useRef<Omit<CreateXTermRuntimeContext, "container" | "initiallyVisible"> | null>(null);
   const pluginDecorationRulesRef = useRef<readonly PluginTerminalDecorationRule[]>(Object.freeze([]));
   const pluginDecorationRefreshRef = useRef<(reason: string) => void>(() => {});
+
+  useEffect(() => () => {
+    clearKittyKeyboardBroadcastSession(sessionId);
+  }, [sessionId]);
 
   const teardown = () => {
     isBootActiveRef.current = false;
@@ -2765,6 +2804,8 @@ const TerminalComponent: React.FC<TerminalProps> = ({
 
     const startNewSession = () => {
       if (!retryStillActive()) return;
+      xtermRuntimeRef.current?.resetKittyConnectionInputState();
+      resetKittyKeyboardModeStateForSession(terminalSettingsRef);
       if (host.protocol === "serial") {
         sessionStarters.startSerial(term);
       } else if (effectiveTerminalProtocol === 'local') {
@@ -3062,6 +3103,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     fontSize: effectiveFontSize,
     terminalTheme: effectiveTheme,
     terminalSettingsRef,
+    kittyKeyboardProtocolEnabled: kittyKeyboardProtocolEnabledForSession,
     terminalBackend,
     sessionRef,
     hotkeySchemeRef,
@@ -3294,7 +3336,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     onWake: wakeFromHibernateRuntime,
   });
 
-  useTerminalEffects({ CONNECTION_TIMEOUT, Error, XTERM_PERFORMANCE_CONFIG, applyUserCursorPreference, auth, autocompleteCloseRef, autocompleteInputRef, autocompleteKeyEventRef, captureTerminalLogData, chainHosts: resolvedChainHosts, chainProgress, clearTerminalCwd, commandBufferRef, connectionLogBufferRef, containerRef, createPromptLineBreakState, createReplaySafeTerminalLogSanitizer, createXTermRuntime, deferTerminalResizeRef, disableTerminalFontZoomRef, effectiveFontSize, effectiveFontWeight, effectiveTheme, error, executeSnippetCommand, finalizeTerminalLogData, fitAddonRef, fontFamilyId, fontSize, fontWeightFixupDoneRef, forceCloseHibernatedSession, forceSyncRenderAfterResize, handleOsc52ReadRequest, handleTerminalDataCaptureOnce, hasConnectedRef, hasRuntimeRef, host, hotkeySchemeRef, hibernatedRef, identities, inWorkspace, isBootActiveRef, isBroadcastEnabledRef, isComposeBarOpen: effectiveComposeBarOpen, isConnectionAwaitingUserInput, isConnectionPastTcpDial, isFocusMode, isFocused, isLocalConnection, isNetworkDevice, isResizing: deferTerminalResize, isRestoringSelectionRef, isSearchOpen, isSerialConnection, isVisible, isVisibleRef, keyBindingsRef, keys, knownCwdRef, lastFittedSizeRef, lastToastedErrorRef, logger, mouseTrackingRef, needsHostKeyVerification, onBroadcastInputRef, onBroadcastInterruptPriorityChange, onCommandExecuted, onCommandSubmitted, onHotkeyActionRef, onOutputTriggerUserInputRef: noteOutputTriggerUserInputRef, onPluginRuntimeCwdChange: pluginAwareOnRuntimeCwdChange, onSnippetShortkeyRef, onSnippetExecutorChange, onTerminalCwdChange, onTerminalTitleChange, onTerminalBell, onTerminalFontSizeChange, paneLayoutKey, passwordPromptActiveRef, pendingAuthRef, pendingOutputScrollRef, pluginDecorationRefreshRef, pluginDecorationRules, pluginDecorationRulesRef, pluginTerminalLifecycle, pluginTerminalProviderRevision, isPluginTerminalProviderAvailable, requestPluginTerminalProviders, prepareRestoredReconnect, prevIsResizingRef, promptLineBreakStateRef, resizeSession, resolveHostAuth, resolvedFontFamily, safeFit, scriptRecorderRef: recorderRef, searchAddonRef, serialConfig, serialLineBufferRef, serializeAddonRef, sessionId, sessionRef, sessionStarters, setError, setHasMouseTracking, setHasSelection, setIsCancelling, setIsDisconnectedDialogDismissed, requestSearchFocus, setNeedsHostKeyVerification, setPendingHostKeyInfo, setPendingHostKeyRequestId, setProgressLogs, setProgressValue, setSelectionOverlayPosition, setShowLogs, setStatus, setTimeLeft, shellType, shouldEnableNativeUserInputAutoScroll, shouldProbeSessionCwd, shouldStartTerminalBackend, attachExistingSession, attachAuthorization, attachHomeWebContentsIdRef, snippetsRef, splitResizeActive: isResizing, status, statusRef, sudoAutofillRef, t, teardown, telnetLocalEchoRef, termRef, terminalAltKeyOptions, terminalBackend, terminalContextActionsRef, terminalCwdTracker, terminalDataCapturedRef, terminalLogSanitizerRef, terminalSettings, terminalSettingsRef, toHostKeyInfo, toast, updateStatus, useEffect, useLayoutEffect, workspaceId, xtermRuntimeRef, zmodem, zmodemToastedRef, restoreState });
+  useTerminalEffects({ CONNECTION_TIMEOUT, Error, XTERM_PERFORMANCE_CONFIG, applyUserCursorPreference, auth, autocompleteCloseRef, autocompleteInputRef, autocompleteKeyEventRef, captureTerminalLogData, chainHosts: resolvedChainHosts, chainProgress, clearTerminalCwd, commandBufferRef, connectionLogBufferRef, containerRef, createPromptLineBreakState, createReplaySafeTerminalLogSanitizer, createXTermRuntime, deferTerminalResizeRef, disableTerminalFontZoomRef, effectiveFontSize, effectiveFontWeight, effectiveTheme, error, executeSnippetCommand, finalizeTerminalLogData, fitAddonRef, fontFamilyId, fontSize, fontWeightFixupDoneRef, forceCloseHibernatedSession, forceSyncRenderAfterResize, handleOsc52ReadRequest, handleTerminalDataCaptureOnce, hasConnectedRef, hasRuntimeRef, host, hotkeySchemeRef, hibernatedRef, identities, inWorkspace, isBootActiveRef, isBroadcastEnabledRef, isComposeBarOpen: effectiveComposeBarOpen, isConnectionAwaitingUserInput, isConnectionPastTcpDial, isFocusMode, isFocused, isLocalConnection, isNetworkDevice, isResizing: deferTerminalResize, isRestoringSelectionRef, isSearchOpen, isSerialConnection, isVisible, isVisibleRef, keyBindingsRef, keys, kittyKeyboardProtocolEnabledForSession, knownCwdRef, lastFittedSizeRef, lastToastedErrorRef, logger, mouseTrackingRef, needsHostKeyVerification, onBroadcastInputRef, onBroadcastInterruptPriorityChange, onCommandExecuted, onCommandSubmitted, onHotkeyActionRef, onOutputTriggerUserInputRef: noteOutputTriggerUserInputRef, onPluginRuntimeCwdChange: pluginAwareOnRuntimeCwdChange, onSnippetShortkeyRef, onSnippetExecutorChange, onTerminalCwdChange, onTerminalTitleChange, onTerminalBell, onTerminalFontSizeChange, paneLayoutKey, passwordPromptActiveRef, pendingAuthRef, pendingOutputScrollRef, pluginDecorationRefreshRef, pluginDecorationRules, pluginDecorationRulesRef, pluginTerminalLifecycle, pluginTerminalProviderRevision, isPluginTerminalProviderAvailable, requestPluginTerminalProviders, prepareRestoredReconnect, prevIsResizingRef, promptLineBreakStateRef, resizeSession, resolveHostAuth, resolvedFontFamily, safeFit, scriptRecorderRef: recorderRef, searchAddonRef, serialConfig, serialLineBufferRef, serializeAddonRef, sessionId, sessionRef, sessionStarters, setError, setHasMouseTracking, setHasSelection, setIsCancelling, setIsDisconnectedDialogDismissed, requestSearchFocus, setNeedsHostKeyVerification, setPendingHostKeyInfo, setPendingHostKeyRequestId, setProgressLogs, setProgressValue, setSelectionOverlayPosition, setShowLogs, setStatus, setTimeLeft, shellType, shouldEnableNativeUserInputAutoScroll, shouldProbeSessionCwd, shouldStartTerminalBackend, attachExistingSession, attachAuthorization, attachHomeWebContentsIdRef, snippetsRef, splitResizeActive: isResizing, status, statusRef, sudoAutofillRef, t, teardown, telnetLocalEchoRef, termRef, terminalAltKeyOptions, terminalBackend, terminalContextActionsRef, terminalCwdTracker, terminalDataCapturedRef, terminalLogSanitizerRef, terminalSettings, terminalSettingsRef, toHostKeyInfo, toast, updateStatus, useEffect, useLayoutEffect, workspaceId, xtermRuntimeRef, zmodem, zmodemToastedRef, restoreState });
 
   return (
     <>

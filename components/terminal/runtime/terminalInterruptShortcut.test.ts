@@ -23,6 +23,17 @@ test("urgent interrupt follows the physical C key on non-Latin layouts", () => {
   assert.equal(shouldUseUrgentTerminalInterrupt(key({ key: "с" }), { hasSelection: false }), true);
 });
 
+test("urgent interrupt prefers an active ASCII layout character over its physical key", () => {
+  assert.equal(
+    shouldUseUrgentTerminalInterrupt(key({ key: "c", code: "KeyJ" }), { hasSelection: false }),
+    true,
+  );
+  assert.equal(
+    shouldUseUrgentTerminalInterrupt(key({ key: "j", code: "KeyC" }), { hasSelection: false }),
+    false,
+  );
+});
+
 test("urgent interrupt leaves copy shortcuts and modified chords alone", () => {
   assert.equal(shouldUseUrgentTerminalInterrupt(key(), { hasSelection: true }), false);
   assert.equal(shouldUseUrgentTerminalInterrupt(key({ shiftKey: true }), { hasSelection: false }), false);

@@ -72,6 +72,7 @@ import {
   shouldDelayAutoRunSnippetInput,
   type TerminalBroadcastInputOptions,
 } from './terminal/terminalHelpers';
+import { dispatchKittyKeyboardBroadcastInput } from './terminal/runtime/kittyKeyboardBroadcast';
 import { Button } from './ui/button';
 import { resolveScriptsSidePanelShortcutIntent } from '../application/state/resolveSnippetsShortcutIntent';
 import { resolveSidePanelToggleIntent } from '../application/state/resolveSidePanelToggleIntent';
@@ -911,13 +912,32 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     sourceSessionId: string,
     options?: TerminalBroadcastInputOptions,
   ) => {
-    const sourceSession = sessionsRef.current.find((session) => session.id === sourceSessionId);
+    const directTargetIds = options?.kittyKeyboardTargetSessionIds;
+    const sourceSession = directTargetIds
+      ? undefined
+      : sessionsRef.current.find((session) => session.id === sourceSessionId);
     const workspaceId = sourceSession?.workspaceId;
-    if (!workspaceId) return;
+    if (!directTargetIds && !workspaceId) return [];
+    const directTargetSet = directTargetIds ? new Set(directTargetIds) : null;
+    const deliveredSessionIds: string[] = [];
 
     for (const session of sessionsRef.current) {
-      if (session.workspaceId !== workspaceId || session.id === sourceSessionId) continue;
+      if (directTargetSet) {
+        if (!directTargetSet.has(session.id)) continue;
+      } else if (session.workspaceId !== workspaceId || session.id === sourceSessionId) {
+        continue;
+      }
       if (!canUseDirectSessionWriteFallback(session)) continue;
+
+      if (options?.kittyKeyboardInput) {
+        dispatchKittyKeyboardBroadcastInput(session.id, options.kittyKeyboardInput, {
+          beforeUrgentInterrupt: () => {
+            broadcastInterruptPrioritizersRef.current.get(session.id)?.();
+          },
+        });
+        deliveredSessionIds.push(session.id);
+        continue;
+      }
 
       const lineDelayMs = options?.lineDelayMs;
       if (data === "\x03" && terminalBackend.interruptSession) {
@@ -929,7 +949,9 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
         automated: true,
         ...(lineDelayMs ? { lineDelayMs } : {}),
       });
+      deliveredSessionIds.push(session.id);
     }
+    return deliveredSessionIds;
   }, [terminalBackend]);
 
   const handleCommandSubmitted = useCallback((command: string, _hostId: string, _hostLabel: string, sessionId: string) => {

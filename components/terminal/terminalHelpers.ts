@@ -19,6 +19,7 @@ import type {
   TerminalSettings,
   TerminalTheme,
 } from "../../types";
+import type { KittyKeyboardBroadcastInput } from "./runtime/kittyKeyboardBroadcast";
 
 export const MAX_CONNECTION_LOG_DATA_CHARS = 1_000_000;
 export const AUTO_RUN_SNIPPET_LINE_DELAY_MS = 250;
@@ -26,6 +27,8 @@ export const AUTO_RUN_SNIPPET_LINE_DELAY_MS = 250;
 export interface TerminalBroadcastInputOptions {
   noAutoRun?: boolean;
   lineDelayMs?: number;
+  kittyKeyboardInput?: KittyKeyboardBroadcastInput;
+  kittyKeyboardTargetSessionIds?: string[];
 }
 
 export { resolveSessionTabTitle };
@@ -199,7 +202,7 @@ export interface TerminalProps {
     data: string,
     sourceSessionId: string,
     options?: TerminalBroadcastInputOptions,
-  ) => void;
+  ) => string[] | void;
   onSnippetExecutorChange?: (
     sessionId: string,
     executor: ((
