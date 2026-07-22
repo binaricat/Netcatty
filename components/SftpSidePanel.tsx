@@ -1147,13 +1147,41 @@ const SftpSidePanelInteractiveBody: React.FC<SftpSidePanelInteractiveBodyProps> 
     }
     if (initialFollowSyncedConnRef.current === connection.id) return;
     initialFollowSyncedConnRef.current = connection.id;
-    void handleGoToTerminalCwd();
+    const expectedConnectionId = connection.id;
+    // Snapshot the (possibly stale) cached cwd so we can neutralize it below.
+    const staleTerminalCwd = activeTerminalCwdRef.current;
+    const syncGeneration = followSyncGenerationRef.current;
+    void (async () => {
+      const cwd = await onGetTerminalCwd?.({ preferFreshBackend: true });
+      if (!cwd || syncGeneration !== followSyncGenerationRef.current) return;
+      const live = sftpRef.current.leftPane.connection;
+      if (!live || live.id !== expectedConnectionId || live.status !== "connected") return;
+      // Mark the stale cached cwd as already handled BEFORE navigating, so a
+      // concurrent normal follow sync cannot yank the pane back to the login
+      // home while this resync runs (or later when closing an editor toggles
+      // hasActiveWork). invalidateInFlightFollowSync clears this once the live
+      // activeTerminalCwd actually changes, letting follow resume. #2335
+      handledFollowRef.current = {
+        connectionId: expectedConnectionId,
+        terminalCwd: staleTerminalCwd && staleTerminalCwd !== cwd ? staleTerminalCwd : cwd,
+      };
+      if (live.currentPath === cwd) return;
+      const navigateResult = await sftpRef.current.navigateTo("left", cwd);
+      if (syncGeneration !== followSyncGenerationRef.current) return;
+      const now = sftpRef.current.leftPane.connection;
+      if (!now || now.id !== expectedConnectionId) return;
+      if (navigateResult === "failed") {
+        blockedFollowRef.current = { connectionId: expectedConnectionId, terminalCwd: cwd };
+      } else if (navigateResult === "reached") {
+        blockedFollowRef.current = null;
+      }
+    })();
   }, [
     canFollowTerminalCwd,
     effectiveFollowTerminalCwd,
-    handleGoToTerminalCwd,
     hasActiveWork,
     isVisible,
+    onGetTerminalCwd,
     sftpRef,
     sftp.leftPane.connection?.id,
     sftp.leftPane.connection?.isLocal,
