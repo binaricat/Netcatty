@@ -5,6 +5,7 @@ import {
   mergeLatestFollowTerminalCwdHostSetting,
   resolveHostFollowTerminalCwd,
   resolveSftpFollowTerminalCwdTargetHost,
+  runInitialFollowTerminalCwdSync,
   shouldApplyFollowTerminalCwdSyncResult,
   shouldClearBlockedFollowOnReach,
   shouldFollowTerminalCwdNavigate,
@@ -364,4 +365,69 @@ test("SftpSidePanel invalidates follow state whenever the follow toggle changes"
   assert.ok(toggleHandler);
   assert.match(toggleHandler[0], /invalidateInFlightFollowSync\(\);/);
   assert.doesNotMatch(toggleHandler[0], /if \(!nextEnabled\)/);
+});
+
+test("first-open sync navigates from stale home to a backend-confirmed cwd", async () => {
+  let handled = null;
+  let blocked = null;
+  let navigatedTo = null;
+  const connection = { id: "conn-1", currentPath: "/home/alice", status: "connected" };
+
+  const completed = await runInitialFollowTerminalCwdSync({
+    expectedConnectionId: "conn-1",
+    staleTerminalCwd: "/home/alice",
+    getFreshTerminalCwd: async () => "/srv/project",
+    isEligible: () => true,
+    getConnection: () => connection,
+    navigate: async (cwd, shouldApply) => {
+      assert.equal(shouldApply(), true);
+      navigatedTo = cwd;
+      connection.currentPath = cwd;
+      return "reached";
+    },
+    setHandled: (value) => { handled = value; },
+    setBlocked: (value) => { blocked = value; },
+  });
+
+  assert.equal(completed, true);
+  assert.equal(navigatedTo, "/srv/project");
+  assert.deepEqual(handled, { connectionId: "conn-1", terminalCwd: "/home/alice" });
+  assert.equal(blocked, null);
+});
+
+test("first-open sync can retry a failed probe and cancels stale results", async () => {
+  let attempts = 0;
+  let eligible = true;
+  let navigations = 0;
+  const connection = { id: "conn-1", currentPath: "/home/alice", status: "connected" };
+  const run = () => runInitialFollowTerminalCwdSync({
+    expectedConnectionId: "conn-1",
+    staleTerminalCwd: "/home/alice",
+    getFreshTerminalCwd: async () => (++attempts === 1 ? null : "/srv/project"),
+    isEligible: () => eligible,
+    getConnection: () => connection,
+    navigate: async () => { navigations += 1; return "reached"; },
+    setHandled: () => {},
+    setBlocked: () => {},
+  });
+
+  assert.equal(await run(), false);
+  assert.equal(await run(), true);
+  assert.equal(attempts, 2);
+  assert.equal(navigations, 1);
+
+  eligible = false;
+  assert.equal(await run(), false);
+  assert.equal(navigations, 1);
+});
+
+test("SftpSidePanel bounds first-open retries and disables cached fallback", () => {
+  const source = readComponentSource("../SftpSidePanel.tsx");
+
+  assert.match(
+    source,
+    /preferFreshBackend: true,\n\s+allowRendererFallback: false/,
+  );
+  assert.match(source, /initialFollowRetryRef\.current\.attempts >= 3/);
+  assert.match(source, /setInitialFollowRetryNonce\(\(value\) => value \+ 1\)/);
 });

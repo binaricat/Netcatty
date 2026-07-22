@@ -55,6 +55,18 @@ test("resolvePreferredTerminalCwd falls back to renderer cwd when fresh backend 
   assert.equal(cwd, "/srv/app/current");
 });
 
+test("resolvePreferredTerminalCwd can require a backend-confirmed cwd", async () => {
+  const cwd = await resolvePreferredTerminalCwd({
+    rendererCwd: "/srv/stale",
+    sessionId: "session-1",
+    preferFreshBackend: true,
+    allowRendererFallback: false,
+    getSessionPwd: async () => ({ success: false, error: "temporary failure" }),
+  });
+
+  assert.equal(cwd, null);
+});
+
 test("resolvePreferredTerminalCwd falls back to backend pwd when no renderer cwd is known", async () => {
   const cwd = await resolvePreferredTerminalCwd({
     rendererCwd: undefined,

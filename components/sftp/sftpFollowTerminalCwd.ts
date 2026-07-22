@@ -30,6 +30,69 @@ export type SftpFollowTerminalCwdSyncResultContext = {
   requireLiveTerminalCwd?: boolean;
 };
 
+type InitialFollowConnection = {
+  id: string;
+  currentPath?: string | null;
+  status: string;
+  isLocal?: boolean;
+};
+
+type InitialFollowSyncOptions = {
+  expectedConnectionId: string;
+  staleTerminalCwd?: string | null;
+  getFreshTerminalCwd: () => Promise<string | null | undefined>;
+  isEligible: () => boolean;
+  getConnection: () => InitialFollowConnection | null | undefined;
+  navigate: (
+    cwd: string,
+    shouldApply: () => boolean,
+  ) => Promise<"reached" | "failed" | "aborted" | "superseded">;
+  setHandled: (value: SftpFollowTerminalCwdBlock) => void;
+  setBlocked: (value: SftpFollowTerminalCwdBlock | null) => void;
+};
+
+/** Run one guarded first-open sync. False means the caller may retry. */
+export const runInitialFollowTerminalCwdSync = async ({
+  expectedConnectionId,
+  staleTerminalCwd,
+  getFreshTerminalCwd,
+  isEligible,
+  getConnection,
+  navigate,
+  setHandled,
+  setBlocked,
+}: InitialFollowSyncOptions): Promise<boolean> => {
+  const cwd = await getFreshTerminalCwd();
+  if (!cwd || !isEligible()) return false;
+
+  const live = getConnection();
+  if (!live || live.id !== expectedConnectionId || live.status !== "connected" || live.isLocal) {
+    return false;
+  }
+
+  setHandled({
+    connectionId: expectedConnectionId,
+    terminalCwd: staleTerminalCwd && staleTerminalCwd !== cwd ? staleTerminalCwd : cwd,
+  });
+  if (live.currentPath === cwd) return true;
+
+  const navigateResult = await navigate(cwd, isEligible);
+  if (!isEligible()) return false;
+  const current = getConnection();
+  if (!current || current.id !== expectedConnectionId || current.status !== "connected") {
+    return false;
+  }
+  if (navigateResult === "failed") {
+    setBlocked({ connectionId: expectedConnectionId, terminalCwd: cwd });
+    return true;
+  }
+  if (navigateResult === "reached") {
+    setBlocked(null);
+    return true;
+  }
+  return navigateResult === "superseded";
+};
+
 export const resolveHostFollowTerminalCwd = (
   hostFollowTerminalCwd: boolean | undefined,
   globalFollowTerminalCwd: boolean,

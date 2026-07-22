@@ -873,12 +873,16 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     terminalSettings,
   });
 
-  const resolveSftpInitialPath = useCallback(async (options?: { preferFreshBackend?: boolean }): Promise<string | undefined> => {
+  const resolveSftpInitialPath = useCallback(async (options?: {
+    preferFreshBackend?: boolean;
+    allowRendererFallback?: boolean;
+  }): Promise<string | undefined> => {
     const cwd = await resolvePreferredTerminalCwd({
       rendererCwd: terminalCwdTracker.getRendererCwd(),
       sessionId: sessionRef.current,
       getSessionPwd: (id, options) => terminalBackend.getSessionPwd(id, options),
       preferFreshBackend: options?.preferFreshBackend,
+      allowRendererFallback: options?.allowRendererFallback,
     });
     return cwd ?? undefined;
   }, [terminalBackend, terminalCwdTracker]);

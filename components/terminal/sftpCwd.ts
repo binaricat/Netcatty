@@ -13,6 +13,8 @@ type ResolvePreferredTerminalCwdOptions = {
   getSessionPwd: (sessionId: string, options?: SessionPwdOptions) => Promise<SessionPwdResult>;
   /** When true, always probe the backend instead of trusting renderer cwd. */
   preferFreshBackend?: boolean;
+  /** When false, a failed backend probe must not return a cached renderer cwd. */
+  allowRendererFallback?: boolean;
 };
 
 const normalizeCwd = (cwd?: string | null): string | null => {
@@ -46,10 +48,11 @@ export const resolvePreferredTerminalCwd = async ({
   sessionId,
   getSessionPwd,
   preferFreshBackend = false,
+  allowRendererFallback = true,
 }: ResolvePreferredTerminalCwdOptions): Promise<string | null> => {
   const knownCwd = normalizeCwd(rendererCwd);
   if (!preferFreshBackend && knownCwd) return knownCwd;
-  if (!sessionId) return null;
+  if (!sessionId) return allowRendererFallback ? knownCwd : null;
 
   try {
     const result = await getSessionPwd(
@@ -57,9 +60,9 @@ export const resolvePreferredTerminalCwd = async ({
       preferFreshBackend ? { allowHomeFallback: false } : undefined,
     );
     const backendCwd = result.success ? normalizeCwd(result.cwd) : null;
-    return backendCwd ?? knownCwd;
+    return backendCwd ?? (allowRendererFallback ? knownCwd : null);
   } catch {
-    return knownCwd;
+    return allowRendererFallback ? knownCwd : null;
   }
 };
 

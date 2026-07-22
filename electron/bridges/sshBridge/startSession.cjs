@@ -145,7 +145,8 @@ function createStartSessionApi(ctx) {
 ps_output=$(ps -e -o pid=,ppid=,tty=,comm= 2>/dev/null) || exit 69
 {
   printf '%s\n' "$ps_output" | awk -v pp="$PPID" -v self="$SELF" '
-    $1 != self && $2 == pp && $3 != "?" && $4 ~ /^-?(ba|z|fi|k|da|a|c|tc)?sh$/ { print $1 }
+    function isshell(c) { sub(/^.*\\//, "", c); sub(/^-/, "", c); return c ~ /^(ba|z|fi|k|da|a|c|tc)?sh$/ }
+    $1 != self && $2 == pp && $3 !~ /^\\?+$/ && isshell($4) { print $1 }
   '
   if [ -r /proc/$SELF/environ ]; then
     conn=$(tr '\\0' '\\n' < /proc/$SELF/environ 2>/dev/null | sed -n 's/^SSH_CONNECTION=//p' | head -n1)

@@ -1,4 +1,56 @@
 /* eslint-disable no-undef */
+function decodeLsofFileName(value) {
+  if (typeof value !== 'string') return null;
+  // lsof's caret form is ambiguous: a BEL byte and the literal characters
+  // "^G" have the same output. Reject it instead of navigating to a guessed path.
+  if (/\^[\x40-\x5f?]/.test(value)) return null;
+  const bytes = [];
+  const simpleEscapes = {
+    b: 0x08,
+    f: 0x0c,
+    n: 0x0a,
+    r: 0x0d,
+    t: 0x09,
+    v: 0x0b,
+    '\\': 0x5c,
+  };
+
+  for (let index = 0; index < value.length; index += 1) {
+    const char = value[index];
+    if (char !== '\\') {
+      bytes.push(...Buffer.from(char));
+      continue;
+    }
+    const escaped = value[index + 1];
+    if (!escaped) return null;
+    if (Object.prototype.hasOwnProperty.call(simpleEscapes, escaped)) {
+      bytes.push(simpleEscapes[escaped]);
+      index += 1;
+      continue;
+    }
+    if (escaped === 'x') {
+      const hex = value.slice(index + 2, index + 4);
+      if (!/^[0-9a-fA-F]{2}$/.test(hex)) return null;
+      bytes.push(Number.parseInt(hex, 16));
+      index += 3;
+      continue;
+    }
+    const octal = value.slice(index + 1).match(/^[0-7]{1,3}/)?.[0];
+    if (octal) {
+      bytes.push(Number.parseInt(octal, 8));
+      index += octal.length;
+      continue;
+    }
+    return null;
+  }
+
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(Uint8Array.from(bytes));
+  } catch {
+    return null;
+  }
+}
+
 function createSessionOpsApi(ctx) {
   with (ctx) {
     function getTcpLatencyTarget(session) {
@@ -255,8 +307,17 @@ function createSessionOpsApi(ctx) {
       // shell are both children of the same per-connection sshd process,
       // so we find the shell as a sibling via $PPID.
       return new Promise((resolve) => {
+        let settled = false;
+        let activeStream = null;
+        const settle = (result) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          resolve(result);
+        };
         const timer = setTimeout(() => {
-          resolve({ success: false, error: 'Timeout getting pwd' });
+          settle({ success: false, error: 'Timeout getting pwd' });
+          try { activeStream?.close(); } catch { /* ignore */ }
         }, 5000);
     
         // POSIX sh script that:
@@ -290,8 +351,9 @@ function createSessionOpsApi(ctx) {
     # entirely (#1123).
     find_login_shell() {
       _shell=$(ps -e -o pid=,ppid=,tty=,comm= 2>/dev/null | awk -v pp="$1" -v self="$SELF" '
-        $1 != self && $2 == pp && $4 ~ /^-?(ba|z|fi|k|da|a|c|tc)?sh$/ {
-          if ($3 != "?") { print $1; found=1; exit }
+        function isshell(c) { sub(/^.*\\//, "", c); sub(/^-/, "", c); return c ~ /^(ba|z|fi|k|da|a|c|tc)?sh$/ }
+        $1 != self && $2 == pp && isshell($4) {
+          if ($3 !~ /^\\?+$/) { print $1; found=1; exit }
           if (any == "") any=$1
         }
         END { if (!found && any != "") print any }
@@ -339,7 +401,7 @@ function createSessionOpsApi(ctx) {
     find_active_shell() {
       ps -e -o pid=,ppid=,stat=,comm= 2>/dev/null | awk -v start="$1" '
         { pp[$1]=$2; st[$1]=$3; cm[$1]=$4; ord[NR]=$1 }
-        function isshell(c) { return c ~ /^-?(ba|z|fi|k|da|a|c|tc)?sh$/ }
+        function isshell(c) { sub(/^.*\\//, "", c); sub(/^-/, "", c); return c ~ /^(ba|z|fi|k|da|a|c|tc)?sh$/ }
         function depth(p,   d) { d=0; while (p != "" && d < 64) { if (p == start) return d; p=pp[p]; d++ } return -1 }
         END {
           best=-1; bp="";
@@ -355,16 +417,16 @@ function createSessionOpsApi(ctx) {
       '
     }
     # Read a process's cwd. Linux exposes it via /proc; systems without a
-    # readable /proc (macOS / *BSD) fall back to lsof so the SFTP
-    # follow-terminal probe also works on those remotes (#2335). Both paths
+    # readable /proc fall back to lsof so the SFTP follow-terminal probe also
+    # works on macOS and on BSD hosts that provide lsof (#2335). Both paths
     # only see same-uid processes, so a su'd / sudo'd shell owned by another
     # user stays unreadable here (handled by the login-shell fallback below).
     read_shell_cwd() {
       _rc_cwd=$(readlink "/proc/$1/cwd" 2>/dev/null)
       if [ -n "$_rc_cwd" ]; then printf '%s\\n' "$_rc_cwd"; return 0; fi
       if command -v lsof >/dev/null 2>&1; then
-        _rc_cwd=$(lsof -a -p "$1" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -n1)
-        if [ -n "$_rc_cwd" ]; then printf '%s\\n' "$_rc_cwd"; return 0; fi
+        _rc_cwd=$(LC_ALL=C lsof -a -p "$1" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -n1)
+        if [ -n "$_rc_cwd" ]; then printf 'NETCATTY_LSOF_CWD=%s\\n' "$_rc_cwd"; return 0; fi
       fi
       return 1
     }
@@ -406,32 +468,44 @@ function createSessionOpsApi(ctx) {
     exit 1`;
         const cmd = `exec sh -c ${quoteShellArg(posixScript)}`;
     
-        session.conn.exec(cmd, (err, stream) => {
-          if (err) {
-            clearTimeout(timer);
-            log('[getSessionPwd] exec error:', err.message);
-            resolve({ success: false, error: err.message });
-            return;
-          }
-          let out = '';
-          let errOut = '';
-          stream.on('data', (d) => { out += d.toString(); });
-          stream.stderr?.on('data', (d) => { errOut += d.toString(); });
-          stream.on('close', (code) => {
-            clearTimeout(timer);
-            const path = out.trim();
-            const loginPidMatch = errOut.match(/(?:^|\n)NETCATTY_LOGIN_PID=(\d+)(?:\n|$)/);
-            if (loginPidMatch) {
-              session.shellPid = loginPidMatch[1];
+        try {
+          session.conn.exec(cmd, (err, stream) => {
+            if (settled) {
+              try { stream?.close(); } catch { /* ignore */ }
+              return;
             }
-            log('[getSessionPwd]', { stdout: path, stderr: errOut.trim(), exitCode: code });
-            if (path && path.startsWith('/')) {
-              resolve({ success: true, cwd: path });
-            } else {
-              resolve({ success: false, error: 'Could not determine cwd' });
+            if (err) {
+              log('[getSessionPwd] exec error:', err.message);
+              settle({ success: false, error: err.message });
+              return;
             }
+            activeStream = stream;
+            let out = '';
+            let errOut = '';
+            stream.on('data', (d) => { out += d.toString(); });
+            stream.stderr?.on('data', (d) => { errOut += d.toString(); });
+            stream.on('close', (code) => {
+              if (settled) return;
+              const rawPath = out.replace(/\r?\n$/, '');
+              const lsofPrefix = 'NETCATTY_LSOF_CWD=';
+              const path = rawPath.startsWith(lsofPrefix)
+                ? decodeLsofFileName(rawPath.slice(lsofPrefix.length))
+                : rawPath;
+              const loginPidMatch = errOut.match(/(?:^|\n)NETCATTY_LOGIN_PID=(\d+)(?:\n|$)/);
+              if (loginPidMatch) {
+                session.shellPid = loginPidMatch[1];
+              }
+              log('[getSessionPwd]', { stdout: rawPath, stderr: errOut.trim(), exitCode: code });
+              if (path && path.startsWith('/')) {
+                settle({ success: true, cwd: path });
+              } else {
+                settle({ success: false, error: 'Could not determine cwd' });
+              }
+            });
           });
-        });
+        } catch (err) {
+          settle({ success: false, error: err?.message || String(err) });
+        }
       });
     }
     
@@ -1270,4 +1344,4 @@ function createSessionOpsApi(ctx) {
   }
 }
 
-module.exports = { createSessionOpsApi };
+module.exports = { createSessionOpsApi, decodeLsofFileName };

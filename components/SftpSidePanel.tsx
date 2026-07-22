@@ -43,6 +43,7 @@ import { keepOnlyPaneSelections } from "./sftp/hooks/selectionScope";
 import { KeyBinding, HotkeyScheme } from "../domain/models";
 import {
   mergeLatestFollowTerminalCwdHostSetting,
+  runInitialFollowTerminalCwdSync,
   resolveHostFollowTerminalCwd,
   shouldApplyFollowTerminalCwdSyncResult,
   shouldClearBlockedFollowOnReach,
@@ -95,7 +96,10 @@ interface SftpSidePanelProps {
   keyBindings: KeyBinding[];
   editorWordWrap: boolean;
   setEditorWordWrap: (value: boolean) => void;
-  onGetTerminalCwd?: (options?: { preferFreshBackend?: boolean }) => Promise<string | null>;
+  onGetTerminalCwd?: (options?: {
+    preferFreshBackend?: boolean;
+    allowRendererFallback?: boolean;
+  }) => Promise<string | null>;
   activeTerminalCwd?: string | null;
   sftpFollowTerminalCwd?: boolean;
   onSftpFollowTerminalCwdChange?: (enabled: boolean, host?: Host | null) => void;
@@ -696,7 +700,10 @@ type SftpSidePanelInteractiveBodyProps = {
   keyBindings: KeyBinding[];
   editorWordWrap: boolean;
   setEditorWordWrap: (value: boolean) => void;
-  onGetTerminalCwd?: (options?: { preferFreshBackend?: boolean }) => Promise<string | null>;
+  onGetTerminalCwd?: (options?: {
+    preferFreshBackend?: boolean;
+    allowRendererFallback?: boolean;
+  }) => Promise<string | null>;
   activeTerminalCwd?: string | null;
   sftpFollowTerminalCwd: boolean;
   onSftpFollowTerminalCwdChange?: (enabled: boolean, host?: Host | null) => void;
@@ -1135,9 +1142,30 @@ const SftpSidePanelInteractiveBody: React.FC<SftpSidePanelInteractiveBodyProps> 
   // stale cache) and navigate to the terminal's real cwd. Reset on hide so
   // reopening after another `cd` resyncs again.
   const initialFollowSyncedConnRef = useRef<string | null>(null);
+  const initialFollowRetryRef = useRef<{ connectionId: string | null; attempts: number }>({
+    connectionId: null,
+    attempts: 0,
+  });
+  const initialFollowRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const initialFollowMountedRef = useRef(true);
+  const [initialFollowRetryNonce, setInitialFollowRetryNonce] = useState(0);
   useEffect(() => {
-    if (!isVisible) initialFollowSyncedConnRef.current = null;
-  }, [isVisible]);
+    initialFollowMountedRef.current = true;
+    return () => {
+      initialFollowMountedRef.current = false;
+      if (initialFollowRetryTimerRef.current) clearTimeout(initialFollowRetryTimerRef.current);
+    };
+  }, []);
+  useEffect(() => {
+    if (!isVisible || initialFollowRetryRef.current.connectionId !== connectionId) {
+      initialFollowSyncedConnRef.current = null;
+      initialFollowRetryRef.current = { connectionId, attempts: 0 };
+      if (initialFollowRetryTimerRef.current) {
+        clearTimeout(initialFollowRetryTimerRef.current);
+        initialFollowRetryTimerRef.current = null;
+      }
+    }
+  }, [connectionId, isVisible]);
   useEffect(() => {
     if (!effectiveFollowTerminalCwd || !canFollowTerminalCwd || !isVisible || hasActiveWork) return;
     const connection = sftpRef.current.leftPane.connection;
@@ -1150,6 +1178,11 @@ const SftpSidePanelInteractiveBody: React.FC<SftpSidePanelInteractiveBodyProps> 
       return;
     }
     if (initialFollowSyncedConnRef.current === connection.id) return;
+    if (initialFollowRetryRef.current.connectionId !== connection.id) {
+      initialFollowRetryRef.current = { connectionId: connection.id, attempts: 0 };
+    }
+    if (initialFollowRetryRef.current.attempts >= 3) return;
+    initialFollowRetryRef.current.attempts += 1;
     initialFollowSyncedConnRef.current = connection.id;
     const expectedConnectionId = connection.id;
     // Snapshot the (possibly stale) cached cwd so we can neutralize it below.
@@ -1159,56 +1192,61 @@ const SftpSidePanelInteractiveBody: React.FC<SftpSidePanelInteractiveBodyProps> 
     // visible, and no interactive work has begun. Re-checked live via refs so a
     // probe that resolves after the panel is hidden or an editor/dialog opens
     // does not move the pane while follow should be paused (#2335).
-    const followStillEligible = () => (
-      syncGeneration === followSyncGenerationRef.current
+    const followCurrentlyEligible = () => (
+      initialFollowMountedRef.current
       && effectiveFollowTerminalCwdRef.current
       && canFollowTerminalCwdRef.current
       && isVisibleRef.current
       && !hasActiveWorkRef.current
-      && (sftpRef.current.leftPane.connection?.id ?? null) === expectedConnectionId
+      && sftpRef.current.leftPane.connection?.id === expectedConnectionId
+      && !sftpRef.current.leftPane.connection?.isLocal
+      && sftpRef.current.leftPane.connection?.status === "connected"
     );
-    void (async () => {
-      const cwd = await onGetTerminalCwd?.({ preferFreshBackend: true });
-      if (!followStillEligible()) {
-        // Paused/hidden/superseded mid-probe: allow a retry once eligible again
-        // instead of leaving this connection permanently un-synced.
-        if (initialFollowSyncedConnRef.current === expectedConnectionId) {
-          initialFollowSyncedConnRef.current = null;
-        }
+    const followStillEligible = () => (
+      syncGeneration === followSyncGenerationRef.current
+      && followCurrentlyEligible()
+    );
+    const clearAttemptAndRetry = () => {
+      if (initialFollowSyncedConnRef.current === expectedConnectionId) {
+        initialFollowSyncedConnRef.current = null;
+      }
+      if (
+        !initialFollowMountedRef.current
+        || !followCurrentlyEligible()
+        || initialFollowRetryRef.current.attempts >= 3
+      ) {
         return;
       }
-      if (!cwd) return;
-      const live = sftpRef.current.leftPane.connection;
-      if (!live || live.id !== expectedConnectionId || live.status !== "connected") return;
-      // Mark the stale cached cwd as already handled BEFORE navigating, so a
-      // concurrent normal follow sync cannot yank the pane back to the login
-      // home while this resync runs (or later when closing an editor toggles
-      // hasActiveWork). invalidateInFlightFollowSync clears this once the live
-      // activeTerminalCwd actually changes, letting follow resume. #2335
-      handledFollowRef.current = {
-        connectionId: expectedConnectionId,
-        terminalCwd: staleTerminalCwd && staleTerminalCwd !== cwd ? staleTerminalCwd : cwd,
-      };
-      if (live.currentPath === cwd) return;
-      const navigateResult = await sftpRef.current.navigateTo("left", cwd, {
-        shouldApply: followStillEligible,
-      });
-      if (!followStillEligible()) return;
-      const now = sftpRef.current.leftPane.connection;
-      if (!now || now.id !== expectedConnectionId) return;
-      if (navigateResult === "failed") {
-        blockedFollowRef.current = { connectionId: expectedConnectionId, terminalCwd: cwd };
-      } else if (navigateResult === "reached") {
-        blockedFollowRef.current = null;
-      }
-    })();
+      if (initialFollowRetryTimerRef.current) clearTimeout(initialFollowRetryTimerRef.current);
+      initialFollowRetryTimerRef.current = setTimeout(() => {
+        initialFollowRetryTimerRef.current = null;
+        setInitialFollowRetryNonce((value) => value + 1);
+      }, 250);
+    };
+    void runInitialFollowTerminalCwdSync({
+      expectedConnectionId,
+      staleTerminalCwd,
+      getFreshTerminalCwd: () => onGetTerminalCwd?.({
+        preferFreshBackend: true,
+        allowRendererFallback: false,
+      }),
+      isEligible: followStillEligible,
+      getConnection: () => sftpRef.current.leftPane.connection,
+      navigate: (cwd, shouldApply) => sftpRef.current.navigateTo("left", cwd, { shouldApply }),
+      setHandled: (value) => { handledFollowRef.current = value; },
+      setBlocked: (value) => { blockedFollowRef.current = value; },
+    }).then((completed) => {
+      if (!completed) clearAttemptAndRetry();
+    });
   }, [
     canFollowTerminalCwd,
     effectiveFollowTerminalCwd,
     hasActiveWork,
+    initialFollowRetryNonce,
     isVisible,
     onGetTerminalCwd,
     sftpRef,
+    activeTerminalCwd,
     sftp.leftPane.connection?.id,
     sftp.leftPane.connection?.isLocal,
     sftp.leftPane.connection?.status,

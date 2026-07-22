@@ -1146,13 +1146,17 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   }, [onSetWorkspaceFocusedSession]);
 
   // Get the focused terminal's current working directory
-  const getTerminalCwd = useCallback(async (options?: { preferFreshBackend?: boolean }): Promise<string | null> => {
+  const getTerminalCwd = useCallback(async (options?: {
+    preferFreshBackend?: boolean;
+    allowRendererFallback?: boolean;
+  }): Promise<string | null> => {
     const sessionId = getActiveTerminalSessionId();
     return resolvePreferredTerminalCwd({
       rendererCwd: sessionId ? terminalRendererCwdBySessionRef.current.get(sessionId) : undefined,
       sessionId,
       getSessionPwd: (id, options) => terminalBackend.getSessionPwd(id, options),
       preferFreshBackend: options?.preferFreshBackend,
+      allowRendererFallback: options?.allowRendererFallback,
     });
   }, [getActiveTerminalSessionId, terminalBackend]);
 
