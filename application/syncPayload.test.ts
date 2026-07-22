@@ -969,6 +969,26 @@ test("buildSyncPayload includes the terminal host information bar preference", (
   assert.equal(termSettings.showHostInfoBar, false);
 });
 
+test("terminal auto-close preference survives sync round-trip", async () => {
+  localStorage.setItem(
+    storageKeys.STORAGE_KEY_TERM_SETTINGS,
+    JSON.stringify({ autoCloseOnExit: false }),
+  );
+
+  const payload = buildSyncPayload(vault());
+  const termSettings = (payload.settings?.terminalSettings ?? {}) as Record<string, unknown>;
+  assert.equal(termSettings.autoCloseOnExit, false);
+
+  localStorage.setItem(
+    storageKeys.STORAGE_KEY_TERM_SETTINGS,
+    JSON.stringify({ autoCloseOnExit: true }),
+  );
+  await applySyncPayload(payload, { importVaultData: () => {} });
+
+  const restored = JSON.parse(localStorage.getItem(storageKeys.STORAGE_KEY_TERM_SETTINGS)!);
+  assert.equal(restored.autoCloseOnExit, false);
+});
+
 test("applySyncPayload restores the terminal host information bar preference", async () => {
   localStorage.setItem(
     storageKeys.STORAGE_KEY_TERM_SETTINGS,
