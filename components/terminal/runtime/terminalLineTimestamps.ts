@@ -116,7 +116,7 @@ export type TerminalLineTimestampDiagnostics = {
 };
 
 const stores = new WeakMap<XTerm, TimestampStore>();
-const MAX_SEGMENTED_TIMESTAMP_WRITES = 64;
+const MIN_BATCHED_TIMESTAMP_DATA_SEGMENTS = 2;
 const BULK_TIMESTAMP_BATCH_MIN_BYTES = 4096;
 /**
  * Hard ceiling for retained timestamps. Matches Settings UI max scrollback
@@ -1208,7 +1208,7 @@ export const writeTerminalDataWithLineTimestamps = (
     && parsedData === dataForTimestamps
     && !hasPartialScrollingRegion(term)
     && (
-      dataSegmentCount > MAX_SEGMENTED_TIMESTAMP_WRITES
+      dataSegmentCount >= MIN_BATCHED_TIMESTAMP_DATA_SEGMENTS
       || data.length >= BULK_TIMESTAMP_BATCH_MIN_BYTES
     )
     // Cheap ASCII gate first (seq / log floods); otherwise one validate+measure probe.

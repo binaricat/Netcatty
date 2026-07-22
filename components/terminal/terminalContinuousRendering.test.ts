@@ -15,6 +15,7 @@ test("renderer activity follows the hibernate setting instead of active-tab visi
     terminalSource,
     /const isRendererActive = isVisible \|\| !hibernateEnabled/,
   );
+  assert.match(terminalSource, /isPaneVisibleRef: isVisibleRef/);
   assert.match(terminalSource, /isVisibleRef: isRendererActiveRef/);
   assert.match(terminalSource, /if \(!isRendererActiveRef\.current && !options\?\.allowHidden\)/);
   assert.match(

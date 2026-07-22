@@ -106,6 +106,10 @@ export const buildTermEnv = (host: Host, terminalSettings?: TerminalSettings) =>
   return env;
 };
 
+const isTerminalPaneVisible = (ctx: TerminalSessionStartersContext): boolean => (
+  (ctx.isPaneVisibleRef?.current ?? ctx.isVisibleRef?.current) !== false
+);
+
 const handleTerminalOutputAutoScroll = (
   ctx: TerminalSessionStartersContext,
   term: XTerm,
@@ -115,7 +119,7 @@ const handleTerminalOutputAutoScroll = (
     return;
   }
 
-  if (ctx.isVisibleRef?.current === false) {
+  if (!isTerminalPaneVisible(ctx)) {
     notePendingOutputScrollIfEnabled(ctx);
     return;
   }
@@ -341,7 +345,7 @@ export const getFlowController = (
       isTerminalWriteQueueInFloodMode(term) || shouldDegradeTerminalSideWork(term),
     )
   ));
-  setTerminalWriteCoalescerFlushGate(term, () => ctx.isVisibleRef?.current !== false);
+  setTerminalWriteCoalescerFlushGate(term, () => isTerminalPaneVisible(ctx));
   return controller;
 };
 
@@ -380,7 +384,7 @@ export const writeSessionData = (
   meta?: TerminalSessionDataMeta,
 ) => {
   const flow = getFlowController(ctx, term);
-  const isPaneCurrentlyVisible = () => ctx.isVisibleRef?.current !== false;
+  const isPaneCurrentlyVisible = () => isTerminalPaneVisible(ctx);
   const isPaneVisible = isPaneCurrentlyVisible();
   const perfTrace = createTerminalOutputPerfTrace({
     sessionId: ctx.sessionRef.current ?? ctx.sessionId,
@@ -407,11 +411,17 @@ export const writeSessionData = (
       });
       flushTerminalWritesForBackgroundOutput(term);
     };
-    flushTerminalWriteCoalescer(term, writeBackgroundOutputData);
-    flushTerminalWritesForBackgroundOutput(term);
+    if (isPaneVisible) {
+      flushTerminalWriteCoalescer(term, writeBackgroundOutputData);
+      flushTerminalWritesForBackgroundOutput(term);
+    }
     enqueueCoalescedTerminalWrite(term, data, writeBackgroundOutputData, ingressBytes);
-    flushTerminalWriteCoalescer(term, writeBackgroundOutputData);
-    flushTerminalWritesForBackgroundOutput(term);
+    if (isPaneVisible) {
+      flushTerminalWriteCoalescer(term, writeBackgroundOutputData);
+      flushTerminalWritesForBackgroundOutput(term);
+    } else {
+      scheduleHiddenPaneDrain(term, isPaneCurrentlyVisible);
+    }
     return;
   }
   enqueueCoalescedTerminalWrite(term, data, (batch, batchIngress, writeOptions) => {
@@ -510,7 +520,7 @@ const writeSessionDataImmediate = (
       if (shouldScrollOnTerminalOutput(settings)) {
         handleTerminalOutputAutoScroll(ctx, term);
       }
-      if (ctx.isVisibleRef?.current !== false) {
+      if (isTerminalPaneVisible(ctx)) {
         // Unfocused-but-visible windows have no rAF-driven render; this
         // debounced sync repaint is the only path that updates pixels (#1761).
         scheduleTerminalRepaintWhenUnfocused(term);

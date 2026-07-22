@@ -1911,6 +1911,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     terminalBackend,
     serialConfig,
     telnetLocalEchoRef,
+    isPaneVisibleRef: isVisibleRef,
     isVisibleRef: isRendererActiveRef,
     isBootActiveRef,
     pendingOutputScrollRef,

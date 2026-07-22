@@ -336,10 +336,9 @@ test("writeSessionDataImmediate schedules unfocused repaint for visible panes on
     new URL("./terminalSessionAttachment.ts", import.meta.url),
     "utf8",
   );
-  // The background fast path must NOT skip this: unfocused-but-visible windows
-  // have no rAF render loop, so the debounced sync repaint is the only way
-  // pixels update (#1761 regression guard).
-  assert.match(source, /if \(ctx\.isVisibleRef\?\.current !== false\) \{[^}]*scheduleTerminalRepaintWhenUnfocused\(term\)/);
+  // Unfocused-but-visible windows have no rAF render loop, so the debounced
+  // sync repaint remains required. Hidden tabs use the batched drain instead.
+  assert.match(source, /if \(isTerminalPaneVisible\(ctx\)\) \{[^}]*scheduleTerminalRepaintWhenUnfocused\(term\)/);
 });
 
 test("app resume recovery flushes pending writes before WebGL recovery", () => {

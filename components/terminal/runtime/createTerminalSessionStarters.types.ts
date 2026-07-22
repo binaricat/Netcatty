@@ -153,6 +153,8 @@ export type TerminalSessionStartersContext = {
     active: boolean,
     state: PasswordPromptPickerState | null,
   ) => boolean;
+  /** Actual tab/pane visibility; the renderer may remain active while hidden. */
+  isPaneVisibleRef?: RefObject<boolean>;
   isVisibleRef?: RefObject<boolean>;
   /** False after unmount/teardown so in-flight session starts skip attach. */
   isBootActiveRef?: RefObject<boolean>;

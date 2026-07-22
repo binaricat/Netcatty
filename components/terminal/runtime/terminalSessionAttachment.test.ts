@@ -430,7 +430,7 @@ test("writeSessionData flushes pending coalesced output with the background fast
   clearTerminalSessionFlowAck("session-1");
 });
 
-test("hidden tab output is written completely while the tab remains hidden", () => {
+test("hidden tab output is written completely while the tab remains hidden", async () => {
   clearTerminalSessionFlowAck("session-1");
   const lines: string[] = [];
   let payloadLength = 0;
@@ -467,12 +467,43 @@ test("hidden tab output is written completely while the tab remains hidden", () 
   withAnimationFrameQueue(() => {
     writeSessionData(ctx as never, term, payload);
   });
+  assert.deepEqual(writes, []);
+
+  await new Promise((resolve) => { setTimeout(resolve, 190); });
   flushTerminalSessionFlowAck("session-1");
 
   assert.equal(writes.join(""), payload);
   assert.equal(getFlowController(ctx as never, term).pendingBytes(), 0);
   assert.equal(acked.reduce((total, bytes) => total + bytes, 0), payload.length);
   clearTerminalSessionFlowAck("session-1");
+});
+
+test("frequent hidden log lines are drained in one complete terminal write", async () => {
+  const { term, writes, markerLines } = createFakeTerm();
+  const ctx = {
+    ...createContext(false),
+    // The renderer stays active when hidden-tab hibernation is disabled, but
+    // the pane itself is not visible. This is the normal multi-tab runtime.
+    isVisibleRef: { current: true },
+    isPaneVisibleRef: { current: false },
+  };
+  const chunks = Array.from(
+    { length: 8 },
+    (_, index) => `line-${String(index + 1).padStart(2, "0")}\r\n`,
+  );
+
+  for (const chunk of chunks) {
+    writeSessionData(ctx as never, term, chunk);
+  }
+
+  assert.deepEqual(writes, []);
+
+  await new Promise((resolve) => { setTimeout(resolve, 190); });
+
+  assert.deepEqual(writes, [chunks.join("")]);
+  assert.equal(markerLines.length, chunks.length);
+  assert.equal(getFlowController(ctx as never, term).pendingBytes(), 0);
+  resetTerminalWriteCoalescer(term);
 });
 
 test("writeSessionData keeps the current perf trace when hidden output is flushed", () => {
@@ -562,7 +593,7 @@ test("writeSessionData drains output after the pane hides before the scheduled f
   clearTerminalSessionFlowAck("session-1");
 });
 
-test("writeSessionData drains hidden pane output without waiting for reveal", () => {
+test("writeSessionData drains hidden pane output without waiting for reveal", async () => {
   clearTerminalSessionFlowAck("session-1");
   const payload = "x".repeat(XTERM_WRITE_CALLBACK_FAST_PATH_MAX_BYTES + 1);
   const writes: string[] = [];
@@ -587,6 +618,9 @@ test("writeSessionData drains hidden pane output without waiting for reveal", ()
   };
 
   writeSessionData(ctx as never, term, payload);
+  assert.deepEqual(writes, []);
+
+  await new Promise((resolve) => { setTimeout(resolve, 190); });
   flushTerminalSessionFlowAck("session-1");
 
   assert.equal(writes.join(""), payload);
@@ -645,7 +679,7 @@ test("writeSessionData keeps the hidden flush gate after coalescer reset and flu
   clearTerminalSessionFlowAck("session-1");
 });
 
-test("hidden tab output marks pending scroll without scrolling immediately", () => {
+test("hidden tab output marks pending scroll without scrolling immediately", async () => {
   const writes: string[] = [];
   let scrollCalls = 0;
   const term = {
@@ -678,6 +712,10 @@ test("hidden tab output marks pending scroll without scrolling immediately", () 
   };
 
   writeSessionData(ctx as never, term, "fresh output");
+
+  assert.equal(writes.join(""), "");
+  assert.equal(ctx.pendingOutputScrollRef.current, false);
+  await new Promise((resolve) => { setTimeout(resolve, 190); });
 
   assert.equal(writes.join(""), "fresh output");
   assert.equal(ctx.pendingOutputScrollRef.current, true);
