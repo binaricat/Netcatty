@@ -338,17 +338,32 @@ function createSessionOpsApi(ctx) {
         }
       '
     }
+    # Read a process's cwd. Linux exposes it via /proc; systems without a
+    # readable /proc (macOS / *BSD) fall back to lsof so the SFTP
+    # follow-terminal probe also works on those remotes (#2335). Both paths
+    # only see same-uid processes, so a su'd / sudo'd shell owned by another
+    # user stays unreadable here (handled by the login-shell fallback below).
+    read_shell_cwd() {
+      _rc_cwd=$(readlink "/proc/$1/cwd" 2>/dev/null)
+      if [ -n "$_rc_cwd" ]; then printf '%s\\n' "$_rc_cwd"; return 0; fi
+      if command -v lsof >/dev/null 2>&1; then
+        _rc_cwd=$(lsof -a -p "$1" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -n1)
+        if [ -n "$_rc_cwd" ]; then printf '%s\\n' "$_rc_cwd"; return 0; fi
+      fi
+      return 1
+    }
     login=$(find_login_shell "$PPID")
     if [ -n "$login" ]; then
       pid=$(find_active_shell "$login")
       [ -n "$pid" ] || pid="$login"
-      cwd=$(readlink /proc/$pid/cwd 2>/dev/null)
-      # /proc/<pid>/cwd is only readable for same-uid processes (ptrace perms), so
-      # this unprivileged exec channel cannot read a su'd / sudo'd shell owned by
-      # another user. Fall back to the same-uid login shell's cwd before giving up
-      # to the home directory (#1065 review).
+      cwd=$(read_shell_cwd "$pid")
+      # The active shell's cwd is only readable for same-uid processes (ptrace
+      # perms on /proc, lsof permissions on macOS/BSD), so this unprivileged
+      # exec channel cannot read a su'd / sudo'd shell owned by another user.
+      # Fall back to the same-uid login shell's cwd before giving up to the
+      # home directory (#1065 review).
       if [ -z "$cwd" ] && [ "$pid" != "$login" ] && [ "$ALLOW_FALLBACK" = "1" ]; then
-        cwd=$(readlink /proc/$login/cwd 2>/dev/null)
+        cwd=$(read_shell_cwd "$login")
       fi
       [ -n "$cwd" ] && printf '%s\\n' "$cwd" && exit 0
     fi

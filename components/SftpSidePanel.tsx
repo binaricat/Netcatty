@@ -1112,6 +1112,44 @@ const SftpSidePanelInteractiveBody: React.FC<SftpSidePanelInteractiveBodyProps> 
     syncFollowToTerminalCwd,
   ]);
 
+  // First open resync (#2335). While the SFTP panel is closed, the per-command
+  // cwd probe does not run, so `activeTerminalCwd` can be stale (it still points
+  // at the login home even though the terminal has since `cd`-ed elsewhere). On
+  // that stale value the normal follow sync sees currentPath === terminalCwd and
+  // does nothing, leaving the panel at home. When the panel first becomes
+  // visible for a connected remote, force one fresh backend probe (bypassing the
+  // stale cache) and navigate to the terminal's real cwd. Reset on hide so
+  // reopening after another `cd` resyncs again.
+  const initialFollowSyncedConnRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!isVisible) initialFollowSyncedConnRef.current = null;
+  }, [isVisible]);
+  useEffect(() => {
+    if (!effectiveFollowTerminalCwd || !canFollowTerminalCwd || !isVisible || hasActiveWork) return;
+    const connection = sftpRef.current.leftPane.connection;
+    if (
+      !connection
+      || connection.isLocal
+      || connection.status !== "connected"
+      || !connection.id
+    ) {
+      return;
+    }
+    if (initialFollowSyncedConnRef.current === connection.id) return;
+    initialFollowSyncedConnRef.current = connection.id;
+    void handleGoToTerminalCwd();
+  }, [
+    canFollowTerminalCwd,
+    effectiveFollowTerminalCwd,
+    handleGoToTerminalCwd,
+    hasActiveWork,
+    isVisible,
+    sftpRef,
+    sftp.leftPane.connection?.id,
+    sftp.leftPane.connection?.isLocal,
+    sftp.leftPane.connection?.status,
+  ]);
+
   const MAX_VISIBLE_TRANSFERS = 5;
   const visibleTransfers = useMemo(() => {
     const connection = sftp.leftPane.connection;
