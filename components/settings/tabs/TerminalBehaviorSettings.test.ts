@@ -23,7 +23,7 @@ test("terminal behavior settings expose enabled auto-close by default", () => {
   );
 });
 
-test("terminal behavior settings show disabled auto-close", () => {
+test("terminal behavior settings expose disabled auto-close", () => {
   const markup = renderSettings(false);
 
   assert.match(
