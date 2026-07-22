@@ -80,7 +80,7 @@ test("disabled auto-close keeps command and attached terminal popups open", () =
   );
 });
 
-test("disabled auto-close reveals a clean command popup exit instead of reporting startup failure", () => {
+test("disabled auto-close reveals every command popup exit instead of reporting startup failure", () => {
   assert.equal(
     shouldRevealTerminalPopupOnExit(
       { reason: "exited", exitCode: 0 },
@@ -93,7 +93,14 @@ test("disabled auto-close reveals a clean command popup exit instead of reportin
       { reason: "exited", exitCode: 1 },
       { autoCloseOnExit: false },
     ),
-    false,
+    true,
+  );
+  assert.equal(
+    shouldRevealTerminalPopupOnExit(
+      { reason: "exited" },
+      { autoCloseOnExit: false },
+    ),
+    true,
   );
   assert.equal(
     shouldRevealTerminalPopupOnExit(

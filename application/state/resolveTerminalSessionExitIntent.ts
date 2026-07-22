@@ -40,10 +40,9 @@ export function shouldCloseTerminalPopupOnExit(
 }
 
 export function shouldRevealTerminalPopupOnExit(
-  evt: TerminalSessionExitEvent,
+  _evt: TerminalSessionExitEvent,
   options: TerminalPopupExitOptions = {},
 ): boolean {
   return options.autoCloseOnExit === false &&
-    options.isAttachMode !== true &&
-    isConfirmedCleanExit(evt);
+    options.isAttachMode !== true;
 }
