@@ -622,6 +622,20 @@ test("reports press, repeat, and release only for eligible keys", () => {
   assert.equal(shouldTrackKittyKeyRelease(state, event("Enter")), false);
 });
 
+test("event-type mode matches Kitty's printable-key release behavior", () => {
+  const state = withFlags(2);
+  assert.equal(encodeKittyKeyEvent(state, event("a")), null);
+  assert.equal(encodeKittyKeyEvent(state, event("a", { repeat: true })), null);
+  assert.equal(
+    encodeKittyKeyEvent(state, event("a", { type: "keyup" })),
+    "\u001b[97;1:3u",
+  );
+  assert.equal(
+    encodeKittyKeyEvent(state, event("A", { code: "KeyA", shiftKey: true, type: "keyup" })),
+    "\u001b[97;2:3u",
+  );
+});
+
 test("reports alternate shifted and PC-101 layout key values", () => {
   const state = withFlags(1 | 4);
   assert.equal(

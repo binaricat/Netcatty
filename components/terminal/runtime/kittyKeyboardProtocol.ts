@@ -977,6 +977,10 @@ export const encodeKittyKeyEvent = (
   ) return null;
   if (eventType === 3 && !reportEvents) return null;
 
+  // This intentionally matches Kitty's reference encoder: with flag 0b10,
+  // printable press/repeat events can still travel through the text path, but
+  // their release has no text payload and is reported as a CSI-u event. Flag
+  // 0b1000 additionally moves the printable press/repeat events to CSI-u.
   const reportableTextEvent =
     reportEvents && eventType === 3 && !LEGACY_C0_KEYS.has(event.key);
   const disambiguatedTextEvent = baselineDisambiguatedTextEvent || (
