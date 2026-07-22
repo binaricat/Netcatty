@@ -949,10 +949,14 @@ const SftpSidePanelInteractiveBody: React.FC<SftpSidePanelInteractiveBodyProps> 
   const connectionId = sftp.leftPane.connection?.id ?? null;
   const connectionIdRef = useRef(connectionId);
   const connectionPath = sftp.leftPane.connection?.currentPath ?? null;
+  const isVisibleRef = useRef(isVisible);
+  const hasActiveWorkRef = useRef(hasActiveWork);
   effectiveFollowTerminalCwdRef.current = effectiveFollowTerminalCwd;
   canFollowTerminalCwdRef.current = canFollowTerminalCwd;
   activeTerminalCwdRef.current = activeTerminalCwd;
   connectionIdRef.current = connectionId;
+  isVisibleRef.current = isVisible;
+  hasActiveWorkRef.current = hasActiveWork;
 
   const invalidateInFlightFollowSync = useCallback(() => {
     followSyncGenerationRef.current += 1;
@@ -1151,9 +1155,29 @@ const SftpSidePanelInteractiveBody: React.FC<SftpSidePanelInteractiveBodyProps> 
     // Snapshot the (possibly stale) cached cwd so we can neutralize it below.
     const staleTerminalCwd = activeTerminalCwdRef.current;
     const syncGeneration = followSyncGenerationRef.current;
+    // Follow is still eligible: same generation, still enabled/allowed, still
+    // visible, and no interactive work has begun. Re-checked live via refs so a
+    // probe that resolves after the panel is hidden or an editor/dialog opens
+    // does not move the pane while follow should be paused (#2335).
+    const followStillEligible = () => (
+      syncGeneration === followSyncGenerationRef.current
+      && effectiveFollowTerminalCwdRef.current
+      && canFollowTerminalCwdRef.current
+      && isVisibleRef.current
+      && !hasActiveWorkRef.current
+      && (sftpRef.current.leftPane.connection?.id ?? null) === expectedConnectionId
+    );
     void (async () => {
       const cwd = await onGetTerminalCwd?.({ preferFreshBackend: true });
-      if (!cwd || syncGeneration !== followSyncGenerationRef.current) return;
+      if (!followStillEligible()) {
+        // Paused/hidden/superseded mid-probe: allow a retry once eligible again
+        // instead of leaving this connection permanently un-synced.
+        if (initialFollowSyncedConnRef.current === expectedConnectionId) {
+          initialFollowSyncedConnRef.current = null;
+        }
+        return;
+      }
+      if (!cwd) return;
       const live = sftpRef.current.leftPane.connection;
       if (!live || live.id !== expectedConnectionId || live.status !== "connected") return;
       // Mark the stale cached cwd as already handled BEFORE navigating, so a
@@ -1166,8 +1190,10 @@ const SftpSidePanelInteractiveBody: React.FC<SftpSidePanelInteractiveBodyProps> 
         terminalCwd: staleTerminalCwd && staleTerminalCwd !== cwd ? staleTerminalCwd : cwd,
       };
       if (live.currentPath === cwd) return;
-      const navigateResult = await sftpRef.current.navigateTo("left", cwd);
-      if (syncGeneration !== followSyncGenerationRef.current) return;
+      const navigateResult = await sftpRef.current.navigateTo("left", cwd, {
+        shouldApply: followStillEligible,
+      });
+      if (!followStillEligible()) return;
       const now = sftpRef.current.leftPane.connection;
       if (!now || now.id !== expectedConnectionId) return;
       if (navigateResult === "failed") {
