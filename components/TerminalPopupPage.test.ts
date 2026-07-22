@@ -125,6 +125,14 @@ test('terminal exit auto-close setting reaches tabs, workspaces, and popups', ()
     /resolveTerminalSessionExitIntent\(\s+evt,\s+terminalSettings\?\.autoCloseOnExit \?\? true,\s+\)/,
   );
   assert.match(
+    terminalSource,
+    /const onSessionExitRef = useRef\(onSessionExit\);[\s\S]*?useLayoutEffect\(\(\) => \{\s+onSessionExitRef\.current = onSessionExit;\s+\}, \[onSessionExit\]\);/,
+  );
+  assert.match(
+    terminalSource,
+    /onSessionExitRef\.current\?\.\(closedSessionId, evt\)/,
+  );
+  assert.match(
     source,
     /shouldCloseTerminalPopupOnExit\(evt, \{\s+autoCloseOnExit: settings\.terminalSettings\.autoCloseOnExit,\s+isAttachMode,\s+\}\)/,
   );

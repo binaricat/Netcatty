@@ -431,6 +431,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   const terminalLogSanitizerRef = useRef(createReplaySafeTerminalLogSanitizer());
   const commandLogRewriterRef = useRef(createProgrammaticCommandLogRewriter());
   const onTerminalDataCaptureRef = useRef(onTerminalDataCapture);
+  const onSessionExitRef = useRef(onSessionExit);
   const commandBufferRef = useRef<string>("");
   const promptLineBreakStateRef = useRef<PromptLineBreakState>(createPromptLineBreakState());
   const [hasMouseTracking, setHasMouseTracking] = useState(false);
@@ -438,6 +439,10 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   const serialLineBufferRef = useRef<string>("");
   const telnetLocalEchoRef = useRef(false);
   const pluginTerminalSessionExitRef = useRef<(exitCode?: number) => void>(() => {});
+
+  useLayoutEffect(() => {
+    onSessionExitRef.current = onSessionExit;
+  }, [onSessionExit]);
 
   useEffect(() => () => {
     reconnectWakeTokenRef.current = null;
@@ -1614,10 +1619,10 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         hibernatePendingBufferRef.current,
         exitMessage,
       );
-      onSessionExit?.(sessionId, evt);
+      onSessionExitRef.current?.(sessionId, evt);
       scheduleAutoReconnect({ evt });
     });
-  }, [onSessionExit, scheduleAutoReconnect, sessionId, terminalBackend]);
+  }, [scheduleAutoReconnect, sessionId, terminalBackend]);
 
   const clearHibernateRetry = useCallback(() => {
     if (hibernateRetryTimerRef.current === null) return;
@@ -1976,7 +1981,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     onSessionExit: (closedSessionId, evt) => {
       clearTerminalCwd();
       pluginTerminalLifecycle.onSessionExited(evt.exitCode);
-      onSessionExit?.(closedSessionId, evt);
+      onSessionExitRef.current?.(closedSessionId, evt);
       scheduleAutoReconnect({ evt });
     },
     onTerminalDataCapture: handleTerminalDataCaptureOnce,
