@@ -80,7 +80,8 @@ export function HostDetailsSettingRow({
   return (
     <div
       className={cn(
-        "flex min-h-12 items-center justify-between gap-3 rounded-lg border border-border/60 bg-secondary/40 px-3 py-2",
+        // Fixed height so switch / select / input rows stay aligned.
+        "flex h-12 items-center justify-between gap-3 rounded-lg border border-border/60 bg-secondary/40 px-3",
         className,
       )}
     >

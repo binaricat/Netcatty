@@ -17,5 +17,13 @@ export function useTerminalPopupWindow() {
     return bridge.onTerminalPopupConfig(cb);
   }, []);
 
-  return { close, setWindowTitle, onPopupConfig };
+  const markAttachClosePrepared = useCallback(async (sessionId: string, authorization: string) => {
+    return netcattyBridge.get()?.markAttachPopupClosePrepared?.(sessionId, authorization);
+  }, []);
+
+  const onPrepareClose = useCallback((cb: (payload: { sessionId: string; authorization: string }) => void) => {
+    return netcattyBridge.get()?.onTerminalPopupPrepareClose?.(cb) ?? (() => {});
+  }, []);
+
+  return { close, setWindowTitle, onPopupConfig, markAttachClosePrepared, onPrepareClose };
 }

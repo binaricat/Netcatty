@@ -1,7 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { importVaultHostsFromText, detectVaultImportFormat, applyVaultHostImport } from "./vaultImport.ts";
+import {
+  importVaultHostsFromText,
+  detectVaultImportFormat,
+  applyVaultHostImport,
+  filterVaultImportKeyPassphrasesAgainstExisting,
+  resolveVaultImportKeyPassphraseConflicts,
+} from "./vaultImport.ts";
+import { encodeCsvPassphrase } from "./vaultImport/csvCredentialFields.ts";
 import type { Host } from "./models.ts";
 
 const mobaXtermSshSession = (
@@ -124,6 +131,270 @@ test("detectVaultImportFormat recognizes csv and ssh_config exports", () => {
     detectVaultImportFormat(["Host prod", "  HostName prod.example.com", "  User deploy"].join("\n")),
     "ssh_config",
   );
+});
+
+test("CSV import keeps working when KeyPath and Passphrase columns are absent", () => {
+  const result = importVaultHostsFromText(
+    "csv",
+    "Label,Hostname,Port,Username,Password\nlegacy,legacy.example.com,22,root,secret",
+  );
+
+  assert.equal(result.hosts.length, 1);
+  assert.equal(result.hosts[0]?.password, "secret");
+  assert.deepEqual(result.keyPassphrases, []);
+});
+
+test("CSV import preserves legacy Passphrase login-password columns without KeyPath", () => {
+  const result = importVaultHostsFromText(
+    "csv",
+    "Hostname,Username,Passphrase\nlegacy.example.com,root,login-secret",
+  );
+
+  assert.equal(result.hosts[0]?.password, "login-secret");
+  assert.deepEqual(result.keyPassphrases, []);
+  assert.deepEqual(result.issues, []);
+});
+
+test("CSV import preserves annotated legacy login-password columns", () => {
+  for (const header of [
+    "Password (optional)",
+    "Password_Value",
+    "Passphrase (optional)",
+    "Passphrase_Value",
+    "Pass (optional)",
+    "Passcode",
+  ]) {
+    const result = importVaultHostsFromText(
+      "csv",
+      `Hostname,Username,${header}\nlegacy.example.com,root,login-secret`,
+    );
+
+    assert.equal(result.hosts[0]?.password, "login-secret");
+  }
+});
+
+test("CSV import prefers an explicit Password column over legacy Passphrase", () => {
+  const result = importVaultHostsFromText(
+    "csv",
+    "Hostname,Username,Password,Passphrase\nlegacy.example.com,root,login-secret,legacy-fallback",
+  );
+
+  assert.equal(result.hosts[0]?.password, "login-secret");
+  assert.deepEqual(result.keyPassphrases, []);
+});
+
+test("CSV import does not treat descriptive headers as key credentials", () => {
+  const result = importVaultHostsFromText(
+    "csv",
+    "Hostname,KeyPathDescription,PassphraseHint\nhost.example.com,documentation,NOT_A_SECRET",
+  );
+
+  assert.equal(result.hosts[0]?.identityFilePaths, undefined);
+  assert.equal(result.hosts[0]?.password, undefined);
+  assert.deepEqual(result.keyPassphrases, []);
+});
+
+test("CSV import ignores a passphrase without a key path", () => {
+  const result = importVaultHostsFromText(
+    "csv",
+    "Label,Hostname,KeyPath,Passphrase\nbroken,broken.example.com,,secret",
+  );
+
+  assert.equal(result.hosts.length, 1);
+  assert.equal(result.hosts[0]?.password, undefined);
+  assert.deepEqual(result.keyPassphrases, []);
+  assert.match(result.issues[0]?.message ?? "", /KeyPath is empty/u);
+});
+
+test("CSV import rejects encrypted passphrase placeholders", () => {
+  const placeholder = "enc:v1:djEwYWJj";
+  for (const value of [placeholder, encodeCsvPassphrase(placeholder)]) {
+    const result = importVaultHostsFromText(
+      "csv",
+      `Hostname,KeyPath,Passphrase\nhost.example.com,~/.ssh/id_ed25519,${value}`,
+    );
+
+    assert.deepEqual(result.keyPassphrases, []);
+    assert.match(result.issues[0]?.message ?? "", /encrypted credential values/u);
+  }
+});
+
+test("CSV duplicate rows merge later key credentials into the retained host", () => {
+  const result = importVaultHostsFromText(
+    "csv",
+    [
+      "Label,Hostname,Username,KeyPath,Passphrase",
+      "first,duplicate.example.com,root,,",
+      "second,duplicate.example.com,root,~/.ssh/id_ed25519,secret",
+    ].join("\n"),
+  );
+
+  assert.equal(result.hosts.length, 1);
+  assert.deepEqual(result.hosts[0]?.identityFilePaths, ["~/.ssh/id_ed25519"]);
+  assert.deepEqual(result.keyPassphrases, [{
+    hostId: result.hosts[0]?.id,
+    keyPath: "~/.ssh/id_ed25519",
+    passphrase: "secret",
+  }]);
+});
+
+test("CSV duplicate rows never attach a passphrase for a different retained key", () => {
+  const result = importVaultHostsFromText(
+    "csv",
+    [
+      "Label,Hostname,Username,KeyPath,Passphrase",
+      "first,duplicate.example.com,root,~/.ssh/id_first,",
+      "second,duplicate.example.com,root,~/.ssh/id_second,secret",
+    ].join("\n"),
+  );
+
+  assert.deepEqual(result.hosts[0]?.identityFilePaths, ["~/.ssh/id_first"]);
+  assert.deepEqual(result.keyPassphrases, []);
+});
+
+test("CSV duplicate rows preserve alias candidates for conflict resolution", async () => {
+  const result = importVaultHostsFromText(
+    "csv",
+    [
+      "Label,Hostname,Username,KeyPath,Passphrase",
+      "first,duplicate.example.com,root,~/.ssh/shared,first-secret",
+      "second,duplicate.example.com,root,/Users/alice/.ssh/shared,second-secret",
+    ].join("\n"),
+  );
+  const host = result.hosts[0];
+  assert.ok(host);
+  const resolved = await resolveVaultImportKeyPassphraseConflicts(
+    result.keyPassphraseCandidates ?? [],
+    async (keyPath) => (
+      keyPath.startsWith("~/")
+        ? [keyPath, `/Users/alice/${keyPath.slice(2)}`]
+        : [keyPath, `~/${keyPath.slice("/Users/alice/".length)}`]
+    ),
+    new Set([host.id]),
+    new Map([[host.id, "~/.ssh/shared"]]),
+  );
+
+  assert.equal(result.keyPassphraseCandidates?.length, 2);
+  assert.deepEqual(resolved.keyPassphrases, []);
+  assert.match(resolved.issues[0]?.message ?? "", /conflicting passphrases/u);
+});
+
+test("CSV duplicate rows do not save candidates for a different retained key", async () => {
+  const result = importVaultHostsFromText(
+    "csv",
+    [
+      "Label,Hostname,Username,KeyPath,Passphrase",
+      "first,duplicate.example.com,root,~/.ssh/id_first,",
+      "second,duplicate.example.com,root,~/.ssh/id_second,secret",
+    ].join("\n"),
+  );
+  const host = result.hosts[0];
+  assert.ok(host);
+  const resolved = await resolveVaultImportKeyPassphraseConflicts(
+    result.keyPassphraseCandidates ?? [],
+    async (keyPath) => [keyPath],
+    new Set([host.id]),
+    new Map([[host.id, "~/.ssh/id_first"]]),
+  );
+
+  assert.deepEqual(resolved.keyPassphrases, []);
+  assert.deepEqual(resolved.issues, []);
+});
+
+test("CSV import rejects conflicting passphrases for a shared key path", () => {
+  const result = importVaultHostsFromText(
+    "csv",
+    [
+      "Label,Hostname,Username,KeyPath,Passphrase",
+      "first,first.example.com,root,~/.ssh/id_shared,first-secret",
+      "second,second.example.com,root,~/.ssh/id_shared,second-secret",
+    ].join("\n"),
+  );
+
+  assert.equal(result.hosts.length, 2);
+  assert.deepEqual(result.keyPassphrases, []);
+  assert.equal(result.keyPassphraseCandidates?.length, 2);
+  assert.match(result.issues[0]?.message ?? "", /conflicting passphrases/u);
+});
+
+test("CSV alias conflict resolution sees candidates rejected by exact-path checks", async () => {
+  const result = importVaultHostsFromText(
+    "csv",
+    [
+      "Label,Hostname,Username,KeyPath,Passphrase",
+      "one,one.example.com,root,~/.ssh/shared,one",
+      "two,two.example.com,root,~/.ssh/shared,two",
+      "three,three.example.com,root,/Users/alice/.ssh/shared,three",
+    ].join("\n"),
+  );
+  const resolved = await resolveVaultImportKeyPassphraseConflicts(
+    result.keyPassphraseCandidates ?? [],
+    async (keyPath) => (
+      keyPath.startsWith("~/")
+        ? [keyPath, `/Users/alice/${keyPath.slice(2)}`]
+        : [keyPath, `~/${keyPath.slice("/Users/alice/".length)}`]
+    ),
+  );
+
+  assert.deepEqual(resolved.keyPassphrases, []);
+  assert.match(resolved.issues[0]?.message ?? "", /conflicting passphrases/u);
+});
+
+test("CSV import keeps POSIX backslashes distinct from path separators", () => {
+  const result = importVaultHostsFromText(
+    "csv",
+    [
+      "Label,Hostname,Username,KeyPath,Passphrase",
+      "first,first.example.com,root,/home/alice/.ssh/team\\key,first-secret",
+      "second,second.example.com,root,/home/alice/.ssh/team/key,second-secret",
+    ].join("\n"),
+  );
+
+  assert.equal(result.hosts.length, 2);
+  assert.deepEqual(result.keyPassphrases?.map((entry) => entry.passphrase), [
+    "first-secret",
+    "second-secret",
+  ]);
+  assert.equal(result.issues.some((issue) => /conflicting passphrases/u.test(issue.message)), false);
+});
+
+test("CSV passphrase conflicts include home-relative path aliases", async () => {
+  const resolved = await resolveVaultImportKeyPassphraseConflicts([
+    { hostId: "first", keyPath: "~/.ssh/shared", passphrase: "first-secret" },
+    { hostId: "second", keyPath: "/Users/alice/.ssh/shared", passphrase: "second-secret" },
+  ], async (keyPath) => (
+    keyPath.startsWith("~/")
+      ? [keyPath, `/Users/alice/${keyPath.slice(2)}`]
+      : [keyPath, `~/${keyPath.slice("/Users/alice/".length)}`]
+  ));
+
+  assert.deepEqual(resolved.keyPassphrases, []);
+  assert.match(resolved.issues[0]?.message ?? "", /conflicting passphrases/u);
+});
+
+test("CSV import keeps an existing saved passphrase on mismatch", async () => {
+  const entry = {
+    hostId: "new-host",
+    keyPath: "~/.ssh/shared",
+    passphrase: "stale-import",
+  };
+  const checked = await filterVaultImportKeyPassphrasesAgainstExisting(
+    [entry],
+    async () => ({ values: ["current-saved"], unreadable: false }),
+  );
+
+  assert.deepEqual(checked.keyPassphrases, []);
+  assert.match(checked.issues[0]?.message ?? "", /existing saved passphrase/u);
+});
+
+test("CSV import does not replace an unreadable saved passphrase", async () => {
+  const checked = await filterVaultImportKeyPassphrasesAgainstExisting(
+    [{ hostId: "new-host", keyPath: "~/.ssh/shared", passphrase: "imported" }],
+    async () => ({ values: [], unreadable: true }),
+  );
+
+  assert.deepEqual(checked.keyPassphrases, []);
+  assert.match(checked.issues[0]?.message ?? "", /Could not verify/u);
 });
 
 test("detectVaultImportFormat recognizes MobaXterm bookmark exports", () => {

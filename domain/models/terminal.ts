@@ -65,6 +65,7 @@ export interface TerminalSettings {
   optionArrowWordJump: boolean; // macOS: Option+←/→ send Meta-b/f for word jump
   shiftEnterNewlineEnabled: boolean; // Send configured text on Shift+Enter
   shiftEnterNewlineText: string; // Backslash-escaped text sent by Shift+Enter
+  kittyKeyboardProtocolEnabled: boolean; // Enable Kitty keyboard protocol support
   scrollOnInput: boolean; // Scroll terminal to bottom on input
   scrollOnOutput: boolean; // Scroll terminal to bottom on output
   scrollOnKeyPress: boolean; // Scroll terminal to bottom on key press
@@ -370,6 +371,7 @@ const DEFAULT_TERMINAL_SETTINGS: TerminalSettings = {
   optionArrowWordJump: false,
   shiftEnterNewlineEnabled: true,
   shiftEnterNewlineText: '\\n',
+  kittyKeyboardProtocolEnabled: false,
   scrollOnInput: true,
   scrollOnOutput: false,
   scrollOnKeyPress: false,

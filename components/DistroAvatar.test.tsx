@@ -4,6 +4,7 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { DistroAvatar } from "./DistroAvatar.tsx";
+import { LINUX_DISTRO_OPTION_IDS } from "./HostDetailsPanel.helpers.ts";
 import type { Host } from "../types.ts";
 
 const baseHost: Pick<Host, "distro" | "manualDistro" | "distroMode" | "os" | "protocol" | "iconMode" | "iconId" | "iconColor"> = {
@@ -84,4 +85,20 @@ test("DistroAvatar renders H3C logo without monochrome inversion", () => {
   assert.match(markup, /src="\/distro\/h3c.svg"/);
   assert.match(markup, /bg-white/);
   assert.doesNotMatch(markup, /invert brightness-0/);
+});
+
+test("DistroAvatar renders the FreeBSD logo for a detected FreeBSD host", () => {
+  const markup = renderToStaticMarkup(
+    <DistroAvatar
+      host={{ distro: "freebsd", os: "linux" }}
+      fallback="FB"
+    />,
+  );
+
+  assert.match(markup, /src="\/distro\/freebsd\.svg"/);
+  assert.match(markup, /alt="freebsd"/);
+});
+
+test("FreeBSD is available as a manual host icon choice", () => {
+  assert.ok(LINUX_DISTRO_OPTION_IDS.includes("freebsd"));
 });

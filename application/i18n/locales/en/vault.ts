@@ -500,6 +500,7 @@ export const enVaultMessages: Messages = {
   'quickConnect.identity.unavailable': 'This identity is missing usable credentials on this device.',
   'quickConnect.identity.useCustom': 'Use custom credentials',
   'quickConnect.identity.connect': 'Connect with preset',
+  'quickConnect.connectTitle': 'Connect to {host}',
 
   // Terminal
   'terminal.connectionErrorTitle': 'Connection Error',
@@ -621,6 +622,7 @@ export const enVaultMessages: Messages = {
   'hostDetails.distro.option.almalinux': 'AlmaLinux',
   'hostDetails.distro.option.alinux': 'Alibaba Cloud Linux',
   'hostDetails.distro.option.openeuler': 'openEuler',
+  'hostDetails.distro.option.freebsd': 'FreeBSD',
   'hostDetails.distro.option.oracle': 'Oracle Linux',
   'hostDetails.distro.option.kali': 'Kali Linux',
   'hostDetails.distro.option.cisco': 'Cisco',

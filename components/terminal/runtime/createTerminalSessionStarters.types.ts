@@ -74,6 +74,13 @@ export type TerminalBackendApi = {
     sessionId: string,
     cb: (evt: { sessionId: string; remoteEcho: boolean; localEcho: boolean }) => void,
   ) => (() => void) | undefined;
+  getTelnetEchoMode?: (sessionId: string) => Promise<{
+    success: boolean;
+    sessionId?: string;
+    remoteEcho?: boolean;
+    localEcho?: boolean;
+    error?: string;
+  }>;
   onChainProgress: (
     cb: (sessionId: string, hop: number, total: number, label: string, status: string, error?: string) => void,
   ) => (() => void) | undefined;
@@ -88,6 +95,7 @@ export type TerminalBackendApi = {
   setSessionFlowPaused?: (sessionId: string, paused: boolean) => void;
   /** Acknowledge rendered terminal output bytes for main-process IPC back-pressure. */
   ackSessionFlow?: (sessionId: string, bytes: number) => void;
+  notifyTerminalSessionDisplayReady?: (sessionId: string) => void;
 };
 
 export type PendingAuth = {
@@ -123,6 +131,7 @@ export type TerminalSessionStartersContext = {
   // Source session id to reuse an authenticated SSH connection from when this
   // terminal was created from an existing SSH session.
   reuseConnectionFromSessionId?: string;
+  isNetworkDevice?: boolean;
   startupCommand?: string;
   noAutoRun?: boolean;
   multiLineRunMode?: TerminalSession["multiLineRunMode"];

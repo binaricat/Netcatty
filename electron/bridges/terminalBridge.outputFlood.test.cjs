@@ -216,7 +216,10 @@ test("closing a local terminal discards buffered output instead of flushing it",
   spawns[0].emitData(Buffer.from("pending tail"));
   bridge.closeSession({ sender: {} }, { sessionId: "local-flood-close" });
 
-  assert.deepEqual(sent, []);
+  assert.deepEqual(sent, [{
+    channel: "netcatty:exit",
+    payload: { sessionId: "local-flood-close", exitCode: 0, reason: "closed" },
+  }]);
 });
 
 test("app cleanup discards buffered output instead of flushing it", () => {

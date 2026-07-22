@@ -169,7 +169,7 @@ export function resolveSelectionOverlayPosition(term: any, container: HTMLElemen
 }
 
 export function useTerminalEffects(ctx: TerminalEffectsContext) {
-  const { CONNECTION_TIMEOUT, Error, XTERM_PERFORMANCE_CONFIG, applyUserCursorPreference, auth, autocompleteCloseRef, autocompleteInputRef, autocompleteKeyEventRef, captureTerminalLogData, chainHosts, chainProgress, clearTerminalCwd, commandBufferRef, connectionLogBufferRef, containerRef, createPromptLineBreakState, createReplaySafeTerminalLogSanitizer, createXTermRuntime, deferTerminalResizeRef, disableTerminalFontZoomRef, effectiveFontSize, effectiveFontWeight, effectiveTheme, error, executeSnippetCommand, finalizeTerminalLogData, fitAddonRef, fontFamilyId, fontSize, fontWeightFixupDoneRef, forceCloseHibernatedSession, forceSyncRenderAfterResize, handleOsc52ReadRequest, handleTerminalDataCaptureOnce, hasConnectedRef, hasRuntimeRef, host, hotkeySchemeRef, hibernatedRef, identities, inWorkspace, isBootActiveRef, isBroadcastEnabledRef, isComposeBarOpen, isConnectionAwaitingUserInput, isConnectionPastTcpDial, isFocusMode, isFocused, isLocalConnection, isNetworkDevice, isResizing, isRestoringSelectionRef, isSearchOpen, isSerialConnection, isVisible, isVisibleRef, keyBindingsRef, keys, knownCwdRef, lastFittedSizeRef, lastToastedErrorRef, logger, mouseTrackingRef, needsHostKeyVerification, onBroadcastInputRef, onBroadcastInterruptPriorityChange, onCommandExecuted, onCommandSubmitted, onHotkeyActionRef, onOutputTriggerUserInputRef, onPluginRuntimeCwdChange, onSnippetExecutorChange, onTerminalTitleChange, onTerminalBell, onTerminalFontSizeChange, paneLayoutKey, passwordPromptActiveRef, pendingAuthRef, pendingOutputScrollRef, pluginDecorationRules, pluginTerminalLifecycle, pluginTerminalProviderRevision, isPluginTerminalProviderAvailable, requestPluginTerminalProviders, prepareRestoredReconnect, prevIsResizingRef, promptLineBreakStateRef, resizeSession, resolveHostAuth, resolvedFontFamily, safeFit, scriptRecorderRef, searchAddonRef, serialConfig, serialLineBufferRef, serializeAddonRef, sessionId, sessionRef, sessionStarters, setError, setHasMouseTracking, setHasSelection, setIsCancelling, setIsDisconnectedDialogDismissed, requestSearchFocus, setNeedsHostKeyVerification, setPendingHostKeyInfo, setPendingHostKeyRequestId, setProgressLogs, setProgressValue, setSelectionOverlayPosition, setShowLogs, setStatus, setTimeLeft, shouldEnableNativeUserInputAutoScroll, shouldProbeSessionCwd, shouldStartTerminalBackend, onSnippetShortkeyRef, snippetsRef, splitResizeActive, status, statusRef, sudoAutofillRef, t, teardown, telnetLocalEchoRef, termRef, terminalAltKeyOptions, terminalBackend, terminalContextActionsRef, terminalCwdTracker, terminalDataCapturedRef, terminalLogSanitizerRef, terminalSettings, terminalSettingsRef, toHostKeyInfo, toast, updateStatus, useEffect, useLayoutEffect, xtermRuntimeRef, zmodem, zmodemToastedRef, restoreState } = ctx;
+  const { CONNECTION_TIMEOUT, Error, XTERM_PERFORMANCE_CONFIG, applyUserCursorPreference, auth, autocompleteCloseRef, autocompleteInputRef, autocompleteKeyEventRef, captureTerminalLogData, chainHosts, chainProgress, clearTerminalCwd, commandBufferRef, connectionLogBufferRef, containerRef, createPromptLineBreakState, createReplaySafeTerminalLogSanitizer, createXTermRuntime, deferTerminalResizeRef, disableTerminalFontZoomRef, effectiveFontSize, effectiveFontWeight, effectiveTheme, error, executeSnippetCommand, finalizeTerminalLogData, fitAddonRef, fontFamilyId, fontSize, fontWeightFixupDoneRef, forceCloseHibernatedSession, forceSyncRenderAfterResize, handleOsc52ReadRequest, handleTerminalDataCaptureOnce, hasConnectedRef, hasRuntimeRef, host, hotkeySchemeRef, hibernatedRef, identities, inWorkspace, isBootActiveRef, isBroadcastEnabledRef, isComposeBarOpen, isConnectionAwaitingUserInput, isConnectionPastTcpDial, isFocusMode, isFocused, isLocalConnection, isNetworkDevice, isResizing, isRestoringSelectionRef, isSearchOpen, isSerialConnection, isVisible, isVisibleRef, keyBindingsRef, keys, knownCwdRef, lastFittedSizeRef, lastToastedErrorRef, logger, mouseTrackingRef, needsHostKeyVerification, onBroadcastInputRef, onBroadcastInterruptPriorityChange, onCommandExecuted, onCommandSubmitted, onHotkeyActionRef, onOutputTriggerUserInputRef, onPluginRuntimeCwdChange, onSnippetExecutorChange, onTerminalTitleChange, onTerminalBell, onTerminalFontSizeChange, paneLayoutKey, passwordPromptActiveRef, pendingAuthRef, pendingOutputScrollRef, pluginDecorationRules, pluginTerminalLifecycle, pluginTerminalProviderRevision, isPluginTerminalProviderAvailable, requestPluginTerminalProviders, prepareRestoredReconnect, prevIsResizingRef, promptLineBreakStateRef, resizeSession, resolveHostAuth, resolvedFontFamily, safeFit, scriptRecorderRef, searchAddonRef, serialConfig, serialLineBufferRef, serializeAddonRef, sessionId, sessionRef, sessionStarters, setError, setHasMouseTracking, setHasSelection, setIsCancelling, setIsDisconnectedDialogDismissed, requestSearchFocus, setNeedsHostKeyVerification, setPendingHostKeyInfo, setPendingHostKeyRequestId, setProgressLogs, setProgressValue, setSelectionOverlayPosition, setShowLogs, setStatus, setTimeLeft, shouldEnableNativeUserInputAutoScroll, shouldProbeSessionCwd, shouldStartTerminalBackend, attachExistingSession, attachAuthorization, attachHomeWebContentsIdRef, onSnippetShortkeyRef, snippetsRef, splitResizeActive, status, statusRef, sudoAutofillRef, t, teardown, telnetLocalEchoRef, termRef, terminalAltKeyOptions, terminalBackend, terminalContextActionsRef, terminalCwdTracker, terminalDataCapturedRef, terminalLogSanitizerRef, terminalSettings, terminalSettingsRef, toHostKeyInfo, toast, updateStatus, useEffect, useLayoutEffect, xtermRuntimeRef, zmodem, zmodemToastedRef, restoreState } = ctx;
   const effectiveTerminalProtocol = resolveEffectiveTerminalProtocol(host);
   const hibernateHiddenTabs = resolveTerminalHibernateEnabledForProtocol(
     terminalSettings,
@@ -515,6 +515,126 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
             setStatus("connecting");
           }
         };
+
+        if (attachExistingSession) {
+          // Observe popup: pause → snapshot → rebind → resume so no live bytes
+          // fall into the gap between snapshot and route handoff.
+          let outputRebound = false;
+          let reboundHomeWebContentsId: number | null = null;
+          try {
+            if (terminalBackend.setSessionFlowPausedAndWait) {
+              const paused = await terminalBackend.setSessionFlowPausedAndWait(sessionId, true);
+              if (!paused?.success && paused?.error === "Output drain unavailable") {
+                terminalBackend.setSessionFlowPaused?.(sessionId, true);
+                await new Promise((resolve) => setTimeout(resolve, 40));
+              } else if (!paused?.success) {
+                throw new Error(paused?.error || "Failed to drain terminal output");
+              }
+            } else {
+              terminalBackend.setSessionFlowPaused?.(sessionId, true);
+              await new Promise((resolve) => setTimeout(resolve, 40));
+            }
+            if (disposed) {
+              try { terminalBackend.setSessionFlowPaused?.(sessionId, false); } catch { /* ignore */ }
+              return;
+            }
+            // Snapshot while home still owns the display route (and stream is paused).
+            const snap = await terminalBackend.requestSessionSnapshot?.(
+              sessionId,
+              attachAuthorization || "",
+            );
+            if (disposed) {
+              try { terminalBackend.setSessionFlowPaused?.(sessionId, false); } catch { /* ignore */ }
+              return;
+            }
+            if (!snap?.success) {
+              throw new Error(snap?.error || "Failed to capture terminal snapshot");
+            }
+            if (snap?.success && snap.snapshot) {
+              try {
+                await new Promise<void>((resolve) => term.write(snap.snapshot!, resolve));
+              } catch (writeErr) {
+                logger.warn("Failed to write attach snapshot to popup terminal", writeErr);
+              }
+            }
+
+            const rebind = await terminalBackend.rebindSessionOutput?.(
+              sessionId,
+              attachAuthorization || "",
+            );
+            if (disposed) {
+              if (rebind?.success) {
+                try {
+                  await terminalBackend.restoreSessionOutput?.(
+                    sessionId,
+                    rebind.previousWebContentsId ?? null,
+                    attachAuthorization || "",
+                  );
+                } catch {
+                  // Main-process closed lifecycle remains the final fallback.
+                }
+              }
+              try { terminalBackend.setSessionFlowPaused?.(sessionId, false); } catch { /* ignore */ }
+              return;
+            }
+            if (!rebind?.success) {
+              try { terminalBackend.setSessionFlowPaused?.(sessionId, false); } catch { /* ignore */ }
+              setError(rebind?.error || "Failed to attach to session");
+              updateStatus("disconnected");
+              isBootActiveRef.current = false;
+              return;
+            }
+            outputRebound = true;
+            reboundHomeWebContentsId = rebind.previousWebContentsId ?? null;
+            if (attachHomeWebContentsIdRef) {
+              attachHomeWebContentsIdRef.current = rebind.previousWebContentsId ?? null;
+            }
+            sessionRef.current = sessionId;
+            const attached = sessionStarters.reattachSession(term);
+            if (!attached) {
+              throw new Error("Failed to attach display to session");
+            }
+            // Resume only after the popup has subscribed to the live session.
+            terminalBackend.setSessionFlowPaused?.(sessionId, false);
+            hasConnectedRef.current = true;
+            updateStatus("connected");
+            setTimeout(() => {
+              if (disposed) return;
+              safeFit({ force: true, requireVisible: true });
+              try {
+                term.scrollToBottom?.();
+              } catch {
+                // ignore
+              }
+              try {
+                terminalBackend.resizeSession?.(sessionId, term.cols, term.rows);
+              } catch {
+                // ignore
+              }
+            }, 50);
+          } catch (attachErr) {
+            if (outputRebound) {
+              try {
+                const restored = await terminalBackend.restoreSessionOutput?.(
+                  sessionId,
+                  reboundHomeWebContentsId,
+                  attachAuthorization || "",
+                );
+                if (restored?.success) terminalBackend.setSessionFlowPaused?.(sessionId, false);
+              } catch {
+                // Main-process close/recovery lifecycle remains the fallback.
+              }
+            } else {
+              try { terminalBackend.setSessionFlowPaused?.(sessionId, false); } catch { /* ignore */ }
+            }
+            if (disposed) return;
+            logger.error("Failed to attach existing session", attachErr);
+            setError(attachErr instanceof Error ? attachErr.message : String(attachErr));
+            updateStatus("disconnected");
+          }
+          isBootActiveRef.current = false;
+          return;
+        }
 
         if (!shouldStartTerminalBackend()) {
           isBootActiveRef.current = false;

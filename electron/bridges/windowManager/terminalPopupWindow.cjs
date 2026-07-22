@@ -3,10 +3,20 @@
 const { randomUUID } = require("node:crypto");
 
 const crashLogBridge = require("../crashLogBridge.cjs");
+const {
+  isAttachPopupClosePrepared,
+  registerAttachPopupAuthorization,
+  releaseAttachPopupAuthorization,
+  restoreAttachedSessionOutput,
+} = require("../terminalAttachRestore.cjs");
+
+const ATTACH_CLOSE_PREPARE_TIMEOUT_MS = 2000;
 
 function createTerminalPopupWindowApi(ctx) {
   with (ctx) {
     const terminalPopupWindows = new Map();
+    /** attachSessionId -> popupId for AI silent-session observe windows */
+    const attachSessionPopups = new Map();
 
     function isLiveWindow(win) {
       return Boolean(win && typeof win.isDestroyed === "function" && !win.isDestroyed());
@@ -15,6 +25,24 @@ function createTerminalPopupWindowApi(ctx) {
     async function openTerminalPopupWindow(electronModule, options, payload) {
       const { BrowserWindow, shell } = electronModule;
       const { preload, devServerUrl, isDev, appIcon, isMac, electronDir, sourceWindow } = options;
+
+      const attachSessionId = typeof payload?.attachSessionId === "string" && payload.attachSessionId
+        ? payload.attachSessionId
+        : null;
+      const attachAuthorization = attachSessionId ? randomUUID() : null;
+      if (attachSessionId) {
+        const existingPopupId = attachSessionPopups.get(attachSessionId);
+        const existing = existingPopupId ? terminalPopupWindows.get(existingPopupId) : null;
+        if (existing && isLiveWindow(existing.win)) {
+          try {
+            showAndFocusWindow(existing.win);
+          } catch {
+            // ignore focus races
+          }
+          return { success: true, popupId: existingPopupId, reused: true };
+        }
+        if (existingPopupId) attachSessionPopups.delete(attachSessionId);
+      }
 
       const osTheme = electronModule?.nativeTheme?.shouldUseDarkColors ? "dark" : "light";
       const effectiveTheme = currentTheme === "dark" || currentTheme === "light" ? currentTheme : osTheme;
@@ -68,14 +96,40 @@ function createTerminalPopupWindowApi(ctx) {
       });
 
       let lifecycleReleased = false;
+      let closePreparationRequested = false;
+      let closePreparationTimer = null;
       const releaseLifecycle = () => {
         if (lifecycleReleased) return;
         lifecycleReleased = true;
+        if (closePreparationTimer) clearTimeout(closePreparationTimer);
         terminalPopupWindows.delete(popupId);
+        if (attachSessionId && attachSessionPopups.get(attachSessionId) === popupId) {
+          attachSessionPopups.delete(attachSessionId);
+          // Window may be destroyed before React cleanup runs; always restore
+          // the display route from the main-process lifecycle.
+          try {
+            restoreAttachedSessionOutput(attachSessionId);
+          } catch (err) {
+            crashLogBridge.captureError?.("terminal-popup", err, {
+              popupId,
+              attachSessionId,
+              step: "restore attach output on close",
+            });
+          }
+        }
+        releaseAttachPopupAuthorization(attachAuthorization);
         unregisterAppContentWindow(win);
         notifyAppContentWindowClosed(win);
       };
       terminalPopupWindows.set(popupId, { releaseLifecycle, win });
+      if (attachSessionId) {
+        attachSessionPopups.set(attachSessionId, popupId);
+        registerAttachPopupAuthorization(
+          attachAuthorization,
+          attachSessionId,
+          win.webContents.id,
+        );
+      }
       registerAppContentWindow(win);
       crashLogBridge.captureDiagnostic("terminal-popup", "popup BrowserWindow created", {
         popupId,
@@ -91,6 +145,28 @@ function createTerminalPopupWindowApi(ctx) {
         // ignore
       }
 
+      win.on("close", (event) => {
+        if (!attachSessionId || isAttachPopupClosePrepared(attachAuthorization)) return;
+        event?.preventDefault?.();
+        if (closePreparationRequested) return;
+        closePreparationRequested = true;
+        try {
+          win.webContents.send("netcatty:terminal-popup:prepare-close", {
+            sessionId: attachSessionId,
+            authorization: attachAuthorization,
+          });
+        } catch {
+          // Timeout below force-closes and restores the route.
+        }
+        closePreparationTimer = setTimeout(() => {
+          closePreparationTimer = null;
+          try {
+            if (isLiveWindow(win)) win.destroy();
+          } catch {
+            releaseLifecycle();
+          }
+        }, ATTACH_CLOSE_PREPARE_TIMEOUT_MS);
+      });
       win.on("closed", releaseLifecycle);
 
       try {
@@ -104,6 +180,14 @@ function createTerminalPopupWindowApi(ctx) {
         });
         win.webContents?.on?.("render-process-gone", (_event, details) => {
           console.warn("[TerminalPopup] Renderer process gone", { popupId, details });
+          if (attachSessionId) {
+            restoreAttachedSessionOutput(attachSessionId);
+          }
+          try {
+            if (isLiveWindow(win)) win.destroy();
+          } catch {
+            releaseLifecycle();
+          }
         });
         win.webContents?.on?.("console-message", (_event, level, message, line, sourceId) => {
           crashLogBridge.captureDiagnostic("terminal-popup-console", message, {
@@ -167,7 +251,11 @@ function createTerminalPopupWindowApi(ctx) {
           await win.loadURL(`app://netcatty/index.html${popupPath}`);
         }
 
-        win.webContents.send("netcatty:window:terminalPopupConfig", { ...payload, popupId });
+        win.webContents.send("netcatty:window:terminalPopupConfig", {
+          ...payload,
+          popupId,
+          ...(attachAuthorization ? { attachAuthorization } : {}),
+        });
         crashLogBridge.captureDiagnostic("terminal-popup", "popup config delivered", {
           popupId,
           title,

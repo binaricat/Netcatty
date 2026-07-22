@@ -235,6 +235,7 @@ export const enCoreMessages: Messages = {
   'tray.empty.title': 'Nothing here yet',
   'tray.empty.subtitle': 'Go connect to a server, they miss you 🚀',
   'tray.quit': 'Quit Netcatty',
+  'tray.closeSession': 'Close session',
 
   // Vault Sidebar
   'vault.sidebar.collapse': 'Collapse sidebar',
@@ -506,6 +507,9 @@ Highlight the focused split pane:
   'settings.terminal.keyboard.optionArrowWordJump': 'Option+←/→ jumps by word',
   'settings.terminal.keyboard.optionArrowWordJump.desc':
     'Send Meta-b / Meta-f on Option+Left/Right so the shell moves by word, instead of the default ^[[1;3D / ^[[1;3C',
+  'settings.terminal.keyboard.kittyProtocol': 'Kitty keyboard protocol',
+  'settings.terminal.keyboard.kittyProtocol.desc':
+    'Enable Kitty keyboard protocol support.',
   'settings.terminal.accessibility.minimumContrastRatio': 'Minimum contrast ratio',
   'settings.terminal.sidePanel.autoOpen': 'Open side panel with terminal',
   'settings.terminal.sidePanel.autoOpen.desc': 'Automatically open a side panel when a terminal connects.',
@@ -910,6 +914,7 @@ Highlight the focused split pane:
   'vault.hosts.export': 'Export',
   'vault.hosts.export.toast.success': 'Exported {count} hosts to CSV',
   'vault.hosts.export.toast.successWithSkipped': 'Exported {count} hosts to CSV ({skipped} unsupported hosts skipped)',
+  'vault.hosts.export.toast.passphrasesSkipped': '{count} saved key passphrases could not be read and were left blank',
   'vault.hosts.export.toast.noHosts': 'No hosts to export',
   'vault.hosts.allHosts': 'All hosts',
   'vault.hosts.pinned': 'Pinned',

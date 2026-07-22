@@ -140,12 +140,19 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
     if (!ctx.telnetLocalEchoRef || !ctx.terminalBackend.onTelnetEchoMode) return;
     clearTelnetEchoMode({ resetLocalEcho });
     if (resetLocalEcho) ctx.telnetLocalEchoRef.current = false;
+    let receivedLiveUpdate = false;
     const dispose = ctx.terminalBackend.onTelnetEchoMode(
       backendSessionId,
       (evt) => {
+        receivedLiveUpdate = true;
         ctx.telnetLocalEchoRef!.current = Boolean(evt.localEcho);
       },
     ) ?? null;
+    void ctx.terminalBackend.getTelnetEchoMode?.(backendSessionId).then((mode) => {
+      if (!receivedLiveUpdate && mode?.success) {
+        ctx.telnetLocalEchoRef!.current = Boolean(mode.localEcho);
+      }
+    }).catch(() => {});
     if (ctx.disposeTelnetEchoModeRef) {
       ctx.disposeTelnetEchoModeRef.current = dispose;
     } else {
@@ -564,6 +571,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
           // bridge silently falls back to a fresh connection if the source is
           // gone, so reconnect/retry after the source closed still works.
           sourceSessionId: ctx.reuseConnectionFromSessionId,
+          skipShellPidDiscovery: ctx.isNetworkDevice === true,
         });
       };
 

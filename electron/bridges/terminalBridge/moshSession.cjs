@@ -9,6 +9,7 @@ const {
 } = require("../terminalFlowAck.cjs");
 const { createSshConnExecProbe } = require("../ai/sessionShellKind.cjs");
 const { orderSshIdentityNames, SSH_KEY_PATTERN } = require("../sshAuthHelper.cjs");
+const { fanoutSessionExit } = require("../terminalAttachRestore.cjs");
 
 const execFileAsync = promisify(execFile);
 
@@ -574,7 +575,7 @@ function createMoshSessionApi(ctx) {
             flushPaced(() => {
               sessionLogStreamManager.stopStream(sessionId, logStreamToken);
               const contents = electronModule.webContents.fromId(session.webContentsId);
-              contents?.send("netcatty:exit", {
+              fanoutSessionExit(sessionId, contents, {
                 sessionId,
                 reason: "error",
                 error: `Failed to spawn mosh-client: ${err.message}`,
@@ -605,7 +606,7 @@ function createMoshSessionApi(ctx) {
         flushPaced(() => {
           sessionLogStreamManager.stopStream(sessionId, logStreamToken);
           const contents = electronModule.webContents.fromId(session.webContentsId);
-          contents?.send("netcatty:exit", {
+          fanoutSessionExit(sessionId, contents, {
             sessionId,
             exitCode,
             signal,
@@ -787,7 +788,7 @@ function createMoshSessionApi(ctx) {
         flushPaced(() => {
           sessionLogStreamManager.stopStream(sessionId, session.logStreamToken);
           const contents = electronModule.webContents.fromId(session.webContentsId);
-          contents?.send("netcatty:exit", {
+          fanoutSessionExit(sessionId, contents, {
             sessionId,
             exitCode,
             signal,

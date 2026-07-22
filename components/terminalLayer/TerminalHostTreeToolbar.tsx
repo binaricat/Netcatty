@@ -1,10 +1,11 @@
-import { Check, Expand, FolderPlus, Minimize2, Search, Tag, TerminalSquare, X } from 'lucide-react';
+import { Check, Expand, FolderPlus, Minimize2, MoreHorizontal, Plus, Search, Tag, TerminalSquare, X } from 'lucide-react';
 import React, { useEffect, useRef } from 'react';
 
 import { useI18n } from '../../application/i18n/I18nProvider';
 import { cn } from '../../lib/utils';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
+import { Popover, PopoverClose, PopoverContent, PopoverTrigger } from '../ui/popover';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 
 export type HostTreeToolbarPanel = 'search' | 'tags' | null;
@@ -26,6 +27,8 @@ interface TerminalHostTreeToolbarProps {
   allTags: string[];
   selectedTags: string[];
   onSelectedTagsChange: (tags: string[]) => void;
+  onNewHost: () => void;
+  canNewHost?: boolean;
   onNewRootGroup: () => void;
   canNewGroup?: boolean;
   onCreateLocalTerminal: () => void;
@@ -36,7 +39,9 @@ interface TerminalHostTreeToolbarProps {
   onCollapse: () => void;
 }
 
-const iconButtonClass = 'netcatty-tab h-7 w-7 shrink-0 rounded-md p-0 hover:bg-transparent';
+const iconButtonClass = 'netcatty-tab h-6 w-6 shrink-0 rounded-md p-0 hover:bg-transparent';
+const overflowMenuItemClass = 'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50';
+export const TERMINAL_HOST_TREE_TOOLBAR_MIN_REQUIRED_WIDTH = 148;
 
 export const TerminalHostTreeToolbar: React.FC<TerminalHostTreeToolbarProps> = ({
   theme,
@@ -47,6 +52,8 @@ export const TerminalHostTreeToolbar: React.FC<TerminalHostTreeToolbarProps> = (
   allTags,
   selectedTags,
   onSelectedTagsChange,
+  onNewHost,
+  canNewHost = true,
   onNewRootGroup,
   canNewGroup = true,
   onCreateLocalTerminal,
@@ -103,8 +110,26 @@ export const TerminalHostTreeToolbar: React.FC<TerminalHostTreeToolbarProps> = (
                   variant="ghost"
                   size="icon"
                   className={iconButtonClass}
+                  style={{ color: theme.mutedFg }}
+                  disabled={!canNewHost}
+                  onClick={onNewHost}
+                  aria-label={t('terminal.layer.hostTree.newHost')}
+                >
+                  <Plus size={14} />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">{t('terminal.layer.hostTree.newHost')}</TooltipContent>
+            </Tooltip>
+
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className={iconButtonClass}
                   style={{ color: expandedPanel === 'search' || hasSearch ? theme.termFg : theme.mutedFg }}
                   onClick={() => togglePanel('search')}
+                  aria-label={t('terminal.layer.hostTree.searchButton')}
                 >
                   <Search size={14} />
                 </Button>
@@ -120,6 +145,7 @@ export const TerminalHostTreeToolbar: React.FC<TerminalHostTreeToolbarProps> = (
                   className={iconButtonClass}
                   style={{ color: expandedPanel === 'tags' || hasTagFilters ? theme.termFg : theme.mutedFg }}
                   onClick={() => togglePanel('tags')}
+                  aria-label={t('terminal.layer.hostTree.tagsButton')}
                 >
                   <Tag size={14} />
                 </Button>
@@ -127,79 +153,72 @@ export const TerminalHostTreeToolbar: React.FC<TerminalHostTreeToolbarProps> = (
               <TooltipContent side="bottom">{t('terminal.layer.hostTree.tagsButton')}</TooltipContent>
             </Tooltip>
 
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className={iconButtonClass}
-                  style={{ color: theme.mutedFg }}
-                  disabled={!canNewGroup}
-                  onClick={onNewRootGroup}
-                >
-                  <FolderPlus size={14} />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">{t('terminal.layer.hostTree.newGroup')}</TooltipContent>
-            </Tooltip>
-
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className={iconButtonClass}
-                  style={{ color: theme.mutedFg }}
-                  disabled={!canCreateLocalTerminal}
-                  onClick={onCreateLocalTerminal}
-                >
-                  <TerminalSquare size={14} />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">{t('terminal.layer.hostTree.localShell')}</TooltipContent>
-            </Tooltip>
-
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className={iconButtonClass}
-                  style={{ color: theme.mutedFg }}
-                  disabled={!canExpandCollapse}
-                  onClick={onExpandAll}
-                >
-                  <Expand size={14} />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">{t('vault.tree.expandAll')}</TooltipContent>
-            </Tooltip>
-
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className={iconButtonClass}
-                  style={{ color: theme.mutedFg }}
-                  disabled={!canExpandCollapse}
-                  onClick={onCollapseAll}
-                >
-                  <Minimize2 size={14} />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">{t('vault.tree.collapseAll')}</TooltipContent>
-            </Tooltip>
+            <Popover>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className={iconButtonClass}
+                      style={{ color: theme.mutedFg }}
+                      aria-label={t('terminal.toolbar.more')}
+                    >
+                      <MoreHorizontal size={14} />
+                    </Button>
+                  </PopoverTrigger>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">{t('terminal.toolbar.more')}</TooltipContent>
+              </Tooltip>
+              <PopoverContent className="w-44 p-1" align="start" side="bottom">
+                <PopoverClose asChild>
+                  <button
+                    type="button"
+                    className={overflowMenuItemClass}
+                    disabled={!canNewGroup}
+                    onClick={onNewRootGroup}
+                  >
+                    <FolderPlus size={14} />
+                    {t('terminal.layer.hostTree.newGroup')}
+                  </button>
+                </PopoverClose>
+                <PopoverClose asChild>
+                  <button
+                    type="button"
+                    className={overflowMenuItemClass}
+                    disabled={!canCreateLocalTerminal}
+                    onClick={onCreateLocalTerminal}
+                  >
+                    <TerminalSquare size={14} />
+                    {t('terminal.layer.hostTree.localShell')}
+                  </button>
+                </PopoverClose>
+                <PopoverClose asChild>
+                  <button
+                    type="button"
+                    className={overflowMenuItemClass}
+                    disabled={!canExpandCollapse}
+                    onClick={onExpandAll}
+                  >
+                    <Expand size={14} />
+                    {t('vault.tree.expandAll')}
+                  </button>
+                </PopoverClose>
+                <PopoverClose asChild>
+                  <button
+                    type="button"
+                    className={overflowMenuItemClass}
+                    disabled={!canExpandCollapse}
+                    onClick={onCollapseAll}
+                  >
+                    <Minimize2 size={14} />
+                    {t('vault.tree.collapseAll')}
+                  </button>
+                </PopoverClose>
+              </PopoverContent>
+            </Popover>
           </div>
 
-          <div
-            aria-hidden
-            className="pointer-events-none absolute inset-y-0 right-0 w-5"
-            data-section="terminal-host-tree-toolbar-actions-fade"
-            style={{
-              background: `linear-gradient(to right, transparent, ${theme.termBg})`,
-            }}
-          />
         </div>
 
         <div
@@ -214,6 +233,7 @@ export const TerminalHostTreeToolbar: React.FC<TerminalHostTreeToolbarProps> = (
                 className={cn(iconButtonClass, 'mr-0.5')}
                 style={{ color: theme.mutedFg }}
                 onClick={onCollapse}
+                aria-label={t('terminal.layer.hostTree.collapse')}
               >
                 <X size={15} />
               </Button>

@@ -651,6 +651,15 @@ function SettingsTerminalTab(props: {
         >
           <Toggle checked={terminalSettings.optionArrowWordJump} onChange={(v) => updateTerminalSetting("optionArrowWordJump", v)} />
         </SettingRow>
+        <SettingRow
+          label={t("settings.terminal.keyboard.kittyProtocol")}
+          description={t("settings.terminal.keyboard.kittyProtocol.desc")}
+        >
+          <Toggle
+            checked={terminalSettings.kittyKeyboardProtocolEnabled}
+            onChange={(v) => updateTerminalSetting("kittyKeyboardProtocolEnabled", v)}
+          />
+        </SettingRow>
       </div>
 
       <SectionHeader title={t("settings.terminal.section.accessibility")} />

@@ -893,6 +893,120 @@ test("tray panel session jump waits for a newly created main window to be ready"
   });
 });
 
+test("tray panel session close forwards without focusing the main window", async () => {
+  await withPlatform("darwin", async () => {
+    const bridge = loadBridge();
+    const electronModule = createElectronStub();
+    const sentMessages = [];
+    const mainWin = new FakeWindow();
+    mainWin.visible = false;
+    mainWin.focused = false;
+    mainWin.webContents = {
+      send(channel, ...args) {
+        sentMessages.push([channel, ...args]);
+      },
+    };
+    electronModule.BrowserWindow.getAllWindows = () => [mainWin];
+    let createCalls = 0;
+
+    bridge.init({
+      electronModule,
+      getMainWindow: () => mainWin,
+      ensureMainWindow: async () => {
+        createCalls += 1;
+        return mainWin;
+      },
+      sendWhenRendererReady: async (win, channel, payload) => {
+        assert.equal(win, mainWin);
+        win.webContents.send(channel, payload);
+        return { success: true };
+      },
+    });
+    const ipcMain = createIpcMainStub();
+    bridge.registerHandlers(ipcMain);
+
+    const result = await ipcMain.handlers.get("netcatty:trayPanel:closeSession")(null, "session-1");
+
+    assert.deepEqual(result, { success: true });
+    assert.deepEqual(sentMessages, [["netcatty:trayPanel:closeSession", "session-1"]]);
+    assert.equal(createCalls, 0);
+    assert.equal(mainWin.showCalls, 0);
+    assert.equal(mainWin.focusCalls, 0);
+    assert.equal(mainWin.isVisible(), false);
+  });
+});
+
+test("tray panel session close does not create a missing main window", async () => {
+  await withPlatform("darwin", async () => {
+    const bridge = loadBridge();
+    const electronModule = createElectronStub();
+    electronModule.BrowserWindow.getAllWindows = () => [];
+    let createCalls = 0;
+
+    bridge.init({
+      electronModule,
+      getMainWindow: () => null,
+      ensureMainWindow: async () => {
+        createCalls += 1;
+        return new FakeWindow();
+      },
+    });
+    const ipcMain = createIpcMainStub();
+    bridge.registerHandlers(ipcMain);
+
+    const result = await ipcMain.handlers.get("netcatty:trayPanel:closeSession")(null, "stale-session");
+
+    assert.deepEqual(result, { success: false, error: "Main window is not available" });
+    assert.equal(createCalls, 0);
+  });
+});
+
+test("tray menu updates refresh an already open tray panel", async () => {
+  await withPlatform("darwin", async () => {
+    const bridge = loadBridge();
+    const electronModule = createElectronStub();
+    const sentMessages = [];
+
+    class FakePanelWindow extends FakeWindow {
+      constructor() {
+        super();
+        const webContents = new EventEmitter();
+        webContents.send = (channel, ...args) => {
+          sentMessages.push([channel, ...args]);
+        };
+        this.webContents = webContents;
+      }
+
+      async loadURL() {}
+      getBounds() { return { width: 360, height: 520 }; }
+      setBounds() {}
+      destroy() { this.destroyed = true; }
+    }
+
+    FakePanelWindow.getAllWindows = () => [];
+    electronModule.BrowserWindow = FakePanelWindow;
+    electronModule.screen = {
+      getDisplayNearestPoint: () => ({ workArea: { x: 0, y: 0, width: 1440, height: 900 } }),
+    };
+
+    const { ipcMain } = await enableCloseToTray(bridge, electronModule);
+    const trayInstance = bridge.getTray();
+    trayInstance.getBounds = () => ({ x: 100, y: 0, width: 24, height: 24 });
+    trayInstance.handlers.get("click")();
+
+    sentMessages.length = 0;
+    const sessions = [{ id: "remaining", label: "Remaining", status: "connected" }];
+    await ipcMain.handlers.get("netcatty:tray:updateMenuData")(null, { sessions });
+
+    assert.deepEqual(sentMessages, [["netcatty:trayPanel:setMenuData", {
+      sessions,
+      portForwardRules: [],
+      hosts: [],
+    }]]);
+    bridge.cleanup();
+  });
+});
+
 test("toggleWindowVisibility show path delegates to showAndFocusMainWindow on win32", async () => {
   await withPlatform("win32", async () => {
     const windowManagerPath = require.resolve("./windowManager.cjs");

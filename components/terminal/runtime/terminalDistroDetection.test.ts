@@ -76,3 +76,33 @@ test("runDistroDetection normalizes Darwin probe output to macos", async () => {
   assert.equal(distroProbeCalls, 1);
   assert.deepEqual(detected, ["macos"]);
 });
+
+test("runDistroDetection normalizes FreeBSD uname output", async () => {
+  const detected: string[] = [];
+  const token = registerConnectionToken("freebsd-session");
+
+  await runDistroDetection({
+    host: {
+      id: "freebsd-host",
+      label: "FreeBSD server",
+      hostname: "freebsd.example.com",
+      username: "root",
+    },
+    terminalBackend: {
+      getSessionRemoteInfo: async () => ({
+        success: true,
+        remoteSshVersion: "SSH-2.0-OpenSSH_9.7 FreeBSD-20240806",
+      }),
+      getSessionDistroInfo: async () => ({
+        success: true,
+        stdout: "FreeBSD freebsd.example.com 14.3-RELEASE-p1 GENERIC amd64\n",
+        stderr: "",
+      }),
+    },
+    onOsDetected: (_hostId: string, distro: string) => {
+      detected.push(distro);
+    },
+  } as never, "freebsd-session", token);
+
+  assert.deepEqual(detected, ["freebsd"]);
+});

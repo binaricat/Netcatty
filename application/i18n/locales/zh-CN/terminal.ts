@@ -251,6 +251,8 @@ export const zhCNTerminalMessages: Messages = {
   'settings.terminal.keyboard.altAsMeta.desc': '使用 Option (Alt) 作为 Meta 键，而不是用于输入特殊字符',
   'settings.terminal.keyboard.optionArrowWordJump': 'Option+←/→ 按单词跳转',
   'settings.terminal.keyboard.optionArrowWordJump.desc': '按 Option+左/右 时发送 Meta-b / Meta-f，让 Shell 按单词移动光标（而非默认的 ^[[1;3D / ^[[1;3C）',
+  'settings.terminal.keyboard.kittyProtocol': 'Kitty 键盘协议',
+  'settings.terminal.keyboard.kittyProtocol.desc': '启用 Kitty 键盘协议支持。',
   'settings.terminal.accessibility.minimumContrastRatio': '最小对比度',
   'settings.terminal.accessibility.minimumContrastRatio.desc': '调整颜色以满足对比度要求 (1 = 禁用, 21 = 最大)',
   'settings.terminal.behavior.rightClick': '右键行为',

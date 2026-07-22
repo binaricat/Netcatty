@@ -227,7 +227,7 @@ export const HostDetailsAdvancedSections: React.FC<HostDetailsAdvancedSectionsPr
               <HostDetailsSettingRow label={t("hostDetails.et.port")} hint={t("hostDetails.et.port.desc")}>
                 <Input
                   type="number"
-                  className="w-28"
+                  className="h-8 w-28"
                   placeholder="2022"
                   value={form.etPort ?? ""}
                   onChange={(e) => {
@@ -271,7 +271,7 @@ export const HostDetailsAdvancedSections: React.FC<HostDetailsAdvancedSectionsPr
                 hint={t("hostDetails.systemSshAgent.socket.desc")}
               >
                 <Input
-                  className="w-44 font-mono text-xs"
+                  className="h-8 w-44 font-mono text-xs"
                   placeholder="$SSH_AUTH_SOCK"
                   value={form.identityAgent ?? ""}
                   onChange={(event) => setForm((previous: typeof form) => ({
@@ -463,7 +463,7 @@ export const HostDetailsAdvancedSections: React.FC<HostDetailsAdvancedSectionsPr
               value={form.backspaceBehavior ?? "default"}
               onValueChange={(v) => update("backspaceBehavior", v === "default" ? undefined : v)}
             >
-              <SelectTrigger className="h-10 w-36 text-xs">
+              <SelectTrigger className="h-8 w-36 text-xs">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -760,7 +760,7 @@ export const HostDetailsAdvancedSections: React.FC<HostDetailsAdvancedSectionsPr
                 value === inheritedStartupCommandRunMode ? undefined : value,
               )}
             >
-              <SelectTrigger className="h-9 w-[180px]">
+              <SelectTrigger className="h-8 w-[180px]">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>

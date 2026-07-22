@@ -309,8 +309,69 @@ declare global {
     interruptSession?(sessionId: string, trace?: NetcattyTerminalInterruptTrace): void;
     resizeSession(sessionId: string, cols: number, rows: number): void;
     setSessionFlowPaused(sessionId: string, paused: boolean): void;
+    setSessionFlowPausedAndWait?(sessionId: string, paused: boolean): Promise<{ success: boolean; error?: string }>;
+    onTerminalOutputDrainRequest?(
+      sessionId: string,
+      cb: (payload: { sessionId: string; requestId: string }) => void | Promise<void>,
+    ): () => void;
+    respondTerminalOutputDrain?(requestId: string): void;
+    notifyTerminalSessionDisplayReady?(sessionId: string): void;
     ackSessionFlow(sessionId: string, bytes: number): void;
     closeSession(sessionId: string): void | Promise<void>;
+    /** Move a live session's output port to this renderer (same PTY). */
+    rebindTerminalSessionOutput?(sessionId: string, authorization: string): Promise<{
+      success: boolean;
+      previousWebContentsId?: number | null;
+      webContentsId?: number;
+      error?: string;
+    }>;
+    /** Restore output after an attach popup closes. */
+    restoreTerminalSessionOutput?(
+      sessionId: string,
+      webContentsId?: number | null,
+      authorization?: string,
+    ): Promise<{ success: boolean; restored?: boolean; webContentsId?: number; error?: string }>;
+    /** Ask the home renderer to serialize current terminal scrollback. */
+    requestTerminalSessionSnapshot?(sessionId: string, authorization: string): Promise<{
+      success: boolean;
+      snapshot?: string;
+      error?: string;
+    }>;
+    /** Home renderer: listen for snapshot requests. */
+    onTerminalSessionSnapshotRequest?(
+      cb: (payload: { sessionId: string; requestId: string }) => void,
+    ): () => void;
+    /** Home renderer: reply with serialized scrollback. */
+    respondTerminalSessionSnapshot?(requestId: string, snapshot: string): void;
+    /** Observe popup: push current state back to the home renderer before restore. */
+    applyTerminalSessionSnapshot?(
+      sessionId: string,
+      snapshot: string,
+      context: {
+        contextSnapshot: string;
+        contextViewportSnapshot: string;
+        contextScrollbackSnapshot: string;
+        alternateScreen: boolean;
+      },
+      authorization: string,
+    ): Promise<{
+      success: boolean;
+      error?: string;
+    }>;
+    markAttachPopupClosePrepared?(sessionId: string, authorization: string): Promise<{ success: boolean; error?: string }>;
+    onTerminalPopupPrepareClose?(cb: (payload: { sessionId: string; authorization: string }) => void): () => void;
+    /** Home renderer: apply a pushed snapshot from an observe popup. */
+    onTerminalSessionApplySnapshot?(
+      cb: (payload: {
+        sessionId: string;
+        snapshot: string;
+        contextSnapshot: string;
+        contextViewportSnapshot: string;
+        contextScrollbackSnapshot: string;
+        alternateScreen: boolean;
+        requestId: string;
+      }) => boolean | Promise<boolean>,
+    ): () => void;
     // ZMODEM file transfer
     onZmodemEvent?(
       sessionId: string,
@@ -382,6 +443,13 @@ declare global {
       sessionId: string,
       cb: (evt: { sessionId: string; remoteEcho: boolean; localEcho: boolean }) => void
     ): () => void;
+    getTelnetEchoMode?(sessionId: string): Promise<{
+      success: boolean;
+      sessionId?: string;
+      remoteEcho?: boolean;
+      localEcho?: boolean;
+      error?: string;
+    }>;
     onAuthFailed?(
       sessionId: string,
       cb: (evt: { sessionId: string; error: string; hostname: string }) => void

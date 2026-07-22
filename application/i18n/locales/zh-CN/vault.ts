@@ -61,6 +61,7 @@ export const zhCNVaultMessages: Messages = {
   'quickConnect.identity.unavailable': '此身份在当前设备上缺少可用凭据。',
   'quickConnect.identity.useCustom': '改用自定义凭据',
   'quickConnect.identity.connect': '使用预设连接',
+  'quickConnect.connectTitle': '连接到 {host}',
 
   // Protocol select dialog
   'protocolSelect.chooseProtocol': '选择协议',
@@ -178,6 +179,7 @@ export const zhCNVaultMessages: Messages = {
   'hostDetails.distro.option.almalinux': 'AlmaLinux',
   'hostDetails.distro.option.alinux': '阿里云 Linux',
   'hostDetails.distro.option.openeuler': 'openEuler',
+  'hostDetails.distro.option.freebsd': 'FreeBSD',
   'hostDetails.distro.option.oracle': 'Oracle Linux',
   'hostDetails.distro.option.kali': 'Kali Linux',
   'hostDetails.distro.option.cisco': '思科',

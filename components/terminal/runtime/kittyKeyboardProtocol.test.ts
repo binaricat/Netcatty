@@ -12,6 +12,7 @@ import {
 } from "./kittyKeyboardProtocol";
 import {
   installKittyKeyboardProtocolHandlers,
+  installKittyKeyboardProtocolHandlersIfEnabled,
   readKittyKeyboardCsiParam,
   type KittyKeyboardCsiParams,
 } from "./kittyKeyboardRuntime";
@@ -142,6 +143,32 @@ test("kitty keyboard CSI param reader applies fallbacks for odd params", () => {
   assert.equal(readKittyKeyboardCsiParam([-1], 0, 7), 7);
   assert.equal(readKittyKeyboardCsiParam([[8, 9]], 0, 7), 8);
   assert.equal(readKittyKeyboardCsiParam([1], 1, 7), 7);
+});
+
+test("kitty keyboard CSI handlers require explicit opt-in", () => {
+  const disabled = createFakeCsiParser();
+  const state = createKittyKeyboardModeState();
+
+  assert.equal(
+    installKittyKeyboardProtocolHandlersIfEnabled(
+      undefined,
+      disabled.parser,
+      state,
+      () => {},
+    ),
+    undefined,
+  );
+  assert.equal(disabled.hasHandler({ prefix: "?", final: "u" }), false);
+
+  const enabled = createFakeCsiParser();
+  const disposable = installKittyKeyboardProtocolHandlersIfEnabled(
+    true,
+    enabled.parser,
+    state,
+    () => {},
+  );
+  assert.equal(enabled.hasHandler({ prefix: "?", final: "u" }), true);
+  disposable?.dispose();
 });
 
 test("kitty keyboard CSI handlers negotiate mode and enable Shift+Enter encoding", () => {

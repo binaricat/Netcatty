@@ -3,7 +3,7 @@
  */
 
 import { Monitor, Search } from 'lucide-react';
-import React, { memo, useEffect, useMemo, useRef, useState } from 'react';
+import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useI18n } from '../../application/i18n/I18nProvider';
 import {
     sftpHostEndpointsEqual,
@@ -11,6 +11,7 @@ import {
 } from '../../domain/sftpConnectedHosts';
 import { Host } from '../../types';
 import { DistroAvatar } from '../DistroAvatar';
+import { getQuickSwitcherRowStateClass, shouldUseQuickSwitcherPointerNavigation } from '../QuickSwitcher';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../ui/dialog';
 import { Input } from '../ui/input';
 import { ScrollArea } from '../ui/scroll-area';
@@ -31,6 +32,11 @@ const StatusDot: React.FC = () => (
     <span className="h-1.5 w-1.5 rounded-full shrink-0 bg-emerald-500" aria-hidden />
 );
 
+function formatHostMeta(host: Host): string {
+    const endpoint = host.username ? `${host.username}@${host.hostname}` : host.hostname;
+    return host.group ? `${endpoint} · ${host.group}` : endpoint;
+}
+
 const SftpHostPickerInner: React.FC<SftpHostPickerProps> = ({
     open,
     onOpenChange,
@@ -45,6 +51,8 @@ const SftpHostPickerInner: React.FC<SftpHostPickerProps> = ({
     const { t } = useI18n();
     const inputRef = useRef<HTMLInputElement>(null);
     const [selectedIndex, setSelectedIndex] = useState(0);
+    const [isKeyboardNavigating, setIsKeyboardNavigating] = useState(true);
+    const isKeyboardNavigatingRef = useRef(true);
     const term = hostSearch.trim().toLowerCase();
 
     const filteredConnectedHosts = useMemo(() => {
@@ -98,6 +106,8 @@ const SftpHostPickerInner: React.FC<SftpHostPickerProps> = ({
     useEffect(() => {
         if (!open) return;
         setSelectedIndex(0);
+        isKeyboardNavigatingRef.current = true;
+        setIsKeyboardNavigating(true);
         const focusTimer = setTimeout(() => inputRef.current?.focus(), 50);
         return () => clearTimeout(focusTimer);
     }, [open]);
@@ -105,6 +115,8 @@ const SftpHostPickerInner: React.FC<SftpHostPickerProps> = ({
     useEffect(() => {
         if (!open) return;
         setSelectedIndex(0);
+        isKeyboardNavigatingRef.current = true;
+        setIsKeyboardNavigating(true);
     }, [hostSearch, open]);
 
     useEffect(() => {
@@ -123,12 +135,25 @@ const SftpHostPickerInner: React.FC<SftpHostPickerProps> = ({
         onOpenChange(false);
     };
 
+    // Match Quick Switcher: pointer movement only leaves keyboard-nav mode.
+    // It must not rewrite the keyboard-selected index until the user clicks.
+    const handlePointerHover = useCallback((movementX: number, movementY: number) => {
+        if (!shouldUseQuickSwitcherPointerNavigation(movementX, movementY)) return;
+        if (!isKeyboardNavigatingRef.current) return;
+        isKeyboardNavigatingRef.current = false;
+        setIsKeyboardNavigating(false);
+    }, []);
+
     const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
         if (e.key === 'ArrowDown') {
             e.preventDefault();
+            isKeyboardNavigatingRef.current = true;
+            setIsKeyboardNavigating(true);
             setSelectedIndex((prev) => Math.min(prev + 1, items.length - 1));
         } else if (e.key === 'ArrowUp') {
             e.preventDefault();
+            isKeyboardNavigatingRef.current = true;
+            setIsKeyboardNavigating(true);
             setSelectedIndex((prev) => Math.max(prev - 1, 0));
         } else if (e.key === 'Enter' && items.length > 0) {
             e.preventDefault();
@@ -145,35 +170,33 @@ const SftpHostPickerInner: React.FC<SftpHostPickerProps> = ({
     const renderHostRow = (
         itemId: string,
         host: Host,
-        meta: { badge: string; showStatus?: boolean },
+        meta: { showStatus?: boolean } = {},
     ) => {
         const itemIndex = itemIndexById.get(itemId) ?? 0;
+        const isSelected = selectedIndex === itemIndex;
         return (
             <div
                 key={itemId}
-                className={`flex items-center justify-between px-4 py-2.5 cursor-pointer transition-colors ${selectedIndex === itemIndex ? 'bg-primary/15' : 'hover:bg-muted/50'
-                    }`}
+                className={`flex items-center justify-between px-4 py-2.5 cursor-pointer transition-colors ${getQuickSwitcherRowStateClass(isSelected, isKeyboardNavigating)}`}
                 onClick={() => handleSelect(items[itemIndex])}
-                onMouseEnter={() => setSelectedIndex(itemIndex)}
+                onMouseMove={(event) => handlePointerHover(event.movementX, event.movementY)}
             >
                 <div className="flex items-center gap-3 min-w-0">
-                    <DistroAvatar host={host} fallback={host.label[0].toUpperCase()} size="sm" />
-                    <div className="min-w-0">
-                        <div className="text-sm font-medium truncate flex items-center gap-1.5">
-                            {meta.showStatus ? <StatusDot /> : null}
-                            <span className="truncate">{host.label}</span>
-                        </div>
-                        <div className="text-xs text-muted-foreground truncate">
-                            {host.username}@{host.hostname}
-                        </div>
+                    <DistroAvatar host={host} fallback={host.label.slice(0, 2).toUpperCase()} size="sm" />
+                    <div className="flex min-w-0 items-center gap-1.5">
+                        {meta.showStatus ? <StatusDot /> : null}
+                        <span className="text-sm font-medium truncate">{host.label}</span>
                     </div>
                 </div>
-                <span className="text-[11px] text-muted-foreground">{meta.badge}</span>
+                <div className="ml-3 shrink-0 text-[11px] text-muted-foreground truncate max-w-[12rem]">
+                    {formatHostMeta(host)}
+                </div>
             </div>
         );
     };
 
     const showHostsEmpty = filteredHosts.length === 0 && filteredConnectedHosts.length === 0;
+    const localSelected = selectedIndex === 0;
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
@@ -207,23 +230,19 @@ const SftpHostPickerInner: React.FC<SftpHostPickerProps> = ({
                             </span>
                         </div>
                         <div
-                            className={`flex items-center justify-between px-4 py-2.5 cursor-pointer transition-colors ${selectedIndex === 0 ? 'bg-primary/15' : 'hover:bg-muted/50'
-                                }`}
+                            className={`flex items-center justify-between px-4 py-2.5 cursor-pointer transition-colors ${getQuickSwitcherRowStateClass(localSelected, isKeyboardNavigating)}`}
                             onClick={() => handleSelect(items[0])}
-                            onMouseEnter={() => setSelectedIndex(0)}
+                            onMouseMove={(event) => handlePointerHover(event.movementX, event.movementY)}
                         >
                             <div className="flex items-center gap-3 min-w-0">
-                                <div className="h-6 w-6 rounded-md bg-primary/10 border border-primary/30 flex items-center justify-center text-primary">
-                                    <Monitor size={14} />
+                                <div className="h-6 w-6 rounded flex items-center justify-center text-muted-foreground">
+                                    <Monitor size={16} />
                                 </div>
-                                <div className="min-w-0">
-                                    <div className="text-sm font-medium truncate">{t('sftp.picker.local.title')}</div>
-                                    <div className="text-xs text-muted-foreground truncate">{t('sftp.picker.local.desc')}</div>
-                                </div>
+                                <span className="text-sm font-medium truncate">{t('sftp.picker.local.title')}</span>
                             </div>
-                            <span className="text-[11px] text-muted-foreground">
-                                {t('sftp.picker.local.badge')}
-                            </span>
+                            <div className="ml-3 shrink-0 text-[11px] text-muted-foreground truncate max-w-[12rem]">
+                                {t('sftp.picker.local.desc')}
+                            </div>
                         </div>
 
                         {filteredConnectedHosts.length > 0 && (
@@ -237,10 +256,7 @@ const SftpHostPickerInner: React.FC<SftpHostPickerProps> = ({
                                     renderHostRow(
                                         `connected:${entry.sessionId}`,
                                         entry.host,
-                                        {
-                                            badge: t('sftp.picker.connected.badge'),
-                                            showStatus: true,
-                                        },
+                                        { showStatus: true },
                                     ),
                                 )}
                             </>
@@ -254,7 +270,7 @@ const SftpHostPickerInner: React.FC<SftpHostPickerProps> = ({
                                 </span>
                             </div>
                             {filteredHosts.length > 0 ? (
-                                filteredHosts.map((host) => renderHostRow(host.id, host, { badge: 'SSH' }))
+                                filteredHosts.map((host) => renderHostRow(host.id, host))
                             ) : (
                                 <div className="px-4 py-6 text-xs text-muted-foreground text-center">
                                     {t('sftp.picker.noMatch')}

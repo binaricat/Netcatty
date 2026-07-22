@@ -17,11 +17,9 @@ import {
   usePluginViewTabs,
 } from './application/state/pluginViewTabStore';
 import {
-  clearReferenceKeyPassphrases,
-  clearKeyPassphrasesByIds,
+  clearRememberedKeyPassphrases,
   loadDefaultKeyPassphrase,
   rememberKeyPassphrase,
-  removeDefaultKeyPassphraseAliases,
   shouldUpdateReferenceKeyPassphrase,
 } from './application/defaultKeyPassphrases';
 import { initializeFonts } from './application/state/fontStore';
@@ -60,6 +58,7 @@ import { getCredentialProtectionAvailability } from './infrastructure/services/c
 import { netcattyBridge } from './infrastructure/services/netcattyBridge';
 import { localStorageAdapter } from './infrastructure/persistence/localStorageAdapter';
 import {
+  markExternalMcpStartupReady,
   readExternalMcpFocusOnHostOpen,
   readExternalMcpSilentSessions,
   syncExternalMcpStartupState,
@@ -201,7 +200,19 @@ function App({ settings }: { settings: SettingsState }) {
   // temporary-mode runtime that the main window already started.
   useEffect(() => {
     if (isPeerSessionWindow) return;
-    syncExternalMcpStartupState(netcattyBridge.get());
+    let cancelled = false;
+    void (async () => {
+      try {
+        // Wait for enable/disable reconcile to settle before top-bar runtime polling
+        // can clear the shared switch from a still-disabled controller.
+        await syncExternalMcpStartupState(netcattyBridge.get());
+      } finally {
+        if (!cancelled) markExternalMcpStartupReady();
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [isPeerSessionWindow]);
 
   const {
@@ -305,7 +316,6 @@ function App({ settings }: { settings: SettingsState }) {
     moveFocusInWorkspace,
     runSnippet,
     orphanSessions,
-    orderedTabs,
     getOrderedWorkTabs,
     reorderTabs,
     toggleBroadcast,
@@ -637,7 +647,18 @@ function App({ settings }: { settings: SettingsState }) {
 
   // Window controls - must be before update toast effect which uses openSettingsWindow
   const { openSettingsWindow } = useWindowControls();
-  const _handleTrayJumpToSession = useEffectEvent((sessionId: string) => { return handleTrayJumpToSessionImpl(() => ({ sessionId, sessions, setActiveTabId, setWorkspaceFocusedSession }), sessionId); });
+  const _handleTrayJumpToSession = useEffectEvent((sessionId: string) => {
+    return handleTrayJumpToSessionImpl(() => ({
+      sessionId,
+      sessions,
+      setActiveTabId,
+      setWorkspaceFocusedSession,
+      getActiveTabId: () => activeTabStore.getActiveTabId(),
+      netcattyBridge,
+      toast,
+      t,
+    }), sessionId);
+  });
   const _handleTrayTogglePortForward = useEffectEvent((ruleId: string, start: boolean) => { return handleTrayTogglePortForwardImpl(() => ({ hasRuntimeTunnel, hosts, identities, keys, knownHosts: effectiveKnownHosts, portForwardingRules, resolveEffectiveHost, ruleId, start, startTunnel, stopTunnel, t, terminalSettings, toast, undefined }), ruleId, start); });
   const _handleTrayPanelConnect = useEffectEvent((hostId: string) => { return handleTrayPanelConnectImpl(() => ({ addConnectionLog, connectToHost, hostId, hosts, identities, keys, resolveEffectiveHost, resolveHostAuth, systemInfoRef, t, toast }), hostId); });
   const _handleTrayPanelConnectRequest = useEffectEvent((hostId: string) => { return handleTrayPanelConnectRequestImpl(() => ({ connectNow: _handleTrayPanelConnect, hostId, isVaultInitialized, queueConnect: (queuedHostId: string) => setPendingTrayPanelConnectHostIds((prev) => [...prev, queuedHostId]) }), hostId); });
@@ -805,14 +826,14 @@ function App({ settings }: { settings: SettingsState }) {
       const keyPaths = event.keyPaths ?? [];
       const keyIds = event.keyIds ?? [];
       console.log('[App] Passphrase auth failed for keys:', { keyPaths, keyIds });
-      void removeDefaultKeyPassphraseAliases(keyPaths).then((aliases) => {
-        if (keyPaths.length > 0 && aliases.length === 0) return;
-        const withoutReferencePassphrases = clearReferenceKeyPassphrases(keysRef.current, aliases);
-        const updated = clearKeyPassphrasesByIds(withoutReferencePassphrases, keyIds);
-        if (updated !== keysRef.current) {
-          keysRef.current = updated;
-          void updateKeys(updated);
-        }
+      void clearRememberedKeyPassphrases({
+        keyPaths,
+        keyIds,
+        getKeys: () => keysRef.current,
+        setCurrentKeys: (keys) => {
+          keysRef.current = keys;
+        },
+        updateKeys,
       });
     });
 
@@ -1150,6 +1171,15 @@ function App({ settings }: { settings: SettingsState }) {
     closeSession(sessionId);
     return { ok: true as const };
   }, [closeSession, sessions]);
+
+  useEffect(() => {
+    if (isPeerSessionWindow) return;
+    const bridge = netcattyBridge.get();
+    const unsubscribe = bridge?.onTrayPanelCloseSession?.((sessionId) => {
+      closeSessionForVaultAgent(sessionId);
+    });
+    return () => unsubscribe?.();
+  }, [isPeerSessionWindow, closeSessionForVaultAgent]);
 
   useVaultAgentBridge({
     hosts,

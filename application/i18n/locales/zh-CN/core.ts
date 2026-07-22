@@ -232,6 +232,7 @@ export const zhCNCoreMessages: Messages = {
   'tray.empty.title': '一切都很安静',
   'tray.empty.subtitle': '去连接个服务器吧，它们想念你了 🚀',
   'tray.quit': '退出 Netcatty',
+  'tray.closeSession': '关闭会话',
 
   // Vault Sidebar
   'vault.sidebar.collapse': '收起侧边栏',
@@ -603,6 +604,7 @@ export const zhCNCoreMessages: Messages = {
   'vault.hosts.export': '导出',
   'vault.hosts.export.toast.success': '已导出 {count} 个主机到 CSV',
   'vault.hosts.export.toast.successWithSkipped': '已导出 {count} 个主机到 CSV（跳过 {skipped} 个不支持的主机）',
+  'vault.hosts.export.toast.passphrasesSkipped': '有 {count} 个已保存的密钥口令无法读取，导出时已留空',
   'vault.hosts.export.toast.noHosts': '没有主机可导出',
   'vault.hosts.allHosts': '全部主机',
   'vault.hosts.pinned': '已置顶',

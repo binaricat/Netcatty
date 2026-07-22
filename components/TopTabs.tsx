@@ -1,4 +1,4 @@
-import { Folder, FolderLock, Menu, Moon, MoreHorizontal, Plus, Settings, Sparkles, Sun } from 'lucide-react';
+import { Folder, FolderLock, Menu, MoreHorizontal, Plus, Settings, Sparkles } from 'lucide-react';
 import React, { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { fromEditorTabId, isEditorTabId, useActiveTabId } from '../application/state/activeTabStore';
 import { isHostTreeWorkTabSurface } from '../application/app/workTabSurface';
@@ -23,7 +23,7 @@ import { Button } from './ui/button';
 import { ContextMenuItem, ContextMenuSeparator } from './ui/context-menu';
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 import { SyncStatusButton } from './SyncStatusButton';
-import { WindowOpacityButton } from './WindowOpacityButton';
+import { TopTabsQuickControls } from './TopTabsQuickControls';
 import {
   ActiveTabAutoScroller,
   EditorTopTab,
@@ -137,6 +137,9 @@ interface TopTabsProps {
   onOpenQuickSwitcher: () => void;
   onToggleTheme: () => void;
   onOpenSettings: () => void;
+  externalMcpEnabled: boolean;
+  onToggleExternalMcp: (enabled: boolean) => void;
+  showExternalMcpToggle?: boolean;
   windowOpacity: number;
   setWindowOpacity: (opacity: number) => void;
   onSyncNow?: () => Promise<void>;
@@ -178,6 +181,9 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
   onOpenQuickSwitcher,
   onToggleTheme,
   onOpenSettings,
+  externalMcpEnabled,
+  onToggleExternalMcp,
+  showExternalMcpToggle = true,
   windowOpacity,
   setWindowOpacity,
   onSyncNow,
@@ -1097,32 +1103,22 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
             </TooltipTrigger>
             <TooltipContent>{t('topTabs.aiAssistant')}</TooltipContent>
           </Tooltip>
-          <WindowOpacityButton
-            windowOpacity={windowOpacity}
-            setWindowOpacity={setWindowOpacity}
-            className="h-7 w-7 shrink-0 top-tab-utility-btn"
-            style={{ color: 'var(--top-tabs-muted, hsl(var(--muted-foreground)))' }}
-          />
           <SyncStatusButton
             onOpenSettings={onOpenSettings}
             onSyncNow={onSyncNow}
             className="h-7 w-7 shrink-0 top-tab-utility-btn"
             style={{ color: 'var(--top-tabs-muted, hsl(var(--muted-foreground)))' }}
           />
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7 shrink-0 app-no-drag top-tab-utility-btn"
-                style={{ color: 'var(--top-tabs-muted, hsl(var(--muted-foreground)))' }}
-                onClick={onToggleTheme}
-              >
-                {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{t('topTabs.toggleTheme')}</TooltipContent>
-          </Tooltip>
+          <TopTabsQuickControls
+            theme={theme}
+            onToggleTheme={onToggleTheme}
+            externalMcpEnabled={externalMcpEnabled}
+            onToggleExternalMcp={onToggleExternalMcp}
+            showExternalMcpToggle={showExternalMcpToggle}
+            windowOpacity={windowOpacity}
+            setWindowOpacity={setWindowOpacity}
+            style={{ color: 'var(--top-tabs-muted, hsl(var(--muted-foreground)))' }}
+          />
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
@@ -1165,6 +1161,9 @@ const topTabsAreEqual = (prev: TopTabsProps, next: TopTabsProps): boolean => {
     prev.onCopySession === next.onCopySession &&
     prev.onCopySessionToNewWindow === next.onCopySessionToNewWindow &&
     prev.onOpenSettings === next.onOpenSettings &&
+    prev.externalMcpEnabled === next.externalMcpEnabled &&
+    prev.onToggleExternalMcp === next.onToggleExternalMcp &&
+    prev.showExternalMcpToggle === next.showExternalMcpToggle &&
     prev.windowOpacity === next.windowOpacity &&
     prev.setWindowOpacity === next.setWindowOpacity &&
     prev.onSyncNow === next.onSyncNow &&

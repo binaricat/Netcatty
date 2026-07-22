@@ -114,3 +114,13 @@ export const installKittyKeyboardProtocolHandlers = (
     },
   };
 };
+
+export const installKittyKeyboardProtocolHandlersIfEnabled = (
+  enabled: boolean | undefined,
+  parser: KittyKeyboardParser,
+  state: KittyKeyboardModeState,
+  writeReply: (payload: string) => void,
+): IDisposable | undefined => {
+  if (enabled !== true) return undefined;
+  return installKittyKeyboardProtocolHandlers(parser, state, writeReply);
+};

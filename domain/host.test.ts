@@ -449,9 +449,18 @@ test("normalizeDistroId maps Darwin and macOS labels to macos", () => {
   assert.equal(normalizeDistroId("Mac OS X"), "macos");
 });
 
-test("classifyDistroId treats macos as a POSIX stats target", () => {
+test("normalizeDistroId maps FreeBSD uname output to freebsd", () => {
+  assert.equal(normalizeDistroId("FreeBSD"), "freebsd");
+  assert.equal(
+    normalizeDistroId("FreeBSD host.example.com 14.3-RELEASE-p1 GENERIC amd64"),
+    "freebsd",
+  );
+});
+
+test("classifyDistroId limits Linux-like runtime support to implemented POSIX platforms", () => {
   assert.equal(classifyDistroId("macos"), "linux-like");
   assert.equal(classifyDistroId("Darwin"), "linux-like");
+  assert.equal(classifyDistroId("freebsd"), "other");
 });
 
 test("shouldProbeSessionCwd allows the probe on a plain Linux host", () => {

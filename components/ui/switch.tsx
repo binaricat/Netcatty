@@ -9,6 +9,14 @@ export interface SwitchProps
 
 const Switch = React.forwardRef<HTMLInputElement, SwitchProps>(
   ({ className, checked, onCheckedChange, disabled, ...props }, ref) => {
+    const {
+      'aria-label': ariaLabel,
+      'aria-labelledby': ariaLabelledBy,
+      'aria-describedby': ariaDescribedBy,
+      id,
+      ...inputProps
+    } = props;
+
     const handleClick = () => {
       if (!disabled && onCheckedChange) {
         onCheckedChange(!checked);
@@ -27,7 +35,11 @@ const Switch = React.forwardRef<HTMLInputElement, SwitchProps>(
     return (
       <div
         role="switch"
+        id={id}
         aria-checked={checked}
+        aria-label={ariaLabel}
+        aria-labelledby={ariaLabelledBy}
+        aria-describedby={ariaDescribedBy}
         tabIndex={disabled ? -1 : 0}
         onClick={handleClick}
         onKeyDown={handleKeyDown}
@@ -44,8 +56,10 @@ const Switch = React.forwardRef<HTMLInputElement, SwitchProps>(
           ref={ref}
           checked={checked}
           disabled={disabled}
+          tabIndex={-1}
+          aria-hidden="true"
           onChange={(e) => onCheckedChange?.(e.target.checked)}
-          {...props}
+          {...inputProps}
         />
         <span
           className={cn(

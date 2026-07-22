@@ -3,11 +3,10 @@ import {
   ChevronDown,
   Eye,
   EyeOff,
-  Globe,
   Key,
   Lock,
+  Plug,
   Plus,
-  Terminal as TerminalIcon,
   User,
 } from "lucide-react";
 import React, { useMemo, useState } from "react";
@@ -29,6 +28,9 @@ import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Dropdown, DropdownContent, DropdownTrigger } from "./ui/dropdown";
 import { ScrollArea } from "./ui/scroll-area";
+import { PROTOCOL_VISUAL_STYLES } from "./protocolVisuals";
+
+
 
 // Wizard steps
 type WizardStep = "protocol" | "username" | "knownhost" | "auth";
@@ -255,8 +257,9 @@ const QuickConnectWizard: React.FC<QuickConnectWizardProps> = ({
 
   // Render protocol selection step
   const renderProtocolStep = () => (
-    <div className="space-y-4">
-      <h3 className="text-base font-semibold">{t("protocolSelect.chooseProtocol")}</h3>
+    <div className="space-y-6">
+      <div className="space-y-4">
+      <h3 className="text-sm font-medium">{t("protocolSelect.chooseProtocol")}</h3>
       <div className="space-y-3">
         {/* SSH */}
         <button
@@ -273,11 +276,11 @@ const QuickConnectWizard: React.FC<QuickConnectWizardProps> = ({
               className={cn(
                 "h-10 w-10 rounded-lg flex items-center justify-center",
                 protocol === "ssh"
-                  ? "bg-primary/20 text-primary"
-                  : "bg-muted text-muted-foreground",
+                  ? PROTOCOL_VISUAL_STYLES.ssh.selected
+                  : PROTOCOL_VISUAL_STYLES.ssh.idle,
               )}
             >
-              <TerminalIcon size={18} />
+              {PROTOCOL_VISUAL_STYLES.ssh.icon}
             </div>
             <div>
               <div className="font-medium">SSH</div>
@@ -315,11 +318,11 @@ const QuickConnectWizard: React.FC<QuickConnectWizardProps> = ({
               className={cn(
                 "h-10 w-10 rounded-lg flex items-center justify-center",
                 protocol === "mosh"
-                  ? "bg-primary/20 text-primary"
-                  : "bg-muted text-muted-foreground",
+                  ? PROTOCOL_VISUAL_STYLES.mosh.selected
+                  : PROTOCOL_VISUAL_STYLES.mosh.idle,
               )}
             >
-              <Globe size={18} />
+              {PROTOCOL_VISUAL_STYLES.mosh.icon}
             </div>
             <div>
               <div className="font-medium">Mosh</div>
@@ -357,11 +360,11 @@ const QuickConnectWizard: React.FC<QuickConnectWizardProps> = ({
               className={cn(
                 "h-10 w-10 rounded-lg flex items-center justify-center",
                 protocol === "et"
-                  ? "bg-primary/20 text-primary"
-                  : "bg-muted text-muted-foreground",
+                  ? PROTOCOL_VISUAL_STYLES.et.selected
+                  : PROTOCOL_VISUAL_STYLES.et.idle,
               )}
             >
-              <Globe size={18} />
+              {PROTOCOL_VISUAL_STYLES.et.icon}
             </div>
             <div>
               <div className="font-medium">Eternal Terminal</div>
@@ -399,11 +402,11 @@ const QuickConnectWizard: React.FC<QuickConnectWizardProps> = ({
               className={cn(
                 "h-10 w-10 rounded-lg flex items-center justify-center",
                 protocol === "telnet"
-                  ? "bg-primary/20 text-primary"
-                  : "bg-muted text-muted-foreground",
+                  ? PROTOCOL_VISUAL_STYLES.telnet.selected
+                  : PROTOCOL_VISUAL_STYLES.telnet.idle,
               )}
             >
-              <TerminalIcon size={18} />
+              {PROTOCOL_VISUAL_STYLES.telnet.icon}
             </div>
             <div>
               <div className="font-medium">Telnet</div>
@@ -426,18 +429,21 @@ const QuickConnectWizard: React.FC<QuickConnectWizardProps> = ({
           </div>
         </button>
       </div>
+      </div>
 
       {protocol !== "telnet" && identities.length > 0 && (
-        <div className="space-y-2 pt-1">
-          <Label>{t("quickConnect.identity.label")}</Label>
-          <Combobox
-            options={identityOptions}
-            value={selectedIdentityId || undefined}
-            onValueChange={handleIdentitySelect}
-            placeholder={t("quickConnect.identity.placeholder")}
-            emptyText={t("quickConnect.identity.empty")}
-            icon={<User size={14} />}
-          />
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-3">
+            <Label className="text-sm font-medium">{t("quickConnect.identity.label")}</Label>
+            <Combobox
+              options={identityOptions}
+              value={selectedIdentityId || undefined}
+              onValueChange={handleIdentitySelect}
+              placeholder={t("quickConnect.identity.placeholder")}
+              emptyText={t("quickConnect.identity.empty")}
+              icon={<User size={14} />}
+            />
+          </div>
           <p className="text-xs text-muted-foreground">
             {selectedIdentity
               ? t("quickConnect.identity.selectedHint", { username: selectedIdentity.username })
@@ -652,87 +658,17 @@ const QuickConnectWizard: React.FC<QuickConnectWizardProps> = ({
     </div>
   );
 
-  // Get step title
-  const getStepTitle = () => {
-    switch (step) {
-      case "protocol":
-        return target.hostname;
-      case "username":
-        return target.hostname;
-      case "knownhost":
-        return target.hostname;
-      case "auth":
-        return target.hostname;
-    }
-  };
-
-  // Get step subtitle
-  const getStepSubtitle = () => {
-    const effectiveUsername = username || target.username || "";
-    switch (step) {
-      case "protocol":
-        return target.hostname;
-      case "username":
-        return `${protocol.toUpperCase()} ${formatHostPort(target.hostname, port)}`;
-      case "knownhost":
-        return `${protocol.toUpperCase()} ${effectiveUsername}@${formatHostPort(target.hostname, port)}`;
-      case "auth":
-        return `${protocol.toUpperCase()} ${formatHostPort(target.hostname, port)}`;
-    }
-  };
-
-  // Render progress indicator
-  const renderProgressIndicator = () => {
-    const steps: WizardStep[] = target.username
-      ? ["protocol", "auth"]
-      : ["protocol", "username", "auth"];
-    const currentIndex = steps.indexOf(step);
-
-    return (
-      <div className="flex items-center gap-3 py-3">
-        <div
-          className={cn(
-            "h-8 w-8 rounded-full flex items-center justify-center flex-shrink-0",
-            currentIndex >= 0
-              ? "bg-primary/20 text-primary"
-              : "bg-muted text-muted-foreground",
-          )}
-        >
-          <TerminalIcon size={14} />
-        </div>
-        <div className="flex-1 h-0.5 bg-muted" />
-        {!target.username && (
-          <>
-            <div
-              className={cn(
-                "h-8 w-8 rounded-full flex items-center justify-center flex-shrink-0",
-                currentIndex >= 1
-                  ? "bg-primary/20 text-primary"
-                  : "bg-muted text-muted-foreground",
-              )}
-            >
-              <User size={14} />
-            </div>
-            <div className="flex-1 h-0.5 bg-muted" />
-          </>
-        )}
-        <div
-          className={cn(
-            "h-8 w-8 rounded-full flex items-center justify-center flex-shrink-0",
-            step === "auth"
-              ? "bg-primary/20 text-primary"
-              : "bg-muted text-muted-foreground",
-          )}
-        >
-          {authMethod === "password" ? <Lock size={14} /> : <Key size={14} />}
-        </div>
-        <div className="flex-1 h-0.5 bg-muted" />
-        <div className="h-8 w-8 rounded-full bg-muted text-muted-foreground flex items-center justify-center text-xs font-mono">
-          {">_"}
-        </div>
-      </div>
+  const hostEndpoint = formatHostPort(target.hostname, port || getQuickConnectDefaultPort(protocol));
+  const connectTitle = t("quickConnect.connectTitle", { host: hostEndpoint });
+  const protocolLabel = protocol === "et" ? "ET" : protocol.toUpperCase();
+  const effectiveUsername = username || target.username || "";
+  const connectSubtitle = step === "protocol"
+    ? null
+    : (
+      effectiveUsername
+        ? `${protocolLabel} ${effectiveUsername}@${hostEndpoint}`
+        : `${protocolLabel} ${hostEndpoint}`
     );
-  };
 
   return (
     <div
@@ -748,24 +684,18 @@ const QuickConnectWizard: React.FC<QuickConnectWizardProps> = ({
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="px-6 py-5 border-b border-border/50">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="h-12 w-12 rounded-xl bg-primary/15 text-primary flex items-center justify-center">
-                <TerminalIcon size={22} />
-              </div>
-              <div>
-                <h2 className="text-base font-semibold">{getStepTitle()}</h2>
-                <p className="text-xs text-muted-foreground font-mono">
-                  {getStepSubtitle()}
-                </p>
-              </div>
+        <div className="px-6 py-4 border-b border-border/50">
+          <div className="flex items-center gap-2 min-w-0">
+            <Plug size={18} className="shrink-0 text-foreground" />
+            <div className="min-w-0">
+              <h2 className="text-base font-semibold truncate">{connectTitle}</h2>
+              {connectSubtitle ? (
+                <p className="text-xs text-muted-foreground font-mono truncate">{connectSubtitle}</p>
+              ) : null}
             </div>
           </div>
         </div>
 
-        {/* Progress indicator */}
-        <div className="px-6">{renderProgressIndicator()}</div>
 
         {warnings && warnings.length > 0 && (
           <div className="px-6 pb-2">

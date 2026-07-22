@@ -223,6 +223,7 @@ export const ruCoreMessages: Messages = {
   'tray.empty.title': 'Пока здесь ничего нет',
   'tray.empty.subtitle': 'Подключитесь к серверу, они по вам скучают 🚀',
   'tray.quit': 'Выйти из Netcatty',
+  'tray.closeSession': 'Закрыть сессию',
 
   // Vault Sidebar
   'vault.sidebar.collapse': 'Свернуть боковую панель',
@@ -493,6 +494,9 @@ export const ruCoreMessages: Messages = {
   'settings.terminal.keyboard.optionArrowWordJump': 'Option+←/→ переход по словам',
   'settings.terminal.keyboard.optionArrowWordJump.desc':
     'Отправлять Meta-b / Meta-f при Option+Влево/Вправо, чтобы оболочка перемещалась по словам, вместо стандартного ^[[1;3D / ^[[1;3C',
+  'settings.terminal.keyboard.kittyProtocol': 'Протокол клавиатуры Kitty',
+  'settings.terminal.keyboard.kittyProtocol.desc':
+    'Включить поддержку протокола клавиатуры Kitty.',
   'settings.terminal.accessibility.minimumContrastRatio': 'Минимальный коэффициент контрастности',
   'settings.terminal.accessibility.minimumContrastRatio.desc':
     'Подстраивать цвета под требования контрастности (1 = отключено, 21 = максимум)',

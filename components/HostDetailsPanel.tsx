@@ -106,6 +106,7 @@ interface HostDetailsPanelProps {
   onImportKey?: (draft: Partial<SSHKey>) => SSHKey;
   snippets?: Snippet[];
   onSnippetsChange?: (snippets: Snippet[]) => void;
+  className?: string;
 }
 
 type HostDetailsPanelPropsWithResize = HostDetailsPanelProps & AsidePanelResizeProps;
@@ -132,6 +133,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
   onImportKey,
   snippets = [],
   onSnippetsChange,
+  className,
   resizable,
   persistWidthStorageKey,
   resizeAriaLabel,
@@ -857,6 +859,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
       onClose={onCancel}
       width="w-[420px]"
       layout={layout}
+      className={className}
       dataSection="host-details-panel"
       {...asideResizeProps}
       title={

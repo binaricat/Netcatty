@@ -3,6 +3,8 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import type { Host } from '../../types';
 
+const sidebarSource = readFileSync(new URL('./TerminalHostTreeSidebar.tsx', import.meta.url), 'utf8');
+
 const storage = new Map<string, string>();
 Object.defineProperty(globalThis, 'localStorage', {
   configurable: true,
@@ -98,6 +100,19 @@ test('host tree sidebar memo tracks surface visibility and theme changes', () =>
 
   assert.match(source, /prev\.surfaceVisible === next\.surfaceVisible/);
   assert.match(source, /themeFingerprint\(prev\.resolvedPreviewTheme\) === themeFingerprint\(next\.resolvedPreviewTheme\)/);
+});
+
+test('host tree sidebar wires app-level host creation and editing actions', () => {
+  assert.match(sidebarSource, /onNewHost\?: \(defaultGroup\?: string\) => void/);
+  assert.match(sidebarSource, /onEditHost\?: \(host: Host\) => void/);
+  assert.match(sidebarSource, /onEditHost=\{onEditHost\}/);
+  assert.match(sidebarSource, /onNewHost=\{\(groupPath\) => onNewHost\?\.\(groupPath\)\}/);
+});
+
+test('host tree sidebar exposes new host only from unused root space', () => {
+  assert.match(sidebarSource, /data-section="terminal-host-tree-root-context"/);
+  assert.match(sidebarSource, /closest\('\[data-row-type\]'\)/);
+  assert.match(sidebarSource, /<ContextMenuItem onClick=\{\(\) => onNewHost\?\.\(\)\}>/);
 });
 
 test('host tree sidebar clips the panel instead of fading it out while closing', () => {

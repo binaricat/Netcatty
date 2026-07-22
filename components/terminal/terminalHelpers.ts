@@ -138,6 +138,16 @@ export interface TerminalProps {
   // source session whose authenticated connection should be reused for a new
   // shell channel — skipping a second MFA prompt (issue #1204).
   reuseConnectionFromSessionId?: string;
+  /**
+   * Attach to an already-running backend session (same PTY) instead of starting
+   * a new one. Used by the AI silent-session observe popup. Must not close the
+   * backend session on unmount.
+   */
+  attachExistingSession?: boolean;
+  /** Ephemeral grant required for attach-session IPC. */
+  attachAuthorization?: string;
+  /** Registers the async handoff that must finish before an attach popup closes. */
+  onAttachClosePreparationChange?: (prepare: (() => Promise<void>) | null) => void;
   serialConfig?: SerialConfig;
   hotkeyScheme?: "disabled" | "mac" | "pc";
   disableTerminalFontZoom?: boolean;

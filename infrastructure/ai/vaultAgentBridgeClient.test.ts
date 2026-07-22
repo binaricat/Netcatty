@@ -55,6 +55,8 @@ function createDeps(
       hosts = nextHosts;
     },
     saveKeyPassphrase: async () => {},
+    resolveKeyPassphraseAliases: async (keyPath) => [keyPath],
+    readKeyPassphrases: async () => ({ values: [], unreadable: false }),
     removeKeyPassphrases: () => {},
     updateNotes: (nextNotes) => {
       notes = nextNotes;
@@ -1012,6 +1014,165 @@ describe('handleVaultAgentOp vault hosts', () => {
     assert.equal((result as { previewHosts?: unknown[] }).previewHosts?.length, 2);
   });
 
+  it('host.import dryRun reports path-alias passphrase conflicts without writing', async () => {
+    const saved: Array<{ keyPath: string; passphrase: string }> = [];
+    const result = await handleVaultAgentOp(
+      'host.import',
+      {
+        format: 'csv',
+        dryRun: true,
+        text: [
+          'Label,Hostname,Username,KeyPath,Passphrase',
+          'first,first.example.com,root,~/.ssh/shared,first-secret',
+          'second,second.example.com,root,/Users/alice/.ssh/shared,second-secret',
+        ].join('\n'),
+      },
+      createDeps({
+        resolveKeyPassphraseAliases: async (keyPath) => (
+          keyPath.startsWith('~/')
+            ? [keyPath, `/Users/alice/${keyPath.slice(2)}`]
+            : [keyPath, `~/${keyPath.slice('/Users/alice/'.length)}`]
+        ),
+        saveKeyPassphrase: async (keyPath, passphrase) => {
+          saved.push({ keyPath, passphrase });
+        },
+      }),
+    );
+
+    assert.equal(result.ok, true);
+    assert.equal((result as { dryRun?: boolean }).dryRun, true);
+    assert.deepEqual(saved, []);
+    assert.match(
+      (result as { issues?: Array<{ message: string }> }).issues?.[0]?.message ?? '',
+      /conflicting passphrases/u,
+    );
+  });
+
+  it('host.import blocks alias conflicts involving a skipped duplicate host', async () => {
+    const existing: Host = {
+      id: 'existing',
+      label: 'old',
+      hostname: 'old.example.com',
+      username: 'root',
+      port: 22,
+    };
+    const saved: Array<{ keyPath: string; passphrase: string }> = [];
+    const params = {
+      format: 'csv',
+      text: [
+        'Label,Hostname,Port,Username,KeyPath,Passphrase',
+        'old,old.example.com,22,root,~/.ssh/shared,old-secret',
+        'new,new.example.com,22,root,/Users/alice/.ssh/shared,new-secret',
+      ].join('\n'),
+    };
+    const aliases = async (keyPath: string) => (
+      keyPath.startsWith('~/')
+        ? [keyPath, `/Users/alice/${keyPath.slice(2)}`]
+        : [keyPath, `~/${keyPath.slice('/Users/alice/'.length)}`]
+    );
+
+    const preview = await handleVaultAgentOp(
+      'host.import',
+      { ...params, dryRun: true },
+      createDeps({ hosts: [existing], resolveKeyPassphraseAliases: aliases }),
+    );
+    const imported = await handleVaultAgentOp(
+      'host.import',
+      params,
+      createDeps({
+        hosts: [existing],
+        resolveKeyPassphraseAliases: aliases,
+        saveKeyPassphrase: async (keyPath, passphrase) => {
+          saved.push({ keyPath, passphrase });
+        },
+      }),
+    );
+
+    assert.equal(preview.ok, true);
+    assert.equal(imported.ok, true);
+    assert.deepEqual(saved, []);
+    assert.match(
+      (preview as { issues?: Array<{ message: string }> }).issues?.[0]?.message ?? '',
+      /conflicting passphrases/u,
+    );
+    assert.match(
+      (imported as { issues?: Array<{ message: string }> }).issues?.[0]?.message ?? '',
+      /conflicting passphrases/u,
+    );
+  });
+
+  it('host.import keeps a new host credential when a skipped alias has the same passphrase', async () => {
+    const existing: Host = {
+      id: 'existing',
+      label: 'old',
+      hostname: 'old.example.com',
+      username: 'root',
+      port: 22,
+    };
+    const saved: Array<{ keyPath: string; passphrase: string }> = [];
+    const result = await handleVaultAgentOp(
+      'host.import',
+      {
+        format: 'csv',
+        text: [
+          'Label,Hostname,Port,Username,KeyPath,Passphrase',
+          'old,old.example.com,22,root,~/.ssh/shared,same-secret',
+          'new,new.example.com,22,root,/Users/alice/.ssh/shared,same-secret',
+        ].join('\n'),
+      },
+      createDeps({
+        hosts: [existing],
+        resolveKeyPassphraseAliases: async (keyPath) => (
+          keyPath.startsWith('~/')
+            ? [keyPath, `/Users/alice/${keyPath.slice(2)}`]
+            : [keyPath, `~/${keyPath.slice('/Users/alice/'.length)}`]
+        ),
+        saveKeyPassphrase: async (keyPath, passphrase) => {
+          saved.push({ keyPath, passphrase });
+        },
+      }),
+    );
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(saved, [{
+      keyPath: '/Users/alice/.ssh/shared',
+      passphrase: 'same-secret',
+    }]);
+  });
+
+  it('host.import blocks an alias after an exact-path conflict', async () => {
+    const saved: Array<{ keyPath: string; passphrase: string }> = [];
+    const result = await handleVaultAgentOp(
+      'host.import',
+      {
+        format: 'csv',
+        text: [
+          'Label,Hostname,Username,KeyPath,Passphrase',
+          'one,one.example.com,root,~/.ssh/shared,one',
+          'two,two.example.com,root,~/.ssh/shared,two',
+          'three,three.example.com,root,/Users/alice/.ssh/shared,three',
+        ].join('\n'),
+      },
+      createDeps({
+        resolveKeyPassphraseAliases: async (keyPath) => (
+          keyPath.startsWith('~/')
+            ? [keyPath, `/Users/alice/${keyPath.slice(2)}`]
+            : [keyPath, `~/${keyPath.slice('/Users/alice/'.length)}`]
+        ),
+        saveKeyPassphrase: async (keyPath, passphrase) => {
+          saved.push({ keyPath, passphrase });
+        },
+      }),
+    );
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(saved, []);
+    assert.ok(
+      (result as { issues?: Array<{ message: string }> }).issues
+        ?.some((issue) => /conflicting passphrases/u.test(issue.message)),
+    );
+  });
+
   it('host.import applies hosts to the vault', async () => {
     const updatedHosts: Host[][] = [];
     const updatedGroups: string[][] = [];
@@ -1032,6 +1193,203 @@ describe('handleVaultAgentOp vault hosts', () => {
     assert.equal(updatedHosts[0]?.length, 2);
     assert.ok(updatedGroups[0]?.includes('prod/web'));
     assert.equal((result as { addedCount?: number }).addedCount, 2);
+  });
+
+  it('host.import saves CSV key passphrases only for newly added hosts', async () => {
+    const saved: Array<{ keyPath: string; passphrase: string }> = [];
+    const result = await handleVaultAgentOp(
+      'host.import',
+      {
+        format: 'csv',
+        text: [
+          'Label,Hostname,Username,KeyPath,Passphrase',
+          'key-host,key.example.com,ubuntu,~/.ssh/id_ed25519,secret',
+        ].join('\n'),
+      },
+      createDeps({
+        saveKeyPassphrase: async (keyPath, passphrase) => {
+          saved.push({ keyPath, passphrase });
+        },
+      }),
+    );
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(saved, [{ keyPath: '~/.ssh/id_ed25519', passphrase: 'secret' }]);
+
+    saved.length = 0;
+    const duplicate = await handleVaultAgentOp(
+      'host.import',
+      {
+        format: 'csv',
+        text: [
+          'Label,Hostname,Username,KeyPath,Passphrase',
+          'key-host,key.example.com,ubuntu,~/.ssh/id_ed25519,replacement',
+        ].join('\n'),
+      },
+      createDeps({
+        hosts: [{
+          id: 'existing-key-host',
+          label: 'key-host',
+          hostname: 'key.example.com',
+          username: 'ubuntu',
+          port: 22,
+          tags: [],
+          os: 'linux',
+        }],
+        saveKeyPassphrase: async (keyPath, passphrase) => {
+          saved.push({ keyPath, passphrase });
+        },
+      }),
+    );
+
+    assert.equal(duplicate.ok, true);
+    assert.deepEqual(saved, []);
+  });
+
+  it('host.import does not save conflicting passphrases for a shared key path', async () => {
+    const saved: Array<{ keyPath: string; passphrase: string }> = [];
+    const result = await handleVaultAgentOp(
+      'host.import',
+      {
+        format: 'csv',
+        text: [
+          'Label,Hostname,Username,KeyPath,Passphrase',
+          'first,first.example.com,root,~/.ssh/id_shared,first-secret',
+          'second,second.example.com,root,~/.ssh/id_shared,second-secret',
+        ].join('\n'),
+      },
+      createDeps({
+        saveKeyPassphrase: async (keyPath, passphrase) => {
+          saved.push({ keyPath, passphrase });
+        },
+      }),
+    );
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(saved, []);
+    assert.equal(
+      (result as { issues?: Array<{ message: string }> }).issues
+        ?.filter((issue) => /conflicting passphrases/u.test(issue.message)).length,
+      1,
+    );
+    assert.match(
+      (result as { issues?: Array<{ message: string }> }).issues?.[0]?.message ?? '',
+      /conflicting passphrases/u,
+    );
+  });
+
+  it('host.import resolves path aliases before saving passphrases', async () => {
+    const saved: Array<{ keyPath: string; passphrase: string }> = [];
+    const result = await handleVaultAgentOp(
+      'host.import',
+      {
+        format: 'csv',
+        text: [
+          'Label,Hostname,Username,KeyPath,Passphrase',
+          'first,first.example.com,root,~/.ssh/shared,first-secret',
+          'second,second.example.com,root,/Users/alice/.ssh/shared,second-secret',
+        ].join('\n'),
+      },
+      createDeps({
+        resolveKeyPassphraseAliases: async (keyPath) => (
+          keyPath.startsWith('~/')
+            ? [keyPath, `/Users/alice/${keyPath.slice(2)}`]
+            : [keyPath, `~/${keyPath.slice('/Users/alice/'.length)}`]
+        ),
+        saveKeyPassphrase: async (keyPath, passphrase) => {
+          saved.push({ keyPath, passphrase });
+        },
+      }),
+    );
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(saved, []);
+    assert.match(
+      (result as { issues?: Array<{ message: string }> }).issues?.[0]?.message ?? '',
+      /conflicting passphrases/u,
+    );
+  });
+
+  it('host.import reports passphrase persistence failures as partial success', async () => {
+    const result = await handleVaultAgentOp(
+      'host.import',
+      {
+        format: 'csv',
+        text: [
+          'Label,Hostname,Username,KeyPath,Passphrase',
+          'key-host,key.example.com,root,~/.ssh/id_ed25519,secret',
+        ].join('\n'),
+      },
+      createDeps({
+        saveKeyPassphrase: async () => {
+          throw new Error('storage unavailable');
+        },
+      }),
+    );
+
+    assert.equal(result.ok, true);
+    assert.match(
+      (result as { issues?: Array<{ message: string }> }).issues?.[0]?.message ?? '',
+      /Could not save the passphrase/u,
+    );
+  });
+
+  it('host.import keeps a different existing saved key passphrase', async () => {
+    const saved: Array<{ keyPath: string; passphrase: string }> = [];
+    const result = await handleVaultAgentOp(
+      'host.import',
+      {
+        format: 'csv',
+        text: [
+          'Label,Hostname,Username,KeyPath,Passphrase',
+          'new,new.example.com,root,~/.ssh/shared,stale-import',
+        ].join('\n'),
+      },
+      createDeps({
+        readKeyPassphrases: async () => ({
+          values: ['current-saved'],
+          unreadable: false,
+        }),
+        saveKeyPassphrase: async (keyPath, passphrase) => {
+          saved.push({ keyPath, passphrase });
+        },
+      }),
+    );
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(saved, []);
+    assert.ok(
+      (result as { issues?: Array<{ message: string }> }).issues
+        ?.some((issue) => /existing saved passphrase/u.test(issue.message)),
+    );
+  });
+
+  it('host.import keeps a passphrase corrected after the initial check', async () => {
+    const saved: Array<{ keyPath: string; passphrase: string }> = [];
+    const result = await handleVaultAgentOp(
+      'host.import',
+      {
+        format: 'csv',
+        text: [
+          'Label,Hostname,Username,KeyPath,Passphrase',
+          'new,new.example.com,root,~/.ssh/shared,stale-import',
+        ].join('\n'),
+      },
+      createDeps({
+        readKeyPassphrases: async () => ({ values: [], unreadable: false }),
+        saveImportedKeyPassphrase: async () => 'conflict',
+        saveKeyPassphrase: async (keyPath, passphrase) => {
+          saved.push({ keyPath, passphrase });
+        },
+      }),
+    );
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(saved, []);
+    assert.ok(
+      (result as { issues?: Array<{ message: string }> }).issues
+        ?.some((issue) => /existing saved passphrase/u.test(issue.message)),
+    );
   });
 });
 

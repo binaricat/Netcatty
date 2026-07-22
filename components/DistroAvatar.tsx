@@ -24,6 +24,7 @@ export const DISTRO_LOGOS: Record<string, string> = {
   openeuler: "/distro/openeuler.svg",
   // OS-level logos (used by local terminal tab icons)
   macos: "/distro/macos.svg",
+  freebsd: "/distro/freebsd.svg",
   windows: "/distro/windows.svg",
   linux: "/distro/linux.svg",
   // Network device vendors — auto-detected from the SSH server
@@ -57,6 +58,7 @@ export const DISTRO_COLORS: Record<string, string> = {
   openeuler: "bg-[#002FA7]",
   // OS-level colors
   macos: "bg-[#333333]",
+  freebsd: "bg-[#AB2B28]",
   windows: "bg-[#0078D4]",
   linux: "bg-[#333333]",
   // Network device vendor brand colors

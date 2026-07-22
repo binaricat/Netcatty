@@ -16,6 +16,26 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type HostDetailsConnectionSectionsProps = Record<string, any>;
 
+export const HOST_AUTH_METHOD_CHOICES = [
+  ["auto", "hostDetails.auth.auto"],
+  ["password", "hostDetails.auth.passwordOnly"],
+  ["key", "hostDetails.auth.key"],
+  ["certificate", "hostDetails.auth.certificate"],
+] as const;
+
+export function shouldForceAuthMethodReselect(
+  nextMethod: "auto" | "password" | "key" | "certificate",
+  currentMethod: "auto" | "password" | "key" | "certificate",
+): boolean {
+  // Radix Select skips onValueChange when the value is unchanged. Key/certificate
+  // still need that path so re-opening the chooser keeps working.
+  return (
+    nextMethod === currentMethod
+    && (nextMethod === "key" || nextMethod === "certificate")
+  );
+}
+
+
 export const applyEffectiveHostAuthMethodSelection = (
   host: Host,
   authMethod: "auto" | "password" | "key" | "certificate",
@@ -99,12 +119,12 @@ export const HostDetailsConnectionSections: React.FC<HostDetailsConnectionSectio
     setCredentialPopoverOpen(false);
   };
 
-  const authChoices = [
-    ["auto", "hostDetails.auth.auto"],
-    ["password", "hostDetails.auth.passwordOnly"],
-    ["key", "hostDetails.auth.key"],
-    ["certificate", "hostDetails.auth.certificate"],
-  ] as const;
+  const resolvedAuthMethod = HOST_AUTH_METHOD_CHOICES.some(([value]) => value === effectiveAuthMethod)
+    ? effectiveAuthMethod
+    : "auto";
+  const selectedAuthMethodLabel = t(
+    HOST_AUTH_METHOD_CHOICES.find(([value]) => value === resolvedAuthMethod)?.[1] ?? "hostDetails.auth.auto",
+  );
   const effectiveEtEnabled = form.etEnabled ?? groupDefaults?.etEnabled;
   const effectiveProtocol = form.protocol ?? groupDefaults?.protocol;
 
@@ -145,49 +165,66 @@ export const HostDetailsConnectionSections: React.FC<HostDetailsConnectionSectio
             </div>
           </div>
           <div className="grid gap-2">
-            <div className="space-y-2 rounded-md border border-border/60 bg-secondary/30 p-2.5">
-                <div>
-                  <div className="text-xs font-medium text-foreground">
-                    {t("hostDetails.auth.method")}
-                  </div>
-                  <div className="text-[11px] text-muted-foreground">
-                    {t(`hostDetails.auth.${effectiveAuthMethod}.desc`)}
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-1.5">
-                  {authChoices.map(([value, labelKey]) => (
-                    <button
+            <HostDetailsSettingRow
+              label={t("hostDetails.auth.method")}
+              hint={t(`hostDetails.auth.${resolvedAuthMethod}.desc`)}
+            >
+              <Select
+                value={resolvedAuthMethod}
+                onValueChange={(val) => selectAuthMethod(val as "auto" | "password" | "key" | "certificate")}
+              >
+                <SelectTrigger
+                  className="h-8 w-32 gap-2"
+                  aria-label={t("hostDetails.auth.method")}
+                >
+                  {/*
+                    Radix Select only mirrors the selected item text after the
+                    closed control is measured. Render the current label directly
+                    so the default value is never blank on first paint.
+                  */}
+                  <span className="min-w-0 flex-1 truncate text-left">
+                    {selectedAuthMethodLabel}
+                  </span>
+                </SelectTrigger>
+                <SelectContent>
+                  {HOST_AUTH_METHOD_CHOICES.map(([value, labelKey]) => (
+                    <SelectItem
                       key={value}
-                      type="button"
-                      aria-pressed={effectiveAuthMethod === value}
-                      onClick={() => selectAuthMethod(value)}
-                      className={`h-8 rounded-md border px-2 text-xs font-medium transition-colors ${
-                        effectiveAuthMethod === value
-                          ? "border-primary/60 bg-primary/10 text-primary"
-                          : "border-border/60 bg-background text-muted-foreground hover:text-foreground"
-                      }`}
+                      value={value}
+                      textValue={t(labelKey)}
+                      onPointerUp={() => {
+                        // Radix skips consumer onValueChange for an unchanged value.
+                        // Key/certificate still need the same-item path to reopen the chooser.
+                        if (shouldForceAuthMethodReselect(value, resolvedAuthMethod)) {
+                          selectAuthMethod(value);
+                        }
+                      }}
+                      onKeyDown={(event) => {
+                        if (
+                          (event.key === "Enter" || event.key === " ")
+                          && shouldForceAuthMethodReselect(value, resolvedAuthMethod)
+                        ) {
+                          selectAuthMethod(value);
+                        }
+                      }}
                     >
                       {t(labelKey)}
-                    </button>
+                    </SelectItem>
                   ))}
-                </div>
-                {!effectiveEtEnabled && effectiveProtocol !== "et" && (
-                  <div className="mt-2 flex items-center justify-between gap-3 rounded-md border border-border/60 bg-background px-2.5 py-2">
-                    <div className="min-w-0">
-                      <div className="text-xs font-medium text-foreground">
-                        {t("hostDetails.auth.mfaFirst")}
-                      </div>
-                      <div className="text-[11px] text-muted-foreground">
-                        {t("hostDetails.auth.mfaFirst.desc")}
-                      </div>
-                    </div>
-                    <Switch
-                      checked={!!form.requiresMfa}
-                      onCheckedChange={(val) => update("requiresMfa" as keyof Host, val)}
-                    />
-                  </div>
-                )}
-            </div>
+                </SelectContent>
+              </Select>
+            </HostDetailsSettingRow>
+            {!effectiveEtEnabled && effectiveProtocol !== "et" && (
+              <HostDetailsSettingRow
+                label={t("hostDetails.auth.mfaFirst")}
+                hint={t("hostDetails.auth.mfaFirst.desc")}
+              >
+                <Switch
+                  checked={!!form.requiresMfa}
+                  onCheckedChange={(val) => update("requiresMfa" as keyof Host, val)}
+                />
+              </HostDetailsSettingRow>
+            )}
             {selectedIdentity ? (
               <div className="flex items-center gap-2 h-10 px-3 rounded-md border border-border/70 bg-secondary/60">
                 <User size={16} className="text-muted-foreground" />
@@ -708,7 +745,7 @@ export const HostDetailsConnectionSections: React.FC<HostDetailsConnectionSectio
                 }
               }}
             >
-              <SelectTrigger className="h-10 w-32">
+              <SelectTrigger className="h-8 w-32">
                 <SelectValue placeholder={t("hostDetails.sftp.fileProtocol.auto")} />
               </SelectTrigger>
               <SelectContent>
@@ -741,7 +778,7 @@ export const HostDetailsConnectionSections: React.FC<HostDetailsConnectionSectio
               value={form.sftpEncoding || "auto"}
               onValueChange={(val) => update("sftpEncoding", val as Host["sftpEncoding"])}
             >
-              <SelectTrigger className="h-10 w-32">
+              <SelectTrigger className="h-8 w-32">
                 <SelectValue placeholder={t("sftp.encoding.label")} />
               </SelectTrigger>
               <SelectContent>

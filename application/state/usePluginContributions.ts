@@ -138,10 +138,11 @@ export function usePluginContributions(
   }, [bridge, queryKey]);
 
   useEffect(() => {
+    const guard = refreshGuard.current;
     void refresh();
     const unsubscribe = bridge?.onPluginContributionsChanged?.(() => { void refresh(); });
     return () => {
-      refreshGuard.current.invalidate();
+      guard.invalidate();
       unsubscribe?.();
     };
   }, [bridge, refresh]);

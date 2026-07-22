@@ -232,6 +232,7 @@ export const zhTWCoreMessages: Messages = {
   'tray.empty.title': '一切都很安靜',
   'tray.empty.subtitle': '去連線個伺服器吧，它們想念你了 🚀',
   'tray.quit': '結束 Netcatty',
+  'tray.closeSession': '關閉工作階段',
 
   // Vault Sidebar
   'vault.sidebar.collapse': '收起側邊欄',
@@ -603,6 +604,7 @@ export const zhTWCoreMessages: Messages = {
   'vault.hosts.export': '匯出',
   'vault.hosts.export.toast.success': '已匯出 {count} 個主機到 CSV',
   'vault.hosts.export.toast.successWithSkipped': '已匯出 {count} 個主機到 CSV（跳過 {skipped} 個不支援的主機）',
+  'vault.hosts.export.toast.passphrasesSkipped': '有 {count} 個已儲存的金鑰密碼無法讀取，匯出時已留空',
   'vault.hosts.export.toast.noHosts': '沒有主機可匯出',
   'vault.hosts.allHosts': '全部主機',
   'vault.hosts.pinned': '已置頂',

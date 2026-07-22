@@ -1,7 +1,44 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
-import { buildPluginPaletteItems } from './QuickSwitcher';
+import {
+  buildPluginPaletteItems,
+  getQuickSwitcherRowStateClass,
+  shouldUseQuickSwitcherPointerNavigation,
+} from './QuickSwitcher';
+
+test('keeps the new workspace action outside the scrollable results', () => {
+  const source = readFileSync(new URL('./QuickSwitcher.tsx', import.meta.url), 'utf8');
+  const actionIndex = source.indexOf('{/* Jump To hint + New Workspace action */}');
+  const resultsScrollIndex = source.indexOf('<ScrollArea className="flex-1 h-full">');
+
+  assert.notEqual(actionIndex, -1);
+  assert.notEqual(resultsScrollIndex, -1);
+  assert.ok(actionIndex < resultsScrollIndex);
+});
+
+test('pointer hover never rewrites the keyboard selection', () => {
+  const quickSwitcherSource = readFileSync(new URL('./QuickSwitcher.tsx', import.meta.url), 'utf8');
+  const workspacePickerSource = readFileSync(new URL('./workspace/AddToWorkspaceDialog.tsx', import.meta.url), 'utf8');
+
+  assert.doesNotMatch(quickSwitcherSource, /onMouseEnter/);
+  assert.doesNotMatch(quickSwitcherSource, /selectWithPointer/);
+  assert.doesNotMatch(workspacePickerSource, /onMouseEnter/);
+  assert.doesNotMatch(workspacePickerSource, /onMouseMove/);
+});
+
+test('keyboard navigation shows only the current keyboard selection', () => {
+  assert.equal(getQuickSwitcherRowStateClass(true, true), 'bg-primary/15');
+  assert.equal(getQuickSwitcherRowStateClass(false, true), '');
+  assert.equal(getQuickSwitcherRowStateClass(false, false), 'hover:bg-muted/50');
+});
+
+test('layout movement under a stationary pointer cannot take over keyboard navigation', () => {
+  assert.equal(shouldUseQuickSwitcherPointerNavigation(0, 0), false);
+  assert.equal(shouldUseQuickSwitcherPointerNavigation(1, 0), true);
+  assert.equal(shouldUseQuickSwitcherPointerNavigation(0, -1), true);
+});
 
 function pluginSnapshot(menuEnabled: boolean): NetcattyPluginContributionSnapshot['plugins'] {
   return [{

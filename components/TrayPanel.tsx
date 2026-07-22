@@ -63,8 +63,9 @@ const WorkspaceGroup: React.FC<{
   sessions: TraySession[];
   activeTabId: string | null;
   jumpToSession: (sessionId: string) => Promise<void>;
+  onCloseSession: (sessionId: string) => void;
   t: (key: string) => string;
-}> = ({ workspaceId, title, sessions, activeTabId, jumpToSession, t }) => {
+}> = ({ workspaceId, title, sessions, activeTabId, jumpToSession, onCloseSession, t }) => {
   const [expanded, setExpanded] = useState(true);
   const isAnyActive = sessions.some((s) => s.id === activeTabId) || activeTabId === workspaceId;
 
@@ -86,31 +87,45 @@ const WorkspaceGroup: React.FC<{
           {sessions.map((s) => (
             <Tooltip key={s.id}>
               <TooltipTrigger asChild>
-                <button
-                  onClick={() => {
-                    // Jump to session (using session id)
-                    void jumpToSession(s.id);
-                  }}
+                <div
                   className={cn(
-                    "w-full text-left px-2 py-1 rounded hover:bg-muted flex items-center justify-between text-sm",
+                    "group w-full rounded hover:bg-muted flex items-center justify-between text-sm",
                     s.status === "connected" ? "" : "text-muted-foreground",
                     activeTabId === s.id ? "bg-muted/60" : "",
                   )}
                 >
-                  <span className="flex items-center gap-2 min-w-0">
-                    <StatusDot
-                      status={s.status === "connected" ? "success" : s.status === "connecting" ? "warning" : "error"}
-                      spinning={s.status === "connecting"}
-                    />
-                    <span className="truncate">{s.hostLabel || s.label}</span>
-                    {s.aiHidden && (
-                      <span className="shrink-0 rounded px-1 py-0.5 text-[10px] font-medium leading-none bg-muted text-muted-foreground">
-                        AI
-                      </span>
-                    )}
-                  </span>
-                  <span className="ml-2 text-xs text-muted-foreground">{t(`tray.status.${s.status}`)}</span>
-                </button>
+                  <button
+                    onClick={() => {
+                      // Jump to session (using session id)
+                      void jumpToSession(s.id);
+                    }}
+                    className="flex-1 min-w-0 text-left px-2 py-1 flex items-center justify-between gap-1"
+                  >
+                    <span className="flex items-center gap-2 min-w-0">
+                      <StatusDot
+                        status={s.status === "connected" ? "success" : s.status === "connecting" ? "warning" : "error"}
+                        spinning={s.status === "connecting"}
+                      />
+                      <span className="truncate">{s.hostLabel || s.label}</span>
+                      {s.aiHidden && (
+                        <span className="shrink-0 rounded px-1 py-0.5 text-[10px] font-medium leading-none bg-muted text-muted-foreground">
+                          AI
+                        </span>
+                      )}
+                    </span>
+                    <span className="ml-2 text-xs text-muted-foreground">{t(`tray.status.${s.status}`)}</span>
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onCloseSession(s.id);
+                    }}
+                    className="shrink-0 mr-1 h-6 w-6 rounded inline-flex items-center justify-center opacity-0 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100 hover:bg-destructive/10 hover:text-destructive text-muted-foreground transition-opacity focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                    aria-label={t("tray.closeSession")}
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
               </TooltipTrigger>
               <TooltipContent>{s.hostLabel || s.label}</TooltipContent>
             </Tooltip>
@@ -132,12 +147,16 @@ const TrayPanelContent: React.FC<TrayPanelContentProps> = ({ terminalSettings })
     openMainWindow,
     quitApp,
     jumpToSession,
+    closeSessionFromTrayPanel,
     onTrayPanelCloseRequest,
     onTrayPanelRefresh,
     onTrayPanelMenuData,
   } = useTrayPanelBackend();
 
   const { hosts, keys, identities, proxyProfiles, groupConfigs, knownHosts, updateKnownHosts } = useVaultState();
+  // TrayPanel runs in its own BrowserWindow, so this hook's session state is
+  // independent from (and typically empty compared to) the main App's — it's
+  // used here only for its storage-sync side effects, never for closeSession.
   useSessionState({ persistSessionRestore: false });
   const {
     rules: portForwardingRules,
@@ -157,6 +176,12 @@ const TrayPanelContent: React.FC<TrayPanelContentProps> = ({ terminalSettings })
   const handleAddKnownHost = useCallback((knownHost: KnownHost) => {
     updateKnownHosts(upsertKnownHost(effectiveKnownHosts, knownHost));
   }, [effectiveKnownHosts, updateKnownHosts]);
+
+  const handleCloseSession = useCallback((sessionId: string) => {
+    // Forwarded to the main window's App-owned closeSession, which is the
+    // instance that actually owns `sessions` and republishes tray menu data.
+    void closeSessionFromTrayPanel(sessionId);
+  }, [closeSessionFromTrayPanel]);
 
   const [traySessions, setTraySessions] = useState<TraySession[]>([]);
 
@@ -309,6 +334,7 @@ const TrayPanelContent: React.FC<TrayPanelContentProps> = ({ terminalSettings })
                     sessions={group.sessions}
                     activeTabId={activeTabId}
                     jumpToSession={jumpToSession}
+                    onCloseSession={handleCloseSession}
                     t={t}
                   />
                 ))}
@@ -316,30 +342,44 @@ const TrayPanelContent: React.FC<TrayPanelContentProps> = ({ terminalSettings })
                 {soloSessions.map((s) => (
                   <Tooltip key={s.id}>
                     <TooltipTrigger asChild>
-                      <button
-                        onClick={() => {
-                          void jumpToSession(s.id);
-                        }}
+                      <div
                         className={cn(
-                          "w-full text-left px-2 py-1.5 rounded hover:bg-muted flex items-center justify-between",
+                          "group w-full rounded hover:bg-muted flex items-center justify-between",
                           s.status === "connected" ? "" : "text-muted-foreground",
                           activeTabId === s.id ? "bg-muted" : "",
                         )}
                       >
-                        <span className="flex items-center gap-2 min-w-0">
-                          <StatusDot
-                            status={s.status === "connected" ? "success" : s.status === "connecting" ? "warning" : "error"}
-                            spinning={s.status === "connecting"}
-                          />
-                          <span className="truncate">{s.hostLabel || s.label}</span>
-                          {s.aiHidden && (
-                            <span className="shrink-0 rounded px-1 py-0.5 text-[10px] font-medium leading-none bg-muted text-muted-foreground">
-                              AI
-                            </span>
-                          )}
-                        </span>
-                        <span className="ml-2 text-xs text-muted-foreground">{t(`tray.status.${s.status}`)}</span>
-                      </button>
+                        <button
+                          onClick={() => {
+                            void jumpToSession(s.id);
+                          }}
+                          className="flex-1 min-w-0 text-left px-2 py-1.5 flex items-center justify-between gap-1"
+                        >
+                          <span className="flex items-center gap-2 min-w-0">
+                            <StatusDot
+                              status={s.status === "connected" ? "success" : s.status === "connecting" ? "warning" : "error"}
+                              spinning={s.status === "connecting"}
+                            />
+                            <span className="truncate">{s.hostLabel || s.label}</span>
+                            {s.aiHidden && (
+                              <span className="shrink-0 rounded px-1 py-0.5 text-[10px] font-medium leading-none bg-muted text-muted-foreground">
+                                AI
+                              </span>
+                            )}
+                          </span>
+                          <span className="ml-2 text-xs text-muted-foreground">{t(`tray.status.${s.status}`)}</span>
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleCloseSession(s.id);
+                          }}
+                          className="shrink-0 mr-1.5 h-6 w-6 rounded inline-flex items-center justify-center opacity-0 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100 hover:bg-destructive/10 hover:text-destructive text-muted-foreground transition-opacity focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                          aria-label={t("tray.closeSession")}
+                        >
+                          <X size={12} />
+                        </button>
+                      </div>
                     </TooltipTrigger>
                     <TooltipContent>{s.hostLabel || s.label}</TooltipContent>
                   </Tooltip>

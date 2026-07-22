@@ -53,6 +53,10 @@ export interface PortForwardingConnection {
 
 // Map to track active connections
 const activeConnections = new Map<string, PortForwardingConnection>();
+// Rules are added only when their bounded automatic reconnect cycle is
+// exhausted. This distinguishes a local-outage failure from a tunnel that the
+// user intentionally stopped while leaving auto-start enabled for next launch.
+const exhaustedReconnectRules = new Set<string>();
 const rulesPendingCleanup = new Set<string>();
 const manualStopsInProgress = new Set<string>();
 const ruleCleanupPromises = new Map<string, Promise<{ success: boolean; error?: string }>>();
@@ -93,6 +97,24 @@ export const clearReconnectTimer = (ruleId: string): void => {
     conn.reconnectDueAt = undefined;
     conn.reconnectTimerCallback = undefined;
   }
+};
+
+/**
+ * Give a failed/retrying auto-start rule a fresh bounded retry cycle after
+ * local network recovery. Returns false for inactive rules that were stopped
+ * manually and therefore must stay stopped until the next app launch.
+ */
+export const resetReconnectAttempts = (ruleId: string): boolean => {
+  const connection = activeConnections.get(ruleId);
+  const shouldRecover = exhaustedReconnectRules.has(ruleId) ||
+    (connection?.reconnectAttempts ?? 0) > 0;
+  if (connection) connection.reconnectAttempts = 0;
+  return shouldRecover;
+};
+
+/** Re-check recovery eligibility after asynchronous backend reconciliation. */
+export const isReconnectRecoveryEligible = (ruleId: string): boolean => {
+  return exhaustedReconnectRules.has(ruleId);
 };
 
 interface PausedReconnectTimer {
@@ -150,6 +172,7 @@ export const initReconnectCancelListener = (): (() => void) => {
   const handler = (e: StorageEvent) => {
     if (e.key !== STORAGE_KEY_PF_RECONNECT_CANCEL || !e.newValue) return;
     const ruleId = e.newValue;
+    exhaustedReconnectRules.delete(ruleId);
     clearReconnectTimer(ruleId);
 
     const conn = activeConnections.get(ruleId);
@@ -204,6 +227,7 @@ const scheduleReconnectIfNeeded = (
     logger.info(`[PortForwardingService] Scheduling reconnect ${attempts}/${MAX_RECONNECT_ATTEMPTS}`);
 
     currentConn.reconnectAttempts = attempts;
+    exhaustedReconnectRules.delete(ruleId);
     const runReconnect = () => {
       if (currentConn.reconnectTimerCallback !== runReconnect) return;
       currentConn.reconnectTimeoutId = undefined;
@@ -226,6 +250,7 @@ const scheduleReconnectIfNeeded = (
   }
 
   logger.warn(`[PortForwardingService] Max reconnect attempts (${MAX_RECONNECT_ATTEMPTS}) reached for rule ${ruleId}`);
+  exhaustedReconnectRules.add(ruleId);
   // Reset reconnect attempts
   if (currentConn) {
     currentConn.reconnectAttempts = 0;
@@ -250,6 +275,7 @@ export const getActiveRuleIds = (): string[] => {
 };
 
 const finishRuleCleanup = (ruleId: string): void => {
+  exhaustedReconnectRules.delete(ruleId);
   rulesPendingCleanup.delete(ruleId);
   deferredReconnects.delete(ruleId);
   clearReconnectTimer(ruleId);
@@ -1028,6 +1054,7 @@ export const startPortForward = async (
     if (conn) {
       conn.reconnectAttempts = 0;
     }
+    exhaustedReconnectRules.delete(rule.id);
     
     return { success: true };
     
@@ -1055,6 +1082,10 @@ export const stopPortForward = async (
 ): Promise<{ success: boolean; error?: string }> => {
   const bridge = netcattyBridge.get();
   const conn = activeConnections.get(ruleId);
+
+  // User intent takes effect immediately. Do not let an already queued network
+  // recovery restart this rule while the backend stop request is still pending.
+  exhaustedReconnectRules.delete(ruleId);
   
   // Clear any pending reconnect timer
   clearReconnectTimer(ruleId);

@@ -58,3 +58,18 @@ test("system overview stats run for Linux and macOS targets", () => {
     true,
   );
 });
+
+test("FreeBSD icon detection does not enable unsupported system features", () => {
+  const host = {
+    id: "host-3",
+    label: "FreeBSD",
+    hostname: "freebsd.local",
+    username: "root",
+    tags: [],
+    os: "linux" as const,
+    distro: "freebsd",
+  };
+
+  assert.equal(shouldCollectServerStats(host, undefined, null), false);
+  assert.deepEqual(buildSystemManagerTabs(host, undefined, null), ["overview", "processes"]);
+});

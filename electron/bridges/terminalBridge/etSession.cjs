@@ -8,6 +8,7 @@ const {
   shouldProcessSessionOutput,
 } = require("../terminalFlowAck.cjs");
 const { orderSshIdentityNames, SSH_KEY_PATTERN } = require("../sshAuthHelper.cjs");
+const { fanoutSessionExit } = require("../terminalAttachRestore.cjs");
 
 //
 // EternalTerminal session backend, factored into the createXxxSessionApi
@@ -1112,8 +1113,9 @@ main();
             sessionLogStreamManager.stopStream(sessionId);
             closeTerminalOutputSession?.(sessionId);
             sessions.delete(sessionId);
+            if (session.closed) return;
             const contents = electronModule.webContents.fromId(session.webContentsId);
-            contents?.send("netcatty:exit", { sessionId, ...evt, reason: evt.exitCode === 0 ? "exited" : "error" });
+            fanoutSessionExit(sessionId, contents, { sessionId, ...evt, reason: evt.exitCode === 0 ? "exited" : "error" });
           });
         });
 

@@ -68,3 +68,9 @@ export const findHeaderIndex = (headers: string[], candidates: string[]): number
   }
   return -1;
 };
+
+export const findExactHeaderIndex = (headers: string[], candidates: string[]): number => {
+  const normalized = headers.map((header) => normalizeHeaderKey(header));
+  const candidateKeys = new Set(candidates.map((candidate) => normalizeHeaderKey(candidate)));
+  return normalized.findIndex((header) => candidateKeys.has(header));
+};

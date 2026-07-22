@@ -61,6 +61,7 @@ export const zhTWVaultMessages: Messages = {
   'quickConnect.identity.unavailable': '此身分在目前裝置上缺少可用憑據。',
   'quickConnect.identity.useCustom': '改用自訂憑據',
   'quickConnect.identity.connect': '使用預設連線',
+  'quickConnect.connectTitle': '連接到 {host}',
 
   // Protocol select dialog
   'protocolSelect.chooseProtocol': '選擇協定',
@@ -178,6 +179,7 @@ export const zhTWVaultMessages: Messages = {
   'hostDetails.distro.option.almalinux': 'AlmaLinux',
   'hostDetails.distro.option.alinux': '阿里雲 Linux',
   'hostDetails.distro.option.openeuler': 'openEuler',
+  'hostDetails.distro.option.freebsd': 'FreeBSD',
   'hostDetails.distro.option.oracle': 'Oracle Linux',
   'hostDetails.distro.option.kali': 'Kali Linux',
   'hostDetails.distro.option.cisco': '思科',

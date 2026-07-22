@@ -133,6 +133,442 @@ function closeTerminalOutputSession(sessionId) {
   terminalOutputChannel?.closeSession?.(sessionId);
 }
 
+/** @type {Map<string, { resolve: (value: any) => void, timeout: NodeJS.Timeout }>} */
+const pendingTerminalSnapshots = new Map();
+const pendingTerminalSnapshotApplies = new Map();
+const pendingTerminalOutputDrains = new Map();
+const TERMINAL_SNAPSHOT_TIMEOUT_MS = 2000;
+/** In-process (non-worker) attach home mapping: sessionId -> webContentsId */
+const attachHomeWebContentsIds = new Map();
+const {
+  markAttachPopupClosePrepared,
+  retryPendingAttachedSessionOutput,
+  setRestoreAttachedSessionOutput,
+  setAttachHomeLookup,
+  setFanoutSessionExit,
+  validateAttachPopupAuthorization,
+} = require("./terminalAttachRestore.cjs");
+
+function isAuthorizedAttachIpc(event, payload, sessionId) {
+  return validateAttachPopupAuthorization(
+    payload?.authorization,
+    sessionId,
+    event?.sender?.id,
+  );
+}
+
+function resolveSessionHomeWebContentsId(sessionId, terminalWorkerManager = null) {
+  if (!sessionId) return null;
+  if (terminalWorkerManager?.getSessionWebContentsId) {
+    const id = terminalWorkerManager.getSessionWebContentsId(sessionId);
+    if (typeof id === "number") return id;
+  }
+  const session = sessions?.get?.(sessionId);
+  if (typeof session?.webContentsId === "number") return session.webContentsId;
+  return null;
+}
+
+/**
+ * Capture a serialize snapshot from the home renderer before rebinding output
+ * to an observe popup, so the popup is not an empty shell.
+ */
+function requestTerminalSessionSnapshot(event, payload, terminalWorkerManager = null) {
+  const sessionId = typeof payload?.sessionId === "string" ? payload.sessionId : "";
+  if (!sessionId) {
+    return Promise.resolve({ success: false, snapshot: "", error: "Missing sessionId" });
+  }
+  if (!isAuthorizedAttachIpc(event, payload, sessionId)) {
+    return Promise.resolve({ success: false, snapshot: "", error: "Unauthorized attach request" });
+  }
+  const homeId = resolveSessionHomeWebContentsId(sessionId, terminalWorkerManager);
+  if (typeof homeId !== "number" || !electronModule?.webContents?.fromId) {
+    return Promise.resolve({ success: false, snapshot: "", error: "Home renderer not found" });
+  }
+  let home;
+  try {
+    home = electronModule.webContents.fromId(homeId);
+  } catch {
+    home = null;
+  }
+  if (!home || home.isDestroyed?.()) {
+    return Promise.resolve({ success: false, snapshot: "", error: "Home renderer destroyed" });
+  }
+
+  const requestId = randomUUID();
+  return new Promise((resolve) => {
+    const timeout = setTimeout(() => {
+      pendingTerminalSnapshots.delete(requestId);
+      resolve({ success: false, snapshot: "", error: "timeout" });
+    }, TERMINAL_SNAPSHOT_TIMEOUT_MS);
+    pendingTerminalSnapshots.set(requestId, { resolve, timeout, webContentsId: home.id });
+    try {
+      home.send("netcatty:terminal:snapshot-request", { sessionId, requestId });
+    } catch (err) {
+      clearTimeout(timeout);
+      pendingTerminalSnapshots.delete(requestId);
+      resolve({ success: false, snapshot: "", error: err?.message || String(err) });
+    }
+  });
+}
+
+function handleTerminalSessionSnapshotResponse(event, payload) {
+  const requestId = typeof payload?.requestId === "string" ? payload.requestId : "";
+  if (!requestId) return;
+  const pending = pendingTerminalSnapshots.get(requestId);
+  if (!pending) return;
+  if (pending.webContentsId !== event?.sender?.id) return;
+  clearTimeout(pending.timeout);
+  pendingTerminalSnapshots.delete(requestId);
+  pending.resolve({
+    success: true,
+    snapshot: typeof payload?.snapshot === "string" ? payload.snapshot : "",
+  });
+}
+
+function requestTerminalOutputDrain(sessionId, terminalWorkerManager = null) {
+  const targetId = resolveSessionHomeWebContentsId(sessionId, terminalWorkerManager);
+  if (typeof targetId !== "number") {
+    return Promise.resolve({ success: false, error: "Display renderer not found" });
+  }
+  const requestId = randomUUID();
+  return new Promise((resolve) => {
+    const timeout = setTimeout(() => {
+      pendingTerminalOutputDrains.delete(requestId);
+      resolve({ success: false, error: "timeout" });
+    }, TERMINAL_SNAPSHOT_TIMEOUT_MS);
+    pendingTerminalOutputDrains.set(requestId, { resolve, timeout, webContentsId: targetId });
+    const sent = terminalWorkerManager
+      ? terminalWorkerManager.drainOutputSession?.(sessionId, requestId)
+      : terminalOutputChannel?.drainSession?.(sessionId, requestId);
+    if (!sent) {
+      clearTimeout(timeout);
+      pendingTerminalOutputDrains.delete(requestId);
+      resolve({ success: false, error: "Output drain unavailable" });
+    }
+  });
+}
+
+function handleTerminalOutputDrainResponse(event, payload) {
+  const pending = pendingTerminalOutputDrains.get(payload?.requestId);
+  if (!pending || pending.webContentsId !== event?.sender?.id) return;
+  clearTimeout(pending.timeout);
+  pendingTerminalOutputDrains.delete(payload.requestId);
+  pending.resolve({ success: true });
+}
+
+/**
+ * Push the observe-popup terminal state back to the home renderer before
+ * restoring the display route, so reopen/attach doesn't show a stale view.
+ */
+function applyTerminalSessionSnapshot(event, payload, terminalWorkerManager = null) {
+  const sessionId = typeof payload?.sessionId === "string" ? payload.sessionId : "";
+  const hasSnapshot = typeof payload?.snapshot === "string";
+  const snapshot = hasSnapshot ? payload.snapshot : "";
+  const hasContextSnapshot = typeof payload?.contextSnapshot === "string";
+  const contextSnapshot = hasContextSnapshot ? payload.contextSnapshot : "";
+  const hasContextViewportSnapshot = typeof payload?.contextViewportSnapshot === "string";
+  const contextViewportSnapshot = hasContextViewportSnapshot ? payload.contextViewportSnapshot : "";
+  const hasContextScrollbackSnapshot = typeof payload?.contextScrollbackSnapshot === "string";
+  const contextScrollbackSnapshot = hasContextScrollbackSnapshot ? payload.contextScrollbackSnapshot : "";
+  const hasAlternateScreen = typeof payload?.alternateScreen === "boolean";
+  const alternateScreen = payload?.alternateScreen === true;
+  if (
+    !sessionId
+    || !hasSnapshot
+    || !hasContextSnapshot
+    || !hasContextViewportSnapshot
+    || !hasContextScrollbackSnapshot
+    || !hasAlternateScreen
+  ) {
+    return Promise.resolve({ success: false, error: "Missing sessionId or snapshot" });
+  }
+  if (!isAuthorizedAttachIpc(event, payload, sessionId)) {
+    return Promise.resolve({ success: false, error: "Unauthorized attach request" });
+  }
+  let homeId = null;
+  if (terminalWorkerManager?.getAttachHomeWebContentsId) {
+    homeId = terminalWorkerManager.getAttachHomeWebContentsId(sessionId);
+  }
+  if (homeId == null) {
+    homeId = attachHomeWebContentsIds.get(sessionId) ?? null;
+  }
+  if (typeof homeId !== "number") {
+    return Promise.resolve({ success: false, error: "Home renderer not found" });
+  }
+  try {
+    const home = findRegisteredMainWebContents(homeId);
+    if (!home) {
+      return Promise.resolve({ success: false, error: "Home renderer unavailable" });
+    }
+    const requestId = randomUUID();
+    return new Promise((resolve) => {
+      const timeout = setTimeout(() => {
+        pendingTerminalSnapshotApplies.delete(requestId);
+        resolve({ success: false, error: "timeout" });
+      }, TERMINAL_SNAPSHOT_TIMEOUT_MS);
+      pendingTerminalSnapshotApplies.set(requestId, { resolve, timeout, webContentsId: home.id });
+      try {
+        home.send("netcatty:terminal:apply-snapshot", {
+          sessionId,
+          snapshot,
+          contextSnapshot,
+          contextViewportSnapshot,
+          contextScrollbackSnapshot,
+          alternateScreen,
+          requestId,
+        });
+      } catch (err) {
+        clearTimeout(timeout);
+        pendingTerminalSnapshotApplies.delete(requestId);
+        resolve({ success: false, error: err?.message || String(err) });
+      }
+    });
+  } catch (err) {
+    return Promise.resolve({ success: false, error: err?.message || String(err) });
+  }
+}
+
+function handleTerminalSessionApplySnapshotResponse(event, payload) {
+  const pending = pendingTerminalSnapshotApplies.get(payload?.requestId);
+  if (!pending || pending.webContentsId !== event?.sender?.id) return;
+  clearTimeout(pending.timeout);
+  pendingTerminalSnapshotApplies.delete(payload.requestId);
+  pending.resolve(payload?.success === false
+    ? { success: false, error: payload?.error || "Snapshot apply failed" }
+    : { success: true });
+}
+
+/**
+ * Rebind a live session's output MessagePort to another renderer (e.g. AI
+ * silent-session observe popup). Keeps the same PTY/stream; only the display
+ * route moves. Returns the previous webContentsId so the caller can restore.
+ *
+ * Worker mode: sessions live in the utilityProcess; display routing is owned
+ * by terminalWorkerManager (sessionWebContentsIds + output ports).
+ * In-process mode: sessions Map in this bridge owns webContentsId.
+ */
+function rebindTerminalSessionOutput(event, payload, terminalWorkerManager = null) {
+  const sessionId = typeof payload?.sessionId === "string" ? payload.sessionId : "";
+  if (!sessionId) {
+    return { success: false, error: "Missing sessionId" };
+  }
+  const sender = event?.sender;
+  if (!sender || sender.isDestroyed?.()) {
+    return { success: false, error: "Invalid sender" };
+  }
+  if (!isAuthorizedAttachIpc(event, payload, sessionId)) {
+    return { success: false, error: "Unauthorized attach request" };
+  }
+
+  if (terminalWorkerManager) {
+    try {
+      const result = terminalWorkerManager.rebindOutputSession(sessionId, sender.id);
+      if (result?.success && sender.isDestroyed?.()) {
+        restoreAttachedSessionOutput(sessionId, terminalWorkerManager);
+        return { success: false, error: "Attach window closed during rebind" };
+      }
+      return result;
+    } catch (err) {
+      return { success: false, error: err?.message || String(err) };
+    }
+  }
+
+  const session = sessions?.get?.(sessionId);
+  if (!session) {
+    return { success: false, error: "Session not found" };
+  }
+  const previousWebContentsId =
+    typeof session.webContentsId === "number" ? session.webContentsId : null;
+  try {
+    if (
+      previousWebContentsId != null
+      && previousWebContentsId !== sender.id
+      && !attachHomeWebContentsIds.has(sessionId)
+    ) {
+      attachHomeWebContentsIds.set(sessionId, previousWebContentsId);
+    }
+    openTerminalOutputSession(sessionId, sender);
+    session.webContentsId = sender.id;
+    if (sender.isDestroyed?.()) {
+      restoreAttachedSessionOutput(sessionId, terminalWorkerManager);
+      return { success: false, error: "Attach window closed during rebind" };
+    }
+    return {
+      success: true,
+      previousWebContentsId,
+      webContentsId: sender.id,
+    };
+  } catch (err) {
+    return { success: false, error: err?.message || String(err) };
+  }
+}
+
+function resumeSessionOutputFlow(sessionId, terminalWorkerManager = null) {
+  if (!sessionId) return;
+  if (terminalWorkerManager?.send) {
+    try {
+      terminalWorkerManager.send("netcatty:flow", { sessionId, paused: false }, {});
+    } catch {
+      // ignore
+    }
+    return;
+  }
+  const session = sessions?.get?.(sessionId);
+  if (!session) return;
+  try {
+    setRendererFlowPaused(session, false);
+    session.flushPendingData?.();
+  } catch {
+    // ignore
+  }
+}
+
+function pauseSessionOutputFlow(sessionId, terminalWorkerManager = null) {
+  if (!sessionId) return;
+  if (terminalWorkerManager?.send) {
+    try { terminalWorkerManager.send("netcatty:flow", { sessionId, paused: true }, {}); } catch {}
+    return;
+  }
+  const session = sessions?.get?.(sessionId);
+  if (!session) return;
+  try { setRendererFlowPaused(session, true); } catch {}
+}
+
+function fanoutSessionLifecycleEvent(sessionId, primaryWebContentsId, channel, payload) {
+  const targets = new Set();
+  if (typeof primaryWebContentsId === "number") targets.add(primaryWebContentsId);
+  const homeId = attachHomeWebContentsIds.get(sessionId);
+  if (typeof homeId === "number") targets.add(homeId);
+  for (const id of targets) {
+    try {
+      const contents = electronModule?.webContents?.fromId?.(id);
+      contents?.send?.(channel, payload);
+    } catch {
+      // ignore destroyed renderers
+    }
+  }
+  attachHomeWebContentsIds.delete(sessionId);
+}
+
+function findRegisteredMainWebContents(preferredId) {
+  try {
+    const wm = require("./windowManager.cjs");
+    const mains = typeof wm.getMainWindows === "function"
+      ? wm.getMainWindows()
+      : (typeof wm.getMainWindow === "function" ? [wm.getMainWindow()].filter(Boolean) : []);
+    const liveContents = [];
+    for (const win of mains) {
+      const contents = win?.webContents;
+      if (contents && !contents.isDestroyed?.()) liveContents.push(contents);
+    }
+    if (typeof preferredId === "number") {
+      const preferred = liveContents.find((contents) => contents.id === preferredId);
+      if (preferred) return preferred;
+    }
+    return liveContents[0] || null;
+  } catch {
+    // ignore unavailable window manager during isolated tests/startup
+  }
+  return null;
+}
+
+function restoreAttachedSessionOutput(
+  sessionId,
+  terminalWorkerManager = null,
+  preferredHomeWebContentsId = null,
+) {
+  if (!sessionId) return { success: false, restored: false };
+  pauseSessionOutputFlow(sessionId, terminalWorkerManager);
+  let result;
+  if (terminalWorkerManager?.restoreAttachHome) {
+    result = terminalWorkerManager.restoreAttachHome(sessionId, preferredHomeWebContentsId);
+  } else {
+    const homeId = attachHomeWebContentsIds.get(sessionId);
+    if (homeId == null) {
+      result = { success: true, restored: false };
+    } else {
+      const session = sessions?.get?.(sessionId);
+      if (!session) {
+        attachHomeWebContentsIds.delete(sessionId);
+        result = { success: true, restored: false };
+      } else {
+        try {
+          const home = findRegisteredMainWebContents(preferredHomeWebContentsId ?? homeId);
+          if (!home) {
+            result = { success: false, restored: false, error: "Home renderer unavailable" };
+          } else {
+            openTerminalOutputSession(sessionId, home);
+            session.webContentsId = home.id;
+            attachHomeWebContentsIds.delete(sessionId);
+            result = { success: true, restored: true, webContentsId: home.id };
+          }
+        } catch (err) {
+          result = { success: false, restored: false, error: err?.message || String(err) };
+        }
+      }
+    }
+  }
+
+  // Resume only after output has a live destination. If no main renderer is
+  // currently available, keep the source paused and the home mapping intact so
+  // a later attach/recovery can safely reclaim the session.
+  if (result?.success) {
+    resumeSessionOutputFlow(sessionId, terminalWorkerManager);
+  }
+  return result;
+}
+
+/**
+ * Restore output to a previous renderer after an attach popup closes.
+ * Falls back to the first live main-ish window if the home webContents is gone.
+ */
+function restoreTerminalSessionOutput(event, payload, terminalWorkerManager = null) {
+  const sessionId = typeof payload?.sessionId === "string" ? payload.sessionId : "";
+  if (!sessionId) {
+    return { success: false, error: "Missing sessionId" };
+  }
+  if (!isAuthorizedAttachIpc(event, payload, sessionId)) {
+    return { success: false, error: "Unauthorized attach request" };
+  }
+
+  const homeId = payload?.webContentsId;
+  const target = findRegisteredMainWebContents(homeId);
+  if (!target) {
+    return { success: false, error: "No live renderer to restore output to" };
+  }
+
+  if (terminalWorkerManager) {
+    if (!terminalWorkerManager.hasOpenSession?.(sessionId)) {
+      // Session already closed — nothing to restore.
+      return { success: true, restored: false };
+    }
+    try {
+      const result = terminalWorkerManager.rebindOutputSession(sessionId, target.id);
+      if (!result?.success) {
+        return { success: false, error: result?.error || "Failed to restore session output" };
+      }
+      terminalWorkerManager.clearAttachHome?.(sessionId);
+      return { success: true, restored: true, webContentsId: target.id };
+    } catch (err) {
+      return { success: false, error: err?.message || String(err) };
+    }
+  }
+
+  const session = sessions?.get?.(sessionId);
+  if (!session) {
+    // Session already closed — nothing to restore.
+    return { success: true, restored: false };
+  }
+  try {
+    openTerminalOutputSession(sessionId, target);
+    session.webContentsId = target.id;
+    attachHomeWebContentsIds.delete(sessionId);
+    return { success: true, restored: true, webContentsId: target.id };
+  } catch (err) {
+    return { success: false, error: err?.message || String(err) };
+  }
+}
+
 /**
  * Locate an executable on POSIX systems by name.
  *
@@ -536,12 +972,17 @@ function startLocalSession(event, payload) {
       sessionLogStreamManager.stopStream(sessionId, logStreamToken);
       ptyProcessTree.unregisterPid(sessionId);
       sessions.delete(sessionId);
-      const contents = electronModule.webContents.fromId(session.webContentsId);
+      if (session.closed) return;
       // Signal present = killed externally (show disconnected UI).
       // No signal = process exited normally, even with non-zero code
       // (e.g. user typed `exit` after a failed command), so auto-close.
       const reason = evt.signal ? "error" : "exited";
-      contents?.send("netcatty:exit", { sessionId, ...evt, reason });
+      fanoutSessionLifecycleEvent(
+        sessionId,
+        session.webContentsId,
+        "netcatty:exit",
+        { sessionId, ...evt, reason },
+      );
     };
     flushLocalPaced(finalizeExit);
   });
@@ -764,10 +1205,16 @@ async function startSerialSession(event, options) {
           session.zmodemSentry?.cancel();
           session.ymodemAbortController?.abort();
           sessionLogStreamManager.stopStream(sessionId, logStreamToken);
-          const contents = electronModule.webContents.fromId(session.webContentsId);
-          contents?.send("netcatty:exit", { sessionId, exitCode: 1, error: err.message, reason: "error" });
+          const primaryId = session.webContentsId;
           ptyProcessTree.unregisterPid(sessionId);
           sessions.delete(sessionId);
+          if (session.closed) return;
+          fanoutSessionLifecycleEvent(
+            sessionId,
+            primaryId,
+            "netcatty:exit",
+            { sessionId, exitCode: 1, error: err.message, reason: "error" },
+          );
         });
 
         serialPort.on('close', () => {
@@ -775,10 +1222,16 @@ async function startSerialSession(event, options) {
           session.zmodemSentry?.cancel();
           session.ymodemAbortController?.abort();
           sessionLogStreamManager.stopStream(sessionId, logStreamToken);
-          const contents = electronModule.webContents.fromId(session.webContentsId);
-          contents?.send("netcatty:exit", { sessionId, exitCode: 0, reason: "closed" });
+          const primaryId = session.webContentsId;
           ptyProcessTree.unregisterPid(sessionId);
           sessions.delete(sessionId);
+          if (session.closed) return;
+          fanoutSessionLifecycleEvent(
+            sessionId,
+            primaryId,
+            "netcatty:exit",
+            { sessionId, exitCode: 0, reason: "closed" },
+          );
         });
 
         resolve({ sessionId });
@@ -1280,6 +1733,12 @@ function closeSession(event, payload) {
   const session = sessions.get(payload.sessionId);
   if (!session) return;
   session.closed = true;
+  fanoutSessionLifecycleEvent(
+    payload.sessionId,
+    session.webContentsId,
+    "netcatty:exit",
+    { sessionId: payload.sessionId, exitCode: 0, reason: "closed" },
+  );
   closeTerminalOutputSession(payload.sessionId);
 
   try {
@@ -1369,6 +1828,13 @@ function setSessionEncoding(_event, { sessionId, encoding }) {
   return { ok: true, encoding: enc };
 }
 
+function getTelnetEchoMode(_event, { sessionId }) {
+  const mode = sessions?.get(sessionId)?.telnetEchoMode;
+  return mode
+    ? { success: true, ...mode }
+    : { success: false, error: "Telnet echo mode unavailable" };
+}
+
 /**
  * Register IPC handlers for terminal operations
  */
@@ -1390,6 +1856,59 @@ function registerWorkerSend(ipcMain, terminalWorkerManager, channel) {
 
 function registerHandlers(ipcMain, options = {}) {
   const terminalWorkerManager = options.terminalWorkerManager || null;
+  // Attach/observe popups rebind display routing in the main process even when
+  // PTY I/O is owned by the terminal worker. Always register these handlers.
+  ipcMain.handle("netcatty:terminal:rebindOutput", (event, payload) =>
+    rebindTerminalSessionOutput(event, payload, terminalWorkerManager));
+  ipcMain.handle("netcatty:terminal:restoreOutput", (event, payload) =>
+    restoreTerminalSessionOutput(event, payload, terminalWorkerManager));
+  ipcMain.handle("netcatty:terminal:requestSnapshot", (event, payload) =>
+    requestTerminalSessionSnapshot(event, payload, terminalWorkerManager));
+  ipcMain.handle("netcatty:terminal:applySnapshot", (event, payload) =>
+    applyTerminalSessionSnapshot(event, payload, terminalWorkerManager));
+  ipcMain.handle("netcatty:terminal:setFlowPausedAndWait", async (event, payload) => {
+    if (terminalWorkerManager) {
+      await terminalWorkerManager.request("netcatty:terminal:setFlowPausedAndWait", payload, {
+        webContentsId: event?.sender?.id,
+      });
+    } else {
+      setSessionFlowPaused(event, payload);
+    }
+    if (!payload?.paused) return { success: true };
+    return requestTerminalOutputDrain(payload?.sessionId, terminalWorkerManager);
+  });
+  ipcMain.handle("netcatty:terminal:markAttachClosePrepared", (event, payload) => {
+    const sessionId = typeof payload?.sessionId === "string" ? payload.sessionId : "";
+    const success = markAttachPopupClosePrepared(
+      payload?.authorization,
+      sessionId,
+      event?.sender?.id,
+    );
+    return success
+      ? { success: true }
+      : { success: false, error: "Unauthorized attach request" };
+  });
+  ipcMain.on("netcatty:terminal:snapshot-response", handleTerminalSessionSnapshotResponse);
+  ipcMain.on("netcatty:terminal:output-drain-response", handleTerminalOutputDrainResponse);
+  ipcMain.on("netcatty:terminal:apply-snapshot-response", handleTerminalSessionApplySnapshotResponse);
+  ipcMain.on("netcatty:terminal:display-ready", (event, payload) => {
+    const sessionId = typeof payload?.sessionId === "string" ? payload.sessionId : "";
+    const readyMain = findRegisteredMainWebContents(event?.sender?.id);
+    if (!sessionId || readyMain?.id !== event?.sender?.id) return;
+    retryPendingAttachedSessionOutput(sessionId, event.sender.id);
+  });
+  setRestoreAttachedSessionOutput((sessionId, preferredHomeWebContentsId) =>
+    restoreAttachedSessionOutput(sessionId, terminalWorkerManager, preferredHomeWebContentsId));
+  setAttachHomeLookup((sessionId) => {
+    if (terminalWorkerManager?.getAttachHomeWebContentsId) {
+      return terminalWorkerManager.getAttachHomeWebContentsId(sessionId);
+    }
+    return attachHomeWebContentsIds.get(sessionId) ?? null;
+  });
+  setFanoutSessionExit((sessionId, primaryWebContentsId, payload) => {
+    fanoutSessionLifecycleEvent(sessionId, primaryWebContentsId, "netcatty:exit", payload);
+  });
+
   if (terminalWorkerManager) {
     [
       "netcatty:local:start",
@@ -1404,6 +1923,7 @@ function registerHandlers(ipcMain, options = {}) {
       "netcatty:local:validatePath",
       "netcatty:shells:discover",
       "netcatty:terminal:setEncoding",
+      "netcatty:telnet:getEchoMode",
       "netcatty:close:await",
     ].forEach((channel) => registerWorkerHandle(ipcMain, terminalWorkerManager, channel));
     ipcMain.on("netcatty:write", (event, payload) => {
@@ -1446,6 +1966,7 @@ function registerHandlers(ipcMain, options = {}) {
   ipcMain.handle("netcatty:local:validatePath", validatePath);
   ipcMain.handle("netcatty:shells:discover", () => discoverShells());
   ipcMain.handle("netcatty:terminal:setEncoding", setSessionEncoding);
+  ipcMain.handle("netcatty:telnet:getEchoMode", getTelnetEchoMode);
   ipcMain.on("netcatty:write", writeToSession);
   ipcMain.on("netcatty:interrupt", interruptSession);
   ipcMain.on("netcatty:resize", resizeSession);

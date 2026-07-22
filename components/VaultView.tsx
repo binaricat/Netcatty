@@ -39,6 +39,7 @@ import { useStoredBoolean } from "../application/state/useStoredBoolean";
 import { useStoredNumber } from "../application/state/useStoredNumber";
 import { useStoredString } from "../application/state/useStoredString";
 import { useTreeExpandedState } from "../application/state/useTreeExpandedState";
+import { buildVaultCsvCredentialOptions } from "../application/vaultCsvExportCredentials";
 import { sanitizeCredentialValue } from "../domain/credentials";
 import { resolveGroupDefaults, applyGroupDefaults } from "../domain/groupConfig";
 import {
@@ -573,13 +574,23 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
   }, [t]);
 
   // Export hosts to CSV
-  const handleExportHosts = useCallback(() => {
+  const handleExportHosts = useCallback(async () => {
     if (hosts.length === 0) {
       toast.warning(t('vault.hosts.export.toast.noHosts'));
       return;
     }
 
-    const { csv, exportedCount, skippedCount } = exportHostsToCsvWithStats(hosts);
+    const {
+      keyPathsById,
+      keyPassphrasesById,
+      keyPassphrases,
+      unreadablePassphraseCount,
+    } = await buildVaultCsvCredentialOptions(hosts, keys);
+    const { csv, exportedCount, skippedCount } = exportHostsToCsvWithStats(hosts, {
+      keyPassphrases,
+      keyPassphrasesById,
+      keyPathsById,
+    });
 
     if (exportedCount === 0) {
       toast.warning(t('vault.hosts.export.toast.noHosts'));
@@ -596,12 +607,15 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
 
+    if (unreadablePassphraseCount > 0) {
+      toast.warning(t('vault.hosts.export.toast.passphrasesSkipped', { count: unreadablePassphraseCount }));
+    }
     if (skippedCount > 0) {
       toast.warning(t('vault.hosts.export.toast.successWithSkipped', { count: exportedCount, skipped: skippedCount }));
     } else {
       toast.success(t('vault.hosts.export.toast.success', { count: exportedCount }));
     }
-  }, [hosts, t]);
+  }, [hosts, keys, t]);
 
   // Copy host credentials to clipboard
   const handleCopyCredentials = useCallback((host: Host) => {
@@ -705,9 +719,11 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
   const { handleImportFileSelected } = useVaultImportHandlers({
     customGroups,
     hosts,
+    keys,
     managedSources,
     onUpdateCustomGroups,
     onUpdateHosts,
+    onUpdateKeys,
     onUpdateManagedSources,
     setIsImportOpen,
     t,

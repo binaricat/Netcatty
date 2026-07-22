@@ -55,6 +55,13 @@ export const LINUX_DISTRO_OPTIONS = [
 
 export const POSIX_PLATFORM_OPTIONS = [
   'macos',
+  'freebsd',
+] as const;
+
+// Only platforms backed by the current stats and system-management commands
+// belong here. Other POSIX platforms may still be valid icon choices.
+const LINUX_LIKE_RUNTIME_PLATFORM_OPTIONS = [
+  'macos',
 ] as const;
 
 /**
@@ -93,6 +100,7 @@ export const normalizeDistroId = (value?: string) => {
   ) {
     return 'macos';
   }
+  if (v.includes('freebsd')) return 'freebsd';
   if (v.includes('ubuntu')) return 'ubuntu';
   if (v.includes('debian')) return 'debian';
   if (v.includes('centos')) return 'centos';
@@ -198,7 +206,7 @@ export const classifyDistroId = (distroId?: string): DeviceClass => {
   if (!v) return 'other';
   if ((NETWORK_DEVICE_OPTIONS as readonly string[]).includes(v)) return 'network-device';
   if ((LINUX_DISTRO_OPTIONS as readonly string[]).includes(v)) return 'linux-like';
-  if ((POSIX_PLATFORM_OPTIONS as readonly string[]).includes(v)) return 'linux-like';
+  if ((LINUX_LIKE_RUNTIME_PLATFORM_OPTIONS as readonly string[]).includes(v)) return 'linux-like';
   return 'other';
 };
 

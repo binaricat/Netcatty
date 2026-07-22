@@ -412,12 +412,11 @@ function createZmodemSentry(opts) {
           ? Buffer.from(zsession._last_ZRINIT.to_hex())
           : null;
 
-      const contents = getWebContents();
       const transferType = zsession.type === "send" ? "upload" : "download";
 
       console.log(`[ZMODEM][${label}] Detected ${transferType} for session ${sessionId}`);
 
-      safeSend(contents, "netcatty:zmodem:detect", {
+      safeSend(getWebContents(), "netcatty:zmodem:detect", {
         sessionId,
         transferType,
       });
@@ -451,13 +450,13 @@ function createZmodemSentry(opts) {
           // Only act if this is still the active session (not replaced by a new one)
           if (currentZSession !== zsession) return;
           console.log(`[ZMODEM][${label}] Transfer completed for session ${sessionId}`);
-          safeSend(contents, "netcatty:zmodem:complete", { sessionId });
+          safeSend(getWebContents(), "netcatty:zmodem:complete", { sessionId });
         })
         .catch((err) => {
           if (currentZSession !== zsession) return;
           console.error(`[ZMODEM][${label}] Transfer error:`, err.message || err);
           try { zsession.abort(); } catch { /* ignore */ }
-          safeSend(contents, "netcatty:zmodem:error", {
+          safeSend(getWebContents(), "netcatty:zmodem:error", {
             sessionId,
             error: String(err.message || err),
           });
@@ -809,7 +808,7 @@ async function handleUpload(zsession, opts) {
     const { filePath, stat, name } = offers[i];
     opts.resetUploadBackpressure?.();
 
-    safeSend(contents, "netcatty:zmodem:progress", {
+    safeSend(getWebContents(), "netcatty:zmodem:progress", {
       sessionId,
       filename: name,
       transferred: 0,
@@ -853,7 +852,7 @@ async function handleUpload(zsession, opts) {
         xfer.send(new Uint8Array(buf.buffer, buf.byteOffset, bytesRead));
         sent += bytesRead;
 
-        safeSend(contents, "netcatty:zmodem:progress", {
+        safeSend(getWebContents(), "netcatty:zmodem:progress", {
           sessionId,
           filename: name,
           transferred: sent,
@@ -871,7 +870,7 @@ async function handleUpload(zsession, opts) {
       // All data written to Node.js buffer — but TCP may still be
       // flushing to the remote.  Show "finalizing" state while we
       // wait for the remote to acknowledge.
-      safeSend(contents, "netcatty:zmodem:progress", {
+      safeSend(getWebContents(), "netcatty:zmodem:progress", {
         sessionId,
         filename: name,
         transferred: stat.size,
@@ -955,7 +954,7 @@ async function handleDownload(zsession, opts) {
     const savePath = path.join(downloadDir, name);
     const currentIndex = fileIndex++;
 
-    safeSend(contents, "netcatty:zmodem:progress", {
+    safeSend(getWebContents(), "netcatty:zmodem:progress", {
       sessionId,
       filename: name,
       transferred: 0,
@@ -1003,7 +1002,7 @@ async function handleDownload(zsession, opts) {
         const now = Date.now();
         if (now - lastProgressTime >= 100) {
           lastProgressTime = now;
-          safeSend(contents, "netcatty:zmodem:progress", {
+          safeSend(getWebContents(), "netcatty:zmodem:progress", {
             sessionId,
             filename: name,
             transferred: received,

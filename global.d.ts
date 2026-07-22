@@ -163,6 +163,8 @@ declare global {
     // The bridge falls back to a fresh connection if the source is gone, unless
     // reuseOnly is also set.
     sourceSessionId?: string;
+    // Skip POSIX process discovery when copying a network-device session.
+    skipShellPidDiscovery?: boolean;
     // When true with sourceSessionId: (1) fail instead of falling back to a
     // fresh SSH dial, and (2) skip renderer endpoint matching so a Connected
     // picker probe can reuse the named live session even if session.username

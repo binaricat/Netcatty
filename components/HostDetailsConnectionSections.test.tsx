@@ -1,4 +1,7 @@
 import test from "node:test";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -7,8 +10,10 @@ import type { Host, SSHKey } from "../types.ts";
 import {
   applyEffectiveHostAuthMethodSelection,
   detachEffectiveHostIdentity,
+  HOST_AUTH_METHOD_CHOICES,
   HostDetailsConnectionSections,
   removeSelectedHostCredential,
+  shouldForceAuthMethodReselect,
 } from "./HostDetailsConnectionSections.tsx";
 import { TooltipProvider } from "./ui/tooltip.tsx";
 
@@ -112,12 +117,47 @@ test("host credentials expose automatic and password-only choices", () => {
     identityFileId: undefined,
   });
 
+  assert.deepEqual(
+    HOST_AUTH_METHOD_CHOICES.map(([value, labelKey]) => [value, labelKey]),
+    [
+      ["auto", "hostDetails.auth.auto"],
+      ["password", "hostDetails.auth.passwordOnly"],
+      ["key", "hostDetails.auth.key"],
+      ["certificate", "hostDetails.auth.certificate"],
+    ],
+  );
   assert.match(markup, /hostDetails\.auth\.method/);
+  assert.match(markup, /role="combobox"[^>]*aria-label="hostDetails\.auth\.method"/);
   assert.match(markup, /hostDetails\.auth\.auto/);
-  assert.match(markup, /hostDetails\.auth\.passwordOnly/);
-  assert.match(markup, /hostDetails\.auth\.key/);
-  assert.match(markup, /hostDetails\.auth\.certificate/);
   assert.match(markup, /hostDetails\.auth\.mfaFirst/);
+  // Login method uses the same option-style setting row as other host form controls.
+  assert.match(
+    markup,
+    /hostDetails\.auth\.method[\s\S]*?role="combobox"[\s\S]*?hostDetails\.auth\.auto[\s\S]*?<\/div>\s*<div class="flex min-h-12 items-center justify-between gap-3 rounded-lg border border-border\/60 bg-secondary\/40 px-3 py-2">[\s\S]*hostDetails\.auth\.mfaFirst/,
+  );
+  assert.match(markup, /class="[^"]*h-8 w-32[^"]*"/);
+  assert.match(
+    markup,
+    /role="combobox"[\s\S]*?<span class="min-w-0 flex-1 truncate text-left">hostDetails\.auth\.auto<\/span>/,
+  );
+});
+
+test("wires same-value key/certificate reselect through pointer and keyboard handlers", () => {
+  const source = fs.readFileSync(
+    path.join(path.dirname(fileURLToPath(import.meta.url)), "HostDetailsConnectionSections.tsx"),
+    "utf8",
+  );
+  assert.match(source, /onPointerUp=\{\(\) => \{[\s\S]*shouldForceAuthMethodReselect/);
+  assert.match(source, /onKeyDown=\{\(event\) => \{[\s\S]*shouldForceAuthMethodReselect/);
+  assert.doesNotMatch(source, /onSelect=\{\(\) => \{[\s\S]*shouldForceAuthMethodReselect/);
+});
+
+test("reselecting the current key or certificate method still forces the chooser path", () => {
+  assert.equal(shouldForceAuthMethodReselect("key", "key"), true);
+  assert.equal(shouldForceAuthMethodReselect("certificate", "certificate"), true);
+  assert.equal(shouldForceAuthMethodReselect("password", "password"), false);
+  assert.equal(shouldForceAuthMethodReselect("auto", "auto"), false);
+  assert.equal(shouldForceAuthMethodReselect("key", "password"), false);
 });
 
 test("ET hosts do not offer the unsupported interactive-auth preference", () => {
@@ -141,7 +181,12 @@ test("host authentication choices remain visible for a selected identity", () =>
     authMethod: "password",
   });
 
-  assert.match(markup, /hostDetails\.auth\.passwordOnly/);
+  assert.match(markup, /hostDetails\.auth\.method/);
+  assert.match(markup, /role="combobox"[^>]*aria-label="hostDetails\.auth\.method"/);
+  assert.match(
+    markup,
+    /role="combobox"[\s\S]*?<span class="min-w-0 flex-1 truncate text-left">hostDetails\.auth\.passwordOnly<\/span>/,
+  );
 });
 
 test("host authentication choices show the inherited effective method", () => {
@@ -151,7 +196,12 @@ test("host authentication choices show the inherited effective method", () => {
     effectiveAuthMethod: "password",
   });
 
-  assert.match(markup, /<button[^>]*aria-pressed="true"[^>]*>hostDetails\.auth\.passwordOnly<\/button>/);
+  assert.match(markup, /hostDetails\.auth\.method/);
+  assert.match(markup, /role="combobox"[^>]*aria-label="hostDetails\.auth\.method"/);
+  assert.match(
+    markup,
+    /role="combobox"[\s\S]*?<span class="min-w-0 flex-1 truncate text-left">hostDetails\.auth\.passwordOnly<\/span>/,
+  );
 });
 
 test("reselecting an inherited authentication method preserves group credentials", () => {

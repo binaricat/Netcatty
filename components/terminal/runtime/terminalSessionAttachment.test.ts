@@ -14,9 +14,11 @@ import {
   attachSessionToTerminal,
   getFlowController,
   notePendingOutputScrollIfEnabled,
+  resolveAttachSnapshot,
   tryAttachSessionToTerminal,
   writeSessionData,
 } from "./terminalSessionAttachment.ts";
+
 import {
   clearTerminalSessionFlowAck,
   flushTerminalSessionFlowAck,
@@ -38,6 +40,12 @@ import {
   createPromptLineBreakState,
   markTerminalCommandCompletionPending,
 } from "./promptLineBreak";
+
+test("resolveAttachSnapshot keeps an authoritative empty final snapshot", () => {
+  assert.equal(resolveAttachSnapshot("", "stale fallback"), "");
+  assert.equal(resolveAttachSnapshot("fresh", "stale fallback"), "fresh");
+  assert.equal(resolveAttachSnapshot(undefined, "fallback"), "fallback");
+});
 
 const createFakeTerm = (activeType = "normal") => {
   const writes: string[] = [];
@@ -1068,6 +1076,44 @@ test("attachSessionToTerminal resets timestamp state for a reused terminal", () 
 
   assert.equal(writes.length, 2);
   assert.equal(writes[1], "fresh");
+});
+
+test("attachSessionToTerminal clears the backend id before reporting exit", () => {
+  const { term } = createFakeTerm();
+  let onExit: ((evt: { reason?: string }) => void) | null = null;
+  let sessionIdSeenByConsumer: string | null | undefined = "not-called";
+  const sessionRef = { current: null as string | null };
+  const ctx = {
+    ...createContext(false),
+    sessionId: "session-1",
+    sessionRef,
+    hasConnectedRef: { current: true },
+    hasRunStartupCommandRef: { current: false },
+    disposeDataRef: { current: null },
+    disposeExitRef: { current: null },
+    fitAddonRef: { current: null },
+    serializeAddonRef: { current: null },
+    pendingAuthRef: { current: null },
+    terminalBackend: {
+      onSessionData: () => () => {},
+      onSessionExit: (_id: string, callback: (evt: { reason?: string }) => void) => {
+        onExit = callback;
+        return () => {};
+      },
+    },
+    updateStatus: () => {},
+    setError: () => {},
+    onSessionExit: () => {
+      sessionIdSeenByConsumer = sessionRef.current;
+    },
+  };
+
+  attachSessionToTerminal(ctx as never, term, "session-1");
+  assert.equal(sessionRef.current, "session-1");
+  onExit?.({ reason: "closed" });
+
+  assert.equal(sessionRef.current, null);
+  assert.equal(sessionIdSeenByConsumer, null);
 });
 
 test("attachSessionToTerminal keeps interrupt-time output visible", () => {

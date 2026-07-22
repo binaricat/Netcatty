@@ -21,15 +21,19 @@ import { Label } from '../../components/ui/label';
 import { LazyLoadBoundary } from '../../components/ui/lazy-load-boundary';
 import { toast } from '../../components/ui/toast';
 import { AppHostTreeLayer } from './AppHostTreeLayer';
+import { AppHostEditorLayer } from './AppHostEditorLayer';
 import { getUiThemeById } from '../../infrastructure/config/uiThemes';
 import { buildAppThemeCssVars } from '../state/settingsStateDefaults';
 import { useMainWindowInputFocusRecovery } from '../state/useMainWindowInputFocusRecovery';
+import { useExternalMcpToggleState } from '../state/useExternalMcpToggleState';
 import { PluginContributionHost } from '../../components/plugins/PluginContributionHost';
 import { resolveActivePluginKeybindingContext } from '../state/pluginContributionContexts';
 import { selectPluginThemeTokens } from '../state/pluginContributionEnvironment';
 import { netcattyBridge } from '../../infrastructure/services/netcattyBridge';
 import { pluginViewTabStore, usePluginViewTabs } from '../state/pluginViewTabStore';
 import { buildPluginSettingScopeCatalog } from '../state/usePluginSettingScopeCatalog';
+import { useWorkSurfaceHostEditor } from '../state/useWorkSurfaceHostEditor';
+import { isHostTreeWorkTabSurface } from './workTabSurface';
 
 const LazyProtocolSelectDialog = lazy(() => import('../../components/ProtocolSelectDialog'));
 const LazyQuickSwitcher = lazy(() =>
@@ -138,6 +142,30 @@ export function AppView({ ctx }: { ctx: AppViewContext }) {
     () => selectPluginThemeTokens(appThemeStyle as Record<string, unknown>),
     [appThemeStyle],
   );
+  const isPeerSessionWindow = typeof window !== 'undefined'
+    && window.location.hash.startsWith('#/session-window');
+  const externalMcpToggle = useExternalMcpToggleState();
+  const handleWorkSurfaceHostSaved = useCallback((mode: 'new' | 'edit') => {
+    if (mode === 'edit') {
+      toast.success(t('terminal.layer.hostTree.hostSavedNextConnection'));
+    }
+  }, [t]);
+  const workSurfaceHostEditor = useWorkSurfaceHostEditor({
+    hosts,
+    onUpdateHosts: updateHosts,
+    onSaved: handleWorkSurfaceHostSaved,
+  });
+  const workSurfaceVisible = useMemo(() => isHostTreeWorkTabSurface({
+    enabled: true,
+    activeTabId,
+    logViewIds: new Set(logViews.map((logView: { id: string }) => logView.id)),
+    orderedTabs: orderedTabsWithEditors,
+    sessionIds: new Set(sessions.map((session: { id: string }) => session.id)),
+    workspaceIds: new Set(workspaces.map((workspace: { id: string }) => workspace.id)),
+  }), [activeTabId, logViews, orderedTabsWithEditors, sessions, workspaces]);
+  const handleCreateWorkSurfaceHostGroup = useCallback((groupPath: string) => {
+    updateCustomGroups(Array.from(new Set([...customGroups, groupPath])));
+  }, [customGroups, updateCustomGroups]);
 
   const closePluginViewTab = useCallback((tabId: string) => {
     const index = orderedTabsWithEditors.indexOf(tabId);
@@ -231,6 +259,9 @@ export function AppView({ ctx }: { ctx: AppViewContext }) {
         onOpenQuickSwitcher={handleOpenQuickSwitcher}
         onToggleTheme={handleToggleTheme}
         onOpenSettings={handleOpenSettings}
+        externalMcpEnabled={externalMcpToggle.enabled}
+        onToggleExternalMcp={externalMcpToggle.setEnabled}
+        showExternalMcpToggle={!isPeerSessionWindow}
         windowOpacity={settings.windowOpacity}
         setWindowOpacity={settings.setWindowOpacity}
         onSyncNow={handleSyncNowManual}
@@ -267,7 +298,29 @@ export function AppView({ ctx }: { ctx: AppViewContext }) {
           themeById={themeById}
           resolveSessionAppearance={resolveSessionAppearance}
           onConnect={handleConnectToHost}
+          onNewHost={workSurfaceHostEditor.openNew}
+          onEditHost={workSurfaceHostEditor.openEdit}
           onCreateLocalTerminal={handleCreateLocalTerminal}
+        />
+        <AppHostEditorLayer
+          surfaceVisible={workSurfaceVisible}
+          target={workSurfaceHostEditor.target}
+          editorKey={workSurfaceHostEditor.editorKey}
+          hosts={hosts}
+          customGroups={customGroups}
+          groupConfigs={groupConfigs}
+          keys={keys}
+          identities={identities}
+          proxyProfiles={proxyProfiles}
+          managedSources={managedSources}
+          snippets={snippets}
+          terminalThemeId={terminalThemeId}
+          terminalFontSize={terminalFontSize}
+          onSave={workSurfaceHostEditor.save}
+          onCancel={workSurfaceHostEditor.close}
+          onCreateGroup={handleCreateWorkSurfaceHostGroup}
+          onImportOrReuseKey={importOrReuseKey}
+          onUpdateSnippets={updateSnippets}
         />
 
         <VaultViewContainer appThemeStyle={appThemeStyle}>

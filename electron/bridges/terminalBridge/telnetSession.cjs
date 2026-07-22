@@ -5,6 +5,7 @@ const {
   shouldAcceptSessionOutput,
   shouldProcessSessionOutput,
 } = require("../terminalFlowAck.cjs");
+const { fanoutSessionExit } = require("../terminalAttachRestore.cjs");
 
 const TELNET_SESSION_REPLACED_ERROR = "Telnet session start was replaced";
 
@@ -72,7 +73,7 @@ function createTelnetSessionApi(ctx) {
               localEcho: localEchoEnabled,
             };
           }
-          const contents = electronModule.webContents.fromId(event.sender.id);
+          const contents = electronModule.webContents.fromId(session?.webContentsId ?? event.sender.id);
           contents?.send("netcatty:telnet:echo-mode", {
             sessionId,
             remoteEcho: remoteEchoEnabled,
@@ -241,13 +242,16 @@ function createTelnetSessionApi(ctx) {
           resolve({ sessionId });
         });
     
-        const telnetWebContentsId = event.sender.id;
+        const getCurrentTelnetWebContentsId = () =>
+          sessions.get(sessionId)?.webContentsId ?? event.sender.id;
+        const getCurrentTelnetWebContents = () =>
+          electronModule.webContents.fromId(getCurrentTelnetWebContentsId());
         const {
           bufferData: bufferTelnetData,
           flushPaced: flushTelnetPaced,
           discard: discardTelnet,
         } = createPtyOutputBuffer((data, meta) => {
-          const contents = electronModule.webContents.fromId(telnetWebContentsId);
+          const contents = getCurrentTelnetWebContents();
           emitTerminalSessionData(contents, sessionId, data, { cols, rows, meta });
         }, {
           onPendingBytesChange: (bytes) => {
@@ -289,13 +293,13 @@ function createTelnetSessionApi(ctx) {
             } catch { return true; }
           },
           getWebContents() {
-            return electronModule.webContents.fromId(telnetWebContentsId);
+            return getCurrentTelnetWebContents();
           },
           selectUploadFiles: selectZmodemUploadFiles
-            ? () => selectZmodemUploadFiles(telnetWebContentsId)
+            ? () => selectZmodemUploadFiles(getCurrentTelnetWebContentsId())
             : undefined,
           selectDownloadDirectory: selectZmodemDownloadDirectory
-            ? () => selectZmodemDownloadDirectory(telnetWebContentsId)
+            ? () => selectZmodemDownloadDirectory(getCurrentTelnetWebContentsId())
             : undefined,
           label: "Telnet",
         });
@@ -343,7 +347,7 @@ function createTelnetSessionApi(ctx) {
               if (session) {
                 session.zmodemSentry?.cancel();
                 const contents = electronModule.webContents.fromId(session.webContentsId);
-                contents?.send("netcatty:exit", { sessionId, exitCode: 1, error: err.message, reason: "error" });
+                fanoutSessionExit(sessionId, contents, { sessionId, exitCode: 1, error: err.message, reason: "error" });
               }
               ptyProcessTree.unregisterPid(sessionId);
               closeTerminalOutputSession?.(sessionId);
@@ -369,7 +373,7 @@ function createTelnetSessionApi(ctx) {
             if (session) {
               session.zmodemSentry?.cancel();
               const contents = electronModule.webContents.fromId(session.webContentsId);
-              contents?.send("netcatty:exit", { sessionId, exitCode: hadError ? 1 : 0, reason: hadError ? "error" : "closed" });
+              fanoutSessionExit(sessionId, contents, { sessionId, exitCode: hadError ? 1 : 0, reason: hadError ? "error" : "closed" });
             }
             ptyProcessTree.unregisterPid(sessionId);
             closeTerminalOutputSession?.(sessionId);
