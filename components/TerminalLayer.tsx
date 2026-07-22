@@ -481,13 +481,16 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   }, [onUpdateSessionStatus]);
 
   const handleSessionExit = useCallback((sessionId: string, evt: TerminalSessionExitEvent) => {
-    const intent = resolveTerminalSessionExitIntent(evt);
+    const intent = resolveTerminalSessionExitIntent(
+      evt,
+      terminalSettings?.autoCloseOnExit ?? true,
+    );
     if (intent.kind === "closeSession") {
       onCloseSession(sessionId);
     } else {
       onUpdateSessionStatus(sessionId, 'disconnected');
     }
-  }, [onCloseSession, onUpdateSessionStatus]);
+  }, [onCloseSession, onUpdateSessionStatus, terminalSettings?.autoCloseOnExit]);
 
   const handleOsDetected = useCallback((hostId: string, distro: string) => {
     onUpdateHostDistro(hostId, distro);

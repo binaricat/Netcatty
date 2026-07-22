@@ -257,6 +257,8 @@ export const zhCNTerminalMessages: Messages = {
   'settings.terminal.accessibility.minimumContrastRatio.desc': '调整颜色以满足对比度要求 (1 = 禁用, 21 = 最大)',
   'settings.terminal.behavior.rightClick': '右键行为',
   'settings.terminal.behavior.rightClick.desc': '在终端中右键时执行的操作',
+  'settings.terminal.behavior.autoCloseOnExit': '退出后自动关闭终端',
+  'settings.terminal.behavior.autoCloseOnExit.desc': '允许终端标签页和窗口在会话退出后自动关闭。关闭此项后，无论退出结果如何都会保留。',
   'settings.terminal.behavior.rightClick.menu': '显示菜单',
   'settings.terminal.behavior.rightClick.paste': '粘贴',
   'settings.terminal.behavior.rightClick.selectWord': '选择单词',

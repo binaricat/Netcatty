@@ -86,6 +86,7 @@ export interface TerminalSettings {
   middleClickPaste: boolean; // Legacy mirror for older settings payloads
   wordSeparators: string; // Characters for word selection
   linkModifier: LinkModifier; // Modifier key to click links
+  autoCloseOnExit: boolean; // Automatically close terminal UI after eligible session exits
 
   // Keyword Highlighting
   keywordHighlightEnabled: boolean;
@@ -384,6 +385,7 @@ const DEFAULT_TERMINAL_SETTINGS: TerminalSettings = {
   middleClickPaste: true,
   wordSeparators: DEFAULT_TERMINAL_WORD_SEPARATORS,
   linkModifier: 'none',
+  autoCloseOnExit: true,
   keywordHighlightEnabled: true,
   keywordHighlightRules: DEFAULT_KEYWORD_HIGHLIGHT_RULES,
   localShell: '', // Empty = use system default

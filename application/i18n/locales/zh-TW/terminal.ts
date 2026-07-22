@@ -257,6 +257,8 @@ export const zhTWTerminalMessages: Messages = {
   'settings.terminal.accessibility.minimumContrastRatio.desc': '調整顏色以滿足對比度要求 (1 = 停用, 21 = 最大)',
   'settings.terminal.behavior.rightClick': '右鍵行為',
   'settings.terminal.behavior.rightClick.desc': '在終端中右鍵時執行的操作',
+  'settings.terminal.behavior.autoCloseOnExit': '結束後自動關閉終端',
+  'settings.terminal.behavior.autoCloseOnExit.desc': '允許終端標籤頁和視窗在工作階段結束後自動關閉。關閉此項後，無論結束結果如何都會保留。',
   'settings.terminal.behavior.rightClick.menu': '顯示選單',
   'settings.terminal.behavior.rightClick.paste': '貼上',
   'settings.terminal.behavior.rightClick.selectWord': '選擇單字',

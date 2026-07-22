@@ -13,6 +13,13 @@ test("normal backend exited events close the session tab", () => {
   );
 });
 
+test("disabled auto-close keeps the session tab after a clean exit", () => {
+  assert.deepEqual(
+    resolveTerminalSessionExitIntent({ reason: "exited", exitCode: 0 }, false),
+    { kind: "markDisconnected" },
+  );
+});
+
 test("non-zero backend exits keep the tab and mark it disconnected", () => {
   assert.deepEqual(
     resolveTerminalSessionExitIntent({ reason: "exited", exitCode: 1 }),
@@ -53,4 +60,31 @@ test("terminal popup only auto-closes after clean command exit", () => {
   assert.equal(shouldCloseTerminalPopupOnExit({ reason: "exited", exitCode: 1 }), false);
   assert.equal(shouldCloseTerminalPopupOnExit({ reason: "error", error: "connection reset" }), false);
   assert.equal(shouldCloseTerminalPopupOnExit({ reason: "closed", exitCode: 0 }), false);
+});
+
+test("disabled auto-close keeps command and attached terminal popups open", () => {
+  assert.equal(
+    shouldCloseTerminalPopupOnExit(
+      { reason: "exited", exitCode: 0 },
+      { autoCloseOnExit: false },
+    ),
+    false,
+  );
+  assert.equal(
+    shouldCloseTerminalPopupOnExit(
+      { reason: "closed", exitCode: 0 },
+      { autoCloseOnExit: false, isAttachMode: true },
+    ),
+    false,
+  );
+});
+
+test("attached terminal popups keep their existing auto-close behavior by default", () => {
+  assert.equal(
+    shouldCloseTerminalPopupOnExit(
+      { reason: "closed", exitCode: 0 },
+      { isAttachMode: true },
+    ),
+    true,
+  );
 });

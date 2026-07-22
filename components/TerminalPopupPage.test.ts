@@ -8,6 +8,7 @@ import { resolveTerminalPopupHost, resolveTerminalPopupReuseId } from './Termina
 
 const source = readFileSync(new URL('./TerminalPopupPage.tsx', import.meta.url), 'utf8');
 const terminalSource = readFileSync(new URL('./Terminal.tsx', import.meta.url), 'utf8');
+const terminalLayerSource = readFileSync(new URL('./TerminalLayer.tsx', import.meta.url), 'utf8');
 
 const vaultHost = (overrides: Partial<Host> = {}): Host => ({
   id: 'host-1',
@@ -118,9 +119,15 @@ test('attach popup close preparation has a bounded timeout', () => {
   assert.match(source, /1500/);
 });
 
-test('an explicitly closed attached session closes its observe popup', () => {
-  assert.match(source, /onSessionExit=\{\(_closedSessionId, evt\) => \{\s+if \(isAttachMode\)/);
-  assert.match(source, /void handleClose\(\)/);
+test('terminal exit auto-close setting reaches tabs, workspaces, and popups', () => {
+  assert.match(
+    terminalLayerSource,
+    /resolveTerminalSessionExitIntent\(\s+evt,\s+terminalSettings\?\.autoCloseOnExit \?\? true,\s+\)/,
+  );
+  assert.match(
+    source,
+    /shouldCloseTerminalPopupOnExit\(evt, \{\s+autoCloseOnExit: settings\.terminalSettings\.autoCloseOnExit,\s+isAttachMode,\s+\}\)/,
+  );
 });
 
 test('an attached observe popup never owns automatic reconnect', () => {

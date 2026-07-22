@@ -9,14 +9,20 @@ export type TerminalSessionExitIntent =
   | { kind: "closeSession" }
   | { kind: "markDisconnected" };
 
+type TerminalPopupExitOptions = {
+  autoCloseOnExit?: boolean;
+  isAttachMode?: boolean;
+};
+
 function isConfirmedCleanExit(evt: TerminalSessionExitEvent): boolean {
   return evt.reason === "exited" && evt.exitCode === 0;
 }
 
 export function resolveTerminalSessionExitIntent(
   evt: TerminalSessionExitEvent,
+  autoCloseOnExit = true,
 ): TerminalSessionExitIntent {
-  if (isConfirmedCleanExit(evt)) {
+  if (autoCloseOnExit && isConfirmedCleanExit(evt)) {
     return { kind: "closeSession" };
   }
 
@@ -25,6 +31,10 @@ export function resolveTerminalSessionExitIntent(
   return { kind: "markDisconnected" };
 }
 
-export function shouldCloseTerminalPopupOnExit(evt: TerminalSessionExitEvent): boolean {
-  return isConfirmedCleanExit(evt);
+export function shouldCloseTerminalPopupOnExit(
+  evt: TerminalSessionExitEvent,
+  options: TerminalPopupExitOptions = {},
+): boolean {
+  if (options.autoCloseOnExit === false) return false;
+  return options.isAttachMode === true || isConfirmedCleanExit(evt);
 }

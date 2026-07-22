@@ -40,6 +40,16 @@ export const TerminalBehaviorSettings: React.FC<TerminalBehaviorSettingsProps> =
       <SectionHeader title={t("settings.terminal.section.behavior")} />
       <div className="space-y-0 divide-y divide-border rounded-lg border bg-card px-4">
         <SettingRow
+          label={t("settings.terminal.behavior.autoCloseOnExit")}
+          description={t("settings.terminal.behavior.autoCloseOnExit.desc")}
+        >
+          <Toggle
+            checked={terminalSettings.autoCloseOnExit}
+            onChange={(v) => updateTerminalSetting("autoCloseOnExit", v)}
+          />
+        </SettingRow>
+
+        <SettingRow
           label={t("settings.terminal.behavior.rightClick")}
           description={t("settings.terminal.behavior.rightClick.desc")}
         >

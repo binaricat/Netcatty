@@ -502,6 +502,9 @@ export const ruCoreMessages: Messages = {
     'Подстраивать цвета под требования контрастности (1 = отключено, 21 = максимум)',
   'settings.terminal.behavior.rightClick': 'Поведение правой кнопки мыши',
   'settings.terminal.behavior.rightClick.desc': 'Действие при щелчке правой кнопкой в терминале',
+  'settings.terminal.behavior.autoCloseOnExit': 'Автоматически закрывать терминал при выходе',
+  'settings.terminal.behavior.autoCloseOnExit.desc':
+    'Разрешить автоматическое закрытие вкладок и окон терминала после завершения сеанса. Отключите, чтобы сохранять их после любого выхода.',
   'settings.terminal.behavior.rightClick.menu': 'Показать меню',
   'settings.terminal.behavior.rightClick.paste': 'Вставить',
   'settings.terminal.behavior.rightClick.selectWord': 'Выбрать слово',
