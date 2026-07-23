@@ -219,6 +219,7 @@ const measurePromptPrefixColumn = (
             if (privateOrIntermediate) return null;
             column = clampColumn(parameterCount(params, 1) - 1);
             columnKnown = true;
+            separated = true;
             break;
           case "E":
           case "F":
@@ -312,7 +313,7 @@ const measurePromptPrefixColumn = (
       if (next === "E" || next === "c") {
         column = 0;
         columnKnown = true;
-        if (next === "E") separated = true;
+        separated = true;
         index += 1;
         continue;
       }
@@ -370,11 +371,12 @@ const measurePromptPrefixColumn = (
 const endsAtKnownColumnZero = (
   term: XTerm,
   rawText: string,
+  visibleText: string,
   cursorXBeforeWrite: number,
   convertEol: boolean,
 ): boolean => {
   const measured = measurePromptPrefixColumn(term, rawText, cursorXBeforeWrite, convertEol);
-  return measured?.column === 0 && measured.separated;
+  return measured?.column === 0 && (measured.separated || endsWithLineBreak(visibleText));
 };
 
 const containsLineReset = (text: string): boolean =>
@@ -628,7 +630,6 @@ const insertPromptLineBreaksAtVisibleStarts = (
         firstVisibleRawIndex,
       );
       const prefixText = mapped.text.slice(0, visibleStart);
-      if (prefixText.length === 0 && cursorXBeforeWrite <= 0) return [];
       const lastColumnResetVisibleIndex = prefixText.lastIndexOf("\r");
       const lastColumnResetRawIndex = lastColumnResetVisibleIndex >= 0
         ? mapped.rawIndexByTextIndex[lastColumnResetVisibleIndex]
@@ -636,14 +637,18 @@ const insertPromptLineBreaksAtVisibleStarts = (
       const measuredRawStart = lastColumnResetRawIndex === undefined
         ? 0
         : lastColumnResetRawIndex + 1;
+      const measuredRawText = data.slice(measuredRawStart, rawStart);
+      if (endsAtKnownColumnZero(
+        term,
+        measuredRawText,
+        prefixText,
+        lastColumnResetRawIndex === undefined ? cursorXBeforeWrite : 0,
+        convertEol,
+      )) return [];
       if (
-        prefixText.length > 0
-        && endsAtKnownColumnZero(
-          term,
-          data.slice(measuredRawStart, rawStart),
-          lastColumnResetRawIndex === undefined ? cursorXBeforeWrite : 0,
-          convertEol,
-        )
+        prefixText.length === 0
+        && measuredRawText.length === 0
+        && cursorXBeforeWrite <= 0
       ) return [];
       return [rawStart];
     });

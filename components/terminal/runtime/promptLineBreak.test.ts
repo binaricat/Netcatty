@@ -76,6 +76,62 @@ test("keeps cursor movement before a prompt-side line break", () => {
   );
 });
 
+test("measures cursor-only prompt prefixes before deciding on a line break", () => {
+  const state = createPromptLineBreakState();
+  state.lastPromptText = "$ ";
+  state.pendingCommand = true;
+  const cursorForward = "\x1b[10C";
+  const data = `${cursorForward}$ `;
+
+  assert.equal(
+    prepareTerminalDataForPromptLineBreak(
+      createFakeTerm("", 0) as never,
+      data,
+      state,
+      true,
+      findTerminalPromptSourceChunkVisibleStarts(data, "$ ", [cursorForward.length]),
+    ),
+    `${cursorForward}\r\n$ `,
+  );
+});
+
+test("does not move a clear-screen prompt away from cursor home", () => {
+  const state = createPromptLineBreakState();
+  state.lastPromptText = "$ ";
+  state.pendingCommand = true;
+  const data = "\x1b[H\x1b[2J$ ";
+
+  assert.equal(
+    prepareTerminalDataForPromptLineBreak(
+      createFakeTerm("", 5) as never,
+      data,
+      state,
+      true,
+      findTerminalPromptSourceChunkVisibleStarts(data, "$ "),
+    ),
+    data,
+  );
+});
+
+test("does not add a second break after carriage return", () => {
+  const state = createPromptLineBreakState();
+  state.lastPromptText = "$ ";
+  state.pendingCommand = true;
+  const output = "foo\r";
+  const data = `${output}$ `;
+
+  assert.equal(
+    prepareTerminalDataForPromptLineBreak(
+      createFakeTerm("", 5) as never,
+      data,
+      state,
+      true,
+      findTerminalPromptSourceChunkVisibleStarts(data, "$ ", [output.length]),
+    ),
+    data,
+  );
+});
+
 test("inserts a prompt line break after leaving the alternate screen", () => {
   const state = createPromptLineBreakState();
   state.lastPromptText = "$ ";
