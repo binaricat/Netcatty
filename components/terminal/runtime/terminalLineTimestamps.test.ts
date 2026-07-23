@@ -539,6 +539,24 @@ test("records a ledger stamp after leaving alternate screen", () => {
   assert.ok(getTerminalLineTimestampLedgerCount(term as never) >= 1);
 });
 
+test("alt-screen newlines do not inflate post-exit stamp anchor lines", () => {
+  const { term, liveMarkers } = createFakeTerm({ rows: 24, scrollback: 1000 });
+  // Many hard newlines inside the alt screen must not push the restored
+  // normal-buffer stamp down (would mis-pin sparse reflow anchors).
+  const payload = `\x1b[?1049h${"frame\n".repeat(30)}\x1b[?1049lprompt\r\n`;
+  writeTerminalDataWithLineTimestamps(term as never, payload, () => {}, {
+    timestampDate: new Date(2026, 5, 6, 12, 0, 0),
+  });
+
+  assert.equal(getTerminalLineTimestampLedgerCount(term as never), 1);
+  assert.equal(liveMarkers.length, 1);
+  assert.equal(
+    liveMarkers[0]?.line,
+    0,
+    `expected stamp on restored normal buffer line 0, got ${liveMarkers[0]?.line}`,
+  );
+});
+
 test("resolveTerminalTimestampGutterRowsFromLedger fills gaps with previous time", () => {
   const rows = resolveTerminalTimestampGutterRowsFromLedger({
     viewportY: 0,

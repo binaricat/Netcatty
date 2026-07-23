@@ -662,8 +662,8 @@ const writeSessionDataImmediate = (
         }
         callback();
       };
-      // writeTerminalDataWithLineTimestamps skips markers only under true flood
-      // (not saturated multi-line), preserving per-line gutter timestamps.
+      // Per-second ledger always records (record/render split); true flood still
+      // skips via shouldSkipTerminalLineTimestamps. Sparse reflow anchors ≤1/s.
       writeTerminalDataWithLineTimestamps(
         term,
         preparedDisplayData,
@@ -673,9 +673,8 @@ const writeSessionDataImmediate = (
             ? { onStep: (step: TerminalLineTimestampPerfStep) => recordLineTimestampPerfStep(lineTimestampPerf, step) }
             : {}),
           timestampDate: writeOptions.timestampDate,
-          // Only host-enabled gutters pay segmenter/marker cost on the hot path.
-          // Read through hostRef so toolbar/vault toggles apply without reattach
-          // (attach handlers close over boot-time ctx.host).
+          // hostRef: live gutter toggle for call-site compatibility (recording
+          // itself is always on; paint is gated by gutter UI).
           enabled: resolveLiveHostShowLineTimestamps(ctx),
         },
       );

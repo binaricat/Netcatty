@@ -540,9 +540,8 @@ const advanceAbsoluteLineByData = (line: number, data: string): number => {
 };
 
 /**
- * Soft-wrap–aware pre-write line advance for stamp placement.
- * Uses the same bulk measurer as the (legacy) batched marker path so narrow
- * terminals still land stamps on the correct buffer row when measurable.
+ * Soft-wrap–aware pre-write line advance for a span that is known to be on the
+ * normal buffer (not alternate screen).
  */
 const advanceStampCursorByData = (
   term: XTerm,
@@ -552,6 +551,9 @@ const advanceStampCursorByData = (
   columns: number,
   wraparoundMode: boolean,
 ): { absoluteLine: number; column: number; wraparoundMode: boolean } => {
+  if (!data) {
+    return { absoluteLine, column, wraparoundMode };
+  }
   const measured = tryMeasureVisualRows(term, data, column, columns, wraparoundMode);
   if (measured) {
     return {
@@ -566,6 +568,76 @@ const advanceStampCursorByData = (
     column: 0,
     wraparoundMode,
   };
+};
+
+type StampCursorEstimate = {
+  absoluteLine: number;
+  column: number;
+  wraparoundMode: boolean;
+  /** True while DEC alt-screen is active — do not advance normal-buffer lines. */
+  altActive: boolean;
+};
+
+/**
+ * Walk a data segment for stamp line estimates: honor soft-wrap on the normal
+ * buffer, ignore visual rows while the alternate screen is active (vim/less),
+ * and toggle alt on enter/leave CSI so post-TUI stamps are not inflated.
+ */
+const advanceStampCursorThroughData = (
+  term: XTerm,
+  cursor: StampCursorEstimate,
+  data: string,
+  columns: number,
+): StampCursorEstimate => {
+  let { absoluteLine, column, wraparoundMode, altActive } = cursor;
+  for (let index = 0; index < data.length;) {
+    if (data[index] === "\x1b") {
+      const sequence = readEscapeSequence(data, index);
+      if (!sequence) {
+        index += 1;
+        continue;
+      }
+      if (!sequence.complete) {
+        // Incomplete ESC at chunk end — segmenter holds it; do not invent rows.
+        break;
+      }
+      const altAction = getAlternateScreenAction(sequence.sequence);
+      if (altAction === "enter") {
+        altActive = true;
+      } else if (altAction === "leave") {
+        altActive = false;
+        // 1049 restore: normal buffer cursor is back where it was; keep the
+        // frozen absoluteLine/column from before enter (do not carry alt rows).
+      }
+      const wrapAction = getWraparoundAction(sequence.sequence);
+      if (wrapAction !== null && !altActive) {
+        wraparoundMode = wrapAction;
+      }
+      index = sequence.endIndex + 1;
+      continue;
+    }
+
+    if (altActive) {
+      const nextEsc = data.indexOf("\x1b", index + 1);
+      index = nextEsc === -1 ? data.length : nextEsc;
+      continue;
+    }
+
+    const nextEsc = data.indexOf("\x1b", index);
+    const end = nextEsc === -1 ? data.length : nextEsc;
+    if (end > index) {
+      ({ absoluteLine, column, wraparoundMode } = advanceStampCursorByData(
+        term,
+        absoluteLine,
+        column,
+        data.slice(index, end),
+        columns,
+        wraparoundMode,
+      ));
+    }
+    index = end;
+  }
+  return { absoluteLine, column, wraparoundMode, altActive };
 };
 
 const disposeLedgerMarker = (entry: TimestampLedgerEntry): void => {
@@ -624,6 +696,7 @@ const pushLedgerStamp = (
  */
 const attachLedgerAnchors = (
   term: XTerm,
+  store: TimestampStore,
   pending: readonly TimestampLedgerEntry[],
 ): void => {
   if (pending.length === 0) return;
@@ -632,8 +705,10 @@ const attachLedgerAnchors = (
   ).registerMarker;
   if (typeof registerMarker !== "function") return;
 
+  const stillInLedger = new Set(store.ledger);
   const cursorLine = getAbsoluteCursorLine(term);
   for (const entry of pending) {
+    if (!stillInLedger.has(entry)) continue;
     if (entry.marker && !entry.marker.isDisposed) continue;
     const offset = entry.line - cursorLine;
     let marker: TimestampMarker | undefined;
@@ -1529,22 +1604,27 @@ const writeTerminalDataWithSecondLedger = (
     store.timestampOnlyPrefix = pendingEscapeSequence;
   }
 
-  let absoluteLine = getAbsoluteCursorLine(term);
-  let column = _getTerminalCursorColumn(term);
+  let stampCursor: StampCursorEstimate = {
+    absoluteLine: getAbsoluteCursorLine(term),
+    column: _getTerminalCursorColumn(term),
+    wraparoundMode: _getTerminalWraparoundMode(term),
+    altActive: ((term.buffer?.active as { type?: string } | undefined)?.type) === "alternate",
+  };
   const columns = _getTerminalColumnCount(term);
-  let wraparoundMode = _getTerminalWraparoundMode(term);
   const capacity = resolveTerminalLineTimestampCapacity(term);
   let ledgerChanged = false;
   const pendingAnchors: TimestampLedgerEntry[] = [];
   for (const segment of segments) {
     if (segment.kind === "timestamp") {
-      const secondKey = store.labelCacheKey ?? secondKeyFromDate(stampDate);
+      // Segmenter only emits timestamps off the alt screen; still guard line.
+      if (stampCursor.altActive) continue;
+      const secondKey = secondKeyFromDate(stampDate);
       if (tryBeginSecondStamp(store, secondKey)) {
         const entry = pushLedgerStamp(
           store,
           segment.label,
           secondKey,
-          absoluteLine,
+          stampCursor.absoluteLine,
           capacity,
         );
         pendingAnchors.push(entry);
@@ -1552,19 +1632,17 @@ const writeTerminalDataWithSecondLedger = (
       }
       continue;
     }
-    ({ absoluteLine, column, wraparoundMode } = advanceStampCursorByData(
+    stampCursor = advanceStampCursorThroughData(
       term,
-      absoluteLine,
-      column,
+      stampCursor,
       segment.data,
       columns,
-      wraparoundMode,
-    ));
+    );
   }
 
   const writeStartedAt = shouldMeasureDiagnostics ? performance.now() : 0;
   term.write(data, () => {
-    attachLedgerAnchors(term, pendingAnchors);
+    attachLedgerAnchors(term, store, pendingAnchors);
     rebaseLedgerForScrollback(term, store);
     if (ledgerChanged) {
       notifyTimestampStore(store);
