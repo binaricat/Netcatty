@@ -613,6 +613,12 @@ test("hidden prompt formatting preserves PTY chunk boundaries", () => {
     Terminal: new (options: Record<string, unknown>) => XTerm;
   };
   const term = new Terminal({ cols: 80, rows: 5, scrollback: 20, allowProposedApi: true });
+  const originalWrite = term.write.bind(term);
+  let writeCalls = 0;
+  term.write = ((data: string | Uint8Array, callback?: () => void) => {
+    writeCalls += 1;
+    return originalWrite(data, callback);
+  }) as XTerm["write"];
   const promptState = createPromptLineBreakState();
   promptState.lastPromptText = "$ ";
   promptState.pendingCommand = true;
@@ -640,6 +646,7 @@ test("hidden prompt formatting preserves PTY chunk boundaries", () => {
     assert.equal(term.buffer.active.getLine(0)?.translateToString(true), "foo");
     assert.equal(term.buffer.active.getLine(1)?.translateToString(true), "$");
     assert.equal(term.buffer.active.cursorX, 2);
+    assert.equal(writeCalls, 1);
   } finally {
     resetTerminalWriteCoalescer(term);
     term.dispose();

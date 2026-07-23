@@ -206,6 +206,24 @@ test("does not refresh cached prompt from output that only ends with the prompt 
   assert.equal(state.suppressNextPromptCache, false);
 });
 
+test("uses a preserved PTY chunk boundary to separate a short prompt", () => {
+  const state = createPromptLineBreakState();
+  state.lastPromptText = "$ ";
+  state.pendingCommand = true;
+
+  assert.equal(
+    prepareTerminalDataForPromptLineBreak(
+      createFakeTerm("", 0) as never,
+      "file tail$ ",
+      state,
+      true,
+      ["file tail".length],
+    ),
+    "file tail\r\n$ ",
+  );
+  assert.equal(state.suppressNextPromptCache, false);
+});
+
 test("keeps waiting for the real prompt after an output suffix matches the prompt text", () => {
   const state = createPromptLineBreakState();
   state.lastPromptText = "$ ";

@@ -223,6 +223,7 @@ export function insertPromptLineBreakBeforePrompt(
   data: string,
   promptText: string,
   cursorXBeforeWrite: number,
+  sourceChunkBoundaries: readonly number[] = [],
 ): string {
   if (!data || !promptText) return data;
 
@@ -231,13 +232,14 @@ export function insertPromptLineBreakBeforePrompt(
 
   const promptTextStart = mapped.text.length - promptText.length;
   const prefixText = mapped.text.slice(0, promptTextStart);
+  const promptRawStart = mapped.rawStartByTextIndex[promptTextStart] ?? 0;
+  const promptStartsAtSourceChunk = sourceChunkBoundaries.includes(promptRawStart);
   if (prefixText.length === 0 && cursorXBeforeWrite <= 0) return data;
   if (prefixText.length > 0) {
     if (endsWithLineBreak(prefixText)) return data;
-    if (!isDistinctPromptText(promptText)) return data;
+    if (!isDistinctPromptText(promptText) && !promptStartsAtSourceChunk) return data;
   }
 
-  const promptRawStart = mapped.rawStartByTextIndex[promptTextStart] ?? 0;
   return `${data.slice(0, promptRawStart)}\r\n${data.slice(promptRawStart)}`;
 }
 
@@ -246,6 +248,7 @@ export function prepareTerminalDataForPromptLineBreak(
   data: string,
   state: PromptLineBreakState | undefined,
   enabled: boolean,
+  sourceChunkBoundaries: readonly number[] = [],
 ): string {
   if (!enabled || !state?.pendingCommand || !state.lastPromptText) return data;
 
@@ -254,6 +257,7 @@ export function prepareTerminalDataForPromptLineBreak(
     data,
     state.lastPromptText,
     cursorXBeforeWrite,
+    sourceChunkBoundaries,
   );
   const visibleText = mapVisibleText(data).text;
   const ambiguousPromptSuffix = hasAmbiguousPromptSuffix(data, state.lastPromptText);

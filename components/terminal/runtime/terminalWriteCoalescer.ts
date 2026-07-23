@@ -216,6 +216,8 @@ export type CoalescedTerminalWriteOptions = {
   deferStart?: boolean;
   yieldAfter?: boolean;
   preservePerfTrace?: boolean;
+  /** Raw offsets where later PTY chunks begin inside this coalesced batch. */
+  sourceChunkBoundaries?: readonly number[];
 };
 type CoalescedTerminalWriteNow = (
   data: string,
@@ -226,6 +228,7 @@ type CoalescedTerminalWriteNow = (
 const terminalWriteCoalescers = new WeakMap<XTerm, WriteCoalescer>();
 const terminalWriteCoalescerIngress = new WeakMap<XTerm, number>();
 const terminalWriteCoalescerChunkCounts = new WeakMap<XTerm, number>();
+const terminalWriteCoalescerChunkBoundaries = new WeakMap<XTerm, number[]>();
 const terminalWriteCoalescerByteCapResolvers = new WeakMap<XTerm, CoalescerByteCapResolver>();
 const terminalWriteCoalescerFlushGates = new WeakMap<XTerm, CoalescerFlushGate>();
 const terminalWriteCoalescerWriters = new WeakMap<XTerm, CoalescedTerminalWriteNow>();
@@ -264,6 +267,12 @@ const takePendingChunkCount = (term: XTerm): number => {
   const count = terminalWriteCoalescerChunkCounts.get(term) ?? 1;
   terminalWriteCoalescerChunkCounts.delete(term);
   return count;
+};
+
+const takePendingChunkBoundaries = (term: XTerm): number[] => {
+  const boundaries = terminalWriteCoalescerChunkBoundaries.get(term) ?? [];
+  terminalWriteCoalescerChunkBoundaries.delete(term);
+  return boundaries;
 };
 
 export const setTerminalWriteCoalescerFlushGate = (
@@ -368,6 +377,7 @@ const writeLargeTerminalBatch = (
   const batchSize = Math.max(1, maxBatchBytes);
   const isSliced = data.length > batchSize;
   const yieldBudget = resolveSliceYieldBudgetBytes(data, batchSize);
+  const { sourceChunkBoundaries = [], ...baseOptions } = options;
   let offset = 0;
   let remainingIngressBytes = Math.max(0, ingressBytes);
   let bytesSinceYield = 0;
@@ -390,9 +400,15 @@ const writeLargeTerminalBatch = (
     if (shouldYield) {
       bytesSinceYield = 0;
     }
+    const sliceChunkBoundaries = sourceChunkBoundaries
+      .filter((boundary) => boundary > offset && boundary < end)
+      .map((boundary) => boundary - offset);
     const nextOptions = {
-      ...options,
+      ...baseOptions,
       ...(shouldYield ? { yieldAfter: true } : {}),
+      ...(sliceChunkBoundaries.length > 0
+        ? { sourceChunkBoundaries: sliceChunkBoundaries }
+        : {}),
     };
     writeNow(
       slice,
@@ -436,19 +452,28 @@ export const enqueueCoalescedTerminalWrite = (
     term,
     (terminalWriteCoalescerChunkCounts.get(term) ?? 0) + 1,
   );
+  const pendingBytesBeforePush = getPendingCoalescedBytes(term);
+  if (pendingBytesBeforePush > 0) {
+    const boundaries = terminalWriteCoalescerChunkBoundaries.get(term) ?? [];
+    boundaries.push(pendingBytesBeforePush);
+    terminalWriteCoalescerChunkBoundaries.set(term, boundaries);
+  }
 
   let coalescer = terminalWriteCoalescers.get(term);
   if (!coalescer) {
     coalescer = createWriteCoalescer((batch) => {
       const batchIngress = takePendingIngressBytes(term, batch.length);
       const chunkCount = takePendingChunkCount(term);
+      const sourceChunkBoundaries = takePendingChunkBoundaries(term);
       const activeWriteNow = terminalWriteCoalescerWriters.get(term) ?? writeNow;
       writeLargeTerminalBatch(
         batch,
         batchIngress,
         resolveTerminalWriteBatchBytes(batch, resolveCoalescerByteCap(term)),
         activeWriteNow,
-        chunkCount === 1 ? {} : { preservePerfTrace: false },
+        chunkCount === 1
+          ? {}
+          : { preservePerfTrace: false, sourceChunkBoundaries },
       );
     }, {
       getMaxPendingBytes: () => resolveCoalescerByteCap(term),
@@ -496,12 +521,15 @@ export const flushTerminalWriteCoalescer = (
   coalescer.flushSync((batch) => {
     const batchIngress = takePendingIngressBytes(term, batch.length);
     const chunkCount = takePendingChunkCount(term);
+    const sourceChunkBoundaries = takePendingChunkBoundaries(term);
     writeLargeTerminalBatch(
       batch,
       batchIngress,
       resolveTerminalWriteBatchBytes(batch, resolveCoalescerByteCap(term)),
       writeNow,
-      chunkCount === 1 ? {} : { preservePerfTrace: false },
+      chunkCount === 1
+        ? {}
+        : { preservePerfTrace: false, sourceChunkBoundaries },
     );
   });
 };
@@ -511,6 +539,7 @@ export const resetTerminalWriteCoalescer = (term: XTerm): void => {
   terminalWriteCoalescers.delete(term);
   terminalWriteCoalescerIngress.delete(term);
   terminalWriteCoalescerChunkCounts.delete(term);
+  terminalWriteCoalescerChunkBoundaries.delete(term);
   terminalWriteCoalescerByteCapResolvers.delete(term);
   terminalWriteCoalescerFlushGates.delete(term);
   terminalWriteCoalescerWriters.delete(term);
@@ -544,6 +573,7 @@ export const abortTerminalWriteCoalescer = (
     coalescer.pendingBytes(),
   );
   takePendingChunkCount(term);
+  takePendingChunkBoundaries(term);
   coalescer.abort();
   if (ingressDropped > 0) {
     onDropped?.(ingressDropped);

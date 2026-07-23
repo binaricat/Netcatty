@@ -508,7 +508,14 @@ const drainOrphanedMarkers = (
 ): void => {
   let remaining = budget;
   if (store.orphanedMarkers.length >= TIMESTAMP_ORPHAN_CATCHUP_THRESHOLD) {
-    remaining = Math.max(remaining, TIMESTAMP_ORPHAN_CATCHUP_BUDGET);
+    // Keep the deferred-disposal tail bounded even when one PTY batch adds
+    // more markers than the fixed catch-up budget. Otherwise 500-line chunks
+    // can add 244 live xterm markers per pass forever.
+    remaining = Math.max(
+      remaining,
+      TIMESTAMP_ORPHAN_CATCHUP_BUDGET,
+      store.orphanedMarkers.length - TIMESTAMP_ORPHAN_CATCHUP_THRESHOLD + 1,
+    );
   }
   while (remaining > 0 && store.orphanedMarkers.length > 0) {
     const marker = store.orphanedMarkers.pop();

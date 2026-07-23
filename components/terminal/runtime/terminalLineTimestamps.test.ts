@@ -866,6 +866,39 @@ test("large multi-chunk flood stays within capacity across writes", () => {
   assert.ok(live <= capacity, `expected <= ${capacity} live entries, got ${live}`);
 });
 
+test("large slow batches keep live xterm markers near the retained capacity", async () => {
+  const require = createRequire(import.meta.url);
+  const { Terminal } = require("@xterm/xterm") as {
+    Terminal: new (options: Record<string, unknown>) => XTerm;
+  };
+  const term = new Terminal({
+    cols: 80,
+    rows: 24,
+    scrollback: 100000,
+    allowProposedApi: true,
+  });
+
+  try {
+    for (let batch = 0; batch < 14; batch += 1) {
+      const data = Array.from(
+        { length: 500 },
+        (_, index) => `batch-${batch}-${index}`,
+      ).join("\r\n") + "\r\n";
+      await new Promise<void>((resolve) => {
+        writeTerminalDataWithLineTimestamps(term, data, resolve);
+      });
+    }
+
+    assert.ok(term.markers.length <= MAX_TERMINAL_LINE_TIMESTAMP_ENTRIES + 512);
+    assert.equal(
+      getTerminalLineTimestampEntryCount(term),
+      MAX_TERMINAL_LINE_TIMESTAMP_ENTRIES,
+    );
+  } finally {
+    term.dispose();
+  }
+});
+
 test("small batched writes amortize full timestamp-store pruning", () => {
   const { term } = createFakeTerm({ scrollback: 1000, rows: 24 });
   (term as unknown as { registerMarker: (offset: number) => unknown }).registerMarker = () => ({

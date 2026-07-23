@@ -424,17 +424,6 @@ export const writeSessionData = (
   // across an arrival-second boundary whenever either side is hidden, while
   // leaving visible full-screen repaints frame-batched.
   flushBeforeTimestampBoundary(term, timestampDate, isPaneVisible);
-  const settings = ctx.terminalSettingsRef?.current ?? ctx.terminalSettings;
-  if (
-    !isPaneVisible
-    && settings?.forcePromptNewLine === true
-    && ctx.promptLineBreakStateRef?.current?.pendingCommand === true
-    && getTerminalWriteCoalescerPendingBytes(term) > 0
-  ) {
-    // Prompt formatting needs the cursor state after each PTY chunk. Preserve
-    // that boundary only while the feature is actively waiting for a prompt.
-    flushPendingTerminalOutputNow(term);
-  }
   const perfTrace = createTerminalOutputPerfTrace({
     sessionId: ctx.sessionRef.current ?? ctx.sessionId,
     data,
@@ -539,6 +528,7 @@ const writeSessionDataImmediate = (
         pasteDisplayData,
         ctx.promptLineBreakStateRef?.current,
         forcePromptNewLine,
+        writeOptions.sourceChunkBoundaries,
       );
       prepareMs = shouldMeasurePerf ? performance.now() - prepareStartedAt : 0;
     }
