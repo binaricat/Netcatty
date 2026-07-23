@@ -182,24 +182,16 @@ export const createWriteCoalescer = (
     const pendingBytesBefore = pendingBytes;
     pending.push(chunk);
     pendingBytes += chunk.length;
-    // Always resolve schedule mode before gated-cap returns so callers can
-    // probe enter-alt CSI (side-effect latch) even when hidden oversized
-    // pending cannot auto-flush yet. Skipping this left follow-up repaints on
-    // microtask after reveal (Codex CLI review).
+    // Always resolve schedule mode before cap drain so callers can probe
+    // enter-alt CSI (side-effect latch) even when this push immediately flushes.
     const mode = resolveScheduleMode({
       nextChunk: chunk,
       pendingBytesBefore,
     });
     if (pendingBytes > getMaxPendingBytes()) {
-      if (!shouldFlushScheduledFrame()) {
-        // Hold the batch, but keep schedule mode upgrades for any already-armed
-        // frame so a later reveal flush is not the only path that sees rAF.
-        if (cancelPendingFrame !== null && scheduledMode === "microtask" && mode === "raf") {
-          cancelScheduledFrame();
-          armSchedule("raf");
-        }
-        return;
-      }
+      // Byte-cap always drains. The frame gate only suppresses idle/rAF flushes
+      // (hidden panes); unbounded hold past the cap freezes multi-terminal log
+      // floods with multi-MB joins until a timed drain (issue #2397).
       flushSync();
       return;
     }

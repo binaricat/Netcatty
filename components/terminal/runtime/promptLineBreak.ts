@@ -215,6 +215,7 @@ const measurePromptPrefixColumn = (
           case "C":
           case "a":
             if (privateOrIntermediate) return null;
+            // CUF clamps at the margin in xterm; it does not wrap.
             if (columnKnown) column = clampColumn(column + count);
             break;
           case "D":
@@ -260,7 +261,19 @@ const measurePromptPrefixColumn = (
             break;
           case "b":
             if (privateOrIntermediate || lastPrintableWidth === null) return null;
-            if (columnKnown) column = clampColumn(column + (lastPrintableWidth * count));
+            if (columnKnown) {
+              // REP repeats a printable; model simple line wrap like printables.
+              for (let rep = 0; rep < count; rep += 1) {
+                for (let width = 0; width < lastPrintableWidth; width += 1) {
+                  if (column >= maxColumn) {
+                    column = 0;
+                    separated = true;
+                  } else {
+                    column += 1;
+                  }
+                }
+              }
+            }
             break;
           case "r":
             if (privateOrIntermediate) return null;
@@ -382,7 +395,17 @@ const measurePromptPrefixColumn = (
       continue;
     }
     lastPrintableWidth = 1;
-    if (columnKnown) column = clampColumn(column + 1);
+    if (columnKnown) {
+      if (column >= maxColumn) {
+        // Simple wrap: a full-width line leaves the cursor at column 0 of the
+        // next row. Clamping at cols-1 falsely looked mid-line and inserted an
+        // extra blank before the following prompt.
+        column = 0;
+        separated = true;
+      } else {
+        column = column + 1;
+      }
+    }
   }
 
   return columnKnown ? { column, separated } : null;

@@ -523,16 +523,6 @@ const writeSessionDataImmediate = (
     const settings = ctx.terminalSettingsRef?.current ?? ctx.terminalSettings;
     const forcePromptNewLine = settings?.forcePromptNewLine ?? false;
     const promptLineBreakState = ctx.promptLineBreakStateRef?.current;
-    const promptVisibleStarts = (
-      forcePromptNewLine
-      && promptLineBreakState?.pendingCommand
-      ? findTerminalPromptSourceChunkVisibleStarts(
-        data,
-        promptLineBreakState.lastPromptText,
-        writeOptions.sourceChunkBoundaries,
-      )
-      : []
-    );
     // Always run filter + paste bookkeeping (stateful). Bulk-plain only skips
     // erase-scrollback / prompt cosmetics when the *post-paste* stream is still
     // plain and forcePromptNewLine is off (Codex: long paste cleanup must run).
@@ -542,6 +532,21 @@ const writeSessionDataImmediate = (
       normalScreen: term.buffer?.active?.type !== "alternate",
     });
     const pasteDisplayData = prepareTerminalDataForUserPasteDisplay(term, afterErase);
+    // Prompt indices must match the string passed to prepare… — source-chunk
+    // boundaries are only valid when display transforms are identity.
+    const promptSourceBoundaries = pasteDisplayData === data
+      ? writeOptions.sourceChunkBoundaries
+      : undefined;
+    const promptVisibleStarts = (
+      forcePromptNewLine
+      && promptLineBreakState?.pendingCommand
+      ? findTerminalPromptSourceChunkVisibleStarts(
+        pasteDisplayData,
+        promptLineBreakState.lastPromptText,
+        promptSourceBoundaries,
+      )
+      : []
+    );
     const bulkPlainPath = shouldDegradeTerminalSideWork(term)
       && isPlainTerminalDisplayData(pasteDisplayData)
       && !forcePromptNewLine;

@@ -169,7 +169,7 @@ test("repaintTerminalAfterReveal repaints again after the reveal reaches a brows
   assert.equal(visibleTail, "__END_1000__");
 });
 
-test("shouldFlushTerminalWritesForBackgroundOutput flushes hidden panes and unfocused pages", () => {
+test("shouldFlushTerminalWritesForBackgroundOutput flushes hidden panes and page-hidden docs", () => {
   withDocumentVisibility("visible", () => {
     assert.equal(shouldFlushTerminalWritesForBackgroundOutput(false), true);
   }, { hasFocus: true });
@@ -177,8 +177,9 @@ test("shouldFlushTerminalWritesForBackgroundOutput flushes hidden panes and unfo
     assert.equal(shouldFlushTerminalWritesForBackgroundOutput(true), true);
     assert.equal(shouldFlushTerminalWritesForBackgroundOutput(false), true);
   });
+  // Unfocused-but-visible keeps normal batching; maybeFlush throttles instead.
   withDocumentVisibility("visible", () => {
-    assert.equal(shouldFlushTerminalWritesForBackgroundOutput(true), true);
+    assert.equal(shouldFlushTerminalWritesForBackgroundOutput(true), false);
     assert.equal(shouldFlushTerminalWritesForBackgroundOutput(false), true);
   }, { hasFocus: false });
   withDocumentVisibility("visible", () => {

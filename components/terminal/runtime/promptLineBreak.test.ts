@@ -1201,3 +1201,34 @@ test("does not refresh cached prompt from an unchanged mid-line write without a 
   assert.equal(state.pendingCommand, true);
   assert.equal(state.suppressNextPromptCache, false);
 });
+
+test("does not insert a blank line after a full-width prefix that already wrapped", () => {
+  const state = createPromptLineBreakState();
+  state.lastPromptText = "$ ";
+  state.pendingCommand = true;
+  const cols = 10;
+  const fullWidth = "x".repeat(cols);
+  const term = createWrappedFakeTerm([fullWidth], 0, 0, cols);
+
+  assert.equal(
+    prepareTerminalDataForPromptLineBreak(
+      term as never,
+      `${fullWidth}$ `,
+      state,
+      true,
+      [fullWidth.length],
+    ),
+    `${fullWidth}$ `,
+  );
+});
+
+test("finds prompt starts on the display string after identity transforms", () => {
+  const prompt = "$ ";
+  const data = `file tail${prompt}`;
+  const starts = findTerminalPromptSourceChunkVisibleStarts(
+    data,
+    prompt,
+    ["file tail".length],
+  );
+  assert.deepEqual(starts, ["file tail".length]);
+});

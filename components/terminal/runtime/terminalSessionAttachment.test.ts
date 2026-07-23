@@ -31,7 +31,9 @@ import {
   resetTerminalWriteCoalescer,
 } from "./terminalWriteCoalescer.ts";
 import {
+  cancelScheduledUnfocusedRepaint,
   flushPendingTerminalWritesOnResume,
+  flushTerminalWriteBufferBypassingTimers,
 } from "./terminalUnfocusedRepaint.ts";
 import {
   clearDeferredTerminalWriteAck,
@@ -330,7 +332,7 @@ test("writeSessionData flushes xterm writes while the page is hidden", () => {
   clearTerminalSessionFlowAck("session-1");
 });
 
-test("writeSessionData flushes xterm writes while the window is unfocused but visible", () => {
+test("writeSessionData batches while unfocused-but-visible then drains on idle flush", async () => {
   clearTerminalSessionFlowAck("session-1");
   const payload = "x".repeat(FLOW_CHAR_COUNT_ACK_SIZE + 1);
   const writes: string[] = [];
@@ -366,6 +368,14 @@ test("writeSessionData flushes xterm writes while the window is unfocused but vi
   withDocumentVisibility("visible", () => {
     writeSessionData(ctx as never, term, payload);
   }, { hasFocus: false });
+
+  // Unfocused-but-visible no longer force-flushes every chunk (preserves
+  // batching / alt-screen frames). Microtask/idle/unfocused timers drain it.
+  await new Promise((resolve) => { setTimeout(resolve, 90); });
+  flushTerminalWriteCoalescer(term);
+  flushTerminalWriteBufferBypassingTimers(term);
+  flushTerminalWriteQueueBypassingTimers(term);
+  flushTerminalWriteBufferBypassingTimers(term);
   flushTerminalSessionFlowAck("session-1");
 
   assert.equal(writes.join(""), payload);
@@ -373,6 +383,8 @@ test("writeSessionData flushes xterm writes while the window is unfocused but vi
   assert.equal(getFlowController(ctx as never, term).pendingBytes(), 0);
   assert.equal(getDeferredTerminalWriteAckBytes(term), 0);
   assert.equal(acked.reduce((total, bytes) => total + bytes, 0), payload.length);
+  cancelScheduledUnfocusedRepaint(term);
+  resetTerminalWriteCoalescer(term);
   clearTerminalSessionFlowAck("session-1");
 });
 

@@ -154,14 +154,7 @@ test("keeps a prompt source chunk intact when slicing merged output", () => {
   setTerminalWriteCoalescerByteCapResolver(term, () => 4);
   setTerminalWriteCoalescerFlushGate(term, () => false);
   withAnimationFrameQueue(() => {
-    enqueueCoalescedTerminalWrite(
-      term,
-      "abc",
-      () => {},
-      "abc".length,
-      { preserveSourceChunkBoundaries: true },
-    );
-    enqueueCoalescedTerminalWrite(term, "$ ", (data, _ingressBytes, options) => {
+    const captureWrite = (data: string, _ingressBytes?: number, options?: CoalescedTerminalWriteOptions) => {
       const promptStarts = findTerminalPromptSourceChunkVisibleStarts(
         data,
         promptState.lastPromptText,
@@ -177,7 +170,21 @@ test("keeps a prompt source chunk intact when slicing merged output", () => {
         ),
         options,
       });
-    }, "$ ".length, { preserveSourceChunkBoundaries: true });
+    };
+    enqueueCoalescedTerminalWrite(
+      term,
+      "abc",
+      captureWrite,
+      "abc".length,
+      { preserveSourceChunkBoundaries: true },
+    );
+    enqueueCoalescedTerminalWrite(
+      term,
+      "$ ",
+      captureWrite,
+      "$ ".length,
+      { preserveSourceChunkBoundaries: true },
+    );
     flushTerminalWriteCoalescer(term);
   });
 
@@ -354,10 +361,10 @@ test("pending output skipped while hidden can be flushed after the pane is shown
   resetTerminalWriteCoalescer(term);
 });
 
-test("cap-triggered coalescer flushes wait until a hidden pane is visible", () => {
+test("cap-triggered coalescer flushes while a pane is still hidden", () => {
   const term = createFakeTerm();
   const writes: string[] = [];
-  let isPaneVisible = false;
+  const isPaneVisible = false;
 
   setTerminalWriteCoalescerByteCapResolver(term, () => 10);
   setTerminalWriteCoalescerFlushGate(term, () => isPaneVisible);
@@ -365,7 +372,9 @@ test("cap-triggered coalescer flushes wait until a hidden pane is visible", () =
     enqueueCoalescedTerminalWrite(
       term,
       "123456",
-      () => {},
+      (data) => {
+        writes.push(data);
+      },
       "123456".length,
     );
     enqueueCoalescedTerminalWrite(
@@ -377,23 +386,21 @@ test("cap-triggered coalescer flushes wait until a hidden pane is visible", () =
       "abcdef".length,
     );
     frames.splice(0).forEach((frame) => frame(0));
-
-    assert.deepEqual(writes, []);
-
-    isPaneVisible = true;
+    // First chunk flushed on cap pressure while still hidden; second may wait
+    // under the gate if it alone is within the cap.
+    assert.equal(writes.join(""), "123456");
     flushTerminalWriteCoalescer(term);
   });
 
   assert.equal(writes.join(""), "123456abcdef");
-  assert.deepEqual(writes.map((write) => write.length), [10, 2]);
 
   resetTerminalWriteCoalescer(term);
 });
 
-test("oversized coalesced output waits while hidden instead of writing directly", () => {
+test("oversized coalesced output drains while hidden instead of unbounded hold", () => {
   const term = createFakeTerm();
   const writes: string[] = [];
-  let isPaneVisible = false;
+  const isPaneVisible = false;
 
   setTerminalWriteCoalescerByteCapResolver(term, () => 4);
   setTerminalWriteCoalescerFlushGate(term, () => isPaneVisible);
@@ -407,14 +414,10 @@ test("oversized coalesced output waits while hidden instead of writing directly"
       "oversized".length,
     );
     frames.splice(0).forEach((frame) => frame(0));
-
-    assert.deepEqual(writes, []);
-
-    isPaneVisible = true;
-    flushTerminalWriteCoalescer(term);
   });
 
-  assert.deepEqual(writes.join(""), "oversized");
+  assert.equal(writes.join(""), "oversized");
+  assert.ok(writes.length >= 1);
 
   resetTerminalWriteCoalescer(term);
 });
@@ -510,7 +513,8 @@ test("hidden oversized enter-alt still latches rAF for follow-up after reveal", 
   };
 
   try {
-    // Cap below enter-alt payload so the gated oversize path is taken while hidden.
+    // Cap below enter-alt payload: size cap drains while hidden, but enter-alt
+    // probing must still latch rAF for later under-cap repaints.
     setTerminalWriteCoalescerByteCapResolver(term, () => 4);
     setTerminalWriteCoalescerFlushGate(term, () => isPaneVisible);
 
@@ -519,16 +523,12 @@ test("hidden oversized enter-alt still latches rAF for follow-up after reveal", 
     });
     frames.splice(0).forEach((frame) => frame(0));
     microtasks.splice(0).forEach((task) => task());
-    assert.deepEqual(writes, []);
-
-    isPaneVisible = true;
-    flushTerminalWriteCoalescer(term);
-    // Cap is 4, so the flush may shard the batch; content must still be intact.
     assert.equal(writes.join(""), "\x1b[?1049hframe");
     writes.length = 0;
     frames.length = 0;
     microtasks.length = 0;
 
+    isPaneVisible = true;
     // Buffer still reports normal until xterm parses; latch must force rAF.
     // Raise the cap so the follow-up uses normal scheduling (not cap flush).
     setTerminalWriteCoalescerByteCapResolver(term, () => 64 * 1024);

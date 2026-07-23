@@ -192,7 +192,7 @@ test("uses a tighter pending-byte cap when getMaxPendingBytes is set", () => {
   assert.equal(writes[0]?.length, cap + 1);
 });
 
-test("does not flush cap-sized pending bytes while automatic flushing is gated", () => {
+test("byte-cap flushes even while scheduled frames are gated", () => {
   const writes: string[] = [];
   let canFlush = false;
   const cap = 8;
@@ -201,19 +201,17 @@ test("does not flush cap-sized pending bytes while automatic flushing is gated",
     shouldFlushScheduledFrame: () => canFlush,
   });
 
+  // Under the cap: gated frame holds.
   coalescer.push("x".repeat(cap));
-  coalescer.push("y");
   fireFrame();
-
   assert.deepEqual(writes, []);
 
-  canFlush = true;
-  coalescer.flushSync();
-
+  // Past the cap: drain immediately so hidden log floods stay bounded.
+  coalescer.push("y");
   assert.deepEqual(writes, ["x".repeat(cap) + "y"]);
 });
 
-test("still resolves schedule mode for gated oversize pushes (alt-screen probe)", () => {
+test("still resolves schedule mode before gated under-cap frames and cap drains", () => {
   const writes: string[] = [];
   let canFlush = false;
   const probed: string[] = [];
@@ -227,18 +225,14 @@ test("still resolves schedule mode for gated oversize pushes (alt-screen probe)"
     },
   });
 
-  // First chunk arms microtask schedule under the cap; second exceeds cap while
-  // gated — resolveScheduleMode must still run so enter-alt latches fire.
+  // First chunk arms a gated under-cap frame; second exceeds cap and drains.
+  // resolveScheduleMode must still run so enter-alt latches fire.
   coalescer.push("shell");
   coalescer.push(`\x1b[?1049h${"x".repeat(cap)}`);
-  fireFrame();
 
-  assert.deepEqual(writes, []);
   assert.deepEqual(probed, ["shell", `\x1b[?1049h${"x".repeat(cap)}`]);
-
-  canFlush = true;
-  coalescer.flushSync();
   assert.equal(writes.join("").includes("\x1b[?1049h"), true);
+  assert.equal(writes.join("").startsWith("shell"), true);
 });
 
 test("dispose flushes remaining bytes and stops accepting new chunks", () => {

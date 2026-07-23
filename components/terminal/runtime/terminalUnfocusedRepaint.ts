@@ -53,10 +53,12 @@ export function shouldFlushTerminalWritesForBackgroundOutput(isPaneVisible: bool
   // Hidden panes should keep their xterm buffer current so tab switches do not
   // reveal a delayed replay of long-running output (#1985).
   if (!isPaneVisible) return true;
-  // Minimized/hidden pages and occluded-but-visible windows (common on Windows
-  // when Alt+Tabbing away) both throttle requestAnimationFrame, which lets the
-  // write coalescer backlog grow and replay slowly on foreground return (#1880).
-  return isTerminalPageHidden() || isTerminalWindowUnfocusedButVisible();
+  // Fully page-hidden documents throttle rAF hard; force the background drain
+  // path so backlog does not sit until the tab is shown again (#1880).
+  // Unfocused-but-still-visible windows (Alt+Tab, second monitor) keep normal
+  // coalescing + maybeFlush… throttling so alt-screen frames and log batching
+  // are not destroyed by a per-chunk force flush.
+  return isTerminalPageHidden();
 }
 
 function normalizeXtermWriteBufferOffset(writeBuffer: XTermPrivateWriteBuffer): void {
@@ -242,8 +244,8 @@ export function maybeFlushTerminalWriteCoalescerWhenUnfocused(
   term: XTerm,
   isPaneVisible: boolean,
 ): void {
-  // Background fast path already drains coalescer/queue synchronously.
-  if (!isPaneVisible || shouldFlushTerminalWritesForBackgroundOutput(isPaneVisible)) return;
+  // Hidden pane / page-hidden use the background drain path in writeSessionData.
+  if (!isPaneVisible || isTerminalPageHidden()) return;
   if (!isTerminalWindowUnfocusedButVisible()) return;
   if (unfocusedFlushTimers.has(term)) return;
 

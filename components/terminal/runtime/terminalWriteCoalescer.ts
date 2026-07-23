@@ -303,9 +303,6 @@ const resolveCoalescerByteCap = (term: XTerm): number => {
   return resolver?.() ?? defaultCoalescerByteCap();
 };
 
-const shouldAutoFlushCoalescer = (term: XTerm): boolean =>
-  terminalWriteCoalescerFlushGates.get(term)?.() ?? true;
-
 const getPendingCoalescedBytes = (term: XTerm): number =>
   terminalWriteCoalescers.get(term)?.pendingBytes() ?? 0;
 
@@ -581,12 +578,16 @@ export const enqueueCoalescedTerminalWrite = (
   }
 
   const maxPendingBytes = resolveCoalescerByteCap(term);
-  const canAutoFlush = shouldAutoFlushCoalescer(term);
-  if (canAutoFlush && getPendingCoalescedBytes(term) + data.length > maxPendingBytes) {
+  // Size caps always drain, even when the frame gate holds scheduled flushes
+  // (hidden panes). Otherwise continuous logs pile multi-MB joins for the
+  // timed drain window and defeat the original batching bound.
+  // Flush *previous* pending with its existing writer before installing this
+  // call's writeNow — preserves per-chunk writer identity under cap pressure.
+  if (getPendingCoalescedBytes(term) + data.length > maxPendingBytes) {
     flushTerminalWriteCoalescer(term);
   }
   terminalWriteCoalescerWriters.set(term, writeNow);
-  if (canAutoFlush && data.length > maxPendingBytes) {
+  if (data.length > maxPendingBytes) {
     // Oversized batches skip the coalescer frame arm, but still must latch
     // enter-alt-screen so follow-up repaint chunks use rAF.
     noteAltScreenScheduleProbe(term, data);
