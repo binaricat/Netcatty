@@ -11,6 +11,7 @@ import {
   Shield,
   Trash2,
   Upload,
+  User,
   UserPlus,
 } from "lucide-react";
 import React, { useCallback, useMemo, useRef, useState } from "react";
@@ -65,6 +66,7 @@ import {
   isMacOS,
   KeyCard,
   type PanelMode,
+  resolvePreferredKeySection,
   shouldShowIdentitySection,
   shouldShowKeySection,
   shouldShowSearchNoResults,
@@ -119,6 +121,11 @@ const KeychainManager: React.FC<KeychainManagerProps> = ({
   const { t } = useI18n();
   const { generateKeyPair, execCommand } = useKeychainBackend();
   const [activeFilter, setActiveFilter] = useState<FilterTab>("key");
+  const [preferredKeySection, setPreferredKeySection] = useState<"key" | "identity" | null>(null);
+  const effectiveKeySection = resolvePreferredKeySection(
+    preferredKeySection,
+    identities.length,
+  );
   const [search, setSearch] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<{
     type: "key" | "identity";
@@ -266,14 +273,23 @@ echo $3 >> "$FILE"`);
     identityCount: identities.length,
     filteredIdentityCount: filteredIdentities.length,
     filteredKeyCount: filteredKeys.length,
+    preferredSection: preferredKeySection,
     search,
   });
   const showKeySection = shouldShowKeySection({
     activeFilter,
     identityCount: identities.length,
     filteredKeyCount: filteredKeys.length,
+    preferredSection: preferredKeySection,
     search,
   });
+  const hasSearch = Boolean(search.trim());
+  const keyButtonActive = activeFilter === "key" && (
+    hasSearch ? showKeySection : effectiveKeySection === "key"
+  );
+  const identityButtonActive = activeFilter === "key" && (
+    hasSearch ? showIdentitySection : effectiveKeySection === "identity"
+  );
 
   // Push a new panel onto the stack
   const pushPanel = useCallback((newPanel: PanelMode) => {
@@ -343,6 +359,8 @@ echo $3 >> "$FILE"`);
 
   // Open panel for new identity
   const openNewIdentity = useCallback(() => {
+    setActiveFilter("key");
+    setPreferredKeySection("identity");
     setPanelStack([{ type: "identity" }]);
     setDraftIdentity({
       id: "",
@@ -619,7 +637,7 @@ echo $3 >> "$FILE"`);
               <div
                 className={cn(
                   "flex items-center rounded-md transition-colors",
-                  activeFilter === "key"
+                  keyButtonActive
                     ? "bg-foreground/10 text-foreground hover:bg-foreground/15"
                     : "bg-foreground/5 text-foreground hover:bg-foreground/10",
                 )}
@@ -628,7 +646,11 @@ echo $3 >> "$FILE"`);
                   size="sm"
                   variant="ghost"
                   className="h-10 px-3 gap-2 rounded-r-none hover:bg-transparent text-inherit"
-                  onClick={() => setActiveFilter("key")}
+                  onClick={() => {
+                    setActiveFilter("key");
+                    setPreferredKeySection("key");
+                    setSearch("");
+                  }}
                 >
                   <Key size={14} />
                   {t("keychain.filter.key")}
@@ -700,6 +722,27 @@ echo $3 >> "$FILE"`);
                 </Button>
               </DropdownContent>
             </Dropdown>
+
+            {identities.length > 0 && (
+              <Button
+                size="sm"
+                variant="ghost"
+                className={cn(
+                  "h-10 px-3 gap-2 shrink-0",
+                  identityButtonActive
+                    ? "bg-foreground/10 text-foreground hover:bg-foreground/15"
+                    : "bg-foreground/5 text-foreground hover:bg-foreground/10",
+                )}
+                onClick={() => {
+                  setActiveFilter("key");
+                  setPreferredKeySection("identity");
+                  setSearch("");
+                }}
+              >
+                <User size={14} />
+                {t("keychain.section.identities")}
+              </Button>
+            )}
 
             {onSaveIdentity && (
               <Button

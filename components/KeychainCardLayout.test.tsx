@@ -10,6 +10,7 @@ import KeychainManager from "./KeychainManager.tsx";
 import { IdentityCard } from "./keychain/IdentityCard.tsx";
 import { KeyCard } from "./keychain/KeyCard.tsx";
 import {
+  resolvePreferredKeySection,
   shouldShowIdentitySection,
   shouldShowKeySection,
   shouldShowSearchNoResults,
@@ -266,6 +267,27 @@ test("keychain browsing keeps sections exclusive outside search", () => {
     filteredKeyCount: 1,
     search: "",
   }), true);
+});
+
+test("keychain browsing can switch back to the full key section", () => {
+  const state = {
+    activeFilter: "key" as const,
+    identityCount: 1,
+    filteredIdentityCount: 1,
+    filteredKeyCount: 1,
+    preferredSection: "key" as const,
+    search: "",
+  };
+
+  assert.equal(shouldShowIdentitySection(state), false);
+  assert.equal(shouldShowKeySection(state), true);
+});
+
+test("keychain default follows identities until the user chooses a section", () => {
+  assert.equal(resolvePreferredKeySection(null, 0), "key");
+  assert.equal(resolvePreferredKeySection(null, 1), "identity");
+  assert.equal(resolvePreferredKeySection("key", 1), "key");
+  assert.equal(resolvePreferredKeySection("identity", 0), "key");
 });
 
 test("keychain distinguishes search misses from an empty vault", () => {
