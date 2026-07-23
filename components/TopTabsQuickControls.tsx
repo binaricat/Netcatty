@@ -50,10 +50,6 @@ export const TopTabsQuickControls: React.FC<TopTabsQuickControlsProps> = ({
   const isPresetActive = (value: number) => Math.round(value * 100) === opacityPercent;
   const isDark = theme === 'dark';
   const externalMcpLabelId = React.useId();
-  const triggerActive = (
-    (showExternalMcpToggle && externalMcpEnabled)
-    || opacityPercent < 100
-  );
 
   return (
     <Popover
@@ -72,9 +68,7 @@ export const TopTabsQuickControls: React.FC<TopTabsQuickControlsProps> = ({
               className={cn('h-7 w-7 shrink-0 app-no-drag top-tab-utility-btn', className)}
               style={{
                 ...style,
-                color: triggerActive
-                  ? 'hsl(var(--primary))'
-                  : (style?.color ?? 'var(--top-tabs-muted, hsl(var(--muted-foreground)))'),
+                color: style?.color ?? 'var(--top-tabs-muted, hsl(var(--muted-foreground)))',
               }}
               aria-label={t('topTabs.controlPanel')}
               data-section="top-tabs-quick-controls"
