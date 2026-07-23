@@ -12,7 +12,9 @@ import {
   repaintTerminalAfterReveal,
   scheduleTerminalRepaintWhenUnfocused,
   shouldFlushTerminalWritesForBackgroundOutput,
+  writeLocalTerminalDataInOrder,
 } from "./terminalUnfocusedRepaint.ts";
+import { enqueueCoalescedTerminalWrite } from "./terminalWriteCoalescer.ts";
 
 const withDocumentVisibility = (
   visibilityState: "visible" | "hidden",
@@ -244,6 +246,21 @@ test("flushPendingTerminalWritesOnResume drains coalescer, queue, and xterm writ
   assert.match(source, /flushTerminalWriteCoalescer\(term\)/);
   assert.match(source, /flushTerminalWriteQueueBypassingTimers\(term\)/);
   assert.match(source, /flushTerminalWriteBufferBypassingTimers\(term\)/);
+});
+
+test("direct local writes stay ordered after pending hidden output", () => {
+  const { term, writes } = createBufferedFakeTerm();
+  const captured: string[] = [];
+
+  enqueueCoalescedTerminalWrite(term, "remote-before", (data) => {
+    captured.push(data);
+    term.write(data);
+  });
+  writeLocalTerminalDataInOrder(term, "local-after", (data) => captured.push(data));
+  flushTerminalWriteBufferBypassingTimers(term);
+
+  assert.deepEqual(writes, ["remote-before", "local-after"]);
+  assert.deepEqual(captured, ["remote-before", "local-after"]);
 });
 
 test("flushPendingTerminalWritesBeforeHibernate drains pending xterm output completely", async () => {

@@ -195,6 +195,19 @@ export function flushPendingTerminalWritesOnResume(term: XTerm): void {
   }
 }
 
+export function writeLocalTerminalDataInOrder(
+  term: XTerm,
+  data: string,
+  capture?: (data: string) => void,
+): void {
+  if (!data) return;
+  // Hidden-pane PTY output may still be waiting in the coalescer. Drain it
+  // before a direct local write so prompts/control sequences cannot overtake it.
+  flushPendingTerminalWritesOnResume(term);
+  capture?.(data);
+  term.write(data);
+}
+
 const waitForTerminalWriteCallbacks = (): Promise<void> =>
   new Promise((resolve) => {
     setTimeout(resolve, 0);

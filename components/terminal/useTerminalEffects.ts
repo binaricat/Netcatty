@@ -714,6 +714,13 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
         return;
       }
 
+      const term = termRef.current;
+      if (term) {
+        // Hidden output can still be inside the delayed coalescer. Capture only
+        // after it has reached both the log buffer and xterm.
+        flushPendingTerminalWritesOnResume(term);
+      }
+
       const persistCloseCapture = (data: string, source: string, dataLength: number) => {
         logger.info("[Terminal] Capturing data on unmount", {
           sessionId,
@@ -736,7 +743,6 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
         return;
       }
 
-      const term = termRef.current;
       const serializeAddon = serializeAddonRef.current;
       if (!terminalDataCapturedRef.current && term && serializeAddon) {
         const preferWasm = resolveHibernatePreferWasmSerialize(terminalSettingsRef.current);

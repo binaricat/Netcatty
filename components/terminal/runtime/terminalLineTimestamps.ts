@@ -124,10 +124,12 @@ const stores = new WeakMap<XTerm, TimestampStore>();
 const MIN_BATCHED_TIMESTAMP_DATA_SEGMENTS = 2;
 const BULK_TIMESTAMP_BATCH_MIN_BYTES = 4096;
 /**
- * Hard ceiling for retained timestamps. Matches Settings UI max scrollback
- * (100000) plus generous viewport headroom for very tall terminals.
+ * Hard ceiling for live xterm markers. xterm updates every marker whenever a
+ * scrollback row is trimmed, so matching a 100k-row scrollback makes steady
+ * output progressively more expensive. Keep enough recent timestamp history
+ * for normal navigation while bounding that per-line trim work.
  */
-export const MAX_TERMINAL_LINE_TIMESTAMP_ENTRIES = 100000 + 2048;
+export const MAX_TERMINAL_LINE_TIMESTAMP_ENTRIES = 4096;
 /** Compact disposed holes at least this often during flood writes. */
 const TIMESTAMP_PRUNE_EVERY_RECORDS = 256;
 /** Max xterm marker.dispose() calls per prune/write pass (amortize O(n) splices). */

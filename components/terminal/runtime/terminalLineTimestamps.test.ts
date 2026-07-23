@@ -1,7 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createRequire } from "node:module";
+import type { Terminal as XTerm } from "@xterm/xterm";
 
 import {
+  MAX_TERMINAL_LINE_TIMESTAMP_ENTRIES,
   createTerminalLineTimestampSegmenter,
   formatTerminalLineTimestamp,
   getTerminalLineTimestampEntryCount,
@@ -651,7 +654,7 @@ test("timestamps a prompt after split alternate-screen enter and leave in one ch
   assert.deepEqual(markerLines, [0]);
 });
 
-test("capacity follows terminal scrollback so flood output cannot retain unbounded markers", () => {
+test("capacity follows small scrollback and caps large histories", () => {
   assert.equal(
     resolveTerminalLineTimestampCapacity({
       rows: 24,
@@ -659,28 +662,53 @@ test("capacity follows terminal scrollback so flood output cannot retain unbound
     } as never),
     1000 + 24 + 64,
   );
-  // Settings UI allows up to 100000 scrollback rows.
+  // Large scrollback values must not create a live xterm marker per retained row.
   assert.equal(
     resolveTerminalLineTimestampCapacity({
       rows: 24,
       options: { scrollback: 200000 },
     } as never),
-    100000 + 2048,
+    MAX_TERMINAL_LINE_TIMESTAMP_ENTRIES,
   );
   assert.equal(
     resolveTerminalLineTimestampCapacity({
       rows: 24,
       options: { scrollback: 80000 },
     } as never),
-    80000 + 24 + 64,
+    MAX_TERMINAL_LINE_TIMESTAMP_ENTRIES,
   );
   assert.equal(
     resolveTerminalLineTimestampCapacity({
       rows: 400,
       options: { scrollback: 100000 },
     } as never),
-    100000 + 400 + 64,
+    MAX_TERMINAL_LINE_TIMESTAMP_ENTRIES,
   );
+});
+
+test("real xterm keeps live timestamp markers bounded while scrollback trims", async () => {
+  const require = createRequire(import.meta.url);
+  const { Terminal } = require("@xterm/xterm") as {
+    Terminal: new (options: Record<string, unknown>) => XTerm;
+  };
+  const term = new Terminal({ cols: 80, rows: 24, scrollback: 5000, allowProposedApi: true });
+  const write = (data: string) => new Promise<void>((resolve) => {
+    writeTerminalDataWithLineTimestamps(term, data, resolve);
+  });
+
+  try {
+    await write(Array.from({ length: 6000 }, (_, index) => `seed-${index}`).join("\r\n"));
+    for (let batch = 0; batch < 300; batch += 1) {
+      await write(`a-${batch}\r\nb-${batch}\r\n`);
+    }
+
+    const capacity = resolveTerminalLineTimestampCapacity(term);
+    const liveMarkers = (term as XTerm & { markers: readonly unknown[] }).markers.length;
+    assert.ok(liveMarkers <= capacity + 512, `expected bounded markers, got ${liveMarkers}`);
+    assert.ok(getTerminalLineTimestampEntryCount(term) <= capacity);
+  } finally {
+    term.dispose();
+  }
 });
 
 test("always records timestamps without a gutter listener so expanding later still has history", () => {

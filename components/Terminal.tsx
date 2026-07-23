@@ -180,7 +180,10 @@ import {
 import {
   releaseTerminalFlowBeforeHibernate,
 } from "./terminal/runtime/terminalSessionAttachment";
-import { flushPendingTerminalWritesBeforeHibernate } from "./terminal/runtime/terminalUnfocusedRepaint";
+import {
+  flushPendingTerminalWritesBeforeHibernate,
+  writeLocalTerminalDataInOrder,
+} from "./terminal/runtime/terminalUnfocusedRepaint";
 import {
   isTerminalFileTransferActive,
   resolveHibernateKeepRendererCount,
@@ -605,9 +608,9 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   }, [onProgrammaticCommandLogRewriteChange, queueProgrammaticCommandLogRewrite, sessionId]);
 
   const writeLocalTerminalData = useCallback((data: string) => {
-    if (!data) return;
-    captureTerminalLogData(data);
-    termRef.current?.write(data);
+    const term = termRef.current;
+    if (!term) return;
+    writeLocalTerminalDataInOrder(term, data, captureTerminalLogData);
   }, [captureTerminalLogData]);
 
   const hotkeySchemeRef = useRef(hotkeyScheme);

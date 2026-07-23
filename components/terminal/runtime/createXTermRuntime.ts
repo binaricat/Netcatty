@@ -116,6 +116,7 @@ import {
 import { clearTerminalInputStateForInterrupt } from "./terminalInterruptInputState";
 import { getFlowControllerForTerm } from "./terminalSessionAttachment";
 import { createTerminalResizeScheduler } from "./terminalResizeScheduler";
+import { writeLocalTerminalDataInOrder } from "./terminalUnfocusedRepaint";
 import {
   prioritizeTerminalInput,
   shouldArmTerminalInterruptDisplayGateForProtocol,
@@ -904,8 +905,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
   });
 
   const writeLocalTerminalData = (nextData: string) => {
-    ctx.onTerminalLogData?.(nextData);
-    term.write(nextData);
+    writeLocalTerminalDataInOrder(term, nextData, ctx.onTerminalLogData);
   };
 
   const handleTerminalInputData = (
