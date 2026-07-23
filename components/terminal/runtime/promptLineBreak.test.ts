@@ -5,7 +5,7 @@ import {
   consumeOsc133CommandCompletion,
   createPromptLineBreakState,
   detectTerminalCommandCompletions,
-  doesTerminalPromptStartAtSourceChunk,
+  findTerminalPromptSourceChunkVisibleStarts,
   insertPromptLineBreakBeforePrompt,
   markPromptLineBreakCommandPending,
   markTerminalCommandCompletionPending,
@@ -13,22 +13,26 @@ import {
   syncPromptLineBreakState,
 } from "./promptLineBreak";
 
-test("detects prompt chunks across trailing and leading ANSI sequences", () => {
+test("finds prompt chunks across trailing and leading ANSI sequences", () => {
   const trailingAnsiData = "file tail\x1b[0m$ ";
-  assert.equal(
-    doesTerminalPromptStartAtSourceChunk(trailingAnsiData, "$ ", ["file tail\x1b[0m".length]),
-    true,
+  assert.deepEqual(
+    findTerminalPromptSourceChunkVisibleStarts(
+      trailingAnsiData,
+      "$ ",
+      ["file tail\x1b[0m".length],
+    ),
+    ["file tail".length],
   );
 
   const leadingAnsiData = "file tail\x1b[32m$ ";
-  assert.equal(
-    doesTerminalPromptStartAtSourceChunk(leadingAnsiData, "$ ", ["file tail".length]),
-    true,
+  assert.deepEqual(
+    findTerminalPromptSourceChunkVisibleStarts(leadingAnsiData, "$ ", ["file tail".length]),
+    ["file tail".length],
   );
-  assert.equal(doesTerminalPromptStartAtSourceChunk("file tail$ ", "$ ", []), false);
+  assert.deepEqual(findTerminalPromptSourceChunkVisibleStarts("file tail$ ", "$ ", []), []);
 
   const clearData = "file tail\x1b[2J$ ";
-  const promptStartsAtSourceChunk = doesTerminalPromptStartAtSourceChunk(
+  const promptVisibleStarts = findTerminalPromptSourceChunkVisibleStarts(
     clearData,
     "$ ",
     ["file tail\x1b[2J".length],
@@ -42,7 +46,7 @@ test("detects prompt chunks across trailing and leading ANSI sequences", () => {
       "file tail\x1b[2J\x1b[3J$ ",
       state,
       true,
-      promptStartsAtSourceChunk,
+      promptVisibleStarts,
     ),
     "file tail\r\n\x1b[2J\x1b[3J$ ",
   );
@@ -253,7 +257,7 @@ test("uses a preserved PTY chunk boundary to separate a short prompt", () => {
       "file tail$ ",
       state,
       true,
-      true,
+      ["file tail".length],
     ),
     "file tail\r\n$ ",
   );

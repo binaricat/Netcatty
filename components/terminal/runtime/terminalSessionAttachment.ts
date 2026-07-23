@@ -11,7 +11,7 @@ import {
 } from "./terminalUserPaste";
 import {
   detectTerminalCommandCompletions,
-  doesTerminalPromptStartAtSourceChunk,
+  findTerminalPromptSourceChunkVisibleStarts,
   prepareTerminalDataForPromptLineBreak,
   syncPromptLineBreakState,
 } from "./promptLineBreak";
@@ -157,7 +157,7 @@ const HIDDEN_PANE_DRAIN_MS = 160;
 const visibleWriteIdleFlushTimers = new WeakMap<XTerm, ReturnType<typeof setTimeout>>();
 const hiddenPaneDrainTimers = new WeakMap<XTerm, ReturnType<typeof setTimeout>>();
 const pendingTimestampSecondByTerm = new WeakMap<XTerm, number>();
-const pendingTimestampPaneVisibleByTerm = new WeakMap<XTerm, boolean>();
+const pendingTimestampBackgroundByTerm = new WeakMap<XTerm, boolean>();
 
 type LineTimestampPerfTotals = {
   segmentCalls: number;
@@ -272,21 +272,21 @@ const flushPendingTerminalOutputNow = (term: XTerm): void => {
 const flushBeforeTimestampBoundary = (
   term: XTerm,
   timestampDate: Date,
-  isPaneVisible: boolean,
+  usesBackgroundWritePath: boolean,
 ): void => {
   const timestampSecond = Math.floor(timestampDate.getTime() / 1000);
   const pendingTimestampSecond = pendingTimestampSecondByTerm.get(term);
-  const pendingPaneWasVisible = pendingTimestampPaneVisibleByTerm.get(term);
+  const pendingUsedBackgroundPath = pendingTimestampBackgroundByTerm.get(term);
   if (
     getTerminalWriteCoalescerPendingBytes(term) > 0
     && pendingTimestampSecond !== undefined
     && pendingTimestampSecond !== timestampSecond
-    && (!isPaneVisible || pendingPaneWasVisible === false)
+    && (usesBackgroundWritePath || pendingUsedBackgroundPath === true)
   ) {
     flushPendingTerminalOutputNow(term);
   }
   pendingTimestampSecondByTerm.set(term, timestampSecond);
-  pendingTimestampPaneVisibleByTerm.set(term, isPaneVisible);
+  pendingTimestampBackgroundByTerm.set(term, usesBackgroundWritePath);
 };
 
 function flushHiddenPaneWritesNow(term: XTerm, isPaneVisible: () => boolean): void {
@@ -421,10 +421,11 @@ export const writeSessionData = (
   const isPaneCurrentlyVisible = () => isTerminalPaneVisible(ctx);
   const isPaneVisible = isPaneCurrentlyVisible();
   const timestampDate = new Date(Date.now());
+  const usesBackgroundWritePath = shouldFlushTerminalWritesForBackgroundOutput(isPaneVisible);
   // Hidden panes may wait before coalesced output is drained. Flush a batch
   // across an arrival-second boundary whenever either side is hidden, while
   // leaving visible full-screen repaints frame-batched.
-  flushBeforeTimestampBoundary(term, timestampDate, isPaneVisible);
+  flushBeforeTimestampBoundary(term, timestampDate, usesBackgroundWritePath);
   const perfTrace = createTerminalOutputPerfTrace({
     sessionId: ctx.sessionRef.current ?? ctx.sessionId,
     data,
@@ -437,7 +438,7 @@ export const writeSessionData = (
   flow.received(ingressBytes);
   setTerminalOutputPressureVisibility(term, isPaneVisible);
   noteTerminalOutputPressureData(term, data);
-  if (shouldFlushTerminalWritesForBackgroundOutput(isPaneVisible)) {
+  if (usesBackgroundWritePath) {
     const writeBackgroundOutputData = (
       batch: string,
       batchIngress: number,
@@ -503,14 +504,15 @@ const writeSessionDataImmediate = (
     const settings = ctx.terminalSettingsRef?.current ?? ctx.terminalSettings;
     const forcePromptNewLine = settings?.forcePromptNewLine ?? false;
     const promptLineBreakState = ctx.promptLineBreakStateRef?.current;
-    const promptStartsAtSourceChunk = Boolean(
+    const promptVisibleStarts = (
       forcePromptNewLine
       && promptLineBreakState?.pendingCommand
-      && doesTerminalPromptStartAtSourceChunk(
+      ? findTerminalPromptSourceChunkVisibleStarts(
         data,
         promptLineBreakState.lastPromptText,
         writeOptions.sourceChunkBoundaries,
-      ),
+      )
+      : []
     );
     // Always run filter + paste bookkeeping (stateful). Bulk-plain only skips
     // erase-scrollback / prompt cosmetics when the *post-paste* stream is still
@@ -539,7 +541,7 @@ const writeSessionDataImmediate = (
         pasteDisplayData,
         promptLineBreakState,
         forcePromptNewLine,
-        promptStartsAtSourceChunk,
+        promptVisibleStarts,
       );
       prepareMs = shouldMeasurePerf ? performance.now() - prepareStartedAt : 0;
     }
@@ -742,7 +744,7 @@ export const releaseTerminalFlowBeforeHibernate = (
   setTerminalWriteCoalescerByteCapResolver(term);
   setTerminalWriteCoalescerFlushGate(term);
   pendingTimestampSecondByTerm.delete(term);
-  pendingTimestampPaneVisibleByTerm.delete(term);
+  pendingTimestampBackgroundByTerm.delete(term);
   resetDeferredTerminalWriteAck(term);
   terminalFlowControllers.delete(term);
 };
@@ -787,7 +789,7 @@ export const attachSessionToTerminal = (
 
   flushPendingTerminalOutputNow(term);
   pendingTimestampSecondByTerm.delete(term);
-  pendingTimestampPaneVisibleByTerm.delete(term);
+  pendingTimestampBackgroundByTerm.delete(term);
   ctx.sessionRef.current = id;
   const flow = getFlowController(ctx, term);
   teardownTerminalOutputPipeline(ctx, term, id, flow);

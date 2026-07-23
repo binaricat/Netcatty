@@ -245,43 +245,115 @@ export function insertPromptLineBreakBeforePrompt(
   return `${data.slice(0, promptRawStart)}\r\n${data.slice(promptRawStart)}`;
 }
 
-export function doesTerminalPromptStartAtSourceChunk(
+const lowerBoundRawIndex = (rawIndexes: readonly number[], target: number): number => {
+  let low = 0;
+  let high = rawIndexes.length;
+  while (low < high) {
+    const middle = low + Math.floor((high - low) / 2);
+    if (rawIndexes[middle] < target) {
+      low = middle + 1;
+    } else {
+      high = middle;
+    }
+  }
+  return low;
+};
+
+export function findTerminalPromptSourceChunkVisibleStarts(
   data: string,
   promptText: string,
   sourceChunkBoundaries: readonly number[] = [],
-): boolean {
-  if (!data || !promptText || sourceChunkBoundaries.length === 0) return false;
+): number[] {
+  if (!data || !promptText) return [];
 
   const mapped = mapVisibleText(data);
-  if (!mapped.text.endsWith(promptText)) return false;
+  const boundaries = [
+    0,
+    ...sourceChunkBoundaries.filter(
+      (boundary, index) => (
+        boundary > 0
+        && boundary < data.length
+        && (index === 0 || boundary > sourceChunkBoundaries[index - 1])
+      ),
+    ),
+    data.length,
+  ];
+  const promptVisibleStarts: number[] = [];
 
-  const promptTextStart = mapped.text.length - promptText.length;
-  const promptRawIndex = mapped.rawIndexByTextIndex[promptTextStart];
-  if (promptRawIndex === undefined) return false;
+  for (let index = 0; index < boundaries.length - 1; index += 1) {
+    const chunkVisibleStart = lowerBoundRawIndex(
+      mapped.rawIndexByTextIndex,
+      boundaries[index],
+    );
+    const chunkVisibleEnd = lowerBoundRawIndex(
+      mapped.rawIndexByTextIndex,
+      boundaries[index + 1],
+    );
+    if (chunkVisibleEnd <= chunkVisibleStart) continue;
 
-  const previousVisibleRawIndex =
-    promptTextStart > 0 ? mapped.rawIndexByTextIndex[promptTextStart - 1] : -1;
-  return sourceChunkBoundaries.some(
-    (boundary) => boundary > previousVisibleRawIndex && boundary <= promptRawIndex,
-  );
+    const chunkText = mapped.text.slice(chunkVisibleStart, chunkVisibleEnd);
+    if (!chunkText.endsWith(promptText)) continue;
+    const promptVisibleStart = chunkVisibleEnd - promptText.length;
+    const chunkPrefix = mapped.text.slice(chunkVisibleStart, promptVisibleStart);
+    if (chunkPrefix.length > 0 && !isDistinctPromptText(promptText)) continue;
+    promptVisibleStarts.push(promptVisibleStart);
+  }
+
+  return promptVisibleStarts;
 }
+
+const insertPromptLineBreaksAtVisibleStarts = (
+  data: string,
+  promptText: string,
+  cursorXBeforeWrite: number,
+  promptVisibleStarts: readonly number[],
+): string => {
+  const mapped = mapVisibleText(data);
+  const rawStarts = [...new Set(promptVisibleStarts)]
+    .sort((left, right) => left - right)
+    .flatMap((visibleStart) => {
+      if (mapped.text.slice(visibleStart, visibleStart + promptText.length) !== promptText) {
+        return [];
+      }
+      const prefixText = mapped.text.slice(0, visibleStart);
+      if (prefixText.length === 0 && cursorXBeforeWrite <= 0) return [];
+      if (prefixText.length > 0 && endsWithLineBreak(prefixText)) return [];
+      const rawStart = mapped.rawStartByTextIndex[visibleStart];
+      return rawStart === undefined ? [] : [rawStart];
+    });
+  if (rawStarts.length === 0) return data;
+
+  let result = "";
+  let lastRawIndex = 0;
+  for (const rawStart of rawStarts) {
+    result += `${data.slice(lastRawIndex, rawStart)}\r\n`;
+    lastRawIndex = rawStart;
+  }
+  return `${result}${data.slice(lastRawIndex)}`;
+};
 
 export function prepareTerminalDataForPromptLineBreak(
   term: XTerm,
   data: string,
   state: PromptLineBreakState | undefined,
   enabled: boolean,
-  promptStartsAtSourceChunk = false,
+  promptVisibleStarts: readonly number[] = [],
 ): string {
   if (!enabled || !state?.pendingCommand || !state.lastPromptText) return data;
 
   const cursorXBeforeWrite = getCursorX(term);
-  const nextData = insertPromptLineBreakBeforePrompt(
-    data,
-    state.lastPromptText,
-    cursorXBeforeWrite,
-    promptStartsAtSourceChunk,
-  );
+  const nextData = promptVisibleStarts.length > 0
+    ? insertPromptLineBreaksAtVisibleStarts(
+      data,
+      state.lastPromptText,
+      cursorXBeforeWrite,
+      promptVisibleStarts,
+    )
+    : insertPromptLineBreakBeforePrompt(
+      data,
+      state.lastPromptText,
+      cursorXBeforeWrite,
+    );
   const visibleText = mapVisibleText(data).text;
   const ambiguousPromptSuffix = hasAmbiguousPromptSuffix(data, state.lastPromptText);
   state.suppressNextPromptCache =

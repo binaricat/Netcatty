@@ -607,6 +607,42 @@ test("hiding a pane preserves the arrival second of already queued output", () =
   }
 });
 
+test("hiding the page preserves the arrival second of already queued output", () => {
+  const { term, writes } = createFakeTerm();
+  const ctx = {
+    ...createContext(true),
+    isVisibleRef: { current: true },
+    isPaneVisibleRef: { current: true },
+  };
+  const originalDateNow = Date.now;
+  let fakeNow = new Date(2026, 0, 1, 12, 0, 59, 800).getTime();
+  Date.now = () => fakeNow;
+
+  try {
+    withAnimationFrameQueue(() => {
+      withDocumentVisibility("visible", () => {
+        writeSessionData(ctx as never, term, "first\r\n");
+      });
+      assert.deepEqual(writes, []);
+
+      fakeNow = new Date(2026, 0, 1, 12, 1, 0, 20).getTime();
+      withDocumentVisibility("hidden", () => {
+        writeSessionData(ctx as never, term, "second\r\n");
+      });
+      flushPendingTerminalWritesOnResume(term);
+
+      assert.deepEqual(writes, ["first\r\n", "second\r\n"]);
+      assert.deepEqual(getVisibleTerminalLineTimestampRows(term), [
+        { row: 0, label: "12:00:59" },
+        { row: 1, label: "12:01:00" },
+      ]);
+    });
+  } finally {
+    Date.now = originalDateNow;
+    resetTerminalWriteCoalescer(term);
+  }
+});
+
 test("hidden prompt formatting preserves PTY chunk boundaries", () => {
   const require = createRequire(import.meta.url);
   const { Terminal } = require("@xterm/xterm") as {
@@ -640,11 +676,16 @@ test("hidden prompt formatting preserves PTY chunk boundaries", () => {
     withAnimationFrameQueue(() => {
       writeSessionData(ctx as never, term, "foo");
       writeSessionData(ctx as never, term, "$ ");
+      writeSessionData(ctx as never, term, "notice\r\n");
+      writeSessionData(ctx as never, term, "bar");
+      writeSessionData(ctx as never, term, "$ ");
       flushPendingTerminalWritesOnResume(term);
     });
 
     assert.equal(term.buffer.active.getLine(0)?.translateToString(true), "foo");
-    assert.equal(term.buffer.active.getLine(1)?.translateToString(true), "$");
+    assert.equal(term.buffer.active.getLine(1)?.translateToString(true), "$ notice");
+    assert.equal(term.buffer.active.getLine(2)?.translateToString(true), "bar");
+    assert.equal(term.buffer.active.getLine(3)?.translateToString(true), "$");
     assert.equal(term.buffer.active.cursorX, 2);
     assert.equal(writeCalls, 1);
   } finally {
