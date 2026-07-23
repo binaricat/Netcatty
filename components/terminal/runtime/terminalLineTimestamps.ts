@@ -56,6 +56,8 @@ type TimestampStore = {
   /** Intern HH:MM:SS for the current wall-clock second. */
   labelCacheKey: number | null;
   labelCacheValue: string;
+  /** Deferred fixed-size marker cleanup, one task at a time. */
+  orphanDrainTimer?: ReturnType<typeof setTimeout>;
 };
 
 type XTermWithUnicodeService = XTerm & {
@@ -134,9 +136,6 @@ export const MAX_TERMINAL_LINE_TIMESTAMP_ENTRIES = 4096;
 const TIMESTAMP_PRUNE_EVERY_RECORDS = 256;
 /** Max xterm marker.dispose() calls per prune/write pass (amortize O(n) splices). */
 const TIMESTAMP_ORPHAN_DISPOSE_BUDGET = 64;
-/** When orphan backlog grows large, spend a bigger budget to catch up. */
-const TIMESTAMP_ORPHAN_CATCHUP_THRESHOLD = 512;
-const TIMESTAMP_ORPHAN_CATCHUP_BUDGET = 256;
 
 const pad2 = (value: number): string => value.toString().padStart(2, "0");
 
@@ -502,28 +501,32 @@ const enqueueOrphanedMarker = (
  * keeps rewrite/flood sessions responsive while still retiring superseded
  * markers that scrollback will never trim (e.g. DECSTBM row rewrites).
  */
-const drainOrphanedMarkers = (
+function scheduleOrphanMarkerDrain(store: TimestampStore): void {
+  if (store.orphanDrainTimer !== undefined || store.orphanedMarkers.length === 0) return;
+  const timer = setTimeout(() => {
+    if (store.orphanDrainTimer !== timer) return;
+    store.orphanDrainTimer = undefined;
+    drainOrphanedMarkers(store);
+  }, 0);
+  if (typeof timer === "object" && "unref" in timer && typeof timer.unref === "function") {
+    timer.unref();
+  }
+  store.orphanDrainTimer = timer;
+}
+
+function drainOrphanedMarkers(
   store: TimestampStore,
   budget = TIMESTAMP_ORPHAN_DISPOSE_BUDGET,
-): void => {
-  let remaining = budget;
-  if (store.orphanedMarkers.length >= TIMESTAMP_ORPHAN_CATCHUP_THRESHOLD) {
-    // Keep the deferred-disposal tail bounded even when one PTY batch adds
-    // more markers than the fixed catch-up budget. Otherwise 500-line chunks
-    // can add 244 live xterm markers per pass forever.
-    remaining = Math.max(
-      remaining,
-      TIMESTAMP_ORPHAN_CATCHUP_BUDGET,
-      store.orphanedMarkers.length - TIMESTAMP_ORPHAN_CATCHUP_THRESHOLD + 1,
-    );
-  }
+): void {
+  let remaining = Math.max(0, budget);
   while (remaining > 0 && store.orphanedMarkers.length > 0) {
     const marker = store.orphanedMarkers.pop();
     remaining -= 1;
     if (!marker || marker.isDisposed) continue;
     marker.dispose?.();
   }
-};
+  scheduleOrphanMarkerDrain(store);
+}
 
 /** Cheap pass for paint/write paths: drop disposed holes only (no dedupe / capacity). */
 const compactDisposedMarkersOnly = (store: TimestampStore): void => {
@@ -617,6 +620,10 @@ const maybePruneTimestampEntries = (
 };
 
 const resetTimestampStore = (store: TimestampStore) => {
+  if (store.orphanDrainTimer !== undefined) {
+    clearTimeout(store.orphanDrainTimer);
+    store.orphanDrainTimer = undefined;
+  }
   for (const entry of store.entries) {
     entry.disposeListener?.dispose();
     entry.marker.dispose?.();

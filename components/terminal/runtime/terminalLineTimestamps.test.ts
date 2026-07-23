@@ -11,6 +11,7 @@ import {
   getVisibleTerminalLineTimestampRows,
   isSimpleAsciiControlText,
   onTerminalLineTimestampsChange,
+  resetTerminalLineTimestamps,
   resolveTerminalLineTimestampCapacity,
   resolveTerminalTimestampGutterRows,
   tryMeasureVisualRows,
@@ -889,6 +890,8 @@ test("large slow batches keep live xterm markers near the retained capacity", as
       });
     }
 
+    await new Promise((resolve) => { setTimeout(resolve, 100); });
+
     assert.ok(term.markers.length <= MAX_TERMINAL_LINE_TIMESTAMP_ENTRIES + 512);
     assert.equal(
       getTerminalLineTimestampEntryCount(term),
@@ -897,6 +900,28 @@ test("large slow batches keep live xterm markers near the retained capacity", as
   } finally {
     term.dispose();
   }
+});
+
+test("large timestamp prunes defer orphan disposal across later tasks", async () => {
+  const { term, disposedMarkerLines } = createFakeTerm({
+    scrollback: 100000,
+    rows: 24,
+  });
+  const lines = Array.from(
+    { length: MAX_TERMINAL_LINE_TIMESTAMP_ENTRIES },
+    (_, index) => `line-${index}`,
+  ).join("\r\n");
+
+  writeTerminalDataWithLineTimestamps(term as never, lines, () => {});
+  writeTerminalDataWithLineTimestamps(term as never, lines, () => {});
+
+  const disposedImmediately = disposedMarkerLines.length;
+  assert.equal(disposedImmediately, 64);
+
+  await new Promise((resolve) => { setTimeout(resolve, 10); });
+  assert.ok(disposedMarkerLines.length > disposedImmediately);
+
+  resetTerminalLineTimestamps(term as never);
 });
 
 test("small batched writes amortize full timestamp-store pruning", () => {
