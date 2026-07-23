@@ -556,8 +556,9 @@ test("frequent hidden log lines are drained in one complete terminal write", asy
   await new Promise((resolve) => { setTimeout(resolve, 190); });
 
   assert.deepEqual(writes, [chunks.join("")]);
-  // Host timestamps off: drain still completes without marker work.
-  assert.equal(markerLines.length, 0);
+  // Host timestamps off still records the per-second ledger; sparse anchors
+  // only (≤1/sec), never per-line markers for 8 short lines.
+  assert.ok(markerLines.length <= 1);
   assert.equal(getFlowController(ctx as never, term).pendingBytes(), 0);
   resetTerminalWriteCoalescer(term);
 });
@@ -1502,17 +1503,19 @@ test("writeSessionData records terminal output timestamps without changing outpu
 
   assert.equal(writes.join(""), "hello\r\nnext");
   assert.equal((writes.join("").match(/\[\d{2}:\d{2}:\d{2}\]/g) ?? []).length, 0);
-  // Record/render separation: ledger only, never xterm markers on write.
-  assert.deepEqual(markerLines, []);
+  // Per-second sparse reflow anchor (not per output line).
+  assert.equal(markerLines.length, 1);
 });
 
-test("writeSessionData never registers xterm markers for timestamps", () => {
+test("writeSessionData uses sparse reflow anchors not per-line markers", () => {
   const { term, writes, markerLines } = createFakeTerm();
   writeSessionData(createContext(true, { showLineTimestamps: false }) as never, term, "hello\r\nnext");
   writeSessionData(createContext(false, { showLineTimestamps: true }) as never, term, "more\r\n");
 
   assert.ok(writes.join("").includes("hello"));
-  assert.deepEqual(markerLines, []);
+  // At most one anchor per stamped wall-clock second across both writes.
+  assert.ok(markerLines.length <= 2);
+  assert.ok(markerLines.length >= 1);
 });
 
 test("writeSessionData records timestamps for hosts with timestamps enabled", () => {
@@ -1520,7 +1523,7 @@ test("writeSessionData records timestamps for hosts with timestamps enabled", ()
   writeSessionData(createContext(false, { showLineTimestamps: true }) as never, term, "hello");
 
   assert.equal(writes.join(""), "hello");
-  assert.deepEqual(markerLines, []);
+  assert.equal(markerLines.length, 1);
   assert.ok(getVisibleTerminalLineTimestampRows(term).length >= 1);
 });
 
@@ -1545,7 +1548,7 @@ test("writeSessionData resumes timestamps after leaving alternate screen in the 
   writeSessionData(createContext(false, { showLineTimestamps: true }) as never, term, "\x1b[?1049lprompt");
 
   assert.equal(writes.join(""), "\x1b[?1049lprompt");
-  assert.deepEqual(markerLines, []);
+  assert.equal(markerLines.length, 1);
   assert.ok(getVisibleTerminalLineTimestampRows(term).length >= 1);
 });
 
@@ -1586,19 +1589,21 @@ test("writeSessionData always uses ledger recording regardless of gutter toggle"
   const ctx = createContext(false, { showLineTimestamps: false });
 
   writeSessionData(ctx as never, term, "before\r\n");
-  assert.deepEqual(markerLines, []);
+  // Per-second sparse reflow anchors (not per-line markers).
+  assert.equal(markerLines.length, 1);
 
   ctx.host = { showLineTimestamps: true };
   ctx.hostRef.current = ctx.host;
   writeSessionData(ctx as never, term, "enabled\r\n");
-  assert.deepEqual(markerLines, [], "write path never registerMarkers");
+  // Same wall-clock second in real runs may still be one stamp; here two writes
+  // share one second unless Date.now advances — allow ≤2 sparse anchors total.
+  assert.ok(markerLines.length <= 2, `expected sparse anchors, got ${markerLines.length}`);
 
   ctx.host = { showLineTimestamps: false };
   ctx.hostRef.current = ctx.host;
   writeSessionData(ctx as never, term, "disabled");
 
   assert.equal(writes.join(""), "before\r\nenabled\r\ndisabled");
-  assert.deepEqual(markerLines, []);
   // Ledger still has stamps for paint when gutter is shown.
   assert.ok(getVisibleTerminalLineTimestampRows(term).length >= 1);
 });
@@ -1614,7 +1619,7 @@ test("writeSessionData follows live hostRef toggles without replacing boot host 
   };
 
   writeSessionData(ctx as never, term, "boot-off\r\n");
-  assert.deepEqual(markerLines, []);
+  assert.ok(markerLines.length <= 1);
 
   hostRef.current = { showLineTimestamps: true };
   assert.equal(bootHost.showLineTimestamps, false);
@@ -1622,13 +1627,13 @@ test("writeSessionData follows live hostRef toggles without replacing boot host 
 
   writeSessionData(ctx as never, term, "live-on\r\n");
   assert.equal(writes.join(""), "boot-off\r\nlive-on\r\n");
-  assert.deepEqual(markerLines, []);
+  // Sparse anchors only (≤1 per stamped second).
+  assert.ok(markerLines.length <= 2);
   assert.ok(getVisibleTerminalLineTimestampRows(term).length >= 1);
 
   hostRef.current = { showLineTimestamps: false };
   writeSessionData(ctx as never, term, "live-off");
   assert.equal(writes.join(""), "boot-off\r\nlive-on\r\nlive-off");
-  assert.deepEqual(markerLines, []);
 });
 
 test("writeSessionData batches timestamp bookkeeping for bulk line output", () => {
@@ -1642,8 +1647,8 @@ test("writeSessionData batches timestamp bookkeeping for bulk line output", () =
   }
 
   assert.equal(writes.join(""), payload);
-  // One wall-clock second → one ledger stamp; paint fills every viewport row.
-  assert.deepEqual(markerLines, []);
+  // One wall-clock second → one ledger stamp + one sparse reflow anchor.
+  assert.equal(markerLines.length, 1);
   const painted = getVisibleTerminalLineTimestampRows(term);
   assert.ok(painted.length >= 1);
   assert.ok(painted.every((row) => row.label.length > 0));

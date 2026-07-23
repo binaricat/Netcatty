@@ -33,8 +33,11 @@ type TimestampEntry = {
 };
 
 /**
- * Record/render separation: write path only appends ledger stamps (one per
- * second). Gutter paint maps ledger → visible rows without registerMarker.
+ * Record/render separation: write path appends at most one ledger stamp per
+ * second. Gutter paint maps ledger → visible rows (fill-forward).
+ *
+ * Each stamp may hold a sparse xterm marker so reflow/scrollback trim keep
+ * `line` honest without per-row markers on every output line.
  */
 type TimestampLedgerEntry = {
   label: string;
@@ -42,6 +45,11 @@ type TimestampLedgerEntry = {
   secondKey: number;
   /** Absolute buffer line (baseY + cursorY style) at stamp time. */
   line: number;
+  /**
+   * Sparse reflow/scrollback anchor. xterm updates `marker.line` on reflow;
+   * disposed when the line is trimmed from scrollback. Prefer when live.
+   */
+  marker?: TimestampMarker;
 };
 
 type TimestampStore = {
@@ -64,6 +72,8 @@ type TimestampStore = {
    */
   lastSeenBaseY: number | null;
   lastSeenBufferLength: number | null;
+  /** Last seen cols; when cols change, reflow may have shifted bare line numbers. */
+  lastSeenCols: number | null;
   /** @deprecated materialize path removed; always false. */
   ledgerMaterialized: boolean;
   /**
@@ -486,6 +496,7 @@ const getTimestampStore = (term: XTerm): TimestampStore => {
       lastStampSecondKey: null,
       lastSeenBaseY: null,
       lastSeenBufferLength: null,
+      lastSeenCols: null,
       ledgerMaterialized: false,
       orphanedMarkers: [],
       listeners: new Set(),
@@ -519,7 +530,7 @@ const getAbsoluteCursorLine = (term: XTerm): number => {
   }
 };
 
-/** Advance absolute line by hard newlines in a data span (pre-write estimate). */
+/** Advance absolute line by hard newlines in a data span (fallback estimate). */
 const advanceAbsoluteLineByData = (line: number, data: string): number => {
   let next = line;
   for (let index = 0; index < data.length; index += 1) {
@@ -528,12 +539,52 @@ const advanceAbsoluteLineByData = (line: number, data: string): number => {
   return next;
 };
 
+/**
+ * Soft-wrap–aware pre-write line advance for stamp placement.
+ * Uses the same bulk measurer as the (legacy) batched marker path so narrow
+ * terminals still land stamps on the correct buffer row when measurable.
+ */
+const advanceStampCursorByData = (
+  term: XTerm,
+  absoluteLine: number,
+  column: number,
+  data: string,
+  columns: number,
+  wraparoundMode: boolean,
+): { absoluteLine: number; column: number; wraparoundMode: boolean } => {
+  const measured = tryMeasureVisualRows(term, data, column, columns, wraparoundMode);
+  if (measured) {
+    return {
+      absoluteLine: absoluteLine + measured.rowOffset,
+      column: measured.column,
+      wraparoundMode: measured.wraparoundMode,
+    };
+  }
+  // Unmeasurable (cursor motion / partial CSI): hard newlines only.
+  return {
+    absoluteLine: advanceAbsoluteLineByData(absoluteLine, data),
+    column: 0,
+    wraparoundMode,
+  };
+};
+
+const disposeLedgerMarker = (entry: TimestampLedgerEntry): void => {
+  const marker = entry.marker;
+  entry.marker = undefined;
+  if (!marker || marker.isDisposed) return;
+  marker.dispose?.();
+};
+
 const trimLedgerToCapacity = (
   store: TimestampStore,
   capacity: number,
 ): void => {
   if (capacity > 0 && store.ledger.length > capacity) {
-    store.ledger.splice(0, store.ledger.length - capacity);
+    const drop = store.ledger.length - capacity;
+    for (let index = 0; index < drop; index += 1) {
+      disposeLedgerMarker(store.ledger[index]!);
+    }
+    store.ledger.splice(0, drop);
   }
 };
 
@@ -556,9 +607,75 @@ const pushLedgerStamp = (
   secondKey: number,
   line: number,
   capacity: number,
-): void => {
-  store.ledger.push({ label, secondKey, line: Math.max(0, line) });
+): TimestampLedgerEntry => {
+  const entry: TimestampLedgerEntry = {
+    label,
+    secondKey,
+    line: Math.max(0, line),
+  };
+  store.ledger.push(entry);
   trimLedgerToCapacity(store, capacity);
+  return entry;
+};
+
+/**
+ * After term.write, pin new stamps to sparse xterm markers so reflow and
+ * scrollback trim keep line anchors accurate (still ≤1 marker/second).
+ */
+const attachLedgerAnchors = (
+  term: XTerm,
+  pending: readonly TimestampLedgerEntry[],
+): void => {
+  if (pending.length === 0) return;
+  const registerMarker = (
+    term as XTerm & { registerMarker?: (offset: number) => TimestampMarker | undefined }
+  ).registerMarker;
+  if (typeof registerMarker !== "function") return;
+
+  const cursorLine = getAbsoluteCursorLine(term);
+  for (const entry of pending) {
+    if (entry.marker && !entry.marker.isDisposed) continue;
+    const offset = entry.line - cursorLine;
+    let marker: TimestampMarker | undefined;
+    try {
+      marker = registerMarker.call(term, offset);
+    } catch {
+      marker = undefined;
+    }
+    if (!marker || marker.isDisposed) continue;
+    entry.marker = marker;
+    if (typeof marker.line === "number" && Number.isFinite(marker.line)) {
+      entry.line = Math.max(0, marker.line);
+    }
+  }
+};
+
+/**
+ * Refresh ledger.line from live sparse anchors. Drops entries whose markers
+ * were disposed by scrollback trim. Bare (unanchored) lines keep their values
+ * unless a full-buffer baseY rebase applied earlier in the same pass.
+ */
+const syncLedgerFromAnchors = (store: TimestampStore): void => {
+  if (store.ledger.length === 0) return;
+  let write = 0;
+  for (let read = 0; read < store.ledger.length; read += 1) {
+    const entry = store.ledger[read]!;
+    const marker = entry.marker;
+    if (marker) {
+      if (marker.isDisposed) {
+        entry.marker = undefined;
+        // Trimmed away with its scrollback row — drop the stamp.
+        continue;
+      }
+      if (typeof marker.line === "number" && Number.isFinite(marker.line)) {
+        entry.line = Math.max(0, marker.line);
+      }
+    }
+    if (entry.line < 0) continue;
+    store.ledger[write] = entry;
+    write += 1;
+  }
+  store.ledger.length = write;
 };
 
 const resolveBufferMaxLines = (term: XTerm): number => {
@@ -572,12 +689,15 @@ const resolveBufferMaxLines = (term: XTerm): number => {
 };
 
 /**
- * Rebase ledger only when scrollback actually trims old lines from the top.
+ * Rebase / refresh ledger anchors after write, paint, or resize.
  *
- * Important: while the buffer is still growing, baseY also increases as the
- * viewport follows the cursor — absolute line indices of older content do NOT
- * shift. Subtracting every baseY delta incorrectly deletes early stamps
- * (MOTD / login banner vanishing on scroll).
+ * - Sparse markers: xterm already moved them for scrollback trim + reflow;
+ *   syncLedgerFromAnchors copies marker.line and drops disposed stamps.
+ * - Bare line numbers (marker attach failed): only subtract baseY when the
+ *   buffer is actually full and trimming — never while still growing (MOTD
+ *   vanishing on scroll).
+ * - Cols change: reflow invalidates bare numbers; drop unanchored stamps so we
+ *   never paint wrong times on reshuffled history (anchored stamps survive).
  */
 const rebaseLedgerForScrollback = (term: XTerm, store: TimestampStore): void => {
   let baseY = 0;
@@ -592,13 +712,18 @@ const rebaseLedgerForScrollback = (term: XTerm, store: TimestampStore): void => 
     return;
   }
 
+  const cols = _getTerminalColumnCount(term);
+  const colsChanged = store.lastSeenCols !== null
+    && Number.isFinite(cols)
+    && cols !== store.lastSeenCols;
+
   const maxLines = resolveBufferMaxLines(term);
   const bufferWasFull = store.lastSeenBufferLength !== null
     && store.lastSeenBufferLength >= maxLines;
   const bufferIsFull = bufferLength >= maxLines;
 
   // Only while full (or staying full) does baseY growth mean "N lines dropped
-  // from the top" and absolute indices of survivors decrease by N.
+  // from the top" for entries that still use bare line numbers.
   if (
     bufferWasFull
     && bufferIsFull
@@ -607,19 +732,40 @@ const rebaseLedgerForScrollback = (term: XTerm, store: TimestampStore): void => 
   ) {
     const delta = baseY - store.lastSeenBaseY;
     for (const entry of store.ledger) {
+      if (entry.marker && !entry.marker.isDisposed) continue;
       entry.line -= delta;
+    }
+  }
+
+  if (colsChanged) {
+    // Reflow: keep only stamps still pinned by a live marker.
+    for (const entry of store.ledger) {
+      if (entry.marker && !entry.marker.isDisposed) continue;
+      // Unanchored after reflow — line no longer trustworthy.
+      entry.line = -1;
     }
   }
 
   store.lastSeenBaseY = baseY;
   store.lastSeenBufferLength = bufferLength;
+  if (Number.isFinite(cols)) {
+    store.lastSeenCols = cols;
+  }
+
+  syncLedgerFromAnchors(store);
 
   if (store.ledger.length === 0) return;
   let write = 0;
   for (let read = 0; read < store.ledger.length; read += 1) {
     const entry = store.ledger[read]!;
-    if (entry.line < 0) continue;
-    if (bufferLength > 0 && entry.line >= bufferLength) continue;
+    if (entry.line < 0) {
+      disposeLedgerMarker(entry);
+      continue;
+    }
+    if (bufferLength > 0 && entry.line >= bufferLength) {
+      disposeLedgerMarker(entry);
+      continue;
+    }
     store.ledger[write] = entry;
     write += 1;
   }
@@ -637,7 +783,10 @@ const resolveLastPaintBufferLine = (
 ): number => {
   let lastLedgerLine = -1;
   for (const entry of store.ledger) {
-    if (entry.line > lastLedgerLine) lastLedgerLine = entry.line;
+    const line = entry.marker && !entry.marker.isDisposed && typeof entry.marker.line === "number"
+      ? entry.marker.line
+      : entry.line;
+    if (line > lastLedgerLine) lastLedgerLine = line;
   }
 
   let cursorAbs = 0;
@@ -822,11 +971,15 @@ const resetTimestampStore = (store: TimestampStore) => {
   for (const marker of store.orphanedMarkers) {
     if (!marker.isDisposed) marker.dispose?.();
   }
+  for (const entry of store.ledger) {
+    disposeLedgerMarker(entry);
+  }
   store.entries = [];
   store.ledger = [];
   store.lastStampSecondKey = null;
   store.lastSeenBaseY = null;
   store.lastSeenBufferLength = null;
+  store.lastSeenCols = null;
   store.ledgerMaterialized = false;
   store.orphanedMarkers = [];
   store.segmenter.reset();
@@ -1245,10 +1398,23 @@ export const resolveTerminalTimestampGutterRows = ({
   return visible;
 };
 
+const effectiveLedgerLine = (entry: TimestampLedgerEntry): number => {
+  if (
+    entry.marker
+    && !entry.marker.isDisposed
+    && typeof entry.marker.line === "number"
+    && Number.isFinite(entry.marker.line)
+  ) {
+    return Math.max(0, entry.marker.line);
+  }
+  return entry.line;
+};
+
 /**
- * Render gutter rows from the per-second ledger (no xterm markers).
+ * Render gutter rows from the per-second ledger.
  * Each visible line uses the latest stamp with stamp.line <= line so blank
  * gaps between stamps (and soft-wrap continuations) fill with the previous time.
+ * Prefer live sparse marker lines when present (reflow-safe).
  */
 export const resolveTerminalTimestampGutterRowsFromLedger = ({
   viewportY,
@@ -1270,8 +1436,8 @@ export const resolveTerminalTimestampGutterRowsFromLedger = ({
   if (ledger.length === 0 || rows <= 0) return [];
 
   const stamps = ledger
+    .map((entry) => ({ label: entry.label, secondKey: entry.secondKey, line: effectiveLedgerLine(entry) }))
     .filter((entry) => entry.line >= 0)
-    .slice()
     .sort((left, right) => left.line - right.line || left.secondKey - right.secondKey);
 
   const labelAtOrBefore = (line: number): string | undefined => {
@@ -1335,7 +1501,9 @@ export const getVisibleTerminalLineTimestampRows = (
 };
 
 /**
- * Record path: one term.write + per-second ledger updates (no registerMarker).
+ * Record path: one term.write + per-second ledger updates.
+ * Soft-wrap–aware pre-write line estimates; sparse markers after write for
+ * reflow/scrollback (still ≤1 marker per wall-clock second).
  */
 const writeTerminalDataWithSecondLedger = (
   term: XTerm,
@@ -1362,22 +1530,41 @@ const writeTerminalDataWithSecondLedger = (
   }
 
   let absoluteLine = getAbsoluteCursorLine(term);
+  let column = _getTerminalCursorColumn(term);
+  const columns = _getTerminalColumnCount(term);
+  let wraparoundMode = _getTerminalWraparoundMode(term);
   const capacity = resolveTerminalLineTimestampCapacity(term);
   let ledgerChanged = false;
+  const pendingAnchors: TimestampLedgerEntry[] = [];
   for (const segment of segments) {
     if (segment.kind === "timestamp") {
       const secondKey = store.labelCacheKey ?? secondKeyFromDate(stampDate);
       if (tryBeginSecondStamp(store, secondKey)) {
-        pushLedgerStamp(store, segment.label, secondKey, absoluteLine, capacity);
+        const entry = pushLedgerStamp(
+          store,
+          segment.label,
+          secondKey,
+          absoluteLine,
+          capacity,
+        );
+        pendingAnchors.push(entry);
         ledgerChanged = true;
       }
       continue;
     }
-    absoluteLine = advanceAbsoluteLineByData(absoluteLine, segment.data);
+    ({ absoluteLine, column, wraparoundMode } = advanceStampCursorByData(
+      term,
+      absoluteLine,
+      column,
+      segment.data,
+      columns,
+      wraparoundMode,
+    ));
   }
 
   const writeStartedAt = shouldMeasureDiagnostics ? performance.now() : 0;
   term.write(data, () => {
+    attachLedgerAnchors(term, pendingAnchors);
     rebaseLedgerForScrollback(term, store);
     if (ledgerChanged) {
       notifyTimestampStore(store);
@@ -1428,8 +1615,7 @@ export const writeTerminalDataWithLineTimestamps = (
     return;
   }
 
-  // Record/render separation: always maintain the per-second ledger; gutter
-  // paint reads ledger only (no xterm markers on the write path).
+  // Record/render separation: per-second ledger + sparse reflow anchors.
   writeTerminalDataWithSecondLedger(
     term,
     data,

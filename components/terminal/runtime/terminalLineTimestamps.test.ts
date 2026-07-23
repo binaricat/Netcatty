@@ -366,7 +366,7 @@ test("formats timestamp labels without terminal escape codes", () => {
 });
 
 
-test("gutter off records a per-second ledger without markers", () => {
+test("gutter off records a per-second ledger with a sparse reflow anchor", () => {
   const { term, writes, markerLines } = createFakeTerm();
   const t0 = new Date(2026, 5, 6, 12, 0, 0);
   writeTerminalDataWithLineTimestamps(term as never, "before\r\nnext\r\nthird", () => {}, {
@@ -375,7 +375,8 @@ test("gutter off records a per-second ledger without markers", () => {
   });
 
   assert.equal(writes.join(""), "before\r\nnext\r\nthird");
-  assert.deepEqual(markerLines, []);
+  // One wall-clock second → one sparse anchor (not per-line markers).
+  assert.equal(markerLines.length, 1);
   assert.equal(getTerminalLineTimestampLedgerCount(term as never), 1);
 });
 
@@ -390,8 +391,8 @@ test("ledger keeps one stamp per wall-clock second whether gutter is on or off",
     timestampDate: new Date(2026, 5, 6, 12, 0, 1),
   });
 
-  // Record path never registerMarkers.
-  assert.deepEqual(markerLines, []);
+  // Sparse anchors only: one registerMarker per stamped second.
+  assert.equal(markerLines.length, 2);
   assert.equal(getTerminalLineTimestampLedgerCount(term as never), 2);
 });
 
@@ -447,8 +448,56 @@ test("large multi-line dump in one second still uses a single ledger stamp", () 
   });
 
   assert.deepEqual(writes, [lines]);
-  assert.deepEqual(markerLines, []);
+  assert.equal(markerLines.length, 1);
   assert.equal(getTerminalLineTimestampLedgerCount(term as never), 1);
+});
+
+test("soft-wrapped long line places the next-second stamp after visual rows", () => {
+  // cols=10: "abcdefghij" is one full row; "klmnopqrst" wraps to a second row, then \n.
+  const { term, liveMarkers } = createFakeTerm({ cols: 10, rows: 24 });
+  writeTerminalDataWithLineTimestamps(term as never, `${"x".repeat(25)}\r\n`, () => {}, {
+    timestampDate: new Date(2026, 5, 6, 12, 0, 0),
+  });
+  writeTerminalDataWithLineTimestamps(term as never, "next\r\n", () => {}, {
+    timestampDate: new Date(2026, 5, 6, 12, 0, 1),
+  });
+
+  assert.equal(getTerminalLineTimestampLedgerCount(term as never), 2);
+  // 25 chars @ width 10 → rows 0,1,2 for first logical line; "next" on line 3.
+  // Second stamp must not share line 0 with the first (hard-\n-only bug).
+  const lines = liveMarkers.map((marker) => marker.line).sort((a, b) => a - b);
+  assert.equal(lines[0], 0);
+  assert.ok(
+    lines[1]! >= 3,
+    `expected second stamp at or after line 3 after soft-wrap, got ${JSON.stringify(lines)}`,
+  );
+
+  const painted = getVisibleTerminalLineTimestampRows(term as never);
+  assert.ok(painted.some((row) => row.label === "12:00:00"));
+  assert.ok(painted.some((row) => row.label === "12:00:01"));
+});
+
+test("reflow updates painted rows from sparse anchor marker.line", () => {
+  const { term, liveMarkers } = createFakeTerm({ cols: 80, rows: 24, scrollback: 1000 });
+  writeTerminalDataWithLineTimestamps(term as never, "early\r\n", () => {}, {
+    timestampDate: new Date(2026, 5, 6, 12, 0, 0),
+  });
+  writeTerminalDataWithLineTimestamps(term as never, "late\r\n", () => {}, {
+    timestampDate: new Date(2026, 5, 6, 12, 0, 1),
+  });
+  assert.equal(liveMarkers.length, 2);
+
+  // Simulate xterm reflow: markers move to new absolute lines.
+  liveMarkers[0]!.line = 5;
+  liveMarkers[1]!.line = 12;
+
+  const painted = getVisibleTerminalLineTimestampRows(term as never);
+  const byRow = new Map(painted.map((row) => [row.row, row.label]));
+  // viewportY=0 → buffer line === row for these anchors.
+  assert.equal(byRow.get(5), "12:00:00");
+  assert.equal(byRow.get(12), "12:00:01");
+  // Fill-forward between anchors.
+  assert.equal(byRow.get(8), "12:00:00");
 });
 
 test("does not withhold output when an OSC sequence is split across chunks", () => {
