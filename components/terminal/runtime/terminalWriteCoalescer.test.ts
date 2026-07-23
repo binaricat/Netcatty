@@ -136,7 +136,7 @@ test("marks merged coalesced output as not preserving single-chunk perf metadata
 
   assert.deepEqual(writes, [{
     data: "firstsecond",
-    options: { preservePerfTrace: false, sourceChunkBoundaries: [5] },
+    options: { preservePerfTrace: false },
   }]);
 
   resetTerminalWriteCoalescer(term);

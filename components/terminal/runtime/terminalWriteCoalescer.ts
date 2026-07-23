@@ -440,20 +440,29 @@ const writeLargeTerminalBatch = (
   let offset = 0;
   let remainingIngressBytes = Math.max(0, ingressBytes);
   let bytesSinceYield = 0;
+  let sourceBoundaryIndex = 0;
 
   while (offset < data.length) {
+    while (
+      sourceBoundaryIndex < sourceChunkBoundaries.length
+      && sourceChunkBoundaries[sourceBoundaryIndex] <= offset
+    ) {
+      sourceBoundaryIndex += 1;
+    }
     const idealEnd = Math.min(data.length, offset + batchSize);
     let end = idealEnd;
     if (preserveSourceChunkBoundaries && idealEnd < data.length) {
       // Prompt formatting treats each original PTY chunk as a semantic unit.
       // Keep one intact when it crosses an otherwise arbitrary bulk slice.
-      for (let index = sourceChunkBoundaries.length - 1; index >= 0; index -= 1) {
-        const boundary = sourceChunkBoundaries[index];
-        if (boundary > idealEnd) continue;
-        if (boundary > offset) {
-          end = boundary;
-        }
-        break;
+      let boundaryEndIndex = sourceBoundaryIndex;
+      while (
+        boundaryEndIndex < sourceChunkBoundaries.length
+        && sourceChunkBoundaries[boundaryEndIndex] <= idealEnd
+      ) {
+        boundaryEndIndex += 1;
+      }
+      if (boundaryEndIndex > sourceBoundaryIndex) {
+        end = sourceChunkBoundaries[boundaryEndIndex - 1];
       }
       // A prompt may share its PTY chunk with preceding output. If no source
       // boundary helped, leave enough tail for the final prompt to stay whole.
@@ -481,9 +490,14 @@ const writeLargeTerminalBatch = (
     if (shouldYield) {
       bytesSinceYield = 0;
     }
-    const sliceChunkBoundaries = sourceChunkBoundaries
-      .filter((boundary) => boundary > offset && boundary < end)
-      .map((boundary) => boundary - offset);
+    const sliceChunkBoundaries: number[] = [];
+    while (
+      sourceBoundaryIndex < sourceChunkBoundaries.length
+      && sourceChunkBoundaries[sourceBoundaryIndex] < end
+    ) {
+      sliceChunkBoundaries.push(sourceChunkBoundaries[sourceBoundaryIndex] - offset);
+      sourceBoundaryIndex += 1;
+    }
     const nextOptions = {
       ...baseOptions,
       ...(shouldYield ? { yieldAfter: true } : {}),
@@ -584,7 +598,10 @@ export const enqueueCoalescedTerminalWrite = (
     terminalWriteCoalescerPreserveSourceChunks.add(term);
   }
   const pendingBytesBeforePush = getPendingCoalescedBytes(term);
-  if (pendingBytesBeforePush > 0) {
+  if (
+    terminalWriteCoalescerPreserveSourceChunks.has(term)
+    && pendingBytesBeforePush > 0
+  ) {
     const boundaries = terminalWriteCoalescerChunkBoundaries.get(term) ?? [];
     boundaries.push(pendingBytesBeforePush);
     terminalWriteCoalescerChunkBoundaries.set(term, boundaries);
