@@ -156,6 +156,7 @@ const HIDDEN_PANE_DRAIN_MS = 160;
 const visibleWriteIdleFlushTimers = new WeakMap<XTerm, ReturnType<typeof setTimeout>>();
 const hiddenPaneDrainTimers = new WeakMap<XTerm, ReturnType<typeof setTimeout>>();
 const pendingTimestampSecondByTerm = new WeakMap<XTerm, number>();
+const pendingTimestampPaneVisibleByTerm = new WeakMap<XTerm, boolean>();
 
 type LineTimestampPerfTotals = {
   segmentCalls: number;
@@ -270,17 +271,21 @@ const flushPendingTerminalOutputNow = (term: XTerm): void => {
 const flushBeforeTimestampBoundary = (
   term: XTerm,
   timestampDate: Date,
+  isPaneVisible: boolean,
 ): void => {
   const timestampSecond = Math.floor(timestampDate.getTime() / 1000);
   const pendingTimestampSecond = pendingTimestampSecondByTerm.get(term);
+  const pendingPaneWasVisible = pendingTimestampPaneVisibleByTerm.get(term);
   if (
     getTerminalWriteCoalescerPendingBytes(term) > 0
     && pendingTimestampSecond !== undefined
     && pendingTimestampSecond !== timestampSecond
+    && (!isPaneVisible || pendingPaneWasVisible === false)
   ) {
     flushPendingTerminalOutputNow(term);
   }
   pendingTimestampSecondByTerm.set(term, timestampSecond);
+  pendingTimestampPaneVisibleByTerm.set(term, isPaneVisible);
 };
 
 function flushHiddenPaneWritesNow(term: XTerm, isPaneVisible: () => boolean): void {
@@ -415,11 +420,20 @@ export const writeSessionData = (
   const isPaneCurrentlyVisible = () => isTerminalPaneVisible(ctx);
   const isPaneVisible = isPaneCurrentlyVisible();
   const timestampDate = new Date(Date.now());
-  // Hidden panes may wait before their coalesced output is drained, so keep
-  // their timestamp batches inside the arrival second. Visible panes must stay
-  // frame-batched, especially while full-screen terminal apps repaint.
-  if (!isPaneVisible) {
-    flushBeforeTimestampBoundary(term, timestampDate);
+  // Hidden panes may wait before coalesced output is drained. Flush a batch
+  // across an arrival-second boundary whenever either side is hidden, while
+  // leaving visible full-screen repaints frame-batched.
+  flushBeforeTimestampBoundary(term, timestampDate, isPaneVisible);
+  const settings = ctx.terminalSettingsRef?.current ?? ctx.terminalSettings;
+  if (
+    !isPaneVisible
+    && settings?.forcePromptNewLine === true
+    && ctx.promptLineBreakStateRef?.current?.pendingCommand === true
+    && getTerminalWriteCoalescerPendingBytes(term) > 0
+  ) {
+    // Prompt formatting needs the cursor state after each PTY chunk. Preserve
+    // that boundary only while the feature is actively waiting for a prompt.
+    flushPendingTerminalOutputNow(term);
   }
   const perfTrace = createTerminalOutputPerfTrace({
     sessionId: ctx.sessionRef.current ?? ctx.sessionId,
@@ -727,6 +741,7 @@ export const releaseTerminalFlowBeforeHibernate = (
   setTerminalWriteCoalescerByteCapResolver(term);
   setTerminalWriteCoalescerFlushGate(term);
   pendingTimestampSecondByTerm.delete(term);
+  pendingTimestampPaneVisibleByTerm.delete(term);
   resetDeferredTerminalWriteAck(term);
   terminalFlowControllers.delete(term);
 };
@@ -771,6 +786,7 @@ export const attachSessionToTerminal = (
 
   flushPendingTerminalOutputNow(term);
   pendingTimestampSecondByTerm.delete(term);
+  pendingTimestampPaneVisibleByTerm.delete(term);
   ctx.sessionRef.current = id;
   const flow = getFlowController(ctx, term);
   teardownTerminalOutputPipeline(ctx, term, id, flow);

@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createRequire } from "node:module";
 import type { Terminal as XTerm } from "@xterm/xterm";
 
 import {
@@ -570,6 +571,78 @@ test("visible alternate-screen output stays frame-batched across a clock boundar
   } finally {
     Date.now = originalDateNow;
     resetTerminalWriteCoalescer(term);
+  }
+});
+
+test("hiding a pane preserves the arrival second of already queued output", () => {
+  const { term, writes } = createFakeTerm();
+  const ctx = {
+    ...createContext(true),
+    isVisibleRef: { current: true },
+    isPaneVisibleRef: { current: true },
+  };
+  const originalDateNow = Date.now;
+  let fakeNow = new Date(2026, 0, 1, 12, 0, 59, 800).getTime();
+  Date.now = () => fakeNow;
+
+  try {
+    withAnimationFrameQueue(() => {
+      writeSessionData(ctx as never, term, "first\r\n");
+      assert.deepEqual(writes, []);
+
+      ctx.isPaneVisibleRef.current = false;
+      fakeNow = new Date(2026, 0, 1, 12, 1, 0, 20).getTime();
+      writeSessionData(ctx as never, term, "second\r\n");
+      flushPendingTerminalWritesOnResume(term);
+
+      assert.deepEqual(writes, ["first\r\n", "second\r\n"]);
+      assert.deepEqual(getVisibleTerminalLineTimestampRows(term), [
+        { row: 0, label: "12:00:59" },
+        { row: 1, label: "12:01:00" },
+      ]);
+    });
+  } finally {
+    Date.now = originalDateNow;
+    resetTerminalWriteCoalescer(term);
+  }
+});
+
+test("hidden prompt formatting preserves PTY chunk boundaries", () => {
+  const require = createRequire(import.meta.url);
+  const { Terminal } = require("@xterm/xterm") as {
+    Terminal: new (options: Record<string, unknown>) => XTerm;
+  };
+  const term = new Terminal({ cols: 80, rows: 5, scrollback: 20, allowProposedApi: true });
+  const promptState = createPromptLineBreakState();
+  promptState.lastPromptText = "$ ";
+  promptState.pendingCommand = true;
+  const settings = {
+    showLineTimestamps: false,
+    scrollOnOutput: false,
+    forcePromptNewLine: true,
+  };
+  const ctx = {
+    ...createContext(false),
+    terminalSettingsRef: { current: settings },
+    terminalSettings: settings,
+    promptLineBreakStateRef: { current: promptState },
+    isVisibleRef: { current: true },
+    isPaneVisibleRef: { current: false },
+  };
+
+  try {
+    withAnimationFrameQueue(() => {
+      writeSessionData(ctx as never, term, "foo");
+      writeSessionData(ctx as never, term, "$ ");
+      flushPendingTerminalWritesOnResume(term);
+    });
+
+    assert.equal(term.buffer.active.getLine(0)?.translateToString(true), "foo");
+    assert.equal(term.buffer.active.getLine(1)?.translateToString(true), "$");
+    assert.equal(term.buffer.active.cursorX, 2);
+  } finally {
+    resetTerminalWriteCoalescer(term);
+    term.dispose();
   }
 });
 
