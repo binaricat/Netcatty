@@ -54,6 +54,24 @@ test("full hibernate flushes pending hidden output before taking the snapshot", 
   assert.ok(snapshotIndex < releaseIndex, "release flow only after snapshot");
 });
 
+test("live context reads flush pending hidden output before reading the buffer", () => {
+  const source = readFileSync(new URL("../Terminal.tsx", import.meta.url), "utf8");
+  const body = readFunctionBody(
+    source,
+    "const readTerminalContext = useCallback<TerminalContextReader>(async (request) =>",
+  );
+
+  const flushIndex = body.indexOf("await flushPendingTerminalWritesBeforeHibernate(targetTerm)");
+  const drainGuardIndex = body.indexOf("if (!flushed)");
+  const bufferReadIndex = body.indexOf("term.buffer.active");
+
+  assert.notEqual(flushIndex, -1, "context reads must flush pending terminal writes");
+  assert.notEqual(drainGuardIndex, -1, "context reads must reject an incomplete drain");
+  assert.notEqual(bufferReadIndex, -1, "context reads must inspect the live terminal buffer");
+  assert.ok(flushIndex < drainGuardIndex, "check the drain result after flushing");
+  assert.ok(flushIndex < bufferReadIndex, "flush pending writes before reading the live buffer");
+});
+
 test("hibernate retry preserves normal hibernate blockers", () => {
   const source = readFileSync(new URL("../Terminal.tsx", import.meta.url), "utf8");
   const body = readFunctionBody(source, "const scheduleHibernateRetry = useCallback(() =>");

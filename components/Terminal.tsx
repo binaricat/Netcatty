@@ -510,7 +510,22 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     }
 
     const range = normalizeTerminalContextRange(request.range);
-    const term = termRef.current;
+    let term = termRef.current;
+    let liveContextReady = !term;
+    for (let attempt = 0; term && attempt < 2; attempt += 1) {
+      const targetTerm = term;
+      const flushed = await flushPendingTerminalWritesBeforeHibernate(targetTerm);
+      term = termRef.current;
+      if (term !== targetTerm) continue;
+      if (!flushed) {
+        return { ok: false, error: "Terminal output is still draining; retry the context read." };
+      }
+      liveContextReady = true;
+      break;
+    }
+    if (term && !liveContextReady) {
+      return { ok: false, error: "Terminal changed while reading its context; retry the request." };
+    }
     if (term) {
       const alternateScreen = isTerminalAlternateScreenActive(term);
       const activeBuffer = term.buffer.active as typeof term.buffer.active & {
