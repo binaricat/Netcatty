@@ -82,6 +82,319 @@ test("runtime invokes registered request handlers and posts responses", async ()
   ]);
 });
 
+test("runtime serializes overlapping same-id starts and closes the superseded session first", async () => {
+  const parentPort = createParentPort();
+  const order = [];
+  let active = null;
+  let releaseFirst;
+  const firstGate = new Promise((resolve) => { releaseFirst = resolve; });
+  const runtime = createTerminalWorkerRuntime({
+    parentPort,
+    registerBridges(ipcMain) {
+      ipcMain.handle("netcatty:local:reconnect", async (_event, payload) => {
+        order.push(`start:${payload.attempt}`);
+        if (payload.attempt === "first") await firstGate;
+        active = payload.attempt;
+        order.push(`publish:${payload.attempt}`);
+        return { sessionId: payload.sessionId };
+      });
+      ipcMain.handle("netcatty:close:await", (_event, payload) => {
+        order.push(`close:${active}:${payload.sessionId}`);
+        active = null;
+      });
+    },
+  });
+  runtime.start();
+
+  parentPort.emitMessage({
+    kind: "request",
+    requestId: "req-1",
+    channel: "netcatty:local:reconnect",
+    payload: { sessionId: "session-1", attempt: "first" },
+    webContentsId: 7,
+  });
+  parentPort.emitMessage({
+    kind: "request",
+    requestId: "req-2",
+    channel: "netcatty:local:reconnect",
+    payload: { sessionId: "session-1", attempt: "second" },
+    webContentsId: 8,
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(order, ["start:first"]);
+
+  releaseFirst();
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(order, [
+    "start:first",
+    "publish:first",
+    "close:first:session-1",
+    "start:second",
+    "publish:second",
+  ]);
+  assert.equal(active, "second");
+  assert.deepEqual(
+    parentPort.messages.filter((message) => message.kind === "response").map((message) => message.requestId),
+    ["req-1", "req-2"],
+  );
+});
+
+test("runtime closes a completed same-id start before a later request begins", async () => {
+  const parentPort = createParentPort();
+  const order = [];
+  let active = null;
+  const runtime = createTerminalWorkerRuntime({
+    parentPort,
+    registerBridges(ipcMain) {
+      ipcMain.handle("netcatty:local:reconnect", async (_event, payload) => {
+        order.push(`start:${payload.attempt}`);
+        active = payload.attempt;
+        order.push(`publish:${payload.attempt}`);
+        return { sessionId: payload.sessionId };
+      });
+      ipcMain.handle("netcatty:close:await", (_event, payload) => {
+        order.push(`close:${active}:${payload.sessionId}`);
+        active = null;
+      });
+    },
+  });
+  runtime.start();
+
+  parentPort.emitMessage({
+    kind: "request",
+    requestId: "req-1",
+    channel: "netcatty:local:reconnect",
+    payload: { sessionId: "session-1", attempt: "first" },
+    webContentsId: 7,
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+
+  parentPort.emitMessage({
+    kind: "request",
+    requestId: "req-2",
+    channel: "netcatty:local:reconnect",
+    payload: { sessionId: "session-1", attempt: "second" },
+    webContentsId: 8,
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(order, [
+    "start:first",
+    "publish:first",
+    "close:first:session-1",
+    "start:second",
+    "publish:second",
+  ]);
+  assert.equal(active, "second");
+  assert.deepEqual(
+    parentPort.messages.filter((message) => message.kind === "session-superseding"),
+    [{
+      kind: "session-superseding",
+      sessionId: "session-1",
+      sessionGeneration: 0,
+      replacementRequestId: "req-2",
+    }],
+  );
+});
+
+test("runtime records a generated session id so a later same-id start closes it first", async () => {
+  const parentPort = createParentPort();
+  const order = [];
+  let active = null;
+  const runtime = createTerminalWorkerRuntime({
+    parentPort,
+    registerBridges(ipcMain) {
+      ipcMain.handle("netcatty:local:start", async (_event, payload) => {
+        order.push(`start:${payload.attempt}`);
+        active = payload.attempt;
+        return { sessionId: "generated-1" };
+      });
+      ipcMain.handle("netcatty:close:await", (_event, payload) => {
+        order.push(`close:${active}:${payload.sessionId}`);
+        active = null;
+      });
+    },
+  });
+  runtime.start();
+
+  parentPort.emitMessage({
+    kind: "request",
+    requestId: "req-1",
+    channel: "netcatty:local:start",
+    payload: { attempt: "first" },
+    webContentsId: 7,
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+
+  parentPort.emitMessage({
+    kind: "request",
+    requestId: "req-2",
+    channel: "netcatty:local:start",
+    payload: { sessionId: "generated-1", attempt: "second" },
+    webContentsId: 8,
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(order, [
+    "start:first",
+    "close:first:generated-1",
+    "start:second",
+  ]);
+  assert.equal(active, "second");
+  assert.deepEqual(
+    parentPort.messages
+      .filter((message) => message.kind === "response")
+      .map((message) => message.sessionGeneration),
+    [0, 1],
+  );
+});
+
+test("runtime close waits for a pending start and removes the session it publishes", async () => {
+  const parentPort = createParentPort();
+  const order = [];
+  let active = null;
+  let releaseStart;
+  const startGate = new Promise((resolve) => { releaseStart = resolve; });
+  const runtime = createTerminalWorkerRuntime({
+    parentPort,
+    registerBridges(ipcMain) {
+      ipcMain.handle("netcatty:local:reconnect", async (_event, payload) => {
+        order.push("start");
+        await startGate;
+        active = payload.sessionId;
+        order.push("publish");
+        return { sessionId: payload.sessionId };
+      });
+      ipcMain.on("netcatty:close", (_event, payload) => {
+        order.push(`close:${payload.sessionId}`);
+        active = null;
+      });
+    },
+  });
+  runtime.start();
+
+  parentPort.emitMessage({
+    kind: "request",
+    requestId: "req-1",
+    channel: "netcatty:local:reconnect",
+    payload: { sessionId: "session-1" },
+    webContentsId: 7,
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(order, ["start"]);
+  parentPort.emitMessage({
+    kind: "send",
+    channel: "netcatty:close",
+    payload: { sessionId: "session-1" },
+    webContentsId: 7,
+  });
+
+  releaseStart();
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(order, ["start", "publish", "close:session-1"]);
+  assert.equal(active, null);
+});
+
+test("runtime close cancels every same-id start that was queued before it", async () => {
+  const parentPort = createParentPort();
+  const starts = [];
+  let active = null;
+  let releaseFirst;
+  const firstGate = new Promise((resolve) => { releaseFirst = resolve; });
+  const runtime = createTerminalWorkerRuntime({
+    parentPort,
+    registerBridges(ipcMain) {
+      ipcMain.handle("netcatty:local:reconnect", async (_event, payload) => {
+        starts.push(payload.attempt);
+        if (payload.attempt === "first") await firstGate;
+        active = payload.attempt;
+        return { sessionId: payload.sessionId };
+      });
+      ipcMain.on("netcatty:close", () => { active = null; });
+    },
+  });
+  runtime.start();
+
+  parentPort.emitMessage({
+    kind: "request",
+    requestId: "req-1",
+    channel: "netcatty:local:reconnect",
+    payload: { sessionId: "session-1", attempt: "first" },
+    webContentsId: 7,
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  parentPort.emitMessage({
+    kind: "request",
+    requestId: "req-2",
+    channel: "netcatty:local:reconnect",
+    payload: { sessionId: "session-1", attempt: "second" },
+    webContentsId: 7,
+  });
+  parentPort.emitMessage({
+    kind: "send",
+    channel: "netcatty:close",
+    payload: { sessionId: "session-1" },
+    webContentsId: 7,
+  });
+  releaseFirst();
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(starts, ["first"]);
+  assert.equal(active, null);
+  assert.equal(parentPort.messages.some((message) => (
+    message.requestId === "req-2" && /cancelled by close/u.test(message.error)
+  )), true);
+});
+
+test("runtime tags a failing start exit so its queued replacement can distinguish it", async () => {
+  const parentPort = createParentPort();
+  const runtime = createTerminalWorkerRuntime({
+    parentPort,
+    registerBridges(ipcMain) {
+      ipcMain.handle("netcatty:local:reconnect", async (event, payload) => {
+        if (payload.attempt === "first") {
+          event.sender.send("netcatty:exit", {
+            sessionId: payload.sessionId,
+            reason: "failed",
+          });
+          throw new Error("first failed");
+        }
+        return { sessionId: payload.sessionId };
+      });
+      ipcMain.handle("netcatty:close:await", () => {});
+    },
+  });
+  runtime.start();
+
+  for (const [requestId, attempt] of [["req-1", "first"], ["req-2", "second"]]) {
+    parentPort.emitMessage({
+      kind: "request",
+      requestId,
+      channel: "netcatty:local:reconnect",
+      payload: { sessionId: "session-1", attempt },
+      webContentsId: 7,
+    });
+  }
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const exit = parentPort.messages.find((message) => message.kind === "renderer-event");
+  assert.equal(exit.originRequestId, "req-1");
+  assert.equal(parentPort.messages.some((message) => (
+    message.requestId === "req-2" && message.result?.sessionId === "session-1"
+  )), true);
+});
+
 test("runtime routes interceptor ports to the worker-owned data pipeline", () => {
   const parentPort = createParentPort();
   const attached = [];
@@ -343,12 +656,14 @@ test("runtime routes terminal data over output messages", async () => {
     kind: "output-tap",
     sessionId: "s1",
     data: "hello",
+    sessionGeneration: 0,
   });
   assert.deepEqual(parentPort.messages[1], {
     kind: "output",
     sessionId: "s1",
     data: "hello",
     tapped: true,
+    sessionGeneration: 0,
   });
 });
 
@@ -411,12 +726,14 @@ test("runtime sends transformed output to the renderer while host taps retain or
     kind: "output-tap",
     sessionId: "s1",
     data: "hello",
+    sessionGeneration: 0,
   });
   assert.deepEqual(parentPort.messages[1], {
     kind: "output",
     sessionId: "s1",
     data: "HELLO",
     tapped: true,
+    sessionGeneration: 0,
     meta: {
       pluginPipelineIngressBytes: 5,
       pluginPipelineProcessed: true,
@@ -449,6 +766,7 @@ test("runtime classifies original prompts when only an output interceptor is act
     sessionId: "s1",
     data: "masked> ",
     tapped: true,
+    sessionGeneration: 0,
     meta: {
       pluginPipelineIngressBytes: 10,
       pluginPipelineProcessed: true,
@@ -663,6 +981,7 @@ test("runtime routes terminal data over a transferred output port", async () => 
     kind: "output-tap",
     sessionId: "s1",
     data: "hello",
+    sessionGeneration: 0,
   });
   assert.equal(parentPort.messages.some((message) => message.kind === "output"), false);
 });
@@ -897,6 +1216,7 @@ test("runtime.createSender uses the transferred output port", () => {
     kind: "output-tap",
     sessionId: "s1",
     data: "hello",
+    sessionGeneration: 0,
   });
 });
 

@@ -5,6 +5,16 @@ const {
   normalizeTrace,
 } = require("../bridges/terminalInterruptDiagnostics.cjs");
 
+const SESSION_START_CHANNELS = new Set([
+  "netcatty:start",
+  "netcatty:local:start",
+  "netcatty:telnet:start",
+  "netcatty:mosh:start",
+  "netcatty:et:start",
+  "netcatty:serial:start",
+  "netcatty:local:reconnect",
+]);
+
 function createIpcMainHarness() {
   const handlers = new Map();
   const listeners = new Map();
@@ -149,6 +159,8 @@ function createSender(
   terminalDataPipeline,
   pendingOutputBySession = new Map(),
   sessionOutputGenerations = new Map(),
+  sessionRequestIds = new Map(),
+  fixedOriginRequestId = null,
 ) {
   const ownedSessionGenerations = new Map();
   const getOwnedSessionGeneration = (sessionId) => {
@@ -166,6 +178,9 @@ function createSender(
     };
     void pending.then(clearPending, clearPending);
   };
+  const getOriginRequestId = (sessionId) => (
+    fixedOriginRequestId || sessionRequestIds.get(sessionId) || null
+  );
   const postRendererEvent = (channel, payload) => {
     const explicitGeneration = payload?._terminalSessionGeneration;
     const sessionGeneration = Number.isSafeInteger(explicitGeneration)
@@ -178,6 +193,7 @@ function createSender(
       : Object.freeze(Object.fromEntries(
         Object.entries(payload).filter(([key]) => key !== "_terminalSessionGeneration"),
       ));
+    const originRequestId = getOriginRequestId(payload?.sessionId);
     if (channel === "netcatty:exit" && payload?.sessionId) {
       if ((sessionOutputGenerations.get(payload.sessionId) ?? 0) === sessionGeneration) {
         sessionOutputGenerations.set(payload.sessionId, sessionGeneration + 1);
@@ -192,6 +208,7 @@ function createSender(
       channel,
       payload: rendererPayload,
       ...(sessionGeneration === undefined ? {} : { sessionGeneration }),
+      ...(originRequestId ? { originRequestId } : {}),
     });
   };
   const deliverTerminalData = (payload) => {
@@ -200,11 +217,14 @@ function createSender(
     const outputGeneration = Number.isSafeInteger(explicitGeneration)
       ? explicitGeneration
       : getOwnedSessionGeneration(sessionId);
+    const originRequestId = getOriginRequestId(sessionId);
     if ((sessionOutputGenerations.get(sessionId) ?? 0) !== outputGeneration) return;
     const tapMessage = {
       kind: "output-tap",
       sessionId: payload?.sessionId,
       data: payload?.data,
+      sessionGeneration: outputGeneration,
+      ...(originRequestId ? { originRequestId } : {}),
     };
     if (payload?.meta) tapMessage.meta = payload.meta;
     if (payload?.tapped !== true) parentPort.postMessage(tapMessage);
@@ -249,6 +269,8 @@ function createSender(
         sessionId: payload?.sessionId,
         data,
         tapped: true,
+        sessionGeneration: outputGeneration,
+        ...(originRequestId ? { originRequestId } : {}),
       };
       if (meta) outputMessage.meta = meta;
       parentPort.postMessage(outputMessage);
@@ -323,6 +345,11 @@ function createTerminalWorkerRuntime(options = {}) {
   const outputPorts = createOutputPortRegistry();
   const pendingOutputBySession = new Map();
   const sessionOutputGenerations = new Map();
+  const sessionRequestIds = new Map();
+  const sessionOperationTails = new Map();
+  const sessionOperationKinds = new Map();
+  const sessionCloseEpochs = new Map();
+  const sessionStartMarkers = new Set();
   let urgentInputPorts = null;
 
   const createWorkerOutputSender = () => createSender(
@@ -332,6 +359,7 @@ function createTerminalWorkerRuntime(options = {}) {
     terminalDataPipeline,
     pendingOutputBySession,
     sessionOutputGenerations,
+    sessionRequestIds,
   );
 
   function replayWorkerOutput(sessionId, chunks) {
@@ -359,6 +387,7 @@ function createTerminalWorkerRuntime(options = {}) {
     pendingOutputBySession.delete(sessionId);
     outputPorts.closeSession(sessionId);
     terminalDataPipeline?.detach?.(sessionId, undefined, "session-closed");
+    sessionRequestIds.delete(sessionId);
   }
 
   async function handleRequest(message) {
@@ -372,6 +401,9 @@ function createTerminalWorkerRuntime(options = {}) {
       return;
     }
     try {
+      const isSessionStart = SESSION_START_CHANNELS.has(message.channel);
+      const requestedSessionId = isSessionStart ? message.payload?.sessionId : null;
+      if (requestedSessionId) sessionRequestIds.set(requestedSessionId, message.requestId);
       const result = await handler({
         sender: createSender(
           parentPort,
@@ -380,9 +412,15 @@ function createTerminalWorkerRuntime(options = {}) {
           terminalDataPipeline,
           pendingOutputBySession,
           sessionOutputGenerations,
+          sessionRequestIds,
+          isSessionStart ? message.requestId : null,
         ),
       }, message.payload);
       const sessionId = result?.sessionId;
+      if (isSessionStart && sessionId) {
+        sessionRequestIds.set(sessionId, message.requestId);
+        sessionStartMarkers.add(sessionId);
+      }
       parentPort.postMessage({
         kind: "response",
         requestId: message.requestId,
@@ -398,6 +436,112 @@ function createTerminalWorkerRuntime(options = {}) {
         error: err?.message || String(err),
       });
     }
+  }
+
+  async function closeSupersededSessionStart(message) {
+    const sessionId = message.payload?.sessionId;
+    if (!sessionId) return;
+    parentPort.postMessage({
+      kind: "session-superseding",
+      sessionId,
+      sessionGeneration: sessionOutputGenerations.get(sessionId) ?? 0,
+      replacementRequestId: message.requestId,
+    });
+    invalidateSessionOutput(sessionId);
+    const closeHandler = ipcMain.handlers.get("netcatty:close:await");
+    if (closeHandler) {
+      await closeHandler({
+        sender: createSender(
+          parentPort,
+          message.webContentsId,
+          outputPorts,
+          terminalDataPipeline,
+          pendingOutputBySession,
+          sessionOutputGenerations,
+          sessionRequestIds,
+        ),
+      }, { sessionId });
+    }
+  }
+
+  function postRequestError(message, error) {
+    parentPort.postMessage({
+      kind: "response",
+      requestId: message.requestId,
+      error: error?.message || String(error),
+    });
+  }
+
+  function trackSessionOperation(sessionId, operation, kind) {
+    sessionOperationTails.set(sessionId, operation);
+    sessionOperationKinds.set(sessionId, kind);
+    void operation.finally(() => {
+      if (sessionOperationTails.get(sessionId) === operation) {
+        sessionOperationTails.delete(sessionId);
+        sessionOperationKinds.delete(sessionId);
+      }
+    });
+  }
+
+  function dispatchRequest(message) {
+    const sessionId = SESSION_START_CHANNELS.has(message.channel)
+      ? message.payload?.sessionId
+      : null;
+    if (message.channel === "netcatty:close:await" && message.payload?.sessionId) {
+      dispatchSessionClose(message, true);
+      return;
+    }
+    if (!sessionId) {
+      void handleRequest(message);
+      return;
+    }
+    const closeEpoch = sessionCloseEpochs.get(sessionId) ?? 0;
+    const previous = sessionOperationTails.get(sessionId);
+    const previousKind = sessionOperationKinds.get(sessionId);
+    const shouldClosePreviousStart = previousKind === "start" || sessionStartMarkers.has(sessionId);
+    const current = (previous || Promise.resolve()).catch(() => {}).then(async () => {
+      if ((sessionCloseEpochs.get(sessionId) ?? 0) !== closeEpoch) {
+        postRequestError(message, new Error("Terminal session start was cancelled by close"));
+        return;
+      }
+      try {
+        if (shouldClosePreviousStart) await closeSupersededSessionStart(message);
+        if ((sessionCloseEpochs.get(sessionId) ?? 0) !== closeEpoch) {
+          postRequestError(message, new Error("Terminal session start was cancelled by close"));
+          return;
+        }
+        sessionStartMarkers.add(sessionId);
+        await handleRequest(message);
+      } catch (error) {
+        postRequestError(message, error);
+      }
+    });
+    trackSessionOperation(sessionId, current, "start");
+  }
+
+  function dispatchSessionClose(message, expectsResponse) {
+    const sessionId = message.payload?.sessionId;
+    if (!sessionId) {
+      if (expectsResponse) void handleRequest(message);
+      else handleSend(message);
+      return;
+    }
+    sessionCloseEpochs.set(sessionId, (sessionCloseEpochs.get(sessionId) ?? 0) + 1);
+    const previous = sessionOperationTails.get(sessionId);
+    const current = (previous || Promise.resolve()).catch(() => {}).then(async () => {
+      try {
+        if (expectsResponse) {
+          invalidateSessionOutput(sessionId);
+          await handleRequest(message);
+        } else {
+          handleSend(message);
+        }
+        sessionStartMarkers.delete(sessionId);
+      } catch (error) {
+        if (expectsResponse) postRequestError(message, error);
+      }
+    });
+    trackSessionOperation(sessionId, current, "close");
   }
 
   function handleSend(message) {
@@ -450,16 +594,30 @@ function createTerminalWorkerRuntime(options = {}) {
       return;
     }
     if (message?.kind === "output-port") {
+      const sessionGeneration = sessionOutputGenerations.get(message.sessionId) ?? 0;
+      if (Number.isSafeInteger(message.sessionGeneration)
+        && message.sessionGeneration !== sessionGeneration) {
+        try { ports?.[0]?.close?.(); } catch {}
+        return;
+      }
       outputPorts.open(message.sessionId, ports?.[0]);
       replayWorkerOutput(message.sessionId, message.bufferedOutput);
       const pending = pendingOutputBySession.get(message.sessionId);
+      const notifyReady = () => parentPort.postMessage({
+        kind: "output-port-ready",
+        sessionId: message.sessionId,
+        ...(Number.isSafeInteger(message.sessionGeneration) ? { sessionGeneration } : {}),
+        ...(message.outputPortRequestId
+          ? { outputPortRequestId: message.outputPortRequestId }
+          : {}),
+      });
       if (pending) {
         void pending.then(
-          () => parentPort.postMessage({ kind: "output-port-ready", sessionId: message.sessionId }),
-          () => parentPort.postMessage({ kind: "output-port-ready", sessionId: message.sessionId }),
+          notifyReady,
+          notifyReady,
         );
       } else {
-        parentPort.postMessage({ kind: "output-port-ready", sessionId: message.sessionId });
+        notifyReady();
       }
       return;
     }
@@ -487,10 +645,14 @@ function createTerminalWorkerRuntime(options = {}) {
       return;
     }
     if (message?.kind === "request") {
-      void handleRequest(message);
+      dispatchRequest(message);
       return;
     }
     if (message?.kind === "send") {
+      if (message.channel === "netcatty:close" && message.payload?.sessionId) {
+        dispatchSessionClose(message, false);
+        return;
+      }
       handleSend(message);
     }
   }
@@ -514,6 +676,7 @@ function createTerminalWorkerRuntime(options = {}) {
         terminalDataPipeline,
         pendingOutputBySession,
         sessionOutputGenerations,
+        sessionRequestIds,
       );
     },
     closeUrgentInputPortsForTest() {

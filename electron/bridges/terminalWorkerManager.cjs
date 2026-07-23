@@ -195,11 +195,19 @@ function createTerminalWorkerManager(options = {}) {
   const pendingOutput = new Map();
   const pendingOutputBytes = new Map();
   const closedSessions = new Set();
-  const outputPortPending = new Set();
+  const closedSessionSequences = new Map();
+  let sessionLifecycleSequence = 0;
+  const outputPortPending = new Map();
   const outputPortReady = new Set();
   const outputRoutePending = new Map();
+  const pendingSessionStartSequences = new Map();
+  const latestSessionStartSequences = new Map();
+  const suppressedPendingOutputSessions = new Set();
+  const workerSessionIds = new Set();
   const sessionWebContentsIds = new Map();
   const sessionGenerations = new Map();
+  const closedSessionGenerations = new Map();
+  const supersedingSessionGenerations = new Map();
   const urgentInputPorts = new Map();
   const outputTaps = new Set();
   const terminalInterceptorWarningListeners = new Set();
@@ -365,7 +373,7 @@ function createTerminalWorkerManager(options = {}) {
   function bufferOutput(sessionId, data, meta) {
     if (
       !sessionId
-      || closedSessions.has(sessionId)
+      || (closedSessions.has(sessionId) && !hasPendingSessionLifecycle(sessionId))
       || maxPendingOutputChunks === 0
       || maxPendingOutputBytes === 0
     ) {
@@ -435,7 +443,7 @@ function createTerminalWorkerManager(options = {}) {
     }
   }
 
-  async function openOutputSession(sessionId, webContentsId) {
+  async function openOutputSession(sessionId, webContentsId, isStillCurrent = null) {
     if (!sessionId || !webContentsId) return false;
     if (closedSessions.has(sessionId)) {
       clearBufferedOutput(sessionId);
@@ -462,6 +470,12 @@ function createTerminalWorkerManager(options = {}) {
       contents.removeListener?.("destroyed", onDestroyed);
     }
     if (closedSessions.has(sessionId)) return false;
+    if (isStillCurrent && !isStillCurrent()) {
+      if (outputRoutePending.get(sessionId) === openToken) {
+        outputRoutePending.delete(sessionId);
+      }
+      return false;
+    }
     if (outputRoutePending.get(sessionId) !== openToken) {
       return outputRoutePending.get(sessionId)?.webContentsId === webContentsId;
     }
@@ -475,6 +489,7 @@ function createTerminalWorkerManager(options = {}) {
     let openedUrgentInputPort = false;
     let replacedOutputChannel = false;
     let transferringBufferedOutput = [];
+    let workerIpcFailed = false;
     try {
       sessionWebContentsIds.set(sessionId, webContentsId);
       openedUrgentInputPort = openUrgentInputPort(webContentsId, contents);
@@ -483,13 +498,25 @@ function createTerminalWorkerManager(options = {}) {
       });
       replacedOutputChannel = Boolean(outputPort);
       if (outputPort && outputPort !== true && child?.postMessage) {
-        outputPortPending.add(sessionId);
+        const worker = child;
+        const outputPortRequestId = randomUUID();
+        const sessionGeneration = sessionGenerations.get(sessionId) ?? 0;
+        outputPortReady.delete(sessionId);
+        outputPortPending.set(sessionId, outputPortRequestId);
         transferringBufferedOutput = takeBufferedOutput(sessionId);
-        child.postMessage({
-          kind: "output-port",
-          sessionId,
-          bufferedOutput: transferringBufferedOutput,
-        }, [outputPort]);
+        try {
+          worker.postMessage({
+            kind: "output-port",
+            sessionId,
+            outputPortRequestId,
+            sessionGeneration,
+            bufferedOutput: transferringBufferedOutput,
+          }, [outputPort]);
+        } catch (error) {
+          workerIpcFailed = true;
+          retireWorkerAfterIpcFailure(worker, error);
+          throw error;
+        }
         transferringBufferedOutput = [];
         if (outputRoutePending.get(sessionId) === openToken) {
           outputRoutePending.delete(sessionId);
@@ -502,6 +529,7 @@ function createTerminalWorkerManager(options = {}) {
       flushBufferedOutput(sessionId);
       return true;
     } catch {
+      if (workerIpcFailed) return false;
       for (const chunk of transferringBufferedOutput) {
         bufferOutput(sessionId, chunk);
       }
@@ -655,20 +683,118 @@ function createTerminalWorkerManager(options = {}) {
     if (sessionId) attachHomeWebContentsIds.delete(sessionId);
   }
 
+  function markSessionClosed(sessionId) {
+    if (!sessionId || closedSessions.has(sessionId)) return;
+    closedSessions.add(sessionId);
+    closedSessionSequences.set(sessionId, ++sessionLifecycleSequence);
+  }
+
+  function cancelPendingSessionStart(sessionId) {
+    if (!pendingSessionStartSequences.delete(sessionId)) return;
+    if (closedSessions.has(sessionId)) {
+      closedSessionSequences.set(sessionId, ++sessionLifecycleSequence);
+    }
+  }
+
+  function finishPendingSessionStart(entry) {
+    if (entry?.requestedSessionId
+      && pendingSessionStartSequences.get(entry.requestedSessionId) === entry.requestSequence) {
+      pendingSessionStartSequences.delete(entry.requestedSessionId);
+    }
+  }
+
+  function hasPendingSessionLifecycle(sessionId) {
+    const pendingStartSequence = pendingSessionStartSequences.get(sessionId);
+    const closedSequence = closedSessionSequences.get(sessionId);
+    return pendingStartSequence != null
+      && (closedSequence == null || pendingStartSequence > closedSequence);
+  }
+
+  function recordClosedSessionGeneration(sessionId, generation) {
+    if (!sessionId || !Number.isSafeInteger(generation)) return;
+    const previous = closedSessionGenerations.get(sessionId);
+    if (previous == null || generation > previous) {
+      closedSessionGenerations.set(sessionId, generation);
+    }
+  }
+
+  function recordSupersedingSessionGeneration(message) {
+    if (!message?.sessionId
+      || !Number.isSafeInteger(message.sessionGeneration)
+      || !message.replacementRequestId) return;
+    const entry = pending.get(message.replacementRequestId);
+    if (!entry?.requestedSessionId || entry.requestedSessionId !== message.sessionId) return;
+    let generations = supersedingSessionGenerations.get(message.sessionId);
+    if (!generations) {
+      generations = new Map();
+      supersedingSessionGenerations.set(message.sessionId, generations);
+    }
+    generations.set(message.sessionGeneration, {
+      requestId: message.replacementRequestId,
+      requestSequence: entry.requestSequence,
+    });
+  }
+
+  function takeSupersedingSessionGeneration(sessionId, generation) {
+    if (!sessionId || !Number.isSafeInteger(generation)) return null;
+    const generations = supersedingSessionGenerations.get(sessionId);
+    const marker = generations?.get(generation) ?? null;
+    if (!marker) return null;
+    generations.delete(generation);
+    if (generations.size === 0) supersedingSessionGenerations.delete(sessionId);
+    return marker;
+  }
+
+  function clearOlderSupersedingSessionGenerations(sessionId, generation) {
+    if (!sessionId || !Number.isSafeInteger(generation)) return;
+    const generations = supersedingSessionGenerations.get(sessionId);
+    if (!generations) return;
+    for (const oldGeneration of generations.keys()) {
+      if (oldGeneration < generation) generations.delete(oldGeneration);
+    }
+    if (generations.size === 0) supersedingSessionGenerations.delete(sessionId);
+  }
+
+  function isOutputFromNewerGeneration(message) {
+    if (!Number.isSafeInteger(message?.sessionGeneration)) return false;
+    const closedGeneration = closedSessionGenerations.get(message.sessionId);
+    return message.sessionGeneration > (closedGeneration ?? 0);
+  }
+
+  function isOutputFromCurrentPendingStart(message) {
+    if (!Number.isSafeInteger(message?.sessionGeneration)) return false;
+    if (!message?.originRequestId) return isOutputFromNewerGeneration(message);
+    const entry = pending.get(message.originRequestId);
+    const latestStartSequence = latestSessionStartSequences.get(message.sessionId);
+    const isCurrentRequest = entry?.requestedSessionId === message.sessionId
+      && latestStartSequence != null
+      && entry.requestSequence === latestStartSequence;
+    if (!isCurrentRequest) return false;
+    const closedGeneration = closedSessionGenerations.get(message.sessionId);
+    return closedGeneration == null || message.sessionGeneration > closedGeneration;
+  }
+
   function closeOutputSession(sessionId) {
     if (!sessionId) return;
-    closedSessions.add(sessionId);
+    markSessionClosed(sessionId);
+    latestSessionStartSequences.delete(sessionId);
+    suppressedPendingOutputSessions.delete(sessionId);
+    workerSessionIds.delete(sessionId);
     clearBufferedOutput(sessionId);
     outputRoutePending.delete(sessionId);
     outputPortPending.delete(sessionId);
     outputPortReady.delete(sessionId);
     sessionWebContentsIds.delete(sessionId);
+    const activeGeneration = sessionGenerations.get(sessionId);
+    recordClosedSessionGeneration(sessionId, activeGeneration);
     sessionGenerations.delete(sessionId);
+    supersedingSessionGenerations.delete(sessionId);
     clearAttachHome(sessionId);
+    const worker = child;
     try {
-      child?.postMessage?.({ kind: "close-output-port", sessionId });
-    } catch {
-      // The worker may already be gone while closing a tab or quitting.
+      worker?.postMessage?.({ kind: "close-output-port", sessionId });
+    } catch (error) {
+      retireWorkerAfterIpcFailure(worker, error);
     }
     terminalOutputChannel?.closeSession?.(sessionId);
   }
@@ -702,10 +828,12 @@ function createTerminalWorkerManager(options = {}) {
 
   function drainOutputSession(sessionId, requestId) {
     if (!sessionId || !requestId || !outputPortReady.has(sessionId)) return false;
+    const worker = ensureStarted();
     try {
-      ensureStarted().postMessage({ kind: "output-drain", sessionId, requestId });
+      worker.postMessage({ kind: "output-drain", sessionId, requestId });
       return true;
-    } catch {
+    } catch (error) {
+      retireWorkerAfterIpcFailure(worker, error);
       return false;
     }
   }
@@ -753,10 +881,12 @@ function createTerminalWorkerManager(options = {}) {
   function flushOutputToWorker(sessionId) {
     const chunks = takeBufferedOutput(sessionId);
     if (!chunks.length || closedSessions.has(sessionId)) return;
+    const worker = child;
     try {
-      child?.postMessage?.({ kind: "output-flush", sessionId, chunks });
-    } catch {
+      worker?.postMessage?.({ kind: "output-flush", sessionId, chunks });
+    } catch (error) {
       for (const chunk of chunks) bufferOutput(sessionId, chunk);
+      retireWorkerAfterIpcFailure(worker, error);
     }
   }
 
@@ -783,32 +913,92 @@ function createTerminalWorkerManager(options = {}) {
   function handleMessage(eventOrMessage) {
     const message = unwrapMessageEvent(eventOrMessage);
     if (!message || typeof message !== "object") return;
+    if (message.kind === "session-superseding") {
+      recordSupersedingSessionGeneration(message);
+      return;
+    }
     if (message.kind === "response") {
       const entry = pending.get(message.requestId);
       if (!entry) return;
       if (message.error) {
+        if (entry.opensOutputSession && entry.requestedSessionId
+          && latestSessionStartSequences.get(entry.requestedSessionId) === entry.requestSequence) {
+          clearBufferedOutput(entry.requestedSessionId);
+          suppressedPendingOutputSessions.add(entry.requestedSessionId);
+          if (!sessionWebContentsIds.has(entry.requestedSessionId)
+            && !outputRoutePending.has(entry.requestedSessionId)) {
+            workerSessionIds.delete(entry.requestedSessionId);
+          }
+        }
+        finishPendingSessionStart(entry);
         pending.delete(message.requestId);
         entry.reject(new Error(message.error));
       } else {
         const sessionId = message.result?.sessionId;
         if (!entry.opensOutputSession || !sessionId) {
+          finishPendingSessionStart(entry);
           pending.delete(message.requestId);
           entry.resolve(message.result);
           return;
         }
+        const latestStartSequence = latestSessionStartSequences.get(sessionId);
+        if (latestStartSequence != null && entry.requestSequence < latestStartSequence) {
+          if (Number.isSafeInteger(message.sessionGeneration)) {
+            recordClosedSessionGeneration(sessionId, message.sessionGeneration);
+          }
+          finishPendingSessionStart(entry);
+          pending.delete(message.requestId);
+          entry.reject(new Error("Terminal session was superseded by a newer start request"));
+          return;
+        }
+        const closedSequence = closedSessionSequences.get(sessionId);
+        if (closedSequence != null && closedSequence >= entry.requestSequence) {
+          recordClosedSessionGeneration(sessionId, message.sessionGeneration);
+          finishPendingSessionStart(entry);
+          pending.delete(message.requestId);
+          entry.reject(new Error("Terminal session closed before its output route opened"));
+          return;
+        }
+        suppressedPendingOutputSessions.delete(sessionId);
+        closedSessionGenerations.delete(sessionId);
+        closedSessions.delete(sessionId);
+        closedSessionSequences.delete(sessionId);
+        workerSessionIds.add(sessionId);
         if (Number.isSafeInteger(message.sessionGeneration)) {
           sessionGenerations.set(sessionId, message.sessionGeneration);
+          clearOlderSupersedingSessionGenerations(sessionId, message.sessionGeneration);
         }
-        void openOutputSession(sessionId, entry.webContentsId).then((opened) => {
+        const isStillCurrent = () => {
+          if (!entry.requestedSessionId) return true;
+          const latestSequence = latestSessionStartSequences.get(sessionId);
+          const currentClosedSequence = closedSessionSequences.get(sessionId);
+          return latestSequence === entry.requestSequence
+            && !(currentClosedSequence != null && currentClosedSequence >= entry.requestSequence);
+        };
+        void openOutputSession(sessionId, entry.webContentsId, isStillCurrent).then((opened) => {
           if (pending.get(message.requestId) !== entry) return;
+          finishPendingSessionStart(entry);
           pending.delete(message.requestId);
           if (!opened) {
-            entry.reject(new Error("Terminal session closed before its output route opened"));
+            const currentClosedSequence = closedSessionSequences.get(sessionId);
+            if (currentClosedSequence != null && currentClosedSequence >= entry.requestSequence) {
+              entry.reject(new Error("Terminal session closed before its output route opened"));
+            } else if (entry.requestedSessionId
+              && latestSessionStartSequences.get(sessionId) !== entry.requestSequence) {
+              recordClosedSessionGeneration(sessionId, message.sessionGeneration);
+              if (sessionGenerations.get(sessionId) === message.sessionGeneration) {
+                sessionGenerations.delete(sessionId);
+              }
+              entry.reject(new Error("Terminal session was superseded by a newer start request"));
+            } else {
+              entry.reject(new Error("Terminal session closed before its output route opened"));
+            }
             return;
           }
           entry.resolve(message.result);
         }, (error) => {
           if (pending.get(message.requestId) !== entry) return;
+          finishPendingSessionStart(entry);
           pending.delete(message.requestId);
           entry.reject(error);
         });
@@ -816,7 +1006,15 @@ function createTerminalWorkerManager(options = {}) {
       return;
     }
     if (message.kind === "output") {
-      if (closedSessions.has(message.sessionId)) return;
+      if (suppressedPendingOutputSessions.has(message.sessionId)
+        && !isOutputFromCurrentPendingStart(message)) return;
+      if (closedSessions.has(message.sessionId)) {
+        if (!hasPendingSessionLifecycle(message.sessionId)
+          || !isOutputFromCurrentPendingStart(message)) return;
+        bufferOutput(message.sessionId, message.data, message.meta);
+        return;
+      }
+      if (message.sessionId) workerSessionIds.add(message.sessionId);
       // Chunks sent through the runtime sender's port fallback were already
       // announced via a dedicated output-tap message (message.tapped);
       // notifying taps again here would double-write session logs and
@@ -839,12 +1037,21 @@ function createTerminalWorkerManager(options = {}) {
       return;
     }
     if (message.kind === "output-tap") {
-      if (!closedSessions.has(message.sessionId)) {
+      if (suppressedPendingOutputSessions.has(message.sessionId)
+        && !isOutputFromCurrentPendingStart(message)) return;
+      if (!closedSessions.has(message.sessionId)
+        || (hasPendingSessionLifecycle(message.sessionId)
+          && isOutputFromCurrentPendingStart(message))) {
+        if (message.sessionId) workerSessionIds.add(message.sessionId);
         notifyOutputTaps(message.sessionId, message.data);
       }
       return;
     }
     if (message.kind === "output-port-ready") {
+      if (!message.outputPortRequestId
+        || outputPortPending.get(message.sessionId) !== message.outputPortRequestId
+        || !Number.isSafeInteger(message.sessionGeneration)
+        || (sessionGenerations.get(message.sessionId) ?? 0) !== message.sessionGeneration) return;
       outputPortPending.delete(message.sessionId);
       if (!closedSessions.has(message.sessionId)) {
         outputPortReady.add(message.sessionId);
@@ -862,9 +1069,75 @@ function createTerminalWorkerManager(options = {}) {
       // Prefer the currently rebound display target. Worker-captured
       // webContentsId is from session start and goes stale after attach/rebind.
       const sessionId = message.payload?.sessionId;
+      const originEntry = message.originRequestId
+        ? pending.get(message.originRequestId)
+        : null;
+      const latestStartSequence = latestSessionStartSequences.get(sessionId);
       if (message.channel === "netcatty:exit"
         && Number.isSafeInteger(message.sessionGeneration)
-        && sessionGenerations.get(sessionId) !== message.sessionGeneration) {
+      ) {
+        const closedGeneration = closedSessionGenerations.get(sessionId);
+        if (closedGeneration != null && message.sessionGeneration <= closedGeneration) return;
+        if (sessionGenerations.has(sessionId)
+          && sessionGenerations.get(sessionId) !== message.sessionGeneration) {
+          return;
+        }
+      }
+      const supersedingMarker = message.channel === "netcatty:exit"
+        ? takeSupersedingSessionGeneration(sessionId, message.sessionGeneration)
+        : null;
+      const isSupersededActiveExit = Boolean(
+        supersedingMarker
+        && latestStartSequence != null
+        && latestStartSequence >= supersedingMarker.requestSequence
+        && hasPendingSessionLifecycle(sessionId),
+      );
+      if (isSupersededActiveExit) {
+        const displayWebContentsId = sessionWebContentsIds.get(sessionId) ?? message.webContentsId;
+        const homeWebContentsId = attachHomeWebContentsIds.get(sessionId) ?? null;
+        recordClosedSessionGeneration(sessionId, message.sessionGeneration);
+        clearBufferedOutput(sessionId);
+        outputRoutePending.delete(sessionId);
+        outputPortPending.delete(sessionId);
+        outputPortReady.delete(sessionId);
+        workerSessionIds.delete(sessionId);
+        sessionWebContentsIds.delete(sessionId);
+        if (sessionGenerations.get(sessionId) === message.sessionGeneration) {
+          sessionGenerations.delete(sessionId);
+        }
+        clearAttachHome(sessionId);
+        terminalOutputChannel?.closeSession?.(sessionId);
+        suppressedPendingOutputSessions.add(sessionId);
+        notifySessionClosed(sessionId, message.payload?.reason || "superseded");
+        const targets = new Set([displayWebContentsId, homeWebContentsId]);
+        if (onRendererEvent) {
+          for (const webContentsId of targets) {
+            if (webContentsId == null) continue;
+            onRendererEvent({ ...message, webContentsId });
+          }
+        } else {
+          for (const webContentsId of targets) {
+            if (webContentsId == null) continue;
+            electronModule?.webContents?.fromId?.(webContentsId)?.send?.(
+              message.channel,
+              message.payload,
+            );
+          }
+        }
+        return;
+      }
+      const isSupersededStartExit = message.channel === "netcatty:exit"
+        && originEntry?.requestedSessionId === sessionId
+        && latestStartSequence != null
+        && originEntry.requestSequence < latestStartSequence;
+      if (isSupersededStartExit) {
+        recordClosedSessionGeneration(sessionId, message.sessionGeneration);
+        clearBufferedOutput(sessionId);
+        workerSessionIds.delete(sessionId);
+        finishPendingSessionStart(originEntry);
+        pending.delete(message.originRequestId);
+        originEntry.reject(new Error("Terminal session was superseded by a newer start request"));
+        notifySessionClosed(sessionId, message.payload?.reason);
         return;
       }
       const displayWebContentsId =
@@ -877,14 +1150,19 @@ function createTerminalWorkerManager(options = {}) {
       const wasExplicitlyClosed = Boolean(
         message.channel === "netcatty:exit"
         && sessionId
-        && closedSessions.has(sessionId),
+        && closedSessions.has(sessionId)
+        && !hasPendingSessionLifecycle(sessionId),
       );
       if (message.channel === "netcatty:exit" && sessionId) {
+        if (Number.isSafeInteger(message.sessionGeneration)) {
+          recordClosedSessionGeneration(sessionId, message.sessionGeneration);
+        }
+        cancelPendingSessionStart(sessionId);
+        closeOutputSession(sessionId);
+        clearAttachHome(sessionId);
         if (!wasExplicitlyClosed) {
           notifySessionClosed(sessionId, message.payload?.reason);
         }
-        closeOutputSession(sessionId);
-        clearAttachHome(sessionId);
       }
       // Explicit close already notified both display and home before removing
       // their routes. Ignore the worker's later transport-level exit event.
@@ -973,20 +1251,66 @@ function createTerminalWorkerManager(options = {}) {
     }
   }
 
-  function handleExit(code) {
-    const error = new Error(`Terminal worker exited${Number.isFinite(code) ? ` with code ${code}` : ""}`);
+  function retireWorkerAfterIpcFailure(worker, error) {
+    if (!worker || child !== worker) return;
+    handleExit(1, error);
+    try { worker.kill?.(); } catch {}
+  }
+
+  function handleExit(code, cause = null) {
+    const error = cause instanceof Error
+      ? cause
+      : new Error(`Terminal worker exited${Number.isFinite(code) ? ` with code ${code}` : ""}`);
     const exitCode = Number.isFinite(code) ? code : 1;
+    const affectedSessionIds = new Set([
+      ...sessionWebContentsIds.keys(),
+      ...outputRoutePending.keys(),
+      ...workerSessionIds,
+      ...pendingOutput.keys(),
+      ...pendingSessionStartSequences.keys(),
+    ]);
+    const sessionNotifications = [];
+    for (const sessionId of affectedSessionIds) {
+      const hasNewPendingLifecycle = hasPendingSessionLifecycle(sessionId);
+      if (closedSessions.has(sessionId) && !hasNewPendingLifecycle) continue;
+      if (closedSessions.has(sessionId)) {
+        closedSessionSequences.set(sessionId, ++sessionLifecycleSequence);
+      } else {
+        markSessionClosed(sessionId);
+      }
+      const targets = new Set();
+      const webContentsId = sessionWebContentsIds.get(sessionId);
+      if (webContentsId != null) targets.add(webContentsId);
+      const pendingWebContentsId = outputRoutePending.get(sessionId)?.webContentsId;
+      if (pendingWebContentsId != null) targets.add(pendingWebContentsId);
+      const homeId = attachHomeWebContentsIds.get(sessionId);
+      if (homeId != null) targets.add(homeId);
+      sessionNotifications.push({ sessionId, targets });
+    }
+    child = null;
+    pendingOutput.clear();
+    pendingOutputBytes.clear();
+    outputPortPending.clear();
+    outputPortReady.clear();
+    outputRoutePending.clear();
+    pendingSessionStartSequences.clear();
+    latestSessionStartSequences.clear();
+    suppressedPendingOutputSessions.clear();
+    workerSessionIds.clear();
+    sessionWebContentsIds.clear();
+    sessionGenerations.clear();
+    closedSessionGenerations.clear();
+    supersedingSessionGenerations.clear();
+    attachHomeWebContentsIds.clear();
+    closeAllUrgentInputPorts();
+    rejectAllPending(error);
+    terminalOutputChannel?.closeAll?.();
     for (const listener of [...terminalInterceptorWarningListeners]) {
       try {
         listener(Object.freeze({ code: "worker-exit", message: error.message }));
       } catch {}
     }
-    for (const [sessionId, webContentsId] of sessionWebContentsIds.entries()) {
-      notifySessionClosed(sessionId, "worker-exit");
-      const targets = new Set();
-      if (webContentsId != null) targets.add(webContentsId);
-      const homeId = attachHomeWebContentsIds.get(sessionId);
-      if (homeId != null) targets.add(homeId);
+    for (const { sessionId, targets } of sessionNotifications) {
       for (const targetId of targets) {
         try {
           const contents = electronModule?.webContents?.fromId?.(targetId);
@@ -1000,20 +1324,8 @@ function createTerminalWorkerManager(options = {}) {
           // Ignore renderer notification failures while unwinding a crashed worker.
         }
       }
+      notifySessionClosed(sessionId, "worker-exit");
     }
-    child = null;
-    pendingOutput.clear();
-    pendingOutputBytes.clear();
-    closedSessions.clear();
-    outputPortPending.clear();
-    outputPortReady.clear();
-    outputRoutePending.clear();
-    sessionWebContentsIds.clear();
-    sessionGenerations.clear();
-    attachHomeWebContentsIds.clear();
-    closeAllUrgentInputPorts();
-    terminalOutputChannel?.closeAll?.();
-    rejectAllPending(error);
   }
 
   function ensureStarted() {
@@ -1021,47 +1333,106 @@ function createTerminalWorkerManager(options = {}) {
     if (!utilityProcess?.fork) {
       throw new Error("Electron utilityProcess is unavailable");
     }
-    child = utilityProcess.fork(workerScriptPath);
-    child.on?.("message", handleMessage);
-    child.on?.("exit", handleExit);
-    return child;
+    const worker = utilityProcess.fork(workerScriptPath);
+    child = worker;
+    worker.on?.("message", (message) => {
+      if (child === worker) handleMessage(message);
+    });
+    worker.on?.("exit", (code) => {
+      if (child === worker) handleExit(code);
+    });
+    return worker;
   }
 
   function request(channel, payload, optionsForRequest = {}) {
+    if (channel === "netcatty:close:await"
+      && payload?.sessionId
+      && closedSessions.has(payload.sessionId)
+      && !pendingSessionStartSequences.has(payload.sessionId)) {
+      return Promise.resolve(undefined);
+    }
     const requestId = randomUUID();
     const worker = ensureStarted();
+    const requestSequence = ++sessionLifecycleSequence;
+    const requestedSessionId = payload?.sessionId && SESSION_START_CHANNELS.has(channel)
+      ? payload.sessionId
+      : null;
     const promise = new Promise((resolve, reject) => {
       pending.set(requestId, {
         resolve,
         reject,
+        requestSequence,
+        requestedSessionId,
         webContentsId: optionsForRequest.webContentsId,
         opensOutputSession: channel === "netcatty:start"
           || channel === "netcatty:local:reconnect"
           || /^(?:netcatty:)(?:local|telnet|mosh|et|serial):start$/u.test(channel),
       });
     });
+    let notifyClosedAfterPost = false;
     if (channel === "netcatty:close:await" && payload?.sessionId) {
+      const closesPendingLifecycle = hasPendingSessionLifecycle(payload.sessionId);
+      notifyClosedAfterPost = !closedSessions.has(payload.sessionId) || closesPendingLifecycle;
+      cancelPendingSessionStart(payload.sessionId);
       notifyExplicitSessionClose(payload.sessionId);
-      if (!closedSessions.has(payload.sessionId)) notifySessionClosed(payload.sessionId, "closed");
       closeOutputSession(payload.sessionId);
-    } else if (payload?.sessionId && SESSION_START_CHANNELS.has(channel)) {
-      closedSessions.delete(payload.sessionId);
+    } else if (requestedSessionId) {
+      if (pendingSessionStartSequences.has(requestedSessionId)) {
+        clearBufferedOutput(requestedSessionId);
+        suppressedPendingOutputSessions.add(requestedSessionId);
+      }
+      pendingSessionStartSequences.set(requestedSessionId, requestSequence);
+      latestSessionStartSequences.set(requestedSessionId, requestSequence);
     }
-    worker.postMessage({
-      kind: "request",
-      requestId,
-      channel,
-      payload,
-      webContentsId: optionsForRequest.webContentsId,
-    });
+    try {
+      worker.postMessage({
+        kind: "request",
+        requestId,
+        channel,
+        payload,
+        webContentsId: optionsForRequest.webContentsId,
+      });
+    } catch (error) {
+      retireWorkerAfterIpcFailure(worker, error);
+      const entry = pending.get(requestId);
+      pending.delete(requestId);
+      finishPendingSessionStart(entry);
+      entry?.reject(error);
+    }
+    if (notifyClosedAfterPost) notifySessionClosed(payload.sessionId, "closed");
     return promise;
   }
 
   function send(channel, payload, optionsForSend = {}) {
-    if (channel === "netcatty:close" && payload?.sessionId) {
-      notifyExplicitSessionClose(payload.sessionId);
-      if (!closedSessions.has(payload.sessionId)) notifySessionClosed(payload.sessionId, "closed");
+    if (channel === "netcatty:close"
+      && payload?.sessionId
+      && closedSessions.has(payload.sessionId)
+      && !pendingSessionStartSequences.has(payload.sessionId)) {
       closeOutputSession(payload.sessionId);
+      return;
+    }
+    if (channel === "netcatty:close" && payload?.sessionId) {
+      const closesPendingLifecycle = hasPendingSessionLifecycle(payload.sessionId);
+      const shouldNotifyClosed = !closedSessions.has(payload.sessionId) || closesPendingLifecycle;
+      cancelPendingSessionStart(payload.sessionId);
+      notifyExplicitSessionClose(payload.sessionId);
+      closeOutputSession(payload.sessionId);
+      let postError = null;
+      const worker = ensureStarted();
+      try {
+        worker.postMessage({
+          kind: "send",
+          channel,
+          payload,
+          webContentsId: optionsForSend.webContentsId,
+        });
+      } catch (error) {
+        retireWorkerAfterIpcFailure(worker, error);
+        postError = error;
+      }
+      if (shouldNotifyClosed) notifySessionClosed(payload.sessionId, "closed");
+      if (postError) throw postError;
+      return;
     }
     if (channel === "netcatty:interrupt") {
       const trace = normalizeTrace(payload);
@@ -1071,25 +1442,42 @@ function createTerminalWorkerManager(options = {}) {
         hasChild: Boolean(child),
       }, trace);
     }
-    ensureStarted().postMessage({
-      kind: "send",
-      channel,
-      payload,
-      webContentsId: optionsForSend.webContentsId,
-    });
+    const worker = ensureStarted();
+    try {
+      worker.postMessage({
+        kind: "send",
+        channel,
+        payload,
+        webContentsId: optionsForSend.webContentsId,
+      });
+    } catch (error) {
+      retireWorkerAfterIpcFailure(worker, error);
+      throw error;
+    }
   }
 
   function attachTerminalInterceptor(descriptor, port) {
     if (!port) throw new TypeError("Terminal interceptor port is required");
-    ensureStarted().postMessage({
-      kind: "terminal-interceptor-port",
-      ...descriptor,
-    }, [port]);
+    const worker = ensureStarted();
+    try {
+      worker.postMessage({
+        kind: "terminal-interceptor-port",
+        ...descriptor,
+      }, [port]);
+    } catch (error) {
+      retireWorkerAfterIpcFailure(worker, error);
+      throw error;
+    }
   }
 
   function detachTerminalInterceptor(sessionId, direction) {
     if (!child) return;
-    child.postMessage({ kind: "terminal-interceptor-detach", sessionId, direction });
+    const worker = child;
+    try {
+      worker.postMessage({ kind: "terminal-interceptor-detach", sessionId, direction });
+    } catch (error) {
+      retireWorkerAfterIpcFailure(worker, error);
+    }
   }
 
   function onTerminalInterceptorWarning(listener) {
@@ -1120,11 +1508,18 @@ function createTerminalWorkerManager(options = {}) {
       pendingOutput.clear();
       pendingOutputBytes.clear();
       closedSessions.clear();
+      closedSessionSequences.clear();
       outputPortPending.clear();
       outputPortReady.clear();
       outputRoutePending.clear();
+      pendingSessionStartSequences.clear();
+      latestSessionStartSequences.clear();
+      suppressedPendingOutputSessions.clear();
+      workerSessionIds.clear();
       sessionWebContentsIds.clear();
       sessionGenerations.clear();
+      closedSessionGenerations.clear();
+      supersedingSessionGenerations.clear();
       closeAllUrgentInputPorts();
       terminalInterceptorWarningListeners.clear();
       sessionOwnedListeners.clear();
