@@ -5,6 +5,7 @@ import type { Terminal as XTerm } from "@xterm/xterm";
 
 import {
   MAX_TERMINAL_LINE_TIMESTAMP_ENTRIES,
+  applyAltScreenAction,
   createTerminalLineTimestampSegmenter,
   formatTerminalLineTimestamp,
   getTerminalLineTimestampLedgerCount,
@@ -16,6 +17,7 @@ import {
   resolveTerminalTimestampGutterRowsFromLedger,
   tryMeasureVisualRows,
   writeTerminalDataWithLineTimestamps,
+  type StampCursorEstimate,
 } from "./terminalLineTimestamps.ts";
 
 const createFakeTerm = (options: {
@@ -665,6 +667,61 @@ test("records a ledger stamp after leaving alternate screen", () => {
   assert.ok(getTerminalLineTimestampLedgerCount(term as never) >= 1);
 });
 
+test("applyAltScreenAction never rewinds normal-buffer line or column", () => {
+  // Pure truth table: enter/leave × altActive; line/col immutable.
+  const base: StampCursorEstimate = {
+    absoluteLine: 7,
+    column: 3,
+    wraparoundMode: true,
+    altActive: false,
+  };
+  const cases: Array<{
+    name: string;
+    start: StampCursorEstimate;
+    action: "enter" | "leave";
+    expectAlt: boolean;
+  }> = [
+    {
+      name: "enter while normal",
+      start: { ...base, altActive: false },
+      action: "enter",
+      expectAlt: true,
+    },
+    {
+      name: "enter while already alt",
+      start: { ...base, altActive: true },
+      action: "enter",
+      expectAlt: true,
+    },
+    {
+      name: "leave while alt",
+      start: { ...base, altActive: true },
+      action: "leave",
+      expectAlt: false,
+    },
+    {
+      name: "spurious leave while already normal",
+      start: { ...base, altActive: false, absoluteLine: 7, column: 3 },
+      action: "leave",
+      expectAlt: false,
+    },
+  ];
+  for (const row of cases) {
+    const next = applyAltScreenAction(row.start, row.action);
+    assert.equal(next.absoluteLine, row.start.absoluteLine, row.name);
+    assert.equal(next.column, row.start.column, row.name);
+    assert.equal(next.wraparoundMode, row.start.wraparoundMode, row.name);
+    assert.equal(next.altActive, row.expectAlt, row.name);
+  }
+  // enter then leave preserves line/col from mid-walk freeze point.
+  const afterEnter = applyAltScreenAction({ ...base, absoluteLine: 1 }, "enter");
+  const afterLeave = applyAltScreenAction(afterEnter, "leave");
+  assert.equal(afterLeave.absoluteLine, 1);
+  assert.equal(afterLeave.altActive, false);
+});
+
+// --- Three write-path integrations for alt/seed/leave (shipped entry) ---
+
 test("alt-screen newlines do not inflate post-exit stamp anchor lines", () => {
   const { term, liveMarkers } = createFakeTerm({ rows: 24, scrollback: 1000 });
   // Many hard newlines inside the alt screen must not push the restored
@@ -685,8 +742,7 @@ test("alt-screen newlines do not inflate post-exit stamp anchor lines", () => {
 
 test("same-chunk normal advance before enter is kept after leave for post-TUI stamp", () => {
   // Leading hard newline advances the normal estimate to line 1 with no stamp
-  // yet; enter freezes that estimate; leave must NOT re-read pre-write
-  // buffer.normal (line 0) or the post-TUI prompt stamp pins to the wrong row.
+  // yet; enter freezes that estimate; leave must not rewind to line 0.
   const { term, liveMarkers } = createFakeTerm({ rows: 24, scrollback: 1000, cols: 80 });
   const payload = `\r\n\x1b[?1049h${"frame\n".repeat(20)}\x1b[?1049lprompt\r\n`;
   writeTerminalDataWithLineTimestamps(term as never, payload, () => {}, {
@@ -699,6 +755,24 @@ test("same-chunk normal advance before enter is kept after leave for post-TUI st
     liveMarkers[0]?.line,
     1,
     `expected prompt stamp on advanced normal line 1, got ${liveMarkers[0]?.line}`,
+  );
+});
+
+test("spurious leave without enter keeps same-chunk normal advance for prompt stamp", () => {
+  // Skeptic: '\r\n\x1b[?1049lprompt\r\n' must stamp line 1, not rewind to 0.
+  const { term, liveMarkers } = createFakeTerm({ rows: 24, scrollback: 1000, cols: 80 });
+  writeTerminalDataWithLineTimestamps(
+    term as never,
+    "\r\n\x1b[?1049lprompt\r\n",
+    () => {},
+    { timestampDate: new Date(2026, 5, 6, 12, 0, 0) },
+  );
+  assert.equal(getTerminalLineTimestampLedgerCount(term as never), 1);
+  assert.equal(liveMarkers.length, 1);
+  assert.equal(
+    liveMarkers[0]?.line,
+    1,
+    `expected stamp on line 1 after leading \\n + spurious leave, got ${liveMarkers[0]?.line}`,
   );
 });
 

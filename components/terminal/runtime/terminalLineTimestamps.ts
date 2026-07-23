@@ -609,19 +609,33 @@ const advanceStampCursorByData = (
   };
 };
 
-type StampCursorEstimate = {
+/**
+ * Stamp line estimate in **normal-buffer** coordinates only.
+ * Seeded once per write (active cursor, or buffer.normal when already on alt).
+ * Enter freezes advancement; leave never rewinds line/col from the live term.
+ */
+export type StampCursorEstimate = {
   absoluteLine: number;
   column: number;
   wraparoundMode: boolean;
   /** True while DEC alt-screen is active — do not advance normal-buffer lines. */
   altActive: boolean;
-  /**
-   * True after an enter CSI in this walk. Leave then keeps the frozen
-   * in-walk estimate (includes same-chunk normal advances before enter).
-   * When false and we leave, the write started on alt — restore from
-   * buffer.normal (pre-write active cursor is the TUI row).
-   */
-  enteredAltInWalk: boolean;
+};
+
+/**
+ * Pure alt-screen enter/leave for stamp estimates.
+ * Invariant: absoluteLine/column always mean normal-buffer coords and never
+ * change here — leave must not re-read term.buffer (spurious 1049l, same-chunk
+ * pre-enter advances, already-on-alt seed are all handled by seed + freeze).
+ */
+export const applyAltScreenAction = (
+  cursor: StampCursorEstimate,
+  action: "enter" | "leave",
+): StampCursorEstimate => {
+  if (action === "enter") {
+    return { ...cursor, altActive: true };
+  }
+  return { ...cursor, altActive: false };
 };
 
 /**
@@ -635,13 +649,7 @@ const advanceStampCursorThroughData = (
   data: string,
   columns: number,
 ): StampCursorEstimate => {
-  let {
-    absoluteLine,
-    column,
-    wraparoundMode,
-    altActive,
-    enteredAltInWalk,
-  } = cursor;
+  let { absoluteLine, column, wraparoundMode, altActive } = cursor;
   for (let index = 0; index < data.length;) {
     if (data[index] === "\x1b") {
       const sequence = readEscapeSequence(data, index);
@@ -654,23 +662,11 @@ const advanceStampCursorThroughData = (
         break;
       }
       const altAction = getAlternateScreenAction(sequence.sequence);
-      if (altAction === "enter") {
-        // Freeze the current normal-buffer estimate; alt rows must not advance it.
-        altActive = true;
-        enteredAltInWalk = true;
-      } else if (altAction === "leave") {
-        altActive = false;
-        if (enteredAltInWalk) {
-          // Same-chunk enter: keep frozen line/col (do NOT re-read pre-write
-          // buffer.normal — that would wipe normal advances before enter).
-          enteredAltInWalk = false;
-        } else {
-          // Write started already on alt: active cursor is the TUI row; restore
-          // the saved primary-buffer position xterm keeps on buffer.normal.
-          const restored = getNormalBufferCursorState(term);
-          absoluteLine = restored.absoluteLine;
-          column = restored.column;
-        }
+      if (altAction) {
+        ({ absoluteLine, column, wraparoundMode, altActive } = applyAltScreenAction(
+          { absoluteLine, column, wraparoundMode, altActive },
+          altAction,
+        ));
       }
       const wrapAction = getWraparoundAction(sequence.sequence);
       if (wrapAction !== null && !altActive) {
@@ -700,13 +696,7 @@ const advanceStampCursorThroughData = (
     }
     index = end;
   }
-  return {
-    absoluteLine,
-    column,
-    wraparoundMode,
-    altActive,
-    enteredAltInWalk,
-  };
+  return { absoluteLine, column, wraparoundMode, altActive };
 };
 
 const disposeLedgerMarker = (entry: TimestampLedgerEntry): void => {
@@ -1688,8 +1678,6 @@ const writeTerminalDataWithSecondLedger = (
     column: seedCursor.column,
     wraparoundMode: _getTerminalWraparoundMode(term),
     altActive: startedOnAlt,
-    // Leave only re-reads buffer.normal when we never saw enter in this walk.
-    enteredAltInWalk: false,
   };
   const columns = _getTerminalColumnCount(term);
   const capacity = resolveTerminalLineTimestampCapacity(term);
