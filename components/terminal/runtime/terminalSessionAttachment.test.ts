@@ -543,6 +543,36 @@ test("hidden output keeps its arrival second when a batch crosses a clock bounda
   }
 });
 
+test("visible alternate-screen output stays frame-batched across a clock boundary", () => {
+  const { term, writes } = createFakeTerm("alternate");
+  const ctx = {
+    ...createContext(false),
+    isVisibleRef: { current: true },
+    isPaneVisibleRef: { current: true },
+  };
+  const originalDateNow = Date.now;
+  let fakeNow = new Date(2026, 0, 1, 12, 0, 59, 800).getTime();
+  Date.now = () => fakeNow;
+
+  try {
+    withAnimationFrameQueue((schedule) => {
+      writeSessionData(ctx as never, term, "frame-a");
+      assert.ok(schedule.scheduledCount() >= 1);
+      assert.deepEqual(writes, []);
+
+      fakeNow = new Date(2026, 0, 1, 12, 1, 0, 20).getTime();
+      writeSessionData(ctx as never, term, "frame-b");
+      assert.deepEqual(writes, []);
+
+      schedule.flushScheduled();
+      assert.equal(writes.join(""), "frame-aframe-b");
+    });
+  } finally {
+    Date.now = originalDateNow;
+    resetTerminalWriteCoalescer(term);
+  }
+});
+
 test("writeSessionData keeps the current perf trace when hidden output is flushed", () => {
   const payload = "hidden current output\n";
   const writes: string[] = [];

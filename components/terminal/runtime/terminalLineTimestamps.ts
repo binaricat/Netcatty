@@ -1226,10 +1226,12 @@ export const writeTerminalDataWithLineTimestamps = (
       dataSegmentCount >= MIN_BATCHED_TIMESTAMP_DATA_SEGMENTS
       || data.length >= BULK_TIMESTAMP_BATCH_MIN_BYTES
     )
-    // Tab stops are mutable terminal state. The row estimator intentionally
-    // avoids xterm internals, so keep tabbed writes on the ordered segmented
+    // Tab stops, delayed wrap around backspaces, and ANSI newline mode depend
+    // on live xterm parser state. Keep those writes on the ordered segmented
     // path where marker positions come from xterm after each write.
     && !data.includes("\t")
+    && !data.includes("\b")
+    && (term as XTerm & { options?: { convertEol?: boolean } }).options?.convertEol !== true
     // Cheap ASCII gate first (seq / log floods); otherwise one validate+measure probe.
     && (
       isSimpleAsciiControlText(data)

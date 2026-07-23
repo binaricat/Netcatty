@@ -415,7 +415,12 @@ export const writeSessionData = (
   const isPaneCurrentlyVisible = () => isTerminalPaneVisible(ctx);
   const isPaneVisible = isPaneCurrentlyVisible();
   const timestampDate = new Date(Date.now());
-  flushBeforeTimestampBoundary(term, timestampDate);
+  // Hidden panes may wait before their coalesced output is drained, so keep
+  // their timestamp batches inside the arrival second. Visible panes must stay
+  // frame-batched, especially while full-screen terminal apps repaint.
+  if (!isPaneVisible) {
+    flushBeforeTimestampBoundary(term, timestampDate);
+  }
   const perfTrace = createTerminalOutputPerfTrace({
     sessionId: ctx.sessionRef.current ?? ctx.sessionId,
     data,

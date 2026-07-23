@@ -404,13 +404,21 @@ test("falls back from batched timestamp markers for combined alternate-screen se
   assert.deepEqual(markerLines, [0, 2]);
 });
 
-test("accounts for backspace cursor movement when batching timestamp markers", () => {
+test("keeps backspace writes on the segmented timestamp path", () => {
   const { term, writes, markerLines } = createFakeTerm({ cols: 5 });
+  const steps: string[] = [];
   const lines = Array.from({ length: 80 }, () => "abc\b\b\bdef").join("\r\n");
 
-  writeTerminalDataWithLineTimestamps(term as never, lines, () => {});
+  writeTerminalDataWithLineTimestamps(
+    term as never,
+    lines,
+    () => {},
+    { onStep: (step) => steps.push(step.kind) },
+  );
 
-  assert.deepEqual(writes, [lines]);
+  assert.equal(writes.join(""), lines);
+  assert.equal(steps.includes("batched-write"), false);
+  assert.equal(steps.includes("segmented-write"), true);
   assert.deepEqual(markerLines, Array.from({ length: 80 }, (_, index) => index));
 });
 
@@ -452,6 +460,65 @@ test("uses changed xterm tab stops when placing timestamps", async () => {
     const rows = getVisibleTerminalLineTimestampRows(term);
     assert.deepEqual(rows.map(({ row }) => row), [0, 1, 2]);
     assert.ok(rows.every(({ label }) => /^\d{2}:\d{2}:\d{2}$/.test(label)));
+  } finally {
+    term.dispose();
+  }
+});
+
+test("uses xterm delayed-wrap state when backspaces follow a full row", async () => {
+  const require = createRequire(import.meta.url);
+  const { Terminal } = require("@xterm/xterm") as {
+    Terminal: new (options: Record<string, unknown>) => XTerm;
+  };
+  const term = new Terminal({ cols: 5, rows: 8, scrollback: 20, allowProposedApi: true });
+  const steps: string[] = [];
+
+  try {
+    await new Promise<void>((resolve) => {
+      writeTerminalDataWithLineTimestamps(
+        term,
+        "bc\r\n\b\b12345\bbc",
+        resolve,
+        { onStep: (step) => steps.push(step.kind) },
+      );
+    });
+
+    assert.equal(steps.includes("batched-write"), false);
+    assert.equal(steps.includes("segmented-write"), true);
+    assert.deepEqual(
+      getVisibleTerminalLineTimestampRows(term).map(({ row }) => row),
+      [0, 1],
+    );
+  } finally {
+    term.dispose();
+  }
+});
+
+test("uses xterm newline mode when placing timestamps", async () => {
+  const require = createRequire(import.meta.url);
+  const { Terminal } = require("@xterm/xterm") as {
+    Terminal: new (options: Record<string, unknown>) => XTerm;
+  };
+  const term = new Terminal({ cols: 10, rows: 8, scrollback: 20, allowProposedApi: true });
+  const steps: string[] = [];
+
+  try {
+    await new Promise<void>((resolve) => term.write("\x1b[20h", resolve));
+    await new Promise<void>((resolve) => {
+      writeTerminalDataWithLineTimestamps(
+        term,
+        "aa\n123456789\r\nb",
+        resolve,
+        { onStep: (step) => steps.push(step.kind) },
+      );
+    });
+
+    assert.equal(steps.includes("batched-write"), false);
+    assert.equal(steps.includes("segmented-write"), true);
+    assert.deepEqual(
+      getVisibleTerminalLineTimestampRows(term).map(({ row }) => row),
+      [0, 1, 2],
+    );
   } finally {
     term.dispose();
   }
