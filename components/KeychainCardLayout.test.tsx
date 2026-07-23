@@ -11,6 +11,7 @@ import { IdentityCard } from "./keychain/IdentityCard.tsx";
 import { KeyCard } from "./keychain/KeyCard.tsx";
 import {
   shouldShowIdentitySection,
+  shouldShowKeySection,
   shouldShowSearchNoResults,
 } from "./keychain/utils.ts";
 
@@ -236,6 +237,34 @@ test("keychain search keeps identities for identity matches or no results", () =
     filteredIdentityCount: 0,
     filteredKeyCount: 0,
     search: "no-results",
+  }), true);
+});
+
+test("keychain search shows both sections when both kinds match", () => {
+  const state = {
+    activeFilter: "key" as const,
+    identityCount: 1,
+    filteredIdentityCount: 1,
+    filteredKeyCount: 1,
+    search: "shared-label",
+  };
+
+  assert.equal(shouldShowIdentitySection(state), true);
+  assert.equal(shouldShowKeySection(state), true);
+});
+
+test("keychain browsing keeps sections exclusive outside search", () => {
+  assert.equal(shouldShowKeySection({
+    activeFilter: "key",
+    identityCount: 1,
+    filteredKeyCount: 1,
+    search: "",
+  }), false);
+  assert.equal(shouldShowKeySection({
+    activeFilter: "key",
+    identityCount: 0,
+    filteredKeyCount: 1,
+    search: "",
   }), true);
 });
 

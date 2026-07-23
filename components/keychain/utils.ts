@@ -88,6 +88,21 @@ export const shouldShowIdentitySection = ({
     return filteredIdentityCount > 0 || filteredKeyCount === 0;
 };
 
+export const shouldShowKeySection = ({
+    activeFilter,
+    identityCount,
+    filteredKeyCount,
+    search,
+}: Pick<
+    IdentitySectionVisibilityOptions,
+    'activeFilter' | 'identityCount' | 'filteredKeyCount' | 'search'
+>): boolean => {
+    if (activeFilter !== 'key' || identityCount === 0) return true;
+    if (!search.trim()) return false;
+
+    return filteredKeyCount > 0;
+};
+
 export const shouldShowSearchNoResults = (
     search: string,
     filteredItemCount: number,

@@ -66,6 +66,7 @@ import {
   KeyCard,
   type PanelMode,
   shouldShowIdentitySection,
+  shouldShowKeySection,
   shouldShowSearchNoResults,
   ViewKeyPanel,
 } from "./keychain";
@@ -267,7 +268,12 @@ echo $3 >> "$FILE"`);
     filteredKeyCount: filteredKeys.length,
     search,
   });
-  const showKeySection = !showIdentitySection;
+  const showKeySection = shouldShowKeySection({
+    activeFilter,
+    identityCount: identities.length,
+    filteredKeyCount: filteredKeys.length,
+    search,
+  });
 
   // Push a new panel onto the stack
   const pushPanel = useCallback((newPanel: PanelMode) => {
