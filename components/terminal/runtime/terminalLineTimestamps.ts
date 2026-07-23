@@ -35,11 +35,10 @@ type TimestampEntry = {
 type TimestampStore = {
   segmenter: TerminalLineTimestampSegmenter;
   /**
-   * Dense ring of live markers. Always records (even when the gutter is off)
-   * so expanding timestamps later still shows history — same product model as
-   * iTerm2, where per-line time lives in buffer metadata and display is a
-   * view toggle. Capacity is capped to scrollback so flood output cannot grow
-   * unboundedly.
+   * Dense ring of live markers for hosts with line timestamps enabled.
+   * Capacity is capped to scrollback so flood output cannot grow unboundedly.
+   * When the host gutter is off we skip this store on the write path; recording
+   * starts when the user turns timestamps on.
    */
   entries: TimestampEntry[];
   /**
@@ -120,6 +119,12 @@ export type TerminalLineTimestampDiagnostics = {
 export type TerminalLineTimestampWriteOptions = TerminalLineTimestampDiagnostics & {
   /** Wall-clock arrival time for this batch, preserved across delayed writes. */
   timestampDate?: Date;
+  /**
+   * When false, skip segmenter/marker work and write bytes only.
+   * Defaults to true for direct unit-test callers; production passes the host
+   * `showLineTimestamps` flag so disabled gutters stay off the hot path.
+   */
+  enabled?: boolean;
 };
 
 const stores = new WeakMap<XTerm, TimestampStore>();
@@ -887,6 +892,13 @@ const measureSimpleAsciiRows = (
  * Returns null when the chunk contains sequences we cannot bulk-measure safely
  * (caller falls back to line-feed counting / segmented writes).
  */
+/** Test-only: counts tryMeasureVisualRows invocations on the shipped path. */
+let visualRowMeasureCountForTests = 0;
+export const getVisualRowMeasureCountForTests = (): number => visualRowMeasureCountForTests;
+export const resetVisualRowMeasureCountForTests = (): void => {
+  visualRowMeasureCountForTests = 0;
+};
+
 export const tryMeasureVisualRows = (
   term: XTerm,
   data: string,
@@ -894,6 +906,7 @@ export const tryMeasureVisualRows = (
   columns: number,
   startWraparoundMode: boolean,
 ): MeasuredTerminalRows | null => {
+  visualRowMeasureCountForTests += 1;
   if (isSimpleAsciiControlText(data)) {
     return measureSimpleAsciiRows(data, startColumn, columns, startWraparoundMode);
   }
@@ -963,17 +976,23 @@ export const tryMeasureVisualRows = (
   return { rowOffset, column, wraparoundMode };
 };
 
-/** @deprecated Prefer tryMeasureVisualRows — kept for call-site clarity in gates. */
-const canMeasureVisualRows = (term: XTerm, data: string): boolean => (
-  isSimpleAsciiControlText(data)
-  || tryMeasureVisualRows(
+/**
+ * True when `data` can be bulk-measured without a full width walk.
+ * Avoids calling tryMeasureVisualRows at the batch gate (that used to double
+ * measure: once with fake geometry at the gate, again per segment for offsets).
+ */
+export const canBulkMeasureTerminalData = (term: XTerm, data: string): boolean => {
+  if (isSimpleAsciiControlText(data)) return true;
+  // Real geometry validity check only when non-ASCII/CSI is present — still a
+  // single measure later in writeBatchedTimestampSegments for marker offsets.
+  return tryMeasureVisualRows(
     term,
     data,
     0,
     Number.POSITIVE_INFINITY,
     true,
-  ) !== null
-);
+  ) !== null;
+};
 
 const writeBatchedTimestampSegments = (
   term: XTerm,
@@ -982,6 +1001,11 @@ const writeBatchedTimestampSegments = (
   segments: TerminalLineTimestampSegment[],
   done: () => void,
   diagnostics?: TerminalLineTimestampDiagnostics,
+  /**
+   * Optional pre-measured full-batch geometry when the batch is a single data
+   * segment equal to `data` (reuses the gate measure; no second walk).
+   */
+  premeasuredFullBatch?: MeasuredTerminalRows | null,
 ): void => {
   const timestamps: Array<{ label: string; rowOffset: number }> = [];
   const columns = getTerminalColumnCount(term);
@@ -991,17 +1015,30 @@ const writeBatchedTimestampSegments = (
   const shouldMeasureDiagnostics = Boolean(diagnostics);
   const measureStartedAt = shouldMeasureDiagnostics ? performance.now() : 0;
 
+  const dataSegments = segments.filter(
+    (segment): segment is { kind: "data"; data: string } => segment.kind === "data",
+  );
+  const canReuseFullBatchMeasure = Boolean(
+    premeasuredFullBatch
+    && dataSegments.length === 1
+    && dataSegments[0]!.data === data
+  );
+
   for (const segment of segments) {
     if (segment.kind === "timestamp") {
       timestamps.push({ label: segment.label, rowOffset });
       continue;
     }
-    const measured = tryMeasureVisualRows(
-      term,
-      segment.data,
-      column,
-      columns,
-      wraparoundMode,
+    const measured = (
+      canReuseFullBatchMeasure && segment.data === data
+        ? premeasuredFullBatch!
+        : tryMeasureVisualRows(
+          term,
+          segment.data,
+          column,
+          columns,
+          wraparoundMode,
+        )
     ) ?? {
       // Unmeasurable chunk: preserve prior column/wrap state and count hard newlines only.
       rowOffset: countLineFeeds(segment.data),
@@ -1179,6 +1216,12 @@ export const writeTerminalDataWithLineTimestamps = (
     });
   };
 
+  // Host gutter off: skip segmenter/store/markers entirely (plain write).
+  if (options?.enabled === false) {
+    writeFallbackOnly(data, done);
+    return;
+  }
+
   const registerMarker = (term as XTerm & { registerMarker?: unknown }).registerMarker;
   if (typeof registerMarker !== "function") {
     writeFallbackOnly(data, done);
@@ -1246,14 +1289,45 @@ export const writeTerminalDataWithLineTimestamps = (
     && !data.includes("\t")
     && !data.includes("\b")
     && (term as XTerm & { options?: { convertEol?: boolean } }).options?.convertEol !== true
-    // Cheap ASCII gate first (seq / log floods); otherwise one validate+measure probe.
-    && (
-      isSimpleAsciiControlText(data)
-      || canMeasureVisualRows(term, data)
-    )
   ) {
-    writeBatchedTimestampSegments(term, store, data, segments, done, diagnostics);
-    return;
+    // Prefer a single geometry walk per bytes measured:
+    // - one data segment: measure with real cursor/cols once, reuse in writeBatched
+    // - multi-segment / simple ASCII: validate (if needed) then measure each
+    //   segment once inside writeBatched (no second full-batch measure for reuse)
+    const isSimpleAscii = isSimpleAsciiControlText(data);
+    if (!isSimpleAscii && dataSegmentCount === 1) {
+      const premeasuredFullBatch = tryMeasureVisualRows(
+        term,
+        data,
+        getTerminalCursorColumn(term),
+        getTerminalColumnCount(term),
+        getTerminalWraparoundMode(term),
+      );
+      if (premeasuredFullBatch !== null) {
+        writeBatchedTimestampSegments(
+          term,
+          store,
+          data,
+          segments,
+          done,
+          diagnostics,
+          premeasuredFullBatch,
+        );
+        return;
+      }
+      // Unmeasurable single segment → segmented writes below.
+    } else if (isSimpleAscii || canBulkMeasureTerminalData(term, data)) {
+      writeBatchedTimestampSegments(
+        term,
+        store,
+        data,
+        segments,
+        done,
+        diagnostics,
+        null,
+      );
+      return;
+    }
   }
   const writeSegments = (
     onComplete: () => void,

@@ -39,6 +39,15 @@ const pendingAltScreenEntryByTerm = new WeakMap<XTerm, true>();
 const observedAltScreenByTerm = new WeakMap<XTerm, true>();
 /** Leave CSI was queued while xterm still reported the alternate buffer. */
 const pendingAltScreenLeaveByTerm = new WeakMap<XTerm, true>();
+/** One-shot: schedule mode consumes a probe already applied for this push. */
+const preappliedAltScreenNeedsRafByTerm = new WeakMap<XTerm, boolean>();
+
+/** Test-only: counts full CSI scans in probeAltScreenScheduling. */
+let altScreenProbeScanCountForTests = 0;
+export const getAltScreenProbeScanCountForTests = (): number => altScreenProbeScanCountForTests;
+export const resetAltScreenProbeScanCountForTests = (): void => {
+  altScreenProbeScanCountForTests = 0;
+};
 
 const isPrivateParamCharCode = (code: number): boolean =>
   (code >= 0x30 && code <= 0x39) || code === 0x3b;
@@ -62,6 +71,7 @@ const probeAltScreenScheduling = (
   data: string,
   resume: IncompletePrivateCsi | null,
 ): AltScreenProbeResult => {
+  altScreenProbeScanCountForTests += 1;
   let phase: IncompletePrivateCsi["phase"] | null = resume?.phase ?? null;
   let params = resume?.params ?? "";
   let lastTransition: "enter" | "leave" | null = null;
@@ -211,11 +221,14 @@ export const shouldPreserveTerminalWriteFrameBatch = (term: XTerm): boolean => (
   || incompleteAltScreenCsiByTerm.has(term)
 );
 
-const noteAltScreenScheduleProbe = (term: XTerm, chunk: string): boolean => {
-  // Always scan the chunk first so leave-alt CSI is observed even while
-  // buffer.active still reports "alternate" (parser lags our write schedule).
-  const resume = incompleteAltScreenCsiByTerm.get(term) ?? null;
-  const probe = probeAltScreenScheduling(chunk, resume);
+/**
+ * Apply a completed alt-screen probe to per-term latches.
+ * Returns whether the next write schedule should use rAF.
+ */
+const applyAltScreenScheduleProbeResult = (
+  term: XTerm,
+  probe: AltScreenProbeResult,
+): boolean => {
   if (probe.incomplete) {
     incompleteAltScreenCsiByTerm.set(term, probe.incomplete);
   } else {
@@ -255,6 +268,14 @@ const noteAltScreenScheduleProbe = (term: XTerm, chunk: string): boolean => {
     probe.needsRaf
     || pendingAltScreenEntryByTerm.has(term)
   );
+};
+
+const noteAltScreenScheduleProbe = (term: XTerm, chunk: string): boolean => {
+  // Always scan the chunk first so leave-alt CSI is observed even while
+  // buffer.active still reports "alternate" (parser lags our write schedule).
+  const resume = incompleteAltScreenCsiByTerm.get(term) ?? null;
+  const probe = probeAltScreenScheduling(chunk, resume);
+  return applyAltScreenScheduleProbeResult(term, probe);
 };
 
 type CoalescerByteCapResolver = () => number;
@@ -534,6 +555,7 @@ export const enqueueCoalescedTerminalWrite = (
   enqueueOptions: EnqueueCoalescedTerminalWriteOptions = {},
 ): void => {
   const resumedAltScreenCsi = incompleteAltScreenCsiByTerm.has(term);
+  // Single CSI scan for frame split + schedule latch (not a second full pass).
   const frameProbe = probeAltScreenScheduling(
     data,
     incompleteAltScreenCsiByTerm.get(term) ?? null,
@@ -555,8 +577,7 @@ export const enqueueCoalescedTerminalWrite = (
         prefix.length,
         ingressBytes,
       );
-      // Advance split CSI state for a resumed sequence that turned out not to
-      // be an alternate-screen entry before the new frame begins.
+      // Prefix may not be the enter CSI; re-probe only those bytes.
       noteAltScreenScheduleProbe(term, prefix);
       writeLargeTerminalBatch(
         prefix,
@@ -577,6 +598,9 @@ export const enqueueCoalescedTerminalWrite = (
     }
   }
 
+  // Apply the single full-chunk probe once before schedule/push or oversized write.
+  const needsRafFromProbe = applyAltScreenScheduleProbeResult(term, frameProbe);
+
   const maxPendingBytes = resolveCoalescerByteCap(term);
   // Size caps always drain, even when the frame gate holds scheduled flushes
   // (hidden panes). Otherwise continuous logs pile multi-MB joins for the
@@ -588,9 +612,7 @@ export const enqueueCoalescedTerminalWrite = (
   }
   terminalWriteCoalescerWriters.set(term, writeNow);
   if (data.length > maxPendingBytes) {
-    // Oversized batches skip the coalescer frame arm, but still must latch
-    // enter-alt-screen so follow-up repaint chunks use rAF.
-    noteAltScreenScheduleProbe(term, data);
+    // Oversized batches skip the coalescer frame arm; probe already latched above.
     writeLargeTerminalBatch(
       data,
       ingressBytes,
@@ -623,6 +645,10 @@ export const enqueueCoalescedTerminalWrite = (
     terminalWriteCoalescerChunkBoundaries.set(term, boundaries);
   }
 
+  // Hand the already-applied probe result to schedule mode so push() does not
+  // re-scan these bytes.
+  preappliedAltScreenNeedsRafByTerm.set(term, needsRafFromProbe);
+
   let coalescer = terminalWriteCoalescers.get(term);
   if (!coalescer) {
     coalescer = createWriteCoalescer((batch) => {
@@ -650,9 +676,12 @@ export const enqueueCoalescedTerminalWrite = (
       // When rAF is unavailable (Node unit tests), prefer the "raf" mode so the
       // coalescer falls back to an immediate flush (legacy test contract).
       resolveScheduleMode: ({ nextChunk }): WriteCoalesceScheduleMode => {
-        // Probe always runs (handles leave while buffer is still alternate).
-        // O(chunk) parser state — no quadratic pending joins.
-        if (noteAltScreenScheduleProbe(term, nextChunk)) {
+        const preapplied = preappliedAltScreenNeedsRafByTerm.get(term);
+        if (preapplied !== undefined) {
+          preappliedAltScreenNeedsRafByTerm.delete(term);
+          if (preapplied) return "raf";
+        } else if (noteAltScreenScheduleProbe(term, nextChunk)) {
+          // Later pushes (or paths without a preapplied probe) still scan once.
           return "raf";
         }
         // Bulk pressure: prefer rAF so the browser can paint between flushes.
@@ -672,6 +701,8 @@ export const enqueueCoalescedTerminalWrite = (
     terminalWriteCoalescers.set(term, coalescer);
   }
   coalescer.push(data);
+  // If push did not consume the preapplied flag (e.g. empty/disposed), drop it.
+  preappliedAltScreenNeedsRafByTerm.delete(term);
   if (flushAfterAltScreenLeave) {
     // Do not let shell output after a TUI exit inherit a later batch timestamp.
     // Keeping the leave and its same-chunk suffix together also lets the
@@ -722,6 +753,7 @@ export const resetTerminalWriteCoalescer = (term: XTerm): void => {
   pendingAltScreenEntryByTerm.delete(term);
   observedAltScreenByTerm.delete(term);
   pendingAltScreenLeaveByTerm.delete(term);
+  preappliedAltScreenNeedsRafByTerm.delete(term);
 };
 
 export const getTerminalWriteCoalescerPendingBytes = (term: XTerm): number =>
@@ -742,6 +774,7 @@ export const abortTerminalWriteCoalescer = (
   pendingAltScreenEntryByTerm.delete(term);
   observedAltScreenByTerm.delete(term);
   pendingAltScreenLeaveByTerm.delete(term);
+  preappliedAltScreenNeedsRafByTerm.delete(term);
 
   const coalescer = terminalWriteCoalescers.get(term);
   if (!coalescer) return;

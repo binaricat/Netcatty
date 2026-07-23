@@ -98,7 +98,9 @@ const createFakeTerm = (activeType = "normal") => {
 };
 
 const createContext = (showLineTimestamps: boolean, host: Record<string, unknown> = {}) => ({
-  host,
+  // Production gates markers on host.showLineTimestamps; keep the first arg as
+  // the host default unless the test overrides host explicitly.
+  host: { showLineTimestamps, ...host },
   terminalSettingsRef: {
     current: {
       showLineTimestamps,
@@ -524,7 +526,8 @@ test("frequent hidden log lines are drained in one complete terminal write", asy
   await new Promise((resolve) => { setTimeout(resolve, 190); });
 
   assert.deepEqual(writes, [chunks.join("")]);
-  assert.equal(markerLines.length, chunks.length);
+  // Host timestamps off: drain still completes without marker work.
+  assert.equal(markerLines.length, 0);
   assert.equal(getFlowController(ctx as never, term).pendingBytes(), 0);
   resetTerminalWriteCoalescer(term);
 });
@@ -1469,12 +1472,13 @@ test("writeSessionData records terminal output timestamps without changing outpu
   assert.deepEqual(markerLines, [0, 1]);
 });
 
-test("writeSessionData keeps timestamp metadata when the host gutter is disabled", () => {
+test("writeSessionData skips timestamp markers when the host gutter is disabled", () => {
   const { term, writes, markerLines } = createFakeTerm();
-  writeSessionData(createContext(true, { showLineTimestamps: false }) as never, term, "hello");
+  writeSessionData(createContext(true, { showLineTimestamps: false }) as never, term, "hello\r\nnext");
 
-  assert.deepEqual(writes, ["hello"]);
-  assert.deepEqual(markerLines, [0]);
+  assert.equal(writes.join(""), "hello\r\nnext");
+  // Disabled gutters no longer pay segmenter/marker cost on the hot path.
+  assert.deepEqual(markerLines, []);
 });
 
 test("writeSessionData records timestamps for hosts with timestamps enabled", () => {
@@ -1541,7 +1545,7 @@ test("writeSessionData does not add erase-scrollback inside synchronized output"
   assert.equal(writes.join(""), "\x1b[?2026h\x1b[H\x1b[2Jframe\x1b[?2026l");
 });
 
-test("writeSessionData preserves timestamps across host gutter visibility changes", () => {
+test("writeSessionData only records timestamps while the host gutter is enabled", () => {
   const { term, writes, markerLines, disposedMarkerLines } = createFakeTerm();
   const ctx = createContext(false, { showLineTimestamps: false });
 
@@ -1552,7 +1556,8 @@ test("writeSessionData preserves timestamps across host gutter visibility change
   writeSessionData(ctx as never, term, "disabled");
 
   assert.equal(writes.join(""), "before\r\nenabled\r\ndisabled");
-  assert.deepEqual(markerLines, [0, 1, 2]);
+  // Only the enabled window records markers; earlier/later disabled writes do not.
+  assert.deepEqual(markerLines, [1]);
   assert.deepEqual(disposedMarkerLines, []);
 });
 
@@ -1562,7 +1567,7 @@ test("writeSessionData batches timestamp bookkeeping for bulk line output", () =
   // batching of markers is covered without degrading the flood fast-path.
   const payload = `${Array.from({ length: 40 }, () => "x".repeat(80)).join("\n")}\n`;
 
-  writeSessionData(createContext(false, { showLineTimestamps: false }) as never, term, payload, payload.length);
+  writeSessionData(createContext(false, { showLineTimestamps: true }) as never, term, payload, payload.length);
   flushTerminalWriteCoalescer(term);
   for (let guard = 0; guard < 1000 && flushTerminalWriteQueueBypassingTimers(term); guard += 1) {
     // Drain cooperative bulk-output timers so the assertion observes the full write plan.

@@ -666,6 +666,8 @@ const writeSessionDataImmediate = (
             ? { onStep: (step: TerminalLineTimestampPerfStep) => recordLineTimestampPerfStep(lineTimestampPerf, step) }
             : {}),
           timestampDate: writeOptions.timestampDate,
+          // Only host-enabled gutters pay segmenter/marker cost on the hot path.
+          enabled: ctx.host?.showLineTimestamps === true,
         },
       );
       if (

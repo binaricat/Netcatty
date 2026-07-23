@@ -7,6 +7,8 @@ import {
   abortTerminalWriteCoalescer,
   enqueueCoalescedTerminalWrite,
   flushTerminalWriteCoalescer,
+  getAltScreenProbeScanCountForTests,
+  resetAltScreenProbeScanCountForTests,
   resetTerminalWriteCoalescer,
   resolveFloodCoalescerByteCap,
   setTerminalWriteCoalescerByteCapResolver,
@@ -1161,4 +1163,27 @@ test("resolveFloodCoalescerByteCap keeps bulk batches while flow is paused (#196
   );
   assert.ok(MAX_PENDING_WRITE_COALESCE_BYTES_FLOOD >= 64 * 1024);
   assert.ok(MAX_PENDING_WRITE_COALESCE_BYTES_FLOOD < MAX_PENDING_WRITE_COALESCE_BYTES);
+});
+
+test("enqueue performs one alt-screen CSI scan per chunk", () => {
+  const term = createFakeTerm();
+  resetAltScreenProbeScanCountForTests();
+  setTerminalWriteCoalescerByteCapResolver(term, () => 64 * 1024);
+  withAnimationFrameQueue(() => {
+    enqueueCoalescedTerminalWrite(
+      term,
+      "\x1b[?1049hframe",
+      () => {},
+      "\x1b[?1049hframe".length,
+    );
+    flushTerminalWriteCoalescer(term);
+  });
+
+  assert.equal(
+    getAltScreenProbeScanCountForTests(),
+    1,
+    "frame split + schedule latch must share one probe pass",
+  );
+  resetTerminalWriteCoalescer(term);
+  resetAltScreenProbeScanCountForTests();
 });

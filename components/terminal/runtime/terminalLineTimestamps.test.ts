@@ -15,6 +15,8 @@ import {
   resolveTerminalLineTimestampCapacity,
   resolveTerminalTimestampGutterRows,
   tryMeasureVisualRows,
+  getVisualRowMeasureCountForTests,
+  resetVisualRowMeasureCountForTests,
   type TerminalLineTimestampPerfStep,
   writeTerminalDataWithLineTimestamps,
 } from "./terminalLineTimestamps.ts";
@@ -279,7 +281,17 @@ test("formats timestamp labels without terminal escape codes", () => {
   assert.equal(formatTerminalLineTimestamp(new Date(2026, 5, 6, 1, 2, 3)), "01:02:03");
 });
 
-test("records line timestamps even while the gutter is hidden", () => {
+test("skips segmenter and markers when timestamps are disabled", () => {
+  const { term, writes, markerLines } = createFakeTerm();
+  writeTerminalDataWithLineTimestamps(term as never, "before\r\nnext", () => {}, {
+    enabled: false,
+  });
+
+  assert.equal(writes.join(""), "before\r\nnext");
+  assert.deepEqual(markerLines, []);
+});
+
+test("records line timestamps when enabled (default for direct callers)", () => {
   const { term, writes, markerLines } = createFakeTerm();
   writeTerminalDataWithLineTimestamps(term as never, "before\r\nnext", () => {});
 
@@ -1054,4 +1066,34 @@ test("capacity prune dedupes rewritten lines so unique history is not dropped", 
   // Unique-line history should still fit under capacity; rewrite noise must not
   // push older unique lines out purely by duplicate count.
   assert.ok(live >= Math.min(capacity, 20), `expected meaningful unique history, got ${live}`);
+});
+
+
+test("batched simple multi-line path measures each data segment once", () => {
+  const { term, writes, markerLines } = createFakeTerm({ cols: 40 });
+  const payload = Array.from({ length: 20 }, (_, i) => `row-${i}`).join("\r\n");
+  resetVisualRowMeasureCountForTests();
+  const steps: TerminalLineTimestampPerfStep[] = [];
+  writeTerminalDataWithLineTimestamps(term as never, payload, () => {}, {
+    onStep: (step) => steps.push(step),
+  });
+  assert.equal(writes.join(""), payload);
+  assert.equal(steps.filter((step) => step.kind === "batched-write").length, 1);
+  // Simple ASCII: no full-batch validation walk; one tryMeasure per data segment only.
+  const measureCount = getVisualRowMeasureCountForTests();
+  assert.equal(measureCount, 20, `expected 20 segment measures, got ${measureCount}`);
+  assert.ok(markerLines.length >= 2);
+});
+
+test("batched single data segment reuses one full-batch measure", () => {
+  const { term, writes } = createFakeTerm({ cols: 40 });
+  const payload = "x".repeat(5000);
+  resetVisualRowMeasureCountForTests();
+  const steps: TerminalLineTimestampPerfStep[] = [];
+  writeTerminalDataWithLineTimestamps(term as never, payload, () => {}, {
+    onStep: (step) => steps.push(step),
+  });
+  assert.equal(writes.join(""), payload);
+  assert.equal(steps.filter((step) => step.kind === "batched-write").length, 1);
+  assert.equal(getVisualRowMeasureCountForTests(), 1);
 });
