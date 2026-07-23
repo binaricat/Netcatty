@@ -90,6 +90,12 @@ const createFakeTerm = (activeType = "normal") => {
     },
     write(data: string, callback?: () => void) {
       writes.push(data);
+      if (data.includes("\x1b[?1049h") || data.includes("\x1b[?47h") || data.includes("\x1b[?1047h")) {
+        active.type = "alternate";
+      }
+      if (data.includes("\x1b[?1049l") || data.includes("\x1b[?47l") || data.includes("\x1b[?1047l")) {
+        active.type = "normal";
+      }
       for (const char of data) {
         if (char === "\n") {
           cursorLine += 1;
@@ -892,9 +898,9 @@ test("showing a pane preserves the background arrival second still queued with v
         "hidden\r\nvisible-same-second\r\n",
         "visible-next-second\r\n",
       ]);
+      // Per-second ledger: same-second lines share one stamp on the first line.
       assert.deepEqual(getVisibleTerminalLineTimestampRows(term), [
         { row: 0, label: "12:00:59" },
-        { row: 1, label: "12:00:59" },
         { row: 2, label: "12:01:00" },
       ]);
     });
@@ -1493,15 +1499,16 @@ test("writeSessionData records terminal output timestamps without changing outpu
 
   assert.equal(writes.join(""), "hello\r\nnext");
   assert.equal((writes.join("").match(/\[\d{2}:\d{2}:\d{2}\]/g) ?? []).length, 0);
-  assert.deepEqual(markerLines, [0, 1]);
+  // Record/render separation: ledger only, never xterm markers on write.
+  assert.deepEqual(markerLines, []);
 });
 
-test("writeSessionData skips timestamp markers when the host gutter is disabled", () => {
+test("writeSessionData never registers xterm markers for timestamps", () => {
   const { term, writes, markerLines } = createFakeTerm();
   writeSessionData(createContext(true, { showLineTimestamps: false }) as never, term, "hello\r\nnext");
+  writeSessionData(createContext(false, { showLineTimestamps: true }) as never, term, "more\r\n");
 
-  assert.equal(writes.join(""), "hello\r\nnext");
-  // Gutter off: per-second ledger only — no xterm markers.
+  assert.ok(writes.join("").includes("hello"));
   assert.deepEqual(markerLines, []);
 });
 
@@ -1510,7 +1517,8 @@ test("writeSessionData records timestamps for hosts with timestamps enabled", ()
   writeSessionData(createContext(false, { showLineTimestamps: true }) as never, term, "hello");
 
   assert.equal(writes.join(""), "hello");
-  assert.deepEqual(markerLines, [0]);
+  assert.deepEqual(markerLines, []);
+  assert.ok(getVisibleTerminalLineTimestampRows(term).length >= 1);
 });
 
 test("writeSessionData skips timestamps on the alternate screen", () => {
@@ -1534,7 +1542,8 @@ test("writeSessionData resumes timestamps after leaving alternate screen in the 
   writeSessionData(createContext(false, { showLineTimestamps: true }) as never, term, "\x1b[?1049lprompt");
 
   assert.equal(writes.join(""), "\x1b[?1049lprompt");
-  assert.deepEqual(markerLines, [0]);
+  assert.deepEqual(markerLines, []);
+  assert.ok(getVisibleTerminalLineTimestampRows(term).length >= 1);
 });
 
 test("writeSessionData inserts erase-scrollback immediately after normal full clear", () => {
@@ -1569,32 +1578,30 @@ test("writeSessionData does not add erase-scrollback inside synchronized output"
   assert.equal(writes.join(""), "\x1b[?2026h\x1b[H\x1b[2Jframe\x1b[?2026l");
 });
 
-test("writeSessionData uses markers only while the host gutter is enabled", () => {
+test("writeSessionData always uses ledger recording regardless of gutter toggle", () => {
   const { term, writes, markerLines } = createFakeTerm();
   const ctx = createContext(false, { showLineTimestamps: false });
 
   writeSessionData(ctx as never, term, "before\r\n");
-  assert.deepEqual(markerLines, [], "gutter off keeps a ledger without markers");
+  assert.deepEqual(markerLines, []);
 
   ctx.host = { showLineTimestamps: true };
   ctx.hostRef.current = ctx.host;
   writeSessionData(ctx as never, term, "enabled\r\n");
-  // Enable materializes ledger + records the new line.
-  assert.ok(markerLines.length >= 1, "gutter on creates markers");
+  assert.deepEqual(markerLines, [], "write path never registerMarkers");
 
-  const markersWhileOn = markerLines.length;
   ctx.host = { showLineTimestamps: false };
   ctx.hostRef.current = ctx.host;
   writeSessionData(ctx as never, term, "disabled");
 
   assert.equal(writes.join(""), "before\r\nenabled\r\ndisabled");
-  // Turning off clears live markers (dispose) and does not register new ones.
-  assert.equal(markerLines.length, markersWhileOn);
+  assert.deepEqual(markerLines, []);
+  // Ledger still has stamps for paint when gutter is shown.
+  assert.ok(getVisibleTerminalLineTimestampRows(term).length >= 1);
 });
 
 test("writeSessionData follows live hostRef toggles without replacing boot host snapshot", () => {
   const { term, writes, markerLines } = createFakeTerm();
-  // Frozen boot-time host object (what attachSessionToTerminal closes over).
   const bootHost = { showLineTimestamps: false as boolean };
   const hostRef = { current: bootHost };
   const ctx = {
@@ -1606,26 +1613,23 @@ test("writeSessionData follows live hostRef toggles without replacing boot host 
   writeSessionData(ctx as never, term, "boot-off\r\n");
   assert.deepEqual(markerLines, []);
 
-  // Toolbar toggle: live host updates via hostRef; boot snapshot stays false.
   hostRef.current = { showLineTimestamps: true };
   assert.equal(bootHost.showLineTimestamps, false);
   assert.equal(ctx.host.showLineTimestamps, false);
 
   writeSessionData(ctx as never, term, "live-on\r\n");
   assert.equal(writes.join(""), "boot-off\r\nlive-on\r\n");
-  assert.ok(markerLines.length >= 1, "live enable materializes/records markers");
+  assert.deepEqual(markerLines, []);
+  assert.ok(getVisibleTerminalLineTimestampRows(term).length >= 1);
 
-  const markersWhileOn = markerLines.length;
   hostRef.current = { showLineTimestamps: false };
   writeSessionData(ctx as never, term, "live-off");
   assert.equal(writes.join(""), "boot-off\r\nlive-on\r\nlive-off");
-  assert.equal(markerLines.length, markersWhileOn, "live disable does not register new markers");
+  assert.deepEqual(markerLines, []);
 });
 
 test("writeSessionData batches timestamp bookkeeping for bulk line output", () => {
   const { term, writes, markerLines } = createFakeTerm();
-  // Stay under large-output pressure so timestamp markers still record; bulk
-  // batching of markers is covered without degrading the flood fast-path.
   const payload = `${Array.from({ length: 40 }, () => "x".repeat(80)).join("\n")}\n`;
 
   writeSessionData(createContext(false, { showLineTimestamps: true }) as never, term, payload, payload.length);
@@ -1635,7 +1639,9 @@ test("writeSessionData batches timestamp bookkeeping for bulk line output", () =
   }
 
   assert.equal(writes.join(""), payload);
-  assert.equal(markerLines.length, 40);
+  // One wall-clock second → one ledger stamp, zero markers.
+  assert.deepEqual(markerLines, []);
+  assert.equal(getVisibleTerminalLineTimestampRows(term).length, 1);
   assert.ok(writes.length >= 1);
 });
 

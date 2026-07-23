@@ -33,12 +33,12 @@ type TimestampEntry = {
 };
 
 /**
- * Lightweight per-second history kept without xterm markers while the gutter
- * is off. On enable, entries materialize into markers for rendering.
+ * Record/render separation: write path only appends ledger stamps (one per
+ * second). Gutter paint maps ledger → visible rows without registerMarker.
  */
 type TimestampLedgerEntry = {
   label: string;
-  /** Floor(unixMs/1000); at most one ledger/marker stamp per second. */
+  /** Floor(unixMs/1000); at most one ledger stamp per second. */
   secondKey: number;
   /** Absolute buffer line (baseY + cursorY style) at stamp time. */
   line: number;
@@ -47,18 +47,19 @@ type TimestampLedgerEntry = {
 type TimestampStore = {
   segmenter: TerminalLineTimestampSegmenter;
   /**
-   * Live xterm markers while the gutter is on (also one-per-second).
-   * Capacity is capped so flood output cannot grow unboundedly.
+   * Legacy marker list (unused on the hot path). Kept so old helpers/tests that
+   * still touch markers do not crash; production paint reads `ledger` only.
    */
   entries: TimestampEntry[];
   /**
-   * Per-second stamps without markers. Written while gutter is off; used to
-   * rebuild markers when the user turns timestamps on.
+   * Source of truth: per-second stamps with buffer line anchors.
    */
   ledger: TimestampLedgerEntry[];
-  /** Last secondKey accepted for ledger or markers (shared throttle). */
+  /** Last secondKey accepted (one stamp per second). */
   lastStampSecondKey: number | null;
-  /** Whether markers currently reflect the ledger (avoid re-materialize storms). */
+  /** Last observed buffer.baseY for scrollback trim rebasing. */
+  lastSeenBaseY: number | null;
+  /** @deprecated materialize path removed; always false. */
   ledgerMaterialized: boolean;
   /**
    * Markers dropped from `entries` but not yet disposed. Drained with a per-pass
@@ -139,16 +140,13 @@ export type TerminalLineTimestampWriteOptions = TerminalLineTimestampDiagnostics
   /** Wall-clock arrival time for this batch, preserved across delayed writes. */
   timestampDate?: Date;
   /**
-   * Gutter visible: materialize markers (one per second) for paint.
-   * Gutter hidden: keep a lightweight per-second ledger only (no registerMarker).
-   * Defaults to true for direct unit-test callers; production passes host flag.
+   * Deprecated for recording: write path always maintains the per-second ledger
+   * (record/render separation). Kept for call-site compatibility; ignored.
    */
   enabled?: boolean;
 };
 
 const stores = new WeakMap<XTerm, TimestampStore>();
-const MIN_BATCHED_TIMESTAMP_DATA_SEGMENTS = 2;
-const BULK_TIMESTAMP_BATCH_MIN_BYTES = 4096;
 /**
  * Target ceiling for retained timestamp entries. xterm updates every marker
  * whenever a scrollback row is trimmed, so matching a 100k-row scrollback makes
@@ -481,6 +479,7 @@ const getTimestampStore = (term: XTerm): TimestampStore => {
       entries: [],
       ledger: [],
       lastStampSecondKey: null,
+      lastSeenBaseY: null,
       ledgerMaterialized: false,
       orphanedMarkers: [],
       listeners: new Set(),
@@ -551,85 +550,54 @@ const pushLedgerStamp = (
   secondKey: number,
   line: number,
   capacity: number,
-  options: { /** When true, markers already track this stamp (gutter on). */ keepMaterialized?: boolean } = {},
 ): void => {
   store.ledger.push({ label, secondKey, line: Math.max(0, line) });
   trimLedgerToCapacity(store, capacity);
-  // Gutter-off ledger writes need a later materialize pass when opened.
-  if (!options.keepMaterialized) {
-    store.ledgerMaterialized = false;
-  }
-};
-
-const clearLiveMarkers = (store: TimestampStore): void => {
-  for (const entry of store.entries) {
-    entry.disposeListener?.dispose();
-    entry.marker.dispose?.();
-  }
-  store.entries = [];
-  store.orphanedMarkers = [];
-  store.disposedPendingCompact = 0;
-  store.recordsSincePrune = 0;
-  store.ledgerMaterialized = false;
 };
 
 /**
- * Turn lightweight ledger stamps into xterm markers for gutter paint.
- * Safe to call from paint/write; no-ops when already materialized or empty.
+ * When scrollback trims, xterm shifts absolute line indices down as baseY grows.
+ * Rebase ledger anchors the same way markers would have been updated.
  */
-export const materializeTimestampLedgerToMarkers = (term: XTerm): number => {
-  const store = getTimestampStore(term);
-  if (store.ledgerMaterialized || store.ledger.length === 0) {
-    return 0;
-  }
-  const registerMarker = (
-    term as XTerm & { registerMarker?: (offset: number) => TimestampMarker | undefined }
-  ).registerMarker;
-  if (typeof registerMarker !== "function") {
-    store.ledgerMaterialized = true;
-    return 0;
-  }
-
-  // Drop stale markers first so we rebuild from the ledger only.
-  clearLiveMarkers(store);
-
-  const cursorLine = getAbsoluteCursorLine(term);
+const rebaseLedgerForScrollback = (term: XTerm, store: TimestampStore): void => {
+  let baseY = 0;
   let bufferLength = 0;
   try {
-    const active = term.buffer?.active as { length?: number } | undefined;
+    const active = term.buffer?.active as
+      | { baseY?: number; length?: number }
+      | undefined;
+    baseY = typeof active?.baseY === "number" ? active.baseY : 0;
     bufferLength = typeof active?.length === "number" ? active.length : 0;
   } catch {
-    bufferLength = 0;
+    return;
   }
 
-  let created = 0;
-  for (const entry of store.ledger) {
-    if (bufferLength > 0 && (entry.line < 0 || entry.line >= bufferLength)) {
-      continue;
+  if (store.lastSeenBaseY !== null && baseY > store.lastSeenBaseY) {
+    const delta = baseY - store.lastSeenBaseY;
+    for (const entry of store.ledger) {
+      entry.line -= delta;
     }
-    const offset = entry.line - cursorLine;
-    const marker = registerMarker.call(term, offset);
-    if (!marker) continue;
-    const markerEntry: TimestampEntry = { marker, label: entry.label };
-    markerEntry.disposeListener = marker.onDispose?.(() => {
-      store.disposedPendingCompact += 1;
-      markerEntry.disposeListener?.dispose();
-      markerEntry.disposeListener = undefined;
-    });
-    store.entries.push(markerEntry);
-    created += 1;
   }
-  store.ledgerMaterialized = true;
-  if (created > 0) {
-    maybePruneTimestampEntries(term, store, true, created);
-    notifyTimestampStore(store);
+  store.lastSeenBaseY = baseY;
+
+  if (store.ledger.length === 0) return;
+  let write = 0;
+  for (let read = 0; read < store.ledger.length; read += 1) {
+    const entry = store.ledger[read]!;
+    if (entry.line < 0) continue;
+    if (bufferLength > 0 && entry.line >= bufferLength) continue;
+    store.ledger[write] = entry;
+    write += 1;
   }
-  return created;
+  store.ledger.length = write;
 };
 
-/** Test helper: per-second ledger depth (no markers). */
+/** Test helper: per-second ledger depth. */
 export const getTerminalLineTimestampLedgerCount = (term: XTerm): number =>
   getTimestampStore(term).ledger.length;
+
+/** @deprecated No-op; paint reads the ledger directly. */
+export const materializeTimestampLedgerToMarkers = (_term: XTerm): number => 0;
 
 const internTerminalLineTimestampLabel = (
   store: TimestampStore,
@@ -688,26 +656,6 @@ function drainOrphanedMarkers(
 }
 
 /** Cheap pass for paint/write paths: drop disposed holes only (no dedupe / capacity). */
-const compactDisposedMarkersOnly = (store: TimestampStore): void => {
-  if (store.disposedPendingCompact <= 0) {
-    // Still drop any disposed holes we notice, but skip the scan when we have
-    // no dispose signals and the list is empty.
-    if (store.entries.length === 0) return;
-  }
-  const entries = store.entries;
-  let write = 0;
-  for (let read = 0; read < entries.length; read += 1) {
-    const entry = entries[read];
-    if (entry.marker.isDisposed) {
-      entry.disposeListener?.dispose();
-      continue;
-    }
-    entries[write] = entry;
-    write += 1;
-  }
-  entries.length = write;
-  store.disposedPendingCompact = 0;
-};
 
 /**
  * Compact disposed markers, collapse rewritten lines to their latest label,
@@ -793,6 +741,7 @@ const resetTimestampStore = (store: TimestampStore) => {
   store.entries = [];
   store.ledger = [];
   store.lastStampSecondKey = null;
+  store.lastSeenBaseY = null;
   store.ledgerMaterialized = false;
   store.orphanedMarkers = [];
   store.segmenter.reset();
@@ -804,7 +753,7 @@ const resetTimestampStore = (store: TimestampStore) => {
   notifyTimestampStore(store);
 };
 
-const recordTerminalLineTimestamp = (
+const _recordTerminalLineTimestamp = (
   term: XTerm,
   store: TimestampStore,
   label: string,
@@ -849,7 +798,7 @@ export const getTerminalLineTimestampEntryCount = (
   return store.entries.length;
 };
 
-const countLineFeeds = (data: string): number => {
+const _countLineFeeds = (data: string): number => {
   let count = 0;
   for (const char of data) {
     if (char === "\n") count += 1;
@@ -857,21 +806,21 @@ const countLineFeeds = (data: string): number => {
   return count;
 };
 
-const getTerminalColumnCount = (term: XTerm): number => {
+const _getTerminalColumnCount = (term: XTerm): number => {
   const columns = (term as XTerm & { cols?: number }).cols;
   return Number.isFinite(columns) && Number(columns) > 0
     ? Math.floor(Number(columns))
     : Number.POSITIVE_INFINITY;
 };
 
-const getTerminalCursorColumn = (term: XTerm): number => {
+const _getTerminalCursorColumn = (term: XTerm): number => {
   const cursorX = ((term.buffer?.active as { cursorX?: number } | undefined)?.cursorX);
   return Number.isFinite(cursorX) && Number(cursorX) >= 0
     ? Math.floor(Number(cursorX))
     : 0;
 };
 
-const getTerminalWraparoundMode = (term: XTerm): boolean => (
+const _getTerminalWraparoundMode = (term: XTerm): boolean => (
   ((term as XTerm & { modes?: { wraparoundMode?: boolean } }).modes?.wraparoundMode) !== false
 );
 
@@ -1136,132 +1085,6 @@ export const tryMeasureVisualRows = (
   return { rowOffset, column, wraparoundMode };
 };
 
-/**
- * True when `data` can be bulk-measured without a full width walk.
- * Avoids calling tryMeasureVisualRows at the batch gate (that used to double
- * measure: once with fake geometry at the gate, again per segment for offsets).
- */
-export const canBulkMeasureTerminalData = (term: XTerm, data: string): boolean => {
-  if (isSimpleAsciiControlText(data)) return true;
-  // Real geometry validity check only when non-ASCII/CSI is present — still a
-  // single measure later in writeBatchedTimestampSegments for marker offsets.
-  return tryMeasureVisualRows(
-    term,
-    data,
-    0,
-    Number.POSITIVE_INFINITY,
-    true,
-  ) !== null;
-};
-
-const writeBatchedTimestampSegments = (
-  term: XTerm,
-  store: TimestampStore,
-  data: string,
-  segments: TerminalLineTimestampSegment[],
-  done: () => void,
-  diagnostics?: TerminalLineTimestampDiagnostics,
-  /**
-   * Optional pre-measured full-batch geometry when the batch is a single data
-   * segment equal to `data` (reuses the gate measure; no second walk).
-   */
-  premeasuredFullBatch?: MeasuredTerminalRows | null,
-): void => {
-  const timestamps: Array<{ label: string; rowOffset: number }> = [];
-  const columns = getTerminalColumnCount(term);
-  let column = getTerminalCursorColumn(term);
-  let wraparoundMode = getTerminalWraparoundMode(term);
-  let rowOffset = 0;
-  const shouldMeasureDiagnostics = Boolean(diagnostics);
-  const measureStartedAt = shouldMeasureDiagnostics ? performance.now() : 0;
-
-  const dataSegments = segments.filter(
-    (segment): segment is { kind: "data"; data: string } => segment.kind === "data",
-  );
-  const canReuseFullBatchMeasure = Boolean(
-    premeasuredFullBatch
-    && dataSegments.length === 1
-    && dataSegments[0]!.data === data
-  );
-
-  for (const segment of segments) {
-    if (segment.kind === "timestamp") {
-      timestamps.push({ label: segment.label, rowOffset });
-      continue;
-    }
-    const measured = (
-      canReuseFullBatchMeasure && segment.data === data
-        ? premeasuredFullBatch!
-        : tryMeasureVisualRows(
-          term,
-          segment.data,
-          column,
-          columns,
-          wraparoundMode,
-        )
-    ) ?? {
-      // Unmeasurable chunk: preserve prior column/wrap state and count hard newlines only.
-      rowOffset: countLineFeeds(segment.data),
-      column,
-      wraparoundMode,
-    };
-    rowOffset += measured.rowOffset;
-    column = measured.column;
-    wraparoundMode = measured.wraparoundMode;
-  }
-  const measureMs = shouldMeasureDiagnostics ? performance.now() - measureStartedAt : 0;
-
-  const writeStartedAt = shouldMeasureDiagnostics ? performance.now() : 0;
-  term.write(data, () => {
-    const writeCallbackMs = shouldMeasureDiagnostics ? performance.now() - writeStartedAt : 0;
-    const markerStartedAt = shouldMeasureDiagnostics ? performance.now() : 0;
-    const capacity = resolveTerminalLineTimestampCapacity(term);
-    // Only register markers that land in the retained visual-row window.
-    // Slice by timestamp count is wrong for soft-wrapped floods (many stamps
-    // can map outside the buffer while fewer visual rows remain). Prefer the
-    // last `capacity` visual rows by measured rowOffset.
-    const minRowOffset = Math.max(0, rowOffset - capacity + 1);
-    let timestampsToRecord = timestamps.filter(
-      (timestamp) => timestamp.rowOffset >= minRowOffset,
-    );
-    if (timestampsToRecord.length > capacity) {
-      timestampsToRecord = timestampsToRecord.slice(
-        timestampsToRecord.length - capacity,
-      );
-    }
-    let timestampRecorded = false;
-    for (const timestamp of timestampsToRecord) {
-      timestampRecorded = recordTerminalLineTimestamp(
-        term,
-        store,
-        timestamp.label,
-        false,
-        timestamp.rowOffset - rowOffset,
-        { skipPrune: true },
-      ) || timestampRecorded;
-    }
-    // Amortize small batches. A forced full-store scan on every 2–8 line
-    // hidden drain grows with retained history and recreates the CPU climb this
-    // path is meant to avoid. Large batches still cross the record threshold.
-    maybePruneTimestampEntries(term, store, false, timestampsToRecord.length);
-    if (timestampRecorded) {
-      notifyTimestampStore(store);
-    }
-    if (diagnostics) {
-      diagnostics.onStep?.({
-        kind: "batched-write",
-        dataChars: data.length,
-        timestamps: timestamps.length,
-        measureMs,
-        writeCallbackMs,
-        markerMs: performance.now() - markerStartedAt,
-        rowOffset,
-        columns,
-      });
-    }
-    done();
-  });
-};
 
 export const resetTerminalLineTimestamps = (term: XTerm) => {
   resetTimestampStore(getTimestampStore(term));
@@ -1278,6 +1101,9 @@ export const onTerminalLineTimestampsChange = (
   };
 };
 
+/**
+ * Paint helper from marker entries (legacy). Prefer ledger-based paint.
+ */
 export const resolveTerminalTimestampGutterRows = ({
   viewportY,
   rows,
@@ -1306,9 +1132,6 @@ export const resolveTerminalTimestampGutterRows = ({
     }
   }
 
-  // Full scan (not binary search): cursor-up / reposition writes can append a
-  // newer marker on an earlier buffer line, so entries are not always sorted by
-  // marker.line. Later entries win for the same line.
   const labelByLine = new Map<number, string>();
   for (const entry of entries) {
     if (entry.marker.isDisposed) continue;
@@ -1337,6 +1160,51 @@ export const resolveTerminalTimestampGutterRows = ({
   return visible;
 };
 
+/**
+ * Render gutter rows from the per-second ledger (no xterm markers).
+ * Show a label only on the stamp line (and soft-wrap continuations of it),
+ * matching classic marker gutters — not every empty row below.
+ */
+export const resolveTerminalTimestampGutterRowsFromLedger = ({
+  viewportY,
+  rows,
+  ledger,
+  isWrappedLine,
+}: {
+  viewportY: number;
+  rows: number;
+  ledger: readonly TimestampLedgerEntry[];
+  isWrappedLine?: (line: number) => boolean;
+}): TerminalTimestampGutterRow[] => {
+  if (ledger.length === 0 || rows <= 0) return [];
+
+  const labelByLine = new Map<number, string>();
+  for (const entry of ledger) {
+    if (entry.line < 0) continue;
+    labelByLine.set(entry.line, entry.label);
+  }
+
+  const resolveSourceLine = (line: number): number => {
+    if (!isWrappedLine?.(line)) return line;
+    let sourceLine = line;
+    while (sourceLine > 0 && isWrappedLine(sourceLine)) {
+      sourceLine -= 1;
+    }
+    return sourceLine;
+  };
+
+  const visible: TerminalTimestampGutterRow[] = [];
+  for (let row = 0; row < rows; row += 1) {
+    const line = viewportY + row;
+    const sourceLine = resolveSourceLine(line);
+    const label = labelByLine.get(sourceLine);
+    if (label) {
+      visible.push({ row, label });
+    }
+  }
+  return visible;
+};
+
 export const getVisibleTerminalLineTimestampRows = (
   term: XTerm,
 ): TerminalTimestampGutterRow[] => {
@@ -1344,23 +1212,19 @@ export const getVisibleTerminalLineTimestampRows = (
     return [];
   }
   const store = getTimestampStore(term);
-  // Gutter just opened: promote per-second ledger into markers for paint.
-  materializeTimestampLedgerToMarkers(term);
-  // Paint path: only drop disposed holes. Full dedupe/capacity runs on write.
-  compactDisposedMarkersOnly(store);
-  return resolveTerminalTimestampGutterRows({
+  rebaseLedgerForScrollback(term, store);
+  return resolveTerminalTimestampGutterRowsFromLedger({
     viewportY: term.buffer.active.viewportY,
     rows: term.rows,
-    entries: store.entries,
+    ledger: store.ledger,
     isWrappedLine: (line) => term.buffer.active.getLine(line)?.isWrapped === true,
   });
 };
 
 /**
- * Gutter off: one term.write, maintain per-second ledger only (no markers).
- * Keeps segmenter state so enable can continue cleanly.
+ * Record path: one term.write + per-second ledger updates (no registerMarker).
  */
-const writeTerminalDataWithSecondLedgerOnly = (
+const writeTerminalDataWithSecondLedger = (
   term: XTerm,
   data: string,
   done: () => void,
@@ -1369,14 +1233,6 @@ const writeTerminalDataWithSecondLedgerOnly = (
   shouldMeasureDiagnostics = false,
 ): void => {
   const store = getTimestampStore(term);
-  // Free xterm marker cost while the gutter is hidden.
-  if (store.entries.length > 0 || store.orphanedMarkers.length > 0) {
-    clearLiveMarkers(store);
-    for (const marker of store.orphanedMarkers) {
-      if (!marker.isDisposed) marker.dispose?.();
-    }
-    store.orphanedMarkers = [];
-  }
 
   store.segmenter.setAlternateScreenActive(
     ((term.buffer?.active as { type?: string } | undefined)?.type) === "alternate",
@@ -1394,11 +1250,13 @@ const writeTerminalDataWithSecondLedgerOnly = (
 
   let absoluteLine = getAbsoluteCursorLine(term);
   const capacity = resolveTerminalLineTimestampCapacity(term);
+  let ledgerChanged = false;
   for (const segment of segments) {
     if (segment.kind === "timestamp") {
       const secondKey = store.labelCacheKey ?? secondKeyFromDate(stampDate);
       if (tryBeginSecondStamp(store, secondKey)) {
         pushLedgerStamp(store, segment.label, secondKey, absoluteLine, capacity);
+        ledgerChanged = true;
       }
       continue;
     }
@@ -1407,6 +1265,10 @@ const writeTerminalDataWithSecondLedgerOnly = (
 
   const writeStartedAt = shouldMeasureDiagnostics ? performance.now() : 0;
   term.write(data, () => {
+    rebaseLedgerForScrollback(term, store);
+    if (ledgerChanged) {
+      notifyTimestampStore(store);
+    }
     if (diagnostics) {
       diagnostics.onStep?.({
         kind: "fallback-write",
@@ -1440,28 +1302,7 @@ export const writeTerminalDataWithLineTimestamps = (
     });
   };
 
-  // Host gutter off: per-second ledger only (no registerMarker).
-  if (options?.enabled === false) {
-    writeTerminalDataWithSecondLedgerOnly(
-      term,
-      data,
-      done,
-      options,
-      diagnostics,
-      shouldMeasureDiagnostics,
-    );
-    return;
-  }
-
-  const registerMarker = (term as XTerm & { registerMarker?: unknown }).registerMarker;
-  if (typeof registerMarker !== "function") {
-    writeFallbackOnly(data, done);
-    return;
-  }
-
-  // Only skip markers under true flood / long-line pressure — not merely
-  // "scrollback full + multi-line" (that would drop timestamps for docker ps
-  // after a prior seq). Product semantics: each line can show a gutter stamp.
+  // True flood: skip ledger work entirely (same product rule as before).
   if (shouldSkipTerminalLineTimestamps(term)) {
     const store = getTimestampStore(term);
     store.segmenter.setAlternateScreenActive(
@@ -1474,186 +1315,14 @@ export const writeTerminalDataWithLineTimestamps = (
     return;
   }
 
-  const store = getTimestampStore(term);
-  // Gutter on: promote any ledger built while hidden into markers once.
-  materializeTimestampLedgerToMarkers(term);
-  // Clears / scrollback wipes dispose markers without new stamps. Compact only
-  // when dispose signals arrived — not on every tiny write against a full store.
-  if (store.disposedPendingCompact > 0) {
-    compactDisposedMarkersOnly(store);
-  }
-  store.segmenter.setAlternateScreenActive(
-    ((term.buffer?.active as { type?: string } | undefined)?.type) === "alternate",
+  // Record/render separation: always maintain the per-second ledger; gutter
+  // paint reads ledger only (no xterm markers on the write path).
+  writeTerminalDataWithSecondLedger(
+    term,
+    data,
+    done,
+    options,
+    diagnostics,
+    shouldMeasureDiagnostics,
   );
-  const timestampOnlyPrefix = store.timestampOnlyPrefix;
-  store.timestampOnlyPrefix = "";
-  const dataForTimestamps = `${timestampOnlyPrefix}${data}`;
-  const segmentStartedAt = shouldMeasureDiagnostics ? performance.now() : 0;
-  const segments = store.segmenter.append(dataForTimestamps, options?.timestampDate);
-  const parsedData = segments
-    .filter((segment): segment is { kind: "data"; data: string } => segment.kind === "data")
-    .map((segment) => segment.data)
-    .join("");
-  const dataSegmentCount = segments.reduce((count, segment) => (
-    segment.kind === "data" && segment.data ? count + 1 : count
-  ), 0);
-  if (diagnostics) {
-    diagnostics.onStep?.({
-      kind: "segment",
-      durationMs: performance.now() - segmentStartedAt,
-      dataChars: data.length,
-      segmentCount: segments.length,
-      dataSegmentCount,
-      timestampSegmentCount: segments.length - dataSegmentCount,
-      parsedChars: parsedData.length,
-    });
-  }
-  const writeFallbackData = writeFallbackOnly;
-  if (
-    timestampOnlyPrefix.length === 0
-    && parsedData === dataForTimestamps
-    && !hasPartialScrollingRegion(term)
-    && (
-      dataSegmentCount >= MIN_BATCHED_TIMESTAMP_DATA_SEGMENTS
-      || data.length >= BULK_TIMESTAMP_BATCH_MIN_BYTES
-    )
-    // Tab stops, delayed wrap around backspaces, and ANSI newline mode depend
-    // on live xterm parser state. Keep those writes on the ordered segmented
-    // path where marker positions come from xterm after each write.
-    && !data.includes("\t")
-    && !data.includes("\b")
-    && (term as XTerm & { options?: { convertEol?: boolean } }).options?.convertEol !== true
-  ) {
-    // Prefer a single geometry walk per bytes measured:
-    // - one data segment: measure with real cursor/cols once, reuse in writeBatched
-    // - multi-segment / simple ASCII: validate (if needed) then measure each
-    //   segment once inside writeBatched (no second full-batch measure for reuse)
-    const isSimpleAscii = isSimpleAsciiControlText(data);
-    if (!isSimpleAscii && dataSegmentCount === 1) {
-      const premeasuredFullBatch = tryMeasureVisualRows(
-        term,
-        data,
-        getTerminalCursorColumn(term),
-        getTerminalColumnCount(term),
-        getTerminalWraparoundMode(term),
-      );
-      if (premeasuredFullBatch !== null) {
-        writeBatchedTimestampSegments(
-          term,
-          store,
-          data,
-          segments,
-          done,
-          diagnostics,
-          premeasuredFullBatch,
-        );
-        return;
-      }
-      // Unmeasurable single segment → segmented writes below.
-    } else if (isSimpleAscii || canBulkMeasureTerminalData(term, data)) {
-      writeBatchedTimestampSegments(
-        term,
-        store,
-        data,
-        segments,
-        done,
-        diagnostics,
-        null,
-      );
-      return;
-    }
-  }
-  const writeSegments = (
-    onComplete: () => void,
-    skipLeadingDataLength = 0,
-  ) => {
-    let index = 0;
-    let remainingSkipLength = skipLeadingDataLength;
-    let timestampRecorded = false;
-    let timestampCount = 0;
-    let writeCalls = 0;
-    let writeChars = 0;
-    let writeCallbackMs = 0;
-    const startedAt = shouldMeasureDiagnostics ? performance.now() : 0;
-
-    const complete = () => {
-      if (timestampRecorded) {
-        notifyTimestampStore(store);
-      }
-      if (diagnostics) {
-        diagnostics.onStep?.({
-          kind: "segmented-write",
-          dataChars: data.length,
-          timestamps: timestampCount,
-          writeCalls,
-          writeChars,
-          writeCallbackMs,
-          totalMs: performance.now() - startedAt,
-        });
-      }
-      onComplete();
-    };
-
-    const writeNext = () => {
-      const segment = segments[index];
-      index += 1;
-
-      if (!segment) {
-        complete();
-        return;
-      }
-
-      if (segment.kind === "timestamp") {
-        timestampCount += 1;
-        timestampRecorded = recordTerminalLineTimestamp(term, store, segment.label, false)
-          || timestampRecorded;
-        writeNext();
-        return;
-      }
-
-      let segmentData = segment.data;
-      if (remainingSkipLength > 0) {
-        const skippedLength = Math.min(remainingSkipLength, segmentData.length);
-        segmentData = segmentData.slice(skippedLength);
-        remainingSkipLength -= skippedLength;
-      }
-
-      if (!segmentData) {
-        writeNext();
-        return;
-      }
-
-      const writeStartedAt = shouldMeasureDiagnostics ? performance.now() : 0;
-      term.write(segmentData, () => {
-        writeCalls += 1;
-        writeChars += segmentData.length;
-        if (shouldMeasureDiagnostics) {
-          writeCallbackMs += performance.now() - writeStartedAt;
-        }
-        writeNext();
-      });
-    };
-
-    writeNext();
-  };
-
-  if (parsedData !== dataForTimestamps) {
-    const pendingEscapeSequence = store.segmenter.flushPendingEscapeSequence();
-    if (isPotentialAlternateScreenSequence(pendingEscapeSequence)) {
-      store.timestampOnlyPrefix = pendingEscapeSequence;
-    }
-    if (!parsedData || !dataForTimestamps.startsWith(parsedData)) {
-      writeFallbackData(data, done);
-      return;
-    }
-
-    const parsedCurrentDataLength = Math.max(0, parsedData.length - timestampOnlyPrefix.length);
-    const trailingData = data.slice(parsedCurrentDataLength);
-    writeSegments(
-      () => writeFallbackData(trailingData, done),
-      timestampOnlyPrefix.length,
-    );
-    return;
-  }
-  writeSegments(done, timestampOnlyPrefix.length);
 };

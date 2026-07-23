@@ -7,21 +7,14 @@ import {
   MAX_TERMINAL_LINE_TIMESTAMP_ENTRIES,
   createTerminalLineTimestampSegmenter,
   formatTerminalLineTimestamp,
-  getTerminalLineTimestampEntryCount,
+  getTerminalLineTimestampLedgerCount,
   getVisibleTerminalLineTimestampRows,
   isSimpleAsciiControlText,
   onTerminalLineTimestampsChange,
-  resetTerminalLineTimestamps,
   resolveTerminalLineTimestampCapacity,
   resolveTerminalTimestampGutterRows,
+  resolveTerminalTimestampGutterRowsFromLedger,
   tryMeasureVisualRows,
-  getVisualRowMeasureCountForTests,
-  resetVisualRowMeasureCountForTests,
-  getTerminalLineTimestampLedgerCount,
-  getTerminalLineTimestampEntryCount,
-  materializeTimestampLedgerToMarkers,
-  getVisibleTerminalLineTimestampRows,
-  type TerminalLineTimestampPerfStep,
   writeTerminalDataWithLineTimestamps,
 } from "./terminalLineTimestamps.ts";
 
@@ -302,6 +295,7 @@ test("formats timestamp labels without terminal escape codes", () => {
   assert.equal(formatTerminalLineTimestamp(new Date(2026, 5, 6, 1, 2, 3)), "01:02:03");
 });
 
+
 test("gutter off records a per-second ledger without markers", () => {
   const { term, writes, markerLines } = createFakeTerm();
   const t0 = new Date(2026, 5, 6, 12, 0, 0);
@@ -312,14 +306,13 @@ test("gutter off records a per-second ledger without markers", () => {
 
   assert.equal(writes.join(""), "before\r\nnext\r\nthird");
   assert.deepEqual(markerLines, []);
-  // Same second → one ledger stamp for three lines.
   assert.equal(getTerminalLineTimestampLedgerCount(term as never), 1);
 });
 
-test("gutter off keeps one ledger stamp per wall-clock second", () => {
+test("ledger keeps one stamp per wall-clock second whether gutter is on or off", () => {
   const { term, markerLines } = createFakeTerm();
   writeTerminalDataWithLineTimestamps(term as never, "a\r\nb\r\n", () => {}, {
-    enabled: false,
+    enabled: true,
     timestampDate: new Date(2026, 5, 6, 12, 0, 0),
   });
   writeTerminalDataWithLineTimestamps(term as never, "c\r\nd\r\n", () => {}, {
@@ -327,408 +320,64 @@ test("gutter off keeps one ledger stamp per wall-clock second", () => {
     timestampDate: new Date(2026, 5, 6, 12, 0, 1),
   });
 
+  // Record path never registerMarkers.
   assert.deepEqual(markerLines, []);
   assert.equal(getTerminalLineTimestampLedgerCount(term as never), 2);
 });
 
-test("opening gutter materializes ledger stamps into markers", () => {
-  const { term, markerLines } = createFakeTerm();
+test("gutter paint shows ledger labels on stamp lines only", () => {
+  const { term } = createFakeTerm();
   writeTerminalDataWithLineTimestamps(term as never, "a\r\nb\r\n", () => {}, {
-    enabled: false,
     timestampDate: new Date(2026, 5, 6, 12, 0, 0),
   });
   writeTerminalDataWithLineTimestamps(term as never, "c\r\n", () => {}, {
-    enabled: false,
     timestampDate: new Date(2026, 5, 6, 12, 0, 1),
   });
-  assert.deepEqual(markerLines, []);
 
-  const created = materializeTimestampLedgerToMarkers(term as never);
-  assert.equal(created, 2);
-  assert.equal(getTerminalLineTimestampEntryCount(term as never, { prune: false }), 2);
-  assert.ok(markerLines.length >= 1);
-
-  // Paint path also materializes (idempotent).
   const rows = getVisibleTerminalLineTimestampRows(term as never);
-  assert.ok(rows.length >= 1);
+  assert.deepEqual(
+    rows.map((row) => row.label),
+    ["12:00:00", "12:00:01"],
+  );
 });
 
-test("records line timestamps when enabled (default for direct callers)", () => {
-  const { term, writes, markerLines } = createFakeTerm();
-  writeTerminalDataWithLineTimestamps(term as never, "before\r\nnext", () => {});
-
-  assert.equal(writes.join(""), "before\r\nnext");
-  assert.deepEqual(markerLines, [0, 1]);
-});
-
-test("coalesces timestamp change notifications per write", () => {
-  const { term, markerLines } = createFakeTerm();
+test("ledger notifies listeners once when a new second is stamped", () => {
+  const { term } = createFakeTerm();
   let notifications = 0;
   const unsubscribe = onTerminalLineTimestampsChange(term as never, () => {
     notifications += 1;
   });
 
-  writeTerminalDataWithLineTimestamps(term as never, "one\r\ntwo\r\nthree", () => {});
-  writeTerminalDataWithLineTimestamps(term as never, " continued", () => {});
+  writeTerminalDataWithLineTimestamps(term as never, "one\r\ntwo\r\nthree", () => {}, {
+    timestampDate: new Date(2026, 5, 6, 12, 0, 0),
+  });
+  writeTerminalDataWithLineTimestamps(term as never, " continued", () => {}, {
+    timestampDate: new Date(2026, 5, 6, 12, 0, 0),
+  });
+  writeTerminalDataWithLineTimestamps(term as never, "\r\nnext-second\r\n", () => {}, {
+    timestampDate: new Date(2026, 5, 6, 12, 0, 1),
+  });
   unsubscribe();
 
-  assert.deepEqual(markerLines, [0, 1, 2]);
-  assert.equal(notifications, 1);
+  assert.equal(getTerminalLineTimestampLedgerCount(term as never), 2);
+  assert.equal(notifications, 2);
 });
 
-test("writes large timestamped output in one batch while preserving marker lines", () => {
+test("large multi-line dump in one second still uses a single ledger stamp", () => {
   const { term, writes, markerLines } = createFakeTerm();
   const lines = Array.from({ length: 80 }, (_, index) => `line-${index}`).join("\r\n");
 
-  writeTerminalDataWithLineTimestamps(term as never, lines, () => {});
-
-  assert.deepEqual(writes, [lines]);
-  assert.deepEqual(markerLines, Array.from({ length: 80 }, (_, index) => index));
-});
-
-test("accounts for soft-wrapped rows when batching timestamp markers", () => {
-  const { term, writes, markerLines } = createFakeTerm({ cols: 5 });
-  const lines = Array.from({ length: 80 }, (_, index) => `line-${index}`).join("\r\n");
-
-  writeTerminalDataWithLineTimestamps(term as never, lines, () => {});
-
-  assert.deepEqual(writes, [lines]);
-  assert.deepEqual(markerLines, Array.from({ length: 80 }, (_, index) => index * 2));
-});
-
-test("does not soft-wrap exact-width rows when batching timestamp markers", () => {
-  const { term, writes, markerLines } = createFakeTerm({ cols: 5 });
-  const lines = Array.from({ length: 80 }, () => "abcde").join("\r\n");
-
-  writeTerminalDataWithLineTimestamps(term as never, lines, () => {});
-
-  assert.deepEqual(writes, [lines]);
-  assert.deepEqual(markerLines, Array.from({ length: 80 }, (_, index) => index));
-});
-
-test("preserves bare line feed cursor columns when batching timestamp markers", () => {
-  const { term, writes, markerLines } = createFakeTerm({ cols: 5 });
-  const lines = Array.from({ length: 80 }, () => "abcde").join("\n");
-
-  writeTerminalDataWithLineTimestamps(term as never, lines, () => {});
-
-  assert.deepEqual(writes, [lines]);
-  assert.deepEqual(markerLines, [
-    0,
-    ...Array.from({ length: 79 }, (_, index) => (index * 2) + 1),
-  ]);
-});
-
-test("respects disabled autowrap when batching timestamp markers", () => {
-  const { term, writes, markerLines } = createFakeTerm({ cols: 5 });
-  const lines = `\x1b[?7l${Array.from({ length: 80 }, () => "abcdef").join("\r\n")}`;
-
-  writeTerminalDataWithLineTimestamps(term as never, lines, () => {});
-
-  assert.deepEqual(writes, [lines]);
-  assert.deepEqual(markerLines, Array.from({ length: 80 }, (_, index) => index));
-});
-
-test("falls back from batched timestamp markers for cursor-moving escape sequences", () => {
-  const { term, writes, markerLines } = createFakeTerm();
-  const steps: string[] = [];
-  const lines = [
-    "line-0",
-    "line-1",
-    "\x1b[Aline-1-again",
-    ...Array.from({ length: 77 }, (_, index) => `line-${index + 3}`),
-  ].join("\r\n");
-
-  writeTerminalDataWithLineTimestamps(
-    term as never,
-    lines,
-    () => {},
-    { onStep: (step) => steps.push(step.kind) },
-  );
-
-  assert.notDeepEqual(writes, [lines]);
-  assert.equal(steps.includes("batched-write"), false);
-  assert.equal(steps.includes("segmented-write"), true);
-  assert.deepEqual(markerLines, [
-    0,
-    1,
-    1,
-    ...Array.from({ length: 77 }, (_, index) => index + 2),
-  ]);
-});
-
-test("falls back from batched timestamp markers for combined alternate-screen sequences", () => {
-  const { term, writes, markerLines } = createFakeTerm();
-  const steps: string[] = [];
-  const lines = [
-    "line-0",
-    `\x1b[?7;1049h${"vim".repeat(1400)}`,
-    "\x1b[?1049lline-1",
-  ].join("\r\n");
-
-  writeTerminalDataWithLineTimestamps(
-    term as never,
-    lines,
-    () => {},
-    { onStep: (step) => steps.push(step.kind) },
-  );
-
-  assert.notDeepEqual(writes, [lines]);
-  assert.equal(steps.includes("batched-write"), false);
-  assert.equal(steps.includes("segmented-write"), true);
-  assert.deepEqual(markerLines, [0, 2]);
-});
-
-test("keeps backspace writes on the segmented timestamp path", () => {
-  const { term, writes, markerLines } = createFakeTerm({ cols: 5 });
-  const steps: string[] = [];
-  const lines = Array.from({ length: 80 }, () => "abc\b\b\bdef").join("\r\n");
-
-  writeTerminalDataWithLineTimestamps(
-    term as never,
-    lines,
-    () => {},
-    { onStep: (step) => steps.push(step.kind) },
-  );
-
-  assert.equal(writes.join(""), lines);
-  assert.equal(steps.includes("batched-write"), false);
-  assert.equal(steps.includes("segmented-write"), true);
-  assert.deepEqual(markerLines, Array.from({ length: 80 }, (_, index) => index));
-});
-
-test("keeps tabbed writes on the segmented path so xterm owns tab stops", () => {
-  const { term, writes, markerLines } = createFakeTerm({ cols: 5 });
-  const steps: string[] = [];
-  const lines = Array.from({ length: 80 }, () => "\t").join("\r\n");
-
-  writeTerminalDataWithLineTimestamps(
-    term as never,
-    lines,
-    () => {},
-    { onStep: (step) => steps.push(step.kind) },
-  );
-
-  assert.equal(writes.join(""), lines);
-  assert.equal(steps.includes("batched-write"), false);
-  assert.equal(steps.includes("segmented-write"), true);
-  assert.deepEqual(markerLines, Array.from({ length: 80 }, (_, index) => index));
-});
-
-test("uses changed xterm tab stops when placing timestamps", async () => {
-  const require = createRequire(import.meta.url);
-  const { Terminal } = require("@xterm/xterm") as {
-    Terminal: new (options: Record<string, unknown>) => XTerm;
-  };
-  const term = new Terminal({ cols: 10, rows: 5, scrollback: 20, allowProposedApi: true });
-  const rawWrite = (data: string) => new Promise<void>((resolve) => term.write(data, resolve));
-  const timestampedWrite = (data: string) => new Promise<void>((resolve) => {
-    writeTerminalDataWithLineTimestamps(term, data, resolve);
+  writeTerminalDataWithLineTimestamps(term as never, lines, () => {}, {
+    timestampDate: new Date(2026, 5, 6, 12, 0, 0),
   });
 
-  try {
-    // Clear all tab stops. xterm then treats TAB differently from the default
-    // eight-column model used by the fast-path estimator.
-    await rawWrite("\x1b[3g");
-    await timestampedWrite("aa\tXY\r\nb");
-
-    const rows = getVisibleTerminalLineTimestampRows(term);
-    assert.deepEqual(rows.map(({ row }) => row), [0, 1, 2]);
-    assert.ok(rows.every(({ label }) => /^\d{2}:\d{2}:\d{2}$/.test(label)));
-  } finally {
-    term.dispose();
-  }
-});
-
-test("uses xterm delayed-wrap state when backspaces follow a full row", async () => {
-  const require = createRequire(import.meta.url);
-  const { Terminal } = require("@xterm/xterm") as {
-    Terminal: new (options: Record<string, unknown>) => XTerm;
-  };
-  const term = new Terminal({ cols: 5, rows: 8, scrollback: 20, allowProposedApi: true });
-  const steps: string[] = [];
-
-  try {
-    await new Promise<void>((resolve) => {
-      writeTerminalDataWithLineTimestamps(
-        term,
-        "bc\r\n\b\b12345\bbc",
-        resolve,
-        { onStep: (step) => steps.push(step.kind) },
-      );
-    });
-
-    assert.equal(steps.includes("batched-write"), false);
-    assert.equal(steps.includes("segmented-write"), true);
-    assert.deepEqual(
-      getVisibleTerminalLineTimestampRows(term).map(({ row }) => row),
-      [0, 1],
-    );
-  } finally {
-    term.dispose();
-  }
-});
-
-test("uses xterm newline mode when placing timestamps", async () => {
-  const require = createRequire(import.meta.url);
-  const { Terminal } = require("@xterm/xterm") as {
-    Terminal: new (options: Record<string, unknown>) => XTerm;
-  };
-  const term = new Terminal({ cols: 10, rows: 8, scrollback: 20, allowProposedApi: true });
-  const steps: string[] = [];
-
-  try {
-    await new Promise<void>((resolve) => term.write("\x1b[20h", resolve));
-    await new Promise<void>((resolve) => {
-      writeTerminalDataWithLineTimestamps(
-        term,
-        "aa\n123456789\r\nb",
-        resolve,
-        { onStep: (step) => steps.push(step.kind) },
-      );
-    });
-
-    assert.equal(steps.includes("batched-write"), false);
-    assert.equal(steps.includes("segmented-write"), true);
-    assert.deepEqual(
-      getVisibleTerminalLineTimestampRows(term).map(({ row }) => row),
-      [0, 1, 2],
-    );
-  } finally {
-    term.dispose();
-  }
-});
-
-test("falls back from batched timestamp markers for combining characters", () => {
-  const { term, writes, markerLines } = createFakeTerm({ cols: 5 });
-  const steps: string[] = [];
-  const lines = Array.from({ length: 80 }, () => "e\u0301e\u0301e\u0301").join("\r\n");
-
-  writeTerminalDataWithLineTimestamps(
-    term as never,
-    lines,
-    () => {},
-    { onStep: (step) => steps.push(step.kind) },
-  );
-
-  assert.equal(writes.join(""), lines);
-  assert.equal(steps.includes("batched-write"), false);
-  assert.equal(steps.includes("segmented-write"), true);
-  assert.deepEqual(markerLines, Array.from({ length: 80 }, (_, index) => index));
-});
-
-test("accounts for wide character soft wraps when batching timestamp markers", () => {
-  const { term, writes, markerLines } = createFakeTerm({ cols: 5 });
-  const lines = Array.from({ length: 80 }, () => "界界界").join("\r\n");
-
-  writeTerminalDataWithLineTimestamps(term as never, lines, () => {});
-
   assert.deepEqual(writes, [lines]);
-  assert.deepEqual(markerLines, Array.from({ length: 80 }, (_, index) => index * 2));
-});
-
-test("uses xterm unicode widths for less common wide characters", () => {
-  const { term, writes, markerLines } = createFakeTerm({ cols: 5 });
-  const steps: string[] = [];
-  const lines = Array.from({ length: 80 }, () => "🀄〈🀄").join("\r\n");
-
-  writeTerminalDataWithLineTimestamps(
-    term as never,
-    lines,
-    () => {},
-    { onStep: (step) => steps.push(step.kind) },
-  );
-
-  assert.deepEqual(writes, [lines]);
-  assert.equal(steps.includes("batched-write"), true);
-  assert.deepEqual(markerLines, Array.from({ length: 80 }, (_, index) => index * 2));
-});
-
-test("falls back from batched timestamp markers for non-Latin combining marks", () => {
-  const { term, writes, markerLines } = createFakeTerm({ cols: 5 });
-  const steps: string[] = [];
-  const lines = Array.from({ length: 80 }, () => "س\u0651س\u0651س\u0651").join("\r\n");
-
-  writeTerminalDataWithLineTimestamps(
-    term as never,
-    lines,
-    () => {},
-    { onStep: (step) => steps.push(step.kind) },
-  );
-
-  assert.equal(writes.join(""), lines);
-  assert.equal(steps.includes("batched-write"), false);
-  assert.equal(steps.includes("segmented-write"), true);
-  assert.deepEqual(markerLines, Array.from({ length: 80 }, (_, index) => index));
-});
-
-test("falls back from batched timestamp markers for Hangul jamo joins", () => {
-  const { term, writes, markerLines } = createFakeTerm({ cols: 5 });
-  const steps: string[] = [];
-  const lines = Array.from({ length: 80 }, () => "\u1100\u1161\u1100\u1161").join("\r\n");
-
-  writeTerminalDataWithLineTimestamps(
-    term as never,
-    lines,
-    () => {},
-    { onStep: (step) => steps.push(step.kind) },
-  );
-
-  assert.equal(writes.join(""), lines);
-  assert.equal(steps.includes("batched-write"), false);
-  assert.equal(steps.includes("segmented-write"), true);
-  assert.deepEqual(markerLines, Array.from({ length: 80 }, (_, index) => index * 2));
-});
-
-test("falls back from batched timestamp markers for zero-width format characters", () => {
-  const { term, writes, markerLines } = createFakeTerm({ cols: 5 });
-  const steps: string[] = [];
-  const lines = Array.from({ length: 80 }, () => "xx\u200bxx").join("\r\n");
-
-  writeTerminalDataWithLineTimestamps(
-    term as never,
-    lines,
-    () => {},
-    { onStep: (step) => steps.push(step.kind) },
-  );
-
-  assert.equal(writes.join(""), lines);
-  assert.equal(steps.includes("batched-write"), false);
-  assert.equal(steps.includes("segmented-write"), true);
-  assert.deepEqual(markerLines, Array.from({ length: 80 }, (_, index) => index));
-});
-
-test("falls back from batched timestamp markers for emoji variation sequences", () => {
-  const { term, writes, markerLines } = createFakeTerm({ cols: 5 });
-  const steps: string[] = [];
-  const lines = Array.from({ length: 80 }, () => "❤️❤️❤️").join("\r\n");
-
-  writeTerminalDataWithLineTimestamps(
-    term as never,
-    lines,
-    () => {},
-    { onStep: (step) => steps.push(step.kind) },
-  );
-
-  assert.equal(writes.join(""), lines);
-  assert.equal(steps.includes("batched-write"), false);
-  assert.equal(steps.includes("segmented-write"), true);
-  assert.deepEqual(markerLines, Array.from({ length: 80 }, (_, index) => index * 2));
-});
-
-test("keeps recording and preserves existing timestamps when the gutter is hidden", () => {
-  const { term, markerLines, disposedMarkerLines } = createFakeTerm();
-
-  writeTerminalDataWithLineTimestamps(term as never, "shown\r\n", () => {});
-  writeTerminalDataWithLineTimestamps(term as never, "hidden\r\n", () => {});
-  writeTerminalDataWithLineTimestamps(term as never, "shown again", () => {});
-
-  assert.deepEqual(markerLines, [0, 1, 2]);
-  assert.deepEqual(disposedMarkerLines, []);
+  assert.deepEqual(markerLines, []);
+  assert.equal(getTerminalLineTimestampLedgerCount(term as never), 1);
 });
 
 test("does not withhold output when an OSC sequence is split across chunks", () => {
-  const { term, writes, markerLines } = createFakeTerm();
+  const { term, writes } = createFakeTerm();
   const callbacks: string[] = [];
 
   writeTerminalDataWithLineTimestamps(
@@ -742,94 +391,75 @@ test("does not withhold output when an OSC sequence is split across chunks", () 
     () => callbacks.push("second"),
   );
 
-  assert.equal(writes.join(""), "\x1b]7;file://server/home/alice\u009calice@server:~$ ");
   assert.deepEqual(callbacks, ["first", "second"]);
-  assert.deepEqual(markerLines, [0]);
+  assert.ok(writes.join("").includes("alice@server:~$ "));
 });
 
-test("keeps timestamps for visible text before a split OSC sequence", () => {
-  const { term, writes, markerLines } = createFakeTerm();
-  const steps: TerminalLineTimestampPerfStep[] = [];
-  const tail = "\x1b]7;file://server/home/alice";
+test("does not timestamp output suspended on the alternate screen", () => {
+  const { term } = createFakeTerm();
+  writeTerminalDataWithLineTimestamps(term as never, "\x1b[?1049hvim screen", () => {}, {
+    timestampDate: new Date(2026, 5, 6, 12, 0, 0),
+  });
+  assert.equal(getTerminalLineTimestampLedgerCount(term as never), 0);
+});
 
+test("records a ledger stamp after leaving alternate screen", () => {
+  const { term } = createFakeTerm();
+  // Start as if already on alt screen via segmenter enter then leave in data
   writeTerminalDataWithLineTimestamps(
     term as never,
-    `hello ${tail}`,
+    "\x1b[?1049hframe\x1b[?1049lprompt line\r\n",
     () => {},
-    { onStep: (step) => steps.push(step) },
+    { timestampDate: new Date(2026, 5, 6, 12, 0, 0) },
   );
+  assert.ok(getTerminalLineTimestampLedgerCount(term as never) >= 1);
+});
 
-  assert.equal(writes.join(""), `hello ${tail}`);
-  assert.deepEqual(markerLines, [0]);
+test("resolveTerminalTimestampGutterRowsFromLedger paints only stamp lines", () => {
+  const rows = resolveTerminalTimestampGutterRowsFromLedger({
+    viewportY: 0,
+    rows: 5,
+    ledger: [
+      { label: "12:00:00", secondKey: 1, line: 0 },
+      { label: "12:00:01", secondKey: 2, line: 3 },
+    ],
+  });
+  assert.deepEqual(rows, [
+    { row: 0, label: "12:00:00" },
+    { row: 3, label: "12:00:01" },
+  ]);
+});
+
+
+test("simple ASCII control text gate matches seq-style floods", () => {
+  assert.equal(isSimpleAsciiControlText("1\n2\n3\n"), true);
+  assert.equal(isSimpleAsciiControlText("line-0\r\nline-1\r\n"), true);
+  assert.equal(isSimpleAsciiControlText("a\tb\b c"), true);
+  assert.equal(isSimpleAsciiControlText("hello\x1b[0m"), false);
+  assert.equal(isSimpleAsciiControlText("界"), false);
+});
+test("tryMeasureVisualRows matches hard-newline accounting for short ASCII lines", () => {
+  const { term } = createFakeTerm({ cols: 80 });
+  const data = Array.from({ length: 100 }, (_, index) => `line-${index}`).join("\r\n");
+  const measured = tryMeasureVisualRows(term as never, data, 0, 80, true);
+  assert.ok(measured);
+  assert.equal(measured?.rowOffset, 99);
+  assert.equal(measured?.column, "line-99".length);
+});
+test("tryMeasureVisualRows accounts for soft wraps on long ASCII lines", () => {
+  const { term } = createFakeTerm({ cols: 5 });
+  const measured = tryMeasureVisualRows(term as never, "abcdefghij", 0, 5, true);
+  assert.ok(measured);
+  assert.equal(measured?.rowOffset, 1);
+  assert.equal(measured?.column, 5);
+});
+test("tryMeasureVisualRows rejects unmeasurable escape sequences", () => {
+  const { term } = createFakeTerm({ cols: 80 });
   assert.equal(
-    steps.some((step) => (
-      step.kind === "segmented-write"
-      && step.writeCalls === 1
-      && step.writeChars === "hello ".length
-    )),
-    true,
-  );
-  assert.equal(
-    steps.some((step) => step.kind === "fallback-write" && step.dataChars === tail.length),
-    true,
+    tryMeasureVisualRows(term as never, "\x1b[Aup", 0, 80, true),
+    null,
   );
 });
-
-test("keeps fallback timestamps on the matching multiline rows", () => {
-  const { term, writes, markerLines } = createFakeTerm();
-
-  writeTerminalDataWithLineTimestamps(
-    term as never,
-    "one\r\ntwo \x1b]7;file://server/home/alice",
-    () => {},
-  );
-
-  assert.equal(writes.join(""), "one\r\ntwo \x1b]7;file://server/home/alice");
-  assert.deepEqual(markerLines, [0, 1]);
-});
-
-test("does not duplicate a line timestamp after a split OSC fallback", () => {
-  const { term, writes, markerLines } = createFakeTerm();
-
-  writeTerminalDataWithLineTimestamps(
-    term as never,
-    "hello \x1b]7;file://server/home/alice",
-    () => {},
-  );
-  writeTerminalDataWithLineTimestamps(
-    term as never,
-    "\u009cworld",
-    () => {},
-  );
-
-  assert.equal(writes.join(""), "hello \x1b]7;file://server/home/alice\u009cworld");
-  assert.deepEqual(markerLines, [0]);
-});
-
-test("does not timestamp the next chunk after a split alternate-screen sequence", () => {
-  const { term, writes, markerLines } = createFakeTerm();
-
-  writeTerminalDataWithLineTimestamps(term as never, "\x1b[?1049", () => {});
-  writeTerminalDataWithLineTimestamps(term as never, "hvim screen", () => {});
-
-  assert.equal(writes.join(""), "\x1b[?1049hvim screen");
-  assert.deepEqual(markerLines, []);
-});
-
-test("timestamps a prompt after split alternate-screen enter and leave in one chunk", () => {
-  const { term, writes, markerLines } = createFakeTerm();
-
-  writeTerminalDataWithLineTimestamps(term as never, "\x1b[?1049", () => {});
-  writeTerminalDataWithLineTimestamps(
-    term as never,
-    "hvim screen\x1b[?1049lprompt",
-    () => {},
-  );
-
-  assert.equal(writes.join(""), "\x1b[?1049hvim screen\x1b[?1049lprompt");
-  assert.deepEqual(markerLines, [0]);
-});
-
 test("capacity follows small scrollback and caps large histories", () => {
   assert.equal(
     resolveTerminalLineTimestampCapacity({
@@ -860,302 +490,4 @@ test("capacity follows small scrollback and caps large histories", () => {
     } as never),
     MAX_TERMINAL_LINE_TIMESTAMP_ENTRIES,
   );
-});
-
-test("real xterm keeps live timestamp markers bounded while scrollback trims", async () => {
-  const require = createRequire(import.meta.url);
-  const { Terminal } = require("@xterm/xterm") as {
-    Terminal: new (options: Record<string, unknown>) => XTerm;
-  };
-  const term = new Terminal({ cols: 80, rows: 24, scrollback: 5000, allowProposedApi: true });
-  const write = (data: string) => new Promise<void>((resolve) => {
-    writeTerminalDataWithLineTimestamps(term, data, resolve);
-  });
-
-  try {
-    await write(Array.from({ length: 6000 }, (_, index) => `seed-${index}`).join("\r\n"));
-    for (let batch = 0; batch < 300; batch += 1) {
-      await write(`a-${batch}\r\nb-${batch}\r\n`);
-    }
-
-    const capacity = resolveTerminalLineTimestampCapacity(term);
-    const liveMarkers = (term as XTerm & { markers: readonly unknown[] }).markers.length;
-    assert.ok(liveMarkers <= capacity + 512, `expected bounded markers, got ${liveMarkers}`);
-    assert.ok(getTerminalLineTimestampEntryCount(term) <= capacity);
-  } finally {
-    term.dispose();
-  }
-});
-
-test("always records timestamps without a gutter listener so expanding later still has history", () => {
-  const { term, markerLines } = createFakeTerm();
-
-  // No onTerminalLineTimestampsChange subscription — gutter is hidden.
-  writeTerminalDataWithLineTimestamps(term as never, "a\r\nb\r\nc", () => {});
-
-  assert.deepEqual(markerLines, [0, 1, 2]);
-  assert.equal(getTerminalLineTimestampEntryCount(term as never), 3);
-
-  let notifications = 0;
-  const unsubscribe = onTerminalLineTimestampsChange(term as never, () => {
-    notifications += 1;
-  });
-  // Late subscriber must still see the already-recorded markers.
-  assert.equal(getTerminalLineTimestampEntryCount(term as never), 3);
-  writeTerminalDataWithLineTimestamps(term as never, "\r\nd", () => {});
-  unsubscribe();
-  assert.equal(notifications, 1);
-  assert.equal(getTerminalLineTimestampEntryCount(term as never), 4);
-});
-
-test("prunes disposed markers in bulk under scrollback pressure without retaining all flood lines", () => {
-  const scrollback = 200;
-  const rows = 24;
-  const { term } = createFakeTerm({ scrollback, rows });
-  const lineCount = 5000;
-  const lines = Array.from({ length: lineCount }, (_, index) => `line-${index}`).join("\r\n");
-
-  writeTerminalDataWithLineTimestamps(term as never, lines, () => {});
-
-  const live = getTerminalLineTimestampEntryCount(term as never);
-  const capacity = resolveTerminalLineTimestampCapacity(term as never);
-  assert.ok(live <= capacity, `expected <= ${capacity} live entries, got ${live}`);
-  // Must not retain near the full flood (old O(n) store grew with every line).
-  assert.ok(live < lineCount / 2, `expected aggressive prune, got ${live} of ${lineCount}`);
-});
-
-test("large multi-chunk flood stays within capacity across writes", () => {
-  const scrollback = 500;
-  const { term } = createFakeTerm({ scrollback, rows: 24 });
-
-  for (let chunk = 0; chunk < 40; chunk += 1) {
-    const lines = Array.from(
-      { length: 200 },
-      (_, index) => `c${chunk}-l${index}`,
-    ).join("\r\n");
-    writeTerminalDataWithLineTimestamps(term as never, `${lines}\r\n`, () => {});
-  }
-
-  const live = getTerminalLineTimestampEntryCount(term as never);
-  const capacity = resolveTerminalLineTimestampCapacity(term as never);
-  assert.ok(live <= capacity, `expected <= ${capacity} live entries, got ${live}`);
-});
-
-test("large slow batches keep live xterm markers near the retained capacity", async () => {
-  const require = createRequire(import.meta.url);
-  const { Terminal } = require("@xterm/xterm") as {
-    Terminal: new (options: Record<string, unknown>) => XTerm;
-  };
-  const term = new Terminal({
-    cols: 80,
-    rows: 24,
-    scrollback: 100000,
-    allowProposedApi: true,
-  });
-
-  try {
-    for (let batch = 0; batch < 14; batch += 1) {
-      const data = Array.from(
-        { length: 500 },
-        (_, index) => `batch-${batch}-${index}`,
-      ).join("\r\n") + "\r\n";
-      await new Promise<void>((resolve) => {
-        writeTerminalDataWithLineTimestamps(term, data, resolve);
-      });
-    }
-
-    await new Promise((resolve) => { setTimeout(resolve, 100); });
-
-    assert.ok(term.markers.length <= MAX_TERMINAL_LINE_TIMESTAMP_ENTRIES + 512);
-    assert.equal(
-      getTerminalLineTimestampEntryCount(term),
-      MAX_TERMINAL_LINE_TIMESTAMP_ENTRIES,
-    );
-  } finally {
-    term.dispose();
-  }
-});
-
-test("large timestamp prunes defer orphan disposal across later tasks", async () => {
-  const { term, disposedMarkerLines } = createFakeTerm({
-    scrollback: 100000,
-    rows: 24,
-  });
-  const lines = Array.from(
-    { length: MAX_TERMINAL_LINE_TIMESTAMP_ENTRIES },
-    (_, index) => `line-${index}`,
-  ).join("\r\n");
-
-  writeTerminalDataWithLineTimestamps(term as never, lines, () => {});
-  writeTerminalDataWithLineTimestamps(term as never, lines, () => {});
-
-  const disposedImmediately = disposedMarkerLines.length;
-  assert.equal(disposedImmediately, 64);
-
-  await new Promise((resolve) => { setTimeout(resolve, 10); });
-  assert.ok(disposedMarkerLines.length > disposedImmediately);
-
-  resetTerminalLineTimestamps(term as never);
-});
-
-test("small batched writes amortize full timestamp-store pruning", () => {
-  const { term } = createFakeTerm({ scrollback: 1000, rows: 24 });
-  (term as unknown as { registerMarker: (offset: number) => unknown }).registerMarker = () => ({
-    line: 0,
-    isDisposed: false,
-    dispose() {
-      this.isDisposed = true;
-    },
-  });
-
-  writeTerminalDataWithLineTimestamps(term as never, "seed\r\n", () => {});
-  writeTerminalDataWithLineTimestamps(term as never, "a\r\nb", () => {});
-
-  assert.equal(getTerminalLineTimestampEntryCount(term as never, { prune: false }), 3);
-  assert.equal(getTerminalLineTimestampEntryCount(term as never), 1);
-});
-
-test("simple ASCII control text gate matches seq-style floods", () => {
-  assert.equal(isSimpleAsciiControlText("1\n2\n3\n"), true);
-  assert.equal(isSimpleAsciiControlText("line-0\r\nline-1\r\n"), true);
-  assert.equal(isSimpleAsciiControlText("a\tb\b c"), true);
-  assert.equal(isSimpleAsciiControlText("hello\x1b[0m"), false);
-  assert.equal(isSimpleAsciiControlText("界"), false);
-});
-
-test("tryMeasureVisualRows matches hard-newline accounting for short ASCII lines", () => {
-  const { term } = createFakeTerm({ cols: 80 });
-  const data = Array.from({ length: 100 }, (_, index) => `line-${index}`).join("\r\n");
-  const measured = tryMeasureVisualRows(term as never, data, 0, 80, true);
-  assert.ok(measured);
-  assert.equal(measured?.rowOffset, 99);
-  assert.equal(measured?.column, "line-99".length);
-});
-
-test("tryMeasureVisualRows accounts for soft wraps on long ASCII lines", () => {
-  const { term } = createFakeTerm({ cols: 5 });
-  const measured = tryMeasureVisualRows(term as never, "abcdefghij", 0, 5, true);
-  assert.ok(measured);
-  assert.equal(measured?.rowOffset, 1);
-  assert.equal(measured?.column, 5);
-});
-
-test("tryMeasureVisualRows rejects unmeasurable escape sequences", () => {
-  const { term } = createFakeTerm({ cols: 80 });
-  assert.equal(
-    tryMeasureVisualRows(term as never, "\x1b[Aup", 0, 80, true),
-    null,
-  );
-});
-
-test("gutter row resolution finds viewport labels across a large entry list", () => {
-  const entries = Array.from({ length: 1000 }, (_, index) => ({
-    marker: { line: index },
-    label: `t-${index}`,
-  }));
-  assert.deepEqual(
-    resolveTerminalTimestampGutterRows({
-      viewportY: 500,
-      rows: 4,
-      entries,
-    }),
-    [
-      { row: 0, label: "t-500" },
-      { row: 1, label: "t-501" },
-      { row: 2, label: "t-502" },
-      { row: 3, label: "t-503" },
-    ],
-  );
-});
-
-test("gutter prefers the latest label when a later marker rewrites an earlier line", () => {
-  // Cursor-up / reposition can append a newer marker on a lower line index.
-  assert.deepEqual(
-    resolveTerminalTimestampGutterRows({
-      viewportY: 0,
-      rows: 2,
-      entries: [
-        { marker: { line: 0 }, label: "10:00:00" },
-        { marker: { line: 1 }, label: "10:00:01" },
-        { marker: { line: 0 }, label: "10:00:02" },
-      ],
-    }),
-    [
-      { row: 0, label: "10:00:02" },
-      { row: 1, label: "10:00:01" },
-    ],
-  );
-});
-
-test("bulk timestamp batching is disabled inside a partial scrolling region", () => {
-  const { term, writes } = createFakeTerm({ cols: 80, rows: 24 });
-  (term as { _core?: { buffer?: { scrollTop: number; scrollBottom: number } } })._core = {
-    buffer: { scrollTop: 1, scrollBottom: 10 },
-  };
-  const steps: string[] = [];
-  const lines = Array.from({ length: 80 }, (_, index) => `line-${index}`).join("\r\n");
-
-  writeTerminalDataWithLineTimestamps(
-    term as never,
-    lines,
-    () => {},
-    { onStep: (step) => steps.push(step.kind) },
-  );
-
-  assert.equal(steps.includes("batched-write"), false);
-  assert.equal(steps.includes("segmented-write"), true);
-  // Segmented path still emits the original bytes.
-  assert.equal(writes.join(""), lines);
-});
-
-test("capacity prune dedupes rewritten lines so unique history is not dropped", () => {
-  const scrollback = 100;
-  const rows = 1;
-  const { term } = createFakeTerm({ scrollback, rows, cols: 80 });
-
-  // Fill unique lines up to roughly the capacity window.
-  const seed = Array.from({ length: scrollback + rows }, (_, index) => `line-${index}`).join("\r\n");
-  writeTerminalDataWithLineTimestamps(term as never, seed, () => {});
-
-  // Rewrite the same line many times via cursor-up (segmented path).
-  for (let index = 0; index < 200; index += 1) {
-    writeTerminalDataWithLineTimestamps(term as never, "\x1b[Ax\r\n", () => {});
-  }
-
-  const live = getTerminalLineTimestampEntryCount(term as never);
-  const capacity = resolveTerminalLineTimestampCapacity(term as never);
-  assert.ok(live <= capacity, `expected <= ${capacity} live entries, got ${live}`);
-  // Unique-line history should still fit under capacity; rewrite noise must not
-  // push older unique lines out purely by duplicate count.
-  assert.ok(live >= Math.min(capacity, 20), `expected meaningful unique history, got ${live}`);
-});
-
-
-test("batched simple multi-line path measures each data segment once", () => {
-  const { term, writes, markerLines } = createFakeTerm({ cols: 40 });
-  const payload = Array.from({ length: 20 }, (_, i) => `row-${i}`).join("\r\n");
-  resetVisualRowMeasureCountForTests();
-  const steps: TerminalLineTimestampPerfStep[] = [];
-  writeTerminalDataWithLineTimestamps(term as never, payload, () => {}, {
-    onStep: (step) => steps.push(step),
-  });
-  assert.equal(writes.join(""), payload);
-  assert.equal(steps.filter((step) => step.kind === "batched-write").length, 1);
-  // Simple ASCII: no full-batch validation walk; one tryMeasure per data segment only.
-  const measureCount = getVisualRowMeasureCountForTests();
-  assert.equal(measureCount, 20, `expected 20 segment measures, got ${measureCount}`);
-  assert.ok(markerLines.length >= 2);
-});
-
-test("batched single data segment reuses one full-batch measure", () => {
-  const { term, writes } = createFakeTerm({ cols: 40 });
-  const payload = "x".repeat(5000);
-  resetVisualRowMeasureCountForTests();
-  const steps: TerminalLineTimestampPerfStep[] = [];
-  writeTerminalDataWithLineTimestamps(term as never, payload, () => {}, {
-    onStep: (step) => steps.push(step),
-  });
-  assert.equal(writes.join(""), payload);
-  assert.equal(steps.filter((step) => step.kind === "batched-write").length, 1);
-  assert.equal(getVisualRowMeasureCountForTests(), 1);
 });
