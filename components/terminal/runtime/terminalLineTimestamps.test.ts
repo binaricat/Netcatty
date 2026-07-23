@@ -8,6 +8,7 @@ import {
   createTerminalLineTimestampSegmenter,
   formatTerminalLineTimestamp,
   getTerminalLineTimestampEntryCount,
+  getVisibleTerminalLineTimestampRows,
   isSimpleAsciiControlText,
   onTerminalLineTimestampsChange,
   resolveTerminalLineTimestampCapacity,
@@ -413,14 +414,47 @@ test("accounts for backspace cursor movement when batching timestamp markers", (
   assert.deepEqual(markerLines, Array.from({ length: 80 }, (_, index) => index));
 });
 
-test("accounts for tab stops without soft wrapping timestamp markers", () => {
+test("keeps tabbed writes on the segmented path so xterm owns tab stops", () => {
   const { term, writes, markerLines } = createFakeTerm({ cols: 5 });
+  const steps: string[] = [];
   const lines = Array.from({ length: 80 }, () => "\t").join("\r\n");
 
-  writeTerminalDataWithLineTimestamps(term as never, lines, () => {});
+  writeTerminalDataWithLineTimestamps(
+    term as never,
+    lines,
+    () => {},
+    { onStep: (step) => steps.push(step.kind) },
+  );
 
-  assert.deepEqual(writes, [lines]);
+  assert.equal(writes.join(""), lines);
+  assert.equal(steps.includes("batched-write"), false);
+  assert.equal(steps.includes("segmented-write"), true);
   assert.deepEqual(markerLines, Array.from({ length: 80 }, (_, index) => index));
+});
+
+test("uses changed xterm tab stops when placing timestamps", async () => {
+  const require = createRequire(import.meta.url);
+  const { Terminal } = require("@xterm/xterm") as {
+    Terminal: new (options: Record<string, unknown>) => XTerm;
+  };
+  const term = new Terminal({ cols: 10, rows: 5, scrollback: 20, allowProposedApi: true });
+  const rawWrite = (data: string) => new Promise<void>((resolve) => term.write(data, resolve));
+  const timestampedWrite = (data: string) => new Promise<void>((resolve) => {
+    writeTerminalDataWithLineTimestamps(term, data, resolve);
+  });
+
+  try {
+    // Clear all tab stops. xterm then treats TAB differently from the default
+    // eight-column model used by the fast-path estimator.
+    await rawWrite("\x1b[3g");
+    await timestampedWrite("aa\tXY\r\nb");
+
+    const rows = getVisibleTerminalLineTimestampRows(term);
+    assert.deepEqual(rows.map(({ row }) => row), [0, 1, 2]);
+    assert.ok(rows.every(({ label }) => /^\d{2}:\d{2}:\d{2}$/.test(label)));
+  } finally {
+    term.dispose();
+  }
 });
 
 test("falls back from batched timestamp markers for combining characters", () => {

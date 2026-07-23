@@ -124,10 +124,10 @@ const stores = new WeakMap<XTerm, TimestampStore>();
 const MIN_BATCHED_TIMESTAMP_DATA_SEGMENTS = 2;
 const BULK_TIMESTAMP_BATCH_MIN_BYTES = 4096;
 /**
- * Hard ceiling for live xterm markers. xterm updates every marker whenever a
- * scrollback row is trimmed, so matching a 100k-row scrollback makes steady
- * output progressively more expensive. Keep enough recent timestamp history
- * for normal navigation while bounding that per-line trim work.
+ * Target ceiling for retained timestamp entries. xterm updates every marker
+ * whenever a scrollback row is trimmed, so matching a 100k-row scrollback makes
+ * steady output progressively more expensive. Keep enough recent timestamp
+ * history for normal navigation while bounding that per-line trim work.
  */
 export const MAX_TERMINAL_LINE_TIMESTAMP_ENTRIES = 4096;
 /** Compact disposed holes at least this often during flood writes. */
@@ -147,7 +147,8 @@ export const formatTerminalLineTimestamp = (date: Date): string => (
 /**
  * Resolve how many line timestamps to retain for a terminal.
  * Prefer the live scrollback option so a smaller history trims timestamps too.
- * Capacity is scrollback + viewport (+slack), matching xterm's retained lines.
+ * Capacity follows scrollback + viewport (+slack), bounded by the live-marker
+ * target so very large histories do not make every trim progressively slower.
  */
 export const resolveTerminalLineTimestampCapacity = (
   term: XTerm,
@@ -1225,6 +1226,10 @@ export const writeTerminalDataWithLineTimestamps = (
       dataSegmentCount >= MIN_BATCHED_TIMESTAMP_DATA_SEGMENTS
       || data.length >= BULK_TIMESTAMP_BATCH_MIN_BYTES
     )
+    // Tab stops are mutable terminal state. The row estimator intentionally
+    // avoids xterm internals, so keep tabbed writes on the ordered segmented
+    // path where marker positions come from xterm after each write.
+    && !data.includes("\t")
     // Cheap ASCII gate first (seq / log floods); otherwise one validate+measure probe.
     && (
       isSimpleAsciiControlText(data)
