@@ -57,8 +57,13 @@ type TimestampStore = {
   ledger: TimestampLedgerEntry[];
   /** Last secondKey accepted (one stamp per second). */
   lastStampSecondKey: number | null;
-  /** Last observed buffer.baseY for scrollback trim rebasing. */
+  /**
+   * Last observed buffer.baseY / length. Used only to detect scrollback *trim*
+   * (circular drop from the top while buffer is full) — not ordinary baseY
+   * growth while the buffer is still growing.
+   */
   lastSeenBaseY: number | null;
+  lastSeenBufferLength: number | null;
   /** @deprecated materialize path removed; always false. */
   ledgerMaterialized: boolean;
   /**
@@ -480,6 +485,7 @@ const getTimestampStore = (term: XTerm): TimestampStore => {
       ledger: [],
       lastStampSecondKey: null,
       lastSeenBaseY: null,
+      lastSeenBufferLength: null,
       ledgerMaterialized: false,
       orphanedMarkers: [],
       listeners: new Set(),
@@ -555,9 +561,23 @@ const pushLedgerStamp = (
   trimLedgerToCapacity(store, capacity);
 };
 
+const resolveBufferMaxLines = (term: XTerm): number => {
+  const options = (term as XTerm & { options?: { scrollback?: number } }).options;
+  const scrollback = typeof options?.scrollback === "number" && options.scrollback > 0
+    ? Math.floor(options.scrollback)
+    : 0;
+  const rows = Number.isFinite(term.rows) && term.rows > 0 ? term.rows : 24;
+  // xterm keeps scrollback + viewport rows in the active buffer.
+  return scrollback + rows;
+};
+
 /**
- * When scrollback trims, xterm shifts absolute line indices down as baseY grows.
- * Rebase ledger anchors the same way markers would have been updated.
+ * Rebase ledger only when scrollback actually trims old lines from the top.
+ *
+ * Important: while the buffer is still growing, baseY also increases as the
+ * viewport follows the cursor — absolute line indices of older content do NOT
+ * shift. Subtracting every baseY delta incorrectly deletes early stamps
+ * (MOTD / login banner vanishing on scroll).
  */
 const rebaseLedgerForScrollback = (term: XTerm, store: TimestampStore): void => {
   let baseY = 0;
@@ -572,13 +592,27 @@ const rebaseLedgerForScrollback = (term: XTerm, store: TimestampStore): void => 
     return;
   }
 
-  if (store.lastSeenBaseY !== null && baseY > store.lastSeenBaseY) {
+  const maxLines = resolveBufferMaxLines(term);
+  const bufferWasFull = store.lastSeenBufferLength !== null
+    && store.lastSeenBufferLength >= maxLines;
+  const bufferIsFull = bufferLength >= maxLines;
+
+  // Only while full (or staying full) does baseY growth mean "N lines dropped
+  // from the top" and absolute indices of survivors decrease by N.
+  if (
+    bufferWasFull
+    && bufferIsFull
+    && store.lastSeenBaseY !== null
+    && baseY > store.lastSeenBaseY
+  ) {
     const delta = baseY - store.lastSeenBaseY;
     for (const entry of store.ledger) {
       entry.line -= delta;
     }
   }
+
   store.lastSeenBaseY = baseY;
+  store.lastSeenBufferLength = bufferLength;
 
   if (store.ledger.length === 0) return;
   let write = 0;
@@ -590,6 +624,56 @@ const rebaseLedgerForScrollback = (term: XTerm, store: TimestampStore): void => 
     write += 1;
   }
   store.ledger.length = write;
+};
+
+/**
+ * Last buffer line that should show a gutter label: never past real content.
+ * Avoids painting empty viewport rows after the final content line.
+ */
+const resolveLastPaintBufferLine = (
+  term: XTerm,
+  store: TimestampStore,
+  bufferLength: number,
+): number => {
+  let lastLedgerLine = -1;
+  for (const entry of store.ledger) {
+    if (entry.line > lastLedgerLine) lastLedgerLine = entry.line;
+  }
+
+  let cursorAbs = 0;
+  let cursorX = 0;
+  try {
+    const active = term.buffer?.active as
+      | { baseY?: number; cursorY?: number; cursorX?: number }
+      | undefined;
+    const baseY = typeof active?.baseY === "number" ? active.baseY : 0;
+    const cursorY = typeof active?.cursorY === "number" ? active.cursorY : 0;
+    cursorX = typeof active?.cursorX === "number" ? active.cursorX : 0;
+    cursorAbs = Math.max(0, baseY + cursorY);
+  } catch {
+    cursorAbs = 0;
+  }
+
+  // After a trailing "\n", the cursor sits on an empty next line — that row
+  // should not force an extra painted gutter cell past content.
+  let contentEnd = cursorAbs;
+  try {
+    const line = term.buffer?.active?.getLine?.(cursorAbs) as
+      | { translateToString?: (trimRight?: boolean) => string }
+      | undefined;
+    const text = line?.translateToString?.(true) ?? "";
+    if (cursorX === 0 && text.length === 0 && cursorAbs > 0) {
+      contentEnd = cursorAbs - 1;
+    }
+  } catch {
+    // keep contentEnd
+  }
+
+  let lastPaint = Math.max(lastLedgerLine, contentEnd);
+  if (bufferLength > 0) {
+    lastPaint = Math.min(lastPaint, bufferLength - 1);
+  }
+  return Math.max(0, lastPaint);
 };
 
 /** Test helper: per-second ledger depth. */
@@ -742,6 +826,7 @@ const resetTimestampStore = (store: TimestampStore) => {
   store.ledger = [];
   store.lastStampSecondKey = null;
   store.lastSeenBaseY = null;
+  store.lastSeenBufferLength = null;
   store.ledgerMaterialized = false;
   store.orphanedMarkers = [];
   store.segmenter.reset();
@@ -1170,14 +1255,17 @@ export const resolveTerminalTimestampGutterRowsFromLedger = ({
   rows,
   ledger,
   isWrappedLine,
-  /** When set, do not paint past the last buffer line (avoids filling empty viewport). */
-  bufferLength,
+  /**
+   * Inclusive last buffer line that may receive a label. Caps paint at real
+   * content (not empty viewport rows past the last line).
+   */
+  lastPaintLine,
 }: {
   viewportY: number;
   rows: number;
   ledger: readonly TimestampLedgerEntry[];
   isWrappedLine?: (line: number) => boolean;
-  bufferLength?: number;
+  lastPaintLine?: number;
 }): TerminalTimestampGutterRow[] => {
   if (ledger.length === 0 || rows <= 0) return [];
 
@@ -1204,14 +1292,14 @@ export const resolveTerminalTimestampGutterRowsFromLedger = ({
     return sourceLine;
   };
 
-  const lastBufferLine = typeof bufferLength === "number" && bufferLength > 0
-    ? bufferLength - 1
+  const maxLine = typeof lastPaintLine === "number" && Number.isFinite(lastPaintLine)
+    ? lastPaintLine
     : Number.POSITIVE_INFINITY;
 
   const visible: TerminalTimestampGutterRow[] = [];
   for (let row = 0; row < rows; row += 1) {
     const line = viewportY + row;
-    if (line > lastBufferLine) break;
+    if (line > maxLine) break;
     const sourceLine = resolveSourceLine(line);
     const label = labelAtOrBefore(sourceLine);
     if (label) {
@@ -1236,12 +1324,13 @@ export const getVisibleTerminalLineTimestampRows = (
   } catch {
     bufferLength = 0;
   }
+  const lastPaintLine = resolveLastPaintBufferLine(term, store, bufferLength);
   return resolveTerminalTimestampGutterRowsFromLedger({
     viewportY: term.buffer.active.viewportY,
     rows: term.rows,
     ledger: store.ledger,
     isWrappedLine: (line) => term.buffer.active.getLine(line)?.isWrapped === true,
-    bufferLength,
+    lastPaintLine,
   });
 };
 

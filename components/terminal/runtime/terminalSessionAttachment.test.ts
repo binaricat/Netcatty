@@ -658,10 +658,10 @@ test("hidden output keeps its arrival second when a batch crosses a clock bounda
     flushPendingTerminalWritesOnResume(term);
 
     assert.deepEqual(writes, ["first\r\n", "second\r\n"]);
+    // Paint only through real content lines (not the empty cursor row after \n).
     assert.deepEqual(getVisibleTerminalLineTimestampRows(term), [
       { row: 0, label: "12:00:59" },
       { row: 1, label: "12:01:00" },
-      { row: 2, label: "12:01:00" },
     ]);
   } finally {
     Date.now = originalDateNow;
@@ -695,7 +695,6 @@ test("visible pressure-batched output keeps its arrival second across a clock bo
       assert.deepEqual(getVisibleTerminalLineTimestampRows(term), [
         { row: 0, label: "12:00:59" },
         { row: 1, label: "12:01:00" },
-        { row: 2, label: "12:01:00" },
       ]);
     });
   } finally {
@@ -800,7 +799,6 @@ test("normal output after an alternate-screen frame keeps its earlier timestamp"
     assert.deepEqual(getVisibleTerminalLineTimestampRows(term), [
       { row: 0, label: "12:00:59" },
       { row: 1, label: "12:01:00" },
-      { row: 2, label: "12:01:00" },
     ]);
   } finally {
     Date.now = originalDateNow;
@@ -833,7 +831,6 @@ test("hiding a pane preserves the arrival second of already queued output", () =
       assert.deepEqual(getVisibleTerminalLineTimestampRows(term), [
         { row: 0, label: "12:00:59" },
         { row: 1, label: "12:01:00" },
-        { row: 2, label: "12:01:00" },
       ]);
     });
   } finally {
@@ -870,7 +867,6 @@ test("hiding the page preserves the arrival second of already queued output", ()
       assert.deepEqual(getVisibleTerminalLineTimestampRows(term), [
         { row: 0, label: "12:00:59" },
         { row: 1, label: "12:01:00" },
-        { row: 2, label: "12:01:00" },
       ]);
     });
   } finally {
@@ -904,12 +900,11 @@ test("showing a pane preserves the background arrival second still queued with v
         "hidden\r\nvisible-same-second\r\n",
         "visible-next-second\r\n",
       ]);
-      // Per-second ledger + fill-forward paint (incl. trailing empty cursor line).
+      // Per-second ledger + fill-forward through content only (no empty cursor row).
       assert.deepEqual(getVisibleTerminalLineTimestampRows(term), [
         { row: 0, label: "12:00:59" },
         { row: 1, label: "12:00:59" },
         { row: 2, label: "12:01:00" },
-        { row: 3, label: "12:01:00" },
       ]);
     });
   } finally {

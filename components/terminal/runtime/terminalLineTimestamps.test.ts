@@ -92,33 +92,80 @@ const createFakeTerm = (options: {
       return cellWidth(String.fromCodePoint(codePoint));
     },
   };
-  const trimMarkersToScrollback = () => {
-    if (!Number.isFinite(scrollback) || scrollback === undefined || scrollback < 0) return;
-    // Approximate xterm: keep the newest (scrollback + rows) buffer lines.
-    const keepFromLine = Math.max(0, cursorLine - (scrollback + rows) + 1);
+  // Approximate xterm: buffer always has at least `rows` lines; once full
+  // (scrollback + rows), further growth raises baseY and trims the top.
+  const maxBufferLines = Number.isFinite(scrollback) && scrollback !== undefined && scrollback >= 0
+    ? scrollback + rows
+    : Number.POSITIVE_INFINITY;
+  let absoluteCursorLine = 0;
+  let baseY = 0;
+  /** When null, viewport follows bottom (baseY). Tests may pin a scroll-up offset. */
+  let viewportYOverride: number | null = null;
+  const lineText = new Map<number, string>();
+
+  // When not yet full, length grows with content but never below viewport.
+  // When full, length stays at maxBufferLines and baseY tracks the trim offset.
+  const resolveLength = (): number => {
+    if (!Number.isFinite(maxBufferLines)) {
+      return Math.max(rows, absoluteCursorLine + 1);
+    }
+    // absolute lines still in buffer: [baseY, baseY + length)
+    return Math.min(maxBufferLines, Math.max(rows, absoluteCursorLine - baseY + 1));
+  };
+
+  const trimScrollbackIfNeeded = () => {
+    if (!Number.isFinite(maxBufferLines)) return;
+    // Cursor absolute line past the last retained slot → drop from top.
+    while (absoluteCursorLine - baseY + 1 > maxBufferLines) {
+      baseY += 1;
+    }
+    const keepFromAbsolute = baseY;
     for (const marker of liveMarkers) {
-      if (!marker.isDisposed && marker.line < keepFromLine) {
+      if (!marker.isDisposed && marker.line < keepFromAbsolute) {
         marker.dispose();
       }
+    }
+    for (const key of [...lineText.keys()]) {
+      if (key < keepFromAbsolute) lineText.delete(key);
     }
   };
 
   const activeBuffer = {
     type: "normal" as string,
-    viewportY: 0,
+    get viewportY() {
+      return viewportYOverride ?? baseY;
+    },
+    set viewportY(value: number) {
+      viewportYOverride = Math.max(0, value);
+    },
     get baseY() {
-      return 0;
+      return baseY;
+    },
+    set baseY(value: number) {
+      baseY = Math.max(0, value);
     },
     get cursorY() {
-      return cursorLine;
+      // Relative to bottom page (baseY).
+      return Math.max(0, absoluteCursorLine - baseY);
+    },
+    set cursorY(value: number) {
+      absoluteCursorLine = baseY + Math.max(0, value);
+      cursorLine = absoluteCursorLine;
     },
     get cursorX() {
       return cursorColumn;
     },
     get length() {
-      return cursorLine + 1;
+      return resolveLength();
     },
-    getLine: () => ({ isWrapped: false }),
+    getLine: (line?: number) => {
+      const absolute = typeof line === "number" ? line : absoluteCursorLine;
+      const text = lineText.get(absolute) ?? "";
+      return {
+        isWrapped: false,
+        translateToString: (_trimRight?: boolean) => text,
+      };
+    },
   };
   const term = {
     _core: {
@@ -139,15 +186,18 @@ const createFakeTerm = (options: {
         const sequence = readCsiSequence(data, index);
         if (sequence) {
           applyCsiSequence(sequence.sequence);
+          absoluteCursorLine = cursorLine;
           index = sequence.endIndex;
           continue;
         }
         const char = data[index];
         if (char === "\n") {
-          cursorLine += 1;
-          if (Number.isFinite(cols) && cursorColumn >= cols) {
-            cursorColumn = cols - 1;
-          }
+          absoluteCursorLine += 1;
+          cursorLine = absoluteCursorLine;
+          cursorColumn = Number.isFinite(cols) && cursorColumn >= cols
+            ? cols - 1
+            : 0;
+          trimScrollbackIfNeeded();
         } else if (char === "\r") {
           cursorColumn = 0;
         } else if (char === "\b") {
@@ -169,19 +219,24 @@ const createFakeTerm = (options: {
             index += 1;
           }
           if (wraparoundMode && cursorColumn + width > cols) {
-            cursorLine += 1;
+            absoluteCursorLine += 1;
+            cursorLine = absoluteCursorLine;
             cursorColumn = 0;
+            trimScrollbackIfNeeded();
           }
+          const existing = lineText.get(absoluteCursorLine) ?? "";
+          lineText.set(absoluteCursorLine, existing + (isEmojiVariationSequence ? "❤️" : char));
           cursorColumn = Number.isFinite(cols)
             ? Math.min(cols, cursorColumn + width)
             : cursorColumn + width;
         }
       }
-      trimMarkersToScrollback();
+      cursorLine = absoluteCursorLine;
+      trimScrollbackIfNeeded();
       callback?.();
     },
     registerMarker(offset: number) {
-      const line = cursorLine + offset;
+      const line = absoluteCursorLine + offset;
       markerLines.push(line);
       const marker = {
         line,
@@ -197,7 +252,22 @@ const createFakeTerm = (options: {
     },
   };
 
-  return { term, writes, markerLines, disposedMarkerLines, liveMarkers };
+  return {
+    term,
+    writes,
+    markerLines,
+    disposedMarkerLines,
+    liveMarkers,
+    /** Test helper: inspect / force xterm-like baseY growth. */
+    getBaseY: () => baseY,
+    setBaseY: (value: number) => {
+      baseY = Math.max(0, value);
+    },
+    setViewportY: (value: number) => {
+      viewportYOverride = Math.max(0, value);
+    },
+    getAbsoluteCursorLine: () => absoluteCursorLine,
+  };
 };
 
 test("segments terminal output into raw bytes plus timestamp markers", () => {
@@ -436,6 +506,97 @@ test("resolveTerminalTimestampGutterRowsFromLedger fills gaps with previous time
     { row: 3, label: "12:00:01" },
     { row: 4, label: "12:00:01" },
   ]);
+});
+
+test("resolveTerminalTimestampGutterRowsFromLedger does not paint past lastPaintLine", () => {
+  // Viewport is 10 rows but content only reaches line 2 — empty rows stay blank.
+  const rows = resolveTerminalTimestampGutterRowsFromLedger({
+    viewportY: 0,
+    rows: 10,
+    lastPaintLine: 2,
+    ledger: [
+      { label: "12:00:00", secondKey: 1, line: 0 },
+    ],
+  });
+  assert.deepEqual(rows, [
+    { row: 0, label: "12:00:00" },
+    { row: 1, label: "12:00:00" },
+    { row: 2, label: "12:00:00" },
+  ]);
+});
+
+test("gutter paint does not fill empty viewport rows past real content", () => {
+  // Fake buffer length is always >= rows (like xterm), even with few content lines.
+  const { term } = createFakeTerm({ rows: 24 });
+  writeTerminalDataWithLineTimestamps(term as never, "motd\r\nlogin\r\n", () => {}, {
+    timestampDate: new Date(2026, 5, 6, 12, 0, 0),
+  });
+
+  const painted = getVisibleTerminalLineTimestampRows(term as never);
+  // "motd\nlogin\n" → content on lines 0-1; cursor sits empty on line 2.
+  assert.ok(painted.length > 0);
+  assert.ok(
+    painted.every((row) => row.row <= 1),
+    `expected paint only on content rows, got rows: ${painted.map((r) => r.row).join(",")}`,
+  );
+  assert.equal(painted.at(-1)?.row, 1);
+});
+
+test("baseY growth while buffer is still growing does not drop early ledger stamps", () => {
+  // Large scrollback so a short session is not yet "full"; baseY may still rise
+  // as the viewport follows the cursor. Old logic rebased on every baseY delta
+  // and wiped MOTD stamps even though nothing was trimmed.
+  const fake = createFakeTerm({ rows: 10, scrollback: 1000 });
+  const { term } = fake;
+
+  writeTerminalDataWithLineTimestamps(term as never, "banner-line\r\n", () => {}, {
+    timestampDate: new Date(2026, 5, 6, 12, 0, 0),
+  });
+  writeTerminalDataWithLineTimestamps(term as never, "later-line\r\n", () => {}, {
+    timestampDate: new Date(2026, 5, 6, 12, 0, 5),
+  });
+
+  assert.equal(getTerminalLineTimestampLedgerCount(term as never), 2);
+
+  // Simulate mistaken "baseY follows cursor" growth while buffer not full.
+  fake.setBaseY(2);
+  // Scroll back to the top so paint includes the original banner line.
+  fake.setViewportY(0);
+
+  const painted = getVisibleTerminalLineTimestampRows(term as never);
+  // Early stamp must still fill-forward (not discarded by rebase).
+  assert.ok(
+    painted.some((row) => row.label === "12:00:00"),
+    `expected early stamp still visible, got ${JSON.stringify(painted)}`,
+  );
+  assert.equal(getTerminalLineTimestampLedgerCount(term as never), 2);
+});
+
+test("full-buffer scrollback trim rebases ledger and drops lines past the top", () => {
+  const fake = createFakeTerm({ rows: 4, scrollback: 4 });
+  const { term } = fake;
+  // maxLines = 4 + 4 = 8. Write enough distinct seconds to stamp many lines,
+  // then overflow so baseY grows while buffer is full.
+
+  for (let second = 0; second < 12; second += 1) {
+    writeTerminalDataWithLineTimestamps(
+      term as never,
+      `line-${second}\r\n`,
+      () => {},
+      { timestampDate: new Date(2026, 5, 6, 12, 0, second) },
+    );
+  }
+
+  assert.ok(fake.getBaseY() > 0, "expected scrollback trim to raise baseY");
+  const ledgerCount = getTerminalLineTimestampLedgerCount(term as never);
+  assert.ok(ledgerCount > 0);
+  // Stamps for lines that scrolled off the top must be gone after rebase+filter.
+  const painted = getVisibleTerminalLineTimestampRows(term as never);
+  assert.ok(painted.length > 0);
+  // Every painted label should still be a valid HH:MM:SS from our window.
+  for (const row of painted) {
+    assert.match(row.label, /^12:00:\d{2}$/);
+  }
 });
 
 
