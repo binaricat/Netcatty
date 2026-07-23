@@ -132,6 +132,9 @@ const measurePromptPrefixColumn = (
   const clampColumn = (value: number) => Math.max(0, Math.min(maxColumn, value));
   const parameterCount = (params: readonly number[], index = 0) => Math.max(1, params[index] || 1);
   let column = clampColumn(startColumn);
+  let columnKnown = true;
+  let newlineMode = convertEol;
+  let hasSavedColumn = false;
   let savedColumn: number | null = null;
   let lastPrintableWidth: number | null = null;
 
@@ -151,54 +154,55 @@ const measurePromptPrefixColumn = (
           case "C":
           case "a":
             if (privateOrIntermediate) return null;
-            column = clampColumn(column + count);
+            if (columnKnown) column = clampColumn(column + count);
             break;
           case "D":
             if (privateOrIntermediate) return null;
-            column = clampColumn(column - count);
+            if (columnKnown) column = clampColumn(column - count);
             break;
           case "G":
           case "`":
             if (privateOrIntermediate) return null;
             column = clampColumn(count - 1);
+            columnKnown = true;
             break;
           case "H":
           case "f":
             if (privateOrIntermediate) return null;
             column = clampColumn(parameterCount(params, 1) - 1);
+            columnKnown = true;
             break;
           case "E":
           case "F":
             if (privateOrIntermediate) return null;
             column = 0;
+            columnKnown = true;
             break;
           case "I":
-            if (privateOrIntermediate) return null;
-            for (let tab = 0; tab < count; tab += 1) {
-              column = clampColumn(column + (8 - (column % 8)));
-            }
-            break;
           case "Z":
             if (privateOrIntermediate) return null;
-            for (let tab = 0; tab < count; tab += 1) {
-              column = Math.max(0, column - (column % 8 || 8));
-            }
+            // HTS/TBC can replace the default 8-column stops. Without reading
+            // xterm's private tab map, the resulting column is unknown.
+            columnKnown = false;
             break;
           case "s":
             if (privateOrIntermediate || params.length > 0) return null;
-            savedColumn = column;
+            hasSavedColumn = true;
+            savedColumn = columnKnown ? column : null;
             break;
           case "u":
-            if (privateOrIntermediate || params.length > 0 || savedColumn === null) return null;
-            column = savedColumn;
+            if (privateOrIntermediate || params.length > 0 || !hasSavedColumn) return null;
+            columnKnown = savedColumn !== null;
+            if (savedColumn !== null) column = savedColumn;
             break;
           case "b":
             if (privateOrIntermediate || lastPrintableWidth === null) return null;
-            column = clampColumn(column + (lastPrintableWidth * count));
+            if (columnKnown) column = clampColumn(column + (lastPrintableWidth * count));
             break;
           case "r":
             if (privateOrIntermediate) return null;
             column = 0;
+            columnKnown = true;
             break;
           case "A":
           case "B":
@@ -214,14 +218,19 @@ const measurePromptPrefixColumn = (
           case "c":
           case "d":
           case "e":
-          case "h":
-          case "l":
           case "m":
           case "n":
           case "q":
             break;
+          case "h":
+          case "l":
+            if (!privateOrIntermediate && params.includes(20)) {
+              newlineMode = sequence.final === "h";
+            }
+            break;
           default:
-            return null;
+            columnKnown = false;
+            break;
         }
         index = sequence.end;
         continue;
@@ -235,18 +244,21 @@ const measurePromptPrefixColumn = (
         continue;
       }
       if (next === "7") {
-        savedColumn = column;
+        hasSavedColumn = true;
+        savedColumn = columnKnown ? column : null;
         index += 1;
         continue;
       }
       if (next === "8") {
-        if (savedColumn === null) return null;
-        column = savedColumn;
+        if (!hasSavedColumn) return null;
+        columnKnown = savedColumn !== null;
+        if (savedColumn !== null) column = savedColumn;
         index += 1;
         continue;
       }
       if (next === "E" || next === "c") {
         column = 0;
+        columnKnown = true;
         index += 1;
         continue;
       }
@@ -262,32 +274,41 @@ const measurePromptPrefixColumn = (
     }
 
     if (char === "\n" || char === "\v" || char === "\f") {
-      if (convertEol) column = 0;
+      if (newlineMode) {
+        column = 0;
+        columnKnown = true;
+      }
       continue;
     }
     if (char === "\r") {
       column = 0;
+      columnKnown = true;
       continue;
     }
     if (char === "\b") {
-      column = Math.max(0, column - 1);
+      if (columnKnown) column = Math.max(0, column - 1);
       continue;
     }
     if (char === "\t") {
-      column = clampColumn(column + (8 - (column % 8)));
+      columnKnown = false;
       continue;
     }
     const code = char.charCodeAt(0);
     if (code < 0x20 || code === 0x7f) {
       if (code === 0 || code === 7 || code === 14 || code === 15) continue;
-      return null;
+      columnKnown = false;
+      continue;
     }
-    if (code > 0x7e) return null;
+    if (code > 0x7e) {
+      columnKnown = false;
+      lastPrintableWidth = null;
+      continue;
+    }
     lastPrintableWidth = 1;
-    column = clampColumn(column + 1);
+    if (columnKnown) column = clampColumn(column + 1);
   }
 
-  return column;
+  return columnKnown ? column : null;
 };
 
 const endsAtKnownColumnZero = (
@@ -547,10 +568,7 @@ const insertPromptLineBreaksAtVisibleStarts = (
       if (rawStart === undefined) return [];
       const prefixText = mapped.text.slice(0, visibleStart);
       if (prefixText.length === 0 && cursorXBeforeWrite <= 0) return [];
-      const lastColumnResetVisibleIndex = Math.max(
-        prefixText.lastIndexOf("\r"),
-        convertEol ? prefixText.lastIndexOf("\n") : -1,
-      );
+      const lastColumnResetVisibleIndex = prefixText.lastIndexOf("\r");
       const lastColumnResetRawIndex = lastColumnResetVisibleIndex >= 0
         ? mapped.rawIndexByTextIndex[lastColumnResetVisibleIndex]
         : undefined;

@@ -921,13 +921,26 @@ test("hidden prompt formatting respects cursor movement before a bare line feed"
   const { Terminal } = require("@xterm/xterm") as {
     Terminal: new (options: Record<string, unknown>) => XTerm;
   };
-  const scenarios = [
+  const scenarios: Array<{
+    convertEol: boolean;
+    output: string;
+    promptRow: number;
+    setup?: string;
+  }> = [
     { convertEol: false, output: "foo\n", promptRow: 2 },
     { convertEol: true, output: "foo\n", promptRow: 1 },
     { convertEol: false, output: "\x1b[10C\n", promptRow: 2 },
     { convertEol: false, output: "foo\x1b[1G\n", promptRow: 1 },
     { convertEol: false, output: "你好\r\n", promptRow: 1 },
     { convertEol: false, output: "你好\n", promptRow: 2 },
+    { convertEol: false, output: "foo\x1b[20h\n", promptRow: 1 },
+    { convertEol: true, output: "foo\x1b[20l\n", promptRow: 2 },
+    {
+      convertEol: false,
+      setup: "\x1b[3g\x1b[6G\x1bH\x1b[1G",
+      output: "\x1b[I\n",
+      promptRow: 2,
+    },
   ];
   for (const scenario of scenarios) {
     const term = new Terminal({
@@ -955,6 +968,10 @@ test("hidden prompt formatting respects cursor movement before a bare line feed"
     };
 
     try {
+      if (scenario.setup) {
+        term.write(scenario.setup);
+        flushPendingTerminalWritesOnResume(term);
+      }
       withAnimationFrameQueue(() => {
         writeSessionData(ctx as never, term, scenario.output);
         writeSessionData(ctx as never, term, "$ ");

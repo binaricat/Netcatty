@@ -10,6 +10,7 @@ import {
   getTerminalWriteCoalescerPendingBytes,
 } from "./terminalWriteCoalescer";
 import {
+  enqueueTerminalWrite,
   flushTerminalWriteQueueBypassingTimers,
   hasPendingTerminalWriteQueueWork,
 } from "./terminalWriteQueue";
@@ -202,10 +203,13 @@ export function writeLocalTerminalDataInOrder(
 ): void {
   if (!data) return;
   // Hidden-pane PTY output may still be waiting in the coalescer. Drain it
-  // before a direct local write so prompts/control sequences cannot overtake it.
-  flushPendingTerminalWritesOnResume(term);
-  capture?.(data);
-  term.write(data);
+  // into the ordered queue before appending local echo. Do not bypass queue
+  // yields for every echoed character during a large output burst.
+  flushTerminalWriteCoalescer(term);
+  enqueueTerminalWrite(term, 0, (done) => {
+    capture?.(data);
+    term.write(data, done);
+  });
 }
 
 const waitForTerminalWriteCallbacks = (): Promise<void> =>

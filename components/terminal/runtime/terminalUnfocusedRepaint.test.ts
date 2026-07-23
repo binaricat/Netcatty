@@ -263,6 +263,25 @@ test("direct local writes stay ordered after pending hidden output", () => {
   assert.deepEqual(captured, ["remote-before", "local-after"]);
 });
 
+test("repeated local writes stay queued without forcing parser flushes", async () => {
+  const { term, writes } = createBufferedFakeTerm();
+  const captured: string[] = [];
+  const localWrites = Array.from({ length: 100 }, (_, index) => String(index % 10));
+
+  for (const data of localWrites) {
+    writeLocalTerminalDataInOrder(term, data, (capturedData) => captured.push(capturedData));
+  }
+
+  assert.deepEqual(writes, []);
+  assert.equal(hasPendingTerminalWrites(term), true);
+
+  const flushed = await flushPendingTerminalWritesBeforeHibernate(term);
+
+  assert.equal(flushed, true);
+  assert.equal(writes.join(""), localWrites.join(""));
+  assert.deepEqual(captured, localWrites);
+});
+
 test("flushPendingTerminalWritesBeforeHibernate drains pending xterm output completely", async () => {
   const { term, writes } = createBufferedFakeTerm();
   const payload = "x".repeat(300000);
