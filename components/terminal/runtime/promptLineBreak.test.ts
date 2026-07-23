@@ -5,12 +5,48 @@ import {
   consumeOsc133CommandCompletion,
   createPromptLineBreakState,
   detectTerminalCommandCompletions,
+  doesTerminalPromptStartAtSourceChunk,
   insertPromptLineBreakBeforePrompt,
   markPromptLineBreakCommandPending,
   markTerminalCommandCompletionPending,
   prepareTerminalDataForPromptLineBreak,
   syncPromptLineBreakState,
 } from "./promptLineBreak";
+
+test("detects prompt chunks across trailing and leading ANSI sequences", () => {
+  const trailingAnsiData = "file tail\x1b[0m$ ";
+  assert.equal(
+    doesTerminalPromptStartAtSourceChunk(trailingAnsiData, "$ ", ["file tail\x1b[0m".length]),
+    true,
+  );
+
+  const leadingAnsiData = "file tail\x1b[32m$ ";
+  assert.equal(
+    doesTerminalPromptStartAtSourceChunk(leadingAnsiData, "$ ", ["file tail".length]),
+    true,
+  );
+  assert.equal(doesTerminalPromptStartAtSourceChunk("file tail$ ", "$ ", []), false);
+
+  const clearData = "file tail\x1b[2J$ ";
+  const promptStartsAtSourceChunk = doesTerminalPromptStartAtSourceChunk(
+    clearData,
+    "$ ",
+    ["file tail\x1b[2J".length],
+  );
+  const state = createPromptLineBreakState();
+  state.lastPromptText = "$ ";
+  state.pendingCommand = true;
+  assert.equal(
+    prepareTerminalDataForPromptLineBreak(
+      createFakeTerm("", 0) as never,
+      "file tail\x1b[2J\x1b[3J$ ",
+      state,
+      true,
+      promptStartsAtSourceChunk,
+    ),
+    "file tail\r\n\x1b[2J\x1b[3J$ ",
+  );
+});
 
 function createFakeTerm(lineText = "", cursorX = lineText.length) {
   return {
@@ -217,7 +253,7 @@ test("uses a preserved PTY chunk boundary to separate a short prompt", () => {
       "file tail$ ",
       state,
       true,
-      ["file tail".length],
+      true,
     ),
     "file tail\r\n$ ",
   );

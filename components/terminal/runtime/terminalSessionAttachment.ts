@@ -11,6 +11,7 @@ import {
 } from "./terminalUserPaste";
 import {
   detectTerminalCommandCompletions,
+  doesTerminalPromptStartAtSourceChunk,
   prepareTerminalDataForPromptLineBreak,
   syncPromptLineBreakState,
 } from "./promptLineBreak";
@@ -501,6 +502,16 @@ const writeSessionDataImmediate = (
     const prepareStartedAt = shouldMeasurePerf ? performance.now() : 0;
     const settings = ctx.terminalSettingsRef?.current ?? ctx.terminalSettings;
     const forcePromptNewLine = settings?.forcePromptNewLine ?? false;
+    const promptLineBreakState = ctx.promptLineBreakStateRef?.current;
+    const promptStartsAtSourceChunk = Boolean(
+      forcePromptNewLine
+      && promptLineBreakState?.pendingCommand
+      && doesTerminalPromptStartAtSourceChunk(
+        data,
+        promptLineBreakState.lastPromptText,
+        writeOptions.sourceChunkBoundaries,
+      ),
+    );
     // Always run filter + paste bookkeeping (stateful). Bulk-plain only skips
     // erase-scrollback / prompt cosmetics when the *post-paste* stream is still
     // plain and forcePromptNewLine is off (Codex: long paste cleanup must run).
@@ -526,9 +537,9 @@ const writeSessionDataImmediate = (
       preparedDisplayData = prepareTerminalDataForPromptLineBreak(
         term,
         pasteDisplayData,
-        ctx.promptLineBreakStateRef?.current,
+        promptLineBreakState,
         forcePromptNewLine,
-        writeOptions.sourceChunkBoundaries,
+        promptStartsAtSourceChunk,
       );
       prepareMs = shouldMeasurePerf ? performance.now() - prepareStartedAt : 0;
     }

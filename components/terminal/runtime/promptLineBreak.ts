@@ -17,6 +17,7 @@ export type PromptLineBreakState = {
 type VisibleTextMap = {
   text: string;
   rawStartByTextIndex: number[];
+  rawIndexByTextIndex: number[];
 };
 
 const ESC = "\x1b";
@@ -30,10 +31,12 @@ const isCsiFinalByte = (char: string): boolean => {
 const mapVisibleText = (data: string): VisibleTextMap => {
   let text = "";
   const rawStartByTextIndex: number[] = [];
+  const rawIndexByTextIndex: number[] = [];
   let nextVisibleSegmentStart = 0;
 
   const appendVisible = (index: number, char: string) => {
     rawStartByTextIndex.push(nextVisibleSegmentStart);
+    rawIndexByTextIndex.push(index);
     text += char;
     nextVisibleSegmentStart = index + char.length;
   };
@@ -72,7 +75,7 @@ const mapVisibleText = (data: string): VisibleTextMap => {
     }
   }
 
-  return { text, rawStartByTextIndex };
+  return { text, rawStartByTextIndex, rawIndexByTextIndex };
 };
 
 const endsWithLineBreak = (text: string): boolean => {
@@ -223,7 +226,7 @@ export function insertPromptLineBreakBeforePrompt(
   data: string,
   promptText: string,
   cursorXBeforeWrite: number,
-  sourceChunkBoundaries: readonly number[] = [],
+  promptStartsAtSourceChunk = false,
 ): string {
   if (!data || !promptText) return data;
 
@@ -233,7 +236,6 @@ export function insertPromptLineBreakBeforePrompt(
   const promptTextStart = mapped.text.length - promptText.length;
   const prefixText = mapped.text.slice(0, promptTextStart);
   const promptRawStart = mapped.rawStartByTextIndex[promptTextStart] ?? 0;
-  const promptStartsAtSourceChunk = sourceChunkBoundaries.includes(promptRawStart);
   if (prefixText.length === 0 && cursorXBeforeWrite <= 0) return data;
   if (prefixText.length > 0) {
     if (endsWithLineBreak(prefixText)) return data;
@@ -243,12 +245,33 @@ export function insertPromptLineBreakBeforePrompt(
   return `${data.slice(0, promptRawStart)}\r\n${data.slice(promptRawStart)}`;
 }
 
+export function doesTerminalPromptStartAtSourceChunk(
+  data: string,
+  promptText: string,
+  sourceChunkBoundaries: readonly number[],
+): boolean {
+  if (!data || !promptText || sourceChunkBoundaries.length === 0) return false;
+
+  const mapped = mapVisibleText(data);
+  if (!mapped.text.endsWith(promptText)) return false;
+
+  const promptTextStart = mapped.text.length - promptText.length;
+  const promptRawIndex = mapped.rawIndexByTextIndex[promptTextStart];
+  if (promptRawIndex === undefined) return false;
+
+  const previousVisibleRawIndex =
+    promptTextStart > 0 ? mapped.rawIndexByTextIndex[promptTextStart - 1] : -1;
+  return sourceChunkBoundaries.some(
+    (boundary) => boundary > previousVisibleRawIndex && boundary <= promptRawIndex,
+  );
+}
+
 export function prepareTerminalDataForPromptLineBreak(
   term: XTerm,
   data: string,
   state: PromptLineBreakState | undefined,
   enabled: boolean,
-  sourceChunkBoundaries: readonly number[] = [],
+  promptStartsAtSourceChunk = false,
 ): string {
   if (!enabled || !state?.pendingCommand || !state.lastPromptText) return data;
 
@@ -257,7 +280,7 @@ export function prepareTerminalDataForPromptLineBreak(
     data,
     state.lastPromptText,
     cursorXBeforeWrite,
-    sourceChunkBoundaries,
+    promptStartsAtSourceChunk,
   );
   const visibleText = mapVisibleText(data).text;
   const ambiguousPromptSuffix = hasAmbiguousPromptSuffix(data, state.lastPromptText);
