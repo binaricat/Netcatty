@@ -343,7 +343,10 @@ test("writeSessionData bypasses animation-frame coalescing for background output
   );
   assert.match(source, /shouldFlushTerminalWritesForBackgroundOutput\(isPaneVisible\)/);
   assert.match(source, /flushTerminalWriteCoalescer\(term, writeBackgroundOutputData\)/);
-  assert.match(source, /enqueueCoalescedTerminalWrite\(term, data, writeBackgroundOutputData, ingressBytes\)/);
+  assert.match(
+    source,
+    /enqueueCoalescedTerminalWrite\(\s*term,\s*data,\s*writeBackgroundOutputData,\s*ingressBytes,/,
+  );
   assert.match(source, /flushTerminalWriteQueueBypassingTimers\(term\)/);
   assert.match(source, /const deferFlowAck = !writeOptions\.flushXtermWriteBuffer/);
 });

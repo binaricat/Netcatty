@@ -266,6 +266,10 @@ export type CoalescedTerminalWriteOptions = {
   /** Raw offsets where later PTY chunks begin inside this coalesced batch. */
   sourceChunkBoundaries?: readonly number[];
 };
+export type EnqueueCoalescedTerminalWriteOptions = {
+  /** Keep original PTY chunks intact when prompt formatting depends on them. */
+  preserveSourceChunkBoundaries?: boolean;
+};
 type CoalescedTerminalWriteNow = (
   data: string,
   ingressBytes: number,
@@ -276,6 +280,7 @@ const terminalWriteCoalescers = new WeakMap<XTerm, WriteCoalescer>();
 const terminalWriteCoalescerIngress = new WeakMap<XTerm, number>();
 const terminalWriteCoalescerChunkCounts = new WeakMap<XTerm, number>();
 const terminalWriteCoalescerChunkBoundaries = new WeakMap<XTerm, number[]>();
+const terminalWriteCoalescerPreserveSourceChunks = new WeakSet<XTerm>();
 const terminalWriteCoalescerByteCapResolvers = new WeakMap<XTerm, CoalescerByteCapResolver>();
 const terminalWriteCoalescerFlushGates = new WeakMap<XTerm, CoalescerFlushGate>();
 const terminalWriteCoalescerWriters = new WeakMap<XTerm, CoalescedTerminalWriteNow>();
@@ -320,6 +325,12 @@ const takePendingChunkBoundaries = (term: XTerm): number[] => {
   const boundaries = terminalWriteCoalescerChunkBoundaries.get(term) ?? [];
   terminalWriteCoalescerChunkBoundaries.delete(term);
   return boundaries;
+};
+
+const takePendingPreserveSourceChunks = (term: XTerm): boolean => {
+  const preserve = terminalWriteCoalescerPreserveSourceChunks.has(term);
+  terminalWriteCoalescerPreserveSourceChunks.delete(term);
+  return preserve;
 };
 
 export const setTerminalWriteCoalescerFlushGate = (
@@ -420,6 +431,7 @@ const writeLargeTerminalBatch = (
     options?: CoalescedTerminalWriteOptions,
   ) => void,
   options: CoalescedTerminalWriteOptions = {},
+  preserveSourceChunkBoundaries = false,
 ): void => {
   const batchSize = Math.max(1, maxBatchBytes);
   const isSliced = data.length > batchSize;
@@ -430,7 +442,29 @@ const writeLargeTerminalBatch = (
   let bytesSinceYield = 0;
 
   while (offset < data.length) {
-    const end = Math.min(data.length, offset + batchSize);
+    const idealEnd = Math.min(data.length, offset + batchSize);
+    let end = idealEnd;
+    if (preserveSourceChunkBoundaries && idealEnd < data.length) {
+      // Prompt formatting treats each original PTY chunk as a semantic unit.
+      // Keep one intact when it crosses an otherwise arbitrary bulk slice.
+      for (let index = sourceChunkBoundaries.length - 1; index >= 0; index -= 1) {
+        const boundary = sourceChunkBoundaries[index];
+        if (boundary > idealEnd) continue;
+        if (boundary > offset) {
+          end = boundary;
+        }
+        break;
+      }
+      // A prompt may share its PTY chunk with preceding output. If no source
+      // boundary helped, leave enough tail for the final prompt to stay whole.
+      if (end === idealEnd) {
+        const minimumFinalSliceBytes = Math.min(batchSize, 1024);
+        const finalSliceStart = data.length - minimumFinalSliceBytes;
+        if (finalSliceStart > offset && idealEnd > finalSliceStart) {
+          end = finalSliceStart;
+        }
+      }
+    }
     const slice = data.slice(offset, end);
     const sliceIngress = end >= data.length
       ? remainingIngressBytes
@@ -471,6 +505,7 @@ export const enqueueCoalescedTerminalWrite = (
   data: string,
   writeNow: CoalescedTerminalWriteNow,
   ingressBytes: number = data.length,
+  enqueueOptions: EnqueueCoalescedTerminalWriteOptions = {},
 ): void => {
   const resumedAltScreenCsi = incompleteAltScreenCsiByTerm.has(term);
   const frameProbe = probeAltScreenScheduling(
@@ -502,12 +537,15 @@ export const enqueueCoalescedTerminalWrite = (
         prefixIngress,
         resolveTerminalWriteBatchBytes(prefix, resolveCoalescerByteCap(term)),
         writeNow,
+        {},
+        enqueueOptions.preserveSourceChunkBoundaries === true,
       );
       enqueueCoalescedTerminalWrite(
         term,
         data.slice(frameStart),
         writeNow,
         Math.max(0, ingressBytes - prefixIngress),
+        enqueueOptions,
       );
       return;
     }
@@ -528,6 +566,8 @@ export const enqueueCoalescedTerminalWrite = (
       ingressBytes,
       resolveTerminalWriteBatchBytes(data, maxPendingBytes),
       writeNow,
+      {},
+      enqueueOptions.preserveSourceChunkBoundaries === true,
     );
     return;
   }
@@ -540,6 +580,9 @@ export const enqueueCoalescedTerminalWrite = (
     term,
     (terminalWriteCoalescerChunkCounts.get(term) ?? 0) + 1,
   );
+  if (enqueueOptions.preserveSourceChunkBoundaries) {
+    terminalWriteCoalescerPreserveSourceChunks.add(term);
+  }
   const pendingBytesBeforePush = getPendingCoalescedBytes(term);
   if (pendingBytesBeforePush > 0) {
     const boundaries = terminalWriteCoalescerChunkBoundaries.get(term) ?? [];
@@ -553,6 +596,7 @@ export const enqueueCoalescedTerminalWrite = (
       const batchIngress = takePendingIngressBytes(term, batch.length);
       const chunkCount = takePendingChunkCount(term);
       const sourceChunkBoundaries = takePendingChunkBoundaries(term);
+      const preserveSourceChunkBoundaries = takePendingPreserveSourceChunks(term);
       const activeWriteNow = terminalWriteCoalescerWriters.get(term) ?? writeNow;
       writeLargeTerminalBatch(
         batch,
@@ -562,6 +606,7 @@ export const enqueueCoalescedTerminalWrite = (
         chunkCount === 1
           ? {}
           : { preservePerfTrace: false, sourceChunkBoundaries },
+        preserveSourceChunkBoundaries,
       );
     }, {
       getMaxPendingBytes: () => resolveCoalescerByteCap(term),
@@ -616,6 +661,7 @@ export const flushTerminalWriteCoalescer = (
     const batchIngress = takePendingIngressBytes(term, batch.length);
     const chunkCount = takePendingChunkCount(term);
     const sourceChunkBoundaries = takePendingChunkBoundaries(term);
+    const preserveSourceChunkBoundaries = takePendingPreserveSourceChunks(term);
     writeLargeTerminalBatch(
       batch,
       batchIngress,
@@ -624,6 +670,7 @@ export const flushTerminalWriteCoalescer = (
       chunkCount === 1
         ? {}
         : { preservePerfTrace: false, sourceChunkBoundaries },
+      preserveSourceChunkBoundaries,
     );
   });
 };
@@ -634,6 +681,7 @@ export const resetTerminalWriteCoalescer = (term: XTerm): void => {
   terminalWriteCoalescerIngress.delete(term);
   terminalWriteCoalescerChunkCounts.delete(term);
   terminalWriteCoalescerChunkBoundaries.delete(term);
+  terminalWriteCoalescerPreserveSourceChunks.delete(term);
   terminalWriteCoalescerByteCapResolvers.delete(term);
   terminalWriteCoalescerFlushGates.delete(term);
   terminalWriteCoalescerWriters.delete(term);
@@ -670,6 +718,7 @@ export const abortTerminalWriteCoalescer = (
   );
   takePendingChunkCount(term);
   takePendingChunkBoundaries(term);
+  takePendingPreserveSourceChunks(term);
   coalescer.abort();
   if (ingressDropped > 0) {
     onDropped?.(ingressDropped);

@@ -435,6 +435,12 @@ export const writeSessionData = (
   flow.received(ingressBytes);
   setTerminalOutputPressureVisibility(term, isPaneVisible);
   noteTerminalOutputPressureData(term, data);
+  const settings = ctx.terminalSettingsRef?.current ?? ctx.terminalSettings;
+  const preservePromptSourceChunks = Boolean(
+    settings?.forcePromptNewLine
+    && ctx.promptLineBreakStateRef?.current?.pendingCommand
+    && ctx.promptLineBreakStateRef.current.lastPromptText,
+  );
   if (usesBackgroundWritePath) {
     const writeBackgroundOutputData = (
       batch: string,
@@ -453,7 +459,13 @@ export const writeSessionData = (
       flushTerminalWriteCoalescer(term, writeBackgroundOutputData);
       flushTerminalWritesForBackgroundOutput(term);
     }
-    enqueueCoalescedTerminalWrite(term, data, writeBackgroundOutputData, ingressBytes);
+    enqueueCoalescedTerminalWrite(
+      term,
+      data,
+      writeBackgroundOutputData,
+      ingressBytes,
+      { preserveSourceChunkBoundaries: preservePromptSourceChunks },
+    );
     if (isPaneVisible) {
       flushTerminalWriteCoalescer(term, writeBackgroundOutputData);
       flushTerminalWritesForBackgroundOutput(term);
@@ -468,7 +480,7 @@ export const writeSessionData = (
       perfTrace: writeOptions?.preservePerfTrace === false ? null : perfTrace,
       timestampDate,
     });
-  }, ingressBytes);
+  }, ingressBytes, { preserveSourceChunkBoundaries: preservePromptSourceChunks });
   scheduleVisibleTerminalWriteIdleFlush(term, isPaneCurrentlyVisible);
   scheduleHiddenPaneDrain(term, isPaneCurrentlyVisible);
   maybeFlushTerminalWriteCoalescerWhenUnfocused(

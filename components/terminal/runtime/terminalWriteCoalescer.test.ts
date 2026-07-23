@@ -20,6 +20,11 @@ import {
   MAX_TERMINAL_PLAIN_WRITE_CHUNK_BYTES,
   MAX_TERMINAL_UNBROKEN_WRITE_CHUNK_BYTES,
 } from "./terminalFlowConstants.ts";
+import {
+  createPromptLineBreakState,
+  findTerminalPromptSourceChunkVisibleStarts,
+  prepareTerminalDataForPromptLineBreak,
+} from "./promptLineBreak.ts";
 
 const createFakeTerm = () => ({}) as XTerm;
 const withAnimationFrameQueue = (run: () => void) => {
@@ -133,6 +138,53 @@ test("marks merged coalesced output as not preserving single-chunk perf metadata
     data: "firstsecond",
     options: { preservePerfTrace: false, sourceChunkBoundaries: [5] },
   }]);
+
+  resetTerminalWriteCoalescer(term);
+});
+
+test("keeps a prompt source chunk intact when slicing merged output", () => {
+  const term = {
+    buffer: { active: { type: "normal", cursorX: 1 } },
+  } as unknown as XTerm;
+  const writes: Array<{ data: string; options?: CoalescedTerminalWriteOptions }> = [];
+  const promptState = createPromptLineBreakState();
+  promptState.lastPromptText = "$ ";
+  promptState.pendingCommand = true;
+
+  setTerminalWriteCoalescerByteCapResolver(term, () => 4);
+  setTerminalWriteCoalescerFlushGate(term, () => false);
+  withAnimationFrameQueue(() => {
+    enqueueCoalescedTerminalWrite(
+      term,
+      "abc",
+      () => {},
+      "abc".length,
+      { preserveSourceChunkBoundaries: true },
+    );
+    enqueueCoalescedTerminalWrite(term, "$ ", (data, _ingressBytes, options) => {
+      const promptStarts = findTerminalPromptSourceChunkVisibleStarts(
+        data,
+        promptState.lastPromptText,
+        options?.sourceChunkBoundaries,
+      );
+      writes.push({
+        data: prepareTerminalDataForPromptLineBreak(
+          term,
+          data,
+          promptState,
+          true,
+          promptStarts,
+        ),
+        options,
+      });
+    }, "$ ".length, { preserveSourceChunkBoundaries: true });
+    flushTerminalWriteCoalescer(term);
+  });
+
+  assert.deepEqual(
+    writes.map((write) => write.data),
+    ["abc", "\r\n$ "],
+  );
 
   resetTerminalWriteCoalescer(term);
 });
