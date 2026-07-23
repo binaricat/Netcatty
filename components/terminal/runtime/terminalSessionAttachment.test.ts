@@ -609,6 +609,41 @@ test("visible alternate-screen output stays frame-batched across a clock boundar
   }
 });
 
+test("normal output before an alternate-screen frame keeps its earlier timestamp", () => {
+  const { term, writes } = createFakeTerm();
+  const ctx = {
+    ...createContext(true),
+    isVisibleRef: { current: true },
+    isPaneVisibleRef: { current: true },
+  };
+  const originalDateNow = Date.now;
+  let fakeNow = new Date(2026, 0, 1, 12, 0, 59, 800).getTime();
+  Date.now = () => fakeNow;
+
+  try {
+    withAnimationFrameQueue((schedule) => {
+      writeSessionData(ctx as never, term, "before\r\n\x1b[?1049hframe-a");
+      assert.deepEqual(writes, ["before\r\n"]);
+
+      fakeNow = new Date(2026, 0, 1, 12, 1, 0, 20).getTime();
+      writeSessionData(ctx as never, term, "frame-b\x1b[?1049lafter");
+      schedule.flushScheduled();
+
+      assert.equal(
+        writes.join(""),
+        "before\r\n\x1b[?1049hframe-aframe-b\x1b[?1049lafter",
+      );
+      assert.deepEqual(getVisibleTerminalLineTimestampRows(term), [
+        { row: 0, label: "12:00:59" },
+        { row: 1, label: "12:01:00" },
+      ]);
+    });
+  } finally {
+    Date.now = originalDateNow;
+    resetTerminalWriteCoalescer(term);
+  }
+});
+
 test("hiding a pane preserves the arrival second of already queued output", () => {
   const { term, writes } = createFakeTerm();
   const ctx = {

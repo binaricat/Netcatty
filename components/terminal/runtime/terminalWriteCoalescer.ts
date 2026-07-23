@@ -45,6 +45,8 @@ type AltScreenProbeResult = {
   needsRaf: boolean;
   incomplete: IncompletePrivateCsi | null;
   lastTransition: "enter" | "leave" | null;
+  /** Raw offset where a new alternate-screen frame (or possible split entry) starts. */
+  frameStart: number | null;
 };
 
 /**
@@ -60,14 +62,20 @@ const probeAltScreenScheduling = (
   let params = resume?.params ?? "";
   let lastTransition: "enter" | "leave" | null = null;
   let incomplete: IncompletePrivateCsi | null = null;
+  let sequenceStart = resume ? 0 : -1;
+  let frameStart: number | null = null;
 
   const finishPrivate = (final: string): void => {
     const parts = params.split(";").filter(Boolean);
     if (parts.some((param) => ALT_SCREEN_DECSET.has(param))) {
       lastTransition = final === "h" ? "enter" : "leave";
+      if (final === "h" && frameStart === null) {
+        frameStart = Math.max(0, sequenceStart);
+      }
     }
     phase = null;
     params = "";
+    sequenceStart = -1;
   };
 
   for (let i = 0; i < data.length; i += 1) {
@@ -78,11 +86,13 @@ const probeAltScreenScheduling = (
       if (ch === ESC) {
         phase = 0;
         params = "";
+        sequenceStart = i;
         continue;
       }
       if (ch === C1_CSI) {
         phase = 3;
         params = "";
+        sequenceStart = i;
         continue;
       }
       continue;
@@ -99,10 +109,12 @@ const probeAltScreenScheduling = (
         lastTransition = "leave";
         phase = null;
         params = "";
+        sequenceStart = -1;
         continue;
       }
       phase = null;
       params = "";
+      sequenceStart = -1;
       i -= 1; // reprocess this char as potential start
       continue;
     }
@@ -116,6 +128,7 @@ const probeAltScreenScheduling = (
       }
       phase = null;
       params = "";
+      sequenceStart = -1;
       i -= 1;
       continue;
     }
@@ -129,6 +142,7 @@ const probeAltScreenScheduling = (
       }
       phase = null;
       params = "";
+      sequenceStart = -1;
       i -= 1;
       continue;
     }
@@ -148,6 +162,7 @@ const probeAltScreenScheduling = (
     // the same) — reprocess this byte as a fresh introducer.
     phase = null;
     params = "";
+    sequenceStart = -1;
     if (ch === ESC || ch === C1_CSI) {
       i -= 1;
     }
@@ -155,12 +170,16 @@ const probeAltScreenScheduling = (
 
   if (phase !== null) {
     incomplete = { phase, params };
+    if (frameStart === null) {
+      frameStart = Math.max(0, sequenceStart);
+    }
   }
 
   return {
     needsRaf: lastTransition === "enter" || incomplete !== null,
     incomplete,
     lastTransition,
+    frameStart,
   };
 };
 
@@ -437,6 +456,46 @@ export const enqueueCoalescedTerminalWrite = (
   writeNow: CoalescedTerminalWriteNow,
   ingressBytes: number = data.length,
 ): void => {
+  const resumedAltScreenCsi = incompleteAltScreenCsiByTerm.has(term);
+  const frameProbe = probeAltScreenScheduling(
+    data,
+    incompleteAltScreenCsiByTerm.get(term) ?? null,
+  );
+  const startsNewFrame = frameProbe.frameStart !== null
+    && !(resumedAltScreenCsi && frameProbe.frameStart === 0);
+  if (startsNewFrame) {
+    // Keep ordinary shell output out of an alternate-screen frame. Otherwise a
+    // frame held across a clock boundary makes the preceding shell line inherit
+    // the later timestamp when the batch finally drains.
+    flushTerminalWriteCoalescer(term);
+    const frameStart = frameProbe.frameStart!;
+    if (frameStart > 0) {
+      const prefix = data.slice(0, frameStart);
+      const prefixIngress = splitIngressBytes(
+        data.length,
+        ingressBytes,
+        prefix.length,
+        ingressBytes,
+      );
+      // Advance split CSI state for a resumed sequence that turned out not to
+      // be an alternate-screen entry before the new frame begins.
+      noteAltScreenScheduleProbe(term, prefix);
+      writeLargeTerminalBatch(
+        prefix,
+        prefixIngress,
+        resolveTerminalWriteBatchBytes(prefix, resolveCoalescerByteCap(term)),
+        writeNow,
+      );
+      enqueueCoalescedTerminalWrite(
+        term,
+        data.slice(frameStart),
+        writeNow,
+        Math.max(0, ingressBytes - prefixIngress),
+      );
+      return;
+    }
+  }
+
   const maxPendingBytes = resolveCoalescerByteCap(term);
   const canAutoFlush = shouldAutoFlushCoalescer(term);
   if (canAutoFlush && getPendingCoalescedBytes(term) + data.length > maxPendingBytes) {
