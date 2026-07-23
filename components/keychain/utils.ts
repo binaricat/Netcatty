@@ -66,3 +66,24 @@ export type PanelMode =
 
 // Filter tab types
 export type FilterTab = 'key' | 'certificate';
+
+interface IdentitySectionVisibilityOptions {
+    activeFilter: FilterTab;
+    identityCount: number;
+    filteredIdentityCount: number;
+    filteredKeyCount: number;
+    search: string;
+}
+
+export const shouldShowIdentitySection = ({
+    activeFilter,
+    identityCount,
+    filteredIdentityCount,
+    filteredKeyCount,
+    search,
+}: IdentitySectionVisibilityOptions): boolean => {
+    if (activeFilter !== 'key' || identityCount === 0) return false;
+    if (!search.trim()) return true;
+
+    return filteredIdentityCount > 0 || filteredKeyCount === 0;
+};

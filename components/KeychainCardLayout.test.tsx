@@ -9,6 +9,7 @@ import type { Identity, SSHKey } from "../types.ts";
 import KeychainManager from "./KeychainManager.tsx";
 import { IdentityCard } from "./keychain/IdentityCard.tsx";
 import { KeyCard } from "./keychain/KeyCard.tsx";
+import { shouldShowIdentitySection } from "./keychain/utils.ts";
 
 const longLabel =
   "sdakdjkasjakjskajskaijssdakdjkasjakjskajskaijssdakdjkasjakjskajskaijssdakdjkasjakjskajskaijs";
@@ -206,4 +207,31 @@ test("KeychainManager exposes the new identity action in the header", () => {
   );
 
   assert.match(markup, />New Identity<\/button>/);
+});
+
+test("keychain search reveals matching keys when identities do not match", () => {
+  assert.equal(shouldShowIdentitySection({
+    activeFilter: "key",
+    identityCount: 1,
+    filteredIdentityCount: 0,
+    filteredKeyCount: 1,
+    search: "matching-key",
+  }), false);
+});
+
+test("keychain search keeps identities for identity matches or no results", () => {
+  assert.equal(shouldShowIdentitySection({
+    activeFilter: "key",
+    identityCount: 1,
+    filteredIdentityCount: 1,
+    filteredKeyCount: 0,
+    search: "matching-identity",
+  }), true);
+  assert.equal(shouldShowIdentitySection({
+    activeFilter: "key",
+    identityCount: 1,
+    filteredIdentityCount: 0,
+    filteredKeyCount: 0,
+    search: "no-results",
+  }), true);
 });

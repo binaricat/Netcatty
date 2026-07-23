@@ -65,6 +65,7 @@ import {
   isMacOS,
   KeyCard,
   type PanelMode,
+  shouldShowIdentitySection,
   ViewKeyPanel,
 } from "./keychain";
 
@@ -258,7 +259,13 @@ echo $3 >> "$FILE"`);
     ));
   }, [identities, search]);
 
-  const showIdentitySection = activeFilter === "key" && identities.length > 0;
+  const showIdentitySection = shouldShowIdentitySection({
+    activeFilter,
+    identityCount: identities.length,
+    filteredIdentityCount: filteredIdentities.length,
+    filteredKeyCount: filteredKeys.length,
+    search,
+  });
   const showKeySection = !showIdentitySection;
 
   // Push a new panel onto the stack

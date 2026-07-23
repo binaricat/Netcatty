@@ -6,7 +6,7 @@
 
 // Utilities and types
 export {
-isMacOS,type FilterTab,type PanelMode
+isMacOS,shouldShowIdentitySection,type FilterTab,type PanelMode
 } from './utils';
 
 // Card components
