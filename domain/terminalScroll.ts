@@ -42,6 +42,14 @@ export const shouldScrollOnTerminalInput = (
     return false;
   }
 
+  // Ctrl+C (SIGINT) is handled by our urgent-interrupt path, which bypasses
+  // xterm's native scrollOnUserInput. Map it to scroll-on-input so the default
+  // "Scroll on input" setting returns the viewport to the bottom after the user
+  // interrupts a scrolled-up stream (e.g. tail logs). #2287
+  if (data === "\x03") {
+    return scrollOnInput || scrollOnKeyPress;
+  }
+
   return hasPrintableTerminalInput(data) ? scrollOnInput : scrollOnKeyPress;
 };
 

@@ -4,92 +4,129 @@ import test from "node:test";
 import {
   scrollTerminalToBottomAfterInputIfEnabled,
   scrollTerminalToBottomIfNeeded,
+  shouldScrollOnTerminalInput,
 } from "./terminalScroll.ts";
 
-test("does not request another scroll when the terminal is already at the bottom", () => {
+const createScrollTarget = (viewportY: number, baseY = 10_000) => {
   let scrollCalls = 0;
-  const terminal = {
-    buffer: {
-      active: {
-        baseY: 10_000,
-        viewportY: 10_000,
+  return {
+    terminal: {
+      buffer: {
+        active: {
+          baseY,
+          viewportY,
+        },
+      },
+      scrollToBottom() {
+        scrollCalls += 1;
       },
     },
-    scrollToBottom() {
-      scrollCalls += 1;
+    get scrollCalls() {
+      return scrollCalls;
     },
   };
+};
 
-  const didScroll = scrollTerminalToBottomIfNeeded(terminal);
+test("does not request another scroll when the terminal is already at the bottom", () => {
+  const fixture = createScrollTarget(10_000);
+
+  const didScroll = scrollTerminalToBottomIfNeeded(fixture.terminal);
 
   assert.equal(didScroll, false);
-  assert.equal(scrollCalls, 0);
+  assert.equal(fixture.scrollCalls, 0);
 });
 
 test("scrolls to the bottom when the user is viewing earlier output", () => {
-  let scrollCalls = 0;
-  const terminal = {
-    buffer: {
-      active: {
-        baseY: 10_000,
-        viewportY: 9_900,
-      },
-    },
-    scrollToBottom() {
-      scrollCalls += 1;
-    },
-  };
+  const fixture = createScrollTarget(9_900);
 
-  const didScroll = scrollTerminalToBottomIfNeeded(terminal);
+  const didScroll = scrollTerminalToBottomIfNeeded(fixture.terminal);
 
   assert.equal(didScroll, true);
-  assert.equal(scrollCalls, 1);
+  assert.equal(fixture.scrollCalls, 1);
 });
 
 test("printable input does not request another scroll when already at the bottom", () => {
-  let scrollCalls = 0;
-  const terminal = {
-    buffer: {
-      active: {
-        baseY: 10_000,
-        viewportY: 10_000,
-      },
-    },
-    scrollToBottom() {
-      scrollCalls += 1;
-    },
-  };
+  const fixture = createScrollTarget(10_000);
 
   const didScroll = scrollTerminalToBottomAfterInputIfEnabled(
-    terminal,
+    fixture.terminal,
     { scrollOnInput: true },
     "f",
   );
 
   assert.equal(didScroll, false);
-  assert.equal(scrollCalls, 0);
+  assert.equal(fixture.scrollCalls, 0);
 });
 
 test("printable input still scrolls when the user is viewing earlier output", () => {
-  let scrollCalls = 0;
-  const terminal = {
-    buffer: {
-      active: {
-        baseY: 10_000,
-        viewportY: 9_900,
-      },
-    },
-    scrollToBottom() {
-      scrollCalls += 1;
-    },
-  };
+  const fixture = createScrollTarget(9_900);
 
   const didScroll = scrollTerminalToBottomAfterInputIfEnabled(
-    terminal,
+    fixture.terminal,
     { scrollOnInput: true },
     "f",
   );
 
   assert.equal(didScroll, true);
-  assert.equal(scrollCalls, 1);
+  assert.equal(fixture.scrollCalls, 1);
+});
+
+test("Ctrl+C scrolls under scrollOnInput when viewing earlier output (#2287)", () => {
+  const fixture = createScrollTarget(9_900);
+
+  assert.equal(
+    shouldScrollOnTerminalInput({ scrollOnInput: true, scrollOnKeyPress: false }, "\x03"),
+    true,
+  );
+
+  const didScroll = scrollTerminalToBottomAfterInputIfEnabled(
+    fixture.terminal,
+    { scrollOnInput: true, scrollOnKeyPress: false },
+    "\x03",
+  );
+
+  assert.equal(didScroll, true);
+  assert.equal(fixture.scrollCalls, 1);
+});
+
+test("Ctrl+C still scrolls when only scrollOnKeyPress is enabled", () => {
+  const fixture = createScrollTarget(9_900);
+
+  const didScroll = scrollTerminalToBottomAfterInputIfEnabled(
+    fixture.terminal,
+    { scrollOnInput: false, scrollOnKeyPress: true },
+    "\x03",
+  );
+
+  assert.equal(didScroll, true);
+  assert.equal(fixture.scrollCalls, 1);
+});
+
+test("Ctrl+C does not scroll when both input scroll settings are off", () => {
+  const fixture = createScrollTarget(9_900);
+
+  assert.equal(
+    shouldScrollOnTerminalInput({ scrollOnInput: false, scrollOnKeyPress: false }, "\x03"),
+    false,
+  );
+
+  const didScroll = scrollTerminalToBottomAfterInputIfEnabled(
+    fixture.terminal,
+    { scrollOnInput: false, scrollOnKeyPress: false },
+    "\x03",
+  );
+
+  assert.equal(didScroll, false);
+  assert.equal(fixture.scrollCalls, 0);
+});
+
+test("non-printable keys still require scrollOnKeyPress", () => {
+  assert.equal(
+    shouldScrollOnTerminalInput({ scrollOnInput: true, scrollOnKeyPress: false }, "\r"),
+    false,
+  );
+  assert.equal(
+    shouldScrollOnTerminalInput({ scrollOnInput: true, scrollOnKeyPress: true }, "\r"),
+    true,
+  );
 });
