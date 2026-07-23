@@ -290,7 +290,10 @@ const flushBeforeTimestampBoundary = (
 function flushHiddenPaneWritesNow(term: XTerm, isPaneVisible: () => boolean): void {
   if (isPaneVisible()) return;
   flushTerminalWriteCoalescer(term);
-  flushTerminalWritesForBackgroundOutput(term);
+  // Each background queue item flushes xterm's parser buffer itself. Leave the
+  // queue's zero-delay yield timers intact so a large hidden burst cannot turn
+  // the whole backlog into one long renderer task.
+  flushTerminalWriteBufferBypassingTimers(term);
   if (!isPaneVisible() && hasPendingTerminalWrites(term)) {
     scheduleHiddenPaneDrain(term, isPaneVisible);
   }
@@ -449,11 +452,16 @@ export const writeSessionData = (
     ): void => {
       writeSessionDataImmediate(ctx, term, batch, batchIngress, {
         ...writeOptions,
+        deferStart: writeOptions?.deferStart ?? !isPaneCurrentlyVisible(),
         flushXtermWriteBuffer: true,
         perfTrace: writeOptions?.preservePerfTrace === false ? null : perfTrace,
         timestampDate,
       });
-      flushTerminalWritesForBackgroundOutput(term);
+      if (isPaneCurrentlyVisible()) {
+        flushTerminalWritesForBackgroundOutput(term);
+      } else {
+        flushTerminalWriteBufferBypassingTimers(term);
+      }
     };
     if (isPaneVisible) {
       flushTerminalWriteCoalescer(term, writeBackgroundOutputData);

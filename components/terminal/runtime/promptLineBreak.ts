@@ -86,9 +86,11 @@ const endsWithLineBreak = (text: string): boolean => {
 const endsAtKnownColumnZero = (
   text: string,
   cursorXBeforeWrite: number,
+  convertEol: boolean,
 ): boolean => {
   if (text.endsWith("\r")) return true;
   if (!text.endsWith("\n")) return false;
+  if (convertEol) return true;
 
   const beforeFinalLineFeed = text.slice(0, -1);
   const lastCarriageReturn = beforeFinalLineFeed.lastIndexOf("\r");
@@ -120,6 +122,14 @@ const getCursorX = (term: XTerm): number => {
     return term.buffer.active.cursorX;
   } catch {
     return 0;
+  }
+};
+
+const getConvertEol = (term: XTerm): boolean => {
+  try {
+    return term.options.convertEol === true;
+  } catch {
+    return false;
   }
 };
 
@@ -321,6 +331,7 @@ const insertPromptLineBreaksAtVisibleStarts = (
   promptText: string,
   cursorXBeforeWrite: number,
   promptVisibleStarts: readonly number[],
+  convertEol: boolean,
 ): string => {
   const mapped = mapVisibleText(data);
   const rawStarts = [...new Set(promptVisibleStarts)]
@@ -333,7 +344,7 @@ const insertPromptLineBreaksAtVisibleStarts = (
       if (prefixText.length === 0 && cursorXBeforeWrite <= 0) return [];
       if (
         prefixText.length > 0
-        && endsAtKnownColumnZero(prefixText, cursorXBeforeWrite)
+        && endsAtKnownColumnZero(prefixText, cursorXBeforeWrite, convertEol)
       ) return [];
       const rawStart = mapped.rawStartByTextIndex[visibleStart];
       return rawStart === undefined ? [] : [rawStart];
@@ -365,6 +376,7 @@ export function prepareTerminalDataForPromptLineBreak(
       state.lastPromptText,
       cursorXBeforeWrite,
       promptVisibleStarts,
+      getConvertEol(term),
     )
     : insertPromptLineBreakBeforePrompt(
       data,

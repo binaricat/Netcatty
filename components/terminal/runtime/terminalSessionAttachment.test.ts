@@ -517,6 +517,77 @@ test("frequent hidden log lines are drained in one complete terminal write", asy
   resetTerminalWriteCoalescer(term);
 });
 
+test("large hidden bursts yield between terminal write slices", () => {
+  type FakeTimer = {
+    active: boolean;
+    callback: () => void;
+    delay: number;
+    unref: () => void;
+  };
+
+  const originalSetTimeout = globalThis.setTimeout;
+  const originalClearTimeout = globalThis.clearTimeout;
+  const timers: FakeTimer[] = [];
+  globalThis.setTimeout = ((callback: (...args: unknown[]) => void, delay = 0, ...args: unknown[]) => {
+    const timer: FakeTimer = {
+      active: true,
+      callback: () => callback(...args),
+      delay: Number(delay),
+      unref() {},
+    };
+    timers.push(timer);
+    return timer as unknown as ReturnType<typeof setTimeout>;
+  }) as typeof setTimeout;
+  globalThis.clearTimeout = ((timer: FakeTimer | undefined) => {
+    if (timer) timer.active = false;
+  }) as unknown as typeof clearTimeout;
+
+  const { term, writes } = createFakeTerm();
+  const ctx = {
+    ...createContext(false),
+    isVisibleRef: { current: true },
+    isPaneVisibleRef: { current: false },
+  };
+  const chunks = Array.from({ length: 96 }, () => "x".repeat(4096));
+  const payload = chunks.join("");
+
+  try {
+    for (const chunk of chunks) {
+      writeSessionData(ctx as never, term, chunk);
+    }
+    assert.deepEqual(writes, []);
+
+    const hiddenDrain = timers.find((timer) => timer.active && timer.delay === 160);
+    assert.ok(hiddenDrain);
+    hiddenDrain.active = false;
+    hiddenDrain.callback();
+
+    assert.deepEqual(writes, []);
+    const firstQueueDrain = timers.find((timer) => timer.active && timer.delay === 0);
+    assert.ok(firstQueueDrain);
+    firstQueueDrain.active = false;
+    firstQueueDrain.callback();
+
+    assert.equal(writes.length, 1);
+    assert.ok(writes[0]!.length <= MAX_TERMINAL_PLAIN_WRITE_CHUNK_BYTES);
+    assert.ok(writes.join("").length < payload.length);
+    assert.ok(timers.some((timer) => timer.active && timer.delay === 0));
+
+    flushPendingTerminalWritesOnResume(term);
+    assert.equal(writes.join(""), payload);
+
+    const followupDrain = timers.find((timer) => timer.active && timer.delay === 160);
+    if (followupDrain) {
+      followupDrain.active = false;
+      followupDrain.callback();
+    }
+  } finally {
+    globalThis.setTimeout = originalSetTimeout;
+    globalThis.clearTimeout = originalClearTimeout;
+    resetTerminalWriteCoalescer(term);
+  }
+});
+
 test("hidden output keeps its arrival second when a batch crosses a clock boundary", () => {
   const { term, writes } = createFakeTerm();
   const ctx = {
@@ -838,43 +909,54 @@ test("hidden prompt formatting preserves PTY chunk boundaries", () => {
   }
 });
 
-test("hidden prompt formatting resets the column after a bare line feed", () => {
+test("hidden prompt formatting respects xterm newline mode after a bare line feed", () => {
   const require = createRequire(import.meta.url);
   const { Terminal } = require("@xterm/xterm") as {
     Terminal: new (options: Record<string, unknown>) => XTerm;
   };
-  const term = new Terminal({ cols: 80, rows: 5, scrollback: 20, allowProposedApi: true });
-  const promptState = createPromptLineBreakState();
-  promptState.lastPromptText = "$ ";
-  promptState.pendingCommand = true;
-  const settings = {
-    showLineTimestamps: false,
-    scrollOnOutput: false,
-    forcePromptNewLine: true,
-  };
-  const ctx = {
-    ...createContext(false),
-    terminalSettingsRef: { current: settings },
-    terminalSettings: settings,
-    promptLineBreakStateRef: { current: promptState },
-    isVisibleRef: { current: true },
-    isPaneVisibleRef: { current: false },
-  };
-
-  try {
-    withAnimationFrameQueue(() => {
-      writeSessionData(ctx as never, term, "foo\n");
-      writeSessionData(ctx as never, term, "$ ");
-      flushPendingTerminalWritesOnResume(term);
+  for (const convertEol of [false, true]) {
+    const term = new Terminal({
+      cols: 80,
+      rows: 5,
+      scrollback: 20,
+      allowProposedApi: true,
+      convertEol,
     });
+    const promptState = createPromptLineBreakState();
+    promptState.lastPromptText = "$ ";
+    promptState.pendingCommand = true;
+    const settings = {
+      showLineTimestamps: false,
+      scrollOnOutput: false,
+      forcePromptNewLine: true,
+    };
+    const ctx = {
+      ...createContext(false),
+      terminalSettingsRef: { current: settings },
+      terminalSettings: settings,
+      promptLineBreakStateRef: { current: promptState },
+      isVisibleRef: { current: true },
+      isPaneVisibleRef: { current: false },
+    };
 
-    assert.equal(term.buffer.active.getLine(0)?.translateToString(true), "foo");
-    assert.equal(term.buffer.active.getLine(1)?.translateToString(true), "");
-    assert.equal(term.buffer.active.getLine(2)?.translateToString(true), "$");
-    assert.equal(term.buffer.active.cursorX, 2);
-  } finally {
-    resetTerminalWriteCoalescer(term);
-    term.dispose();
+    try {
+      withAnimationFrameQueue(() => {
+        writeSessionData(ctx as never, term, "foo\n");
+        writeSessionData(ctx as never, term, "$ ");
+        flushPendingTerminalWritesOnResume(term);
+      });
+
+      const promptRow = convertEol ? 1 : 2;
+      assert.equal(term.buffer.active.getLine(0)?.translateToString(true), "foo");
+      if (!convertEol) {
+        assert.equal(term.buffer.active.getLine(1)?.translateToString(true), "");
+      }
+      assert.equal(term.buffer.active.getLine(promptRow)?.translateToString(true), "$");
+      assert.equal(term.buffer.active.cursorX, 2);
+    } finally {
+      resetTerminalWriteCoalescer(term);
+      term.dispose();
+    }
   }
 });
 
