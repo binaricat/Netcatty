@@ -916,18 +916,24 @@ test("hidden prompt formatting preserves PTY chunk boundaries", () => {
   }
 });
 
-test("hidden prompt formatting respects xterm newline mode after a bare line feed", () => {
+test("hidden prompt formatting respects cursor movement before a bare line feed", () => {
   const require = createRequire(import.meta.url);
   const { Terminal } = require("@xterm/xterm") as {
     Terminal: new (options: Record<string, unknown>) => XTerm;
   };
-  for (const convertEol of [false, true]) {
+  const scenarios = [
+    { convertEol: false, output: "foo\n", promptRow: 2 },
+    { convertEol: true, output: "foo\n", promptRow: 1 },
+    { convertEol: false, output: "\x1b[10C\n", promptRow: 2 },
+    { convertEol: false, output: "foo\x1b[1G\n", promptRow: 1 },
+  ];
+  for (const scenario of scenarios) {
     const term = new Terminal({
       cols: 80,
       rows: 5,
       scrollback: 20,
       allowProposedApi: true,
-      convertEol,
+      convertEol: scenario.convertEol,
     });
     const promptState = createPromptLineBreakState();
     promptState.lastPromptText = "$ ";
@@ -948,17 +954,12 @@ test("hidden prompt formatting respects xterm newline mode after a bare line fee
 
     try {
       withAnimationFrameQueue(() => {
-        writeSessionData(ctx as never, term, "foo\n");
+        writeSessionData(ctx as never, term, scenario.output);
         writeSessionData(ctx as never, term, "$ ");
         flushPendingTerminalWritesOnResume(term);
       });
 
-      const promptRow = convertEol ? 1 : 2;
-      assert.equal(term.buffer.active.getLine(0)?.translateToString(true), "foo");
-      if (!convertEol) {
-        assert.equal(term.buffer.active.getLine(1)?.translateToString(true), "");
-      }
-      assert.equal(term.buffer.active.getLine(promptRow)?.translateToString(true), "$");
+      assert.equal(term.buffer.active.getLine(scenario.promptRow)?.translateToString(true), "$");
       assert.equal(term.buffer.active.cursorX, 2);
     } finally {
       resetTerminalWriteCoalescer(term);

@@ -83,21 +83,223 @@ const endsWithLineBreak = (text: string): boolean => {
   return last === "\n" || last === "\r";
 };
 
+type CsiSequence = {
+  body: string;
+  end: number;
+  final: string;
+};
+
+const readCsiSequence = (data: string, index: number): CsiSequence | null => {
+  const parameterStart = data[index] === ESC ? index + 2 : index + 1;
+  if (data[index] === ESC && data[index + 1] !== "[") return null;
+  for (let end = parameterStart; end < data.length; end += 1) {
+    if (!isCsiFinalByte(data[end])) continue;
+    return {
+      body: data.slice(parameterStart, end),
+      end,
+      final: data[end],
+    };
+  }
+  return null;
+};
+
+const readControlStringEnd = (data: string, start: number): number | null => {
+  for (let index = start; index < data.length; index += 1) {
+    if (data[index] === BEL) return index;
+    if (data[index] === ESC && data[index + 1] === "\\") return index + 1;
+  }
+  return null;
+};
+
+const parseCsiParams = (body: string): number[] => {
+  const parameterText = body.match(/^[0-9;:]*/)?.[0] ?? "";
+  if (!parameterText) return [];
+  return parameterText.split(";").map((part) => {
+    const value = Number.parseInt(part.split(":", 1)[0] ?? "", 10);
+    return Number.isFinite(value) ? value : 0;
+  });
+};
+
+const measurePromptPrefixColumn = (
+  term: XTerm,
+  data: string,
+  startColumn: number,
+  convertEol: boolean,
+): number | null => {
+  const maxColumn = Number.isFinite(term.cols) && term.cols > 0
+    ? term.cols - 1
+    : Number.MAX_SAFE_INTEGER;
+  const clampColumn = (value: number) => Math.max(0, Math.min(maxColumn, value));
+  const parameterCount = (params: readonly number[], index = 0) => Math.max(1, params[index] || 1);
+  let column = clampColumn(startColumn);
+  let savedColumn: number | null = null;
+  let lastPrintableWidth: number | null = null;
+
+  for (let index = 0; index < data.length; index += 1) {
+    const char = data[index];
+    if (char === ESC || char === "\x9b") {
+      const isCsi = char === "\x9b" || data[index + 1] === "[";
+      if (isCsi) {
+        const sequence = readCsiSequence(data, index);
+        if (!sequence) return null;
+        const params = parseCsiParams(sequence.body);
+        const privateOrIntermediate = sequence.body.slice(
+          sequence.body.match(/^[0-9;:]*/)?.[0].length ?? 0,
+        );
+        const count = parameterCount(params);
+        switch (sequence.final) {
+          case "C":
+          case "a":
+            if (privateOrIntermediate) return null;
+            column = clampColumn(column + count);
+            break;
+          case "D":
+            if (privateOrIntermediate) return null;
+            column = clampColumn(column - count);
+            break;
+          case "G":
+          case "`":
+            if (privateOrIntermediate) return null;
+            column = clampColumn(count - 1);
+            break;
+          case "H":
+          case "f":
+            if (privateOrIntermediate) return null;
+            column = clampColumn(parameterCount(params, 1) - 1);
+            break;
+          case "E":
+          case "F":
+            if (privateOrIntermediate) return null;
+            column = 0;
+            break;
+          case "I":
+            if (privateOrIntermediate) return null;
+            for (let tab = 0; tab < count; tab += 1) {
+              column = clampColumn(column + (8 - (column % 8)));
+            }
+            break;
+          case "Z":
+            if (privateOrIntermediate) return null;
+            for (let tab = 0; tab < count; tab += 1) {
+              column = Math.max(0, column - (column % 8 || 8));
+            }
+            break;
+          case "s":
+            if (privateOrIntermediate || params.length > 0) return null;
+            savedColumn = column;
+            break;
+          case "u":
+            if (privateOrIntermediate || params.length > 0 || savedColumn === null) return null;
+            column = savedColumn;
+            break;
+          case "b":
+            if (privateOrIntermediate || lastPrintableWidth === null) return null;
+            column = clampColumn(column + (lastPrintableWidth * count));
+            break;
+          case "r":
+            if (privateOrIntermediate) return null;
+            column = 0;
+            break;
+          case "A":
+          case "B":
+          case "J":
+          case "K":
+          case "L":
+          case "M":
+          case "P":
+          case "S":
+          case "T":
+          case "X":
+          case "@":
+          case "c":
+          case "d":
+          case "e":
+          case "h":
+          case "l":
+          case "m":
+          case "n":
+          case "q":
+            break;
+          default:
+            return null;
+        }
+        index = sequence.end;
+        continue;
+      }
+
+      const next = data[index + 1];
+      if (next === "]" || next === "P" || next === "X" || next === "^" || next === "_") {
+        const end = readControlStringEnd(data, index + 2);
+        if (end === null) return null;
+        index = end;
+        continue;
+      }
+      if (next === "7") {
+        savedColumn = column;
+        index += 1;
+        continue;
+      }
+      if (next === "8") {
+        if (savedColumn === null) return null;
+        column = savedColumn;
+        index += 1;
+        continue;
+      }
+      if (next === "E" || next === "c") {
+        column = 0;
+        index += 1;
+        continue;
+      }
+      if (next === "D" || next === "M" || next === "=" || next === ">" || next === "H") {
+        index += 1;
+        continue;
+      }
+      if (["(", ")", "*", "+", "-", ".", "/"].includes(next) && data[index + 2]) {
+        index += 2;
+        continue;
+      }
+      return null;
+    }
+
+    if (char === "\n" || char === "\v" || char === "\f") {
+      if (convertEol) column = 0;
+      continue;
+    }
+    if (char === "\r") {
+      column = 0;
+      continue;
+    }
+    if (char === "\b") {
+      column = Math.max(0, column - 1);
+      continue;
+    }
+    if (char === "\t") {
+      column = clampColumn(column + (8 - (column % 8)));
+      continue;
+    }
+    const code = char.charCodeAt(0);
+    if (code < 0x20 || code === 0x7f) {
+      if (code === 0 || code === 7 || code === 14 || code === 15) continue;
+      return null;
+    }
+    if (code > 0x7e) return null;
+    lastPrintableWidth = 1;
+    column = clampColumn(column + 1);
+  }
+
+  return column;
+};
+
 const endsAtKnownColumnZero = (
-  text: string,
+  term: XTerm,
+  rawText: string,
+  visibleText: string,
   cursorXBeforeWrite: number,
   convertEol: boolean,
-): boolean => {
-  if (text.endsWith("\r")) return true;
-  if (!text.endsWith("\n")) return false;
-  if (convertEol) return true;
-
-  const beforeFinalLineFeed = text.slice(0, -1);
-  const lastCarriageReturn = beforeFinalLineFeed.lastIndexOf("\r");
-  const sinceColumnReset = beforeFinalLineFeed.slice(lastCarriageReturn + 1);
-  if (sinceColumnReset.replaceAll("\n", "").length > 0) return false;
-  return lastCarriageReturn >= 0 || cursorXBeforeWrite <= 0;
-};
+): boolean => (
+  endsWithLineBreak(visibleText)
+  && measurePromptPrefixColumn(term, rawText, cursorXBeforeWrite, convertEol) === 0
+);
 
 const containsLineReset = (text: string): boolean =>
   text.includes("\n") || text.includes("\r");
@@ -327,6 +529,7 @@ export function findTerminalPromptSourceChunkVisibleStarts(
 }
 
 const insertPromptLineBreaksAtVisibleStarts = (
+  term: XTerm,
   data: string,
   promptText: string,
   cursorXBeforeWrite: number,
@@ -340,14 +543,21 @@ const insertPromptLineBreaksAtVisibleStarts = (
       if (mapped.text.slice(visibleStart, visibleStart + promptText.length) !== promptText) {
         return [];
       }
+      const rawStart = mapped.rawStartByTextIndex[visibleStart];
+      if (rawStart === undefined) return [];
       const prefixText = mapped.text.slice(0, visibleStart);
       if (prefixText.length === 0 && cursorXBeforeWrite <= 0) return [];
       if (
         prefixText.length > 0
-        && endsAtKnownColumnZero(prefixText, cursorXBeforeWrite, convertEol)
+        && endsAtKnownColumnZero(
+          term,
+          data.slice(0, rawStart),
+          prefixText,
+          cursorXBeforeWrite,
+          convertEol,
+        )
       ) return [];
-      const rawStart = mapped.rawStartByTextIndex[visibleStart];
-      return rawStart === undefined ? [] : [rawStart];
+      return [rawStart];
     });
   if (rawStarts.length === 0) return data;
 
@@ -372,6 +582,7 @@ export function prepareTerminalDataForPromptLineBreak(
   const cursorXBeforeWrite = getCursorX(term);
   const nextData = promptVisibleStarts.length > 0
     ? insertPromptLineBreaksAtVisibleStarts(
+      term,
       data,
       state.lastPromptText,
       cursorXBeforeWrite,
