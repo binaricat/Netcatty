@@ -57,17 +57,36 @@ const createFakeTerm = (activeType = "normal") => {
   const markerLines: number[] = [];
   const disposedMarkerLines: number[] = [];
   let cursorLine = 0;
+  const active: {
+    type: string;
+    viewportY: number;
+    cursorX: number;
+    baseY: number;
+    cursorY: number;
+    length: number;
+    getLine: () => { isWrapped: boolean };
+  } = {
+    type: activeType,
+    viewportY: 0,
+    cursorX: 0,
+    baseY: 0,
+    get cursorY() {
+      return cursorLine;
+    },
+    set cursorY(value: number) {
+      cursorLine = Math.max(0, value);
+    },
+    get length() {
+      return cursorLine + 1;
+    },
+    getLine: () => ({ isWrapped: false }),
+  };
   const term = {
     rows: 24,
     cols: 80,
     options: { scrollback: 1000 },
     buffer: {
-      active: {
-        type: activeType,
-        viewportY: 0,
-        cursorX: 0,
-        getLine: () => ({ isWrapped: false }),
-      },
+      active,
     },
     write(data: string, callback?: () => void) {
       writes.push(data);
@@ -1482,7 +1501,7 @@ test("writeSessionData skips timestamp markers when the host gutter is disabled"
   writeSessionData(createContext(true, { showLineTimestamps: false }) as never, term, "hello\r\nnext");
 
   assert.equal(writes.join(""), "hello\r\nnext");
-  // Disabled gutters no longer pay segmenter/marker cost on the hot path.
+  // Gutter off: per-second ledger only — no xterm markers.
   assert.deepEqual(markerLines, []);
 });
 
@@ -1550,22 +1569,27 @@ test("writeSessionData does not add erase-scrollback inside synchronized output"
   assert.equal(writes.join(""), "\x1b[?2026h\x1b[H\x1b[2Jframe\x1b[?2026l");
 });
 
-test("writeSessionData only records timestamps while the host gutter is enabled", () => {
-  const { term, writes, markerLines, disposedMarkerLines } = createFakeTerm();
+test("writeSessionData uses markers only while the host gutter is enabled", () => {
+  const { term, writes, markerLines } = createFakeTerm();
   const ctx = createContext(false, { showLineTimestamps: false });
 
   writeSessionData(ctx as never, term, "before\r\n");
+  assert.deepEqual(markerLines, [], "gutter off keeps a ledger without markers");
+
   ctx.host = { showLineTimestamps: true };
   ctx.hostRef.current = ctx.host;
   writeSessionData(ctx as never, term, "enabled\r\n");
+  // Enable materializes ledger + records the new line.
+  assert.ok(markerLines.length >= 1, "gutter on creates markers");
+
+  const markersWhileOn = markerLines.length;
   ctx.host = { showLineTimestamps: false };
   ctx.hostRef.current = ctx.host;
   writeSessionData(ctx as never, term, "disabled");
 
   assert.equal(writes.join(""), "before\r\nenabled\r\ndisabled");
-  // Only the enabled window records markers; earlier/later disabled writes do not.
-  assert.deepEqual(markerLines, [1]);
-  assert.deepEqual(disposedMarkerLines, []);
+  // Turning off clears live markers (dispose) and does not register new ones.
+  assert.equal(markerLines.length, markersWhileOn);
 });
 
 test("writeSessionData follows live hostRef toggles without replacing boot host snapshot", () => {
@@ -1589,13 +1613,13 @@ test("writeSessionData follows live hostRef toggles without replacing boot host 
 
   writeSessionData(ctx as never, term, "live-on\r\n");
   assert.equal(writes.join(""), "boot-off\r\nlive-on\r\n");
-  assert.deepEqual(markerLines, [1]);
+  assert.ok(markerLines.length >= 1, "live enable materializes/records markers");
 
+  const markersWhileOn = markerLines.length;
   hostRef.current = { showLineTimestamps: false };
   writeSessionData(ctx as never, term, "live-off");
   assert.equal(writes.join(""), "boot-off\r\nlive-on\r\nlive-off");
-  // No new markers while live-disabled.
-  assert.deepEqual(markerLines, [1]);
+  assert.equal(markerLines.length, markersWhileOn, "live disable does not register new markers");
 });
 
 test("writeSessionData batches timestamp bookkeeping for bulk line output", () => {

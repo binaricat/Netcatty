@@ -17,6 +17,10 @@ import {
   tryMeasureVisualRows,
   getVisualRowMeasureCountForTests,
   resetVisualRowMeasureCountForTests,
+  getTerminalLineTimestampLedgerCount,
+  getTerminalLineTimestampEntryCount,
+  materializeTimestampLedgerToMarkers,
+  getVisibleTerminalLineTimestampRows,
   type TerminalLineTimestampPerfStep,
   writeTerminalDataWithLineTimestamps,
 } from "./terminalLineTimestamps.ts";
@@ -106,12 +110,29 @@ const createFakeTerm = (options: {
     }
   };
 
+  const activeBuffer = {
+    type: "normal" as string,
+    viewportY: 0,
+    get baseY() {
+      return 0;
+    },
+    get cursorY() {
+      return cursorLine;
+    },
+    get cursorX() {
+      return cursorColumn;
+    },
+    get length() {
+      return cursorLine + 1;
+    },
+    getLine: () => ({ isWrapped: false }),
+  };
   const term = {
     _core: {
       unicodeService,
     },
     buffer: {
-      active: { type: "normal", viewportY: 0 },
+      active: activeBuffer,
     },
     cols,
     options: Number.isFinite(scrollback) ? { scrollback } : {},
@@ -281,14 +302,55 @@ test("formats timestamp labels without terminal escape codes", () => {
   assert.equal(formatTerminalLineTimestamp(new Date(2026, 5, 6, 1, 2, 3)), "01:02:03");
 });
 
-test("skips segmenter and markers when timestamps are disabled", () => {
+test("gutter off records a per-second ledger without markers", () => {
   const { term, writes, markerLines } = createFakeTerm();
-  writeTerminalDataWithLineTimestamps(term as never, "before\r\nnext", () => {}, {
+  const t0 = new Date(2026, 5, 6, 12, 0, 0);
+  writeTerminalDataWithLineTimestamps(term as never, "before\r\nnext\r\nthird", () => {}, {
     enabled: false,
+    timestampDate: t0,
   });
 
-  assert.equal(writes.join(""), "before\r\nnext");
+  assert.equal(writes.join(""), "before\r\nnext\r\nthird");
   assert.deepEqual(markerLines, []);
+  // Same second → one ledger stamp for three lines.
+  assert.equal(getTerminalLineTimestampLedgerCount(term as never), 1);
+});
+
+test("gutter off keeps one ledger stamp per wall-clock second", () => {
+  const { term, markerLines } = createFakeTerm();
+  writeTerminalDataWithLineTimestamps(term as never, "a\r\nb\r\n", () => {}, {
+    enabled: false,
+    timestampDate: new Date(2026, 5, 6, 12, 0, 0),
+  });
+  writeTerminalDataWithLineTimestamps(term as never, "c\r\nd\r\n", () => {}, {
+    enabled: false,
+    timestampDate: new Date(2026, 5, 6, 12, 0, 1),
+  });
+
+  assert.deepEqual(markerLines, []);
+  assert.equal(getTerminalLineTimestampLedgerCount(term as never), 2);
+});
+
+test("opening gutter materializes ledger stamps into markers", () => {
+  const { term, markerLines } = createFakeTerm();
+  writeTerminalDataWithLineTimestamps(term as never, "a\r\nb\r\n", () => {}, {
+    enabled: false,
+    timestampDate: new Date(2026, 5, 6, 12, 0, 0),
+  });
+  writeTerminalDataWithLineTimestamps(term as never, "c\r\n", () => {}, {
+    enabled: false,
+    timestampDate: new Date(2026, 5, 6, 12, 0, 1),
+  });
+  assert.deepEqual(markerLines, []);
+
+  const created = materializeTimestampLedgerToMarkers(term as never);
+  assert.equal(created, 2);
+  assert.equal(getTerminalLineTimestampEntryCount(term as never, { prune: false }), 2);
+  assert.ok(markerLines.length >= 1);
+
+  // Paint path also materializes (idempotent).
+  const rows = getVisibleTerminalLineTimestampRows(term as never);
+  assert.ok(rows.length >= 1);
 });
 
 test("records line timestamps when enabled (default for direct callers)", () => {

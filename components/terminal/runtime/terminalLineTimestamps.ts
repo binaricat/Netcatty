@@ -32,15 +32,34 @@ type TimestampEntry = {
   disposeListener?: { dispose: () => void };
 };
 
+/**
+ * Lightweight per-second history kept without xterm markers while the gutter
+ * is off. On enable, entries materialize into markers for rendering.
+ */
+type TimestampLedgerEntry = {
+  label: string;
+  /** Floor(unixMs/1000); at most one ledger/marker stamp per second. */
+  secondKey: number;
+  /** Absolute buffer line (baseY + cursorY style) at stamp time. */
+  line: number;
+};
+
 type TimestampStore = {
   segmenter: TerminalLineTimestampSegmenter;
   /**
-   * Dense ring of live markers for hosts with line timestamps enabled.
-   * Capacity is capped to scrollback so flood output cannot grow unboundedly.
-   * When the host gutter is off we skip this store on the write path; recording
-   * starts when the user turns timestamps on.
+   * Live xterm markers while the gutter is on (also one-per-second).
+   * Capacity is capped so flood output cannot grow unboundedly.
    */
   entries: TimestampEntry[];
+  /**
+   * Per-second stamps without markers. Written while gutter is off; used to
+   * rebuild markers when the user turns timestamps on.
+   */
+  ledger: TimestampLedgerEntry[];
+  /** Last secondKey accepted for ledger or markers (shared throttle). */
+  lastStampSecondKey: number | null;
+  /** Whether markers currently reflect the ledger (avoid re-materialize storms). */
+  ledgerMaterialized: boolean;
   /**
    * Markers dropped from `entries` but not yet disposed. Drained with a per-pass
    * budget so rewrite storms do not O(n²)-freeze on xterm marker list splices.
@@ -120,9 +139,9 @@ export type TerminalLineTimestampWriteOptions = TerminalLineTimestampDiagnostics
   /** Wall-clock arrival time for this batch, preserved across delayed writes. */
   timestampDate?: Date;
   /**
-   * When false, skip segmenter/marker work and write bytes only.
-   * Defaults to true for direct unit-test callers; production passes the host
-   * `showLineTimestamps` flag so disabled gutters stay off the hot path.
+   * Gutter visible: materialize markers (one per second) for paint.
+   * Gutter hidden: keep a lightweight per-second ledger only (no registerMarker).
+   * Defaults to true for direct unit-test callers; production passes host flag.
    */
   enabled?: boolean;
 };
@@ -460,6 +479,9 @@ const getTimestampStore = (term: XTerm): TimestampStore => {
       // Placeholder; replaced immediately with an interning segmenter below.
       segmenter: createTerminalLineTimestampSegmenter(),
       entries: [],
+      ledger: [],
+      lastStampSecondKey: null,
+      ledgerMaterialized: false,
       orphanedMarkers: [],
       listeners: new Set(),
       timestampOnlyPrefix: "",
@@ -476,6 +498,138 @@ const getTimestampStore = (term: XTerm): TimestampStore => {
   }
   return store;
 };
+
+const secondKeyFromDate = (date: Date): number => Math.floor(date.getTime() / 1000);
+
+const getAbsoluteCursorLine = (term: XTerm): number => {
+  try {
+    const active = term.buffer?.active as
+      | { baseY?: number; cursorY?: number }
+      | undefined;
+    const baseY = typeof active?.baseY === "number" ? active.baseY : 0;
+    const cursorY = typeof active?.cursorY === "number" ? active.cursorY : 0;
+    return Math.max(0, baseY + cursorY);
+  } catch {
+    return 0;
+  }
+};
+
+/** Advance absolute line by hard newlines in a data span (pre-write estimate). */
+const advanceAbsoluteLineByData = (line: number, data: string): number => {
+  let next = line;
+  for (let index = 0; index < data.length; index += 1) {
+    if (data[index] === "\n") next += 1;
+  }
+  return next;
+};
+
+const trimLedgerToCapacity = (
+  store: TimestampStore,
+  capacity: number,
+): void => {
+  if (capacity > 0 && store.ledger.length > capacity) {
+    store.ledger.splice(0, store.ledger.length - capacity);
+  }
+};
+
+/**
+ * Accept at most one stamp per wall-clock second across ledger + markers.
+ * Returns false when this second was already stamped.
+ */
+const tryBeginSecondStamp = (
+  store: TimestampStore,
+  secondKey: number,
+): boolean => {
+  if (store.lastStampSecondKey === secondKey) return false;
+  store.lastStampSecondKey = secondKey;
+  return true;
+};
+
+const pushLedgerStamp = (
+  store: TimestampStore,
+  label: string,
+  secondKey: number,
+  line: number,
+  capacity: number,
+  options: { /** When true, markers already track this stamp (gutter on). */ keepMaterialized?: boolean } = {},
+): void => {
+  store.ledger.push({ label, secondKey, line: Math.max(0, line) });
+  trimLedgerToCapacity(store, capacity);
+  // Gutter-off ledger writes need a later materialize pass when opened.
+  if (!options.keepMaterialized) {
+    store.ledgerMaterialized = false;
+  }
+};
+
+const clearLiveMarkers = (store: TimestampStore): void => {
+  for (const entry of store.entries) {
+    entry.disposeListener?.dispose();
+    entry.marker.dispose?.();
+  }
+  store.entries = [];
+  store.orphanedMarkers = [];
+  store.disposedPendingCompact = 0;
+  store.recordsSincePrune = 0;
+  store.ledgerMaterialized = false;
+};
+
+/**
+ * Turn lightweight ledger stamps into xterm markers for gutter paint.
+ * Safe to call from paint/write; no-ops when already materialized or empty.
+ */
+export const materializeTimestampLedgerToMarkers = (term: XTerm): number => {
+  const store = getTimestampStore(term);
+  if (store.ledgerMaterialized || store.ledger.length === 0) {
+    return 0;
+  }
+  const registerMarker = (
+    term as XTerm & { registerMarker?: (offset: number) => TimestampMarker | undefined }
+  ).registerMarker;
+  if (typeof registerMarker !== "function") {
+    store.ledgerMaterialized = true;
+    return 0;
+  }
+
+  // Drop stale markers first so we rebuild from the ledger only.
+  clearLiveMarkers(store);
+
+  const cursorLine = getAbsoluteCursorLine(term);
+  let bufferLength = 0;
+  try {
+    const active = term.buffer?.active as { length?: number } | undefined;
+    bufferLength = typeof active?.length === "number" ? active.length : 0;
+  } catch {
+    bufferLength = 0;
+  }
+
+  let created = 0;
+  for (const entry of store.ledger) {
+    if (bufferLength > 0 && (entry.line < 0 || entry.line >= bufferLength)) {
+      continue;
+    }
+    const offset = entry.line - cursorLine;
+    const marker = registerMarker.call(term, offset);
+    if (!marker) continue;
+    const markerEntry: TimestampEntry = { marker, label: entry.label };
+    markerEntry.disposeListener = marker.onDispose?.(() => {
+      store.disposedPendingCompact += 1;
+      markerEntry.disposeListener?.dispose();
+      markerEntry.disposeListener = undefined;
+    });
+    store.entries.push(markerEntry);
+    created += 1;
+  }
+  store.ledgerMaterialized = true;
+  if (created > 0) {
+    maybePruneTimestampEntries(term, store, true, created);
+    notifyTimestampStore(store);
+  }
+  return created;
+};
+
+/** Test helper: per-second ledger depth (no markers). */
+export const getTerminalLineTimestampLedgerCount = (term: XTerm): number =>
+  getTimestampStore(term).ledger.length;
 
 const internTerminalLineTimestampLabel = (
   store: TimestampStore,
@@ -637,6 +791,9 @@ const resetTimestampStore = (store: TimestampStore) => {
     if (!marker.isDisposed) marker.dispose?.();
   }
   store.entries = [];
+  store.ledger = [];
+  store.lastStampSecondKey = null;
+  store.ledgerMaterialized = false;
   store.orphanedMarkers = [];
   store.segmenter.reset();
   store.timestampOnlyPrefix = "";
@@ -655,6 +812,8 @@ const recordTerminalLineTimestamp = (
   cursorYOffset = 0,
   options: { skipPrune?: boolean } = {},
 ): boolean => {
+  // Gutter-on path: per-line markers for accurate paint. The gutter-off path
+  // uses a per-second ledger instead (see writeTerminalDataWithSecondLedgerOnly).
   const registerMarker = (term as XTerm & { registerMarker?: (offset: number) => TimestampMarker | undefined }).registerMarker;
   const marker = registerMarker?.call(term, cursorYOffset);
   if (!marker) return false;
@@ -668,6 +827,7 @@ const recordTerminalLineTimestamp = (
     entry.disposeListener = undefined;
   });
   store.entries.push(entry);
+  store.ledgerMaterialized = true;
   if (!options.skipPrune) {
     maybePruneTimestampEntries(term, store);
   }
@@ -1184,6 +1344,8 @@ export const getVisibleTerminalLineTimestampRows = (
     return [];
   }
   const store = getTimestampStore(term);
+  // Gutter just opened: promote per-second ledger into markers for paint.
+  materializeTimestampLedgerToMarkers(term);
   // Paint path: only drop disposed holes. Full dedupe/capacity runs on write.
   compactDisposedMarkersOnly(store);
   return resolveTerminalTimestampGutterRows({
@@ -1191,6 +1353,68 @@ export const getVisibleTerminalLineTimestampRows = (
     rows: term.rows,
     entries: store.entries,
     isWrappedLine: (line) => term.buffer.active.getLine(line)?.isWrapped === true,
+  });
+};
+
+/**
+ * Gutter off: one term.write, maintain per-second ledger only (no markers).
+ * Keeps segmenter state so enable can continue cleanly.
+ */
+const writeTerminalDataWithSecondLedgerOnly = (
+  term: XTerm,
+  data: string,
+  done: () => void,
+  options?: TerminalLineTimestampWriteOptions,
+  diagnostics?: TerminalLineTimestampDiagnostics,
+  shouldMeasureDiagnostics = false,
+): void => {
+  const store = getTimestampStore(term);
+  // Free xterm marker cost while the gutter is hidden.
+  if (store.entries.length > 0 || store.orphanedMarkers.length > 0) {
+    clearLiveMarkers(store);
+    for (const marker of store.orphanedMarkers) {
+      if (!marker.isDisposed) marker.dispose?.();
+    }
+    store.orphanedMarkers = [];
+  }
+
+  store.segmenter.setAlternateScreenActive(
+    ((term.buffer?.active as { type?: string } | undefined)?.type) === "alternate",
+  );
+  const timestampOnlyPrefix = store.timestampOnlyPrefix;
+  store.timestampOnlyPrefix = "";
+  const dataForTimestamps = `${timestampOnlyPrefix}${data}`;
+  const stampDate = options?.timestampDate ?? new Date();
+  const segments = store.segmenter.append(dataForTimestamps, stampDate);
+
+  const pendingEscapeSequence = store.segmenter.flushPendingEscapeSequence();
+  if (isPotentialAlternateScreenSequence(pendingEscapeSequence)) {
+    store.timestampOnlyPrefix = pendingEscapeSequence;
+  }
+
+  let absoluteLine = getAbsoluteCursorLine(term);
+  const capacity = resolveTerminalLineTimestampCapacity(term);
+  for (const segment of segments) {
+    if (segment.kind === "timestamp") {
+      const secondKey = store.labelCacheKey ?? secondKeyFromDate(stampDate);
+      if (tryBeginSecondStamp(store, secondKey)) {
+        pushLedgerStamp(store, segment.label, secondKey, absoluteLine, capacity);
+      }
+      continue;
+    }
+    absoluteLine = advanceAbsoluteLineByData(absoluteLine, segment.data);
+  }
+
+  const writeStartedAt = shouldMeasureDiagnostics ? performance.now() : 0;
+  term.write(data, () => {
+    if (diagnostics) {
+      diagnostics.onStep?.({
+        kind: "fallback-write",
+        dataChars: data.length,
+        writeCallbackMs: performance.now() - writeStartedAt,
+      });
+    }
+    done();
   });
 };
 
@@ -1216,9 +1440,16 @@ export const writeTerminalDataWithLineTimestamps = (
     });
   };
 
-  // Host gutter off: skip segmenter/store/markers entirely (plain write).
+  // Host gutter off: per-second ledger only (no registerMarker).
   if (options?.enabled === false) {
-    writeFallbackOnly(data, done);
+    writeTerminalDataWithSecondLedgerOnly(
+      term,
+      data,
+      done,
+      options,
+      diagnostics,
+      shouldMeasureDiagnostics,
+    );
     return;
   }
 
@@ -1238,11 +1469,14 @@ export const writeTerminalDataWithLineTimestamps = (
     );
     store.segmenter.reset();
     store.timestampOnlyPrefix = "";
+    store.lastStampSecondKey = null;
     writeFallbackOnly(data, done);
     return;
   }
 
   const store = getTimestampStore(term);
+  // Gutter on: promote any ledger built while hidden into markers once.
+  materializeTimestampLedgerToMarkers(term);
   // Clears / scrollback wipes dispose markers without new stamps. Compact only
   // when dispose signals arrived — not on every tiny write against a full store.
   if (store.disposedPendingCompact > 0) {
