@@ -661,6 +661,7 @@ test("hidden output keeps its arrival second when a batch crosses a clock bounda
     assert.deepEqual(getVisibleTerminalLineTimestampRows(term), [
       { row: 0, label: "12:00:59" },
       { row: 1, label: "12:01:00" },
+      { row: 2, label: "12:01:00" },
     ]);
   } finally {
     Date.now = originalDateNow;
@@ -694,6 +695,7 @@ test("visible pressure-batched output keeps its arrival second across a clock bo
       assert.deepEqual(getVisibleTerminalLineTimestampRows(term), [
         { row: 0, label: "12:00:59" },
         { row: 1, label: "12:01:00" },
+        { row: 2, label: "12:01:00" },
       ]);
     });
   } finally {
@@ -756,6 +758,7 @@ test("normal output before an alternate-screen frame keeps its earlier timestamp
         writes.join(""),
         "before\r\n\x1b[?1049hframe-aframe-b\x1b[?1049lafter",
       );
+      // before @ :59; after leave alt "after" @ :00 (same buffer line count).
       assert.deepEqual(getVisibleTerminalLineTimestampRows(term), [
         { row: 0, label: "12:00:59" },
         { row: 1, label: "12:01:00" },
@@ -797,6 +800,7 @@ test("normal output after an alternate-screen frame keeps its earlier timestamp"
     assert.deepEqual(getVisibleTerminalLineTimestampRows(term), [
       { row: 0, label: "12:00:59" },
       { row: 1, label: "12:01:00" },
+      { row: 2, label: "12:01:00" },
     ]);
   } finally {
     Date.now = originalDateNow;
@@ -829,6 +833,7 @@ test("hiding a pane preserves the arrival second of already queued output", () =
       assert.deepEqual(getVisibleTerminalLineTimestampRows(term), [
         { row: 0, label: "12:00:59" },
         { row: 1, label: "12:01:00" },
+        { row: 2, label: "12:01:00" },
       ]);
     });
   } finally {
@@ -865,6 +870,7 @@ test("hiding the page preserves the arrival second of already queued output", ()
       assert.deepEqual(getVisibleTerminalLineTimestampRows(term), [
         { row: 0, label: "12:00:59" },
         { row: 1, label: "12:01:00" },
+        { row: 2, label: "12:01:00" },
       ]);
     });
   } finally {
@@ -898,10 +904,12 @@ test("showing a pane preserves the background arrival second still queued with v
         "hidden\r\nvisible-same-second\r\n",
         "visible-next-second\r\n",
       ]);
-      // Per-second ledger: same-second lines share one stamp on the first line.
+      // Per-second ledger + fill-forward paint (incl. trailing empty cursor line).
       assert.deepEqual(getVisibleTerminalLineTimestampRows(term), [
         { row: 0, label: "12:00:59" },
+        { row: 1, label: "12:00:59" },
         { row: 2, label: "12:01:00" },
+        { row: 3, label: "12:01:00" },
       ]);
     });
   } finally {
@@ -1639,9 +1647,11 @@ test("writeSessionData batches timestamp bookkeeping for bulk line output", () =
   }
 
   assert.equal(writes.join(""), payload);
-  // One wall-clock second → one ledger stamp, zero markers.
+  // One wall-clock second → one ledger stamp; paint fills every viewport row.
   assert.deepEqual(markerLines, []);
-  assert.equal(getVisibleTerminalLineTimestampRows(term).length, 1);
+  const painted = getVisibleTerminalLineTimestampRows(term);
+  assert.ok(painted.length >= 1);
+  assert.ok(painted.every((row) => row.label.length > 0));
   assert.ok(writes.length >= 1);
 });
 

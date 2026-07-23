@@ -1162,27 +1162,38 @@ export const resolveTerminalTimestampGutterRows = ({
 
 /**
  * Render gutter rows from the per-second ledger (no xterm markers).
- * Show a label only on the stamp line (and soft-wrap continuations of it),
- * matching classic marker gutters — not every empty row below.
+ * Each visible line uses the latest stamp with stamp.line <= line so blank
+ * gaps between stamps (and soft-wrap continuations) fill with the previous time.
  */
 export const resolveTerminalTimestampGutterRowsFromLedger = ({
   viewportY,
   rows,
   ledger,
   isWrappedLine,
+  /** When set, do not paint past the last buffer line (avoids filling empty viewport). */
+  bufferLength,
 }: {
   viewportY: number;
   rows: number;
   ledger: readonly TimestampLedgerEntry[];
   isWrappedLine?: (line: number) => boolean;
+  bufferLength?: number;
 }): TerminalTimestampGutterRow[] => {
   if (ledger.length === 0 || rows <= 0) return [];
 
-  const labelByLine = new Map<number, string>();
-  for (const entry of ledger) {
-    if (entry.line < 0) continue;
-    labelByLine.set(entry.line, entry.label);
-  }
+  const stamps = ledger
+    .filter((entry) => entry.line >= 0)
+    .slice()
+    .sort((left, right) => left.line - right.line || left.secondKey - right.secondKey);
+
+  const labelAtOrBefore = (line: number): string | undefined => {
+    let label: string | undefined;
+    for (const stamp of stamps) {
+      if (stamp.line > line) break;
+      label = stamp.label;
+    }
+    return label;
+  };
 
   const resolveSourceLine = (line: number): number => {
     if (!isWrappedLine?.(line)) return line;
@@ -1193,11 +1204,16 @@ export const resolveTerminalTimestampGutterRowsFromLedger = ({
     return sourceLine;
   };
 
+  const lastBufferLine = typeof bufferLength === "number" && bufferLength > 0
+    ? bufferLength - 1
+    : Number.POSITIVE_INFINITY;
+
   const visible: TerminalTimestampGutterRow[] = [];
   for (let row = 0; row < rows; row += 1) {
     const line = viewportY + row;
+    if (line > lastBufferLine) break;
     const sourceLine = resolveSourceLine(line);
-    const label = labelByLine.get(sourceLine);
+    const label = labelAtOrBefore(sourceLine);
     if (label) {
       visible.push({ row, label });
     }
@@ -1213,11 +1229,19 @@ export const getVisibleTerminalLineTimestampRows = (
   }
   const store = getTimestampStore(term);
   rebaseLedgerForScrollback(term, store);
+  let bufferLength = 0;
+  try {
+    const active = term.buffer?.active as { length?: number } | undefined;
+    bufferLength = typeof active?.length === "number" ? active.length : 0;
+  } catch {
+    bufferLength = 0;
+  }
   return resolveTerminalTimestampGutterRowsFromLedger({
     viewportY: term.buffer.active.viewportY,
     rows: term.rows,
     ledger: store.ledger,
     isWrappedLine: (line) => term.buffer.active.getLine(line)?.isWrapped === true,
+    bufferLength,
   });
 };
 

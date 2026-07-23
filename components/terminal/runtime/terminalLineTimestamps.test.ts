@@ -325,7 +325,7 @@ test("ledger keeps one stamp per wall-clock second whether gutter is on or off",
   assert.equal(getTerminalLineTimestampLedgerCount(term as never), 2);
 });
 
-test("gutter paint shows ledger labels on stamp lines only", () => {
+test("gutter paint fills blank rows with the previous stamp time", () => {
   const { term } = createFakeTerm();
   writeTerminalDataWithLineTimestamps(term as never, "a\r\nb\r\n", () => {}, {
     timestampDate: new Date(2026, 5, 6, 12, 0, 0),
@@ -335,9 +335,14 @@ test("gutter paint shows ledger labels on stamp lines only", () => {
   });
 
   const rows = getVisibleTerminalLineTimestampRows(term as never);
+  // line0 stamp 12:00:00 fills line1; line2 stamp 12:00:01.
   assert.deepEqual(
-    rows.map((row) => row.label),
-    ["12:00:00", "12:00:01"],
+    rows.filter((row) => row.row <= 2).map((row) => ({ row: row.row, label: row.label })),
+    [
+      { row: 0, label: "12:00:00" },
+      { row: 1, label: "12:00:00" },
+      { row: 2, label: "12:00:01" },
+    ],
   );
 });
 
@@ -415,7 +420,7 @@ test("records a ledger stamp after leaving alternate screen", () => {
   assert.ok(getTerminalLineTimestampLedgerCount(term as never) >= 1);
 });
 
-test("resolveTerminalTimestampGutterRowsFromLedger paints only stamp lines", () => {
+test("resolveTerminalTimestampGutterRowsFromLedger fills gaps with previous time", () => {
   const rows = resolveTerminalTimestampGutterRowsFromLedger({
     viewportY: 0,
     rows: 5,
@@ -426,7 +431,10 @@ test("resolveTerminalTimestampGutterRowsFromLedger paints only stamp lines", () 
   });
   assert.deepEqual(rows, [
     { row: 0, label: "12:00:00" },
+    { row: 1, label: "12:00:00" },
+    { row: 2, label: "12:00:00" },
     { row: 3, label: "12:00:01" },
+    { row: 4, label: "12:00:01" },
   ]);
 });
 
