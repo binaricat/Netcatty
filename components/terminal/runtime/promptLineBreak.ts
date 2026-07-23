@@ -248,7 +248,7 @@ export function insertPromptLineBreakBeforePrompt(
 export function doesTerminalPromptStartAtSourceChunk(
   data: string,
   promptText: string,
-  sourceChunkBoundaries: readonly number[],
+  sourceChunkBoundaries: readonly number[] = [],
 ): boolean {
   if (!data || !promptText || sourceChunkBoundaries.length === 0) return false;
 
