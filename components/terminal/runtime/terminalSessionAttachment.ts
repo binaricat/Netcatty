@@ -282,7 +282,9 @@ const flushBeforeTimestampBoundary = (
     && pendingTimestampSecond !== timestampSecond
     && !shouldPreserveTerminalWriteFrameBatch(term)
   ) {
-    flushPendingTerminalOutputNow(term);
+    // Split arrival-time batches at the second boundary, but keep any queued
+    // bulk slices on their cooperative yield schedule.
+    flushTerminalWriteCoalescer(term);
   }
   pendingTimestampSecondByTerm.set(term, timestampSecond);
 };

@@ -527,6 +527,7 @@ test("large hidden bursts yield between terminal write slices", () => {
 
   const originalSetTimeout = globalThis.setTimeout;
   const originalClearTimeout = globalThis.clearTimeout;
+  const originalDateNow = Date.now;
   const timers: FakeTimer[] = [];
   globalThis.setTimeout = ((callback: (...args: unknown[]) => void, delay = 0, ...args: unknown[]) => {
     const timer: FakeTimer = {
@@ -549,12 +550,17 @@ test("large hidden bursts yield between terminal write slices", () => {
     isPaneVisibleRef: { current: false },
   };
   const chunks = Array.from({ length: 96 }, () => "x".repeat(4096));
-  const payload = chunks.join("");
+  const nextSecondChunk = "y";
+  const payload = `${chunks.join("")}${nextSecondChunk}`;
+  let fakeNow = new Date(2026, 0, 1, 12, 0, 59, 800).getTime();
+  Date.now = () => fakeNow;
 
   try {
     for (const chunk of chunks) {
       writeSessionData(ctx as never, term, chunk);
     }
+    fakeNow += 1_000;
+    writeSessionData(ctx as never, term, nextSecondChunk);
     assert.deepEqual(writes, []);
 
     const hiddenDrain = timers.find((timer) => timer.active && timer.delay === 160);
@@ -582,6 +588,7 @@ test("large hidden bursts yield between terminal write slices", () => {
       followupDrain.callback();
     }
   } finally {
+    Date.now = originalDateNow;
     globalThis.setTimeout = originalSetTimeout;
     globalThis.clearTimeout = originalClearTimeout;
     resetTerminalWriteCoalescer(term);
