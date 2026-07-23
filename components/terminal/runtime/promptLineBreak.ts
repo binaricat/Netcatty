@@ -120,12 +120,59 @@ const parseCsiParams = (body: string): number[] => {
   });
 };
 
+const CURSOR_PREFIX_CSI_FINALS = new Set([
+  "@", "A", "B", "C", "D", "E", "F", "G", "H", "I", "L", "M",
+  "P", "S", "T", "X", "Z", "`", "a", "d", "e", "f", "h", "l", "r",
+  "s", "u",
+]);
+
+const advancePromptBreakPastLeadingCursorControls = (
+  data: string,
+  rawStart: number,
+  firstVisibleRawIndex: number,
+): number => {
+  let breakIndex = rawStart;
+  for (let index = rawStart; index < firstVisibleRawIndex; index += 1) {
+    const char = data[index];
+    if (char === ESC || char === "\x9b") {
+      const isCsi = char === "\x9b" || data[index + 1] === "[";
+      if (isCsi) {
+        const sequence = readCsiSequence(data, index);
+        if (!sequence || sequence.end >= firstVisibleRawIndex) break;
+        if (CURSOR_PREFIX_CSI_FINALS.has(sequence.final)) {
+          breakIndex = sequence.end + 1;
+        }
+        index = sequence.end;
+        continue;
+      }
+
+      const next = data[index + 1];
+      if (next === "]" || next === "P" || next === "X" || next === "^" || next === "_") {
+        const end = readControlStringEnd(data, index + 2);
+        if (end === null || end >= firstVisibleRawIndex) break;
+        index = end;
+        continue;
+      }
+      if (["7", "8", "D", "E", "H", "M", "c"].includes(next)) {
+        breakIndex = index + 2;
+      }
+      if (next) index += 1;
+    }
+  }
+  return breakIndex;
+};
+
+type PromptPrefixMeasurement = {
+  column: number;
+  separated: boolean;
+};
+
 const measurePromptPrefixColumn = (
   term: XTerm,
   data: string,
   startColumn: number,
   convertEol: boolean,
-): number | null => {
+): PromptPrefixMeasurement | null => {
   const maxColumn = Number.isFinite(term.cols) && term.cols > 0
     ? term.cols - 1
     : Number.MAX_SAFE_INTEGER;
@@ -137,6 +184,7 @@ const measurePromptPrefixColumn = (
   let hasSavedColumn = false;
   let savedColumn: number | null = null;
   let lastPrintableWidth: number | null = null;
+  let separated = false;
 
   for (let index = 0; index < data.length; index += 1) {
     const char = data[index];
@@ -177,6 +225,7 @@ const measurePromptPrefixColumn = (
             if (privateOrIntermediate) return null;
             column = 0;
             columnKnown = true;
+            separated = true;
             break;
           case "I":
           case "Z":
@@ -208,8 +257,6 @@ const measurePromptPrefixColumn = (
           case "B":
           case "J":
           case "K":
-          case "L":
-          case "M":
           case "P":
           case "S":
           case "T":
@@ -221,6 +268,12 @@ const measurePromptPrefixColumn = (
           case "m":
           case "n":
           case "q":
+            break;
+          case "L":
+          case "M":
+            if (privateOrIntermediate) return null;
+            column = 0;
+            columnKnown = true;
             break;
           case "h":
           case "l":
@@ -259,6 +312,7 @@ const measurePromptPrefixColumn = (
       if (next === "E" || next === "c") {
         column = 0;
         columnKnown = true;
+        if (next === "E") separated = true;
         index += 1;
         continue;
       }
@@ -274,6 +328,7 @@ const measurePromptPrefixColumn = (
     }
 
     if (char === "\n" || char === "\v" || char === "\f") {
+      separated = true;
       if (newlineMode) {
         column = 0;
         columnKnown = true;
@@ -283,6 +338,7 @@ const measurePromptPrefixColumn = (
     if (char === "\r") {
       column = 0;
       columnKnown = true;
+      separated = true;
       continue;
     }
     if (char === "\b") {
@@ -308,19 +364,18 @@ const measurePromptPrefixColumn = (
     if (columnKnown) column = clampColumn(column + 1);
   }
 
-  return columnKnown ? column : null;
+  return columnKnown ? { column, separated } : null;
 };
 
 const endsAtKnownColumnZero = (
   term: XTerm,
   rawText: string,
-  visibleText: string,
   cursorXBeforeWrite: number,
   convertEol: boolean,
-): boolean => (
-  endsWithLineBreak(visibleText)
-  && measurePromptPrefixColumn(term, rawText, cursorXBeforeWrite, convertEol) === 0
-);
+): boolean => {
+  const measured = measurePromptPrefixColumn(term, rawText, cursorXBeforeWrite, convertEol);
+  return measured?.column === 0 && measured.separated;
+};
 
 const containsLineReset = (text: string): boolean =>
   text.includes("\n") || text.includes("\r");
@@ -564,8 +619,14 @@ const insertPromptLineBreaksAtVisibleStarts = (
       if (mapped.text.slice(visibleStart, visibleStart + promptText.length) !== promptText) {
         return [];
       }
-      const rawStart = mapped.rawStartByTextIndex[visibleStart];
-      if (rawStart === undefined) return [];
+      const leadingControlsRawStart = mapped.rawStartByTextIndex[visibleStart];
+      const firstVisibleRawIndex = mapped.rawIndexByTextIndex[visibleStart];
+      if (leadingControlsRawStart === undefined || firstVisibleRawIndex === undefined) return [];
+      const rawStart = advancePromptBreakPastLeadingCursorControls(
+        data,
+        leadingControlsRawStart,
+        firstVisibleRawIndex,
+      );
       const prefixText = mapped.text.slice(0, visibleStart);
       if (prefixText.length === 0 && cursorXBeforeWrite <= 0) return [];
       const lastColumnResetVisibleIndex = prefixText.lastIndexOf("\r");
@@ -580,7 +641,6 @@ const insertPromptLineBreaksAtVisibleStarts = (
         && endsAtKnownColumnZero(
           term,
           data.slice(measuredRawStart, rawStart),
-          prefixText,
           lastColumnResetRawIndex === undefined ? cursorXBeforeWrite : 0,
           convertEol,
         )

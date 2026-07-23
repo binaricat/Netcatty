@@ -925,6 +925,7 @@ test("hidden prompt formatting respects cursor movement before a bare line feed"
     convertEol: boolean;
     output: string;
     promptRow: number;
+    promptLine?: string;
     setup?: string;
   }> = [
     { convertEol: false, output: "foo\n", promptRow: 2 },
@@ -935,6 +936,9 @@ test("hidden prompt formatting respects cursor movement before a bare line feed"
     { convertEol: false, output: "你好\n", promptRow: 2 },
     { convertEol: false, output: "foo\x1b[20h\n", promptRow: 1 },
     { convertEol: true, output: "foo\x1b[20l\n", promptRow: 2 },
+    { convertEol: false, output: "foo\x1b[E", promptRow: 1 },
+    { convertEol: false, output: "foo\x1b[L\n", promptRow: 1, promptLine: "$ o" },
+    { convertEol: false, output: "foo\x1b[M\n", promptRow: 1 },
     {
       convertEol: false,
       setup: "\x1b[3g\x1b[6G\x1bH\x1b[1G",
@@ -978,7 +982,11 @@ test("hidden prompt formatting respects cursor movement before a bare line feed"
         flushPendingTerminalWritesOnResume(term);
       });
 
-      assert.equal(term.buffer.active.getLine(scenario.promptRow)?.translateToString(true), "$");
+      assert.equal(
+        term.buffer.active.getLine(scenario.promptRow)?.translateToString(true),
+        scenario.promptLine ?? "$",
+        JSON.stringify(scenario),
+      );
       assert.equal(term.buffer.active.cursorX, 2);
     } finally {
       resetTerminalWriteCoalescer(term);

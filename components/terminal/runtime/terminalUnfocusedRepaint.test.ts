@@ -15,6 +15,7 @@ import {
   writeLocalTerminalDataInOrder,
 } from "./terminalUnfocusedRepaint.ts";
 import { enqueueCoalescedTerminalWrite } from "./terminalWriteCoalescer.ts";
+import { enqueueTerminalWrite } from "./terminalWriteQueue.ts";
 
 const withDocumentVisibility = (
   visibilityState: "visible" | "hidden",
@@ -280,6 +281,23 @@ test("repeated local writes stay queued without forcing parser flushes", async (
   assert.equal(flushed, true);
   assert.equal(writes.join(""), localWrites.join(""));
   assert.deepEqual(captured, localWrites);
+});
+
+test("full close-style flush drains more than the synchronous resume pass limit", async () => {
+  const { term, writes } = createBufferedFakeTerm();
+  const chunks = Array.from({ length: 80 }, (_, index) => String(index % 10));
+
+  for (const chunk of chunks) {
+    enqueueTerminalWrite(term, chunk.length, (done) => {
+      term.write(chunk, done);
+    }, { deferStart: true, yieldAfter: true });
+  }
+
+  const flushed = await flushPendingTerminalWritesBeforeHibernate(term);
+
+  assert.equal(flushed, true);
+  assert.equal(hasPendingTerminalWrites(term), false);
+  assert.equal(writes.join(""), chunks.join(""));
 });
 
 test("flushPendingTerminalWritesBeforeHibernate drains pending xterm output completely", async () => {

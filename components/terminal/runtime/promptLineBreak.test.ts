@@ -52,6 +52,54 @@ test("finds prompt chunks across trailing and leading ANSI sequences", () => {
   );
 });
 
+test("keeps cursor movement before a prompt-side line break", () => {
+  const state = createPromptLineBreakState();
+  state.lastPromptText = "$ ";
+  state.pendingCommand = true;
+  const output = "foo\x1b[E";
+  const data = `${output}$ `;
+  const promptStarts = findTerminalPromptSourceChunkVisibleStarts(
+    data,
+    state.lastPromptText,
+    [output.length],
+  );
+
+  assert.equal(
+    prepareTerminalDataForPromptLineBreak(
+      createFakeTerm("", 0) as never,
+      data,
+      state,
+      true,
+      promptStarts,
+    ),
+    data,
+  );
+});
+
+test("inserts a prompt line break after leaving the alternate screen", () => {
+  const state = createPromptLineBreakState();
+  state.lastPromptText = "$ ";
+  state.pendingCommand = true;
+  const leaveAlternateScreen = "\x1b[?1049l";
+  const data = `${leaveAlternateScreen}$ `;
+  const promptStarts = findTerminalPromptSourceChunkVisibleStarts(
+    data,
+    state.lastPromptText,
+    [leaveAlternateScreen.length],
+  );
+
+  assert.equal(
+    prepareTerminalDataForPromptLineBreak(
+      createFakeTerm("", 5) as never,
+      data,
+      state,
+      true,
+      promptStarts,
+    ),
+    `${leaveAlternateScreen}\r\n$ `,
+  );
+});
+
 function createFakeTerm(lineText = "", cursorX = lineText.length) {
   return {
     buffer: {

@@ -36,6 +36,7 @@ import {
 } from './terminalHibernateRuntime';
 import {
   cancelScheduledUnfocusedRepaint,
+  flushPendingTerminalWritesBeforeHibernate,
   flushPendingTerminalWritesOnResume,
   forceTerminalRepaintBypassingAnimationFrame,
   repaintTerminalAfterReveal,
@@ -714,13 +715,6 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
         return;
       }
 
-      const term = termRef.current;
-      if (term) {
-        // Hidden output can still be inside the delayed coalescer. Capture only
-        // after it has reached both the log buffer and xterm.
-        flushPendingTerminalWritesOnResume(term);
-      }
-
       const persistCloseCapture = (data: string, source: string, dataLength: number) => {
         logger.info("[Terminal] Capturing data on unmount", {
           sessionId,
@@ -730,24 +724,44 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
         handleTerminalDataCaptureOnce(sessionId, data, { finalized: true });
       };
 
-      const connectionLogPayload = !terminalDataCapturedRef.current
-        ? resolveConnectionLogCapturePayload(finalizeTerminalLogData)
-        : null;
-      if (connectionLogPayload) {
-        persistCloseCapture(
-          connectionLogPayload.data,
-          connectionLogPayload.source,
-          connectionLogPayload.data.length,
-        );
-        scheduleTerminalCloseTeardown(teardown);
-        return;
-      }
+      const term = termRef.current;
+      const completeClose = async () => {
+        if (term) {
+          // A hidden terminal can have more output queued than the synchronous
+          // resume helper intentionally drains. Wait for the complete ordered
+          // backlog before finalizing the saved capture.
+          const flushed = await flushPendingTerminalWritesBeforeHibernate(term);
+          if (!isTerminalCloseGenerationCurrent(
+            closeGeneration,
+            terminalBootCloseGenerationRef.current,
+          )) {
+            return;
+          }
+          if (!flushed) {
+            logger.warn("Terminal output did not drain before close capture; skipping stale capture");
+            teardown();
+            return;
+          }
+        }
 
-      const serializeAddon = serializeAddonRef.current;
-      if (!terminalDataCapturedRef.current && term && serializeAddon) {
-        const preferWasm = resolveHibernatePreferWasmSerialize(terminalSettingsRef.current);
-        void serializeTerminalCloseFallback(term, serializeAddon, { preferWasm })
-          .then((payload) => {
+        const connectionLogPayload = !terminalDataCapturedRef.current
+          ? resolveConnectionLogCapturePayload(finalizeTerminalLogData)
+          : null;
+        if (connectionLogPayload) {
+          persistCloseCapture(
+            connectionLogPayload.data,
+            connectionLogPayload.source,
+            connectionLogPayload.data.length,
+          );
+          scheduleTerminalCloseTeardown(teardown);
+          return;
+        }
+
+        const serializeAddon = serializeAddonRef.current;
+        if (!terminalDataCapturedRef.current && term && serializeAddon) {
+          const preferWasm = resolveHibernatePreferWasmSerialize(terminalSettingsRef.current);
+          try {
+            const payload = await serializeTerminalCloseFallback(term, serializeAddon, { preferWasm });
             if (!isTerminalCloseGenerationCurrent(
               closeGeneration,
               terminalBootCloseGenerationRef.current,
@@ -758,8 +772,7 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
               persistCloseCapture(payload.data, payload.source, payload.data.length);
             }
             scheduleTerminalCloseTeardown(teardown);
-          })
-          .catch((err) => {
+          } catch (err) {
             if (!isTerminalCloseGenerationCurrent(
               closeGeneration,
               terminalBootCloseGenerationRef.current,
@@ -768,11 +781,14 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
             }
             logger.warn("Failed to serialize terminal data on unmount:", err);
             scheduleTerminalCloseTeardown(teardown);
-          });
-        return;
-      }
+          }
+          return;
+        }
 
-      teardown();
+        teardown();
+      };
+
+      void completeClose();
     };
      
   }, [forceCloseHibernatedSession, handleTerminalDataCaptureOnce, host.id, sessionId]);
