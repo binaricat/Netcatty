@@ -36,6 +36,7 @@ export const createKittyKeyboardBroadcastForwarder = (options: {
   sourceSessionId: string;
   isHandlingBroadcast: () => boolean;
   isBroadcastEnabled: () => boolean;
+  isSensitiveInput?: () => boolean;
   getDispatcher: () => ((
     data: string,
     sourceSessionId: string,
@@ -56,6 +57,7 @@ export const createKittyKeyboardBroadcastForwarder = (options: {
     const dispatcher = currentDispatcher ?? (forcePairedRelease ? lastDispatcher : undefined);
     if (
       options.isHandlingBroadcast() ||
+      (!forcePairedRelease && options.isSensitiveInput?.() === true) ||
       (!forcePairedRelease && !options.isBroadcastEnabled()) ||
       !dispatcher
     ) return null;
@@ -258,6 +260,7 @@ export const createKittyKeyboardBroadcastHandler = (options: {
     legacySuppressedKeys?: Set<string>;
   };
   getSessionId: () => string | null;
+  isSensitiveInput?: () => boolean;
   isConnected: () => boolean;
   isRuntimeDisposed: () => boolean;
   interruptSession?: (sessionId: string) => void;
@@ -266,6 +269,8 @@ export const createKittyKeyboardBroadcastHandler = (options: {
 }): KittyKeyboardBroadcastHandler => (input, dispatchOptions) => {
   const sessionId = options.getSessionId();
   if (!sessionId || !options.isConnected()) return;
+  const isPairedRelease = input.kind === "key" && input.event.type === "keyup";
+  if (!isPairedRelease && options.isSensitiveInput?.() === true) return;
   const resolved = resolveKittyKeyboardBroadcastInput(input, options.resolveOptions());
   if (!resolved) return;
   if (resolved.urgentInterrupt && options.interruptSession) {

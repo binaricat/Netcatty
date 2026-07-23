@@ -338,18 +338,19 @@ printf '%s\n' '${scanCompleteMarker}'`;
         takePendingEntry: takePendingBuffer,
         discard: discardBuffer,
       } = createPtyOutputBuffer((data, meta) => {
+        if (sessions.get(sessionId) !== session) return;
         const contents = event.sender;
-        const current = sessions.get(sessionId);
         emitTerminalSessionData(contents, sessionId, data, {
-          cols: current?.cols,
-          rows: current?.rows,
+          session,
+          cols: session.cols,
+          rows: session.rows,
           meta,
         });
       }, {
         onPendingBytesChange: (bytes) => {
           if (sessions.get(sessionId) === session) setBufferedOutputBytes(session, bytes);
         },
-        shouldAcceptOutput: () => shouldAcceptSessionOutput(sessions.get(sessionId)),
+        shouldAcceptOutput: () => sessions.get(sessionId) === session && shouldAcceptSessionOutput(session),
       });
       session.flushPendingData = flushBufferPaced;
       session.takePendingData = takePendingBuffer;
@@ -369,6 +370,7 @@ printf '%s\n' '${scanCompleteMarker}'`;
       const sshZmodemSentry = createZmodemSentry({
         sessionId,
         onData(buf) {
+          if (sessions.get(sessionId) !== session) return;
           const decoder = getSessionDecoder(sessionId, "stdout");
           const decoded = decoder.write(buf);
           const output = filterTerminalInterruptOutput(session, decoded);
@@ -442,9 +444,9 @@ printf '%s\n' '${scanCompleteMarker}'`;
       session.zmodemSentry = sshZmodemSentry;
 
       stream.on("data", (data) => {
-        const currentSession = sessions.get(sessionId);
-        if (!shouldProcessSessionOutput(currentSession, sshZmodemSentry)) {
-          logTerminalOutputDropSample(currentSession, {
+        if (sessions.get(sessionId) !== session) return;
+        if (!shouldProcessSessionOutput(session, sshZmodemSentry)) {
+          logTerminalOutputDropSample(session, {
             sessionId,
             stream: "stdout",
             bytes: Buffer.isBuffer(data) ? data.length : Buffer.byteLength(String(data)),
@@ -457,9 +459,9 @@ printf '%s\n' '${scanCompleteMarker}'`;
       });
 
       stream.stderr?.on("data", (data) => {
-        const currentSession = sessions.get(sessionId);
-        if (!shouldProcessSessionOutput(currentSession)) {
-          logTerminalOutputDropSample(currentSession, {
+        if (sessions.get(sessionId) !== session) return;
+        if (!shouldProcessSessionOutput(session)) {
+          logTerminalOutputDropSample(session, {
             sessionId,
             stream: "stderr",
             bytes: Buffer.isBuffer(data) ? data.length : Buffer.byteLength(String(data)),
@@ -469,9 +471,9 @@ printf '%s\n' '${scanCompleteMarker}'`;
         // stderr is not used for ZMODEM — decode normally
         const decoder = getSessionDecoder(sessionId, "stderr");
         const decoded = decoder.write(data);
-        const output = filterTerminalInterruptOutput(currentSession, decoded);
+        const output = filterTerminalInterruptOutput(session, decoded);
         if (!output.accepted) {
-          logTerminalInterruptDrainDropSample(currentSession, {
+          logTerminalInterruptDrainDropSample(session, {
             sessionId,
             stream: "stderr",
             droppedBytes: output.droppedBytes,
@@ -481,7 +483,7 @@ printf '%s\n' '${scanCompleteMarker}'`;
           return;
         }
         if (output.droppedBytes > 0) {
-          logTerminalInterruptDrainDropSample(currentSession, {
+          logTerminalInterruptDrainDropSample(session, {
             sessionId,
             stream: "stderr",
             droppedBytes: output.droppedBytes,
@@ -490,7 +492,7 @@ printf '%s\n' '${scanCompleteMarker}'`;
           });
         }
         if (!output.data) return;
-        const outputMeta = takePendingInterruptOutputMeta(currentSession);
+        const outputMeta = takePendingInterruptOutputMeta(session);
         bufferData(output.data, outputMeta);
         sessionLogStreamManager.appendData(sessionId, output.data);
       });
@@ -531,14 +533,20 @@ printf '%s\n' '${scanCompleteMarker}'`;
           // Only send exit if session hasn't already been cleaned up by
           // conn.once("close") — which fires before stream.on("close")
           // in ssh2 when the transport drops.
-          if (sessions.has(sessionId)) {
+          const liveSession = sessions.get(sessionId);
+          if (liveSession === session) {
             const contents = event.sender;
-            const liveSession = sessions.get(sessionId);
             const transportError = liveSession?._transportError;
             if (liveSession?.closed) {
               // Explicit close already notified every attached renderer.
             } else if (transportError) {
-              safeSendSessionExit({ safeSend, electronModule, sessions }, contents, sessionId, { sessionId, exitCode: 1, error: transportError, reason: "error" });
+              safeSendSessionExit({ safeSend, electronModule, sessions }, contents, sessionId, {
+                sessionId,
+                exitCode: 1,
+                error: transportError,
+                reason: "error",
+                _terminalSessionGeneration: liveSession?._terminalSessionGeneration,
+              });
             } else {
               // A shell TMOUT auto-logout is a clean exit (numeric code, no
               // signal) — identical to a user-typed `exit` by code/signal —
@@ -547,7 +555,12 @@ printf '%s\n' '${scanCompleteMarker}'`;
               // for reconnect instead of auto-closing it (#1062 / #977).
               const idleTimedOut = streamExited && looksLikeIdleAutoLogout(liveSession?._promptTrackTail);
               const reason = idleTimedOut ? "timeout" : (streamExited ? "exited" : "closed");
-              safeSendSessionExit({ safeSend, electronModule, sessions }, contents, sessionId, { sessionId, exitCode: streamExitCode, reason });
+              safeSendSessionExit({ safeSend, electronModule, sessions }, contents, sessionId, {
+                sessionId,
+                exitCode: streamExitCode,
+                reason,
+                _terminalSessionGeneration: liveSession?._terminalSessionGeneration,
+              });
             }
             liveSession?.zmodemSentry?.cancel();
             // Release this channel's hold on the shared connection. The transport
@@ -1641,9 +1654,12 @@ printf '%s\n' '${scanCompleteMarker}'`;
             sendProgress(totalHops, totalHops, options.hostname, 'authenticated');
             sendProgress(totalHops, totalHops, options.hostname, 'shell');
 
+            let establishedOwnerSession = null;
             const sendTerminalMessage = (data) => {
               const current = sessions.get(sessionId);
+              if (establishedOwnerSession && current !== establishedOwnerSession) return;
               emitTerminalSessionData(event.sender, sessionId, data, {
+                ...(establishedOwnerSession ? { session: establishedOwnerSession } : {}),
                 cols: current?.cols,
                 rows: current?.rows,
               });
@@ -1717,6 +1733,7 @@ printf '%s\n' '${scanCompleteMarker}'`;
                   chainConnections,
                   isReused: false,
                 });
+                establishedOwnerSession = ownerSession;
                 connRef = createConnectionRef(ownerSession, conn, chainConnections);
                 // Capture this connection's log stream token in the closure so
                 // the connection-level handlers below stop the right stream even
@@ -1889,9 +1906,20 @@ printf '%s\n' '${scanCompleteMarker}'`;
               const transportError = session?._transportError;
               if (transportError) {
                 // A transport error was recorded — report it as an error exit
-                safeSendSessionExit({ safeSend, electronModule, sessions }, contents, sessionId, { sessionId, exitCode: 1, error: transportError, reason: "error" });
+                safeSendSessionExit({ safeSend, electronModule, sessions }, contents, sessionId, {
+                  sessionId,
+                  exitCode: 1,
+                  error: transportError,
+                  reason: "error",
+                  _terminalSessionGeneration: session?._terminalSessionGeneration,
+                });
               } else {
-                safeSendSessionExit({ safeSend, electronModule, sessions }, contents, sessionId, { sessionId, exitCode: 0, reason: "closed" });
+                safeSendSessionExit({ safeSend, electronModule, sessions }, contents, sessionId, {
+                  sessionId,
+                  exitCode: 0,
+                  reason: "closed",
+                  _terminalSessionGeneration: session?._terminalSessionGeneration,
+                });
               }
               // Use this connection's captured token so a late close from an
               // old transport can't stop a newer same-sessionId stream (#916).

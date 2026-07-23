@@ -32,7 +32,7 @@ interface UseTerminalDragDropOptions {
   status: TerminalSession["status"];
   t: (key: string) => string;
   terminalBackend: {
-    writeToSession: (sessionId: string, data: string, options?: { automated?: boolean }) => void;
+    writeToSession: (sessionId: string, data: string, options?: { automated?: boolean; sensitive?: boolean }) => void;
     cancelZmodem?: (sessionId: string, options?: { interrupt?: boolean }) => void;
     onSessionData?: (sessionId: string, cb: (chunk: string) => void) => () => void;
     onZmodemEvent?: (
@@ -45,6 +45,7 @@ interface UseTerminalDragDropOptions {
       uploadCommand?: string,
     ) => Promise<{ success: boolean; error?: string }>;
   };
+  isSensitiveInput?: () => boolean;
   rzMissingFallbackTimeoutMs?: number;
   termRef: React.MutableRefObject<XTerm | null>;
 }
@@ -125,6 +126,7 @@ export async function handleTerminalDropEntries({
   sessionId,
   sessionRef,
   terminalBackend,
+  isSensitiveInput,
   rzMissingFallbackTimeoutMs,
   termRef,
 }: Pick<
@@ -138,6 +140,7 @@ export async function handleTerminalDropEntries({
   | "sessionId"
   | "sessionRef"
   | "terminalBackend"
+  | "isSensitiveInput"
   | "rzMissingFallbackTimeoutMs"
   | "termRef"
 > & {
@@ -152,7 +155,9 @@ export async function handleTerminalDropEntries({
 
     if (paths.length > 0 && termRef.current && sessionRef.current) {
       const pathsText = paths.join(" ");
-      terminalBackend.writeToSession(sessionRef.current, pathsText);
+      terminalBackend.writeToSession(sessionRef.current, pathsText, {
+        sensitive: isSensitiveInput?.() === true,
+      });
       scrollToBottomAfterProgrammaticInput(pathsText);
       termRef.current.focus();
     }
@@ -237,6 +242,7 @@ export function useTerminalDragDrop({
   status,
   t,
   terminalBackend,
+  isSensitiveInput,
   rzMissingFallbackTimeoutMs,
   termRef,
 }: UseTerminalDragDropOptions) {
@@ -297,6 +303,7 @@ export function useTerminalDragDrop({
         sessionId,
         sessionRef,
         terminalBackend,
+        isSensitiveInput,
         rzMissingFallbackTimeoutMs,
         termRef,
       });

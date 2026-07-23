@@ -39,6 +39,7 @@ import { Host, KnownHost, TerminalSession, Workspace } from '../types';
 import { applySessionFontSizeToHost } from '../domain/terminalAppearance';
 import { resolveHostAutofillPassword } from '../domain/sshAuth';
 import { listPasswordPromptFillCandidates } from '../domain/passwordPromptAssist';
+import { isTerminalSensitiveInputActive } from './terminal/runtime/terminalSensitiveInputRegistry';
 import {
   resolveEffectiveTerminalHost,
   resolveTerminalChainHosts,
@@ -948,8 +949,10 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
         terminalBackend.interruptSession(session.id);
         continue;
       }
+      if (isTerminalSensitiveInputActive(session.id)) continue;
       terminalBackend.writeToSession(session.id, data, {
         automated: true,
+        sensitive: false,
         ...(lineDelayMs ? { lineDelayMs } : {}),
       });
       deliveredSessionIds.push(session.id);
@@ -1538,6 +1541,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       : undefined;
     terminalBackend.writeToSession(sessionId, data, {
       automated: true,
+      sensitive: isTerminalSensitiveInputActive(sessionId),
       ...(lineDelayMs ? { lineDelayMs } : {}),
     });
     // Re-focus the terminal so the user can interact immediately
@@ -1688,19 +1692,23 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     const payload = text + '\r';
     const broadcastEnabled = isBroadcastEnabled?.(activeWorkspace.id);
     const focusedSessionId = activeWorkspace.focusedSessionId;
+    const focusedSensitive = focusedSessionId
+      ? isTerminalSensitiveInputActive(focusedSessionId)
+      : false;
 
-    if (broadcastEnabled) {
+    if (broadcastEnabled && !focusedSensitive) {
       const allSessionIds = sessionsRef.current
         .filter((session) => session.workspaceId === activeWorkspace.id)
         .map((session) => session.id);
       for (const sid of allSessionIds) {
+        if (isTerminalSensitiveInputActive(sid)) continue;
         const executor = snippetExecutorsRef.current.get(sid);
         if (executor) {
           executor(text, false, { broadcast: false });
         } else {
           const session = sessionsRef.current.find((candidate) => candidate.id === sid);
           if (!session || !canUseDirectSessionWriteFallback(session)) continue;
-          terminalBackend.writeToSession(sid, payload);
+          terminalBackend.writeToSession(sid, payload, { sensitive: false });
         }
       }
     } else {
@@ -1716,7 +1724,9 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
         } else {
           const session = sessionsRef.current.find((candidate) => candidate.id === targetId);
           if (!session || !canUseDirectSessionWriteFallback(session)) return;
-          terminalBackend.writeToSession(targetId, payload);
+          terminalBackend.writeToSession(targetId, payload, {
+            sensitive: isTerminalSensitiveInputActive(targetId),
+          });
         }
       }
     }

@@ -35,6 +35,20 @@ function normalizeActivationIdentity(activation) {
   });
 }
 
+function terminalSessionSnapshotsEqual(left, right) {
+  return left?.sessionId === right?.sessionId
+    && left?.hostId === right?.hostId
+    && left?.workspaceId === right?.workspaceId
+    && left?.protocol === right?.protocol
+    && left?.status === right?.status
+    && left?.cwd === right?.cwd
+    && left?.title === right?.title
+    && left?.shellType === right?.shellType
+    && left?.cols === right?.cols
+    && left?.rows === right?.rows
+    && left?.alternateScreen === right?.alternateScreen;
+}
+
 class PluginTerminalDataPipelineService {
   constructor(options) {
     if (!options?.contributionService || !options?.permissionEngine
@@ -50,17 +64,47 @@ class PluginTerminalDataPipelineService {
     this.terminalWorkerManager = null;
     this.workerWarningSubscription = null;
     this.sessionOwnedSubscription = null;
+    this.sessionClosedSubscription = null;
     this.active = new Map();
     this.declined = new Set();
     this.quarantined = new Set();
     this.selectedProviders = new Map();
     this.operations = new Map();
+    this.pendingActivations = new Map();
+    this.failedActivations = new Map();
+    this.finalizedActivations = new WeakSet();
+    this.permissionGenerations = new Map();
     this.sessionEpochs = new Map();
     this.pendingOwnership = new Map();
     this.closed = false;
+    this.permissionRevocationSubscription = this.permissionEngine.onDidRevoke?.((event) => {
+      const pluginId = event?.pluginId;
+      if (typeof pluginId !== "string") return;
+      this.permissionGenerations.set(pluginId, (this.permissionGenerations.get(pluginId) ?? 0) + 1);
+      const affectedDirections = event.permission === "terminal.intercept.input"
+        ? new Set(["input"])
+        : event.permission === "terminal.intercept.output"
+          ? new Set(["output"])
+          : event.permission === undefined || event.permission === "provider.terminal"
+            ? new Set(DIRECTIONS)
+            : new Set();
+      if (affectedDirections.size === 0) return;
+      for (const [key, binding] of [...this.active]) {
+        if (binding.identity.pluginId === pluginId && affectedDirections.has(binding.direction)) {
+          this.#detachKey(key, "permission-revoked");
+        }
+      }
+      for (const [key, selection] of [...this.selectedProviders]) {
+        const direction = key.slice(key.lastIndexOf("\0") + 1);
+        if (selection.pluginId === pluginId && affectedDirections.has(direction)) {
+          this.selectedProviders.delete(key);
+        }
+      }
+    }) ?? null;
     this.runtimeSupervisor.onDidChangeRuntime?.((event) => {
       if (event.status === "running") return;
       const failed = event.status === "error" || event.status === "quarantined";
+      const warnedKeys = new Set();
       for (const [key, selection] of this.selectedProviders) {
         if (selection.pluginId === event.pluginId) {
           this.selectedProviders.delete(key);
@@ -80,8 +124,47 @@ class PluginTerminalDataPipelineService {
               message: event.error
                 ?? `Terminal interceptor runtime ${event.status}`,
             }));
+            warnedKeys.add(key);
           }
           this.#detachKey(key, failed ? `runtime-${event.status}` : "runtime-stopped");
+        }
+      }
+      for (const [key, pending] of [
+        ...this.pendingActivations,
+        ...this.failedActivations,
+      ]) {
+        if ((this.sessionEpochs.get(pending.sessionId) ?? 0) !== pending.sessionEpoch) {
+          if (this.failedActivations.get(key) === pending) this.failedActivations.delete(key);
+          continue;
+        }
+        if (pending.identity.pluginId !== event.pluginId
+          || (event.runtimeId != null
+            && pending.identity.runtimeId != null
+            && pending.identity.runtimeId !== event.runtimeId)) {
+          continue;
+        }
+        this.finalizedActivations.add(pending);
+        this.selectedProviders.delete(key);
+        if (!failed) continue;
+        this.declined.add(key);
+        this.quarantined.add(key);
+        if (!warnedKeys.has(key)) {
+          this.showWarning(Object.freeze({
+            sessionId: pending.sessionId,
+            direction: pending.direction,
+            providerId: pending.providerId,
+            code: `runtime-${event.status}`,
+            message: event.error
+              ?? `Terminal interceptor runtime ${event.status}`,
+          }));
+        }
+      }
+      for (const [key, pending] of this.failedActivations) {
+        if (pending.identity.pluginId === event.pluginId
+          && (event.runtimeId == null
+            || pending.identity.runtimeId == null
+            || pending.identity.runtimeId === event.runtimeId)) {
+          this.failedActivations.delete(key);
         }
       }
     });
@@ -91,8 +174,10 @@ class PluginTerminalDataPipelineService {
   bindTerminalWorkerManager(manager) {
     this.workerWarningSubscription?.dispose?.();
     this.sessionOwnedSubscription?.dispose?.();
+    this.sessionClosedSubscription?.dispose?.();
     this.workerWarningSubscription = null;
     this.sessionOwnedSubscription = null;
+    this.sessionClosedSubscription = null;
     this.terminalWorkerManager = manager ?? null;
     if (manager?.onTerminalInterceptorWarning) {
       this.workerWarningSubscription = manager.onTerminalInterceptorWarning((warning) => {
@@ -130,6 +215,25 @@ class PluginTerminalDataPipelineService {
       this.sessionOwnedSubscription = manager.onSessionOwned((event) => (
         this.#handleSessionOwned(event)
       ));
+    }
+    if (manager?.onSessionClosed) {
+      this.sessionClosedSubscription = manager.onSessionClosed((event) => {
+        if (typeof event?.sessionId === "string") this.#disposeSession(event.sessionId);
+      });
+    }
+  }
+
+  #disposeSession(sessionId) {
+    this.permissionEngine.revokeSession?.(sessionId);
+    this.pendingOwnership.delete(sessionId);
+    this.sessionEpochs.set(sessionId, (this.sessionEpochs.get(sessionId) ?? 0) + 1);
+    this.detachSession(sessionId);
+    for (const direction of DIRECTIONS) {
+      const key = this.#key(sessionId, direction);
+      this.declined.delete(key);
+      this.quarantined.delete(key);
+      this.selectedProviders.delete(key);
+      this.failedActivations.delete(key);
     }
   }
 
@@ -235,6 +339,13 @@ class PluginTerminalDataPipelineService {
     }
   }
 
+  acceptsSessionEvent(event, webContentsId) {
+    const sessionId = event?.session?.sessionId;
+    if (typeof sessionId !== "string" || !Number.isSafeInteger(webContentsId)) return true;
+    const currentOwner = this.terminalWorkerManager?.getSessionOwnerWebContentsId?.(sessionId);
+    return !Number.isSafeInteger(currentOwner) || currentOwner === webContentsId;
+  }
+
   async #configureDirection(session, direction, options) {
     this.#assertSessionCurrent(session.sessionId, options.sessionEpoch);
     if (!this.terminalWorkerManager?.attachTerminalInterceptor) {
@@ -261,6 +372,7 @@ class PluginTerminalDataPipelineService {
     }
     const existing = this.active.get(key);
     if (existing && existing.sessionEpoch === options.sessionEpoch
+      && terminalSessionSnapshotsEqual(existing.session, session)
       && providers.some((entry) => entry.provider.id === existing.providerId)
       && runtimeIdentityMatches(
         this.runtimeSupervisor.getRuntimeIdentity(existing.identity.pluginId),
@@ -283,6 +395,13 @@ class PluginTerminalDataPipelineService {
     if (providerId == null) {
       providerId = await this.requestSelection(Object.freeze({ session, direction, providers }));
       this.#assertSessionCurrent(session.sessionId, options.sessionEpoch);
+      if (options.webContentsId != null
+        && !this.terminalWorkerManager?.ownsSession?.(session.sessionId, options.webContentsId)) {
+        throw new PluginRpcError(
+          RPC_ERRORS.permissionDenied,
+          "Terminal interceptor session ownership changed during selection",
+        );
+      }
     }
     if (providerId == null) {
       this.declined.add(key);
@@ -292,9 +411,51 @@ class PluginTerminalDataPipelineService {
     const selected = providers.find((entry) => entry.provider.id === providerId);
     if (!selected) throw new PluginRpcError(RPC_ERRORS.invalidArgument, "Selected Terminal interceptor is unavailable");
 
-    const activation = await this.contributionService.activateProvider(providerId);
+    const permissionGeneration = this.permissionGenerations.get(selected.pluginId) ?? 0;
+    let pendingActivation = Object.freeze({
+      sessionId: session.sessionId,
+      sessionEpoch: options.sessionEpoch,
+      direction,
+      providerId,
+      identity: Object.freeze({
+        pluginId: selected.pluginId,
+        pluginVersion: selected.pluginVersion,
+        runtimeId: null,
+      }),
+    });
+    this.failedActivations.delete(key);
+    this.pendingActivations.set(key, pendingActivation);
+    try {
+    let activation;
+    try {
+      activation = await this.contributionService.activateProvider(providerId);
+    } catch (error) {
+      if ((this.sessionEpochs.get(session.sessionId) ?? 0) === options.sessionEpoch
+        && !this.quarantined.has(key)
+        && !this.finalizedActivations.has(pendingActivation)) {
+        this.failedActivations.set(key, pendingActivation);
+      }
+      if (this.finalizedActivations.has(pendingActivation) && !this.quarantined.has(key)) {
+        throw new PluginRpcError(RPC_ERRORS.cancelled, "Terminal interceptor activation was cancelled");
+      }
+      throw error;
+    }
     this.#assertSessionCurrent(session.sessionId, options.sessionEpoch);
     const identity = normalizeActivationIdentity(activation);
+    pendingActivation = Object.freeze({
+      sessionId: session.sessionId,
+      sessionEpoch: options.sessionEpoch,
+      direction,
+      providerId,
+      identity,
+    });
+    this.pendingActivations.set(key, pendingActivation);
+    if (this.quarantined.has(key)) {
+      throw new PluginRpcError(
+        RPC_ERRORS.unavailable,
+        "Terminal interceptor was disabled after a runtime failure",
+      );
+    }
     if (activation.plugin.manifest.main?.node == null
       || activation.provider.kind !== `terminal.interceptor.${direction}`) {
       throw new PluginRpcError(
@@ -318,6 +479,25 @@ class PluginTerminalDataPipelineService {
           sessionId: session.sessionId,
           reason: `Use ${providerId} to intercept Terminal ${direction} data`,
           operationId: `terminal.interceptor.${direction}:${providerId}`,
+          allowedScopes: ["session", "application", "always"],
+          validateBeforeGrant: () => {
+            if ((this.permissionGenerations.get(identity.pluginId) ?? 0) !== permissionGeneration) {
+              throw new PluginRpcError(
+                RPC_ERRORS.permissionDenied,
+                "Terminal interceptor permission changed during authorization",
+              );
+            }
+            if (!runtimeIdentityMatches(
+              this.runtimeSupervisor.getRuntimeIdentity(identity.pluginId),
+              identity,
+            )) {
+              throw new PluginRpcError(
+                RPC_ERRORS.unavailable,
+                "Terminal interceptor runtime changed during authorization",
+              );
+            }
+            this.#assertAttachmentCurrent(session, direction, providerId, identity, options);
+          },
         });
         if (!["existing", "session", "application", "always"].includes(grant?.scope)) {
           throw new PluginRpcError(
@@ -335,6 +515,12 @@ class PluginTerminalDataPipelineService {
       throw error;
     }
     const currentIdentity = this.runtimeSupervisor.getRuntimeIdentity(activation.plugin.id);
+    if ((this.permissionGenerations.get(identity.pluginId) ?? 0) !== permissionGeneration) {
+      throw new PluginRpcError(
+        RPC_ERRORS.permissionDenied,
+        "Terminal interceptor permission changed during activation",
+      );
+    }
     if (!runtimeIdentityMatches(currentIdentity, identity)) {
       throw new PluginRpcError(RPC_ERRORS.unavailable, "Terminal interceptor runtime changed during authorization");
     }
@@ -342,11 +528,10 @@ class PluginTerminalDataPipelineService {
 
     if (existing?.sessionEpoch === options.sessionEpoch
       && existing.providerId === providerId
+      && terminalSessionSnapshotsEqual(existing.session, session)
       && runtimeIdentityMatches(existing.identity, identity)) {
       return Object.freeze({ status: "active", direction, providerId, pluginId: identity.pluginId });
     }
-    if (existing) this.#detachKey(key, "replaced");
-
     const channel = new this.MessageChannelMain();
     const utilityDescriptor = Object.freeze({ providerId, direction, session });
     const workerDescriptor = Object.freeze({
@@ -377,15 +562,33 @@ class PluginTerminalDataPipelineService {
           "Terminal interceptor runtime changed during port attachment",
         );
       }
+      if ((this.permissionGenerations.get(identity.pluginId) ?? 0) !== permissionGeneration) {
+        throw new PluginRpcError(
+          RPC_ERRORS.permissionDenied,
+          "Terminal interceptor permission changed during port attachment",
+        );
+      }
+      if (this.quarantined.has(key)) {
+        throw new PluginRpcError(
+          RPC_ERRORS.unavailable,
+          "Terminal interceptor was disabled after a runtime failure",
+        );
+      }
       this.#assertAttachmentCurrent(session, direction, providerId, identity, options);
       this.terminalWorkerManager.attachTerminalInterceptor(workerDescriptor, channel.port1);
       workerAttached = true;
     } catch (error) {
+      if (!this.finalizedActivations.has(pendingActivation)) {
+        this.failedActivations.set(key, pendingActivation);
+      }
       if (workerAttached) {
         this.terminalWorkerManager.detachTerminalInterceptor(session.sessionId, direction);
       }
       try { channel.port1.close?.(); } catch {}
       try { channel.port2.close?.(); } catch {}
+      if (this.finalizedActivations.has(pendingActivation) && !this.quarantined.has(key)) {
+        throw new PluginRpcError(RPC_ERRORS.cancelled, "Terminal interceptor activation was cancelled");
+      }
       throw error;
     }
     this.active.set(key, Object.freeze({
@@ -394,37 +597,47 @@ class PluginTerminalDataPipelineService {
       providerId,
       identity: Object.freeze({ ...identity }),
       sessionEpoch: options.sessionEpoch,
+      session,
     }));
+    this.failedActivations.delete(key);
     this.declined.delete(key);
     this.selectedProviders.set(key, Object.freeze({
       providerId,
       pluginId: identity.pluginId,
     }));
     return Object.freeze({ status: "active", direction, providerId, pluginId: identity.pluginId });
+    } finally {
+      if (this.pendingActivations.get(key) === pendingActivation) {
+        this.pendingActivations.delete(key);
+      }
+    }
   }
 
   async handleSessionEvent(event, options = {}) {
     const session = normalizeTerminalSessionSnapshot(event?.session);
+    if (!this.acceptsSessionEvent(event, options.webContentsId)) return Object.freeze([]);
     if (event?.type === "disposed") {
-      this.pendingOwnership.delete(session.sessionId);
-      this.sessionEpochs.set(session.sessionId, (this.sessionEpochs.get(session.sessionId) ?? 0) + 1);
-      this.detachSession(session.sessionId);
-      for (const direction of DIRECTIONS) {
-        const key = this.#key(session.sessionId, direction);
-        this.declined.delete(key);
-        this.quarantined.delete(key);
-        this.selectedProviders.delete(key);
-      }
+      this.#disposeSession(session.sessionId);
       return Object.freeze([]);
     }
     if (event?.type === "disconnected") {
-      this.pendingOwnership.delete(session.sessionId);
-      this.sessionEpochs.set(session.sessionId, (this.sessionEpochs.get(session.sessionId) ?? 0) + 1);
+      const sessionEpoch = (this.sessionEpochs.get(session.sessionId) ?? 0) + 1;
+      this.sessionEpochs.set(session.sessionId, sessionEpoch);
       this.detachSession(session.sessionId, "session-disconnected");
+      if (Number.isSafeInteger(options.webContentsId)) {
+        this.pendingOwnership.set(session.sessionId, Object.freeze({
+          session,
+          sessionEpoch,
+          webContentsId: options.webContentsId,
+          locale: options.locale,
+        }));
+      } else {
+        this.pendingOwnership.delete(session.sessionId);
+      }
       return Object.freeze([]);
     }
-    if (event?.type !== "created" && event?.type !== "connected"
-      && event?.type !== "reconnected" && event?.type !== "snapshot") {
+    if (!["created", "connected", "reconnected", "snapshot", "cwdChanged", "titleChanged",
+      "resized", "alternateScreenChanged"].includes(event?.type)) {
       return Object.freeze([]);
     }
     if (event.type === "created") {
@@ -434,6 +647,7 @@ class PluginTerminalDataPipelineService {
         this.declined.delete(key);
         this.quarantined.delete(key);
         this.selectedProviders.delete(key);
+        this.failedActivations.delete(key);
       }
       this.sessionEpochs.set(session.sessionId, (this.sessionEpochs.get(session.sessionId) ?? 0) + 1);
     }
@@ -457,6 +671,17 @@ class PluginTerminalDataPipelineService {
         }));
       }
       catch (error) {
+        if (error?.code === RPC_ERRORS.permissionDenied) {
+          results.push(Object.freeze({ status: "declined", direction }));
+          continue;
+        }
+        const key = this.#key(session.sessionId, direction);
+        if (error?.code === RPC_ERRORS.cancelled
+          || (this.sessionEpochs.get(session.sessionId) ?? 0) !== sessionEpoch
+          || this.quarantined.has(key)) {
+          results.push(Object.freeze({ status: "cancelled", direction }));
+          continue;
+        }
         this.showWarning(Object.freeze({
           sessionId: session.sessionId,
           direction,
@@ -482,11 +707,17 @@ class PluginTerminalDataPipelineService {
     this.declined.clear();
     this.quarantined.clear();
     this.selectedProviders.clear();
+    this.pendingActivations.clear();
+    this.failedActivations.clear();
     this.pendingOwnership.clear();
     this.workerWarningSubscription?.dispose?.();
     this.sessionOwnedSubscription?.dispose?.();
+    this.sessionClosedSubscription?.dispose?.();
     this.workerWarningSubscription = null;
     this.sessionOwnedSubscription = null;
+    this.sessionClosedSubscription = null;
+    this.permissionRevocationSubscription?.dispose?.();
+    this.permissionRevocationSubscription = null;
   }
 }
 

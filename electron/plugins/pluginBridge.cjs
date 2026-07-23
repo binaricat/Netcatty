@@ -256,6 +256,10 @@ function registerPluginBridge(ipcMain, options) {
   });
   handle(CHANNELS.terminalSessionEvent, async (_activeManager, payload, event) => {
     if (!terminalProviderService) throw new Error("Plugin Terminal Providers are unavailable");
+    if (terminalDataPipelineService?.acceptsSessionEvent
+      && !terminalDataPipelineService.acceptsSessionEvent(payload, event?.sender?.id)) {
+      return [];
+    }
     const [providers] = await Promise.all([
       terminalProviderService.publishSessionEvent(payload),
       terminalDataPipelineService?.handleSessionEvent?.(payload, {

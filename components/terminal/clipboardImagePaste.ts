@@ -20,10 +20,11 @@ type HandleRemoteClipboardImagePasteOptions = {
   bridge?: RemoteClipboardImageBridge;
   createTransferId?: () => string;
   getRemoteCwd: () => Promise<string | null | undefined>;
+  isSensitiveInput?: () => boolean;
   scrollToBottomAfterProgrammaticInput?: (data: string) => void;
   sessionId: string | null | undefined;
   terminalBackend: {
-    writeToSession: (sessionId: string, data: string, options?: { automated?: boolean }) => void;
+    writeToSession: (sessionId: string, data: string, options?: { automated?: boolean; sensitive?: boolean }) => void;
   };
   term?: TerminalLike | null;
 };
@@ -82,6 +83,7 @@ export async function handleRemoteClipboardImageUpload({
   bridge,
   createTransferId = defaultTransferId,
   getRemoteCwd,
+  isSensitiveInput,
   scrollToBottomAfterProgrammaticInput,
   sessionId,
   terminalBackend,
@@ -115,7 +117,9 @@ export async function handleRemoteClipboardImageUpload({
     if (!transferResult || transferResult.error) return { ok: false, reason: "upload-failed" };
 
     const pastedPath = quoteRemotePathForShell(targetPath);
-    terminalBackend.writeToSession(sessionId, pastedPath);
+    terminalBackend.writeToSession(sessionId, pastedPath, {
+      sensitive: isSensitiveInput?.() === true,
+    });
     scrollToBottomAfterProgrammaticInput?.(pastedPath);
     term?.focus?.();
     return { ok: true, remotePath: targetPath, pastedPath };

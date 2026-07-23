@@ -326,7 +326,19 @@ function createBridgeRegistrar(context) {
           MessageChannelMain: electronModule.MessageChannelMain,
         })
       : null;
-    pluginHostService?.terminalDataPipelineService?.bindTerminalWorkerManager(terminalWorkerManager);
+    const terminalPipelineSessionManager = terminalWorkerManager ?? {
+      getSessionOwnerWebContentsId(sessionId) {
+        const owner = sessions.get(sessionId)?.webContentsId;
+        return Number.isSafeInteger(owner) ? owner : null;
+      },
+      ownsSession(sessionId, webContentsId) {
+        return Number.isSafeInteger(webContentsId)
+          && sessions.get(sessionId)?.webContentsId === webContentsId;
+      },
+    };
+    pluginHostService?.terminalDataPipelineService?.bindTerminalWorkerManager(
+      terminalPipelineSessionManager,
+    );
     const reportOpenedSessionActivity = (event) => aiBridge.reportOpenedSessionActivity?.(event);
     terminalWorkerManager?.addOutputTap?.((sessionId) => {
       reportOpenedSessionActivity({ sessionId, phase: "touch" });

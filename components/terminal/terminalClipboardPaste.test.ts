@@ -33,7 +33,7 @@ test("terminal user paste does not inspect or upload remote clipboard images", a
 });
 
 test("terminal user paste still inserts local clipboard file paths", async () => {
-  const writes: string[] = [];
+  const writes: Array<{ data: string; sensitive?: boolean }> = [];
   const scrolled: string[] = [];
   let focused = false;
 
@@ -45,11 +45,15 @@ test("terminal user paste still inserts local clipboard file paths", async () =>
       ],
     },
     isLocalConnection: true,
+    isSensitiveInput: () => true,
     readClipboardText: async () => assert.fail("local file paste should not fall through to text"),
     scrollToBottomAfterProgrammaticInput: (data) => scrolled.push(data),
     sessionId: "session-1",
     terminalBackend: {
-      writeToSession: (_sessionId, data) => writes.push(data),
+      writeToSession: (_sessionId, data, options) => writes.push({
+        data,
+        sensitive: options?.sensitive,
+      }),
     },
     term: {
       focus: () => {
@@ -60,7 +64,10 @@ test("terminal user paste still inserts local clipboard file paths", async () =>
     },
   });
 
-  assert.deepEqual(writes, ["/Users/alice/shot.png /Users/alice/report.txt"]);
+  assert.deepEqual(writes, [{
+    data: "/Users/alice/shot.png /Users/alice/report.txt",
+    sensitive: true,
+  }]);
   assert.deepEqual(scrolled, ["/Users/alice/shot.png /Users/alice/report.txt"]);
   assert.equal(focused, true);
 });

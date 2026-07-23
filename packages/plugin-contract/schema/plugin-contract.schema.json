@@ -1249,7 +1249,14 @@
         },
         "reason": { "type": "string", "minLength": 1, "maxLength": 1024 },
         "operationId": { "type": "string", "minLength": 1, "maxLength": 128 },
-        "sessionId": { "type": "string", "minLength": 1, "maxLength": 128 }
+        "sessionId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "allowedScopes": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 4,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/PermissionGrantScope" }
+        }
       },
       "additionalProperties": false
     },

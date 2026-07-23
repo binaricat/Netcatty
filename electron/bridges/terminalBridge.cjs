@@ -131,6 +131,11 @@ function init(deps) {
 }
 
 function openTerminalOutputSession(sessionId, webContents) {
+  const generation = webContents?.claimSessionGeneration?.(sessionId);
+  const session = sessions?.get?.(sessionId);
+  if (session && Number.isSafeInteger(generation)) {
+    session._terminalSessionGeneration = generation;
+  }
   terminalOutputChannel?.openSession?.(sessionId, webContents);
 }
 
@@ -244,6 +249,11 @@ function handleTerminalSessionSnapshotResponse(event, payload) {
     kittyKeyboardProtocolEnabled: typeof payload?.kittyKeyboardProtocolEnabled === "boolean"
       ? payload.kittyKeyboardProtocolEnabled
       : undefined,
+    passwordPromptActive: typeof payload?.passwordPromptActive === "boolean"
+      ? payload.passwordPromptActive
+      : undefined,
+    cwd: payload?.cwd === null ? null : typeof payload?.cwd === "string" ? payload.cwd : undefined,
+    title: payload?.title === null ? null : typeof payload?.title === "string" ? payload.title : undefined,
   });
 }
 
@@ -298,6 +308,11 @@ function applyTerminalSessionSnapshot(event, payload, terminalWorkerManager = nu
   const kittyKeyboardProtocolEnabled = typeof payload?.kittyKeyboardProtocolEnabled === "boolean"
     ? payload.kittyKeyboardProtocolEnabled
     : undefined;
+  const passwordPromptActive = typeof payload?.passwordPromptActive === "boolean"
+    ? payload.passwordPromptActive
+    : undefined;
+  const cwd = payload?.cwd === null ? null : typeof payload?.cwd === "string" ? payload.cwd : undefined;
+  const title = payload?.title === null ? null : typeof payload?.title === "string" ? payload.title : undefined;
   if (
     !sessionId
     || !hasSnapshot
@@ -343,6 +358,9 @@ function applyTerminalSessionSnapshot(event, payload, terminalWorkerManager = nu
           alternateScreen,
           kittyKeyboardModeState,
           kittyKeyboardProtocolEnabled,
+          passwordPromptActive,
+          cwd,
+          title,
           requestId,
         });
       } catch (err) {
@@ -462,7 +480,13 @@ function pauseSessionOutputFlow(sessionId, terminalWorkerManager = null) {
   try { setRendererFlowPaused(session, true); } catch {}
 }
 
-function fanoutSessionLifecycleEvent(sessionId, primaryWebContentsId, channel, payload) {
+function fanoutSessionLifecycleEvent(
+  sessionId,
+  primaryWebContentsId,
+  channel,
+  payload,
+  terminalSessionGeneration,
+) {
   const targets = new Set();
   if (typeof primaryWebContentsId === "number") targets.add(primaryWebContentsId);
   const homeId = attachHomeWebContentsIds.get(sessionId);
@@ -470,7 +494,9 @@ function fanoutSessionLifecycleEvent(sessionId, primaryWebContentsId, channel, p
   for (const id of targets) {
     try {
       const contents = electronModule?.webContents?.fromId?.(id);
-      contents?.send?.(channel, payload);
+      contents?.send?.(channel, Number.isSafeInteger(terminalSessionGeneration)
+        ? { ...payload, _terminalSessionGeneration: terminalSessionGeneration }
+        : payload);
     } catch {
       // ignore destroyed renderers
     }
@@ -937,6 +963,7 @@ function startLocalSession(event, payload) {
   } = createPtyOutputBuffer((data, meta) => {
     const contents = electronModule.webContents.fromId(session.webContentsId);
     emitTerminalSessionData(contents, sessionId, data, {
+      session,
       cols: session.cols,
       rows: session.rows,
       meta,
@@ -980,11 +1007,13 @@ function startLocalSession(event, payload) {
     session.zmodemSentry = zmodemSentry;
 
     proc.onData((data) => {
+      if (sessions.get(sessionId) !== session) return;
       if (!shouldProcessSessionOutput(session, zmodemSentry)) return;
       zmodemSentry.consume(data);
     });
   } else {
     proc.onData((data) => {
+      if (sessions.get(sessionId) !== session) return;
       if (!shouldProcessSessionOutput(session)) return;
       trackSessionIdlePrompt(session, data);
       bufferLocalData(data);
@@ -998,6 +1027,7 @@ function startLocalSession(event, payload) {
       if (localExitFinalized) return;
       localExitFinalized = true;
       sessionLogStreamManager.stopStream(sessionId, logStreamToken);
+      if (sessions.get(sessionId) !== session) return;
       ptyProcessTree.unregisterPid(sessionId);
       sessions.delete(sessionId);
       if (session.closed) return;
@@ -1010,6 +1040,7 @@ function startLocalSession(event, payload) {
         session.webContentsId,
         "netcatty:exit",
         { sessionId, ...evt, reason },
+        session._terminalSessionGeneration,
       );
     };
     flushLocalPaced(finalizeExit);
@@ -1200,6 +1231,7 @@ async function startSerialSession(event, options) {
             if (!decoded) return;
             const contents = electronModule.webContents.fromId(session.webContentsId);
             emitTerminalSessionData(contents, sessionId, decoded, {
+              session,
               cols: session.cols,
               rows: session.rows,
             });
@@ -1222,14 +1254,17 @@ async function startSerialSession(event, options) {
         session.zmodemSentry = serialZmodemSentry;
 
         serialPort.on('data', (data) => {
+          if (sessions.get(sessionId) !== session) return;
           if (session.ymodemActive) return;
           if (!shouldProcessSessionOutput(session, serialZmodemSentry)) return;
           // data is already Buffer from serialport — feed to sentry
           serialZmodemSentry.consume(data);
         });
 
-        serialPort.on('error', (err) => {
-          console.error(`[Serial] Port error: ${err.message}`);
+        let serialExitFinalized = false;
+        const finalizeSerialExit = ({ exitCode, error, reason }) => {
+          if (serialExitFinalized || sessions.get(sessionId) !== session) return;
+          serialExitFinalized = true;
           session.zmodemSentry?.cancel();
           session.ymodemAbortController?.abort();
           sessionLogStreamManager.stopStream(sessionId, logStreamToken);
@@ -1241,25 +1276,19 @@ async function startSerialSession(event, options) {
             sessionId,
             primaryId,
             "netcatty:exit",
-            { sessionId, exitCode: 1, error: err.message, reason: "error" },
+            { sessionId, exitCode, ...(error ? { error } : {}), reason },
+            session._terminalSessionGeneration,
           );
+        };
+
+        serialPort.on('error', (err) => {
+          console.error(`[Serial] Port error: ${err.message}`);
+          finalizeSerialExit({ exitCode: 1, error: err.message, reason: "error" });
         });
 
         serialPort.on('close', () => {
           console.log(`[Serial] Port closed`);
-          session.zmodemSentry?.cancel();
-          session.ymodemAbortController?.abort();
-          sessionLogStreamManager.stopStream(sessionId, logStreamToken);
-          const primaryId = session.webContentsId;
-          ptyProcessTree.unregisterPid(sessionId);
-          sessions.delete(sessionId);
-          if (session.closed) return;
-          fanoutSessionLifecycleEvent(
-            sessionId,
-            primaryId,
-            "netcatty:exit",
-            { sessionId, exitCode: 0, reason: "closed" },
-          );
+          finalizeSerialExit({ exitCode: 0, reason: "closed" });
         });
 
         resolve({ sessionId });
@@ -1566,6 +1595,7 @@ function drainPendingOutputForInterrupt(sessionId, session, trace) {
   const outputMeta = takePendingInterruptOutputMeta(session, pendingMeta);
   const contents = electronModule.webContents.fromId(session.webContentsId);
   emitTerminalSessionData(contents, sessionId, output.data, {
+    session,
     cols: session.cols,
     rows: session.rows,
     meta: outputMeta,
@@ -1793,6 +1823,7 @@ function closeSession(event, payload) {
     session.webContentsId,
     "netcatty:exit",
     { sessionId: payload.sessionId, exitCode: 0, reason: "closed" },
+    session._terminalSessionGeneration,
   );
   terminalInputPipelineBarriers.delete(payload.sessionId);
   closeTerminalOutputSession(payload.sessionId);

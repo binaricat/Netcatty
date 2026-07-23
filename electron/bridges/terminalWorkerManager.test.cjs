@@ -122,6 +122,43 @@ test("session ownership listeners finish before buffered output is released", as
   assert.deepEqual(routed, [{ sessionId: "local-1", data: "banner" }]);
 });
 
+test("destroying a renderer immediately cancels its pending session ownership", async () => {
+  const child = new FakeChild();
+  const contents = new EventEmitter();
+  contents.id = 7;
+  contents.destroyed = false;
+  contents.isDestroyed = () => contents.destroyed;
+  let releaseOwnership;
+  let outputOpened = false;
+  const manager = createTerminalWorkerManager({
+    utilityProcess: { fork: () => child },
+    terminalOutputChannel: {
+      openSession() { outputOpened = true; },
+    },
+    electronModule: { webContents: { fromId: () => contents } },
+    workerScriptPath: "/worker.cjs",
+  });
+  manager.onSessionOwned(() => new Promise((resolve) => { releaseOwnership = resolve; }));
+
+  const start = manager.request("netcatty:local:start", {}, { webContentsId: 7 });
+  child.emit("message", {
+    kind: "response",
+    requestId: child.messages[0].requestId,
+    result: { sessionId: "local-1" },
+  });
+  while (!releaseOwnership) await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(manager.ownsSession("local-1", 7), true);
+
+  contents.destroyed = true;
+  contents.emit("destroyed");
+  assert.equal(manager.ownsSession("local-1", 7), false);
+  assert.equal(manager.getSessionOwnerWebContentsId("local-1"), null);
+  releaseOwnership();
+
+  await assert.rejects(start, /output route opened/u);
+  assert.equal(outputOpened, false);
+});
+
 test("a start closed while ownership is pending rejects instead of creating a ghost session", async () => {
   const child = new FakeChild();
   let releaseOwnership;
@@ -1366,6 +1403,114 @@ test("worker renderer events wrapped in MessageEvent data are forwarded", () => 
   ]);
 });
 
+test("worker terminal exit notifies host session lifecycle listeners", async () => {
+  const child = new FakeChild();
+  const closed = [];
+  const manager = createTerminalWorkerManager({
+    utilityProcess: { fork: () => child },
+    terminalOutputChannel: { openSession: () => true, closeSession() {} },
+    electronModule: { webContents: { fromId: (id) => ({ id, isDestroyed: () => false, send() {} }) } },
+    workerScriptPath: "/worker.cjs",
+  });
+  manager.onSessionClosed((event) => closed.push(event));
+  const start = manager.request("netcatty:local:start", {}, { webContentsId: 7 });
+  child.emit("message", {
+    kind: "response",
+    requestId: child.messages[0].requestId,
+    result: { sessionId: "session-1" },
+  });
+  await start;
+
+  child.emit("message", {
+    kind: "renderer-event",
+    webContentsId: 7,
+    channel: "netcatty:exit",
+    payload: { sessionId: "session-1", reason: "exited" },
+  });
+
+  assert.deepEqual(closed, [{ sessionId: "session-1", reason: "exited" }]);
+});
+
+test("explicit close notifies host session lifecycle exactly once before the worker exit", async () => {
+  const child = new FakeChild();
+  const closed = [];
+  const manager = createTerminalWorkerManager({
+    utilityProcess: { fork: () => child },
+    terminalOutputChannel: { openSession: () => true, closeSession() {} },
+    electronModule: { webContents: { fromId: (id) => ({ id, isDestroyed: () => false, send() {} }) } },
+    workerScriptPath: "/worker.cjs",
+  });
+  manager.onSessionClosed((event) => closed.push(event));
+  const start = manager.request("netcatty:local:start", {}, { webContentsId: 7 });
+  child.emit("message", {
+    kind: "response",
+    requestId: child.messages[0].requestId,
+    result: { sessionId: "session-1" },
+  });
+  await start;
+
+  manager.send("netcatty:close", { sessionId: "session-1" }, { webContentsId: 7 });
+  assert.deepEqual(closed, [{ sessionId: "session-1", reason: "closed" }]);
+  child.emit("message", {
+    kind: "renderer-event",
+    webContentsId: 7,
+    channel: "netcatty:exit",
+    payload: { sessionId: "session-1", reason: "exited" },
+  });
+  assert.deepEqual(closed, [{ sessionId: "session-1", reason: "closed" }]);
+});
+
+test("a duplicate exit from an old session generation cannot close a reconnected session", async () => {
+  const child = new FakeChild();
+  const closed = [];
+  const manager = createTerminalWorkerManager({
+    utilityProcess: { fork: () => child },
+    terminalOutputChannel: { openSession: () => true, closeSession() {} },
+    electronModule: { webContents: { fromId: (id) => ({ id, isDestroyed: () => false, send() {} }) } },
+    workerScriptPath: "/worker.cjs",
+  });
+  manager.onSessionClosed((event) => closed.push(event));
+
+  const first = manager.request("netcatty:local:start", {}, { webContentsId: 7 });
+  child.emit("message", {
+    kind: "response",
+    requestId: child.messages[0].requestId,
+    result: { sessionId: "session-1" },
+    sessionGeneration: 0,
+  });
+  await first;
+  child.emit("message", {
+    kind: "renderer-event",
+    webContentsId: 7,
+    channel: "netcatty:exit",
+    payload: { sessionId: "session-1", reason: "error" },
+    sessionGeneration: 0,
+  });
+
+  const reconnect = manager.request("netcatty:local:reconnect", { sessionId: "session-1" }, {
+    webContentsId: 7,
+  });
+  child.emit("message", {
+    kind: "response",
+    requestId: child.messages.at(-1).requestId,
+    result: { sessionId: "session-1" },
+    sessionGeneration: 1,
+  });
+  await reconnect;
+  assert.equal(manager.hasOpenSession("session-1"), true);
+
+  child.emit("message", {
+    kind: "renderer-event",
+    webContentsId: 7,
+    channel: "netcatty:exit",
+    payload: { sessionId: "session-1", reason: "close" },
+    sessionGeneration: 0,
+  });
+
+  assert.equal(manager.hasOpenSession("session-1"), true);
+  assert.deepEqual(closed, [{ sessionId: "session-1", reason: "error" }]);
+});
+
 test("rebound interactive events target only the popup while exit also reaches home", async () => {
   const child = new FakeChild();
   const forwarded = [];
@@ -1475,6 +1620,7 @@ test("rebind waits for ownership and routes interactive events to the pending re
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(settled, false);
   assert.equal(manager.getSessionWebContentsId("session-1"), 7);
+  assert.equal(manager.getSessionOwnerWebContentsId("session-1"), 9);
 
   child.emit("message", {
     kind: "renderer-event",
@@ -1506,6 +1652,7 @@ test("rebind waits for ownership and routes interactive events to the pending re
   releaseRebind();
   assert.equal((await rebound).success, true);
   assert.equal(manager.getSessionWebContentsId("session-1"), 9);
+  assert.equal(manager.getSessionOwnerWebContentsId("session-1"), 9);
 });
 
 test("failed output-port transfer clears pending state and restores the previous route", async () => {

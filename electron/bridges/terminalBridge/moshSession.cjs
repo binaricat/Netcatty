@@ -499,13 +499,14 @@ function createMoshSessionApi(ctx) {
           ? { ...(meta || {}), moshHandshake: true }
           : meta;
         emitTerminalSessionData(contents, sessionId, data, {
+          session,
           cols: session.cols,
           rows: session.rows,
           meta: handshakeMeta,
         });
       }, {
         onPendingBytesChange: (bytes) => setBufferedOutputBytes(session, bytes),
-        shouldAcceptOutput: () => shouldAcceptSessionOutput(session),
+        shouldAcceptOutput: () => sessions.get(sessionId) === session && shouldAcceptSessionOutput(session),
       });
       session.flushPendingData = flushPaced;
       session.discardPendingData = discard;
@@ -518,6 +519,7 @@ function createMoshSessionApi(ctx) {
       // during handshake — it can't appear during ssh login output and
       // would only complicate the swap.
       sshPty.onData((chunk) => {
+        if (sessions.get(sessionId) !== session) return;
         const { visible, parsed } = sniffer.feed(chunk);
         if (visible && (visible.length || (typeof visible === "string" && visible))) {
           const str = Buffer.isBuffer(visible) ? visible.toString("utf8") : visible;
@@ -573,12 +575,14 @@ function createMoshSessionApi(ctx) {
             });
           } catch (err) {
             flushPaced(() => {
+              if (sessions.get(sessionId) !== session) return;
               sessionLogStreamManager.stopStream(sessionId, logStreamToken);
               const contents = electronModule.webContents.fromId(session.webContentsId);
               fanoutSessionExit(sessionId, contents, {
                 sessionId,
                 reason: "error",
                 error: `Failed to spawn mosh-client: ${err.message}`,
+                _terminalSessionGeneration: session._terminalSessionGeneration,
               });
               closeTerminalOutputSession?.(sessionId);
               sessions.delete(sessionId);
@@ -604,6 +608,7 @@ function createMoshSessionApi(ctx) {
           // Best-effort diagnostics; still tear the session down below.
         }
         flushPaced(() => {
+          if (sessions.get(sessionId) !== session) return;
           sessionLogStreamManager.stopStream(sessionId, logStreamToken);
           const contents = electronModule.webContents.fromId(session.webContentsId);
           fanoutSessionExit(sessionId, contents, {
@@ -612,6 +617,7 @@ function createMoshSessionApi(ctx) {
             signal,
             reason: "error",
             error: "Mosh SSH startup failed: no MOSH CONNECT from mosh-server (UDP client not started)",
+            _terminalSessionGeneration: session._terminalSessionGeneration,
           });
           closeTerminalOutputSession?.(sessionId);
           sessions.delete(sessionId);
@@ -761,12 +767,14 @@ function createMoshSessionApi(ctx) {
         });
         session.zmodemSentry = sentry;
         mcPty.onData((data) => {
+          if (sessions.get(sessionId) !== session) return;
           if (!shouldProcessSessionOutput(session, sentry)) return;
           sentry.consume(data);
         });
       } else {
         const decodeMoshOutput = createMoshUtf8Decoder();
         mcPty.onData((data) => {
+          if (sessions.get(sessionId) !== session) return;
           if (!shouldProcessSessionOutput(session)) return;
           const str = decodeMoshOutput(data);
           if (!str) return;
@@ -786,6 +794,7 @@ function createMoshSessionApi(ctx) {
         try { session.moshStatsConn?.end(); } catch { /* ignore */ }
         bufferData(MOSH_PRIMARY_SCREEN_RESET);
         flushPaced(() => {
+          if (sessions.get(sessionId) !== session) return;
           sessionLogStreamManager.stopStream(sessionId, session.logStreamToken);
           const contents = electronModule.webContents.fromId(session.webContentsId);
           fanoutSessionExit(sessionId, contents, {
@@ -793,6 +802,7 @@ function createMoshSessionApi(ctx) {
             exitCode,
             signal,
             reason: exitCode !== 0 ? "error" : "exited",
+            _terminalSessionGeneration: session._terminalSessionGeneration,
           });
           closeTerminalOutputSession?.(sessionId);
           sessions.delete(sessionId);

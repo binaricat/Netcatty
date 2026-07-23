@@ -347,6 +347,9 @@ declare global {
       snapshot?: string;
       kittyKeyboardModeState?: NetcattyKittyKeyboardModeState;
       kittyKeyboardProtocolEnabled?: boolean;
+      passwordPromptActive?: boolean;
+      cwd?: string | null;
+      title?: string | null;
       error?: string;
     }>;
     /** Home renderer: listen for snapshot requests. */
@@ -359,6 +362,9 @@ declare global {
       snapshot: string,
       kittyKeyboardModeState?: NetcattyKittyKeyboardModeState,
       kittyKeyboardProtocolEnabled?: boolean,
+      passwordPromptActive?: boolean,
+      cwd?: string | null,
+      title?: string | null,
     ): void;
     /** Observe popup: push current state back to the home renderer before restore. */
     applyTerminalSessionSnapshot?(
@@ -371,6 +377,9 @@ declare global {
         alternateScreen: boolean;
         kittyKeyboardModeState?: NetcattyKittyKeyboardModeState;
         kittyKeyboardProtocolEnabled?: boolean;
+        passwordPromptActive?: boolean;
+        cwd?: string | null;
+        title?: string | null;
       },
       authorization: string,
     ): Promise<{
@@ -390,6 +399,9 @@ declare global {
         alternateScreen: boolean;
         kittyKeyboardModeState?: NetcattyKittyKeyboardModeState;
         kittyKeyboardProtocolEnabled?: boolean;
+        passwordPromptActive?: boolean;
+        cwd?: string | null;
+        title?: string | null;
         requestId: string;
       }) => boolean | Promise<boolean>,
     ): () => void;

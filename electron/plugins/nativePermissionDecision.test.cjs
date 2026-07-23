@@ -70,6 +70,33 @@ test("native permission decisions fail closed on cancellation and abort", async 
   await assert.rejects(provider(permissionRequest(), { signal: controller.signal }), /runtime stopped/);
 });
 
+test("terminal interceptor permission prompts omit the unsupported one-use choice", async () => {
+  let captured;
+  const provider = createNativePermissionDecisionProvider({
+    dialog: {
+      async showMessageBox(options) {
+        captured = options;
+        return { response: 1 };
+      },
+    },
+  });
+  assert.deepEqual(await provider(permissionRequest({
+    sessionId: "session-1",
+    operationId: `terminal.interceptor.input:com.example.${"x".repeat(170)}`,
+    allowedScopes: ["session", "application", "always"],
+  })), {
+    requestId: "request-1",
+    decision: "allow",
+    scope: "session",
+  });
+  assert.deepEqual(captured.buttons, [
+    "Deny",
+    "Allow for Session",
+    "Allow for Application",
+    "Always Allow",
+  ]);
+});
+
 test("native permission request details are bounded and preserve resource kinds", () => {
   const resources = Array.from({ length: MAX_VISIBLE_RESOURCES + 5 }, (_, index) => `/path/${index}`);
   const detail = describePermissionRequest(permissionRequest({

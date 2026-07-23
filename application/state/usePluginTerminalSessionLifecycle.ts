@@ -10,8 +10,7 @@ interface PluginTerminalSessionLifecycleOptions {
   status: 'connecting' | 'connected' | 'disconnected';
   shellType?: string;
   initialCwd?: string;
-  /** False for a renderer that only temporarily owns an existing backend session. */
-  ownsBackendSessionMount?: boolean;
+  ownsBackendLifecycle?: boolean;
 }
 
 export interface PluginTerminalSnapshotState {
@@ -86,6 +85,22 @@ export function beginPluginTerminalSessionMountLifecycle(
   return disposeBackendSession;
 }
 
+export function ownsPluginTerminalBackendLifecycle(value: boolean | undefined): boolean {
+  return value !== false;
+}
+
+const BACKEND_LIFECYCLE_EVENTS = new Set<NetcattyTerminalSessionEvent['type']>([
+  'created', 'connected', 'reconnected', 'disconnected', 'disposed',
+]);
+
+export function shouldPublishPluginTerminalEvent(
+  type: NetcattyTerminalSessionEvent['type'],
+  ownsBackendLifecycle: boolean | undefined,
+): boolean {
+  return ownsPluginTerminalBackendLifecycle(ownsBackendLifecycle)
+    || !BACKEND_LIFECYCLE_EVENTS.has(type);
+}
+
 function normalizeShellType(shellType: string | undefined): NetcattyTerminalSessionSnapshot['shellType'] | undefined {
   if (shellType === 'posix' || shellType === 'fish' || shellType === 'powershell' || shellType === 'cmd') {
     return shellType;
@@ -126,6 +141,7 @@ export function usePluginTerminalSessionLifecycle(options: PluginTerminalSession
     sessionOverrides: Partial<NetcattyTerminalSessionSnapshot> = {},
   ) => {
     if (!registry) return;
+    if (!shouldPublishPluginTerminalEvent(type, metadataRef.current.ownsBackendLifecycle)) return;
     void registry.publishSessionEvent({
       type,
       session: { ...snapshot(), ...sessionOverrides },
@@ -135,14 +151,14 @@ export function usePluginTerminalSessionLifecycle(options: PluginTerminalSession
 
   useEffect(() => {
     return beginPluginTerminalSessionMountLifecycle(
-      options.ownsBackendSessionMount !== false,
+      ownsPluginTerminalBackendLifecycle(options.ownsBackendLifecycle),
       () => publish('created'),
       () => {
         publish('disposed');
         registry?.cancelSession(metadataRef.current.sessionId);
       },
     );
-  }, [options.ownsBackendSessionMount, publish, registry]);
+  }, [options.ownsBackendLifecycle, publish, registry]);
 
   useEffect(() => {
     const transition = transitionPluginTerminalConnectionState(

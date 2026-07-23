@@ -778,7 +778,11 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
   const appLevelActions = getAppLevelActions();
   const terminalActions = getTerminalPassthroughActions();
   const broadcastUserPasteData = (data: string) => {
-    if (ctx.isBroadcastEnabledRef.current && ctx.onBroadcastInputRef.current) {
+    if (
+      ctx.passwordPromptActiveRef?.current !== true
+      && ctx.isBroadcastEnabledRef.current
+      && ctx.onBroadcastInputRef.current
+    ) {
       ctx.onBroadcastInputRef.current(data, ctx.sessionId);
       return true;
     }
@@ -1111,6 +1115,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     sourceSessionId: ctx.sessionId,
     isHandlingBroadcast: () => handlingKittyBroadcast,
     isBroadcastEnabled: () => ctx.isBroadcastEnabledRef.current,
+    isSensitiveInput: () => ctx.passwordPromptActiveRef?.current === true,
     getDispatcher: () => ctx.onBroadcastInputRef.current,
   });
 
@@ -1546,11 +1551,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
       if (id) {
         e.preventDefault();
         e.stopPropagation();
-        ctx.onAutocompleteInput?.(wordJumpSequence);
-        ctx.terminalBackend.writeToSession(id, wordJumpSequence);
-        if (ctx.isBroadcastEnabledRef.current && ctx.onBroadcastInputRef.current) {
-          ctx.onBroadcastInputRef.current(wordJumpSequence, ctx.sessionId);
-        }
+        handleTerminalInputData(wordJumpSequence);
         scrollToBottomAfterInput(wordJumpSequence);
         return false;
       }
@@ -1740,6 +1741,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
       legacySuppressedKeys: broadcastLegacySuppressedKeys,
     }),
     getSessionId: () => ctx.sessionRef.current,
+    isSensitiveInput: () => ctx.passwordPromptActiveRef?.current === true,
     isConnected: () => ctx.statusRef.current === "connected",
     isRuntimeDisposed: () => runtimeDisposed,
     interruptSession: ctx.terminalBackend.interruptSession
@@ -1748,6 +1750,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     writeDisposed: (id, data) => ctx.terminalBackend.writeToSession(
       id,
       mapTerminalBackspaceInput(data, ctx.host.backspaceBehavior),
+      { sensitive: ctx.passwordPromptActiveRef?.current === true },
     ),
     writeActive: (data) => handleTerminalInputData(data, { source: "kitty" }),
   });

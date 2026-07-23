@@ -178,6 +178,7 @@ const SESSION_START_CHANNELS = new Set([
   "netcatty:mosh:start",
   "netcatty:et:start",
   "netcatty:serial:start",
+  "netcatty:local:reconnect",
 ]);
 
 function createTerminalWorkerManager(options = {}) {
@@ -198,10 +199,12 @@ function createTerminalWorkerManager(options = {}) {
   const outputPortReady = new Set();
   const outputRoutePending = new Map();
   const sessionWebContentsIds = new Map();
+  const sessionGenerations = new Map();
   const urgentInputPorts = new Map();
   const outputTaps = new Set();
   const terminalInterceptorWarningListeners = new Set();
   const sessionOwnedListeners = new Set();
+  const sessionClosedListeners = new Set();
   const maxPendingOutputChunks = Number.isFinite(options.maxPendingOutputChunks)
     ? Math.max(0, Math.trunc(options.maxPendingOutputChunks))
     : 512;
@@ -445,9 +448,19 @@ function createTerminalWorkerManager(options = {}) {
     const previousWebContentsId = sessionWebContentsIds.get(sessionId) ?? null;
     const openToken = Object.freeze({ webContentsId });
     outputRoutePending.set(sessionId, openToken);
-    await Promise.allSettled([...sessionOwnedListeners].map((listener) => (
-      Promise.resolve().then(() => listener(Object.freeze({ sessionId, webContentsId })))
-    )));
+    const onDestroyed = () => {
+      if (outputRoutePending.get(sessionId) === openToken) {
+        outputRoutePending.delete(sessionId);
+      }
+    };
+    contents.once?.("destroyed", onDestroyed);
+    try {
+      await Promise.allSettled([...sessionOwnedListeners].map((listener) => (
+        Promise.resolve().then(() => listener(Object.freeze({ sessionId, webContentsId })))
+      )));
+    } finally {
+      contents.removeListener?.("destroyed", onDestroyed);
+    }
     if (closedSessions.has(sessionId)) return false;
     if (outputRoutePending.get(sessionId) !== openToken) {
       return outputRoutePending.get(sessionId)?.webContentsId === webContentsId;
@@ -650,6 +663,7 @@ function createTerminalWorkerManager(options = {}) {
     outputPortPending.delete(sessionId);
     outputPortReady.delete(sessionId);
     sessionWebContentsIds.delete(sessionId);
+    sessionGenerations.delete(sessionId);
     clearAttachHome(sessionId);
     try {
       child?.postMessage?.({ kind: "close-output-port", sessionId });
@@ -676,6 +690,13 @@ function createTerminalWorkerManager(options = {}) {
       } catch {
         // A closing renderer may disappear between lookup and notification.
       }
+    }
+  }
+
+  function notifySessionClosed(sessionId, reason) {
+    if (!sessionId) return;
+    for (const listener of [...sessionClosedListeners]) {
+      try { listener(Object.freeze({ sessionId, reason })); } catch {}
     }
   }
 
@@ -775,6 +796,9 @@ function createTerminalWorkerManager(options = {}) {
           entry.resolve(message.result);
           return;
         }
+        if (Number.isSafeInteger(message.sessionGeneration)) {
+          sessionGenerations.set(sessionId, message.sessionGeneration);
+        }
         void openOutputSession(sessionId, entry.webContentsId).then((opened) => {
           if (pending.get(message.requestId) !== entry) return;
           pending.delete(message.requestId);
@@ -838,6 +862,11 @@ function createTerminalWorkerManager(options = {}) {
       // Prefer the currently rebound display target. Worker-captured
       // webContentsId is from session start and goes stale after attach/rebind.
       const sessionId = message.payload?.sessionId;
+      if (message.channel === "netcatty:exit"
+        && Number.isSafeInteger(message.sessionGeneration)
+        && sessionGenerations.get(sessionId) !== message.sessionGeneration) {
+        return;
+      }
       const displayWebContentsId =
         (typeof sessionId === "string" && outputRoutePending.get(sessionId)?.webContentsId)
         || (typeof sessionId === "string" && sessionWebContentsIds.get(sessionId))
@@ -851,6 +880,9 @@ function createTerminalWorkerManager(options = {}) {
         && closedSessions.has(sessionId),
       );
       if (message.channel === "netcatty:exit" && sessionId) {
+        if (!wasExplicitlyClosed) {
+          notifySessionClosed(sessionId, message.payload?.reason);
+        }
         closeOutputSession(sessionId);
         clearAttachHome(sessionId);
       }
@@ -976,6 +1008,7 @@ function createTerminalWorkerManager(options = {}) {
     outputPortReady.clear();
     outputRoutePending.clear();
     sessionWebContentsIds.clear();
+    sessionGenerations.clear();
     attachHomeWebContentsIds.clear();
     closeAllUrgentInputPorts();
     terminalOutputChannel?.closeAll?.();
@@ -1008,6 +1041,7 @@ function createTerminalWorkerManager(options = {}) {
     });
     if (channel === "netcatty:close:await" && payload?.sessionId) {
       notifyExplicitSessionClose(payload.sessionId);
+      if (!closedSessions.has(payload.sessionId)) notifySessionClosed(payload.sessionId, "closed");
       closeOutputSession(payload.sessionId);
     } else if (payload?.sessionId && SESSION_START_CHANNELS.has(channel)) {
       closedSessions.delete(payload.sessionId);
@@ -1025,6 +1059,7 @@ function createTerminalWorkerManager(options = {}) {
   function send(channel, payload, optionsForSend = {}) {
     if (channel === "netcatty:close" && payload?.sessionId) {
       notifyExplicitSessionClose(payload.sessionId);
+      if (!closedSessions.has(payload.sessionId)) notifySessionClosed(payload.sessionId, "closed");
       closeOutputSession(payload.sessionId);
     }
     if (channel === "netcatty:interrupt") {
@@ -1068,6 +1103,12 @@ function createTerminalWorkerManager(options = {}) {
     return Object.freeze({ dispose: () => sessionOwnedListeners.delete(listener) });
   }
 
+  function onSessionClosed(listener) {
+    if (typeof listener !== "function") throw new TypeError("Terminal session close listener is required");
+    sessionClosedListeners.add(listener);
+    return Object.freeze({ dispose: () => sessionClosedListeners.delete(listener) });
+  }
+
   function stop() {
     if (!child) return;
     const current = child;
@@ -1082,9 +1123,11 @@ function createTerminalWorkerManager(options = {}) {
       outputPortReady.clear();
       outputRoutePending.clear();
       sessionWebContentsIds.clear();
+      sessionGenerations.clear();
       closeAllUrgentInputPorts();
       terminalInterceptorWarningListeners.clear();
       sessionOwnedListeners.clear();
+      sessionClosedListeners.clear();
       terminalOutputChannel?.closeAll?.();
       rejectAllPending(new Error("Terminal worker stopped"));
     }
@@ -1104,6 +1147,7 @@ function createTerminalWorkerManager(options = {}) {
     detachTerminalInterceptor,
     onTerminalInterceptorWarning,
     onSessionOwned,
+    onSessionClosed,
     hasOpenSession(sessionId) {
       return Boolean(
         sessionId
@@ -1115,14 +1159,23 @@ function createTerminalWorkerManager(options = {}) {
       if (!sessionId) return null;
       return sessionWebContentsIds.get(sessionId) ?? null;
     },
+    getSessionOwnerWebContentsId(sessionId) {
+      if (!sessionId || closedSessions.has(sessionId)) return null;
+      const pendingWebContentsId = outputRoutePending.get(sessionId)?.webContentsId;
+      if (isLiveWebContentsId(pendingWebContentsId)) return pendingWebContentsId;
+      const currentWebContentsId = sessionWebContentsIds.get(sessionId);
+      return isLiveWebContentsId(currentWebContentsId) ? currentWebContentsId : null;
+    },
     ownsSession(sessionId, webContentsId) {
       const pendingWebContentsId = outputRoutePending.get(sessionId)?.webContentsId;
       return Boolean(
         sessionId
         && Number.isSafeInteger(webContentsId)
         && (
-          sessionWebContentsIds.get(sessionId) === webContentsId
-          || pendingWebContentsId === webContentsId
+          (sessionWebContentsIds.get(sessionId) === webContentsId
+            && isLiveWebContentsId(webContentsId))
+          || (pendingWebContentsId === webContentsId
+            && isLiveWebContentsId(webContentsId))
         )
         && !closedSessions.has(sessionId),
       );

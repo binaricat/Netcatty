@@ -8,13 +8,14 @@ type ClipboardFileBridge = Pick<Partial<NetcattyBridge>, "readClipboardFiles">;
 type TerminalClipboardPasteOptions = {
   bridge?: ClipboardFileBridge;
   isLocalConnection: boolean;
+  isSensitiveInput?: () => boolean;
   onPasteData?: (data: string) => boolean | void;
   readClipboardText: () => Promise<string>;
   scrollOnPaste?: boolean;
   scrollToBottomAfterProgrammaticInput?: (data: string) => void;
   sessionId: string | null | undefined;
   terminalBackend: {
-    writeToSession: (sessionId: string, data: string, options?: { automated?: boolean }) => void;
+    writeToSession: (sessionId: string, data: string, options?: { automated?: boolean; sensitive?: boolean }) => void;
   };
   term: Pick<XTerm, "paste" | "scrollToBottom"> & Partial<Pick<XTerm, "focus">>;
 };
@@ -22,6 +23,7 @@ type TerminalClipboardPasteOptions = {
 export async function handleTerminalClipboardPaste({
   bridge,
   isLocalConnection,
+  isSensitiveInput,
   onPasteData,
   readClipboardText,
   scrollOnPaste = false,
@@ -38,7 +40,9 @@ export async function handleTerminalClipboardPaste({
         const paths = extractRootPathsFromClipboardFiles(files);
         if (paths.length > 0) {
           const pathsText = paths.join(" ");
-          terminalBackend.writeToSession(sessionId, pathsText);
+          terminalBackend.writeToSession(sessionId, pathsText, {
+            sensitive: isSensitiveInput?.() === true,
+          });
           scrollToBottomAfterProgrammaticInput?.(pathsText);
           term.focus?.();
           return;

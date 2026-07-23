@@ -97,6 +97,37 @@ test("a paired release is forwarded after broadcast is disabled", () => {
   ]);
 });
 
+test("sensitive input is never broadcast while an earlier paired release can still finish", () => {
+  let sensitive = true;
+  const forwarded: KittyKeyboardBroadcastInput[] = [];
+  const forward = createKittyKeyboardBroadcastForwarder({
+    sourceSessionId: "source",
+    isHandlingBroadcast: () => false,
+    isBroadcastEnabled: () => true,
+    isSensitiveInput: () => sensitive,
+    getDispatcher: () => (_data, _sourceSessionId, options) => {
+      forwarded.push(options.kittyKeyboardInput);
+      return ["target-a"];
+    },
+  });
+  const secretPress: KittyKeyboardBroadcastInput = {
+    kind: "key",
+    event: { type: "keydown", key: "x", code: "KeyX" },
+  };
+  const priorRelease: KittyKeyboardBroadcastInput = {
+    kind: "key",
+    event: { type: "keyup", key: "Shift", code: "ShiftLeft" },
+  };
+
+  assert.equal(forward(secretPress), null);
+  assert.deepEqual(forward(priorRelease, true, ["target-a"]), {
+    targetSessionIds: ["target-a"],
+  });
+  sensitive = false;
+  assert.deepEqual(forward(secretPress), { targetSessionIds: ["target-a"] });
+  assert.deepEqual(forwarded, [priorRelease, secretPress]);
+});
+
 test("blur flushes every forwarded press as a synthetic release", () => {
   const forwarded: KittyKeyboardBroadcastInput[] = [];
   const forward = createKittyKeyboardBroadcastForwarder({

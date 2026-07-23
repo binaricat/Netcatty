@@ -152,6 +152,8 @@ function createTerminalDataPipeline(options = {}) {
     }
     const key = keyOf(sessionId, direction);
     const previous = bindings.get(key);
+    const previousRawTail = outputRawTails.get(sessionId);
+    const wasSensitive = sensitiveInputSessions.has(sessionId);
     if (previous) disable(previous, "replaced", "Terminal interceptor was replaced for this session");
     const binding = {
       sessionId,
@@ -213,6 +215,15 @@ function createTerminalDataPipeline(options = {}) {
     }));
     bindings.set(key, binding);
     refreshOutputMode(sessionId);
+    if (previousRawTail !== undefined) outputRawTails.set(sessionId, previousRawTail);
+    if (direction === "input") {
+      const lastVisibleLine = previousRawTail === undefined
+        ? ""
+        : (visibleTerminalTail(previousRawTail).split(/[\r\n]/u).at(-1) ?? "");
+      if (wasSensitive || SENSITIVE_PROMPT.test(lastVisibleLine)) {
+        sensitiveInputSessions.add(sessionId);
+      }
+    }
   }
 
   function detach(sessionId, direction, reason = "detached") {
@@ -334,6 +345,7 @@ function createTerminalDataPipeline(options = {}) {
         );
         if (!result) return data;
         output.push(result);
+        offset = end;
       }
       try {
         const total = output.reduce((sum, item) => sum + item.byteLength, 0);

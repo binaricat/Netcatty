@@ -76,6 +76,8 @@ function getEmitPerfLogDetails(sessionId, terminalPerf, options = {}) {
 }
 
 function emitTerminalSessionData(contents, sessionId, data, options = {}) {
+  const currentSession = getSession && sessionId ? getSession(sessionId) : null;
+  if (options.session && currentSession !== options.session) return false;
   if (sessionId && data && onSessionActivity) {
     try {
       onSessionActivity({ sessionId, phase: "touch" });
@@ -83,11 +85,8 @@ function emitTerminalSessionData(contents, sessionId, data, options = {}) {
       // Session activity tracking is best-effort and must not break output.
     }
   }
-  if (getSession && sessionId && data) {
-    const session = getSession(sessionId);
-    if (session) {
-      trackEmitted(session, typeof data === "string" ? data.length : 0, sessionId);
-    }
+  if (currentSession && sessionId && data) {
+    trackEmitted(currentSession, typeof data === "string" ? data.length : 0, sessionId);
   }
   if (sessionId && data) {
     for (const tap of dataTaps) {
@@ -104,8 +103,15 @@ function emitTerminalSessionData(contents, sessionId, data, options = {}) {
   if (emitPerfDetails) {
     logTerminalOutputPerf("backend-emit", emitPerfDetails);
   }
-  if (outputChannel?.send?.(sessionId, data, meta)) return;
-  contents?.send("netcatty:data", meta ? { sessionId, data, meta } : { sessionId, data });
+  if (outputChannel?.send?.(sessionId, data, meta)) return true;
+  const generation = options.session?._terminalSessionGeneration;
+  contents?.send("netcatty:data", {
+    sessionId,
+    data,
+    ...(meta ? { meta } : {}),
+    ...(Number.isSafeInteger(generation) ? { _terminalSessionGeneration: generation } : {}),
+  });
+  return true;
 }
 
 module.exports = {

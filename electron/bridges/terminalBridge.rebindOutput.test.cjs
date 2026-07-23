@@ -27,6 +27,9 @@ function loadTerminalBridgeWithMocks() {
     if (request === "./emitTerminalSessionData.cjs" || request.endsWith("emitTerminalSessionData.cjs")) {
       return { configureTerminalSessionDataEmitter: () => {} };
     }
+    if (request === "electron") {
+      return {};
+    }
     return originalRequire.apply(this, arguments);
   };
 
@@ -85,8 +88,9 @@ test("worker renderer-event forwarding prefers rebound webContentsId", () => {
   assert.match(source, /attachHomeWebContentsIds/);
   assert.match(source, /restoreAttachHome/);
   // Exit cleanup must not run before we capture display/home targets.
-  const captureIdx = source.indexOf("const displayWebContentsId =");
-  const closeIdx = source.indexOf('if (message.channel === "netcatty:exit"');
+  const rendererEventIdx = source.indexOf('if (message.kind === "renderer-event")');
+  const captureIdx = source.indexOf("const displayWebContentsId =", rendererEventIdx);
+  const closeIdx = source.indexOf('if (message.channel === "netcatty:exit" && sessionId)', captureIdx);
   assert.ok(captureIdx > 0 && closeIdx > captureIdx, "capture targets before closeOutputSession on exit");
   assert.match(
     source,
@@ -187,6 +191,38 @@ test("in-process explicit close sends an exit event before dropping the output r
   assert.match(sshSource, /if \(liveSession\?\.closed\)/, "SSH close callback suppresses duplicate explicit-close exits");
 });
 
+test("late backend exits cannot tear down a replacement with the same session id", () => {
+  const bridgeSource = require("node:fs").readFileSync(
+    path.join(__dirname, "terminalBridge.cjs"),
+    "utf8",
+  );
+  const sshSource = require("node:fs").readFileSync(
+    path.join(__dirname, "sshBridge/startSession.cjs"),
+    "utf8",
+  );
+  const telnetSource = require("node:fs").readFileSync(
+    path.join(__dirname, "terminalBridge/telnetSession.cjs"),
+    "utf8",
+  );
+  const moshSource = require("node:fs").readFileSync(
+    path.join(__dirname, "terminalBridge/moshSession.cjs"),
+    "utf8",
+  );
+  const etSource = require("node:fs").readFileSync(
+    path.join(__dirname, "terminalBridge/etSession.cjs"),
+    "utf8",
+  );
+
+  assert.match(sshSource, /if \(liveSession === session\)/);
+  assert.match(bridgeSource, /if \(sessions\.get\(sessionId\) !== session\) return;/);
+  assert.match(bridgeSource, /serialExitFinalized \|\| sessions\.get\(sessionId\) !== session/);
+  assert.match(telnetSource, /sessions\.get\(sessionId\) !== activeSession/);
+  assert.match(moshSource, /sessions\.get\(sessionId\) !== session/);
+  assert.match(etSource, /sessions\.get\(sessionId\) !== session/);
+  assert.match(sshSource, /establishedOwnerSession && current !== establishedOwnerSession/);
+  assert.match(sshSource, /establishedOwnerSession \? \{ session: establishedOwnerSession \} : \{\}/);
+});
+
 test("in-process explicit close notifies a rebound popup and its home renderer", async () => {
   const { bridge, fakeChannel } = loadTerminalBridgeWithMocks();
   const sent = [];
@@ -267,6 +303,10 @@ test("snapshot apply acknowledgements are emitted only by the matching terminal"
   assert.match(terminalSource, /\?\? kittyKeyboardProtocolEnabledForSession/);
   assert.match(terminalSource, /setKittyKeyboardProtocolEnabled/);
   assert.match(effectsSource, /runtime\.setKittyKeyboardProtocolEnabled\(snap\.kittyKeyboardProtocolEnabled\)/);
+  assert.match(terminalSource, /passwordPromptActive: passwordPromptActiveRef\.current/u);
+  assert.match(preloadSource, /typeof passwordPromptActive === "boolean"/u);
+  assert.match(bridgeSource, /passwordPromptActive: typeof payload\?\.passwordPromptActive/u);
+  assert.match(effectsSource, /passwordPromptActiveRef\.current = snap\.passwordPromptActive/u);
 });
 
 test("exit fanout preserves the original renderer before registry wiring", () => {
@@ -369,4 +409,31 @@ test("attach popup payload field is consumed by terminal popup window", () => {
   assert.match(source, /attachSessionId/);
   assert.match(source, /attachSessionPopups/);
   assert.match(source, /reused: true/);
+});
+
+test("attach snapshots preserve cwd and title updates including explicit clears", () => {
+  const terminalSource = require("node:fs").readFileSync(
+    path.join(__dirname, "../../components/Terminal.tsx"),
+    "utf8",
+  );
+  const effectsSource = require("node:fs").readFileSync(
+    path.join(__dirname, "../../components/terminal/useTerminalEffects.ts"),
+    "utf8",
+  );
+  assert.match(
+    terminalSource,
+    /knownCwdRef\.current \?\? null,[\s\S]*?terminalTitleRef\.current \?\? null/,
+  );
+  assert.match(
+    effectsSource,
+    /snap\.cwd !== undefined[\s\S]*?setRendererCwd\(snap\.cwd\)[\s\S]*?snap\.title !== undefined/,
+  );
+  assert.match(
+    effectsSource,
+    /onTitleChange: \(title: string \| null\) => \{[\s\S]*?terminalTitleRef\.current = title \|\| undefined/,
+  );
+  assert.match(
+    terminalSource,
+    /payload\.cwd !== undefined[\s\S]*?setRendererCwd\(payload\.cwd\)[\s\S]*?payload\.title !== undefined/,
+  );
 });

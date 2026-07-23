@@ -447,6 +447,84 @@ test("session grants require a host-owned session identifier", async (context) =
   database.close();
 });
 
+test("revoking a session aborts its pending permission prompt before it can grant", async (context) => {
+  const database = createDatabase(context);
+  let promptStarted;
+  const started = new Promise((resolve) => { promptStarted = resolve; });
+  const engine = new PluginPermissionEngine({
+    database,
+    requestDecision: (_request, { signal }) => new Promise((_resolve, reject) => {
+      promptStarted();
+      signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+    }),
+  });
+  const pluginManifest = manifest({ optional: ["terminal.metadata"] });
+  const pending = engine.authorize(runtimeContext(pluginManifest), {
+    permission: "terminal.metadata",
+    resources: ["*"],
+    reason: "Read terminal metadata",
+    sessionId: "terminal-session-pending",
+    allowedScopes: ["session"],
+  });
+  await started;
+  engine.revokeSession("terminal-session-pending");
+  await assert.rejects(pending, /session ended/u);
+  assert.equal(engine.sessionGrants.size, 0);
+  database.close();
+});
+
+test("host state is revalidated before a permission decision can persist", async (context) => {
+  const database = createDatabase(context);
+  const engine = new PluginPermissionEngine({
+    database,
+    requestDecision: async (request) => ({
+      requestId: request.requestId,
+      decision: "allow",
+      scope: "application",
+    }),
+  });
+  const pluginManifest = manifest({ optional: ["terminal.metadata"] });
+  await assert.rejects(engine.authorize(runtimeContext(pluginManifest), {
+    permission: "terminal.metadata",
+    resources: ["*"],
+    reason: "Read terminal metadata",
+    validateBeforeGrant: () => { throw new Error("runtime changed"); },
+  }), /runtime changed/u);
+  assert.equal(engine.applicationGrants.size, 0);
+  database.close();
+});
+
+test("permission revocation aborts matching prompts and publishes a revocation event", async (context) => {
+  const database = createDatabase(context);
+  let started;
+  const promptStarted = new Promise((resolve) => { started = resolve; });
+  const engine = new PluginPermissionEngine({
+    database,
+    requestDecision: (_request, { signal }) => new Promise((_resolve, reject) => {
+      started();
+      signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+    }),
+  });
+  const events = [];
+  engine.onDidRevoke((event) => events.push(event));
+  const pluginManifest = manifest({ optional: ["terminal.metadata"] });
+  const pending = engine.authorize(runtimeContext(pluginManifest), {
+    permission: "terminal.metadata",
+    resources: ["*"],
+    reason: "Read terminal metadata",
+  });
+  await promptStarted;
+  engine.revokeApplication(pluginManifest.id, "terminal.metadata", "*");
+  await assert.rejects(pending, /revoked/u);
+  assert.deepEqual(events, [{
+    pluginId: pluginManifest.id,
+    permission: "terminal.metadata",
+    resource: "*",
+    scope: "application",
+  }]);
+  database.close();
+});
+
 test("required preflight rejects missing or wildcard resource-scoped activation bounds", async (context) => {
   const database = createDatabase(context);
   const requested = [];

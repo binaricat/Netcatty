@@ -72,36 +72,19 @@ test("terminal input interception transfers bounded UTF-8 chunks and preserves o
   pipeline.shutdown();
 });
 
-test("terminal interceptor chunks never split a UTF-8 code point", async () => {
-  const pipeline = createTerminalDataPipeline({ inputDeadlineMs: 100 });
-  const channel = new MessageChannel();
-  channel.port1.unref?.();
-  channel.port2.unref?.();
-  const chunks = [];
-  const strictDecoder = new TextDecoder("utf-8", { fatal: true });
-  listen(channel.port2, (message) => {
-    const envelope = readFrame(message);
-    if (envelope.frame.type !== "netcatty:terminal-interceptor:chunk") return;
-    const bytes = new Uint8Array(envelope.transfer);
-    chunks.push(strictDecoder.decode(bytes));
-    const result = Uint8Array.from(bytes).buffer;
-    postResult(channel.port2, envelope.frame.sequence, envelope.frame.byteLength, result);
-  });
-  pipeline.attach({
-    sessionId: "session-1",
-    direction: "input",
-    providerId: "com.example.interceptor",
-    pluginId: "com.example",
-    pluginVersion: "1.0.0",
-    runtimeId: "runtime-1",
-    runtimeKind: "utility",
-    securityPrincipal: "principal-1",
-  }, channel.port1);
-
-  const input = `${"a".repeat((64 * 1024) - 1)}😀tail`;
-  assert.equal(await pipeline.interceptInput("session-1", input), input);
-  assert.deepEqual(chunks.map((chunk) => Buffer.byteLength(chunk)), [(64 * 1024) - 1, 8]);
-  pipeline.shutdown();
+test("terminal interception keeps multi-byte UTF-8 characters whole at the chunk boundary", async () => {
+  for (const direction of ["input", "output"]) {
+    const pipeline = createTerminalDataPipeline({ inputDeadlineMs: 100, outputDeadlineMs: 100 });
+    const { seen } = attachTransform(pipeline, { direction, transform: (value) => value });
+    const value = `${"a".repeat(65535)}你b`;
+    const result = direction === "input"
+      ? await pipeline.interceptInput("session-1", value)
+      : await pipeline.interceptOutput("session-1", value);
+    assert.equal(result, value);
+    assert.deepEqual(seen.map((entry) => Buffer.byteLength(entry.data)), [65535, 4]);
+    assert.equal(seen.map((entry) => entry.data).join(""), value);
+    pipeline.shutdown();
+  }
 });
 
 test("sensitive input bypasses the third-party port unconditionally", async () => {
@@ -148,6 +131,22 @@ test("sensitive passthrough stays ordered behind earlier intercepted input", asy
   pipeline.shutdown();
 });
 
+test("replacing an input interceptor preserves host-detected sensitive state", async () => {
+  const pipeline = createTerminalDataPipeline({ inputDeadlineMs: 100 });
+  const first = attachTransform(pipeline, { transform: (data) => data });
+  pipeline.observeOutput("session-1", "Password:");
+  assert.equal(await pipeline.interceptInput("session-1", "first-secret"), "first-secret");
+
+  const second = attachTransform(pipeline, { transform: (data) => data });
+  assert.equal(await pipeline.interceptInput("session-1", "second-secret"), "second-secret");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(second.seen.length, 0);
+
+  pipeline.shutdown();
+  first.channel.port2.close();
+  second.channel.port2.close();
+});
+
 test("original output protects password input even when a plugin could hide the prompt", async () => {
   const pipeline = createTerminalDataPipeline({ inputDeadlineMs: 100 });
   const { seen } = attachTransform(pipeline);
@@ -191,6 +190,17 @@ test("output-only interception classifies sensitive prompts without retaining st
   assert.equal(pipeline.observeOutput("session-1", "Pass"), false);
   assert.equal(pipeline.observeOutput("session-1", "word: "), true);
   assert.equal(pipeline.observeOutput("session-1", "\r\nordinary output"), false);
+  pipeline.shutdown();
+});
+
+test("an input interceptor attached after a visible password prompt starts in sensitive mode", async () => {
+  const pipeline = createTerminalDataPipeline({ inputDeadlineMs: 100 });
+  attachTransform(pipeline, { direction: "output", transform: (data) => data });
+  assert.equal(pipeline.observeOutput("session-1", "Password: "), true);
+
+  const { seen } = attachTransform(pipeline, { direction: "input" });
+  assert.equal(await pipeline.interceptInput("session-1", "secret\r"), "secret\r");
+  assert.deepEqual(seen, []);
   pipeline.shutdown();
 });
 

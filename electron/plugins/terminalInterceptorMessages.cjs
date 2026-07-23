@@ -47,7 +47,9 @@ function terminalInterceptorChoiceLabel(entry) {
     160,
   );
   const provider = escapePermissionText(entry?.provider?.label ?? entry?.provider?.id ?? "Provider", 160);
-  return `${plugin}: ${provider}`;
+  const pluginId = escapePermissionText(entry?.pluginId ?? "unknown-plugin", 128);
+  const providerId = escapePermissionText(entry?.provider?.id ?? "unknown-provider", 192);
+  return `${plugin} (${pluginId}): ${provider} (${providerId})`;
 }
 
 function terminalInterceptorIdentifier(value) {

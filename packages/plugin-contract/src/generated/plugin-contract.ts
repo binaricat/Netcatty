@@ -116,6 +116,7 @@ export type PermissionRequest = {
   reason: string;
   operationId?: string;
   sessionId?: string;
+  allowedScopes?: Array<PermissionGrantScope>;
 };
 
 export type PermissionResource = string;

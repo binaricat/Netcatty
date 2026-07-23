@@ -44,14 +44,22 @@ function createNativePermissionDecisionProvider(options) {
   const window = options.window;
   return async (request, context = {}) => {
     context.signal?.throwIfAborted();
+    const allowedScopes = Array.isArray(request.allowedScopes)
+      ? new Set(request.allowedScopes)
+      : null;
+    const supportsScope = (scope) => allowedScopes == null || allowedScopes.has(scope);
     const choices = [
       { label: "Deny", decision: "deny" },
-      { label: "Allow Once", decision: "allow", scope: "once" },
-      ...(request.sessionId
+      ...(supportsScope("once") ? [{ label: "Allow Once", decision: "allow", scope: "once" }] : []),
+      ...(request.sessionId && supportsScope("session")
         ? [{ label: "Allow for Session", decision: "allow", scope: "session" }]
         : []),
-      { label: "Allow for Application", decision: "allow", scope: "application" },
-      { label: "Always Allow", decision: "allow", scope: "always" },
+      ...(supportsScope("application")
+        ? [{ label: "Allow for Application", decision: "allow", scope: "application" }]
+        : []),
+      ...(supportsScope("always")
+        ? [{ label: "Always Allow", decision: "allow", scope: "always" }]
+        : []),
     ];
     const messageBoxOptions = {
       type: "warning",

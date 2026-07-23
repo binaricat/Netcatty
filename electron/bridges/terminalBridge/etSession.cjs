@@ -1052,13 +1052,14 @@ main();
         } = createPtyOutputBuffer((data, meta) => {
           const contents = electronModule.webContents.fromId(session.webContentsId);
           emitTerminalSessionData(contents, sessionId, data, {
+            session,
             cols: session.cols,
             rows: session.rows,
             meta,
           });
         }, {
           onPendingBytesChange: (bytes) => setBufferedOutputBytes(session, bytes),
-          shouldAcceptOutput: () => shouldAcceptSessionOutput(session),
+          shouldAcceptOutput: () => sessions.get(sessionId) === session && shouldAcceptSessionOutput(session),
         });
         session.flushPendingData = flushEtPaced;
         session.discardPendingData = discardEt;
@@ -1091,11 +1092,13 @@ main();
           session.zmodemSentry = etZmodemSentry;
 
           proc.onData((data) => {
+            if (sessions.get(sessionId) !== session) return;
             if (!shouldProcessSessionOutput(session, etZmodemSentry)) return;
             etZmodemSentry.consume(data);
           });
         } else {
           proc.onData((data) => {
+            if (sessions.get(sessionId) !== session) return;
             if (!shouldProcessSessionOutput(session)) return;
             trackSessionIdlePrompt(session, data);
             bufferEtData(data);
@@ -1107,6 +1110,7 @@ main();
         proc.onExit((evt) => {
           flushEtPaced(() => {
             if (etExitFinalized) return;
+            if (sessions.get(sessionId) !== session) return;
             etExitFinalized = true;
             try { session.etStatsConn?.end(); } catch { /* ignore */ }
             cleanupSessionExternalAuthArtifacts(session);
@@ -1115,7 +1119,12 @@ main();
             sessions.delete(sessionId);
             if (session.closed) return;
             const contents = electronModule.webContents.fromId(session.webContentsId);
-            fanoutSessionExit(sessionId, contents, { sessionId, ...evt, reason: evt.exitCode === 0 ? "exited" : "error" });
+            fanoutSessionExit(sessionId, contents, {
+              sessionId,
+              ...evt,
+              reason: evt.exitCode === 0 ? "exited" : "error",
+              _terminalSessionGeneration: session._terminalSessionGeneration,
+            });
           });
         });
 

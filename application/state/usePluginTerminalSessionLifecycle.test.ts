@@ -4,9 +4,21 @@ import test from 'node:test';
 import {
   beginPluginTerminalSessionMountLifecycle,
   normalizePluginTerminalProtocol,
+  ownsPluginTerminalBackendLifecycle,
   shouldPublishPluginTerminalSessionMountLifecycle,
+  shouldPublishPluginTerminalEvent,
   transitionPluginTerminalConnectionState,
 } from './usePluginTerminalSessionLifecycle.ts';
+
+test('an attached renderer does not claim creation or disposal of the reused backend session', () => {
+  assert.equal(ownsPluginTerminalBackendLifecycle(undefined), true);
+  assert.equal(ownsPluginTerminalBackendLifecycle(true), true);
+  assert.equal(ownsPluginTerminalBackendLifecycle(false), false);
+  for (const type of ['created', 'connected', 'reconnected', 'disconnected', 'disposed'] as const) {
+    assert.equal(shouldPublishPluginTerminalEvent(type, false), false);
+  }
+  assert.equal(shouldPublishPluginTerminalEvent('resized', false), true);
+});
 
 const connectedState = {
   cwd: '/srv/old',

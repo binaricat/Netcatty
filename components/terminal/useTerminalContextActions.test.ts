@@ -35,3 +35,19 @@ test("terminal context paste reports false when broadcast is disabled", () => {
 
   assert.equal(didBroadcast, false);
 });
+
+test("terminal context paste never broadcasts password-prompt input", () => {
+  const didBroadcast = broadcastTerminalPasteData("secret", {
+    sourceSessionId: "workspace-session-1",
+    sessionRef: { current: "session-1" },
+    isBroadcastEnabledRef: { current: true },
+    passwordPromptActiveRef: { current: true },
+    onBroadcastInputRef: {
+      current: () => {
+        throw new Error("sensitive paste must not broadcast");
+      },
+    },
+  });
+
+  assert.equal(didBroadcast, false);
+});

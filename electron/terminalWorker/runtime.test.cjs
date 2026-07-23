@@ -105,6 +105,101 @@ test("runtime routes interceptor ports to the worker-owned data pipeline", () =>
   assert.deepEqual(detached, [{ sessionId: "session-1", direction: "output" }]);
 });
 
+test("fresh sender lookups preserve an explicitly bound backend session generation", () => {
+  const parentPort = createParentPort();
+  const detached = [];
+  const runtime = createTerminalWorkerRuntime({
+    parentPort,
+    terminalDataPipeline: {
+      detach(sessionId, direction, reason) { detached.push({ sessionId, direction, reason }); },
+    },
+    registerBridges() {},
+  });
+  runtime.start();
+
+  const oldGeneration = runtime.createSender(7).claimSessionGeneration("session-1");
+  runtime.createSender(7).send("netcatty:exit", {
+    sessionId: "session-1",
+    reason: "error",
+    _terminalSessionGeneration: oldGeneration,
+  });
+  const newGeneration = runtime.createSender(8).claimSessionGeneration("session-1");
+  runtime.createSender(7).send("netcatty:exit", {
+    sessionId: "session-1",
+    reason: "close",
+    _terminalSessionGeneration: oldGeneration,
+  });
+  runtime.createSender(8).send("netcatty:exit", {
+    sessionId: "session-1",
+    reason: "exited",
+    _terminalSessionGeneration: newGeneration,
+  });
+
+  assert.deepEqual(
+    parentPort.messages.map((message) => message.sessionGeneration),
+    [0, 0, 1],
+  );
+  assert.equal(parentPort.messages.some((message) => (
+    Object.hasOwn(message.payload, "_terminalSessionGeneration")
+  )), false);
+  assert.deepEqual(detached, [
+    { sessionId: "session-1", direction: undefined, reason: "session-closed" },
+    { sessionId: "session-1", direction: undefined, reason: "session-closed" },
+  ]);
+});
+
+test("stale backend output is rejected before taps, observation, or interception", async () => {
+  const parentPort = createParentPort();
+  const observed = [];
+  const intercepted = [];
+  const runtime = createTerminalWorkerRuntime({
+    parentPort,
+    terminalDataPipeline: {
+      getOutputMode() { return 3; },
+      observeOutput(sessionId, data) { observed.push({ sessionId, data }); return false; },
+      async interceptOutput(sessionId, data) {
+        intercepted.push({ sessionId, data });
+        return data;
+      },
+      detach() {},
+    },
+    registerBridges() {},
+  });
+  runtime.start();
+
+  const oldSender = runtime.createSender(7);
+  const oldGeneration = oldSender.claimSessionGeneration("session-1");
+  oldSender.send("netcatty:exit", {
+    sessionId: "session-1",
+    reason: "error",
+    _terminalSessionGeneration: oldGeneration,
+  });
+  const newSender = runtime.createSender(8);
+  const newGeneration = newSender.claimSessionGeneration("session-1");
+  parentPort.messages.length = 0;
+
+  runtime.createSender(7).send("netcatty:data", {
+    sessionId: "session-1",
+    data: "old-secret",
+    _terminalSessionGeneration: oldGeneration,
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(parentPort.messages, []);
+  assert.deepEqual(observed, []);
+  assert.deepEqual(intercepted, []);
+
+  runtime.createSender(8).send("netcatty:data", {
+    sessionId: "session-1",
+    data: "new-output",
+    _terminalSessionGeneration: newGeneration,
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(observed, [{ sessionId: "session-1", data: "new-output" }]);
+  assert.deepEqual(intercepted, [{ sessionId: "session-1", data: "new-output" }]);
+  assert.deepEqual(parentPort.messages.map((message) => message.kind), ["output-tap", "output"]);
+});
+
 test("runtime invokes fire-and-forget listeners", () => {
   const parentPort = createParentPort();
   const calls = [];
@@ -832,5 +927,6 @@ test("runtime forwards non-output renderer events to the parent", async () => {
     webContentsId: 7,
     channel: "netcatty:exit",
     payload: { sessionId: "s1", reason: "closed" },
+    sessionGeneration: 0,
   });
 });

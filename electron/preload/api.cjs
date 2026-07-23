@@ -383,6 +383,9 @@ function createPreloadApi(ctx) {
     snapshot,
     kittyKeyboardModeState,
     kittyKeyboardProtocolEnabled,
+    passwordPromptActive,
+    cwd,
+    title,
   ) => {
     ipcRenderer.send("netcatty:terminal:snapshot-response", {
       requestId,
@@ -391,6 +394,11 @@ function createPreloadApi(ctx) {
       kittyKeyboardProtocolEnabled: typeof kittyKeyboardProtocolEnabled === "boolean"
         ? kittyKeyboardProtocolEnabled
         : undefined,
+      passwordPromptActive: typeof passwordPromptActive === "boolean"
+        ? passwordPromptActive
+        : undefined,
+      cwd: cwd === null ? null : typeof cwd === "string" ? cwd : undefined,
+      title: title === null ? null : typeof title === "string" ? title : undefined,
     });
   },
   applyTerminalSessionSnapshot: (sessionId, snapshot, context, authorization) =>
@@ -409,6 +417,11 @@ function createPreloadApi(ctx) {
       kittyKeyboardProtocolEnabled: typeof context?.kittyKeyboardProtocolEnabled === "boolean"
         ? context.kittyKeyboardProtocolEnabled
         : undefined,
+      passwordPromptActive: typeof context?.passwordPromptActive === "boolean"
+        ? context.passwordPromptActive
+        : undefined,
+      cwd: context?.cwd === null ? null : typeof context?.cwd === "string" ? context.cwd : undefined,
+      title: context?.title === null ? null : typeof context?.title === "string" ? context.title : undefined,
       authorization,
     }),
   markAttachPopupClosePrepared: (sessionId, authorization) =>

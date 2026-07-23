@@ -13,8 +13,9 @@ interface UseTerminalFilePasteOptions {
   termRef: React.MutableRefObject<XTerm | null>;
   sessionRef: React.MutableRefObject<string | null>;
   terminalBackend: {
-    writeToSession: (sessionId: string, data: string, options?: { automated?: boolean }) => void;
+    writeToSession: (sessionId: string, data: string, options?: { automated?: boolean; sensitive?: boolean }) => void;
   };
+  isSensitiveInput?: () => boolean;
   scrollOnPasteRef?: React.RefObject<boolean>;
   onPasteData?: (data: string) => boolean | void;
   scrollToBottomAfterProgrammaticInput: (data: string) => void;
@@ -27,6 +28,7 @@ export function useTerminalFilePaste({
   termRef,
   sessionRef,
   terminalBackend,
+  isSensitiveInput,
   scrollOnPasteRef,
   onPasteData,
   scrollToBottomAfterProgrammaticInput,
@@ -56,6 +58,7 @@ export function useTerminalFilePaste({
           await handleTerminalClipboardPaste({
             bridge,
             isLocalConnection,
+            isSensitiveInput,
             readClipboardText: () => navigator.clipboard.readText(),
             scrollOnPaste: scrollOnPasteRef?.current ?? false,
             onPasteData,
@@ -77,6 +80,7 @@ export function useTerminalFilePaste({
   }, [
     containerRef,
     isLocalConnection,
+    isSensitiveInput,
     onPasteData,
     scrollOnPasteRef,
     scrollToBottomAfterProgrammaticInput,

@@ -5,6 +5,7 @@ import test from "node:test";
 const runtimeSource = readFileSync(new URL("./createXTermRuntime.ts", import.meta.url), "utf8");
 const attachmentSource = readFileSync(new URL("./terminalSessionAttachment.ts", import.meta.url), "utf8");
 const terminalSource = readFileSync(new URL("../../Terminal.tsx", import.meta.url), "utf8");
+const terminalLayerSource = readFileSync(new URL("../../TerminalLayer.tsx", import.meta.url), "utf8");
 const preloadSource = readFileSync(
   new URL("../../../electron/preload/api.cjs", import.meta.url),
   "utf8",
@@ -42,6 +43,14 @@ test("password-prompt input is classified before prompt state reset and cannot b
   assert.match(
     runtimeSource,
     /writeToSession\(id, nextData, \{ sensitive \}\)/u,
+  );
+  assert.match(
+    runtimeSource,
+    /const broadcastUserPasteData = \(data: string\) => \{[\s\S]*?passwordPromptActiveRef\?\.current !== true[\s\S]*?onBroadcastInputRef\.current/u,
+  );
+  assert.match(
+    terminalSource,
+    /const sensitive = passwordPromptActiveRef\.current;[\s\S]*?!sensitive && isBroadcastEnabledRef\.current[\s\S]*?writeToSession\(id, data, \{[\s\S]*?sensitive,/u,
   );
 });
 
@@ -113,5 +122,12 @@ test("active and hibernated output share host-owned sensitive prompt classificat
   assert.match(
     terminalSource,
     /onTerminalOutput: \(chunk: string, meta\?: TerminalSessionDataMeta\) => \{\s*observeTerminalInputPrompt\(chunk, meta\)/u,
+  );
+});
+
+test("ordinary broadcast skips targets that are waiting for sensitive input", () => {
+  assert.match(
+    terminalLayerSource,
+    /if \(isTerminalSensitiveInputActive\(session\.id\)\) continue;[\s\S]*?writeToSession\(session\.id, data/u,
   );
 });

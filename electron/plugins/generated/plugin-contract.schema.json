@@ -2295,6 +2295,15 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 128
+        },
+        "allowedScopes": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 4,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/PermissionGrantScope"
+          }
         }
       },
       "additionalProperties": false

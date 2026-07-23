@@ -27,6 +27,7 @@ const AUDITED_PERMISSION_USES = new Set([
   "terminal.intercept.output",
 ]);
 const PROMPT_TIMEOUT_MS = 30_000;
+const PERMISSION_GRANT_SCOPES = new Set(["once", "session", "application", "always"]);
 const HOST_PERMISSION_REASONS = Object.freeze({
   "terminal.intercept.input": "This plugin can inspect and rewrite Terminal input. Netcatty bypasses host-recognized credential input, but arbitrary no-echo input may not be detectable.",
 });
@@ -55,6 +56,18 @@ function normalizePermissionSessionId(value) {
     throw permissionDenied("Plugin permission session ID is invalid");
   }
   return value;
+}
+
+function normalizePermissionAllowedScopes(value) {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || value.length === 0) {
+    throw permissionDenied("Plugin permission grant scopes are invalid");
+  }
+  const scopes = [...new Set(value)];
+  if (scopes.some((scope) => !PERMISSION_GRANT_SCOPES.has(scope))) {
+    throw permissionDenied("Plugin permission grant scopes are invalid");
+  }
+  return Object.freeze(scopes);
 }
 
 function normalizePermissionResources(permission, values, label = "Plugin permission resources") {
@@ -158,8 +171,33 @@ class PluginPermissionEngine {
     this.applicationGrants = new Map();
     this.sessionGrants = new Map();
     this.pending = new Map();
+    this.sessionPromptControllers = new Map();
+    this.promptControllers = new Set();
+    this.revocationListeners = new Set();
     this.closed = false;
     this.shutdownController = new AbortController();
+  }
+
+  onDidRevoke(listener) {
+    if (typeof listener !== "function") throw new TypeError("Permission revocation listener is required");
+    this.revocationListeners.add(listener);
+    return Object.freeze({ dispose: () => this.revocationListeners.delete(listener) });
+  }
+
+  #emitRevocation(event) {
+    const frozen = Object.freeze({ ...event });
+    for (const listener of this.revocationListeners) {
+      try { listener(frozen); } catch {}
+    }
+  }
+
+  #abortPrompts(pluginId, permission, resource) {
+    for (const entry of this.promptControllers) {
+      if (entry.pluginId !== pluginId) continue;
+      if (permission !== undefined && entry.permission !== permission) continue;
+      if (resource !== undefined && !entry.resources.includes(resource)) continue;
+      entry.controller.abort(permissionDenied("Plugin permission was revoked"));
+    }
   }
 
   #grantKey(pluginId, permission, declarationHash, resource) {
@@ -307,6 +345,7 @@ class PluginPermissionEngine {
       ),
       operationId: normalizePermissionOperationId(descriptor.operationId),
       sessionId: normalizePermissionSessionId(descriptor.sessionId),
+      allowedScopes: normalizePermissionAllowedScopes(descriptor.allowedScopes),
     });
     const resourceDescriptors = normalizePermissionResourceDescriptors(
       permission,
@@ -355,6 +394,7 @@ class PluginPermissionEngine {
       resourceKinds,
       descriptor.operationId ?? null,
       descriptor.sessionId ?? null,
+      descriptor.allowedScopes ?? null,
     ]);
     let pending = this.pending.get(pendingKey);
     let ownsPrompt = false;
@@ -402,8 +442,21 @@ class PluginPermissionEngine {
       reason: descriptor.reason,
       ...(descriptor.operationId === undefined ? {} : { operationId: descriptor.operationId }),
       ...(descriptor.sessionId === undefined ? {} : { sessionId: descriptor.sessionId }),
+      ...(descriptor.allowedScopes === undefined ? {} : { allowedScopes: descriptor.allowedScopes }),
     });
     const controller = new AbortController();
+    const promptEntry = Object.freeze({
+      controller,
+      pluginId: context.pluginId,
+      permission: descriptor.permission,
+      resources: Object.freeze([...resources]),
+    });
+    this.promptControllers.add(promptEntry);
+    if (descriptor.sessionId) {
+      const controllers = this.sessionPromptControllers.get(descriptor.sessionId) ?? new Set();
+      controllers.add(controller);
+      this.sessionPromptControllers.set(descriptor.sessionId, controllers);
+    }
     const timer = setTimeout(() => controller.abort(permissionDenied(
       "Plugin permission request timed out",
     )), this.promptTimeoutMs);
@@ -430,8 +483,14 @@ class PluginPermissionEngine {
       });
     } finally {
       clearTimeout(timer);
+      this.promptControllers.delete(promptEntry);
       context.signal?.removeEventListener("abort", onAbort);
       this.shutdownController.signal.removeEventListener("abort", onShutdown);
+      if (descriptor.sessionId) {
+        const controllers = this.sessionPromptControllers.get(descriptor.sessionId);
+        controllers?.delete(controller);
+        if (controllers?.size === 0) this.sessionPromptControllers.delete(descriptor.sessionId);
+      }
     }
     if (this.closed) throw permissionDenied("Plugin permission engine is unavailable");
     let decision;
@@ -453,6 +512,9 @@ class PluginPermissionEngine {
       });
       const outcome = decision.decision === "deny" ? "denied" : "cancelled";
       throw permissionDenied(`Plugin permission was ${outcome}: ${descriptor.permission}`);
+    }
+    if (descriptor.allowedScopes && !descriptor.allowedScopes.includes(decision.scope)) {
+      throw permissionDenied(`Plugin permission scope is not supported for this operation: ${decision.scope}`);
     }
     let decisionResources;
     try {
@@ -493,6 +555,8 @@ class PluginPermissionEngine {
     if (decision.scope === "session" && !descriptor.sessionId) {
       throw permissionDenied("Session-scoped plugin permission requires a host-owned session");
     }
+    context.signal?.throwIfAborted();
+    descriptor.validateBeforeGrant?.();
     for (const { resource, resourceKind } of decisionResourceDescriptors) {
       const grantKey = this.#grantKey(
         context.pluginId,
@@ -609,6 +673,8 @@ class PluginPermissionEngine {
       permission,
       resource: canonicalResource,
     });
+    this.#abortPrompts(pluginId, permission, canonicalResource);
+    this.#emitRevocation({ pluginId, permission, resource: canonicalResource, scope: "always" });
   }
 
   revokeApplication(pluginId, permission, resource) {
@@ -631,9 +697,21 @@ class PluginPermissionEngine {
       ...(permission === undefined ? {} : { permission }),
       ...(canonicalResource === undefined ? {} : { resource: canonicalResource }),
     });
+    this.#abortPrompts(pluginId, permission, canonicalResource);
+    this.#emitRevocation({
+      pluginId,
+      ...(permission === undefined ? {} : { permission }),
+      ...(canonicalResource === undefined ? {} : { resource: canonicalResource }),
+      scope: "application",
+    });
   }
 
   revokeSession(sessionId) {
+    const controllers = this.sessionPromptControllers.get(sessionId);
+    this.sessionPromptControllers.delete(sessionId);
+    for (const controller of controllers ?? []) {
+      controller.abort(permissionDenied("Plugin permission request session ended"));
+    }
     for (const key of [...this.sessionGrants.keys()]) {
       if (key.startsWith(`${sessionId}\0`)) this.sessionGrants.delete(key);
     }
@@ -648,6 +726,8 @@ class PluginPermissionEngine {
       if (grant.pluginId === pluginId) this.sessionGrants.delete(key);
     }
     this.database.recordSecurityAudit(pluginId, "permission.revoked", { scope: "all" });
+    this.#abortPrompts(pluginId);
+    this.#emitRevocation({ pluginId, scope: "all" });
   }
 
   shutdown() {
@@ -656,6 +736,8 @@ class PluginPermissionEngine {
     this.shutdownController.abort(permissionDenied("Plugin permission engine is unavailable"));
     this.applicationGrants.clear();
     this.sessionGrants.clear();
+    this.promptControllers.clear();
+    this.revocationListeners.clear();
   }
 }
 

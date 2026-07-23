@@ -150,6 +150,13 @@ function createSender(
   pendingOutputBySession = new Map(),
   sessionOutputGenerations = new Map(),
 ) {
+  const ownedSessionGenerations = new Map();
+  const getOwnedSessionGeneration = (sessionId) => {
+    if (!ownedSessionGenerations.has(sessionId)) {
+      ownedSessionGenerations.set(sessionId, sessionOutputGenerations.get(sessionId) ?? 0);
+    }
+    return ownedSessionGenerations.get(sessionId);
+  };
   const trackPendingOutput = (sessionId, pending) => {
     pendingOutputBySession.set(sessionId, pending);
     const clearPending = () => {
@@ -160,25 +167,40 @@ function createSender(
     void pending.then(clearPending, clearPending);
   };
   const postRendererEvent = (channel, payload) => {
+    const explicitGeneration = payload?._terminalSessionGeneration;
+    const sessionGeneration = Number.isSafeInteger(explicitGeneration)
+      ? explicitGeneration
+      : payload?.sessionId
+        ? getOwnedSessionGeneration(payload.sessionId)
+        : undefined;
+    const rendererPayload = explicitGeneration === undefined
+      ? payload
+      : Object.freeze(Object.fromEntries(
+        Object.entries(payload).filter(([key]) => key !== "_terminalSessionGeneration"),
+      ));
     if (channel === "netcatty:exit" && payload?.sessionId) {
-      sessionOutputGenerations.set(
-        payload.sessionId,
-        (sessionOutputGenerations.get(payload.sessionId) ?? 0) + 1,
-      );
-      pendingOutputBySession.delete(payload.sessionId);
-      outputPorts?.closeSession?.(payload.sessionId);
-      terminalDataPipeline?.detach?.(payload.sessionId, undefined, "session-closed");
+      if ((sessionOutputGenerations.get(payload.sessionId) ?? 0) === sessionGeneration) {
+        sessionOutputGenerations.set(payload.sessionId, sessionGeneration + 1);
+        pendingOutputBySession.delete(payload.sessionId);
+        outputPorts?.closeSession?.(payload.sessionId);
+        terminalDataPipeline?.detach?.(payload.sessionId, undefined, "session-closed");
+      }
     }
     parentPort.postMessage({
       kind: "renderer-event",
       webContentsId,
       channel,
-      payload,
+      payload: rendererPayload,
+      ...(sessionGeneration === undefined ? {} : { sessionGeneration }),
     });
   };
   const deliverTerminalData = (payload) => {
     const sessionId = payload?.sessionId;
-    const outputGeneration = sessionOutputGenerations.get(sessionId) ?? 0;
+    const explicitGeneration = payload?._terminalSessionGeneration;
+    const outputGeneration = Number.isSafeInteger(explicitGeneration)
+      ? explicitGeneration
+      : getOwnedSessionGeneration(sessionId);
+    if ((sessionOutputGenerations.get(sessionId) ?? 0) !== outputGeneration) return;
     const tapMessage = {
       kind: "output-tap",
       sessionId: payload?.sessionId,
@@ -264,6 +286,9 @@ function createSender(
   };
   return {
     id: webContentsId,
+    claimSessionGeneration(sessionId) {
+      return getOwnedSessionGeneration(sessionId);
+    },
     isDestroyed() {
       return false;
     },
@@ -357,10 +382,14 @@ function createTerminalWorkerRuntime(options = {}) {
           sessionOutputGenerations,
         ),
       }, message.payload);
+      const sessionId = result?.sessionId;
       parentPort.postMessage({
         kind: "response",
         requestId: message.requestId,
         result,
+        ...(typeof sessionId === "string"
+          ? { sessionGeneration: sessionOutputGenerations.get(sessionId) ?? 0 }
+          : {}),
       });
     } catch (err) {
       parentPort.postMessage({
