@@ -66,6 +66,7 @@ import {
   KeyCard,
   type PanelMode,
   shouldShowIdentitySection,
+  shouldShowSearchNoResults,
   ViewKeyPanel,
 } from "./keychain";
 
@@ -815,6 +816,17 @@ echo $3 >> "$FILE"`);
                     </div>
                   )}
                 </div>
+              ) : shouldShowSearchNoResults(
+                search,
+                filteredKeys.length,
+                keysForActiveFilter.length,
+              ) ? (
+                <div
+                  className="flex h-40 items-center justify-center text-sm text-muted-foreground"
+                  data-section="keychain-no-results"
+                >
+                  {t("common.noResultsFound")}
+                </div>
               ) : (
                 <div
                   className={
@@ -860,14 +872,26 @@ echo $3 >> "$FILE"`);
                   {t("keychain.count.items", { count: filteredIdentities.length })}
                 </span>
               </div>
-              <div
-                className={
-                  viewMode === "grid"
-                    ? "grid min-w-0 w-full max-w-full gap-3 grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
-                    : "flex min-w-0 w-full max-w-full flex-col gap-0"
-                }
-              >
-                {filteredIdentities.map((identity) => (
+              {shouldShowSearchNoResults(
+                search,
+                filteredIdentities.length,
+                identities.length,
+              ) ? (
+                <div
+                  className="flex h-40 items-center justify-center text-sm text-muted-foreground"
+                  data-section="keychain-no-results"
+                >
+                  {t("common.noResultsFound")}
+                </div>
+              ) : (
+                <div
+                  className={
+                    viewMode === "grid"
+                      ? "grid min-w-0 w-full max-w-full gap-3 grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+                      : "flex min-w-0 w-full max-w-full flex-col gap-0"
+                  }
+                >
+                  {filteredIdentities.map((identity) => (
                   <ContextMenu key={identity.id}>
                     <ContextMenuTrigger className="block min-w-0 w-full max-w-full">
                       <IdentityCard
@@ -907,8 +931,9 @@ echo $3 >> "$FILE"`);
                       )}
                     </ContextMenuContent>
                   </ContextMenu>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>

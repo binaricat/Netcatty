@@ -87,3 +87,9 @@ export const shouldShowIdentitySection = ({
 
     return filteredIdentityCount > 0 || filteredKeyCount === 0;
 };
+
+export const shouldShowSearchNoResults = (
+    search: string,
+    filteredItemCount: number,
+    totalItemCount: number,
+): boolean => Boolean(search.trim()) && totalItemCount > 0 && filteredItemCount === 0;

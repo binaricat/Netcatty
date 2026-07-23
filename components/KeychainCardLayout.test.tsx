@@ -9,7 +9,10 @@ import type { Identity, SSHKey } from "../types.ts";
 import KeychainManager from "./KeychainManager.tsx";
 import { IdentityCard } from "./keychain/IdentityCard.tsx";
 import { KeyCard } from "./keychain/KeyCard.tsx";
-import { shouldShowIdentitySection } from "./keychain/utils.ts";
+import {
+  shouldShowIdentitySection,
+  shouldShowSearchNoResults,
+} from "./keychain/utils.ts";
 
 const longLabel =
   "sdakdjkasjakjskajskaijssdakdjkasjakjskajskaijssdakdjkasjakjskajskaijssdakdjkasjakjskajskaijs";
@@ -234,4 +237,10 @@ test("keychain search keeps identities for identity matches or no results", () =
     filteredKeyCount: 0,
     search: "no-results",
   }), true);
+});
+
+test("keychain distinguishes search misses from an empty vault", () => {
+  assert.equal(shouldShowSearchNoResults("missing", 0, 1), true);
+  assert.equal(shouldShowSearchNoResults("", 0, 1), false);
+  assert.equal(shouldShowSearchNoResults("missing", 0, 0), false);
 });
