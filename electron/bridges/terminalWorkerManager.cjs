@@ -982,6 +982,7 @@ function createTerminalWorkerManager(options = {}) {
       } catch {}
     }
     for (const [sessionId, webContentsId] of sessionWebContentsIds.entries()) {
+      notifySessionClosed(sessionId, "worker-exit");
       const targets = new Set();
       if (webContentsId != null) targets.add(webContentsId);
       const homeId = attachHomeWebContentsIds.get(sessionId);

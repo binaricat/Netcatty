@@ -1957,3 +1957,47 @@ test("worker exit notifies renderers for active worker sessions", async () => {
     },
   ]);
 });
+
+test("worker exit notifies host lifecycle listeners for every active session", async () => {
+  const child = new FakeChild();
+  const closed = [];
+  const manager = createTerminalWorkerManager({
+    utilityProcess: { fork: () => child },
+    terminalOutputChannel: {
+      openSession() {},
+      closeAll() {},
+    },
+    electronModule: {
+      webContents: {
+        fromId(id) {
+          return { id, send() {} };
+        },
+      },
+    },
+    workerScriptPath: "/worker.cjs",
+  });
+  manager.onSessionClosed((event) => closed.push(event));
+
+  const first = manager.request("netcatty:local:start", {}, { webContentsId: 7 });
+  child.emit("message", {
+    kind: "response",
+    requestId: child.messages[0].requestId,
+    result: { sessionId: "local-1" },
+  });
+  await first;
+
+  const second = manager.request("netcatty:local:start", {}, { webContentsId: 8 });
+  child.emit("message", {
+    kind: "response",
+    requestId: child.messages.at(-1).requestId,
+    result: { sessionId: "local-2" },
+  });
+  await second;
+
+  child.emit("exit", 1);
+
+  assert.deepEqual(closed, [
+    { sessionId: "local-1", reason: "worker-exit" },
+    { sessionId: "local-2", reason: "worker-exit" },
+  ]);
+});
