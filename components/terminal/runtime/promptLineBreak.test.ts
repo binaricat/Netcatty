@@ -153,6 +153,47 @@ test("does not move prompts after row-positioning controls", () => {
   }
 });
 
+test("keeps non-moving mode toggles on the prompt side of an inserted break", () => {
+  for (const control of ["\x1b[?2004h", "\x1b[?25h", "\x1b[?25l"]) {
+    const stateAtLineStart = createPromptLineBreakState();
+    stateAtLineStart.lastPromptText = "$ ";
+    stateAtLineStart.pendingCommand = true;
+    const data = `${control}$ `;
+    const promptStarts = findTerminalPromptSourceChunkVisibleStarts(
+      data,
+      stateAtLineStart.lastPromptText,
+      [control.length],
+    );
+
+    assert.equal(
+      prepareTerminalDataForPromptLineBreak(
+        createFakeTerm("", 0) as never,
+        data,
+        stateAtLineStart,
+        true,
+        promptStarts,
+      ),
+      data,
+      JSON.stringify(control),
+    );
+
+    const stateMidLine = createPromptLineBreakState();
+    stateMidLine.lastPromptText = "$ ";
+    stateMidLine.pendingCommand = true;
+    assert.equal(
+      prepareTerminalDataForPromptLineBreak(
+        createFakeTerm("output", 6) as never,
+        data,
+        stateMidLine,
+        true,
+        promptStarts,
+      ),
+      `\r\n${data}`,
+      JSON.stringify(control),
+    );
+  }
+});
+
 test("inserts a prompt line break after leaving the alternate screen", () => {
   const state = createPromptLineBreakState();
   state.lastPromptText = "$ ";

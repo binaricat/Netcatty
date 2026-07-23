@@ -122,9 +122,22 @@ const parseCsiParams = (body: string): number[] => {
 
 const CURSOR_PREFIX_CSI_FINALS = new Set([
   "@", "A", "B", "C", "D", "E", "F", "G", "H", "I", "L", "M",
-  "P", "S", "T", "X", "Z", "`", "a", "d", "e", "f", "h", "l", "r",
+  "P", "S", "T", "X", "Z", "`", "a", "d", "e", "f", "r",
   "s", "u",
 ]);
+
+const CURSOR_AFFECTING_PRIVATE_MODES = new Set([3, 6, 47, 1047, 1048, 1049]);
+
+const isCursorAffectingCsiSequence = (sequence: CsiSequence): boolean => {
+  if (CURSOR_PREFIX_CSI_FINALS.has(sequence.final)) return true;
+  if ((sequence.final !== "h" && sequence.final !== "l") || !sequence.body.startsWith("?")) {
+    return false;
+  }
+  return sequence.body.slice(1).split(";").some((part) => {
+    const mode = Number.parseInt(part.split(":", 1)[0] ?? "", 10);
+    return CURSOR_AFFECTING_PRIVATE_MODES.has(mode);
+  });
+};
 
 const advancePromptBreakPastLeadingCursorControls = (
   data: string,
@@ -139,7 +152,7 @@ const advancePromptBreakPastLeadingCursorControls = (
       if (isCsi) {
         const sequence = readCsiSequence(data, index);
         if (!sequence || sequence.end >= firstVisibleRawIndex) break;
-        if (CURSOR_PREFIX_CSI_FINALS.has(sequence.final)) {
+        if (isCursorAffectingCsiSequence(sequence)) {
           breakIndex = sequence.end + 1;
         }
         index = sequence.end;
