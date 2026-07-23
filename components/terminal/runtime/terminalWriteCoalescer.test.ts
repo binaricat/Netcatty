@@ -189,6 +189,47 @@ test("keeps a prompt source chunk intact when slicing merged output", () => {
   resetTerminalWriteCoalescer(term);
 });
 
+test("preserves prompt line breaks after a coalesced bare line feed", () => {
+  const term = {
+    buffer: { active: { type: "normal", cursorX: 0 } },
+  } as unknown as XTerm;
+  const writes: string[] = [];
+  const promptState = createPromptLineBreakState();
+  promptState.lastPromptText = "$ ";
+  promptState.pendingCommand = true;
+
+  setTerminalWriteCoalescerByteCapResolver(term, () => 64 * 1024);
+  setTerminalWriteCoalescerFlushGate(term, () => false);
+  withAnimationFrameQueue(() => {
+    enqueueCoalescedTerminalWrite(
+      term,
+      "foo\n",
+      () => {},
+      "foo\n".length,
+      { preserveSourceChunkBoundaries: true },
+    );
+    enqueueCoalescedTerminalWrite(term, "$ ", (data, _ingressBytes, options) => {
+      const promptStarts = findTerminalPromptSourceChunkVisibleStarts(
+        data,
+        promptState.lastPromptText,
+        options?.sourceChunkBoundaries,
+      );
+      writes.push(prepareTerminalDataForPromptLineBreak(
+        term,
+        data,
+        promptState,
+        true,
+        promptStarts,
+      ));
+    }, "$ ".length, { preserveSourceChunkBoundaries: true });
+    flushTerminalWriteCoalescer(term);
+  });
+
+  assert.deepEqual(writes, ["foo\n\r\n$ "]);
+
+  resetTerminalWriteCoalescer(term);
+});
+
 test("uses the pending writer when a new chunk forces an old single chunk flush", () => {
   const term = createFakeTerm();
   const firstWriter: string[] = [];

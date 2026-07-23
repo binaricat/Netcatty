@@ -83,6 +83,20 @@ const endsWithLineBreak = (text: string): boolean => {
   return last === "\n" || last === "\r";
 };
 
+const endsAtKnownColumnZero = (
+  text: string,
+  cursorXBeforeWrite: number,
+): boolean => {
+  if (text.endsWith("\r")) return true;
+  if (!text.endsWith("\n")) return false;
+
+  const beforeFinalLineFeed = text.slice(0, -1);
+  const lastCarriageReturn = beforeFinalLineFeed.lastIndexOf("\r");
+  const sinceColumnReset = beforeFinalLineFeed.slice(lastCarriageReturn + 1);
+  if (sinceColumnReset.replaceAll("\n", "").length > 0) return false;
+  return lastCarriageReturn >= 0 || cursorXBeforeWrite <= 0;
+};
+
 const containsLineReset = (text: string): boolean =>
   text.includes("\n") || text.includes("\r");
 
@@ -317,7 +331,10 @@ const insertPromptLineBreaksAtVisibleStarts = (
       }
       const prefixText = mapped.text.slice(0, visibleStart);
       if (prefixText.length === 0 && cursorXBeforeWrite <= 0) return [];
-      if (prefixText.length > 0 && endsWithLineBreak(prefixText)) return [];
+      if (
+        prefixText.length > 0
+        && endsAtKnownColumnZero(prefixText, cursorXBeforeWrite)
+      ) return [];
       const rawStart = mapped.rawStartByTextIndex[visibleStart];
       return rawStart === undefined ? [] : [rawStart];
     });

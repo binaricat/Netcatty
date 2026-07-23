@@ -838,6 +838,46 @@ test("hidden prompt formatting preserves PTY chunk boundaries", () => {
   }
 });
 
+test("hidden prompt formatting resets the column after a bare line feed", () => {
+  const require = createRequire(import.meta.url);
+  const { Terminal } = require("@xterm/xterm") as {
+    Terminal: new (options: Record<string, unknown>) => XTerm;
+  };
+  const term = new Terminal({ cols: 80, rows: 5, scrollback: 20, allowProposedApi: true });
+  const promptState = createPromptLineBreakState();
+  promptState.lastPromptText = "$ ";
+  promptState.pendingCommand = true;
+  const settings = {
+    showLineTimestamps: false,
+    scrollOnOutput: false,
+    forcePromptNewLine: true,
+  };
+  const ctx = {
+    ...createContext(false),
+    terminalSettingsRef: { current: settings },
+    terminalSettings: settings,
+    promptLineBreakStateRef: { current: promptState },
+    isVisibleRef: { current: true },
+    isPaneVisibleRef: { current: false },
+  };
+
+  try {
+    withAnimationFrameQueue(() => {
+      writeSessionData(ctx as never, term, "foo\n");
+      writeSessionData(ctx as never, term, "$ ");
+      flushPendingTerminalWritesOnResume(term);
+    });
+
+    assert.equal(term.buffer.active.getLine(0)?.translateToString(true), "foo");
+    assert.equal(term.buffer.active.getLine(1)?.translateToString(true), "");
+    assert.equal(term.buffer.active.getLine(2)?.translateToString(true), "$");
+    assert.equal(term.buffer.active.cursorX, 2);
+  } finally {
+    resetTerminalWriteCoalescer(term);
+    term.dispose();
+  }
+});
+
 test("writeSessionData keeps the current perf trace when hidden output is flushed", () => {
   const payload = "hidden current output\n";
   const writes: string[] = [];
