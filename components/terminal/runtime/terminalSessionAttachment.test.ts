@@ -926,6 +926,8 @@ test("hidden prompt formatting respects cursor movement before a bare line feed"
     { convertEol: true, output: "foo\n", promptRow: 1 },
     { convertEol: false, output: "\x1b[10C\n", promptRow: 2 },
     { convertEol: false, output: "foo\x1b[1G\n", promptRow: 1 },
+    { convertEol: false, output: "你好\r\n", promptRow: 1 },
+    { convertEol: false, output: "你好\n", promptRow: 2 },
   ];
   for (const scenario of scenarios) {
     const term = new Terminal({

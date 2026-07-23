@@ -547,13 +547,23 @@ const insertPromptLineBreaksAtVisibleStarts = (
       if (rawStart === undefined) return [];
       const prefixText = mapped.text.slice(0, visibleStart);
       if (prefixText.length === 0 && cursorXBeforeWrite <= 0) return [];
+      const lastColumnResetVisibleIndex = Math.max(
+        prefixText.lastIndexOf("\r"),
+        convertEol ? prefixText.lastIndexOf("\n") : -1,
+      );
+      const lastColumnResetRawIndex = lastColumnResetVisibleIndex >= 0
+        ? mapped.rawIndexByTextIndex[lastColumnResetVisibleIndex]
+        : undefined;
+      const measuredRawStart = lastColumnResetRawIndex === undefined
+        ? 0
+        : lastColumnResetRawIndex + 1;
       if (
         prefixText.length > 0
         && endsAtKnownColumnZero(
           term,
-          data.slice(0, rawStart),
+          data.slice(measuredRawStart, rawStart),
           prefixText,
-          cursorXBeforeWrite,
+          lastColumnResetRawIndex === undefined ? cursorXBeforeWrite : 0,
           convertEol,
         )
       ) return [];
