@@ -253,9 +253,13 @@ const measurePromptPrefixColumn = (
             if (privateOrIntermediate) return null;
             column = 0;
             columnKnown = true;
+            separated = true;
             break;
           case "A":
           case "B":
+            if (privateOrIntermediate) return null;
+            separated = true;
+            break;
           case "J":
           case "K":
           case "P":
@@ -264,11 +268,14 @@ const measurePromptPrefixColumn = (
           case "X":
           case "@":
           case "c":
-          case "d":
-          case "e":
           case "m":
           case "n":
           case "q":
+            break;
+          case "d":
+          case "e":
+            if (privateOrIntermediate) return null;
+            separated = true;
             break;
           case "L":
           case "M":

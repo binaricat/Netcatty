@@ -132,6 +132,27 @@ test("does not add a second break after carriage return", () => {
   );
 });
 
+test("does not move prompts after row-positioning controls", () => {
+  for (const control of ["\x1b[r", "\x1b[A", "\x1b[B", "\x1b[d", "\x1b[e"]) {
+    const state = createPromptLineBreakState();
+    state.lastPromptText = "$ ";
+    state.pendingCommand = true;
+    const data = `${control}$ `;
+
+    assert.equal(
+      prepareTerminalDataForPromptLineBreak(
+        createFakeTerm("", 0) as never,
+        data,
+        state,
+        true,
+        findTerminalPromptSourceChunkVisibleStarts(data, "$ ", [control.length]),
+      ),
+      data,
+      JSON.stringify(control),
+    );
+  }
+});
+
 test("inserts a prompt line break after leaving the alternate screen", () => {
   const state = createPromptLineBreakState();
   state.lastPromptText = "$ ";

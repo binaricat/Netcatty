@@ -363,6 +363,7 @@ const isPlainTerminalOutput = (data: string): boolean =>
   !data.includes("\x1b") && !data.includes("\x9b");
 
 const LINE_BREAK_SCAN = /[\n\r]/g;
+const SOURCE_BOUNDARY_SLICE_SLACK_BYTES = 1024;
 
 const hasLongUnbrokenRun = (data: string, maxRunBytes: number): boolean => {
   if (data.length <= maxRunBytes) {
@@ -463,6 +464,20 @@ const writeLargeTerminalBatch = (
       }
       if (boundaryEndIndex > sourceBoundaryIndex) {
         end = sourceChunkBoundaries[boundaryEndIndex - 1];
+      }
+      if (end === idealEnd) {
+        const nextBoundary = sourceChunkBoundaries[boundaryEndIndex];
+        const boundarySlack = Math.min(batchSize, SOURCE_BOUNDARY_SLICE_SLACK_BYTES);
+        if (
+          nextBoundary !== undefined
+          && nextBoundary > idealEnd
+          && nextBoundary - idealEnd <= boundarySlack
+        ) {
+          // A prompt can end just after the nominal slice boundary. Extending
+          // by a small bounded amount keeps that PTY chunk intact without
+          // giving up cooperative bulk-write limits.
+          end = nextBoundary;
+        }
       }
       // A prompt may share its PTY chunk with preceding output. If no source
       // boundary helped, leave enough tail for the final prompt to stay whole.

@@ -189,6 +189,43 @@ test("keeps a prompt source chunk intact when slicing merged output", () => {
   resetTerminalWriteCoalescer(term);
 });
 
+test("extends a real-sized slice to preserve a nearby prompt boundary", () => {
+  const term = {
+    buffer: { active: { type: "normal", cursorX: 1 } },
+  } as unknown as XTerm;
+  const prompt = "(base) user@host:~$ ";
+  const firstChunk = `${"a".repeat((128 * 1024) - prompt.length + 1)}${prompt}`;
+  const writes: Array<{ data: string; promptStarts: number[] }> = [];
+
+  setTerminalWriteCoalescerByteCapResolver(term, () => 1024 * 1024);
+  setTerminalWriteCoalescerFlushGate(term, () => false);
+  withAnimationFrameQueue(() => {
+    enqueueCoalescedTerminalWrite(
+      term,
+      firstChunk,
+      () => {},
+      firstChunk.length,
+      { preserveSourceChunkBoundaries: true },
+    );
+    enqueueCoalescedTerminalWrite(term, "later output", (data, _ingressBytes, options) => {
+      writes.push({
+        data,
+        promptStarts: findTerminalPromptSourceChunkVisibleStarts(
+          data,
+          prompt,
+          options?.sourceChunkBoundaries,
+        ),
+      });
+    }, "later output".length, { preserveSourceChunkBoundaries: true });
+    flushTerminalWriteCoalescer(term);
+  });
+
+  assert.equal(writes[0]?.data, firstChunk);
+  assert.deepEqual(writes[0]?.promptStarts, [firstChunk.length - prompt.length]);
+
+  resetTerminalWriteCoalescer(term);
+});
+
 test("preserves prompt line breaks after a coalesced bare line feed", () => {
   const term = {
     buffer: { active: { type: "normal", cursorX: 0 } },
