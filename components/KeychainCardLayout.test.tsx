@@ -117,7 +117,7 @@ test("KeyCard list layout constrains long labels", () => {
   assert.match(markup, /block max-w-full truncate text-sm font-semibold/);
 });
 
-test("KeychainManager list layout constrains long key and identity rows", () => {
+test("KeychainManager shows identities without the keys section when identities exist", () => {
   installNavigatorStub();
   installStorageStub("list");
 
@@ -145,6 +145,65 @@ test("KeychainManager list layout constrains long key and identity rows", () => 
   assert.doesNotMatch(markup, /flex-1 min-w-0 w-full overflow-y-auto overflow-x-hidden/);
   assert.match(markup, /flex min-w-0 w-full max-w-full flex-col gap-0/);
   assert.match(markup, /block min-w-0 w-full max-w-full/);
-  assert.match(markup, /Keys/);
-  assert.match(markup, /Identities/);
+  assert.match(markup, /data-section="keychain-identities"/);
+  assert.doesNotMatch(markup, /data-section="keychain-keys"/);
+  assert.doesNotMatch(markup, /data-section="keychain-empty"/);
+});
+
+test("KeychainManager shows keys without the identities section when no identities exist", () => {
+  installNavigatorStub();
+  installStorageStub();
+
+  const markup = renderWithI18n(
+    React.createElement(KeychainManager, {
+      keys: [keyItem],
+      identities: [],
+      onSave: () => {},
+      onUpdate: () => {},
+      onDelete: () => {},
+      onSaveIdentity: () => {},
+    }),
+  );
+
+  assert.match(markup, /data-section="keychain-keys"/);
+  assert.doesNotMatch(markup, /data-section="keychain-identities"/);
+  assert.doesNotMatch(markup, /data-section="keychain-empty"/);
+});
+
+test("KeychainManager shows the empty prompt only when keys and identities are absent", () => {
+  installNavigatorStub();
+  installStorageStub();
+
+  const markup = renderWithI18n(
+    React.createElement(KeychainManager, {
+      keys: [],
+      identities: [],
+      onSave: () => {},
+      onUpdate: () => {},
+      onDelete: () => {},
+      onSaveIdentity: () => {},
+    }),
+  );
+
+  assert.match(markup, /data-section="keychain-keys"/);
+  assert.match(markup, /data-section="keychain-empty"/);
+  assert.doesNotMatch(markup, /data-section="keychain-identities"/);
+});
+
+test("KeychainManager exposes the new identity action in the header", () => {
+  installNavigatorStub();
+  installStorageStub();
+
+  const markup = renderWithI18n(
+    React.createElement(KeychainManager, {
+      keys: [],
+      identities: [],
+      onSave: () => {},
+      onUpdate: () => {},
+      onDelete: () => {},
+      onSaveIdentity: () => {},
+    }),
+  );
+
+  assert.match(markup, />New Identity<\/button>/);
 });

@@ -49,6 +49,7 @@ import {
   VaultHeaderSearch,
   VaultPageHeader,
   vaultHeaderIconButtonClass,
+  vaultHeaderSecondaryButtonClass,
   vaultSectionTitleClass,
 } from "./vault/VaultPageHeader";
 import { VaultDeleteConfirmDialog } from "./vault/VaultDeleteConfirmDialog";
@@ -209,11 +210,10 @@ echo $3 >> "$FILE"`);
     toast.error(message, title);
   }, [t]);
 
-  // Filter keys based on active tab and search
-  const filteredKeys = useMemo(() => {
+  // Filter keys based on active tab
+  const keysForActiveFilter = useMemo(() => {
     let result = keys;
 
-    // Filter by tab
     switch (activeFilter) {
       case "key":
         result = result.filter(
@@ -227,7 +227,13 @@ echo $3 >> "$FILE"`);
         break;
     }
 
-    // Filter by search
+    return sortByVaultOrder(result);
+  }, [keys, activeFilter]);
+
+  // Filter the active key collection by search
+  const filteredKeys = useMemo(() => {
+    let result = keysForActiveFilter;
+
     if (search.trim()) {
       const s = search.toLowerCase();
       result = result.filter(
@@ -238,8 +244,8 @@ echo $3 >> "$FILE"`);
       );
     }
 
-    return sortByVaultOrder(result);
-  }, [keys, activeFilter, search]);
+    return result;
+  }, [keysForActiveFilter, search]);
 
   // Filter identities based on search
   const filteredIdentities = useMemo(() => {
@@ -251,6 +257,9 @@ echo $3 >> "$FILE"`);
         i.username.toLowerCase().includes(s),
     ));
   }, [identities, search]);
+
+  const showIdentitySection = activeFilter === "key" && identities.length > 0;
+  const showKeySection = !showIdentitySection;
 
   // Push a new panel onto the stack
   const pushPanel = useCallback((newPanel: PanelMode) => {
@@ -635,15 +644,6 @@ echo $3 >> "$FILE"`);
                 >
                   <Upload size={14} /> {t("keychain.action.importKey")}
                 </Button>
-                {onSaveIdentity && (
-                  <Button
-                    variant="ghost"
-                    className="w-full justify-start gap-2"
-                    onClick={openNewIdentity}
-                  >
-                    <UserPlus size={14} /> {t("keychain.action.newIdentity")}
-                  </Button>
-                )}
               </DropdownContent>
             </Dropdown>
 
@@ -686,6 +686,18 @@ echo $3 >> "$FILE"`);
                 </Button>
               </DropdownContent>
             </Dropdown>
+
+            {onSaveIdentity && (
+              <Button
+                size="sm"
+                variant="secondary"
+                className={cn(vaultHeaderSecondaryButtonClass, "shrink-0")}
+                onClick={openNewIdentity}
+              >
+                <UserPlus size={14} />
+                {t("keychain.action.newIdentity")}
+              </Button>
+            )}
           </div>
 
           {/* Search and View Mode - hide search when panel is open */}
@@ -755,132 +767,143 @@ echo $3 >> "$FILE"`);
           }}
         >
           {/* Keys Section */}
-          <div className="min-w-0 w-full space-y-3 p-3">
-            <div className="flex items-center justify-between">
-              <h2 className={vaultSectionTitleClass}>
-                {t("keychain.section.keys")}
-              </h2>
-              <span className="text-xs text-muted-foreground">
-                {t("keychain.count.items", { count: filteredKeys.length })}
-              </span>
-            </div>
-
-          {filteredKeys.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-64 text-muted-foreground">
-              <div className="h-16 w-16 rounded-2xl bg-secondary/80 flex items-center justify-center mb-4">
-                <Shield size={32} className="opacity-60" />
+          {showKeySection && (
+            <div
+              className="min-w-0 w-full space-y-3 p-3"
+              data-section="keychain-keys"
+            >
+              <div className="flex items-center justify-between">
+                <h2 className={vaultSectionTitleClass}>
+                  {t("keychain.section.keys")}
+                </h2>
+                <span className="text-xs text-muted-foreground">
+                  {t("keychain.count.items", { count: filteredKeys.length })}
+                </span>
               </div>
-              <h3 className="text-lg font-semibold text-foreground mb-2">
-                {t("keychain.empty.title")}
-              </h3>
-              <p className="text-sm text-center max-w-sm mb-4">
-                {t("keychain.empty.desc")}
-              </p>
-              {(activeFilter === "key" || activeFilter === "certificate") && (
-                <div className="flex gap-2">
-                  <Button variant="secondary" onClick={openImport}>
-                    <Upload size={14} className="mr-2" />
-                    {t("common.import")}
-                  </Button>
-                  <Button onClick={openGenerate}>
-                    <Plus size={14} className="mr-2" />
-                    {t("common.generate")}
-                  </Button>
+
+              {keysForActiveFilter.length === 0 ? (
+                <div
+                  className="flex flex-col items-center justify-center h-64 text-muted-foreground"
+                  data-section="keychain-empty"
+                >
+                  <div className="h-16 w-16 rounded-2xl bg-secondary/80 flex items-center justify-center mb-4">
+                    <Shield size={32} className="opacity-60" />
+                  </div>
+                  <h3 className="text-lg font-semibold text-foreground mb-2">
+                    {t("keychain.empty.title")}
+                  </h3>
+                  <p className="text-sm text-center max-w-sm mb-4">
+                    {t("keychain.empty.desc")}
+                  </p>
+                  {(activeFilter === "key" || activeFilter === "certificate") && (
+                    <div className="flex gap-2">
+                      <Button variant="secondary" onClick={openImport}>
+                        <Upload size={14} className="mr-2" />
+                        {t("common.import")}
+                      </Button>
+                      <Button onClick={openGenerate}>
+                        <Plus size={14} className="mr-2" />
+                        {t("common.generate")}
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div
+                  className={
+                    viewMode === "grid"
+                      ? "grid min-w-0 w-full max-w-full gap-3 grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+                      : "flex min-w-0 w-full max-w-full flex-col gap-0"
+                  }
+                >
+                  {filteredKeys.map((key) => (
+                    <KeyCard
+                      key={key.id}
+                      keyItem={key}
+                      viewMode={viewMode}
+                      isSelected={
+                        (panel.type === "view" && panel.key.id === key.id) ||
+                        (panel.type === "export" && panel.key.id === key.id)
+                      }
+                      isMac={isMacOS()}
+                      reorderProps={keyReorder.getItemReorderProps(key.id, `key:${key.id}`)}
+                      onClick={() => openKeyView(key)}
+                      onEdit={() => openKeyEdit(key)}
+                      onExport={() => openKeyExport(key)}
+                      onCopyPublicKey={() => copyPublicKey(key)}
+                      onDelete={() => handleDelete(key.id)}
+                    />
+                  ))}
                 </div>
               )}
             </div>
-          ) : (
+          )}
+
+          {/* Identities Section */}
+          {showIdentitySection && (
             <div
-              className={
-                viewMode === "grid"
-                  ? "grid min-w-0 w-full max-w-full gap-3 grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
-                  : "flex min-w-0 w-full max-w-full flex-col gap-0"
-              }
+              className="min-w-0 w-full space-y-3 p-3"
+              data-section="keychain-identities"
             >
-              {filteredKeys.map((key) => (
-                <KeyCard
-                  key={key.id}
-                  keyItem={key}
-                  viewMode={viewMode}
-                  isSelected={
-                    (panel.type === "view" && panel.key.id === key.id) ||
-                    (panel.type === "export" && panel.key.id === key.id)
-                  }
-                  isMac={isMacOS()}
-                  reorderProps={keyReorder.getItemReorderProps(key.id, `key:${key.id}`)}
-                  onClick={() => openKeyView(key)}
-                  onEdit={() => openKeyEdit(key)}
-                  onExport={() => openKeyExport(key)}
-                  onCopyPublicKey={() => copyPublicKey(key)}
-                  onDelete={() => handleDelete(key.id)}
-                />
-              ))}
+              <div className="flex items-center justify-between">
+                <h2 className={vaultSectionTitleClass}>
+                  {t("keychain.section.identities")}
+                </h2>
+                <span className="text-xs text-muted-foreground">
+                  {t("keychain.count.items", { count: filteredIdentities.length })}
+                </span>
+              </div>
+              <div
+                className={
+                  viewMode === "grid"
+                    ? "grid min-w-0 w-full max-w-full gap-3 grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+                    : "flex min-w-0 w-full max-w-full flex-col gap-0"
+                }
+              >
+                {filteredIdentities.map((identity) => (
+                  <ContextMenu key={identity.id}>
+                    <ContextMenuTrigger className="block min-w-0 w-full max-w-full">
+                      <IdentityCard
+                        identity={identity}
+                        viewMode={viewMode}
+                        isSelected={
+                          panel.type === "identity" &&
+                          panel.identity?.id === identity.id
+                        }
+                        reorderProps={identityReorder.getItemReorderProps(identity.id, `identity:${identity.id}`)}
+                        onClick={() => {
+                          setPanelStack([{ type: "identity", identity }]);
+                          setDraftIdentity({ ...identity });
+                        }}
+                      />
+                    </ContextMenuTrigger>
+                    <ContextMenuContent>
+                      <ContextMenuItem
+                        onClick={() => {
+                          setPanelStack([{ type: "identity", identity }]);
+                          setDraftIdentity({ ...identity });
+                        }}
+                      >
+                        <Edit2 className="mr-2 h-4 w-4" /> {t("action.edit")}
+                      </ContextMenuItem>
+                      {onDeleteIdentity && (
+                        <>
+                          <ContextMenuSeparator />
+                          <ContextMenuItem
+                            className="text-destructive"
+                            onClick={() => _handleDeleteIdentity(identity.id)}
+                          >
+                            <Trash2 className="mr-2 h-4 w-4" />{" "}
+                            {t("action.delete")}
+                          </ContextMenuItem>
+                        </>
+                      )}
+                    </ContextMenuContent>
+                  </ContextMenu>
+                ))}
+              </div>
             </div>
           )}
-        </div>
-
-        {/* Identities Section */}
-        {activeFilter === "key" && filteredIdentities.length > 0 && (
-          <div className="min-w-0 w-full space-y-3 px-3 pb-3">
-            <div className="flex items-center justify-between">
-              <h2 className={vaultSectionTitleClass}>
-                {t("keychain.section.identities")}
-              </h2>
-              <span className="text-xs text-muted-foreground">
-                {t("keychain.count.items", { count: filteredIdentities.length })}
-              </span>
-            </div>
-            <div
-              className={
-                viewMode === "grid"
-                  ? "grid min-w-0 w-full max-w-full gap-3 grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
-                  : "flex min-w-0 w-full max-w-full flex-col gap-0"
-              }
-            >
-              {filteredIdentities.map((identity) => (
-                <ContextMenu key={identity.id}>
-                  <ContextMenuTrigger className="block min-w-0 w-full max-w-full">
-                    <IdentityCard
-                      identity={identity}
-                      viewMode={viewMode}
-                      isSelected={
-                        panel.type === "identity" &&
-                        panel.identity?.id === identity.id
-                      }
-                      reorderProps={identityReorder.getItemReorderProps(identity.id, `identity:${identity.id}`)}
-                      onClick={() => {
-                        setPanelStack([{ type: "identity", identity }]);
-                        setDraftIdentity({ ...identity });
-                      }}
-                    />
-                  </ContextMenuTrigger>
-                  <ContextMenuContent>
-                    <ContextMenuItem
-                      onClick={() => {
-                        setPanelStack([{ type: "identity", identity }]);
-                        setDraftIdentity({ ...identity });
-                      }}
-                    >
-                      <Edit2 className="mr-2 h-4 w-4" /> {t("action.edit")}
-                    </ContextMenuItem>
-                    {onDeleteIdentity && (
-                      <>
-                        <ContextMenuSeparator />
-                        <ContextMenuItem
-                          className="text-destructive"
-                          onClick={() => _handleDeleteIdentity(identity.id)}
-                        >
-                          <Trash2 className="mr-2 h-4 w-4" />{" "}
-                          {t("action.delete")}
-                        </ContextMenuItem>
-                      </>
-                    )}
-                  </ContextMenuContent>
-                </ContextMenu>
-              ))}
-            </div>
-          </div>
-        )}
         </div>
       </div>
 
