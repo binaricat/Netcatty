@@ -398,6 +398,13 @@ const acknowledgeDroppedTerminalDisplayBytes = (
   }
 };
 
+/** Live host fields for write-path feature gates (prefer hostRef over frozen host). */
+export const resolveLiveHostShowLineTimestamps = (
+  ctx: Pick<TerminalSessionStartersContext, "host" | "hostRef">,
+): boolean => (
+  (ctx.hostRef?.current ?? ctx.host)?.showLineTimestamps === true
+);
+
 export const writeTerminalLine = (
   ctx: TerminalSessionStartersContext,
   term: XTerm,
@@ -667,7 +674,9 @@ const writeSessionDataImmediate = (
             : {}),
           timestampDate: writeOptions.timestampDate,
           // Only host-enabled gutters pay segmenter/marker cost on the hot path.
-          enabled: ctx.host?.showLineTimestamps === true,
+          // Read through hostRef so toolbar/vault toggles apply without reattach
+          // (attach handlers close over boot-time ctx.host).
+          enabled: resolveLiveHostShowLineTimestamps(ctx),
         },
       );
       if (

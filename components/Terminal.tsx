@@ -453,6 +453,8 @@ const TerminalComponent: React.FC<TerminalProps> = ({
 
   const terminalSettingsRef = useRef(terminalSettings);
   terminalSettingsRef.current = terminalSettings;
+  const hostRef = useRef(host);
+  hostRef.current = host;
   // The protocol capability is connection-scoped. A settings change applies
   // to newly mounted terminals so an already-negotiated remote never sees the
   // parser and encoder disagree or disappear during hibernation/reconnect.
@@ -1912,6 +1914,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
 
   const sessionStarters = createTerminalSessionStarters({
     host,
+    hostRef,
     keys,
     identities,
     knownHosts,

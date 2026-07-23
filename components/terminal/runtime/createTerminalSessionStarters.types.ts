@@ -123,6 +123,12 @@ export type SessionLogConfig = {
 
 export type TerminalSessionStartersContext = {
   host: Host & Pick<Partial<TerminalSession>, "localStartDir">;
+  /**
+   * Live host snapshot updated every render. Session data handlers close over
+   * boot-time ctx, so mid-session host toggles (e.g. line timestamps) must be
+   * read from this ref rather than the frozen `host` field.
+   */
+  hostRef?: RefObject<Host & Pick<Partial<TerminalSession>, "localStartDir">>;
   keys: SSHKey[];
   identities?: Identity[];
   knownHosts?: KnownHost[];

@@ -97,26 +97,31 @@ const createFakeTerm = (activeType = "normal") => {
   return { term, writes, markerLines, disposedMarkerLines };
 };
 
-const createContext = (showLineTimestamps: boolean, host: Record<string, unknown> = {}) => ({
+const createContext = (showLineTimestamps: boolean, host: Record<string, unknown> = {}) => {
   // Production gates markers on host.showLineTimestamps; keep the first arg as
   // the host default unless the test overrides host explicitly.
-  host: { showLineTimestamps, ...host },
-  terminalSettingsRef: {
-    current: {
+  const liveHost = { showLineTimestamps, ...host };
+  return {
+    host: liveHost,
+    // Mirror Terminal.tsx: write path reads hostRef.current for live toggles.
+    hostRef: { current: liveHost },
+    terminalSettingsRef: {
+      current: {
+        showLineTimestamps,
+        scrollOnOutput: false,
+        forcePromptNewLine: false,
+      },
+    },
+    terminalSettings: {
       showLineTimestamps,
       scrollOnOutput: false,
       forcePromptNewLine: false,
     },
-  },
-  terminalSettings: {
-    showLineTimestamps,
-    scrollOnOutput: false,
-    forcePromptNewLine: false,
-  },
-  terminalBackend: {},
-  sessionRef: { current: "session-1" },
-  promptLineBreakStateRef: { current: undefined },
-});
+    terminalBackend: {},
+    sessionRef: { current: "session-1" },
+    promptLineBreakStateRef: { current: undefined },
+  };
+};
 
 test("terminal output publishes one completion for each pending command at the next prompt", () => {
   const { term } = createFakeTerm();
@@ -1551,14 +1556,46 @@ test("writeSessionData only records timestamps while the host gutter is enabled"
 
   writeSessionData(ctx as never, term, "before\r\n");
   ctx.host = { showLineTimestamps: true };
+  ctx.hostRef.current = ctx.host;
   writeSessionData(ctx as never, term, "enabled\r\n");
   ctx.host = { showLineTimestamps: false };
+  ctx.hostRef.current = ctx.host;
   writeSessionData(ctx as never, term, "disabled");
 
   assert.equal(writes.join(""), "before\r\nenabled\r\ndisabled");
   // Only the enabled window records markers; earlier/later disabled writes do not.
   assert.deepEqual(markerLines, [1]);
   assert.deepEqual(disposedMarkerLines, []);
+});
+
+test("writeSessionData follows live hostRef toggles without replacing boot host snapshot", () => {
+  const { term, writes, markerLines } = createFakeTerm();
+  // Frozen boot-time host object (what attachSessionToTerminal closes over).
+  const bootHost = { showLineTimestamps: false as boolean };
+  const hostRef = { current: bootHost };
+  const ctx = {
+    ...createContext(false),
+    host: bootHost,
+    hostRef,
+  };
+
+  writeSessionData(ctx as never, term, "boot-off\r\n");
+  assert.deepEqual(markerLines, []);
+
+  // Toolbar toggle: live host updates via hostRef; boot snapshot stays false.
+  hostRef.current = { showLineTimestamps: true };
+  assert.equal(bootHost.showLineTimestamps, false);
+  assert.equal(ctx.host.showLineTimestamps, false);
+
+  writeSessionData(ctx as never, term, "live-on\r\n");
+  assert.equal(writes.join(""), "boot-off\r\nlive-on\r\n");
+  assert.deepEqual(markerLines, [1]);
+
+  hostRef.current = { showLineTimestamps: false };
+  writeSessionData(ctx as never, term, "live-off");
+  assert.equal(writes.join(""), "boot-off\r\nlive-on\r\nlive-off");
+  // No new markers while live-disabled.
+  assert.deepEqual(markerLines, [1]);
 });
 
 test("writeSessionData batches timestamp bookkeeping for bulk line output", () => {
