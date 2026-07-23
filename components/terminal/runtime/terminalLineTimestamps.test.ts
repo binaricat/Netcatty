@@ -683,6 +683,25 @@ test("alt-screen newlines do not inflate post-exit stamp anchor lines", () => {
   );
 });
 
+test("same-chunk normal advance before enter is kept after leave for post-TUI stamp", () => {
+  // Leading hard newline advances the normal estimate to line 1 with no stamp
+  // yet; enter freezes that estimate; leave must NOT re-read pre-write
+  // buffer.normal (line 0) or the post-TUI prompt stamp pins to the wrong row.
+  const { term, liveMarkers } = createFakeTerm({ rows: 24, scrollback: 1000, cols: 80 });
+  const payload = `\r\n\x1b[?1049h${"frame\n".repeat(20)}\x1b[?1049lprompt\r\n`;
+  writeTerminalDataWithLineTimestamps(term as never, payload, () => {}, {
+    timestampDate: new Date(2026, 5, 6, 12, 0, 0),
+  });
+
+  assert.equal(getTerminalLineTimestampLedgerCount(term as never), 1);
+  assert.equal(liveMarkers.length, 1);
+  assert.equal(
+    liveMarkers[0]?.line,
+    1,
+    `expected prompt stamp on advanced normal line 1, got ${liveMarkers[0]?.line}`,
+  );
+});
+
 test("already-on-alt leave stamps on saved normal line not deep alt cursor", () => {
   const fake = createFakeTerm({ rows: 24, scrollback: 1000 });
   const { term, liveMarkers, disposedMarkerLines } = fake;
