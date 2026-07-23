@@ -644,6 +644,43 @@ test("normal output before an alternate-screen frame keeps its earlier timestamp
   }
 });
 
+test("normal output after an alternate-screen frame keeps its earlier timestamp", () => {
+  const { term, writes } = createFakeTerm("alternate");
+  const activeBuffer = term.buffer.active as { type: string };
+  const originalWrite = term.write.bind(term);
+  term.write = (data: string | Uint8Array, callback?: () => void) => {
+    const text = typeof data === "string" ? data : new TextDecoder().decode(data);
+    if (text.includes("\x1b[?1049l")) {
+      activeBuffer.type = "normal";
+    }
+    originalWrite(data, callback);
+  };
+  const ctx = {
+    ...createContext(true),
+    isVisibleRef: { current: true },
+    isPaneVisibleRef: { current: false },
+  };
+  const originalDateNow = Date.now;
+  let fakeNow = new Date(2026, 0, 1, 12, 0, 59, 800).getTime();
+  Date.now = () => fakeNow;
+
+  try {
+    writeSessionData(ctx as never, term, "\x1b[?1049lafter\r\n");
+    fakeNow = new Date(2026, 0, 1, 12, 1, 0, 20).getTime();
+    writeSessionData(ctx as never, term, "next\r\n");
+    flushPendingTerminalWritesOnResume(term);
+
+    assert.equal(writes.join(""), "\x1b[?1049lafter\r\nnext\r\n");
+    assert.deepEqual(getVisibleTerminalLineTimestampRows(term), [
+      { row: 0, label: "12:00:59" },
+      { row: 1, label: "12:01:00" },
+    ]);
+  } finally {
+    Date.now = originalDateNow;
+    resetTerminalWriteCoalescer(term);
+  }
+});
+
 test("hiding a pane preserves the arrival second of already queued output", () => {
   const { term, writes } = createFakeTerm();
   const ctx = {

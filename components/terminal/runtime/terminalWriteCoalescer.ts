@@ -37,6 +37,8 @@ const incompleteAltScreenCsiByTerm = new WeakMap<XTerm, IncompletePrivateCsi>();
 const pendingAltScreenEntryByTerm = new WeakMap<XTerm, true>();
 /** True once we have observed the alternate buffer live on this term. */
 const observedAltScreenByTerm = new WeakMap<XTerm, true>();
+/** Leave CSI was queued while xterm still reported the alternate buffer. */
+const pendingAltScreenLeaveByTerm = new WeakMap<XTerm, true>();
 
 const isPrivateParamCharCode = (code: number): boolean =>
   (code >= 0x30 && code <= 0x39) || code === 0x3b;
@@ -47,6 +49,8 @@ type AltScreenProbeResult = {
   lastTransition: "enter" | "leave" | null;
   /** Raw offset where a new alternate-screen frame (or possible split entry) starts. */
   frameStart: number | null;
+  /** Raw offset immediately after the final transition back to normal screen. */
+  normalScreenStart: number | null;
 };
 
 /**
@@ -64,14 +68,16 @@ const probeAltScreenScheduling = (
   let incomplete: IncompletePrivateCsi | null = null;
   let sequenceStart = resume ? 0 : -1;
   let frameStart: number | null = null;
+  let normalScreenStart: number | null = null;
 
-  const finishPrivate = (final: string): void => {
+  const finishPrivate = (final: string, endOffset: number): void => {
     const parts = params.split(";").filter(Boolean);
     if (parts.some((param) => ALT_SCREEN_DECSET.has(param))) {
       lastTransition = final === "h" ? "enter" : "leave";
       if (final === "h" && frameStart === null) {
         frameStart = Math.max(0, sequenceStart);
       }
+      normalScreenStart = final === "l" ? endOffset : null;
     }
     phase = null;
     params = "";
@@ -107,6 +113,7 @@ const probeAltScreenScheduling = (
       if (ch === "c") {
         // RIS returns the terminal to the normal screen without DECSET leave.
         lastTransition = "leave";
+        normalScreenStart = i + 1;
         phase = null;
         params = "";
         sequenceStart = -1;
@@ -155,7 +162,7 @@ const probeAltScreenScheduling = (
       continue;
     }
     if (ch === "h" || ch === "l") {
-      finishPrivate(ch);
+      finishPrivate(ch, i + 1);
       continue;
     }
     // Abort incomplete private mode. ESC / C1 start a new sequence (xterm does
@@ -180,6 +187,7 @@ const probeAltScreenScheduling = (
     incomplete,
     lastTransition,
     frameStart,
+    normalScreenStart,
   };
 };
 
@@ -197,7 +205,7 @@ const isTerminalAlternateScreenActive = (term: XTerm): boolean => {
  * private CSI split across PTY chunks.
  */
 export const shouldPreserveTerminalWriteFrameBatch = (term: XTerm): boolean => (
-  isTerminalAlternateScreenActive(term)
+  (!pendingAltScreenLeaveByTerm.has(term) && isTerminalAlternateScreenActive(term))
   || observedAltScreenByTerm.has(term)
   || pendingAltScreenEntryByTerm.has(term)
   || incompleteAltScreenCsiByTerm.has(term)
@@ -217,12 +225,19 @@ const noteAltScreenScheduleProbe = (term: XTerm, chunk: string): boolean => {
   if (probe.lastTransition === "leave") {
     pendingAltScreenEntryByTerm.delete(term);
     observedAltScreenByTerm.delete(term);
+    pendingAltScreenLeaveByTerm.set(term, true);
   } else if (probe.lastTransition === "enter") {
     // Complete enter CSI observed; xterm may still report normal until parse.
     pendingAltScreenEntryByTerm.set(term, true);
+    pendingAltScreenLeaveByTerm.delete(term);
   }
 
   if (isTerminalAlternateScreenActive(term)) {
+    if (pendingAltScreenLeaveByTerm.has(term)) {
+      // Schedule the leave with the current TUI frame, but do not re-latch the
+      // old alternate state while xterm is still parsing the queued leave.
+      return true;
+    }
     // Buffer realized alternate — drop enter-pending (no longer needed).
     observedAltScreenByTerm.set(term, true);
     pendingAltScreenEntryByTerm.delete(term);
@@ -234,6 +249,7 @@ const noteAltScreenScheduleProbe = (term: XTerm, chunk: string): boolean => {
     observedAltScreenByTerm.delete(term);
     pendingAltScreenEntryByTerm.delete(term);
   }
+  pendingAltScreenLeaveByTerm.delete(term);
 
   return (
     probe.needsRaf
@@ -463,6 +479,7 @@ export const enqueueCoalescedTerminalWrite = (
   );
   const startsNewFrame = frameProbe.frameStart !== null
     && !(resumedAltScreenCsi && frameProbe.frameStart === 0);
+  const flushAfterAltScreenLeave = frameProbe.normalScreenStart !== null;
   if (startsNewFrame) {
     // Keep ordinary shell output out of an alternate-screen frame. Otherwise a
     // frame held across a clock boundary makes the preceding shell line inherit
@@ -577,6 +594,12 @@ export const enqueueCoalescedTerminalWrite = (
     terminalWriteCoalescers.set(term, coalescer);
   }
   coalescer.push(data);
+  if (flushAfterAltScreenLeave) {
+    // Do not let shell output after a TUI exit inherit a later batch timestamp.
+    // Keeping the leave and its same-chunk suffix together also lets the
+    // timestamp parser observe the transition before stamping that suffix.
+    flushTerminalWriteCoalescer(term);
+  }
 };
 
 export const flushTerminalWriteCoalescer = (
@@ -617,6 +640,7 @@ export const resetTerminalWriteCoalescer = (term: XTerm): void => {
   incompleteAltScreenCsiByTerm.delete(term);
   pendingAltScreenEntryByTerm.delete(term);
   observedAltScreenByTerm.delete(term);
+  pendingAltScreenLeaveByTerm.delete(term);
 };
 
 export const getTerminalWriteCoalescerPendingBytes = (term: XTerm): number =>
@@ -636,6 +660,7 @@ export const abortTerminalWriteCoalescer = (
   incompleteAltScreenCsiByTerm.delete(term);
   pendingAltScreenEntryByTerm.delete(term);
   observedAltScreenByTerm.delete(term);
+  pendingAltScreenLeaveByTerm.delete(term);
 
   const coalescer = terminalWriteCoalescers.get(term);
   if (!coalescer) return;
