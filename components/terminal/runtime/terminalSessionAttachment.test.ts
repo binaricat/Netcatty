@@ -20,6 +20,7 @@ import {
   writeSessionData,
 } from "./terminalSessionAttachment.ts";
 import { getVisibleTerminalLineTimestampRows } from "./terminalLineTimestamps.ts";
+import { noteTerminalOutputPressureData } from "./terminalOutputPressure.ts";
 
 import {
   clearTerminalSessionFlowAck,
@@ -538,6 +539,40 @@ test("hidden output keeps its arrival second when a batch crosses a clock bounda
       { row: 0, label: "12:00:59" },
       { row: 1, label: "12:01:00" },
     ]);
+  } finally {
+    Date.now = originalDateNow;
+    resetTerminalWriteCoalescer(term);
+  }
+});
+
+test("visible pressure-batched output keeps its arrival second across a clock boundary", () => {
+  const { term, writes } = createFakeTerm();
+  const ctx = {
+    ...createContext(true),
+    isVisibleRef: { current: true },
+    isPaneVisibleRef: { current: true },
+  };
+  const originalDateNow = Date.now;
+  let fakeNow = new Date(2026, 0, 1, 12, 0, 59, 800).getTime();
+  Date.now = () => fakeNow;
+
+  try {
+    withAnimationFrameQueue((schedule) => {
+      noteTerminalOutputPressureData(term, "x".repeat(20_000));
+      writeSessionData(ctx as never, term, "first\r\n");
+      assert.ok(schedule.scheduledCount() >= 1);
+      assert.deepEqual(writes, []);
+
+      fakeNow = new Date(2026, 0, 1, 12, 1, 0, 20).getTime();
+      writeSessionData(ctx as never, term, "second\r\n");
+      schedule.flushScheduled();
+
+      assert.deepEqual(writes, ["first\r\n", "second\r\n"]);
+      assert.deepEqual(getVisibleTerminalLineTimestampRows(term), [
+        { row: 0, label: "12:00:59" },
+        { row: 1, label: "12:01:00" },
+      ]);
+    });
   } finally {
     Date.now = originalDateNow;
     resetTerminalWriteCoalescer(term);

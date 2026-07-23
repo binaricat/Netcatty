@@ -54,6 +54,7 @@ import {
   resolveFloodCoalescerByteCap,
   setTerminalWriteCoalescerByteCapResolver,
   setTerminalWriteCoalescerFlushGate,
+  shouldPreserveTerminalWriteFrameBatch,
 } from "./terminalWriteCoalescer";
 import {
   accumulateDeferredTerminalWriteAck,
@@ -157,7 +158,6 @@ const HIDDEN_PANE_DRAIN_MS = 160;
 const visibleWriteIdleFlushTimers = new WeakMap<XTerm, ReturnType<typeof setTimeout>>();
 const hiddenPaneDrainTimers = new WeakMap<XTerm, ReturnType<typeof setTimeout>>();
 const pendingTimestampSecondByTerm = new WeakMap<XTerm, number>();
-const pendingTimestampBackgroundByTerm = new WeakMap<XTerm, boolean>();
 
 type LineTimestampPerfTotals = {
   segmentCalls: number;
@@ -272,27 +272,19 @@ const flushPendingTerminalOutputNow = (term: XTerm): void => {
 const flushBeforeTimestampBoundary = (
   term: XTerm,
   timestampDate: Date,
-  usesBackgroundWritePath: boolean,
 ): void => {
   const timestampSecond = Math.floor(timestampDate.getTime() / 1000);
   const pendingTimestampSecond = pendingTimestampSecondByTerm.get(term);
-  const pendingUsedBackgroundPath = pendingTimestampBackgroundByTerm.get(term);
   const hadPendingOutput = getTerminalWriteCoalescerPendingBytes(term) > 0;
   if (
     hadPendingOutput
     && pendingTimestampSecond !== undefined
     && pendingTimestampSecond !== timestampSecond
-    && (usesBackgroundWritePath || pendingUsedBackgroundPath === true)
+    && !shouldPreserveTerminalWriteFrameBatch(term)
   ) {
     flushPendingTerminalOutputNow(term);
   }
   pendingTimestampSecondByTerm.set(term, timestampSecond);
-  pendingTimestampBackgroundByTerm.set(
-    term,
-    hadPendingOutput && getTerminalWriteCoalescerPendingBytes(term) > 0
-      ? pendingUsedBackgroundPath === true || usesBackgroundWritePath
-      : usesBackgroundWritePath,
-  );
 };
 
 function flushHiddenPaneWritesNow(term: XTerm, isPaneVisible: () => boolean): void {
@@ -428,10 +420,9 @@ export const writeSessionData = (
   const isPaneVisible = isPaneCurrentlyVisible();
   const timestampDate = new Date(Date.now());
   const usesBackgroundWritePath = shouldFlushTerminalWritesForBackgroundOutput(isPaneVisible);
-  // Hidden panes may wait before coalesced output is drained. Flush a batch
-  // across an arrival-second boundary whenever either side is hidden, while
-  // leaving visible full-screen repaints frame-batched.
-  flushBeforeTimestampBoundary(term, timestampDate, usesBackgroundWritePath);
+  // Flush normal-screen output across an arrival-second boundary so every
+  // line keeps its real timestamp. Alternate-screen repaints stay atomic.
+  flushBeforeTimestampBoundary(term, timestampDate);
   const perfTrace = createTerminalOutputPerfTrace({
     sessionId: ctx.sessionRef.current ?? ctx.sessionId,
     data,
@@ -750,7 +741,6 @@ export const releaseTerminalFlowBeforeHibernate = (
   setTerminalWriteCoalescerByteCapResolver(term);
   setTerminalWriteCoalescerFlushGate(term);
   pendingTimestampSecondByTerm.delete(term);
-  pendingTimestampBackgroundByTerm.delete(term);
   resetDeferredTerminalWriteAck(term);
   terminalFlowControllers.delete(term);
 };
@@ -795,7 +785,6 @@ export const attachSessionToTerminal = (
 
   flushPendingTerminalOutputNow(term);
   pendingTimestampSecondByTerm.delete(term);
-  pendingTimestampBackgroundByTerm.delete(term);
   ctx.sessionRef.current = id;
   const flow = getFlowController(ctx, term);
   teardownTerminalOutputPipeline(ctx, term, id, flow);

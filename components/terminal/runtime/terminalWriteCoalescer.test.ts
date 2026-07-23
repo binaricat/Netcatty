@@ -11,6 +11,7 @@ import {
   resolveFloodCoalescerByteCap,
   setTerminalWriteCoalescerByteCapResolver,
   setTerminalWriteCoalescerFlushGate,
+  shouldPreserveTerminalWriteFrameBatch,
   type CoalescedTerminalWriteOptions,
 } from "./terminalWriteCoalescer.ts";
 import {
@@ -700,11 +701,13 @@ test("upgrades to rAF when alternate-screen CSI is split across PTY chunks", () 
     });
     assert.equal(frames.length, 1);
     assert.equal(microtasks.length, 0);
+    assert.equal(shouldPreserveTerminalWriteFrameBatch(term), true);
 
     enqueueCoalescedTerminalWrite(term, "9hframe", (data) => {
       writes.push(data);
     });
     assert.equal(frames.length, 1);
+    assert.equal(shouldPreserveTerminalWriteFrameBatch(term), true);
     frames[0]!(0);
     assert.deepEqual(writes, ["\x1b[?1049hframe"]);
   } finally {

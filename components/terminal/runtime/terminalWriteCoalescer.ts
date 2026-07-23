@@ -172,6 +172,18 @@ const isTerminalAlternateScreenActive = (term: XTerm): boolean => {
   }
 };
 
+/**
+ * Keep a pending write atomic when it is part of an alternate-screen frame.
+ * This includes enter sequences that xterm has not parsed yet, including a
+ * private CSI split across PTY chunks.
+ */
+export const shouldPreserveTerminalWriteFrameBatch = (term: XTerm): boolean => (
+  isTerminalAlternateScreenActive(term)
+  || observedAltScreenByTerm.has(term)
+  || pendingAltScreenEntryByTerm.has(term)
+  || incompleteAltScreenCsiByTerm.has(term)
+);
+
 const noteAltScreenScheduleProbe = (term: XTerm, chunk: string): boolean => {
   // Always scan the chunk first so leave-alt CSI is observed even while
   // buffer.active still reports "alternate" (parser lags our write schedule).
