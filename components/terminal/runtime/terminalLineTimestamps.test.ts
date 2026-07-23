@@ -92,87 +92,168 @@ const createFakeTerm = (options: {
       return cellWidth(String.fromCodePoint(codePoint));
     },
   };
-  // Approximate xterm: buffer always has at least `rows` lines; once full
-  // (scrollback + rows), further growth raises baseY and trims the top.
+  // Approximate xterm: dual buffers (normal + alternate). Active switches on
+  // 1049h/l; buffer.normal always exposes the saved normal-buffer cursor so
+  // stamp placement can restore correctly when a write starts already on alt.
   const maxBufferLines = Number.isFinite(scrollback) && scrollback !== undefined && scrollback >= 0
     ? scrollback + rows
     : Number.POSITIVE_INFINITY;
-  let absoluteCursorLine = 0;
-  let baseY = 0;
+  type BufferState = {
+    absoluteCursorLine: number;
+    baseY: number;
+    column: number;
+    lineText: Map<number, string>;
+  };
+  const normalState: BufferState = {
+    absoluteCursorLine: 0,
+    baseY: 0,
+    column: 0,
+    lineText: new Map(),
+  };
+  const altState: BufferState = {
+    absoluteCursorLine: 0,
+    baseY: 0,
+    column: 0,
+    lineText: new Map(),
+  };
+  let screen: "normal" | "alternate" = "normal";
+  const currentState = (): BufferState => (screen === "alternate" ? altState : normalState);
   /** When null, viewport follows bottom (baseY). Tests may pin a scroll-up offset. */
   let viewportYOverride: number | null = null;
-  const lineText = new Map<number, string>();
 
   // When not yet full, length grows with content but never below viewport.
   // When full, length stays at maxBufferLines and baseY tracks the trim offset.
-  const resolveLength = (): number => {
+  const resolveLength = (state: BufferState): number => {
     if (!Number.isFinite(maxBufferLines)) {
-      return Math.max(rows, absoluteCursorLine + 1);
+      return Math.max(rows, state.absoluteCursorLine + 1);
     }
-    // absolute lines still in buffer: [baseY, baseY + length)
-    return Math.min(maxBufferLines, Math.max(rows, absoluteCursorLine - baseY + 1));
+    return Math.min(
+      maxBufferLines,
+      Math.max(rows, state.absoluteCursorLine - state.baseY + 1),
+    );
   };
 
-  const trimScrollbackIfNeeded = () => {
+  const trimScrollbackIfNeeded = (state: BufferState) => {
     if (!Number.isFinite(maxBufferLines)) return;
-    // Cursor absolute line past the last retained slot → drop from top.
-    while (absoluteCursorLine - baseY + 1 > maxBufferLines) {
-      baseY += 1;
+    while (state.absoluteCursorLine - state.baseY + 1 > maxBufferLines) {
+      state.baseY += 1;
     }
-    const keepFromAbsolute = baseY;
+    if (screen !== "normal") return;
+    const keepFromAbsolute = state.baseY;
     for (const marker of liveMarkers) {
       if (!marker.isDisposed && marker.line < keepFromAbsolute) {
         marker.dispose();
       }
     }
-    for (const key of [...lineText.keys()]) {
-      if (key < keepFromAbsolute) lineText.delete(key);
+    for (const key of [...state.lineText.keys()]) {
+      if (key < keepFromAbsolute) state.lineText.delete(key);
     }
   };
 
-  const activeBuffer = {
-    type: "normal" as string,
+  // buffer.normal: always the primary buffer (xterm keeps this while alt is active).
+  const normalBuffer = {
+    type: "normal" as const,
     get viewportY() {
-      return viewportYOverride ?? baseY;
-    },
-    set viewportY(value: number) {
-      viewportYOverride = Math.max(0, value);
+      return viewportYOverride ?? normalState.baseY;
     },
     get baseY() {
-      return baseY;
-    },
-    set baseY(value: number) {
-      baseY = Math.max(0, value);
+      return normalState.baseY;
     },
     get cursorY() {
-      // Relative to bottom page (baseY).
-      return Math.max(0, absoluteCursorLine - baseY);
-    },
-    set cursorY(value: number) {
-      absoluteCursorLine = baseY + Math.max(0, value);
-      cursorLine = absoluteCursorLine;
+      return Math.max(0, normalState.absoluteCursorLine - normalState.baseY);
     },
     get cursorX() {
-      return cursorColumn;
+      return normalState.column;
     },
     get length() {
-      return resolveLength();
+      return resolveLength(normalState);
     },
     getLine: (line?: number) => {
-      const absolute = typeof line === "number" ? line : absoluteCursorLine;
-      const text = lineText.get(absolute) ?? "";
+      const absolute = typeof line === "number" ? line : normalState.absoluteCursorLine;
+      const text = normalState.lineText.get(absolute) ?? "";
       return {
         isWrapped: false,
         translateToString: (_trimRight?: boolean) => text,
       };
     },
   };
+
+  // active.type must reflect the current screen for alt-screen gates.
+  const activeBuffer = {
+    get type() {
+      return screen;
+    },
+    set type(value: string) {
+      screen = value === "alternate" ? "alternate" : "normal";
+    },
+    get viewportY() {
+      return viewportYOverride ?? currentState().baseY;
+    },
+    set viewportY(value: number) {
+      viewportYOverride = Math.max(0, value);
+    },
+    get baseY() {
+      return currentState().baseY;
+    },
+    set baseY(value: number) {
+      currentState().baseY = Math.max(0, value);
+    },
+    get cursorY() {
+      const state = currentState();
+      return Math.max(0, state.absoluteCursorLine - state.baseY);
+    },
+    set cursorY(value: number) {
+      const state = currentState();
+      state.absoluteCursorLine = state.baseY + Math.max(0, value);
+      cursorLine = state.absoluteCursorLine;
+    },
+    get cursorX() {
+      return currentState().column;
+    },
+    set cursorX(value: number) {
+      currentState().column = Math.max(0, value);
+      cursorColumn = currentState().column;
+    },
+    get length() {
+      return resolveLength(currentState());
+    },
+    getLine: (line?: number) => {
+      const state = currentState();
+      const absolute = typeof line === "number" ? line : state.absoluteCursorLine;
+      const text = state.lineText.get(absolute) ?? "";
+      return {
+        isWrapped: false,
+        translateToString: (_trimRight?: boolean) => text,
+      };
+    },
+  };
+
+  const enterAlternate = () => {
+    if (screen === "alternate") return;
+    // Save normal cursor (already in normalState); reset alt surface.
+    altState.absoluteCursorLine = 0;
+    altState.baseY = 0;
+    altState.column = 0;
+    altState.lineText.clear();
+    screen = "alternate";
+    cursorLine = 0;
+    cursorColumn = 0;
+  };
+
+  const leaveAlternate = () => {
+    if (screen !== "alternate") return;
+    screen = "normal";
+    cursorLine = normalState.absoluteCursorLine;
+    cursorColumn = normalState.column;
+  };
+
   const term = {
     _core: {
       unicodeService,
     },
     buffer: {
       active: activeBuffer,
+      normal: normalBuffer,
     },
     cols,
     options: Number.isFinite(scrollback) ? { scrollback } : {},
@@ -185,27 +266,50 @@ const createFakeTerm = (options: {
       for (let index = 0; index < data.length; index += 1) {
         const sequence = readCsiSequence(data, index);
         if (sequence) {
+          if (
+            sequence.sequence === "\x1b[?1049h"
+            || sequence.sequence === "\x1b[?47h"
+            || sequence.sequence === "\x1b[?1047h"
+          ) {
+            enterAlternate();
+            index = sequence.endIndex;
+            continue;
+          }
+          if (
+            sequence.sequence === "\x1b[?1049l"
+            || sequence.sequence === "\x1b[?47l"
+            || sequence.sequence === "\x1b[?1047l"
+          ) {
+            leaveAlternate();
+            index = sequence.endIndex;
+            continue;
+          }
           applyCsiSequence(sequence.sequence);
-          absoluteCursorLine = cursorLine;
+          currentState().absoluteCursorLine = cursorLine;
           index = sequence.endIndex;
           continue;
         }
+        const state = currentState();
         const char = data[index];
         if (char === "\n") {
-          absoluteCursorLine += 1;
-          cursorLine = absoluteCursorLine;
-          cursorColumn = Number.isFinite(cols) && cursorColumn >= cols
+          state.absoluteCursorLine += 1;
+          cursorLine = state.absoluteCursorLine;
+          state.column = Number.isFinite(cols) && state.column >= cols
             ? cols - 1
             : 0;
-          trimScrollbackIfNeeded();
+          cursorColumn = state.column;
+          trimScrollbackIfNeeded(state);
         } else if (char === "\r") {
+          state.column = 0;
           cursorColumn = 0;
         } else if (char === "\b") {
-          cursorColumn = Math.max(0, cursorColumn - 1);
+          state.column = Math.max(0, state.column - 1);
+          cursorColumn = state.column;
         } else if (char === "\t") {
-          if (cursorColumn < cols) {
-            const nextTabStop = cursorColumn + (8 - (cursorColumn % 8));
-            cursorColumn = Math.min(nextTabStop, cols - 1);
+          if (state.column < cols) {
+            const nextTabStop = state.column + (8 - (state.column % 8));
+            state.column = Math.min(nextTabStop, cols - 1);
+            cursorColumn = state.column;
           }
         } else if (isCombiningMark(char)) {
           continue;
@@ -218,25 +322,34 @@ const createFakeTerm = (options: {
           if (isEmojiVariationSequence) {
             index += 1;
           }
-          if (wraparoundMode && cursorColumn + width > cols) {
-            absoluteCursorLine += 1;
-            cursorLine = absoluteCursorLine;
+          if (wraparoundMode && state.column + width > cols) {
+            state.absoluteCursorLine += 1;
+            cursorLine = state.absoluteCursorLine;
+            state.column = 0;
             cursorColumn = 0;
-            trimScrollbackIfNeeded();
+            trimScrollbackIfNeeded(state);
           }
-          const existing = lineText.get(absoluteCursorLine) ?? "";
-          lineText.set(absoluteCursorLine, existing + (isEmojiVariationSequence ? "❤️" : char));
-          cursorColumn = Number.isFinite(cols)
-            ? Math.min(cols, cursorColumn + width)
-            : cursorColumn + width;
+          const existing = state.lineText.get(state.absoluteCursorLine) ?? "";
+          state.lineText.set(
+            state.absoluteCursorLine,
+            existing + (isEmojiVariationSequence ? "❤️" : char),
+          );
+          state.column = Number.isFinite(cols)
+            ? Math.min(cols, state.column + width)
+            : state.column + width;
+          cursorColumn = state.column;
         }
       }
-      cursorLine = absoluteCursorLine;
-      trimScrollbackIfNeeded();
+      cursorLine = currentState().absoluteCursorLine;
+      cursorColumn = currentState().column;
+      trimScrollbackIfNeeded(currentState());
       callback?.();
     },
     registerMarker(offset: number) {
-      const line = absoluteCursorLine + offset;
+      // Markers attach to the normal buffer in production for our ledger path
+      // after leave; while on alt, offset is still relative to active cursor.
+      const state = currentState();
+      const line = state.absoluteCursorLine + offset;
       markerLines.push(line);
       const marker = {
         line,
@@ -258,15 +371,28 @@ const createFakeTerm = (options: {
     markerLines,
     disposedMarkerLines,
     liveMarkers,
-    /** Test helper: inspect / force xterm-like baseY growth. */
-    getBaseY: () => baseY,
+    /** Test helper: inspect / force xterm-like baseY growth on the normal buffer. */
+    getBaseY: () => normalState.baseY,
     setBaseY: (value: number) => {
-      baseY = Math.max(0, value);
+      normalState.baseY = Math.max(0, value);
     },
     setViewportY: (value: number) => {
       viewportYOverride = Math.max(0, value);
     },
-    getAbsoluteCursorLine: () => absoluteCursorLine,
+    getAbsoluteCursorLine: () => currentState().absoluteCursorLine,
+    /** Force already-on-alt with a saved normal cursor (skeptic multi-write path). */
+    enterAlternateWithSavedNormal: (savedNormalLine: number, savedNormalColumn = 0) => {
+      normalState.absoluteCursorLine = Math.max(0, savedNormalLine);
+      normalState.column = Math.max(0, savedNormalColumn);
+      normalState.lineText.set(normalState.absoluteCursorLine, "shell-prompt");
+      enterAlternate();
+      // Simulate a tall TUI: alt cursor deep in the alternate buffer.
+      altState.absoluteCursorLine = 40;
+      altState.column = 0;
+      cursorLine = 40;
+      cursorColumn = 0;
+    },
+    getNormalAbsoluteLine: () => normalState.absoluteCursorLine,
   };
 };
 
@@ -555,6 +681,55 @@ test("alt-screen newlines do not inflate post-exit stamp anchor lines", () => {
     0,
     `expected stamp on restored normal buffer line 0, got ${liveMarkers[0]?.line}`,
   );
+});
+
+test("already-on-alt leave stamps on saved normal line not deep alt cursor", () => {
+  const fake = createFakeTerm({ rows: 24, scrollback: 1000 });
+  const { term, liveMarkers, disposedMarkerLines } = fake;
+
+  // Normal-buffer banner first (saves a real primary-buffer line).
+  writeTerminalDataWithLineTimestamps(term as never, "banner\r\n", () => {}, {
+    timestampDate: new Date(2026, 5, 6, 12, 0, 0),
+  });
+  const savedNormalLine = fake.getNormalAbsoluteLine();
+  assert.ok(savedNormalLine >= 1);
+
+  // Simulate a multi-write TUI session: already on alt with a deep alt cursor
+  // while buffer.normal still holds the shell line.
+  fake.enterAlternateWithSavedNormal(savedNormalLine, 0);
+  assert.equal((term.buffer.active as { type: string }).type, "alternate");
+  assert.equal(fake.getAbsoluteCursorLine(), 40);
+
+  // Alt-only output must not add stamps (segmenter suspended).
+  writeTerminalDataWithLineTimestamps(term as never, `${"frame\n".repeat(15)}`, () => {}, {
+    timestampDate: new Date(2026, 5, 6, 12, 0, 1),
+  });
+  assert.equal(getTerminalLineTimestampLedgerCount(term as never), 1);
+
+  // Leave alt + shell prompt — stamp must pin to saved normal line, not alt 40+.
+  writeTerminalDataWithLineTimestamps(term as never, "\x1b[?1049lprompt\r\n", () => {}, {
+    timestampDate: new Date(2026, 5, 6, 12, 0, 2),
+  });
+
+  assert.equal(
+    getTerminalLineTimestampLedgerCount(term as never),
+    2,
+    "post-TUI stamp must remain in the ledger (not dropped as past bufferLength)",
+  );
+  const live = liveMarkers.filter((marker) => !marker.isDisposed);
+  assert.ok(live.length >= 2);
+  const promptAnchor = live[live.length - 1]!;
+  assert.ok(
+    promptAnchor.line < 20,
+    `expected normal-buffer stamp, got alt-depth line ${promptAnchor.line}`,
+  );
+  assert.ok(
+    promptAnchor.line >= savedNormalLine - 1 && promptAnchor.line <= savedNormalLine + 2,
+    `expected stamp near saved normal line ${savedNormalLine}, got ${promptAnchor.line}`,
+  );
+  // The deep-alt mis-pin (line ~40) must not be the surviving prompt anchor.
+  assert.equal(disposedMarkerLines.includes(40), false);
+  assert.notEqual(promptAnchor.line, 40);
 });
 
 test("resolveTerminalTimestampGutterRowsFromLedger fills gaps with previous time", () => {

@@ -517,17 +517,56 @@ const getTimestampStore = (term: XTerm): TimestampStore => {
 
 const secondKeyFromDate = (date: Date): number => Math.floor(date.getTime() / 1000);
 
+type BufferCursorState = {
+  absoluteLine: number;
+  column: number;
+};
+
+const readBufferCursorState = (
+  buffer: { baseY?: number; cursorY?: number; cursorX?: number } | null | undefined,
+): BufferCursorState => {
+  const baseY = typeof buffer?.baseY === "number" ? buffer.baseY : 0;
+  const cursorY = typeof buffer?.cursorY === "number" ? buffer.cursorY : 0;
+  const cursorX = typeof buffer?.cursorX === "number" ? buffer.cursorX : 0;
+  return {
+    absoluteLine: Math.max(0, baseY + cursorY),
+    column: Math.max(0, cursorX),
+  };
+};
+
 const getAbsoluteCursorLine = (term: XTerm): number => {
   try {
-    const active = term.buffer?.active as
-      | { baseY?: number; cursorY?: number }
-      | undefined;
-    const baseY = typeof active?.baseY === "number" ? active.baseY : 0;
-    const cursorY = typeof active?.cursorY === "number" ? active.cursorY : 0;
-    return Math.max(0, baseY + cursorY);
+    return readBufferCursorState(
+      term.buffer?.active as { baseY?: number; cursorY?: number; cursorX?: number } | undefined,
+    ).absoluteLine;
   } catch {
     return 0;
   }
+};
+
+/**
+ * Cursor on the normal (primary) buffer — used for stamp placement when the
+ * active buffer is the alternate screen. xterm keeps the pre-alt position on
+ * `buffer.normal` while `active` is alternate; reading active alone pins stamps
+ * to alt rows and drops them after leave.
+ */
+const getNormalBufferCursorState = (term: XTerm): BufferCursorState => {
+  try {
+    const buffers = term.buffer as {
+      normal?: { baseY?: number; cursorY?: number; cursorX?: number };
+      active?: { type?: string; baseY?: number; cursorY?: number; cursorX?: number };
+    } | undefined;
+    if (buffers?.normal) {
+      return readBufferCursorState(buffers.normal);
+    }
+    const active = buffers?.active;
+    if (active && active.type !== "alternate") {
+      return readBufferCursorState(active);
+    }
+  } catch {
+    // fall through
+  }
+  return { absoluteLine: 0, column: 0 };
 };
 
 /** Advance absolute line by hard newlines in a data span (fallback estimate). */
@@ -603,11 +642,15 @@ const advanceStampCursorThroughData = (
       }
       const altAction = getAlternateScreenAction(sequence.sequence);
       if (altAction === "enter") {
+        // Freeze the current normal-buffer estimate; alt rows must not advance it.
         altActive = true;
       } else if (altAction === "leave") {
         altActive = false;
-        // 1049 restore: normal buffer cursor is back where it was; keep the
-        // frozen absoluteLine/column from before enter (do not carry alt rows).
+        // Restore from buffer.normal (works when the write *started* on alt too —
+        // freezing active's alt cursor would mis-pin or drop post-TUI stamps).
+        const restored = getNormalBufferCursorState(term);
+        absoluteLine = restored.absoluteLine;
+        column = restored.column;
       }
       const wrapAction = getWraparoundAction(sequence.sequence);
       if (wrapAction !== null && !altActive) {
@@ -1604,11 +1647,21 @@ const writeTerminalDataWithSecondLedger = (
     store.timestampOnlyPrefix = pendingEscapeSequence;
   }
 
+  const startedOnAlt = (
+    (term.buffer?.active as { type?: string } | undefined)?.type
+  ) === "alternate";
+  // If already on alt, seed from the saved normal buffer — not active (alt) cursor.
+  const seedCursor = startedOnAlt
+    ? getNormalBufferCursorState(term)
+    : {
+      absoluteLine: getAbsoluteCursorLine(term),
+      column: _getTerminalCursorColumn(term),
+    };
   let stampCursor: StampCursorEstimate = {
-    absoluteLine: getAbsoluteCursorLine(term),
-    column: _getTerminalCursorColumn(term),
+    absoluteLine: seedCursor.absoluteLine,
+    column: seedCursor.column,
     wraparoundMode: _getTerminalWraparoundMode(term),
-    altActive: ((term.buffer?.active as { type?: string } | undefined)?.type) === "alternate",
+    altActive: startedOnAlt,
   };
   const columns = _getTerminalColumnCount(term);
   const capacity = resolveTerminalLineTimestampCapacity(term);
