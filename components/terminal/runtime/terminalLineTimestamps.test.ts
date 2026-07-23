@@ -737,6 +737,23 @@ test("large multi-chunk flood stays within capacity across writes", () => {
   assert.ok(live <= capacity, `expected <= ${capacity} live entries, got ${live}`);
 });
 
+test("small batched writes amortize full timestamp-store pruning", () => {
+  const { term } = createFakeTerm({ scrollback: 1000, rows: 24 });
+  (term as unknown as { registerMarker: (offset: number) => unknown }).registerMarker = () => ({
+    line: 0,
+    isDisposed: false,
+    dispose() {
+      this.isDisposed = true;
+    },
+  });
+
+  writeTerminalDataWithLineTimestamps(term as never, "seed\r\n", () => {});
+  writeTerminalDataWithLineTimestamps(term as never, "a\r\nb", () => {});
+
+  assert.equal(getTerminalLineTimestampEntryCount(term as never, { prune: false }), 3);
+  assert.equal(getTerminalLineTimestampEntryCount(term as never), 1);
+});
+
 test("simple ASCII control text gate matches seq-style floods", () => {
   assert.equal(isSimpleAsciiControlText("1\n2\n3\n"), true);
   assert.equal(isSimpleAsciiControlText("line-0\r\nline-1\r\n"), true);

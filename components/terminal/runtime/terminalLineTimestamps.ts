@@ -7,7 +7,7 @@ export type TerminalLineTimestampSegment =
   | { kind: "timestamp"; label: string };
 
 export type TerminalLineTimestampSegmenter = {
-  append: (data: string) => TerminalLineTimestampSegment[];
+  append: (data: string, timestampDate?: Date) => TerminalLineTimestampSegment[];
   reset: () => void;
   flushPendingEscapeSequence: () => string;
   setAlternateScreenActive: (active: boolean) => void;
@@ -113,6 +113,11 @@ export type TerminalLineTimestampPerfStep =
 
 export type TerminalLineTimestampDiagnostics = {
   onStep?: (step: TerminalLineTimestampPerfStep) => void;
+};
+
+export type TerminalLineTimestampWriteOptions = TerminalLineTimestampDiagnostics & {
+  /** Wall-clock arrival time for this batch, preserved across delayed writes. */
+  timestampDate?: Date;
 };
 
 const stores = new WeakMap<XTerm, TimestampStore>();
@@ -337,18 +342,21 @@ export const createTerminalLineTimestampSegmenter = (
     currentLineStamped = false;
   };
 
-  const pushTimestampIfNeeded = (segments: TerminalLineTimestampSegment[]) => {
+  const pushTimestampIfNeeded = (
+    segments: TerminalLineTimestampSegment[],
+    timestampDate?: Date,
+  ) => {
     if (!atLineStart || currentLineStamped) return;
     currentLineStamped = true;
     atLineStart = false;
     segments.push({
       kind: "timestamp",
-      label: formatLabel(now()),
+      label: formatLabel(timestampDate ?? now()),
     });
   };
 
   return {
-    append(data: string) {
+    append(data: string, timestampDate?: Date) {
       const input = pendingEscapeSequence ? `${pendingEscapeSequence}${data}` : data;
       pendingEscapeSequence = "";
       const segments: TerminalLineTimestampSegment[] = [];
@@ -403,7 +411,7 @@ export const createTerminalLineTimestampSegmenter = (
         // state-changing character (ESC/LF/CR) and append the span in one
         // slice. Control chars inside the span (BEL, backspace, DEL, C1)
         // never change segmenter state, matching the per-char loop.
-        pushTimestampIfNeeded(segments);
+        pushTimestampIfNeeded(segments, timestampDate);
         atLineStart = false;
         const end = nextSegmenterBoundary(input, index + 1);
         pushDataSegment(segments, input.slice(index, end));
@@ -585,9 +593,10 @@ const maybePruneTimestampEntries = (
   term: XTerm,
   store: TimestampStore,
   force = false,
+  recordsAdded = 1,
 ): void => {
   const capacity = resolveTerminalLineTimestampCapacity(term);
-  store.recordsSincePrune += 1;
+  store.recordsSincePrune += Math.max(0, recordsAdded);
   if (
     force
     || store.recordsSincePrune >= TIMESTAMP_PRUNE_EVERY_RECORDS
@@ -1017,8 +1026,10 @@ const writeBatchedTimestampSegments = (
         { skipPrune: true },
       ) || timestampRecorded;
     }
-    // Single prune after bulk registration (intermediate prunes dominate large floods).
-    maybePruneTimestampEntries(term, store, true);
+    // Amortize small batches. A forced full-store scan on every 2–8 line
+    // hidden drain grows with retained history and recreates the CPU climb this
+    // path is meant to avoid. Large batches still cross the record threshold.
+    maybePruneTimestampEntries(term, store, false, timestampsToRecord.length);
     if (timestampRecorded) {
       notifyTimestampStore(store);
     }
@@ -1133,8 +1144,9 @@ export const writeTerminalDataWithLineTimestamps = (
   term: XTerm,
   data: string,
   done: () => void,
-  diagnostics?: TerminalLineTimestampDiagnostics,
+  options?: TerminalLineTimestampWriteOptions,
 ) => {
+  const diagnostics = options?.onStep ? options : undefined;
   const shouldMeasureDiagnostics = Boolean(diagnostics);
   const writeFallbackOnly = (fallbackData: string, onComplete: () => void): void => {
     const writeStartedAt = shouldMeasureDiagnostics ? performance.now() : 0;
@@ -1183,7 +1195,7 @@ export const writeTerminalDataWithLineTimestamps = (
   store.timestampOnlyPrefix = "";
   const dataForTimestamps = `${timestampOnlyPrefix}${data}`;
   const segmentStartedAt = shouldMeasureDiagnostics ? performance.now() : 0;
-  const segments = store.segmenter.append(dataForTimestamps);
+  const segments = store.segmenter.append(dataForTimestamps, options?.timestampDate);
   const parsedData = segments
     .filter((segment): segment is { kind: "data"; data: string } => segment.kind === "data")
     .map((segment) => segment.data)

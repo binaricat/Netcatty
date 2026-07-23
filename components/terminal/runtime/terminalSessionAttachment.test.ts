@@ -18,6 +18,7 @@ import {
   tryAttachSessionToTerminal,
   writeSessionData,
 } from "./terminalSessionAttachment.ts";
+import { getVisibleTerminalLineTimestampRows } from "./terminalLineTimestamps.ts";
 
 import {
   clearTerminalSessionFlowAck,
@@ -53,8 +54,16 @@ const createFakeTerm = (activeType = "normal") => {
   const disposedMarkerLines: number[] = [];
   let cursorLine = 0;
   const term = {
+    rows: 24,
+    cols: 80,
+    options: { scrollback: 1000 },
     buffer: {
-      active: { type: activeType },
+      active: {
+        type: activeType,
+        viewportY: 0,
+        cursorX: 0,
+        getLine: () => ({ isWrapped: false }),
+      },
     },
     write(data: string, callback?: () => void) {
       writes.push(data);
@@ -504,6 +513,34 @@ test("frequent hidden log lines are drained in one complete terminal write", asy
   assert.equal(markerLines.length, chunks.length);
   assert.equal(getFlowController(ctx as never, term).pendingBytes(), 0);
   resetTerminalWriteCoalescer(term);
+});
+
+test("hidden output keeps its arrival second when a batch crosses a clock boundary", () => {
+  const { term, writes } = createFakeTerm();
+  const ctx = {
+    ...createContext(true),
+    isVisibleRef: { current: true },
+    isPaneVisibleRef: { current: false },
+  };
+  const originalDateNow = Date.now;
+  let fakeNow = new Date(2026, 0, 1, 12, 0, 59, 800).getTime();
+  Date.now = () => fakeNow;
+
+  try {
+    writeSessionData(ctx as never, term, "first\r\n");
+    fakeNow = new Date(2026, 0, 1, 12, 1, 0, 20).getTime();
+    writeSessionData(ctx as never, term, "second\r\n");
+    flushPendingTerminalWritesOnResume(term);
+
+    assert.deepEqual(writes, ["first\r\n", "second\r\n"]);
+    assert.deepEqual(getVisibleTerminalLineTimestampRows(term), [
+      { row: 0, label: "12:00:59" },
+      { row: 1, label: "12:01:00" },
+    ]);
+  } finally {
+    Date.now = originalDateNow;
+    resetTerminalWriteCoalescer(term);
+  }
 });
 
 test("writeSessionData keeps the current perf trace when hidden output is flushed", () => {
@@ -1152,6 +1189,54 @@ test("attachSessionToTerminal clears the backend id before reporting exit", () =
 
   assert.equal(sessionRef.current, null);
   assert.equal(sessionIdSeenByConsumer, null);
+});
+
+test("attachSessionToTerminal drains hidden final output before exit capture", () => {
+  const { term, writes } = createFakeTerm();
+  let onData: ((data: string) => void) | null = null;
+  let onExit: ((evt: { reason?: string }) => void) | null = null;
+  let captured = "";
+  const ctx = {
+    ...createContext(false),
+    sessionId: "session-1",
+    sessionRef: { current: null as string | null },
+    isVisibleRef: { current: true },
+    isPaneVisibleRef: { current: false },
+    hasConnectedRef: { current: true },
+    hasRunStartupCommandRef: { current: false },
+    disposeDataRef: { current: null },
+    disposeExitRef: { current: null },
+    fitAddonRef: { current: null },
+    serializeAddonRef: { current: { serialize: () => writes.join("") } },
+    pendingAuthRef: { current: null },
+    terminalBackend: {
+      onSessionData: (_id: string, callback: (data: string) => void) => {
+        onData = callback;
+        return () => {};
+      },
+      onSessionExit: (_id: string, callback: (evt: { reason?: string }) => void) => {
+        onExit = callback;
+        return () => {};
+      },
+    },
+    updateStatus: () => {},
+    setError: () => {},
+    onTerminalDataCapture: (_sessionId: string, data: string) => {
+      captured = data;
+    },
+    onSessionExit: () => {},
+  };
+
+  attachSessionToTerminal(ctx as never, term, "session-1");
+  onData?.("final output\r\n");
+  assert.deepEqual(writes, []);
+
+  onExit?.({ reason: "closed" });
+
+  const expected = "final output\r\n\r\n[session closed]\r\n";
+  assert.equal(writes.join(""), expected);
+  assert.equal(captured, expected);
+  resetTerminalWriteCoalescer(term);
 });
 
 test("attachSessionToTerminal keeps interrupt-time output visible", () => {

@@ -49,6 +49,7 @@ import {
   type CoalescedTerminalWriteOptions,
   enqueueCoalescedTerminalWrite,
   flushTerminalWriteCoalescer,
+  getTerminalWriteCoalescerPendingBytes,
   resolveFloodCoalescerByteCap,
   setTerminalWriteCoalescerByteCapResolver,
   setTerminalWriteCoalescerFlushGate,
@@ -142,6 +143,7 @@ const terminalFlowControllers = new WeakMap<XTerm, OutputFlowController>();
 type TerminalSessionWriteOptions = CoalescedTerminalWriteOptions & {
   flushXtermWriteBuffer?: boolean;
   perfTrace?: TerminalOutputPerfTrace | null;
+  timestampDate?: Date;
 };
 
 const BACKGROUND_OUTPUT_FLUSH_MAX_PASSES = 64;
@@ -153,6 +155,7 @@ const VISIBLE_WRITE_IDLE_FLUSH_MS = 24;
 const HIDDEN_PANE_DRAIN_MS = 160;
 const visibleWriteIdleFlushTimers = new WeakMap<XTerm, ReturnType<typeof setTimeout>>();
 const hiddenPaneDrainTimers = new WeakMap<XTerm, ReturnType<typeof setTimeout>>();
+const pendingTimestampSecondByTerm = new WeakMap<XTerm, number>();
 
 type LineTimestampPerfTotals = {
   segmentCalls: number;
@@ -256,6 +259,28 @@ const cancelHiddenPaneDrain = (term: XTerm): void => {
   if (timer === undefined) return;
   clearTimeout(timer);
   hiddenPaneDrainTimers.delete(term);
+};
+
+const flushPendingTerminalOutputNow = (term: XTerm): void => {
+  cancelHiddenPaneDrain(term);
+  flushTerminalWriteCoalescer(term);
+  flushTerminalWritesForBackgroundOutput(term);
+};
+
+const flushBeforeTimestampBoundary = (
+  term: XTerm,
+  timestampDate: Date,
+): void => {
+  const timestampSecond = Math.floor(timestampDate.getTime() / 1000);
+  const pendingTimestampSecond = pendingTimestampSecondByTerm.get(term);
+  if (
+    getTerminalWriteCoalescerPendingBytes(term) > 0
+    && pendingTimestampSecond !== undefined
+    && pendingTimestampSecond !== timestampSecond
+  ) {
+    flushPendingTerminalOutputNow(term);
+  }
+  pendingTimestampSecondByTerm.set(term, timestampSecond);
 };
 
 function flushHiddenPaneWritesNow(term: XTerm, isPaneVisible: () => boolean): void {
@@ -369,11 +394,14 @@ export const writeTerminalLine = (
   term: XTerm,
   data: string,
 ) => {
+  // Keep lifecycle/control lines ordered after all preceding PTY output.
+  flushPendingTerminalOutputNow(term);
   const lineData = `${data}\r\n`;
   enqueueTerminalWrite(term, lineData.length, (done) => {
     ctx.onTerminalLogData?.(lineData);
     term.write(lineData, done);
   });
+  flushTerminalWritesForBackgroundOutput(term);
 };
 
 export const writeSessionData = (
@@ -386,6 +414,8 @@ export const writeSessionData = (
   const flow = getFlowController(ctx, term);
   const isPaneCurrentlyVisible = () => isTerminalPaneVisible(ctx);
   const isPaneVisible = isPaneCurrentlyVisible();
+  const timestampDate = new Date(Date.now());
+  flushBeforeTimestampBoundary(term, timestampDate);
   const perfTrace = createTerminalOutputPerfTrace({
     sessionId: ctx.sessionRef.current ?? ctx.sessionId,
     data,
@@ -408,6 +438,7 @@ export const writeSessionData = (
         ...writeOptions,
         flushXtermWriteBuffer: true,
         perfTrace: writeOptions?.preservePerfTrace === false ? null : perfTrace,
+        timestampDate,
       });
       flushTerminalWritesForBackgroundOutput(term);
     };
@@ -428,6 +459,7 @@ export const writeSessionData = (
     writeSessionDataImmediate(ctx, term, batch, batchIngress, {
       ...writeOptions,
       perfTrace: writeOptions?.preservePerfTrace === false ? null : perfTrace,
+      timestampDate,
     });
   }, ingressBytes);
   scheduleVisibleTerminalWriteIdleFlush(term, isPaneCurrentlyVisible);
@@ -583,9 +615,12 @@ const writeSessionDataImmediate = (
         term,
         preparedDisplayData,
         finishWrite,
-        shouldMeasurePerf && lineTimestampPerf
-          ? { onStep: (step) => recordLineTimestampPerfStep(lineTimestampPerf, step) }
-          : undefined,
+        {
+          ...(shouldMeasurePerf && lineTimestampPerf
+            ? { onStep: (step: TerminalLineTimestampPerfStep) => recordLineTimestampPerfStep(lineTimestampPerf, step) }
+            : {}),
+          timestampDate: writeOptions.timestampDate,
+        },
       );
       if (
         !writeOptions.flushXtermWriteBuffer
@@ -682,10 +717,11 @@ export const releaseTerminalFlowBeforeHibernate = (
   options?: { resumeBackend?: boolean },
 ): void => {
   const flow = terminalFlowControllers.get(term);
-  cancelHiddenPaneDrain(term);
+  flushPendingTerminalOutputNow(term);
   releaseTerminalFlowOutputForTerm(term, backend, sessionId, flow, options);
   setTerminalWriteCoalescerByteCapResolver(term);
   setTerminalWriteCoalescerFlushGate(term);
+  pendingTimestampSecondByTerm.delete(term);
   resetDeferredTerminalWriteAck(term);
   terminalFlowControllers.delete(term);
 };
@@ -728,6 +764,8 @@ export const attachSessionToTerminal = (
     return;
   }
 
+  flushPendingTerminalOutputNow(term);
+  pendingTimestampSecondByTerm.delete(term);
   ctx.sessionRef.current = id;
   const flow = getFlowController(ctx, term);
   teardownTerminalOutputPipeline(ctx, term, id, flow);
