@@ -643,6 +643,43 @@ test("hiding the page preserves the arrival second of already queued output", ()
   }
 });
 
+test("showing a pane preserves the background arrival second still queued with visible output", () => {
+  const { term, writes } = createFakeTerm();
+  const ctx = {
+    ...createContext(true),
+    isVisibleRef: { current: true },
+    isPaneVisibleRef: { current: false },
+  };
+  const originalDateNow = Date.now;
+  let fakeNow = new Date(2026, 0, 1, 12, 0, 59, 800).getTime();
+  Date.now = () => fakeNow;
+
+  try {
+    withAnimationFrameQueue(() => {
+      writeSessionData(ctx as never, term, "hidden\r\n");
+      ctx.isPaneVisibleRef.current = true;
+      writeSessionData(ctx as never, term, "visible-same-second\r\n");
+
+      fakeNow = new Date(2026, 0, 1, 12, 1, 0, 20).getTime();
+      writeSessionData(ctx as never, term, "visible-next-second\r\n");
+      flushPendingTerminalWritesOnResume(term);
+
+      assert.deepEqual(writes, [
+        "hidden\r\nvisible-same-second\r\n",
+        "visible-next-second\r\n",
+      ]);
+      assert.deepEqual(getVisibleTerminalLineTimestampRows(term), [
+        { row: 0, label: "12:00:59" },
+        { row: 1, label: "12:00:59" },
+        { row: 2, label: "12:01:00" },
+      ]);
+    });
+  } finally {
+    Date.now = originalDateNow;
+    resetTerminalWriteCoalescer(term);
+  }
+});
+
 test("hidden prompt formatting preserves PTY chunk boundaries", () => {
   const require = createRequire(import.meta.url);
   const { Terminal } = require("@xterm/xterm") as {

@@ -277,8 +277,9 @@ const flushBeforeTimestampBoundary = (
   const timestampSecond = Math.floor(timestampDate.getTime() / 1000);
   const pendingTimestampSecond = pendingTimestampSecondByTerm.get(term);
   const pendingUsedBackgroundPath = pendingTimestampBackgroundByTerm.get(term);
+  const hadPendingOutput = getTerminalWriteCoalescerPendingBytes(term) > 0;
   if (
-    getTerminalWriteCoalescerPendingBytes(term) > 0
+    hadPendingOutput
     && pendingTimestampSecond !== undefined
     && pendingTimestampSecond !== timestampSecond
     && (usesBackgroundWritePath || pendingUsedBackgroundPath === true)
@@ -286,7 +287,12 @@ const flushBeforeTimestampBoundary = (
     flushPendingTerminalOutputNow(term);
   }
   pendingTimestampSecondByTerm.set(term, timestampSecond);
-  pendingTimestampBackgroundByTerm.set(term, usesBackgroundWritePath);
+  pendingTimestampBackgroundByTerm.set(
+    term,
+    hadPendingOutput && getTerminalWriteCoalescerPendingBytes(term) > 0
+      ? pendingUsedBackgroundPath === true || usesBackgroundWritePath
+      : usesBackgroundWritePath,
+  );
 };
 
 function flushHiddenPaneWritesNow(term: XTerm, isPaneVisible: () => boolean): void {
