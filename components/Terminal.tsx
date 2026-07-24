@@ -1372,6 +1372,13 @@ const TerminalComponent: React.FC<TerminalProps> = ({
           || typeof payload.contextScrollbackSnapshot !== "string"
           || typeof payload.alternateScreen !== "boolean"
         ) return false;
+        const term = termRef.current;
+        if (term) {
+          const flushed = await flushPendingTerminalWritesBeforeHibernate(term);
+          if (!flushed || termRef.current !== term) {
+            throw new Error("Terminal output did not settle before applying the snapshot");
+          }
+        }
         if (typeof payload.kittyKeyboardProtocolEnabled === "boolean") {
           xtermRuntimeRef.current?.setKittyKeyboardProtocolEnabled(
             payload.kittyKeyboardProtocolEnabled,
@@ -1397,12 +1404,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
             payload.kittyKeyboardModeState,
           );
         }
-        if (termRef.current) {
-          const term = termRef.current;
-          const flushed = await flushPendingTerminalWritesBeforeHibernate(term);
-          if (!flushed) {
-            throw new Error("Terminal output did not settle before applying the snapshot");
-          }
+        if (term) {
           term.reset();
           if (payload.snapshot) {
             await new Promise<void>((resolve) => term.write(payload.snapshot, resolve));

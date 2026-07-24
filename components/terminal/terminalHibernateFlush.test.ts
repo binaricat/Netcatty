@@ -139,10 +139,15 @@ test("snapshot and handoff paths reject output that misses the settle deadline",
   assert.ok(snapshotWarningIndex >= 0 && snapshotWarningIndex < snapshotReturnIndex);
   assert.ok(snapshotReturnIndex < snapshotSerializeIndex);
 
-  assert.match(
-    source,
-    /const flushed = await flushPendingTerminalWritesBeforeHibernate\(term\);\s*if \(!flushed\) \{\s*throw new Error\("Terminal output did not settle before applying the snapshot"\);\s*\}\s*term\.reset\(\)/,
-  );
+  const applyHandlerIndex = source.indexOf("onTerminalSessionApplySnapshot");
+  const applyDrainIndex = source.indexOf("flushPendingTerminalWritesBeforeHibernate(term)", applyHandlerIndex);
+  const applyFailureIndex = source.indexOf("Terminal output did not settle before applying the snapshot", applyDrainIndex);
+  const applyMetadataIndex = source.indexOf("setKittyKeyboardProtocolEnabled", applyHandlerIndex);
+  const applyResetIndex = source.indexOf("term.reset()", applyHandlerIndex);
+  assert.ok(applyHandlerIndex >= 0 && applyHandlerIndex < applyDrainIndex);
+  assert.ok(applyDrainIndex < applyFailureIndex);
+  assert.ok(applyFailureIndex < applyMetadataIndex, "failed drains must not mutate snapshot metadata");
+  assert.ok(applyMetadataIndex < applyResetIndex);
   assert.match(
     source,
     /const flushed = await flushPendingTerminalWritesBeforeHibernate\(snapshotTerm\);\s*if \(!flushed\) \{\s*throw new Error\("Terminal output did not settle before closing the attached display"\);\s*\}/,
