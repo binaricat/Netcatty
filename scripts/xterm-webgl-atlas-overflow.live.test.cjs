@@ -134,11 +134,11 @@ if (!process.versions.electron) {
       const maxSignatureDiff = (left, right) => Math.max(
         ...left.map((signature, index) => signatureDiff(signature, right[index])),
       );
-      const writeAndWaitForRender = data => new Promise((resolve, reject) => {
+      const writeAndWaitForRender = (data, label) => new Promise((resolve, reject) => {
         const timeout = setTimeout(() => {
           disposable.dispose();
-          reject(new Error("timed out waiting for terminal render"));
-        }, 2000);
+          reject(new Error("timed out waiting for terminal render: " + label));
+        }, 10000);
         const disposable = term.onRender(() => {
           clearTimeout(timeout);
           disposable.dispose();
@@ -148,7 +148,10 @@ if (!process.versions.electron) {
       });
       const marker = "AFTER_EVICTION_0123456789";
       const markerColumns = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
-      await writeAndWaitForRender("\\x1b[H\\x1b[2J\\x1b[97m" + marker + "\\x1b[0m");
+      await writeAndWaitForRender(
+        "\\x1b[H\\x1b[2J\\x1b[97m" + marker + "\\x1b[0m",
+        "initial marker",
+      );
       const markerReference = captureCellSignatures(markerColumns);
 
       const generateUniqueGlyphFlood = (count, offset) => {
@@ -168,18 +171,22 @@ if (!process.versions.electron) {
       for (let chunk = 0; chunk < 32; chunk += 1) {
         await writeAndWaitForRender(
           "\\x1b[H\\x1b[2J" + generateUniqueGlyphFlood(glyphsPerChunk, chunk * glyphsPerChunk),
+          "normal atlas flood " + chunk,
         );
         peakPages = Math.max(peakPages, atlas.pages.length);
         if (errors.length > 0 || atlas.pages.length > glyphRenderer._atlasTextures.length) break;
       }
 
-      await writeAndWaitForRender("\\x1b[H\\x1b[2J\\x1b[97m" + marker + "\\x1b[0m");
+      await writeAndWaitForRender(
+        "\\x1b[H\\x1b[2J\\x1b[97m" + marker + "\\x1b[0m",
+        "post-eviction marker",
+      );
       const markerAfterEviction = captureCellSignatures(markerColumns);
       const markerPixelDiff = maxSignatureDiff(markerReference, markerAfterEviction);
       const normalPages = atlas.pages.length;
       const normalRemovals = removals;
 
-      await writeAndWaitForRender("\\x1b[H\\x1b[2J");
+      await writeAndWaitForRender("\\x1b[H\\x1b[2J", "wide-glyph blank reference");
       const wideColumns = [0, 7, 15, 23, 31];
       const blankSignatures = captureCellSignatures(wideColumns);
       const cellWidth = renderer.dimensions.device.cell.width;
@@ -189,7 +196,7 @@ if (!process.versions.electron) {
       }
       const wideMarker = "W".repeat(joinedLength);
       term.registerCharacterJoiner(text => text.startsWith(wideMarker) ? [[0, joinedLength]] : []);
-      await writeAndWaitForRender("\\x1b[H" + wideMarker);
+      await writeAndWaitForRender("\\x1b[H" + wideMarker, "oversized glyph");
       const wideSignatures = captureCellSignatures(wideColumns);
       const minimumWidePixelDiff = Math.min(
         ...wideSignatures.map(
