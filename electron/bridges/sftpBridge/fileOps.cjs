@@ -440,7 +440,6 @@ function createFileOpsApi(ctx) {
 
       await requireSftpChannel(client);
       const encoding = resolveEncodingForRequest(payload.sftpId, payload.encoding);
-      const encodedPath = encodePath(remotePath, encoding);
     
       // Extract callback functions from payload
       const onProgress = payload.onProgress;
@@ -567,11 +566,13 @@ function createFileOpsApi(ctx) {
         };
 
         if (typeof pipelinedUploadWithOptionalStaging === "function") {
-          await pipelinedUploadWithOptionalStaging(client, tempPath, encodedPath, {
+          // Pass the logical remote path; helper encodes stage/final paths.
+          await pipelinedUploadWithOptionalStaging(client, tempPath, remotePath, {
             chunkSize: TRANSFER_CHUNK_SIZE,
             concurrency: UPLOAD_TRANSFER_CONCURRENCY,
             step,
             signal: abortController?.signal || null,
+            encoding,
             expectedSize: totalBytes,
             onChannel(sftp, control) {
               if (control?.dispose) {
@@ -585,6 +586,7 @@ function createFileOpsApi(ctx) {
           });
         } else if (typeof pipelinedUploadLocalFile === "function") {
           // Fallback if staging helper is unavailable (older injection).
+          const encodedPath = encodePath(remotePath, encoding);
           await pipelinedUploadLocalFile(client, tempPath, encodedPath, {
             chunkSize: TRANSFER_CHUNK_SIZE,
             concurrency: UPLOAD_TRANSFER_CONCURRENCY,

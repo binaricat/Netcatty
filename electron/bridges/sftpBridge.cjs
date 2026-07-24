@@ -588,12 +588,11 @@ function attrsIndicateSymlink(attrs) {
 
 /**
  * Plan overwrite strategy for a remote upload target.
- * - Symlinks: write in-place so the server follows the link (rename would replace the link node).
- * - Regular files: stage + rename, and capture mode bits to restore after the new inode lands.
+ * - Existing files / symlinks: write in-place so the inode, mode, ACL, and link
+ *   node are preserved (stage+rename would replace the inode).
+ * - Missing targets: stage + rename for cancel-safe promotion of new files.
  */
 async function planRemoteUploadReplace(client, encodedPath) {
-  let existingMode = null;
-  let writeInPlace = false;
   try {
     const sftp = await requireSftpChannel(client);
     let attrs = null;
@@ -603,17 +602,24 @@ async function planRemoteUploadReplace(client, encodedPath) {
       attrs = null;
     }
     if (!attrs) return { writeInPlace: false, existingMode: null };
-    if (attrsIndicateSymlink(attrs)) {
-      return { writeInPlace: true, existingMode: null };
-    }
+    // Existing node (file or symlink): prefer in-place overwrite.
     const mode = Number(attrs.mode);
-    if (Number.isFinite(mode) && mode > 0) {
-      existingMode = mode & 0o7777;
-    }
+    const existingMode = Number.isFinite(mode) && mode > 0 && !attrsIndicateSymlink(attrs)
+      ? (mode & 0o7777)
+      : null;
+    return { writeInPlace: true, existingMode };
   } catch {
     // Missing destination / unsupported lstat is fine — default to staging.
   }
-  return { writeInPlace, existingMode };
+  return { writeInPlace: false, existingMode: null };
+}
+
+function isNetcattyStagedRemotePath(remotePath) {
+  const asString = Buffer.isBuffer(remotePath)
+    ? remotePath.toString("utf8")
+    : String(remotePath || "");
+  // Only our randomized stage names — never the caller's final destination.
+  return /(^|\/|\\)\.netcatty-upload-[^/\\]+\.part$/.test(asString);
 }
 
 async function restoreRemoteMode(client, encodedPath, mode) {
@@ -641,22 +647,29 @@ async function restoreRemoteMode(client, encodedPath, mode) {
 }
 
 /**
- * Pipelined upload with stage+rename by default (cancel-safe final dest).
- * Writes in-place for symlink destinations; falls back to in-place when staging
- * fails due to parent-directory permission (file itself still writable).
+ * Pipelined upload with optional stage+rename.
+ * - New files: stage then rename (cancel-safe promotion).
+ * - Existing files/symlinks: write in-place (preserve inode / link / metadata).
+ * - Parent-dir permission on stage: fall back to in-place.
+ *
+ * `remotePath` must be the logical (pre-encode) path string. Encoding is applied
+ * here so staged/backup names are not built from Buffer path bytes.
  */
 async function pipelinedUploadWithOptionalStaging(client, localPath, remotePath, options = {}) {
   const signal = options?.signal || null;
   const expectedSize = options?.expectedSize;
-  const plan = await planRemoteUploadReplace(client, remotePath);
+  const encoding = options?.encoding || "utf-8";
+  const encodedPath = encodePath(remotePath, encoding);
+  const plan = await planRemoteUploadReplace(client, encodedPath);
   const fastPutOptions = { ...options };
   delete fastPutOptions.expectedSize;
+  delete fastPutOptions.encoding;
 
   const uploadDirect = async () => {
-    await pipelinedUploadLocalFile(client, localPath, remotePath, fastPutOptions);
+    await pipelinedUploadLocalFile(client, localPath, encodedPath, fastPutOptions);
     throwIfAborted(signal);
     if (Number.isFinite(expectedSize) && expectedSize >= 0 && typeof client.stat === "function") {
-      const st = await client.stat(remotePath);
+      const st = await client.stat(encodedPath);
       const size = Number(st?.size);
       if (Number.isFinite(size) && size !== expectedSize) {
         throw new Error(
@@ -671,13 +684,16 @@ async function pipelinedUploadWithOptionalStaging(client, localPath, remotePath,
     return uploadDirect();
   }
 
-  const stagedRemotePath = buildStagedRemotePath(remotePath);
-  const backupRemotePath = buildBackupRemotePath(remotePath);
+  // Build stage/backup names from the logical string, then encode each path.
+  const stagedLogical = buildStagedRemotePath(remotePath);
+  const backupLogical = buildBackupRemotePath(remotePath);
+  const encodedStagedPath = encodePath(stagedLogical, encoding);
+  const encodedBackupPath = encodePath(backupLogical, encoding);
   try {
-    await pipelinedUploadLocalFile(client, localPath, stagedRemotePath, fastPutOptions);
+    await pipelinedUploadLocalFile(client, localPath, encodedStagedPath, fastPutOptions);
     throwIfAborted(signal);
     if (Number.isFinite(expectedSize) && expectedSize >= 0 && typeof client.stat === "function") {
-      const stagedStat = await client.stat(stagedRemotePath);
+      const stagedStat = await client.stat(encodedStagedPath);
       const stagedSize = Number(stagedStat?.size);
       if (Number.isFinite(stagedSize) && stagedSize !== expectedSize) {
         throw new Error(
@@ -685,13 +701,13 @@ async function pipelinedUploadWithOptionalStaging(client, localPath, remotePath,
         );
       }
     }
-    await renameRemotePath(client, stagedRemotePath, remotePath, backupRemotePath);
-    await restoreRemoteMode(client, remotePath, plan.existingMode);
+    await renameRemotePath(client, encodedStagedPath, encodedPath, encodedBackupPath);
+    await restoreRemoteMode(client, encodedPath, plan.existingMode);
     return { staged: true };
   } catch (err) {
     try {
       if (typeof client.delete === "function") {
-        await client.delete(stagedRemotePath);
+        await client.delete(encodedStagedPath);
       }
     } catch {
       // Best-effort cleanup of a partial stage.
@@ -1205,10 +1221,14 @@ function runFastPutOnChannel(sftp, localPath, remotePath, options = {}, channelC
     const scheduleForceFinish = (err) => {
       clearForceFinish();
       forceFinishTimer = setTimeout(() => {
-        // Shared channel: best-effort unlink the in-progress remote target so a
-        // late fastPut cannot keep growing a staged .part after cancel reports.
-        // Disposable channels are already ended; unlink is optional there.
-        if (!dispose && (abortRequested || signal?.aborted || pendingError)) {
+        // Shared channel: best-effort unlink only Netcatty staged .part paths so a
+        // late fastPut cannot keep growing a temp after cancel reports.
+        // Never unlink the caller's final destination (in-place / symlink writes).
+        if (
+          !dispose
+          && (abortRequested || signal?.aborted || pendingError)
+          && isNetcattyStagedRemotePath(remotePath)
+        ) {
           try { sftp.unlink?.(remotePath, () => {}); } catch { /* ignore */ }
         }
         finish(err || new Error("SFTP channel closed"));
@@ -1369,7 +1389,6 @@ async function uploadLocalToSftp(_event, payload) {
 
   await requireSftpChannel(client);
   const encoding = resolveEncodingForRequest(payload.sftpId, payload.encoding);
-  const encodedPath = encodePath(payload.remotePath, encoding);
   throwIfAborted(payload.abortSignal);
   const {
     TRANSFER_CHUNK_SIZE,
@@ -1379,12 +1398,12 @@ async function uploadLocalToSftp(_event, payload) {
   try {
     expectedSize = Number((await fs.promises.stat(payload.localPath))?.size);
   } catch { /* ignore — fall through without size check if local vanished */ }
-  // Pipelined WRITEs with stage+rename by default (cancel-safe). Symlink and
-  // parent-dir permission edge cases fall back to in-place overwrite.
-  await pipelinedUploadWithOptionalStaging(client, payload.localPath, encodedPath, {
+  // Logical path in; helper encodes stage/final so non-UTF-8 dirs stay intact.
+  await pipelinedUploadWithOptionalStaging(client, payload.localPath, payload.remotePath, {
     chunkSize: TRANSFER_CHUNK_SIZE,
     concurrency: UPLOAD_TRANSFER_CONCURRENCY,
     signal: payload.abortSignal,
+    encoding,
     expectedSize: Number.isFinite(expectedSize) ? expectedSize : undefined,
   });
   return { success: true, remotePath: payload.remotePath };

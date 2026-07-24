@@ -238,15 +238,15 @@ test("session-backed writeSftpBinaryWithProgress uses pipelined fastPut", async 
   assert.equal(fastPutCalls.length, 1);
   assert.equal(fastPutCalls[0].concurrency, UPLOAD_TRANSFER_CONCURRENCY);
   assert.equal(fastPutCalls[0].chunkSize, TRANSFER_CHUNK_SIZE);
-  // Upload must stage to a remote .part path, not write the final path directly.
-  assert.match(fastPutCalls[0].remotePath, /\.part$/);
+  // New destinations stage to a remote .part path, then rename into place.
+  assert.match(fastPutCalls[0].remotePath, /\.netcatty-upload-.*\.part$/);
   assert.notEqual(fastPutCalls[0].remotePath, "/home/alice/mem.bin");
   assert.ok(remoteFiles.has("/home/alice/mem.bin"));
   assert.deepEqual(remoteFiles.get("/home/alice/mem.bin"), payload);
 });
 
-test("staged overwrite restores previous remote mode bits", async (t) => {
-  const tempRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-mode-restore-"));
+test("existing destinations overwrite in-place to preserve metadata", async (t) => {
+  const tempRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-inplace-meta-"));
   t.after(async () => {
     await fs.promises.rm(tempRoot, { recursive: true, force: true });
   });
@@ -256,7 +256,7 @@ test("staged overwrite restores previous remote mode bits", async (t) => {
   const payload = Buffer.from("#!/bin/sh\necho hi\n");
   await fs.promises.writeFile(localPath, payload);
 
-  const { channel, remoteFiles, remoteMeta, chmodCalls } = createSessionChannel();
+  const { channel, fastPutCalls, remoteFiles, remoteMeta, chmodCalls } = createSessionChannel();
   remoteFiles.set("/usr/local/bin/tool", Buffer.from("old"));
   remoteMeta.set("/usr/local/bin/tool", { mode: 0o100755 });
 
@@ -281,12 +281,13 @@ test("staged overwrite restores previous remote mode bits", async (t) => {
     encoding: "utf-8",
   });
 
+  assert.equal(fastPutCalls.length, 1);
+  assert.equal(fastPutCalls[0].remotePath, "/usr/local/bin/tool");
   assert.ok(remoteFiles.has("/usr/local/bin/tool"));
   assert.deepEqual(remoteFiles.get("/usr/local/bin/tool"), payload);
-  assert.ok(
-    chmodCalls.some((c) => c.targetPath === "/usr/local/bin/tool" && (c.mode & 0o777) === 0o755),
-    `expected mode restore via chmod, got ${JSON.stringify(chmodCalls)}`,
-  );
+  // In-place overwrite should not need a post-rename chmod restore.
+  assert.equal(chmodCalls.length, 0);
+  assert.equal(remoteMeta.get("/usr/local/bin/tool")?.mode, 0o100755);
 });
 
 test("symlink destinations are written in-place (not replaced by rename)", async (t) => {
@@ -331,7 +332,7 @@ test("symlink destinations are written in-place (not replaced by rename)", async
   assert.deepEqual(remoteFiles.get("/etc/app/config.json"), payload);
 });
 
-test("parent-dir permission on staged path falls back to in-place overwrite", async (t) => {
+test("parent-dir permission on staged path falls back to in-place for new files", async (t) => {
   const tempRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-stage-perm-"));
   t.after(async () => {
     await fs.promises.rm(tempRoot, { recursive: true, force: true });
@@ -342,9 +343,9 @@ test("parent-dir permission on staged path falls back to in-place overwrite", as
   const payload = Buffer.from("new-content");
   await fs.promises.writeFile(localPath, payload);
 
-  const { channel, fastPutCalls, remoteFiles, remoteMeta } = createSessionChannel({
+  const { channel, fastPutCalls, remoteFiles } = createSessionChannel({
     onFastPut(_local, remotePath) {
-      if (String(remotePath).includes(".part") || String(remotePath).includes(".netcatty-upload-")) {
+      if (String(remotePath).includes(".netcatty-upload-")) {
         const err = new Error("Permission denied");
         err.code = 3;
         return { error: err };
@@ -352,8 +353,7 @@ test("parent-dir permission on staged path falls back to in-place overwrite", as
       return null;
     },
   });
-  remoteFiles.set("/ro-dir/file.bin", Buffer.from("old"));
-  remoteMeta.set("/ro-dir/file.bin", { mode: 0o100644 });
+  // Destination does not exist → staging is attempted first.
 
   const connection = {
     sftp(callback) { callback(null, channel); },
@@ -377,6 +377,7 @@ test("parent-dir permission on staged path falls back to in-place overwrite", as
   });
 
   assert.ok(fastPutCalls.length >= 2, "expected staged attempt then in-place");
+  assert.match(fastPutCalls[0].remotePath, /\.netcatty-upload-.*\.part$/);
   assert.equal(fastPutCalls[fastPutCalls.length - 1].remotePath, "/ro-dir/file.bin");
   assert.deepEqual(remoteFiles.get("/ro-dir/file.bin"), payload);
 });
@@ -512,8 +513,62 @@ test("shared-channel fastPut cancel force-settles when callback stalls", async (
   assert.ok(elapsed < 5000, `cancel took too long: ${elapsed}ms`);
   // Shared channel must not be ended (would kill browse/sudo session).
   assert.equal(ended, false);
-  // Force-settle best-effort unlinks the in-progress remote target.
-  assert.equal(unlinkedPath, "/tmp/stall-out.bin");
+  // Final destinations must not be unlinked on shared-channel force-settle.
+  assert.equal(unlinkedPath, null);
+
+  await fs.promises.rm(tempRoot, { recursive: true, force: true });
+});
+
+test("shared-channel force-settle unlinks only Netcatty staged .part paths", async () => {
+  const tempRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-shared-stage-unlink-"));
+  const localPath = path.join(tempRoot, "stall.bin");
+  await fs.promises.writeFile(localPath, Buffer.alloc(4 * 1024, 9));
+
+  let unlinkedPath = null;
+  const channel = {
+    readdir(_p, cb) { cb(null, []); },
+    mkdir(_p, cb) { cb(null); },
+    unlink(targetPath, cb) {
+      unlinkedPath = targetPath;
+      cb(null);
+    },
+    stat(_p, cb) {
+      const err = new Error("ENOENT");
+      err.code = 2;
+      cb(err);
+    },
+    fastPut() {},
+    end() {},
+  };
+  const sharedOnlyClient = {
+    __netcattySudoMode: true,
+    sftp: channel,
+    client: null,
+  };
+
+  sftpBridge.init({
+    electronModule: {},
+    sessions: new Map(),
+    sftpClients: new Map(),
+  });
+
+  const controller = new AbortController();
+  const stagedPath = "/tmp/.netcatty-upload-deadbeef-stall.bin.part";
+  const uploadPromise = sftpBridge.pipelinedUploadLocalFile(
+    sharedOnlyClient,
+    localPath,
+    stagedPath,
+    {
+      concurrency: UPLOAD_TRANSFER_CONCURRENCY,
+      chunkSize: TRANSFER_CHUNK_SIZE,
+      signal: controller.signal,
+    },
+  );
+
+  await new Promise((r) => setImmediate(r));
+  controller.abort();
+  await assert.rejects(uploadPromise, /abort|cancel/i);
+  assert.equal(unlinkedPath, stagedPath);
 
   await fs.promises.rm(tempRoot, { recursive: true, force: true });
 });
