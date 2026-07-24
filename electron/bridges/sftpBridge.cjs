@@ -744,6 +744,8 @@ async function pipelinedUploadWithOptionalStaging(client, localPath, remotePath,
         );
       }
     }
+    // Cancel may arrive during the awaited size verify; recheck before promote.
+    throwIfAborted(signal);
     await renameRemotePath(client, encodedStagedPath, encodedPath, encodedBackupPath);
     await restoreRemoteMode(client, encodedPath, plan.existingMode);
     return { staged: true };

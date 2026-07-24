@@ -423,6 +423,68 @@ test("parent-dir permission on staged path falls back to in-place for new files"
   assert.deepEqual(remoteFiles.get("/ro-dir/file.bin"), payload);
 });
 
+test("late abort during staged size verify does not promote .part", async (t) => {
+  const tempRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-late-abort-promote-"));
+  t.after(async () => {
+    await fs.promises.rm(tempRoot, { recursive: true, force: true });
+  });
+  tempDirBridge.init?.({ getPath: () => tempRoot });
+
+  const localPath = path.join(tempRoot, "payload.bin");
+  const payload = Buffer.from("late-abort-payload");
+  await fs.promises.writeFile(localPath, payload);
+
+  const { channel, fastPutCalls, remoteFiles } = createSessionChannel();
+  const controller = new AbortController();
+  let renameCalled = false;
+  const origStat = channel.stat.bind(channel);
+  const origRename = channel.rename.bind(channel);
+  channel.stat = (targetPath, callback) => {
+    if (String(targetPath).includes(".netcatty-upload-")) {
+      // Abort while size verification is in flight so the post-stat check must
+      // block promotion (throwIfAborted after await client.stat).
+      controller.abort();
+      queueMicrotask(() => origStat(targetPath, callback));
+      return;
+    }
+    return origStat(targetPath, callback);
+  };
+  channel.rename = (from, to, callback) => {
+    renameCalled = true;
+    return origRename(from, to, callback);
+  };
+
+  const connection = {
+    sftp(callback) { callback(null, channel); },
+  };
+  const sftpClients = new Map();
+  sftpBridge.init({
+    electronModule: { webContents: { fromId: () => null } },
+    sessions: new Map([["session-late-abort", { conn: connection }]]),
+    sftpClients,
+  });
+  const opened = await sftpBridge.openSftpForSession(null, {
+    sessionId: "session-late-abort",
+    fileProtocol: "sftp",
+  });
+
+  await assert.rejects(
+    () => sftpBridge.uploadLocalToSftp(null, {
+      sftpId: opened.sftpId,
+      localPath,
+      remotePath: "/tmp/late-abort.bin",
+      encoding: "utf-8",
+      abortSignal: controller.signal,
+    }),
+    /abort|cancel/i,
+  );
+
+  assert.equal(fastPutCalls.length, 1);
+  assert.match(fastPutCalls[0].remotePath, /\.netcatty-upload-.*\.part$/);
+  assert.equal(renameCalled, false);
+  assert.equal(remoteFiles.has("/tmp/late-abort.bin"), false);
+});
+
 test("size-mismatch on path containing 'access' does not fall back to in-place", async (t) => {
   const tempRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-access-name-"));
   t.after(async () => {
