@@ -420,6 +420,85 @@ test("writeSessionData batches while unfocused-but-visible then drains on idle f
   clearTerminalSessionFlowAck("session-1");
 });
 
+test("visible idle drain leaves xterm's private parser on its normal async path", async () => {
+  clearTerminalSessionFlowAck("session-1");
+  const payload = `\x1b[?2026h\x1b[H${"Herdr frame".repeat(7_000)}\x1b[?2026l`;
+  const pendingData: string[] = [];
+  const pendingCallbacks: Array<(() => void) | undefined> = [];
+  let pendingChars = 0;
+  let flushSyncCalls = 0;
+  const writeBuffer = {
+    _writeBuffer: pendingData,
+    _callbacks: pendingCallbacks,
+    _pendingData: 0,
+    _bufferOffset: 0,
+    flushSync() {
+      flushSyncCalls += 1;
+      const data = pendingData.shift();
+      if (!data) return;
+      pendingChars = Math.max(0, pendingChars - data.length);
+      this._pendingData = pendingChars;
+      // Match xterm's private flushSync ordering: it removes the data before
+      // parsing, then removes the matching callback only after parsing. A
+      // renderer/parser exception here strands Netcatty's active queue item.
+      throw new Error("simulated xterm parser failure");
+    },
+  };
+  const term = {
+    rows: 24,
+    cols: 80,
+    options: { scrollback: 1000 },
+    buffer: {
+      active: {
+        type: "normal",
+        viewportY: 0,
+        baseY: 0,
+        cursorX: 0,
+        cursorY: 0,
+        length: 1,
+        getLine: () => ({ isWrapped: false, translateToString: () => "" }),
+      },
+    },
+    _core: { _writeBuffer: writeBuffer },
+    write(data: string, callback?: () => void) {
+      pendingData.push(data);
+      pendingCallbacks.push(callback);
+      pendingChars += data.length;
+      writeBuffer._pendingData = pendingChars;
+      setTimeout(() => {
+        const queued = pendingData.shift();
+        if (!queued) return;
+        pendingChars = Math.max(0, pendingChars - queued.length);
+        writeBuffer._pendingData = pendingChars;
+        pendingCallbacks.shift()?.();
+      }, 300);
+    },
+    scrollToBottom() {},
+  } as unknown as XTerm;
+  const acked: number[] = [];
+  const ctx = {
+    ...createContext(false),
+    isVisibleRef: { current: true },
+    sessionRef: { current: "session-1" },
+    terminalBackend: {
+      ackSessionFlow: (_sessionId: string, bytes: number) => acked.push(bytes),
+    },
+  };
+
+  withDocumentVisibility("visible", () => {
+    writeSessionData(ctx as never, term, payload);
+  }, { hasFocus: true });
+
+  await new Promise((resolve) => { setTimeout(resolve, 340); });
+  flushTerminalSessionFlowAck("session-1");
+
+  assert.equal(flushSyncCalls, 0);
+  assert.equal(getFlowController(ctx as never, term).pendingBytes(), 0);
+  assert.equal(acked.reduce((total, bytes) => total + bytes, 0), payload.length);
+  resetTerminalWriteCoalescer(term);
+  clearTerminalSessionFlowAck("session-1");
+});
+
 test("writeSessionData flushes pending coalesced output with the background fast path", () => {
   clearTerminalSessionFlowAck("session-1");
   const pendingPayload = "pending output\n";

@@ -150,10 +150,10 @@ type TerminalSessionWriteOptions = CoalescedTerminalWriteOptions & {
 };
 
 const BACKGROUND_OUTPUT_FLUSH_MAX_PASSES = 64;
-const LARGE_WRITE_FLUSH_WATCHDOG_BYTES = 64 * 1024;
-const LARGE_WRITE_FLUSH_WATCHDOG_MS = 250;
-// With microtask coalescing, idle flush is only a safety net for rAF TUI path
-// and any leftover queue work — keep it short so the last batch does not lag.
+// With microtask coalescing, idle drain is only a safety net for rAF TUI path
+// and any leftover queue work. Keep xterm on its public async write path here:
+// its private flushSync removes a chunk before parsing and can strand the
+// matching callback when parsing/rendering throws (notably on Herdr frames).
 const VISIBLE_WRITE_IDLE_FLUSH_MS = 24;
 const HIDDEN_PANE_DRAIN_MS = 160;
 const visibleWriteIdleFlushTimers = new WeakMap<XTerm, ReturnType<typeof setTimeout>>();
@@ -330,9 +330,7 @@ const scheduleVisibleTerminalWriteIdleFlush = (term: XTerm, isPaneVisible: () =>
       return;
     }
     flushTerminalWriteCoalescer(term);
-    flushTerminalWriteBufferBypassingTimers(term);
     flushTerminalWriteQueueBypassingTimers(term);
-    flushTerminalWriteBufferBypassingTimers(term);
   }, VISIBLE_WRITE_IDLE_FLUSH_MS);
   if (typeof timer === "object" && "unref" in timer && typeof timer.unref === "function") {
     timer.unref();
@@ -645,14 +643,9 @@ const writeSessionDataImmediate = (
       const lineTimestampPerf = shouldMeasurePerf ? createLineTimestampPerfTotals() : null;
       const writeStartedAt = shouldMeasurePerf ? performance.now() : 0;
       let completed = false;
-      let watchdog: ReturnType<typeof setTimeout> | undefined;
       const finishWrite = () => {
         if (completed) return;
         completed = true;
-        if (watchdog !== undefined) {
-          clearTimeout(watchdog);
-          watchdog = undefined;
-        }
         if (shouldMeasurePerf && lineTimestampPerf) {
           const now = performance.now();
           logTerminalOutputPerf("renderer-write-done", writeOptions.perfTrace, {
@@ -685,18 +678,6 @@ const writeSessionDataImmediate = (
           enabled: resolveLiveHostShowLineTimestamps(ctx),
         },
       );
-      if (
-        !writeOptions.flushXtermWriteBuffer
-        && !completed
-        && preparedDisplayData.length >= LARGE_WRITE_FLUSH_WATCHDOG_BYTES
-      ) {
-        watchdog = setTimeout(() => {
-          watchdog = undefined;
-          if (!completed) {
-            flushTerminalWriteBufferBypassingTimers(term);
-          }
-        }, LARGE_WRITE_FLUSH_WATCHDOG_MS);
-      }
       if (writeOptions.flushXtermWriteBuffer) {
         flushTerminalWriteBufferBypassingTimers(term);
       }
