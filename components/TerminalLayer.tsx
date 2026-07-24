@@ -987,12 +987,16 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
 
     // Broadcast peers receive submitted bytes via writeToSession and never run
     // the source command-submission path, so Docker-log OSC suppression must be
-    // armed here when broadcast mode is on for the workspace.
+    // armed here when broadcast mode is on for the workspace. Mirror the same
+    // delivery filters as handleBroadcastInput so peers that never receive the
+    // command (sensitive input / non-writable) are not left suppressing OSC.
     const sourceSession = sessionsRef.current.find((candidate) => candidate.id === sessionId);
     const broadcastWorkspaceId = sourceSession?.workspaceId;
     if (broadcastWorkspaceId && isBroadcastEnabled?.(broadcastWorkspaceId)) {
       for (const peer of sessionsRef.current) {
         if (peer.workspaceId !== broadcastWorkspaceId || peer.id === sessionId) continue;
+        if (!canUseDirectSessionWriteFallback(peer)) continue;
+        if (isTerminalSensitiveInputActive(peer.id)) continue;
         armOscColorQuerySuppressionForSession(peer.id, command);
       }
     }
