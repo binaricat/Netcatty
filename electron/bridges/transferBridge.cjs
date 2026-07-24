@@ -780,6 +780,8 @@ async function runPausableConcurrentRanges({
 }) {
   let nextOffset = checkpoint;
   let transferred = checkpoint;
+  let contiguousCheckpoint = checkpoint;
+  const completedRanges = new Map();
   let active = 0;
   let settled = false;
   let terminalError = null;
@@ -833,7 +835,15 @@ async function runPausableConcurrentRanges({
         void copyRange(position, length)
           .then(() => {
             transferred += length;
-            if (!transfer.cancelled) sendProgress(transferred, fileSize);
+            completedRanges.set(position, position + length);
+            while (completedRanges.has(contiguousCheckpoint)) {
+              const nextCheckpoint = completedRanges.get(contiguousCheckpoint);
+              completedRanges.delete(contiguousCheckpoint);
+              contiguousCheckpoint = nextCheckpoint;
+            }
+            if (!transfer.cancelled) {
+              sendProgress(transferred, fileSize, { checkpointBytes: contiguousCheckpoint });
+            }
           })
           .catch((error) => abort(error))
           .finally(() => {
@@ -1063,10 +1073,10 @@ async function downloadFile(remotePath, localPath, client, fileSize, transfer, s
         });
         return;
       } catch (err) {
-        if (transfer.cancelled) throw err;
         if (transfer.resumable) {
           releaseIsolatedDownloadChannel(client, fastSftp, { dispose: true });
         }
+        if (transfer.cancelled) throw err;
         console.warn(
           "[transferBridge] fastGet failed, falling back to a compatible stream:",
           err?.message || String(err),
@@ -1295,7 +1305,10 @@ async function startTransferNow(event, payload, onProgress) {
 
     lastObservedTransferred = normalizedTransferred;
     lastObservedTotal = normalizedTotal;
-    transfer.checkpointBytes = normalizedTransferred;
+    const requestedCheckpoint = Number(options.checkpointBytes);
+    transfer.checkpointBytes = Number.isFinite(requestedCheckpoint) && requestedCheckpoint >= 0
+      ? Math.min(requestedCheckpoint, normalizedTotal || requestedCheckpoint)
+      : normalizedTransferred;
 
     const lastSample = speedSamples[speedSamples.length - 1];
     if (!lastSample || lastSample.bytes !== normalizedTransferred || now - lastSample.time >= PROGRESS_THROTTLE_MS) {
@@ -1612,10 +1625,15 @@ async function startTransferNow(event, payload, onProgress) {
               hashLocalPrefix(tempPath, verifyBytes),
             );
           }
-          const downloadProgress = (transferred) => {
-            transfer.downloadCheckpointBytes = transferred;
-            sendProgress(Math.floor(transferred / 2), fileSize);
-            transfer.checkpointBytes = transferred;
+          const downloadProgress = (transferred, _total, options = {}) => {
+            const durableCheckpoint = Number.isFinite(options.checkpointBytes)
+              ? options.checkpointBytes
+              : transferred;
+            transfer.downloadCheckpointBytes = durableCheckpoint;
+            sendProgress(Math.floor(transferred / 2), fileSize, {
+              checkpointBytes: durableCheckpoint,
+            });
+            transfer.checkpointBytes = durableCheckpoint;
           };
           await downloadFile(
             encodedSourcePath,
@@ -1669,10 +1687,15 @@ async function startTransferNow(event, payload, onProgress) {
         const encodedTargetPath = isScpModeClient(targetClient)
           ? uploadTargetPath
           : encodePathForSession(targetSftpId, uploadTargetPath, targetEncoding);
-        const uploadProgress = (transferred) => {
-          transfer.uploadCheckpointBytes = transferred;
-          sendProgress(Math.floor(fileSize / 2) + Math.floor(transferred / 2), fileSize);
-          transfer.checkpointBytes = transferred;
+        const uploadProgress = (transferred, _total, options = {}) => {
+          const durableCheckpoint = Number.isFinite(options.checkpointBytes)
+            ? options.checkpointBytes
+            : transferred;
+          transfer.uploadCheckpointBytes = durableCheckpoint;
+          sendProgress(Math.floor(fileSize / 2) + Math.floor(transferred / 2), fileSize, {
+            checkpointBytes: durableCheckpoint,
+          });
+          transfer.checkpointBytes = durableCheckpoint;
         };
         await uploadFile(
           tempPath,
