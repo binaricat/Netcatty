@@ -520,25 +520,36 @@ function createFileOpsApi(ctx) {
 
       // Pipelined fastPut via temp file only. Serial put()/WriteStream is not
       // used as a silent fallback (#2449; align Electerm/OpenSSH/WinSCP).
-      // Session-backed clients expose fastPut on the wrapper (→ sftp.fastPut);
-      // also accept raw sftp.fastPut when the high-level method is missing.
+      // Prefer a disposable SFTP channel so cancelSftpUpload can abort mid-transfer.
       let tempPath = null;
       let lastProgressTime = Date.now();
       let lastTransferredBytes = 0;
+      let lastProgressSentTime = 0;
+      let lastProgressSentBytes = 0;
+      const PROGRESS_THROTTLE_MS = 100;
+      const PROGRESS_THROTTLE_BYTES = 1024 * 1024;
 
-      activeSftpUploads.set(transferId, { cancelled: false, stream: null });
+      const transferControl = {
+        cancelled: false,
+        abort: null,
+      };
+      activeSftpUploads.set(transferId, {
+        cancelled: false,
+        stream: null,
+        transfer: transferControl,
+      });
 
       try {
         tempPath = await tempDirBridge.getTempFilePath(
           `sftp-upload-${transferId || Date.now()}.bin`,
         );
         await fs.promises.writeFile(tempPath, buffer);
-        if (activeSftpUploads.get(transferId)?.cancelled) {
+        if (activeSftpUploads.get(transferId)?.cancelled || transferControl.cancelled) {
           throw new Error("Upload cancelled");
         }
 
-        const step = (transferred) => {
-          if (activeSftpUploads.get(transferId)?.cancelled) return;
+        const step = (transferred, _chunk, total) => {
+          if (activeSftpUploads.get(transferId)?.cancelled || transferControl.cancelled) return;
           const now = Date.now();
           const elapsed = (now - lastProgressTime) / 1000;
           let speed = 0;
@@ -547,31 +558,51 @@ function createFileOpsApi(ctx) {
             lastProgressTime = now;
             lastTransferredBytes = transferred;
           }
-          emitProgress(transferred, speed);
+          const totalSize = Number(total) > 0 ? Number(total) : totalBytes;
+          const isComplete = transferred >= totalSize;
+          const timeSinceLast = now - lastProgressSentTime;
+          const bytesSinceLast = transferred - lastProgressSentBytes;
+          if (
+            isComplete
+            || timeSinceLast >= PROGRESS_THROTTLE_MS
+            || bytesSinceLast >= PROGRESS_THROTTLE_BYTES
+          ) {
+            emitProgress(transferred, speed);
+            lastProgressSentTime = now;
+            lastProgressSentBytes = transferred;
+          }
         };
-        const putOptions = {
+
+        // Open a disposable channel when possible so cancel can end it.
+        // pipelinedUploadLocalFile is injected from sftpBridge (ctx).
+        if (typeof pipelinedUploadLocalFile !== "function") {
+          throw new Error("SFTP pipelined upload helper is not available");
+        }
+        const abortController = typeof AbortController === "function"
+          ? new AbortController()
+          : null;
+        transferControl.abort = () => {
+          transferControl.cancelled = true;
+          try { abortController?.abort(); } catch { /* ignore */ }
+        };
+
+        await pipelinedUploadLocalFile(client, tempPath, encodedPath, {
           chunkSize: TRANSFER_CHUNK_SIZE,
           concurrency: UPLOAD_TRANSFER_CONCURRENCY,
           step,
-        };
-
-        if (typeof client.fastPut === "function") {
-          await client.fastPut(tempPath, encodedPath, putOptions);
-        } else {
-          const sftp = await requireSftpChannel(client);
-          if (typeof sftp.fastPut !== "function") {
-            throw new Error(
-              "SFTP pipelined upload (fastPut) is not available on this session",
-            );
-          }
-          await new Promise((resolve, reject) => {
-            sftp.fastPut(tempPath, encodedPath, putOptions, (err) => {
-              if (err) reject(err);
-              else resolve();
-            });
-          });
-        }
-        if (activeSftpUploads.get(transferId)?.cancelled) {
+          signal: abortController?.signal || null,
+          onChannel(sftp, control) {
+            // Prefer channel end for cancel when the channel is disposable.
+            if (control?.dispose) {
+              transferControl.abort = () => {
+                transferControl.cancelled = true;
+                try { control.abort?.(); } catch { /* ignore */ }
+                try { sftp.end?.(); } catch { /* ignore */ }
+              };
+            }
+          },
+        });
+        if (activeSftpUploads.get(transferId)?.cancelled || transferControl.cancelled) {
           throw new Error("Upload cancelled");
         }
 
@@ -580,9 +611,16 @@ function createFileOpsApi(ctx) {
         return { success: true, transferId };
       } catch (err) {
         const uploadState = activeSftpUploads.get(transferId);
-        if (uploadState?.cancelled || err.message === "Upload cancelled") {
-          const contents = electronModule.webContents.fromId(event.sender.id);
-          contents?.send("netcatty:upload:cancelled", { transferId });
+        if (
+          uploadState?.cancelled
+          || transferControl.cancelled
+          || err.message === "Upload cancelled"
+          || /abort/i.test(err.message || "")
+        ) {
+          try {
+            const contents = electronModule.webContents.fromId(event?.sender?.id);
+            contents?.send("netcatty:upload:cancelled", { transferId });
+          } catch { /* ignore */ }
           return { success: false, transferId, cancelled: true };
         }
         emitError(err.message);

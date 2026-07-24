@@ -743,23 +743,12 @@ function createSessionBackedSftpClient(sessionId, sshClient, options = {}) {
      * Session-backed clients are not ssh2-sftp-client instances and do not
      * inherit client.fastPut — expose the channel method so uploadLocal /
      * writeSftpBinaryWithProgress keep the high-throughput path (#2449).
+     *
+     * When `options.signal` is provided, open a disposable SFTP channel so
+     * abort can end the transfer without killing the browse session.
      */
     async fastPut(localPath, remotePath, options = {}) {
-      const sftp = await requireSftpChannel(client);
-      if (typeof sftp.fastPut !== "function") {
-        throw new Error(
-          "SFTP pipelined upload (fastPut) is not available on this session",
-        );
-      }
-      const signal = options?.signal || null;
-      throwIfAborted(signal);
-      const { signal: _ignoredSignal, ...fastPutOptions } = options || {};
-      return new Promise((resolve, reject) => {
-        sftp.fastPut(localPath, remotePath, fastPutOptions, (err) => {
-          if (err) reject(err);
-          else resolve();
-        });
-      });
+      return runAbortableFastPut(client, localPath, remotePath, options);
     },
     async stat(remotePath) {
       const sftp = await requireSftpChannel(client);
@@ -1017,29 +1006,103 @@ async function downloadSftpToLocal(_event, payload) {
 }
 
 /**
- * Pipelined local→remote upload.
- * - ssh2-sftp-client: client.fastPut
- * - session-backed (openForSession/reuse): client.fastPut wraps sftp.fastPut
- * - last resort: raw channel after requireSftpChannel
- * Never falls back to serial createWriteStream/put (#2449).
+ * Open a disposable SFTP channel for cancelable pipelined uploads when possible.
+ * Falls back to the shared browse channel (not disposable) for sudo / missing SSH client.
  */
-async function pipelinedUploadLocalFile(client, localPath, remotePath, options = {}) {
-  if (typeof client?.fastPut === "function") {
-    return client.fastPut(localPath, remotePath, options);
+async function acquireUploadSftpChannel(client, options = {}) {
+  if (client?.__netcattySudoMode) {
+    const sftp = await requireSftpChannel(client, options);
+    return { sftp, dispose: false };
   }
-  const sftp = await requireSftpChannel(client);
-  if (typeof sftp.fastPut !== "function") {
+  const sshClient = client?.client;
+  if (sshClient && typeof sshClient.sftp === "function") {
+    const sftp = await tryOpenSftpChannel(client, options);
+    if (sftp && typeof sftp.fastPut === "function") {
+      return { sftp, dispose: true };
+    }
+    try { sftp?.end?.(); } catch { /* ignore */ }
+  }
+  const shared = await requireSftpChannel(client, options);
+  return { sftp: shared, dispose: false };
+}
+
+/**
+ * Run ssh2 SFTP fastPut with optional AbortSignal.
+ * When dispose is true, abort/end closes only this channel.
+ */
+function runFastPutOnChannel(sftp, localPath, remotePath, options = {}, channelControl = {}) {
+  const { dispose = false, signal = null } = channelControl;
+  throwIfAborted(signal);
+  if (typeof sftp?.fastPut !== "function") {
     throw new Error(
       "SFTP pipelined upload (fastPut) is not available on this session",
     );
   }
-  const { signal: _ignoredSignal, ...fastPutOptions } = options || {};
+  const { signal: _ignoredSignal, onChannel, ...fastPutOptions } = options || {};
   return new Promise((resolve, reject) => {
-    sftp.fastPut(localPath, remotePath, fastPutOptions, (err) => {
+    let settled = false;
+    const finish = (err) => {
+      if (settled) return;
+      settled = true;
+      if (signal && onAbort) {
+        try { signal.removeEventListener("abort", onAbort); } catch { /* ignore */ }
+      }
+      if (dispose) {
+        try { sftp.end?.(); } catch { /* ignore */ }
+      }
       if (err) reject(err);
       else resolve();
-    });
+    };
+    const onAbort = () => {
+      try { if (dispose) sftp.end?.(); } catch { /* ignore */ }
+      finish(createAbortError(signal, "Upload cancelled"));
+    };
+    if (typeof onChannel === "function") {
+      try { onChannel(sftp, { dispose, abort: onAbort }); } catch { /* ignore */ }
+    }
+    if (signal) {
+      if (signal.aborted) {
+        onAbort();
+        return;
+      }
+      signal.addEventListener("abort", onAbort, { once: true });
+    }
+    try {
+      sftp.fastPut(localPath, remotePath, fastPutOptions, (err) => {
+        if (signal?.aborted) {
+          finish(createAbortError(signal, "Upload cancelled"));
+          return;
+        }
+        finish(err || null);
+      });
+    } catch (err) {
+      finish(err);
+    }
   });
+}
+
+async function runAbortableFastPut(client, localPath, remotePath, options = {}) {
+  const signal = options?.signal || null;
+  throwIfAborted(signal);
+  const { sftp, dispose } = await acquireUploadSftpChannel(client, { signal });
+  return runFastPutOnChannel(sftp, localPath, remotePath, options, { dispose, signal });
+}
+
+/**
+ * Pipelined local→remote upload.
+ * - Prefer disposable-channel fastPut when abortable / session-backed
+ * - ssh2-sftp-client.fastPut when no signal and method exists
+ * Never falls back to serial createWriteStream/put (#2449).
+ */
+async function pipelinedUploadLocalFile(client, localPath, remotePath, options = {}) {
+  const signal = options?.signal || null;
+  // Always use abortable channel path when a signal is present, or when the
+  // client is session-backed (wrapper fastPut → disposable channel).
+  if (signal || client?.__netcattySessionBacked || typeof client?.fastPut !== "function") {
+    return runAbortableFastPut(client, localPath, remotePath, options);
+  }
+  // ssh2-sftp-client without abort: native fastPut on the shared connection.
+  return client.fastPut(localPath, remotePath, options);
 }
 
 async function uploadLocalToSftp(_event, payload) {
@@ -1190,6 +1253,7 @@ const fileOpsApi = createFileOpsApi({
   realpathAsync, statAsync, lstatAsync, readdirAsync, mkdirAsync, rmdirAsync, unlinkAsync, openFileAsync,
   writeFileChunkAsync, closeFileAsync, createAbortError, copySftpEncodingState, clearSftpEncodingState,
   safeSend, tempDirBridge, randomUUID,
+  pipelinedUploadLocalFile,
 });
 const {
   listSftp,

@@ -196,6 +196,77 @@ test("session-backed writeSftpBinaryWithProgress uses pipelined fastPut", async 
   assert.deepEqual(remoteFiles.get("/home/alice/mem.bin"), payload);
 });
 
+test("pipelinedUploadLocalFile aborts in-flight fastPut when AbortSignal fires", async () => {
+  const tempRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-abort-fastput-"));
+  const localPath = path.join(tempRoot, "abort.bin");
+  await fs.promises.writeFile(localPath, Buffer.alloc(64 * 1024, 3));
+
+  let ended = false;
+  let fastPutStarted = false;
+  const channel = {
+    readdir(_p, cb) { cb(null, []); },
+    mkdir(_p, cb) { cb(null); },
+    unlink(_p, cb) { cb(null); },
+    stat(_p, cb) {
+      const err = new Error("ENOENT");
+      err.code = 2;
+      cb(err);
+    },
+    fastPut(_local, _remote, _opts, callback) {
+      fastPutStarted = true;
+      // Stay pending until end() cancels the transfer.
+      this._pendingCallback = callback;
+    },
+    end() {
+      ended = true;
+      const cb = this._pendingCallback;
+      this._pendingCallback = null;
+      if (typeof cb === "function") {
+        const err = new Error("SFTP channel closed");
+        queueMicrotask(() => cb(err));
+      }
+    },
+  };
+  const bareClient = {
+    __netcattySessionBacked: true,
+    sftp: null,
+    client: {
+      sftp(cb) {
+        cb(null, channel);
+      },
+    },
+  };
+
+  sftpBridge.init({
+    electronModule: {},
+    sessions: new Map(),
+    sftpClients: new Map(),
+  });
+
+  const controller = new AbortController();
+  const uploadPromise = sftpBridge.pipelinedUploadLocalFile(
+    bareClient,
+    localPath,
+    "/tmp/abort-out.bin",
+    {
+      concurrency: UPLOAD_TRANSFER_CONCURRENCY,
+      chunkSize: TRANSFER_CHUNK_SIZE,
+      signal: controller.signal,
+    },
+  );
+
+  // Allow fastPut to start, then abort.
+  await new Promise((r) => setImmediate(r));
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(fastPutStarted, true);
+  controller.abort();
+
+  await assert.rejects(uploadPromise, /abort|cancel/i);
+  assert.equal(ended, true);
+
+  await fs.promises.rm(tempRoot, { recursive: true, force: true });
+});
+
 test("pipelinedUploadLocalFile falls back to raw sftp.fastPut when client.fastPut is missing", async () => {
   const tempRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-raw-fastput-"));
   const localPath = path.join(tempRoot, "raw.bin");
