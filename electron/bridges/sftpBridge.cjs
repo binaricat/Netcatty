@@ -1383,6 +1383,42 @@ async function uploadLocalToSftp(_event, payload) {
     const backend = getScpBackendForClient(client);
     const encodingRaw = resolveEncodingForRequest(payload.sftpId, payload.encoding);
     const encoding = encodingRaw === "auto" ? "utf-8" : encodingRaw;
+
+    // Symlinks must be written in-place so scp follows the link target. Staging
+    // + rename would replace the link node itself (Codex PR review).
+    let existingIsSymlink = false;
+    try {
+      const existing = await backend.stat(payload.remotePath, { encoding });
+      if (existing?.isDirectory) {
+        throw new Error(`Remote path is a directory: ${payload.remotePath}`);
+      }
+      existingIsSymlink = !!(
+        existing?.isSymbolicLink
+        || existing?.isSymlink
+        || existing?.type === "symlink"
+      );
+    } catch (statErr) {
+      if (/directory/i.test(statErr?.message || "")) throw statErr;
+      // ENOENT / missing is fine — fall through to staged create.
+    }
+
+    if (existingIsSymlink) {
+      try {
+        await backend.uploadFile(payload.localPath, payload.remotePath, {
+          transfer,
+          encoding,
+          signal: payload.abortSignal || null,
+        });
+        throwIfAborted(payload.abortSignal);
+        if (transfer?.cancelled) {
+          throw createAbortError(payload.abortSignal, "Transfer cancelled");
+        }
+        return { success: true, remotePath: payload.remotePath };
+      } finally {
+        try { transfer?.detachAbortSignal?.(); } catch { /* ignore */ }
+      }
+    }
+
     // Upload to a staged remote name, then rename into place so a cancelled or
     // failed transfer cannot leave a truncated original (matches SFTP path).
     const stagedRemotePath = buildStagedRemotePath(payload.remotePath);
