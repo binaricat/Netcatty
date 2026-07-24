@@ -578,6 +578,9 @@ function createFileOpsApi(ctx) {
               if (control?.dispose) {
                 transferControl.abort = () => {
                   transferControl.cancelled = true;
+                  // Keep AbortSignal aborted so post-upload throwIfAborted
+                  // blocks staged rename/promotion after a late cancel.
+                  try { abortController?.abort(); } catch { /* ignore */ }
                   try { control.abort?.(); } catch { /* ignore */ }
                   try { sftp.end?.(); } catch { /* ignore */ }
                 };
@@ -596,6 +599,7 @@ function createFileOpsApi(ctx) {
               if (control?.dispose) {
                 transferControl.abort = () => {
                   transferControl.cancelled = true;
+                  try { abortController?.abort(); } catch { /* ignore */ }
                   try { control.abort?.(); } catch { /* ignore */ }
                   try { sftp.end?.(); } catch { /* ignore */ }
                 };
