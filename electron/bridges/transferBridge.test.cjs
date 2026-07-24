@@ -816,7 +816,10 @@ test("range-failure fallback truncates sparse local tail before streaming", asyn
   let firstReadCallback = null;
   let fallbackStart = null;
   let sizeAtFallback = null;
+  const transferId = "download-sparse-tail";
   const targetPath = path.join(tempDir, "sparse.bin");
+  // Resumable downloads stage under the transfer temp path, not the final target.
+  const stagedPath = tempDirBridge.getTransferTempFilePath(transferId, path.basename(targetPath));
   const fastSftp = createFastSftp({
     open(_remotePath, _flags, callback) {
       callback(null, Buffer.from("remote-handle"));
@@ -842,11 +845,11 @@ test("range-failure fallback truncates sparse local tail before streaming", asyn
     sftp: createFastSftp({
       createReadStream(_remotePath, options) {
         fallbackStart = options.start;
-        // Capture staged size when stream fallback opens (post-truncate).
+        // Capture *staged* size when stream fallback opens (post-truncate).
         try {
-          sizeAtFallback = fs.statSync(targetPath).size;
+          sizeAtFallback = fs.statSync(stagedPath).size;
         } catch {
-          sizeAtFallback = 0;
+          sizeAtFallback = -1;
         }
         return Readable.from(payload.subarray(options.start || 0));
       },
@@ -865,7 +868,7 @@ test("range-failure fallback truncates sparse local tail before streaming", asyn
   const result = await transferBridge.startTransfer(
     { sender: createSender() },
     {
-      transferId: "download-sparse-tail",
+      transferId,
       sourcePath: "/tmp/source.bin",
       targetPath,
       sourceType: "sftp",
@@ -878,9 +881,108 @@ test("range-failure fallback truncates sparse local tail before streaming", asyn
 
   assert.equal(result.error, undefined, result.error);
   assert.equal(fallbackStart, 0);
-  // Contiguous checkpoint never advanced past 0; sparse tail must be truncated.
+  // Contiguous checkpoint never advanced past 0; sparse tail must be truncated
+  // on the staged .part (final target is only written at promote time).
   assert.equal(sizeAtFallback, 0);
   assert.deepEqual(await fs.promises.readFile(targetPath), payload);
+});
+
+test("S2S upload-phase fallback does not truncate the complete local temp source", async (t) => {
+  const transferId = `s2s-no-truncate-${crypto.randomUUID()}`;
+  const payload = Buffer.alloc(64 * 1024, 23);
+  const localStage = tempDirBridge.getTransferTempFilePath(transferId, "payload.bin");
+  await fs.promises.writeFile(localStage, payload);
+  t.after(async () => {
+    await fs.promises.unlink(localStage).catch(() => {});
+  });
+
+  let sizeAtFallback = null;
+  let fallbackStart = null;
+  let remote = Buffer.alloc(0);
+  const fastSftp = createFastSftp({
+    open(_remotePath, _flags, callback) {
+      callback(null, Buffer.from("remote-handle"));
+    },
+    write(_handle, _buffer, _offset, _length, position, callback) {
+      if (position === 0) {
+        callback(new Error("first upload range failed"));
+        return;
+      }
+      callback(null);
+    },
+    close(_handle, callback) {
+      callback(null);
+    },
+  });
+  const sourceClient = {
+    sftp: createFastSftp({}),
+    stat: async () => ({ size: payload.length }),
+  };
+  const targetClient = {
+    sftp: createFastSftp({
+      createWriteStream(_path, options = {}) {
+        fallbackStart = options.start || 0;
+        try {
+          sizeAtFallback = fs.statSync(localStage).size;
+        } catch {
+          sizeAtFallback = -1;
+        }
+        let offset = options.start || 0;
+        return new Writable({
+          write(chunk, _encoding, callback) {
+            if (remote.length < offset) {
+              remote = Buffer.concat([remote, Buffer.alloc(offset - remote.length)]);
+            }
+            remote = Buffer.concat([
+              remote.subarray(0, offset),
+              Buffer.from(chunk),
+              remote.subarray(offset + chunk.length),
+            ]);
+            offset += chunk.length;
+            callback();
+          },
+        });
+      },
+    }),
+    stat: async () => ({ size: remote.length }),
+    rename: async () => {},
+    delete: async () => {},
+    client: {
+      sftp(callback) {
+        callback(null, fastSftp);
+      },
+    },
+  };
+  transferBridge.init({
+    sftpClients: new Map([
+      ["source", sourceClient],
+      ["target", targetClient],
+    ]),
+  });
+
+  const result = await transferBridge.startTransfer(
+    { sender: createSender() },
+    {
+      transferId,
+      sourcePath: "/source/payload.bin",
+      targetPath: "/target/payload.bin",
+      sourceType: "sftp",
+      targetType: "sftp",
+      sourceSftpId: "source",
+      targetSftpId: "target",
+      totalBytes: payload.length,
+      resumable: true,
+      resumeStage: "upload",
+      downloadCheckpointBytes: payload.length,
+      uploadCheckpointBytes: 0,
+      checkpointBytes: 0,
+    },
+  );
+
+  // Capture happens when stream fallback opens — local temp must still be full.
+  assert.equal(sizeAtFallback, payload.length);
+  assert.equal(fallbackStart, 0);
+  assert.equal(result.error, undefined, result.error);
 });
 
 test("cancelled fast resumable downloads release their isolated channel", async (t) => {

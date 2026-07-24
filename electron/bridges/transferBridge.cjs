@@ -503,16 +503,13 @@ async function truncateRemoteStagedToCheckpoint(client, stagedRemote, checkpoint
 
 async function prepareStreamFallbackAfterRangeFailure(transfer, client) {
   const checkpoint = Math.max(0, Number(transfer?.checkpointBytes) || 0);
-  // Only truncate partial *target* staging. In SFTP→SFTP copies, stagedLocalPath
+  // Truncate partial *target* staging only. In SFTP→SFTP copies, stagedLocalPath
   // is the fully-downloaded temp *source* during the upload phase — never shrink it.
+  // Direct transfers keep resumeStage "direct"; S2S download uses "download".
+  // Anything other than "upload" with a staged local path is a partial target.
   const localIsPartialTarget =
-    transfer?.stagedLocalPath
-    && transfer.resumeStage !== "upload"
-    && (
-      transfer.resumeStage === "download"
-      || transfer.sourceType === "sftp" && transfer.targetType === "local"
-      || transfer.sourceType === "local" && transfer.targetType === "local"
-    );
+    Boolean(transfer?.stagedLocalPath)
+    && transfer.resumeStage !== "upload";
   if (localIsPartialTarget) {
     await truncateStagedPathToCheckpoint(transfer.stagedLocalPath, checkpoint);
   }
@@ -1327,9 +1324,13 @@ async function startTransferNow(event, payload, onProgress) {
     uploadCheckpointBytes: Math.max(0, Number(payload.uploadCheckpointBytes) || 0),
     sourceFingerprint: payload.sourceFingerprint,
     sourceType,
+    targetType,
     sourcePath,
+    targetPath,
     sourceSftpId,
+    targetSftpId,
     sourceEncoding,
+    targetEncoding,
     readStream: null,
     writeStream: null,
     abort: null,
