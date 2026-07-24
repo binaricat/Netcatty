@@ -78,6 +78,14 @@ test("issue implementation publishing tolerates competing automation runs", () =
   assert.match(publishJob[0], /not permitted to create/);
 });
 
+test("clean Codex handoff updates labels without GraphQL-only organization scopes", () => {
+  const markReady = cursorWorkflow.match(/\n      - name: Mark PR ready after clean Codex[\s\S]*?(?=\n      - name: Give up after max rounds)/);
+  assert.ok(markReady, "mark-ready step must exist before give-up step");
+  assert.match(markReady[0], /gh api/);
+  assert.match(markReady[0], /issues\/\$\{pull\}\/labels/);
+  assert.doesNotMatch(markReady[0], /gh pr edit/);
+});
+
 test("ET binary validation runs once and retries transient container pulls", () => {
   assert.match(etWorkflow, /push:\s*\n\s*branches:\s*\n\s*- main/);
   assert.doesNotMatch(etWorkflow, /branches:\s*\n\s*- "\*\*"/);

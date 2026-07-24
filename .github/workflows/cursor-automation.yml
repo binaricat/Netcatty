@@ -1414,9 +1414,12 @@ jobs:
             fi
           }
           if [[ "$ready_blocked" == "true" ]]; then
-            gh pr edit "$PULL_NUMBER" --repo "$GITHUB_REPOSITORY" \
-              --remove-label "automation:codex-loop" \
-              --add-label "automation:needs-human" 2>/dev/null || true
+            gh api --method DELETE \
+              "repos/${GITHUB_REPOSITORY}/issues/${PULL_NUMBER}/labels/automation%3Acodex-loop" \
+              >/dev/null 2>&1 || true
+            gh api --method POST \
+              "repos/${GITHUB_REPOSITORY}/issues/${PULL_NUMBER}/labels" \
+              -f 'labels[]=automation:needs-human' >/dev/null 2>&1 || true
             gh pr comment "$PULL_NUMBER" --repo "$GITHUB_REPOSITORY" --body \
               "Codex reported no major issues, but the automation token cannot change draft state. A maintainer can mark this PR ready." 2>/dev/null || true
             exit 0
@@ -1430,35 +1433,22 @@ jobs:
           fi
           # Terminal label transition: drop codex-loop, add codex-clean (pure helper).
           node -e '
-            const { execSync } = require("node:child_process");
+            const { execFileSync } = require("node:child_process");
             const auto = require(process.env.RUNNER_TEMP + "/cursor-automation.cjs");
             const pull = process.env.PULL_NUMBER;
             const repo = process.env.GITHUB_REPOSITORY;
-            const raw = execSync(
-              `gh pr view ${pull} --repo ${repo} --json labels -q "[.labels[].name]"`,
+            const raw = execFileSync(
+              "gh",
+              ["api", `repos/${repo}/issues/${pull}`, "--jq", "[.labels[].name]"],
               { encoding: "utf8" },
             );
             const existing = JSON.parse(raw);
             const next = auto.nextCodexTerminalLabels(existing, "mark_ready");
-            const remove = existing.filter((l) => !next.includes(l));
-            const add = next.filter((l) => !existing.includes(l));
-            for (const name of remove) {
-              try {
-                execSync(
-                  `gh pr edit ${pull} --repo ${repo} --remove-label ${JSON.stringify(name)}`,
-                  { stdio: "inherit" },
-                );
-              } catch (err) {
-                console.error("Failed to remove label", name, err.message);
-                process.exit(1);
-              }
-            }
-            if (add.length) {
-              const args = add.map((n) => `--add-label ${JSON.stringify(n)}`).join(" ");
-              execSync(`gh pr edit ${pull} --repo ${repo} ${args}`, {
-                stdio: "inherit",
-              });
-            }
+            execFileSync(
+              "gh",
+              ["api", "--method", "PUT", `repos/${repo}/issues/${pull}/labels`, "--input", "-"],
+              { input: JSON.stringify({ labels: next }), stdio: ["pipe", "inherit", "inherit"] },
+            );
             console.log("mark_ready labels:", next.join(", "));
           '
           # Confirm draft=false before claiming success.
