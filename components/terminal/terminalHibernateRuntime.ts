@@ -332,14 +332,11 @@ export async function applyHibernateWakeToTerminal(
 }
 
 export function nudgeAlternateScreenRedraw(term: XTerm): void {
+  // A same-size resize does not notify the PTY, but xterm still synchronously
+  // drains its private parser buffer before returning. During a large TUI frame
+  // that can interrupt the normal write callback and strand renderer flow.
+  // Public refresh is sufficient to repaint the already-parsed viewport.
   refreshTerminalViewport(term);
-  const cols = term.cols;
-  const rows = term.rows;
-  if (cols > 0 && rows > 0) {
-    // Many full-screen TUIs (htop, vim) repaint on a size "change" even when dimensions match.
-    term.resize(cols, rows);
-    refreshTerminalViewport(term);
-  }
 }
 
 export function buildHibernateWakePayload(

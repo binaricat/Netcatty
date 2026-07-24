@@ -5,6 +5,7 @@ import { buildTerminalContextSnapshotText } from "../../domain/terminalContextRe
 import {
   applyAuthoritativeHibernateSnapshot,
   isTerminalAlternateScreenActive,
+  nudgeAlternateScreenRedraw,
   readTerminalHibernateContext,
   refreshTerminalViewport,
   resolveHibernateSerializeOptions,
@@ -235,6 +236,22 @@ test("refreshTerminalViewport refreshes the full viewport", () => {
   };
   refreshTerminalViewport(term as never);
   assert.deepEqual(refreshed, [0, 23]);
+});
+
+test("alternate-screen redraw never forces xterm parser flushing through resize", () => {
+  const refreshed: Array<[number, number]> = [];
+  const term = {
+    cols: 80,
+    rows: 24,
+    refresh: (start: number, end: number) => refreshed.push([start, end]),
+    resize: () => {
+      throw new Error("redraw must not resize while a TUI frame may still be pending");
+    },
+  };
+
+  nudgeAlternateScreenRedraw(term as never);
+
+  assert.deepEqual(refreshed, [[0, 23]]);
 });
 
 test("serializeTerminalForHibernate preserves alternate screen when serialize throws", async () => {

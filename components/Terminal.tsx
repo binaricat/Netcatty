@@ -186,6 +186,7 @@ import {
 } from "./terminal/runtime/terminalSessionAttachment";
 import {
   flushPendingTerminalWritesBeforeHibernate,
+  hasPendingTerminalWrites,
   writeLocalTerminalDataInOrder,
 } from "./terminal/runtime/terminalUnfocusedRepaint";
 import {
@@ -2391,7 +2392,13 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     });
   }, [reuseConnectionFromSessionId, sessionId, terminalBackend]);
 
-  const safeFit = (options?: { force?: boolean; requireVisible?: boolean; immediate?: boolean; allowHidden?: boolean }) => {
+  type SafeFitOptions = { force?: boolean; requireVisible?: boolean; immediate?: boolean; allowHidden?: boolean };
+  const pendingWriteSafeFitRef = useRef<{
+    term: XTerm;
+    options: SafeFitOptions;
+  } | null>(null);
+
+  const safeFit = (options?: SafeFitOptions) => {
     const fitAddon = fitAddonRef.current;
     if (!fitAddon) return;
     if (!isRendererActiveRef.current && !options?.allowHidden) {
@@ -2424,6 +2431,36 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       try {
         const term = termRef.current;
         if (!term) return;
+
+        if (hasPendingTerminalWrites(term)) {
+          let pending = pendingWriteSafeFitRef.current;
+          if (pending?.term === term) {
+            pending.options = {
+              force: pending.options.force || options?.force,
+              requireVisible: pending.options.requireVisible || options?.requireVisible,
+              immediate: pending.options.immediate || options?.immediate,
+              allowHidden: pending.options.allowHidden || options?.allowHidden,
+            };
+            return;
+          }
+
+          pending = { term, options: { ...options } };
+          pendingWriteSafeFitRef.current = pending;
+          void flushPendingTerminalWritesBeforeHibernate(term).then((settled) => {
+            if (pendingWriteSafeFitRef.current !== pending || termRef.current !== term) return;
+            if (settled) {
+              pendingWriteSafeFitRef.current = null;
+              safeFit(pending.options);
+              return;
+            }
+            setTimeout(() => {
+              if (pendingWriteSafeFitRef.current !== pending || termRef.current !== term) return;
+              pendingWriteSafeFitRef.current = null;
+              safeFit(pending.options);
+            }, 50);
+          });
+          return;
+        }
 
         const buffer = term.buffer.active;
         const wasPinnedToBottom = buffer.viewportY >= buffer.baseY;

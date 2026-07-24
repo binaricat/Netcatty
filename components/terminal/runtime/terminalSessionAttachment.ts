@@ -87,7 +87,6 @@ import {
   teardownTerminalOutputPipeline,
 } from "./terminalOutputPipeline";
 import {
-  flushTerminalWriteBufferBypassingTimers,
   hasPendingTerminalWrites,
   maybeFlushTerminalWriteCoalescerWhenUnfocused,
   scheduleTerminalRepaintWhenUnfocused,
@@ -144,7 +143,6 @@ export const notePendingOutputScrollIfEnabled = (
 const terminalFlowControllers = new WeakMap<XTerm, OutputFlowController>();
 
 type TerminalSessionWriteOptions = CoalescedTerminalWriteOptions & {
-  flushXtermWriteBuffer?: boolean;
   perfTrace?: TerminalOutputPerfTrace | null;
   timestampDate?: Date;
 };
@@ -248,12 +246,10 @@ const summarizeLineTimestampPerf = (totals: LineTimestampPerfTotals) => ({
 });
 
 const flushTerminalWritesForBackgroundOutput = (term: XTerm): void => {
-  flushTerminalWriteBufferBypassingTimers(term);
   for (let pass = 0; pass < BACKGROUND_OUTPUT_FLUSH_MAX_PASSES; pass += 1) {
     if (!flushTerminalWriteQueueBypassingTimers(term)) {
       return;
     }
-    flushTerminalWriteBufferBypassingTimers(term);
   }
 };
 
@@ -293,10 +289,8 @@ const flushBeforeTimestampBoundary = (
 function flushHiddenPaneWritesNow(term: XTerm, isPaneVisible: () => boolean): void {
   if (isPaneVisible()) return;
   flushTerminalWriteCoalescer(term);
-  // Each background queue item flushes xterm's parser buffer itself. Leave the
-  // queue's zero-delay yield timers intact so a large hidden burst cannot turn
-  // the whole backlog into one long renderer task.
-  flushTerminalWriteBufferBypassingTimers(term);
+  // Leave both the queue's cooperative yield timer and xterm's parser timer
+  // intact so a large hidden burst cannot turn the backlog into one long task.
   if (!isPaneVisible() && hasPendingTerminalWrites(term)) {
     scheduleHiddenPaneDrain(term, isPaneVisible);
   }
@@ -461,14 +455,11 @@ export const writeSessionData = (
       writeSessionDataImmediate(ctx, term, batch, batchIngress, {
         ...writeOptions,
         deferStart: writeOptions?.deferStart ?? !isPaneCurrentlyVisible(),
-        flushXtermWriteBuffer: true,
         perfTrace: writeOptions?.preservePerfTrace === false ? null : perfTrace,
         timestampDate,
       });
       if (isPaneCurrentlyVisible()) {
         flushTerminalWritesForBackgroundOutput(term);
-      } else {
-        flushTerminalWriteBufferBypassingTimers(term);
       }
     };
     if (isPaneVisible) {
@@ -629,8 +620,7 @@ const writeSessionDataImmediate = (
       flushIpcAck(clearDeferredTerminalWriteAck(term));
     };
     const deferredBeforeWrite = getDeferredTerminalWriteAckBytes(term);
-    const deferFlowAck = !writeOptions.flushXtermWriteBuffer
-      && !forcePromptNewLine
+    const deferFlowAck = !forcePromptNewLine
       && shouldDeferTerminalWriteCallback(
         preparedDisplayData.length,
         deferredBeforeWrite,
@@ -678,9 +668,6 @@ const writeSessionDataImmediate = (
           enabled: resolveLiveHostShowLineTimestamps(ctx),
         },
       );
-      if (writeOptions.flushXtermWriteBuffer) {
-        flushTerminalWriteBufferBypassingTimers(term);
-      }
     };
 
     if (deferFlowAck) {

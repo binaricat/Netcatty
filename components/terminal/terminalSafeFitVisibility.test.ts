@@ -28,3 +28,13 @@ test('safeFit clears the WebGL atlas on pixel-only layout changes', () => {
     /if \(term\.cols !== dimensions\.cols \|\| term\.rows !== dimensions\.rows\) \{\s*term\.resize\(dimensions\.cols, dimensions\.rows\);\s*forceSyncRenderAfterResize\(term\);\s*\} else \{\s*[\s\S]*?xtermRuntimeRef\.current\?\.clearTextureAtlas\(\);\s*forceSyncRenderAfterResize\(term\);\s*\}/,
   );
 });
+
+test('safeFit waits for normal xterm callbacks before resizing', () => {
+  const pendingGuardIndex = source.indexOf('if (hasPendingTerminalWrites(term))');
+  const settleIndex = source.indexOf('flushPendingTerminalWritesBeforeHibernate(term)', pendingGuardIndex);
+  const resizeIndex = source.indexOf('term.resize(dimensions.cols, dimensions.rows)', pendingGuardIndex);
+
+  assert.ok(pendingGuardIndex >= 0);
+  assert.ok(settleIndex > pendingGuardIndex);
+  assert.ok(resizeIndex > settleIndex);
+});
