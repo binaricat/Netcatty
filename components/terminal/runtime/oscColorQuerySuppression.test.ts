@@ -2,10 +2,12 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  armOscColorQuerySuppressionForSession,
   beginOscColorQuerySuppressionForCommand,
   endOscColorQuerySuppressionForCommand,
   installOscColorQuerySuppression,
   isDockerLogsCommand,
+  registerOscColorQuerySuppressionArmer,
 } from './oscColorQuerySuppression.ts';
 
 type OscHandler = (data: string) => boolean | Promise<boolean>;
@@ -86,4 +88,22 @@ test('the next trusted non-log command restores ordinary color queries', () => {
   assert.equal(state.current, false);
   endOscColorQuerySuppressionForCommand(state);
   assert.equal(state.current, false);
+});
+
+test('broadcast peer sessions can be armed through the suppression registry', () => {
+  const peerState = { current: false };
+  const unregister = registerOscColorQuerySuppressionArmer(
+    'peer-session',
+    (command) => beginOscColorQuerySuppressionForCommand(peerState, command),
+  );
+
+  armOscColorQuerySuppressionForSession('peer-session', 'docker logs -f api');
+  assert.equal(peerState.current, true);
+
+  armOscColorQuerySuppressionForSession('peer-session', 'vim');
+  assert.equal(peerState.current, false);
+
+  unregister();
+  armOscColorQuerySuppressionForSession('peer-session', 'docker logs -f api');
+  assert.equal(peerState.current, false);
 });

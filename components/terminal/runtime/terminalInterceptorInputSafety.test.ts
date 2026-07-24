@@ -131,3 +131,22 @@ test("ordinary broadcast skips targets that are waiting for sensitive input", ()
     /if \(isTerminalSensitiveInputActive\(session\.id\)\) continue;[\s\S]*?writeToSession\(session\.id, data/u,
   );
 });
+
+test("broadcast Docker-log submissions arm OSC color-query suppression on peers", () => {
+  assert.match(
+    terminalLayerSource,
+    /isBroadcastEnabled\?\.\(broadcastWorkspaceId\)[\s\S]*?armOscColorQuerySuppressionForSession\(peer\.id, command\)/u,
+  );
+  assert.match(
+    terminalLayerSource,
+    /oscColorQuerySuppressionCommand !== undefined[\s\S]*?armOscColorQuerySuppressionForSession\(\s*session\.id,\s*options\.oscColorQuerySuppressionCommand/u,
+  );
+  assert.match(
+    terminalSource,
+    /registerOscColorQuerySuppressionArmer\(\s*sessionId,\s*\(command\) => beginOscColorQuerySuppressionForCommand\(\s*suppressOscColorQueriesForActiveCommandRef,\s*command/u,
+  );
+  assert.match(
+    terminalSource,
+    /oscColorQuerySuppressionCommand: command/u,
+  );
+});

@@ -40,6 +40,7 @@ import { applySessionFontSizeToHost } from '../domain/terminalAppearance';
 import { resolveHostAutofillPassword } from '../domain/sshAuth';
 import { listPasswordPromptFillCandidates } from '../domain/passwordPromptAssist';
 import { isTerminalSensitiveInputActive } from './terminal/runtime/terminalSensitiveInputRegistry';
+import { armOscColorQuerySuppressionForSession } from './terminal/runtime/oscColorQuerySuppression';
 import {
   resolveEffectiveTerminalHost,
   resolveTerminalChainHosts,
@@ -965,6 +966,12 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
         continue;
       }
       if (isTerminalSensitiveInputActive(session.id)) continue;
+      if (options?.oscColorQuerySuppressionCommand !== undefined) {
+        armOscColorQuerySuppressionForSession(
+          session.id,
+          options.oscColorQuerySuppressionCommand,
+        );
+      }
       terminalBackend.writeToSession(session.id, data, {
         automated: true,
         sensitive: false,
@@ -978,8 +985,20 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   const handleCommandSubmitted = useCallback((command: string, _hostId: string, _hostLabel: string, sessionId: string) => {
     applySessionCodingCliProviderFromCommand(sessionId, command);
 
+    // Broadcast peers receive submitted bytes via writeToSession and never run
+    // the source command-submission path, so Docker-log OSC suppression must be
+    // armed here when broadcast mode is on for the workspace.
+    const sourceSession = sessionsRef.current.find((candidate) => candidate.id === sessionId);
+    const broadcastWorkspaceId = sourceSession?.workspaceId;
+    if (broadcastWorkspaceId && isBroadcastEnabled?.(broadcastWorkspaceId)) {
+      for (const peer of sessionsRef.current) {
+        if (peer.workspaceId !== broadcastWorkspaceId || peer.id === sessionId) continue;
+        armOscColorQuerySuppressionForSession(peer.id, command);
+      }
+    }
+
     const tabId = activeTabIdRef.current;
-    const session = sessionsRef.current.find((candidate) => candidate.id === sessionId);
+    const session = sourceSession;
     if (!session || !canReuseTerminalConnection(session)) return;
     const sessionHost = sessionHostsMapRef.current.get(sessionId);
     const visibleSftpHost = tabId && sidePanelOpenTabsRef.current.get(tabId) === 'sftp'
@@ -1022,7 +1041,13 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       },
     });
     cwdProbeCancelersRef.current.set(sessionId, cancelProbe);
-  }, [applySessionCodingCliProviderFromCommand, handleTerminalCwdChange, restoreTerminalCwd, terminalBackend]);
+  }, [
+    applySessionCodingCliProviderFromCommand,
+    handleTerminalCwdChange,
+    isBroadcastEnabled,
+    restoreTerminalCwd,
+    terminalBackend,
+  ]);
 
   const handleCommandExecuted = useCallback((command: string, hostId: string, hostLabel: string, sessionId: string) => {
     onCommandExecuted?.(command, hostId, hostLabel, sessionId);

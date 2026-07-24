@@ -135,6 +135,7 @@ import {
   beginOscColorQuerySuppression,
   beginOscColorQuerySuppressionForCommand,
   endOscColorQuerySuppressionForCommand,
+  registerOscColorQuerySuppressionArmer,
 } from "./terminal/runtime/oscColorQuerySuppression";
 import { clearKittyKeyboardBroadcastSession } from "./terminal/runtime/kittyKeyboardBroadcast";
 import { registerTerminalSensitiveInputReader } from "./terminal/runtime/terminalSensitiveInputRegistry";
@@ -454,6 +455,13 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   const onSessionExitRef = useRef(onSessionExit);
   const commandBufferRef = useRef<string>("");
   const suppressOscColorQueriesForActiveCommandRef = useRef(false);
+  useEffect(() => registerOscColorQuerySuppressionArmer(
+    sessionId,
+    (command) => beginOscColorQuerySuppressionForCommand(
+      suppressOscColorQueriesForActiveCommandRef,
+      command,
+    ),
+  ), [sessionId]);
   const promptLineBreakStateRef = useRef<PromptLineBreakState>(createPromptLineBreakState());
   const [hasMouseTracking, setHasMouseTracking] = useState(false);
   const mouseTrackingRef = useRef(false);
@@ -2608,6 +2616,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       onBroadcastInputRef.current(data, sessionId, {
         noAutoRun,
         ...(lineDelayMs ? { lineDelayMs } : {}),
+        ...(!noAutoRun ? { oscColorQuerySuppressionCommand: command } : {}),
       });
     }
 

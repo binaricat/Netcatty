@@ -64,6 +64,29 @@ export function endOscColorQuerySuppressionForCommand(state: { current: boolean 
   state.current = false;
 }
 
+const oscColorQuerySuppressionArmers = new Map<string, (command: string) => void>();
+
+/** Register a session's OSC color-query suppression armer for broadcast peers. */
+export function registerOscColorQuerySuppressionArmer(
+  sessionId: string,
+  armer: (command: string) => void,
+): () => void {
+  oscColorQuerySuppressionArmers.set(sessionId, armer);
+  return () => {
+    if (oscColorQuerySuppressionArmers.get(sessionId) === armer) {
+      oscColorQuerySuppressionArmers.delete(sessionId);
+    }
+  };
+}
+
+/** Arm (or clear) Docker-log OSC suppression on a broadcast target session. */
+export function armOscColorQuerySuppressionForSession(
+  sessionId: string,
+  command: string,
+): void {
+  oscColorQuerySuppressionArmers.get(sessionId)?.(command);
+}
+
 export function installOscColorQuerySuppression(
   parser: Pick<IParser, 'registerOscHandler'>,
   enabled: boolean | (() => boolean),

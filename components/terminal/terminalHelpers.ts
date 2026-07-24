@@ -27,6 +27,8 @@ export const AUTO_RUN_SNIPPET_LINE_DELAY_MS = 250;
 export interface TerminalBroadcastInputOptions {
   noAutoRun?: boolean;
   lineDelayMs?: number;
+  /** When set, arm Docker-log OSC color-query suppression on each broadcast peer. */
+  oscColorQuerySuppressionCommand?: string;
   kittyKeyboardInput?: KittyKeyboardBroadcastInput;
   kittyKeyboardTargetSessionIds?: string[];
 }
