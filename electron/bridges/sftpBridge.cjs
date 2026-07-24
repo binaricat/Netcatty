@@ -1028,7 +1028,10 @@ async function acquireUploadSftpChannel(client, options = {}) {
 
 /**
  * Run ssh2 SFTP fastPut with optional AbortSignal.
- * When dispose is true, abort/end closes only this channel.
+ * When dispose is true, abort ends only this channel and rejects immediately.
+ * When dispose is false (shared browse channel), abort marks cancelled but waits
+ * for the fastPut callback before rejecting so callers do not delete temp/staged
+ * files while writes are still in flight.
  */
 function runFastPutOnChannel(sftp, localPath, remotePath, options = {}, channelControl = {}) {
   const { dispose = false, signal = null } = channelControl;
@@ -1041,6 +1044,7 @@ function runFastPutOnChannel(sftp, localPath, remotePath, options = {}, channelC
   const { signal: _ignoredSignal, onChannel, ...fastPutOptions } = options || {};
   return new Promise((resolve, reject) => {
     let settled = false;
+    let abortRequested = false;
     const finish = (err) => {
       if (settled) return;
       settled = true;
@@ -1054,8 +1058,15 @@ function runFastPutOnChannel(sftp, localPath, remotePath, options = {}, channelC
       else resolve();
     };
     const onAbort = () => {
-      try { if (dispose) sftp.end?.(); } catch { /* ignore */ }
-      finish(createAbortError(signal, "Upload cancelled"));
+      abortRequested = true;
+      if (dispose) {
+        // Disposable channel: tearing it down stops fastPut and unblocks callers.
+        try { sftp.end?.(); } catch { /* ignore */ }
+        finish(createAbortError(signal, "Upload cancelled"));
+        return;
+      }
+      // Shared channel: cannot end without killing browse/sudo SFTP. Wait for
+      // fastPut's callback so temp-file cleanup does not race in-flight WRITEs.
     };
     if (typeof onChannel === "function") {
       try { onChannel(sftp, { dispose, abort: onAbort }); } catch { /* ignore */ }
@@ -1063,13 +1074,16 @@ function runFastPutOnChannel(sftp, localPath, remotePath, options = {}, channelC
     if (signal) {
       if (signal.aborted) {
         onAbort();
+        if (dispose || settled) return;
+        // Shared + already aborted before start: do not begin the transfer.
+        finish(createAbortError(signal, "Upload cancelled"));
         return;
       }
       signal.addEventListener("abort", onAbort, { once: true });
     }
     try {
       sftp.fastPut(localPath, remotePath, fastPutOptions, (err) => {
-        if (signal?.aborted) {
+        if (abortRequested || signal?.aborted) {
           finish(createAbortError(signal, "Upload cancelled"));
           return;
         }
