@@ -738,6 +738,29 @@ function createSessionBackedSftpClient(sessionId, sshClient, options = {}) {
       }
       return true;
     },
+    /**
+     * Pipelined local→remote upload via the raw ssh2 SFTP channel.
+     * Session-backed clients are not ssh2-sftp-client instances and do not
+     * inherit client.fastPut — expose the channel method so uploadLocal /
+     * writeSftpBinaryWithProgress keep the high-throughput path (#2449).
+     */
+    async fastPut(localPath, remotePath, options = {}) {
+      const sftp = await requireSftpChannel(client);
+      if (typeof sftp.fastPut !== "function") {
+        throw new Error(
+          "SFTP pipelined upload (fastPut) is not available on this session",
+        );
+      }
+      const signal = options?.signal || null;
+      throwIfAborted(signal);
+      const { signal: _ignoredSignal, ...fastPutOptions } = options || {};
+      return new Promise((resolve, reject) => {
+        sftp.fastPut(localPath, remotePath, fastPutOptions, (err) => {
+          if (err) reject(err);
+          else resolve();
+        });
+      });
+    },
     async stat(remotePath) {
       const sftp = await requireSftpChannel(client);
       const attrs = await statAsync(sftp, remotePath);
@@ -993,6 +1016,32 @@ async function downloadSftpToLocal(_event, payload) {
   return { success: true, localPath: payload.localPath };
 }
 
+/**
+ * Pipelined local→remote upload.
+ * - ssh2-sftp-client: client.fastPut
+ * - session-backed (openForSession/reuse): client.fastPut wraps sftp.fastPut
+ * - last resort: raw channel after requireSftpChannel
+ * Never falls back to serial createWriteStream/put (#2449).
+ */
+async function pipelinedUploadLocalFile(client, localPath, remotePath, options = {}) {
+  if (typeof client?.fastPut === "function") {
+    return client.fastPut(localPath, remotePath, options);
+  }
+  const sftp = await requireSftpChannel(client);
+  if (typeof sftp.fastPut !== "function") {
+    throw new Error(
+      "SFTP pipelined upload (fastPut) is not available on this session",
+    );
+  }
+  const { signal: _ignoredSignal, ...fastPutOptions } = options || {};
+  return new Promise((resolve, reject) => {
+    sftp.fastPut(localPath, remotePath, fastPutOptions, (err) => {
+      if (err) reject(err);
+      else resolve();
+    });
+  });
+}
+
 async function uploadLocalToSftp(_event, payload) {
   const client = sftpClients.get(payload.sftpId);
   if (!client) throw new Error("SFTP session not found");
@@ -1070,14 +1119,10 @@ async function uploadLocalToSftp(_event, payload) {
     UPLOAD_TRANSFER_CONCURRENCY,
   } = require("./transferLimits.cjs");
   try {
-    // Pipelined WRITEs only (ssh2 fastPut). Serial createReadStream→put is
-    // RTT-bound and is never used as a silent fallback (#2449 / industry practice).
-    if (typeof client.fastPut !== "function") {
-      throw new Error(
-        "SFTP pipelined upload (fastPut) is not available on this session",
-      );
-    }
-    await client.fastPut(payload.localPath, encodedStagedPath, {
+    // Pipelined WRITEs only. Supports ssh2-sftp-client (client.fastPut) and
+    // session-backed clients (client.fastPut → raw sftp.fastPut). Serial put is
+    // never used as a silent fallback (#2449 / industry practice).
+    await pipelinedUploadLocalFile(client, payload.localPath, encodedStagedPath, {
       chunkSize: TRANSFER_CHUNK_SIZE,
       concurrency: UPLOAD_TRANSFER_CONCURRENCY,
       signal: payload.abortSignal,
@@ -1290,6 +1335,7 @@ module.exports = {
   cancelSftpUpload,
   downloadSftpToLocal,
   uploadLocalToSftp,
+  pipelinedUploadLocalFile,
   closeSftp,
   mkdirSftp,
   deleteSftp,

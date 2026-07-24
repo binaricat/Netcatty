@@ -520,6 +520,8 @@ function createFileOpsApi(ctx) {
 
       // Pipelined fastPut via temp file only. Serial put()/WriteStream is not
       // used as a silent fallback (#2449; align Electerm/OpenSSH/WinSCP).
+      // Session-backed clients expose fastPut on the wrapper (→ sftp.fastPut);
+      // also accept raw sftp.fastPut when the high-level method is missing.
       let tempPath = null;
       let lastProgressTime = Date.now();
       let lastTransferredBytes = 0;
@@ -527,11 +529,6 @@ function createFileOpsApi(ctx) {
       activeSftpUploads.set(transferId, { cancelled: false, stream: null });
 
       try {
-        if (typeof client.fastPut !== "function") {
-          throw new Error(
-            "SFTP pipelined upload (fastPut) is not available on this session",
-          );
-        }
         tempPath = await tempDirBridge.getTempFilePath(
           `sftp-upload-${transferId || Date.now()}.bin`,
         );
@@ -539,22 +536,41 @@ function createFileOpsApi(ctx) {
         if (activeSftpUploads.get(transferId)?.cancelled) {
           throw new Error("Upload cancelled");
         }
-        await client.fastPut(tempPath, encodedPath, {
+
+        const step = (transferred) => {
+          if (activeSftpUploads.get(transferId)?.cancelled) return;
+          const now = Date.now();
+          const elapsed = (now - lastProgressTime) / 1000;
+          let speed = 0;
+          if (elapsed >= 0.1) {
+            speed = (transferred - lastTransferredBytes) / elapsed;
+            lastProgressTime = now;
+            lastTransferredBytes = transferred;
+          }
+          emitProgress(transferred, speed);
+        };
+        const putOptions = {
           chunkSize: TRANSFER_CHUNK_SIZE,
           concurrency: UPLOAD_TRANSFER_CONCURRENCY,
-          step: (transferred, _chunk, total) => {
-            if (activeSftpUploads.get(transferId)?.cancelled) return;
-            const now = Date.now();
-            const elapsed = (now - lastProgressTime) / 1000;
-            let speed = 0;
-            if (elapsed >= 0.1) {
-              speed = (transferred - lastTransferredBytes) / elapsed;
-              lastProgressTime = now;
-              lastTransferredBytes = transferred;
-            }
-            emitProgress(transferred, speed);
-          },
-        });
+          step,
+        };
+
+        if (typeof client.fastPut === "function") {
+          await client.fastPut(tempPath, encodedPath, putOptions);
+        } else {
+          const sftp = await requireSftpChannel(client);
+          if (typeof sftp.fastPut !== "function") {
+            throw new Error(
+              "SFTP pipelined upload (fastPut) is not available on this session",
+            );
+          }
+          await new Promise((resolve, reject) => {
+            sftp.fastPut(tempPath, encodedPath, putOptions, (err) => {
+              if (err) reject(err);
+              else resolve();
+            });
+          });
+        }
         if (activeSftpUploads.get(transferId)?.cancelled) {
           throw new Error("Upload cancelled");
         }
