@@ -1201,6 +1201,34 @@ function writeText(filePath, value) {
   fs.writeFileSync(filePath, String(value ?? ''), 'utf8');
 }
 
+/**
+ * Octokit's paginate plugin normalizes Search API responses so that
+ * `response.data` is already the items array (with total_count attached).
+ * Older code expected `response.data.items`. Accept both shapes, and never
+ * return undefined (that previously crashed daily-limit admission).
+ */
+function extractPaginatedItems(response) {
+  const data = response?.data;
+  if (Array.isArray(data)) {
+    return data.filter((item) => item != null && typeof item === 'object');
+  }
+  if (Array.isArray(data?.items)) {
+    return data.items.filter((item) => item != null && typeof item === 'object');
+  }
+  if (Array.isArray(response)) {
+    return response.filter((item) => item != null && typeof item === 'object');
+  }
+  return [];
+}
+
+function isSearchIssueCandidate(candidate) {
+  return (
+    candidate != null &&
+    typeof candidate === 'object' &&
+    Number.isFinite(Number(candidate.number))
+  );
+}
+
 async function prepareIssueContext({
   github,
   context,
@@ -1228,11 +1256,12 @@ async function prepareIssueContext({
     return { shouldRun: false, issue };
   }
 
-  const labelNames = issue.labels.map((label) =>
+  const labelNames = (issue.labels || []).map((label) =>
     typeof label === 'string' ? label : label.name,
   );
+  const authorType = issue.user?.type;
   const eligible =
-    issue.user.type !== 'Bot' &&
+    authorType !== 'Bot' &&
     (manual ||
       (!labelNames.includes('invalid-format') && isValidIssueFormat(issue)));
 
@@ -1265,6 +1294,8 @@ async function prepareIssueContext({
   ) {
     const startOfDay = new Date();
     startOfDay.setUTCHours(0, 0, 0, 0);
+    // Map with extractPaginatedItems: Octokit may expose either
+    // response.data (normalized) or response.data.items (raw Search shape).
     const recentlyUpdatedIssues = await github.paginate(
       github.rest.search.issuesAndPullRequests,
       {
@@ -1273,10 +1304,15 @@ async function prepareIssueContext({
           .slice(0, 10)}`,
         per_page: 100,
       },
-      (response) => response.data.items,
+      (response) => extractPaginatedItems(response),
     );
+    const candidates = Array.isArray(recentlyUpdatedIssues)
+      ? recentlyUpdatedIssues.filter(isSearchIssueCandidate)
+      : extractPaginatedItems(recentlyUpdatedIssues).filter(
+          isSearchIssueCandidate,
+        );
     let externalAutomaticCount = 0;
-    for (const candidate of recentlyUpdatedIssues) {
+    for (const candidate of candidates) {
       if (
         candidate.user?.type === 'Bot' ||
         ['OWNER', 'MEMBER', 'COLLABORATOR'].includes(
@@ -1294,7 +1330,10 @@ async function prepareIssueContext({
           per_page: 100,
         },
       );
-      externalAutomaticCount += events.filter(
+      const eventList = Array.isArray(events)
+        ? events.filter((event) => event != null)
+        : [];
+      externalAutomaticCount += eventList.filter(
         (event) =>
           event.event === 'labeled' &&
           event.label?.name === 'triage:admitted' &&
@@ -1322,6 +1361,9 @@ async function prepareIssueContext({
     issue_number: issue.number,
     per_page: 100,
   });
+  const commentList = Array.isArray(comments)
+    ? comments.filter((comment) => comment != null)
+    : [];
 
   const input = {
     warning:
@@ -1336,11 +1378,11 @@ async function prepareIssueContext({
       url: issue.html_url,
       title: sanitizeUntrustedText(issue.title, 500),
       body: sanitizeUntrustedText(issue.body),
-      author: issue.user.login,
+      author: issue.user?.login || '',
       labels: labelNames,
       author_association: issue.author_association,
     },
-    comments: comments
+    comments: commentList
       .filter((comment) => comment.user)
       .slice(-20)
       .map((comment) => ({
@@ -1564,6 +1606,8 @@ module.exports = {
   hasProtectedChanges,
   hasProtectedChangesInSources,
   getCodexRoundFromComments,
+  extractPaginatedItems,
+  isSearchIssueCandidate,
   prepareIssueContext,
   applyClassification,
   markNeedsHuman,

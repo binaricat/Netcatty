@@ -836,3 +836,202 @@ test('buildCodexReviewRequestComment includes mention', () => {
   assert.match(body, /cursor-codex-round:2/);
   assert.doesNotMatch(body, /cursor-codex-head:/);
 });
+
+test('extractPaginatedItems accepts normalized Search arrays and raw items', () => {
+  const normalized = [{ number: 1, user: { type: 'User' } }, null, { number: 2 }];
+  assert.deepEqual(
+    auto.extractPaginatedItems({ data: normalized }).map((i) => i.number),
+    [1, 2],
+  );
+  assert.deepEqual(
+    auto
+      .extractPaginatedItems({
+        data: { total_count: 2, incomplete_results: false, items: normalized },
+      })
+      .map((i) => i.number),
+    [1, 2],
+  );
+  assert.deepEqual(auto.extractPaginatedItems({ data: { total_count: 0 } }), []);
+  assert.deepEqual(auto.extractPaginatedItems(undefined), []);
+});
+
+test('prepareIssueContext survives Octokit-normalized search pages (no .items)', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cursor-auto-'));
+  const outputPath = path.join(dir, 'issue.json');
+  const outputs = {};
+  const core = {
+    setOutput(key, value) {
+      outputs[key] = value;
+    },
+  };
+  const issueBody = [
+    '## Describe the problem',
+    'AI multi-session support request with enough detail for format checks.',
+    '## Steps to reproduce',
+    '1. open AI panel',
+    '2. start second session',
+    '## Expected behavior',
+    'multiple sessions',
+    '## Actual behavior',
+    'only one session',
+    '## Operating system',
+    'macOS',
+  ].join('\n');
+
+  // Simulate @octokit/plugin-paginate-rest Search normalization: data is the
+  // items array (not { items: [...] }). The previous map used response.data.items
+  // and crashed on candidate.user when iterating undefined holes.
+  const github = {
+    rest: {
+      issues: {
+        async get() {
+          return {
+            data: {
+              number: 2438,
+              html_url: 'https://github.com/binaricat/Netcatty/issues/2438',
+              title: '[Feature] AI multi session',
+              body: issueBody,
+              pull_request: undefined,
+              labels: [{ name: 'enhancement' }, { name: 'triage' }],
+              user: { login: 'reporter', type: 'User' },
+              author_association: 'NONE',
+            },
+          };
+        },
+        async addLabels() {
+          return { data: [] };
+        },
+      },
+      search: {
+        issuesAndPullRequests: async () => ({ data: [] }),
+      },
+    },
+    async paginate(fn, _params, mapFn) {
+      if (fn === github.rest.search.issuesAndPullRequests) {
+        // Normalized shape (data is already the items array).
+        const page = {
+          data: [
+            {
+              number: 2436,
+              user: { type: 'User', login: 'u1' },
+              author_association: 'NONE',
+            },
+            {
+              number: 2438,
+              user: { type: 'User', login: 'u2' },
+              author_association: 'NONE',
+            },
+          ],
+        };
+        if (typeof mapFn === 'function') {
+          const mapped = mapFn(page);
+          return Array.isArray(mapped) ? mapped : [];
+        }
+        return page.data;
+      }
+      // timeline / comments
+      return [];
+    },
+  };
+
+  const result = await auto.prepareIssueContext({
+    github,
+    context: { repo: { owner: 'binaricat', repo: 'Netcatty' } },
+    core,
+    issueNumber: 2438,
+    outputPath,
+    dailyLimit: 10,
+    manual: false,
+  });
+
+  assert.equal(result.shouldRun, true);
+  assert.equal(outputs.should_run, 'true');
+  assert.equal(outputs.reason, 'ok');
+  assert.ok(fs.existsSync(outputPath));
+  const written = JSON.parse(fs.readFileSync(outputPath, 'utf8'));
+  assert.equal(written.issue.number, 2438);
+  assert.equal(written.issue.author, 'reporter');
+});
+
+test('prepareIssueContext does not throw when search map previously returned undefined', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cursor-auto-'));
+  const outputPath = path.join(dir, 'issue.json');
+  const outputs = {};
+  const core = {
+    setOutput(key, value) {
+      outputs[key] = value;
+    },
+  };
+  const issueBody = [
+    '## Describe the problem',
+    'Regression path for daily limit search pagination.',
+    '## Steps to reproduce',
+    '1. open issue',
+    '## Expected behavior',
+    'classified',
+    '## Actual behavior',
+    'workflow crash',
+    '## Operating system',
+    'Linux',
+  ].join('\n');
+
+  const github = {
+    rest: {
+      issues: {
+        async get() {
+          return {
+            data: {
+              number: 99,
+              html_url: 'https://example.test/99',
+              title: '[Bug] pagination',
+              body: issueBody,
+              labels: [{ name: 'bug' }],
+              user: { login: 'r', type: 'User' },
+              author_association: 'NONE',
+            },
+          };
+        },
+        async addLabels() {
+          return { data: [] };
+        },
+      },
+      search: {
+        issuesAndPullRequests: async () => ({ data: [] }),
+      },
+    },
+    async paginate(fn, _params, mapFn) {
+      if (fn === github.rest.search.issuesAndPullRequests) {
+        // Raw Search shape still supported.
+        const page = {
+          data: {
+            total_count: 1,
+            incomplete_results: false,
+            items: [
+              {
+                number: 1,
+                user: { type: 'User' },
+                author_association: 'NONE',
+              },
+            ],
+          },
+        };
+        const mapped = typeof mapFn === 'function' ? mapFn(page) : page.data.items;
+        // Guard: never yield sparse/undefined candidates to callers.
+        return Array.isArray(mapped) ? mapped.filter(Boolean) : [];
+      }
+      return [];
+    },
+  };
+
+  const result = await auto.prepareIssueContext({
+    github,
+    context: { repo: { owner: 'o', repo: 'r' } },
+    core,
+    issueNumber: 99,
+    outputPath,
+    dailyLimit: 10,
+    manual: false,
+  });
+  assert.equal(result.shouldRun, true);
+  assert.equal(outputs.should_run, 'true');
+});
