@@ -440,7 +440,18 @@ function createFileOpsApi(ctx) {
 
       await requireSftpChannel(client);
       const encoding = resolveEncodingForRequest(payload.sftpId, payload.encoding);
+      // Stage to a remote .part path, then rename into place. Shared-channel
+      // cancel cannot stop ssh2 fastPut without ending the session; staging
+      // keeps late WRITEs off the final destination after cancel reports.
+      const stagedRemotePath = typeof buildStagedRemotePath === "function"
+        ? buildStagedRemotePath(remotePath)
+        : `${remotePath}.part`;
+      const backupRemotePath = typeof buildBackupRemotePath === "function"
+        ? buildBackupRemotePath(remotePath)
+        : `${remotePath}.bak`;
       const encodedPath = encodePath(remotePath, encoding);
+      const encodedStagedPath = encodePath(stagedRemotePath, encoding);
+      const encodedBackupPath = encodePath(backupRemotePath, encoding);
     
       // Extract callback functions from payload
       const onProgress = payload.onProgress;
@@ -500,17 +511,17 @@ function createFileOpsApi(ctx) {
         }
       };
 
-      const assertRemoteSize = async () => {
+      const assertStagedRemoteSize = async () => {
         if (typeof client.stat !== "function") return;
-        const attrs = await client.stat(encodedPath);
+        const attrs = await client.stat(encodedStagedPath);
         const remoteSize = Number(attrs?.size);
         if (Number.isFinite(remoteSize) && remoteSize !== totalBytes) {
           try {
             if (typeof client.delete === "function") {
-              await client.delete(encodedPath);
+              await client.delete(encodedStagedPath);
             }
           } catch {
-            // Best-effort cleanup of the corrupt remote file.
+            // Best-effort cleanup of the corrupt staged remote file.
           }
           throw new Error(
             `Upload size mismatch for ${remotePath}: expected ${totalBytes} bytes, got ${remoteSize}`,
@@ -518,8 +529,8 @@ function createFileOpsApi(ctx) {
         }
       };
 
-      // Pipelined fastPut via temp file only. Serial put()/WriteStream is not
-      // used as a silent fallback (#2449; align Electerm/OpenSSH/WinSCP).
+      // Pipelined fastPut via local temp + remote .part only. Serial put()/WriteStream
+      // is not used as a silent fallback (#2449; align Electerm/OpenSSH/WinSCP).
       // Prefer a disposable SFTP channel so cancelSftpUpload can abort mid-transfer.
       let tempPath = null;
       let lastProgressTime = Date.now();
@@ -590,7 +601,7 @@ function createFileOpsApi(ctx) {
           throw new Error("SFTP pipelined upload helper is not available");
         }
 
-        await pipelinedUploadLocalFile(client, tempPath, encodedPath, {
+        await pipelinedUploadLocalFile(client, tempPath, encodedStagedPath, {
           chunkSize: TRANSFER_CHUNK_SIZE,
           concurrency: UPLOAD_TRANSFER_CONCURRENCY,
           step,
@@ -610,10 +621,24 @@ function createFileOpsApi(ctx) {
           throw new Error("Upload cancelled");
         }
 
-        await assertRemoteSize();
+        await assertStagedRemoteSize();
+        if (typeof renameRemotePath === "function") {
+          await renameRemotePath(client, encodedStagedPath, encodedPath, encodedBackupPath);
+        } else if (typeof client.rename === "function") {
+          await client.rename(encodedStagedPath, encodedPath);
+        } else {
+          throw new Error("SFTP rename is not available to promote staged upload");
+        }
         emitComplete();
         return { success: true, transferId };
       } catch (err) {
+        try {
+          if (typeof client.delete === "function") {
+            await client.delete(encodedStagedPath);
+          }
+        } catch {
+          // Best-effort cleanup of partial remote stage after cancel/error.
+        }
         const uploadState = activeSftpUploads.get(transferId);
         if (
           uploadState?.cancelled

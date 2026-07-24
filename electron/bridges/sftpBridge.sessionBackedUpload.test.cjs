@@ -193,6 +193,9 @@ test("session-backed writeSftpBinaryWithProgress uses pipelined fastPut", async 
   assert.equal(fastPutCalls.length, 1);
   assert.equal(fastPutCalls[0].concurrency, UPLOAD_TRANSFER_CONCURRENCY);
   assert.equal(fastPutCalls[0].chunkSize, TRANSFER_CHUNK_SIZE);
+  // Upload must stage to a remote .part path, not write the final path directly.
+  assert.match(fastPutCalls[0].remotePath, /\.part$/);
+  assert.notEqual(fastPutCalls[0].remotePath, "/home/alice/mem.bin");
   assert.ok(remoteFiles.has("/home/alice/mem.bin"));
   assert.deepEqual(remoteFiles.get("/home/alice/mem.bin"), payload);
 });
@@ -274,10 +277,14 @@ test("shared-channel fastPut cancel force-settles when callback stalls", async (
   await fs.promises.writeFile(localPath, Buffer.alloc(8 * 1024, 5));
 
   let ended = false;
+  let unlinkedPath = null;
   const channel = {
     readdir(_p, cb) { cb(null, []); },
     mkdir(_p, cb) { cb(null); },
-    unlink(_p, cb) { cb(null); },
+    unlink(targetPath, cb) {
+      unlinkedPath = targetPath;
+      cb(null);
+    },
     stat(_p, cb) {
       const err = new Error("ENOENT");
       err.code = 2;
@@ -324,6 +331,8 @@ test("shared-channel fastPut cancel force-settles when callback stalls", async (
   assert.ok(elapsed < 5000, `cancel took too long: ${elapsed}ms`);
   // Shared channel must not be ended (would kill browse/sudo session).
   assert.equal(ended, false);
+  // Force-settle best-effort unlinks the in-progress remote target.
+  assert.equal(unlinkedPath, "/tmp/stall-out.bin");
 
   await fs.promises.rm(tempRoot, { recursive: true, force: true });
 });

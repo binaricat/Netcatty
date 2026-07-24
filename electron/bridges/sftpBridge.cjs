@@ -1067,6 +1067,12 @@ function runFastPutOnChannel(sftp, localPath, remotePath, options = {}, channelC
     const scheduleForceFinish = (err) => {
       clearForceFinish();
       forceFinishTimer = setTimeout(() => {
+        // Shared channel: best-effort unlink the in-progress remote target so a
+        // late fastPut cannot keep growing a staged .part after cancel reports.
+        // Disposable channels are already ended; unlink is optional there.
+        if (!dispose && (abortRequested || signal?.aborted || pendingError)) {
+          try { sftp.unlink?.(remotePath, () => {}); } catch { /* ignore */ }
+        }
         finish(err || new Error("SFTP channel closed"));
       }, 2000);
     };
@@ -1319,6 +1325,7 @@ const fileOpsApi = createFileOpsApi({
   requireSftpChannel, resolveEncodingForRequest, updateResolvedEncoding, encodePath, decodeName,
   detectEncodingFromList, statResultFromAttrs, normalizeRemotePathString, collectReadable, writeToWritable,
   throwIfAborted, pipeStreams, ensureRemoteDirForSession, removeRemotePathInternal, renameRemotePath,
+  buildStagedRemotePath, buildBackupRemotePath,
   realpathAsync, statAsync, lstatAsync, readdirAsync, mkdirAsync, rmdirAsync, unlinkAsync, openFileAsync,
   writeFileChunkAsync, closeFileAsync, createAbortError, copySftpEncodingState, clearSftpEncodingState,
   safeSend, tempDirBridge, randomUUID,
