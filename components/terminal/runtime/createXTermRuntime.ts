@@ -157,6 +157,7 @@ type TerminalBackendApi = {
   writeToSession: (sessionId: string, data: string) => void;
   interruptSession?: (sessionId: string, trace?: NetcattyTerminalInterruptTrace) => void;
   resizeSession: (sessionId: string, cols: number, rows: number) => void;
+  clearSessionPtyBuffer?: (sessionId: string) => void;
   setSessionFlowPaused?: (sessionId: string, paused: boolean) => void;
 };
 
@@ -1465,6 +1466,12 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
               clearTerminalViewport(term, {
                 wipeScrollback: ctx.terminalSettingsRef.current?.clearWipesScrollback ?? true,
               });
+              // Keep ConPTY cursor/buffer in sync after a local clear so the
+              // next Enter does not reprint a tall blank gap (Windows PowerShell).
+              const clearId = ctx.sessionRef.current;
+              if (clearId) {
+                ctx.terminalBackend.clearSessionPtyBuffer?.(clearId);
+              }
               break;
             }
             case "searchTerminal": {

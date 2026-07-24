@@ -75,6 +75,7 @@ export const useTerminalContextActions = ({
   normalizeTextOnCopyRef?: RefObject<boolean | undefined>;
   terminalBackend: {
     writeToSession: (sessionId: string, data: string, options?: { automated?: boolean }) => void;
+    clearSessionPtyBuffer?: (sessionId: string) => void;
   };
   getRemoteCwd?: () => Promise<string | null | undefined>;
   scrollToBottomAfterProgrammaticInput?: (data: string) => void;
@@ -186,7 +187,11 @@ export const useTerminalContextActions = ({
     const term = termRef.current;
     if (!term) return;
     clearTerminalViewport(term, { wipeScrollback: clearWipesScrollbackRef?.current ?? true });
-  }, [clearWipesScrollbackRef, termRef]);
+    const id = sessionRef.current;
+    if (id) {
+      terminalBackend.clearSessionPtyBuffer?.(id);
+    }
+  }, [clearWipesScrollbackRef, sessionRef, termRef, terminalBackend]);
 
   const onSelectWord = useCallback(() => {
     const term = termRef.current;

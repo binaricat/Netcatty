@@ -1812,6 +1812,23 @@ function resizeSession(event, payload) {
 }
 
 /**
+ * Sync ConPTY's internal buffer after the renderer clears the xterm viewport.
+ * Without this, Windows shells (especially PowerShell) keep the old cursor
+ * row and the next Enter reprints a tall blank gap. No-op on SSH/Unix PTYs.
+ */
+function clearSessionPtyBuffer(event, payload) {
+  const session = sessions.get(payload?.sessionId);
+  if (!session?.proc || typeof session.proc.clear !== "function") return;
+  try {
+    session.proc.clear();
+  } catch (err) {
+    if (err?.code !== "EPIPE" && err?.code !== "ERR_STREAM_DESTROYED") {
+      console.warn("PTY clear failed", err);
+    }
+  }
+}
+
+/**
  * Close a session
  */
 function closeSession(event, payload) {
@@ -2035,6 +2052,7 @@ function registerHandlers(ipcMain, options = {}) {
     [
       "netcatty:interrupt",
       "netcatty:resize",
+      "netcatty:pty:clear",
       "netcatty:flow",
       "netcatty:flow:ack",
       "netcatty:close",
@@ -2057,6 +2075,7 @@ function registerHandlers(ipcMain, options = {}) {
   ipcMain.on("netcatty:write", writeToSession);
   ipcMain.on("netcatty:interrupt", interruptSession);
   ipcMain.on("netcatty:resize", resizeSession);
+  ipcMain.on("netcatty:pty:clear", clearSessionPtyBuffer);
   ipcMain.on("netcatty:flow", setSessionFlowPaused);
   ipcMain.on("netcatty:flow:ack", ackSessionFlow);
   ipcMain.on("netcatty:close", closeSession);
@@ -2229,6 +2248,7 @@ module.exports = {
   writeToSession,
   setSessionEncoding,
   resizeSession,
+  clearSessionPtyBuffer,
   setSessionFlowPaused,
   ackSessionFlow,
   closeSession,

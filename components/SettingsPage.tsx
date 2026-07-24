@@ -16,7 +16,6 @@ import { sanitizePortForwardingRulesForSync } from "../application/syncPayload";
 import { toast } from "./ui/toast";
 import { SettingsTabContent } from "./settings/settings-ui";
 import { Tabs, TabsList, TabsTrigger } from "./ui/tabs";
-import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 import { LazyLoadBoundary } from "./ui/lazy-load-boundary";
 import { ExternalMcpApprovalsHost } from "./ai/ExternalMcpApprovalsHost";
 import { useExternalMcpGrantPersister } from "./ai/useExternalMcpGrantPersister";
@@ -349,17 +348,16 @@ const SettingsPageContent: React.FC<{ settings: SettingsState }> = ({ settings }
                 <div className="flex items-center justify-between px-4 py-2">
                     <h1 className="text-lg font-semibold">{t("settings.title")}</h1>
                     {!isMac && (
-                        <Tooltip>
-                            <TooltipTrigger asChild>
-                                <button
-                                    onClick={handleClose}
-                                    className="app-no-drag w-8 h-8 flex items-center justify-center rounded-md hover:bg-destructive/20 hover:text-destructive transition-colors text-muted-foreground"
-                                >
-                                    <X size={16} />
-                                </button>
-                            </TooltipTrigger>
-                            <TooltipContent>{t("common.close")}</TooltipContent>
-                        </Tooltip>
+                        // No tooltip: on Windows the primary-colored tooltip sits in a
+                        // drag titlebar region, can stick open, and blocks the real X.
+                        <button
+                            type="button"
+                            onClick={handleClose}
+                            aria-label={t("common.close")}
+                            className="app-no-drag w-8 h-8 flex items-center justify-center rounded-md hover:bg-destructive/20 hover:text-destructive transition-colors text-muted-foreground"
+                        >
+                            <X size={16} />
+                        </button>
                     )}
                 </div>
             </div>

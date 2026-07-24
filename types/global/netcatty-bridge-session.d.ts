@@ -318,6 +318,11 @@ declare global {
     ): void;
     interruptSession?(sessionId: string, trace?: NetcattyTerminalInterruptTrace): void;
     resizeSession(sessionId: string, cols: number, rows: number): void;
+    /**
+     * Sync Windows ConPTY after the renderer clears the xterm viewport.
+     * No-op for SSH and non-ConPTY sessions.
+     */
+    clearSessionPtyBuffer?(sessionId: string): void;
     setSessionFlowPaused(sessionId: string, paused: boolean): void;
     setSessionFlowPausedAndWait?(sessionId: string, paused: boolean): Promise<{ success: boolean; error?: string }>;
     onTerminalOutputDrainRequest?(

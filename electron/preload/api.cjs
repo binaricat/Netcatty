@@ -321,6 +321,10 @@ function createPreloadApi(ctx) {
   resizeSession: (sessionId, cols, rows) => {
     ipcRenderer.send("netcatty:resize", { sessionId, cols, rows });
   },
+  clearSessionPtyBuffer: (sessionId) => {
+    if (!sessionId) return;
+    ipcRenderer.send("netcatty:pty:clear", { sessionId });
+  },
   setSessionFlowPaused: (sessionId, paused) => {
     ipcRenderer.send("netcatty:flow", { sessionId, paused: Boolean(paused) });
   },
