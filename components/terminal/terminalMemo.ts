@@ -40,6 +40,7 @@ export const terminalPropsAreEqual = (
   && prev.restoreTerminalCwd === next.restoreTerminalCwd
   && prev.sessionDisplayName === next.sessionDisplayName
   && prev.startupCommand === next.startupCommand
+  && prev.startupCommandKind === next.startupCommandKind
   && prev.noAutoRun === next.noAutoRun
   && prev.pendingScriptId === next.pendingScriptId
   && prev.pendingScript === next.pendingScript

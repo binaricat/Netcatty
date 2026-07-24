@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 import type { TerminalSession } from '../../types';
 import { openInteractiveTerminal } from './openInteractiveTerminal';
@@ -92,4 +93,39 @@ test('openInteractiveTerminal keeps SSH connection reuse for ordinary connected 
   assert.equal(payload.sourceSession.moshEnabled, false);
   assert.equal(payload.sourceSession.protocol, 'ssh');
   assert.equal(payload.sourceSession.reuseConnectionFromSessionId, 'session-1');
+});
+
+test('openInteractiveTerminal marks a Docker logs startup command without exposing a setting', async () => {
+  const payloads: unknown[] = [];
+  const backend = {
+    openTerminalPopup: async (payload: unknown) => {
+      payloads.push(payload);
+      return { success: true };
+    },
+  };
+
+  await openInteractiveTerminal(
+    backend as never,
+    parentSession(),
+    'logs: api',
+    'generated docker logs launcher',
+    { startupCommandKind: 'dockerLogs' },
+  );
+
+  assert.equal(
+    (payloads[0] as { startupCommandKind?: string }).startupCommandKind,
+    'dockerLogs',
+  );
+});
+
+test('only the built-in Docker logs action carries the Docker logs command kind', () => {
+  const source = readFileSync(
+    new URL('./DockerContainersPanel.tsx', import.meta.url),
+    'utf8',
+  );
+  const shellBlock = source.slice(source.indexOf('const openShell'), source.indexOf('const openLogs'));
+  const logsBlock = source.slice(source.indexOf('const openLogs'), source.indexOf('const restart'));
+
+  assert.doesNotMatch(shellBlock, /startupCommandKind/);
+  assert.match(logsBlock, /startupCommandKind:\s*'dockerLogs'/);
 });

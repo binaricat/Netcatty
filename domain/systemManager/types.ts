@@ -135,6 +135,7 @@ export interface TerminalPopupPayload {
   parentSessionId: string;
   sourceSession: import('../../types').TerminalSession;
   startupCommand: string;
+  startupCommandKind?: 'dockerLogs';
   localShellType?: import('../../types').TerminalSession['shellType'];
   /**
    * When set, the popup attaches to this already-running backend session

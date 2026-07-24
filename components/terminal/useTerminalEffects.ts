@@ -58,6 +58,9 @@ import {
 } from './connectionTimeouts';
 import { resolveHostSshConnectionTimeouts } from '../../domain/sshConnectionTimeouts';
 import { resolveEffectiveTerminalProtocol } from '../../domain/terminalProtocol';
+import {
+  beginOscColorQuerySuppressionForCommand,
+} from './runtime/oscColorQuerySuppression';
 
 type TerminalEffectsContext = Record<string, any>;
 
@@ -178,6 +181,10 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
   ) && !kittyKeyboardProtocolEnabledForSession;
   ctx.pluginDecorationRulesRef.current = pluginDecorationRules;
   const pluginAwareOnCommandSubmitted = (...args: Parameters<NonNullable<typeof onCommandSubmitted>>) => {
+    beginOscColorQuerySuppressionForCommand(
+      ctx.suppressOscColorQueriesForActiveCommandRef,
+      args[0],
+    );
     markTerminalCommandCompletionPending(promptLineBreakStateRef);
     publishPluginTerminalRuntimeLifecycleEvent(pluginTerminalLifecycle, 'commandSubmitted');
     void xtermRuntimeRef.current?.pluginProviderHost?.commandSubmitted(args[0]);
@@ -400,6 +407,7 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
           resolvedFontFamily,
           fontSize,
           terminalTheme: effectiveTheme,
+          suppressOscColorQueriesForActiveCommandRef: ctx.suppressOscColorQueriesForActiveCommandRef,
           terminalSettingsRef,
           kittyKeyboardProtocolEnabled: kittyKeyboardProtocolEnabledForSession,
           terminalBackend,

@@ -133,6 +133,7 @@ export interface TerminalProps {
   lastCwd?: string;
   restoreTerminalCwd?: boolean;
   startupCommand?: string;
+  startupCommandKind?: 'dockerLogs';
   noAutoRun?: boolean;
   multiLineRunMode?: Snippet["multiLineRunMode"];
   pendingScriptId?: string;

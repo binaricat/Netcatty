@@ -49,7 +49,7 @@ export async function openInteractiveTerminal(
   parentSession: TerminalSession,
   title: string,
   startupCommand: string,
-  options?: { icon?: TerminalPopupIcon },
+  options?: { icon?: TerminalPopupIcon; startupCommandKind?: 'dockerLogs' },
 ): Promise<{ success: boolean; error?: string }> {
   const canReuseConnection = canReuseTerminalConnection(parentSession);
   const popupTitle = buildPopupTitle(parentSession, title);
@@ -67,6 +67,7 @@ export async function openInteractiveTerminal(
     icon: options?.icon,
     parentSessionId: parentSession.id,
     startupCommand,
+    ...(options?.startupCommandKind ? { startupCommandKind: options.startupCommandKind } : {}),
     sourceSession: buildCommandPopupSourceSession(parentSession, startupCommand, canReuseConnection),
   });
   await writeSystemManagerDiagnostic('openInteractiveTerminal result', {

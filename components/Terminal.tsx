@@ -117,6 +117,7 @@ import { ZmodemProgressIndicator } from "./terminal/ZmodemProgressIndicator";
 import { createReplaySafeTerminalLogSanitizer } from "./terminal/replaySafeTerminalLog";
 import { createConnectionLogBuffer } from "./terminal/connectionLogBuffer";
 import { createProgrammaticCommandLogRewriter, type ProgrammaticCommandLogRewrite } from "./terminal/programmaticCommandLog";
+import { getAlignedPrompt } from "./terminal/autocomplete/promptDetector";
 import { getSessionLogInitialLine } from "./terminal/sessionLogInitialLine";
 import { getTerminalSelectionForClipboard } from "./terminal/normalizeTerminalSelection";
 import { useZmodemTransfer } from "./terminal/hooks/useZmodemTransfer";
@@ -130,6 +131,11 @@ import {
   resetKittyKeyboardModeStateForSession,
   type XTermRuntime,
 } from "./terminal/runtime/createXTermRuntime";
+import {
+  beginOscColorQuerySuppression,
+  beginOscColorQuerySuppressionForCommand,
+  endOscColorQuerySuppressionForCommand,
+} from "./terminal/runtime/oscColorQuerySuppression";
 import { clearKittyKeyboardBroadcastSession } from "./terminal/runtime/kittyKeyboardBroadcast";
 import { registerTerminalSensitiveInputReader } from "./terminal/runtime/terminalSensitiveInputRegistry";
 import { applyUserCursorPreference } from "./terminal/runtime/cursorPreference";
@@ -254,6 +260,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   lastCwd,
   restoreTerminalCwd = false,
   startupCommand,
+  startupCommandKind,
   noAutoRun,
   multiLineRunMode,
   pendingScriptId,
@@ -446,6 +453,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   const onTerminalDataCaptureRef = useRef(onTerminalDataCapture);
   const onSessionExitRef = useRef(onSessionExit);
   const commandBufferRef = useRef<string>("");
+  const suppressOscColorQueriesForActiveCommandRef = useRef(false);
   const promptLineBreakStateRef = useRef<PromptLineBreakState>(createPromptLineBreakState());
   const [hasMouseTracking, setHasMouseTracking] = useState(false);
   const mouseTrackingRef = useRef(false);
@@ -1700,6 +1708,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
 
     disposeExitRef.current?.();
     disposeExitRef.current = terminalBackend.onSessionExit(backendId, (evt) => {
+      endOscColorQuerySuppressionForCommand(suppressOscColorQueriesForActiveCommandRef);
       disposeTelnetEchoModeRef.current?.();
       disposeTelnetEchoModeRef.current = null;
       telnetLocalEchoRef.current = false;
@@ -1958,6 +1967,10 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   const pluginAwareOnCommandSubmitted = useCallback((
     command: string,
   ) => {
+    beginOscColorQuerySuppressionForCommand(
+      suppressOscColorQueriesForActiveCommandRef,
+      command,
+    );
     markTerminalCommandCompletionPending(promptLineBreakStateRef);
     pluginTerminalLifecycle.onCommandSubmitted();
     void xtermRuntimeRef.current?.pluginProviderHost?.commandSubmitted(command);
@@ -2078,6 +2091,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       knownCwdRef.current = cwd;
     },
     onSessionExit: (closedSessionId, evt) => {
+      endOscColorQuerySuppressionForCommand(suppressOscColorQueriesForActiveCommandRef);
       clearTerminalCwd();
       pluginTerminalLifecycle.onSessionExited(evt.exitCode);
       onSessionExitRef.current?.(closedSessionId, evt);
@@ -2094,6 +2108,10 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     onTerminalLogData: captureTerminalLogData,
     onProgrammaticCommandLogRewrite: queueProgrammaticCommandLogRewrite,
     onOsDetected,
+    onStartupCommandStarted: () => {
+      if (startupCommandKind !== 'dockerLogs') return;
+      beginOscColorQuerySuppression(suppressOscColorQueriesForActiveCommandRef);
+    },
     onCommandExecuted,
     onCommandSubmitted,
     onCommandCompleted: pluginAwareOnCommandCompleted,
@@ -2546,6 +2564,22 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     const id = sessionRef.current;
     if (!term || !id) return;
 
+    if (!noAutoRun) {
+      const prompt = getAlignedPrompt(term, '', false).prompt;
+      if (
+        prompt.isAtPrompt
+        && prompt.userInput.trim().length === 0
+        && isConfirmedTerminalShellPrompt(prompt.promptText, {
+          allowHostStyleGreaterThan: isNetworkDevice,
+        })
+      ) {
+        beginOscColorQuerySuppressionForCommand(
+          suppressOscColorQueriesForActiveCommandRef,
+          command,
+        );
+      }
+    }
+
     let data = normalizeLineEndings(command);
     const lineDelayMs = shouldDelayAutoRunSnippetInput(data, {
       noAutoRun,
@@ -2585,7 +2619,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     });
     scrollToBottomAfterProgrammaticInput(data);
     term.focus();
-  }, [prepareProgrammaticSudoInput, scrollToBottomAfterProgrammaticInput, terminalBackend, sessionId]);
+  }, [isNetworkDevice, prepareProgrammaticSudoInput, scrollToBottomAfterProgrammaticInput, terminalBackend, sessionId]);
 
   const executeSnippet = useCallback(async (snippet: Snippet) => {
     if (isScriptSnippet(snippet)) {
@@ -3204,6 +3238,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     resolvedFontFamily,
     fontSize: effectiveFontSize,
     terminalTheme: effectiveTheme,
+    suppressOscColorQueriesForActiveCommandRef,
     terminalSettingsRef,
     kittyKeyboardProtocolEnabled: kittyKeyboardProtocolEnabledForSession,
     terminalBackend,
@@ -3438,7 +3473,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     onWake: wakeFromHibernateRuntime,
   });
 
-  useTerminalEffects({ CONNECTION_TIMEOUT, Error, XTERM_PERFORMANCE_CONFIG, applyUserCursorPreference, auth, autocompleteCloseRef, autocompleteInputRef, autocompleteKeyEventRef, captureTerminalLogData, chainHosts: resolvedChainHosts, chainProgress, clearTerminalCwd, commandBufferRef, connectionLogBufferRef, containerRef, createPromptLineBreakState, createReplaySafeTerminalLogSanitizer, createXTermRuntime, deferTerminalResizeRef, disableTerminalFontZoomRef, effectiveFontSize, effectiveFontWeight, effectiveTheme, error, executeSnippetCommand, finalizeTerminalLogData, fitAddonRef, fontFamilyId, fontSize, fontWeightFixupDoneRef, forceCloseHibernatedSession, forceSyncRenderAfterResize, handleOsc52ReadRequest, handleTerminalDataCaptureOnce, hasConnectedRef, hasRuntimeRef, host, hotkeySchemeRef, hibernatedRef, identities, inWorkspace, isBootActiveRef, isBroadcastEnabledRef, isComposeBarOpen: effectiveComposeBarOpen, isConnectionAwaitingUserInput, isConnectionPastTcpDial, isFocusMode, isFocused, isLocalConnection, isNetworkDevice, isResizing: deferTerminalResize, isRestoringSelectionRef, isSearchOpen, isSerialConnection, isVisible, isVisibleRef, keyBindingsRef, keys, kittyKeyboardProtocolEnabledForSession, knownCwdRef, lastFittedSizeRef, lastToastedErrorRef, logger, mouseTrackingRef, needsHostKeyVerification, onBroadcastInputRef, onBroadcastInterruptPriorityChange, onCommandExecuted, onCommandSubmitted, onHotkeyActionRef, onOutputTriggerUserInputRef: noteOutputTriggerUserInputRef, onPluginRuntimeCwdChange: pluginAwareOnRuntimeCwdChange, onSnippetShortkeyRef, onSnippetExecutorChange, onTerminalCwdChange, onTerminalTitleChange, onTerminalBell, onTerminalFontSizeChange, paneLayoutKey, passwordPromptActiveRef, pendingAuthRef, pendingOutputScrollRef, pluginDecorationRefreshRef, pluginDecorationRules, pluginDecorationRulesRef, pluginTerminalLifecycle, pluginTerminalProviderRevision, isPluginTerminalProviderAvailable, requestPluginTerminalProviders, prepareRestoredReconnect, prevIsResizingRef, promptLineBreakStateRef, resizeSession, resolveHostAuth, resolvedFontFamily, safeFit, scriptRecorderRef: recorderRef, searchAddonRef, serialConfig, serialLineBufferRef, serializeAddonRef, sessionId, sessionRef, sessionStarters, setError, setHasMouseTracking, setHasSelection, setIsCancelling, setIsDisconnectedDialogDismissed, requestSearchFocus, setNeedsHostKeyVerification, setPendingHostKeyInfo, setPendingHostKeyRequestId, setProgressLogs, setProgressValue, setSelectionOverlayPosition, setShowLogs, setStatus, setTimeLeft, shellType, shouldEnableNativeUserInputAutoScroll, shouldProbeSessionCwd, shouldStartTerminalBackend, attachExistingSession, attachAuthorization, attachHomeWebContentsIdRef, snippetsRef, splitResizeActive: isResizing, status, statusRef, sudoAutofillRef, t, teardown, telnetLocalEchoRef, termRef, terminalAltKeyOptions, terminalBackend, terminalContextActionsRef, terminalCwdTracker, terminalDataCapturedRef, terminalLogSanitizerRef, terminalSettings, terminalSettingsRef, terminalTitleRef, toHostKeyInfo, toast, updateStatus, useEffect, useLayoutEffect, workspaceId, xtermRuntimeRef, zmodem, zmodemToastedRef, restoreState });
+  useTerminalEffects({ CONNECTION_TIMEOUT, Error, XTERM_PERFORMANCE_CONFIG, applyUserCursorPreference, auth, autocompleteCloseRef, autocompleteInputRef, autocompleteKeyEventRef, captureTerminalLogData, chainHosts: resolvedChainHosts, chainProgress, clearTerminalCwd, commandBufferRef, connectionLogBufferRef, containerRef, createPromptLineBreakState, createReplaySafeTerminalLogSanitizer, createXTermRuntime, deferTerminalResizeRef, disableTerminalFontZoomRef, effectiveFontSize, effectiveFontWeight, effectiveTheme, error, executeSnippetCommand, finalizeTerminalLogData, fitAddonRef, fontFamilyId, fontSize, fontWeightFixupDoneRef, forceCloseHibernatedSession, forceSyncRenderAfterResize, handleOsc52ReadRequest, handleTerminalDataCaptureOnce, hasConnectedRef, hasRuntimeRef, host, hotkeySchemeRef, hibernatedRef, identities, inWorkspace, isBootActiveRef, isBroadcastEnabledRef, isComposeBarOpen: effectiveComposeBarOpen, isConnectionAwaitingUserInput, isConnectionPastTcpDial, isFocusMode, isFocused, isLocalConnection, isNetworkDevice, isResizing: deferTerminalResize, isRestoringSelectionRef, isSearchOpen, isSerialConnection, isVisible, isVisibleRef, keyBindingsRef, keys, kittyKeyboardProtocolEnabledForSession, knownCwdRef, lastFittedSizeRef, lastToastedErrorRef, logger, mouseTrackingRef, needsHostKeyVerification, onBroadcastInputRef, onBroadcastInterruptPriorityChange, onCommandExecuted, onCommandSubmitted, onHotkeyActionRef, onOutputTriggerUserInputRef: noteOutputTriggerUserInputRef, onPluginRuntimeCwdChange: pluginAwareOnRuntimeCwdChange, onSnippetShortkeyRef, onSnippetExecutorChange, onTerminalCwdChange, onTerminalTitleChange, onTerminalBell, onTerminalFontSizeChange, paneLayoutKey, passwordPromptActiveRef, pendingAuthRef, pendingOutputScrollRef, pluginDecorationRefreshRef, pluginDecorationRules, pluginDecorationRulesRef, pluginTerminalLifecycle, pluginTerminalProviderRevision, isPluginTerminalProviderAvailable, requestPluginTerminalProviders, prepareRestoredReconnect, prevIsResizingRef, promptLineBreakStateRef, resizeSession, resolveHostAuth, resolvedFontFamily, safeFit, scriptRecorderRef: recorderRef, searchAddonRef, serialConfig, serialLineBufferRef, serializeAddonRef, sessionId, sessionRef, sessionStarters, setError, setHasMouseTracking, setHasSelection, setIsCancelling, setIsDisconnectedDialogDismissed, requestSearchFocus, setNeedsHostKeyVerification, setPendingHostKeyInfo, setPendingHostKeyRequestId, setProgressLogs, setProgressValue, setSelectionOverlayPosition, setShowLogs, setStatus, setTimeLeft, shellType, suppressOscColorQueriesForActiveCommandRef, shouldEnableNativeUserInputAutoScroll, shouldProbeSessionCwd, shouldStartTerminalBackend, attachExistingSession, attachAuthorization, attachHomeWebContentsIdRef, snippetsRef, splitResizeActive: isResizing, status, statusRef, sudoAutofillRef, t, teardown, telnetLocalEchoRef, termRef, terminalAltKeyOptions, terminalBackend, terminalContextActionsRef, terminalCwdTracker, terminalDataCapturedRef, terminalLogSanitizerRef, terminalSettings, terminalSettingsRef, terminalTitleRef, toHostKeyInfo, toast, updateStatus, useEffect, useLayoutEffect, workspaceId, xtermRuntimeRef, zmodem, zmodemToastedRef, restoreState });
 
   return (
     <>

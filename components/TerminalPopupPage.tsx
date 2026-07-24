@@ -459,6 +459,7 @@ function TerminalPopupPageInner() {
               disableTerminalFontZoom={settings.disableTerminalFontZoom}
               sessionId={sessionId}
               startupCommand={isAttachMode ? undefined : config.startupCommand}
+              startupCommandKind={isAttachMode ? undefined : config.startupCommandKind}
               reuseConnectionFromSessionId={isAttachMode ? undefined : reuseId}
               attachExistingSession={isAttachMode}
               attachAuthorization={attachAuthorization}

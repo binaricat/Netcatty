@@ -200,6 +200,7 @@ export type TerminalSessionStartersContext = {
   onProgrammaticCommandLogRewrite?: (rewrite: ProgrammaticCommandLogRewrite) => void;
   onTerminalOutput?: (chunk: string, meta?: TerminalSessionDataMeta) => void;
   onOsDetected?: (hostId: string, distro: string) => void;
+  onStartupCommandStarted?: (command: string) => void;
   onCommandExecuted?: (
     command: string,
     hostId: string,

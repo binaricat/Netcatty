@@ -6,6 +6,10 @@ import {
   getMissingChainHostIds,
 } from "./createTerminalSessionStarters";
 import { createPromptLineBreakState } from "./promptLineBreak";
+import {
+  beginOscColorQuerySuppression,
+  endOscColorQuerySuppressionForCommand,
+} from "./oscColorQuerySuppression";
 import { resolveStartupCommand } from "./terminalStartupCommands";
 import { pasteTextIntoTerminal } from "./terminalUserPaste";
 import { shouldSuppressHostStartupCommandOnReconnect } from "../restoredSessionGate";
@@ -2013,6 +2017,8 @@ test("local session acknowledges metadata-only plugin output immediately", async
 test("local session runs startup command after attaching", async () => {
   const sessionWrites: Array<{ id: string; data: string; automated?: boolean }> = [];
   const attached: string[] = [];
+  const started: string[] = [];
+  const colorQuerySuppression = { current: false };
 
   const terminalBackend = {
     backendAvailable: () => true,
@@ -2049,12 +2055,20 @@ test("local session runs startup command after attaching", async () => {
     startupCommand: "docker logs -f --tail 200 abc123",
     promptLineBreakStateRef: undefined,
     onSessionAttached: (id: string) => attached.push(id),
+    onStartupCommandStarted: (command: string) => {
+      started.push(command);
+      beginOscColorQuerySuppression(colorQuerySuppression);
+    },
   });
 
   await createTerminalSessionStarters(ctx as never).startLocal(createTermStub() as never);
   await new Promise((resolve) => setTimeout(resolve, 0));
 
   assert.deepEqual(attached, ["local-session"]);
+  assert.deepEqual(started, ["docker logs -f --tail 200 abc123"]);
+  assert.equal(colorQuerySuppression.current, true);
+  endOscColorQuerySuppressionForCommand(colorQuerySuppression);
+  assert.equal(colorQuerySuppression.current, false);
   assert.deepEqual(sessionWrites, [{
     id: "local-session",
     data: "docker logs -f --tail 200 abc123\r",

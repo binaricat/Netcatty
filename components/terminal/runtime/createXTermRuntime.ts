@@ -63,6 +63,9 @@ import {
 } from "./kittyKeyboardProtocol";
 import { installKittyKeyboardProtocolHandlersIfEnabled } from "./kittyKeyboardRuntime";
 import {
+  installOscColorQuerySuppression,
+} from "./oscColorQuerySuppression";
+import {
   clearKittyKeyboardBroadcastPairingState,
   createKittyKeyboardBroadcastForwarder,
   createKittyKeyboardBroadcastHandler,
@@ -225,6 +228,7 @@ export type CreateXTermRuntimeContext = {
   resolvedFontFamily: string;
   fontSize: number;
   terminalTheme: TerminalTheme;
+  suppressOscColorQueriesForActiveCommandRef?: RefObject<boolean>;
   terminalSettingsRef: RefObject<TerminalSettings | undefined>;
   kittyKeyboardProtocolEnabled?: boolean;
   kittyKeyboardModeState?: KittyKeyboardModeState;
@@ -1865,6 +1869,11 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     return true; // Indicate we handled the sequence
   });
 
+  const oscColorQuerySuppressionDisposable = installOscColorQuerySuppression(
+    term.parser,
+    () => ctx.suppressOscColorQueriesForActiveCommandRef?.current === true,
+  );
+
   const osc133Disposable = term.parser.registerOscHandler(133, (data) => {
     if (consumeOsc133CommandCompletion(data, ctx.promptLineBreakStateRef?.current)) {
       ctx.onCommandCompleted?.();
@@ -2042,6 +2051,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
       textarea?.removeEventListener("blur", clearKittyTransientInputState);
       clearKittyTransientInputState();
       osc7Disposable.dispose();
+      oscColorQuerySuppressionDisposable?.dispose();
       osc133Disposable.dispose();
       osc52Disposable.dispose();
       titleChangeDisposable.dispose();

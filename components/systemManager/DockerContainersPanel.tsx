@@ -388,7 +388,10 @@ export const DockerContainersPanel = memo(function DockerContainersPanel({
       parentSession,
       `logs: ${container.name || id}`,
       buildDockerLogsCommand(id),
-      { icon: await buildContainerPopupIcon(container.image) },
+      {
+        icon: await buildContainerPopupIcon(container.image),
+        startupCommandKind: 'dockerLogs',
+      },
     );
     if (!result.success) {
       await writeSystemManagerDiagnostic('docker open logs failed', {

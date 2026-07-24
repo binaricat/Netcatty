@@ -40,6 +40,13 @@ test("terminal memo refreshes when restored local shell type changes", () => {
   );
 });
 
+test("terminal memo refreshes when the startup command kind changes", () => {
+  assert.equal(
+    terminalPropsAreEqual(baseProps, { ...baseProps, startupCommandKind: 'dockerLogs' }),
+    false,
+  );
+});
+
 test("terminal memo refreshes when terminal context reader callback changes", () => {
   assert.equal(
     terminalPropsAreEqual(baseProps, {

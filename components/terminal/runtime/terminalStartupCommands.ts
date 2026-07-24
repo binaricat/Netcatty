@@ -98,6 +98,7 @@ export const scheduleStartupCommand = (
         onSettled?.();
         return;
       }
+      ctx.onStartupCommandStarted?.(commandToRun);
       ctx.terminalBackend.writeToSession(
         ctx.sessionRef.current,
         buildStartupPasteInput(term, commandToRun),
@@ -125,6 +126,7 @@ export const scheduleStartupCommand = (
       return;
     }
     const line = lines[index];
+    ctx.onStartupCommandStarted?.(line);
     ctx.terminalBackend.writeToSession(ctx.sessionRef.current, `${line}\r`, { automated: true });
     markPromptLineBreakCommandPending(ctx.promptLineBreakStateRef, term, line);
     ctx.onCommandExecuted?.(line, ctx.host.id, ctx.host.label, ctx.sessionId);
