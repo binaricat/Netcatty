@@ -1,9 +1,9 @@
 name: build-et-binaries
 
 # Trigger philosophy (mirrors build-mosh-binaries.yml):
-#  - Pushes that touch the et build pipeline + PRs run the matrix so we can
-#    validate workflow / script changes without tagging. Artifacts upload as
-#    workflow artifacts only; *no* release.
+#  - Pull requests that touch the et build pipeline run the matrix. Main pushes
+#    provide the post-merge check without duplicating every PR commit.
+#    Artifacts upload as workflow artifacts only; *no* release.
 #  - Manual `workflow_dispatch` with `release_tag` publishes the binaries +
 #    SHA256SUMS to the dedicated binary repository
 #    (`binaricat/Netcatty-et-bin` by default).
@@ -27,7 +27,7 @@ on:
         default: "binaricat/Netcatty-et-bin"
   push:
     branches:
-      - "**"
+      - main
     paths:
       - ".github/workflows/build-et-binaries.yml"
       - "electron-builder.config.cjs"
@@ -59,10 +59,23 @@ jobs:
     name: build-linux-x64
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+      - name: Pull build container with retry
+        run: |
+          set -euo pipefail
+          image="quay.io/pypa/manylinux2014_x86_64"
+          for attempt in 1 2 3; do
+            if docker pull "$image"; then
+              exit 0
+            fi
+            if [[ "$attempt" -lt 3 ]]; then
+              sleep "$((attempt * 5))"
+            fi
+          done
+          exit 1
       - name: Build et (linux-x64)
         run: |
-          docker run --rm \
+          docker run --rm --pull=never \
             -e ET_REF="${ET_REF}" \
             -e OUT_DIR=/work/out \
             -e ARCH=x64 \
@@ -71,7 +84,7 @@ jobs:
             quay.io/pypa/manylinux2014_x86_64 \
             bash scripts/build-et/build-linux.sh
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: et-linux-x64
           path: out/
@@ -80,10 +93,23 @@ jobs:
     name: build-linux-arm64
     runs-on: ubuntu-24.04-arm
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+      - name: Pull build container with retry
+        run: |
+          set -euo pipefail
+          image="quay.io/pypa/manylinux2014_aarch64"
+          for attempt in 1 2 3; do
+            if docker pull "$image"; then
+              exit 0
+            fi
+            if [[ "$attempt" -lt 3 ]]; then
+              sleep "$((attempt * 5))"
+            fi
+          done
+          exit 1
       - name: Build et (linux-arm64)
         run: |
-          docker run --rm \
+          docker run --rm --pull=never \
             -e ET_REF="${ET_REF}" \
             -e OUT_DIR=/work/out \
             -e ARCH=arm64 \
@@ -92,7 +118,7 @@ jobs:
             quay.io/pypa/manylinux2014_aarch64 \
             bash scripts/build-et/build-linux.sh
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: et-linux-arm64
           path: out/
@@ -104,7 +130,7 @@ jobs:
     name: build-macos-universal
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Build et (darwin-universal)
         env:
           ET_REF: ${{ env.ET_REF }}
@@ -112,7 +138,7 @@ jobs:
           MACOSX_DEPLOYMENT_TARGET: "11.0"
         run: bash scripts/build-et/build-macos.sh
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: et-darwin-universal
           path: out/
@@ -124,7 +150,7 @@ jobs:
     name: build-windows-x64
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install ninja
         run: choco install -y ninja
       - name: Set up MSVC developer command prompt
@@ -138,7 +164,7 @@ jobs:
         shell: pwsh
         run: pwsh -File scripts/build-et/build-windows.ps1
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: et-win32-x64
           path: out/
@@ -162,9 +188,9 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Download artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: artifacts
       - name: Stage release files

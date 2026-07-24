@@ -66,7 +66,7 @@ jobs:
       # Prefer control-plane helpers from the default branch. While this workflow
       # is still landing, the helper may only exist on the PR head — bootstrap then.
       - name: Checkout helpers
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.event.repository.default_branch }}
 
@@ -95,7 +95,7 @@ jobs:
 
       - name: Decide route
         id: decide
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         env:
           OWN_ACTORS: ${{ vars.AUTOMATION_OWN_ACTORS || 'binaricat,netcatty-bot,github-actions[bot]' }}
           DISPATCH_ISSUE: ${{ inputs.issue_number || '' }}
@@ -309,7 +309,7 @@ jobs:
       should_run: ${{ steps.prepare.outputs.should_run }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -324,7 +324,7 @@ jobs:
 
       - name: Prepare issue context
         id: prepare
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         env:
           ISSUE_NUMBER: ${{ needs.route.outputs.issue_number }}
           MANUAL_RUN: ${{ github.event_name == 'workflow_dispatch' }}
@@ -415,7 +415,7 @@ jobs:
       - name: Apply classification
         id: apply
         if: steps.prepare.outputs.should_run == 'true'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         env:
           ISSUE_NUMBER: ${{ steps.prepare.outputs.issue_number }}
         with:
@@ -487,7 +487,7 @@ jobs:
       ISSUE_TITLE: ${{ needs.classify.outputs.issue_title }}
     steps:
       - name: Checkout main
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.event.repository.default_branch }}
           fetch-depth: 0
@@ -520,7 +520,7 @@ jobs:
 
       - name: Skip if bot PR already open
         id: existing
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const auto = require(`${process.env.RUNNER_TEMP}/cursor-automation.cjs`);
@@ -565,7 +565,7 @@ jobs:
 
       - name: Prepare issue JSON
         if: steps.existing.outputs.exists != 'true'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const auto = require(`${process.env.RUNNER_TEMP}/cursor-automation.cjs`);
@@ -580,7 +580,7 @@ jobs:
 
       - name: Setup Node
         if: steps.existing.outputs.exists != 'true'
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -672,7 +672,7 @@ jobs:
 
       - name: Report no changes
         if: steps.existing.outputs.exists != 'true' && steps.changes.outputs.present != 'true'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           github-token: ${{ secrets.TRIAGE_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
           script: |
@@ -783,7 +783,7 @@ jobs:
 
       - name: Upload implement patch
         if: steps.patch.outputs.should_publish == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: implement-patch-${{ github.run_id }}
           path: |
@@ -794,7 +794,7 @@ jobs:
 
       - name: Mark needs human on implement failure
         if: failure() && steps.existing.outputs.exists != 'true'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           github-token: ${{ secrets.TRIAGE_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
           script: |
@@ -831,12 +831,13 @@ jobs:
       DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
     steps:
       - name: Download implement patch
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: implement-patch-${{ github.run_id }}
           path: patch-in
 
       - name: Publish branch from fresh runner
+        id: publish
         run: |
           set -euo pipefail
           PUBLISH="$RUNNER_TEMP/publish-tree"
@@ -845,19 +846,40 @@ jobs:
           cd "$PUBLISH"
           git -c core.hooksPath=/dev/null config user.name "netcatty-bot"
           git -c core.hooksPath=/dev/null config user.email "308658023+netcatty-bot@users.noreply.github.com"
+          expected=""
+          if git -c core.hooksPath=/dev/null fetch --depth=50 origin "refs/heads/${BRANCH}:refs/remotes/origin/${BRANCH}"; then
+            expected="$(git rev-parse "refs/remotes/origin/${BRANCH}")"
+          fi
           git -c core.hooksPath=/dev/null fetch --depth=50 origin "${BASE_SHA}"
           git -c core.hooksPath=/dev/null checkout -B "$BRANCH" "$BASE_SHA"
           git -c core.hooksPath=/dev/null am --3way "$GITHUB_WORKSPACE/patch-in/implement.patch"
-          git -c core.hooksPath=/dev/null push origin "HEAD:$BRANCH"
+          if ! git -c core.hooksPath=/dev/null push \
+            --force-with-lease="refs/heads/${BRANCH}:${expected}" \
+            origin "HEAD:$BRANCH"; then
+            if ! remote_after="$(git ls-remote --heads origin "refs/heads/${BRANCH}" | awk '{print $1}')"; then
+              echo "::error::Push failed and the remote branch could not be checked."
+              exit 1
+            fi
+            if [[ "$remote_after" != "$expected" ]]; then
+              echo "::notice::Another automation run updated $BRANCH first; discard this stale result."
+              echo "published=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "::error::Push failed even though $BRANCH did not move."
+            exit 1
+          fi
+          echo "published=true" >> "$GITHUB_OUTPUT"
 
       - name: Checkout helper for PR body helpers
-        uses: actions/checkout@v5
+        if: steps.publish.outputs.published == 'true'
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.event.repository.default_branch }}
           persist-credentials: false
           path: helpers
 
       - name: Ensure automation helper present
+        if: steps.publish.outputs.published == 'true'
         working-directory: helpers
         env:
           BOOTSTRAP_SHA: ${{ github.sha }}
@@ -875,8 +897,9 @@ jobs:
           test -s "$RUNNER_TEMP/cursor-automation.cjs"
 
       - name: Open draft PR
+        if: steps.publish.outputs.published == 'true'
         id: openpr
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         env:
           BRANCH: ${{ needs.implement.outputs.branch }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
@@ -919,27 +942,71 @@ jobs:
               summary,
               agentBody,
             });
-            const { data: pr } = await github.rest.pulls.create({
-              ...context.repo,
-              title,
-              head: process.env.BRANCH,
-              base: process.env.DEFAULT_BRANCH || 'main',
-              body,
-              draft: true,
-            });
-            await github.rest.issues.addLabels({
-              ...context.repo,
-              issue_number: pr.number,
-              labels: ['automation:bot-pr', 'automation:codex-loop', 'triage'],
-            });
-            await github.rest.issues.createComment({
-              ...context.repo,
-              issue_number: Number(process.env.ISSUE_NUMBER),
-              body: auto.buildPullRequestComment({
-                pullRequestUrl: pr.html_url,
-                clean: false,
-              }),
-            });
+            let pr;
+            let created = true;
+            try {
+              ({ data: pr } = await github.rest.pulls.create({
+                ...context.repo,
+                title,
+                head: process.env.BRANCH,
+                base: process.env.DEFAULT_BRANCH || 'main',
+                body,
+                draft: true,
+              }));
+            } catch (error) {
+              const status = Number(error.status || error.response?.status || 0);
+              const errorText = String(
+                error.response?.data?.message || error.message || '',
+              ).toLowerCase();
+              const createPermissionDenied =
+                errorText.includes('resource not accessible by integration') ||
+                errorText.includes('resource not accessible by personal access token') ||
+                errorText.includes('not permitted to create') ||
+                errorText.includes('must have pull request write permission');
+              if (status === 422) {
+                const { data: existing } = await github.rest.pulls.list({
+                  ...context.repo,
+                  state: 'open',
+                  head: `${context.repo.owner}:${process.env.BRANCH}`,
+                  base: process.env.DEFAULT_BRANCH || 'main',
+                  per_page: 1,
+                });
+                pr = existing[0];
+                created = false;
+                if (!pr) throw error;
+                core.notice(`Another run already opened ${pr.html_url}; reuse it.`);
+              } else if (status === 403 && createPermissionDenied) {
+                core.warning('The automation token cannot create pull requests; handing off to a maintainer.');
+                await github.rest.issues.addLabels({
+                  ...context.repo,
+                  issue_number: Number(process.env.ISSUE_NUMBER),
+                  labels: ['automation:needs-human'],
+                }).catch(() => {});
+                await github.rest.issues.createComment({
+                  ...context.repo,
+                  issue_number: Number(process.env.ISSUE_NUMBER),
+                  body: `The implementation is available on branch \`${process.env.BRANCH}\`, but the automation token cannot open a pull request. A maintainer can open it manually.`,
+                }).catch(() => {});
+                return;
+              } else {
+                throw error;
+              }
+            }
+            if (created) {
+              await github.rest.issues.addLabels({
+                ...context.repo,
+                issue_number: pr.number,
+                labels: ['automation:bot-pr', 'automation:codex-loop', 'triage'],
+              });
+              await github.rest.issues.createComment({
+                ...context.repo,
+                issue_number: Number(process.env.ISSUE_NUMBER),
+                body: auto.buildPullRequestComment({
+                  pullRequestUrl: pr.html_url,
+                  clean: false,
+                }),
+              });
+            }
             // Expose PR number for a separate @codex step that may use a
             // human PAT (CODEX_REQUEST_GITHUB_TOKEN) without changing PR author.
             core.setOutput('pull_number', String(pr.number));
@@ -948,7 +1015,7 @@ jobs:
 
       - name: Request Codex review on implement PR
         if: steps.openpr.outputs.pull_number != ''
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         env:
           PULL_NUMBER: ${{ steps.openpr.outputs.pull_number }}
           HEAD_SHA: ${{ steps.openpr.outputs.head_sha }}
@@ -993,7 +1060,7 @@ jobs:
       GH_TOKEN: ${{ secrets.TRIAGE_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
     steps:
       - name: Checkout helpers
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.event.repository.default_branch }}
           persist-credentials: false
@@ -1025,7 +1092,7 @@ jobs:
 
       - name: Inspect Codex outcome
         id: codex
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           github-token: ${{ secrets.TRIAGE_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
           script: |
@@ -1223,7 +1290,7 @@ jobs:
 
       - name: Request Codex review
         if: steps.codex.outputs.action == 'request_review'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           # @codex must come from a human identity connected to Codex (binaricat PAT).
           github-token: ${{ secrets.CODEX_REQUEST_GITHUB_TOKEN || secrets.TRIAGE_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
@@ -1332,15 +1399,28 @@ jobs:
                 ;;
             esac
           fi
-          # Tolerate already-ready / closed / permission noise. Still apply labels below.
+          # A restricted token may be able to comment and label but not change
+          # draft state. Hand that case to a maintainer without failing the run.
+          ready_blocked=false
           ready_out="$(gh pr ready "$PULL_NUMBER" --repo "$GITHUB_REPOSITORY" 2>&1)" || {
             if echo "$ready_out" | grep -qiE 'already ready|not a draft|is not a draft|is closed|closed\.|only draft'; then
               echo "PR not convertible to ready (ok to continue labeling): $ready_out"
+            elif echo "$ready_out" | grep -qiE 'resource not accessible|forbidden|permission|not authorized'; then
+              echo "::warning::Token cannot change PR draft state; handing off to a maintainer."
+              ready_blocked=true
             else
               echo "$ready_out" >&2
               exit 1
             fi
           }
+          if [[ "$ready_blocked" == "true" ]]; then
+            gh pr edit "$PULL_NUMBER" --repo "$GITHUB_REPOSITORY" \
+              --remove-label "automation:codex-loop" \
+              --add-label "automation:needs-human" 2>/dev/null || true
+            gh pr comment "$PULL_NUMBER" --repo "$GITHUB_REPOSITORY" --body \
+              "Codex reported no major issues, but the automation token cannot change draft state. A maintainer can mark this PR ready." 2>/dev/null || true
+            exit 0
+          fi
           # Re-check head after gh pr ready (another push could race).
           live_head2="$(gh pr view "$PULL_NUMBER" --repo "$GITHUB_REPOSITORY" --json headRefOid -q .headRefOid)"
           if [[ "$live_head2" != "$live_head" ]]; then
@@ -1396,7 +1476,7 @@ jobs:
 
       - name: Give up after max rounds / P3 handoff
         if: steps.codex.outputs.action == 'give_up'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         env:
           REASON: ${{ steps.codex.outputs.reason }}
           MAX_ROUNDS: ${{ env.MAX_ROUNDS }}
@@ -1430,7 +1510,7 @@ jobs:
 
       - name: Checkout PR head for fix
         if: steps.codex.outputs.action == 'fix'
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           ref: ${{ steps.codex.outputs.head_sha }}
           fetch-depth: 0
@@ -1438,7 +1518,7 @@ jobs:
 
       - name: Restore findings file
         if: steps.codex.outputs.action == 'fix'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const auto = require(`${process.env.RUNNER_TEMP}/cursor-automation.cjs`);
@@ -1520,7 +1600,7 @@ jobs:
 
       - name: Setup Node
         if: steps.codex.outputs.action == 'fix'
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -1698,7 +1778,7 @@ jobs:
 
       - name: Upload fix patch
         if: steps.codex.outputs.action == 'fix' && steps.fixpatch.outputs.should_publish == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: codex-fix-patch-${{ github.run_id }}
           path: .cursor-runtime/fix.patch
@@ -1706,7 +1786,7 @@ jobs:
 
       - name: Mark needs human when no fix produced
         if: steps.codex.outputs.action == 'fix' && steps.fixpatch.outputs.empty == 'true'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         env:
           PULL_NUMBER: ${{ needs.route.outputs.pull_number }}
         with:
@@ -1733,7 +1813,7 @@ jobs:
 
       - name: Mark needs human on fix failure
         if: failure() && steps.codex.outputs.action == 'fix'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         env:
           PULL_NUMBER: ${{ needs.route.outputs.pull_number }}
         with:
@@ -1781,12 +1861,13 @@ jobs:
       PREV_ROUND: ${{ needs.codex_loop.outputs.prev_round }}
     steps:
       - name: Download fix patch
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: codex-fix-patch-${{ github.run_id }}
           path: patch-in
 
       - name: Publish fix from fresh runner
+        id: publish
         run: |
           set -euo pipefail
           PUBLISH="$RUNNER_TEMP/publish-fix-tree"
@@ -1795,19 +1876,43 @@ jobs:
           cd "$PUBLISH"
           git -c core.hooksPath=/dev/null config user.name "netcatty-bot"
           git -c core.hooksPath=/dev/null config user.email "308658023+netcatty-bot@users.noreply.github.com"
+          git -c core.hooksPath=/dev/null fetch --depth=50 origin "$HEAD_REF"
+          live_head="$(git rev-parse FETCH_HEAD)"
+          if [[ "$live_head" != "$BASE_SHA" ]]; then
+            echo "::notice::PR head moved from $BASE_SHA to $live_head; discard this stale fix."
+            echo "published=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           git -c core.hooksPath=/dev/null fetch --depth=50 origin "$BASE_SHA"
           git -c core.hooksPath=/dev/null checkout -B "$HEAD_REF" "$BASE_SHA"
           git -c core.hooksPath=/dev/null am --3way "$GITHUB_WORKSPACE/patch-in/fix.patch"
-          git -c core.hooksPath=/dev/null push origin "HEAD:$HEAD_REF"
+          if ! git -c core.hooksPath=/dev/null push \
+            --force-with-lease="refs/heads/${HEAD_REF}:${BASE_SHA}" \
+            origin "HEAD:$HEAD_REF"; then
+            if ! remote_after="$(git ls-remote --heads origin "refs/heads/${HEAD_REF}" | awk '{print $1}')"; then
+              echo "::error::Push failed and the PR head could not be checked."
+              exit 1
+            fi
+            if [[ "$remote_after" != "$BASE_SHA" ]]; then
+              echo "::notice::PR head changed while publishing; discard this stale fix."
+              echo "published=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "::error::Push failed even though the PR head did not move."
+            exit 1
+          fi
+          echo "published=true" >> "$GITHUB_OUTPUT"
 
       - name: Checkout helper
-        uses: actions/checkout@v5
+        if: steps.publish.outputs.published == 'true'
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.event.repository.default_branch }}
           persist-credentials: false
           path: helpers
 
       - name: Load helper
+        if: steps.publish.outputs.published == 'true'
         run: |
           set -euo pipefail
           if [[ -f helpers/scripts/cursor-automation.cjs ]]; then
@@ -1819,7 +1924,8 @@ jobs:
           test -s "$RUNNER_TEMP/cursor-automation.cjs"
 
       - name: Re-request Codex after fix push
-        uses: actions/github-script@v7
+        if: steps.publish.outputs.published == 'true'
+        uses: actions/github-script@v9
         with:
           github-token: ${{ secrets.CODEX_REQUEST_GITHUB_TOKEN || secrets.TRIAGE_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
           script: |
@@ -1855,7 +1961,7 @@ jobs:
       OWN_ACTORS: ${{ vars.AUTOMATION_OWN_ACTORS || 'binaricat,netcatty-bot,github-actions[bot]' }}
     steps:
       - name: Checkout helpers
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.event.repository.default_branch }}
           persist-credentials: false
@@ -1883,7 +1989,7 @@ jobs:
           test -s scripts/cursor-automation.cjs
 
       - name: Comment @codex review after human push
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           # Human-connected Codex identity (binaricat PAT); not netcatty-bot.
           github-token: ${{ secrets.CODEX_REQUEST_GITHUB_TOKEN || secrets.TRIAGE_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
@@ -2001,7 +2107,7 @@ jobs:
       OWN_ACTORS: ${{ vars.AUTOMATION_OWN_ACTORS || 'binaricat,netcatty-bot,github-actions[bot]' }}
     steps:
       - name: Checkout helpers
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.event.repository.default_branch }}
           persist-credentials: false
@@ -2029,7 +2135,7 @@ jobs:
           test -s scripts/cursor-automation.cjs
 
       - name: Comment @codex review after contributor push
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           # Prefer human Codex-connected PAT; fall back for forks/write token.
           github-token: ${{ secrets.CODEX_REQUEST_GITHUB_TOKEN || secrets.TRIAGE_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
@@ -2097,7 +2203,7 @@ jobs:
       GH_TOKEN: ${{ secrets.TRIAGE_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
     steps:
       - name: Checkout helpers
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.event.repository.default_branch }}
           persist-credentials: false
@@ -2119,7 +2225,7 @@ jobs:
           test -s scripts/cursor-automation.cjs
 
       - name: Poll open automation PRs
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           # Poll may re-@codex; use human-connected token for those comments.
           github-token: ${{ secrets.CODEX_REQUEST_GITHUB_TOKEN || secrets.TRIAGE_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}

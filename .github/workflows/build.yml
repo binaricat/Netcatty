@@ -1,12 +1,10 @@
 name: build-packages
 
 # Trigger philosophy
-#  - Any push to any branch + any PR -> run the build matrix so CI is
-#    always testable. Same-repo PR runs own package validation; matching
-#    branch push runs become a lightweight mirror only after a current
-#    open PR run for the same commit is visible. If lookup is slow or
-#    unavailable, the push run falls back to the full matrix. Artifacts
-#    upload as workflow artifacts only; *no* GitHub Release is published.
+#  - Main pushes always run the package matrix. Pull requests run it only
+#    when packaging, native runtimes, or installer inputs change. Ordinary
+#    app changes are covered by the required test workflow's production build.
+#    Artifacts upload as workflow artifacts only; *no* release is published.
 #  - Tag push matching `v<MAJOR>.<MINOR>.<PATCH>` (with optional
 #    pre-release suffix like `v1.2.3-rc.1`) -> run the matrix and
 #    publish a GitHub Release. Loose tags like `v-test`, `vNEXT`, or
@@ -35,19 +33,52 @@ on:
         default: ""
   push:
     branches:
-      - "**"
+      - main
     tags:
       - "v[0-9]+.[0-9]+.[0-9]+"
       - "v[0-9]+.[0-9]+.[0-9]+-[0-9A-Za-z]*"
   pull_request:
+    paths:
+      - ".github/workflows/build.yml"
+      - "build/**"
+      - "electron-builder.config.cjs"
+      - "electron/bridges/**/*mosh*"
+      - "electron/bridges/**/*ConPTY*"
+      - "electron/bridges/fixtures/**"
+      - "electron/bridges/terminalBridge.cjs"
+      - "electron/entitlements.mac.plist"
+      - "electron/plugins/**"
+      - "infrastructure/config/terminalFlowConstants.*"
+      - "lib/**/*.cjs"
+      - "lib/**/*.json"
+      - "package.json"
+      - "package-lock.json"
+      - "packages/plugin-*/**"
+      - "patches/**"
+      - "public/icon*"
+      - "resources/**"
+      - "scripts/afterPackMacUuid.cjs"
+      - "scripts/beforePackCursorSdk.cjs"
+      - "scripts/build-et/**"
+      - "scripts/build-mosh/**"
+      - "scripts/ensure-node-pty-linux.sh"
+      - "scripts/et-extra-resources.cjs"
+      - "scripts/fetch-et-binaries.cjs"
+      - "scripts/fetch-mosh-binaries.cjs"
+      - "scripts/mosh-extra-resources.cjs"
+      - "scripts/nodePtyConptyPatch.cjs"
+      - "scripts/patch-xterm-webgl-atlas.cjs"
+      - "scripts/rebuildPatchedNodePty.cjs"
+      - "scripts/resolve-et-bin-release.cjs"
+      - "scripts/resolve-mosh-bin-release.cjs"
+      - "scripts/verify-linux-*.sh"
+      - "skills/**"
 
-# A newer run for the same push branch or PR cancels older in-progress
-# work. Push and PR events stay in separate groups so deduped push runs
-# can mirror PR results cleanly instead of leaving cancelled checks on
-# the PR. Publishing tag runs share a release group across push and
-# manual dispatch; non-publishing manual tag runs use their own group.
+# A newer run for the same main push or PR cancels older in-progress work.
+# Publishing tag runs share a release group across push and manual dispatch;
+# non-publishing manual tag runs use their own group.
 concurrency:
-  group: build-packages-${{ github.workflow }}-${{ startsWith(github.ref, 'refs/tags/') && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish_release)) && 'release' || github.event_name }}-${{ github.event.pull_request.head.repo.full_name || github.repository }}-${{ github.ref_type }}-${{ github.event.pull_request.head.ref || github.ref_name }}
+  group: build-packages-${{ github.workflow }}-${{ startsWith(github.ref, 'refs/tags/') && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish_release)) && 'release' || github.ref }}
   cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 
 permissions:
@@ -63,117 +94,10 @@ env:
   STRICT_VERSION_REF_RE: '^refs/tags/v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*|[A-Za-z][0-9A-Za-z-]*|[0-9A-Za-z][0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(\.(0|[1-9][0-9]*|[A-Za-z][0-9A-Za-z-]*|[0-9A-Za-z][0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*))?$'
 
 jobs:
-  dedupe:
-    name: dedupe push run
-    runs-on: ubuntu-latest
-    outputs:
-      skip_heavy_ci: ${{ steps.detect.outputs.skip_heavy_ci }}
-      heavy_ci_pr_run_id: ${{ steps.detect.outputs.heavy_ci_pr_run_id }}
-    steps:
-      - name: Detect duplicate heavy CI
-        id: detect
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPOSITORY: ${{ github.repository }}
-          REPOSITORY_OWNER: ${{ github.repository_owner }}
-          EVENT_NAME: ${{ github.event_name }}
-          REF: ${{ github.ref }}
-          HEAD_REF: ${{ github.ref_name }}
-          HEAD_SHA: ${{ github.sha }}
-        run: |
-          skip_heavy_ci=false
-          if [[ "$EVENT_NAME" == "push" && "$REF" == refs/heads/* ]]; then
-            pr_count=0
-            if ! pr_count="$(gh api --method GET "repos/${REPOSITORY}/pulls" \
-              -f state=open \
-              -f "head=${REPOSITORY_OWNER}:${HEAD_REF}" \
-              -F per_page=1 \
-              --jq 'length')"; then
-              echo "::warning::Could not check open PRs; running full push CI."
-              pr_count=0
-            fi
-
-            pr_run_id=""
-            if [[ "$pr_count" != "0" ]]; then
-              cutoff="$(date -u -d '20 minutes ago' +'%Y-%m-%dT%H:%M:%SZ')"
-              for attempt in {1..18}; do
-                if ! pr_run_id="$(gh api --method GET "repos/${REPOSITORY}/actions/workflows/build.yml/runs" \
-                  -f event=pull_request \
-                  -f "branch=${HEAD_REF}" \
-                  -f "head_sha=${HEAD_SHA}" \
-                  -F per_page=20 \
-                  --jq "[.workflow_runs[] | select(.created_at >= \"${cutoff}\" and .conclusion != \"cancelled\" and .conclusion != \"skipped\")] | sort_by(.created_at, .id) | .[0].id // \"\"")"; then
-                  echo "::warning::Could not check PR workflow runs; running full push CI."
-                  pr_run_id=""
-                  break
-                fi
-                if [[ -n "$pr_run_id" ]]; then
-                  skip_heavy_ci=true
-                  break
-                fi
-                if [[ "$attempt" == "18" ]]; then
-                  break
-                fi
-                sleep 10
-              done
-            fi
-            if [[ -n "$pr_run_id" ]]; then
-              echo "heavy_ci_pr_run_id=${pr_run_id}" >> "$GITHUB_OUTPUT"
-              echo "heavy_ci_pr_run_id=${pr_run_id}"
-            fi
-          fi
-          echo "skip_heavy_ci=${skip_heavy_ci}" >> "$GITHUB_OUTPUT"
-          echo "skip_heavy_ci=${skip_heavy_ci}"
-
-  dedupe-result:
-    name: dedupe result
-    needs: dedupe
-    if: needs.dedupe.outputs.skip_heavy_ci == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Mirror PR build result
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPOSITORY: ${{ github.repository }}
-          PR_RUN_ID: ${{ needs.dedupe.outputs.heavy_ci_pr_run_id }}
-        run: |
-          if [[ -z "$PR_RUN_ID" ]]; then
-            echo "::error::No PR workflow run was selected for dedupe."
-            exit 1
-          fi
-
-          for attempt in {1..360}; do
-            if ! result="$(gh run view "$PR_RUN_ID" --repo "$REPOSITORY" --json status,conclusion --jq '.status + "|" + (.conclusion // "")')"; then
-              echo "::warning::Could not read PR workflow run ${PR_RUN_ID}; retrying."
-              sleep 30
-              continue
-            fi
-            status="${result%%|*}"
-            conclusion="${result#*|}"
-            echo "PR run ${PR_RUN_ID}: status=${status} conclusion=${conclusion:-pending}"
-
-            if [[ "$status" == "completed" ]]; then
-              if [[ "$conclusion" == "success" ]]; then
-                exit 0
-              fi
-              echo "::error::PR workflow run ${PR_RUN_ID} completed with conclusion '${conclusion}'."
-              exit 1
-            fi
-
-            sleep 30
-          done
-
-          echo "::error::Timed out waiting for PR workflow run ${PR_RUN_ID}."
-          exit 1
-
   resolve-mosh:
     name: resolve bundled mosh-client
-    needs: dedupe
     if: |
-      needs.dedupe.outputs.skip_heavy_ci != 'true'
-      && (
+      (
         (startsWith(github.ref, 'refs/tags/v') && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish_release)))
         || (github.event_name == 'workflow_dispatch' && inputs.mosh_bin_release != '')
       )
@@ -182,7 +106,7 @@ jobs:
       mosh_bin_release: ${{ steps.resolve.outputs.mosh_bin_release }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Resolve bundled mosh-client release
         id: resolve
@@ -199,10 +123,8 @@ jobs:
 
   resolve-et:
     name: resolve bundled et-client
-    needs: dedupe
     if: |
-      needs.dedupe.outputs.skip_heavy_ci != 'true'
-      && (
+      (
         (startsWith(github.ref, 'refs/tags/v') && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish_release)))
         || (github.event_name == 'workflow_dispatch' && inputs.et_bin_release != '')
       )
@@ -211,7 +133,7 @@ jobs:
       et_bin_release: ${{ steps.resolve.outputs.et_bin_release }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Resolve bundled et-client release
         id: resolve
@@ -227,12 +149,12 @@ jobs:
           echo "et_bin_release=${release}" >> "$GITHUB_OUTPUT"
 
   build:
-    name: ${{ needs.dedupe.outputs.skip_heavy_ci == 'true' && format('deduped build-{0}', matrix.name) || format('build-{0}', matrix.name) }}
-    needs: [dedupe, resolve-mosh, resolve-et]
+    name: build-${{ matrix.name }}
+    needs: [resolve-mosh, resolve-et]
     if: |
       always()
-      && needs.dedupe.result == 'success'
-      && needs.dedupe.outputs.skip_heavy_ci != 'true'
+      && (needs.resolve-mosh.result == 'success' || needs.resolve-mosh.result == 'skipped')
+      && (needs.resolve-et.result == 'success' || needs.resolve-et.result == 'skipped')
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -278,16 +200,38 @@ jobs:
           fi
 
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
 
       - name: Install deps
         run: npm ci
+
+      - name: Compile ConPTY test helpers
+        if: matrix.name == 'windows'
+        shell: pwsh
+        run: |
+          $compiler = "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
+          if (-not (Test-Path $compiler)) { throw "csc.exe not found" }
+          New-Item -ItemType Directory -Force -Path "$env:RUNNER_TEMP\netcatty-mosh-conpty" | Out-Null
+          & $compiler /nologo /target:exe /out:"$env:RUNNER_TEMP\netcatty-mosh-conpty\ssh.exe" electron\bridges\fixtures\mosh-conpty-fake-ssh.cs
+          if ($LASTEXITCODE -ne 0) { throw "failed to compile fake ssh" }
+          & $compiler /nologo /target:exe /out:"$env:RUNNER_TEMP\netcatty-mosh-conpty\mosh-client.exe" electron\bridges\fixtures\mosh-conpty-fake-client.cs
+          if ($LASTEXITCODE -ne 0) { throw "failed to compile fake mosh-client" }
+
+      - name: Test Mosh handshake through ConPTY
+        if: matrix.name == 'windows'
+        shell: pwsh
+        env:
+          NETCATTY_TEST_MOSH_SSH_EXE: ${{ runner.temp }}\netcatty-mosh-conpty\ssh.exe
+          NETCATTY_TEST_MOSH_CLIENT_EXE: ${{ runner.temp }}\netcatty-mosh-conpty\mosh-client.exe
+        run: |
+          node --test electron/bridges/moshHandshake.test.cjs
+          node electron/bridges/terminalBridge.moshConpty.integration.cjs
 
       - name: Fetch bundled mosh-client
         if: env.BUNDLE_MOSH == 'true'
@@ -337,7 +281,7 @@ jobs:
         run: npm run ${{ matrix.pack_script }}
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: netcatty-${{ matrix.name }}
           path: |
@@ -366,12 +310,12 @@ jobs:
   # newer system libstdc++ on RHEL 8 derivatives.
   # Key: GLIBC < 2.34 also avoids the libpthread-merge symbol requirement.
   build-linux-x64:
-    name: ${{ needs.dedupe.outputs.skip_heavy_ci == 'true' && 'deduped build-linux-x64' || 'build-linux-x64' }}
-    needs: [dedupe, resolve-mosh, resolve-et]
+    name: build-linux-x64
+    needs: [resolve-mosh, resolve-et]
     if: |
       always()
-      && needs.dedupe.result == 'success'
-      && needs.dedupe.outputs.skip_heavy_ci != 'true'
+      && (needs.resolve-mosh.result == 'success' || needs.resolve-mosh.result == 'skipped')
+      && (needs.resolve-et.result == 'success' || needs.resolve-et.result == 'skipped')
     runs-on: ubuntu-latest
     container:
       image: almalinux:8
@@ -555,7 +499,7 @@ jobs:
           echo "npm_config_python=/usr/bin/python3.11" >> "${GITHUB_ENV}"
 
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install deps
         run: |
@@ -622,7 +566,7 @@ jobs:
         run: bash scripts/verify-linux-rpm-artifact.sh x86_64
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: netcatty-linux-x64
           path: |
@@ -638,12 +582,12 @@ jobs:
   # to ensure compatibility with older distros like UOS/Deepin (GLIBC 2.28).
   # Key: GLIBC < 2.34 avoids the libpthread-merge symbol requirement.
   build-linux-arm64:
-    name: ${{ needs.dedupe.outputs.skip_heavy_ci == 'true' && 'deduped build-linux-arm64' || 'build-linux-arm64' }}
-    needs: [dedupe, resolve-mosh, resolve-et]
+    name: build-linux-arm64
+    needs: [resolve-mosh, resolve-et]
     if: |
       always()
-      && needs.dedupe.result == 'success'
-      && needs.dedupe.outputs.skip_heavy_ci != 'true'
+      && (needs.resolve-mosh.result == 'success' || needs.resolve-mosh.result == 'skipped')
+      && (needs.resolve-et.result == 'success' || needs.resolve-et.result == 'skipped')
     runs-on: ubuntu-24.04-arm
     container:
       image: debian:bullseye
@@ -690,7 +634,7 @@ jobs:
           apt-get install -y nodejs
 
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install deps
         run: npm ci
@@ -738,7 +682,7 @@ jobs:
         run: bash scripts/verify-linux-rpm-artifact.sh aarch64
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: netcatty-linux-arm64
           path: |
@@ -765,7 +709,7 @@ jobs:
       actions: read
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Validate release tag
         shell: bash
@@ -776,7 +720,7 @@ jobs:
           fi
 
       - name: Download artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: artifacts
           merge-multiple: true
@@ -869,15 +813,16 @@ jobs:
     permissions:
       contents: write
       actions: read
+      pull-requests: write
     steps:
       - name: Checkout default branch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.event.repository.default_branch }}
           token: ${{ secrets.RELEASE_TOKEN }}
 
       - name: Download Linux artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: artifacts
           merge-multiple: true
@@ -885,18 +830,38 @@ jobs:
       - name: Update Nix release metadata
         run: node .github/scripts/update-nix-release.js --artifacts artifacts --version "${GITHUB_REF_NAME#v}"
 
-      - name: Commit Nix release metadata
+      - name: Propose Nix release metadata
         shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           if git diff --quiet -- nix/release.nix; then
             echo "Nix release metadata is already current."
             exit 0
           fi
+          branch="automation/nix-release-${GITHUB_REF_NAME}"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -C "$branch"
           git add nix/release.nix
           git commit -m "Update Nix release metadata for ${GITHUB_REF_NAME}"
-          git push origin HEAD:${{ github.event.repository.default_branch }}
+          if git fetch origin "refs/heads/${branch}:refs/remotes/origin/${branch}"; then
+            expected="$(git rev-parse "refs/remotes/origin/${branch}")"
+            git push --force-with-lease="${branch}:${expected}" origin "HEAD:${branch}"
+          else
+            git push origin "HEAD:${branch}"
+          fi
+          existing="$(gh pr list --base "$DEFAULT_BRANCH" --head "$branch" --state open --json url --jq '.[0].url // ""')"
+          if [[ -n "$existing" ]]; then
+            echo "Nix metadata pull request already exists: $existing"
+            exit 0
+          fi
+          gh pr create \
+            --base "$DEFAULT_BRANCH" \
+            --head "$branch" \
+            --title "Update Nix release metadata for ${GITHUB_REF_NAME}" \
+            --body "Automated release metadata update for ${GITHUB_REF_NAME}."
 
   homebrew-tap:
     name: bump homebrew tap
@@ -910,10 +875,10 @@ jobs:
       && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish_release))
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Download macOS artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: netcatty-macos
           path: artifacts/

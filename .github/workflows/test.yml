@@ -4,7 +4,7 @@ on:
   pull_request:
   push:
     branches:
-      - "**"
+      - main
 
 concurrency:
   group: test-${{ github.workflow }}-${{ github.ref }}
@@ -19,10 +19,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -49,38 +49,5 @@ jobs:
       - name: Test
         run: npm test
 
-  mosh-windows-conpty:
-    name: mosh-windows-conpty
-    runs-on: windows-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-
-      - name: Install deps
-        run: npm ci
-
-      - name: Compile ConPTY test helpers
-        shell: pwsh
-        run: |
-          $compiler = "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
-          if (-not (Test-Path $compiler)) { throw "csc.exe not found" }
-          New-Item -ItemType Directory -Force -Path "$env:RUNNER_TEMP\netcatty-mosh-conpty" | Out-Null
-          & $compiler /nologo /target:exe /out:"$env:RUNNER_TEMP\netcatty-mosh-conpty\ssh.exe" electron\bridges\fixtures\mosh-conpty-fake-ssh.cs
-          if ($LASTEXITCODE -ne 0) { throw "failed to compile fake ssh" }
-          & $compiler /nologo /target:exe /out:"$env:RUNNER_TEMP\netcatty-mosh-conpty\mosh-client.exe" electron\bridges\fixtures\mosh-conpty-fake-client.cs
-          if ($LASTEXITCODE -ne 0) { throw "failed to compile fake mosh-client" }
-
-      - name: Test Mosh handshake through ConPTY
-        shell: pwsh
-        env:
-          NETCATTY_TEST_MOSH_SSH_EXE: ${{ runner.temp }}\netcatty-mosh-conpty\ssh.exe
-          NETCATTY_TEST_MOSH_CLIENT_EXE: ${{ runner.temp }}\netcatty-mosh-conpty\mosh-client.exe
-        run: |
-          node --test electron/bridges/moshHandshake.test.cjs
-          node electron/bridges/terminalBridge.moshConpty.integration.cjs
+      - name: Build
+        run: npm run build

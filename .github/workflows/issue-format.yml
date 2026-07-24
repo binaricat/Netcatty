@@ -20,14 +20,14 @@ jobs:
       !contains(github.event.issue.labels.*.name, 'format-exempt')
     steps:
       - name: Checkout format helpers
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           sparse-checkout: |
             scripts/cursor-automation.cjs
           sparse-checkout-cone-mode: false
 
       - name: Validate title and body
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const auto = require(`${process.env.GITHUB_WORKSPACE}/scripts/cursor-automation.cjs`);

@@ -7,8 +7,18 @@ const {
   resolveIdentityPath,
 } = require("./systemSshAgent.cjs");
 
+const TEST_PUBLIC_KEYS = [
+  "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILKxGkTKkraRFbFuzZ2hIJiiRCVecNR1V0Az2YPSHyB1",
+  "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKX948eIUbsCfpX6+wkEedowUaDcg9jZP0rAlCLfiPPY",
+  "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFDTqolh2DHp5OhKylW13C0cZSwJ0pxzAWYoLsZR9VKE",
+  "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGwNYEIS5fjDhPYDAeKd+osXu05BTlVfvlBGTpctoaWj",
+];
+let nextTestPublicKey = 0;
+
 function makePublicKey() {
-  return utils.generateKeyPairSync("ed25519").public;
+  const key = TEST_PUBLIC_KEYS[nextTestPublicKey % TEST_PUBLIC_KEYS.length];
+  nextTestPublicKey += 1;
+  return key;
 }
 
 function fakeAgent(publicKeys) {

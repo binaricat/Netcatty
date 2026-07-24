@@ -842,6 +842,7 @@ test("resumable concurrent range failure does not complete via serial stream", a
   const localPath = path.join(tempDir, "upload.bin");
   await fs.promises.writeFile(localPath, payload);
   let secondWriteCallback = null;
+  let thirdWriteCompleted = false;
   let createWriteStreamCalls = 0;
   let remoteBytes = 0;
   const fastSftp = createFastSftp({
@@ -851,12 +852,18 @@ test("resumable concurrent range failure does not complete via serial stream", a
     write(_handle, _buffer, _offset, length, position, callback) {
       if (position === 32 * 1024) {
         secondWriteCallback = callback;
+        if (thirdWriteCompleted) {
+          queueMicrotask(() => secondWriteCallback(new Error("second range failed")));
+        }
         return;
       }
       remoteBytes = Math.max(remoteBytes, position + length);
       callback(null);
       if (position === 2 * 32 * 1024) {
-        queueMicrotask(() => secondWriteCallback(new Error("second range failed")));
+        thirdWriteCompleted = true;
+        if (secondWriteCallback) {
+          queueMicrotask(() => secondWriteCallback(new Error("second range failed")));
+        }
       }
     },
     close(_handle, callback) {
@@ -2596,6 +2603,7 @@ test("server-to-server concurrent failure does not complete via serial stream", 
   t.after(async () => { await fs.promises.unlink(localStage).catch(() => {}); });
 
   let secondWriteCallback = null;
+  let thirdWriteCompleted = false;
   let remoteBytes = 0;
   let createWriteStreamCalls = 0;
   const fastSftp = createFastSftp({
@@ -2605,12 +2613,18 @@ test("server-to-server concurrent failure does not complete via serial stream", 
     write(_handle, _buffer, _offset, length, position, callback) {
       if (position === 32 * 1024) {
         secondWriteCallback = callback;
+        if (thirdWriteCompleted) {
+          queueMicrotask(() => secondWriteCallback(new Error("second range failed")));
+        }
         return;
       }
       remoteBytes = Math.max(remoteBytes, position + length);
       callback(null);
       if (position === 2 * 32 * 1024) {
-        queueMicrotask(() => secondWriteCallback(new Error("second range failed")));
+        thirdWriteCompleted = true;
+        if (secondWriteCallback) {
+          queueMicrotask(() => secondWriteCallback(new Error("second range failed")));
+        }
       }
     },
     close(_handle, callback) {

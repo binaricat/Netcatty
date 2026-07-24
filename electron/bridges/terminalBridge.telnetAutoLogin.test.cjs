@@ -93,7 +93,13 @@ test("startTelnetSession answers login prompts with saved credentials", async ()
     );
 
     assert.equal(result.sessionId, "telnet-auto-login-test");
-    await waitFor(() => received.join("").includes("\r\nadmin\r\nsecret\r\n"));
+    await waitFor(() => (
+      received.join("").includes("\r\nadmin\r\nsecret\r\n")
+      && sentEvents.some((evt) =>
+        evt.channel === "netcatty:telnet:auto-login-complete" &&
+        evt.payload?.sessionId === "telnet-auto-login-test",
+      )
+    ));
     assert.equal(received.join(""), "\r\nadmin\r\nsecret\r\n");
     assert.ok(sentEvents.some((evt) =>
       evt.channel === "netcatty:telnet:auto-login-complete" &&
