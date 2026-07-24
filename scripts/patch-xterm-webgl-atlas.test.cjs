@@ -136,7 +136,7 @@ test("patches the real @xterm/addon-webgl 0.19 atlas paths", async (t) => {
   }
 });
 
-test("accepts the scoped upstream xterm fix", async (t) => {
+test("recognizes the upstream mipmap fix but fails closed without a confirmed capacity fix", async (t) => {
   const root = makeTmp(t);
   writeWebglVersion(root, "0.20.0-beta.276");
   writeWebglBuild(
@@ -152,9 +152,64 @@ test("accepts the scoped upstream xterm fix", async (t) => {
     upstreamFixedPath("t", "e", "i"),
   );
 
-  const { stdout } = await execFileAsync(process.execPath, [script], { cwd: root });
+  await assert.rejects(execFileAsync(process.execPath, [script], { cwd: root }), (error) => {
+    assert.equal(error.code, 1);
+    assert.match(error.stdout, /mipmap: patched=0 already=0 upstream=2 missing=0/);
+    assert.match(error.stdout, /capacity: patched=0 already=0 skipped=0 missing=2/);
+    assert.match(error.stderr, /unsupported @xterm\/addon-webgl version 0\.20\.0-beta\.276/);
+    return true;
+  });
+});
 
-  assert.match(stdout, /mipmap: patched=0 already=0 upstream=2 missing=0/);
+test("fails closed when an unreviewed beta still contains the atlas overflow paths", async (t) => {
+  const root = makeTmp(t);
+  writeWebglVersion(root, "0.20.0-beta.220");
+  writeWebglBuild(
+    root,
+    "node_modules/@xterm/addon-webgl/lib/addon-webgl.mjs",
+    webglBeta219MjsLoop,
+    mipmapPath("t", "r", "n"),
+    webglBeta219MjsCapacity,
+  );
+  writeWebglBuild(
+    root,
+    "node_modules/@xterm/addon-webgl/lib/addon-webgl.js",
+    webglBeta219CjsLoop,
+    mipmapPath("t", "e", "i"),
+    webglBeta219CjsCapacity,
+  );
+
+  await assert.rejects(execFileAsync(process.execPath, [script], { cwd: root }), (error) => {
+    assert.equal(error.code, 1);
+    assert.match(error.stdout, /capacity: patched=0 already=0 skipped=0 missing=2/);
+    assert.match(error.stderr, /unsupported @xterm\/addon-webgl version 0\.20\.0-beta\.220/);
+    return true;
+  });
+});
+
+test("fails closed when package metadata does not identify the pinned WebGL addon", async (t) => {
+  const root = makeTmp(t);
+  writeWebglBuild(
+    root,
+    "node_modules/@xterm/addon-webgl/lib/addon-webgl.mjs",
+    webglBeta219MjsLoop,
+    mipmapPath("t", "r", "n"),
+    webglBeta219MjsCapacity,
+  );
+  writeWebglBuild(
+    root,
+    "node_modules/@xterm/addon-webgl/lib/addon-webgl.js",
+    webglBeta219CjsLoop,
+    mipmapPath("t", "e", "i"),
+    webglBeta219CjsCapacity,
+  );
+
+  await assert.rejects(execFileAsync(process.execPath, [script], { cwd: root }), (error) => {
+    assert.equal(error.code, 1);
+    assert.match(error.stdout, /capacity: patched=0 already=0 skipped=0 missing=2/);
+    assert.match(error.stderr, /unsupported @xterm\/addon-webgl version \(unknown\)/);
+    return true;
+  });
 });
 
 test("fails closed when multiple glyph-atlas mipmap paths are present", async (t) => {

@@ -85,6 +85,72 @@ if (!process.versions.electron) {
         throw new Error("WebGL renderer internals are unavailable");
       }
 
+      const captureCellSignatures = columns => {
+        const gl = renderer._gl;
+        const canvas = renderer._canvas;
+        const cell = renderer.dimensions?.device?.cell;
+        if (!gl || !canvas || !cell?.width || !cell?.height) {
+          throw new Error("WebGL canvas dimensions are unavailable");
+        }
+        const pixels = new Uint8Array(canvas.width * canvas.height * 4);
+        gl.readPixels(0, 0, canvas.width, canvas.height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+        const grid = 4;
+        return columns.map(column => {
+          const sums = new Array(grid * grid * 4).fill(0);
+          const counts = new Array(grid * grid).fill(0);
+          const startX = Math.max(0, Math.floor(column * cell.width));
+          const endX = Math.min(canvas.width, Math.ceil((column + 1) * cell.width));
+          const startY = 0;
+          const endY = Math.min(canvas.height, Math.ceil(cell.height));
+          for (let y = startY; y < endY; y += 1) {
+            const gridY = Math.min(grid - 1, Math.floor((y / cell.height) * grid));
+            const sourceY = canvas.height - y - 1;
+            for (let x = startX; x < endX; x += 1) {
+              const gridX = Math.min(
+                grid - 1,
+                Math.floor(((x - column * cell.width) / cell.width) * grid),
+              );
+              const bucket = gridY * grid + gridX;
+              const pixel = (sourceY * canvas.width + x) * 4;
+              for (let channel = 0; channel < 4; channel += 1) {
+                sums[bucket * 4 + channel] += pixels[pixel + channel];
+              }
+              counts[bucket] += 1;
+            }
+          }
+          return sums.map((sum, index) => {
+            const count = counts[Math.floor(index / 4)];
+            return count > 0 ? sum / count : 0;
+          });
+        });
+      };
+      const signatureDiff = (left, right) => {
+        let difference = 0;
+        for (let index = 0; index < left.length; index += 1) {
+          difference = Math.max(difference, Math.abs(left[index] - right[index]));
+        }
+        return difference;
+      };
+      const maxSignatureDiff = (left, right) => Math.max(
+        ...left.map((signature, index) => signatureDiff(signature, right[index])),
+      );
+      const writeAndWaitForRender = data => new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          disposable.dispose();
+          reject(new Error("timed out waiting for terminal render"));
+        }, 2000);
+        const disposable = term.onRender(() => {
+          clearTimeout(timeout);
+          disposable.dispose();
+          requestAnimationFrame(() => requestAnimationFrame(resolve));
+        });
+        term.write(data);
+      });
+      const marker = "AFTER_EVICTION_0123456789";
+      const markerColumns = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+      await writeAndWaitForRender("\\x1b[H\\x1b[2J\\x1b[97m" + marker + "\\x1b[0m");
+      const markerReference = captureCellSignatures(markerColumns);
+
       const generateUniqueGlyphFlood = (count, offset) => {
         const base = 0x4E00;
         const range = 0x9FFF - base;
@@ -97,22 +163,52 @@ if (!process.versions.electron) {
         return output;
       };
 
-      const write = data => new Promise(resolve => term.write(data, resolve));
       const glyphsPerChunk = 23 * 40 - 1;
       let peakPages = atlas.pages.length;
       for (let chunk = 0; chunk < 32; chunk += 1) {
-        await write("\\x1b[H\\x1b[2J" + generateUniqueGlyphFlood(glyphsPerChunk, chunk * glyphsPerChunk));
-        await new Promise(resolve => setTimeout(resolve, 35));
+        await writeAndWaitForRender(
+          "\\x1b[H\\x1b[2J" + generateUniqueGlyphFlood(glyphsPerChunk, chunk * glyphsPerChunk),
+        );
         peakPages = Math.max(peakPages, atlas.pages.length);
         if (errors.length > 0 || atlas.pages.length > glyphRenderer._atlasTextures.length) break;
       }
 
+      await writeAndWaitForRender("\\x1b[H\\x1b[2J\\x1b[97m" + marker + "\\x1b[0m");
+      const markerAfterEviction = captureCellSignatures(markerColumns);
+      const markerPixelDiff = maxSignatureDiff(markerReference, markerAfterEviction);
+      const normalPages = atlas.pages.length;
+      const normalRemovals = removals;
+
+      await writeAndWaitForRender("\\x1b[H\\x1b[2J");
+      const wideColumns = [0, 7, 15, 23, 31];
+      const blankSignatures = captureCellSignatures(wideColumns);
+      const cellWidth = renderer.dimensions.device.cell.width;
+      const joinedLength = Math.min(term.cols - 1, Math.ceil(atlas._textureSize / cellWidth) + 32);
+      if (joinedLength * cellWidth <= atlas._textureSize) {
+        throw new Error("joined glyph is not wider than a normal atlas page");
+      }
+      const wideMarker = "W".repeat(joinedLength);
+      term.registerCharacterJoiner(text => text.startsWith(wideMarker) ? [[0, joinedLength]] : []);
+      await writeAndWaitForRender("\\x1b[H" + wideMarker);
+      const wideSignatures = captureCellSignatures(wideColumns);
+      const minimumWidePixelDiff = Math.min(
+        ...wideSignatures.map(
+          (signature, index) => signatureDiff(signature, blankSignatures[index]),
+        ),
+      );
+
       const state = {
         errors,
-        pages: atlas.pages.length,
+        pages: normalPages,
         peakPages,
         textures: glyphRenderer._atlasTextures.length,
         removals,
+        normalRemovals,
+        markerPixelDiff,
+        oversizedPages: atlas.pages.length,
+        oversizedPageCreated: !!atlas._overflowSizePage,
+        oversizedRemovals: removals - normalRemovals,
+        minimumWidePixelDiff,
       };
       term.dispose();
       return state;
@@ -124,7 +220,35 @@ if (!process.versions.electron) {
       result.peakPages <= result.textures,
       `atlas grew beyond renderer texture capacity: ${JSON.stringify(result)}`,
     );
-    assert.ok(result.removals > 0, `atlas never exercised its capacity recovery: ${JSON.stringify(result)}`);
+    assert.ok(
+      result.normalRemovals > 0,
+      `normal atlas pages never exercised capacity recovery: ${JSON.stringify(result)}`,
+    );
+    assert.ok(
+      result.markerPixelDiff <= 14,
+      `rendered text changed after atlas eviction: ${JSON.stringify(result)}`,
+    );
+    assert.equal(
+      result.pages,
+      result.textures,
+      `normal atlas pages did not reach texture capacity: ${JSON.stringify(result)}`,
+    );
+    assert.ok(
+      result.oversizedPageCreated,
+      `oversized glyph did not use its dedicated atlas page: ${JSON.stringify(result)}`,
+    );
+    assert.ok(
+      result.oversizedPages <= result.textures,
+      `oversized glyph exceeded texture capacity: ${JSON.stringify(result)}`,
+    );
+    assert.ok(
+      result.oversizedRemovals > 0,
+      `oversized glyph did not evict full atlas pages: ${JSON.stringify(result)}`,
+    );
+    assert.ok(
+      result.minimumWidePixelDiff > 14,
+      `every sampled part of the oversized glyph must render visible pixels: ${JSON.stringify(result)}`,
+    );
     process.stdout.write(`XTERM_WEBGL_ATLAS_OVERFLOW_OK ${JSON.stringify(result)}\n`);
     window.destroy();
     cleanup(0);

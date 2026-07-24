@@ -43,6 +43,7 @@ const MIPMAP_MARKER = "/*netcatty:#2158 no-atlas-mipmaps*/";
 const CAPACITY_MARKER = "/*netcatty:#2455 atlas-capacity*/";
 const CAPACITY_GUARD_MARKER = "/*netcatty:#2455 atlas-capacity-guard*/";
 const CAPACITY_PATCH_VERSION = "0.20.0-beta.219";
+const CAPACITY_SKIP_VERSIONS = new Set(["0.19.0"]);
 
 const EVICT_METHOD =
   `_evictAllPages(){${CAPACITY_MARKER}` +
@@ -274,10 +275,17 @@ for (const { file, loops, mipmapPaths, upstreamFixedPaths, capacityPaths } of TA
         capacity.missing++;
       }
     }
-  } else {
+  } else if (CAPACITY_SKIP_VERSIONS.has(webglVersion)) {
     // Historical 0.19 branches still use this script. Do not make their npm
     // install fail for a backport that is intentionally scoped to beta.219.
     capacity.skipped++;
+  } else {
+    console.warn(
+      `[patch-xterm-webgl-atlas] ERROR: unsupported @xterm/addon-webgl version ` +
+        `${webglVersion || "(unknown)"} in ${file}. Confirm xtermjs/xterm.js#6043 ` +
+        "before changing the pinned version (#2455).",
+    );
+    capacity.missing++;
   }
 
   if (next !== src) fs.writeFileSync(abs, next);
