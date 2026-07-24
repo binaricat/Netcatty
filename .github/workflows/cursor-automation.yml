@@ -940,6 +940,8 @@ jobs:
       PULL_NUMBER: ${{ needs.route.outputs.pull_number }}
       MAX_ROUNDS: ${{ vars.CURSOR_CODEX_FIX_MAX_ROUNDS || '40' }}
       OWN_ACTORS: ${{ vars.AUTOMATION_OWN_ACTORS || 'binaricat,netcatty-bot,github-actions[bot]' }}
+      # Bot PAT can convert draft + comment; default GITHUB_TOKEN often cannot.
+      GH_TOKEN: ${{ secrets.TRIAGE_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
     steps:
       - name: Checkout helpers
         uses: actions/checkout@v5
@@ -976,6 +978,7 @@ jobs:
         id: codex
         uses: actions/github-script@v7
         with:
+          github-token: ${{ secrets.TRIAGE_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
           script: |
             const auto = require(`${process.env.RUNNER_TEMP}/cursor-automation.cjs`);
             const pull_number = Number(process.env.PULL_NUMBER);
@@ -983,6 +986,15 @@ jobs:
               ...context.repo,
               pull_number,
             });
+            if (pr.state !== 'open') {
+              core.info(`PR #${pull_number} is ${pr.state}; skip Codex loop.`);
+              core.setOutput('action', 'skip');
+              core.setOutput('eligible', 'false');
+              core.setOutput('head_sha', pr.head?.sha || '');
+              core.setOutput('head_ref', pr.head?.ref || '');
+              core.setOutput('draft', pr.draft ? 'true' : 'false');
+              return;
+            }
             const eligible = auto.isFixEligiblePr(pr, {
               ownActors: process.env.OWN_ACTORS,
               repository: `${context.repo.owner}/${context.repo.repo}`,
@@ -1164,6 +1176,7 @@ jobs:
         if: steps.codex.outputs.action == 'request_review'
         uses: actions/github-script@v7
         with:
+          github-token: ${{ secrets.TRIAGE_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
           script: |
             const auto = require(`${process.env.RUNNER_TEMP}/cursor-automation.cjs`);
             const pull_number = Number(process.env.PULL_NUMBER);
@@ -1176,35 +1189,46 @@ jobs:
               ...context.repo,
               pull_number,
             });
-            // Draft-until-clean: convert ready maintainer PRs back to draft.
+            if (pr.state !== 'open') {
+              core.info(`PR #${pull_number} is ${pr.state}; skip Codex request.`);
+              return;
+            }
+            // Draft-until-clean when possible. GITHUB_TOKEN often lacks this
+            // mutation — warn and continue so @codex still runs.
             if (!pr.draft) {
-              const prInfo = await github.graphql(
-                `query($owner:String!, $name:String!, $number:Int!) {
-                  repository(owner:$owner, name:$name) {
-                    pullRequest(number:$number) { id isDraft }
-                  }
-                }`,
-                {
-                  owner: context.repo.owner,
-                  name: context.repo.repo,
-                  number: pull_number,
-                },
-              );
-              const node = prInfo.repository.pullRequest;
-              if (!node.isDraft) {
-                const converted = await github.graphql(
-                  `mutation($id:ID!) {
-                    convertPullRequestToDraft(input:{pullRequestId:$id}) {
-                      pullRequest { isDraft }
+              try {
+                const prInfo = await github.graphql(
+                  `query($owner:String!, $name:String!, $number:Int!) {
+                    repository(owner:$owner, name:$name) {
+                      pullRequest(number:$number) { id isDraft }
                     }
                   }`,
-                  { id: node.id },
+                  {
+                    owner: context.repo.owner,
+                    name: context.repo.repo,
+                    number: pull_number,
+                  },
                 );
-                if (!converted.convertPullRequestToDraft.pullRequest.isDraft) {
-                  throw new Error(
-                    `Failed to convert PR #${pull_number} to draft before Codex request`,
+                const node = prInfo.repository.pullRequest;
+                if (!node.isDraft) {
+                  const converted = await github.graphql(
+                    `mutation($id:ID!) {
+                      convertPullRequestToDraft(input:{pullRequestId:$id}) {
+                        pullRequest { isDraft }
+                      }
+                    }`,
+                    { id: node.id },
                   );
+                  if (!converted.convertPullRequestToDraft.pullRequest.isDraft) {
+                    core.warning(
+                      `PR #${pull_number} still not draft after convert; continuing with @codex`,
+                    );
+                  }
                 }
+              } catch (err) {
+                core.warning(
+                  `Could not convert PR #${pull_number} to draft (${err.message || err}); continuing with @codex`,
+                );
               }
             }
             try {
@@ -1225,10 +1249,16 @@ jobs:
       - name: Mark PR ready after clean Codex
         if: steps.codex.outputs.action == 'mark_ready'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.TRIAGE_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
           EXPECTED_HEAD: ${{ steps.codex.outputs.head_sha }}
         run: |
           set -euo pipefail
+          # Closed / missing PRs are not an automation failure.
+          state="$(gh pr view "$PULL_NUMBER" --repo "$GITHUB_REPOSITORY" --json state -q .state 2>/dev/null || echo MISSING)"
+          if [[ "$state" != "OPEN" ]]; then
+            echo "PR #$PULL_NUMBER is $state; skip mark ready."
+            exit 0
+          fi
           # Refuse to approve if the head moved after the clean decision.
           live_head="$(gh pr view "$PULL_NUMBER" --repo "$GITHUB_REPOSITORY" --json headRefOid -q .headRefOid)"
           if [[ -z "$EXPECTED_HEAD" || -z "$live_head" ]]; then
@@ -1250,13 +1280,14 @@ jobs:
                 ;;
             esac
           fi
-          # Tolerate already-ready; fail on other errors.
+          # Tolerate already-ready / closed / permission noise.
           ready_out="$(gh pr ready "$PULL_NUMBER" --repo "$GITHUB_REPOSITORY" 2>&1)" || {
-            if ! echo "$ready_out" | grep -qiE 'already ready|not a draft|is not a draft'; then
-              echo "$ready_out" >&2
-              exit 1
+            if echo "$ready_out" | grep -qiE 'already ready|not a draft|is not a draft|is closed|closed\.|only draft'; then
+              echo "PR not convertible to ready (ok to skip): $ready_out"
+              exit 0
             fi
-            echo "PR already ready (ok)."
+            echo "$ready_out" >&2
+            exit 1
           }
           # Re-check head after gh pr ready (another push could race).
           live_head2="$(gh pr view "$PULL_NUMBER" --repo "$GITHUB_REPOSITORY" --json headRefOid -q .headRefOid)"
@@ -1273,8 +1304,8 @@ jobs:
           # Confirm draft=false before claiming success.
           draft="$(gh pr view "$PULL_NUMBER" --repo "$GITHUB_REPOSITORY" --json isDraft -q .isDraft)"
           if [[ "$draft" == "true" ]]; then
-            echo "Failed to convert PR out of draft." >&2
-            exit 1
+            echo "Failed to convert PR out of draft (token may lack draft permission); labels still applied." >&2
+            exit 0
           fi
           gh pr comment "$PULL_NUMBER" --repo "$GITHUB_REPOSITORY" --body "$(cat <<'EOF'
           <!-- cursor-automation -->
@@ -1291,6 +1322,7 @@ jobs:
           MAX_ROUNDS: ${{ env.MAX_ROUNDS }}
           PULL_NUMBER: ${{ needs.route.outputs.pull_number }}
         with:
+          github-token: ${{ secrets.TRIAGE_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
           script: |
             const auto = require(`${process.env.RUNNER_TEMP}/cursor-automation.cjs`);
             const pull_number = Number(process.env.PULL_NUMBER);
@@ -1823,37 +1855,36 @@ jobs:
               issue_number: pull_number,
               labels: ['automation:codex-loop'],
             });
-            if (!pr.draft) {
-              // Must restore draft-until-clean; do not leave a new head ready.
-              const prInfo = await github.graphql(
-                `query($owner:String!, $name:String!, $number:Int!) {
-                  repository(owner:$owner, name:$name) {
-                    pullRequest(number:$number) { id isDraft }
-                  }
-                }`,
-                {
-                  owner: context.repo.owner,
-                  name: context.repo.repo,
-                  number: pull_number,
-                },
-              );
-              const node = prInfo.repository.pullRequest;
-              if (!node.isDraft) {
-                const converted = await github.graphql(
-                  `mutation($id:ID!) {
-                    convertPullRequestToDraft(input:{pullRequestId:$id}) {
-                      pullRequest { isDraft }
+            if (!pr.draft && pr.state === 'open') {
+              // Best-effort draft-until-clean; do not fail the job if token lacks draft mutation.
+              try {
+                const prInfo = await github.graphql(
+                  `query($owner:String!, $name:String!, $number:Int!) {
+                    repository(owner:$owner, name:$name) {
+                      pullRequest(number:$number) { id isDraft }
                     }
                   }`,
-                  { id: node.id },
+                  {
+                    owner: context.repo.owner,
+                    name: context.repo.repo,
+                    number: pull_number,
+                  },
                 );
-                if (
-                  !converted.convertPullRequestToDraft.pullRequest.isDraft
-                ) {
-                  throw new Error(
-                    `Failed to convert PR #${pull_number} back to draft after human push`,
+                const node = prInfo.repository.pullRequest;
+                if (!node.isDraft) {
+                  await github.graphql(
+                    `mutation($id:ID!) {
+                      convertPullRequestToDraft(input:{pullRequestId:$id}) {
+                        pullRequest { isDraft }
+                      }
+                    }`,
+                    { id: node.id },
                   );
                 }
+              } catch (err) {
+                core.warning(
+                  `Could not convert PR #${pull_number} to draft after human push (${err.message || err}); continuing with @codex`,
+                );
               }
             }
             await github.rest.issues.createComment({
@@ -1974,6 +2005,7 @@ jobs:
     env:
       OWN_ACTORS: ${{ vars.AUTOMATION_OWN_ACTORS || 'binaricat,netcatty-bot,github-actions[bot]' }}
       MAX_ROUNDS: ${{ vars.CURSOR_CODEX_FIX_MAX_ROUNDS || '40' }}
+      GH_TOKEN: ${{ secrets.TRIAGE_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
     steps:
       - name: Checkout helpers
         uses: actions/checkout@v5
@@ -2000,6 +2032,7 @@ jobs:
       - name: Poll open automation PRs
         uses: actions/github-script@v7
         with:
+          github-token: ${{ secrets.TRIAGE_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
           script: |
             const auto = require(`${process.env.GITHUB_WORKSPACE}/scripts/cursor-automation.cjs`);
             const ownActors = process.env.OWN_ACTORS;
