@@ -134,6 +134,21 @@ test("startMoshSession handshake path returns the same shape as the legacy path"
   assert.deepEqual(result, { sessionId: "mosh-test-session" });
 });
 
+test("Mosh PTYs enable bundled ConPTY clear support on Windows", async (t) => {
+  const h = makeHarness(t);
+  await h.bridge.startMoshSession(h.event, h.options, { moshClientLookup: h.lookupOpts });
+
+  assert.equal(h.spawns[0].opts.useConptyDll, process.platform === "win32");
+
+  h.spawns[0].emitData(
+    "MOSH IP 203.0.113.8\r\nMOSH CONNECT 60002 ABCDEFGHIJKLMNOPQRSTUV==\r\n",
+  );
+  h.spawns[0].emitExit({ exitCode: 0, signal: 0 });
+
+  assert.equal(h.spawns.length, 2);
+  assert.equal(h.spawns[1].opts.useConptyDll, process.platform === "win32");
+});
+
 test("startMoshSession offers all locale settings to mosh-server without exporting them through SSH", async (t) => {
   const h = makeHarness(t);
   h.options.env = {

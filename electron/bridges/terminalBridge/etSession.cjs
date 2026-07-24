@@ -963,6 +963,7 @@ main();
           env,
           cwd: os.homedir(),
           encoding: null, // Return Buffer for ZMODEM binary support
+          useConptyDll: process.platform === "win32",
         });
 
         const session = {

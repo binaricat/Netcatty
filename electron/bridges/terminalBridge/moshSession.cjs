@@ -427,6 +427,7 @@ function createMoshSessionApi(ctx) {
           env: sshEnv,
           cwd: os.homedir(),
           encoding: null,
+          useConptyDll: process.platform === "win32",
         });
       } catch (err) {
         cleanupMoshAuthTempFiles(moshAuth.tempFiles);
@@ -674,6 +675,7 @@ function createMoshSessionApi(ctx) {
         env,
         cwd: os.homedir(),
         encoding: null,
+        useConptyDll: process.platform === "win32",
       });
     
       // Atomic swap — writeToSession / resizeSession both read
