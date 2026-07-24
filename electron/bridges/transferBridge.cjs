@@ -1091,37 +1091,22 @@ function createSourceContentChangedError() {
   return error;
 }
 
-function sampleOffsetsForFingerprint(fileSize) {
-  if (fileSize <= 0) return [];
-  const sampleSize = Math.min(TRANSFER_CHUNK_SIZE, fileSize);
-  return [...new Set([
-    0,
-    Math.max(0, Math.floor((fileSize - sampleSize) / 2)),
-    Math.max(0, fileSize - sampleSize),
-  ])].map((position) => ({
-    position,
-    length: Math.min(sampleSize, fileSize - position),
-  }));
-}
-
 /**
- * Content fingerprint for same-size rewrite detection. Metadata (mtime/ctime)
- * alone is not enough: some filesystems keep the same timestamp within a tick.
+ * Full content fingerprint for same-size rewrite detection. Uploads can read
+ * ranges out of order, so metadata or sparse sampling cannot prove that a
+ * large source stayed unchanged throughout the transfer.
  */
 async function captureLocalContentFingerprintFromHandle(fileHandle, fileSize) {
-  const samples = sampleOffsetsForFingerprint(fileSize);
-  if (samples.length === 0) return { size: fileSize, digests: [] };
-  const digests = [];
-  for (const { position, length } of samples) {
-    const buffer = Buffer.allocUnsafe(length);
+  const hash = crypto.createHash("sha256");
+  const buffer = Buffer.allocUnsafe(Math.min(1024 * 1024, Math.max(1, fileSize)));
+  let position = 0;
+  while (position < fileSize) {
+    const length = Math.min(buffer.length, fileSize - position);
     await readLocalRange(fileHandle, buffer, position, length);
-    digests.push({
-      position,
-      length,
-      digest: crypto.createHash("sha256").update(buffer).digest("hex"),
-    });
+    hash.update(buffer.subarray(0, length));
+    position += length;
   }
-  return { size: fileSize, digests };
+  return { size: fileSize, digest: hash.digest("hex") };
 }
 
 async function captureLocalContentFingerprint(filePath, fileSize) {
@@ -1151,38 +1136,16 @@ async function assertLocalContentFingerprintUnchanged(filePath, fingerprint, exp
     throw createSourceSizeChangedError(expectedSize, latestSize);
   }
   const latest = await captureLocalContentFingerprint(filePath, expectedSize);
-  if (latest.digests.length !== fingerprint.digests.length) {
+  if (latest.digest !== fingerprint.digest) {
     throw createSourceContentChangedError();
-  }
-  for (let i = 0; i < fingerprint.digests.length; i += 1) {
-    const before = fingerprint.digests[i];
-    const after = latest.digests[i];
-    if (
-      before.position !== after.position
-      || before.length !== after.length
-      || before.digest !== after.digest
-    ) {
-      throw createSourceContentChangedError();
-    }
   }
 }
 
 async function assertLocalContentFingerprintUnchangedFromHandle(fileHandle, fingerprint, expectedSize) {
   if (!fingerprint) return;
   const latest = await captureLocalContentFingerprintFromHandle(fileHandle, expectedSize);
-  if (latest.size !== expectedSize || latest.digests.length !== fingerprint.digests.length) {
+  if (latest.size !== expectedSize || latest.digest !== fingerprint.digest) {
     throw createSourceContentChangedError();
-  }
-  for (let i = 0; i < fingerprint.digests.length; i += 1) {
-    const before = fingerprint.digests[i];
-    const after = latest.digests[i];
-    if (
-      before.position !== after.position
-      || before.length !== after.length
-      || before.digest !== after.digest
-    ) {
-      throw createSourceContentChangedError();
-    }
   }
 }
 
@@ -2420,7 +2383,7 @@ async function startTransferNow(event, payload, onProgress) {
         transfer.stagedRemote = null;
       }
     }
-    if (err.message === 'Transfer cancelled') {
+    if (transfer.cancelled || err.message === 'Transfer cancelled') {
       if (transfer.stagedLocalPath) {
         try { await fs.promises.unlink(transfer.stagedLocalPath); } catch { }
       }

@@ -108,13 +108,10 @@ function createSessionChannel(options = {}) {
         callback(err);
         return;
       }
+      const sourceMeta = remoteMeta.get(from);
       remoteFiles.set(to, remoteFiles.get(from));
       remoteFiles.delete(from);
-      // Rename creates a new name; do not inherit destination mode automatically
-      // so restoreRemoteMode can re-apply the captured bits.
-      if (!remoteMeta.has(to)) {
-        remoteMeta.set(to, { mode: 0o100644 });
-      }
+      remoteMeta.set(to, sourceMeta || { mode: 0o100644 });
       remoteMeta.delete(from);
       callback(null);
     },
@@ -287,9 +284,259 @@ test("existing destinations stage then restore mode after rename", async (t) => 
   assert.deepEqual(remoteFiles.get("/usr/local/bin/tool"), payload);
   // Stage+rename replaces the inode; restore prior mode bits afterwards.
   assert.ok(
-    chmodCalls.some((c) => c.targetPath === "/usr/local/bin/tool" && (c.mode & 0o777) === 0o755),
+    chmodCalls.some((c) => String(c.targetPath).includes(".netcatty-upload-") && (c.mode & 0o777) === 0o755),
     `expected mode restore via chmod, got ${JSON.stringify(chmodCalls)}`,
   );
+  assert.equal(remoteMeta.get("/usr/local/bin/tool")?.mode & 0o777, 0o755);
+});
+
+test("mode restore failure leaves the existing destination untouched", async (t) => {
+  const tempRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-stage-mode-fail-"));
+  t.after(async () => {
+    await fs.promises.rm(tempRoot, { recursive: true, force: true });
+  });
+  tempDirBridge.init?.({ getPath: () => tempRoot });
+
+  const localPath = path.join(tempRoot, "tool");
+  await fs.promises.writeFile(localPath, Buffer.from("new-tool"));
+  const { channel, remoteFiles, remoteMeta } = createSessionChannel();
+  remoteFiles.set("/usr/local/bin/tool", Buffer.from("old-tool"));
+  remoteMeta.set("/usr/local/bin/tool", { mode: 0o100755 });
+  channel.chmod = (_targetPath, _mode, callback) => {
+    const err = new Error("chmod failed");
+    err.code = "EIO";
+    callback(err);
+  };
+
+  const sftpClients = new Map();
+  sftpBridge.init({
+    electronModule: { webContents: { fromId: () => null } },
+    sessions: new Map([["session-mode-fail", { conn: { sftp: (cb) => cb(null, channel) } }]]),
+    sftpClients,
+  });
+  const opened = await sftpBridge.openSftpForSession(null, {
+    sessionId: "session-mode-fail",
+    fileProtocol: "sftp",
+  });
+
+  await assert.rejects(
+    () => sftpBridge.uploadLocalToSftp(null, {
+      sftpId: opened.sftpId,
+      localPath,
+      remotePath: "/usr/local/bin/tool",
+      encoding: "utf-8",
+    }),
+    /chmod failed/,
+  );
+  assert.deepEqual(remoteFiles.get("/usr/local/bin/tool"), Buffer.from("old-tool"));
+  assert.equal(
+    [...remoteFiles.keys()].some((key) => String(key).includes(".netcatty-upload-")),
+    false,
+  );
+});
+
+test("failed promotion and failed restore preserve both recovery files", async (t) => {
+  const tempRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-stage-restore-fail-"));
+  t.after(async () => {
+    await fs.promises.rm(tempRoot, { recursive: true, force: true });
+  });
+  tempDirBridge.init?.({ getPath: () => tempRoot });
+
+  const localPath = path.join(tempRoot, "data.bin");
+  await fs.promises.writeFile(localPath, Buffer.from("new-data"));
+  const { channel, remoteFiles, remoteMeta } = createSessionChannel();
+  const finalPath = "/tmp/data.bin";
+  remoteFiles.set(finalPath, Buffer.from("old-data"));
+  remoteMeta.set(finalPath, { mode: 0o100644 });
+  const originalRename = channel.rename.bind(channel);
+  let stagePromoteAttempts = 0;
+  channel.rename = (from, to, callback) => {
+    const fromString = String(from);
+    const toString = String(to);
+    if (fromString.includes(".netcatty-upload-") && toString === finalPath) {
+      stagePromoteAttempts += 1;
+      callback(new Error("stage promote failed"));
+      return;
+    }
+    if (fromString.includes(".netcatty-backup-") && toString === finalPath) {
+      callback(new Error("backup restore failed"));
+      return;
+    }
+    originalRename(from, to, callback);
+  };
+
+  const sftpClients = new Map();
+  sftpBridge.init({
+    electronModule: { webContents: { fromId: () => null } },
+    sessions: new Map([["session-restore-fail", { conn: { sftp: (cb) => cb(null, channel) } }]]),
+    sftpClients,
+  });
+  const opened = await sftpBridge.openSftpForSession(null, {
+    sessionId: "session-restore-fail",
+    fileProtocol: "sftp",
+  });
+
+  await assert.rejects(
+    () => sftpBridge.uploadLocalToSftp(null, {
+      sftpId: opened.sftpId,
+      localPath,
+      remotePath: finalPath,
+      encoding: "utf-8",
+    }),
+    /could not be restored/,
+  );
+  assert.ok(stagePromoteAttempts >= 2);
+  assert.equal(remoteFiles.has(finalPath), false);
+  assert.ok(
+    [...remoteFiles.entries()].some(([key, value]) => String(key).includes(".netcatty-upload-") && value.equals(Buffer.from("new-data"))),
+  );
+  assert.ok(
+    [...remoteFiles.entries()].some(([key, value]) => String(key).includes(".netcatty-backup-") && value.equals(Buffer.from("old-data"))),
+  );
+});
+
+test("rename fallback replaces safely and restores the old target on promotion failure", async () => {
+  const makeClient = ({ failEveryStagePromotion = false } = {}) => {
+    const files = new Map([
+      ["/tmp/stage", Buffer.from("new")],
+      ["/tmp/final", Buffer.from("old")],
+    ]);
+    let stagePromotionAttempts = 0;
+    const channel = {
+      readdir(_path, cb) { cb(null, []); },
+      mkdir(_path, cb) { cb(null); },
+      unlink(targetPath, cb) { files.delete(targetPath); cb(null); },
+      stat(targetPath, cb) {
+        if (!files.has(targetPath)) {
+          const err = new Error("ENOENT");
+          err.code = 2;
+          cb(err);
+          return;
+        }
+        cb(null, { size: files.get(targetPath).length, isDirectory: false });
+      },
+    };
+    return {
+      files,
+      client: {
+        sftp: channel,
+        async stat(targetPath) {
+          return { size: files.get(targetPath)?.length || 0, isDirectory: false };
+        },
+        async rename(from, to) {
+          if (from === "/tmp/stage" && to === "/tmp/final") {
+            stagePromotionAttempts += 1;
+            if (stagePromotionAttempts === 1 || failEveryStagePromotion) {
+              throw new Error("overwrite unsupported");
+            }
+          }
+          if (!files.has(from)) throw new Error("ENOENT");
+          files.set(to, files.get(from));
+          files.delete(from);
+        },
+        async delete(targetPath) {
+          files.delete(targetPath);
+        },
+      },
+    };
+  };
+
+  const successful = makeClient();
+  await sftpBridge._renameRemotePathForTests(
+    successful.client,
+    "/tmp/stage",
+    "/tmp/final",
+    "/tmp/backup",
+  );
+  assert.deepEqual(successful.files.get("/tmp/final"), Buffer.from("new"));
+  assert.equal(successful.files.has("/tmp/backup"), false);
+
+  const restored = makeClient({ failEveryStagePromotion: true });
+  await assert.rejects(
+    () => sftpBridge._renameRemotePathForTests(
+      restored.client,
+      "/tmp/stage",
+      "/tmp/final",
+      "/tmp/backup",
+    ),
+    /overwrite unsupported/,
+  );
+  assert.deepEqual(restored.files.get("/tmp/final"), Buffer.from("old"));
+  assert.deepEqual(restored.files.get("/tmp/stage"), Buffer.from("new"));
+  assert.equal(restored.files.has("/tmp/backup"), false);
+});
+
+test("SCP upload stops when the destination type cannot be inspected", async () => {
+  let uploadCalls = 0;
+  const backend = {
+    async stat() {
+      throw new Error("temporary stat failure");
+    },
+    async uploadFile() {
+      uploadCalls += 1;
+    },
+  };
+  const client = {
+    __netcattyFileProtocol: "scp",
+    __netcattyScpBackend: backend,
+  };
+  sftpBridge.init({
+    electronModule: {},
+    sessions: new Map(),
+    sftpClients: new Map([["scp-stat-fail", client]]),
+  });
+
+  await assert.rejects(
+    () => sftpBridge.uploadLocalToSftp(null, {
+      sftpId: "scp-stat-fail",
+      localPath: "/tmp/local.bin",
+      remotePath: "/tmp/remote.bin",
+      encoding: "utf-8",
+    }),
+    /temporary stat failure/,
+  );
+  assert.equal(uploadCalls, 0);
+});
+
+test("SCP upload does not replace a symlink that appears before promotion", async () => {
+  let statCalls = 0;
+  let renameCalls = 0;
+  let removedStage = false;
+  const backend = {
+    async stat() {
+      statCalls += 1;
+      if (statCalls === 1) return { type: "file", isDirectory: false };
+      return { type: "symlink", isDirectory: false, isSymbolicLink: true };
+    },
+    async uploadFile() {},
+    async rename() {
+      renameCalls += 1;
+    },
+    async remove(remotePath) {
+      if (String(remotePath).includes(".netcatty-upload-")) removedStage = true;
+    },
+  };
+  const client = {
+    __netcattyFileProtocol: "scp",
+    __netcattyScpBackend: backend,
+  };
+  sftpBridge.init({
+    electronModule: {},
+    sessions: new Map(),
+    sftpClients: new Map([["scp-symlink-race", client]]),
+  });
+
+  await assert.rejects(
+    () => sftpBridge.uploadLocalToSftp(null, {
+      sftpId: "scp-symlink-race",
+      localPath: "/tmp/local.bin",
+      remotePath: "/tmp/remote.bin",
+      encoding: "utf-8",
+    }),
+    /changed to a symlink/,
+  );
+  assert.equal(renameCalls, 0);
+  assert.equal(removedStage, true);
 });
 
 test("staged basenames stay within the remote NAME_MAX budget", async (t) => {

@@ -602,7 +602,8 @@ function isRemoteMissingError(err) {
   return code === 2
     || code === "ENOENT"
     || code === "NO_SUCH_FILE"
-    || code === "SSH_FX_NO_SUCH_FILE";
+    || code === "SSH_FX_NO_SUCH_FILE"
+    || String(err?.message || "").trim() === "ENOENT";
 }
 
 function attrsIndicateSymlink(attrs) {
@@ -679,13 +680,15 @@ async function planRemoteUploadReplace(client, encodedPath) {
       // Confirmed missing destination — stage a new file.
     }
   } catch {
-    // Channel probe failure — default to staging for cancel-safe new uploads.
+    // Unknown target state: preserve a possible symlink instead of replacing it.
+    return { writeInPlace: true, existingMode: null };
   }
   return { writeInPlace: false, existingMode: null };
 }
 
-async function restoreRemoteMode(client, encodedPath, mode) {
+async function restoreRemoteMode(client, encodedPath, mode, options = {}) {
   if (mode == null || !Number.isFinite(mode)) return;
+  const bestEffort = options?.bestEffort !== false;
   try {
     if (typeof client.chmod === "function") {
       await client.chmod(encodedPath, mode);
@@ -701,11 +704,27 @@ async function restoreRemoteMode(client, encodedPath, mode) {
         sftp.setstat(encodedPath, { mode }, (err) => (err ? reject(err) : resolve()));
         return;
       }
-      resolve();
+      reject(new Error("Remote server does not support restoring file mode"));
     });
-  } catch {
-    // Best-effort only — do not fail a successful upload over metadata restore.
+  } catch (err) {
+    if (!bestEffort) throw err;
   }
+}
+
+function createRemoteRecoveryError(promotionError, restoreError, paths = {}) {
+  const recoveryLocations = [
+    paths.backupPath ? `backup=${String(paths.backupPath)}` : null,
+    paths.stagePath ? `staged=${String(paths.stagePath)}` : null,
+  ].filter(Boolean).join(", ");
+  const error = new Error(
+    `Remote upload promotion failed and the original destination could not be restored (${recoveryLocations}): ${restoreError?.message || String(restoreError)}`,
+    { cause: promotionError },
+  );
+  error.preserveStagedUpload = true;
+  error.remoteStagePath = paths.stagePath || null;
+  error.remoteBackupPath = paths.backupPath || null;
+  error.remoteFinalPath = paths.finalPath || null;
+  return error;
 }
 
 /**
@@ -768,16 +787,22 @@ async function pipelinedUploadWithOptionalStaging(client, localPath, remotePath,
     }
     // Cancel may arrive during the awaited size verify; recheck before promote.
     throwIfAborted(signal);
+    // Apply the old mode to the stage before promotion. A failed chmod must not
+    // replace an executable final with a non-executable file and report success.
+    await restoreRemoteMode(client, encodedStagedPath, plan.existingMode, {
+      bestEffort: false,
+    });
     await renameRemotePath(client, encodedStagedPath, encodedPath, encodedBackupPath);
-    await restoreRemoteMode(client, encodedPath, plan.existingMode);
     return { staged: true };
   } catch (err) {
-    try {
-      if (typeof client.delete === "function") {
-        await client.delete(encodedStagedPath);
+    if (!err?.preserveStagedUpload) {
+      try {
+        if (typeof client.delete === "function") {
+          await client.delete(encodedStagedPath);
+        }
+      } catch {
+        // Best-effort cleanup of a partial stage.
       }
-    } catch {
-      // Best-effort cleanup of a partial stage.
     }
     // Parent dir not writable but existing file may still be: fall back to in-place.
     if (isRemotePermissionError(err)) {
@@ -832,8 +857,12 @@ async function renameRemotePath(client, fromPath, toPath, backupPath = null) {
       if (movedExistingTarget) {
         try {
           await client.rename(backupPath, toPath);
-        } catch {
-          // Ignore restore failures and surface the original fallback error.
+        } catch (restoreErr) {
+          throw createRemoteRecoveryError(fallbackErr, restoreErr, {
+            stagePath: fromPath,
+            backupPath,
+            finalPath: toPath,
+          });
         }
       }
       throw fallbackErr;
@@ -1416,21 +1445,20 @@ async function uploadLocalToSftp(_event, payload) {
 
     // Symlinks must be written in-place so scp follows the link target. Staging
     // + rename would replace the link node itself (Codex PR review).
-    let existingIsSymlink = false;
+    let existing = null;
     try {
-      const existing = await backend.stat(payload.remotePath, { encoding });
-      if (existing?.isDirectory) {
-        throw new Error(`Remote path is a directory: ${payload.remotePath}`);
-      }
-      existingIsSymlink = !!(
-        existing?.isSymbolicLink
-        || existing?.isSymlink
-        || existing?.type === "symlink"
-      );
+      existing = await backend.stat(payload.remotePath, { encoding });
     } catch (statErr) {
-      if (/directory/i.test(statErr?.message || "")) throw statErr;
-      // ENOENT / missing is fine — fall through to staged create.
+      if (!isRemoteMissingError(statErr)) throw statErr;
     }
+    if (existing?.isDirectory) {
+      throw new Error(`Remote path is a directory: ${payload.remotePath}`);
+    }
+    const existingIsSymlink = !!(
+      existing?.isSymbolicLink
+      || existing?.isSymlink
+      || existing?.type === "symlink"
+    );
 
     if (existingIsSymlink) {
       try {
@@ -1468,21 +1496,42 @@ async function uploadLocalToSftp(_event, payload) {
       // otherwise end up recursively deleting the whole tree via backup cleanup.
       let movedExisting = false;
       try {
-        const existing = await backend.stat(payload.remotePath, { encoding });
-        if (existing?.isDirectory) {
+        let latestExisting = null;
+        try {
+          latestExisting = await backend.stat(payload.remotePath, { encoding });
+        } catch (statErr) {
+          if (!isRemoteMissingError(statErr)) throw statErr;
+        }
+        if (latestExisting?.isDirectory) {
           throw new Error(`Remote path is a directory: ${payload.remotePath}`);
         }
-        await backend.rename(payload.remotePath, backupRemotePath, { encoding });
-        movedExisting = true;
+        if (
+          latestExisting?.isSymbolicLink
+          || latestExisting?.isSymlink
+          || latestExisting?.type === "symlink"
+        ) {
+          throw new Error(`Remote destination changed to a symlink during upload: ${payload.remotePath}`);
+        }
+        if (latestExisting) {
+          await backend.rename(payload.remotePath, backupRemotePath, { encoding });
+          movedExisting = true;
+        }
       } catch (statOrRenameErr) {
-        if (/directory/i.test(statOrRenameErr?.message || "")) throw statOrRenameErr;
-        // Destination may not exist yet (ENOENT) — continue with staged promote.
+        throw statOrRenameErr;
       }
       try {
         await backend.rename(stagedRemotePath, payload.remotePath, { encoding });
       } catch (renameErr) {
         if (movedExisting) {
-          try { await backend.rename(backupRemotePath, payload.remotePath, { encoding }); } catch { /* ignore */ }
+          try {
+            await backend.rename(backupRemotePath, payload.remotePath, { encoding });
+          } catch (restoreErr) {
+            throw createRemoteRecoveryError(renameErr, restoreErr, {
+              stagePath: stagedRemotePath,
+              backupPath: backupRemotePath,
+              finalPath: payload.remotePath,
+            });
+          }
         }
         throw renameErr;
       }
@@ -1491,7 +1540,9 @@ async function uploadLocalToSftp(_event, payload) {
       }
       return { success: true, remotePath: payload.remotePath };
     } catch (err) {
-      try { await backend.remove(stagedRemotePath, { recursive: false, encoding }); } catch { /* ignore */ }
+      if (!err?.preserveStagedUpload) {
+        try { await backend.remove(stagedRemotePath, { recursive: false, encoding }); } catch { /* ignore */ }
+      }
       throw err;
     } finally {
       try { transfer?.detachAbortSignal?.(); } catch { /* ignore */ }
@@ -1719,6 +1770,7 @@ module.exports = {
   downloadSftpToLocal,
   uploadLocalToSftp,
   pipelinedUploadLocalFile,
+  _renameRemotePathForTests: renameRemotePath,
   closeSftp,
   mkdirSftp,
   deleteSftp,

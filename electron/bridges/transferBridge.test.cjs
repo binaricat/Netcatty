@@ -94,9 +94,8 @@ test("resumable SFTP uploads use the configured per-file request concurrency", a
   };
   transferBridge.init({ sftpClients: new Map([["target", client]]) });
 
-  const sender = createSender();
   const running = transferBridge.startTransfer(
-    { sender },
+    { sender: createSender() },
     {
       transferId: "upload-large",
       sourcePath: localPath,
@@ -244,8 +243,9 @@ test("resuming while a fast pause is pending settles the pause request", async (
   };
   transferBridge.init({ sftpClients: new Map([["target", client]]) });
 
+  const sender = createSender();
   const running = transferBridge.startTransfer(
-    { sender: createSender() },
+    { sender },
     {
       transferId: "pause-resume-race",
       sourcePath: localPath,
@@ -593,8 +593,9 @@ test("cancel during stalled resumable upload OPEN ends the isolated channel", as
   };
   transferBridge.init({ sftpClients: new Map([["target", client]]) });
 
+  const sender = createSender();
   const running = transferBridge.startTransfer(
-    { sender: createSender() },
+    { sender },
     {
       transferId: "upload-open-stall-cancel",
       sourcePath: localPath,
@@ -618,6 +619,8 @@ test("cancel during stalled resumable upload OPEN ends the isolated channel", as
   const result = await running;
   assert.match(result.error || "", /cancel|closed/i);
   assert.ok(endedChannels >= 1, `expected isolated channel end on cancel, got ${endedChannels}`);
+  assert.ok(sender.sent.some((entry) => entry.channel === "netcatty:transfer:cancelled"));
+  assert.equal(sender.sent.some((entry) => entry.channel === "netcatty:transfer:error"), false);
 });
 
 test("resumable SFTP uploads fail closed when pipelined strategies fail (no serial stream)", async (t) => {
@@ -970,16 +973,17 @@ test("resumable fast uploads reject a source that grows during transfer", async 
   assert.equal(promoted, false);
 });
 
-test("resumable fast uploads reject same-size source changes", async (t) => {
+test("resumable fast uploads reject same-size changes outside old sample regions", async (t) => {
   const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-transfer-upload-metadata-change-"));
   t.after(async () => {
     await fs.promises.rm(tempDir, { recursive: true, force: true });
   });
 
-  const payload = Buffer.alloc(32 * 1024, 73);
+  const payload = Buffer.alloc(8 * TRANSFER_CHUNK_SIZE, 73);
   const localPath = path.join(tempDir, "upload.bin");
   await fs.promises.writeFile(localPath, payload);
   const frozenStat = await fs.promises.stat(localPath);
+  let changeStarted = false;
   let changed = false;
   let promoted = false;
   let stagedDeleted = false;
@@ -988,14 +992,27 @@ test("resumable fast uploads reject same-size source changes", async (t) => {
       callback(null, Buffer.from("remote-handle"));
     },
     write(_handle, _buffer, _offset, _length, _position, callback) {
-      // Same-size rewrite + restore original mtime/ctime so metadata-only
-      // checks cannot detect the change (Codex regression on coarse FS clocks).
-      fs.promises.writeFile(localPath, Buffer.alloc(payload.length, 74))
-        .then(() => fs.promises.utimes(
-          localPath,
-          frozenStat.atime,
-          frozenStat.mtime,
-        ))
+      if (changeStarted) {
+        callback(null);
+        return;
+      }
+      changeStarted = true;
+      // Rewrite only the second chunk. The old start/middle/end sampling did
+      // not cover this range, and restoring mtime models a coarse filesystem.
+      fs.promises.open(localPath, "r+")
+        .then(async (handle) => {
+          try {
+            await handle.write(
+              Buffer.alloc(TRANSFER_CHUNK_SIZE, 74),
+              0,
+              TRANSFER_CHUNK_SIZE,
+              TRANSFER_CHUNK_SIZE,
+            );
+          } finally {
+            await handle.close();
+          }
+        })
+        .then(() => fs.promises.utimes(localPath, frozenStat.atime, frozenStat.mtime))
         .then(() => {
           changed = true;
           callback(null);
