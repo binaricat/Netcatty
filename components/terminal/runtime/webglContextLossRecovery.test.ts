@@ -113,7 +113,7 @@ test("burst losses trip a persistent breaker that ensure and suspend cannot rear
 
 // Periodic GPU context loss (~every 15s on some Linux drivers) must still trip the
 // breaker. A short recovery window ages each prior loss out, so WebGL keeps
-// dispose→rebuild cycling and the terminal flashes forever (#2436).
+// dispose -> rebuild cycling and the terminal flashes forever (#2436).
 test("periodic losses spaced ~15s apart trip the breaker instead of flashing forever", () => {
   const harness = createHarness();
   harness.controller.ensure();

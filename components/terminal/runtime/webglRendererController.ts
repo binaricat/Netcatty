@@ -35,7 +35,7 @@ export function createWebglRendererController<TAddon extends WebglRendererAddon>
   const recoveryDelayMs = options.recoveryDelayMs ?? 50;
   // Keep a wide enough window that periodic GPU context loss (commonly ~15s on
   // some Linux drivers/compositors) still accumulates and trips the breaker.
-  // A 10s window aged those losses out, so WebGL kept dispose→rebuild flashing.
+  // A 10s window aged those losses out, so WebGL kept dispose -> rebuild flashing.
   const recoveryWindowMs = options.recoveryWindowMs ?? 60_000;
   const maxRecoveriesPerWindow = options.maxRecoveriesPerWindow ?? 2;
   const contextLosses: number[] = [];
