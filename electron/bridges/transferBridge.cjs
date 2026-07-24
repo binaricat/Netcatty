@@ -900,7 +900,13 @@ async function uploadFile(localPath, remotePath, client, fileSize, transfer, sen
           ? undefined
           : transfer.pauseUnavailableReason;
         if (transfer.cancelled) throw err;
+        // Source-change / hard safety errors must not be retried on another path.
+        if (err?.noTransferFallback || err?.sourceChanged) throw err;
         rememberPipelineError(err);
+        // fastPut progress is not a durable contiguous checkpoint — reset so
+        // concurrent-shared does not resume past holes left by the failed put.
+        transfer.checkpointBytes = 0;
+        sendProgress(0, fileSize, { force: true, checkpointBytes: 0 });
         console.warn(
           "[transferBridge] isolated fastPut failed, trying next pipelined strategy:",
           err?.message || String(err),

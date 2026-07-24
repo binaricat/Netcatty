@@ -1229,6 +1229,21 @@ async function uploadLocalToSftp(_event, payload) {
       signal: payload.abortSignal,
     });
     throwIfAborted(payload.abortSignal);
+    // Verify staged size before promoting over the destination (#2022 / silent
+    // truncation on servers that mishandle non-default WRITE sizes).
+    let expectedSize = null;
+    try {
+      expectedSize = Number((await fs.promises.stat(payload.localPath))?.size);
+    } catch { /* ignore — fall through without size check if local vanished */ }
+    if (Number.isFinite(expectedSize) && expectedSize >= 0) {
+      const stagedStat = await client.stat(encodedStagedPath);
+      const stagedSize = Number(stagedStat?.size);
+      if (Number.isFinite(stagedSize) && stagedSize !== expectedSize) {
+        throw new Error(
+          `Upload size mismatch for ${payload.remotePath}: expected ${expectedSize} bytes, got ${stagedSize}`,
+        );
+      }
+    }
     await renameRemotePath(client, encodedStagedPath, encodedPath, encodedBackupPath);
   } catch (err) {
     try {
