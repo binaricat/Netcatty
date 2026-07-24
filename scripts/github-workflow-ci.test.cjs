@@ -10,6 +10,14 @@ const testWorkflow = readWorkflow("test.yml");
 const buildWorkflow = readWorkflow("build.yml");
 const cursorWorkflow = readWorkflow("cursor-automation.yml");
 const etWorkflow = readWorkflow("build-et-binaries.yml");
+const appBuilderPatch = fs.readFileSync(
+  path.join(__dirname, "..", "patches", "app-builder-lib+26.15.2.patch"),
+  "utf8",
+);
+const windowsEtBuild = fs.readFileSync(
+  path.join(__dirname, "build-et", "build-windows.ps1"),
+  "utf8",
+);
 
 test("PR validation runs once per commit and includes a production build", () => {
   assert.match(testWorkflow, /push:\s*\n\s*branches:\s*\n\s*- main/);
@@ -44,6 +52,9 @@ test("Windows packaging reuses its dependency install for the ConPTY smoke test"
   assert.match(packageMatrix[0], /Compile ConPTY test helpers/);
   assert.match(packageMatrix[0], /Test Mosh handshake through ConPTY/);
   assert.match(packageMatrix[0], /if: matrix\.name == 'windows'/);
+  assert.match(packageMatrix[0], /Restore Electron download cache/);
+  assert.match(packageMatrix[0], /actions\/cache@v6/);
+  assert.match(packageMatrix[0], /node electron\/bridges\/terminalBridge\.moshConpty\.integration\.cjs/);
 });
 
 test("stable releases propose Nix metadata through a pull request", () => {
@@ -92,6 +103,9 @@ test("ET binary validation runs once and retries transient container pulls", () 
   assert.match(etWorkflow, /Pull build container with retry/g);
   assert.match(etWorkflow, /docker pull/);
   assert.match(etWorkflow, /--pull=never/);
+  assert.match(etWorkflow, /Restore vcpkg download cache/g);
+  assert.match(etWorkflow, /VCPKG_DOWNLOADS/g);
+  assert.match(windowsEtBuild, /Invoke-WithRetry/);
 });
 
 test("GitHub-owned actions use current Node 24 releases", () => {
@@ -104,6 +118,7 @@ test("GitHub-owned actions use current Node 24 releases", () => {
     ["actions/upload-artifact", "v7"],
     ["actions/download-artifact", "v8"],
     ["actions/github-script", "v9"],
+    ["actions/cache", "v6"],
   ]);
 
   for (const [name, source] of workflows) {
@@ -114,4 +129,9 @@ test("GitHub-owned actions use current Node 24 releases", () => {
       }
     }
   }
+});
+
+test("electron-builder retries Fetch API server errors", () => {
+  assert.match(appBuilderPatch, /e\?\.response\?\.status/);
+  assert.match(appBuilderPatch, /responseStatus >= 500/);
 });

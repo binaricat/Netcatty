@@ -60,6 +60,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - name: Restore vcpkg download cache
+        uses: actions/cache@v6
+        with:
+          path: .cache/vcpkg-downloads
+          key: vcpkg-downloads-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/build-et/**') }}
+          restore-keys: vcpkg-downloads-${{ runner.os }}-${{ runner.arch }}-
       - name: Pull build container with retry
         run: |
           set -euo pipefail
@@ -75,10 +81,12 @@ jobs:
           exit 1
       - name: Build et (linux-x64)
         run: |
+          mkdir -p "${GITHUB_WORKSPACE}/.cache/vcpkg-downloads"
           docker run --rm --pull=never \
             -e ET_REF="${ET_REF}" \
             -e OUT_DIR=/work/out \
             -e ARCH=x64 \
+            -e VCPKG_DOWNLOADS=/work/.cache/vcpkg-downloads \
             -v "${GITHUB_WORKSPACE}:/work" \
             -w /work \
             quay.io/pypa/manylinux2014_x86_64 \
@@ -94,6 +102,12 @@ jobs:
     runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v7
+      - name: Restore vcpkg download cache
+        uses: actions/cache@v6
+        with:
+          path: .cache/vcpkg-downloads
+          key: vcpkg-downloads-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/build-et/**') }}
+          restore-keys: vcpkg-downloads-${{ runner.os }}-${{ runner.arch }}-
       - name: Pull build container with retry
         run: |
           set -euo pipefail
@@ -109,10 +123,12 @@ jobs:
           exit 1
       - name: Build et (linux-arm64)
         run: |
+          mkdir -p "${GITHUB_WORKSPACE}/.cache/vcpkg-downloads"
           docker run --rm --pull=never \
             -e ET_REF="${ET_REF}" \
             -e OUT_DIR=/work/out \
             -e ARCH=arm64 \
+            -e VCPKG_DOWNLOADS=/work/.cache/vcpkg-downloads \
             -v "${GITHUB_WORKSPACE}:/work" \
             -w /work \
             quay.io/pypa/manylinux2014_aarch64 \
@@ -131,6 +147,16 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v7
+      - name: Restore vcpkg download cache
+        uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/vcpkg-downloads
+          key: vcpkg-downloads-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/build-et/**') }}
+          restore-keys: vcpkg-downloads-${{ runner.os }}-${{ runner.arch }}-
+      - name: Prepare vcpkg download cache
+        run: |
+          mkdir -p "${RUNNER_TEMP}/vcpkg-downloads"
+          echo "VCPKG_DOWNLOADS=${RUNNER_TEMP}/vcpkg-downloads" >> "$GITHUB_ENV"
       - name: Build et (darwin-universal)
         env:
           ET_REF: ${{ env.ET_REF }}
@@ -151,6 +177,18 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7
+      - name: Restore vcpkg download cache
+        uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}\vcpkg-downloads
+          key: vcpkg-downloads-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/build-et/**') }}
+          restore-keys: vcpkg-downloads-${{ runner.os }}-${{ runner.arch }}-
+      - name: Prepare vcpkg download cache
+        shell: pwsh
+        run: |
+          $downloads = Join-Path $env:RUNNER_TEMP "vcpkg-downloads"
+          New-Item -ItemType Directory -Force -Path $downloads | Out-Null
+          "VCPKG_DOWNLOADS=$downloads" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Install ninja
         run: choco install -y ninja
       - name: Set up MSVC developer command prompt

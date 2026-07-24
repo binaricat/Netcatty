@@ -1,0 +1,20 @@
+diff --git a/node_modules/app-builder-lib/out/util/electronGet.js b/node_modules/app-builder-lib/out/util/electronGet.js
+index c433dbb..1274151 100644
+--- a/node_modules/app-builder-lib/out/util/electronGet.js
++++ b/node_modules/app-builder-lib/out/util/electronGet.js
+@@ -252,12 +252,12 @@ async function downloadArtifactToFile(config, label) {
+                 interval: 2000,
+                 backoff: 2000,
+                 shouldRetry: (e) => {
+-                    var _a;
+                     if (e instanceof builder_util_runtime_1.HttpError) {
+                         return e.isServerError();
+                     }
+-                    if (typeof ((_a = e === null || e === void 0 ? void 0 : e.response) === null || _a === void 0 ? void 0 : _a.statusCode) === "number") {
+-                        return e.response.statusCode >= 500;
++                    const responseStatus = e?.response?.statusCode ?? e?.response?.status;
++                    if (typeof responseStatus === "number") {
++                        return responseStatus >= 500;
+                     }
+                     return typeof (e === null || e === void 0 ? void 0 : e.code) === "string" && ["ENOTFOUND", "ETIMEDOUT", "ECONNRESET", "EPIPE", "ENOENT"].includes(e.code);
+                 },

@@ -2,6 +2,7 @@
 
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
+const Module = require("node:module");
 const os = require("node:os");
 const path = require("node:path");
 
@@ -44,7 +45,19 @@ async function main() {
 
   const bridgePath = require.resolve("./terminalBridge.cjs");
   delete require.cache[bridgePath];
-  const bridge = require("./terminalBridge.cjs");
+  const originalLoad = Module._load;
+  Module._load = function loadWithoutElectronBinary(request, parent, isMain) {
+    if (request === "electron") {
+      return { dialog: {} };
+    }
+    return originalLoad.call(this, request, parent, isMain);
+  };
+  let bridge;
+  try {
+    bridge = require("./terminalBridge.cjs");
+  } finally {
+    Module._load = originalLoad;
+  }
   const sessions = new Map();
   const sent = [];
   bridge.init({

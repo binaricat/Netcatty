@@ -18,6 +18,29 @@ Set-StrictMode -Version Latest
 if (-not $env:ET_REF) { throw "missing ET_REF" }
 if (-not $env:OUT_DIR) { throw "missing OUT_DIR" }
 
+function Invoke-WithRetry {
+  param(
+    [Parameter(Mandatory = $true)]
+    [scriptblock]$Command,
+    [int]$MaxAttempts = 4,
+    [int]$InitialDelaySeconds = 15
+  )
+
+  $attempt = 1
+  $delay = $InitialDelaySeconds
+  while ($true) {
+    & $Command
+    if ($LASTEXITCODE -eq 0) { return }
+    if ($attempt -ge $MaxAttempts) {
+      throw "command failed after $attempt attempts (exit $LASTEXITCODE)"
+    }
+    Write-Warning "command failed with exit $LASTEXITCODE; retrying in ${delay}s (attempt $($attempt + 1)/$MaxAttempts)"
+    Start-Sleep -Seconds $delay
+    $attempt++
+    $delay *= 2
+  }
+}
+
 $etRef = $env:ET_REF
 if ($etRef -notmatch '^[A-Za-z0-9][A-Za-z0-9._/-]*$' -or $etRef -match '\.\.' -or $etRef -match '@\{' -or $etRef.EndsWith('/') -or $etRef.EndsWith('.lock')) {
   throw "invalid ET_REF: $etRef"
@@ -69,12 +92,13 @@ try {
   & (Join-Path $etDir "external\vcpkg\bootstrap-vcpkg.bat") -disableMetrics
 
   $buildDir = Join-Path $etDir "build"
-  cmake -S $etDir -B $buildDir `
-    -GNinja `
-    -DCMAKE_BUILD_TYPE=RelWithDebInfo `
-    -DDISABLE_TELEMETRY=ON `
-    -DVCPKG_TARGET_TRIPLET=x64-windows-static
-  if ($LASTEXITCODE -ne 0) { throw "cmake configure failed" }
+  Invoke-WithRetry {
+    cmake -S $etDir -B $buildDir `
+      -GNinja `
+      -DCMAKE_BUILD_TYPE=RelWithDebInfo `
+      -DDISABLE_TELEMETRY=ON `
+      -DVCPKG_TARGET_TRIPLET=x64-windows-static
+  }
 
   cmake --build $buildDir --target et
   if ($LASTEXITCODE -ne 0) { throw "cmake build failed" }
