@@ -108,6 +108,8 @@ function makeHarness(t) {
 
   return {
     bridge,
+    tmp,
+    sshPath,
     sessions,
     sent,
     spawns,
@@ -134,19 +136,45 @@ test("startMoshSession handshake path returns the same shape as the legacy path"
   assert.deepEqual(result, { sessionId: "mosh-test-session" });
 });
 
-test("Mosh PTYs enable bundled ConPTY clear support on Windows", async (t) => {
-  const h = makeHarness(t);
-  await h.bridge.startMoshSession(h.event, h.options, { moshClientLookup: h.lookupOpts });
+test("Mosh PTYs explicitly enable bundled ConPTY clear support only on Windows", async (t) => {
+  const platformDescriptor = Object.getOwnPropertyDescriptor(process, "platform");
+  const originalSystemRoot = process.env.SystemRoot;
 
-  assert.equal(h.spawns[0].opts.useConptyDll, process.platform === "win32");
+  const startAndSwap = async (platform) => {
+    const h = makeHarness(t);
+    if (platform === "win32") {
+      const system32 = path.join(h.tmp, "System32");
+      const whereExe = path.join(system32, "where.exe");
+      fs.mkdirSync(system32, { recursive: true });
+      fs.writeFileSync(whereExe, `#!/bin/sh\nprintf '%s\\n' '${h.sshPath.replace(/'/g, "'\\''")}'\n`);
+      fs.chmodSync(whereExe, 0o755);
+      process.env.SystemRoot = h.tmp;
+    }
+    Object.defineProperty(process, "platform", { ...platformDescriptor, value: platform });
 
-  h.spawns[0].emitData(
-    "MOSH IP 203.0.113.8\r\nMOSH CONNECT 60002 ABCDEFGHIJKLMNOPQRSTUV==\r\n",
-  );
-  h.spawns[0].emitExit({ exitCode: 0, signal: 0 });
+    await h.bridge.startMoshSession(h.event, h.options, { moshClientLookup: h.lookupOpts });
+    h.spawns[0].emitData(
+      "MOSH IP 203.0.113.8\r\nMOSH CONNECT 60002 ABCDEFGHIJKLMNOPQRSTUV==\r\n",
+    );
+    h.spawns[0].emitExit({ exitCode: 0, signal: 0 });
+    return h.spawns;
+  };
 
-  assert.equal(h.spawns.length, 2);
-  assert.equal(h.spawns[1].opts.useConptyDll, process.platform === "win32");
+  try {
+    const windowsSpawns = await startAndSwap("win32");
+    assert.equal(windowsSpawns.length, 2);
+    assert.equal(windowsSpawns[0].opts.useConptyDll, true);
+    assert.equal(windowsSpawns[1].opts.useConptyDll, true);
+
+    const linuxSpawns = await startAndSwap("linux");
+    assert.equal(linuxSpawns.length, 2);
+    assert.equal(linuxSpawns[0].opts.useConptyDll, false);
+    assert.equal(linuxSpawns[1].opts.useConptyDll, false);
+  } finally {
+    Object.defineProperty(process, "platform", platformDescriptor);
+    if (originalSystemRoot === undefined) delete process.env.SystemRoot;
+    else process.env.SystemRoot = originalSystemRoot;
+  }
 });
 
 test("startMoshSession offers all locale settings to mosh-server without exporting them through SSH", async (t) => {
