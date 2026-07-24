@@ -837,6 +837,119 @@ test('buildCodexReviewRequestComment includes mention', () => {
   assert.doesNotMatch(body, /cursor-codex-head:/);
 });
 
+test('normalizeClassification accepts already_available and does not implement', () => {
+  const result = auto.normalizeClassification(
+    grounded({
+      category: 'already_available',
+      confidence: 0.9,
+      summary: 'multi-session already exists',
+      reasoning:
+        'AIChatPanel already exposes session list and createSession; no new surface needed.',
+      reply:
+        '这个能力已经有了：打开侧边 AI 面板后，用会话列表 / 新建会话即可切换多会话（见 AIChatPanel）。若入口对你不可见，请补充截图。',
+    }),
+  );
+  assert.equal(result.category, 'already_available');
+  assert.equal(result.should_implement, false);
+  assert.equal(auto.CLOSE_REASONS.already_available, 'completed');
+});
+
+test('normalizeClassification downgrades low-confidence already_available', () => {
+  const result = auto.normalizeClassification(
+    grounded({
+      category: 'already_available',
+      confidence: 0.5,
+      summary: 'maybe already there',
+      reasoning: 'Saw AIChatPanel but entry path uncertain.',
+      reply: '可能已经支持多会话。',
+    }),
+  );
+  assert.equal(result.category, 'other');
+  assert.equal(result.should_implement, false);
+  assert.match(result.reply, /维护者|maintainer/i);
+});
+
+test('labelsForCategory for already_available drops ready-for-agent', () => {
+  const labels = auto.labelsForCategory('already_available', [
+    'enhancement',
+    'triage',
+    'ready-for-agent',
+    'user-tag',
+  ]);
+  assert.ok(labels.includes('triage:already-available'));
+  assert.ok(labels.includes('user-tag'));
+  assert.ok(!labels.includes('ready-for-agent'));
+  assert.ok(!labels.includes('enhancement'));
+});
+
+test('applyClassification comments then closes already_available as completed', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cursor-auto-'));
+  const classificationPath = path.join(dir, 'classification.json');
+  fs.writeFileSync(
+    classificationPath,
+    JSON.stringify(
+      grounded({
+        category: 'already_available',
+        confidence: 0.92,
+        summary: 'right sidebar already present',
+        reasoning:
+          'AsidePanel hosts right-side panels; VaultView already uses absolute right panels.',
+        reply:
+          '右侧栏已存在：在主机/密钥等 Vault 页面打开详情时会从右侧滑出 AsidePanel。若不满足你的场景请说明期望入口。',
+      }),
+    ),
+  );
+
+  const calls = [];
+  const github = {
+    rest: {
+      issues: {
+        async get() {
+          return {
+            data: {
+              number: 2428,
+              state: 'open',
+              labels: [{ name: 'enhancement' }, { name: 'triage' }],
+            },
+          };
+        },
+        async createComment(args) {
+          calls.push(['createComment', args]);
+          return { data: { id: 1 } };
+        },
+        async update(args) {
+          calls.push(['update', args]);
+          return { data: {} };
+        },
+      },
+    },
+  };
+  const outputs = {};
+  const core = {
+    setOutput(key, value) {
+      outputs[key] = value;
+    },
+  };
+
+  const classification = await auto.applyClassification({
+    github,
+    context: { repo: { owner: 'binaricat', repo: 'Netcatty' } },
+    core,
+    issueNumber: 2428,
+    classificationPath,
+  });
+
+  assert.equal(classification.category, 'already_available');
+  assert.equal(outputs.should_implement, 'false');
+  assert.equal(outputs.should_close, 'true');
+  assert.equal(calls[0][0], 'createComment');
+  assert.match(calls[0][1].body, /AsidePanel/);
+  assert.equal(calls[1][0], 'update');
+  assert.equal(calls[1][1].state, 'closed');
+  assert.equal(calls[1][1].state_reason, 'completed');
+  assert.ok(calls[1][1].labels.includes('triage:already-available'));
+});
+
 test('extractPaginatedItems accepts normalized Search arrays and raw items', () => {
   const normalized = [{ number: 1, user: { type: 'User' } }, null, { number: 2 }];
   assert.deepEqual(

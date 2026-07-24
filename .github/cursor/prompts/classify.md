@@ -92,6 +92,35 @@ Do **not** defer just because:
 - `bug_needs_info`: still cannot reproduce / attribute after reading code, or
   missing evidence (logs, steps, versions).
 
+### Already available (important — check before treating as a new feature)
+
+Use `already_available` when **all** of these hold after reading code:
+
+- The reporter is asking for a capability (feature request) **or** reports
+  something “missing” that the product **already implements**.
+- You found the owning UI/settings/code path and can point to a **concrete
+  entry point** a user can follow today (menu path, panel name, toggle label,
+  button text, shortcut, host type, etc.).
+- The existing behavior **covers the request** (or the obvious interpretation
+  of it) without a material product gap. Small polish differences do not
+  block this category if the core need is already met.
+- Confidence ≥ 0.8. If you only *suspect* it exists, do **not** use this
+  category — use `feature_defer` / `bug_needs_info` / `other` instead.
+
+Examples that should be `already_available`:
+
+- User asks for multi-session AI chat, and the sidebar already supports
+  multiple chat sessions with a visible new-session / history control.
+- User asks for a right-side panel that already exists under a named control.
+- User cannot find a setting that is already present under Settings → …
+
+Do **not** use `already_available` when:
+
+- Only a partial workaround exists and the requested product gap is real.
+- The feature is unfinished, gated behind `NETCATTY_PLUGIN_DEV`, or clearly
+  experimental/internal-only without a user-facing entry.
+- You cannot name an accurate click-path from the code you opened.
+
 ### Other
 
 - `unclear`: cannot interpret as a concrete bug or feature.
@@ -99,15 +128,20 @@ Do **not** defer just because:
 
 ### Confidence
 
-- Use **≥ 0.8** for `bug_ready` and `feature_quick_win` when the code path is
-  clear and the change is local — **do not under-confidence UI polish** just to
-  “be safe”. Under-confidence auto-downgrades quick wins away from implement.
+- Use **≥ 0.8** for `bug_ready`, `feature_quick_win`, and `already_available`
+  when the code path is clear — **do not under-confidence UI polish** just to
+  “be safe”. Under-confidence auto-downgrades quick wins away from implement
+  and blocks auto-close for already-available.
 - Be cautious on security, data loss, and cross-process surfaces — not on
   ordinary vault/keychain layout polish.
 
 When truly unsure between quick_win and defer: **if the touch surface is
 clearly local UI after reading code, choose `feature_quick_win`**. Reserve
 defer for genuinely large or strategic work.
+
+Prefer checking **already shipped** before inventing a new feature ticket:
+if the code already exposes the capability, choose `already_available`
+instead of `feature_quick_win` / `feature_defer`.
 
 ## Public `reply` rules
 
@@ -129,6 +163,12 @@ Category-specific:
   vague “tradeoffs”.
 - `bug_ready` / `feature_quick_win`: say a focused change is being prepared and
   name the likely touchpoint.
+- `already_available`: **do not promise a code change**. Explain that this
+  already exists, give **step-by-step how to open/use it** (menu / panel /
+  control names from the UI strings you saw in code), mention the code
+  touchpoint briefly, and invite them to reopen with more detail if that
+  path does not cover their case. The automation will close the issue after
+  this reply.
 - `unclear` / `other`: say what is missing or that a maintainer will follow up.
 
 Do not claim to be human. Do not add an AI disclaimer.
@@ -161,6 +201,9 @@ Hard requirements:
 - `reply` must reference at least one path basename or symbol from the above.
 - `reasoning` for `feature_defer` must state **which multi-module / strategic
   barrier** applies; “tests exist” is not enough.
+- For `already_available`, `code_findings` must name the user-facing entry
+  (menu/panel/control) **and** the owning component/symbol; `reply` must be a
+  usable how-to, not just “already supported”.
 
 If you cannot complete steps 2–3, set category to `bug_needs_info` or `unclear`
 and put the failed search terms in `code_findings` — still do not invent paths.
