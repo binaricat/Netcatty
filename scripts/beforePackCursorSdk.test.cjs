@@ -83,7 +83,7 @@ test("Windows packaging rebuilds patched node-pty from source for the target arc
     path.join("/workspace/netcatty", "node_modules", "@electron", "rebuild", "lib", "cli.js"),
     "--force",
     "--build-from-source",
-    "--which-module",
+    "--only",
     "node-pty",
     "--arch",
     "arm64",

@@ -39,7 +39,7 @@ function rebuildPatchedNodePty({
     rebuildCli,
     "--force",
     "--build-from-source",
-    "--which-module",
+    "--only",
     "node-pty",
     "--arch",
     targetArch,
