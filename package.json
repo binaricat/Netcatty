@@ -41,7 +41,7 @@
     "pack:linux": "npm run build && cross-env NODE_OPTIONS=--disable-warning=DEP0190 electron-builder --config electron-builder.config.cjs --linux --publish=never",
     "pack:linux-x64": "npm run build && cross-env npm_config_arch=x64 NODE_OPTIONS=--disable-warning=DEP0190 electron-builder --config electron-builder.config.cjs --linux --x64 --publish=never",
     "pack:linux-arm64": "npm run build && cross-env npm_config_arch=arm64 NODE_OPTIONS=--disable-warning=DEP0190 electron-builder --config electron-builder.config.cjs --linux --arm64 --publish=never",
-    "postinstall": "electron-builder install-app-deps && patch-package && node scripts/patch-xterm-webgl-atlas.cjs",
+    "postinstall": "patch-package && electron-builder install-app-deps && node scripts/rebuildPatchedNodePty.cjs && node scripts/patch-xterm-webgl-atlas.cjs",
     "rebuild": "electron-builder install-app-deps",
     "tool:cli": "node electron/cli/netcatty-tool-cli.cjs",
     "generate:capability-tools": "node scripts/generate-capability-tools.cjs",

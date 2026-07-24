@@ -34,67 +34,6 @@ function npmExecutable() {
   return process.platform === "win32" ? "npm.cmd" : "npm";
 }
 
-const ELECTRON_BUILDER_ARCH = {
-  0: "ia32",
-  1: "x64",
-  2: "armv7l",
-  3: "arm64",
-  4: "universal",
-};
-
-function rebuildPatchedNodePty({
-  projectDir,
-  platform,
-  arch,
-  run = execFileSync,
-  exists = fs.existsSync,
-  logger = console,
-}) {
-  if (platform !== "win32") return false;
-  const targetArch = typeof arch === "number" ? ELECTRON_BUILDER_ARCH[arch] : arch;
-  if (!targetArch || targetArch === "universal") {
-    throw new Error(`[beforePackCursorSdk] Unsupported Windows architecture: ${String(arch)}`);
-  }
-  const rebuildExecutable = path.join(
-    projectDir,
-    "node_modules",
-    ".bin",
-    process.platform === "win32" ? "electron-rebuild.cmd" : "electron-rebuild",
-  );
-  logger.log(`[beforePackCursorSdk] Rebuilding patched node-pty for Windows ${targetArch}`);
-  run(rebuildExecutable, [
-    "--force",
-    "--build-from-source",
-    "--which-module",
-    "node-pty",
-    "--arch",
-    targetArch,
-  ], {
-    cwd: projectDir,
-    stdio: "inherit",
-  });
-
-  const nodePtyDir = path.join(projectDir, "node_modules", "node-pty");
-  run(process.execPath, [path.join(nodePtyDir, "scripts", "post-install.js")], {
-    cwd: projectDir,
-    stdio: "inherit",
-    env: { ...process.env, npm_config_arch: targetArch },
-  });
-
-  const requiredArtifacts = [
-    path.join(nodePtyDir, "build", "Release", "conpty.node"),
-    path.join(nodePtyDir, "build", "Release", "conpty", "conpty.dll"),
-    path.join(nodePtyDir, "build", "Release", "conpty", "OpenConsole.exe"),
-  ];
-  const missingArtifacts = requiredArtifacts.filter((filePath) => !exists(filePath));
-  if (missingArtifacts.length > 0) {
-    throw new Error(
-      `[beforePackCursorSdk] Patched node-pty artifacts missing: ${missingArtifacts.join(", ")}`,
-    );
-  }
-  return true;
-}
-
 function ensureCursorSdkPlatformPackages({
   projectDir,
   platform,
@@ -129,11 +68,9 @@ function beforePackCursorSdk(context = {}) {
   const projectDir = context.appDir || process.cwd();
   const platform = context.electronPlatformName || process.platform;
   ensureCursorSdkPlatformPackages({ projectDir, platform });
-  rebuildPatchedNodePty({ projectDir, platform, arch: context.arch ?? process.arch });
 }
 
 module.exports = beforePackCursorSdk;
 module.exports.default = beforePackCursorSdk;
 module.exports.ensureCursorSdkPlatformPackages = ensureCursorSdkPlatformPackages;
-module.exports.rebuildPatchedNodePty = rebuildPatchedNodePty;
 module.exports.CURSOR_PLATFORM_PACKAGES = CURSOR_PLATFORM_PACKAGES;

@@ -7,8 +7,11 @@ const path = require("node:path");
 const {
   CURSOR_PLATFORM_PACKAGES,
   ensureCursorSdkPlatformPackages,
-  rebuildPatchedNodePty,
 } = require("./beforePackCursorSdk.cjs");
+const {
+  copyPatchedNodePtyToPackagedApp,
+  rebuildPatchedNodePty,
+} = require("./nodePtyConptyPatch.cjs");
 
 function writeJson(filePath, value) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
@@ -75,8 +78,9 @@ test("Windows packaging rebuilds patched node-pty from source for the target arc
 
   assert.equal(rebuilt, true);
   assert.equal(calls.length, 2);
-  assert.match(calls[0][0], /node_modules[/\\]\.bin[/\\]electron-rebuild(?:\.cmd)?$/);
+  assert.equal(calls[0][0], process.execPath);
   assert.deepEqual(calls[0][1], [
+    path.join("/workspace/netcatty", "node_modules", "@electron", "rebuild", "lib", "cli.js"),
     "--force",
     "--build-from-source",
     "--which-module",
@@ -116,6 +120,27 @@ test("non-Windows packaging keeps the prebuilt node-pty path", () => {
 
   assert.equal(rebuilt, false);
   assert.deepEqual(calls, []);
+});
+
+test("Windows afterPack copies rebuilt ConPTY files over packaged prebuilds", () => {
+  const copied = [];
+  const made = [];
+  const destinations = copyPatchedNodePtyToPackagedApp({
+    projectDir: "/workspace/netcatty",
+    resourcesDir: "/workspace/release/resources",
+    copy: (...args) => copied.push(args),
+    mkdir: (...args) => made.push(args),
+  });
+
+  assert.equal(copied.length, 3);
+  assert.equal(made.length, 3);
+  assert.equal(copied[0][0], path.join(
+    "/workspace/netcatty", "node_modules", "node-pty", "build", "Release", "conpty.node",
+  ));
+  assert.equal(copied[0][1], path.join(
+    "/workspace/release/resources", "app.asar.unpacked", "node_modules", "node-pty", "build", "Release", "conpty.node",
+  ));
+  assert.deepEqual(destinations, copied.map(([, destination]) => destination));
 });
 
 test("node-pty patch matches bundled ConPTY clear ABI and preserves the cursor row", () => {

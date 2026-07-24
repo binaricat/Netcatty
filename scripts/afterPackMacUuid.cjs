@@ -20,6 +20,10 @@ const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
 const { execFileSync } = require("node:child_process");
+const {
+  copyPatchedNodePtyToPackagedApp,
+  rebuildPatchedNodePty,
+} = require("./nodePtyConptyPatch.cjs");
 
 const LC_UUID = 0x1b;
 const MH_MAGIC_64 = 0xfeedfacf; // thin 64-bit, little-endian on disk
@@ -297,6 +301,17 @@ async function afterPack(context) {
     console.log(
       `[afterPack] Removed unused Cursor SDK platform package(s): ${removedCursorPackages.join(", ")}`,
     );
+  }
+
+  if (context.electronPlatformName === "win32") {
+    const projectDir = context.packager.appDir || context.packager.projectDir;
+    rebuildPatchedNodePty({ projectDir, platform: "win32", arch: context.arch });
+    copyPatchedNodePtyToPackagedApp({
+      projectDir,
+      resourcesDir: appResourcesDir(context),
+    });
+    console.log("[afterPack] Installed patched node-pty ConPTY runtime into packaged app");
+    return;
   }
 
   if (context.electronPlatformName !== "darwin") return;
