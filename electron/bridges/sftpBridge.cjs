@@ -587,11 +587,14 @@ function buildBackupRemotePath(remotePath) {
 }
 
 function isRemotePermissionError(err) {
+  // Codes only — do not match message substrings (filenames may contain
+  // "permission"/"access"/"denied" and must not trigger in-place fallback).
   const code = err?.code;
-  if (code === 3 || code === "EACCES" || code === "EPERM" || code === "ERR_PERMISSION") {
-    return true;
-  }
-  return /permission|denied|access/i.test(String(err?.message || ""));
+  return code === 3
+    || code === "EACCES"
+    || code === "EPERM"
+    || code === "ERR_PERMISSION"
+    || code === "SSH_FX_PERMISSION_DENIED";
 }
 
 function attrsIndicateSymlink(attrs) {
@@ -604,33 +607,52 @@ function attrsIndicateSymlink(attrs) {
 
 /**
  * Plan overwrite strategy for a remote upload target.
- * - Symlinks: write in-place so the server follows the link (rename would
- *   replace the link node). Shared-channel cancel cannot hard-stop fastPut;
- *   symlink overwrite is rare and accepted as best-effort.
- * - Regular files (new or existing): stage + rename so cancel cannot keep
- *   mutating the final destination after the UI reports cancellation. Capture
- *   mode bits to restore after the new inode lands.
+ * - Confirmed symlinks: write in-place so the server follows the link.
+ * - When lstat is unavailable but the path exists: write in-place so we never
+ *   replace an unknown link node via stage+rename.
+ * - Confirmed regular files (new or existing): stage + rename so cancel cannot
+ *   keep mutating the final destination. Restore mode bits after promotion
+ *   (SFTP v3 cannot portably preserve owner/ACL/xattr/hard-links).
  */
 async function planRemoteUploadReplace(client, encodedPath) {
   try {
     const sftp = await requireSftpChannel(client);
-    let attrs = null;
+    const hasNativeLstat = typeof sftp?.lstat === "function";
+
+    if (hasNativeLstat) {
+      let attrs = null;
+      try {
+        attrs = await lstatAsync(sftp, encodedPath);
+      } catch {
+        attrs = null;
+      }
+      if (!attrs) return { writeInPlace: false, existingMode: null };
+      if (attrsIndicateSymlink(attrs)) {
+        return { writeInPlace: true, existingMode: null };
+      }
+      const mode = Number(attrs.mode);
+      const existingMode = Number.isFinite(mode) && mode > 0
+        ? (mode & 0o7777)
+        : null;
+      return { writeInPlace: false, existingMode };
+    }
+
+    // No lstat: if the path exists via stat, write in-place so a symlink is not
+    // replaced by rename when we cannot inspect the link node.
     try {
-      attrs = await lstatAsync(sftp, encodedPath);
+      const attrs = await statAsync(sftp, encodedPath);
+      if (attrs) {
+        const mode = Number(attrs.mode);
+        const existingMode = Number.isFinite(mode) && mode > 0
+          ? (mode & 0o7777)
+          : null;
+        return { writeInPlace: true, existingMode };
+      }
     } catch {
-      attrs = null;
+      // Missing destination — stage a new file.
     }
-    if (!attrs) return { writeInPlace: false, existingMode: null };
-    if (attrsIndicateSymlink(attrs)) {
-      return { writeInPlace: true, existingMode: null };
-    }
-    const mode = Number(attrs.mode);
-    const existingMode = Number.isFinite(mode) && mode > 0
-      ? (mode & 0o7777)
-      : null;
-    return { writeInPlace: false, existingMode };
   } catch {
-    // Missing destination / unsupported lstat is fine — default to staging.
+    // Channel probe failure — default to staging for cancel-safe new uploads.
   }
   return { writeInPlace: false, existingMode: null };
 }
@@ -669,9 +691,9 @@ async function restoreRemoteMode(client, encodedPath, mode) {
 
 /**
  * Pipelined upload with optional stage+rename.
- * - New files: stage then rename (cancel-safe promotion).
- * - Existing files/symlinks: write in-place (preserve inode / link / metadata).
- * - Parent-dir permission on stage: fall back to in-place.
+ * - Confirmed regular files: stage then rename (cancel-safe finals) + mode restore.
+ * - Symlinks / unknown-existing (no lstat): write in-place.
+ * - Parent-dir permission on stage: fall back to in-place (code-based only).
  *
  * `remotePath` must be the logical (pre-encode) path string. Encoding is applied
  * here so staged/backup names are not built from Buffer path bytes.

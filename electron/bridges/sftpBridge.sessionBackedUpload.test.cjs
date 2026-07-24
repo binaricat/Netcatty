@@ -423,6 +423,63 @@ test("parent-dir permission on staged path falls back to in-place for new files"
   assert.deepEqual(remoteFiles.get("/ro-dir/file.bin"), payload);
 });
 
+test("size-mismatch on path containing 'access' does not fall back to in-place", async (t) => {
+  const tempRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-access-name-"));
+  t.after(async () => {
+    await fs.promises.rm(tempRoot, { recursive: true, force: true });
+  });
+  tempDirBridge.init?.({ getPath: () => tempRoot });
+
+  const localPath = path.join(tempRoot, "payload.bin");
+  const payload = Buffer.from("twelve-bytes"); // 12 bytes
+  await fs.promises.writeFile(localPath, payload);
+
+  const { channel, fastPutCalls } = createSessionChannel();
+  // Make staged-path stat report a wrong size so size-verify throws a message
+  // containing the path word "access" — must NOT be treated as permission.
+  const origStat = channel.stat.bind(channel);
+  channel.stat = (targetPath, callback) => {
+    if (String(targetPath).includes(".netcatty-upload-")) {
+      callback(null, {
+        size: 1,
+        mode: 0o100644,
+        isDirectory: () => false,
+        isFile: () => true,
+        isSymbolicLink: () => false,
+      });
+      return;
+    }
+    return origStat(targetPath, callback);
+  };
+
+  const connection = {
+    sftp(callback) { callback(null, channel); },
+  };
+  const sftpClients = new Map();
+  sftpBridge.init({
+    electronModule: { webContents: { fromId: () => null } },
+    sessions: new Map([["session-access", { conn: connection }]]),
+    sftpClients,
+  });
+  const opened = await sftpBridge.openSftpForSession(null, {
+    sessionId: "session-access",
+    fileProtocol: "sftp",
+  });
+
+  await assert.rejects(
+    () => sftpBridge.uploadLocalToSftp(null, {
+      sftpId: opened.sftpId,
+      localPath,
+      remotePath: "/tmp/access-denied-name.bin",
+      encoding: "utf-8",
+    }),
+    /size mismatch/i,
+  );
+  // Only the staged attempt — no in-place fallback write to the final path.
+  assert.equal(fastPutCalls.length, 1);
+  assert.match(fastPutCalls[0].remotePath, /\.netcatty-upload-.*\.part$/);
+});
+
 test("pipelinedUploadLocalFile aborts in-flight fastPut when AbortSignal fires", async () => {
   const tempRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-abort-fastput-"));
   const localPath = path.join(tempRoot, "abort.bin");
