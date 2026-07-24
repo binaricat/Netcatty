@@ -192,6 +192,30 @@ function emitCodexToolResultOnce(item, emitter, state, output, toolName) {
 }
 
 /**
+ * Codex emits mid-turn `type:"error"` JSONL events while it reconnects after a
+ * dropped SSE/response body (`Reconnecting...`, `retrying N/M`, `error decoding
+ * response body`, …). Those are recoverable — the same turn keeps producing
+ * items afterward. Treating them as fatal settles the Netcatty sidebar turn and
+ * stops UI refresh while the CLI process continues (issue #2456).
+ *
+ * Truly terminal failures still arrive as `turn.failed` (or a non-retryable
+ * stream error message).
+ */
+function isCodexRetryableStreamError(event) {
+  if (!event || typeof event !== "object") return false;
+  if (event.willRetry === true || event.will_retry === true) return true;
+  const message = String(event.message || "").toLowerCase();
+  if (!message) return false;
+  return (
+    /\breconnect(?:ing|ed)?\b/.test(message) ||
+    /\bretry(?:ing|ed)?\b/.test(message) ||
+    message.includes("stream disconnected") ||
+    message.includes("error decoding response body") ||
+    message.includes("transport error")
+  );
+}
+
+/**
  * Translate one Codex ThreadEvent into emitter calls.
  * `state` ({ reasoningOpen }) is threaded across events so reasoning summary
  * items render as a single collapsible thinking panel that closes when the first
@@ -210,8 +234,15 @@ function translateCodexEvent(event, emitter, state) {
     return;
   }
   if (event.type === "error") {
+    const message = event.message || "Codex stream failed";
+    if (isCodexRetryableStreamError(event)) {
+      // Keep reasoning open — the turn is still in progress after Codex retries.
+      const warningCount = (st.streamWarningCount = (st.streamWarningCount || 0) + 1);
+      emitter.warning(`codex-stream-error:${warningCount}`, message);
+      return;
+    }
     closeReasoning();
-    emitter.emitError(event.message || "Codex stream failed");
+    emitter.emitError(message);
     return;
   }
   if (event.type === "turn.completed") {
