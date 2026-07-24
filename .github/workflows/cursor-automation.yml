@@ -97,7 +97,7 @@ jobs:
         id: decide
         uses: actions/github-script@v7
         env:
-          OWN_ACTORS: ${{ vars.AUTOMATION_OWN_ACTORS || 'binaricat' }}
+          OWN_ACTORS: ${{ vars.AUTOMATION_OWN_ACTORS || 'binaricat,netcatty-bot,github-actions[bot]' }}
           DISPATCH_ISSUE: ${{ inputs.issue_number || '' }}
           DISPATCH_PULL: ${{ inputs.pull_number || '' }}
         with:
@@ -330,6 +330,8 @@ jobs:
           MANUAL_RUN: ${{ github.event_name == 'workflow_dispatch' }}
           DAILY_LIMIT: ${{ vars.CURSOR_TRIAGE_DAILY_LIMIT || '10' }}
         with:
+          # Prefer bot PAT so labels/admission and later apply run as netcatty-bot.
+          github-token: ${{ secrets.TRIAGE_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
           script: |
             const auto = require(`${process.env.RUNNER_TEMP}/cursor-automation.cjs`);
             await auto.prepareIssueContext({
@@ -417,6 +419,8 @@ jobs:
         env:
           ISSUE_NUMBER: ${{ steps.prepare.outputs.issue_number }}
         with:
+          # Comments/labels/close as netcatty-bot (not github-actions).
+          github-token: ${{ secrets.TRIAGE_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
           script: |
             const auto = require(`${process.env.RUNNER_TEMP}/cursor-automation.cjs`);
             await auto.applyClassification({
@@ -670,6 +674,7 @@ jobs:
         if: steps.existing.outputs.exists != 'true' && steps.changes.outputs.present != 'true'
         uses: actions/github-script@v7
         with:
+          github-token: ${{ secrets.TRIAGE_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
           script: |
             const auto = require(`${process.env.RUNNER_TEMP}/cursor-automation.cjs`);
             await auto.markNeedsHuman({
@@ -783,6 +788,7 @@ jobs:
         if: failure() && steps.existing.outputs.exists != 'true'
         uses: actions/github-script@v7
         with:
+          github-token: ${{ secrets.TRIAGE_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
           script: |
             const fs = require('node:fs');
             const helper = fs.existsSync(`${process.env.RUNNER_TEMP}/cursor-automation.cjs`)
@@ -933,7 +939,7 @@ jobs:
     env:
       PULL_NUMBER: ${{ needs.route.outputs.pull_number }}
       MAX_ROUNDS: ${{ vars.CURSOR_CODEX_FIX_MAX_ROUNDS || '40' }}
-      OWN_ACTORS: ${{ vars.AUTOMATION_OWN_ACTORS || 'binaricat' }}
+      OWN_ACTORS: ${{ vars.AUTOMATION_OWN_ACTORS || 'binaricat,netcatty-bot,github-actions[bot]' }}
     steps:
       - name: Checkout helpers
         uses: actions/checkout@v5
@@ -1727,7 +1733,7 @@ jobs:
       pull-requests: write
     env:
       PULL_NUMBER: ${{ needs.route.outputs.pull_number }}
-      OWN_ACTORS: ${{ vars.AUTOMATION_OWN_ACTORS || 'binaricat' }}
+      OWN_ACTORS: ${{ vars.AUTOMATION_OWN_ACTORS || 'binaricat,netcatty-bot,github-actions[bot]' }}
     steps:
       - name: Checkout helpers
         uses: actions/checkout@v5
@@ -1873,7 +1879,7 @@ jobs:
       pull-requests: write
     env:
       PULL_NUMBER: ${{ needs.route.outputs.pull_number }}
-      OWN_ACTORS: ${{ vars.AUTOMATION_OWN_ACTORS || 'binaricat' }}
+      OWN_ACTORS: ${{ vars.AUTOMATION_OWN_ACTORS || 'binaricat,netcatty-bot,github-actions[bot]' }}
     steps:
       - name: Checkout helpers
         uses: actions/checkout@v5
@@ -1967,7 +1973,7 @@ jobs:
       issues: write
       pull-requests: write
     env:
-      OWN_ACTORS: ${{ vars.AUTOMATION_OWN_ACTORS || 'binaricat' }}
+      OWN_ACTORS: ${{ vars.AUTOMATION_OWN_ACTORS || 'binaricat,netcatty-bot,github-actions[bot]' }}
       MAX_ROUNDS: ${{ vars.CURSOR_CODEX_FIX_MAX_ROUNDS || '40' }}
     steps:
       - name: Checkout helpers
