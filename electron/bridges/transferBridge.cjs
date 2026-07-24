@@ -1125,29 +1125,34 @@ async function uploadFileResumableFast(
     channelError = channelError || error;
   };
   sftp.on?.("error", onChannelError);
-  let localHandle;
-  try {
-    localHandle = await fs.promises.open(localPath, "r");
-  } catch (error) {
+  // Install cancel before OPEN so a stalled remote open can still end the
+  // isolated channel (runPausableConcurrentRanges would install this later).
+  const abortEarly = () => {
+    transfer.cancelled = true;
     try { sftp.end?.(); } catch { }
-    try { sftp.removeListener?.("error", onChannelError); } catch { }
-    const localOpenError = new Error(error?.message || String(error), { cause: error });
-    localOpenError.noTransferFallback = true;
-    throw localOpenError;
-  }
-  let remoteHandle;
+  };
+  transfer.abort = abortEarly;
+
+  let localHandle = null;
+  let remoteHandle = null;
   let failed = false;
+  let noTransferFallback = false;
   try {
+    if (transfer.cancelled) throw new Error("Transfer cancelled");
+    try {
+      localHandle = await fs.promises.open(localPath, "r");
+    } catch (error) {
+      failed = true;
+      noTransferFallback = true;
+      const localOpenError = new Error(error?.message || String(error), { cause: error });
+      localOpenError.noTransferFallback = true;
+      throw localOpenError;
+    }
+    if (transfer.cancelled) throw new Error("Transfer cancelled");
     remoteHandle = await openSftpHandle(sftp, remotePath, checkpoint > 0 ? "r+" : "w");
     if (channelError) throw channelError;
-  } catch (error) {
-    await localHandle.close().catch(() => {});
-    try { sftp.end?.(); } catch { }
-    try { sftp.removeListener?.("error", onChannelError); } catch { }
-    throw error;
-  }
+    if (transfer.cancelled) throw new Error("Transfer cancelled");
 
-  try {
     try {
       await runPausableConcurrentRanges({
         transfer,
@@ -1168,14 +1173,22 @@ async function uploadFileResumableFast(
       failed = true;
       throw error;
     }
+  } catch (error) {
+    failed = true;
+    if (noTransferFallback && error && typeof error === "object") {
+      error.noTransferFallback = true;
+    }
+    throw error;
   } finally {
     transfer.readStream = null;
     transfer.waitForPause = null;
     transfer.cancelPauseWait = null;
     transfer.abort = null;
-    await localHandle.close().catch(() => {});
+    if (localHandle) {
+      await localHandle.close().catch(() => {});
+    }
     let remoteCloseError = null;
-    if (!failed && !transfer.cancelled) {
+    if (remoteHandle && !failed && !transfer.cancelled) {
       try {
         await closeSftpHandle(sftp, remoteHandle);
       } catch (error) {
@@ -1185,6 +1198,7 @@ async function uploadFileResumableFast(
     if (!failed && !transfer.cancelled && !remoteCloseError && channelError) {
       remoteCloseError = channelError;
     }
+    // Single dispose path for the isolated channel.
     try { sftp.end?.(); } catch { }
     try { sftp.removeListener?.("error", onChannelError); } catch { }
     if (remoteCloseError) throw remoteCloseError;
@@ -1212,25 +1226,25 @@ async function downloadFileResumableFast(
     channelError = channelError || error;
   };
   sftp.on?.("error", onChannelError);
-  let remoteHandle;
-  try {
-    remoteHandle = await openSftpHandle(sftp, remotePath, "r");
-    if (channelError) throw channelError;
-  } catch (error) {
-    try { sftp.removeListener?.("error", onChannelError); } catch { }
-    throw error;
-  }
-  let localHandle;
+  // Install cancel before OPEN so a stalled remote open can still end the
+  // isolated channel (runPausableConcurrentRanges would install this later).
+  const abortEarly = () => {
+    transfer.cancelled = true;
+    try { sftp.end?.(); } catch { }
+  };
+  transfer.abort = abortEarly;
+
+  let remoteHandle = null;
+  let localHandle = null;
   let failed = false;
   try {
+    if (transfer.cancelled) throw new Error("Transfer cancelled");
+    remoteHandle = await openSftpHandle(sftp, remotePath, "r");
+    if (channelError) throw channelError;
+    if (transfer.cancelled) throw new Error("Transfer cancelled");
     localHandle = await fs.promises.open(localPath, checkpoint > 0 ? "r+" : "w+");
-  } catch (error) {
-    await closeSftpHandle(sftp, remoteHandle).catch(() => {});
-    try { sftp.removeListener?.("error", onChannelError); } catch { }
-    throw error;
-  }
+    if (transfer.cancelled) throw new Error("Transfer cancelled");
 
-  try {
     try {
       await runPausableConcurrentRanges({
         transfer,
@@ -1252,19 +1266,24 @@ async function downloadFileResumableFast(
       failed = true;
       throw error;
     }
+  } catch (error) {
+    failed = true;
+    throw error;
   } finally {
     transfer.readStream = null;
     transfer.waitForPause = null;
     transfer.cancelPauseWait = null;
     transfer.abort = null;
     let localCloseError = null;
-    try {
-      await localHandle.close();
-    } catch (error) {
-      localCloseError = error;
+    if (localHandle) {
+      try {
+        await localHandle.close();
+      } catch (error) {
+        localCloseError = error;
+      }
     }
     let remoteCloseError = null;
-    if (!failed && !transfer.cancelled) {
+    if (remoteHandle && !failed && !transfer.cancelled) {
       try {
         await closeSftpHandle(sftp, remoteHandle);
       } catch (error) {
@@ -1288,10 +1307,6 @@ async function downloadFileResumableFast(
   }
 }
 
-/**
- * Download from SFTP to local file using ssh2's fastGet (parallel SFTP requests).
- * Falls back to sequential stream piping if fastGet is unavailable.
- */
 async function downloadFile(remotePath, localPath, client, fileSize, transfer, sendProgress, encoding = "utf-8") {
   if (isScpModeClient(client)) {
     transfer.pauseSupported = false;

@@ -545,6 +545,73 @@ test("failed local open for resumable upload still ends the isolated channel", a
   assert.equal(remoteOpenAttempts, 0);
 });
 
+test("cancel during stalled resumable upload OPEN ends the isolated channel", async (t) => {
+  const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-transfer-upload-open-stall-"));
+  t.after(async () => {
+    await fs.promises.rm(tempDir, { recursive: true, force: true });
+  });
+
+  const localPath = path.join(tempDir, "upload.bin");
+  await fs.promises.writeFile(localPath, Buffer.alloc(32 * 1024, 29));
+  let endedChannels = 0;
+  let releaseOpen = null;
+  const fastSftp = createFastSftp({
+    open(_remotePath, _flags, callback) {
+      releaseOpen = () => callback(new Error("channel closed during open"));
+    },
+    end() {
+      endedChannels += 1;
+      // Simulate ssh2 failing the pending OPEN when the channel ends.
+      releaseOpen?.();
+      releaseOpen = null;
+    },
+  });
+  const client = {
+    sftp: createFastSftp({
+      createWriteStream() {
+        const writeStream = new Writable({
+          write(_chunk, _encoding, callback) {
+            callback(new Error("should not stream-fallback after cancel"));
+          },
+        });
+        return writeStream;
+      },
+    }),
+    client: {
+      sftp(callback) {
+        callback(null, fastSftp);
+      },
+    },
+  };
+  transferBridge.init({ sftpClients: new Map([["target", client]]) });
+
+  const running = transferBridge.startTransfer(
+    { sender: createSender() },
+    {
+      transferId: "upload-open-stall-cancel",
+      sourcePath: localPath,
+      targetPath: "/tmp/upload.bin",
+      sourceType: "local",
+      targetType: "sftp",
+      targetSftpId: "target",
+      totalBytes: 32 * 1024,
+      resumable: true,
+      skipAdmission: true,
+    },
+  );
+
+  const readyDeadline = Date.now() + 1000;
+  while (!releaseOpen && Date.now() < readyDeadline) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  assert.ok(releaseOpen, "expected remote OPEN to stall");
+
+  await transferBridge.cancelTransfer(null, { transferId: "upload-open-stall-cancel" });
+  const result = await running;
+  assert.match(result.error || "", /cancel|closed/i);
+  assert.ok(endedChannels >= 1, `expected isolated channel end on cancel, got ${endedChannels}`);
+});
+
 test("resumable SFTP uploads fall back to a compatible stream after fast path fails", async (t) => {
   const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-transfer-upload-fallback-"));
   t.after(async () => {
