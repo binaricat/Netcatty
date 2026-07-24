@@ -1455,6 +1455,9 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     };
 
     if (!attachExistingSession) {
+      // Reconnect/teardown dispose the exit listener before closeSession, so the
+      // exit callback never clears Docker-log OSC suppression — reset here too.
+      endOscColorQuerySuppressionForCommand(suppressOscColorQueriesForActiveCommandRef);
       disposeSessionListeners();
     }
 

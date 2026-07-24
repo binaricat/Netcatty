@@ -150,3 +150,10 @@ test("broadcast Docker-log submissions arm OSC color-query suppression on peers"
     /oscColorQuerySuppressionCommand: command/u,
   );
 });
+
+test("reconnect cleanup clears Docker-log OSC color-query suppression before disposing exit listeners", () => {
+  assert.match(
+    terminalSource,
+    /if \(!attachExistingSession\) \{[\s\S]*?endOscColorQuerySuppressionForCommand\(suppressOscColorQueriesForActiveCommandRef\);[\s\S]*?disposeSessionListeners\(\);/u,
+  );
+});

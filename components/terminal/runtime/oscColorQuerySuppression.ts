@@ -46,6 +46,8 @@ export function isDockerLogsCommand(command: string): boolean {
     index += 1;
     if (!option.includes('=') && DOCKER_GLOBAL_OPTIONS_WITH_VALUE.has(option)) index += 1;
   }
+  // `docker logs` is an alias of `docker container logs`.
+  if (tokens[index] === 'container') index += 1;
   return tokens[index] === 'logs';
 }
 

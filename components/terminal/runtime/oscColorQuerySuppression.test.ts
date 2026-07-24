@@ -56,9 +56,12 @@ test('ordinary terminals do not install color-query suppression', () => {
 
 test('docker logs detection covers direct and privileged commands without matching other docker commands', () => {
   assert.equal(isDockerLogsCommand('docker logs -f api'), true);
+  assert.equal(isDockerLogsCommand('docker container logs -f api'), true);
   assert.equal(isDockerLogsCommand('sudo -n docker logs --tail 200 api'), true);
+  assert.equal(isDockerLogsCommand('sudo docker --host tcp://1.2.3.4:2375 container logs api'), true);
   assert.equal(isDockerLogsCommand('/usr/bin/docker --context prod logs api'), true);
   assert.equal(isDockerLogsCommand('docker exec api sh'), false);
+  assert.equal(isDockerLogsCommand('docker container exec api sh'), false);
   assert.equal(isDockerLogsCommand('echo docker logs api'), false);
   assert.equal(isDockerLogsCommand('docker logs api; vim'), false);
   assert.equal(isDockerLogsCommand('docker logs api && vim'), false);
