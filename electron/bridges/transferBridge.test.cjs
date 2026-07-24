@@ -9,6 +9,10 @@ const { PassThrough, Readable, Writable } = require("node:stream");
 
 const transferBridge = require("./transferBridge.cjs");
 const tempDirBridge = require("./tempDirBridge.cjs");
+const {
+  TRANSFER_CHUNK_SIZE,
+  UPLOAD_TRANSFER_CONCURRENCY,
+} = require("./transferLimits.cjs");
 
 function createSender() {
   return {
@@ -30,14 +34,16 @@ function createFastSftp(overrides) {
   return sftp;
 }
 
-test("resumable SFTP uploads use conservative per-file request concurrency", async (t) => {
+test("resumable SFTP uploads use the configured per-file request concurrency", async (t) => {
   const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-transfer-test-"));
   t.after(async () => {
     await fs.promises.rm(tempDir, { recursive: true, force: true });
   });
 
+  // Need more than one fanout wave so the concurrency cap is observable.
+  const fileSize = UPLOAD_TRANSFER_CONCURRENCY * TRANSFER_CHUNK_SIZE * 2;
   const localPath = path.join(tempDir, "large.bin");
-  await fs.promises.writeFile(localPath, Buffer.alloc(1024 * 1024));
+  await fs.promises.writeFile(localPath, Buffer.alloc(fileSize));
 
   let activeWrites = 0;
   let observedConcurrency = 0;
@@ -72,7 +78,7 @@ test("resumable SFTP uploads use conservative per-file request concurrency", asy
   const client = {
     sftp: createFastSftp({}),
     stat() {
-      return Promise.resolve({ size: 1024 * 1024 });
+      return Promise.resolve({ size: fileSize });
     },
     rename() {
       return Promise.resolve();
@@ -103,12 +109,12 @@ test("resumable SFTP uploads use conservative per-file request concurrency", asy
   );
 
   const readyDeadline = Date.now() + 1000;
-  while (pendingWrites.length < 8 && Date.now() < readyDeadline) {
+  while (pendingWrites.length < UPLOAD_TRANSFER_CONCURRENCY && Date.now() < readyDeadline) {
     await new Promise((resolve) => setImmediate(resolve));
   }
-  assert.equal(pendingWrites.length, 8);
-  assert.equal(observedConcurrency, 8);
-  assert.equal(observedChunkSize, 32 * 1024);
+  assert.equal(pendingWrites.length, UPLOAD_TRANSFER_CONCURRENCY);
+  assert.equal(observedConcurrency, UPLOAD_TRANSFER_CONCURRENCY);
+  assert.equal(observedChunkSize, TRANSFER_CHUNK_SIZE);
   holdWrites = false;
   for (const complete of pendingWrites.splice(0)) complete();
   const result = await running;
@@ -121,7 +127,8 @@ test("fast resumable uploads pause only after in-flight ranges are durable", asy
     await fs.promises.rm(tempDir, { recursive: true, force: true });
   });
 
-  const payload = Buffer.alloc(1024 * 1024, 13);
+  // First in-flight wave must be smaller than the file so pause can land mid-transfer.
+  const payload = Buffer.alloc(UPLOAD_TRANSFER_CONCURRENCY * TRANSFER_CHUNK_SIZE * 2, 13);
   const localPath = path.join(tempDir, "upload.bin");
   await fs.promises.writeFile(localPath, payload);
   const pendingWrites = [];
@@ -177,17 +184,17 @@ test("fast resumable uploads pause only after in-flight ranges are durable", asy
   );
 
   const readyDeadline = Date.now() + 1000;
-  while (pendingWrites.length < 8 && Date.now() < readyDeadline) {
+  while (pendingWrites.length < UPLOAD_TRANSFER_CONCURRENCY && Date.now() < readyDeadline) {
     await new Promise((resolve) => setImmediate(resolve));
   }
-  assert.equal(pendingWrites.length, 8);
+  assert.equal(pendingWrites.length, UPLOAD_TRANSFER_CONCURRENCY);
 
   const pausing = transferBridge.pauseTransfer(null, { transferId: "upload-fast-paused" });
   holdWrites = false;
   for (const complete of pendingWrites.splice(0)) complete();
   const paused = await pausing;
   assert.equal(paused.success, true);
-  assert.equal(paused.checkpointBytes, 256 * 1024);
+  assert.equal(paused.checkpointBytes, UPLOAD_TRANSFER_CONCURRENCY * TRANSFER_CHUNK_SIZE);
 
   assert.deepEqual(
     await transferBridge.resumeTransfer(null, { transferId: "upload-fast-paused" }),
@@ -276,7 +283,7 @@ test("resuming during pause fingerprinting prevents a stale pause success", asyn
     await fs.promises.rm(tempDir, { recursive: true, force: true });
   });
 
-  const payload = Buffer.alloc(512 * 1024, 71);
+  const payload = Buffer.alloc(UPLOAD_TRANSFER_CONCURRENCY * TRANSFER_CHUNK_SIZE * 2, 71);
   const localPath = path.join(tempDir, "upload.bin");
   await fs.promises.writeFile(localPath, payload);
   const pendingWrites = [];
@@ -336,10 +343,10 @@ test("resuming during pause fingerprinting prevents a stale pause success", asyn
       },
     );
     const writeDeadline = Date.now() + 1000;
-    while (pendingWrites.length < 8 && Date.now() < writeDeadline) {
+    while (pendingWrites.length < UPLOAD_TRANSFER_CONCURRENCY && Date.now() < writeDeadline) {
       await new Promise((resolve) => setImmediate(resolve));
     }
-    assert.equal(pendingWrites.length, 8);
+    assert.equal(pendingWrites.length, UPLOAD_TRANSFER_CONCURRENCY);
 
     const pausing = transferBridge.pauseTransfer(null, { transferId: "late-pause-race" });
     holdWrites = false;

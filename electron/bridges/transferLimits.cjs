@@ -4,10 +4,13 @@
 // requests and can silently produce truncated/corrupt files (GitHub #2022).
 const TRANSFER_CHUNK_SIZE = 32 * 1024;
 
-// Upload fanout: 8 parallel 32KB requests (~256KB in flight). Higher than the
-// previous 4 to help high-latency paths, still far below download fanout so
-// interactive terminal traffic is not starved (GitHub #1507).
-const UPLOAD_TRANSFER_CONCURRENCY = 8;
+// Upload fanout: 32 parallel 32KB WRITE requests (~1MB in flight). Measured
+// against real hosts (public ~38ms RTT and LAN ~13ms RTT): concurrency 8 left
+// multi-MB/s on the table; 32 matched Electerm/ssh2-class throughput without
+// the occasional stalls seen at a full 64 on higher-latency paths. Uploads still
+// use an isolated SFTP channel / dedicated transfer session so interactive
+// terminal traffic is not starved (GitHub #1507, #2449).
+const UPLOAD_TRANSFER_CONCURRENCY = 32;
 
 // Downloads need a larger request window on high-latency proxy paths. 64 is
 // ssh2's fastGet default and, with the safe 32KB request size, restores the 2MB
