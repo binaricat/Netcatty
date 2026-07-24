@@ -570,6 +570,144 @@ function buildBackupRemotePath(remotePath) {
   return dir ? `${dir}${backupName}` : backupName;
 }
 
+function isRemotePermissionError(err) {
+  const code = err?.code;
+  if (code === 3 || code === "EACCES" || code === "EPERM" || code === "ERR_PERMISSION") {
+    return true;
+  }
+  return /permission|denied|access/i.test(String(err?.message || ""));
+}
+
+function attrsIndicateSymlink(attrs) {
+  if (!attrs) return false;
+  if (typeof attrs.isSymbolicLink === "function") return !!attrs.isSymbolicLink();
+  if (typeof attrs.isSymbolicLink === "boolean") return attrs.isSymbolicLink;
+  const mode = Number(attrs.mode);
+  return Number.isFinite(mode) && (mode & 0o170000) === 0o120000;
+}
+
+/**
+ * Plan overwrite strategy for a remote upload target.
+ * - Symlinks: write in-place so the server follows the link (rename would replace the link node).
+ * - Regular files: stage + rename, and capture mode bits to restore after the new inode lands.
+ */
+async function planRemoteUploadReplace(client, encodedPath) {
+  let existingMode = null;
+  let writeInPlace = false;
+  try {
+    const sftp = await requireSftpChannel(client);
+    let attrs = null;
+    try {
+      attrs = await lstatAsync(sftp, encodedPath);
+    } catch {
+      attrs = null;
+    }
+    if (!attrs) return { writeInPlace: false, existingMode: null };
+    if (attrsIndicateSymlink(attrs)) {
+      return { writeInPlace: true, existingMode: null };
+    }
+    const mode = Number(attrs.mode);
+    if (Number.isFinite(mode) && mode > 0) {
+      existingMode = mode & 0o7777;
+    }
+  } catch {
+    // Missing destination / unsupported lstat is fine — default to staging.
+  }
+  return { writeInPlace, existingMode };
+}
+
+async function restoreRemoteMode(client, encodedPath, mode) {
+  if (mode == null || !Number.isFinite(mode)) return;
+  try {
+    if (typeof client.chmod === "function") {
+      await client.chmod(encodedPath, mode);
+      return;
+    }
+    const sftp = await requireSftpChannel(client);
+    await new Promise((resolve, reject) => {
+      if (typeof sftp.chmod === "function") {
+        sftp.chmod(encodedPath, mode, (err) => (err ? reject(err) : resolve()));
+        return;
+      }
+      if (typeof sftp.setstat === "function") {
+        sftp.setstat(encodedPath, { mode }, (err) => (err ? reject(err) : resolve()));
+        return;
+      }
+      resolve();
+    });
+  } catch {
+    // Best-effort only — do not fail a successful upload over metadata restore.
+  }
+}
+
+/**
+ * Pipelined upload with stage+rename by default (cancel-safe final dest).
+ * Writes in-place for symlink destinations; falls back to in-place when staging
+ * fails due to parent-directory permission (file itself still writable).
+ */
+async function pipelinedUploadWithOptionalStaging(client, localPath, remotePath, options = {}) {
+  const signal = options?.signal || null;
+  const expectedSize = options?.expectedSize;
+  const plan = await planRemoteUploadReplace(client, remotePath);
+  const fastPutOptions = { ...options };
+  delete fastPutOptions.expectedSize;
+
+  const uploadDirect = async () => {
+    await pipelinedUploadLocalFile(client, localPath, remotePath, fastPutOptions);
+    throwIfAborted(signal);
+    if (Number.isFinite(expectedSize) && expectedSize >= 0 && typeof client.stat === "function") {
+      const st = await client.stat(remotePath);
+      const size = Number(st?.size);
+      if (Number.isFinite(size) && size !== expectedSize) {
+        throw new Error(
+          `Upload size mismatch for ${remotePath}: expected ${expectedSize} bytes, got ${size}`,
+        );
+      }
+    }
+    return { staged: false };
+  };
+
+  if (plan.writeInPlace) {
+    return uploadDirect();
+  }
+
+  const stagedRemotePath = buildStagedRemotePath(remotePath);
+  const backupRemotePath = buildBackupRemotePath(remotePath);
+  try {
+    await pipelinedUploadLocalFile(client, localPath, stagedRemotePath, fastPutOptions);
+    throwIfAborted(signal);
+    if (Number.isFinite(expectedSize) && expectedSize >= 0 && typeof client.stat === "function") {
+      const stagedStat = await client.stat(stagedRemotePath);
+      const stagedSize = Number(stagedStat?.size);
+      if (Number.isFinite(stagedSize) && stagedSize !== expectedSize) {
+        throw new Error(
+          `Upload size mismatch for ${remotePath}: expected ${expectedSize} bytes, got ${stagedSize}`,
+        );
+      }
+    }
+    await renameRemotePath(client, stagedRemotePath, remotePath, backupRemotePath);
+    await restoreRemoteMode(client, remotePath, plan.existingMode);
+    return { staged: true };
+  } catch (err) {
+    try {
+      if (typeof client.delete === "function") {
+        await client.delete(stagedRemotePath);
+      }
+    } catch {
+      // Best-effort cleanup of a partial stage.
+    }
+    // Parent dir not writable but existing file may still be: fall back to in-place.
+    if (isRemotePermissionError(err)) {
+      console.warn(
+        "[SFTP] Staged upload unavailable (permission); falling back to in-place overwrite:",
+        err?.message || String(err),
+      );
+      return uploadDirect();
+    }
+    throw err;
+  }
+}
+
 const posixRenameAsync = (sftp, fromPath, toPath) =>
   new Promise((resolve, reject) => {
     if (typeof sftp?.ext_openssh_rename !== "function") {
@@ -1231,50 +1369,24 @@ async function uploadLocalToSftp(_event, payload) {
 
   await requireSftpChannel(client);
   const encoding = resolveEncodingForRequest(payload.sftpId, payload.encoding);
-  const stagedRemotePath = buildStagedRemotePath(payload.remotePath);
-  const backupRemotePath = buildBackupRemotePath(payload.remotePath);
   const encodedPath = encodePath(payload.remotePath, encoding);
-  const encodedStagedPath = encodePath(stagedRemotePath, encoding);
-  const encodedBackupPath = encodePath(backupRemotePath, encoding);
   throwIfAborted(payload.abortSignal);
   const {
     TRANSFER_CHUNK_SIZE,
     UPLOAD_TRANSFER_CONCURRENCY,
   } = require("./transferLimits.cjs");
+  let expectedSize = null;
   try {
-    // Pipelined WRITEs only. Supports ssh2-sftp-client (client.fastPut) and
-    // session-backed clients (client.fastPut → raw sftp.fastPut). Serial put is
-    // never used as a silent fallback (#2449 / industry practice).
-    await pipelinedUploadLocalFile(client, payload.localPath, encodedStagedPath, {
-      chunkSize: TRANSFER_CHUNK_SIZE,
-      concurrency: UPLOAD_TRANSFER_CONCURRENCY,
-      signal: payload.abortSignal,
-    });
-    throwIfAborted(payload.abortSignal);
-    // Verify staged size before promoting over the destination (#2022 / silent
-    // truncation on servers that mishandle non-default WRITE sizes).
-    let expectedSize = null;
-    try {
-      expectedSize = Number((await fs.promises.stat(payload.localPath))?.size);
-    } catch { /* ignore — fall through without size check if local vanished */ }
-    if (Number.isFinite(expectedSize) && expectedSize >= 0) {
-      const stagedStat = await client.stat(encodedStagedPath);
-      const stagedSize = Number(stagedStat?.size);
-      if (Number.isFinite(stagedSize) && stagedSize !== expectedSize) {
-        throw new Error(
-          `Upload size mismatch for ${payload.remotePath}: expected ${expectedSize} bytes, got ${stagedSize}`,
-        );
-      }
-    }
-    await renameRemotePath(client, encodedStagedPath, encodedPath, encodedBackupPath);
-  } catch (err) {
-    try {
-      await client.delete(encodedStagedPath);
-    } catch {
-      // Ignore best-effort cleanup failures for partially uploaded temp files.
-    }
-    throw err;
-  }
+    expectedSize = Number((await fs.promises.stat(payload.localPath))?.size);
+  } catch { /* ignore — fall through without size check if local vanished */ }
+  // Pipelined WRITEs with stage+rename by default (cancel-safe). Symlink and
+  // parent-dir permission edge cases fall back to in-place overwrite.
+  await pipelinedUploadWithOptionalStaging(client, payload.localPath, encodedPath, {
+    chunkSize: TRANSFER_CHUNK_SIZE,
+    concurrency: UPLOAD_TRANSFER_CONCURRENCY,
+    signal: payload.abortSignal,
+    expectedSize: Number.isFinite(expectedSize) ? expectedSize : undefined,
+  });
   return { success: true, remotePath: payload.remotePath };
 }
 
@@ -1330,6 +1442,7 @@ const fileOpsApi = createFileOpsApi({
   writeFileChunkAsync, closeFileAsync, createAbortError, copySftpEncodingState, clearSftpEncodingState,
   safeSend, tempDirBridge, randomUUID,
   pipelinedUploadLocalFile,
+  pipelinedUploadWithOptionalStaging,
 });
 const {
   listSftp,

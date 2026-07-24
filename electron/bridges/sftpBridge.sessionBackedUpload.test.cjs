@@ -21,9 +21,11 @@ const {
   UPLOAD_TRANSFER_CONCURRENCY,
 } = require("./transferLimits.cjs");
 
-function createSessionChannel() {
+function createSessionChannel(options = {}) {
   const fastPutCalls = [];
   const remoteFiles = new Map();
+  const remoteMeta = new Map(); // path -> { mode, isSymlink }
+  const chmodCalls = [];
   const channel = {
     // hasSftpChannelApi requires these four methods.
     readdir(_targetPath, callback) {
@@ -34,6 +36,7 @@ function createSessionChannel() {
     },
     unlink(targetPath, callback) {
       remoteFiles.delete(targetPath);
+      remoteMeta.delete(targetPath);
       callback(null);
     },
     stat(targetPath, callback) {
@@ -44,24 +47,54 @@ function createSessionChannel() {
         callback(err);
         return;
       }
+      const meta = remoteMeta.get(targetPath) || {};
       callback(null, {
         size: data.length,
+        mode: meta.mode ?? 0o100644,
         isDirectory: () => false,
         isFile: () => true,
+        isSymbolicLink: () => !!meta.isSymlink,
       });
     },
-    fastPut(localPath, remotePath, options, callback) {
+    lstat(targetPath, callback) {
+      const meta = remoteMeta.get(targetPath);
+      const data = remoteFiles.get(targetPath);
+      if (!data && !meta) {
+        const err = new Error(`ENOENT ${targetPath}`);
+        err.code = 2;
+        callback(err);
+        return;
+      }
+      callback(null, {
+        size: data ? data.length : 0,
+        mode: meta?.isSymlink ? 0o120777 : (meta?.mode ?? 0o100644),
+        isDirectory: () => false,
+        isFile: () => !meta?.isSymlink,
+        isSymbolicLink: () => !!meta?.isSymlink,
+      });
+    },
+    fastPut(localPath, remotePath, opts, callback) {
       fastPutCalls.push({
         localPath,
         remotePath,
-        concurrency: options?.concurrency,
-        chunkSize: options?.chunkSize,
+        concurrency: opts?.concurrency,
+        chunkSize: opts?.chunkSize,
       });
+      if (typeof options.onFastPut === "function") {
+        const intercept = options.onFastPut(localPath, remotePath);
+        if (intercept?.error) {
+          queueMicrotask(() => callback(intercept.error));
+          return;
+        }
+      }
       try {
         const data = fs.readFileSync(localPath);
         remoteFiles.set(remotePath, data);
-        if (typeof options?.step === "function") {
-          options.step(data.length, data.length, data.length);
+        if (!remoteMeta.has(remotePath)) {
+          remoteMeta.set(remotePath, { mode: 0o100644 });
+        }
+        if (typeof opts?.step === "function") {
+          opts.step(data.length, data.length, data.length);
         }
         queueMicrotask(() => callback(null));
       } catch (err) {
@@ -77,11 +110,23 @@ function createSessionChannel() {
       }
       remoteFiles.set(to, remoteFiles.get(from));
       remoteFiles.delete(from);
+      // Rename creates a new name; do not inherit destination mode automatically
+      // so restoreRemoteMode can re-apply the captured bits.
+      if (!remoteMeta.has(to)) {
+        remoteMeta.set(to, { mode: 0o100644 });
+      }
+      remoteMeta.delete(from);
+      callback(null);
+    },
+    chmod(targetPath, mode, callback) {
+      chmodCalls.push({ targetPath, mode });
+      const prev = remoteMeta.get(targetPath) || {};
+      remoteMeta.set(targetPath, { ...prev, mode });
       callback(null);
     },
     end() {},
   };
-  return { channel, fastPutCalls, remoteFiles };
+  return { channel, fastPutCalls, remoteFiles, remoteMeta, chmodCalls };
 }
 
 test("session-backed uploadLocalToSftp uses pipelined fastPut on the raw SFTP channel", async (t) => {
@@ -198,6 +243,142 @@ test("session-backed writeSftpBinaryWithProgress uses pipelined fastPut", async 
   assert.notEqual(fastPutCalls[0].remotePath, "/home/alice/mem.bin");
   assert.ok(remoteFiles.has("/home/alice/mem.bin"));
   assert.deepEqual(remoteFiles.get("/home/alice/mem.bin"), payload);
+});
+
+test("staged overwrite restores previous remote mode bits", async (t) => {
+  const tempRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-mode-restore-"));
+  t.after(async () => {
+    await fs.promises.rm(tempRoot, { recursive: true, force: true });
+  });
+  tempDirBridge.init?.({ getPath: () => tempRoot });
+
+  const localPath = path.join(tempRoot, "exec.bin");
+  const payload = Buffer.from("#!/bin/sh\necho hi\n");
+  await fs.promises.writeFile(localPath, payload);
+
+  const { channel, remoteFiles, remoteMeta, chmodCalls } = createSessionChannel();
+  remoteFiles.set("/usr/local/bin/tool", Buffer.from("old"));
+  remoteMeta.set("/usr/local/bin/tool", { mode: 0o100755 });
+
+  const connection = {
+    sftp(callback) { callback(null, channel); },
+  };
+  const sftpClients = new Map();
+  sftpBridge.init({
+    electronModule: { webContents: { fromId: () => null } },
+    sessions: new Map([["session-mode", { conn: connection }]]),
+    sftpClients,
+  });
+  const opened = await sftpBridge.openSftpForSession(null, {
+    sessionId: "session-mode",
+    fileProtocol: "sftp",
+  });
+
+  await sftpBridge.uploadLocalToSftp(null, {
+    sftpId: opened.sftpId,
+    localPath,
+    remotePath: "/usr/local/bin/tool",
+    encoding: "utf-8",
+  });
+
+  assert.ok(remoteFiles.has("/usr/local/bin/tool"));
+  assert.deepEqual(remoteFiles.get("/usr/local/bin/tool"), payload);
+  assert.ok(
+    chmodCalls.some((c) => c.targetPath === "/usr/local/bin/tool" && (c.mode & 0o777) === 0o755),
+    `expected mode restore via chmod, got ${JSON.stringify(chmodCalls)}`,
+  );
+});
+
+test("symlink destinations are written in-place (not replaced by rename)", async (t) => {
+  const tempRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-symlink-upload-"));
+  t.after(async () => {
+    await fs.promises.rm(tempRoot, { recursive: true, force: true });
+  });
+  tempDirBridge.init?.({ getPath: () => tempRoot });
+
+  const localPath = path.join(tempRoot, "cfg.json");
+  const payload = Buffer.from('{"ok":true}');
+  await fs.promises.writeFile(localPath, payload);
+
+  const { channel, fastPutCalls, remoteFiles, remoteMeta } = createSessionChannel();
+  // Symlink at the destination path; real content elsewhere.
+  remoteMeta.set("/etc/app/config.json", { isSymlink: true, mode: 0o120777 });
+  remoteFiles.set("/etc/app/config.json", Buffer.from("link-placeholder"));
+
+  const connection = {
+    sftp(callback) { callback(null, channel); },
+  };
+  const sftpClients = new Map();
+  sftpBridge.init({
+    electronModule: { webContents: { fromId: () => null } },
+    sessions: new Map([["session-link", { conn: connection }]]),
+    sftpClients,
+  });
+  const opened = await sftpBridge.openSftpForSession(null, {
+    sessionId: "session-link",
+    fileProtocol: "sftp",
+  });
+
+  await sftpBridge.uploadLocalToSftp(null, {
+    sftpId: opened.sftpId,
+    localPath,
+    remotePath: "/etc/app/config.json",
+    encoding: "utf-8",
+  });
+
+  assert.equal(fastPutCalls.length, 1);
+  assert.equal(fastPutCalls[0].remotePath, "/etc/app/config.json");
+  assert.deepEqual(remoteFiles.get("/etc/app/config.json"), payload);
+});
+
+test("parent-dir permission on staged path falls back to in-place overwrite", async (t) => {
+  const tempRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-stage-perm-"));
+  t.after(async () => {
+    await fs.promises.rm(tempRoot, { recursive: true, force: true });
+  });
+  tempDirBridge.init?.({ getPath: () => tempRoot });
+
+  const localPath = path.join(tempRoot, "data.bin");
+  const payload = Buffer.from("new-content");
+  await fs.promises.writeFile(localPath, payload);
+
+  const { channel, fastPutCalls, remoteFiles, remoteMeta } = createSessionChannel({
+    onFastPut(_local, remotePath) {
+      if (String(remotePath).includes(".part") || String(remotePath).includes(".netcatty-upload-")) {
+        const err = new Error("Permission denied");
+        err.code = 3;
+        return { error: err };
+      }
+      return null;
+    },
+  });
+  remoteFiles.set("/ro-dir/file.bin", Buffer.from("old"));
+  remoteMeta.set("/ro-dir/file.bin", { mode: 0o100644 });
+
+  const connection = {
+    sftp(callback) { callback(null, channel); },
+  };
+  const sftpClients = new Map();
+  sftpBridge.init({
+    electronModule: { webContents: { fromId: () => null } },
+    sessions: new Map([["session-perm", { conn: connection }]]),
+    sftpClients,
+  });
+  const opened = await sftpBridge.openSftpForSession(null, {
+    sessionId: "session-perm",
+    fileProtocol: "sftp",
+  });
+
+  await sftpBridge.uploadLocalToSftp(null, {
+    sftpId: opened.sftpId,
+    localPath,
+    remotePath: "/ro-dir/file.bin",
+    encoding: "utf-8",
+  });
+
+  assert.ok(fastPutCalls.length >= 2, "expected staged attempt then in-place");
+  assert.equal(fastPutCalls[fastPutCalls.length - 1].remotePath, "/ro-dir/file.bin");
+  assert.deepEqual(remoteFiles.get("/ro-dir/file.bin"), payload);
 });
 
 test("pipelinedUploadLocalFile aborts in-flight fastPut when AbortSignal fires", async () => {
