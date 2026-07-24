@@ -725,7 +725,7 @@ test("shared-channel fastPut cancel force-settles when callback stalls", async (
   await fs.promises.rm(tempRoot, { recursive: true, force: true });
 });
 
-test("shared-channel force-settle unlinks only Netcatty staged .part paths", async () => {
+test("shared-channel force-settle unlinks explicitly generated stage paths", async () => {
   const tempRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-shared-stage-unlink-"));
   const localPath = path.join(tempRoot, "stall.bin");
   await fs.promises.writeFile(localPath, Buffer.alloc(4 * 1024, 9));
@@ -768,6 +768,7 @@ test("shared-channel force-settle unlinks only Netcatty staged .part paths", asy
       concurrency: UPLOAD_TRANSFER_CONCURRENCY,
       chunkSize: TRANSFER_CHUNK_SIZE,
       signal: controller.signal,
+      generatedStagePath: true,
     },
   );
 
@@ -775,6 +776,60 @@ test("shared-channel force-settle unlinks only Netcatty staged .part paths", asy
   controller.abort();
   await assert.rejects(uploadPromise, /abort|cancel/i);
   assert.equal(unlinkedPath, stagedPath);
+
+  await fs.promises.rm(tempRoot, { recursive: true, force: true });
+});
+
+test("shared-channel cancel never unlinks a caller path that resembles a stage", async () => {
+  const tempRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-shared-stage-lookalike-"));
+  const localPath = path.join(tempRoot, "stall.bin");
+  await fs.promises.writeFile(localPath, Buffer.alloc(4 * 1024, 11));
+
+  let unlinkedPath = null;
+  const channel = {
+    readdir(_p, cb) { cb(null, []); },
+    mkdir(_p, cb) { cb(null); },
+    unlink(targetPath, cb) {
+      unlinkedPath = targetPath;
+      cb(null);
+    },
+    stat(_p, cb) {
+      const err = new Error("ENOENT");
+      err.code = 2;
+      cb(err);
+    },
+    fastPut() {},
+    end() {},
+  };
+  const sharedOnlyClient = {
+    __netcattySudoMode: true,
+    sftp: channel,
+    client: null,
+  };
+
+  sftpBridge.init({
+    electronModule: {},
+    sessions: new Map(),
+    sftpClients: new Map(),
+  });
+
+  const controller = new AbortController();
+  const callerPath = "/tmp/.netcatty-upload-deadbeef-user-file.part";
+  const uploadPromise = sftpBridge.pipelinedUploadLocalFile(
+    sharedOnlyClient,
+    localPath,
+    callerPath,
+    {
+      concurrency: UPLOAD_TRANSFER_CONCURRENCY,
+      chunkSize: TRANSFER_CHUNK_SIZE,
+      signal: controller.signal,
+    },
+  );
+
+  await new Promise((r) => setImmediate(r));
+  controller.abort();
+  await assert.rejects(uploadPromise, /abort|cancel/i);
+  assert.equal(unlinkedPath, null);
 
   await fs.promises.rm(tempRoot, { recursive: true, force: true });
 });

@@ -684,14 +684,6 @@ async function planRemoteUploadReplace(client, encodedPath) {
   return { writeInPlace: false, existingMode: null };
 }
 
-function isNetcattyStagedRemotePath(remotePath) {
-  const asString = Buffer.isBuffer(remotePath)
-    ? remotePath.toString("utf8")
-    : String(remotePath || "");
-  // Only our randomized stage names — never the caller's final destination.
-  return /(^|\/|\\)\.netcatty-upload-[^/\\]+\.part$/.test(asString);
-}
-
 async function restoreRemoteMode(client, encodedPath, mode) {
   if (mode == null || !Number.isFinite(mode)) return;
   try {
@@ -760,7 +752,10 @@ async function pipelinedUploadWithOptionalStaging(client, localPath, remotePath,
   const encodedStagedPath = encodePath(stagedLogical, encoding);
   const encodedBackupPath = encodePath(backupLogical, encoding);
   try {
-    await pipelinedUploadLocalFile(client, localPath, encodedStagedPath, fastPutOptions);
+    await pipelinedUploadLocalFile(client, localPath, encodedStagedPath, {
+      ...fastPutOptions,
+      generatedStagePath: true,
+    });
     throwIfAborted(signal);
     if (Number.isFinite(expectedSize) && expectedSize >= 0 && typeof client.stat === "function") {
       const stagedStat = await client.stat(encodedStagedPath);
@@ -1271,7 +1266,7 @@ async function acquireUploadSftpChannel(client, options = {}) {
  * Disposable channels are ended on abort; shared channels only mark cancelled.
  */
 function runFastPutOnChannel(sftp, localPath, remotePath, options = {}, channelControl = {}) {
-  const { dispose = false, signal = null } = channelControl;
+  const { dispose = false, signal = null, generatedStagePath = false } = channelControl;
   throwIfAborted(signal);
   if (typeof sftp?.fastPut !== "function") {
     throw new Error(
@@ -1293,13 +1288,12 @@ function runFastPutOnChannel(sftp, localPath, remotePath, options = {}, channelC
     const scheduleForceFinish = (err) => {
       clearForceFinish();
       forceFinishTimer = setTimeout(() => {
-        // Shared channel: best-effort unlink only Netcatty staged .part paths so a
-        // late fastPut cannot keep growing a temp after cancel reports.
-        // Never unlink the caller's final destination (in-place / symlink writes).
+        // Shared channel: best-effort unlink only paths explicitly created by
+        // our staging planner. A caller's final name may resemble a stage path.
         if (
           !dispose
           && (abortRequested || signal?.aborted || pendingError)
-          && isNetcattyStagedRemotePath(remotePath)
+          && generatedStagePath
         ) {
           try { sftp.unlink?.(remotePath, () => {}); } catch { /* ignore */ }
         }
@@ -1373,9 +1367,16 @@ function runFastPutOnChannel(sftp, localPath, remotePath, options = {}, channelC
 
 async function runAbortableFastPut(client, localPath, remotePath, options = {}) {
   const signal = options?.signal || null;
+  const generatedStagePath = options?.generatedStagePath === true;
+  const fastPutOptions = { ...options };
+  delete fastPutOptions.generatedStagePath;
   throwIfAborted(signal);
   const { sftp, dispose } = await acquireUploadSftpChannel(client, { signal });
-  return runFastPutOnChannel(sftp, localPath, remotePath, options, { dispose, signal });
+  return runFastPutOnChannel(sftp, localPath, remotePath, fastPutOptions, {
+    dispose,
+    signal,
+    generatedStagePath,
+  });
 }
 
 /**
@@ -1392,7 +1393,9 @@ async function pipelinedUploadLocalFile(client, localPath, remotePath, options =
     return runAbortableFastPut(client, localPath, remotePath, options);
   }
   // ssh2-sftp-client without abort: native fastPut on the shared connection.
-  return client.fastPut(localPath, remotePath, options);
+  const fastPutOptions = { ...options };
+  delete fastPutOptions.generatedStagePath;
+  return client.fastPut(localPath, remotePath, fastPutOptions);
 }
 
 async function uploadLocalToSftp(_event, payload) {
