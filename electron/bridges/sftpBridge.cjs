@@ -1016,11 +1016,23 @@ async function acquireUploadSftpChannel(client, options = {}) {
   }
   const sshClient = client?.client;
   if (sshClient && typeof sshClient.sftp === "function") {
-    const sftp = await tryOpenSftpChannel(client, options);
-    if (sftp && typeof sftp.fastPut === "function") {
-      return { sftp, dispose: true };
+    // Prefer a disposable channel for cancel, but never fail the whole upload
+    // when MaxSessions / server policy refuses another subsystem — fall back to
+    // the existing browse channel (Codex PR review).
+    try {
+      throwIfAborted(options?.signal);
+      const sftp = await tryOpenSftpChannel(client, options);
+      if (sftp && typeof sftp.fastPut === "function") {
+        return { sftp, dispose: true };
+      }
+      try { sftp?.end?.(); } catch { /* ignore */ }
+    } catch (err) {
+      if (options?.signal?.aborted) throw err;
+      console.warn(
+        "[SFTP] Disposable upload channel unavailable, using shared SFTP channel:",
+        err?.message || String(err),
+      );
     }
-    try { sftp?.end?.(); } catch { /* ignore */ }
   }
   const shared = await requireSftpChannel(client, options);
   return { sftp: shared, dispose: false };

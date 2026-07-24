@@ -1253,10 +1253,33 @@ async function runPausableConcurrentRanges({
 
   try {
     await new Promise((resolve, reject) => {
+      let forceFinishTimer = null;
+      const clearForceFinish = () => {
+        if (forceFinishTimer) {
+          clearTimeout(forceFinishTimer);
+          forceFinishTimer = null;
+        }
+      };
       const finish = (error) => {
         if (settled) return;
         if (error) terminalError = terminalError || error;
-        if (active > 0) return;
+        if (active > 0) {
+          // On cancel/error with in-flight WRITEs (especially shared-channel
+          // where abort cannot end the SFTP subsystem), force-settle so Cancel
+          // cannot hang forever waiting for stalled remote callbacks.
+          if (terminalError || transfer.cancelled) {
+            clearForceFinish();
+            forceFinishTimer = setTimeout(() => {
+              if (settled) return;
+              active = 0;
+              settled = true;
+              reject(terminalError || new Error("Transfer cancelled"));
+            }, 2000);
+            forceFinishTimer.unref?.();
+          }
+          return;
+        }
+        clearForceFinish();
         settled = true;
         if (terminalError) reject(terminalError);
         else resolve();
@@ -1264,7 +1287,7 @@ async function runPausableConcurrentRanges({
 
       const abort = (error = new Error("Transfer cancelled")) => {
         terminalError = terminalError || error;
-        try { abortChannel?.(); } catch { }
+        try { abortChannel?.(); } catch { /* ignore */ }
         finish(terminalError);
       };
 
