@@ -1100,7 +1100,9 @@ function runFastPutOnChannel(sftp, localPath, remotePath, options = {}, channelC
         scheduleForceFinish(createAbortError(signal, "Upload cancelled"));
         return;
       }
-      // Shared channel: wait for fastPut callback only.
+      // Shared browse/sudo channel: do not sftp.end() (would kill the session).
+      // Still bound cancellation so a stalled fastPut cannot hang forever.
+      scheduleForceFinish(createAbortError(signal, "Upload cancelled"));
     };
     try { sftp.on?.("error", onChannelError); } catch { /* ignore */ }
     if (typeof onChannel === "function") {

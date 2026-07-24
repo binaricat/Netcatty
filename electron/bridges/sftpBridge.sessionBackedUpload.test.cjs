@@ -267,6 +267,66 @@ test("pipelinedUploadLocalFile aborts in-flight fastPut when AbortSignal fires",
   await fs.promises.rm(tempRoot, { recursive: true, force: true });
 });
 
+test("shared-channel fastPut cancel force-settles when callback stalls", async () => {
+  const tempRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-shared-abort-bound-"));
+  const localPath = path.join(tempRoot, "stall.bin");
+  await fs.promises.writeFile(localPath, Buffer.alloc(8 * 1024, 5));
+
+  let ended = false;
+  const channel = {
+    readdir(_p, cb) { cb(null, []); },
+    mkdir(_p, cb) { cb(null); },
+    unlink(_p, cb) { cb(null); },
+    stat(_p, cb) {
+      const err = new Error("ENOENT");
+      err.code = 2;
+      cb(err);
+    },
+    // Never invoke the callback — simulates a stalled shared-channel fastPut.
+    fastPut() {},
+    end() {
+      ended = true;
+    },
+  };
+  // No client.sftp() for a second channel → acquireUpload uses shared channel.
+  const sharedOnlyClient = {
+    __netcattySudoMode: true,
+    sftp: channel,
+    client: null,
+  };
+
+  sftpBridge.init({
+    electronModule: {},
+    sessions: new Map(),
+    sftpClients: new Map(),
+  });
+
+  const controller = new AbortController();
+  const uploadPromise = sftpBridge.pipelinedUploadLocalFile(
+    sharedOnlyClient,
+    localPath,
+    "/tmp/stall-out.bin",
+    {
+      concurrency: UPLOAD_TRANSFER_CONCURRENCY,
+      chunkSize: TRANSFER_CHUNK_SIZE,
+      signal: controller.signal,
+    },
+  );
+
+  await new Promise((r) => setImmediate(r));
+  controller.abort();
+
+  const started = Date.now();
+  await assert.rejects(uploadPromise, /abort|cancel/i);
+  const elapsed = Date.now() - started;
+  // Must settle via the 2s force-finish path, not hang forever.
+  assert.ok(elapsed < 5000, `cancel took too long: ${elapsed}ms`);
+  // Shared channel must not be ended (would kill browse/sudo session).
+  assert.equal(ended, false);
+
+  await fs.promises.rm(tempRoot, { recursive: true, force: true });
+});
+
 test("pipelinedUploadLocalFile falls back to raw sftp.fastPut when client.fastPut is missing", async () => {
   const tempRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-raw-fastput-"));
   const localPath = path.join(tempRoot, "raw.bin");
