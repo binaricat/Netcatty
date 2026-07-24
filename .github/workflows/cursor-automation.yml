@@ -881,11 +881,21 @@ jobs:
           script: |
             const auto = require(`${process.env.RUNNER_TEMP}/cursor-automation.cjs`);
             const fs = require('node:fs');
-            let summary = '';
+            let statusText = '';
             try {
-              summary = fs.readFileSync(`${process.env.GITHUB_WORKSPACE}/patch-in/implement-status.out.txt`, 'utf8');
+              statusText = fs.readFileSync(
+                `${process.env.GITHUB_WORKSPACE}/patch-in/implement-status.out.txt`,
+                'utf8',
+              );
             } catch {}
-            const title = `fix(#${process.env.ISSUE_NUMBER}): ${process.env.ISSUE_TITLE}`.slice(0, 110);
+            const parsed = auto.parseImplementStatus(statusText);
+            const summary = parsed.summary || statusText;
+            const title = auto.selectBotPrTitle({
+              agentTitle: parsed.title,
+              issueNumber: process.env.ISSUE_NUMBER,
+              issueTitle: process.env.ISSUE_TITLE,
+              maxLength: 110,
+            });
             const body = auto.buildPullRequestBody({
               issueNumber: process.env.ISSUE_NUMBER,
               issueTitle: process.env.ISSUE_TITLE,
@@ -1280,14 +1290,14 @@ jobs:
                 ;;
             esac
           fi
-          # Tolerate already-ready / closed / permission noise.
+          # Tolerate already-ready / closed / permission noise. Still apply labels below.
           ready_out="$(gh pr ready "$PULL_NUMBER" --repo "$GITHUB_REPOSITORY" 2>&1)" || {
             if echo "$ready_out" | grep -qiE 'already ready|not a draft|is not a draft|is closed|closed\.|only draft'; then
-              echo "PR not convertible to ready (ok to skip): $ready_out"
-              exit 0
+              echo "PR not convertible to ready (ok to continue labeling): $ready_out"
+            else
+              echo "$ready_out" >&2
+              exit 1
             fi
-            echo "$ready_out" >&2
-            exit 1
           }
           # Re-check head after gh pr ready (another push could race).
           live_head2="$(gh pr view "$PULL_NUMBER" --repo "$GITHUB_REPOSITORY" --json headRefOid -q .headRefOid)"
@@ -1296,11 +1306,39 @@ jobs:
             gh pr ready "$PULL_NUMBER" --repo "$GITHUB_REPOSITORY" --undo 2>/dev/null || true
             exit 0
           fi
-          gh pr edit "$PULL_NUMBER" --repo "$GITHUB_REPOSITORY" \
-            --add-label "automation:codex-clean" \
-            --add-label "automation:bot-pr" || true
-          gh pr edit "$PULL_NUMBER" --repo "$GITHUB_REPOSITORY" \
-            --remove-label "automation:codex-loop" || true
+          # Terminal label transition: drop codex-loop, add codex-clean (pure helper).
+          node -e '
+            const { execSync } = require("node:child_process");
+            const auto = require(process.env.RUNNER_TEMP + "/cursor-automation.cjs");
+            const pull = process.env.PULL_NUMBER;
+            const repo = process.env.GITHUB_REPOSITORY;
+            const raw = execSync(
+              `gh pr view ${pull} --repo ${repo} --json labels -q "[.labels[].name]"`,
+              { encoding: "utf8" },
+            );
+            const existing = JSON.parse(raw);
+            const next = auto.nextCodexTerminalLabels(existing, "mark_ready");
+            const remove = existing.filter((l) => !next.includes(l));
+            const add = next.filter((l) => !existing.includes(l));
+            for (const name of remove) {
+              try {
+                execSync(
+                  `gh pr edit ${pull} --repo ${repo} --remove-label ${JSON.stringify(name)}`,
+                  { stdio: "inherit" },
+                );
+              } catch (err) {
+                console.error("Failed to remove label", name, err.message);
+                process.exit(1);
+              }
+            }
+            if (add.length) {
+              const args = add.map((n) => `--add-label ${JSON.stringify(n)}`).join(" ");
+              execSync(`gh pr edit ${pull} --repo ${repo} ${args}`, {
+                stdio: "inherit",
+              });
+            }
+            console.log("mark_ready labels:", next.join(", "));
+          '
           # Confirm draft=false before claiming success.
           draft="$(gh pr view "$PULL_NUMBER" --repo "$GITHUB_REPOSITORY" --json isDraft -q .isDraft)"
           if [[ "$draft" == "true" ]]; then
@@ -1326,10 +1364,11 @@ jobs:
           script: |
             const auto = require(`${process.env.RUNNER_TEMP}/cursor-automation.cjs`);
             const pull_number = Number(process.env.PULL_NUMBER);
-            await github.rest.issues.addLabels({
-              ...context.repo,
-              issue_number: pull_number,
-              labels: ['ready-for-human'],
+            await auto.applyCodexTerminalLabels({
+              github,
+              context,
+              pullNumber: pull_number,
+              terminal: 'give_up',
             });
             const reason = process.env.REASON || 'max_rounds';
             const message =
@@ -1626,7 +1665,10 @@ jobs:
       - name: Mark needs human when no fix produced
         if: steps.codex.outputs.action == 'fix' && steps.fixpatch.outputs.empty == 'true'
         uses: actions/github-script@v7
+        env:
+          PULL_NUMBER: ${{ needs.route.outputs.pull_number }}
         with:
+          github-token: ${{ secrets.TRIAGE_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
           script: |
             const auto = require(`${process.env.RUNNER_TEMP}/cursor-automation.cjs`);
             const pull_number = Number(process.env.PULL_NUMBER);
@@ -1640,13 +1682,12 @@ jobs:
                 'Automatic fix did not produce additional code changes for the latest Codex findings. Marking for human review.',
               ].join('\n'),
             });
-            await github.rest.issues.addLabels({
-              ...context.repo,
-              issue_number: pull_number,
-              labels: ['ready-for-human'],
+            await auto.applyCodexTerminalLabels({
+              github,
+              context,
+              pullNumber: pull_number,
+              terminal: 'empty_fix',
             });
-        env:
-          PULL_NUMBER: ${{ needs.route.outputs.pull_number }}
 
       - name: Mark needs human on fix failure
         if: failure() && steps.codex.outputs.action == 'fix'
@@ -1654,6 +1695,7 @@ jobs:
         env:
           PULL_NUMBER: ${{ needs.route.outputs.pull_number }}
         with:
+          github-token: ${{ secrets.TRIAGE_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
           script: |
             const fs = require('node:fs');
             const helper = fs.existsSync(`${process.env.RUNNER_TEMP}/cursor-automation.cjs`)
@@ -1671,10 +1713,11 @@ jobs:
                 'Automatic Codex fix did not finish cleanly (agent, protected paths, or verification failed). Marking for human review.',
               ].join('\n'),
             });
-            await github.rest.issues.addLabels({
-              ...context.repo,
-              issue_number: pull_number,
-              labels: ['ready-for-human'],
+            await auto.applyCodexTerminalLabels({
+              github,
+              context,
+              pullNumber: pull_number,
+              terminal: 'verify_fail',
             });
 
   publish_codex_fix:
@@ -2272,20 +2315,12 @@ jobs:
                       );
                       continue;
                     }
-                    await github.rest.issues.addLabels({
-                      ...context.repo,
-                      issue_number: pr.number,
-                      labels: ['automation:codex-clean'],
+                    await auto.applyCodexTerminalLabels({
+                      github,
+                      context,
+                      pullNumber: pr.number,
+                      terminal: 'mark_ready',
                     });
-                    try {
-                      await github.rest.issues.removeLabel({
-                        ...context.repo,
-                        issue_number: pr.number,
-                        name: 'automation:codex-loop',
-                      });
-                    } catch {
-                      // label may already be absent
-                    }
                     core.info(`PR #${pr.number}: marked ready via clean reaction`);
                     handled += 1;
                   } catch (err) {

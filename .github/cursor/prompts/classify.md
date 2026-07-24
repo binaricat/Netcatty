@@ -14,23 +14,57 @@ Do not modify any repository files. Classification is read-only.
 
 ## Mandatory procedure (do not skip)
 
-Execute these steps **in order**. Do not draft the final JSON until step 4.
+Execute these steps **in order**. Do not draft the final JSON until step 5.
 
 ### 1. Extract search terms from the issue
 
-From the title/body, list concrete tokens to search:
+From the title/body (and recent comments in `issue.json`), list concrete tokens:
 
 - English UI/feature words (Keychain, SFTP, port forward, WebDAV, …)
 - Chinese product words (凭证, 密钥, 身份, 证书, 终端, …)
 - Error strings, file names, component names if present
 - Related domain words (SSH, identity, host, vault, …)
+- **Unknown proper nouns / product names** (tools users run inside the terminal
+  or compare against — e.g. herdr, OpenCode, WindTerm, xftp, tmux clones)
+- **URLs** in the issue or replies (project homepages, docs, screenshots are
+  secondary — prioritise homepages and GitHub repos)
 
-### 2. Search the repository (required)
+### 2. Active research for unknown terms and URLs (required when present)
+
+If the report names a product/tool that is **not** an obvious Netcatty UI label,
+or includes an `http(s)://` link, you **must research before needs-info**:
+
+1. **URLs in the issue/comments:** open or fetch enough to learn what the
+   project is (README summary, one-line description). Note how it relates to
+   SSH/terminal/SFTP/TUI — do not ignore a reporter-provided link.
+2. **Unknown names without a link:** use available web/search tools (or
+   `gh` / public GitHub search if available) for the exact token + a short
+   context word (`terminal`, `tmux`, `ssh`, `sftp`). Record the project name
+   and role in `code_findings`.
+3. **Related history:** search this repository's issues/PRs for the same
+   token (`gh issue list --search "…"` when available, or memory of paths/
+   prior bugs). Mention prior issue numbers in `code_findings` when found.
+4. **Map to Netcatty surfaces:** after research, connect the external tool to
+   local code (terminal mouse mode, scrollback, SFTP transfer, AI sidebar,
+   etc.) and search those areas — not only for a page literally named after
+   the external product.
+
+**Hard failure:** answering only “仓库里没有叫 X 的页面 / we have no page
+named X” without steps 1–4 when X or a URL was present. That is not research.
+
+Only after research, if evidence is still insufficient for a focused fix,
+use `bug_needs_info` with **specific** missing items (not a generic “what is
+this tool?” when the reporter already linked it).
+
+### 3. Search the repository (required)
 
 Run **at least two** searches in the workspace (shell/`rg`/`grep`/`find` tools
 are fine). Record **real file paths** you hit (not guessed).
 
-### 3. Open and read code (required)
+Include tokens from research (TUI, mouse, SFTP throughput, stream decode, …)
+when the external product maps to those subsystems.
+
+### 4. Open and read code (required)
 
 Open **at least two** source files that search returned (prefer
 `components/`, `application/`, `domain/`, `electron/`, not docs-only).
@@ -42,10 +76,10 @@ Read enough of each file to answer:
 - **How large is the change surface?** Count roughly: files, subsystems,
   protocol/data-model impact, cross-cutting settings.
 
-If search finds nothing relevant, say so in `code_findings` and prefer
-`bug_needs_info` / `unclear` rather than inventing paths.
+If search finds nothing relevant after research, say so in `code_findings` and
+prefer `bug_needs_info` / `unclear` rather than inventing paths.
 
-### 4. Only then classify and write the reply
+### 5. Only then classify and write the reply
 
 ## Category definitions (read carefully)
 
@@ -241,5 +275,5 @@ Hard requirements:
 - For `already_available`, `code_findings` names the entry and owning component;
   `reply` is a usable how-to in plain language.
 
-If you cannot complete steps 2–3, set category to `bug_needs_info` or `unclear`
+If you cannot complete steps 2–4, set category to `bug_needs_info` or `unclear`
 and put the failed search terms in `code_findings` — still do not invent paths.

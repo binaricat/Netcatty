@@ -36,4 +36,11 @@ When successful, write `.cursor-runtime/implement-status.txt` with:
 
 ```text
 OK: short summary of what changed
+TITLE: concise PR title (imperative, area-scoped; e.g. fix(sftp): raise upload WRITE fanout)
 ```
+
+- `OK:` is required for a successful implement pass.
+- `TITLE:` is **required when you made code changes**. The workflow uses it as
+  the GitHub PR title (sanitized). Prefer `fix(area): …` / `feat(area): …`
+  style; do **not** paste the raw issue title. Keep it under ~100 characters.
+- If you cannot implement safely, write only `BLOCKED: reason` and make no edits.

@@ -5,7 +5,11 @@ on:
     types: [opened, edited]
 
 permissions:
+  contents: read
   issues: write
+  # workflow_dispatch is allowed from GITHUB_TOKEN (unlike issues.reopened)
+  # so format recovery can start triage without a human re-dispatch.
+  actions: write
 
 jobs:
   validate:
@@ -15,74 +19,78 @@ jobs:
       github.event.issue.user.type != 'Bot' &&
       !contains(github.event.issue.labels.*.name, 'format-exempt')
     steps:
+      - name: Checkout format helpers
+        uses: actions/checkout@v5
+        with:
+          sparse-checkout: |
+            scripts/cursor-automation.cjs
+          sparse-checkout-cone-mode: false
+
       - name: Validate title and body
         uses: actions/github-script@v7
         with:
           script: |
+            const auto = require(`${process.env.GITHUB_WORKSPACE}/scripts/cursor-automation.cjs`);
             const issue = context.payload.issue;
-            const title = issue.title.trim();
-            const body = (issue.body || '').trim();
-            const errors = [];
-
-            const modernTitle = /^\[(Bug|Feature)\] .{8,}/.test(title);
-            const legacyAppTitle = /^Bug:\s*.{5,}/i.test(title);
-            if (!modernTitle && !legacyAppTitle) {
-              errors.push(
-                'Title must start with `[Bug]` or `[Feature]` followed by a short summary (at least 8 characters after the prefix). Legacy app links using `Bug: ...` are also accepted. Example: `[Bug] SFTP upload fails on Windows`'
-              );
-            }
-
-            if (body.length < 120) {
-              errors.push(
-                'Body is too short. Please use the Bug Report or Feature Request template and fill in all required fields.'
-              );
-            }
-
-            const templateMarkers = [
-              'Steps to reproduce',
-              'Expected behavior',
-              'Actual behavior',
-              'Describe the problem',
-              'Problem / pain point',
-              'Proposed solution',
-              'Operating system',
-            ];
-            const hasTemplateStructure = templateMarkers.some((marker) =>
-              body.includes(marker)
-            );
-            if (!hasTemplateStructure) {
-              errors.push(
-                'Body does not look like it came from an issue template. Choose **Bug Report** or **Feature Request** when opening an issue.'
-              );
-            }
-
+            const errors = auto.getIssueFormatErrors(issue);
             const labels = new Set(
               (issue.labels || []).map((label) =>
                 typeof label === 'string' ? label : label.name
               )
             );
+            const formatOk = errors.length === 0;
+            const recovery = auto.shouldRecoverIssueFormat({
+              state: issue.state,
+              labels: [...labels],
+              formatOk,
+            });
 
-            if (errors.length === 0) {
-              if (
-                issue.state === 'closed' &&
-                labels.has('invalid-format')
-              ) {
+            if (formatOk) {
+              if (recovery.recover) {
                 labels.delete('invalid-format');
-                await github.rest.issues.update({
+                const update = {
                   owner: context.repo.owner,
                   repo: context.repo.repo,
                   issue_number: issue.number,
-                  state: 'open',
                   labels: [...labels],
-                });
+                };
+                if (recovery.reopen) {
+                  update.state = 'open';
+                }
+                await github.rest.issues.update(update);
                 await github.rest.issues.createComment({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
                   issue_number: issue.number,
-                  body: '<!-- issue-format-bot --> Format looks good now. Reopening this issue.',
+                  body: recovery.reopen
+                    ? '<!-- issue-format-bot --> Format looks good now. Reopening this issue and starting triage.'
+                    : '<!-- issue-format-bot --> Format looks good now. Starting triage.',
                 });
+                // GITHUB_TOKEN reopen does not fire issues.reopened workflows.
+                // workflow_dispatch is the supported exception that starts classify.
+                const ref =
+                  context.payload.repository?.default_branch || 'main';
+                try {
+                  await github.rest.actions.createWorkflowDispatch({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    workflow_id: 'cursor-automation.yml',
+                    ref,
+                    inputs: {
+                      issue_number: String(issue.number),
+                    },
+                  });
+                  core.info(
+                    `Dispatched cursor-automation for recovered issue #${issue.number}`,
+                  );
+                } catch (err) {
+                  core.warning(
+                    `Failed to dispatch triage after format recovery: ${err.message}`,
+                  );
+                }
+              } else {
+                core.info('Issue format OK');
               }
-              core.info('Issue format OK');
               return;
             }
 

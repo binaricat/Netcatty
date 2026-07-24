@@ -37,9 +37,35 @@ clone.
 
 Actions → **Cursor automation** → Run workflow → provide an issue or PR number.
 
+## Format recovery → triage
+
+`issue-format` and triage share the same title/body rules in
+`scripts/cursor-automation.cjs` (CJK-friendly `[Bug]`/`[Feature]` summaries).
+
+When a closed `invalid-format` issue is fixed, `issue-format` reopens it and
+**dispatches** `cursor-automation` via `workflow_dispatch` (GITHUB_TOKEN cannot
+silently chain `issues.reopened`, but `workflow_dispatch` is allowed).
+
+## Bot PR titles
+
+Implement agents write `TITLE:` in `.cursor-runtime/implement-status.txt`.
+Publish uses that line (sanitized) as the draft PR title, with a short
+`fix(#N): …` fallback if missing.
+
+## Codex label handoffs
+
+Terminal codex_loop outcomes always drop `automation:codex-loop`:
+
+| Outcome | Labels |
+|---|---|
+| clean / mark_ready | `automation:codex-clean` (+ bot-pr), no loop/human |
+| give_up / verify fail / empty fix | `ready-for-human`, no loop/clean |
+
 ## Safety
 
 - External / fork PRs: only re-trigger Codex; **no** Cursor CLI review and **no** commits.
 - Own / bot PR Codex findings: Cursor CLI may push fixes (max rounds).
 - Automation never publishes changes under `.github/` or automation scripts.
 - Issue text is sanitized before prompts.
+- Classify must research unknown product names and issue URLs before needs-info.
+- Author replies on `needs-info` / `triage:bug-needs-info` re-run classify (same research bar).
