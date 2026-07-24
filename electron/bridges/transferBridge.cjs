@@ -573,16 +573,27 @@ async function uploadFile(localPath, remotePath, client, fileSize, transfer, sen
     }
 
     if (fastSftp && transfer.resumable) {
-      await uploadFileResumableFast(
-        localPath,
-        remotePath,
-        fastSftp,
-        fileSize,
-        transfer,
-        sendProgress,
-      );
-      await assertRemoteUploadSize(client, remotePath, fileSize);
-      return;
+      try {
+        await uploadFileResumableFast(
+          localPath,
+          remotePath,
+          fastSftp,
+          fileSize,
+          transfer,
+          sendProgress,
+        );
+        await assertRemoteUploadSize(client, remotePath, fileSize);
+        return;
+      } catch (err) {
+        // uploadFileResumableFast ends the isolated channel itself. Clear the
+        // handle so we do not reuse a closed channel for fastPut below.
+        fastSftp = null;
+        if (transfer.cancelled) throw err;
+        console.warn(
+          "[transferBridge] resumable fast upload failed, falling back to a compatible stream:",
+          err?.message || String(err),
+        );
+      }
     }
 
     if (fastSftp && typeof fastSftp.fastPut === "function") {

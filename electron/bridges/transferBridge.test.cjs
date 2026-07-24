@@ -198,7 +198,18 @@ test("failed resumable upload opens close their isolated channel", async (t) => 
     },
   });
   const client = {
-    sftp: createFastSftp({}),
+    // Stream fallback also rejects so the transfer still fails after cleanup.
+    sftp: createFastSftp({
+      createWriteStream() {
+        const writeStream = new Writable({
+          write(_chunk, _encoding, callback) {
+            callback(new Error("permission denied"));
+          },
+        });
+        queueMicrotask(() => writeStream.destroy(new Error("permission denied")));
+        return writeStream;
+      },
+    }),
     client: {
       sftp(callback) {
         callback(null, fastSftp);
@@ -223,6 +234,78 @@ test("failed resumable upload opens close their isolated channel", async (t) => 
 
   assert.match(result.error || "", /permission denied/);
   assert.equal(endedChannels, 1);
+});
+
+test("resumable SFTP uploads fall back to a compatible stream after fast path fails", async (t) => {
+  const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-transfer-upload-fallback-"));
+  t.after(async () => {
+    await fs.promises.rm(tempDir, { recursive: true, force: true });
+  });
+
+  const payload = Buffer.from("complete fallback upload");
+  const localPath = path.join(tempDir, "upload.bin");
+  await fs.promises.writeFile(localPath, payload);
+  let endedChannels = 0;
+  let remoteBytes = 0;
+  const fastSftp = createFastSftp({
+    open(_remotePath, _flags, callback) {
+      callback(new Error("server rejected random-access writes"));
+    },
+    end() {
+      endedChannels += 1;
+    },
+  });
+  const client = {
+    sftp: createFastSftp({
+      createWriteStream() {
+        return new Writable({
+          write(chunk, _encoding, callback) {
+            remoteBytes += chunk.length;
+            callback();
+          },
+          final(callback) {
+            queueMicrotask(() => {
+              this.emit("close");
+              callback();
+            });
+          },
+        });
+      },
+    }),
+    stat() {
+      return Promise.resolve({ size: remoteBytes });
+    },
+    rename() {
+      return Promise.resolve();
+    },
+    delete() {
+      return Promise.resolve();
+    },
+    client: {
+      sftp(callback) {
+        callback(null, fastSftp);
+      },
+    },
+  };
+  transferBridge.init({ sftpClients: new Map([["target", client]]) });
+
+  const result = await transferBridge.startTransfer(
+    { sender: createSender() },
+    {
+      transferId: "upload-fallback",
+      sourcePath: localPath,
+      targetPath: "/tmp/upload.bin",
+      sourceType: "local",
+      targetType: "sftp",
+      targetSftpId: "target",
+      totalBytes: payload.length,
+      resumable: true,
+    },
+  );
+
+  assert.equal(result.error, undefined);
+  assert.equal(endedChannels, 1);
+  assert.equal(remoteBytes, payload.length);
 });
 
 test("SFTP uploads fail when remote size does not match local size", async (t) => {
