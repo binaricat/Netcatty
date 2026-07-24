@@ -671,16 +671,27 @@ test("syncAllProviders upload-local override overwrites remote without decryptin
   const checkedRemote = remoteFile("github", 5, 500);
   const localPayload = payload("local-after-reinstall");
   const uploaded: Array<{ provider: CloudProvider; payload: SyncPayload }> = [];
+  const encryptBaseVersions: number[] = [];
   let decryptCalls = 0;
 
   EncryptionService.decryptPayload = async () => {
     decryptCalls += 1;
     throw new Error("OperationError: unable to authenticate data");
   };
-  EncryptionService.encryptPayload = async (outgoing: SyncPayload) => ({
-    ...remoteFile("github", 6, 600),
-    payload: JSON.stringify(outgoing),
-  });
+  EncryptionService.encryptPayload = async (
+    outgoing: SyncPayload,
+    _password: string,
+    _deviceId: string,
+    _deviceName: string,
+    _appVersion: string,
+    existingVersion?: number,
+  ) => {
+    encryptBaseVersions.push(existingVersion ?? 0);
+    return {
+      ...remoteFile("github", (existingVersion ?? 0) + 1, 600),
+      payload: JSON.stringify(outgoing),
+    };
+  };
 
   try {
     const manager = {
@@ -729,6 +740,9 @@ test("syncAllProviders upload-local override overwrites remote without decryptin
     assert.equal(forced.get("github")?.action, "upload");
     assert.equal(uploaded.length, 1);
     assert.equal(uploaded[0]?.payload.hosts[0]?.id, "local-after-reinstall");
+    // Keep-local under smartMerge must base on the conflicting remote version
+    // (v5 → encrypted as v6), matching single-provider upload-local.
+    assert.deepEqual(encryptBaseVersions, [5]);
     // Shrink-guard may attempt decrypt and ignore failure; merge path must not run.
     assert.ok(decryptCalls >= 1);
   } finally {

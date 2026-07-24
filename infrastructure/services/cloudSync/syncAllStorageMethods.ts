@@ -516,8 +516,21 @@ export async function syncAllProvidersImpl(this: any,
     }
 
     // Use the highest version as base: either local or any remote that was merged
+    // or forcibly overwritten. Explicit keep-local (conflictActionOverride
+    // upload-local) can run while syncStrategy is still smartMerge; without
+    // taking the remote version here, encryptPayload would mint local+1 and
+    // regress past a higher conflicting remote (e.g. local v1 over remote v5).
     let baseVersion = this.state.localVersion;
-    if (wasMerged || (this.state.syncStrategy !== 'smartMerge' && conflicts.length > 0)) {
+    if (
+      wasMerged
+      || (
+        conflicts.length > 0
+        && (
+          this.state.syncStrategy !== 'smartMerge'
+          || opts.conflictActionOverride === 'upload-local'
+        )
+      )
+    ) {
       for (const c of conflicts) {
         const rv = c.check?.remoteFile?.meta?.version ?? 0;
         if (rv > baseVersion) baseVersion = rv;
