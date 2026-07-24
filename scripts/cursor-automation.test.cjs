@@ -1392,3 +1392,68 @@ test('isValidIssueTitle accepts case variants and no-space legacy', () => {
   assert.equal(auto.isValidIssueTitle('[FEATURE] sort by ip addr'), true);
   assert.equal(auto.isValidIssueTitle('Bug:上传太慢了啊'), true);
 });
+
+test('buildPullRequestBody prefers substantial agent body over one-line template', () => {
+  const agentBody = [
+    '## Summary',
+    '',
+    '- Raise SFTP WRITE fanout from 8 to 32 for higher throughput on multi-ms RTT paths.',
+    '- Keep chunk size at 32KB for server compatibility after #2022.',
+    '',
+    '## Why',
+    '',
+    'In-flight window was only 256KB; WindTerm keeps more data on the wire.',
+    '',
+    '## Testing',
+    '',
+    '- node --test electron/bridges/transferLimits.test.cjs',
+    '',
+    'Fixes #2449',
+  ].join('\n');
+  const body = auto.buildPullRequestBody({
+    issueNumber: 2449,
+    issueTitle: '[Bug] 文件上传速度太慢了',
+    summary: 'OK: raise fanout',
+    agentBody,
+  });
+  assert.match(body, /<!-- cursor-bot-pr -->/);
+  assert.match(body, /Raise SFTP WRITE fanout/);
+  assert.match(body, /## Why/);
+  assert.match(body, /Fixes #2449/);
+  assert.match(body, /## Automation/);
+  assert.doesNotMatch(body, /OK: raise fanout/);
+});
+
+test('buildPullRequestBody falls back when agent body is thin', () => {
+  const body = auto.buildPullRequestBody({
+    issueNumber: 12,
+    issueTitle: '[Bug] something',
+    summary: 'Fixed the null check',
+    agentBody: 'short',
+  });
+  assert.match(body, /## Summary/);
+  assert.match(body, /Fixed the null check/);
+  assert.match(body, /Fixes #12/);
+  assert.match(body, /## Automation/);
+});
+
+test('buildPullRequestBody strips agent markers and appends Fixes when missing', () => {
+  const body = auto.buildPullRequestBody({
+    issueNumber: 99,
+    issueTitle: 'x',
+    summary: 'y',
+    agentBody: [
+      '<!-- cursor-bot-pr -->',
+      '## Summary',
+      '',
+      '- One concrete change that is long enough to count as a real body for reviewers.',
+      '- Second bullet explaining the behavior impact on the sidebar streaming path.',
+      '',
+      '## Testing',
+      '',
+      '- unit tests for the helper',
+    ].join('\n'),
+  });
+  assert.equal((body.match(/<!-- cursor-bot-pr -->/g) || []).length, 1);
+  assert.match(body, /Fixes #99/);
+});

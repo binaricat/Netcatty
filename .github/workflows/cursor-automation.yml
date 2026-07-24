@@ -752,6 +752,11 @@ jobs:
           else
             echo "OK: automated fix" > .cursor-runtime/implement-status.out.txt
           fi
+          if [[ -f .cursor-runtime/implement-pr-body.md ]]; then
+            cp .cursor-runtime/implement-pr-body.md .cursor-runtime/implement-pr-body.out.md
+          else
+            : > .cursor-runtime/implement-pr-body.out.md
+          fi
           echo "should_publish=true" >> "$GITHUB_OUTPUT"
 
       - name: Scan implement patch for secret leaks
@@ -768,6 +773,8 @@ jobs:
                 ".cursor-runtime/implement.patch",
                 ".cursor-runtime/implement-status.out.txt",
                 ".cursor-runtime/implement-status.txt",
+                ".cursor-runtime/implement-pr-body.out.md",
+                ".cursor-runtime/implement-pr-body.md",
               ],
               process.env.CURSOR_API_KEY,
               "implement-publish",
@@ -782,6 +789,7 @@ jobs:
           path: |
             .cursor-runtime/implement.patch
             .cursor-runtime/implement-status.out.txt
+            .cursor-runtime/implement-pr-body.out.md
           if-no-files-found: error
 
       - name: Mark needs human on implement failure
@@ -882,9 +890,16 @@ jobs:
             const auto = require(`${process.env.RUNNER_TEMP}/cursor-automation.cjs`);
             const fs = require('node:fs');
             let statusText = '';
+            let agentBody = '';
             try {
               statusText = fs.readFileSync(
                 `${process.env.GITHUB_WORKSPACE}/patch-in/implement-status.out.txt`,
+                'utf8',
+              );
+            } catch {}
+            try {
+              agentBody = fs.readFileSync(
+                `${process.env.GITHUB_WORKSPACE}/patch-in/implement-pr-body.out.md`,
                 'utf8',
               );
             } catch {}
@@ -900,6 +915,7 @@ jobs:
               issueNumber: process.env.ISSUE_NUMBER,
               issueTitle: process.env.ISSUE_TITLE,
               summary,
+              agentBody,
             });
             const { data: pr } = await github.rest.pulls.create({
               ...context.repo,

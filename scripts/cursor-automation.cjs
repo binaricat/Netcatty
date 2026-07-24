@@ -720,22 +720,58 @@ function buildTriageComment(classification) {
   return [TRIAGE_MARKER, '', classification.reply].join('\n');
 }
 
-function buildPullRequestBody({ issueNumber, issueTitle, summary }) {
+const BOT_PR_AUTOMATION_FOOTER = [
+  '## Automation',
+  '- Automated implement pass',
+  '- Review gate: `@codex review` (own/bot PRs only)',
+  '- Draft until Codex reports clean findings',
+].join('\n');
+
+/**
+ * Prefer a Cursor-written PR body when present and substantial; otherwise a
+ * short fallback. Always prepends bot markers and ensures Fixes #N + Automation.
+ *
+ * @param {{ issueNumber?: string|number, issueTitle?: string, summary?: string, agentBody?: string }} opts
+ */
+function buildPullRequestBody({
+  issueNumber,
+  issueTitle,
+  summary,
+  agentBody,
+} = {}) {
+  const n = String(issueNumber || '').replace(/\D/g, '') || String(issueNumber || '');
   const title = sanitizeUntrustedText(issueTitle, 300);
   const detail = sanitizeUntrustedText(summary, 2_000);
+  const markers = [BOT_PR_MARKER, TRIAGE_MARKER, ''];
+
+  let body = sanitizeUntrustedText(agentBody, 12_000)
+    .replace(/<!--\s*cursor-bot-pr\s*-->/gi, '')
+    .replace(/<!--\s*cursor-automation\s*-->/gi, '')
+    .trim();
+
+  const hasStructure =
+    /^##\s+Summary\b/im.test(body) ||
+    body.split('\n').filter((line) => line.trim()).length >= 5;
+  const longEnough = countSummaryUnits(body) >= 120;
+
+  if (body && (hasStructure || longEnough)) {
+    if (n && !new RegExp(`(?:Fixes|Closes|Related to)\\s+#${n}\\b`, 'i').test(body)) {
+      body = `${body}\n\nFixes #${n}`;
+    }
+    if (!/^##\s+Automation\b/im.test(body)) {
+      body = `${body}\n\n${BOT_PR_AUTOMATION_FOOTER}`;
+    }
+    return [...markers, body].join('\n');
+  }
+
   return [
-    BOT_PR_MARKER,
-    TRIAGE_MARKER,
+    ...markers,
+    '## Summary',
+    detail || `Automated fix for #${n || issueNumber}: ${title}`,
     '',
-    `## Summary`,
-    detail || `Automated fix for #${issueNumber}: ${title}`,
+    n ? `Fixes #${n}` : `Fixes #${issueNumber}`,
     '',
-    `Fixes #${issueNumber}`,
-    '',
-    '## Automation',
-    '- Automated implement pass',
-    '- Review gate: `@codex review` (own/bot PRs only)',
-    '- Draft until Codex reports clean findings',
+    BOT_PR_AUTOMATION_FOOTER,
   ].join('\n');
 }
 

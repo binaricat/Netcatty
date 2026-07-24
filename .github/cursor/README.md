@@ -46,11 +46,16 @@ When a closed `invalid-format` issue is fixed, `issue-format` reopens it and
 **dispatches** `cursor-automation` via `workflow_dispatch` (GITHUB_TOKEN cannot
 silently chain `issues.reopened`, but `workflow_dispatch` is allowed).
 
-## Bot PR titles
+## Bot PR titles and bodies
 
-Implement agents write `TITLE:` in `.cursor-runtime/implement-status.txt`.
-Publish uses that line (sanitized) as the draft PR title, with a short
-`fix(#N): …` fallback if missing.
+Implement agents write:
+
+- `TITLE:` in `.cursor-runtime/implement-status.txt` → draft PR title
+  (`selectBotPrTitle`, with short `fix(#N): …` fallback)
+- `.cursor-runtime/implement-pr-body.md` → full maintainer-style PR body
+  (`buildPullRequestBody` prefers this; short template only if missing/thin)
+
+Bodies always get bot markers + `Fixes #N` + an Automation footer when needed.
 
 ## Codex label handoffs
 
