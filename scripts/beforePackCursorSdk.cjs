@@ -47,6 +47,7 @@ function rebuildPatchedNodePty({
   platform,
   arch,
   run = execFileSync,
+  exists = fs.existsSync,
   logger = console,
 }) {
   if (platform !== "win32") return false;
@@ -72,6 +73,25 @@ function rebuildPatchedNodePty({
     cwd: projectDir,
     stdio: "inherit",
   });
+
+  const nodePtyDir = path.join(projectDir, "node_modules", "node-pty");
+  run(process.execPath, [path.join(nodePtyDir, "scripts", "post-install.js")], {
+    cwd: projectDir,
+    stdio: "inherit",
+    env: { ...process.env, npm_config_arch: targetArch },
+  });
+
+  const requiredArtifacts = [
+    path.join(nodePtyDir, "build", "Release", "conpty.node"),
+    path.join(nodePtyDir, "build", "Release", "conpty", "conpty.dll"),
+    path.join(nodePtyDir, "build", "Release", "conpty", "OpenConsole.exe"),
+  ];
+  const missingArtifacts = requiredArtifacts.filter((filePath) => !exists(filePath));
+  if (missingArtifacts.length > 0) {
+    throw new Error(
+      `[beforePackCursorSdk] Patched node-pty artifacts missing: ${missingArtifacts.join(", ")}`,
+    );
+  }
   return true;
 }
 

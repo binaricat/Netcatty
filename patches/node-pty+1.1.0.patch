@@ -1,26 +1,17 @@
 diff --git a/node_modules/node-pty/src/win/conpty.cc b/node_modules/node-pty/src/win/conpty.cc
-index 7b286d3..451dcce 100644
+index 7b286d3..5423c8e 100644
 --- a/node_modules/node-pty/src/win/conpty.cc
 +++ b/node_modules/node-pty/src/win/conpty.cc
-@@ -523,7 +523,7 @@ static Napi::Value PtyClear(const Napi::CallbackInfo& info) {
-       PFNCLEARPSEUDOCONSOLE const pfnClearPseudoConsole = (PFNCLEARPSEUDOCONSOLE)GetProcAddress((HMODULE)hLibrary, "ConptyClearPseudoConsole");
-       if (pfnClearPseudoConsole)
-       {
+@@ -35 +35 @@ typedef HRESULT (__stdcall *PFNRESIZEPSEUDOCONSOLE)(HPCON hpc, COORD newSize);
+-typedef HRESULT (__stdcall *PFNCLEARPSEUDOCONSOLE)(HPCON hpc);
++typedef HRESULT (__stdcall *PFNCLEARPSEUDOCONSOLE)(HPCON hpc, BOOL keepCursorRow);
+@@ -526 +526 @@ static Napi::Value PtyClear(const Napi::CallbackInfo& info) {
 -        pfnClearPseudoConsole(handle->hpc);
 +        pfnClearPseudoConsole(handle->hpc, TRUE);
-       }
-     }
-   }
 diff --git a/node_modules/node-pty/src/win/conpty.h b/node_modules/node-pty/src/win/conpty.h
 index 4cef31c..4f03a0c 100644
 --- a/node_modules/node-pty/src/win/conpty.h
 +++ b/node_modules/node-pty/src/win/conpty.h
-@@ -30,7 +30,7 @@ CONPTY_EXPORT HRESULT WINAPI ConptyCreatePseudoConsole(COORD size, HANDLE hInput
- CONPTY_EXPORT HRESULT WINAPI ConptyCreatePseudoConsoleAsUser(HANDLE hToken, COORD size, HANDLE hInput, HANDLE hOutput, DWORD dwFlags, HPCON* phPC);
- 
- CONPTY_EXPORT HRESULT WINAPI ConptyResizePseudoConsole(HPCON hPC, COORD size);
+@@ -33 +33 @@ CONPTY_EXPORT HRESULT WINAPI ConptyResizePseudoConsole(HPCON hPC, COORD size);
 -CONPTY_EXPORT HRESULT WINAPI ConptyClearPseudoConsole(HPCON hPC);
 +CONPTY_EXPORT HRESULT WINAPI ConptyClearPseudoConsole(HPCON hPC, BOOL keepCursorRow);
- CONPTY_EXPORT HRESULT WINAPI ConptyShowHidePseudoConsole(HPCON hPC, bool show);
- CONPTY_EXPORT HRESULT WINAPI ConptyReparentPseudoConsole(HPCON hPC, HWND newParent);
- CONPTY_EXPORT HRESULT WINAPI ConptyReleasePseudoConsole(HPCON hPC);
