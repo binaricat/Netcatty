@@ -187,6 +187,7 @@ import {
 import {
   flushPendingTerminalWritesBeforeHibernate,
   hasPendingTerminalWrites,
+  runWithTerminalOutputPausedAfterWritesSettle,
   writeLocalTerminalDataInOrder,
 } from "./terminal/runtime/terminalUnfocusedRepaint";
 import {
@@ -1475,20 +1476,15 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     if (attachExistingSession) {
       const homeId = attachHomeWebContentsIdRef.current;
       attachHomeWebContentsIdRef.current = undefined;
+      const outputPauseLease = await terminalBackend.acquireSessionFlowPauseLease(closingSessionId);
       try {
         // Stop the source before detaching the popup listener. This lets any
         // already-delivered writes settle into xterm before its final snapshot.
-        if (terminalBackend.setSessionFlowPausedAndWait) {
-          const paused = await terminalBackend.setSessionFlowPausedAndWait(closingSessionId, true);
-          if (!paused?.success && paused?.error === "Output drain unavailable") {
-            terminalBackend.setSessionFlowPaused?.(closingSessionId, true);
-            await new Promise((resolve) => setTimeout(resolve, 40));
-          } else if (!paused?.success) {
-            throw new Error(paused?.error || "Failed to drain terminal output");
-          }
-        } else {
-          terminalBackend.setSessionFlowPaused?.(closingSessionId, true);
+        const paused = await outputPauseLease.waitForPause();
+        if (!paused?.success && paused?.error === "Output drain unavailable") {
           await new Promise((resolve) => setTimeout(resolve, 40));
+        } else if (!paused?.success) {
+          throw new Error(paused?.error || "Failed to drain terminal output");
         }
         const snapshotTerm = termRef.current;
         if (snapshotTerm) {
@@ -1552,7 +1548,9 @@ const TerminalComponent: React.FC<TerminalProps> = ({
           clearTerminalSessionFlowAck(closingSessionId);
           terminalBackend.setSessionFlowPaused?.(closingSessionId, false);
         }
+        outputPauseLease.release();
       } catch (err) {
+        outputPauseLease.release({ keepPaused: true });
         logger.warn("Failed to restore terminal output after attach popup close", err);
         disposeSessionListeners();
         throw err;
@@ -2468,19 +2466,46 @@ const TerminalComponent: React.FC<TerminalProps> = ({
 
           pending = { term, options: { ...options } };
           pendingWriteSafeFitRef.current = pending;
-          void flushPendingTerminalWritesBeforeHibernate(term).then((settled) => {
-            if (pendingWriteSafeFitRef.current !== pending || termRef.current !== term) return;
-            if (settled) {
+          const fitRequest = pending;
+          const fitSessionId = sessionRef.current;
+          void (async () => {
+            let ranFit = false;
+            const settled = await runWithTerminalOutputPausedAfterWritesSettle(
+              term,
+              fitSessionId,
+              terminalBackend,
+              () => {
+                if (
+                  pendingWriteSafeFitRef.current !== fitRequest ||
+                  termRef.current !== term ||
+                  sessionRef.current !== fitSessionId
+                ) return;
+                pendingWriteSafeFitRef.current = null;
+                ranFit = true;
+                safeFit({ ...fitRequest.options, immediate: true });
+              },
+              () => sessionRef.current === fitSessionId && termRef.current === term,
+            );
+            if (ranFit) return;
+            if (pendingWriteSafeFitRef.current !== fitRequest || termRef.current !== term) return;
+
+            // A reconnect can reuse the same xterm while replacing the backend
+            // session. Retry against the new source instead of resizing it
+            // under the old session's pause.
+            if (sessionRef.current !== fitSessionId) {
               pendingWriteSafeFitRef.current = null;
-              safeFit(pending.options);
+              setTimeout(() => safeFit(fitRequest.options), 0);
               return;
             }
-            setTimeout(() => {
-              if (pendingWriteSafeFitRef.current !== pending || termRef.current !== term) return;
-              pendingWriteSafeFitRef.current = null;
-              safeFit(pending.options);
-            }, 50);
-          });
+
+            if (!settled) {
+              setTimeout(() => {
+                if (pendingWriteSafeFitRef.current !== fitRequest || termRef.current !== term) return;
+                pendingWriteSafeFitRef.current = null;
+                safeFit(fitRequest.options);
+              }, 50);
+            }
+          })();
           return;
         }
 

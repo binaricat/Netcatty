@@ -198,6 +198,51 @@ export async function flushPendingTerminalWritesBeforeHibernate(
   return !hasPendingTerminalWrites(term);
 }
 
+type TerminalOutputPauseBackend = {
+  acquireSessionFlowPauseLease: (sessionId: string) => Promise<{
+    release(options?: { keepPaused?: boolean }): void;
+    waitForPause(): Promise<unknown>;
+  }>;
+};
+
+/**
+ * Run a synchronous terminal operation only after pending writes have settled,
+ * while keeping the backend source paused across the operation.
+ *
+ * Draining xterm can cross the renderer flow controller's low watermark. The
+ * main-process lease keeps that automatic resume from overriding another
+ * window's resize, snapshot, or handoff operation.
+ */
+export async function runWithTerminalOutputPausedAfterWritesSettle(
+  term: XTerm,
+  sessionId: string | null,
+  backend: TerminalOutputPauseBackend,
+  operation: () => void,
+  shouldResumeBackend: () => boolean = () => true,
+): Promise<boolean> {
+  const lease = sessionId
+    ? await backend.acquireSessionFlowPauseLease(sessionId)
+    : null;
+  try {
+    if (lease) {
+      try {
+        await lease.waitForPause();
+      } catch {
+        // Acquiring the main-process lease already paused the source. Continue
+        // with the local drain if the renderer acknowledgement path is absent.
+      }
+    }
+
+    const settled = await flushPendingTerminalWritesBeforeHibernate(term);
+    if (!settled) return false;
+
+    operation();
+    return true;
+  } finally {
+    lease?.release({ keepPaused: !shouldResumeBackend() });
+  }
+}
+
 export function maybeFlushTerminalWriteCoalescerWhenUnfocused(
   term: XTerm,
   isPaneVisible: boolean,

@@ -23,6 +23,13 @@
  * non-mipmapped linear filters. Apply that narrow fix to the currently pinned
  * beta so Netcatty does not need to absorb unrelated xterm beta changes.
  *
+ * Heavy TUIs can also fill more atlas pages than GlyphRenderer allocated WebGL
+ * textures for (xtermjs/xterm.js#6038). The next render then dereferences a
+ * missing texture and stops repainting even though terminal input and buffer
+ * updates continue. Upstream fixed this in xtermjs/xterm.js#6043. Backport the
+ * same capacity eviction to the pinned beta and clamp the upload loop as a
+ * defensive last resort (#2455).
+ *
  * Idempotent. If the upstream code changes (e.g. an @xterm/addon-webgl upgrade)
  * and neither the expected target nor the upstream fixed form is found, fail
  * the install so a release cannot silently lose either protection.
@@ -33,6 +40,17 @@ const path = require("node:path");
 
 const ATLAS_MARKER = "/*netcatty:#1063 atlas-isolation*/";
 const MIPMAP_MARKER = "/*netcatty:#2158 no-atlas-mipmaps*/";
+const CAPACITY_MARKER = "/*netcatty:#2455 atlas-capacity*/";
+const CAPACITY_GUARD_MARKER = "/*netcatty:#2455 atlas-capacity-guard*/";
+const CAPACITY_PATCH_VERSION = "0.20.0-beta.219";
+const CAPACITY_SKIP_VERSIONS = new Set(["0.19.0"]);
+
+const EVICT_METHOD =
+  `_evictAllPages(){${CAPACITY_MARKER}` +
+  "for(const page of this._pages)this._onRemoveTextureAtlasCanvas.fire(page.canvas),page.canvas.remove();" +
+  "this._pages.length=0,this._activePages.length=0,this._overflowSizePage=void 0," +
+  "this._cacheMap.clear(),this._cacheMapCombined.clear(),this._didWarmUp=!1,this._requestClearModel=!0}";
+const CREATE_PAGE_METHOD = "_createNewPage(){";
 
 function countOccurrences(source, value) {
   return source.split(value).length - 1;
@@ -81,6 +99,20 @@ const TARGETS = [
     upstreamFixedPaths: [
       upstreamFixedPath("t", "r", "s"), // @xterm/addon-webgl@0.20.0-beta.276
     ],
+    capacityPaths: {
+      fallback:
+        "if(a.length<4||a.some(T=>T.canvas.width!==a[0].canvas.width)){let T=new u0(this._document,this._textureSize);return this._pages.push(T),this._activePages.push(T),this._onAddTextureAtlasCanvas.fire(T.canvas),T}",
+      overflow:
+        "this._overflowSizePage||(this._overflowSizePage=new u0(this._document,this._config.deviceMaxTextureSize),this.pages.push(this._overflowSizePage),this._requestClearModel=!0,this._onAddTextureAtlasCanvas.fire(this._overflowSizePage.canvas))",
+      render:
+        "for(let s=0;s<this._atlas.pages.length;s++)this._atlas.pages[s].version!==this._atlasTextures[s].version",
+      fallbackReplacement:
+        "if(a.length<4||a.some(T=>T.canvas.width!==a[0].canvas.width)){this._evictAllPages();let T=new u0(this._document,this._textureSize);return this._pages.push(T),this._activePages.push(T),this._onAddTextureAtlasCanvas.fire(T.canvas),T}",
+      overflowReplacement:
+        "this._overflowSizePage||(i.maxAtlasPages&&this._pages.length>=i.maxAtlasPages&&this._evictAllPages(),this._overflowSizePage=new u0(this._document,this._config.deviceMaxTextureSize),this.pages.push(this._overflowSizePage),this._requestClearModel=!0,this._onAddTextureAtlasCanvas.fire(this._overflowSizePage.canvas))",
+      renderReplacement:
+        `${CAPACITY_GUARD_MARKER}for(let s=0;s<Math.min(this._atlas.pages.length,this._atlasTextures.length);s++)this._atlas.pages[s].version!==this._atlasTextures[s].version`,
+    },
   },
   {
     file: "node_modules/@xterm/addon-webgl/lib/addon-webgl.js",
@@ -97,13 +129,39 @@ const TARGETS = [
     upstreamFixedPaths: [
       upstreamFixedPath("t", "e", "i"), // @xterm/addon-webgl@0.20.0-beta.276
     ],
+    capacityPaths: {
+      fallback:
+        "if(s.length<4||s.some(t=>t.canvas.width!==s[0].canvas.width)){const t=new Q(this._document,this._textureSize);return this._pages.push(t),this._activePages.push(t),this._onAddTextureAtlasCanvas.fire(t.canvas),t}",
+      overflow:
+        "this._overflowSizePage||(this._overflowSizePage=new Q(this._document,this._config.deviceMaxTextureSize),this.pages.push(this._overflowSizePage),this._requestClearModel=!0,this._onAddTextureAtlasCanvas.fire(this._overflowSizePage.canvas))",
+      render:
+        "for(let t=0;t<this._atlas.pages.length;t++)this._atlas.pages[t].version!==this._atlasTextures[t].version",
+      fallbackReplacement:
+        "if(s.length<4||s.some(t=>t.canvas.width!==s[0].canvas.width)){this._evictAllPages();const t=new Q(this._document,this._textureSize);return this._pages.push(t),this._activePages.push(t),this._onAddTextureAtlasCanvas.fire(t.canvas),t}",
+      overflowReplacement:
+        "this._overflowSizePage||(_.maxAtlasPages&&this._pages.length>=_.maxAtlasPages&&this._evictAllPages(),this._overflowSizePage=new Q(this._document,this._config.deviceMaxTextureSize),this.pages.push(this._overflowSizePage),this._requestClearModel=!0,this._onAddTextureAtlasCanvas.fire(this._overflowSizePage.canvas))",
+      renderReplacement:
+        `${CAPACITY_GUARD_MARKER}for(let t=0;t<Math.min(this._atlas.pages.length,this._atlasTextures.length);t++)this._atlas.pages[t].version!==this._atlasTextures[t].version`,
+    },
   },
 ];
 
 const atlas = { patched: 0, already: 0, missing: 0 };
 const mipmap = { patched: 0, already: 0, upstream: 0, missing: 0 };
+const capacity = { patched: 0, already: 0, skipped: 0, missing: 0 };
 
-for (const { file, loops, mipmapPaths, upstreamFixedPaths } of TARGETS) {
+let webglVersion = "";
+try {
+  const packageJson = path.resolve(
+    process.cwd(),
+    "node_modules/@xterm/addon-webgl/package.json",
+  );
+  webglVersion = JSON.parse(fs.readFileSync(packageJson, "utf8")).version || "";
+} catch {
+  // Missing package metadata is handled as an unknown version below.
+}
+
+for (const { file, loops, mipmapPaths, upstreamFixedPaths, capacityPaths } of TARGETS) {
   const abs = path.resolve(process.cwd(), file);
   let src;
   try {
@@ -112,6 +170,7 @@ for (const { file, loops, mipmapPaths, upstreamFixedPaths } of TARGETS) {
     console.warn(`[patch-xterm-webgl-atlas] skip (not found): ${file}`);
     atlas.missing++;
     mipmap.missing++;
+    capacity.missing++;
     continue;
   }
   let next = src;
@@ -177,12 +236,65 @@ for (const { file, loops, mipmapPaths, upstreamFixedPaths } of TARGETS) {
     mipmap.missing++;
   }
 
+  if (webglVersion === CAPACITY_PATCH_VERSION) {
+    if (next.includes(CAPACITY_MARKER)) {
+      const complete =
+        next.includes(EVICT_METHOD) &&
+        next.includes(capacityPaths.fallbackReplacement) &&
+        next.includes(capacityPaths.overflowReplacement) &&
+        next.includes(capacityPaths.renderReplacement) &&
+        !next.includes(capacityPaths.fallback) &&
+        !next.includes(capacityPaths.overflow) &&
+        !next.includes(capacityPaths.render);
+      if (complete) {
+        capacity.already++;
+      } else {
+        console.warn(
+          `[patch-xterm-webgl-atlas] ERROR: incomplete atlas-capacity patch in ${file}.`,
+        );
+        capacity.missing++;
+      }
+    } else {
+      const exactTargets = [
+        CREATE_PAGE_METHOD,
+        capacityPaths.fallback,
+        capacityPaths.overflow,
+        capacityPaths.render,
+      ];
+      if (exactTargets.every((target) => countOccurrences(next, target) === 1)) {
+        next = next.replace(CREATE_PAGE_METHOD, `${EVICT_METHOD}${CREATE_PAGE_METHOD}`);
+        next = next.replace(capacityPaths.fallback, capacityPaths.fallbackReplacement);
+        next = next.replace(capacityPaths.overflow, capacityPaths.overflowReplacement);
+        next = next.replace(capacityPaths.render, capacityPaths.renderReplacement);
+        capacity.patched++;
+      } else {
+        console.warn(
+          `[patch-xterm-webgl-atlas] ERROR: atlas-capacity path is missing or ambiguous in ${file}. ` +
+            "Refresh the scoped targets before changing @xterm/addon-webgl (#2455).",
+        );
+        capacity.missing++;
+      }
+    }
+  } else if (CAPACITY_SKIP_VERSIONS.has(webglVersion)) {
+    // Historical 0.19 branches still use this script. Do not make their npm
+    // install fail for a backport that is intentionally scoped to beta.219.
+    capacity.skipped++;
+  } else {
+    console.warn(
+      `[patch-xterm-webgl-atlas] ERROR: unsupported @xterm/addon-webgl version ` +
+        `${webglVersion || "(unknown)"} in ${file}. Confirm xtermjs/xterm.js#6043 ` +
+        "before changing the pinned version (#2455).",
+    );
+    capacity.missing++;
+  }
+
   if (next !== src) fs.writeFileSync(abs, next);
 }
 
 console.log(
   `[patch-xterm-webgl-atlas] atlas: patched=${atlas.patched} already=${atlas.already} missing=${atlas.missing}; ` +
-    `mipmap: patched=${mipmap.patched} already=${mipmap.already} upstream=${mipmap.upstream} missing=${mipmap.missing}`,
+    `mipmap: patched=${mipmap.patched} already=${mipmap.already} upstream=${mipmap.upstream} missing=${mipmap.missing}; ` +
+    `capacity: patched=${capacity.patched} already=${capacity.already} skipped=${capacity.skipped} missing=${capacity.missing}`,
 );
 
-if (atlas.missing > 0 || mipmap.missing > 0) process.exitCode = 1;
+if (atlas.missing > 0 || mipmap.missing > 0 || capacity.missing > 0) process.exitCode = 1;

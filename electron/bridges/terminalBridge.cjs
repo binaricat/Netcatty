@@ -12,8 +12,12 @@ const path = require("node:path");
 const { promisify } = require("node:util");
 const { StringDecoder } = require("node:string_decoder");
 const { ensureNodePtySpawnHelperExecutable } = require("./nodePtySpawnHelperPermissions.cjs");
+const { createTerminalFlowPauseArbiter } = require("./terminalFlowPauseArbiter.cjs");
 
 ensureNodePtySpawnHelperExecutable();
+
+const terminalFlowPauseArbiter = createTerminalFlowPauseArbiter();
+const trackedFlowPauseSenders = new WeakSet();
 
 const pty = require("node-pty");
 const { SerialPort } = require("serialport");
@@ -1771,6 +1775,54 @@ function setSessionFlowPaused(event, payload) {
   }
 }
 
+function applyEffectiveSessionFlowPause(event, payload, terminalWorkerManager) {
+  if (terminalWorkerManager) {
+    terminalWorkerManager.send("netcatty:flow", payload, {
+      webContentsId: event?.sender?.id,
+    });
+    return;
+  }
+  setSessionFlowPaused(event, payload);
+}
+
+async function applyEffectiveSessionFlowPauseAndWait(event, payload, terminalWorkerManager) {
+  if (terminalWorkerManager) {
+    await terminalWorkerManager.request("netcatty:terminal:setFlowPausedAndWait", payload, {
+      webContentsId: event?.sender?.id,
+    });
+    return;
+  }
+  setSessionFlowPaused(event, payload);
+}
+
+function registerFlowPauseSenderCleanup(event, terminalWorkerManager) {
+  const sender = event?.sender;
+  if (!sender || trackedFlowPauseSenders.has(sender) || typeof sender.once !== "function") return;
+  trackedFlowPauseSenders.add(sender);
+  const senderId = sender.id;
+  sender.once("destroyed", () => {
+    for (const change of terminalFlowPauseArbiter.clearSender(senderId)) {
+      applyEffectiveSessionFlowPause(
+        { sender: { id: senderId } },
+        change,
+        terminalWorkerManager,
+      );
+    }
+  });
+}
+
+function applyRendererFlowPauseRequest(event, payload, terminalWorkerManager) {
+  const sessionId = typeof payload?.sessionId === "string" ? payload.sessionId : "";
+  if (!sessionId) return;
+  registerFlowPauseSenderCleanup(event, terminalWorkerManager);
+  const paused = terminalFlowPauseArbiter.setDirectPaused(
+    sessionId,
+    event?.sender?.id,
+    Boolean(payload.paused),
+  );
+  applyEffectiveSessionFlowPause(event, { ...payload, sessionId, paused }, terminalWorkerManager);
+}
+
 function ackSessionFlow(event, payload) {
   const session = sessions.get(payload.sessionId);
   if (!session) return;
@@ -1836,6 +1888,7 @@ function clearSessionPtyBuffer(event, payload) {
 function closeSession(event, payload) {
   const session = sessions.get(payload.sessionId);
   if (!session) return;
+  terminalFlowPauseArbiter.clearSession(payload.sessionId);
   session.closed = true;
   fanoutSessionLifecycleEvent(
     payload.sessionId,
@@ -1973,15 +2026,70 @@ function registerHandlers(ipcMain, options = {}) {
   ipcMain.handle("netcatty:terminal:applySnapshot", (event, payload) =>
     applyTerminalSessionSnapshot(event, payload, terminalWorkerManager));
   ipcMain.handle("netcatty:terminal:setFlowPausedAndWait", async (event, payload) => {
-    if (terminalWorkerManager) {
-      await terminalWorkerManager.request("netcatty:terminal:setFlowPausedAndWait", payload, {
-        webContentsId: event?.sender?.id,
-      });
-    } else {
-      setSessionFlowPaused(event, payload);
-    }
+    const sessionId = typeof payload?.sessionId === "string" ? payload.sessionId : "";
+    if (!sessionId) return { success: false, error: "Missing terminal session" };
+    registerFlowPauseSenderCleanup(event, terminalWorkerManager);
+    const paused = terminalFlowPauseArbiter.setDirectPaused(
+      sessionId,
+      event?.sender?.id,
+      Boolean(payload.paused),
+    );
+    await applyEffectiveSessionFlowPauseAndWait(
+      event,
+      { ...payload, sessionId, paused },
+      terminalWorkerManager,
+    );
     if (!payload?.paused) return { success: true };
-    return requestTerminalOutputDrain(payload?.sessionId, terminalWorkerManager);
+    return requestTerminalOutputDrain(sessionId, terminalWorkerManager);
+  });
+  ipcMain.handle("netcatty:terminal:acquireFlowPauseLease", async (event, payload) => {
+    const sessionId = typeof payload?.sessionId === "string" ? payload.sessionId : "";
+    if (!sessionId) return { success: false, error: "Missing terminal session" };
+    registerFlowPauseSenderCleanup(event, terminalWorkerManager);
+    const lease = terminalFlowPauseArbiter.acquire(sessionId, event?.sender?.id);
+    try {
+      await applyEffectiveSessionFlowPauseAndWait(
+        event,
+        { sessionId, paused: true },
+        terminalWorkerManager,
+      );
+    } catch (error) {
+      terminalFlowPauseArbiter.release(sessionId, event?.sender?.id, lease.leaseId);
+      throw error;
+    }
+    return { success: true, leaseId: lease.leaseId };
+  });
+  ipcMain.handle("netcatty:terminal:waitFlowPauseLease", async (event, payload) => {
+    const sessionId = typeof payload?.sessionId === "string" ? payload.sessionId : "";
+    const leaseId = typeof payload?.leaseId === "string" ? payload.leaseId : "";
+    if (!terminalFlowPauseArbiter.owns(sessionId, event?.sender?.id, leaseId)) {
+      return { success: false, error: "Invalid terminal flow pause lease" };
+    }
+    await applyEffectiveSessionFlowPauseAndWait(
+      event,
+      { sessionId, paused: true },
+      terminalWorkerManager,
+    );
+    return requestTerminalOutputDrain(sessionId, terminalWorkerManager);
+  });
+  ipcMain.handle("netcatty:terminal:releaseFlowPauseLease", async (event, payload) => {
+    const sessionId = typeof payload?.sessionId === "string" ? payload.sessionId : "";
+    const leaseId = typeof payload?.leaseId === "string" ? payload.leaseId : "";
+    const released = terminalFlowPauseArbiter.release(
+      sessionId,
+      event?.sender?.id,
+      leaseId,
+      { keepPaused: payload?.keepPaused === true },
+    );
+    if (!released.success) {
+      return { success: false, error: "Invalid terminal flow pause lease" };
+    }
+    applyEffectiveSessionFlowPause(
+      event,
+      { sessionId, paused: released.paused },
+      terminalWorkerManager,
+    );
+    return { success: true };
   });
   ipcMain.handle("netcatty:terminal:markAttachClosePrepared", (event, payload) => {
     const sessionId = typeof payload?.sessionId === "string" ? payload.sessionId : "";
@@ -2055,10 +2163,17 @@ function registerHandlers(ipcMain, options = {}) {
       "netcatty:interrupt",
       "netcatty:resize",
       "netcatty:pty:clear",
-      "netcatty:flow",
       "netcatty:flow:ack",
-      "netcatty:close",
     ].forEach((channel) => registerWorkerSend(ipcMain, terminalWorkerManager, channel));
+    ipcMain.on("netcatty:flow", (event, payload) => {
+      applyRendererFlowPauseRequest(event, payload, terminalWorkerManager);
+    });
+    ipcMain.on("netcatty:close", (event, payload) => {
+      terminalWorkerManager.send("netcatty:close", payload, {
+        webContentsId: event?.sender?.id,
+      });
+      terminalFlowPauseArbiter.clearSession(payload?.sessionId);
+    });
     return;
   }
   ipcMain.handle("netcatty:local:start", startLocalSession);
@@ -2078,7 +2193,9 @@ function registerHandlers(ipcMain, options = {}) {
   ipcMain.on("netcatty:interrupt", interruptSession);
   ipcMain.on("netcatty:resize", resizeSession);
   ipcMain.on("netcatty:pty:clear", clearSessionPtyBuffer);
-  ipcMain.on("netcatty:flow", setSessionFlowPaused);
+  ipcMain.on("netcatty:flow", (event, payload) => {
+    applyRendererFlowPauseRequest(event, payload, null);
+  });
   ipcMain.on("netcatty:flow:ack", ackSessionFlow);
   ipcMain.on("netcatty:close", closeSession);
   ipcMain.handle("netcatty:close:await", closeSession);

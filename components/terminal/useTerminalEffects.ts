@@ -524,21 +524,16 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
           // fall into the gap between snapshot and route handoff.
           let outputRebound = false;
           let reboundHomeWebContentsId: number | null = null;
+          const outputPauseLease = await terminalBackend.acquireSessionFlowPauseLease(sessionId);
           try {
-            if (terminalBackend.setSessionFlowPausedAndWait) {
-              const paused = await terminalBackend.setSessionFlowPausedAndWait(sessionId, true);
-              if (!paused?.success && paused?.error === "Output drain unavailable") {
-                terminalBackend.setSessionFlowPaused?.(sessionId, true);
-                await new Promise((resolve) => setTimeout(resolve, 40));
-              } else if (!paused?.success) {
-                throw new Error(paused?.error || "Failed to drain terminal output");
-              }
-            } else {
-              terminalBackend.setSessionFlowPaused?.(sessionId, true);
+            const paused = await outputPauseLease.waitForPause();
+            if (!paused?.success && paused?.error === "Output drain unavailable") {
               await new Promise((resolve) => setTimeout(resolve, 40));
+            } else if (!paused?.success) {
+              throw new Error(paused?.error || "Failed to drain terminal output");
             }
             if (disposed) {
-              try { terminalBackend.setSessionFlowPaused?.(sessionId, false); } catch { /* ignore */ }
+              outputPauseLease.release();
               return;
             }
             // Snapshot while home still owns the display route (and stream is paused).
@@ -547,7 +542,7 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
               attachAuthorization || "",
             );
             if (disposed) {
-              try { terminalBackend.setSessionFlowPaused?.(sessionId, false); } catch { /* ignore */ }
+              outputPauseLease.release();
               return;
             }
             if (!snap?.success) {
@@ -606,11 +601,11 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
                   // Main-process closed lifecycle remains the final fallback.
                 }
               }
-              try { terminalBackend.setSessionFlowPaused?.(sessionId, false); } catch { /* ignore */ }
+              outputPauseLease.release();
               return;
             }
             if (!rebind?.success) {
-              try { terminalBackend.setSessionFlowPaused?.(sessionId, false); } catch { /* ignore */ }
+              outputPauseLease.release();
               setError(rebind?.error || "Failed to attach to session");
               updateStatus("disconnected");
               isBootActiveRef.current = false;
@@ -627,7 +622,7 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
               throw new Error("Failed to attach display to session");
             }
             // Resume only after the popup has subscribed to the live session.
-            terminalBackend.setSessionFlowPaused?.(sessionId, false);
+            outputPauseLease.release();
             hasConnectedRef.current = true;
             updateStatus("connected");
             setTimeout(() => {
@@ -652,12 +647,12 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
                   reboundHomeWebContentsId,
                   attachAuthorization || "",
                 );
-                if (restored?.success) terminalBackend.setSessionFlowPaused?.(sessionId, false);
+                if (restored?.success) outputPauseLease.release();
               } catch {
                 // Main-process close/recovery lifecycle remains the fallback.
               }
             } else {
-              try { terminalBackend.setSessionFlowPaused?.(sessionId, false); } catch { /* ignore */ }
+              outputPauseLease.release();
             }
             if (disposed) return;
             logger.error("Failed to attach existing session", attachErr);

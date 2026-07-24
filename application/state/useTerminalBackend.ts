@@ -122,6 +122,36 @@ export const useTerminalBackend = () => {
     return bridge.setSessionFlowPausedAndWait(sessionId, paused);
   }, []);
 
+  const acquireSessionFlowPauseLease = useCallback(async (sessionId: string) => {
+    const bridge = netcattyBridge.get();
+    if (!bridge?.acquireSessionFlowPauseLease) {
+      throw new Error("Terminal flow pause leases unavailable");
+    }
+    const acquired = await bridge.acquireSessionFlowPauseLease(sessionId);
+    if (!acquired?.success || !acquired.leaseId) {
+      throw new Error(acquired?.error || "Failed to pause terminal output");
+    }
+    const leaseId = acquired.leaseId;
+    let released = false;
+    return {
+      release: (options?: { keepPaused?: boolean }) => {
+        if (released) return;
+        released = true;
+        void bridge.releaseSessionFlowPauseLease?.(
+          sessionId,
+          leaseId,
+          options,
+        );
+      },
+      waitForPause: async () => {
+        if (!bridge.waitSessionFlowPauseLease) {
+          return { success: false, error: "Output drain unavailable" };
+        }
+        return bridge.waitSessionFlowPauseLease(sessionId, leaseId);
+      },
+    };
+  }, []);
+
   const ackSessionFlow = useCallback((sessionId: string, bytes: number) => {
     const bridge = netcattyBridge.get();
     bridge?.ackSessionFlow?.(sessionId, bytes);
@@ -446,6 +476,7 @@ export const useTerminalBackend = () => {
         clearSessionPtyBuffer,
         setSessionFlowPaused,
         setSessionFlowPausedAndWait,
+        acquireSessionFlowPauseLease,
         ackSessionFlow,
         notifyTerminalSessionDisplayReady,
         closeSession,
@@ -523,6 +554,7 @@ export const useTerminalBackend = () => {
       clearSessionPtyBuffer,
       setSessionFlowPaused,
       setSessionFlowPausedAndWait,
+      acquireSessionFlowPauseLease,
       ackSessionFlow,
       notifyTerminalSessionDisplayReady,
       closeSession,

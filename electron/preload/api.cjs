@@ -333,6 +333,16 @@ function createPreloadApi(ctx) {
       sessionId,
       paused: Boolean(paused),
     }),
+  acquireSessionFlowPauseLease: (sessionId) =>
+    ipcRenderer.invoke("netcatty:terminal:acquireFlowPauseLease", { sessionId }),
+  waitSessionFlowPauseLease: (sessionId, leaseId) =>
+    ipcRenderer.invoke("netcatty:terminal:waitFlowPauseLease", { sessionId, leaseId }),
+  releaseSessionFlowPauseLease: (sessionId, leaseId, options) =>
+    ipcRenderer.invoke("netcatty:terminal:releaseFlowPauseLease", {
+      sessionId,
+      leaseId,
+      keepPaused: options?.keepPaused === true,
+    }),
   onTerminalOutputDrainRequest: (sessionId, cb) => {
     const listeners = ctx.terminalOutputDrainListeners;
     if (!listeners.has(sessionId)) listeners.set(sessionId, new Set());

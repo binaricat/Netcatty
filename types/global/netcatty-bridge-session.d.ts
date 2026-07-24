@@ -325,6 +325,20 @@ declare global {
     clearSessionPtyBuffer?(sessionId: string): void;
     setSessionFlowPaused(sessionId: string, paused: boolean): void;
     setSessionFlowPausedAndWait?(sessionId: string, paused: boolean): Promise<{ success: boolean; error?: string }>;
+    acquireSessionFlowPauseLease?(sessionId: string): Promise<{
+      success: boolean;
+      leaseId?: string;
+      error?: string;
+    }>;
+    waitSessionFlowPauseLease?(sessionId: string, leaseId: string): Promise<{
+      success: boolean;
+      error?: string;
+    }>;
+    releaseSessionFlowPauseLease?(
+      sessionId: string,
+      leaseId: string,
+      options?: { keepPaused?: boolean },
+    ): Promise<{ success: boolean; error?: string }>;
     onTerminalOutputDrainRequest?(
       sessionId: string,
       cb: (payload: { sessionId: string; requestId: string }) => void | Promise<void>,

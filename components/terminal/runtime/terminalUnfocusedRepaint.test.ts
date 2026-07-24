@@ -9,6 +9,7 @@ import {
   forceTerminalRepaintBypassingAnimationFrame,
   hasPendingTerminalWrites,
   repaintTerminalAfterReveal,
+  runWithTerminalOutputPausedAfterWritesSettle,
   scheduleTerminalRepaintWhenUnfocused,
   shouldFlushTerminalWritesForBackgroundOutput,
   writeLocalTerminalDataInOrder,
@@ -289,6 +290,91 @@ test("flushPendingTerminalWritesBeforeHibernate returns before the renderer drai
 
   assert.equal(flushed, false);
   assert.ok(elapsedMs < 1_800, `settle deadline took ${elapsedMs}ms`);
+});
+
+test("paused terminal operations reassert pause after write callbacks resume the source", async () => {
+  const { term } = createBufferedFakeTerm();
+  const events: string[] = [];
+  term.write("pending", () => {
+    // Simulate OutputFlowController.written crossing its low watermark.
+    events.push("flow-resume");
+    events.push("lease-kept-paused");
+  });
+  const backend = {
+    async acquireSessionFlowPauseLease(_sessionId: string) {
+      let released = false;
+      events.push("pause");
+      return {
+        release: () => {
+          if (released) return;
+          released = true;
+          events.push("resume");
+        },
+        async waitForPause() {
+          events.push("pause-wait");
+        },
+      };
+    },
+  };
+
+  const settled = await runWithTerminalOutputPausedAfterWritesSettle(
+    term,
+    "session-1",
+    backend,
+    () => events.push("resize"),
+  );
+
+  assert.equal(settled, true);
+  assert.deepEqual(events, [
+    "pause",
+    "pause-wait",
+    "flow-resume",
+    "lease-kept-paused",
+    "resize",
+    "resume",
+  ]);
+});
+
+test("a replaced backend session cancels the old operation without resuming its source", async () => {
+  const { term } = createBufferedFakeTerm();
+  const events: string[] = [];
+  let currentSessionId = "session-1";
+  term.write("old-session-output", () => {
+    currentSessionId = "session-2";
+    events.push("session-replaced");
+  });
+  const backend = {
+    async acquireSessionFlowPauseLease(_sessionId: string) {
+      events.push("pause-old");
+      return {
+        release: (options?: { keepPaused?: boolean }) => {
+          events.push(options?.keepPaused ? "keep-pause-old" : "resume-old");
+        },
+        async waitForPause() {
+          events.push("pause-wait-old");
+        },
+      };
+    },
+  };
+
+  await runWithTerminalOutputPausedAfterWritesSettle(
+    term,
+    "session-1",
+    backend,
+    () => {
+      if (currentSessionId !== "session-1") return;
+      events.push("resize");
+    },
+    () => currentSessionId === "session-1",
+  );
+
+  assert.deepEqual(events, [
+    "pause-old",
+    "pause-wait-old",
+    "session-replaced",
+    "keep-pause-old",
+  ]);
+  assert.equal(events.includes("resize"), false);
 });
 
 test("maybeFlushTerminalWriteCoalescerWhenUnfocused throttles coalescer flushes", () => {
