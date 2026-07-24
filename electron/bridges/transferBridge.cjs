@@ -779,7 +779,10 @@ async function runPausableConcurrentRanges({
   abortChannel,
 }) {
   let nextOffset = checkpoint;
-  let transferred = checkpoint;
+  // Only the highest contiguous durable offset is safe to resume from.
+  // Out-of-order range completion must not advance the checkpoint past a hole.
+  let contiguousEnd = checkpoint;
+  const completedRanges = new Map();
   let active = 0;
   let settled = false;
   let terminalError = null;
@@ -790,6 +793,16 @@ async function runPausableConcurrentRanges({
     const resolvers = pauseResolvers;
     pauseResolvers = [];
     for (const resolve of resolvers) resolve();
+  };
+
+  const advanceContiguousEnd = (position, length) => {
+    completedRanges.set(position, length);
+    while (completedRanges.has(contiguousEnd)) {
+      const rangeLength = completedRanges.get(contiguousEnd);
+      completedRanges.delete(contiguousEnd);
+      contiguousEnd += rangeLength;
+    }
+    if (!transfer.cancelled) sendProgress(contiguousEnd, fileSize);
   };
 
   await new Promise((resolve, reject) => {
@@ -832,8 +845,7 @@ async function runPausableConcurrentRanges({
 
         void copyRange(position, length)
           .then(() => {
-            transferred += length;
-            if (!transfer.cancelled) sendProgress(transferred, fileSize);
+            advanceContiguousEnd(position, length);
           })
           .catch((error) => abort(error))
           .finally(() => {
@@ -841,7 +853,7 @@ async function runPausableConcurrentRanges({
             settlePauseWaiters();
             if (terminalError || transfer.cancelled) {
               finish(terminalError || new Error("Transfer cancelled"));
-            } else if (transferred === fileSize) finish();
+            } else if (contiguousEnd === fileSize) finish();
             else pump();
           });
       }
@@ -922,9 +934,10 @@ async function uploadFileResumableFast(
 
 /**
  * Preserve fastGet's high-latency request window without giving up a safe
- * pause checkpoint. Once pause is requested, no new ranges are scheduled and
- * we wait for every in-flight range before acknowledging it. The staged file
- * is therefore complete through its reported size and can resume from there.
+ * pause checkpoint. Progress and resume offsets track the highest contiguous
+ * durable byte; out-of-order range completion cannot advance past a hole.
+ * Once pause is requested, no new ranges are scheduled and we wait for every
+ * in-flight range before acknowledging it.
  */
 async function downloadFileResumableFast(
   remotePath,
@@ -1063,10 +1076,12 @@ async function downloadFile(remotePath, localPath, client, fileSize, transfer, s
         });
         return;
       } catch (err) {
-        if (transfer.cancelled) throw err;
+        // Always release before rethrowing cancel — otherwise the channel stays
+        // in pool.busy and the per-session fast-download budget is exhausted.
         if (transfer.resumable) {
           releaseIsolatedDownloadChannel(client, fastSftp, { dispose: true });
         }
+        if (transfer.cancelled) throw err;
         console.warn(
           "[transferBridge] fastGet failed, falling back to a compatible stream:",
           err?.message || String(err),
