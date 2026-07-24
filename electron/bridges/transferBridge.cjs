@@ -1018,18 +1018,20 @@ async function uploadFileResumableFast(
   sendProgress,
 ) {
   const checkpoint = Math.max(0, Math.min(transfer.checkpointBytes || 0, fileSize));
-  const localHandle = await fs.promises.open(localPath, "r");
-  let remoteHandle;
+  let localHandle = null;
+  let remoteHandle = null;
   let failed = false;
+  // Always end the isolated channel — callers clear fastSftp after any throw
+  // and assume this helper already disposed it.
   try {
-    remoteHandle = await openSftpHandle(sftp, remotePath, checkpoint > 0 ? "r+" : "w");
-  } catch (error) {
-    await localHandle.close().catch(() => {});
-    try { sftp.end?.(); } catch { }
-    throw error;
-  }
+    try {
+      localHandle = await fs.promises.open(localPath, "r");
+      remoteHandle = await openSftpHandle(sftp, remotePath, checkpoint > 0 ? "r+" : "w");
+    } catch (error) {
+      failed = true;
+      throw error;
+    }
 
-  try {
     try {
       await runPausableConcurrentRanges({
         transfer,
@@ -1053,8 +1055,10 @@ async function uploadFileResumableFast(
     transfer.readStream = null;
     transfer.waitForPause = null;
     transfer.abort = null;
-    await localHandle.close().catch(() => {});
-    if (!failed && !transfer.cancelled) {
+    if (localHandle) {
+      await localHandle.close().catch(() => {});
+    }
+    if (remoteHandle && !failed && !transfer.cancelled) {
       await closeSftpHandle(sftp, remoteHandle).catch(() => {});
     }
     try { sftp.end?.(); } catch { }

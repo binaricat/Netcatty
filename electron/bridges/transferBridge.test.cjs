@@ -253,6 +253,59 @@ test("failed resumable upload opens close their isolated channel", async (t) => 
   assert.equal(endedChannels, 1);
 });
 
+test("failed local open for resumable upload still ends the isolated channel", async (t) => {
+  const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-transfer-upload-local-open-fail-"));
+  t.after(async () => {
+    await fs.promises.rm(tempDir, { recursive: true, force: true });
+  });
+
+  // A directory path makes fs.promises.open(..., "r") reject after the isolated
+  // channel is already open (totalBytes skips the preflight file stat).
+  const localPath = path.join(tempDir, "not-a-file");
+  await fs.promises.mkdir(localPath);
+  let endedChannels = 0;
+  let remoteOpenAttempts = 0;
+  const fastSftp = createFastSftp({
+    open(_remotePath, _flags, callback) {
+      remoteOpenAttempts += 1;
+      callback(null, Buffer.from("remote-handle"));
+    },
+    end() {
+      endedChannels += 1;
+    },
+  });
+  const client = {
+    // No stream fallback path needed: assert cleanup before rethrow is enough.
+    sftp: createFastSftp({}),
+    client: {
+      sftp(callback) {
+        callback(null, fastSftp);
+      },
+    },
+  };
+  transferBridge.init({ sftpClients: new Map([["target", client]]) });
+
+  const result = await transferBridge.startTransfer(
+    { sender: createSender() },
+    {
+      transferId: "upload-local-open-fail",
+      sourcePath: localPath,
+      targetPath: "/tmp/upload.bin",
+      sourceType: "local",
+      targetType: "sftp",
+      targetSftpId: "target",
+      totalBytes: 32 * 1024,
+      resumable: true,
+      skipAdmission: true,
+    },
+  );
+
+  // Range path fails on local open; stream fallback may surface a different error.
+  assert.ok(result.error, "expected transfer to fail when local source cannot be opened");
+  assert.equal(endedChannels, 1);
+  assert.equal(remoteOpenAttempts, 0);
+});
+
 test("resumable SFTP uploads fall back to a compatible stream after fast path fails", async (t) => {
   const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-transfer-upload-fallback-"));
   t.after(async () => {
