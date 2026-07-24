@@ -669,10 +669,19 @@ async function prepareUploadFallbackCheckpoint(transfer, client, fileSize, sendP
 async function uploadViaFastPut(localPath, remotePath, sftp, fileSize, transfer, sendProgress, { disposeChannel }) {
   await new Promise((resolve, reject) => {
     let settled = false;
+    let pendingError = null;
+    let forceFinishTimer = null;
     let onFastSftpError = null;
+    const clearForceFinish = () => {
+      if (forceFinishTimer) {
+        clearTimeout(forceFinishTimer);
+        forceFinishTimer = null;
+      }
+    };
     const finish = (err) => {
       if (settled) return;
       settled = true;
+      clearForceFinish();
       if (transfer.abort === abortFastTransfer) {
         transfer.abort = null;
       }
@@ -688,17 +697,30 @@ async function uploadViaFastPut(localPath, remotePath, sftp, fileSize, transfer,
       else if (err) reject(err);
       else resolve();
     };
+    const scheduleForceFinish = (err) => {
+      clearForceFinish();
+      forceFinishTimer = setTimeout(() => finish(err), 2000);
+    };
     const abortFastTransfer = () => {
       if (settled) return;
       transfer.cancelled = true;
       if (disposeChannel) {
         try { sftp.end(); } catch { /* ignore */ }
+        // Wait for fastPut callback when possible; force after grace period.
+        scheduleForceFinish(new Error("Transfer cancelled"));
+        return;
       }
-      finish(new Error("Transfer cancelled"));
+      // Shared channel: wait for callback.
     };
     transfer.abort = abortFastTransfer;
-    onFastSftpError = (err) => finish(err);
-    sftp.once?.("error", onFastSftpError);
+    onFastSftpError = (err) => {
+      pendingError = err || new Error("SFTP channel error");
+      if (disposeChannel) {
+        try { sftp.end(); } catch { /* ignore */ }
+        scheduleForceFinish(pendingError);
+      }
+    };
+    sftp.on?.("error", onFastSftpError);
 
     if (transfer.cancelled) {
       finish(new Error("Transfer cancelled"));
@@ -712,7 +734,17 @@ async function uploadViaFastPut(localPath, remotePath, sftp, fileSize, transfer,
         if (transfer.cancelled) return;
         sendProgress(transferred, total || fileSize);
       },
-    }, finish);
+    }, (err) => {
+      if (transfer.cancelled) {
+        finish(new Error("Transfer cancelled"));
+        return;
+      }
+      if (pendingError) {
+        finish(pendingError);
+        return;
+      }
+      finish(err || null);
+    });
   });
 }
 
@@ -832,6 +864,7 @@ async function uploadFile(localPath, remotePath, client, fileSize, transfer, sen
     const hasResumeCheckpoint = Math.max(0, Number(transfer.checkpointBytes) || 0) > 0;
     if (isolated && typeof isolated.fastPut === "function" && !hasResumeCheckpoint) {
       let fastPutOk = false;
+      let fastPutFingerprint = null;
       try {
         transfer.uploadStrategy = "fastPut-isolated";
         transfer.pauseSupported = false;
@@ -839,6 +872,9 @@ async function uploadFile(localPath, remotePath, client, fileSize, transfer, sen
         sendProgress(Math.max(0, Number(transfer.checkpointBytes) || 0), fileSize, {
           force: true,
         });
+        if (transfer.resumable) {
+          fastPutFingerprint = await captureLocalContentFingerprint(localPath, fileSize);
+        }
         await uploadViaFastPut(
           localPath,
           remotePath,
@@ -848,6 +884,13 @@ async function uploadFile(localPath, remotePath, client, fileSize, transfer, sen
           sendProgress,
           { disposeChannel: true },
         );
+        if (fastPutFingerprint) {
+          await assertLocalContentFingerprintUnchanged(
+            localPath,
+            fastPutFingerprint,
+            fileSize,
+          );
+        }
         fastPutOk = true;
       } catch (err) {
         isolated = null;

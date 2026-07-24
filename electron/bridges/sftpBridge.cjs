@@ -1044,6 +1044,7 @@ function runFastPutOnChannel(sftp, localPath, remotePath, options = {}, channelC
   return new Promise((resolve, reject) => {
     let settled = false;
     let abortRequested = false;
+    let pendingError = null;
     let forceFinishTimer = null;
     const clearForceFinish = () => {
       if (forceFinishTimer) {
@@ -1051,8 +1052,11 @@ function runFastPutOnChannel(sftp, localPath, remotePath, options = {}, channelC
         forceFinishTimer = null;
       }
     };
-    const onChannelError = (err) => {
-      finish(err || new Error("SFTP channel error"));
+    const scheduleForceFinish = (err) => {
+      clearForceFinish();
+      forceFinishTimer = setTimeout(() => {
+        finish(err || new Error("SFTP channel closed"));
+      }, 2000);
     };
     const finish = (err) => {
       if (settled) return;
@@ -1068,20 +1072,23 @@ function runFastPutOnChannel(sftp, localPath, remotePath, options = {}, channelC
       if (err) reject(err);
       else resolve();
     };
+    // Channel errors must not finish immediately: wait for fastPut callback (or
+    // force timeout) so local temp files are not unlinked while still open.
+    const onChannelError = (err) => {
+      pendingError = err || new Error("SFTP channel error");
+      if (dispose) {
+        try { sftp.end?.(); } catch { /* ignore */ }
+        scheduleForceFinish(pendingError);
+      }
+    };
     const onAbort = () => {
       abortRequested = true;
       if (dispose) {
-        // Tear down disposable channel; wait for fastPut cb to release local fd.
         try { sftp.end?.(); } catch { /* ignore */ }
-        // If the callback never fires, force-finish so callers are not stuck.
-        clearForceFinish();
-        forceFinishTimer = setTimeout(() => {
-          finish(createAbortError(signal, "Upload cancelled"));
-        }, 2000);
+        scheduleForceFinish(createAbortError(signal, "Upload cancelled"));
         return;
       }
-      // Shared channel: cannot end without killing browse/sudo SFTP. Wait for
-      // fastPut's callback so temp-file cleanup does not race in-flight WRITEs.
+      // Shared channel: wait for fastPut callback only.
     };
     try { sftp.on?.("error", onChannelError); } catch { /* ignore */ }
     if (typeof onChannel === "function") {
@@ -1089,7 +1096,6 @@ function runFastPutOnChannel(sftp, localPath, remotePath, options = {}, channelC
     }
     if (signal) {
       if (signal.aborted) {
-        // Do not start the transfer when already aborted.
         finish(createAbortError(signal, "Upload cancelled"));
         return;
       }
@@ -1099,6 +1105,10 @@ function runFastPutOnChannel(sftp, localPath, remotePath, options = {}, channelC
       sftp.fastPut(localPath, remotePath, fastPutOptions, (err) => {
         if (abortRequested || signal?.aborted) {
           finish(createAbortError(signal, "Upload cancelled"));
+          return;
+        }
+        if (pendingError) {
+          finish(pendingError);
           return;
         }
         finish(err || null);
