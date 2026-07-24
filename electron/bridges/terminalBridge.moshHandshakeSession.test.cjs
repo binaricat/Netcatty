@@ -138,21 +138,15 @@ test("startMoshSession handshake path returns the same shape as the legacy path"
 
 test("Mosh PTYs explicitly enable bundled ConPTY clear support only on Windows", async (t) => {
   const platformDescriptor = Object.getOwnPropertyDescriptor(process, "platform");
-  const originalSystemRoot = process.env.SystemRoot;
 
   const startAndSwap = async (platform) => {
     const h = makeHarness(t);
-    if (platform === "win32") {
-      const system32 = path.join(h.tmp, "System32");
-      const whereExe = path.join(system32, "where.exe");
-      fs.mkdirSync(system32, { recursive: true });
-      fs.writeFileSync(whereExe, `#!/bin/sh\nprintf '%s\\n' '${h.sshPath.replace(/'/g, "'\\''")}'\n`);
-      fs.chmodSync(whereExe, 0o755);
-      process.env.SystemRoot = h.tmp;
-    }
     Object.defineProperty(process, "platform", { ...platformDescriptor, value: platform });
 
-    await h.bridge.startMoshSession(h.event, h.options, { moshClientLookup: h.lookupOpts });
+    await h.bridge.startMoshSession(h.event, h.options, {
+      moshClientLookup: h.lookupOpts,
+      findExecutable: () => h.sshPath,
+    });
     h.spawns[0].emitData(
       "MOSH IP 203.0.113.8\r\nMOSH CONNECT 60002 ABCDEFGHIJKLMNOPQRSTUV==\r\n",
     );
@@ -172,8 +166,6 @@ test("Mosh PTYs explicitly enable bundled ConPTY clear support only on Windows",
     assert.equal(linuxSpawns[1].opts.useConptyDll, false);
   } finally {
     Object.defineProperty(process, "platform", platformDescriptor);
-    if (originalSystemRoot === undefined) delete process.env.SystemRoot;
-    else process.env.SystemRoot = originalSystemRoot;
   }
 });
 

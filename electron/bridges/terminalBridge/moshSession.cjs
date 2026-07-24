@@ -845,7 +845,7 @@ function createMoshSessionApi(ctx) {
       const sshExe = moshHandshake.resolveSshExecutable({
         findExecutable: (name) => (
           process.platform === "win32"
-            ? findExecutable(name, { pathOverride: mergedPathForResolution })
+            ? (opts.findExecutable || findExecutable)(name, { pathOverride: mergedPathForResolution })
             : resolvePosixExecutable(name, { pathOverride: mergedPathForResolution })
         ),
         fileExists: (p) => isExecutableFile(p) || fs.existsSync(p),
