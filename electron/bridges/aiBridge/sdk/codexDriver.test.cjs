@@ -264,6 +264,9 @@ test("item errors and reconnectable stream errors are warnings; other stream err
     message: "stream disconnected before completion: Transport error: error decoding response body; retrying 2/5 in 361ms…",
   }, emitter, state);
   translateCodexEvent({ type: "error", message: "stream disconnected", willRetry: true }, emitter, state);
+  translateCodexEvent({ type: "error", message: "stream disconnected" }, emitter, state);
+  translateCodexEvent({ type: "error", message: "error decoding response body" }, emitter, state);
+  translateCodexEvent({ type: "error", message: "transport error" }, emitter, state);
   translateCodexEvent({
     type: "error",
     message: "stream disconnected before completion: Transport error: network error",
@@ -277,6 +280,9 @@ test("item errors and reconnectable stream errors are warnings; other stream err
   translateCodexEvent({ type: "error", message: "not authenticated" }, emitter, state);
   assert.equal(events.filter((event) => event.k === "warning").length, 4);
   assert.deepEqual(events.filter((event) => event.k === "error"), [
+    { k: "error", e: "stream disconnected" },
+    { k: "error", e: "error decoding response body" },
+    { k: "error", e: "transport error" },
     { k: "error", e: "stream disconnected before completion: Transport error: network error" },
     { k: "error", e: "transport error after retries exhausted" },
     { k: "error", e: "not authenticated" },
@@ -302,6 +308,41 @@ test("explicit non-retryable stream disconnect fails the turn even after partial
                 type: "error",
                 message: "stream disconnected before completion: Transport error",
                 willRetry: false,
+              };
+            })(),
+          };
+        },
+      };
+    }
+    resumeThread() { return this.startThread(); }
+  }
+  await runCodexTurn({
+    prompt: "hi", constructorOptions: {}, threadOptions: {}, emitter, CodexCtor: FakeCodex,
+  });
+  assert.deepEqual(events.filter((event) => event.k === "text"), [{ k: "text", t: "partial answer" }]);
+  assert.deepEqual(events.filter((event) => event.k === "error"), [
+    { k: "error", e: "stream disconnected before completion: Transport error" },
+  ]);
+  assert.equal(events.some((event) => event.k === "done"), false);
+});
+
+test("message-only transport failure fails the turn even after partial content", async () => {
+  const { events, emitter } = collector();
+  class FakeCodex {
+    startThread() {
+      return {
+        id: "thr-disconnected",
+        async runStreamed() {
+          return {
+            events: (async function* () {
+              yield { type: "thread.started", thread_id: "thr-disconnected" };
+              yield {
+                type: "item.completed",
+                item: { type: "agent_message", text: "partial answer" },
+              };
+              yield {
+                type: "error",
+                message: "stream disconnected before completion: Transport error",
               };
             })(),
           };

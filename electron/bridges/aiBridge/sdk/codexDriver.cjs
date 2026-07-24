@@ -193,10 +193,10 @@ function emitCodexToolResultOnce(item, emitter, state, output, toolName) {
 
 /**
  * Codex emits mid-turn `type:"error"` JSONL events while it reconnects after a
- * dropped SSE/response body (`Reconnecting...`, `retrying N/M`, `error decoding
- * response body`, …). Those are recoverable — the same turn keeps producing
- * items afterward. Treating them as fatal settles the Netcatty sidebar turn and
- * stops UI refresh while the CLI process continues (issue #2456).
+ * dropped SSE/response body (`Reconnecting...`, `retrying N/M`). Those are
+ * recoverable — the same turn keeps producing items afterward. Treating them
+ * as fatal settles the Netcatty sidebar turn and stops UI refresh while the CLI
+ * process continues (issue #2456).
  *
  * Explicit `willRetry: false` / `will_retry: false` means Codex exhausted its
  * retry budget — always fatal, even when the message still mentions stream /
@@ -208,13 +208,7 @@ function isCodexRetryableStreamError(event) {
   if (event.willRetry === true || event.will_retry === true) return true;
   const message = String(event.message || "").toLowerCase();
   if (!message) return false;
-  return (
-    /\breconnect(?:ing|ed)?\b/.test(message) ||
-    /\bretry(?:ing|ed)?\b/.test(message) ||
-    message.includes("stream disconnected") ||
-    message.includes("error decoding response body") ||
-    message.includes("transport error")
-  );
+  return /\breconnecting\b/.test(message) || /\bretrying\b/.test(message);
 }
 
 /**
