@@ -1086,12 +1086,14 @@ function runFastPutOnChannel(sftp, localPath, remotePath, options = {}, channelC
     };
     // Channel errors must not finish immediately: wait for fastPut callback (or
     // force timeout) so local temp files are not unlinked while still open.
+    // Shared channels also get force-settle (without sftp.end) so a stalled
+    // callback after error cannot hang the upload forever.
     const onChannelError = (err) => {
       pendingError = err || new Error("SFTP channel error");
       if (dispose) {
         try { sftp.end?.(); } catch { /* ignore */ }
-        scheduleForceFinish(pendingError);
       }
+      scheduleForceFinish(pendingError);
     };
     const onAbort = () => {
       abortRequested = true;

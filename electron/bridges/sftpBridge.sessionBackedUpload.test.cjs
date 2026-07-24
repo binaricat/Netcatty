@@ -9,6 +9,7 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const { EventEmitter } = require("node:events");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
@@ -322,6 +323,61 @@ test("shared-channel fastPut cancel force-settles when callback stalls", async (
   // Must settle via the 2s force-finish path, not hang forever.
   assert.ok(elapsed < 5000, `cancel took too long: ${elapsed}ms`);
   // Shared channel must not be ended (would kill browse/sudo session).
+  assert.equal(ended, false);
+
+  await fs.promises.rm(tempRoot, { recursive: true, force: true });
+});
+
+test("shared-channel fastPut error force-settles when callback stalls", async () => {
+  const tempRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-shared-error-bound-"));
+  const localPath = path.join(tempRoot, "err.bin");
+  await fs.promises.writeFile(localPath, Buffer.alloc(4 * 1024, 7));
+
+  let ended = false;
+  const channel = new EventEmitter();
+  Object.assign(channel, {
+    readdir(_p, cb) { cb(null, []); },
+    mkdir(_p, cb) { cb(null); },
+    unlink(_p, cb) { cb(null); },
+    stat(_p, cb) {
+      const err = new Error("ENOENT");
+      err.code = 2;
+      cb(err);
+    },
+    // Emit channel error and never invoke the fastPut callback.
+    fastPut() {
+      queueMicrotask(() => channel.emit("error", new Error("channel failed")));
+    },
+    end() {
+      ended = true;
+    },
+  });
+  const sharedOnlyClient = {
+    __netcattySudoMode: true,
+    sftp: channel,
+    client: null,
+  };
+
+  sftpBridge.init({
+    electronModule: {},
+    sessions: new Map(),
+    sftpClients: new Map(),
+  });
+
+  const uploadPromise = sftpBridge.pipelinedUploadLocalFile(
+    sharedOnlyClient,
+    localPath,
+    "/tmp/err-out.bin",
+    {
+      concurrency: UPLOAD_TRANSFER_CONCURRENCY,
+      chunkSize: TRANSFER_CHUNK_SIZE,
+    },
+  );
+
+  const started = Date.now();
+  await assert.rejects(uploadPromise, /channel failed|SFTP channel/i);
+  const elapsed = Date.now() - started;
+  assert.ok(elapsed < 5000, `error settle took too long: ${elapsed}ms`);
   assert.equal(ended, false);
 
   await fs.promises.rm(tempRoot, { recursive: true, force: true });
