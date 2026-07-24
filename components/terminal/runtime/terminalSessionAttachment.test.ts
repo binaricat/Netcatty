@@ -475,16 +475,21 @@ test("Herdr-style frames complete on xterm's normal async path in every visibili
       let ackedBytes = 0;
       let expectedAckBytes = payload.length;
       let resolveAck: (() => void) | undefined;
-      const waitForAck = () => Promise.race([
-        new Promise<void>((resolve) => {
-          resolveAck = resolve;
-          if (ackedBytes >= expectedAckBytes) resolve();
-        }),
-        new Promise<never>((_, reject) => {
-          const timer = setTimeout(() => reject(new Error(`timed out waiting for ${scenario.name}`)), 3_000);
-          if (typeof timer === "object" && "unref" in timer) timer.unref();
-        }),
-      ]);
+      const waitForAck = () => new Promise<void>((resolve, reject) => {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        resolveAck = () => {
+          if (timer) clearTimeout(timer);
+          resolve();
+        };
+        if (ackedBytes >= expectedAckBytes) {
+          resolveAck();
+          return;
+        }
+        timer = setTimeout(() => {
+          resolveAck = undefined;
+          reject(new Error(`timed out waiting for ${scenario.name}`));
+        }, 3_000);
+      });
       const ctx = {
         ...createContext(false),
         isVisibleRef: { current: true },
