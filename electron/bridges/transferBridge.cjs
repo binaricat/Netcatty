@@ -717,14 +717,18 @@ async function uploadViaFastPut(localPath, remotePath, sftp, fileSize, transfer,
 }
 
 /**
- * Upload a local file with pipelined SFTP WRITEs.
+ * Upload a local file with pipelined SFTP WRITEs only.
  *
- * Strategy order (never jump straight to serial WriteStream — that path is
- * ~RTT-bound at ~1 WRITE × 32KB and is the usual cause of sub-MB/s speeds):
+ * Aligns with OpenSSH sftp / Electerm / WinSCP: default is outstanding-request
+ * fanout, not serial WriteStream. Strategy order:
  *   1. concurrent ranges on an isolated channel (resumable + cancel-safe)
  *   2. ssh2 fastPut on an isolated channel
  *   3. concurrent ranges on the shared browse channel
- *   4. serial createWriteStream (last resort for servers that reject fanout)
+ *
+ * There is no silent serial createWriteStream/put fallback — that path is
+ * RTT-bound (~1 WRITE × 32KB) and was the usual cause of sub-MB/s uploads
+ * (#2449). When every pipelined strategy fails, the transfer fails with the
+ * last underlying error (Electerm-style: fail closed, do not crawl).
  */
 async function uploadFile(localPath, remotePath, client, fileSize, transfer, sendProgress, encoding = "utf-8") {
   if (isScpModeClient(client)) {
@@ -757,12 +761,20 @@ async function uploadFile(localPath, remotePath, client, fileSize, transfer, sen
     await assertRemoteUploadSize(client, remotePath, fileSize);
   };
 
+  /** @type {Error | null} */
+  let lastPipelineError = null;
+  const rememberPipelineError = (err) => {
+    if (err && typeof err === "object") lastPipelineError = err;
+    else lastPipelineError = new Error(String(err || "SFTP upload failed"));
+  };
+
   // Prefer an isolated SFTP channel so cancellation cannot kill the browse session.
   if (!client.__netcattySudoMode) {
     let isolated = null;
     try {
       isolated = await openIsolatedSftpChannel(client);
     } catch (err) {
+      rememberPipelineError(err);
       console.warn(
         "[transferBridge] Failed to open isolated SFTP channel for upload:",
         err.message || String(err),
@@ -788,13 +800,14 @@ async function uploadFile(localPath, remotePath, client, fileSize, transfer, sen
         isolated = null;
         if (transfer.cancelled) throw err;
         if (err?.noTransferFallback) throw err;
+        rememberPipelineError(err);
         await prepareUploadFallbackCheckpoint(transfer, client, fileSize, sendProgress);
         console.warn(
-          "[transferBridge] concurrent isolated upload failed, trying next strategy:",
+          "[transferBridge] concurrent isolated upload failed, trying next pipelined strategy:",
           err?.message || String(err),
         );
       }
-      // Verification errors must not fall through into slower strategies.
+      // Verification errors must not fall through into other strategies.
       if (concurrentIsolatedOk) {
         await finishSuccessfulUpload();
         return;
@@ -805,6 +818,7 @@ async function uploadFile(localPath, remotePath, client, fileSize, transfer, sen
       try {
         isolated = await openIsolatedSftpChannel(client);
       } catch (err) {
+        rememberPipelineError(err);
         console.warn(
           "[transferBridge] Failed to reopen isolated SFTP channel for fastPut:",
           err.message || String(err),
@@ -832,8 +846,9 @@ async function uploadFile(localPath, remotePath, client, fileSize, transfer, sen
       } catch (err) {
         isolated = null;
         if (transfer.cancelled) throw err;
+        rememberPipelineError(err);
         console.warn(
-          "[transferBridge] isolated fastPut failed, trying next strategy:",
+          "[transferBridge] isolated fastPut failed, trying next pipelined strategy:",
           err?.message || String(err),
         );
       }
@@ -865,9 +880,10 @@ async function uploadFile(localPath, remotePath, client, fileSize, transfer, sen
     } catch (err) {
       if (transfer.cancelled) throw err;
       if (err?.noTransferFallback) throw err;
+      rememberPipelineError(err);
       await prepareUploadFallbackCheckpoint(transfer, client, fileSize, sendProgress);
       console.warn(
-        "[transferBridge] concurrent shared upload failed, falling back to serial stream:",
+        "[transferBridge] concurrent shared upload failed (no serial stream fallback):",
         err?.message || String(err),
       );
     }
@@ -875,83 +891,23 @@ async function uploadFile(localPath, remotePath, client, fileSize, transfer, sen
       await finishSuccessfulUpload();
       return;
     }
-  }
-
-  // Last resort: sequential stream piping (ssh2 WriteStream is 1-in-flight).
-  // ssh2 closes the remote handle from _final and may suppress Node's normal
-  // 'finish' event. Treat a successful close after the complete local read as
-  // completion, then verify the persisted remote size below.
-  transfer.uploadStrategy = "stream-serial";
-  console.warn(
-    "[transferBridge] using serial SFTP WriteStream (slow path); expect RTT-bound throughput",
-  );
-  const streamContentFingerprint = transfer.resumable
-    ? await captureLocalContentFingerprint(localPath, fileSize)
-    : null;
-  await new Promise((resolve, reject) => {
-    const checkpoint = Math.max(0, Math.min(transfer.checkpointBytes || 0, fileSize));
-    const readStream = fs.createReadStream(localPath, { highWaterMark: TRANSFER_CHUNK_SIZE, start: checkpoint });
-    const writeStream = sftp.createWriteStream(remotePath, {
-      highWaterMark: TRANSFER_CHUNK_SIZE,
-      flags: checkpoint > 0 ? "r+" : "w",
-      start: checkpoint,
-    });
-    let transferred = checkpoint;
-    let settled = false;
-
-    transfer.readStream = readStream;
-    transfer.writeStream = writeStream;
-    // Honor a pause that raced stream open (fingerprint / dir ensure window).
-    if (transfer.paused) {
-      try { readStream.pause(); } catch { /* ignore */ }
-    }
-
-    const cleanup = (err) => {
-      if (settled) return;
-      settled = true;
-      readStream.removeAllListeners();
-      writeStream.removeAllListeners();
-      if (err) {
-        try { readStream.destroy(); } catch { /* ignore */ }
-        try { writeStream.destroy(); } catch { /* ignore */ }
-        reject(err);
-      } else {
-        resolve();
-      }
-    };
-
-    readStream.on("data", (chunk) => {
-      if (transfer.cancelled) { cleanup(new Error("Transfer cancelled")); return; }
-      transferred += chunk.length;
-      sendProgress(transferred, fileSize);
-    });
-    readStream.on("error", cleanup);
-    writeStream.on("error", cleanup);
-    writeStream.on("close", () => {
-      if (transfer.cancelled) {
-        cleanup(new Error("Transfer cancelled"));
-        return;
-      }
-      if (!readStream.readableEnded || transferred !== fileSize) {
-        cleanup(new Error("Upload stream closed before finish"));
-        return;
-      }
-      cleanup(null);
-    });
-    readStream.pipe(writeStream);
-  });
-  await assertRemoteUploadSize(client, remotePath, fileSize);
-  if (initialSource) {
-    const latestSource = await fs.promises.stat(localPath);
-    assertSourceMetadataUnchanged(initialSource, latestSource, fileSize);
-  }
-  if (streamContentFingerprint) {
-    await assertLocalContentFingerprintUnchanged(
-      localPath,
-      streamContentFingerprint,
-      fileSize,
+  } else if (!lastPipelineError) {
+    lastPipelineError = new Error(
+      "SFTP session does not support pipelined WRITE (open/write missing)",
     );
   }
+
+  // Fail closed — do not crawl via serial WriteStream (industry practice:
+  // OpenSSH/Electerm/WinSCP keep outstanding-request fanout; they do not
+  // silently degrade to 1-in-flight put on failure).
+  transfer.uploadStrategy = "failed";
+  const cause = lastPipelineError;
+  const message = cause?.message
+    ? `SFTP pipelined upload failed: ${cause.message}`
+    : "SFTP pipelined upload failed (no serial stream fallback)";
+  const error = new Error(message, cause ? { cause } : undefined);
+  if (cause?.noTransferFallback) error.noTransferFallback = true;
+  throw error;
 }
 
 function openSftpHandle(sftp, filePath, flags) {

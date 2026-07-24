@@ -1070,20 +1070,18 @@ async function uploadLocalToSftp(_event, payload) {
     UPLOAD_TRANSFER_CONCURRENCY,
   } = require("./transferLimits.cjs");
   try {
-    // Prefer pipelined WRITEs (ssh2 fastPut). createReadStream→put is serial and
-    // RTT-bound (~1×32KB in flight) — the usual cause of sub-MB/s uploads (#2449).
-    if (typeof client.fastPut === "function") {
-      await client.fastPut(payload.localPath, encodedStagedPath, {
-        chunkSize: TRANSFER_CHUNK_SIZE,
-        concurrency: UPLOAD_TRANSFER_CONCURRENCY,
-        signal: payload.abortSignal,
-      });
-    } else {
-      const content = fs.createReadStream(payload.localPath, {
-        highWaterMark: TRANSFER_CHUNK_SIZE,
-      });
-      await client.put(content, encodedStagedPath, { signal: payload.abortSignal });
+    // Pipelined WRITEs only (ssh2 fastPut). Serial createReadStream→put is
+    // RTT-bound and is never used as a silent fallback (#2449 / industry practice).
+    if (typeof client.fastPut !== "function") {
+      throw new Error(
+        "SFTP pipelined upload (fastPut) is not available on this session",
+      );
     }
+    await client.fastPut(payload.localPath, encodedStagedPath, {
+      chunkSize: TRANSFER_CHUNK_SIZE,
+      concurrency: UPLOAD_TRANSFER_CONCURRENCY,
+      signal: payload.abortSignal,
+    });
     throwIfAborted(payload.abortSignal);
     await renameRemotePath(client, encodedStagedPath, encodedPath, encodedBackupPath);
   } catch (err) {

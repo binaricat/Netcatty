@@ -518,11 +518,8 @@ function createFileOpsApi(ctx) {
         }
       };
 
-      // Prefer pipelined fastPut via a temp file. Streaming put() uses ssh2's
-      // serial WriteStream (1 WRITE in flight) and collapses to RTT-bound KB/s
-      // on multi-ms paths (#2449). Spill even modest buffers — the alternative
-      // is always the slow path when the UI only has ArrayBuffer content.
-      const useFastPut = typeof client.fastPut === "function" && totalBytes > 0;
+      // Pipelined fastPut via temp file only. Serial put()/WriteStream is not
+      // used as a silent fallback (#2449; align Electerm/OpenSSH/WinSCP).
       let tempPath = null;
       let lastProgressTime = Date.now();
       let lastTransferredBytes = 0;
@@ -530,80 +527,36 @@ function createFileOpsApi(ctx) {
       activeSftpUploads.set(transferId, { cancelled: false, stream: null });
 
       try {
-        if (useFastPut) {
-          tempPath = await tempDirBridge.getTempFilePath(
-            `sftp-upload-${transferId || Date.now()}.bin`,
+        if (typeof client.fastPut !== "function") {
+          throw new Error(
+            "SFTP pipelined upload (fastPut) is not available on this session",
           );
-          await fs.promises.writeFile(tempPath, buffer);
-          if (activeSftpUploads.get(transferId)?.cancelled) {
-            throw new Error("Upload cancelled");
-          }
-          await client.fastPut(tempPath, encodedPath, {
-            chunkSize: TRANSFER_CHUNK_SIZE,
-            concurrency: UPLOAD_TRANSFER_CONCURRENCY,
-            step: (transferred, _chunk, total) => {
-              if (activeSftpUploads.get(transferId)?.cancelled) return;
-              const now = Date.now();
-              const elapsed = (now - lastProgressTime) / 1000;
-              let speed = 0;
-              if (elapsed >= 0.1) {
-                speed = (transferred - lastTransferredBytes) / elapsed;
-                lastProgressTime = now;
-                lastTransferredBytes = transferred;
-              }
-              emitProgress(transferred, speed);
-            },
-          });
-          if (activeSftpUploads.get(transferId)?.cancelled) {
-            throw new Error("Upload cancelled");
-          }
-        } else {
-          let transferredBytes = 0;
-          let lastProgressSentTime = 0;
-          let lastProgressSentBytes = 0;
-          const PROGRESS_THROTTLE_MS = 100;
-          const PROGRESS_THROTTLE_BYTES = 1024 * 1024;
-          const { Readable } = require("stream");
-          const readableStream = new Readable({
-            read() {
-              const uploadState = activeSftpUploads.get(transferId);
-              if (uploadState?.cancelled) {
-                this.destroy(new Error("Upload cancelled"));
-                return;
-              }
-              const chunkSize = TRANSFER_CHUNK_SIZE;
-              if (transferredBytes < totalBytes) {
-                const end = Math.min(transferredBytes + chunkSize, totalBytes);
-                const chunk = buffer.subarray(transferredBytes, end);
-                transferredBytes = end;
-                const now = Date.now();
-                const elapsed = (now - lastProgressTime) / 1000;
-                let speed = 0;
-                if (elapsed >= 0.1) {
-                  speed = (transferredBytes - lastTransferredBytes) / elapsed;
-                  lastProgressTime = now;
-                  lastTransferredBytes = transferredBytes;
-                }
-                const timeSinceLastProgress = now - lastProgressSentTime;
-                const bytesSinceLastProgress = transferredBytes - lastProgressSentBytes;
-                const isComplete = transferredBytes >= totalBytes;
-                if (
-                  isComplete
-                  || timeSinceLastProgress >= PROGRESS_THROTTLE_MS
-                  || bytesSinceLastProgress >= PROGRESS_THROTTLE_BYTES
-                ) {
-                  emitProgress(transferredBytes, speed);
-                  lastProgressSentTime = now;
-                  lastProgressSentBytes = transferredBytes;
-                }
-                this.push(chunk);
-              } else {
-                this.push(null);
-              }
-            },
-          });
-          activeSftpUploads.set(transferId, { cancelled: false, stream: readableStream });
-          await client.put(readableStream, encodedPath);
+        }
+        tempPath = await tempDirBridge.getTempFilePath(
+          `sftp-upload-${transferId || Date.now()}.bin`,
+        );
+        await fs.promises.writeFile(tempPath, buffer);
+        if (activeSftpUploads.get(transferId)?.cancelled) {
+          throw new Error("Upload cancelled");
+        }
+        await client.fastPut(tempPath, encodedPath, {
+          chunkSize: TRANSFER_CHUNK_SIZE,
+          concurrency: UPLOAD_TRANSFER_CONCURRENCY,
+          step: (transferred, _chunk, total) => {
+            if (activeSftpUploads.get(transferId)?.cancelled) return;
+            const now = Date.now();
+            const elapsed = (now - lastProgressTime) / 1000;
+            let speed = 0;
+            if (elapsed >= 0.1) {
+              speed = (transferred - lastTransferredBytes) / elapsed;
+              lastProgressTime = now;
+              lastTransferredBytes = transferred;
+            }
+            emitProgress(transferred, speed);
+          },
+        });
+        if (activeSftpUploads.get(transferId)?.cancelled) {
+          throw new Error("Upload cancelled");
         }
 
         await assertRemoteSize();
