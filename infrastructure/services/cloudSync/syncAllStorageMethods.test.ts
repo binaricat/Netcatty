@@ -665,6 +665,78 @@ test("syncAllProviders builds provider-specific sync metadata from each provider
   }
 });
 
+test("syncAllProviders upload-local override overwrites remote without decrypting when password differs", async () => {
+  const originalDecryptPayload = EncryptionService.decryptPayload;
+  const originalEncryptPayload = EncryptionService.encryptPayload;
+  const checkedRemote = remoteFile("github", 5, 500);
+  const localPayload = payload("local-after-reinstall");
+  const uploaded: Array<{ provider: CloudProvider; payload: SyncPayload }> = [];
+  let decryptCalls = 0;
+
+  EncryptionService.decryptPayload = async () => {
+    decryptCalls += 1;
+    throw new Error("OperationError: unable to authenticate data");
+  };
+  EncryptionService.encryptPayload = async (outgoing: SyncPayload) => ({
+    ...remoteFile("github", 6, 600),
+    payload: JSON.stringify(outgoing),
+  });
+
+  try {
+    const manager = {
+      masterPassword: "new-master-password",
+      adapters: new Map(),
+      state: {
+        securityState: "UNLOCKED",
+        providers: {
+          github: { enabled: true, connected: true, status: "connected" },
+          google: { enabled: false, connected: false, status: "disconnected" },
+          onedrive: { enabled: false, connected: false, status: "disconnected" },
+          webdav: { enabled: false, connected: false, status: "disconnected" },
+          s3: { enabled: false, connected: false, status: "disconnected" },
+        },
+        lastError: null,
+        syncState: "IDLE",
+        syncStrategy: "smartMerge",
+        localVersion: 1,
+        deviceId: "local-device",
+        deviceName: "Local",
+      },
+      getConnectedAdapter: async (provider: CloudProvider) => ({ provider }),
+      updateProviderStatus: () => {},
+      emit: () => {},
+      checkProviderConflict: async () => ({ conflict: true, remoteFile: checkedRemote }),
+      loadSyncBase: async () => null,
+      uploadToProvider: async (provider: CloudProvider, _adapter: unknown, _file: SyncedFile, outgoing: SyncPayload) => {
+        uploaded.push({ provider, payload: outgoing });
+        return { success: true, provider, action: "upload" as const, version: 6 };
+      },
+      exitBlockedState: () => {},
+      notifyStateChange: () => {},
+    };
+
+    const conflicted = await syncAllProvidersImpl.call(manager, localPayload);
+    assert.equal(conflicted.get("github")?.success, false);
+    assert.equal(conflicted.get("github")?.conflictDetected, true);
+    assert.equal(conflicted.get("github")?.error, undefined);
+    assert.equal(uploaded.length, 0);
+
+    const forced = await syncAllProvidersImpl.call(manager, localPayload, {
+      conflictActionOverride: "upload-local",
+      overrideShrink: true,
+    });
+    assert.equal(forced.get("github")?.success, true);
+    assert.equal(forced.get("github")?.action, "upload");
+    assert.equal(uploaded.length, 1);
+    assert.equal(uploaded[0]?.payload.hosts[0]?.id, "local-after-reinstall");
+    // Shrink-guard may attempt decrypt and ignore failure; merge path must not run.
+    assert.ok(decryptCalls >= 1);
+  } finally {
+    EncryptionService.decryptPayload = originalDecryptPayload;
+    EncryptionService.encryptPayload = originalEncryptPayload;
+  }
+});
+
 test("an initialized but paused v2 replica cannot fall through to legacy provider writes", async () => {
   const originalStorage = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
   const values = new Map<string, string>();

@@ -719,8 +719,15 @@ const SyncDashboard: React.FC<SyncDashboardProps> = ({
 
                 let results: Map<CloudProvider, SyncResult> | null = null;
                 await withRestoreBarrier(async () => {
+                    // Explicit keep-local must not re-enter smart-merge: after a
+                    // reinstall with a new master password the cloud ciphertext
+                    // is undecryptable, and merge failure returns conflictDetected
+                    // without an error string (UI shows "unknown error"). Force
+                    // upload-local so we encrypt with the current password and
+                    // overwrite remote without reading the old backup.
                     results = await sync.syncNow(localPayload, {
                         overrideShrink: true,
+                        conflictActionOverride: 'upload-local',
                         applyConvergentPayload: onApplyConvergentPayload,
                     });
                 });
