@@ -732,7 +732,13 @@ async function uploadViaFastPut(localPath, remotePath, sftp, fileSize, transfer,
       concurrency: UPLOAD_TRANSFER_CONCURRENCY,
       step: (transferred, _chunk, total) => {
         if (transfer.cancelled) return;
-        sendProgress(transferred, total || fileSize);
+        // UI progress only. fastPut byte totals are not a durable contiguous
+        // resume offset — keep checkpoint at 0 so a crash mid-fastPut cannot
+        // resume past sparse holes on the next run.
+        sendProgress(transferred, total || fileSize, {
+          force: true,
+          checkpointBytes: 0,
+        });
       },
     }, (err) => {
       if (transfer.cancelled) {
@@ -1448,13 +1454,24 @@ async function uploadFileConcurrent(
       await localHandle.close().catch(() => {});
     }
     let remoteCloseError = null;
-    // Always close the remote handle — required on shared browse channels so a
-    // failed/cancelled transfer does not leak OPEN handles into the session.
+    // Close remote handles while the channel is still live. On disposeChannel
+    // cancel/failure the channel is about to be ended (or already dead); a
+    // CLOSE request would hang forever with no callback from ssh2.
     if (remoteHandle) {
-      try {
-        await closeSftpHandle(sftp, remoteHandle);
-      } catch (error) {
-        if (!failed && !transfer.cancelled) remoteCloseError = error;
+      const skipClose = disposeChannel && (failed || transfer.cancelled);
+      if (!skipClose) {
+        try {
+          await Promise.race([
+            closeSftpHandle(sftp, remoteHandle),
+            new Promise((_, reject) => {
+              setTimeout(() => reject(new Error("SFTP close timed out")), 2000);
+            }),
+          ]);
+        } catch (error) {
+          if (!failed && !transfer.cancelled && !/timed out/i.test(error?.message || "")) {
+            remoteCloseError = error;
+          }
+        }
       }
     }
     if (!failed && !transfer.cancelled && !remoteCloseError && channelError) {
