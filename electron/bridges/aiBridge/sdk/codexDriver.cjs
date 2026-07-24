@@ -198,11 +198,13 @@ function emitCodexToolResultOnce(item, emitter, state, output, toolName) {
  * items afterward. Treating them as fatal settles the Netcatty sidebar turn and
  * stops UI refresh while the CLI process continues (issue #2456).
  *
- * Truly terminal failures still arrive as `turn.failed` (or a non-retryable
- * stream error message).
+ * Explicit `willRetry: false` / `will_retry: false` means Codex exhausted its
+ * retry budget — always fatal, even when the message still mentions stream /
+ * transport wording. Truly terminal failures also arrive as `turn.failed`.
  */
 function isCodexRetryableStreamError(event) {
   if (!event || typeof event !== "object") return false;
+  if (event.willRetry === false || event.will_retry === false) return false;
   if (event.willRetry === true || event.will_retry === true) return true;
   const message = String(event.message || "").toLowerCase();
   if (!message) return false;
@@ -230,6 +232,7 @@ function translateCodexEvent(event, emitter, state) {
 
   if (event.type === "turn.failed") {
     closeReasoning();
+    st.fatalError = true;
     emitter.emitError(event.error?.message || "Codex turn failed");
     return;
   }
@@ -242,6 +245,7 @@ function translateCodexEvent(event, emitter, state) {
       return;
     }
     closeReasoning();
+    st.fatalError = true;
     emitter.emitError(message);
     return;
   }
@@ -376,11 +380,15 @@ async function runCodexTurn({
       if (signal?.aborted) break;
       if (event?.type === "item.completed") hasContent = true;
       translateCodexEvent(event, emitter, state);
+      if (state.fatalError) break;
     }
     if (state.reasoningOpen) emitter.reasoningEnd();
     if (!threadId) {
       threadId = thread.id || resumeThreadId || null;
       if (threadId) emitter.sessionId(threadId);
+    }
+    if (state.fatalError) {
+      return { threadId };
     }
     if (!hasContent && !signal?.aborted) {
       emitter.emitError(
