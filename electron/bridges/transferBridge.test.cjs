@@ -42,6 +42,8 @@ test("resumable SFTP uploads use conservative per-file request concurrency", asy
   let activeWrites = 0;
   let observedConcurrency = 0;
   let observedChunkSize = 0;
+  const pendingWrites = [];
+  let holdWrites = true;
   const fastSftp = createFastSftp({
     open(_remotePath, flags, callback) {
       assert.equal(flags, "w");
@@ -51,6 +53,13 @@ test("resumable SFTP uploads use conservative per-file request concurrency", asy
       activeWrites += 1;
       observedConcurrency = Math.max(observedConcurrency, activeWrites);
       observedChunkSize = Math.max(observedChunkSize, length);
+      if (holdWrites) {
+        pendingWrites.push(() => {
+          activeWrites -= 1;
+          callback(null);
+        });
+        return;
+      }
       setImmediate(() => {
         activeWrites -= 1;
         callback(null);
@@ -80,7 +89,7 @@ test("resumable SFTP uploads use conservative per-file request concurrency", asy
   transferBridge.init({ sftpClients: new Map([["target", client]]) });
 
   const sender = createSender();
-  const result = await transferBridge.startTransfer(
+  const running = transferBridge.startTransfer(
     { sender },
     {
       transferId: "upload-large",
@@ -93,9 +102,17 @@ test("resumable SFTP uploads use conservative per-file request concurrency", asy
     },
   );
 
-  assert.equal(result.error, undefined);
+  const readyDeadline = Date.now() + 1000;
+  while (pendingWrites.length < 8 && Date.now() < readyDeadline) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  assert.equal(pendingWrites.length, 8);
   assert.equal(observedConcurrency, 8);
   assert.equal(observedChunkSize, 32 * 1024);
+  holdWrites = false;
+  for (const complete of pendingWrites.splice(0)) complete();
+  const result = await running;
+  assert.equal(result.error, undefined);
 });
 
 test("fast resumable uploads pause only after in-flight ranges are durable", async (t) => {
@@ -783,6 +800,86 @@ test("fast resumable downloads fall back from the highest contiguous checkpoint"
 
   assert.equal(result.error, undefined);
   assert.equal(fallbackStart, 0);
+  assert.deepEqual(await fs.promises.readFile(targetPath), payload);
+});
+
+test("range-failure fallback truncates sparse local tail before streaming", async (t) => {
+  const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-transfer-sparse-tail-"));
+  t.after(async () => {
+    await fs.promises.rm(tempDir, { recursive: true, force: true });
+  });
+
+  // Two chunks: finish the second first, then fail the first so contiguous stays 0
+  // while the local file already has a sparse tail past the durable checkpoint.
+  const chunk = 32 * 1024;
+  const payload = Buffer.alloc(2 * chunk, 17);
+  let firstReadCallback = null;
+  let fallbackStart = null;
+  let sizeAtFallback = null;
+  const targetPath = path.join(tempDir, "sparse.bin");
+  const fastSftp = createFastSftp({
+    open(_remotePath, _flags, callback) {
+      callback(null, Buffer.from("remote-handle"));
+    },
+    read(_handle, buffer, offset, length, position, callback) {
+      if (position === 0) {
+        firstReadCallback = () => callback(new Error("first range failed"));
+        // Complete the later range first, then fail the first.
+        queueMicrotask(() => {
+          // second range is already in flight separately
+        });
+        return;
+      }
+      payload.copy(buffer, offset, position, position + length);
+      callback(null, length, buffer, position);
+      queueMicrotask(() => firstReadCallback?.());
+    },
+    close(_handle, callback) {
+      callback(null);
+    },
+  });
+  const client = {
+    sftp: createFastSftp({
+      createReadStream(_remotePath, options) {
+        fallbackStart = options.start;
+        // Capture staged size when stream fallback opens (post-truncate).
+        try {
+          sizeAtFallback = fs.statSync(targetPath).size;
+        } catch {
+          sizeAtFallback = 0;
+        }
+        return Readable.from(payload.subarray(options.start || 0));
+      },
+    }),
+    stat() {
+      return Promise.resolve({ size: payload.length });
+    },
+    client: {
+      sftp(callback) {
+        callback(null, fastSftp);
+      },
+    },
+  };
+  transferBridge.init({ sftpClients: new Map([["source", client]]) });
+
+  const result = await transferBridge.startTransfer(
+    { sender: createSender() },
+    {
+      transferId: "download-sparse-tail",
+      sourcePath: "/tmp/source.bin",
+      targetPath,
+      sourceType: "sftp",
+      targetType: "local",
+      sourceSftpId: "source",
+      totalBytes: payload.length,
+      resumable: true,
+    },
+  );
+
+  assert.equal(result.error, undefined, result.error);
+  assert.equal(fallbackStart, 0);
+  // Contiguous checkpoint never advanced past 0; sparse tail must be truncated.
+  assert.equal(sizeAtFallback, 0);
   assert.deepEqual(await fs.promises.readFile(targetPath), payload);
 });
 

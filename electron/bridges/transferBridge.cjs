@@ -438,6 +438,79 @@ async function openIsolatedSftpChannel(client) {
   });
 }
 
+/**
+ * After concurrent ranges fail, staged files may extend past the contiguous
+ * checkpoint (sparse tail). Truncate to the durable offset before stream
+ * fallback or pause-stat, so resume never skips holes.
+ */
+async function truncateStagedPathToCheckpoint(filePath, checkpointBytes) {
+  const checkpoint = Math.max(0, Number(checkpointBytes) || 0);
+  if (!filePath) return;
+  try {
+    const stat = await fs.promises.stat(filePath);
+    if (!stat.isFile()) return;
+    if (stat.size > checkpoint) {
+      await fs.promises.truncate(filePath, checkpoint);
+    }
+  } catch (error) {
+    if (error?.code === "ENOENT") return;
+    // Best-effort: stream fallback can still proceed from checkpoint.
+    console.warn(
+      "[transferBridge] failed to truncate staged local file before fallback:",
+      error?.message || String(error),
+    );
+  }
+}
+
+async function truncateRemoteStagedToCheckpoint(client, stagedRemote, checkpointBytes) {
+  const checkpoint = Math.max(0, Number(checkpointBytes) || 0);
+  if (!client || !stagedRemote?.path) return;
+  if (isScpModeClient(client)) return;
+  try {
+    const encoded = encodePathForSession(
+      stagedRemote.sftpId,
+      stagedRemote.path,
+      stagedRemote.encoding,
+    );
+    const stat = await client.stat(encoded);
+    const size = Math.max(0, Number(stat?.size) || 0);
+    if (size <= checkpoint) return;
+    // Prefer native truncate when available (ssh2-sftp-client).
+    if (typeof client.truncate === "function") {
+      await client.truncate(encoded, checkpoint);
+      return;
+    }
+    if (typeof client.sftp?.ftruncate === "function" && typeof client.sftp?.open === "function") {
+      await new Promise((resolve, reject) => {
+        client.sftp.open(encoded, "r+", (openErr, handle) => {
+          if (openErr) return reject(openErr);
+          client.sftp.ftruncate(handle, checkpoint, (truncErr) => {
+            client.sftp.close(handle, () => {
+              if (truncErr) reject(truncErr);
+              else resolve();
+            });
+          });
+        });
+      });
+    }
+  } catch (error) {
+    console.warn(
+      "[transferBridge] failed to truncate staged remote file before fallback:",
+      error?.message || String(error),
+    );
+  }
+}
+
+async function prepareStreamFallbackAfterRangeFailure(transfer, client) {
+  const checkpoint = Math.max(0, Number(transfer?.checkpointBytes) || 0);
+  if (transfer?.stagedLocalPath) {
+    await truncateStagedPathToCheckpoint(transfer.stagedLocalPath, checkpoint);
+  }
+  if (transfer?.stagedRemote) {
+    await truncateRemoteStagedToCheckpoint(client, transfer.stagedRemote, checkpoint);
+  }
+}
+
 function getIsolatedDownloadChannelPool(client) {
   let pool = isolatedDownloadChannelPools.get(client);
   if (!pool) {
@@ -589,6 +662,9 @@ async function uploadFile(localPath, remotePath, client, fileSize, transfer, sen
         // handle so we do not reuse a closed channel for fastPut below.
         fastSftp = null;
         if (transfer.cancelled) throw err;
+        // Ranges may have written past the contiguous checkpoint; truncate
+        // the staged remote .part before sequential stream resume.
+        await prepareStreamFallbackAfterRangeFailure(transfer, client);
         console.warn(
           "[transferBridge] resumable fast upload failed, falling back to a compatible stream:",
           err?.message || String(err),
@@ -1026,7 +1102,12 @@ async function downloadFile(remotePath, localPath, client, fileSize, transfer, s
   // Prefer an isolated SFTP channel so cancellation cannot kill the browse session.
   if (!client.__netcattySudoMode) {
     const fastSftp = await acquireIsolatedDownloadChannel(client, transfer);
-    if (transfer.cancelled) throw new Error("Transfer cancelled");
+    if (transfer.cancelled) {
+      if (fastSftp) {
+        releaseIsolatedDownloadChannel(client, fastSftp, { dispose: true });
+      }
+      throw new Error("Transfer cancelled");
+    }
 
     if (fastSftp && (transfer.resumable || typeof fastSftp.fastGet === "function")) {
       try {
@@ -1090,15 +1171,19 @@ async function downloadFile(remotePath, localPath, client, fileSize, transfer, s
       } catch (err) {
         // Always release before rethrowing cancel — otherwise the channel stays
         // in pool.busy and the per-session fast-download budget is exhausted.
-        if (transfer.resumable) {
-          releaseIsolatedDownloadChannel(client, fastSftp, { dispose: true });
-        }
+        releaseIsolatedDownloadChannel(client, fastSftp, { dispose: true });
         if (transfer.cancelled) throw err;
+        // Concurrent ranges may leave sparse tails past the contiguous
+        // checkpoint; truncate before sequential stream resume.
+        await prepareStreamFallbackAfterRangeFailure(transfer, client);
         console.warn(
           "[transferBridge] fastGet failed, falling back to a compatible stream:",
           err?.message || String(err),
         );
       }
+    } else if (fastSftp) {
+      // Acquired a channel but cannot use fast path — return it to the pool.
+      releaseIsolatedDownloadChannel(client, fastSftp);
     }
   }
 
@@ -1989,7 +2074,19 @@ async function pauseTransfer(_event, payload) {
     // Concurrent range transfers already track the highest contiguous durable
     // byte. File size may extend past a hole when ranges finish out of order.
     if (usesContiguousRangeCheckpoint) {
-      // Keep the checkpoint supplied by runPausableConcurrentRanges.
+      // Keep the checkpoint supplied by runPausableConcurrentRanges, and
+      // shrink any sparse tail so a later pause/stat cannot overshoot.
+      const checkpoint = Math.max(0, Number(transfer.checkpointBytes) || 0);
+      if (transfer.stagedLocalPath) {
+        await truncateStagedPathToCheckpoint(transfer.stagedLocalPath, checkpoint);
+      }
+      if (transfer.stagedRemote) {
+        await truncateRemoteStagedToCheckpoint(
+          transfer.stagedRemote.client,
+          transfer.stagedRemote,
+          checkpoint,
+        );
+      }
     } else if (transfer.stagedLocalPath) {
       const stat = await fs.promises.stat(transfer.stagedLocalPath);
       transfer.checkpointBytes = stat.size;
