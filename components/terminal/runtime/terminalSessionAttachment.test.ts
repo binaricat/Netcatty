@@ -14,6 +14,7 @@ import {
 import {
   attachSessionToTerminal,
   getFlowController,
+  isReplaceableDec2026FullFrame,
   notePendingOutputScrollIfEnabled,
   resolveAttachSnapshot,
   tryAttachSessionToTerminal,
@@ -50,6 +51,25 @@ test("resolveAttachSnapshot keeps an authoritative empty final snapshot", () => 
   assert.equal(resolveAttachSnapshot("", "stale fallback"), "");
   assert.equal(resolveAttachSnapshot("fresh", "stale fallback"), "fresh");
   assert.equal(resolveAttachSnapshot(undefined, "fallback"), "fallback");
+});
+
+test("recognizes replaceable OpenCode DEC 2026 full frames conservatively", () => {
+  const frame = "\x1b[14t\x1b[?2026h\x1b[?25l\x1b[1;1Hframe\x1b[?25h\x1b[?2026l";
+
+  assert.equal(isReplaceableDec2026FullFrame(frame), true);
+  assert.equal(
+    isReplaceableDec2026FullFrame("\x1b[?2026h\x1b[Hframe\x1b[?2026l"),
+    true,
+  );
+  assert.equal(
+    isReplaceableDec2026FullFrame("prompt\x1b[?2026h\x1b[1;1Hframe\x1b[?2026l"),
+    false,
+  );
+  assert.equal(
+    isReplaceableDec2026FullFrame("\x1b[?2026h\x1b[5;1Hincremental\x1b[?2026l"),
+    false,
+  );
+  assert.equal(isReplaceableDec2026FullFrame("\x1b[?2026h\x1b[1;1Hunfinished"), false);
 });
 
 const createFakeTerm = (activeType = "normal") => {
