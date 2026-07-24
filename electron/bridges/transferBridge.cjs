@@ -691,6 +691,7 @@ async function uploadFile(localPath, remotePath, client, fileSize, transfer, sen
         );
         const latestSource = await fs.promises.stat(localPath);
         assertSourceMetadataUnchanged(initialSource, latestSource, fileSize);
+        // Content samples already verified inside uploadFileResumableFast.
         await assertRemoteUploadSize(client, remotePath, fileSize);
         return;
       } catch (err) {
@@ -779,6 +780,9 @@ async function uploadFile(localPath, remotePath, client, fileSize, transfer, sen
   // ssh2 closes the remote handle from _final and may suppress Node's normal
   // 'finish' event. Treat a successful close after the complete local read as
   // completion, then verify the persisted remote size below.
+  const streamContentFingerprint = transfer.resumable
+    ? await captureLocalContentFingerprint(localPath, fileSize)
+    : null;
   await new Promise((resolve, reject) => {
     const checkpoint = Math.max(0, Math.min(transfer.checkpointBytes || 0, fileSize));
     const readStream = fs.createReadStream(localPath, { highWaterMark: TRANSFER_CHUNK_SIZE, start: checkpoint });
@@ -835,6 +839,13 @@ async function uploadFile(localPath, remotePath, client, fileSize, transfer, sen
   if (initialSource) {
     const latestSource = await fs.promises.stat(localPath);
     assertSourceMetadataUnchanged(initialSource, latestSource, fileSize);
+  }
+  if (streamContentFingerprint) {
+    await assertLocalContentFingerprintUnchanged(
+      localPath,
+      streamContentFingerprint,
+      fileSize,
+    );
   }
 }
 
@@ -943,11 +954,115 @@ function createSourceSizeChangedError(expectedSize, actualSize) {
   return error;
 }
 
+function createSourceContentChangedError() {
+  const error = new Error("Transfer source content changed during transfer");
+  error.noTransferFallback = true;
+  error.sourceChanged = true;
+  return error;
+}
+
+function sampleOffsetsForFingerprint(fileSize) {
+  if (fileSize <= 0) return [];
+  const sampleSize = Math.min(TRANSFER_CHUNK_SIZE, fileSize);
+  return [...new Set([
+    0,
+    Math.max(0, Math.floor((fileSize - sampleSize) / 2)),
+    Math.max(0, fileSize - sampleSize),
+  ])].map((position) => ({
+    position,
+    length: Math.min(sampleSize, fileSize - position),
+  }));
+}
+
+/**
+ * Content fingerprint for same-size rewrite detection. Metadata (mtime/ctime)
+ * alone is not enough: some filesystems keep the same timestamp within a tick.
+ */
+async function captureLocalContentFingerprintFromHandle(fileHandle, fileSize) {
+  const samples = sampleOffsetsForFingerprint(fileSize);
+  if (samples.length === 0) return { size: fileSize, digests: [] };
+  const digests = [];
+  for (const { position, length } of samples) {
+    const buffer = Buffer.allocUnsafe(length);
+    await readLocalRange(fileHandle, buffer, position, length);
+    digests.push({
+      position,
+      length,
+      digest: crypto.createHash("sha256").update(buffer).digest("hex"),
+    });
+  }
+  return { size: fileSize, digests };
+}
+
+async function captureLocalContentFingerprint(filePath, fileSize) {
+  const handle = await fs.promises.open(filePath, "r");
+  try {
+    return await captureLocalContentFingerprintFromHandle(handle, fileSize);
+  } finally {
+    await handle.close().catch(() => {});
+  }
+}
+
+async function assertLocalContentFingerprintUnchanged(filePath, fingerprint, expectedSize) {
+  if (!fingerprint) return;
+  let latestStat;
+  try {
+    latestStat = await fs.promises.stat(filePath);
+  } catch (error) {
+    const err = new Error(
+      `Transfer source disappeared during transfer: ${error?.message || String(error)}`,
+    );
+    err.noTransferFallback = true;
+    err.sourceChanged = true;
+    throw err;
+  }
+  const latestSize = Number(latestStat?.size);
+  if (latestSize !== expectedSize) {
+    throw createSourceSizeChangedError(expectedSize, latestSize);
+  }
+  const latest = await captureLocalContentFingerprint(filePath, expectedSize);
+  if (latest.digests.length !== fingerprint.digests.length) {
+    throw createSourceContentChangedError();
+  }
+  for (let i = 0; i < fingerprint.digests.length; i += 1) {
+    const before = fingerprint.digests[i];
+    const after = latest.digests[i];
+    if (
+      before.position !== after.position
+      || before.length !== after.length
+      || before.digest !== after.digest
+    ) {
+      throw createSourceContentChangedError();
+    }
+  }
+}
+
+async function assertLocalContentFingerprintUnchangedFromHandle(fileHandle, fingerprint, expectedSize) {
+  if (!fingerprint) return;
+  const latest = await captureLocalContentFingerprintFromHandle(fileHandle, expectedSize);
+  if (latest.size !== expectedSize || latest.digests.length !== fingerprint.digests.length) {
+    throw createSourceContentChangedError();
+  }
+  for (let i = 0; i < fingerprint.digests.length; i += 1) {
+    const before = fingerprint.digests[i];
+    const after = latest.digests[i];
+    if (
+      before.position !== after.position
+      || before.length !== after.length
+      || before.digest !== after.digest
+    ) {
+      throw createSourceContentChangedError();
+    }
+  }
+}
+
 function assertSourceMetadataUnchanged(initialSource, latestSource, expectedSize) {
   const latestSize = Number(latestSource?.size);
   if (latestSize !== expectedSize) {
     throw createSourceSizeChangedError(expectedSize, latestSize);
   }
+  // Soft signal only — content fingerprint is the durable check for same-size
+  // rewrites. Keep metadata as a cheap early reject when timestamps move.
   const versionFields = ["mtimeMs", "ctimeMs", "mtime", "ctime", "ino"];
   const changed = versionFields.some((field) => {
     const before = Number(initialSource?.[field]);
@@ -955,10 +1070,7 @@ function assertSourceMetadataUnchanged(initialSource, latestSource, expectedSize
     return Number.isFinite(before) && Number.isFinite(after) && before !== after;
   });
   if (changed) {
-    const error = new Error("Transfer source changed during transfer");
-    error.noTransferFallback = true;
-    error.sourceChanged = true;
-    throw error;
+    throw createSourceContentChangedError();
   }
 }
 
@@ -1149,6 +1261,12 @@ async function uploadFileResumableFast(
       throw localOpenError;
     }
     if (transfer.cancelled) throw new Error("Transfer cancelled");
+    // Sample content after local OPEN so same-size rewrites are caught even when
+    // mtime/ctime stay put. Uses the open handle (channel already acquired).
+    const contentFingerprint = await captureLocalContentFingerprintFromHandle(
+      localHandle,
+      fileSize,
+    );
     remoteHandle = await openSftpHandle(sftp, remotePath, checkpoint > 0 ? "r+" : "w");
     if (channelError) throw channelError;
     if (transfer.cancelled) throw new Error("Transfer cancelled");
@@ -1169,6 +1287,11 @@ async function uploadFileResumableFast(
         sftp,
       });
       if (channelError) throw channelError;
+      await assertLocalContentFingerprintUnchangedFromHandle(
+        localHandle,
+        contentFingerprint,
+        fileSize,
+      );
     } catch (error) {
       failed = true;
       throw error;

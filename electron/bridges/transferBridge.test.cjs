@@ -1000,6 +1000,7 @@ test("resumable fast uploads reject same-size source changes", async (t) => {
   const payload = Buffer.alloc(32 * 1024, 73);
   const localPath = path.join(tempDir, "upload.bin");
   await fs.promises.writeFile(localPath, payload);
+  const frozenStat = await fs.promises.stat(localPath);
   let changed = false;
   let promoted = false;
   let stagedDeleted = false;
@@ -1008,10 +1009,18 @@ test("resumable fast uploads reject same-size source changes", async (t) => {
       callback(null, Buffer.from("remote-handle"));
     },
     write(_handle, _buffer, _offset, _length, _position, callback) {
-      fs.promises.writeFile(localPath, Buffer.alloc(payload.length, 74)).then(() => {
-        changed = true;
-        callback(null);
-      }, callback);
+      // Same-size rewrite + restore original mtime/ctime so metadata-only
+      // checks cannot detect the change (Codex regression on coarse FS clocks).
+      fs.promises.writeFile(localPath, Buffer.alloc(payload.length, 74))
+        .then(() => fs.promises.utimes(
+          localPath,
+          frozenStat.atime,
+          frozenStat.mtime,
+        ))
+        .then(() => {
+          changed = true;
+          callback(null);
+        }, callback);
     },
     close(_handle, callback) {
       callback(null);
@@ -1053,7 +1062,7 @@ test("resumable fast uploads reject same-size source changes", async (t) => {
   );
 
   assert.equal(changed, true);
-  assert.match(result.error || "", /source.*changed/);
+  assert.match(result.error || "", /source.*changed/i);
   assert.equal(promoted, false);
   assert.equal(stagedDeleted, true);
 });
