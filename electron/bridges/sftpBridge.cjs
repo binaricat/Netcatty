@@ -551,12 +551,27 @@ function ensureRemoteSftpSupport(sessionId) {
   return { session, sshClient };
 }
 
+// Common remote NAME_MAX; keep stage/backup basenames within this budget.
+const REMOTE_BASENAME_MAX = 255;
+
+function clipRemoteBaseName(baseName, overhead) {
+  const raw = baseName || "upload";
+  const maxBase = Math.max(8, REMOTE_BASENAME_MAX - overhead);
+  if (Buffer.byteLength(raw, "utf8") <= maxBase) return raw;
+  // Prefer character-safe clip: shrink until utf8 bytes fit.
+  let clipped = raw;
+  while (clipped.length > 1 && Buffer.byteLength(clipped, "utf8") > maxBase) {
+    clipped = clipped.slice(0, -1);
+  }
+  return clipped || "upload";
+}
+
 function buildStagedRemotePath(remotePath) {
-  const isWindowsPath = isWindowsRemotePath(remotePath);
   const lastSeparatorIndex = Math.max(remotePath.lastIndexOf("/"), remotePath.lastIndexOf("\\"));
   const dir = lastSeparatorIndex >= 0 ? remotePath.slice(0, lastSeparatorIndex + 1) : "";
   const baseName = lastSeparatorIndex >= 0 ? remotePath.slice(lastSeparatorIndex + 1) : remotePath;
-  const safeBaseName = baseName || "upload";
+  // ".netcatty-upload-" (17) + 8 hex + "-" (1) + ".part" (5) = 31
+  const safeBaseName = clipRemoteBaseName(baseName, 31);
   const stagedName = `.netcatty-upload-${randomUUID().slice(0, 8)}-${safeBaseName}.part`;
   return dir ? `${dir}${stagedName}` : stagedName;
 }
@@ -565,7 +580,8 @@ function buildBackupRemotePath(remotePath) {
   const lastSeparatorIndex = Math.max(remotePath.lastIndexOf("/"), remotePath.lastIndexOf("\\"));
   const dir = lastSeparatorIndex >= 0 ? remotePath.slice(0, lastSeparatorIndex + 1) : "";
   const baseName = lastSeparatorIndex >= 0 ? remotePath.slice(lastSeparatorIndex + 1) : remotePath;
-  const safeBaseName = baseName || "upload";
+  // ".netcatty-backup-" (17) + 8 hex + "-" (1) + ".bak" (4) = 30
+  const safeBaseName = clipRemoteBaseName(baseName, 30);
   const backupName = `.netcatty-backup-${randomUUID().slice(0, 8)}-${safeBaseName}.bak`;
   return dir ? `${dir}${backupName}` : backupName;
 }
@@ -588,9 +604,12 @@ function attrsIndicateSymlink(attrs) {
 
 /**
  * Plan overwrite strategy for a remote upload target.
- * - Existing files / symlinks: write in-place so the inode, mode, ACL, and link
- *   node are preserved (stage+rename would replace the inode).
- * - Missing targets: stage + rename for cancel-safe promotion of new files.
+ * - Symlinks: write in-place so the server follows the link (rename would
+ *   replace the link node). Shared-channel cancel cannot hard-stop fastPut;
+ *   symlink overwrite is rare and accepted as best-effort.
+ * - Regular files (new or existing): stage + rename so cancel cannot keep
+ *   mutating the final destination after the UI reports cancellation. Capture
+ *   mode bits to restore after the new inode lands.
  */
 async function planRemoteUploadReplace(client, encodedPath) {
   try {
@@ -602,12 +621,14 @@ async function planRemoteUploadReplace(client, encodedPath) {
       attrs = null;
     }
     if (!attrs) return { writeInPlace: false, existingMode: null };
-    // Existing node (file or symlink): prefer in-place overwrite.
+    if (attrsIndicateSymlink(attrs)) {
+      return { writeInPlace: true, existingMode: null };
+    }
     const mode = Number(attrs.mode);
-    const existingMode = Number.isFinite(mode) && mode > 0 && !attrsIndicateSymlink(attrs)
+    const existingMode = Number.isFinite(mode) && mode > 0
       ? (mode & 0o7777)
       : null;
-    return { writeInPlace: true, existingMode };
+    return { writeInPlace: false, existingMode };
   } catch {
     // Missing destination / unsupported lstat is fine — default to staging.
   }

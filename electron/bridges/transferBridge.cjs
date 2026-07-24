@@ -735,8 +735,8 @@ async function uploadViaFastPut(localPath, remotePath, sftp, fileSize, transfer,
         // UI progress only. fastPut byte totals are not a durable contiguous
         // resume offset — keep checkpoint at 0 so a crash mid-fastPut cannot
         // resume past sparse holes on the next run.
+        // Do not force every chunk: ssh2 steps per 32KB and would flood IPC.
         sendProgress(transferred, total || fileSize, {
-          force: true,
           checkpointBytes: 0,
         });
       },

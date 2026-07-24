@@ -245,8 +245,8 @@ test("session-backed writeSftpBinaryWithProgress uses pipelined fastPut", async 
   assert.deepEqual(remoteFiles.get("/home/alice/mem.bin"), payload);
 });
 
-test("existing destinations overwrite in-place to preserve metadata", async (t) => {
-  const tempRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-inplace-meta-"));
+test("existing destinations stage then restore mode after rename", async (t) => {
+  const tempRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-stage-meta-"));
   t.after(async () => {
     await fs.promises.rm(tempRoot, { recursive: true, force: true });
   });
@@ -282,12 +282,53 @@ test("existing destinations overwrite in-place to preserve metadata", async (t) 
   });
 
   assert.equal(fastPutCalls.length, 1);
-  assert.equal(fastPutCalls[0].remotePath, "/usr/local/bin/tool");
+  assert.match(fastPutCalls[0].remotePath, /\.netcatty-upload-.*\.part$/);
   assert.ok(remoteFiles.has("/usr/local/bin/tool"));
   assert.deepEqual(remoteFiles.get("/usr/local/bin/tool"), payload);
-  // In-place overwrite should not need a post-rename chmod restore.
-  assert.equal(chmodCalls.length, 0);
-  assert.equal(remoteMeta.get("/usr/local/bin/tool")?.mode, 0o100755);
+  // Stage+rename replaces the inode; restore prior mode bits afterwards.
+  assert.ok(
+    chmodCalls.some((c) => c.targetPath === "/usr/local/bin/tool" && (c.mode & 0o777) === 0o755),
+    `expected mode restore via chmod, got ${JSON.stringify(chmodCalls)}`,
+  );
+});
+
+test("staged basenames stay within the remote NAME_MAX budget", async (t) => {
+  const tempRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-long-name-"));
+  t.after(async () => {
+    await fs.promises.rm(tempRoot, { recursive: true, force: true });
+  });
+  tempDirBridge.init?.({ getPath: () => tempRoot });
+
+  const longBase = `${"a".repeat(240)}.bin`;
+  const localPath = path.join(tempRoot, "payload.bin");
+  await fs.promises.writeFile(localPath, Buffer.from("x"));
+
+  const { channel, fastPutCalls, remoteFiles } = createSessionChannel();
+  const connection = {
+    sftp(callback) { callback(null, channel); },
+  };
+  const sftpClients = new Map();
+  sftpBridge.init({
+    electronModule: { webContents: { fromId: () => null } },
+    sessions: new Map([["session-long", { conn: connection }]]),
+    sftpClients,
+  });
+  const opened = await sftpBridge.openSftpForSession(null, {
+    sessionId: "session-long",
+    fileProtocol: "sftp",
+  });
+
+  await sftpBridge.uploadLocalToSftp(null, {
+    sftpId: opened.sftpId,
+    localPath,
+    remotePath: `/tmp/${longBase}`,
+    encoding: "utf-8",
+  });
+
+  assert.equal(fastPutCalls.length, 1);
+  const stagedBase = path.posix.basename(fastPutCalls[0].remotePath);
+  assert.ok(Buffer.byteLength(stagedBase, "utf8") <= 255, stagedBase);
+  assert.ok(remoteFiles.has(`/tmp/${longBase}`));
 });
 
 test("symlink destinations are written in-place (not replaced by rename)", async (t) => {
