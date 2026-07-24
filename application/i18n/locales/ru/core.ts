@@ -55,6 +55,7 @@ export const ruCoreMessages: Messages = {
   'sort.newest': 'Сначала новые',
   'sort.oldest': 'Сначала старые',
   'sort.group': 'По группе',
+  'sort.ip': 'По IP',
   'field.label': 'Метка',
   'field.type': 'Тип',
   'auth.keyType': 'Тип {type}',

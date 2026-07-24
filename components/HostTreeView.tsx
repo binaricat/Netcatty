@@ -14,6 +14,7 @@ import {
   type HostClickBehavior,
 } from '../domain/hostClickBehavior';
 import { sortByVaultOrder } from '../domain/vaultOrder';
+import { compareHostAddresses } from '../domain/hostAddressSort';
 import { STORAGE_KEY_VAULT_HOSTS_TREE_EXPANDED } from '../infrastructure/config/storageKeys';
 import { GroupConfig, GroupNode, Host } from '../types';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from './ui/collapsible';
@@ -41,7 +42,7 @@ const hasDragType = (dataTransfer: DataTransfer, type: string) =>
 interface HostTreeViewProps {
   groupTree: GroupNode[];
   hosts: Host[];
-  sortMode?: 'manual' | 'az' | 'za' | 'newest' | 'oldest' | 'group';
+  sortMode?: 'manual' | 'az' | 'za' | 'newest' | 'oldest' | 'group' | 'ip';
   expandedPaths?: Set<string>;
   onTogglePath?: (path: string) => void;
   onExpandAll?: (paths: string[]) => void;
@@ -78,7 +79,7 @@ interface HostTreeViewProps {
 interface TreeNodeProps {
   node: GroupNode;
   depth: number;
-  sortMode: 'manual' | 'az' | 'za' | 'newest' | 'oldest' | 'group';
+  sortMode: 'manual' | 'az' | 'za' | 'newest' | 'oldest' | 'group' | 'ip';
   expandedPaths: Set<string>;
   onToggle: (path: string) => void;
   onConnect: (host: Host) => void;
@@ -215,6 +216,10 @@ const TreeNode: React.FC<TreeNodeProps> = ({
           return (a.createdAt || 0) - (b.createdAt || 0);
         case 'manual':
           return 0;
+        case 'ip': {
+          const addrCmp = compareHostAddresses(a.hostname, b.hostname);
+          return addrCmp !== 0 ? addrCmp : a.label.localeCompare(b.label);
+        }
         default:
           return a.label.localeCompare(b.label);
       }
@@ -681,6 +686,10 @@ export const HostTreeView: React.FC<HostTreeViewProps> = ({
           return (a.createdAt || 0) - (b.createdAt || 0);
         case 'manual':
           return 0;
+        case 'ip': {
+          const addrCmp = compareHostAddresses(a.hostname, b.hostname);
+          return addrCmp !== 0 ? addrCmp : a.label.localeCompare(b.label);
+        }
         default:
           return a.label.localeCompare(b.label);
       }

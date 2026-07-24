@@ -1,10 +1,10 @@
-import { Calendar,CalendarClock,Check,ChevronDown,ChevronUp,FolderTree,GripVertical,SortAsc,SortDesc } from 'lucide-react';
+import { Calendar,CalendarClock,Check,ChevronDown,ChevronUp,FolderTree,GripVertical,Network,SortAsc,SortDesc } from 'lucide-react';
 import React from 'react';
 import { useI18n } from "../../application/i18n/I18nProvider";
 import { Button } from './button';
 import { Dropdown,DropdownContent,DropdownTrigger } from './dropdown';
 
-export type SortMode = 'manual' | 'az' | 'za' | 'newest' | 'oldest' | 'group';
+export type SortMode = 'manual' | 'az' | 'za' | 'newest' | 'oldest' | 'group' | 'ip';
 
 const SORT_OPTIONS: Record<SortMode, { labelKey: string; icon: React.ReactElement; triggerIcon: React.ReactElement }> = {
     manual: { labelKey: 'sort.manual', icon: <GripVertical className="w-4 h-4 shrink-0" />, triggerIcon: <GripVertical className="w-4 h-4" /> },
@@ -13,6 +13,7 @@ const SORT_OPTIONS: Record<SortMode, { labelKey: string; icon: React.ReactElemen
     newest: { labelKey: 'sort.newest', icon: <Calendar className="w-4 h-4 shrink-0" />, triggerIcon: <Calendar className="w-4 h-4" /> },
     oldest: { labelKey: 'sort.oldest', icon: <CalendarClock className="w-4 h-4 shrink-0" />, triggerIcon: <CalendarClock className="w-4 h-4" /> },
     group: { labelKey: 'sort.group', icon: <FolderTree className="w-4 h-4 shrink-0" />, triggerIcon: <FolderTree className="w-4 h-4" /> },
+    ip: { labelKey: 'sort.ip', icon: <Network className="w-4 h-4 shrink-0" />, triggerIcon: <Network className="w-4 h-4" /> },
 };
 
 interface SortDropdownProps {

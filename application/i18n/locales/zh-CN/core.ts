@@ -42,6 +42,7 @@ export const zhCNCoreMessages: Messages = {
   'sort.newest': '从新到旧',
   'sort.oldest': '从旧到新',
   'sort.group': '按分组',
+  'sort.ip': '按 IP',
   'field.label': 'Label',
   'field.type': '类型',
   'auth.keyType': '类型 {type}',

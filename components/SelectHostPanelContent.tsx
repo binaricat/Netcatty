@@ -9,6 +9,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { cn } from '../lib/utils';
 import { matchesHostSearchQuery, matchesSearchQuery } from '../lib/searchMatcher';
 import { useI18n } from '../application/i18n/I18nProvider';
+import { compareHostAddresses } from '../domain/hostAddressSort';
 import { Host, ProxyProfile, SSHKey } from '../types';
 import { ManagedSource } from '../domain/models';
 import { DistroAvatar } from './DistroAvatar';
@@ -175,6 +176,10 @@ export const SelectHostPanelContent: React.FC<SelectHostPanelContentProps> = ({
           return b.id.localeCompare(a.id);
         case 'oldest':
           return a.id.localeCompare(b.id);
+        case 'ip': {
+          const addrCmp = compareHostAddresses(a.hostname, b.hostname);
+          return addrCmp !== 0 ? addrCmp : a.label.localeCompare(b.label);
+        }
         default:
           return 0;
       }

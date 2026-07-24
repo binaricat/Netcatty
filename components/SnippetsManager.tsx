@@ -1743,6 +1743,7 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
                 value={sortMode}
                 onChange={setSortMode}
                 className={vaultHeaderIconButtonClass}
+                modes={['manual', 'az', 'za', 'newest', 'oldest', 'group']}
               />
               <Tooltip>
                 <TooltipTrigger asChild>

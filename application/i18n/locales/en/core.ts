@@ -56,6 +56,7 @@ export const enCoreMessages: Messages = {
   'sort.newest': 'Newest to oldest',
   'sort.oldest': 'Oldest to newest',
   'sort.group': 'By group',
+  'sort.ip': 'By IP',
   'field.label': 'Label',
   'field.type': 'Type',
   'auth.keyType': 'Type {type}',
