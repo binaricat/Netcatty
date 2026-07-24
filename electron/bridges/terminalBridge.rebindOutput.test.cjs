@@ -78,6 +78,175 @@ test("rebind and restore handlers register even when terminal worker is enabled"
   assert.match(source, /function requestTerminalSessionSnapshot/);
 });
 
+test("main process arbitrates two renderer leases before forwarding to the worker", async () => {
+  const { bridge } = loadTerminalBridgeWithMocks();
+  const handles = new Map();
+  const listeners = new Map();
+  const sent = [];
+  const requested = [];
+  const ipcMain = {
+    handle(channel, handler) { handles.set(channel, handler); },
+    on(channel, handler) { listeners.set(channel, handler); },
+  };
+  const terminalWorkerManager = {
+    request: async (channel, payload) => {
+      requested.push({ channel, payload });
+      return { success: true };
+    },
+    send: (channel, payload) => sent.push({ channel, payload }),
+  };
+  bridge.registerHandlers(ipcMain, { terminalWorkerManager });
+  const sender = (id) => ({ id, once() {} });
+  const acquire = handles.get("netcatty:terminal:acquireFlowPauseLease");
+  const release = handles.get("netcatty:terminal:releaseFlowPauseLease");
+  const flow = listeners.get("netcatty:flow");
+
+  const home = await acquire({ sender: sender(10) }, { sessionId: "session-lease" });
+  const popup = await acquire({ sender: sender(20) }, { sessionId: "session-lease" });
+  flow({ sender: sender(10) }, { sessionId: "session-lease", paused: false });
+  await release(
+    { sender: sender(10) },
+    { sessionId: "session-lease", leaseId: home.leaseId },
+  );
+  await release(
+    { sender: sender(20) },
+    { sessionId: "session-lease", leaseId: popup.leaseId },
+  );
+
+  assert.deepEqual(requested.map(({ payload }) => payload.paused), [true, true]);
+  assert.deepEqual(sent.map(({ payload }) => payload.paused), [true, true, false]);
+  assert.ok([...requested, ...sent].every(({ payload }) => payload._flowArbitrated === true));
+});
+
+test("attach recovery respects a home renderer lease in worker mode", async () => {
+  const { bridge } = loadTerminalBridgeWithMocks();
+  const handles = new Map();
+  const sent = [];
+  const ipcMain = {
+    handle(channel, handler) { handles.set(channel, handler); },
+    on() {},
+  };
+  const terminalWorkerManager = {
+    request: async () => ({ success: true }),
+    send: (channel, payload) => sent.push({ channel, payload }),
+    restoreAttachHome: async () => ({ success: true, restored: true }),
+  };
+  bridge.registerHandlers(ipcMain, { terminalWorkerManager });
+  const sender = { id: 10, once() {} };
+  const acquire = handles.get("netcatty:terminal:acquireFlowPauseLease");
+  const release = handles.get("netcatty:terminal:releaseFlowPauseLease");
+  const home = await acquire({ sender }, { sessionId: "session-restore" });
+  const attachRestore = require("./terminalAttachRestore.cjs");
+
+  const restored = await attachRestore.restoreAttachedSessionOutput("session-restore");
+
+  assert.equal(restored.success, true);
+  assert.equal(sent.at(-1)?.payload?.paused, true);
+  await release(
+    { sender },
+    { sessionId: "session-restore", leaseId: home.leaseId },
+  );
+  assert.equal(sent.at(-1)?.payload?.paused, false);
+});
+
+test("duplicate popup crash restores share one in-flight operation", async () => {
+  const { bridge } = loadTerminalBridgeWithMocks();
+  const handles = new Map();
+  let restoreCalls = 0;
+  let finishRestore;
+  const restoreResult = new Promise((resolve) => { finishRestore = resolve; });
+  const ipcMain = {
+    handle(channel, handler) { handles.set(channel, handler); },
+    on() {},
+  };
+  const terminalWorkerManager = {
+    request: async () => ({ success: true }),
+    send() {},
+    restoreAttachHome: async () => {
+      restoreCalls += 1;
+      return restoreResult;
+    },
+  };
+  bridge.registerHandlers(ipcMain, { terminalWorkerManager });
+  const attachRestore = require("./terminalAttachRestore.cjs");
+
+  const renderGoneRestore = attachRestore.restoreAttachedSessionOutput("session-crash");
+  const closedRestore = attachRestore.restoreAttachedSessionOutput("session-crash");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(restoreCalls, 1);
+
+  finishRestore({ success: true, restored: true });
+  assert.deepEqual(await Promise.all([renderGoneRestore, closedRestore]), [
+    { success: true, restored: true },
+    { success: true, restored: true },
+  ]);
+  assert.equal(restoreCalls, 1);
+});
+
+test("failed worker lease acquisition compensates the backend pause", async () => {
+  const { bridge } = loadTerminalBridgeWithMocks();
+  const handles = new Map();
+  const sent = [];
+  const ipcMain = {
+    handle(channel, handler) { handles.set(channel, handler); },
+    on() {},
+  };
+  const terminalWorkerManager = {
+    request: async () => { throw new Error("worker unavailable"); },
+    send: (channel, payload) => sent.push({ channel, payload }),
+  };
+  bridge.registerHandlers(ipcMain, { terminalWorkerManager });
+  const acquire = handles.get("netcatty:terminal:acquireFlowPauseLease");
+
+  await assert.rejects(
+    acquire(
+      { sender: { id: 10, once() {} } },
+      { sessionId: "session-acquire-failure" },
+    ),
+    /worker unavailable/,
+  );
+
+  assert.equal(sent.at(-1)?.payload?.paused, false);
+  assert.equal(sent.at(-1)?.payload?._flowArbitrated, true);
+});
+
+test("worker close and natural exit clear main-process pause ownership", async () => {
+  const { bridge } = loadTerminalBridgeWithMocks();
+  const handles = new Map();
+  const ipcMain = {
+    handle(channel, handler) { handles.set(channel, handler); },
+    on() {},
+  };
+  let notifySessionClosed = null;
+  const terminalWorkerManager = {
+    request: async () => ({ success: true }),
+    send() {},
+    onSessionClosed(listener) {
+      notifySessionClosed = listener;
+      return { dispose() {} };
+    },
+  };
+  bridge.registerHandlers(ipcMain, { terminalWorkerManager });
+  const sender = { id: 10, once() {}, send() {} };
+  const acquire = handles.get("netcatty:terminal:acquireFlowPauseLease");
+  const release = handles.get("netcatty:terminal:releaseFlowPauseLease");
+  const closeAwait = handles.get("netcatty:close:await");
+
+  const closingLease = await acquire({ sender }, { sessionId: "session-close" });
+  await closeAwait({ sender }, { sessionId: "session-close" });
+  assert.equal((await release(
+    { sender },
+    { sessionId: "session-close", leaseId: closingLease.leaseId },
+  )).success, false);
+
+  const exitLease = await acquire({ sender }, { sessionId: "session-exit" });
+  notifySessionClosed({ sessionId: "session-exit", reason: "exited" });
+  assert.equal((await release(
+    { sender },
+    { sessionId: "session-exit", leaseId: exitLease.leaseId },
+  )).success, false);
+});
+
 test("worker renderer-event forwarding prefers rebound webContentsId", () => {
   const source = require("node:fs").readFileSync(
     path.join(__dirname, "terminalWorkerManager.cjs"),
@@ -141,11 +310,11 @@ test("attach close restores the output route before resuming the backend", () =>
     path.join(__dirname, "terminalBridge.cjs"),
     "utf8",
   );
-  const restoreStart = bridgeSource.indexOf("function restoreAttachedSessionOutput");
+  const restoreStart = bridgeSource.indexOf("async function restoreAttachedSessionOutputOnce");
   const restoreEnd = bridgeSource.indexOf("function restoreTerminalSessionOutput", restoreStart);
   const restoreSource = bridgeSource.slice(restoreStart, restoreEnd);
   const routeIdx = restoreSource.indexOf("restoreAttachHome");
-  const resumeIdx = restoreSource.indexOf("resumeSessionOutputFlow");
+  const resumeIdx = restoreSource.lastIndexOf("setDirectPaused");
   assert.ok(routeIdx > 0 && resumeIdx > routeIdx, "restore route before resuming output");
 
   const terminalSource = require("node:fs").readFileSync(
@@ -167,10 +336,13 @@ test("attach close restores the output route before resuming the backend", () =>
   assert.ok(disposeIdx > rendererRestoreIdx, "detach popup listener after route restore");
   assert.ok(releaseIdx > disposeIdx, "resume only after popup listener detaches");
   assert.ok(leaseReleaseIdx > releaseIdx, "release pause ownership after output handoff");
-  const mainRestoreStart = bridgeSource.indexOf("function restoreAttachedSessionOutput");
+  const mainRestoreStart = bridgeSource.indexOf("async function restoreAttachedSessionOutputOnce");
   const mainRestoreEnd = bridgeSource.indexOf("function restoreTerminalSessionOutput", mainRestoreStart);
   const mainRestoreSource = bridgeSource.slice(mainRestoreStart, mainRestoreEnd);
-  assert.match(mainRestoreSource, /if \(result\?\.success\) \{\s*resumeSessionOutputFlow/);
+  assert.match(
+    mainRestoreSource,
+    /if \(result\?\.success\) \{[\s\S]*setDirectPaused\([\s\S]*restorePauseOwner,[\s\S]*false/,
+  );
 });
 
 test("in-process explicit close sends an exit event before dropping the output route", () => {

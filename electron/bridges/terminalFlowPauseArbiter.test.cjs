@@ -47,6 +47,15 @@ test("direct flow resume cannot override a lease in another renderer", () => {
   assert.equal(arbiter.release("session-1", 20, popup.leaseId).paused, false);
 });
 
+test("attach recovery release cannot override a home renderer lease", () => {
+  const arbiter = make();
+  const home = arbiter.acquire("session-1", 10);
+
+  assert.equal(arbiter.setDirectPaused("session-1", "main:attach-restore", true), true);
+  assert.equal(arbiter.setDirectPaused("session-1", "main:attach-restore", false), true);
+  assert.equal(arbiter.release("session-1", 10, home.leaseId).paused, false);
+});
+
 test("destroying one renderer preserves other renderers' pause owners", () => {
   const arbiter = make();
   arbiter.acquire("session-1", 10);
