@@ -1858,21 +1858,6 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     return true; // Indicate we handled the sequence
   });
 
-  // OSC 10 — Set foreground text color (e.g. Oh My Zsh / Powerlevel10k themes)
-  // OSC 11 — Set background color
-  // OSC 12 — Set cursor color
-  // Docker containers and themed shells emit these sequences frequently. If xterm.js
-  // has no registered handler, it may leak the sequence content (e.g. "11;rgb:…")
-  // as visible text instead of silently dropping it. Consume them to prevent junk
-  // output, matching the behavior of common terminal emulators.
-  const oscThemeDisposable = (() => {
-    const ignore = () => true;
-    const d1 = term.parser.registerOscHandler(10, ignore);
-    const d2 = term.parser.registerOscHandler(11, ignore);
-    const d3 = term.parser.registerOscHandler(12, ignore);
-    return { dispose: () => { d1.dispose(); d2.dispose(); d3.dispose(); } };
-  })();
-
   const osc133Disposable = term.parser.registerOscHandler(133, (data) => {
     if (consumeOsc133CommandCompletion(data, ctx.promptLineBreakStateRef?.current)) {
       ctx.onCommandCompleted?.();
@@ -2050,7 +2035,6 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
       textarea?.removeEventListener("blur", clearKittyTransientInputState);
       clearKittyTransientInputState();
       osc7Disposable.dispose();
-      oscThemeDisposable.dispose();
       osc133Disposable.dispose();
       osc52Disposable.dispose();
       titleChangeDisposable.dispose();

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createRequire } from 'node:module';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
@@ -9,6 +10,50 @@ const terminalSource = readFileSync(new URL('../Terminal.tsx', import.meta.url),
 const terminalViewSource = readFileSync(new URL('./TerminalView.tsx', import.meta.url), 'utf8');
 const xtermRuntimeSource = readFileSync(new URL('./runtime/createXTermRuntime.ts', import.meta.url), 'utf8');
 const providerHookSource = readFileSync(new URL('../../application/state/usePluginTerminalProviders.ts', import.meta.url), 'utf8');
+
+test('OSC 10-12 color handling remains owned by xterm', async () => {
+  assert.doesNotMatch(
+    xtermRuntimeSource,
+    /registerOscHandler\((?:10|11|12),/,
+    'runtime hooks must not swallow xterm color updates or queries',
+  );
+
+  const require = createRequire(import.meta.url);
+  const { Terminal } = require('@xterm/xterm') as {
+    Terminal: new (options: Record<string, unknown>) => {
+      _core: {
+        _inputHandler: {
+          onColor(listener: (event: Array<{ type: number; index: number }>) => void): { dispose(): void };
+        };
+      };
+      write(data: string, callback: () => void): void;
+      dispose(): void;
+    };
+  };
+  const term = new Terminal({ cols: 20, rows: 2, allowProposedApi: true });
+  const colorEvents: Array<Array<{ type: number; index: number }>> = [];
+  const disposable = term._core._inputHandler.onColor((event) => colorEvents.push(event));
+
+  try {
+    await new Promise<void>((resolve) => {
+      term.write(
+        '\x1b]10;rgb:11/22/33\x07\x1b]11;?\x07\x1b]12;rgb:44/55/66\x07',
+        resolve,
+      );
+    });
+    assert.deepEqual(
+      colorEvents.map(([event]) => ({ type: event.type, index: event.index })),
+      [
+        { type: 1, index: 256 },
+        { type: 0, index: 257 },
+        { type: 1, index: 258 },
+      ],
+    );
+  } finally {
+    disposable.dispose();
+    term.dispose();
+  }
+});
 
 test('hibernate runtime keyword setup restores plugin decoration rules', () => {
   let applied: { rules: unknown[]; enabled: boolean } | undefined;
