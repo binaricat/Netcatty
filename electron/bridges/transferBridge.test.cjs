@@ -2178,6 +2178,208 @@ test("resumable stream transfers pause without losing their checkpoint and conti
   assert.equal((await running).error, undefined);
 });
 
+test("stream local-copy pause survives write-stream drain without auto-resuming the pipe", async (t) => {
+  // Regression for transfer-list pause (#2458): Node's .pipe() resumes the source
+  // on destination 'drain'. SFTP upload no longer uses serial WriteStream; cover
+  // unpipe on local→local copies (same pauseTransfer path). Mock write stream
+  // still persists bytes so pause checkpoint stat succeeds.
+  const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-transfer-pipe-pause-local-"));
+  t.after(async () => {
+    await fs.promises.rm(tempDir, { recursive: true, force: true });
+  });
+
+  const payload = Buffer.alloc(256 * 1024, 91);
+  const sourcePath = path.join(tempDir, "source.bin");
+  const targetPath = path.join(tempDir, "target.bin");
+  await fs.promises.writeFile(sourcePath, payload);
+
+  let durableBytes = 0;
+  const pendingWriteCallbacks = [];
+  let holdWrites = true;
+  let activeWriteStream = null;
+  const originalCreateWriteStream = fs.createWriteStream;
+  t.after(() => {
+    fs.createWriteStream = originalCreateWriteStream;
+  });
+  fs.createWriteStream = (filePath, options) => {
+    const real = originalCreateWriteStream(filePath, options);
+    activeWriteStream = new Writable({
+      highWaterMark: 16,
+      write(chunk, encoding, callback) {
+        real.write(chunk, encoding, (err) => {
+          if (err) return callback(err);
+          durableBytes += chunk.length;
+          activeWriteStream.bytesWritten = durableBytes;
+          if (holdWrites) {
+            pendingWriteCallbacks.push(callback);
+            return;
+          }
+          callback();
+        });
+      },
+      final(callback) {
+        real.end(callback);
+      },
+      destroy(err, callback) {
+        real.destroy(err);
+        callback(err);
+      },
+    });
+    activeWriteStream.bytesWritten = 0;
+    return activeWriteStream;
+  };
+
+  transferBridge.init({ sftpClients: new Map() });
+  const sender = createSender();
+  const running = transferBridge.startTransfer(
+    { sender },
+    {
+      transferId: "local-pipe-pause",
+      sourcePath,
+      targetPath,
+      sourceType: "local",
+      targetType: "local",
+      totalBytes: payload.length,
+      resumable: true,
+    },
+  );
+
+  const backpressureDeadline = Date.now() + 2000;
+  while (pendingWriteCallbacks.length === 0 && Date.now() < backpressureDeadline) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  assert.ok(pendingWriteCallbacks.length > 0, "write stream should be backpressured");
+  const bytesWhenPauseRequested = durableBytes;
+
+  const pausing = transferBridge.pauseTransfer(null, { transferId: "local-pipe-pause" });
+  holdWrites = false;
+  for (const callback of pendingWriteCallbacks.splice(0)) callback();
+  const paused = await pausing;
+  assert.equal(paused.success, true, paused.reason);
+  const checkpoint = paused.checkpointBytes;
+  assert.ok(checkpoint >= bytesWhenPauseRequested);
+  assert.ok(
+    checkpoint < payload.length,
+    "pause must stop before the copy finishes under backpressure",
+  );
+
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(
+    durableBytes,
+    checkpoint,
+    "paused stream copy must not keep writing after drain",
+  );
+
+  assert.deepEqual(
+    await transferBridge.resumeTransfer(null, { transferId: "local-pipe-pause" }),
+    { success: true },
+  );
+  assert.equal((await running).error, undefined);
+  assert.equal(durableBytes, payload.length);
+});
+
+test("repeated resume does not double-pipe the same stream pair", async (t) => {
+  const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-transfer-double-resume-local-"));
+  t.after(async () => {
+    await fs.promises.rm(tempDir, { recursive: true, force: true });
+  });
+
+  const payload = Buffer.alloc(256 * 1024, 77);
+  const sourcePath = path.join(tempDir, "source.bin");
+  const targetPath = path.join(tempDir, "target.bin");
+  await fs.promises.writeFile(sourcePath, payload);
+
+  let durableBytes = 0;
+  const pendingWriteCallbacks = [];
+  let holdWrites = true;
+  let pipeCount = 0;
+  let activeWriteStream = null;
+  const originalCreateWriteStream = fs.createWriteStream;
+  t.after(() => {
+    fs.createWriteStream = originalCreateWriteStream;
+  });
+  fs.createWriteStream = (filePath, options) => {
+    const real = originalCreateWriteStream(filePath, options);
+    activeWriteStream = new Writable({
+      highWaterMark: 16,
+      write(chunk, encoding, callback) {
+        real.write(chunk, encoding, (err) => {
+          if (err) return callback(err);
+          durableBytes += chunk.length;
+          activeWriteStream.bytesWritten = durableBytes;
+          if (holdWrites) {
+            pendingWriteCallbacks.push(callback);
+            return;
+          }
+          callback();
+        });
+      },
+      final(callback) {
+        real.end(callback);
+      },
+      destroy(err, callback) {
+        real.destroy(err);
+        callback(err);
+      },
+    });
+    activeWriteStream.bytesWritten = 0;
+    return activeWriteStream;
+  };
+  const originalReadablePipe = Readable.prototype.pipe;
+  t.after(() => {
+    Readable.prototype.pipe = originalReadablePipe;
+  });
+  Readable.prototype.pipe = function patchedPipe(dest, ...args) {
+    if (dest === activeWriteStream) pipeCount += 1;
+    return originalReadablePipe.apply(this, [dest, ...args]);
+  };
+
+  transferBridge.init({ sftpClients: new Map() });
+  const sender = createSender();
+  const running = transferBridge.startTransfer(
+    { sender },
+    {
+      transferId: "local-double-resume",
+      sourcePath,
+      targetPath,
+      sourceType: "local",
+      targetType: "local",
+      totalBytes: payload.length,
+      resumable: true,
+    },
+  );
+
+  const backpressureDeadline = Date.now() + 2000;
+  while (pendingWriteCallbacks.length === 0 && Date.now() < backpressureDeadline) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  assert.ok(pendingWriteCallbacks.length > 0, "write stream should be backpressured");
+
+  const pausing = transferBridge.pauseTransfer(null, { transferId: "local-double-resume" });
+  holdWrites = false;
+  for (const callback of pendingWriteCallbacks.splice(0)) callback();
+  const paused = await pausing;
+  assert.equal(paused.success, true, paused.reason);
+  const pipesAfterPause = pipeCount;
+
+  assert.deepEqual(
+    await transferBridge.resumeTransfer(null, { transferId: "local-double-resume" }),
+    { success: true },
+  );
+  assert.deepEqual(
+    await transferBridge.resumeTransfer(null, { transferId: "local-double-resume" }),
+    { success: true },
+  );
+  assert.equal(
+    pipeCount,
+    pipesAfterPause + 1,
+    "second resume must not call pipe() again on the same pair",
+  );
+
+  assert.equal((await running).error, undefined);
+  assert.equal(durableBytes, payload.length);
+});
+
 test("resumable downloads never promote a partial staged file", async (t) => {
   const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-transfer-partial-test-"));
   t.after(async () => {

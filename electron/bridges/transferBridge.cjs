@@ -968,6 +968,7 @@ async function uploadFile(localPath, remotePath, client, fileSize, transfer, sen
   // Fail closed — do not crawl via serial WriteStream (industry practice:
   // OpenSSH/Electerm/WinSCP keep outstanding-request fanout; they do not
   // silently degrade to 1-in-flight put on failure).
+  // Main's #2458 pause/unpipe fix still applies to download/local stream paths.
   transfer.uploadStrategy = "failed";
   const cause = lastPipelineError;
   const message = cause?.message
@@ -1732,6 +1733,10 @@ async function downloadFile(remotePath, localPath, client, fileSize, transfer, s
     transfer.writeStream = writeStream;
     if (transfer.paused) {
       try { readStream.pause(); } catch { }
+      transfer.streamsUnpiped = true;
+    } else {
+      readStream.pipe(writeStream);
+      transfer.streamsUnpiped = false;
     }
 
     const cleanup = (err) => {
@@ -1767,7 +1772,6 @@ async function downloadFile(remotePath, localPath, client, fileSize, transfer, s
     writeStream.on('close', () => {
       if (transfer.cancelled) cleanup(new Error('Transfer cancelled'));
     });
-    readStream.pipe(writeStream);
   });
   if (initialSource) {
     const latestSource = await client.stat(remotePath);
@@ -1824,6 +1828,9 @@ async function startTransferNow(event, payload, onProgress) {
     targetEncoding,
     readStream: null,
     writeStream: null,
+    // True after unpipe (or when open skipped pipe while paused). Guards
+    // resumeStreamPair against duplicate pipe() which doubles writes.
+    streamsUnpiped: false,
     abort: null,
   };
   activeTransfers.set(transferId, transfer);
@@ -2153,6 +2160,10 @@ async function startTransferNow(event, payload, onProgress) {
         transfer.writeStream = writeStream;
         if (transfer.paused) {
           try { readStream.pause(); } catch { }
+          transfer.streamsUnpiped = true;
+        } else {
+          readStream.pipe(writeStream);
+          transfer.streamsUnpiped = false;
         }
 
         const cleanup = (err) => {
@@ -2188,7 +2199,6 @@ async function startTransferNow(event, payload, onProgress) {
         writeStream.on('close', () => {
           if (transfer.cancelled) cleanup(new Error('Transfer cancelled'));
         });
-        readStream.pipe(writeStream);
       });
       if (transfer.resumable && transfer.stagedLocalPath) {
         await promoteLocalTransfer(transfer.stagedLocalPath, targetPath);
@@ -2570,6 +2580,19 @@ function clearPendingCancel(transferId) {
   if (transferId) pendingCancelTransferIds.delete(String(transferId));
 }
 
+/**
+ * Re-attach a paused stream pair and continue reading.
+ * pauseTransfer unpipes so destination drain cannot auto-resume the source.
+ * Idempotent: Node does not dedupe pipe(), so only re-pipe while unpiped.
+ */
+function resumeStreamPair(transfer) {
+  if (transfer.readStream && transfer.writeStream && transfer.streamsUnpiped) {
+    try { transfer.readStream.pipe(transfer.writeStream); } catch { }
+    transfer.streamsUnpiped = false;
+  }
+  try { transfer.readStream?.resume?.(); } catch { }
+}
+
 async function pauseTransfer(_event, payload) {
   const queuedResult = pauseQueuedTransfer(payload?.transferId);
   if (queuedResult) return queuedResult;
@@ -2597,6 +2620,14 @@ async function pauseTransfer(_event, payload) {
   transfer.pauseSuperseded = false;
   const pauseOperation = (async () => {
   transfer.paused = true;
+  // Stream transfers use readStream.pipe(writeStream). Node's pipe resumes the
+  // source on destination 'drain', and pauseTransfer waits for that drain to
+  // flush durable bytes — so pause() alone is undone and upload continues while
+  // the UI shows paused. Unpipe first; resumeTransfer re-pipes.
+  if (transfer.readStream && transfer.writeStream) {
+    try { transfer.readStream.unpipe?.(transfer.writeStream); } catch { }
+    transfer.streamsUnpiped = true;
+  }
   try { transfer.readStream?.pause?.(); } catch { }
   const usesContiguousRangeCheckpoint = typeof transfer.waitForPause === "function";
   if (usesContiguousRangeCheckpoint) {
@@ -2654,7 +2685,7 @@ async function pauseTransfer(_event, payload) {
     }
   } catch {
     transfer.paused = false;
-    try { transfer.readStream?.resume?.(); } catch { }
+    resumeStreamPair(transfer);
     return { success: false, reason: "Could not verify the saved transfer checkpoint" };
   }
   if (transfer.resumeStage === 'download') transfer.downloadCheckpointBytes = transfer.checkpointBytes;
@@ -2669,7 +2700,7 @@ async function pauseTransfer(_event, payload) {
       });
     } catch {
       transfer.paused = false;
-      try { transfer.readStream?.resume?.(); } catch { }
+      resumeStreamPair(transfer);
       return { success: false, reason: "Could not verify that the source is safe to resume" };
     }
   }
@@ -2717,9 +2748,13 @@ async function resumeTransfer(_event, payload) {
   if (currentTransfer !== transfer || transfer.cancelled) {
     return { success: false, reason: "Transfer is no longer active" };
   }
+  // Already flowing (e.g. double-click resume): do not pipe() again.
+  if (!transfer.paused) {
+    return { success: true };
+  }
   transfer.paused = false;
   transfer.pauseSuperseded = false;
-  try { transfer.readStream?.resume?.(); } catch { }
+  resumeStreamPair(transfer);
   return { success: true };
 }
 
