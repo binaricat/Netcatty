@@ -1470,3 +1470,44 @@ test('buildPullRequestBody strips agent markers and appends Fixes when missing',
   assert.equal((body.match(/<!-- cursor-bot-pr -->/g) || []).length, 1);
   assert.match(body, /Fixes #99/);
 });
+
+test('buildPullRequestBody still appends Fixes when body only has Related to', () => {
+  const body = auto.buildPullRequestBody({
+    issueNumber: 2449,
+    issueTitle: '[Bug] slow upload',
+    summary: 'raise fanout',
+    agentBody: [
+      '## Summary',
+      '',
+      '- Raise SFTP WRITE fanout for multi-ms RTT paths on LAN and public hosts.',
+      '- Keep chunk size at 32KB for compatibility with picky servers.',
+      '',
+      '## Testing',
+      '',
+      '- node --test electron/bridges/transferLimits.test.cjs',
+      '',
+      'Related to #2449',
+    ].join('\n'),
+  });
+  assert.match(body, /Related to #2449/);
+  assert.match(body, /Fixes #2449/);
+});
+
+test('buildPullRequestBody does not duplicate Fixes when Closes already present', () => {
+  const body = auto.buildPullRequestBody({
+    issueNumber: 10,
+    issueTitle: 'x',
+    summary: 'y',
+    agentBody: [
+      '## Summary',
+      '',
+      '- Concrete change one with enough text for a substantial agent body check.',
+      '- Concrete change two covering the secondary behavior path as well.',
+      '',
+      'Closes #10',
+    ].join('\n'),
+  });
+  assert.equal((body.match(/Closes #10|Fixes #10/gi) || []).length, 1);
+  assert.match(body, /Closes #10/);
+  assert.doesNotMatch(body, /Fixes #10/);
+});

@@ -755,7 +755,15 @@ function buildPullRequestBody({
   const longEnough = countSummaryUnits(body) >= 120;
 
   if (body && (hasStructure || longEnough)) {
-    if (n && !new RegExp(`(?:Fixes|Closes|Related to)\\s+#${n}\\b`, 'i').test(body)) {
+    // Only closing keywords suppress the footer. "Related to #N" (PR template
+    // wording) must not leave the triaged issue open after the bot fix merges.
+    if (
+      n &&
+      !new RegExp(
+        `(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\\s+#${n}\\b`,
+        'i',
+      ).test(body)
+    ) {
       body = `${body}\n\nFixes #${n}`;
     }
     if (!/^##\s+Automation\b/im.test(body)) {
