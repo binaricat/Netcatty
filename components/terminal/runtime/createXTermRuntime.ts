@@ -41,7 +41,7 @@ import { logger } from "../../../lib/logger";
 import { isMacPlatform } from "../../../lib/utils";
 import { netcattyBridge } from "../../../infrastructure/services/netcattyBridge";
 import {
-  clearTerminalViewport,
+  clearTerminalViewportAndSyncPty,
   installEraseInDisplayHandlers,
 } from "../clearTerminalViewport";
 import { getTerminalSelectionForClipboard } from "../normalizeTerminalSelection";
@@ -1463,15 +1463,15 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
               break;
             }
             case "clearBuffer": {
-              const didClearViewport = clearTerminalViewport(term, {
+              clearTerminalViewportAndSyncPty(term, {
                 wipeScrollback: ctx.terminalSettingsRef.current?.clearWipesScrollback ?? true,
+                syncPty: () => {
+                  const clearId = ctx.sessionRef.current;
+                  if (clearId) {
+                    ctx.terminalBackend.clearSessionPtyBuffer?.(clearId);
+                  }
+                },
               });
-              // Keep ConPTY cursor/buffer in sync after a local clear so the
-              // next Enter does not reprint a tall blank gap (Windows PowerShell).
-              const clearId = ctx.sessionRef.current;
-              if (didClearViewport && clearId) {
-                ctx.terminalBackend.clearSessionPtyBuffer?.(clearId);
-              }
               break;
             }
             case "searchTerminal": {

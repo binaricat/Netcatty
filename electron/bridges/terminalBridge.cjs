@@ -910,6 +910,8 @@ function startLocalSession(event, payload) {
     env,
     cwd,
     encoding: null, // Return Buffer for ZMODEM binary support
+    // node-pty can only clear ConPTY through its bundled conpty.dll.
+    useConptyDll: process.platform === "win32",
   });
   
   const session = {

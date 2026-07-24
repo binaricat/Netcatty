@@ -50,8 +50,9 @@ function loadBridgeWithFakes(spawns, sentries) {
   Module._load = function patchedLoad(request, parent, isMain) {
     if (request === "node-pty") {
       return {
-        spawn() {
+        spawn(...spawnArgs) {
           const pty = new FakePty();
+          pty.spawnArgs = spawnArgs;
           spawns.push(pty);
           return pty;
         },
@@ -97,6 +98,35 @@ function loadBridgeWithFakes(spawns, sentries) {
     Module._load = originalLoad;
   }
 }
+
+test("Windows local terminals enable the bundled ConPTY implementation required for clear", () => {
+  const spawns = [];
+  const sentries = [];
+  const sessions = new Map();
+  const bridge = loadBridgeWithFakes(spawns, sentries);
+  const platformDescriptor = Object.getOwnPropertyDescriptor(process, "platform");
+
+  try {
+    Object.defineProperty(process, "platform", { ...platformDescriptor, value: "win32" });
+    bridge.init({
+      sessions,
+      electronModule: {
+        webContents: {
+          fromId: () => ({ send() {} }),
+        },
+      },
+    });
+    bridge.startLocalSession(
+      { sender: { id: 7 } },
+      { sessionId: "windows-clear", shell: "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" },
+    );
+
+    assert.equal(spawns.length, 1);
+    assert.equal(spawns[0].spawnArgs[2].useConptyDll, true);
+  } finally {
+    Object.defineProperty(process, "platform", platformDescriptor);
+  }
+});
 
 test("local terminal buffers incoming flood while renderer flow is paused", () => {
   const spawns = [];

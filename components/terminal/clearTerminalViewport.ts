@@ -30,6 +30,10 @@ type ClearTerminalViewportOptions = {
   wipeScrollback?: boolean;
 };
 
+type ClearTerminalViewportAndSyncPtyOptions = ClearTerminalViewportOptions & {
+  syncPty: () => void;
+};
+
 type AppendEraseScrollbackOptions = {
   wipeScrollback: boolean;
   normalScreen: boolean;
@@ -157,6 +161,17 @@ export const clearTerminalViewport = (
     term.scrollToBottom();
   });
   return true;
+};
+
+export const clearTerminalViewportAndSyncPty = (
+  term: XTerm,
+  { syncPty, ...options }: ClearTerminalViewportAndSyncPtyOptions,
+): boolean => {
+  const didClearViewport = clearTerminalViewport(term, options);
+  if (didClearViewport) {
+    syncPty();
+  }
+  return didClearViewport;
 };
 
 export const isEraseScrollbackSequence = (params: CsiParam[]): boolean =>

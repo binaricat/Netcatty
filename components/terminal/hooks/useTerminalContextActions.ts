@@ -4,7 +4,7 @@ import type { RefObject } from "react";
 import { netcattyBridge } from "../../../infrastructure/services/netcattyBridge";
 import { logger } from "../../../lib/logger";
 import { pasteTextIntoTerminal } from "../runtime/terminalUserPaste";
-import { clearTerminalViewport } from "../clearTerminalViewport";
+import { clearTerminalViewportAndSyncPty } from "../clearTerminalViewport";
 import {
   handleRemoteClipboardImageUpload,
   type RemoteClipboardImageUploadResult,
@@ -186,13 +186,15 @@ export const useTerminalContextActions = ({
   const onClear = useCallback(() => {
     const term = termRef.current;
     if (!term) return;
-    const didClearViewport = clearTerminalViewport(term, {
+    clearTerminalViewportAndSyncPty(term, {
       wipeScrollback: clearWipesScrollbackRef?.current ?? true,
+      syncPty: () => {
+        const id = sessionRef.current;
+        if (id) {
+          terminalBackend.clearSessionPtyBuffer?.(id);
+        }
+      },
     });
-    const id = sessionRef.current;
-    if (didClearViewport && id) {
-      terminalBackend.clearSessionPtyBuffer?.(id);
-    }
   }, [clearWipesScrollbackRef, sessionRef, termRef, terminalBackend]);
 
   const onSelectWord = useCallback(() => {
