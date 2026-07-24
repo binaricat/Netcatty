@@ -101,22 +101,38 @@ Use `already_available` when **all** of these hold after reading code:
 - You found the owning UI/settings/code path and can point to a **concrete
   entry point** a user can follow today (menu path, panel name, toggle label,
   button text, shortcut, host type, etc.).
-- The existing behavior **covers the request** (or the obvious interpretation
-  of it) without a material product gap. Small polish differences do not
-  block this category if the core need is already met.
+- The existing behavior **covers the primary / literal ask** without a
+  material product gap. Small polish differences do not block this category
+  if the core need is already met.
 - Confidence ≥ 0.8. If you only *suspect* it exists, do **not** use this
   category — use `feature_defer` / `bug_needs_info` / `other` instead.
+
+**Primary-ask rule (critical):** classify against the **most natural reading**
+of the title/body, not an upgraded mega-feature you invent.
+
+- “AI 多会话 / multi-session chat” → existing new-chat + history is enough →
+  `already_available` (do **not** reframe as “global cross-host agent”).
+- “增加右边栏 / right sidebar” → existing move-panel-to-right is enough →
+  `already_available` (do **not** reframe as “left+right dual panels at once”).
+- Only choose `feature_defer` when the user **explicitly** asks for the larger
+  gap (e.g. “左右同时开两个不同面板”, “跨所有主机共享一个全局 AI 会话”).
+
+When the primary ask is already covered, still **briefly** mention any larger
+related gap in the reply if useful, but the category must stay
+`already_available` so the issue is closed with a how-to.
 
 Examples that should be `already_available`:
 
 - User asks for multi-session AI chat, and the sidebar already supports
   multiple chat sessions with a visible new-session / history control.
-- User asks for a right-side panel that already exists under a named control.
+- User asks for a right-side panel that already exists under a named control
+  (including “move side panel to the right”).
 - User cannot find a setting that is already present under Settings → …
 
 Do **not** use `already_available` when:
 
-- Only a partial workaround exists and the requested product gap is real.
+- Only a partial workaround exists and the **primary** requested product gap
+  is still real after the literal reading.
 - The feature is unfinished, gated behind `NETCATTY_PLUGIN_DEV`, or clearly
   experimental/internal-only without a user-facing entry.
 - You cannot name an accurate click-path from the code you opened.
