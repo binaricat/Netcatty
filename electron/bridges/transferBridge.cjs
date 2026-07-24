@@ -864,6 +864,7 @@ async function runPausableConcurrentRanges({
   copyRange,
   sendProgress,
   abortChannel,
+  sftp = null,
 }) {
   let nextOffset = checkpoint;
   // Progress may complete out of order, but the resume checkpoint must never
@@ -876,97 +877,125 @@ async function runPausableConcurrentRanges({
   let terminalError = null;
   let pauseResolvers = [];
 
+  const publishContiguousCheckpoint = (force = false) => {
+    if (transfer.cancelled) return;
+    sendProgress(transferred, fileSize, {
+      checkpointBytes: contiguousCheckpoint,
+      ...(force ? { force: true } : {}),
+    });
+  };
+
   const settlePauseWaiters = () => {
     if (!transfer.paused || active !== 0 || pauseResolvers.length === 0) return;
+    // Flush the contiguous offset before resolving pause so pauseTransfer
+    // never has to re-stat a sparse staged file.
+    publishContiguousCheckpoint(true);
     const resolvers = pauseResolvers;
     pauseResolvers = [];
     for (const resolve of resolvers) resolve();
   };
 
-  await new Promise((resolve, reject) => {
-    const finish = (error) => {
-      if (settled) return;
-      if (error) terminalError = terminalError || error;
-      if (active > 0) return;
-      settled = true;
-      if (terminalError) reject(terminalError);
-      else resolve();
-    };
+  let onSftpError = null;
 
-    const abort = (error = new Error("Transfer cancelled")) => {
-      terminalError = terminalError || error;
-      try { abortChannel?.(); } catch { }
-      finish(terminalError);
-    };
+  try {
+    await new Promise((resolve, reject) => {
+      const finish = (error) => {
+        if (settled) return;
+        if (error) terminalError = terminalError || error;
+        if (active > 0) return;
+        settled = true;
+        if (terminalError) reject(terminalError);
+        else resolve();
+      };
 
-    const pump = () => {
-      if (settled) return;
-      if (terminalError || transfer.cancelled) {
-        finish(terminalError || new Error("Transfer cancelled"));
-        return;
-      }
-      if (transfer.paused) {
-        settlePauseWaiters();
-        return;
-      }
+      const abort = (error = new Error("Transfer cancelled")) => {
+        terminalError = terminalError || error;
+        try { abortChannel?.(); } catch { }
+        finish(terminalError);
+      };
 
-      while (
-        active < concurrency
-        && nextOffset < fileSize
-        && !transfer.paused
-        && !transfer.cancelled
-      ) {
-        const position = nextOffset;
-        const length = Math.min(TRANSFER_CHUNK_SIZE, fileSize - position);
-        nextOffset += length;
-        active += 1;
-
-        void copyRange(position, length)
-          .then(() => {
-            transferred += length;
-            completedRanges.set(position, position + length);
-            while (completedRanges.has(contiguousCheckpoint)) {
-              const nextCheckpoint = completedRanges.get(contiguousCheckpoint);
-              completedRanges.delete(contiguousCheckpoint);
-              contiguousCheckpoint = nextCheckpoint;
-            }
-            if (!transfer.cancelled) {
-              sendProgress(transferred, fileSize, { checkpointBytes: contiguousCheckpoint });
-            }
-          })
-          .catch((error) => abort(error))
-          .finally(() => {
-            active -= 1;
-            settlePauseWaiters();
-            if (terminalError || transfer.cancelled) {
-              finish(terminalError || new Error("Transfer cancelled"));
-            } else if (contiguousCheckpoint === fileSize) finish();
-            else pump();
-          });
+      // Channel-level errors must not become unhandled EventEmitter crashes.
+      if (sftp && typeof sftp.on === "function") {
+        onSftpError = (error) => {
+          abort(error || new Error("Isolated SFTP channel error"));
+        };
+        sftp.on("error", onSftpError);
       }
 
-      if (fileSize === checkpoint && active === 0) finish();
-    };
+      const pump = () => {
+        if (settled) return;
+        if (terminalError || transfer.cancelled) {
+          finish(terminalError || new Error("Transfer cancelled"));
+          return;
+        }
+        if (transfer.paused) {
+          settlePauseWaiters();
+          return;
+        }
 
-    transfer.readStream = {
-      pause() {
-        transfer.paused = true;
-      },
-      resume() {
-        transfer.paused = false;
-        pump();
-      },
-      destroy() {
-        abort();
-      },
-    };
-    transfer.waitForPause = () => {
-      if (active === 0) return Promise.resolve();
-      return new Promise((resolvePause) => pauseResolvers.push(resolvePause));
-    };
-    transfer.abort = abort;
-    pump();
-  });
+        while (
+          active < concurrency
+          && nextOffset < fileSize
+          && !transfer.paused
+          && !transfer.cancelled
+        ) {
+          const position = nextOffset;
+          const length = Math.min(TRANSFER_CHUNK_SIZE, fileSize - position);
+          nextOffset += length;
+          active += 1;
+
+          void copyRange(position, length)
+            .then(() => {
+              transferred += length;
+              completedRanges.set(position, position + length);
+              while (completedRanges.has(contiguousCheckpoint)) {
+                const nextCheckpoint = completedRanges.get(contiguousCheckpoint);
+                completedRanges.delete(contiguousCheckpoint);
+                contiguousCheckpoint = nextCheckpoint;
+              }
+              publishContiguousCheckpoint(false);
+            })
+            .catch((error) => abort(error))
+            .finally(() => {
+              active -= 1;
+              settlePauseWaiters();
+              if (terminalError || transfer.cancelled) {
+                finish(terminalError || new Error("Transfer cancelled"));
+              } else if (contiguousCheckpoint === fileSize) finish();
+              else pump();
+            });
+        }
+
+        if (fileSize === checkpoint && active === 0) finish();
+      };
+
+      transfer.readStream = {
+        pause() {
+          transfer.paused = true;
+        },
+        resume() {
+          transfer.paused = false;
+          pump();
+        },
+        destroy() {
+          abort();
+        },
+      };
+      transfer.waitForPause = () => {
+        if (active === 0) {
+          publishContiguousCheckpoint(true);
+          return Promise.resolve();
+        }
+        return new Promise((resolvePause) => pauseResolvers.push(resolvePause));
+      };
+      transfer.abort = abort;
+      pump();
+    });
+  } finally {
+    if (sftp && onSftpError && typeof sftp.removeListener === "function") {
+      try { sftp.removeListener("error", onSftpError); } catch { }
+    }
+  }
 }
 
 async function uploadFileResumableFast(
@@ -1003,6 +1032,7 @@ async function uploadFileResumableFast(
         },
         sendProgress,
         abortChannel: () => sftp.end?.(),
+        sftp,
       });
     } catch (error) {
       failed = true;
@@ -1060,6 +1090,7 @@ async function downloadFileResumableFast(
         },
         sendProgress,
         abortChannel: () => sftp.end?.(),
+        sftp,
       });
     } catch (error) {
       failed = true;
