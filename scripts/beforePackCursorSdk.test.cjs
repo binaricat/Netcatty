@@ -7,6 +7,7 @@ const path = require("node:path");
 const {
   CURSOR_PLATFORM_PACKAGES,
   ensureCursorSdkPlatformPackages,
+  rebuildPatchedNodePty,
 } = require("./beforePackCursorSdk.cjs");
 
 function writeJson(filePath, value) {
@@ -59,4 +60,53 @@ test("ensureCursorSdkPlatformPackages is a no-op when target packages exist", (t
 
   assert.deepEqual(installed, []);
   assert.deepEqual(calls, []);
+});
+
+test("Windows packaging rebuilds patched node-pty from source for the target architecture", () => {
+  const calls = [];
+  const rebuilt = rebuildPatchedNodePty({
+    projectDir: "/workspace/netcatty",
+    platform: "win32",
+    arch: 3,
+    run: (...args) => calls.push(args),
+    logger: { log() {} },
+  });
+
+  assert.equal(rebuilt, true);
+  assert.equal(calls.length, 1);
+  assert.match(calls[0][0], /node_modules[/\\]\.bin[/\\]electron-rebuild(?:\.cmd)?$/);
+  assert.deepEqual(calls[0][1], [
+    "--force",
+    "--build-from-source",
+    "--which-module",
+    "node-pty",
+    "--arch",
+    "arm64",
+  ]);
+  assert.equal(calls[0][2].cwd, "/workspace/netcatty");
+});
+
+test("non-Windows packaging keeps the prebuilt node-pty path", () => {
+  const calls = [];
+  const rebuilt = rebuildPatchedNodePty({
+    projectDir: "/workspace/netcatty",
+    platform: "linux",
+    arch: 1,
+    run: (...args) => calls.push(args),
+    logger: { log() {} },
+  });
+
+  assert.equal(rebuilt, false);
+  assert.deepEqual(calls, []);
+});
+
+test("node-pty patch matches bundled ConPTY clear ABI and preserves the cursor row", () => {
+  const patch = fs.readFileSync(
+    path.join(__dirname, "..", "patches", "node-pty+1.1.0.patch"),
+    "utf8",
+  );
+
+  assert.match(patch, /ConptyClearPseudoConsole\(HPCON hPC, BOOL keepCursorRow\)/);
+  assert.match(patch, /pfnClearPseudoConsole\(handle->hpc, TRUE\)/);
+  assert.doesNotMatch(patch, /node_modules\/node-pty\/build\//);
 });
