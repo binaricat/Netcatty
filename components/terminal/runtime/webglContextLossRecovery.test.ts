@@ -111,6 +111,50 @@ test("burst losses trip a persistent breaker that ensure and suspend cannot rear
   assert.equal(harness.loadedStates.at(-1), false);
 });
 
+// Periodic GPU context loss (~every 15s on some Linux drivers) must still trip the
+// breaker. A short recovery window ages each prior loss out, so WebGL keeps
+// dispose→rebuild cycling and the terminal flashes forever (#2436).
+test("periodic losses spaced ~15s apart trip the breaker instead of flashing forever", () => {
+  const harness = createHarness();
+  harness.controller.ensure();
+
+  for (let loss = 0; loss < 3; loss += 1) {
+    harness.setTime(loss * 15_000);
+    harness.addons[loss].loseContext();
+    if (loss < 2) harness.runNextTimer();
+  }
+
+  assert.equal(harness.pendingTimers, 0);
+  assert.ok(harness.warnings.some((warning) => warning.includes("staying on DOM renderer")));
+  assert.equal(harness.loadCalls, 3);
+  assert.equal(harness.controller.getAddon(), null);
+  assert.equal(harness.loadedStates.at(-1), false);
+
+  harness.controller.ensure();
+  assert.equal(harness.loadCalls, 3);
+});
+
+test("a quiet gap longer than the recovery window allows a fresh recovery", () => {
+  const harness = createHarness();
+  harness.controller.ensure();
+
+  harness.setTime(0);
+  harness.addons[0].loseContext();
+  harness.runNextTimer();
+  harness.setTime(15_000);
+  harness.addons[1].loseContext();
+  harness.runNextTimer();
+
+  // After the recovery window elapses with no further losses, a later single
+  // loss should recover once rather than staying broken forever.
+  harness.setTime(15_000 + 60_001);
+  harness.addons[2].loseContext();
+  assert.equal(harness.pendingTimers, 1);
+  harness.runNextTimer();
+  assert.equal(harness.loadCalls, 4);
+  assert.equal(harness.loadedStates.at(-1), true);
+});
+
 test("suspend and dispose cancel pending recovery callbacks", () => {
   for (const action of ["suspend", "dispose"] as const) {
     const harness = createHarness();
