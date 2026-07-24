@@ -503,11 +503,25 @@ async function truncateRemoteStagedToCheckpoint(client, stagedRemote, checkpoint
 
 async function prepareStreamFallbackAfterRangeFailure(transfer, client) {
   const checkpoint = Math.max(0, Number(transfer?.checkpointBytes) || 0);
-  if (transfer?.stagedLocalPath) {
+  // Only truncate partial *target* staging. In SFTP→SFTP copies, stagedLocalPath
+  // is the fully-downloaded temp *source* during the upload phase — never shrink it.
+  const localIsPartialTarget =
+    transfer?.stagedLocalPath
+    && transfer.resumeStage !== "upload"
+    && (
+      transfer.resumeStage === "download"
+      || transfer.sourceType === "sftp" && transfer.targetType === "local"
+      || transfer.sourceType === "local" && transfer.targetType === "local"
+    );
+  if (localIsPartialTarget) {
     await truncateStagedPathToCheckpoint(transfer.stagedLocalPath, checkpoint);
   }
   if (transfer?.stagedRemote) {
-    await truncateRemoteStagedToCheckpoint(client, transfer.stagedRemote, checkpoint);
+    await truncateRemoteStagedToCheckpoint(
+      transfer.stagedRemote.client || client,
+      transfer.stagedRemote,
+      checkpoint,
+    );
   }
 }
 
@@ -2106,18 +2120,8 @@ async function pauseTransfer(_event, payload) {
     // byte. File size may extend past a hole when ranges finish out of order.
     if (usesContiguousRangeCheckpoint) {
       // Keep the checkpoint supplied by runPausableConcurrentRanges, and
-      // shrink any sparse tail so a later pause/stat cannot overshoot.
-      const checkpoint = Math.max(0, Number(transfer.checkpointBytes) || 0);
-      if (transfer.stagedLocalPath) {
-        await truncateStagedPathToCheckpoint(transfer.stagedLocalPath, checkpoint);
-      }
-      if (transfer.stagedRemote) {
-        await truncateRemoteStagedToCheckpoint(
-          transfer.stagedRemote.client,
-          transfer.stagedRemote,
-          checkpoint,
-        );
-      }
+      // shrink any sparse *target* tail so a later pause/stat cannot overshoot.
+      await prepareStreamFallbackAfterRangeFailure(transfer, transfer.stagedRemote?.client);
     } else if (transfer.stagedLocalPath) {
       const stat = await fs.promises.stat(transfer.stagedLocalPath);
       transfer.checkpointBytes = stat.size;
