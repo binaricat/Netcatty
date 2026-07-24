@@ -123,3 +123,28 @@ test("a cancelled soft-hidden upgrade resumes its renderer", () => {
   assert.match(helperBody, /clearTextureAtlas\(\)/);
   assert.match(helperBody, /safeFitRef\.current\(\{ force: true \}\)/);
 });
+
+test("snapshot and handoff paths reject output that misses the settle deadline", () => {
+  const source = readFileSync(new URL("../Terminal.tsx", import.meta.url), "utf8");
+
+  const drainWarningIndex = source.indexOf("Terminal output drain did not settle before the deadline");
+  const drainReturnIndex = source.indexOf("return;", drainWarningIndex);
+  const drainResponseIndex = source.indexOf("respondTerminalOutputDrain", drainReturnIndex);
+  assert.ok(drainWarningIndex >= 0 && drainWarningIndex < drainReturnIndex);
+  assert.ok(drainReturnIndex < drainResponseIndex);
+
+  const snapshotWarningIndex = source.indexOf("Terminal snapshot drain did not settle before the deadline");
+  const snapshotReturnIndex = source.indexOf("return;", snapshotWarningIndex);
+  const snapshotSerializeIndex = source.indexOf("serializeAddonRef.current.serialize", snapshotReturnIndex);
+  assert.ok(snapshotWarningIndex >= 0 && snapshotWarningIndex < snapshotReturnIndex);
+  assert.ok(snapshotReturnIndex < snapshotSerializeIndex);
+
+  assert.match(
+    source,
+    /const flushed = await flushPendingTerminalWritesBeforeHibernate\(term\);\s*if \(!flushed\) \{\s*throw new Error\("Terminal output did not settle before applying the snapshot"\);\s*\}\s*term\.reset\(\)/,
+  );
+  assert.match(
+    source,
+    /const flushed = await flushPendingTerminalWritesBeforeHibernate\(snapshotTerm\);\s*if \(!flushed\) \{\s*throw new Error\("Terminal output did not settle before closing the attached display"\);\s*\}/,
+  );
+});

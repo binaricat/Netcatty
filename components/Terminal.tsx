@@ -1307,7 +1307,13 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     if (!bridge?.onTerminalOutputDrainRequest || !bridge?.respondTerminalOutputDrain) return undefined;
     return bridge.onTerminalOutputDrainRequest(sessionId, async (payload) => {
       const term = termRef.current;
-      if (term) await flushPendingTerminalWritesBeforeHibernate(term);
+      if (term) {
+        const flushed = await flushPendingTerminalWritesBeforeHibernate(term);
+        if (!flushed) {
+          logger.warn("Terminal output drain did not settle before the deadline", { sessionId });
+          return;
+        }
+      }
       flushTerminalSessionFlowAck(sessionId);
       bridge.respondTerminalOutputDrain?.(payload.requestId);
     });
@@ -1325,7 +1331,13 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         let snapshot = "";
         try {
           if (serializeAddonRef.current) {
-            if (termRef.current) await flushPendingTerminalWritesBeforeHibernate(termRef.current);
+            if (termRef.current) {
+              const flushed = await flushPendingTerminalWritesBeforeHibernate(termRef.current);
+              if (!flushed) {
+                logger.warn("Terminal snapshot drain did not settle before the deadline", { sessionId });
+                return;
+              }
+            }
             snapshot = serializeAddonRef.current.serialize() || "";
           } else if (hibernatedRef.current || softHiddenRef.current) {
             // Hibernate path: live xterm is torn down; use retained snapshot.
@@ -1387,7 +1399,10 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         }
         if (termRef.current) {
           const term = termRef.current;
-          await flushPendingTerminalWritesBeforeHibernate(term);
+          const flushed = await flushPendingTerminalWritesBeforeHibernate(term);
+          if (!flushed) {
+            throw new Error("Terminal output did not settle before applying the snapshot");
+          }
           term.reset();
           if (payload.snapshot) {
             await new Promise<void>((resolve) => term.write(payload.snapshot, resolve));
@@ -1474,7 +1489,12 @@ const TerminalComponent: React.FC<TerminalProps> = ({
           await new Promise((resolve) => setTimeout(resolve, 40));
         }
         const snapshotTerm = termRef.current;
-        if (snapshotTerm) await flushPendingTerminalWritesBeforeHibernate(snapshotTerm);
+        if (snapshotTerm) {
+          const flushed = await flushPendingTerminalWritesBeforeHibernate(snapshotTerm);
+          if (!flushed) {
+            throw new Error("Terminal output did not settle before closing the attached display");
+          }
+        }
         // Push popup display state home first so reopen is not stale.
         let finalContext = {
           contextSnapshot: "",
