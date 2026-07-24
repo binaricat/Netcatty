@@ -563,13 +563,26 @@ async function uploadFile(localPath, remotePath, client, fileSize, transfer, sen
   if (!sftp) throw new Error("SFTP client not ready");
   transfer.pauseSupported = Boolean(transfer.resumable);
 
-  // Prefer fastPut on an isolated SFTP channel so cancellation can abort just this transfer.
-  if (!transfer.resumable && !client.__netcattySudoMode) {
+  // Prefer an isolated SFTP channel so cancellation cannot kill the browse session.
+  if (!client.__netcattySudoMode) {
     let fastSftp = null;
     try {
       fastSftp = await openIsolatedSftpChannel(client);
     } catch (err) {
       console.warn("[transferBridge] Failed to open isolated SFTP channel for fastPut, falling back to streams:", err.message || String(err));
+    }
+
+    if (fastSftp && transfer.resumable) {
+      await uploadFileResumableFast(
+        localPath,
+        remotePath,
+        fastSftp,
+        fileSize,
+        transfer,
+        sendProgress,
+      );
+      await assertRemoteUploadSize(client, remotePath, fileSize);
+      return;
     }
 
     if (fastSftp && typeof fastSftp.fastPut === "function") {
@@ -684,6 +697,284 @@ async function uploadFile(localPath, remotePath, client, fileSize, transfer, sen
   await assertRemoteUploadSize(client, remotePath, fileSize);
 }
 
+function openSftpHandle(sftp, filePath, flags) {
+  return new Promise((resolve, reject) => {
+    sftp.open(filePath, flags, (error, handle) => {
+      if (error) reject(error);
+      else resolve(handle);
+    });
+  });
+}
+
+function closeSftpHandle(sftp, handle) {
+  return new Promise((resolve, reject) => {
+    sftp.close(handle, (error) => {
+      if (error) reject(error);
+      else resolve();
+    });
+  });
+}
+
+async function readSftpRange(sftp, handle, buffer, position, length) {
+  let received = 0;
+  while (received < length) {
+    const bytesRead = await new Promise((resolve, reject) => {
+      sftp.read(
+        handle,
+        buffer,
+        received,
+        length - received,
+        position + received,
+        (error, count) => {
+          if (error) reject(error);
+          else resolve(Number(count) || 0);
+        },
+      );
+    });
+    if (bytesRead <= 0) {
+      throw new Error("Download stream finished before the full source was received");
+    }
+    received += bytesRead;
+  }
+}
+
+async function writeLocalRange(fileHandle, buffer, position, length) {
+  let written = 0;
+  while (written < length) {
+    const result = await fileHandle.write(buffer, written, length - written, position + written);
+    if (!result || result.bytesWritten <= 0) {
+      throw new Error("Local download file stopped accepting data");
+    }
+    written += result.bytesWritten;
+  }
+}
+
+async function readLocalRange(fileHandle, buffer, position, length) {
+  let received = 0;
+  while (received < length) {
+    const result = await fileHandle.read(buffer, received, length - received, position + received);
+    if (!result || result.bytesRead <= 0) {
+      throw new Error("Upload source ended before the expected file size");
+    }
+    received += result.bytesRead;
+  }
+}
+
+function writeSftpRange(sftp, handle, buffer, position, length) {
+  return new Promise((resolve, reject) => {
+    sftp.write(handle, buffer, 0, length, position, (error) => {
+      if (error) reject(error);
+      else resolve();
+    });
+  });
+}
+
+async function runPausableConcurrentRanges({
+  transfer,
+  fileSize,
+  checkpoint,
+  concurrency,
+  copyRange,
+  sendProgress,
+  abortChannel,
+}) {
+  let nextOffset = checkpoint;
+  let transferred = checkpoint;
+  let active = 0;
+  let settled = false;
+  let terminalError = null;
+  let pauseResolvers = [];
+
+  const settlePauseWaiters = () => {
+    if (!transfer.paused || active !== 0 || pauseResolvers.length === 0) return;
+    const resolvers = pauseResolvers;
+    pauseResolvers = [];
+    for (const resolve of resolvers) resolve();
+  };
+
+  await new Promise((resolve, reject) => {
+    const finish = (error) => {
+      if (settled) return;
+      if (error) terminalError = terminalError || error;
+      if (active > 0) return;
+      settled = true;
+      if (terminalError) reject(terminalError);
+      else resolve();
+    };
+
+    const abort = (error = new Error("Transfer cancelled")) => {
+      terminalError = terminalError || error;
+      try { abortChannel?.(); } catch { }
+      finish(terminalError);
+    };
+
+    const pump = () => {
+      if (settled) return;
+      if (terminalError || transfer.cancelled) {
+        finish(terminalError || new Error("Transfer cancelled"));
+        return;
+      }
+      if (transfer.paused) {
+        settlePauseWaiters();
+        return;
+      }
+
+      while (
+        active < concurrency
+        && nextOffset < fileSize
+        && !transfer.paused
+        && !transfer.cancelled
+      ) {
+        const position = nextOffset;
+        const length = Math.min(TRANSFER_CHUNK_SIZE, fileSize - position);
+        nextOffset += length;
+        active += 1;
+
+        void copyRange(position, length)
+          .then(() => {
+            transferred += length;
+            if (!transfer.cancelled) sendProgress(transferred, fileSize);
+          })
+          .catch((error) => abort(error))
+          .finally(() => {
+            active -= 1;
+            settlePauseWaiters();
+            if (terminalError || transfer.cancelled) {
+              finish(terminalError || new Error("Transfer cancelled"));
+            } else if (transferred === fileSize) finish();
+            else pump();
+          });
+      }
+
+      if (fileSize === checkpoint && active === 0) finish();
+    };
+
+    transfer.readStream = {
+      pause() {
+        transfer.paused = true;
+      },
+      resume() {
+        transfer.paused = false;
+        pump();
+      },
+      destroy() {
+        abort();
+      },
+    };
+    transfer.waitForPause = () => {
+      if (active === 0) return Promise.resolve();
+      return new Promise((resolvePause) => pauseResolvers.push(resolvePause));
+    };
+    transfer.abort = abort;
+    pump();
+  });
+}
+
+async function uploadFileResumableFast(
+  localPath,
+  remotePath,
+  sftp,
+  fileSize,
+  transfer,
+  sendProgress,
+) {
+  const checkpoint = Math.max(0, Math.min(transfer.checkpointBytes || 0, fileSize));
+  const localHandle = await fs.promises.open(localPath, "r");
+  let remoteHandle;
+  let failed = false;
+  try {
+    remoteHandle = await openSftpHandle(sftp, remotePath, checkpoint > 0 ? "r+" : "w");
+  } catch (error) {
+    await localHandle.close().catch(() => {});
+    throw error;
+  }
+
+  try {
+    try {
+      await runPausableConcurrentRanges({
+        transfer,
+        fileSize,
+        checkpoint,
+        concurrency: UPLOAD_TRANSFER_CONCURRENCY,
+        copyRange: async (position, length) => {
+          const buffer = Buffer.allocUnsafe(length);
+          await readLocalRange(localHandle, buffer, position, length);
+          await writeSftpRange(sftp, remoteHandle, buffer, position, length);
+        },
+        sendProgress,
+        abortChannel: () => sftp.end?.(),
+      });
+    } catch (error) {
+      failed = true;
+      throw error;
+    }
+  } finally {
+    transfer.readStream = null;
+    transfer.waitForPause = null;
+    transfer.abort = null;
+    await localHandle.close().catch(() => {});
+    if (!failed && !transfer.cancelled) {
+      await closeSftpHandle(sftp, remoteHandle).catch(() => {});
+    }
+    try { sftp.end?.(); } catch { }
+  }
+}
+
+/**
+ * Preserve fastGet's high-latency request window without giving up a safe
+ * pause checkpoint. Once pause is requested, no new ranges are scheduled and
+ * we wait for every in-flight range before acknowledging it. The staged file
+ * is therefore complete through its reported size and can resume from there.
+ */
+async function downloadFileResumableFast(
+  remotePath,
+  localPath,
+  sftp,
+  fileSize,
+  transfer,
+  sendProgress,
+) {
+  const checkpoint = Math.max(0, Math.min(transfer.checkpointBytes || 0, fileSize));
+  const remoteHandle = await openSftpHandle(sftp, remotePath, "r");
+  let localHandle;
+  let failed = false;
+  try {
+    localHandle = await fs.promises.open(localPath, checkpoint > 0 ? "r+" : "w");
+  } catch (error) {
+    await closeSftpHandle(sftp, remoteHandle).catch(() => {});
+    throw error;
+  }
+
+  try {
+    try {
+      await runPausableConcurrentRanges({
+        transfer,
+        fileSize,
+        checkpoint,
+        concurrency: DOWNLOAD_TRANSFER_CONCURRENCY,
+        copyRange: async (position, length) => {
+          const buffer = Buffer.allocUnsafe(length);
+          await readSftpRange(sftp, remoteHandle, buffer, position, length);
+          await writeLocalRange(localHandle, buffer, position, length);
+        },
+        sendProgress,
+        abortChannel: () => sftp.end?.(),
+      });
+    } catch (error) {
+      failed = true;
+      throw error;
+    }
+  } finally {
+    transfer.readStream = null;
+    transfer.waitForPause = null;
+    transfer.abort = null;
+    await localHandle.close().catch(() => {});
+    if (!failed && !transfer.cancelled) {
+      await closeSftpHandle(sftp, remoteHandle).catch(() => {});
+    }
+  }
+}
+
 /**
  * Download from SFTP to local file using ssh2's fastGet (parallel SFTP requests).
  * Falls back to sequential stream piping if fastGet is unavailable.
@@ -707,13 +998,25 @@ async function downloadFile(remotePath, localPath, client, fileSize, transfer, s
   if (!sftp) throw new Error("SFTP client not ready");
   transfer.pauseSupported = Boolean(transfer.resumable);
 
-  // Prefer fastGet on an isolated SFTP channel so cancellation can abort just this transfer.
-  if (!transfer.resumable && !client.__netcattySudoMode) {
+  // Prefer an isolated SFTP channel so cancellation cannot kill the browse session.
+  if (!client.__netcattySudoMode) {
     const fastSftp = await acquireIsolatedDownloadChannel(client, transfer);
     if (transfer.cancelled) throw new Error("Transfer cancelled");
 
-    if (fastSftp && typeof fastSftp.fastGet === "function") {
+    if (fastSftp && (transfer.resumable || typeof fastSftp.fastGet === "function")) {
       try {
+        if (transfer.resumable) {
+          await downloadFileResumableFast(
+            remotePath,
+            localPath,
+            fastSftp,
+            fileSize,
+            transfer,
+            sendProgress,
+          );
+          releaseIsolatedDownloadChannel(client, fastSftp);
+          return;
+        }
         await new Promise((resolve, reject) => {
           let settled = false;
           let onFastSftpError = null;
@@ -761,6 +1064,9 @@ async function downloadFile(remotePath, localPath, client, fileSize, transfer, s
         return;
       } catch (err) {
         if (transfer.cancelled) throw err;
+        if (transfer.resumable) {
+          releaseIsolatedDownloadChannel(client, fastSftp, { dispose: true });
+        }
         console.warn(
           "[transferBridge] fastGet failed, falling back to a compatible stream:",
           err?.message || String(err),
@@ -1605,6 +1911,9 @@ async function pauseTransfer(_event, payload) {
   }
   transfer.paused = true;
   try { transfer.readStream?.pause?.(); } catch { }
+  if (typeof transfer.waitForPause === "function") {
+    await transfer.waitForPause();
+  }
   if (transfer.writeStream?.pending) {
     await new Promise((resolve) => {
       const timer = setTimeout(resolve, 2000);
