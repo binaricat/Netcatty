@@ -61,7 +61,8 @@
     "test:sync-crdt": "node --test --import tsx domain/convergentSync/*.test.ts",
     "bench:sync-crdt": "tsx scripts/bench-sync-crdt.ts",
     "test:ssh-mfa-models": "node --test electron/bridges/sshMfaModels.live.test.cjs",
-    "test:ssh-mfa-models:live": "SSH_MFA_LIVE=1 node --test electron/bridges/sshMfaModels.live.test.cjs"
+    "test:ssh-mfa-models:live": "SSH_MFA_LIVE=1 node --test electron/bridges/sshMfaModels.live.test.cjs",
+    "test:xterm-webgl-overflow": "electron scripts/xterm-webgl-atlas-overflow.live.test.cjs"
   },
   "dependencies": {
     "@eslint-community/regexpp": "4.12.2",
