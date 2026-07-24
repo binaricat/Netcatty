@@ -37,7 +37,7 @@ test("Windows settings close uses a plain button without a primary tooltip", () 
   const source = readFileSync(new URL("./SettingsPage.tsx", import.meta.url), "utf8");
   const closeIndex = source.indexOf('aria-label={t("common.close")}');
   assert.notEqual(closeIndex, -1);
-  // The old Tooltip + TooltipContent("关闭") rendered as a stuck blue chip over the chrome.
+  // The old Tooltip + TooltipContent("Close") rendered as a stuck blue chip over the chrome.
   assert.doesNotMatch(
     source.slice(Math.max(0, closeIndex - 200), closeIndex + 400),
     /TooltipContent|TooltipTrigger/,
