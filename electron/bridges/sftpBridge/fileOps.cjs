@@ -533,6 +533,13 @@ function createFileOpsApi(ctx) {
         cancelled: false,
         abort: null,
       };
+      const abortController = typeof AbortController === "function"
+        ? new AbortController()
+        : null;
+      transferControl.abort = () => {
+        transferControl.cancelled = true;
+        try { abortController?.abort(); } catch { /* ignore */ }
+      };
       activeSftpUploads.set(transferId, {
         cancelled: false,
         stream: null,
@@ -543,7 +550,11 @@ function createFileOpsApi(ctx) {
         tempPath = await tempDirBridge.getTempFilePath(
           `sftp-upload-${transferId || Date.now()}.bin`,
         );
-        await fs.promises.writeFile(tempPath, buffer);
+        // Stage to disk with abort support (Node writeFile accepts signal).
+        const writeOpts = abortController?.signal
+          ? { signal: abortController.signal }
+          : undefined;
+        await fs.promises.writeFile(tempPath, buffer, writeOpts);
         if (activeSftpUploads.get(transferId)?.cancelled || transferControl.cancelled) {
           throw new Error("Upload cancelled");
         }
@@ -578,13 +589,6 @@ function createFileOpsApi(ctx) {
         if (typeof pipelinedUploadLocalFile !== "function") {
           throw new Error("SFTP pipelined upload helper is not available");
         }
-        const abortController = typeof AbortController === "function"
-          ? new AbortController()
-          : null;
-        transferControl.abort = () => {
-          transferControl.cancelled = true;
-          try { abortController?.abort(); } catch { /* ignore */ }
-        };
 
         await pipelinedUploadLocalFile(client, tempPath, encodedPath, {
           chunkSize: TRANSFER_CHUNK_SIZE,

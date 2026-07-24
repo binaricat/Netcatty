@@ -828,11 +828,17 @@ async function uploadFile(localPath, remotePath, client, fileSize, transfer, sen
 
     // fastPut always truncates and rewrites from offset 0 — skip when we
     // already have a durable resume checkpoint from a prior concurrent attempt.
+    // fastPut is not pause-aware; do not advertise pause while it runs.
     const hasResumeCheckpoint = Math.max(0, Number(transfer.checkpointBytes) || 0) > 0;
     if (isolated && typeof isolated.fastPut === "function" && !hasResumeCheckpoint) {
       let fastPutOk = false;
       try {
         transfer.uploadStrategy = "fastPut-isolated";
+        transfer.pauseSupported = false;
+        transfer.pauseUnavailableReason = "Pause is unavailable during fastPut upload";
+        sendProgress(Math.max(0, Number(transfer.checkpointBytes) || 0), fileSize, {
+          force: true,
+        });
         await uploadViaFastPut(
           localPath,
           remotePath,
@@ -845,6 +851,11 @@ async function uploadFile(localPath, remotePath, client, fileSize, transfer, sen
         fastPutOk = true;
       } catch (err) {
         isolated = null;
+        // Restore pause capability for subsequent pause-aware strategies.
+        transfer.pauseSupported = Boolean(transfer.resumable);
+        transfer.pauseUnavailableReason = transfer.resumable
+          ? undefined
+          : transfer.pauseUnavailableReason;
         if (transfer.cancelled) throw err;
         rememberPipelineError(err);
         console.warn(
@@ -867,6 +878,8 @@ async function uploadFile(localPath, remotePath, client, fileSize, transfer, sen
     let sharedOk = false;
     try {
       transfer.uploadStrategy = "concurrent-shared";
+      transfer.pauseSupported = Boolean(transfer.resumable);
+      if (transfer.resumable) transfer.pauseUnavailableReason = undefined;
       await uploadFileConcurrent(
         localPath,
         remotePath,
