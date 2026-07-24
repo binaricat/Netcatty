@@ -387,8 +387,9 @@ test("local clear writes erase-scrollback when requested", () => {
     scrollToBottom: () => {},
   };
 
-  clearTerminalViewport(term as never, { wipeScrollback: true });
+  const didClear = clearTerminalViewport(term as never, { wipeScrollback: true });
 
+  assert.equal(didClear, true);
   assert.equal(writes.length, 1);
   assert.equal(writes[0].includes("\x1b[3J"), true);
 });
@@ -418,10 +419,31 @@ test("local clear preserves scrollback when erase-scrollback is not requested", 
     scrollToBottom: () => {},
   };
 
-  clearTerminalViewport(term as never, { wipeScrollback: false });
+  const didClear = clearTerminalViewport(term as never, { wipeScrollback: false });
 
+  assert.equal(didClear, true);
   assert.equal(writes.length, 1);
   assert.equal(writes[0].includes("\x1b[3J"), false);
+});
+
+test("local clear reports that alternate-screen content was left unchanged", () => {
+  const writes: string[] = [];
+  const term = {
+    buffer: {
+      active: {
+        type: "alternate",
+        baseY: 0,
+        cursorY: 2,
+        cursorX: 4,
+      },
+    },
+    write: (payload: string) => writes.push(payload),
+  };
+
+  const didClear = clearTerminalViewport(term as never, { wipeScrollback: true });
+
+  assert.equal(didClear, false);
+  assert.deepEqual(writes, []);
 });
 
 test("appendEraseScrollback adds 3J after a normal full clear", () => {

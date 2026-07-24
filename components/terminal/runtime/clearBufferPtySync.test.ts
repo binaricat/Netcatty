@@ -8,8 +8,8 @@ test("clearBuffer syncs ConPTY after clearing the local xterm viewport", () => {
   assert.notEqual(clearCaseIndex, -1);
 
   const clearCase = runtimeSource.slice(clearCaseIndex, clearCaseIndex + 500);
-  assert.match(clearCase, /clearTerminalViewport\(term,/);
-  assert.match(clearCase, /clearSessionPtyBuffer\?/);
+  assert.match(clearCase, /const didClearViewport = clearTerminalViewport\(term,/);
+  assert.match(clearCase, /if \(didClearViewport && clearId\)/);
 });
 
 test("context-menu clear also syncs the ConPTY buffer", () => {
@@ -19,7 +19,7 @@ test("context-menu clear also syncs the ConPTY buffer", () => {
   );
   const onClearIndex = actionsSource.indexOf("const onClear = useCallback");
   assert.notEqual(onClearIndex, -1);
-  const onClear = actionsSource.slice(onClearIndex, onClearIndex + 450);
-  assert.match(onClear, /clearTerminalViewport\(term,/);
-  assert.match(onClear, /clearSessionPtyBuffer\?/);
+  const onClear = actionsSource.slice(onClearIndex, onClearIndex + 550);
+  assert.match(onClear, /const didClearViewport = clearTerminalViewport\(term,/);
+  assert.match(onClear, /if \(didClearViewport && id\)/);
 });

@@ -1463,13 +1463,13 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
               break;
             }
             case "clearBuffer": {
-              clearTerminalViewport(term, {
+              const didClearViewport = clearTerminalViewport(term, {
                 wipeScrollback: ctx.terminalSettingsRef.current?.clearWipesScrollback ?? true,
               });
               // Keep ConPTY cursor/buffer in sync after a local clear so the
               // next Enter does not reprint a tall blank gap (Windows PowerShell).
               const clearId = ctx.sessionRef.current;
-              if (clearId) {
+              if (didClearViewport && clearId) {
                 ctx.terminalBackend.clearSessionPtyBuffer?.(clearId);
               }
               break;

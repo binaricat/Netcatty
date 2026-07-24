@@ -186,9 +186,11 @@ export const useTerminalContextActions = ({
   const onClear = useCallback(() => {
     const term = termRef.current;
     if (!term) return;
-    clearTerminalViewport(term, { wipeScrollback: clearWipesScrollbackRef?.current ?? true });
+    const didClearViewport = clearTerminalViewport(term, {
+      wipeScrollback: clearWipesScrollbackRef?.current ?? true,
+    });
     const id = sessionRef.current;
-    if (id) {
+    if (didClearViewport && id) {
       terminalBackend.clearSessionPtyBuffer?.(id);
     }
   }, [clearWipesScrollbackRef, sessionRef, termRef, terminalBackend]);
