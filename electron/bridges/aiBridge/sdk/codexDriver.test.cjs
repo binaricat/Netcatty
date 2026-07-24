@@ -264,27 +264,28 @@ test("item errors and reconnectable stream errors are warnings; other stream err
     message: "stream disconnected before completion: Transport error: error decoding response body; retrying 2/5 in 361ms…",
   }, emitter, state);
   translateCodexEvent({ type: "error", message: "stream disconnected", willRetry: true }, emitter, state);
+  translateCodexEvent({ type: "error", message: "transport error", will_retry: true }, emitter, state);
   translateCodexEvent({ type: "error", message: "stream disconnected" }, emitter, state);
   translateCodexEvent({ type: "error", message: "error decoding response body" }, emitter, state);
   translateCodexEvent({ type: "error", message: "transport error" }, emitter, state);
   translateCodexEvent({
     type: "error",
-    message: "stream disconnected before completion: Transport error: network error",
+    message: "Reconnecting... 5/5 (stream disconnected before completion: Transport error)",
     willRetry: false,
   }, emitter, state);
   translateCodexEvent({
     type: "error",
-    message: "transport error after retries exhausted",
+    message: "transport error; retrying 5/5 after retries exhausted",
     will_retry: false,
   }, emitter, state);
   translateCodexEvent({ type: "error", message: "not authenticated" }, emitter, state);
-  assert.equal(events.filter((event) => event.k === "warning").length, 4);
+  assert.equal(events.filter((event) => event.k === "warning").length, 5);
   assert.deepEqual(events.filter((event) => event.k === "error"), [
     { k: "error", e: "stream disconnected" },
     { k: "error", e: "error decoding response body" },
     { k: "error", e: "transport error" },
-    { k: "error", e: "stream disconnected before completion: Transport error: network error" },
-    { k: "error", e: "transport error after retries exhausted" },
+    { k: "error", e: "Reconnecting... 5/5 (stream disconnected before completion: Transport error)" },
+    { k: "error", e: "transport error; retrying 5/5 after retries exhausted" },
     { k: "error", e: "not authenticated" },
   ]);
   assert.match(events[1].message, /Reconnecting|error decoding response body/);
@@ -306,7 +307,7 @@ test("explicit non-retryable stream disconnect fails the turn even after partial
               };
               yield {
                 type: "error",
-                message: "stream disconnected before completion: Transport error",
+                message: "Reconnecting... 5/5 (stream disconnected before completion: Transport error)",
                 willRetry: false,
               };
             })(),
@@ -321,7 +322,7 @@ test("explicit non-retryable stream disconnect fails the turn even after partial
   });
   assert.deepEqual(events.filter((event) => event.k === "text"), [{ k: "text", t: "partial answer" }]);
   assert.deepEqual(events.filter((event) => event.k === "error"), [
-    { k: "error", e: "stream disconnected before completion: Transport error" },
+    { k: "error", e: "Reconnecting... 5/5 (stream disconnected before completion: Transport error)" },
   ]);
   assert.equal(events.some((event) => event.k === "done"), false);
 });
