@@ -725,7 +725,7 @@ jobs:
           if [[ -n "$status" ]]; then
             $GITH add -A
             $GITH reset -- .cursor-runtime >/dev/null 2>&1 || true
-            $GITH -c user.name="netcatty-cursor-bot" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            $GITH -c user.name="netcatty-bot" -c user.email="308658023+netcatty-bot@users.noreply.github.com" \
               commit -m "fix(#${ISSUE_NUMBER}): automated Cursor CLI fix" || true
           fi
           name_status="$($GITH diff --name-status -M "${{ steps.branch.outputs.base_sha }}" HEAD)"
@@ -835,8 +835,8 @@ jobs:
           rm -rf "$PUBLISH"
           git clone --no-checkout "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$PUBLISH"
           cd "$PUBLISH"
-          git -c core.hooksPath=/dev/null config user.name "netcatty-cursor-bot"
-          git -c core.hooksPath=/dev/null config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -c core.hooksPath=/dev/null config user.name "netcatty-bot"
+          git -c core.hooksPath=/dev/null config user.email "308658023+netcatty-bot@users.noreply.github.com"
           git -c core.hooksPath=/dev/null fetch --depth=50 origin "${BASE_SHA}"
           git -c core.hooksPath=/dev/null checkout -B "$BRANCH" "$BASE_SHA"
           git -c core.hooksPath=/dev/null am --3way "$GITHUB_WORKSPACE/patch-in/implement.patch"
@@ -1540,7 +1540,7 @@ jobs:
           if [[ -n "$status" ]]; then
             $GITH add -A
             $GITH reset -- .cursor-runtime >/dev/null 2>&1 || true
-            $GITH -c user.name="netcatty-cursor-bot" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            $GITH -c user.name="netcatty-bot" -c user.email="308658023+netcatty-bot@users.noreply.github.com" \
               commit -m "fix: address Codex review on PR #${PULL_NUMBER}" || true
           fi
           name_status="$($GITH diff --name-status -M "${BASE_SHA}" HEAD 2>/dev/null || true)"
@@ -1677,8 +1677,8 @@ jobs:
           rm -rf "$PUBLISH"
           git clone --no-checkout "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$PUBLISH"
           cd "$PUBLISH"
-          git -c core.hooksPath=/dev/null config user.name "netcatty-cursor-bot"
-          git -c core.hooksPath=/dev/null config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -c core.hooksPath=/dev/null config user.name "netcatty-bot"
+          git -c core.hooksPath=/dev/null config user.email "308658023+netcatty-bot@users.noreply.github.com"
           git -c core.hooksPath=/dev/null fetch --depth=50 origin "$BASE_SHA"
           git -c core.hooksPath=/dev/null checkout -B "$HEAD_REF" "$BASE_SHA"
           git -c core.hooksPath=/dev/null am --3way "$GITHUB_WORKSPACE/patch-in/fix.patch"
