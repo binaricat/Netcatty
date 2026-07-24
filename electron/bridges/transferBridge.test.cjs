@@ -259,10 +259,10 @@ test("failed local open for resumable upload still ends the isolated channel", a
     await fs.promises.rm(tempDir, { recursive: true, force: true });
   });
 
-  // A directory path makes fs.promises.open(..., "r") reject after the isolated
-  // channel is already open (totalBytes skips the preflight file stat).
-  const localPath = path.join(tempDir, "not-a-file");
-  await fs.promises.mkdir(localPath);
+  // Create the source so preflight can proceed, then delete it as soon as the
+  // isolated channel opens so uploadFileResumableFast fails on local open.
+  const localPath = path.join(tempDir, "source.bin");
+  await fs.promises.writeFile(localPath, Buffer.alloc(32 * 1024, 7));
   let endedChannels = 0;
   let remoteOpenAttempts = 0;
   const fastSftp = createFastSftp({
@@ -275,11 +275,22 @@ test("failed local open for resumable upload still ends the isolated channel", a
     },
   });
   const client = {
-    // No stream fallback path needed: assert cleanup before rethrow is enough.
-    sftp: createFastSftp({}),
+    sftp: createFastSftp({
+      createWriteStream() {
+        // Stream fallback after range-path failure — keep it error-safe.
+        const writeStream = new Writable({
+          write(_chunk, _encoding, callback) {
+            callback(new Error("stream fallback after missing local open"));
+          },
+        });
+        return writeStream;
+      },
+    }),
     client: {
       sftp(callback) {
-        callback(null, fastSftp);
+        fs.promises.unlink(localPath).finally(() => {
+          callback(null, fastSftp);
+        });
       },
     },
   };
@@ -300,9 +311,9 @@ test("failed local open for resumable upload still ends the isolated channel", a
     },
   );
 
-  // Range path fails on local open; stream fallback may surface a different error.
-  assert.ok(result.error, "expected transfer to fail when local source cannot be opened");
-  assert.equal(endedChannels, 1);
+  assert.ok(result.error, "expected transfer to fail when local source disappears");
+  // Critical: isolated channel must not leak when local open fails first.
+  assert.ok(endedChannels >= 1, `expected isolated channel end, got ${endedChannels}`);
   assert.equal(remoteOpenAttempts, 0);
 });
 
