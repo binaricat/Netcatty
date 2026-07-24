@@ -430,7 +430,8 @@ test("failed resumable upload opens close their isolated channel", async (t) => 
 
   assert.match(result.error || "", /permission denied/);
   assert.equal(hadOpenErrorListener, true);
-  assert.equal(endedChannels, 1);
+  // concurrent-isolated + fastPut-isolated each open/end their own channel.
+  assert.ok(endedChannels >= 1, `expected isolated channels to end, got ${endedChannels}`);
 });
 
 test("failed local upload opens close their isolated channel", async (t) => {
@@ -687,7 +688,9 @@ test("resumable SFTP uploads fall back to a compatible stream after fast path fa
   );
 
   assert.equal(result.error, undefined);
-  assert.equal(endedChannels, 1);
+  // concurrent-isolated fails open; fastPut-isolated reopens and ends its channel.
+  // Serial stream uses the shared browse sftp and does not call end on isolated mocks.
+  assert.ok(endedChannels >= 1, `expected isolated channels to end, got ${endedChannels}`);
   assert.equal(remoteBytes, payload.length);
 });
 
@@ -1183,6 +1186,76 @@ test("SFTP uploads fail when remote size does not match local size", async (t) =
   assert.match(result.error || "", /Upload size mismatch/);
   assert.equal(deletedRemotePath, "/tmp/archive.zip");
   assert.ok(sender.sent.some((entry) => entry.channel === "netcatty:transfer:error"));
+});
+
+test("uploads prefer concurrent shared channel over serial WriteStream", async (t) => {
+  const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-transfer-shared-concurrent-"));
+  t.after(async () => {
+    await fs.promises.rm(tempDir, { recursive: true, force: true });
+  });
+
+  const payload = Buffer.alloc(UPLOAD_TRANSFER_CONCURRENCY * TRANSFER_CHUNK_SIZE, 91);
+  const localPath = path.join(tempDir, "upload.bin");
+  await fs.promises.writeFile(localPath, payload);
+
+  let maxInFlight = 0;
+  let activeWrites = 0;
+  let createWriteStreamCalls = 0;
+  const sharedSftp = createFastSftp({
+    open(_remotePath, flags, callback) {
+      assert.equal(flags, "w");
+      callback(null, Buffer.from("shared-handle"));
+    },
+    write(_handle, _buffer, _offset, length, _position, callback) {
+      activeWrites += 1;
+      maxInFlight = Math.max(maxInFlight, activeWrites);
+      setImmediate(() => {
+        activeWrites -= 1;
+        callback(null);
+      });
+    },
+    close(_handle, callback) {
+      callback(null);
+    },
+    createWriteStream() {
+      createWriteStreamCalls += 1;
+      throw new Error("serial WriteStream must not be used when concurrent works");
+    },
+  });
+
+  const client = {
+    // Force the isolated-channel path to be unavailable (sudo / no secondary channel).
+    __netcattySudoMode: true,
+    sftp: sharedSftp,
+    stat() {
+      return Promise.resolve({ size: payload.length });
+    },
+    rename() {
+      return Promise.resolve();
+    },
+    delete() {
+      return Promise.resolve();
+    },
+  };
+  transferBridge.init({ sftpClients: new Map([["target", client]]) });
+
+  const result = await transferBridge.startTransfer(
+    { sender: createSender() },
+    {
+      transferId: "upload-shared-concurrent",
+      sourcePath: localPath,
+      targetPath: "/tmp/upload.bin",
+      sourceType: "local",
+      targetType: "sftp",
+      targetSftpId: "target",
+      totalBytes: payload.length,
+      resumable: true,
+    },
+  );
+
+  assert.equal(result.error, undefined);
+  assert.equal(createWriteStreamCalls, 0);
+  assert.equal(maxInFlight, UPLOAD_TRANSFER_CONCURRENCY);
 });
 
 test("SFTP stream-fallback uploads wait for close after finish", async (t) => {

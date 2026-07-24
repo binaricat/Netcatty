@@ -451,138 +451,178 @@ function createFileOpsApi(ctx) {
       // For ArrayBuffer from renderer, we still need to convert but use a more efficient method
       const buffer = Buffer.isBuffer(content) ? content : Buffer.from(content);
       const totalBytes = buffer.length;
-      let transferredBytes = 0;
-      let lastProgressTime = Date.now();
-      let lastTransferredBytes = 0;
-      let lastProgressSentTime = 0;
-    
-      // Throttle settings: send progress at most every 100ms or every 1MB
-      const PROGRESS_THROTTLE_MS = 100;
-      const PROGRESS_THROTTLE_BYTES = 1024 * 1024; // 1MB
-      let lastProgressSentBytes = 0;
-    
-      const { Readable } = require("stream");
-      const readableStream = new Readable({
-        read() {
-          // Check for cancellation
-          const uploadState = activeSftpUploads.get(transferId);
-          if (uploadState?.cancelled) {
-            this.destroy(new Error("Upload cancelled"));
-            return;
-          }
-    
-          // Use larger chunk size for better performance (256KB instead of 64KB)
-          const chunkSize = 262144;
-          if (transferredBytes < totalBytes) {
-            const end = Math.min(transferredBytes + chunkSize, totalBytes);
-            // Use subarray instead of slice to avoid copying
-            const chunk = buffer.subarray(transferredBytes, end);
-            transferredBytes = end;
-    
-            const now = Date.now();
-            const elapsed = (now - lastProgressTime) / 1000;
-            let speed = 0;
-            if (elapsed >= 0.1) {
-              speed = (transferredBytes - lastTransferredBytes) / elapsed;
-              lastProgressTime = now;
-              lastTransferredBytes = transferredBytes;
-            }
-    
-            // Throttle IPC progress events: only send if enough time or bytes have passed
-            const timeSinceLastProgress = now - lastProgressSentTime;
-            const bytesSinceLastProgress = transferredBytes - lastProgressSentBytes;
-            const isComplete = transferredBytes >= totalBytes;
-    
-            if (isComplete || timeSinceLastProgress >= PROGRESS_THROTTLE_MS || bytesSinceLastProgress >= PROGRESS_THROTTLE_BYTES) {
-              // Call the progress callback if provided, otherwise send IPC event
-              if (typeof onProgress === 'function') {
-                try {
-                  onProgress(transferredBytes, totalBytes, speed);
-                } catch (err) {
-                  console.warn('[SFTP] Progress callback error:', err);
-                }
-              } else {
-                const contents = electronModule.webContents.fromId(event.sender.id);
-                contents?.send("netcatty:upload:progress", {
-                  transferId,
-                  transferred: transferredBytes,
-                  totalBytes,
-                  speed,
-                });
-              }
-              lastProgressSentTime = now;
-              lastProgressSentBytes = transferredBytes;
-            }
-    
-            this.push(chunk);
-          } else {
-            this.push(null);
-          }
-        }
-      });
-    
-      // Register this upload for potential cancellation
-      activeSftpUploads.set(transferId, { cancelled: false, stream: readableStream });
-    
-      try {
-        await client.put(readableStream, encodedPath);
+      const {
+        TRANSFER_CHUNK_SIZE,
+        UPLOAD_TRANSFER_CONCURRENCY,
+      } = require("../transferLimits.cjs");
 
-        // Guard against silent truncation on servers that mishandle large writes (#2022).
-        if (typeof client.stat === "function") {
-          const attrs = await client.stat(encodedPath);
-          const remoteSize = Number(attrs?.size);
-          if (Number.isFinite(remoteSize) && remoteSize !== totalBytes) {
-            try {
-              if (typeof client.delete === "function") {
-                await client.delete(encodedPath);
-              }
-            } catch {
-              // Best-effort cleanup of the corrupt remote file.
-            }
-            throw new Error(
-              `Upload size mismatch for ${remotePath}: expected ${totalBytes} bytes, got ${remoteSize}`,
-            );
+      const emitProgress = (transferred, speed = 0) => {
+        if (typeof onProgress === "function") {
+          try {
+            onProgress(transferred, totalBytes, speed);
+          } catch (err) {
+            console.warn("[SFTP] Progress callback error:", err);
           }
+        } else {
+          const contents = electronModule.webContents.fromId(event.sender.id);
+          contents?.send("netcatty:upload:progress", {
+            transferId,
+            transferred,
+            totalBytes,
+            speed,
+          });
         }
-    
-        // Call the complete callback if provided, otherwise send IPC event
-        if (typeof onComplete === 'function') {
+      };
+
+      const emitComplete = () => {
+        if (typeof onComplete === "function") {
           try {
             onComplete();
           } catch (err) {
-            console.warn('[SFTP] Complete callback error:', err);
+            console.warn("[SFTP] Complete callback error:", err);
           }
         } else {
           const contents = electronModule.webContents.fromId(event.sender.id);
           contents?.send("netcatty:upload:complete", { transferId });
         }
-    
+      };
+
+      const emitError = (message) => {
+        if (typeof onError === "function") {
+          try {
+            onError(message);
+          } catch (callbackErr) {
+            console.warn("[SFTP] Error callback error:", callbackErr);
+          }
+        } else {
+          const contents = electronModule.webContents.fromId(event.sender.id);
+          contents?.send("netcatty:upload:error", { transferId, error: message });
+        }
+      };
+
+      const assertRemoteSize = async () => {
+        if (typeof client.stat !== "function") return;
+        const attrs = await client.stat(encodedPath);
+        const remoteSize = Number(attrs?.size);
+        if (Number.isFinite(remoteSize) && remoteSize !== totalBytes) {
+          try {
+            if (typeof client.delete === "function") {
+              await client.delete(encodedPath);
+            }
+          } catch {
+            // Best-effort cleanup of the corrupt remote file.
+          }
+          throw new Error(
+            `Upload size mismatch for ${remotePath}: expected ${totalBytes} bytes, got ${remoteSize}`,
+          );
+        }
+      };
+
+      // Prefer pipelined fastPut via a temp file. Streaming put() uses ssh2's
+      // serial WriteStream (1 WRITE in flight) and collapses to RTT-bound KB/s
+      // on multi-ms paths (#2449). Spill even modest buffers — the alternative
+      // is always the slow path when the UI only has ArrayBuffer content.
+      const useFastPut = typeof client.fastPut === "function" && totalBytes > 0;
+      let tempPath = null;
+      let lastProgressTime = Date.now();
+      let lastTransferredBytes = 0;
+
+      activeSftpUploads.set(transferId, { cancelled: false, stream: null });
+
+      try {
+        if (useFastPut) {
+          tempPath = await tempDirBridge.getTempFilePath(
+            `sftp-upload-${transferId || Date.now()}.bin`,
+          );
+          await fs.promises.writeFile(tempPath, buffer);
+          if (activeSftpUploads.get(transferId)?.cancelled) {
+            throw new Error("Upload cancelled");
+          }
+          await client.fastPut(tempPath, encodedPath, {
+            chunkSize: TRANSFER_CHUNK_SIZE,
+            concurrency: UPLOAD_TRANSFER_CONCURRENCY,
+            step: (transferred, _chunk, total) => {
+              if (activeSftpUploads.get(transferId)?.cancelled) return;
+              const now = Date.now();
+              const elapsed = (now - lastProgressTime) / 1000;
+              let speed = 0;
+              if (elapsed >= 0.1) {
+                speed = (transferred - lastTransferredBytes) / elapsed;
+                lastProgressTime = now;
+                lastTransferredBytes = transferred;
+              }
+              emitProgress(transferred, speed);
+            },
+          });
+          if (activeSftpUploads.get(transferId)?.cancelled) {
+            throw new Error("Upload cancelled");
+          }
+        } else {
+          let transferredBytes = 0;
+          let lastProgressSentTime = 0;
+          let lastProgressSentBytes = 0;
+          const PROGRESS_THROTTLE_MS = 100;
+          const PROGRESS_THROTTLE_BYTES = 1024 * 1024;
+          const { Readable } = require("stream");
+          const readableStream = new Readable({
+            read() {
+              const uploadState = activeSftpUploads.get(transferId);
+              if (uploadState?.cancelled) {
+                this.destroy(new Error("Upload cancelled"));
+                return;
+              }
+              const chunkSize = TRANSFER_CHUNK_SIZE;
+              if (transferredBytes < totalBytes) {
+                const end = Math.min(transferredBytes + chunkSize, totalBytes);
+                const chunk = buffer.subarray(transferredBytes, end);
+                transferredBytes = end;
+                const now = Date.now();
+                const elapsed = (now - lastProgressTime) / 1000;
+                let speed = 0;
+                if (elapsed >= 0.1) {
+                  speed = (transferredBytes - lastTransferredBytes) / elapsed;
+                  lastProgressTime = now;
+                  lastTransferredBytes = transferredBytes;
+                }
+                const timeSinceLastProgress = now - lastProgressSentTime;
+                const bytesSinceLastProgress = transferredBytes - lastProgressSentBytes;
+                const isComplete = transferredBytes >= totalBytes;
+                if (
+                  isComplete
+                  || timeSinceLastProgress >= PROGRESS_THROTTLE_MS
+                  || bytesSinceLastProgress >= PROGRESS_THROTTLE_BYTES
+                ) {
+                  emitProgress(transferredBytes, speed);
+                  lastProgressSentTime = now;
+                  lastProgressSentBytes = transferredBytes;
+                }
+                this.push(chunk);
+              } else {
+                this.push(null);
+              }
+            },
+          });
+          activeSftpUploads.set(transferId, { cancelled: false, stream: readableStream });
+          await client.put(readableStream, encodedPath);
+        }
+
+        await assertRemoteSize();
+        emitComplete();
         return { success: true, transferId };
       } catch (err) {
-        // Check if this upload was cancelled - the error might not be exactly "Upload cancelled"
-        // when stream is destroyed, SFTP server may return different errors like "Write stream error"
         const uploadState = activeSftpUploads.get(transferId);
         if (uploadState?.cancelled || err.message === "Upload cancelled") {
           const contents = electronModule.webContents.fromId(event.sender.id);
           contents?.send("netcatty:upload:cancelled", { transferId });
           return { success: false, transferId, cancelled: true };
         }
-    
-        // Call the error callback if provided, otherwise send IPC event
-        if (typeof onError === 'function') {
-          try {
-            onError(err.message);
-          } catch (callbackErr) {
-            console.warn('[SFTP] Error callback error:', callbackErr);
-          }
-        } else {
-          const contents = electronModule.webContents.fromId(event.sender.id);
-          contents?.send("netcatty:upload:error", { transferId, error: err.message });
-        }
+        emitError(err.message);
         throw err;
       } finally {
-        // Cleanup
         activeSftpUploads.delete(transferId);
+        if (tempPath) {
+          try { await fs.promises.unlink(tempPath); } catch { /* ignore */ }
+        }
       }
     }
     

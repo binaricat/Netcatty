@@ -1065,9 +1065,25 @@ async function uploadLocalToSftp(_event, payload) {
   const encodedStagedPath = encodePath(stagedRemotePath, encoding);
   const encodedBackupPath = encodePath(backupRemotePath, encoding);
   throwIfAborted(payload.abortSignal);
-  const content = fs.createReadStream(payload.localPath);
+  const {
+    TRANSFER_CHUNK_SIZE,
+    UPLOAD_TRANSFER_CONCURRENCY,
+  } = require("./transferLimits.cjs");
   try {
-    await client.put(content, encodedStagedPath, { signal: payload.abortSignal });
+    // Prefer pipelined WRITEs (ssh2 fastPut). createReadStream→put is serial and
+    // RTT-bound (~1×32KB in flight) — the usual cause of sub-MB/s uploads (#2449).
+    if (typeof client.fastPut === "function") {
+      await client.fastPut(payload.localPath, encodedStagedPath, {
+        chunkSize: TRANSFER_CHUNK_SIZE,
+        concurrency: UPLOAD_TRANSFER_CONCURRENCY,
+        signal: payload.abortSignal,
+      });
+    } else {
+      const content = fs.createReadStream(payload.localPath, {
+        highWaterMark: TRANSFER_CHUNK_SIZE,
+      });
+      await client.put(content, encodedStagedPath, { signal: payload.abortSignal });
+    }
     throwIfAborted(payload.abortSignal);
     await renameRemotePath(client, encodedStagedPath, encodedPath, encodedBackupPath);
   } catch (err) {
