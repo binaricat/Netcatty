@@ -180,6 +180,51 @@ test("fast resumable uploads pause only after in-flight ranges are durable", asy
   assert.equal(durableBytes, payload.length);
 });
 
+test("failed resumable upload opens close their isolated channel", async (t) => {
+  const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-transfer-upload-open-fail-"));
+  t.after(async () => {
+    await fs.promises.rm(tempDir, { recursive: true, force: true });
+  });
+
+  const localPath = path.join(tempDir, "upload.bin");
+  await fs.promises.writeFile(localPath, Buffer.alloc(32 * 1024, 23));
+  let endedChannels = 0;
+  const fastSftp = createFastSftp({
+    open(_remotePath, _flags, callback) {
+      callback(new Error("permission denied"));
+    },
+    end() {
+      endedChannels += 1;
+    },
+  });
+  const client = {
+    sftp: createFastSftp({}),
+    client: {
+      sftp(callback) {
+        callback(null, fastSftp);
+      },
+    },
+  };
+  transferBridge.init({ sftpClients: new Map([["target", client]]) });
+
+  const result = await transferBridge.startTransfer(
+    { sender: createSender() },
+    {
+      transferId: "upload-open-fail",
+      sourcePath: localPath,
+      targetPath: "/tmp/upload.bin",
+      sourceType: "local",
+      targetType: "sftp",
+      targetSftpId: "target",
+      totalBytes: 32 * 1024,
+      resumable: true,
+    },
+  );
+
+  assert.match(result.error || "", /permission denied/);
+  assert.equal(endedChannels, 1);
+});
+
 test("SFTP uploads fail when remote size does not match local size", async (t) => {
   const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-transfer-size-test-"));
   t.after(async () => {
@@ -567,10 +612,22 @@ test("fast resumable downloads pause only at a complete checkpoint", async (t) =
   }
   assert.equal(pendingReads.length, 64);
 
+  const originalStat = fs.promises.stat;
+  fs.promises.stat = async (filePath) => {
+    if (String(filePath).includes("download-fast-paused")) {
+      throw new Error("fast range checkpoints must not be inferred from file size");
+    }
+    return originalStat(filePath);
+  };
   const pausing = transferBridge.pauseTransfer(null, { transferId: "download-fast-paused" });
   holdReads = false;
   for (const complete of pendingReads.splice(0)) complete();
-  const paused = await pausing;
+  let paused;
+  try {
+    paused = await pausing;
+  } finally {
+    fs.promises.stat = originalStat;
+  }
   assert.equal(paused.success, true);
   assert.equal(paused.checkpointBytes, 2 * 1024 * 1024);
 

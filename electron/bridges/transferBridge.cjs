@@ -898,6 +898,7 @@ async function uploadFileResumableFast(
     remoteHandle = await openSftpHandle(sftp, remotePath, checkpoint > 0 ? "r+" : "w");
   } catch (error) {
     await localHandle.close().catch(() => {});
+    try { sftp.end?.(); } catch { }
     throw error;
   }
 
@@ -1939,7 +1940,8 @@ async function pauseTransfer(_event, payload) {
   }
   transfer.paused = true;
   try { transfer.readStream?.pause?.(); } catch { }
-  if (typeof transfer.waitForPause === "function") {
+  const usesContiguousRangeCheckpoint = typeof transfer.waitForPause === "function";
+  if (usesContiguousRangeCheckpoint) {
     await transfer.waitForPause();
   }
   if (transfer.writeStream?.pending) {
@@ -1973,7 +1975,11 @@ async function pauseTransfer(_event, payload) {
     }
   }
   try {
-    if (transfer.stagedLocalPath) {
+    // Concurrent range transfers already track the highest contiguous durable
+    // byte. File size may extend past a hole when ranges finish out of order.
+    if (usesContiguousRangeCheckpoint) {
+      // Keep the checkpoint supplied by runPausableConcurrentRanges.
+    } else if (transfer.stagedLocalPath) {
       const stat = await fs.promises.stat(transfer.stagedLocalPath);
       transfer.checkpointBytes = stat.size;
     } else if (transfer.stagedRemote) {
