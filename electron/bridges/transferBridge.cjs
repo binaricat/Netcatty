@@ -1213,6 +1213,7 @@ async function runPausableConcurrentRanges({
   sendProgress,
   abortChannel,
   sftp = null,
+  forceSettleOnError = false,
 }) {
   let nextOffset = checkpoint;
   // Progress may complete out of order, but the resume checkpoint must never
@@ -1264,10 +1265,10 @@ async function runPausableConcurrentRanges({
         if (settled) return;
         if (error) terminalError = terminalError || error;
         if (active > 0) {
-          // On cancel/error with in-flight WRITEs (especially shared-channel
-          // where abort cannot end the SFTP subsystem), force-settle so Cancel
-          // cannot hang forever waiting for stalled remote callbacks.
-          if (terminalError || transfer.cancelled) {
+          // Cancel must remain bounded even on a shared channel. Ordinary
+          // shared-channel errors, however, must drain their in-flight WRITEs
+          // before the caller can clean up or retry the same remote path.
+          if (transfer.cancelled || (terminalError && forceSettleOnError)) {
             clearForceFinish();
             forceFinishTimer = setTimeout(() => {
               if (settled) return;
@@ -1452,6 +1453,7 @@ async function uploadFileConcurrent(
         sendProgress,
         abortChannel,
         sftp,
+        forceSettleOnError: disposeChannel,
       });
       if (channelError) throw channelError;
       await assertLocalContentFingerprintUnchangedFromHandle(

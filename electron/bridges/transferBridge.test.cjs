@@ -1235,6 +1235,82 @@ test("uploads prefer concurrent shared channel over serial WriteStream", async (
   );
 });
 
+test("shared upload errors wait for all in-flight WRITEs before returning", async (t) => {
+  const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-transfer-shared-error-drain-"));
+  t.after(async () => {
+    await fs.promises.rm(tempDir, { recursive: true, force: true });
+  });
+
+  const fileSize = 4 * TRANSFER_CHUNK_SIZE;
+  const localPath = path.join(tempDir, "upload.bin");
+  await fs.promises.writeFile(localPath, Buffer.alloc(fileSize, 13));
+
+  const pendingWriteCallbacks = [];
+  let triggerFirstError;
+  const firstErrorTriggered = new Promise((resolve) => {
+    triggerFirstError = resolve;
+  });
+  let firstErrorScheduled = false;
+  const sharedSftp = createFastSftp({
+    open(_remotePath, flags, callback) {
+      assert.equal(flags, "w");
+      callback(null, Buffer.from("shared-handle"));
+    },
+    write(_handle, _buffer, _offset, _length, _position, callback) {
+      pendingWriteCallbacks.push(callback);
+      if (!firstErrorScheduled && pendingWriteCallbacks.length === 4) {
+        firstErrorScheduled = true;
+        setImmediate(() => {
+          const fail = pendingWriteCallbacks.shift();
+          fail(new Error("shared WRITE failed"));
+          triggerFirstError();
+        });
+      }
+    },
+    close(_handle, callback) {
+      callback(null);
+    },
+  });
+
+  const client = {
+    __netcattySudoMode: true,
+    sftp: sharedSftp,
+    stat() {
+      return Promise.resolve({ size: 0 });
+    },
+    delete() {
+      return Promise.resolve();
+    },
+  };
+  transferBridge.init({ sftpClients: new Map([["target", client]]) });
+
+  let transferSettled = false;
+  const running = transferBridge.startTransfer(
+    { sender: createSender() },
+    {
+      transferId: "upload-shared-error-drain",
+      sourcePath: localPath,
+      targetPath: "/tmp/upload.bin",
+      sourceType: "local",
+      targetType: "sftp",
+      targetSftpId: "target",
+      totalBytes: fileSize,
+      resumable: true,
+    },
+  ).finally(() => {
+    transferSettled = true;
+  });
+
+  await firstErrorTriggered;
+  await new Promise((resolve) => setTimeout(resolve, 2100));
+  const settledBeforeRemainingWrites = transferSettled;
+  for (const callback of pendingWriteCallbacks.splice(0)) callback(null);
+
+  const result = await running;
+  assert.equal(settledBeforeRemainingWrites, false);
+  assert.match(result.error || "", /shared WRITE failed|pipelined upload failed/i);
+});
+
 test("sudo SFTP sessions without open/write fail closed (no serial WriteStream)", async (t) => {
   const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-transfer-sudo-fail-closed-"));
   t.after(async () => {

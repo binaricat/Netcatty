@@ -373,6 +373,52 @@ test("symlink destinations are written in-place (not replaced by rename)", async
   assert.deepEqual(remoteFiles.get("/etc/app/config.json"), payload);
 });
 
+test("lstat unsupported falls back to stat and preserves an existing destination", async (t) => {
+  const tempRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-lstat-fallback-"));
+  t.after(async () => {
+    await fs.promises.rm(tempRoot, { recursive: true, force: true });
+  });
+  tempDirBridge.init?.({ getPath: () => tempRoot });
+
+  const localPath = path.join(tempRoot, "cfg.json");
+  const payload = Buffer.from('{"fallback":true}');
+  await fs.promises.writeFile(localPath, payload);
+
+  const { channel, fastPutCalls, remoteFiles, remoteMeta } = createSessionChannel();
+  remoteFiles.set("/etc/app/config.json", Buffer.from("old-target-content"));
+  remoteMeta.set("/etc/app/config.json", { isSymlink: true, mode: 0o120777 });
+  channel.lstat = (_targetPath, callback) => {
+    const err = new Error("SSH_FX_OP_UNSUPPORTED");
+    err.code = 8;
+    callback(err);
+  };
+
+  const connection = {
+    sftp(callback) { callback(null, channel); },
+  };
+  const sftpClients = new Map();
+  sftpBridge.init({
+    electronModule: { webContents: { fromId: () => null } },
+    sessions: new Map([["session-lstat-fallback", { conn: connection }]]),
+    sftpClients,
+  });
+  const opened = await sftpBridge.openSftpForSession(null, {
+    sessionId: "session-lstat-fallback",
+    fileProtocol: "sftp",
+  });
+
+  await sftpBridge.uploadLocalToSftp(null, {
+    sftpId: opened.sftpId,
+    localPath,
+    remotePath: "/etc/app/config.json",
+    encoding: "utf-8",
+  });
+
+  assert.equal(fastPutCalls.length, 1);
+  assert.equal(fastPutCalls[0].remotePath, "/etc/app/config.json");
+  assert.deepEqual(remoteFiles.get("/etc/app/config.json"), payload);
+});
+
 test("parent-dir permission on staged path falls back to in-place for new files", async (t) => {
   const tempRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-stage-perm-"));
   t.after(async () => {

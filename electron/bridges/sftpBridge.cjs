@@ -597,6 +597,14 @@ function isRemotePermissionError(err) {
     || code === "SSH_FX_PERMISSION_DENIED";
 }
 
+function isRemoteMissingError(err) {
+  const code = err?.code;
+  return code === 2
+    || code === "ENOENT"
+    || code === "NO_SUCH_FILE"
+    || code === "SSH_FX_NO_SUCH_FILE";
+}
+
 function attrsIndicateSymlink(attrs) {
   if (!attrs) return false;
   if (typeof attrs.isSymbolicLink === "function") return !!attrs.isSymbolicLink();
@@ -623,8 +631,23 @@ async function planRemoteUploadReplace(client, encodedPath) {
       let attrs = null;
       try {
         attrs = await lstatAsync(sftp, encodedPath);
-      } catch {
-        attrs = null;
+      } catch (lstatError) {
+        if (isRemoteMissingError(lstatError)) {
+          return { writeInPlace: false, existingMode: null };
+        }
+        // Some SFTP servers expose lstat client-side but reject it at runtime.
+        // A successful stat proves the destination exists, but cannot tell us
+        // whether it is a symlink, so preserve it with an in-place write.
+        try {
+          attrs = await statAsync(sftp, encodedPath);
+          if (attrs) return { writeInPlace: true, existingMode: null };
+        } catch (statError) {
+          if (isRemoteMissingError(statError)) {
+            return { writeInPlace: false, existingMode: null };
+          }
+          // Unknown inspection failure: do not risk rename-replacing a link.
+          return { writeInPlace: true, existingMode: null };
+        }
       }
       if (!attrs) return { writeInPlace: false, existingMode: null };
       if (attrsIndicateSymlink(attrs)) {
@@ -648,8 +671,12 @@ async function planRemoteUploadReplace(client, encodedPath) {
           : null;
         return { writeInPlace: true, existingMode };
       }
-    } catch {
-      // Missing destination — stage a new file.
+    } catch (statError) {
+      if (!isRemoteMissingError(statError)) {
+        // Unknown existing-path state: preserve a possible symlink.
+        return { writeInPlace: true, existingMode: null };
+      }
+      // Confirmed missing destination — stage a new file.
     }
   } catch {
     // Channel probe failure — default to staging for cancel-safe new uploads.
