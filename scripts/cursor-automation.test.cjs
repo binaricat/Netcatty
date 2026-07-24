@@ -723,6 +723,18 @@ test('buildCodexReviewRequestComment pins head sha', () => {
   );
   assert.match(body, /cursor-codex-round:2/);
   assert.match(body, /cursor-codex-head:deadbeefcafebabe000000000000000000000001/);
+  assert.equal((body.match(/@codex review/g) || []).length, 1);
+  assert.doesNotMatch(body, /cursor-external-codex:/);
+});
+
+test('buildCodexReviewRequestComment can plant external dedupe marker once', () => {
+  const sha = 'deadbeefcafebabe000000000000000000000001';
+  const body = auto.buildCodexReviewRequestComment(1, sha, {
+    includeExternalMarker: true,
+  });
+  assert.equal((body.match(/@codex review/g) || []).length, 1);
+  assert.match(body, new RegExp(`cursor-codex-head:${sha}`));
+  assert.match(body, new RegExp(`cursor-external-codex:${sha}`));
 });
 
 test('buildExternalCodexRerequestComment only asks Codex', () => {
@@ -730,6 +742,7 @@ test('buildExternalCodexRerequestComment only asks Codex', () => {
   assert.match(body, /@codex review/);
   assert.match(body, /cursor-external-codex:deadbeef/);
   assert.doesNotMatch(body, /Cursor CLI/i);
+  assert.equal((body.match(/@codex review/g) || []).length, 1);
 });
 
 test('getCodexRoundFromComments reads max round from trusted authors only', () => {

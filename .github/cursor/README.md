@@ -17,7 +17,10 @@ re-comments `@codex review` after the author pushes more commits
 
 Optional:
 
-- `TRIAGE_GITHUB_TOKEN` — optional PAT for PR comments / fork re-`@codex`.
+- `TRIAGE_GITHUB_TOKEN` — bot PAT (netcatty-bot) for opening PRs, labels, triage replies.
+- `CODEX_REQUEST_GITHUB_TOKEN` — **maintainer PAT (binaricat)** used only for
+  `@codex review` comments so the Codex GitHub connector sees a human identity.
+  Falls back to `TRIAGE_GITHUB_TOKEN` / `GITHUB_TOKEN` if unset.
 - `SLACK_WEBHOOK_URL` — status pings.
 
 Fork re-`@codex` uses `pull_request_target` (default-branch checkout only) so

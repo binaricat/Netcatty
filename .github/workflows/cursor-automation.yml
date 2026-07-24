@@ -874,7 +874,8 @@ jobs:
           git show "FETCH_HEAD:scripts/cursor-automation.cjs" > "$RUNNER_TEMP/cursor-automation.cjs"
           test -s "$RUNNER_TEMP/cursor-automation.cjs"
 
-      - name: Open draft PR and request Codex review
+      - name: Open draft PR
+        id: openpr
         uses: actions/github-script@v7
         env:
           BRANCH: ${{ needs.implement.outputs.branch }}
@@ -884,7 +885,8 @@ jobs:
         with:
           # GITHUB_TOKEN cannot create PRs unless the repo enables
           # "Allow GitHub Actions to create and approve pull requests".
-          # Prefer TRIAGE_GITHUB_TOKEN (PAT) so implement can open draft PRs.
+          # Prefer TRIAGE_GITHUB_TOKEN (PAT) so implement can open draft PRs
+          # as netcatty-bot — keep this separate from @codex identity.
           github-token: ${{ secrets.TRIAGE_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
           script: |
             const auto = require(`${process.env.RUNNER_TEMP}/cursor-automation.cjs`);
@@ -938,12 +940,33 @@ jobs:
                 clean: false,
               }),
             });
+            // Expose PR number for a separate @codex step that may use a
+            // human PAT (CODEX_REQUEST_GITHUB_TOKEN) without changing PR author.
+            core.setOutput('pull_number', String(pr.number));
+            core.setOutput('head_sha', pr.head.sha);
+            core.info(`Opened draft PR ${pr.html_url}`);
+
+      - name: Request Codex review on implement PR
+        if: steps.openpr.outputs.pull_number != ''
+        uses: actions/github-script@v7
+        env:
+          PULL_NUMBER: ${{ steps.openpr.outputs.pull_number }}
+          HEAD_SHA: ${{ steps.openpr.outputs.head_sha }}
+        with:
+          # Prefer maintainer PAT so Codex connector sees a human identity.
+          github-token: ${{ secrets.CODEX_REQUEST_GITHUB_TOKEN || secrets.TRIAGE_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
+          script: |
+            const auto = require(`${process.env.RUNNER_TEMP}/cursor-automation.cjs`);
+            const pull_number = Number(process.env.PULL_NUMBER);
+            const headSha = process.env.HEAD_SHA || '';
             await github.rest.issues.createComment({
               ...context.repo,
-              issue_number: pr.number,
-              body: auto.buildCodexReviewRequestComment(1, pr.head.sha),
+              issue_number: pull_number,
+              body: auto.buildCodexReviewRequestComment(1, headSha, {
+                includeExternalMarker: true,
+              }),
             });
-            core.info(`Opened draft PR ${pr.html_url}`);
+            core.info(`Requested @codex review on PR #${pull_number}`);
 
   codex_loop:
     name: Codex review loop
@@ -1202,7 +1225,8 @@ jobs:
         if: steps.codex.outputs.action == 'request_review'
         uses: actions/github-script@v7
         with:
-          github-token: ${{ secrets.TRIAGE_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
+          # @codex must come from a human identity connected to Codex (binaricat PAT).
+          github-token: ${{ secrets.CODEX_REQUEST_GITHUB_TOKEN || secrets.TRIAGE_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
           script: |
             const auto = require(`${process.env.RUNNER_TEMP}/cursor-automation.cjs`);
             const pull_number = Number(process.env.PULL_NUMBER);
@@ -1269,7 +1293,9 @@ jobs:
             await github.rest.issues.createComment({
               ...context.repo,
               issue_number: pull_number,
-              body: auto.buildCodexReviewRequestComment(1, pr.head.sha),
+              body: auto.buildCodexReviewRequestComment(1, pr.head.sha, {
+                includeExternalMarker: true,
+              }),
             });
 
       - name: Mark PR ready after clean Codex
@@ -1795,6 +1821,7 @@ jobs:
       - name: Re-request Codex after fix push
         uses: actions/github-script@v7
         with:
+          github-token: ${{ secrets.CODEX_REQUEST_GITHUB_TOKEN || secrets.TRIAGE_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
           script: |
             const auto = require(`${process.env.RUNNER_TEMP}/cursor-automation.cjs`);
             const pull_number = Number(process.env.PULL_NUMBER);
@@ -1806,7 +1833,9 @@ jobs:
             await github.rest.issues.createComment({
               ...context.repo,
               issue_number: pull_number,
-              body: auto.buildCodexReviewRequestComment(nextRound, pr.head.sha),
+              body: auto.buildCodexReviewRequestComment(nextRound, pr.head.sha, {
+                includeExternalMarker: true,
+              }),
             });
 
   own_rerequest_codex:
@@ -1856,7 +1885,8 @@ jobs:
       - name: Comment @codex review after human push
         uses: actions/github-script@v7
         with:
-          github-token: ${{ secrets.TRIAGE_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
+          # Human-connected Codex identity (binaricat PAT); not netcatty-bot.
+          github-token: ${{ secrets.CODEX_REQUEST_GITHUB_TOKEN || secrets.TRIAGE_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
           script: |
             const auto = require(`${process.env.GITHUB_WORKSPACE}/scripts/cursor-automation.cjs`);
             const pull_number = Number(process.env.PULL_NUMBER);
@@ -1946,13 +1976,13 @@ jobs:
                 );
               }
             }
+            // Exactly one @codex review mention; plant both marker families for dedupe.
             await github.rest.issues.createComment({
               ...context.repo,
               issue_number: pull_number,
-              body: [
-                auto.buildCodexReviewRequestComment(round, pr.head.sha),
-                auto.buildExternalCodexRerequestComment(pr.head.sha),
-              ].join('\n'),
+              body: auto.buildCodexReviewRequestComment(round, pr.head.sha, {
+                includeExternalMarker: true,
+              }),
             });
 
   external_rerequest_codex:
@@ -2001,8 +2031,8 @@ jobs:
       - name: Comment @codex review after contributor push
         uses: actions/github-script@v7
         with:
-          # pull_request_target provides write GITHUB_TOKEN for forks; optional PAT override.
-          github-token: ${{ secrets.TRIAGE_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
+          # Prefer human Codex-connected PAT; fall back for forks/write token.
+          github-token: ${{ secrets.CODEX_REQUEST_GITHUB_TOKEN || secrets.TRIAGE_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
           script: |
             const auto = require(`${process.env.GITHUB_WORKSPACE}/scripts/cursor-automation.cjs`);
             // External job checks out default branch only; tree is trusted.
@@ -2091,7 +2121,8 @@ jobs:
       - name: Poll open automation PRs
         uses: actions/github-script@v7
         with:
-          github-token: ${{ secrets.TRIAGE_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
+          # Poll may re-@codex; use human-connected token for those comments.
+          github-token: ${{ secrets.CODEX_REQUEST_GITHUB_TOKEN || secrets.TRIAGE_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
           script: |
             const auto = require(`${process.env.GITHUB_WORKSPACE}/scripts/cursor-automation.cjs`);
             const ownActors = process.env.OWN_ACTORS;
@@ -2372,6 +2403,7 @@ jobs:
                       body: auto.buildCodexReviewRequestComment(
                         round,
                         pr.head.sha,
+                        { includeExternalMarker: true },
                       ),
                     });
                     core.info(
@@ -2389,7 +2421,9 @@ jobs:
                 await github.rest.issues.createComment({
                   ...context.repo,
                   issue_number: pr.number,
-                  body: auto.buildCodexReviewRequestComment(round, pr.head.sha),
+                  body: auto.buildCodexReviewRequestComment(round, pr.head.sha, {
+                    includeExternalMarker: true,
+                  }),
                 });
                 core.info(`PR #${pr.number}: re-requested Codex after timeout`);
                 handled += 1;

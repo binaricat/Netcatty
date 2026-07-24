@@ -785,7 +785,18 @@ function buildPullRequestComment({ pullRequestUrl, clean }) {
   ].join('\n');
 }
 
-function buildCodexReviewRequestComment(round = 1, headSha = '') {
+/**
+ * Single @codex review request comment for the GitHub Codex connector.
+ * At most one `@codex review` line — never join with buildExternalCodexRerequestComment.
+ *
+ * @param {number} [round]
+ * @param {string} [headSha]
+ * @param {{ includeExternalMarker?: boolean }} [options]
+ *   includeExternalMarker: also plant cursor-external-codex so own/human
+ *   re-requests share the same dedupe key as external re-requests.
+ */
+function buildCodexReviewRequestComment(round = 1, headSha = '', options = {}) {
+  const includeExternalMarker = Boolean(options && options.includeExternalMarker);
   const lines = [
     TRIAGE_MARKER,
     '',
@@ -798,6 +809,9 @@ function buildCodexReviewRequestComment(round = 1, headSha = '') {
     .toLowerCase();
   if (/^[0-9a-f]{7,40}$/.test(sha)) {
     lines.push(`<!-- cursor-codex-head:${sha} -->`);
+    if (includeExternalMarker) {
+      lines.push(`<!-- cursor-external-codex:${sha} -->`);
+    }
   }
   return lines.join('\n');
 }
