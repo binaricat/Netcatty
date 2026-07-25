@@ -38,6 +38,9 @@ test('docker logs detection covers direct and privileged commands without matchi
   assert.equal(isDockerLogsCommand('doas -u root docker logs -f api'), true);
   assert.equal(isDockerLogsCommand('env DOCKER_HOST=unix:///run/docker.sock docker logs -f api'), true);
   assert.equal(isDockerLogsCommand('env -u DOCKER_CONTEXT docker logs api'), true);
+  assert.equal(isDockerLogsCommand('env -C /tmp docker logs -f api'), true);
+  assert.equal(isDockerLogsCommand('env --chdir /tmp docker logs -f api'), true);
+  assert.equal(isDockerLogsCommand('sudo -T 30 docker logs -f api'), true);
   assert.equal(isDockerLogsCommand('sudo docker --host tcp://1.2.3.4:2375 container logs api'), true);
   assert.equal(isDockerLogsCommand('/usr/bin/docker --context prod logs api'), true);
   assert.equal(isDockerLogsCommand('docker exec api sh'), false);
@@ -76,7 +79,8 @@ test('docker logs stays protected through prompt-like output and interrupt resid
 });
 
 test('a non-log command restores ordinary color queries only after a user interrupt boundary', () => {
-  const state = { current: true };
+  const state = { current: false };
+  beginOscColorQuerySuppressionForCommand(state, 'docker logs -f api');
   beginOscColorQuerySuppressionForCommand(state, 'vim');
   assert.equal(state.current, true);
   markOscColorQuerySuppressionEndBoundary(state);
@@ -84,6 +88,14 @@ test('a non-log command restores ordinary color queries only after a user interr
   beginOscColorQuerySuppressionForCommand(state, 'vim');
   assert.equal(state.current, false);
   endOscColorQuerySuppressionForCommand(state);
+  assert.equal(state.current, false);
+});
+
+test('a bounded Docker logs command restores on the next trusted command', () => {
+  const state = { current: false };
+  beginOscColorQuerySuppressionForCommand(state, 'docker logs --tail 200 api');
+  assert.equal(state.current, true);
+  beginOscColorQuerySuppressionForCommand(state, 'vim');
   assert.equal(state.current, false);
 });
 

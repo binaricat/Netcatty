@@ -1577,6 +1577,14 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
       e.preventDefault();
       e.stopPropagation();
       const kittyEvent = toKittyKeyboardEvent(e);
+      const urgentInterrupt = shouldUseUrgentTerminalInterrupt(e, {
+        hasSelection: term.hasSelection(),
+      });
+      if (urgentInterrupt && ctx.suppressOscColorQueriesForActiveCommandRef) {
+        markOscColorQuerySuppressionEndBoundary(
+          ctx.suppressOscColorQueriesForActiveCommandRef,
+        );
+      }
       upsertKittyKeyboardForwardedPress(
         kittyForwardedKeys,
         kittyKeyIdentity(e),
@@ -1588,9 +1596,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
         kind: "key",
         event: kittyEvent,
         fallbackToLegacy: true,
-        urgentInterrupt: shouldUseUrgentTerminalInterrupt(e, {
-          hasSelection: term.hasSelection(),
-        }),
+        urgentInterrupt,
         ...(kittyEvent.type !== "keyup" && kittyEvent.key === "Enter"
           ? { oscColorQuerySuppressionCommand: resolveTrustedKeyboardBroadcastCommand() }
           : {}),

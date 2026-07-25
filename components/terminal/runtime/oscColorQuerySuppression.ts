@@ -16,11 +16,11 @@ const DOCKER_GLOBAL_OPTIONS_WITH_VALUE = new Set([
 ]);
 const DOCKER_NON_EXECUTING_OPTIONS = new Set(['--help', '--version', '-v']);
 const SUDO_OPTIONS_WITH_VALUE = new Set([
-  '--chdir', '--close-from', '--group', '--host', '--other-user', '--prompt', '--role', '--type', '--user',
-  '-C', '-g', '-h', '-p', '-R', '-r', '-t', '-u',
+  '--chdir', '--close-from', '--command-timeout', '--group', '--host', '--other-user', '--prompt', '--role',
+  '--type', '--user', '-C', '-g', '-h', '-p', '-R', '-r', '-T', '-t', '-u',
 ]);
 const DOAS_OPTIONS_WITH_VALUE = new Set(['-a', '-C', '-u']);
-const ENV_OPTIONS_WITH_VALUE = new Set(['--unset', '-u']);
+const ENV_OPTIONS_WITH_VALUE = new Set(['--chdir', '--unset', '-C', '-u']);
 
 const commandBasename = (token: string): string => token.split('/').pop() ?? token;
 
@@ -80,8 +80,10 @@ const hasShellCommandSeparator = (command: string): boolean => {
   return false;
 };
 
-const isStandaloneDockerLogsCommand = (command: string): boolean => {
-  if (hasShellCommandSeparator(command)) return false;
+type DockerLogsCommand = { follow: boolean };
+
+const classifyStandaloneDockerLogsCommand = (command: string): DockerLogsCommand | null => {
+  if (hasShellCommandSeparator(command)) return null;
   const tokens = command.trim().split(/\s+/).filter(Boolean);
   let index = 0;
 
@@ -92,14 +94,14 @@ const isStandaloneDockerLogsCommand = (command: string): boolean => {
     if (wrapper === 'command') {
       index += 1;
       while (tokens[index] === '-p' || tokens[index] === '--') index += 1;
-      if ((tokens[index] ?? '').startsWith('-')) return false;
+      if ((tokens[index] ?? '').startsWith('-')) return null;
       continue;
     }
     if (wrapper === 'exec') {
       index += 1;
       while ((tokens[index] ?? '').startsWith('-')) {
         const option = tokens[index];
-        if (!['--', '-a', '-c', '-l'].includes(option)) return false;
+        if (!['--', '-a', '-c', '-l'].includes(option)) return null;
         index += 1;
         if (option === '-a') index += 1;
       }
@@ -110,7 +112,7 @@ const isStandaloneDockerLogsCommand = (command: string): boolean => {
       const optionsWithValue = wrapper === 'sudo' ? SUDO_OPTIONS_WITH_VALUE : DOAS_OPTIONS_WITH_VALUE;
       while ((tokens[index] ?? '').startsWith('-')) {
         const option = tokens[index];
-        if (['--help', '--version', '-V'].includes(option)) return false;
+        if (['--help', '--version', '-V'].includes(option)) return null;
         index += 1;
         if (!option.includes('=') && optionsWithValue.has(option)) index += 1;
       }
@@ -120,7 +122,7 @@ const isStandaloneDockerLogsCommand = (command: string): boolean => {
       index += 1;
       while ((tokens[index] ?? '').startsWith('-')) {
         const option = tokens[index];
-        if (['--help', '--version'].includes(option)) return false;
+        if (['--help', '--version'].includes(option)) return null;
         index += 1;
         if (!option.includes('=') && ENV_OPTIONS_WITH_VALUE.has(option)) index += 1;
       }
@@ -130,34 +132,51 @@ const isStandaloneDockerLogsCommand = (command: string): boolean => {
     break;
   }
 
-  if (commandBasename(tokens[index] ?? '') !== 'docker') return false;
+  if (commandBasename(tokens[index] ?? '') !== 'docker') return null;
   index += 1;
   while ((tokens[index] ?? '').startsWith('-')) {
     const option = tokens[index];
-    if (DOCKER_NON_EXECUTING_OPTIONS.has(option)) return false;
+    if (DOCKER_NON_EXECUTING_OPTIONS.has(option)) return null;
     index += 1;
     if (!option.includes('=') && DOCKER_GLOBAL_OPTIONS_WITH_VALUE.has(option)) index += 1;
   }
   // `docker logs` is an alias of `docker container logs`.
   if (tokens[index] === 'container') index += 1;
-  return tokens[index] === 'logs';
+  if (tokens[index] !== 'logs') return null;
+  return {
+    follow: tokens.slice(index + 1).some((token) => (
+      token === '--follow'
+      || token.startsWith('--follow=')
+      || /^-[^-]*f/u.test(token)
+    )),
+  };
+};
+
+const classifyDockerLogsCommand = (command: string): DockerLogsCommand | null => {
+  const segments = getForegroundCommandSegments(command);
+  const dockerSegment = segments.at(-1);
+  if (
+    dockerSegment === undefined
+    || !segments.slice(0, -1).every(isSafeDockerLogsSetupCommand)
+  ) return null;
+  return classifyStandaloneDockerLogsCommand(dockerSegment);
 };
 
 export function isDockerLogsCommand(command: string): boolean {
-  const segments = getForegroundCommandSegments(command);
-  const dockerSegment = segments.at(-1);
-  return dockerSegment !== undefined
-    && segments.slice(0, -1).every(isSafeDockerLogsSetupCommand)
-    && isStandaloneDockerLogsCommand(dockerSegment);
+  return classifyDockerLogsCommand(command) !== null;
 }
 
 export function beginOscColorQuerySuppressionForCommand(
   state: { current: boolean },
   command: string,
 ): void {
-  if (isDockerLogsCommand(command)) {
+  const dockerLogs = classifyDockerLogsCommand(command);
+  if (dockerLogs) {
     state.current = true;
-    suppressionEndBoundaries.delete(state);
+    // Follow mode needs a user-originated interrupt before a prompt can be
+    // trusted. A bounded logs command may restore on its next trusted command.
+    if (dockerLogs.follow) suppressionEndBoundaries.delete(state);
+    else suppressionEndBoundaries.add(state);
     return;
   }
   // A prompt-shaped line can be emitted by the container itself. Keep the

@@ -162,6 +162,10 @@ test("only trusted broadcast commands transition OSC color-query suppression on 
     /onTrustedCommandSubmitted:[\s\S]*?trustedSubmittedCommand = command[\s\S]*?oscColorQuerySuppressionCommand: trustedSubmittedCommand/u,
   );
   assert.match(
+    runtimeSource,
+    /if \(kittySequenceForKeyDown\)[\s\S]*?urgentInterrupt[\s\S]*?markOscColorQuerySuppressionEndBoundary/u,
+  );
+  assert.match(
     terminalSource,
     /let trustedShellSubmission = false[\s\S]*?trustedShellSubmission = true[\s\S]*?trustedShellSubmission[\s\S]*?oscColorQuerySuppressionCommand: command/u,
   );
