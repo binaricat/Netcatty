@@ -950,9 +950,13 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       if (!canUseDirectSessionWriteFallback(session)) continue;
 
       if (options?.kittyKeyboardInput) {
-        dispatchKittyKeyboardBroadcastInput(session.id, options.kittyKeyboardInput, {
+        const kittyKeyboardInput = options.kittyKeyboardInput;
+        dispatchKittyKeyboardBroadcastInput(session.id, kittyKeyboardInput, {
           beforeUrgentInterrupt: () => {
             broadcastInterruptPrioritizersRef.current.get(session.id)?.();
+          },
+          onResolvedInput: (resolvedData, command) => {
+            handleOscColorQueryBroadcastInputForSession(session.id, resolvedData, command);
           },
         });
         deliveredSessionIds.push(session.id);

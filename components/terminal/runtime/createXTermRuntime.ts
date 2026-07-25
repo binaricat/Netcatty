@@ -137,6 +137,7 @@ import {
 import {
   isTrustedTerminalShellSubmission,
   recordTerminalCommandExecution,
+  resolveSubmittedShellCommand,
 } from "./terminalCommandExecution";
 import {
   getSingleBracketedPasteLine,
@@ -1622,6 +1623,22 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
         kind: "key",
         event: normalizedKittyEvent,
         fallbackToLegacy: true,
+        ...(normalizedKittyEvent.type !== "keyup" && normalizedKittyEvent.key === "Enter"
+          ? (() => {
+              const command = resolveSubmittedShellCommand(
+                ctx.commandBufferRef.current,
+                term,
+                ctx.promptLineBreakStateRef?.current?.lastPromptText,
+              );
+              return command && isTrustedTerminalShellSubmission(
+                ctx.commandBufferRef.current,
+                term,
+                ctx.allowHostStyleGreaterThanPrompt,
+              )
+                ? { oscColorQuerySuppressionCommand: command }
+                : {};
+            })()
+          : {}),
       });
       if (forwarded) {
         upsertKittyKeyboardForwardedPress(

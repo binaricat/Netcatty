@@ -138,6 +138,14 @@ test("only trusted broadcast commands transition OSC color-query suppression on 
     /handleOscColorQueryBroadcastInputForSession\(\s*session\.id,\s*data,\s*options\?\.oscColorQuerySuppressionCommand/u,
   );
   assert.match(
+    terminalLayerSource,
+    /kittyKeyboardInput[\s\S]*?onResolvedInput:[\s\S]*?handleOscColorQueryBroadcastInputForSession\(session\.id, resolvedData, command\)[\s\S]*?continue/u,
+  );
+  assert.match(
+    runtimeSource,
+    /resolveSubmittedShellCommand\([\s\S]*?oscColorQuerySuppressionCommand: command[\s\S]*?broadcastKittyInput/u,
+  );
+  assert.match(
     runtimeSource,
     /onTrustedCommandSubmitted:[\s\S]*?trustedSubmittedCommand = command[\s\S]*?oscColorQuerySuppressionCommand: trustedSubmittedCommand/u,
   );

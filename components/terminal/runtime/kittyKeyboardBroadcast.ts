@@ -13,12 +13,14 @@ export type KittyKeyboardBroadcastInput =
       event: KittyKeyboardEvent;
       fallbackToLegacy?: boolean;
       urgentInterrupt?: boolean;
+      oscColorQuerySuppressionCommand?: string;
     }
   | { kind: "legacy"; data: string; keyIdentity: string; urgentInterrupt?: boolean }
   | { kind: "text"; text: string };
 
 type KittyKeyboardBroadcastDispatchOptions = {
   beforeUrgentInterrupt?: () => void;
+  onResolvedInput?: (data: string, command?: string) => void;
 };
 
 type KittyKeyboardBroadcastHandler = (
@@ -271,8 +273,22 @@ export const createKittyKeyboardBroadcastHandler = (options: {
   if (!sessionId || !options.isConnected()) return;
   const isPairedRelease = input.kind === "key" && input.event.type === "keyup";
   if (!isPairedRelease && options.isSensitiveInput?.() === true) return;
-  const resolved = resolveKittyKeyboardBroadcastInput(input, options.resolveOptions());
+  const resolvedOptions = options.resolveOptions();
+  const resolved = resolveKittyKeyboardBroadcastInput(input, resolvedOptions);
   if (!resolved) return;
+  const trackingData = input.kind === "text"
+    ? input.text
+    : input.kind === "legacy"
+      ? input.data
+      : input.event.type === "keyup"
+        ? ""
+        : encodeLegacyKeyboardEvent(input.event, resolvedOptions.applicationCursorMode) ?? "";
+  if (trackingData) {
+    dispatchOptions?.onResolvedInput?.(
+      trackingData,
+      input.kind === "key" ? input.oscColorQuerySuppressionCommand : undefined,
+    );
+  }
   if (resolved.urgentInterrupt && options.interruptSession) {
     dispatchOptions?.beforeUrgentInterrupt?.();
     options.interruptSession(sessionId);

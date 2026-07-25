@@ -690,6 +690,41 @@ test("keyup clears target pairing even when its flags do not encode releases", (
   }), null);
 });
 
+test("resolved keyboard input carries trusted command metadata to broadcast targets", () => {
+  const tracked: Array<{ data: string; command?: string }> = [];
+  const writes: string[] = [];
+  const handler = createKittyKeyboardBroadcastHandler({
+    resolveOptions: () => ({
+      kittyProtocolEnabled: false,
+      kittyMode: createKittyKeyboardModeState(),
+      applicationCursorMode: false,
+      encodedKeys: new Set<string>(),
+    }),
+    getSessionId: () => "target",
+    isConnected: () => true,
+    isRuntimeDisposed: () => false,
+    writeDisposed: () => undefined,
+    writeActive: (data) => writes.push(data),
+  });
+  const onResolvedInput = (data: string, command?: string) => tracked.push({ data, command });
+  handler({
+    kind: "key",
+    fallbackToLegacy: true,
+    event: { type: "keydown", key: "d", code: "KeyD" },
+  }, { onResolvedInput });
+  handler({
+    kind: "key",
+    fallbackToLegacy: true,
+    event: { type: "keydown", key: "Enter", code: "Enter" },
+    oscColorQuerySuppressionCommand: "docker logs api",
+  }, { onResolvedInput });
+  assert.deepEqual(tracked, [
+    { data: "d", command: undefined },
+    { data: "\r", command: "docker logs api" },
+  ]);
+  assert.deepEqual(writes, ["d", "\r"]);
+});
+
 test("queued inputs survive a temporarily absent hibernated target handler", () => {
   const received: KittyKeyboardBroadcastInput[] = [];
   const input: KittyKeyboardBroadcastInput = {
