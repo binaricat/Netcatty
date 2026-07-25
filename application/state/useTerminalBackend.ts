@@ -374,6 +374,14 @@ export const useTerminalBackend = () => {
     return bridge.getSessionPwd(sessionId, options);
   }, []);
 
+  const getLocalSessionForeground = useCallback(async (sessionId: string) => {
+    const bridge = netcattyBridge.get();
+    if (!bridge?.getLocalSessionForeground) {
+      return { success: false, error: 'getLocalSessionForeground unavailable' };
+    }
+    return bridge.getLocalSessionForeground(sessionId);
+  }, []);
+
   const getSessionRemoteInfo = useCallback(async (sessionId: string) => {
     const bridge = netcattyBridge.get();
     if (!bridge?.getSessionRemoteInfo) {
@@ -437,6 +445,7 @@ export const useTerminalBackend = () => {
         execCommand,
         setupOsc7Tracking,
         getSessionPwd,
+        getLocalSessionForeground,
         getSessionRemoteInfo,
         getSessionDistroInfo,
         getServerStats,
@@ -514,6 +523,7 @@ export const useTerminalBackend = () => {
       execCommand,
       setupOsc7Tracking,
       getSessionPwd,
+      getLocalSessionForeground,
       getSessionRemoteInfo,
       getSessionDistroInfo,
       getServerStats,

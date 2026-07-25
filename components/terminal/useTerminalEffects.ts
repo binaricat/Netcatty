@@ -580,7 +580,10 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
                 const suppressionVersion = getOscColorQuerySuppressionVersion(
                   ctx.suppressOscColorQueriesForActiveCommandRef,
                 );
-                void terminalBackend.getSessionPwd(sessionId, { allowHomeFallback: false })
+                const foregroundProbe = isLocalConnection
+                  ? terminalBackend.getLocalSessionForeground(sessionId)
+                  : terminalBackend.getSessionPwd(sessionId, { allowHomeFallback: false });
+                void foregroundProbe
                   .then((result: { success: boolean; shellForeground?: boolean }) => {
                     if (
                       !disposed

@@ -211,7 +211,7 @@ test("broadcast targets and direct-send paths require their own trusted shell bo
   );
   assert.match(
     terminalSource,
-    /const hibernatePrompt = getAlignedPrompt[\s\S]*?hibernatePrompt\.userInput\.trim\(\)\.length === 0[\s\S]*?disposeRuntimeOnly\(\)[\s\S]*?hibernatedRef\.current = true/u,
+    /const hibernatePrompt = getAlignedPrompt[\s\S]*?line: hibernatePrompt\.userInput[\s\S]*?tracking: hibernatePrompt\.userInput\.length > 0[\s\S]*?disposeRuntimeOnly\(\)[\s\S]*?hibernatedRef\.current = true/u,
   );
   assert.match(
     terminalSource,
@@ -220,10 +220,6 @@ test("broadcast targets and direct-send paths require their own trusted shell bo
   assert.match(
     terminalLayerSource,
     /if \(data === "\\x03" && terminalBackend\.interruptSession\) \{\s*handleOscColorQueryBroadcastInputForSession\(session\.id, data\);[\s\S]*?terminalBackend\.interruptSession/u,
-  );
-  assert.match(
-    terminalSource,
-    /hibernatedBroadcastInputRef\.current = \{\s*promptReady: trustedShellPromptReadyRef\.current,\s*line: "",\s*tracking: false,\s*edited: false,\s*\}/u,
   );
   assert.match(
     terminalSource,
@@ -241,7 +237,7 @@ test("reconnect cleanup clears Docker-log OSC color-query suppression before dis
 test("natural completion requires an out-of-band foreground-shell check", () => {
   assert.match(
     terminalSource,
-    /isConfirmedTerminalShellPrompt[\s\S]*?getOscColorQuerySuppressionVersion[\s\S]*?getSessionPwd\(activeSessionId, \{ allowHomeFallback: false \}\)[\s\S]*?result\.shellForeground === true[\s\S]*?endOscColorQuerySuppressionForCommand/u,
+    /isConfirmedTerminalShellPrompt[\s\S]*?getOscColorQuerySuppressionVersion[\s\S]*?getLocalSessionForeground\(activeSessionId\)[\s\S]*?getSessionPwd\(activeSessionId, \{ allowHomeFallback: false \}\)[\s\S]*?result\.shellForeground === true[\s\S]*?endOscColorQuerySuppressionForCommand/u,
   );
   assert.doesNotMatch(
     runtimeSource,
@@ -249,6 +245,6 @@ test("natural completion requires an out-of-band foreground-shell check", () => 
   );
   assert.match(
     effectsSource,
-    /snap\.suppressOscColorQueries[\s\S]*?getSessionPwd\(sessionId, \{ allowHomeFallback: false \}\)[\s\S]*?result\.shellForeground === true[\s\S]*?endOscColorQuerySuppressionForCommand/u,
+    /snap\.suppressOscColorQueries[\s\S]*?getLocalSessionForeground\(sessionId\)[\s\S]*?getSessionPwd\(sessionId, \{ allowHomeFallback: false \}\)[\s\S]*?result\.shellForeground === true[\s\S]*?endOscColorQuerySuppressionForCommand/u,
   );
 });

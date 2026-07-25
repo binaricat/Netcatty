@@ -225,6 +225,9 @@ function createPreloadApi(ctx) {
       allowHomeFallback: options?.allowHomeFallback,
     });
   },
+  getLocalSessionForeground: async (sessionId) => {
+    return ipcRenderer.invoke("netcatty:local:foreground", { sessionId });
+  },
   getSessionRemoteInfo: async (sessionId) => {
     return ipcRenderer.invoke("netcatty:ssh:remoteInfo", { sessionId });
   },

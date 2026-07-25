@@ -82,6 +82,7 @@ test('docker logs detection covers direct and privileged commands without matchi
   assert.equal(isDockerLogsCommand("sudo sh -c 'docker logs -f api'"), true);
   assert.equal(isDockerLogsCommand("sh -c 'docker logs api'"), true);
   assert.equal(isDockerLogsCommand("sh -c 'vim && docker logs -f api'"), false);
+  assert.equal(isDockerLogsCommand("sh -c 'cd /srv && docker logs -f api'"), true);
   assert.equal(isDockerLogsCommand("bash -n -c 'docker logs -f api'"), false);
   assert.equal(isDockerLogsCommand("bash --noexec -c 'docker logs -f api'"), false);
   assert.equal(isDockerLogsCommand('docker logs --help -f api'), false);
@@ -112,12 +113,16 @@ test('a non-log command restores ordinary color queries only after a user interr
   assert.equal(state.current, false);
 });
 
-test('bounded Docker logs commands do not enable follow-mode suppression', () => {
+test('bounded Docker logs commands suppress replies until the next trusted command', () => {
   const state = { current: false };
   beginOscColorQuerySuppressionForCommand(state, 'docker logs --tail 200 api');
+  assert.equal(state.current, true);
+  beginOscColorQuerySuppressionForCommand(state, 'vim');
   assert.equal(state.current, false);
 
   beginOscColorQuerySuppressionForCommand(state, 'docker logs --follow=false api');
+  assert.equal(state.current, true);
+  beginOscColorQuerySuppressionForCommand(state, 'vim');
   assert.equal(state.current, false);
 });
 
@@ -135,10 +140,12 @@ test('Docker follow boolean and combined shorthand forms select the right lifecy
     ['docker logs -tf=false api', false],
     ['docker logs -ft=false api', true],
   ];
-  for (const [command, expected] of cases) {
+  for (const [command, expectedSticky] of cases) {
     const state = { current: false };
     beginOscColorQuerySuppressionForCommand(state, command);
-    assert.equal(state.current, expected, command);
+    assert.equal(state.current, true, command);
+    beginOscColorQuerySuppressionForCommand(state, 'vim');
+    assert.equal(state.current, expectedSticky, command);
   }
 });
 

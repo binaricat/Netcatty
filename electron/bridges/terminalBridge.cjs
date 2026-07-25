@@ -12,6 +12,7 @@ const path = require("node:path");
 const { promisify } = require("node:util");
 const { StringDecoder } = require("node:string_decoder");
 const { ensureNodePtySpawnHelperExecutable } = require("./nodePtySpawnHelperPermissions.cjs");
+const { isLocalShellForegroundFromPs } = require("./terminalLocalForeground.cjs");
 
 ensureNodePtySpawnHelperExecutable();
 
@@ -1065,6 +1066,30 @@ function startLocalSession(event, payload) {
   return { sessionId };
 }
 
+async function getLocalSessionForeground(_event, payload) {
+  const session = sessions.get(payload?.sessionId);
+  const shellPid = Number(session?.proc?.pid);
+  if (session?.type !== "local" || !Number.isSafeInteger(shellPid) || shellPid < 1) {
+    return { success: false, error: "Local session not found" };
+  }
+  if (process.platform === "win32") {
+    const children = await ptyProcessTree.getChildProcesses(payload.sessionId);
+    return { success: true, shellForeground: children.length === 0 };
+  }
+  return new Promise((resolve) => {
+    execFile("ps", ["-A", "-o", "pid=,ppid=,stat=,comm="], (error, stdout) => {
+      if (error || typeof stdout !== "string") {
+        resolve({ success: false, error: error?.message || "Unable to inspect local shell" });
+        return;
+      }
+      resolve({
+        success: true,
+        shellForeground: isLocalShellForegroundFromPs(stdout, shellPid),
+      });
+    });
+  });
+}
+
 /**
  * Start a Telnet session using native Node.js net module
  */
@@ -2041,6 +2066,7 @@ function registerHandlers(ipcMain, options = {}) {
       "netcatty:serial:ymodem-receive",
       "netcatty:local:defaultShell",
       "netcatty:local:validatePath",
+      "netcatty:local:foreground",
       "netcatty:shells:discover",
       "netcatty:terminal:setEncoding",
       "netcatty:telnet:getEchoMode",
@@ -2085,6 +2111,7 @@ function registerHandlers(ipcMain, options = {}) {
   ipcMain.handle("netcatty:serial:ymodem-receive", receiveSerialYmodem);
   ipcMain.handle("netcatty:local:defaultShell", getDefaultShell);
   ipcMain.handle("netcatty:local:validatePath", validatePath);
+  ipcMain.handle("netcatty:local:foreground", getLocalSessionForeground);
   ipcMain.handle("netcatty:shells:discover", () => discoverShells());
   ipcMain.handle("netcatty:terminal:setEncoding", setSessionEncoding);
   ipcMain.handle("netcatty:telnet:getEchoMode", getTelnetEchoMode);
@@ -2248,6 +2275,7 @@ module.exports = {
   registerHandlers,
   findExecutable,
   startLocalSession,
+  getLocalSessionForeground,
   startTelnetSession,
   startMoshSession,
   bundledMoshClient,

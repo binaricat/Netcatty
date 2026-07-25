@@ -72,6 +72,8 @@ test("shared terminal cwd probe targets the shell pid assigned to that tab", asy
   assert.ok(command.includes("sub(/^.*\\//"));
   assert.ok(command.includes("$3 !~ /^\\?+$/"));
   assert.match(command, /LC_ALL=C lsof/);
+  assert.match(command, /is_shell_ready/);
+  assert.match(command, /shell_fg && !busy/);
   assert.equal(session.shellPid, "4242");
 });
 

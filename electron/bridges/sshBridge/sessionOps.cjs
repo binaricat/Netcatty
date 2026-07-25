@@ -416,6 +416,26 @@ function createSessionOpsApi(ctx) {
         }
       '
     }
+    # A visible prompt is trustworthy only when a foreground shell exists and
+    # no non-shell process in its subtree still owns the foreground group.
+    # This also covers shells with job control disabled, where the waiting shell
+    # and its foreground child share one process group and both carry "+".
+    is_shell_ready() {
+      ps -e -o pid=,ppid=,stat=,comm= 2>/dev/null | awk -v start="$1" '
+        { pp[$1]=$2; st[$1]=$3; cm[$1]=$4; ord[NR]=$1 }
+        function isshell(c) { sub(/^.*\//, "", c); sub(/^-/, "", c); return c ~ /^(ba|z|fi|k|da|a|c|tc)?sh$/ }
+        function descendant(p,   d) { d=0; while (p != "" && d < 64) { if (p == start) return 1; p=pp[p]; d++ } return 0 }
+        END {
+          shell_fg=0; busy=0;
+          for (i=1; i<=NR; i++) {
+            p=ord[i];
+            if (!descendant(p) || index(st[p], "+") == 0) continue;
+            if (isshell(cm[p])) shell_fg=1; else busy=1;
+          }
+          exit !(shell_fg && !busy)
+        }
+      '
+    }
     # Read a process's cwd. Linux exposes it via /proc; systems without a
     # readable /proc fall back to lsof so the SFTP follow-terminal probe also
     # works on macOS and on BSD hosts that provide lsof (#2335). Both paths
@@ -436,10 +456,11 @@ function createSessionOpsApi(ctx) {
       printf 'NETCATTY_LOGIN_PID=%s\\n' "$login" >&2
       pid=$(find_active_shell "$login")
       [ -n "$pid" ] || pid="$login"
-      case "$(ps -p "$pid" -o stat= 2>/dev/null)" in
-        *+*) printf 'NETCATTY_SHELL_FOREGROUND=1\\n' >&2 ;;
-        *) printf 'NETCATTY_SHELL_FOREGROUND=0\\n' >&2 ;;
-      esac
+      if is_shell_ready "$login"; then
+        printf 'NETCATTY_SHELL_FOREGROUND=1\\n' >&2
+      else
+        printf 'NETCATTY_SHELL_FOREGROUND=0\\n' >&2
+      fi
       cwd=$(read_shell_cwd "$pid")
       # The active shell's cwd is only readable for same-uid processes (ptrace
       # perms on /proc, lsof permissions on macOS/BSD), so this unprivileged

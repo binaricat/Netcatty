@@ -1782,7 +1782,10 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         const suppressionVersion = getOscColorQuerySuppressionVersion(
           suppressOscColorQueriesForActiveCommandRef,
         );
-        void terminalBackend.getSessionPwd(activeSessionId, { allowHomeFallback: false })
+        const foregroundProbe = isLocalConnection
+          ? terminalBackend.getLocalSessionForeground(activeSessionId)
+          : terminalBackend.getSessionPwd(activeSessionId, { allowHomeFallback: false });
+        void foregroundProbe
           .then((result) => {
             if (
               result.success
@@ -1806,7 +1809,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         hibernatedBroadcastInputRef.current = { promptReady: false, line: "", tracking: false, edited: false };
       }
     }
-  }, [isNetworkDevice, terminalBackend]);
+  }, [isLocalConnection, isNetworkDevice, terminalBackend]);
 
   const beginHibernatedSessionListeners = useCallback((backendId: string) => {
     disposeDataRef.current?.();
@@ -1960,15 +1963,14 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     const hibernatePrompt = getAlignedPrompt(term, "", false).prompt;
     trustedShellPromptReadyRef.current = Boolean(
       hibernatePrompt.isAtPrompt
-      && hibernatePrompt.userInput.trim().length === 0
       && isConfirmedTerminalShellPrompt(hibernatePrompt.promptText, {
         allowHostStyleGreaterThan: isNetworkDevice,
       }),
     );
     hibernatedBroadcastInputRef.current = {
       promptReady: trustedShellPromptReadyRef.current,
-      line: "",
-      tracking: false,
+      line: hibernatePrompt.userInput,
+      tracking: hibernatePrompt.userInput.length > 0,
       edited: false,
     };
     isBootActiveRef.current = false;

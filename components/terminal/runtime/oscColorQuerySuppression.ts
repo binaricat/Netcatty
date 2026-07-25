@@ -151,6 +151,16 @@ const parseDockerBoolean = (value: string): boolean | null => {
 
 type DockerLogsCommand = { follow: boolean };
 
+function classifyDockerLogsCommand(command: string, shellDepth = 0): DockerLogsCommand | null {
+  const segments = getForegroundCommandSegments(command);
+  const dockerSegment = segments.at(-1);
+  if (
+    dockerSegment === undefined
+    || !segments.slice(0, -1).every(isSafeDockerLogsSetupCommand)
+  ) return null;
+  return classifyStandaloneDockerLogsCommand(dockerSegment, shellDepth);
+}
+
 const classifyStandaloneDockerLogsCommand = (
   command: string,
   shellDepth = 0,
@@ -229,7 +239,7 @@ const classifyStandaloneDockerLogsCommand = (
     }
     return commandString === undefined
       ? null
-      : classifyStandaloneDockerLogsCommand(commandString, shellDepth + 1);
+      : classifyDockerLogsCommand(commandString, shellDepth + 1);
   }
 
   if (commandBasename(tokens[index] ?? '') !== 'docker') return null;
@@ -273,16 +283,6 @@ const classifyStandaloneDockerLogsCommand = (
   };
 };
 
-const classifyDockerLogsCommand = (command: string): DockerLogsCommand | null => {
-  const segments = getForegroundCommandSegments(command);
-  const dockerSegment = segments.at(-1);
-  if (
-    dockerSegment === undefined
-    || !segments.slice(0, -1).every(isSafeDockerLogsSetupCommand)
-  ) return null;
-  return classifyStandaloneDockerLogsCommand(dockerSegment);
-};
-
 export function isDockerLogsCommand(command: string): boolean {
   return classifyDockerLogsCommand(command) !== null;
 }
@@ -293,9 +293,10 @@ export function beginOscColorQuerySuppressionForCommand(
 ): void {
   advanceSuppressionVersion(state);
   const dockerLogs = classifyDockerLogsCommand(command);
-  if (dockerLogs?.follow) {
+  if (dockerLogs) {
     state.current = true;
-    suppressionEndBoundaries.delete(state);
+    if (dockerLogs.follow) suppressionEndBoundaries.delete(state);
+    else suppressionEndBoundaries.add(state);
     return;
   }
   // A prompt-shaped line can be emitted by the container itself. Keep the

@@ -220,6 +220,9 @@ declare global {
       sessionId: string,
       options?: { allowHomeFallback?: boolean },
     ): Promise<{ success: boolean; cwd?: string; shellForeground?: boolean; error?: string }>;
+    getLocalSessionForeground?(
+      sessionId: string,
+    ): Promise<{ success: boolean; shellForeground?: boolean; error?: string }>;
     /**
      * Get metadata about an already-connected SSH session — currently the
      * SSH server identification string (the `software` part of the
