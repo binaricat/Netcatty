@@ -64,6 +64,10 @@ test('docker logs detection covers direct and privileged commands without matchi
   assert.equal(isDockerLogsCommand('docker --help logs'), false);
   assert.equal(isDockerLogsCommand('docker --version logs'), false);
   assert.equal(isDockerLogsCommand('sudo --help docker logs api'), false);
+  assert.equal(isDockerLogsCommand('doas -C /etc/doas.conf docker logs -f api'), false);
+  assert.equal(isDockerLogsCommand('env LABEL="two words" docker logs -f api'), true);
+  assert.equal(isDockerLogsCommand('env LABEL="a|b" docker logs -f api'), true);
+  assert.equal(isDockerLogsCommand('sudo -p "Password for %u: " docker logs -f api'), true);
 });
 
 test('docker logs stays protected through prompt-like output and interrupt residue', () => {
@@ -91,17 +95,34 @@ test('a non-log command restores ordinary color queries only after a user interr
   assert.equal(state.current, false);
 });
 
-test('a bounded Docker logs command restores on the next trusted command', () => {
+test('bounded Docker logs commands do not enable follow-mode suppression', () => {
   const state = { current: false };
   beginOscColorQuerySuppressionForCommand(state, 'docker logs --tail 200 api');
-  assert.equal(state.current, true);
-  beginOscColorQuerySuppressionForCommand(state, 'vim');
   assert.equal(state.current, false);
 
   beginOscColorQuerySuppressionForCommand(state, 'docker logs --follow=false api');
-  assert.equal(state.current, true);
-  beginOscColorQuerySuppressionForCommand(state, 'vim');
   assert.equal(state.current, false);
+});
+
+test('Docker follow boolean and combined shorthand forms select the right lifecycle', () => {
+  const cases: Array<[string, boolean]> = [
+    ['docker logs --follow api', true],
+    ['docker logs --follow=1 api', true],
+    ['docker logs --follow=TRUE api', true],
+    ['docker logs --follow=0 api', false],
+    ['docker logs --follow=FALSE api', false],
+    ['docker logs -f=true api', true],
+    ['docker logs -f=1 api', true],
+    ['docker logs -f=false api', false],
+    ['docker logs -f=0 api', false],
+    ['docker logs -tf=false api', false],
+    ['docker logs -ft=false api', true],
+  ];
+  for (const [command, expected] of cases) {
+    const state = { current: false };
+    beginOscColorQuerySuppressionForCommand(state, command);
+    assert.equal(state.current, expected, command);
+  }
 });
 
 test('the interrupt boundary survives a terminal-view handoff', () => {

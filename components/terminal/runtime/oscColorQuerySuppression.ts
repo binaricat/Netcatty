@@ -72,19 +72,74 @@ const isSafeDockerLogsSetupCommand = (command: string): boolean => (
 );
 
 const hasShellCommandSeparator = (command: string): boolean => {
+  let quote: "'" | '"' | null = null;
+  let escaped = false;
   for (let index = 0; index < command.length; index += 1) {
     const char = command[index];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (char === '\\' && quote !== "'") {
+      escaped = true;
+      continue;
+    }
+    if (quote) {
+      if (char === quote) quote = null;
+      continue;
+    }
+    if (char === "'" || char === '"') {
+      quote = char;
+      continue;
+    }
     if (char === ';' || char === '|' || char === '\r' || char === '\n') return true;
     if (char === '&' && command[index - 1] !== '>' && command[index + 1] !== '>') return true;
   }
   return false;
 };
 
+const tokenizeShellWords = (command: string): string[] => {
+  const tokens: string[] = [];
+  let token = '';
+  let quote: "'" | '"' | null = null;
+  let escaped = false;
+  const push = () => {
+    if (token) tokens.push(token);
+    token = '';
+  };
+  for (const char of command) {
+    if (escaped) {
+      token += char;
+      escaped = false;
+    } else if (char === '\\' && quote !== "'") {
+      escaped = true;
+    } else if (quote) {
+      if (char === quote) quote = null;
+      else token += char;
+    } else if (char === "'" || char === '"') {
+      quote = char;
+    } else if (/\s/u.test(char)) {
+      push();
+    } else {
+      token += char;
+    }
+  }
+  if (quote || escaped) return [];
+  push();
+  return tokens;
+};
+
+const parseDockerBoolean = (value: string): boolean | null => {
+  if (/^(?:1|t|true)$/iu.test(value)) return true;
+  if (/^(?:0|f|false)$/iu.test(value)) return false;
+  return null;
+};
+
 type DockerLogsCommand = { follow: boolean };
 
 const classifyStandaloneDockerLogsCommand = (command: string): DockerLogsCommand | null => {
   if (hasShellCommandSeparator(command)) return null;
-  const tokens = command.trim().split(/\s+/).filter(Boolean);
+  const tokens = tokenizeShellWords(command);
   let index = 0;
 
   while (/^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[index] ?? '')) index += 1;
@@ -113,6 +168,7 @@ const classifyStandaloneDockerLogsCommand = (command: string): DockerLogsCommand
       while ((tokens[index] ?? '').startsWith('-')) {
         const option = tokens[index];
         if (['--help', '--version', '-V'].includes(option)) return null;
+        if (wrapper === 'doas' && (option === '-C' || option.startsWith('-C='))) return null;
         index += 1;
         if (!option.includes('=') && optionsWithValue.has(option)) index += 1;
       }
@@ -145,15 +201,23 @@ const classifyStandaloneDockerLogsCommand = (command: string): DockerLogsCommand
   if (tokens[index] !== 'logs') return null;
   let follow = false;
   for (const token of tokens.slice(index + 1)) {
-    if (token === '--follow=false' || token === '-f=false') {
-      follow = false;
-    } else if (
-      token === '--follow'
-      || token === '--follow=true'
-      || token === '-f'
-      || /^-[^-][^=]*f/u.test(token)
-    ) {
+    if (token === '--follow' || token === '-f') {
       follow = true;
+      continue;
+    }
+    const longValue = /^--follow=(.+)$/iu.exec(token);
+    if (longValue) {
+      follow = parseDockerBoolean(longValue[1]) ?? false;
+      continue;
+    }
+    const shortCluster = /^-([^-][^=]*)(?:=(.+))?$/u.exec(token);
+    if (shortCluster) {
+      const followIndex = shortCluster[1].indexOf('f');
+      if (followIndex >= 0) {
+        follow = followIndex === shortCluster[1].length - 1 && shortCluster[2] !== undefined
+          ? parseDockerBoolean(shortCluster[2]) ?? false
+          : true;
+      }
     }
   }
   return {
@@ -180,12 +244,9 @@ export function beginOscColorQuerySuppressionForCommand(
   command: string,
 ): void {
   const dockerLogs = classifyDockerLogsCommand(command);
-  if (dockerLogs) {
+  if (dockerLogs?.follow) {
     state.current = true;
-    // Follow mode needs a user-originated interrupt before a prompt can be
-    // trusted. A bounded logs command may restore on its next trusted command.
-    if (dockerLogs.follow) suppressionEndBoundaries.delete(state);
-    else suppressionEndBoundaries.add(state);
+    suppressionEndBoundaries.delete(state);
     return;
   }
   // A prompt-shaped line can be emitted by the container itself. Keep the
