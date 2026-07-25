@@ -143,12 +143,21 @@ const classifyStandaloneDockerLogsCommand = (command: string): DockerLogsCommand
   // `docker logs` is an alias of `docker container logs`.
   if (tokens[index] === 'container') index += 1;
   if (tokens[index] !== 'logs') return null;
-  return {
-    follow: tokens.slice(index + 1).some((token) => (
+  let follow = false;
+  for (const token of tokens.slice(index + 1)) {
+    if (token === '--follow=false' || token === '-f=false') {
+      follow = false;
+    } else if (
       token === '--follow'
-      || token.startsWith('--follow=')
-      || /^-[^-]*f/u.test(token)
-    )),
+      || token === '--follow=true'
+      || token === '-f'
+      || /^-[^-][^=]*f/u.test(token)
+    ) {
+      follow = true;
+    }
+  }
+  return {
+    follow,
   };
 };
 

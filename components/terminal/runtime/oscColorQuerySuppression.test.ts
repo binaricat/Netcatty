@@ -97,6 +97,11 @@ test('a bounded Docker logs command restores on the next trusted command', () =>
   assert.equal(state.current, true);
   beginOscColorQuerySuppressionForCommand(state, 'vim');
   assert.equal(state.current, false);
+
+  beginOscColorQuerySuppressionForCommand(state, 'docker logs --follow=false api');
+  assert.equal(state.current, true);
+  beginOscColorQuerySuppressionForCommand(state, 'vim');
+  assert.equal(state.current, false);
 });
 
 test('the interrupt boundary survives a terminal-view handoff', () => {
