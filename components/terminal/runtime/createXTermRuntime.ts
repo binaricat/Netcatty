@@ -63,7 +63,7 @@ import {
 } from "./kittyKeyboardProtocol";
 import { installKittyKeyboardProtocolHandlersIfEnabled } from "./kittyKeyboardRuntime";
 import {
-  installOscColorQuerySuppression,
+  stripOscColorQueryResponses,
 } from "./oscColorQuerySuppression";
 import {
   clearKittyKeyboardBroadcastPairingState,
@@ -1708,7 +1708,12 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
   ctx.container.addEventListener("input", markKittyTextInput, true);
   textarea?.addEventListener("blur", clearKittyTransientInputState);
 
-  term.onData((data) => {
+  term.onData((rawData) => {
+    const data = stripOscColorQueryResponses(
+      rawData,
+      ctx.suppressOscColorQueriesForActiveCommandRef?.current === true,
+    );
+    if (!data) return;
     if (kittyCompositionPending && !data.startsWith("\u001b")) {
       kittyCompositionPending = false;
       if (kittyCompositionClearTimer !== undefined) {
@@ -1868,12 +1873,6 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     }
     return true; // Indicate we handled the sequence
   });
-
-  const oscColorQuerySuppressionDisposable = installOscColorQuerySuppression(
-    term.parser,
-    () => ctx.suppressOscColorQueriesForActiveCommandRef?.current === true,
-    (sequence) => term.write(sequence),
-  );
 
   const osc133Disposable = term.parser.registerOscHandler(133, (data) => {
     if (consumeOsc133CommandCompletion(data, ctx.promptLineBreakStateRef?.current)) {
@@ -2052,7 +2051,6 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
       textarea?.removeEventListener("blur", clearKittyTransientInputState);
       clearKittyTransientInputState();
       osc7Disposable.dispose();
-      oscColorQuerySuppressionDisposable?.dispose();
       osc133Disposable.dispose();
       osc52Disposable.dispose();
       titleChangeDisposable.dispose();

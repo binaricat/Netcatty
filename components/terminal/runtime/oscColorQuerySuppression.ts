@@ -1,6 +1,8 @@
-import type { IDisposable, IParser } from '@xterm/xterm';
-
-const OSC_COLOR_QUERY_IDENTIFIERS = [4, 10, 11, 12] as const;
+const ESC = String.fromCharCode(0x1b);
+const OSC_COLOR_RESPONSE_PATTERN = new RegExp(
+  `${ESC}\\](?:4;\\d{1,3}|1[0-2]);rgb:[0-9a-f]+\\/[0-9a-f]+\\/[0-9a-f]+${ESC}\\\\`,
+  'giu',
+);
 
 const PRIVILEGE_WRAPPERS = new Set(['sudo', 'doas']);
 const SIMPLE_WRAPPERS = new Set(['command', 'builtin', 'exec']);
@@ -102,68 +104,15 @@ export function registerOscColorQuerySuppressionArmer(
   };
 }
 
-/** Arm (or clear) Docker-log OSC suppression on a broadcast target session. */
+/** Arm Docker-log OSC suppression on a broadcast target without clearing target-owned state. */
 export function armOscColorQuerySuppressionForSession(
   sessionId: string,
   command: string,
 ): void {
+  if (!isDockerLogsCommand(command)) return;
   oscColorQuerySuppressionArmers.get(sessionId)?.(command);
 }
 
-export function installOscColorQuerySuppression(
-  parser: Pick<IParser, 'registerOscHandler'>,
-  enabled: boolean | (() => boolean),
-  forwardColorSetting: (sequence: string) => void,
-): IDisposable | undefined {
-  if (!enabled) return undefined;
-
-  const shouldSuppress = typeof enabled === 'function' ? enabled : () => true;
-
-  const suppressQueriesAndForwardSettings = (identifier: number, data: string): boolean => {
-    const fields = data.split(';').map((field) => field.trim());
-    if (identifier === 4) {
-      let hasQuery = false;
-      const settings: string[] = [];
-      for (let index = 0; index + 1 < fields.length; index += 2) {
-        if (fields[index + 1] === '?') {
-          hasQuery = true;
-        } else {
-          settings.push(fields[index], fields[index + 1]);
-        }
-      }
-      if (!hasQuery) return false;
-      if (settings.length > 0) {
-        forwardColorSetting(`\x1b]4;${settings.join(';')}\x1b\\`);
-      }
-      return true;
-    }
-
-    let hasQuery = false;
-    const supportedFieldCount = 13 - identifier;
-    for (let index = 0; index < Math.min(fields.length, supportedFieldCount); index += 1) {
-      if (fields[index] === '?') {
-        hasQuery = true;
-      }
-    }
-    if (!hasQuery) return false;
-    for (let index = 0; index < Math.min(fields.length, supportedFieldCount); index += 1) {
-      if (fields[index] !== '?') {
-        forwardColorSetting(`\x1b]${identifier + index};${fields[index]}\x1b\\`);
-      }
-    }
-    return true;
-  };
-
-  const disposables = OSC_COLOR_QUERY_IDENTIFIERS.map((identifier) => (
-    parser.registerOscHandler(
-      identifier,
-      (data) => shouldSuppress() && suppressQueriesAndForwardSettings(identifier, data),
-    )
-  ));
-
-  return {
-    dispose: () => {
-      for (const disposable of disposables) disposable.dispose();
-    },
-  };
+export function stripOscColorQueryResponses(data: string, enabled: boolean): string {
+  return enabled ? data.replace(OSC_COLOR_RESPONSE_PATTERN, '') : data;
 }
