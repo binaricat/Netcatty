@@ -30,7 +30,10 @@ const createParser = () => {
 
 test('Docker log color-query suppression consumes queries but preserves color settings', async () => {
   const { parser, handlers, disposed } = createParser();
-  const disposable = installOscColorQuerySuppression(parser, true);
+  const forwarded: string[] = [];
+  const disposable = installOscColorQuerySuppression(parser, true, (sequence) => {
+    forwarded.push(sequence);
+  });
 
   assert.deepEqual([...handlers.keys()], [4, 10, 11, 12]);
   const indexedColorHandler = handlers.get(4);
@@ -39,6 +42,8 @@ test('Docker log color-query suppression consumes queries but preserves color se
   assert.equal(await indexedColorHandler('0;?;15;?'), true);
   assert.equal(await indexedColorHandler('0;rgb:11/22/33'), false);
   assert.equal(await indexedColorHandler('0;#123456;15;#abcdef'), false);
+  assert.equal(await indexedColorHandler('0;#123456;15;?'), true);
+  assert.deepEqual(forwarded.splice(0), ['\x1b]4;0;#123456\x1b\\']);
   for (const identifier of [10, 11, 12]) {
     const handler = handlers.get(identifier);
     assert.ok(handler);
@@ -49,6 +54,12 @@ test('Docker log color-query suppression consumes queries but preserves color se
     assert.equal(await handler('rgb:11/22/33;#123456'), false);
     assert.equal(await handler('#123456'), false);
   }
+  const foregroundHandler = handlers.get(10);
+  assert.ok(foregroundHandler);
+  assert.equal(await foregroundHandler('#123456;?'), true);
+  assert.deepEqual(forwarded.splice(0), ['\x1b]10;#123456\x1b\\']);
+  assert.equal(await foregroundHandler('?;#abcdef'), true);
+  assert.deepEqual(forwarded.splice(0), ['\x1b]11;#abcdef\x1b\\']);
 
   disposable?.dispose();
   assert.deepEqual([...disposed], [4, 10, 11, 12]);
@@ -57,7 +68,7 @@ test('Docker log color-query suppression consumes queries but preserves color se
 test('ordinary terminals do not install color-query suppression', () => {
   const { parser, handlers } = createParser();
 
-  const disposable = installOscColorQuerySuppression(parser, false);
+  const disposable = installOscColorQuerySuppression(parser, false, () => {});
 
   assert.equal(disposable, undefined);
   assert.equal(handlers.size, 0);
@@ -75,12 +86,15 @@ test('docker logs detection covers direct and privileged commands without matchi
   assert.equal(isDockerLogsCommand('docker logs api; vim'), false);
   assert.equal(isDockerLogsCommand('docker logs api && vim'), false);
   assert.equal(isDockerLogsCommand('docker logs api | less'), false);
+  assert.equal(isDockerLogsCommand('docker logs api 2>&1'), true);
+  assert.equal(isDockerLogsCommand('docker logs api > logs.txt'), true);
+  assert.equal(isDockerLogsCommand('docker logs api &'), false);
 });
 
 test('docker logs stays protected through prompt-like output and interrupt residue', async () => {
   const { parser, handlers } = createParser();
   const state = { current: false };
-  installOscColorQuerySuppression(parser, () => state.current);
+  installOscColorQuerySuppression(parser, () => state.current, () => {});
 
   const handler = handlers.get(11);
   assert.ok(handler);

@@ -1872,6 +1872,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
   const oscColorQuerySuppressionDisposable = installOscColorQuerySuppression(
     term.parser,
     () => ctx.suppressOscColorQueriesForActiveCommandRef?.current === true,
+    (sequence) => term.write(sequence),
   );
 
   const osc133Disposable = term.parser.registerOscHandler(133, (data) => {
