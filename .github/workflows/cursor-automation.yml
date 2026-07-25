@@ -2367,11 +2367,16 @@ jobs:
                     per_page: 100,
                   },
                 );
-                for (const c of reviewComments) {
+                const currentReviewComments =
+                  auto.filterCodexReviewCommentsForHead(
+                    reviewComments,
+                    pr.head.sha,
+                  );
+                for (const c of currentReviewComments) {
                   if (!auto.isCodexBotLogin(c.user?.login)) continue;
                   if (
                     !headMatches(
-                      c.commit_id || c.original_commit_id,
+                      c.original_commit_id || c.commit_id,
                       c.body,
                     )
                   ) {

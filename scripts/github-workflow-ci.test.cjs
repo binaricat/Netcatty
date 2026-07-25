@@ -256,6 +256,13 @@ test("all own-PR Codex request paths serialize on the head branch", () => {
   );
 });
 
+test("scheduled Codex polling ignores review comments remapped from old heads", () => {
+  const pollJob = cursorWorkflow.match(/\n  codex_poll:\n[\s\S]*$/);
+  assert.ok(pollJob, "codex_poll job must exist");
+  assert.match(pollJob[0], /auto\.filterCodexReviewCommentsForHead\(\s*reviewComments,\s*pr\.head\.sha/);
+  assert.doesNotMatch(pollJob[0], /c\.commit_id \|\| c\.original_commit_id/);
+});
+
 test("clean Codex handoff updates labels without GraphQL-only organization scopes", () => {
   const markReady = cursorWorkflow.match(/\n      - name: Mark PR ready after clean Codex[\s\S]*?(?=\n      - name: Give up after max rounds)/);
   assert.ok(markReady, "mark-ready step must exist before give-up step");

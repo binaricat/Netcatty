@@ -200,6 +200,20 @@ test('parseCodexReviewOutcome ignores stale head inlines when summary clean', ()
   assert.equal(outcome.clean, true);
 });
 
+test('filterCodexReviewCommentsForHead keeps remapped old comments stale', () => {
+  const scoped = auto.filterCodexReviewCommentsForHead(
+    [
+      {
+        body: '![P2 Badge](x) already-fixed bug',
+        original_commit_id: 'oldsha',
+        commit_id: 'newsha',
+      },
+    ],
+    'newsha',
+  );
+  assert.deepEqual(scoped, []);
+});
+
 test('parseCodexReviewOutcome prefers current-head inline over unpinned clean', () => {
   const outcome = auto.parseCodexReviewOutcome({
     summaryText: "Codex Review: Didn't find any major issues. Swish!",

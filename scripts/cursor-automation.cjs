@@ -1073,15 +1073,16 @@ function getLatestCommentTime(comments = [], predicate) {
 }
 
 /**
- * Keep review comments that belong to the current head (or lack commit_id).
- * Drops clearly stale comments pinned to older commits when headSha is known.
+ * Keep review comments that were originally created on the current head.
+ * GitHub can remap `commit_id` as a diff line survives later commits, so prefer
+ * the immutable `original_commit_id` when deciding whether a finding is stale.
  */
 function filterCodexReviewCommentsForHead(reviewComments = [], headSha = '') {
   const head = String(headSha || '').toLowerCase();
   if (!head) return [...reviewComments];
   return reviewComments.filter((comment) => {
     const commitId = String(
-      comment.commit_id || comment.original_commit_id || '',
+      comment.original_commit_id || comment.commit_id || '',
     ).toLowerCase();
     if (!commitId) return true;
     return commitId === head || commitId.startsWith(head.slice(0, 7));
