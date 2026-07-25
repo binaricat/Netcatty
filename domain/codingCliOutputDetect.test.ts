@@ -21,6 +21,20 @@ test('inferCodingCliProviderFromOutput detects other CLI banners', () => {
   assert.equal(inferCodingCliProviderFromOutput('Welcome to Claude Code'), 'claude');
   assert.equal(inferCodingCliProviderFromOutput('GitHub Copilot CLI'), 'copilot');
   assert.equal(inferCodingCliProviderFromOutput('Factory Droid ready'), 'droid');
+  assert.equal(inferCodingCliProviderFromOutput('  OpenCode\nmodel: gpt-5'), 'opencode');
+});
+
+test('inferCodingCliProviderFromOutput ignores lowercase npm package mentions of opencode', () => {
+  assert.equal(
+    inferCodingCliProviderFromOutput(
+      'npm update codex\nchanged 3 packages in 2s\nopencode@1.2.3\n├── opencode@1.2.3',
+    ),
+    undefined,
+  );
+  assert.equal(
+    inferCodingCliProviderFromOutput('added opencode as a dependency'),
+    undefined,
+  );
 });
 
 test('createCodingCliOutputScanner finds providers across chunked output', () => {

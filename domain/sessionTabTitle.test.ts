@@ -3,7 +3,14 @@ import test from 'node:test';
 import {
   getSessionConnectionLabel,
   resolveSessionTabTitle,
+  shouldUpdateCodingCliTabIcon,
 } from './sessionTabTitle';
+
+test('shouldUpdateCodingCliTabIcon follows dynamic tab title mode', () => {
+  assert.equal(shouldUpdateCodingCliTabIcon('off'), false);
+  assert.equal(shouldUpdateCodingCliTabIcon('agent'), true);
+  assert.equal(shouldUpdateCodingCliTabIcon('all'), true);
+});
 
 test('getSessionConnectionLabel prefers customName over hostLabel', () => {
   assert.equal(

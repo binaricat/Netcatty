@@ -8,6 +8,14 @@ export const getSessionConnectionLabel = (session: Pick<TerminalSession, 'custom
 };
 
 /**
+ * Whether live coding-CLI tab icon inference (output scan / title signals)
+ * should run. Mirrors dynamic tab titles: "off" disables icon updates too.
+ */
+export const shouldUpdateCodingCliTabIcon = (
+  dynamicTabTitleMode: DynamicTabTitleMode = 'agent',
+): boolean => dynamicTabTitleMode !== 'off';
+
+/**
  * Resolve the label shown on session tabs and pane headers.
  * Uses the shell-reported title according to the global dynamic title mode.
  */

@@ -544,7 +544,7 @@ export const ruCoreMessages: Messages = {
     'Если последняя строка вывода команды не завершена переводом строки, переносить распознанное приглашение оболочки на следующую визуальную строку.',
   'settings.terminal.behavior.dynamicTabTitle': 'Динамический заголовок вкладки',
   'settings.terminal.behavior.dynamicTabTitle.desc':
-    'Выберите, когда вкладки сеансов должны следовать заголовкам окна, сообщаемым оболочкой.',
+    'Выберите, когда вкладки сеансов должны следовать заголовкам окна оболочки и обновлять значки coding CLI. «Отключено» также останавливает распознавание значков.',
   'settings.terminal.behavior.dynamicTabTitle.off': 'Отключено',
   'settings.terminal.behavior.dynamicTabTitle.agent': 'Только агенты',
   'settings.terminal.behavior.dynamicTabTitle.all': 'Все сеансы',

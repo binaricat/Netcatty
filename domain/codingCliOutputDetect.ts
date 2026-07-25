@@ -47,7 +47,9 @@ const OUTPUT_SIGNATURES: readonly OutputSignature[] = [
   },
   {
     id: 'opencode',
-    test: (text) => /\bOpenCode\b/i.test(text),
+    // OpenCode's TUI splash prints branded "OpenCode". Case-insensitive
+    // matching falsely triggers on npm package lines like "opencode@1.2.3".
+    test: (text) => /\bOpenCode\b/.test(text),
   },
   {
     id: 'kimi',

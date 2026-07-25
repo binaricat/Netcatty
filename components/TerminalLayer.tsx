@@ -15,6 +15,7 @@ import { matchCodingCliProviderFromCommand } from '../domain/codingCliProviderMa
 import { createCodingCliOutputScanner, type CodingCliOutputScanner } from '../domain/codingCliOutputDetect';
 import type { CodingCliProviderId } from '../domain/codingCliProviders';
 import { inferCodingCliProviderFromTitleSignals, shouldClearCodingCliProviderForTitle } from '../domain/codingCliTitleParse';
+import { shouldUpdateCodingCliTabIcon } from '../domain/sessionTabTitle';
 import { sessionCapabilitiesStore } from '../application/state/sessionCapabilitiesStore';
 import { useTerminalBackend } from '../application/state/useTerminalBackend';
 import { collectSessionIds } from '../domain/workspace';
@@ -350,7 +351,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       return;
     }
 
-    if (providerId && dynamicTabTitleMode !== 'off') {
+    if (providerId && shouldUpdateCodingCliTabIcon(dynamicTabTitleMode)) {
       if (!session.codingCliProviderId || session.codingCliProviderId !== providerId) {
         codingCliOutputScannersRef.current.delete(sessionId);
         codingCliOutputScanDisabledRef.current.delete(sessionId);
@@ -372,6 +373,9 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   const handleTerminalOutput = useCallback((sessionId: string, chunk: string) => {
     if (!chunk || codingCliOutputScanDisabledRef.current.has(sessionId)) return;
 
+    const dynamicTabTitleMode = terminalSettings?.dynamicTabTitleMode ?? 'agent';
+    if (!shouldUpdateCodingCliTabIcon(dynamicTabTitleMode)) return;
+
     const session = sessionsRef.current.find((candidate) => candidate.id === sessionId);
     if (session?.codingCliProviderId) return;
 
@@ -392,7 +396,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       codingCliOutputScanDisabledRef.current.delete(sessionId);
       codingCliOutputScanDisabledRef.current.add(sessionId);
     }
-  }, [applySessionCodingCliProvider]);
+  }, [applySessionCodingCliProvider, terminalSettings?.dynamicTabTitleMode]);
 
   const handleTerminalBell = useCallback((sessionId: string) => {
     const session = sessionsRef.current.find((candidate) => candidate.id === sessionId);
