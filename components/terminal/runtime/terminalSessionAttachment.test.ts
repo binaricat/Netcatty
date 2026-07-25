@@ -423,6 +423,152 @@ test("writeSessionData batches while unfocused-but-visible then drains on idle f
   clearTerminalSessionFlowAck("session-1");
 });
 
+test("continuous visible output cannot postpone the first idle drain deadline", () => {
+  clearTerminalSessionFlowAck("session-1");
+  const { term } = createFakeTerm();
+  const ctx = createContext(false);
+  const originalSetTimeout = globalThis.setTimeout;
+  const originalClearTimeout = globalThis.clearTimeout;
+  let now = 0;
+  let nextTimerId = 1;
+  const timers = new Map<number, {
+    callback: () => void;
+    delay: number;
+    due: number;
+  }>();
+  const advanceBy = (elapsedMs: number) => {
+    const target = now + elapsedMs;
+    while (true) {
+      const next = [...timers.entries()]
+        // Keep zero-delay queue yields paused. The visible idle deadline is the
+        // independent safety wake-up under test.
+        .filter(([, timer]) => timer.delay > 0 && timer.due <= target)
+        .sort((left, right) => left[1].due - right[1].due)[0];
+      if (!next) break;
+      const [id, timer] = next;
+      timers.delete(id);
+      now = timer.due;
+      timer.callback();
+    }
+    now = target;
+  };
+
+  globalThis.setTimeout = ((callback, delay = 0, ...args) => {
+    const id = nextTimerId;
+    nextTimerId += 1;
+    const normalizedDelay = Number(delay) || 0;
+    timers.set(id, {
+      callback: () => callback(...args),
+      delay: normalizedDelay,
+      due: now + normalizedDelay,
+    });
+    return id as unknown as ReturnType<typeof setTimeout>;
+  }) as typeof setTimeout;
+  globalThis.clearTimeout = ((timer) => {
+    timers.delete(Number(timer));
+  }) as typeof clearTimeout;
+
+  try {
+    withAnimationFrameQueue((schedule) => {
+      writeSessionData(
+        ctx as never,
+        term,
+        "x".repeat(MAX_TERMINAL_PLAIN_WRITE_CHUNK_BYTES + 1024),
+      );
+      schedule.flushScheduled();
+      assert.ok(getFlowController(ctx as never, term).pendingBytes() > 0);
+
+      for (let index = 0; index < 4; index += 1) {
+        advanceBy(5);
+        writeSessionData(ctx as never, term, "stream");
+        schedule.flushScheduled();
+      }
+
+      // The first 24 ms deadline must still fire even though chunks arrived at
+      // 5, 10, 15, and 20 ms. A debounce would postpone it to 44 ms.
+      advanceBy(4);
+      assert.equal(getFlowController(ctx as never, term).pendingBytes(), 0);
+    });
+  } finally {
+    advanceBy(100);
+    globalThis.setTimeout = originalSetTimeout;
+    globalThis.clearTimeout = originalClearTimeout;
+    resetTerminalWriteCoalescer(term);
+    clearTerminalSessionFlowAck("session-1");
+  }
+});
+
+test("a settled visible batch does not lend its idle deadline to the next frame", () => {
+  clearTerminalSessionFlowAck("session-1");
+  const { term, writes } = createFakeTerm("alternate");
+  const ctx = createContext(false);
+  const originalSetTimeout = globalThis.setTimeout;
+  const originalClearTimeout = globalThis.clearTimeout;
+  let now = 0;
+  let nextTimerId = 1;
+  const timers = new Map<number, {
+    callback: () => void;
+    delay: number;
+    due: number;
+  }>();
+  const advanceBy = (elapsedMs: number) => {
+    const target = now + elapsedMs;
+    while (true) {
+      const next = [...timers.entries()]
+        .filter(([, timer]) => timer.delay > 0 && timer.due <= target)
+        .sort((left, right) => left[1].due - right[1].due)[0];
+      if (!next) break;
+      const [id, timer] = next;
+      timers.delete(id);
+      now = timer.due;
+      timer.callback();
+    }
+    now = target;
+  };
+
+  globalThis.setTimeout = ((callback, delay = 0, ...args) => {
+    const id = nextTimerId;
+    nextTimerId += 1;
+    const normalizedDelay = Number(delay) || 0;
+    timers.set(id, {
+      callback: () => callback(...args),
+      delay: normalizedDelay,
+      due: now + normalizedDelay,
+    });
+    return id as unknown as ReturnType<typeof setTimeout>;
+  }) as typeof setTimeout;
+  globalThis.clearTimeout = ((timer) => {
+    timers.delete(Number(timer));
+  }) as typeof clearTimeout;
+
+  try {
+    withAnimationFrameQueue((schedule) => {
+      writeSessionData(ctx as never, term, "frame-one");
+      advanceBy(16);
+      schedule.flushScheduled();
+      assert.deepEqual(writes, ["frame-one"]);
+
+      advanceBy(4);
+      writeSessionData(ctx as never, term, "frame-two");
+
+      // The first batch settled at 16 ms. Its old 24 ms safety deadline must
+      // not flush this new frame before the next animation frame at 32 ms.
+      advanceBy(4);
+      assert.deepEqual(writes, ["frame-one"]);
+
+      advanceBy(8);
+      schedule.flushScheduled();
+      assert.deepEqual(writes, ["frame-one", "frame-two"]);
+    });
+  } finally {
+    advanceBy(100);
+    globalThis.setTimeout = originalSetTimeout;
+    globalThis.clearTimeout = originalClearTimeout;
+    resetTerminalWriteCoalescer(term);
+    clearTerminalSessionFlowAck("session-1");
+  }
+});
+
 test("Herdr-style frames complete on xterm's normal async path in every visibility state", async (t) => {
   const require = createRequire(import.meta.url);
   const { Terminal } = require("@xterm/xterm") as {

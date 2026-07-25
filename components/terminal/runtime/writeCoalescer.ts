@@ -25,6 +25,9 @@ export {
   MAX_PENDING_WRITE_COALESCE_BYTES_FLOOD,
 };
 
+/** Maximum time pending output may wait for its primary scheduler. */
+export const WRITE_COALESCE_FALLBACK_DRAIN_MS = 50;
+
 export type WriteCoalescer = {
   push(chunk: string): void;
   /** Flush pending bytes synchronously before ordered writes (exit notices). */
@@ -45,9 +48,12 @@ export type WriteCoalesceScheduleContext = {
 };
 
 type ScheduleWriteFrame = (callback: () => void) => (() => void) | null;
+type ScheduleTimeout = (callback: () => void, ms: number) => (() => void) | null;
 
 export type WriteCoalescerOptions = {
   scheduleFrame?: ScheduleWriteFrame;
+  scheduleTimeout?: ScheduleTimeout;
+  fallbackDrainMs?: number;
   /**
    * Choose scheduling per push. Alternate-screen TUIs should return `raf`;
    * normal-screen / bulk output should return `microtask` for lower latency.
@@ -92,6 +98,16 @@ const scheduleMicrotaskFrame = (callback: () => void): (() => void) | null => {
   return null;
 };
 
+const defaultScheduleTimeout: ScheduleTimeout = (callback, ms) => {
+  if (typeof setTimeout !== "function") {
+    return null;
+  }
+  const timer = setTimeout(callback, ms);
+  return () => {
+    clearTimeout(timer);
+  };
+};
+
 const scheduleByMode = (
   mode: WriteCoalesceScheduleMode,
   callback: () => void,
@@ -110,38 +126,95 @@ const scheduleByMode = (
   return scheduleRafFrame(callback);
 };
 
+const combineCancels = (
+  cancels: Array<(() => void) | null | undefined>,
+): (() => void) | null => {
+  const active = cancels.filter((cancel): cancel is () => void => typeof cancel === "function");
+  if (active.length === 0) {
+    return null;
+  }
+  return () => {
+    for (const cancel of active) {
+      cancel();
+    }
+  };
+};
+
 export const createWriteCoalescer = (
   write: (data: string) => void,
   options: WriteCoalescerOptions = {},
 ): WriteCoalescer => {
   let pending: string[] = [];
   let pendingBytes = 0;
-  let cancelPendingFrame: (() => void) | null = null;
+  let cancelPendingSchedule: (() => void) | null = null;
   let scheduledMode: WriteCoalesceScheduleMode | null = null;
   let disposed = false;
   const customScheduleFrame = options.scheduleFrame;
+  const scheduleTimeout = options.scheduleTimeout ?? defaultScheduleTimeout;
+  const fallbackDrainMs = options.fallbackDrainMs ?? WRITE_COALESCE_FALLBACK_DRAIN_MS;
   const resolveScheduleMode = options.resolveScheduleMode ?? (() => "raf" as const);
   const getMaxPendingBytes = options.getMaxPendingBytes
     ?? (() => MAX_PENDING_WRITE_COALESCE_BYTES);
   const shouldFlushScheduledFrame = options.shouldFlushScheduledFrame ?? (() => true);
 
-  const cancelScheduledFrame = (): void => {
-    if (cancelPendingFrame !== null) {
-      cancelPendingFrame();
-      cancelPendingFrame = null;
+  const cancelScheduledDrain = (): void => {
+    if (cancelPendingSchedule !== null) {
+      cancelPendingSchedule();
+      cancelPendingSchedule = null;
     }
     scheduledMode = null;
   };
 
-  const armSchedule = (mode: WriteCoalesceScheduleMode): void => {
-    const cancelFrame = scheduleByMode(mode, () => {
-      cancelPendingFrame = null;
+  const armDeferredDrain = (mode: WriteCoalesceScheduleMode): void => {
+    if (disposed || pendingBytes === 0 || cancelPendingSchedule !== null) {
+      return;
+    }
+    const cancel = scheduleTimeout(() => {
+      cancelPendingSchedule = null;
       scheduledMode = null;
+      if (disposed || pendingBytes === 0) {
+        return;
+      }
       if (!shouldFlushScheduledFrame()) {
+        armDeferredDrain(mode);
         return;
       }
       flushSync();
-    }, customScheduleFrame);
+    }, Math.max(fallbackDrainMs, 1));
+    if (cancel === null) {
+      return;
+    }
+    cancelPendingSchedule = cancel;
+    scheduledMode = mode;
+  };
+
+  const armSchedule = (mode: WriteCoalesceScheduleMode): void => {
+    let settled = false;
+    const onScheduled = (): void => {
+      if (settled || disposed) {
+        return;
+      }
+      settled = true;
+      const cancel = cancelPendingSchedule;
+      cancelPendingSchedule = null;
+      scheduledMode = null;
+      cancel?.();
+      if (!shouldFlushScheduledFrame()) {
+        if (pendingBytes > 0) {
+          armDeferredDrain(mode);
+        }
+        return;
+      }
+      flushSync();
+    };
+
+    const primaryCancel = scheduleByMode(mode, onScheduled, customScheduleFrame);
+    const fallbackCancel = mode === "raf"
+      && fallbackDrainMs > 0
+      && primaryCancel !== null
+      ? scheduleTimeout(onScheduled, fallbackDrainMs)
+      : null;
+    const cancelFrame = combineCancels([primaryCancel, fallbackCancel]);
     if (cancelFrame === null) {
       if (!shouldFlushScheduledFrame()) {
         return;
@@ -149,12 +222,12 @@ export const createWriteCoalescer = (
       flushSync();
       return;
     }
-    cancelPendingFrame = cancelFrame;
+    cancelPendingSchedule = cancelFrame;
     scheduledMode = mode;
   };
 
   const flushSync = (writeOverride?: (data: string) => void): void => {
-    cancelScheduledFrame();
+    cancelScheduledDrain();
     if (pendingBytes === 0) {
       return;
     }
@@ -165,7 +238,7 @@ export const createWriteCoalescer = (
   };
 
   const abort = (onDropped?: (bytes: number) => void): void => {
-    cancelScheduledFrame();
+    cancelScheduledDrain();
     if (pendingBytes === 0) {
       return;
     }
@@ -195,7 +268,7 @@ export const createWriteCoalescer = (
       flushSync();
       return;
     }
-    if (cancelPendingFrame === null) {
+    if (cancelPendingSchedule === null) {
       armSchedule(mode);
       return;
     }
@@ -203,7 +276,7 @@ export const createWriteCoalescer = (
     // chunk may have scheduled a same-turn flush before the alt-screen CSI
     // arrived, which would tear the first repaint (Codex PR review).
     if (scheduledMode === "microtask" && mode === "raf") {
-      cancelScheduledFrame();
+      cancelScheduledDrain();
       armSchedule("raf");
     }
   };

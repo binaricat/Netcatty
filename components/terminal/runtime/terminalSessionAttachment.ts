@@ -155,6 +155,7 @@ const BACKGROUND_OUTPUT_FLUSH_MAX_PASSES = 64;
 const VISIBLE_WRITE_IDLE_FLUSH_MS = 24;
 const HIDDEN_PANE_DRAIN_MS = 160;
 const visibleWriteIdleFlushTimers = new WeakMap<XTerm, ReturnType<typeof setTimeout>>();
+const visibleWriteIdleFlushSettleChecks = new WeakSet<XTerm>();
 const hiddenPaneDrainTimers = new WeakMap<XTerm, ReturnType<typeof setTimeout>>();
 const pendingTimestampSecondByTerm = new WeakMap<XTerm, number>();
 
@@ -310,12 +311,40 @@ function scheduleHiddenPaneDrain(term: XTerm, isPaneVisible: () => boolean): voi
   hiddenPaneDrainTimers.set(term, timer);
 }
 
+const cancelVisibleTerminalWriteIdleFlush = (term: XTerm): void => {
+  const timer = visibleWriteIdleFlushTimers.get(term);
+  if (timer === undefined) return;
+  clearTimeout(timer);
+  visibleWriteIdleFlushTimers.delete(term);
+};
+
+const cancelVisibleTerminalWriteIdleFlushIfSettled = (term: XTerm): void => {
+  if (!visibleWriteIdleFlushTimers.has(term)) return;
+  if (!hasPendingTerminalWrites(term)) {
+    cancelVisibleTerminalWriteIdleFlush(term);
+    return;
+  }
+  // A synchronous xterm callback can run before the serial queue marks its
+  // active item complete. Recheck once after the current queue turn unwinds.
+  if (visibleWriteIdleFlushSettleChecks.has(term)) return;
+  visibleWriteIdleFlushSettleChecks.add(term);
+  queueMicrotask(() => {
+    visibleWriteIdleFlushSettleChecks.delete(term);
+    if (!hasPendingTerminalWrites(term)) {
+      cancelVisibleTerminalWriteIdleFlush(term);
+    }
+  });
+};
+
 const scheduleVisibleTerminalWriteIdleFlush = (term: XTerm, isPaneVisible: () => boolean): void => {
   if (!isPaneVisible()) return;
-  const existingTimer = visibleWriteIdleFlushTimers.get(term);
-  if (existingTimer !== undefined) {
-    clearTimeout(existingTimer);
+  if (!hasPendingTerminalWrites(term)) {
+    cancelVisibleTerminalWriteIdleFlush(term);
+    return;
   }
+  // This is a maximum wait, not an idle debounce. Sustained TUI output must
+  // not postpone the safety drain forever.
+  if (visibleWriteIdleFlushTimers.has(term)) return;
 
   const timer = setTimeout(() => {
     visibleWriteIdleFlushTimers.delete(term);
@@ -325,6 +354,9 @@ const scheduleVisibleTerminalWriteIdleFlush = (term: XTerm, isPaneVisible: () =>
     }
     flushTerminalWriteCoalescer(term);
     flushTerminalWriteQueueBypassingTimers(term);
+    if (hasPendingTerminalWrites(term) && isPaneVisible()) {
+      scheduleVisibleTerminalWriteIdleFlush(term, isPaneVisible);
+    }
   }, VISIBLE_WRITE_IDLE_FLUSH_MS);
   if (typeof timer === "object" && "unref" in timer && typeof timer.unref === "function") {
     timer.unref();
@@ -607,6 +639,9 @@ const writeSessionDataImmediate = (
         scheduleTerminalRepaintWhenUnfocused(term);
       }
       done();
+      // A completed frame ends this safety-deadline generation. Without this,
+      // a later frame can inherit the old deadline and be split before its rAF.
+      cancelVisibleTerminalWriteIdleFlushIfSettled(term);
     };
     const commitIpcAck = (ackedBytes: number) => {
       if (ackedBytes <= 0) return;
