@@ -82,18 +82,32 @@ test('startup commands recognize saved Docker logs commands and built-in launche
 
 test('broadcast peer sessions can be armed through the suppression registry', () => {
   const peerState = { current: false };
-  const unregister = registerOscColorQuerySuppressionArmer(
+  const popupState = { current: false };
+  const unregisterPeer = registerOscColorQuerySuppressionArmer(
     'peer-session',
     (command) => beginOscColorQuerySuppressionForCommand(peerState, command),
+  );
+  const unregisterPopup = registerOscColorQuerySuppressionArmer(
+    'peer-session',
+    (command) => beginOscColorQuerySuppressionForCommand(popupState, command),
   );
 
   armOscColorQuerySuppressionForSession('peer-session', 'docker logs -f api');
   assert.equal(peerState.current, true);
+  assert.equal(popupState.current, true);
 
   armOscColorQuerySuppressionForSession('peer-session', 'vim');
   assert.equal(peerState.current, true);
+  assert.equal(popupState.current, true);
 
-  unregister();
+  unregisterPopup();
+  peerState.current = false;
+  popupState.current = false;
+  armOscColorQuerySuppressionForSession('peer-session', 'docker logs -f api');
+  assert.equal(peerState.current, true);
+  assert.equal(popupState.current, false);
+
+  unregisterPeer();
   peerState.current = false;
   armOscColorQuerySuppressionForSession('peer-session', 'docker logs -f api');
   assert.equal(peerState.current, false);
