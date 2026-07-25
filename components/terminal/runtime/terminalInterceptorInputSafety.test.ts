@@ -6,6 +6,7 @@ const runtimeSource = readFileSync(new URL("./createXTermRuntime.ts", import.met
 const attachmentSource = readFileSync(new URL("./terminalSessionAttachment.ts", import.meta.url), "utf8");
 const terminalSource = readFileSync(new URL("../../Terminal.tsx", import.meta.url), "utf8");
 const terminalLayerSource = readFileSync(new URL("../../TerminalLayer.tsx", import.meta.url), "utf8");
+const effectsSource = readFileSync(new URL("../useTerminalEffects.ts", import.meta.url), "utf8");
 const preloadSource = readFileSync(
   new URL("../../../electron/preload/api.cjs", import.meta.url),
   "utf8",
@@ -210,7 +211,7 @@ test("broadcast targets and direct-send paths require their own trusted shell bo
   );
   assert.match(
     terminalSource,
-    /trustedShellPromptReadyRef\.current = isTrustedTerminalShellSubmission[\s\S]*?disposeRuntimeOnly\(\)[\s\S]*?hibernatedRef\.current = true/u,
+    /const hibernatePrompt = getAlignedPrompt[\s\S]*?hibernatePrompt\.userInput\.trim\(\)\.length === 0[\s\S]*?disposeRuntimeOnly\(\)[\s\S]*?hibernatedRef\.current = true/u,
   );
   assert.match(
     terminalSource,
@@ -237,21 +238,17 @@ test("reconnect cleanup clears Docker-log OSC color-query suppression before dis
   );
 });
 
-test("only explicit shell integration completion ends Docker-log color-query suppression", () => {
-  assert.match(
-    runtimeSource,
-    /consumeOsc133CommandCompletion[\s\S]*?onCommandCompleted\?\.\(\{ source: "osc133" \}\)/u,
-  );
-  assert.match(
-    attachmentSource,
-    /onCommandCompleted\?\.\(\{ source: "prompt" \}\)/u,
-  );
+test("natural completion requires an out-of-band foreground-shell check", () => {
   assert.match(
     terminalSource,
-    /meta\?\.source === 'osc133'[\s\S]*?endOscColorQuerySuppressionForCommand/u,
+    /isConfirmedTerminalShellPrompt[\s\S]*?getOscColorQuerySuppressionVersion[\s\S]*?getSessionPwd\(activeSessionId, \{ allowHomeFallback: false \}\)[\s\S]*?result\.shellForeground === true[\s\S]*?endOscColorQuerySuppressionForCommand/u,
   );
   assert.doesNotMatch(
-    terminalSource,
-    /meta\?\.source === 'prompt'[\s\S]*?endOscColorQuerySuppressionForCommand/u,
+    runtimeSource,
+    /consumeOsc133CommandCompletion[\s\S]{0,300}endOscColorQuerySuppressionForCommand/u,
+  );
+  assert.match(
+    effectsSource,
+    /snap\.suppressOscColorQueries[\s\S]*?getSessionPwd\(sessionId, \{ allowHomeFallback: false \}\)[\s\S]*?result\.shellForeground === true[\s\S]*?endOscColorQuerySuppressionForCommand/u,
   );
 });

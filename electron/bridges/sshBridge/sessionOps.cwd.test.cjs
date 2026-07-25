@@ -8,13 +8,15 @@ function quoteShellArg(value) {
   return "'" + String(value).replace(/'/g, "'\\''") + "'";
 }
 
-function makePwdStream(cwd, loginPid) {
+function makePwdStream(cwd, loginPid, shellForeground) {
   const stream = new EventEmitter();
   stream.stderr = new EventEmitter();
   stream.close = () => {};
   setImmediate(() => {
     stream.emit("data", Buffer.from(`${cwd}\n`));
-    stream.stderr.emit("data", Buffer.from(`NETCATTY_LOGIN_PID=${loginPid}\n`));
+    stream.stderr.emit("data", Buffer.from(
+      `NETCATTY_LOGIN_PID=${loginPid}\n${shellForeground === undefined ? "" : `NETCATTY_SHELL_FOREGROUND=${shellForeground ? 1 : 0}\n`}`,
+    ));
     stream.emit("close", 0);
   });
   return stream;
@@ -71,6 +73,25 @@ test("shared terminal cwd probe targets the shell pid assigned to that tab", asy
   assert.ok(command.includes("$3 !~ /^\\?+$/"));
   assert.match(command, /LC_ALL=C lsof/);
   assert.equal(session.shellPid, "4242");
+});
+
+test("session cwd probe reports whether the interactive shell owns the foreground", async () => {
+  const session = {
+    shellPid: "4242",
+    connRef: { count: 1 },
+    stream: {},
+    conn: {
+      exec(_command, callback) {
+        callback(null, makePwdStream("/srv/app", "4242", true));
+      },
+    },
+  };
+  const api = makeApi(session);
+
+  assert.deepEqual(
+    await api.getSessionPwd(null, { sessionId: "session-1" }),
+    { success: true, cwd: "/srv/app", shellForeground: true },
+  );
 });
 
 test("lsof cwd output decodes UTF-8 bytes and escaped control characters", () => {

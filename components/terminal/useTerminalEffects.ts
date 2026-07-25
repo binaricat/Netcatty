@@ -61,6 +61,7 @@ import { resolveEffectiveTerminalProtocol } from '../../domain/terminalProtocol'
 import {
   beginOscColorQuerySuppressionForCommand,
   endOscColorQuerySuppressionForCommand,
+  getOscColorQuerySuppressionVersion,
   restoreOscColorQuerySuppressionEndBoundary,
 } from './runtime/oscColorQuerySuppression';
 
@@ -191,10 +192,7 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
     publishPluginTerminalRuntimeLifecycleEvent(pluginTerminalLifecycle, 'commandSubmitted');
     void xtermRuntimeRef.current?.pluginProviderHost?.commandSubmitted(args[0]);
   };
-  const pluginAwareOnCommandCompleted = (meta?: { source: 'osc133' | 'prompt' }) => {
-    if (meta?.source === 'osc133') {
-      endOscColorQuerySuppressionForCommand(ctx.suppressOscColorQueriesForActiveCommandRef);
-    }
+  const pluginAwareOnCommandCompleted = () => {
     publishPluginTerminalRuntimeLifecycleEvent(pluginTerminalLifecycle, 'commandCompleted');
     void xtermRuntimeRef.current?.pluginProviderHost?.commandCompleted();
   };
@@ -578,6 +576,29 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
                 ctx.suppressOscColorQueriesForActiveCommandRef,
                 snap.suppressOscColorQueriesCanEnd === true,
               );
+              if (snap.suppressOscColorQueries) {
+                const suppressionVersion = getOscColorQuerySuppressionVersion(
+                  ctx.suppressOscColorQueriesForActiveCommandRef,
+                );
+                void terminalBackend.getSessionPwd(sessionId, { allowHomeFallback: false })
+                  .then((result: { success: boolean; shellForeground?: boolean }) => {
+                    if (
+                      !disposed
+                      && result.success
+                      && result.shellForeground === true
+                      && sessionRef.current === sessionId
+                      && ctx.suppressOscColorQueriesForActiveCommandRef.current
+                      && getOscColorQuerySuppressionVersion(
+                        ctx.suppressOscColorQueriesForActiveCommandRef,
+                      ) === suppressionVersion
+                    ) {
+                      endOscColorQuerySuppressionForCommand(
+                        ctx.suppressOscColorQueriesForActiveCommandRef,
+                      );
+                    }
+                  })
+                  .catch(() => {});
+              }
             }
             if (snap.cwd !== undefined) {
               const cwd = terminalCwdTracker.setRendererCwd(snap.cwd);

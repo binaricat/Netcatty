@@ -213,7 +213,7 @@ export type TerminalSessionStartersContext = {
     hostLabel: string,
     sessionId: string,
   ) => void;
-  onCommandCompleted?: (meta?: { source: "osc133" | "prompt" }) => void;
+  onCommandCompleted?: () => void;
 };
 
 export type TerminalSessionDataMeta = {

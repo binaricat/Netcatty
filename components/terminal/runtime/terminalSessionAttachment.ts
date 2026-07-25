@@ -602,7 +602,7 @@ const writeSessionDataImmediate = (
         ctx.promptLineBreakStateRef?.current,
       );
       for (let index = 0; index < completed; index += 1) {
-        ctx.onCommandCompleted?.({ source: "prompt" });
+        ctx.onCommandCompleted?.();
       }
     };
     const finishQueueItem = () => {

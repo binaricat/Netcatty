@@ -436,6 +436,10 @@ function createSessionOpsApi(ctx) {
       printf 'NETCATTY_LOGIN_PID=%s\\n' "$login" >&2
       pid=$(find_active_shell "$login")
       [ -n "$pid" ] || pid="$login"
+      case "$(ps -p "$pid" -o stat= 2>/dev/null)" in
+        *+*) printf 'NETCATTY_SHELL_FOREGROUND=1\\n' >&2 ;;
+        *) printf 'NETCATTY_SHELL_FOREGROUND=0\\n' >&2 ;;
+      esac
       cwd=$(read_shell_cwd "$pid")
       # The active shell's cwd is only readable for same-uid processes (ptrace
       # perms on /proc, lsof permissions on macOS/BSD), so this unprivileged
@@ -492,12 +496,21 @@ function createSessionOpsApi(ctx) {
                 ? decodeLsofFileName(rawPath.slice(lsofPrefix.length))
                 : rawPath;
               const loginPidMatch = errOut.match(/(?:^|\n)NETCATTY_LOGIN_PID=(\d+)(?:\n|$)/);
+              const shellForegroundMatch = errOut.match(
+                /(?:^|\n)NETCATTY_SHELL_FOREGROUND=([01])(?:\n|$)/,
+              );
               if (loginPidMatch) {
                 session.shellPid = loginPidMatch[1];
               }
               log('[getSessionPwd]', { stdout: rawPath, stderr: errOut.trim(), exitCode: code });
               if (path && path.startsWith('/')) {
-                settle({ success: true, cwd: path });
+                settle({
+                  success: true,
+                  cwd: path,
+                  ...(shellForegroundMatch
+                    ? { shellForeground: shellForegroundMatch[1] === '1' }
+                    : {}),
+                });
               } else {
                 settle({ success: false, error: 'Could not determine cwd' });
               }

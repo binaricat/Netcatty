@@ -136,6 +136,7 @@ import {
   beginOscColorQuerySuppressionForStartupCommand,
   consumeHibernatedBroadcastInput,
   endOscColorQuerySuppressionForCommand,
+  getOscColorQuerySuppressionVersion,
   hasOscColorQuerySuppressionEndBoundary,
   markOscColorQuerySuppressionEndBoundary,
   registerOscColorQuerySuppressionArmer,
@@ -1776,13 +1777,36 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       passwordPromptActiveRef.current = false;
       trustedShellPromptReadyRef.current = true;
       hibernatedBroadcastInputRef.current = { promptReady: true, line: "", tracking: false, edited: false };
+      const activeSessionId = sessionRef.current;
+      if (suppressOscColorQueriesForActiveCommandRef.current && activeSessionId) {
+        const suppressionVersion = getOscColorQuerySuppressionVersion(
+          suppressOscColorQueriesForActiveCommandRef,
+        );
+        void terminalBackend.getSessionPwd(activeSessionId, { allowHomeFallback: false })
+          .then((result) => {
+            if (
+              result.success
+              && result.shellForeground === true
+              && sessionRef.current === activeSessionId
+              && suppressOscColorQueriesForActiveCommandRef.current
+              && getOscColorQuerySuppressionVersion(
+                suppressOscColorQueriesForActiveCommandRef,
+              ) === suppressionVersion
+            ) {
+              endOscColorQuerySuppressionForCommand(
+                suppressOscColorQueriesForActiveCommandRef,
+              );
+            }
+          })
+          .catch(() => {});
+      }
     } else {
       trustedShellPromptReadyRef.current = false;
       if (hibernatedRef.current && !hibernatedBroadcastInputRef.current.tracking) {
         hibernatedBroadcastInputRef.current = { promptReady: false, line: "", tracking: false, edited: false };
       }
     }
-  }, [isNetworkDevice]);
+  }, [isNetworkDevice, terminalBackend]);
 
   const beginHibernatedSessionListeners = useCallback((backendId: string) => {
     disposeDataRef.current?.();
@@ -1933,10 +1957,13 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     }
 
     applyHibernateSnapshot(snapshot);
-    trustedShellPromptReadyRef.current = isTrustedTerminalShellSubmission(
-      "",
-      term,
-      isNetworkDevice,
+    const hibernatePrompt = getAlignedPrompt(term, "", false).prompt;
+    trustedShellPromptReadyRef.current = Boolean(
+      hibernatePrompt.isAtPrompt
+      && hibernatePrompt.userInput.trim().length === 0
+      && isConfirmedTerminalShellPrompt(hibernatePrompt.promptText, {
+        allowHostStyleGreaterThan: isNetworkDevice,
+      }),
     );
     hibernatedBroadcastInputRef.current = {
       promptReady: trustedShellPromptReadyRef.current,
@@ -2086,13 +2113,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     pluginTerminalLifecycle.onCommandSubmitted();
     void xtermRuntimeRef.current?.pluginProviderHost?.commandSubmitted(command);
   }, [pluginTerminalLifecycle]);
-  const pluginAwareOnCommandCompleted = useCallback((meta?: { source: 'osc133' | 'prompt' }) => {
-    // Prompt-shaped container output is not a trustworthy end boundary. Shell
-    // integration completion is the only in-band natural-completion signal;
-    // session exit covers the built-in Docker logs window.
-    if (meta?.source === 'osc133') {
-      endOscColorQuerySuppressionForCommand(suppressOscColorQueriesForActiveCommandRef);
-    }
+  const pluginAwareOnCommandCompleted = useCallback(() => {
     pluginTerminalLifecycle.onCommandCompleted();
     void xtermRuntimeRef.current?.pluginProviderHost?.commandCompleted();
   }, [pluginTerminalLifecycle]);

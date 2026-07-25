@@ -69,6 +69,7 @@ test('docker logs detection covers direct and privileged commands without matchi
   assert.equal(isDockerLogsCommand('sudo -v docker logs -f api'), false);
   assert.equal(isDockerLogsCommand('sudo --validate docker logs -f api'), false);
   assert.equal(isDockerLogsCommand('sudo -K docker logs -f api'), false);
+  assert.equal(isDockerLogsCommand('sudo -D /tmp docker logs -f api'), true);
   assert.equal(isDockerLogsCommand('doas -L docker logs -f api'), false);
   assert.equal(isDockerLogsCommand('doas -C /etc/doas.conf docker logs -f api'), false);
   assert.equal(isDockerLogsCommand('docker --help=true logs -f api'), false);
@@ -81,6 +82,9 @@ test('docker logs detection covers direct and privileged commands without matchi
   assert.equal(isDockerLogsCommand("sudo sh -c 'docker logs -f api'"), true);
   assert.equal(isDockerLogsCommand("sh -c 'docker logs api'"), true);
   assert.equal(isDockerLogsCommand("sh -c 'vim && docker logs -f api'"), false);
+  assert.equal(isDockerLogsCommand("bash -n -c 'docker logs -f api'"), false);
+  assert.equal(isDockerLogsCommand("bash --noexec -c 'docker logs -f api'"), false);
+  assert.equal(isDockerLogsCommand('docker logs --help -f api'), false);
 });
 
 test('docker logs stays protected through prompt-like output and interrupt residue', () => {

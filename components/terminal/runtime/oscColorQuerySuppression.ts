@@ -9,6 +9,15 @@ const TRUSTED_CURSOR_EDIT_SEQUENCE_PATTERN = new RegExp(
   'gu',
 );
 const suppressionEndBoundaries = new WeakSet<object>();
+const suppressionVersions = new WeakMap<object, number>();
+
+const advanceSuppressionVersion = (state: object): void => {
+  suppressionVersions.set(state, (suppressionVersions.get(state) ?? 0) + 1);
+};
+
+export function getOscColorQuerySuppressionVersion(state: object): number {
+  return suppressionVersions.get(state) ?? 0;
+}
 
 const DOCKER_GLOBAL_OPTIONS_WITH_VALUE = new Set([
   '--config', '--context', '--host', '--log-level', '--tlscacert', '--tlscert', '--tlskey',
@@ -22,7 +31,7 @@ const SUDO_NON_EXECUTING_OPTIONS = new Set([
 const DOAS_NON_EXECUTING_OPTIONS = new Set(['-C', '-L']);
 const SUDO_OPTIONS_WITH_VALUE = new Set([
   '--chdir', '--close-from', '--command-timeout', '--group', '--host', '--other-user', '--prompt', '--role',
-  '--type', '--user', '-C', '-g', '-h', '-p', '-R', '-r', '-T', '-t', '-u',
+  '--type', '--user', '-C', '-D', '-g', '-h', '-p', '-R', '-r', '-T', '-t', '-u',
 ]);
 const DOAS_OPTIONS_WITH_VALUE = new Set(['-a', '-C', '-u']);
 const ENV_OPTIONS_WITH_VALUE = new Set(['--chdir', '--unset', '-C', '-u']);
@@ -208,6 +217,10 @@ const classifyStandaloneDockerLogsCommand = (
     while (index < tokens.length && (tokens[index] ?? '').startsWith('-')) {
       const option = tokens[index];
       index += 1;
+      if (
+        ['--help', '--noexec', '--version', '-n'].includes(option)
+        || /^-[^-]*n[^-]*$/u.test(option)
+      ) return null;
       if (option === '--') continue;
       if (option === '-c' || /^-[^-]*c[^-]*$/u.test(option)) {
         commandString = tokens[index];
@@ -235,6 +248,7 @@ const classifyStandaloneDockerLogsCommand = (
   if (tokens[index] !== 'logs') return null;
   let follow = false;
   for (const token of tokens.slice(index + 1)) {
+    if (token === '--help' || token.startsWith('--help=')) return null;
     if (token === '--follow' || token === '-f') {
       follow = true;
       continue;
@@ -277,6 +291,7 @@ export function beginOscColorQuerySuppressionForCommand(
   state: { current: boolean },
   command: string,
 ): void {
+  advanceSuppressionVersion(state);
   const dockerLogs = classifyDockerLogsCommand(command);
   if (dockerLogs?.follow) {
     state.current = true;
@@ -293,6 +308,7 @@ export function beginOscColorQuerySuppressionForCommand(
 }
 
 export function beginOscColorQuerySuppression(state: { current: boolean }): void {
+  advanceSuppressionVersion(state);
   state.current = true;
   suppressionEndBoundaries.delete(state);
 }
@@ -310,6 +326,7 @@ export function restoreOscColorQuerySuppressionEndBoundary(
   state: { current: boolean },
   enabled: boolean,
 ): void {
+  advanceSuppressionVersion(state);
   suppressionEndBoundaries.delete(state);
   if (state.current && enabled) suppressionEndBoundaries.add(state);
 }
@@ -327,6 +344,7 @@ export function beginOscColorQuerySuppressionForStartupCommand(
 }
 
 export function endOscColorQuerySuppressionForCommand(state: { current: boolean }): void {
+  advanceSuppressionVersion(state);
   state.current = false;
   suppressionEndBoundaries.delete(state);
 }

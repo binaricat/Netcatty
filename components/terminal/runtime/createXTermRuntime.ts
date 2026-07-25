@@ -283,7 +283,7 @@ export type CreateXTermRuntimeContext = {
     hostLabel: string,
     sessionId: string,
   ) => void;
-  onCommandCompleted?: (meta?: { source: "osc133" | "prompt" }) => void;
+  onCommandCompleted?: () => void;
   requestPluginTerminalProviders?: RequestPluginTerminalProviders;
   pluginProviderVisible?: boolean;
   isPluginTerminalProviderAvailable?: (kind: NetcattyTerminalProviderKind) => boolean;
@@ -1971,7 +1971,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
 
   const osc133Disposable = term.parser.registerOscHandler(133, (data) => {
     if (consumeOsc133CommandCompletion(data, ctx.promptLineBreakStateRef?.current)) {
-      ctx.onCommandCompleted?.({ source: "osc133" });
+      ctx.onCommandCompleted?.();
     }
     return true;
   });
