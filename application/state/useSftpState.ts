@@ -751,7 +751,7 @@ export const useSftpState = (
       methodsRef.current.uploadExternalFolderPath(...args),
     uploadExternalEntries: (...args: Parameters<typeof uploadExternalEntries>) =>
       methodsRef.current.uploadExternalEntries(...args),
-    cancelExternalUpload: () => methodsRef.current.cancelExternalUpload(),
+    cancelExternalUpload: (taskId?: string) => methodsRef.current.cancelExternalUpload(taskId),
     selectApplication: () => methodsRef.current.selectApplication(),
     startTransfer: (...args: Parameters<typeof startTransfer>) => methodsRef.current.startTransfer(...args),
     downloadToLocal: (...args: Parameters<typeof downloadToLocal>) => methodsRef.current.downloadToLocal(...args),
