@@ -8,8 +8,9 @@ export const getSessionConnectionLabel = (session: Pick<TerminalSession, 'custom
 };
 
 /**
- * Whether live coding-CLI tab icon inference (output scan / title signals)
- * should run. Mirrors dynamic tab titles: "off" disables icon updates too.
+ * Whether live coding-CLI tab icon inference (command match / output scan /
+ * title signals) should run. Mirrors dynamic tab titles: "off" disables icon
+ * updates too.
  */
 export const shouldUpdateCodingCliTabIcon = (
   dynamicTabTitleMode: DynamicTabTitleMode = 'agent',

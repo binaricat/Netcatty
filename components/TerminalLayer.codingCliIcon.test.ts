@@ -11,4 +11,8 @@ test('TerminalLayer gates coding-CLI icon updates with dynamic tab title mode', 
     source,
     /handleTerminalOutput[\s\S]*?shouldUpdateCodingCliTabIcon\(dynamicTabTitleModeRef\.current\)/,
   );
+  assert.match(
+    source,
+    /applySessionCodingCliProviderFromCommand[\s\S]*?shouldUpdateCodingCliTabIcon\(dynamicTabTitleModeRef\.current\)/,
+  );
 });

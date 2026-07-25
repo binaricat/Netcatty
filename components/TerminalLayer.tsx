@@ -321,6 +321,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     sessionId: string,
     commandLine: string,
   ) => {
+    if (!shouldUpdateCodingCliTabIcon(dynamicTabTitleModeRef.current)) return;
     const provider = matchCodingCliProviderFromCommand(commandLine);
     if (provider) {
       codingCliOutputScannersRef.current.delete(sessionId);
