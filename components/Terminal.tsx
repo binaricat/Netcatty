@@ -458,20 +458,6 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   const onSessionExitRef = useRef(onSessionExit);
   const commandBufferRef = useRef<string>("");
   const suppressOscColorQueriesForActiveCommandRef = useRef(false);
-  useEffect(() => registerOscColorQuerySuppressionArmer(
-    sessionId,
-    (command) => {
-      const trustedTarget = termRef.current
-        ? isTrustedTerminalShellSubmission(command, termRef.current, isNetworkDevice)
-        : hibernatedRef.current && trustedShellPromptReadyRef.current;
-      if (!trustedTarget) return;
-      beginOscColorQuerySuppressionForCommand(
-        suppressOscColorQueriesForActiveCommandRef,
-        command,
-      );
-      trustedShellPromptReadyRef.current = false;
-    },
-  ), [isNetworkDevice, sessionId]);
   const promptLineBreakStateRef = useRef<PromptLineBreakState>(createPromptLineBreakState());
   const [hasMouseTracking, setHasMouseTracking] = useState(false);
   const mouseTrackingRef = useRef(false);
@@ -994,6 +980,20 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   const detectedDeviceClass = classifyDistroId(host.distro);
   const isNetworkDevice =
     host.deviceType === 'network' || detectedDeviceClass === 'network-device';
+  useEffect(() => registerOscColorQuerySuppressionArmer(
+    sessionId,
+    (command) => {
+      const trustedTarget = termRef.current
+        ? isTrustedTerminalShellSubmission(command, termRef.current, isNetworkDevice)
+        : hibernatedRef.current && trustedShellPromptReadyRef.current;
+      if (!trustedTarget) return;
+      beginOscColorQuerySuppressionForCommand(
+        suppressOscColorQueriesForActiveCommandRef,
+        command,
+      );
+      trustedShellPromptReadyRef.current = false;
+    },
+  ), [isNetworkDevice, sessionId]);
   const remoteDragDropUsesZmodem = supportsZmodemTerminalDragDrop(host, isNetworkDevice);
 
   // Check if this is a local or serial connection (doesn't need connection dialog during connecting)
