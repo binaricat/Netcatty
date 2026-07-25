@@ -6,8 +6,9 @@ const source = readFileSync(new URL('./TerminalLayer.tsx', import.meta.url), 'ut
 
 test('TerminalLayer gates coding-CLI icon updates with dynamic tab title mode', () => {
   assert.match(source, /shouldUpdateCodingCliTabIcon/);
+  assert.match(source, /dynamicTabTitleModeRef\.current = terminalSettings\?\.dynamicTabTitleMode/);
   assert.match(
     source,
-    /handleTerminalOutput[\s\S]*?shouldUpdateCodingCliTabIcon\(dynamicTabTitleMode\)/,
+    /handleTerminalOutput[\s\S]*?shouldUpdateCodingCliTabIcon\(dynamicTabTitleModeRef\.current\)/,
   );
 });

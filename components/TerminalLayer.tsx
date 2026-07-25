@@ -303,6 +303,10 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
 
   const codingCliOutputScannersRef = useRef<Map<string, CodingCliOutputScanner>>(new Map());
   const codingCliOutputScanDisabledRef = useRef<Set<string>>(new Set());
+  // Boot-time onSessionData listeners capture handleTerminalOutput; read mode via ref
+  // so toggling Disabled still gates icon updates for already-connected sessions.
+  const dynamicTabTitleModeRef = useRef(terminalSettings?.dynamicTabTitleMode ?? 'agent');
+  dynamicTabTitleModeRef.current = terminalSettings?.dynamicTabTitleMode ?? 'agent';
 
   const applySessionCodingCliProvider = useCallback((
     sessionId: string,
@@ -328,7 +332,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   const handleTerminalTitleChange = useCallback((sessionId: string, title: string | null) => {
     const session = sessionsRef.current.find((candidate) => candidate.id === sessionId);
     if (!session) return;
-    const dynamicTabTitleMode = terminalSettings?.dynamicTabTitleMode ?? 'agent';
+    const dynamicTabTitleMode = dynamicTabTitleModeRef.current;
 
     const trimmedTitle = title?.trim();
     const providerId = trimmedTitle
@@ -368,13 +372,12 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       codingCliOutputScanDisabledRef.current.delete(sessionId);
       onUpdateSessionCodingCliProvider?.(sessionId, null);
     }
-  }, [applySessionCodingCliProvider, onUpdateSessionCodingCliProvider, onUpdateSessionDynamicTitle, terminalSettings?.dynamicTabTitleMode]);
+  }, [applySessionCodingCliProvider, onUpdateSessionCodingCliProvider, onUpdateSessionDynamicTitle]);
 
   const handleTerminalOutput = useCallback((sessionId: string, chunk: string) => {
     if (!chunk || codingCliOutputScanDisabledRef.current.has(sessionId)) return;
 
-    const dynamicTabTitleMode = terminalSettings?.dynamicTabTitleMode ?? 'agent';
-    if (!shouldUpdateCodingCliTabIcon(dynamicTabTitleMode)) return;
+    if (!shouldUpdateCodingCliTabIcon(dynamicTabTitleModeRef.current)) return;
 
     const session = sessionsRef.current.find((candidate) => candidate.id === sessionId);
     if (session?.codingCliProviderId) return;
@@ -396,7 +399,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       codingCliOutputScanDisabledRef.current.delete(sessionId);
       codingCliOutputScanDisabledRef.current.add(sessionId);
     }
-  }, [applySessionCodingCliProvider, terminalSettings?.dynamicTabTitleMode]);
+  }, [applySessionCodingCliProvider]);
 
   const handleTerminalBell = useCallback((sessionId: string) => {
     const session = sessionsRef.current.find((candidate) => candidate.id === sessionId);
