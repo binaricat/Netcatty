@@ -19,6 +19,21 @@ const windowsEtBuild = fs.readFileSync(
   "utf8",
 );
 
+const pullRequestPaths = buildWorkflow
+  .match(/pull_request:\s*\n\s*paths:\s*\n((?:\s+- "[^"]+"\s*\n)+)/)?.[1]
+  ?.match(/^\s+- "([^"]+)"$/gm)
+  ?.map((line) => line.match(/^\s+- "([^"]+)"$/)?.[1])
+  .filter(Boolean);
+
+const triggersPackageValidation = (filePath) => {
+  assert.ok(pullRequestPaths, "package workflow pull_request paths must be readable");
+  return pullRequestPaths.reduce((included, pattern) => {
+    const excluded = pattern.startsWith("!");
+    const glob = excluded ? pattern.slice(1) : pattern;
+    return path.matchesGlob(filePath, glob) ? !excluded : included;
+  }, false);
+};
+
 test("PR validation runs once per commit and includes a production build", () => {
   assert.match(testWorkflow, /push:\s*\n\s*branches:\s*\n\s*- main/);
   assert.doesNotMatch(testWorkflow, /branches:\s*\n\s*- "\*\*"/);
@@ -34,8 +49,6 @@ test("package validation avoids duplicate branch runs and scopes PR builds", () 
   assert.doesNotMatch(buildWorkflow, /\n  dedupe-result:/);
   for (const packagedInput of [
     "electron/**",
-    "electron/entitlements.mac.plist",
-    "electron/bridges/terminalBridge.cjs",
     "infrastructure/config/terminalFlowConstants.*",
     "public/icon*",
     "scripts/afterPackMacUuid.cjs",
@@ -64,10 +77,28 @@ test("package validation avoids duplicate branch runs and scopes PR builds", () 
     buildWorkflow.indexOf('- "electron/**"') < buildWorkflow.indexOf('- "!electron/**/*.test.*"'),
     "packaged Electron files must be included before test-only exclusions",
   );
-  assert.ok(
-    buildWorkflow.indexOf('- "electron/plugins/**"') < buildWorkflow.indexOf('- "!electron/plugins/fixtures/**"'),
-    "plugin fixtures must stay excluded after plugin runtime files are included",
-  );
+
+  for (const packagedPath of [
+    "electron/main.cjs",
+    "electron/entitlements.mac.plist",
+    "electron/bridges/terminalBridge.cjs",
+    "electron/preload/api.cjs",
+    "electron/shared/protocol.cjs",
+    "electron/mcp/server.cjs",
+    "electron/plugins/pluginManager.cjs",
+    "scripts/linux/after-install.tpl",
+  ]) {
+    assert.equal(triggersPackageValidation(packagedPath), true, `${packagedPath} must trigger package validation`);
+  }
+
+  for (const testOnlyPath of [
+    "electron/main.test.cjs",
+    "electron/bridges/moshHandshake.test.cjs",
+    "electron/plugins/pluginManager.test.cjs",
+    "electron/plugins/fixtures/example/plugin.cjs",
+  ]) {
+    assert.equal(triggersPackageValidation(testOnlyPath), false, `${testOnlyPath} must not trigger package validation`);
+  }
 });
 
 test("Windows packaging reuses its dependency install for the ConPTY smoke test", () => {
