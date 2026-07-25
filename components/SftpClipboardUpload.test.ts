@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import {
   createDropEntriesFromClipboardFiles,
@@ -156,5 +157,25 @@ test("native clipboard paste follows SFTP paste shortcut availability", () => {
       { id: "sftp-paste", action: "sftpPaste", label: "Paste", mac: "⌘ + V", pc: "Ctrl + V", category: "sftp" },
     ]),
     true,
+  );
+});
+
+test("clipboard upload dialog closes before waiting for the transfer", () => {
+  const source = readFileSync(
+    new URL("./sftp/SftpClipboardUploadDialog.tsx", import.meta.url),
+    "utf8",
+  );
+  const confirmHandler = source.slice(
+    source.indexOf("const handleConfirm"),
+    source.indexOf("\n  return ("),
+  );
+  const clearRequest = confirmHandler.indexOf("sftpClipboardUploadStore.clear(request);");
+  const waitForUpload = confirmHandler.indexOf("await request.onConfirm();");
+
+  assert.notEqual(clearRequest, -1);
+  assert.notEqual(waitForUpload, -1);
+  assert.ok(
+    clearRequest < waitForUpload,
+    "the modal request must be cleared before the upload promise is awaited",
   );
 });

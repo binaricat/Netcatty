@@ -1,5 +1,4 @@
-import React, { useState } from "react";
-import { Loader2 } from "lucide-react";
+import React from "react";
 import { Button } from "../ui/button";
 import {
   Dialog,
@@ -23,27 +22,21 @@ export const SftpClipboardUploadDialog: React.FC<SftpClipboardUploadDialogProps>
   currentPath,
   onUploaded,
 }) => {
-  const [uploading, setUploading] = useState(false);
   const open = !!request;
   const fileCount = request?.files.length ?? 0;
   const previewFiles = request?.files.slice(0, 5) ?? [];
   const remainingCount = Math.max(0, fileCount - previewFiles.length);
 
   const handleClose = (nextOpen: boolean) => {
-    if (nextOpen || uploading) return;
+    if (nextOpen) return;
     sftpClipboardUploadStore.clear(request);
   };
 
   const handleConfirm = async () => {
     if (!request) return;
-    setUploading(true);
-    try {
-      await request.onConfirm();
-      onUploaded?.(request.targetPath);
-      sftpClipboardUploadStore.clear(request);
-    } finally {
-      setUploading(false);
-    }
+    sftpClipboardUploadStore.clear(request);
+    await request.onConfirm();
+    onUploaded?.(request.targetPath);
   };
 
   return (
@@ -80,12 +73,10 @@ export const SftpClipboardUploadDialog: React.FC<SftpClipboardUploadDialogProps>
           <Button
             variant="outline"
             onClick={() => sftpClipboardUploadStore.clear(request)}
-            disabled={uploading}
           >
             Cancel
           </Button>
-          <Button onClick={handleConfirm} disabled={uploading || !request}>
-            {uploading && <Loader2 size={14} className="mr-2 animate-spin" />}
+          <Button onClick={handleConfirm} disabled={!request}>
             Upload
           </Button>
         </DialogFooter>
