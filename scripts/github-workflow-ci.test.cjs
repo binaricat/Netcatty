@@ -149,6 +149,31 @@ test("stable releases propose Nix metadata through a pull request", () => {
   assert.doesNotMatch(nixJob[0], /git push origin HEAD:\$\{\{ github\.event\.repository\.default_branch \}\}/);
   assert.match(nixJob[0], /gh pr create/);
   assert.match(nixJob[0], /automation\/nix-release-/);
+  assert.match(nixJob[0], /candidate_tree/);
+  assert.match(nixJob[0], /remote_tree/);
+  assert.match(nixJob[0], /branch_prefix/);
+  assert.match(nixJob[0], /headRefName/);
+  assert.match(nixJob[0], /headRepositoryOwner\.login == \$owner/);
+  assert.match(nixJob[0], /gh api --method GET "repos\/\$\{GITHUB_REPOSITORY\}\/pulls"/);
+  assert.match(nixJob[0], /-f head="\$\{REPO_OWNER\}:\$\{branch\}"/);
+  assert.doesNotMatch(nixJob[0], /gh pr list[^\n]*--head "\$\{REPO_OWNER\}:/);
+  assert.match(nixJob[0], /\.headRefName == \$prefix/);
+  assert.doesNotMatch(
+    nixJob[0],
+    /\.headRefName \| startswith\(\$prefix\)/,
+    "v1.2.30 must not be treated as a v1.2.3 metadata branch",
+  );
+  assert.match(nixJob[0], /test\("\^\[0-9\]\+-\[0-9\]\+\$"\)/);
+  assert.match(nixJob[0], /suffix=.*branch_prefix/);
+  assert.match(nixJob[0], /\[\[ "\$suffix" =~ \^\[0-9\]\+-\[0-9\]\+\$ \]\]/);
+  assert.match(nixJob[0], /ls-remote --heads origin "refs\/heads\/\$\{branch_prefix\}\*"/);
+  assert.match(nixJob[0], /GITHUB_RUN_ID/);
+  assert.match(nixJob[0], /--force-with-lease="refs\/heads\/\$\{branch\}:"/);
+  assert.doesNotMatch(nixJob[0], /--force-with-lease="\$\{branch\}:\$\{expected\}"/);
+  assert.ok(
+    nixJob[0].indexOf('gh pr list') < nixJob[0].indexOf('git switch -C'),
+    "an existing Nix PR must be reused before rebuilding its branch",
+  );
 });
 
 test("Codex fix publishing treats a moved PR head as a stale result", () => {
@@ -178,6 +203,7 @@ test("issue implementation publishing tolerates competing automation runs", () =
   assert.match(publishJob[0], /remote_after/);
   assert.match(publishJob[0], /exit 1/);
   assert.match(publishJob[0], /steps\.publish\.outputs\.published == 'true'/);
+  assert.match(publishJob[0], /group: cursor-codex-head-/);
   assert.match(publishJob[0], /status === 403 && createPermissionDenied/);
   assert.match(publishJob[0], /resource not accessible by integration/);
   assert.match(publishJob[0], /resource not accessible by personal access token/);
@@ -193,6 +219,36 @@ test("reused automation PRs still receive labels and one source-issue backlink",
   assert.match(openPr[0], /github\.paginate\(github\.rest\.issues\.listComments/);
   assert.match(openPr[0], /auto\.hasAutomationPullRequestBacklink/);
   assert.doesNotMatch(openPr[0], /if \(created\)/);
+});
+
+test("reused implementation PRs do not duplicate Codex requests for the same head", () => {
+  const requestCodex = cursorWorkflow.match(
+    /\n      - name: Request Codex review on implement PR[\s\S]*?(?=\n  codex_loop:)/,
+  );
+  assert.ok(requestCodex, "implement Codex request step must exist before codex_loop");
+  assert.match(requestCodex[0], /github\.paginate\(github\.rest\.issues\.listComments/);
+  assert.match(requestCodex[0], /github\.rest\.pulls\.get/);
+  assert.match(requestCodex[0], /auto\.shouldSkipExternalCodexRerequest/);
+  assert.match(requestCodex[0], /headSha/);
+  assert.match(requestCodex[0], /OWN_ACTORS/);
+  assert.doesNotMatch(requestCodex[0], /process\.env\.HEAD_SHA/);
+});
+
+test("all own-PR Codex request paths serialize on the head branch", () => {
+  const codexLoop = cursorWorkflow.match(/\n  codex_loop:\n[\s\S]*?(?=\n  publish_codex_fix:)/);
+  const ownRerequest = cursorWorkflow.match(/\n  own_rerequest_codex:\n[\s\S]*?(?=\n  external_rerequest_codex:)/);
+  assert.ok(codexLoop, "codex_loop job must exist before publish_codex_fix");
+  assert.ok(ownRerequest, "own_rerequest_codex must exist before external_rerequest_codex");
+  assert.match(cursorWorkflow, /head_ref: \$\{\{ steps\.decide\.outputs\.head_ref \}\}/);
+  assert.match(codexLoop[0], /group: cursor-codex-head-/);
+  assert.match(ownRerequest[0], /group: cursor-codex-head-/);
+  assert.match(codexLoop[0], /needs\.route\.outputs\.head_ref/);
+  assert.match(ownRerequest[0], /needs\.route\.outputs\.head_ref/);
+  assert.match(cursorWorkflow, /head_ref: pr\.head\?\.ref \|\| ''/);
+  assert.match(
+    cursorWorkflow,
+    /issue_comment[\s\S]*?github\.rest\.pulls\.get[\s\S]*?head_ref: pr\.head\?\.ref \|\| ''/,
+  );
 });
 
 test("clean Codex handoff updates labels without GraphQL-only organization scopes", () => {
