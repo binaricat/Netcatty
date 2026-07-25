@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  confirmSftpClipboardUpload,
   createDropEntriesFromClipboardFiles,
   getSftpClipboardSystemTextPaths,
   getSupportedClipboardUploadFiles,
@@ -9,6 +10,7 @@ import {
   resolveSftpClipboardUploadTarget,
   shouldLetNativePasteEventHandleSftpPaste,
   type ClipboardLocalFile,
+  type SftpClipboardUploadRequest,
 } from "./sftp/clipboardUpload.ts";
 import type { SftpFileEntry } from "../types";
 
@@ -124,6 +126,74 @@ test("SFTP paste keydown lets the native paste event handle OS clipboard files",
   assert.equal(shouldLetNativePasteEventHandleSftpPaste("sftpPaste", "Cmd + Shift + V"), false);
   assert.equal(shouldLetNativePasteEventHandleSftpPaste("sftpPaste", "F9"), false);
   assert.equal(shouldLetNativePasteEventHandleSftpPaste("sftpCopy", "Ctrl + V"), false);
+});
+
+test("clipboard upload confirmation clears the dialog before awaiting transfer", async () => {
+  const events: string[] = [];
+  let resolveUpload: (() => void) | undefined;
+  const uploadDone = new Promise<void>((resolve) => {
+    resolveUpload = resolve;
+  });
+
+  const request: SftpClipboardUploadRequest = {
+    scopeId: "pane-1",
+    side: "left",
+    targetPath: "/remote/inbox",
+    files: [{ path: "/tmp/a.txt", name: "a.txt", isDirectory: false, size: 1 }],
+    onConfirm: async () => {
+      events.push("upload-start");
+      await uploadDone;
+      events.push("upload-end");
+    },
+  };
+
+  const confirmPromise = confirmSftpClipboardUpload({
+    request,
+    clear: () => {
+      events.push("clear");
+    },
+    onUploaded: (targetPath) => {
+      events.push(`uploaded:${targetPath}`);
+    },
+  });
+
+  // Dialog must already be cleared while the transfer is still in flight.
+  // async function runs to its first await before returning the promise.
+  assert.deepEqual(events, ["clear", "upload-start"]);
+
+  resolveUpload?.();
+  await confirmPromise;
+  assert.deepEqual(events, ["clear", "upload-start", "upload-end", "uploaded:/remote/inbox"]);
+});
+
+test("clipboard upload confirmation skips onUploaded when transfer fails", async () => {
+  const events: string[] = [];
+  const request: SftpClipboardUploadRequest = {
+    scopeId: "pane-1",
+    side: "left",
+    targetPath: "/remote/inbox",
+    files: [{ path: "/tmp/a.txt", name: "a.txt", isDirectory: false, size: 1 }],
+    onConfirm: async () => {
+      events.push("upload-start");
+      throw new Error("boom");
+    },
+  };
+
+  await assert.rejects(
+    () => confirmSftpClipboardUpload({
+      request,
+      clear: () => {
+        events.push("clear");
+      },
+      onUploaded: () => {
+        events.push("uploaded");
+      },
+    }),
+    /boom/,
+  );
+
+  // Dialog is still cleared so the UI is not stuck; refresh callback is skipped.
+  assert.deepEqual(events, ["clear", "upload-start"]);
 });
 
 test("native clipboard paste follows SFTP paste shortcut availability", () => {

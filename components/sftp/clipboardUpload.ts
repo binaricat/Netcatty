@@ -138,3 +138,19 @@ export const sftpClipboardUploadStore = {
     return () => clipboardUploadListeners.delete(listener);
   },
 };
+
+/**
+ * Hand off a confirmed clipboard upload without holding the modal open.
+ * Clears the active request first, then runs the transfer (issue #2478).
+ */
+export async function confirmSftpClipboardUpload(params: {
+  request: SftpClipboardUploadRequest;
+  clear?: (request: SftpClipboardUploadRequest) => void;
+  onUploaded?: (targetPath: string) => void;
+}): Promise<void> {
+  const { request, onUploaded } = params;
+  const clear = params.clear ?? sftpClipboardUploadStore.clear;
+  clear(request);
+  await request.onConfirm();
+  onUploaded?.(request.targetPath);
+}
