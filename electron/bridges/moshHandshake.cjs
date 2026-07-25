@@ -245,8 +245,10 @@ function potentialProtocolStart(text) {
 
 function buildMoshServerCommand(moshServerPath) {
   const trimmed = typeof moshServerPath === "string" ? moshServerPath.trim() : "";
-  if (!trimmed) return "mosh-server new -s";
-  return `${shellQuote(trimmed)} new -s`;
+  // -c 256 matches stock mosh when the client reports 256 colors: mosh-server
+  // sets TERM=xterm-256color only when colors === 256 (default 8 → TERM=xterm).
+  if (!trimmed) return "mosh-server new -s -c 256";
+  return `${shellQuote(trimmed)} new -s -c 256`;
 }
 
 /**
@@ -289,7 +291,7 @@ function parseMoshConnect(buffer) {
  * @param {string} [opts.username]  — ssh user (defaults to ssh's choice)
  * @param {string} [opts.lang]      — UTF-8 locale offered to mosh-server
  * @param {object} [opts.locales]    — client locale variables offered in stock order
- * @param {string} [opts.moshServer]— remote command (default "mosh-server new")
+ * @param {string} [opts.moshServer]— remote command (default "mosh-server new -s -c 256")
  * @param {string[]} [opts.sshArgs] — extra args passed to ssh (e.g. -i path)
  * @returns {{ command: string, args: string[] }}
  */
@@ -312,7 +314,7 @@ function buildSshHandshakeCommand(opts) {
   // Invoke POSIX sh explicitly because the account's login shell may not be
   // sh-compatible. The sniffer validates and hides the MOSH IP marker.
   const lang = opts.lang || "en_US.UTF-8";
-  const moshServer = opts.moshServer || "mosh-server new -s";
+  const moshServer = opts.moshServer || "mosh-server new -s -c 256";
   const localeAssignments = MOSH_LOCALE_NAMES
     .filter((name) => Object.prototype.hasOwnProperty.call(opts.locales || {}, name))
     .map((name) => `${name}=${String(opts.locales[name])}`);

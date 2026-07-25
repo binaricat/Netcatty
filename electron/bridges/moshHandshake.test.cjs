@@ -188,7 +188,14 @@ test("buildSshHandshakeCommand mirrors stock mosh SSH PTY startup", () => {
   assert.deepEqual(got.args.slice(0, 4), ["-n", "-tt", "alice@example.com", "--"]);
   assert.match(got.args.at(-1), /^sh -c /);
   assert.doesNotMatch(got.args.at(-1), /env LC_ALL=/);
-  assert.match(got.args.at(-1), /exec mosh-server new -s -l .*LANG=en_US\.UTF-8/);
+  // -c 256 makes mosh-server advertise TERM=xterm-256color (default is 8 → xterm).
+  assert.match(got.args.at(-1), /exec mosh-server new -s -c 256 -l .*LANG=en_US\.UTF-8/);
+});
+
+test("buildMoshServerCommand defaults to 256 colors so remote TERM is xterm-256color", () => {
+  assert.equal(buildMoshServerCommand(), "mosh-server new -s -c 256");
+  assert.equal(buildMoshServerCommand(""), "mosh-server new -s -c 256");
+  assert.equal(buildMoshServerCommand("   "), "mosh-server new -s -c 256");
 });
 
 test("buildSshHandshakeCommand reports the exact server address selected by SSH", () => {
@@ -248,7 +255,7 @@ test("buildSshHandshakeCommand preserves the stock locale variable order", () =>
 test("buildMoshServerCommand treats custom server input as a path", () => {
   assert.equal(
     buildMoshServerCommand("/opt/Mosh Tools/mosh-server; touch /tmp/nope"),
-    "'/opt/Mosh Tools/mosh-server; touch /tmp/nope' new -s",
+    "'/opt/Mosh Tools/mosh-server; touch /tmp/nope' new -s -c 256",
   );
 });
 
