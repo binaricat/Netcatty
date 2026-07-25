@@ -170,6 +170,10 @@ test("broadcast targets and direct-send paths require their own trusted shell bo
   );
   assert.match(
     terminalSource,
+    /const broadcastUserPasteData[\s\S]*?getSinglePastedCommand\(data\)[\s\S]*?isTrustedTerminalShellSubmission[\s\S]*?oscColorQuerySuppressionCommand/u,
+  );
+  assert.match(
+    terminalSource,
     /trustedShellPromptReadyRef\.current = isTrustedTerminalShellSubmission[\s\S]*?disposeRuntimeOnly\(\)[\s\S]*?hibernatedRef\.current = true/u,
   );
   assert.match(

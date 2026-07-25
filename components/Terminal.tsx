@@ -147,6 +147,7 @@ import {
   type PromptLineBreakState,
 } from "./terminal/runtime/promptLineBreak";
 import {
+  getSinglePastedCommand,
   prepareSudoAutofillInput,
   type PasswordPromptPickerState,
   type SudoPasswordAutofill,
@@ -2595,11 +2596,25 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       && isBroadcastEnabledRef.current
       && onBroadcastInputRef.current
     ) {
-      onBroadcastInputRef.current(data, sessionId);
+      const pastedCommand = getSinglePastedCommand(data)?.command;
+      const trustedCommand = pastedCommand && isTrustedTerminalShellSubmission(
+        pastedCommand,
+        termRef.current,
+        isNetworkDevice,
+      )
+        ? pastedCommand
+        : undefined;
+      onBroadcastInputRef.current(
+        data,
+        sessionId,
+        trustedCommand !== undefined
+          ? { oscColorQuerySuppressionCommand: trustedCommand }
+          : undefined,
+      );
       return true;
     }
     return false;
-  }, [sessionId]);
+  }, [isNetworkDevice, sessionId]);
 
   const executeSnippetCommand = useCallback((
     command: string,
