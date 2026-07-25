@@ -120,6 +120,8 @@ export const useSftpExternalOperations = (
     setDefault: (action: FileConflictAction) => void;
   };
   const uploadConflictResolversRef = useRef<Map<string, UploadConflictResolver>>(new Map());
+  /** Maps conflict id → owning UploadController so cancel A never stops B's prompts. */
+  const uploadConflictOwnersRef = useRef<Map<string, UploadController>>(new Map());
 
   const readTextFile = useCallback(
     async (side: "left" | "right", filePath: string): Promise<string> => {
@@ -547,23 +549,30 @@ export const useSftpExternalOperations = (
     const resolver = uploadConflictResolversRef.current.get(conflictId);
     if (!resolver) return;
     uploadConflictResolversRef.current.delete(conflictId);
+    uploadConflictOwnersRef.current.delete(conflictId);
     if (conflict && applyToAll) {
       resolver.setDefault(action);
     }
     resolver.resolve(action);
   }, [uploadConflicts]);
 
-  const cancelPendingUploadConflicts = useCallback(() => {
+  const cancelPendingUploadConflicts = useCallback((controller?: UploadController) => {
     if (uploadConflictResolversRef.current.size === 0) return;
-    const resolvers = [...uploadConflictResolversRef.current.values()];
-    uploadConflictResolversRef.current.clear();
-    setUploadConflicts([]);
-    for (const resolver of resolvers) {
+    const canceledIds: string[] = [];
+    for (const [conflictId, resolver] of [...uploadConflictResolversRef.current]) {
+      const owner = uploadConflictOwnersRef.current.get(conflictId);
+      // Scoped cancel: only stop prompts owned by this controller.
+      if (controller && owner !== controller) continue;
+      canceledIds.push(conflictId);
+      uploadConflictResolversRef.current.delete(conflictId);
+      uploadConflictOwnersRef.current.delete(conflictId);
       resolver.resolve("stop");
     }
+    if (canceledIds.length === 0) return;
+    setUploadConflicts((prev) => prev.filter((item) => !canceledIds.includes(item.transferId)));
   }, []);
 
-  const createUploadConflictResolver = useCallback(() => {
+  const createUploadConflictResolver = useCallback((controller: UploadController) => {
     const conflictDefaults = new Map<string, FileConflictAction>();
 
     return async (conflict: {
@@ -598,6 +607,7 @@ export const useSftpExternalOperations = (
 
       setUploadConflicts((prev) => [...prev, fileConflict]);
       return new Promise<FileConflictAction>((resolve) => {
+        uploadConflictOwnersRef.current.set(conflictId, controller);
         uploadConflictResolversRef.current.set(conflictId, {
           resolve,
           setDefault: (action) => {
@@ -792,7 +802,7 @@ export const useSftpExternalOperations = (
               joinPath,
               callbacks,
               useCompressedUpload,
-              resolveConflict: createUploadConflictResolver(),
+              resolveConflict: createUploadConflictResolver(controller),
             },
             controller,
           );
@@ -881,7 +891,7 @@ export const useSftpExternalOperations = (
               joinPath,
               callbacks,
               useCompressedUpload,
-              resolveConflict: createUploadConflictResolver(),
+              resolveConflict: createUploadConflictResolver(controller),
             },
             controller,
           );
@@ -1031,7 +1041,7 @@ export const useSftpExternalOperations = (
               joinPath,
               callbacks,
               useCompressedUpload,
-              resolveConflict: createUploadConflictResolver(),
+              resolveConflict: createUploadConflictResolver(controller),
             },
             controller,
           );
@@ -1154,7 +1164,7 @@ export const useSftpExternalOperations = (
               joinPath,
               callbacks,
               useCompressedUpload,
-              resolveConflict: createUploadConflictResolver(),
+              resolveConflict: createUploadConflictResolver(controller),
             },
             controller,
           );
@@ -1211,6 +1221,8 @@ export const useSftpExternalOperations = (
       const controller = uploadControllersByTaskRef.current.get(taskId);
       if (controller) {
         logger.info("[SFTP] Cancelling external upload", { taskId });
+        // Stop only this upload's conflict prompts — concurrent uploads keep theirs.
+        cancelPendingUploadConflicts(controller);
         cancelPromise = controller.cancel();
       }
     } else {
@@ -1219,8 +1231,8 @@ export const useSftpExternalOperations = (
         logger.info("[SFTP] Cancelling all external uploads", { count: controllers.length });
         cancelPromise = Promise.all(controllers.map((controller) => controller.cancel())).then(() => undefined);
       }
+      cancelPendingUploadConflicts();
     }
-    cancelPendingUploadConflicts();
     await cancelPromise;
   }, [cancelPendingUploadConflicts]);
 

@@ -161,3 +161,57 @@ test("reconnect reads the new connection id from the pinned tab", async () => {
   assert.equal(currentConnectionId, "conn-new");
   assert.equal(sftpId, "sftp-after-reconnect");
 });
+
+test("reconnect prefers the pane host over a stale side-wide lastConnected host", async () => {
+  const otherHost = {
+    id: "host-other",
+    label: "Other",
+    hostname: "other.example",
+    port: 22,
+    username: "deploy",
+    protocol: "ssh",
+  } as Host;
+  let connectedHost: Host | "local" | null = null;
+  const sessions = { current: new Map<string, string>() };
+  const sftpId = await ensureRemoteSftpSession({
+    side: "left",
+    tabId: "pane-1",
+    getActivePane: () => remotePane("conn-1"),
+    sftpSessionsRef: sessions,
+    // Side last connected to a different host (another tab), which must not win.
+    lastConnectedHostRef: { current: { left: otherHost, right: null } },
+    resolveHostById: (id) => {
+      if (id === "host-1") return host;
+      if (id === "host-other") return otherHost;
+      return null;
+    },
+    connect: async (_side, resolved) => {
+      connectedHost = resolved;
+      sessions.current.set("conn-1", "sftp-pane-host");
+    },
+  });
+  assert.equal(sftpId, "sftp-pane-host");
+  assert.equal((connectedHost as Host).id, "host-1");
+  assert.equal((connectedHost as Host).hostname, "ci.example");
+});
+
+test("reconnect reuses lastConnected host when it matches the pane hostId", async () => {
+  const lastHostWithOverrides = {
+    ...host,
+    hostname: "session-override.example",
+  } as Host;
+  let connectedHost: Host | "local" | null = null;
+  const sessions = { current: new Map<string, string>() };
+  await ensureRemoteSftpSession({
+    side: "left",
+    getActivePane: () => remotePane("conn-1"),
+    sftpSessionsRef: sessions,
+    lastConnectedHostRef: { current: { left: lastHostWithOverrides, right: null } },
+    resolveHostById: (id) => (id === "host-1" ? host : null),
+    connect: async (_side, resolved) => {
+      connectedHost = resolved;
+      sessions.current.set("conn-1", "sftp-matched");
+    },
+  });
+  assert.equal((connectedHost as Host).hostname, "session-override.example");
+});

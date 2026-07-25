@@ -32,11 +32,16 @@ export const SftpClipboardUploadDialog: React.FC<SftpClipboardUploadDialogProps>
     sftpClipboardUploadStore.clear(request);
   };
 
-  const handleConfirm = async () => {
+  const handleConfirm = () => {
     if (!request) return;
-    sftpClipboardUploadStore.clear(request);
-    await request.onConfirm();
-    onUploaded?.(request.targetPath);
+    // Capture before clear so a second click cannot re-enter with the same request.
+    // Close the modal first, then hand the transfer to the background queue.
+    const active = request;
+    const targetPath = active.targetPath;
+    sftpClipboardUploadStore.clear(active);
+    void active.onConfirm().then(() => {
+      onUploaded?.(targetPath);
+    });
   };
 
   return (
@@ -45,7 +50,8 @@ export const SftpClipboardUploadDialog: React.FC<SftpClipboardUploadDialogProps>
         <DialogHeader>
           <DialogTitle>Upload clipboard files?</DialogTitle>
           <DialogDescription>
-            Upload {fileCount} item{fileCount === 1 ? "" : "s"} to:
+            Upload {fileCount} item{fileCount === 1 ? "" : "s"} to the path below.
+            After you confirm, the dialog closes and the transfer continues in the background.
           </DialogDescription>
         </DialogHeader>
 

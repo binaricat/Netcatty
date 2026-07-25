@@ -42,13 +42,22 @@ export async function ensureRemoteSftpSession(
 
   const resolveHost = (): Host => {
     const pane = getActivePane(side);
-    const lastHost = lastConnectedHostRef.current[side];
-    if (lastHost && lastHost !== "local") return lastHost;
     const hostId = pane?.connection && !pane.connection.isLocal ? pane.connection.hostId : undefined;
+    const lastHost = lastConnectedHostRef.current[side];
+
+    // lastConnectedHostRef is side-wide (latest connect on left/right), not
+    // tab-scoped. Multi-tab sides often leave it pointing at a different host
+    // than the pane we are reconnecting. Only reuse it when it matches this
+    // pane's hostId so pinned uploads cannot land on the wrong endpoint.
+    if (lastHost && lastHost !== "local" && (!hostId || lastHost.id === hostId)) {
+      return lastHost;
+    }
+
     if (hostId && resolveHostById) {
       const fromVault = resolveHostById(hostId);
       if (fromVault) return fromVault;
     }
+
     // Pane connection only stores hostId/label — inventing root@label:22 would
     // open the wrong endpoint. Fail clearly so the caller can reconnect via
     // vault host metadata instead of a synthetic identity.

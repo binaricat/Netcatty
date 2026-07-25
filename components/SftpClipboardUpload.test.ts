@@ -169,14 +169,19 @@ test("clipboard upload dialog closes before waiting for the transfer", () => {
     source.indexOf("const handleConfirm"),
     source.indexOf("\n  return ("),
   );
-  const clearRequest = confirmHandler.indexOf("sftpClipboardUploadStore.clear(request);");
-  const waitForUpload = confirmHandler.indexOf("await request.onConfirm();");
+  const clearRequest = confirmHandler.indexOf("sftpClipboardUploadStore.clear(active)");
+  const startUpload = confirmHandler.indexOf("void active.onConfirm()");
 
   assert.notEqual(clearRequest, -1);
-  assert.notEqual(waitForUpload, -1);
+  assert.notEqual(startUpload, -1);
   assert.ok(
-    clearRequest < waitForUpload,
-    "the modal request must be cleared before the upload promise is awaited",
+    clearRequest < startUpload,
+    "the modal request must be cleared before the upload starts in the background",
+  );
+  assert.equal(
+    /await\s+request\.onConfirm\(/.test(confirmHandler),
+    false,
+    "confirm must not block the dialog lifecycle on the upload promise",
   );
 });
 
@@ -255,4 +260,42 @@ test("external upload cancellation is keyed by transfer task id", () => {
     "utf8",
   );
   assert.match(queue, /cancelExternalUpload\(task\.id\)/);
+});
+
+test("external upload conflict cancel is scoped to the cancelled controller", () => {
+  const ops = readFileSync(
+    new URL("../application/state/sftp/useSftpExternalOperations.ts", import.meta.url),
+    "utf8",
+  );
+  assert.match(ops, /uploadConflictOwnersRef/);
+  assert.match(ops, /createUploadConflictResolver = useCallback\(\(controller: UploadController\)/);
+  assert.match(ops, /cancelPendingUploadConflicts\(controller\)/);
+
+  const cancelFn = ops.slice(
+    ops.indexOf("const cancelExternalUpload = useCallback"),
+    ops.indexOf("const selectApplication = useCallback"),
+  );
+  // Task-scoped cancel must not fall through to the unscoped "cancel all conflicts" path.
+  assert.match(cancelFn, /cancelPendingUploadConflicts\(controller\)/);
+  assert.ok(
+    cancelFn.indexOf("cancelPendingUploadConflicts(controller)")
+      < cancelFn.indexOf("cancelPendingUploadConflicts()"),
+    "scoped conflict cancel comes first; unscoped only for cancel-all",
+  );
+});
+
+test("ensureRemoteSftpSession refuses a side-wide lastConnected host that belongs to another tab", () => {
+  const source = readFileSync(
+    new URL("../application/state/sftp/ensureRemoteSftpSession.ts", import.meta.url),
+    "utf8",
+  );
+  const resolveHost = source.slice(
+    source.indexOf("const resolveHost = (): Host =>"),
+    source.indexOf("const readMappedId"),
+  );
+  assert.match(resolveHost, /lastHost\.id === hostId/);
+  assert.ok(
+    resolveHost.includes("resolveHostById"),
+    "pane hostId must still fall back through vault lookup",
+  );
 });
