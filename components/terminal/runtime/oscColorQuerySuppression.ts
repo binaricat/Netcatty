@@ -108,12 +108,11 @@ export function registerOscColorQuerySuppressionArmer(
   };
 }
 
-/** Arm Docker-log OSC suppression on a broadcast target without clearing target-owned state. */
+/** Transition OSC suppression on a broadcast target for its next trusted command. */
 export function armOscColorQuerySuppressionForSession(
   sessionId: string,
   command: string,
 ): void {
-  if (!isDockerLogsCommand(command)) return;
   for (const armer of oscColorQuerySuppressionArmers.get(sessionId) ?? []) {
     armer(command);
   }

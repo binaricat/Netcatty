@@ -6,6 +6,7 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal as XTerm } from "@xterm/xterm";
 import type { RefObject } from "react";
+import type { TerminalBroadcastInputOptions } from "../terminalHelpers";
 import {
   checkAppShortcut,
   getAppLevelActions,
@@ -72,7 +73,6 @@ import {
   flushKittyKeyboardBroadcastReleases,
   registerKittyKeyboardBroadcastHandler,
   upsertKittyKeyboardForwardedPress,
-  type KittyKeyboardBroadcastInput,
   type KittyKeyboardForwardedPress,
 } from "./kittyKeyboardBroadcast";
 import { installUserCursorPreferenceGuard } from "./cursorPreference";
@@ -248,7 +248,7 @@ export type CreateXTermRuntimeContext = {
     ((
       data: string,
       sourceSessionId: string,
-      options?: { kittyKeyboardInput?: KittyKeyboardBroadcastInput },
+      options?: TerminalBroadcastInputOptions,
     ) => void) | undefined
   >;
 
@@ -931,6 +931,19 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     const dataToWrite = data;
     const sensitive = ctx.passwordPromptActiveRef?.current === true;
     let handledSubmittedInput = false;
+    let trustedSubmittedCommand: string | undefined;
+    const commandExecutionContext = {
+      ...ctx,
+      onTrustedCommandSubmitted: (
+        command: string,
+        hostId: string,
+        hostLabel: string,
+        sessionId: string,
+      ) => {
+        trustedSubmittedCommand = command;
+        ctx.onTrustedCommandSubmitted?.(command, hostId, hostLabel, sessionId);
+      },
+    };
     const submittedInput: { text: string; lineEnding: "\r\n" | "\r" | "\n" } | null =
       inputSource === "shift-enter"
         ? getShiftEnterSubmittedInput(data)
@@ -962,7 +975,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
       if (ctx.passwordPromptActiveRef) ctx.passwordPromptActiveRef.current = false;
       const recordedCommand = recordTerminalCommandExecution(
         ctx.commandBufferRef.current,
-        ctx,
+        commandExecutionContext,
         term,
         { sensitive, allowHostStyleGreaterThanPrompt: ctx.allowHostStyleGreaterThanPrompt },
       );
@@ -984,7 +997,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
         if (ctx.passwordPromptActiveRef) ctx.passwordPromptActiveRef.current = false;
         const recordedCommand = recordTerminalCommandExecution(
           `${ctx.commandBufferRef.current}${pastedCommand.command}`,
-          ctx,
+          commandExecutionContext,
           term,
           { sensitive, allowHostStyleGreaterThanPrompt: ctx.allowHostStyleGreaterThanPrompt },
         );
@@ -1044,7 +1057,13 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
       // Use remapped data so broadcast peers also receive the correct byte
       const broadcastData = mapTerminalBackspaceInput(dataToWrite, ctx.host.backspaceBehavior);
       if (willBroadcastInput) {
-        onBroadcastInput?.(broadcastData, ctx.sessionId);
+        onBroadcastInput?.(
+          broadcastData,
+          ctx.sessionId,
+          trustedSubmittedCommand !== undefined
+            ? { oscColorQuerySuppressionCommand: trustedSubmittedCommand }
+            : undefined,
+        );
       }
 
       if (!shouldSuppressTerminalInputScrollForUserPaste(term, data)) {

@@ -2578,6 +2578,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     const id = sessionRef.current;
     if (!term || !id) return;
 
+    let trustedShellSubmission = false;
     if (!noAutoRun) {
       const prompt = getAlignedPrompt(term, '', false).prompt;
       if (
@@ -2587,6 +2588,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
           allowHostStyleGreaterThan: isNetworkDevice,
         })
       ) {
+        trustedShellSubmission = true;
         beginOscColorQuerySuppressionForCommand(
           suppressOscColorQueriesForActiveCommandRef,
           command,
@@ -2622,7 +2624,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       onBroadcastInputRef.current(data, sessionId, {
         noAutoRun,
         ...(lineDelayMs ? { lineDelayMs } : {}),
-        ...(!noAutoRun ? { oscColorQuerySuppressionCommand: command } : {}),
+        ...(trustedShellSubmission ? { oscColorQuerySuppressionCommand: command } : {}),
       });
     }
 

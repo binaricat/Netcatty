@@ -97,8 +97,8 @@ test('broadcast peer sessions can be armed through the suppression registry', ()
   assert.equal(popupState.current, true);
 
   armOscColorQuerySuppressionForSession('peer-session', 'vim');
-  assert.equal(peerState.current, true);
-  assert.equal(popupState.current, true);
+  assert.equal(peerState.current, false);
+  assert.equal(popupState.current, false);
 
   unregisterPopup();
   peerState.current = false;

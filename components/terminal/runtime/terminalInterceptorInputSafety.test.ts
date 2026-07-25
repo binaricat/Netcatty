@@ -132,11 +132,7 @@ test("ordinary broadcast skips targets that are waiting for sensitive input", ()
   );
 });
 
-test("broadcast Docker-log submissions arm OSC color-query suppression on peers", () => {
-  assert.match(
-    terminalLayerSource,
-    /isBroadcastEnabled\?\.\(broadcastWorkspaceId\)[\s\S]*?if \(!canUseDirectSessionWriteFallback\(peer\)\) continue;[\s\S]*?if \(isTerminalSensitiveInputActive\(peer\.id\)\) continue;[\s\S]*?armOscColorQuerySuppressionForSession\(peer\.id, command\)/u,
-  );
+test("only trusted broadcast commands transition OSC color-query suppression on peers", () => {
   assert.match(
     terminalLayerSource,
     /oscColorQuerySuppressionCommand !== undefined[\s\S]*?armOscColorQuerySuppressionForSession\(\s*session\.id,\s*options\.oscColorQuerySuppressionCommand/u,
@@ -146,8 +142,16 @@ test("broadcast Docker-log submissions arm OSC color-query suppression on peers"
     /registerOscColorQuerySuppressionArmer\(\s*sessionId,\s*\(command\) => beginOscColorQuerySuppressionForCommand\(\s*suppressOscColorQueriesForActiveCommandRef,\s*command/u,
   );
   assert.match(
+    runtimeSource,
+    /onTrustedCommandSubmitted:[\s\S]*?trustedSubmittedCommand = command[\s\S]*?oscColorQuerySuppressionCommand: trustedSubmittedCommand/u,
+  );
+  assert.match(
     terminalSource,
-    /oscColorQuerySuppressionCommand: command/u,
+    /let trustedShellSubmission = false[\s\S]*?trustedShellSubmission = true[\s\S]*?trustedShellSubmission[\s\S]*?oscColorQuerySuppressionCommand: command/u,
+  );
+  assert.doesNotMatch(
+    terminalLayerSource,
+    /handleCommandSubmitted[\s\S]*?armOscColorQuerySuppressionForSession\(peer\.id, command\)/u,
   );
 });
 
