@@ -134,7 +134,10 @@ import {
   consumeOsc133CommandCompletion,
   type PromptLineBreakState,
 } from "./promptLineBreak";
-import { recordTerminalCommandExecution } from "./terminalCommandExecution";
+import {
+  isTrustedTerminalShellSubmission,
+  recordTerminalCommandExecution,
+} from "./terminalCommandExecution";
 import {
   getSingleBracketedPasteLine,
   getSinglePastedCommand,
@@ -789,7 +792,21 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
       && ctx.isBroadcastEnabledRef.current
       && ctx.onBroadcastInputRef.current
     ) {
-      ctx.onBroadcastInputRef.current(data, ctx.sessionId);
+      const pastedCommand = getSinglePastedCommand(data)?.command;
+      const trustedCommand = pastedCommand && isTrustedTerminalShellSubmission(
+        pastedCommand,
+        term,
+        ctx.allowHostStyleGreaterThanPrompt,
+      )
+        ? pastedCommand
+        : undefined;
+      ctx.onBroadcastInputRef.current(
+        data,
+        ctx.sessionId,
+        trustedCommand !== undefined
+          ? { oscColorQuerySuppressionCommand: trustedCommand }
+          : undefined,
+      );
       return true;
     }
     return false;

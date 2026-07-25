@@ -138,10 +138,6 @@ test("only trusted broadcast commands transition OSC color-query suppression on 
     /oscColorQuerySuppressionCommand !== undefined[\s\S]*?armOscColorQuerySuppressionForSession\(\s*session\.id,\s*options\.oscColorQuerySuppressionCommand/u,
   );
   assert.match(
-    terminalSource,
-    /registerOscColorQuerySuppressionArmer\(\s*sessionId,\s*\(command\) => beginOscColorQuerySuppressionForCommand\(\s*suppressOscColorQueriesForActiveCommandRef,\s*command/u,
-  );
-  assert.match(
     runtimeSource,
     /onTrustedCommandSubmitted:[\s\S]*?trustedSubmittedCommand = command[\s\S]*?oscColorQuerySuppressionCommand: trustedSubmittedCommand/u,
   );
@@ -152,6 +148,21 @@ test("only trusted broadcast commands transition OSC color-query suppression on 
   assert.doesNotMatch(
     terminalLayerSource,
     /handleCommandSubmitted[\s\S]*?armOscColorQuerySuppressionForSession\(peer\.id, command\)/u,
+  );
+});
+
+test("broadcast targets and direct-send paths require their own trusted shell boundary", () => {
+  assert.match(
+    terminalSource,
+    /registerOscColorQuerySuppressionArmer\([\s\S]*?isTrustedTerminalShellSubmission\([\s\S]*?beginOscColorQuerySuppressionForCommand/u,
+  );
+  assert.match(
+    runtimeSource,
+    /broadcastUserPasteData[\s\S]*?getSinglePastedCommand\(data\)[\s\S]*?isTrustedTerminalShellSubmission[\s\S]*?oscColorQuerySuppressionCommand/u,
+  );
+  assert.match(
+    terminalSource,
+    /autocompleteAcceptTextRef\.current[\s\S]*?let trustedSubmittedCommand[\s\S]*?trustedSubmittedCommand = command[\s\S]*?oscColorQuerySuppressionCommand: trustedSubmittedCommand/u,
   );
 });
 

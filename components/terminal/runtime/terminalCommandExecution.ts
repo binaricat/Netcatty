@@ -666,12 +666,10 @@ export const recordTerminalCommandExecution = (
   if (cmd) {
     ctx.onCommandSubmitted?.(cmd, ctx.host.id, ctx.host.label, ctx.sessionId);
   }
-  const alignedPrompt = term ? getAlignedPrompt(term, command, true).prompt : null;
-  const trustedPrompt = Boolean(
-    term && alignedPrompt?.isAtPrompt
-    && isConfirmedTerminalShellPrompt(alignedPrompt.promptText, {
-      allowHostStyleGreaterThan: options?.allowHostStyleGreaterThanPrompt,
-    }),
+  const trustedPrompt = isTrustedTerminalShellSubmission(
+    command,
+    term,
+    options?.allowHostStyleGreaterThanPrompt,
   );
   if (cmd && shouldRecordShellHistory(cmd, term)) {
     if (trustedPrompt) {
@@ -685,4 +683,19 @@ export const recordTerminalCommandExecution = (
   ctx.commandBufferRef.current = "";
   markPromptLineBreakCommandPending(ctx.promptLineBreakStateRef, term, cmd || command);
   return null;
+};
+
+export const isTrustedTerminalShellSubmission = (
+  command: string,
+  term?: XTerm | null,
+  allowHostStyleGreaterThanPrompt?: boolean,
+): boolean => {
+  if (!term) return false;
+  const alignedPrompt = getAlignedPrompt(term, command, true).prompt;
+  return Boolean(
+    alignedPrompt.isAtPrompt
+    && isConfirmedTerminalShellPrompt(alignedPrompt.promptText, {
+      allowHostStyleGreaterThan: allowHostStyleGreaterThanPrompt,
+    }),
+  );
 };

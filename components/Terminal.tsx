@@ -152,6 +152,7 @@ import {
   type SudoPasswordAutofill,
 } from "./terminal/runtime/terminalSudoAutofill";
 import {
+  isTrustedTerminalShellSubmission,
   recordTerminalCommandExecution,
   shouldRecordShellHistory,
 } from "./terminal/runtime/terminalCommandExecution";
@@ -457,11 +458,14 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   const suppressOscColorQueriesForActiveCommandRef = useRef(false);
   useEffect(() => registerOscColorQuerySuppressionArmer(
     sessionId,
-    (command) => beginOscColorQuerySuppressionForCommand(
-      suppressOscColorQueriesForActiveCommandRef,
-      command,
-    ),
-  ), [sessionId]);
+    (command) => {
+      if (!isTrustedTerminalShellSubmission(command, termRef.current, isNetworkDevice)) return;
+      beginOscColorQuerySuppressionForCommand(
+        suppressOscColorQueriesForActiveCommandRef,
+        command,
+      );
+    },
+  ), [isNetworkDevice, sessionId]);
   const promptLineBreakStateRef = useRef<PromptLineBreakState>(createPromptLineBreakState());
   const [hasMouseTracking, setHasMouseTracking] = useState(false);
   const mouseTrackingRef = useRef(false);
@@ -831,6 +835,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       const sensitive = passwordPromptActiveRef.current;
       let textToWrite = text;
       let handledSubmittedInput = false;
+      let trustedSubmittedCommand: string | undefined;
       if (
         host.protocol !== "serial" &&
         statusRef.current === "connected" &&
@@ -880,11 +885,6 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         terminalBackend.writeToSession(id, textToWrite, { sensitive });
       }
 
-      // Broadcast to other sessions if broadcast mode is enabled
-      if (!sensitive && isBroadcastEnabledRef.current && onBroadcastInputRef.current) {
-        onBroadcastInputRef.current(text, sessionId);
-      }
-
       // Update command buffer for onCommandExecuted tracking
       for (const ch of text) {
         if (handledSubmittedInput) {
@@ -904,7 +904,10 @@ const TerminalComponent: React.FC<TerminalProps> = ({
             sessionId,
             onCommandExecuted,
             onCommandSubmitted,
-            onTrustedCommandSubmitted: pluginAwareOnCommandSubmitted,
+            onTrustedCommandSubmitted: (command) => {
+              trustedSubmittedCommand = command;
+              pluginAwareOnCommandSubmitted(command);
+            },
             commandBufferRef,
             promptLineBreakStateRef,
           }, termRef.current, { sensitive, allowHostStyleGreaterThanPrompt: isNetworkDevice });
@@ -920,6 +923,18 @@ const TerminalComponent: React.FC<TerminalProps> = ({
           commandBufferRef.current += ch;
           recorderRef.current.recordInput(ch);
         }
+      }
+
+      // Broadcast only after semantic command tracking so trusted direct-send
+      // submissions can carry the same peer suppression transition as typing.
+      if (!sensitive && isBroadcastEnabledRef.current && onBroadcastInputRef.current) {
+        onBroadcastInputRef.current(
+          text,
+          sessionId,
+          trustedSubmittedCommand !== undefined
+            ? { oscColorQuerySuppressionCommand: trustedSubmittedCommand }
+            : undefined,
+        );
       }
     }
   };
