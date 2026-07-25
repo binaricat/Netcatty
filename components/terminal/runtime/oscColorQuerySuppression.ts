@@ -62,6 +62,18 @@ export function beginOscColorQuerySuppression(state: { current: boolean }): void
   state.current = true;
 }
 
+export function beginOscColorQuerySuppressionForStartupCommand(
+  state: { current: boolean },
+  command: string,
+  commandKind?: 'dockerLogs',
+): void {
+  if (commandKind === 'dockerLogs') {
+    beginOscColorQuerySuppression(state);
+    return;
+  }
+  beginOscColorQuerySuppressionForCommand(state, command);
+}
+
 export function endOscColorQuerySuppressionForCommand(state: { current: boolean }): void {
   state.current = false;
 }

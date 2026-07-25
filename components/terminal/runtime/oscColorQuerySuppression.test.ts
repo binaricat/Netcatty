@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
   armOscColorQuerySuppressionForSession,
   beginOscColorQuerySuppressionForCommand,
+  beginOscColorQuerySuppressionForStartupCommand,
   endOscColorQuerySuppressionForCommand,
   installOscColorQuerySuppression,
   isDockerLogsCommand,
@@ -91,6 +92,23 @@ test('the next trusted non-log command restores ordinary color queries', () => {
   assert.equal(state.current, false);
   endOscColorQuerySuppressionForCommand(state);
   assert.equal(state.current, false);
+});
+
+test('startup commands recognize saved Docker logs commands and built-in launchers', () => {
+  const state = { current: false };
+
+  beginOscColorQuerySuppressionForStartupCommand(state, 'docker logs -f api');
+  assert.equal(state.current, true);
+
+  beginOscColorQuerySuppressionForStartupCommand(state, 'vim');
+  assert.equal(state.current, false);
+
+  beginOscColorQuerySuppressionForStartupCommand(
+    state,
+    'generated shell wrapper',
+    'dockerLogs',
+  );
+  assert.equal(state.current, true);
 });
 
 test('broadcast peer sessions can be armed through the suppression registry', () => {

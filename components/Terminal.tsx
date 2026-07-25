@@ -132,8 +132,8 @@ import {
   type XTermRuntime,
 } from "./terminal/runtime/createXTermRuntime";
 import {
-  beginOscColorQuerySuppression,
   beginOscColorQuerySuppressionForCommand,
+  beginOscColorQuerySuppressionForStartupCommand,
   endOscColorQuerySuppressionForCommand,
   registerOscColorQuerySuppressionArmer,
 } from "./terminal/runtime/oscColorQuerySuppression";
@@ -2119,9 +2119,12 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     onTerminalLogData: captureTerminalLogData,
     onProgrammaticCommandLogRewrite: queueProgrammaticCommandLogRewrite,
     onOsDetected,
-    onStartupCommandStarted: () => {
-      if (startupCommandKind !== 'dockerLogs') return;
-      beginOscColorQuerySuppression(suppressOscColorQueriesForActiveCommandRef);
+    onStartupCommandStarted: (command) => {
+      beginOscColorQuerySuppressionForStartupCommand(
+        suppressOscColorQueriesForActiveCommandRef,
+        command,
+        startupCommandKind,
+      );
     },
     onCommandExecuted,
     onCommandSubmitted,
