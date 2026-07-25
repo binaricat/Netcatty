@@ -242,3 +242,23 @@ test("reconnect refuses lastConnected host with a different endpoint key", async
   assert.equal((connectedHost as Host).hostname, "ci.example");
   assert.equal((connectedHost as Host).port, 22);
 });
+
+test("reconnect fails when vault defaults cannot satisfy a session-override endpoint key", async () => {
+  const sessions = { current: new Map<string, string>() };
+  // Pane was opened with a non-default hostname override; vault host alone is not enough.
+  const overrideEndpointKey = "host-1:session-override.example:22:ssh::root:";
+  await assert.rejects(
+    () => ensureRemoteSftpSession({
+      side: "left",
+      getActivePane: () => remotePane("conn-1"),
+      sftpSessionsRef: sessions,
+      lastConnectedHostRef: { current: { left: null, right: null } },
+      endpointKey: overrideEndpointKey,
+      resolveHostById: (id) => (id === "host-1" ? host : null),
+      connect: async () => {
+        throw new Error("should not connect with vault defaults");
+      },
+    }),
+    /exact endpoint credentials are unavailable/,
+  );
+});

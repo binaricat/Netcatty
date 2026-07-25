@@ -76,7 +76,25 @@ export async function ensureRemoteSftpSession(
 
     if (hostId && resolveHostById) {
       const fromVault = resolveHostById(hostId);
-      if (fromVault) return fromVault;
+      if (fromVault) {
+        if (!endpointKey) return fromVault;
+        // When the pane was opened with session overrides, vault defaults may
+        // differ. Never retarget the tab to vault endpoint just because lastHost
+        // was stale — fail so the user can reopen the exact host.
+        const vaultKey = buildCacheKey(
+          fromVault.id,
+          fromVault.hostname,
+          fromVault.port,
+          fromVault.protocol,
+          fromVault.sftpSudo,
+          fromVault.username,
+          fromVault.sftpFileProtocol,
+        );
+        if (vaultKey === endpointKey) return fromVault;
+        throw new Error(
+          `Cannot reconnect SFTP for "${pane?.connection?.hostLabel ?? hostId}": exact endpoint credentials are unavailable. Reopen the host from the vault.`,
+        );
+      }
     }
 
     // Pane connection only stores hostId/label — inventing root@label:22 would
