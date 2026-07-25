@@ -846,29 +846,36 @@ jobs:
           cd "$PUBLISH"
           git -c core.hooksPath=/dev/null config user.name "netcatty-bot"
           git -c core.hooksPath=/dev/null config user.email "308658023+netcatty-bot@users.noreply.github.com"
-          expected=""
-          if git -c core.hooksPath=/dev/null fetch --depth=50 origin "refs/heads/${BRANCH}:refs/remotes/origin/${BRANCH}"; then
-            expected="$(git rev-parse "refs/remotes/origin/${BRANCH}")"
-          fi
           git -c core.hooksPath=/dev/null fetch --depth=50 origin "${BASE_SHA}"
           git -c core.hooksPath=/dev/null checkout -B "$BRANCH" "$BASE_SHA"
           git -c core.hooksPath=/dev/null am --3way "$GITHUB_WORKSPACE/patch-in/implement.patch"
-          if ! git -c core.hooksPath=/dev/null push \
-            --force-with-lease="refs/heads/${BRANCH}:${expected}" \
+          candidate_tree="$(git rev-parse 'HEAD^{tree}')"
+          if git -c core.hooksPath=/dev/null push \
+            --force-with-lease="refs/heads/${BRANCH}:" \
             origin "HEAD:$BRANCH"; then
-            if ! remote_after="$(git ls-remote --heads origin "refs/heads/${BRANCH}" | awk '{print $1}')"; then
-              echo "::error::Push failed and the remote branch could not be checked."
-              exit 1
-            fi
-            if [[ "$remote_after" != "$expected" ]]; then
-              echo "::notice::Another automation run updated $BRANCH first; discard this stale result."
-              echo "published=false" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
-            echo "::error::Push failed even though $BRANCH did not move."
+            echo "published=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if ! git -c core.hooksPath=/dev/null fetch --depth=1 origin \
+            "+refs/heads/${BRANCH}:refs/remotes/origin/${BRANCH}"; then
+            echo "::error::The create-only push failed and the remote branch could not be fetched."
             exit 1
           fi
-          echo "published=true" >> "$GITHUB_OUTPUT"
+          remote_after="$(git rev-parse "refs/remotes/origin/${BRANCH}")"
+          remote_tree="$(git rev-parse "refs/remotes/origin/${BRANCH}^{tree}")"
+          live_after="$(git ls-remote --heads origin "refs/heads/${BRANCH}" | awk '{print $1}')"
+          if [[ -z "$live_after" || "$live_after" != "$remote_after" ]]; then
+            echo "::notice::Remote branch $BRANCH changed while it was being checked; preserve it and discard this stale publish."
+            echo "published=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [[ "$remote_tree" == "$candidate_tree" ]]; then
+            echo "::notice::Remote branch $BRANCH already has the same implementation; reuse it without rewriting history."
+            echo "published=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "::notice::Remote branch $BRANCH already has different content; preserve it and discard this stale publish."
+          echo "published=false" >> "$GITHUB_OUTPUT"
 
       - name: Checkout helper for PR body helpers
         if: steps.publish.outputs.published == 'true'

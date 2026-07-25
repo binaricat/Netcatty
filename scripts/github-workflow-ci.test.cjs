@@ -165,6 +165,15 @@ test("issue implementation publishing tolerates competing automation runs", () =
   const publishJob = cursorWorkflow.match(/\n  publish_implement:\n[\s\S]*?(?=\n  codex_loop:)/);
   assert.ok(publishJob, "publish_implement job must exist before codex_loop");
   assert.match(publishJob[0], /--force-with-lease/);
+  assert.match(publishJob[0], /candidate_tree/);
+  assert.match(publishJob[0], /remote_tree/);
+  assert.match(publishJob[0], /refs\/heads\/\$\{BRANCH\}:/);
+  assert.match(publishJob[0], /fetch --depth=1 origin[\s\\]*"\+refs\/heads\/\$\{BRANCH\}:refs\/remotes\/origin\/\$\{BRANCH\}"/);
+  assert.match(publishJob[0], /live_after/);
+  assert.match(publishJob[0], /changed while it was being checked/);
+  assert.match(publishJob[0], /reuse it without rewriting history/);
+  assert.doesNotMatch(publishJob[0], /:\$\{expected\}/);
+  assert.doesNotMatch(publishJob[0], /if \[\[ -n "\$expected" \]\]/);
   assert.match(publishJob[0], /published=false/);
   assert.match(publishJob[0], /remote_after/);
   assert.match(publishJob[0], /exit 1/);
