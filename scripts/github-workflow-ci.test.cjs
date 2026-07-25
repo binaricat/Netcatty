@@ -171,6 +171,19 @@ test("stable releases propose Nix metadata through a pull request", () => {
   assert.match(nixJob[0], /branch_prefix/);
   assert.match(nixJob[0], /headRefName/);
   assert.match(nixJob[0], /headRepositoryOwner\.login == \$owner/);
+  assert.match(nixJob[0], /desired_nix_blob="\$\(git hash-object -w nix\/release\.nix\)"/);
+  assert.match(nixJob[0], /existing_branch/);
+  assert.match(nixJob[0], /refs\/heads\/\$\{existing_branch\}/);
+  assert.match(nixJob[0], /git cat-file blob "\$desired_nix_blob" > nix\/release\.nix/);
+  assert.match(nixJob[0], /git diff --quiet -- nix\/release\.nix/);
+  assert.match(nixJob[0], /while IFS='\|' read -r existing existing_branch/);
+  assert.match(nixJob[0], /done <<<"\$existing_prs"/);
+  assert.doesNotMatch(nixJob[0], /\.\[0\] \/\//);
+  assert.match(
+    nixJob[0],
+    /--force-with-lease="refs\/heads\/\$\{existing_branch\}:\$\{remote_before\}"/,
+  );
+  assert.match(nixJob[0], /origin "HEAD:\$\{existing_branch\}"/);
   assert.match(nixJob[0], /gh api --method GET "repos\/\$\{GITHUB_REPOSITORY\}\/pulls"/);
   assert.match(nixJob[0], /-f head="\$\{REPO_OWNER\}:\$\{branch\}"/);
   assert.doesNotMatch(nixJob[0], /gh pr list[^\n]*--head "\$\{REPO_OWNER\}:/);

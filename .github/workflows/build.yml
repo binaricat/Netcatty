@@ -877,7 +877,9 @@ jobs:
           fi
           branch_prefix="automation/nix-release-${GITHUB_REF_NAME}"
           branch="$branch_prefix"
-          existing="$(
+          desired_nix_blob="$(git hash-object -w nix/release.nix)"
+          git restore --worktree -- nix/release.nix
+          existing_prs="$(
             gh pr list --base "$DEFAULT_BRANCH" --state open --limit 100 \
               --json url,headRefName,headRepositoryOwner |
               jq -r --arg prefix "$branch_prefix" --arg owner "$REPO_OWNER" '
@@ -890,16 +892,47 @@ jobs:
                       (($head | ltrimstr($prefix + "-")) | test("^[0-9]+-[0-9]+$"))
                     )
                   )
-                )) | .[0].url // ""
+                )) |
+                .[] |
+                "\(.url)|\(.headRefName)"
               '
           )"
-          if [[ -n "$existing" ]]; then
-            echo "Nix metadata pull request already exists: $existing"
-            exit 0
-          fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if [[ -n "$existing_prs" ]]; then
+            existing_index=0
+            while IFS='|' read -r existing existing_branch; do
+              [[ -n "$existing" && -n "$existing_branch" ]] || continue
+              existing_index=$((existing_index + 1))
+              tracking_ref="refs/remotes/origin/nix-existing-${existing_index}"
+              git fetch --depth=1 origin \
+                "+refs/heads/${existing_branch}:${tracking_ref}"
+              remote_before="$(git rev-parse "$tracking_ref")"
+              live_before="$(
+                git ls-remote --heads origin "refs/heads/${existing_branch}" |
+                  awk '{print $1}'
+              )"
+              if [[ -z "$live_before" || "$live_before" != "$remote_before" ]]; then
+                echo "Existing Nix metadata branch changed while it was being checked; retry the workflow." >&2
+                exit 1
+              fi
+              git switch -C "$existing_branch" "$tracking_ref"
+              git cat-file blob "$desired_nix_blob" > nix/release.nix
+              if git diff --quiet -- nix/release.nix; then
+                echo "Nix metadata pull request is already current: $existing"
+                continue
+              fi
+              git add nix/release.nix
+              git commit -m "Update Nix release metadata for ${GITHUB_REF_NAME}"
+              git push \
+                --force-with-lease="refs/heads/${existing_branch}:${remote_before}" \
+                origin "HEAD:${existing_branch}"
+              echo "Updated Nix metadata pull request without rewriting its history: $existing"
+            done <<<"$existing_prs"
+            exit 0
+          fi
           git switch -C "$branch"
+          git cat-file blob "$desired_nix_blob" > nix/release.nix
           git add nix/release.nix
           git commit -m "Update Nix release metadata for ${GITHUB_REF_NAME}"
           candidate_tree="$(git rev-parse 'HEAD^{tree}')"
