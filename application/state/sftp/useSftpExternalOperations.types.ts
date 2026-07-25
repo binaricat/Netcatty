@@ -9,6 +9,8 @@ export interface UseSftpExternalOperationsParams {
   getActivePane: (side: "left" | "right") => SftpPane | null;
   getPaneByConnectionId: (connectionId: string) => SftpPane | null;
   getPaneByTabId: (tabId: string) => SftpPane | null;
+  /** Current side that owns a tab (tabs can move left ↔ right). */
+  getSideByTabId?: (tabId: string) => "left" | "right" | null;
   refresh: (side: "left" | "right", options?: { tabId?: string }) => Promise<void>;
   sftpSessionsRef: React.MutableRefObject<Map<string, string>>;
   connectionCacheKeyMapRef: React.MutableRefObject<Map<string, string>>;
@@ -71,12 +73,12 @@ export interface SftpExternalOperationsResult {
     side: "left" | "right",
     folderPath: string,
     targetPath?: string,
-    options?: { connectionId?: string },
+    options?: { connectionId?: string; tabId?: string },
   ) => Promise<UploadResult[]>;
   uploadExternalEntries: (
     side: "left" | "right",
     entries: DropEntry[],
-    options?: { targetPath?: string; connectionId?: string },
+    options?: { targetPath?: string; connectionId?: string; tabId?: string },
   ) => Promise<UploadResult[]>;
   cancelExternalUpload: (taskId?: string) => Promise<void>;
   selectApplication: () => Promise<{ path: string; name: string } | null>;

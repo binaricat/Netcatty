@@ -1,6 +1,7 @@
 import type { Host } from "../../../domain/models";
 import type { MutableRefObject } from "react";
 import { isSessionError } from "./errors";
+import { buildCacheKey } from "./sharedRemoteHostCache";
 import type { SftpPane } from "./types";
 
 export interface EnsureRemoteSftpSessionParams {
@@ -19,6 +20,12 @@ export interface EnsureRemoteSftpSessionParams {
   forceReconnect?: boolean;
   /** Stable tab identity — reconnect replaces connection ids, not tab ids. */
   tabId?: string;
+  /**
+   * Full endpoint key for the pane being reconnected (hostId+hostname+port+…).
+   * When set, side-wide lastConnectedHost is only reused if it matches this key
+   * so another tab's session overrides cannot steal the reconnect.
+   */
+  endpointKey?: string | null;
 }
 
 /**
@@ -38,6 +45,7 @@ export async function ensureRemoteSftpSession(
     probeSession,
     forceReconnect = false,
     tabId,
+    endpointKey,
   } = params;
 
   const resolveHost = (): Host => {
@@ -46,11 +54,24 @@ export async function ensureRemoteSftpSession(
     const lastHost = lastConnectedHostRef.current[side];
 
     // lastConnectedHostRef is side-wide (latest connect on left/right), not
-    // tab-scoped. Multi-tab sides often leave it pointing at a different host
-    // than the pane we are reconnecting. Only reuse it when it matches this
-    // pane's hostId so pinned uploads cannot land on the wrong endpoint.
+    // tab-scoped. Only reuse it when the full endpoint matches this pane so
+    // another tab's session overrides (hostname/port/user) cannot win.
     if (lastHost && lastHost !== "local" && (!hostId || lastHost.id === hostId)) {
-      return lastHost;
+      if (!endpointKey) {
+        return lastHost;
+      }
+      const lastKey = buildCacheKey(
+        lastHost.id,
+        lastHost.hostname,
+        lastHost.port,
+        lastHost.protocol,
+        lastHost.sftpSudo,
+        lastHost.username,
+        lastHost.sftpFileProtocol,
+      );
+      if (lastKey === endpointKey) {
+        return lastHost;
+      }
     }
 
     if (hostId && resolveHostById) {

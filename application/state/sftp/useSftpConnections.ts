@@ -345,6 +345,18 @@ export const useSftpConnections = ({
       const filenameEncoding: SftpFilenameEncoding =
         host === "local" ? "auto" : (host.sftpEncoding ?? "auto");
 
+      // Connection this connect intends to replace. After awaits, if the tab
+      // shows a different connection we did not create, a newer connect won.
+      const startingConnectionId = currentPane?.connection?.id ?? null;
+      const canCommitConnectToTab = () => {
+        const pane = getTargetPane();
+        if (!pane) return false;
+        if (pane.connection?.id === connectionId) return true;
+        if (!pane.connection) return true;
+        if (startingConnectionId && pane.connection.id === startingConnectionId) return true;
+        return false;
+      };
+
       // When forceNewTab is set, we're preserving the old tab for instant switching —
       // don't close its SFTP session or clear its cache.
       if (!options?.forceNewTab) {
@@ -365,6 +377,13 @@ export const useSftpConnections = ({
             }
           }
         }
+      }
+
+      // After the close await, abort if the user (or another connect) already
+      // retargeted this tab — do not overwrite their newer host selection.
+      if (!canCommitConnectToTab()) {
+        connectionCacheKeyMapRef.current.delete(connectionId);
+        return;
       }
 
       if (host === "local") {

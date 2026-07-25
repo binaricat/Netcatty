@@ -145,6 +145,12 @@ export const useSftpState = (
     return null;
   }, [leftTabsRef, rightTabsRef]);
 
+  const getSideByTabId = useCallback((tabId: string): "left" | "right" | null => {
+    if (leftTabsRef.current.tabs.some((tab) => tab.id === tabId)) return "left";
+    if (rightTabsRef.current.tabs.some((tab) => tab.id === tabId)) return "right";
+    return null;
+  }, [leftTabsRef, rightTabsRef]);
+
   const getTabByConnectionId = useCallback((connectionId: string) => {
     for (const tab of leftTabsRef.current.tabs) {
       if (tab.connection?.id === connectionId) {
@@ -435,6 +441,7 @@ export const useSftpState = (
     getActivePane,
     getPaneByConnectionId,
     getPaneByTabId,
+    getSideByTabId,
     refresh,
     sftpSessionsRef,
     connectionCacheKeyMapRef,
@@ -454,6 +461,10 @@ export const useSftpState = (
             return pane;
           }
         : getActivePane;
+      const pinnedPane = tabId ? getPaneByTabId(tabId) : (connectionId ? getPaneByConnectionId(connectionId) : getActivePane(side));
+      const endpointKey = pinnedPane?.connection && !pinnedPane.connection.isLocal
+        ? (connectionCacheKeyMapRef.current.get(pinnedPane.connection.id) ?? null)
+        : null;
       return ensureRemoteSftpSession({
         side,
         getActivePane: pinnedGetActivePane,
@@ -463,6 +474,7 @@ export const useSftpState = (
         resolveHostById: (hostId) => hosts.find((host) => host.id === hostId) ?? null,
         forceReconnect: ensureOptions?.forceReconnect,
         tabId,
+        endpointKey,
         probeSession: async (sftpId) => {
           // Lightweight liveness check; any session-error from the bridge
           // triggers a reconnect in ensureRemoteSftpSession.

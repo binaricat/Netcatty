@@ -192,7 +192,7 @@ test("clipboard upload pins the originating connection through confirm and uploa
   );
   assert.match(
     requestType,
-    /export interface SftpClipboardUploadRequest \{[\s\S]*connectionId: string;/,
+    /export interface SftpClipboardUploadRequest \{[\s\S]*tabId: string;[\s\S]*connectionId: string;/,
   );
 
   const shortcuts = readFileSync(
@@ -201,15 +201,15 @@ test("clipboard upload pins the originating connection through confirm and uploa
   );
   assert.match(
     shortcuts,
-    /uploadExternalEntries\(focusedSide, fileEntries, \{\s*targetPath,\s*connectionId,\s*\}\)/,
+    /uploadExternalEntries\(focusedSide, fileEntries, \{\s*targetPath,\s*connectionId,\s*tabId,\s*\}\)/,
   );
   assert.match(
     shortcuts,
-    /uploadExternalEntries\(focusedSide, entries, \{\s*targetPath,\s*connectionId,\s*\}\)/,
+    /uploadExternalEntries\(focusedSide, entries, \{\s*targetPath,\s*connectionId,\s*tabId,\s*\}\)/,
   );
   assert.match(
     shortcuts,
-    /uploadExternalFolderPath\(\s*focusedSide,\s*file\.path,\s*targetPath,\s*\{\s*connectionId\s*\},\s*\)/,
+    /uploadExternalFolderPath\(\s*focusedSide,\s*file\.path,\s*targetPath,\s*\{\s*connectionId,\s*tabId\s*\},\s*\)/,
   );
 
   const ops = readFileSync(

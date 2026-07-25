@@ -215,3 +215,30 @@ test("reconnect reuses lastConnected host when it matches the pane hostId", asyn
   });
   assert.equal((connectedHost as Host).hostname, "session-override.example");
 });
+
+test("reconnect refuses lastConnected host with a different endpoint key", async () => {
+  const lastHostWithOverrides = {
+    ...host,
+    hostname: "other-override.example",
+    port: 2222,
+  } as Host;
+  let connectedHost: Host | "local" | null = null;
+  const sessions = { current: new Map<string, string>() };
+  // Endpoint key for the original pane endpoint (ci.example:22), not the lastConnected override.
+  // Mirrors buildCacheKey(host.id, host.hostname, host.port, host.protocol, …, host.username, …)
+  const paneEndpointKey = "host-1:ci.example:22:ssh::root:";
+  await ensureRemoteSftpSession({
+    side: "left",
+    getActivePane: () => remotePane("conn-1"),
+    sftpSessionsRef: sessions,
+    lastConnectedHostRef: { current: { left: lastHostWithOverrides, right: null } },
+    endpointKey: paneEndpointKey,
+    resolveHostById: (id) => (id === "host-1" ? host : null),
+    connect: async (_side, resolved) => {
+      connectedHost = resolved;
+      sessions.current.set("conn-1", "sftp-vault-endpoint");
+    },
+  });
+  assert.equal((connectedHost as Host).hostname, "ci.example");
+  assert.equal((connectedHost as Host).port, 22);
+});

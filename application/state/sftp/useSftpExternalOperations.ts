@@ -35,6 +35,7 @@ export const useSftpExternalOperations = (
     getActivePane,
     getPaneByConnectionId,
     getPaneByTabId,
+    getSideByTabId,
     refresh,
     sftpSessionsRef,
     connectionCacheKeyMapRef,
@@ -982,15 +983,18 @@ export const useSftpExternalOperations = (
       side: "left" | "right",
       folderPath: string,
       targetPath?: string,
-      options?: { connectionId?: string },
+      options?: { connectionId?: string; tabId?: string },
     ): Promise<UploadResult[]> => {
       // Pin before any await so tab switches cannot retarget the upload.
-      const originatingPane = options?.connectionId
-        ? getPaneByConnectionId(options.connectionId)
-        : getActivePane(side);
+      // Prefer stable tabId (survives reconnect) over connectionId.
+      const originatingPane = options?.tabId
+        ? getPaneByTabId(options.tabId)
+        : options?.connectionId
+          ? getPaneByConnectionId(options.connectionId)
+          : getActivePane(side);
       if (!originatingPane?.connection) {
         throw new Error(
-          options?.connectionId
+          options?.tabId || options?.connectionId
             ? "Upload target connection is no longer available"
             : "No active connection",
         );
@@ -1095,7 +1099,8 @@ export const useSftpExternalOperations = (
             clearDirCacheEntry(livePane.connection.id, uploadTargetPath);
           }
           if (uploadTargetPath === livePane.connection.currentPath) {
-            await refresh(side, { tabId: uploadPaneId });
+            const refreshSide = getSideByTabId?.(uploadPaneId) ?? side;
+            await refresh(refreshSide, { tabId: uploadPaneId });
           }
           return results;
         } catch (error) {
@@ -1137,6 +1142,7 @@ export const useSftpExternalOperations = (
       getActivePane,
       getPaneByConnectionId,
       getPaneByTabId,
+      getSideByTabId,
       refresh,
       resolveRemoteSftpId,
       unregisterUploadController,
@@ -1148,15 +1154,18 @@ export const useSftpExternalOperations = (
     async (
       side: "left" | "right",
       entries: DropEntry[],
-      options?: { targetPath?: string; connectionId?: string },
+      options?: { targetPath?: string; connectionId?: string; tabId?: string },
     ): Promise<UploadResult[]> => {
       // Pin before any await so tab switches cannot retarget the upload.
-      const originatingPane = options?.connectionId
-        ? getPaneByConnectionId(options.connectionId)
-        : getActivePane(side);
+      // Prefer stable tabId (survives reconnect) over connectionId.
+      const originatingPane = options?.tabId
+        ? getPaneByTabId(options.tabId)
+        : options?.connectionId
+          ? getPaneByConnectionId(options.connectionId)
+          : getActivePane(side);
       if (!originatingPane?.connection) {
         throw new Error(
-          options?.connectionId
+          options?.tabId || options?.connectionId
             ? "Upload target connection is no longer available"
             : "No active connection",
         );
@@ -1228,7 +1237,8 @@ export const useSftpExternalOperations = (
             clearDirCacheEntry(livePane.connection.id, uploadTargetPath);
           }
           if (uploadTargetPath === livePane.connection.currentPath) {
-            await refresh(side, { tabId: uploadPaneId });
+            const refreshSide = getSideByTabId?.(uploadPaneId) ?? side;
+            await refresh(refreshSide, { tabId: uploadPaneId });
           }
           return results;
         } finally {
@@ -1261,6 +1271,7 @@ export const useSftpExternalOperations = (
       getActivePane,
       getPaneByConnectionId,
       getPaneByTabId,
+      getSideByTabId,
       refresh,
       resolveRemoteSftpId,
       unregisterUploadController,

@@ -108,6 +108,8 @@ export function isSftpNativeClipboardPasteEnabled(
 export interface SftpClipboardUploadRequest {
   scopeId: string;
   side: "left" | "right";
+  /** Stable tab id — survives reconnect (connection ids do not). */
+  tabId: string;
   /** Pane connection that owned the paste target when the dialog opened. */
   connectionId: string;
   targetPath: string;
