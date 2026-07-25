@@ -139,3 +139,25 @@ test("refuses synthetic root@label:22 when host metadata is missing", async () =
     /credentials are unavailable/,
   );
 });
+
+test("reconnect reads the new connection id from the pinned tab", async () => {
+  let currentConnectionId = "conn-old";
+  let connectTabId: string | undefined;
+  const sessions = { current: new Map<string, string>() };
+  const sftpId = await ensureRemoteSftpSession({
+    side: "left",
+    tabId: "pane-1",
+    getActivePane: () => remotePane(currentConnectionId),
+    sftpSessionsRef: sessions,
+    lastConnectedHostRef: { current: { left: host, right: null } },
+    connect: async (_side, _host, options) => {
+      connectTabId = options?.tabId;
+      sessions.current.delete(currentConnectionId);
+      currentConnectionId = "conn-new";
+      sessions.current.set(currentConnectionId, "sftp-after-reconnect");
+    },
+  });
+  assert.equal(connectTabId, "pane-1");
+  assert.equal(currentConnectionId, "conn-new");
+  assert.equal(sftpId, "sftp-after-reconnect");
+});

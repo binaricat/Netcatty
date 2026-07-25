@@ -33,6 +33,7 @@ export const useSftpExternalOperations = (
     ownerId,
     getActivePane,
     getPaneByConnectionId,
+    getPaneByTabId,
     refresh,
     sftpSessionsRef,
     connectionCacheKeyMapRef,
@@ -53,11 +54,13 @@ export const useSftpExternalOperations = (
    */
   const resolveRemoteSftpId = useCallback(async (
     side: "left" | "right",
-    options?: { forceReconnect?: boolean; connectionId?: string },
+    options?: { forceReconnect?: boolean; connectionId?: string; tabId?: string },
   ): Promise<{ sftpId: string | null; release: () => void }> => {
-    const pane = options?.connectionId
-      ? getPaneByConnectionId(options.connectionId)
-      : getActivePane(side);
+    const pane = options?.tabId
+      ? getPaneByTabId(options.tabId)
+      : options?.connectionId
+        ? getPaneByConnectionId(options.connectionId)
+        : getActivePane(side);
     if (!pane?.connection) throw new Error("No active connection");
     if (pane.connection.isLocal) return { sftpId: null, release: () => {} };
 
@@ -66,16 +69,47 @@ export const useSftpExternalOperations = (
       const sftpId = await ensureRemoteSftpId(side, {
         forceReconnect: options?.forceReconnect,
         connectionId,
+        tabId: options?.tabId ?? pane.id,
       });
       return { sftpId, release: () => {} };
     }
     const sftpId = sftpSessionsRef.current.get(connectionId);
     if (!sftpId) throw new Error("SFTP session not found");
     return { sftpId, release: () => {} };
-  }, [ensureRemoteSftpId, getActivePane, getPaneByConnectionId, sftpSessionsRef]);
+  }, [ensureRemoteSftpId, getActivePane, getPaneByConnectionId, getPaneByTabId, sftpSessionsRef]);
 
-  // Upload controller for cancellation support
-  const uploadControllerRef = useRef<UploadController | null>(null);
+  // Per-upload controllers so canceling upload A does not touch upload B.
+  const uploadControllersByTaskRef = useRef<Map<string, UploadController>>(new Map());
+
+  const registerUploadController = useCallback((taskId: string, controller: UploadController) => {
+    uploadControllersByTaskRef.current.set(taskId, controller);
+  }, []);
+
+  const unregisterUploadController = useCallback((controller: UploadController) => {
+    for (const [taskId, active] of [...uploadControllersByTaskRef.current]) {
+      if (active === controller) {
+        uploadControllersByTaskRef.current.delete(taskId);
+      }
+    }
+  }, []);
+
+  const bindUploadControllerCallbacks = useCallback((
+    controller: UploadController,
+    callbacks: UploadCallbacks,
+  ): UploadCallbacks => ({
+    ...callbacks,
+    onScanningStart: (taskId) => {
+      registerUploadController(taskId, controller);
+      callbacks.onScanningStart?.(taskId);
+    },
+    onTaskCreated: (task) => {
+      registerUploadController(task.id, controller);
+      if (task.parentTaskId) {
+        registerUploadController(task.parentTaskId, controller);
+      }
+      callbacks.onTaskCreated?.(task);
+    },
+  }), [registerUploadController]);
 
   // Track active file watches so the side panel can block host-switching.
   // Reset to 0 when the SFTP session disconnects (handled in SftpSidePanel).
@@ -734,14 +768,16 @@ export const useSftpExternalOperations = (
         const uploadPaneId = livePane.id;
         const uploadTargetPath = targetPath || livePane.connection.currentPath;
         const controller = new UploadController();
-        uploadControllerRef.current = controller;
 
-        const callbacks = createUploadCallbacks(
-          livePane.connection.id,
-          uploadTargetPath,
-          livePane.connection.isLocal ? undefined : livePane.connection.hostId,
-          livePane.connection.isLocal ? undefined : connectionCacheKeyMapRef.current.get(livePane.connection.id),
-          livePane.connection.isLocal ? undefined : livePane.connection.hostLabel,
+        const callbacks = bindUploadControllerCallbacks(
+          controller,
+          createUploadCallbacks(
+            livePane.connection.id,
+            uploadTargetPath,
+            livePane.connection.isLocal ? undefined : livePane.connection.hostId,
+            livePane.connection.isLocal ? undefined : connectionCacheKeyMapRef.current.get(livePane.connection.id),
+            livePane.connection.isLocal ? undefined : livePane.connection.hostLabel,
+          ),
         );
 
         try {
@@ -770,10 +806,7 @@ export const useSftpExternalOperations = (
           return results;
         } finally {
           release();
-          // Don't clear a newer concurrent upload's controller.
-          if (uploadControllerRef.current === controller) {
-            uploadControllerRef.current = null;
-          }
+          unregisterUploadController(controller);
         }
       };
 
@@ -789,6 +822,7 @@ export const useSftpExternalOperations = (
       }
     },
     [
+      bindUploadControllerCallbacks,
       clearDirCacheEntry,
       connectionCacheKeyMapRef,
       createUploadBridge,
@@ -798,6 +832,7 @@ export const useSftpExternalOperations = (
       getActivePane,
       refresh,
       resolveRemoteSftpId,
+      unregisterUploadController,
       useCompressedUpload,
     ],
   );
@@ -822,14 +857,16 @@ export const useSftpExternalOperations = (
         const uploadPaneId = livePane.id;
         const uploadTargetPath = targetPath || livePane.connection.currentPath;
         const controller = new UploadController();
-        uploadControllerRef.current = controller;
 
-        const callbacks = createUploadCallbacks(
-          livePane.connection.id,
-          uploadTargetPath,
-          livePane.connection.isLocal ? undefined : livePane.connection.hostId,
-          livePane.connection.isLocal ? undefined : connectionCacheKeyMapRef.current.get(livePane.connection.id),
-          livePane.connection.isLocal ? undefined : livePane.connection.hostLabel,
+        const callbacks = bindUploadControllerCallbacks(
+          controller,
+          createUploadCallbacks(
+            livePane.connection.id,
+            uploadTargetPath,
+            livePane.connection.isLocal ? undefined : livePane.connection.hostId,
+            livePane.connection.isLocal ? undefined : connectionCacheKeyMapRef.current.get(livePane.connection.id),
+            livePane.connection.isLocal ? undefined : livePane.connection.hostLabel,
+          ),
         );
 
         try {
@@ -858,9 +895,7 @@ export const useSftpExternalOperations = (
           return results;
         } finally {
           release();
-          if (uploadControllerRef.current === controller) {
-            uploadControllerRef.current = null;
-          }
+          unregisterUploadController(controller);
         }
       };
 
@@ -876,6 +911,7 @@ export const useSftpExternalOperations = (
       }
     },
     [
+      bindUploadControllerCallbacks,
       clearDirCacheEntry,
       connectionCacheKeyMapRef,
       createUploadBridge,
@@ -885,6 +921,7 @@ export const useSftpExternalOperations = (
       getActivePane,
       refresh,
       resolveRemoteSftpId,
+      unregisterUploadController,
       useCompressedUpload,
     ],
   );
@@ -907,10 +944,11 @@ export const useSftpExternalOperations = (
             : "No active connection",
         );
       }
-      const originatingConnectionId = originatingPane.connection.id;
+      // Tab ids stay stable across reconnect; connection ids do not.
+      const originatingTabId = originatingPane.id;
 
       const run = async (forceReconnect = false): Promise<UploadResult[]> => {
-        const pane = getPaneByConnectionId(originatingConnectionId) ?? originatingPane;
+        const pane = getPaneByTabId(originatingTabId) ?? originatingPane;
         if (!pane?.connection) throw new Error("Upload target connection is no longer available");
         const bridge = netcattyBridge.get();
         if (!bridge) throw new Error("Bridge not available");
@@ -918,23 +956,27 @@ export const useSftpExternalOperations = (
 
         const { sftpId, release } = await resolveRemoteSftpId(side, {
           forceReconnect,
-          connectionId: originatingConnectionId,
+          connectionId: pane.connection.id,
+          tabId: originatingTabId,
         });
         // Never re-resolve via getActivePane after awaits — focus may have moved.
-        const livePane = getPaneByConnectionId(originatingConnectionId) ?? pane;
+        // Prefer tab id so a reconnect that minted a new connection id still lands here.
+        const livePane = getPaneByTabId(originatingTabId) ?? pane;
         if (!livePane.connection) throw new Error("Upload target connection is no longer available");
 
         const uploadPaneId = livePane.id;
         const uploadTargetPath = targetPath || livePane.connection.currentPath;
         const controller = new UploadController();
-        uploadControllerRef.current = controller;
 
-        const callbacks = createUploadCallbacks(
-          livePane.connection.id,
-          uploadTargetPath,
-          livePane.connection.isLocal ? undefined : livePane.connection.hostId,
-          livePane.connection.isLocal ? undefined : connectionCacheKeyMapRef.current.get(livePane.connection.id),
-          livePane.connection.isLocal ? undefined : livePane.connection.hostLabel,
+        const callbacks = bindUploadControllerCallbacks(
+          controller,
+          createUploadCallbacks(
+            livePane.connection.id,
+            uploadTargetPath,
+            livePane.connection.isLocal ? undefined : livePane.connection.hostId,
+            livePane.connection.isLocal ? undefined : connectionCacheKeyMapRef.current.get(livePane.connection.id),
+            livePane.connection.isLocal ? undefined : livePane.connection.hostLabel,
+          ),
         );
 
         const scanningTask = startUploadScanningTask(callbacks);
@@ -1012,9 +1054,7 @@ export const useSftpExternalOperations = (
           throw error;
         } finally {
           release();
-          if (uploadControllerRef.current === controller) {
-            uploadControllerRef.current = null;
-          }
+          unregisterUploadController(controller);
         }
       };
 
@@ -1030,6 +1070,7 @@ export const useSftpExternalOperations = (
       }
     },
     [
+      bindUploadControllerCallbacks,
       clearDirCacheEntry,
       connectionCacheKeyMapRef,
       createUploadBridge,
@@ -1038,8 +1079,10 @@ export const useSftpExternalOperations = (
       ensureRemoteSftpId,
       getActivePane,
       getPaneByConnectionId,
+      getPaneByTabId,
       refresh,
       resolveRemoteSftpId,
+      unregisterUploadController,
       useCompressedUpload,
     ],
   );
@@ -1061,34 +1104,39 @@ export const useSftpExternalOperations = (
             : "No active connection",
         );
       }
-      const originatingConnectionId = originatingPane.connection.id;
+      // Tab ids stay stable across reconnect; connection ids do not.
+      const originatingTabId = originatingPane.id;
 
       const run = async (forceReconnect = false): Promise<UploadResult[]> => {
-        const pane = getPaneByConnectionId(originatingConnectionId) ?? originatingPane;
+        const pane = getPaneByTabId(originatingTabId) ?? originatingPane;
         if (!pane?.connection) throw new Error("Upload target connection is no longer available");
         if (!netcattyBridge.get()) throw new Error("Bridge not available");
 
         const { sftpId, release } = await resolveRemoteSftpId(side, {
           forceReconnect,
-          connectionId: originatingConnectionId,
+          connectionId: pane.connection.id,
+          tabId: originatingTabId,
         });
         // Never re-resolve via getActivePane after awaits — focus may have moved.
-        const livePane = getPaneByConnectionId(originatingConnectionId) ?? pane;
+        // Prefer tab id so a reconnect that minted a new connection id still lands here.
+        const livePane = getPaneByTabId(originatingTabId) ?? pane;
         if (!livePane.connection) throw new Error("Upload target connection is no longer available");
 
         // Capture the pane ID now so we can refresh the correct tab after
         // upload, even if focus switches during the transfer.
         const uploadPaneId = livePane.id;
         const controller = new UploadController();
-        uploadControllerRef.current = controller;
         const uploadTargetPath = options?.targetPath || livePane.connection.currentPath;
 
-        const callbacks = createUploadCallbacks(
-          livePane.connection.id,
-          uploadTargetPath,
-          livePane.connection.isLocal ? undefined : livePane.connection.hostId,
-          livePane.connection.isLocal ? undefined : connectionCacheKeyMapRef.current.get(livePane.connection.id),
-          livePane.connection.isLocal ? undefined : livePane.connection.hostLabel,
+        const callbacks = bindUploadControllerCallbacks(
+          controller,
+          createUploadCallbacks(
+            livePane.connection.id,
+            uploadTargetPath,
+            livePane.connection.isLocal ? undefined : livePane.connection.hostId,
+            livePane.connection.isLocal ? undefined : connectionCacheKeyMapRef.current.get(livePane.connection.id),
+            livePane.connection.isLocal ? undefined : livePane.connection.hostLabel,
+          ),
         );
         const directUploadBridge: UploadBridge = {
           ...createUploadBridge,
@@ -1124,9 +1172,7 @@ export const useSftpExternalOperations = (
           return results;
         } finally {
           release();
-          if (uploadControllerRef.current === controller) {
-            uploadControllerRef.current = null;
-          }
+          unregisterUploadController(controller);
         }
       };
 
@@ -1142,6 +1188,7 @@ export const useSftpExternalOperations = (
       }
     },
     [
+      bindUploadControllerCallbacks,
       clearDirCacheEntry,
       connectionCacheKeyMapRef,
       createUploadBridge,
@@ -1150,18 +1197,28 @@ export const useSftpExternalOperations = (
       ensureRemoteSftpId,
       getActivePane,
       getPaneByConnectionId,
+      getPaneByTabId,
       refresh,
       resolveRemoteSftpId,
+      unregisterUploadController,
       useCompressedUpload,
     ],
   );
 
-  const cancelExternalUpload = useCallback(async () => {
-    const controller = uploadControllerRef.current;
+  const cancelExternalUpload = useCallback(async (taskId?: string) => {
     let cancelPromise: Promise<void> | undefined;
-    if (controller) {
-      logger.info("[SFTP] Cancelling external upload");
-      cancelPromise = controller.cancel();
+    if (taskId) {
+      const controller = uploadControllersByTaskRef.current.get(taskId);
+      if (controller) {
+        logger.info("[SFTP] Cancelling external upload", { taskId });
+        cancelPromise = controller.cancel();
+      }
+    } else {
+      const controllers = [...new Set(uploadControllersByTaskRef.current.values())];
+      if (controllers.length > 0) {
+        logger.info("[SFTP] Cancelling all external uploads", { count: controllers.length });
+        cancelPromise = Promise.all(controllers.map((controller) => controller.cancel())).then(() => undefined);
+      }
     }
     cancelPendingUploadConflicts();
     await cancelPromise;

@@ -41,6 +41,8 @@ export interface SftpConnectOptions {
   forceNewTab?: boolean;
   ignoreSharedCache?: boolean;
   initialPath?: string;
+  /** Reconnect this tab instead of whichever tab is currently active on the side. */
+  tabId?: string;
   onTabCreated?: (tabId: string) => void;
   sourceSessionId?: string;
 }
@@ -218,8 +220,15 @@ export const useSftpConnections = ({
 
       let activeTabId: string | null = null;
       const sideTabs = side === "left" ? leftTabsRef.current : rightTabsRef.current;
+      const pinnedTabId = options?.tabId && sideTabs.tabs.some((tab) => tab.id === options.tabId)
+        ? options.tabId
+        : null;
 
-      if (!sideTabs.activeTabId || options?.forceNewTab) {
+      if (pinnedTabId) {
+        // Background reconnect for a specific tab (e.g. pinned upload) must not
+        // retarget whichever tab happens to be focused on this side.
+        activeTabId = pinnedTabId;
+      } else if (!sideTabs.activeTabId || options?.forceNewTab) {
         const newPane = createEmptyPane();
         activeTabId = newPane.id;
         setTabs((prev) => ({
@@ -232,11 +241,16 @@ export const useSftpConnections = ({
 
       if (!activeTabId) return;
 
+      const getTargetPaneEarly = () => {
+        const tabs = side === "left" ? leftTabsRef.current.tabs : rightTabsRef.current.tabs;
+        return tabs.find((tab) => tab.id === activeTabId) ?? null;
+      };
+
       // Capture path/endpoint before we replace the connection so same-endpoint
       // auto-reconnect can land back where the user was browsing instead of home.
       // Do not inherit path across endpoints (including same hostId with different
       // hostname/port/user) if a reconnect flag is still set while switching.
-      const previousConnection = getActivePane(side)?.connection;
+      const previousConnection = getTargetPaneEarly()?.connection;
       const previousPath = previousConnection?.currentPath;
       const previousConnectionKey = !previousConnection
         ? null
@@ -317,7 +331,7 @@ export const useSftpConnections = ({
         );
       }
 
-      const currentPane = getActivePane(side);
+      const currentPane = getTargetPaneEarly();
       // Reset encoding to host's configured encoding or "auto" when connecting to a new host
       // This ensures proper auto-detection works and respects host-level encoding settings
       const filenameEncoding: SftpFilenameEncoding =

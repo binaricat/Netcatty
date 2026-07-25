@@ -11,12 +11,14 @@ export interface EnsureRemoteSftpSessionParams {
   connect: (
     side: "left" | "right",
     host: Host | "local",
-    options?: { initialPath?: string; ignoreSharedCache?: boolean },
+    options?: { initialPath?: string; ignoreSharedCache?: boolean; tabId?: string },
   ) => Promise<void>;
   /** Resolve vault host by id when lastConnectedHostRef is missing (tab race). */
   resolveHostById?: (hostId: string) => Host | null | undefined;
   probeSession?: (sftpId: string) => Promise<boolean>;
   forceReconnect?: boolean;
+  /** Stable tab identity — reconnect replaces connection ids, not tab ids. */
+  tabId?: string;
 }
 
 /**
@@ -35,6 +37,7 @@ export async function ensureRemoteSftpSession(
     resolveHostById,
     probeSession,
     forceReconnect = false,
+    tabId,
   } = params;
 
   const resolveHost = (): Host => {
@@ -89,6 +92,7 @@ export async function ensureRemoteSftpSession(
   await connect(side, host, {
     initialPath: resumePath,
     ignoreSharedCache: true,
+    ...(tabId ? { tabId } : {}),
   });
 
   const sftpId = readMappedId();

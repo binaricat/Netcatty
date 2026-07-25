@@ -215,14 +215,44 @@ test("clipboard upload pins the originating connection through confirm and uploa
     ops.indexOf("const uploadExternalEntries = useCallback"),
     ops.indexOf("const cancelExternalUpload = useCallback"),
   );
-  assert.ok(entriesFn.includes("originatingConnectionId"));
+  assert.ok(entriesFn.includes("originatingTabId"));
   assert.ok(
-    entriesFn.includes("getPaneByConnectionId(originatingConnectionId)"),
-    "upload must re-resolve the originating connection after awaits",
+    entriesFn.includes("getPaneByTabId(originatingTabId)"),
+    "upload must re-resolve the originating tab after awaits (connection ids rotate on reconnect)",
   );
   assert.equal(
     entriesFn.includes("getActivePane(side) ?? pane"),
     false,
     "upload must not retarget to the newly active pane after session resolve",
   );
+
+  const ensureWrapper = readFileSync(
+    new URL("../application/state/useSftpState.ts", import.meta.url),
+    "utf8",
+  );
+  assert.match(
+    ensureWrapper,
+    /getPaneByTabId\(tabId\)/,
+    "ensureRemoteSftpId must pin by stable tab id across reconnect",
+  );
+  assert.match(
+    ensureWrapper,
+    /tabId,/,
+    "ensureRemoteSftpSession must receive the pinned tab id for connect()",
+  );
+});
+
+test("external upload cancellation is keyed by transfer task id", () => {
+  const ops = readFileSync(
+    new URL("../application/state/sftp/useSftpExternalOperations.ts", import.meta.url),
+    "utf8",
+  );
+  assert.match(ops, /uploadControllersByTaskRef/);
+  assert.match(ops, /const cancelExternalUpload = useCallback\(async \(taskId\?: string\)/);
+
+  const queue = readFileSync(
+    new URL("./sftp/SftpTransferQueue.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(queue, /cancelExternalUpload\(task\.id\)/);
 });
