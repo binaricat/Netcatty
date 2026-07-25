@@ -257,7 +257,7 @@ export const useSftpConnections = ({
         && options.tabId !== sideTabs.activeTabId;
       const clearSideReconnecting = () => {
         if (!isPinnedBackgroundReconnect) {
-          clearSideReconnecting();
+          reconnectingRef.current[side] = false;
         }
       };
 
