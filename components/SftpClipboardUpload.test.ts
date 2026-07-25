@@ -299,3 +299,49 @@ test("ensureRemoteSftpSession refuses a side-wide lastConnected host that belong
     "pane hostId must still fall back through vault lookup",
   );
 });
+
+test("pinned external upload aborts when the tab endpoint changes mid-flight", () => {
+  const ops = readFileSync(
+    new URL("../application/state/sftp/useSftpExternalOperations.ts", import.meta.url),
+    "utf8",
+  );
+  assert.match(ops, /captureUploadEndpoint/);
+  assert.match(ops, /assertUploadEndpointUnchanged/);
+  assert.match(ops, /Upload target changed before the transfer started/);
+
+  const entriesFn = ops.slice(
+    ops.indexOf("const uploadExternalEntries = useCallback"),
+    ops.indexOf("const cancelExternalUpload = useCallback"),
+  );
+  // Must not fall back to a stale originating pane object after awaits.
+  assert.equal(
+    entriesFn.includes("getPaneByTabId(originatingTabId) ?? originatingPane"),
+    false,
+    "stale pane fallback would accept a retargeted host after tab switch",
+  );
+  assert.ok(
+    entriesFn.includes("assertUploadEndpointUnchanged(livePane.connection, originatingEndpoint)"),
+    "endpoint must be re-validated after session resolve awaits",
+  );
+});
+
+test("pinned reconnect refuses silent active-tab fallback when tab is missing", () => {
+  const source = readFileSync(
+    new URL("../application/state/sftp/useSftpConnections.ts", import.meta.url),
+    "utf8",
+  );
+  const connectFn = source.slice(
+    source.indexOf("const connect = useCallback"),
+    source.indexOf("const disconnect = useCallback") > 0
+      ? source.indexOf("const disconnect = useCallback")
+      : source.indexOf("return {"),
+  );
+  assert.match(connectFn, /options\?\.tabId/);
+  assert.match(connectFn, /SFTP tab is no longer available/);
+  assert.match(connectFn, /moved to the other pane during reconnect/);
+  // Explicit pin must not degrade to activeTabId when the tab is gone.
+  assert.equal(
+    /pinnedTabId\s*\?\s*options\.tabId\s*:\s*null/.test(connectFn),
+    false,
+  );
+});

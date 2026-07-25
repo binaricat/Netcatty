@@ -220,14 +220,22 @@ export const useSftpConnections = ({
 
       let activeTabId: string | null = null;
       const sideTabs = side === "left" ? leftTabsRef.current : rightTabsRef.current;
-      const pinnedTabId = options?.tabId && sideTabs.tabs.some((tab) => tab.id === options.tabId)
-        ? options.tabId
-        : null;
 
-      if (pinnedTabId) {
+      if (options?.tabId) {
         // Background reconnect for a specific tab (e.g. pinned upload) must not
-        // retarget whichever tab happens to be focused on this side.
-        activeTabId = pinnedTabId;
+        // fall back to whichever tab is focused — that can clobber an unrelated pane.
+        const pinnedOnThisSide = sideTabs.tabs.some((tab) => tab.id === options.tabId);
+        if (!pinnedOnThisSide) {
+          const otherSide = side === "left" ? "right" : "left";
+          const otherTabs = otherSide === "left" ? leftTabsRef.current : rightTabsRef.current;
+          if (otherTabs.tabs.some((tab) => tab.id === options.tabId)) {
+            throw new Error(
+              "SFTP tab was moved to the other pane during reconnect; upload aborted for safety",
+            );
+          }
+          throw new Error("SFTP tab is no longer available");
+        }
+        activeTabId = options.tabId;
       } else if (!sideTabs.activeTabId || options?.forceNewTab) {
         const newPane = createEmptyPane();
         activeTabId = newPane.id;

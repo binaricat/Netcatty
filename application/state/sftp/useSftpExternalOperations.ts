@@ -21,6 +21,7 @@ import { extractDropEntries, type DropEntry } from "../../../lib/sftpFileUtils";
 export type { UploadResult };
 
 import type { UseSftpExternalOperationsParams, SftpExternalOperationsResult } from "./useSftpExternalOperations.types";
+import type { SftpPane } from "./types";
 import { getSftpTransferResourceKeys, globalSftpTransferScheduler } from "./globalTransferScheduler";
 import { localStorageAdapter } from "../../../infrastructure/persistence/localStorageAdapter";
 import { STORAGE_KEY_SFTP_TRANSFER_CONCURRENCY } from "../../../infrastructure/config/storageKeys";
@@ -110,6 +111,46 @@ export const useSftpExternalOperations = (
       callbacks.onTaskCreated?.(task);
     },
   }), [registerUploadController]);
+
+  /**
+   * Endpoint identity for a pinned upload. Same-host reconnect may mint a new
+   * connection id; host/local and (when known) cache key must stay the same so a
+   * mid-flight host switch cannot inherit the original target path.
+   */
+  type UploadEndpointPin = {
+    isLocal: boolean;
+    hostId: string | null;
+    cacheKey: string | null;
+  };
+
+  const captureUploadEndpoint = useCallback((connection: NonNullable<SftpPane["connection"]>): UploadEndpointPin => ({
+    isLocal: connection.isLocal,
+    hostId: connection.isLocal ? null : (connection.hostId ?? null),
+    cacheKey: connection.isLocal
+      ? "local"
+      : (connectionCacheKeyMapRef.current.get(connection.id) ?? null),
+  }), [connectionCacheKeyMapRef]);
+
+  const assertUploadEndpointUnchanged = useCallback((
+    connection: NonNullable<SftpPane["connection"]>,
+    expected: UploadEndpointPin,
+  ) => {
+    if (connection.isLocal !== expected.isLocal) {
+      throw new Error("Upload target changed before the transfer started");
+    }
+    if (connection.isLocal) return;
+    if ((connection.hostId ?? null) !== expected.hostId) {
+      throw new Error("Upload target changed before the transfer started");
+    }
+    if (expected.cacheKey) {
+      const liveKey = connectionCacheKeyMapRef.current.get(connection.id) ?? null;
+      // After reconnect the key is re-stamped for the same endpoint; a different
+      // session override (hostname/port/user) must not continue the upload.
+      if (liveKey && liveKey !== expected.cacheKey) {
+        throw new Error("Upload target changed before the transfer started");
+      }
+    }
+  }, [connectionCacheKeyMapRef]);
 
   // Track active file watches so the side panel can block host-switching.
   // Reset to 0 when the SFTP session disconnects (handled in SftpSidePanel).
@@ -956,10 +997,12 @@ export const useSftpExternalOperations = (
       }
       // Tab ids stay stable across reconnect; connection ids do not.
       const originatingTabId = originatingPane.id;
+      const originatingEndpoint = captureUploadEndpoint(originatingPane.connection);
 
       const run = async (forceReconnect = false): Promise<UploadResult[]> => {
-        const pane = getPaneByTabId(originatingTabId) ?? originatingPane;
+        const pane = getPaneByTabId(originatingTabId);
         if (!pane?.connection) throw new Error("Upload target connection is no longer available");
+        assertUploadEndpointUnchanged(pane.connection, originatingEndpoint);
         const bridge = netcattyBridge.get();
         if (!bridge) throw new Error("Bridge not available");
         if (!bridge.listLocalTree) throw new Error("Folder upload not supported");
@@ -971,8 +1014,10 @@ export const useSftpExternalOperations = (
         });
         // Never re-resolve via getActivePane after awaits — focus may have moved.
         // Prefer tab id so a reconnect that minted a new connection id still lands here.
-        const livePane = getPaneByTabId(originatingTabId) ?? pane;
-        if (!livePane.connection) throw new Error("Upload target connection is no longer available");
+        // Re-validate endpoint: user may have switched this tab to another host mid-await.
+        const livePane = getPaneByTabId(originatingTabId);
+        if (!livePane?.connection) throw new Error("Upload target connection is no longer available");
+        assertUploadEndpointUnchanged(livePane.connection, originatingEndpoint);
 
         const uploadPaneId = livePane.id;
         const uploadTargetPath = targetPath || livePane.connection.currentPath;
@@ -1080,7 +1125,9 @@ export const useSftpExternalOperations = (
       }
     },
     [
+      assertUploadEndpointUnchanged,
       bindUploadControllerCallbacks,
+      captureUploadEndpoint,
       clearDirCacheEntry,
       connectionCacheKeyMapRef,
       createUploadBridge,
@@ -1116,10 +1163,12 @@ export const useSftpExternalOperations = (
       }
       // Tab ids stay stable across reconnect; connection ids do not.
       const originatingTabId = originatingPane.id;
+      const originatingEndpoint = captureUploadEndpoint(originatingPane.connection);
 
       const run = async (forceReconnect = false): Promise<UploadResult[]> => {
-        const pane = getPaneByTabId(originatingTabId) ?? originatingPane;
+        const pane = getPaneByTabId(originatingTabId);
         if (!pane?.connection) throw new Error("Upload target connection is no longer available");
+        assertUploadEndpointUnchanged(pane.connection, originatingEndpoint);
         if (!netcattyBridge.get()) throw new Error("Bridge not available");
 
         const { sftpId, release } = await resolveRemoteSftpId(side, {
@@ -1129,8 +1178,10 @@ export const useSftpExternalOperations = (
         });
         // Never re-resolve via getActivePane after awaits — focus may have moved.
         // Prefer tab id so a reconnect that minted a new connection id still lands here.
-        const livePane = getPaneByTabId(originatingTabId) ?? pane;
-        if (!livePane.connection) throw new Error("Upload target connection is no longer available");
+        // Re-validate endpoint: user may have switched this tab to another host mid-await.
+        const livePane = getPaneByTabId(originatingTabId);
+        if (!livePane?.connection) throw new Error("Upload target connection is no longer available");
+        assertUploadEndpointUnchanged(livePane.connection, originatingEndpoint);
 
         // Capture the pane ID now so we can refresh the correct tab after
         // upload, even if focus switches during the transfer.
@@ -1198,7 +1249,9 @@ export const useSftpExternalOperations = (
       }
     },
     [
+      assertUploadEndpointUnchanged,
       bindUploadControllerCallbacks,
+      captureUploadEndpoint,
       clearDirCacheEntry,
       connectionCacheKeyMapRef,
       createUploadBridge,
