@@ -14,8 +14,10 @@ const DOCKER_GLOBAL_OPTIONS_WITH_VALUE = new Set([
 
 const commandBasename = (token: string): string => token.split('/').pop() ?? token;
 
-const getLastStartupCommandSegment = (command: string): string => {
+const getLastForegroundCommandSegment = (command: string): string => {
   let segmentStart = 0;
+  let lastCompletedSegment = '';
+  let trailingSeparator: 'soft' | 'and' | null = null;
   let quote: "'" | '"' | null = null;
   let escaped = false;
   for (let index = 0; index < command.length; index += 1) {
@@ -37,13 +39,21 @@ const getLastStartupCommandSegment = (command: string): string => {
       continue;
     }
     if (char === ';' || char === '\r' || char === '\n') {
+      const segment = command.slice(segmentStart, index).trim();
+      if (segment) lastCompletedSegment = segment;
       segmentStart = index + 1;
+      trailingSeparator = 'soft';
     } else if (char === '&' && command[index + 1] === '&') {
+      const segment = command.slice(segmentStart, index).trim();
+      if (segment) lastCompletedSegment = segment;
       segmentStart = index + 2;
+      trailingSeparator = 'and';
       index += 1;
     }
   }
-  return command.slice(segmentStart).trim();
+  const finalSegment = command.slice(segmentStart).trim();
+  if (finalSegment) return finalSegment;
+  return trailingSeparator === 'soft' ? lastCompletedSegment : '';
 };
 
 const hasShellCommandSeparator = (command: string): boolean => {
@@ -55,7 +65,7 @@ const hasShellCommandSeparator = (command: string): boolean => {
   return false;
 };
 
-export function isDockerLogsCommand(command: string): boolean {
+const isStandaloneDockerLogsCommand = (command: string): boolean => {
   if (hasShellCommandSeparator(command)) return false;
   const tokens = command.trim().split(/\s+/).filter(Boolean);
   let index = 0;
@@ -93,6 +103,10 @@ export function isDockerLogsCommand(command: string): boolean {
   // `docker logs` is an alias of `docker container logs`.
   if (tokens[index] === 'container') index += 1;
   return tokens[index] === 'logs';
+};
+
+export function isDockerLogsCommand(command: string): boolean {
+  return isStandaloneDockerLogsCommand(getLastForegroundCommandSegment(command));
 }
 
 export function beginOscColorQuerySuppressionForCommand(
@@ -115,7 +129,7 @@ export function beginOscColorQuerySuppressionForStartupCommand(
     beginOscColorQuerySuppression(state);
     return;
   }
-  beginOscColorQuerySuppressionForCommand(state, getLastStartupCommandSegment(command));
+  beginOscColorQuerySuppressionForCommand(state, command);
 }
 
 export function endOscColorQuerySuppressionForCommand(state: { current: boolean }): void {
@@ -125,6 +139,7 @@ export function endOscColorQuerySuppressionForCommand(state: { current: boolean 
 export type HibernatedBroadcastInputState = {
   promptReady: boolean;
   line: string;
+  tracking: boolean;
 };
 
 /** Track the input line while xterm is absent and verify the submitted command. */
@@ -134,11 +149,13 @@ export function consumeHibernatedBroadcastInput(
   command?: string,
 ): boolean {
   const input = data.replace(BRACKETED_PASTE_MARKER_PATTERN, '');
+  if (input) state.tracking = true;
   let trustedSubmission = false;
   for (const char of input) {
     if (char === '\x03') {
       state.promptReady = false;
       state.line = '';
+      state.tracking = false;
     } else if (char === '\x15') {
       state.line = '';
     } else if (char === '\b' || char === '\x7f') {
@@ -149,6 +166,7 @@ export function consumeHibernatedBroadcastInput(
         && state.line.trim() === command.trim();
       state.promptReady = false;
       state.line = '';
+      state.tracking = false;
     } else if (char.charCodeAt(0) >= 32) {
       state.line += char;
     }

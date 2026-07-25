@@ -182,7 +182,7 @@ test("broadcast targets and direct-send paths require their own trusted shell bo
   );
   assert.match(
     terminalSource,
-    /hibernatedBroadcastInputRef\.current = \{\s*promptReady: trustedShellPromptReadyRef\.current,\s*line: "",\s*\}/u,
+    /hibernatedBroadcastInputRef\.current = \{\s*promptReady: trustedShellPromptReadyRef\.current,\s*line: "",\s*tracking: false,\s*\}/u,
   );
 });
 

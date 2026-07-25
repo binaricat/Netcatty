@@ -360,7 +360,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   ), [sessionId]);
   const sensitivePromptOutputTailRef = useRef("");
   const trustedShellPromptReadyRef = useRef(false);
-  const hibernatedBroadcastInputRef = useRef({ promptReady: false, line: "" });
+  const hibernatedBroadcastInputRef = useRef({ promptReady: false, line: "", tracking: false });
   const [activeScriptRun, setActiveScriptRun] = useState<import('@/types/global/netcatty-bridge-script.d.ts').ScriptRun | undefined>(undefined);
   const dismissedScriptRunIdRef = useRef<string | null>(null);
 
@@ -985,16 +985,19 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   useEffect(() => registerOscColorQuerySuppressionArmer(
     sessionId,
     (data, command) => {
-      const trustedTarget = termRef.current
-        ? command !== undefined
-          && isTrustedTerminalShellSubmission(command, termRef.current, isNetworkDevice)
-        : hibernatedRef.current
-          && consumeHibernatedBroadcastInput(
-            hibernatedBroadcastInputRef.current,
-            data,
-            command,
-          );
-      if (trustedTarget) {
+      const broadcastInput = hibernatedBroadcastInputRef.current;
+      if (termRef.current && !broadcastInput.tracking) {
+        broadcastInput.promptReady = isTrustedTerminalShellSubmission(
+          "",
+          termRef.current,
+          isNetworkDevice,
+        );
+        broadcastInput.line = "";
+      }
+      const trustedTarget = (termRef.current || hibernatedRef.current)
+        ? consumeHibernatedBroadcastInput(broadcastInput, data, command)
+        : false;
+      if (trustedTarget && command !== undefined) {
         beginOscColorQuerySuppressionForCommand(
           suppressOscColorQueriesForActiveCommandRef,
           command,
@@ -1004,7 +1007,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       }
       if (data.includes("\r") || data.includes("\n") || data.includes("\x03")) {
         trustedShellPromptReadyRef.current = false;
-        hibernatedBroadcastInputRef.current = { promptReady: false, line: "" };
+        hibernatedBroadcastInputRef.current = { promptReady: false, line: "", tracking: false };
       }
     },
   ), [isNetworkDevice, sessionId]);
@@ -1640,7 +1643,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   const clearHibernateRuntimeState = useCallback(() => {
     hibernatedRef.current = false;
     trustedShellPromptReadyRef.current = false;
-    hibernatedBroadcastInputRef.current = { promptReady: false, line: "" };
+    hibernatedBroadcastInputRef.current = { promptReady: false, line: "", tracking: false };
     softHiddenRef.current = false;
     hibernateSnapshotRef.current = "";
     hibernateViewportSnapshotRef.current = "";
@@ -1714,7 +1717,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     if (typeof meta?.pluginPipelineSensitiveInput === "boolean") {
       passwordPromptActiveRef.current = meta.pluginPipelineSensitiveInput;
       trustedShellPromptReadyRef.current = false;
-      hibernatedBroadcastInputRef.current = { promptReady: false, line: "" };
+      hibernatedBroadcastInputRef.current = { promptReady: false, line: "", tracking: false };
       if (meta.pluginPipelineSensitiveInput) {
         autocompleteCloseRef.current?.();
       } else {
@@ -1727,7 +1730,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     )) {
       passwordPromptActiveRef.current = true;
       trustedShellPromptReadyRef.current = false;
-      hibernatedBroadcastInputRef.current = { promptReady: false, line: "" };
+      hibernatedBroadcastInputRef.current = { promptReady: false, line: "", tracking: false };
       autocompleteCloseRef.current?.();
     } else if (isConfirmedTerminalShellPrompt(
       sensitivePromptOutputTailRef.current,
@@ -1735,9 +1738,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     )) {
       passwordPromptActiveRef.current = false;
       trustedShellPromptReadyRef.current = true;
-      if (hibernatedRef.current) {
-        hibernatedBroadcastInputRef.current = { promptReady: true, line: "" };
-      }
+      hibernatedBroadcastInputRef.current = { promptReady: true, line: "", tracking: false };
     } else {
       trustedShellPromptReadyRef.current = false;
     }
@@ -1900,6 +1901,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     hibernatedBroadcastInputRef.current = {
       promptReady: trustedShellPromptReadyRef.current,
       line: "",
+      tracking: false,
     };
     isBootActiveRef.current = false;
     releaseTerminalFlowBeforeHibernate(terminalBackend, term, backendId);

@@ -42,6 +42,10 @@ test('docker logs detection covers direct and privileged commands without matchi
   assert.equal(isDockerLogsCommand('docker logs api 2>&1'), true);
   assert.equal(isDockerLogsCommand('docker logs api > logs.txt'), true);
   assert.equal(isDockerLogsCommand('docker logs api &'), false);
+  assert.equal(isDockerLogsCommand('cd /srv && docker logs -f api'), true);
+  assert.equal(isDockerLogsCommand('cd /srv\ndocker container logs api'), true);
+  assert.equal(isDockerLogsCommand('docker logs -f api;\n'), true);
+  assert.equal(isDockerLogsCommand('docker logs -f api &&'), false);
 });
 
 test('docker logs stays protected through prompt-like output and interrupt residue', () => {
@@ -137,7 +141,7 @@ test('broadcast peer sessions can be armed through the suppression registry', ()
 });
 
 test('hibernated broadcast input stays trusted across typed echoes until submission', () => {
-  const state = { promptReady: true, line: '' };
+  const state = { promptReady: true, line: '', tracking: false };
   for (const char of 'docker logs -f api') {
     assert.equal(consumeHibernatedBroadcastInput(state, char), false);
   }
@@ -146,11 +150,11 @@ test('hibernated broadcast input stays trusted across typed echoes until submiss
     consumeHibernatedBroadcastInput(state, '\r', 'docker logs -f api'),
     true,
   );
-  assert.deepEqual(state, { promptReady: false, line: '' });
+  assert.deepEqual(state, { promptReady: false, line: '', tracking: false });
 });
 
 test('hibernated broadcast input rejects mismatched and interrupted submissions', () => {
-  const state = { promptReady: true, line: '' };
+  const state = { promptReady: true, line: '', tracking: false };
   consumeHibernatedBroadcastInput(state, 'docker ps');
   assert.equal(consumeHibernatedBroadcastInput(state, '\r', 'docker logs -f api'), false);
 
