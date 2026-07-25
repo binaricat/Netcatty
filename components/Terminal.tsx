@@ -360,7 +360,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   ), [sessionId]);
   const sensitivePromptOutputTailRef = useRef("");
   const trustedShellPromptReadyRef = useRef(false);
-  const hibernatedBroadcastInputRef = useRef({ promptReady: false, line: "", tracking: false });
+  const hibernatedBroadcastInputRef = useRef({ promptReady: false, line: "", tracking: false, edited: false });
   const [activeScriptRun, setActiveScriptRun] = useState<import('@/types/global/netcatty-bridge-script.d.ts').ScriptRun | undefined>(undefined);
   const dismissedScriptRunIdRef = useRef<string | null>(null);
 
@@ -1018,7 +1018,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       }
       if (data.includes("\r") || data.includes("\n") || data.includes("\x03")) {
         trustedShellPromptReadyRef.current = false;
-        hibernatedBroadcastInputRef.current = { promptReady: false, line: "", tracking: false };
+        hibernatedBroadcastInputRef.current = { promptReady: false, line: "", tracking: false, edited: false };
       }
     },
   ), [isNetworkDevice, sessionId]);
@@ -1408,6 +1408,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
           xtermRuntimeRef.current?.getKittyKeyboardProtocolEnabled()
             ?? kittyKeyboardProtocolEnabledForSession,
           passwordPromptActiveRef.current,
+          suppressOscColorQueriesForActiveCommandRef.current,
           knownCwdRef.current ?? null,
           terminalTitleRef.current ?? null,
         );
@@ -1431,6 +1432,9 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         }
         if (typeof payload.passwordPromptActive === "boolean") {
           passwordPromptActiveRef.current = payload.passwordPromptActive;
+        }
+        if (typeof payload.suppressOscColorQueries === "boolean") {
+          suppressOscColorQueriesForActiveCommandRef.current = payload.suppressOscColorQueries;
         }
         if (payload.cwd !== undefined) {
           const cwd = terminalCwdTracker.setRendererCwd(payload.cwd);
@@ -1572,6 +1576,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
             kittyKeyboardProtocolEnabled:
               xtermRuntimeRef.current?.getKittyKeyboardProtocolEnabled(),
             passwordPromptActive: passwordPromptActiveRef.current,
+            suppressOscColorQueries: suppressOscColorQueriesForActiveCommandRef.current,
             cwd: knownCwdRef.current ?? null,
             title: terminalTitleRef.current ?? null,
           },
@@ -1654,7 +1659,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   const clearHibernateRuntimeState = useCallback(() => {
     hibernatedRef.current = false;
     trustedShellPromptReadyRef.current = false;
-    hibernatedBroadcastInputRef.current = { promptReady: false, line: "", tracking: false };
+    hibernatedBroadcastInputRef.current = { promptReady: false, line: "", tracking: false, edited: false };
     softHiddenRef.current = false;
     hibernateSnapshotRef.current = "";
     hibernateViewportSnapshotRef.current = "";
@@ -1729,12 +1734,12 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       passwordPromptActiveRef.current = meta.pluginPipelineSensitiveInput;
       trustedShellPromptReadyRef.current = false;
       if (meta.pluginPipelineSensitiveInput) {
-        hibernatedBroadcastInputRef.current = { promptReady: false, line: "", tracking: false };
+        hibernatedBroadcastInputRef.current = { promptReady: false, line: "", tracking: false, edited: false };
         autocompleteCloseRef.current?.();
       } else {
         sensitivePromptOutputTailRef.current = "";
         if (!hibernatedBroadcastInputRef.current.tracking) {
-          hibernatedBroadcastInputRef.current = { promptReady: false, line: "", tracking: false };
+          hibernatedBroadcastInputRef.current = { promptReady: false, line: "", tracking: false, edited: false };
         }
       }
       return;
@@ -1744,7 +1749,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     )) {
       passwordPromptActiveRef.current = true;
       trustedShellPromptReadyRef.current = false;
-      hibernatedBroadcastInputRef.current = { promptReady: false, line: "", tracking: false };
+      hibernatedBroadcastInputRef.current = { promptReady: false, line: "", tracking: false, edited: false };
       autocompleteCloseRef.current?.();
     } else if (isConfirmedTerminalShellPrompt(
       sensitivePromptOutputTailRef.current,
@@ -1752,11 +1757,11 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     )) {
       passwordPromptActiveRef.current = false;
       trustedShellPromptReadyRef.current = true;
-      hibernatedBroadcastInputRef.current = { promptReady: true, line: "", tracking: false };
+      hibernatedBroadcastInputRef.current = { promptReady: true, line: "", tracking: false, edited: false };
     } else {
       trustedShellPromptReadyRef.current = false;
       if (hibernatedRef.current && !hibernatedBroadcastInputRef.current.tracking) {
-        hibernatedBroadcastInputRef.current = { promptReady: false, line: "", tracking: false };
+        hibernatedBroadcastInputRef.current = { promptReady: false, line: "", tracking: false, edited: false };
       }
     }
   }, [isNetworkDevice]);
@@ -1919,6 +1924,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       promptReady: trustedShellPromptReadyRef.current,
       line: "",
       tracking: false,
+      edited: false,
     };
     isBootActiveRef.current = false;
     releaseTerminalFlowBeforeHibernate(terminalBackend, term, backendId);

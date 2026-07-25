@@ -567,6 +567,9 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
             if (typeof snap.passwordPromptActive === "boolean") {
               passwordPromptActiveRef.current = snap.passwordPromptActive;
             }
+            if (typeof snap.suppressOscColorQueries === "boolean") {
+              ctx.suppressOscColorQueriesForActiveCommandRef.current = snap.suppressOscColorQueries;
+            }
             if (snap.cwd !== undefined) {
               const cwd = terminalCwdTracker.setRendererCwd(snap.cwd);
               knownCwdRef.current = cwd;

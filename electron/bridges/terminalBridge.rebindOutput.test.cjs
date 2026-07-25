@@ -307,6 +307,13 @@ test("snapshot apply acknowledgements are emitted only by the matching terminal"
   assert.match(preloadSource, /typeof passwordPromptActive === "boolean"/u);
   assert.match(bridgeSource, /passwordPromptActive: typeof payload\?\.passwordPromptActive/u);
   assert.match(effectsSource, /passwordPromptActiveRef\.current = snap\.passwordPromptActive/u);
+  assert.match(terminalSource, /suppressOscColorQueries: suppressOscColorQueriesForActiveCommandRef\.current/u);
+  assert.match(preloadSource, /typeof suppressOscColorQueries === "boolean"/u);
+  assert.match(bridgeSource, /suppressOscColorQueries: typeof payload\?\.suppressOscColorQueries/u);
+  assert.match(
+    effectsSource,
+    /suppressOscColorQueriesForActiveCommandRef\.current = snap\.suppressOscColorQueries/u,
+  );
 });
 
 test("exit fanout preserves the original renderer before registry wiring", () => {

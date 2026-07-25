@@ -152,7 +152,7 @@ test('hibernated broadcast input stays trusted across typed echoes until submiss
     consumeHibernatedBroadcastInput(state, '\r', 'docker logs -f api'),
     true,
   );
-  assert.deepEqual(state, { promptReady: false, line: '', tracking: false });
+  assert.deepEqual(state, { promptReady: false, line: '', tracking: false, edited: false });
 });
 
 test('hibernated broadcast input rejects mismatched and interrupted submissions', () => {
@@ -167,4 +167,22 @@ test('hibernated broadcast input rejects mismatched and interrupted submissions'
   state.promptReady = true;
   consumeHibernatedBroadcastInput(state, 'docker logs -f api\x03');
   assert.equal(consumeHibernatedBroadcastInput(state, '\r', 'docker logs -f api'), false);
+});
+
+test('broadcast input accepts trusted multi-line and cursor-edited submissions', () => {
+  const multiline = { promptReady: true, line: '', tracking: false };
+  assert.equal(consumeHibernatedBroadcastInput(
+    multiline,
+    'cd /srv\ndocker logs -f api\r',
+    'cd /srv\ndocker logs -f api',
+  ), true);
+
+  const edited = { promptReady: true, line: '', tracking: false };
+  consumeHibernatedBroadcastInput(edited, 'docker logx');
+  consumeHibernatedBroadcastInput(edited, '\x1b[D\x7fs');
+  assert.equal(consumeHibernatedBroadcastInput(edited, '\r', 'docker logs'), true);
+
+  const untrusted = { promptReady: false, line: '', tracking: false };
+  consumeHibernatedBroadcastInput(untrusted, 'docker logs');
+  assert.equal(consumeHibernatedBroadcastInput(untrusted, '\r', 'docker logs'), false);
 });

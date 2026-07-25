@@ -388,6 +388,7 @@ function createPreloadApi(ctx) {
     kittyKeyboardModeState,
     kittyKeyboardProtocolEnabled,
     passwordPromptActive,
+    suppressOscColorQueries,
     cwd,
     title,
   ) => {
@@ -400,6 +401,9 @@ function createPreloadApi(ctx) {
         : undefined,
       passwordPromptActive: typeof passwordPromptActive === "boolean"
         ? passwordPromptActive
+        : undefined,
+      suppressOscColorQueries: typeof suppressOscColorQueries === "boolean"
+        ? suppressOscColorQueries
         : undefined,
       cwd: cwd === null ? null : typeof cwd === "string" ? cwd : undefined,
       title: title === null ? null : typeof title === "string" ? title : undefined,
@@ -423,6 +427,9 @@ function createPreloadApi(ctx) {
         : undefined,
       passwordPromptActive: typeof context?.passwordPromptActive === "boolean"
         ? context.passwordPromptActive
+        : undefined,
+      suppressOscColorQueries: typeof context?.suppressOscColorQueries === "boolean"
+        ? context.suppressOscColorQueries
         : undefined,
       cwd: context?.cwd === null ? null : typeof context?.cwd === "string" ? context.cwd : undefined,
       title: context?.title === null ? null : typeof context?.title === "string" ? context.title : undefined,

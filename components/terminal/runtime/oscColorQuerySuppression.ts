@@ -149,6 +149,7 @@ export type HibernatedBroadcastInputState = {
   promptReady: boolean;
   line: string;
   tracking: boolean;
+  edited?: boolean;
 };
 
 /** Track the input line while xterm is absent and verify the submitted command. */
@@ -158,6 +159,23 @@ export function consumeHibernatedBroadcastInput(
   command?: string,
 ): boolean {
   const input = data.replace(BRACKETED_PASTE_MARKER_PATTERN, '');
+  const submittedInput = `${state.line}${input}`
+    .replace(/\r\n?/gu, '\n')
+    .replace(/[\r\n]+$/gu, '');
+  const normalizedCommand = command?.replace(/\r\n?/gu, '\n').trim();
+  if (
+    state.promptReady
+    && normalizedCommand !== undefined
+    && submittedInput.trim() === normalizedCommand
+  ) {
+    state.promptReady = false;
+    state.line = '';
+    state.tracking = false;
+    state.edited = false;
+    return true;
+  }
+  const wasTracking = state.tracking;
+  if (input.includes(ESC)) state.edited = true;
   if (input) state.tracking = true;
   let trustedSubmission = false;
   for (const char of input) {
@@ -165,6 +183,7 @@ export function consumeHibernatedBroadcastInput(
       state.promptReady = false;
       state.line = '';
       state.tracking = false;
+      state.edited = false;
     } else if (char === '\x15') {
       state.line = '';
     } else if (char === '\b' || char === '\x7f') {
@@ -172,12 +191,15 @@ export function consumeHibernatedBroadcastInput(
     } else if (char === '\r' || char === '\n') {
       trustedSubmission ||= state.promptReady
         && command !== undefined
-        && state.line.trim() === command.trim();
+        && (state.line.trim() === command.trim() || (wasTracking && state.edited === true));
       state.promptReady = false;
       state.line = '';
       state.tracking = false;
+      state.edited = false;
     } else if (char.charCodeAt(0) >= 32) {
       state.line += char;
+    } else {
+      state.edited = true;
     }
   }
   return trustedSubmission;

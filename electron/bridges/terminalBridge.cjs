@@ -252,6 +252,9 @@ function handleTerminalSessionSnapshotResponse(event, payload) {
     passwordPromptActive: typeof payload?.passwordPromptActive === "boolean"
       ? payload.passwordPromptActive
       : undefined,
+    suppressOscColorQueries: typeof payload?.suppressOscColorQueries === "boolean"
+      ? payload.suppressOscColorQueries
+      : undefined,
     cwd: payload?.cwd === null ? null : typeof payload?.cwd === "string" ? payload.cwd : undefined,
     title: payload?.title === null ? null : typeof payload?.title === "string" ? payload.title : undefined,
   });
@@ -311,6 +314,9 @@ function applyTerminalSessionSnapshot(event, payload, terminalWorkerManager = nu
   const passwordPromptActive = typeof payload?.passwordPromptActive === "boolean"
     ? payload.passwordPromptActive
     : undefined;
+  const suppressOscColorQueries = typeof payload?.suppressOscColorQueries === "boolean"
+    ? payload.suppressOscColorQueries
+    : undefined;
   const cwd = payload?.cwd === null ? null : typeof payload?.cwd === "string" ? payload.cwd : undefined;
   const title = payload?.title === null ? null : typeof payload?.title === "string" ? payload.title : undefined;
   if (
@@ -359,6 +365,7 @@ function applyTerminalSessionSnapshot(event, payload, terminalWorkerManager = nu
           kittyKeyboardModeState,
           kittyKeyboardProtocolEnabled,
           passwordPromptActive,
+          suppressOscColorQueries,
           cwd,
           title,
           requestId,
