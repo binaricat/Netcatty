@@ -2,10 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  collectLiveRemoteConnectionIds,
   listRemoteConnectionIdsForRestore,
   shouldParkBrowseSessions,
   shouldRestoreBrowseSessions,
   takeBrowseSessionsForClose,
+  takeUnusedBrowseSessions,
 } from "./browseSessionLifecycle.ts";
 
 test("parks browse only when the interactive surface hides and not already parked", () => {
@@ -51,4 +53,33 @@ test("listRemoteConnectionIdsForRestore skips local and already-live remotes", (
     liveSessionConnectionIds: new Set(["remote-b"]),
   });
   assert.deepEqual(ids, ["remote-a"]);
+});
+
+test("collectLiveRemoteConnectionIds excludes a closing tab and locals", () => {
+  const ids = collectLiveRemoteConnectionIds({
+    leftTabs: [
+      { id: "closing", connection: { id: "remote-a", isLocal: false } },
+      { id: "keep", connection: { id: "remote-b", isLocal: false } },
+      { id: "local", connection: { id: "local-1", isLocal: true } },
+    ],
+    rightTabs: [
+      { id: "other", connection: { id: "remote-c", isLocal: false } },
+    ],
+    exclude: { side: "left", tabId: "closing" },
+  });
+  assert.deepEqual([...ids].sort(), ["remote-b", "remote-c"]);
+});
+
+test("takeUnusedBrowseSessions removes mappings not owned by live tabs", () => {
+  const sessions = new Map([
+    ["remote-a", "sftp-a"],
+    ["remote-b", "sftp-b"],
+    ["orphan", "sftp-orphan"],
+  ]);
+  const unused = takeUnusedBrowseSessions(sessions, new Set(["remote-b"]));
+  assert.deepEqual(unused, [
+    { connectionId: "remote-a", sftpId: "sftp-a" },
+    { connectionId: "orphan", sftpId: "sftp-orphan" },
+  ]);
+  assert.deepEqual([...sessions.keys()], ["remote-b"]);
 });

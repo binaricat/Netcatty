@@ -57,3 +57,54 @@ export function listRemoteConnectionIdsForRestore(params: {
   }
   return [...ids];
 }
+
+type TabConnectionRef = {
+  id: string;
+  connection: { id: string; isLocal: boolean } | null;
+};
+
+/**
+ * Connection ids still owned by open panes. Optionally skip a tab that is
+ * about to close (refs may still include it until the next React commit).
+ */
+export function collectLiveRemoteConnectionIds(params: {
+  leftTabs: ReadonlyArray<TabConnectionRef>;
+  rightTabs: ReadonlyArray<TabConnectionRef>;
+  exclude?: { side: "left" | "right"; tabId: string };
+}): Set<string> {
+  const ids = new Set<string>();
+  const collect = (
+    tabs: ReadonlyArray<TabConnectionRef>,
+    side: "left" | "right",
+  ) => {
+    for (const tab of tabs) {
+      if (
+        params.exclude
+        && params.exclude.side === side
+        && params.exclude.tabId === tab.id
+      ) {
+        continue;
+      }
+      const connection = tab.connection;
+      if (!connection || connection.isLocal) continue;
+      ids.add(connection.id);
+    }
+  };
+  collect(params.leftTabs, "left");
+  collect(params.rightTabs, "right");
+  return ids;
+}
+
+/** Remove and return browse mappings that no live tab still references. */
+export function takeUnusedBrowseSessions(
+  sessions: Map<string, string>,
+  liveConnectionIds: ReadonlySet<string>,
+): BrowseSessionEntry[] {
+  const unused: BrowseSessionEntry[] = [];
+  for (const [connectionId, sftpId] of sessions) {
+    if (liveConnectionIds.has(connectionId)) continue;
+    unused.push({ connectionId, sftpId });
+    sessions.delete(connectionId);
+  }
+  return unused;
+}

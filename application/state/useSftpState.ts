@@ -34,9 +34,11 @@ import {
   getSharedTransferConnectionPool,
 } from "./sftp/transferConnectionPool";
 import {
+  collectLiveRemoteConnectionIds,
   shouldParkBrowseSessions,
   shouldRestoreBrowseSessions,
   takeBrowseSessionsForClose,
+  takeUnusedBrowseSessions,
 } from "./sftp/browseSessionLifecycle";
 import { netcattyBridge } from "../../infrastructure/services/netcattyBridge";
 import { logger } from "../../lib/logger";
@@ -74,7 +76,7 @@ export const useSftpState = (
     clearSelectionsExcept,
     setTabShowHiddenFiles,
     addTab,
-    closeTab,
+    closeTab: closeTabFromTabsState,
     selectTab,
     reorderTabs,
     moveTabToOtherSide,
@@ -197,6 +199,46 @@ export const useSftpState = (
 
   useSftpSessionCleanup(sftpSessionsRef);
   useSftpFileWatch(options);
+
+  // Closing a remote tab must reclaim its browse channel. With interactive
+  // kept true while the main SFTP page stays mounted, unused mappings would
+  // otherwise accumulate until unmount.
+  const closeTab = useCallback(
+    (side: "left" | "right", tabId: string) => {
+      const sideTabs = side === "left" ? leftTabsRef.current : rightTabsRef.current;
+      const closingTab = sideTabs.tabs.find((tab) => tab.id === tabId);
+      const closingConnectionId = closingTab?.connection?.id ?? null;
+
+      const liveConnectionIds = collectLiveRemoteConnectionIds({
+        leftTabs: leftTabsRef.current.tabs,
+        rightTabs: rightTabsRef.current.tabs,
+        exclude: { side, tabId },
+      });
+      const unused = takeUnusedBrowseSessions(sftpSessionsRef.current, liveConnectionIds);
+
+      closeTabFromTabsState(side, tabId);
+
+      // Local panes never enter sftpSessionsRef; remote orphans are cleared below.
+      if (closingConnectionId && !liveConnectionIds.has(closingConnectionId)) {
+        connectionCacheKeyMapRef.current.delete(closingConnectionId);
+        clearCacheForConnection(closingConnectionId);
+      }
+
+      if (unused.length === 0) return;
+      logger.info(`[SFTP] Reclaiming ${unused.length} browse session(s) after tab close`);
+      void Promise.all(unused.map(async ({ connectionId, sftpId }) => {
+        connectionCacheKeyMapRef.current.delete(connectionId);
+        clearCacheForConnection(connectionId);
+        try {
+          // closeSftp soft-closes when transfer leases still hold the id.
+          await netcattyBridge.get()?.closeSftp?.(sftpId);
+        } catch {
+          // best-effort — session may already be gone
+        }
+      }));
+    },
+    [clearCacheForConnection, closeTabFromTabsState, leftTabsRef, rightTabsRef],
+  );
 
   // FileZilla-style dedicated transfer connection pool (1–2 sessions per host).
   // Shared across SFTP panels so we never open more than maxPerHost globally.
