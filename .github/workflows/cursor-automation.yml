@@ -61,6 +61,7 @@ jobs:
       kind: ${{ steps.decide.outputs.kind }}
       issue_number: ${{ steps.decide.outputs.issue_number }}
       pull_number: ${{ steps.decide.outputs.pull_number }}
+      head_ref: ${{ steps.decide.outputs.head_ref }}
       reason: ${{ steps.decide.outputs.reason }}
     steps:
       # Prefer control-plane helpers from the default branch. While this workflow
@@ -109,6 +110,10 @@ jobs:
               core.setOutput('kind', kind);
               core.setOutput('issue_number', extra.issue_number || '');
               core.setOutput('pull_number', extra.pull_number || '');
+              core.setOutput(
+                'head_ref',
+                extra.head_ref || context.payload.pull_request?.head?.ref || '',
+              );
               core.setOutput('reason', extra.reason || kind);
             };
 
@@ -136,6 +141,7 @@ jobs:
                 });
                 return set(eligible ? 'codex_loop' : 'external_rerequest_codex', {
                   pull_number: String(pr.number),
+                  head_ref: pr.head?.ref || '',
                   reason: eligible ? 'manual own pr' : 'manual external re-@codex',
                 });
               }
@@ -158,8 +164,13 @@ jobs:
                   auto.isCodexBotLogin(login) &&
                   auto.isCodexTerminalReviewText(comment.body)
                 ) {
+                  const { data: pr } = await github.rest.pulls.get({
+                    ...context.repo,
+                    pull_number: Number(issue.number),
+                  });
                   return set('codex_loop', {
                     pull_number: String(issue.number),
+                    head_ref: pr.head?.ref || '',
                     reason: 'codex terminal issue_comment on pr',
                   });
                 }
@@ -817,6 +828,9 @@ jobs:
     if: needs.implement.outputs.should_publish == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    concurrency:
+      group: cursor-codex-head-${{ needs.implement.outputs.branch || github.run_id }}
+      cancel-in-progress: false
     permissions:
       contents: write
       issues: write
@@ -1029,14 +1043,32 @@ jobs:
         uses: actions/github-script@v9
         env:
           PULL_NUMBER: ${{ steps.openpr.outputs.pull_number }}
-          HEAD_SHA: ${{ steps.openpr.outputs.head_sha }}
+          OWN_ACTORS: ${{ vars.AUTOMATION_OWN_ACTORS || 'binaricat,netcatty-bot,github-actions[bot]' }}
         with:
           # Prefer maintainer PAT so Codex connector sees a human identity.
           github-token: ${{ secrets.CODEX_REQUEST_GITHUB_TOKEN || secrets.TRIAGE_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
           script: |
             const auto = require(`${process.env.RUNNER_TEMP}/cursor-automation.cjs`);
             const pull_number = Number(process.env.PULL_NUMBER);
-            const headSha = process.env.HEAD_SHA || '';
+            const { data: pr } = await github.rest.pulls.get({
+              ...context.repo,
+              pull_number,
+            });
+            const headSha = pr.head?.sha || '';
+            if (!headSha) throw new Error('Missing implementation PR head SHA.');
+            const existingComments = await github.paginate(github.rest.issues.listComments, {
+              ...context.repo,
+              issue_number: pull_number,
+              per_page: 100,
+            });
+            if (auto.shouldSkipExternalCodexRerequest({
+              existingComments,
+              headSha,
+              ownActors: process.env.OWN_ACTORS,
+            })) {
+              core.notice(`@codex review was already requested for ${headSha}; skip duplicate.`);
+              return;
+            }
             await github.rest.issues.createComment({
               ...context.repo,
               issue_number: pull_number,
@@ -1052,6 +1084,9 @@ jobs:
     if: needs.route.outputs.kind == 'codex_loop'
     runs-on: ubuntu-latest
     timeout-minutes: 120
+    concurrency:
+      group: cursor-codex-head-${{ needs.route.outputs.head_ref || needs.route.outputs.pull_number || github.run_id }}
+      cancel-in-progress: false
     permissions:
       contents: read
       issues: write
@@ -1848,6 +1883,9 @@ jobs:
     if: needs.codex_loop.outputs.should_publish == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    concurrency:
+      group: cursor-codex-head-${{ needs.codex_loop.outputs.head_ref || github.run_id }}
+      cancel-in-progress: false
     permissions:
       contents: write
       issues: write
@@ -1950,6 +1988,9 @@ jobs:
     if: needs.route.outputs.kind == 'own_rerequest_codex'
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    concurrency:
+      group: cursor-codex-head-${{ needs.route.outputs.head_ref || needs.route.outputs.pull_number || github.run_id }}
+      cancel-in-progress: false
     # Must write the @codex review comment after maintainer pushes.
     # Without this, the workflow default read-only GITHUB_TOKEN gets 403.
     permissions:

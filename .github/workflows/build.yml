@@ -82,7 +82,7 @@ on:
 # Publishing tag runs share a release group across push and manual dispatch;
 # non-publishing manual tag runs use their own group.
 concurrency:
-  group: build-packages-${{ github.workflow }}-${{ startsWith(github.ref, 'refs/tags/') && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish_release)) && 'release' || github.ref }}
+  group: build-packages-${{ github.workflow }}-${{ startsWith(github.ref, 'refs/tags/') && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish_release)) && format('release-{0}', github.ref) || github.ref }}
   cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 
 permissions:
@@ -867,24 +867,88 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          REPO_OWNER: ${{ github.repository_owner }}
         run: |
+          set -euo pipefail
           if git diff --quiet -- nix/release.nix; then
             echo "Nix release metadata is already current."
             exit 0
           fi
-          branch="automation/nix-release-${GITHUB_REF_NAME}"
+          branch_prefix="automation/nix-release-${GITHUB_REF_NAME}"
+          branch="$branch_prefix"
+          existing="$(
+            gh pr list --base "$DEFAULT_BRANCH" --state open --limit 100 \
+              --json url,headRefName,headRepositoryOwner |
+              jq -r --arg prefix "$branch_prefix" --arg owner "$REPO_OWNER" '
+                map(select(
+                  .headRepositoryOwner.login == $owner and
+                  (
+                    .headRefName == $prefix or
+                    (.headRefName as $head |
+                      ($head | startswith($prefix + "-")) and
+                      (($head | ltrimstr($prefix + "-")) | test("^[0-9]+-[0-9]+$"))
+                    )
+                  )
+                )) | .[0].url // ""
+              '
+          )"
+          if [[ -n "$existing" ]]; then
+            echo "Nix metadata pull request already exists: $existing"
+            exit 0
+          fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git switch -C "$branch"
           git add nix/release.nix
           git commit -m "Update Nix release metadata for ${GITHUB_REF_NAME}"
-          if git fetch origin "refs/heads/${branch}:refs/remotes/origin/${branch}"; then
-            expected="$(git rev-parse "refs/remotes/origin/${branch}")"
-            git push --force-with-lease="${branch}:${expected}" origin "HEAD:${branch}"
-          else
-            git push origin "HEAD:${branch}"
+          candidate_tree="$(git rev-parse 'HEAD^{tree}')"
+          if ! git push --force-with-lease="refs/heads/${branch}:" origin "HEAD:${branch}"; then
+            remote_refs="$(git ls-remote --heads origin "refs/heads/${branch_prefix}*")"
+            if [[ -z "$remote_refs" ]]; then
+              echo "The create-only push failed and no reusable remote Nix branch was found." >&2
+              exit 1
+            fi
+            matching_branch=""
+            branch_index=0
+            while read -r _ remote_ref; do
+              [[ -n "$remote_ref" ]] || continue
+              remote_branch="${remote_ref#refs/heads/}"
+              if [[ "$remote_branch" == "$branch_prefix" ]]; then
+                :
+              elif [[ "$remote_branch" == "$branch_prefix"-* ]]; then
+                suffix="${remote_branch#"$branch_prefix"-}"
+                [[ "$suffix" =~ ^[0-9]+-[0-9]+$ ]] || continue
+              else
+                continue
+              fi
+              branch_index=$((branch_index + 1))
+              tracking_ref="refs/remotes/origin/nix-reuse-${branch_index}"
+              git fetch --depth=1 origin "+${remote_ref}:${tracking_ref}"
+              remote_after="$(git rev-parse "$tracking_ref")"
+              remote_tree="$(git rev-parse "${tracking_ref}^{tree}")"
+              live_after="$(git ls-remote --heads origin "$remote_ref" | awk '{print $1}')"
+              if [[ -n "$live_after" && "$live_after" == "$remote_after" && "$remote_tree" == "$candidate_tree" ]]; then
+                matching_branch="$remote_branch"
+                break
+              fi
+            done <<<"$remote_refs"
+            if [[ -n "$matching_branch" ]]; then
+              branch="$matching_branch"
+              echo "Remote Nix branch $branch already has the same metadata; reuse it without rewriting history."
+            else
+              branch="${branch}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+              echo "Existing Nix branch has different or changing content; publishing safely to $branch instead."
+              git push --force-with-lease="refs/heads/${branch}:" origin "HEAD:${branch}"
+            fi
           fi
-          existing="$(gh pr list --base "$DEFAULT_BRANCH" --head "$branch" --state open --json url --jq '.[0].url // ""')"
+          existing="$(
+            gh api --method GET "repos/${GITHUB_REPOSITORY}/pulls" \
+              -f state=open \
+              -f base="$DEFAULT_BRANCH" \
+              -f head="${REPO_OWNER}:${branch}" \
+              -f per_page=100 \
+              --jq '.[0].html_url // ""'
+          )"
           if [[ -n "$existing" ]]; then
             echo "Nix metadata pull request already exists: $existing"
             exit 0
