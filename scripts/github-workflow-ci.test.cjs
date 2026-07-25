@@ -77,6 +77,18 @@ test("package release concurrency is isolated per tag", () => {
   assert.doesNotMatch(buildWorkflow, /&& 'release' \|\| github\.ref/);
 });
 
+test("manual package validations do not share push concurrency", () => {
+  assert.match(
+    buildWorkflow,
+    /github\.event_name == 'workflow_dispatch' && format\('manual-\{0\}', github\.run_id\)/,
+  );
+  assert.ok(
+    buildWorkflow.indexOf("format('release-{0}', github.ref)") <
+      buildWorkflow.indexOf("format('manual-{0}', github.run_id)"),
+    "publishing a tag manually must still share that tag's release group",
+  );
+});
+
 test("package validation avoids duplicate branch runs and scopes PR builds", () => {
   assert.match(buildWorkflow, /push:\s*\n\s*branches:\s*\n\s*- main/);
   assert.doesNotMatch(buildWorkflow, /branches:\s*\n\s*- "\*\*"/);

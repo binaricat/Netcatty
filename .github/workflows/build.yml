@@ -80,9 +80,10 @@ on:
 
 # A newer run for the same main push or PR cancels older in-progress work.
 # Publishing tag runs share a release group across push and manual dispatch;
-# non-publishing manual tag runs use their own group.
+# every non-publishing manual run uses its own group so branch pushes and other
+# explicitly requested validations cannot cancel it.
 concurrency:
-  group: build-packages-${{ github.workflow }}-${{ startsWith(github.ref, 'refs/tags/') && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish_release)) && format('release-{0}', github.ref) || github.ref }}
+  group: build-packages-${{ github.workflow }}-${{ startsWith(github.ref, 'refs/tags/') && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish_release)) && format('release-{0}', github.ref) || github.event_name == 'workflow_dispatch' && format('manual-{0}', github.run_id) || github.ref }}
   cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 
 permissions:
