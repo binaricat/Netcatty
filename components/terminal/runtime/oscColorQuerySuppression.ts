@@ -3,6 +3,7 @@ const OSC_COLOR_RESPONSE_PATTERN = new RegExp(
   `${ESC}\\](?:4;\\d{1,3}|1[0-2]);rgb:[0-9a-f]+\\/[0-9a-f]+\\/[0-9a-f]+${ESC}\\\\`,
   'giu',
 );
+const BRACKETED_PASTE_MARKER_PATTERN = new RegExp(`${ESC}\\[(?:200|201)~`, 'gu');
 
 const PRIVILEGE_WRAPPERS = new Set(['sudo', 'doas']);
 const SIMPLE_WRAPPERS = new Set(['command', 'builtin', 'exec']);
@@ -89,12 +90,48 @@ export function endOscColorQuerySuppressionForCommand(state: { current: boolean 
   state.current = false;
 }
 
-const oscColorQuerySuppressionArmers = new Map<string, Set<(command: string) => void>>();
+export type HibernatedBroadcastInputState = {
+  promptReady: boolean;
+  line: string;
+};
+
+/** Track the input line while xterm is absent and verify the submitted command. */
+export function consumeHibernatedBroadcastInput(
+  state: HibernatedBroadcastInputState,
+  data: string,
+  command?: string,
+): boolean {
+  const input = data.replace(BRACKETED_PASTE_MARKER_PATTERN, '');
+  let trustedSubmission = false;
+  for (const char of input) {
+    if (char === '\x03') {
+      state.promptReady = false;
+      state.line = '';
+    } else if (char === '\x15') {
+      state.line = '';
+    } else if (char === '\b' || char === '\x7f') {
+      state.line = state.line.slice(0, -1);
+    } else if (char === '\r' || char === '\n') {
+      trustedSubmission ||= state.promptReady
+        && command !== undefined
+        && state.line.trim() === command.trim();
+      state.promptReady = false;
+      state.line = '';
+    } else if (char.charCodeAt(0) >= 32) {
+      state.line += char;
+    }
+  }
+  return trustedSubmission;
+}
+
+type OscColorQueryBroadcastInputHandler = (data: string, command?: string) => void;
+
+const oscColorQuerySuppressionArmers = new Map<string, Set<OscColorQueryBroadcastInputHandler>>();
 
 /** Register a session's OSC color-query suppression armer for broadcast peers. */
 export function registerOscColorQuerySuppressionArmer(
   sessionId: string,
-  armer: (command: string) => void,
+  armer: OscColorQueryBroadcastInputHandler,
 ): () => void {
   const armers = oscColorQuerySuppressionArmers.get(sessionId) ?? new Set();
   armers.add(armer);
@@ -108,13 +145,14 @@ export function registerOscColorQuerySuppressionArmer(
   };
 }
 
-/** Transition OSC suppression on a broadcast target for its next trusted command. */
-export function armOscColorQuerySuppressionForSession(
+/** Track broadcast input and transition suppression on the target's trusted submission. */
+export function handleOscColorQueryBroadcastInputForSession(
   sessionId: string,
-  command: string,
+  data: string,
+  command?: string,
 ): void {
   for (const armer of oscColorQuerySuppressionArmers.get(sessionId) ?? []) {
-    armer(command);
+    armer(data, command);
   }
 }
 

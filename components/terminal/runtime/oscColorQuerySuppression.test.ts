@@ -2,9 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
-  armOscColorQuerySuppressionForSession,
+  handleOscColorQueryBroadcastInputForSession,
   beginOscColorQuerySuppressionForCommand,
   beginOscColorQuerySuppressionForStartupCommand,
+  consumeHibernatedBroadcastInput,
   endOscColorQuerySuppressionForCommand,
   isDockerLogsCommand,
   registerOscColorQuerySuppressionArmer,
@@ -85,30 +86,61 @@ test('broadcast peer sessions can be armed through the suppression registry', ()
   const popupState = { current: false };
   const unregisterPeer = registerOscColorQuerySuppressionArmer(
     'peer-session',
-    (command) => beginOscColorQuerySuppressionForCommand(peerState, command),
+    (_data, command) => {
+      if (command !== undefined) beginOscColorQuerySuppressionForCommand(peerState, command);
+    },
   );
   const unregisterPopup = registerOscColorQuerySuppressionArmer(
     'peer-session',
-    (command) => beginOscColorQuerySuppressionForCommand(popupState, command),
+    (_data, command) => {
+      if (command !== undefined) beginOscColorQuerySuppressionForCommand(popupState, command);
+    },
   );
 
-  armOscColorQuerySuppressionForSession('peer-session', 'docker logs -f api');
+  handleOscColorQueryBroadcastInputForSession('peer-session', '\r', 'docker logs -f api');
   assert.equal(peerState.current, true);
   assert.equal(popupState.current, true);
 
-  armOscColorQuerySuppressionForSession('peer-session', 'vim');
+  handleOscColorQueryBroadcastInputForSession('peer-session', '\r', 'vim');
   assert.equal(peerState.current, false);
   assert.equal(popupState.current, false);
 
   unregisterPopup();
   peerState.current = false;
   popupState.current = false;
-  armOscColorQuerySuppressionForSession('peer-session', 'docker logs -f api');
+  handleOscColorQueryBroadcastInputForSession('peer-session', '\r', 'docker logs -f api');
   assert.equal(peerState.current, true);
   assert.equal(popupState.current, false);
 
   unregisterPeer();
   peerState.current = false;
-  armOscColorQuerySuppressionForSession('peer-session', 'docker logs -f api');
+  handleOscColorQueryBroadcastInputForSession('peer-session', '\r', 'docker logs -f api');
   assert.equal(peerState.current, false);
+});
+
+test('hibernated broadcast input stays trusted across typed echoes until submission', () => {
+  const state = { promptReady: true, line: '' };
+  for (const char of 'docker logs -f api') {
+    assert.equal(consumeHibernatedBroadcastInput(state, char), false);
+  }
+  assert.equal(state.promptReady, true);
+  assert.equal(
+    consumeHibernatedBroadcastInput(state, '\r', 'docker logs -f api'),
+    true,
+  );
+  assert.deepEqual(state, { promptReady: false, line: '' });
+});
+
+test('hibernated broadcast input rejects mismatched and interrupted submissions', () => {
+  const state = { promptReady: true, line: '' };
+  consumeHibernatedBroadcastInput(state, 'docker ps');
+  assert.equal(consumeHibernatedBroadcastInput(state, '\r', 'docker logs -f api'), false);
+
+  state.promptReady = true;
+  consumeHibernatedBroadcastInput(state, 'old\x15docker logs -f api');
+  assert.equal(consumeHibernatedBroadcastInput(state, '\r', 'docker logs -f api'), true);
+
+  state.promptReady = true;
+  consumeHibernatedBroadcastInput(state, 'docker logs -f api\x03');
+  assert.equal(consumeHibernatedBroadcastInput(state, '\r', 'docker logs -f api'), false);
 });

@@ -135,7 +135,7 @@ test("ordinary broadcast skips targets that are waiting for sensitive input", ()
 test("only trusted broadcast commands transition OSC color-query suppression on peers", () => {
   assert.match(
     terminalLayerSource,
-    /oscColorQuerySuppressionCommand !== undefined[\s\S]*?armOscColorQuerySuppressionForSession\(\s*session\.id,\s*options\.oscColorQuerySuppressionCommand/u,
+    /handleOscColorQueryBroadcastInputForSession\(\s*session\.id,\s*data,\s*options\?\.oscColorQuerySuppressionCommand/u,
   );
   assert.match(
     runtimeSource,
@@ -178,7 +178,11 @@ test("broadcast targets and direct-send paths require their own trusted shell bo
   );
   assert.match(
     terminalSource,
-    /termRef\.current[\s\S]*?hibernatedRef\.current[\s\S]*?trustedShellPromptReadyRef\.current[\s\S]*?beginOscColorQuerySuppressionForCommand/u,
+    /termRef\.current[\s\S]*?hibernatedRef\.current[\s\S]*?consumeHibernatedBroadcastInput[\s\S]*?beginOscColorQuerySuppressionForCommand/u,
+  );
+  assert.match(
+    terminalSource,
+    /hibernatedBroadcastInputRef\.current = \{\s*promptReady: trustedShellPromptReadyRef\.current,\s*line: "",\s*\}/u,
   );
 });
 

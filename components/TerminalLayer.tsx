@@ -40,7 +40,7 @@ import { applySessionFontSizeToHost } from '../domain/terminalAppearance';
 import { resolveHostAutofillPassword } from '../domain/sshAuth';
 import { listPasswordPromptFillCandidates } from '../domain/passwordPromptAssist';
 import { isTerminalSensitiveInputActive } from './terminal/runtime/terminalSensitiveInputRegistry';
-import { armOscColorQuerySuppressionForSession } from './terminal/runtime/oscColorQuerySuppression';
+import { handleOscColorQueryBroadcastInputForSession } from './terminal/runtime/oscColorQuerySuppression';
 import {
   resolveEffectiveTerminalHost,
   resolveTerminalChainHosts,
@@ -966,12 +966,11 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
         continue;
       }
       if (isTerminalSensitiveInputActive(session.id)) continue;
-      if (options?.oscColorQuerySuppressionCommand !== undefined) {
-        armOscColorQuerySuppressionForSession(
-          session.id,
-          options.oscColorQuerySuppressionCommand,
-        );
-      }
+      handleOscColorQueryBroadcastInputForSession(
+        session.id,
+        data,
+        options?.oscColorQuerySuppressionCommand,
+      );
       terminalBackend.writeToSession(session.id, data, {
         automated: true,
         sensitive: false,
