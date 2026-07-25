@@ -60,6 +60,7 @@ import { resolveHostSshConnectionTimeouts } from '../../domain/sshConnectionTime
 import { resolveEffectiveTerminalProtocol } from '../../domain/terminalProtocol';
 import {
   beginOscColorQuerySuppressionForCommand,
+  restoreOscColorQuerySuppressionEndBoundary,
 } from './runtime/oscColorQuerySuppression';
 
 type TerminalEffectsContext = Record<string, any>;
@@ -569,6 +570,10 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
             }
             if (typeof snap.suppressOscColorQueries === "boolean") {
               ctx.suppressOscColorQueriesForActiveCommandRef.current = snap.suppressOscColorQueries;
+              restoreOscColorQuerySuppressionEndBoundary(
+                ctx.suppressOscColorQueriesForActiveCommandRef,
+                snap.suppressOscColorQueriesCanEnd === true,
+              );
             }
             if (snap.cwd !== undefined) {
               const cwd = terminalCwdTracker.setRendererCwd(snap.cwd);

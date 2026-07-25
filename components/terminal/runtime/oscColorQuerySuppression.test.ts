@@ -7,9 +7,11 @@ import {
   beginOscColorQuerySuppressionForStartupCommand,
   consumeHibernatedBroadcastInput,
   endOscColorQuerySuppressionForCommand,
+  hasOscColorQuerySuppressionEndBoundary,
   isDockerLogsCommand,
   markOscColorQuerySuppressionEndBoundary,
   registerOscColorQuerySuppressionArmer,
+  restoreOscColorQuerySuppressionEndBoundary,
   stripOscColorQueryResponses,
 } from './oscColorQuerySuppression.ts';
 
@@ -73,6 +75,25 @@ test('a non-log command restores ordinary color queries only after a user interr
   assert.equal(state.current, false);
   endOscColorQuerySuppressionForCommand(state);
   assert.equal(state.current, false);
+});
+
+test('the interrupt boundary survives a terminal-view handoff', () => {
+  const source = { current: false };
+  beginOscColorQuerySuppressionForCommand(source, 'docker logs -f api');
+  markOscColorQuerySuppressionEndBoundary(source);
+
+  const target = { current: source.current };
+  restoreOscColorQuerySuppressionEndBoundary(
+    target,
+    hasOscColorQuerySuppressionEndBoundary(source),
+  );
+  beginOscColorQuerySuppressionForCommand(target, 'vim');
+  assert.equal(target.current, false);
+
+  const activeLogsTarget = { current: true };
+  restoreOscColorQuerySuppressionEndBoundary(activeLogsTarget, false);
+  beginOscColorQuerySuppressionForCommand(activeLogsTarget, 'vim');
+  assert.equal(activeLogsTarget.current, true);
 });
 
 test('startup commands recognize saved Docker logs commands and built-in launchers', () => {

@@ -151,6 +151,18 @@ export function markOscColorQuerySuppressionEndBoundary(state: { current: boolea
   if (state.current) suppressionEndBoundaries.add(state);
 }
 
+export function hasOscColorQuerySuppressionEndBoundary(state: { current: boolean }): boolean {
+  return state.current && suppressionEndBoundaries.has(state);
+}
+
+export function restoreOscColorQuerySuppressionEndBoundary(
+  state: { current: boolean },
+  enabled: boolean,
+): void {
+  suppressionEndBoundaries.delete(state);
+  if (state.current && enabled) suppressionEndBoundaries.add(state);
+}
+
 export function beginOscColorQuerySuppressionForStartupCommand(
   state: { current: boolean },
   command: string,

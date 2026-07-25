@@ -136,8 +136,10 @@ import {
   beginOscColorQuerySuppressionForStartupCommand,
   consumeHibernatedBroadcastInput,
   endOscColorQuerySuppressionForCommand,
+  hasOscColorQuerySuppressionEndBoundary,
   markOscColorQuerySuppressionEndBoundary,
   registerOscColorQuerySuppressionArmer,
+  restoreOscColorQuerySuppressionEndBoundary,
 } from "./terminal/runtime/oscColorQuerySuppression";
 import { clearKittyKeyboardBroadcastSession } from "./terminal/runtime/kittyKeyboardBroadcast";
 import { registerTerminalSensitiveInputReader } from "./terminal/runtime/terminalSensitiveInputRegistry";
@@ -1415,6 +1417,9 @@ const TerminalComponent: React.FC<TerminalProps> = ({
             ?? kittyKeyboardProtocolEnabledForSession,
           passwordPromptActiveRef.current,
           suppressOscColorQueriesForActiveCommandRef.current,
+          hasOscColorQuerySuppressionEndBoundary(
+            suppressOscColorQueriesForActiveCommandRef,
+          ),
           knownCwdRef.current ?? null,
           terminalTitleRef.current ?? null,
         );
@@ -1441,6 +1446,10 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         }
         if (typeof payload.suppressOscColorQueries === "boolean") {
           suppressOscColorQueriesForActiveCommandRef.current = payload.suppressOscColorQueries;
+          restoreOscColorQuerySuppressionEndBoundary(
+            suppressOscColorQueriesForActiveCommandRef,
+            payload.suppressOscColorQueriesCanEnd === true,
+          );
         }
         if (payload.cwd !== undefined) {
           const cwd = terminalCwdTracker.setRendererCwd(payload.cwd);
@@ -1583,6 +1592,9 @@ const TerminalComponent: React.FC<TerminalProps> = ({
               xtermRuntimeRef.current?.getKittyKeyboardProtocolEnabled(),
             passwordPromptActive: passwordPromptActiveRef.current,
             suppressOscColorQueries: suppressOscColorQueriesForActiveCommandRef.current,
+            suppressOscColorQueriesCanEnd: hasOscColorQuerySuppressionEndBoundary(
+              suppressOscColorQueriesForActiveCommandRef,
+            ),
             cwd: knownCwdRef.current ?? null,
             title: terminalTitleRef.current ?? null,
           },

@@ -354,6 +354,7 @@ declare global {
       kittyKeyboardProtocolEnabled?: boolean;
       passwordPromptActive?: boolean;
       suppressOscColorQueries?: boolean;
+      suppressOscColorQueriesCanEnd?: boolean;
       cwd?: string | null;
       title?: string | null;
       error?: string;
@@ -370,6 +371,7 @@ declare global {
       kittyKeyboardProtocolEnabled?: boolean,
       passwordPromptActive?: boolean,
       suppressOscColorQueries?: boolean,
+      suppressOscColorQueriesCanEnd?: boolean,
       cwd?: string | null,
       title?: string | null,
     ): void;
@@ -386,6 +388,7 @@ declare global {
         kittyKeyboardProtocolEnabled?: boolean;
         passwordPromptActive?: boolean;
         suppressOscColorQueries?: boolean;
+        suppressOscColorQueriesCanEnd?: boolean;
         cwd?: string | null;
         title?: string | null;
       },
@@ -409,6 +412,7 @@ declare global {
         kittyKeyboardProtocolEnabled?: boolean;
         passwordPromptActive?: boolean;
         suppressOscColorQueries?: boolean;
+        suppressOscColorQueriesCanEnd?: boolean;
         cwd?: string | null;
         title?: string | null;
         requestId: string;
