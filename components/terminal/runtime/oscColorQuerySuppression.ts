@@ -1,6 +1,6 @@
 import type { IDisposable, IParser } from '@xterm/xterm';
 
-const OSC_COLOR_QUERY_IDENTIFIERS = [10, 11, 12] as const;
+const OSC_COLOR_QUERY_IDENTIFIERS = [4, 10, 11, 12] as const;
 
 const PRIVILEGE_WRAPPERS = new Set(['sudo', 'doas']);
 const SIMPLE_WRAPPERS = new Set(['command', 'builtin', 'exec']);
@@ -109,8 +109,19 @@ export function installOscColorQuerySuppression(
 
   const shouldSuppress = typeof enabled === 'function' ? enabled : () => true;
 
+  const containsColorQuery = (identifier: number, data: string): boolean => {
+    const fields = data.split(';').map((field) => field.trim());
+    if (identifier === 4) {
+      return fields.some((field, index) => index % 2 === 1 && field === '?');
+    }
+    return fields.some((field) => field === '?');
+  };
+
   const disposables = OSC_COLOR_QUERY_IDENTIFIERS.map((identifier) => (
-    parser.registerOscHandler(identifier, (data) => shouldSuppress() && data.trim() === '?')
+    parser.registerOscHandler(
+      identifier,
+      (data) => shouldSuppress() && containsColorQuery(identifier, data),
+    )
   ));
 
   return {

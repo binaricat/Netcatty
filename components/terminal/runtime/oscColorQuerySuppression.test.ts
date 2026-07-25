@@ -32,18 +32,26 @@ test('Docker log color-query suppression consumes queries but preserves color se
   const { parser, handlers, disposed } = createParser();
   const disposable = installOscColorQuerySuppression(parser, true);
 
-  assert.deepEqual([...handlers.keys()], [10, 11, 12]);
+  assert.deepEqual([...handlers.keys()], [4, 10, 11, 12]);
+  const indexedColorHandler = handlers.get(4);
+  assert.ok(indexedColorHandler);
+  assert.equal(await indexedColorHandler('0;?'), true);
+  assert.equal(await indexedColorHandler('0;?;15;?'), true);
+  assert.equal(await indexedColorHandler('0;rgb:11/22/33'), false);
+  assert.equal(await indexedColorHandler('0;#123456;15;#abcdef'), false);
   for (const identifier of [10, 11, 12]) {
     const handler = handlers.get(identifier);
     assert.ok(handler);
     assert.equal(await handler('?'), true);
     assert.equal(await handler(' ? '), true);
+    assert.equal(await handler('?;?'), true);
     assert.equal(await handler('rgb:11/22/33'), false);
+    assert.equal(await handler('rgb:11/22/33;#123456'), false);
     assert.equal(await handler('#123456'), false);
   }
 
   disposable?.dispose();
-  assert.deepEqual([...disposed], [10, 11, 12]);
+  assert.deepEqual([...disposed], [4, 10, 11, 12]);
 });
 
 test('ordinary terminals do not install color-query suppression', () => {
