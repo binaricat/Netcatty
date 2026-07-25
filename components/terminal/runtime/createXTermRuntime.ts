@@ -139,6 +139,8 @@ import {
   recordTerminalCommandExecution,
   resolveSubmittedShellCommand,
 } from "./terminalCommandExecution";
+import { getAlignedPrompt } from "../autocomplete/promptDetector";
+import { isConfirmedTerminalShellPrompt } from "../../../domain/terminalPromptSecurity";
 import {
   getSingleBracketedPasteLine,
   getSinglePastedCommand,
@@ -794,12 +796,15 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
       && ctx.onBroadcastInputRef.current
     ) {
       const pastedCommand = getSinglePastedCommand(data)?.command;
-      const trustedCommand = pastedCommand && isTrustedTerminalShellSubmission(
-        pastedCommand,
+      const submittedCommand = pastedCommand
+        ? `${ctx.commandBufferRef.current}${pastedCommand}`
+        : undefined;
+      const trustedCommand = submittedCommand && isTrustedTerminalShellSubmission(
+        submittedCommand,
         term,
         ctx.allowHostStyleGreaterThanPrompt,
       )
-        ? pastedCommand
+        ? submittedCommand
         : undefined;
       ctx.onBroadcastInputRef.current(
         data,
@@ -1160,6 +1165,30 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     isSensitiveInput: () => ctx.passwordPromptActiveRef?.current === true,
     getDispatcher: () => ctx.onBroadcastInputRef.current,
   });
+  const resolveTrustedKeyboardBroadcastCommand = (): string | undefined => {
+    const livePrompt = getAlignedPrompt(term, "", false).prompt;
+    if (
+      livePrompt.isAtPrompt
+      && livePrompt.userInput.trim().length > 0
+      && isConfirmedTerminalShellPrompt(livePrompt.promptText, {
+        allowHostStyleGreaterThan: ctx.allowHostStyleGreaterThanPrompt,
+      })
+    ) {
+      return livePrompt.userInput.trim();
+    }
+    const command = resolveSubmittedShellCommand(
+      ctx.commandBufferRef.current,
+      term,
+      ctx.promptLineBreakStateRef?.current?.lastPromptText,
+    );
+    return command && isTrustedTerminalShellSubmission(
+      ctx.commandBufferRef.current,
+      term,
+      ctx.allowHostStyleGreaterThanPrompt,
+    )
+      ? command
+      : undefined;
+  };
 
   term.attachCustomKeyEventHandler((e: KeyboardEvent) => {
     // Preserve mouse selection across keystrokes when enabled. xterm.js
@@ -1556,6 +1585,9 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
         urgentInterrupt: shouldUseUrgentTerminalInterrupt(e, {
           hasSelection: term.hasSelection(),
         }),
+        ...(kittyEvent.type !== "keyup" && kittyEvent.key === "Enter"
+          ? { oscColorQuerySuppressionCommand: resolveTrustedKeyboardBroadcastCommand() }
+          : {}),
       });
       if (forwarded) {
         upsertKittyKeyboardForwardedPress(
@@ -1624,20 +1656,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
         event: normalizedKittyEvent,
         fallbackToLegacy: true,
         ...(normalizedKittyEvent.type !== "keyup" && normalizedKittyEvent.key === "Enter"
-          ? (() => {
-              const command = resolveSubmittedShellCommand(
-                ctx.commandBufferRef.current,
-                term,
-                ctx.promptLineBreakStateRef?.current?.lastPromptText,
-              );
-              return command && isTrustedTerminalShellSubmission(
-                ctx.commandBufferRef.current,
-                term,
-                ctx.allowHostStyleGreaterThanPrompt,
-              )
-                ? { oscColorQuerySuppressionCommand: command }
-                : {};
-            })()
+          ? { oscColorQuerySuppressionCommand: resolveTrustedKeyboardBroadcastCommand() }
           : {}),
       });
       if (forwarded) {

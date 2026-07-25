@@ -143,7 +143,15 @@ test("only trusted broadcast commands transition OSC color-query suppression on 
   );
   assert.match(
     runtimeSource,
-    /resolveSubmittedShellCommand\([\s\S]*?oscColorQuerySuppressionCommand: command[\s\S]*?broadcastKittyInput/u,
+    /resolveTrustedKeyboardBroadcastCommand[\s\S]*?resolveSubmittedShellCommand\([\s\S]*?oscColorQuerySuppressionCommand: resolveTrustedKeyboardBroadcastCommand\(\)/u,
+  );
+  assert.match(
+    terminalSource,
+    /getAlignedPrompt\(termRef\.current, "", false\)[\s\S]*?livePrompt\.userInput\.trim\(\)\.length === 0/u,
+  );
+  assert.doesNotMatch(
+    terminalSource,
+    /else if \(data\.includes\("\\r"\) \|\| data\.includes\("\\n"\) \|\| data\.includes\("\\x03"\)\)[\s\S]*?endOscColorQuerySuppressionForCommand/u,
   );
   assert.match(
     runtimeSource,
@@ -182,6 +190,14 @@ test("broadcast targets and direct-send paths require their own trusted shell bo
   );
   assert.match(
     terminalSource,
+    /submittedCommand = pastedCommand[\s\S]*?commandBufferRef\.current[\s\S]*?trustedCommand = submittedCommand/u,
+  );
+  assert.match(
+    runtimeSource,
+    /submittedCommand = pastedCommand[\s\S]*?ctx\.commandBufferRef\.current[\s\S]*?trustedCommand = submittedCommand/u,
+  );
+  assert.match(
+    terminalSource,
     /trustedShellPromptReadyRef\.current = isTrustedTerminalShellSubmission[\s\S]*?disposeRuntimeOnly\(\)[\s\S]*?hibernatedRef\.current = true/u,
   );
   assert.match(
@@ -191,6 +207,10 @@ test("broadcast targets and direct-send paths require their own trusted shell bo
   assert.match(
     terminalSource,
     /hibernatedBroadcastInputRef\.current = \{\s*promptReady: trustedShellPromptReadyRef\.current,\s*line: "",\s*tracking: false,\s*\}/u,
+  );
+  assert.match(
+    terminalSource,
+    /else \{\s*trustedShellPromptReadyRef\.current = false;[\s\S]*?hibernatedRef\.current && !hibernatedBroadcastInputRef\.current\.tracking[\s\S]*?promptReady: false/u,
   );
 });
 

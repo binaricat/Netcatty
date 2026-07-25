@@ -987,22 +987,35 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     (data, command) => {
       const broadcastInput = hibernatedBroadcastInputRef.current;
       if (termRef.current && !broadcastInput.tracking) {
-        broadcastInput.promptReady = isTrustedTerminalShellSubmission(
-          "",
-          termRef.current,
-          isNetworkDevice,
+        const livePrompt = getAlignedPrompt(termRef.current, "", false).prompt;
+        broadcastInput.promptReady = Boolean(
+          livePrompt.isAtPrompt
+          && livePrompt.userInput.trim().length === 0
+          && isConfirmedTerminalShellPrompt(livePrompt.promptText, {
+            allowHostStyleGreaterThan: isNetworkDevice,
+          }),
         );
         broadcastInput.line = "";
       }
-      const trustedTarget = (termRef.current || hibernatedRef.current)
+      const trackedTarget = (termRef.current || hibernatedRef.current)
         ? consumeHibernatedBroadcastInput(broadcastInput, data, command)
         : false;
+      const liveTarget = termRef.current && command !== undefined
+        ? getAlignedPrompt(termRef.current, "", false).prompt
+        : null;
+      const trustedTarget = trackedTarget || Boolean(
+        liveTarget?.isAtPrompt
+        && liveTarget.userInput.trim() === command?.trim()
+        && isConfirmedTerminalShellPrompt(liveTarget.promptText, {
+          allowHostStyleGreaterThan: isNetworkDevice,
+        }),
+      );
       if (trustedTarget && command !== undefined) {
         beginOscColorQuerySuppressionForCommand(
           suppressOscColorQueriesForActiveCommandRef,
           command,
         );
-      } else if (data.includes("\r") || data.includes("\n") || data.includes("\x03")) {
+      } else if (data.includes("\r") || data.includes("\n")) {
         endOscColorQuerySuppressionForCommand(suppressOscColorQueriesForActiveCommandRef);
       }
       if (data.includes("\r") || data.includes("\n") || data.includes("\x03")) {
@@ -1717,11 +1730,14 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     if (typeof meta?.pluginPipelineSensitiveInput === "boolean") {
       passwordPromptActiveRef.current = meta.pluginPipelineSensitiveInput;
       trustedShellPromptReadyRef.current = false;
-      hibernatedBroadcastInputRef.current = { promptReady: false, line: "", tracking: false };
       if (meta.pluginPipelineSensitiveInput) {
+        hibernatedBroadcastInputRef.current = { promptReady: false, line: "", tracking: false };
         autocompleteCloseRef.current?.();
       } else {
         sensitivePromptOutputTailRef.current = "";
+        if (!hibernatedBroadcastInputRef.current.tracking) {
+          hibernatedBroadcastInputRef.current = { promptReady: false, line: "", tracking: false };
+        }
       }
       return;
     } else if (isUntrustedTerminalInputPrompt(
@@ -1741,6 +1757,9 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       hibernatedBroadcastInputRef.current = { promptReady: true, line: "", tracking: false };
     } else {
       trustedShellPromptReadyRef.current = false;
+      if (hibernatedRef.current && !hibernatedBroadcastInputRef.current.tracking) {
+        hibernatedBroadcastInputRef.current = { promptReady: false, line: "", tracking: false };
+      }
     }
   }, [isNetworkDevice]);
 
@@ -2623,12 +2642,15 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       && onBroadcastInputRef.current
     ) {
       const pastedCommand = getSinglePastedCommand(data)?.command;
-      const trustedCommand = pastedCommand && isTrustedTerminalShellSubmission(
-        pastedCommand,
+      const submittedCommand = pastedCommand
+        ? `${commandBufferRef.current}${pastedCommand}`
+        : undefined;
+      const trustedCommand = submittedCommand && isTrustedTerminalShellSubmission(
+        submittedCommand,
         termRef.current,
         isNetworkDevice,
       )
-        ? pastedCommand
+        ? submittedCommand
         : undefined;
       onBroadcastInputRef.current(
         data,
