@@ -25,12 +25,43 @@ const pullRequestPaths = buildWorkflow
   ?.map((line) => line.match(/^\s+- "([^"]+)"$/)?.[1])
   .filter(Boolean);
 
+// Portable glob matcher for Node >=22 (path.matchesGlob only landed in 22.5).
+const matchesGlob = (filePath, pattern) => {
+  let regex = "^";
+  for (let i = 0; i < pattern.length; ) {
+    if (pattern[i] === "*" && pattern[i + 1] === "*") {
+      if (pattern[i + 2] === "/") {
+        regex += "(?:.*/)?";
+        i += 3;
+      } else {
+        regex += ".*";
+        i += 2;
+      }
+      continue;
+    }
+    if (pattern[i] === "*") {
+      regex += "[^/]*";
+      i += 1;
+      continue;
+    }
+    if (pattern[i] === "?") {
+      regex += "[^/]";
+      i += 1;
+      continue;
+    }
+    regex += pattern[i].replace(/[|\\{}()[\]^$+?.]/g, "\\$&");
+    i += 1;
+  }
+  regex += "$";
+  return new RegExp(regex).test(filePath);
+};
+
 const triggersPackageValidation = (filePath) => {
   assert.ok(pullRequestPaths, "package workflow pull_request paths must be readable");
   return pullRequestPaths.reduce((included, pattern) => {
     const excluded = pattern.startsWith("!");
     const glob = excluded ? pattern.slice(1) : pattern;
-    return path.matchesGlob(filePath, glob) ? !excluded : included;
+    return matchesGlob(filePath, glob) ? !excluded : included;
   }, false);
 };
 
