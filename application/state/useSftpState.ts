@@ -429,9 +429,19 @@ export const useSftpState = (
     connectionCacheKeyMapRef,
     ensureRemoteSftpId: async (side, ensureOptions) => {
       const bridge = netcattyBridge.get();
+      const connectionId = ensureOptions?.connectionId;
+      const pinnedGetActivePane = connectionId
+        ? (_side: "left" | "right") => {
+            const pane = getPaneByConnectionId(connectionId);
+            if (!pane) {
+              throw new Error("Upload target connection is no longer available");
+            }
+            return pane;
+          }
+        : getActivePane;
       return ensureRemoteSftpSession({
         side,
-        getActivePane,
+        getActivePane: pinnedGetActivePane,
         sftpSessionsRef,
         lastConnectedHostRef,
         connect,

@@ -179,3 +179,50 @@ test("clipboard upload dialog closes before waiting for the transfer", () => {
     "the modal request must be cleared before the upload promise is awaited",
   );
 });
+
+test("clipboard upload pins the originating connection through confirm and upload", () => {
+  const requestType = readFileSync(
+    new URL("./sftp/clipboardUpload.ts", import.meta.url),
+    "utf8",
+  );
+  assert.match(
+    requestType,
+    /export interface SftpClipboardUploadRequest \{[\s\S]*connectionId: string;/,
+  );
+
+  const shortcuts = readFileSync(
+    new URL("./sftp/hooks/useSftpKeyboardShortcuts.ts", import.meta.url),
+    "utf8",
+  );
+  assert.match(
+    shortcuts,
+    /uploadExternalEntries\(focusedSide, fileEntries, \{\s*targetPath,\s*connectionId,\s*\}\)/,
+  );
+  assert.match(
+    shortcuts,
+    /uploadExternalEntries\(focusedSide, entries, \{\s*targetPath,\s*connectionId,\s*\}\)/,
+  );
+  assert.match(
+    shortcuts,
+    /uploadExternalFolderPath\(\s*focusedSide,\s*file\.path,\s*targetPath,\s*\{\s*connectionId\s*\},\s*\)/,
+  );
+
+  const ops = readFileSync(
+    new URL("../application/state/sftp/useSftpExternalOperations.ts", import.meta.url),
+    "utf8",
+  );
+  const entriesFn = ops.slice(
+    ops.indexOf("const uploadExternalEntries = useCallback"),
+    ops.indexOf("const cancelExternalUpload = useCallback"),
+  );
+  assert.ok(entriesFn.includes("originatingConnectionId"));
+  assert.ok(
+    entriesFn.includes("getPaneByConnectionId(originatingConnectionId)"),
+    "upload must re-resolve the originating connection after awaits",
+  );
+  assert.equal(
+    entriesFn.includes("getActivePane(side) ?? pane"),
+    false,
+    "upload must not retarget to the newly active pane after session resolve",
+  );
+});

@@ -15,7 +15,10 @@ export interface UseSftpExternalOperationsParams {
    * Ensure a live remote SFTP session for the pane (reconnect when missing/dead).
    * Required for uploads/downloads that must not fail with "SFTP session not found".
    */
-  ensureRemoteSftpId?: (side: "left" | "right", options?: { forceReconnect?: boolean }) => Promise<string>;
+  ensureRemoteSftpId?: (
+    side: "left" | "right",
+    options?: { forceReconnect?: boolean; connectionId?: string },
+  ) => Promise<string>;
   /**
    * FileZilla-style dedicated transfer sessions for bulk uploads.
    * When set, remote stream uploads prefer pool connections (1–2/host)
@@ -66,12 +69,13 @@ export interface SftpExternalOperationsResult {
   uploadExternalFolderPath: (
     side: "left" | "right",
     folderPath: string,
-    targetPath?: string
+    targetPath?: string,
+    options?: { connectionId?: string },
   ) => Promise<UploadResult[]>;
   uploadExternalEntries: (
     side: "left" | "right",
     entries: DropEntry[],
-    options?: { targetPath?: string }
+    options?: { targetPath?: string; connectionId?: string },
   ) => Promise<UploadResult[]>;
   cancelExternalUpload: () => Promise<void>;
   selectApplication: () => Promise<{ path: string; name: string } | null>;
