@@ -14,6 +14,38 @@ const DOCKER_GLOBAL_OPTIONS_WITH_VALUE = new Set([
 
 const commandBasename = (token: string): string => token.split('/').pop() ?? token;
 
+const getLastStartupCommandSegment = (command: string): string => {
+  let segmentStart = 0;
+  let quote: "'" | '"' | null = null;
+  let escaped = false;
+  for (let index = 0; index < command.length; index += 1) {
+    const char = command[index];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (char === '\\' && quote !== "'") {
+      escaped = true;
+      continue;
+    }
+    if (quote) {
+      if (char === quote) quote = null;
+      continue;
+    }
+    if (char === "'" || char === '"') {
+      quote = char;
+      continue;
+    }
+    if (char === ';' || char === '\r' || char === '\n') {
+      segmentStart = index + 1;
+    } else if (char === '&' && command[index + 1] === '&') {
+      segmentStart = index + 2;
+      index += 1;
+    }
+  }
+  return command.slice(segmentStart).trim();
+};
+
 const hasShellCommandSeparator = (command: string): boolean => {
   for (let index = 0; index < command.length; index += 1) {
     const char = command[index];
@@ -83,7 +115,7 @@ export function beginOscColorQuerySuppressionForStartupCommand(
     beginOscColorQuerySuppression(state);
     return;
   }
-  beginOscColorQuerySuppressionForCommand(state, command);
+  beginOscColorQuerySuppressionForCommand(state, getLastStartupCommandSegment(command));
 }
 
 export function endOscColorQuerySuppressionForCommand(state: { current: boolean }): void {

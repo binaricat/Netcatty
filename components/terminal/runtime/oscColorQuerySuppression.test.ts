@@ -70,6 +70,24 @@ test('startup commands recognize saved Docker logs commands and built-in launche
   beginOscColorQuerySuppressionForStartupCommand(state, 'docker logs -f api');
   assert.equal(state.current, true);
 
+  beginOscColorQuerySuppressionForStartupCommand(
+    state,
+    'cd /srv\ndocker logs -f api',
+  );
+  assert.equal(state.current, true);
+
+  beginOscColorQuerySuppressionForStartupCommand(
+    state,
+    'cd "/srv/a && b" && docker logs -f api',
+  );
+  assert.equal(state.current, true);
+
+  beginOscColorQuerySuppressionForStartupCommand(
+    state,
+    'docker logs api && echo done',
+  );
+  assert.equal(state.current, false);
+
   beginOscColorQuerySuppressionForStartupCommand(state, 'vim');
   assert.equal(state.current, false);
 
