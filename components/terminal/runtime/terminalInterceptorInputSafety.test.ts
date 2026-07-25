@@ -151,7 +151,7 @@ test("only trusted broadcast commands transition OSC color-query suppression on 
   );
   assert.doesNotMatch(
     terminalSource,
-    /else if \(data\.includes\("\\r"\) \|\| data\.includes\("\\n"\) \|\| data\.includes\("\\x03"\)\)[\s\S]*?endOscColorQuerySuppressionForCommand/u,
+    /trustedTarget[\s\S]{0,500}else if \(data\.includes\("\\r"\)[\s\S]*?endOscColorQuerySuppressionForCommand/u,
   );
   assert.match(
     runtimeSource,

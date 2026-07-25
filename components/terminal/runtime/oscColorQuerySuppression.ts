@@ -14,9 +14,9 @@ const DOCKER_GLOBAL_OPTIONS_WITH_VALUE = new Set([
 
 const commandBasename = (token: string): string => token.split('/').pop() ?? token;
 
-const getLastForegroundCommandSegment = (command: string): string => {
+const getForegroundCommandSegments = (command: string): string[] => {
+  const segments: string[] = [];
   let segmentStart = 0;
-  let lastCompletedSegment = '';
   let trailingSeparator: 'soft' | 'and' | null = null;
   let quote: "'" | '"' | null = null;
   let escaped = false;
@@ -40,21 +40,26 @@ const getLastForegroundCommandSegment = (command: string): string => {
     }
     if (char === ';' || char === '\r' || char === '\n') {
       const segment = command.slice(segmentStart, index).trim();
-      if (segment) lastCompletedSegment = segment;
+      if (segment) segments.push(segment);
       segmentStart = index + 1;
       trailingSeparator = 'soft';
     } else if (char === '&' && command[index + 1] === '&') {
       const segment = command.slice(segmentStart, index).trim();
-      if (segment) lastCompletedSegment = segment;
+      if (segment) segments.push(segment);
       segmentStart = index + 2;
       trailingSeparator = 'and';
       index += 1;
     }
   }
   const finalSegment = command.slice(segmentStart).trim();
-  if (finalSegment) return finalSegment;
-  return trailingSeparator === 'soft' ? lastCompletedSegment : '';
+  if (finalSegment) segments.push(finalSegment);
+  if (!finalSegment && trailingSeparator === 'and') return [];
+  return segments;
 };
+
+const isSafeDockerLogsSetupCommand = (command: string): boolean => (
+  /^(?:builtin\s+|command\s+)?cd(?:\s|$)/u.test(command.trim())
+);
 
 const hasShellCommandSeparator = (command: string): boolean => {
   for (let index = 0; index < command.length; index += 1) {
@@ -106,7 +111,11 @@ const isStandaloneDockerLogsCommand = (command: string): boolean => {
 };
 
 export function isDockerLogsCommand(command: string): boolean {
-  return isStandaloneDockerLogsCommand(getLastForegroundCommandSegment(command));
+  const segments = getForegroundCommandSegments(command);
+  const dockerSegment = segments.at(-1);
+  return dockerSegment !== undefined
+    && segments.slice(0, -1).every(isSafeDockerLogsSetupCommand)
+    && isStandaloneDockerLogsCommand(dockerSegment);
 }
 
 export function beginOscColorQuerySuppressionForCommand(

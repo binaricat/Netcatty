@@ -46,6 +46,8 @@ test('docker logs detection covers direct and privileged commands without matchi
   assert.equal(isDockerLogsCommand('cd /srv\ndocker container logs api'), true);
   assert.equal(isDockerLogsCommand('docker logs -f api;\n'), true);
   assert.equal(isDockerLogsCommand('docker logs -f api &&'), false);
+  assert.equal(isDockerLogsCommand('vim && docker logs -f api'), false);
+  assert.equal(isDockerLogsCommand('command cd /srv && docker logs -f api'), true);
 });
 
 test('docker logs stays protected through prompt-like output and interrupt residue', () => {

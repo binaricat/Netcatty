@@ -1015,8 +1015,6 @@ const TerminalComponent: React.FC<TerminalProps> = ({
           suppressOscColorQueriesForActiveCommandRef,
           command,
         );
-      } else if (data.includes("\r") || data.includes("\n")) {
-        endOscColorQuerySuppressionForCommand(suppressOscColorQueriesForActiveCommandRef);
       }
       if (data.includes("\r") || data.includes("\n") || data.includes("\x03")) {
         trustedShellPromptReadyRef.current = false;
