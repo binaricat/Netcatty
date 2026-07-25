@@ -34,6 +34,10 @@ test('docker logs detection covers direct and privileged commands without matchi
   assert.equal(isDockerLogsCommand('docker logs -f api'), true);
   assert.equal(isDockerLogsCommand('docker container logs -f api'), true);
   assert.equal(isDockerLogsCommand('sudo -n docker logs --tail 200 api'), true);
+  assert.equal(isDockerLogsCommand('sudo --user root docker logs -f api'), true);
+  assert.equal(isDockerLogsCommand('doas -u root docker logs -f api'), true);
+  assert.equal(isDockerLogsCommand('env DOCKER_HOST=unix:///run/docker.sock docker logs -f api'), true);
+  assert.equal(isDockerLogsCommand('env -u DOCKER_CONTEXT docker logs api'), true);
   assert.equal(isDockerLogsCommand('sudo docker --host tcp://1.2.3.4:2375 container logs api'), true);
   assert.equal(isDockerLogsCommand('/usr/bin/docker --context prod logs api'), true);
   assert.equal(isDockerLogsCommand('docker exec api sh'), false);
@@ -51,6 +55,12 @@ test('docker logs detection covers direct and privileged commands without matchi
   assert.equal(isDockerLogsCommand('docker logs -f api &&'), false);
   assert.equal(isDockerLogsCommand('vim && docker logs -f api'), false);
   assert.equal(isDockerLogsCommand('command cd /srv && docker logs -f api'), true);
+  assert.equal(isDockerLogsCommand('command -p docker logs -f api'), true);
+  assert.equal(isDockerLogsCommand('command -v docker logs'), false);
+  assert.equal(isDockerLogsCommand('command -V docker logs'), false);
+  assert.equal(isDockerLogsCommand('docker --help logs'), false);
+  assert.equal(isDockerLogsCommand('docker --version logs'), false);
+  assert.equal(isDockerLogsCommand('sudo --help docker logs api'), false);
 });
 
 test('docker logs stays protected through prompt-like output and interrupt residue', () => {

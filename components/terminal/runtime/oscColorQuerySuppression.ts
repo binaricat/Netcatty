@@ -10,12 +10,17 @@ const TRUSTED_CURSOR_EDIT_SEQUENCE_PATTERN = new RegExp(
 );
 const suppressionEndBoundaries = new WeakSet<object>();
 
-const PRIVILEGE_WRAPPERS = new Set(['sudo', 'doas']);
-const SIMPLE_WRAPPERS = new Set(['command', 'builtin', 'exec']);
 const DOCKER_GLOBAL_OPTIONS_WITH_VALUE = new Set([
   '--config', '--context', '--host', '--log-level', '--tlscacert', '--tlscert', '--tlskey',
   '-c', '-H', '-l',
 ]);
+const DOCKER_NON_EXECUTING_OPTIONS = new Set(['--help', '--version', '-v']);
+const SUDO_OPTIONS_WITH_VALUE = new Set([
+  '--chdir', '--close-from', '--group', '--host', '--other-user', '--prompt', '--role', '--type', '--user',
+  '-C', '-g', '-h', '-p', '-R', '-r', '-t', '-u',
+]);
+const DOAS_OPTIONS_WITH_VALUE = new Set(['-a', '-C', '-u']);
+const ENV_OPTIONS_WITH_VALUE = new Set(['--unset', '-u']);
 
 const commandBasename = (token: string): string => token.split('/').pop() ?? token;
 
@@ -84,20 +89,42 @@ const isStandaloneDockerLogsCommand = (command: string): boolean => {
 
   while (index < tokens.length) {
     const wrapper = commandBasename(tokens[index]);
-    if (SIMPLE_WRAPPERS.has(wrapper)) {
+    if (wrapper === 'command') {
       index += 1;
-      while ((tokens[index] ?? '').startsWith('-')) index += 1;
+      while (tokens[index] === '-p' || tokens[index] === '--') index += 1;
+      if ((tokens[index] ?? '').startsWith('-')) return false;
       continue;
     }
-    if (PRIVILEGE_WRAPPERS.has(wrapper)) {
+    if (wrapper === 'exec') {
       index += 1;
       while ((tokens[index] ?? '').startsWith('-')) {
         const option = tokens[index];
+        if (!['--', '-a', '-c', '-l'].includes(option)) return false;
         index += 1;
-        if (!option.includes('=') && ['-C', '-g', '-h', '-p', '-R', '-r', '-t', '-u'].includes(option)) {
-          index += 1;
-        }
+        if (option === '-a') index += 1;
       }
+      continue;
+    }
+    if (wrapper === 'sudo' || wrapper === 'doas') {
+      index += 1;
+      const optionsWithValue = wrapper === 'sudo' ? SUDO_OPTIONS_WITH_VALUE : DOAS_OPTIONS_WITH_VALUE;
+      while ((tokens[index] ?? '').startsWith('-')) {
+        const option = tokens[index];
+        if (['--help', '--version', '-V'].includes(option)) return false;
+        index += 1;
+        if (!option.includes('=') && optionsWithValue.has(option)) index += 1;
+      }
+      continue;
+    }
+    if (wrapper === 'env') {
+      index += 1;
+      while ((tokens[index] ?? '').startsWith('-')) {
+        const option = tokens[index];
+        if (['--help', '--version'].includes(option)) return false;
+        index += 1;
+        if (!option.includes('=') && ENV_OPTIONS_WITH_VALUE.has(option)) index += 1;
+      }
+      while (/^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[index] ?? '')) index += 1;
       continue;
     }
     break;
@@ -107,6 +134,7 @@ const isStandaloneDockerLogsCommand = (command: string): boolean => {
   index += 1;
   while ((tokens[index] ?? '').startsWith('-')) {
     const option = tokens[index];
+    if (DOCKER_NON_EXECUTING_OPTIONS.has(option)) return false;
     index += 1;
     if (!option.includes('=') && DOCKER_GLOBAL_OPTIONS_WITH_VALUE.has(option)) index += 1;
   }
