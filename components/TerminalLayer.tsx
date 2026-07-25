@@ -965,6 +965,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
 
       const lineDelayMs = options?.lineDelayMs;
       if (data === "\x03" && terminalBackend.interruptSession) {
+        handleOscColorQueryBroadcastInputForSession(session.id, data);
         broadcastInterruptPrioritizersRef.current.get(session.id)?.();
         terminalBackend.interruptSession(session.id);
         continue;

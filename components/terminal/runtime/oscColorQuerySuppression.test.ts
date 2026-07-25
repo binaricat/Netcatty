@@ -8,6 +8,7 @@ import {
   consumeHibernatedBroadcastInput,
   endOscColorQuerySuppressionForCommand,
   isDockerLogsCommand,
+  markOscColorQuerySuppressionEndBoundary,
   registerOscColorQuerySuppressionArmer,
   stripOscColorQueryResponses,
 } from './oscColorQuerySuppression.ts';
@@ -62,8 +63,12 @@ test('docker logs stays protected through prompt-like output and interrupt resid
   assert.equal(state.current, true);
 });
 
-test('the next trusted non-log command restores ordinary color queries', () => {
+test('a non-log command restores ordinary color queries only after a user interrupt boundary', () => {
   const state = { current: true };
+  beginOscColorQuerySuppressionForCommand(state, 'vim');
+  assert.equal(state.current, true);
+  markOscColorQuerySuppressionEndBoundary(state);
+  assert.equal(state.current, true);
   beginOscColorQuerySuppressionForCommand(state, 'vim');
   assert.equal(state.current, false);
   endOscColorQuerySuppressionForCommand(state);
@@ -92,6 +97,13 @@ test('startup commands recognize saved Docker logs commands and built-in launche
     state,
     'docker logs api && echo done',
   );
+  assert.equal(state.current, true);
+
+  endOscColorQuerySuppressionForCommand(state);
+  beginOscColorQuerySuppressionForStartupCommand(
+    state,
+    'docker logs api && echo done',
+  );
   assert.equal(state.current, false);
 
   beginOscColorQuerySuppressionForStartupCommand(state, 'vim');
@@ -110,13 +122,15 @@ test('broadcast peer sessions can be armed through the suppression registry', ()
   const popupState = { current: false };
   const unregisterPeer = registerOscColorQuerySuppressionArmer(
     'peer-session',
-    (_data, command) => {
+    (data, command) => {
+      if (data.includes('\x03')) markOscColorQuerySuppressionEndBoundary(peerState);
       if (command !== undefined) beginOscColorQuerySuppressionForCommand(peerState, command);
     },
   );
   const unregisterPopup = registerOscColorQuerySuppressionArmer(
     'peer-session',
-    (_data, command) => {
+    (data, command) => {
+      if (data.includes('\x03')) markOscColorQuerySuppressionEndBoundary(popupState);
       if (command !== undefined) beginOscColorQuerySuppressionForCommand(popupState, command);
     },
   );
@@ -125,6 +139,7 @@ test('broadcast peer sessions can be armed through the suppression registry', ()
   assert.equal(peerState.current, true);
   assert.equal(popupState.current, true);
 
+  handleOscColorQueryBroadcastInputForSession('peer-session', '\x03');
   handleOscColorQueryBroadcastInputForSession('peer-session', '\r', 'vim');
   assert.equal(peerState.current, false);
   assert.equal(popupState.current, false);

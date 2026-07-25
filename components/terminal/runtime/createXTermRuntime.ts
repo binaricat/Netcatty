@@ -64,6 +64,7 @@ import {
 } from "./kittyKeyboardProtocol";
 import { installKittyKeyboardProtocolHandlersIfEnabled } from "./kittyKeyboardRuntime";
 import {
+  markOscColorQuerySuppressionEndBoundary,
   stripOscColorQueryResponses,
 } from "./oscColorQuerySuppression";
 import {
@@ -1405,6 +1406,11 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
         });
         if (ctx.passwordPromptActiveRef) {
           ctx.passwordPromptActiveRef.current = false;
+        }
+        if (ctx.suppressOscColorQueriesForActiveCommandRef) {
+          markOscColorQuerySuppressionEndBoundary(
+            ctx.suppressOscColorQueriesForActiveCommandRef,
+          );
         }
         if (ctx.terminalBackend.interruptSession) {
           ctx.terminalBackend.interruptSession(id, interruptTrace);

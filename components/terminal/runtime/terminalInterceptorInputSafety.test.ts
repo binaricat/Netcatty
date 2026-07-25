@@ -209,6 +209,10 @@ test("broadcast targets and direct-send paths require their own trusted shell bo
     /termRef\.current[\s\S]*?hibernatedRef\.current[\s\S]*?consumeHibernatedBroadcastInput[\s\S]*?beginOscColorQuerySuppressionForCommand/u,
   );
   assert.match(
+    terminalLayerSource,
+    /if \(data === "\\x03" && terminalBackend\.interruptSession\) \{\s*handleOscColorQueryBroadcastInputForSession\(session\.id, data\);[\s\S]*?terminalBackend\.interruptSession/u,
+  );
+  assert.match(
     terminalSource,
     /hibernatedBroadcastInputRef\.current = \{\s*promptReady: trustedShellPromptReadyRef\.current,\s*line: "",\s*tracking: false,\s*edited: false,\s*\}/u,
   );

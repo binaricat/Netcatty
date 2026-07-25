@@ -136,6 +136,7 @@ import {
   beginOscColorQuerySuppressionForStartupCommand,
   consumeHibernatedBroadcastInput,
   endOscColorQuerySuppressionForCommand,
+  markOscColorQuerySuppressionEndBoundary,
   registerOscColorQuerySuppressionArmer,
 } from "./terminal/runtime/oscColorQuerySuppression";
 import { clearKittyKeyboardBroadcastSession } from "./terminal/runtime/kittyKeyboardBroadcast";
@@ -985,6 +986,11 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   useEffect(() => registerOscColorQuerySuppressionArmer(
     sessionId,
     (data, command) => {
+      if (data.includes("\x03")) {
+        markOscColorQuerySuppressionEndBoundary(
+          suppressOscColorQueriesForActiveCommandRef,
+        );
+      }
       const broadcastInput = hibernatedBroadcastInputRef.current;
       if (termRef.current && !broadcastInput.tracking) {
         const livePrompt = getAlignedPrompt(termRef.current, "", false).prompt;

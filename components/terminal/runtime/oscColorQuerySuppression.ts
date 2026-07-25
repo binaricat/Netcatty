@@ -8,6 +8,7 @@ const TRUSTED_CURSOR_EDIT_SEQUENCE_PATTERN = new RegExp(
   `${ESC}(?:\\[[0-9;]*[CDFH]|O[HF])`,
   'gu',
 );
+const suppressionEndBoundaries = new WeakSet<object>();
 
 const PRIVILEGE_WRAPPERS = new Set(['sudo', 'doas']);
 const SIMPLE_WRAPPERS = new Set(['command', 'builtin', 'exec']);
@@ -126,11 +127,28 @@ export function beginOscColorQuerySuppressionForCommand(
   state: { current: boolean },
   command: string,
 ): void {
-  state.current = isDockerLogsCommand(command);
+  if (isDockerLogsCommand(command)) {
+    state.current = true;
+    suppressionEndBoundaries.delete(state);
+    return;
+  }
+  // A prompt-shaped line can be emitted by the container itself. Keep the
+  // active guard sticky until a local interrupt establishes a boundary that
+  // cannot have originated in Docker output.
+  if (!state.current || suppressionEndBoundaries.has(state)) {
+    state.current = false;
+    suppressionEndBoundaries.delete(state);
+  }
 }
 
 export function beginOscColorQuerySuppression(state: { current: boolean }): void {
   state.current = true;
+  suppressionEndBoundaries.delete(state);
+}
+
+/** Record a user-originated interrupt without exposing trailing output yet. */
+export function markOscColorQuerySuppressionEndBoundary(state: { current: boolean }): void {
+  if (state.current) suppressionEndBoundaries.add(state);
 }
 
 export function beginOscColorQuerySuppressionForStartupCommand(
@@ -147,6 +165,7 @@ export function beginOscColorQuerySuppressionForStartupCommand(
 
 export function endOscColorQuerySuppressionForCommand(state: { current: boolean }): void {
   state.current = false;
+  suppressionEndBoundaries.delete(state);
 }
 
 export type HibernatedBroadcastInputState = {
