@@ -146,6 +146,10 @@ test("only trusted broadcast commands transition OSC color-query suppression on 
     /resolveTrustedKeyboardBroadcastCommand[\s\S]*?resolveSubmittedShellCommand\([\s\S]*?oscColorQuerySuppressionCommand: resolveTrustedKeyboardBroadcastCommand\(\)/u,
   );
   assert.match(
+    runtimeSource,
+    /\(input, dispatchOptions\) => \{[\s\S]*?handleKittyKeyboardBroadcast\(input, dispatchOptions\)/u,
+  );
+  assert.match(
     terminalSource,
     /getAlignedPrompt\(termRef\.current, "", false\)[\s\S]*?livePrompt\.userInput\.trim\(\)\.length === 0/u,
   );

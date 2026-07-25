@@ -186,3 +186,20 @@ test('broadcast input accepts trusted multi-line and cursor-edited submissions',
   consumeHibernatedBroadcastInput(untrusted, 'docker logs');
   assert.equal(consumeHibernatedBroadcastInput(untrusted, '\r', 'docker logs'), false);
 });
+
+test('broadcast history navigation cannot borrow the source command identity', () => {
+  const history = { promptReady: true, line: '', tracking: false };
+  consumeHibernatedBroadcastInput(history, 'vim');
+  consumeHibernatedBroadcastInput(history, '\x1b[A');
+  assert.equal(
+    consumeHibernatedBroadcastInput(history, '\r', 'docker logs -f api'),
+    false,
+  );
+
+  const reverseSearch = { promptReady: true, line: '', tracking: false };
+  consumeHibernatedBroadcastInput(reverseSearch, '\x12docker');
+  assert.equal(
+    consumeHibernatedBroadcastInput(reverseSearch, '\r', 'docker logs -f api'),
+    false,
+  );
+});

@@ -4,6 +4,10 @@ const OSC_COLOR_RESPONSE_PATTERN = new RegExp(
   'giu',
 );
 const BRACKETED_PASTE_MARKER_PATTERN = new RegExp(`${ESC}\\[(?:200|201)~`, 'gu');
+const TRUSTED_CURSOR_EDIT_SEQUENCE_PATTERN = new RegExp(
+  `${ESC}(?:\\[[0-9;]*[CDFH]|O[HF])`,
+  'gu',
+);
 
 const PRIVILEGE_WRAPPERS = new Set(['sudo', 'doas']);
 const SIMPLE_WRAPPERS = new Set(['command', 'builtin', 'exec']);
@@ -150,6 +154,7 @@ export type HibernatedBroadcastInputState = {
   line: string;
   tracking: boolean;
   edited?: boolean;
+  unverifiableEdit?: boolean;
 };
 
 /** Track the input line while xterm is absent and verify the submitted command. */
@@ -172,9 +177,22 @@ export function consumeHibernatedBroadcastInput(
     state.line = '';
     state.tracking = false;
     state.edited = false;
+    delete state.unverifiableEdit;
     return true;
   }
   const wasTracking = state.tracking;
+  const untrackedControls = input.replace(TRUSTED_CURSOR_EDIT_SEQUENCE_PATTERN, '');
+  if (Array.from(untrackedControls).some((char) => {
+    const code = char.charCodeAt(0);
+    return code < 32
+      && char !== '\r'
+      && char !== '\n'
+      && char !== '\x03'
+      && char !== '\x15'
+      && char !== '\b';
+  })) {
+    state.unverifiableEdit = true;
+  }
   if (input.includes(ESC)) state.edited = true;
   if (input) state.tracking = true;
   let trustedSubmission = false;
@@ -184,6 +202,7 @@ export function consumeHibernatedBroadcastInput(
       state.line = '';
       state.tracking = false;
       state.edited = false;
+      delete state.unverifiableEdit;
     } else if (char === '\x15') {
       state.line = '';
     } else if (char === '\b' || char === '\x7f') {
@@ -191,11 +210,15 @@ export function consumeHibernatedBroadcastInput(
     } else if (char === '\r' || char === '\n') {
       trustedSubmission ||= state.promptReady
         && command !== undefined
-        && (state.line.trim() === command.trim() || (wasTracking && state.edited === true));
+        && (
+          state.line.trim() === command.trim()
+          || (wasTracking && state.edited === true && state.unverifiableEdit !== true)
+        );
       state.promptReady = false;
       state.line = '';
       state.tracking = false;
       state.edited = false;
+      delete state.unverifiableEdit;
     } else if (char.charCodeAt(0) >= 32) {
       state.line += char;
     } else {

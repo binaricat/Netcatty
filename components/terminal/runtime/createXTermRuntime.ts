@@ -1844,10 +1844,10 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
   });
   registerKittyKeyboardBroadcastHandler(
     ctx.sessionId,
-    (input) => {
+    (input, dispatchOptions) => {
       handlingKittyBroadcast = true;
       try {
-        handleKittyKeyboardBroadcast(input);
+        handleKittyKeyboardBroadcast(input, dispatchOptions);
       } finally {
         handlingKittyBroadcast = false;
       }
