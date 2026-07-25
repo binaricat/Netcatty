@@ -33,6 +33,7 @@ test("package validation avoids duplicate branch runs and scopes PR builds", () 
   assert.doesNotMatch(buildWorkflow, /\n  dedupe:/);
   assert.doesNotMatch(buildWorkflow, /\n  dedupe-result:/);
   for (const packagedInput of [
+    "electron/**",
     "electron/entitlements.mac.plist",
     "electron/bridges/terminalBridge.cjs",
     "infrastructure/config/terminalFlowConstants.*",
@@ -40,10 +41,33 @@ test("package validation avoids duplicate branch runs and scopes PR builds", () 
     "scripts/afterPackMacUuid.cjs",
     "scripts/beforePackCursorSdk.cjs",
     "scripts/nodePtyConptyPatch.cjs",
+    "scripts/linux/**",
     "skills/**",
   ]) {
     assert.ok(buildWorkflow.includes(`- "${packagedInput}"`), `${packagedInput} must trigger package validation`);
   }
+
+  for (const excludedTestInput of [
+    "!electron/**/*.test.*",
+    "!electron/**/*.spec.*",
+    "!electron/**/__tests__/**",
+    "!electron/**/test/**",
+    "!electron/**/tests/**",
+    "!electron/**/example/**",
+    "!electron/**/examples/**",
+    "!electron/plugins/fixtures/**",
+  ]) {
+    assert.ok(buildWorkflow.includes(`- "${excludedTestInput}"`), `${excludedTestInput} must stay out of package validation`);
+  }
+
+  assert.ok(
+    buildWorkflow.indexOf('- "electron/**"') < buildWorkflow.indexOf('- "!electron/**/*.test.*"'),
+    "packaged Electron files must be included before test-only exclusions",
+  );
+  assert.ok(
+    buildWorkflow.indexOf('- "electron/plugins/**"') < buildWorkflow.indexOf('- "!electron/plugins/fixtures/**"'),
+    "plugin fixtures must stay excluded after plugin runtime files are included",
+  );
 });
 
 test("Windows packaging reuses its dependency install for the ConPTY smoke test", () => {
