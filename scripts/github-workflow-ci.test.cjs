@@ -18,6 +18,10 @@ const windowsEtBuild = fs.readFileSync(
   path.join(__dirname, "build-et", "build-windows.ps1"),
   "utf8",
 );
+const homebrewBump = fs.readFileSync(
+  path.join(__dirname, "..", ".github", "scripts", "bump-homebrew-cask.sh"),
+  "utf8",
+);
 
 const pullRequestPaths = buildWorkflow
   .match(/pull_request:\s*\n\s*paths:\s*\n((?:\s+- "[^"]+"\s*\n)+)/)?.[1]
@@ -204,6 +208,20 @@ test("stable releases propose Nix metadata through a pull request", () => {
     nixJob[0].indexOf('gh pr list') < nixJob[0].indexOf('git switch -C'),
     "an existing Nix PR must be reused before rebuilding its branch",
   );
+});
+
+test("Homebrew tap updates retry push races without downgrading newer releases", () => {
+  assert.match(homebrewBump, /MAX_PUSH_ATTEMPTS/);
+  assert.match(homebrewBump, /version_is_newer/);
+  assert.match(homebrewBump, /git fetch --depth=1 origin main/);
+  assert.match(homebrewBump, /git switch -C main origin\/main/);
+  assert.match(homebrewBump, /for \(\(attempt=1; attempt<=MAX_PUSH_ATTEMPTS; attempt\+\+\)\)/);
+  assert.match(homebrewBump, /if version_is_newer "\$current_version" "\$VERSION"/);
+  assert.match(homebrewBump, /if push_output="\$\(git push origin HEAD:main 2>&1\)"/);
+  assert.match(homebrewBump, /grep -Eqi 'non-fast-forward\|fetch first' <<<"\$push_output"/);
+  assert.doesNotMatch(homebrewBump, /2> >\(tee/);
+  assert.match(homebrewBump, /Tap already has newer version/);
+  assert.match(homebrewBump, /Push raced with another release/);
 });
 
 test("Codex fix publishing treats a moved PR head as a stale result", () => {
