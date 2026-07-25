@@ -60,13 +60,22 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - name: Restore cached PR build
+        id: et-build-cache
+        if: github.event_name == 'pull_request'
+        uses: actions/cache@v6
+        with:
+          path: out/
+          key: et-pr-build-v1-${{ runner.os }}-${{ runner.arch }}-${{ env.ET_REF }}-${{ hashFiles('.github/workflows/build-et-binaries.yml', 'scripts/build-et/**') }}
       - name: Restore vcpkg download cache
+        if: github.event_name != 'pull_request' || steps.et-build-cache.outputs.cache-hit != 'true'
         uses: actions/cache@v6
         with:
           path: .cache/vcpkg-downloads
           key: vcpkg-downloads-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/build-et/**') }}
           restore-keys: vcpkg-downloads-${{ runner.os }}-${{ runner.arch }}-
       - name: Pull build container with retry
+        if: github.event_name != 'pull_request' || steps.et-build-cache.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
           image="quay.io/pypa/manylinux2014_x86_64"
@@ -80,6 +89,7 @@ jobs:
           done
           exit 1
       - name: Build et (linux-x64)
+        if: github.event_name != 'pull_request' || steps.et-build-cache.outputs.cache-hit != 'true'
         run: |
           mkdir -p "${GITHUB_WORKSPACE}/.cache/vcpkg-downloads"
           docker run --rm --pull=never \
@@ -96,19 +106,29 @@ jobs:
         with:
           name: et-linux-x64
           path: out/
+          if-no-files-found: error
 
   build-linux-arm64:
     name: build-linux-arm64
     runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v7
+      - name: Restore cached PR build
+        id: et-build-cache
+        if: github.event_name == 'pull_request'
+        uses: actions/cache@v6
+        with:
+          path: out/
+          key: et-pr-build-v1-${{ runner.os }}-${{ runner.arch }}-${{ env.ET_REF }}-${{ hashFiles('.github/workflows/build-et-binaries.yml', 'scripts/build-et/**') }}
       - name: Restore vcpkg download cache
+        if: github.event_name != 'pull_request' || steps.et-build-cache.outputs.cache-hit != 'true'
         uses: actions/cache@v6
         with:
           path: .cache/vcpkg-downloads
           key: vcpkg-downloads-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/build-et/**') }}
           restore-keys: vcpkg-downloads-${{ runner.os }}-${{ runner.arch }}-
       - name: Pull build container with retry
+        if: github.event_name != 'pull_request' || steps.et-build-cache.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
           image="quay.io/pypa/manylinux2014_aarch64"
@@ -122,6 +142,7 @@ jobs:
           done
           exit 1
       - name: Build et (linux-arm64)
+        if: github.event_name != 'pull_request' || steps.et-build-cache.outputs.cache-hit != 'true'
         run: |
           mkdir -p "${GITHUB_WORKSPACE}/.cache/vcpkg-downloads"
           docker run --rm --pull=never \
@@ -138,6 +159,7 @@ jobs:
         with:
           name: et-linux-arm64
           path: out/
+          if-no-files-found: error
 
   # ------------------------------------------------------------------
   # macOS universal2 (arm64 + x86_64 lipo). Min deployment target macOS 11.
@@ -147,17 +169,27 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v7
+      - name: Restore cached PR build
+        id: et-build-cache
+        if: github.event_name == 'pull_request'
+        uses: actions/cache@v6
+        with:
+          path: out/
+          key: et-pr-build-v1-${{ runner.os }}-${{ runner.arch }}-${{ env.ET_REF }}-${{ hashFiles('.github/workflows/build-et-binaries.yml', 'scripts/build-et/**') }}
       - name: Restore vcpkg download cache
+        if: github.event_name != 'pull_request' || steps.et-build-cache.outputs.cache-hit != 'true'
         uses: actions/cache@v6
         with:
           path: ${{ runner.temp }}/vcpkg-downloads
           key: vcpkg-downloads-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/build-et/**') }}
           restore-keys: vcpkg-downloads-${{ runner.os }}-${{ runner.arch }}-
       - name: Prepare vcpkg download cache
+        if: github.event_name != 'pull_request' || steps.et-build-cache.outputs.cache-hit != 'true'
         run: |
           mkdir -p "${RUNNER_TEMP}/vcpkg-downloads"
           echo "VCPKG_DOWNLOADS=${RUNNER_TEMP}/vcpkg-downloads" >> "$GITHUB_ENV"
       - name: Build et (darwin-universal)
+        if: github.event_name != 'pull_request' || steps.et-build-cache.outputs.cache-hit != 'true'
         env:
           ET_REF: ${{ env.ET_REF }}
           OUT_DIR: ${{ github.workspace }}/out
@@ -168,6 +200,7 @@ jobs:
         with:
           name: et-darwin-universal
           path: out/
+          if-no-files-found: error
 
   # ------------------------------------------------------------------
   # Windows x64 — static MSVC build (no DLL bundle).
@@ -177,25 +210,37 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7
+      - name: Restore cached PR build
+        id: et-build-cache
+        if: github.event_name == 'pull_request'
+        uses: actions/cache@v6
+        with:
+          path: out/
+          key: et-pr-build-v1-${{ runner.os }}-${{ runner.arch }}-${{ env.ET_REF }}-${{ hashFiles('.github/workflows/build-et-binaries.yml', 'scripts/build-et/**') }}
       - name: Restore vcpkg download cache
+        if: github.event_name != 'pull_request' || steps.et-build-cache.outputs.cache-hit != 'true'
         uses: actions/cache@v6
         with:
           path: ${{ runner.temp }}\vcpkg-downloads
           key: vcpkg-downloads-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/build-et/**') }}
           restore-keys: vcpkg-downloads-${{ runner.os }}-${{ runner.arch }}-
       - name: Prepare vcpkg download cache
+        if: github.event_name != 'pull_request' || steps.et-build-cache.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
           $downloads = Join-Path $env:RUNNER_TEMP "vcpkg-downloads"
           New-Item -ItemType Directory -Force -Path $downloads | Out-Null
           "VCPKG_DOWNLOADS=$downloads" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Install ninja
+        if: github.event_name != 'pull_request' || steps.et-build-cache.outputs.cache-hit != 'true'
         run: choco install -y ninja
       - name: Set up MSVC developer command prompt
+        if: github.event_name != 'pull_request' || steps.et-build-cache.outputs.cache-hit != 'true'
         uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: x64
       - name: Build et (win32-x64)
+        if: github.event_name != 'pull_request' || steps.et-build-cache.outputs.cache-hit != 'true'
         env:
           ET_REF: ${{ env.ET_REF }}
           OUT_DIR: ${{ github.workspace }}\out
@@ -206,6 +251,7 @@ jobs:
         with:
           name: et-win32-x64
           path: out/
+          if-no-files-found: error
 
   # ------------------------------------------------------------------
   # Windows arm64 — intentionally not built until a tested client exists.

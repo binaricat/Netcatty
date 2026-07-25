@@ -163,6 +163,45 @@ test("ET binary validation runs once and retries transient container pulls", () 
   assert.match(windowsEtBuild, /Invoke-WithRetry/);
 });
 
+test("ET pull requests reuse exact platform builds without weakening release builds", () => {
+  const buildJobs = [
+    ["linux-x64", etWorkflow.match(/\n  build-linux-x64:\n[\s\S]*?(?=\n  build-linux-arm64:)/)?.[0]],
+    ["linux-arm64", etWorkflow.match(/\n  build-linux-arm64:\n[\s\S]*?(?=\n  build-macos-universal:)/)?.[0]],
+    ["macos-universal", etWorkflow.match(/\n  build-macos-universal:\n[\s\S]*?(?=\n  build-windows-x64:)/)?.[0]],
+    ["windows-x64", etWorkflow.match(/\n  build-windows-x64:\n[\s\S]*?(?=\n  # ------------------------------------------------------------------\n  # Windows arm64)/)?.[0]],
+  ];
+  const skipOnExactPrCacheHit =
+    "if: github.event_name != 'pull_request' || steps.et-build-cache.outputs.cache-hit != 'true'";
+
+  for (const [platform, job] of buildJobs) {
+    assert.ok(job, `${platform} ET build job must be readable`);
+    assert.match(job, /- name: Restore cached PR build\s*\n\s*id: et-build-cache/);
+    assert.match(job, /if: github\.event_name == 'pull_request'/);
+    assert.match(job, /path: out\//);
+    assert.match(
+      job,
+      /key: et-pr-build-v1-\$\{\{ runner\.os \}\}-\$\{\{ runner\.arch \}\}-\$\{\{ env\.ET_REF \}\}-\$\{\{ hashFiles\('\.github\/workflows\/build-et-binaries\.yml', 'scripts\/build-et\/\*\*'\) \}\}/,
+    );
+    assert.ok(job.includes(skipOnExactPrCacheHit), `${platform} must skip compilation on an exact PR cache hit`);
+    assert.match(
+      job,
+      /- name: Upload artifact[\s\S]*?if-no-files-found: error/,
+      `${platform} must fail instead of publishing an empty cached build`,
+    );
+  }
+
+  assert.equal(
+    (etWorkflow.match(new RegExp(skipOnExactPrCacheHit.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g")) ?? []).length,
+    14,
+    "all dependency setup and compilation steps must be skipped when the exact PR build is cached",
+  );
+  assert.doesNotMatch(
+    etWorkflow.match(/\n  release:\n[\s\S]*$/)?.[0] ?? "",
+    /et-build-cache|Restore cached PR build/,
+    "manual releases must never reuse PR build outputs",
+  );
+});
+
 test("GitHub-owned actions use current Node 24 releases", () => {
   const workflows = fs.readdirSync(workflowsDir)
     .filter((name) => name.endsWith(".yml"))
