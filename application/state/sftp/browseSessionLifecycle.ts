@@ -1,9 +1,11 @@
 /**
  * Browse vs transfer session lifecycle helpers.
  *
- * FileZilla model: the interactive browser can soft-close its SFTP channels
- * while bulk transfers keep dedicated pool connections (and any leased browse
- * sessions held by in-flight streams).
+ * FileZilla model: a *hidden* interactive browser (e.g. closed terminal SFTP
+ * side panel) can soft-close its browse SFTP channels while bulk transfers keep
+ * dedicated pool connections (and any leased browse sessions held by in-flight
+ * streams). The main top-level SFTP page stays interactive while mounted so
+ * switching away in the top tabs does not force reconnects.
  */
 
 export function shouldParkBrowseSessions(params: {

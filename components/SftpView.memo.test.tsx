@@ -1,5 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+
+test("main SftpView keeps browse sessions across top-tab switches", () => {
+  const source = readFileSync(new URL("./SftpView.tsx", import.meta.url), "utf8");
+  // Mount stays alive after first visit; parking on isActive caused every
+  // remote tab to reconnect when leaving SFTP for Terminal and coming back.
+  assert.match(source, /interactive:\s*true/);
+  assert.doesNotMatch(source, /interactive:\s*isActive/);
+});
 
 test("SftpView re-renders when host-key verification setting changes", async () => {
   Object.defineProperty(globalThis, "localStorage", {

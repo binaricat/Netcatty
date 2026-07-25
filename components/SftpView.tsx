@@ -118,15 +118,16 @@ const SftpViewInner: React.FC<SftpViewProps> = ({
   const sftpOptions = useMemo(() => ({
     ...fileWatchHandlers,
     transferOwnerId: "main-sftp-view",
-    // Leaving the main SFTP page parks browse channels; transfers continue
-    // on dedicated pool sessions (and any leased browse sockets).
-    interactive: isActive,
+    // Keep browse channels while the main SFTP page stays mounted. Top-tab
+    // switches (e.g. Terminal ↔ SFTP) must not soft-close every tab's session;
+    // the terminal side panel still parks when its panel is hidden.
+    interactive: true,
     useCompressedUpload: sftpUseCompressedUpload,
     defaultShowHiddenFiles: sftpShowHiddenFiles,
     terminalSettings,
     knownHosts,
     onAddKnownHost,
-  }), [fileWatchHandlers, isActive, sftpUseCompressedUpload, sftpShowHiddenFiles, terminalSettings, knownHosts, onAddKnownHost]);
+  }), [fileWatchHandlers, sftpUseCompressedUpload, sftpShowHiddenFiles, terminalSettings, knownHosts, onAddKnownHost]);
 
   // Pre-resolve group defaults so SFTP connections inherit group config
   const effectiveHosts = useMemo(() => {
