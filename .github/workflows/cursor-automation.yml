@@ -999,7 +999,7 @@ jobs:
                 await github.rest.issues.addLabels({
                   ...context.repo,
                   issue_number: Number(process.env.ISSUE_NUMBER),
-                  labels: ['automation:needs-human'],
+                  labels: ['ready-for-human'],
                 }).catch(() => {});
                 await github.rest.issues.createComment({
                   ...context.repo,
@@ -1465,7 +1465,7 @@ jobs:
               >/dev/null 2>&1 || true
             gh api --method POST \
               "repos/${GITHUB_REPOSITORY}/issues/${PULL_NUMBER}/labels" \
-              -f 'labels[]=automation:needs-human' >/dev/null 2>&1 || true
+              -f 'labels[]=ready-for-human' >/dev/null 2>&1 || true
             gh pr comment "$PULL_NUMBER" --repo "$GITHUB_REPOSITORY" --body \
               "Codex reported no major issues, but the automation token cannot change draft state. A maintainer can mark this PR ready." 2>/dev/null || true
             exit 0

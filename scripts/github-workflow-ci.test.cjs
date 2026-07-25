@@ -277,6 +277,12 @@ test("clean Codex handoff updates labels without GraphQL-only organization scope
   assert.doesNotMatch(markReady[0], /gh pr edit/);
 });
 
+test("permission handoffs use the established ready-for-human label", () => {
+  assert.doesNotMatch(cursorWorkflow, /automation:needs-human/);
+  assert.match(cursorWorkflow, /labels: \['ready-for-human'\]/);
+  assert.match(cursorWorkflow, /-f 'labels\[\]=ready-for-human'/);
+});
+
 test("ET binary validation runs once and retries transient container pulls", () => {
   assert.match(etWorkflow, /push:\s*\n\s*branches:\s*\n\s*- main/);
   assert.doesNotMatch(etWorkflow, /branches:\s*\n\s*- "\*\*"/);
