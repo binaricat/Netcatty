@@ -943,7 +943,6 @@ jobs:
               agentBody,
             });
             let pr;
-            let created = true;
             try {
               ({ data: pr } = await github.rest.pulls.create({
                 ...context.repo,
@@ -972,7 +971,6 @@ jobs:
                   per_page: 1,
                 });
                 pr = existing[0];
-                created = false;
                 if (!pr) throw error;
                 core.notice(`Another run already opened ${pr.html_url}; reuse it.`);
               } else if (status === 403 && createPermissionDenied) {
@@ -992,15 +990,21 @@ jobs:
                 throw error;
               }
             }
-            if (created) {
-              await github.rest.issues.addLabels({
-                ...context.repo,
-                issue_number: pr.number,
-                labels: ['automation:bot-pr', 'automation:codex-loop', 'triage'],
-              });
+            await github.rest.issues.addLabels({
+              ...context.repo,
+              issue_number: pr.number,
+              labels: ['automation:bot-pr', 'automation:codex-loop', 'triage'],
+            });
+            const sourceIssueNumber = Number(process.env.ISSUE_NUMBER);
+            const sourceComments = await github.paginate(github.rest.issues.listComments, {
+              ...context.repo,
+              issue_number: sourceIssueNumber,
+              per_page: 100,
+            });
+            if (!auto.hasAutomationPullRequestBacklink(sourceComments, pr.html_url)) {
               await github.rest.issues.createComment({
                 ...context.repo,
-                issue_number: Number(process.env.ISSUE_NUMBER),
+                issue_number: sourceIssueNumber,
                 body: auto.buildPullRequestComment({
                   pullRequestUrl: pr.html_url,
                   clean: false,
@@ -1431,26 +1435,25 @@ jobs:
             gh pr ready "$PULL_NUMBER" --repo "$GITHUB_REPOSITORY" --undo 2>/dev/null || true
             exit 0
           fi
-          # Terminal label transition: drop codex-loop, add codex-clean (pure helper).
-          node -e '
-            const { execFileSync } = require("node:child_process");
-            const auto = require(process.env.RUNNER_TEMP + "/cursor-automation.cjs");
-            const pull = process.env.PULL_NUMBER;
-            const repo = process.env.GITHUB_REPOSITORY;
-            const raw = execFileSync(
-              "gh",
-              ["api", `repos/${repo}/issues/${pull}`, "--jq", "[.labels[].name]"],
-              { encoding: "utf8" },
-            );
-            const existing = JSON.parse(raw);
-            const next = auto.nextCodexTerminalLabels(existing, "mark_ready");
-            execFileSync(
-              "gh",
-              ["api", "--method", "PUT", `repos/${repo}/issues/${pull}/labels`, "--input", "-"],
-              { input: JSON.stringify({ labels: next }), stdio: ["pipe", "inherit", "inherit"] },
-            );
-            console.log("mark_ready labels:", next.join(", "));
-          '
+          # Change only the automation labels so concurrent maintainer labels survive.
+          delete_label() {
+            local encoded_label="$1"
+            local output
+            if ! output="$(gh api --method DELETE \
+              "repos/${GITHUB_REPOSITORY}/issues/${PULL_NUMBER}/labels/${encoded_label}" 2>&1)"; then
+              if grep -qiE 'HTTP 404|Label does not exist|Not Found' <<<"$output"; then
+                return 0
+              fi
+              echo "$output" >&2
+              return 1
+            fi
+          }
+          delete_label "automation%3Acodex-loop"
+          delete_label "ready-for-human"
+          gh api --method POST \
+            "repos/${GITHUB_REPOSITORY}/issues/${PULL_NUMBER}/labels" \
+            -f 'labels[]=automation:codex-clean' \
+            -f 'labels[]=automation:bot-pr' >/dev/null
           # Confirm draft=false before claiming success.
           draft="$(gh pr view "$PULL_NUMBER" --repo "$GITHUB_REPOSITORY" --json isDraft -q .isDraft)"
           if [[ "$draft" == "true" ]]; then

@@ -175,11 +175,28 @@ test("issue implementation publishing tolerates competing automation runs", () =
   assert.match(publishJob[0], /not permitted to create/);
 });
 
+test("reused automation PRs still receive labels and one source-issue backlink", () => {
+  const openPr = cursorWorkflow.match(
+    /\n      - name: Open draft PR[\s\S]*?(?=\n      - name: Request Codex review on implement PR)/,
+  );
+  assert.ok(openPr, "open-PR step must exist before Codex review request");
+  assert.match(openPr[0], /github\.rest\.issues\.addLabels/);
+  assert.match(openPr[0], /github\.paginate\(github\.rest\.issues\.listComments/);
+  assert.match(openPr[0], /auto\.hasAutomationPullRequestBacklink/);
+  assert.doesNotMatch(openPr[0], /if \(created\)/);
+});
+
 test("clean Codex handoff updates labels without GraphQL-only organization scopes", () => {
   const markReady = cursorWorkflow.match(/\n      - name: Mark PR ready after clean Codex[\s\S]*?(?=\n      - name: Give up after max rounds)/);
   assert.ok(markReady, "mark-ready step must exist before give-up step");
   assert.match(markReady[0], /gh api/);
-  assert.match(markReady[0], /issues\/\$\{pull\}\/labels/);
+  assert.match(markReady[0], /issues\/\$\{PULL_NUMBER\}\/labels/);
+  assert.match(markReady[0], /automation%3Acodex-loop/);
+  assert.match(markReady[0], /ready-for-human/);
+  assert.match(markReady[0], /labels\[\]=automation:codex-clean/);
+  assert.match(markReady[0], /labels\[\]=automation:bot-pr/);
+  assert.doesNotMatch(markReady[0], /nextCodexTerminalLabels/);
+  assert.doesNotMatch(markReady[0], /"PUT"/);
   assert.doesNotMatch(markReady[0], /gh pr edit/);
 });
 

@@ -1307,6 +1307,37 @@ test('nextCodexTerminalLabels rejects unknown terminal', () => {
   assert.throws(() => auto.nextCodexTerminalLabels([], 'nope'), /Unknown codex terminal/);
 });
 
+test('hasAutomationPullRequestBacklink deduplicates only the same marked PR link', () => {
+  const pullRequestUrl = 'https://github.com/binaricat/Netcatty/pull/2474';
+  assert.equal(
+    auto.hasAutomationPullRequestBacklink(
+      [
+        { body: `ordinary maintainer note with ${pullRequestUrl}` },
+        {
+          body: `${auto.TRIAGE_MARKER}\n\nA draft fix is available at https://github.com/binaricat/Netcatty/pull/2400.`,
+        },
+        {
+          body: `${auto.TRIAGE_MARKER}\n\nA draft fix is available at ${pullRequestUrl}.`,
+        },
+      ],
+      pullRequestUrl,
+    ),
+    true,
+  );
+  assert.equal(
+    auto.hasAutomationPullRequestBacklink([{ body: `${auto.TRIAGE_MARKER}\n\nDifferent PR` }], pullRequestUrl),
+    false,
+  );
+  assert.equal(
+    auto.hasAutomationPullRequestBacklink(
+      [{ body: `${auto.TRIAGE_MARKER}\n\nA draft fix is available at ${pullRequestUrl}4.` }],
+      pullRequestUrl,
+    ),
+    false,
+  );
+  assert.equal(auto.hasAutomationPullRequestBacklink([], ''), false);
+});
+
 test('parseImplementStatus reads OK summary and TITLE line', () => {
   const parsed = auto.parseImplementStatus(
     ['OK: Raise SFTP WRITE fanout to 32', 'TITLE: fix(sftp): raise upload WRITE fanout', ''].join(
