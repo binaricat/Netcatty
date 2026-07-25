@@ -229,9 +229,19 @@ test("issue implementation publishing tolerates competing automation runs", () =
   assert.match(publishJob[0], /reuse it without rewriting history/);
   assert.doesNotMatch(publishJob[0], /:\$\{expected\}/);
   assert.doesNotMatch(publishJob[0], /if \[\[ -n "\$expected" \]\]/);
-  assert.match(publishJob[0], /published=false/);
+  assert.doesNotMatch(publishJob[0], /published=false/);
   assert.match(publishJob[0], /remote_after/);
   assert.match(publishJob[0], /exit 1/);
+  assert.match(publishJob[0], /echo "handoff=true" >> "\$GITHUB_OUTPUT"/);
+  assert.match(
+    publishJob[0],
+    /if: failure\(\) && steps\.publish\.outputs\.handoff == 'true'/,
+  );
+  assert.doesNotMatch(publishJob[0], /steps\.publish\.outcome == 'failure'/);
+  assert.match(publishJob[0], /labels: \['ready-for-human'\]/);
+  assert.match(publishJob[0], /could not safely publish the implementation branch/);
+  assert.match(publishJob[0], /cursor-publish-handoff:/);
+  assert.match(publishJob[0], /github\.paginate\(github\.rest\.issues\.listComments/);
   assert.match(publishJob[0], /steps\.publish\.outputs\.published == 'true'/);
   assert.match(publishJob[0], /group: cursor-codex-head-/);
   assert.match(publishJob[0], /status === 403 && createPermissionDenied/);

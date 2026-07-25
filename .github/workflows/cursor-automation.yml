@@ -879,17 +879,47 @@ jobs:
           remote_tree="$(git rev-parse "refs/remotes/origin/${BRANCH}^{tree}")"
           live_after="$(git ls-remote --heads origin "refs/heads/${BRANCH}" | awk '{print $1}')"
           if [[ -z "$live_after" || "$live_after" != "$remote_after" ]]; then
-            echo "::notice::Remote branch $BRANCH changed while it was being checked; preserve it and discard this stale publish."
-            echo "published=false" >> "$GITHUB_OUTPUT"
-            exit 0
+            echo "::error::Remote branch $BRANCH changed while it was being checked; preserve it and hand off this publish."
+            echo "handoff=true" >> "$GITHUB_OUTPUT"
+            exit 1
           fi
           if [[ "$remote_tree" == "$candidate_tree" ]]; then
             echo "::notice::Remote branch $BRANCH already has the same implementation; reuse it without rewriting history."
             echo "published=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          echo "::notice::Remote branch $BRANCH already has different content; preserve it and discard this stale publish."
-          echo "published=false" >> "$GITHUB_OUTPUT"
+          echo "::error::Remote branch $BRANCH already has different content; preserve it and hand off this publish."
+          echo "handoff=true" >> "$GITHUB_OUTPUT"
+          exit 1
+
+      - name: Mark needs human on publish failure
+        if: failure() && steps.publish.outputs.handoff == 'true'
+        uses: actions/github-script@v9
+        env:
+          ISSUE_NUMBER: ${{ needs.implement.outputs.issue_number }}
+          BRANCH: ${{ needs.implement.outputs.branch }}
+        with:
+          github-token: ${{ secrets.TRIAGE_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
+          script: |
+            const issueNumber = Number(process.env.ISSUE_NUMBER);
+            const marker = `<!-- cursor-publish-handoff:${process.env.BRANCH} -->`;
+            await github.rest.issues.addLabels({
+              ...context.repo,
+              issue_number: issueNumber,
+              labels: ['ready-for-human'],
+            });
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              ...context.repo,
+              issue_number: issueNumber,
+              per_page: 100,
+            });
+            if (!comments.some((comment) => String(comment.body || '').includes(marker))) {
+              await github.rest.issues.createComment({
+                ...context.repo,
+                issue_number: issueNumber,
+                body: `${marker}\n\nThe automation could not safely publish the implementation branch \`${process.env.BRANCH}\` because that branch already contains different or changing work. A maintainer needs to review the preserved branch before retrying.`,
+              });
+            }
 
       - name: Checkout helper for PR body helpers
         if: steps.publish.outputs.published == 'true'
