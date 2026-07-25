@@ -9,6 +9,7 @@ import {
   isSftpNativeClipboardPasteEnabled,
   resolveSftpClipboardUploadTarget,
   shouldLetNativePasteEventHandleSftpPaste,
+  shouldStartClipboardUploadConfirm,
   type ClipboardLocalFile,
   type SftpClipboardUploadRequest,
 } from "./sftp/clipboardUpload.ts";
@@ -194,6 +195,29 @@ test("clipboard upload confirmation skips onUploaded when transfer fails", async
 
   // Dialog is still cleared so the UI is not stuck; refresh callback is skipped.
   assert.deepEqual(events, ["clear", "upload-start"]);
+});
+
+test("clipboard upload confirm guard is per request, not a global lock", () => {
+  const first: SftpClipboardUploadRequest = {
+    scopeId: "pane-1",
+    side: "left",
+    targetPath: "/a",
+    files: [{ path: "/tmp/a.txt", name: "a.txt", isDirectory: false, size: 1 }],
+    onConfirm: async () => {},
+  };
+  const second: SftpClipboardUploadRequest = {
+    scopeId: "pane-1",
+    side: "left",
+    targetPath: "/b",
+    files: [{ path: "/tmp/b.txt", name: "b.txt", isDirectory: false, size: 1 }],
+    onConfirm: async () => {},
+  };
+
+  assert.equal(shouldStartClipboardUploadConfirm(first, null), true);
+  assert.equal(shouldStartClipboardUploadConfirm(first, first), false);
+  // A later paste while the first transfer is still running must remain confirmable.
+  assert.equal(shouldStartClipboardUploadConfirm(second, first), true);
+  assert.equal(shouldStartClipboardUploadConfirm(null, first), false);
 });
 
 test("native clipboard paste follows SFTP paste shortcut availability", () => {

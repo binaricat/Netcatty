@@ -9,7 +9,11 @@ import {
   DialogTitle,
 } from "../ui/dialog";
 import type { SftpClipboardUploadRequest } from "./clipboardUpload";
-import { confirmSftpClipboardUpload, sftpClipboardUploadStore } from "./clipboardUpload";
+import {
+  confirmSftpClipboardUpload,
+  shouldStartClipboardUploadConfirm,
+  sftpClipboardUploadStore,
+} from "./clipboardUpload";
 
 interface SftpClipboardUploadDialogProps {
   request: SftpClipboardUploadRequest | null;
@@ -29,8 +33,9 @@ export const SftpClipboardUploadDialog: React.FC<SftpClipboardUploadDialogProps>
   currentPath,
   onUploaded,
 }) => {
-  // Guard double-clicks before React re-renders with a cleared request.
-  const confirmStartedRef = useRef(false);
+  // Double-click guard is scoped to the request identity so a later paste can
+  // confirm while an earlier background transfer is still running.
+  const confirmStartedForRef = useRef<SftpClipboardUploadRequest | null>(null);
   const open = !!request;
   const fileCount = request?.files.length ?? 0;
   const previewFiles = request?.files.slice(0, 5) ?? [];
@@ -42,17 +47,18 @@ export const SftpClipboardUploadDialog: React.FC<SftpClipboardUploadDialogProps>
   };
 
   const handleConfirm = async () => {
-    if (!request || confirmStartedRef.current) return;
-    confirmStartedRef.current = true;
+    if (!request || !shouldStartClipboardUploadConfirm(request, confirmStartedForRef.current)) {
+      return;
+    }
+    const confirmedRequest = request;
+    confirmStartedForRef.current = confirmedRequest;
     try {
       // Close immediately so side-panel / standalone SFTP stay interactive while
       // the existing background transfer path runs.
-      await confirmSftpClipboardUpload({ request, onUploaded });
+      await confirmSftpClipboardUpload({ request: confirmedRequest, onUploaded });
     } catch {
       // Transfer handlers toast failures; keep this path free of unhandled
       // rejections after the dialog has already closed.
-    } finally {
-      confirmStartedRef.current = false;
     }
   };
 

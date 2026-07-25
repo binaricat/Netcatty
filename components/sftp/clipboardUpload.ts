@@ -154,3 +154,11 @@ export async function confirmSftpClipboardUpload(params: {
   await request.onConfirm();
   onUploaded?.(request.targetPath);
 }
+
+/** True when Upload should start for this request (blocks same-request double-click only). */
+export function shouldStartClipboardUploadConfirm(
+  request: SftpClipboardUploadRequest | null | undefined,
+  alreadyStartedFor: SftpClipboardUploadRequest | null | undefined,
+): boolean {
+  return !!request && alreadyStartedFor !== request;
+}
