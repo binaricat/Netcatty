@@ -50,6 +50,7 @@ export const useTerminalContextActions = ({
   scrollOnPasteRef,
   isBroadcastEnabledRef,
   onBroadcastInputRef,
+  onPasteData,
   passwordPromptActiveRef,
   isLocalConnection,
   supportsRemoteImagePaste,
@@ -67,6 +68,7 @@ export const useTerminalContextActions = ({
   scrollOnPasteRef?: RefObject<boolean>;
   isBroadcastEnabledRef?: RefObject<boolean | undefined>;
   onBroadcastInputRef?: RefObject<((data: string, sourceSessionId: string) => void) | undefined>;
+  onPasteData?: (data: string) => boolean | void;
   passwordPromptActiveRef?: RefObject<boolean | undefined>;
   isLocalConnection: boolean;
   supportsRemoteImagePaste: boolean;
@@ -82,6 +84,7 @@ export const useTerminalContextActions = ({
   onClipboardImageUploadResult?: (result: RemoteClipboardImageUploadResult) => void;
 }) => {
   const broadcastUserPasteData = useCallback((data: string) => {
+    if (onPasteData) return onPasteData(data);
     return broadcastTerminalPasteData(data, {
       sourceSessionId,
       sessionRef,
@@ -89,7 +92,7 @@ export const useTerminalContextActions = ({
       onBroadcastInputRef,
       passwordPromptActiveRef,
     });
-  }, [isBroadcastEnabledRef, onBroadcastInputRef, passwordPromptActiveRef, sessionRef, sourceSessionId]);
+  }, [isBroadcastEnabledRef, onBroadcastInputRef, onPasteData, passwordPromptActiveRef, sessionRef, sourceSessionId]);
 
   const onCopy = useCallback(() => {
     const term = termRef.current;

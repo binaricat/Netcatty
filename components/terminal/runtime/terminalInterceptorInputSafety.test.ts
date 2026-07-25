@@ -164,6 +164,18 @@ test("broadcast targets and direct-send paths require their own trusted shell bo
     terminalSource,
     /autocompleteAcceptTextRef\.current[\s\S]*?let trustedSubmittedCommand[\s\S]*?trustedSubmittedCommand = command[\s\S]*?oscColorQuerySuppressionCommand: trustedSubmittedCommand/u,
   );
+  assert.match(
+    terminalSource,
+    /useTerminalContextActions\(\{[\s\S]*?onPasteData: broadcastUserPasteData/u,
+  );
+  assert.match(
+    terminalSource,
+    /trustedShellPromptReadyRef\.current = isTrustedTerminalShellSubmission[\s\S]*?disposeRuntimeOnly\(\)[\s\S]*?hibernatedRef\.current = true/u,
+  );
+  assert.match(
+    terminalSource,
+    /termRef\.current[\s\S]*?hibernatedRef\.current[\s\S]*?trustedShellPromptReadyRef\.current[\s\S]*?beginOscColorQuerySuppressionForCommand/u,
+  );
 });
 
 test("reconnect cleanup clears Docker-log OSC color-query suppression before disposing exit listeners", () => {
