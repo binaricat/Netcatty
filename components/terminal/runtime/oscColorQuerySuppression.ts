@@ -15,6 +15,11 @@ const DOCKER_GLOBAL_OPTIONS_WITH_VALUE = new Set([
   '-c', '-H', '-l',
 ]);
 const DOCKER_NON_EXECUTING_OPTIONS = new Set(['--help', '--version', '-v']);
+const SUDO_NON_EXECUTING_OPTIONS = new Set([
+  '--help', '--list', '--remove-timestamp', '--validate', '--version',
+  '-K', '-V', '-l', '-v',
+]);
+const DOAS_NON_EXECUTING_OPTIONS = new Set(['-C', '-L']);
 const SUDO_OPTIONS_WITH_VALUE = new Set([
   '--chdir', '--close-from', '--command-timeout', '--group', '--host', '--other-user', '--prompt', '--role',
   '--type', '--user', '-C', '-g', '-h', '-p', '-R', '-r', '-T', '-t', '-u',
@@ -137,7 +142,10 @@ const parseDockerBoolean = (value: string): boolean | null => {
 
 type DockerLogsCommand = { follow: boolean };
 
-const classifyStandaloneDockerLogsCommand = (command: string): DockerLogsCommand | null => {
+const classifyStandaloneDockerLogsCommand = (
+  command: string,
+  shellDepth = 0,
+): DockerLogsCommand | null => {
   if (hasShellCommandSeparator(command)) return null;
   const tokens = tokenizeShellWords(command);
   let index = 0;
@@ -167,8 +175,13 @@ const classifyStandaloneDockerLogsCommand = (command: string): DockerLogsCommand
       const optionsWithValue = wrapper === 'sudo' ? SUDO_OPTIONS_WITH_VALUE : DOAS_OPTIONS_WITH_VALUE;
       while ((tokens[index] ?? '').startsWith('-')) {
         const option = tokens[index];
-        if (['--help', '--version', '-V'].includes(option)) return null;
-        if (wrapper === 'doas' && (option === '-C' || option.startsWith('-C='))) return null;
+        if (
+          wrapper === 'sudo'
+            ? SUDO_NON_EXECUTING_OPTIONS.has(option)
+              || /^-[^-]*[lVvK][^-]*$/u.test(option)
+            : DOAS_NON_EXECUTING_OPTIONS.has(option)
+              || option.startsWith('-C=')
+        ) return null;
         index += 1;
         if (!option.includes('=') && optionsWithValue.has(option)) index += 1;
       }
@@ -188,11 +201,32 @@ const classifyStandaloneDockerLogsCommand = (command: string): DockerLogsCommand
     break;
   }
 
+  const shell = commandBasename(tokens[index] ?? '');
+  if (shellDepth < 2 && ['bash', 'dash', 'ksh', 'sh', 'zsh'].includes(shell)) {
+    index += 1;
+    let commandString: string | undefined;
+    while (index < tokens.length && (tokens[index] ?? '').startsWith('-')) {
+      const option = tokens[index];
+      index += 1;
+      if (option === '--') continue;
+      if (option === '-c' || /^-[^-]*c[^-]*$/u.test(option)) {
+        commandString = tokens[index];
+        break;
+      }
+    }
+    return commandString === undefined
+      ? null
+      : classifyStandaloneDockerLogsCommand(commandString, shellDepth + 1);
+  }
+
   if (commandBasename(tokens[index] ?? '') !== 'docker') return null;
   index += 1;
   while ((tokens[index] ?? '').startsWith('-')) {
     const option = tokens[index];
-    if (DOCKER_NON_EXECUTING_OPTIONS.has(option)) return null;
+    if (
+      DOCKER_NON_EXECUTING_OPTIONS.has(option)
+      || /^(?:--help|--version|-v)=/u.test(option)
+    ) return null;
     index += 1;
     if (!option.includes('=') && DOCKER_GLOBAL_OPTIONS_WITH_VALUE.has(option)) index += 1;
   }

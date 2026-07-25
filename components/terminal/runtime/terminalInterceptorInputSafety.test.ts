@@ -166,6 +166,10 @@ test("only trusted broadcast commands transition OSC color-query suppression on 
     /if \(kittySequenceForKeyDown\)[\s\S]*?urgentInterrupt[\s\S]*?markOscColorQuerySuppressionEndBoundary/u,
   );
   assert.match(
+    runtimeSource,
+    /const trustedKittyCommand[\s\S]*?ctx\.onTrustedCommandSubmitted\?\.[\s\S]*?oscColorQuerySuppressionCommand: trustedKittyCommand/u,
+  );
+  assert.match(
     terminalSource,
     /let trustedShellSubmission = false[\s\S]*?trustedShellSubmission = true[\s\S]*?trustedShellSubmission[\s\S]*?oscColorQuerySuppressionCommand: command/u,
   );
@@ -230,5 +234,24 @@ test("reconnect cleanup clears Docker-log OSC color-query suppression before dis
   assert.match(
     terminalSource,
     /if \(!attachExistingSession\) \{[\s\S]*?endOscColorQuerySuppressionForCommand\(suppressOscColorQueriesForActiveCommandRef\);[\s\S]*?disposeSessionListeners\(\);/u,
+  );
+});
+
+test("only explicit shell integration completion ends Docker-log color-query suppression", () => {
+  assert.match(
+    runtimeSource,
+    /consumeOsc133CommandCompletion[\s\S]*?onCommandCompleted\?\.\(\{ source: "osc133" \}\)/u,
+  );
+  assert.match(
+    attachmentSource,
+    /onCommandCompleted\?\.\(\{ source: "prompt" \}\)/u,
+  );
+  assert.match(
+    terminalSource,
+    /meta\?\.source === 'osc133'[\s\S]*?endOscColorQuerySuppressionForCommand/u,
+  );
+  assert.doesNotMatch(
+    terminalSource,
+    /meta\?\.source === 'prompt'[\s\S]*?endOscColorQuerySuppressionForCommand/u,
   );
 });

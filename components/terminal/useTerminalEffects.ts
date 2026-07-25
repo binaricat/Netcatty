@@ -60,6 +60,7 @@ import { resolveHostSshConnectionTimeouts } from '../../domain/sshConnectionTime
 import { resolveEffectiveTerminalProtocol } from '../../domain/terminalProtocol';
 import {
   beginOscColorQuerySuppressionForCommand,
+  endOscColorQuerySuppressionForCommand,
   restoreOscColorQuerySuppressionEndBoundary,
 } from './runtime/oscColorQuerySuppression';
 
@@ -190,7 +191,10 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
     publishPluginTerminalRuntimeLifecycleEvent(pluginTerminalLifecycle, 'commandSubmitted');
     void xtermRuntimeRef.current?.pluginProviderHost?.commandSubmitted(args[0]);
   };
-  const pluginAwareOnCommandCompleted = () => {
+  const pluginAwareOnCommandCompleted = (meta?: { source: 'osc133' | 'prompt' }) => {
+    if (meta?.source === 'osc133') {
+      endOscColorQuerySuppressionForCommand(ctx.suppressOscColorQueriesForActiveCommandRef);
+    }
     publishPluginTerminalRuntimeLifecycleEvent(pluginTerminalLifecycle, 'commandCompleted');
     void xtermRuntimeRef.current?.pluginProviderHost?.commandCompleted();
   };

@@ -283,7 +283,7 @@ export type CreateXTermRuntimeContext = {
     hostLabel: string,
     sessionId: string,
   ) => void;
-  onCommandCompleted?: () => void;
+  onCommandCompleted?: (meta?: { source: "osc133" | "prompt" }) => void;
   requestPluginTerminalProviders?: RequestPluginTerminalProviders;
   pluginProviderVisible?: boolean;
   isPluginTerminalProviderAvailable?: (kind: NetcattyTerminalProviderKind) => boolean;
@@ -1591,14 +1591,25 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
         kittyEvent,
         [],
       );
+      const trustedKittyCommand = kittyEvent.type !== "keyup" && kittyEvent.key === "Enter"
+        ? resolveTrustedKeyboardBroadcastCommand()
+        : undefined;
+      if (trustedKittyCommand) {
+        ctx.onTrustedCommandSubmitted?.(
+          trustedKittyCommand,
+          ctx.host.id,
+          ctx.host.label,
+          ctx.sessionId,
+        );
+      }
       handleTerminalInputData(kittySequenceForKeyDown, { source: "kitty" });
       const forwarded = broadcastKittyInput({
         kind: "key",
         event: kittyEvent,
         fallbackToLegacy: true,
         urgentInterrupt,
-        ...(kittyEvent.type !== "keyup" && kittyEvent.key === "Enter"
-          ? { oscColorQuerySuppressionCommand: resolveTrustedKeyboardBroadcastCommand() }
+        ...(trustedKittyCommand !== undefined
+          ? { oscColorQuerySuppressionCommand: trustedKittyCommand }
           : {}),
       });
       if (forwarded) {
@@ -1960,7 +1971,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
 
   const osc133Disposable = term.parser.registerOscHandler(133, (data) => {
     if (consumeOsc133CommandCompletion(data, ctx.promptLineBreakStateRef?.current)) {
-      ctx.onCommandCompleted?.();
+      ctx.onCommandCompleted?.({ source: "osc133" });
     }
     return true;
   });

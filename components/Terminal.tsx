@@ -2086,7 +2086,13 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     pluginTerminalLifecycle.onCommandSubmitted();
     void xtermRuntimeRef.current?.pluginProviderHost?.commandSubmitted(command);
   }, [pluginTerminalLifecycle]);
-  const pluginAwareOnCommandCompleted = useCallback(() => {
+  const pluginAwareOnCommandCompleted = useCallback((meta?: { source: 'osc133' | 'prompt' }) => {
+    // Prompt-shaped container output is not a trustworthy end boundary. Shell
+    // integration completion is the only in-band natural-completion signal;
+    // session exit covers the built-in Docker logs window.
+    if (meta?.source === 'osc133') {
+      endOscColorQuerySuppressionForCommand(suppressOscColorQueriesForActiveCommandRef);
+    }
     pluginTerminalLifecycle.onCommandCompleted();
     void xtermRuntimeRef.current?.pluginProviderHost?.commandCompleted();
   }, [pluginTerminalLifecycle]);

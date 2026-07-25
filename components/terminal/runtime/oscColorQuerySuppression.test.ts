@@ -64,10 +64,23 @@ test('docker logs detection covers direct and privileged commands without matchi
   assert.equal(isDockerLogsCommand('docker --help logs'), false);
   assert.equal(isDockerLogsCommand('docker --version logs'), false);
   assert.equal(isDockerLogsCommand('sudo --help docker logs api'), false);
+  assert.equal(isDockerLogsCommand('sudo -l docker logs -f api'), false);
+  assert.equal(isDockerLogsCommand('sudo --list docker logs -f api'), false);
+  assert.equal(isDockerLogsCommand('sudo -v docker logs -f api'), false);
+  assert.equal(isDockerLogsCommand('sudo --validate docker logs -f api'), false);
+  assert.equal(isDockerLogsCommand('sudo -K docker logs -f api'), false);
+  assert.equal(isDockerLogsCommand('doas -L docker logs -f api'), false);
   assert.equal(isDockerLogsCommand('doas -C /etc/doas.conf docker logs -f api'), false);
+  assert.equal(isDockerLogsCommand('docker --help=true logs -f api'), false);
+  assert.equal(isDockerLogsCommand('docker --version=true logs -f api'), false);
   assert.equal(isDockerLogsCommand('env LABEL="two words" docker logs -f api'), true);
   assert.equal(isDockerLogsCommand('env LABEL="a|b" docker logs -f api'), true);
   assert.equal(isDockerLogsCommand('sudo -p "Password for %u: " docker logs -f api'), true);
+  assert.equal(isDockerLogsCommand("sh -c 'docker logs -f api'"), true);
+  assert.equal(isDockerLogsCommand("bash -lc 'exec docker logs --follow=true api'"), true);
+  assert.equal(isDockerLogsCommand("sudo sh -c 'docker logs -f api'"), true);
+  assert.equal(isDockerLogsCommand("sh -c 'docker logs api'"), true);
+  assert.equal(isDockerLogsCommand("sh -c 'vim && docker logs -f api'"), false);
 });
 
 test('docker logs stays protected through prompt-like output and interrupt residue', () => {
