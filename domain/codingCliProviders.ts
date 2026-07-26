@@ -9,7 +9,8 @@ export type CodingCliProviderId =
   | 'droid'
   | 'copilot'
   | 'cursor'
-  | 'codebuddy';
+  | 'codebuddy'
+  | 'antigravity';
 
 export type CodingCliProvider = {
   id: CodingCliProviderId;
@@ -92,6 +93,14 @@ export const CODING_CLI_PROVIDERS: readonly CodingCliProvider[] = [
     command: 'codebuddy',
     titleHints: ['codebuddy'],
     iconKey: 'codebuddy',
+  },
+  {
+    id: 'antigravity',
+    label: 'Antigravity CLI',
+    command: 'agy',
+    aliases: ['antigravity'],
+    titleHints: ['agy', 'antigravity'],
+    iconKey: 'gemini',
   },
 ] as const;
 
