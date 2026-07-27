@@ -1,3 +1,93 @@
+# =============================================================================
+# Allowlist .gitignore (https://github.com/binaricat/Netcatty/issues/2534)
+#
+# Layer 1 — default-deny at the repository root
+# Layer 2 — re-include only paths that belong in git
+# Layer 3 — classical denylist for generated / local / secret artifacts
+#
+# Goal: a mistaken `git add .` (or an agent doing the same) cannot pick up
+# random root files, agent state dirs, env files, or build outputs.
+# =============================================================================
+
+# --- Layer 1: ignore everything at the repository root by default ---
+/*
+
+# --- Layer 2: allowlist root files ---
+!.gitattributes
+!.gitignore
+!.npmrc
+!AGENTS.md
+!App.tsx
+!CHANGELOG.md
+!CLAUDE.md
+!CODE_OF_CONDUCT.md
+!CODE_SIGNING_POLICY.md
+!CONTRIBUTING.md
+!ET_INTEGRATION_CHECKLIST.md
+!LICENSE
+!PRIVACY.md
+!README.ja-JP.md
+!README.md
+!README.zh-CN.md
+!electron-builder.config.cjs
+!eslint.config.js
+!flake.lock
+!flake.nix
+!global.d.ts
+!index.css
+!index.html
+!index.tsx
+!metadata.json
+!package-lock.json
+!package.json
+!tsconfig.json
+!types.ts
+!vite.config.ts
+
+# --- Layer 2: allowlist root directories ---
+# Un-ignore the directory entry, then everything under it. Git does not
+# traverse ignored directories, so both steps are required.
+!.github/
+!.github/**
+!.vscode/
+!.vscode/**
+!application/
+!application/**
+!build/
+!build/**
+!components/
+!components/**
+!docs/
+!docs/**
+!domain/
+!domain/**
+!electron/
+!electron/**
+!examples/
+!examples/**
+!infrastructure/
+!infrastructure/**
+!lib/
+!lib/**
+!nix/
+!nix/**
+!packages/
+!packages/**
+!patches/
+!patches/**
+!public/
+!public/**
+!resources/
+!resources/**
+!scripts/
+!scripts/**
+!skills/
+!skills/**
+!types/
+!types/**
+
+# --- Layer 3: classical denylist (applies inside allowlisted trees) ---
+
 # Logs
 logs
 *.log
@@ -7,8 +97,8 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
+# Dependencies and build outputs
 node_modules
-
 dist
 dist-ssr
 *.local
@@ -17,14 +107,16 @@ dist-ssr
 .eslintcache
 *.tsbuildinfo
 coverage
-/.vite
+.vite
+*.asar
+
+# Root / packaging outputs (also blocked by Layer 1; kept for nested paths)
 /build/*
 !/build/icons
 !/build/installer.nsh
 /electron/native/**/build
 /release
 /out
-*.asar
 /public/monaco
 
 # Editor directories and files
@@ -37,27 +129,20 @@ coverage
 *.sln
 *.sw?
 
-# Claude Code
-/.claude/
-
-# Codex
-/.codex/
-
-# OMO / local agent run-continuation state
-/.omo/
-
-# Qoder
+# Claude Code / Codex / other local agent state
+# (Root agent dirs are also blocked by Layer 1; nested copies stay denied.)
+.claude/
+.codex/
+.omo/
 .qoder
-
-# Workbuddy
 .workbuddy
-
-# Codebuddy
 .codebuddy
+.serena/
+.superpowers/
+.worktrees/
 
 # AI / Superpowers generated docs (local only)
 /docs/superpowers/
-/.superpowers/
 
 # Dev-only electron-updater test config (not for production)
 /dev-app-update.yml
@@ -65,12 +150,6 @@ coverage
 # Test suite (local only, not committed)
 /tests/
 /vitest.config.ts
-
-# Serena MCP project config (local only)
-/.serena/
-
-# Git worktrees (local isolated workspaces)
-/.worktrees/
 
 # Windows VS Build environment scripts (local dev only)
 Directory.Build.props
