@@ -64,7 +64,9 @@ interface HostTreeViewProps {
 
   isMultiSelectMode?: boolean;
   selectedHostIds?: Set<string>;
+  selectedGroupPaths?: Set<string>;
   toggleHostSelection?: (hostId: string) => void;
+  toggleGroupSelection?: (groupPath: string) => void;
   hostClickBehavior?: HostClickBehavior;
   focusedHostId?: string | null;
   onFocusHost?: (hostId: string | null) => void;
@@ -99,7 +101,9 @@ interface TreeNodeProps {
 
   isMultiSelectMode?: boolean;
   selectedHostIds?: Set<string>;
+  selectedGroupPaths?: Set<string>;
   toggleHostSelection?: (hostId: string) => void;
+  toggleGroupSelection?: (groupPath: string) => void;
   hostClickBehavior?: HostClickBehavior;
   focusedHostId?: string | null;
   onFocusHost?: (hostId: string | null) => void;
@@ -136,7 +140,9 @@ const TreeNode: React.FC<TreeNodeProps> = ({
 
   isMultiSelectMode,
   selectedHostIds,
+  selectedGroupPaths,
   toggleHostSelection,
+  toggleGroupSelection,
   hostClickBehavior = 'connect',
   focusedHostId,
   onFocusHost,
@@ -155,6 +161,7 @@ const TreeNode: React.FC<TreeNodeProps> = ({
   const groupRowRef = useRef<HTMLDivElement>(null);
   const isExpanded = expandedPaths.has(node.path);
   const isGroupFocused = hostClickBehavior === 'select' && focusedGroupPath === node.path;
+  const isGroupMultiSelected = Boolean(isMultiSelectMode && selectedGroupPaths?.has(node.path));
 
   useEffect(() => {
     if (!isInlineEditing || !inlineEdit?.shouldScrollIntoView) return;
@@ -230,6 +237,10 @@ const TreeNode: React.FC<TreeNodeProps> = ({
         open={isExpanded}
         onOpenChange={() => {
           if (isInlineEditing) return;
+          if (isMultiSelectMode) {
+            toggleGroupSelection?.(node.path);
+            return;
+          }
           if (hostClickBehavior === 'select' && focusedGroupPath !== node.path) {
             onFocusGroup?.(node.path);
             onFocusHost?.(null);
@@ -246,7 +257,7 @@ const TreeNode: React.FC<TreeNodeProps> = ({
                 name={node.name}
                 depth={depth}
                 expanded={isExpanded}
-                selected={isGroupFocused}
+                selected={isGroupFocused || isGroupMultiSelected}
                 hasChildren={hasChildren || node.hosts.length > 0}
                 count={hostsCountInNode}
                 editing={isInlineEditing}
@@ -257,7 +268,7 @@ const TreeNode: React.FC<TreeNodeProps> = ({
                 data-section="host-tree-row"
                 data-row-type="group"
                 data-group-path={node.path}
-                draggable={!isInlineEditing}
+                draggable={!isInlineEditing && !isMultiSelectMode}
                 onDragStart={(e) => {
                   if (isInlineEditing) return;
                   e.dataTransfer.setData("group-path", node.path);
@@ -298,7 +309,12 @@ const TreeNode: React.FC<TreeNodeProps> = ({
                     Managed
                   </span>
                 )}
-                labelActions={(
+                icon={isMultiSelectMode
+                  ? isGroupMultiSelected
+                    ? <CheckSquare size={16} />
+                    : <Square size={16} />
+                  : undefined}
+                labelActions={!isMultiSelectMode && (
                   <button
                     aria-label={`Edit ${node.name}`}
                     data-host-tree-group-edit-button={node.path}
@@ -352,7 +368,9 @@ const TreeNode: React.FC<TreeNodeProps> = ({
 
 	              isMultiSelectMode={isMultiSelectMode}
 	              selectedHostIds={selectedHostIds}
+	              selectedGroupPaths={selectedGroupPaths}
 	              toggleHostSelection={toggleHostSelection}
+	              toggleGroupSelection={toggleGroupSelection}
 	              hostClickBehavior={hostClickBehavior}
 	              focusedHostId={focusedHostId}
 	              onFocusHost={onFocusHost}
@@ -592,7 +610,9 @@ export const HostTreeView: React.FC<HostTreeViewProps> = ({
 
   isMultiSelectMode,
   selectedHostIds,
+  selectedGroupPaths,
   toggleHostSelection,
+  toggleGroupSelection,
   hostClickBehavior,
   focusedHostId,
   onFocusHost,
@@ -760,7 +780,9 @@ export const HostTreeView: React.FC<HostTreeViewProps> = ({
           cancelInlineGroupEdit={cancelInlineGroupEdit}
           isMultiSelectMode={isMultiSelectMode}
           selectedHostIds={selectedHostIds}
+          selectedGroupPaths={selectedGroupPaths}
           toggleHostSelection={toggleHostSelection}
+          toggleGroupSelection={toggleGroupSelection}
           hostClickBehavior={hostClickBehavior}
           focusedHostId={focusedHostId}
           onFocusHost={onFocusHost}

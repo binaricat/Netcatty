@@ -1,16 +1,21 @@
-import { useCallback, useRef } from "react";
+import { startTransition, useCallback, useRef, useState } from "react";
 
 import {
   readRememberedKeyPassphrases,
   rememberImportedKeyPassphrase,
   resolveDefaultKeyPassphraseAliases,
 } from "../../application/defaultKeyPassphrases";
-import { readVaultImportFile } from "../../application/state/vaultImportFile";
+import {
+  countVaultImportDuplicates,
+  waitForVaultImportProgressPaint,
+  type VaultImportProgress,
+} from "../../application/state/vaultImportProgress";
+import { importVaultHostsInWorker } from "../../application/state/vaultImportWorker";
 import { sanitizeHost } from "../../domain/host";
 import {
+  applyVaultImportDestination,
   applyVaultHostImport,
   filterVaultImportKeyPassphrasesAgainstExisting,
-  importVaultHostsFromText,
   mergeVaultImportIssues,
   resolveVaultImportKeyPassphraseConflicts,
   type VaultImportFormat,
@@ -25,7 +30,7 @@ interface UseVaultImportHandlersOptions {
   keys: SSHKey[];
   managedSources: ManagedSource[];
   onUpdateCustomGroups: (groups: string[]) => void;
-  onUpdateHosts: (hosts: Host[]) => void;
+  onUpdateHosts: (hosts: Host[]) => void | Promise<void>;
   onUpdateKeys: (keys: SSHKey[]) => void;
   onUpdateManagedSources: (sources: ManagedSource[]) => void;
   setIsImportOpen: (open: boolean) => void;
@@ -44,32 +49,80 @@ export function useVaultImportHandlers({
   setIsImportOpen,
   t,
 }: UseVaultImportHandlersOptions) {
+  const [importProgress, setImportProgress] = useState<VaultImportProgress | null>(null);
+  const customGroupsRef = useRef(customGroups);
+  const hostsRef = useRef(hosts);
   const keysRef = useRef(keys);
+  const managedSourcesRef = useRef(managedSources);
+  customGroupsRef.current = customGroups;
+  hostsRef.current = hosts;
   keysRef.current = keys;
+  managedSourcesRef.current = managedSources;
+  const resetImportProgress = useCallback(() => setImportProgress(null), []);
+
   const handleImportFileSelected = useCallback(
-      async (format: VaultImportFormat, file: File, options?: ImportOptions) => {
-        setIsImportOpen(false);
-  
+      async (format: VaultImportFormat, files: File[], options?: ImportOptions) => {
+        const file = files[0];
+        if (!file) return;
+        const relativeRoot = file.webkitRelativePath?.split(/[\\/]+/).filter(Boolean)[0];
+        const selectionName = files.length > 1 ? (relativeRoot || file.name) : file.name;
+        const formatLabel =
+          format === "putty"
+            ? "PuTTY"
+            : format === "mobaxterm"
+              ? "MobaXterm"
+              : format === "csv"
+                ? "CSV"
+                : format === "securecrt"
+                  ? "SecureCRT"
+                  : "ssh_config";
+        const updateProgress = (next: Partial<VaultImportProgress>) => {
+          setImportProgress((current) => ({
+            status: "running",
+            stage: "reading",
+            percent: 5,
+            formatLabel,
+            fileName: selectionName,
+            totalFiles: files.length,
+            ...current,
+            ...next,
+          }));
+        };
+
+        setIsImportOpen(true);
+        setImportProgress({
+          status: "running",
+          stage: "reading",
+          percent: 5,
+          formatLabel,
+          fileName: selectionName,
+          completedFiles: 0,
+          totalFiles: files.length,
+        });
+
         try {
-          const formatLabel =
-            format === "putty"
-              ? "PuTTY"
-              : format === "mobaxterm"
-                ? "MobaXterm"
-                : format === "csv"
-                  ? "CSV"
-                  : format === "securecrt"
-                    ? "SecureCRT"
-                    : "ssh_config";
-  
-          toast.info(t("vault.import.toast.start", { format: formatLabel }));
-  
-          const text = await readVaultImportFile(format, file, options?.encoding);
-          const result = importVaultHostsFromText(format, text, {
-            fileName: file.name,
+          let result = await importVaultHostsInWorker({
+            format,
+            files,
+            encoding: options?.encoding,
+            onProgress: (progress) => updateProgress(progress),
           });
-  
           const isManaged = format === "ssh_config" && options?.managed === true;
+          if (!isManaged) {
+            result = applyVaultImportDestination(
+              result,
+              options?.destination ?? { mode: "preserve" },
+            );
+          }
+          updateProgress({ stage: "preparing", percent: 70 });
+          await waitForVaultImportProgressPaint();
+          updateProgress({ stage: "saving", percent: 85 });
+          await waitForVaultImportProgressPaint();
+
+          const currentCustomGroups = customGroupsRef.current;
+          const currentHosts = hostsRef.current;
+          const currentManagedSources = managedSourcesRef.current;
+
           const fileBaseName = file.name.replace(/\.[^/.]+$/, "");
   
           // Generate unique managed group name (check for conflicts with existing sources,
@@ -77,9 +130,9 @@ export function useVaultImportHandlers({
           let managedGroupName = `${fileBaseName} - Managed`;
           if (isManaged) {
             const existingGroupNames = new Set([
-              ...managedSources.map(s => s.groupName),
-              ...customGroups,
-              ...hosts.map(h => h.group).filter((g): g is string => !!g),
+              ...currentManagedSources.map(s => s.groupName),
+              ...currentCustomGroups,
+              ...currentHosts.map(h => h.group).filter((g): g is string => !!g),
             ]);
             let suffix = 1;
             while (existingGroupNames.has(managedGroupName)) {
@@ -95,18 +148,34 @@ export function useVaultImportHandlers({
   
           if (isManaged && !filePath) {
             // Cannot proceed with managed import without a valid file path
+            const message = t("vault.import.sshConfig.noFilePathDesc");
+            updateProgress({
+              status: "error",
+              stage: "failed",
+              percent: 100,
+              error: message,
+            });
             toast.error(
-              t("vault.import.sshConfig.noFilePathDesc"),
+              message,
               t("vault.import.sshConfig.noFilePath"),
             );
             return;
           }
   
           if (isManaged) {
-            const existingSource = managedSources.find(s => s.filePath === filePath);
+            const existingSource = currentManagedSources.find(s => s.filePath === filePath);
             if (existingSource) {
+              const message = t("vault.import.sshConfig.alreadyManagedDesc", {
+                group: existingSource.groupName,
+              });
+              updateProgress({
+                status: "error",
+                stage: "failed",
+                percent: 100,
+                error: message,
+              });
               toast.error(
-                t("vault.import.sshConfig.alreadyManagedDesc", { group: existingSource.groupName }),
+                message,
                 t("vault.import.sshConfig.alreadyManaged"),
               );
               return;
@@ -116,7 +185,7 @@ export function useVaultImportHandlers({
           const makeKey = (h: Host) =>
             `${(h.protocol ?? "ssh").toLowerCase()}|${h.hostname.toLowerCase()}|${h.port}|${(h.username ?? "").toLowerCase()}`;
   
-          const existingKeys = new Set(hosts.map(makeKey));
+          const existingKeys = new Set(currentHosts.map(makeKey));
           // Filter out duplicates for both managed and non-managed imports
           let newHosts = result.hosts.filter((h) => !existingKeys.has(makeKey(h)));
   
@@ -124,7 +193,7 @@ export function useVaultImportHandlers({
           let updatedExistingHosts: Host[] = [];
           if (isManaged) {
             const importedKeys = new Set(result.hosts.map(makeKey));
-            updatedExistingHosts = hosts.filter((h) => importedKeys.has(makeKey(h)));
+            updatedExistingHosts = currentHosts.filter((h) => importedKeys.has(makeKey(h)));
           }
   
           if (isManaged && (newHosts.length > 0 || updatedExistingHosts.length > 0)) {
@@ -146,7 +215,7 @@ export function useVaultImportHandlers({
   
             // Update existing hosts to be managed (move to managed group)
             const existingHostIds = new Set(updatedExistingHosts.map(h => h.id));
-            const updatedHosts = hosts.map((h) => {
+            const updatedHosts = currentHosts.map((h) => {
               if (!existingHostIds.has(h.id)) return h;
               const canBeManaged = !h.protocol || h.protocol === "ssh";
               return {
@@ -158,27 +227,37 @@ export function useVaultImportHandlers({
               };
             });
   
-            onUpdateManagedSources([...managedSources, newSource]);
-            onUpdateHosts([...updatedHosts, ...newHosts].map(sanitizeHost));
-  
             const nextGroups = Array.from(
               new Set([
-                ...customGroups,
+                ...currentCustomGroups,
                 ...result.groups,
                 managedGroupName,
                 ...newHosts.map((h) => h.group).filter(Boolean),
               ]),
             ) as string[];
-            onUpdateCustomGroups(nextGroups);
+
+            onUpdateManagedSources([...currentManagedSources, newSource]);
+            let hostUpdate: void | Promise<void>;
+            startTransition(() => {
+	              hostUpdate = onUpdateHosts(
+	                [...updatedHosts, ...newHosts].map((host: Host) => sanitizeHost(host)),
+	              );
+              onUpdateCustomGroups(nextGroups);
+            });
+            await hostUpdate!;
           } else if (newHosts.length > 0) {
-            const merged = applyVaultHostImport(hosts, customGroups, result, { skipDuplicates: true });
+            const merged = applyVaultHostImport(currentHosts, currentCustomGroups, result, { skipDuplicates: true });
             const addedHostIds = new Set(merged.addedHosts.map((host) => host.id));
             const addedHostKeyPaths = new Map(merged.addedHosts.flatMap((host) => {
               const keyPath = host.identityFilePaths?.find((path) => path.trim())?.trim();
               return keyPath ? [[host.id, keyPath] as const] : [];
             }));
-            onUpdateHosts(merged.hosts);
-            onUpdateCustomGroups(merged.customGroups);
+            let hostUpdate: void | Promise<void>;
+            startTransition(() => {
+              hostUpdate = onUpdateHosts(merged.hosts);
+              onUpdateCustomGroups(merged.customGroups);
+            });
+            await hostUpdate!;
             const resolved = await resolveVaultImportKeyPassphraseConflicts(
               result.keyPassphraseCandidates ?? result.keyPassphrases ?? [],
               resolveDefaultKeyPassphraseAliases,
@@ -231,18 +310,38 @@ export function useVaultImportHandlers({
           const totalAffected = newHosts.length + (isManaged ? updatedExistingHosts.length : 0);
   
           const skipped = result.stats.skipped;
-          const duplicates = result.stats.duplicates;
+          const duplicates = countVaultImportDuplicates({
+            importedHostCount: result.hosts.length,
+            newHostCount: newHosts.length,
+            fileDuplicateCount: result.stats.duplicates,
+            managed: isManaged,
+          });
           const hasWarnings = skipped > 0 || duplicates > 0 || result.issues.length > 0;
   
           if (result.stats.parsed === 0 && totalAffected === 0) {
+            const message = t("vault.import.toast.noEntries", { format: formatLabel });
+            updateProgress({
+              status: "error",
+              stage: "failed",
+              percent: 100,
+              error: message,
+            });
             toast.error(
-              t("vault.import.toast.noEntries", { format: formatLabel }),
+              message,
               t("vault.import.toast.failedTitle"),
             );
             return;
           }
   
           if (totalAffected === 0) {
+            updateProgress({
+              status: "complete",
+              stage: "complete",
+              percent: 100,
+              imported: 0,
+              skipped,
+              duplicates,
+            });
             toast.warning(
               t("vault.import.toast.noNewHosts", { format: formatLabel }),
               t("vault.import.toast.completedTitle"),
@@ -272,16 +371,27 @@ export function useVaultImportHandlers({
               toast.success(details, t("vault.import.toast.completedTitle"));
             }
           }
+          updateProgress({
+            status: "complete",
+            stage: "complete",
+            percent: 100,
+            imported: totalAffected,
+            skipped,
+            duplicates,
+          });
         } catch (err) {
           const message =
             err instanceof Error ? err.message : t("common.unknownError");
+          updateProgress({
+            status: "error",
+            stage: "failed",
+            percent: 100,
+            error: message,
+          });
           toast.error(message, t("vault.import.toast.failedTitle"));
         }
       },
       [
-        customGroups,
-        hosts,
-        managedSources,
         onUpdateCustomGroups,
         onUpdateHosts,
         onUpdateKeys,
@@ -291,5 +401,5 @@ export function useVaultImportHandlers({
       ],
     );
 
-  return { handleImportFileSelected };
+  return { handleImportFileSelected, importProgress, resetImportProgress };
 }

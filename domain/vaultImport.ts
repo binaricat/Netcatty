@@ -132,6 +132,10 @@ export interface VaultImportResult {
   keyPassphraseCandidates?: VaultHostKeyPassphrase[];
 }
 
+export type VaultImportDestination =
+  | { mode: "preserve" }
+  | { mode: "group"; group: string };
+
 export function mergeVaultImportIssues(
   ...groups: ReadonlyArray<ReadonlyArray<VaultImportIssue>>
 ): VaultImportIssue[] {
@@ -154,6 +158,20 @@ const normalizeGroupPath = (raw: string | undefined): string | undefined => {
   if (parts.length === 0) return undefined;
   return parts.join("/");
 };
+
+export function applyVaultImportDestination(
+  result: VaultImportResult,
+  destination: VaultImportDestination,
+): VaultImportResult {
+  if (destination.mode === "preserve") return result;
+  const group = normalizeGroupPath(destination.group);
+  if (!group) return result;
+  return {
+    ...result,
+    hosts: result.hosts.map((host) => ({ ...host, group })),
+    groups: [group],
+  };
+}
 
 const normalizeProtocol = (
   raw: string | undefined,
@@ -898,7 +916,7 @@ const importFromSecureCrt = (text: string, fileName?: string): VaultImportResult
       current.hostname = value;
     } else if (key === "Username") {
       current.username = value;
-    } else if (key === "Port") {
+    } else if (key === "Port" || key === "[SSH2] Port" || key === "[SSH1] Port") {
       current.port = parseSecureCrtPort(value);
     } else if (key === "Protocol Name") {
       const p = normalizeProtocol(value);

@@ -5,6 +5,7 @@ import {
   importVaultHostsFromText,
   detectVaultImportFormat,
   applyVaultHostImport,
+  applyVaultImportDestination,
   filterVaultImportKeyPassphrasesAgainstExisting,
   resolveVaultImportKeyPassphraseConflicts,
 } from "./vaultImport.ts";
@@ -131,6 +132,39 @@ test("detectVaultImportFormat recognizes csv and ssh_config exports", () => {
     detectVaultImportFormat(["Host prod", "  HostName prod.example.com", "  User deploy"].join("\n")),
     "ssh_config",
   );
+});
+
+test("SecureCRT import reads the protocol-specific hexadecimal port", () => {
+  const result = importVaultHostsFromText("securecrt", [
+    'S:"Hostname"=secure.example.com',
+    'S:"Username"=operator',
+    'S:"Protocol Name"=SSH2',
+    'D:"[SSH2] Port"=000008ae',
+  ].join("\n"), { fileName: "Secure Host.ini" });
+
+  assert.equal(result.hosts.length, 1);
+  assert.equal(result.hosts[0].label, "Secure Host");
+  assert.equal(result.hosts[0].port, 2222);
+});
+
+test("vault import can place every imported host into one selected group", () => {
+  const imported = importVaultHostsFromText("csv", [
+    "Label,Hostname,Group",
+    "web,web.example.com,Production/Web",
+    "db,db.example.com,Production/DB",
+  ].join("\n"));
+
+  const targeted = applyVaultImportDestination(imported, {
+    mode: "group",
+    group: "Imported/July",
+  });
+
+  assert.deepEqual(targeted.hosts.map((host) => host.group), [
+    "Imported/July",
+    "Imported/July",
+  ]);
+  assert.deepEqual(targeted.groups, ["Imported/July"]);
+  assert.deepEqual(imported.groups, ["Production/Web", "Production/DB"]);
 });
 
 test("CSV import keeps working when KeyPath and Passphrase columns are absent", () => {

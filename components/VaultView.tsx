@@ -32,16 +32,30 @@ import {
   X,
   Zap,
 } from "lucide-react";
-import React, { Suspense, lazy, memo, startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  Suspense,
+  lazy,
+  memo,
+  startTransition,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useI18n } from "../application/i18n/I18nProvider";
 import { useStoredViewMode } from "../application/state/useStoredViewMode";
 import { useStoredBoolean } from "../application/state/useStoredBoolean";
 import { useStoredNumber } from "../application/state/useStoredNumber";
 import { useStoredString } from "../application/state/useStoredString";
 import { useTreeExpandedState } from "../application/state/useTreeExpandedState";
+import { useVaultGroupDeletion } from "../application/state/useVaultGroupDeletion";
 import { buildVaultCsvCredentialOptions } from "../application/vaultCsvExportCredentials";
 import { sanitizeCredentialValue } from "../domain/credentials";
-import { resolveGroupDefaults, applyGroupDefaults } from "../domain/groupConfig";
+import {
+  resolveGroupDefaults,
+  applyGroupDefaults,
+} from "../domain/groupConfig";
 import {
   getEffectiveHostDistro,
   resolveTelnetPassword,
@@ -83,10 +97,14 @@ import { AppLogo } from "./AppLogo";
 import { connectHostsStaggered } from "./connectHostsStaggered";
 import { DistroAvatar } from "./DistroAvatar";
 import GroupDetailsPanel from "./GroupDetailsPanel";
+import { getVaultHostGridColumnCount } from "./vault/vaultHostGridLayout";
 import HostDetailsPanel from "./HostDetailsPanel";
 import { HostTreeView } from "./HostTreeView";
 import QuickConnectWizard from "./QuickConnectWizard";
-import { isQuickConnectInput, parseQuickConnectInputWithWarnings } from "../domain/quickConnect";
+import {
+  isQuickConnectInput,
+  parseQuickConnectInputWithWarnings,
+} from "../domain/quickConnect";
 import SerialConnectModal from "./SerialConnectModal";
 import SerialHostDetailsPanel from "./SerialHostDetailsPanel";
 import { NotesManager } from "./notes/NotesManager";
@@ -117,7 +135,12 @@ import { Label } from "./ui/label";
 import { SortDropdown, SortMode } from "./ui/sort-dropdown";
 import { TagFilterDropdown } from "./ui/tag-filter-dropdown";
 import { toast } from "./ui/toast";
-import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "./ui/tooltip";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+  TooltipProvider,
+} from "./ui/tooltip";
 import { Badge } from "./ui/badge";
 import { HotkeyScheme, KeyBinding } from "../domain/models";
 import { VaultViewLayout } from "./vault/VaultViewLayout";
@@ -132,7 +155,15 @@ const PortForwarding = lazy(() => import("./PortForwardingNew"));
 const ProxyProfilesManager = lazy(() => import("./ProxyProfilesManager"));
 const SnippetsManager = lazy(() => import("./SnippetsManager"));
 
-export type VaultSection = "hosts" | "keys" | "proxies" | "snippets" | "notes" | "port" | "knownhosts" | "logs";
+export type VaultSection =
+  | "hosts"
+  | "keys"
+  | "proxies"
+  | "snippets"
+  | "notes"
+  | "port"
+  | "knownhosts"
+  | "logs";
 
 const haveSameHostOrderResult = (previous: Host[], next: Host[]) => {
   if (previous.length !== next.length) return false;
@@ -192,7 +223,10 @@ interface VaultViewProps {
   onOpenSettings: () => void;
   onOpenQuickSwitcher: () => void;
   onCreateLocalTerminal: () => void;
-  onConnectSerial?: (config: SerialConfig, options?: { charset?: string }) => void;
+  onConnectSerial?: (
+    config: SerialConfig,
+    options?: { charset?: string },
+  ) => void;
   onDeleteHost: (id: string) => void;
   onConnect: (host: Host) => void;
   onOpenHostFromNote?: (host: Host, source?: { noteId: string }) => void;
@@ -227,16 +261,23 @@ interface VaultViewProps {
   groupConfigs: GroupConfig[];
   onUpdateGroupConfigs: (configs: GroupConfig[]) => void;
   showRecentHosts: boolean;
-  hostClickBehavior?: 'connect' | 'select';
+  hostClickBehavior?: "connect" | "select";
   showOnlyUngroupedHostsInRoot: boolean;
   // Optional: navigate to a specific section on mount or when changed
   navigateToSection?: VaultSection | null;
   onNavigateToSectionHandled?: () => void;
   deepLinkHostDraft?: Host | null;
   onDeepLinkHostDraftHandled?: () => void;
-  vaultFocusRequest?: { type: 'note'; noteId: string; requestId: number } | { type: 'snippet'; snippetId: string; requestId: number } | null;
+  vaultFocusRequest?:
+    | { type: "note"; noteId: string; requestId: number }
+    | { type: "snippet"; snippetId: string; requestId: number }
+    | null;
   onVaultFocusRequestHandled?: () => void;
-  terminalSettings?: { verifyHostKeys: boolean; keepaliveInterval: number; keepaliveCountMax: number };
+  terminalSettings?: {
+    verifyHostKeys: boolean;
+    keepaliveInterval: number;
+    keepaliveCountMax: number;
+  };
 }
 
 const VaultViewInner: React.FC<VaultViewProps> = ({
@@ -320,6 +361,9 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
   const [isSerialModalOpen, setIsSerialModalOpen] = useState(false);
   const [isDeleteGroupOpen, setIsDeleteGroupOpen] = useState(false);
   const [deleteTargetPath, setDeleteTargetPath] = useState<string | null>(null);
+  const [bulkDeleteGroupPaths, setBulkDeleteGroupPaths] = useState<string[]>(
+    [],
+  );
   const [deleteGroupWithHosts, setDeleteGroupWithHosts] = useState(false);
 
   // Sidebar collapsed state with localStorage persistence
@@ -329,28 +373,38 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
   );
   const [sidebarWidth, setSidebarWidth, persistSidebarWidth] = useStoredNumber(
     STORAGE_KEY_VAULT_SIDEBAR_WIDTH,
-    storedSidebarCollapsed ? VAULT_SIDEBAR_MIN_WIDTH : VAULT_SIDEBAR_DEFAULT_WIDTH,
+    storedSidebarCollapsed
+      ? VAULT_SIDEBAR_MIN_WIDTH
+      : VAULT_SIDEBAR_DEFAULT_WIDTH,
     {
       min: VAULT_SIDEBAR_MIN_WIDTH,
       max: VAULT_SIDEBAR_MAX_WIDTH,
     },
   );
   const sidebarCollapsed = sidebarWidth < VAULT_SIDEBAR_LABEL_THRESHOLD;
-  const setSidebarCollapsed = useCallback((nextCollapsed: boolean) => {
-    const nextWidth = nextCollapsed ? VAULT_SIDEBAR_MIN_WIDTH : VAULT_SIDEBAR_DEFAULT_WIDTH;
-    setSidebarWidth(nextWidth);
-    persistSidebarWidth(nextWidth);
-    setStoredSidebarCollapsed(nextCollapsed);
-  }, [persistSidebarWidth, setSidebarWidth, setStoredSidebarCollapsed]);
-  const handleSidebarWidthCommit = useCallback((nextWidth: number) => {
-    const clampedWidth = Math.max(
-      VAULT_SIDEBAR_MIN_WIDTH,
-      Math.min(VAULT_SIDEBAR_MAX_WIDTH, nextWidth),
-    );
-    setSidebarWidth(clampedWidth);
-    persistSidebarWidth(clampedWidth);
-    setStoredSidebarCollapsed(clampedWidth < VAULT_SIDEBAR_LABEL_THRESHOLD);
-  }, [persistSidebarWidth, setSidebarWidth, setStoredSidebarCollapsed]);
+  const setSidebarCollapsed = useCallback(
+    (nextCollapsed: boolean) => {
+      const nextWidth = nextCollapsed
+        ? VAULT_SIDEBAR_MIN_WIDTH
+        : VAULT_SIDEBAR_DEFAULT_WIDTH;
+      setSidebarWidth(nextWidth);
+      persistSidebarWidth(nextWidth);
+      setStoredSidebarCollapsed(nextCollapsed);
+    },
+    [persistSidebarWidth, setSidebarWidth, setStoredSidebarCollapsed],
+  );
+  const handleSidebarWidthCommit = useCallback(
+    (nextWidth: number) => {
+      const clampedWidth = Math.max(
+        VAULT_SIDEBAR_MIN_WIDTH,
+        Math.min(VAULT_SIDEBAR_MAX_WIDTH, nextWidth),
+      );
+      setSidebarWidth(clampedWidth);
+      persistSidebarWidth(clampedWidth);
+      setStoredSidebarCollapsed(clampedWidth < VAULT_SIDEBAR_LABEL_THRESHOLD);
+    },
+    [persistSidebarWidth, setSidebarWidth, setStoredSidebarCollapsed],
+  );
 
   // Handle external navigation requests
   useEffect(() => {
@@ -365,22 +419,33 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
     STORAGE_KEY_VAULT_HOSTS_VIEW_MODE,
     "grid",
   );
-  const treeExpandedState = useTreeExpandedState(STORAGE_KEY_VAULT_HOSTS_TREE_EXPANDED);
+  const treeExpandedState = useTreeExpandedState(
+    STORAGE_KEY_VAULT_HOSTS_TREE_EXPANDED,
+  );
   const [sortMode, setSortMode] = useStoredString<SortMode>(
     STORAGE_KEY_VAULT_HOSTS_SORT_MODE,
     "manual",
     isSortMode,
   );
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
-  const [selectedHostIds, setSelectedHostIds] = useState<Set<string>>(new Set());
+  const [selectedHostIds, setSelectedHostIds] = useState<Set<string>>(
+    new Set(),
+  );
+  const [selectedGroupPaths, setSelectedGroupPaths] = useState<Set<string>>(
+    new Set(),
+  );
   const [isMultiSelectMode, setIsMultiSelectMode] = useState(false);
 
   // Host panel state (local to hosts section)
   const [isHostPanelOpen, setIsHostPanelOpen] = useState(false);
   const [editingHost, setEditingHost] = useState<Host | null>(null);
   const [newHostGroupPath, setNewHostGroupPath] = useState<string | null>(null);
-  const [pendingOpenNoteId, setPendingOpenNoteId] = useState<string | null>(null);
-  const [pendingOpenSnippetId, setPendingOpenSnippetId] = useState<string | null>(null);
+  const [pendingOpenNoteId, setPendingOpenNoteId] = useState<string | null>(
+    null,
+  );
+  const [pendingOpenSnippetId, setPendingOpenSnippetId] = useState<
+    string | null
+  >(null);
 
   useEffect(() => {
     if (!deepLinkHostDraft) return;
@@ -394,11 +459,11 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
 
   useEffect(() => {
     if (!vaultFocusRequest) return;
-    if (vaultFocusRequest.type === 'note') {
-      setCurrentSection('notes');
+    if (vaultFocusRequest.type === "note") {
+      setCurrentSection("notes");
       setPendingOpenNoteId(vaultFocusRequest.noteId);
-    } else if (vaultFocusRequest.type === 'snippet') {
-      setCurrentSection('snippets');
+    } else if (vaultFocusRequest.type === "snippet") {
+      setCurrentSection("snippets");
       setPendingOpenSnippetId(vaultFocusRequest.snippetId);
     }
     onVaultFocusRequestHandled?.();
@@ -417,11 +482,15 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
   // Close host panel if the host being edited was deleted.
   // Track previous host IDs so we only close for actual deletions, not for
   // unsaved new/duplicated hosts whose IDs were never in the hosts array.
-  const knownHostIdsRef = useRef(new Set(hosts.map(h => h.id)));
+  const knownHostIdsRef = useRef(new Set(hosts.map((h) => h.id)));
   useEffect(() => {
-    const currentIds = new Set(hosts.map(h => h.id));
+    const currentIds = new Set(hosts.map((h) => h.id));
     // Check against previous IDs before updating the ref
-    if (editingHost && knownHostIdsRef.current.has(editingHost.id) && !currentIds.has(editingHost.id)) {
+    if (
+      editingHost &&
+      knownHostIdsRef.current.has(editingHost.id) &&
+      !currentIds.has(editingHost.id)
+    ) {
       setIsHostPanelOpen(false);
       setEditingHost(null);
       setNewHostGroupPath(null);
@@ -450,7 +519,9 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
     port?: number;
   } | null>(null);
   const [isQuickConnectOpen, setIsQuickConnectOpen] = useState(false);
-  const [quickConnectWarnings, setQuickConnectWarnings] = useState<string[]>([]);
+  const [quickConnectWarnings, setQuickConnectWarnings] = useState<string[]>(
+    [],
+  );
 
   // Protocol select state (for hosts with multiple protocols)
   const [protocolSelectHost, setProtocolSelectHost] = useState<Host | null>(
@@ -495,8 +566,18 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
   const handleHostConnect = useCallback(
     (host: Host) => {
       const effective = host.group
-        ? applyGroupDefaults(host, resolveGroupDefaults(host.group, groupConfigs, { validProxyProfileIds: proxyProfileIdSet }), { validProxyProfileIds: proxyProfileIdSet })
-        : applyGroupDefaults(host, {}, { validProxyProfileIds: proxyProfileIdSet });
+        ? applyGroupDefaults(
+            host,
+            resolveGroupDefaults(host.group, groupConfigs, {
+              validProxyProfileIds: proxyProfileIdSet,
+            }),
+            { validProxyProfileIds: proxyProfileIdSet },
+          )
+        : applyGroupDefaults(
+            host,
+            {},
+            { validProxyProfileIds: proxyProfileIdSet },
+          );
       // Only prompt when Telnet is available but isn't the host's default protocol.
       if (effective.telnetEnabled && effective.protocol !== "telnet") {
         setProtocolSelectHost(effective);
@@ -516,7 +597,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
       if (protocolSelectHost) {
         const hostWithProtocol: Host = {
           ...protocolSelectHost,
-          protocol: (protocol === "mosh" || protocol === "et") ? "ssh" : protocol,
+          protocol: protocol === "mosh" || protocol === "et" ? "ssh" : protocol,
           port,
           moshEnabled: protocol === "mosh",
           etEnabled: protocol === "et",
@@ -563,28 +644,31 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
     setIsHostPanelOpen(true);
   }, []);
 
-  const handleDuplicateHost = useCallback((host: Host) => {
-    setCurrentSection("hosts");
-    setIsGroupPanelOpen(false);
-    setEditingGroupPath(null);
-    // Create a copy of the host with a new ID and modified label
-    const duplicatedHost: Host = {
-      ...host,
-      id: crypto.randomUUID(),
-      label: `${host.label} (${t('action.copy')})`,
-      createdAt: Date.now(),
-      pinned: undefined,
-      lastConnectedAt: undefined,
-    };
-    // Open the edit panel with the duplicated host for modification
-    setEditingHost(duplicatedHost);
-    setIsHostPanelOpen(true);
-  }, [t]);
+  const handleDuplicateHost = useCallback(
+    (host: Host) => {
+      setCurrentSection("hosts");
+      setIsGroupPanelOpen(false);
+      setEditingGroupPath(null);
+      // Create a copy of the host with a new ID and modified label
+      const duplicatedHost: Host = {
+        ...host,
+        id: crypto.randomUUID(),
+        label: `${host.label} (${t("action.copy")})`,
+        createdAt: Date.now(),
+        pinned: undefined,
+        lastConnectedAt: undefined,
+      };
+      // Open the edit panel with the duplicated host for modification
+      setEditingHost(duplicatedHost);
+      setIsHostPanelOpen(true);
+    },
+    [t],
+  );
 
   // Export hosts to CSV
   const handleExportHosts = useCallback(async () => {
     if (hosts.length === 0) {
-      toast.warning(t('vault.hosts.export.toast.noHosts'));
+      toast.warning(t("vault.hosts.export.toast.noHosts"));
       return;
     }
 
@@ -594,20 +678,23 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
       keyPassphrases,
       unreadablePassphraseCount,
     } = await buildVaultCsvCredentialOptions(hosts, keys);
-    const { csv, exportedCount, skippedCount } = exportHostsToCsvWithStats(hosts, {
-      keyPassphrases,
-      keyPassphrasesById,
-      keyPathsById,
-    });
+    const { csv, exportedCount, skippedCount } = exportHostsToCsvWithStats(
+      hosts,
+      {
+        keyPassphrases,
+        keyPassphrasesById,
+        keyPathsById,
+      },
+    );
 
     if (exportedCount === 0) {
-      toast.warning(t('vault.hosts.export.toast.noHosts'));
+      toast.warning(t("vault.hosts.export.toast.noHosts"));
       return;
     }
 
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
+    const link = document.createElement("a");
     link.href = url;
     link.download = `hosts_export_${new Date().toISOString().slice(0, 10)}.csv`;
     document.body.appendChild(link);
@@ -616,78 +703,113 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
     URL.revokeObjectURL(url);
 
     if (unreadablePassphraseCount > 0) {
-      toast.warning(t('vault.hosts.export.toast.passphrasesSkipped', { count: unreadablePassphraseCount }));
+      toast.warning(
+        t("vault.hosts.export.toast.passphrasesSkipped", {
+          count: unreadablePassphraseCount,
+        }),
+      );
     }
     if (skippedCount > 0) {
-      toast.warning(t('vault.hosts.export.toast.successWithSkipped', { count: exportedCount, skipped: skippedCount }));
+      toast.warning(
+        t("vault.hosts.export.toast.successWithSkipped", {
+          count: exportedCount,
+          skipped: skippedCount,
+        }),
+      );
     } else {
-      toast.success(t('vault.hosts.export.toast.success', { count: exportedCount }));
+      toast.success(
+        t("vault.hosts.export.toast.success", { count: exportedCount }),
+      );
     }
   }, [hosts, keys, t]);
 
   // Copy host credentials to clipboard
-  const handleCopyCredentials = useCallback((host: Host) => {
-    // Apply group defaults so inherited credentials are included
-    const effective = host.group
-      ? applyGroupDefaults(host, resolveGroupDefaults(host.group, groupConfigs, { validProxyProfileIds: proxyProfileIdSet }), { validProxyProfileIds: proxyProfileIdSet })
-      : applyGroupDefaults(host, {}, { validProxyProfileIds: proxyProfileIdSet });
-    // Only use telnet-specific port and credentials when protocol is explicitly telnet
-    // Don't treat telnetEnabled as primary - that's just an optional protocol
-    const isTelnet = effective.protocol === "telnet";
+  const handleCopyCredentials = useCallback(
+    (host: Host) => {
+      // Apply group defaults so inherited credentials are included
+      const effective = host.group
+        ? applyGroupDefaults(
+            host,
+            resolveGroupDefaults(host.group, groupConfigs, {
+              validProxyProfileIds: proxyProfileIdSet,
+            }),
+            { validProxyProfileIds: proxyProfileIdSet },
+          )
+        : applyGroupDefaults(
+            host,
+            {},
+            { validProxyProfileIds: proxyProfileIdSet },
+          );
+      // Only use telnet-specific port and credentials when protocol is explicitly telnet
+      // Don't treat telnetEnabled as primary - that's just an optional protocol
+      const isTelnet = effective.protocol === "telnet";
 
-    const defaultPort = isTelnet ? 23 : 22;
-    const effectivePort = isTelnet ? resolveTelnetPort(effective) : (effective.port ?? 22);
+      const defaultPort = isTelnet ? 23 : 22;
+      const effectivePort = isTelnet
+        ? resolveTelnetPort(effective)
+        : (effective.port ?? 22);
 
-    // Bracket IPv6 addresses when appending non-default port
-    let address: string;
-    if (effectivePort !== defaultPort) {
-      const isIPv6 = effective.hostname.includes(":") && !effective.hostname.startsWith("[");
-      const hostname = isIPv6 ? `[${effective.hostname}]` : effective.hostname;
-      address = `${hostname}:${effectivePort}`;
-    } else {
-      address = effective.hostname;
-    }
+      // Bracket IPv6 addresses when appending non-default port
+      let address: string;
+      if (effectivePort !== defaultPort) {
+        const isIPv6 =
+          effective.hostname.includes(":") &&
+          !effective.hostname.startsWith("[");
+        const hostname = isIPv6
+          ? `[${effective.hostname}]`
+          : effective.hostname;
+        address = `${hostname}:${effectivePort}`;
+      } else {
+        address = effective.hostname;
+      }
 
-    // Resolve credentials from identity if configured, otherwise use host credentials
-    // For telnet hosts, use telnet-specific credentials
-    const identity = effective.identityId
-      ? identities.find((i) => i.id === effective.identityId)
-      : undefined;
+      // Resolve credentials from identity if configured, otherwise use host credentials
+      // For telnet hosts, use telnet-specific credentials
+      const identity = effective.identityId
+        ? identities.find((i) => i.id === effective.identityId)
+        : undefined;
 
-    const username = isTelnet
-      ? resolveTelnetUsername(effective)
-      : (identity?.username?.trim() || effective.username?.trim());
+      const username = isTelnet
+        ? resolveTelnetUsername(effective)
+        : identity?.username?.trim() || effective.username?.trim();
 
-    const rawPassword = isTelnet
-      ? resolveTelnetPassword(effective)
-      : (identity?.password || effective.password);
-    const password = sanitizeCredentialValue(rawPassword);
+      const rawPassword = isTelnet
+        ? resolveTelnetPassword(effective)
+        : identity?.password || effective.password;
+      const password = sanitizeCredentialValue(rawPassword);
 
-    if (!password) {
-      toast.warning(t('vault.hosts.copyCredentials.toast.noPassword'));
-      return;
-    }
+      if (!password) {
+        toast.warning(t("vault.hosts.copyCredentials.toast.noPassword"));
+        return;
+      }
 
-    const text = `host: ${address}\nusername: ${username ?? ''}\npassword: ${password}`;
-    navigator.clipboard.writeText(text).then(() => {
-      toast.success(t('vault.hosts.copyCredentials.toast.success'));
-    });
-  }, [identities, groupConfigs, proxyProfileIdSet, t]);
+      const text = `host: ${address}\nusername: ${username ?? ""}\npassword: ${password}`;
+      navigator.clipboard.writeText(text).then(() => {
+        toast.success(t("vault.hosts.copyCredentials.toast.success"));
+      });
+    },
+    [identities, groupConfigs, proxyProfileIdSet, t],
+  );
 
   const [lastPinnedId, setLastPinnedId] = useState<string | null>(null);
-  const toggleHostPinned = useCallback((hostId: string) => {
-    const host = hostsRef.current.find((h) => h.id === hostId);
-    const isPinning = host && !host.pinned;
-    startTransition(() => {
-      onUpdateHosts(hostsRef.current.map((h) =>
-        h.id === hostId ? { ...h, pinned: !h.pinned } : h
-      ));
-    });
-    setLastPinnedId(isPinning ? hostId : null);
-  }, [onUpdateHosts]);
+  const toggleHostPinned = useCallback(
+    (hostId: string) => {
+      const host = hostsRef.current.find((h) => h.id === hostId);
+      const isPinning = host && !host.pinned;
+      startTransition(() => {
+        onUpdateHosts(
+          hostsRef.current.map((h) =>
+            h.id === hostId ? { ...h, pinned: !h.pinned } : h,
+          ),
+        );
+      });
+      setLastPinnedId(isPinning ? hostId : null);
+    },
+    [onUpdateHosts],
+  );
 
   const toggleHostSelection = useCallback((hostId: string) => {
-    setSelectedHostIds(prev => {
+    setSelectedHostIds((prev) => {
       const next = new Set(prev);
       if (next.has(hostId)) {
         next.delete(hostId);
@@ -698,17 +820,32 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
     });
   }, []);
 
+  const toggleGroupSelection = useCallback((groupPath: string) => {
+    setSelectedGroupPaths((previous) => {
+      const next = new Set(previous);
+      if (next.has(groupPath)) {
+        next.delete(groupPath);
+      } else {
+        next.add(groupPath);
+      }
+      return next;
+    });
+  }, []);
+
   const clearHostSelection = useCallback(() => {
     setSelectedHostIds(new Set());
+    setSelectedGroupPaths(new Set());
     setIsMultiSelectMode(false);
   }, []);
 
   const deleteSelectedHosts = useCallback(() => {
     if (selectedHostIds.size === 0) return;
-    const updatedHosts = hosts.filter(h => !selectedHostIds.has(h.id));
+    const updatedHosts = hosts.filter((h) => !selectedHostIds.has(h.id));
     onUpdateHosts(updatedHosts);
     clearHostSelection();
-    toast.success(t("vault.hosts.deleteMultiple.success", { count: selectedHostIds.size }));
+    toast.success(
+      t("vault.hosts.deleteMultiple.success", { count: selectedHostIds.size }),
+    );
   }, [selectedHostIds, hosts, onUpdateHosts, clearHostSelection, t]);
 
   const connectSelectedHosts = useCallback(() => {
@@ -716,26 +853,29 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
     // Connect each selected host in list order with its default protocol.
     // We call onConnect directly (not handleHostConnect) so multi-protocol hosts
     // connect with their configured protocol instead of opening a per-host dialog.
-    const targets = hosts.filter(h => selectedHostIds.has(h.id));
+    const targets = hosts.filter((h) => selectedHostIds.has(h.id));
     // Stagger the connects across frames so mounting N terminals (each creating
     // a WebGL context) doesn't block one frame and freeze the UI. The first host
     // still connects synchronously so its tab appears immediately.
     connectHostsStaggered(targets, onConnect);
     clearHostSelection();
-    toast.success(t("vault.hosts.connectMultiple.success", { count: targets.length }));
+    toast.success(
+      t("vault.hosts.connectMultiple.success", { count: targets.length }),
+    );
   }, [selectedHostIds, hosts, onConnect, clearHostSelection, t]);
-  const { handleImportFileSelected } = useVaultImportHandlers({
-    customGroups,
-    hosts,
-    keys,
-    managedSources,
-    onUpdateCustomGroups,
-    onUpdateHosts,
-    onUpdateKeys,
-    onUpdateManagedSources,
-    setIsImportOpen,
-    t,
-  });
+  const { handleImportFileSelected, importProgress, resetImportProgress } =
+    useVaultImportHandlers({
+      customGroups,
+      hosts,
+      keys,
+      managedSources,
+      onUpdateCustomGroups,
+      onUpdateHosts,
+      onUpdateKeys,
+      onUpdateManagedSources,
+      setIsImportOpen,
+      t,
+    });
 
   const {
     allGroupPaths,
@@ -769,7 +909,6 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
     sortMode,
     viewMode,
   });
-
 
   const submitNewFolder = () => {
     if (!newFolderName.trim()) return;
@@ -819,9 +958,13 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
 
     // Update managed sources if any match the renamed group path
     const updatedManagedSources = managedSources.map((s) => {
-      if (s.groupName === renameTargetPath) return { ...s, groupName: nextPath };
+      if (s.groupName === renameTargetPath)
+        return { ...s, groupName: nextPath };
       if (s.groupName.startsWith(renameTargetPath + "/"))
-        return { ...s, groupName: nextPath + s.groupName.slice(renameTargetPath.length) };
+        return {
+          ...s,
+          groupName: nextPath + s.groupName.slice(renameTargetPath.length),
+        };
       return s;
     });
     if (updatedManagedSources.some((s, i) => s !== managedSources[i])) {
@@ -852,141 +995,132 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
     setIsGroupPanelOpen(true);
   }, []);
 
-  const handleSaveGroupConfig = useCallback((config: GroupConfig, _newName?: string, _newParent?: string | null) => {
-    const oldPath = editingGroupPath!;
-    const newPath = config.path; // Panel already computed the correct path
+  const handleSaveGroupConfig = useCallback(
+    (config: GroupConfig, _newName?: string, _newParent?: string | null) => {
+      const oldPath = editingGroupPath!;
+      const newPath = config.path; // Panel already computed the correct path
 
-    // Validate no duplicate path on rename/reparent
-    if (newPath !== oldPath && customGroups.includes(newPath)) {
-      toast.error(t('vault.groups.errors.duplicatePath'));
-      return;
-    }
-
-    // Save config (use new path)
-    const updatedConfigs = [...groupConfigs.filter(c => c.path !== oldPath), config];
-
-    // Handle path change (rename or parent change)
-    if (newPath !== oldPath) {
-      // Update groups, hosts, managed sources, and configs for path change
-      const updatedGroups = customGroups.map((g) => {
-        if (g === oldPath) return newPath;
-        if (g.startsWith(oldPath + '/')) return newPath + g.slice(oldPath.length);
-        return g;
-      });
-      const updatedHosts = hosts.map((h) => {
-        const g = h.group || '';
-        if (g === oldPath) return { ...h, group: newPath };
-        if (g.startsWith(oldPath + '/')) return { ...h, group: newPath + g.slice(oldPath.length) };
-        return h;
-      });
-      const updatedManagedSources = managedSources.map((s) => {
-        if (s.groupName === oldPath) return { ...s, groupName: newPath };
-        if (s.groupName.startsWith(oldPath + '/')) return { ...s, groupName: newPath + s.groupName.slice(oldPath.length) };
-        return s;
-      });
-      if (updatedManagedSources.some((s, i) => s !== managedSources[i])) {
-        onUpdateManagedSources(updatedManagedSources);
+      // Validate no duplicate path on rename/reparent
+      if (newPath !== oldPath && customGroups.includes(newPath)) {
+        toast.error(t("vault.groups.errors.duplicatePath"));
+        return;
       }
-      onUpdateCustomGroups(Array.from(new Set(updatedGroups)));
-      onUpdateHosts(updatedHosts);
-      // Update child config paths too
-      const finalConfigs = updatedConfigs.map(c => {
-        if (c.path.startsWith(oldPath + '/')) return { ...c, path: newPath + c.path.slice(oldPath.length) };
-        return c;
-      });
-      onUpdateGroupConfigs(finalConfigs);
-      if (selectedGroupPath === oldPath) setSelectedGroupPath(newPath);
-      if (selectedGroupPath?.startsWith(oldPath + '/')) {
-        setSelectedGroupPath(newPath + selectedGroupPath.slice(oldPath.length));
-      }
-    } else {
-      onUpdateGroupConfigs(updatedConfigs);
-    }
 
-    setIsGroupPanelOpen(false);
-    setEditingGroupPath(null);
-  }, [groupConfigs, editingGroupPath, customGroups, hosts, managedSources, selectedGroupPath, onUpdateGroupConfigs, onUpdateCustomGroups, onUpdateHosts, onUpdateManagedSources, t]);
+      // Save config (use new path)
+      const updatedConfigs = [
+        ...groupConfigs.filter((c) => c.path !== oldPath),
+        config,
+      ];
 
-  const deleteGroupPath = async (path: string, deleteHosts: boolean = false) => {
-    const keepGroups = customGroups.filter(
-      (g) => !(g === path || g.startsWith(path + "/")),
-    );
-
-    // Find all managed sources under the deleted path (exact match or subgroups)
-    const sourcesToRemove = managedSources.filter(s =>
-      s.groupName === path || s.groupName.startsWith(path + "/")
-    );
-
-    // Clear managed blocks in SSH config files before removing sources
-    // Use batch removal to avoid race conditions when multiple sources are removed
-    if (sourcesToRemove.length > 0 && onClearAndRemoveManagedSources) {
-      await onClearAndRemoveManagedSources(sourcesToRemove);
-    } else if (sourcesToRemove.length > 0 && onClearAndRemoveManagedSource) {
-      // Fallback to single removal (may have race conditions with multiple sources)
-      await Promise.all(sourcesToRemove.map(s => onClearAndRemoveManagedSource(s)));
-    } else if (sourcesToRemove.length > 0) {
-      // Fallback: just remove sources without clearing (if callback not provided)
-      const updatedSources = managedSources.filter(s =>
-        s.groupName !== path && !s.groupName.startsWith(path + "/")
-      );
-      onUpdateManagedSources(updatedSources);
-    }
-
-    // Check if this is a subgroup under a managed group (that won't be deleted)
-    // Use the most specific (deepest) matching managed source
-    const parentManagedSource = managedSources
-      .filter(s => path.startsWith(s.groupName + "/") && s.groupName !== path)
-      .sort((a, b) => b.groupName.length - a.groupName.length)[0];
-
-    let keepHosts: Host[];
-    if (deleteHosts) {
-      keepHosts = hosts.filter((h) => {
-        const g = h.group || "";
-        return !(g === path || g.startsWith(path + "/"));
-      });
-    } else {
-      keepHosts = hosts.map((h) => {
-        const g = h.group || "";
-        if (g === path || g.startsWith(path + "/")) {
-          // If deleting a subgroup under a managed group, keep managedSourceId
-          // so hosts remain managed and sync to the SSH config
-          if (parentManagedSource) {
-            return { ...h, group: "" };
-          }
-          return { ...h, group: "", managedSourceId: undefined };
+      // Handle path change (rename or parent change)
+      if (newPath !== oldPath) {
+        // Update groups, hosts, managed sources, and configs for path change
+        const updatedGroups = customGroups.map((g) => {
+          if (g === oldPath) return newPath;
+          if (g.startsWith(oldPath + "/"))
+            return newPath + g.slice(oldPath.length);
+          return g;
+        });
+        const updatedHosts = hosts.map((h) => {
+          const g = h.group || "";
+          if (g === oldPath) return { ...h, group: newPath };
+          if (g.startsWith(oldPath + "/"))
+            return { ...h, group: newPath + g.slice(oldPath.length) };
+          return h;
+        });
+        const updatedManagedSources = managedSources.map((s) => {
+          if (s.groupName === oldPath) return { ...s, groupName: newPath };
+          if (s.groupName.startsWith(oldPath + "/"))
+            return {
+              ...s,
+              groupName: newPath + s.groupName.slice(oldPath.length),
+            };
+          return s;
+        });
+        if (updatedManagedSources.some((s, i) => s !== managedSources[i])) {
+          onUpdateManagedSources(updatedManagedSources);
         }
-        return h;
-      });
-    }
+        onUpdateCustomGroups(Array.from(new Set(updatedGroups)));
+        onUpdateHosts(updatedHosts);
+        // Update child config paths too
+        const finalConfigs = updatedConfigs.map((c) => {
+          if (c.path.startsWith(oldPath + "/"))
+            return { ...c, path: newPath + c.path.slice(oldPath.length) };
+          return c;
+        });
+        onUpdateGroupConfigs(finalConfigs);
+        if (selectedGroupPath === oldPath) setSelectedGroupPath(newPath);
+        if (selectedGroupPath?.startsWith(oldPath + "/")) {
+          setSelectedGroupPath(
+            newPath + selectedGroupPath.slice(oldPath.length),
+          );
+        }
+      } else {
+        onUpdateGroupConfigs(updatedConfigs);
+      }
 
-    onUpdateCustomGroups(keepGroups);
-    onUpdateHosts(keepHosts);
-    // Remove configs for deleted group and its children
-    const updatedGroupConfigs = groupConfigs.filter(
-      (c) => c.path !== path && !c.path.startsWith(path + '/')
-    );
-    if (updatedGroupConfigs.length !== groupConfigs.length) {
-      onUpdateGroupConfigs(updatedGroupConfigs);
-    }
-    if (
-      selectedGroupPath &&
-      (selectedGroupPath === path || selectedGroupPath.startsWith(path + "/"))
-    ) {
-      setSelectedGroupPath(null);
-    }
-  };
+      setIsGroupPanelOpen(false);
+      setEditingGroupPath(null);
+    },
+    [
+      groupConfigs,
+      editingGroupPath,
+      customGroups,
+      hosts,
+      managedSources,
+      selectedGroupPath,
+      onUpdateGroupConfigs,
+      onUpdateCustomGroups,
+      onUpdateHosts,
+      onUpdateManagedSources,
+      t,
+    ],
+  );
+
+  const handleDeletedGroupPaths = useCallback(
+    (selectedRoots: string[]) => {
+      if (
+        selectedGroupPath &&
+        selectedRoots.some(
+          (root) =>
+            selectedGroupPath === root ||
+            selectedGroupPath.startsWith(root + "/"),
+        )
+      ) {
+        setSelectedGroupPath(null);
+      }
+    },
+    [selectedGroupPath],
+  );
+  const deleteGroupPaths = useVaultGroupDeletion({
+    customGroups,
+    hosts,
+    groupConfigs,
+    managedSources,
+    onUpdateCustomGroups,
+    onUpdateHosts,
+    onUpdateGroupConfigs,
+    onUpdateManagedSources,
+    onClearAndRemoveManagedSource,
+    onClearAndRemoveManagedSources,
+    onDeletedPaths: handleDeletedGroupPaths,
+  });
+
+  const deleteGroupPath = (path: string, deleteHosts: boolean = false) =>
+    deleteGroupPaths([path], deleteHosts);
 
   const moveGroup = (sourcePath: string, targetParent: string | null) => {
     const name = sourcePath.split("/").filter(Boolean).pop() || "";
     const newPath = targetParent ? `${targetParent}/${name}` : name;
     if (newPath === sourcePath || newPath.startsWith(sourcePath + "/")) return;
     if (customGroups.includes(newPath)) {
-      toast.error(t('vault.groups.errors.duplicatePath'));
+      toast.error(t("vault.groups.errors.duplicatePath"));
       return;
     }
     const updatedGroups = customGroups.map((g) => {
       if (g === sourcePath) return newPath;
-      if (g.startsWith(sourcePath + "/")) return newPath + g.slice(sourcePath.length);
+      if (g.startsWith(sourcePath + "/"))
+        return newPath + g.slice(sourcePath.length);
       return g;
     });
     const updatedHosts = hosts.map((h) => {
@@ -1000,7 +1134,10 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
     const updatedManagedSources = managedSources.map((s) => {
       if (s.groupName === sourcePath) return { ...s, groupName: newPath };
       if (s.groupName.startsWith(sourcePath + "/"))
-        return { ...s, groupName: newPath + s.groupName.slice(sourcePath.length) };
+        return {
+          ...s,
+          groupName: newPath + s.groupName.slice(sourcePath.length),
+        };
       return s;
     });
     if (updatedManagedSources.some((s, i) => s !== managedSources[i])) {
@@ -1011,7 +1148,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
     // Update group configs for moved paths
     const updatedGroupConfigs = groupConfigs.map((c) => {
       if (c.path === sourcePath) return { ...c, path: newPath };
-      if (c.path.startsWith(sourcePath + '/'))
+      if (c.path.startsWith(sourcePath + "/"))
         return { ...c, path: newPath + c.path.slice(sourcePath.length) };
       return c;
     });
@@ -1027,69 +1164,107 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
     }
   };
 
-  const reorderHost = useCallback((sourceHostId: string, targetHostId: string, position: VaultOrderPosition) => {
-    const source = hostsRef.current.find((host) => host.id === sourceHostId);
-    const target = hostsRef.current.find((host) => host.id === targetHostId);
-    if (!source || !target) return;
-    const targetGroup = target.group || "";
-    const targetManagedSource = managedSources
-      .filter((sourceInfo) => targetGroup === sourceInfo.groupName || targetGroup.startsWith(`${sourceInfo.groupName}/`))
-      .sort((a, b) => b.groupName.length - a.groupName.length)[0];
-    const updatedHosts = hostsRef.current.map((host) =>
-      host.id === sourceHostId
-        ? {
-          ...host,
-          label:
-            targetManagedSource && (!host.protocol || host.protocol === "ssh")
-              ? host.label.replace(/\s/g, "")
-              : host.label,
-          group: targetGroup,
-          managedSourceId:
-            targetManagedSource && (!host.protocol || host.protocol === "ssh")
-              ? targetManagedSource.id
-              : undefined,
-        }
-        : host,
-    );
-    const reorderedHosts = reorderVaultItems<Host>(updatedHosts, sourceHostId, targetHostId, position);
-    if (haveSameHostOrderResult(hostsRef.current, reorderedHosts)) return;
-    onUpdateHosts(reorderedHosts);
-    setSortMode("manual");
-  }, [managedSources, onUpdateHosts, setSortMode]);
+  const reorderHost = useCallback(
+    (
+      sourceHostId: string,
+      targetHostId: string,
+      position: VaultOrderPosition,
+    ) => {
+      const source = hostsRef.current.find((host) => host.id === sourceHostId);
+      const target = hostsRef.current.find((host) => host.id === targetHostId);
+      if (!source || !target) return;
+      const targetGroup = target.group || "";
+      const targetManagedSource = managedSources
+        .filter(
+          (sourceInfo) =>
+            targetGroup === sourceInfo.groupName ||
+            targetGroup.startsWith(`${sourceInfo.groupName}/`),
+        )
+        .sort((a, b) => b.groupName.length - a.groupName.length)[0];
+      const updatedHosts = hostsRef.current.map((host) =>
+        host.id === sourceHostId
+          ? {
+              ...host,
+              label:
+                targetManagedSource &&
+                (!host.protocol || host.protocol === "ssh")
+                  ? host.label.replace(/\s/g, "")
+                  : host.label,
+              group: targetGroup,
+              managedSourceId:
+                targetManagedSource &&
+                (!host.protocol || host.protocol === "ssh")
+                  ? targetManagedSource.id
+                  : undefined,
+            }
+          : host,
+      );
+      const reorderedHosts = reorderVaultItems<Host>(
+        updatedHosts,
+        sourceHostId,
+        targetHostId,
+        position,
+      );
+      if (haveSameHostOrderResult(hostsRef.current, reorderedHosts)) return;
+      onUpdateHosts(reorderedHosts);
+      setSortMode("manual");
+    },
+    [managedSources, onUpdateHosts, setSortMode],
+  );
 
-  const reorderGroup = useCallback((sourcePath: string, targetPath: string, position: VaultOrderPosition) => {
-    const parentOf = (path: string) => {
-      const parts = path.split("/").filter(Boolean);
-      return parts.slice(0, -1).join("/");
-    };
-    if (parentOf(sourcePath) !== parentOf(targetPath)) return false;
-    const sortableGroups = Array.from(new Set([...customGroups, sourcePath, targetPath]));
-    const updatedGroups = reorderVaultStrings(sortableGroups, sourcePath, targetPath, position);
-    const orderByPath = new Map(updatedGroups.map((path, index) => [path, (index + 1) * 1000]));
-    const configByPath = new Map<string, GroupConfig>(groupConfigs.map((config) => [config.path, config]));
-    const nextConfigs: GroupConfig[] = [
-      ...updatedGroups.map((path) => {
-        const existing = configByPath.get(path);
-        const base: GroupConfig = existing ? { ...existing } : { path };
-        return {
-          ...base,
-          order: orderByPath.get(path),
-        };
-      }),
-      ...groupConfigs.filter((config) => !orderByPath.has(config.path)),
-    ];
-    if (
-      updatedGroups.length === customGroups.length &&
-      updatedGroups.every((path, index) => path === customGroups[index]) &&
-      haveSameGroupConfigs(groupConfigs, nextConfigs)
-    ) {
+  const reorderGroup = useCallback(
+    (sourcePath: string, targetPath: string, position: VaultOrderPosition) => {
+      const parentOf = (path: string) => {
+        const parts = path.split("/").filter(Boolean);
+        return parts.slice(0, -1).join("/");
+      };
+      if (parentOf(sourcePath) !== parentOf(targetPath)) return false;
+      const sortableGroups = Array.from(
+        new Set([...customGroups, sourcePath, targetPath]),
+      );
+      const updatedGroups = reorderVaultStrings(
+        sortableGroups,
+        sourcePath,
+        targetPath,
+        position,
+      );
+      const orderByPath = new Map(
+        updatedGroups.map((path, index) => [path, (index + 1) * 1000]),
+      );
+      const configByPath = new Map<string, GroupConfig>(
+        groupConfigs.map((config) => [config.path, config]),
+      );
+      const nextConfigs: GroupConfig[] = [
+        ...updatedGroups.map((path) => {
+          const existing = configByPath.get(path);
+          const base: GroupConfig = existing ? { ...existing } : { path };
+          return {
+            ...base,
+            order: orderByPath.get(path),
+          };
+        }),
+        ...groupConfigs.filter((config) => !orderByPath.has(config.path)),
+      ];
+      if (
+        updatedGroups.length === customGroups.length &&
+        updatedGroups.every((path, index) => path === customGroups[index]) &&
+        haveSameGroupConfigs(groupConfigs, nextConfigs)
+      ) {
+        return true;
+      }
+      onUpdateCustomGroups(updatedGroups);
+      onUpdateGroupConfigs(nextConfigs);
+      setSortMode("manual");
       return true;
-    }
-    onUpdateCustomGroups(updatedGroups);
-    onUpdateGroupConfigs(nextConfigs);
-    setSortMode("manual");
-    return true;
-  }, [customGroups, groupConfigs, onUpdateCustomGroups, onUpdateGroupConfigs, setSortMode]);
+    },
+    [
+      customGroups,
+      groupConfigs,
+      onUpdateCustomGroups,
+      onUpdateGroupConfigs,
+      setSortMode,
+    ],
+  );
   const {
     getDropTargetClasses,
     handleUnmanageGroup,
@@ -1105,7 +1280,6 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
     onUpdateManagedSources,
     t,
   });
-
 
   const {
     startInlineNewGroup,
@@ -1161,15 +1335,12 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
   const hasHostsSidePanel =
     isHostsSectionActive &&
     ((isGroupPanelOpen && !!editingGroupPath) || isHostPanelOpen);
-  // Fixed N columns (not auto-fit) so populated rows fill the width with no
-  // trailing gap AND a section with a single card (e.g. Pinned) keeps it at one
-  // column's width instead of stretching it across the whole row — matching the
-  // no-panel grid-cols-* behaviour, just measured from the container. The actual
-  // column count rides on the --vault-grid-cols custom property (set by the
-  // ResizeObserver below); the fallback applies until the first measurement.
-  const splitViewGridStyle = hasHostsSidePanel
-    ? { gridTemplateColumns: "var(--vault-grid-cols, repeat(2, minmax(0, 1fr)))" }
-    : undefined;
+  // Every host grid uses the same container-based fixed column count. This keeps
+  // pinned/recent cards aligned with the virtualized main grid and prevents a
+  // single card from stretching across the full row.
+  const splitViewGridStyle = {
+    gridTemplateColumns: "var(--vault-grid-cols, minmax(0, 1fr))",
+  };
 
   // Track the host-list container width and derive the column count the same way
   // the auto-fit grid did (≈220px min card + 12px gap), but as a fixed count so
@@ -1180,16 +1351,17 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
   useEffect(() => {
     const el = hostListScrollRef.current;
     if (!el || typeof ResizeObserver === "undefined") return;
-    const GAP = 12; // matches gap-3
-    const MIN_CARD = 220;
     const PADDING_X = 32; // matches px-4 on both sides
     const recompute = () => {
       const usable = el.clientWidth - PADDING_X;
       if (usable <= 0) return; // hidden / not laid out yet
-      const next = Math.max(1, Math.floor((usable + GAP) / (MIN_CARD + GAP)));
+      const next = getVaultHostGridColumnCount(usable);
       if (next === splitGridColsRef.current) return;
       splitGridColsRef.current = next;
-      el.style.setProperty("--vault-grid-cols", `repeat(${next}, minmax(0, 1fr))`);
+      el.style.setProperty(
+        "--vault-grid-cols",
+        `repeat(${next}, minmax(0, 1fr))`,
+      );
     };
     recompute();
     const observer = new ResizeObserver(recompute);
@@ -1202,7 +1374,271 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
         managedGroupPaths={managedGroupPaths}
         onConfirmDelete={deleteGroupPath}
       />
-      <VaultViewLayout ctx={{ Activity, allGroupPaths, allTags, AppLogo, Array, Badge, BookMarked, Boolean, Button, CheckSquare, ChevronDown, cancelInlineGroupEdit, clearHostSelection, ClipboardCopy, Clock, cn, commitInlineGroupRename, connectionLogs, connectSelectedHosts, ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger, Copy, currentSection, customGroups, deleteGroupPath, deleteGroupWithHosts, deleteSelectedHosts, deleteTargetPath, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, displayedGroups, displayedHosts, DistroAvatar, Download, Dropdown, DropdownContent, DropdownTrigger, Edit2, editingGroupPath, editingHost, editingHostGroupDefaults, FileCode, FileSymlink, FolderPlus, FolderTree, getDropTargetClasses, getEffectiveHostDistro, Globe, groupConfigs, GroupDetailsPanel, groupedDisplayHosts, handleConnectClick, handleCopyCredentials, handleDeleteTag, handleDuplicateHost, handleEditGroupConfig, handleEditHost, handleEditTag, handleExportHosts, handleHostConnect, handleImportFileSelected, handleNewHost, handleProtocolSelect, handleQuickConnect, handleQuickConnectSaveHost, handleSaveGroupConfig, handleSearchKeyDown, handleUnmanageGroup, hasHostsSidePanel, HostDetailsPanel, hostListScrollRef, hosts, HostTreeView, hotkeyScheme, identities, ImportVaultDialog, Input, isDeleteGroupOpen, isGroupPanelOpen, isHostPanelOpen, isHostsSectionActive, isImportOpen, isMultiSelectMode, isNewFolderOpen, isQuickConnectOpen, isRenameGroupOpen, isSearchQuickConnect, isSerialModalOpen, Key, keyBindings, KeychainManager, keys, knownHosts, knownHostsManagerElement, Label, lastPinnedId, LayoutGrid, LazyConnectionLogsManager, LazyProtocolSelectDialog, List, managedGroupPaths, managedSources, moveGroup, moveHostToGroup, Network, newFolderName, newHostGroupPath, noteGroups, NotebookText, notes, NotesManager, onCommitPluginImporterData, onClearUnsavedConnectionLogs, onConnectSerial, onCreateLocalTerminal, onDeleteConnectionLog, onDeleteHost, onImportOrReuseKey, onOpenHostFromNote, onOpenLogView, onOpenSettings, onRunSnippet, onToggleConnectionLogSaved, onUpdateCustomGroups, onUpdateGroupConfigs, onUpdateHosts, onUpdateIdentities, onUpdateKeys, onUpdateNoteGroups, onUpdateNotes, onUpdateProxyProfiles, onUpdateSnippetPackages, onUpdateSnippets, openNoteId: pendingOpenNoteId, onOpenNoteIdHandled: () => setPendingOpenNoteId(null), openSnippetId: pendingOpenSnippetId, onOpenSnippetIdHandled: () => setPendingOpenSnippetId(null), Pin, pinnedHosts, pinnedRecentIds, Plug, Plus, PortForwarding, protocolSelectHost, proxyProfiles, ProxyProfilesManager, quickConnectTarget, quickConnectWarnings, QuickConnectWizard, recentHosts, renameGroupError, renameGroupName, renameTargetPath, reorderGroup, reorderHost, RippleButton, rootRef, sanitizeHost, search, Search, selectedGroupPath, selectedHostIds, selectedTags, SerialConnectModal, SerialHostDetailsPanel, sessionCount, Set, setCurrentSection, setDeleteGroupWithHosts, setDeleteTargetPath, setDragOverDropTarget, setEditingGroupPath, setEditingHost, setGroupDragOverDropTarget, setIsDeleteGroupOpen, setIsGroupPanelOpen, setIsHostPanelOpen, setIsImportOpen, setIsMultiSelectMode, setIsNewFolderOpen, setIsQuickConnectOpen, setIsRenameGroupOpen, setIsSerialModalOpen, setLastPinnedId, setNewFolderName, setNewHostGroupPath, setProtocolSelectHost, setQuickConnectTarget, setQuickConnectWarnings, setRenameGroupError, setRenameGroupName, setRenameTargetPath, setSearch, setSelectedGroupPath, setSelectedHostIds, setSelectedTags, setSidebarCollapsed, setSidebarWidth, handleSidebarWidthCommit, setSortMode, setTargetParentPath, Settings, setViewMode, shellHistory, shouldHideEmptyRootHostsSection, showRecentHosts, hostClickBehavior, sidebarCollapsed, sidebarWidth, snippetPackages, snippets, SnippetsManager, SortDropdown, sortMode, splitViewGridStyle, Square, Star, startInlineDeleteGroup, startInlineNewGroup, startInlineRenameGroup, submitNewFolder, submitRenameGroup, Suspense, t, TagFilterDropdown, targetParentPath, terminalFontSize, terminalSettings, TerminalSquare, terminalThemeId, toggleHostPinned, toggleHostSelection, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger, Trash2, treeExpandedState, treeViewGroupTree, treeViewHosts, Upload, upsertHostById, Usb, viewMode, visibleDisplayedHosts, X, Zap }} />
+      <VaultViewLayout
+        ctx={{
+          Activity,
+          allGroupPaths,
+          allTags,
+          AppLogo,
+          Array,
+          Badge,
+          BookMarked,
+          Boolean,
+          bulkDeleteGroupPaths,
+          Button,
+          CheckSquare,
+          ChevronDown,
+          cancelInlineGroupEdit,
+          clearHostSelection,
+          ClipboardCopy,
+          Clock,
+          cn,
+          commitInlineGroupRename,
+          connectionLogs,
+          connectSelectedHosts,
+          ContextMenu,
+          ContextMenuContent,
+          ContextMenuItem,
+          ContextMenuTrigger,
+          Copy,
+          currentSection,
+          customGroups,
+          deleteGroupPath,
+          deleteGroupPaths,
+          deleteGroupWithHosts,
+          deleteSelectedHosts,
+          deleteTargetPath,
+          Dialog,
+          DialogContent,
+          DialogDescription,
+          DialogFooter,
+          DialogHeader,
+          DialogTitle,
+          displayedGroups,
+          displayedHosts,
+          DistroAvatar,
+          Download,
+          Dropdown,
+          DropdownContent,
+          DropdownTrigger,
+          Edit2,
+          editingGroupPath,
+          editingHost,
+          editingHostGroupDefaults,
+          FileCode,
+          FileSymlink,
+          FolderPlus,
+          FolderTree,
+          getDropTargetClasses,
+          getEffectiveHostDistro,
+          Globe,
+          groupConfigs,
+          GroupDetailsPanel,
+          groupedDisplayHosts,
+          handleConnectClick,
+          handleCopyCredentials,
+          handleDeleteTag,
+          handleDuplicateHost,
+          handleEditGroupConfig,
+          handleEditHost,
+          handleEditTag,
+          handleExportHosts,
+          handleHostConnect,
+          handleImportFileSelected,
+          handleNewHost,
+          handleProtocolSelect,
+          handleQuickConnect,
+          handleQuickConnectSaveHost,
+          handleSaveGroupConfig,
+          handleSearchKeyDown,
+          handleUnmanageGroup,
+          hasHostsSidePanel,
+          HostDetailsPanel,
+          hostListScrollRef,
+          hosts,
+          HostTreeView,
+          hotkeyScheme,
+          identities,
+          importProgress,
+          ImportVaultDialog,
+          Input,
+          isDeleteGroupOpen,
+          isGroupPanelOpen,
+          isHostPanelOpen,
+          isHostsSectionActive,
+          isImportOpen,
+          isMultiSelectMode,
+          isNewFolderOpen,
+          isQuickConnectOpen,
+          isRenameGroupOpen,
+          isSearchQuickConnect,
+          isSerialModalOpen,
+          Key,
+          keyBindings,
+          KeychainManager,
+          keys,
+          knownHosts,
+          knownHostsManagerElement,
+          Label,
+          lastPinnedId,
+          LayoutGrid,
+          LazyConnectionLogsManager,
+          LazyProtocolSelectDialog,
+          List,
+          managedGroupPaths,
+          managedSources,
+          moveGroup,
+          moveHostToGroup,
+          Network,
+          newFolderName,
+          newHostGroupPath,
+          noteGroups,
+          NotebookText,
+          notes,
+          NotesManager,
+          onCommitPluginImporterData,
+          onClearUnsavedConnectionLogs,
+          onConnectSerial,
+          onCreateLocalTerminal,
+          onDeleteConnectionLog,
+          onDeleteHost,
+          onImportOrReuseKey,
+          onOpenHostFromNote,
+          onOpenLogView,
+          onOpenSettings,
+          onRunSnippet,
+          onToggleConnectionLogSaved,
+          onUpdateCustomGroups,
+          onUpdateGroupConfigs,
+          onUpdateHosts,
+          onUpdateIdentities,
+          onUpdateKeys,
+          onUpdateNoteGroups,
+          onUpdateNotes,
+          onUpdateProxyProfiles,
+          onUpdateSnippetPackages,
+          onUpdateSnippets,
+          openNoteId: pendingOpenNoteId,
+          onOpenNoteIdHandled: () => setPendingOpenNoteId(null),
+          openSnippetId: pendingOpenSnippetId,
+          onOpenSnippetIdHandled: () => setPendingOpenSnippetId(null),
+          Pin,
+          pinnedHosts,
+          pinnedRecentIds,
+          Plug,
+          Plus,
+          PortForwarding,
+          protocolSelectHost,
+          proxyProfiles,
+          ProxyProfilesManager,
+          quickConnectTarget,
+          quickConnectWarnings,
+          QuickConnectWizard,
+          recentHosts,
+          renameGroupError,
+          renameGroupName,
+          renameTargetPath,
+          reorderGroup,
+          reorderHost,
+          resetImportProgress,
+          RippleButton,
+          rootRef,
+          sanitizeHost,
+          search,
+          Search,
+          selectedGroupPath,
+          selectedGroupPaths,
+          selectedHostIds,
+          selectedTags,
+          SerialConnectModal,
+          SerialHostDetailsPanel,
+          sessionCount,
+          Set,
+          setBulkDeleteGroupPaths,
+          setCurrentSection,
+          setDeleteGroupWithHosts,
+          setDeleteTargetPath,
+          setDragOverDropTarget,
+          setEditingGroupPath,
+          setEditingHost,
+          setGroupDragOverDropTarget,
+          setIsDeleteGroupOpen,
+          setIsGroupPanelOpen,
+          setIsHostPanelOpen,
+          setIsImportOpen,
+          setIsMultiSelectMode,
+          setIsNewFolderOpen,
+          setIsQuickConnectOpen,
+          setIsRenameGroupOpen,
+          setIsSerialModalOpen,
+          setLastPinnedId,
+          setNewFolderName,
+          setNewHostGroupPath,
+          setProtocolSelectHost,
+          setQuickConnectTarget,
+          setQuickConnectWarnings,
+          setRenameGroupError,
+          setRenameGroupName,
+          setRenameTargetPath,
+          setSearch,
+          setSelectedGroupPath,
+          setSelectedGroupPaths,
+          setSelectedHostIds,
+          setSelectedTags,
+          setSidebarCollapsed,
+          setSidebarWidth,
+          handleSidebarWidthCommit,
+          setSortMode,
+          setTargetParentPath,
+          Settings,
+          setViewMode,
+          shellHistory,
+          shouldHideEmptyRootHostsSection,
+          showRecentHosts,
+          hostClickBehavior,
+          sidebarCollapsed,
+          sidebarWidth,
+          snippetPackages,
+          snippets,
+          SnippetsManager,
+          SortDropdown,
+          sortMode,
+          splitViewGridStyle,
+          Square,
+          Star,
+          startInlineDeleteGroup,
+          startInlineNewGroup,
+          startInlineRenameGroup,
+          submitNewFolder,
+          submitRenameGroup,
+          Suspense,
+          t,
+          TagFilterDropdown,
+          targetParentPath,
+          terminalFontSize,
+          terminalSettings,
+          TerminalSquare,
+          terminalThemeId,
+          toggleGroupSelection,
+          toggleHostPinned,
+          toggleHostSelection,
+          Tooltip,
+          TooltipContent,
+          TooltipProvider,
+          TooltipTrigger,
+          Trash2,
+          treeExpandedState,
+          treeViewGroupTree,
+          treeViewHosts,
+          Upload,
+          upsertHostById,
+          Usb,
+          viewMode,
+          visibleDisplayedHosts,
+          X,
+          Zap,
+        }}
+      />
     </>
   );
 };
@@ -1241,9 +1677,12 @@ export const vaultViewAreEqual = (
     // PortForwarding inside the vault, so compare them directly. Other
     // terminal settings (fonts, themes, etc.) don't affect this subtree
     // and we don't want to re-render for them.
-    prev.terminalSettings?.verifyHostKeys === next.terminalSettings?.verifyHostKeys &&
-    prev.terminalSettings?.keepaliveInterval === next.terminalSettings?.keepaliveInterval &&
-    prev.terminalSettings?.keepaliveCountMax === next.terminalSettings?.keepaliveCountMax;
+    prev.terminalSettings?.verifyHostKeys ===
+      next.terminalSettings?.verifyHostKeys &&
+    prev.terminalSettings?.keepaliveInterval ===
+      next.terminalSettings?.keepaliveInterval &&
+    prev.terminalSettings?.keepaliveCountMax ===
+      next.terminalSettings?.keepaliveCountMax;
 
   return isEqual;
 };

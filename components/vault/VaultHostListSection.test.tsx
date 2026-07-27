@@ -34,6 +34,15 @@ import {
 import { cn } from "../../lib/utils.ts";
 import { VaultHostListSection } from "./VaultHostListSection.tsx";
 
+Object.defineProperty(globalThis, "localStorage", {
+  configurable: true,
+  value: {
+    getItem: () => null,
+    setItem: () => {},
+    removeItem: () => {},
+  },
+});
+
 const makeHost = (id: string, label: string): Host => ({
   id,
   label,
@@ -299,4 +308,40 @@ test("VaultHostListSection keeps list group edit action beside the group label w
   });
 
   assertGridGroupPlacement(gridMarkup, group);
+});
+
+test("VaultHostListSection virtualizes large grid collections without hiding search results", () => {
+  const hosts = Array.from({ length: 300 }, (_, index) => (
+    makeHost(`bulk-${index}`, `Bulk ${index}`)
+  ));
+  const markup = renderHostList({
+    viewMode: "grid",
+    displayedGroups: [],
+    displayedHosts: hosts,
+    visibleDisplayedHosts: hosts,
+  });
+
+  const renderedHosts = (markup.match(/data-vault-grid-item="main:/g) ?? []).length;
+  assert.ok(renderedHosts > 0);
+  assert.ok(renderedHosts < 100);
+  assert.doesNotMatch(markup, /vault\.hosts\.showMore/);
+});
+
+test("VaultHostListSection preserves grouped totals while virtualizing rendered cards", () => {
+  const hosts = Array.from({ length: 300 }, (_, index) => (
+    makeHost(`grouped-bulk-${index}`, `Grouped Bulk ${index}`)
+  ));
+  const markup = renderHostList({
+    viewMode: "grid",
+    displayedGroups: [],
+    displayedHosts: hosts,
+    groupedDisplayHosts: [{ name: "Large group", hosts }],
+    sortMode: "group",
+    visibleDisplayedHosts: [],
+  });
+
+  const renderedHosts = (markup.match(/data-vault-grid-item="grouped:/g) ?? []).length;
+  assert.ok(renderedHosts > 0);
+  assert.ok(renderedHosts < 100);
+  assert.match(markup, /\(300\)/);
 });

@@ -1,0 +1,31 @@
+interface VaultGroupTreeNodeLike {
+  path: string;
+  children?: Record<string, VaultGroupTreeNodeLike>;
+}
+
+export function collectVisibleVaultGroupPaths(
+  nodes: VaultGroupTreeNodeLike[],
+): string[] {
+  const paths: string[] = [];
+  const visit = (items: VaultGroupTreeNodeLike[]) => {
+    for (const node of items) {
+      paths.push(node.path);
+      visit(Object.values(node.children ?? {}));
+    }
+  };
+  visit(nodes);
+  return paths;
+}
+
+export function collectVisibleVaultHostIds<T extends { id: string }>({
+  viewMode,
+  displayedHosts,
+  treeHosts,
+}: {
+  viewMode: "grid" | "list" | "tree";
+  displayedHosts: T[];
+  treeHosts: T[];
+}): string[] {
+  const visibleHosts = viewMode === "tree" ? treeHosts : displayedHosts;
+  return visibleHosts.map((host) => host.id);
+}

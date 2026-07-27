@@ -150,3 +150,39 @@ test("HostTreeView renders the group edit action beside the group label", () => 
   assert.ok(editButtonIndex > labelIndex);
   assert.ok(countIndex > editButtonIndex);
 });
+
+test("HostTreeView shows selected groups in multi-select mode", () => {
+  installLocalStorageMock();
+
+  const markup = renderToStaticMarkup(
+    <HostTreeView
+      groupTree={[{
+        name: "Production",
+        path: "production",
+        children: {},
+        hosts: [],
+      }]}
+      hosts={[]}
+      expandedPaths={new Set<string>()}
+      onTogglePath={() => undefined}
+      onConnect={() => undefined}
+      onEditHost={() => undefined}
+      onDuplicateHost={() => undefined}
+      onDeleteHost={() => undefined}
+      onCopyCredentials={() => undefined}
+      onNewGroup={() => undefined}
+      onRenameGroup={() => undefined}
+      onEditGroup={() => undefined}
+      onDeleteGroup={() => undefined}
+      moveHostToGroup={() => undefined}
+      moveGroup={() => undefined}
+      isMultiSelectMode
+      selectedGroupPaths={new Set(["production"])}
+      toggleGroupSelection={() => undefined}
+    />,
+  );
+
+  assert.match(markup, /data-selected="true"/);
+  assert.match(markup, /data-group-path="production"/);
+  assert.doesNotMatch(markup, /data-host-tree-group-edit-button="production"/);
+});
