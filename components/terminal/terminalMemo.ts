@@ -27,6 +27,7 @@ export const terminalPropsAreEqual = (
   && prev.isResizing === next.isResizing
   && prev.isFocusMode === next.isFocusMode
   && prev.isFocused === next.isFocused
+  && prev.isFocusedPane === next.isFocusedPane
   && prev.fontFamilyId === next.fontFamilyId
   && prev.fontSize === next.fontSize
   && prev.followAppTerminalTheme === next.followAppTerminalTheme

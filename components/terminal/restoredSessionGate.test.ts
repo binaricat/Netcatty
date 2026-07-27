@@ -193,15 +193,18 @@ test("disconnected connection dialog keeps an Enter-reconnect focus sink", () =>
   const restoreEffectIdx = source.indexOf("Restore xterm focus only when this overlay unmounts");
   assert.notEqual(claimEffectIdx, -1);
   assert.notEqual(restoreEffectIdx, -1);
-  const claimDeps = source.indexOf("}, [canEnterReconnectFromDialog]);", claimEffectIdx);
+  const claimDeps = source.indexOf("}, [canEnterReconnectFromDialog, isFocusedPane]);", claimEffectIdx);
   const restoreDeps = source.indexOf("}, []);", restoreEffectIdx);
   assert.notEqual(claimDeps, -1);
   assert.notEqual(restoreDeps, -1);
   assert.ok(claimDeps < restoreEffectIdx);
   // Claim deps must not re-run on showLogs/error/status; restore is unmount-only.
-  assert.match(source.slice(claimDeps, claimDeps + 40), /^\}, \[canEnterReconnectFromDialog\]\);/);
+  assert.match(source.slice(claimDeps, claimDeps + 60), /^\}, \[canEnterReconnectFromDialog, isFocusedPane\]\);/);
   assert.match(source.slice(restoreDeps, restoreDeps + 10), /^\}, \[\]\);/);
   assert.equal(source.includes("}, [canEnterReconnectFromDialog, status, error, showLogs]"), false);
+  // Split unfocused panes pass isFocusedPane so document blur cannot steal focus.
+  assert.match(source, /isFocusedPane/);
+  assert.match(source, /shouldClaimDisconnectedDialogFocus\(\{[\s\S]*isFocusedPane/);
 });
 
 test("open terminal search does not globally gate enter reconnect", () => {

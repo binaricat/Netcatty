@@ -44,6 +44,8 @@ export interface TerminalConnectionDialogProps {
     keys: SSHKey[];
     onDismissDisconnected?: () => void;
     showEnterReconnectHint?: boolean;
+    /** False for unfocused split siblings — do not claim body/document focus. */
+    isFocusedPane?: boolean;
     hostKeyVerification?: {
         hostKeyInfo: HostKeyInfo;
         onClose: () => void;
@@ -102,6 +104,7 @@ export const TerminalConnectionDialog: React.FC<TerminalConnectionDialogProps> =
     keys,
     onDismissDisconnected,
     showEnterReconnectHint,
+    isFocusedPane,
     hostKeyVerification,
     progressProps,
 }) => {
@@ -142,6 +145,7 @@ export const TerminalConnectionDialog: React.FC<TerminalConnectionDialogProps> =
                 sessionRoot,
                 documentBody: document.body,
                 documentElement: document.documentElement,
+                isFocusedPane,
             })) {
                 return;
             }
@@ -152,7 +156,7 @@ export const TerminalConnectionDialog: React.FC<TerminalConnectionDialogProps> =
         // cannot leave focus on document.body — still never steals other panes.
         const timer = window.setTimeout(focusOverlay, 0);
         return () => window.clearTimeout(timer);
-    }, [canEnterReconnectFromDialog]);
+    }, [canEnterReconnectFromDialog, isFocusedPane]);
 
     // Restore xterm focus only when this overlay unmounts (connected / dismiss).
     // Do not key on Enter-reconnect mode: reconnect may keep the dialog mounted

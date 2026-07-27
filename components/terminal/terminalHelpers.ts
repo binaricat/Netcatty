@@ -120,6 +120,12 @@ export interface TerminalProps {
   isResizing?: boolean;
   isFocusMode?: boolean;
   isFocused?: boolean;
+  /**
+   * Split-pane keyboard ownership for disconnected-dialog focus claims.
+   * `false` = visible unfocused split sibling (must not claim body/document focus).
+   * Omit outside split mode (solo / focus / popup).
+   */
+  isFocusedPane?: boolean;
   fontFamilyId: string;
   fontSize: number;
   terminalTheme: TerminalTheme;
@@ -328,9 +334,13 @@ export function resolveDisconnectedDialogTerminalRoot(
 
 /**
  * Only park focus on the disconnected overlay when it is safe:
- * - focus is already lost (body / null), or
+ * - focus is already lost (body / null) AND this pane may own keyboard focus, or
  * - focus still belongs to this terminal/session tree.
  * Never steal from another pane, side panel, or app chrome.
+ *
+ * `isFocusedPane === false` means an unfocused split sibling: document-level
+ * focus loss must not let that pane claim Enter-reconnect focus.
+ * Omit / true outside split contention (solo, focus mode, popup).
  */
 export function shouldClaimDisconnectedDialogFocus({
   activeElement,
@@ -338,18 +348,20 @@ export function shouldClaimDisconnectedDialogFocus({
   sessionRoot,
   documentBody,
   documentElement,
+  isFocusedPane,
 }: {
   activeElement: Element | null;
   dialogNode: HTMLElement;
   sessionRoot: Element | null;
   documentBody?: Element | null;
   documentElement?: Element | null;
+  isFocusedPane?: boolean;
 }): boolean {
   if (!activeElement || activeElement === documentBody || activeElement === documentElement) {
-    return true;
+    return isFocusedPane !== false;
   }
   if (typeof HTMLElement !== "undefined" && !(activeElement instanceof HTMLElement)) {
-    return true;
+    return isFocusedPane !== false;
   }
   const active = activeElement as HTMLElement;
   if (dialogNode.contains(active)) {

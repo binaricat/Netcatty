@@ -159,6 +159,37 @@ test("disconnected dialog focus claim never steals from other panes", () => {
       }),
       true,
     );
+    // Unfocused split sibling must not claim when focus is on body/null.
+    assert.equal(
+      shouldClaimDisconnectedDialogFocus({
+        activeElement: null,
+        dialogNode: dialog as unknown as HTMLElement,
+        sessionRoot: session as unknown as Element,
+        documentBody: body as unknown as Element,
+        isFocusedPane: false,
+      }),
+      false,
+    );
+    assert.equal(
+      shouldClaimDisconnectedDialogFocus({
+        activeElement: body as unknown as Element,
+        dialogNode: dialog as unknown as HTMLElement,
+        sessionRoot: session as unknown as Element,
+        documentBody: body as unknown as Element,
+        isFocusedPane: false,
+      }),
+      false,
+    );
+    assert.equal(
+      shouldClaimDisconnectedDialogFocus({
+        activeElement: body as unknown as Element,
+        dialogNode: dialog as unknown as HTMLElement,
+        sessionRoot: session as unknown as Element,
+        documentBody: body as unknown as Element,
+        isFocusedPane: true,
+      }),
+      true,
+    );
     assert.equal(
       shouldClaimDisconnectedDialogFocus({
         activeElement: textarea as unknown as Element,

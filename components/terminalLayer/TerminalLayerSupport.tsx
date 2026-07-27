@@ -1372,6 +1372,7 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
         isResizing={isResizing}
         isFocusMode={layoutWorkspace?.viewMode === 'focus'}
         isFocused={isFocusedPane}
+        isFocusedPane={isSplitViewVisible ? isFocusedPane : undefined}
         fontFamilyId={terminalFontFamilyId}
         fontSize={fontSize}
         terminalTheme={terminalTheme}
