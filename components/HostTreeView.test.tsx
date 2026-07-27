@@ -2,12 +2,14 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { act, create, type ReactTestRenderer } from "react-test-renderer";
 
 import type { GroupConfig, GroupNode, Host } from "../types.ts";
 import {
   buildVisibleHostTreeItems,
   getHostTreeDisplayDetails,
   HostTreeView,
+  useHostTreeExpandedPaths,
 } from "./HostTreeView.tsx";
 
 const baseHost: Host = {
@@ -260,7 +262,10 @@ test("HostTreeView exposes only one tree item in the tab order", () => {
   );
 
   assert.equal(markup.match(/tabindex="0"/g)?.length, 1);
-  assert.equal(markup.match(/tabindex="-1"/g)?.length, 1);
+  assert.match(
+    markup,
+    /<button(?=[^>]*data-host-tree-group-edit-button="production")(?=[^>]*tabindex="-1")[^>]*>/,
+  );
 });
 
 test("HostTreeView flattens only expanded group descendants", () => {
@@ -327,6 +332,57 @@ test("HostTreeView keeps an explicit collapsed state after search auto-expands g
 
   assert.match(markup, /data-group-path="production"[^>]*aria-expanded="false"/);
   assert.doesNotMatch(markup, /data-host-id="child-host"/);
+});
+
+test("HostTreeView search expansion is temporary and remains collapsible", async () => {
+  const actEnvironment = globalThis as typeof globalThis & {
+    IS_REACT_ACT_ENVIRONMENT?: boolean;
+  };
+  const previousActEnvironment = actEnvironment.IS_REACT_ACT_ENVIRONMENT;
+  actEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
+  let persistentMutationCount = 0;
+  let autoExpandGroupsKey: string | undefined = "router";
+  let expandedPaths = new Set<string>();
+  let collapseAll = () => undefined;
+  let renderer: ReactTestRenderer | null = null;
+  const Probe = () => {
+    const state = useHostTreeExpandedPaths({
+      persistentExpandedPaths: new Set(),
+      allGroupPaths: ["production"],
+      autoExpandGroupsKey,
+      onTogglePath: () => { persistentMutationCount++; },
+      onExpandAll: () => { persistentMutationCount++; },
+      onCollapseAll: () => { persistentMutationCount++; },
+    });
+    expandedPaths = state.expandedPaths;
+    collapseAll = state.collapseAll;
+    return null;
+  };
+
+  try {
+    await act(async () => {
+      renderer = create(React.createElement(Probe));
+    });
+    assert.equal(expandedPaths.has("production"), true);
+
+    await act(async () => {
+      collapseAll();
+    });
+    assert.equal(expandedPaths.has("production"), false);
+    assert.equal(persistentMutationCount, 0);
+
+    await act(async () => {
+      autoExpandGroupsKey = undefined;
+      renderer!.update(React.createElement(Probe));
+    });
+    assert.equal(expandedPaths.has("production"), false);
+    assert.equal(persistentMutationCount, 0);
+  } finally {
+    await act(async () => {
+      renderer?.unmount();
+    });
+    actEnvironment.IS_REACT_ACT_ENVIRONMENT = previousActEnvironment;
+  }
 });
 
 test("HostTreeView virtualizes an 8,000-host tree", () => {

@@ -125,6 +125,8 @@ test("vault import progress is shown in a non-blocking floating panel", () => {
   assert.match(html, /data-vault-import-progress-panel/);
   assert.doesNotMatch(html, /role="dialog"/);
   assert.match(html, /fixed/);
+  assert.match(html, /max-h-\[calc\(100vh-2rem\)\]/);
+  assert.match(html, /overflow-y-auto/);
 });
 
 test("vault import destination controls offer preserve, existing, and new groups", () => {

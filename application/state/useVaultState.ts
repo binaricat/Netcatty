@@ -566,8 +566,14 @@ export const useVaultState = () => {
     nextHosts: Host[],
     updateGroups: (current: string[]) => string[],
     updateSources: (current: ManagedSource[]) => ManagedSource[],
+    updateGroupConfigs?: (current: GroupConfig[]) => GroupConfig[],
   ): Promise<
-    | { status: "persisted"; groups: string[]; sources: ManagedSource[] }
+    | {
+      status: "persisted";
+      groups: string[];
+      sources: ManagedSource[];
+      groupConfigs: GroupConfig[];
+    }
     | { status: "superseded" }
   > => {
     const version = hostsWriteVersion.current;
@@ -597,7 +603,10 @@ export const useVaultState = () => {
       baselineRaw.get(STORAGE_KEY_GROUP_CONFIGS) ?? null,
     );
     const latestGroupConfigs = await decryptGroupConfigs(storedGroupConfigs);
-    const nextGroupConfigs = buildGroupConfigsForGroups(groups, latestGroupConfigs);
+    const nextGroupConfigs = buildGroupConfigsForGroups(
+      groups,
+      updateGroupConfigs?.(latestGroupConfigs) ?? latestGroupConfigs,
+    );
     const [encryptedHosts, encryptedGroupConfigs] = await Promise.all([
       encryptHosts(cleanedHosts),
       encryptGroupConfigs(nextGroupConfigs),
@@ -628,7 +637,12 @@ export const useVaultState = () => {
     setCustomGroups(result.groups);
     setManagedSources(result.sources);
     setGroupConfigs(nextGroupConfigs);
-    return { status: "persisted", groups: result.groups, sources: result.sources };
+    return {
+      status: "persisted",
+      groups: result.groups,
+      sources: result.sources,
+      groupConfigs: nextGroupConfigs,
+    };
   }, [waitForPendingVaultWrites]);
 
   const updateGroupConfigs = useCallback((data: GroupConfig[]) => {

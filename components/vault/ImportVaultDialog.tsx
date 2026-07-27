@@ -356,7 +356,7 @@ export function VaultImportProgressPanel({
   return (
     <div
       data-vault-import-progress-panel
-      className="fixed bottom-4 right-4 z-50 w-[min(24rem,calc(100vw-2rem))] rounded-2xl border border-border/70 bg-background p-4 shadow-2xl"
+      className="fixed bottom-4 right-4 z-50 max-h-[calc(100vh-2rem)] w-[min(24rem,calc(100vw-2rem))] overflow-y-auto rounded-2xl border border-border/70 bg-background p-4 shadow-2xl"
     >
       <VaultImportProgressView
         progress={progress}

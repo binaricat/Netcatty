@@ -255,8 +255,14 @@ interface VaultViewProps {
     hosts: Host[],
     updateGroups: (current: string[]) => string[],
     updateSources: (current: ManagedSource[]) => ManagedSource[],
+    updateGroupConfigs?: (current: GroupConfig[]) => GroupConfig[],
   ) => Promise<
-    | { status: "persisted"; groups: string[]; sources: ManagedSource[] }
+    | {
+      status: "persisted";
+      groups: string[];
+      sources: ManagedSource[];
+      groupConfigs: GroupConfig[];
+    }
     | { status: "superseded" }
   >;
   onClearAndRemoveManagedSource?: (source: ManagedSource) => Promise<() => Promise<void>>;

@@ -112,6 +112,64 @@ export function buildVisibleHostTreeItems({
   return items;
 }
 
+export function useHostTreeExpandedPaths({
+  persistentExpandedPaths,
+  allGroupPaths,
+  autoExpandGroupsKey,
+  onTogglePath,
+  onExpandAll,
+  onCollapseAll,
+}: {
+  persistentExpandedPaths: Set<string>;
+  allGroupPaths: string[];
+  autoExpandGroupsKey?: string;
+  onTogglePath: (path: string) => void;
+  onExpandAll: (paths: string[]) => void;
+  onCollapseAll: () => void;
+}) {
+  const [temporaryExpandedPaths, setTemporaryExpandedPaths] = useState<Set<string> | null>(null);
+  const lastAutoExpandGroupsKeyRef = useRef<string | undefined>(undefined);
+
+  useEffect(() => {
+    if (!autoExpandGroupsKey) {
+      lastAutoExpandGroupsKeyRef.current = undefined;
+      setTemporaryExpandedPaths(null);
+      return;
+    }
+    if (lastAutoExpandGroupsKeyRef.current === autoExpandGroupsKey) return;
+    lastAutoExpandGroupsKeyRef.current = autoExpandGroupsKey;
+    setTemporaryExpandedPaths(new Set(allGroupPaths));
+  }, [allGroupPaths, autoExpandGroupsKey]);
+
+  const togglePath = useCallback((path: string) => {
+    if (temporaryExpandedPaths === null) {
+      onTogglePath(path);
+      return;
+    }
+    setTemporaryExpandedPaths((current) => {
+      const next = new Set(current ?? []);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
+  }, [onTogglePath, temporaryExpandedPaths]);
+  const expandAll = useCallback((paths: string[]) => {
+    if (temporaryExpandedPaths === null) onExpandAll(paths);
+    else setTemporaryExpandedPaths(new Set(paths));
+  }, [onExpandAll, temporaryExpandedPaths]);
+  const collapseAll = useCallback(() => {
+    if (temporaryExpandedPaths === null) onCollapseAll();
+    else setTemporaryExpandedPaths(new Set());
+  }, [onCollapseAll, temporaryExpandedPaths]);
+
+  return {
+    expandedPaths: temporaryExpandedPaths ?? persistentExpandedPaths,
+    togglePath,
+    expandAll,
+    collapseAll,
+  };
+}
+
 interface HostTreeViewProps {
   groupTree: GroupNode[];
   hosts: Host[];
@@ -374,6 +432,7 @@ const TreeNode: React.FC<TreeNodeProps> = ({
                 labelActions={!isMultiSelectMode && (
                   <button
                     aria-label={`Edit ${node.name}`}
+                    tabIndex={-1}
                     data-host-tree-group-edit-button={node.path}
                     className="flex h-5 w-5 shrink-0 items-center justify-center rounded opacity-0 transition-colors hover:bg-secondary/80 group-hover:opacity-100"
                     onClick={(e) => {
@@ -641,6 +700,7 @@ const HostTreeItem: React.FC<HostTreeItemProps> = ({
                 <span className="truncate">{host.label}</span>
                 <button
                   aria-label={`Edit ${host.label}`}
+                  tabIndex={-1}
                   data-host-tree-host-edit-button={host.id}
                   className="flex h-5 w-5 shrink-0 items-center justify-center rounded transition-colors opacity-0 hover:bg-secondary/80 group-hover:opacity-100"
                   onClick={(e) => {
@@ -745,9 +805,9 @@ export const HostTreeView: React.FC<HostTreeViewProps> = ({
   // Use external state if provided, otherwise use local persistent state
   const localTreeState = useTreeExpandedState(STORAGE_KEY_VAULT_HOSTS_TREE_EXPANDED);
   
-  const togglePath = externalOnTogglePath || localTreeState.togglePath;
-  const expandAll = externalOnExpandAll || localTreeState.expandAll;
-  const collapseAll = externalOnCollapseAll || localTreeState.collapseAll;
+  const persistentTogglePath = externalOnTogglePath || localTreeState.togglePath;
+  const persistentExpandAll = externalOnExpandAll || localTreeState.expandAll;
+  const persistentCollapseAll = externalOnCollapseAll || localTreeState.collapseAll;
 
   // Get all possible group paths for expand/collapse all functionality
   const getAllGroupPaths = (nodes: GroupNode[]): string[] => {
@@ -765,18 +825,15 @@ export const HostTreeView: React.FC<HostTreeViewProps> = ({
   };
 
   const allGroupPaths = useMemo(() => getAllGroupPaths(groupTree), [groupTree]);
-  const expandedPaths = externalExpandedPaths || localTreeState.expandedPaths;
-  const lastAutoExpandGroupsKeyRef = useRef<string | undefined>(undefined);
-
-  useEffect(() => {
-    if (!autoExpandGroupsKey) {
-      lastAutoExpandGroupsKeyRef.current = undefined;
-      return;
-    }
-    if (lastAutoExpandGroupsKeyRef.current === autoExpandGroupsKey) return;
-    lastAutoExpandGroupsKeyRef.current = autoExpandGroupsKey;
-    expandAll(allGroupPaths);
-  }, [allGroupPaths, autoExpandGroupsKey, expandAll]);
+  const persistentExpandedPaths = externalExpandedPaths || localTreeState.expandedPaths;
+  const { expandedPaths, togglePath, expandAll, collapseAll } = useHostTreeExpandedPaths({
+    persistentExpandedPaths,
+    allGroupPaths,
+    autoExpandGroupsKey,
+    onTogglePath: persistentTogglePath,
+    onExpandAll: persistentExpandAll,
+    onCollapseAll: persistentCollapseAll,
+  });
 
   const groupDefaultsByPath = useMemo(() => {
     const paths = new Set<string>(allGroupPaths as string[]);

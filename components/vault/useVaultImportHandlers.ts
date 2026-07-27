@@ -27,7 +27,7 @@ import {
   resolveVaultImportKeyPassphraseConflicts,
   type VaultImportFormat,
 } from "../../domain/vaultImport";
-import type { Host, ManagedSource, SSHKey } from "../../types";
+import type { GroupConfig, Host, ManagedSource, SSHKey } from "../../types";
 import type { ImportOptions } from "./ImportVaultDialog";
 import { toast } from "../ui/toast";
 
@@ -44,8 +44,14 @@ interface UseVaultImportHandlersOptions {
     hosts: Host[],
     updateGroups: (current: string[]) => string[],
     updateSources: (current: ManagedSource[]) => ManagedSource[],
+    updateGroupConfigs?: (current: GroupConfig[]) => GroupConfig[],
   ) => Promise<
-    | { status: "persisted"; groups: string[]; sources: ManagedSource[] }
+    | {
+      status: "persisted";
+      groups: string[];
+      sources: ManagedSource[];
+      groupConfigs: GroupConfig[];
+    }
     | { status: "superseded" }
   >;
   setIsImportOpen: (open: boolean) => void;

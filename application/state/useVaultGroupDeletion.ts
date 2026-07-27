@@ -26,8 +26,14 @@ export function useVaultGroupDeletion({
     hosts: Host[],
     updateGroups: (current: string[]) => string[],
     updateSources: (current: ManagedSource[]) => ManagedSource[],
+    updateGroupConfigs?: (current: GroupConfig[]) => GroupConfig[],
   ) => Promise<
-    | { status: "persisted"; groups: string[]; sources: ManagedSource[] }
+    | {
+      status: "persisted";
+      groups: string[];
+      sources: ManagedSource[];
+      groupConfigs: GroupConfig[];
+    }
     | { status: "superseded" }
   >;
   onClearAndRemoveManagedSource?: (source: ManagedSource) => Promise<() => Promise<void>>;
@@ -114,6 +120,14 @@ export function useVaultGroupDeletion({
               (remaining, sourceToRemove) => remaining.filter((source) => source.id !== sourceToRemove.id),
               currentSources,
             ),
+            (currentGroupConfigs) => buildVaultGroupDeletion({
+              selectedPaths,
+              deleteHosts,
+              customGroups: [],
+              hosts: [],
+              groupConfigs: currentGroupConfigs,
+              managedSources: [],
+            }).groupConfigs,
           );
           if (transaction.status === "superseded") {
             latestRef.current.hosts = await onReadPersistedHosts();
@@ -122,7 +136,7 @@ export function useVaultGroupDeletion({
           latestRef.current = {
             customGroups: transaction.groups,
             hosts: nextHosts,
-            groupConfigs: deletion.groupConfigs,
+            groupConfigs: transaction.groupConfigs,
             managedSources: transaction.sources,
           };
           break;
