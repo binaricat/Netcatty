@@ -52,9 +52,12 @@ export function useVaultGroupDeletion({
       if (deletion.sourcesToRemove.length > 0 && onClearAndRemoveManagedSources) {
         await onClearAndRemoveManagedSources(deletion.sourcesToRemove);
       } else if (deletion.sourcesToRemove.length > 0 && onClearAndRemoveManagedSource) {
-        await Promise.all(
+        const results = await Promise.all(
           deletion.sourcesToRemove.map((source) => onClearAndRemoveManagedSource(source)),
         );
+        if (results.some((success) => !success)) {
+          throw new Error("Could not clear every managed SSH config source");
+        }
       }
 
       // Rebuild after the file operations so edits made while they were running

@@ -164,18 +164,14 @@ export const useManagedSourceSync = ({
     [onUpdateManagedSources],
   );
 
-  // Clear the managed block in the SSH config file and then remove the source
-  // This should be called before deleting a managed group to avoid stale entries
+  // Clear the managed block before the caller atomically removes the Vault
+  // source and hosts. Keeping state unchanged here lets a failed clear abort
+  // the deletion without leaving a half-removed source record.
   const clearAndRemoveSource = useCallback(
     async (source: ManagedSource) => {
-      // Write empty hosts list to clear the managed block
-      const success = await writeSshConfigToFile(source, []);
-      // Remove the source regardless of write success
-      const updatedSources = managedSourcesRef.current.filter((s) => s.id !== source.id);
-      onUpdateManagedSources(updatedSources);
-      return success;
+      return writeSshConfigToFile(source, []);
     },
-    [onUpdateManagedSources, writeSshConfigToFile],
+    [writeSshConfigToFile],
   );
 
   // Clear and remove multiple sources atomically to avoid race conditions
@@ -185,21 +181,17 @@ export const useManagedSourceSync = ({
       if (sources.length === 0) return;
 
       // Clear all files in parallel
-      await Promise.all(
+      const results = await Promise.all(
         sources.map(async (source) => {
           const success = await writeSshConfigToFile(source, []);
           return { sourceId: source.id, success };
         })
       );
-
-      // Remove all sources atomically in a single update
-      const sourceIdsToRemove = new Set(sources.map(s => s.id));
-      const updatedSources = managedSourcesRef.current.filter(
-        (s) => !sourceIdsToRemove.has(s.id)
-      );
-      onUpdateManagedSources(updatedSources);
+      if (results.some((result) => !result.success)) {
+        throw new Error("Could not clear every managed SSH config source");
+      }
     },
-    [onUpdateManagedSources, writeSshConfigToFile],
+    [writeSshConfigToFile],
   );
 
   const pendingSyncRef = useRef(false);
@@ -332,7 +324,7 @@ export const useManagedSourceSync = ({
       Promise.all(
         managedSources
           .filter((s) => changedSourceIds.has(s.id))
-          .map(syncManagedSource),
+          .map((source) => syncManagedSource(source)),
       ).then((results) => {
         // Batch update lastSyncedAt for all successful syncs to avoid race conditions
         const successfulSourceIds = new Set(

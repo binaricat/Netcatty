@@ -111,6 +111,8 @@ export function VaultImportDestinationControls({
   groups,
   existingGroup,
   onExistingGroupChange,
+  existingGroupQuery = existingGroup,
+  onExistingGroupQueryChange,
   newGroup,
   onNewGroupChange,
   t,
@@ -120,6 +122,8 @@ export function VaultImportDestinationControls({
   groups: string[];
   existingGroup: string;
   onExistingGroupChange: (group: string) => void;
+  existingGroupQuery?: string;
+  onExistingGroupQueryChange?: (query: string) => void;
   newGroup: string;
   onNewGroupChange: (group: string) => void;
   t: Translate;
@@ -127,11 +131,11 @@ export function VaultImportDestinationControls({
   const choices: VaultImportDestinationMode[] = ["preserve", "existing", "new"];
   const existingGroupListId = React.useId();
   const matchingGroups = useMemo(() => {
-    const query = existingGroup.trim().toLocaleLowerCase();
+    const query = existingGroupQuery.trim().toLocaleLowerCase();
     return groups
       .filter((group) => !query || group.toLocaleLowerCase().includes(query))
       .slice(0, 50);
-  }, [existingGroup, groups]);
+  }, [existingGroupQuery, groups]);
   return (
     <div className="space-y-3 rounded-xl border border-border/60 bg-muted/20 p-3">
       <div className="text-xs font-medium text-muted-foreground">
@@ -161,8 +165,12 @@ export function VaultImportDestinationControls({
           <input
             type="text"
             list={existingGroupListId}
-            value={existingGroup}
-            onChange={(event) => onExistingGroupChange(event.target.value)}
+            value={existingGroupQuery}
+            onChange={(event) => {
+              const value = event.target.value;
+              onExistingGroupQueryChange?.(value);
+              onExistingGroupChange(groups.includes(value) ? value : "");
+            }}
             placeholder={groups.length === 0
               ? t("vault.import.destination.noGroups")
               : t("vault.import.destination.existing")}
@@ -376,6 +384,7 @@ export const ImportVaultDialog: React.FC<ImportVaultDialogProps> = ({
   const [destinationMode, setDestinationMode] =
     useState<VaultImportDestinationMode>("preserve");
   const [existingGroup, setExistingGroup] = useState(groups[0] ?? "");
+  const [existingGroupQuery, setExistingGroupQuery] = useState(groups[0] ?? "");
   const [newGroup, setNewGroup] = useState("");
   const destination = buildVaultImportDestination({
     mode: destinationMode,
@@ -384,15 +393,20 @@ export const ImportVaultDialog: React.FC<ImportVaultDialogProps> = ({
     availableGroups: groups,
   });
   useEffect(() => {
-    if (destinationMode === "existing" && !groups.includes(existingGroup)) {
-      setExistingGroup(groups[0] ?? "");
-    }
-  }, [destinationMode, existingGroup, groups]);
+    if (destinationMode !== "existing") return;
+    setExistingGroup((current) => {
+      if (groups.includes(current)) return current;
+      const next = groups[0] ?? "";
+      setExistingGroupQuery(next);
+      return next;
+    });
+  }, [destinationMode, groups]);
   useEffect(() => {
     if (open) return;
     setStep("format");
     setDestinationMode("preserve");
     setExistingGroup(groups[0] ?? "");
+    setExistingGroupQuery(groups[0] ?? "");
     setNewGroup("");
   }, [groups, open]);
   const pluginImporter = usePluginVaultImporter({
@@ -857,11 +871,14 @@ export const ImportVaultDialog: React.FC<ImportVaultDialogProps> = ({
                       setDestinationMode(mode);
                       if (mode === "existing" && !existingGroup && groups[0]) {
                         setExistingGroup(groups[0]);
+                        setExistingGroupQuery(groups[0]);
                       }
                     }}
                     groups={groups}
                     existingGroup={existingGroup}
                     onExistingGroupChange={setExistingGroup}
+                    existingGroupQuery={existingGroupQuery}
+                    onExistingGroupQueryChange={setExistingGroupQuery}
                     newGroup={newGroup}
                     onNewGroupChange={setNewGroup}
                     t={t}
