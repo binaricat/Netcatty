@@ -114,3 +114,21 @@ test("vault import surfaces worker failures and always stops the worker", async 
   await assert.rejects(promise, /Unable to parse CSV/);
   assert.equal(worker.terminated, true);
 });
+
+test("vault import cancellation stops the worker and rejects before applying a result", async () => {
+  const worker = new FakeVaultImportWorker();
+  const controller = new AbortController();
+  const promise = importVaultHostsInWorker({
+    format: "csv",
+    files: [new File(["Label,Hostname\nA,a.example.com"], "hosts.csv")],
+    signal: controller.signal,
+    createWorker: () => worker,
+  });
+
+  controller.abort();
+
+  await assert.rejects(promise, (error: unknown) => (
+    error instanceof DOMException && error.name === "AbortError"
+  ));
+  assert.equal(worker.terminated, true);
+});

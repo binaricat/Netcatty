@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  applyPluginImporterDestination,
   buildPluginImporterSafePreview,
   mergePluginImporterDrafts,
   normalizePluginImporterRecords,
@@ -378,6 +379,34 @@ test('plugin importer merge skips duplicates and remaps relationships to retaine
   assert.equal(merged.identities.length, 1);
   assert.equal(merged.hosts.length, 1);
   assert.equal(merged.snippets.length, 1);
+});
+
+test('plugin importer destination moves only newly imported hosts into the selected group', () => {
+  const existingDrafts = normalizePluginImporterRecords([{ type: 'draft', draft: {
+    kind: 'host',
+    value: { label: 'Existing', hostname: 'existing.test', group: 'Original' },
+  } }]);
+  const importedDrafts = normalizePluginImporterRecords([{ type: 'draft', draft: {
+    kind: 'host',
+    value: { label: 'Imported', hostname: 'imported.test', group: 'Source' },
+  } }]);
+  const merged = mergePluginImporterDrafts({
+    hosts: existingDrafts.hosts,
+    identities: [],
+    keys: [],
+    snippets: [],
+    customGroups: ['Original'],
+  }, importedDrafts);
+
+  const targeted = applyPluginImporterDestination(
+    merged,
+    existingDrafts.hosts.length,
+    { mode: 'group', group: 'Chosen' },
+  );
+
+  assert.equal(targeted.hosts[0].group, 'Original');
+  assert.equal(targeted.hosts[1].group, 'Chosen');
+  assert.deepEqual(targeted.customGroups, ['Original', 'Source', 'Chosen']);
 });
 
 test('plugin importer preview is bounded and never exposes secret or command payloads', () => {

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { VaultImportDestination } from "../../domain/vaultImport";
 import { pluginExtensionBridge } from "./pluginExtensionBridge";
 
 type Translation = (key: string, params?: Record<string, unknown>) => string;
@@ -6,7 +7,11 @@ type Translation = (key: string, params?: Record<string, unknown>) => string;
 type PluginVaultImporterOptions = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onPluginPreviewCommit: (preview: NetcattyPluginImporterPreview) => Promise<void> | void;
+  onPluginPreviewCommit: (
+    preview: NetcattyPluginImporterPreview,
+    destination?: VaultImportDestination,
+  ) => Promise<void> | void;
+  destination?: VaultImportDestination | null;
   t: Translation;
 };
 
@@ -33,6 +38,7 @@ export function usePluginVaultImporter({
   open,
   onOpenChange,
   onPluginPreviewCommit,
+  destination,
   t,
 }: PluginVaultImporterOptions) {
   const activePluginImportRequestRef = useRef<string | null>(null);
@@ -127,14 +133,14 @@ export function usePluginVaultImporter({
     setPluginBusy(true);
     setPluginError(null);
     try {
-      await onPluginPreviewCommit(pluginPreview);
+      await onPluginPreviewCommit(pluginPreview, destination ?? undefined);
       handleOpenChange(false);
     } catch (error) {
       setPluginError(error instanceof Error ? error.message : t("common.unknownError"));
     } finally {
       setPluginBusy(false);
     }
-  }, [handleOpenChange, onPluginPreviewCommit, pluginBusy, pluginPreview, t]);
+  }, [destination, handleOpenChange, onPluginPreviewCommit, pluginBusy, pluginPreview, t]);
 
   const previewSummary = useMemo(() => summarizePluginImporterPreview(pluginPreview), [pluginPreview]);
 

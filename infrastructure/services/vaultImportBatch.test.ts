@@ -89,3 +89,13 @@ test("SecureCRT folder paths transferred alongside files survive the worker boun
   assert.equal(result.hosts[0]?.group, "Production");
   assert.deepEqual(result.groups, ["Production"]);
 });
+
+test("SecureCRT keeps a real nested Sessions folder when that folder was selected", async () => {
+  const result = await importVaultHostFiles({
+    format: "securecrt",
+    files: [secureCrtFile("Sessions/Sessions/Nested.ini", "nested.example.com")],
+  });
+
+  assert.equal(result.hosts[0]?.group, "Sessions");
+  assert.deepEqual(result.groups, ["Sessions"]);
+});

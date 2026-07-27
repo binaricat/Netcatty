@@ -1,4 +1,4 @@
-import { startTransition, useCallback, useRef, useState } from "react";
+import { startTransition, useCallback, useEffect, useRef, useState } from "react";
 
 import {
   readRememberedKeyPassphrases,
@@ -55,16 +55,37 @@ export function useVaultImportHandlers({
   const hostsRef = useRef(hosts);
   const keysRef = useRef(keys);
   const managedSourcesRef = useRef(managedSources);
+  const activeImportAbortRef = useRef<AbortController | null>(null);
   customGroupsRef.current = customGroups;
   hostsRef.current = hosts;
   keysRef.current = keys;
   managedSourcesRef.current = managedSources;
   const resetImportProgress = useCallback(() => setImportProgress(null), []);
 
+  useEffect(() => () => {
+    activeImportAbortRef.current?.abort();
+    activeImportAbortRef.current = null;
+  }, []);
+
   const handleImportFileSelected = useCallback(
       async (format: VaultImportFormat, files: File[], options?: ImportOptions) => {
         const file = files[0];
         if (!file) return;
+        activeImportAbortRef.current?.abort();
+        const abortController = new AbortController();
+        activeImportAbortRef.current = abortController;
+        const { signal } = abortController;
+        const throwIfCancelled = () => {
+          if (signal.aborted) {
+            throw new DOMException("Vault import cancelled.", "AbortError");
+          }
+        };
+        let rollbackSnapshot: {
+          hosts: Host[];
+          customGroups: string[];
+          managedSources: ManagedSource[];
+          keys: SSHKey[];
+        } | null = null;
         const relativeRoot = file.webkitRelativePath?.split(/[\\/]+/).filter(Boolean)[0];
         const selectionName = files.length > 1 ? (relativeRoot || file.name) : file.name;
         const formatLabel =
@@ -106,8 +127,12 @@ export function useVaultImportHandlers({
             format,
             files,
             encoding: options?.encoding,
-            onProgress: (progress) => updateProgress(progress),
+            signal,
+            onProgress: (progress) => {
+              if (!signal.aborted) updateProgress(progress);
+            },
           });
+          throwIfCancelled();
           const isManaged = format === "ssh_config" && options?.managed === true;
           if (!isManaged) {
             result = applyVaultImportDestination(
@@ -117,12 +142,30 @@ export function useVaultImportHandlers({
           }
           updateProgress({ stage: "preparing", percent: 70 });
           await waitForVaultImportProgressPaint();
+          throwIfCancelled();
           updateProgress({ stage: "saving", percent: 85 });
           await waitForVaultImportProgressPaint();
+          throwIfCancelled();
 
           const currentCustomGroups = customGroupsRef.current;
           const currentHosts = hostsRef.current;
           const currentManagedSources = managedSourcesRef.current;
+          const persistHosts = async (nextHosts: Host[]) => {
+            throwIfCancelled();
+            rollbackSnapshot = {
+              hosts: currentHosts,
+              customGroups: currentCustomGroups,
+              managedSources: currentManagedSources,
+              keys: keysRef.current,
+            };
+            let hostUpdate: boolean | void | Promise<boolean | void>;
+            startTransition(() => {
+              hostUpdate = onUpdateHosts(nextHosts);
+            });
+            const persisted = await hostUpdate!;
+            throwIfCancelled();
+            return persisted;
+          };
 
           const fileBaseName = file.name.replace(/\.[^/.]+$/, "");
   
@@ -237,20 +280,21 @@ export function useVaultImportHandlers({
               ]),
             ) as string[];
 
-            let hostUpdate: boolean | void | Promise<boolean | void>;
-            startTransition(() => {
-	              hostUpdate = onUpdateHosts(
-	                [...updatedHosts, ...newHosts].map((host: Host) => sanitizeHost(host)),
-	              );
-            });
-            ensureVaultImportPersisted(
-              await hostUpdate!,
+            const hostPersisted = await persistHosts(
+              [...updatedHosts, ...newHosts].map((host: Host) => sanitizeHost(host)),
+            );
+            await ensureVaultImportPersisted(
+              hostPersisted,
               t("vault.import.progress.persistFailed"),
               () => {
                 startTransition(() => {
                   onUpdateManagedSources([...currentManagedSources, newSource]);
                   onUpdateCustomGroups(nextGroups);
                 });
+              },
+              async () => {
+                await onUpdateHosts(currentHosts);
+                rollbackSnapshot = null;
               },
             );
           } else if (newHosts.length > 0) {
@@ -260,27 +304,31 @@ export function useVaultImportHandlers({
               const keyPath = host.identityFilePaths?.find((path) => path.trim())?.trim();
               return keyPath ? [[host.id, keyPath] as const] : [];
             }));
-            let hostUpdate: boolean | void | Promise<boolean | void>;
-            startTransition(() => {
-              hostUpdate = onUpdateHosts(merged.hosts);
-            });
-            ensureVaultImportPersisted(
-              await hostUpdate!,
+            const hostPersisted = await persistHosts(merged.hosts);
+            await ensureVaultImportPersisted(
+              hostPersisted,
               t("vault.import.progress.persistFailed"),
               () => {
                 startTransition(() => onUpdateCustomGroups(merged.customGroups));
               },
+              async () => {
+                await onUpdateHosts(currentHosts);
+                rollbackSnapshot = null;
+              },
             );
+            throwIfCancelled();
             const resolved = await resolveVaultImportKeyPassphraseConflicts(
               result.keyPassphraseCandidates ?? result.keyPassphrases ?? [],
               resolveDefaultKeyPassphraseAliases,
               addedHostIds,
               addedHostKeyPaths,
             );
+            throwIfCancelled();
             const checked = await filterVaultImportKeyPassphrasesAgainstExisting(
               resolved.keyPassphrases,
               (keyPath) => readRememberedKeyPassphrases(keyPath, keysRef.current),
             );
+            throwIfCancelled();
             result.issues = mergeVaultImportIssues(
               result.issues,
               resolved.issues,
@@ -298,6 +346,7 @@ export function useVaultImportHandlers({
                     keysRef.current = updatedKeys;
                   },
                 });
+                throwIfCancelled();
                 if (saved === "conflict") {
                   result.issues.push({
                     level: "warning",
@@ -309,7 +358,10 @@ export function useVaultImportHandlers({
                     message: `Could not verify the existing saved passphrase for KeyPath "${entry.keyPath}"; the imported passphrase was not saved.`,
                   });
                 }
-              } catch {
+              } catch (error) {
+                if (error instanceof DOMException && error.name === "AbortError") {
+                  throw error;
+                }
                 result.issues.push({
                   level: "warning",
                   message: `Could not save the passphrase for KeyPath "${entry.keyPath}".`,
@@ -361,6 +413,9 @@ export function useVaultImportHandlers({
             );
             return;
           }
+
+          throwIfCancelled();
+          rollbackSnapshot = null;
   
           if (isManaged) {
             toast.success(
@@ -393,6 +448,18 @@ export function useVaultImportHandlers({
             duplicates,
           });
         } catch (err) {
+          if (rollbackSnapshot) {
+            const snapshot = rollbackSnapshot;
+            rollbackSnapshot = null;
+            await onUpdateHosts(snapshot.hosts);
+            onUpdateKeys(snapshot.keys);
+            keysRef.current = snapshot.keys;
+            startTransition(() => {
+              onUpdateCustomGroups(snapshot.customGroups);
+              onUpdateManagedSources(snapshot.managedSources);
+            });
+          }
+          if (err instanceof DOMException && err.name === "AbortError") return;
           const message =
             err instanceof Error ? err.message : t("common.unknownError");
           updateProgress({
@@ -402,6 +469,10 @@ export function useVaultImportHandlers({
             error: message,
           });
           toast.error(message, t("vault.import.toast.failedTitle"));
+        } finally {
+          if (activeImportAbortRef.current === abortController) {
+            activeImportAbortRef.current = null;
+          }
         }
       },
       [

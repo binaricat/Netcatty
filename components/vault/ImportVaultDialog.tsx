@@ -91,6 +91,7 @@ export type ImportVaultDialogProps = {
   ) => void;
   onPluginPreviewCommit: (
     preview: NetcattyPluginImporterPreview,
+    destination?: VaultImportDestination,
   ) => Promise<void> | void;
   getPluginPreviewAnalysis: (preview: NetcattyPluginImporterPreview) => {
     duplicateCount: number;
@@ -321,12 +322,6 @@ export const ImportVaultDialog: React.FC<ImportVaultDialogProps> = ({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const pendingFormatRef = useRef<VaultImportFormat | null>(null);
   const pendingOptionsRef = useRef<ImportOptions | undefined>(undefined);
-  const pluginImporter = usePluginVaultImporter({
-    open,
-    onOpenChange,
-    onPluginPreviewCommit,
-    t,
-  });
   const [step, setStep] = useState<ImportDialogStep>("format");
   const [destinationMode, setDestinationMode] =
     useState<VaultImportDestinationMode>("preserve");
@@ -336,6 +331,13 @@ export const ImportVaultDialog: React.FC<ImportVaultDialogProps> = ({
     mode: destinationMode,
     existingGroup,
     newGroup,
+  });
+  const pluginImporter = usePluginVaultImporter({
+    open,
+    onOpenChange,
+    onPluginPreviewCommit,
+    destination,
+    t,
   });
 
   const downloadCsvTemplate = useCallback(() => {

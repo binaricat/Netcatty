@@ -2,6 +2,7 @@ import type { ImporterRecord, JsonValue } from '@netcatty/plugin-contract';
 import { sanitizeHost } from './host';
 import { isBuiltInHostProtocol, isPluginHostProtocol } from './pluginConnection';
 import type { Host, Identity, Snippet, SSHKey } from './models';
+import { applyVaultImportDestination, type VaultImportDestination } from './vaultImport';
 import { buildVaultHostMergeKey } from './vaultHostCreate';
 
 export interface PluginImporterDrafts {
@@ -466,6 +467,33 @@ export interface PluginImporterMergeResult {
   customGroups: string[];
   duplicateCount: number;
   addedCount: number;
+}
+
+export function applyPluginImporterDestination(
+  merged: PluginImporterMergeResult,
+  existingHostCount: number,
+  destination?: VaultImportDestination,
+): PluginImporterMergeResult {
+  if (!destination || destination.mode === 'preserve') return merged;
+  const splitAt = Math.max(0, Math.min(existingHostCount, merged.hosts.length));
+  const existingHosts = merged.hosts.slice(0, splitAt);
+  const importedHosts = merged.hosts.slice(splitAt);
+  const targeted = applyVaultImportDestination({
+    hosts: importedHosts,
+    groups: [],
+    issues: [],
+    stats: {
+      parsed: importedHosts.length,
+      imported: importedHosts.length,
+      skipped: 0,
+      duplicates: 0,
+    },
+  }, destination);
+  return {
+    ...merged,
+    hosts: [...existingHosts, ...targeted.hosts],
+    customGroups: [...new Set([...merged.customGroups, ...targeted.groups])],
+  };
 }
 
 const stableJson = (value: unknown): string => {

@@ -1,10 +1,12 @@
 import { useCallback } from "react";
 import { sanitizeHost } from "../../domain/host";
 import {
+  applyPluginImporterDestination,
   buildPluginImporterSafePreview,
   mergePluginImporterDrafts,
   normalizePluginImporterRecords,
 } from "../../domain/pluginImporter";
+import type { VaultImportDestination } from "../../domain/vaultImport";
 import type { Host, Identity, Snippet, SSHKey } from "../../types";
 
 type Translation = (key: string, params?: Record<string, unknown>) => string;
@@ -52,20 +54,28 @@ export function usePluginImporterCommit({
     };
   }, [customGroups, hosts, identities, keys, snippets]);
 
-  const handlePluginPreviewCommit = useCallback(async (preview: NetcattyPluginImporterPreview) => {
+  const handlePluginPreviewCommit = useCallback(async (
+    preview: NetcattyPluginImporterPreview,
+    destination?: VaultImportDestination,
+  ) => {
     const { drafts, merged } = buildPluginImportMerge(preview);
     if (preview.result.errors > 0 || drafts.errors.length > 0) {
       throw new Error(drafts.errors[0] || t("vault.import.plugins.containsErrors"));
     }
+    const destinationApplied = applyPluginImporterDestination(
+      merged,
+      hosts.length,
+      destination,
+    );
     await onCommitPluginImporterData({
-      keys: merged.keys,
-      identities: merged.identities,
-      hosts: merged.hosts.map(sanitizeHost),
-      snippets: merged.snippets,
-      customGroups: merged.customGroups,
+      keys: destinationApplied.keys,
+      identities: destinationApplied.identities,
+      hosts: destinationApplied.hosts.map(sanitizeHost),
+      snippets: destinationApplied.snippets,
+      customGroups: destinationApplied.customGroups,
     });
     onCommitSuccess?.(merged.addedCount);
-  }, [buildPluginImportMerge, onCommitPluginImporterData, onCommitSuccess, t]);
+  }, [buildPluginImportMerge, hosts.length, onCommitPluginImporterData, onCommitSuccess, t]);
 
   const getPluginPreviewAnalysis = useCallback((preview: NetcattyPluginImporterPreview) => {
     const { drafts, merged } = buildPluginImportMerge(preview);

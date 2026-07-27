@@ -42,6 +42,7 @@ interface ImportVaultHostsInWorkerOptions {
   format: VaultImportFormat;
   files: File[];
   encoding?: VaultImportFileEncoding;
+  signal?: AbortSignal;
   createWorker?: () => VaultImportWorkerLike;
   onProgress?: (progress: VaultImportWorkerProgress) => void;
 }
@@ -56,16 +57,26 @@ export function importVaultHostsInWorker({
   format,
   files,
   encoding,
+  signal,
   createWorker = createVaultImportWorker,
   onProgress,
 }: ImportVaultHostsInWorkerOptions): Promise<VaultImportResult> {
+  if (signal?.aborted) {
+    return Promise.reject(new DOMException("Vault import cancelled.", "AbortError"));
+  }
   const worker = createWorker();
 
   return new Promise((resolve, reject) => {
     const cleanup = () => {
       worker.removeEventListener("message", handleMessage);
       worker.removeEventListener("error", handleWorkerError);
+      signal?.removeEventListener("abort", handleAbort);
       worker.terminate();
+    };
+
+    const handleAbort = () => {
+      cleanup();
+      reject(new DOMException("Vault import cancelled.", "AbortError"));
     };
 
     const handleMessage: VaultImportWorkerListener = (event) => {
@@ -92,6 +103,7 @@ export function importVaultHostsInWorker({
 
     worker.addEventListener("message", handleMessage);
     worker.addEventListener("error", handleWorkerError);
+    signal?.addEventListener("abort", handleAbort, { once: true });
     worker.postMessage({
       type: "import",
       format,

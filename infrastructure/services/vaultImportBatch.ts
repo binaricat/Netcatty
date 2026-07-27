@@ -45,8 +45,13 @@ const secureCrtGroupFromFile = (
   if (segments.length <= 1) return undefined;
 
   segments.pop();
-  segments.shift();
-  if (segments[0]?.toLowerCase() === "sessions") segments.shift();
+  const selectedRoot = segments.shift();
+  if (
+    selectedRoot?.toLowerCase() !== "sessions"
+    && segments[0]?.toLowerCase() === "sessions"
+  ) {
+    segments.shift();
+  }
   return segments.length > 0 ? segments.join("/") : undefined;
 };
 
