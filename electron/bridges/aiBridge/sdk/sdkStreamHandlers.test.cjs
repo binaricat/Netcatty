@@ -432,6 +432,16 @@ test("resolveSdkBackendBinPath prefers the renderer-configured command path", ()
   assert.equal(out, "/opt/homebrew/bin/codex");
 });
 
+test("resolveSdkBackendBinPath preserves an Antigravity virtualenv interpreter", () => {
+  const out = resolveSdkBackendBinPath({
+    backendKey: "antigravity",
+    configuredCommand: "/workspace/.venv/bin/python",
+    normalizeCliPathForPlatform: (value) => value,
+    realpath: () => "/usr/bin/python3",
+  });
+  assert.equal(out, "/workspace/.venv/bin/python");
+});
+
 test("resolveSdkBackendBinPath rejects invalid renderer-configured command paths", () => {
   assert.throws(
     () => resolveSdkBackendBinPath({

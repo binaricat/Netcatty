@@ -278,6 +278,10 @@ function resolveSdkBackendBinPath({
 }) {
   const configuredPath = normalizeConfiguredCommandPath(configuredCommand, normalizeCliPathForPlatform);
   if (configuredPath) {
+    // Python virtual environments rely on the symlinked interpreter path to
+    // locate their environment. Resolving it would silently launch the system
+    // interpreter that does not contain the probed Antigravity SDK.
+    if (backendKey === "antigravity") return configuredPath;
     return resolveConfiguredSdkPath({
       backendKey,
       configuredPath,
