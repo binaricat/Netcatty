@@ -17,6 +17,7 @@ import {
   type VaultImportProgress,
 } from "../../application/state/vaultImportProgress";
 import { importVaultHostsInWorker } from "../../application/state/vaultImportWorker";
+import { withVaultManagedImportLock } from "../../application/state/vaultManagedImportLock";
 import { sanitizeHost } from "../../domain/host";
 import {
   applyVaultImportDestination,
@@ -291,6 +292,19 @@ export function useVaultImportHandlers({
           }
   
           if (isManaged && (newHosts.length > 0 || updatedExistingHosts.length > 0)) {
+            await withVaultManagedImportLock(filePath!, async () => {
+            let latestPersistedSources = managedSourcesRef.current;
+            onUpdateManagedSources((current) => {
+              latestPersistedSources = current;
+              managedSourcesRef.current = current;
+              return current;
+            });
+            const sourceClaim = latestPersistedSources.find((source) => source.filePath === filePath);
+            if (sourceClaim) {
+              throw new Error(t("vault.import.sshConfig.alreadyManagedDesc", {
+                group: sourceClaim.groupName,
+              }));
+            }
             const sourceId = crypto.randomUUID();
             let newSource: ManagedSource = {
               id: sourceId,
@@ -401,6 +415,7 @@ export function useVaultImportHandlers({
               },
               rollbackPendingImport,
             );
+            });
           } else if (newHosts.length > 0) {
             const merged = applyVaultHostImport(currentHosts, currentCustomGroups, result, { skipDuplicates: true });
             const addedHostIds = new Set(merged.addedHosts.map((host) => host.id));
