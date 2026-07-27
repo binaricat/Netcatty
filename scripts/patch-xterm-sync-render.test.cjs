@@ -30,7 +30,8 @@ const targets = [
       },
       {
         from: "case 2026:this._coreService.decPrivateModes.synchronizedOutput=!1,this._onRequestRefreshRows.fire(void 0);break",
-        to: "case 2026:this._coreService.decPrivateModes.synchronizedOutput=!1,this._onRequestRefreshRows.fire({sync:!0});break",
+        to: "case 2026:this._coreService.decPrivateModes.synchronizedOutput?(this._coreService.decPrivateModes.synchronizedOutput=!1,this._onRequestRefreshRows.fire({sync:!0})):this._onRequestRefreshRows.fire(void 0);break",
+        legacy: "case 2026:this._coreService.decPrivateModes.synchronizedOutput=!1,this._onRequestRefreshRows.fire({sync:!0});break/*netcatty:sync-render-close*/",
       },
     ],
   },
@@ -47,7 +48,8 @@ const targets = [
       },
       {
         from: "case 2026:this._coreService.decPrivateModes.synchronizedOutput=!1,this._onRequestRefreshRows.fire(void 0);break",
-        to: "case 2026:this._coreService.decPrivateModes.synchronizedOutput=!1,this._onRequestRefreshRows.fire({sync:!0});break",
+        to: "case 2026:this._coreService.decPrivateModes.synchronizedOutput?(this._coreService.decPrivateModes.synchronizedOutput=!1,this._onRequestRefreshRows.fire({sync:!0})):this._onRequestRefreshRows.fire(void 0);break",
+        legacy: "case 2026:this._coreService.decPrivateModes.synchronizedOutput=!1,this._onRequestRefreshRows.fire({sync:!0});break/*netcatty:sync-render-close*/",
       },
     ],
   },
@@ -64,6 +66,12 @@ const makeTmp = (t, packageVersion = version) => {
 
 const sourceFor = (target, state) => target.edits
   .map((edit, index) => state === "from" ? edit.from : `${edit.to}${markers[index]}`)
+  .join(" separator ");
+
+const markedFor = (target) => target.edits
+  .map((edit, index) => index === 0
+    ? `${edit.to.slice(0, -1)}${markers[index]}}`
+    : `${edit.to}${markers[index]}`)
   .join(" separator ");
 
 const writeBuild = (root, target, source = sourceFor(target, "from")) => {
@@ -104,6 +112,21 @@ test("leaves the complete upstream-equivalent fix untouched", async (t) => {
   for (const target of targets) {
     const source = fs.readFileSync(path.join(root, target.file), "utf8");
     for (const marker of markers) assert.equal(source.includes(marker), false);
+  }
+});
+
+test("upgrades the previous unconditional close marker", async (t) => {
+  const root = makeTmp(t);
+  for (const target of targets) {
+    const source = markedFor(target).replace(`${target.edits[2].to}${markers[2]}`, target.edits[2].legacy);
+    writeBuild(root, target, source);
+  }
+  const result = await execFileAsync(process.execPath, [script], { cwd: root });
+  assert.match(result.stdout, /patched=2 already=0 upstream=0 missing=0/);
+  for (const target of targets) {
+    const source = fs.readFileSync(path.join(root, target.file), "utf8");
+    assert.equal(source.includes(target.edits[2].legacy), false);
+    assert.equal(source.includes(`${target.edits[2].to}${markers[2]}`), true);
   }
 });
 

@@ -46,8 +46,11 @@ const TARGETS = [
       },
       {
         from: "case 2026:this._coreService.decPrivateModes.synchronizedOutput=!1,this._onRequestRefreshRows.fire(void 0);break",
-        to: "case 2026:this._coreService.decPrivateModes.synchronizedOutput=!1,this._onRequestRefreshRows.fire({sync:!0});break",
+        to: "case 2026:this._coreService.decPrivateModes.synchronizedOutput?(this._coreService.decPrivateModes.synchronizedOutput=!1,this._onRequestRefreshRows.fire({sync:!0})):this._onRequestRefreshRows.fire(void 0);break",
         mark: (value) => markedExpression(value, CLOSE_MARKER),
+        legacy: [
+          "case 2026:this._coreService.decPrivateModes.synchronizedOutput=!1,this._onRequestRefreshRows.fire({sync:!0});break/*netcatty:sync-render-close*/",
+        ],
       },
     ],
   },
@@ -66,8 +69,11 @@ const TARGETS = [
       },
       {
         from: "case 2026:this._coreService.decPrivateModes.synchronizedOutput=!1,this._onRequestRefreshRows.fire(void 0);break",
-        to: "case 2026:this._coreService.decPrivateModes.synchronizedOutput=!1,this._onRequestRefreshRows.fire({sync:!0});break",
+        to: "case 2026:this._coreService.decPrivateModes.synchronizedOutput?(this._coreService.decPrivateModes.synchronizedOutput=!1,this._onRequestRefreshRows.fire({sync:!0})):this._onRequestRefreshRows.fire(void 0);break",
         mark: (value) => markedExpression(value, CLOSE_MARKER),
+        legacy: [
+          "case 2026:this._coreService.decPrivateModes.synchronizedOutput=!1,this._onRequestRefreshRows.fire({sync:!0});break/*netcatty:sync-render-close*/",
+        ],
       },
     ],
   },
@@ -117,8 +123,13 @@ for (const target of TARGETS) {
     const markedMatches = count(source, marked);
     const fromMatches = count(source, edit.from);
     const toMatches = count(source, edit.to);
+    const legacyMatches = edit.legacy?.filter((value) => count(source, value) > 0) ?? [];
+    const legacy = legacyMatches.find((value) => count(source, value) === 1);
     if (markedMatches === 1) {
       markedEdits++;
+    } else if (legacy && legacyMatches.length === 1 && fromMatches === 0 && toMatches === 0) {
+      output = output.replace(legacy, marked);
+      pendingEdits++;
     } else if (fromMatches === 1 && toMatches === 0) {
       output = output.replace(edit.from, marked);
       pendingEdits++;

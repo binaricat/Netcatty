@@ -6,6 +6,8 @@ const path = require("node:path");
 
 const LIVE_ENV = "NETCATTY_XTERM_SYNC_RENDER_LIVE";
 const USER_DATA_ENV = "NETCATTY_XTERM_SYNC_RENDER_USER_DATA";
+const MODULE_ROOT_ENV = "NETCATTY_XTERM_SYNC_RENDER_MODULE_ROOT";
+const EXPECT_UNPATCHED_ENV = "NETCATTY_XTERM_SYNC_RENDER_EXPECT_UNPATCHED";
 
 if (!process.versions.electron && process.env[LIVE_ENV] !== "1") {
   const test = require("node:test");
@@ -76,7 +78,9 @@ if (!process.versions.electron && process.env[LIVE_ENV] !== "1") {
     );
     await window.loadFile(htmlFile);
 
-    const cjsPath = require.resolve("@xterm/xterm", { paths: [appRoot] });
+    const moduleRoot = process.env[MODULE_ROOT_ENV] || appRoot;
+    const expectUnpatched = process.env[EXPECT_UNPATCHED_ENV] === "1";
+    const cjsPath = require.resolve("@xterm/xterm", { paths: [moduleRoot] });
     const esmPath = path.join(path.dirname(cjsPath), "xterm.mjs");
     const loaders = [
       { name: "cjs", expression: `require(${JSON.stringify(cjsPath)})` },
@@ -86,25 +90,30 @@ if (!process.versions.electron && process.env[LIVE_ENV] !== "1") {
       {
         name: "split-input",
         chunks: [
-          "\\x1b[?2026h\\x1b[1;1HAAAAAAAAAA",
-          "\\x1b[2;1HBBBBBBBBBB\\x1b[?2026l",
-          "\\x1b[?2026h\\x1b[1;1HCC",
+          "\x1b[?2026h\x1b[1;1HAAAAAAAAAA",
+          "\x1b[2;1HBBBBBBBBBB\x1b[?2026l",
+          "\x1b[?2026h\x1b[1;1HCC",
         ],
       },
       {
         name: "close-and-next-open-together",
         chunks: [
-          "\\x1b[?2026h\\x1b[1;1HAAAAAAAAAA",
-          "\\x1b[2;1HBBBBBBBBBB\\x1b[?2026l\\x1b[?2026h\\x1b[1;1HCC",
+          "\x1b[?2026h\x1b[1;1HAAAAAAAAAA",
+          "\x1b[2;1HBBBBBBBBBB\x1b[?2026l\x1b[?2026h\x1b[1;1HCC",
         ],
       },
       {
         name: "complete-and-next-frame-together",
         chunks: [
-          "\\x1b[?2026h\\x1b[1;1HAAAAAAAAAA\\x1b[2;1HBBBBBBBBBB\\x1b[?2026l\\x1b[?2026h\\x1b[1;1HCC",
+          "\x1b[?2026h\x1b[1;1HAAAAAAAAAA\x1b[2;1HBBBBBBBBBB\x1b[?2026l\x1b[?2026h\x1b[1;1HCC",
         ],
       },
     ];
+    for (const scenario of scenarios) {
+      for (const chunk of scenario.chunks) {
+        assert.equal(chunk.charCodeAt(0), 0x1b, `${scenario.name} must start with a real ESC byte`);
+      }
+    }
     const results = [];
 
     for (const loader of loaders) {
@@ -134,15 +143,55 @@ if (!process.versions.electron && process.env[LIVE_ENV] !== "1") {
         term.dispose();
         return { rendersBeforeSecondFrameClose };
         })()`);
-        assert.ok(
-          result.rendersBeforeSecondFrameClose > 0,
-          `${loader.name}/${scenario.name} did not render the completed first frame before the second opened: ${JSON.stringify(result)}`,
-        );
+        if (expectUnpatched) {
+          assert.equal(
+            result.rendersBeforeSecondFrameClose,
+            0,
+            `${loader.name}/${scenario.name} unexpectedly passed without the patch: ${JSON.stringify(result)}`,
+          );
+        } else {
+          assert.ok(
+            result.rendersBeforeSecondFrameClose > 0,
+            `${loader.name}/${scenario.name} did not render the completed first frame before the second opened: ${JSON.stringify(result)}`,
+          );
+        }
         results.push({ build: loader.name, scenario: scenario.name, ...result });
       }
+
+      const redundantClose = await window.webContents.executeJavaScript(`(async () => {
+        const { Terminal } = ${loader.expression};
+        const target = document.getElementById("terminal");
+        target.replaceChildren();
+        const term = new Terminal({ cols: 10, rows: 2, cursorBlink: false });
+        term.open(target);
+        const nextFrame = () => new Promise(resolve => requestAnimationFrame(resolve));
+        await nextFrame();
+        await nextFrame();
+        const renders = [];
+        const renderSubscription = term.onRender(event => renders.push(event));
+        await new Promise(resolve => term.write("\\x1b[?2026l".repeat(100), resolve));
+        const immediate = renders.length;
+        await nextFrame();
+        await nextFrame();
+        const afterFrame = renders.length;
+        renderSubscription.dispose();
+        term.dispose();
+        return { immediate, afterFrame };
+      })()`);
+      assert.equal(
+        redundantClose.immediate,
+        0,
+        `${loader.name} rendered redundant synchronized-output closes immediately: ${JSON.stringify(redundantClose)}`,
+      );
+      assert.ok(
+        redundantClose.afterFrame > 0,
+        `${loader.name} did not preserve the normal deferred refresh for redundant closes: ${JSON.stringify(redundantClose)}`,
+      );
+      results.push({ build: loader.name, scenario: "redundant-close", ...redundantClose });
     }
 
-    process.stdout.write(`XTERM_SYNC_RENDER_OK ${JSON.stringify(results)}\n`);
+    const label = expectUnpatched ? "XTERM_SYNC_RENDER_BASELINE_OK" : "XTERM_SYNC_RENDER_OK";
+    process.stdout.write(`${label} ${JSON.stringify(results)}\n`);
     finish(0);
   }).catch((error) => finish(1, error));
 }
