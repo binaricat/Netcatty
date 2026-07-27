@@ -6,6 +6,15 @@ import { Button } from "../../../ui/button";
 import { cn } from "../../../../lib/utils";
 import type { AgentPathInfo } from "./types";
 
+export function resolveAntigravityDecryptedApiKey(
+  encryptedValue: string,
+  decryptedValue: string | undefined,
+): { value: string; failed: boolean } {
+  const value = decryptedValue ?? "";
+  const failed = encryptedValue.startsWith("enc:v1:") && value === encryptedValue;
+  return { value: failed ? "" : value, failed };
+}
+
 export const AntigravitySdkCard: React.FC<{
   pathInfo: AgentPathInfo | null;
   isResolvingPath: boolean;
@@ -46,7 +55,13 @@ export const AntigravitySdkCard: React.FC<{
     }
     setDecrypting(true);
     void decryptField(encryptedApiKey)
-      .then((value) => { if (!cancelled) setApiKey(value ?? ""); })
+      .then((value) => {
+        if (!cancelled) {
+          const decrypted = resolveAntigravityDecryptedApiKey(encryptedApiKey, value);
+          setApiKey(decrypted.value);
+          setDecryptError(decrypted.failed);
+        }
+      })
       .catch(() => {
         if (!cancelled) {
           setApiKey("");

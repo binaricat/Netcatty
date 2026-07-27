@@ -2,7 +2,21 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { AntigravitySdkCard } from "./AntigravitySdkCard";
+import {
+  AntigravitySdkCard,
+  resolveAntigravityDecryptedApiKey,
+} from "./AntigravitySdkCard";
+
+test("Antigravity settings rejects ciphertext returned by a failed decrypt", () => {
+  assert.deepEqual(
+    resolveAntigravityDecryptedApiKey("enc:v1:ciphertext", "enc:v1:ciphertext"),
+    { value: "", failed: true },
+  );
+  assert.deepEqual(
+    resolveAntigravityDecryptedApiKey("enc:v1:ciphertext", "real-key"),
+    { value: "real-key", failed: false },
+  );
+});
 
 test("Antigravity settings exposes SDK status, Python path, and API key", () => {
   const markup = renderToStaticMarkup(
