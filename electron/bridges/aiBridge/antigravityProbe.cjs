@@ -4,6 +4,8 @@ const { spawn: defaultSpawn } = require("node:child_process");
 
 const SDK_PROBE = [
   "import importlib.metadata as m, json, platform",
+  "from google.antigravity import Agent, LocalAgentConfig, types",
+  "from google.antigravity.hooks import policy",
   "print(json.dumps({'version': m.version('google-antigravity'), 'pythonVersion': platform.python_version()}))",
 ].join("; ");
 const MINIMUM_SDK_VERSION = [0, 1, 8];

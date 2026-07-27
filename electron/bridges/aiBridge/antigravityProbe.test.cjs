@@ -6,6 +6,7 @@ const {
   findAntigravitySdk,
   getAntigravityAuth,
   probeAntigravitySdk,
+  SDK_PROBE,
 } = require("./antigravityProbe.cjs");
 
 test("Antigravity authentication only accepts credentials supported by the SDK", () => {
@@ -54,6 +55,9 @@ test("probeAntigravitySdk reports an installed official SDK", async () => {
   });
   assert.equal(calls[0].command, "/usr/bin/python3");
   assert.equal(calls[0].args[0], "-c");
+  assert.equal(calls[0].args[1], SDK_PROBE);
+  assert.match(SDK_PROBE, /from google\.antigravity import Agent, LocalAgentConfig, types/);
+  assert.match(SDK_PROBE, /from google\.antigravity\.hooks import policy/);
 });
 
 test("probeAntigravitySdk distinguishes missing packages from missing credentials", async () => {
