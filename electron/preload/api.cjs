@@ -1405,6 +1405,9 @@ function createPreloadApi(ctx) {
   aiAntigravityStopHarness: async (options) => {
     return ipcRenderer.invoke("netcatty:ai:antigravity:stop", options);
   },
+  aiAntigravityInstallHarness: async () => {
+    return ipcRenderer.invoke("netcatty:ai:antigravity:install");
+  },
   // External MCP (productized catalog MCP for Codex / Claude Code / Cursor / Grok)
   externalMcpGetStatus: async () => {
     return ipcRenderer.invoke("netcatty:external-mcp:get-status");

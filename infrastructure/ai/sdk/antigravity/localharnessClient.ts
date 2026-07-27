@@ -28,7 +28,7 @@ export class LocalHarnessClient {
       binaryPath: this.config.binaryPath,
       appDataDir: this.config.appDataDir,
       chatSessionId
-    }) as any;
+    }) as { port: number; apiKey: string; project?: string };
     
     this.adcProject = project;
 

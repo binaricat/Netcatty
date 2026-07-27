@@ -80,7 +80,7 @@ function unwrap<T>(r: ToolExecResult<T>): T | { error: string } {
 }
 
 async function invokeCapabilityRpc(
-  bridge: NetcattyBridge & { aiCapability?: (method: string, args: any, sessionId?: string) => Promise<unknown> },
+  bridge: NetcattyBridge & { aiCapability?: (method: string, args: Record<string, unknown>, sessionId?: string) => Promise<unknown> },
   rpcMethod: string,
   args: Record<string, unknown>,
   chatSessionId?: string,

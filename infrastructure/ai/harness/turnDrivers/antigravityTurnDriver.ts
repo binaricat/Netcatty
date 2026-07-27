@@ -48,9 +48,9 @@ export class AntigravityTurnDriver implements TurnDriver {
     );
 
     const client = new LocalHarnessClient({
-      binaryPath: (input.agentConfig as any).command || '/tmp/agy-sdk/google/antigravity/bin/localharness',
-      appDataDir: (globalThis as any).process?.env?.HOME 
-        ? (globalThis as any).process.env.HOME + '/.gemini/antigravity-cli'
+      binaryPath: ((input.agentConfig as unknown) as Record<string, unknown>).command as string || '/tmp/agy-sdk/google/antigravity/bin/localharness',
+      appDataDir: (globalThis as unknown as { process?: { env?: Record<string, string> } }).process?.env?.HOME 
+        ? (globalThis as unknown as { process?: { env?: Record<string, string> } }).process!.env!.HOME + '/.gemini/antigravity-cli'
         : '/tmp/.gemini/antigravity-cli',
       debug: false
     });
@@ -62,7 +62,9 @@ export class AntigravityTurnDriver implements TurnDriver {
       try {
         const fs = require('fs');
         fs.appendFileSync('/tmp/netcatty-harness.log', `[${new Date().toISOString()}] ${msg}\n`);
-      } catch (e) {}
+      } catch {
+        // Ignore logging errors
+      }
     };
     logToFile(`--- Starting Antigravity Turn for Session ${sessionId} ---`);
 
@@ -85,7 +87,7 @@ export class AntigravityTurnDriver implements TurnDriver {
 
       const isExternalContext = !('activeProvider' in context);
       const activeProvider = isExternalContext
-        ? (context as any as ExternalTurnContext).providers?.find(p => 
+        ? (context as unknown as ExternalTurnContext).providers?.find(p => 
             p.providerId === 'google' || 
             p.id === 'google' || 
             p.style === 'google' ||
@@ -147,8 +149,6 @@ export class AntigravityTurnDriver implements TurnDriver {
       };
 
       let isExpectedClose = false;
-
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       client.onClose = () => {
         if (!isExpectedClose) {
           ui.reportStreamError(sessionId, signal, new Error("Antigravity process terminated unexpectedly (e.g. invalid model name or crash)"));
@@ -205,7 +205,7 @@ export class AntigravityTurnDriver implements TurnDriver {
 
             let resultStr = "";
             let isError = false;
-            let resultObj: any;
+            let resultObj: unknown;
             try {
               const toolDefinition = toolsBundle.tools[name];
               if (!toolDefinition || typeof toolDefinition.execute !== 'function') {
@@ -220,8 +220,8 @@ export class AntigravityTurnDriver implements TurnDriver {
               
               const approvalResult = await approvalFn({
                 toolCall: { toolName: name, input: parsedArgs, toolCallId },
-                context: toolsBundle.toolsContext[name] as any
-              } as any);
+                context: toolsBundle.toolsContext[name] as unknown
+              } as unknown as Parameters<typeof approvalFn>[0]);
 
               if (approvalResult?.type === 'denied') {
                 throw new Error(approvalResult.reason || 'User denied the tool execution.');
@@ -232,7 +232,7 @@ export class AntigravityTurnDriver implements TurnDriver {
                 toolCallId,
                 messages: [],
                 abortSignal: signal,
-                context: toolsBundle.toolsContext[name] as any
+                context: toolsBundle.toolsContext[name] as unknown
               });
               console.log(`[TurnDriver] Tool ${name} executed successfully.`);
               resultStr = typeof resultObj === 'string' ? resultObj : JSON.stringify(resultObj);

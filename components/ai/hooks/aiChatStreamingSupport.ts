@@ -165,6 +165,7 @@ export interface PanelBridge extends NetcattyBridge {
   aiCattyCancelExec?(chatSessionId: string): Promise<unknown>;
   aiSetChatSessionCancelled?(chatSessionId: string, cancelled?: boolean): Promise<{ ok: boolean; error?: string }>;
   aiMcpSyncPermissionGrants?(grants: Array<Record<string, unknown>>): Promise<{ ok: boolean; count?: number; error?: string }>;
+  aiAntigravityInstallHarness?: () => Promise<{ ok: boolean; path: string; error?: string }>;
   aiSdkAgentCancel?: (requestId: string, chatSessionId?: string) => Promise<{ ok: boolean; error?: string }>;
   aiSdkAgentSteer?: (
     requestId: string,

@@ -288,6 +288,7 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
   );
   const [antigravityCustomPath, setAntigravityCustomPath] = useState(() => initialManagedPathsRef.current?.antigravity ?? "");
   const [isResolvingAntigravity, setIsResolvingAntigravity] = useState(false);
+  const [isDownloadingAntigravity, setIsDownloadingAntigravity] = useState(false);
 
   const codebuddyManagedEnv = useMemo(
     () => externalAgents.find((a) => a.id === "discovered_codebuddy")?.env,
@@ -694,6 +695,29 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
   }, [setExternalAgents]);
 
   // Validate a custom path for an agent.
+  const handleDownloadAntigravity = useCallback(async () => {
+    try {
+      setIsDownloadingAntigravity(true);
+      const bridge = getBridge() as { aiAntigravityInstallHarness?: () => Promise<{ ok: boolean; path: string; error?: string }> };
+      if (!bridge?.aiAntigravityInstallHarness) {
+        throw new Error("Antigravity installer not available");
+      }
+      const res = await bridge.aiAntigravityInstallHarness();
+      if (!res.ok) throw new Error(res.error || "Installation failed");
+      
+      setAntigravityCustomPath(res.path);
+      await resolveAgentPath("antigravity", res.path, {
+        refreshShellEnv: true,
+        commandSource: "manual",
+      });
+    } catch (err: unknown) {
+      console.error("Failed to download antigravity", err);
+      window.alert("Failed to download Antigravity: " + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setIsDownloadingAntigravity(false);
+    }
+  }, [resolveAgentPath]);
+
   const handleCheckCustomPath = useCallback(async (agentKey: ManagedAgentKey) => {
     const customPath = agentKey === "codex"
       ? codexCustomPath
@@ -1135,6 +1159,8 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
               onCustomPathChange={setAntigravityCustomPath}
               onRecheckPath={() => void handleCheckCustomPath("antigravity")}
               onResetPath={() => void handleResetCustomPath("antigravity")}
+              onDownload={handleDownloadAntigravity}
+              isDownloading={isDownloadingAntigravity}
               i18nPrefix="ai.antigravity"
             />
           </SettingsSection>

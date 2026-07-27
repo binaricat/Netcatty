@@ -15,6 +15,8 @@ export const CopilotCliCard: React.FC<{
   i18nPrefix?: "ai.copilot" | "ai.cursor" | "ai.opencode";
   allowEmptyCheck?: boolean;
   showCustomPathInput?: boolean;
+  onDownload?: () => void;
+  isDownloading?: boolean;
 }> = ({
   pathInfo,
   isResolvingPath,
@@ -25,6 +27,8 @@ export const CopilotCliCard: React.FC<{
   i18nPrefix = "ai.copilot",
   allowEmptyCheck = false,
   showCustomPathInput = true,
+  onDownload,
+  isDownloading = false,
 }) => {
   const { t } = useI18n();
   const found = pathInfo?.available;
@@ -72,20 +76,26 @@ export const CopilotCliCard: React.FC<{
               {t(`${i18nPrefix}.notFoundHint`)}
             </p>
           )}
-          <div className={cn("flex items-center gap-2", showCustomPathInput ? "" : "justify-end")}>
-            {showCustomPathInput && (
-              <input
-                type="text"
-                value={customPath}
-                onChange={(e) => onCustomPathChange(e.target.value)}
-                placeholder={t(`${i18nPrefix}.customPathPlaceholder`)}
-                className="flex-1 h-8 rounded-md border border-input bg-background px-3 text-sm font-mono placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-              />
-            )}
-            <Button variant="outline" size="sm" onClick={onRecheckPath} disabled={!allowEmptyCheck && !customPath.trim()}>
-              <RefreshCw size={14} className="mr-1.5" />
-              {t(`${i18nPrefix}.check`)}
-            </Button>
+            <div className={cn("flex items-center gap-2", showCustomPathInput ? "" : "justify-end")}>
+              {onDownload && !found && (
+                <Button variant="default" size="sm" onClick={onDownload} disabled={isDownloading}>
+                  {isDownloading ? <RefreshCw size={14} className="mr-1.5 animate-spin" /> : null}
+                  {t(`${i18nPrefix}.download`)}
+                </Button>
+              )}
+              {showCustomPathInput && (
+                <input
+                  type="text"
+                  value={customPath}
+                  onChange={(e) => onCustomPathChange(e.target.value)}
+                  placeholder={t(`${i18nPrefix}.customPathPlaceholder`)}
+                  className="flex-1 h-8 rounded-md border border-input bg-background px-3 text-sm font-mono placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                />
+              )}
+              <Button variant="outline" size="sm" onClick={onRecheckPath} disabled={!allowEmptyCheck && !customPath.trim()}>
+                <RefreshCw size={14} className="mr-1.5" />
+                {t(`${i18nPrefix}.check`)}
+              </Button>
             {showCustomPathInput && onResetPath && (
               <Button variant="ghost" size="sm" onClick={onResetPath} disabled={!customPath.trim()}>
                 <RotateCcw size={14} className="mr-1.5" />

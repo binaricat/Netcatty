@@ -77,6 +77,7 @@ export const enAiMessages: Messages = {
   'ai.antigravity.notFound': 'Harness not found',
   'ai.antigravity.notFoundHint': 'Specify the path to the localharness binary (e.g. /tmp/agy-sdk/google/antigravity/bin/localharness).',
   'ai.antigravity.check': 'Check',
+  'ai.antigravity.download': 'Download',
 
 
   // AI Codex
