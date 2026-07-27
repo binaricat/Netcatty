@@ -39,9 +39,7 @@ interface UseVaultImportHandlersOptions {
   onReadPersistedHosts: () => Promise<Host[]>;
   onUpdateHosts: (hosts: Host[]) => VaultHostPersistenceResult | Promise<VaultHostPersistenceResult>;
   onUpdateKeys: (keys: SSHKey[]) => void;
-  onUpdateManagedSources: (
-    sources: ManagedSource[] | ((current: ManagedSource[]) => ManagedSource[]),
-  ) => void;
+  onReadPersistedManagedSources: () => ManagedSource[];
   onCommitVaultImportMetadata: (
     updateGroups: (current: string[]) => string[],
     updateSources: (current: ManagedSource[]) => ManagedSource[],
@@ -58,7 +56,7 @@ export function useVaultImportHandlers({
   onReadPersistedHosts,
   onUpdateHosts,
   onUpdateKeys,
-  onUpdateManagedSources,
+  onReadPersistedManagedSources,
   onCommitVaultImportMetadata,
   setIsImportOpen,
   t,
@@ -70,6 +68,7 @@ export function useVaultImportHandlers({
   const managedSourcesRef = useRef(managedSources);
   const activeImportAbortRef = useRef<AbortController | null>(null);
   const importCommitStartedRef = useRef(false);
+  const importInFlightRef = useRef(false);
   customGroupsRef.current = customGroups;
   hostsRef.current = hosts;
   keysRef.current = keys;
@@ -93,6 +92,8 @@ export function useVaultImportHandlers({
       async (format: VaultImportFormat, files: File[], options?: ImportOptions) => {
         const file = files[0];
         if (!file) return;
+        if (importInFlightRef.current) return;
+        importInFlightRef.current = true;
         activeImportAbortRef.current?.abort();
         const abortController = new AbortController();
         activeImportAbortRef.current = abortController;
@@ -222,7 +223,6 @@ export function useVaultImportHandlers({
 
           rollbackPendingImport = async () => {
             const snapshot = rollbackSnapshot;
-            rollbackSnapshot = null;
             if (!snapshot) return;
             while (true) {
               const rollbackHosts = rollbackVaultImportedHosts({
@@ -238,6 +238,7 @@ export function useVaultImportHandlers({
               if (persisted === false) {
                 throw new Error(t("vault.import.progress.persistFailed"));
               }
+              rollbackSnapshot = null;
               return;
             }
           };
@@ -303,12 +304,8 @@ export function useVaultImportHandlers({
   
           if (isManaged && (newHosts.length > 0 || updatedExistingHosts.length > 0)) {
             await withVaultImportLock("vault", async () => {
-            let latestPersistedSources = managedSourcesRef.current;
-            onUpdateManagedSources((current) => {
-              latestPersistedSources = current;
-              managedSourcesRef.current = current;
-              return current;
-            });
+            const latestPersistedSources = onReadPersistedManagedSources();
+            managedSourcesRef.current = latestPersistedSources;
             const sourceClaim = latestPersistedSources.find((source) => source.filePath === filePath);
             if (sourceClaim) {
               throw new Error(t("vault.import.sshConfig.alreadyManagedDesc", {
@@ -617,10 +614,12 @@ export function useVaultImportHandlers({
             duplicates,
           });
         } catch (err) {
+          let rollbackFailure: unknown;
           if (rollbackSnapshot) {
             try {
               await rollbackPendingImport();
             } catch (rollbackError) {
+              rollbackFailure = rollbackError;
               console.error("[vault import] Failed to rollback imported hosts.", rollbackError);
             }
           }
@@ -628,8 +627,11 @@ export function useVaultImportHandlers({
             signal.aborted
             || (err instanceof DOMException && err.name === "AbortError")
           ) return;
-          const message =
+          const originalMessage =
             err instanceof Error ? err.message : t("common.unknownError");
+          const message = rollbackFailure
+            ? `${originalMessage} ${t("vault.import.progress.rollbackFailed")}`
+            : originalMessage;
           updateProgress({
             status: "error",
             stage: "failed",
@@ -642,14 +644,15 @@ export function useVaultImportHandlers({
             activeImportAbortRef.current = null;
           }
           importCommitStartedRef.current = false;
+          importInFlightRef.current = false;
         }
       },
       [
         onReadPersistedHosts,
         onCommitVaultImportMetadata,
+        onReadPersistedManagedSources,
         onUpdateHosts,
         onUpdateKeys,
-        onUpdateManagedSources,
         setIsImportOpen,
         t,
       ],

@@ -44,3 +44,8 @@ test("plugin importer merge and commit workflow is owned by application state", 
   assert.match(pluginImporterCommitHookSource, /mergePluginImporterDrafts/);
   assert.match(pluginImporterCommitHookSource, /buildPluginImporterSafePreview/);
 });
+
+test("Vault import entry is disabled while an import is running", () => {
+  assert.match(vaultViewLayoutSource, /disabled=\{importProgress\?\.status === "running"\}/);
+  assert.match(vaultViewLayoutSource, /if \(importProgress\?\.status === "running"\) return;/);
+});

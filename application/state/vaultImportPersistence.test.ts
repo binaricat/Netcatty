@@ -10,7 +10,11 @@ import {
   readStoredArray,
 } from "./vaultImportPersistence.ts";
 
-const createStorage = (initial: Record<string, string>, failKey?: string) => {
+const createStorage = (
+  initial: Record<string, string>,
+  failKey?: string,
+  failRestore = false,
+) => {
   const values = new Map(Object.entries(initial));
   return {
     values,
@@ -21,6 +25,7 @@ const createStorage = (initial: Record<string, string>, failKey?: string) => {
       return true;
     },
     writeString(key: string, value: string) {
+      if (failRestore) return false;
       values.set(key, value);
       return true;
     },
@@ -66,6 +71,19 @@ test("Vault import metadata restores groups when sources cannot be saved", () =>
 
   assert.equal(result.persisted, false);
   assert.equal(storage.readString(STORAGE_KEY_GROUPS), originalGroups);
+});
+
+test("Vault import metadata reports when its rollback cannot be saved", () => {
+  const storage = createStorage({
+    [STORAGE_KEY_GROUPS]: JSON.stringify(["Existing"]),
+    [STORAGE_KEY_MANAGED_SOURCES]: JSON.stringify([]),
+  }, STORAGE_KEY_MANAGED_SOURCES, true);
+
+  assert.throws(() => persistVaultImportMetadata(
+    storage,
+    (groups) => [...groups, "Imported"],
+    (sources) => sources,
+  ), /rollback failed/);
 });
 
 test("Vault import persistence rejects unreadable existing arrays", () => {

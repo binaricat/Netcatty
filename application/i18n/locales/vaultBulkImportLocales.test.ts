@@ -17,6 +17,7 @@ const KEYS = [
   "vault.import.securecrt.folder",
   "vault.import.progress.fileCount",
   "vault.import.progress.persistFailed",
+  "vault.import.progress.rollbackFailed",
   "vault.import.sshConfig.managedDestinationHint",
 ] as const;
 

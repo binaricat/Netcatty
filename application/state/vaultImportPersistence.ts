@@ -39,7 +39,12 @@ export function persistVaultImportMetadata(
   }
   if (!storage.write(STORAGE_KEY_MANAGED_SOURCES, sources)) {
     if (previousGroups === null) storage.remove(STORAGE_KEY_GROUPS);
-    else storage.writeString(STORAGE_KEY_GROUPS, previousGroups);
+    else if (!storage.writeString(STORAGE_KEY_GROUPS, previousGroups)) {
+      throw new Error("Vault import metadata rollback failed");
+    }
+    if (storage.readString(STORAGE_KEY_GROUPS) !== previousGroups) {
+      throw new Error("Vault import metadata rollback failed");
+    }
     return { persisted: false, groups, sources };
   }
   return { persisted: true, groups, sources };

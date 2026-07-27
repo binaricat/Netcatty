@@ -899,7 +899,9 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
                     <Button
                       variant="ghost"
                       className="w-full justify-start gap-2"
+                      disabled={importProgress?.status === "running"}
                       onClick={() => {
+                        if (importProgress?.status === "running") return;
                         setIsImportOpen(true);
                       }}
                     >

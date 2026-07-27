@@ -516,6 +516,13 @@ export const useVaultState = () => {
     localStorageAdapter.write(STORAGE_KEY_MANAGED_SOURCES, next);
   }, []);
 
+  const readPersistedManagedSources = useCallback((): ManagedSource[] => (
+    readStoredArray<ManagedSource>(
+      STORAGE_KEY_MANAGED_SOURCES,
+      localStorageAdapter.readString(STORAGE_KEY_MANAGED_SOURCES),
+    )
+  ), []);
+
   const commitVaultImportMetadata = useCallback((
     updateGroups: (current: string[]) => string[],
     updateSources: (current: ManagedSource[]) => ManagedSource[],
@@ -1316,6 +1323,7 @@ export const useVaultState = () => {
     updateCustomGroups,
     updateKnownHosts,
     updateManagedSources,
+    readPersistedManagedSources,
     commitVaultImportMetadata,
     updateGroupConfigs,
     addShellHistoryEntry,

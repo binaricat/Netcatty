@@ -671,6 +671,7 @@ export const zhTWCoreMessages: Messages = {
   'vault.import.progress.complete': '匯入完成',
   'vault.import.progress.failed': '匯入失敗',
   'vault.import.progress.persistFailed': '匯入的主機無法儲存。請清理本機儲存空間後重試。',
+  'vault.import.progress.rollbackFailed': '匯入內容無法安全回復，可能仍有部分主機留在倉庫中。請檢查後再重試。',
   'vault.import.progress.summary': '已匯入 {count} 台主機；跳過 {skipped} 條；重複 {duplicates} 條。',
   'vault.import.progress.keepOpen': '匯入正在背景執行，請保持 Netcatty 開啟。',
   'vault.import.progress.fileSummary': '{name} · {count} 個檔案',
