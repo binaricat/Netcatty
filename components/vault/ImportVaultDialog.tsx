@@ -5,7 +5,6 @@ import {
   FileSymlink,
   FileText,
   FolderOpen,
-  FolderTree,
   Import,
   LoaderCircle,
   Plug,
@@ -1026,38 +1025,23 @@ export const ImportVaultDialog: React.FC<ImportVaultDialogProps> = ({
                     </div>
                   )}
 
-                  <div className="flex flex-col gap-3 pt-2 border-t border-border/60 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex items-center justify-between gap-3 pt-2 border-t border-border/60">
                     <button
                       type="button"
                       data-import-destination-settings="true"
                       onClick={() => setStep("destination")}
-                      className={cn(
-                        "inline-flex min-w-0 max-w-full items-center gap-2 rounded-lg border border-border/60 bg-muted/20",
-                        "px-3 py-2 text-left transition-colors hover:bg-muted/40",
-                      )}
+                      className="min-w-0 max-w-[55%] truncate text-left text-xs text-muted-foreground hover:text-foreground hover:underline"
+                      title={destinationSummary}
                     >
-                      <FolderTree className="h-4 w-4 shrink-0 text-muted-foreground" />
-                      <span className="min-w-0">
-                        <span className="block text-xs font-medium text-foreground">
-                          {t("vault.import.destination.settings")}
-                        </span>
-                        <span className="block truncate text-[11px] text-muted-foreground">
-                          {destinationSummary}
-                        </span>
-                      </span>
+                      {destinationSummary}
                     </button>
-                    <div className="flex min-w-0 flex-col items-start gap-1 sm:items-end">
-                      <div className="text-xs text-muted-foreground">
-                        {t("vault.import.csv.tip")}
-                      </div>
-                      <button
-                        type="button"
-                        onClick={downloadCsvTemplate}
-                        className="text-xs text-primary hover:underline"
-                      >
-                        {t("vault.import.csv.downloadTemplate")}
-                      </button>
-                    </div>
+                    <button
+                      type="button"
+                      onClick={downloadCsvTemplate}
+                      className="shrink-0 text-xs text-primary hover:underline"
+                    >
+                      {t("vault.import.csv.downloadTemplate")}
+                    </button>
                   </div>
                 </>
               )}
