@@ -110,6 +110,20 @@ export function rebaseVaultImportedHosts({
   return rebasedHosts;
 }
 
+export function mergeVaultImportedGroups({
+  currentGroups,
+  baselineGroups,
+  appliedGroups,
+}: {
+  currentGroups: string[];
+  baselineGroups: string[];
+  appliedGroups: string[];
+}): string[] {
+  const baseline = new Set(baselineGroups);
+  const importedGroups = appliedGroups.filter((group) => !baseline.has(group));
+  return Array.from(new Set([...currentGroups, ...importedGroups]));
+}
+
 export function rollbackVaultImportedHosts({
   currentHosts,
   baselineHosts,

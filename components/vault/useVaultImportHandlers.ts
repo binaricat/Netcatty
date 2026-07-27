@@ -8,6 +8,7 @@ import {
 import {
   countVaultImportDuplicates,
   ensureVaultImportPersisted,
+  mergeVaultImportedGroups,
   rebaseVaultImportedHosts,
   rollbackVaultImportedHosts,
   waitForVaultImportProgressPaint,
@@ -319,8 +320,12 @@ export function useVaultImportHandlers({
               t("vault.import.progress.persistFailed"),
               () => {
                 startTransition(() => {
-                  onUpdateManagedSources([...currentManagedSources, newSource]);
-                  onUpdateCustomGroups(nextGroups);
+                  onUpdateManagedSources([...managedSourcesRef.current, newSource]);
+                  onUpdateCustomGroups(mergeVaultImportedGroups({
+                    currentGroups: customGroupsRef.current,
+                    baselineGroups: currentCustomGroups,
+                    appliedGroups: nextGroups,
+                  }));
                 });
               },
               rollbackPendingImport,
@@ -337,7 +342,11 @@ export function useVaultImportHandlers({
               hostPersisted,
               t("vault.import.progress.persistFailed"),
               () => {
-                startTransition(() => onUpdateCustomGroups(merged.customGroups));
+                startTransition(() => onUpdateCustomGroups(mergeVaultImportedGroups({
+                  currentGroups: customGroupsRef.current,
+                  baselineGroups: currentCustomGroups,
+                  appliedGroups: merged.customGroups,
+                })));
               },
               rollbackPendingImport,
             );

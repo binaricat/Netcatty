@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   countVaultImportDuplicates,
   ensureVaultImportPersisted,
+  mergeVaultImportedGroups,
   rebaseVaultImportedHosts,
   rollbackVaultImportedHosts,
   waitForVaultImportProgressPaint,
@@ -94,6 +95,14 @@ test("vault import rebase preserves concurrent edits and restores missing import
     { ...baseline[0], id: "concurrent", hostname: "concurrent.test" },
     applied[1],
   ]);
+});
+
+test("vault import group merge keeps concurrent changes without restoring deleted groups", () => {
+  assert.deepEqual(mergeVaultImportedGroups({
+    currentGroups: ["Renamed", "Concurrent"],
+    baselineGroups: ["Original", "Kept"],
+    appliedGroups: ["Original", "Kept", "Imported"],
+  }), ["Renamed", "Concurrent", "Imported"]);
 });
 
 test("vault import duplicate count includes hosts that already exist", () => {
