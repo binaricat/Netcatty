@@ -141,10 +141,7 @@ export function VaultImportDestinationControls({
       .slice(0, 50);
   }, [existingGroupQuery, groups]);
   return (
-    <div className="space-y-3 rounded-xl border border-border/60 bg-muted/20 p-3">
-      <div className="text-xs font-medium text-muted-foreground">
-        {t("vault.import.destination.title")}
-      </div>
+    <div className="space-y-3" data-import-destination-controls="true">
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
         {choices.map((choice) => (
           <button
@@ -154,7 +151,7 @@ export function VaultImportDestinationControls({
             aria-pressed={mode === choice}
             onClick={() => onModeChange(choice)}
             className={cn(
-              "rounded-lg border px-3 py-2 text-xs transition-colors",
+              "rounded-lg border px-3 py-2.5 text-sm transition-colors",
               mode === choice
                 ? "border-primary bg-primary/10 text-foreground"
                 : "border-border/60 bg-background text-muted-foreground hover:text-foreground",
@@ -562,31 +559,33 @@ export const ImportVaultDialog: React.FC<ImportVaultDialogProps> = ({
       <DialogContent className="max-h-[calc(100vh-2rem)] max-w-2xl overflow-y-auto">
           <>
             <DialogHeader className="text-center sm:text-center">
-              <div className="mx-auto h-14 w-14 rounded-2xl bg-muted/60 border border-border/60 flex items-center justify-center">
-                <img
-                  src="/import/file.png"
-                  alt=""
-                  className="h-8 w-8 object-contain"
-                />
-              </div>
-              <DialogTitle className="text-xl">
+              {step !== "destination" && (
+                <div className="mx-auto h-14 w-14 rounded-2xl bg-muted/60 border border-border/60 flex items-center justify-center">
+                  <img
+                    src="/import/file.png"
+                    alt=""
+                    className="h-8 w-8 object-contain"
+                  />
+                </div>
+              )}
+              <DialogTitle className={step === "destination" ? "text-lg" : "text-xl"}>
                 {step === "securecrt-source"
                   ? t("vault.import.securecrt.promptTitle")
                   : step === "destination"
                     ? t("vault.import.destination.settings")
                     : t("vault.import.title")}
               </DialogTitle>
-              <DialogDescription className="mx-auto max-w-xl">
-                {step === "ssh-mode"
-                  ? t("vault.import.sshConfig.chooseMode")
-                  : step === "moba-encoding"
-                    ? t("vault.import.mobaxterm.chooseEncoding")
-                    : step === "securecrt-source"
-                      ? t("vault.import.securecrt.promptDesc")
-                      : step === "destination"
-                        ? t("vault.import.destination.settingsHint")
+              {step !== "destination" && (
+                <DialogDescription className="mx-auto max-w-xl">
+                  {step === "ssh-mode"
+                    ? t("vault.import.sshConfig.chooseMode")
+                    : step === "moba-encoding"
+                      ? t("vault.import.mobaxterm.chooseEncoding")
+                      : step === "securecrt-source"
+                        ? t("vault.import.securecrt.promptDesc")
                         : t("vault.import.desc")}
-              </DialogDescription>
+                </DialogDescription>
+              )}
             </DialogHeader>
 
             <input
@@ -906,6 +905,8 @@ export const ImportVaultDialog: React.FC<ImportVaultDialogProps> = ({
                         setExistingGroup(groups[0]);
                         setExistingGroupQuery(groups[0]);
                       }
+                      // Preserve needs no extra input — finish immediately.
+                      if (mode === "preserve") setStep("format");
                     }}
                     groups={groups}
                     existingGroup={existingGroup}
@@ -916,7 +917,7 @@ export const ImportVaultDialog: React.FC<ImportVaultDialogProps> = ({
                     onNewGroupChange={setNewGroup}
                     t={t}
                   />
-                  <div className="flex items-center justify-between gap-3 pt-1">
+                  <div className="flex items-center justify-between gap-3 pt-2">
                     <button
                       type="button"
                       onClick={() => setStep("format")}
@@ -924,14 +925,16 @@ export const ImportVaultDialog: React.FC<ImportVaultDialogProps> = ({
                     >
                       {t("common.back")}
                     </button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      disabled={!destination}
-                      onClick={() => setStep("format")}
-                    >
-                      {t("vault.import.destination.done")}
-                    </Button>
+                    {destinationMode !== "preserve" && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        disabled={!destination}
+                        onClick={() => setStep("format")}
+                      >
+                        {t("vault.import.destination.done")}
+                      </Button>
+                    )}
                   </div>
                 </>
               ) : (
