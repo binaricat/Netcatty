@@ -5,6 +5,7 @@ import {
   FileSymlink,
   FileText,
   FolderOpen,
+  FolderTree,
   Import,
   LoaderCircle,
   Plug,
@@ -103,7 +104,11 @@ export type ImportVaultDialogProps = {
 
 type Translate = (key: string, values?: Record<string, unknown>) => string;
 type ImportDialogStep =
-  "format" | "ssh-mode" | "moba-encoding" | "securecrt-source";
+  | "format"
+  | "destination"
+  | "ssh-mode"
+  | "moba-encoding"
+  | "securecrt-source";
 
 export function VaultImportDestinationControls({
   mode,
@@ -398,6 +403,15 @@ export const ImportVaultDialog: React.FC<ImportVaultDialogProps> = ({
     newGroup,
     availableGroups: groups,
   });
+  const destinationSummary = useMemo(() => {
+    if (destinationMode === "preserve") {
+      return t("vault.import.destination.preserve");
+    }
+    if (destinationMode === "existing") {
+      return existingGroup || t("vault.import.destination.existing");
+    }
+    return newGroup.trim() || t("vault.import.destination.new");
+  }, [destinationMode, existingGroup, newGroup, t]);
   useEffect(() => {
     const query = existingGroupQueryRef.current;
     if (query) {
@@ -557,7 +571,11 @@ export const ImportVaultDialog: React.FC<ImportVaultDialogProps> = ({
                 />
               </div>
               <DialogTitle className="text-xl">
-                {t("vault.import.title")}
+                {step === "securecrt-source"
+                  ? t("vault.import.securecrt.promptTitle")
+                  : step === "destination"
+                    ? t("vault.import.destination.settings")
+                    : t("vault.import.title")}
               </DialogTitle>
               <DialogDescription className="mx-auto max-w-xl">
                 {step === "ssh-mode"
@@ -565,8 +583,10 @@ export const ImportVaultDialog: React.FC<ImportVaultDialogProps> = ({
                   : step === "moba-encoding"
                     ? t("vault.import.mobaxterm.chooseEncoding")
                     : step === "securecrt-source"
-                      ? t("vault.import.securecrt.chooseSource")
-                      : t("vault.import.desc")}
+                      ? t("vault.import.securecrt.promptDesc")
+                      : step === "destination"
+                        ? t("vault.import.destination.settingsHint")
+                        : t("vault.import.desc")}
               </DialogDescription>
             </DialogHeader>
 
@@ -815,6 +835,12 @@ export const ImportVaultDialog: React.FC<ImportVaultDialogProps> = ({
                 </>
               ) : step === "securecrt-source" ? (
                 <>
+                  <div
+                    className="rounded-xl border border-border/60 bg-muted/20 px-4 py-3 text-sm text-muted-foreground"
+                    data-import-securecrt-prompt="true"
+                  >
+                    {t("vault.import.securecrt.directoryHint")}
+                  </div>
                   <div className="text-sm font-medium text-center text-muted-foreground">
                     {t("vault.import.securecrt.sourceQuestion")}
                   </div>
@@ -866,12 +892,8 @@ export const ImportVaultDialog: React.FC<ImportVaultDialogProps> = ({
                     {t("common.back")}
                   </button>
                 </>
-              ) : (
+              ) : step === "destination" ? (
                 <>
-                  <div className="text-sm font-medium text-center text-muted-foreground">
-                    {t("vault.import.chooseFormat")}
-                  </div>
-
                   <VaultImportDestinationControls
                     mode={destinationMode}
                     onModeChange={(mode) => {
@@ -895,6 +917,29 @@ export const ImportVaultDialog: React.FC<ImportVaultDialogProps> = ({
                     onNewGroupChange={setNewGroup}
                     t={t}
                   />
+                  <div className="flex items-center justify-between gap-3 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setStep("format")}
+                      className="text-xs text-muted-foreground hover:text-foreground"
+                    >
+                      {t("common.back")}
+                    </button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      disabled={!destination}
+                      onClick={() => setStep("format")}
+                    >
+                      {t("vault.import.destination.done")}
+                    </Button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="text-sm font-medium text-center text-muted-foreground">
+                    {t("vault.import.chooseFormat")}
+                  </div>
 
                   <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
                     {OPTIONS.map((opt) => (
@@ -902,6 +947,7 @@ export const ImportVaultDialog: React.FC<ImportVaultDialogProps> = ({
                         key={opt.format}
                         type="button"
                         disabled={!destination}
+                        data-import-format={opt.format}
                         className={cn(
                           "group rounded-2xl border border-border/60 bg-background",
                           "px-3 py-4 hover:bg-muted/30 hover:border-border transition-colors",
@@ -922,11 +968,6 @@ export const ImportVaultDialog: React.FC<ImportVaultDialogProps> = ({
                         <div className="text-sm font-medium text-foreground">
                           {opt.label}
                         </div>
-                        {opt.format === "securecrt" && (
-                          <div className="text-center text-[10px] leading-4 text-muted-foreground">
-                            {t("vault.import.securecrt.directoryHint")}
-                          </div>
-                        )}
                       </button>
                     ))}
                   </div>
@@ -985,17 +1026,38 @@ export const ImportVaultDialog: React.FC<ImportVaultDialogProps> = ({
                     </div>
                   )}
 
-                  <div className="flex items-center justify-between gap-3 pt-2 border-t border-border/60">
-                    <div className="text-xs text-muted-foreground">
-                      {t("vault.import.csv.tip")}
-                    </div>
+                  <div className="flex flex-col gap-3 pt-2 border-t border-border/60 sm:flex-row sm:items-center sm:justify-between">
                     <button
                       type="button"
-                      onClick={downloadCsvTemplate}
-                      className="text-xs text-primary hover:underline"
+                      data-import-destination-settings="true"
+                      onClick={() => setStep("destination")}
+                      className={cn(
+                        "inline-flex min-w-0 max-w-full items-center gap-2 rounded-lg border border-border/60 bg-muted/20",
+                        "px-3 py-2 text-left transition-colors hover:bg-muted/40",
+                      )}
                     >
-                      {t("vault.import.csv.downloadTemplate")}
+                      <FolderTree className="h-4 w-4 shrink-0 text-muted-foreground" />
+                      <span className="min-w-0">
+                        <span className="block text-xs font-medium text-foreground">
+                          {t("vault.import.destination.settings")}
+                        </span>
+                        <span className="block truncate text-[11px] text-muted-foreground">
+                          {destinationSummary}
+                        </span>
+                      </span>
                     </button>
+                    <div className="flex min-w-0 flex-col items-start gap-1 sm:items-end">
+                      <div className="text-xs text-muted-foreground">
+                        {t("vault.import.csv.tip")}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={downloadCsvTemplate}
+                        className="text-xs text-primary hover:underline"
+                      >
+                        {t("vault.import.csv.downloadTemplate")}
+                      </button>
+                    </div>
                   </div>
                 </>
               )}

@@ -178,6 +178,22 @@ test("vault import destination controls offer preserve, existing, and new groups
   assert.match(html, /vault\.import\.destination\.new/);
 });
 
+test("import format step keeps destination settings off the main card grid", () => {
+  // Source-level guard: format tiles must not embed SecureCRT copy, and the
+  // destination picker lives behind a dedicated footer entry point.
+  const source = require("node:fs").readFileSync(
+    new URL("./ImportVaultDialog.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(source, /data-import-destination-settings="true"/);
+  assert.match(source, /data-import-securecrt-prompt="true"/);
+  assert.match(source, /step === "destination"/);
+  assert.doesNotMatch(
+    source,
+    /data-import-format=\{opt\.format\}[\s\S]*securecrt\.directoryHint/,
+  );
+});
+
 test("vault import destination search caps very large group suggestions", () => {
   const groups = Array.from({ length: 1000 }, (_, index) => `Group ${index}`);
   const html = renderToStaticMarkup(
