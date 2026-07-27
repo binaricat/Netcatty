@@ -72,6 +72,8 @@ export function VirtualizedHostCollection<T>({
   layoutKey,
   ariaLabel,
   onActiveItemChange,
+  activeItemKey,
+  onBoundaryNavigation,
 }: {
   items: T[];
   itemKey: (item: T) => React.Key;
@@ -81,6 +83,8 @@ export function VirtualizedHostCollection<T>({
   layoutKey?: React.Key;
   ariaLabel?: string;
   onActiveItemChange?: (item: T) => void;
+  activeItemKey?: React.Key | null;
+  onBoundaryNavigation?: (direction: "previous" | "next") => void;
 }) {
   const rootRef = React.useRef<HTMLDivElement>(null);
   const pendingFocusKeyRef = React.useRef<string | null>(null);
@@ -156,6 +160,18 @@ export function VirtualizedHostCollection<T>({
     pendingFocusKeyRef.current = null;
   });
 
+  React.useLayoutEffect(() => {
+    if (activeItemKey === null || activeItemKey === undefined) return;
+    const key = String(activeItemKey);
+    const index = itemIndexByKey.get(key);
+    if (index === undefined) return;
+    pendingFocusKeyRef.current = key;
+    virtualizer.scrollToIndex(Math.floor(index / columns), { align: "auto" });
+    queueMicrotask(() => {
+      if (focusRenderedItem(key)) pendingFocusKeyRef.current = null;
+    });
+  }, [activeItemKey, columns, focusRenderedItem, itemIndexByKey, virtualizer]);
+
   const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
     const target = event.target as HTMLElement;
     const wrapper = target.closest<HTMLElement>("[data-vault-item-key]");
@@ -171,7 +187,18 @@ export function VirtualizedHostCollection<T>({
       key: event.key,
     });
     if (nextIndex === null) return;
-    if (nextIndex === currentIndex) return;
+    if (nextIndex === currentIndex) {
+      const direction = event.key === "ArrowUp" || event.key === "ArrowLeft"
+        ? "previous"
+        : event.key === "ArrowDown" || event.key === "ArrowRight"
+          ? "next"
+          : null;
+      if (direction && onBoundaryNavigation) {
+        event.preventDefault();
+        onBoundaryNavigation(direction);
+      }
+      return;
+    }
     event.preventDefault();
     const nextItem = items[nextIndex];
     const nextKey = String(itemKey(nextItem));
@@ -263,6 +290,8 @@ export function VirtualizedGroupedHostCollection<T>({
   layoutKey,
   ariaLabel,
   onActiveItemChange,
+  activeItemKey,
+  onBoundaryNavigation,
 }: {
   groups: Array<VirtualizedHostGroup<T>>;
   itemKey: (item: T) => React.Key;
@@ -273,6 +302,8 @@ export function VirtualizedGroupedHostCollection<T>({
   layoutKey?: React.Key;
   ariaLabel?: string;
   onActiveItemChange?: (item: T) => void;
+  activeItemKey?: React.Key | null;
+  onBoundaryNavigation?: (direction: "previous" | "next") => void;
 }) {
   const rootRef = React.useRef<HTMLDivElement>(null);
   const pendingFocusKeyRef = React.useRef<string | null>(null);
@@ -372,6 +403,23 @@ export function VirtualizedGroupedHostCollection<T>({
     pendingFocusKeyRef.current = null;
   });
 
+  React.useLayoutEffect(() => {
+    if (activeItemKey === null || activeItemKey === undefined) return;
+    const key = String(activeItemKey);
+    const index = itemIndexByKey.get(key);
+    if (index === undefined) return;
+    const rowIndex = rows.findIndex((row) => (
+      row.kind === "hosts"
+      && index >= row.hostStartIndex
+      && index < row.hostStartIndex + row.hosts.length
+    ));
+    pendingFocusKeyRef.current = key;
+    if (rowIndex >= 0) virtualizer.scrollToIndex(rowIndex, { align: "auto" });
+    queueMicrotask(() => {
+      if (focusRenderedItem(key)) pendingFocusKeyRef.current = null;
+    });
+  }, [activeItemKey, focusRenderedItem, itemIndexByKey, rows, virtualizer]);
+
   const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
     const target = event.target as HTMLElement;
     const wrapper = target.closest<HTMLElement>("[data-vault-item-key]");
@@ -414,7 +462,18 @@ export function VirtualizedGroupedHostCollection<T>({
       });
     }
     if (nextIndex === null) return;
-    if (nextIndex === currentIndex) return;
+    if (nextIndex === currentIndex) {
+      const direction = event.key === "ArrowUp"
+        ? "previous"
+        : event.key === "ArrowDown"
+          ? "next"
+          : null;
+      if (direction && onBoundaryNavigation) {
+        event.preventDefault();
+        onBoundaryNavigation(direction);
+      }
+      return;
+    }
     event.preventDefault();
     const nextItem = flatItems[nextIndex];
     const nextKey = String(itemKey(nextItem));

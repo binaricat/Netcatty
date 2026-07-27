@@ -184,8 +184,10 @@ test("HostTreeView shows selected groups in multi-select mode", () => {
 
   assert.match(markup, /data-selected="true"/);
   assert.match(markup, /data-group-path="production"/);
-  assert.match(markup, /role="checkbox"/);
-  assert.match(markup, /aria-checked="true"/);
+  assert.match(markup, /role="tree"/);
+  assert.match(markup, /aria-multiselectable="true"/);
+  assert.match(markup, /role="treeitem"/);
+  assert.match(markup, /aria-selected="true"/);
   assert.match(markup, /tabindex="0"/);
   assert.doesNotMatch(markup, /aria-expanded=/);
   assert.doesNotMatch(markup, /data-host-tree-group-edit-button="production"/);
@@ -215,7 +217,8 @@ test("HostTreeView exposes selected hosts to keyboard and assistive technology",
     />,
   );
 
-  assert.match(markup, /data-host-id="host-1"[^>]*role="checkbox"/);
-  assert.match(markup, /data-host-id="host-1"[^>]*aria-checked="true"/);
+  assert.match(markup, /role="tree"/);
+  assert.match(markup, /data-host-id="host-1"[^>]*role="treeitem"/);
+  assert.match(markup, /data-host-id="host-1"[^>]*aria-selected="true"/);
   assert.match(markup, /data-host-id="host-1"[^>]*tabindex="0"/);
 });

@@ -268,10 +268,10 @@ const TreeNode: React.FC<TreeNodeProps> = ({
                 data-section="host-tree-row"
                 data-row-type="group"
                 data-group-path={node.path}
-                role={isMultiSelectMode ? "checkbox" : undefined}
-                aria-checked={isMultiSelectMode ? isGroupMultiSelected : undefined}
-                aria-expanded={isMultiSelectMode ? undefined : isExpanded}
-                tabIndex={isMultiSelectMode ? 0 : undefined}
+                role="treeitem"
+                aria-selected={isMultiSelectMode ? isGroupMultiSelected : isGroupFocused}
+                aria-expanded={hasChildren || node.hosts.length > 0 ? isExpanded : undefined}
+                tabIndex={0}
                 draggable={!isInlineEditing && !isMultiSelectMode}
                 onKeyDown={(event) => {
                   if (!isMultiSelectMode) return;
@@ -351,7 +351,7 @@ const TreeNode: React.FC<TreeNodeProps> = ({
           />
         </ContextMenu>
 
-        <CollapsibleContent>
+        <CollapsibleContent role="group">
           {/* Child Groups */}
           {childNodes.map((child) => (
             <TreeNode
@@ -497,6 +497,9 @@ const HostTreeItem: React.FC<HostTreeItemProps> = ({
   const isMultiSelected = Boolean(isMultiSelectMode && selectedHostIds?.has(host.id));
   const isFocusSelected = !isMultiSelectMode && hostClickBehavior === 'select' && focusedHostId === host.id;
   const isSelected = isMultiSelected || isFocusSelected;
+  const normalizedHostClickBehavior: HostClickBehavior = hostClickBehavior === 'select'
+    ? 'select'
+    : 'connect';
 
   return (
     <ContextMenu>
@@ -509,14 +512,14 @@ const HostTreeItem: React.FC<HostTreeItemProps> = ({
           data-section="host-tree-row"
           data-row-type="host"
           data-host-id={host.id}
-          role={isMultiSelectMode ? "checkbox" : "button"}
-          aria-checked={isMultiSelectMode ? isMultiSelected : undefined}
+          role="treeitem"
+          aria-selected={Boolean(isSelected)}
           tabIndex={0}
           draggable={!isMultiSelectMode}
           onDragStart={(e) => e.dataTransfer.setData("host-id", host.id)}
           onClick={() => {
             const action = resolveHostActivateAction({
-              behavior: hostClickBehavior,
+              behavior: normalizedHostClickBehavior,
               isMultiSelectMode: Boolean(isMultiSelectMode),
               focusedHostId,
               hostId: host.id,
@@ -535,7 +538,7 @@ const HostTreeItem: React.FC<HostTreeItemProps> = ({
             if (event.key !== 'Enter' && event.key !== ' ') return;
             event.preventDefault();
             const action = resolveHostActivateAction({
-              behavior: hostClickBehavior,
+              behavior: normalizedHostClickBehavior,
               isMultiSelectMode: Boolean(isMultiSelectMode),
               focusedHostId,
               hostId: host.id,
@@ -697,7 +700,7 @@ export const HostTreeView: React.FC<HostTreeViewProps> = ({
   const allGroupPaths = useMemo(() => getAllGroupPaths(groupTree), [groupTree]);
 
   const groupDefaultsByPath = useMemo(() => {
-    const paths = new Set(allGroupPaths);
+    const paths = new Set<string>(allGroupPaths as string[]);
     for (const host of hosts) {
       if (host.group) {
         paths.add(host.group);
@@ -787,6 +790,11 @@ export const HostTreeView: React.FC<HostTreeViewProps> = ({
         </div>
       )}
 
+      <div
+        role="tree"
+        aria-label={t("vault.nav.hosts")}
+        aria-multiselectable={isMultiSelectMode || undefined}
+      >
       {/* Group tree */}
       {sortedGroupTree.map((node) => (
         <TreeNode
@@ -853,6 +861,7 @@ export const HostTreeView: React.FC<HostTreeViewProps> = ({
 	          groupDefaultsByPath={groupDefaultsByPath}
 	        />
       ))}
+      </div>
       
       {/* Empty state */}
       {ungroupedHosts.length === 0 && groupTree.length === 0 && (

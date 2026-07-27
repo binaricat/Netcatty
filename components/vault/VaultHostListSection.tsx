@@ -95,6 +95,39 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
     setFocusedHostId(host.id);
     setFocusedGroupPath(null);
   }, []);
+  const mainKeyboardHosts = groupedDisplayHosts
+    ? groupedDisplayHosts.flatMap((group) => group.hosts)
+    : visibleDisplayedHosts;
+  const keyboardHostSections = [
+    { key: "pinned", hosts: pinnedHosts },
+    { key: "recent", hosts: showRecentHosts ? recentHosts : [] },
+    { key: "main", hosts: mainKeyboardHosts },
+  ];
+  const focusHostAndElement = (host: Host) => {
+    focusHost(host);
+    queueMicrotask(() => {
+      const scrollElement = hostListScrollRef.current as HTMLElement | null;
+      const element = [...(scrollElement?.querySelectorAll<HTMLElement>("[data-host-id]") ?? [])]
+        .find((candidate) => candidate.dataset.hostId === host.id);
+      element?.focus();
+    });
+  };
+  const navigateHostSection = (
+    sectionKey: "pinned" | "recent" | "main",
+    direction: "previous" | "next",
+  ) => {
+    const currentSectionIndex = keyboardHostSections.findIndex((section) => section.key === sectionKey);
+    const step = direction === "next" ? 1 : -1;
+    let sectionIndex = currentSectionIndex + step;
+    while (sectionIndex >= 0 && sectionIndex < keyboardHostSections.length) {
+      const section = keyboardHostSections[sectionIndex];
+      if (section.hosts.length > 0) {
+        focusHostAndElement(direction === "next" ? section.hosts[0] : section.hosts.at(-1)!);
+        return;
+      }
+      sectionIndex += step;
+    }
+  };
   const initialKeyboardHostId = pinnedHosts[0]?.id
     ?? (showRecentHosts ? recentHosts[0]?.id : undefined)
     ?? groupedDisplayHosts?.[0]?.hosts[0]?.id
@@ -367,6 +400,8 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
                         layoutKey={`pinned:${hostCollectionLayoutKey}`}
                         ariaLabel={t("vault.hosts.pinned")}
                         onActiveItemChange={focusHost}
+                        activeItemKey={focusedHostId}
+                        onBoundaryNavigation={(direction) => navigateHostSection("pinned", direction)}
                         renderItem={(host) => {
                           const safeHost = sanitizeHost(host);
                           const effectiveDistro = getEffectiveHostDistro(safeHost);
@@ -408,9 +443,23 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
                                     activateHost(safeHost);
                                   }}
                                   onKeyDown={(event) => {
-                                    if (event.key !== "Enter" && event.key !== " ") return;
+                                    if (event.key === "Enter" || event.key === " ") {
+                                      event.preventDefault();
+                                      activateHost(safeHost);
+                                      return;
+                                    }
+                                    const index = recentHosts.findIndex((item) => item.id === host.id);
+                                    const direction = event.key === "ArrowUp" || event.key === "ArrowLeft"
+                                      ? "previous"
+                                      : event.key === "ArrowDown" || event.key === "ArrowRight"
+                                        ? "next"
+                                        : null;
+                                    if (!direction) return;
                                     event.preventDefault();
-                                    activateHost(safeHost);
+                                    const nextIndex = index + (direction === "next" ? 1 : -1);
+                                    const nextHost = recentHosts[nextIndex];
+                                    if (nextHost) focusHostAndElement(nextHost);
+                                    else navigateHostSection("recent", direction);
                                   }}
                                 >
                                   {viewMode === "grid" && (
@@ -828,6 +877,8 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
 	                              layoutKey={hostCollectionLayoutKey}
 	                              ariaLabel={t("vault.nav.hosts")}
 	                              onActiveItemChange={focusHost}
+	                              activeItemKey={focusedHostId}
+	                              onBoundaryNavigation={(direction) => navigateHostSection("main", direction)}
 	                              renderGroupHeader={(group) => (
 	                                <div className="flex w-full items-center gap-2 border-b border-border/40 pb-2">
 	                                  <FolderTree size={14} className="text-muted-foreground" />
@@ -981,6 +1032,8 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
                         layoutKey={hostCollectionLayoutKey}
                         ariaLabel={t("vault.nav.hosts")}
                         onActiveItemChange={focusHost}
+                        activeItemKey={focusedHostId}
+                        onBoundaryNavigation={(direction) => navigateHostSection("main", direction)}
                         renderItem={(host: Host) => {
                           const safeHost = sanitizeHost(host);
                           const effectiveDistro = getEffectiveHostDistro(safeHost);
