@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  isActiveVaultLockHandle,
   isVaultImportLockHeld,
   withVaultImportLock,
+  withVaultImportLockIfNeeded,
 } from "./vaultManagedImportLock.ts";
 
 test("Vault imports are serialized without Web Locks", async () => {
@@ -34,32 +36,45 @@ test("Vault imports are serialized without Web Locks", async () => {
   ]);
 });
 
-test("Vault import lock reports ownership while held and serializes concurrent work", async () => {
+test("Vault import lock serializes concurrent work while nested helpers use the handle", async () => {
   const events: string[] = [];
   let releaseOuter!: () => void;
   const outerGate = new Promise<void>((resolve) => {
     releaseOuter = resolve;
   });
 
-  const outer = withVaultImportLock("owned", async () => {
+  const outer = withVaultImportLock("owned", async (lock) => {
     events.push("outer:start");
     assert.equal(isVaultImportLockHeld("owned"), true);
+    assert.equal(isActiveVaultLockHandle("owned", lock), true);
+
+    await withVaultImportLockIfNeeded("owned", async () => {
+      events.push("nested");
+    }, lock, null);
+
     await outerGate;
     events.push("outer:end");
   }, null);
 
-  const concurrent = withVaultImportLock("owned", async () => {
-    events.push("concurrent");
-    assert.equal(isVaultImportLockHeld("owned"), true);
-  }, null);
+  await Promise.resolve();
+  assert.deepEqual(events, ["outer:start", "nested"]);
+
+  // Started without the active handle: must queue behind the outer owner.
+  const concurrent = withVaultImportLockIfNeeded("owned", async () => {
+    events.push("concurrent-if-needed");
+  }, undefined, null);
 
   await Promise.resolve();
-  assert.deepEqual(events, ["outer:start"]);
-  assert.equal(isVaultImportLockHeld("owned"), true);
+  assert.deepEqual(events, ["outer:start", "nested"]);
   releaseOuter();
   await Promise.all([outer, concurrent]);
   assert.equal(isVaultImportLockHeld("owned"), false);
-  assert.deepEqual(events, ["outer:start", "outer:end", "concurrent"]);
+  assert.deepEqual(events, [
+    "outer:start",
+    "nested",
+    "outer:end",
+    "concurrent-if-needed",
+  ]);
 });
 
 test("Vault imports fail safely in a window without shared locking", async () => {

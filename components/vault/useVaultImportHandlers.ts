@@ -17,7 +17,10 @@ import {
   type VaultImportProgress,
 } from "../../application/state/vaultImportProgress";
 import { importVaultHostsInWorker } from "../../application/state/vaultImportWorker";
-import { withVaultImportLock } from "../../application/state/vaultManagedImportLock";
+import {
+  type VaultLockHandle,
+  withVaultImportLock,
+} from "../../application/state/vaultManagedImportLock";
 import { sanitizeHost } from "../../domain/host";
 import {
   applyVaultImportDestination,
@@ -46,6 +49,7 @@ interface UseVaultImportHandlersOptions {
     updateSources: (current: ManagedSource[]) => ManagedSource[],
     updateGroupConfigs?: (current: GroupConfig[]) => GroupConfig[],
     expectedHosts?: Host[],
+    lock?: VaultLockHandle | null,
   ) => Promise<
     | {
       status: "persisted";
@@ -314,7 +318,7 @@ export function useVaultImportHandlers({
           }
   
           if (isManaged && (newHosts.length > 0 || updatedExistingHosts.length > 0)) {
-            await withVaultImportLock("vault", async () => {
+            await withVaultImportLock("vault", async (lock) => {
             const latestPersistedSources = onReadPersistedManagedSources();
             managedSourcesRef.current = latestPersistedSources;
             const sourceClaim = latestPersistedSources.find((source) => source.filePath === filePath);
@@ -429,6 +433,7 @@ export function useVaultImportHandlers({
                     },
                     undefined,
                     baselineHosts,
+                    lock,
                   );
                   if (transaction.status === "superseded") return "superseded";
                   customGroupsRef.current = transaction.groups;
@@ -447,7 +452,7 @@ export function useVaultImportHandlers({
           } else if (newHosts.length > 0) {
             let addedHostIds = new Set<string>();
             let addedHostKeyPaths = new Map<string, string>();
-            await withVaultImportLock("vault", async () => {
+            await withVaultImportLock("vault", async (lock) => {
             const importBaselineHosts = await onReadPersistedHosts();
             hostsRef.current = importBaselineHosts;
             const importBaselineGroups = customGroupsRef.current;
@@ -477,6 +482,7 @@ export function useVaultImportHandlers({
                   (latestPersistedSources) => latestPersistedSources,
                   undefined,
                   baselineHosts,
+                  lock,
                 );
                 if (transaction.status === "superseded") return "superseded";
                 customGroupsRef.current = transaction.groups;

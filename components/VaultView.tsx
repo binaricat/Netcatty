@@ -48,6 +48,7 @@ import { useStoredViewMode } from "../application/state/useStoredViewMode";
 import { useStoredBoolean } from "../application/state/useStoredBoolean";
 import { useStoredNumber } from "../application/state/useStoredNumber";
 import { useStoredString } from "../application/state/useStoredString";
+import type { VaultLockHandle } from "../application/state/vaultManagedImportLock";
 import { useTreeExpandedState } from "../application/state/useTreeExpandedState";
 import { useVaultGroupDeletion } from "../application/state/useVaultGroupDeletion";
 import type { VaultHostPersistenceResult } from "../application/state/vaultImportProgress";
@@ -257,6 +258,7 @@ interface VaultViewProps {
     updateSources: (current: ManagedSource[]) => ManagedSource[],
     updateGroupConfigs?: (current: GroupConfig[]) => GroupConfig[],
     expectedHosts?: Host[],
+    lock?: VaultLockHandle | null,
   ) => Promise<
     | {
       status: "persisted";

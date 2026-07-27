@@ -73,6 +73,7 @@ import { pluginExtensionBridge } from "./pluginExtensionBridge";
 import type { PluginImporterCommitRequest } from "./usePluginImporterCommit";
 import {
   isVaultImportLockHeld,
+  type VaultLockHandle,
   withVaultImportLock,
   withVaultImportLockIfNeeded,
 } from "./vaultManagedImportLock";
@@ -402,7 +403,7 @@ export const useVaultState = () => {
     const ver = ++hostsWriteVersion.current;
     // Encrypt and write under the shared cross-window lock so ordinary saves
     // cannot slip between an import's final check and write.
-    const pending = withVaultImportLockIfNeeded("vault", async () => {
+    const pending = withVaultImportLock("vault", async () => {
       if (ver !== hostsWriteVersion.current) return "superseded" as const;
       const enc = await encryptHosts(cleaned);
       if (ver !== hostsWriteVersion.current) return "superseded" as const;
@@ -431,7 +432,7 @@ export const useVaultState = () => {
     const cleaned = normalizeVaultOrder(data);
     setKeys(cleaned);
     const ver = ++keysWriteVersion.current;
-    const pending = withVaultImportLockIfNeeded("vault", async () => {
+    const pending = withVaultImportLock("vault", async () => {
       if (ver !== keysWriteVersion.current) return;
       const enc = await encryptKeys(cleaned);
       if (ver === keysWriteVersion.current)
@@ -471,7 +472,7 @@ export const useVaultState = () => {
     const updated = normalizeVaultOrder([...keys, newKey]);
     setKeys(updated);
     const ver = ++keysWriteVersion.current;
-    const pending = withVaultImportLockIfNeeded("vault", async () => {
+    const pending = withVaultImportLock("vault", async () => {
       if (ver !== keysWriteVersion.current) return;
       const enc = await encryptKeys(updated);
       if (ver === keysWriteVersion.current)
@@ -485,7 +486,7 @@ export const useVaultState = () => {
     const cleaned = normalizeVaultOrder(data);
     setIdentities(cleaned);
     const ver = ++identitiesWriteVersion.current;
-    const pending = withVaultImportLockIfNeeded("vault", async () => {
+    const pending = withVaultImportLock("vault", async () => {
       if (ver !== identitiesWriteVersion.current) return;
       const enc = await encryptIdentities(cleaned);
       if (ver === identitiesWriteVersion.current)
@@ -545,7 +546,7 @@ export const useVaultState = () => {
     const cleanedGroupConfigs = buildGroupConfigsForGroups(next, groupConfigs);
     setGroupConfigs(cleanedGroupConfigs);
     const configsVer = ++groupConfigsWriteVersion.current;
-    const pending = withVaultImportLockIfNeeded("vault", async () => {
+    const pending = withVaultImportLock("vault", async () => {
       if (groupsVer === customGroupsWriteVersion.current) {
         localStorageAdapter.write(STORAGE_KEY_GROUPS, next);
       }
@@ -574,7 +575,7 @@ export const useVaultState = () => {
       : data;
     managedSourcesRef.current = next;
     setManagedSources(next);
-    void withVaultImportLockIfNeeded("vault", async () => {
+    void withVaultImportLock("vault", async () => {
       // Latest ref wins if another update ran while waiting for the lock.
       if (managedSourcesRef.current !== next) return;
       localStorageAdapter.write(STORAGE_KEY_MANAGED_SOURCES, next);
@@ -594,6 +595,7 @@ export const useVaultState = () => {
     updateSources: (current: ManagedSource[]) => ManagedSource[],
     updateGroupConfigs?: (current: GroupConfig[]) => GroupConfig[],
     expectedHosts?: Host[],
+    lock?: VaultLockHandle | null,
   ): Promise<
     | {
       status: "persisted";
@@ -604,9 +606,8 @@ export const useVaultState = () => {
     | { status: "superseded" }
   > => {
     // Hold the shared lock for the entire check → encrypt → write path so no
-    // ordinary vault save can interleave. Callers that already hold the lock
-    // (import handlers, group deletion) continue in-place; independent work
-    // always queues instead of re-entering.
+    // ordinary vault save can interleave. Callers already inside withVaultImportLock
+    // must pass the active lock handle to continue without re-acquiring.
     const runCommit = async (): Promise<
       | {
         status: "persisted";
@@ -702,7 +703,7 @@ export const useVaultState = () => {
       };
     };
 
-    return withVaultImportLockIfNeeded("vault", runCommit);
+    return withVaultImportLockIfNeeded("vault", runCommit, lock);
   }, []);
 
   const updateGroupConfigs = useCallback((data: GroupConfig[]) => {
@@ -714,7 +715,7 @@ export const useVaultState = () => {
     const cleaned = normalizeVaultOrder(data.map(sanitizeGroupConfig));
     setGroupConfigs(cleaned);
     const ver = ++groupConfigsWriteVersion.current;
-    const pending = withVaultImportLockIfNeeded("vault", async () => {
+    const pending = withVaultImportLock("vault", async () => {
       if (ver !== groupConfigsWriteVersion.current) return;
       const enc = await encryptGroupConfigs(cleaned);
       if (ver === groupConfigsWriteVersion.current)
@@ -863,7 +864,7 @@ export const useVaultState = () => {
     setHosts((prevHosts) => {
       const updated = normalizeVaultOrder([...prevHosts, sanitizeHost(newHost)]);
       const ver = ++hostsWriteVersion.current;
-      const pending = withVaultImportLockIfNeeded("vault", async () => {
+      const pending = withVaultImportLock("vault", async () => {
         if (ver !== hostsWriteVersion.current) return;
         const enc = await encryptHosts(updated);
         if (ver === hostsWriteVersion.current)
@@ -1282,7 +1283,7 @@ export const useVaultState = () => {
         h.id === hostId ? { ...h, lastConnectedAt: Date.now() } : h,
       );
       const ver = ++hostsWriteVersion.current;
-      const pending = withVaultImportLockIfNeeded("vault", async () => {
+      const pending = withVaultImportLock("vault", async () => {
         if (ver !== hostsWriteVersion.current) return;
         const enc = await encryptHosts(next);
         if (ver === hostsWriteVersion.current)
@@ -1300,7 +1301,7 @@ export const useVaultState = () => {
         h.id === hostId ? { ...h, distro: normalized } : h,
       );
       const ver = ++hostsWriteVersion.current;
-      const pending = withVaultImportLockIfNeeded("vault", async () => {
+      const pending = withVaultImportLock("vault", async () => {
         if (ver !== hostsWriteVersion.current) return;
         const enc = await encryptHosts(next);
         if (ver === hostsWriteVersion.current)

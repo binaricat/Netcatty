@@ -2,7 +2,10 @@ import { useCallback, useRef } from "react";
 
 import type { GroupConfig, Host, ManagedSource } from "../../domain/models";
 import { buildVaultGroupDeletion } from "../../domain/vaultGroupDeletion";
-import { withVaultImportLock } from "./vaultManagedImportLock";
+import {
+  type VaultLockHandle,
+  withVaultImportLock,
+} from "./vaultManagedImportLock";
 
 const RETRY_VAULT_GROUP_DELETION = Symbol("retry-vault-group-deletion");
 
@@ -40,6 +43,7 @@ export function useVaultGroupDeletion({
     updateSources: (current: ManagedSource[]) => ManagedSource[],
     updateGroupConfigs?: (current: GroupConfig[]) => GroupConfig[],
     expectedHosts?: Host[],
+    lock?: VaultLockHandle | null,
   ) => Promise<
     | {
       status: "persisted";
@@ -62,7 +66,7 @@ export function useVaultGroupDeletion({
     additionallyDeletedHostIds: ReadonlySet<string> = new Set(),
   ) => {
     const selectedPaths = [...paths];
-    await withVaultImportLock("vault", async () => {
+    await withVaultImportLock("vault", async (lock) => {
       let deletedRoots: string[] = [];
       while (true) {
         const [latestHosts, latestManagedSources] = await Promise.all([
@@ -160,6 +164,7 @@ export function useVaultGroupDeletion({
                 managedSources: [],
               }).groupConfigs,
               expectedHosts,
+              lock,
             );
             if (transaction.status === "superseded") {
               const [refreshedHosts, refreshedSources] = await Promise.all([
