@@ -490,7 +490,10 @@ export function applyPluginImporterDestination(
       duplicates: 0,
     },
   }, destination);
-  const existingGroupSet = new Set(existingCustomGroups);
+  const existingGroupSet = new Set([
+    ...existingCustomGroups,
+    ...existingHosts.flatMap((host) => host.group ? [host.group] : []),
+  ]);
   const previousAddedGroupCount = merged.customGroups.filter(
     (group) => !existingGroupSet.has(group),
   ).length;

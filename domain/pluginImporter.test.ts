@@ -411,6 +411,34 @@ test('plugin importer destination moves only newly imported hosts into the selec
   assert.equal(targeted.addedCount, 2);
 });
 
+test('plugin importer does not count a host-owned destination group as newly added', () => {
+  const existingDrafts = normalizePluginImporterRecords([{ type: 'draft', draft: {
+    kind: 'host',
+    value: { label: 'Existing', hostname: 'existing.test', group: 'Existing Group' },
+  } }]);
+  const importedDrafts = normalizePluginImporterRecords([{ type: 'draft', draft: {
+    kind: 'host',
+    value: { label: 'Imported', hostname: 'imported.test', group: 'Source' },
+  } }]);
+  const merged = mergePluginImporterDrafts({
+    hosts: existingDrafts.hosts,
+    identities: [],
+    keys: [],
+    snippets: [],
+    customGroups: [],
+  }, importedDrafts);
+
+  const targeted = applyPluginImporterDestination(
+    merged,
+    existingDrafts.hosts.length,
+    { mode: 'group', group: 'Existing Group' },
+  );
+
+  assert.equal(targeted.hosts[1].group, 'Existing Group');
+  assert.deepEqual(targeted.customGroups, ['Existing Group']);
+  assert.equal(targeted.addedCount, 1);
+});
+
 test('plugin importer preview is bounded and never exposes secret or command payloads', () => {
   const drafts = normalizePluginImporterRecords([
     { type: 'draft', draft: { kind: 'identity', value: {

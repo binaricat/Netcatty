@@ -268,6 +268,9 @@ const TreeNode: React.FC<TreeNodeProps> = ({
                 data-section="host-tree-row"
                 data-row-type="group"
                 data-group-path={node.path}
+                role={isMultiSelectMode ? "checkbox" : undefined}
+                aria-checked={isMultiSelectMode ? isGroupMultiSelected : undefined}
+                aria-expanded={isMultiSelectMode ? undefined : isExpanded}
                 draggable={!isInlineEditing && !isMultiSelectMode}
                 onDragStart={(e) => {
                   if (isInlineEditing) return;
