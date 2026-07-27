@@ -1,4 +1,5 @@
 import { CheckSquare, Edit2, FileSymlink, Server, Square, Expand, Minimize2 } from 'lucide-react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useI18n } from '../application/i18n/I18nProvider';
 import {
@@ -38,10 +39,83 @@ const getTreeGroupDropIntent = (
 const hasDragType = (dataTransfer: DataTransfer, type: string) =>
   Array.from(dataTransfer.types).includes(type);
 
+type HostTreeSortMode = 'manual' | 'az' | 'za' | 'newest' | 'oldest' | 'group';
+
+export type VisibleHostTreeItem =
+  | { kind: 'group'; key: string; depth: number; node: GroupNode }
+  | { kind: 'host'; key: string; depth: number; host: Host };
+
+const sortHostTreeGroups = (
+  nodes: GroupNode[],
+  sortMode: HostTreeSortMode,
+  groupConfigs: GroupConfig[],
+): GroupNode[] => {
+  const originalIndex = new Map(nodes.map((node, index) => [node.path, index]));
+  const orderByPath = new Map(
+    groupConfigs
+      .filter((config) => typeof config.order === 'number' && Number.isFinite(config.order))
+      .map((config) => [config.path, config.order as number]),
+  );
+  return [...nodes].sort((a, b) => {
+    if (sortMode === 'za') return b.name.localeCompare(a.name);
+    if (sortMode === 'manual') {
+      const orderA = orderByPath.get(a.path);
+      const orderB = orderByPath.get(b.path);
+      if (orderA !== undefined && orderB !== undefined && orderA !== orderB) return orderA - orderB;
+      if (orderA !== undefined) return -1;
+      if (orderB !== undefined) return 1;
+      return (originalIndex.get(a.path) ?? 0) - (originalIndex.get(b.path) ?? 0);
+    }
+    return a.name.localeCompare(b.name);
+  });
+};
+
+const sortHostTreeHosts = (hosts: Host[], sortMode: HostTreeSortMode): Host[] => {
+  const sorted = [...hosts].sort((a, b) => {
+    if (sortMode === 'za') return b.label.localeCompare(a.label);
+    if (sortMode === 'newest') return (b.createdAt || 0) - (a.createdAt || 0);
+    if (sortMode === 'oldest') return (a.createdAt || 0) - (b.createdAt || 0);
+    if (sortMode === 'manual') return 0;
+    return a.label.localeCompare(b.label);
+  });
+  return sortMode === 'manual' ? sortByVaultOrder(sorted) : sorted;
+};
+
+export function buildVisibleHostTreeItems({
+  groupTree,
+  ungroupedHosts,
+  expandedPaths,
+  sortMode,
+  groupConfigs,
+}: {
+  groupTree: GroupNode[];
+  ungroupedHosts: Host[];
+  expandedPaths: Set<string>;
+  sortMode: HostTreeSortMode;
+  groupConfigs: GroupConfig[];
+}): VisibleHostTreeItem[] {
+  const items: VisibleHostTreeItem[] = [];
+  const visitGroups = (nodes: GroupNode[], depth: number) => {
+    for (const node of sortHostTreeGroups(nodes, sortMode, groupConfigs)) {
+      items.push({ kind: 'group', key: `group:${node.path}`, depth, node });
+      if (!expandedPaths.has(node.path)) continue;
+      visitGroups(Object.values(node.children ?? {}) as GroupNode[], depth + 1);
+      for (const host of sortHostTreeHosts(node.hosts, sortMode)) {
+        items.push({ kind: 'host', key: `host:${host.id}`, depth: depth + 1, host });
+      }
+    }
+  };
+  visitGroups(groupTree, 0);
+  for (const host of sortHostTreeHosts(ungroupedHosts, sortMode)) {
+    items.push({ kind: 'host', key: `host:${host.id}`, depth: 0, host });
+  }
+  return items;
+}
+
 interface HostTreeViewProps {
   groupTree: GroupNode[];
   hosts: Host[];
-  sortMode?: 'manual' | 'az' | 'za' | 'newest' | 'oldest' | 'group';
+  sortMode?: HostTreeSortMode;
   expandedPaths?: Set<string>;
   onTogglePath?: (path: string) => void;
   onExpandAll?: (paths: string[]) => void;
@@ -75,12 +149,14 @@ interface HostTreeViewProps {
   getDropTargetClasses?: (target: string) => string;
   setDragOverDropTarget?: (target: string | null) => void;
   groupConfigs?: GroupConfig[];
+  scrollRef?: React.RefObject<HTMLDivElement | null>;
+  expandAllGroups?: boolean;
 }
 
 interface TreeNodeProps {
   node: GroupNode;
   depth: number;
-  sortMode: 'manual' | 'az' | 'za' | 'newest' | 'oldest' | 'group';
+  sortMode: HostTreeSortMode;
   expandedPaths: Set<string>;
   onToggle: (path: string) => void;
   onConnect: (host: Host) => void;
@@ -116,6 +192,7 @@ interface TreeNodeProps {
   activeTreeItemKey: string | null;
   initialTreeItemKey: string | null;
   onActiveTreeItemChange: (key: string) => void;
+  renderDescendants?: boolean;
 }
 
 
@@ -158,6 +235,7 @@ const TreeNode: React.FC<TreeNodeProps> = ({
   activeTreeItemKey,
   initialTreeItemKey,
   onActiveTreeItemChange,
+  renderDescendants = true,
 }) => {
   const inlineEdit = useHostTreeInlineGroupEdit();
   const vaultTreeActions = useVaultHostTreeActions();
@@ -181,60 +259,15 @@ const TreeNode: React.FC<TreeNodeProps> = ({
   const isManaged = managedGroupPaths?.has(node.path) ?? false;
   const hostsCountInNode = node.totalHostCount ?? node.hosts.length;
 
-  const childNodes = useMemo(() => {
-    if (!node.children) return [];
-    const nodes = Object.values(node.children) as unknown as GroupNode[];
-    const originalIndex = new Map(nodes.map((child, index) => [child.path, index]));
-    const orderByPath = new Map(
-      groupConfigs
-        .filter((config) => typeof config.order === 'number' && Number.isFinite(config.order))
-        .map((config) => [config.path, config.order as number]),
-    );
-    return nodes.sort((a, b) => {
-      switch (sortMode) {
-        case 'za':
-          return b.name.localeCompare(a.name);
-        case 'manual': {
-          const orderA = orderByPath.get(a.path);
-          const orderB = orderByPath.get(b.path);
-          const hasOrderA = typeof orderA === 'number' && Number.isFinite(orderA);
-          const hasOrderB = typeof orderB === 'number' && Number.isFinite(orderB);
-          if (hasOrderA && hasOrderB && orderA !== orderB) return orderA - orderB;
-          if (hasOrderA) return -1;
-          if (hasOrderB) return 1;
-          return (originalIndex.get(a.path) ?? 0) - (originalIndex.get(b.path) ?? 0);
-        }
-        case 'newest':
-        case 'oldest':
-          // For groups, fall back to name sorting since groups don't have creation dates
-          return a.name.localeCompare(b.name);
-        case 'az':
-        default:
-          return a.name.localeCompare(b.name);
-      }
-    });
-  }, [groupConfigs, node.children, sortMode]);
-
-  const sortedHosts = useMemo(() => {
-    const sorted = [...node.hosts].sort((a, b) => {
-      switch (sortMode) {
-        case 'az':
-          return a.label.localeCompare(b.label);
-        case 'za':
-          return b.label.localeCompare(a.label);
-        case 'newest':
-          return (b.createdAt || 0) - (a.createdAt || 0);
-        case 'oldest':
-          return (a.createdAt || 0) - (b.createdAt || 0);
-        case 'manual':
-          return 0;
-        default:
-          return a.label.localeCompare(b.label);
-      }
-    });
-    if (sortMode === 'manual') return sortByVaultOrder(sorted);
-    return sorted;
-  }, [node.hosts, sortMode]);
+  const childNodes = useMemo(() => sortHostTreeGroups(
+    Object.values(node.children ?? {}) as GroupNode[],
+    sortMode,
+    groupConfigs,
+  ), [groupConfigs, node.children, sortMode]);
+  const sortedHosts = useMemo(
+    () => sortHostTreeHosts(node.hosts, sortMode),
+    [node.hosts, sortMode],
+  );
 
   return (
     <div>
@@ -364,7 +397,7 @@ const TreeNode: React.FC<TreeNodeProps> = ({
           />
         </ContextMenu>
 
-        <CollapsibleContent role="group">
+        {renderDescendants && <CollapsibleContent role="group">
           {/* Child Groups */}
           {childNodes.map((child) => (
             <TreeNode
@@ -439,7 +472,7 @@ const TreeNode: React.FC<TreeNodeProps> = ({
 	              onActiveTreeItemChange={onActiveTreeItemChange}
 	            />
 	          ))}
-        </CollapsibleContent>
+        </CollapsibleContent>}
       </Collapsible>
     </div>
   );
@@ -689,8 +722,11 @@ export const HostTreeView: React.FC<HostTreeViewProps> = ({
   getDropTargetClasses,
   setDragOverDropTarget,
   groupConfigs = [],
+  scrollRef,
+  expandAllGroups = false,
 }) => {
   const { t } = useI18n();
+  const treeSortMode = sortMode as HostTreeSortMode;
   const inlineEdit = useHostTreeInlineGroupEdit();
   const vaultTreeActions = useVaultHostTreeActions();
   const cancelRename = cancelInlineGroupEdit ?? vaultTreeActions?.cancelInlineGroupEdit;
@@ -709,7 +745,6 @@ export const HostTreeView: React.FC<HostTreeViewProps> = ({
   // Use external state if provided, otherwise use local persistent state
   const localTreeState = useTreeExpandedState(STORAGE_KEY_VAULT_HOSTS_TREE_EXPANDED);
   
-  const expandedPaths = externalExpandedPaths || localTreeState.expandedPaths;
   const togglePath = externalOnTogglePath || localTreeState.togglePath;
   const expandAll = externalOnExpandAll || localTreeState.expandAll;
   const collapseAll = externalOnCollapseAll || localTreeState.collapseAll;
@@ -730,6 +765,11 @@ export const HostTreeView: React.FC<HostTreeViewProps> = ({
   };
 
   const allGroupPaths = useMemo(() => getAllGroupPaths(groupTree), [groupTree]);
+  const expandedPaths = useMemo(() => (
+    expandAllGroups
+      ? new Set(allGroupPaths)
+      : externalExpandedPaths || localTreeState.expandedPaths
+  ), [allGroupPaths, expandAllGroups, externalExpandedPaths, localTreeState.expandedPaths]);
 
   const groupDefaultsByPath = useMemo(() => {
     const paths = new Set<string>(allGroupPaths as string[]);
@@ -754,75 +794,91 @@ export const HostTreeView: React.FC<HostTreeViewProps> = ({
     collapseAll();
   };
 
-  // Get ungrouped hosts (hosts without a group or with empty group) and sort them
-  const ungroupedHosts = useMemo(() => {
-    const hosts_without_group = hosts.filter(host => !host.group || host.group === '');
-    const sorted = hosts_without_group.sort((a, b) => {
-      switch (sortMode) {
-        case 'az':
-          return a.label.localeCompare(b.label);
-        case 'za':
-          return b.label.localeCompare(a.label);
-        case 'newest':
-          return (b.createdAt || 0) - (a.createdAt || 0);
-        case 'oldest':
-          return (a.createdAt || 0) - (b.createdAt || 0);
-        case 'manual':
-          return 0;
-        default:
-          return a.label.localeCompare(b.label);
-      }
-    });
-    if (sortMode === 'manual') return sortByVaultOrder(sorted);
-    return sorted;
-  }, [hosts, sortMode]);
-
-  // Sort group tree based on sort mode
-  const sortedGroupTree = useMemo(() => {
-    return [...groupTree].sort((a, b) => {
-      switch (sortMode) {
-        case 'za':
-          return b.name.localeCompare(a.name);
-        case 'manual':
-          return 0;
-        case 'newest':
-        case 'oldest':
-          // For groups, fall back to name sorting since groups don't have creation dates
-          return a.name.localeCompare(b.name);
-        case 'az':
-        default:
-          return a.name.localeCompare(b.name);
-      }
-    });
-  }, [groupTree, sortMode]);
+  const ungroupedHosts = useMemo(
+    () => hosts.filter((host) => !host.group || host.group === ''),
+    [hosts],
+  );
+  const visibleTreeItems = useMemo(() => buildVisibleHostTreeItems({
+    groupTree,
+    ungroupedHosts,
+    expandedPaths,
+    sortMode: treeSortMode,
+    groupConfigs,
+  }), [expandedPaths, groupConfigs, groupTree, treeSortMode, ungroupedHosts]);
 
   const treeRef = useRef<HTMLDivElement>(null);
+  const pendingTreeFocusKeyRef = useRef<string | null>(null);
+  const [scrollMargin, setScrollMargin] = useState(0);
   const [activeTreeItemKey, setActiveTreeItemKey] = useState<string | null>(null);
-  const initialTreeItemKey = sortedGroupTree[0]
-    ? `group:${sortedGroupTree[0].path}`
-    : ungroupedHosts[0]
-      ? `host:${ungroupedHosts[0].id}`
-      : null;
+  const initialTreeItemKey = visibleTreeItems[0]?.key ?? null;
+  const treeItemIndexByKey = useMemo(() => new Map(
+    visibleTreeItems.map((item, index) => [item.key, index]),
+  ), [visibleTreeItems]);
+  const virtualizer = useVirtualizer({
+    count: visibleTreeItems.length,
+    getScrollElement: () => scrollRef?.current ?? null,
+    estimateSize: () => 40,
+    getItemKey: (index) => visibleTreeItems[index]?.key ?? index,
+    overscan: 10,
+    scrollMargin,
+    initialRect: typeof window === 'undefined'
+      ? { width: 1280, height: 800 }
+      : undefined,
+  });
 
-  const getVisibleTreeItems = useCallback(() => (
-    [...(treeRef.current?.querySelectorAll<HTMLElement>('[role="treeitem"]') ?? [])]
-      .filter((item) => !item.closest('[role="group"][data-state="closed"]'))
-  ), []);
+  React.useLayoutEffect(() => {
+    const root = treeRef.current;
+    const scrollElement = scrollRef?.current;
+    if (!root || !scrollElement) return;
+    const measure = () => {
+      const nextMargin = root.getBoundingClientRect().top
+        - scrollElement.getBoundingClientRect().top
+        + scrollElement.scrollTop;
+      setScrollMargin((current) => current === nextMargin ? current : nextMargin);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(root);
+    observer.observe(scrollElement);
+    return () => observer.disconnect();
+  }, [scrollRef, visibleTreeItems.length]);
+
+  React.useLayoutEffect(() => {
+    virtualizer.measure();
+  }, [virtualizer, visibleTreeItems.length]);
+
+  const focusRenderedTreeItem = useCallback((key: string) => {
+    const target = [...(treeRef.current?.querySelectorAll<HTMLElement>('[data-tree-item-key]') ?? [])]
+      .find((item) => item.dataset.treeItemKey === key);
+    if (!target) return false;
+    target.focus();
+    return true;
+  }, []);
+
+  React.useLayoutEffect(() => {
+    const key = pendingTreeFocusKeyRef.current;
+    if (!key || !focusRenderedTreeItem(key)) return;
+    pendingTreeFocusKeyRef.current = null;
+  });
 
   useEffect(() => {
     if (!activeTreeItemKey) return;
-    if (!getVisibleTreeItems().some((item) => item.dataset.treeItemKey === activeTreeItemKey)) {
+    if (!treeItemIndexByKey.has(activeTreeItemKey)) {
       setActiveTreeItemKey(null);
     }
-  }, [activeTreeItemKey, expandedPaths, getVisibleTreeItems, hosts, sortedGroupTree]);
+  }, [activeTreeItemKey, treeItemIndexByKey]);
 
-  const focusTreeItem = useCallback((item: HTMLElement | undefined) => {
+  const focusTreeItem = useCallback((index: number) => {
+    const item = visibleTreeItems[index];
     if (!item) return;
-    const key = item.dataset.treeItemKey;
-    if (!key) return;
+    const key = item.key;
+    pendingTreeFocusKeyRef.current = key;
     setActiveTreeItemKey(key);
-    item.focus();
-  }, []);
+    virtualizer.scrollToIndex(index, { align: 'auto' });
+    queueMicrotask(() => {
+      if (focusRenderedTreeItem(key)) pendingTreeFocusKeyRef.current = null;
+    });
+  }, [focusRenderedTreeItem, virtualizer, visibleTreeItems]);
 
   const handleTreeKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
     if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) {
@@ -833,19 +889,23 @@ export const HostTreeView: React.FC<HostTreeViewProps> = ({
       : null;
     if (!target || !treeRef.current?.contains(target)) return;
 
-    const items = getVisibleTreeItems();
-    const index = items.indexOf(target);
-    if (index < 0) return;
-    const depth = Number(target.dataset.treeDepth ?? 0);
+    const key = target.dataset.treeItemKey;
+    const index = key ? treeItemIndexByKey.get(key) : undefined;
+    if (index === undefined) return;
+    const currentItem = visibleTreeItems[index];
+    const depth = currentItem.depth;
 
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp' || event.key === 'Home' || event.key === 'End') {
       event.preventDefault();
       const nextIndex = event.key === 'Home'
         ? 0
         : event.key === 'End'
-          ? items.length - 1
-          : Math.max(0, Math.min(items.length - 1, index + (event.key === 'ArrowDown' ? 1 : -1)));
-      focusTreeItem(items[nextIndex]);
+          ? visibleTreeItems.length - 1
+          : Math.max(0, Math.min(
+            visibleTreeItems.length - 1,
+            index + (event.key === 'ArrowDown' ? 1 : -1),
+          ));
+      focusTreeItem(nextIndex);
       return;
     }
 
@@ -860,9 +920,9 @@ export const HostTreeView: React.FC<HostTreeViewProps> = ({
         togglePath(groupPath);
         return;
       }
-      const child = items[index + 1];
-      if (child && Number(child.dataset.treeDepth ?? 0) > depth) {
-        focusTreeItem(child);
+      const child = visibleTreeItems[index + 1];
+      if (child && child.depth > depth) {
+        focusTreeItem(index + 1);
       }
       return;
     }
@@ -873,13 +933,13 @@ export const HostTreeView: React.FC<HostTreeViewProps> = ({
       return;
     }
     for (let parentIndex = index - 1; parentIndex >= 0; parentIndex -= 1) {
-      const parent = items[parentIndex];
-      if (parent.dataset.rowType === 'group' && Number(parent.dataset.treeDepth ?? 0) < depth) {
-        focusTreeItem(parent);
+      const parent = visibleTreeItems[parentIndex];
+      if (parent.kind === 'group' && parent.depth < depth) {
+        focusTreeItem(parentIndex);
         return;
       }
     }
-  }, [focusTreeItem, getVisibleTreeItems, togglePath]);
+  }, [focusTreeItem, togglePath, treeItemIndexByKey, visibleTreeItems]);
 
   return (
     <div className="space-y-1" onPointerDownCapture={handleTreePointerDownCapture}>
@@ -909,83 +969,97 @@ export const HostTreeView: React.FC<HostTreeViewProps> = ({
 
       <div
         ref={treeRef}
+        className="relative min-w-0"
+        style={{ height: virtualizer.getTotalSize() }}
+        data-vault-virtual-tree="true"
         role="tree"
         aria-label={t("vault.nav.hosts")}
         aria-multiselectable={isMultiSelectMode || undefined}
         onKeyDownCapture={handleTreeKeyDown}
       >
-      {/* Group tree */}
-      {sortedGroupTree.map((node) => (
-        <TreeNode
-          key={node.path}
-          node={node}
-          depth={0}
-          sortMode={sortMode}
-          expandedPaths={expandedPaths}
-          onToggle={togglePath}
-          onConnect={onConnect}
-          onEditHost={onEditHost}
-          onDuplicateHost={onDuplicateHost}
-          onDeleteHost={onDeleteHost}
-          onCopyCredentials={onCopyCredentials}
-          onNewGroup={onNewGroup}
-          onRenameGroup={onRenameGroup}
-          onEditGroup={onEditGroup}
-          onDeleteGroup={onDeleteGroup}
-          moveHostToGroup={moveHostToGroup}
-          moveGroup={moveGroup}
-          managedGroupPaths={managedGroupPaths}
-          onUnmanageGroup={onUnmanageGroup}
-          commitInlineGroupRename={commitInlineGroupRename}
-          cancelInlineGroupEdit={cancelInlineGroupEdit}
-          isMultiSelectMode={isMultiSelectMode}
-          selectedHostIds={selectedHostIds}
-          selectedGroupPaths={selectedGroupPaths}
-          toggleHostSelection={toggleHostSelection}
-          toggleGroupSelection={toggleGroupSelection}
-          hostClickBehavior={hostClickBehavior}
-          focusedHostId={focusedHostId}
-          onFocusHost={onFocusHost}
-          focusedGroupPath={focusedGroupPath}
-          onFocusGroup={onFocusGroup}
-	          getDropTargetClasses={getDropTargetClasses}
-	          setDragOverDropTarget={setDragOverDropTarget}
-	          groupConfigs={groupConfigs}
-	          groupDefaultsByPath={groupDefaultsByPath}
-	          activeTreeItemKey={activeTreeItemKey}
-	          initialTreeItemKey={initialTreeItemKey}
-	          onActiveTreeItemChange={setActiveTreeItemKey}
-	        />
-      ))}
-
-      {/* Ungrouped hosts at root level */}
-      {ungroupedHosts.map((host) => (
-        <HostTreeItem
-          key={host.id}
-          host={host}
-          depth={0}
-          onConnect={onConnect}
-          onEditHost={onEditHost}
-          onDuplicateHost={onDuplicateHost}
-          onDeleteHost={onDeleteHost}
-          onCopyCredentials={onCopyCredentials}
-          moveHostToGroup={moveHostToGroup}
-          isMultiSelectMode={isMultiSelectMode}
-	          selectedHostIds={selectedHostIds}
-	          toggleHostSelection={toggleHostSelection}
-          hostClickBehavior={hostClickBehavior}
-          focusedHostId={focusedHostId}
-          onFocusHost={(hostId) => {
-            onFocusHost?.(hostId);
-            if (hostId) onFocusGroup?.(null);
-          }}
-	          groupConfigs={groupConfigs}
-	          groupDefaultsByPath={groupDefaultsByPath}
-	          activeTreeItemKey={activeTreeItemKey}
-	          initialTreeItemKey={initialTreeItemKey}
-	          onActiveTreeItemChange={setActiveTreeItemKey}
-	        />
-      ))}
+      {virtualizer.getVirtualItems().map((virtualRow) => {
+        const item = visibleTreeItems[virtualRow.index];
+        if (!item) return null;
+        return (
+          <div
+            key={item.key}
+            data-vault-virtual-tree-row={virtualRow.index}
+            className="absolute left-0 top-0 w-full"
+            style={{
+              height: virtualRow.size,
+              transform: `translateY(${virtualRow.start - scrollMargin}px)`,
+            }}
+          >
+            {item.kind === 'group' ? (
+              <TreeNode
+                node={item.node}
+                depth={item.depth}
+                sortMode={sortMode}
+                expandedPaths={expandedPaths}
+                onToggle={togglePath}
+                onConnect={onConnect}
+                onEditHost={onEditHost}
+                onDuplicateHost={onDuplicateHost}
+                onDeleteHost={onDeleteHost}
+                onCopyCredentials={onCopyCredentials}
+                onNewGroup={onNewGroup}
+                onRenameGroup={onRenameGroup}
+                onEditGroup={onEditGroup}
+                onDeleteGroup={onDeleteGroup}
+                moveHostToGroup={moveHostToGroup}
+                moveGroup={moveGroup}
+                managedGroupPaths={managedGroupPaths}
+                onUnmanageGroup={onUnmanageGroup}
+                commitInlineGroupRename={commitInlineGroupRename}
+                cancelInlineGroupEdit={cancelInlineGroupEdit}
+                isMultiSelectMode={isMultiSelectMode}
+                selectedHostIds={selectedHostIds}
+                selectedGroupPaths={selectedGroupPaths}
+                toggleHostSelection={toggleHostSelection}
+                toggleGroupSelection={toggleGroupSelection}
+                hostClickBehavior={hostClickBehavior}
+                focusedHostId={focusedHostId}
+                onFocusHost={onFocusHost}
+                focusedGroupPath={focusedGroupPath}
+                onFocusGroup={onFocusGroup}
+                getDropTargetClasses={getDropTargetClasses}
+                setDragOverDropTarget={setDragOverDropTarget}
+                groupConfigs={groupConfigs}
+                groupDefaultsByPath={groupDefaultsByPath}
+                activeTreeItemKey={activeTreeItemKey}
+                initialTreeItemKey={initialTreeItemKey}
+                onActiveTreeItemChange={setActiveTreeItemKey}
+                renderDescendants={false}
+              />
+            ) : (
+              <HostTreeItem
+                host={item.host}
+                depth={item.depth}
+                onConnect={onConnect}
+                onEditHost={onEditHost}
+                onDuplicateHost={onDuplicateHost}
+                onDeleteHost={onDeleteHost}
+                onCopyCredentials={onCopyCredentials}
+                moveHostToGroup={moveHostToGroup}
+                isMultiSelectMode={isMultiSelectMode}
+                selectedHostIds={selectedHostIds}
+                toggleHostSelection={toggleHostSelection}
+                hostClickBehavior={hostClickBehavior}
+                focusedHostId={focusedHostId}
+                onFocusHost={(hostId) => {
+                  onFocusHost?.(hostId);
+                  if (hostId) onFocusGroup?.(null);
+                }}
+                groupConfigs={groupConfigs}
+                groupDefaultsByPath={groupDefaultsByPath}
+                activeTreeItemKey={activeTreeItemKey}
+                initialTreeItemKey={initialTreeItemKey}
+                onActiveTreeItemChange={setActiveTreeItemKey}
+              />
+            )}
+          </div>
+        );
+      })}
       </div>
       
       {/* Empty state */}

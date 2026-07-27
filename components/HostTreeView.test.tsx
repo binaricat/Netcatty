@@ -4,7 +4,11 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import type { GroupConfig, GroupNode, Host } from "../types.ts";
-import { getHostTreeDisplayDetails, HostTreeView } from "./HostTreeView.tsx";
+import {
+  buildVisibleHostTreeItems,
+  getHostTreeDisplayDetails,
+  HostTreeView,
+} from "./HostTreeView.tsx";
 
 const baseHost: Host = {
   id: "host-1",
@@ -257,4 +261,68 @@ test("HostTreeView exposes only one tree item in the tab order", () => {
 
   assert.equal(markup.match(/tabindex="0"/g)?.length, 1);
   assert.equal(markup.match(/tabindex="-1"/g)?.length, 1);
+});
+
+test("HostTreeView flattens only expanded group descendants", () => {
+  const childHost = { ...baseHost, id: "child-host", group: "production" };
+  const groupTree = [{
+    name: "Production",
+    path: "production",
+    children: {},
+    hosts: [childHost],
+  }];
+
+  assert.deepEqual(
+    buildVisibleHostTreeItems({
+      groupTree,
+      ungroupedHosts: [baseHost],
+      expandedPaths: new Set(),
+      sortMode: "az",
+      groupConfigs: [],
+    }).map((item) => item.key),
+    ["group:production", "host:host-1"],
+  );
+  assert.deepEqual(
+    buildVisibleHostTreeItems({
+      groupTree,
+      ungroupedHosts: [baseHost],
+      expandedPaths: new Set(["production"]),
+      sortMode: "az",
+      groupConfigs: [],
+    }).map((item) => item.key),
+    ["group:production", "host:child-host", "host:host-1"],
+  );
+});
+
+test("HostTreeView virtualizes an 8,000-host tree", () => {
+  installLocalStorageMock();
+  const hosts = Array.from({ length: 8000 }, (_, index) => ({
+    ...baseHost,
+    id: `host-${index}`,
+    label: `Host ${String(index).padStart(4, "0")}`,
+  }));
+
+  const markup = renderToStaticMarkup(
+    <HostTreeView
+      groupTree={[]}
+      hosts={hosts}
+      onConnect={() => undefined}
+      onEditHost={() => undefined}
+      onDuplicateHost={() => undefined}
+      onDeleteHost={() => undefined}
+      onCopyCredentials={() => undefined}
+      onNewGroup={() => undefined}
+      onRenameGroup={() => undefined}
+      onEditGroup={() => undefined}
+      onDeleteGroup={() => undefined}
+      moveHostToGroup={() => undefined}
+      moveGroup={() => undefined}
+    />,
+  );
+
+  const renderedHosts = markup.match(/data-host-id=/g)?.length ?? 0;
+  assert.ok(renderedHosts > 0);
+  assert.ok(renderedHosts < 100);
+  assert.match(markup, /data-vault-virtual-tree="true"/);
+  assert.match(markup, /height:320000px/);
 });

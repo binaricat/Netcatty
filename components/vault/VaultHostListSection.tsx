@@ -2,6 +2,8 @@
 import React from "react";
 import { HostNotesIndicator } from "../host/HostNotesIndicator";
 import {
+  getNextVirtualHostIndex,
+  getVaultHostColumnCount,
   VirtualizedGroupedHostCollection,
   VirtualizedHostCollection,
 } from "./VirtualizedHostCollection";
@@ -39,7 +41,7 @@ const isRelatedTargetInside = (
 };
 
 export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext }) {
-  const { Badge, Boolean, Button, cancelInlineGroupEdit, CheckSquare, ClipboardCopy, Clock, cn, commitInlineGroupRename, ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger, Copy, displayedGroups, displayedHosts, DistroAvatar, Edit2, FileSymlink, FolderPlus, FolderTree, getDropTargetClasses, getEffectiveHostDistro, groupConfigs, groupedDisplayHosts, handleCopyCredentials, handleDuplicateHost, handleEditGroupConfig, handleEditHost, handleHostConnect, hostClickBehavior: hostClickBehaviorProp, handleUnmanageGroup, hasHostsSidePanel, hostListScrollRef, HostTreeView, isHostsSectionActive, isMultiSelectMode, lastPinnedId, LayoutGrid, managedGroupPaths, moveGroup, moveHostToGroup, onDeleteHost, Pin, pinnedHosts, Plug, recentHosts, reorderGroup, reorderHost, sanitizeHost, selectedGroupPath, selectedGroupPaths, selectedHostIds, sessionCount, setDeleteTargetPath, setDragOverDropTarget, setGroupDragOverDropTarget, setIsDeleteGroupOpen, setIsNewFolderOpen, setLastPinnedId, setNewFolderName, setSelectedGroupPath, setTargetParentPath, shouldHideEmptyRootHostsSection, showRecentHosts, sortMode, splitViewGridStyle, Square, Star, startInlineDeleteGroup, startInlineNewGroup, startInlineRenameGroup, t, toggleGroupSelection, toggleHostPinned, toggleHostSelection, Trash2, treeExpandedState, treeViewGroupTree, treeViewHosts, viewMode, visibleDisplayedHosts } = ctx;
+  const { Badge, Boolean, Button, cancelInlineGroupEdit, CheckSquare, ClipboardCopy, Clock, cn, commitInlineGroupRename, ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger, Copy, displayedGroups, displayedHosts, DistroAvatar, Edit2, FileSymlink, FolderPlus, FolderTree, getDropTargetClasses, getEffectiveHostDistro, groupConfigs, groupedDisplayHosts, handleCopyCredentials, handleDuplicateHost, handleEditGroupConfig, handleEditHost, handleHostConnect, hostClickBehavior: hostClickBehaviorProp, handleUnmanageGroup, hasHostsSidePanel, hostListScrollRef, HostTreeView, isHostsSectionActive, isMultiSelectMode, lastPinnedId, LayoutGrid, managedGroupPaths, moveGroup, moveHostToGroup, onDeleteHost, Pin, pinnedHosts, Plug, recentHosts, reorderGroup, reorderHost, sanitizeHost, search, selectedGroupPath, selectedGroupPaths, selectedHostIds, sessionCount, setDeleteTargetPath, setDragOverDropTarget, setGroupDragOverDropTarget, setIsDeleteGroupOpen, setIsNewFolderOpen, setLastPinnedId, setNewFolderName, setSelectedGroupPath, setTargetParentPath, shouldHideEmptyRootHostsSection, showRecentHosts, sortMode, splitViewGridStyle, Square, Star, startInlineDeleteGroup, startInlineNewGroup, startInlineRenameGroup, t, toggleGroupSelection, toggleHostPinned, toggleHostSelection, Trash2, treeExpandedState, treeViewGroupTree, treeViewHosts, viewMode, visibleDisplayedHosts } = ctx;
   const hostClickBehavior: HostClickBehavior = hostClickBehaviorProp === 'select' ? 'select' : 'connect';
   const multiSelectedGroupPaths: Set<string> = selectedGroupPaths ?? new Set();
   const [draggingHostId, setDraggingHostId] = React.useState<string | null>(null);
@@ -564,17 +566,29 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
                                       return;
                                     }
                                     const index = recentHosts.findIndex((item) => item.id === host.id);
+                                    const nextIndex = getNextVirtualHostIndex({
+                                      currentIndex: index,
+                                      itemCount: recentHosts.length,
+                                      columns: getVaultHostColumnCount(
+                                        hostListScrollRef.current?.clientWidth ?? 0,
+                                        viewMode,
+                                      ),
+                                      viewMode,
+                                      key: event.key,
+                                    });
+                                    if (nextIndex === null) return;
+                                    event.preventDefault();
+                                    const nextHost = recentHosts[nextIndex];
+                                    if (nextIndex !== index && nextHost) {
+                                      focusHostAndElement(nextHost);
+                                      return;
+                                    }
                                     const direction = event.key === "ArrowUp" || event.key === "ArrowLeft"
                                       ? "previous"
                                       : event.key === "ArrowDown" || event.key === "ArrowRight"
                                         ? "next"
                                         : null;
-                                    if (!direction) return;
-                                    event.preventDefault();
-                                    const nextIndex = index + (direction === "next" ? 1 : -1);
-                                    const nextHost = recentHosts[nextIndex];
-                                    if (nextHost) focusHostAndElement(nextHost);
-                                    else navigateHostSection("recent", direction);
+                                    if (direction) navigateHostSection("recent", direction);
                                   }}
                                 >
                                   <div className="flex items-center gap-3 h-full">
@@ -864,9 +878,11 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
 	                      getDropTargetClasses={(path) =>
 	                        getDropTargetClasses({ kind: "group", path })
 	                      }
-	                      setDragOverDropTarget={setGroupDragOverDropTarget}
-	                      groupConfigs={groupConfigs}
-	                    />
+                      setDragOverDropTarget={setGroupDragOverDropTarget}
+                      groupConfigs={groupConfigs}
+                      scrollRef={hostListScrollRef}
+                      expandAllGroups={Boolean(search?.trim())}
+                    />
 	                  ) : sortMode === "group" && groupedDisplayHosts ? (
 	                    <>
 	                        <VirtualizedGroupedHostCollection<Host>

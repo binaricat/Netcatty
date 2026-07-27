@@ -282,6 +282,24 @@ export const useVaultState = () => {
   const identitiesWritePendingRef = useRef<Promise<unknown>>(Promise.resolve());
   const groupConfigsWritePendingRef = useRef<Promise<unknown>>(Promise.resolve());
 
+  const waitForPendingVaultWrites = useCallback(async () => {
+    while (true) {
+      const pending = [
+        hostsWritePendingRef.current,
+        keysWritePendingRef.current,
+        identitiesWritePendingRef.current,
+        groupConfigsWritePendingRef.current,
+      ];
+      await Promise.all(pending);
+      if (
+        pending[0] === hostsWritePendingRef.current
+        && pending[1] === keysWritePendingRef.current
+        && pending[2] === identitiesWritePendingRef.current
+        && pending[3] === groupConfigsWritePendingRef.current
+      ) return;
+    }
+  }, []);
+
   // Read-sequence counters for cross-window storage events.  Each incoming
   // event bumps the counter; the async decrypt callback only applies state if
   // its sequence still matches, preventing stale decrypts from overwriting
@@ -387,7 +405,7 @@ export const useVaultState = () => {
   }, []);
 
   const readPersistedHosts = useCallback(async (): Promise<Host[]> => {
-    await hostsWritePendingRef.current;
+    await waitForPendingVaultWrites();
     while (true) {
       const rawHosts = localStorageAdapter.readString(STORAGE_KEY_HOSTS);
       const storedHosts = readStoredArray<Host>(STORAGE_KEY_HOSTS, rawHosts);
@@ -395,7 +413,7 @@ export const useVaultState = () => {
       if (localStorageAdapter.readString(STORAGE_KEY_HOSTS) !== rawHosts) continue;
       return normalizeVaultOrder(decrypted.map((host) => sanitizeHost(host)));
     }
-  }, []);
+  }, [waitForPendingVaultWrites]);
 
   const updateKeys = useCallback((data: SSHKey[]) => {
     const cleaned = normalizeVaultOrder(data);
@@ -552,7 +570,13 @@ export const useVaultState = () => {
     | { status: "persisted"; groups: string[]; sources: ManagedSource[] }
     | { status: "superseded" }
   > => {
-    await groupConfigsWritePendingRef.current;
+    const version = hostsWriteVersion.current;
+    const groupConfigsVersion = groupConfigsWriteVersion.current;
+    await waitForPendingVaultWrites();
+    if (
+      version !== hostsWriteVersion.current
+      || groupConfigsVersion !== groupConfigsWriteVersion.current
+    ) return { status: "superseded" };
     const cleanedHosts = normalizeVaultOrder(nextHosts.map((host) => sanitizeHost(host)));
     const baselineRaw = new Map([
       [STORAGE_KEY_HOSTS, localStorageAdapter.readString(STORAGE_KEY_HOSTS)],
@@ -572,14 +596,13 @@ export const useVaultState = () => {
       STORAGE_KEY_GROUP_CONFIGS,
       baselineRaw.get(STORAGE_KEY_GROUP_CONFIGS) ?? null,
     );
-    const version = hostsWriteVersion.current;
-    const groupConfigsVersion = groupConfigsWriteVersion.current;
     const latestGroupConfigs = await decryptGroupConfigs(storedGroupConfigs);
     const nextGroupConfigs = buildGroupConfigsForGroups(groups, latestGroupConfigs);
     const [encryptedHosts, encryptedGroupConfigs] = await Promise.all([
       encryptHosts(cleanedHosts),
       encryptGroupConfigs(nextGroupConfigs),
     ]);
+    await waitForPendingVaultWrites();
     if (
       version !== hostsWriteVersion.current
       || groupConfigsVersion !== groupConfigsWriteVersion.current
@@ -606,7 +629,7 @@ export const useVaultState = () => {
     setManagedSources(result.sources);
     setGroupConfigs(nextGroupConfigs);
     return { status: "persisted", groups: result.groups, sources: result.sources };
-  }, []);
+  }, [waitForPendingVaultWrites]);
 
   const updateGroupConfigs = useCallback((data: GroupConfig[]) => {
     // Sanitize on the write path too — applySyncPayload / importVaultData
@@ -1258,13 +1281,16 @@ export const useVaultState = () => {
     drafts,
     destination,
   }: PluginImporterCommitRequest): Promise<number> => withVaultImportLock("vault", async () => {
-    await Promise.all([
-      hostsWritePendingRef.current,
-      keysWritePendingRef.current,
-      identitiesWritePendingRef.current,
-      groupConfigsWritePendingRef.current,
-    ]);
     while (true) {
+      await waitForPendingVaultWrites();
+      const writeVersions = {
+        hosts: hostsWriteVersion.current,
+        keys: keysWriteVersion.current,
+        identities: identitiesWriteVersion.current,
+        snippets: snippetsWriteVersion.current,
+        groups: customGroupsWriteVersion.current,
+        groupConfigs: groupConfigsWriteVersion.current,
+      };
       const raw = new Map(
         [...PLUGIN_IMPORT_TRANSACTION_KEYS].map((key) => [key, localStorageAdapter.readString(key)]),
       );
@@ -1338,8 +1364,17 @@ export const useVaultState = () => {
         encryptIdentities(nextIdentities),
         encryptGroupConfigs(nextGroupConfigs),
       ]);
-      const changedWhilePreparing = [...PLUGIN_IMPORT_TRANSACTION_KEYS].some(
+      await waitForPendingVaultWrites();
+      const changedWhilePreparing = (
+        writeVersions.hosts !== hostsWriteVersion.current
+        || writeVersions.keys !== keysWriteVersion.current
+        || writeVersions.identities !== identitiesWriteVersion.current
+        || writeVersions.snippets !== snippetsWriteVersion.current
+        || writeVersions.groups !== customGroupsWriteVersion.current
+        || writeVersions.groupConfigs !== groupConfigsWriteVersion.current
+        || [...PLUGIN_IMPORT_TRANSACTION_KEYS].some(
         (key) => localStorageAdapter.readString(key) !== raw.get(key),
+        )
       );
       if (changedWhilePreparing) continue;
 
@@ -1366,7 +1401,7 @@ export const useVaultState = () => {
       setGroupConfigs(nextGroupConfigs);
       return committed.addedCount;
     }
-  }), []);
+  }), [waitForPendingVaultWrites]);
 
   const importDataFromString = useCallback(
     (jsonString: string): Promise<void> => {

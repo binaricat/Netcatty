@@ -1096,6 +1096,7 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
                 reorderGroup,
                 reorderHost,
                 sanitizeHost,
+                search,
                 selectedGroupPath,
                 selectedGroupPaths,
                 selectedHostIds,
