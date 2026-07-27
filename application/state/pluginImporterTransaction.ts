@@ -74,6 +74,9 @@ export function commitPluginImporterTransaction(
   storage: TransactionStorage,
   writes: ReadonlyArray<readonly [key: string, value: unknown]>,
 ): void {
+  if (storage.readString(STORAGE_KEY_PLUGIN_IMPORT_TRANSACTION) !== null) {
+    throw new Error('An unfinished Vault import recovery record already exists');
+  }
   const keys = new Set(writes.map(([key]) => key));
   if (keys.size !== writes.length || keys.has(STORAGE_KEY_PLUGIN_IMPORT_TRANSACTION)) {
     throw new Error('Vault importer transaction keys are invalid');

@@ -84,6 +84,25 @@ test('Vault importer transaction rejects writes that do not actually persist', (
   assert.deepEqual(target.read('hosts'), ['old']);
 });
 
+test('Vault importer transaction preserves an unfinished recovery record', () => {
+  const recoveryRecord = JSON.stringify({
+    version: 1,
+    phase: 'prepared',
+    previous: [{ key: 'hosts', value: JSON.stringify(['old']) }],
+  });
+  const target = storage({
+    hosts: JSON.stringify(['partial']),
+    [STORAGE_KEY_PLUGIN_IMPORT_TRANSACTION]: recoveryRecord,
+  });
+
+  assert.throws(
+    () => commitPluginImporterTransaction(target, [['hosts', ['new']]]),
+    /unfinished Vault import recovery record/,
+  );
+  assert.equal(target.readString(STORAGE_KEY_PLUGIN_IMPORT_TRANSACTION), recoveryRecord);
+  assert.deepEqual(target.read('hosts'), ['partial']);
+});
+
 test('plugin importer recovery keeps fully committed values', () => {
   const target = storage({ hosts: JSON.stringify(['new']) });
   target.write(STORAGE_KEY_PLUGIN_IMPORT_TRANSACTION, { version: 1, phase: 'committed' });
