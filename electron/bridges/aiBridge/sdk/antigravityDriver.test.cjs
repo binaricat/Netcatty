@@ -2,285 +2,335 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const { EventEmitter } = require("node:events");
 const { PassThrough } = require("node:stream");
-const fs = require("node:fs");
-const path = require("node:path");
-const { spawnSync } = require("node:child_process");
-const tempDirBridge = require("../../tempDirBridge.cjs");
-const { buildPythonInvocationArgs } = require("./pythonLauncher.cjs");
 const {
-  buildAntigravityWorkerRequest,
-  cleanupAntigravityChatStorage,
-  getAntigravityChatStorageRoot,
-  isAntigravitySessionStorageReady,
-  resolveAntigravityWorkerPath,
-  resolveAntigravityStorageDirs,
+  buildAntigravityCliArgs,
+  formatAntigravityCliFailure,
+  getAntigravityPromptByteLimit,
+  listAntigravityModels,
   runAntigravityTurn,
-  translateAntigravityWorkerEvent,
+  signalAntigravityProcessTree,
 } = require("./antigravityDriver.cjs");
 
-test("resolveAntigravityWorkerPath points packaged builds at the unpacked Python worker", () => {
-  assert.equal(
-    resolveAntigravityWorkerPath("/Applications/Netcatty.app/Contents/Resources/app.asar/electron/bridges/aiBridge/sdk"),
-    "/Applications/Netcatty.app/Contents/Resources/app.asar.unpacked/electron/bridges/aiBridge/sdk/antigravity_worker.py",
-  );
-  assert.equal(
-    resolveAntigravityWorkerPath("/workspace/electron/bridges/aiBridge/sdk"),
-    "/workspace/electron/bridges/aiBridge/sdk/antigravity_worker.py",
-  );
-});
-
-test("Windows py launcher selects Python 3 for the SDK worker", () => {
-  assert.deepEqual(
-    buildPythonInvocationArgs("C:\\Windows\\py.exe", ["C:\\app\\antigravity_worker.py"], "win32"),
-    ["-3", "C:\\app\\antigravity_worker.py"],
-  );
-});
-
-test("Antigravity storage is isolated per chat and removed with chat cleanup", (t) => {
-  const firstChat = `antigravity-storage-a-${process.pid}-${Date.now()}`;
-  const secondChat = `antigravity-storage-b-${process.pid}-${Date.now()}`;
-  t.after(() => {
-    cleanupAntigravityChatStorage(firstChat);
-    cleanupAntigravityChatStorage(secondChat);
-  });
-
-  assert.notEqual(
-    getAntigravityChatStorageRoot(firstChat),
-    getAntigravityChatStorageRoot(secondChat),
-  );
-  assert.equal(isAntigravitySessionStorageReady(firstChat), false);
-  const dirs = resolveAntigravityStorageDirs(firstChat);
-  assert.equal(isAntigravitySessionStorageReady(firstChat), true);
-  assert.equal(fs.existsSync(dirs.saveDir), true);
-  assert.equal(fs.existsSync(dirs.appDataDir), true);
-  cleanupAntigravityChatStorage(firstChat);
-  assert.equal(isAntigravitySessionStorageReady(firstChat), false);
-});
-
-function collector() {
-  const events = [];
+function makeEmitter() {
+  const calls = [];
   return {
-    events,
-    emitter: {
-      text: (text) => events.push({ type: "text", text }),
-      reasoning: (text) => events.push({ type: "reasoning", text }),
-      reasoningEnd: () => events.push({ type: "reasoning-end" }),
-      toolCall: (name, args, id) => events.push({ type: "tool-call", name, args, id }),
-      toolResult: (id, output, name) => events.push({ type: "tool-result", id, output, name }),
-      usage: (usage) => events.push({ type: "usage", usage }),
-      sessionId: (id) => events.push({ type: "session-id", id }),
-      status: (message) => events.push({ type: "status", message }),
-    },
+    calls,
+    text: (value) => calls.push(["text", value]),
+    status: (value) => calls.push(["status", value]),
+    emitDone: () => calls.push(["done"]),
   };
 }
 
-test("buildAntigravityWorkerRequest disables direct local tools in MCP mode", () => {
-  assert.deepEqual(buildAntigravityWorkerRequest({
-    prompt: "inspect the host",
-    cwd: "/workspace",
-    permissionMode: "confirm",
-    toolIntegrationMode: "mcp",
-    saveDir: "/managed/temp/antigravity/sessions",
-    appDataDir: "/managed/temp/antigravity/app-data",
-    resumeSessionId: "12345678-1234-1234-1234-123456789abc",
-    attachments: [{ filePath: "/tmp/screenshot.png", mediaType: "image/png", filename: "screenshot.png" }],
-    injectedMcpServers: [{
-      name: "netcatty",
-      command: "/app/electron",
-      args: ["/app/netcatty-mcp-server.cjs"],
-      env: [{ name: "NETCATTY_MCP_PORT", value: "4321" }],
-    }],
-  }), {
-    type: "turn",
-    prompt: "inspect the host",
-    cwd: "/workspace",
-    permissionMode: "confirm",
-    toolIntegrationMode: "mcp",
-    saveDir: "/managed/temp/antigravity/sessions",
-    appDataDir: "/managed/temp/antigravity/app-data",
-    conversationId: "12345678-1234-1234-1234-123456789abc",
-    attachments: [{ path: "/tmp/screenshot.png", mediaType: "image/png", filename: "screenshot.png" }],
-    mcpServers: [{
-      name: "netcatty",
-      command: "/app/electron",
-      args: ["/app/netcatty-mcp-server.cjs"],
-      env: { NETCATTY_MCP_PORT: "4321" },
-    }],
-  });
-});
+function fakeChild(pid = 4242) {
+  const child = new EventEmitter();
+  child.pid = pid;
+  child.stdout = new PassThrough();
+  child.stderr = new PassThrough();
+  child.killed = false;
+  child.kill = (signal) => {
+    child.killed = true;
+    child.killSignal = signal;
+    return true;
+  };
+  return child;
+}
 
-test("translateAntigravityWorkerEvent maps the official SDK stream to Netcatty events", () => {
-  const { events, emitter } = collector();
-  translateAntigravityWorkerEvent({ type: "text", text: "hello" }, emitter);
-  translateAntigravityWorkerEvent({ type: "reasoning", text: "thinking" }, emitter);
-  translateAntigravityWorkerEvent({ type: "tool_call", id: "call-1", name: "netcatty_terminal_execute", args: { command: "pwd" } }, emitter);
-  translateAntigravityWorkerEvent({ type: "tool_result", id: "call-1", name: "netcatty_terminal_execute", output: { ok: true } }, emitter);
-  translateAntigravityWorkerEvent({ type: "usage", inputTokens: 11, cachedInputTokens: 2, outputTokens: 7, reasoningTokens: 3, totalTokens: 21 }, emitter);
-  translateAntigravityWorkerEvent({ type: "session_id", sessionId: "session-1" }, emitter);
+test("buildAntigravityCliArgs maps Netcatty permission modes without unsafe defaults", () => {
+  assert.deepEqual(buildAntigravityCliArgs({
+    prompt: "inspect",
+    model: "gemini-3-pro",
+    permissionMode: "observer",
+    cwd: "/workspace",
+  }), [
+    "--print=inspect", "--print-timeout", "5m", "--model", "gemini-3-pro",
+    "--add-dir", "/workspace", "--mode", "plan", "--sandbox",
+  ]);
 
-  assert.deepEqual(events, [
-    { type: "text", text: "hello" },
-    { type: "reasoning", text: "thinking" },
-    { type: "tool-call", name: "netcatty_terminal_execute", args: { command: "pwd" }, id: "call-1" },
-    { type: "tool-result", id: "call-1", output: { ok: true }, name: "netcatty_terminal_execute" },
-    { type: "usage", usage: { inputTokens: 11, cachedInputTokens: 2, outputTokens: 7, reasoningTokens: 3, totalTokens: 21 } },
-    { type: "session-id", id: "session-1" },
+  assert.deepEqual(buildAntigravityCliArgs({
+    prompt: "inspect",
+    permissionMode: "confirm",
+    cwd: "/workspace",
+  }), ["--print=inspect", "--print-timeout", "5m", "--add-dir", "/workspace", "--mode", "plan", "--sandbox"]);
+
+  assert.deepEqual(buildAntigravityCliArgs({
+    prompt: "change it",
+    permissionMode: "auto",
+  }), [
+    "--print=change it", "--print-timeout", "5m",
+    "--dangerously-skip-permissions",
   ]);
 });
 
-test("runAntigravityTurn starts the SDK worker, streams JSONL, and returns its session", async () => {
-  const child = new EventEmitter();
-  child.stdout = new PassThrough();
-  child.stderr = new PassThrough();
-  child.stdin = new PassThrough();
-  child.kill = () => true;
-  const writes = [];
-  child.stdin.on("data", (chunk) => writes.push(chunk.toString()));
-  const spawned = [];
-  const { events, emitter } = collector();
+test("buildAntigravityCliArgs rejects prompts too large for argv", () => {
+  assert.throws(
+    () => buildAntigravityCliArgs({ prompt: "x".repeat(300_000) }),
+    /too large/i,
+  );
+});
 
+test("Windows command shims use a cmd.exe-safe prompt budget", () => {
+  assert.equal(getAntigravityPromptByteLimit("C:\\npm\\agy.cmd"), 5 * 1024);
+  assert.equal(getAntigravityPromptByteLimit("C:\\bin\\agy.exe"), 24 * 1024);
+  assert.doesNotThrow(() => buildAntigravityCliArgs({
+    binPath: "C:\\npm\\agy.cmd",
+    prompt: "x".repeat(5 * 1024),
+  }));
+  assert.throws(() => buildAntigravityCliArgs({
+    binPath: "C:\\npm\\agy.cmd",
+    prompt: "x".repeat((5 * 1024) + 1),
+  }), /maximum 5120/);
+  assert.throws(() => buildAntigravityCliArgs({
+    binPath: "C:\\project\\node_modules\\.bin\\agy.cmd",
+    prompt: "&%!^".repeat(1000),
+  }), /Windows command-shell characters/);
+});
+
+test("runAntigravityTurn closes stdin, captures the final response, and emits done", async () => {
+  const child = fakeChild();
+  const emitter = makeEmitter();
+  const observed = [];
+  const writtenConfigs = [];
+  const cleaned = [];
   const turn = runAntigravityTurn({
     prompt: "hello",
     cwd: "/workspace",
-    env: { GEMINI_API_KEY: "secret" },
-    pythonPath: "/usr/bin/python3",
-    injectedMcpServers: [],
-    toolIntegrationMode: "mcp",
-    permissionMode: "observer",
-    chatSessionId: "chat-123",
+    model: "gemini-3-pro",
+    permissionMode: "confirm",
+    env: { PATH: "/bin" },
+    binPath: "/usr/local/bin/agy",
     emitter,
+    injectedMcpServers: [],
   }, {
-    workerPath: "/app/antigravity_worker.py",
-    resolveStorageDirs() {
-      return {
-        saveDir: "/managed/temp/antigravity/sessions",
-        appDataDir: "/managed/temp/antigravity/app-data",
-      };
-    },
     spawn(command, args, options) {
-      spawned.push({ command, args, options });
+      observed.push({ command, args, options });
       return child;
+    },
+    timeoutMs: 1000,
+    createTurnDirectory: () => "/netcatty-temp/agy-turn-1",
+    writeMcpConfig: (dir, servers) => writtenConfigs.push({ dir, servers }),
+    cleanupTurnDirectory: (dir) => cleaned.push(dir),
+  });
+
+  await new Promise((resolve) => setImmediate(resolve));
+  child.stdout.write("Hello from Agy\n");
+  child.stderr.end();
+  child.stdout.end();
+  child.emit("close", 0, null);
+
+  assert.deepEqual(await turn, { sessionId: null });
+  assert.deepEqual(observed, [{
+    command: "/usr/local/bin/agy",
+    args: ["--print=hello", "--print-timeout", "5m", "--model", "gemini-3-pro", "--add-dir", "/workspace", "--mode", "plan", "--sandbox"],
+    options: {
+      cwd: "/netcatty-temp/agy-turn-1",
+      env: { PATH: "/bin" },
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
+      detached: true,
+    },
+  }]);
+  assert.deepEqual(writtenConfigs, [{ dir: "/netcatty-temp/agy-turn-1", servers: [] }]);
+  assert.deepEqual(cleaned, ["/netcatty-temp/agy-turn-1"]);
+  assert.deepEqual(emitter.calls, [["text", "Hello from Agy\n"], ["done"]]);
+});
+
+test("runAntigravityTurn reports stderr and does not emit partial stdout on failure", async () => {
+  const child = fakeChild();
+  const emitter = makeEmitter();
+  const turn = runAntigravityTurn({
+    prompt: "hello",
+    cwd: "/workspace",
+    binPath: "/bin/agy",
+    emitter,
+  }, { spawn: () => child, timeoutMs: 1000 });
+
+  await new Promise((resolve) => setImmediate(resolve));
+  child.stdout.end("partial answer");
+  child.stderr.end("permission confirmation required");
+  child.emit("close", 1, null);
+
+  await assert.rejects(turn, /permission confirmation required/);
+  assert.deepEqual(emitter.calls, []);
+});
+
+test("runAntigravityTurn times out and terminates the full process tree", async () => {
+  const child = fakeChild();
+  const signals = [];
+  const turn = runAntigravityTurn({
+    prompt: "hang",
+    binPath: "/bin/agy",
+    emitter: makeEmitter(),
+  }, {
+    spawn: () => child,
+    timeoutMs: 5,
+    killGraceMs: 5,
+    signalProcessTree(_child, signal) {
+      signals.push(signal);
+      if (signal === "SIGTERM") child.emit("close", null, "SIGTERM");
+    },
+  });
+
+  await assert.rejects(turn, /timed out/i);
+  assert.deepEqual(signals, ["SIGTERM", "SIGKILL"]);
+});
+
+test("runAntigravityTurn terminates immediately when captured output is too large", async () => {
+  const child = fakeChild();
+  const signals = [];
+  const turn = runAntigravityTurn({
+    prompt: "large output", binPath: "/bin/agy", emitter: makeEmitter(),
+  }, {
+    spawn: () => child,
+    timeoutMs: 1000,
+    killGraceMs: 5,
+    maxOutputBytes: 4,
+    signalProcessTree(_child, signal) {
+      signals.push(signal);
+      child.emit("close", null, signal);
+    },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  child.stdout.write("12345");
+  await assert.rejects(turn, /capture limit/i);
+  assert.deepEqual(signals, ["SIGTERM", "SIGKILL"]);
+});
+
+test("runAntigravityTurn treats user cancellation as a soft stop", async () => {
+  const child = fakeChild();
+  const emitter = makeEmitter();
+  const controller = new AbortController();
+  const signals = [];
+  const turn = runAntigravityTurn({
+    prompt: "stop",
+    binPath: "/bin/agy",
+    emitter,
+    signal: controller.signal,
+  }, {
+    spawn: () => child,
+    timeoutMs: 1000,
+    killGraceMs: 5,
+    signalProcessTree(_child, signal) {
+      signals.push(signal);
+      child.emit("close", null, signal);
     },
   });
 
   await new Promise((resolve) => setImmediate(resolve));
-  child.stdout.write('{"type":"session_id","sessionId":"session-123"}\n');
-  child.stdout.write('{"type":"text","text":"Hi"}\n');
-  child.stdout.write('{"type":"done"}\n');
-  child.stdout.end();
-  child.emit("close", 0, null);
-
-  assert.deepEqual(await turn, { sessionId: "session-123" });
-  assert.deepEqual(spawned, [{
-    command: "/usr/bin/python3",
-    args: ["/app/antigravity_worker.py"],
-    options: {
-      cwd: "/workspace",
-      env: { GEMINI_API_KEY: "secret" },
-      stdio: ["pipe", "pipe", "pipe"],
-      windowsHide: true,
-    },
-  }]);
-  assert.equal(JSON.parse(writes.join("")).prompt, "hello");
-  assert.equal(JSON.parse(writes.join("")).saveDir, "/managed/temp/antigravity/sessions");
-  assert.equal(JSON.parse(writes.join("")).appDataDir, "/managed/temp/antigravity/app-data");
-  assert.deepEqual(events, [
-    { type: "session-id", id: "session-123" },
-    { type: "text", text: "Hi" },
-  ]);
+  controller.abort();
+  assert.deepEqual(await turn, { sessionId: null });
+  assert.deepEqual(signals, ["SIGTERM", "SIGKILL"]);
+  assert.deepEqual(emitter.calls, []);
 });
 
-test("Python worker completes MCP activities from the official receive_steps contract", (t) => {
-  const python = [process.env.PYTHON, "python3", "python"]
-    .filter(Boolean)
-    .find((candidate) => spawnSync(candidate, ["--version"], { stdio: "ignore" }).status === 0);
-  if (!python) return t.skip("Python is not available");
-
-  const netcattyTempDir = tempDirBridge.getTempDir();
-  const fakeRoot = fs.mkdtempSync(path.join(netcattyTempDir, "antigravity-worker-test-"));
-  assert.equal(path.relative(netcattyTempDir, fakeRoot).startsWith(".."), false);
-  t.after(() => fs.rmSync(fakeRoot, { recursive: true, force: true }));
-  const packageRoot = path.join(fakeRoot, "google", "antigravity");
-  fs.mkdirSync(path.join(packageRoot, "hooks"), { recursive: true });
-  fs.writeFileSync(path.join(fakeRoot, "google", "__init__.py"), "");
-  fs.writeFileSync(path.join(packageRoot, "hooks", "__init__.py"), "");
-  fs.writeFileSync(path.join(packageRoot, "hooks", "policy.py"), "def allow_all(): return 'allow-all'\n");
-  fs.writeFileSync(path.join(packageRoot, "types.py"), `
-from enum import Enum
-from types import SimpleNamespace
-class BuiltinTools:
-  @staticmethod
-  def none(): return []
-class CapabilitiesConfig:
-  def __init__(self, enabled_tools=None): self.enabled_tools = enabled_tools
-class McpStdioServer:
-  def __init__(self, **kwargs): self.kwargs = kwargs
-class SessionContinuationMode:
-  CREATE_OR_RESUME = "create_or_resume"
-class StepSource(Enum):
-  MODEL = "MODEL"
-class StepTarget(Enum):
-  USER = "TARGET_USER"
-  ENVIRONMENT = "TARGET_ENVIRONMENT"
-class StepStatus(Enum):
-  ACTIVE = "ACTIVE"
-  DONE = "DONE"
-  ERROR = "ERROR"
-  CANCELED = "CANCELED"
-class ToolCall:
-  def __init__(self, id, name, args): self.id, self.name, self.args = id, name, args
-def from_file(file_path): return file_path
-`);
-  fs.writeFileSync(path.join(packageRoot, "__init__.py"), `
-from types import SimpleNamespace
-from . import types
-class LocalAgentConfig:
-  def __init__(self, **kwargs):
-    assert kwargs["save_dir"].endswith("sessions")
-    assert kwargs["app_data_dir"].endswith("app-data")
-class Conversation:
-  conversation_id = "12345678-1234-1234-1234-123456789abc"
-  async def send(self, prompt): pass
-  async def receive_steps(self):
-    call = types.ToolCall("call-1", "netcatty_terminal_execute", {"command": "pwd"})
-    base = dict(thinking_delta="", content_delta="", tool_calls=[call], error="", usage_metadata=None, id="step-1")
-    yield SimpleNamespace(source=types.StepSource.MODEL, target=types.StepTarget.ENVIRONMENT, status=types.StepStatus.ACTIVE, **{**base, "thinking_delta": "thinking"})
-    yield SimpleNamespace(source=types.StepSource.MODEL, target=types.StepTarget.ENVIRONMENT, status=types.StepStatus.DONE, **base)
-    usage = SimpleNamespace(prompt_token_count=3, cached_content_token_count=1, candidates_token_count=2, thoughts_token_count=0, total_token_count=5)
-    yield SimpleNamespace(source=types.StepSource.MODEL, target=types.StepTarget.USER, status=types.StepStatus.DONE, thinking_delta="", content_delta="done", tool_calls=[], error="", usage_metadata=usage, id="step-2")
-class Agent:
-  def __init__(self, config): self.conversation = Conversation()
-  @property
-  def conversation_id(self): return self.conversation.conversation_id
-  async def __aenter__(self): return self
-  async def __aexit__(self, *args): pass
-`);
-
-  const request = {
-    type: "turn",
-    prompt: "run pwd",
-    cwd: fakeRoot,
-    saveDir: path.join(fakeRoot, "sessions"),
-    appDataDir: path.join(fakeRoot, "app-data"),
-    mcpServers: [{ name: "netcatty", command: "netcatty-mcp", args: [], env: {} }],
-  };
-  const result = spawnSync(python, [path.join(__dirname, "antigravity_worker.py")], {
-    input: `${JSON.stringify(request)}\n`,
-    encoding: "utf8",
-    env: { ...process.env, PYTHONPATH: fakeRoot },
+test("listAntigravityModels parses model ids and supports cancellation", async () => {
+  const child = fakeChild();
+  const controller = new AbortController();
+  const result = listAntigravityModels({
+    binPath: "/bin/agy", env: { PATH: "/bin" }, signal: controller.signal,
+  }, { spawn: () => child, timeoutMs: 1000 });
+  await new Promise((resolve) => setImmediate(resolve));
+  child.stdout.end("gemini-3.6-flash-high\nclaude-sonnet-4-6\n");
+  child.stderr.end();
+  child.emit("close", 0, null);
+  assert.deepEqual(await result, {
+    currentModelId: null,
+    models: [
+      { id: "gemini-3.6-flash-high", name: "gemini-3.6-flash-high" },
+      { id: "claude-sonnet-4-6", name: "claude-sonnet-4-6" },
+    ],
   });
-  assert.equal(result.status, 0, result.stderr || result.stdout);
-  const events = result.stdout.trim().split(/\r?\n/).map((line) => JSON.parse(line));
-  assert.equal(events.filter((event) => event.type === "tool_call").length, 1);
-  const reasoningEndIndex = events.findIndex((event) => event.type === "reasoning_end");
-  const toolCallIndex = events.findIndex((event) => event.type === "tool_call");
-  assert.equal(reasoningEndIndex, toolCallIndex - 1);
-  assert.deepEqual(events.find((event) => event.type === "tool_result"), {
-    type: "tool_result",
-    id: "call-1",
-    name: "netcatty_terminal_execute",
-    output: { status: "DONE" },
+});
+
+test("listAntigravityModels returns promptly when cancelled", async () => {
+  const child = fakeChild();
+  const controller = new AbortController();
+  const result = listAntigravityModels({
+    binPath: "/bin/agy", signal: controller.signal,
+  }, {
+    spawn: () => child,
+    timeoutMs: 1000,
+    killGraceMs: 5,
+    signalProcessTree(_child, signal) {
+      child.kill(signal);
+      child.emit("close", null, signal);
+    },
   });
-  assert.equal(events.find((event) => event.type === "text").text, "done");
-  assert.equal(events.at(-1).type, "done");
+  controller.abort();
+  assert.deepEqual(await result, { currentModelId: null, models: [] });
+  assert.equal(child.killSignal, "SIGKILL");
+});
+
+test("signalAntigravityProcessTree targets the POSIX process group", async () => {
+  const signals = [];
+  await signalAntigravityProcessTree(fakeChild(4321), "SIGTERM", {
+    platform: "linux",
+    kill(pid, signal) { signals.push([pid, signal]); },
+  });
+  assert.deepEqual(signals, [[-4321, "SIGTERM"]]);
+});
+
+test("signalAntigravityProcessTree uses taskkill for a Windows process tree", async () => {
+  const calls = [];
+  await signalAntigravityProcessTree(fakeChild(4321), "SIGKILL", {
+    platform: "win32",
+    execFile(command, args, options, callback) {
+      calls.push({ command, args, options });
+      callback(null);
+    },
+  });
+  assert.deepEqual(calls, [{
+    command: "taskkill",
+    args: ["/PID", "4321", "/T", "/F"],
+    options: { windowsHide: true },
+  }]);
+});
+
+test("Windows cancellation waits for taskkill before cleaning the private turn directory", async () => {
+  const child = fakeChild(9001);
+  const controller = new AbortController();
+  const callbacks = [];
+  const cleaned = [];
+  const turn = runAntigravityTurn({
+    prompt: "stop", cwd: "/workspace", binPath: "C:\\agy.exe",
+    signal: controller.signal, emitter: makeEmitter(),
+  }, {
+    spawn: () => child,
+    platform: "win32",
+    execFile(_command, _args, _options, callback) { callbacks.push(callback); },
+    createTurnDirectory: () => "C:\\Netcatty\\agy-turn-1",
+    writeMcpConfig() {},
+    cleanupTurnDirectory: (dir) => cleaned.push(dir),
+    timeoutMs: 1000,
+    killGraceMs: 5,
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  controller.abort();
+  child.emit("close", null, "SIGTERM");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(cleaned, []);
+  callbacks[0](null);
+  assert.deepEqual(await turn, { sessionId: null });
+  assert.deepEqual(cleaned, ["C:\\Netcatty\\agy-turn-1"]);
+});
+
+test("model cancellation escalates from process-tree SIGTERM to SIGKILL", async () => {
+  const child = fakeChild(9101);
+  const controller = new AbortController();
+  const signals = [];
+  const result = listAntigravityModels({ binPath: "/bin/agy", signal: controller.signal }, {
+    spawn: () => child,
+    killGraceMs: 5,
+    signalProcessTree(_child, signal) {
+      signals.push(signal);
+      if (signal === "SIGTERM") child.emit("close", null, signal);
+    },
+  });
+  controller.abort();
+  assert.deepEqual(await result, { currentModelId: null, models: [] });
+  assert.deepEqual(signals, ["SIGTERM", "SIGKILL"]);
+});
+
+test("formatAntigravityCliFailure gives actionable authentication guidance", () => {
+  assert.match(formatAntigravityCliFailure("not authenticated", 1), /run `agy`/i);
+  assert.equal(formatAntigravityCliFailure("quota exceeded", 1), "quota exceeded");
 });

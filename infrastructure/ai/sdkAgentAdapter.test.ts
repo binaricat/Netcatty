@@ -308,7 +308,7 @@ test('runSdkAgentTurn forwards Cursor API key as agent environment', async () =>
   assert.equal(streamArgs[2], 'cursor');
 });
 
-test('runSdkAgentTurn forwards Antigravity API key through the shared SDK environment', async () => {
+test('runSdkAgentTurn forwards the configured agy CLI path without SDK credentials', async () => {
   let streamArgs: unknown[] = [];
   let done: (() => void) | null = null;
   const bridge: Record<string, (...args: unknown[]) => unknown> = {
@@ -333,50 +333,17 @@ test('runSdkAgentTurn forwards Antigravity API key through the shared SDK enviro
     {
       id: 'antigravity',
       name: 'Google Antigravity',
-      command: '/usr/bin/python3',
+      command: '/usr/local/bin/agy',
       enabled: true,
       sdkBackend: 'antigravity',
-      apiKey: 'agy-test-key',
     },
     'hello',
     createCallbacks([]),
   );
 
-  assert.deepEqual(streamArgs[13], { GEMINI_API_KEY: 'agy-test-key' });
-  assert.equal(streamArgs[14], '/usr/bin/python3');
+  assert.equal(streamArgs[13], undefined);
+  assert.equal(streamArgs[14], '/usr/local/bin/agy');
   assert.equal(streamArgs[2], 'antigravity');
-});
-
-test('runSdkAgentTurn rejects an Antigravity API key that could not be decrypted', async () => {
-  let streamStarted = false;
-  const errors: string[] = [];
-  const bridge: Record<string, (...args: unknown[]) => unknown> = {
-    aiSdkAgentStream: async () => {
-      streamStarted = true;
-      return { ok: true };
-    },
-  };
-
-  await runSdkAgentTurn(
-    bridge,
-    'request-antigravity-encrypted-key',
-    'chat-antigravity-encrypted-key',
-    {
-      id: 'antigravity',
-      name: 'Google Antigravity',
-      command: '/usr/bin/python3',
-      enabled: true,
-      sdkBackend: 'antigravity',
-      apiKey: 'enc:v1:undecryptable',
-    },
-    'hello',
-    createCallbacks(errors),
-  );
-
-  assert.equal(streamStarted, false);
-  assert.deepEqual(errors, [
-    'Saved Antigravity API key could not be decrypted. Please save it again in Settings.',
-  ]);
 });
 
 test('runSdkAgentTurn in cursor cli-login mode does not inject CURSOR_API_KEY', async () => {

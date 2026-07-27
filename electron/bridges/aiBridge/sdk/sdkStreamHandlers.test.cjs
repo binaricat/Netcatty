@@ -1,6 +1,8 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const {
+  ANTIGRAVITY_MAX_PROMPT_BYTES,
+  ANTIGRAVITY_MAX_SKILLS_BYTES,
   buildSdkTurnPrompt,
   buildSdkModelCacheKey,
   buildSdkSessionKey,
@@ -12,6 +14,7 @@ const {
   resolveSdkToolIntegrationMode,
   shouldCacheSdkRuntimeModels,
   shouldReplaySdkHistory,
+  truncateUtf8Text,
 } = require("./sdkStreamHandlers.cjs");
 
 test("resolveBackendKey maps backend command/value to registry key", () => {
@@ -382,6 +385,73 @@ test("buildSdkTurnPrompt replays history only when requested", () => {
   assert.equal(steadyStatePrompt, "latest question");
 });
 
+test("buildSdkTurnPrompt keeps recent complete turns when history is byte-bounded", () => {
+  const prompt = buildSdkTurnPrompt({
+    prompt: "latest question",
+    replayHistory: true,
+    maxPromptBytes: 240,
+    historyMessages: [
+      { role: "user", content: "old question that should be dropped" },
+      { role: "assistant", content: "old answer that should be dropped" },
+      { role: "user", content: "recent question" },
+      { role: "assistant", content: "recent answer" },
+    ],
+  });
+
+  assert.doesNotMatch(prompt, /old question/);
+  assert.match(prompt, /USER: recent question/);
+  assert.match(prompt, /ASSISTANT: recent answer/);
+  assert.match(prompt, /latest question$/);
+});
+
+test("buildSdkTurnPrompt counts multibyte history and attachment hints against the byte budget", () => {
+  const prompt = buildSdkTurnPrompt({
+    prompt: "最新问题🙂",
+    replayHistory: true,
+    maxPromptBytes: 620,
+    historyMessages: [
+      { role: "assistant", content: "orphan answer" },
+      { role: "user", content: "旧问题".repeat(30) },
+      { role: "assistant", content: "旧回答".repeat(30) },
+      { role: "user", content: "近期问题🙂" },
+      { role: "assistant", content: "近期回答🙂" },
+    ],
+    attachments: [
+      { base64Data: "eA==", mediaType: "text/plain", filename: "资料.txt" },
+    ],
+    writeAttachmentToTemp: () => "/tmp/资料.txt",
+  });
+
+  assert.doesNotMatch(prompt, /orphan answer|旧问题|旧回答/);
+  assert.match(prompt, /USER: 近期问题🙂/);
+  assert.match(prompt, /ASSISTANT: 近期回答🙂/);
+  assert.match(prompt, /资料\.txt/);
+  assert.match(prompt, /最新问题🙂$/);
+  assert.ok(Buffer.byteLength(prompt) <= 620);
+});
+
+test("Agy skill and turn budgets bound the final UTF-8 contextual prompt", () => {
+  const skills = truncateUtf8Text("技能🙂".repeat(5000), ANTIGRAVITY_MAX_SKILLS_BYTES);
+  const systemContext = `[Context]\n${skills}`;
+  const turnBudget = ANTIGRAVITY_MAX_PROMPT_BYTES - Buffer.byteLength(systemContext) - 2;
+  const turnPrompt = buildSdkTurnPrompt({
+    prompt: "当前问题🙂",
+    replayHistory: true,
+    maxPromptBytes: turnBudget,
+    historyMessages: [
+      { role: "user", content: "历史问题🙂".repeat(1000) },
+      { role: "assistant", content: "历史回答🙂".repeat(1000) },
+      { role: "user", content: "近期问题" },
+      { role: "assistant", content: "近期回答" },
+    ],
+  });
+  const contextualPrompt = `${systemContext}\n\n${turnPrompt}`;
+
+  assert.ok(Buffer.byteLength(skills) <= ANTIGRAVITY_MAX_SKILLS_BYTES);
+  assert.ok(Buffer.byteLength(contextualPrompt) <= ANTIGRAVITY_MAX_PROMPT_BYTES);
+  assert.match(contextualPrompt, /当前问题🙂$/);
+});
+
 test("buildSdkTurnPrompt stages attachments as local file hints", () => {
   const staged = [];
   const prompt = buildSdkTurnPrompt({
@@ -432,14 +502,55 @@ test("resolveSdkBackendBinPath prefers the renderer-configured command path", ()
   assert.equal(out, "/opt/homebrew/bin/codex");
 });
 
-test("resolveSdkBackendBinPath preserves an Antigravity virtualenv interpreter", () => {
+test("resolveSdkBackendBinPath accepts a configured Antigravity CLI path", () => {
   const out = resolveSdkBackendBinPath({
     backendKey: "antigravity",
-    configuredCommand: "/workspace/.venv/bin/python",
+    configuredCommand: "/Users/me/.local/bin/agy",
     normalizeCliPathForPlatform: (value) => value,
-    realpath: () => "/usr/bin/python3",
+    realpath: () => "/opt/antigravity/bin/agy",
   });
-  assert.equal(out, "/workspace/.venv/bin/python");
+  assert.equal(out, "/opt/antigravity/bin/agy");
+});
+
+test("resolveSdkBackendBinPath discovers agy for an auto-managed Antigravity agent", () => {
+  const out = resolveSdkBackendBinPath({
+    backendKey: "antigravity",
+    shellEnv: { PATH: "/usr/local/bin" },
+    resolveCliFromPath: (command) => command === "agy" ? "/usr/local/bin/agy" : null,
+    realpath: (value) => value,
+  });
+  assert.equal(out, "/usr/local/bin/agy");
+});
+
+test("resolveSdkBackendBinPath honors a configured bare Antigravity command", () => {
+  const calls = [];
+  const out = resolveSdkBackendBinPath({
+    backendKey: "antigravity",
+    configuredCommand: "antigravity",
+    shellEnv: { PATH: "/custom/bin" },
+    resolveCliFromPath: (command) => {
+      calls.push(command);
+      return command === "antigravity" ? "/custom/bin/antigravity" : null;
+    },
+    realpath: (value) => value,
+  });
+  assert.equal(out, "/custom/bin/antigravity");
+  assert.deepEqual(calls, ["antigravity"]);
+});
+
+test("resolveSdkBackendBinPath falls back to antigravity when agy is absent", () => {
+  const calls = [];
+  const out = resolveSdkBackendBinPath({
+    backendKey: "antigravity",
+    shellEnv: { PATH: "/opt/bin" },
+    resolveCliFromPath: (command) => {
+      calls.push(command);
+      return command === "antigravity" ? "/opt/bin/antigravity" : null;
+    },
+    realpath: (value) => value,
+  });
+  assert.equal(out, "/opt/bin/antigravity");
+  assert.deepEqual(calls, ["agy", "antigravity"]);
 });
 
 test("resolveSdkBackendBinPath rejects invalid renderer-configured command paths", () => {

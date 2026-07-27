@@ -68,8 +68,6 @@ export interface AgentPathInfo {
   apiKeyOk?: boolean;
   /** True when @cursor/sdk platform package is importable. */
   sdkInstalled?: boolean;
-  /** True when the installed Antigravity SDK imports and meets the supported version. */
-  sdkReady?: boolean;
 }
 
 /** Mode-aware Cursor availability for Settings enablement. */
@@ -145,7 +143,6 @@ export interface NetcattyAiBridge {
   aiDiscoverAgents?: (options?: {
     refreshShellEnv?: boolean;
     apiKeyPresent?: boolean;
-    antigravityApiKeyPresent?: boolean;
   }) => Promise<Array<AgentPathInfo & { command: string }>>;
   aiPrewarmShellEnv?: () => Promise<{ ok: boolean; error?: string }>;
   aiCodexGetIntegration?: (options?: { refreshShellEnv?: boolean; validateChatGptAuth?: boolean; codexPath?: string }) => Promise<CodexIntegrationStatus>;

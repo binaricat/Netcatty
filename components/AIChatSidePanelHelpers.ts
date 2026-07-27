@@ -131,7 +131,8 @@ export function shouldLoadSdkRuntimeModels(agent?: ExternalAgentConfig): boolean
     || sdkBackend === 'copilot'
     || sdkBackend === 'cursor'
     || sdkBackend === 'codebuddy'
-    || sdkBackend === 'opencode';
+    || sdkBackend === 'opencode'
+    || sdkBackend === 'antigravity';
 }
 
 export function shouldAdoptSdkCurrentModel(

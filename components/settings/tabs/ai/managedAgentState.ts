@@ -1,6 +1,7 @@
 import type { ExternalAgentConfig } from "../../../../infrastructure/ai/types";
 import {
   type ManagedAgentKey,
+  isLegacyAntigravityRuntimeCommand,
   isPathLikeCommand,
 } from "../../../../infrastructure/ai/managedAgents";
 import type { AgentPathInfo } from "./types";
@@ -13,6 +14,12 @@ function getAutoManagedAgentStoredPath(
 ): string | null {
   const managed = agents.find((agent) => agent.id === `discovered_${agentKey}`);
   if (managed?.commandSource === "auto") return null;
+  if (
+    agentKey === "antigravity"
+    && isLegacyAntigravityRuntimeCommand(managed?.command)
+  ) {
+    return null;
+  }
   return isPathLikeCommand(managed?.command) ? managed?.command ?? null : null;
 }
 
@@ -81,23 +88,6 @@ export function buildManagedAgentState(
         };
       }
     }
-    if (agentKey === "antigravity" && existingManaged?.apiKey) {
-      return {
-        agents: [
-          ...otherAgents,
-          {
-            ...existingManaged,
-            ...AGENT_DEFAULTS.antigravity,
-            id: managedId,
-            command: pathInfo?.path || existingManaged.command || "python3",
-            enabled: existingManaged.enabled ?? true,
-            available: false,
-            apiKey: existingManaged.apiKey,
-          },
-        ],
-        defaultAgentId: existingManaged.id === defaultAgentId ? "catty" : defaultAgentId,
-      };
-    }
     return {
       agents: otherAgents,
       defaultAgentId: managedAgents.some((agent) => agent.id === defaultAgentId)
@@ -112,6 +102,8 @@ export function buildManagedAgentState(
     acpArgs: _legacyArgs,
     ...existingManagedWithoutLegacy
   } = existingManaged ?? {};
+  const existingManagedBase = { ...existingManagedWithoutLegacy };
+  if (agentKey === "antigravity") delete existingManagedBase.apiKey;
   const defaults = AGENT_DEFAULTS[agentKey];
   const managedEnv =
     agentKey === "claude"
@@ -132,7 +124,7 @@ export function buildManagedAgentState(
     : true;
 
   const nextManagedAgent: ExternalAgentConfig = {
-    ...existingManagedWithoutLegacy,
+    ...existingManagedBase,
     ...defaults,
     id: managedId,
     command: agentKey === "cursor" && cursorAuthMode === "cli-login"

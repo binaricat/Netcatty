@@ -107,6 +107,7 @@
     "@xterm/xterm": "6.1.0-beta.220",
     "ai": "^7.0.2",
     "clsx": "2.1.1",
+    "cross-spawn": "7.0.6",
     "electron-updater": "^6.8.3",
     "http-proxy-agent": "^7.0.2",
     "https-proxy-agent": "^7.0.6",

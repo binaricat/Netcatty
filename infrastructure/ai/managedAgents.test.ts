@@ -66,12 +66,12 @@ test('legacy backend field is still accepted for saved settings', () => {
   );
 });
 
-test('Antigravity managed config keeps its Python SDK interpreter identity', () => {
+test('Antigravity managed config keeps its agy CLI identity', () => {
   assert.equal(
     matchesManagedAgentConfig(
       {
         id: 'discovered_antigravity',
-        command: '/usr/bin/python3',
+        command: '/usr/local/bin/agy',
         sdkBackend: 'antigravity',
       },
       'antigravity',
@@ -81,9 +81,9 @@ test('Antigravity managed config keeps its Python SDK interpreter identity', () 
   assert.equal(
     matchesManagedAgentConfig(
       {
-        id: 'custom-python-agent',
-        command: '/usr/bin/python3',
-        sdkBackend: 'custom-python',
+        id: 'custom-agent',
+        command: '/usr/local/bin/other-agent',
+        sdkBackend: 'custom',
       },
       'antigravity',
     ),

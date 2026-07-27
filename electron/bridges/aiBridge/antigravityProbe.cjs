@@ -1,166 +1,155 @@
 "use strict";
 
-const { spawn: defaultSpawn } = require("node:child_process");
-const { buildPythonInvocationArgs } = require("./sdk/pythonLauncher.cjs");
+const defaultSpawn = require("cross-spawn");
+const { signalAntigravityProcessTree } = require("./sdk/antigravityDriver.cjs");
 
-const SDK_PROBE = [
-  "import importlib.metadata as m, json, os, platform",
-  "from google.antigravity import Agent, LocalAgentConfig, types",
-  "from google.antigravity.hooks import policy",
-  "cloud_auth_source = None",
-  "uses_cloud = os.environ.get('GOOGLE_GENAI_USE_VERTEXAI', '').lower() in ('true', '1') or os.environ.get('GOOGLE_GENAI_USE_ENTERPRISE', '').lower() in ('true', '1')",
-  "if uses_cloud and os.environ.get('GOOGLE_CLOUD_LOCATION'):",
-  "  try:",
-  "    import google.auth",
-  "    credentials, detected_project = google.auth.default()",
-  "    if credentials and (os.environ.get('GOOGLE_CLOUD_PROJECT') or detected_project):",
-  "      cloud_auth_source = 'Google Cloud'",
-  "  except Exception:",
-  "    pass",
-  "print(json.dumps({'version': m.version('google-antigravity'), 'pythonVersion': platform.python_version(), 'authSource': cloud_auth_source}))",
-].join("\n");
-const MINIMUM_SDK_VERSION = [0, 1, 8];
+const MINIMUM_CLI_VERSION = [1, 1, 4];
 const DEFAULT_PROBE_TIMEOUT_MS = 5_000;
 const DEFAULT_KILL_GRACE_MS = 750;
 
-function isSupportedAntigravityVersion(version) {
-  const parts = String(version || "").match(/^v?(\d+)\.(\d+)\.(\d+)/);
-  if (!parts) return false;
-  const current = parts.slice(1).map(Number);
-  for (let index = 0; index < MINIMUM_SDK_VERSION.length; index += 1) {
-    if (current[index] > MINIMUM_SDK_VERSION[index]) return true;
-    if (current[index] < MINIMUM_SDK_VERSION[index]) return false;
+function parseAntigravityCliVersion(output) {
+  const match = String(output || "").match(/(?:^|\s)v?(\d+)\.(\d+)\.(\d+)(?:\s|$)/m);
+  return match ? `${Number(match[1])}.${Number(match[2])}.${Number(match[3])}` : null;
+}
+
+function isSupportedAntigravityCliVersion(version) {
+  const parsed = parseAntigravityCliVersion(version);
+  if (!parsed) return false;
+  const current = parsed.split(".").map(Number);
+  for (let index = 0; index < MINIMUM_CLI_VERSION.length; index += 1) {
+    if (current[index] > MINIMUM_CLI_VERSION[index]) return true;
+    if (current[index] < MINIMUM_CLI_VERSION[index]) return false;
   }
   return true;
 }
 
-function getAntigravityAuth(env) {
-  if (env?.GEMINI_API_KEY) return { authenticated: true, authSource: "GEMINI_API_KEY" };
-  return { authenticated: false, authSource: null };
+function unavailable(cliPath, { installed = Boolean(cliPath), cliVersion = null } = {}) {
+  return {
+    path: cliPath || null,
+    binPath: cliPath || null,
+    version: cliVersion ? `Antigravity CLI ${cliVersion}` : null,
+    cliVersion,
+    installed,
+    cliReady: false,
+    available: false,
+    authenticated: false,
+    authSource: null,
+  };
 }
 
-async function probeAntigravitySdk(pythonPath, env = {}, deps = {}) {
-  const auth = deps.apiKeyPresent
-    ? { authenticated: true, authSource: "settings" }
-    : getAntigravityAuth(env);
-  if (!pythonPath) {
-    return {
-      path: null,
-      binPath: null,
-      version: null,
-      installed: false,
-      sdkReady: false,
-      available: false,
-      ...auth,
-    };
-  }
+function hasAntigravityCliHelp(help) {
+  const text = String(help || "");
+  return /--print(?:\s|$)/.test(text)
+    && /--print-timeout(?:\s|$)/.test(text)
+    && /--dangerously-skip-permissions(?:\s|$)/.test(text)
+    && /(?:^|\s)models(?:\s|$)/m.test(text);
+}
+
+async function runProbeCommand(cliPath, args, env, deps) {
   const spawn = deps.spawn || defaultSpawn;
+  const timeoutMs = Number.isFinite(deps.timeoutMs) ? deps.timeoutMs : DEFAULT_PROBE_TIMEOUT_MS;
+  const killGraceMs = Number.isFinite(deps.killGraceMs) ? deps.killGraceMs : DEFAULT_KILL_GRACE_MS;
   return await new Promise((resolve) => {
     let stdout = "";
+    let stderr = "";
     let settled = false;
     let closed = false;
-    let killTimer = null;
-    const unavailable = () => ({
-      path: pythonPath,
-      binPath: pythonPath,
-      version: null,
-      installed: false,
-      sdkReady: false,
-      available: false,
-      ...auth,
-    });
+    let timedOut = false;
+    let timeoutTimer = null;
+    let child;
     const finish = (result) => {
       if (settled) return;
       settled = true;
-      clearTimeout(timeoutTimer);
+      if (timeoutTimer) clearTimeout(timeoutTimer);
       resolve(result);
     };
-    const child = spawn(pythonPath, buildPythonInvocationArgs(
-      pythonPath,
-      ["-c", SDK_PROBE],
-      deps.platform,
-    ), {
-      env,
-      stdio: ["ignore", "pipe", "pipe"],
-      windowsHide: true,
-    });
-    child.stdout.on("data", (chunk) => { stdout += chunk.toString(); });
-    child.once("error", () => {
+    try {
+      child = spawn(cliPath, args, {
+        env,
+        stdio: ["ignore", "pipe", "pipe"],
+        windowsHide: true,
+        detached: true,
+      });
+    } catch (error) {
+      finish({ code: null, stdout, stderr, error });
+      return;
+    }
+    child.stdout?.on("data", (chunk) => { stdout += String(chunk); });
+    child.stderr?.on("data", (chunk) => { stderr += String(chunk); });
+    child.once("error", (error) => {
       closed = true;
-      finish(unavailable());
+      if (timedOut) return;
+      finish({ code: null, stdout, stderr, error });
     });
     child.once("close", (code) => {
       closed = true;
-      if (killTimer) clearTimeout(killTimer);
-      if (code !== 0) {
-        finish(unavailable());
-        return;
-      }
-      try {
-        const info = JSON.parse(stdout.trim());
-        const resolvedAuth = !auth.authenticated && info.authSource === "Google Cloud"
-          ? { authenticated: true, authSource: "Google Cloud" }
-          : auth;
-        const sdkReady = isSupportedAntigravityVersion(info.version);
-        finish({
-          path: pythonPath,
-          binPath: pythonPath,
-          version: `Antigravity SDK ${info.version} (Python ${info.pythonVersion})`,
-          installed: true,
-          sdkReady,
-          available: sdkReady && resolvedAuth.authenticated,
-          ...resolvedAuth,
-        });
-      } catch {
-        finish(unavailable());
-      }
+      if (timedOut) return;
+      finish({ code, stdout, stderr, error: null });
     });
-    const timeoutMs = Number.isFinite(deps.timeoutMs) ? deps.timeoutMs : DEFAULT_PROBE_TIMEOUT_MS;
-    const timeoutTimer = setTimeout(() => {
+    timeoutTimer = setTimeout(() => {
       if (settled) return;
-      try { if (!closed) child.kill("SIGTERM"); } catch {}
-      const killGraceMs = Number.isFinite(deps.killGraceMs) ? deps.killGraceMs : DEFAULT_KILL_GRACE_MS;
-      killTimer = setTimeout(() => {
-        try { if (!closed) child.kill("SIGKILL"); } catch {}
-      }, killGraceMs);
-      killTimer.unref?.();
-      finish(unavailable());
+      timedOut = true;
+      const platform = deps.platform || process.platform;
+      const signalProcessTree = deps.signalProcessTree
+        || ((target, signal) => signalAntigravityProcessTree(target, signal, deps));
+      void Promise.resolve().then(async () => {
+        await signalProcessTree(child, "SIGTERM");
+        if (platform !== "win32") {
+          await new Promise((done) => setTimeout(done, killGraceMs));
+          await signalProcessTree(child, "SIGKILL");
+        }
+      }).catch(() => {}).finally(() => {
+        finish({ code: null, stdout, stderr, error: new Error("Antigravity CLI probe timed out") });
+      });
     }, timeoutMs);
   });
 }
 
-async function findAntigravitySdk(env, deps = {}) {
-  const resolve = deps.resolve;
-  const probe = deps.probe || ((pythonPath) => probeAntigravitySdk(pythonPath, env));
-  const candidates = [];
-  const commands = deps.platform === "win32" || (!deps.platform && process.platform === "win32")
-    ? ["python3", "python", "py"]
-    : ["python3", "python"];
-  for (const command of commands) {
-    const resolved = await resolve(command, env);
-    if (resolved && !candidates.includes(resolved)) candidates.push(resolved);
+async function probeAntigravityCli(cliPath, env = {}, deps = {}) {
+  const normalizedPath = String(cliPath || "").trim();
+  if (!normalizedPath) return unavailable(null, { installed: false });
+  const versionResult = await runProbeCommand(normalizedPath, ["--version"], env, deps);
+  const cliVersion = parseAntigravityCliVersion(`${versionResult.stdout}\n${versionResult.stderr}`);
+  const installed = versionResult.error?.code !== "ENOENT";
+  if (versionResult.code !== 0 || !cliVersion) return unavailable(normalizedPath, { installed });
+  if (!isSupportedAntigravityCliVersion(cliVersion)) return unavailable(normalizedPath, { installed: true, cliVersion });
+
+  const helpResult = await runProbeCommand(normalizedPath, ["--help"], env, deps);
+  if (helpResult.code !== 0 || !hasAntigravityCliHelp(`${helpResult.stdout}\n${helpResult.stderr}`)) {
+    return unavailable(normalizedPath, { installed: true, cliVersion });
   }
-  let firstResult = null;
-  for (const pythonPath of candidates) {
-    const result = await probe(pythonPath, env);
-    firstResult ||= result;
-    if (result.sdkReady) return result;
-  }
-  return firstResult || {
-    path: null,
-    binPath: null,
-    version: null,
-    installed: false,
-    sdkReady: false,
-    available: false,
-    ...getAntigravityAuth(env),
+  return {
+    path: normalizedPath,
+    binPath: normalizedPath,
+    version: `Antigravity CLI ${cliVersion}`,
+    cliVersion,
+    installed: true,
+    cliReady: true,
+    available: true,
+    authenticated: false,
+    authSource: null,
   };
 }
 
+async function findAntigravityCli(env, deps = {}) {
+  if (typeof deps.resolve !== "function") return unavailable(null, { installed: false });
+  const probe = deps.probe || ((candidate) => probeAntigravityCli(candidate, env, deps));
+  let firstFailure = null;
+  for (const command of ["agy", "antigravity"]) {
+    const cliPath = await deps.resolve(command, env);
+    if (!cliPath) continue;
+    const status = await probe(cliPath, env);
+    if (status?.available) return status;
+    firstFailure ||= status;
+  }
+  return firstFailure || unavailable(null, { installed: false });
+}
+
 module.exports = {
-  findAntigravitySdk,
-  getAntigravityAuth,
-  isSupportedAntigravityVersion,
-  probeAntigravitySdk,
-  SDK_PROBE,
+  findAntigravityCli,
+  hasAntigravityCliHelp,
+  isSupportedAntigravityCliVersion,
+  MINIMUM_CLI_VERSION,
+  parseAntigravityCliVersion,
+  probeAntigravityCli,
 };

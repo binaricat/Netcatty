@@ -10,8 +10,11 @@ const tempDirBridge = require("../../tempDirBridge.cjs");
 const { realpathSync } = require("node:fs");
 const { CodexAppServerRuntime } = require("../codexAppServer/runtime.cjs");
 const { probeCodexAppServer } = require("../codexAppServer/probe.cjs");
+const { getAntigravityPromptByteLimit } = require("./antigravityDriver.cjs");
 
 const VALID_BACKENDS = new Set(listBackends());
+const ANTIGRAVITY_MAX_PROMPT_BYTES = 24 * 1024;
+const ANTIGRAVITY_MAX_SKILLS_BYTES = 4 * 1024;
 
 // Pre-flight model catalog cache. SDK listModels often spawns a CLI/server
 // (~1-2s+), so cache per backend+binPath and coalesce in-flight loads.
@@ -215,6 +218,22 @@ function normalizeHistoryMessages(historyMessages) {
     .filter((msg) => msg.content.length > 0);
 }
 
+function truncateUtf8Text(value, maxBytes, suffix = "\n[Content truncated for Agy.]") {
+  const text = String(value || "");
+  if (!Number.isFinite(maxBytes) || maxBytes < 0 || Buffer.byteLength(text) <= maxBytes) return text;
+  const suffixBytes = Buffer.byteLength(suffix);
+  const contentBudget = Math.max(0, maxBytes - suffixBytes);
+  let output = "";
+  let used = 0;
+  for (const character of text) {
+    const bytes = Buffer.byteLength(character);
+    if (used + bytes > contentBudget) break;
+    output += character;
+    used += bytes;
+  }
+  return `${output}${suffixBytes <= maxBytes ? suffix : ""}`;
+}
+
 function logCursorApiKeySummary({ requestedAgentEnv, shellEnv, env }) {
   const requestedKey = requestedAgentEnv?.CURSOR_API_KEY;
   const shellKey = shellEnv?.CURSOR_API_KEY;
@@ -278,10 +297,6 @@ function resolveSdkBackendBinPath({
 }) {
   const configuredPath = normalizeConfiguredCommandPath(configuredCommand, normalizeCliPathForPlatform);
   if (configuredPath) {
-    // Python virtual environments rely on the symlinked interpreter path to
-    // locate their environment. Resolving it would silently launch the system
-    // interpreter that does not contain the probed Antigravity SDK.
-    if (backendKey === "antigravity") return configuredPath;
     return resolveConfiguredSdkPath({
       backendKey,
       configuredPath,
@@ -311,6 +326,18 @@ function resolveSdkBackendBinPath({
     const rawPath = configuredEnvPath || resolveCliFromPath(backendKey, shellEnv) || undefined;
     return rawPath ? resolveRealCliPath(rawPath, realpath) : undefined;
   }
+  if (backendKey === "antigravity") {
+    const configuredName = String(configuredCommand || "").trim();
+    const configuredBareCommand = /^(?:agy|antigravity)(?:\.(?:exe|cmd|bat))?$/i.test(configuredName)
+      ? configuredName
+      : null;
+    const candidates = [configuredBareCommand, "agy", "antigravity"].filter(Boolean);
+    for (const candidate of new Set(candidates)) {
+      const rawPath = resolveCliFromPath(candidate, shellEnv) || undefined;
+      if (rawPath) return resolveRealCliPath(rawPath, realpath);
+    }
+    return undefined;
+  }
   return resolveSdkBinPath?.(backendKey, shellEnv) || undefined;
 }
 
@@ -329,21 +356,12 @@ function buildSdkTurnPrompt({
   prompt,
   historyMessages,
   replayHistory,
+  maxPromptBytes,
   attachments,
   writeAttachmentToTemp = defaultWriteAttachmentToTemp,
   onStagedAttachment,
 }) {
-  const sections = [];
-  const history = replayHistory ? normalizeHistoryMessages(historyMessages) : [];
-  if (history.length > 0) {
-    sections.push(
-      [
-        "[Conversation context replay: the agent SDK may be starting from a fresh local session, so use these prior turns as context and answer only the latest user request.]",
-        ...history.map((msg) => `${msg.role === "assistant" ? "ASSISTANT" : "USER"}: ${msg.content}`),
-      ].join("\n"),
-    );
-  }
-
+  const supplementalSections = [];
   if (Array.isArray(attachments) && attachments.length > 0) {
     const hints = [];
     for (const attachment of attachments) {
@@ -365,7 +383,7 @@ function buildSdkTurnPrompt({
       }
     }
     if (hints.length > 0) {
-      sections.push(
+      supplementalSections.push(
         [
           "[Attached files: these paths are local to the machine running Netcatty, not remote hosts. Inspect them locally if needed.]",
           "[If local filesystem tools are unavailable, use Netcatty's list_attachments and read_attachment MCP tools to inspect these user-supplied files.]",
@@ -376,6 +394,39 @@ function buildSdkTurnPrompt({
   }
 
   const trimmedPrompt = String(prompt || "");
+  const sections = [];
+  const history = replayHistory ? normalizeHistoryMessages(historyMessages) : [];
+  if (history.length > 0) {
+    const turns = [];
+    let currentTurn = null;
+    for (const message of history) {
+      if (message.role === "user") {
+        if (currentTurn) turns.push(currentTurn);
+        currentTurn = [message];
+      } else if (currentTurn) {
+        currentTurn.push(message);
+      }
+    }
+    if (currentTurn) turns.push(currentTurn);
+
+    const header = "[Conversation context replay: the agent SDK may be starting from a fresh local session, so use these prior turns as context and answer only the latest user request.]";
+    const formattedTurns = turns.map((turn) => turn
+      .map((msg) => `${msg.role === "assistant" ? "ASSISTANT" : "USER"}: ${msg.content}`)
+      .join("\n"));
+    let selectedTurns = formattedTurns;
+    if (Number.isFinite(maxPromptBytes) && maxPromptBytes >= 0) {
+      const fixedTail = [...supplementalSections, trimmedPrompt].filter(Boolean).join("\n\n");
+      const availableBytes = Math.max(0, maxPromptBytes - Buffer.byteLength(fixedTail) - 2);
+      selectedTurns = [];
+      for (let index = formattedTurns.length - 1; index >= 0; index -= 1) {
+        const candidate = [formattedTurns[index], ...selectedTurns];
+        if (Buffer.byteLength([header, ...candidate].join("\n")) > availableBytes) break;
+        selectedTurns = candidate;
+      }
+    }
+    if (selectedTurns.length > 0) sections.push([header, ...selectedTurns].join("\n"));
+  }
+  sections.push(...supplementalSections);
   return sections.length > 0
     ? `${sections.join("\n\n")}\n\n${trimmedPrompt}`
     : trimmedPrompt;
@@ -556,6 +607,45 @@ function registerSdkStreamHandlers(ctx) {
             hasConfiguredCommand,
           });
           const stagedAttachments = [];
+          const antigravityPromptByteLimit = backendKey === "antigravity"
+            ? getAntigravityPromptByteLimit(binPath)
+            : undefined;
+          const antigravityBaseSystemContext = backendKey === "antigravity"
+            ? buildExternalAgentSystemContext({
+              mode: driverToolIntegrationMode,
+              chatSessionId,
+              defaultTargetSession,
+              userSkillsContext: "",
+            })
+            : "";
+          const antigravitySkillsByteLimit = backendKey === "antigravity"
+            ? Math.min(
+              ANTIGRAVITY_MAX_SKILLS_BYTES,
+              Math.max(
+                0,
+                antigravityPromptByteLimit
+                  - Buffer.byteLength(antigravityBaseSystemContext)
+                  - Buffer.byteLength(String(prompt || ""))
+                  - 2,
+              ),
+            )
+            : ANTIGRAVITY_MAX_SKILLS_BYTES;
+          const effectiveUserSkillsContext = backendKey === "antigravity"
+            ? truncateUtf8Text(
+              userSkillsContext,
+              antigravitySkillsByteLimit,
+              "\n[Selected skill context truncated to fit Agy's command-line limit.]",
+            )
+            : userSkillsContext;
+          const systemContext = buildExternalAgentSystemContext({
+            mode: driverToolIntegrationMode,
+            chatSessionId,
+            defaultTargetSession,
+            userSkillsContext: effectiveUserSkillsContext,
+          });
+          const antigravityTurnBudget = backendKey === "antigravity"
+            ? Math.max(0, antigravityPromptByteLimit - Buffer.byteLength(systemContext) - 2)
+            : undefined;
           const turnPrompt = buildSdkTurnPrompt({
             prompt,
             historyMessages: payload?.historyMessages,
@@ -565,23 +655,21 @@ function registerSdkStreamHandlers(ctx) {
               resumeSessionId,
               hasInMemorySession,
             }),
+            // agy currently accepts --print content only through argv. Keep
+            // replayed context bounded so long chats stay below platform
+            // command-line limits; the latest user request is never truncated.
+            maxPromptBytes: antigravityTurnBudget,
             attachments: payload?.images,
             onStagedAttachment: (attachment) => stagedAttachments.push(attachment),
           });
           mcpServerBridge.updateAttachmentMetadata?.(stagedAttachments, chatSessionId);
 
-          const systemContext = buildExternalAgentSystemContext({
-            mode: driverToolIntegrationMode,
-            chatSessionId,
-            defaultTargetSession,
-            userSkillsContext,
-          });
           const contextualPrompt = buildExternalAgentContextualPrompt({
             mode: driverToolIntegrationMode,
             prompt: turnPrompt,
             chatSessionId,
             defaultTargetSession,
-            userSkillsContext,
+            userSkillsContext: effectiveUserSkillsContext,
           });
 
           const driverEmitter = {
@@ -621,7 +709,10 @@ function registerSdkStreamHandlers(ctx) {
             chatSessionId,
             prompt: backendKey === "opencode" ? turnPrompt : contextualPrompt,
             systemPrompt: backendKey === "opencode" ? systemContext : undefined,
-            cwd: cwd || process.cwd(),
+            // Netcatty does not currently expose a local project directory for
+            // sidebar agents. Agy creates its own private turn workspace; do
+            // not accidentally expose Electron's launch directory via --add-dir.
+            cwd: backendKey === "antigravity" ? (cwd || undefined) : (cwd || process.cwd()),
             model: model || undefined,
             permissionMode: permissionMode || "confirm",
             env,
@@ -859,7 +950,6 @@ function registerSdkStreamHandlers(ctx) {
       mcpServerBridge.cancelPtyExecsForSession(chatSessionId);
       mcpServerBridge.cancelWorkerBackgroundJobsForSession?.(chatSessionId);
       deleteSdkSessionKeysForChat(sdkSessionIds, chatSessionId);
-      await Promise.resolve(getDriver("antigravity").cleanupChatSession?.(chatSessionId));
       await codexAppServerRuntime.cleanupChatSession(chatSessionId);
       await mcpServerBridge.cleanupScopedMetadata(chatSessionId);
       return { ok: true };
@@ -908,6 +998,8 @@ function registerSdkStreamHandlers(ctx) {
 }
 
 module.exports = {
+  ANTIGRAVITY_MAX_PROMPT_BYTES,
+  ANTIGRAVITY_MAX_SKILLS_BYTES,
   registerSdkStreamHandlers,
   resolveBackendKey,
   resolveSdkToolIntegrationMode,
@@ -919,6 +1011,7 @@ module.exports = {
   expireSiblingCursorCliModeSessions,
   shouldCacheSdkRuntimeModels,
   shouldReplaySdkHistory,
+  truncateUtf8Text,
   normalizeHistoryMessages,
   buildSdkTurnPrompt,
 };

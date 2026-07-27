@@ -141,7 +141,6 @@ module.exports = {
         '!node_modules/sqlite3/deps/**/*'
     ],
     asarUnpack: [
-        'electron/bridges/aiBridge/sdk/antigravity_worker.py',
         'node_modules/node-pty/**/*',
         'node_modules/ssh2/**/*',
         'node_modules/cpu-features/**/*',

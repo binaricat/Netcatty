@@ -12,7 +12,7 @@ const MANAGED_AGENT_META: Record<ManagedAgentKey, { commandNames: string[]; sdkB
   cursor: { commandNames: ['cursor'], sdkBackend: 'cursor' },
   codebuddy: { commandNames: ['codebuddy'], sdkBackend: 'codebuddy' },
   opencode: { commandNames: ['opencode'], sdkBackend: 'opencode' },
-  antigravity: { commandNames: ['python3', 'python', 'python.exe'], sdkBackend: 'antigravity' },
+  antigravity: { commandNames: ['agy', 'antigravity'], sdkBackend: 'antigravity' },
 };
 
 function matchesPrimaryCliBasename(command: string | undefined, agentKey: ManagedAgentKey): boolean {
@@ -64,6 +64,14 @@ export function getExternalAgentSdkBackend(
   agent: Pick<ExternalAgentConfig, 'sdkBackend' | 'acpCommand'> | undefined,
 ): string | undefined {
   return agent?.sdkBackend || agent?.acpCommand || undefined;
+}
+
+export function isLegacyAntigravityRuntimeCommand(command: string | undefined): boolean {
+  const basename = getCommandBasename(command);
+  return /^python(?:\d+(?:\.\d+)*)?(?:\.exe)?$/.test(basename)
+    || /^py(?:\.exe)?$/.test(basename)
+    || /^localharness(?:\.(?:exe|cmd|bat))?$/.test(basename)
+    || basename === 'antigravity_worker.py';
 }
 
 export function getManagedAgentStoredPath(

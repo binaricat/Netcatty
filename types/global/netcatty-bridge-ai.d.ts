@@ -12,7 +12,6 @@ declare global {
     aiDiscoverAgents?(options?: {
       refreshShellEnv?: boolean;
       apiKeyPresent?: boolean;
-      antigravityApiKeyPresent?: boolean;
     }): Promise<Array<{
       command: string;
       name: string;

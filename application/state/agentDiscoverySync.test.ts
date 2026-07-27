@@ -37,7 +37,7 @@ test('applyDiscoveredUpdatesToExternalAgents does not recover Cursor available f
   assert.equal(next[0].cursorAuthMode, 'api-key');
 });
 
-test('applyDiscoveredUpdatesToExternalAgents recovers sticky Antigravity available:false', () => {
+test('applyDiscoveredUpdatesToExternalAgents migrates Python Antigravity state to agy and removes its API key', () => {
   const agents: ExternalAgentConfig[] = [{
     id: 'discovered_antigravity',
     name: 'Google Antigravity',
@@ -47,18 +47,17 @@ test('applyDiscoveredUpdatesToExternalAgents recovers sticky Antigravity availab
     enabled: true,
     available: false,
     apiKey: 'enc:v1:test',
-    sdkBackend: 'antigravity',
     commandSource: 'auto',
   }];
   const discovered: DiscoveredAgent[] = [{
     command: 'antigravity',
     name: 'Google Antigravity',
     icon: 'gemini',
-    description: 'Google Antigravity via the official Python SDK',
+    description: 'Google Antigravity via the official Agy CLI',
     args: [],
-    path: '/usr/bin/python3',
-    binPath: '/usr/bin/python3',
-    version: 'Antigravity SDK 0.1.8 (Python 3.12.0)',
+    path: '/usr/local/bin/agy',
+    binPath: '/usr/local/bin/agy',
+    version: 'Antigravity CLI 1.1.7',
     available: true,
     sdkBackend: 'antigravity',
   }];
@@ -66,9 +65,46 @@ test('applyDiscoveredUpdatesToExternalAgents recovers sticky Antigravity availab
   const next = applyDiscoveredUpdatesToExternalAgents(agents, discovered);
 
   assert.equal(next[0].available, true);
-  assert.equal(next[0].command, '/usr/bin/python3');
-  assert.equal(next[0].apiKey, 'enc:v1:test');
-  assert.equal(next[0].cliVersion, 'Antigravity SDK 0.1.8 (Python 3.12.0)');
+  assert.equal(next[0].command, '/usr/local/bin/agy');
+  assert.equal(next[0].apiKey, undefined);
+  assert.equal(next[0].cliVersion, 'Antigravity CLI 1.1.7');
+});
+
+test('applyDiscoveredUpdatesToExternalAgents disables a legacy Antigravity runtime without discovery', () => {
+  const agents: ExternalAgentConfig[] = [{
+    id: 'discovered_antigravity',
+    name: 'Google Antigravity',
+    command: 'python3',
+    args: [],
+    icon: 'gemini',
+    enabled: true,
+    available: true,
+    commandSource: 'auto',
+  }];
+
+  const next = applyDiscoveredUpdatesToExternalAgents(agents, []);
+
+  assert.equal(next[0].apiKey, undefined);
+  assert.equal(next[0].command, 'python3');
+  assert.equal(next[0].available, false);
+});
+
+test('applyDiscoveredUpdatesToExternalAgents disables the legacy Windows Python launcher', () => {
+  const agents: ExternalAgentConfig[] = [{
+    id: 'discovered_antigravity',
+    name: 'Google Antigravity',
+    command: 'C:\\Windows\\py.exe',
+    args: [],
+    icon: 'gemini',
+    enabled: true,
+    available: true,
+    sdkBackend: 'antigravity',
+  }];
+
+  const next = applyDiscoveredUpdatesToExternalAgents(agents, []);
+
+  assert.equal(next[0].command, 'C:\\Windows\\py.exe');
+  assert.equal(next[0].available, false);
 });
 
 test('applyDiscoveredUpdatesToExternalAgents keeps manual Antigravity paths', () => {
@@ -79,8 +115,7 @@ test('applyDiscoveredUpdatesToExternalAgents keeps manual Antigravity paths', ()
     args: [],
     icon: 'gemini',
     enabled: true,
-    available: false,
-    apiKey: 'enc:v1:test',
+    available: true,
     sdkBackend: 'antigravity',
     commandSource: 'manual',
     cliVersion: 'custom-probe',
@@ -89,11 +124,11 @@ test('applyDiscoveredUpdatesToExternalAgents keeps manual Antigravity paths', ()
     command: 'antigravity',
     name: 'Google Antigravity',
     icon: 'gemini',
-    description: 'Google Antigravity via the official Python SDK',
+    description: 'Google Antigravity via the official Agy CLI',
     args: [],
-    path: '/usr/bin/python3',
-    binPath: '/usr/bin/python3',
-    version: 'Antigravity SDK 0.1.8 (Python 3.12.0)',
+    path: '/usr/local/bin/agy',
+    binPath: '/usr/local/bin/agy',
+    version: 'Antigravity CLI 1.1.7',
     available: true,
     sdkBackend: 'antigravity',
   }];
@@ -102,6 +137,7 @@ test('applyDiscoveredUpdatesToExternalAgents keeps manual Antigravity paths', ()
 
   assert.equal(next[0].available, false);
   assert.equal(next[0].command, '/custom/python');
+  assert.equal(next[0].apiKey, undefined);
   assert.equal(next[0].cliVersion, 'custom-probe');
 });
 
@@ -109,7 +145,7 @@ test('applyDiscoveredUpdatesToExternalAgents recovers manual path when discovery
   const agents: ExternalAgentConfig[] = [{
     id: 'discovered_antigravity',
     name: 'Google Antigravity',
-    command: '/custom/python',
+    command: '/custom/agy',
     args: [],
     icon: 'gemini',
     enabled: true,
@@ -122,11 +158,11 @@ test('applyDiscoveredUpdatesToExternalAgents recovers manual path when discovery
     command: 'antigravity',
     name: 'Google Antigravity',
     icon: 'gemini',
-    description: 'Google Antigravity via the official Python SDK',
+    description: 'Google Antigravity via the official Agy CLI',
     args: [],
-    path: '/custom/python',
-    binPath: '/custom/python',
-    version: 'Antigravity SDK 0.1.8 (Python 3.12.0)',
+    path: '/custom/agy',
+    binPath: '/custom/agy',
+    version: 'Antigravity CLI 1.1.7',
     available: true,
     sdkBackend: 'antigravity',
   }];
@@ -134,6 +170,103 @@ test('applyDiscoveredUpdatesToExternalAgents recovers manual path when discovery
   const next = applyDiscoveredUpdatesToExternalAgents(agents, discovered);
 
   assert.equal(next[0].available, true);
-  assert.equal(next[0].command, '/custom/python');
-  assert.equal(next[0].cliVersion, 'Antigravity SDK 0.1.8 (Python 3.12.0)');
+  assert.equal(next[0].command, '/custom/agy');
+  assert.equal(next[0].apiKey, undefined);
+  assert.equal(next[0].cliVersion, 'Antigravity CLI 1.1.7');
+});
+
+test('applyDiscoveredUpdatesToExternalAgents preserves legacy manual executable paths', () => {
+  const cases: Array<{
+    agent: ExternalAgentConfig;
+    discovered: DiscoveredAgent;
+    envKey?: string;
+  }> = [
+    {
+      agent: {
+        id: 'discovered_claude',
+        name: 'Claude Code',
+        command: '/custom/bin/claude',
+        args: [],
+        icon: 'claude',
+        enabled: true,
+        available: true,
+        sdkBackend: 'claude',
+        cliVersion: 'custom-version',
+        env: { CLAUDE_CODE_EXECUTABLE: '/custom/bin/claude' },
+      },
+      discovered: {
+        command: 'claude',
+        name: 'Claude Code',
+        icon: 'claude',
+        description: 'Claude Code',
+        args: [],
+        path: '/usr/bin/claude',
+        binPath: '/usr/bin/claude',
+        version: 'system-version',
+        available: true,
+        sdkBackend: 'claude',
+      },
+      envKey: 'CLAUDE_CODE_EXECUTABLE',
+    },
+    {
+      agent: {
+        id: 'discovered_opencode',
+        name: 'OpenCode',
+        command: '/custom/bin/opencode',
+        args: [],
+        icon: 'opencode',
+        enabled: true,
+        available: true,
+        sdkBackend: 'opencode',
+        cliVersion: 'custom-version',
+        env: { OPENCODE_BIN: '/custom/bin/opencode' },
+      },
+      discovered: {
+        command: 'opencode',
+        name: 'OpenCode',
+        icon: 'opencode',
+        description: 'OpenCode',
+        args: [],
+        path: '/usr/bin/opencode',
+        binPath: '/usr/bin/opencode',
+        version: 'system-version',
+        available: true,
+        sdkBackend: 'opencode',
+      },
+      envKey: 'OPENCODE_BIN',
+    },
+    {
+      agent: {
+        id: 'discovered_antigravity',
+        name: 'Google Antigravity',
+        command: '/custom/bin/google-agent',
+        args: [],
+        icon: 'gemini',
+        enabled: true,
+        available: false,
+        sdkBackend: 'antigravity',
+        cliVersion: 'custom-version',
+      },
+      discovered: {
+        command: 'antigravity',
+        name: 'Google Antigravity',
+        icon: 'gemini',
+        description: 'Google Antigravity via the official Agy CLI',
+        args: [],
+        path: '/usr/bin/agy',
+        binPath: '/usr/bin/agy',
+        version: 'system-version',
+        available: true,
+        sdkBackend: 'antigravity',
+      },
+    },
+  ];
+
+  for (const { agent, discovered, envKey } of cases) {
+    const next = applyDiscoveredUpdatesToExternalAgents([agent], [discovered]);
+    assert.equal(next[0].command, agent.command);
+    assert.equal(next[0].cliVersion, 'custom-version');
+    assert.equal(next[0].available, agent.available);
+    if (envKey) assert.equal(next[0].env?.[envKey], agent.command);
+  }
 });

@@ -55,12 +55,8 @@ import { WebSearchSettings } from "./ai/WebSearchSettings";
 import { QuickMessagesSettings } from "./ai/QuickMessagesSettings";
 import type { AIQuickMessage } from "../../../infrastructure/ai/quickMessages";
 import { encryptField } from "../../../infrastructure/persistence/secureFieldAdapter";
-import {
-  encryptAntigravityApiKey,
-  updateAntigravityAgentCredential,
-} from "../../../application/state/antigravityAgentSettings";
 import { CursorSdkCard } from "./ai/CursorSdkCard";
-import { AntigravitySdkCard } from "./ai/AntigravitySdkCard";
+import { AntigravityCliCard } from "./ai/AntigravityCliCard";
 import {
   areExternalAgentListsEqual,
   buildManagedAgentState,
@@ -74,6 +70,8 @@ type IdleWindow = Window & {
   requestIdleCallback?: (callback: IdleRequestCallback, options?: IdleRequestOptions) => number;
   cancelIdleCallback?: (handle: number) => void;
 };
+
+const ANTIGRAVITY_CLI_INSTALL_URL = "https://antigravity.google/docs/cli/using?app=antigravity";
 
 function scheduleAfterFirstPaint(callback: () => void, delayMs = 0): () => void {
   let cancelled = false;
@@ -318,11 +316,6 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
     [externalAgents],
   );
   const cursorApiKeyEncrypted = cursorManagedAgent?.apiKey;
-  const antigravityManagedAgent = useMemo(
-    () => externalAgents.find((agent) => agent.id === "discovered_antigravity"),
-    [externalAgents],
-  );
-  const antigravityApiKeyEncrypted = antigravityManagedAgent?.apiKey;
   const cursorAuthMode: CursorAuthMode = cursorManagedAgent?.cursorAuthMode === "cli-login"
     ? "cli-login"
     : "api-key";
@@ -418,14 +411,12 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
         command: agentKey,
         customPath: customPath.trim(),
         refreshShellEnv: Boolean(options?.refreshShellEnv),
-        ...((agentKey === "cursor" || agentKey === "antigravity") ? {
+        ...(agentKey === "cursor" ? {
         // Always report stored key presence so discovery can set apiKeyOk even
         // while the user is in CLI-login mode (mode is separate from capability).
         apiKeyPresent: (options?.apiKeyPresent !== undefined
           ? Boolean(options.apiKeyPresent)
-          : agentKey === "cursor"
-            ? Boolean(cursorApiKeyEncrypted)
-            : Boolean(antigravityApiKeyEncrypted)),
+          : Boolean(cursorApiKeyEncrypted)),
       } : {}),
       });
       if (!isCurrentRequest()) return null;
@@ -462,7 +453,7 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
         setResolving(false);
       }
     }
-  }, [antigravityApiKeyEncrypted, applyResolvedAgentPath, cursorApiKeyEncrypted]);
+  }, [applyResolvedAgentPath, cursorApiKeyEncrypted]);
 
   useEffect(() => {
     if (activeSubTab !== "agents") return;
@@ -489,7 +480,6 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
         key: "antigravity",
         delayMs: 1840,
         path: initialPaths?.antigravity ?? "",
-        options: { apiKeyPresent: Boolean(antigravityApiKeyEncrypted) },
       },
     ];
     const cancelTasks = tasks
@@ -507,7 +497,7 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
     return () => {
       for (const cancel of cancelTasks) cancel();
     };
-  }, [activeSubTab, antigravityApiKeyEncrypted, cursorApiKeyEncrypted, cursorAuthMode, resolveAgentPath]);
+  }, [activeSubTab, cursorApiKeyEncrypted, cursorAuthMode, resolveAgentPath]);
 
   const handleSaveCursorApiKey = useCallback(async (apiKey: string) => {
     const trimmed = apiKey.trim();
@@ -541,22 +531,6 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
       return [...others, nextAgent];
     });
   }, [cursorPathInfo?.path, resolveAgentPath, setExternalAgents]);
-
-  const handleSaveAntigravityApiKey = useCallback(async (apiKey: string) => {
-    const trimmed = apiKey.trim();
-    const encrypted = await encryptAntigravityApiKey(trimmed);
-    const result = await resolveAgentPath("antigravity", antigravityCustomPath, {
-      apiKeyPresent: Boolean(trimmed),
-      commandSource: antigravityCustomPath.trim() ? "manual" : "auto",
-    });
-    setExternalAgents((prev) => updateAntigravityAgentCredential(prev, {
-      encryptedApiKey: encrypted,
-      resolvedPath: result?.path,
-      currentPath: antigravityPathInfo?.path,
-      customPath: antigravityCustomPath,
-      available: Boolean(result?.available),
-    }));
-  }, [antigravityCustomPath, antigravityPathInfo?.path, resolveAgentPath, setExternalAgents]);
 
   const handleCursorAuthModeChange = useCallback((mode: CursorAuthMode) => {
     setExternalAgents((prev) => {
@@ -774,8 +748,6 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
       commandSource: "auto",
       ...(agentKey === "cursor" ? {
         apiKeyPresent: Boolean(cursorApiKeyEncrypted),
-      } : agentKey === "antigravity" ? {
-        apiKeyPresent: Boolean(antigravityApiKeyEncrypted),
       } : {}),
     });
     if (agentKey === "codex") {
@@ -785,7 +757,7 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
         codexPath: result?.path || undefined,
       });
     }
-  }, [antigravityApiKeyEncrypted, cursorApiKeyEncrypted, resolveAgentPath, refreshCodexIntegration]);
+  }, [cursorApiKeyEncrypted, resolveAgentPath, refreshCodexIntegration]);
 
   useEffect(() => {
     if (activeSubTab !== "agents") return;
@@ -1163,15 +1135,14 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
             title={t('ai.antigravity.title')}
             leading={<AgentIconBadge agent={{ id: "antigravity", icon: "gemini", name: "Google Antigravity" }} variant="plain" className="h-5 w-5 text-muted-foreground/90" />}
           >
-            <AntigravitySdkCard
+            <AntigravityCliCard
               pathInfo={antigravityPathInfo}
               isResolvingPath={isResolvingAntigravity}
               customPath={antigravityCustomPath}
-              encryptedApiKey={antigravityApiKeyEncrypted}
               onCustomPathChange={setAntigravityCustomPath}
+              onOpenInstallGuide={() => void getBridge()?.openExternal?.(ANTIGRAVITY_CLI_INSTALL_URL)}
               onRecheckPath={() => void handleCheckCustomPath("antigravity")}
               onResetPath={() => void handleResetCustomPath("antigravity")}
-              onSaveApiKey={handleSaveAntigravityApiKey}
             />
           </SettingsSection>
 

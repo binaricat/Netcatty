@@ -404,6 +404,38 @@ test("resolve-cli does not fall back to PATH when a custom path is invalid", asy
   }
 });
 
+test("resolve-cli accepts a bare antigravity command from PATH", async () => {
+  const calls = [];
+  const { bridge, restore } = loadBridgeWithMocks({
+    normalizeCliPathForPlatform: () => null,
+    resolveCliFromPathAsync: (command) => {
+      calls.push(command);
+      return command === "antigravity" ? "/opt/bin/antigravity" : null;
+    },
+  });
+  const ipcMain = createIpcMainStub();
+
+  bridge.init({
+    sessions: new Map(),
+    sftpClients: new Map(),
+    electronModule: { app: { getPath: () => process.cwd() } },
+  });
+  bridge.registerHandlers(ipcMain);
+
+  try {
+    const resolveCli = ipcMain.handlers.get("netcatty:ai:resolve-cli");
+    const result = await resolveCli({ sender: { id: 1 } }, {
+      command: "antigravity",
+      customPath: "antigravity",
+    });
+
+    assert.equal(result.path, "/opt/bin/antigravity");
+    assert.deepEqual(calls, ["antigravity"]);
+  } finally {
+    restore();
+  }
+});
+
 test("codex login does not reuse an active session from a different resolved path", async () => {
   const { bridge, restore } = loadBridgeWithMocks({
     resolveCliFromPathAsync: (command) => (command === "codex" ? "/usr/bin/codex" : null),

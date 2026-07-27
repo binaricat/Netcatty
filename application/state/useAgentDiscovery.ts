@@ -10,7 +10,6 @@ interface NetcattyBridge {
   aiDiscoverAgents(options?: {
     refreshShellEnv?: boolean;
     apiKeyPresent?: boolean;
-    antigravityApiKeyPresent?: boolean;
   }): Promise<DiscoveredAgent[]>;
 }
 
@@ -22,7 +21,6 @@ const AGENT_DISCOVERY_CACHE_TTL_MS = 60_000;
 let agentDiscoveryCache: {
   agents: DiscoveredAgent[];
   apiKeyPresent: boolean;
-  antigravityApiKeyPresent: boolean;
   updatedAt: number;
 } | null = null;
 const agentDiscoveryPromises = new Map<string, Promise<DiscoveredAgent[]>>();
@@ -50,10 +48,6 @@ export function useAgentDiscovery(
   const cursorApiKeyPresent = externalAgents.some(
     (agent) => agent.id === "discovered_cursor" && Boolean(agent.apiKey),
   );
-  const antigravityApiKeyPresent = externalAgents.some(
-    (agent) => agent.id === "discovered_antigravity" && Boolean(agent.apiKey),
-  );
-
   const discover = useCallback(async (discoverOptions?: { refreshShellEnv?: boolean }) => {
     if (!enabledRef.current) return;
     const bridge = getBridge();
@@ -63,7 +57,6 @@ export function useAgentDiscovery(
     const cacheFresh =
       agentDiscoveryCache
       && agentDiscoveryCache.apiKeyPresent === cursorApiKeyPresent
-      && agentDiscoveryCache.antigravityApiKeyPresent === antigravityApiKeyPresent
       && Date.now() - agentDiscoveryCache.updatedAt < AGENT_DISCOVERY_CACHE_TTL_MS;
 
     if (!forceRefresh && cacheFresh) {
@@ -76,7 +69,6 @@ export function useAgentDiscovery(
     const writeGeneration = ++agentDiscoveryWriteGeneration;
     const promiseKey = JSON.stringify({
       apiKeyPresent: cursorApiKeyPresent,
-      antigravityApiKeyPresent,
       refreshShellEnv: forceRefresh,
     });
     try {
@@ -85,7 +77,6 @@ export function useAgentDiscovery(
         const sharedPromise = bridge.aiDiscoverAgents({
           ...discoverOptions,
           apiKeyPresent: cursorApiKeyPresent,
-          antigravityApiKeyPresent,
         }).finally(() => {
           if (agentDiscoveryPromises.get(promiseKey) === sharedPromise) {
             agentDiscoveryPromises.delete(promiseKey);
@@ -104,7 +95,6 @@ export function useAgentDiscovery(
       agentDiscoveryCache = {
         agents,
         apiKeyPresent: cursorApiKeyPresent,
-        antigravityApiKeyPresent,
         updatedAt: Date.now(),
       };
       startTransition(() => setDiscoveredAgents(agents));
@@ -115,14 +105,14 @@ export function useAgentDiscovery(
         setIsDiscovering(false);
       }
     }
-  }, [antigravityApiKeyPresent, cursorApiKeyPresent]);
+  }, [cursorApiKeyPresent]);
 
   useEffect(() => {
     discoverSeqRef.current += 1;
     if (!enabled) {
       setIsDiscovering(false);
     }
-  }, [antigravityApiKeyPresent, cursorApiKeyPresent, enabled]);
+  }, [cursorApiKeyPresent, enabled]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -150,7 +140,7 @@ export function useAgentDiscovery(
   // Auto-update args for already-configured discovered agents when
   // the canonical args from discovery change (e.g. after an app update).
   useEffect(() => {
-    if (!setExternalAgents || discoveredAgents.length === 0) return;
+    if (!setExternalAgents) return;
     if (!enabled) return;
 
     setExternalAgents((prev) => applyDiscoveredUpdatesToExternalAgents(prev, discoveredAgents));

@@ -70,6 +70,30 @@ test('buildManagedAgentState keeps unrelated defaults when removing stale manage
   assert.equal(state.defaultAgentId, 'custom-agent');
 });
 
+test('buildManagedAgentState migrates Antigravity to the official agy CLI without an API key', () => {
+  const state = buildManagedAgentState(
+    [{
+      id: 'discovered_antigravity',
+      name: 'Google Antigravity',
+      command: '/old/antigravity-runtime',
+      enabled: false,
+      available: true,
+      sdkBackend: 'antigravity',
+      apiKey: 'obsolete-key',
+    }],
+    'catty',
+    'antigravity',
+    { path: '/usr/local/bin/agy', version: 'Antigravity CLI 1.1.7', available: true },
+    'auto',
+  );
+
+  assert.equal(state.agents[0].command, '/usr/local/bin/agy');
+  assert.equal(state.agents[0].cliVersion, 'Antigravity CLI 1.1.7');
+  assert.equal(state.agents[0].enabled, false);
+  assert.equal(state.agents[0].available, true);
+  assert.equal(state.agents[0].apiKey, undefined);
+});
+
 test('buildManagedAgentState stores the system Claude executable for SDK runs', () => {
   const state = buildManagedAgentState(
     [],
@@ -156,6 +180,39 @@ test('getInitialManagedAgentPaths keeps manual and legacy command paths', () => 
     available: true,
     sdkBackend: 'codex',
   }]).codex, '/legacy/bin/codex');
+});
+
+test('getInitialManagedAgentPaths drops legacy Antigravity runtimes but keeps manual agy paths', () => {
+  const antigravity = (command: string): ExternalAgentConfig => ({
+    id: 'discovered_antigravity',
+    name: 'Google Antigravity',
+    command,
+    commandSource: 'manual',
+    enabled: true,
+    sdkBackend: 'antigravity',
+  });
+
+  assert.equal(getInitialManagedAgentPaths([antigravity('/usr/bin/python3')]).antigravity, '');
+  assert.equal(getInitialManagedAgentPaths([antigravity('C:\\Windows\\py.exe')]).antigravity, '');
+  assert.equal(getInitialManagedAgentPaths([antigravity('/opt/antigravity/localharness')]).antigravity, '');
+  assert.equal(
+    getInitialManagedAgentPaths([antigravity('/opt/tools/google-agent')]).antigravity,
+    '/opt/tools/google-agent',
+  );
+  assert.equal(getInitialManagedAgentPaths([antigravity('/usr/local/bin/agy')]).antigravity, '/usr/local/bin/agy');
+  assert.equal(getInitialManagedAgentPaths([antigravity('C:\\Tools\\agy.exe')]).antigravity, 'C:\\Tools\\agy.exe');
+  assert.equal(
+    getInitialManagedAgentPaths([antigravity('/Applications/Antigravity/antigravity')]).antigravity,
+    '/Applications/Antigravity/antigravity',
+  );
+  assert.equal(
+    getInitialManagedAgentPaths([antigravity('C:\\Tools\\antigravity.exe')]).antigravity,
+    'C:\\Tools\\antigravity.exe',
+  );
+  assert.equal(
+    getInitialManagedAgentPaths([antigravity('C:\\Tools\\antigravity.cmd')]).antigravity,
+    'C:\\Tools\\antigravity.cmd',
+  );
 });
 
 test('buildManagedAgentState stores SDK backend key for discovered Cursor', () => {

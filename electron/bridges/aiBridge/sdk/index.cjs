@@ -28,7 +28,7 @@ const DRIVER_REGISTRY = {
         cwd: ctx.cwd,
         model: ctx.model,
         env: ctx.env,
-        pythonPath: ctx.binPath,
+        binPath: ctx.binPath,
         injectedMcpServers: ctx.injectedMcpServers,
         toolIntegrationMode: ctx.toolIntegrationMode,
         permissionMode: ctx.permissionMode,
@@ -37,14 +37,12 @@ const DRIVER_REGISTRY = {
         signal: ctx.signal,
       });
     },
-    async listModels() {
-      return antigravity.listAntigravityModels();
-    },
-    cleanupChatSession(chatSessionId) {
-      antigravity.cleanupAntigravityChatStorage(chatSessionId);
-    },
-    isSessionStorageReady(chatSessionId) {
-      return antigravity.isAntigravitySessionStorageReady(chatSessionId);
+    async listModels(ctx) {
+      return antigravity.listAntigravityModels({
+        binPath: ctx.binPath,
+        env: ctx.env,
+        signal: ctx.abortController?.signal || ctx.signal,
+      });
     },
   },
   claude: {
