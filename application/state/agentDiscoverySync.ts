@@ -20,6 +20,16 @@ function findMatchingDiscoveredAgent(
   });
 }
 
+function discoveredPathMatchesConfigured(
+  agent: ExternalAgentConfig,
+  match: DiscoveredAgent,
+  matchPath: string | undefined,
+): boolean {
+  return agent.command === matchPath
+    || agent.command === match.path
+    || agent.command === match.command;
+}
+
 /** Apply rediscovery results onto already-configured discovered_* agents. */
 export function applyDiscoveredUpdatesToExternalAgents(
   agents: ExternalAgentConfig[],
@@ -39,18 +49,27 @@ export function applyDiscoveredUpdatesToExternalAgents(
       || Boolean(ea.acpCommand)
       || JSON.stringify(ea.acpArgs || []) !== JSON.stringify([]);
     const matchPath = match.binPath || match.path;
-    const env = match.command === 'claude'
+    // Manual executables must not inherit available/version/env from an unrelated
+    // PATH discovery result (e.g. /custom/python vs /usr/bin/python3).
+    const canApplyExecutableStatus = ea.commandSource !== 'manual'
+      || discoveredPathMatchesConfigured(ea, match, matchPath);
+    const env = canApplyExecutableStatus && match.command === 'claude'
       ? { ...(ea.env ?? {}), CLAUDE_CODE_EXECUTABLE: matchPath }
-      : match.command === 'opencode'
+      : canApplyExecutableStatus && match.command === 'opencode'
         ? { ...(ea.env ?? {}), OPENCODE_BIN: matchPath }
         : ea.env;
-    const envChanged =
+    const envChanged = canApplyExecutableStatus && (
       (match.command === 'claude' && ea.env?.CLAUDE_CODE_EXECUTABLE !== matchPath)
-      || (match.command === 'opencode' && ea.env?.OPENCODE_BIN !== matchPath);
-    const versionChanged = Boolean(match.version) && ea.cliVersion !== match.version;
+      || (match.command === 'opencode' && ea.env?.OPENCODE_BIN !== matchPath)
+    );
+    const versionChanged = canApplyExecutableStatus
+      && Boolean(match.version)
+      && ea.cliVersion !== match.version;
     // Discovery only returns agents that are currently available; recover sticky
     // available:false after a later SDK/auth probe succeeds (e.g. Antigravity key).
-    const availableChanged = ea.available === false && match.available !== false;
+    const availableChanged = canApplyExecutableStatus
+      && ea.available === false
+      && match.available !== false;
     const commandChanged = match.command === 'antigravity'
       && Boolean(matchPath)
       && ea.commandSource !== 'manual'
@@ -71,7 +90,7 @@ export function applyDiscoveredUpdatesToExternalAgents(
         sdkBackend: backend,
         ...(commandChanged ? { command: matchPath } : {}),
         ...(availableChanged ? { available: true } : {}),
-        ...(match.version ? { cliVersion: match.version } : {}),
+        ...(canApplyExecutableStatus && match.version ? { cliVersion: match.version } : {}),
         ...(env ? { env } : {}),
       };
     }
