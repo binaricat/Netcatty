@@ -34,6 +34,15 @@ export function collectVaultGroupPathsForSelectAll({
     : [...displayedGroupPaths];
 }
 
+export function retainVisibleVaultGroupSelection(
+  selectedGroupPaths: ReadonlySet<string>,
+  visibleGroupPaths: ReadonlySet<string>,
+): Set<string> {
+  return new Set(
+    [...selectedGroupPaths].filter((path) => visibleGroupPaths.has(path)),
+  );
+}
+
 export function collectVisibleVaultHostIds<T extends { id: string }>({
   viewMode,
   displayedHosts,

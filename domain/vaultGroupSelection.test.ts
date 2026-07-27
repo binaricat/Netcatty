@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   collectVaultGroupPathsForSelectAll,
+  retainVisibleVaultGroupSelection,
   collectVisibleVaultGroupPaths,
   collectVisibleVaultHostIds,
 } from "./vaultGroupSelection.ts";
@@ -48,4 +49,14 @@ test("filtered select-all never selects whole groups with hidden hosts", () => {
     displayedGroupPaths: ["Production", "Staging"],
     visibleTreeGroupPaths: ["Production"],
   }), ["Production"]);
+});
+
+test("group selection drops groups hidden by navigation or filters", () => {
+  assert.deepEqual(
+    retainVisibleVaultGroupSelection(
+      new Set(["visible", "hidden"]),
+      new Set(["visible", "new"]),
+    ),
+    new Set(["visible"]),
+  );
 });

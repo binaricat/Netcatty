@@ -7,6 +7,7 @@ import {
   collectVaultGroupPathsForSelectAll,
   collectVisibleVaultGroupPaths,
   collectVisibleVaultHostIds,
+  retainVisibleVaultGroupSelection,
 } from "../../domain/vaultGroupSelection";
 import { STORAGE_KEY_VAULT_HOST_PANEL_WIDTH } from "@/infrastructure/config/storageKeys.ts";
 import { VaultHostListSection } from "./VaultHostListSection";
@@ -309,6 +310,20 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
     () => collectVisibleVaultGroupPaths(treeViewGroupTree),
     [treeViewGroupTree],
   );
+  const visibleSelectableGroupPaths = React.useMemo(
+    () => new globalThis.Set(
+      viewMode === "tree"
+        ? visibleTreeGroupPaths
+        : displayedGroups.map((group: { path: string }) => group.path),
+    ),
+    [displayedGroups, viewMode, visibleTreeGroupPaths],
+  );
+  React.useEffect(() => {
+    setSelectedGroupPaths((current: Set<string>) => {
+      const next = retainVisibleVaultGroupSelection(current, visibleSelectableGroupPaths);
+      return next.size === current.size ? current : next;
+    });
+  }, [setSelectedGroupPaths, visibleSelectableGroupPaths]);
   const hasActiveHostFilters = search.trim().length > 0 || selectedTags.length > 0;
   const vaultHostPanelResizeProps = {
     resizable: true as const,

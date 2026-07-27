@@ -379,13 +379,20 @@ export function useVaultImportHandlers({
               hostPersisted,
               t("vault.import.progress.persistFailed"),
               () => {
+                const nextManagedSources = [
+                  ...managedSourcesRef.current.filter((source) => source.id !== newSource.id),
+                  newSource,
+                ];
+                const committedGroups = mergeVaultImportedGroups({
+                  currentGroups: customGroupsRef.current,
+                  baselineGroups: currentCustomGroups,
+                  appliedGroups: nextGroups,
+                });
+                managedSourcesRef.current = nextManagedSources;
+                customGroupsRef.current = committedGroups;
                 startTransition(() => {
-                  onUpdateManagedSources([...managedSourcesRef.current, newSource]);
-                  onUpdateCustomGroups(mergeVaultImportedGroups({
-                    currentGroups: customGroupsRef.current,
-                    baselineGroups: currentCustomGroups,
-                    appliedGroups: nextGroups,
-                  }));
+                  onUpdateManagedSources(nextManagedSources);
+                  onUpdateCustomGroups(committedGroups);
                 });
               },
               rollbackPendingImport,
@@ -402,11 +409,13 @@ export function useVaultImportHandlers({
               hostPersisted,
               t("vault.import.progress.persistFailed"),
               () => {
-                startTransition(() => onUpdateCustomGroups(mergeVaultImportedGroups({
+                const committedGroups = mergeVaultImportedGroups({
                   currentGroups: customGroupsRef.current,
                   baselineGroups: currentCustomGroups,
                   appliedGroups: merged.customGroups,
-                })));
+                });
+                customGroupsRef.current = committedGroups;
+                startTransition(() => onUpdateCustomGroups(committedGroups));
               },
               rollbackPendingImport,
             );
