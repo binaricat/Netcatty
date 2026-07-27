@@ -16,6 +16,7 @@ import { TerminalAuthDialog, TerminalAuthDialogProps } from './TerminalAuthDialo
 import { TerminalConnectionProgress, TerminalConnectionProgressProps } from './TerminalConnectionProgress';
 import { HostKeyInfo, TerminalHostKeyVerification } from './TerminalHostKeyVerification';
 import {
+    resolveDisconnectedDialogTerminalRoot,
     restoreTerminalFocusFromDisconnectedDialog,
     shouldClaimDisconnectedDialogFocus,
     shouldReconnectDisconnectedDialogOnEnterKey,
@@ -158,13 +159,20 @@ export const TerminalConnectionDialog: React.FC<TerminalConnectionDialogProps> =
         if (!canEnterReconnectFromDialog) return;
         const node = dialogFocusRef.current;
         if (!node) return;
-        const sessionRoot = node.closest("[data-session-id]");
+        // Capture the terminal root while the dialog is still mounted — after
+        // unmount, parentElement is null and popup trees have no data-session-id.
+        const sessionRoot = resolveDisconnectedDialogTerminalRoot(
+            node,
+            node.closest("[data-session-id]"),
+        );
         return () => {
             if (typeof document === "undefined") return;
             restoreTerminalFocusFromDisconnectedDialog({
                 activeElement: document.activeElement,
                 dialogNode: node,
                 sessionRoot,
+                documentBody: document.body,
+                documentElement: document.documentElement,
             });
         };
     }, [canEnterReconnectFromDialog]);

@@ -372,13 +372,29 @@ export function restoreTerminalFocusFromDisconnectedDialog({
   activeElement,
   dialogNode,
   sessionRoot,
+  documentBody,
+  documentElement,
 }: {
   activeElement: Element | null;
   dialogNode: HTMLElement | null;
   sessionRoot: Element | null;
+  documentBody?: Element | null;
+  documentElement?: Element | null;
 }): boolean {
-  if (!dialogNode || !activeElement) return false;
-  if (!dialogNode.contains(activeElement) && activeElement !== dialogNode) return false;
+  if (!dialogNode) return false;
+  // When React removes the focused overlay, the browser parks focus on body/html
+  // before passive-effect cleanup runs — treat that as still owning focus.
+  const focusLostToDocument =
+    !activeElement
+    || activeElement === documentBody
+    || activeElement === documentElement;
+  if (
+    !focusLostToDocument
+    && activeElement !== dialogNode
+    && !dialogNode.contains(activeElement)
+  ) {
+    return false;
+  }
   const terminalRoot = resolveDisconnectedDialogTerminalRoot(dialogNode, sessionRoot);
   if (!terminalRoot) return false;
   const textarea = terminalRoot.querySelector("textarea.xterm-helper-textarea");

@@ -200,19 +200,33 @@ test("disconnected dialog focus claim never steals from other panes", () => {
         activeElement: dialog as unknown as Element,
         dialogNode: dialog as unknown as HTMLElement,
         sessionRoot: session as unknown as Element,
+        documentBody: body as unknown as Element,
       }),
       true,
     );
     assert.equal(textarea.focusCalls, 1);
+    // After React removes the focused dialog, the browser parks focus on body
+    // before passive-effect cleanup runs — still restore to this session's xterm.
+    assert.equal(
+      restoreTerminalFocusFromDisconnectedDialog({
+        activeElement: body as unknown as Element,
+        dialogNode: dialog as unknown as HTMLElement,
+        sessionRoot: session as unknown as Element,
+        documentBody: body as unknown as Element,
+      }),
+      true,
+    );
+    assert.equal(textarea.focusCalls, 2);
     assert.equal(
       restoreTerminalFocusFromDisconnectedDialog({
         activeElement: otherPane as unknown as Element,
         dialogNode: dialog as unknown as HTMLElement,
         sessionRoot: session as unknown as Element,
+        documentBody: body as unknown as Element,
       }),
       false,
     );
-    assert.equal(textarea.focusCalls, 1);
+    assert.equal(textarea.focusCalls, 2);
 
     // Popup terminals have no data-session-id ancestor — restore via local tree walk.
     const popupTextarea = new FakeNode({ id: "textarea" });
@@ -227,6 +241,7 @@ test("disconnected dialog focus claim never steals from other panes", () => {
         activeElement: popupDialog as unknown as Element,
         dialogNode: popupDialog as unknown as HTMLElement,
         sessionRoot: null,
+        documentBody: body as unknown as Element,
       }),
       true,
     );
@@ -240,6 +255,18 @@ test("disconnected dialog focus claim never steals from other panes", () => {
       }),
       true,
     );
+    // Detached popup dialog (parent cleared) + body focus: use captured terminal root.
+    popupDialog.opts.parent = null;
+    assert.equal(
+      restoreTerminalFocusFromDisconnectedDialog({
+        activeElement: body as unknown as Element,
+        dialogNode: popupDialog as unknown as HTMLElement,
+        sessionRoot: popupRoot as unknown as Element,
+        documentBody: body as unknown as Element,
+      }),
+      true,
+    );
+    assert.equal(popupTextarea.focusCalls, 2);
   } finally {
     globalThis.HTMLElement = previousHTMLElement;
   }
