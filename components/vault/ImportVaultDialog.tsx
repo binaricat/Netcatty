@@ -358,6 +358,13 @@ export const ImportVaultDialog: React.FC<ImportVaultDialogProps> = ({
       setExistingGroup(groups[0] ?? "");
     }
   }, [destinationMode, existingGroup, groups]);
+  useEffect(() => {
+    if (open) return;
+    setStep("format");
+    setDestinationMode("preserve");
+    setExistingGroup(groups[0] ?? "");
+    setNewGroup("");
+  }, [groups, open]);
   const pluginImporter = usePluginVaultImporter({
     open,
     onOpenChange,

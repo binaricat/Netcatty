@@ -334,7 +334,7 @@ export const useVaultState = () => {
     setHosts(cleaned);
     const ver = ++hostsWriteVersion.current;
     return encryptHosts(cleaned).then((enc) => {
-      if (ver !== hostsWriteVersion.current) return undefined;
+      if (ver !== hostsWriteVersion.current) return false;
       return localStorageAdapter.write(STORAGE_KEY_HOSTS, enc);
     });
   }, []);
