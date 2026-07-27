@@ -18,6 +18,7 @@ export interface UseManagedSourceSyncOptions {
   hosts: Host[];
   managedSources: ManagedSource[];
   onUpdateManagedSources: (sources: ManagedSource[]) => void;
+  onReadPersistedHosts: () => Promise<Host[]>;
 }
 
 export const haveSameManagedSshAgentFields = (previous: Host, current: Host): boolean => (
@@ -36,6 +37,7 @@ export const useManagedSourceSync = ({
   hosts,
   managedSources,
   onUpdateManagedSources,
+  onReadPersistedHosts,
 }: UseManagedSourceSyncOptions) => {
   const previousHostsRef = useRef<Host[]>([]);
   const hostsRef = useRef(hosts);
@@ -123,7 +125,7 @@ export const useManagedSourceSync = ({
   );
 
   const writeSshConfigToFile = useCallback(
-    async (source: ManagedSource, managedHosts: Host[]) => {
+    async (source: ManagedSource, managedHosts: Host[], allHosts = hostsRef.current) => {
       const bridge = netcattyBridge.get();
       if (!bridge?.writeLocalFile) {
         console.warn("[ManagedSourceSync] writeLocalFile not available");
@@ -138,7 +140,7 @@ export const useManagedSourceSync = ({
         const finalContent = mergeWithExistingContent(
           existingContent,
           managedHosts,
-          hostsRef.current,
+          allHosts,
         );
         const encoder = new TextEncoder();
         const buffer = encoder.encode(finalContent);
@@ -161,12 +163,13 @@ export const useManagedSourceSync = ({
         if (!persistedSources.some((candidate) => candidate.id === source.id)) {
           return { sourceId: source.id, success: false };
         }
-        const managedHosts = getManagedHostsForSource(source.id);
-        const success = await writeSshConfigToFile(source, managedHosts);
+        const latestHosts = await onReadPersistedHosts();
+        const managedHosts = latestHosts.filter((host) => host.managedSourceId === source.id);
+        const success = await writeSshConfigToFile(source, managedHosts, latestHosts);
         return { sourceId: source.id, success };
       });
     },
-    [getManagedHostsForSource, writeSshConfigToFile],
+    [onReadPersistedHosts, writeSshConfigToFile],
   );
 
   const unmanageSource = useCallback(
@@ -185,14 +188,16 @@ export const useManagedSourceSync = ({
       const success = await writeSshConfigToFile(source, []);
       if (!success) throw new Error("Could not clear managed SSH config source");
       return async () => {
+        const latestHosts = await onReadPersistedHosts();
         const restored = await writeSshConfigToFile(
           source,
-          getManagedHostsForSource(source.id),
+          latestHosts.filter((host) => host.managedSourceId === source.id),
+          latestHosts,
         );
         if (!restored) throw new Error("Could not restore managed SSH config source");
       };
     },
-    [getManagedHostsForSource, writeSshConfigToFile],
+    [onReadPersistedHosts, writeSshConfigToFile],
   );
 
   // Clear and remove multiple sources atomically to avoid race conditions
@@ -203,9 +208,11 @@ export const useManagedSourceSync = ({
       for (const source of sources) {
         const success = await writeSshConfigToFile(source, []);
         if (!success) {
+          const latestHosts = await onReadPersistedHosts();
           const restored = await Promise.all(clearedSources.map((clearedSource) => writeSshConfigToFile(
             clearedSource,
-            getManagedHostsForSource(clearedSource.id),
+            latestHosts.filter((host) => host.managedSourceId === clearedSource.id),
+            latestHosts,
           )));
           if (restored.some((result) => !result)) {
             throw new Error("Could not clear or restore every managed SSH config source");
@@ -215,16 +222,18 @@ export const useManagedSourceSync = ({
         clearedSources.push(source);
       }
       return async () => {
+        const latestHosts = await onReadPersistedHosts();
         const results = await Promise.all(clearedSources.map((source) => writeSshConfigToFile(
           source,
-          getManagedHostsForSource(source.id),
+          latestHosts.filter((host) => host.managedSourceId === source.id),
+          latestHosts,
         )));
         if (results.some((success) => !success)) {
           throw new Error("Could not restore every managed SSH config source");
         }
       };
     },
-    [getManagedHostsForSource, writeSshConfigToFile],
+    [onReadPersistedHosts, writeSshConfigToFile],
   );
 
   const pendingSyncRef = useRef(false);

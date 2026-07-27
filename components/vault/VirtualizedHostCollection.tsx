@@ -92,6 +92,7 @@ export function VirtualizedHostCollection<T>({
 }) {
   const rootRef = React.useRef<HTMLDivElement>(null);
   const pendingFocusKeyRef = React.useRef<string | null>(null);
+  const lastRequestedActiveKeyRef = React.useRef<string | null>(null);
   const [containerWidth, setContainerWidth] = React.useState(
     viewMode === "grid" ? 1280 : 0,
   );
@@ -167,8 +168,13 @@ export function VirtualizedHostCollection<T>({
   });
 
   React.useLayoutEffect(() => {
-    if (activeItemKey === null || activeItemKey === undefined) return;
+    if (activeItemKey === null || activeItemKey === undefined) {
+      lastRequestedActiveKeyRef.current = null;
+      return;
+    }
     const key = String(activeItemKey);
+    if (lastRequestedActiveKeyRef.current === key) return;
+    lastRequestedActiveKeyRef.current = key;
     const index = itemIndexByKey.get(key);
     if (index === undefined) return;
     pendingFocusKeyRef.current = key;
@@ -315,6 +321,7 @@ export function VirtualizedGroupedHostCollection<T>({
 }) {
   const rootRef = React.useRef<HTMLDivElement>(null);
   const pendingFocusKeyRef = React.useRef<string | null>(null);
+  const lastRequestedActiveKeyRef = React.useRef<string | null>(null);
   const [containerWidth, setContainerWidth] = React.useState(
     viewMode === "grid" ? 1280 : 0,
   );
@@ -437,8 +444,13 @@ export function VirtualizedGroupedHostCollection<T>({
   });
 
   React.useLayoutEffect(() => {
-    if (activeItemKey === null || activeItemKey === undefined) return;
+    if (activeItemKey === null || activeItemKey === undefined) {
+      lastRequestedActiveKeyRef.current = null;
+      return;
+    }
     const key = String(activeItemKey);
+    if (lastRequestedActiveKeyRef.current === key) return;
+    lastRequestedActiveKeyRef.current = key;
     const index = itemIndexByKey.get(key);
     if (index === undefined) return;
     const rowIndex = virtualRowIndexByItemIndex.get(index) ?? -1;

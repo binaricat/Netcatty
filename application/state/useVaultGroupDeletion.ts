@@ -74,6 +74,12 @@ export function useVaultGroupDeletion({
         }
       }
 
+      latestRef.current = {
+        ...latestRef.current,
+        hosts: await onReadPersistedHosts(),
+        managedSources: onReadPersistedManagedSources(),
+      };
+
       // Rebuild after the file operations so edits made while they were running
       // are preserved, then publish one coherent in-memory baseline for any
       // deletion already queued behind this one.
