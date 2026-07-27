@@ -84,12 +84,23 @@ function SidePanelSftpSlotInner({
   } = ctx;
 
   const storedSftpHost = sftpHostForTab.get(tabId) ?? null;
-  const panelActiveHost = isVisible
-    ? (live.sftpActiveHost ?? storedSftpHost)
-    : storedSftpHost;
   const rememberedSourceSessionId = sftpSourceSessionIdForTab.get(tabId) ?? null;
+  const focusedSftpSession = rememberedSourceSessionId && live.focusedSessionId
+    ? (sessions as TerminalSession[]).find((session) => session.id === live.focusedSessionId) ?? null
+    : null;
+  const shouldDeferForPendingFocusedSession = isVisible
+    && !!rememberedSourceSessionId
+    && !live.activeTerminalSessionIdForSftp
+    && focusedSftpSession?.status === 'connecting';
+  const shouldUseRememberedSourceSession = isVisible
+    && !!rememberedSourceSessionId
+    && !live.focusedSessionId
+    && !live.activeTerminalSessionIdForSftp;
+  const panelActiveHost = isVisible
+    ? (shouldDeferForPendingFocusedSession ? null : (live.sftpActiveHost ?? storedSftpHost))
+    : storedSftpHost;
   const panelActiveSessionId = isVisible
-    ? (live.activeTerminalSessionIdForSftp ?? rememberedSourceSessionId)
+    ? (live.activeTerminalSessionIdForSftp ?? (shouldUseRememberedSourceSession ? rememberedSourceSessionId : null))
     : null;
 
   const handleFollowTerminalCwdChange = useCallback((enabled: boolean, visibleHost?: Host | null) => {

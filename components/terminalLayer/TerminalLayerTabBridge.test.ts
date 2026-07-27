@@ -32,7 +32,7 @@ test('terminal layer bridge passes vault open callbacks into the side panel cont
   assert.match(source, /onOpenVaultSectionFromChat: s\.onOpenVaultSectionFromChat/);
 });
 
-test('terminal layer bridge prefers the remembered SFTP source session', () => {
+test('terminal layer bridge passes the remembered SFTP source session', () => {
   assert.match(source, /const sftpSourceSessionIdForTab = s\.sftpSourceSessionIdForTab/);
   assert.match(source, /preferredSourceSessionId: activeTabId \? sftpSourceSessionIdForTab\.get\(activeTabId\) \?\? null : null/);
 });

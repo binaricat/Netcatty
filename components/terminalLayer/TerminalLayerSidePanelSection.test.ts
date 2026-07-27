@@ -114,7 +114,9 @@ test('SFTP side panel uses remembered source session before live state catches u
   const source = readFileSync(new URL('./terminalLayerSidePanelSlots.tsx', import.meta.url), 'utf8');
 
   assert.match(source, /const rememberedSourceSessionId = sftpSourceSessionIdForTab\.get\(tabId\) \?\? null/);
-  assert.match(source, /const panelActiveSessionId = isVisible\s*\?\s*\(live\.activeTerminalSessionIdForSftp \?\? rememberedSourceSessionId\)\s*:\s*null/);
+  assert.match(source, /const shouldUseRememberedSourceSession = isVisible[\s\S]*!live\.focusedSessionId[\s\S]*!live\.activeTerminalSessionIdForSftp/);
+  assert.match(source, /const shouldDeferForPendingFocusedSession = isVisible[\s\S]*focusedSftpSession\?\.status === 'connecting'/);
+  assert.match(source, /live\.activeTerminalSessionIdForSftp \?\? \(shouldUseRememberedSourceSession \? rememberedSourceSessionId : null\)/);
   assert.match(source, /activeSessionId=\{panelActiveSessionId\}/);
 });
 

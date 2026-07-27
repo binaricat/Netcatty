@@ -27,19 +27,9 @@ function sameSftpReuseEndpoint(a: SftpReuseEndpoint, b: SftpReuseEndpoint): bool
     && (a.username || "root") === (b.username || "root");
 }
 
-// Allows the connected-status event to beat React session-state propagation while
-// still rejecting protocols that the backend cannot share with SFTP.
-function canReusePendingTerminalConnection(session: TerminalSession): boolean {
-  return (
-    (session.protocol === "ssh" || session.protocol === undefined) &&
-    !session.moshEnabled &&
-    !session.etEnabled &&
-    session.status === "connecting"
-  );
-}
-
-// Resolves the terminal session SFTP should try to reuse, preferring the session
-// that opened the panel so automatic SFTP opens do not lose MFA state on render races.
+// Resolves the terminal session SFTP should try to reuse. The focused session
+// wins once React has published it; remembered sources only cover the first
+// render before the live side-panel snapshot catches up.
 export function resolveReusableTerminalSessionIdForSftp({
   activeSessionId,
   preferredSourceSessionId,
@@ -50,20 +40,14 @@ export function resolveReusableTerminalSessionIdForSftp({
   if (!sftpActiveHost) return null;
 
   const candidateIds = Array.from(new Set([
-    preferredSourceSessionId ?? null,
     activeSessionId ?? null,
+    preferredSourceSessionId ?? null,
   ].filter((id): id is string => !!id)));
 
   for (const candidateId of candidateIds) {
     const session = sessions.find((candidate) => candidate.id === candidateId);
     if (!session) continue;
-    const isPreferredSource = candidateId === preferredSourceSessionId;
-    if (
-      !canReuseTerminalConnection(session)
-      && !(isPreferredSource && canReusePendingTerminalConnection(session))
-    ) {
-      continue;
-    }
+    if (!canReuseTerminalConnection(session)) continue;
     const sessionEndpoint = sessionHostsMap.get(session.id) ?? {
       hostname: session.hostname,
       port: session.port,

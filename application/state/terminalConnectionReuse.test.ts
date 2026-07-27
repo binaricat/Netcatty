@@ -35,7 +35,42 @@ test("non-SSH or unavailable sessions do not reuse a connection", () => {
   assert.equal(canReuseTerminalConnection(session({ etEnabled: true })), false);
 });
 
-test("SFTP source session survives the connected-status render race", () => {
+test("SFTP reuse prefers the focused session over a remembered source", () => {
+  const rememberedSession = session({ id: "remembered-session" });
+  const focusedSession = session({ id: "focused-session" });
+  const sourceSessionId = resolveReusableTerminalSessionIdForSftp({
+    activeSessionId: focusedSession.id,
+    preferredSourceSessionId: rememberedSession.id,
+    sftpActiveHost: {
+      hostname: focusedSession.hostname,
+      port: focusedSession.port,
+      username: focusedSession.username,
+    },
+    sessions: [rememberedSession, focusedSession],
+    sessionHostsMap: new Map([
+      [
+        rememberedSession.id,
+        {
+          hostname: rememberedSession.hostname,
+          port: rememberedSession.port,
+          username: rememberedSession.username,
+        },
+      ],
+      [
+        focusedSession.id,
+        {
+          hostname: focusedSession.hostname,
+          port: focusedSession.port,
+          username: focusedSession.username,
+        },
+      ],
+    ]),
+  });
+
+  assert.equal(sourceSessionId, focusedSession.id);
+});
+
+test("SFTP reuse rejects a preferred session that is still connecting", () => {
   const pendingRenderSession = session({ status: "connecting" });
   const sourceSessionId = resolveReusableTerminalSessionIdForSftp({
     activeSessionId: pendingRenderSession.id,
@@ -58,7 +93,7 @@ test("SFTP source session survives the connected-status render race", () => {
     ]),
   });
 
-  assert.equal(sourceSessionId, pendingRenderSession.id);
+  assert.equal(sourceSessionId, null);
 });
 
 test("split session clones reuse only connected SSH sources", () => {

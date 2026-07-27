@@ -1,5 +1,5 @@
-// 创建时间: 2026-07-27
-// 功能说明: 验证 SFTP 传输连接池预热策略，避免后台触发二次认证。
+// Created: 2026-07-27
+// Purpose: Verify SFTP transfer pool warmup policy avoids background MFA prompts.
 
 import assert from "node:assert/strict";
 import test from "node:test";
