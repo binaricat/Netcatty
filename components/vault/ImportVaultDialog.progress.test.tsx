@@ -5,6 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import {
   VaultImportDestinationControls,
+  VaultImportProgressPanel,
   VaultImportProgressView,
 } from "./ImportVaultDialog.tsx";
 
@@ -103,6 +104,27 @@ test("vault import progress shows SecureCRT batch file progress", () => {
   assert.match(html, /Sessions · 3 files/);
   assert.match(html, /2 of 3 files/);
   assert.match(html, /DB\.ini/);
+});
+
+test("vault import progress is shown in a non-blocking floating panel", () => {
+  const html = renderToStaticMarkup(
+    <VaultImportProgressPanel
+      progress={{
+        status: "running",
+        stage: "parsing",
+        percent: 55,
+        formatLabel: "CSV",
+        fileName: "hosts.csv",
+      }}
+      onClose={() => {}}
+      onCancel={() => {}}
+      t={t}
+    />,
+  );
+
+  assert.match(html, /data-vault-import-progress-panel/);
+  assert.doesNotMatch(html, /role="dialog"/);
+  assert.match(html, /fixed/);
 });
 
 test("vault import destination controls offer preserve, existing, and new groups", () => {

@@ -99,9 +99,6 @@ export type ImportVaultDialogProps = {
     safePreview: import("../../domain/pluginImporter").PluginImporterSafePreview;
   };
   groups?: string[];
-  progress?: VaultImportProgress | null;
-  onProgressClose?: () => void;
-  onProgressCancel?: () => void;
 };
 
 type Translate = (key: string, values?: Record<string, unknown>) => string;
@@ -327,6 +324,32 @@ export function VaultImportProgressView({
   );
 }
 
+export function VaultImportProgressPanel({
+  progress,
+  onClose,
+  onCancel,
+  t,
+}: {
+  progress: VaultImportProgress;
+  onClose: () => void;
+  onCancel?: () => void;
+  t: Translate;
+}) {
+  return (
+    <div
+      data-vault-import-progress-panel
+      className="fixed bottom-4 right-4 z-50 w-[min(24rem,calc(100vw-2rem))] rounded-2xl border border-border/70 bg-background p-4 shadow-2xl"
+    >
+      <VaultImportProgressView
+        progress={progress}
+        onClose={onClose}
+        onCancel={onCancel}
+        t={t}
+      />
+    </div>
+  );
+}
+
 export const ImportVaultDialog: React.FC<ImportVaultDialogProps> = ({
   open,
   onOpenChange,
@@ -334,9 +357,6 @@ export const ImportVaultDialog: React.FC<ImportVaultDialogProps> = ({
   onPluginPreviewCommit,
   getPluginPreviewAnalysis,
   groups = [],
-  progress = null,
-  onProgressClose,
-  onProgressCancel,
 }) => {
   const { t } = useI18n();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -458,25 +478,21 @@ export const ImportVaultDialog: React.FC<ImportVaultDialogProps> = ({
       const files = selectVaultImportFiles(format, e.target.files);
       if (files.length === 0) return;
       onFileSelected(format, files, options);
+      onOpenChange(false);
       e.target.value = "";
       pendingOptionsRef.current = undefined;
     },
-    [onFileSelected],
+    [onFileSelected, onOpenChange],
   );
 
   const handleOpenChange = useCallback(
     (newOpen: boolean) => {
-      if (!newOpen && progress?.status === "running") {
-        if (progress.stage !== "saving") onProgressCancel?.();
-        return;
-      }
       if (!newOpen) {
         setStep("format");
-        if (progress) onProgressClose?.();
       }
       pluginImporter.handleOpenChange(newOpen);
     },
-    [onProgressCancel, onProgressClose, pluginImporter, progress],
+    [pluginImporter],
   );
 
   const previewAnalysis = useMemo(
@@ -499,23 +515,7 @@ export const ImportVaultDialog: React.FC<ImportVaultDialogProps> = ({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="max-w-2xl" hideCloseButton={progress !== null}>
-        {progress ? (
-          <>
-            <DialogTitle className="sr-only">
-              {t(PROGRESS_STAGE_KEYS[progress.stage])}
-            </DialogTitle>
-            <VaultImportProgressView
-              progress={progress}
-              onCancel={onProgressCancel}
-              onClose={() => {
-                onProgressClose?.();
-                onOpenChange(false);
-              }}
-              t={t}
-            />
-          </>
-        ) : (
+      <DialogContent className="max-w-2xl">
           <>
             <DialogHeader className="text-center sm:text-center">
               <div className="mx-auto h-14 w-14 rounded-2xl bg-muted/60 border border-border/60 flex items-center justify-center">
@@ -962,7 +962,6 @@ export const ImportVaultDialog: React.FC<ImportVaultDialogProps> = ({
               )}
             </div>
           </>
-        )}
       </DialogContent>
     </Dialog>
   );

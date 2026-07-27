@@ -127,7 +127,7 @@ export function useVaultImportHandlers({
           }));
         };
 
-        setIsImportOpen(true);
+        setIsImportOpen(false);
         setImportProgress({
           status: "running",
           stage: "reading",

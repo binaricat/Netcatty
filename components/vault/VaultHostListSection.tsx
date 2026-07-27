@@ -39,7 +39,7 @@ const isRelatedTargetInside = (
 };
 
 export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext }) {
-  const { Badge, Boolean, Button, cancelInlineGroupEdit, CheckSquare, ClipboardCopy, Clock, cn, commitInlineGroupRename, ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger, Copy, displayedGroups, displayedHosts, DistroAvatar, Edit2, FileSymlink, FolderPlus, FolderTree, getDropTargetClasses, getEffectiveHostDistro, groupConfigs, groupedDisplayHosts, handleCopyCredentials, handleDuplicateHost, handleEditGroupConfig, handleEditHost, handleHostConnect, hostClickBehavior: hostClickBehaviorProp, handleUnmanageGroup, hasHostsSidePanel, hostListScrollRef, HostTreeView, isHostsSectionActive, isMultiSelectMode, lastPinnedId, LayoutGrid, managedGroupPaths, moveGroup, moveHostToGroup, onDeleteHost, Pin, pinnedHosts, pinnedRecentIds, Plug, recentHosts, reorderGroup, reorderHost, sanitizeHost, selectedGroupPath, selectedGroupPaths, selectedHostIds, sessionCount, setDeleteTargetPath, setDragOverDropTarget, setGroupDragOverDropTarget, setIsDeleteGroupOpen, setIsNewFolderOpen, setLastPinnedId, setNewFolderName, setSelectedGroupPath, setTargetParentPath, shouldHideEmptyRootHostsSection, showRecentHosts, sortMode, splitViewGridStyle, Square, Star, startInlineDeleteGroup, startInlineNewGroup, startInlineRenameGroup, t, toggleGroupSelection, toggleHostPinned, toggleHostSelection, Trash2, treeExpandedState, treeViewGroupTree, treeViewHosts, viewMode, visibleDisplayedHosts } = ctx;
+  const { Badge, Boolean, Button, cancelInlineGroupEdit, CheckSquare, ClipboardCopy, Clock, cn, commitInlineGroupRename, ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger, Copy, displayedGroups, displayedHosts, DistroAvatar, Edit2, FileSymlink, FolderPlus, FolderTree, getDropTargetClasses, getEffectiveHostDistro, groupConfigs, groupedDisplayHosts, handleCopyCredentials, handleDuplicateHost, handleEditGroupConfig, handleEditHost, handleHostConnect, hostClickBehavior: hostClickBehaviorProp, handleUnmanageGroup, hasHostsSidePanel, hostListScrollRef, HostTreeView, isHostsSectionActive, isMultiSelectMode, lastPinnedId, LayoutGrid, managedGroupPaths, moveGroup, moveHostToGroup, onDeleteHost, Pin, pinnedHosts, Plug, recentHosts, reorderGroup, reorderHost, sanitizeHost, selectedGroupPath, selectedGroupPaths, selectedHostIds, sessionCount, setDeleteTargetPath, setDragOverDropTarget, setGroupDragOverDropTarget, setIsDeleteGroupOpen, setIsNewFolderOpen, setLastPinnedId, setNewFolderName, setSelectedGroupPath, setTargetParentPath, shouldHideEmptyRootHostsSection, showRecentHosts, sortMode, splitViewGridStyle, Square, Star, startInlineDeleteGroup, startInlineNewGroup, startInlineRenameGroup, t, toggleGroupSelection, toggleHostPinned, toggleHostSelection, Trash2, treeExpandedState, treeViewGroupTree, treeViewHosts, viewMode, visibleDisplayedHosts } = ctx;
   const hostClickBehavior: HostClickBehavior = hostClickBehaviorProp === 'select' ? 'select' : 'connect';
   const multiSelectedGroupPaths: Set<string> = selectedGroupPaths ?? new Set();
   const [draggingHostId, setDraggingHostId] = React.useState<string | null>(null);
@@ -789,10 +789,7 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
 	                  ) : sortMode === "group" && groupedDisplayHosts ? (
 	                    <>
 	                        <VirtualizedGroupedHostCollection<Host>
-	                          groups={groupedDisplayHosts.map((group) => ({
-	                            ...group,
-	                            hosts: group.hosts.filter((host) => selectedGroupPath || !pinnedRecentIds.has(host.id)),
-	                          }))}
+	                          groups={groupedDisplayHosts}
 	                              itemKey={(host) => host.id}
 	                              scrollRef={hostListScrollRef}
 	                              viewMode={viewMode}

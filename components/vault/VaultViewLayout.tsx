@@ -11,6 +11,7 @@ import {
 } from "../../domain/vaultGroupSelection";
 import { STORAGE_KEY_VAULT_HOST_PANEL_WIDTH } from "@/infrastructure/config/storageKeys.ts";
 import { VaultHostListSection } from "./VaultHostListSection";
+import { VaultImportProgressPanel } from "./ImportVaultDialog";
 import {
   VaultHeaderSearch,
   VaultPageHeader,
@@ -1634,10 +1635,15 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
         onPluginPreviewCommit={handlePluginPreviewCommit}
         getPluginPreviewAnalysis={getPluginPreviewAnalysis}
         groups={allGroupPaths}
-        progress={importProgress}
-        onProgressClose={resetImportProgress}
-        onProgressCancel={cancelImport}
       />
+      {importProgress && (
+        <VaultImportProgressPanel
+          progress={importProgress}
+          onCancel={cancelImport}
+          onClose={resetImportProgress}
+          t={t}
+        />
+      )}
 
       {/* Quick Connect Wizard */}
       {isQuickConnectOpen && quickConnectTarget && (
