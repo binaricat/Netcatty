@@ -847,7 +847,7 @@ function registerHandlers(ipcMain) {
   registerAgentDiscoveryHandlers(context);
   registerAgentProcessHandlers(context);
   registerSdkStreamHandlers(context);
-  setupAntigravityBridge(ipcMain);
+  setupAntigravityBridge(ipcMain, validateSenderOrSettings);
 
   if (externalMcpController) {
     externalMcpController.registerHandlers(ipcMain, validateSenderOrSettings);

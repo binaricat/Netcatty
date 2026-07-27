@@ -1056,6 +1056,12 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
       abortControllersRef.current.set(sessionId, abortController);
       currentSession = currentSession ?? sessionsRef.current.find((session) => session.id === sessionId) ?? null;
 
+      const toolScope = {
+        type: scopeType,
+        targetId: scopeTargetId,
+        label: scopeLabel,
+      } as const;
+
       if (isExternalAgent) {
         if (!agentConfig) {
           updateMessageById(sessionId, assistantMsgId, msg => ({ ...msg, content: 'External agent not found. Please check settings.', executionStatus: 'failed' }));
@@ -1075,6 +1081,11 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
             toolIntegrationMode,
             selectedUserSkillSlugs: selectedSkillSlugs,
             permissionMode: globalPermissionMode,
+            getExecutorContext: () => buildExecutorContextForScope(toolScope),
+            scopeType,
+            scopeTargetId,
+            scopeLabel,
+            webSearchConfig,
           });
         } catch (err) {
           reportStreamError(sessionId, abortController.signal, err);
@@ -1084,11 +1095,6 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
         abortControllersRef.current.delete(sessionId);
         autoTitleSession(sessionId, trimmed);
       } else {
-        const toolScope = {
-          type: scopeType,
-          targetId: scopeTargetId,
-          label: scopeLabel,
-        } as const;
         await sendToCattyAgent(sessionId, sendScopeKey, modelPrompt, abortController, currentSession ?? undefined, assistantMsgId, {
           activeProvider: sendActiveProvider,
           activeModelId: sendActiveModelId,

@@ -44,7 +44,7 @@ function writeVarInt(buf, offset, val) {
 
 let webRequestInitialized = false;
 
-function setupAntigravityBridge() {
+function setupAntigravityBridge(ipcMain, validateSenderOrSettings) {
   if (!webRequestInitialized) {
     webRequestInitialized = true;
     const { session } = require("electron");
@@ -87,17 +87,27 @@ function setupAntigravityBridge() {
   }
 
   ipcMain.handle("netcatty:ai:antigravity:start", async (event, { binaryPath, appDataDir, chatSessionId }) => {
+    if (validateSenderOrSettings && !validateSenderOrSettings(event)) {
+      throw new Error("Unauthorized IPC sender");
+    }
+    
     const port = await findFreePort();
     const apiKey = 'test_key_' + Date.now();
 
     return new Promise((resolve, reject) => {
-      const harnessProcess = spawn(binaryPath, [], {
-        env: {
-          ...process.env,
-          ANTIGRAVITY_APP_DATA_DIR: appDataDir,
-        },
-        stdio: ['pipe', 'pipe', 'inherit']
-      });
+      let harnessProcess;
+      try {
+        harnessProcess = spawn(binaryPath, [], {
+          env: {
+            ...process.env,
+            ANTIGRAVITY_APP_DATA_DIR: appDataDir,
+          },
+          stdio: ['pipe', 'pipe', 'inherit']
+        });
+      } catch (err) {
+        reject(err);
+        return;
+      }
 
       if (!harnessProcess.stdin || !harnessProcess.stdout) {
         throw new Error('Failed to open stdio to localharness');
@@ -127,26 +137,38 @@ function setupAntigravityBridge() {
       harnessProcess.stdin.write(lengthPrefix);
       harnessProcess.stdin.write(payload);
 
-      harnessProcess.stdout.once('data', (data) => {
-        if (data.length < 4) {
-          reject(new Error("Invalid handshake response"));
-          return;
-        }
+      let buffer = Buffer.alloc(0);
+      let resolved = false;
+
+      const onData = (data) => {
+        if (resolved) return;
+        buffer = Buffer.concat([buffer, data]);
+        
+        if (buffer.length < 4) return;
+        
+        const expectedLen = buffer.readUInt32LE(0);
+        if (buffer.length < 4 + expectedLen) return;
+        
+        resolved = true;
+        harnessProcess.stdout.removeListener('data', onData);
         
         let actualApiKey = apiKey;
         let actualPort = port;
         let offset = 4;
-        while (offset < data.length) {
-          const fieldType = data[offset++];
+        const payloadData = buffer.subarray(4, 4 + expectedLen);
+        let localOffset = 0;
+        
+        while (localOffset < payloadData.length) {
+          const fieldType = payloadData[localOffset++];
           if (fieldType === 0x12) { // api_key field (field 2, length delimited)
-            const keyLen = data[offset++];
-            actualApiKey = data.toString('utf8', offset, offset + keyLen);
-            offset += keyLen;
+            const keyLen = payloadData[localOffset++];
+            actualApiKey = payloadData.toString('utf8', localOffset, localOffset + keyLen);
+            localOffset += keyLen;
           } else if (fieldType === 0x08) { // port field (field 1, varint)
             let val = 0;
             let shift = 0;
-            while (offset < data.length) {
-              const b = data[offset++];
+            while (localOffset < payloadData.length) {
+              const b = payloadData[localOffset++];
               val |= (b & 0x7F) << shift;
               shift += 7;
               if ((b & 0x80) === 0) break;
@@ -159,19 +181,33 @@ function setupAntigravityBridge() {
         
         const detectedProject = getAdcProject();
         resolve({ port: actualPort, apiKey: actualApiKey, project: detectedProject });
-      });
+      };
+      
+      harnessProcess.stdout.on('data', onData);
 
       harnessProcess.on('error', (err) => {
         console.error("[Antigravity] Process error:", err);
+        activeProcesses.delete(chatSessionId);
+        if (!resolved) {
+          reject(err);
+          resolved = true;
+        }
       });
 
       harnessProcess.on('exit', () => {
         activeProcesses.delete(chatSessionId);
+        if (!resolved) {
+          reject(new Error("Process exited before handshake"));
+          resolved = true;
+        }
       });
     });
   });
 
   ipcMain.handle("netcatty:ai:antigravity:stop", async (event, { chatSessionId }) => {
+    if (validateSenderOrSettings && !validateSenderOrSettings(event)) {
+      throw new Error("Unauthorized IPC sender");
+    }
     const harnessProcess = activeProcesses.get(chatSessionId);
     if (harnessProcess) {
       harnessProcess.kill();

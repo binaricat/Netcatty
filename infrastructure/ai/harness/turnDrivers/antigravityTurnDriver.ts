@@ -2,6 +2,7 @@ import { LocalHarnessClient } from '../../sdk/antigravity/localharnessClient';
 import type { TurnDriver, TurnInput, TurnDriverContext, TurnSteerInput, TurnSteerResult, AntigravityTurnInput, ExternalTurnContext, CattyTurnContext } from './types';
 import { generateId, getNetcattyBridge } from '../../../../components/ai/hooks/aiChatStreamingSupport';
 import { createCattyToolsFromCatalog } from '../capabilityTools';
+import { buildCattyToolApproval } from '../cattyToolApproval';
 import { isToolResultError } from '../../../../components/ai/hooks/aiChatStreamingSupport';
 import type { ExecutorContext } from '../../cattyAgent/executor';
 
@@ -47,7 +48,7 @@ export class AntigravityTurnDriver implements TurnDriver {
     );
 
     const client = new LocalHarnessClient({
-      binaryPath: input.agentConfig.customPath || '/tmp/agy-sdk/google/antigravity/bin/localharness',
+      binaryPath: (input.agentConfig as any).command || '/tmp/agy-sdk/google/antigravity/bin/localharness',
       appDataDir: (globalThis as any).process?.env?.HOME 
         ? (globalThis as any).process.env.HOME + '/.gemini/antigravity-cli'
         : '/tmp/.gemini/antigravity-cli',
@@ -108,18 +109,18 @@ export class AntigravityTurnDriver implements TurnDriver {
 
       const payloadConfig = {
         config: {
-          cascade_id: cascadeId,
-          session_continuation_mode: 'CREATE_OR_RESUME',
-          system_instructions: {
+          cascadeId: cascadeId,
+          sessionContinuationMode: 'CREATE_OR_RESUME',
+          systemInstructions: {
             custom: { part: [{ text: "You are Antigravity, integrated in Netcatty." }] }
           },
           models: [{
             name: activeModelId,
             types: ["MODEL_TYPE_TEXT"],
             ...(rawApiKey ? {
-              gemini_api_endpoint: { api_key: rawApiKey }
+              geminiApiEndpoint: { apiKey: rawApiKey }
             } : {
-              vertex_endpoint: { project: client.adcProject || '', location: "us-central1" } // Fallback to Application Default Credentials (ADC)
+              vertexEndpoint: { project: client.adcProject || '', location: "us-central1" } // Fallback to Application Default Credentials (ADC)
             })
           }],
           tools: harnessTools
@@ -145,9 +146,13 @@ export class AntigravityTurnDriver implements TurnDriver {
         });
       };
 
+      let isExpectedClose = false;
+
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       client.onClose = () => {
-        ui.reportStreamError(sessionId, signal, new Error("Antigravity process terminated unexpectedly (e.g. invalid model name or crash)"));
+        if (!isExpectedClose) {
+          ui.reportStreamError(sessionId, signal, new Error("Antigravity process terminated unexpectedly (e.g. invalid model name or crash)"));
+        }
         ui.setStreamingForScope(sessionId, false);
       };
 
@@ -169,15 +174,18 @@ export class AntigravityTurnDriver implements TurnDriver {
 
           if (step.errorMessage) {
             ui.reportStreamError(sessionId, signal, step.errorMessage);
+            isExpectedClose = true;
             client.destroy();
             return;
           }
+        }
 
-          // Bidirectional Tool Conversion Handle
-          if (step.toolCall) {
-            maybeCreateAssistantMsg();
-            const { id, name, argumentsJson: toolArgsStr } = step.toolCall;
-            const toolCallId = id || `tc_${Date.now()}`;
+        // Bidirectional Tool Conversion Handle
+        if (event.toolCall) {
+          const toolCall = event.toolCall;
+          maybeCreateAssistantMsg();
+          const { id, name, argumentsJson: toolArgsStr } = toolCall;
+          const toolCallId = id || `tc_${Date.now()}`;
             
             let parsedArgs = {};
             try {
@@ -203,6 +211,22 @@ export class AntigravityTurnDriver implements TurnDriver {
               if (!toolDefinition || typeof toolDefinition.execute !== 'function') {
                 throw new Error(`Tool ${name} not found or not executable.`);
               }
+              
+              const permissionMode = (context as CattyTurnContext).permissionMode ?? context.globalPermissionMode;
+              const approvalFn = buildCattyToolApproval({
+                permissionMode: permissionMode,
+                chatSessionId: sessionId,
+              });
+              
+              const approvalResult = await approvalFn({
+                toolCall: { toolName: name, input: parsedArgs, toolCallId },
+                context: toolsBundle.toolsContext[name] as any
+              } as any);
+
+              if (approvalResult?.type === 'denied') {
+                throw new Error(approvalResult.reason || 'User denied the tool execution.');
+              }
+
               console.log(`[TurnDriver] Executing tool ${name}...`);
               resultObj = await toolDefinition.execute!(parsedArgs, {
                 toolCallId,
@@ -246,16 +270,15 @@ export class AntigravityTurnDriver implements TurnDriver {
             client.sendJson({
               toolResponse: {
                 id: toolCallId,
-                name: name,
                 responseJson: resultStr
               }
             });
           }
-        }
 
         if (event.trajectoryStateUpdate) {
           const state = event.trajectoryStateUpdate.state;
           if (state === 'STATE_DONE' || state === 'STATE_ERROR') {
+            isExpectedClose = true;
             client.destroy();
             return;
           }
@@ -265,7 +288,7 @@ export class AntigravityTurnDriver implements TurnDriver {
           logToFile(`Sending user input: ${trimmed}`);
           // Send the user input ONLY AFTER initialization is complete!
           client.sendJson({
-            user_input: trimmed
+            userInput: trimmed
           });
         }
 

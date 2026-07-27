@@ -76,6 +76,13 @@ export interface ExternalTurnContext {
   toolIntegrationMode: AIToolIntegrationMode;
   selectedUserSkillSlugs?: string[];
   permissionMode: AIPermissionMode;
+  
+  // Fields shared with CattyTurnContext (required by antigravity localharness)
+  getExecutorContext?: () => ExecutorContext;
+  scopeType?: 'terminal' | 'workspace';
+  scopeTargetId?: string;
+  scopeLabel?: string;
+  webSearchConfig?: WebSearchConfig | null;
 }
 
 export interface CattyTurnInput {
