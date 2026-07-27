@@ -3,12 +3,17 @@ const assert = require("node:assert/strict");
 const { EventEmitter } = require("node:events");
 const { PassThrough } = require("node:stream");
 const fs = require("node:fs");
-const os = require("node:os");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
+const tempDirBridge = require("../../tempDirBridge.cjs");
+const { buildPythonInvocationArgs } = require("./pythonLauncher.cjs");
 const {
   buildAntigravityWorkerRequest,
+  cleanupAntigravityChatStorage,
+  getAntigravityChatStorageRoot,
+  isAntigravitySessionStorageReady,
   resolveAntigravityWorkerPath,
+  resolveAntigravityStorageDirs,
   runAntigravityTurn,
   translateAntigravityWorkerEvent,
 } = require("./antigravityDriver.cjs");
@@ -22,6 +27,34 @@ test("resolveAntigravityWorkerPath points packaged builds at the unpacked Python
     resolveAntigravityWorkerPath("/workspace/electron/bridges/aiBridge/sdk"),
     "/workspace/electron/bridges/aiBridge/sdk/antigravity_worker.py",
   );
+});
+
+test("Windows py launcher selects Python 3 for the SDK worker", () => {
+  assert.deepEqual(
+    buildPythonInvocationArgs("C:\\Windows\\py.exe", ["C:\\app\\antigravity_worker.py"], "win32"),
+    ["-3", "C:\\app\\antigravity_worker.py"],
+  );
+});
+
+test("Antigravity storage is isolated per chat and removed with chat cleanup", (t) => {
+  const firstChat = `antigravity-storage-a-${process.pid}-${Date.now()}`;
+  const secondChat = `antigravity-storage-b-${process.pid}-${Date.now()}`;
+  t.after(() => {
+    cleanupAntigravityChatStorage(firstChat);
+    cleanupAntigravityChatStorage(secondChat);
+  });
+
+  assert.notEqual(
+    getAntigravityChatStorageRoot(firstChat),
+    getAntigravityChatStorageRoot(secondChat),
+  );
+  assert.equal(isAntigravitySessionStorageReady(firstChat), false);
+  const dirs = resolveAntigravityStorageDirs(firstChat);
+  assert.equal(isAntigravitySessionStorageReady(firstChat), true);
+  assert.equal(fs.existsSync(dirs.saveDir), true);
+  assert.equal(fs.existsSync(dirs.appDataDir), true);
+  cleanupAntigravityChatStorage(firstChat);
+  assert.equal(isAntigravitySessionStorageReady(firstChat), false);
 });
 
 function collector() {
@@ -163,7 +196,9 @@ test("Python worker completes MCP activities from the official receive_steps con
     .find((candidate) => spawnSync(candidate, ["--version"], { stdio: "ignore" }).status === 0);
   if (!python) return t.skip("Python is not available");
 
-  const fakeRoot = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-antigravity-worker-"));
+  const netcattyTempDir = tempDirBridge.getTempDir();
+  const fakeRoot = fs.mkdtempSync(path.join(netcattyTempDir, "antigravity-worker-test-"));
+  assert.equal(path.relative(netcattyTempDir, fakeRoot).startsWith(".."), false);
   t.after(() => fs.rmSync(fakeRoot, { recursive: true, force: true }));
   const packageRoot = path.join(fakeRoot, "google", "antigravity");
   fs.mkdirSync(path.join(packageRoot, "hooks"), { recursive: true });

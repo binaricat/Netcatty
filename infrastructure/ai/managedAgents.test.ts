@@ -78,4 +78,15 @@ test('Antigravity managed config keeps its Python SDK interpreter identity', () 
     ),
     true,
   );
+  assert.equal(
+    matchesManagedAgentConfig(
+      {
+        id: 'custom-python-agent',
+        command: '/usr/bin/python3',
+        sdkBackend: 'custom-python',
+      },
+      'antigravity',
+    ),
+    false,
+  );
 });

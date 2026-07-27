@@ -104,6 +104,9 @@ function registerAgentDiscoveryHandlers(ctx) {
       const antigravityDiscovery = agent.command === "antigravity"
         ? await findAntigravitySdk(shellEnv, {
           resolve: (command) => resolveCliFromPathAsync(command, shellEnv),
+          probe: (pythonPath) => probeAntigravitySdk(pythonPath, shellEnv, {
+            apiKeyPresent: Boolean(options?.antigravityApiKeyPresent),
+          }),
         })
         : null;
       const resolvedPath = agent.command === "cursor"
@@ -117,10 +120,6 @@ function registerAgentDiscoveryHandlers(ctx) {
 
       if (agent.command === "antigravity") {
         antigravitySdkStatus = antigravityDiscovery;
-        if (options?.antigravityApiKeyPresent) {
-          antigravitySdkStatus.authenticated = true;
-          antigravitySdkStatus.authSource = "settings";
-        }
         if (!antigravitySdkStatus.available) continue;
       }
 
@@ -216,6 +215,9 @@ function registerAgentDiscoveryHandlers(ctx) {
     } else if (command === "antigravity") {
       const status = await findAntigravitySdk(shellEnv, {
         resolve: (candidate) => resolveCliFromPathAsync(candidate, shellEnv),
+        probe: (pythonPath) => probeAntigravitySdk(pythonPath, shellEnv, {
+          apiKeyPresent: Boolean(apiKeyPresent),
+        }),
       });
       resolvedPath = status.path;
     } else {
@@ -250,12 +252,9 @@ function registerAgentDiscoveryHandlers(ctx) {
     }
 
     if (command === "antigravity") {
-      const status = await probeAntigravitySdk(resolvedPath, shellEnv);
-      if (apiKeyPresent) {
-        status.authenticated = true;
-        status.authSource = "settings";
-      }
-      return status;
+      return await probeAntigravitySdk(resolvedPath, shellEnv, {
+        apiKeyPresent: Boolean(apiKeyPresent),
+      });
     }
 
     if (!resolvedPath) {

@@ -68,6 +68,8 @@ export interface AgentPathInfo {
   apiKeyOk?: boolean;
   /** True when @cursor/sdk platform package is importable. */
   sdkInstalled?: boolean;
+  /** True when the installed Antigravity SDK imports and meets the supported version. */
+  sdkReady?: boolean;
 }
 
 /** Mode-aware Cursor availability for Settings enablement. */

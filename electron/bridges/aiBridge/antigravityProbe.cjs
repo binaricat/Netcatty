@@ -1,13 +1,24 @@
 "use strict";
 
 const { spawn: defaultSpawn } = require("node:child_process");
+const { buildPythonInvocationArgs } = require("./sdk/pythonLauncher.cjs");
 
 const SDK_PROBE = [
-  "import importlib.metadata as m, json, platform",
+  "import importlib.metadata as m, json, os, platform",
   "from google.antigravity import Agent, LocalAgentConfig, types",
   "from google.antigravity.hooks import policy",
-  "print(json.dumps({'version': m.version('google-antigravity'), 'pythonVersion': platform.python_version()}))",
-].join("; ");
+  "cloud_auth_source = None",
+  "uses_cloud = os.environ.get('GOOGLE_GENAI_USE_VERTEXAI', '').lower() in ('true', '1') or os.environ.get('GOOGLE_GENAI_USE_ENTERPRISE', '').lower() in ('true', '1')",
+  "if uses_cloud and os.environ.get('GOOGLE_CLOUD_LOCATION'):",
+  "  try:",
+  "    import google.auth",
+  "    credentials, detected_project = google.auth.default()",
+  "    if credentials and (os.environ.get('GOOGLE_CLOUD_PROJECT') or detected_project):",
+  "      cloud_auth_source = 'Google Cloud'",
+  "  except Exception:",
+  "    pass",
+  "print(json.dumps({'version': m.version('google-antigravity'), 'pythonVersion': platform.python_version(), 'authSource': cloud_auth_source}))",
+].join("\n");
 const MINIMUM_SDK_VERSION = [0, 1, 8];
 const DEFAULT_PROBE_TIMEOUT_MS = 5_000;
 const DEFAULT_KILL_GRACE_MS = 750;
@@ -29,13 +40,16 @@ function getAntigravityAuth(env) {
 }
 
 async function probeAntigravitySdk(pythonPath, env = {}, deps = {}) {
-  const auth = getAntigravityAuth(env);
+  const auth = deps.apiKeyPresent
+    ? { authenticated: true, authSource: "settings" }
+    : getAntigravityAuth(env);
   if (!pythonPath) {
     return {
       path: null,
       binPath: null,
       version: null,
       installed: false,
+      sdkReady: false,
       available: false,
       ...auth,
     };
@@ -51,6 +65,7 @@ async function probeAntigravitySdk(pythonPath, env = {}, deps = {}) {
       binPath: pythonPath,
       version: null,
       installed: false,
+      sdkReady: false,
       available: false,
       ...auth,
     });
@@ -60,7 +75,11 @@ async function probeAntigravitySdk(pythonPath, env = {}, deps = {}) {
       clearTimeout(timeoutTimer);
       resolve(result);
     };
-    const child = spawn(pythonPath, ["-c", SDK_PROBE], {
+    const child = spawn(pythonPath, buildPythonInvocationArgs(
+      pythonPath,
+      ["-c", SDK_PROBE],
+      deps.platform,
+    ), {
       env,
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
@@ -79,13 +98,18 @@ async function probeAntigravitySdk(pythonPath, env = {}, deps = {}) {
       }
       try {
         const info = JSON.parse(stdout.trim());
+        const resolvedAuth = !auth.authenticated && info.authSource === "Google Cloud"
+          ? { authenticated: true, authSource: "Google Cloud" }
+          : auth;
+        const sdkReady = isSupportedAntigravityVersion(info.version);
         finish({
           path: pythonPath,
           binPath: pythonPath,
           version: `Antigravity SDK ${info.version} (Python ${info.pythonVersion})`,
           installed: true,
-          available: isSupportedAntigravityVersion(info.version),
-          ...auth,
+          sdkReady,
+          available: sdkReady && resolvedAuth.authenticated,
+          ...resolvedAuth,
         });
       } catch {
         finish(unavailable());
@@ -102,7 +126,6 @@ async function probeAntigravitySdk(pythonPath, env = {}, deps = {}) {
       killTimer.unref?.();
       finish(unavailable());
     }, timeoutMs);
-    timeoutTimer.unref?.();
   });
 }
 
@@ -110,7 +133,10 @@ async function findAntigravitySdk(env, deps = {}) {
   const resolve = deps.resolve;
   const probe = deps.probe || ((pythonPath) => probeAntigravitySdk(pythonPath, env));
   const candidates = [];
-  for (const command of ["python3", "python"]) {
+  const commands = deps.platform === "win32" || (!deps.platform && process.platform === "win32")
+    ? ["python3", "python", "py"]
+    : ["python3", "python"];
+  for (const command of commands) {
     const resolved = await resolve(command, env);
     if (resolved && !candidates.includes(resolved)) candidates.push(resolved);
   }
@@ -118,13 +144,14 @@ async function findAntigravitySdk(env, deps = {}) {
   for (const pythonPath of candidates) {
     const result = await probe(pythonPath, env);
     firstResult ||= result;
-    if (result.available) return result;
+    if (result.sdkReady) return result;
   }
   return firstResult || {
     path: null,
     binPath: null,
     version: null,
     installed: false,
+    sdkReady: false,
     available: false,
     ...getAntigravityAuth(env),
   };

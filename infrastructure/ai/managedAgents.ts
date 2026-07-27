@@ -47,6 +47,12 @@ export function matchesManagedAgentConfig(
       basename.startsWith('claude.')
     );
   }
+  if (agentKey === 'antigravity') {
+    return (
+      agent.id === 'discovered_antigravity' ||
+      getExternalAgentSdkBackend(agent) === 'antigravity'
+    );
+  }
   return (
     agent.id === `discovered_${agentKey}` ||
     getExternalAgentSdkBackend(agent) === meta.sdkBackend ||

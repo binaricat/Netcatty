@@ -11,6 +11,7 @@ const {
   resolveSdkBackendBinPath,
   resolveSdkToolIntegrationMode,
   shouldCacheSdkRuntimeModels,
+  shouldReplaySdkHistory,
 } = require("./sdkStreamHandlers.cjs");
 
 test("resolveBackendKey maps backend command/value to registry key", () => {
@@ -26,6 +27,27 @@ test("Antigravity always uses the scoped MCP tool path", () => {
   assert.equal(resolveSdkToolIntegrationMode("antigravity", "skills"), "mcp");
   assert.equal(resolveSdkToolIntegrationMode("antigravity", "mcp"), "mcp");
   assert.equal(resolveSdkToolIntegrationMode("claude", "skills"), "skills");
+});
+
+test("Antigravity does not replay history when a persisted SDK session resumes", () => {
+  assert.equal(shouldReplaySdkHistory({
+    backendKey: "antigravity",
+    runtime: "sdk",
+    resumeSessionId: "persisted-session",
+    hasInMemorySession: false,
+  }), false);
+  assert.equal(shouldReplaySdkHistory({
+    backendKey: "antigravity",
+    runtime: "sdk",
+    resumeSessionId: undefined,
+    hasInMemorySession: false,
+  }), true);
+  assert.equal(shouldReplaySdkHistory({
+    backendKey: "claude",
+    runtime: "sdk",
+    resumeSessionId: "persisted-session",
+    hasInMemorySession: false,
+  }), true);
 });
 
 test("resolveBackendKey returns null for unknown", () => {

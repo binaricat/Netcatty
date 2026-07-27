@@ -2,10 +2,12 @@
 
 const path = require("node:path");
 const fs = require("node:fs");
+const crypto = require("node:crypto");
 const readline = require("node:readline");
 const { spawn: defaultSpawn } = require("node:child_process");
 const tempDirBridge = require("../../tempDirBridge.cjs");
 const { mcpEnvPairsToObject } = require("./injectMcp.cjs");
+const { buildPythonInvocationArgs } = require("./pythonLauncher.cjs");
 
 function resolveAntigravityWorkerPath(baseDir = __dirname) {
   const bundledPath = path.join(baseDir, "antigravity_worker.py");
@@ -56,13 +58,30 @@ function buildAntigravityWorkerRequest({
   return request;
 }
 
-function resolveAntigravityStorageDirs() {
-  const root = path.join(tempDirBridge.getTempDir(), "antigravity-sdk");
-  const saveDir = path.join(root, "sessions");
-  const appDataDir = path.join(root, "app-data");
+function getAntigravityChatStorageRoot(chatSessionId) {
+  const chatHash = crypto.createHash("sha256")
+    .update(String(chatSessionId || ""))
+    .digest("hex");
+  return path.join(tempDirBridge.getTempDir(), "antigravity-sdk", "chats", chatHash);
+}
+
+function resolveAntigravityStorageDirs(chatSessionId) {
+  const chatRoot = getAntigravityChatStorageRoot(chatSessionId);
+  const saveDir = path.join(chatRoot, "sessions");
+  const appDataDir = path.join(chatRoot, "app-data");
   fs.mkdirSync(saveDir, { recursive: true, mode: 0o700 });
   fs.mkdirSync(appDataDir, { recursive: true, mode: 0o700 });
   return { saveDir, appDataDir };
+}
+
+function isAntigravitySessionStorageReady(chatSessionId) {
+  const chatRoot = getAntigravityChatStorageRoot(chatSessionId);
+  return fs.existsSync(path.join(chatRoot, "sessions"))
+    && fs.existsSync(path.join(chatRoot, "app-data"));
+}
+
+function cleanupAntigravityChatStorage(chatSessionId) {
+  fs.rmSync(getAntigravityChatStorageRoot(chatSessionId), { recursive: true, force: true });
 }
 
 function translateAntigravityWorkerEvent(event, emitter) {
@@ -118,7 +137,11 @@ async function runAntigravityTurn(options, deps = {}) {
 
   const resolveStorageDirs = deps.resolveStorageDirs || resolveAntigravityStorageDirs;
   const storageDirs = resolveStorageDirs(options.chatSessionId);
-  const child = spawn(pythonPath, [workerPath], {
+  const child = spawn(pythonPath, buildPythonInvocationArgs(
+    pythonPath,
+    [workerPath],
+    deps.platform,
+  ), {
     cwd: options.cwd || process.cwd(),
     env: options.env || process.env,
     stdio: ["pipe", "pipe", "pipe"],
@@ -189,6 +212,9 @@ async function listAntigravityModels() {
 
 module.exports = {
   buildAntigravityWorkerRequest,
+  cleanupAntigravityChatStorage,
+  getAntigravityChatStorageRoot,
+  isAntigravitySessionStorageReady,
   listAntigravityModels,
   resolveAntigravityWorkerPath,
   resolveAntigravityStorageDirs,

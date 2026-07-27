@@ -84,6 +84,13 @@ function shouldCacheSdkRuntimeModels(_backendKey) {
   return true;
 }
 
+function shouldReplaySdkHistory({ backendKey, runtime, resumeSessionId, hasInMemorySession }) {
+  if (runtime === "app-server" || backendKey === "antigravity") {
+    return !resumeSessionId;
+  }
+  return !hasInMemorySession;
+}
+
 function normalizeSdkListModelsResult(raw) {
   const rawModels = Array.isArray(raw) ? raw : raw?.models;
   const currentModelId = Array.isArray(raw) ? null : raw?.currentModelId || null;
@@ -527,11 +534,16 @@ function registerSdkStreamHandlers(ctx) {
             cursorSessionAuthMode,
             cursorCliMode,
           );
+          const driver = getDriver(backendKey);
+          const sessionStorageReady = typeof driver.isSessionStorageReady === "function"
+            ? driver.isSessionStorageReady(chatSessionId)
+            : true;
+          if (!sessionStorageReady) sdkSessionIds.delete(sdkSessionKey);
           const hasInMemorySession = sdkSessionIds.has(sdkSessionKey);
           const resumeSessionId = resolveSdkResumeSessionId({
             sdkSessionIds,
             sdkSessionKey,
-            existingSessionId,
+            existingSessionId: sessionStorageReady ? existingSessionId : undefined,
             backendKey,
             binPath: sessionBinPath,
             runtime: codexRuntime,
@@ -543,7 +555,12 @@ function registerSdkStreamHandlers(ctx) {
           const turnPrompt = buildSdkTurnPrompt({
             prompt,
             historyMessages: payload?.historyMessages,
-            replayHistory: codexRuntime === "app-server" ? !resumeSessionId : !hasInMemorySession,
+            replayHistory: shouldReplaySdkHistory({
+              backendKey,
+              runtime: codexRuntime,
+              resumeSessionId,
+              hasInMemorySession,
+            }),
             attachments: payload?.images,
             onStagedAttachment: (attachment) => stagedAttachments.push(attachment),
           });
@@ -563,7 +580,6 @@ function registerSdkStreamHandlers(ctx) {
             userSkillsContext,
           });
 
-          const driver = getDriver(backendKey);
           const driverEmitter = {
             ...emitter,
             sessionId(sessionId) {
@@ -839,6 +855,7 @@ function registerSdkStreamHandlers(ctx) {
       mcpServerBridge.cancelPtyExecsForSession(chatSessionId);
       mcpServerBridge.cancelWorkerBackgroundJobsForSession?.(chatSessionId);
       deleteSdkSessionKeysForChat(sdkSessionIds, chatSessionId);
+      await Promise.resolve(getDriver("antigravity").cleanupChatSession?.(chatSessionId));
       await codexAppServerRuntime.cleanupChatSession(chatSessionId);
       await mcpServerBridge.cleanupScopedMetadata(chatSessionId);
       return { ok: true };
@@ -897,6 +914,7 @@ module.exports = {
   resolveSdkResumeSessionId,
   expireSiblingCursorCliModeSessions,
   shouldCacheSdkRuntimeModels,
+  shouldReplaySdkHistory,
   normalizeHistoryMessages,
   buildSdkTurnPrompt,
 };

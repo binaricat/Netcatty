@@ -40,6 +40,12 @@ const DRIVER_REGISTRY = {
     async listModels() {
       return antigravity.listAntigravityModels();
     },
+    cleanupChatSession(chatSessionId) {
+      antigravity.cleanupAntigravityChatStorage(chatSessionId);
+    },
+    isSessionStorageReady(chatSessionId) {
+      return antigravity.isAntigravitySessionStorageReady(chatSessionId);
+    },
   },
   claude: {
     async runTurn(ctx) {

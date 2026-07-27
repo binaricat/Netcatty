@@ -55,6 +55,10 @@ import { WebSearchSettings } from "./ai/WebSearchSettings";
 import { QuickMessagesSettings } from "./ai/QuickMessagesSettings";
 import type { AIQuickMessage } from "../../../infrastructure/ai/quickMessages";
 import { encryptField } from "../../../infrastructure/persistence/secureFieldAdapter";
+import {
+  encryptAntigravityApiKey,
+  updateAntigravityAgentCredential,
+} from "../../../application/state/antigravityAgentSettings";
 import { CursorSdkCard } from "./ai/CursorSdkCard";
 import { AntigravitySdkCard } from "./ai/AntigravitySdkCard";
 import {
@@ -540,32 +544,18 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
 
   const handleSaveAntigravityApiKey = useCallback(async (apiKey: string) => {
     const trimmed = apiKey.trim();
-    const encrypted = trimmed ? await encryptField(trimmed) : undefined;
+    const encrypted = await encryptAntigravityApiKey(trimmed);
     const result = await resolveAgentPath("antigravity", antigravityCustomPath, {
       apiKeyPresent: Boolean(trimmed),
       commandSource: antigravityCustomPath.trim() ? "manual" : "auto",
     });
-    setExternalAgents((prev) => {
-      const existing = prev.find((agent) => agent.id === "discovered_antigravity");
-      const others = prev.filter((agent) => agent.id !== "discovered_antigravity");
-      if (!encrypted && !existing) return prev;
-      const nextAgent: ExternalAgentConfig = {
-        ...(existing ?? {
-          id: "discovered_antigravity",
-          name: "Google Antigravity",
-          command: result?.path || antigravityPathInfo?.path || antigravityCustomPath || "python3",
-          args: [],
-          icon: "gemini",
-          sdkBackend: "antigravity",
-          enabled: true,
-        }),
-        apiKey: encrypted,
-        command: result?.path || existing?.command || antigravityPathInfo?.path || antigravityCustomPath || "python3",
-        commandSource: antigravityCustomPath.trim() ? "manual" : "auto",
-        available: Boolean(result?.available),
-      };
-      return [...others, nextAgent];
-    });
+    setExternalAgents((prev) => updateAntigravityAgentCredential(prev, {
+      encryptedApiKey: encrypted,
+      resolvedPath: result?.path,
+      currentPath: antigravityPathInfo?.path,
+      customPath: antigravityCustomPath,
+      available: Boolean(result?.available),
+    }));
   }, [antigravityCustomPath, antigravityPathInfo?.path, resolveAgentPath, setExternalAgents]);
 
   const handleCursorAuthModeChange = useCallback((mode: CursorAuthMode) => {
