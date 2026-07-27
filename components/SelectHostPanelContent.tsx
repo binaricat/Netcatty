@@ -315,9 +315,16 @@ export const SelectHostPanelContent: React.FC<SelectHostPanelContentProps> = ({
   const activeNavKey = activeNavEntry?.key ?? null;
   const activeDescendantId = activeNavEntry ? optionDomId(clampedNavIndex) : undefined;
 
+  // Opening a group / changing filters must start at the first entry; otherwise a
+  // deep prior cursor scrolls the new list partway down and hides its top rows.
+  useEffect(() => {
+    setActiveNavIndex(0);
+  }, [currentPath, searchQuery, selectedTags, sortMode]);
+
+  // Inventory-only shrinkage keeps the prior cursor when still in range.
   useEffect(() => {
     setActiveNavIndex((prev) => clampListIndex(prev, navigable.length));
-  }, [navigable.length, currentPath, searchQuery, selectedTags, sortMode]);
+  }, [navigable.length]);
 
   useEffect(() => {
     const entry = navigable[clampListIndex(activeNavIndex, navigable.length)];

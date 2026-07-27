@@ -34,6 +34,15 @@ test('SelectHostPanelContent virtualizes with listbox keyboard model', () => {
   // One listbox tab stop — not per-host tabIndex under virtualization.
   assert.match(source, /role="listbox"[\s\S]*tabIndex=\{0\}/);
   assert.doesNotMatch(source, /data-host-id=\{host\.id\}[\s\S]{0,120}tabIndex=\{0\}/);
+  // Path/filter changes must reset the cursor; length-only shrinks still clamp.
+  assert.match(
+    source,
+    /setActiveNavIndex\(0\);\s*\}, \[currentPath, searchQuery, selectedTags, sortMode\]/,
+  );
+  assert.match(
+    source,
+    /setActiveNavIndex\(\(prev\) => clampListIndex\(prev, navigable\.length\)\);\s*\}, \[navigable\.length\]/,
+  );
 });
 
 test('QuickSwitcher virtualizes categorized rows and clamps empty-list keyboard', () => {
