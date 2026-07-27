@@ -228,6 +228,7 @@ const SIDE_PANEL_STABLE_CTX_KEYS = [
   'sftpDefaultViewMode',
   'sftpInitialLocationForTab',
   'sftpPendingUploadsForTab',
+  'sftpSourceSessionIdForTab',
   'handleSftpCurrentPathChange',
   'sftpDoubleClickBehavior',
   'sftpAutoSync',

@@ -4,7 +4,7 @@ import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 
 import { useActiveTabId } from '../../application/state/activeTabStore';
 import { sessionCapabilitiesStore } from '../../application/state/sessionCapabilitiesStore';
 import { useSystemManagerBackend } from '../../application/state/useSystemManagerBackend';
-import { canReuseTerminalConnection } from '../../application/state/terminalConnectionReuse';
+import { resolveReusableTerminalSessionIdForSftp } from '../../application/state/terminalConnectionReuse';
 import { resolveSystemSidebarSession } from '../../domain/systemManager/resolveSystemSession';
 import type { TerminalContextReader } from '../../domain/terminalContextRead';
 import { useSystemCapabilitiesWarmup } from '../systemManager/hooks/useSystemManager';
@@ -35,6 +35,7 @@ export function TerminalLayerTabBridge({ stableRef }: { stableRef: StableRef }) 
   const sessions = s.sessions as TerminalSession[];
   const sessionHostsMap = s.sessionHostsMap as Map<string, Host>;
   const sftpHostForTab = s.sftpHostForTab as Map<string, Host>;
+  const sftpSourceSessionIdForTab = s.sftpSourceSessionIdForTab as Map<string, string>;
   const sidePanelOpenTabs = s.sidePanelOpenTabs as Map<string, SidePanelTab>;
   const showHostTreeSidebar = s.showHostTreeSidebar as boolean | undefined;
 
@@ -127,18 +128,14 @@ export function TerminalLayerTabBridge({ stableRef }: { stableRef: StableRef }) 
 
   const activeTerminalSessionIdForSftp = useMemo((): string | null => {
     if (!isSftpOpenForCurrentTab || !sftpActiveHost) return null;
-    const sessionId = activeWorkspace ? focusedSessionId : activeSession?.id;
-    if (!sessionId) return null;
-    const session = sessions.find((candidate) => candidate.id === sessionId);
-    if (!session || !canReuseTerminalConnection(session)) return null;
-    const sessionHost = sessionHostsMap.get(session.id);
-    if (!sessionHost) return null;
-    const sameEndpoint =
-      sessionHost.hostname === sftpActiveHost.hostname
-      && (sessionHost.port || 22) === (sftpActiveHost.port || 22)
-      && (sessionHost.username || 'root') === (sftpActiveHost.username || 'root');
-    return sameEndpoint ? session.id : null;
-  }, [activeSession?.id, activeWorkspace, focusedSessionId, isSftpOpenForCurrentTab, sessions, sessionHostsMap, sftpActiveHost]);
+    return resolveReusableTerminalSessionIdForSftp({
+      activeSessionId: activeWorkspace ? focusedSessionId : activeSession?.id,
+      preferredSourceSessionId: activeTabId ? sftpSourceSessionIdForTab.get(activeTabId) ?? null : null,
+      sftpActiveHost,
+      sessions,
+      sessionHostsMap,
+    });
+  }, [activeSession?.id, activeTabId, activeWorkspace, focusedSessionId, isSftpOpenForCurrentTab, sessions, sessionHostsMap, sftpActiveHost, sftpSourceSessionIdForTab]);
 
   const linkedTerminalSessionIdForSftp = useMemo((): string | null => {
     if (!isSftpOpenForCurrentTab) return null;
@@ -561,6 +558,7 @@ export function TerminalLayerTabBridge({ stableRef }: { stableRef: StableRef }) 
     sftpFollowTerminalCwd: s.sftpFollowTerminalCwd,
     sftpInitialLocationForTab: s.sftpInitialLocationForTab,
     sftpPendingUploadsForTab: s.sftpPendingUploadsForTab,
+    sftpSourceSessionIdForTab,
     sftpShowHiddenFiles: s.sftpShowHiddenFiles,
     SftpSidePanel: s.SftpSidePanel,
     sftpUseCompressedUpload: s.sftpUseCompressedUpload,
@@ -635,6 +633,7 @@ export function TerminalLayerTabBridge({ stableRef }: { stableRef: StableRef }) 
     s.terminalSettings,
     showHostTreeSidebar,
     sftpActiveHost,
+    sftpSourceSessionIdForTab,
     s.sftpFollowTerminalCwd,
     themeState,
     workspaceById,

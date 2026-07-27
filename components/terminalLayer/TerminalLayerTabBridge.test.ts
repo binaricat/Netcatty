@@ -32,6 +32,11 @@ test('terminal layer bridge passes vault open callbacks into the side panel cont
   assert.match(source, /onOpenVaultSectionFromChat: s\.onOpenVaultSectionFromChat/);
 });
 
+test('terminal layer bridge prefers the remembered SFTP source session', () => {
+  assert.match(source, /const sftpSourceSessionIdForTab = s\.sftpSourceSessionIdForTab/);
+  assert.match(source, /preferredSourceSessionId: activeTabId \? sftpSourceSessionIdForTab\.get\(activeTabId\) \?\? null : null/);
+});
+
 test('terminal layer bridge updates side panel live state after render', () => {
   assert.match(source, /const sidePanelLiveSnapshot = useMemo<SidePanelLiveSnapshot>/);
   assert.match(

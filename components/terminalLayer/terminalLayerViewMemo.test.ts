@@ -237,6 +237,25 @@ test("terminal layer side panel stable ctx re-renders when session transport fla
   );
 });
 
+test("terminal layer side panel stable ctx re-renders when remembered SFTP source changes", () => {
+  const baseCtx = {
+    mountedSftpTabIds: ["workspace-1"],
+    sidePanelOpenTabs: new Map([["workspace-1", "sftp"]]),
+    sftpSourceSessionIdForTab: new Map([["workspace-1", "session-1"]]),
+  };
+
+  assert.equal(
+    terminalLayerSidePanelStableCtxEqual(
+      baseCtx,
+      {
+        ...baseCtx,
+        sftpSourceSessionIdForTab: new Map([["workspace-1", "session-2"]]),
+      },
+    ),
+    false,
+  );
+});
+
 test("terminal layer side panel re-renders when linked terminal cwd changes", () => {
   const baseCtx = {
     mountedSftpTabIds: ["workspace-1"],

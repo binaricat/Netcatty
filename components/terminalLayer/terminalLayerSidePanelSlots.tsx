@@ -61,6 +61,7 @@ function SidePanelSftpSlotInner({
     handleAddKnownHost,
     sftpDefaultViewMode,
     sftpHostForTab,
+    sftpSourceSessionIdForTab,
     sftpInitialLocationForTab,
     sftpPendingUploadsForTab,
     handleSftpInitialLocationApplied,
@@ -86,6 +87,10 @@ function SidePanelSftpSlotInner({
   const panelActiveHost = isVisible
     ? (live.sftpActiveHost ?? storedSftpHost)
     : storedSftpHost;
+  const rememberedSourceSessionId = sftpSourceSessionIdForTab.get(tabId) ?? null;
+  const panelActiveSessionId = isVisible
+    ? (live.activeTerminalSessionIdForSftp ?? rememberedSourceSessionId)
+    : null;
 
   const handleFollowTerminalCwdChange = useCallback((enabled: boolean, visibleHost?: Host | null) => {
     const isActive = activeTabStore.getActiveTabId() === tabId;
@@ -129,13 +134,13 @@ function SidePanelSftpSlotInner({
       handleSftpCurrentPathChange(
         getSftpCurrentPathMemoryKey({
           tabId,
-          activeTerminalSessionIdForSftp: live.activeTerminalSessionIdForSftp,
+          activeTerminalSessionIdForSftp: panelActiveSessionId,
           focusedSessionId: live.focusedSessionId,
         }),
         location,
       );
     },
-    [handleSftpCurrentPathChange, live.activeTerminalSessionIdForSftp, live.focusedSessionId, tabId],
+    [handleSftpCurrentPathChange, live.focusedSessionId, panelActiveSessionId, tabId],
   );
 
   const handleActiveTransfersChange = useCallback(
@@ -159,7 +164,7 @@ function SidePanelSftpSlotInner({
         onAddKnownHost={handleAddKnownHost}
         sftpDefaultViewMode={sftpDefaultViewMode}
         activeHost={panelActiveHost}
-        activeSessionId={isVisible ? live.activeTerminalSessionIdForSftp : null}
+        activeSessionId={panelActiveSessionId}
         initialLocation={isVisible ? (sftpInitialLocationForTab.get(tabId) ?? null) : null}
         onInitialLocationApplied={handleInitialLocationApplied}
         onCurrentPathChange={handleCurrentPathChange}

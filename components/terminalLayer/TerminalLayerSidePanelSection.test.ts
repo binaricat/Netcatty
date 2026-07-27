@@ -110,6 +110,14 @@ test('system monitoring only pauses for hidden remote tabs when hibernation is e
   assert.match(source, /isVisible=\{keepSystemWorkActive\}/);
 });
 
+test('SFTP side panel uses remembered source session before live state catches up', () => {
+  const source = readFileSync(new URL('./terminalLayerSidePanelSlots.tsx', import.meta.url), 'utf8');
+
+  assert.match(source, /const rememberedSourceSessionId = sftpSourceSessionIdForTab\.get\(tabId\) \?\? null/);
+  assert.match(source, /const panelActiveSessionId = isVisible\s*\?\s*\(live\.activeTerminalSessionIdForSftp \?\? rememberedSourceSessionId\)\s*:\s*null/);
+  assert.match(source, /activeSessionId=\{panelActiveSessionId\}/);
+});
+
 test('side panel tab bar and borders use inline resolved terminal theme colors', () => {
   const sectionSource = readFileSync(new URL('./TerminalLayerSidePanelSection.tsx', import.meta.url), 'utf8');
 

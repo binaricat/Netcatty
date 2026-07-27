@@ -466,6 +466,11 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
         next.set(tabId, hostWithOverrides);
         return next;
       });
+      setSftpSourceSessionIdForTab(prev => {
+        const next = new Map(prev);
+        next.set(tabId, sessionId);
+        return next;
+      });
     } else if (targetPanel === 'ai') {
       setAiMountedTabIds((prev) => addMountedSidePanelTabId(prev, tabId));
     } else if (targetPanel === 'scripts') {
@@ -605,6 +610,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   const [sftpPendingUploadsForTab, setSftpPendingUploadsForTab] = useState<
     Map<string, PendingSftpUpload>
   >(new Map());
+  const [sftpSourceSessionIdForTab, setSftpSourceSessionIdForTab] = useState<Map<string, string>>(new Map());
   const [pendingTerminalSelectionForAI, setPendingTerminalSelectionForAI] =
     useState<PendingTerminalSelectionForAI | null>(null);
   const [notesOpenNoteByTab, setNotesOpenNoteByTab] = useState<Map<string, { noteId: string; requestId: number }>>(new Map());
@@ -661,6 +667,12 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       return next;
     });
     setSftpInitialLocationForTab(prev => {
+      if (!prev.has(tabId)) return prev;
+      const next = new Map(prev);
+      next.delete(tabId);
+      return next;
+    });
+    setSftpSourceSessionIdForTab(prev => {
       if (!prev.has(tabId)) return prev;
       const next = new Map(prev);
       next.delete(tabId);
@@ -794,6 +806,18 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
         next.delete(tabId);
       } else {
         next.set(tabId, host);
+      }
+      return next;
+    });
+
+    setSftpSourceSessionIdForTab(prev => {
+      const next = new Map(prev);
+      if (isClosing && !keepSftpMounted) {
+        next.delete(tabId);
+      } else if (sourceSessionId) {
+        next.set(tabId, sourceSessionId);
+      } else {
+        next.delete(tabId);
       }
       return next;
     });
@@ -1310,6 +1334,15 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
         const next = new Map(prev);
         if (effectiveInitialPath) {
           next.set(tabId, { hostId: host.id, path: effectiveInitialPath });
+        } else {
+          next.delete(tabId);
+        }
+        return next;
+      });
+      setSftpSourceSessionIdForTab(prev => {
+        const next = new Map(prev);
+        if (sourceSessionId) {
+          next.set(tabId, sourceSessionId);
         } else {
           next.delete(tabId);
         }
@@ -1954,6 +1987,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     sftpHostForTab,
     sftpInitialLocationForTab,
     sftpPendingUploadsForTab,
+    sftpSourceSessionIdForTab,
     sftpShowHiddenFiles,
     SftpSidePanel,
     sftpUseCompressedUpload,

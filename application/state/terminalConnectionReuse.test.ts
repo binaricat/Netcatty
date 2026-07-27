@@ -6,6 +6,7 @@ import {
   canReuseTerminalConnection,
   createCopiedTerminalSessionClone,
   createSplitTerminalSessionClone,
+  resolveReusableTerminalSessionIdForSftp,
 } from "./terminalConnectionReuse";
 
 const session = (overrides: Partial<TerminalSession> = {}): TerminalSession => ({
@@ -32,6 +33,32 @@ test("non-SSH or unavailable sessions do not reuse a connection", () => {
   assert.equal(canReuseTerminalConnection(session({ protocol: "telnet" })), false);
   assert.equal(canReuseTerminalConnection(session({ moshEnabled: true })), false);
   assert.equal(canReuseTerminalConnection(session({ etEnabled: true })), false);
+});
+
+test("SFTP source session survives the connected-status render race", () => {
+  const pendingRenderSession = session({ status: "connecting" });
+  const sourceSessionId = resolveReusableTerminalSessionIdForSftp({
+    activeSessionId: pendingRenderSession.id,
+    preferredSourceSessionId: pendingRenderSession.id,
+    sftpActiveHost: {
+      hostname: pendingRenderSession.hostname,
+      port: pendingRenderSession.port,
+      username: pendingRenderSession.username,
+    },
+    sessions: [pendingRenderSession],
+    sessionHostsMap: new Map([
+      [
+        pendingRenderSession.id,
+        {
+          hostname: pendingRenderSession.hostname,
+          port: pendingRenderSession.port,
+          username: pendingRenderSession.username,
+        },
+      ],
+    ]),
+  });
+
+  assert.equal(sourceSessionId, pendingRenderSession.id);
 });
 
 test("split session clones reuse only connected SSH sources", () => {
