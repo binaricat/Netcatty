@@ -102,44 +102,21 @@ export function buildPluginPaletteItems(
 }
 import { DistroAvatar } from "./DistroAvatar";
 import { Input } from "./ui/input";
-import { ScrollArea } from "./ui/scroll-area";
+import {
+  VariableSizeVirtualList,
+  type VariableSizeVirtualListHandle,
+} from "./ui/VariableSizeVirtualList";
+import { clampListIndex, stepListIndex } from "./ui/virtualListMath";
 
 // Compute once at module level
 const IS_MAC = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
 
-// Memoized host item component to prevent unnecessary re-renders
-const HostItem = memo(({
-  host,
-  isSelected,
-  isKeyboardNavigating,
-  selectedItemRef,
-  onSelect,
-}: {
-  host: Host;
-  isSelected: boolean;
-  isKeyboardNavigating: boolean;
-  selectedItemRef?: React.RefCallback<HTMLDivElement>;
-  onSelect: (host: Host) => void;
-}) => (
-  <div
-    ref={selectedItemRef}
-    className={`flex items-center justify-between px-4 py-2.5 cursor-pointer transition-colors ${getQuickSwitcherRowStateClass(isSelected, isKeyboardNavigating)}`}
-    onClick={() => onSelect(host)}
-  >
-    <div className="flex items-center gap-3 min-w-0">
-      <DistroAvatar
-        host={host}
-        fallback={host.label.slice(0, 2).toUpperCase()}
-        size="sm"
-      />
-      <span className="text-sm font-medium truncate">{host.label}</span>
-    </div>
-    <div className="text-[11px] text-muted-foreground">
-      {host.group ? `Personal / ${host.group}` : "Personal"}
-    </div>
-  </div>
-));
-HostItem.displayName = "HostItem";
+const QS_ROW_HEIGHT = 44;
+const QS_HEADER_HEIGHT = 32;
+
+type QuickSwitcherVisualRow =
+  | { kind: "header"; key: string; label: string }
+  | { kind: "item"; key: string; item: QuickSwitcherItem; itemIndex: number };
 
 interface QuickSwitcherProps {
   isOpen: boolean;
@@ -209,10 +186,7 @@ const QuickSwitcherInner: React.FC<QuickSwitcherProps> = ({
   const isKeyboardNavigatingRef = useRef(true);
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const selectedItemRef = useRef<HTMLElement>(null);
-  const setSelectedItemRef = useCallback((element: HTMLElement | null) => {
-    selectedItemRef.current = element;
-  }, []);
+  const listRef = useRef<VariableSizeVirtualListHandle>(null);
   const handlePointerHover = useCallback((movementX: number, movementY: number) => {
     if (!shouldUseQuickSwitcherPointerNavigation(movementX, movementY)) return;
     if (!isKeyboardNavigatingRef.current) return;
@@ -294,70 +268,103 @@ const QuickSwitcherInner: React.FC<QuickSwitcherProps> = ({
     trimmedQuery,
   ), [pluginContributions.snapshot.plugins, trimmedQuery]);
 
-  // Always show categorized view (Hosts/Tabs/Quick connect)
-  const showCategorized = true;
-
-  // Memoize flat items list and index map
-  const { flatItems, itemIndexMap } = useMemo(() => {
+  // Memoize flat selectable items + visual rows (headers + items) for virtualization.
+  const { flatItems, visualRows, itemIndexToVisualIndex } = useMemo(() => {
     const items: QuickSwitcherItem[] = [];
+    const visual: QuickSwitcherVisualRow[] = [];
+    const itemToVisual = new Map<number, number>();
 
-    if (showCategorized) {
-      // Hosts
-      results.forEach((host) =>
-        items.push({ type: "host", id: host.id, data: host }),
-      );
-      // Tabs (built-in + sessions + workspaces)
-      builtInTabs.forEach((tabId) => {
-        items.push({ type: "tab", id: tabId });
+    const pushHeader = (key: string, label: string) => {
+      visual.push({ kind: "header", key, label });
+    };
+    const pushItem = (item: QuickSwitcherItem) => {
+      const itemIndex = items.length;
+      items.push(item);
+      itemToVisual.set(itemIndex, visual.length);
+      visual.push({
+        kind: "item",
+        key: `${item.type}:${item.id}`,
+        item,
+        itemIndex,
       });
-      filteredOrphanSessions.forEach((s) =>
-        items.push({ type: "tab", id: s.id, data: s }),
-      );
-      filteredWorkspaces.forEach((w) =>
-        items.push({ type: "workspace", id: w.id, data: w }),
-      );
-      // Local shells (or fallback action if discovery not ready)
-      if (filteredShells.length > 0) {
-        filteredShells.forEach((shell) =>
-          items.push({ type: "shell", id: shell.id }),
-        );
-      } else if (shouldShowLocalTerminalFallback) {
-        items.push({ type: "action", id: "local-terminal" });
-      }
-      items.push(...pluginPaletteItems);
-    } else {
-      // Recent connections only
+    };
+
+    if (results.length > 0) {
+      pushHeader("header:hosts", "Hosts");
       results.forEach((host) =>
-        items.push({ type: "host", id: host.id, data: host }),
+        pushItem({ type: "host", id: host.id, data: host }),
       );
-      // Also include matching shells in search results
-      filteredShells.forEach((shell) =>
-        items.push({ type: "shell", id: shell.id }),
-      );
-      items.push(...pluginPaletteItems);
     }
 
-    // Build index map for O(1) lookup
-    const indexMap = new Map<string, number>();
-    items.forEach((item, idx) => {
-      indexMap.set(`${item.type}:${item.id}`, idx);
-    });
+    const hasTabsSection =
+      builtInTabs.length > 0
+      || filteredOrphanSessions.length > 0
+      || filteredWorkspaces.length > 0;
+    if (hasTabsSection) {
+      pushHeader("header:tabs", "Tabs");
+      builtInTabs.forEach((tabId) => {
+        pushItem({ type: "tab", id: tabId });
+      });
+      filteredWorkspaces.forEach((w) =>
+        pushItem({ type: "workspace", id: w.id, data: w }),
+      );
+      filteredOrphanSessions.forEach((s) =>
+        pushItem({ type: "tab", id: s.id, data: s }),
+      );
+    }
 
-    return { flatItems: items, itemIndexMap: indexMap };
-  }, [showCategorized, results, builtInTabs, filteredOrphanSessions, filteredWorkspaces, filteredShells, shouldShowLocalTerminalFallback, pluginPaletteItems]);
+    if (filteredShells.length > 0) {
+      pushHeader("header:shells", t("qs.localShells"));
+      filteredShells.forEach((shell) =>
+        pushItem({ type: "shell", id: shell.id }),
+      );
+    } else if (shouldShowLocalTerminalFallback) {
+      pushHeader("header:shells", t("qs.localShells"));
+      pushItem({ type: "action", id: "local-terminal" });
+    }
 
-  // O(1) index lookup
-  const getItemIndex = useCallback((type: string, id: string) => {
-    return itemIndexMap.get(`${type}:${id}`) ?? -1;
-  }, [itemIndexMap]);
+    if (pluginPaletteItems.length > 0) {
+      pushHeader("header:plugins", t("settings.tab.plugins"));
+      pluginPaletteItems.forEach((item) => pushItem(item));
+    }
 
-  const selectedItem = flatItems[selectedIndex];
-  const selectedItemKey = selectedItem ? `${selectedItem.type}:${selectedItem.id}` : '';
+    return {
+      flatItems: items,
+      visualRows: visual,
+      itemIndexToVisualIndex: itemToVisual,
+    };
+  }, [
+    builtInTabs,
+    filteredOrphanSessions,
+    filteredShells,
+    filteredWorkspaces,
+    pluginPaletteItems,
+    results,
+    shouldShowLocalTerminalFallback,
+    t,
+  ]);
 
   useEffect(() => {
-    if (!isOpen || !selectedItemKey) return;
-    selectedItemRef.current?.scrollIntoView({ block: "nearest" });
-  }, [isOpen, selectedIndex, selectedItemKey]);
+    if (!isOpen) return;
+    setSelectedIndex((prev) => clampListIndex(prev, flatItems.length));
+  }, [flatItems.length, isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const visualIndex = itemIndexToVisualIndex.get(selectedIndex);
+    if (visualIndex === undefined) return;
+    listRef.current?.scrollToIndex(visualIndex, "auto");
+  }, [isOpen, itemIndexToVisualIndex, selectedIndex]);
+
+  const shellById = useMemo(
+    () => new Map(quickSwitcherShells.map((shell) => [shell.id, shell])),
+    [quickSwitcherShells],
+  );
+
+  const getRowHeight = useCallback(
+    (row: QuickSwitcherVisualRow) => (row.kind === "header" ? QS_HEADER_HEIGHT : QS_ROW_HEIGHT),
+    [],
+  );
 
   if (!isOpen) return null;
 
@@ -366,15 +373,16 @@ const QuickSwitcherInner: React.FC<QuickSwitcherProps> = ({
       e.preventDefault();
       isKeyboardNavigatingRef.current = true;
       setIsKeyboardNavigating(true);
-      setSelectedIndex((prev) => Math.min(prev + 1, flatItems.length - 1));
+      setSelectedIndex((prev) => stepListIndex(prev, flatItems.length, 1));
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
       isKeyboardNavigatingRef.current = true;
       setIsKeyboardNavigating(true);
-      setSelectedIndex((prev) => Math.max(prev - 1, 0));
+      setSelectedIndex((prev) => stepListIndex(prev, flatItems.length, -1));
     } else if (e.key === "Enter" && flatItems.length > 0) {
       e.preventDefault();
-      const item = flatItems[selectedIndex];
+      const item = flatItems[clampListIndex(selectedIndex, flatItems.length)];
+      if (!item) return;
       handleItemSelect(item, e.altKey);
     }
   };
@@ -477,105 +485,77 @@ const QuickSwitcherInner: React.FC<QuickSwitcherProps> = ({
           )}
         </div>
 
-        <ScrollArea className="flex-1 h-full">
-          {/* Categorized view: Hosts/Tabs/Quick connect */}
-          <div>
-            {/* Hosts section */}
-            {results.length > 0 && (
-              <div>
-                <div className="px-4 py-1.5">
-                  <span className="text-xs font-medium text-muted-foreground">
-                    Hosts
-                  </span>
-                </div>
-                {results.map((host) => (
-                  <HostItem
-                    key={host.id}
-                    host={host}
-                    isSelected={getItemIndex("host", host.id) === selectedIndex}
-                    isKeyboardNavigating={isKeyboardNavigating}
-                    selectedItemRef={getItemIndex("host", host.id) === selectedIndex ? setSelectedItemRef : undefined}
-                    onSelect={onSelect}
-                  />
-                ))}
-              </div>
-            )}
-
-            {/* Tabs section */}
-            <div>
-              <div className="px-4 py-1.5">
-                <span className="text-xs font-medium text-muted-foreground">
-                  Tabs
-                </span>
-              </div>
-
-              {/* Built-in tabs */}
-              {builtInTabs.map((tabId) => {
-                const idx = getItemIndex("tab", tabId);
-                const isSelected = idx === selectedIndex;
-                const icon =
-                  tabId === "vault" ? (
-                    <FolderLock size={16} />
-                  ) : (
-                    <Folder size={16} />
-                  );
-                const label = tabId === "vault" ? "Vaults" : "SFTP";
-
+        <div className="min-h-0 flex-1" data-host-picker-virtual="quick-switcher">
+          <VariableSizeVirtualList<QuickSwitcherVisualRow>
+            ref={listRef}
+            items={visualRows}
+            getItemHeight={getRowHeight}
+            className="h-full"
+            overscan={8}
+            getItemKey={(row) => row.key}
+            renderItem={(row) => {
+              if (row.kind === "header") {
                 return (
-                  <div
-                    key={tabId}
-                    ref={isSelected ? setSelectedItemRef : undefined}
-                    className={`flex items-center gap-3 px-4 py-2.5 cursor-pointer transition-colors ${getQuickSwitcherRowStateClass(isSelected, isKeyboardNavigating)}`}
-                    onClick={() => {
-                      onSelectTab(tabId);
-                      onClose();
-                    }}
-                  >
-                    <div className="h-6 w-6 rounded flex items-center justify-center text-muted-foreground">
-                      {icon}
-                    </div>
-                    <span className="text-sm font-medium">{label}</span>
-                  </div>
-                );
-              })}
-
-              {/* Workspaces */}
-              {filteredWorkspaces.map((workspace) => {
-                const idx = getItemIndex("workspace", workspace.id);
-                const isSelected = idx === selectedIndex;
-
-                return (
-                  <div
-                    key={workspace.id}
-                    ref={isSelected ? setSelectedItemRef : undefined}
-                    className={`flex items-center gap-3 px-4 py-2.5 cursor-pointer transition-colors ${getQuickSwitcherRowStateClass(isSelected, isKeyboardNavigating)}`}
-                    onClick={() => {
-                      onSelectTab(workspace.id);
-                      onClose();
-                    }}
-                  >
-                    <div className="h-6 w-6 rounded flex items-center justify-center text-muted-foreground">
-                      <LayoutGrid size={16} />
-                    </div>
-                    <span className="text-sm font-medium">
-                      {workspace.title}
+                  <div className="flex h-full items-end px-4 pb-1.5">
+                    <span className="text-xs font-medium text-muted-foreground">
+                      {row.label}
                     </span>
                   </div>
                 );
-              })}
+              }
 
-              {/* Orphan sessions */}
-              {filteredOrphanSessions.map((session) => {
-                const idx = getItemIndex("tab", session.id);
-                const isSelected = idx === selectedIndex;
+              const { item, itemIndex } = row;
+              const isSelected = itemIndex === selectedIndex;
+              const rowClass = `flex items-center gap-3 px-4 py-2.5 cursor-pointer transition-colors ${getQuickSwitcherRowStateClass(isSelected, isKeyboardNavigating)}`;
 
+              if (item.type === "host") {
+                const host = item.data as Host;
                 return (
                   <div
-                    key={session.id}
-                    ref={isSelected ? setSelectedItemRef : undefined}
-                    className={`flex items-center gap-3 px-4 py-2.5 cursor-pointer transition-colors ${getQuickSwitcherRowStateClass(isSelected, isKeyboardNavigating)}`}
+                    className={`flex items-center justify-between px-4 py-2.5 cursor-pointer transition-colors ${getQuickSwitcherRowStateClass(isSelected, isKeyboardNavigating)}`}
+                    onClick={() => onSelect(host)}
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <DistroAvatar
+                        host={host}
+                        fallback={host.label.slice(0, 2).toUpperCase()}
+                        size="sm"
+                      />
+                      <span className="text-sm font-medium truncate">{host.label}</span>
+                    </div>
+                    <div className="text-[11px] text-muted-foreground">
+                      {host.group ? `Personal / ${host.group}` : "Personal"}
+                    </div>
+                  </div>
+                );
+              }
+
+              if (item.type === "tab") {
+                const isBuiltIn = item.id === "vault" || item.id === "sftp";
+                if (isBuiltIn) {
+                  const icon = item.id === "vault" ? <FolderLock size={16} /> : <Folder size={16} />;
+                  const label = item.id === "vault" ? "Vaults" : "SFTP";
+                  return (
+                    <div
+                      className={rowClass}
+                      onClick={() => {
+                        onSelectTab(item.id);
+                        onClose();
+                      }}
+                    >
+                      <div className="h-6 w-6 rounded flex items-center justify-center text-muted-foreground">
+                        {icon}
+                      </div>
+                      <span className="text-sm font-medium">{label}</span>
+                    </div>
+                  );
+                }
+                const session = item.data as TerminalSession | undefined;
+                return (
+                  <div
+                    className={rowClass}
                     onClick={() => {
-                      onSelectTab(session.id);
+                      onSelectTab(item.id);
                       onClose();
                     }}
                   >
@@ -583,110 +563,108 @@ const QuickSwitcherInner: React.FC<QuickSwitcherProps> = ({
                       <TerminalSquare size={16} />
                     </div>
                     <span className="text-sm font-medium">
-                      {session.hostLabel}
+                      {session?.hostLabel ?? item.id}
                     </span>
                   </div>
                 );
-              })}
-            </div>
+              }
 
-            {/* Local Shells section */}
-            {/* Local Shells or fallback Local Terminal */}
-            {filteredShells.length > 0 ? (
-              <div>
-                <div className="px-4 py-1.5">
-                  <span className="text-xs font-medium text-muted-foreground">
-                    {t("qs.localShells")}
-                  </span>
-                </div>
-                {filteredShells.map((shell) => {
-                  const idx = getItemIndex("shell", shell.id);
-                  const isSelected = idx === selectedIndex;
-                  return (
-                    <div
-                      key={shell.id}
-                      ref={isSelected ? setSelectedItemRef : undefined}
-                      className={`flex items-center gap-3 px-4 py-2.5 cursor-pointer transition-colors ${getQuickSwitcherRowStateClass(isSelected, isKeyboardNavigating)}`}
-                      onClick={() => {
-                        if (onCreateLocalTerminal) {
-                          onCreateLocalTerminal({ command: shell.command, args: shell.args, name: shell.name, icon: shell.icon });
-                          onClose();
-                        }
-                      }}
-                    >
-                      <img
-                        src={getShellIconPath(shell.icon)}
-                        alt={shell.name}
-                        className={`h-6 w-6 shrink-0${isMonochromeShellIcon(shell.icon) ? " dark:invert" : ""}`}
-                      />
-                      <span className="text-sm font-medium">{shell.name}</span>
-                      {shell.isDefault && (
-                        <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
-                          {t("qs.default")}
-                        </span>
-                      )}
+              if (item.type === "workspace") {
+                const workspace = item.data as Workspace | undefined;
+                return (
+                  <div
+                    className={rowClass}
+                    onClick={() => {
+                      onSelectTab(item.id);
+                      onClose();
+                    }}
+                  >
+                    <div className="h-6 w-6 rounded flex items-center justify-center text-muted-foreground">
+                      <LayoutGrid size={16} />
                     </div>
-                  );
-                })}
-              </div>
-            ) : shouldShowLocalTerminalFallback && (
-              <div>
-                <div className="px-4 py-1.5">
-                  <span className="text-xs font-medium text-muted-foreground">
-                    {t("qs.localShells")}
-                  </span>
-                </div>
-                <div
-                  ref={getItemIndex("action", "local-terminal") === selectedIndex ? setSelectedItemRef : undefined}
-                  className={`flex items-center gap-3 px-4 py-2.5 cursor-pointer transition-colors ${getQuickSwitcherRowStateClass(
-                    getItemIndex("action", "local-terminal") === selectedIndex,
-                    isKeyboardNavigating,
-                  )}`}
-                  onClick={() => {
-                    onCreateLocalTerminal();
-                    onClose();
-                  }}
-                >
-                  <div className="h-6 w-6 rounded flex items-center justify-center text-muted-foreground">
-                    <Terminal size={16} />
+                    <span className="text-sm font-medium">
+                      {workspace?.title ?? item.id}
+                    </span>
                   </div>
-                  <span className="text-sm font-medium">{t("qs.localTerminal")}</span>
-                </div>
-              </div>
-            )}
+                );
+              }
 
-            {pluginPaletteItems.length > 0 && (
-              <div>
-                <div className="px-4 py-1.5">
-                  <span className="text-xs font-medium text-muted-foreground">{t('settings.tab.plugins')}</span>
-                </div>
-                {pluginPaletteItems.map((item) => {
-                  const idx = getItemIndex(item.type, item.id);
-                  const isSelected = idx === selectedIndex;
-                  return (
-                    <button
-                      type="button"
-                      key={`${item.type}:${item.id}`}
-                      ref={isSelected ? setSelectedItemRef : undefined}
-                      disabled={item.enabled === false}
-                      className={`flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors ${getQuickSwitcherRowStateClass(isSelected, isKeyboardNavigating)} disabled:opacity-50`}
-                      onClick={(event) => handleItemSelect(item, event.altKey)}
-                    >
-                      <div className="flex h-6 w-6 items-center justify-center text-muted-foreground">
-                        <PluginContributionIcon pluginId={item.pluginId} icon={item.icon} size={16} />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="truncate text-sm font-medium">{item.title}</div>
-                        <div className="truncate text-[10px] text-muted-foreground">{item.pluginTitle}</div>
-                      </div>
-                      {item.shortcut && <kbd className="text-[10px] text-muted-foreground">{item.shortcut}</kbd>}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        </ScrollArea>
+              if (item.type === "shell") {
+                const shell = shellById.get(item.id);
+                if (!shell) return null;
+                return (
+                  <div
+                    className={rowClass}
+                    onClick={() => {
+                      if (onCreateLocalTerminal) {
+                        onCreateLocalTerminal({
+                          command: shell.command,
+                          args: shell.args,
+                          name: shell.name,
+                          icon: shell.icon,
+                        });
+                        onClose();
+                      }
+                    }}
+                  >
+                    <img
+                      src={getShellIconPath(shell.icon)}
+                      alt={shell.name}
+                      className={`h-6 w-6 shrink-0${isMonochromeShellIcon(shell.icon) ? " dark:invert" : ""}`}
+                    />
+                    <span className="text-sm font-medium">{shell.name}</span>
+                    {shell.isDefault && (
+                      <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
+                        {t("qs.default")}
+                      </span>
+                    )}
+                  </div>
+                );
+              }
+
+              if (item.type === "action" && item.id === "local-terminal") {
+                return (
+                  <div
+                    className={rowClass}
+                    onClick={() => {
+                      onCreateLocalTerminal?.();
+                      onClose();
+                    }}
+                  >
+                    <div className="h-6 w-6 rounded flex items-center justify-center text-muted-foreground">
+                      <Terminal size={16} />
+                    </div>
+                    <span className="text-sm font-medium">{t("qs.localTerminal")}</span>
+                  </div>
+                );
+              }
+
+              if (item.type === "plugin-command" || item.type === "plugin-view") {
+                return (
+                  <button
+                    type="button"
+                    disabled={item.enabled === false}
+                    className={`flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors ${getQuickSwitcherRowStateClass(isSelected, isKeyboardNavigating)} disabled:opacity-50`}
+                    onClick={(event) => handleItemSelect(item, event.altKey)}
+                  >
+                    <div className="flex h-6 w-6 items-center justify-center text-muted-foreground">
+                      <PluginContributionIcon pluginId={item.pluginId} icon={item.icon} size={16} />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm font-medium">{item.title}</div>
+                      <div className="truncate text-[10px] text-muted-foreground">{item.pluginTitle}</div>
+                    </div>
+                    {item.shortcut && (
+                      <kbd className="text-[10px] text-muted-foreground">{item.shortcut}</kbd>
+                    )}
+                  </button>
+                );
+              }
+
+              return null;
+            }}
+          />
+        </div>
       </div>
     </div>
   );

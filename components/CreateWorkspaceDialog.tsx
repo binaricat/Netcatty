@@ -1,5 +1,5 @@
 import { Search } from 'lucide-react';
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect, useCallback } from 'react';
 import { useI18n } from '../application/i18n/I18nProvider';
 import { Host } from '../types';
 import { DistroAvatar } from './DistroAvatar';
@@ -7,7 +7,9 @@ import { Button } from './ui/button';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
-import { ScrollArea } from './ui/scroll-area';
+import { FixedSizeVirtualList } from './ui/FixedSizeVirtualList';
+
+const CREATE_WS_HOST_ROW_HEIGHT = 52;
 
 interface CreateWorkspaceDialogProps {
   isOpen: boolean;
@@ -37,7 +39,7 @@ export const CreateWorkspaceDialog: React.FC<CreateWorkspaceDialogProps> = ({
     );
   }, [hosts, search]);
 
-  const toggleHost = (hostId: string) => {
+  const toggleHost = useCallback((hostId: string) => {
     setSelectedHostIds(prev => {
       const next = new Set(prev);
       if (next.has(hostId)) {
@@ -47,7 +49,7 @@ export const CreateWorkspaceDialog: React.FC<CreateWorkspaceDialogProps> = ({
       }
       return next;
     });
-  };
+  }, []);
 
   const handleCreate = () => {
     const selected = hosts.filter(h => selectedHostIds.has(h.id));
@@ -62,6 +64,26 @@ export const CreateWorkspaceDialog: React.FC<CreateWorkspaceDialogProps> = ({
         setSelectedHostIds(new Set());
     }
   }, [isOpen]);
+
+  const renderHostRow = useCallback((host: Host) => {
+    const isSelected = selectedHostIds.has(host.id);
+    return (
+      <div
+        data-host-id={host.id}
+        className={`flex h-full items-center gap-3 px-2 rounded-md cursor-pointer hover:bg-muted/50 ${isSelected ? 'bg-primary/10' : ''}`}
+        onClick={() => toggleHost(host.id)}
+      >
+        <div className={`h-4 w-4 border rounded flex items-center justify-center ${isSelected ? 'bg-primary border-primary' : 'border-muted-foreground'}`}>
+          {isSelected && <div className="h-2 w-2 bg-primary-foreground rounded-sm" />}
+        </div>
+        <DistroAvatar host={host} size="sm" fallback={host.label.slice(0, 2).toUpperCase()} />
+        <div className="flex-1 min-w-0">
+          <div className="font-medium truncate">{host.label}</div>
+          <div className="text-xs text-muted-foreground truncate">{host.hostname}</div>
+        </div>
+      </div>
+    );
+  }, [selectedHostIds, toggleHost]);
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
@@ -94,36 +116,21 @@ export const CreateWorkspaceDialog: React.FC<CreateWorkspaceDialogProps> = ({
                 />
             </div>
 
-            <div className="border rounded-md flex-1 min-h-[200px]">
-                <ScrollArea className="h-full max-h-[300px]">
-                    <div className="p-2 space-y-1">
-                        {filteredHosts.length === 0 ? (
-                            <div className="text-center py-4 text-sm text-muted-foreground">
-                                {t('common.noResults', { defaultValue: 'No hosts found' })}
-                            </div>
-                        ) : (
-                            filteredHosts.map(host => {
-                                const isSelected = selectedHostIds.has(host.id);
-                                return (
-                                    <div
-                                        key={host.id}
-                                        className={`flex items-center gap-3 p-2 rounded-md cursor-pointer hover:bg-muted/50 ${isSelected ? 'bg-primary/10' : ''}`}
-                                        onClick={() => toggleHost(host.id)}
-                                    >
-                                        <div className={`h-4 w-4 border rounded flex items-center justify-center ${isSelected ? 'bg-primary border-primary' : 'border-muted-foreground'}`}>
-                                            {isSelected && <div className="h-2 w-2 bg-primary-foreground rounded-sm" />}
-                                        </div>
-                                        <DistroAvatar host={host} size="sm" fallback={host.label.slice(0, 2).toUpperCase()} />
-                                        <div className="flex-1 min-w-0">
-                                            <div className="font-medium truncate">{host.label}</div>
-                                            <div className="text-xs text-muted-foreground truncate">{host.hostname}</div>
-                                        </div>
-                                    </div>
-                                );
-                            })
-                        )}
+            <div className="border rounded-md h-[300px] min-h-[200px]" data-host-picker-virtual="create-workspace">
+                {filteredHosts.length === 0 ? (
+                    <div className="text-center py-4 text-sm text-muted-foreground">
+                        {t('common.noResults', { defaultValue: 'No hosts found' })}
                     </div>
-                </ScrollArea>
+                ) : (
+                    <FixedSizeVirtualList
+                      items={filteredHosts}
+                      itemHeight={CREATE_WS_HOST_ROW_HEIGHT}
+                      className="h-full"
+                      overscan={8}
+                      getItemKey={(host) => host.id}
+                      renderItem={renderHostRow}
+                    />
+                )}
             </div>
             <div className="text-xs text-muted-foreground text-right">
                 {selectedHostIds.size} {t('common.selected', { defaultValue: 'selected' })}

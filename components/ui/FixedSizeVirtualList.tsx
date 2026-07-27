@@ -8,6 +8,7 @@ import React, {
 } from 'react';
 
 import { cn } from '../../lib/utils';
+import { getFixedSizeVirtualWindow } from './virtualListMath';
 
 const DEFAULT_OVERSCAN = 6;
 
@@ -55,6 +56,32 @@ function FixedSizeVirtualListInner<T>(
     return () => observer.disconnect();
   }, []);
 
+  const {
+    startIndex,
+    endIndex,
+    effectiveScrollTop,
+    totalHeight,
+  } = getFixedSizeVirtualWindow({
+    itemCount: items.length,
+    itemHeight,
+    scrollTop,
+    viewportHeight,
+    overscan,
+  });
+
+  // Sync the DOM scroll position when content shrinks (filter / data change).
+  // Layout already uses effectiveScrollTop so the list never blanks for a frame.
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    if (container.scrollTop !== effectiveScrollTop) {
+      container.scrollTop = effectiveScrollTop;
+    }
+    if (scrollTop !== effectiveScrollTop) {
+      setScrollTop(effectiveScrollTop);
+    }
+  }, [effectiveScrollTop, scrollTop]);
+
   useImperativeHandle(ref, () => ({
     scrollToIndex: (index: number, align = 'auto') => {
       const container = containerRef.current;
@@ -82,11 +109,6 @@ function FixedSizeVirtualListInner<T>(
   const handleScroll = useCallback((event: React.UIEvent<HTMLDivElement>) => {
     setScrollTop(event.currentTarget.scrollTop);
   }, []);
-
-  const totalHeight = items.length * itemHeight;
-  const startIndex = Math.max(0, Math.floor(scrollTop / itemHeight) - overscan);
-  const visibleCount = Math.ceil(viewportHeight / itemHeight) + overscan * 2;
-  const endIndex = Math.min(items.length, startIndex + visibleCount);
 
   return (
     <div

@@ -15,7 +15,15 @@ import { DistroAvatar } from '../DistroAvatar';
 import { getQuickSwitcherRowStateClass, shouldUseQuickSwitcherPointerNavigation } from '../QuickSwitcher';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../ui/dialog';
 import { Input } from '../ui/input';
-import { ScrollArea } from '../ui/scroll-area';
+import {
+    VariableSizeVirtualList,
+    type VariableSizeVirtualListHandle,
+} from '../ui/VariableSizeVirtualList';
+import { clampListIndex, stepListIndex } from '../ui/virtualListMath';
+
+const SFTP_PICKER_ROW_HEIGHT = 44;
+const SFTP_PICKER_HEADER_HEIGHT = 32;
+const SFTP_PICKER_EMPTY_HEIGHT = 56;
 
 interface SftpHostPickerProps {
     open: boolean;
@@ -38,6 +46,16 @@ function formatHostMeta(host: Host): string {
     return host.group ? `${endpoint} · ${host.group}` : endpoint;
 }
 
+type PickerItem =
+    | { type: 'local'; id: string }
+    | { type: 'connected'; id: string; entry: SftpConnectedHostEntry }
+    | { type: 'host'; id: string; host: Host };
+
+type VisualRow =
+    | { kind: 'header'; key: string; label: string }
+    | { kind: 'item'; key: string; item: PickerItem; itemIndex: number }
+    | { kind: 'empty'; key: string; message: string };
+
 const SftpHostPickerInner: React.FC<SftpHostPickerProps> = ({
     open,
     onOpenChange,
@@ -51,6 +69,7 @@ const SftpHostPickerInner: React.FC<SftpHostPickerProps> = ({
 }) => {
     const { t } = useI18n();
     const inputRef = useRef<HTMLInputElement>(null);
+    const listRef = useRef<VariableSizeVirtualListHandle>(null);
     const [selectedIndex, setSelectedIndex] = useState(0);
     const [isKeyboardNavigating, setIsKeyboardNavigating] = useState(true);
     const isKeyboardNavigatingRef = useRef(true);
@@ -89,21 +108,54 @@ const SftpHostPickerInner: React.FC<SftpHostPickerProps> = ({
     }, [hosts, term, connectedByHostId]);
     const sideLabel = side === 'left' ? t('common.left') : t('common.right');
 
-    type PickerItem =
-        | { type: 'local'; id: string }
-        | { type: 'connected'; id: string; entry: SftpConnectedHostEntry }
-        | { type: 'host'; id: string; host: Host };
+    const { items, visualRows, itemIndexToVisualIndex } = useMemo(() => {
+        const nextItems: PickerItem[] = [];
+        const nextVisual: VisualRow[] = [];
+        const nextMap = new Map<number, number>();
 
-    const items = useMemo<PickerItem[]>(() => {
-        const localItem: PickerItem = { type: 'local', id: 'local' };
-        const connectedItems: PickerItem[] = filteredConnectedHosts.map((entry) => ({
-            type: 'connected',
-            id: `connected:${entry.sessionId}`,
-            entry,
-        }));
-        const hostItems: PickerItem[] = filteredHosts.map((host) => ({ type: 'host', id: host.id, host }));
-        return [localItem, ...connectedItems, ...hostItems];
-    }, [filteredConnectedHosts, filteredHosts]);
+        const pushHeader = (key: string, label: string) => {
+            nextVisual.push({ kind: 'header', key, label });
+        };
+        const pushItem = (item: PickerItem) => {
+            const itemIndex = nextItems.length;
+            nextItems.push(item);
+            nextMap.set(itemIndex, nextVisual.length);
+            nextVisual.push({ kind: 'item', key: item.id, item, itemIndex });
+        };
+
+        pushHeader('header:local', t('sftp.picker.local.badge'));
+        pushItem({ type: 'local', id: 'local' });
+
+        if (filteredConnectedHosts.length > 0) {
+            pushHeader('header:connected', t('sftp.picker.connected.section'));
+            for (const entry of filteredConnectedHosts) {
+                pushItem({
+                    type: 'connected',
+                    id: `connected:${entry.sessionId}`,
+                    entry,
+                });
+            }
+        }
+
+        pushHeader('header:hosts', t('vault.nav.hosts'));
+        if (filteredHosts.length > 0) {
+            for (const host of filteredHosts) {
+                pushItem({ type: 'host', id: host.id, host });
+            }
+        } else if (filteredConnectedHosts.length === 0) {
+            nextVisual.push({
+                kind: 'empty',
+                key: 'empty:hosts',
+                message: t('sftp.picker.noMatch'),
+            });
+        }
+
+        return {
+            items: nextItems,
+            visualRows: nextVisual,
+            itemIndexToVisualIndex: nextMap,
+        };
+    }, [filteredConnectedHosts, filteredHosts, t]);
 
     useEffect(() => {
         if (!open) return;
@@ -123,10 +175,17 @@ const SftpHostPickerInner: React.FC<SftpHostPickerProps> = ({
 
     useEffect(() => {
         if (!open) return;
-        setSelectedIndex((prev) => Math.min(prev, Math.max(items.length - 1, 0)));
+        setSelectedIndex((prev) => clampListIndex(prev, items.length));
     }, [items.length, open]);
 
-    const handleSelect = (item: PickerItem) => {
+    useEffect(() => {
+        if (!open) return;
+        const visualIndex = itemIndexToVisualIndex.get(selectedIndex);
+        if (visualIndex === undefined) return;
+        listRef.current?.scrollToIndex(visualIndex, 'auto');
+    }, [itemIndexToVisualIndex, open, selectedIndex]);
+
+    const handleSelect = useCallback((item: PickerItem) => {
         if (item.type === 'local') {
             onSelectLocal();
         } else if (item.type === 'connected') {
@@ -135,7 +194,7 @@ const SftpHostPickerInner: React.FC<SftpHostPickerProps> = ({
             onSelectHost(item.host);
         }
         onOpenChange(false);
-    };
+    }, [onOpenChange, onSelectHost, onSelectLocal]);
 
     // Match Quick Switcher: pointer movement only leaves keyboard-nav mode.
     // It must not rewrite the keyboard-selected index until the user clicks.
@@ -151,42 +210,77 @@ const SftpHostPickerInner: React.FC<SftpHostPickerProps> = ({
             e.preventDefault();
             isKeyboardNavigatingRef.current = true;
             setIsKeyboardNavigating(true);
-            setSelectedIndex((prev) => Math.min(prev + 1, items.length - 1));
+            setSelectedIndex((prev) => stepListIndex(prev, items.length, 1));
         } else if (e.key === 'ArrowUp') {
             e.preventDefault();
             isKeyboardNavigatingRef.current = true;
             setIsKeyboardNavigating(true);
-            setSelectedIndex((prev) => Math.max(prev - 1, 0));
+            setSelectedIndex((prev) => stepListIndex(prev, items.length, -1));
         } else if (e.key === 'Enter' && items.length > 0) {
             e.preventDefault();
-            handleSelect(items[selectedIndex]);
+            const item = items[clampListIndex(selectedIndex, items.length)];
+            if (!item) return;
+            handleSelect(item);
         }
     };
 
-    const itemIndexById = useMemo(() => {
-        const map = new Map<string, number>();
-        items.forEach((item, index) => map.set(item.id, index));
-        return map;
-    }, [items]);
+    const getRowHeight = useCallback((row: VisualRow) => {
+        if (row.kind === 'header') return SFTP_PICKER_HEADER_HEIGHT;
+        if (row.kind === 'empty') return SFTP_PICKER_EMPTY_HEIGHT;
+        return SFTP_PICKER_ROW_HEIGHT;
+    }, []);
 
-    const renderHostRow = (
-        itemId: string,
-        host: Host,
-        meta: { showStatus?: boolean } = {},
-    ) => {
-        const itemIndex = itemIndexById.get(itemId) ?? 0;
+    const renderRow = useCallback((row: VisualRow) => {
+        if (row.kind === 'header') {
+            return (
+                <div className="flex h-full items-end px-4 pb-1.5">
+                    <span className="text-xs font-medium text-muted-foreground">{row.label}</span>
+                </div>
+            );
+        }
+        if (row.kind === 'empty') {
+            return (
+                <div className="px-4 py-6 text-xs text-muted-foreground text-center">
+                    {row.message}
+                </div>
+            );
+        }
+
+        const { item, itemIndex } = row;
         const isSelected = selectedIndex === itemIndex;
+
+        if (item.type === 'local') {
+            return (
+                <div
+                    className={`flex items-center justify-between px-4 py-2.5 cursor-pointer transition-colors ${getQuickSwitcherRowStateClass(isSelected, isKeyboardNavigating)}`}
+                    onClick={() => handleSelect(item)}
+                    onMouseMove={(event) => handlePointerHover(event.movementX, event.movementY)}
+                >
+                    <div className="flex items-center gap-3 min-w-0">
+                        <div className="h-6 w-6 rounded flex items-center justify-center text-muted-foreground">
+                            <Monitor size={16} />
+                        </div>
+                        <span className="text-sm font-medium truncate">{t('sftp.picker.local.title')}</span>
+                    </div>
+                    <div className="ml-3 shrink-0 text-[11px] text-muted-foreground truncate max-w-[12rem]">
+                        {t('sftp.picker.local.desc')}
+                    </div>
+                </div>
+            );
+        }
+
+        const host = item.type === 'connected' ? item.entry.host : item.host;
+        const showStatus = item.type === 'connected';
         return (
             <div
-                key={itemId}
                 className={`flex items-center justify-between px-4 py-2.5 cursor-pointer transition-colors ${getQuickSwitcherRowStateClass(isSelected, isKeyboardNavigating)}`}
-                onClick={() => handleSelect(items[itemIndex])}
+                onClick={() => handleSelect(item)}
                 onMouseMove={(event) => handlePointerHover(event.movementX, event.movementY)}
             >
                 <div className="flex items-center gap-3 min-w-0">
                     <DistroAvatar host={host} fallback={host.label.slice(0, 2).toUpperCase()} size="sm" />
                     <div className="flex min-w-0 items-center gap-1.5">
-                        {meta.showStatus ? <StatusDot /> : null}
+                        {showStatus ? <StatusDot /> : null}
                         <span className="text-sm font-medium truncate">{host.label}</span>
                     </div>
                 </div>
@@ -195,10 +289,7 @@ const SftpHostPickerInner: React.FC<SftpHostPickerProps> = ({
                 </div>
             </div>
         );
-    };
-
-    const showHostsEmpty = filteredHosts.length === 0 && filteredConnectedHosts.length === 0;
-    const localSelected = selectedIndex === 0;
+    }, [handlePointerHover, handleSelect, isKeyboardNavigating, selectedIndex, t]);
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
@@ -224,64 +315,17 @@ const SftpHostPickerInner: React.FC<SftpHostPickerProps> = ({
                     </span>
                 </div>
 
-                <ScrollArea className="max-h-[360px]">
-                    <div className="py-2">
-                        <div className="px-4 py-1.5">
-                            <span className="text-xs font-medium text-muted-foreground">
-                                {t('sftp.picker.local.badge')}
-                            </span>
-                        </div>
-                        <div
-                            className={`flex items-center justify-between px-4 py-2.5 cursor-pointer transition-colors ${getQuickSwitcherRowStateClass(localSelected, isKeyboardNavigating)}`}
-                            onClick={() => handleSelect(items[0])}
-                            onMouseMove={(event) => handlePointerHover(event.movementX, event.movementY)}
-                        >
-                            <div className="flex items-center gap-3 min-w-0">
-                                <div className="h-6 w-6 rounded flex items-center justify-center text-muted-foreground">
-                                    <Monitor size={16} />
-                                </div>
-                                <span className="text-sm font-medium truncate">{t('sftp.picker.local.title')}</span>
-                            </div>
-                            <div className="ml-3 shrink-0 text-[11px] text-muted-foreground truncate max-w-[12rem]">
-                                {t('sftp.picker.local.desc')}
-                            </div>
-                        </div>
-
-                        {filteredConnectedHosts.length > 0 && (
-                            <>
-                                <div className="px-4 pt-3 pb-1.5">
-                                    <span className="text-xs font-medium text-muted-foreground">
-                                        {t('sftp.picker.connected.section')}
-                                    </span>
-                                </div>
-                                {filteredConnectedHosts.map((entry) =>
-                                    renderHostRow(
-                                        `connected:${entry.sessionId}`,
-                                        entry.host,
-                                        { showStatus: true },
-                                    ),
-                                )}
-                            </>
-                        )}
-
-                        {(filteredHosts.length > 0 || showHostsEmpty) && (
-                          <>
-                            <div className="px-4 pt-3 pb-1.5">
-                                <span className="text-xs font-medium text-muted-foreground">
-                                    {t('vault.nav.hosts')}
-                                </span>
-                            </div>
-                            {filteredHosts.length > 0 ? (
-                                filteredHosts.map((host) => renderHostRow(host.id, host))
-                            ) : (
-                                <div className="px-4 py-6 text-xs text-muted-foreground text-center">
-                                    {t('sftp.picker.noMatch')}
-                                </div>
-                            )}
-                          </>
-                        )}
-                    </div>
-                </ScrollArea>
+                <div className="h-[360px]" data-host-picker-virtual="sftp">
+                    <VariableSizeVirtualList<VisualRow>
+                        ref={listRef}
+                        items={visualRows}
+                        getItemHeight={getRowHeight}
+                        className="h-full"
+                        overscan={8}
+                        getItemKey={(row) => row.key}
+                        renderItem={renderRow}
+                    />
+                </div>
             </DialogContent>
         </Dialog>
     );

@@ -8,7 +8,7 @@ import {
   Search,
   Square,
 } from 'lucide-react';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { cn } from '../lib/utils';
 import { matchesHostSearchQuery, matchesSearchQuery } from '../lib/searchMatcher';
 import { useI18n } from '../application/i18n/I18nProvider';
@@ -23,7 +23,6 @@ import { DistroAvatar } from './DistroAvatar';
 import HostDetailsPanel from './HostDetailsPanel';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
-import { ScrollArea } from './ui/scroll-area';
 import { SortDropdown, SortMode } from './ui/sort-dropdown';
 import { TagFilterDropdown } from './ui/tag-filter-dropdown';
 import {
@@ -32,6 +31,14 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from './ui/tooltip';
+import {
+  VariableSizeVirtualList,
+  type VariableSizeVirtualListHandle,
+} from './ui/VariableSizeVirtualList';
+import { clampListIndex, stepListIndex } from './ui/virtualListMath';
+
+const SELECT_HOST_SECTION_HEIGHT = 28;
+const SELECT_HOST_ROW_HEIGHT = 48;
 
 export interface SelectHostPanelContentProps {
   hosts: Host[];
@@ -52,6 +59,11 @@ export interface SelectHostPanelContentProps {
   onNewHostPanelOpenChange?: (open: boolean) => void;
   className?: string;
 }
+
+type SelectHostListRow =
+  | { kind: 'section'; key: string; title: string }
+  | { kind: 'group'; key: string; path: string; name: string; count: number }
+  | { kind: 'host'; key: string; host: Host };
 
 /** Shared host-picker body used by aside panel and dialog variants. */
 export const SelectHostPanelContent: React.FC<SelectHostPanelContentProps> = ({
@@ -78,6 +90,8 @@ export const SelectHostPanelContent: React.FC<SelectHostPanelContentProps> = ({
   const [sortMode, setSortMode] = useState<SortMode>('az');
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [showNewHostPanel, setShowNewHostPanel] = useState(false);
+  const [activeNavIndex, setActiveNavIndex] = useState(0);
+  const listRef = useRef<VariableSizeVirtualListHandle>(null);
 
   useEffect(() => {
     onNewHostPanelOpenChange?.(showNewHostPanel);
@@ -212,7 +226,42 @@ export const SelectHostPanelContent: React.FC<SelectHostPanelContentProps> = ({
     return map;
   }, [multiSelect, groupsWithCounts, selectableHosts]);
 
-  const applySelectionChange = (nextSelectedHostIds: string[]) => {
+  const listRows = useMemo<SelectHostListRow[]>(() => {
+    const rows: SelectHostListRow[] = [];
+    if (groupsWithCounts.length > 0) {
+      rows.push({
+        kind: 'section',
+        key: 'section:groups',
+        title: t('vault.groups.title'),
+      });
+      for (const group of groupsWithCounts) {
+        rows.push({
+          kind: 'group',
+          key: `group:${group.path}`,
+          path: group.path,
+          name: group.name,
+          count: group.count,
+        });
+      }
+    }
+    if (filteredHosts.length > 0) {
+      rows.push({
+        kind: 'section',
+        key: 'section:hosts',
+        title: t('vault.nav.hosts'),
+      });
+      for (const host of filteredHosts) {
+        rows.push({
+          kind: 'host',
+          key: `host:${host.id}`,
+          host,
+        });
+      }
+    }
+    return rows;
+  }, [filteredHosts, groupsWithCounts, t]);
+
+  const applySelectionChange = useCallback((nextSelectedHostIds: string[]) => {
     if (onSelectionChange) {
       onSelectionChange(nextSelectedHostIds);
       return;
@@ -225,28 +274,228 @@ export const SelectHostPanelContent: React.FC<SelectHostPanelContentProps> = ({
       const isSelected = next.has(host.id);
       if (wasSelected !== isSelected) onSelect(host);
     }
-  };
+  }, [onSelect, onSelectionChange, selectableHosts, selectedHostIds]);
 
-  const handleHostClick = (host: Host) => {
+  const handleHostClick = useCallback((host: Host) => {
     if (multiSelect && onSelectionChange) {
       onSelectionChange(toggleIdsInSelection(selectedHostIds, [host.id]));
       return;
     }
     onSelect(host);
-  };
+  }, [multiSelect, onSelect, onSelectionChange, selectedHostIds]);
 
-  const handleGroupToggle = (groupPath: string) => {
+  const handleGroupToggle = useCallback((groupPath: string) => {
     const groupHostIds = groupHostIdsByPath.get(groupPath)
       ?? collectSelectableHostIdsInGroup(selectableHosts, groupPath);
     if (groupHostIds.length === 0) return;
     applySelectionChange(toggleIdsInSelection(selectedHostIds, groupHostIds));
-  };
+  }, [applySelectionChange, groupHostIdsByPath, selectableHosts, selectedHostIds]);
+
+  // Navigable rows (groups + hosts) for listbox keyboard model under virtualization.
+  const navigable = useMemo(() => {
+    const entries: { key: string; listIndex: number; row: SelectHostListRow }[] = [];
+    listRows.forEach((row, listIndex) => {
+      if (row.kind === 'group' || row.kind === 'host') {
+        entries.push({ key: row.key, listIndex, row });
+      }
+    });
+    return entries;
+  }, [listRows]);
+
+  const activeNavKey = navigable[clampListIndex(activeNavIndex, navigable.length)]?.key ?? null;
+
+  useEffect(() => {
+    setActiveNavIndex((prev) => clampListIndex(prev, navigable.length));
+  }, [navigable.length, currentPath, searchQuery, selectedTags, sortMode]);
+
+  useEffect(() => {
+    const entry = navigable[clampListIndex(activeNavIndex, navigable.length)];
+    if (!entry) return;
+    listRef.current?.scrollToIndex(entry.listIndex, 'auto');
+  }, [activeNavIndex, navigable]);
+
+  const handleListKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (navigable.length === 0) return;
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      setActiveNavIndex((prev) => stepListIndex(prev, navigable.length, 1));
+      return;
+    }
+    if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      setActiveNavIndex((prev) => stepListIndex(prev, navigable.length, -1));
+      return;
+    }
+    if (event.key === 'Home') {
+      event.preventDefault();
+      setActiveNavIndex(0);
+      return;
+    }
+    if (event.key === 'End') {
+      event.preventDefault();
+      setActiveNavIndex(Math.max(0, navigable.length - 1));
+      return;
+    }
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      const entry = navigable[clampListIndex(activeNavIndex, navigable.length)];
+      if (!entry) return;
+      if (entry.row.kind === 'group') {
+        if (multiSelect && event.key === ' ') {
+          handleGroupToggle(entry.row.path);
+          return;
+        }
+        setCurrentPath(entry.row.path);
+        return;
+      }
+      handleHostClick(entry.row.host);
+    }
+  }, [activeNavIndex, handleGroupToggle, handleHostClick, multiSelect, navigable]);
 
   const renderSelectionIcon = (state: 'none' | 'partial' | 'all') => {
     if (state === 'all') return <CheckSquare size={16} className="text-primary shrink-0" />;
     if (state === 'partial') return <MinusSquare size={16} className="text-primary shrink-0" />;
     return <Square size={16} className="text-muted-foreground shrink-0" />;
   };
+
+  const getRowHeight = useCallback((row: SelectHostListRow) => (
+    row.kind === 'section' ? SELECT_HOST_SECTION_HEIGHT : SELECT_HOST_ROW_HEIGHT
+  ), []);
+
+  const renderRow = useCallback((row: SelectHostListRow) => {
+    if (row.kind === 'section') {
+      return (
+        <div className="flex h-full items-end px-1 pb-1">
+          <h4 className="text-xs font-semibold text-muted-foreground">{row.title}</h4>
+        </div>
+      );
+    }
+
+    const isActive = activeNavKey === row.key;
+
+    if (row.kind === 'group') {
+      const groupHostIds = groupHostIdsByPath.get(row.path) ?? [];
+      const groupState = multiSelect
+        ? getGroupSelectionState(selectedHostIdSet, groupHostIds)
+        : 'none';
+      const canToggleGroup = multiSelect && groupHostIds.length > 0;
+
+      return (
+        <div
+          role="option"
+          aria-selected={isActive}
+          data-active={isActive ? 'true' : undefined}
+          className={cn(
+            'flex h-full items-center gap-2.5 px-2.5 rounded-lg transition-colors',
+            isActive ? 'bg-primary/10 ring-1 ring-primary/40' : 'hover:bg-muted/70',
+          )}
+          onClick={() => {
+            const navIndex = navigable.findIndex((entry) => entry.key === row.key);
+            if (navIndex >= 0) setActiveNavIndex(navIndex);
+            setCurrentPath(row.path);
+          }}
+        >
+          {multiSelect ? (
+            <button
+              type="button"
+              tabIndex={-1}
+              className={cn(
+                'shrink-0 rounded-sm p-0.5 -m-0.5',
+                canToggleGroup
+                  ? 'hover:bg-muted cursor-pointer'
+                  : 'opacity-40 cursor-not-allowed',
+              )}
+              disabled={!canToggleGroup}
+              aria-label={t('selectHost.toggleGroup', { name: row.name })}
+              aria-pressed={groupState === 'all'}
+              onClick={(event) => {
+                event.stopPropagation();
+                handleGroupToggle(row.path);
+              }}
+            >
+              {renderSelectionIcon(groupState)}
+            </button>
+          ) : null}
+          <div className="flex flex-1 min-w-0 items-center gap-2.5 text-left cursor-pointer">
+            <div className="h-8 w-8 rounded-lg bg-primary/15 text-primary flex items-center justify-center shrink-0">
+              <LayoutGrid size={15} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-[13px] font-medium truncate">{row.name}</div>
+              <div className="text-[11px] text-muted-foreground">
+                {t('vault.groups.hostsCount', { count: row.count })}
+              </div>
+            </div>
+            <ChevronRight size={14} className="text-muted-foreground shrink-0 opacity-60" />
+          </div>
+        </div>
+      );
+    }
+
+    const host = row.host;
+    const isSelected = selectedHostIdSet.has(host.id);
+    const connectionStr = `${host.username}@${host.hostname}:${host.port || 22}`;
+
+    return (
+      <div
+        role="option"
+        aria-selected={isSelected || isActive}
+        data-host-id={host.id}
+        data-active={isActive ? 'true' : undefined}
+        aria-label={t('selectHost.toggleHost', { name: host.label })}
+        className={cn(
+          'flex h-full items-center gap-2.5 px-2.5 rounded-lg cursor-pointer transition-colors',
+          isSelected ? 'bg-muted' : isActive ? 'bg-primary/10 ring-1 ring-primary/40' : 'hover:bg-muted/70',
+        )}
+        onClick={() => {
+          const navIndex = navigable.findIndex((entry) => entry.key === row.key);
+          if (navIndex >= 0) setActiveNavIndex(navIndex);
+          handleHostClick(host);
+        }}
+      >
+        {multiSelect ? (
+          <span className="shrink-0" aria-hidden>
+            {renderSelectionIcon(isSelected ? 'all' : 'none')}
+          </span>
+        ) : null}
+        <DistroAvatar
+          host={host}
+          fallback={(host.os || 'L')[0].toUpperCase()}
+          size="md"
+        />
+        <div className="flex-1 min-w-0">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div className="text-[13px] font-medium truncate">{host.label}</div>
+            </TooltipTrigger>
+            <TooltipContent side="top" align="start">
+              <p>{host.label}</p>
+            </TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div className="text-[11px] text-muted-foreground truncate">{connectionStr}</div>
+            </TooltipTrigger>
+            <TooltipContent side="top" align="start">
+              <p>{connectionStr}</p>
+            </TooltipContent>
+          </Tooltip>
+        </div>
+        {!multiSelect && isSelected ? (
+          <Check size={14} className="text-primary shrink-0" />
+        ) : null}
+      </div>
+    );
+  }, [
+    activeNavKey,
+    groupHostIdsByPath,
+    handleGroupToggle,
+    handleHostClick,
+    multiSelect,
+    navigable,
+    selectedHostIdSet,
+    t,
+  ]);
 
   return (
     <TooltipProvider delayDuration={300}>
@@ -291,171 +540,61 @@ export const SelectHostPanelContent: React.FC<SelectHostPanelContentProps> = ({
           </div>
         </div>
 
-        <ScrollArea className="flex-1 min-h-0 min-w-0">
-          <div className="p-3 space-y-3">
-            {currentPath ? (
-              <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                <button
-                  type="button"
-                  onClick={() => setCurrentPath(null)}
-                  className="text-primary hover:underline"
-                >
-                  {t('vault.hosts.allHosts')}
-                </button>
-                {breadcrumbs.map((crumb, index) => (
-                  <React.Fragment key={crumb.path}>
-                    <ChevronRight size={12} className="shrink-0 opacity-50" />
-                    <button
-                      type="button"
-                      onClick={() => setCurrentPath(crumb.path)}
-                      className={cn(
-                        'hover:underline',
-                        index === breadcrumbs.length - 1
-                          ? 'text-foreground font-medium'
-                          : 'text-primary',
-                      )}
-                    >
-                      {crumb.name}
-                    </button>
-                  </React.Fragment>
-                ))}
-              </div>
-            ) : null}
+        <div className="flex-1 min-h-0 min-w-0 flex flex-col">
+          {currentPath ? (
+            <div className="flex shrink-0 items-center gap-1 px-3 pt-3 text-xs text-muted-foreground">
+              <button
+                type="button"
+                onClick={() => setCurrentPath(null)}
+                className="text-primary hover:underline"
+              >
+                {t('vault.hosts.allHosts')}
+              </button>
+              {breadcrumbs.map((crumb, index) => (
+                <React.Fragment key={crumb.path}>
+                  <ChevronRight size={12} className="shrink-0 opacity-50" />
+                  <button
+                    type="button"
+                    onClick={() => setCurrentPath(crumb.path)}
+                    className={cn(
+                      'hover:underline',
+                      index === breadcrumbs.length - 1
+                        ? 'text-foreground font-medium'
+                        : 'text-primary',
+                    )}
+                  >
+                    {crumb.name}
+                  </button>
+                </React.Fragment>
+              ))}
+            </div>
+          ) : null}
 
-            {groupsWithCounts.length > 0 ? (
-              <div>
-                <h4 className="text-xs font-semibold mb-2 text-muted-foreground">{t('vault.groups.title')}</h4>
-                <div className="space-y-1">
-                  {groupsWithCounts.map((group) => {
-                    const groupHostIds = groupHostIdsByPath.get(group.path) ?? [];
-                    const groupState = multiSelect
-                      ? getGroupSelectionState(selectedHostIdSet, groupHostIds)
-                      : 'none';
-                    const canToggleGroup = multiSelect && groupHostIds.length > 0;
-
-                    return (
-                      <div
-                        key={group.path}
-                        className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg hover:bg-muted/70 transition-colors"
-                      >
-                        {multiSelect ? (
-                          <button
-                            type="button"
-                            className={cn(
-                              'shrink-0 rounded-sm p-0.5 -m-0.5',
-                              canToggleGroup
-                                ? 'hover:bg-muted cursor-pointer'
-                                : 'opacity-40 cursor-not-allowed',
-                            )}
-                            disabled={!canToggleGroup}
-                            aria-label={t('selectHost.toggleGroup', { name: group.name })}
-                            aria-pressed={groupState === 'all'}
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              handleGroupToggle(group.path);
-                            }}
-                          >
-                            {renderSelectionIcon(groupState)}
-                          </button>
-                        ) : null}
-                        <button
-                          type="button"
-                          className="flex flex-1 min-w-0 items-center gap-2.5 text-left cursor-pointer"
-                          onClick={() => setCurrentPath(group.path)}
-                        >
-                          <div className="h-8 w-8 rounded-lg bg-primary/15 text-primary flex items-center justify-center shrink-0">
-                            <LayoutGrid size={15} />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="text-[13px] font-medium truncate">{group.name}</div>
-                            <div className="text-[11px] text-muted-foreground">
-                              {t('vault.groups.hostsCount', { count: group.count })}
-                            </div>
-                          </div>
-                          <ChevronRight size={14} className="text-muted-foreground shrink-0 opacity-60" />
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            ) : null}
-
-            {filteredHosts.length > 0 ? (
-              <div>
-                <h4 className="text-xs font-semibold mb-2 text-muted-foreground">{t('vault.nav.hosts')}</h4>
-                <div className="space-y-1">
-                  {filteredHosts.map((host) => {
-                    const isSelected = selectedHostIdSet.has(host.id);
-                    const connectionStr = `${host.username}@${host.hostname}:${host.port || 22}`;
-
-                    return (
-                      <div
-                        key={host.id}
-                        role="button"
-                        tabIndex={0}
-                        aria-label={t('selectHost.toggleHost', { name: host.label })}
-                        aria-pressed={isSelected}
-                        className={cn(
-                          'flex items-center gap-2.5 px-2.5 py-2 rounded-lg cursor-pointer transition-colors',
-                          isSelected ? 'bg-muted' : 'hover:bg-muted/70',
-                        )}
-                        onClick={() => handleHostClick(host)}
-                        onKeyDown={(event) => {
-                          if (event.key === 'Enter' || event.key === ' ') {
-                            event.preventDefault();
-                            handleHostClick(host);
-                          }
-                        }}
-                      >
-                        {multiSelect ? (
-                          <span
-                            className="shrink-0"
-                            aria-hidden
-                          >
-                            {renderSelectionIcon(isSelected ? 'all' : 'none')}
-                          </span>
-                        ) : null}
-                        <DistroAvatar
-                          host={host}
-                          fallback={host.os[0].toUpperCase()}
-                          size="md"
-                        />
-                        <div className="flex-1 min-w-0">
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <div className="text-[13px] font-medium truncate">{host.label}</div>
-                            </TooltipTrigger>
-                            <TooltipContent side="top" align="start">
-                              <p>{host.label}</p>
-                            </TooltipContent>
-                          </Tooltip>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <div className="text-[11px] text-muted-foreground truncate">{connectionStr}</div>
-                            </TooltipTrigger>
-                            <TooltipContent side="top" align="start">
-                              <p>{connectionStr}</p>
-                            </TooltipContent>
-                          </Tooltip>
-                        </div>
-                        {!multiSelect && isSelected ? (
-                          <Check size={14} className="text-primary shrink-0" />
-                        ) : null}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            ) : null}
-
-            {groupsWithCounts.length === 0 && filteredHosts.length === 0 ? (
-              <div className="text-center py-12 text-muted-foreground">
-                <p>{t('selectHost.noHostsFound')}</p>
-              </div>
-            ) : null}
-          </div>
-        </ScrollArea>
+          {listRows.length === 0 ? (
+            <div className="text-center py-12 text-muted-foreground">
+              <p>{t('selectHost.noHostsFound')}</p>
+            </div>
+          ) : (
+            <div
+              className="flex-1 min-h-0 px-3 py-2 outline-none"
+              data-host-picker-virtual="select-host"
+              role="listbox"
+              aria-label={t('selectHost.title')}
+              tabIndex={0}
+              onKeyDown={handleListKeyDown}
+            >
+              <VariableSizeVirtualList<SelectHostListRow>
+                ref={listRef}
+                items={listRows}
+                getItemHeight={getRowHeight}
+                className="h-full"
+                overscan={8}
+                getItemKey={(row) => row.key}
+                renderItem={renderRow}
+              />
+            </div>
+          )}
+        </div>
 
         <div className="px-4 py-3 border-t border-border/60 shrink-0">
           <Button

@@ -49,3 +49,10 @@ test("sftp host picker uses single-line quick switcher row layout", () => {
   assert.doesNotMatch(source, /bg-primary\/10 border border-primary\/30/);
   assert.doesNotMatch(source, /text-xs text-muted-foreground truncate/);
 });
+
+test("sftp host picker virtualizes the host list", () => {
+  assert.match(source, /VariableSizeVirtualList/);
+  assert.match(source, /data-host-picker-virtual="sftp"/);
+  assert.match(source, /itemIndexToVisualIndex/);
+  assert.doesNotMatch(source, /filteredHosts\.map\(\(host\) =>/);
+});

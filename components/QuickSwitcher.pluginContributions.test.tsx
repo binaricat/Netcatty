@@ -11,11 +11,12 @@ import {
 test('keeps the new workspace action outside the scrollable results', () => {
   const source = readFileSync(new URL('./QuickSwitcher.tsx', import.meta.url), 'utf8');
   const actionIndex = source.indexOf('{/* Jump To hint + New Workspace action */}');
-  const resultsScrollIndex = source.indexOf('<ScrollArea className="flex-1 h-full">');
+  const resultsScrollIndex = source.indexOf('data-host-picker-virtual="quick-switcher"');
 
   assert.notEqual(actionIndex, -1);
   assert.notEqual(resultsScrollIndex, -1);
   assert.ok(actionIndex < resultsScrollIndex);
+  assert.match(source, /VariableSizeVirtualList/);
 });
 
 test('pointer hover never rewrites the keyboard selection', () => {

@@ -9,6 +9,7 @@ import React, {
 } from 'react';
 
 import { cn } from '../../lib/utils';
+import { clampScrollTop } from './virtualListMath';
 
 const DEFAULT_OVERSCAN = 6;
 
@@ -52,18 +53,23 @@ function VariableSizeVirtualListInner<T>(
     return { offsets, totalHeight: total };
   }, [getItemHeight, items]);
 
+  const effectiveScrollTop = clampScrollTop(
+    scrollTop,
+    layout.totalHeight,
+    viewportHeight,
+  );
+
+  // Sync DOM when content shrinks; render path already uses effectiveScrollTop.
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
-
-    const maxScroll = Math.max(0, layout.totalHeight - container.clientHeight);
-    if (container.scrollTop > maxScroll) {
-      container.scrollTop = maxScroll;
-      setScrollTop(maxScroll);
-    } else {
-      setScrollTop(container.scrollTop);
+    if (container.scrollTop !== effectiveScrollTop) {
+      container.scrollTop = effectiveScrollTop;
     }
-  }, [layout.totalHeight, items.length]);
+    if (scrollTop !== effectiveScrollTop) {
+      setScrollTop(effectiveScrollTop);
+    }
+  }, [effectiveScrollTop, scrollTop]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -113,29 +119,27 @@ function VariableSizeVirtualListInner<T>(
       return { startIndex: 0, endIndex: 0 };
     }
 
-    let start = 0;
-    let end = items.length;
     const { offsets } = layout;
 
-    // First visible row: largest index whose top <= scrollTop.
+    // First visible row: largest index whose top <= effectiveScrollTop.
     let lo = 0;
     let hi = items.length - 1;
     while (lo < hi) {
       const mid = Math.floor((lo + hi + 1) / 2);
-      if ((offsets[mid] ?? 0) <= scrollTop) lo = mid;
+      if ((offsets[mid] ?? 0) <= effectiveScrollTop) lo = mid;
       else hi = mid - 1;
     }
-    start = Math.max(0, lo - overscan);
+    const start = Math.max(0, lo - overscan);
 
-    const viewBottom = scrollTop + viewportHeight;
+    const viewBottom = effectiveScrollTop + viewportHeight;
     let scan = start;
     while (scan < items.length && (offsets[scan] ?? 0) < viewBottom + overscan * 40) {
       scan += 1;
     }
-    end = Math.min(items.length, scan + overscan);
+    const end = Math.min(items.length, scan + overscan);
 
     return { startIndex: start, endIndex: end };
-  }, [items.length, layout, overscan, scrollTop, viewportHeight]);
+  }, [effectiveScrollTop, items.length, layout, overscan, viewportHeight]);
 
   return (
     <div
