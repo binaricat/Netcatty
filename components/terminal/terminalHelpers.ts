@@ -308,6 +308,25 @@ const DIALOG_INTERACTIVE_FOCUS_SELECTOR =
   "button, a, input, textarea, select, [contenteditable='true'], [role='button'], [role='menuitem'], [role='textbox']";
 
 /**
+ * Resolve the local terminal tree for focus claim/restore.
+ * Main panes expose `data-session-id`; popup terminals (TerminalPopupPage) do not,
+ * so walk up from the dialog until we find the sibling xterm textarea.
+ */
+export function resolveDisconnectedDialogTerminalRoot(
+  dialogNode: Element | null,
+  sessionRoot?: Element | null,
+): Element | null {
+  if (sessionRoot) return sessionRoot;
+  if (!dialogNode) return null;
+  let node: Element | null = dialogNode.parentElement;
+  while (node) {
+    if (node.querySelector("textarea.xterm-helper-textarea")) return node;
+    node = node.parentElement;
+  }
+  return null;
+}
+
+/**
  * Only park focus on the disconnected overlay when it is safe:
  * - focus is already lost (body / null), or
  * - focus still belongs to this terminal/session tree.
@@ -341,7 +360,8 @@ export function shouldClaimDisconnectedDialogFocus({
     // Sink already focused.
     return active !== dialogNode;
   }
-  if (sessionRoot?.contains(active)) {
+  const terminalRoot = resolveDisconnectedDialogTerminalRoot(dialogNode, sessionRoot);
+  if (terminalRoot?.contains(active)) {
     return true;
   }
   return false;
@@ -357,9 +377,11 @@ export function restoreTerminalFocusFromDisconnectedDialog({
   dialogNode: HTMLElement | null;
   sessionRoot: Element | null;
 }): boolean {
-  if (!dialogNode || !sessionRoot || !activeElement) return false;
+  if (!dialogNode || !activeElement) return false;
   if (!dialogNode.contains(activeElement) && activeElement !== dialogNode) return false;
-  const textarea = sessionRoot.querySelector("textarea.xterm-helper-textarea");
+  const terminalRoot = resolveDisconnectedDialogTerminalRoot(dialogNode, sessionRoot);
+  if (!terminalRoot) return false;
+  const textarea = terminalRoot.querySelector("textarea.xterm-helper-textarea");
   if (!(textarea instanceof HTMLElement)) return false;
   textarea.focus({ preventScroll: true });
   return true;

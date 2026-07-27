@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import type { Host } from "../domain/models";
 import {
   AUTO_RUN_SNIPPET_LINE_DELAY_MS,
+  resolveDisconnectedDialogTerminalRoot,
   restoreTerminalFocusFromDisconnectedDialog,
   shouldClaimDisconnectedDialogFocus,
   shouldHideConnectingDialogForConnectionReuse,
@@ -101,6 +102,9 @@ test("disconnected dialog focus claim never steals from other panes", () => {
       for (const child of opts.children ?? []) {
         child.opts.parent = this;
       }
+    }
+    get parentElement() {
+      return this.opts.parent ?? null;
     }
     contains(other: FakeNode | null) {
       if (!other) return false;
@@ -209,6 +213,33 @@ test("disconnected dialog focus claim never steals from other panes", () => {
       false,
     );
     assert.equal(textarea.focusCalls, 1);
+
+    // Popup terminals have no data-session-id ancestor — restore via local tree walk.
+    const popupTextarea = new FakeNode({ id: "textarea" });
+    const popupDialog = new FakeNode({ id: "dialog" });
+    const popupRoot = new FakeNode({ id: "popup-root", children: [popupTextarea, popupDialog] });
+    assert.equal(
+      resolveDisconnectedDialogTerminalRoot(popupDialog as unknown as Element, null),
+      popupRoot as unknown as Element,
+    );
+    assert.equal(
+      restoreTerminalFocusFromDisconnectedDialog({
+        activeElement: popupDialog as unknown as Element,
+        dialogNode: popupDialog as unknown as HTMLElement,
+        sessionRoot: null,
+      }),
+      true,
+    );
+    assert.equal(popupTextarea.focusCalls, 1);
+    assert.equal(
+      shouldClaimDisconnectedDialogFocus({
+        activeElement: popupTextarea as unknown as Element,
+        dialogNode: popupDialog as unknown as HTMLElement,
+        sessionRoot: null,
+        documentBody: body as unknown as Element,
+      }),
+      true,
+    );
   } finally {
     globalThis.HTMLElement = previousHTMLElement;
   }
