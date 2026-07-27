@@ -310,6 +310,15 @@ export const SelectHostPanelContent: React.FC<SelectHostPanelContentProps> = ({
     return entries;
   }, [listRows]);
 
+  // O(1) key → nav index for virtual row renders (avoid findIndex per visible row).
+  const navigableIndexByKey = useMemo(() => {
+    const map = new Map<string, number>();
+    navigable.forEach((entry, index) => {
+      map.set(entry.key, index);
+    });
+    return map;
+  }, [navigable]);
+
   const clampedNavIndex = clampListIndex(activeNavIndex, navigable.length);
   const activeNavEntry = navigable[clampedNavIndex];
   const activeNavKey = activeNavEntry?.key ?? null;
@@ -391,7 +400,7 @@ export const SelectHostPanelContent: React.FC<SelectHostPanelContentProps> = ({
       );
     }
 
-    const navIndex = navigable.findIndex((entry) => entry.key === row.key);
+    const navIndex = navigableIndexByKey.get(row.key) ?? -1;
     const isActive = activeNavKey === row.key;
 
     if (row.kind === 'group') {
@@ -467,7 +476,9 @@ export const SelectHostPanelContent: React.FC<SelectHostPanelContentProps> = ({
         aria-label={t('selectHost.toggleHost', { name: host.label })}
         className={cn(
           'flex h-full min-h-0 cursor-pointer items-center gap-2.5 overflow-hidden rounded-lg px-2.5 transition-colors',
-          isSelected ? 'bg-muted' : isActive ? 'bg-primary/10 ring-1 ring-primary/40' : 'hover:bg-muted/70',
+          isSelected ? 'bg-muted' : isActive ? 'bg-primary/10' : 'hover:bg-muted/70',
+          // Keep keyboard cursor visible even when the host is already selected.
+          isActive && 'ring-1 ring-primary/40',
         )}
         onClick={() => {
           if (navIndex >= 0) setActiveNavIndex(navIndex);
@@ -513,7 +524,7 @@ export const SelectHostPanelContent: React.FC<SelectHostPanelContentProps> = ({
     handleGroupToggle,
     handleHostClick,
     multiSelect,
-    navigable,
+    navigableIndexByKey,
     optionDomId,
     selectedHostIdSet,
     t,

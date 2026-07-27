@@ -30,6 +30,17 @@ test('SelectHostPanelContent virtualizes with listbox keyboard model', () => {
   // Navigable-index IDs avoid collisions when group paths sanitize identically.
   assert.match(source, /id=\{navIndex >= 0 \? optionDomId\(navIndex\) : undefined\}/);
   assert.match(source, /\$\{listboxId\}-opt-\$\{navIndex\}/);
+  // Virtual rows must O(1)-lookup nav indices, not findIndex the full navigable list.
+  assert.match(source, /navigableIndexByKey/);
+  assert.match(source, /navigableIndexByKey\.get\(row\.key\)/);
+  assert.doesNotMatch(source, /navigable\.findIndex/);
+  // Selected hosts must still show the keyboard active ring.
+  assert.match(source, /isSelected \? 'bg-muted' : isActive \? 'bg-primary\/10' : 'hover:bg-muted\/70'/);
+  assert.match(source, /isActive && 'ring-1 ring-primary\/40'/);
+  assert.doesNotMatch(
+    source,
+    /isSelected \? 'bg-muted' : isActive \? 'bg-primary\/10 ring-1 ring-primary\/40'/,
+  );
   assert.doesNotMatch(source, /filteredHosts\.map\(\(host\) =>/);
   // One listbox tab stop — not per-host tabIndex under virtualization.
   assert.match(source, /role="listbox"[\s\S]*tabIndex=\{0\}/);
