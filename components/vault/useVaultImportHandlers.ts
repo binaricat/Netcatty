@@ -21,6 +21,9 @@ import {
   type VaultLockHandle,
   withVaultImportLock,
 } from "../../application/state/vaultManagedImportLock";
+
+/** Exit the import lock so a concurrent host save can finish, then retry. */
+const RETRY_VAULT_IMPORT_AFTER_CONCURRENT_EDIT = Symbol("retry-vault-import-after-concurrent-edit");
 import { sanitizeHost } from "../../domain/host";
 import {
   applyVaultImportDestination,
@@ -221,23 +224,13 @@ export function useVaultImportHandlers({
                 return persisted;
               }
 
-              // Prefer in-memory hosts when they diverged (local edit while an
-              // import holds the write lock). Fall back to disk for cross-window
-              // changes that already landed in storage.
-              const diskHosts = options?.persistAttempt
-                ? await onReadPersistedHosts()
-                : hostsRef.current;
-              const memoryHosts = hostsRef.current;
-              const memoryDivergedFromDisk = memoryHosts.length !== diskHosts.length
-                || memoryHosts.some((host, index) => {
-                  const diskHost = diskHosts[index];
-                  return !diskHost
-                    || diskHost.id !== host.id
-                    || diskHost.label !== host.label
-                    || diskHost.hostname !== host.hostname
-                    || diskHost.group !== host.group;
-                });
-              const latestHosts = memoryDivergedFromDisk ? memoryHosts : diskHosts;
+              // Locked import commits must release the shared lock before retrying
+              // so a concurrent host save queued behind that lock can finish first.
+              if (options?.persistAttempt) {
+                throw RETRY_VAULT_IMPORT_AFTER_CONCURRENT_EDIT;
+              }
+
+              const latestHosts = hostsRef.current;
               hostsRef.current = latestHosts;
               appliedHosts = rebaseVaultImportedHosts({
                 currentHosts: latestHosts,
@@ -332,6 +325,8 @@ export function useVaultImportHandlers({
           }
   
           if (isManaged && (newHosts.length > 0 || updatedExistingHosts.length > 0)) {
+            while (true) {
+            try {
             await withVaultImportLock("vault", async (lock) => {
             const latestPersistedSources = onReadPersistedManagedSources();
             managedSourcesRef.current = latestPersistedSources;
@@ -463,9 +458,18 @@ export function useVaultImportHandlers({
               rollbackPendingImport,
             );
             });
+            break;
+            } catch (error) {
+              if (error !== RETRY_VAULT_IMPORT_AFTER_CONCURRENT_EDIT) throw error;
+              // Drain concurrent locked writes outside the critical section.
+              hostsRef.current = await onReadPersistedHosts();
+            }
+            }
           } else if (newHosts.length > 0) {
             let addedHostIds = new Set<string>();
             let addedHostKeyPaths = new Map<string, string>();
+            while (true) {
+            try {
             await withVaultImportLock("vault", async (lock) => {
             const importBaselineHosts = await onReadPersistedHosts();
             hostsRef.current = importBaselineHosts;
@@ -511,6 +515,12 @@ export function useVaultImportHandlers({
               rollbackPendingImport,
             );
             });
+            break;
+            } catch (error) {
+              if (error !== RETRY_VAULT_IMPORT_AFTER_CONCURRENT_EDIT) throw error;
+              hostsRef.current = await onReadPersistedHosts();
+            }
+            }
             throwIfCancelled();
             const resolved = await resolveVaultImportKeyPassphraseConflicts(
               result.keyPassphraseCandidates ?? result.keyPassphrases ?? [],

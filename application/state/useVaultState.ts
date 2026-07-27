@@ -282,6 +282,13 @@ export const useVaultState = () => {
   const snippetsWriteVersion = useRef(0);
   const customGroupsWriteVersion = useRef(0);
   const groupConfigsWriteVersion = useRef(0);
+  // Encrypt-phase promises can always be awaited, even under the vault lock.
+  // Full write promises include lock acquisition and must only be awaited when
+  // this window does not already hold that lock (otherwise writers deadlock).
+  const hostsEncryptPendingRef = useRef<Promise<unknown>>(Promise.resolve());
+  const keysEncryptPendingRef = useRef<Promise<unknown>>(Promise.resolve());
+  const identitiesEncryptPendingRef = useRef<Promise<unknown>>(Promise.resolve());
+  const groupConfigsEncryptPendingRef = useRef<Promise<unknown>>(Promise.resolve());
   const hostsWritePendingRef = useRef<Promise<unknown>>(Promise.resolve());
   const keysWritePendingRef = useRef<Promise<unknown>>(Promise.resolve());
   const identitiesWritePendingRef = useRef<Promise<unknown>>(Promise.resolve());
@@ -289,18 +296,38 @@ export const useVaultState = () => {
 
   const waitForPendingVaultWrites = useCallback(async () => {
     while (true) {
-      const pending = [
+      const encryptPending = [
+        hostsEncryptPendingRef.current,
+        keysEncryptPendingRef.current,
+        identitiesEncryptPendingRef.current,
+        groupConfigsEncryptPendingRef.current,
+      ];
+      await Promise.all(encryptPending);
+      if (isVaultImportLockHeld("vault")) {
+        if (
+          encryptPending[0] === hostsEncryptPendingRef.current
+          && encryptPending[1] === keysEncryptPendingRef.current
+          && encryptPending[2] === identitiesEncryptPendingRef.current
+          && encryptPending[3] === groupConfigsEncryptPendingRef.current
+        ) return;
+        continue;
+      }
+      const writePending = [
         hostsWritePendingRef.current,
         keysWritePendingRef.current,
         identitiesWritePendingRef.current,
         groupConfigsWritePendingRef.current,
       ];
-      await Promise.all(pending);
+      await Promise.all(writePending);
       if (
-        pending[0] === hostsWritePendingRef.current
-        && pending[1] === keysWritePendingRef.current
-        && pending[2] === identitiesWritePendingRef.current
-        && pending[3] === groupConfigsWritePendingRef.current
+        writePending[0] === hostsWritePendingRef.current
+        && writePending[1] === keysWritePendingRef.current
+        && writePending[2] === identitiesWritePendingRef.current
+        && writePending[3] === groupConfigsWritePendingRef.current
+        && encryptPending[0] === hostsEncryptPendingRef.current
+        && encryptPending[1] === keysEncryptPendingRef.current
+        && encryptPending[2] === identitiesEncryptPendingRef.current
+        && encryptPending[3] === groupConfigsEncryptPendingRef.current
       ) return;
     }
   }, []);
@@ -404,22 +431,22 @@ export const useVaultState = () => {
     // Encrypt outside the lock so importers that hold the lock can still wait
     // for in-flight encryption without deadlocking on lock acquisition.
     const encryptPromise = encryptHosts(cleaned);
-    hostsWritePendingRef.current = encryptPromise.then(() => undefined);
-    return encryptPromise.then(async (enc) => {
+    hostsEncryptPendingRef.current = encryptPromise.then(() => undefined);
+    const writePromise = encryptPromise.then(async (enc) => {
       if (ver !== hostsWriteVersion.current) return "superseded" as const;
       return withVaultImportLock("vault", async () => {
         if (ver !== hostsWriteVersion.current) return "superseded" as const;
         return localStorageAdapter.write(STORAGE_KEY_HOSTS, enc);
       });
     });
+    hostsWritePendingRef.current = writePromise;
+    return writePromise;
   }, []);
 
   const readPersistedHosts = useCallback(async (): Promise<Host[]> => {
-    // Never wait for pending writers while this window already holds the vault
-    // lock — those writers may be queued behind us and waiting would deadlock.
-    if (!isVaultImportLockHeld("vault")) {
-      await waitForPendingVaultWrites();
-    }
+    // Always drain what is safe to wait for. Under the vault lock this is only
+    // the encrypt phase; outside the lock it also waits for locked disk writes.
+    await waitForPendingVaultWrites();
     while (true) {
       const rawHosts = localStorageAdapter.readString(STORAGE_KEY_HOSTS);
       const storedHosts = readStoredArray<Host>(STORAGE_KEY_HOSTS, rawHosts);
@@ -434,14 +461,16 @@ export const useVaultState = () => {
     setKeys(cleaned);
     const ver = ++keysWriteVersion.current;
     const encryptPromise = encryptKeys(cleaned);
-    keysWritePendingRef.current = encryptPromise.then(() => undefined);
-    return encryptPromise.then(async (enc) => {
+    keysEncryptPendingRef.current = encryptPromise.then(() => undefined);
+    const writePromise = encryptPromise.then(async (enc) => {
       if (ver !== keysWriteVersion.current) return;
       return withVaultImportLock("vault", async () => {
         if (ver === keysWriteVersion.current)
           localStorageAdapter.write(STORAGE_KEY_KEYS, enc);
       });
     });
+    keysWritePendingRef.current = writePromise;
+    return writePromise;
   }, []);
 
   const importOrReuseKey = useCallback((draft: Partial<SSHKey>): SSHKey => {
@@ -475,14 +504,15 @@ export const useVaultState = () => {
     setKeys(updated);
     const ver = ++keysWriteVersion.current;
     const encryptPromise = encryptKeys(updated);
-    keysWritePendingRef.current = encryptPromise.then(() => undefined);
-    void encryptPromise.then(async (enc) => {
+    keysEncryptPendingRef.current = encryptPromise.then(() => undefined);
+    const writePromise = encryptPromise.then(async (enc) => {
       if (ver !== keysWriteVersion.current) return;
       return withVaultImportLock("vault", async () => {
         if (ver === keysWriteVersion.current)
           localStorageAdapter.write(STORAGE_KEY_KEYS, enc);
       });
     });
+    keysWritePendingRef.current = writePromise;
     return newKey;
   }, [keys]);
 
@@ -491,14 +521,16 @@ export const useVaultState = () => {
     setIdentities(cleaned);
     const ver = ++identitiesWriteVersion.current;
     const encryptPromise = encryptIdentities(cleaned);
-    identitiesWritePendingRef.current = encryptPromise.then(() => undefined);
-    return encryptPromise.then(async (enc) => {
+    identitiesEncryptPendingRef.current = encryptPromise.then(() => undefined);
+    const writePromise = encryptPromise.then(async (enc) => {
       if (ver !== identitiesWriteVersion.current) return;
       return withVaultImportLock("vault", async () => {
         if (ver === identitiesWriteVersion.current)
           localStorageAdapter.write(STORAGE_KEY_IDENTITIES, enc);
       });
     });
+    identitiesWritePendingRef.current = writePromise;
+    return writePromise;
   }, []);
 
   const updateProxyProfiles = useCallback((data: ProxyProfile[]) => {
@@ -538,12 +570,9 @@ export const useVaultState = () => {
   const updateCustomGroups = useCallback((
     data: string[] | ((current: string[]) => string[]),
   ) => {
-    const next = typeof data === "function"
-      ? data(
-        localStorageAdapter.read<string[]>(STORAGE_KEY_GROUPS)
-          ?? customGroupsRef.current,
-      )
-      : data;
+    // Functional updates must see the latest in-memory snapshot. Storage may
+    // still hold an older value while an encrypt+locked write is in flight.
+    const next = typeof data === "function" ? data(customGroupsRef.current) : data;
     customGroupsRef.current = next;
     const groupsVer = ++customGroupsWriteVersion.current;
     setCustomGroups(next);
@@ -552,8 +581,8 @@ export const useVaultState = () => {
     setGroupConfigs(cleanedGroupConfigs);
     const configsVer = ++groupConfigsWriteVersion.current;
     const encryptPromise = encryptGroupConfigs(cleanedGroupConfigs);
-    groupConfigsWritePendingRef.current = encryptPromise.then(() => undefined);
-    void encryptPromise.then(async (enc) => {
+    groupConfigsEncryptPendingRef.current = encryptPromise.then(() => undefined);
+    const writePromise = encryptPromise.then(async (enc) => {
       return withVaultImportLock("vault", async () => {
         if (groupsVer === customGroupsWriteVersion.current) {
           localStorageAdapter.write(STORAGE_KEY_GROUPS, next);
@@ -562,6 +591,7 @@ export const useVaultState = () => {
           localStorageAdapter.write(STORAGE_KEY_GROUP_CONFIGS, enc);
       });
     });
+    groupConfigsWritePendingRef.current = writePromise;
   }, [groupConfigs]);
 
   const updateKnownHosts = useCallback((data: KnownHost[]) => {
@@ -573,12 +603,7 @@ export const useVaultState = () => {
   const updateManagedSources = useCallback((
     data: ManagedSource[] | ((current: ManagedSource[]) => ManagedSource[]),
   ) => {
-    const next = typeof data === "function"
-      ? data(
-        localStorageAdapter.read<ManagedSource[]>(STORAGE_KEY_MANAGED_SOURCES)
-          ?? managedSourcesRef.current,
-      )
-      : data;
+    const next = typeof data === "function" ? data(managedSourcesRef.current) : data;
     managedSourcesRef.current = next;
     setManagedSources(next);
     void withVaultImportLock("vault", async () => {
@@ -722,14 +747,16 @@ export const useVaultState = () => {
     setGroupConfigs(cleaned);
     const ver = ++groupConfigsWriteVersion.current;
     const encryptPromise = encryptGroupConfigs(cleaned);
-    groupConfigsWritePendingRef.current = encryptPromise.then(() => undefined);
-    return encryptPromise.then(async (enc) => {
+    groupConfigsEncryptPendingRef.current = encryptPromise.then(() => undefined);
+    const writePromise = encryptPromise.then(async (enc) => {
       if (ver !== groupConfigsWriteVersion.current) return;
       return withVaultImportLock("vault", async () => {
         if (ver === groupConfigsWriteVersion.current)
           localStorageAdapter.write(STORAGE_KEY_GROUP_CONFIGS, enc);
       });
     });
+    groupConfigsWritePendingRef.current = writePromise;
+    return writePromise;
   }, []);
 
   const clearVaultData = useCallback(() => {
@@ -872,14 +899,15 @@ export const useVaultState = () => {
       const updated = normalizeVaultOrder([...prevHosts, sanitizeHost(newHost)]);
       const ver = ++hostsWriteVersion.current;
       const encryptPromise = encryptHosts(updated);
-      hostsWritePendingRef.current = encryptPromise.then(() => undefined);
-      void encryptPromise.then(async (enc) => {
+      hostsEncryptPendingRef.current = encryptPromise.then(() => undefined);
+      const writePromise = encryptPromise.then(async (enc) => {
         if (ver !== hostsWriteVersion.current) return;
         return withVaultImportLock("vault", async () => {
           if (ver === hostsWriteVersion.current)
             localStorageAdapter.write(STORAGE_KEY_HOSTS, enc);
         });
       });
+      hostsWritePendingRef.current = writePromise;
       return updated;
     });
 
@@ -1293,14 +1321,15 @@ export const useVaultState = () => {
       );
       const ver = ++hostsWriteVersion.current;
       const encryptPromise = encryptHosts(next);
-      hostsWritePendingRef.current = encryptPromise.then(() => undefined);
-      void encryptPromise.then(async (enc) => {
+      hostsEncryptPendingRef.current = encryptPromise.then(() => undefined);
+      const writePromise = encryptPromise.then(async (enc) => {
         if (ver !== hostsWriteVersion.current) return;
         return withVaultImportLock("vault", async () => {
           if (ver === hostsWriteVersion.current)
             localStorageAdapter.write(STORAGE_KEY_HOSTS, enc);
         });
       });
+      hostsWritePendingRef.current = writePromise;
       return next;
     });
   }, []);
@@ -1313,14 +1342,15 @@ export const useVaultState = () => {
       );
       const ver = ++hostsWriteVersion.current;
       const encryptPromise = encryptHosts(next);
-      hostsWritePendingRef.current = encryptPromise.then(() => undefined);
-      void encryptPromise.then(async (enc) => {
+      hostsEncryptPendingRef.current = encryptPromise.then(() => undefined);
+      const writePromise = encryptPromise.then(async (enc) => {
         if (ver !== hostsWriteVersion.current) return;
         return withVaultImportLock("vault", async () => {
           if (ver === hostsWriteVersion.current)
             localStorageAdapter.write(STORAGE_KEY_HOSTS, enc);
         });
       });
+      hostsWritePendingRef.current = writePromise;
       return next;
     });
   }, []);
