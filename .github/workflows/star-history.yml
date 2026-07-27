@@ -39,10 +39,12 @@ jobs:
             --output "$out_dir/star-history-dark.svg"
 
       # main is protected (require PR + enforce_admins), so direct pushes fail with GH006.
-      # Open/update a fixed-branch PR and merge it when the branch rules allow.
+      # Push the chart branch with RELEASE_TOKEN (checkout credentials), then open/merge
+      # the PR with GITHUB_TOKEN — RELEASE_TOKEN is not granted createPullRequest.
       - name: Commit via pull request
         env:
-          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          # Prefer GITHUB_TOKEN for PR API; fall back is not used for git push auth.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
@@ -60,6 +62,7 @@ jobs:
 
           git checkout -B "$branch"
           git commit -m "chore: update star history charts [skip ci]"
+          # Auth comes from actions/checkout (RELEASE_TOKEN), not GH_TOKEN above.
           git push -u origin "HEAD:${branch}" --force
 
           existing="$(

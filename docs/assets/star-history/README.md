@@ -30,9 +30,12 @@ Or trigger the **Star History** GitHub Actions workflow
 secret (same PAT already used for release publishing) so no new secret is
 needed. Because `main` requires pull requests (with admin enforcement), the
 workflow never pushes to the default branch directly: it force-updates
-`chore/star-history`, opens or reuses a PR, then squash-merges it. The token
-must be able to:
+`chore/star-history` with `RELEASE_TOKEN`, then opens/reuses and squash-merges
+a PR with the built-in `GITHUB_TOKEN` (PATs often lack `createPullRequest`).
+`RELEASE_TOKEN` must be able to:
 
 - read stargazers (repo admin/collaborator)
 - push the `chore/star-history` branch
-- open and merge pull requests into the default branch
+
+Also ensure the repo setting **Allow GitHub Actions to create and approve pull
+requests** is enabled so `GITHUB_TOKEN` can open the chart PR.
