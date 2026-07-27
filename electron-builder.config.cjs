@@ -233,6 +233,7 @@ module.exports = {
         artifactName: '${productName}-${version}-portable-${os}-${arch}.${ext}',
     },
     nsis: {
+        include: 'build/installer.nsh',
         oneClick: false,
         perMachine: false,
         allowElevation: true,

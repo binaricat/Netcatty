@@ -201,6 +201,34 @@ test("windows packaging includes a zip archive target", () => {
   );
 });
 
+test("windows installer registers and removes Explorer folder context menu entries", () => {
+  const fs = require("node:fs");
+  const path = require("node:path");
+
+  assert.equal(
+    config.nsis.include,
+    "build/installer.nsh",
+    "NSIS packaging must include the Explorer context-menu installer hooks",
+  );
+
+  const installerScript = fs.readFileSync(
+    path.join(__dirname, "..", config.nsis.include),
+    "utf8",
+  );
+  const folderKey = String.raw`Software\Classes\Directory\shell\Netcatty`;
+  const backgroundKey = String.raw`Software\Classes\Directory\Background\shell\Netcatty`;
+
+  assert.match(installerScript, /!macro customInstall\b/);
+  assert.match(installerScript, new RegExp(`WriteRegStr SHCTX "${folderKey.replaceAll("\\", "\\\\")}"`));
+  assert.match(installerScript, new RegExp(`WriteRegStr SHCTX "${backgroundKey.replaceAll("\\", "\\\\")}"`));
+  assert.match(installerScript, /--open-terminal-path "%1"/);
+  assert.match(installerScript, /--open-terminal-path "%V"/);
+
+  assert.match(installerScript, /!macro customUnInstall\b/);
+  assert.match(installerScript, new RegExp(`DeleteRegKey SHCTX "${folderKey.replaceAll("\\", "\\\\")}"`));
+  assert.match(installerScript, new RegExp(`DeleteRegKey SHCTX "${backgroundKey.replaceAll("\\", "\\\\")}"`));
+});
+
 test("windows zip follows the requested build architecture", () => {
   const { Arch } = require("builder-util");
   const { Platform } = require("app-builder-lib");
