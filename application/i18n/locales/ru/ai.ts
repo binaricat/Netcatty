@@ -191,6 +191,25 @@ export const ruAiMessages: Messages = {
   'ai.codebuddy.envVars.placeholder': 'CODEBUDDY_API_KEY=...\nCODEBUDDY_AUTH_TOKEN=...\nOTHER_VAR=...',
   'ai.codebuddy.envVars.hint': 'По одной записи KEY=VALUE на строку, передаются агенту CodeBuddy. Укажите CODEBUDDY_API_KEY или CODEBUDDY_AUTH_TOKEN для аутентификации. Хранятся локально в открытом виде.',
 
+  // AI Antigravity
+  'ai.antigravity.title': 'Google Antigravity',
+  'ai.antigravity.description': 'Использует официальный Google Antigravity SDK через общую систему локальных агентов Netcatty. Требуются Python 3.10+ и пакет google-antigravity.',
+  'ai.antigravity.detecting': 'Обнаружение...',
+  'ai.antigravity.detected': 'Обнаружен',
+  'ai.antigravity.notFound': 'Не найден',
+  'ai.antigravity.path': 'Python:',
+  'ai.antigravity.notFoundHint': 'Установите официальный SDK командой python -m pip install google-antigravity, затем повторите проверку или укажите путь к Python. SDK 0.1.8 поддерживает macOS на Apple Silicon, но не Intel Mac.',
+  'ai.antigravity.customPathPlaceholder': 'например, /usr/local/bin/python3',
+  'ai.antigravity.check': 'Проверить',
+  'ai.antigravity.resetPath': 'Сбросить',
+  'ai.antigravity.apiKey': 'Ключ Gemini API',
+  'ai.antigravity.apiKeyPlaceholder': 'Введите ключ Gemini API',
+  'ai.antigravity.apiKeyPlaceholder.env': 'Используется GEMINI_API_KEY из окружения',
+  'ai.antigravity.showApiKey': 'Показать ключ API',
+  'ai.antigravity.hideApiKey': 'Скрыть ключ API',
+  'ai.antigravity.saveApiKey': 'Сохранить',
+  'ai.antigravity.saved': 'Сохранено',
+
   // AI Default Agent
   'ai.defaultAgent': 'Агент по умолчанию',
   'ai.defaultAgent.description': 'Агент, который будет использоваться при запуске новой AI-сессии',

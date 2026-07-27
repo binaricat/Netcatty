@@ -279,7 +279,7 @@ export interface DiscoveredAgent {
   acpCommand?: string;
   acpArgs?: string[];
   /** SDK backend key (claude|codex|copilot|cursor|codebuddy|opencode) — the routing value. */
-  sdkBackend?: 'claude' | 'codex' | 'copilot' | 'cursor' | 'codebuddy' | 'opencode';
+  sdkBackend?: 'antigravity' | 'claude' | 'codex' | 'copilot' | 'cursor' | 'codebuddy' | 'opencode';
   /** Absolute resolved CLI path (preferred over `path`). */
   binPath?: string;
   installed?: boolean;

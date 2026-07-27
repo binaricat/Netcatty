@@ -16,8 +16,31 @@ const cursor = require("./cursorDriver.cjs");
 const cursorCli = require("./cursorCliDriver.cjs");
 const codebuddy = require("./codebuddyDriver.cjs");
 const opencode = require("./opencodeDriver.cjs");
+const antigravity = require("./antigravityDriver.cjs");
 
 const DRIVER_REGISTRY = {
+  antigravity: {
+    async runTurn(ctx) {
+      return antigravity.runAntigravityTurn({
+        prompt: ctx.prompt,
+        chatSessionId: ctx.chatSessionId,
+        attachments: ctx.attachments,
+        cwd: ctx.cwd,
+        model: ctx.model,
+        env: ctx.env,
+        pythonPath: ctx.binPath,
+        injectedMcpServers: ctx.injectedMcpServers,
+        toolIntegrationMode: ctx.toolIntegrationMode,
+        permissionMode: ctx.permissionMode,
+        resumeSessionId: ctx.resumeSessionId,
+        emitter: ctx.emitter,
+        signal: ctx.signal,
+      });
+    },
+    async listModels() {
+      return antigravity.listAntigravityModels();
+    },
+  },
   claude: {
     async runTurn(ctx) {
       const options = claude.buildClaudeQueryOptions({

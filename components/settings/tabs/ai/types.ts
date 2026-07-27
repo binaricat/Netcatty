@@ -206,6 +206,12 @@ export const AGENT_DEFAULTS: Record<string, Omit<ExternalAgentConfig, "id" | "co
     icon: "opencode",
     sdkBackend: "opencode",
   },
+  antigravity: {
+    name: "Google Antigravity",
+    args: [],
+    icon: "gemini",
+    sdkBackend: "antigravity",
+  },
 };
 
 // ---------------------------------------------------------------------------

@@ -21,6 +21,7 @@ test('inferCodingCliProviderFromOutput detects other CLI banners', () => {
   assert.equal(inferCodingCliProviderFromOutput('Welcome to Claude Code'), 'claude');
   assert.equal(inferCodingCliProviderFromOutput('GitHub Copilot CLI'), 'copilot');
   assert.equal(inferCodingCliProviderFromOutput('Factory Droid ready'), 'droid');
+  assert.equal(inferCodingCliProviderFromOutput('Antigravity CLI ready'), 'antigravity');
   assert.equal(
     inferCodingCliProviderFromOutput(
       '█▀▀█ █▀▀█ █▀▀█ █▀▀▄ █▀▀▀ █▀▀█ █▀▀█ █▀▀█\n'

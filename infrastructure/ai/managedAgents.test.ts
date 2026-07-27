@@ -65,3 +65,17 @@ test('legacy backend field is still accepted for saved settings', () => {
     'codex',
   );
 });
+
+test('Antigravity managed config keeps its Python SDK interpreter identity', () => {
+  assert.equal(
+    matchesManagedAgentConfig(
+      {
+        id: 'discovered_antigravity',
+        command: '/usr/bin/python3',
+        sdkBackend: 'antigravity',
+      },
+      'antigravity',
+    ),
+    true,
+  );
+});

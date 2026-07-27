@@ -81,6 +81,23 @@ export function buildManagedAgentState(
         };
       }
     }
+    if (agentKey === "antigravity" && existingManaged?.apiKey) {
+      return {
+        agents: [
+          ...otherAgents,
+          {
+            ...existingManaged,
+            ...AGENT_DEFAULTS.antigravity,
+            id: managedId,
+            command: pathInfo?.path || existingManaged.command || "python3",
+            enabled: existingManaged.enabled ?? true,
+            available: false,
+            apiKey: existingManaged.apiKey,
+          },
+        ],
+        defaultAgentId: existingManaged.id === defaultAgentId ? "catty" : defaultAgentId,
+      };
+    }
     return {
       agents: otherAgents,
       defaultAgentId: managedAgents.some((agent) => agent.id === defaultAgentId)
@@ -190,5 +207,6 @@ export function getInitialManagedAgentPaths(agents: ExternalAgentConfig[]) {
     cursor: getAutoManagedAgentStoredPath(agents, "cursor") ?? "",
     codebuddy: getAutoManagedAgentStoredPath(agents, "codebuddy") ?? "",
     opencode: getAutoManagedAgentStoredPath(agents, "opencode") ?? "",
+    antigravity: getAutoManagedAgentStoredPath(agents, "antigravity") ?? "",
   };
 }

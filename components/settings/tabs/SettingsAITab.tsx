@@ -56,6 +56,7 @@ import { QuickMessagesSettings } from "./ai/QuickMessagesSettings";
 import type { AIQuickMessage } from "../../../infrastructure/ai/quickMessages";
 import { encryptField } from "../../../infrastructure/persistence/secureFieldAdapter";
 import { CursorSdkCard } from "./ai/CursorSdkCard";
+import { AntigravitySdkCard } from "./ai/AntigravitySdkCard";
 import {
   areExternalAgentListsEqual,
   buildManagedAgentState,
@@ -217,6 +218,7 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
     cursor: string;
     codebuddy: string;
     opencode: string;
+    antigravity: string;
   } | null>(null);
   if (!initialManagedPathsRef.current) {
     initialManagedPathsRef.current = getInitialManagedAgentPaths(externalAgents);
@@ -281,6 +283,13 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
   );
   const [opencodeCustomPath, setOpencodeCustomPath] = useState(() => initialManagedPathsRef.current?.opencode ?? "");
   const [isResolvingOpencode, setIsResolvingOpencode] = useState(false);
+  const [antigravityPathInfo, setAntigravityPathInfo] = useState<AgentPathInfo | null>(
+    () => getSavedManagedAgentPathInfo(externalAgents, "antigravity"),
+  );
+  const [antigravityCustomPath, setAntigravityCustomPath] = useState(
+    () => initialManagedPathsRef.current?.antigravity ?? "",
+  );
+  const [isResolvingAntigravity, setIsResolvingAntigravity] = useState(false);
 
   const codebuddyManagedEnv = useMemo(
     () => externalAgents.find((a) => a.id === "discovered_codebuddy")?.env,
@@ -305,6 +314,11 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
     [externalAgents],
   );
   const cursorApiKeyEncrypted = cursorManagedAgent?.apiKey;
+  const antigravityManagedAgent = useMemo(
+    () => externalAgents.find((agent) => agent.id === "discovered_antigravity"),
+    [externalAgents],
+  );
+  const antigravityApiKeyEncrypted = antigravityManagedAgent?.apiKey;
   const cursorAuthMode: CursorAuthMode = cursorManagedAgent?.cursorAuthMode === "cli-login"
     ? "cli-login"
     : "api-key";
@@ -321,7 +335,7 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
   useEffect(() => () => {
     mountedRef.current = false;
     codexRequestIdRef.current += 1;
-    for (const key of ["codex", "claude", "copilot", "cursor", "codebuddy", "opencode"] as ManagedAgentKey[]) {
+    for (const key of ["codex", "claude", "copilot", "cursor", "codebuddy", "opencode", "antigravity"] as ManagedAgentKey[]) {
       agentPathRequestIdRef.current[key] = (agentPathRequestIdRef.current[key] ?? 0) + 1;
     }
   }, []);
@@ -341,7 +355,9 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
             ? setCursorPathInfo
             : agentKey === "codebuddy"
               ? setCodebuddyPathInfo
-              : setOpencodePathInfo;
+              : agentKey === "opencode"
+                ? setOpencodePathInfo
+                : setAntigravityPathInfo;
 
     setInfo(result);
 
@@ -382,7 +398,9 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
             ? setIsResolvingCursor
             : agentKey === "codebuddy"
               ? setIsResolvingCodebuddy
-              : setIsResolvingOpencode;
+              : agentKey === "opencode"
+                ? setIsResolvingOpencode
+                : setIsResolvingAntigravity;
 
     setResolving(true);
     const requestId = (agentPathRequestIdRef.current[agentKey] ?? 0) + 1;
@@ -396,12 +414,14 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
         command: agentKey,
         customPath: customPath.trim(),
         refreshShellEnv: Boolean(options?.refreshShellEnv),
-        ...(agentKey === "cursor" ? {
+        ...((agentKey === "cursor" || agentKey === "antigravity") ? {
         // Always report stored key presence so discovery can set apiKeyOk even
         // while the user is in CLI-login mode (mode is separate from capability).
         apiKeyPresent: (options?.apiKeyPresent !== undefined
           ? Boolean(options.apiKeyPresent)
-          : Boolean(cursorApiKeyEncrypted)),
+          : agentKey === "cursor"
+            ? Boolean(cursorApiKeyEncrypted)
+            : Boolean(antigravityApiKeyEncrypted)),
       } : {}),
       });
       if (!isCurrentRequest()) return null;
@@ -421,7 +441,9 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
                 ? setCursorPathInfo
                 : agentKey === "codebuddy"
                   ? setCodebuddyPathInfo
-                  : setOpencodePathInfo;
+                  : agentKey === "opencode"
+                    ? setOpencodePathInfo
+                    : setAntigravityPathInfo;
         setInfo(result);
         return result;
       }
@@ -436,7 +458,7 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
         setResolving(false);
       }
     }
-  }, [applyResolvedAgentPath, cursorApiKeyEncrypted]);
+  }, [antigravityApiKeyEncrypted, applyResolvedAgentPath, cursorApiKeyEncrypted]);
 
   useEffect(() => {
     if (activeSubTab !== "agents") return;
@@ -459,6 +481,12 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
       },
       { key: "codebuddy", delayMs: 1280, path: initialPaths?.codebuddy ?? "" },
       { key: "opencode", delayMs: 1560, path: initialPaths?.opencode ?? "" },
+      {
+        key: "antigravity",
+        delayMs: 1840,
+        path: initialPaths?.antigravity ?? "",
+        options: { apiKeyPresent: Boolean(antigravityApiKeyEncrypted) },
+      },
     ];
     const cancelTasks = tasks
       .filter((task) => !autoResolvedAgentStateRef.current[task.key])
@@ -475,7 +503,7 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
     return () => {
       for (const cancel of cancelTasks) cancel();
     };
-  }, [activeSubTab, cursorApiKeyEncrypted, cursorAuthMode, resolveAgentPath]);
+  }, [activeSubTab, antigravityApiKeyEncrypted, cursorApiKeyEncrypted, cursorAuthMode, resolveAgentPath]);
 
   const handleSaveCursorApiKey = useCallback(async (apiKey: string) => {
     const trimmed = apiKey.trim();
@@ -509,6 +537,36 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
       return [...others, nextAgent];
     });
   }, [cursorPathInfo?.path, resolveAgentPath, setExternalAgents]);
+
+  const handleSaveAntigravityApiKey = useCallback(async (apiKey: string) => {
+    const trimmed = apiKey.trim();
+    const encrypted = trimmed ? await encryptField(trimmed) : undefined;
+    const result = await resolveAgentPath("antigravity", antigravityCustomPath, {
+      apiKeyPresent: Boolean(trimmed),
+      commandSource: antigravityCustomPath.trim() ? "manual" : "auto",
+    });
+    setExternalAgents((prev) => {
+      const existing = prev.find((agent) => agent.id === "discovered_antigravity");
+      const others = prev.filter((agent) => agent.id !== "discovered_antigravity");
+      if (!encrypted && !existing) return prev;
+      const nextAgent: ExternalAgentConfig = {
+        ...(existing ?? {
+          id: "discovered_antigravity",
+          name: "Google Antigravity",
+          command: result?.path || antigravityPathInfo?.path || antigravityCustomPath || "python3",
+          args: [],
+          icon: "gemini",
+          sdkBackend: "antigravity",
+          enabled: true,
+        }),
+        apiKey: encrypted,
+        command: result?.path || existing?.command || antigravityPathInfo?.path || antigravityCustomPath || "python3",
+        commandSource: antigravityCustomPath.trim() ? "manual" : "auto",
+        available: Boolean(result?.available),
+      };
+      return [...others, nextAgent];
+    });
+  }, [antigravityCustomPath, antigravityPathInfo?.path, resolveAgentPath, setExternalAgents]);
 
   const handleCursorAuthModeChange = useCallback((mode: CursorAuthMode) => {
     setExternalAgents((prev) => {
@@ -692,7 +750,7 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
             ? codebuddyCustomPath
             : agentKey === "opencode"
               ? opencodeCustomPath
-              : "";
+              : antigravityCustomPath;
     const result = await resolveAgentPath(agentKey, customPath, {
       refreshShellEnv: true,
       commandSource: customPath.trim() ? "manual" : "auto",
@@ -704,7 +762,7 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
         codexPath: result?.path || customPath.trim() || undefined,
       });
     }
-  }, [claudeCustomPath, codexCustomPath, copilotCustomPath, codebuddyCustomPath, opencodeCustomPath, resolveAgentPath, refreshCodexIntegration]);
+  }, [antigravityCustomPath, claudeCustomPath, codexCustomPath, copilotCustomPath, codebuddyCustomPath, opencodeCustomPath, resolveAgentPath, refreshCodexIntegration]);
 
   const handleResetCustomPath = useCallback(async (agentKey: ManagedAgentKey) => {
     if (agentKey === "codex") {
@@ -717,6 +775,8 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
       setCodebuddyCustomPath("");
     } else if (agentKey === "opencode") {
       setOpencodeCustomPath("");
+    } else if (agentKey === "antigravity") {
+      setAntigravityCustomPath("");
     }
 
     const result = await resolveAgentPath(agentKey, "", {
@@ -724,6 +784,8 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
       commandSource: "auto",
       ...(agentKey === "cursor" ? {
         apiKeyPresent: Boolean(cursorApiKeyEncrypted),
+      } : agentKey === "antigravity" ? {
+        apiKeyPresent: Boolean(antigravityApiKeyEncrypted),
       } : {}),
     });
     if (agentKey === "codex") {
@@ -733,7 +795,7 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
         codexPath: result?.path || undefined,
       });
     }
-  }, [cursorApiKeyEncrypted, resolveAgentPath, refreshCodexIntegration]);
+  }, [antigravityApiKeyEncrypted, cursorApiKeyEncrypted, resolveAgentPath, refreshCodexIntegration]);
 
   useEffect(() => {
     if (activeSubTab !== "agents") return;
@@ -1104,6 +1166,22 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
               onRecheckPath={() => void handleCheckCustomPath("opencode")}
               onResetPath={() => void handleResetCustomPath("opencode")}
               i18nPrefix="ai.opencode"
+            />
+          </SettingsSection>
+
+          <SettingsSection
+            title={t('ai.antigravity.title')}
+            leading={<AgentIconBadge agent={{ id: "antigravity", icon: "gemini", name: "Google Antigravity" }} variant="plain" className="h-5 w-5 text-muted-foreground/90" />}
+          >
+            <AntigravitySdkCard
+              pathInfo={antigravityPathInfo}
+              isResolvingPath={isResolvingAntigravity}
+              customPath={antigravityCustomPath}
+              encryptedApiKey={antigravityApiKeyEncrypted}
+              onCustomPathChange={setAntigravityCustomPath}
+              onRecheckPath={() => void handleCheckCustomPath("antigravity")}
+              onResetPath={() => void handleResetCustomPath("antigravity")}
+              onSaveApiKey={handleSaveAntigravityApiKey}
             />
           </SettingsSection>
 

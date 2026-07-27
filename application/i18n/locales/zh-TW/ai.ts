@@ -222,6 +222,25 @@ export const zhTWAiMessages: Messages = {
   'ai.opencode.check': '檢查',
   'ai.opencode.resetPath': '重置',
 
+  // AI Antigravity
+  'ai.antigravity.title': 'Google Antigravity',
+  'ai.antigravity.description': '透過 Netcatty 現有的本機 Agent 框架介接 Google 官方 Antigravity SDK。需要 Python 3.10+ 和 google-antigravity 套件。',
+  'ai.antigravity.detecting': '偵測中...',
+  'ai.antigravity.detected': '已偵測到',
+  'ai.antigravity.notFound': '未找到',
+  'ai.antigravity.path': 'Python：',
+  'ai.antigravity.notFoundHint': '請執行 python -m pip install google-antigravity 安裝官方 SDK，然後重新檢查或選擇對應的 Python 執行檔。SDK 0.1.8 支援 Apple 晶片 Mac，但不支援 Intel Mac。',
+  'ai.antigravity.customPathPlaceholder': '例如 /usr/local/bin/python3',
+  'ai.antigravity.check': '檢查',
+  'ai.antigravity.resetPath': '重置',
+  'ai.antigravity.apiKey': 'Gemini API 金鑰',
+  'ai.antigravity.apiKeyPlaceholder': '輸入 Gemini API 金鑰',
+  'ai.antigravity.apiKeyPlaceholder.env': '正在使用環境變數中的 GEMINI_API_KEY',
+  'ai.antigravity.showApiKey': '顯示 API 金鑰',
+  'ai.antigravity.hideApiKey': '隱藏 API 金鑰',
+  'ai.antigravity.saveApiKey': '儲存',
+  'ai.antigravity.saved': '已儲存',
+
   // AI Default Agent
   'ai.defaultAgent': '預設 Agent',
   'ai.defaultAgent.description': '建立新 AI 工作階段時使用的 Agent',

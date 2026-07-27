@@ -193,6 +193,10 @@ function resolveBackendKey(value) {
   return VALID_BACKENDS.has(key) ? key : null;
 }
 
+function resolveSdkToolIntegrationMode(backendKey, requestedMode) {
+  return backendKey === "antigravity" ? "mcp" : requestedMode;
+}
+
 function normalizeHistoryMessages(historyMessages) {
   if (!Array.isArray(historyMessages)) return [];
   return historyMessages
@@ -416,13 +420,14 @@ function registerSdkStreamHandlers(ctx) {
         try {
           const shellEnv = await getShellEnv();
           const effectiveMode = normalizeToolIntegrationMode(toolIntegrationMode);
-          setToolIntegrationMode(effectiveMode);
+          const driverToolIntegrationMode = resolveSdkToolIntegrationMode(backendKey, effectiveMode);
+          setToolIntegrationMode(driverToolIntegrationMode);
 
           // Push terminal session metadata + build injected MCP (mcp mode only).
           const injectedMcpServers = await buildInjectedMcpServers({
             mcpServerBridge,
             chatSessionId,
-            toolIntegrationMode: effectiveMode,
+            toolIntegrationMode: driverToolIntegrationMode,
           });
 
           // NETCATTY_CLAUDE_SETTINGS is a netcatty marker carrying the claude SDK
@@ -545,13 +550,13 @@ function registerSdkStreamHandlers(ctx) {
           mcpServerBridge.updateAttachmentMetadata?.(stagedAttachments, chatSessionId);
 
           const systemContext = buildExternalAgentSystemContext({
-            mode: effectiveMode,
+            mode: driverToolIntegrationMode,
             chatSessionId,
             defaultTargetSession,
             userSkillsContext,
           });
           const contextualPrompt = buildExternalAgentContextualPrompt({
-            mode: effectiveMode,
+            mode: driverToolIntegrationMode,
             prompt: turnPrompt,
             chatSessionId,
             defaultTargetSession,
@@ -575,7 +580,7 @@ function registerSdkStreamHandlers(ctx) {
               }
             },
           };
-          const skillsPathAllowlist = effectiveMode === "skills" && backendKey === "opencode"
+          const skillsPathAllowlist = driverToolIntegrationMode === "skills" && backendKey === "opencode"
             ? buildNetcattySkillsOpenCodePathAllowlist({
               launcherPath: NETCATTY_TOOL_LAUNCHER_PATH,
               cliScriptPath: NETCATTY_TOOL_CLI_PATH,
@@ -605,7 +610,7 @@ function registerSdkStreamHandlers(ctx) {
             cursorCliBinPath: backendKey === "cursor" ? cursorCliBinPath : undefined,
             injectedMcpServers,
             claudeSettings,
-            toolIntegrationMode: effectiveMode,
+            toolIntegrationMode: driverToolIntegrationMode,
             skillsPathAllowlist,
             emitter: driverEmitter,
             signal: abortController.signal,
@@ -884,6 +889,7 @@ function registerSdkStreamHandlers(ctx) {
 module.exports = {
   registerSdkStreamHandlers,
   resolveBackendKey,
+  resolveSdkToolIntegrationMode,
   resolveSdkBackendBinPath,
   buildSdkSessionKey,
   buildSdkModelCacheKey,

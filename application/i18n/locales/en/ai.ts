@@ -222,6 +222,25 @@ export const enAiMessages: Messages = {
   'ai.opencode.check': 'Check',
   'ai.opencode.resetPath': 'Reset',
 
+  // AI Antigravity
+  'ai.antigravity.title': 'Google Antigravity',
+  'ai.antigravity.description': 'Uses the official Google Antigravity SDK through Netcatty\'s shared local-agent framework. Requires Python 3.10+ and the google-antigravity package.',
+  'ai.antigravity.detecting': 'Detecting...',
+  'ai.antigravity.detected': 'Detected',
+  'ai.antigravity.notFound': 'Not found',
+  'ai.antigravity.path': 'Python:',
+  'ai.antigravity.notFoundHint': 'Install the official SDK with python -m pip install google-antigravity, then check again or select that Python executable. SDK 0.1.8 supports macOS on Apple Silicon, but not Intel Macs.',
+  'ai.antigravity.customPathPlaceholder': 'e.g. /usr/local/bin/python3',
+  'ai.antigravity.check': 'Check',
+  'ai.antigravity.resetPath': 'Reset',
+  'ai.antigravity.apiKey': 'Gemini API key',
+  'ai.antigravity.apiKeyPlaceholder': 'Enter a Gemini API key',
+  'ai.antigravity.apiKeyPlaceholder.env': 'Using GEMINI_API_KEY from the environment',
+  'ai.antigravity.showApiKey': 'Show API key',
+  'ai.antigravity.hideApiKey': 'Hide API key',
+  'ai.antigravity.saveApiKey': 'Save',
+  'ai.antigravity.saved': 'Saved',
+
   // AI Default Agent
   'ai.defaultAgent': 'Default Agent',
   'ai.defaultAgent.description': 'Agent to use when starting a new AI session',

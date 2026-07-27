@@ -149,6 +149,12 @@ async function buildAgentEnvWithStoredApiKey(
         env.CURSOR_API_KEY = apiKey;
       }
     }
+  } else if (sdkBackend === 'antigravity' && config.apiKey) {
+    const decrypted = await decryptField(config.apiKey).catch(() => config.apiKey);
+    const apiKey = String(decrypted || '').trim();
+    if (apiKey) {
+      env.GEMINI_API_KEY = apiKey;
+    }
   }
   return Object.keys(env).length > 0 ? env : undefined;
 }
@@ -253,7 +259,9 @@ export async function runSdkAgentTurn(
   };
 
   const agentEnv = await buildAgentEnvWithStoredApiKey(sdkBackend, config);
-  const agentCommand = getManualAgentCommand(config);
+  const agentCommand = sdkBackend === 'antigravity'
+    ? String(config.command || '').trim() || undefined
+    : getManualAgentCommand(config);
 
   // Set up event listeners before starting stream
   if (!harnessOptions?.skipHarnessTrace) {

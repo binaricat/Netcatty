@@ -52,6 +52,7 @@ export function inferCodingCliProviderFromTitleSignals(title: string): CodingCli
   if (titleIncludesPhrase(raw, 'codex') || titleIncludesPhrase(raw, 'chatgpt')) return 'codex';
   if (titleIncludesPhrase(raw, 'github copilot') || titleIncludesPhrase(raw, 'copilot')) return 'copilot';
   if (titleIncludesPhrase(raw, 'codebuddy')) return 'codebuddy';
+  if (titleIncludesPhrase(raw, 'antigravity') || titleIncludesPhrase(raw, 'agy')) return 'antigravity';
   if (titleIncludesPhrase(raw, 'gemini')) return 'gemini';
   if (titleIncludesPhrase(raw, 'moonshot') || titleIncludesPhrase(raw, 'kimi')) return 'kimi';
   if (titleIncludesPhrase(raw, 'factory droid') || titleIncludesPhrase(raw, 'factory ai')) return 'droid';

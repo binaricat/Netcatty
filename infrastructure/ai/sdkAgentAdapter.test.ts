@@ -308,6 +308,45 @@ test('runSdkAgentTurn forwards Cursor API key as agent environment', async () =>
   assert.equal(streamArgs[2], 'cursor');
 });
 
+test('runSdkAgentTurn forwards Antigravity API key through the shared SDK environment', async () => {
+  let streamArgs: unknown[] = [];
+  let done: (() => void) | null = null;
+  const bridge: Record<string, (...args: unknown[]) => unknown> = {
+    aiSdkAgentStream: async (...args: unknown[]) => {
+      streamArgs = args;
+      queueMicrotask(() => done?.());
+      return { ok: true };
+    },
+    aiSdkAgentCancel: async () => ({ ok: true }),
+    onAiSdkAgentEvent: () => () => {},
+    onAiSdkAgentDone: (_requestId: unknown, cb: unknown) => {
+      done = cb as () => void;
+      return () => {};
+    },
+    onAiSdkAgentError: () => () => {},
+  };
+
+  await runSdkAgentTurn(
+    bridge,
+    'request-antigravity-key',
+    'chat-antigravity-key',
+    {
+      id: 'antigravity',
+      name: 'Google Antigravity',
+      command: '/usr/bin/python3',
+      enabled: true,
+      sdkBackend: 'antigravity',
+      apiKey: 'agy-test-key',
+    },
+    'hello',
+    createCallbacks([]),
+  );
+
+  assert.deepEqual(streamArgs[13], { GEMINI_API_KEY: 'agy-test-key' });
+  assert.equal(streamArgs[14], '/usr/bin/python3');
+  assert.equal(streamArgs[2], 'antigravity');
+});
+
 test('runSdkAgentTurn in cursor cli-login mode does not inject CURSOR_API_KEY', async () => {
   let streamArgs: unknown[] = [];
   let done: (() => void) | null = null;

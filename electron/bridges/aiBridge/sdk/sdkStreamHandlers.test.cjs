@@ -9,15 +9,23 @@ const {
   expireSiblingCursorCliModeSessions,
   resolveBackendKey,
   resolveSdkBackendBinPath,
+  resolveSdkToolIntegrationMode,
   shouldCacheSdkRuntimeModels,
 } = require("./sdkStreamHandlers.cjs");
 
 test("resolveBackendKey maps backend command/value to registry key", () => {
+  assert.equal(resolveBackendKey("antigravity"), "antigravity");
   assert.equal(resolveBackendKey("claude"), "claude");
   assert.equal(resolveBackendKey("codex"), "codex");
   assert.equal(resolveBackendKey("copilot"), "copilot");
   assert.equal(resolveBackendKey("codebuddy"), "codebuddy");
   assert.equal(resolveBackendKey("opencode"), "opencode");
+});
+
+test("Antigravity always uses the scoped MCP tool path", () => {
+  assert.equal(resolveSdkToolIntegrationMode("antigravity", "skills"), "mcp");
+  assert.equal(resolveSdkToolIntegrationMode("antigravity", "mcp"), "mcp");
+  assert.equal(resolveSdkToolIntegrationMode("claude", "skills"), "skills");
 });
 
 test("resolveBackendKey returns null for unknown", () => {

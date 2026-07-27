@@ -100,6 +100,10 @@ const OUTPUT_SIGNATURES: readonly OutputSignature[] = [
     test: (text) => /Gemini CLI/i.test(text),
   },
   {
+    id: 'antigravity',
+    test: (text) => /Antigravity CLI/i.test(text) || /Google Antigravity/i.test(text),
+  },
+  {
     id: 'droid',
     test: (text) => /Factory Droid/i.test(text) || /Factory\.ai/i.test(text),
   },

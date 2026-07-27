@@ -16,6 +16,7 @@ test('matchCodingCliProviderFromCommand resolves known CLIs', () => {
   assert.equal(matchCodingCliProviderFromCommand('opencode')?.id, 'opencode');
   assert.equal(matchCodingCliProviderFromCommand('droid')?.id, 'droid');
   assert.equal(matchCodingCliProviderFromCommand('factory')?.id, 'droid');
+  assert.equal(matchCodingCliProviderFromCommand('agy')?.id, 'antigravity');
 });
 
 test('matchCodingCliProviderFromTitle detects Claude Code and Codex titles', () => {
@@ -34,6 +35,10 @@ test('matchCodingCliProviderFromTitle detects Claude Code and Codex titles', () 
   assert.equal(
     matchCodingCliProviderFromTitle('Factory Droid · auth flow')?.id,
     'droid',
+  );
+  assert.equal(
+    matchCodingCliProviderFromTitle('Antigravity · netcatty')?.id,
+    'antigravity',
   );
   assert.equal(
     matchCodingCliProviderFromTitle('android@pixel:~'),

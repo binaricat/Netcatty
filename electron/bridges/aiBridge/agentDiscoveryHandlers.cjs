@@ -1,4 +1,5 @@
 /* eslint-disable no-undef */
+const { findAntigravitySdk, probeAntigravitySdk } = require("./antigravityProbe.cjs");
 function getCursorPlatformPackageName(platform = process.platform, arch = process.arch) {
   if (platform === "darwin" && (arch === "arm64" || arch === "x64")) return `@cursor/sdk-darwin-${arch}`;
   if (platform === "linux" && (arch === "arm64" || arch === "x64")) return `@cursor/sdk-linux-${arch}`;
@@ -82,6 +83,8 @@ function registerAgentDiscoveryHandlers(ctx) {
         description: "Tencent's coding agent CLI (Agent SDK)", sdkBackend: "codebuddy", args: [] },
       { command: "opencode", name: "OpenCode", icon: "opencode",
         description: "Open source coding agent via the official OpenCode SDK", sdkBackend: "opencode", args: [] },
+      { command: "antigravity", name: "Google Antigravity", icon: "gemini",
+        description: "Google Antigravity via the official Python SDK", sdkBackend: "antigravity", args: [] },
     ];
 
     const shellEnv = await getShellEnv();
@@ -89,6 +92,7 @@ function registerAgentDiscoveryHandlers(ctx) {
 
     for (const agent of knownAgents) {
       let cursorSdkStatus = null;
+      let antigravitySdkStatus = null;
       if (agent.command === "cursor") {
         cursorSdkStatus = await probeCursorSdkAvailability(shellEnv, {
           apiKeyPresent: Boolean(options?.apiKeyPresent),
@@ -97,15 +101,33 @@ function registerAgentDiscoveryHandlers(ctx) {
         if (!cursorSdkStatus.available) continue;
       }
 
+      const antigravityDiscovery = agent.command === "antigravity"
+        ? await findAntigravitySdk(shellEnv, {
+          resolve: (command) => resolveCliFromPathAsync(command, shellEnv),
+        })
+        : null;
       const resolvedPath = agent.command === "cursor"
         ? (cursorSdkStatus.cliLoginOk
           ? (cursorSdkStatus.cliBinPath || "cursor")
           : (cursorSdkStatus.sdkInstalled ? "cursor" : (cursorSdkStatus.cliBinPath || "cursor")))
+        : agent.command === "antigravity"
+          ? antigravityDiscovery?.path
         : await resolveCliFromPathAsync(agent.command, shellEnv); // Layer-1: locate
       if (!resolvedPath || seenPaths.has(resolvedPath)) continue;
 
+      if (agent.command === "antigravity") {
+        antigravitySdkStatus = antigravityDiscovery;
+        if (options?.antigravityApiKeyPresent) {
+          antigravitySdkStatus.authenticated = true;
+          antigravitySdkStatus.authSource = "settings";
+        }
+        if (!antigravitySdkStatus.available) continue;
+      }
+
       const probe = agent.command === "cursor"
         ? { exitCode: 0, version: cursorSdkStatus.version }
+        : agent.command === "antigravity"
+          ? { exitCode: 0, version: antigravitySdkStatus.version }
         : await probeCliVersion(resolvedPath, ["--version"], shellEnv); // Layer-2: version
       const hasPlausibleVersion = agent.command === "cursor"
         ? probe.exitCode === 0
@@ -130,6 +152,11 @@ function registerAgentDiscoveryHandlers(ctx) {
           auth = probeCodebuddyAuth({ env: shellEnv });
         } else if (agent.command === "opencode") {
           auth = { authenticated: true, authSource: "opencode-config" };
+        } else if (agent.command === "antigravity") {
+          auth = {
+            authenticated: antigravitySdkStatus.authenticated,
+            authSource: antigravitySdkStatus.authSource,
+          };
         }
       } catch { /* auth probe is best-effort */ }
 
@@ -186,6 +213,11 @@ function registerAgentDiscoveryHandlers(ctx) {
       // A user-supplied path must be validated as-is; falling back to PATH would
       // make Settings appear to accept one binary while actually using another.
       resolvedPath = normalizeCliPathForPlatform(customPath);
+    } else if (command === "antigravity") {
+      const status = await findAntigravitySdk(shellEnv, {
+        resolve: (candidate) => resolveCliFromPathAsync(candidate, shellEnv),
+      });
+      resolvedPath = status.path;
     } else {
       resolvedPath = await resolveCliFromPathAsync(command, shellEnv);
     }
@@ -215,6 +247,15 @@ function registerAgentDiscoveryHandlers(ctx) {
         apiKeyOk: Boolean(cursorSdkStatus.apiKeyOk),
         sdkInstalled: Boolean(cursorSdkStatus.sdkInstalled),
       };
+    }
+
+    if (command === "antigravity") {
+      const status = await probeAntigravitySdk(resolvedPath, shellEnv);
+      if (apiKeyPresent) {
+        status.authenticated = true;
+        status.authSource = "settings";
+      }
+      return status;
     }
 
     if (!resolvedPath) {

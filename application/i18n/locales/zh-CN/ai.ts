@@ -222,6 +222,25 @@ export const zhCNAiMessages: Messages = {
   'ai.opencode.check': '检查',
   'ai.opencode.resetPath': '重置',
 
+  // AI Antigravity
+  'ai.antigravity.title': 'Google Antigravity',
+  'ai.antigravity.description': '通过 Netcatty 现有的本地 Agent 框架接入 Google 官方 Antigravity SDK。需要 Python 3.10+ 和 google-antigravity 包。',
+  'ai.antigravity.detecting': '检测中...',
+  'ai.antigravity.detected': '已检测到',
+  'ai.antigravity.notFound': '未找到',
+  'ai.antigravity.path': 'Python：',
+  'ai.antigravity.notFoundHint': '请运行 python -m pip install google-antigravity 安装官方 SDK，然后重新检查或选择对应的 Python 可执行文件。SDK 0.1.8 支持 Apple 芯片 Mac，但不支持 Intel Mac。',
+  'ai.antigravity.customPathPlaceholder': '例如 /usr/local/bin/python3',
+  'ai.antigravity.check': '检查',
+  'ai.antigravity.resetPath': '重置',
+  'ai.antigravity.apiKey': 'Gemini API 密钥',
+  'ai.antigravity.apiKeyPlaceholder': '输入 Gemini API 密钥',
+  'ai.antigravity.apiKeyPlaceholder.env': '正在使用环境变量中的 GEMINI_API_KEY',
+  'ai.antigravity.showApiKey': '显示 API 密钥',
+  'ai.antigravity.hideApiKey': '隐藏 API 密钥',
+  'ai.antigravity.saveApiKey': '保存',
+  'ai.antigravity.saved': '已保存',
+
   // AI Default Agent
   'ai.defaultAgent': '默认 Agent',
   'ai.defaultAgent.description': '创建新 AI 会话时使用的 Agent',

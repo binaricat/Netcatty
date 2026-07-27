@@ -21,6 +21,11 @@ test('inferCodingCliProviderFromTitleSignals detects Droid and Factory titles', 
   assert.equal(inferCodingCliProviderFromTitleSignals('droid · session'), 'droid');
 });
 
+test('inferCodingCliProviderFromTitleSignals detects Antigravity titles', () => {
+  assert.equal(inferCodingCliProviderFromTitleSignals('Antigravity · refactor auth'), 'antigravity');
+  assert.equal(inferCodingCliProviderFromTitleSignals('agy · netcatty'), 'antigravity');
+});
+
 test('inferCodingCliProviderFromTitleSignals ignores provider names inside longer words', () => {
   assert.equal(inferCodingCliProviderFromTitleSignals('android@pixel:~'), undefined);
   assert.equal(inferCodingCliProviderFromTitleSignals('myopencodetooling'), undefined);
