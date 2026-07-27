@@ -382,6 +382,24 @@ test("VaultHostListSection virtualizes large grid collections without hiding sea
   assert.doesNotMatch(markup, /vault\.hosts\.showMore/);
 });
 
+test("VaultHostListSection virtualizes large pinned collections", () => {
+  const hosts = Array.from({ length: 300 }, (_, index) => (
+    { ...makeHost(`pinned-${index}`, `Pinned ${index}`), pinned: true }
+  ));
+  const markup = renderHostList({
+    viewMode: "grid",
+    displayedGroups: [],
+    displayedHosts: [],
+    visibleDisplayedHosts: [],
+    pinnedHosts: hosts,
+  });
+
+  const renderedHosts = (markup.match(/data-vault-grid-item="pinned:/g) ?? []).length;
+  assert.ok(renderedHosts > 0);
+  assert.ok(renderedHosts < 100);
+  assert.match(markup, /data-vault-virtual-collection="grid"/);
+});
+
 test("VaultHostListSection preserves grouped totals while virtualizing rendered cards", () => {
   const hosts = Array.from({ length: 300 }, (_, index) => (
     makeHost(`grouped-bulk-${index}`, `Grouped Bulk ${index}`)

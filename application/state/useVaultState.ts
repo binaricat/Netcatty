@@ -73,6 +73,10 @@ import { pluginExtensionBridge } from "./pluginExtensionBridge";
 import type { PluginImporterCommitRequest } from "./usePluginImporterCommit";
 import { withVaultImportLock } from "./vaultManagedImportLock";
 import {
+  persistVaultImportMetadata,
+  readStoredArray,
+} from "./vaultImportPersistence";
+import {
   commitPluginImporterTransaction,
   recoverPluginImporterTransaction,
 } from "./pluginImporterTransaction";
@@ -101,15 +105,6 @@ const PLUGIN_IMPORT_TRANSACTION_KEYS = new Set([
   STORAGE_KEY_GROUPS,
   STORAGE_KEY_GROUP_CONFIGS,
 ]);
-
-const parseStoredJson = <T>(value: string | null): T | null => {
-  if (value === null) return null;
-  try {
-    return JSON.parse(value) as T;
-  } catch {
-    return null;
-  }
-};
 
 // Migration helper for old SSHKey format to new format
 const migrateKey = (key: Partial<SSHKey>): SSHKey => {
@@ -361,8 +356,7 @@ export const useVaultState = () => {
   const readPersistedHosts = useCallback(async (): Promise<Host[]> => {
     while (true) {
       const rawHosts = localStorageAdapter.readString(STORAGE_KEY_HOSTS);
-      const storedHosts = parseStoredJson<Host[]>(rawHosts);
-      if (!storedHosts) return [];
+      const storedHosts = readStoredArray<Host>(STORAGE_KEY_HOSTS, rawHosts);
       const decrypted = await decryptHosts(storedHosts);
       if (localStorageAdapter.readString(STORAGE_KEY_HOSTS) !== rawHosts) continue;
       return normalizeVaultOrder(decrypted.map((host) => sanitizeHost(host)));
@@ -521,6 +515,22 @@ export const useVaultState = () => {
     setManagedSources(next);
     localStorageAdapter.write(STORAGE_KEY_MANAGED_SOURCES, next);
   }, []);
+
+  const commitVaultImportMetadata = useCallback((
+    updateGroups: (current: string[]) => string[],
+    updateSources: (current: ManagedSource[]) => ManagedSource[],
+  ): { persisted: boolean; groups: string[]; sources: ManagedSource[] } => {
+    const result = persistVaultImportMetadata(
+      localStorageAdapter,
+      updateGroups,
+      updateSources,
+    );
+    if (result.persisted) {
+      updateCustomGroups(result.groups);
+      updateManagedSources(result.sources);
+    }
+    return result;
+  }, [updateCustomGroups, updateManagedSources]);
 
   const updateGroupConfigs = useCallback((data: GroupConfig[]) => {
     // Sanitize on the write path too — applySyncPayload / importVaultData
@@ -1169,14 +1179,30 @@ export const useVaultState = () => {
       const raw = new Map(
         [...PLUGIN_IMPORT_TRANSACTION_KEYS].map((key) => [key, localStorageAdapter.readString(key)]),
       );
-      const storedHosts = parseStoredJson<Host[]>(raw.get(STORAGE_KEY_HOSTS) ?? null) ?? [];
-      const storedKeys = parseStoredJson<SSHKey[]>(raw.get(STORAGE_KEY_KEYS) ?? null) ?? [];
-      const storedIdentities = parseStoredJson<Identity[]>(raw.get(STORAGE_KEY_IDENTITIES) ?? null) ?? [];
-      const storedSnippets = parseStoredJson<Snippet[]>(raw.get(STORAGE_KEY_SNIPPETS) ?? null) ?? [];
-      const storedGroups = parseStoredJson<string[]>(raw.get(STORAGE_KEY_GROUPS) ?? null) ?? [];
-      const storedGroupConfigs = parseStoredJson<GroupConfig[]>(
+      const storedHosts = readStoredArray<Host>(
+        STORAGE_KEY_HOSTS,
+        raw.get(STORAGE_KEY_HOSTS) ?? null,
+      );
+      const storedKeys = readStoredArray<SSHKey>(
+        STORAGE_KEY_KEYS,
+        raw.get(STORAGE_KEY_KEYS) ?? null,
+      );
+      const storedIdentities = readStoredArray<Identity>(
+        STORAGE_KEY_IDENTITIES,
+        raw.get(STORAGE_KEY_IDENTITIES) ?? null,
+      );
+      const storedSnippets = readStoredArray<Snippet>(
+        STORAGE_KEY_SNIPPETS,
+        raw.get(STORAGE_KEY_SNIPPETS) ?? null,
+      );
+      const storedGroups = readStoredArray<string>(
+        STORAGE_KEY_GROUPS,
+        raw.get(STORAGE_KEY_GROUPS) ?? null,
+      );
+      const storedGroupConfigs = readStoredArray<GroupConfig>(
+        STORAGE_KEY_GROUP_CONFIGS,
         raw.get(STORAGE_KEY_GROUP_CONFIGS) ?? null,
-      ) ?? [];
+      );
       const [latestHosts, latestKeys, latestIdentities, latestGroupConfigs] = await Promise.all([
         decryptHosts(storedHosts),
         decryptKeys(storedKeys),
@@ -1290,6 +1316,7 @@ export const useVaultState = () => {
     updateCustomGroups,
     updateKnownHosts,
     updateManagedSources,
+    commitVaultImportMetadata,
     updateGroupConfigs,
     addShellHistoryEntry,
     clearShellHistory,

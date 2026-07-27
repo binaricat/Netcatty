@@ -36,15 +36,16 @@ interface UseVaultImportHandlersOptions {
   hosts: Host[];
   keys: SSHKey[];
   managedSources: ManagedSource[];
-  onUpdateCustomGroups: (
-    groups: string[] | ((current: string[]) => string[]),
-  ) => void;
   onReadPersistedHosts: () => Promise<Host[]>;
   onUpdateHosts: (hosts: Host[]) => VaultHostPersistenceResult | Promise<VaultHostPersistenceResult>;
   onUpdateKeys: (keys: SSHKey[]) => void;
   onUpdateManagedSources: (
     sources: ManagedSource[] | ((current: ManagedSource[]) => ManagedSource[]),
   ) => void;
+  onCommitVaultImportMetadata: (
+    updateGroups: (current: string[]) => string[],
+    updateSources: (current: ManagedSource[]) => ManagedSource[],
+  ) => { persisted: boolean; groups: string[]; sources: ManagedSource[] };
   setIsImportOpen: (open: boolean) => void;
   t: (key: string, values?: Record<string, unknown>) => string;
 }
@@ -54,11 +55,11 @@ export function useVaultImportHandlers({
   hosts,
   keys,
   managedSources,
-  onUpdateCustomGroups,
   onReadPersistedHosts,
   onUpdateHosts,
   onUpdateKeys,
   onUpdateManagedSources,
+  onCommitVaultImportMetadata,
   setIsImportOpen,
   t,
 }: UseVaultImportHandlersOptions) {
@@ -176,6 +177,7 @@ export function useVaultImportHandlers({
             options?: {
               baselineHosts?: Host[];
               prepareAttempt?: (attempt: { baselineHosts: Host[]; appliedHosts: Host[] }) => Host[];
+              retainRollbackAfterPersist?: boolean;
               shouldRetryAfterPersist?: () => boolean;
             },
           ) => {
@@ -202,7 +204,9 @@ export function useVaultImportHandlers({
                   baselineHosts = latestHosts;
                   continue;
                 }
-                if (persisted !== false) rollbackSnapshot = null;
+                if (persisted !== false && !options?.retainRollbackAfterPersist) {
+                  rollbackSnapshot = null;
+                }
                 return persisted;
               }
 
@@ -404,62 +408,83 @@ export function useVaultImportHandlers({
               {
                 baselineHosts: managedBaselineHosts,
                 prepareAttempt: prepareManagedAttempt,
+                retainRollbackAfterPersist: true,
                 shouldRetryAfterPersist: () => !managedGroupNameStillAvailable(),
               },
             );
             await ensureVaultImportPersisted(
               hostPersisted,
               t("vault.import.progress.persistFailed"),
-              () => {
-                startTransition(() => {
-                  onUpdateCustomGroups((latestPersistedGroups) => {
-                    const committedGroups = mergeVaultImportedGroups({
-                      currentGroups: latestPersistedGroups,
-                      baselineGroups: currentCustomGroups,
-                      appliedGroups: nextGroups,
-                    });
-                    customGroupsRef.current = committedGroups;
-                    return committedGroups;
-                  });
-                  onUpdateManagedSources((latestPersistedSources) => {
-                    const nextManagedSources = [
-                      ...latestPersistedSources.filter((source) => source.id !== newSource.id),
-                      newSource,
-                    ];
-                    managedSourcesRef.current = nextManagedSources;
-                    return nextManagedSources;
-                  });
-                });
+              async () => {
+                const metadata = onCommitVaultImportMetadata(
+                  (latestPersistedGroups) => mergeVaultImportedGroups({
+                    currentGroups: latestPersistedGroups,
+                    baselineGroups: currentCustomGroups,
+                    appliedGroups: nextGroups,
+                  }),
+                  (latestPersistedSources) => [
+                    ...latestPersistedSources.filter((source) => source.id !== newSource.id),
+                    newSource,
+                  ],
+                );
+                if (!metadata.persisted) {
+                  await rollbackPendingImport();
+                  throw new Error(t("vault.import.progress.persistFailed"));
+                }
+                customGroupsRef.current = metadata.groups;
+                managedSourcesRef.current = metadata.sources;
+                rollbackSnapshot = null;
               },
               rollbackPendingImport,
             );
             });
           } else if (newHosts.length > 0) {
-            const merged = applyVaultHostImport(currentHosts, currentCustomGroups, result, { skipDuplicates: true });
-            const addedHostIds = new Set(merged.addedHosts.map((host) => host.id));
-            const addedHostKeyPaths = new Map(merged.addedHosts.flatMap((host) => {
+            let addedHostIds = new Set<string>();
+            let addedHostKeyPaths = new Map<string, string>();
+            await withVaultImportLock("vault", async () => {
+            const importBaselineHosts = await onReadPersistedHosts();
+            hostsRef.current = importBaselineHosts;
+            const importBaselineGroups = customGroupsRef.current;
+            const merged = applyVaultHostImport(
+              importBaselineHosts,
+              importBaselineGroups,
+              result,
+              { skipDuplicates: true },
+            );
+            newHosts = merged.addedHosts;
+            addedHostIds = new Set(merged.addedHosts.map((host) => host.id));
+            addedHostKeyPaths = new Map(merged.addedHosts.flatMap((host) => {
               const keyPath = host.identityFilePaths?.find((path) => path.trim())?.trim();
               return keyPath ? [[host.id, keyPath] as const] : [];
             }));
-            const hostPersisted = await persistHosts(merged.hosts);
+            if (newHosts.length === 0) return;
+            const hostPersisted = await persistHosts(merged.hosts, {
+              baselineHosts: importBaselineHosts,
+              retainRollbackAfterPersist: true,
+            });
             await ensureVaultImportPersisted(
               hostPersisted,
               t("vault.import.progress.persistFailed"),
-              () => {
-                startTransition(() => {
-                  onUpdateCustomGroups((latestPersistedGroups) => {
-                    const committedGroups = mergeVaultImportedGroups({
-                      currentGroups: latestPersistedGroups,
-                      baselineGroups: currentCustomGroups,
-                      appliedGroups: merged.customGroups,
-                    });
-                    customGroupsRef.current = committedGroups;
-                    return committedGroups;
-                  });
-                });
+              async () => {
+                const metadata = onCommitVaultImportMetadata(
+                  (latestPersistedGroups) => mergeVaultImportedGroups({
+                    currentGroups: latestPersistedGroups,
+                    baselineGroups: importBaselineGroups,
+                    appliedGroups: merged.customGroups,
+                  }),
+                  (latestPersistedSources) => latestPersistedSources,
+                );
+                if (!metadata.persisted) {
+                  await rollbackPendingImport();
+                  throw new Error(t("vault.import.progress.persistFailed"));
+                }
+                customGroupsRef.current = metadata.groups;
+                managedSourcesRef.current = metadata.sources;
+                rollbackSnapshot = null;
               },
               rollbackPendingImport,
             );
+            });
             throwIfCancelled();
             const resolved = await resolveVaultImportKeyPassphraseConflicts(
               result.keyPassphraseCandidates ?? result.keyPassphrases ?? [],
@@ -620,8 +645,8 @@ export function useVaultImportHandlers({
         }
       },
       [
-        onUpdateCustomGroups,
         onReadPersistedHosts,
+        onCommitVaultImportMetadata,
         onUpdateHosts,
         onUpdateKeys,
         onUpdateManagedSources,

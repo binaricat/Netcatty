@@ -347,15 +347,14 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
                         <Pin size={14} className="shrink-0 -translate-y-[1px]" />
                         {t("vault.hosts.pinned")}
                       </h3>
-                      <div className={cn(
-                        viewMode === "grid"
-                          ? cn(
-                            "grid gap-3",
-                          )
-                          : "flex flex-col gap-0",
-                      )}
-                      style={viewMode === "grid" ? splitViewGridStyle : undefined}>
-                        {pinnedHosts.map((host) => {
+                      <VirtualizedHostCollection<Host>
+                        items={pinnedHosts}
+                        itemKey={(host) => host.id}
+                        scrollRef={hostListScrollRef}
+                        viewMode={viewMode}
+                        layoutKey={`pinned:${hostCollectionLayoutKey}`}
+                        ariaLabel={t("vault.hosts.pinned")}
+                        renderItem={(host) => {
                           const safeHost = sanitizeHost(host);
                           const effectiveDistro = getEffectiveHostDistro(safeHost);
                           const distroBadge = {
@@ -453,8 +452,8 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
                               </ContextMenuContent>
                             </ContextMenu>
                           );
-                        })}
-                      </div>
+                        }}
+                      />
                     </section>
                   )}
                   {/* Recently Connected section - only at root level, toggleable */}

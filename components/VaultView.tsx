@@ -250,6 +250,10 @@ interface VaultViewProps {
   onUpdateManagedSources: (
     managedSources: ManagedSource[] | ((current: ManagedSource[]) => ManagedSource[]),
   ) => void;
+  onCommitVaultImportMetadata: (
+    updateGroups: (current: string[]) => string[],
+    updateSources: (current: ManagedSource[]) => ManagedSource[],
+  ) => { persisted: boolean; groups: string[]; sources: ManagedSource[] };
   onClearAndRemoveManagedSource?: (source: ManagedSource) => Promise<boolean>;
   onClearAndRemoveManagedSources?: (sources: ManagedSource[]) => Promise<void>;
   onUnmanageSource?: (sourceId: string) => void;
@@ -321,6 +325,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
   onCommitPluginImporterData,
   onUpdateKnownHosts,
   onUpdateManagedSources,
+  onCommitVaultImportMetadata,
   onClearAndRemoveManagedSource,
   onClearAndRemoveManagedSources,
   onUnmanageSource,
@@ -871,11 +876,11 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
       hosts,
       keys,
       managedSources,
-      onUpdateCustomGroups,
       onReadPersistedHosts,
       onUpdateHosts,
       onUpdateKeys,
       onUpdateManagedSources,
+      onCommitVaultImportMetadata,
       setIsImportOpen,
       t,
     });
@@ -1669,6 +1674,7 @@ export const vaultViewAreEqual = (
     prev.managedSources === next.managedSources &&
     prev.groupConfigs === next.groupConfigs &&
     prev.onReadPersistedHosts === next.onReadPersistedHosts &&
+    prev.onCommitVaultImportMetadata === next.onCommitVaultImportMetadata &&
     prev.onCommitPluginImporterData === next.onCommitPluginImporterData &&
     prev.showRecentHosts === next.showRecentHosts &&
     prev.hostClickBehavior === next.hostClickBehavior &&

@@ -99,7 +99,7 @@ export function AppView({ ctx }: { ctx: AppViewContext }) {
 
   const {
     accentMode, addShellHistoryEntry, addSessionToWorkspace, addToWorkspaceDialog, appendHostToWorkspace, appendLocalTerminalToWorkspace,
-    clearAndRemoveSource, clearAndRemoveSources, clearUnsavedConnectionLogs, closeLogView, closeSession, closeTabsBatch, closeWorkspace, commitPluginImporterData, copySessionToNewWindowWithCurrentShell, copySessionWithCurrentShell,
+    clearAndRemoveSource, clearAndRemoveSources, clearUnsavedConnectionLogs, closeLogView, closeSession, closeTabsBatch, closeWorkspace, commitPluginImporterData, commitVaultImportMetadata, copySessionToNewWindowWithCurrentShell, copySessionWithCurrentShell,
     connectionLogs, convertKnownHostToHost, createWorkspaceFromSessions, createWorkspaceFromTargets, createWorkspaceWithHosts, customAccent,
     customGroups, currentTerminalTheme, deepLinkHostDraft, deleteConnectionLog, draggingSessionId, effectiveKnownHosts, editorTabs, editorWordWrap, emptyVaultConflict,
     followAppTerminalTheme,
@@ -367,6 +367,7 @@ export function AppView({ ctx }: { ctx: AppViewContext }) {
             onCommitPluginImporterData={commitPluginImporterData}
             onUpdateKnownHosts={updateKnownHosts}
             onUpdateManagedSources={updateManagedSources}
+            onCommitVaultImportMetadata={commitVaultImportMetadata}
             onClearAndRemoveManagedSource={clearAndRemoveSource}
             onClearAndRemoveManagedSources={clearAndRemoveSources}
             onUnmanageSource={unmanageSource}
