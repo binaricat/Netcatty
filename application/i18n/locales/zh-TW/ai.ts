@@ -70,6 +70,14 @@ export const zhTWAiMessages: Messages = {
   'ai.providers.advancedParams.hint': '留空則使用供應商預設值。',
   'ai.providers.advancedParams.maxTokens.placeholder': '例如 4096',
   'ai.providers.advancedParams.default': '供應商預設',
+  // AI Antigravity
+  'ai.antigravity': 'Antigravity',
+  'ai.antigravity.title': 'Antigravity SDK',
+  'ai.antigravity.description': '介接 Google Antigravity SDK。偵測到後即可作為外部程式設計 Agent 使用。',
+  'ai.antigravity.notFound': '未找到 Harness',
+  'ai.antigravity.notFoundHint': '指定 localharness 二進位檔案的路徑 (例如 /tmp/agy-sdk/google/antigravity/bin/localharness)。',
+  'ai.antigravity.check': '檢查',
+
 
   // AI Codex
   'ai.codex': 'Codex',

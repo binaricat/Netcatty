@@ -80,19 +80,26 @@ function unwrap<T>(r: ToolExecResult<T>): T | { error: string } {
 }
 
 async function invokeCapabilityRpc(
-  bridge: NetcattyBridge,
+  bridge: NetcattyBridge & { aiCapability?: (method: string, args: any, sessionId?: string) => Promise<unknown> },
   rpcMethod: string,
-  params: Record<string, unknown>,
+  args: Record<string, unknown>,
   chatSessionId?: string,
 ): Promise<unknown> {
-  if (!bridge.aiCapability) {
-    return { error: 'Capability bridge is unavailable in this environment.' };
+  if (bridge.aiCapability) {
+    const result = await bridge.aiCapability(rpcMethod, args, chatSessionId);
+    if (result && typeof result === 'object' && 'ok' in result && (result as { ok: boolean }).ok === false) {
+      return { error: (result as { error?: string }).error || 'Capability call failed.' };
+    }
+    return result;
   }
-  const result = await bridge.aiCapability(rpcMethod, params, chatSessionId);
-  if (result && typeof result === 'object' && 'ok' in result && (result as { ok: boolean }).ok === false) {
-    return { error: (result as { error?: string }).error || 'Capability call failed.' };
+  if (!bridge.invoke) {
+    throw new Error(`Capability RPC is not supported by the current bridge (missing invoke and aiCapability).`);
   }
-  return result;
+  return await bridge.invoke(`netcatty:plugins:rpc`, {
+    method: rpcMethod,
+    args,
+    chatSessionId,
+  });
 }
 
 async function tryFetchHostEnvironment(

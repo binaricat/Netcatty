@@ -1,0 +1,2771 @@
+syntax = "proto3";
+package: "antigravity.localharness"
+message_type {
+  name: "InputConfig"
+  field {
+    name: "storage_directory"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  field {
+    name: "port"
+    number: 2
+    label: LABEL_OPTIONAL
+    type: TYPE_UINT32
+  }
+  field {
+    name: "bind_address"
+    number: 3
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+    default_value: "localhost"
+  }
+  field {
+    name: "client_info"
+    number: 4
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.ClientInfo"
+  }
+  field {
+    name: "env"
+    number: 5
+    label: LABEL_REPEATED
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.InputConfig.EnvEntry"
+  }
+  nested_type {
+    name: "EnvEntry"
+    field {
+      name: "key"
+      number: 1
+      label: LABEL_OPTIONAL
+      type: TYPE_STRING
+    }
+    field {
+      name: "value"
+      number: 2
+      label: LABEL_OPTIONAL
+      type: TYPE_STRING
+    }
+    options {
+      map_entry: true
+    }
+  }
+}
+message_type {
+  name: "InitializeConversationEvent"
+  field {
+    name: "config"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.HarnessConfig"
+  }
+}
+message_type {
+  name: "ClientInfo"
+  field {
+    name: "language"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  field {
+    name: "version"
+    number: 2
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  field {
+    name: "language_version"
+    number: 3
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  field {
+    name: "os"
+    number: 4
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  field {
+    name: "os_version"
+    number: 5
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+}
+message_type {
+  name: "HarnessConfig"
+  field {
+    name: "cascade_id"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  field {
+    name: "session_continuation_mode"
+    number: 19
+    label: LABEL_OPTIONAL
+    type: TYPE_ENUM
+    type_name: ".antigravity.localharness.HarnessConfig.SessionContinuationMode"
+  }
+  field {
+    name: "system_instructions"
+    number: 4
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.SystemInstructions"
+  }
+  field {
+    name: "tools"
+    number: 5
+    label: LABEL_REPEATED
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.Tool"
+  }
+  field {
+    name: "harness_side_tools"
+    number: 6
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.HarnessSideTools"
+  }
+  field {
+    name: "compaction_threshold"
+    number: 7
+    label: LABEL_OPTIONAL
+    type: TYPE_UINT32
+  }
+  field {
+    name: "workspaces"
+    number: 8
+    label: LABEL_REPEATED
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.Workspace"
+  }
+  field {
+    name: "skills_paths"
+    number: 9
+    label: LABEL_REPEATED
+    type: TYPE_STRING
+  }
+  field {
+    name: "finish_tool_schema_json"
+    number: 10
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  field {
+    name: "initial_trajectory"
+    number: 11
+    label: LABEL_OPTIONAL
+    type: TYPE_BYTES
+  }
+  field {
+    name: "app_data_dir"
+    number: 12
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  field {
+    name: "mcp_servers"
+    number: 14
+    label: LABEL_REPEATED
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.McpServerConfig"
+  }
+  field {
+    name: "models"
+    number: 15
+    label: LABEL_REPEATED
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.ModelConfig"
+  }
+  field {
+    name: "enabled_hooks"
+    number: 16
+    label: LABEL_REPEATED
+    type: TYPE_ENUM
+    type_name: ".antigravity.localharness.LifecycleHook"
+  }
+  field {
+    name: "custom_subagents"
+    number: 17
+    label: LABEL_REPEATED
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.CustomAgent"
+  }
+  field {
+    name: "tool_output_truncation"
+    number: 18
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.ToolOutputTruncation"
+  }
+  field {
+    name: "retry_config"
+    number: 20
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.RetryConfig"
+  }
+  enum_type {
+    name: "SessionContinuationMode"
+    value {
+      name: "SESSION_CONTINUATION_MODE_UNSPECIFIED"
+      number: 0
+    }
+    value {
+      name: "RESUME"
+      number: 1
+    }
+    value {
+      name: "CREATE_OR_RESUME"
+      number: 2
+    }
+    value {
+      name: "CREATE_ONLY"
+      number: 3
+    }
+  }
+  extension_range {
+    start: 1000
+    end: 2000
+  }
+  extension_range {
+    start: 2000
+    end: 536870912
+  }
+}
+message_type {
+  name: "ModelAPIRetryConfig"
+  field {
+    name: "max_retries"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_UINT32
+  }
+  field {
+    name: "initial_sleep_duration_ms"
+    number: 2
+    label: LABEL_OPTIONAL
+    type: TYPE_UINT32
+  }
+  field {
+    name: "exponential_multiplier"
+    number: 3
+    label: LABEL_OPTIONAL
+    type: TYPE_DOUBLE
+  }
+  field {
+    name: "jitter_range"
+    number: 4
+    label: LABEL_OPTIONAL
+    type: TYPE_DOUBLE
+  }
+}
+message_type {
+  name: "ModelOutputRetryConfig"
+  field {
+    name: "max_retries"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_UINT32
+  }
+}
+message_type {
+  name: "RetryConfig"
+  field {
+    name: "api_retry"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.ModelAPIRetryConfig"
+  }
+  field {
+    name: "model_output_retry"
+    number: 2
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.ModelOutputRetryConfig"
+  }
+}
+message_type {
+  name: "Workspace"
+  field {
+    name: "filesystem_workspace"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.FilesystemWorkspace"
+    oneof_index: 0
+  }
+  oneof_decl {
+    name: "workspace_type"
+  }
+}
+message_type {
+  name: "FilesystemWorkspace"
+  field {
+    name: "directory"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+}
+message_type {
+  name: "GeminiModelOptions"
+  field {
+    name: "thinking_level"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+}
+message_type {
+  name: "GeminiAPIEndpoint"
+  field {
+    name: "base_url"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  field {
+    name: "http_headers"
+    number: 2
+    label: LABEL_REPEATED
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.GeminiAPIEndpoint.HttpHeadersEntry"
+  }
+  field {
+    name: "api_key"
+    number: 3
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  field {
+    name: "options"
+    number: 4
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.GeminiModelOptions"
+  }
+  nested_type {
+    name: "HttpHeadersEntry"
+    field {
+      name: "key"
+      number: 1
+      label: LABEL_OPTIONAL
+      type: TYPE_STRING
+    }
+    field {
+      name: "value"
+      number: 2
+      label: LABEL_OPTIONAL
+      type: TYPE_STRING
+    }
+    options {
+      map_entry: true
+    }
+  }
+}
+message_type {
+  name: "VertexEndpoint"
+  field {
+    name: "base_url"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  field {
+    name: "http_headers"
+    number: 2
+    label: LABEL_REPEATED
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.VertexEndpoint.HttpHeadersEntry"
+  }
+  field {
+    name: "project"
+    number: 3
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  field {
+    name: "location"
+    number: 4
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  field {
+    name: "options"
+    number: 5
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.GeminiModelOptions"
+  }
+  nested_type {
+    name: "HttpHeadersEntry"
+    field {
+      name: "key"
+      number: 1
+      label: LABEL_OPTIONAL
+      type: TYPE_STRING
+    }
+    field {
+      name: "value"
+      number: 2
+      label: LABEL_OPTIONAL
+      type: TYPE_STRING
+    }
+    options {
+      map_entry: true
+    }
+  }
+}
+message_type {
+  name: "ModelConfig"
+  field {
+    name: "gemini_api_endpoint"
+    number: 3
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.GeminiAPIEndpoint"
+    oneof_index: 0
+  }
+  field {
+    name: "vertex_endpoint"
+    number: 4
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.VertexEndpoint"
+    oneof_index: 0
+  }
+  field {
+    name: "gemma_endpoint"
+    number: 6
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.GemmaEndpoint"
+    oneof_index: 0
+  }
+  field {
+    name: "custom_endpoint"
+    number: 7
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.CustomEndpoint"
+    oneof_index: 0
+  }
+  field {
+    name: "name"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  field {
+    name: "types"
+    number: 2
+    label: LABEL_REPEATED
+    type: TYPE_ENUM
+    type_name: ".antigravity.localharness.ModelType"
+  }
+  oneof_decl {
+    name: "endpoint"
+  }
+}
+message_type {
+  name: "GemmaEndpoint"
+  field {
+    name: "base_url"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+}
+message_type {
+  name: "CustomEndpoint"
+  field {
+    name: "backend_type"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  field {
+    name: "config_json"
+    number: 2
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+}
+message_type {
+  name: "SystemInstructions"
+  field {
+    name: "custom"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.CustomSystemInstructions"
+    oneof_index: 0
+  }
+  field {
+    name: "appended"
+    number: 2
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.AppendedSystemInstructions"
+    oneof_index: 0
+  }
+  oneof_decl {
+    name: "type"
+  }
+}
+message_type {
+  name: "CustomSystemInstructions"
+  field {
+    name: "part"
+    number: 1
+    label: LABEL_REPEATED
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.CustomSystemInstructions.Part"
+  }
+  nested_type {
+    name: "Part"
+    field {
+      name: "text"
+      number: 1
+      label: LABEL_OPTIONAL
+      type: TYPE_STRING
+      oneof_index: 0
+    }
+    field {
+      name: "template"
+      number: 2
+      label: LABEL_OPTIONAL
+      type: TYPE_MESSAGE
+      type_name: ".antigravity.localharness.CustomSystemInstructions.SystemInstructionTemplate"
+      oneof_index: 0
+    }
+    oneof_decl {
+      name: "part"
+    }
+  }
+  nested_type {
+    name: "SystemInstructionTemplate"
+    field {
+      name: "template_name"
+      number: 1
+      label: LABEL_OPTIONAL
+      type: TYPE_STRING
+    }
+    field {
+      name: "args"
+      number: 2
+      label: LABEL_REPEATED
+      type: TYPE_MESSAGE
+      type_name: ".antigravity.localharness.CustomSystemInstructions.SystemInstructionTemplate.Arg"
+    }
+    nested_type {
+      name: "Arg"
+      field {
+        name: "name"
+        number: 1
+        label: LABEL_OPTIONAL
+        type: TYPE_STRING
+      }
+      field {
+        name: "value"
+        number: 2
+        label: LABEL_OPTIONAL
+        type: TYPE_STRING
+      }
+    }
+  }
+}
+message_type {
+  name: "AppendedSystemInstructions"
+  field {
+    name: "custom_identity"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  field {
+    name: "appended_sections"
+    number: 2
+    label: LABEL_REPEATED
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.AppendedSystemInstructions.Section"
+  }
+  nested_type {
+    name: "Section"
+    field {
+      name: "title"
+      number: 1
+      label: LABEL_OPTIONAL
+      type: TYPE_STRING
+    }
+    field {
+      name: "content"
+      number: 2
+      label: LABEL_OPTIONAL
+      type: TYPE_STRING
+    }
+  }
+}
+message_type {
+  name: "Tool"
+  field {
+    name: "name"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  field {
+    name: "description"
+    number: 2
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  field {
+    name: "parameters_json_schema"
+    number: 3
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  field {
+    name: "response_json_schema"
+    number: 4
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  field {
+    name: "defer_loading"
+    number: 5
+    label: LABEL_OPTIONAL
+    type: TYPE_BOOL
+  }
+  extension_range {
+    start: 1000
+    end: 2000
+  }
+  extension_range {
+    start: 2000
+    end: 536870912
+  }
+}
+message_type {
+  name: "HarnessSideTools"
+  field {
+    name: "find"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.FindToolConfig"
+  }
+  field {
+    name: "run_command"
+    number: 2
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.RunCommandToolConfig"
+  }
+  field {
+    name: "subagents"
+    number: 3
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.SubagentsConfig"
+  }
+  field {
+    name: "user_questions"
+    number: 4
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.UserQuestionsConfig"
+  }
+  field {
+    name: "file_edit"
+    number: 5
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.FileEditToolConfig"
+  }
+  field {
+    name: "view_file"
+    number: 6
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.ViewFileToolConfig"
+  }
+  field {
+    name: "write_to_file"
+    number: 7
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.WriteToFileToolConfig"
+  }
+  field {
+    name: "grep_search"
+    number: 8
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.GrepSearchToolConfig"
+  }
+  field {
+    name: "list_dir"
+    number: 9
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.ListDirToolConfig"
+  }
+  field {
+    name: "permissions"
+    number: 10
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.PermissionsConfig"
+  }
+  field {
+    name: "generate_image"
+    number: 11
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.GenerateImageToolConfig"
+  }
+  field {
+    name: "search_web"
+    number: 12
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.SearchWebToolConfig"
+  }
+  field {
+    name: "read_url_content"
+    number: 14
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.ReadUrlContentToolConfig"
+  }
+  field {
+    name: "tool_search_config"
+    number: 15
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.ToolSearchConfig"
+  }
+  extension_range {
+    start: 1000
+    end: 2000
+  }
+  extension_range {
+    start: 2000
+    end: 536870912
+  }
+}
+message_type {
+  name: "FindToolConfig"
+  field {
+    name: "enabled"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_BOOL
+  }
+  extension_range {
+    start: 1000
+    end: 2000
+  }
+  extension_range {
+    start: 2000
+    end: 536870912
+  }
+}
+message_type {
+  name: "RunCommandToolConfig"
+  field {
+    name: "enabled"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_BOOL
+  }
+}
+message_type {
+  name: "SubagentsConfig"
+  field {
+    name: "enabled"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_BOOL
+  }
+}
+message_type {
+  name: "UserQuestionsConfig"
+  field {
+    name: "enabled"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_BOOL
+  }
+}
+message_type {
+  name: "FileEditToolConfig"
+  field {
+    name: "enabled"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_BOOL
+  }
+}
+message_type {
+  name: "ViewFileToolConfig"
+  field {
+    name: "enabled"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_BOOL
+  }
+}
+message_type {
+  name: "WriteToFileToolConfig"
+  field {
+    name: "enabled"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_BOOL
+  }
+}
+message_type {
+  name: "GrepSearchToolConfig"
+  field {
+    name: "enabled"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_BOOL
+  }
+  extension_range {
+    start: 1000
+    end: 2000
+  }
+  extension_range {
+    start: 2000
+    end: 536870912
+  }
+}
+message_type {
+  name: "ListDirToolConfig"
+  field {
+    name: "enabled"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_BOOL
+  }
+}
+message_type {
+  name: "GenerateImageToolConfig"
+  field {
+    name: "enabled"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_BOOL
+  }
+}
+message_type {
+  name: "SearchWebToolConfig"
+  field {
+    name: "enabled"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_BOOL
+  }
+}
+message_type {
+  name: "ReadUrlContentToolConfig"
+  field {
+    name: "enabled"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_BOOL
+  }
+}
+message_type {
+  name: "ToolSearchConfig"
+  field {
+    name: "enabled"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_BOOL
+  }
+  extension_range {
+    start: 1000
+    end: 536870912
+  }
+}
+message_type {
+  name: "PermissionsConfig"
+  field {
+    name: "enforce_workspace_validation"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_BOOL
+  }
+}
+message_type {
+  name: "OutputConfig"
+  field {
+    name: "port"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_INT32
+  }
+  field {
+    name: "api_key"
+    number: 2
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+}
+message_type {
+  name: "OutputEvent"
+  field {
+    name: "step_update"
+    number: 10
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.StepUpdate"
+    oneof_index: 0
+  }
+  field {
+    name: "trajectory_state_update"
+    number: 11
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.TrajectoryStateUpdate"
+    oneof_index: 0
+  }
+  field {
+    name: "tool_call"
+    number: 12
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.ToolCall"
+    oneof_index: 0
+  }
+  field {
+    name: "initialize_conversation_response"
+    number: 13
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.InitializeConversationResponse"
+    oneof_index: 0
+  }
+  field {
+    name: "call_hook_request"
+    number: 14
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.CallHookRequest"
+    oneof_index: 0
+  }
+  field {
+    name: "session_end_response"
+    number: 15
+    label: LABEL_OPTIONAL
+    type: TYPE_BOOL
+    oneof_index: 0
+  }
+  field {
+    name: "seq_num"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_INT64
+  }
+  field {
+    name: "timestamp_micros"
+    number: 2
+    label: LABEL_OPTIONAL
+    type: TYPE_INT64
+  }
+  field {
+    name: "usage_metadata"
+    number: 20
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.UsageMetadata"
+  }
+  oneof_decl {
+    name: "event"
+  }
+}
+message_type {
+  name: "InitializeConversationResponse"
+  field {
+    name: "cascade_id"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  field {
+    name: "history"
+    number: 2
+    label: LABEL_REPEATED
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.StepUpdate"
+  }
+}
+message_type {
+  name: "StepUpdate"
+  field {
+    name: "cascade_id"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  field {
+    name: "trajectory_id"
+    number: 2
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  field {
+    name: "step_index"
+    number: 3
+    label: LABEL_OPTIONAL
+    type: TYPE_UINT32
+  }
+  field {
+    name: "state"
+    number: 4
+    label: LABEL_OPTIONAL
+    type: TYPE_ENUM
+    type_name: ".antigravity.localharness.StepUpdate.State"
+  }
+  field {
+    name: "source"
+    number: 5
+    label: LABEL_OPTIONAL
+    type: TYPE_ENUM
+    type_name: ".antigravity.localharness.StepUpdate.Source"
+  }
+  field {
+    name: "target"
+    number: 6
+    label: LABEL_OPTIONAL
+    type: TYPE_ENUM
+    type_name: ".antigravity.localharness.StepUpdate.Target"
+  }
+  field {
+    name: "error_message"
+    number: 7
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  field {
+    name: "thinking"
+    number: 8
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  field {
+    name: "text_delta"
+    number: 9
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  field {
+    name: "thinking_delta"
+    number: 10
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  field {
+    name: "text"
+    number: 20
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  field {
+    name: "list_directory"
+    number: 21
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.ActionListDirectory"
+  }
+  field {
+    name: "find_file"
+    number: 22
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.ActionFindFile"
+  }
+  field {
+    name: "search_directory"
+    number: 23
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.ActionSearchDirectory"
+  }
+  field {
+    name: "view_file"
+    number: 24
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.ActionViewFile"
+  }
+  field {
+    name: "create_file"
+    number: 25
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.ActionCreateFile"
+  }
+  field {
+    name: "edit_file"
+    number: 26
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.ActionEditFile"
+  }
+  field {
+    name: "run_command"
+    number: 27
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.ActionRunCommand"
+  }
+  field {
+    name: "compaction"
+    number: 28
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.ActionCompaction"
+  }
+  field {
+    name: "invoke_subagent"
+    number: 29
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.ActionInvokeSubagent"
+  }
+  field {
+    name: "generate_image"
+    number: 30
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.ActionGenerateImage"
+  }
+  field {
+    name: "finish"
+    number: 31
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.ActionFinish"
+  }
+  field {
+    name: "error"
+    number: 32
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.ActionError"
+  }
+  field {
+    name: "mcp_tool"
+    number: 33
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.ActionMcpTool"
+  }
+  field {
+    name: "search_web"
+    number: 34
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.ActionSearchWeb"
+  }
+  field {
+    name: "read_url_content"
+    number: 35
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.ActionReadUrlContent"
+  }
+  field {
+    name: "custom_tool"
+    number: 36
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.ActionCustomTool"
+  }
+  field {
+    name: "request_text"
+    number: 50
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  field {
+    name: "tool_confirmation_request"
+    number: 51
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.ToolConfirmationRequest"
+  }
+  field {
+    name: "questions_request"
+    number: 52
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.UserQuestionsRequest"
+  }
+  enum_type {
+    name: "State"
+    value {
+      name: "STATE_UNSPECIFIED"
+      number: 0
+    }
+    value {
+      name: "STATE_ACTIVE"
+      number: 1
+    }
+    value {
+      name: "STATE_DONE"
+      number: 2
+    }
+    value {
+      name: "STATE_WAITING_FOR_USER"
+      number: 3
+    }
+    value {
+      name: "STATE_ERROR"
+      number: 4
+    }
+  }
+  enum_type {
+    name: "Source"
+    value {
+      name: "SOURCE_UNSPECIFIED"
+      number: 0
+    }
+    value {
+      name: "SOURCE_SYSTEM"
+      number: 1
+    }
+    value {
+      name: "SOURCE_USER"
+      number: 2
+    }
+    value {
+      name: "SOURCE_MODEL"
+      number: 3
+    }
+  }
+  enum_type {
+    name: "Target"
+    value {
+      name: "TARGET_UNSPECIFIED"
+      number: 0
+    }
+    value {
+      name: "TARGET_USER"
+      number: 1
+    }
+    value {
+      name: "TARGET_MODEL"
+      number: 2
+    }
+    value {
+      name: "TARGET_ENVIRONMENT"
+      number: 3
+    }
+  }
+}
+message_type {
+  name: "ActionGenerateImage"
+  field {
+    name: "prompt"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  field {
+    name: "image_paths"
+    number: 2
+    label: LABEL_REPEATED
+    type: TYPE_STRING
+  }
+  field {
+    name: "image_name"
+    number: 3
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  field {
+    name: "aspect_ratio"
+    number: 4
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+}
+message_type {
+  name: "ActionSearchWeb"
+  field {
+    name: "query"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  field {
+    name: "domain"
+    number: 2
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  field {
+    name: "summary"
+    number: 3
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+}
+message_type {
+  name: "ActionReadUrlContent"
+  field {
+    name: "url"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  field {
+    name: "title"
+    number: 2
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  field {
+    name: "summary"
+    number: 3
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  field {
+    name: "content_path"
+    number: 4
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+}
+message_type {
+  name: "ActionFinish"
+  field {
+    name: "output_string"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+}
+message_type {
+  name: "ActionError"
+  field {
+    name: "error_message"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  field {
+    name: "http_code"
+    number: 2
+    label: LABEL_OPTIONAL
+    type: TYPE_UINT32
+  }
+}
+message_type {
+  name: "ActionListDirectory"
+  field {
+    name: "directory_path"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  field {
+    name: "results"
+    number: 2
+    label: LABEL_REPEATED
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.ActionListDirectory.Result"
+  }
+  nested_type {
+    name: "Result"
+    field {
+      name: "is_directory"
+      number: 2
+      label: LABEL_OPTIONAL
+      type: TYPE_BOOL
+      oneof_index: 0
+    }
+    field {
+      name: "file_size"
+      number: 3
+      label: LABEL_OPTIONAL
+      type: TYPE_UINT64
+      oneof_index: 0
+    }
+    field {
+      name: "name"
+      number: 1
+      label: LABEL_OPTIONAL
+      type: TYPE_STRING
+    }
+    oneof_decl {
+      name: "info"
+    }
+  }
+}
+message_type {
+  name: "ActionFindFile"
+  field {
+    name: "directory_path"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  field {
+    name: "query"
+    number: 2
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  field {
+    name: "output"
+    number: 3
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+}
+message_type {
+  name: "ActionSearchDirectory"
+  field {
+    name: "directory_path"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  field {
+    name: "query"
+    number: 2
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  field {
+    name: "num_results"
+    number: 3
+    label: LABEL_OPTIONAL
+    type: TYPE_INT32
+  }
+}
+message_type {
+  name: "ActionViewFile"
+  field {
+    name: "file_path"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  field {
+    name: "start_line"
+    number: 2
+    label: LABEL_OPTIONAL
+    type: TYPE_UINT32
+  }
+  field {
+    name: "end_line"
+    number: 3
+    label: LABEL_OPTIONAL
+    type: TYPE_UINT32
+  }
+}
+message_type {
+  name: "ActionCreateFile"
+  field {
+    name: "file_path"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  field {
+    name: "contents"
+    number: 2
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+}
+message_type {
+  name: "ActionEditFile"
+  field {
+    name: "file_path"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  field {
+    name: "diff_block"
+    number: 2
+    label: LABEL_REPEATED
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.ActionEditFile.DiffBlock"
+  }
+  nested_type {
+    name: "DiffLine"
+    field {
+      name: "text"
+      number: 1
+      label: LABEL_OPTIONAL
+      type: TYPE_STRING
+    }
+    field {
+      name: "action"
+      number: 2
+      label: LABEL_OPTIONAL
+      type: TYPE_ENUM
+      type_name: ".antigravity.localharness.ActionEditFile.DiffLine.LineAction"
+    }
+    enum_type {
+      name: "LineAction"
+      value {
+        name: "LINE_ACTION_UNSPECIFIED"
+        number: 0
+      }
+      value {
+        name: "LINE_ACTION_INSERT"
+        number: 1
+      }
+      value {
+        name: "LINE_ACTION_DELETE"
+        number: 2
+      }
+      value {
+        name: "LINE_ACTION_NONE"
+        number: 3
+      }
+    }
+  }
+  nested_type {
+    name: "DiffBlock"
+    field {
+      name: "start_line"
+      number: 1
+      label: LABEL_OPTIONAL
+      type: TYPE_INT32
+    }
+    field {
+      name: "end_line"
+      number: 2
+      label: LABEL_OPTIONAL
+      type: TYPE_INT32
+    }
+    field {
+      name: "lines"
+      number: 3
+      label: LABEL_REPEATED
+      type: TYPE_MESSAGE
+      type_name: ".antigravity.localharness.ActionEditFile.DiffLine"
+    }
+  }
+}
+message_type {
+  name: "ActionRunCommand"
+  field {
+    name: "command_line"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  field {
+    name: "working_dir"
+    number: 2
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  field {
+    name: "exit_code"
+    number: 4
+    label: LABEL_OPTIONAL
+    type: TYPE_INT32
+  }
+  field {
+    name: "combined_output"
+    number: 5
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+}
+message_type {
+  name: "ActionCompaction"
+}
+message_type {
+  name: "ActionInvokeSubagent"
+}
+message_type {
+  name: "ToolConfirmationRequest"
+}
+message_type {
+  name: "UserQuestionsRequest"
+  field {
+    name: "questions"
+    number: 1
+    label: LABEL_REPEATED
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.UserQuestion"
+  }
+}
+message_type {
+  name: "UserQuestion"
+  field {
+    name: "multiple_choice"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.MultipleChoice"
+    oneof_index: 0
+  }
+  oneof_decl {
+    name: "question_type"
+  }
+}
+message_type {
+  name: "MultipleChoice"
+  field {
+    name: "question"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  field {
+    name: "choices"
+    number: 2
+    label: LABEL_REPEATED
+    type: TYPE_STRING
+  }
+  field {
+    name: "is_multi_select"
+    number: 3
+    label: LABEL_OPTIONAL
+    type: TYPE_BOOL
+  }
+}
+message_type {
+  name: "InputEvent"
+  field {
+    name: "user_input"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+    oneof_index: 0
+  }
+  field {
+    name: "complex_user_input"
+    number: 7
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.UserInput"
+    oneof_index: 0
+  }
+  field {
+    name: "tool_confirmation"
+    number: 2
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.ToolConfirmation"
+    oneof_index: 0
+  }
+  field {
+    name: "tool_response"
+    number: 3
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.ToolResponse"
+    oneof_index: 0
+  }
+  field {
+    name: "question_response"
+    number: 4
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.UserQuestionsResponse"
+    oneof_index: 0
+  }
+  field {
+    name: "halt_request"
+    number: 5
+    label: LABEL_OPTIONAL
+    type: TYPE_BOOL
+    oneof_index: 0
+  }
+  field {
+    name: "automated_trigger"
+    number: 6
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+    oneof_index: 0
+  }
+  field {
+    name: "call_hook_response"
+    number: 8
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.CallHookResponse"
+    oneof_index: 0
+  }
+  field {
+    name: "session_end_request"
+    number: 9
+    label: LABEL_OPTIONAL
+    type: TYPE_BOOL
+    oneof_index: 0
+  }
+  oneof_decl {
+    name: "event"
+  }
+}
+message_type {
+  name: "UserInput"
+  field {
+    name: "parts"
+    number: 1
+    label: LABEL_REPEATED
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.UserInput.Part"
+  }
+  nested_type {
+    name: "Media"
+    field {
+      name: "mime_type"
+      number: 1
+      label: LABEL_OPTIONAL
+      type: TYPE_STRING
+    }
+    field {
+      name: "description"
+      number: 2
+      label: LABEL_OPTIONAL
+      type: TYPE_STRING
+    }
+    field {
+      name: "data"
+      number: 3
+      label: LABEL_OPTIONAL
+      type: TYPE_BYTES
+    }
+  }
+  nested_type {
+    name: "SlashCommand"
+    field {
+      name: "name"
+      number: 1
+      label: LABEL_OPTIONAL
+      type: TYPE_STRING
+    }
+  }
+  nested_type {
+    name: "Part"
+    field {
+      name: "text"
+      number: 1
+      label: LABEL_OPTIONAL
+      type: TYPE_STRING
+      oneof_index: 0
+    }
+    field {
+      name: "media"
+      number: 2
+      label: LABEL_OPTIONAL
+      type: TYPE_MESSAGE
+      type_name: ".antigravity.localharness.UserInput.Media"
+      oneof_index: 0
+    }
+    field {
+      name: "slash_command"
+      number: 3
+      label: LABEL_OPTIONAL
+      type: TYPE_MESSAGE
+      type_name: ".antigravity.localharness.UserInput.SlashCommand"
+      oneof_index: 0
+    }
+    oneof_decl {
+      name: "part"
+    }
+  }
+}
+message_type {
+  name: "ToolConfirmation"
+  field {
+    name: "trajectory_id"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  field {
+    name: "step_index"
+    number: 2
+    label: LABEL_OPTIONAL
+    type: TYPE_UINT32
+  }
+  field {
+    name: "accepted"
+    number: 3
+    label: LABEL_OPTIONAL
+    type: TYPE_BOOL
+  }
+}
+message_type {
+  name: "TrajectoryStateUpdate"
+  field {
+    name: "trajectory_id"
+    number: 2
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  field {
+    name: "state"
+    number: 3
+    label: LABEL_OPTIONAL
+    type: TYPE_ENUM
+    type_name: ".antigravity.localharness.TrajectoryStateUpdate.State"
+  }
+  field {
+    name: "error"
+    number: 4
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  enum_type {
+    name: "State"
+    value {
+      name: "STATE_UNSPECIFIED"
+      number: 0
+    }
+    value {
+      name: "STATE_RUNNING"
+      number: 1
+    }
+    value {
+      name: "STATE_IDLE"
+      number: 2
+    }
+    value {
+      name: "STATE_CANCELLED"
+      number: 3
+    }
+    value {
+      name: "STATE_WAITING_FOR_TASKS"
+      number: 4
+    }
+  }
+}
+message_type {
+  name: "Struct"
+  field {
+    name: "fields"
+    number: 1
+    label: LABEL_REPEATED
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.Field"
+  }
+}
+message_type {
+  name: "Field"
+  field {
+    name: "name"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  field {
+    name: "value"
+    number: 2
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.Value"
+  }
+}
+message_type {
+  name: "Value"
+  field {
+    name: "null_value"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_ENUM
+    type_name: ".antigravity.localharness.NullValue"
+    oneof_index: 0
+  }
+  field {
+    name: "number_value"
+    number: 2
+    label: LABEL_OPTIONAL
+    type: TYPE_DOUBLE
+    oneof_index: 0
+  }
+  field {
+    name: "string_value"
+    number: 3
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+    oneof_index: 0
+  }
+  field {
+    name: "bool_value"
+    number: 4
+    label: LABEL_OPTIONAL
+    type: TYPE_BOOL
+    oneof_index: 0
+  }
+  field {
+    name: "struct_value"
+    number: 5
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.Struct"
+    oneof_index: 0
+  }
+  field {
+    name: "list_value"
+    number: 6
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.ListValue"
+    oneof_index: 0
+  }
+  field {
+    name: "media"
+    number: 7
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.Media"
+    oneof_index: 0
+  }
+  oneof_decl {
+    name: "kind"
+  }
+}
+message_type {
+  name: "ListValue"
+  field {
+    name: "values"
+    number: 1
+    label: LABEL_REPEATED
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.Value"
+  }
+}
+message_type {
+  name: "ToolCall"
+  field {
+    name: "id"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  field {
+    name: "name"
+    number: 2
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  field {
+    name: "arguments_json"
+    number: 3
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  field {
+    name: "arguments"
+    number: 4
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.Struct"
+  }
+  extension_range {
+    start: 1000
+    end: 2000
+  }
+  extension_range {
+    start: 2000
+    end: 536870912
+  }
+}
+message_type {
+  name: "ToolResponse"
+  field {
+    name: "id"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  field {
+    name: "response_json"
+    number: 2
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  field {
+    name: "supplemental_media"
+    number: 3
+    label: LABEL_REPEATED
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.Media"
+  }
+  field {
+    name: "response"
+    number: 4
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.Struct"
+  }
+  field {
+    name: "error_message"
+    number: 5
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  extension_range {
+    start: 1000
+    end: 2000
+  }
+  extension_range {
+    start: 2000
+    end: 536870912
+  }
+}
+message_type {
+  name: "UserQuestionsResponse"
+  field {
+    name: "cancelled"
+    number: 3
+    label: LABEL_OPTIONAL
+    type: TYPE_BOOL
+    oneof_index: 0
+  }
+  field {
+    name: "response"
+    number: 4
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.UserQuestionsResponse.QuestionsResponse"
+    oneof_index: 0
+  }
+  field {
+    name: "trajectory_id"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  field {
+    name: "step_index"
+    number: 2
+    label: LABEL_OPTIONAL
+    type: TYPE_UINT32
+  }
+  nested_type {
+    name: "QuestionsResponse"
+    field {
+      name: "answers"
+      number: 1
+      label: LABEL_REPEATED
+      type: TYPE_MESSAGE
+      type_name: ".antigravity.localharness.UserQuestionAnswer"
+    }
+  }
+  oneof_decl {
+    name: "result"
+  }
+}
+message_type {
+  name: "UserQuestionAnswer"
+  field {
+    name: "unanswered"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_BOOL
+    oneof_index: 0
+  }
+  field {
+    name: "multiple_choice_answer"
+    number: 2
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.MultipleChoiceAnswer"
+    oneof_index: 0
+  }
+  oneof_decl {
+    name: "answer"
+  }
+}
+message_type {
+  name: "MultipleChoiceAnswer"
+  field {
+    name: "selected_choice_indices"
+    number: 1
+    label: LABEL_REPEATED
+    type: TYPE_INT32
+  }
+  field {
+    name: "freeform_response"
+    number: 2
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+}
+message_type {
+  name: "Media"
+  field {
+    name: "mime_type"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  field {
+    name: "description"
+    number: 2
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  field {
+    name: "data"
+    number: 3
+    label: LABEL_OPTIONAL
+    type: TYPE_BYTES
+  }
+}
+message_type {
+  name: "UsageMetadata"
+  field {
+    name: "prompt_token_count"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_UINT64
+  }
+  field {
+    name: "cached_content_token_count"
+    number: 5
+    label: LABEL_OPTIONAL
+    type: TYPE_UINT64
+  }
+  field {
+    name: "candidates_token_count"
+    number: 2
+    label: LABEL_OPTIONAL
+    type: TYPE_UINT64
+  }
+  field {
+    name: "thoughts_token_count"
+    number: 4
+    label: LABEL_OPTIONAL
+    type: TYPE_UINT64
+  }
+  field {
+    name: "total_token_count"
+    number: 3
+    label: LABEL_OPTIONAL
+    type: TYPE_UINT64
+  }
+}
+message_type {
+  name: "McpServerConfig"
+  field {
+    name: "stdio"
+    number: 2
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.McpStdioTransport"
+    oneof_index: 0
+  }
+  field {
+    name: "http"
+    number: 3
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.McpHttpTransport"
+    oneof_index: 0
+  }
+  field {
+    name: "name"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  field {
+    name: "enabled_tools"
+    number: 4
+    label: LABEL_REPEATED
+    type: TYPE_STRING
+  }
+  field {
+    name: "disabled_tools"
+    number: 5
+    label: LABEL_REPEATED
+    type: TYPE_STRING
+  }
+  field {
+    name: "auth_provider_type"
+    number: 6
+    label: LABEL_OPTIONAL
+    type: TYPE_ENUM
+    type_name: ".antigravity.localharness.McpServerConfig.AuthProviderType"
+  }
+  field {
+    name: "timeout_seconds"
+    number: 7
+    label: LABEL_OPTIONAL
+    type: TYPE_INT32
+  }
+  enum_type {
+    name: "AuthProviderType"
+    value {
+      name: "AUTH_PROVIDER_TYPE_UNSPECIFIED"
+      number: 0
+    }
+    value {
+      name: "AUTH_PROVIDER_TYPE_GOOGLE_CREDENTIALS"
+      number: 1
+    }
+  }
+  oneof_decl {
+    name: "transport"
+  }
+}
+message_type {
+  name: "McpStdioTransport"
+  field {
+    name: "command"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  field {
+    name: "args"
+    number: 2
+    label: LABEL_REPEATED
+    type: TYPE_STRING
+  }
+  field {
+    name: "env"
+    number: 3
+    label: LABEL_REPEATED
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.McpStdioTransport.EnvEntry"
+  }
+  nested_type {
+    name: "EnvEntry"
+    field {
+      name: "key"
+      number: 1
+      label: LABEL_OPTIONAL
+      type: TYPE_STRING
+    }
+    field {
+      name: "value"
+      number: 2
+      label: LABEL_OPTIONAL
+      type: TYPE_STRING
+    }
+    options {
+      map_entry: true
+    }
+  }
+}
+message_type {
+  name: "McpHttpTransport"
+  field {
+    name: "url"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  field {
+    name: "headers"
+    number: 2
+    label: LABEL_REPEATED
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.McpHttpTransport.HeadersEntry"
+  }
+  nested_type {
+    name: "HeadersEntry"
+    field {
+      name: "key"
+      number: 1
+      label: LABEL_OPTIONAL
+      type: TYPE_STRING
+    }
+    field {
+      name: "value"
+      number: 2
+      label: LABEL_OPTIONAL
+      type: TYPE_STRING
+    }
+    options {
+      map_entry: true
+    }
+  }
+}
+message_type {
+  name: "ActionMcpTool"
+  field {
+    name: "server_name"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  field {
+    name: "tool_name"
+    number: 2
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  field {
+    name: "arguments_json"
+    number: 3
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+}
+message_type {
+  name: "ActionCustomTool"
+  field {
+    name: "tool_call"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.ToolCall"
+  }
+  field {
+    name: "tool_response"
+    number: 2
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.ToolResponse"
+  }
+}
+message_type {
+  name: "CallHookRequest"
+  field {
+    name: "pre_turn_args"
+    number: 3
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.PreTurnArgs"
+    oneof_index: 0
+  }
+  field {
+    name: "post_turn_args"
+    number: 4
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.PostTurnArgs"
+    oneof_index: 0
+  }
+  field {
+    name: "pre_tool_args"
+    number: 5
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.PreToolArgs"
+    oneof_index: 0
+  }
+  field {
+    name: "post_tool_args"
+    number: 6
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.PostToolArgs"
+    oneof_index: 0
+  }
+  field {
+    name: "on_tool_error_args"
+    number: 8
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.OnToolErrorArgs"
+    oneof_index: 0
+  }
+  field {
+    name: "request_id"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  field {
+    name: "name"
+    number: 2
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  field {
+    name: "type"
+    number: 7
+    label: LABEL_OPTIONAL
+    type: TYPE_ENUM
+    type_name: ".antigravity.localharness.LifecycleHook"
+  }
+  oneof_decl {
+    name: "args"
+  }
+}
+message_type {
+  name: "CallHookResponse"
+  field {
+    name: "pre_turn_result"
+    number: 2
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.PreTurnResult"
+    oneof_index: 0
+  }
+  field {
+    name: "pre_tool_result"
+    number: 3
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.PreToolResult"
+    oneof_index: 0
+  }
+  field {
+    name: "empty_result"
+    number: 4
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.EmptyResult"
+    oneof_index: 0
+  }
+  field {
+    name: "error_message"
+    number: 5
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+    oneof_index: 0
+  }
+  field {
+    name: "on_tool_error_result"
+    number: 6
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.OnToolErrorResult"
+    oneof_index: 0
+  }
+  field {
+    name: "request_id"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  oneof_decl {
+    name: "result"
+  }
+}
+message_type {
+  name: "PreToolArgs"
+  field {
+    name: "tool_name"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  field {
+    name: "arguments_json"
+    number: 2
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  field {
+    name: "server_name"
+    number: 3
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+}
+message_type {
+  name: "PostToolArgs"
+  field {
+    name: "tool_name"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  field {
+    name: "result"
+    number: 2
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  field {
+    name: "error"
+    number: 3
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  field {
+    name: "server_name"
+    number: 5
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+}
+message_type {
+  name: "OnToolErrorArgs"
+  field {
+    name: "tool_name"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  field {
+    name: "error_message"
+    number: 2
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  field {
+    name: "server_name"
+    number: 4
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+}
+message_type {
+  name: "PreTurnArgs"
+  field {
+    name: "user_input"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.UserInput"
+  }
+}
+message_type {
+  name: "PostTurnArgs"
+  field {
+    name: "response_text"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+}
+message_type {
+  name: "EmptyResult"
+}
+message_type {
+  name: "OnToolErrorResult"
+  field {
+    name: "custom_error_message"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+}
+message_type {
+  name: "PreToolResult"
+  field {
+    name: "decision"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_ENUM
+    type_name: ".antigravity.localharness.PreToolResult.Decision"
+  }
+  field {
+    name: "reason"
+    number: 2
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  field {
+    name: "modified_arguments_json"
+    number: 3
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  enum_type {
+    name: "Decision"
+    value {
+      name: "DECISION_UNSPECIFIED"
+      number: 0
+    }
+    value {
+      name: "ALLOW"
+      number: 1
+    }
+    value {
+      name: "DENY"
+      number: 2
+    }
+  }
+}
+message_type {
+  name: "PreTurnResult"
+  field {
+    name: "decision"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_ENUM
+    type_name: ".antigravity.localharness.PreTurnResult.Decision"
+  }
+  field {
+    name: "reason"
+    number: 2
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  enum_type {
+    name: "Decision"
+    value {
+      name: "DECISION_UNSPECIFIED"
+      number: 0
+    }
+    value {
+      name: "ALLOW"
+      number: 1
+    }
+    value {
+      name: "DENY"
+      number: 2
+    }
+  }
+}
+message_type {
+  name: "CustomAgent"
+  field {
+    name: "name"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  field {
+    name: "description"
+    number: 2
+    label: LABEL_OPTIONAL
+    type: TYPE_STRING
+  }
+  field {
+    name: "system_instructions"
+    number: 3
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.SystemInstructions"
+  }
+  field {
+    name: "harness_side_tools"
+    number: 4
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.HarnessSideTools"
+  }
+  field {
+    name: "tools"
+    number: 5
+    label: LABEL_REPEATED
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.Tool"
+  }
+}
+message_type {
+  name: "ToolOutputTruncation"
+  field {
+    name: "truncate"
+    number: 1
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.ToolOutputTruncation.TruncateStrategy"
+    oneof_index: 0
+  }
+  field {
+    name: "error"
+    number: 2
+    label: LABEL_OPTIONAL
+    type: TYPE_MESSAGE
+    type_name: ".antigravity.localharness.ToolOutputTruncation.ErrorStrategy"
+    oneof_index: 0
+  }
+  nested_type {
+    name: "TruncateStrategy"
+    field {
+      name: "max_tokens"
+      number: 1
+      label: LABEL_OPTIONAL
+      type: TYPE_INT32
+    }
+  }
+  nested_type {
+    name: "ErrorStrategy"
+    field {
+      name: "max_tokens"
+      number: 1
+      label: LABEL_OPTIONAL
+      type: TYPE_INT32
+    }
+    field {
+      name: "error_message"
+      number: 2
+      label: LABEL_OPTIONAL
+      type: TYPE_STRING
+    }
+  }
+  oneof_decl {
+    name: "strategy"
+  }
+}
+enum_type {
+  name: "LifecycleHook"
+  value {
+    name: "LIFECYCLE_HOOK_UNSPECIFIED"
+    number: 0
+  }
+  value {
+    name: "LIFECYCLE_HOOK_ON_SESSION_START"
+    number: 1
+  }
+  value {
+    name: "LIFECYCLE_HOOK_ON_SESSION_END"
+    number: 2
+  }
+  value {
+    name: "LIFECYCLE_HOOK_PRE_TURN"
+    number: 3
+  }
+  value {
+    name: "LIFECYCLE_HOOK_POST_TURN"
+    number: 4
+  }
+  value {
+    name: "LIFECYCLE_HOOK_PRE_TOOL"
+    number: 5
+  }
+  value {
+    name: "LIFECYCLE_HOOK_POST_TOOL"
+    number: 6
+  }
+  value {
+    name: "LIFECYCLE_HOOK_ON_TOOL_ERROR"
+    number: 7
+  }
+}
+enum_type {
+  name: "ModelType"
+  value {
+    name: "MODEL_TYPE_UNSPECIFIED"
+    number: 0
+  }
+  value {
+    name: "MODEL_TYPE_TEXT"
+    number: 1
+  }
+  value {
+    name: "MODEL_TYPE_IMAGE"
+    number: 2
+  }
+}
+enum_type {
+  name: "NullValue"
+  value {
+    name: "NULL_VALUE"
+    number: 0
+  }
+}
+syntax: "editions"
+edition: EDITION_2024

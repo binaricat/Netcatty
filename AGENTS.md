@@ -72,6 +72,18 @@ Catty sidebar turns use **Vercel AI SDK 7** via `streamText` in `turnDrivers/cat
 
 Compaction remains **`prepareTurnContext` / `compactCattyMessages`** (pre-turn + 413-retry). Step-level pruning is **`prepareStepContext`** only (typed compression + handle notices, no LLM summarize).
 
+### Google Antigravity Integration (Local Harness)
+
+Netcatty supports delegating AI capabilities to the local Google Antigravity binary (`localharness`). When the user selects Google as their provider, the `antigravityTurnDriver.ts` bridges the Netcatty UI to the Antigravity agent via WebSocket.
+
+**Authentication Rules:**
+1. **API Key (Gemini API):** If an API key is provided in the Netcatty settings, the driver populates `gemini_api_endpoint` in the `config` payload, allowing standard Gemini API usage.
+2. **Account Auth / Application Default Credentials (ADC):** If NO API key is provided, the driver configures `vertex_endpoint` instead. This triggers the Google Cloud SDK inside the `localharness` to look for local ADC credentials (e.g. established via `gcloud auth application-default login`). If ADC is missing on the machine, the binary will cleanly report `failed to find default credentials` back to the UI.
+
+**Important details:**
+- The Go binary strictly requires `cascade_id` to match `[a-zA-Z0-9-]`. Since Netcatty's session IDs include underscores (`_`), the TurnDriver replaces them with hyphens (`-`).
+- The protocol's JSON keys must be camelCase (e.g., `textDelta` instead of `text_delta`) for the Go unmarshaler to accept them.
+
 ### Capability exposure (Round 2 + gap fill)
 
 Single source of truth: `electron/capabilities/catalog/` + `electron/capabilities/codegen/toolSurfaces.cjs`.

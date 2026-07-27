@@ -24,7 +24,7 @@ export type AgentEventType =
   | 'error'
   | 'turn_end';
 
-export type AgentBackend = 'catty' | 'external-sdk';
+export type AgentBackend = 'catty' | 'external-sdk' | 'antigravity';
 
 export type ApprovalOutcome = 'approved' | 'denied' | 'timeout';
 

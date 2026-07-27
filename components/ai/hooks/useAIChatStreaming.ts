@@ -199,8 +199,10 @@ export function useAIChatStreaming({
     context: SendToExternalContext,
   ) => {
     const bridge = getNetcattyBridge();
+    const backendType = agentConfig.sdkBackend === 'antigravity' ? 'antigravity' : 'external-sdk';
+    
     await getAgentRuntime().runTurn({
-      backend: 'external-sdk',
+      backend: backendType,
       chatSessionId: sessionId,
       assistantMsgId,
       userText: trimmed,
@@ -210,7 +212,7 @@ export function useAIChatStreaming({
       context,
       bridge,
       ui: uiCallbacks(),
-    });
+    } as import('../../../infrastructure/ai/harness/turnDrivers/types').TurnInput);
   }, [uiCallbacks]);
 
   const steerExternalAgent = useCallback(async (input: TurnSteerInput) => {

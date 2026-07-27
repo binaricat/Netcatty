@@ -70,6 +70,14 @@ export const zhCNAiMessages: Messages = {
   'ai.providers.advancedParams.hint': '留空则使用提供商默认值。',
   'ai.providers.advancedParams.maxTokens.placeholder': '例如 4096',
   'ai.providers.advancedParams.default': '提供商默认',
+  // AI Antigravity
+  'ai.antigravity': 'Antigravity',
+  'ai.antigravity.title': 'Antigravity SDK',
+  'ai.antigravity.description': '接入 Google Antigravity SDK。检测到后即可作为外部编程 Agent 使用。',
+  'ai.antigravity.notFound': '未找到 Harness',
+  'ai.antigravity.notFoundHint': '指定 localharness 二进制文件的路径 (例如 /tmp/agy-sdk/google/antigravity/bin/localharness)。',
+  'ai.antigravity.check': '检查',
+
 
   // AI Codex
   'ai.codex': 'Codex',

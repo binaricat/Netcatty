@@ -206,6 +206,12 @@ export const AGENT_DEFAULTS: Record<string, Omit<ExternalAgentConfig, "id" | "co
     icon: "opencode",
     sdkBackend: "opencode",
   },
+  antigravity: {
+    name: "Antigravity",
+    args: [],
+    icon: "antigravity",
+    sdkBackend: "antigravity",
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -232,7 +238,7 @@ export function normalizeCodexBridgeError(error: unknown): string {
 // Provider icon helper
 // ---------------------------------------------------------------------------
 
-export type SettingsIconId = AIProviderId | "claude" | "copilot" | "codebuddy" | "opencode";
+export type SettingsIconId = AIProviderId | "claude" | "copilot" | "codebuddy" | "opencode" | "antigravity";
 
 export const SETTINGS_ICON_PATHS: Record<SettingsIconId, string> = {
   openai: "/ai/providers/openai.svg",
@@ -241,6 +247,7 @@ export const SETTINGS_ICON_PATHS: Record<SettingsIconId, string> = {
   copilot: "/ai/agents/copilot.svg",
   codebuddy: "/ai/agents/codebuddy.svg",
   opencode: "/ai/agents/opencode.svg",
+  antigravity: "/ai/agents/opencode.svg", // Reusing icon for now
   google: "/ai/providers/google.svg",
   ollama: "/ai/providers/ollama.svg",
   openrouter: "/ai/providers/openrouter.svg",
@@ -260,6 +267,7 @@ export const SETTINGS_ICON_COLORS: Record<SettingsIconId, string> = {
   copilot: "border border-zinc-300 bg-white",
   codebuddy: "bg-indigo-600",
   opencode: "bg-teal-600",
+  antigravity: "bg-violet-600",
   google: "bg-blue-600",
   ollama: "bg-purple-600",
   openrouter: "bg-pink-600",

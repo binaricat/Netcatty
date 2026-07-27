@@ -1399,6 +1399,12 @@ function createPreloadApi(ctx) {
   aiCodexLogout: async (options) => {
     return ipcRenderer.invoke("netcatty:ai:codex:logout", options);
   },
+  aiAntigravityStartHarness: async (options) => {
+    return ipcRenderer.invoke("netcatty:ai:antigravity:start", options);
+  },
+  aiAntigravityStopHarness: async (options) => {
+    return ipcRenderer.invoke("netcatty:ai:antigravity:stop", options);
+  },
   // External MCP (productized catalog MCP for Codex / Claude Code / Cursor / Grok)
   externalMcpGetStatus: async () => {
     return ipcRenderer.invoke("netcatty:external-mcp:get-status");

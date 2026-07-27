@@ -51,6 +51,14 @@ export const ruAiMessages: Messages = {
   'ai.providers.advancedParams.hint': 'Оставьте пустым, чтобы использовать настройки провайдера по умолчанию.',
   'ai.providers.advancedParams.maxTokens.placeholder': 'например, 4096',
   'ai.providers.advancedParams.default': 'По умолчанию у провайдера',
+  // AI Antigravity
+  'ai.antigravity': 'Antigravity',
+  'ai.antigravity.title': 'Antigravity SDK',
+  'ai.antigravity.description': 'Подключение Google Antigravity SDK. После обнаружения его можно выбрать в качестве внешнего агента.',
+  'ai.antigravity.notFound': 'Harness не найден',
+  'ai.antigravity.notFoundHint': 'Укажите путь к бинарному файлу localharness (например, /tmp/agy-sdk/google/antigravity/bin/localharness).',
+  'ai.antigravity.check': 'Проверить',
+
 
   // AI Codex
   'ai.codex': 'Codex',

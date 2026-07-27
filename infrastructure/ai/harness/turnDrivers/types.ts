@@ -106,7 +106,20 @@ export interface ExternalTurnInput {
   ui: TurnUiCallbacks;
 }
 
-export type TurnInput = CattyTurnInput | ExternalTurnInput;
+export interface AntigravityTurnInput {
+  backend: 'antigravity';
+  chatSessionId: string;
+  assistantMsgId: string;
+  userText: string;
+  signal: AbortSignal;
+  agentConfig: ExternalAgentConfig;
+  context: CattyTurnContext;
+  attachments?: ChatMessageAttachment[];
+  bridge?: unknown;
+  ui: TurnUiCallbacks;
+}
+
+export type TurnInput = CattyTurnInput | ExternalTurnInput | AntigravityTurnInput;
 
 export interface TurnResult {
   turnId: string;

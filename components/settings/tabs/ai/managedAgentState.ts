@@ -190,5 +190,6 @@ export function getInitialManagedAgentPaths(agents: ExternalAgentConfig[]) {
     cursor: getAutoManagedAgentStoredPath(agents, "cursor") ?? "",
     codebuddy: getAutoManagedAgentStoredPath(agents, "codebuddy") ?? "",
     opencode: getAutoManagedAgentStoredPath(agents, "opencode") ?? "",
+    antigravity: getAutoManagedAgentStoredPath(agents, "antigravity") ?? "",
   };
 }

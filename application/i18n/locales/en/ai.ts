@@ -70,6 +70,14 @@ export const enAiMessages: Messages = {
   'ai.providers.advancedParams.hint': 'Leave blank to use provider defaults.',
   'ai.providers.advancedParams.maxTokens.placeholder': 'e.g. 4096',
   'ai.providers.advancedParams.default': 'Provider default',
+  // AI Antigravity
+  'ai.antigravity': 'Antigravity',
+  'ai.antigravity.title': 'Antigravity SDK',
+  'ai.antigravity.description': 'Connect Google Antigravity SDK. Once detected, it can be selected as an external coding agent.',
+  'ai.antigravity.notFound': 'Harness not found',
+  'ai.antigravity.notFoundHint': 'Specify the path to the localharness binary (e.g. /tmp/agy-sdk/google/antigravity/bin/localharness).',
+  'ai.antigravity.check': 'Check',
+
 
   // AI Codex
   'ai.codex': 'Codex',

@@ -3,7 +3,7 @@ import { getCommandBasename, isPathLikeCommand } from './shared/pathLikeCommand'
 
 export { isPathLikeCommand, getCommandBasename };
 
-export type ManagedAgentKey = 'codex' | 'claude' | 'copilot' | 'cursor' | 'codebuddy' | 'opencode';
+export type ManagedAgentKey = 'codex' | 'claude' | 'copilot' | 'cursor' | 'codebuddy' | 'opencode' | 'antigravity';
 
 const MANAGED_AGENT_META: Record<ManagedAgentKey, { commandNames: string[]; sdkBackend: string }> = {
   codex: { commandNames: ['codex'], sdkBackend: 'codex' },
@@ -12,6 +12,7 @@ const MANAGED_AGENT_META: Record<ManagedAgentKey, { commandNames: string[]; sdkB
   cursor: { commandNames: ['cursor'], sdkBackend: 'cursor' },
   codebuddy: { commandNames: ['codebuddy'], sdkBackend: 'codebuddy' },
   opencode: { commandNames: ['opencode'], sdkBackend: 'opencode' },
+  antigravity: { commandNames: ['antigravity', 'localharness', 'agy'], sdkBackend: 'antigravity' },
 };
 
 function matchesPrimaryCliBasename(command: string | undefined, agentKey: ManagedAgentKey): boolean {
@@ -27,7 +28,8 @@ export function isSettingsManagedDiscoveredAgent(
     || agent.command === 'copilot'
     || agent.command === 'cursor'
     || agent.command === 'codebuddy'
-    || agent.command === 'opencode';
+    || agent.command === 'opencode'
+    || agent.command === 'antigravity';
 }
 
 export function matchesManagedAgentConfig(

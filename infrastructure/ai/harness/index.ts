@@ -53,6 +53,7 @@ export type { ToolResultDedupEntry } from './toolResultDedup';
 
 export { cattyTurnDriver } from './turnDrivers/cattyTurnDriver';
 export { externalSdkTurnDriver } from './turnDrivers/externalSdkTurnDriver';
+export { antigravityTurnDriver } from './turnDrivers/antigravityTurnDriver';
 export type {
   TurnInput,
   TurnResult,

@@ -28,6 +28,7 @@ const { registerProviderHandlers } = require("./aiBridge/providerHandlers.cjs"),
 const { createVaultAgentBridge } = require("./aiBridge/vaultAgentBridge.cjs");
 const { registerAgentDiscoveryHandlers } = require("./aiBridge/agentDiscoveryHandlers.cjs"), { registerAgentProcessHandlers } = require("./aiBridge/agentProcessHandlers.cjs"), { registerSdkStreamHandlers } = require("./aiBridge/sdk/sdkStreamHandlers.cjs");
 const { probeClaudeAuth, probeCopilotAuth, probeCodexAuth, probeCodebuddyAuth, probeCursorCliAuth } = require("./aiBridge/agentAuthProbes.cjs");
+const { setupAntigravityBridge } = require("./aiBridge/antigravityBridge.cjs");
 
 // ── Extracted modules ──
 const {
@@ -846,6 +847,7 @@ function registerHandlers(ipcMain) {
   registerAgentDiscoveryHandlers(context);
   registerAgentProcessHandlers(context);
   registerSdkStreamHandlers(context);
+  setupAntigravityBridge(ipcMain);
 
   if (externalMcpController) {
     externalMcpController.registerHandlers(ipcMain, validateSenderOrSettings);

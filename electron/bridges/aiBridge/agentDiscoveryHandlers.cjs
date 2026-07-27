@@ -82,6 +82,8 @@ function registerAgentDiscoveryHandlers(ctx) {
         description: "Tencent's coding agent CLI (Agent SDK)", sdkBackend: "codebuddy", args: [] },
       { command: "opencode", name: "OpenCode", icon: "opencode",
         description: "Open source coding agent via the official OpenCode SDK", sdkBackend: "opencode", args: [] },
+      { command: "antigravity", name: "Antigravity", icon: "antigravity",
+        description: "Google Deepmind Antigravity Agent", sdkBackend: "antigravity", args: [] },
     ];
 
     const shellEnv = await getShellEnv();
@@ -109,7 +111,10 @@ function registerAgentDiscoveryHandlers(ctx) {
         : await probeCliVersion(resolvedPath, ["--version"], shellEnv); // Layer-2: version
       const hasPlausibleVersion = agent.command === "cursor"
         ? probe.exitCode === 0
-        : probe.exitCode === 0 && isPlausibleCliVersionOutput(probe.version);
+        : agent.command === "antigravity"
+          ? true // Bypass version check for antigravity for now
+          : probe.exitCode === 0 && isPlausibleCliVersionOutput(probe.version);
+      
       if (!hasPlausibleVersion) continue;
 
       // Layer-3: authentication (best-effort; never blocks discovery).
@@ -130,6 +135,8 @@ function registerAgentDiscoveryHandlers(ctx) {
           auth = probeCodebuddyAuth({ env: shellEnv });
         } else if (agent.command === "opencode") {
           auth = { authenticated: true, authSource: "opencode-config" };
+        } else if (agent.command === "antigravity") {
+          auth = { authenticated: true, authSource: "antigravity-config" };
         }
       } catch { /* auth probe is best-effort */ }
 
@@ -224,7 +231,9 @@ function registerAgentDiscoveryHandlers(ctx) {
     const probe = await probeCliVersion(resolvedPath, ["--version"], shellEnv);
     const hasPlausibleVersion = command === "cursor"
       ? probe.exitCode === 0
-      : probe.exitCode === 0 && isPlausibleCliVersionOutput(probe.version);
+      : command === "antigravity"
+        ? true // Bypass version check for antigravity
+        : probe.exitCode === 0 && isPlausibleCliVersionOutput(probe.version);
     if (!hasPlausibleVersion) {
       return { path: resolvedPath, binPath: resolvedPath, version: null, available: false, installed: true };
     }
