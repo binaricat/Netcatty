@@ -51,6 +51,57 @@ export async function ensureVaultImportPersisted(
   await onPersisted?.();
 }
 
+const importFieldMatches = (left: unknown, right: unknown): boolean => (
+  JSON.stringify(left) === JSON.stringify(right)
+);
+
+export function rollbackVaultImportedHosts({
+  currentHosts,
+  baselineHosts,
+  appliedHosts,
+}: {
+  currentHosts: Host[];
+  baselineHosts: Host[];
+  appliedHosts: Host[];
+}): Host[] {
+  const baselineById = new Map(baselineHosts.map((host) => [host.id, host]));
+  const appliedById = new Map(appliedHosts.map((host) => [host.id, host]));
+  const addedHostIds = new Set(
+    appliedHosts.filter((host) => !baselineById.has(host.id)).map((host) => host.id),
+  );
+
+  return currentHosts.flatMap((currentHost) => {
+    if (addedHostIds.has(currentHost.id)) return [];
+    const baselineHost = baselineById.get(currentHost.id);
+    const appliedHost = appliedById.get(currentHost.id);
+    if (!baselineHost || !appliedHost) return [currentHost];
+
+    const fieldNames = new Set([
+      ...Object.keys(baselineHost),
+      ...Object.keys(appliedHost),
+    ] as Array<keyof Host>);
+    const changedFields = [...fieldNames].filter((field) => (
+      !importFieldMatches(baselineHost[field], appliedHost[field])
+    ));
+    if (changedFields.length === 0) return [currentHost];
+    if (changedFields.some((field) => (
+      !importFieldMatches(currentHost[field], appliedHost[field])
+    ))) {
+      return [currentHost];
+    }
+
+    const restored = { ...currentHost } as Host & Record<string, unknown>;
+    for (const field of changedFields) {
+      if (Object.prototype.hasOwnProperty.call(baselineHost, field)) {
+        restored[field] = baselineHost[field];
+      } else {
+        delete restored[field];
+      }
+    }
+    return [restored];
+  });
+}
+
 interface VaultImportPaintWaitOptions {
   requestFrame?: (callback: () => void) => unknown;
   setTimer?: (callback: () => void, delayMs: number) => unknown;
@@ -78,3 +129,4 @@ export function waitForVaultImportProgressPaint({
     requestFrame?.(complete);
   });
 }
+import type { Host } from "../../domain/models";

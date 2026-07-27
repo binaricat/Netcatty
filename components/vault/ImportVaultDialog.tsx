@@ -101,6 +101,7 @@ export type ImportVaultDialogProps = {
   groups?: string[];
   progress?: VaultImportProgress | null;
   onProgressClose?: () => void;
+  onProgressCancel?: () => void;
 };
 
 type Translate = (key: string, values?: Record<string, unknown>) => string;
@@ -194,10 +195,12 @@ const PROGRESS_STAGE_KEYS = {
 export function VaultImportProgressView({
   progress,
   onClose,
+  onCancel,
   t,
 }: {
   progress: VaultImportProgress;
   onClose: () => void;
+  onCancel?: () => void;
   t: Translate;
 }) {
   const isRunning = progress.status === "running";
@@ -205,7 +208,12 @@ export function VaultImportProgressView({
   const stageText = t(PROGRESS_STAGE_KEYS[progress.stage]);
 
   return (
-    <div className="flex flex-col items-center gap-5 py-2 text-center">
+    <div
+      className="flex flex-col items-center gap-5 py-2 text-center"
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+    >
       <div
         className={cn(
           "flex h-14 w-14 items-center justify-center rounded-2xl border",
@@ -295,6 +303,17 @@ export function VaultImportProgressView({
         <p className="text-sm text-destructive">{progress.error}</p>
       )}
 
+      {isRunning && onCancel && (
+        <button
+          type="button"
+          onClick={onCancel}
+          disabled={progress.stage === "saving"}
+          className="w-full rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {t("common.cancel")}
+        </button>
+      )}
+
       {!isRunning && (
         <button
           type="button"
@@ -317,6 +336,7 @@ export const ImportVaultDialog: React.FC<ImportVaultDialogProps> = ({
   groups = [],
   progress = null,
   onProgressClose,
+  onProgressCancel,
 }) => {
   const { t } = useI18n();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -433,14 +453,17 @@ export const ImportVaultDialog: React.FC<ImportVaultDialogProps> = ({
 
   const handleOpenChange = useCallback(
     (newOpen: boolean) => {
-      if (!newOpen && progress?.status === "running") return;
+      if (!newOpen && progress?.status === "running") {
+        if (progress.stage !== "saving") onProgressCancel?.();
+        return;
+      }
       if (!newOpen) {
         setStep("format");
         if (progress) onProgressClose?.();
       }
       pluginImporter.handleOpenChange(newOpen);
     },
-    [onProgressClose, pluginImporter, progress],
+    [onProgressCancel, onProgressClose, pluginImporter, progress],
   );
 
   const previewAnalysis = useMemo(
@@ -471,6 +494,7 @@ export const ImportVaultDialog: React.FC<ImportVaultDialogProps> = ({
             </DialogTitle>
             <VaultImportProgressView
               progress={progress}
+              onCancel={onProgressCancel}
               onClose={() => {
                 onProgressClose?.();
                 onOpenChange(false);
@@ -865,7 +889,7 @@ export const ImportVaultDialog: React.FC<ImportVaultDialogProps> = ({
                           <button
                             key={provider.provider.id}
                             type="button"
-                            disabled={pluginImporter.pluginBusy}
+                            disabled={pluginImporter.pluginBusy || !destination}
                             className="flex items-center gap-3 rounded-xl border border-border/60 p-3 text-left transition-colors hover:bg-muted/30 disabled:opacity-50"
                             onClick={() =>
                               pluginImporter.pickPluginFile(provider)

@@ -8,6 +8,7 @@ import {
 import {
   countVaultImportDuplicates,
   ensureVaultImportPersisted,
+  rollbackVaultImportedHosts,
   waitForVaultImportProgressPaint,
   type VaultImportProgress,
 } from "../../application/state/vaultImportProgress";
@@ -56,6 +57,7 @@ export function useVaultImportHandlers({
   const keysRef = useRef(keys);
   const managedSourcesRef = useRef(managedSources);
   const activeImportAbortRef = useRef<AbortController | null>(null);
+  const importCommitStartedRef = useRef(false);
   customGroupsRef.current = customGroups;
   hostsRef.current = hosts;
   keysRef.current = keys;
@@ -63,9 +65,17 @@ export function useVaultImportHandlers({
   const resetImportProgress = useCallback(() => setImportProgress(null), []);
 
   useEffect(() => () => {
-    activeImportAbortRef.current?.abort();
+    if (!importCommitStartedRef.current) activeImportAbortRef.current?.abort();
     activeImportAbortRef.current = null;
   }, []);
+
+  const cancelImport = useCallback(() => {
+    if (importCommitStartedRef.current) return;
+    activeImportAbortRef.current?.abort();
+    activeImportAbortRef.current = null;
+    setImportProgress(null);
+    setIsImportOpen(false);
+  }, [setIsImportOpen]);
 
   const handleImportFileSelected = useCallback(
       async (format: VaultImportFormat, files: File[], options?: ImportOptions) => {
@@ -74,6 +84,7 @@ export function useVaultImportHandlers({
         activeImportAbortRef.current?.abort();
         const abortController = new AbortController();
         activeImportAbortRef.current = abortController;
+        importCommitStartedRef.current = false;
         const { signal } = abortController;
         const throwIfCancelled = () => {
           if (signal.aborted) {
@@ -81,10 +92,8 @@ export function useVaultImportHandlers({
           }
         };
         let rollbackSnapshot: {
-          hosts: Host[];
-          customGroups: string[];
-          managedSources: ManagedSource[];
-          keys: SSHKey[];
+          baselineHosts: Host[];
+          appliedHosts: Host[];
         } | null = null;
         const relativeRoot = file.webkitRelativePath?.split(/[\\/]+/).filter(Boolean)[0];
         const selectionName = files.length > 1 ? (relativeRoot || file.name) : file.name;
@@ -153,17 +162,16 @@ export function useVaultImportHandlers({
           const persistHosts = async (nextHosts: Host[]) => {
             throwIfCancelled();
             rollbackSnapshot = {
-              hosts: currentHosts,
-              customGroups: currentCustomGroups,
-              managedSources: currentManagedSources,
-              keys: keysRef.current,
+              baselineHosts: currentHosts,
+              appliedHosts: nextHosts,
             };
+            importCommitStartedRef.current = true;
             let hostUpdate: boolean | void | Promise<boolean | void>;
             startTransition(() => {
               hostUpdate = onUpdateHosts(nextHosts);
             });
             const persisted = await hostUpdate!;
-            throwIfCancelled();
+            if (persisted !== false) rollbackSnapshot = null;
             return persisted;
           };
 
@@ -293,7 +301,10 @@ export function useVaultImportHandlers({
                 });
               },
               async () => {
-                await onUpdateHosts(currentHosts);
+                await onUpdateHosts(rollbackVaultImportedHosts({
+                  currentHosts: hostsRef.current,
+                  ...rollbackSnapshot!,
+                }));
                 rollbackSnapshot = null;
               },
             );
@@ -312,7 +323,10 @@ export function useVaultImportHandlers({
                 startTransition(() => onUpdateCustomGroups(merged.customGroups));
               },
               async () => {
-                await onUpdateHosts(currentHosts);
+                await onUpdateHosts(rollbackVaultImportedHosts({
+                  currentHosts: hostsRef.current,
+                  ...rollbackSnapshot!,
+                }));
                 rollbackSnapshot = null;
               },
             );
@@ -451,15 +465,15 @@ export function useVaultImportHandlers({
           if (rollbackSnapshot) {
             const snapshot = rollbackSnapshot;
             rollbackSnapshot = null;
-            await onUpdateHosts(snapshot.hosts);
-            onUpdateKeys(snapshot.keys);
-            keysRef.current = snapshot.keys;
-            startTransition(() => {
-              onUpdateCustomGroups(snapshot.customGroups);
-              onUpdateManagedSources(snapshot.managedSources);
-            });
+            await onUpdateHosts(rollbackVaultImportedHosts({
+              currentHosts: hostsRef.current,
+              ...snapshot,
+            }));
           }
-          if (err instanceof DOMException && err.name === "AbortError") return;
+          if (
+            signal.aborted
+            || (err instanceof DOMException && err.name === "AbortError")
+          ) return;
           const message =
             err instanceof Error ? err.message : t("common.unknownError");
           updateProgress({
@@ -473,6 +487,7 @@ export function useVaultImportHandlers({
           if (activeImportAbortRef.current === abortController) {
             activeImportAbortRef.current = null;
           }
+          importCommitStartedRef.current = false;
         }
       },
       [
@@ -485,5 +500,10 @@ export function useVaultImportHandlers({
       ],
     );
 
-  return { handleImportFileSelected, importProgress, resetImportProgress };
+  return {
+    cancelImport,
+    handleImportFileSelected,
+    importProgress,
+    resetImportProgress,
+  };
 }

@@ -41,6 +41,7 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
     Boolean,
     bulkDeleteGroupPaths,
     Button,
+    cancelImport,
     cancelInlineGroupEdit,
     CheckSquare,
     ChevronDown,
@@ -1624,6 +1625,7 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
         groups={allGroupPaths}
         progress={importProgress}
         onProgressClose={resetImportProgress}
+        onProgressCancel={cancelImport}
       />
 
       {/* Quick Connect Wizard */}

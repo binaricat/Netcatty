@@ -21,6 +21,7 @@ const messages: Record<string, string> = {
   "vault.import.progress.fileSummary": "{name} · {count} files",
   "vault.import.progress.fileCount": "{completed} of {total} files",
   "common.close": "Close",
+  "common.cancel": "Cancel",
 };
 
 const t = (key: string, values?: Record<string, unknown>) => {
@@ -42,6 +43,7 @@ test("vault import progress renders the current background stage and percent", (
         fileName: "hosts.csv",
       }}
       onClose={() => {}}
+      onCancel={() => {}}
       t={t}
     />,
   );
@@ -50,6 +52,9 @@ test("vault import progress renders the current background stage and percent", (
   assert.match(html, /hosts\.csv/);
   assert.match(html, /Parsing hosts/);
   assert.match(html, /aria-valuenow="55"/);
+  assert.match(html, /role="status"/);
+  assert.match(html, /aria-live="polite"/);
+  assert.match(html, />Cancel</);
   assert.doesNotMatch(html, />Close</);
 });
 

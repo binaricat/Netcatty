@@ -4,8 +4,52 @@ import test from "node:test";
 import {
   countVaultImportDuplicates,
   ensureVaultImportPersisted,
+  rollbackVaultImportedHosts,
   waitForVaultImportProgressPaint,
 } from "./vaultImportProgress.ts";
+
+test("vault import rollback preserves unrelated concurrent host changes", () => {
+  const baseline = [{
+    id: "existing",
+    label: "Existing",
+    hostname: "existing.test",
+    username: "root",
+    port: 22,
+    group: "Original",
+    tags: [],
+    os: "linux" as const,
+  }];
+  const applied = [
+    { ...baseline[0], group: "Managed", managedSourceId: "source-1" },
+    {
+      ...baseline[0],
+      id: "imported",
+      label: "Imported",
+      hostname: "imported.test",
+    },
+  ];
+  const concurrent = {
+    ...baseline[0],
+    id: "concurrent",
+    label: "Concurrent",
+    hostname: "concurrent.test",
+  };
+
+  const rolledBack = rollbackVaultImportedHosts({
+    baselineHosts: baseline,
+    appliedHosts: applied,
+    currentHosts: [
+      { ...applied[0], notes: "changed while importing" },
+      applied[1],
+      concurrent,
+    ],
+  });
+
+  assert.deepEqual(rolledBack, [
+    { ...baseline[0], notes: "changed while importing" },
+    concurrent,
+  ]);
+});
 
 test("vault import duplicate count includes hosts that already exist", () => {
   assert.equal(countVaultImportDuplicates({

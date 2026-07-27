@@ -863,7 +863,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
       t("vault.hosts.connectMultiple.success", { count: targets.length }),
     );
   }, [selectedHostIds, hosts, onConnect, clearHostSelection, t]);
-  const { handleImportFileSelected, importProgress, resetImportProgress } =
+  const { cancelImport, handleImportFileSelected, importProgress, resetImportProgress } =
     useVaultImportHandlers({
       customGroups,
       hosts,
@@ -1386,6 +1386,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
           Boolean,
           bulkDeleteGroupPaths,
           Button,
+          cancelImport,
           CheckSquare,
           ChevronDown,
           cancelInlineGroupEdit,
