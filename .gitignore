@@ -20,6 +20,7 @@ coverage
 /.vite
 /build/*
 !/build/icons
+!/build/installer.nsh
 /electron/native/**/build
 /release
 /out

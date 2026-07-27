@@ -215,6 +215,8 @@ Windows 发布文件可能仍未签名。
 
 > **Windows 便携数据：** 退出 Netcatty，在 `Netcatty.exe`（zip 版）或便携版启动文件旁创建名为 `data` 的文件夹。下次启动后，Netcatty 会把数据保存在这里。已保存的密码和私钥仍受创建它们的 Windows 用户保护；将该文件夹移到其他电脑或 Windows 用户后，需要重新输入这些敏感信息。
 
+> **在 Windows 中用 Netcatty 打开文件夹：** 安装版会在资源管理器的文件夹右键菜单和文件夹空白处右键菜单中加入 **Open in Netcatty**。点击后会直接在该目录打开本地终端；Windows 11 需要先选择 **显示更多选项**。ZIP 版和便携版不会添加此菜单。
+
 > **macOS 用户注意：** 当前发布版本应已完成代码签名和公证。如果 Gatekeeper 仍然提示风险，请确认您下载的是 GitHub Releases 中的最新官方构建。
 
 ### Nix / NixOS
