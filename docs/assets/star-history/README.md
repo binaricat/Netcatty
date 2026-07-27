@@ -28,7 +28,11 @@ python3 "$tmpdir/mystarhistory/mystarhistory.py" \
 Or trigger the **Star History** GitHub Actions workflow
 (`.github/workflows/star-history.yml`). It reuses the existing `RELEASE_TOKEN`
 secret (same PAT already used for release publishing) so no new secret is
-needed. The token must be able to:
+needed. Because `main` requires pull requests (with admin enforcement), the
+workflow never pushes to the default branch directly: it force-updates
+`chore/star-history`, opens or reuses a PR, then squash-merges it. The token
+must be able to:
 
 - read stargazers (repo admin/collaborator)
-- push commits to the default branch
+- push the `chore/star-history` branch
+- open and merge pull requests into the default branch
