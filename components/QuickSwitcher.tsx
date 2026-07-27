@@ -112,13 +112,22 @@ import { clampListIndex, stepListIndex } from "./ui/virtualListMath";
 const IS_MAC = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
 
 const QS_ROW_HEIGHT = 44;
-/** Two-line plugin rows (title + plugin name) with py-2.5 exceed QS_ROW_HEIGHT. */
+/** Two-line plugin command/view rows (title + subtitle + py-2.5) need a taller slot. */
 const QS_PLUGIN_ROW_HEIGHT = 56;
 const QS_HEADER_HEIGHT = 32;
 
 type QuickSwitcherVisualRow =
   | { kind: "header"; key: string; label: string }
   | { kind: "item"; key: string; item: QuickSwitcherItem; itemIndex: number };
+
+/** Exported for tests — must match VariableSizeVirtualList absolute slot heights. */
+export function getQuickSwitcherVisualRowHeight(row: QuickSwitcherVisualRow): number {
+  if (row.kind === "header") return QS_HEADER_HEIGHT;
+  if (row.item.type === "plugin-command" || row.item.type === "plugin-view") {
+    return QS_PLUGIN_ROW_HEIGHT;
+  }
+  return QS_ROW_HEIGHT;
+}
 
 interface QuickSwitcherProps {
   isOpen: boolean;
@@ -363,13 +372,10 @@ const QuickSwitcherInner: React.FC<QuickSwitcherProps> = ({
     [quickSwitcherShells],
   );
 
-  const getRowHeight = useCallback((row: QuickSwitcherVisualRow) => {
-    if (row.kind === "header") return QS_HEADER_HEIGHT;
-    if (row.item.type === "plugin-command" || row.item.type === "plugin-view") {
-      return QS_PLUGIN_ROW_HEIGHT;
-    }
-    return QS_ROW_HEIGHT;
-  }, []);
+  const getRowHeight = useCallback(
+    (row: QuickSwitcherVisualRow) => getQuickSwitcherVisualRowHeight(row),
+    [],
+  );
 
   if (!isOpen) return null;
 

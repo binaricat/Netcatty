@@ -65,6 +65,8 @@ type SelectHostListRow =
   | { kind: 'group'; key: string; path: string; name: string; count: number }
   | { kind: 'host'; key: string; host: Host };
 
+type SelectHostNavigableRow = Extract<SelectHostListRow, { kind: 'group' | 'host' }>;
+
 /** Shared host-picker body used by aside panel and dialog variants. */
 export const SelectHostPanelContent: React.FC<SelectHostPanelContentProps> = ({
   hosts,
@@ -293,7 +295,7 @@ export const SelectHostPanelContent: React.FC<SelectHostPanelContentProps> = ({
 
   // Navigable rows (groups + hosts) for listbox keyboard model under virtualization.
   const navigable = useMemo(() => {
-    const entries: { key: string; listIndex: number; row: SelectHostListRow }[] = [];
+    const entries: { key: string; listIndex: number; row: SelectHostNavigableRow }[] = [];
     listRows.forEach((row, listIndex) => {
       if (row.kind === 'group' || row.kind === 'host') {
         entries.push({ key: row.key, listIndex, row });
@@ -348,7 +350,9 @@ export const SelectHostPanelContent: React.FC<SelectHostPanelContentProps> = ({
         setCurrentPath(entry.row.path);
         return;
       }
-      handleHostClick(entry.row.host);
+      if (entry.row.kind === 'host') {
+        handleHostClick(entry.row.host);
+      }
     }
   }, [activeNavIndex, handleGroupToggle, handleHostClick, multiSelect, navigable]);
 

@@ -10,6 +10,7 @@ import {
   getFixedSizeVirtualWindow,
   stepListIndex,
 } from './ui/virtualListMath.ts';
+import { getQuickSwitcherVisualRowHeight } from './QuickSwitcher.tsx';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 
@@ -106,4 +107,64 @@ test('shipped visual index map matches picker header/item interleaving', () => {
   ];
   const map = buildItemIndexToVisualIndexMap(visual);
   assert.deepEqual([...map.entries()], [[0, 1], [1, 2], [2, 4]]);
+});
+
+test('QuickSwitcher plugin rows use a taller virtual slot than single-line hosts', () => {
+  assert.equal(
+    getQuickSwitcherVisualRowHeight({ kind: 'header', key: 'h', label: 'Hosts' }),
+    32,
+  );
+  assert.equal(
+    getQuickSwitcherVisualRowHeight({
+      kind: 'item',
+      key: 'host:1',
+      itemIndex: 0,
+      item: { type: 'host', id: '1' },
+    }),
+    44,
+  );
+  // Two-line plugin chrome must not share the 44px host slot (overflow/overlap).
+  assert.equal(
+    getQuickSwitcherVisualRowHeight({
+      kind: 'item',
+      key: 'plugin:1',
+      itemIndex: 1,
+      item: {
+        type: 'plugin-command',
+        id: 'p1',
+        commandId: 'cmd',
+        title: 'Run',
+        pluginTitle: 'Plugin',
+      },
+    }),
+    56,
+  );
+  assert.equal(
+    getQuickSwitcherVisualRowHeight({
+      kind: 'item',
+      key: 'view:1',
+      itemIndex: 2,
+      item: { type: 'plugin-view', id: 'v1', title: 'View', pluginTitle: 'Plugin' },
+    }),
+    56,
+  );
+  assert.ok(
+    getQuickSwitcherVisualRowHeight({
+      kind: 'item',
+      key: 'plugin:1',
+      itemIndex: 1,
+      item: {
+        type: 'plugin-command',
+        id: 'p1',
+        commandId: 'cmd',
+        title: 'Run',
+        pluginTitle: 'Plugin',
+      },
+    }) > getQuickSwitcherVisualRowHeight({
+      kind: 'item',
+      key: 'host:1',
+      itemIndex: 0,
+      item: { type: 'host', id: '1' },
+    }),
+  );
 });
