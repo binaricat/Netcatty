@@ -125,6 +125,8 @@ export const TerminalConnectionDialog: React.FC<TerminalConnectionDialogProps> =
     );
     const dialogFocusRef = useRef<HTMLDivElement | null>(null);
 
+    // Claim focus only when Enter-reconnect mode turns on — not on every
+    // showLogs/error rerender (those would steal keyboard focus off buttons).
     useEffect(() => {
         if (!canEnterReconnectFromDialog) return;
         const node = dialogFocusRef.current;
@@ -147,10 +149,17 @@ export const TerminalConnectionDialog: React.FC<TerminalConnectionDialogProps> =
         // Re-assert after paint/microtasks so late blur from xterm teardown
         // cannot leave focus on document.body — still never steals other panes.
         const timer = window.setTimeout(focusOverlay, 0);
+        return () => window.clearTimeout(timer);
+    }, [canEnterReconnectFromDialog]);
+
+    // Restore xterm focus only when Enter-reconnect mode actually ends
+    // (reconnect / dismiss / unmount), not when dialog internals re-render.
+    useEffect(() => {
+        if (!canEnterReconnectFromDialog) return;
+        const node = dialogFocusRef.current;
+        if (!node) return;
+        const sessionRoot = node.closest("[data-session-id]");
         return () => {
-            window.clearTimeout(timer);
-            // Overlay is leaving (reconnect / dismiss). If we still own focus,
-            // hand it back to this session's xterm so the user can type.
             if (typeof document === "undefined") return;
             restoreTerminalFocusFromDisconnectedDialog({
                 activeElement: document.activeElement,
@@ -158,7 +167,7 @@ export const TerminalConnectionDialog: React.FC<TerminalConnectionDialogProps> =
                 sessionRoot,
             });
         };
-    }, [canEnterReconnectFromDialog, status, error, showLogs]);
+    }, [canEnterReconnectFromDialog]);
 
     const handleDialogKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
         if (!shouldReconnectDisconnectedDialogOnEnterKey({

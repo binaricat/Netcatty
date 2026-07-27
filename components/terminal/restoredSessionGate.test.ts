@@ -184,6 +184,21 @@ test("disconnected connection dialog keeps an Enter-reconnect focus sink", () =>
   assert.match(source, /shouldClaimDisconnectedDialogFocus/);
   assert.match(source, /restoreTerminalFocusFromDisconnectedDialog/);
   assert.match(source, /dialogFocusRef\.current\?\.focus/);
+  // Focus claim/restore must key only on enter-reconnect mode, not showLogs/error,
+  // or toggling "Show logs" steals keyboard focus off the button.
+  const claimEffectIdx = source.indexOf("Claim focus only when Enter-reconnect mode turns on");
+  const restoreEffectIdx = source.indexOf("Restore xterm focus only when Enter-reconnect mode actually ends");
+  assert.notEqual(claimEffectIdx, -1);
+  assert.notEqual(restoreEffectIdx, -1);
+  const claimDeps = source.indexOf("}, [canEnterReconnectFromDialog]);", claimEffectIdx);
+  const restoreDeps = source.indexOf("}, [canEnterReconnectFromDialog]);", restoreEffectIdx);
+  assert.notEqual(claimDeps, -1);
+  assert.notEqual(restoreDeps, -1);
+  assert.ok(claimDeps < restoreEffectIdx);
+  // Dependency arrays themselves must not re-run on showLogs/error/status.
+  assert.match(source.slice(claimDeps, claimDeps + 40), /^\}, \[canEnterReconnectFromDialog\]\);/);
+  assert.match(source.slice(restoreDeps, restoreDeps + 40), /^\}, \[canEnterReconnectFromDialog\]\);/);
+  assert.equal(source.includes("}, [canEnterReconnectFromDialog, status, error, showLogs]"), false);
 });
 
 test("open terminal search does not globally gate enter reconnect", () => {
