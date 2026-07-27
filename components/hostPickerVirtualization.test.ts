@@ -35,6 +35,8 @@ test('QuickSwitcher virtualizes categorized rows and clamps empty-list keyboard'
   assert.match(source, /data-host-picker-virtual="quick-switcher"/);
   assert.match(source, /stepListIndex/);
   assert.match(source, /clampListIndex/);
+  // Two-line plugin rows need a taller virtual slot than QS_ROW_HEIGHT.
+  assert.match(source, /QS_PLUGIN_ROW_HEIGHT/);
   assert.doesNotMatch(source, /results\.map\(\(host\) =>/);
   // Must not use bare length-1 which yields -1 on empty lists.
   assert.doesNotMatch(
