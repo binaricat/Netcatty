@@ -74,10 +74,12 @@ type RenderHostListOptions = {
   displayedGroups?: GroupNode[];
   displayedHosts?: Host[];
   groupedDisplayHosts?: Array<{ name: string; hosts: Host[] }>;
+  isMultiSelectMode?: boolean;
   pinnedHosts?: Host[];
   pinnedRecentIds?: Set<string>;
   recentHosts?: Host[];
   showRecentHosts?: boolean;
+  selectedGroupPaths?: Set<string>;
   sortMode?: string;
   treeViewGroupTree?: GroupNode[];
   treeViewHosts?: Host[];
@@ -89,10 +91,12 @@ const renderHostList = ({
   displayedGroups = [group],
   displayedHosts = [mainHost],
   groupedDisplayHosts,
+  isMultiSelectMode = false,
   pinnedHosts = [],
   pinnedRecentIds = new Set<string>(),
   recentHosts = [],
   showRecentHosts = false,
+  selectedGroupPaths = new Set<string>(),
   sortMode = "az",
   treeViewGroupTree = [],
   treeViewHosts = [],
@@ -136,7 +140,7 @@ const renderHostList = ({
       hostListScrollRef: React.createRef<HTMLDivElement>(),
       HostTreeView,
       isHostsSectionActive: true,
-      isMultiSelectMode: false,
+      isMultiSelectMode,
       lastPinnedId: null,
       LayoutGrid,
       managedGroupPaths: new Set<string>(),
@@ -152,6 +156,7 @@ const renderHostList = ({
       reorderHost: noop,
       sanitizeHost,
       selectedGroupPath: null,
+      selectedGroupPaths,
       selectedHostIds: new Set<string>(),
       sessionCount: 0,
       setDeleteTargetPath: noop,
@@ -173,6 +178,7 @@ const renderHostList = ({
       startInlineNewGroup: noop,
       startInlineRenameGroup: noop,
       t: (key: string) => key,
+      toggleGroupSelection: noop,
       toggleHostPinned: noop,
       toggleHostSelection: noop,
       Trash2,
@@ -308,6 +314,21 @@ test("VaultHostListSection keeps list group edit action beside the group label w
   });
 
   assertGridGroupPlacement(gridMarkup, group);
+});
+
+test("VaultHostListSection exposes selectable groups to keyboard and assistive technology", () => {
+  const markup = renderHostList({
+    viewMode: "list",
+    displayedGroups: [group],
+    displayedHosts: [],
+    visibleDisplayedHosts: [],
+    isMultiSelectMode: true,
+    selectedGroupPaths: new Set([group.path]),
+  });
+
+  assert.match(markup, /data-group-path="production"[^>]*role="checkbox"/);
+  assert.match(markup, /data-group-path="production"[^>]*aria-checked="true"/);
+  assert.match(markup, /data-group-path="production"[^>]*tabindex="0"/);
 });
 
 test("VaultHostListSection virtualizes large grid collections without hiding search results", () => {

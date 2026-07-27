@@ -611,6 +611,11 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
                               )}
                               data-group-path={node.path}
                               data-vault-grid-item={`group:${node.path}`}
+                              role={isMultiSelectMode ? "checkbox" : undefined}
+                              aria-checked={isMultiSelectMode
+                                ? multiSelectedGroupPaths.has(node.path)
+                                : undefined}
+                              tabIndex={isMultiSelectMode ? 0 : undefined}
                               draggable={!isMultiSelectMode}
                               onDragStart={(e) =>
                                 e.dataTransfer.setData("group-path", node.path)
@@ -619,6 +624,12 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
                                 if (!isMultiSelectMode) setSelectedGroupPath(node.path);
                               }}
                               onClick={() => activateGroup(node.path)}
+                              onKeyDown={(event) => {
+                                if (!isMultiSelectMode) return;
+                                if (event.key !== "Enter" && event.key !== " ") return;
+                                event.preventDefault();
+                                activateGroup(node.path);
+                              }}
                               onDragOver={(e) => {
                                 e.preventDefault();
                                 e.stopPropagation();

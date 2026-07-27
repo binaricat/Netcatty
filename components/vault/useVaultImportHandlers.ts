@@ -10,6 +10,7 @@ import {
   ensureVaultImportPersisted,
   mergeVaultImportedGroups,
   rebaseVaultImportedHosts,
+  resolveUniqueManagedImportGroupName,
   rollbackVaultImportedHosts,
   waitForVaultImportProgressPaint,
   type VaultHostPersistenceResult,
@@ -162,12 +163,19 @@ export function useVaultImportHandlers({
           const currentCustomGroups = customGroupsRef.current;
           const currentHosts = hostsRef.current;
           const currentManagedSources = managedSourcesRef.current;
-          const persistHosts = async (nextHosts: Host[]) => {
+          const persistHosts = async (
+            nextHosts: Host[],
+            options?: {
+              prepareAttempt?: (attempt: { baselineHosts: Host[]; appliedHosts: Host[] }) => Host[];
+              shouldRetryAfterPersist?: () => boolean;
+            },
+          ) => {
             throwIfCancelled();
             importCommitStartedRef.current = true;
             let baselineHosts = currentHosts;
             let appliedHosts = nextHosts;
             while (true) {
+              appliedHosts = options?.prepareAttempt?.({ baselineHosts, appliedHosts }) ?? appliedHosts;
               rollbackSnapshot = { baselineHosts, appliedHosts };
               let hostUpdate: VaultHostPersistenceResult | Promise<VaultHostPersistenceResult>;
               startTransition(() => {
@@ -175,6 +183,16 @@ export function useVaultImportHandlers({
               });
               const persisted = await hostUpdate!;
               if (persisted !== "superseded") {
+                if (persisted !== false && options?.shouldRetryAfterPersist?.()) {
+                  const latestHosts = hostsRef.current;
+                  appliedHosts = rebaseVaultImportedHosts({
+                    currentHosts: latestHosts,
+                    baselineHosts,
+                    appliedHosts,
+                  });
+                  baselineHosts = latestHosts;
+                  continue;
+                }
                 if (persisted !== false) rollbackSnapshot = null;
                 return persisted;
               }
@@ -201,21 +219,7 @@ export function useVaultImportHandlers({
 
           const fileBaseName = file.name.replace(/\.[^/.]+$/, "");
   
-          // Generate unique managed group name (check for conflicts with existing sources,
-          // custom groups, and host groups to avoid accidentally merging unrelated hosts)
           let managedGroupName = `${fileBaseName} - Managed`;
-          if (isManaged) {
-            const existingGroupNames = new Set([
-              ...currentManagedSources.map(s => s.groupName),
-              ...currentCustomGroups,
-              ...currentHosts.map(h => h.group).filter((g): g is string => !!g),
-            ]);
-            let suffix = 1;
-            while (existingGroupNames.has(managedGroupName)) {
-              managedGroupName = `${fileBaseName} - Managed (${suffix})`;
-              suffix++;
-            }
-          }
   
           // Check if this file is already managed
           const bridge = (window as unknown as { netcatty?: { getPathForFile?: (file: File) => string | undefined } }).netcatty;
@@ -274,7 +278,7 @@ export function useVaultImportHandlers({
   
           if (isManaged && (newHosts.length > 0 || updatedExistingHosts.length > 0)) {
             const sourceId = crypto.randomUUID();
-            const newSource: ManagedSource = {
+            let newSource: ManagedSource = {
               id: sourceId,
               type: "ssh_config",
               filePath: filePath,
@@ -303,17 +307,61 @@ export function useVaultImportHandlers({
               };
             });
   
-            const nextGroups = Array.from(
-              new Set([
+            let nextGroups: string[] = [];
+            const ensureManagedSourceStillAvailable = () => {
+              const conflictingSource = managedSourcesRef.current.find((source) => (
+                source.id !== sourceId && source.filePath === filePath
+              ));
+              if (conflictingSource) {
+                throw new Error(t("vault.import.sshConfig.alreadyManagedDesc", {
+                  group: conflictingSource.groupName,
+                }));
+              }
+            };
+            const prepareManagedAttempt = ({
+              baselineHosts,
+              appliedHosts,
+            }: {
+              baselineHosts: Host[];
+              appliedHosts: Host[];
+            }) => {
+              ensureManagedSourceStillAvailable();
+              managedGroupName = resolveUniqueManagedImportGroupName({
+                baseName: fileBaseName,
+                customGroups: customGroupsRef.current,
+                hosts: baselineHosts,
+                managedSources: managedSourcesRef.current,
+                ownerSourceId: sourceId,
+              });
+              newSource = { ...newSource, groupName: managedGroupName };
+              nextGroups = Array.from(new Set([
                 ...currentCustomGroups,
                 ...result.groups,
                 managedGroupName,
-                ...newHosts.map((h) => h.group).filter(Boolean),
-              ]),
-            ) as string[];
+              ]));
+              return appliedHosts.map((host) => (
+                host.managedSourceId === sourceId
+                  ? { ...host, group: managedGroupName }
+                  : host
+              ));
+            };
+            const managedGroupNameStillAvailable = () => {
+              ensureManagedSourceStillAvailable();
+              return resolveUniqueManagedImportGroupName({
+                baseName: fileBaseName,
+                customGroups: customGroupsRef.current,
+                hosts: hostsRef.current,
+                managedSources: managedSourcesRef.current,
+                ownerSourceId: sourceId,
+              }) === managedGroupName;
+            };
 
             const hostPersisted = await persistHosts(
               [...updatedHosts, ...newHosts].map((host: Host) => sanitizeHost(host)),
+              {
+                prepareAttempt: prepareManagedAttempt,
+                shouldRetryAfterPersist: () => !managedGroupNameStillAvailable(),
+              },
             );
             await ensureVaultImportPersisted(
               hostPersisted,

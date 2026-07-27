@@ -124,6 +124,39 @@ export function mergeVaultImportedGroups({
   return Array.from(new Set([...currentGroups, ...importedGroups]));
 }
 
+export function resolveUniqueManagedImportGroupName({
+  baseName,
+  customGroups,
+  hosts,
+  managedSources,
+  ownerSourceId,
+}: {
+  baseName: string;
+  customGroups: string[];
+  hosts: Host[];
+  managedSources: ManagedSource[];
+  ownerSourceId?: string;
+}): string {
+  const existingGroupNames = new Set([
+    ...customGroups,
+    ...managedSources
+      .filter((source) => source.id !== ownerSourceId)
+      .map((source) => source.groupName),
+    ...hosts
+      .filter((host) => host.managedSourceId !== ownerSourceId)
+      .map((host) => host.group)
+      .filter((group): group is string => Boolean(group)),
+  ]);
+  const initialName = `${baseName} - Managed`;
+  let groupName = initialName;
+  let suffix = 1;
+  while (existingGroupNames.has(groupName)) {
+    groupName = `${initialName} (${suffix})`;
+    suffix++;
+  }
+  return groupName;
+}
+
 export function rollbackVaultImportedHosts({
   currentHosts,
   baselineHosts,
@@ -158,14 +191,9 @@ export function rollbackVaultImportedHosts({
       !importFieldMatches(baselineHost[field], appliedHost[field])
     ));
     if (changedFields.length === 0) return [currentHost];
-    if (changedFields.some((field) => (
-      !importFieldMatches(currentHost[field], appliedHost[field])
-    ))) {
-      return [currentHost];
-    }
-
     const restored = { ...currentHost } as Record<string, unknown>;
     for (const field of changedFields) {
+      if (!importFieldMatches(currentHost[field], appliedHost[field])) continue;
       if (Object.prototype.hasOwnProperty.call(baselineHost, field)) {
         restored[field as string] = baselineHost[field];
       } else {
@@ -203,4 +231,4 @@ export function waitForVaultImportProgressPaint({
     requestFrame?.(complete);
   });
 }
-import type { Host } from "../../domain/models";
+import type { Host, ManagedSource } from "../../domain/models";

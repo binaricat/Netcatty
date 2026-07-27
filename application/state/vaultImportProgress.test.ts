@@ -6,6 +6,7 @@ import {
   ensureVaultImportPersisted,
   mergeVaultImportedGroups,
   rebaseVaultImportedHosts,
+  resolveUniqueManagedImportGroupName,
   rollbackVaultImportedHosts,
   waitForVaultImportProgressPaint,
 } from "./vaultImportProgress.ts";
@@ -59,6 +60,26 @@ test("vault import rollback preserves unrelated concurrent host changes", () => 
     { ...applied[2], notes: "edited after import started" },
     concurrent,
   ]);
+
+  const rolledBackPerField = rollbackVaultImportedHosts({
+    baselineHosts: baseline,
+    appliedHosts: [{
+      ...baseline[0],
+      label: "ExistingWithoutSpaces",
+      group: "Managed",
+      managedSourceId: "source-1",
+    }],
+    currentHosts: [{
+      ...baseline[0],
+      label: "Renamed concurrently",
+      group: "Managed",
+      managedSourceId: "source-1",
+    }],
+  });
+  assert.deepEqual(rolledBackPerField, [{
+    ...baseline[0],
+    label: "Renamed concurrently",
+  }]);
 });
 
 test("vault import rebase preserves concurrent edits and restores missing imported data", () => {
@@ -103,6 +124,34 @@ test("vault import group merge keeps concurrent changes without restoring delete
     baselineGroups: ["Original", "Kept"],
     appliedGroups: ["Original", "Kept", "Imported"],
   }), ["Renamed", "Concurrent", "Imported"]);
+});
+
+test("managed import group naming ignores its own retry and avoids concurrent groups", () => {
+  const host = {
+    id: "imported",
+    label: "Imported",
+    hostname: "imported.test",
+    username: "root",
+    port: 22,
+    group: "sessions - Managed",
+    managedSourceId: "source-1",
+    tags: [],
+    os: "linux" as const,
+  };
+  assert.equal(resolveUniqueManagedImportGroupName({
+    baseName: "sessions",
+    customGroups: ["sessions - Managed"],
+    hosts: [host],
+    managedSources: [],
+    ownerSourceId: "source-1",
+  }), "sessions - Managed (1)");
+  assert.equal(resolveUniqueManagedImportGroupName({
+    baseName: "sessions",
+    customGroups: [],
+    hosts: [host],
+    managedSources: [],
+    ownerSourceId: "source-1",
+  }), "sessions - Managed");
 });
 
 test("vault import duplicate count includes hosts that already exist", () => {
