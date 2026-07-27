@@ -27,7 +27,9 @@ test('SelectHostPanelContent virtualizes with listbox keyboard model', () => {
   // Screen readers need active option linkage while focus stays on the listbox.
   assert.match(source, /aria-activedescendant=\{activeDescendantId\}/);
   assert.match(source, /optionDomId/);
-  assert.match(source, /id=\{optionDomId\(row\.key\)\}/);
+  // Navigable-index IDs avoid collisions when group paths sanitize identically.
+  assert.match(source, /id=\{navIndex >= 0 \? optionDomId\(navIndex\) : undefined\}/);
+  assert.match(source, /\$\{listboxId\}-opt-\$\{navIndex\}/);
   assert.doesNotMatch(source, /filteredHosts\.map\(\(host\) =>/);
   // One listbox tab stop — not per-host tabIndex under virtualization.
   assert.match(source, /role="listbox"[\s\S]*tabIndex=\{0\}/);

@@ -95,8 +95,10 @@ export const SelectHostPanelContent: React.FC<SelectHostPanelContentProps> = ({
   const [activeNavIndex, setActiveNavIndex] = useState(0);
   const listRef = useRef<VariableSizeVirtualListHandle>(null);
   const listboxId = useId();
-  const optionDomId = useCallback((key: string) => (
-    `${listboxId}-opt-${key.replace(/[^a-zA-Z0-9_-]/g, '_')}`
+  // Index-based IDs stay unique even when group paths only differ by chars that
+  // would collide under a sanitize-to-_ mapping (e.g. "Prod East" vs "Prod_East").
+  const optionDomId = useCallback((navIndex: number) => (
+    `${listboxId}-opt-${navIndex}`
   ), [listboxId]);
 
   useEffect(() => {
@@ -308,9 +310,10 @@ export const SelectHostPanelContent: React.FC<SelectHostPanelContentProps> = ({
     return entries;
   }, [listRows]);
 
-  const activeNavEntry = navigable[clampListIndex(activeNavIndex, navigable.length)];
+  const clampedNavIndex = clampListIndex(activeNavIndex, navigable.length);
+  const activeNavEntry = navigable[clampedNavIndex];
   const activeNavKey = activeNavEntry?.key ?? null;
-  const activeDescendantId = activeNavKey ? optionDomId(activeNavKey) : undefined;
+  const activeDescendantId = activeNavEntry ? optionDomId(clampedNavIndex) : undefined;
 
   useEffect(() => {
     setActiveNavIndex((prev) => clampListIndex(prev, navigable.length));
@@ -381,6 +384,7 @@ export const SelectHostPanelContent: React.FC<SelectHostPanelContentProps> = ({
       );
     }
 
+    const navIndex = navigable.findIndex((entry) => entry.key === row.key);
     const isActive = activeNavKey === row.key;
 
     if (row.kind === 'group') {
@@ -392,7 +396,7 @@ export const SelectHostPanelContent: React.FC<SelectHostPanelContentProps> = ({
 
       return (
         <div
-          id={optionDomId(row.key)}
+          id={navIndex >= 0 ? optionDomId(navIndex) : undefined}
           role="option"
           aria-selected={multiSelect ? groupState === 'all' : false}
           data-active={isActive ? 'true' : undefined}
@@ -401,7 +405,6 @@ export const SelectHostPanelContent: React.FC<SelectHostPanelContentProps> = ({
             isActive ? 'bg-primary/10 ring-1 ring-primary/40' : 'hover:bg-muted/70',
           )}
           onClick={() => {
-            const navIndex = navigable.findIndex((entry) => entry.key === row.key);
             if (navIndex >= 0) setActiveNavIndex(navIndex);
             setCurrentPath(row.path);
           }}
@@ -449,7 +452,7 @@ export const SelectHostPanelContent: React.FC<SelectHostPanelContentProps> = ({
 
     return (
       <div
-        id={optionDomId(row.key)}
+        id={navIndex >= 0 ? optionDomId(navIndex) : undefined}
         role="option"
         aria-selected={isSelected}
         data-host-id={host.id}
@@ -460,7 +463,6 @@ export const SelectHostPanelContent: React.FC<SelectHostPanelContentProps> = ({
           isSelected ? 'bg-muted' : isActive ? 'bg-primary/10 ring-1 ring-primary/40' : 'hover:bg-muted/70',
         )}
         onClick={() => {
-          const navIndex = navigable.findIndex((entry) => entry.key === row.key);
           if (navIndex >= 0) setActiveNavIndex(navIndex);
           handleHostClick(host);
         }}
