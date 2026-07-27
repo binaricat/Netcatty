@@ -41,6 +41,7 @@ test("Antigravity settings disables save while loading a stored API key", () => 
     />,
   );
 
+  assert.match(markup, /<input type="password"[^>]*disabled=""/);
   assert.match(markup, /disabled="">ai\.antigravity\.saveApiKey<\/button>/);
 });
 

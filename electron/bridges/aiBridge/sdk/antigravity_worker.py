@@ -110,6 +110,9 @@ async def run_turn(request: dict[str, Any]) -> None:
       for call in step.tool_calls:
         call_id = call.id or f"{step.id}:{call.name}"
         if call_id not in seen_tool_ids:
+          if reasoning_open:
+            emit({"type": "reasoning_end"})
+            reasoning_open = False
           seen_tool_ids.add(call_id)
           emit({
               "type": "tool_call",

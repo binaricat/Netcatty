@@ -234,6 +234,7 @@ export const zhCNAiMessages: Messages = {
   'ai.antigravity.check': '检查',
   'ai.antigravity.resetPath': '重置',
   'ai.antigravity.apiKey': 'Gemini API 密钥',
+  'ai.antigravity.apiKeyDecryptFailed': '无法读取已保存的 API 密钥。请在解锁系统凭据存储后重试，或输入新密钥替换。',
   'ai.antigravity.apiKeyPlaceholder': '输入 Gemini API 密钥',
   'ai.antigravity.apiKeyPlaceholder.env': '正在使用环境变量中的 GEMINI_API_KEY',
   'ai.antigravity.showApiKey': '显示 API 密钥',

@@ -234,6 +234,7 @@ export const enAiMessages: Messages = {
   'ai.antigravity.check': 'Check',
   'ai.antigravity.resetPath': 'Reset',
   'ai.antigravity.apiKey': 'Gemini API key',
+  'ai.antigravity.apiKeyDecryptFailed': 'Could not read the saved API key. Enter a replacement or try again after unlocking your credential store.',
   'ai.antigravity.apiKeyPlaceholder': 'Enter a Gemini API key',
   'ai.antigravity.apiKeyPlaceholder.env': 'Using GEMINI_API_KEY from the environment',
   'ai.antigravity.showApiKey': 'Show API key',

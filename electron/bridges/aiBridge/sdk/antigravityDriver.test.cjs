@@ -244,7 +244,7 @@ class Conversation:
   async def receive_steps(self):
     call = types.ToolCall("call-1", "netcatty_terminal_execute", {"command": "pwd"})
     base = dict(thinking_delta="", content_delta="", tool_calls=[call], error="", usage_metadata=None, id="step-1")
-    yield SimpleNamespace(source=types.StepSource.MODEL, target=types.StepTarget.ENVIRONMENT, status=types.StepStatus.ACTIVE, **base)
+    yield SimpleNamespace(source=types.StepSource.MODEL, target=types.StepTarget.ENVIRONMENT, status=types.StepStatus.ACTIVE, **{**base, "thinking_delta": "thinking"})
     yield SimpleNamespace(source=types.StepSource.MODEL, target=types.StepTarget.ENVIRONMENT, status=types.StepStatus.DONE, **base)
     usage = SimpleNamespace(prompt_token_count=3, cached_content_token_count=1, candidates_token_count=2, thoughts_token_count=0, total_token_count=5)
     yield SimpleNamespace(source=types.StepSource.MODEL, target=types.StepTarget.USER, status=types.StepStatus.DONE, thinking_delta="", content_delta="done", tool_calls=[], error="", usage_metadata=usage, id="step-2")
@@ -272,6 +272,9 @@ class Agent:
   assert.equal(result.status, 0, result.stderr || result.stdout);
   const events = result.stdout.trim().split(/\r?\n/).map((line) => JSON.parse(line));
   assert.equal(events.filter((event) => event.type === "tool_call").length, 1);
+  const reasoningEndIndex = events.findIndex((event) => event.type === "reasoning_end");
+  const toolCallIndex = events.findIndex((event) => event.type === "tool_call");
+  assert.equal(reasoningEndIndex, toolCallIndex - 1);
   assert.deepEqual(events.find((event) => event.type === "tool_result"), {
     type: "tool_result",
     id: "call-1",

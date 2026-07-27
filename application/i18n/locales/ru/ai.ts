@@ -203,6 +203,7 @@ export const ruAiMessages: Messages = {
   'ai.antigravity.check': 'Проверить',
   'ai.antigravity.resetPath': 'Сбросить',
   'ai.antigravity.apiKey': 'Ключ Gemini API',
+  'ai.antigravity.apiKeyDecryptFailed': 'Не удалось прочитать сохранённый ключ API. Разблокируйте хранилище учётных данных и повторите попытку либо введите новый ключ.',
   'ai.antigravity.apiKeyPlaceholder': 'Введите ключ Gemini API',
   'ai.antigravity.apiKeyPlaceholder.env': 'Используется GEMINI_API_KEY из окружения',
   'ai.antigravity.showApiKey': 'Показать ключ API',

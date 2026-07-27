@@ -31,10 +31,14 @@ export const AntigravitySdkCard: React.FC<{
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [decrypting, setDecrypting] = useState(Boolean(encryptedApiKey));
+  const [decryptError, setDecryptError] = useState(false);
+  const [apiKeyEdited, setApiKeyEdited] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     setSaved(false);
+    setDecryptError(false);
+    setApiKeyEdited(false);
     if (!encryptedApiKey) {
       setApiKey("");
       setDecrypting(false);
@@ -43,13 +47,21 @@ export const AntigravitySdkCard: React.FC<{
     setDecrypting(true);
     void decryptField(encryptedApiKey)
       .then((value) => { if (!cancelled) setApiKey(value ?? ""); })
-      .catch(() => { if (!cancelled) setApiKey(""); })
+      .catch(() => {
+        if (!cancelled) {
+          setApiKey("");
+          setDecryptError(true);
+        }
+      })
       .finally(() => { if (!cancelled) setDecrypting(false); });
     return () => { cancelled = true; };
   }, [encryptedApiKey]);
 
   const installed = Boolean(pathInfo?.sdkReady ?? pathInfo?.available);
   const authenticated = Boolean(encryptedApiKey || pathInfo?.authenticated);
+  const canSaveApiKey = !saving
+    && !decrypting
+    && (Boolean(apiKey.trim()) || Boolean(encryptedApiKey && apiKeyEdited && !decryptError));
   const status = isResolvingPath
     ? t("ai.antigravity.detecting")
     : installed
@@ -120,27 +132,36 @@ export const AntigravitySdkCard: React.FC<{
               value={decrypting ? "" : apiKey}
               onChange={(event) => {
                 setSaved(false);
+                setApiKeyEdited(true);
+                setDecryptError(false);
                 setApiKey(event.target.value);
               }}
-              placeholder={authenticated && !encryptedApiKey
-                ? t("ai.antigravity.apiKeyPlaceholder.env")
-                : t("ai.antigravity.apiKeyPlaceholder")}
-              className="w-full h-8 rounded-md border border-input bg-background px-3 pr-9 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              placeholder={decrypting
+                ? t("ai.providers.apiKey.decrypting")
+                : authenticated && !encryptedApiKey
+                  ? t("ai.antigravity.apiKeyPlaceholder.env")
+                  : t("ai.antigravity.apiKeyPlaceholder")}
+              disabled={decrypting}
+              className="w-full h-8 rounded-md border border-input bg-background px-3 pr-9 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-50"
             />
             <button
               type="button"
               onClick={() => setShowApiKey((value) => !value)}
+              disabled={decrypting}
               className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
               aria-label={showApiKey ? t("ai.antigravity.hideApiKey") : t("ai.antigravity.showApiKey")}
             >
               {showApiKey ? <EyeOff size={14} /> : <Eye size={14} />}
             </button>
           </div>
-          <Button variant="outline" size="sm" onClick={() => void save()} disabled={saving || decrypting || (!apiKey.trim() && !encryptedApiKey)}>
+          <Button variant="outline" size="sm" onClick={() => void save()} disabled={!canSaveApiKey}>
             {saved ? <Check size={14} className="mr-1.5" /> : null}
             {saved ? t("ai.antigravity.saved") : t("ai.antigravity.saveApiKey")}
           </Button>
         </div>
+        {decryptError ? (
+          <p className="text-xs text-destructive">{t("ai.antigravity.apiKeyDecryptFailed")}</p>
+        ) : null}
       </div>
     </div>
   );
