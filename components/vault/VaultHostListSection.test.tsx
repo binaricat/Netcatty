@@ -32,7 +32,10 @@ import {
   ContextMenuTrigger,
 } from "../ui/context-menu.tsx";
 import { cn } from "../../lib/utils.ts";
-import { VaultHostListSection } from "./VaultHostListSection.tsx";
+import {
+  getVaultTreeAutoExpandKey,
+  VaultHostListSection,
+} from "./VaultHostListSection.tsx";
 
 Object.defineProperty(globalThis, "localStorage", {
   configurable: true,
@@ -69,6 +72,16 @@ const group: GroupNode = {
 };
 
 const noop = () => undefined;
+
+test("tree auto-expansion covers both text and tag filters", () => {
+  assert.equal(getVaultTreeAutoExpandKey("", []), undefined);
+  assert.ok(getVaultTreeAutoExpandKey("router", []));
+  assert.ok(getVaultTreeAutoExpandKey("", ["production"]));
+  assert.equal(
+    getVaultTreeAutoExpandKey("router", ["production", "linux"]),
+    getVaultTreeAutoExpandKey("router", ["linux", "production"]),
+  );
+});
 
 type RenderHostListOptions = {
   displayedGroups?: GroupNode[];

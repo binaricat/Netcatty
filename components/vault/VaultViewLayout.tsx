@@ -1100,6 +1100,7 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
                 selectedGroupPath,
                 selectedGroupPaths,
                 selectedHostIds,
+                selectedTags,
                 sessionCount,
                 setDeleteTargetPath,
                 setDragOverDropTarget,
