@@ -935,7 +935,7 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
                       setDragOverDropTarget={setGroupDragOverDropTarget}
                       groupConfigs={groupConfigs}
                       scrollRef={hostListScrollRef}
-                      expandAllGroups={Boolean(search?.trim())}
+                      autoExpandGroupsKey={search?.trim() || undefined}
                     />
 	                  ) : sortMode === "group" && groupedDisplayHosts ? (
 	                    <>

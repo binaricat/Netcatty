@@ -150,7 +150,7 @@ interface HostTreeViewProps {
   setDragOverDropTarget?: (target: string | null) => void;
   groupConfigs?: GroupConfig[];
   scrollRef?: React.RefObject<HTMLDivElement | null>;
-  expandAllGroups?: boolean;
+  autoExpandGroupsKey?: string;
 }
 
 interface TreeNodeProps {
@@ -723,7 +723,7 @@ export const HostTreeView: React.FC<HostTreeViewProps> = ({
   setDragOverDropTarget,
   groupConfigs = [],
   scrollRef,
-  expandAllGroups = false,
+  autoExpandGroupsKey,
 }) => {
   const { t } = useI18n();
   const treeSortMode = sortMode as HostTreeSortMode;
@@ -765,11 +765,18 @@ export const HostTreeView: React.FC<HostTreeViewProps> = ({
   };
 
   const allGroupPaths = useMemo(() => getAllGroupPaths(groupTree), [groupTree]);
-  const expandedPaths = useMemo(() => (
-    expandAllGroups
-      ? new Set(allGroupPaths)
-      : externalExpandedPaths || localTreeState.expandedPaths
-  ), [allGroupPaths, expandAllGroups, externalExpandedPaths, localTreeState.expandedPaths]);
+  const expandedPaths = externalExpandedPaths || localTreeState.expandedPaths;
+  const lastAutoExpandGroupsKeyRef = useRef<string | undefined>(undefined);
+
+  useEffect(() => {
+    if (!autoExpandGroupsKey) {
+      lastAutoExpandGroupsKeyRef.current = undefined;
+      return;
+    }
+    if (lastAutoExpandGroupsKeyRef.current === autoExpandGroupsKey) return;
+    lastAutoExpandGroupsKeyRef.current = autoExpandGroupsKey;
+    expandAll(allGroupPaths);
+  }, [allGroupPaths, autoExpandGroupsKey, expandAll]);
 
   const groupDefaultsByPath = useMemo(() => {
     const paths = new Set<string>(allGroupPaths as string[]);

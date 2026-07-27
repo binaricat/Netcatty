@@ -294,6 +294,41 @@ test("HostTreeView flattens only expanded group descendants", () => {
   );
 });
 
+test("HostTreeView keeps an explicit collapsed state after search auto-expands groups", () => {
+  installLocalStorageMock();
+  const childHost = { ...baseHost, id: "child-host", group: "production" };
+  const markup = renderToStaticMarkup(
+    <HostTreeView
+      groupTree={[{
+        name: "Production",
+        path: "production",
+        children: {},
+        hosts: [childHost],
+      }]}
+      hosts={[childHost]}
+      expandedPaths={new Set()}
+      autoExpandGroupsKey="router"
+      onTogglePath={() => undefined}
+      onExpandAll={() => undefined}
+      onCollapseAll={() => undefined}
+      onConnect={() => undefined}
+      onEditHost={() => undefined}
+      onDuplicateHost={() => undefined}
+      onDeleteHost={() => undefined}
+      onCopyCredentials={() => undefined}
+      onNewGroup={() => undefined}
+      onRenameGroup={() => undefined}
+      onEditGroup={() => undefined}
+      onDeleteGroup={() => undefined}
+      moveHostToGroup={() => undefined}
+      moveGroup={() => undefined}
+    />,
+  );
+
+  assert.match(markup, /data-group-path="production"[^>]*aria-expanded="false"/);
+  assert.doesNotMatch(markup, /data-host-id="child-host"/);
+});
+
 test("HostTreeView virtualizes an 8,000-host tree", () => {
   installLocalStorageMock();
   const hosts = Array.from({ length: 8000 }, (_, index) => ({
