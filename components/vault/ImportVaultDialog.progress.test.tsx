@@ -189,6 +189,7 @@ test("import format step keeps destination settings off the main card grid", asy
   assert.match(source, /data-import-destination-settings="true"/);
   assert.match(source, /data-import-securecrt-prompt="true"/);
   assert.match(source, /step === "destination"/);
+  assert.match(source, /FolderTree/);
   assert.doesNotMatch(
     source,
     /data-import-format=\{opt\.format\}[\s\S]*securecrt\.directoryHint/,

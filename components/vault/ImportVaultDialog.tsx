@@ -5,6 +5,8 @@ import {
   FileSymlink,
   FileText,
   FolderOpen,
+  FolderPlus,
+  FolderTree,
   Import,
   LoaderCircle,
   Plug,
@@ -132,7 +134,14 @@ export function VaultImportDestinationControls({
   onNewGroupChange: (group: string) => void;
   t: Translate;
 }) {
-  const choices: VaultImportDestinationMode[] = ["preserve", "existing", "new"];
+  const choices: Array<{
+    mode: VaultImportDestinationMode;
+    icon: React.ReactNode;
+  }> = [
+    { mode: "preserve", icon: <FolderTree className="h-4 w-4" /> },
+    { mode: "existing", icon: <FolderOpen className="h-4 w-4" /> },
+    { mode: "new", icon: <FolderPlus className="h-4 w-4" /> },
+  ];
   const existingGroupListId = React.useId();
   const matchingGroups = useMemo(() => {
     const query = existingGroupQuery.trim().toLocaleLowerCase();
@@ -145,19 +154,27 @@ export function VaultImportDestinationControls({
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
         {choices.map((choice) => (
           <button
-            key={choice}
+            key={choice.mode}
             type="button"
-            data-import-destination-mode={choice}
-            aria-pressed={mode === choice}
-            onClick={() => onModeChange(choice)}
+            data-import-destination-mode={choice.mode}
+            aria-pressed={mode === choice.mode}
+            onClick={() => onModeChange(choice.mode)}
             className={cn(
-              "rounded-lg border px-3 py-2.5 text-sm transition-colors",
-              mode === choice
+              "inline-flex items-center justify-center gap-2 rounded-lg border px-3 py-2.5 text-sm transition-colors",
+              mode === choice.mode
                 ? "border-primary bg-primary/10 text-foreground"
                 : "border-border/60 bg-background text-muted-foreground hover:text-foreground",
             )}
           >
-            {t(`vault.import.destination.${choice}`)}
+            <span
+              className={cn(
+                "shrink-0",
+                mode === choice.mode ? "text-primary" : "text-muted-foreground",
+              )}
+            >
+              {choice.icon}
+            </span>
+            {t(`vault.import.destination.${choice.mode}`)}
           </button>
         ))}
       </div>
@@ -559,7 +576,15 @@ export const ImportVaultDialog: React.FC<ImportVaultDialogProps> = ({
       <DialogContent className="max-h-[calc(100vh-2rem)] max-w-2xl overflow-y-auto">
           <>
             <DialogHeader className="text-center sm:text-center">
-              {step !== "destination" && (
+              {step === "destination" ? (
+                <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl border border-border/60 bg-muted/60 text-muted-foreground">
+                  <FolderTree className="h-6 w-6" />
+                </div>
+              ) : step === "securecrt-source" ? (
+                <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl border border-border/60 bg-muted/60 text-muted-foreground">
+                  <FolderOpen className="h-6 w-6" />
+                </div>
+              ) : (
                 <div className="mx-auto h-14 w-14 rounded-2xl bg-muted/60 border border-border/60 flex items-center justify-center">
                   <img
                     src="/import/file.png"
@@ -568,22 +593,20 @@ export const ImportVaultDialog: React.FC<ImportVaultDialogProps> = ({
                   />
                 </div>
               )}
-              <DialogTitle className={step === "destination" ? "text-lg" : "text-xl"}>
+              <DialogTitle className={step === "destination" || step === "securecrt-source" ? "text-lg" : "text-xl"}>
                 {step === "securecrt-source"
                   ? t("vault.import.securecrt.promptTitle")
                   : step === "destination"
                     ? t("vault.import.destination.settings")
                     : t("vault.import.title")}
               </DialogTitle>
-              {step !== "destination" && (
+              {step !== "destination" && step !== "securecrt-source" && (
                 <DialogDescription className="mx-auto max-w-xl">
                   {step === "ssh-mode"
                     ? t("vault.import.sshConfig.chooseMode")
                     : step === "moba-encoding"
                       ? t("vault.import.mobaxterm.chooseEncoding")
-                      : step === "securecrt-source"
-                        ? t("vault.import.securecrt.promptDesc")
-                        : t("vault.import.desc")}
+                      : t("vault.import.desc")}
                 </DialogDescription>
               )}
             </DialogHeader>
@@ -834,31 +857,25 @@ export const ImportVaultDialog: React.FC<ImportVaultDialogProps> = ({
               ) : step === "securecrt-source" ? (
                 <>
                   <div
-                    className="rounded-xl border border-border/60 bg-muted/20 px-4 py-3 text-sm text-muted-foreground"
+                    className="grid grid-cols-2 gap-3"
                     data-import-securecrt-prompt="true"
                   >
-                    {t("vault.import.securecrt.directoryHint")}
-                  </div>
-                  <div className="text-sm font-medium text-center text-muted-foreground">
-                    {t("vault.import.securecrt.sourceQuestion")}
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
                     <button
                       type="button"
                       className={cn(
                         "group rounded-2xl border border-primary/60 bg-primary/5",
-                        "px-4 py-6 hover:bg-primary/10 hover:border-primary transition-colors",
-                        "flex flex-col items-center gap-3",
+                        "px-3 py-5 hover:bg-primary/10 hover:border-primary transition-colors",
+                        "flex flex-col items-center gap-2.5",
                       )}
                       onClick={() => handleSecureCrtChoice("folder")}
                     >
-                      <div className="h-12 w-12 rounded-xl bg-primary/10 flex items-center justify-center">
-                        <FolderOpen className="h-6 w-6 text-primary" />
+                      <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10">
+                        <FolderOpen className="h-5 w-5 text-primary" />
                       </div>
                       <div className="text-sm font-medium text-foreground">
                         {t("vault.import.securecrt.folder")}
                       </div>
-                      <div className="text-xs text-muted-foreground text-center">
+                      <div className="text-xs leading-4 text-muted-foreground text-center">
                         {t("vault.import.securecrt.folderDesc")}
                       </div>
                     </button>
@@ -866,18 +883,18 @@ export const ImportVaultDialog: React.FC<ImportVaultDialogProps> = ({
                       type="button"
                       className={cn(
                         "group rounded-2xl border border-border/60 bg-background",
-                        "px-4 py-6 hover:bg-muted/30 hover:border-border transition-colors",
-                        "flex flex-col items-center gap-3",
+                        "px-3 py-5 hover:bg-muted/30 hover:border-border transition-colors",
+                        "flex flex-col items-center gap-2.5",
                       )}
                       onClick={() => handleSecureCrtChoice("file")}
                     >
-                      <div className="h-12 w-12 rounded-xl bg-muted/60 flex items-center justify-center">
-                        <FileText className="h-6 w-6 text-muted-foreground" />
+                      <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-muted/60">
+                        <FileText className="h-5 w-5 text-muted-foreground" />
                       </div>
                       <div className="text-sm font-medium text-foreground">
                         {t("vault.import.securecrt.file")}
                       </div>
-                      <div className="text-xs text-muted-foreground text-center">
+                      <div className="text-xs leading-4 text-muted-foreground text-center">
                         {t("vault.import.securecrt.fileDesc")}
                       </div>
                     </button>
