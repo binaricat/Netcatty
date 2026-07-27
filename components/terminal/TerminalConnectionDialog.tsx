@@ -129,6 +129,9 @@ export const TerminalConnectionDialog: React.FC<TerminalConnectionDialogProps> =
         && onRetry,
     );
     const dialogFocusRef = useRef<HTMLDivElement | null>(null);
+    // Unmount cleanup keeps [] deps; read the latest pane ownership then.
+    const isFocusedPaneRef = useRef(isFocusedPane);
+    isFocusedPaneRef.current = isFocusedPane;
 
     // Claim focus only when Enter-reconnect mode turns on — not on every
     // showLogs/error rerender (those would steal keyboard focus off buttons).
@@ -180,6 +183,7 @@ export const TerminalConnectionDialog: React.FC<TerminalConnectionDialogProps> =
                 sessionRoot,
                 documentBody: document.body,
                 documentElement: document.documentElement,
+                isFocusedPane: isFocusedPaneRef.current,
             });
         };
     }, []);

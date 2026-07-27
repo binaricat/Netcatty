@@ -391,30 +391,41 @@ export function shouldRestoreDisconnectedDialogTerminalFocus(
   return !dialogNode.isConnected;
 }
 
-/** After the overlay unmounts, return focus to this session's xterm if we still own it. */
+/**
+ * After the overlay unmounts, return focus to this session's xterm if we still own it.
+ *
+ * Body/html focus after unmount is treated as ownership only when this pane may
+ * own keyboard focus (`isFocusedPane !== false`). Unfocused split siblings must
+ * not redirect input after a background reconnect completes.
+ * If the dialog node still holds focus, restore regardless of the pane flag.
+ */
 export function restoreTerminalFocusFromDisconnectedDialog({
   activeElement,
   dialogNode,
   sessionRoot,
   documentBody,
   documentElement,
+  isFocusedPane,
 }: {
   activeElement: Element | null;
   dialogNode: HTMLElement | null;
   sessionRoot: Element | null;
   documentBody?: Element | null;
   documentElement?: Element | null;
+  isFocusedPane?: boolean;
 }): boolean {
   if (!dialogNode) return false;
   // When React removes the focused overlay, the browser parks focus on body/html
-  // before passive-effect cleanup runs — treat that as still owning focus.
+  // before passive-effect cleanup runs — treat that as still owning focus only
+  // for the focused pane (or solo / popup where isFocusedPane is omitted).
   const focusLostToDocument =
     !activeElement
     || activeElement === documentBody
     || activeElement === documentElement;
-  if (
-    !focusLostToDocument
-    && activeElement !== dialogNode
+  if (focusLostToDocument) {
+    if (isFocusedPane === false) return false;
+  } else if (
+    activeElement !== dialogNode
     && !dialogNode.contains(activeElement)
   ) {
     return false;

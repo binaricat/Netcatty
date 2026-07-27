@@ -205,6 +205,8 @@ test("disconnected connection dialog keeps an Enter-reconnect focus sink", () =>
   // Split unfocused panes pass isFocusedPane so document blur cannot steal focus.
   assert.match(source, /isFocusedPane/);
   assert.match(source, /shouldClaimDisconnectedDialogFocus\(\{[\s\S]*isFocusedPane/);
+  // Unmount restore must also honor isFocusedPane when focus lands on body/html.
+  assert.match(source, /restoreTerminalFocusFromDisconnectedDialog\(\{[\s\S]*isFocusedPane/);
 });
 
 test("open terminal search does not globally gate enter reconnect", () => {

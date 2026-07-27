@@ -299,6 +299,42 @@ test("disconnected dialog focus claim never steals from other panes", () => {
       true,
     );
     assert.equal(popupTextarea.focusCalls, 2);
+
+    // Unfocused split sibling must not restore when browser parked focus on body.
+    assert.equal(
+      restoreTerminalFocusFromDisconnectedDialog({
+        activeElement: body as unknown as Element,
+        dialogNode: dialog as unknown as HTMLElement,
+        sessionRoot: session as unknown as Element,
+        documentBody: body as unknown as Element,
+        isFocusedPane: false,
+      }),
+      false,
+    );
+    assert.equal(textarea.focusCalls, 2);
+    assert.equal(
+      restoreTerminalFocusFromDisconnectedDialog({
+        activeElement: body as unknown as Element,
+        dialogNode: dialog as unknown as HTMLElement,
+        sessionRoot: session as unknown as Element,
+        documentBody: body as unknown as Element,
+        isFocusedPane: true,
+      }),
+      true,
+    );
+    assert.equal(textarea.focusCalls, 3);
+    // Dialog actually owned focus — restore even if pane focus flag flipped.
+    assert.equal(
+      restoreTerminalFocusFromDisconnectedDialog({
+        activeElement: dialog as unknown as Element,
+        dialogNode: dialog as unknown as HTMLElement,
+        sessionRoot: session as unknown as Element,
+        documentBody: body as unknown as Element,
+        isFocusedPane: false,
+      }),
+      true,
+    );
+    assert.equal(textarea.focusCalls, 4);
   } finally {
     globalThis.HTMLElement = previousHTMLElement;
   }
