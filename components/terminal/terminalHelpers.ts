@@ -275,6 +275,35 @@ export function shouldShowTerminalConnectionDialog({
     && !(status === "disconnected" && isDisconnectedDialogDismissed);
 }
 
+/**
+ * Dialog-local Enter reconnect while the disconnected overlay owns focus.
+ * Leave native activation to focused buttons/links (Retry / Close / logs).
+ */
+export function shouldReconnectDisconnectedDialogOnEnterKey({
+  key,
+  enabled,
+  altKey,
+  ctrlKey,
+  metaKey,
+  shiftKey,
+  isComposing,
+  target,
+}: {
+  key: string;
+  enabled: boolean;
+  altKey?: boolean;
+  ctrlKey?: boolean;
+  metaKey?: boolean;
+  shiftKey?: boolean;
+  isComposing?: boolean;
+  target?: EventTarget | null;
+}): boolean {
+  if (!enabled || key !== "Enter") return false;
+  if (altKey || ctrlKey || metaKey || shiftKey || isComposing) return false;
+  if (typeof HTMLElement === "undefined" || !(target instanceof HTMLElement)) return true;
+  return !target.closest("button, a, input, textarea, select, [contenteditable='true'], [role='button'], [role='menuitem'], [role='textbox']");
+}
+
 export function shouldDelayAutoRunSnippetInput(
   data: string,
   opts: { noAutoRun?: boolean; multiLineRunMode?: Snippet["multiLineRunMode"] },

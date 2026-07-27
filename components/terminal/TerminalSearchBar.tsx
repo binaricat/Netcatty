@@ -114,6 +114,7 @@ export const TerminalSearchBar: React.FC<TerminalSearchBarProps> = ({
                     onKeyDown={handleKeyDown}
                     onClick={(e) => e.stopPropagation()}
                     onMouseDown={(e) => e.stopPropagation()}
+                    data-terminal-search-input=""
                     placeholder={t("terminal.search.placeholder")}
                     className="w-full h-6 pl-7 pr-2 text-[11px] border-none rounded placeholder:opacity-40 focus:outline-none"
                     style={{

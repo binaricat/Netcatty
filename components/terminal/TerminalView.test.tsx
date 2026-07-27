@@ -76,7 +76,6 @@ test("disconnected terminal reconnects on plain Enter when input is not claimed 
       key: "Enter",
       status: "disconnected",
       hasRetryHandler: true,
-      isSearchOpen: false,
       isComposeBarOpen: false,
       needsAuth: false,
       needsHostKeyVerification: false,
@@ -91,7 +90,6 @@ test("terminal enter reconnect ignores active controls and non-disconnected stat
     key: "Enter",
     status: "disconnected" as const,
     hasRetryHandler: true,
-    isSearchOpen: false,
     isComposeBarOpen: false,
     needsAuth: false,
     needsHostKeyVerification: false,
@@ -101,7 +99,8 @@ test("terminal enter reconnect ignores active controls and non-disconnected stat
   assert.equal(shouldReconnectTerminalOnEnterKey({ ...base, status: "connected" }), false);
   assert.equal(shouldReconnectTerminalOnEnterKey({ ...base, key: "a" }), false);
   assert.equal(shouldReconnectTerminalOnEnterKey({ ...base, hasRetryHandler: false }), false);
-  assert.equal(shouldReconnectTerminalOnEnterKey({ ...base, isSearchOpen: true }), false);
+  // Open search must not globally suppress Enter reconnect / the hint (#2546).
+  assert.equal(shouldReconnectTerminalOnEnterKey({ ...base }), true);
   assert.equal(shouldReconnectTerminalOnEnterKey({ ...base, isComposeBarOpen: true }), false);
   assert.equal(shouldReconnectTerminalOnEnterKey({ ...base, needsAuth: true }), false);
   assert.equal(shouldReconnectTerminalOnEnterKey({ ...base, needsHostKeyVerification: true }), false);
@@ -128,6 +127,16 @@ test("terminal enter reconnect ignores interactive controls outside xterm only",
     shouldBlockTerminalReconnectForTarget({
       isWithinXterm: false,
       hasInteractiveAncestor: false,
+    }),
+    false,
+  );
+  // An open terminal search input is interactive, but disconnected Enter must
+  // still reconnect rather than find-next (#2546).
+  assert.equal(
+    shouldBlockTerminalReconnectForTarget({
+      isWithinXterm: false,
+      hasInteractiveAncestor: true,
+      isTerminalSearchInput: true,
     }),
     false,
   );

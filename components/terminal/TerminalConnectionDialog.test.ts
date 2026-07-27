@@ -116,6 +116,9 @@ test("shows enter reconnect hint when disconnected reconnect is available", () =
   });
 
   assert.match(markup, /Press Enter to reconnect/);
+  // Focus sink so Enter still reaches the overlay after body/document blur (#2544).
+  assert.match(markup, /data-terminal-disconnected-dialog="true"/);
+  assert.match(markup, /tabindex="-1"/);
 });
 
 test("does not show enter reconnect hint until the caller marks enter reconnect available", () => {
@@ -125,6 +128,7 @@ test("does not show enter reconnect hint until the caller marks enter reconnect 
   });
 
   assert.equal(markup.includes("Press Enter to reconnect"), false);
+  assert.equal(markup.includes("data-terminal-disconnected-dialog"), false);
 });
 
 test("renders changed host key warning in the same connection dialog", () => {

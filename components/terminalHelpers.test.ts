@@ -6,6 +6,7 @@ import {
   AUTO_RUN_SNIPPET_LINE_DELAY_MS,
   shouldHideConnectingDialogForConnectionReuse,
   shouldDelayAutoRunSnippetInput,
+  shouldReconnectDisconnectedDialogOnEnterKey,
   shouldShowTerminalConnectionDialog,
 } from "./terminal/terminalHelpers";
 
@@ -16,6 +17,73 @@ const host = (overrides: Partial<Host> = {}): Host => ({
   username: "alice",
   authMethod: "password",
   ...overrides,
+});
+
+test("disconnected dialog reconnects on plain Enter when no control owns focus", () => {
+  assert.equal(
+    shouldReconnectDisconnectedDialogOnEnterKey({
+      key: "Enter",
+      enabled: true,
+    }),
+    true,
+  );
+  assert.equal(
+    shouldReconnectDisconnectedDialogOnEnterKey({
+      key: "Enter",
+      enabled: false,
+    }),
+    false,
+  );
+  assert.equal(
+    shouldReconnectDisconnectedDialogOnEnterKey({
+      key: "a",
+      enabled: true,
+    }),
+    false,
+  );
+  assert.equal(
+    shouldReconnectDisconnectedDialogOnEnterKey({
+      key: "Enter",
+      enabled: true,
+      shiftKey: true,
+    }),
+    false,
+  );
+});
+
+test("disconnected dialog leaves Enter to focused buttons and inputs", () => {
+  class FakeElement {
+    constructor(private readonly selectorMatch: boolean) {}
+    closest(selector: string) {
+      void selector;
+      return this.selectorMatch ? this : null;
+    }
+  }
+  const previousHTMLElement = globalThis.HTMLElement;
+  // @ts-expect-error test double for DOM instanceof checks
+  globalThis.HTMLElement = FakeElement;
+  try {
+    const buttonLike = new FakeElement(true);
+    const plain = new FakeElement(false);
+    assert.equal(
+      shouldReconnectDisconnectedDialogOnEnterKey({
+        key: "Enter",
+        enabled: true,
+        target: buttonLike as unknown as EventTarget,
+      }),
+      false,
+    );
+    assert.equal(
+      shouldReconnectDisconnectedDialogOnEnterKey({
+        key: "Enter",
+        enabled: true,
+        target: plain as unknown as EventTarget,
+      }),
+      true,
+    );
+  } finally {
+    globalThis.HTMLElement = previousHTMLElement;
+  }
 });
 
 test("connection dialog is hidden while a reused SSH channel is opening", () => {

@@ -82,7 +82,6 @@ export function shouldReconnectTerminalOnEnterKey({
   key,
   status,
   hasRetryHandler,
-  isSearchOpen,
   isComposeBarOpen,
   needsAuth,
   needsHostKeyVerification,
@@ -96,7 +95,6 @@ export function shouldReconnectTerminalOnEnterKey({
   key: string;
   status?: string;
   hasRetryHandler: boolean;
-  isSearchOpen: boolean;
   isComposeBarOpen: boolean;
   needsAuth: boolean;
   needsHostKeyVerification: boolean;
@@ -107,10 +105,14 @@ export function shouldReconnectTerminalOnEnterKey({
   shiftKey?: boolean;
   isComposing?: boolean;
 }): boolean {
+  // Search-bar open state is intentionally not a global gate. While disconnected,
+  // find-next is less useful than reconnect; the capture handler still refuses
+  // Enter only when a real interactive control outside xterm owns the event
+  // (compose/auth/buttons). The terminal search input is allow-listed so an open
+  // search bar cannot hide the hint or swallow reconnect (#2544 / #2546).
   return key === "Enter"
     && status === "disconnected"
     && hasRetryHandler
-    && !isSearchOpen
     && !isComposeBarOpen
     && !needsAuth
     && !needsHostKeyVerification
@@ -125,10 +127,14 @@ export function shouldReconnectTerminalOnEnterKey({
 export function shouldBlockTerminalReconnectForTarget({
   isWithinXterm,
   hasInteractiveAncestor,
+  isTerminalSearchInput = false,
 }: {
   isWithinXterm: boolean;
   hasInteractiveAncestor: boolean;
+  /** Open search may keep focus; disconnected Enter reconnect must still win. */
+  isTerminalSearchInput?: boolean;
 }): boolean {
+  if (isTerminalSearchInput) return false;
   return !isWithinXterm && hasInteractiveAncestor;
 }
 
@@ -137,6 +143,7 @@ function isTerminalReconnectControlTarget(target: EventTarget | null): boolean {
   return shouldBlockTerminalReconnectForTarget({
     isWithinXterm: target.classList.contains("xterm-helper-textarea") || Boolean(target.closest(".xterm")),
     hasInteractiveAncestor: Boolean(target.closest("button, a, input, textarea, select, [contenteditable='true'], [role='button'], [role='menuitem'], [role='textbox']")),
+    isTerminalSearchInput: Boolean(target.closest("[data-terminal-search-input]")),
   });
 }
 
@@ -287,7 +294,6 @@ function TerminalViewInner({ ctx }: { ctx: TerminalViewContext }) {
     key: "Enter",
     status,
     hasRetryHandler: Boolean(handleRetry),
-    isSearchOpen,
     isComposeBarOpen,
     needsAuth: Boolean(auth.needsAuth),
     needsHostKeyVerification: Boolean(needsHostKeyVerification),
@@ -298,7 +304,6 @@ function TerminalViewInner({ ctx }: { ctx: TerminalViewContext }) {
       key: event.key,
       status,
       hasRetryHandler: Boolean(handleRetry),
-      isSearchOpen,
       isComposeBarOpen,
       needsAuth: Boolean(auth.needsAuth),
       needsHostKeyVerification: Boolean(needsHostKeyVerification),
@@ -322,7 +327,6 @@ function TerminalViewInner({ ctx }: { ctx: TerminalViewContext }) {
     handleRetry,
     hasBlockingReconnectOverlay,
     isComposeBarOpen,
-    isSearchOpen,
     needsHostKeyVerification,
     status,
   ]);

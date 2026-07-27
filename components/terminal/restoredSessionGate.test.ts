@@ -176,6 +176,27 @@ test("dismissing the disconnected dialog returns focus to the terminal for enter
   );
 });
 
+test("disconnected connection dialog keeps an Enter-reconnect focus sink", () => {
+  const source = readFileSync(new URL("./TerminalConnectionDialog.tsx", import.meta.url), "utf8");
+  assert.match(source, /canEnterReconnectFromDialog/);
+  assert.match(source, /data-terminal-disconnected-dialog/);
+  assert.match(source, /shouldReconnectDisconnectedDialogOnEnterKey/);
+  assert.match(source, /dialogFocusRef\.current\?\.focus/);
+});
+
+test("open terminal search does not globally gate enter reconnect", () => {
+  const viewSource = readFileSync(new URL("./TerminalView.tsx", import.meta.url), "utf8");
+  const gateIndex = viewSource.indexOf("export function shouldReconnectTerminalOnEnterKey");
+  const bodyEnd = viewSource.indexOf("export function shouldBlockTerminalReconnectForTarget", gateIndex);
+  const gateBody = viewSource.slice(gateIndex, bodyEnd);
+  assert.equal(gateBody.includes("!isSearchOpen"), false);
+  assert.match(viewSource, /isTerminalSearchInput/);
+  assert.match(
+    readFileSync(new URL("./TerminalSearchBar.tsx", import.meta.url), "utf8"),
+    /data-terminal-search-input/,
+  );
+});
+
 test("terminal view receives the effective compose bar state for enter reconnect gating", () => {
   const source = readFileSync(new URL("../Terminal.tsx", import.meta.url), "utf8");
   const effectiveDefinitionIndex = source.indexOf("const effectiveComposeBarOpen =");
