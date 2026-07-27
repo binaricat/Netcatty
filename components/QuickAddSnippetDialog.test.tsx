@@ -24,18 +24,20 @@ test("quick add snippet event defaults to an empty command", () => {
   );
 });
 
-test("quick add snippet form binds shortkeys and uses a side panel drawer", () => {
-  assert.match(source, /AsidePanel/);
+test("quick add snippet form binds shortkeys and uses a centered Dialog modal", () => {
+  assert.match(source, /DialogContent/);
+  assert.match(source, /from '\.\/ui\/dialog'/);
+  assert.doesNotMatch(source, /AsidePanel/);
   assert.match(source, /snippets\.field\.shortkey/);
   assert.match(source, /keyEventToString/);
   assert.match(source, /shortkey: shortkey \|\| undefined/);
   assert.match(source, /if \(e\.defaultPrevented\) return/);
-  // Modal contract for hasOpenAppDialog / Cmd+W interception
-  assert.match(source, /role="dialog"/);
-  assert.match(source, /data-state="open"/);
-  assert.match(source, /data-dialog-close="true"/);
-  // Focus trap + restore opener focus
-  assert.match(source, /previouslyFocusedRef/);
-  assert.match(source, /listFocusable/);
-  assert.match(source, /focusin/);
+  // Escape while recording a shortkey cancels capture instead of closing
+  assert.match(source, /onEscapeKeyDown/);
+  assert.match(source, /isRecordingShortkey/);
+});
+
+test("shared Dialog exposes data-dialog-close for Cmd+W / hasOpenAppDialog", () => {
+  const dialogSource = readFileSync(new URL("./ui/dialog.tsx", import.meta.url), "utf8");
+  assert.match(dialogSource, /data-dialog-close="true"/);
 });

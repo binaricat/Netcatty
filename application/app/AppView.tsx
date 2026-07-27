@@ -559,7 +559,7 @@ export function AppView({ ctx }: { ctx: AppViewContext }) {
         />
       </div>
 
-      {/* Global "quick add / edit snippet" dialog, triggered by the
+      {/* Global "quick add / edit snippet" modal, triggered by the
           netcatty:snippets:add and :edit window events (from ScriptsSidePanel
           "+" button and right-click menu). Delete is handled by a sibling
           useEffect above — it does not need a dialog. */}
