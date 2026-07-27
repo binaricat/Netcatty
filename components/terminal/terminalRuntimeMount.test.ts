@@ -209,3 +209,18 @@ test('normal boot and hibernate wake share the refresh-capable runtime cwd handl
     /onPluginRuntimeCwdChange\(cwd, \{ source: 'osc7' \}\);/,
   );
 });
+
+test('normal boot and hibernate wake share terminal link error feedback', () => {
+  assert.match(
+    terminalSource,
+    /const onOpenExternalError = useCallback\([\s\S]*?toast\.error\(message\.body, message\.title\);/,
+  );
+  assert.match(
+    terminalSource,
+    /xTermRuntimeContextRef\.current = \{[\s\S]*?onOpenExternalError,/,
+  );
+  assert.match(
+    effectsSource,
+    /createXTermRuntime\(\{[\s\S]*?onOpenExternalError,/,
+  );
+});

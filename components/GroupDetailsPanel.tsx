@@ -958,6 +958,7 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelPropsWithResize> = ({
                 }));
               }}
               className="min-w-0 flex-1"
+              ariaLabel={t("vault.groups.details.fontFamily")}
             />
             {form.fontFamilyOverride && (
               <HostDetailsOverrideReset

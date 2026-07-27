@@ -35,6 +35,7 @@ const {
   createSessionTopTabDoubleClickHandler,
   formatSessionTopTabLabel,
   formatSessionTopTabTooltip,
+  resolveSessionTabCodingCliIconState,
   stopCloseButtonDoubleClickPropagation,
 } = await import("./top-tabs/TopTabItems.tsx");
 const { activeTabStore } = await import("../application/state/activeTabStore.ts");
@@ -202,6 +203,43 @@ test("SessionTabIcon checks custom host icon appearance before distro logos", ()
   assert.ok(
     topTabItemsSource.indexOf("resolveHostIconAppearance(host)") < topTabItemsSource.indexOf("getEffectiveHostDistro(host)"),
     "custom host icon should be checked before distro fallback",
+  );
+});
+
+test("disabling dynamic titles freezes a stored coding CLI icon and stops title fallback", () => {
+  assert.deepEqual(
+    resolveSessionTabCodingCliIconState({
+      codingCliProviderId: "claude",
+      dynamicTitle: "⠋ Reading files",
+    }, undefined, "off"),
+    {
+      provider: {
+        id: "claude",
+        label: "Claude Code",
+        command: "claude",
+        titleHints: ["claude code", "claude"],
+        iconKey: "claude",
+      },
+      activityPhase: "idle",
+    },
+  );
+  assert.equal(
+    resolveSessionTabCodingCliIconState({
+      dynamicTitle: "OpenAI Codex",
+    }, undefined, "off"),
+    null,
+  );
+  assert.equal(
+    resolveSessionTabCodingCliIconState({
+      startupCommand: "claude",
+    }, undefined, "off")?.provider.id,
+    "claude",
+  );
+  assert.equal(
+    resolveSessionTabCodingCliIconState({
+      dynamicTitle: "OpenAI Codex",
+    }, undefined, "agent")?.provider.id,
+    "codex",
   );
 });
 

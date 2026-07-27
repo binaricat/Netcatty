@@ -307,7 +307,7 @@ export const zhTWTerminalMessages: Messages = {
     '當指令輸出的最後一行未以換行符結束時，將識別到的 shell 提示字元移動到下一行顯示。',
   'settings.terminal.behavior.dynamicTabTitle': '動態標籤頁標題',
   'settings.terminal.behavior.dynamicTabTitle.desc':
-    '選擇標籤頁什麼時候跟隨 Shell 報告的視窗標題。',
+    '選擇標籤頁什麼時候跟隨 Shell 報告的視窗標題，並更新編程 CLI 圖示。關閉時也會停止即時圖示識別。',
   'settings.terminal.behavior.dynamicTabTitle.off': '關閉',
   'settings.terminal.behavior.dynamicTabTitle.agent': '僅 Agent',
   'settings.terminal.behavior.dynamicTabTitle.all': '全部工作階段',

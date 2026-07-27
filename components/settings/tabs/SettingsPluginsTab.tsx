@@ -180,6 +180,7 @@ export function PluginSettingField({
           disabled={saving}
           onChange={(next) => { setValue(next); void save(next); }}
           className="w-full max-w-xl"
+          ariaLabel={setting.label}
         />
       );
     }

@@ -11,12 +11,11 @@ import {
   shouldMarkSessionActivity,
 } from '../application/state/sessionActivity';
 import { sessionActivityStore } from '../application/state/sessionActivityStore';
-import { matchCodingCliProviderFromCommand } from '../domain/codingCliProviderMatch';
-import { createCodingCliOutputScanner, type CodingCliOutputScanner } from '../domain/codingCliOutputDetect';
-import type { CodingCliProviderId } from '../domain/codingCliProviders';
-import { inferCodingCliProviderFromTitleSignals, shouldClearCodingCliProviderForTitle } from '../domain/codingCliTitleParse';
 import { sessionCapabilitiesStore } from '../application/state/sessionCapabilitiesStore';
 import { useTerminalBackend } from '../application/state/useTerminalBackend';
+import {
+  useCodingCliSessionSignals,
+} from '../application/state/codingCliSessionSignalController';
 import { collectSessionIds } from '../domain/workspace';
 import { isPluginHostProtocol } from '../domain/pluginConnection';
 
@@ -301,99 +300,15 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     setTerminalCwdRevision(terminalCwdRevisionRef.current);
   }, [onUpdateSessionRestoreCwd]);
 
-  const codingCliOutputScannersRef = useRef<Map<string, CodingCliOutputScanner>>(new Map());
-  const codingCliOutputScanDisabledRef = useRef<Set<string>>(new Set());
-
-  const applySessionCodingCliProvider = useCallback((
-    sessionId: string,
-    providerId: CodingCliProviderId,
-  ) => {
-    const session = sessionsRef.current.find((candidate) => candidate.id === sessionId);
-    if (!session || session.codingCliProviderId === providerId) return;
-    onUpdateSessionCodingCliProvider?.(sessionId, providerId);
-  }, [onUpdateSessionCodingCliProvider]);
-
-  const applySessionCodingCliProviderFromCommand = useCallback((
-    sessionId: string,
-    commandLine: string,
-  ) => {
-    const provider = matchCodingCliProviderFromCommand(commandLine);
-    if (provider) {
-      codingCliOutputScannersRef.current.delete(sessionId);
-      codingCliOutputScanDisabledRef.current.delete(sessionId);
-      applySessionCodingCliProvider(sessionId, provider.id);
-    }
-  }, [applySessionCodingCliProvider]);
-
-  const handleTerminalTitleChange = useCallback((sessionId: string, title: string | null) => {
-    const session = sessionsRef.current.find((candidate) => candidate.id === sessionId);
-    if (!session) return;
-    const dynamicTabTitleMode = terminalSettings?.dynamicTabTitleMode ?? 'agent';
-
-    const trimmedTitle = title?.trim();
-    const providerId = trimmedTitle
-      ? inferCodingCliProviderFromTitleSignals(trimmedTitle)
-      : undefined;
-    const shouldStoreDynamicTitle =
-      dynamicTabTitleMode === 'all' ||
-      (
-        dynamicTabTitleMode === 'agent' &&
-        Boolean(session.codingCliProviderId || providerId)
-      );
-    onUpdateSessionDynamicTitle?.(sessionId, shouldStoreDynamicTitle ? title : null);
-
-    if (!trimmedTitle) {
-      if (session.codingCliProviderId) {
-        codingCliOutputScannersRef.current.delete(sessionId);
-        codingCliOutputScanDisabledRef.current.delete(sessionId);
-        onUpdateSessionCodingCliProvider?.(sessionId, null);
-      }
-      return;
-    }
-
-    if (providerId && dynamicTabTitleMode !== 'off') {
-      if (!session.codingCliProviderId || session.codingCliProviderId !== providerId) {
-        codingCliOutputScannersRef.current.delete(sessionId);
-        codingCliOutputScanDisabledRef.current.delete(sessionId);
-        applySessionCodingCliProvider(sessionId, providerId);
-      }
-      return;
-    }
-
-    if (
-      session.codingCliProviderId
-      && shouldClearCodingCliProviderForTitle(trimmedTitle, session.codingCliProviderId)
-    ) {
-      codingCliOutputScannersRef.current.delete(sessionId);
-      codingCliOutputScanDisabledRef.current.delete(sessionId);
-      onUpdateSessionCodingCliProvider?.(sessionId, null);
-    }
-  }, [applySessionCodingCliProvider, onUpdateSessionCodingCliProvider, onUpdateSessionDynamicTitle, terminalSettings?.dynamicTabTitleMode]);
-
-  const handleTerminalOutput = useCallback((sessionId: string, chunk: string) => {
-    if (!chunk || codingCliOutputScanDisabledRef.current.has(sessionId)) return;
-
-    const session = sessionsRef.current.find((candidate) => candidate.id === sessionId);
-    if (session?.codingCliProviderId) return;
-
-    let scanner = codingCliOutputScannersRef.current.get(sessionId);
-    if (!scanner) {
-      scanner = createCodingCliOutputScanner();
-      codingCliOutputScannersRef.current.set(sessionId, scanner);
-    }
-
-    const providerId = scanner.feed(chunk);
-    if (providerId) {
-      applySessionCodingCliProvider(sessionId, providerId);
-      return;
-    }
-
-    if (scanner.isExhausted()) {
-      codingCliOutputScannersRef.current.delete(sessionId);
-      codingCliOutputScanDisabledRef.current.delete(sessionId);
-      codingCliOutputScanDisabledRef.current.add(sessionId);
-    }
-  }, [applySessionCodingCliProvider]);
+  const codingCliSignalController = useCodingCliSessionSignals({
+    dynamicTabTitleMode: terminalSettings?.dynamicTabTitleMode ?? 'agent',
+    sessionIds: sessions.map((session) => session.id),
+    getSession: (sessionId) => sessionsRef.current.find((candidate) => candidate.id === sessionId),
+    onUpdateSessionCodingCliProvider,
+    onUpdateSessionDynamicTitle,
+  });
+  const handleTerminalTitleChange = codingCliSignalController.handleTerminalTitleChange;
+  const handleTerminalOutput = codingCliSignalController.handleTerminalOutput;
 
   const handleTerminalBell = useCallback((sessionId: string) => {
     const session = sessionsRef.current.find((candidate) => candidate.id === sessionId);
@@ -404,11 +319,10 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
 
   // Stable callback references for Terminal components
   const handleCloseSession = useCallback((sessionId: string) => {
-    codingCliOutputScannersRef.current.delete(sessionId);
-    codingCliOutputScanDisabledRef.current.delete(sessionId);
+    codingCliSignalController.forgetSession(sessionId);
     sessionCapabilitiesStore.delete(sessionId);
     onCloseSession(sessionId);
-  }, [onCloseSession]);
+  }, [codingCliSignalController, onCloseSession]);
 
   const sftpAutoOpenSidebarRef = useRef(sftpAutoOpenSidebar);
   sftpAutoOpenSidebarRef.current = sftpAutoOpenSidebar;
@@ -492,11 +406,11 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       terminalSettings?.autoCloseOnExit ?? true,
     );
     if (intent.kind === "closeSession") {
-      onCloseSession(sessionId);
+      handleCloseSession(sessionId);
     } else {
       onUpdateSessionStatus(sessionId, 'disconnected');
     }
-  }, [onCloseSession, onUpdateSessionStatus, terminalSettings?.autoCloseOnExit]);
+  }, [handleCloseSession, onUpdateSessionStatus, terminalSettings?.autoCloseOnExit]);
 
   const handleOsDetected = useCallback((hostId: string, distro: string) => {
     onUpdateHostDistro(hostId, distro);
@@ -987,7 +901,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   }, [terminalBackend]);
 
   const handleCommandSubmitted = useCallback((command: string, _hostId: string, _hostLabel: string, sessionId: string) => {
-    applySessionCodingCliProviderFromCommand(sessionId, command);
+    codingCliSignalController.handleCommandSubmitted(sessionId, command);
 
     const tabId = activeTabIdRef.current;
     const session = sessionsRef.current.find((candidate) => candidate.id === sessionId);
@@ -1033,7 +947,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       },
     });
     cwdProbeCancelersRef.current.set(sessionId, cancelProbe);
-  }, [applySessionCodingCliProviderFromCommand, handleTerminalCwdChange, restoreTerminalCwd, terminalBackend]);
+  }, [codingCliSignalController, handleTerminalCwdChange, restoreTerminalCwd, terminalBackend]);
 
   const handleCommandExecuted = useCallback((command: string, hostId: string, hostLabel: string, sessionId: string) => {
     onCommandExecuted?.(command, hostId, hostLabel, sessionId);

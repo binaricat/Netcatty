@@ -212,6 +212,7 @@ function SettingsAppearanceTab(props: {
             fonts={availableUIFonts}
             onChange={(v) => setUiFontFamilyId(v)}
             className="w-48"
+            ariaLabel={t("settings.appearance.uiFont")}
           />
         </SettingRow>
       </div>

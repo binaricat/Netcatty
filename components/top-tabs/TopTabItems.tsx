@@ -9,7 +9,8 @@ import { useI18n } from '../../application/i18n/I18nProvider';
 import { getEffectiveHostDistro } from '../../domain/host';
 import { resolveHostIconAppearance, resolveHostIconColorAppearance } from '../../domain/hostIcon';
 import { resolveSessionCodingCliProvider } from '../../domain/codingCliProviderMatch';
-import { resolveCodingCliActivityPhase } from '../../domain/codingCliTitleParse';
+import type { CodingCliProvider } from '../../domain/codingCliProviders';
+import { resolveCodingCliActivityPhase, type CodingCliActivityPhase } from '../../domain/codingCliTitleParse';
 import { resolveSessionTabTitle } from '../../domain/sessionTabTitle';
 import type { DynamicTabTitleMode } from '../../domain/models';
 import { CodingCliProviderIcon } from '../icons/CodingCliProviderIcon';
@@ -47,14 +48,15 @@ const SessionTabIcon: React.FC<{
   isActive: boolean;
   protocol?: string;
   shellIcon?: string;
-}> = memo(({ host, session, isActive, protocol, shellIcon }) => {
+  dynamicTabTitleMode?: DynamicTabTitleMode;
+}> = memo(({ host, session, isActive, protocol, shellIcon, dynamicTabTitleMode }) => {
   const boxBase = "shrink-0 h-4 w-4 rounded flex items-center justify-center";
   const iconSize = "h-2.5 w-2.5";
   const fallbackStyle = { color: isActive ? 'var(--top-tabs-accent, hsl(var(--accent)))' : 'var(--top-tabs-muted, hsl(var(--muted-foreground)))' };
 
-  const codingCliProvider = resolveSessionCodingCliProvider(session, host);
-  if (codingCliProvider) {
-    const activityPhase = resolveCodingCliActivityPhase(session.dynamicTitle, codingCliProvider.id);
+  const codingCliIconState = resolveSessionTabCodingCliIconState(session, host, dynamicTabTitleMode);
+  if (codingCliIconState) {
+    const { provider: codingCliProvider, activityPhase } = codingCliIconState;
     return (
       <CodingCliProviderIcon
         providerId={codingCliProvider.id}
@@ -147,6 +149,36 @@ const SessionTabIcon: React.FC<{
   return <TerminalSquare className={iconSize} style={fallbackStyle} />;
 });
 SessionTabIcon.displayName = 'SessionTabIcon';
+
+export function resolveSessionTabCodingCliIconState(
+  session: Pick<
+    TerminalSession,
+    | 'dynamicTitle'
+    | 'startupCommand'
+    | 'customName'
+    | 'hostLabel'
+    | 'localShell'
+    | 'localShellName'
+    | 'codingCliProviderId'
+  >,
+  host: Host | undefined,
+  dynamicTabTitleMode: DynamicTabTitleMode = 'agent',
+): { provider: CodingCliProvider; activityPhase: CodingCliActivityPhase } | null {
+  if (dynamicTabTitleMode === 'off') {
+    const provider = resolveSessionCodingCliProvider({
+      ...session,
+      dynamicTitle: undefined,
+    }, host);
+    return provider ? { provider, activityPhase: 'idle' } : null;
+  }
+
+  const provider = resolveSessionCodingCliProvider(session, host);
+  if (!provider) return null;
+  return {
+    provider,
+    activityPhase: resolveCodingCliActivityPhase(session.dynamicTitle, provider.id),
+  };
+}
 
 export const sessionStatusDot = (status: TerminalSession['status'], hasActivity: boolean) => {
   const tone = status === 'connected'
@@ -739,7 +771,14 @@ export const SessionTopTab: React.FC<SessionTopTabProps> = memo(({
         />
       )}
       <div className="flex items-center gap-2 min-w-0 flex-1">
-        <SessionTabIcon host={host} session={session} isActive={isActive} protocol={session.protocol} shellIcon={session.localShellIcon} />
+        <SessionTabIcon
+          host={host}
+          session={session}
+          isActive={isActive}
+          protocol={session.protocol}
+          shellIcon={session.localShellIcon}
+          dynamicTabTitleMode={dynamicTabTitleMode}
+        />
         <span className="truncate">{tabTitle}</span>
         <div className="flex-shrink-0">{sessionStatusDot(session.status, hasActivity)}</div>
       </div>

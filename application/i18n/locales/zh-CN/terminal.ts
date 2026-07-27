@@ -307,7 +307,7 @@ export const zhCNTerminalMessages: Messages = {
     '当命令输出的最后一行未以换行符结束时，将识别到的 shell 提示符移动到下一行显示。',
   'settings.terminal.behavior.dynamicTabTitle': '动态标签页标题',
   'settings.terminal.behavior.dynamicTabTitle.desc':
-    '选择标签页什么时候跟随 Shell 报告的窗口标题。',
+    '选择标签页什么时候跟随 Shell 报告的窗口标题，并更新编程 CLI 图标。关闭时也会停止实时图标识别。',
   'settings.terminal.behavior.dynamicTabTitle.off': '关闭',
   'settings.terminal.behavior.dynamicTabTitle.agent': '仅 Agent',
   'settings.terminal.behavior.dynamicTabTitle.all': '全部会话',

@@ -26,6 +26,9 @@ interface ComboboxProps {
     inputStyle?: React.CSSProperties;
     onInputValueChange?: (value: string) => void;
     disabled?: boolean;
+    clearable?: boolean;
+    selectValueOnFocus?: boolean;
+    ariaLabel?: string;
 }
 
 export const comboboxWheelDeltaToPixels = (deltaY: number, deltaMode: number): number => {
@@ -38,6 +41,21 @@ export type ComboboxScrollableTarget = {
     clientHeight: number;
     scrollHeight: number;
     scrollTop: number;
+}
+
+export const filterComboboxOptions = (
+    options: ComboboxOption[],
+    inputValue: string,
+    isSearching: boolean,
+): ComboboxOption[] => {
+    if (!isSearching || !inputValue.trim()) return options
+    const lower = inputValue.trim().toLowerCase()
+    return options.filter(
+        (option) =>
+            option.label.toLowerCase().includes(lower) ||
+            option.value.toLowerCase().includes(lower) ||
+            option.sublabel?.toLowerCase().includes(lower)
+    )
 }
 
 export const applyComboboxWheelScroll = (
@@ -62,6 +80,26 @@ export const getNextComboboxActiveIndex = (
     }
     return (currentIndex + direction + optionCount) % optionCount
 }
+
+export type ComboboxFocusableInput = Pick<HTMLInputElement, "focus" | "select">;
+
+export const focusComboboxInput = (
+    input: ComboboxFocusableInput | null,
+    selectValue: boolean,
+): void => {
+    input?.focus()
+    if (selectValue) input?.select()
+}
+
+export const selectComboboxInputIfFocused = (
+    input: ComboboxFocusableInput | null,
+    activeElement: Element | null,
+): void => {
+    if (input && input === activeElement) input.select()
+}
+
+export const canComboboxOpen = (disabled: boolean, nextOpen: boolean): boolean =>
+    !disabled || !nextOpen
 
 function ComboboxOptionsList({
     children,
@@ -108,6 +146,9 @@ export function Combobox({
     inputStyle,
     onInputValueChange,
     disabled = false,
+    clearable = true,
+    selectValueOnFocus = false,
+    ariaLabel,
 }: ComboboxProps) {
     const [open, setOpen] = React.useState(false)
     const [inputValue, setInputValue] = React.useState("")
@@ -115,28 +156,36 @@ export function Combobox({
     // Track if user is actively searching (typed something after opening)
     const [isSearching, setIsSearching] = React.useState(false)
     const inputRef = React.useRef<HTMLInputElement>(null)
+    const wasOpenRef = React.useRef(false)
     const activeOptionRef = React.useRef<HTMLButtonElement>(null)
     const listboxId = React.useId()
 
     // Sync input value with external value when not focused
     React.useEffect(() => {
+        const wasOpen = wasOpenRef.current
+        wasOpenRef.current = open
+
         if (!open) {
             const selected = options.find((opt) => opt.value === value)
             setInputValue(selected?.label || value || "")
             setIsSearching(false)
+
+            if (wasOpen && selectValueOnFocus) {
+                // The restored label lands after the close event. Reselect it on the next
+                // frame so the next keystroke replaces it instead of appending to it.
+                requestAnimationFrame(() => {
+                    selectComboboxInputIfFocused(
+                        inputRef.current,
+                        typeof document === "undefined" ? null : document.activeElement,
+                    )
+                })
+            }
         }
-    }, [value, options, open])
+    }, [value, options, open, selectValueOnFocus])
 
     // Show all options when dropdown is open but user hasn't started searching
     const filteredOptions = React.useMemo(() => {
-        if (!isSearching || !inputValue.trim()) return options
-        const lower = inputValue.toLowerCase()
-        return options.filter(
-            (opt) =>
-                opt.label.toLowerCase().includes(lower) ||
-                opt.value.toLowerCase().includes(lower) ||
-                opt.sublabel?.toLowerCase().includes(lower)
-        )
+        return filterComboboxOptions(options, inputValue, isSearching)
     }, [options, inputValue, isSearching])
 
     const showCreateOption = React.useMemo(() => {
@@ -152,22 +201,41 @@ export function Combobox({
         activeOptionRef.current?.scrollIntoView({ block: 'nearest' })
     }, [activeIndex])
 
+    React.useEffect(() => {
+        if (!disabled || !open) return
+        setOpen(false)
+        setActiveIndex(-1)
+        setIsSearching(false)
+        onInputValueChange?.(value ?? "")
+    }, [disabled, open, onInputValueChange, value])
+
     const handleSelect = (optValue: string) => {
+        if (disabled) return
         onValueChange?.(optValue)
         onInputValueChange?.(optValue)
         setOpen(false)
+        setActiveIndex(-1)
         const selected = options.find((opt) => opt.value === optValue)
         setInputValue(selected?.label || optValue)
     }
 
     const handleCreate = () => {
+        if (disabled) return
         const newValue = inputValue.trim()
         if (newValue) {
             onCreateNew?.(newValue)
             onValueChange?.(newValue)
             onInputValueChange?.(newValue)
             setOpen(false)
+            setActiveIndex(-1)
         }
+    }
+
+    const focusAndSelectInput = () => {
+        // Defer so selection wins over click-to-place-caret on focus.
+        requestAnimationFrame(() => {
+            focusComboboxInput(inputRef.current, true)
+        })
     }
 
     const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -178,10 +246,22 @@ export function Combobox({
         if (!open) setOpen(true)
     }
 
+    const handleInputFocus = () => {
+        if (selectValueOnFocus) focusAndSelectInput()
+    }
+
     const handleOpenChange = (nextOpen: boolean) => {
+        if (!canComboboxOpen(disabled, nextOpen)) return
         setOpen(nextOpen)
         setActiveIndex(-1)
-        if (!nextOpen) onInputValueChange?.(value ?? "")
+        if (nextOpen) {
+            if (selectValueOnFocus) {
+                // Opening a closed picker from its chevron should also replace on first keystroke.
+                focusAndSelectInput()
+            }
+        } else {
+            onInputValueChange?.(value ?? "")
+        }
     }
 
     const handleInputKeyDown = (e: React.KeyboardEvent) => {
@@ -213,6 +293,7 @@ export function Combobox({
     }
 
     const handleClear = (e: React.MouseEvent) => {
+        if (disabled) return
         e.stopPropagation()
         setInputValue("")
         onInputValueChange?.("")
@@ -221,13 +302,15 @@ export function Combobox({
     }
 
     return (
-        <Popover open={open} onOpenChange={handleOpenChange}>
+        <Popover open={open && !disabled} onOpenChange={handleOpenChange}>
             <PopoverTrigger asChild disabled={disabled}>
                 <div
+                    aria-disabled={disabled}
                     className={cn(
                         "flex h-10 w-full items-center rounded-md border border-input bg-background text-sm min-w-0 overflow-hidden",
                         "hover:bg-secondary/50 transition-colors",
-                        "disabled:cursor-not-allowed disabled:opacity-50",
+                        "focus-within:outline-none focus-within:ring-1 focus-within:ring-ring",
+                        disabled && "cursor-not-allowed opacity-50 hover:bg-background",
                         triggerClassName
                     )}
                 >
@@ -237,20 +320,24 @@ export function Combobox({
                         type="text"
                         value={inputValue}
                         onChange={handleInputChange}
+                        onFocus={handleInputFocus}
                         onKeyDown={handleInputKeyDown}
                         role="combobox"
+                        aria-label={ariaLabel}
                         aria-autocomplete="list"
-                        aria-expanded={open}
+                        aria-expanded={open && !disabled}
                         aria-controls={listboxId}
                         aria-activedescendant={
-                            hasActiveOption ? `${listboxId}-option-${activeIndex}` : undefined
+                            open && !disabled && hasActiveOption
+                                ? `${listboxId}-option-${activeIndex}`
+                                : undefined
                         }
                         placeholder={placeholder}
                         style={inputStyle}
                         className="flex-1 min-w-0 h-full px-3 bg-transparent outline-none placeholder:text-muted-foreground"
                         disabled={disabled}
                     />
-                    {inputValue && (
+                    {clearable && !disabled && inputValue && (
                         <button
                             type="button"
                             onClick={handleClear}

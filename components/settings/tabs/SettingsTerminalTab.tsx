@@ -514,6 +514,7 @@ function SettingsTerminalTab(props: {
             fonts={availableFonts}
             onChange={(id) => setTerminalFontFamilyId(id)}
             className="w-48"
+            ariaLabel={t("settings.terminal.font.family")}
           />
         </SettingRow>
 

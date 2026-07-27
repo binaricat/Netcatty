@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   getSessionConnectionLabel,
+  resolveCodingCliProviderIconUpdate,
   resolveSessionTabTitle,
+  shouldUpdateCodingCliTabIcon,
 } from './sessionTabTitle';
 
 test('getSessionConnectionLabel prefers customName over hostLabel', () => {
@@ -77,4 +79,26 @@ test('resolveSessionTabTitle strips agent spinner prefixes from dynamic titles',
     ),
     'Droid',
   );
+});
+
+test('coding CLI icon updates stop without clearing the current icon when dynamic titles are off', () => {
+  assert.equal(shouldUpdateCodingCliTabIcon('off'), false);
+  assert.equal(shouldUpdateCodingCliTabIcon('agent'), true);
+  assert.equal(shouldUpdateCodingCliTabIcon('all'), true);
+
+  assert.equal(resolveCodingCliProviderIconUpdate({
+    dynamicTabTitleMode: 'off',
+    currentProviderId: 'claude',
+    nextProviderId: null,
+  }), undefined);
+  assert.equal(resolveCodingCliProviderIconUpdate({
+    dynamicTabTitleMode: 'off',
+    currentProviderId: 'claude',
+    nextProviderId: 'opencode',
+  }), undefined);
+  assert.equal(resolveCodingCliProviderIconUpdate({
+    dynamicTabTitleMode: 'agent',
+    currentProviderId: 'claude',
+    nextProviderId: null,
+  }), null);
 });

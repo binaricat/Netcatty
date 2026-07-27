@@ -568,7 +568,7 @@ Highlight the focused split pane:
     'When the final line of command output is not terminated by a newline, move the recognized shell prompt to the next visual line.',
   'settings.terminal.behavior.dynamicTabTitle': 'Dynamic tab title',
   'settings.terminal.behavior.dynamicTabTitle.desc':
-    'Choose when session tabs should follow shell-reported window titles.',
+    'Choose when session tabs should follow shell-reported window titles and update coding-CLI icons. Disabled also stops live icon detection.',
   'settings.terminal.behavior.dynamicTabTitle.off': 'Disabled',
   'settings.terminal.behavior.dynamicTabTitle.agent': 'Agents only',
   'settings.terminal.behavior.dynamicTabTitle.all': 'All sessions',
