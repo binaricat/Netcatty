@@ -509,6 +509,9 @@ const HostTreeItem: React.FC<HostTreeItemProps> = ({
           data-section="host-tree-row"
           data-row-type="host"
           data-host-id={host.id}
+          role={isMultiSelectMode ? "checkbox" : "button"}
+          aria-checked={isMultiSelectMode ? isMultiSelected : undefined}
+          tabIndex={0}
           draggable={!isMultiSelectMode}
           onDragStart={(e) => e.dataTransfer.setData("host-id", host.id)}
           onClick={() => {
@@ -528,11 +531,30 @@ const HostTreeItem: React.FC<HostTreeItemProps> = ({
             }
             onConnect(safeHost);
           }}
-          leading={isMultiSelectMode ? (
-            <div className="mr-2 flex h-5 w-4 flex-shrink-0 items-center justify-center" onClick={(e) => {
-              e.stopPropagation();
+          onKeyDown={(event) => {
+            if (event.key !== 'Enter' && event.key !== ' ') return;
+            event.preventDefault();
+            const action = resolveHostActivateAction({
+              behavior: hostClickBehavior,
+              isMultiSelectMode: Boolean(isMultiSelectMode),
+              focusedHostId,
+              hostId: host.id,
+            });
+            if (action === 'toggle-multi') {
               toggleHostSelection?.(host.id);
-            }}>
+              return;
+            }
+            if (action === 'select') {
+              onFocusHost?.(host.id);
+              return;
+            }
+            onConnect(safeHost);
+          }}
+          leading={isMultiSelectMode ? (
+            <div
+              className="mr-2 flex h-5 w-4 flex-shrink-0 items-center justify-center"
+              aria-hidden="true"
+            >
               {isMultiSelected ? (
                 <CheckSquare size={15} className="text-primary" />
               ) : (

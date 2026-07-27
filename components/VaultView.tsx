@@ -240,7 +240,9 @@ interface VaultViewProps {
   onUpdateSnippetPackages: (pkgs: string[]) => void;
   onUpdateNotes: (notes: VaultNote[]) => void;
   onUpdateNoteGroups: (groups: string[]) => void;
-  onUpdateCustomGroups: (groups: string[]) => void;
+  onUpdateCustomGroups: (
+    groups: string[] | ((current: string[]) => string[]),
+  ) => void;
   onCommitPluginImporterData: (data: {
     hosts: Host[];
     keys: SSHKey[];

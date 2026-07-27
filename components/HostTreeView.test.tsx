@@ -190,3 +190,32 @@ test("HostTreeView shows selected groups in multi-select mode", () => {
   assert.doesNotMatch(markup, /aria-expanded=/);
   assert.doesNotMatch(markup, /data-host-tree-group-edit-button="production"/);
 });
+
+test("HostTreeView exposes selected hosts to keyboard and assistive technology", () => {
+  installLocalStorageMock();
+
+  const markup = renderToStaticMarkup(
+    <HostTreeView
+      groupTree={[]}
+      hosts={[baseHost]}
+      onConnect={() => undefined}
+      onEditHost={() => undefined}
+      onDuplicateHost={() => undefined}
+      onDeleteHost={() => undefined}
+      onCopyCredentials={() => undefined}
+      onNewGroup={() => undefined}
+      onRenameGroup={() => undefined}
+      onEditGroup={() => undefined}
+      onDeleteGroup={() => undefined}
+      moveHostToGroup={() => undefined}
+      moveGroup={() => undefined}
+      isMultiSelectMode
+      selectedHostIds={new Set([baseHost.id])}
+      toggleHostSelection={() => undefined}
+    />,
+  );
+
+  assert.match(markup, /data-host-id="host-1"[^>]*role="checkbox"/);
+  assert.match(markup, /data-host-id="host-1"[^>]*aria-checked="true"/);
+  assert.match(markup, /data-host-id="host-1"[^>]*tabindex="0"/);
+});

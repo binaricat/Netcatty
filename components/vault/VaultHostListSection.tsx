@@ -383,11 +383,21 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
                                   )}
                                   data-host-id={host.id}
                                   data-vault-grid-item={`pinned:${host.id}`}
+                                  role={isMultiSelectMode ? "checkbox" : "button"}
+                                  aria-checked={isMultiSelectMode
+                                    ? selectedHostIds.has(host.id)
+                                    : undefined}
+                                  tabIndex={0}
                                   style={lastPinnedId === host.id ? { animation: "pop-in 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) both" } : undefined}
                                   onAnimationEnd={() => { if (lastPinnedId === host.id) setLastPinnedId(null); }}
                                   draggable={!isMultiSelectMode}
                                   onDragStart={(e) => handleHostDragStart(e, host.id)}
                                   onClick={() => {
+                                    activateHost(safeHost);
+                                  }}
+                                  onKeyDown={(event) => {
+                                    if (event.key !== "Enter" && event.key !== " ") return;
+                                    event.preventDefault();
                                     activateHost(safeHost);
                                   }}
                                 >
@@ -490,9 +500,19 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
                                   )}
                                   data-host-id={host.id}
                                   data-vault-grid-item={`recent:${host.id}`}
+                                  role={isMultiSelectMode ? "checkbox" : "button"}
+                                  aria-checked={isMultiSelectMode
+                                    ? selectedHostIds.has(host.id)
+                                    : undefined}
+                                  tabIndex={0}
                                   draggable={!isMultiSelectMode}
                                   onDragStart={(e) => handleHostDragStart(e, host.id)}
                                   onClick={() => {
+                                    activateHost(safeHost);
+                                  }}
+                                  onKeyDown={(event) => {
+                                    if (event.key !== "Enter" && event.key !== " ") return;
+                                    event.preventDefault();
                                     activateHost(safeHost);
                                   }}
                                 >
@@ -834,9 +854,19 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
                                         )}
                                         data-host-id={host.id}
                                         data-vault-grid-item={`grouped:${group.name || "__ungrouped__"}:${host.id}`}
-                                        draggable
+                                        role={isMultiSelectMode ? "checkbox" : "button"}
+                                        aria-checked={isMultiSelectMode
+                                          ? selectedHostIds.has(host.id)
+                                          : undefined}
+                                        tabIndex={0}
+                                        draggable={!isMultiSelectMode}
                                         onDragStart={(e) => handleHostDragStart(e, host.id)}
                                         onClick={() => {
+                                          activateHost(safeHost);
+                                        }}
+                                        onKeyDown={(event) => {
+                                          if (event.key !== "Enter" && event.key !== " ") return;
+                                          event.preventDefault();
                                           activateHost(safeHost);
                                         }}
                                       >
@@ -845,13 +875,7 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
                                         )}
                                         <div className="flex items-center gap-3 h-full">
                                           {isMultiSelectMode && (
-                                            <div
-                                              className="shrink-0"
-                                              onClick={(e) => {
-                                                e.stopPropagation();
-                                                toggleHostSelection(host.id);
-                                              }}
-                                            >
+                                            <div className="shrink-0" aria-hidden="true">
                                               {selectedHostIds.has(host.id) ? (
                                                 <CheckSquare size={18} className="text-primary" />
                                               ) : (
@@ -971,9 +995,19 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
                                   )}
                                   data-host-id={host.id}
                                   data-vault-grid-item={`main:${host.id}`}
-                                  draggable
+                                  role={isMultiSelectMode ? "checkbox" : "button"}
+                                  aria-checked={isMultiSelectMode
+                                    ? selectedHostIds.has(host.id)
+                                    : undefined}
+                                  tabIndex={0}
+                                  draggable={!isMultiSelectMode}
                                   onDragStart={(e) => handleHostDragStart(e, host.id)}
                                   onClick={() => {
+                                    activateHost(safeHost);
+                                  }}
+                                  onKeyDown={(event) => {
+                                    if (event.key !== "Enter" && event.key !== " ") return;
+                                    event.preventDefault();
                                     activateHost(safeHost);
                                   }}
                                 >
@@ -982,13 +1016,7 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
                                   )}
                                   <div className="flex items-center gap-3 h-full">
                                     {isMultiSelectMode && (
-                                      <div
-                                        className="shrink-0"
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          toggleHostSelection(host.id);
-                                        }}
-                                      >
+                                      <div className="shrink-0" aria-hidden="true">
                                         {selectedHostIds.has(host.id) ? (
                                           <CheckSquare size={18} className="text-primary" />
                                         ) : (

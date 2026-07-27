@@ -36,7 +36,9 @@ interface UseVaultImportHandlersOptions {
   hosts: Host[];
   keys: SSHKey[];
   managedSources: ManagedSource[];
-  onUpdateCustomGroups: (groups: string[]) => void;
+  onUpdateCustomGroups: (
+    groups: string[] | ((current: string[]) => string[]),
+  ) => void;
   onUpdateHosts: (hosts: Host[]) => VaultHostPersistenceResult | Promise<VaultHostPersistenceResult>;
   onUpdateKeys: (keys: SSHKey[]) => void;
   onUpdateManagedSources: (
@@ -405,13 +407,16 @@ export function useVaultImportHandlers({
               hostPersisted,
               t("vault.import.progress.persistFailed"),
               () => {
-                const committedGroups = mergeVaultImportedGroups({
-                  currentGroups: customGroupsRef.current,
-                  baselineGroups: currentCustomGroups,
-                  appliedGroups: nextGroups,
-                });
-                customGroupsRef.current = committedGroups;
                 startTransition(() => {
+                  onUpdateCustomGroups((latestPersistedGroups) => {
+                    const committedGroups = mergeVaultImportedGroups({
+                      currentGroups: latestPersistedGroups,
+                      baselineGroups: currentCustomGroups,
+                      appliedGroups: nextGroups,
+                    });
+                    customGroupsRef.current = committedGroups;
+                    return committedGroups;
+                  });
                   onUpdateManagedSources((latestPersistedSources) => {
                     const nextManagedSources = [
                       ...latestPersistedSources.filter((source) => source.id !== newSource.id),
@@ -420,7 +425,6 @@ export function useVaultImportHandlers({
                     managedSourcesRef.current = nextManagedSources;
                     return nextManagedSources;
                   });
-                  onUpdateCustomGroups(committedGroups);
                 });
               },
               rollbackPendingImport,
@@ -438,13 +442,17 @@ export function useVaultImportHandlers({
               hostPersisted,
               t("vault.import.progress.persistFailed"),
               () => {
-                const committedGroups = mergeVaultImportedGroups({
-                  currentGroups: customGroupsRef.current,
-                  baselineGroups: currentCustomGroups,
-                  appliedGroups: merged.customGroups,
+                startTransition(() => {
+                  onUpdateCustomGroups((latestPersistedGroups) => {
+                    const committedGroups = mergeVaultImportedGroups({
+                      currentGroups: latestPersistedGroups,
+                      baselineGroups: currentCustomGroups,
+                      appliedGroups: merged.customGroups,
+                    });
+                    customGroupsRef.current = committedGroups;
+                    return committedGroups;
+                  });
                 });
-                customGroupsRef.current = committedGroups;
-                startTransition(() => onUpdateCustomGroups(committedGroups));
               },
               rollbackPendingImport,
             );

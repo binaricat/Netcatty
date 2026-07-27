@@ -80,6 +80,7 @@ type RenderHostListOptions = {
   recentHosts?: Host[];
   showRecentHosts?: boolean;
   selectedGroupPaths?: Set<string>;
+  selectedHostIds?: Set<string>;
   sortMode?: string;
   treeViewGroupTree?: GroupNode[];
   treeViewHosts?: Host[];
@@ -97,6 +98,7 @@ const renderHostList = ({
   recentHosts = [],
   showRecentHosts = false,
   selectedGroupPaths = new Set<string>(),
+  selectedHostIds = new Set<string>(),
   sortMode = "az",
   treeViewGroupTree = [],
   treeViewHosts = [],
@@ -157,7 +159,7 @@ const renderHostList = ({
       sanitizeHost,
       selectedGroupPath: null,
       selectedGroupPaths,
-      selectedHostIds: new Set<string>(),
+      selectedHostIds,
       sessionCount: 0,
       setDeleteTargetPath: noop,
       setDragOverDropTarget: noop,
@@ -329,6 +331,38 @@ test("VaultHostListSection exposes selectable groups to keyboard and assistive t
   assert.match(markup, /data-group-path="production"[^>]*role="checkbox"/);
   assert.match(markup, /data-group-path="production"[^>]*aria-checked="true"/);
   assert.match(markup, /data-group-path="production"[^>]*tabindex="0"/);
+});
+
+test("VaultHostListSection exposes ungrouped hosts to keyboard and assistive technology", () => {
+  const markup = renderHostList({
+    viewMode: "list",
+    displayedGroups: [],
+    displayedHosts: [mainHost],
+    visibleDisplayedHosts: [mainHost],
+    isMultiSelectMode: true,
+    selectedHostIds: new Set([mainHost.id]),
+  });
+
+  assert.match(markup, /data-host-id="main-host"[^>]*role="checkbox"/);
+  assert.match(markup, /data-host-id="main-host"[^>]*aria-checked="true"/);
+  assert.match(markup, /data-host-id="main-host"[^>]*tabindex="0"/);
+});
+
+test("VaultHostListSection exposes grouped hosts to keyboard and assistive technology", () => {
+  const markup = renderHostList({
+    viewMode: "grid",
+    displayedGroups: [],
+    displayedHosts: [groupedHost],
+    groupedDisplayHosts: [{ name: "Production", hosts: [groupedHost] }],
+    visibleDisplayedHosts: [groupedHost],
+    isMultiSelectMode: true,
+    selectedHostIds: new Set([groupedHost.id]),
+    sortMode: "group",
+  });
+
+  assert.match(markup, /data-host-id="grouped-host"[^>]*role="checkbox"/);
+  assert.match(markup, /data-host-id="grouped-host"[^>]*aria-checked="true"/);
+  assert.match(markup, /data-host-id="grouped-host"[^>]*tabindex="0"/);
 });
 
 test("VaultHostListSection virtualizes large grid collections without hiding search results", () => {

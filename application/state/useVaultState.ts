@@ -225,7 +225,9 @@ export const useVaultState = () => {
   const [connectionLogs, setConnectionLogs] = useState<ConnectionLog[]>([]);
   const [managedSources, setManagedSources] = useState<ManagedSource[]>([]);
   const [groupConfigs, setGroupConfigs] = useState<GroupConfig[]>([]);
+  const customGroupsRef = useRef<string[]>([]);
   const managedSourcesRef = useRef<ManagedSource[]>([]);
+  customGroupsRef.current = customGroups;
   managedSourcesRef.current = managedSources;
 
   // Write-version counters prevent out-of-order async writes from overwriting
@@ -432,18 +434,27 @@ export const useVaultState = () => {
     localStorageAdapter.write(STORAGE_KEY_NOTE_GROUPS, cleaned);
   }, []);
 
-  const updateCustomGroups = useCallback((data: string[]) => {
+  const updateCustomGroups = useCallback((
+    data: string[] | ((current: string[]) => string[]),
+  ) => {
+    const next = typeof data === "function"
+      ? data(
+        localStorageAdapter.read<string[]>(STORAGE_KEY_GROUPS)
+          ?? customGroupsRef.current,
+      )
+      : data;
+    customGroupsRef.current = next;
     ++customGroupsWriteVersion.current;
-    setCustomGroups(data);
-    localStorageAdapter.write(STORAGE_KEY_GROUPS, data);
+    setCustomGroups(next);
+    localStorageAdapter.write(STORAGE_KEY_GROUPS, next);
 
     const groupOrderByPath = new Map<string, number>(
-      data.map((path, index) => [path, (index + 1) * 1000]),
+      next.map((path, index) => [path, (index + 1) * 1000]),
     );
     const existingConfigByPath = new Map<string, GroupConfig>(
       groupConfigs.map((config) => [config.path, config]),
     );
-    const orderedConfigs = data.map((path) => {
+    const orderedConfigs = next.map((path) => {
       const existing = existingConfigByPath.get(path);
       const base: GroupConfig = existing ? { ...existing } : { path };
       return sanitizeGroupConfig({
