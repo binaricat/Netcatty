@@ -4,14 +4,14 @@ type LockManagerLike = {
 
 const fallbackTails = new Map<string, Promise<void>>();
 
-export async function withVaultManagedImportLock<T>(
+export async function withVaultImportLock<T>(
   key: string,
   run: () => Promise<T>,
   lockManager: LockManagerLike | null | undefined = (
     typeof navigator === "undefined" ? undefined : navigator.locks
   ),
 ): Promise<T> {
-  const lockName = `netcatty:vault-managed-import:${key}`;
+  const lockName = `netcatty:vault-import:${key}`;
   if (lockManager) return lockManager.request(lockName, run);
 
   const previous = fallbackTails.get(lockName) ?? Promise.resolve();

@@ -1,22 +1,18 @@
 import { useCallback } from "react";
-import { sanitizeHost } from "../../domain/host";
 import {
-  applyPluginImporterDestination,
   buildPluginImporterSafePreview,
   mergePluginImporterDrafts,
   normalizePluginImporterRecords,
+  type PluginImporterDrafts,
 } from "../../domain/pluginImporter";
 import type { VaultImportDestination } from "../../domain/vaultImport";
 import type { Host, Identity, Snippet, SSHKey } from "../../types";
 
 type Translation = (key: string, params?: Record<string, unknown>) => string;
 
-type PluginImporterCommitData = {
-  keys: SSHKey[];
-  identities: Identity[];
-  hosts: Host[];
-  snippets: Snippet[];
-  customGroups: string[];
+export type PluginImporterCommitRequest = {
+  drafts: PluginImporterDrafts;
+  destination?: VaultImportDestination;
 };
 
 type PluginImporterCommitOptions = {
@@ -25,7 +21,7 @@ type PluginImporterCommitOptions = {
   keys: ReadonlyArray<SSHKey>;
   snippets: ReadonlyArray<Snippet>;
   customGroups: ReadonlyArray<string>;
-  onCommitPluginImporterData: (data: PluginImporterCommitData) => Promise<void> | void;
+  onCommitPluginImporterData: (request: PluginImporterCommitRequest) => Promise<number>;
   onCommitSuccess?: (addedCount: number) => void;
   t: Translation;
 };
@@ -58,25 +54,13 @@ export function usePluginImporterCommit({
     preview: NetcattyPluginImporterPreview,
     destination?: VaultImportDestination,
   ) => {
-    const { drafts, merged } = buildPluginImportMerge(preview);
+    const drafts = normalizePluginImporterRecords(preview.records);
     if (preview.result.errors > 0 || drafts.errors.length > 0) {
       throw new Error(drafts.errors[0] || t("vault.import.plugins.containsErrors"));
     }
-    const destinationApplied = applyPluginImporterDestination(
-      merged,
-      hosts.length,
-      destination,
-      customGroups,
-    );
-    await onCommitPluginImporterData({
-      keys: destinationApplied.keys,
-      identities: destinationApplied.identities,
-      hosts: destinationApplied.hosts.map(sanitizeHost),
-      snippets: destinationApplied.snippets,
-      customGroups: destinationApplied.customGroups,
-    });
-    onCommitSuccess?.(destinationApplied.addedCount);
-  }, [buildPluginImportMerge, customGroups, hosts.length, onCommitPluginImporterData, onCommitSuccess, t]);
+    const addedCount = await onCommitPluginImporterData({ drafts, destination });
+    onCommitSuccess?.(addedCount);
+  }, [onCommitPluginImporterData, onCommitSuccess, t]);
 
   const getPluginPreviewAnalysis = useCallback((preview: NetcattyPluginImporterPreview) => {
     const { drafts, merged } = buildPluginImportMerge(preview);

@@ -1,20 +1,20 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { withVaultManagedImportLock } from "./vaultManagedImportLock.ts";
+import { withVaultImportLock } from "./vaultManagedImportLock.ts";
 
-test("managed imports for the same source are serialized without Web Locks", async () => {
+test("Vault imports are serialized without Web Locks", async () => {
   const events: string[] = [];
   let releaseFirst!: () => void;
   const firstGate = new Promise<void>((resolve) => {
     releaseFirst = resolve;
   });
-  const first = withVaultManagedImportLock("shared", async () => {
+  const first = withVaultImportLock("shared", async () => {
     events.push("first:start");
     await firstGate;
     events.push("first:end");
   }, null);
-  const second = withVaultManagedImportLock("shared", async () => {
+  const second = withVaultImportLock("shared", async () => {
     events.push("second:start");
     events.push("second:end");
   }, null);

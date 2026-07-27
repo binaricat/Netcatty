@@ -117,7 +117,7 @@ export function AppView({ ctx }: { ctx: AppViewContext }) {
     sftpShowHiddenFiles, sftpUseCompressedUpload, shellHistory, snippetPackages, snippets, splitSessionWithCurrentShell, startSessionRename,
     startWorkspaceRename, submitSessionRename, submitWorkspaceRename, t, terminalFontFamilyId, terminalFontSize, terminalSettings, terminalThemeId, themeById,
     toggleBroadcast, toggleConnectionLogSaved, toggleScriptsSidePanelRef, toggleSidePanelRef, toggleWorkspaceViewMode, unmanageSource, updateConnectionLog,
-    updateCustomGroups, updateGroupConfigs, updateHostDistro, updateHosts, updateIdentities, updateKeys, updateKnownHosts, updateManagedSources,
+    readPersistedHosts, updateCustomGroups, updateGroupConfigs, updateHostDistro, updateHosts, updateIdentities, updateKeys, updateKnownHosts, updateManagedSources,
     updateNoteGroups, updateNotes, updateProxyProfiles, updateSnippetPackages, updateSnippets, updateSplitSizes, updateTerminalSetting, vaultFocusRequest, workspaceRenameTarget, workspaceRenameValue, workspaces,
     VaultViewContainer, SftpViewMount, TerminalLayerMount, LogViewWrapper,
   } = ctx;
@@ -354,6 +354,7 @@ export function AppView({ ctx }: { ctx: AppViewContext }) {
             groupConfigs={groupConfigs}
             onUpdateGroupConfigs={updateGroupConfigs}
             onUpdateHosts={updateHosts}
+            onReadPersistedHosts={readPersistedHosts}
             onUpdateKeys={updateKeys}
             onImportOrReuseKey={importOrReuseKey}
             onUpdateIdentities={updateIdentities}

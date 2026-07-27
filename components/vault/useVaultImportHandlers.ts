@@ -17,7 +17,7 @@ import {
   type VaultImportProgress,
 } from "../../application/state/vaultImportProgress";
 import { importVaultHostsInWorker } from "../../application/state/vaultImportWorker";
-import { withVaultManagedImportLock } from "../../application/state/vaultManagedImportLock";
+import { withVaultImportLock } from "../../application/state/vaultManagedImportLock";
 import { sanitizeHost } from "../../domain/host";
 import {
   applyVaultImportDestination,
@@ -39,6 +39,7 @@ interface UseVaultImportHandlersOptions {
   onUpdateCustomGroups: (
     groups: string[] | ((current: string[]) => string[]),
   ) => void;
+  onReadPersistedHosts: () => Promise<Host[]>;
   onUpdateHosts: (hosts: Host[]) => VaultHostPersistenceResult | Promise<VaultHostPersistenceResult>;
   onUpdateKeys: (keys: SSHKey[]) => void;
   onUpdateManagedSources: (
@@ -54,6 +55,7 @@ export function useVaultImportHandlers({
   keys,
   managedSources,
   onUpdateCustomGroups,
+  onReadPersistedHosts,
   onUpdateHosts,
   onUpdateKeys,
   onUpdateManagedSources,
@@ -104,6 +106,7 @@ export function useVaultImportHandlers({
           baselineHosts: Host[];
           appliedHosts: Host[];
         } | null = null;
+        let rollbackPendingImport: () => Promise<void> = async () => undefined;
         const relativeRoot = file.webkitRelativePath?.split(/[\\/]+/).filter(Boolean)[0];
         const selectionName = files.length > 1 ? (relativeRoot || file.name) : file.name;
         const formatLabel =
@@ -213,7 +216,7 @@ export function useVaultImportHandlers({
             }
           };
 
-          const rollbackPendingImport = async () => {
+          rollbackPendingImport = async () => {
             const snapshot = rollbackSnapshot;
             rollbackSnapshot = null;
             if (!snapshot) return;
@@ -295,7 +298,7 @@ export function useVaultImportHandlers({
           }
   
           if (isManaged && (newHosts.length > 0 || updatedExistingHosts.length > 0)) {
-            await withVaultManagedImportLock("vault", async () => {
+            await withVaultImportLock("vault", async () => {
             let latestPersistedSources = managedSourcesRef.current;
             onUpdateManagedSources((current) => {
               latestPersistedSources = current;
@@ -308,7 +311,8 @@ export function useVaultImportHandlers({
                 group: sourceClaim.groupName,
               }));
             }
-            const managedBaselineHosts = hostsRef.current;
+            const managedBaselineHosts = await onReadPersistedHosts();
+            hostsRef.current = managedBaselineHosts;
             const managedExistingKeys = new Set(managedBaselineHosts.map(makeKey));
             newHosts = result.hosts.filter((host) => !managedExistingKeys.has(makeKey(host)));
             const managedImportedKeys = new Set(result.hosts.map(makeKey));
@@ -617,6 +621,7 @@ export function useVaultImportHandlers({
       },
       [
         onUpdateCustomGroups,
+        onReadPersistedHosts,
         onUpdateHosts,
         onUpdateKeys,
         onUpdateManagedSources,

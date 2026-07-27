@@ -5,6 +5,10 @@ import { sanitizeGroupConfig } from "../../domain/groupConfig";
 import { normalizeKnownHosts } from "../../domain/knownHosts";
 import { normalizeNoteGroups, normalizeVaultNotes } from "../../domain/notes";
 import {
+  applyPluginImporterDestination,
+  mergePluginImporterDrafts,
+} from "../../domain/pluginImporter";
+import {
   ConnectionLog,
   GroupConfig,
   Host,
@@ -66,6 +70,8 @@ import {
   encryptProxyProfiles,
 } from "../../infrastructure/persistence/secureFieldAdapter";
 import { pluginExtensionBridge } from "./pluginExtensionBridge";
+import type { PluginImporterCommitRequest } from "./usePluginImporterCommit";
+import { withVaultImportLock } from "./vaultManagedImportLock";
 import {
   commitPluginImporterTransaction,
   recoverPluginImporterTransaction,
@@ -95,6 +101,15 @@ const PLUGIN_IMPORT_TRANSACTION_KEYS = new Set([
   STORAGE_KEY_GROUPS,
   STORAGE_KEY_GROUP_CONFIGS,
 ]);
+
+const parseStoredJson = <T>(value: string | null): T | null => {
+  if (value === null) return null;
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return null;
+  }
+};
 
 // Migration helper for old SSHKey format to new format
 const migrateKey = (key: Partial<SSHKey>): SSHKey => {
@@ -334,13 +349,24 @@ export const useVaultState = () => {
   }, []);
 
   const updateHosts = useCallback((data: Host[]) => {
-    const cleaned = normalizeVaultOrder(data.map(sanitizeHost));
+    const cleaned = normalizeVaultOrder(data.map((host) => sanitizeHost(host)));
     setHosts(cleaned);
     const ver = ++hostsWriteVersion.current;
     return encryptHosts(cleaned).then((enc) => {
       if (ver !== hostsWriteVersion.current) return "superseded" as const;
       return localStorageAdapter.write(STORAGE_KEY_HOSTS, enc);
     });
+  }, []);
+
+  const readPersistedHosts = useCallback(async (): Promise<Host[]> => {
+    while (true) {
+      const rawHosts = localStorageAdapter.readString(STORAGE_KEY_HOSTS);
+      const storedHosts = parseStoredJson<Host[]>(rawHosts);
+      if (!storedHosts) return [];
+      const decrypted = await decryptHosts(storedHosts);
+      if (localStorageAdapter.readString(STORAGE_KEY_HOSTS) !== rawHosts) continue;
+      return normalizeVaultOrder(decrypted.map((host) => sanitizeHost(host)));
+    }
   }, []);
 
   const updateKeys = useCallback((data: SSHKey[]) => {
@@ -675,7 +701,7 @@ export const useVaultState = () => {
           if (ver === hostsWriteVersion.current) {
             const sanitized = normalizeVaultOrder(
               migrateHostsFromLegacyLineTimestamps(
-                decrypted.map(sanitizeHost),
+                decrypted.map((host) => sanitizeHost(host)),
                 readLegacyLineTimestampsEnabled(),
               ),
             );
@@ -906,7 +932,7 @@ export const useVaultState = () => {
           // Discard if a newer storage event arrived OR a local write occurred
           // during the decrypt (writeVersion would have advanced).
           if (seq === hostsReadSeq.current && writeAtStart === hostsWriteVersion.current)
-            setHosts(normalizeVaultOrder(dec.map(sanitizeHost)));
+            setHosts(normalizeVaultOrder(dec.map((host) => sanitizeHost(host))));
         });
         return;
       }
@@ -1135,71 +1161,97 @@ export const useVaultState = () => {
     ],
   );
 
-  const commitPluginImporterData = useCallback(async (payload: Pick<
-    ExportableVaultData,
-    "hosts" | "keys" | "identities" | "snippets" | "customGroups"
-  >): Promise<void> => {
-    const nextHosts = normalizeVaultOrder(payload.hosts.map(sanitizeHost));
-    const nextKeys = normalizeVaultOrder(payload.keys);
-    const nextIdentities = normalizeVaultOrder(payload.identities ?? []);
-    const nextSnippets = normalizeVaultOrder(payload.snippets);
-    const nextGroups = [...payload.customGroups];
-    const groupOrderByPath = new Map(nextGroups.map((groupPath, index) => [groupPath, (index + 1) * 1000]));
-    const existingConfigByPath = new Map(groupConfigs.map((config) => [config.path, config]));
-    const nextGroupConfigs = normalizeVaultOrder([
-      ...nextGroups.map((groupPath) => sanitizeGroupConfig({
-        ...(existingConfigByPath.get(groupPath) ?? { path: groupPath }),
-        path: groupPath,
-        order: groupOrderByPath.get(groupPath),
-      })),
-      ...groupConfigs
-        .filter((config) => !groupOrderByPath.has(config.path))
-        .map(sanitizeGroupConfig),
-    ]);
-    const versions = {
-      hosts: hostsWriteVersion.current,
-      keys: keysWriteVersion.current,
-      identities: identitiesWriteVersion.current,
-      snippets: snippetsWriteVersion.current,
-      customGroups: customGroupsWriteVersion.current,
-      groups: groupConfigsWriteVersion.current,
-    };
-    const [encryptedHosts, encryptedKeys, encryptedIdentities, encryptedGroupConfigs] = await Promise.all([
-      encryptHosts(nextHosts),
-      encryptKeys(nextKeys),
-      encryptIdentities(nextIdentities),
-      encryptGroupConfigs(nextGroupConfigs),
-    ]);
-    if (versions.hosts !== hostsWriteVersion.current
-      || versions.keys !== keysWriteVersion.current
-      || versions.identities !== identitiesWriteVersion.current
-      || versions.snippets !== snippetsWriteVersion.current
-      || versions.customGroups !== customGroupsWriteVersion.current
-      || versions.groups !== groupConfigsWriteVersion.current) {
-      throw new Error("Vault changed while preparing the importer transaction; retry the import");
+  const commitPluginImporterData = useCallback(async ({
+    drafts,
+    destination,
+  }: PluginImporterCommitRequest): Promise<number> => withVaultImportLock("vault", async () => {
+    while (true) {
+      const raw = new Map(
+        [...PLUGIN_IMPORT_TRANSACTION_KEYS].map((key) => [key, localStorageAdapter.readString(key)]),
+      );
+      const storedHosts = parseStoredJson<Host[]>(raw.get(STORAGE_KEY_HOSTS) ?? null) ?? [];
+      const storedKeys = parseStoredJson<SSHKey[]>(raw.get(STORAGE_KEY_KEYS) ?? null) ?? [];
+      const storedIdentities = parseStoredJson<Identity[]>(raw.get(STORAGE_KEY_IDENTITIES) ?? null) ?? [];
+      const storedSnippets = parseStoredJson<Snippet[]>(raw.get(STORAGE_KEY_SNIPPETS) ?? null) ?? [];
+      const storedGroups = parseStoredJson<string[]>(raw.get(STORAGE_KEY_GROUPS) ?? null) ?? [];
+      const storedGroupConfigs = parseStoredJson<GroupConfig[]>(
+        raw.get(STORAGE_KEY_GROUP_CONFIGS) ?? null,
+      ) ?? [];
+      const [latestHosts, latestKeys, latestIdentities, latestGroupConfigs] = await Promise.all([
+        decryptHosts(storedHosts),
+        decryptKeys(storedKeys),
+        decryptIdentities(storedIdentities),
+        decryptGroupConfigs(storedGroupConfigs),
+      ]);
+      const merged = mergePluginImporterDrafts({
+        hosts: normalizeVaultOrder(latestHosts.map((host) => sanitizeHost(host))),
+        keys: normalizeVaultOrder(latestKeys),
+        identities: normalizeVaultOrder(latestIdentities),
+        snippets: normalizeVaultOrder(storedSnippets),
+        customGroups: storedGroups,
+      }, drafts);
+      const committed = applyPluginImporterDestination(
+        merged,
+        latestHosts.length,
+        destination,
+        storedGroups,
+      );
+      const nextHosts = normalizeVaultOrder(committed.hosts.map((host) => sanitizeHost(host)));
+      const nextKeys = normalizeVaultOrder(committed.keys);
+      const nextIdentities = normalizeVaultOrder(committed.identities);
+      const nextSnippets = normalizeVaultOrder(committed.snippets);
+      const nextGroups = [...committed.customGroups];
+      const groupOrderByPath = new Map(
+        nextGroups.map((groupPath, index) => [groupPath, (index + 1) * 1000]),
+      );
+      const existingConfigByPath = new Map(
+        latestGroupConfigs.map((config) => [config.path, config]),
+      );
+      const nextGroupConfigs = normalizeVaultOrder([
+        ...nextGroups.map((groupPath) => sanitizeGroupConfig({
+          ...(existingConfigByPath.get(groupPath) ?? { path: groupPath }),
+          path: groupPath,
+          order: groupOrderByPath.get(groupPath),
+        })),
+        ...latestGroupConfigs
+          .filter((config) => !groupOrderByPath.has(config.path))
+          .map(sanitizeGroupConfig),
+      ]);
+      const [encryptedHosts, encryptedKeys, encryptedIdentities, encryptedGroupConfigs] = await Promise.all([
+        encryptHosts(nextHosts),
+        encryptKeys(nextKeys),
+        encryptIdentities(nextIdentities),
+        encryptGroupConfigs(nextGroupConfigs),
+      ]);
+      const changedWhilePreparing = [...PLUGIN_IMPORT_TRANSACTION_KEYS].some(
+        (key) => localStorageAdapter.readString(key) !== raw.get(key),
+      );
+      if (changedWhilePreparing) continue;
+
+      ++hostsWriteVersion.current;
+      ++keysWriteVersion.current;
+      ++identitiesWriteVersion.current;
+      ++snippetsWriteVersion.current;
+      ++customGroupsWriteVersion.current;
+      ++groupConfigsWriteVersion.current;
+      commitPluginImporterTransaction(localStorageAdapter, [
+        [STORAGE_KEY_HOSTS, encryptedHosts],
+        [STORAGE_KEY_KEYS, encryptedKeys],
+        [STORAGE_KEY_IDENTITIES, encryptedIdentities],
+        [STORAGE_KEY_SNIPPETS, nextSnippets],
+        [STORAGE_KEY_GROUPS, nextGroups],
+        [STORAGE_KEY_GROUP_CONFIGS, encryptedGroupConfigs],
+      ]);
+      customGroupsRef.current = nextGroups;
+      setHosts(nextHosts);
+      setKeys(nextKeys);
+      setIdentities(nextIdentities);
+      setSnippets(nextSnippets);
+      setCustomGroups(nextGroups);
+      setGroupConfigs(nextGroupConfigs);
+      return committed.addedCount;
     }
-    ++hostsWriteVersion.current;
-    ++keysWriteVersion.current;
-    ++identitiesWriteVersion.current;
-    ++snippetsWriteVersion.current;
-    ++customGroupsWriteVersion.current;
-    ++groupConfigsWriteVersion.current;
-    const prepared = [
-      [STORAGE_KEY_HOSTS, encryptedHosts],
-      [STORAGE_KEY_KEYS, encryptedKeys],
-      [STORAGE_KEY_IDENTITIES, encryptedIdentities],
-      [STORAGE_KEY_SNIPPETS, nextSnippets],
-      [STORAGE_KEY_GROUPS, nextGroups],
-      [STORAGE_KEY_GROUP_CONFIGS, encryptedGroupConfigs],
-    ] as const;
-    commitPluginImporterTransaction(localStorageAdapter, prepared);
-    setHosts(nextHosts);
-    setKeys(nextKeys);
-    setIdentities(nextIdentities);
-    setSnippets(nextSnippets);
-    setCustomGroups(nextGroups);
-    setGroupConfigs(nextGroupConfigs);
-  }, [groupConfigs]);
+  }), []);
 
   const importDataFromString = useCallback(
     (jsonString: string): Promise<void> => {
@@ -1226,6 +1278,7 @@ export const useVaultState = () => {
     managedSources,
     groupConfigs,
     updateHosts,
+    readPersistedHosts,
     updateKeys,
     importOrReuseKey,
     updateIdentities,

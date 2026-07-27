@@ -51,6 +51,7 @@ import { useStoredString } from "../application/state/useStoredString";
 import { useTreeExpandedState } from "../application/state/useTreeExpandedState";
 import { useVaultGroupDeletion } from "../application/state/useVaultGroupDeletion";
 import type { VaultHostPersistenceResult } from "../application/state/vaultImportProgress";
+import type { PluginImporterCommitRequest } from "../application/state/usePluginImporterCommit";
 import { buildVaultCsvCredentialOptions } from "../application/vaultCsvExportCredentials";
 import { sanitizeCredentialValue } from "../domain/credentials";
 import {
@@ -232,6 +233,7 @@ interface VaultViewProps {
   onConnect: (host: Host) => void;
   onOpenHostFromNote?: (host: Host, source?: { noteId: string }) => void;
   onUpdateHosts: (hosts: Host[]) => VaultHostPersistenceResult | Promise<VaultHostPersistenceResult>;
+  onReadPersistedHosts: () => Promise<Host[]>;
   onUpdateKeys: (keys: SSHKey[]) => void;
   onImportOrReuseKey: (draft: Partial<SSHKey>) => SSHKey;
   onUpdateIdentities: (identities: Identity[]) => void;
@@ -243,13 +245,7 @@ interface VaultViewProps {
   onUpdateCustomGroups: (
     groups: string[] | ((current: string[]) => string[]),
   ) => void;
-  onCommitPluginImporterData: (data: {
-    hosts: Host[];
-    keys: SSHKey[];
-    identities: Identity[];
-    snippets: Snippet[];
-    customGroups: string[];
-  }) => Promise<void>;
+  onCommitPluginImporterData: (request: PluginImporterCommitRequest) => Promise<number>;
   onUpdateKnownHosts: (knownHosts: KnownHost[]) => void;
   onUpdateManagedSources: (
     managedSources: ManagedSource[] | ((current: ManagedSource[]) => ManagedSource[]),
@@ -312,6 +308,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
   onConnect,
   onOpenHostFromNote,
   onUpdateHosts,
+  onReadPersistedHosts,
   onUpdateKeys,
   onImportOrReuseKey,
   onUpdateIdentities,
@@ -875,6 +872,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
       keys,
       managedSources,
       onUpdateCustomGroups,
+      onReadPersistedHosts,
       onUpdateHosts,
       onUpdateKeys,
       onUpdateManagedSources,
@@ -1670,6 +1668,7 @@ export const vaultViewAreEqual = (
     prev.sessionCount === next.sessionCount &&
     prev.managedSources === next.managedSources &&
     prev.groupConfigs === next.groupConfigs &&
+    prev.onReadPersistedHosts === next.onReadPersistedHosts &&
     prev.onCommitPluginImporterData === next.onCommitPluginImporterData &&
     prev.showRecentHosts === next.showRecentHosts &&
     prev.hostClickBehavior === next.hostClickBehavior &&
