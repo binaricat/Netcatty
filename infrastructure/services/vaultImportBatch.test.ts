@@ -34,9 +34,9 @@ test("SecureCRT directory import reads every session and preserves folder groups
 
   assert.deepEqual(result.stats, {
     parsed: 3,
-    imported: 2,
+    imported: 3,
     skipped: 1,
-    duplicates: 1,
+    duplicates: 0,
   });
   assert.deepEqual(
     result.hosts.map(({ label, hostname, port, group }) => ({ label, hostname, port, group })),
@@ -53,10 +53,38 @@ test("SecureCRT directory import reads every session and preserves folder groups
         port: 22,
         group: "Staging",
       },
+      {
+        label: "Web Copy",
+        hostname: "web.example.com",
+        port: 2222,
+        group: "Archive",
+      },
     ],
   );
-  assert.deepEqual(result.groups, ["Production", "Staging"]);
+  assert.deepEqual(result.groups, ["Production", "Staging", "Archive"]);
   assert.match(result.issues[0]?.message ?? "", /Broken\.ini/);
+});
+
+test("SecureCRT keeps separate session files that point to the same endpoint", async () => {
+  const session = [
+    'S:"Hostname"=shared.example.com',
+    'S:"Username"=root',
+    'S:"Protocol Name"=SSH2',
+  ].join("\n");
+  const result = await importVaultHostFiles({
+    format: "securecrt",
+    files: [
+      new File([session], "web.ini"),
+      new File([session], "web.ini"),
+    ],
+    relativePaths: [
+      "Sessions/Prod/web.ini",
+      "Sessions/Staging/web.ini",
+    ],
+  });
+
+  assert.equal(result.hosts.length, 2);
+  assert.deepEqual(result.hosts.map((host) => host.group), ["Prod", "Staging"]);
 });
 
 test("SecureCRT batch import does not count an unsupported session twice", async () => {

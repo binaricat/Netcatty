@@ -169,13 +169,14 @@ export function useVaultImportHandlers({
           const persistHosts = async (
             nextHosts: Host[],
             options?: {
+              baselineHosts?: Host[];
               prepareAttempt?: (attempt: { baselineHosts: Host[]; appliedHosts: Host[] }) => Host[];
               shouldRetryAfterPersist?: () => boolean;
             },
           ) => {
             throwIfCancelled();
             importCommitStartedRef.current = true;
-            let baselineHosts = currentHosts;
+            let baselineHosts = options?.baselineHosts ?? currentHosts;
             let appliedHosts = nextHosts;
             while (true) {
               appliedHosts = options?.prepareAttempt?.({ baselineHosts, appliedHosts }) ?? appliedHosts;
@@ -292,7 +293,7 @@ export function useVaultImportHandlers({
           }
   
           if (isManaged && (newHosts.length > 0 || updatedExistingHosts.length > 0)) {
-            await withVaultManagedImportLock(filePath!, async () => {
+            await withVaultManagedImportLock("vault", async () => {
             let latestPersistedSources = managedSourcesRef.current;
             onUpdateManagedSources((current) => {
               latestPersistedSources = current;
@@ -305,6 +306,14 @@ export function useVaultImportHandlers({
                 group: sourceClaim.groupName,
               }));
             }
+            const managedBaselineHosts = hostsRef.current;
+            const managedExistingKeys = new Set(managedBaselineHosts.map(makeKey));
+            newHosts = result.hosts.filter((host) => !managedExistingKeys.has(makeKey(host)));
+            const managedImportedKeys = new Set(result.hosts.map(makeKey));
+            updatedExistingHosts = managedBaselineHosts.filter((host) => (
+              !host.managedSourceId && managedImportedKeys.has(makeKey(host))
+            ));
+            if (newHosts.length === 0 && updatedExistingHosts.length === 0) return;
             const sourceId = crypto.randomUUID();
             let newSource: ManagedSource = {
               id: sourceId,
@@ -323,7 +332,7 @@ export function useVaultImportHandlers({
   
             // Update existing hosts to be managed (move to managed group)
             const existingHostIds = new Set(updatedExistingHosts.map(h => h.id));
-            const updatedHosts = currentHosts.map((h) => {
+            const updatedHosts = managedBaselineHosts.map((h) => {
               if (!existingHostIds.has(h.id)) return h;
               const canBeManaged = !h.protocol || h.protocol === "ssh";
               return {
@@ -387,6 +396,7 @@ export function useVaultImportHandlers({
             const hostPersisted = await persistHosts(
               [...updatedHosts, ...newHosts].map((host: Host) => sanitizeHost(host)),
               {
+                baselineHosts: managedBaselineHosts,
                 prepareAttempt: prepareManagedAttempt,
                 shouldRetryAfterPersist: () => !managedGroupNameStillAvailable(),
               },

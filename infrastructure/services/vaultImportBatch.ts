@@ -132,15 +132,17 @@ export async function importVaultHostFiles({
   }
 
   const seen = new Set<string>();
-  const uniqueHosts = hosts.filter((host) => {
-    const key = buildVaultHostMergeKey(host);
-    if (seen.has(key)) {
-      duplicates++;
-      return false;
-    }
-    seen.add(key);
-    return true;
-  });
+  const uniqueHosts = format === "securecrt"
+    ? hosts
+    : hosts.filter((host) => {
+      const key = buildVaultHostMergeKey(host);
+      if (seen.has(key)) {
+        duplicates++;
+        return false;
+      }
+      seen.add(key);
+      return true;
+    });
   const groups = Array.from(new Set(
     uniqueHosts.map((host) => host.group).filter((group): group is string => Boolean(group)),
   ));
