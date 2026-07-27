@@ -48,6 +48,42 @@ test('plugin importer recovery rolls back a crash during the prepared phase', ()
   assert.equal(target.readString(STORAGE_KEY_PLUGIN_IMPORT_TRANSACTION), null);
 });
 
+test('Vault importer recovery accepts a safe subset of transaction keys', () => {
+  const target = storage({ groups: JSON.stringify(['partial']), sources: JSON.stringify(['partial-source']) });
+  target.write(STORAGE_KEY_PLUGIN_IMPORT_TRANSACTION, {
+    version: 1,
+    phase: 'prepared',
+    previous: [
+      { key: 'groups', value: JSON.stringify(['old-group']) },
+      { key: 'sources', value: JSON.stringify(['old-source']) },
+    ],
+  });
+
+  assert.equal(
+    recoverPluginImporterTransaction(target, new Set(['hosts', 'groups', 'sources'])),
+    'rolled-back',
+  );
+  assert.deepEqual(target.read('groups'), ['old-group']);
+  assert.deepEqual(target.read('sources'), ['old-source']);
+});
+
+test('Vault importer transaction rejects writes that do not actually persist', () => {
+  const target = storage({ hosts: JSON.stringify(['old']) });
+  const lyingStorage = {
+    ...target,
+    write<T>(key: string, value: T) {
+      if (key === 'hosts') return true;
+      return target.write(key, value);
+    },
+  };
+
+  assert.throws(
+    () => commitPluginImporterTransaction(lyingStorage, [['hosts', ['new']]]),
+    /rejected importer transaction/,
+  );
+  assert.deepEqual(target.read('hosts'), ['old']);
+});
+
 test('plugin importer recovery keeps fully committed values', () => {
   const target = storage({ hosts: JSON.stringify(['new']) });
   target.write(STORAGE_KEY_PLUGIN_IMPORT_TRANSACTION, { version: 1, phase: 'committed' });

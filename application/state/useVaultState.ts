@@ -104,6 +104,7 @@ const PLUGIN_IMPORT_TRANSACTION_KEYS = new Set([
   STORAGE_KEY_SNIPPETS,
   STORAGE_KEY_GROUPS,
   STORAGE_KEY_GROUP_CONFIGS,
+  STORAGE_KEY_MANAGED_SOURCES,
 ]);
 
 // Migration helper for old SSHKey format to new format
@@ -706,7 +707,9 @@ export const useVaultState = () => {
   useEffect(() => {
     const init = async () => {
       try {
-        recoverPluginImporterTransaction(localStorageAdapter, PLUGIN_IMPORT_TRANSACTION_KEYS);
+        await withVaultImportLock("vault", async () => {
+          recoverPluginImporterTransaction(localStorageAdapter, PLUGIN_IMPORT_TRANSACTION_KEYS);
+        });
         const savedHosts = localStorageAdapter.read<Host[]>(STORAGE_KEY_HOSTS);
 
         if (savedHosts) {

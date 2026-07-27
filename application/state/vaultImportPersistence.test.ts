@@ -18,6 +18,10 @@ const createStorage = (
   const values = new Map(Object.entries(initial));
   return {
     values,
+    read<T>(key: string): T | null {
+      const value = values.get(key);
+      return value === undefined ? null : JSON.parse(value) as T;
+    },
     readString: (key: string) => values.get(key) ?? null,
     write<T>(key: string, value: T) {
       if (key === failKey) return false;
@@ -57,19 +61,18 @@ test("Vault import metadata keeps current groups and sources", () => {
   assert.equal(result.sources.length, 1);
 });
 
-test("Vault import metadata restores groups when sources cannot be saved", () => {
+test("Vault import metadata transaction restores groups when sources cannot be saved", () => {
   const originalGroups = JSON.stringify(["Existing"]);
   const storage = createStorage({
     [STORAGE_KEY_GROUPS]: originalGroups,
     [STORAGE_KEY_MANAGED_SOURCES]: JSON.stringify([]),
   }, STORAGE_KEY_MANAGED_SOURCES);
-  const result = persistVaultImportMetadata(
+  assert.throws(() => persistVaultImportMetadata(
     storage,
     (groups) => [...groups, "Imported"],
     (sources) => sources,
-  );
+  ), /rejected importer transaction/);
 
-  assert.equal(result.persisted, false);
   assert.equal(storage.readString(STORAGE_KEY_GROUPS), originalGroups);
 });
 

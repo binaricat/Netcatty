@@ -19,8 +19,15 @@ type ImportJournal = PreparedJournal | CommittedJournal;
 
 const restorePrevious = (storage: TransactionStorage, previous: PreviousEntry[]) => {
   for (const entry of previous) {
-    if (entry.value === null) storage.remove(entry.key);
-    else if (!storage.writeString(entry.key, entry.value)) {
+    if (entry.value === null) {
+      storage.remove(entry.key);
+      if (storage.readString(entry.key) !== null) {
+        throw new Error(`Vault importer rollback failed for ${entry.key}`);
+      }
+    } else if (
+      !storage.writeString(entry.key, entry.value)
+      || storage.readString(entry.key) !== entry.value
+    ) {
       throw new Error(`Vault importer rollback failed for ${entry.key}`);
     }
   }
@@ -32,7 +39,7 @@ const parseJournal = (value: unknown, allowedKeys: ReadonlySet<string>): ImportJ
   if (journal.version !== 1 || (journal.phase !== 'prepared' && journal.phase !== 'committed')) return null;
   if (journal.phase === 'committed') return { version: 1, phase: 'committed' };
   const previous = (journal as Partial<PreparedJournal>).previous;
-  if (!Array.isArray(previous) || previous.length !== allowedKeys.size) return null;
+  if (!Array.isArray(previous) || previous.length === 0 || previous.length > allowedKeys.size) return null;
   const seen = new Set<string>();
   for (const entry of previous) {
     if (!entry || typeof entry !== 'object' || Array.isArray(entry)
@@ -78,7 +85,12 @@ export function commitPluginImporterTransaction(
   }
   try {
     for (const [key, value] of writes) {
-      if (!storage.write(key, value)) throw new Error(`Vault storage rejected importer transaction key ${key}`);
+      const expected = JSON.stringify(value);
+      if (expected === undefined
+        || !storage.write(key, value)
+        || storage.readString(key) !== expected) {
+        throw new Error(`Vault storage rejected importer transaction key ${key}`);
+      }
     }
     const committed: CommittedJournal = { version: 1, phase: 'committed' };
     if (!storage.write(STORAGE_KEY_PLUGIN_IMPORT_TRANSACTION, committed)) {

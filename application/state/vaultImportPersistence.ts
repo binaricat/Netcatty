@@ -3,8 +3,10 @@ import {
   STORAGE_KEY_GROUPS,
   STORAGE_KEY_MANAGED_SOURCES,
 } from "../../infrastructure/config/storageKeys";
+import { commitPluginImporterTransaction } from "./pluginImporterTransaction";
 
 type VaultImportMetadataStorage = {
+  read<T>(key: string): T | null;
   readString(key: string): string | null;
   write<T>(key: string, value: T): boolean;
   writeString(key: string, value: string): boolean;
@@ -27,25 +29,17 @@ export function persistVaultImportMetadata(
   updateGroups: (current: string[]) => string[],
   updateSources: (current: ManagedSource[]) => ManagedSource[],
 ): { persisted: boolean; groups: string[]; sources: ManagedSource[] } {
-  const previousGroups = storage.readString(STORAGE_KEY_GROUPS);
-  const previousSources = storage.readString(STORAGE_KEY_MANAGED_SOURCES);
-  const groups = updateGroups(readStoredArray<string>(STORAGE_KEY_GROUPS, previousGroups));
+  const groups = updateGroups(readStoredArray<string>(
+    STORAGE_KEY_GROUPS,
+    storage.readString(STORAGE_KEY_GROUPS),
+  ));
   const sources = updateSources(readStoredArray<ManagedSource>(
     STORAGE_KEY_MANAGED_SOURCES,
-    previousSources,
+    storage.readString(STORAGE_KEY_MANAGED_SOURCES),
   ));
-  if (!storage.write(STORAGE_KEY_GROUPS, groups)) {
-    return { persisted: false, groups, sources };
-  }
-  if (!storage.write(STORAGE_KEY_MANAGED_SOURCES, sources)) {
-    if (previousGroups === null) storage.remove(STORAGE_KEY_GROUPS);
-    else if (!storage.writeString(STORAGE_KEY_GROUPS, previousGroups)) {
-      throw new Error("Vault import metadata rollback failed");
-    }
-    if (storage.readString(STORAGE_KEY_GROUPS) !== previousGroups) {
-      throw new Error("Vault import metadata rollback failed");
-    }
-    return { persisted: false, groups, sources };
-  }
+  commitPluginImporterTransaction(storage, [
+    [STORAGE_KEY_GROUPS, groups],
+    [STORAGE_KEY_MANAGED_SOURCES, sources],
+  ]);
   return { persisted: true, groups, sources };
 }
