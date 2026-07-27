@@ -249,7 +249,9 @@ interface VaultViewProps {
     customGroups: string[];
   }) => Promise<void>;
   onUpdateKnownHosts: (knownHosts: KnownHost[]) => void;
-  onUpdateManagedSources: (managedSources: ManagedSource[]) => void;
+  onUpdateManagedSources: (
+    managedSources: ManagedSource[] | ((current: ManagedSource[]) => ManagedSource[]),
+  ) => void;
   onClearAndRemoveManagedSource?: (source: ManagedSource) => Promise<boolean>;
   onClearAndRemoveManagedSources?: (sources: ManagedSource[]) => Promise<void>;
   onUnmanageSource?: (sourceId: string) => void;

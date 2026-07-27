@@ -38,7 +38,9 @@ interface UseVaultImportHandlersOptions {
   onUpdateCustomGroups: (groups: string[]) => void;
   onUpdateHosts: (hosts: Host[]) => VaultHostPersistenceResult | Promise<VaultHostPersistenceResult>;
   onUpdateKeys: (keys: SSHKey[]) => void;
-  onUpdateManagedSources: (sources: ManagedSource[]) => void;
+  onUpdateManagedSources: (
+    sources: ManagedSource[] | ((current: ManagedSource[]) => ManagedSource[]),
+  ) => void;
   setIsImportOpen: (open: boolean) => void;
   t: (key: string, values?: Record<string, unknown>) => string;
 }
@@ -379,19 +381,21 @@ export function useVaultImportHandlers({
               hostPersisted,
               t("vault.import.progress.persistFailed"),
               () => {
-                const nextManagedSources = [
-                  ...managedSourcesRef.current.filter((source) => source.id !== newSource.id),
-                  newSource,
-                ];
                 const committedGroups = mergeVaultImportedGroups({
                   currentGroups: customGroupsRef.current,
                   baselineGroups: currentCustomGroups,
                   appliedGroups: nextGroups,
                 });
-                managedSourcesRef.current = nextManagedSources;
                 customGroupsRef.current = committedGroups;
                 startTransition(() => {
-                  onUpdateManagedSources(nextManagedSources);
+                  onUpdateManagedSources((latestPersistedSources) => {
+                    const nextManagedSources = [
+                      ...latestPersistedSources.filter((source) => source.id !== newSource.id),
+                      newSource,
+                    ];
+                    managedSourcesRef.current = nextManagedSources;
+                    return nextManagedSources;
+                  });
                   onUpdateCustomGroups(committedGroups);
                 });
               },

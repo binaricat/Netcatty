@@ -225,6 +225,8 @@ export const useVaultState = () => {
   const [connectionLogs, setConnectionLogs] = useState<ConnectionLog[]>([]);
   const [managedSources, setManagedSources] = useState<ManagedSource[]>([]);
   const [groupConfigs, setGroupConfigs] = useState<GroupConfig[]>([]);
+  const managedSourcesRef = useRef<ManagedSource[]>([]);
+  managedSourcesRef.current = managedSources;
 
   // Write-version counters prevent out-of-order async writes from overwriting
   // newer data.  Each update bumps the counter; the .then() callback only
@@ -469,9 +471,18 @@ export const useVaultState = () => {
     localStorageAdapter.write(STORAGE_KEY_KNOWN_HOSTS, cleaned);
   }, []);
 
-  const updateManagedSources = useCallback((data: ManagedSource[]) => {
-    setManagedSources(data);
-    localStorageAdapter.write(STORAGE_KEY_MANAGED_SOURCES, data);
+  const updateManagedSources = useCallback((
+    data: ManagedSource[] | ((current: ManagedSource[]) => ManagedSource[]),
+  ) => {
+    const next = typeof data === "function"
+      ? data(
+        localStorageAdapter.read<ManagedSource[]>(STORAGE_KEY_MANAGED_SOURCES)
+          ?? managedSourcesRef.current,
+      )
+      : data;
+    managedSourcesRef.current = next;
+    setManagedSources(next);
+    localStorageAdapter.write(STORAGE_KEY_MANAGED_SOURCES, next);
   }, []);
 
   const updateGroupConfigs = useCallback((data: GroupConfig[]) => {
