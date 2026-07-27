@@ -4,6 +4,7 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import {
+  getNextRaggedRowPosition,
   getNextVirtualHostIndex,
   VirtualizedGroupedHostCollection,
   VirtualizedHostCollection,
@@ -47,6 +48,21 @@ test("virtualized host keyboard navigation crosses rows and collection edges", (
     viewMode: "list",
     key: "ArrowUp",
   }), 0);
+});
+
+test("grouped grid navigation preserves the actual column across ragged rows", () => {
+  assert.deepEqual(getNextRaggedRowPosition({
+    rowLengths: [1, 3, 3],
+    currentRow: 0,
+    currentColumn: 0,
+    direction: 1,
+  }), { row: 1, column: 0 });
+  assert.deepEqual(getNextRaggedRowPosition({
+    rowLengths: [3, 1, 3],
+    currentRow: 0,
+    currentColumn: 2,
+    direction: 1,
+  }), { row: 1, column: 0 });
 });
 
 test("virtualized host grid renders only the viewport window for a large collection", () => {

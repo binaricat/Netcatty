@@ -44,6 +44,25 @@ export function getNextVirtualHostIndex({
   return Math.max(0, Math.min(itemCount - 1, nextIndex));
 }
 
+export function getNextRaggedRowPosition({
+  rowLengths,
+  currentRow,
+  currentColumn,
+  direction,
+}: {
+  rowLengths: number[];
+  currentRow: number;
+  currentColumn: number;
+  direction: -1 | 1;
+}): { row: number; column: number } {
+  if (rowLengths.length === 0) return { row: 0, column: 0 };
+  const row = Math.max(0, Math.min(rowLengths.length - 1, currentRow + direction));
+  return {
+    row,
+    column: Math.max(0, Math.min(rowLengths[row] - 1, currentColumn)),
+  };
+}
+
 export function VirtualizedHostCollection<T>({
   items,
   itemKey,
@@ -360,13 +379,40 @@ export function VirtualizedGroupedHostCollection<T>({
       ? itemIndexByKey.get(wrapper.dataset.vaultItemKey ?? "")
       : undefined;
     if (currentIndex === undefined) return;
-    const nextIndex = getNextVirtualHostIndex({
-      currentIndex,
-      itemCount: flatItems.length,
-      columns,
-      viewMode,
-      key: event.key,
-    });
+    let nextIndex: number | null;
+    if (viewMode === "grid" && (event.key === "ArrowUp" || event.key === "ArrowDown")) {
+      const currentKey = wrapper?.dataset.vaultItemKey ?? "";
+      const hostRows = rows.flatMap((row, rowIndex) => (
+        row.kind === "hosts" ? [{ row, rowIndex }] : []
+      ));
+      const currentHostRowIndex = hostRows.findIndex(({ row }) => (
+        row.hosts.some((item) => String(itemKey(item)) === currentKey)
+      ));
+      const currentRow = hostRows[currentHostRowIndex]?.row;
+      const currentColumn = currentRow
+        ? currentRow.hosts.findIndex((item) => String(itemKey(item)) === currentKey)
+        : 0;
+      const direction = event.key === "ArrowDown" ? 1 : -1;
+      const targetPosition = getNextRaggedRowPosition({
+        rowLengths: hostRows.map(({ row }) => row.hosts.length),
+        currentRow: currentHostRowIndex,
+        currentColumn,
+        direction,
+      });
+      const targetHostRow = hostRows[targetPosition.row];
+      const targetItem = targetHostRow?.row.hosts[targetPosition.column];
+      nextIndex = targetItem === undefined
+        ? currentIndex
+        : itemIndexByKey.get(String(itemKey(targetItem))) ?? currentIndex;
+    } else {
+      nextIndex = getNextVirtualHostIndex({
+        currentIndex,
+        itemCount: flatItems.length,
+        columns,
+        viewMode,
+        key: event.key,
+      });
+    }
     if (nextIndex === null) return;
     if (nextIndex === currentIndex) return;
     event.preventDefault();

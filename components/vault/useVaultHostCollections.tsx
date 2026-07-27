@@ -248,15 +248,16 @@ export function useVaultHostCollections({
     // Respects active search and tag filters
     const recentHosts = useMemo(() => {
       if (selectedGroupPath) return [];
-      const filtered = filteredHosts.filter((h) => h.lastConnectedAt);
+      const filtered = filteredHosts.filter((h) => h.lastConnectedAt && !h.pinned);
       return filtered
         .sort((a, b) => (b.lastConnectedAt || 0) - (a.lastConnectedAt || 0))
         .slice(0, 6);
     }, [filteredHosts, selectedGroupPath]);
   
-  // No longer deduplicate pinned/recent hosts from the main list,
-    // so hosts always appear in their groups regardless of pinned/recent status.
-    const pinnedRecentIds = useMemo(() => new Set<string>(), []);
+    const pinnedRecentIds = useMemo(() => new Set<string>([
+      ...pinnedHosts.map((host) => host.id),
+      ...(showRecentHosts ? recentHosts.map((host) => host.id) : []),
+    ]), [pinnedHosts, recentHosts, showRecentHosts]);
   
   const visibleDisplayedHosts = useMemo(
       () => displayedHosts.filter((h) => selectedGroupPath || !pinnedRecentIds.has(h.id)),
@@ -273,7 +274,7 @@ export function useVaultHostCollections({
       const groups: { name: string; hosts: Host[] }[] = [];
       const groupMap = new Map<string, Host[]>();
   
-      for (const host of displayedHosts) {
+      for (const host of visibleDisplayedHosts) {
         const groupName = host.group || "";
         if (!groupMap.has(groupName)) {
           groupMap.set(groupName, []);
@@ -286,7 +287,7 @@ export function useVaultHostCollections({
         groups.push({ name: key, hosts: groupMap.get(key)! });
       }
       return groups;
-    }, [displayedHosts, sortMode]);
+    }, [sortMode, visibleDisplayedHosts]);
   
   const buildTreeViewGroupTree = useMemo<Record<string, GroupNode>>(() => {
       const root: Record<string, GroupNode> = {};
