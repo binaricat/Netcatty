@@ -248,14 +248,14 @@ export const AddToWorkspaceDialog: React.FC<AddToWorkspaceDialogProps> = ({
     if (item.type === 'local') {
       return (
         <div
-          className={`flex items-center gap-3 px-4 py-2.5 cursor-pointer transition-colors ${getWorkspaceTargetRowStateClass(isCursor, isChecked)}`}
+          className={`flex h-full min-h-0 items-center gap-3 overflow-hidden px-4 py-2.5 cursor-pointer transition-colors ${getWorkspaceTargetRowStateClass(isCursor, isChecked)}`}
           onClick={() => handleTargetClick(idx, LOCAL_ITEM_ID)}
         >
-          <div className="h-6 w-6 rounded flex items-center justify-center text-muted-foreground">
+          <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground">
             <Terminal size={16} />
           </div>
-          <span className="text-sm font-medium flex-1 truncate">Local Terminal</span>
-          {isChecked && <Check size={14} className="text-primary flex-shrink-0" />}
+          <span className="min-w-0 flex-1 truncate text-sm font-medium">Local Terminal</span>
+          {isChecked && <Check size={14} className="text-primary shrink-0" />}
         </div>
       );
     }
@@ -263,18 +263,18 @@ export const AddToWorkspaceDialog: React.FC<AddToWorkspaceDialogProps> = ({
     const host = item.host;
     return (
       <div
-        className={`flex items-center justify-between px-4 py-2.5 cursor-pointer transition-colors ${getWorkspaceTargetRowStateClass(isCursor, isChecked)}`}
+        className={`flex h-full min-h-0 items-center justify-between overflow-hidden px-4 py-2.5 cursor-pointer transition-colors ${getWorkspaceTargetRowStateClass(isCursor, isChecked)}`}
         onClick={() => handleTargetClick(idx, host.id)}
       >
-        <div className="flex items-center gap-3 min-w-0">
+        <div className="flex min-w-0 items-center gap-3">
           <DistroAvatar host={host} fallback={(host.label || host.hostname).slice(0, 2).toUpperCase()} size="sm" />
-          <span className="text-sm font-medium truncate">{host.label || host.hostname}</span>
+          <span className="truncate text-sm font-medium">{host.label || host.hostname}</span>
         </div>
-        <div className="flex items-center gap-2">
-          <div className="text-[11px] text-muted-foreground">
+        <div className="ml-2 flex min-w-0 shrink-0 items-center gap-2">
+          <div className="max-w-[12rem] truncate text-[11px] text-muted-foreground">
             {host.group ? `Personal / ${host.group}` : 'Personal'}
           </div>
-          {isChecked && <Check size={14} className="text-primary flex-shrink-0" />}
+          {isChecked && <Check size={14} className="text-primary shrink-0" />}
         </div>
       </div>
     );

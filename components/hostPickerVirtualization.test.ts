@@ -24,6 +24,10 @@ test('SelectHostPanelContent virtualizes with listbox keyboard model', () => {
   assert.match(source, /role="listbox"/);
   assert.match(source, /handleListKeyDown/);
   assert.match(source, /stepListIndex/);
+  // Screen readers need active option linkage while focus stays on the listbox.
+  assert.match(source, /aria-activedescendant=\{activeDescendantId\}/);
+  assert.match(source, /optionDomId/);
+  assert.match(source, /id=\{optionDomId\(row\.key\)\}/);
   assert.doesNotMatch(source, /filteredHosts\.map\(\(host\) =>/);
   // One listbox tab stop — not per-host tabIndex under virtualization.
   assert.match(source, /role="listbox"[\s\S]*tabIndex=\{0\}/);
@@ -38,6 +42,9 @@ test('QuickSwitcher virtualizes categorized rows and clamps empty-list keyboard'
   assert.match(source, /clampListIndex/);
   // Two-line plugin rows need a taller virtual slot than QS_ROW_HEIGHT.
   assert.match(source, /QS_PLUGIN_ROW_HEIGHT/);
+  // Fixed-height slots must clip/truncate so long titles never overlap the next row.
+  assert.match(source, /overflow-hidden/);
+  assert.match(source, /max-w-\[12rem\] shrink-0 truncate/);
   assert.doesNotMatch(source, /results\.map\(\(host\) =>/);
   // Must not use bare length-1 which yields -1 on empty lists.
   assert.doesNotMatch(
@@ -53,6 +60,8 @@ test('AddToWorkspaceDialog virtualizes and clamps selection on shrink', () => {
   assert.match(source, /clampListIndex\(prev, items\.length\)/);
   assert.match(source, /onClick=\{\(\) => handleTargetClick\(idx, LOCAL_ITEM_ID\)\}/);
   assert.match(source, /onClick=\{\(\) => handleTargetClick\(idx, host\.id\)\}/);
+  // Long group paths must not wrap out of the fixed virtual row.
+  assert.match(source, /max-w-\[12rem\] truncate text-\[11px\] text-muted-foreground/);
   assert.doesNotMatch(source, /filteredHosts\.map\(\(host, i\) =>/);
 });
 

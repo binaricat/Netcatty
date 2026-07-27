@@ -8,7 +8,7 @@ import {
   Search,
   Square,
 } from 'lucide-react';
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { cn } from '../lib/utils';
 import { matchesHostSearchQuery, matchesSearchQuery } from '../lib/searchMatcher';
 import { useI18n } from '../application/i18n/I18nProvider';
@@ -94,6 +94,10 @@ export const SelectHostPanelContent: React.FC<SelectHostPanelContentProps> = ({
   const [showNewHostPanel, setShowNewHostPanel] = useState(false);
   const [activeNavIndex, setActiveNavIndex] = useState(0);
   const listRef = useRef<VariableSizeVirtualListHandle>(null);
+  const listboxId = useId();
+  const optionDomId = useCallback((key: string) => (
+    `${listboxId}-opt-${key.replace(/[^a-zA-Z0-9_-]/g, '_')}`
+  ), [listboxId]);
 
   useEffect(() => {
     onNewHostPanelOpenChange?.(showNewHostPanel);
@@ -304,7 +308,9 @@ export const SelectHostPanelContent: React.FC<SelectHostPanelContentProps> = ({
     return entries;
   }, [listRows]);
 
-  const activeNavKey = navigable[clampListIndex(activeNavIndex, navigable.length)]?.key ?? null;
+  const activeNavEntry = navigable[clampListIndex(activeNavIndex, navigable.length)];
+  const activeNavKey = activeNavEntry?.key ?? null;
+  const activeDescendantId = activeNavKey ? optionDomId(activeNavKey) : undefined;
 
   useEffect(() => {
     setActiveNavIndex((prev) => clampListIndex(prev, navigable.length));
@@ -386,11 +392,12 @@ export const SelectHostPanelContent: React.FC<SelectHostPanelContentProps> = ({
 
       return (
         <div
+          id={optionDomId(row.key)}
           role="option"
           aria-selected={isActive}
           data-active={isActive ? 'true' : undefined}
           className={cn(
-            'flex h-full items-center gap-2.5 px-2.5 rounded-lg transition-colors',
+            'flex h-full min-h-0 items-center gap-2.5 overflow-hidden px-2.5 rounded-lg transition-colors',
             isActive ? 'bg-primary/10 ring-1 ring-primary/40' : 'hover:bg-muted/70',
           )}
           onClick={() => {
@@ -442,13 +449,14 @@ export const SelectHostPanelContent: React.FC<SelectHostPanelContentProps> = ({
 
     return (
       <div
+        id={optionDomId(row.key)}
         role="option"
         aria-selected={isSelected || isActive}
         data-host-id={host.id}
         data-active={isActive ? 'true' : undefined}
         aria-label={t('selectHost.toggleHost', { name: host.label })}
         className={cn(
-          'flex h-full items-center gap-2.5 px-2.5 rounded-lg cursor-pointer transition-colors',
+          'flex h-full min-h-0 cursor-pointer items-center gap-2.5 overflow-hidden rounded-lg px-2.5 transition-colors',
           isSelected ? 'bg-muted' : isActive ? 'bg-primary/10 ring-1 ring-primary/40' : 'hover:bg-muted/70',
         )}
         onClick={() => {
@@ -497,6 +505,7 @@ export const SelectHostPanelContent: React.FC<SelectHostPanelContentProps> = ({
     handleHostClick,
     multiSelect,
     navigable,
+    optionDomId,
     selectedHostIdSet,
     t,
   ]);
@@ -584,6 +593,7 @@ export const SelectHostPanelContent: React.FC<SelectHostPanelContentProps> = ({
               data-host-picker-virtual="select-host"
               role="listbox"
               aria-label={t('selectHost.title')}
+              aria-activedescendant={activeDescendantId}
               tabIndex={0}
               onKeyDown={handleListKeyDown}
             >

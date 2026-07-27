@@ -517,24 +517,25 @@ const QuickSwitcherInner: React.FC<QuickSwitcherProps> = ({
 
               const { item, itemIndex } = row;
               const isSelected = itemIndex === selectedIndex;
-              const rowClass = `flex items-center gap-3 px-4 py-2.5 cursor-pointer transition-colors ${getQuickSwitcherRowStateClass(isSelected, isKeyboardNavigating)}`;
+              // Fixed virtual slots: keep content single-line (or plugin two-line) and clip overflow.
+              const rowClass = `flex h-full min-h-0 items-center gap-3 overflow-hidden px-4 py-2.5 cursor-pointer transition-colors ${getQuickSwitcherRowStateClass(isSelected, isKeyboardNavigating)}`;
 
               if (item.type === "host") {
                 const host = item.data as Host;
                 return (
                   <div
-                    className={`flex items-center justify-between px-4 py-2.5 cursor-pointer transition-colors ${getQuickSwitcherRowStateClass(isSelected, isKeyboardNavigating)}`}
+                    className={`flex h-full min-h-0 items-center justify-between overflow-hidden px-4 py-2.5 cursor-pointer transition-colors ${getQuickSwitcherRowStateClass(isSelected, isKeyboardNavigating)}`}
                     onClick={() => onSelect(host)}
                   >
-                    <div className="flex items-center gap-3 min-w-0">
+                    <div className="flex min-w-0 items-center gap-3">
                       <DistroAvatar
                         host={host}
                         fallback={host.label.slice(0, 2).toUpperCase()}
                         size="sm"
                       />
-                      <span className="text-sm font-medium truncate">{host.label}</span>
+                      <span className="truncate text-sm font-medium">{host.label}</span>
                     </div>
-                    <div className="text-[11px] text-muted-foreground">
+                    <div className="ml-3 max-w-[12rem] shrink-0 truncate text-[11px] text-muted-foreground">
                       {host.group ? `Personal / ${host.group}` : "Personal"}
                     </div>
                   </div>
@@ -554,10 +555,10 @@ const QuickSwitcherInner: React.FC<QuickSwitcherProps> = ({
                         onClose();
                       }}
                     >
-                      <div className="h-6 w-6 rounded flex items-center justify-center text-muted-foreground">
+                      <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground">
                         {icon}
                       </div>
-                      <span className="text-sm font-medium">{label}</span>
+                      <span className="truncate text-sm font-medium">{label}</span>
                     </div>
                   );
                 }
@@ -570,10 +571,10 @@ const QuickSwitcherInner: React.FC<QuickSwitcherProps> = ({
                       onClose();
                     }}
                   >
-                    <div className="h-6 w-6 rounded flex items-center justify-center text-muted-foreground">
+                    <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground">
                       <TerminalSquare size={16} />
                     </div>
-                    <span className="text-sm font-medium">
+                    <span className="min-w-0 truncate text-sm font-medium">
                       {session?.hostLabel ?? item.id}
                     </span>
                   </div>
@@ -590,10 +591,10 @@ const QuickSwitcherInner: React.FC<QuickSwitcherProps> = ({
                       onClose();
                     }}
                   >
-                    <div className="h-6 w-6 rounded flex items-center justify-center text-muted-foreground">
+                    <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground">
                       <LayoutGrid size={16} />
                     </div>
-                    <span className="text-sm font-medium">
+                    <span className="min-w-0 truncate text-sm font-medium">
                       {workspace?.title ?? item.id}
                     </span>
                   </div>
@@ -623,9 +624,9 @@ const QuickSwitcherInner: React.FC<QuickSwitcherProps> = ({
                       alt={shell.name}
                       className={`h-6 w-6 shrink-0${isMonochromeShellIcon(shell.icon) ? " dark:invert" : ""}`}
                     />
-                    <span className="text-sm font-medium">{shell.name}</span>
+                    <span className="min-w-0 truncate text-sm font-medium">{shell.name}</span>
                     {shell.isDefault && (
-                      <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
+                      <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
                         {t("qs.default")}
                       </span>
                     )}
@@ -642,10 +643,10 @@ const QuickSwitcherInner: React.FC<QuickSwitcherProps> = ({
                       onClose();
                     }}
                   >
-                    <div className="h-6 w-6 rounded flex items-center justify-center text-muted-foreground">
+                    <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground">
                       <Terminal size={16} />
                     </div>
-                    <span className="text-sm font-medium">{t("qs.localTerminal")}</span>
+                    <span className="truncate text-sm font-medium">{t("qs.localTerminal")}</span>
                   </div>
                 );
               }
@@ -655,10 +656,10 @@ const QuickSwitcherInner: React.FC<QuickSwitcherProps> = ({
                   <button
                     type="button"
                     disabled={item.enabled === false}
-                    className={`flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors ${getQuickSwitcherRowStateClass(isSelected, isKeyboardNavigating)} disabled:opacity-50`}
+                    className={`flex h-full min-h-0 w-full items-center gap-3 overflow-hidden px-4 py-2.5 text-left transition-colors ${getQuickSwitcherRowStateClass(isSelected, isKeyboardNavigating)} disabled:opacity-50`}
                     onClick={(event) => handleItemSelect(item, event.altKey)}
                   >
-                    <div className="flex h-6 w-6 items-center justify-center text-muted-foreground">
+                    <div className="flex h-6 w-6 shrink-0 items-center justify-center text-muted-foreground">
                       <PluginContributionIcon pluginId={item.pluginId} icon={item.icon} size={16} />
                     </div>
                     <div className="min-w-0 flex-1">
@@ -666,7 +667,7 @@ const QuickSwitcherInner: React.FC<QuickSwitcherProps> = ({
                       <div className="truncate text-[10px] text-muted-foreground">{item.pluginTitle}</div>
                     </div>
                     {item.shortcut && (
-                      <kbd className="text-[10px] text-muted-foreground">{item.shortcut}</kbd>
+                      <kbd className="shrink-0 text-[10px] text-muted-foreground">{item.shortcut}</kbd>
                     )}
                   </button>
                 );
