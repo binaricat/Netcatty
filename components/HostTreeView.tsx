@@ -1,5 +1,5 @@
 import { CheckSquare, Edit2, FileSymlink, Server, Square, Expand, Minimize2 } from 'lucide-react';
-import React, { useCallback, useEffect, useMemo, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useI18n } from '../application/i18n/I18nProvider';
 import {
   hostTreeInlineGroupEditStore,
@@ -113,6 +113,9 @@ interface TreeNodeProps {
   setDragOverDropTarget?: (target: string | null) => void;
   groupConfigs: GroupConfig[];
   groupDefaultsByPath: ReadonlyMap<string, Partial<GroupConfig>>;
+  activeTreeItemKey: string | null;
+  initialTreeItemKey: string | null;
+  onActiveTreeItemChange: (key: string) => void;
 }
 
 
@@ -152,6 +155,9 @@ const TreeNode: React.FC<TreeNodeProps> = ({
   setDragOverDropTarget,
   groupConfigs,
   groupDefaultsByPath,
+  activeTreeItemKey,
+  initialTreeItemKey,
+  onActiveTreeItemChange,
 }) => {
   const inlineEdit = useHostTreeInlineGroupEdit();
   const vaultTreeActions = useVaultHostTreeActions();
@@ -268,10 +274,17 @@ const TreeNode: React.FC<TreeNodeProps> = ({
                 data-section="host-tree-row"
                 data-row-type="group"
                 data-group-path={node.path}
+                data-tree-item-key={`group:${node.path}`}
+                data-tree-depth={depth}
                 role="treeitem"
+                aria-level={depth + 1}
                 aria-selected={isMultiSelectMode ? isGroupMultiSelected : isGroupFocused}
                 aria-expanded={hasChildren || node.hosts.length > 0 ? isExpanded : undefined}
-                tabIndex={0}
+                tabIndex={activeTreeItemKey === `group:${node.path}`
+                  || (!activeTreeItemKey && initialTreeItemKey === `group:${node.path}`)
+                  ? 0
+                  : -1}
+                onFocus={() => onActiveTreeItemChange(`group:${node.path}`)}
                 draggable={!isInlineEditing && !isMultiSelectMode}
                 onKeyDown={(event) => {
                   if (!isMultiSelectMode) return;
@@ -391,6 +404,9 @@ const TreeNode: React.FC<TreeNodeProps> = ({
 	              setDragOverDropTarget={setDragOverDropTarget}
 	              groupConfigs={groupConfigs}
 	              groupDefaultsByPath={groupDefaultsByPath}
+	              activeTreeItemKey={activeTreeItemKey}
+	              initialTreeItemKey={initialTreeItemKey}
+	              onActiveTreeItemChange={onActiveTreeItemChange}
 	            />
 	          ))}
 
@@ -418,6 +434,9 @@ const TreeNode: React.FC<TreeNodeProps> = ({
 	              }}
 	              groupConfigs={groupConfigs}
 	              groupDefaultsByPath={groupDefaultsByPath}
+	              activeTreeItemKey={activeTreeItemKey}
+	              initialTreeItemKey={initialTreeItemKey}
+	              onActiveTreeItemChange={onActiveTreeItemChange}
 	            />
 	          ))}
         </CollapsibleContent>
@@ -444,6 +463,9 @@ interface HostTreeItemProps {
   onFocusHost?: (hostId: string | null) => void;
   groupConfigs: GroupConfig[];
   groupDefaultsByPath: ReadonlyMap<string, Partial<GroupConfig>>;
+  activeTreeItemKey: string | null;
+  initialTreeItemKey: string | null;
+  onActiveTreeItemChange: (key: string) => void;
 }
 
 export const getHostTreeDisplayDetails = (
@@ -484,6 +506,9 @@ const HostTreeItem: React.FC<HostTreeItemProps> = ({
   onFocusHost,
   groupConfigs,
   groupDefaultsByPath,
+  activeTreeItemKey,
+  initialTreeItemKey,
+  onActiveTreeItemChange,
 }) => {
   const safeHost = sanitizeHost(host);
   const tags = host.tags || [];
@@ -512,9 +537,16 @@ const HostTreeItem: React.FC<HostTreeItemProps> = ({
           data-section="host-tree-row"
           data-row-type="host"
           data-host-id={host.id}
+          data-tree-item-key={`host:${host.id}`}
+          data-tree-depth={depth}
           role="treeitem"
+          aria-level={depth + 1}
           aria-selected={Boolean(isSelected)}
-          tabIndex={0}
+          tabIndex={activeTreeItemKey === `host:${host.id}`
+            || (!activeTreeItemKey && initialTreeItemKey === `host:${host.id}`)
+            ? 0
+            : -1}
+          onFocus={() => onActiveTreeItemChange(`host:${host.id}`)}
           draggable={!isMultiSelectMode}
           onDragStart={(e) => e.dataTransfer.setData("host-id", host.id)}
           onClick={() => {
@@ -764,6 +796,91 @@ export const HostTreeView: React.FC<HostTreeViewProps> = ({
     });
   }, [groupTree, sortMode]);
 
+  const treeRef = useRef<HTMLDivElement>(null);
+  const [activeTreeItemKey, setActiveTreeItemKey] = useState<string | null>(null);
+  const initialTreeItemKey = sortedGroupTree[0]
+    ? `group:${sortedGroupTree[0].path}`
+    : ungroupedHosts[0]
+      ? `host:${ungroupedHosts[0].id}`
+      : null;
+
+  const getVisibleTreeItems = useCallback(() => (
+    [...(treeRef.current?.querySelectorAll<HTMLElement>('[role="treeitem"]') ?? [])]
+      .filter((item) => !item.closest('[role="group"][data-state="closed"]'))
+  ), []);
+
+  useEffect(() => {
+    if (!activeTreeItemKey) return;
+    if (!getVisibleTreeItems().some((item) => item.dataset.treeItemKey === activeTreeItemKey)) {
+      setActiveTreeItemKey(null);
+    }
+  }, [activeTreeItemKey, expandedPaths, getVisibleTreeItems, hosts, sortedGroupTree]);
+
+  const focusTreeItem = useCallback((item: HTMLElement | undefined) => {
+    if (!item) return;
+    const key = item.dataset.treeItemKey;
+    if (!key) return;
+    setActiveTreeItemKey(key);
+    item.focus();
+  }, []);
+
+  const handleTreeKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) {
+      return;
+    }
+    const target = event.target instanceof Element
+      ? event.target.closest<HTMLElement>('[role="treeitem"]')
+      : null;
+    if (!target || !treeRef.current?.contains(target)) return;
+
+    const items = getVisibleTreeItems();
+    const index = items.indexOf(target);
+    if (index < 0) return;
+    const depth = Number(target.dataset.treeDepth ?? 0);
+
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp' || event.key === 'Home' || event.key === 'End') {
+      event.preventDefault();
+      const nextIndex = event.key === 'Home'
+        ? 0
+        : event.key === 'End'
+          ? items.length - 1
+          : Math.max(0, Math.min(items.length - 1, index + (event.key === 'ArrowDown' ? 1 : -1)));
+      focusTreeItem(items[nextIndex]);
+      return;
+    }
+
+    const isGroup = target.dataset.rowType === 'group';
+    const groupPath = target.dataset.groupPath;
+    const isExpandable = target.hasAttribute('aria-expanded');
+    const isExpanded = target.getAttribute('aria-expanded') === 'true';
+    if (event.key === 'ArrowRight') {
+      if (!isGroup || !isExpandable) return;
+      event.preventDefault();
+      if (!isExpanded && groupPath) {
+        togglePath(groupPath);
+        return;
+      }
+      const child = items[index + 1];
+      if (child && Number(child.dataset.treeDepth ?? 0) > depth) {
+        focusTreeItem(child);
+      }
+      return;
+    }
+
+    event.preventDefault();
+    if (isGroup && isExpandable && isExpanded && groupPath) {
+      togglePath(groupPath);
+      return;
+    }
+    for (let parentIndex = index - 1; parentIndex >= 0; parentIndex -= 1) {
+      const parent = items[parentIndex];
+      if (parent.dataset.rowType === 'group' && Number(parent.dataset.treeDepth ?? 0) < depth) {
+        focusTreeItem(parent);
+        return;
+      }
+    }
+  }, [focusTreeItem, getVisibleTreeItems, togglePath]);
+
   return (
     <div className="space-y-1" onPointerDownCapture={handleTreePointerDownCapture}>
       {/* Expand/Collapse controls */}
@@ -791,9 +908,11 @@ export const HostTreeView: React.FC<HostTreeViewProps> = ({
       )}
 
       <div
+        ref={treeRef}
         role="tree"
         aria-label={t("vault.nav.hosts")}
         aria-multiselectable={isMultiSelectMode || undefined}
+        onKeyDownCapture={handleTreeKeyDown}
       >
       {/* Group tree */}
       {sortedGroupTree.map((node) => (
@@ -833,6 +952,9 @@ export const HostTreeView: React.FC<HostTreeViewProps> = ({
 	          setDragOverDropTarget={setDragOverDropTarget}
 	          groupConfigs={groupConfigs}
 	          groupDefaultsByPath={groupDefaultsByPath}
+	          activeTreeItemKey={activeTreeItemKey}
+	          initialTreeItemKey={initialTreeItemKey}
+	          onActiveTreeItemChange={setActiveTreeItemKey}
 	        />
       ))}
 
@@ -859,6 +981,9 @@ export const HostTreeView: React.FC<HostTreeViewProps> = ({
           }}
 	          groupConfigs={groupConfigs}
 	          groupDefaultsByPath={groupDefaultsByPath}
+	          activeTreeItemKey={activeTreeItemKey}
+	          initialTreeItemKey={initialTreeItemKey}
+	          onActiveTreeItemChange={setActiveTreeItemKey}
 	        />
       ))}
       </div>

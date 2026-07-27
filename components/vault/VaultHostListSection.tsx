@@ -443,23 +443,9 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
                                     activateHost(safeHost);
                                   }}
                                   onKeyDown={(event) => {
-                                    if (event.key === "Enter" || event.key === " ") {
-                                      event.preventDefault();
-                                      activateHost(safeHost);
-                                      return;
-                                    }
-                                    const index = recentHosts.findIndex((item) => item.id === host.id);
-                                    const direction = event.key === "ArrowUp" || event.key === "ArrowLeft"
-                                      ? "previous"
-                                      : event.key === "ArrowDown" || event.key === "ArrowRight"
-                                        ? "next"
-                                        : null;
-                                    if (!direction) return;
+                                    if (event.key !== "Enter" && event.key !== " ") return;
                                     event.preventDefault();
-                                    const nextIndex = index + (direction === "next" ? 1 : -1);
-                                    const nextHost = recentHosts[nextIndex];
-                                    if (nextHost) focusHostAndElement(nextHost);
-                                    else navigateHostSection("recent", direction);
+                                    activateHost(safeHost);
                                   }}
                                 >
                                   {viewMode === "grid" && (
@@ -572,9 +558,23 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
                                     activateHost(safeHost);
                                   }}
                                   onKeyDown={(event) => {
-                                    if (event.key !== "Enter" && event.key !== " ") return;
+                                    if (event.key === "Enter" || event.key === " ") {
+                                      event.preventDefault();
+                                      activateHost(safeHost);
+                                      return;
+                                    }
+                                    const index = recentHosts.findIndex((item) => item.id === host.id);
+                                    const direction = event.key === "ArrowUp" || event.key === "ArrowLeft"
+                                      ? "previous"
+                                      : event.key === "ArrowDown" || event.key === "ArrowRight"
+                                        ? "next"
+                                        : null;
+                                    if (!direction) return;
                                     event.preventDefault();
-                                    activateHost(safeHost);
+                                    const nextIndex = index + (direction === "next" ? 1 : -1);
+                                    const nextHost = recentHosts[nextIndex];
+                                    if (nextHost) focusHostAndElement(nextHost);
+                                    else navigateHostSection("recent", direction);
                                   }}
                                 >
                                   <div className="flex items-center gap-3 h-full">

@@ -188,6 +188,9 @@ test("HostTreeView shows selected groups in multi-select mode", () => {
   assert.match(markup, /aria-multiselectable="true"/);
   assert.match(markup, /role="treeitem"/);
   assert.match(markup, /aria-selected="true"/);
+  assert.match(markup, /data-tree-item-key="group:production"/);
+  assert.match(markup, /data-tree-depth="0"/);
+  assert.match(markup, /aria-level="1"/);
   assert.match(markup, /tabindex="0"/);
   assert.doesNotMatch(markup, /aria-expanded=/);
   assert.doesNotMatch(markup, /data-host-tree-group-edit-button="production"/);
@@ -220,5 +223,38 @@ test("HostTreeView exposes selected hosts to keyboard and assistive technology",
   assert.match(markup, /role="tree"/);
   assert.match(markup, /data-host-id="host-1"[^>]*role="treeitem"/);
   assert.match(markup, /data-host-id="host-1"[^>]*aria-selected="true"/);
+  assert.match(markup, /data-host-id="host-1"[^>]*data-tree-item-key="host:host-1"/);
+  assert.match(markup, /data-host-id="host-1"[^>]*data-tree-depth="0"/);
+  assert.match(markup, /data-host-id="host-1"[^>]*aria-level="1"/);
   assert.match(markup, /data-host-id="host-1"[^>]*tabindex="0"/);
+});
+
+test("HostTreeView exposes only one tree item in the tab order", () => {
+  installLocalStorageMock();
+
+  const markup = renderToStaticMarkup(
+    <HostTreeView
+      groupTree={[{
+        name: "Production",
+        path: "production",
+        children: {},
+        hosts: [],
+      }]}
+      hosts={[baseHost]}
+      onConnect={() => undefined}
+      onEditHost={() => undefined}
+      onDuplicateHost={() => undefined}
+      onDeleteHost={() => undefined}
+      onCopyCredentials={() => undefined}
+      onNewGroup={() => undefined}
+      onRenameGroup={() => undefined}
+      onEditGroup={() => undefined}
+      onDeleteGroup={() => undefined}
+      moveHostToGroup={() => undefined}
+      moveGroup={() => undefined}
+    />,
+  );
+
+  assert.equal(markup.match(/tabindex="0"/g)?.length, 1);
+  assert.equal(markup.match(/tabindex="-1"/g)?.length, 1);
 });
