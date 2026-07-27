@@ -21,6 +21,8 @@ export interface VaultImportProgress {
   error?: string;
 }
 
+export type VaultHostPersistenceResult = boolean | void | "superseded";
+
 export function countVaultImportDuplicates({
   importedHostCount,
   newHostCount,
@@ -39,13 +41,17 @@ export function countVaultImportDuplicates({
 }
 
 export async function ensureVaultImportPersisted(
-  persisted: boolean | void,
+  persisted: Exclude<VaultHostPersistenceResult, "superseded">,
   errorMessage: string,
   onPersisted?: () => unknown | Promise<unknown>,
   onPersistenceFailed?: () => unknown | Promise<unknown>,
 ): Promise<void> {
   if (persisted === false) {
-    await onPersistenceFailed?.();
+    try {
+      await onPersistenceFailed?.();
+    } catch {
+      // Keep the original persistence error visible even if rollback also fails.
+    }
     throw new Error(errorMessage);
   }
   await onPersisted?.();
@@ -60,6 +66,49 @@ const hostMatchesAppliedImport = (currentHost: Host, appliedHost: Host): boolean
   const { order: _appliedOrder, ...appliedComparable } = appliedHost;
   return importFieldMatches(currentComparable, appliedComparable);
 };
+
+export function rebaseVaultImportedHosts({
+  currentHosts,
+  baselineHosts,
+  appliedHosts,
+}: {
+  currentHosts: Host[];
+  baselineHosts: Host[];
+  appliedHosts: Host[];
+}): Host[] {
+  const baselineById = new Map(baselineHosts.map((host) => [host.id, host]));
+  const appliedById = new Map(appliedHosts.map((host) => [host.id, host]));
+  const currentIds = new Set(currentHosts.map((host) => host.id));
+
+  const rebasedHosts = currentHosts.map((currentHost) => {
+    const baselineHost = baselineById.get(currentHost.id);
+    const appliedHost = appliedById.get(currentHost.id);
+    if (!baselineHost || !appliedHost) return currentHost;
+
+    const fieldNames = new Set([
+      ...Object.keys(baselineHost),
+      ...Object.keys(appliedHost),
+    ] as Array<keyof Host>);
+    const rebased = { ...currentHost } as Record<string, unknown>;
+    for (const field of fieldNames) {
+      if (importFieldMatches(baselineHost[field], appliedHost[field])) continue;
+      if (!importFieldMatches(currentHost[field], baselineHost[field])) continue;
+      if (Object.prototype.hasOwnProperty.call(appliedHost, field)) {
+        rebased[field as string] = appliedHost[field];
+      } else {
+        delete rebased[field as string];
+      }
+    }
+    return rebased as Host;
+  });
+
+  for (const appliedHost of appliedHosts) {
+    if (!baselineById.has(appliedHost.id) && !currentIds.has(appliedHost.id)) {
+      rebasedHosts.push(appliedHost);
+    }
+  }
+  return rebasedHosts;
+}
 
 export function rollbackVaultImportedHosts({
   currentHosts,
@@ -101,15 +150,15 @@ export function rollbackVaultImportedHosts({
       return [currentHost];
     }
 
-    const restored = { ...currentHost } as Host & Record<string, unknown>;
+    const restored = { ...currentHost } as Record<string, unknown>;
     for (const field of changedFields) {
       if (Object.prototype.hasOwnProperty.call(baselineHost, field)) {
-        restored[field] = baselineHost[field];
+        restored[field as string] = baselineHost[field];
       } else {
-        delete restored[field];
+        delete restored[field as string];
       }
     }
-    return [restored];
+    return [restored as Host];
   });
 }
 

@@ -8,8 +8,10 @@ import {
 import {
   countVaultImportDuplicates,
   ensureVaultImportPersisted,
+  rebaseVaultImportedHosts,
   rollbackVaultImportedHosts,
   waitForVaultImportProgressPaint,
+  type VaultHostPersistenceResult,
   type VaultImportProgress,
 } from "../../application/state/vaultImportProgress";
 import { importVaultHostsInWorker } from "../../application/state/vaultImportWorker";
@@ -32,7 +34,7 @@ interface UseVaultImportHandlersOptions {
   keys: SSHKey[];
   managedSources: ManagedSource[];
   onUpdateCustomGroups: (groups: string[]) => void;
-  onUpdateHosts: (hosts: Host[]) => boolean | void | Promise<boolean | void>;
+  onUpdateHosts: (hosts: Host[]) => VaultHostPersistenceResult | Promise<VaultHostPersistenceResult>;
   onUpdateKeys: (keys: SSHKey[]) => void;
   onUpdateManagedSources: (sources: ManagedSource[]) => void;
   setIsImportOpen: (open: boolean) => void;
@@ -161,18 +163,39 @@ export function useVaultImportHandlers({
           const currentManagedSources = managedSourcesRef.current;
           const persistHosts = async (nextHosts: Host[]) => {
             throwIfCancelled();
-            rollbackSnapshot = {
-              baselineHosts: currentHosts,
-              appliedHosts: nextHosts,
-            };
             importCommitStartedRef.current = true;
-            let hostUpdate: boolean | void | Promise<boolean | void>;
-            startTransition(() => {
-              hostUpdate = onUpdateHosts(nextHosts);
-            });
-            const persisted = await hostUpdate!;
-            if (persisted !== false) rollbackSnapshot = null;
-            return persisted;
+            let baselineHosts = currentHosts;
+            let appliedHosts = nextHosts;
+            while (true) {
+              rollbackSnapshot = { baselineHosts, appliedHosts };
+              let hostUpdate: VaultHostPersistenceResult | Promise<VaultHostPersistenceResult>;
+              startTransition(() => {
+                hostUpdate = onUpdateHosts(appliedHosts);
+              });
+              const persisted = await hostUpdate!;
+              if (persisted !== "superseded") {
+                if (persisted !== false) rollbackSnapshot = null;
+                return persisted;
+              }
+
+              const latestHosts = hostsRef.current;
+              appliedHosts = rebaseVaultImportedHosts({
+                currentHosts: latestHosts,
+                baselineHosts,
+                appliedHosts,
+              });
+              baselineHosts = latestHosts;
+            }
+          };
+
+          const rollbackPendingImport = async () => {
+            const snapshot = rollbackSnapshot;
+            rollbackSnapshot = null;
+            if (!snapshot) return;
+            await onUpdateHosts(rollbackVaultImportedHosts({
+              currentHosts: hostsRef.current,
+              ...snapshot,
+            }));
           };
 
           const fileBaseName = file.name.replace(/\.[^/.]+$/, "");
@@ -300,13 +323,7 @@ export function useVaultImportHandlers({
                   onUpdateCustomGroups(nextGroups);
                 });
               },
-              async () => {
-                await onUpdateHosts(rollbackVaultImportedHosts({
-                  currentHosts: hostsRef.current,
-                  ...rollbackSnapshot!,
-                }));
-                rollbackSnapshot = null;
-              },
+              rollbackPendingImport,
             );
           } else if (newHosts.length > 0) {
             const merged = applyVaultHostImport(currentHosts, currentCustomGroups, result, { skipDuplicates: true });
@@ -322,13 +339,7 @@ export function useVaultImportHandlers({
               () => {
                 startTransition(() => onUpdateCustomGroups(merged.customGroups));
               },
-              async () => {
-                await onUpdateHosts(rollbackVaultImportedHosts({
-                  currentHosts: hostsRef.current,
-                  ...rollbackSnapshot!,
-                }));
-                rollbackSnapshot = null;
-              },
+              rollbackPendingImport,
             );
             throwIfCancelled();
             const resolved = await resolveVaultImportKeyPassphraseConflicts(
@@ -463,12 +474,11 @@ export function useVaultImportHandlers({
           });
         } catch (err) {
           if (rollbackSnapshot) {
-            const snapshot = rollbackSnapshot;
-            rollbackSnapshot = null;
-            await onUpdateHosts(rollbackVaultImportedHosts({
-              currentHosts: hostsRef.current,
-              ...snapshot,
-            }));
+            try {
+              await rollbackPendingImport();
+            } catch (rollbackError) {
+              console.error("[vault import] Failed to rollback imported hosts.", rollbackError);
+            }
           }
           if (
             signal.aborted

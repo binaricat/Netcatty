@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   countVaultImportDuplicates,
   ensureVaultImportPersisted,
+  rebaseVaultImportedHosts,
   rollbackVaultImportedHosts,
   waitForVaultImportProgressPaint,
 } from "./vaultImportProgress.ts";
@@ -59,6 +60,42 @@ test("vault import rollback preserves unrelated concurrent host changes", () => 
   ]);
 });
 
+test("vault import rebase preserves concurrent edits and restores missing imported data", () => {
+  const baseline = [{
+    id: "existing",
+    label: "Existing",
+    hostname: "existing.test",
+    username: "root",
+    port: 22,
+    group: "Original",
+    tags: [],
+    os: "linux" as const,
+  }];
+  const applied = [
+    { ...baseline[0], group: "Imported", managedSourceId: "source-1" },
+    { ...baseline[0], id: "imported", label: "Imported", hostname: "imported.test" },
+  ];
+  const concurrent = [
+    { ...baseline[0], label: "Renamed concurrently" },
+    { ...baseline[0], id: "concurrent", hostname: "concurrent.test" },
+  ];
+
+  assert.deepEqual(rebaseVaultImportedHosts({
+    currentHosts: concurrent,
+    baselineHosts: baseline,
+    appliedHosts: applied,
+  }), [
+    {
+      ...baseline[0],
+      label: "Renamed concurrently",
+      group: "Imported",
+      managedSourceId: "source-1",
+    },
+    { ...baseline[0], id: "concurrent", hostname: "concurrent.test" },
+    applied[1],
+  ]);
+});
+
 test("vault import duplicate count includes hosts that already exist", () => {
   assert.equal(countVaultImportDuplicates({
     importedHostCount: 8000,
@@ -94,6 +131,16 @@ test("vault import treats an explicit persistence failure as an import failure",
   );
   assert.equal(committed, 1);
   assert.equal(rolledBack, 1);
+
+  await assert.rejects(
+    ensureVaultImportPersisted(
+      false,
+      "not saved",
+      undefined,
+      async () => { throw new Error("rollback also failed"); },
+    ),
+    /not saved/,
+  );
 });
 
 test("vault import keeps moving when animation frames are paused in a background window", async () => {
