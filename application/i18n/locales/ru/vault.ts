@@ -107,6 +107,7 @@ export const ruVaultMessages: Messages = {
   'vault.import.progress.saving': 'Сохранение хостов',
   'vault.import.progress.complete': 'Импорт завершён',
   'vault.import.progress.failed': 'Ошибка импорта',
+  'vault.import.progress.persistFailed': 'Не удалось сохранить импортированные хосты. Освободите место в локальном хранилище и повторите попытку.',
   'vault.import.progress.summary':
     'Импортировано: {count}; пропущено: {skipped}; дубликатов: {duplicates}.',
   'vault.import.progress.keepOpen': 'Не закрывайте Netcatty, пока импорт выполняется в фоне.',

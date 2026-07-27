@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   countVaultImportDuplicates,
+  ensureVaultImportPersisted,
   waitForVaultImportProgressPaint,
 } from "./vaultImportProgress.ts";
 
@@ -20,6 +21,14 @@ test("vault import duplicate count includes hosts that already exist", () => {
     fileDuplicateCount: 3,
     managed: true,
   }), 3);
+});
+
+test("vault import treats an explicit persistence failure as an import failure", () => {
+  assert.doesNotThrow(() => ensureVaultImportPersisted(undefined, "not saved"));
+  assert.throws(
+    () => ensureVaultImportPersisted(false, "not saved"),
+    /not saved/,
+  );
 });
 
 test("vault import keeps moving when animation frames are paused in a background window", async () => {

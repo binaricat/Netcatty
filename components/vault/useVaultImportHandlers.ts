@@ -7,6 +7,7 @@ import {
 } from "../../application/defaultKeyPassphrases";
 import {
   countVaultImportDuplicates,
+  ensureVaultImportPersisted,
   waitForVaultImportProgressPaint,
   type VaultImportProgress,
 } from "../../application/state/vaultImportProgress";
@@ -30,7 +31,7 @@ interface UseVaultImportHandlersOptions {
   keys: SSHKey[];
   managedSources: ManagedSource[];
   onUpdateCustomGroups: (groups: string[]) => void;
-  onUpdateHosts: (hosts: Host[]) => void | Promise<void>;
+  onUpdateHosts: (hosts: Host[]) => boolean | void | Promise<boolean | void>;
   onUpdateKeys: (keys: SSHKey[]) => void;
   onUpdateManagedSources: (sources: ManagedSource[]) => void;
   setIsImportOpen: (open: boolean) => void;
@@ -237,14 +238,17 @@ export function useVaultImportHandlers({
             ) as string[];
 
             onUpdateManagedSources([...currentManagedSources, newSource]);
-            let hostUpdate: void | Promise<void>;
+            let hostUpdate: boolean | void | Promise<boolean | void>;
             startTransition(() => {
 	              hostUpdate = onUpdateHosts(
 	                [...updatedHosts, ...newHosts].map((host: Host) => sanitizeHost(host)),
 	              );
               onUpdateCustomGroups(nextGroups);
             });
-            await hostUpdate!;
+            ensureVaultImportPersisted(
+              await hostUpdate!,
+              t("vault.import.progress.persistFailed"),
+            );
           } else if (newHosts.length > 0) {
             const merged = applyVaultHostImport(currentHosts, currentCustomGroups, result, { skipDuplicates: true });
             const addedHostIds = new Set(merged.addedHosts.map((host) => host.id));
@@ -252,12 +256,15 @@ export function useVaultImportHandlers({
               const keyPath = host.identityFilePaths?.find((path) => path.trim())?.trim();
               return keyPath ? [[host.id, keyPath] as const] : [];
             }));
-            let hostUpdate: void | Promise<void>;
+            let hostUpdate: boolean | void | Promise<boolean | void>;
             startTransition(() => {
               hostUpdate = onUpdateHosts(merged.hosts);
               onUpdateCustomGroups(merged.customGroups);
             });
-            await hostUpdate!;
+            ensureVaultImportPersisted(
+              await hostUpdate!,
+              t("vault.import.progress.persistFailed"),
+            );
             const resolved = await resolveVaultImportKeyPassphraseConflicts(
               result.keyPassphraseCandidates ?? result.keyPassphrases ?? [],
               resolveDefaultKeyPassphraseAliases,

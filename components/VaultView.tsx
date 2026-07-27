@@ -230,7 +230,7 @@ interface VaultViewProps {
   onDeleteHost: (id: string) => void;
   onConnect: (host: Host) => void;
   onOpenHostFromNote?: (host: Host, source?: { noteId: string }) => void;
-  onUpdateHosts: (hosts: Host[]) => void;
+  onUpdateHosts: (hosts: Host[]) => boolean | void | Promise<boolean | void>;
   onUpdateKeys: (keys: SSHKey[]) => void;
   onImportOrReuseKey: (draft: Partial<SSHKey>) => SSHKey;
   onUpdateIdentities: (identities: Identity[]) => void;

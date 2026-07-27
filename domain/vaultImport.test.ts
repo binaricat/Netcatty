@@ -147,6 +147,24 @@ test("SecureCRT import reads the protocol-specific hexadecimal port", () => {
   assert.equal(result.hosts[0].port, 2222);
 });
 
+test("SecureCRT import selects the port field for the configured SSH version", () => {
+  const ssh2 = importVaultHostsFromText("securecrt", [
+    'S:"Hostname"=ssh2.example.com',
+    'S:"Protocol Name"=SSH2',
+    'D:"[SSH2] Port"=000008ae',
+    'D:"[SSH1] Port"=00000017',
+  ].join("\n"));
+  const ssh1 = importVaultHostsFromText("securecrt", [
+    'S:"Hostname"=ssh1.example.com',
+    'S:"Protocol Name"=SSH1',
+    'D:"[SSH1] Port"=000008af',
+    'D:"[SSH2] Port"=00000016',
+  ].join("\n"));
+
+  assert.equal(ssh2.hosts[0]?.port, 2222);
+  assert.equal(ssh1.hosts[0]?.port, 2223);
+});
+
 test("vault import can place every imported host into one selected group", () => {
   const imported = importVaultHostsFromText("csv", [
     "Label,Hostname,Group",

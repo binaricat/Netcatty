@@ -38,6 +38,13 @@ export function countVaultImportDuplicates({
   return fileDuplicateCount + existingDuplicateCount;
 }
 
+export function ensureVaultImportPersisted(
+  persisted: boolean | void,
+  errorMessage: string,
+): void {
+  if (persisted === false) throw new Error(errorMessage);
+}
+
 interface VaultImportPaintWaitOptions {
   requestFrame?: (callback: () => void) => unknown;
   setTimer?: (callback: () => void, delayMs: number) => unknown;

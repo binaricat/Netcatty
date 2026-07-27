@@ -670,6 +670,7 @@ export const zhCNCoreMessages: Messages = {
   'vault.import.progress.saving': '正在保存主机',
   'vault.import.progress.complete': '导入完成',
   'vault.import.progress.failed': '导入失败',
+  'vault.import.progress.persistFailed': '导入的主机无法保存。请清理本地存储空间后重试。',
   'vault.import.progress.summary': '已导入 {count} 台主机；跳过 {skipped} 条；重复 {duplicates} 条。',
   'vault.import.progress.keepOpen': '导入正在后台进行，请保持 Netcatty 开启。',
   'vault.import.progress.fileSummary': '{name} · {count} 个文件',

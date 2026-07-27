@@ -879,6 +879,9 @@ const importFromSecureCrt = (text: string, fileName?: string): VaultImportResult
     hostname?: string;
     username?: string;
     port?: number;
+    ssh1Port?: number;
+    ssh2Port?: number;
+    sshVersion?: "ssh1" | "ssh2";
     protocol?: Exclude<HostProtocol, "mosh" | "et">;
   };
 
@@ -916,11 +919,21 @@ const importFromSecureCrt = (text: string, fileName?: string): VaultImportResult
       current.hostname = value;
     } else if (key === "Username") {
       current.username = value;
-    } else if (key === "Port" || key === "[SSH2] Port" || key === "[SSH1] Port") {
+    } else if (key === "Port") {
       current.port = parseSecureCrtPort(value);
+    } else if (key === "[SSH2] Port") {
+      current.ssh2Port = parseSecureCrtPort(value);
+    } else if (key === "[SSH1] Port") {
+      current.ssh1Port = parseSecureCrtPort(value);
     } else if (key === "Protocol Name") {
       const p = normalizeProtocol(value);
-      current.protocol = p;
+      const normalizedName = value.trim().toLowerCase();
+      current.sshVersion = normalizedName === "ssh1"
+        ? "ssh1"
+        : normalizedName === "ssh2" || normalizedName === "ssh-2"
+          ? "ssh2"
+          : undefined;
+      current.protocol = p ?? (current.sshVersion ? "ssh" : undefined);
     } else if (key === "Session Name") {
       current.label = value;
     }
@@ -949,12 +962,19 @@ const importFromSecureCrt = (text: string, fileName?: string): VaultImportResult
     }
 
     const label = s.label || (sessions.length > 1 ? `${fallbackLabel} ${i + 1}` : fallbackLabel);
+    const protocolSpecificPort = protocol === "ssh"
+      ? s.sshVersion === "ssh1"
+        ? s.ssh1Port
+        : s.sshVersion === "ssh2"
+          ? s.ssh2Port
+          : s.ssh2Port ?? s.ssh1Port
+      : undefined;
     parsedHosts.push(
       createHost({
         label,
         hostname: s.hostname,
         username: s.username,
-        port: s.port ?? (protocol === "ssh" ? DEFAULT_SSH_PORT : 23),
+        port: protocolSpecificPort ?? s.port ?? (protocol === "ssh" ? DEFAULT_SSH_PORT : 23),
         protocol,
       }),
     );

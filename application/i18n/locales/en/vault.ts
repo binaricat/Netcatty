@@ -70,6 +70,7 @@ export const enVaultMessages: Messages = {
   'vault.import.progress.saving': 'Saving hosts',
   'vault.import.progress.complete': 'Import complete',
   'vault.import.progress.failed': 'Import failed',
+  'vault.import.progress.persistFailed': 'Imported hosts could not be saved. Free some local storage space and try again.',
   'vault.import.progress.summary':
     'Imported {count} hosts; skipped {skipped}; duplicates {duplicates}.',
   'vault.import.progress.keepOpen': 'Keep Netcatty open while the import runs in the background.',
