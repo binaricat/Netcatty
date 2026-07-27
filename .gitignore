@@ -1,9 +1,9 @@
 # =============================================================================
 # Allowlist .gitignore (https://github.com/binaricat/Netcatty/issues/2534)
 #
-# Layer 1 — default-deny at the repository root
-# Layer 2 — re-include only paths that belong in git
-# Layer 3 — classical denylist for generated / local / secret artifacts
+# Layer 1 - default-deny at the repository root
+# Layer 2 - re-include only paths that belong in git
+# Layer 3 - classical denylist for generated / local / secret artifacts
 #
 # Goal: a mistaken `git add .` (or an agent doing the same) cannot pick up
 # random root files, agent state dirs, env files, or build outputs.
