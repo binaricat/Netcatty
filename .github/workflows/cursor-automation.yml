@@ -64,6 +64,7 @@ permissions:
 env:
   CURSOR_SANDBOX_APPARMOR_URL: https://downloads.cursor.com/lab/enterprise/cursor-sandbox-apparmor_0.6.0_all.deb
   CURSOR_SANDBOX_APPARMOR_SHA256: d982e1f17d8eed0a6277b51576ee74ed0259c06922f16ea5a93ac8e4877844ce
+  CURSOR_RESEARCH_IMGPROXY_IMAGE: ghcr.io/imgproxy/imgproxy@sha256:5206f369c5398e6ce37d3c4131206c95383edecc7aefdf0c37ff0b22fd213ed0
 
 jobs:
   route:
@@ -386,6 +387,9 @@ jobs:
           set -euo pipefail
           test -f scripts/cursor-automation.cjs
           cp scripts/cursor-automation.cjs "$RUNNER_TEMP/cursor-automation.cjs"
+          test -f scripts/prepare-cursor-research-input.sh
+          cp scripts/prepare-cursor-research-input.sh "$RUNNER_TEMP/prepare-cursor-research-input.sh"
+          chmod 0555 "$RUNNER_TEMP/prepare-cursor-research-input.sh"
           # Prompt copy for classify (agent must not rewrite the policy helper).
           mkdir -p "$RUNNER_TEMP/cursor-prompts"
           cp .github/cursor/prompts/classify.md "$RUNNER_TEMP/cursor-prompts/classify.md"
@@ -635,11 +639,15 @@ jobs:
         env:
           GITHUB_TOKEN: ''
           GH_TOKEN: ''
+          RESEARCH_INPUT_PATH: .cursor-runtime/issue.json
+          RESEARCH_PROMPT_PATH: cursor-prompts/research.md
+          RESEARCH_RAW_OUTPUT_PATH: .cursor-runtime/external-research-raw.txt
+          RESEARCH_RESULT_OUTPUT_PATH: .cursor-runtime/external-research.md
         run: |
           set -euo pipefail
           research_dir="$(mktemp -d /tmp/cursor-web-research.XXXXXX)"
           mkdir -p "$research_dir/.cursor" .cursor-runtime
-          cp .cursor-runtime/issue.json "$research_dir/input.json"
+          "$RUNNER_TEMP/prepare-cursor-research-input.sh" "$RESEARCH_INPUT_PATH" "$research_dir"
           node -e '
             const fs = require("node:fs");
             const cursorDir = process.argv[1];
@@ -655,7 +663,7 @@ jobs:
               cursorDir + "/cli.json",
               JSON.stringify({
                 permissions: {
-                  allow: ["Read(input.json)"],
+                  allow: ["Read(input.json)", "Read(attachments/**)"],
                   deny: [
                     "Shell(*)",
                     "Write(**)",
@@ -670,23 +678,23 @@ jobs:
               }, null, 2) + "\n",
             );
           ' "$research_dir/.cursor"
-          prompt="$(cat "$RUNNER_TEMP/cursor-prompts/research.md")"
+          prompt="$(cat "$RUNNER_TEMP/$RESEARCH_PROMPT_PATH")"
           sudo --preserve-env=HOME,RUNNER_TEMP,GITHUB_WORKSPACE \
             "$RUNNER_TEMP/cursor-agent-authenticated" \
             -p --mode=ask --force --trust --sandbox enabled --model auto --output-format stream-json --stream-partial-output \
             --workspace "$research_dir" "$prompt" \
-            > .cursor-runtime/external-research-raw.txt
-          cat .cursor-runtime/external-research-raw.txt
+            > "$RESEARCH_RAW_OUTPUT_PATH"
+          cat "$RESEARCH_RAW_OUTPUT_PATH"
           node -e '
             const fs = require("node:fs");
             const auto = require(process.env.RUNNER_TEMP + "/cursor-automation.cjs");
-            const raw = fs.readFileSync(".cursor-runtime/external-research-raw.txt", "utf8");
-            const input = JSON.parse(fs.readFileSync(".cursor-runtime/issue.json", "utf8"));
+            const raw = fs.readFileSync(process.argv[2], "utf8");
+            const input = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
             auto.writeText(
-              ".cursor-runtime/external-research.md",
+              process.argv[3],
               auto.parseExternalResearchStream(raw, input),
             );
-          '
+          ' "$research_dir/input.json" "$RESEARCH_RAW_OUTPUT_PATH" "$RESEARCH_RESULT_OUTPUT_PATH"
 
       - name: Scan classification research output for credential leaks
         if: steps.prepare.outputs.should_run == 'true'
@@ -1183,9 +1191,12 @@ jobs:
           set -euo pipefail
           git fetch --depth=1 origin "$DEFAULT_BRANCH"
           git show "FETCH_HEAD:scripts/cursor-automation.cjs" > "$RUNNER_TEMP/cursor-automation.cjs"
+          git show "FETCH_HEAD:scripts/prepare-cursor-research-input.sh" > "$RUNNER_TEMP/prepare-cursor-research-input.sh"
           git show "FETCH_HEAD:.github/cursor/prompts/followup.md" > "$RUNNER_TEMP/followup.md"
           git show "FETCH_HEAD:.github/cursor/prompts/research.md" > "$RUNNER_TEMP/research.md"
+          chmod 0555 "$RUNNER_TEMP/prepare-cursor-research-input.sh"
           test -s "$RUNNER_TEMP/cursor-automation.cjs"
+          test -s "$RUNNER_TEMP/prepare-cursor-research-input.sh"
           test -s "$RUNNER_TEMP/followup.md"
           test -s "$RUNNER_TEMP/research.md"
 
@@ -1372,11 +1383,15 @@ jobs:
         env:
           GITHUB_TOKEN: ''
           GH_TOKEN: ''
+          RESEARCH_INPUT_PATH: .cursor-runtime/followup.json
+          RESEARCH_PROMPT_PATH: research.md
+          RESEARCH_RAW_OUTPUT_PATH: .cursor-runtime/followup-research-raw.txt
+          RESEARCH_RESULT_OUTPUT_PATH: .cursor-runtime/followup-research.md
         run: |
           set -euo pipefail
           research_dir="$(mktemp -d /tmp/cursor-web-research.XXXXXX)"
           mkdir -p "$research_dir/.cursor" .cursor-runtime
-          cp .cursor-runtime/followup.json "$research_dir/input.json"
+          "$RUNNER_TEMP/prepare-cursor-research-input.sh" "$RESEARCH_INPUT_PATH" "$research_dir"
           node -e '
             const fs = require("node:fs");
             const cursorDir = process.argv[1];
@@ -1392,7 +1407,7 @@ jobs:
               cursorDir + "/cli.json",
               JSON.stringify({
                 permissions: {
-                  allow: ["Read(input.json)"],
+                  allow: ["Read(input.json)", "Read(attachments/**)"],
                   deny: [
                     "Shell(*)",
                     "Write(**)",
@@ -1407,23 +1422,23 @@ jobs:
               }, null, 2) + "\n",
             );
           ' "$research_dir/.cursor"
-          prompt="$(cat "$RUNNER_TEMP/research.md")"
+          prompt="$(cat "$RUNNER_TEMP/$RESEARCH_PROMPT_PATH")"
           sudo --preserve-env=HOME,RUNNER_TEMP,GITHUB_WORKSPACE \
             "$RUNNER_TEMP/cursor-agent-authenticated" \
             -p --mode=ask --force --trust --sandbox enabled --model auto --output-format stream-json --stream-partial-output \
             --workspace "$research_dir" "$prompt" \
-            > .cursor-runtime/followup-research-raw.txt
-          cat .cursor-runtime/followup-research-raw.txt
+            > "$RESEARCH_RAW_OUTPUT_PATH"
+          cat "$RESEARCH_RAW_OUTPUT_PATH"
           node -e '
             const fs = require("node:fs");
             const auto = require(process.env.RUNNER_TEMP + "/cursor-automation.cjs");
-            const raw = fs.readFileSync(".cursor-runtime/followup-research-raw.txt", "utf8");
-            const input = JSON.parse(fs.readFileSync(".cursor-runtime/followup.json", "utf8"));
+            const raw = fs.readFileSync(process.argv[2], "utf8");
+            const input = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
             auto.writeText(
-              ".cursor-runtime/followup-research.md",
+              process.argv[3],
               auto.parseExternalResearchStream(raw, input),
             );
-          '
+          ' "$research_dir/input.json" "$RESEARCH_RAW_OUTPUT_PATH" "$RESEARCH_RESULT_OUTPUT_PATH"
 
       - name: Scan follow-up research output for credential leaks
         if: steps.prepare.outputs.should_run == 'true'

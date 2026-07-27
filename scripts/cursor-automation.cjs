@@ -91,6 +91,7 @@ const PROTECTED_PATH_PREFIXES = Object.freeze([
   '.github/',
   '.cursor/',
   'scripts/cursor-automation',
+  'scripts/prepare-cursor-research-input',
   'scripts/issue-triage',
   'scripts/release',
   'nix/',
@@ -160,6 +161,70 @@ function parseExternalResearchEnvelope(value) {
     /^(RESEARCH_COMPLETE|RESEARCH_NOT_NEEDED|RESEARCH_BLOCKED):\s+(.+)$/,
   );
   return match ? { text: normalized, match, fenced: Boolean(fenced) } : null;
+}
+
+const USER_AUTHORED_URL_TOKEN_PATTERN = /https?:\/\/[^\s<>()"'`,;]+/gi;
+const GITHUB_USER_ATTACHMENT_ASSET_PATH_PATTERN =
+  /^\/user-attachments\/assets\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function normalizeGithubUserAttachmentAssetUrl(value) {
+  const candidate = String(value || '').replace(/[.!:\]}]+$/g, '');
+  try {
+    const parsed = new URL(candidate);
+    if (
+      parsed.protocol !== 'https:'
+      || parsed.hostname !== 'github.com'
+      || parsed.username
+      || parsed.password
+      || parsed.search
+      || parsed.hash
+      || !GITHUB_USER_ATTACHMENT_ASSET_PATH_PATTERN.test(parsed.pathname)
+    ) {
+      return '';
+    }
+    return candidate;
+  } catch {
+    return '';
+  }
+}
+
+function extractGithubUserAttachmentAssetUrls(input = {}) {
+  const tokens = getUserAuthoredResearchText(input).match(USER_AUTHORED_URL_TOKEN_PATTERN) || [];
+  return [...new Set(tokens.map(normalizeGithubUserAttachmentAssetUrl).filter(Boolean))];
+}
+
+function rewriteExternalResearchInputAttachments(input, attachments = []) {
+  const replacements = new Map();
+  for (const attachment of attachments) {
+    const sourceUrl = String(attachment?.sourceUrl || '');
+    const relativePath = String(attachment?.relativePath || '');
+    const exactSource = normalizeGithubUserAttachmentAssetUrl(sourceUrl);
+    if (exactSource !== sourceUrl) {
+      throw new Error('Research attachment source must be a GitHub user attachment asset URL.');
+    }
+    if (!/^attachments\/[A-Za-z0-9._/-]+$/.test(relativePath) || relativePath.includes('..')) {
+      throw new Error('Research attachment path must stay under attachments/.');
+    }
+    replacements.set(sourceUrl, `[proxied image: ${relativePath}]`);
+  }
+
+  const rewrite = (value) => {
+    if (typeof value === 'string') {
+      let result = value;
+      for (const [sourceUrl, replacement] of replacements) {
+        result = result.split(sourceUrl).join(replacement);
+      }
+      return result;
+    }
+    if (Array.isArray(value)) return value.map(rewrite);
+    if (value && typeof value === 'object') {
+      return Object.fromEntries(
+        Object.entries(value).map(([key, nested]) => [key, rewrite(nested)]),
+      );
+    }
+    return value;
+  };
+  return rewrite(input);
 }
 
 function normalizeExternalResearchText(value, { input, webToolUsed = false } = {}) {
@@ -3104,6 +3169,8 @@ module.exports = {
   BOT_PR_LABEL,
   CODEX_TERMINALS,
   sanitizeUntrustedText,
+  extractGithubUserAttachmentAssetUrls,
+  rewriteExternalResearchInputAttachments,
   normalizeExternalResearchText,
   parseExternalResearchStream,
   countSummaryUnits,

@@ -1392,9 +1392,16 @@ test('isBotPrForIssue matches marker + Fixes', () => {
 test('hasProtectedChangesInSources checks commit names', () => {
   const hits = auto.hasProtectedChangesInSources({
     gitStatusPorcelain: '',
-    changedFiles: ['.github/workflows/x.yml', 'src/a.ts'],
+    changedFiles: [
+      '.github/workflows/x.yml',
+      'scripts/prepare-cursor-research-input.sh',
+      'src/a.ts',
+    ],
   });
-  assert.deepEqual(hits, ['.github/workflows/x.yml']);
+  assert.deepEqual(hits, [
+    '.github/workflows/x.yml',
+    'scripts/prepare-cursor-research-input.sh',
+  ]);
 });
 
 test('hasProtectedChangesInSources blocks electron-builder configs', () => {
@@ -1894,6 +1901,65 @@ test('normalizeExternalResearchText accepts sourced research and explicit no-op'
       '```',
     ].join('\n')),
     'RESEARCH_NOT_NEEDED: only local Netcatty behavior is involved',
+  );
+});
+
+test('research input replaces only successfully proxied GitHub image attachments', () => {
+  const attachmentUrl =
+    'https://github.com/user-attachments/assets/4ef1f25a-934d-4537-9ec0-3a415d7e9a32';
+  const noResearchNeeded =
+    'RESEARCH_NOT_NEEDED: the report only concerns local Netcatty behavior';
+  const input = {
+    issue: {
+      body: [
+        'The reconnect prompt disappears while terminal search is open.',
+        `<img alt="Image" src="${attachmentUrl}" />`,
+      ].join('\n'),
+    },
+    comments: [
+      {
+        is_bot: false,
+        body: `${attachmentUrl},https://example.com/project/issue/42`,
+      },
+    ],
+  };
+
+  assert.deepEqual(
+    auto.extractGithubUserAttachmentAssetUrls(input),
+    [attachmentUrl],
+  );
+  for (const suffix of ['/download', '.html', '%2Fdownload', '?raw=1', '#preview']) {
+    const extendedUrl = `${attachmentUrl}${suffix}`;
+    assert.deepEqual(
+      auto.extractGithubUserAttachmentAssetUrls({ body: extendedUrl }),
+      [],
+    );
+    assert.throws(
+      () => auto.normalizeExternalResearchText(noResearchNeeded, {
+        input: { body: extendedUrl },
+      }),
+      /requires external research/i,
+    );
+  }
+
+  const rewritten = auto.rewriteExternalResearchInputAttachments(input, [
+    { sourceUrl: attachmentUrl, relativePath: 'attachments/issue-image-1.png' },
+  ]);
+  assert.match(rewritten.issue.body, /attachments\/issue-image-1\.png/);
+  assert.doesNotMatch(rewritten.issue.body, /github\.com\/user-attachments/);
+  assert.match(rewritten.comments[0].body, /https:\/\/example\.com\/project\/issue\/42/);
+  assert.throws(
+    () => auto.normalizeExternalResearchText(noResearchNeeded, { input: rewritten }),
+    /requires external research/i,
+  );
+
+  const imageOnly = auto.rewriteExternalResearchInputAttachments(
+    { body: `<img alt="Image" src="${attachmentUrl}" />` },
+    [{ sourceUrl: attachmentUrl, relativePath: 'attachments/issue-image-1.png' }],
+  );
+  assert.equal(
+    auto.normalizeExternalResearchText(noResearchNeeded, { input: imageOnly }),
+    noResearchNeeded,
   );
 });
 
@@ -2600,6 +2666,54 @@ test('workflow confines forced WebSearch to isolated read-only research passes',
   assert.equal((workflow.match(/denyWeb: true/g) || []).length, 5);
   assert.doesNotMatch(workflow, /issue-research-\$\{\{ github\.run_id \}\}-\$\{\{ github\.run_attempt \}\}/);
   assert.match(workflow, /name: issue-research-\$\{\{ github\.run_id \}\}[\s\S]*?overwrite: true/);
+});
+
+test('workflow sanitizes GitHub screenshots through pinned imgproxy before research', () => {
+  const workflow = fs.readFileSync(
+    path.join(__dirname, '..', '.github', 'workflows', 'cursor-automation.yml'),
+    'utf8',
+  );
+  const attachmentProxy = fs.readFileSync(
+    path.join(__dirname, 'prepare-cursor-research-input.sh'),
+    'utf8',
+  );
+  const researchRuns = [...workflow.matchAll(
+    /- name: Research external context[\s\S]*?(?=\n\s{6}- name:)/g,
+  )].map((match) => match[0]);
+
+  assert.equal(researchRuns.length, 2);
+  assert.match(
+    workflow,
+    /CURSOR_RESEARCH_IMGPROXY_IMAGE: ghcr\.io\/imgproxy\/imgproxy@sha256:[a-f0-9]{64}/,
+  );
+  for (const run of researchRuns) {
+    assert.match(run, /"\$RUNNER_TEMP\/prepare-cursor-research-input\.sh"/);
+    assert.doesNotMatch(run, /(?:^|\s)scripts\/prepare-cursor-research-input\.sh/);
+    assert.match(run, /Read\(attachments\/\*\*\)/);
+  }
+  assert.match(
+    workflow,
+    /cp scripts\/prepare-cursor-research-input\.sh "\$RUNNER_TEMP\/prepare-cursor-research-input\.sh"/,
+  );
+  assert.match(
+    workflow,
+    /git show "FETCH_HEAD:scripts\/prepare-cursor-research-input\.sh" > "\$RUNNER_TEMP\/prepare-cursor-research-input\.sh"/,
+  );
+  assert.match(attachmentProxy, /extractGithubUserAttachmentAssetUrls/);
+  assert.match(attachmentProxy, /rewriteExternalResearchInputAttachments/);
+  assert.match(attachmentProxy, /attachment_count > 4/);
+  assert.match(
+    attachmentProxy,
+    /IMGPROXY_ALLOWED_SOURCES=https:\/\/github\.com\/user-attachments\/assets\//,
+  );
+  assert.match(attachmentProxy, /IMGPROXY_ALLOW_LOOPBACK_SOURCE_ADDRESSES=false/);
+  assert.match(attachmentProxy, /IMGPROXY_ALLOW_LINK_LOCAL_SOURCE_ADDRESSES=false/);
+  assert.match(attachmentProxy, /IMGPROXY_ALLOW_PRIVATE_SOURCE_ADDRESSES=false/);
+  assert.match(attachmentProxy, /IMGPROXY_MAX_SRC_FILE_SIZE=10485760/);
+  assert.match(attachmentProxy, /IMGPROXY_MAX_REDIRECTS=2/);
+  assert.match(attachmentProxy, /IMGPROXY_MAX_ANIMATION_FRAMES=1/);
+  assert.match(attachmentProxy, /127\.0\.0\.1:/);
+  assert.match(attachmentProxy, /attachments\/issue-image-/);
 });
 
 test('every Cursor agent invocation uses the one-shot credential descriptor bridge', () => {

@@ -88,6 +88,13 @@ Terminal codex_loop outcomes always drop `automation:codex-loop`:
   source-linked notes are passed to classify, implement, or follow-up agents.
   The workflow also verifies the CLI stream contains a real WebSearch/WebFetch
   tool event; an answer that merely prints a URL is rejected.
+- GitHub user-attachment images are fetched before that pass through a
+  digest-pinned imgproxy container. The proxy accepts only GitHub attachment
+  sources, blocks local/private destinations, bounds redirects, bytes, pixels,
+  and animation frames, and rasterizes successful results to temporary PNGs.
+  Cursor sees only those PNGs and a rewritten input without the source image
+  URL; any other URL still requires sourced external research. Proxy failures
+  stop the run and use the normal maintainer handoff.
 - User-level WebSearch/WebFetch denials are written only after that research
   pass (or in implement/fix jobs that never research). Pre-research sandbox
   setup enables the command sandbox without denying web tools, so research is
