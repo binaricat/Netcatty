@@ -347,6 +347,38 @@ test('runSdkAgentTurn forwards Antigravity API key through the shared SDK enviro
   assert.equal(streamArgs[2], 'antigravity');
 });
 
+test('runSdkAgentTurn rejects an Antigravity API key that could not be decrypted', async () => {
+  let streamStarted = false;
+  const errors: string[] = [];
+  const bridge: Record<string, (...args: unknown[]) => unknown> = {
+    aiSdkAgentStream: async () => {
+      streamStarted = true;
+      return { ok: true };
+    },
+  };
+
+  await runSdkAgentTurn(
+    bridge,
+    'request-antigravity-encrypted-key',
+    'chat-antigravity-encrypted-key',
+    {
+      id: 'antigravity',
+      name: 'Google Antigravity',
+      command: '/usr/bin/python3',
+      enabled: true,
+      sdkBackend: 'antigravity',
+      apiKey: 'enc:v1:undecryptable',
+    },
+    'hello',
+    createCallbacks(errors),
+  );
+
+  assert.equal(streamStarted, false);
+  assert.deepEqual(errors, [
+    'Saved Antigravity API key could not be decrypted. Please save it again in Settings.',
+  ]);
+});
+
 test('runSdkAgentTurn in cursor cli-login mode does not inject CURSOR_API_KEY', async () => {
   let streamArgs: unknown[] = [];
   let done: (() => void) | null = null;

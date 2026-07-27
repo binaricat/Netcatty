@@ -152,6 +152,9 @@ async function buildAgentEnvWithStoredApiKey(
   } else if (sdkBackend === 'antigravity' && config.apiKey) {
     const decrypted = await decryptField(config.apiKey).catch(() => config.apiKey);
     const apiKey = String(decrypted || '').trim();
+    if (String(config.apiKey).trim().startsWith('enc:v1:') && apiKey === String(config.apiKey).trim()) {
+      throw new Error('Saved Antigravity API key could not be decrypted. Please save it again in Settings.');
+    }
     if (apiKey) {
       env.GEMINI_API_KEY = apiKey;
     }
@@ -258,7 +261,13 @@ export async function runSdkAgentTurn(
     return true;
   };
 
-  const agentEnv = await buildAgentEnvWithStoredApiKey(sdkBackend, config);
+  let agentEnv: Record<string, string> | undefined;
+  try {
+    agentEnv = await buildAgentEnvWithStoredApiKey(sdkBackend, config);
+  } catch (error) {
+    callbacks.onError(formatSdkAgentErrorForDisplay(error));
+    return;
+  }
   const agentCommand = sdkBackend === 'antigravity'
     ? String(config.command || '').trim() || undefined
     : getManualAgentCommand(config);
