@@ -178,10 +178,11 @@ test("vault import destination controls offer preserve, existing, and new groups
   assert.match(html, /vault\.import\.destination\.new/);
 });
 
-test("import format step keeps destination settings off the main card grid", () => {
+test("import format step keeps destination settings off the main card grid", async () => {
   // Source-level guard: format tiles must not embed SecureCRT copy, and the
   // destination picker lives behind a dedicated footer entry point.
-  const source = require("node:fs").readFileSync(
+  const { readFileSync } = await import("node:fs");
+  const source = readFileSync(
     new URL("./ImportVaultDialog.tsx", import.meta.url),
     "utf8",
   );
