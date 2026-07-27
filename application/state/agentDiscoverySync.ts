@@ -65,9 +65,12 @@ export function applyDiscoveredUpdatesToExternalAgents(
     const versionChanged = canApplyExecutableStatus
       && Boolean(match.version)
       && ea.cliVersion !== match.version;
-    // Discovery only returns agents that are currently available; recover sticky
-    // available:false after a later SDK/auth probe succeeds (e.g. Antigravity key).
+    // Recover sticky available:false only for Antigravity after a later SDK/auth
+    // probe succeeds. Cursor discovery available is a union of API-key and
+    // CLI-login modes; applying it here would enable send while cursorAuthMode
+    // remains the unusable mode. Cursor availability is mode-gated in Settings.
     const availableChanged = canApplyExecutableStatus
+      && match.command === 'antigravity'
       && ea.available === false
       && match.available !== false;
     const commandChanged = match.command === 'antigravity'

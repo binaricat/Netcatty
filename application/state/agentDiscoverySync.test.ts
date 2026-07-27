@@ -3,6 +3,40 @@ import test from 'node:test';
 import type { DiscoveredAgent, ExternalAgentConfig } from '../../infrastructure/ai/types';
 import { applyDiscoveredUpdatesToExternalAgents } from './agentDiscoverySync';
 
+test('applyDiscoveredUpdatesToExternalAgents does not recover Cursor available from cross-mode discovery', () => {
+  const agents: ExternalAgentConfig[] = [{
+    id: 'discovered_cursor',
+    name: 'Cursor',
+    command: 'cursor',
+    args: [],
+    icon: 'cursor',
+    enabled: true,
+    available: false,
+    sdkBackend: 'cursor',
+    cursorAuthMode: 'api-key',
+    commandSource: 'auto',
+  }];
+  // Discovery available is the union of both auth modes (CLI login ok, no API key).
+  const discovered: DiscoveredAgent[] = [{
+    command: 'cursor',
+    name: 'Cursor',
+    icon: 'cursor',
+    description: "Cursor's coding agent via Cursor SDK",
+    args: [],
+    path: 'cursor',
+    binPath: '/usr/local/bin/cursor-agent',
+    version: 'Cursor Agent CLI',
+    available: true,
+    sdkBackend: 'cursor',
+    authSource: 'cli-login',
+  }];
+
+  const next = applyDiscoveredUpdatesToExternalAgents(agents, discovered);
+
+  assert.equal(next[0].available, false);
+  assert.equal(next[0].cursorAuthMode, 'api-key');
+});
+
 test('applyDiscoveredUpdatesToExternalAgents recovers sticky Antigravity available:false', () => {
   const agents: ExternalAgentConfig[] = [{
     id: 'discovered_antigravity',
