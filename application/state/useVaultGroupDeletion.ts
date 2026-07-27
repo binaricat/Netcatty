@@ -9,10 +9,8 @@ export function useVaultGroupDeletion({
   hosts,
   groupConfigs,
   managedSources,
-  onUpdateCustomGroups,
-  onUpdateHosts,
-  onUpdateGroupConfigs,
-  onUpdateManagedSources,
+  onReadPersistedHosts,
+  onCommitVaultImportTransaction,
   onClearAndRemoveManagedSource,
   onClearAndRemoveManagedSources,
   onDeletedPaths,
@@ -21,10 +19,15 @@ export function useVaultGroupDeletion({
   hosts: Host[];
   groupConfigs: GroupConfig[];
   managedSources: ManagedSource[];
-  onUpdateCustomGroups: (groups: string[]) => void;
-  onUpdateHosts: (hosts: Host[]) => unknown | Promise<unknown>;
-  onUpdateGroupConfigs: (configs: GroupConfig[]) => unknown | Promise<unknown>;
-  onUpdateManagedSources: (sources: ManagedSource[]) => void;
+  onReadPersistedHosts: () => Promise<Host[]>;
+  onCommitVaultImportTransaction: (
+    hosts: Host[],
+    updateGroups: (current: string[]) => string[],
+    updateSources: (current: ManagedSource[]) => ManagedSource[],
+  ) => Promise<
+    | { status: "persisted"; groups: string[]; sources: ManagedSource[] }
+    | { status: "superseded" }
+  >;
   onClearAndRemoveManagedSource?: (source: ManagedSource) => Promise<boolean>;
   onClearAndRemoveManagedSources?: (sources: ManagedSource[]) => Promise<void>;
   onDeletedPaths?: (selectedRoots: string[]) => void;
@@ -57,43 +60,56 @@ export function useVaultGroupDeletion({
       // Rebuild after the file operations so edits made while they were running
       // are preserved, then publish one coherent in-memory baseline for any
       // deletion already queued behind this one.
-      deletion = buildVaultGroupDeletion({
-        selectedPaths,
-        deleteHosts,
-        ...latestRef.current,
-      });
-      const removedSourceIds = new Set(deletion.sourcesToRemove.map((source) => source.id));
-      const nextManagedSources = latestRef.current.managedSources.filter(
-        (source) => !removedSourceIds.has(source.id),
-      );
-      const nextHosts = deletion.hosts.filter(
-        (host) => !additionallyDeletedHostIds.has(host.id),
-      );
-      latestRef.current = {
-        customGroups: deletion.customGroups,
-        hosts: nextHosts,
-        groupConfigs: deletion.groupConfigs,
-        managedSources: nextManagedSources,
-      };
-
-      onUpdateManagedSources(nextManagedSources);
-      onUpdateCustomGroups(deletion.customGroups);
-      const [hostsPersisted, groupConfigsPersisted] = await Promise.all([
-        onUpdateHosts(nextHosts),
-        onUpdateGroupConfigs(deletion.groupConfigs),
-      ]);
-      if (hostsPersisted === false || groupConfigsPersisted === false) {
-        throw new Error("Vault group deletion could not be saved");
+      while (true) {
+        deletion = buildVaultGroupDeletion({
+          selectedPaths,
+          deleteHosts,
+          ...latestRef.current,
+        });
+        const nextHosts = deletion.hosts.filter(
+          (host) => !additionallyDeletedHostIds.has(host.id),
+        );
+        const transaction = await onCommitVaultImportTransaction(
+          nextHosts,
+          (currentGroups) => buildVaultGroupDeletion({
+            selectedPaths,
+            deleteHosts,
+            customGroups: currentGroups,
+            hosts: [],
+            groupConfigs: [],
+            managedSources: [],
+          }).customGroups,
+          (currentSources) => buildVaultGroupDeletion({
+            selectedPaths,
+            deleteHosts,
+            customGroups: [],
+            hosts: [],
+            groupConfigs: [],
+            managedSources: currentSources,
+          }).sourcesToRemove.reduce(
+            (remaining, sourceToRemove) => remaining.filter((source) => source.id !== sourceToRemove.id),
+            currentSources,
+          ),
+        );
+        if (transaction.status === "superseded") {
+          latestRef.current.hosts = await onReadPersistedHosts();
+          continue;
+        }
+        latestRef.current = {
+          customGroups: transaction.groups,
+          hosts: nextHosts,
+          groupConfigs: deletion.groupConfigs,
+          managedSources: transaction.sources,
+        };
+        break;
       }
       onDeletedPaths?.(deletion.selectedRoots);
     });
   }, [
     onClearAndRemoveManagedSource,
     onClearAndRemoveManagedSources,
+    onCommitVaultImportTransaction,
     onDeletedPaths,
-    onUpdateCustomGroups,
-    onUpdateGroupConfigs,
-    onUpdateHosts,
-    onUpdateManagedSources,
+    onReadPersistedHosts,
   ]);
 }

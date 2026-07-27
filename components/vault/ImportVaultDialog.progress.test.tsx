@@ -143,8 +143,27 @@ test("vault import destination controls offer preserve, existing, and new groups
 
   assert.equal((html.match(/data-import-destination-mode=/g) ?? []).length, 3);
   assert.match(html, /Production/);
-  assert.match(html, /Staging/);
+  assert.doesNotMatch(html, /Staging/);
   assert.match(html, /vault\.import\.destination\.preserve/);
   assert.match(html, /vault\.import\.destination\.existing/);
   assert.match(html, /vault\.import\.destination\.new/);
+});
+
+test("vault import destination search caps very large group suggestions", () => {
+  const groups = Array.from({ length: 1000 }, (_, index) => `Group ${index}`);
+  const html = renderToStaticMarkup(
+    <VaultImportDestinationControls
+      mode="existing"
+      onModeChange={() => {}}
+      groups={groups}
+      existingGroup=""
+      onExistingGroupChange={() => {}}
+      newGroup=""
+      onNewGroupChange={() => {}}
+      t={t}
+    />,
+  );
+
+  assert.equal((html.match(/<option/g) ?? []).length, 50);
+  assert.match(html, /list=/);
 });

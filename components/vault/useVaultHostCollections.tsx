@@ -371,13 +371,26 @@ export function useVaultHostCollections({
     );
   
   const displayedGroups = useMemo(() => {
+      const hasActiveFilters = Boolean(searchTerm) || selectedTags.length > 0;
+      const sourceTree = hasActiveFilters ? buildTreeViewGroupTree : buildGroupTree;
+      const findSourceNode = (path: string): GroupNode | null => {
+        const parts = path.split("/").filter(Boolean);
+        let currentLevel = sourceTree;
+        let currentNode: GroupNode | null = null;
+        for (const part of parts) {
+          currentNode = currentLevel[part] ?? null;
+          if (!currentNode) return null;
+          currentLevel = currentNode.children;
+        }
+        return currentNode;
+      };
       if (!selectedGroupPath) {
         // Hide "General" group at root level only if it's auto-generated
         // (not user-created and has no subgroups)
         const isGeneralUserCreated = customGroups.some(
           (g) => g === "General" || g.startsWith("General/")
         );
-        const nodes = (Object.values(buildGroupTree) as GroupNode[])
+        const nodes = (Object.values(sourceTree) as GroupNode[])
           .filter((node) => {
             if (node.name !== "General") return true;
             // Keep General if user explicitly created it or it has subgroups
@@ -388,13 +401,21 @@ export function useVaultHostCollections({
         if (sortMode === "manual") return sortGroupNodes(nodes);
         return nodes.sort((a, b) => a.name.localeCompare(b.name));
       }
-      const node = findGroupNode(selectedGroupPath);
+      const node = findSourceNode(selectedGroupPath);
       if (!node || !node.children) return [];
       const children = Object.values(node.children) as GroupNode[];
       if (sortMode === "manual") return sortGroupNodes(children);
       return children.sort((a, b) => a.name.localeCompare(b.name));
-      // eslint-disable-next-line react-hooks/exhaustive-deps -- findGroupNode is derived from buildGroupTree
-    }, [buildGroupTree, selectedGroupPath, customGroups, sortGroupNodes, sortMode]);
+    }, [
+      buildGroupTree,
+      buildTreeViewGroupTree,
+      customGroups,
+      searchTerm,
+      selectedGroupPath,
+      selectedTags.length,
+      sortGroupNodes,
+      sortMode,
+    ]);
   
   const shouldHideEmptyRootHostsSection = useMemo(() => {
       if (selectedGroupPath || viewMode === "tree") return false;

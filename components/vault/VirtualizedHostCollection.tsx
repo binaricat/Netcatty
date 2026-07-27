@@ -345,6 +345,31 @@ export function VirtualizedGroupedHostCollection<T>({
   const itemIndexByKey = React.useMemo(() => new Map(
     flatItems.map((item, index) => [String(itemKey(item)), index]),
   ), [flatItems, itemKey]);
+  const hostRows = React.useMemo(() => rows.flatMap((row, rowIndex) => (
+    row.kind === "hosts" ? [{ row, rowIndex }] : []
+  )), [rows]);
+  const hostRowLengths = React.useMemo(
+    () => hostRows.map(({ row }) => row.hosts.length),
+    [hostRows],
+  );
+  const hostPositionByKey = React.useMemo(() => {
+    const positions = new Map<string, { hostRowIndex: number; column: number }>();
+    hostRows.forEach(({ row }, hostRowIndex) => {
+      row.hosts.forEach((item, column) => {
+        positions.set(String(itemKey(item)), { hostRowIndex, column });
+      });
+    });
+    return positions;
+  }, [hostRows, itemKey]);
+  const virtualRowIndexByItemIndex = React.useMemo(() => {
+    const indices = new Map<number, number>();
+    hostRows.forEach(({ row, rowIndex }) => {
+      row.hosts.forEach((_, column) => {
+        indices.set(row.hostStartIndex + column, rowIndex);
+      });
+    });
+    return indices;
+  }, [hostRows]);
   const hostRowHeight = viewMode === "grid" ? GRID_CARD_HEIGHT + VAULT_HOST_GRID_GAP : LIST_ROW_HEIGHT;
   const headerRowHeight = viewMode === "grid" ? 56 : 44;
 
@@ -416,17 +441,13 @@ export function VirtualizedGroupedHostCollection<T>({
     const key = String(activeItemKey);
     const index = itemIndexByKey.get(key);
     if (index === undefined) return;
-    const rowIndex = rows.findIndex((row) => (
-      row.kind === "hosts"
-      && index >= row.hostStartIndex
-      && index < row.hostStartIndex + row.hosts.length
-    ));
+    const rowIndex = virtualRowIndexByItemIndex.get(index) ?? -1;
     pendingFocusKeyRef.current = key;
     if (rowIndex >= 0) virtualizer.scrollToIndex(rowIndex, { align: "auto" });
     queueMicrotask(() => {
       if (focusRenderedItem(key)) pendingFocusKeyRef.current = null;
     });
-  }, [activeItemKey, focusRenderedItem, itemIndexByKey, rows, virtualizer]);
+  }, [activeItemKey, focusRenderedItem, itemIndexByKey, virtualizer, virtualRowIndexByItemIndex]);
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
     const target = event.target as HTMLElement;
@@ -438,19 +459,12 @@ export function VirtualizedGroupedHostCollection<T>({
     let nextIndex: number | null;
     if (viewMode === "grid" && (event.key === "ArrowUp" || event.key === "ArrowDown")) {
       const currentKey = wrapper?.dataset.vaultItemKey ?? "";
-      const hostRows = rows.flatMap((row, rowIndex) => (
-        row.kind === "hosts" ? [{ row, rowIndex }] : []
-      ));
-      const currentHostRowIndex = hostRows.findIndex(({ row }) => (
-        row.hosts.some((item) => String(itemKey(item)) === currentKey)
-      ));
-      const currentRow = hostRows[currentHostRowIndex]?.row;
-      const currentColumn = currentRow
-        ? currentRow.hosts.findIndex((item) => String(itemKey(item)) === currentKey)
-        : 0;
+      const currentPosition = hostPositionByKey.get(currentKey);
+      const currentHostRowIndex = currentPosition?.hostRowIndex ?? 0;
+      const currentColumn = currentPosition?.column ?? 0;
       const direction = event.key === "ArrowDown" ? 1 : -1;
       const targetPosition = getNextRaggedRowPosition({
-        rowLengths: hostRows.map(({ row }) => row.hosts.length),
+        rowLengths: hostRowLengths,
         currentRow: currentHostRowIndex,
         currentColumn,
         direction,
@@ -485,11 +499,7 @@ export function VirtualizedGroupedHostCollection<T>({
     event.preventDefault();
     const nextItem = flatItems[nextIndex];
     const nextKey = String(itemKey(nextItem));
-    const rowIndex = rows.findIndex((row) => (
-      row.kind === "hosts"
-      && nextIndex >= row.hostStartIndex
-      && nextIndex < row.hostStartIndex + row.hosts.length
-    ));
+    const rowIndex = virtualRowIndexByItemIndex.get(nextIndex) ?? -1;
     pendingFocusKeyRef.current = nextKey;
     onActiveItemChange?.(nextItem);
     if (rowIndex >= 0) virtualizer.scrollToIndex(rowIndex, { align: "auto" });

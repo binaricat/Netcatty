@@ -125,6 +125,13 @@ export function VaultImportDestinationControls({
   t: Translate;
 }) {
   const choices: VaultImportDestinationMode[] = ["preserve", "existing", "new"];
+  const existingGroupListId = React.useId();
+  const matchingGroups = useMemo(() => {
+    const query = existingGroup.trim().toLocaleLowerCase();
+    return groups
+      .filter((group) => !query || group.toLocaleLowerCase().includes(query))
+      .slice(0, 50);
+  }, [existingGroup, groups]);
   return (
     <div className="space-y-3 rounded-xl border border-border/60 bg-muted/20 p-3">
       <div className="text-xs font-medium text-muted-foreground">
@@ -150,22 +157,25 @@ export function VaultImportDestinationControls({
         ))}
       </div>
       {mode === "existing" && (
-        <select
-          value={existingGroup}
-          onChange={(event) => onExistingGroupChange(event.target.value)}
-          aria-label={t("vault.import.destination.existing")}
-          className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground"
-        >
-          {groups.length === 0 ? (
-            <option value="">{t("vault.import.destination.noGroups")}</option>
-          ) : (
-            groups.map((group) => (
-              <option key={group} value={group}>
-                {group}
-              </option>
-            ))
-          )}
-        </select>
+        <>
+          <input
+            type="text"
+            list={existingGroupListId}
+            value={existingGroup}
+            onChange={(event) => onExistingGroupChange(event.target.value)}
+            placeholder={groups.length === 0
+              ? t("vault.import.destination.noGroups")
+              : t("vault.import.destination.existing")}
+            aria-label={t("vault.import.destination.existing")}
+            autoComplete="off"
+            className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground"
+          />
+          <datalist id={existingGroupListId}>
+            {matchingGroups.map((group) => (
+              <option key={group} value={group} />
+            ))}
+          </datalist>
+        </>
       )}
       {mode === "new" && (
         <input
