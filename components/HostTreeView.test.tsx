@@ -425,7 +425,56 @@ test("HostTreeView virtualizes an 8,000-host tree", () => {
   assert.ok(renderedHosts < 100);
   assert.match(markup, /data-vault-virtual-tree="true"/);
   assert.match(markup, /height:320000px/);
+  // Flat ungrouped hosts share one sibling set at the root level.
   assert.match(markup, /aria-setsize="8000"/);
   assert.match(markup, /aria-posinset="1"/);
   assert.match(markup, /role="treeitem"/);
+});
+
+test("HostTreeView announces sibling position within each tree level", () => {
+  installLocalStorageMock();
+  const groupTree: GroupNode[] = [{
+    name: "prod",
+    path: "prod",
+    hosts: [
+      { ...baseHost, id: "host-a", label: "A", group: "prod" },
+      { ...baseHost, id: "host-b", label: "B", group: "prod" },
+    ],
+    children: {
+      east: {
+        name: "east",
+        path: "prod/east",
+        hosts: [{ ...baseHost, id: "host-c", label: "C", group: "prod/east" }],
+        children: {},
+      },
+    },
+  }];
+  const hosts = [
+    { ...baseHost, id: "host-a", label: "A", group: "prod" },
+    { ...baseHost, id: "host-b", label: "B", group: "prod" },
+    { ...baseHost, id: "host-c", label: "C", group: "prod/east" },
+    { ...baseHost, id: "host-root", label: "Root", group: "" },
+  ];
+  const items = buildVisibleHostTreeItems({
+    groupTree,
+    ungroupedHosts: hosts.filter((host) => !host.group),
+    expandedPaths: new Set(["prod", "prod/east"]),
+    sortMode: "az",
+    groupConfigs: [],
+  });
+
+  const byKey = new Map(items.map((item) => [item.key, item]));
+  // Root siblings: prod group + ungrouped host-root
+  assert.equal(byKey.get("group:prod")?.posInSet, 1);
+  assert.equal(byKey.get("group:prod")?.setSize, 2);
+  assert.equal(byKey.get("host:host-root")?.posInSet, 2);
+  assert.equal(byKey.get("host:host-root")?.setSize, 2);
+  // Children of prod: east group + hosts A/B
+  assert.equal(byKey.get("group:prod/east")?.posInSet, 1);
+  assert.equal(byKey.get("group:prod/east")?.setSize, 3);
+  assert.equal(byKey.get("host:host-a")?.setSize, 3);
+  assert.equal(byKey.get("host:host-b")?.setSize, 3);
+  // Child of prod/east: only host C
+  assert.equal(byKey.get("host:host-c")?.posInSet, 1);
+  assert.equal(byKey.get("host:host-c")?.setSize, 1);
 });

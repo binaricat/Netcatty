@@ -34,19 +34,32 @@ test("Vault imports are serialized without Web Locks", async () => {
   ]);
 });
 
-test("Vault import lock re-enters in the same window without deadlock", async () => {
+test("Vault import lock reports ownership while held and serializes concurrent work", async () => {
   const events: string[] = [];
-  await withVaultImportLock("reenter", async () => {
-    events.push("outer");
-    assert.equal(isVaultImportLockHeld("reenter"), true);
-    await withVaultImportLock("reenter", async () => {
-      events.push("inner");
-      assert.equal(isVaultImportLockHeld("reenter"), true);
-    }, null);
-    events.push("after-inner");
+  let releaseOuter!: () => void;
+  const outerGate = new Promise<void>((resolve) => {
+    releaseOuter = resolve;
+  });
+
+  const outer = withVaultImportLock("owned", async () => {
+    events.push("outer:start");
+    assert.equal(isVaultImportLockHeld("owned"), true);
+    await outerGate;
+    events.push("outer:end");
   }, null);
-  assert.equal(isVaultImportLockHeld("reenter"), false);
-  assert.deepEqual(events, ["outer", "inner", "after-inner"]);
+
+  const concurrent = withVaultImportLock("owned", async () => {
+    events.push("concurrent");
+    assert.equal(isVaultImportLockHeld("owned"), true);
+  }, null);
+
+  await Promise.resolve();
+  assert.deepEqual(events, ["outer:start"]);
+  assert.equal(isVaultImportLockHeld("owned"), true);
+  releaseOuter();
+  await Promise.all([outer, concurrent]);
+  assert.equal(isVaultImportLockHeld("owned"), false);
+  assert.deepEqual(events, ["outer:start", "outer:end", "concurrent"]);
 });
 
 test("Vault imports fail safely in a window without shared locking", async () => {

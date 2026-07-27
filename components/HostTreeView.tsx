@@ -42,8 +42,22 @@ const hasDragType = (dataTransfer: DataTransfer, type: string) =>
 type HostTreeSortMode = 'manual' | 'az' | 'za' | 'newest' | 'oldest' | 'group';
 
 export type VisibleHostTreeItem =
-  | { kind: 'group'; key: string; depth: number; node: GroupNode }
-  | { kind: 'host'; key: string; depth: number; host: Host };
+  | {
+    kind: 'group';
+    key: string;
+    depth: number;
+    node: GroupNode;
+    posInSet: number;
+    setSize: number;
+  }
+  | {
+    kind: 'host';
+    key: string;
+    depth: number;
+    host: Host;
+    posInSet: number;
+    setSize: number;
+  };
 
 const sortHostTreeGroups = (
   nodes: GroupNode[],
@@ -96,19 +110,90 @@ export function buildVisibleHostTreeItems({
 }): VisibleHostTreeItem[] {
   const items: VisibleHostTreeItem[] = [];
   const visitGroups = (nodes: GroupNode[], depth: number) => {
-    for (const node of sortHostTreeGroups(nodes, sortMode, groupConfigs)) {
-      items.push({ kind: 'group', key: `group:${node.path}`, depth, node });
-      if (!expandedPaths.has(node.path)) continue;
-      visitGroups(Object.values(node.children ?? {}) as GroupNode[], depth + 1);
-      for (const host of sortHostTreeHosts(node.hosts, sortMode)) {
-        items.push({ kind: 'host', key: `host:${host.id}`, depth: depth + 1, host });
-      }
+    const sortedGroups = sortHostTreeGroups(nodes, sortMode, groupConfigs);
+    // Root-level ungrouped hosts are siblings of top-level groups.
+    const rootUngrouped = depth === 0 ? sortHostTreeHosts(ungroupedHosts, sortMode) : [];
+    const siblingSetSize = sortedGroups.length + rootUngrouped.length;
+    sortedGroups.forEach((node, groupIndex) => {
+      items.push({
+        kind: 'group',
+        key: `group:${node.path}`,
+        depth,
+        node,
+        posInSet: groupIndex + 1,
+        setSize: siblingSetSize,
+      });
+      if (!expandedPaths.has(node.path)) return;
+      const childGroups = sortHostTreeGroups(
+        Object.values(node.children ?? {}) as GroupNode[],
+        sortMode,
+        groupConfigs,
+      );
+      const childHosts = sortHostTreeHosts(node.hosts, sortMode);
+      const childSetSize = childGroups.length + childHosts.length;
+      // Recurse for nested groups first so expanded descendants stay contiguous
+      // under each child group, then emit this node's direct host siblings.
+      visitChildGroups(childGroups, depth + 1, childSetSize);
+      childHosts.forEach((host, hostIndex) => {
+        items.push({
+          kind: 'host',
+          key: `host:${host.id}`,
+          depth: depth + 1,
+          host,
+          posInSet: childGroups.length + hostIndex + 1,
+          setSize: childSetSize,
+        });
+      });
+    });
+    if (depth === 0) {
+      rootUngrouped.forEach((host, hostIndex) => {
+        items.push({
+          kind: 'host',
+          key: `host:${host.id}`,
+          depth: 0,
+          host,
+          posInSet: sortedGroups.length + hostIndex + 1,
+          setSize: siblingSetSize,
+        });
+      });
     }
   };
+  const visitChildGroups = (
+    sortedGroups: GroupNode[],
+    depth: number,
+    siblingSetSize: number,
+  ) => {
+    sortedGroups.forEach((node, groupIndex) => {
+      items.push({
+        kind: 'group',
+        key: `group:${node.path}`,
+        depth,
+        node,
+        posInSet: groupIndex + 1,
+        setSize: siblingSetSize,
+      });
+      if (!expandedPaths.has(node.path)) return;
+      const childGroups = sortHostTreeGroups(
+        Object.values(node.children ?? {}) as GroupNode[],
+        sortMode,
+        groupConfigs,
+      );
+      const childHosts = sortHostTreeHosts(node.hosts, sortMode);
+      const childSetSize = childGroups.length + childHosts.length;
+      visitChildGroups(childGroups, depth + 1, childSetSize);
+      childHosts.forEach((host, hostIndex) => {
+        items.push({
+          kind: 'host',
+          key: `host:${host.id}`,
+          depth: depth + 1,
+          host,
+          posInSet: childGroups.length + hostIndex + 1,
+          setSize: childSetSize,
+        });
+      });
+    });
+  };
   visitGroups(groupTree, 0);
-  for (const host of sortHostTreeHosts(ungroupedHosts, sortMode)) {
-    items.push({ kind: 'host', key: `host:${host.id}`, depth: 0, host });
-  }
   return items;
 }
 
@@ -1121,8 +1206,8 @@ export const HostTreeView: React.FC<HostTreeViewProps> = ({
                 initialTreeItemKey={initialTreeItemKey}
                 onActiveTreeItemChange={setActiveTreeItemKey}
                 renderDescendants={false}
-                treePosInSet={virtualRow.index + 1}
-                treeSetSize={visibleTreeItems.length}
+                treePosInSet={item.posInSet}
+                treeSetSize={item.setSize}
               />
             ) : (
               <HostTreeItem
@@ -1148,8 +1233,8 @@ export const HostTreeView: React.FC<HostTreeViewProps> = ({
                 activeTreeItemKey={activeTreeItemKey}
                 initialTreeItemKey={initialTreeItemKey}
                 onActiveTreeItemChange={setActiveTreeItemKey}
-                treePosInSet={virtualRow.index + 1}
-                treeSetSize={visibleTreeItems.length}
+                treePosInSet={item.posInSet}
+                treeSetSize={item.setSize}
               />
             )}
           </div>
