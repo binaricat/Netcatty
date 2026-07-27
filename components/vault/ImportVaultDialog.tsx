@@ -385,6 +385,8 @@ export const ImportVaultDialog: React.FC<ImportVaultDialogProps> = ({
     useState<VaultImportDestinationMode>("preserve");
   const [existingGroup, setExistingGroup] = useState(groups[0] ?? "");
   const [existingGroupQuery, setExistingGroupQuery] = useState(groups[0] ?? "");
+  const existingGroupQueryRef = useRef(existingGroupQuery);
+  existingGroupQueryRef.current = existingGroupQuery;
   const [newGroup, setNewGroup] = useState("");
   const destination = buildVaultImportDestination({
     mode: destinationMode,
@@ -393,14 +395,15 @@ export const ImportVaultDialog: React.FC<ImportVaultDialogProps> = ({
     availableGroups: groups,
   });
   useEffect(() => {
-    if (destinationMode !== "existing") return;
-    setExistingGroup((current) => {
-      if (groups.includes(current)) return current;
-      const next = groups[0] ?? "";
-      setExistingGroupQuery(next);
-      return next;
-    });
-  }, [destinationMode, groups]);
+    const query = existingGroupQueryRef.current;
+    if (query) {
+      setExistingGroup(groups.includes(query) ? query : "");
+      return;
+    }
+    const next = groups[0] ?? "";
+    setExistingGroup(next);
+    setExistingGroupQuery(next);
+  }, [groups]);
   useEffect(() => {
     if (open) return;
     setStep("format");
@@ -869,7 +872,12 @@ export const ImportVaultDialog: React.FC<ImportVaultDialogProps> = ({
                     mode={destinationMode}
                     onModeChange={(mode) => {
                       setDestinationMode(mode);
-                      if (mode === "existing" && !existingGroup && groups[0]) {
+                      if (
+                        mode === "existing"
+                        && !existingGroup
+                        && !existingGroupQuery
+                        && groups[0]
+                      ) {
                         setExistingGroup(groups[0]);
                         setExistingGroupQuery(groups[0]);
                       }

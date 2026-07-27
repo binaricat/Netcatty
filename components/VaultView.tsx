@@ -259,8 +259,8 @@ interface VaultViewProps {
     | { status: "persisted"; groups: string[]; sources: ManagedSource[] }
     | { status: "superseded" }
   >;
-  onClearAndRemoveManagedSource?: (source: ManagedSource) => Promise<boolean>;
-  onClearAndRemoveManagedSources?: (sources: ManagedSource[]) => Promise<void>;
+  onClearAndRemoveManagedSource?: (source: ManagedSource) => Promise<() => Promise<void>>;
+  onClearAndRemoveManagedSources?: (sources: ManagedSource[]) => Promise<() => Promise<void>>;
   onUnmanageSource?: (sourceId: string) => void;
   onConvertKnownHost: (knownHost: KnownHost) => void;
   onToggleConnectionLogSaved: (id: string) => void;

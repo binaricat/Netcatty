@@ -28,8 +28,8 @@ export function useVaultGroupDeletion({
     | { status: "persisted"; groups: string[]; sources: ManagedSource[] }
     | { status: "superseded" }
   >;
-  onClearAndRemoveManagedSource?: (source: ManagedSource) => Promise<boolean>;
-  onClearAndRemoveManagedSources?: (sources: ManagedSource[]) => Promise<void>;
+  onClearAndRemoveManagedSource?: (source: ManagedSource) => Promise<() => Promise<void>>;
+  onClearAndRemoveManagedSources?: (sources: ManagedSource[]) => Promise<() => Promise<void>>;
   onDeletedPaths?: (selectedRoots: string[]) => void;
 }) {
   const latestRef = useRef({ customGroups, hosts, groupConfigs, managedSources });
@@ -49,62 +49,70 @@ export function useVaultGroupDeletion({
       });
       if (deletion.selectedRoots.length === 0) return;
 
-      if (deletion.sourcesToRemove.length > 0 && onClearAndRemoveManagedSources) {
-        await onClearAndRemoveManagedSources(deletion.sourcesToRemove);
-      } else if (deletion.sourcesToRemove.length > 0 && onClearAndRemoveManagedSource) {
-        const results = await Promise.all(
-          deletion.sourcesToRemove.map((source) => onClearAndRemoveManagedSource(source)),
-        );
-        if (results.some((success) => !success)) {
-          throw new Error("Could not clear every managed SSH config source");
+      let restoreManagedFiles: (() => Promise<void>) | undefined;
+      if (deletion.sourcesToRemove.length > 0) {
+        if (onClearAndRemoveManagedSources) {
+          restoreManagedFiles = await onClearAndRemoveManagedSources(deletion.sourcesToRemove);
+        } else if (onClearAndRemoveManagedSource) {
+          const restores = await Promise.all(
+            deletion.sourcesToRemove.map((source) => onClearAndRemoveManagedSource(source)),
+          );
+          restoreManagedFiles = async () => {
+            await Promise.all(restores.map((restore) => restore()));
+          };
         }
       }
 
       // Rebuild after the file operations so edits made while they were running
       // are preserved, then publish one coherent in-memory baseline for any
       // deletion already queued behind this one.
-      while (true) {
-        deletion = buildVaultGroupDeletion({
-          selectedPaths,
-          deleteHosts,
-          ...latestRef.current,
-        });
-        const nextHosts = deletion.hosts.filter(
-          (host) => !additionallyDeletedHostIds.has(host.id),
-        );
-        const transaction = await onCommitVaultImportTransaction(
-          nextHosts,
-          (currentGroups) => buildVaultGroupDeletion({
+      try {
+        while (true) {
+          deletion = buildVaultGroupDeletion({
             selectedPaths,
             deleteHosts,
-            customGroups: currentGroups,
-            hosts: [],
-            groupConfigs: [],
-            managedSources: [],
-          }).customGroups,
-          (currentSources) => buildVaultGroupDeletion({
-            selectedPaths,
-            deleteHosts,
-            customGroups: [],
-            hosts: [],
-            groupConfigs: [],
-            managedSources: currentSources,
-          }).sourcesToRemove.reduce(
-            (remaining, sourceToRemove) => remaining.filter((source) => source.id !== sourceToRemove.id),
-            currentSources,
-          ),
-        );
-        if (transaction.status === "superseded") {
-          latestRef.current.hosts = await onReadPersistedHosts();
-          continue;
+            ...latestRef.current,
+          });
+          const nextHosts = deletion.hosts.filter(
+            (host) => !additionallyDeletedHostIds.has(host.id),
+          );
+          const transaction = await onCommitVaultImportTransaction(
+            nextHosts,
+            (currentGroups) => buildVaultGroupDeletion({
+              selectedPaths,
+              deleteHosts,
+              customGroups: currentGroups,
+              hosts: [],
+              groupConfigs: [],
+              managedSources: [],
+            }).customGroups,
+            (currentSources) => buildVaultGroupDeletion({
+              selectedPaths,
+              deleteHosts,
+              customGroups: [],
+              hosts: [],
+              groupConfigs: [],
+              managedSources: currentSources,
+            }).sourcesToRemove.reduce(
+              (remaining, sourceToRemove) => remaining.filter((source) => source.id !== sourceToRemove.id),
+              currentSources,
+            ),
+          );
+          if (transaction.status === "superseded") {
+            latestRef.current.hosts = await onReadPersistedHosts();
+            continue;
+          }
+          latestRef.current = {
+            customGroups: transaction.groups,
+            hosts: nextHosts,
+            groupConfigs: deletion.groupConfigs,
+            managedSources: transaction.sources,
+          };
+          break;
         }
-        latestRef.current = {
-          customGroups: transaction.groups,
-          hosts: nextHosts,
-          groupConfigs: deletion.groupConfigs,
-          managedSources: transaction.sources,
-        };
-        break;
+      } catch (error) {
+        await restoreManagedFiles?.();
+        throw error;
       }
       onDeletedPaths?.(deletion.selectedRoots);
     });
