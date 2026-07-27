@@ -1,9 +1,17 @@
 import { startTransition, useCallback, useEffect, useRef, useState } from 'react';
 import type { DiscoveredAgent, ExternalAgentConfig } from '../../infrastructure/ai/types';
-import { getExternalAgentSdkBackend } from '../../infrastructure/ai/managedAgents';
+import {
+  isSettingsManagedDiscoveredAgent,
+  matchesManagedAgentConfig,
+} from '../../infrastructure/ai/managedAgents';
+import { applyDiscoveredUpdatesToExternalAgents } from './agentDiscoverySync';
 
 interface NetcattyBridge {
-  aiDiscoverAgents(options?: { refreshShellEnv?: boolean; apiKeyPresent?: boolean }): Promise<DiscoveredAgent[]>;
+  aiDiscoverAgents(options?: {
+    refreshShellEnv?: boolean;
+    apiKeyPresent?: boolean;
+    antigravityApiKeyPresent?: boolean;
+  }): Promise<DiscoveredAgent[]>;
 }
 
 function getBridge(): NetcattyBridge | undefined {
@@ -14,6 +22,7 @@ const AGENT_DISCOVERY_CACHE_TTL_MS = 60_000;
 let agentDiscoveryCache: {
   agents: DiscoveredAgent[];
   apiKeyPresent: boolean;
+  antigravityApiKeyPresent: boolean;
   updatedAt: number;
 } | null = null;
 const agentDiscoveryPromises = new Map<string, Promise<DiscoveredAgent[]>>();
@@ -41,6 +50,9 @@ export function useAgentDiscovery(
   const cursorApiKeyPresent = externalAgents.some(
     (agent) => agent.id === "discovered_cursor" && Boolean(agent.apiKey),
   );
+  const antigravityApiKeyPresent = externalAgents.some(
+    (agent) => agent.id === "discovered_antigravity" && Boolean(agent.apiKey),
+  );
 
   const discover = useCallback(async (discoverOptions?: { refreshShellEnv?: boolean }) => {
     if (!enabledRef.current) return;
@@ -51,6 +63,7 @@ export function useAgentDiscovery(
     const cacheFresh =
       agentDiscoveryCache
       && agentDiscoveryCache.apiKeyPresent === cursorApiKeyPresent
+      && agentDiscoveryCache.antigravityApiKeyPresent === antigravityApiKeyPresent
       && Date.now() - agentDiscoveryCache.updatedAt < AGENT_DISCOVERY_CACHE_TTL_MS;
 
     if (!forceRefresh && cacheFresh) {
@@ -63,6 +76,7 @@ export function useAgentDiscovery(
     const writeGeneration = ++agentDiscoveryWriteGeneration;
     const promiseKey = JSON.stringify({
       apiKeyPresent: cursorApiKeyPresent,
+      antigravityApiKeyPresent,
       refreshShellEnv: forceRefresh,
     });
     try {
@@ -71,6 +85,7 @@ export function useAgentDiscovery(
         const sharedPromise = bridge.aiDiscoverAgents({
           ...discoverOptions,
           apiKeyPresent: cursorApiKeyPresent,
+          antigravityApiKeyPresent,
         }).finally(() => {
           if (agentDiscoveryPromises.get(promiseKey) === sharedPromise) {
             agentDiscoveryPromises.delete(promiseKey);
@@ -89,6 +104,7 @@ export function useAgentDiscovery(
       agentDiscoveryCache = {
         agents,
         apiKeyPresent: cursorApiKeyPresent,
+        antigravityApiKeyPresent,
         updatedAt: Date.now(),
       };
       startTransition(() => setDiscoveredAgents(agents));
@@ -99,14 +115,14 @@ export function useAgentDiscovery(
         setIsDiscovering(false);
       }
     }
-  }, [cursorApiKeyPresent]);
+  }, [antigravityApiKeyPresent, cursorApiKeyPresent]);
 
   useEffect(() => {
     discoverSeqRef.current += 1;
     if (!enabled) {
       setIsDiscovering(false);
     }
-  }, [cursorApiKeyPresent, enabled]);
+  }, [antigravityApiKeyPresent, cursorApiKeyPresent, enabled]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -137,56 +153,19 @@ export function useAgentDiscovery(
     if (!setExternalAgents || discoveredAgents.length === 0) return;
     if (!enabled) return;
 
-    setExternalAgents((prev) => {
-      let changed = false;
-      const next = prev.map((ea) => {
-        // Only update agents that were auto-discovered (id starts with "discovered_")
-        if (!ea.id.startsWith('discovered_')) return ea;
-
-        const match = discoveredAgents.find(
-          (da) => ea.command === da.path || ea.command === da.command,
-        );
-        if (!match) return ea;
-
-        // Check if args, SDK backend, or managed SDK path env differ.
-        const currentArgs = JSON.stringify(ea.args || []);
-        const newArgs = JSON.stringify(match.args);
-        const backend = match.sdkBackend ?? match.command;
-        const backendChanged = getExternalAgentSdkBackend(ea) !== backend
-          || Boolean(ea.acpCommand)
-          || JSON.stringify(ea.acpArgs || []) !== JSON.stringify([]);
-        const matchPath = match.binPath || match.path;
-        const env = match.command === 'claude'
-          ? { ...(ea.env ?? {}), CLAUDE_CODE_EXECUTABLE: matchPath }
-          : match.command === 'opencode'
-            ? { ...(ea.env ?? {}), OPENCODE_BIN: matchPath }
-            : ea.env;
-        const envChanged =
-          (match.command === 'claude' && ea.env?.CLAUDE_CODE_EXECUTABLE !== matchPath)
-          || (match.command === 'opencode' && ea.env?.OPENCODE_BIN !== matchPath);
-        const versionChanged = Boolean(match.version) && ea.cliVersion !== match.version;
-        if (currentArgs !== newArgs || backendChanged || envChanged || versionChanged) {
-          changed = true;
-          const { acpCommand: _legacyCommand, acpArgs: _legacyArgs, ...rest } = ea;
-          return {
-            ...rest,
-            args: match.args,
-            sdkBackend: backend,
-            ...(match.version ? { cliVersion: match.version } : {}),
-            ...(env ? { env } : {}),
-          };
-        }
-        return ea;
-      });
-      return changed ? next : prev;
-    });
+    setExternalAgents((prev) => applyDiscoveredUpdatesToExternalAgents(prev, discoveredAgents));
   }, [discoveredAgents, enabled, setExternalAgents]);
 
   // Filter out agents that are already configured as external agents
   const unconfiguredAgents = discoveredAgents.filter(
-    (da) => !externalAgents.some(
-      (ea) => ea.command === da.command || ea.command === da.path,
-    ),
+    (da) => {
+      if (isSettingsManagedDiscoveredAgent(da)) {
+        return !externalAgents.some((ea) => matchesManagedAgentConfig(ea, da.command));
+      }
+      return !externalAgents.some(
+        (ea) => ea.command === da.command || ea.command === da.path,
+      );
+    },
   );
 
   // Build ExternalAgentConfig from a discovered agent
@@ -200,6 +179,7 @@ export function useAgentDiscovery(
         args: agent.args,
         icon: agent.icon,
         enabled: true,
+        available: true,
         sdkBackend: backend,
         ...(agent.version ? { cliVersion: agent.version } : {}),
         ...(agent.command === 'claude'

@@ -9,7 +9,11 @@ declare global {
     aiAllowlistAddHost?(baseURL: string): Promise<{ ok: boolean; error?: string }>;
     aiExec?(sessionId: string, command: string, chatSessionId?: string): Promise<{ ok: boolean; stdout?: string; stderr?: string; exitCode?: number | null; error?: string }>;
     aiCattyCancelExec?(chatSessionId: string): Promise<{ ok: boolean; error?: string }>;
-    aiDiscoverAgents?(options?: { refreshShellEnv?: boolean; apiKeyPresent?: boolean }): Promise<Array<{
+    aiDiscoverAgents?(options?: {
+      refreshShellEnv?: boolean;
+      apiKeyPresent?: boolean;
+      antigravityApiKeyPresent?: boolean;
+    }): Promise<Array<{
       command: string;
       name: string;
       icon: string;
