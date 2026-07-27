@@ -714,7 +714,7 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
                       viewMode={viewMode}
                       layoutKey={`groups:${hostCollectionLayoutKey}`}
                       ariaLabel={t("vault.groups.title")}
-                      activeItemKey={focusedGroupIsVisible ? focusedGroupPath : initialKeyboardGroupPath}
+                      activeItemKey={focusedGroupIsVisible ? focusedGroupPath : null}
                       onActiveItemChange={(node) => {
                         setFocusedGroupPath(node.path);
                         setFocusedHostId(null);

@@ -1112,6 +1112,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
     groupConfigs,
     managedSources,
     onReadPersistedHosts,
+    onReadPersistedManagedSources,
     onCommitVaultImportTransaction,
     onClearAndRemoveManagedSource,
     onClearAndRemoveManagedSources,

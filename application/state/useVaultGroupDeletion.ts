@@ -10,6 +10,7 @@ export function useVaultGroupDeletion({
   groupConfigs,
   managedSources,
   onReadPersistedHosts,
+  onReadPersistedManagedSources,
   onCommitVaultImportTransaction,
   onClearAndRemoveManagedSource,
   onClearAndRemoveManagedSources,
@@ -20,6 +21,7 @@ export function useVaultGroupDeletion({
   groupConfigs: GroupConfig[];
   managedSources: ManagedSource[];
   onReadPersistedHosts: () => Promise<Host[]>;
+  onReadPersistedManagedSources: () => ManagedSource[];
   onCommitVaultImportTransaction: (
     hosts: Host[],
     updateGroups: (current: string[]) => string[],
@@ -42,6 +44,15 @@ export function useVaultGroupDeletion({
   ) => {
     const selectedPaths = [...paths];
     await withVaultImportLock("vault", async () => {
+      const [latestHosts, latestManagedSources] = await Promise.all([
+        onReadPersistedHosts(),
+        Promise.resolve(onReadPersistedManagedSources()),
+      ]);
+      latestRef.current = {
+        ...latestRef.current,
+        hosts: latestHosts,
+        managedSources: latestManagedSources,
+      };
       let deletion = buildVaultGroupDeletion({
         selectedPaths,
         deleteHosts,
@@ -122,5 +133,6 @@ export function useVaultGroupDeletion({
     onCommitVaultImportTransaction,
     onDeletedPaths,
     onReadPersistedHosts,
+    onReadPersistedManagedSources,
   ]);
 }

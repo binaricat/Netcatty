@@ -358,19 +358,23 @@ export const useManagedSourceSync = ({
         managedSources
           .filter((s) => changedSourceIds.has(s.id))
           .map((source) => syncManagedSource(source)),
-      ).then((results) => {
+      ).then(async (results) => {
         // Batch update lastSyncedAt for all successful syncs to avoid race conditions
         const successfulSourceIds = new Set(
           results.filter(r => r.success).map(r => r.sourceId)
         );
 
         if (successfulSourceIds.size > 0) {
-          const currentSources = managedSourcesRef.current;
-          const now = Date.now();
-          const updatedSources = currentSources.map((s) =>
-            successfulSourceIds.has(s.id) ? { ...s, lastSyncedAt: now } : s,
-          );
-          onUpdateManagedSources(updatedSources);
+          await withVaultImportLock("vault", async () => {
+            const currentSources = localStorageAdapter.read<ManagedSource[]>(
+              STORAGE_KEY_MANAGED_SOURCES,
+            ) ?? managedSourcesRef.current;
+            const now = Date.now();
+            const updatedSources = currentSources.map((s) =>
+              successfulSourceIds.has(s.id) ? { ...s, lastSyncedAt: now } : s,
+            );
+            onUpdateManagedSources(updatedSources);
+          });
         }
       }).finally(() => {
         syncInProgressRef.current = false;
