@@ -266,6 +266,8 @@ interface TreeNodeProps {
   initialTreeItemKey: string | null;
   onActiveTreeItemChange: (key: string) => void;
   renderDescendants?: boolean;
+  treePosInSet?: number;
+  treeSetSize?: number;
 }
 
 
@@ -309,6 +311,8 @@ const TreeNode: React.FC<TreeNodeProps> = ({
   initialTreeItemKey,
   onActiveTreeItemChange,
   renderDescendants = true,
+  treePosInSet,
+  treeSetSize,
 }) => {
   const inlineEdit = useHostTreeInlineGroupEdit();
   const vaultTreeActions = useVaultHostTreeActions();
@@ -384,6 +388,8 @@ const TreeNode: React.FC<TreeNodeProps> = ({
                 data-tree-depth={depth}
                 role="treeitem"
                 aria-level={depth + 1}
+                aria-posinset={treePosInSet}
+                aria-setsize={treeSetSize}
                 aria-selected={isMultiSelectMode ? isGroupMultiSelected : isGroupFocused}
                 aria-expanded={hasChildren || node.hosts.length > 0 ? isExpanded : undefined}
                 tabIndex={activeTreeItemKey === `group:${node.path}`
@@ -573,6 +579,8 @@ interface HostTreeItemProps {
   activeTreeItemKey: string | null;
   initialTreeItemKey: string | null;
   onActiveTreeItemChange: (key: string) => void;
+  treePosInSet?: number;
+  treeSetSize?: number;
 }
 
 export const getHostTreeDisplayDetails = (
@@ -612,6 +620,8 @@ const HostTreeItem: React.FC<HostTreeItemProps> = ({
   focusedHostId,
   onFocusHost,
   groupConfigs,
+  treePosInSet,
+  treeSetSize,
   groupDefaultsByPath,
   activeTreeItemKey,
   initialTreeItemKey,
@@ -648,6 +658,8 @@ const HostTreeItem: React.FC<HostTreeItemProps> = ({
           data-tree-depth={depth}
           role="treeitem"
           aria-level={depth + 1}
+          aria-posinset={treePosInSet}
+          aria-setsize={treeSetSize}
           aria-selected={Boolean(isSelected)}
           tabIndex={activeTreeItemKey === `host:${host.id}`
             || (!activeTreeItemKey && initialTreeItemKey === `host:${host.id}`)
@@ -1109,6 +1121,8 @@ export const HostTreeView: React.FC<HostTreeViewProps> = ({
                 initialTreeItemKey={initialTreeItemKey}
                 onActiveTreeItemChange={setActiveTreeItemKey}
                 renderDescendants={false}
+                treePosInSet={virtualRow.index + 1}
+                treeSetSize={visibleTreeItems.length}
               />
             ) : (
               <HostTreeItem
@@ -1134,6 +1148,8 @@ export const HostTreeView: React.FC<HostTreeViewProps> = ({
                 activeTreeItemKey={activeTreeItemKey}
                 initialTreeItemKey={initialTreeItemKey}
                 onActiveTreeItemChange={setActiveTreeItemKey}
+                treePosInSet={virtualRow.index + 1}
+                treeSetSize={visibleTreeItems.length}
               />
             )}
           </div>

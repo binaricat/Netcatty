@@ -3,6 +3,16 @@ type LockManagerLike = {
 };
 
 const fallbackTails = new Map<string, Promise<void>>();
+/** Same-window re-entrancy depth. Web Locks are not re-entrant across nested awaits. */
+const heldDepth = new Map<string, number>();
+
+function lockNameFor(key: string): string {
+  return `netcatty:vault-import:${key}`;
+}
+
+export function isVaultImportLockHeld(key: string): boolean {
+  return (heldDepth.get(lockNameFor(key)) ?? 0) > 0;
+}
 
 export async function withVaultImportLock<T>(
   key: string,
@@ -11,8 +21,29 @@ export async function withVaultImportLock<T>(
     typeof navigator === "undefined" ? undefined : navigator.locks
   ),
 ): Promise<T> {
-  const lockName = `netcatty:vault-import:${key}`;
-  if (lockManager) return lockManager.request(lockName, run);
+  const lockName = lockNameFor(key);
+  const depth = heldDepth.get(lockName) ?? 0;
+  if (depth > 0) {
+    heldDepth.set(lockName, depth + 1);
+    try {
+      return await run();
+    } finally {
+      const next = (heldDepth.get(lockName) ?? 1) - 1;
+      if (next <= 0) heldDepth.delete(lockName);
+      else heldDepth.set(lockName, next);
+    }
+  }
+
+  const execute = async (): Promise<T> => {
+    heldDepth.set(lockName, 1);
+    try {
+      return await run();
+    } finally {
+      heldDepth.delete(lockName);
+    }
+  };
+
+  if (lockManager) return lockManager.request(lockName, execute);
   if (typeof window !== "undefined") {
     throw new Error("Cross-window Vault import locking is unavailable");
   }
@@ -26,7 +57,7 @@ export async function withVaultImportLock<T>(
   fallbackTails.set(lockName, tail);
   await previous;
   try {
-    return await run();
+    return await execute();
   } finally {
     release();
     if (fallbackTails.get(lockName) === tail) fallbackTails.delete(lockName);

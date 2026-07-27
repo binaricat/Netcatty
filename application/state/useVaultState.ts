@@ -71,7 +71,7 @@ import {
 } from "../../infrastructure/persistence/secureFieldAdapter";
 import { pluginExtensionBridge } from "./pluginExtensionBridge";
 import type { PluginImporterCommitRequest } from "./usePluginImporterCommit";
-import { withVaultImportLock } from "./vaultManagedImportLock";
+import { isVaultImportLockHeld, withVaultImportLock } from "./vaultManagedImportLock";
 import {
   persistVaultImportMetadata,
   readStoredArray,
@@ -396,7 +396,11 @@ export const useVaultState = () => {
     const cleaned = normalizeVaultOrder(data.map((host) => sanitizeHost(host)));
     setHosts(cleaned);
     const ver = ++hostsWriteVersion.current;
-    const pending = encryptHosts(cleaned).then((enc) => {
+    // Encrypt and write under the shared cross-window lock so ordinary saves
+    // cannot slip between an import's final check and write.
+    const pending = withVaultImportLock("vault", async () => {
+      if (ver !== hostsWriteVersion.current) return "superseded" as const;
+      const enc = await encryptHosts(cleaned);
       if (ver !== hostsWriteVersion.current) return "superseded" as const;
       return localStorageAdapter.write(STORAGE_KEY_HOSTS, enc);
     });
@@ -405,7 +409,11 @@ export const useVaultState = () => {
   }, []);
 
   const readPersistedHosts = useCallback(async (): Promise<Host[]> => {
-    await waitForPendingVaultWrites();
+    // Never wait for pending writers while this window already holds the vault
+    // lock — those writers may be queued behind us and waiting would deadlock.
+    if (!isVaultImportLockHeld("vault")) {
+      await waitForPendingVaultWrites();
+    }
     while (true) {
       const rawHosts = localStorageAdapter.readString(STORAGE_KEY_HOSTS);
       const storedHosts = readStoredArray<Host>(STORAGE_KEY_HOSTS, rawHosts);
@@ -419,7 +427,9 @@ export const useVaultState = () => {
     const cleaned = normalizeVaultOrder(data);
     setKeys(cleaned);
     const ver = ++keysWriteVersion.current;
-    const pending = encryptKeys(cleaned).then((enc) => {
+    const pending = withVaultImportLock("vault", async () => {
+      if (ver !== keysWriteVersion.current) return;
+      const enc = await encryptKeys(cleaned);
       if (ver === keysWriteVersion.current)
         localStorageAdapter.write(STORAGE_KEY_KEYS, enc);
     });
@@ -457,7 +467,9 @@ export const useVaultState = () => {
     const updated = normalizeVaultOrder([...keys, newKey]);
     setKeys(updated);
     const ver = ++keysWriteVersion.current;
-    const pending = encryptKeys(updated).then((enc) => {
+    const pending = withVaultImportLock("vault", async () => {
+      if (ver !== keysWriteVersion.current) return;
+      const enc = await encryptKeys(updated);
       if (ver === keysWriteVersion.current)
         localStorageAdapter.write(STORAGE_KEY_KEYS, enc);
     });
@@ -469,7 +481,9 @@ export const useVaultState = () => {
     const cleaned = normalizeVaultOrder(data);
     setIdentities(cleaned);
     const ver = ++identitiesWriteVersion.current;
-    const pending = encryptIdentities(cleaned).then((enc) => {
+    const pending = withVaultImportLock("vault", async () => {
+      if (ver !== identitiesWriteVersion.current) return;
+      const enc = await encryptIdentities(cleaned);
       if (ver === identitiesWriteVersion.current)
         localStorageAdapter.write(STORAGE_KEY_IDENTITIES, enc);
     });
@@ -521,15 +535,19 @@ export const useVaultState = () => {
       )
       : data;
     customGroupsRef.current = next;
-    ++customGroupsWriteVersion.current;
+    const groupsVer = ++customGroupsWriteVersion.current;
     setCustomGroups(next);
-    localStorageAdapter.write(STORAGE_KEY_GROUPS, next);
 
     const cleanedGroupConfigs = buildGroupConfigsForGroups(next, groupConfigs);
     setGroupConfigs(cleanedGroupConfigs);
-    const ver = ++groupConfigsWriteVersion.current;
-    const pending = encryptGroupConfigs(cleanedGroupConfigs).then((enc) => {
-      if (ver === groupConfigsWriteVersion.current)
+    const configsVer = ++groupConfigsWriteVersion.current;
+    const pending = withVaultImportLock("vault", async () => {
+      if (groupsVer === customGroupsWriteVersion.current) {
+        localStorageAdapter.write(STORAGE_KEY_GROUPS, next);
+      }
+      if (configsVer !== groupConfigsWriteVersion.current) return;
+      const enc = await encryptGroupConfigs(cleanedGroupConfigs);
+      if (configsVer === groupConfigsWriteVersion.current)
         localStorageAdapter.write(STORAGE_KEY_GROUP_CONFIGS, enc);
     });
     groupConfigsWritePendingRef.current = pending;
@@ -552,7 +570,11 @@ export const useVaultState = () => {
       : data;
     managedSourcesRef.current = next;
     setManagedSources(next);
-    localStorageAdapter.write(STORAGE_KEY_MANAGED_SOURCES, next);
+    void withVaultImportLock("vault", async () => {
+      // Latest ref wins if another update ran while waiting for the lock.
+      if (managedSourcesRef.current !== next) return;
+      localStorageAdapter.write(STORAGE_KEY_MANAGED_SOURCES, next);
+    });
   }, []);
 
   const readPersistedManagedSources = useCallback((): ManagedSource[] => (
@@ -577,91 +599,99 @@ export const useVaultState = () => {
     }
     | { status: "superseded" }
   > => {
-    const version = hostsWriteVersion.current;
-    const groupConfigsVersion = groupConfigsWriteVersion.current;
-    await waitForPendingVaultWrites();
-    if (
-      version !== hostsWriteVersion.current
-      || groupConfigsVersion !== groupConfigsWriteVersion.current
-    ) return { status: "superseded" };
-    const cleanedHosts = normalizeVaultOrder(nextHosts.map((host) => sanitizeHost(host)));
-    const baselineRaw = new Map([
-      [STORAGE_KEY_HOSTS, localStorageAdapter.readString(STORAGE_KEY_HOSTS)],
-      [STORAGE_KEY_GROUPS, localStorageAdapter.readString(STORAGE_KEY_GROUPS)],
-      [STORAGE_KEY_MANAGED_SOURCES, localStorageAdapter.readString(STORAGE_KEY_MANAGED_SOURCES)],
-      [STORAGE_KEY_GROUP_CONFIGS, localStorageAdapter.readString(STORAGE_KEY_GROUP_CONFIGS)],
-    ]);
-    const groups = updateGroups(readStoredArray<string>(
-      STORAGE_KEY_GROUPS,
-      baselineRaw.get(STORAGE_KEY_GROUPS) ?? null,
-    ));
-    const sources = updateSources(readStoredArray<ManagedSource>(
-      STORAGE_KEY_MANAGED_SOURCES,
-      baselineRaw.get(STORAGE_KEY_MANAGED_SOURCES) ?? null,
-    ));
-    const storedGroupConfigs = readStoredArray<GroupConfig>(
-      STORAGE_KEY_GROUP_CONFIGS,
-      baselineRaw.get(STORAGE_KEY_GROUP_CONFIGS) ?? null,
-    );
-    const storedHosts = readStoredArray<Host>(
-      STORAGE_KEY_HOSTS,
-      baselineRaw.get(STORAGE_KEY_HOSTS) ?? null,
-    );
-    const [latestPersistedHosts, latestGroupConfigs] = await Promise.all([
-      decryptHosts(storedHosts).then((decrypted) => (
-        normalizeVaultOrder(decrypted.map((host) => sanitizeHost(host)))
-      )),
-      decryptGroupConfigs(storedGroupConfigs),
-    ]);
-    if (expectedHosts) {
-      const normalizedExpectedHosts = normalizeVaultOrder(
-        expectedHosts.map((host) => sanitizeHost(host)),
+    // Hold the shared lock for the entire check → encrypt → write path so no
+    // ordinary vault save can interleave. Nested callers already holding the
+    // lock re-enter without deadlock.
+    return withVaultImportLock("vault", async () => {
+      const version = hostsWriteVersion.current;
+      const groupConfigsVersion = groupConfigsWriteVersion.current;
+      // Disk reads/writes happen only while the shared lock is held, so ordinary
+      // vault saves cannot interleave. Nested callers re-enter without waiting
+      // on writers that are queued behind this critical section.
+      const cleanedHosts = normalizeVaultOrder(nextHosts.map((host) => sanitizeHost(host)));
+      const baselineRaw = new Map([
+        [STORAGE_KEY_HOSTS, localStorageAdapter.readString(STORAGE_KEY_HOSTS)],
+        [STORAGE_KEY_GROUPS, localStorageAdapter.readString(STORAGE_KEY_GROUPS)],
+        [STORAGE_KEY_MANAGED_SOURCES, localStorageAdapter.readString(STORAGE_KEY_MANAGED_SOURCES)],
+        [STORAGE_KEY_GROUP_CONFIGS, localStorageAdapter.readString(STORAGE_KEY_GROUP_CONFIGS)],
+      ]);
+      const groups = updateGroups(readStoredArray<string>(
+        STORAGE_KEY_GROUPS,
+        baselineRaw.get(STORAGE_KEY_GROUPS) ?? null,
+      ));
+      const sources = updateSources(readStoredArray<ManagedSource>(
+        STORAGE_KEY_MANAGED_SOURCES,
+        baselineRaw.get(STORAGE_KEY_MANAGED_SOURCES) ?? null,
+      ));
+      const storedGroupConfigs = readStoredArray<GroupConfig>(
+        STORAGE_KEY_GROUP_CONFIGS,
+        baselineRaw.get(STORAGE_KEY_GROUP_CONFIGS) ?? null,
       );
-      if (JSON.stringify(latestPersistedHosts) !== JSON.stringify(normalizedExpectedHosts)) {
+      const storedHosts = readStoredArray<Host>(
+        STORAGE_KEY_HOSTS,
+        baselineRaw.get(STORAGE_KEY_HOSTS) ?? null,
+      );
+      const [latestPersistedHosts, latestGroupConfigs] = await Promise.all([
+        decryptHosts(storedHosts).then((decrypted) => (
+          normalizeVaultOrder(decrypted.map((host) => sanitizeHost(host)))
+        )),
+        decryptGroupConfigs(storedGroupConfigs),
+      ]);
+      if (
+        version !== hostsWriteVersion.current
+        || groupConfigsVersion !== groupConfigsWriteVersion.current
+      ) {
         return { status: "superseded" };
       }
-    }
-    const nextGroupConfigs = buildGroupConfigsForGroups(
-      groups,
-      updateGroupConfigs?.(latestGroupConfigs) ?? latestGroupConfigs,
-    );
-    const [encryptedHosts, encryptedGroupConfigs] = await Promise.all([
-      encryptHosts(cleanedHosts),
-      encryptGroupConfigs(nextGroupConfigs),
-    ]);
-    await waitForPendingVaultWrites();
-    if (
-      version !== hostsWriteVersion.current
-      || groupConfigsVersion !== groupConfigsWriteVersion.current
-      || [...baselineRaw].some(([key, value]) => localStorageAdapter.readString(key) !== value)
-    ) {
-      return { status: "superseded" };
-    }
-    const result = persistVaultImportMetadata(
-      localStorageAdapter,
-      () => groups,
-      () => sources,
-      [
-        [STORAGE_KEY_HOSTS, encryptedHosts],
-        [STORAGE_KEY_GROUP_CONFIGS, encryptedGroupConfigs],
-      ],
-    );
-    ++hostsWriteVersion.current;
-    ++customGroupsWriteVersion.current;
-    ++groupConfigsWriteVersion.current;
-    customGroupsRef.current = result.groups;
-    managedSourcesRef.current = result.sources;
-    setHosts(cleanedHosts);
-    setCustomGroups(result.groups);
-    setManagedSources(result.sources);
-    setGroupConfigs(nextGroupConfigs);
-    return {
-      status: "persisted",
-      groups: result.groups,
-      sources: result.sources,
-      groupConfigs: nextGroupConfigs,
-    };
-  }, [waitForPendingVaultWrites]);
+      if (expectedHosts) {
+        const normalizedExpectedHosts = normalizeVaultOrder(
+          expectedHosts.map((host) => sanitizeHost(host)),
+        );
+        if (JSON.stringify(latestPersistedHosts) !== JSON.stringify(normalizedExpectedHosts)) {
+          return { status: "superseded" };
+        }
+      }
+      const nextGroupConfigs = buildGroupConfigsForGroups(
+        groups,
+        updateGroupConfigs?.(latestGroupConfigs) ?? latestGroupConfigs,
+      );
+      const [encryptedHosts, encryptedGroupConfigs] = await Promise.all([
+        encryptHosts(cleanedHosts),
+        encryptGroupConfigs(nextGroupConfigs),
+      ]);
+      if (
+        version !== hostsWriteVersion.current
+        || groupConfigsVersion !== groupConfigsWriteVersion.current
+        || [...baselineRaw].some(([key, value]) => localStorageAdapter.readString(key) !== value)
+      ) {
+        return { status: "superseded" };
+      }
+      const result = persistVaultImportMetadata(
+        localStorageAdapter,
+        () => groups,
+        () => sources,
+        [
+          [STORAGE_KEY_HOSTS, encryptedHosts],
+          [STORAGE_KEY_GROUP_CONFIGS, encryptedGroupConfigs],
+        ],
+      );
+      ++hostsWriteVersion.current;
+      ++customGroupsWriteVersion.current;
+      ++groupConfigsWriteVersion.current;
+      customGroupsRef.current = result.groups;
+      managedSourcesRef.current = result.sources;
+      setHosts(cleanedHosts);
+      setCustomGroups(result.groups);
+      setManagedSources(result.sources);
+      setGroupConfigs(nextGroupConfigs);
+      return {
+        status: "persisted",
+        groups: result.groups,
+        sources: result.sources,
+        groupConfigs: nextGroupConfigs,
+      };
+    });
+  }, []);
 
   const updateGroupConfigs = useCallback((data: GroupConfig[]) => {
     // Sanitize on the write path too — applySyncPayload / importVaultData
@@ -672,7 +702,9 @@ export const useVaultState = () => {
     const cleaned = normalizeVaultOrder(data.map(sanitizeGroupConfig));
     setGroupConfigs(cleaned);
     const ver = ++groupConfigsWriteVersion.current;
-    const pending = encryptGroupConfigs(cleaned).then((enc) => {
+    const pending = withVaultImportLock("vault", async () => {
+      if (ver !== groupConfigsWriteVersion.current) return;
+      const enc = await encryptGroupConfigs(cleaned);
       if (ver === groupConfigsWriteVersion.current)
         localStorageAdapter.write(STORAGE_KEY_GROUP_CONFIGS, enc);
     });
@@ -819,7 +851,9 @@ export const useVaultState = () => {
     setHosts((prevHosts) => {
       const updated = normalizeVaultOrder([...prevHosts, sanitizeHost(newHost)]);
       const ver = ++hostsWriteVersion.current;
-      const pending = encryptHosts(updated).then((enc) => {
+      const pending = withVaultImportLock("vault", async () => {
+        if (ver !== hostsWriteVersion.current) return;
+        const enc = await encryptHosts(updated);
         if (ver === hostsWriteVersion.current)
           localStorageAdapter.write(STORAGE_KEY_HOSTS, enc);
       });
@@ -1236,7 +1270,9 @@ export const useVaultState = () => {
         h.id === hostId ? { ...h, lastConnectedAt: Date.now() } : h,
       );
       const ver = ++hostsWriteVersion.current;
-      const pending = encryptHosts(next).then((enc) => {
+      const pending = withVaultImportLock("vault", async () => {
+        if (ver !== hostsWriteVersion.current) return;
+        const enc = await encryptHosts(next);
         if (ver === hostsWriteVersion.current)
           localStorageAdapter.write(STORAGE_KEY_HOSTS, enc);
       });
@@ -1252,7 +1288,9 @@ export const useVaultState = () => {
         h.id === hostId ? { ...h, distro: normalized } : h,
       );
       const ver = ++hostsWriteVersion.current;
-      const pending = encryptHosts(next).then((enc) => {
+      const pending = withVaultImportLock("vault", async () => {
+        if (ver !== hostsWriteVersion.current) return;
+        const enc = await encryptHosts(next);
         if (ver === hostsWriteVersion.current)
           localStorageAdapter.write(STORAGE_KEY_HOSTS, enc);
       });

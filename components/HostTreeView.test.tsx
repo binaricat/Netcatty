@@ -425,4 +425,7 @@ test("HostTreeView virtualizes an 8,000-host tree", () => {
   assert.ok(renderedHosts < 100);
   assert.match(markup, /data-vault-virtual-tree="true"/);
   assert.match(markup, /height:320000px/);
+  assert.match(markup, /aria-setsize="8000"/);
+  assert.match(markup, /aria-posinset="1"/);
+  assert.match(markup, /role="treeitem"/);
 });

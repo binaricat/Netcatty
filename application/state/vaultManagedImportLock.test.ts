@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { withVaultImportLock } from "./vaultManagedImportLock.ts";
+import {
+  isVaultImportLockHeld,
+  withVaultImportLock,
+} from "./vaultManagedImportLock.ts";
 
 test("Vault imports are serialized without Web Locks", async () => {
   const events: string[] = [];
@@ -29,6 +32,21 @@ test("Vault imports are serialized without Web Locks", async () => {
     "second:start",
     "second:end",
   ]);
+});
+
+test("Vault import lock re-enters in the same window without deadlock", async () => {
+  const events: string[] = [];
+  await withVaultImportLock("reenter", async () => {
+    events.push("outer");
+    assert.equal(isVaultImportLockHeld("reenter"), true);
+    await withVaultImportLock("reenter", async () => {
+      events.push("inner");
+      assert.equal(isVaultImportLockHeld("reenter"), true);
+    }, null);
+    events.push("after-inner");
+  }, null);
+  assert.equal(isVaultImportLockHeld("reenter"), false);
+  assert.deepEqual(events, ["outer", "inner", "after-inner"]);
 });
 
 test("Vault imports fail safely in a window without shared locking", async () => {
