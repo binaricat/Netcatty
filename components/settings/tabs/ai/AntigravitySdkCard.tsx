@@ -30,21 +30,25 @@ export const AntigravitySdkCard: React.FC<{
   const [showApiKey, setShowApiKey] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [decrypting, setDecrypting] = useState(Boolean(encryptedApiKey));
 
   useEffect(() => {
     let cancelled = false;
     setSaved(false);
     if (!encryptedApiKey) {
       setApiKey("");
+      setDecrypting(false);
       return;
     }
+    setDecrypting(true);
     void decryptField(encryptedApiKey)
       .then((value) => { if (!cancelled) setApiKey(value ?? ""); })
-      .catch(() => { if (!cancelled) setApiKey(""); });
+      .catch(() => { if (!cancelled) setApiKey(""); })
+      .finally(() => { if (!cancelled) setDecrypting(false); });
     return () => { cancelled = true; };
   }, [encryptedApiKey]);
 
-  const installed = Boolean(pathInfo?.installed || pathInfo?.available);
+  const installed = Boolean(pathInfo?.sdkReady ?? pathInfo?.available);
   const authenticated = Boolean(encryptedApiKey || pathInfo?.authenticated);
   const status = isResolvingPath
     ? t("ai.antigravity.detecting")
@@ -113,7 +117,7 @@ export const AntigravitySdkCard: React.FC<{
           <div className="relative flex-1">
             <input
               type={showApiKey ? "text" : "password"}
-              value={apiKey}
+              value={decrypting ? "" : apiKey}
               onChange={(event) => {
                 setSaved(false);
                 setApiKey(event.target.value);
@@ -132,7 +136,7 @@ export const AntigravitySdkCard: React.FC<{
               {showApiKey ? <EyeOff size={14} /> : <Eye size={14} />}
             </button>
           </div>
-          <Button variant="outline" size="sm" onClick={() => void save()} disabled={saving || (!apiKey.trim() && !encryptedApiKey)}>
+          <Button variant="outline" size="sm" onClick={() => void save()} disabled={saving || decrypting || (!apiKey.trim() && !encryptedApiKey)}>
             {saved ? <Check size={14} className="mr-1.5" /> : null}
             {saved ? t("ai.antigravity.saved") : t("ai.antigravity.saveApiKey")}
           </Button>
