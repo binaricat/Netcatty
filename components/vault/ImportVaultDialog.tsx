@@ -257,12 +257,12 @@ export function VaultImportProgressView({
       </span>
       <div
         className={cn(
-          "flex h-14 w-14 items-center justify-center rounded-2xl border",
+          "flex h-14 w-14 items-center justify-center rounded-2xl",
           isComplete
-            ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-500"
+            ? "bg-emerald-500/10 text-emerald-500"
             : progress.status === "error"
-              ? "border-destructive/30 bg-destructive/10 text-destructive"
-              : "border-primary/30 bg-primary/10 text-primary",
+              ? "bg-destructive/10 text-destructive"
+              : "bg-primary/10 text-primary",
         )}
       >
         {isComplete ? (
