@@ -107,6 +107,32 @@ const PLUGIN_IMPORT_TRANSACTION_KEYS = new Set([
   STORAGE_KEY_MANAGED_SOURCES,
 ]);
 
+const buildGroupConfigsForGroups = (
+  groups: string[],
+  currentConfigs: GroupConfig[],
+): GroupConfig[] => {
+  const groupOrderByPath = new Map<string, number>(
+    groups.map((path, index) => [path, (index + 1) * 1000]),
+  );
+  const existingConfigByPath = new Map<string, GroupConfig>(
+    currentConfigs.map((config) => [config.path, config]),
+  );
+  const orderedConfigs = groups.map((path) => {
+    const existing = existingConfigByPath.get(path);
+    return sanitizeGroupConfig({
+      ...(existing ? { ...existing } : { path }),
+      path,
+      order: groupOrderByPath.get(path),
+    });
+  });
+  return normalizeVaultOrder([
+    ...orderedConfigs,
+    ...currentConfigs
+      .filter((config) => !groupOrderByPath.has(config.path))
+      .map(sanitizeGroupConfig),
+  ]);
+};
+
 // Migration helper for old SSHKey format to new format
 const migrateKey = (key: Partial<SSHKey>): SSHKey => {
   const id = key.id ?? crypto.randomUUID();
@@ -254,6 +280,7 @@ export const useVaultState = () => {
   const hostsWritePendingRef = useRef<Promise<unknown>>(Promise.resolve());
   const keysWritePendingRef = useRef<Promise<unknown>>(Promise.resolve());
   const identitiesWritePendingRef = useRef<Promise<unknown>>(Promise.resolve());
+  const groupConfigsWritePendingRef = useRef<Promise<unknown>>(Promise.resolve());
 
   // Read-sequence counters for cross-window storage events.  Each incoming
   // event bumps the counter; the async decrypt callback only applies state if
@@ -480,32 +507,14 @@ export const useVaultState = () => {
     setCustomGroups(next);
     localStorageAdapter.write(STORAGE_KEY_GROUPS, next);
 
-    const groupOrderByPath = new Map<string, number>(
-      next.map((path, index) => [path, (index + 1) * 1000]),
-    );
-    const existingConfigByPath = new Map<string, GroupConfig>(
-      groupConfigs.map((config) => [config.path, config]),
-    );
-    const orderedConfigs = next.map((path) => {
-      const existing = existingConfigByPath.get(path);
-      const base: GroupConfig = existing ? { ...existing } : { path };
-      return sanitizeGroupConfig({
-        ...base,
-        path,
-        order: groupOrderByPath.get(path),
-      });
-    });
-    const retainedConfigs = groupConfigs.filter((config) => !groupOrderByPath.has(config.path));
-    const cleanedGroupConfigs = normalizeVaultOrder([
-      ...orderedConfigs,
-      ...retainedConfigs.map(sanitizeGroupConfig),
-    ]);
+    const cleanedGroupConfigs = buildGroupConfigsForGroups(next, groupConfigs);
     setGroupConfigs(cleanedGroupConfigs);
     const ver = ++groupConfigsWriteVersion.current;
-    void encryptGroupConfigs(cleanedGroupConfigs).then((enc) => {
+    const pending = encryptGroupConfigs(cleanedGroupConfigs).then((enc) => {
       if (ver === groupConfigsWriteVersion.current)
         localStorageAdapter.write(STORAGE_KEY_GROUP_CONFIGS, enc);
     });
+    groupConfigsWritePendingRef.current = pending;
   }, [groupConfigs]);
 
   const updateKnownHosts = useCallback((data: KnownHost[]) => {
@@ -543,28 +552,61 @@ export const useVaultState = () => {
     | { status: "persisted"; groups: string[]; sources: ManagedSource[] }
     | { status: "superseded" }
   > => {
+    await groupConfigsWritePendingRef.current;
     const cleanedHosts = normalizeVaultOrder(nextHosts.map((host) => sanitizeHost(host)));
-    const baselineRawHosts = localStorageAdapter.readString(STORAGE_KEY_HOSTS);
+    const baselineRaw = new Map([
+      [STORAGE_KEY_HOSTS, localStorageAdapter.readString(STORAGE_KEY_HOSTS)],
+      [STORAGE_KEY_GROUPS, localStorageAdapter.readString(STORAGE_KEY_GROUPS)],
+      [STORAGE_KEY_MANAGED_SOURCES, localStorageAdapter.readString(STORAGE_KEY_MANAGED_SOURCES)],
+      [STORAGE_KEY_GROUP_CONFIGS, localStorageAdapter.readString(STORAGE_KEY_GROUP_CONFIGS)],
+    ]);
+    const groups = updateGroups(readStoredArray<string>(
+      STORAGE_KEY_GROUPS,
+      baselineRaw.get(STORAGE_KEY_GROUPS) ?? null,
+    ));
+    const sources = updateSources(readStoredArray<ManagedSource>(
+      STORAGE_KEY_MANAGED_SOURCES,
+      baselineRaw.get(STORAGE_KEY_MANAGED_SOURCES) ?? null,
+    ));
+    const storedGroupConfigs = readStoredArray<GroupConfig>(
+      STORAGE_KEY_GROUP_CONFIGS,
+      baselineRaw.get(STORAGE_KEY_GROUP_CONFIGS) ?? null,
+    );
     const version = hostsWriteVersion.current;
-    const encryptedHosts = await encryptHosts(cleanedHosts);
+    const groupConfigsVersion = groupConfigsWriteVersion.current;
+    const latestGroupConfigs = await decryptGroupConfigs(storedGroupConfigs);
+    const nextGroupConfigs = buildGroupConfigsForGroups(groups, latestGroupConfigs);
+    const [encryptedHosts, encryptedGroupConfigs] = await Promise.all([
+      encryptHosts(cleanedHosts),
+      encryptGroupConfigs(nextGroupConfigs),
+    ]);
     if (
       version !== hostsWriteVersion.current
-      || localStorageAdapter.readString(STORAGE_KEY_HOSTS) !== baselineRawHosts
+      || groupConfigsVersion !== groupConfigsWriteVersion.current
+      || [...baselineRaw].some(([key, value]) => localStorageAdapter.readString(key) !== value)
     ) {
       return { status: "superseded" };
     }
     const result = persistVaultImportMetadata(
       localStorageAdapter,
-      updateGroups,
-      updateSources,
-      [[STORAGE_KEY_HOSTS, encryptedHosts]],
+      () => groups,
+      () => sources,
+      [
+        [STORAGE_KEY_HOSTS, encryptedHosts],
+        [STORAGE_KEY_GROUP_CONFIGS, encryptedGroupConfigs],
+      ],
     );
     ++hostsWriteVersion.current;
+    ++customGroupsWriteVersion.current;
+    ++groupConfigsWriteVersion.current;
+    customGroupsRef.current = result.groups;
+    managedSourcesRef.current = result.sources;
     setHosts(cleanedHosts);
-    updateCustomGroups(result.groups);
-    updateManagedSources(result.sources);
+    setCustomGroups(result.groups);
+    setManagedSources(result.sources);
+    setGroupConfigs(nextGroupConfigs);
     return { status: "persisted", groups: result.groups, sources: result.sources };
-  }, [updateCustomGroups, updateManagedSources]);
+  }, []);
 
   const updateGroupConfigs = useCallback((data: GroupConfig[]) => {
     // Sanitize on the write path too — applySyncPayload / importVaultData
@@ -575,10 +617,12 @@ export const useVaultState = () => {
     const cleaned = normalizeVaultOrder(data.map(sanitizeGroupConfig));
     setGroupConfigs(cleaned);
     const ver = ++groupConfigsWriteVersion.current;
-    return encryptGroupConfigs(cleaned).then((enc) => {
+    const pending = encryptGroupConfigs(cleaned).then((enc) => {
       if (ver === groupConfigsWriteVersion.current)
         localStorageAdapter.write(STORAGE_KEY_GROUP_CONFIGS, enc);
     });
+    groupConfigsWritePendingRef.current = pending;
+    return pending;
   }, []);
 
   const clearVaultData = useCallback(() => {
@@ -1218,6 +1262,7 @@ export const useVaultState = () => {
       hostsWritePendingRef.current,
       keysWritePendingRef.current,
       identitiesWritePendingRef.current,
+      groupConfigsWritePendingRef.current,
     ]);
     while (true) {
       const raw = new Map(

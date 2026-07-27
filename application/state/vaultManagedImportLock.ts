@@ -13,6 +13,9 @@ export async function withVaultImportLock<T>(
 ): Promise<T> {
   const lockName = `netcatty:vault-import:${key}`;
   if (lockManager) return lockManager.request(lockName, run);
+  if (typeof window !== "undefined") {
+    throw new Error("Cross-window Vault import locking is unavailable");
+  }
 
   const previous = fallbackTails.get(lockName) ?? Promise.resolve();
   let release!: () => void;

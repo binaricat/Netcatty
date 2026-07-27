@@ -30,3 +30,20 @@ test("Vault imports are serialized without Web Locks", async () => {
     "second:end",
   ]);
 });
+
+test("Vault imports fail safely in a window without shared locking", async () => {
+  const previousWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: {},
+  });
+  try {
+    await assert.rejects(
+      () => withVaultImportLock("shared", async () => undefined, null),
+      /Cross-window Vault import locking is unavailable/,
+    );
+  } finally {
+    if (previousWindow) Object.defineProperty(globalThis, "window", previousWindow);
+    else delete (globalThis as { window?: unknown }).window;
+  }
+});
