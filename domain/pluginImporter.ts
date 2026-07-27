@@ -473,6 +473,7 @@ export function applyPluginImporterDestination(
   merged: PluginImporterMergeResult,
   existingHostCount: number,
   destination?: VaultImportDestination,
+  existingCustomGroups: ReadonlyArray<string> = [],
 ): PluginImporterMergeResult {
   if (!destination || destination.mode === 'preserve') return merged;
   const splitAt = Math.max(0, Math.min(existingHostCount, merged.hosts.length));
@@ -489,10 +490,19 @@ export function applyPluginImporterDestination(
       duplicates: 0,
     },
   }, destination);
+  const existingGroupSet = new Set(existingCustomGroups);
+  const previousAddedGroupCount = merged.customGroups.filter(
+    (group) => !existingGroupSet.has(group),
+  ).length;
+  const customGroups = [...new Set([...existingCustomGroups, ...targeted.groups])];
+  const nextAddedGroupCount = customGroups.filter(
+    (group) => !existingGroupSet.has(group),
+  ).length;
   return {
     ...merged,
     hosts: [...existingHosts, ...targeted.hosts],
-    customGroups: [...new Set([...merged.customGroups, ...targeted.groups])],
+    customGroups,
+    addedCount: merged.addedCount - previousAddedGroupCount + nextAddedGroupCount,
   };
 }
 

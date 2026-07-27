@@ -402,11 +402,13 @@ test('plugin importer destination moves only newly imported hosts into the selec
     merged,
     existingDrafts.hosts.length,
     { mode: 'group', group: 'Chosen' },
+    ['Original'],
   );
 
   assert.equal(targeted.hosts[0].group, 'Original');
   assert.equal(targeted.hosts[1].group, 'Chosen');
-  assert.deepEqual(targeted.customGroups, ['Original', 'Source', 'Chosen']);
+  assert.deepEqual(targeted.customGroups, ['Original', 'Chosen']);
+  assert.equal(targeted.addedCount, 2);
 });
 
 test('plugin importer preview is bounded and never exposes secret or command payloads', () => {

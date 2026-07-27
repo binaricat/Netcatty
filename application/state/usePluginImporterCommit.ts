@@ -66,6 +66,7 @@ export function usePluginImporterCommit({
       merged,
       hosts.length,
       destination,
+      customGroups,
     );
     await onCommitPluginImporterData({
       keys: destinationApplied.keys,
@@ -74,8 +75,8 @@ export function usePluginImporterCommit({
       snippets: destinationApplied.snippets,
       customGroups: destinationApplied.customGroups,
     });
-    onCommitSuccess?.(merged.addedCount);
-  }, [buildPluginImportMerge, hosts.length, onCommitPluginImporterData, onCommitSuccess, t]);
+    onCommitSuccess?.(destinationApplied.addedCount);
+  }, [buildPluginImportMerge, customGroups, hosts.length, onCommitPluginImporterData, onCommitSuccess, t]);
 
   const getPluginPreviewAnalysis = useCallback((preview: NetcattyPluginImporterPreview) => {
     const { drafts, merged } = buildPluginImportMerge(preview);
