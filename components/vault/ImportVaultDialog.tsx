@@ -581,11 +581,11 @@ export const ImportVaultDialog: React.FC<ImportVaultDialogProps> = ({
                   <FolderTree className="h-6 w-6" />
                 </div>
               ) : step === "securecrt-source" ? (
-                <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl border border-border/60 bg-muted/60">
+                <div className="mx-auto flex h-14 w-14 items-center justify-center">
                   <img
                     src="/import/securecrt.png"
                     alt=""
-                    className="h-9 w-9 object-contain"
+                    className="h-10 w-10 object-contain"
                   />
                 </div>
               ) : (
