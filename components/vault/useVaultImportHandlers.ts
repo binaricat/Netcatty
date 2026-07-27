@@ -259,7 +259,6 @@ export function useVaultImportHandlers({
             updateProgress({
               status: "error",
               stage: "failed",
-              percent: 100,
               error: message,
             });
             toast.error(
@@ -278,7 +277,6 @@ export function useVaultImportHandlers({
               updateProgress({
                 status: "error",
                 stage: "failed",
-                percent: 100,
                 error: message,
               });
               toast.error(
@@ -551,7 +549,6 @@ export function useVaultImportHandlers({
             updateProgress({
               status: "error",
               stage: "failed",
-              percent: 100,
               error: message,
             });
             toast.error(
@@ -635,7 +632,6 @@ export function useVaultImportHandlers({
           updateProgress({
             status: "error",
             stage: "failed",
-            percent: 100,
             error: message,
           });
           toast.error(message, t("vault.import.toast.failedTitle"));
