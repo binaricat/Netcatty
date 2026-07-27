@@ -613,3 +613,31 @@ test("applyVaultHostImport skips duplicates by default", () => {
   assert.equal(merged.skippedExistingCount, 1);
   assert.equal(merged.hosts.length, 2);
 });
+
+test("applyVaultHostImport can preserve distinct sessions with the same endpoint", () => {
+  const existing: Host = {
+    id: "existing-1",
+    label: "Existing session",
+    hostname: "shared.example.com",
+    username: "deploy",
+    port: 22,
+    tags: [],
+    os: "linux",
+  };
+  const importedHosts: Host[] = ["Session A", "Session B"].map((label, index) => ({
+    ...existing,
+    id: `imported-${index}`,
+    label,
+  }));
+  const imported = {
+    hosts: importedHosts,
+    groups: [],
+    issues: [],
+    stats: { parsed: 2, imported: 2, skipped: 0, duplicates: 0 },
+  };
+
+  const merged = applyVaultHostImport([existing], [], imported, { skipDuplicates: false });
+  assert.equal(merged.addedCount, 2);
+  assert.equal(merged.skippedExistingCount, 0);
+  assert.equal(merged.hosts.length, 3);
+});

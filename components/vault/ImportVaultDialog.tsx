@@ -542,7 +542,7 @@ export const ImportVaultDialog: React.FC<ImportVaultDialogProps> = ({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="max-h-[calc(100vh-2rem)] max-w-2xl overflow-y-auto">
           <>
             <DialogHeader className="text-center sm:text-center">
               <div className="mx-auto h-14 w-14 rounded-2xl bg-muted/60 border border-border/60 flex items-center justify-center">

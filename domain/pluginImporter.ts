@@ -540,8 +540,12 @@ const hostFingerprint = (host: Host): string => host.pluginConnection
     protocol: host.protocol,
     providerId: host.pluginConnection.providerId,
     authenticationProviderId: host.pluginConnection.authenticationProviderId,
+    credentialId: host.pluginConnection.credentialId,
     configuration: host.pluginConnection.configuration,
     username: host.username.trim().toLowerCase(),
+    identityId: host.identityId,
+    telnetIdentityId: host.telnetIdentityId,
+    identityFileId: host.identityFileId,
   })
   : buildVaultHostMergeKey(host);
 

@@ -381,6 +381,45 @@ test('plugin importer merge skips duplicates and remaps relationships to retaine
   assert.equal(merged.snippets.length, 1);
 });
 
+test('plugin importer keeps identical provider settings with different credentials', () => {
+  const drafts = normalizePluginImporterRecords([
+    { type: 'draft', draft: { kind: 'identity', value: {
+      id: 'credential-a', label: 'Credential A', username: 'root', authMethod: 'password', password: 'first',
+    } } },
+    { type: 'draft', draft: { kind: 'identity', value: {
+      id: 'credential-b', label: 'Credential B', username: 'root', authMethod: 'password', password: 'second',
+    } } },
+    { type: 'draft', draft: { kind: 'host', value: {
+      label: 'Plugin host A',
+      protocol: 'plugin:com.example.transport.connection',
+      pluginConnection: {
+        providerId: 'com.example.transport.connection',
+        configuration: { endpoint: 'shared' },
+        credentialId: 'credential-a',
+      },
+    } } },
+    { type: 'draft', draft: { kind: 'host', value: {
+      label: 'Plugin host B',
+      protocol: 'plugin:com.example.transport.connection',
+      pluginConnection: {
+        providerId: 'com.example.transport.connection',
+        configuration: { endpoint: 'shared' },
+        credentialId: 'credential-b',
+      },
+    } } },
+  ]);
+  const merged = mergePluginImporterDrafts({
+    hosts: [], identities: [], keys: [], snippets: [], customGroups: [],
+  }, drafts);
+
+  assert.equal(merged.hosts.length, 2);
+  assert.equal(merged.identities.length, 2);
+  assert.notEqual(
+    merged.hosts[0].pluginConnection?.credentialId,
+    merged.hosts[1].pluginConnection?.credentialId,
+  );
+});
+
 test('plugin importer destination moves only newly imported hosts into the selected group', () => {
   const existingDrafts = normalizePluginImporterRecords([{ type: 'draft', draft: {
     kind: 'host',

@@ -294,7 +294,9 @@ export function useVaultImportHandlers({
   
           const existingKeys = new Set(currentHosts.map(makeKey));
           // Filter out duplicates for both managed and non-managed imports
-          let newHosts = result.hosts.filter((h) => !existingKeys.has(makeKey(h)));
+          let newHosts = format === "securecrt"
+            ? result.hosts
+            : result.hosts.filter((h) => !existingKeys.has(makeKey(h)));
   
           // For managed imports, also update existing hosts to be managed
           let updatedExistingHosts: Host[] = [];
@@ -443,7 +445,7 @@ export function useVaultImportHandlers({
               importBaselineHosts,
               importBaselineGroups,
               result,
-              { skipDuplicates: true },
+              { skipDuplicates: format !== "securecrt" },
             );
             newHosts = merged.addedHosts;
             addedHostIds = new Set(merged.addedHosts.map((host) => host.id));
