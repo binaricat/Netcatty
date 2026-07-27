@@ -63,7 +63,7 @@
     "test:ssh-mfa-models": "node --test electron/bridges/sshMfaModels.live.test.cjs",
     "test:ssh-mfa-models:live": "SSH_MFA_LIVE=1 node --test electron/bridges/sshMfaModels.live.test.cjs",
     "test:xterm-webgl-overflow": "electron scripts/xterm-webgl-atlas-overflow.live.test.cjs",
-    "test:xterm-sync-render": "electron scripts/xterm-sync-render.live.test.cjs"
+    "test:xterm-sync-render": "cross-env NETCATTY_XTERM_SYNC_RENDER_LIVE=1 node scripts/xterm-sync-render.live.test.cjs"
   },
   "dependencies": {
     "@eslint-community/regexpp": "4.12.2",

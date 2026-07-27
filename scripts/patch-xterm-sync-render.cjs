@@ -20,72 +20,115 @@
  * already off, so the completed frame paints before the next can reopen it.
  *
  * Upstream: https://github.com/xtermjs/xterm.js (fix pending). Applied here as a
- * string patch on the minified build, like patch-xterm-webgl-atlas.cjs, so a
- * version bump that moves the target surfaces as an install failure rather than
- * silently losing the fix.
+ * string patch on the minified build, like patch-xterm-webgl-atlas.cjs. The
+ * exact package version and complete refreshRows method are checked so an xterm
+ * upgrade or minifier change fails installation rather than mispatching code.
  *
- * Idempotent.
+ * Idempotent. Both builds are validated before either is replaced.
  */
 "use strict";
 const fs = require("node:fs");
 const path = require("node:path");
 
 const MARKER = "/*netcatty:sync-render*/";
+const EXPECTED_VERSION = "6.1.0-beta.220";
+const VERSION_FILE = "node_modules/@xterm/xterm/package.json";
 
-// The minified `sync ? _renderRows(a,b) : _renderDebouncer.refresh(a,b,c)`
-// ternary, and the `buffered` local to widen it with. Token names differ
-// between the CJS and ESM builds, so each target names its own.
 const TARGETS = [
   {
     file: "node_modules/@xterm/xterm/lib/xterm.js",
-    // const r = flush(); ... i ? _renderRows(e,t) : _renderDebouncer.refresh(e,t,this._rowCount)
-    from: "i?this._renderRows(e,t):this._renderDebouncer.refresh(e,t,this._rowCount)",
-    to: "(i||r)?this._renderRows(e,t):this._renderDebouncer.refresh(e,t,this._rowCount)",
+    from: "refreshRows(e,t,i=!1,s=!1){if(this._isPaused)return void(this._needsFullRefresh=!0);if(this._coreService.decPrivateModes.synchronizedOutput)return void this._syncOutputHandler.bufferRows(e,t);const r=this._syncOutputHandler.flush();r&&(e=Math.min(e,r.start),t=Math.max(t,r.end)),s||(this._isNextRenderRedrawOnly=!1),i?this._renderRows(e,t):this._renderDebouncer.refresh(e,t,this._rowCount)}",
+    to: "refreshRows(e,t,i=!1,s=!1){if(this._isPaused)return void(this._needsFullRefresh=!0);if(this._coreService.decPrivateModes.synchronizedOutput)return void this._syncOutputHandler.bufferRows(e,t);const r=this._syncOutputHandler.flush();r&&(e=Math.min(e,r.start),t=Math.max(t,r.end)),s||(this._isNextRenderRedrawOnly=!1),(i||r)?this._renderRows(e,t):this._renderDebouncer.refresh(e,t,this._rowCount)}",
   },
   {
     file: "node_modules/@xterm/xterm/lib/xterm.mjs",
-    // let o = flush(); ... r ? _renderRows(e,t) : _renderDebouncer.refresh(e,t,this._rowCount)
-    from: "r?this._renderRows(e,t):this._renderDebouncer.refresh(e,t,this._rowCount)",
-    to: "(r||o)?this._renderRows(e,t):this._renderDebouncer.refresh(e,t,this._rowCount)",
+    from: "refreshRows(e,t,r=!1,s=!1){if(this._isPaused){this._needsFullRefresh=!0;return}if(this._coreService.decPrivateModes.synchronizedOutput){this._syncOutputHandler.bufferRows(e,t);return}let o=this._syncOutputHandler.flush();o&&(e=Math.min(e,o.start),t=Math.max(t,o.end)),s||(this._isNextRenderRedrawOnly=!1),r?this._renderRows(e,t):this._renderDebouncer.refresh(e,t,this._rowCount)}",
+    to: "refreshRows(e,t,r=!1,s=!1){if(this._isPaused){this._needsFullRefresh=!0;return}if(this._coreService.decPrivateModes.synchronizedOutput){this._syncOutputHandler.bufferRows(e,t);return}let o=this._syncOutputHandler.flush();o&&(e=Math.min(e,o.start),t=Math.max(t,o.end)),s||(this._isNextRenderRedrawOnly=!1),(r||o)?this._renderRows(e,t):this._renderDebouncer.refresh(e,t,this._rowCount)}",
   },
 ];
 
-let patched = 0;
 let already = 0;
 let upstream = 0;
 let missing = 0;
+const writes = [];
+
+const count = (source, value) => source.split(value).length - 1;
+const warnInvalid = (file, detail) => {
+  console.warn(`[patch-xterm-sync-render] ERROR: ${detail} in ${file}. ` +
+    "Refresh the exact target before upgrading @xterm/xterm.");
+  missing++;
+};
+
+try {
+  const versionPath = path.resolve(process.cwd(), VERSION_FILE);
+  const version = JSON.parse(fs.readFileSync(versionPath, "utf8")).version;
+  if (version !== EXPECTED_VERSION) {
+    warnInvalid(VERSION_FILE, `expected version ${EXPECTED_VERSION}, found ${version}`);
+  }
+} catch {
+  warnInvalid(VERSION_FILE, "package version is missing or invalid");
+}
 
 for (const { file, from, to } of TARGETS) {
   const abs = path.resolve(process.cwd(), file);
-  let src;
+  let source;
+  let stat;
   try {
-    src = fs.readFileSync(abs, "utf8");
+    source = fs.readFileSync(abs, "utf8");
+    stat = fs.statSync(abs);
   } catch {
-    console.warn(`[patch-xterm-sync-render] skip (not found): ${file}`);
-    missing++;
+    warnInvalid(file, "target is missing");
     continue;
   }
-  const withMarker = to + MARKER;
-  const markerMatches = src.split(MARKER).length - 1;
-  const targetMatches = src.split(from).length - 1;
-  const upstreamMatches = src.split(to).length - 1;
-  if (markerMatches === 1 && src.includes(withMarker)) {
+
+  const marked = `${to.slice(0, -1)}${MARKER}}`;
+  const markerMatches = count(source, MARKER);
+  const targetMatches = count(source, from);
+  const upstreamMatches = count(source, to);
+  if (markerMatches === 1 && count(source, marked) === 1) {
     already++;
-    continue;
-  }
-  if (markerMatches === 0 && targetMatches === 1 && upstreamMatches === 0) {
-    fs.writeFileSync(abs, src.replace(from, withMarker), "utf8");
-    patched++;
+  } else if (markerMatches === 0 && targetMatches === 1 && upstreamMatches === 0) {
+    writes.push({ abs, file, mode: stat.mode, source, output: source.replace(from, marked) });
   } else if (markerMatches === 0 && targetMatches === 0 && upstreamMatches === 1) {
-    // The exact upstream fixed form is already present without Netcatty's
-    // marker. Leave it untouched so an xterm upgrade can retire this patch.
     upstream++;
   } else {
-    console.warn(
-      `[patch-xterm-sync-render] ERROR: sync-render ternary not found (or ambiguous) in ${file}. ` +
-        "Refresh the minified target before upgrading @xterm/xterm.",
-    );
+    warnInvalid(file, "complete sync-render method was not found exactly once");
+  }
+}
+
+let patched = 0;
+if (missing === 0 && writes.length > 0) {
+  const staged = [];
+  const committed = [];
+  try {
+    for (const write of writes) {
+      const temp = `${write.abs}.netcatty-${process.pid}-${staged.length}.tmp`;
+      fs.writeFileSync(temp, write.output, { encoding: "utf8", flag: "wx", mode: write.mode });
+      staged.push({ ...write, temp });
+    }
+    for (const write of staged) {
+      fs.renameSync(write.temp, write.abs);
+      committed.push(write);
+    }
+    patched = committed.length;
+  } catch (error) {
+    console.warn(`[patch-xterm-sync-render] ERROR: atomic replacement failed: ${error.message}`);
     missing++;
+    for (const write of committed.reverse()) {
+      try {
+        const rollback = `${write.abs}.netcatty-${process.pid}-rollback.tmp`;
+        fs.writeFileSync(rollback, write.source, { encoding: "utf8", flag: "wx", mode: write.mode });
+        fs.renameSync(rollback, write.abs);
+      } catch (rollbackError) {
+        console.warn(`[patch-xterm-sync-render] ERROR: rollback failed for ${write.file}: ${rollbackError.message}`);
+      }
+    }
+  } finally {
+    for (const write of staged) {
+      try {
+        fs.rmSync(write.temp, { force: true });
+      } catch {}
+    }
   }
 }
 

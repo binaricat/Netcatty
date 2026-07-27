@@ -1,30 +1,64 @@
 "use strict";
 
-if (!process.versions.electron) {
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
+
+const LIVE_ENV = "NETCATTY_XTERM_SYNC_RENDER_LIVE";
+const USER_DATA_ENV = "NETCATTY_XTERM_SYNC_RENDER_USER_DATA";
+
+if (!process.versions.electron && process.env[LIVE_ENV] !== "1") {
   const test = require("node:test");
   test("closed synchronized-output frames render before the next frame opens", {
-    skip: "run with Electron so xterm's renderer is available",
+    skip: "run npm run test:xterm-sync-render for the Electron behavior test",
   }, () => {});
+} else if (!process.versions.electron) {
+  const { spawnSync } = require("node:child_process");
+  const electronPath = require("electron");
+  const userData = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-xterm-sync-render-"));
+  const result = spawnSync(electronPath, [__filename], {
+    cwd: path.resolve(__dirname, ".."),
+    env: { ...process.env, [USER_DATA_ENV]: userData },
+    stdio: "inherit",
+    timeout: 30_000,
+  });
+  fs.rmSync(userData, { recursive: true, force: true });
+  if (result.error) {
+    console.error(result.error);
+    process.exitCode = 1;
+  } else if (result.status !== 0) {
+    process.exitCode = result.status ?? 1;
+  }
 } else {
   const assert = require("node:assert/strict");
-  const fs = require("node:fs");
-  const os = require("node:os");
-  const path = require("node:path");
+  const { pathToFileURL } = require("node:url");
   const electron = require("electron");
 
   const appRoot = path.resolve(__dirname, "..");
-  const userData = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-xterm-sync-render-"));
+  const userData = process.env[USER_DATA_ENV];
+  assert.ok(userData, `${USER_DATA_ENV} is required`);
   electron.app.setPath("userData", userData);
   electron.app.commandLine.appendSwitch("disable-gpu");
-  electron.app.on("window-all-closed", () => {});
 
-  const cleanup = (exitCode) => {
-    fs.rmSync(userData, { recursive: true, force: true });
-    electron.app.exit(exitCode);
+  let window;
+  let finished = false;
+  const finish = (exitCode, error) => {
+    if (finished) return;
+    finished = true;
+    clearTimeout(hardTimeout);
+    if (error) console.error(error);
+    try {
+      if (window && !window.isDestroyed()) window.destroy();
+    } finally {
+      electron.app.exit(exitCode);
+    }
   };
+  const hardTimeout = setTimeout(() => {
+    finish(1, new Error("xterm synchronized-render Electron test timed out"));
+  }, 20_000);
 
   void electron.app.whenReady().then(async () => {
-    const window = new electron.BrowserWindow({
+    window = new electron.BrowserWindow({
       show: false,
       width: 640,
       height: 360,
@@ -35,55 +69,57 @@ if (!process.versions.electron) {
         sandbox: false,
       },
     });
-    await window.loadURL(
-      "data:text/html;charset=utf-8," + encodeURIComponent(
-        "<!doctype html><style>html,body,#terminal{width:600px;height:320px;margin:0}</style><div id=terminal></div>",
-      ),
+    const htmlFile = path.join(userData, "xterm-sync-render.html");
+    fs.writeFileSync(
+      htmlFile,
+      "<!doctype html><style>html,body,#terminal{width:600px;height:320px;margin:0}</style><div id=terminal></div>",
     );
+    await window.loadFile(htmlFile);
 
-    const xtermPath = require.resolve("@xterm/xterm", { paths: [appRoot] });
-    const result = await window.webContents.executeJavaScript(`(async () => {
-      const { Terminal } = require(${JSON.stringify(xtermPath)});
-      const term = new Terminal({ cols: 10, rows: 2, cursorBlink: false });
-      term.open(document.getElementById("terminal"));
+    const cjsPath = require.resolve("@xterm/xterm", { paths: [appRoot] });
+    const esmPath = path.join(path.dirname(cjsPath), "xterm.mjs");
+    const loaders = [
+      { name: "cjs", expression: `require(${JSON.stringify(cjsPath)})` },
+      { name: "esm", expression: `await import(${JSON.stringify(pathToFileURL(esmPath).href)})` },
+    ];
+    const results = [];
 
-      const nextFrame = () => new Promise(resolve => requestAnimationFrame(resolve));
-      await nextFrame();
-      await nextFrame();
+    for (const loader of loaders) {
+      const result = await window.webContents.executeJavaScript(`(async () => {
+        const { Terminal } = ${loader.expression};
+        const target = document.getElementById("terminal");
+        target.replaceChildren();
+        const term = new Terminal({ cols: 10, rows: 2, cursorBlink: false });
+        term.open(target);
 
-      const renders = [];
-      const renderSubscription = term.onRender(event => renders.push(event));
-      const write = data => new Promise(resolve => term.write(data, resolve));
-      const firstFrameStart = "\\x1b[?2026h\\x1b[1;1HAAAAAAAAAA";
-      const firstFrameClose = "\\x1b[2;1HBBBBBBBBBB\\x1b[?2026l";
-      const secondFrameOpen = "\\x1b[?2026h\\x1b[1;1HCC";
+        const nextFrame = () => new Promise(resolve => requestAnimationFrame(resolve));
+        await nextFrame();
+        await nextFrame();
 
-      // Keep the synchronized frame open across two input chunks so xterm
-      // buffers dirty rows, then queue the next frame before the completed
-      // first frame's debounced paint can run.
-      await write(firstFrameStart);
-      await write(firstFrameClose);
-      await write(secondFrameOpen);
-      await nextFrame();
-      await nextFrame();
-      const rendersBeforeSecondFrameClose = renders.length;
+        const renders = [];
+        const renderSubscription = term.onRender(event => renders.push(event));
+        const write = data => new Promise(resolve => term.write(data, resolve));
+        await write("\\x1b[?2026h\\x1b[1;1HAAAAAAAAAA");
+        await write("\\x1b[2;1HBBBBBBBBBB\\x1b[?2026l");
+        await write("\\x1b[?2026h\\x1b[1;1HCC");
+        await nextFrame();
+        await nextFrame();
+        const rendersBeforeSecondFrameClose = renders.length;
 
-      await write("\\x1b[?2026l");
-      await nextFrame();
-      renderSubscription.dispose();
-      term.dispose();
-      return { rendersBeforeSecondFrameClose };
-    })()`);
+        await write("\\x1b[?2026l");
+        await nextFrame();
+        renderSubscription.dispose();
+        term.dispose();
+        return { rendersBeforeSecondFrameClose };
+      })()`);
+      assert.ok(
+        result.rendersBeforeSecondFrameClose > 0,
+        `${loader.name} did not render the completed first frame before the second opened: ${JSON.stringify(result)}`,
+      );
+      results.push({ build: loader.name, ...result });
+    }
 
-    assert.ok(
-      result.rendersBeforeSecondFrameClose > 0,
-      `the completed first frame was not rendered before the second frame opened: ${JSON.stringify(result)}`,
-    );
-    process.stdout.write(`XTERM_SYNC_RENDER_OK ${JSON.stringify(result)}\n`);
-    window.destroy();
-    cleanup(0);
-  }).catch((error) => {
-    console.error(error);
-    cleanup(1);
-  });
+    process.stdout.write(`XTERM_SYNC_RENDER_OK ${JSON.stringify(results)}\n`);
+    finish(0);
+  }).catch((error) => finish(1, error));
 }
