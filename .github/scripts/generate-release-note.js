@@ -107,6 +107,14 @@ const content = `
 | **Windows** | ${badges.win.setup_x64} |
 | **macOS** | ${badges.mac.apple_silicon} ${badges.mac.intel} |
 | **Linux** | ${badges.linux.appimage_x64} ${badges.linux.deb_x64} ${badges.linux.rpm_x64} ${badges.linux.pacman_x64} <br> ${badges.linux.appimage_arm64} ${badges.linux.deb_arm64} ${badges.linux.rpm_arm64} ${badges.linux.pacman_arm64} |
+
+## Code signing policy
+
+Netcatty is applying to the SignPath Foundation open-source program. Once
+approved, covered Windows release artifacts will use **Free code signing provided by SignPath.io, certificate by SignPath Foundation**.
+See the
+[Code signing policy](https://github.com/${repo}/blob/${tag}/CODE_SIGNING_POLICY.md)
+and [Privacy policy](https://github.com/${repo}/blob/${tag}/PRIVACY.md).
 `;
 
 fs.writeFileSync('release_notes.md', content);

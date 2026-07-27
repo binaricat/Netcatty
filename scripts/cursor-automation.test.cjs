@@ -1887,6 +1887,14 @@ test('normalizeExternalResearchText accepts sourced research and explicit no-op'
     ),
     'RESEARCH_NOT_NEEDED: only local Netcatty behavior is involved',
   );
+  assert.equal(
+    auto.normalizeExternalResearchText([
+      '```text',
+      'RESEARCH_NOT_NEEDED: only local Netcatty behavior is involved',
+      '```',
+    ].join('\n')),
+    'RESEARCH_NOT_NEEDED: only local Netcatty behavior is involved',
+  );
 });
 
 test('normalizeExternalResearchText fails closed on blocked or unsourced research', () => {
@@ -2021,6 +2029,475 @@ test('parseExternalResearchStream supports standard deltas and terminal result',
   assert.match(auto.parseExternalResearchStream(deltasOnly, {}), /^RESEARCH_COMPLETE:/);
 });
 
+test('parseExternalResearchStream accepts the isolated fenced status from issue 2534', () => {
+  const status = 'RESEARCH_NOT_NEEDED: Issue is a Netcatty-local feature ask';
+  const events = [
+    {
+      type: 'assistant',
+      message: {
+        content: [{
+          type: 'text',
+          text: '先读取 `input.json`，再判断是否需要对外检索。',
+        }],
+      },
+    },
+    {
+      type: 'assistant',
+      message: {
+        content: [{ type: 'text', text: `\`\`\`text\n${status}\n\`\`\`` }],
+      },
+    },
+    {
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      result: `先读取 \`input.json\`，再判断是否需要对外检索。\`\`\`text\n${status}\n\`\`\``,
+    },
+  ].map(JSON.stringify).join('\n');
+
+  assert.equal(auto.parseExternalResearchStream(events, {}), status);
+  assert.throws(
+    () => auto.normalizeExternalResearchText(
+      `先读取 input.json。\n\`\`\`text\n${status}\n\`\`\``,
+    ),
+    /research status/i,
+  );
+  assert.throws(
+    () => auto.parseExternalResearchStream(JSON.stringify({
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      result: `Untrusted preamble\n\`\`\`text\n${status}\n\`\`\``,
+    }), {}),
+    /research status/i,
+  );
+});
+
+test('parseExternalResearchStream prefers the final isolated status over stale earlier text', () => {
+  const assistantEvents = [
+    {
+      type: 'assistant',
+      message: {
+        content: [{
+          type: 'text',
+          text: 'RESEARCH_NOT_NEEDED: initially appeared local-only',
+        }],
+      },
+    },
+    {
+      type: 'assistant',
+      message: {
+        content: [{
+          type: 'text',
+          text: 'RESEARCH_BLOCKED: WebSearch became unavailable',
+        }],
+      },
+    },
+  ];
+  const resultEvent = (result) => ({
+    type: 'result',
+    subtype: 'success',
+    is_error: false,
+    result,
+  });
+  const parse = (result) => auto.parseExternalResearchStream(
+    [...assistantEvents, resultEvent(result)].map(JSON.stringify).join('\n'),
+    {},
+  );
+
+  assert.throws(
+    () => parse([
+      'Conversation preamble',
+      'RESEARCH_NOT_NEEDED: initially appeared local-only',
+      'RESEARCH_BLOCKED: WebSearch became unavailable',
+    ].join('\n')),
+    /conflicting research statuses/,
+  );
+  assert.throws(
+    () => parse([
+      'RESEARCH_NOT_NEEDED: initially appeared local-only',
+      'RESEARCH_BLOCKED: WebSearch became unavailable',
+    ].join('\n')),
+    /conflicting research statuses/,
+  );
+});
+
+test('parseExternalResearchStream falls back to a complete fenced status split across events', () => {
+  const status = 'RESEARCH_NOT_NEEDED: only local Netcatty behavior is involved';
+  const events = [
+    {
+      type: 'assistant',
+      message: {
+        content: [{ type: 'text', text: '```text\n' }],
+      },
+    },
+    {
+      type: 'assistant',
+      message: {
+        content: [{ type: 'text', text: `${status}\n\`\`\`` }],
+      },
+    },
+    {
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      result: `Conversation preamble\n\`\`\`text\n${status}\n\`\`\``,
+    },
+  ].map(JSON.stringify).join('\n');
+
+  assert.equal(auto.parseExternalResearchStream(events, {}), status);
+});
+
+test('parseExternalResearchStream prefers a split final status over an earlier valid status', () => {
+  const staleStatus = 'RESEARCH_NOT_NEEDED: initially appeared local-only';
+  const finalStatus = 'RESEARCH_BLOCKED: WebSearch became unavailable';
+  const events = [
+    {
+      type: 'assistant',
+      message: {
+        content: [{ type: 'text', text: staleStatus }],
+      },
+    },
+    {
+      type: 'assistant',
+      message: {
+        content: [{ type: 'text', text: '```text\n' }],
+      },
+    },
+    {
+      type: 'assistant',
+      message: {
+        content: [{ type: 'text', text: `${finalStatus}\n\`\`\`` }],
+      },
+    },
+    {
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      result: `${staleStatus}\n\`\`\`text\n${finalStatus}\n\`\`\``,
+    },
+  ].map(JSON.stringify).join('\n');
+
+  assert.throws(
+    () => auto.parseExternalResearchStream(events, {}),
+    /conflicting research statuses/,
+  );
+});
+
+test('parseExternalResearchStream prefers a split final fence over cumulative flushes', () => {
+  const staleStatus = 'RESEARCH_NOT_NEEDED: initially appeared local-only';
+  const finalStatus = 'RESEARCH_BLOCKED: WebSearch became unavailable';
+  const cumulative = `${staleStatus}\n\`\`\`text\n${finalStatus}\n\`\`\``;
+  const events = [
+    {
+      type: 'assistant',
+      timestamp_ms: 1,
+      message: {
+        content: [{ type: 'text', text: `${staleStatus}\n` }],
+      },
+    },
+    {
+      type: 'assistant',
+      timestamp_ms: 2,
+      message: {
+        content: [{ type: 'text', text: '```text\n' }],
+      },
+    },
+    {
+      type: 'assistant',
+      timestamp_ms: 3,
+      message: {
+        content: [{ type: 'text', text: `${finalStatus}\n\`\`\`` }],
+      },
+    },
+    {
+      type: 'assistant',
+      message: {
+        content: [{ type: 'text', text: cumulative }],
+      },
+    },
+    {
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      result: cumulative,
+    },
+  ].map(JSON.stringify).join('\n');
+
+  assert.throws(
+    () => auto.parseExternalResearchStream(events, {}),
+    /conflicting research statuses/,
+  );
+});
+
+test('parseExternalResearchStream rejects a fenced status example that conflicts with success', () => {
+  const completeStatus = [
+    'RESEARCH_COMPLETE: Cursor documentation was checked.',
+    'Sources:',
+    '- https://docs.cursor.com/en/cli/reference/output-format — official format',
+  ].join('\n');
+  const fencedExample = '```text\nRESEARCH_BLOCKED: example only\n```';
+  const cumulative = `${completeStatus}\n${fencedExample}`;
+  const events = [
+    {
+      type: 'tool_call',
+      subtype: 'completed',
+      tool_call: {
+        webFetchToolCall: {
+          args: { url: 'https://docs.cursor.com/en/cli/reference/output-format' },
+          result: { success: { content: 'Cursor output format documentation' } },
+        },
+      },
+    },
+    {
+      type: 'assistant',
+      timestamp_ms: 1,
+      message: {
+        content: [{ type: 'text', text: `${completeStatus}\n` }],
+      },
+    },
+    {
+      type: 'assistant',
+      timestamp_ms: 2,
+      message: {
+        content: [{ type: 'text', text: '```text\n' }],
+      },
+    },
+    {
+      type: 'assistant',
+      timestamp_ms: 3,
+      message: {
+        content: [{ type: 'text', text: 'RESEARCH_BLOCKED: example only\n```' }],
+      },
+    },
+    {
+      type: 'assistant',
+      message: {
+        content: [{ type: 'text', text: cumulative }],
+      },
+    },
+    {
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      result: cumulative,
+    },
+  ].map(JSON.stringify).join('\n');
+
+  assert.throws(
+    () => auto.parseExternalResearchStream(events, {}),
+    /conflicting research statuses/,
+  );
+});
+
+test('parseExternalResearchStream rejects conflicts across every valid candidate', () => {
+  const noOp = 'RESEARCH_NOT_NEEDED: initially appeared local-only';
+  const blocked = 'RESEARCH_BLOCKED: WebSearch became unavailable';
+  const fencedNoOp = `\`\`\`text\n${noOp}\n\`\`\``;
+  const threeWayConflict = [
+    {
+      type: 'assistant',
+      timestamp_ms: 1,
+      message: { content: [{ type: 'text', text: '```text\n' }] },
+    },
+    {
+      type: 'assistant',
+      timestamp_ms: 2,
+      message: { content: [{ type: 'text', text: `${noOp}\n\`\`\`` }] },
+    },
+    {
+      type: 'assistant',
+      message: { content: [{ type: 'text', text: fencedNoOp }] },
+    },
+    {
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      result: blocked,
+    },
+  ].map(JSON.stringify).join('\n');
+
+  assert.throws(
+    () => auto.parseExternalResearchStream(threeWayConflict, {}),
+    /conflicting research statuses/,
+  );
+
+  const fencedExample = '```text\nRESEARCH_BLOCKED: example only\n```';
+  const partialAggregate = `${noOp}\n${fencedExample}`;
+  const prefixedAggregateConflict = [
+    {
+      type: 'assistant',
+      timestamp_ms: 1,
+      message: { content: [{ type: 'text', text: `${noOp}\n` }] },
+    },
+    {
+      type: 'assistant',
+      timestamp_ms: 2,
+      message: { content: [{ type: 'text', text: '```text\n' }] },
+    },
+    {
+      type: 'assistant',
+      timestamp_ms: 3,
+      message: { content: [{ type: 'text', text: 'RESEARCH_BLOCKED: example only\n```' }] },
+    },
+    {
+      type: 'assistant',
+      message: {
+        content: [{ type: 'text', text: `Conversation preamble\n${partialAggregate}` }],
+      },
+    },
+    {
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      result: `Conversation preamble\n${partialAggregate}`,
+    },
+  ].map(JSON.stringify).join('\n');
+
+  assert.throws(
+    () => auto.parseExternalResearchStream(prefixedAggregateConflict, {}),
+    /conflicting research statuses/,
+  );
+
+  const quotedNoOp = 'RESEARCH_NOT_NEEDED: quoted example, not the result';
+  const sameStatusConflict = [
+    {
+      type: 'assistant',
+      timestamp_ms: 1,
+      message: { content: [{ type: 'text', text: '```text\n' }] },
+    },
+    {
+      type: 'assistant',
+      timestamp_ms: 2,
+      message: { content: [{ type: 'text', text: `${quotedNoOp}\n\`\`\`` }] },
+    },
+    {
+      type: 'assistant',
+      message: { content: [{ type: 'text', text: noOp }] },
+    },
+    {
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      result: noOp,
+    },
+  ].map(JSON.stringify).join('\n');
+
+  assert.throws(
+    () => auto.parseExternalResearchStream(sameStatusConflict, {}),
+    /conflicting research statuses/,
+  );
+});
+
+test('parseExternalResearchStream keeps a valid terminal status over assistant fragments', () => {
+  const terminalStatus = 'RESEARCH_BLOCKED: WebSearch became unavailable';
+  const staleAssistantEvents = [
+    {
+      type: 'assistant',
+      message: {
+        content: [{ type: 'text', text: 'RESEARCH_NOT_NEEDED: initially appeared local-only' }],
+      },
+    },
+    {
+      type: 'assistant',
+      message: {
+        content: [{ type: 'text', text: 'Reconsidering after reading the request.' }],
+      },
+    },
+    {
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      result: terminalStatus,
+    },
+  ].map(JSON.stringify).join('\n');
+
+  assert.throws(
+    () => auto.parseExternalResearchStream(staleAssistantEvents, {}),
+    /conflicting research statuses/,
+  );
+
+  const terminalNoOp = 'RESEARCH_NOT_NEEDED: only local Netcatty behavior is involved';
+  const statusLikeBodyFragment = [
+    {
+      type: 'assistant',
+      timestamp_ms: 1,
+      message: {
+        content: [{ type: 'text', text: 'Research notes continued in another event.' }],
+      },
+    },
+    {
+      type: 'assistant',
+      timestamp_ms: 2,
+      message: {
+        content: [{ type: 'text', text: 'RESEARCH_BLOCKED: quoted source wording, not the result' }],
+      },
+    },
+    {
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      result: terminalNoOp,
+    },
+  ].map(JSON.stringify).join('\n');
+
+  assert.equal(auto.parseExternalResearchStream(statusLikeBodyFragment, {}), terminalNoOp);
+
+  const prefixedTerminalWithStatusLikeDelta = [
+    {
+      type: 'assistant',
+      timestamp_ms: 1,
+      message: {
+        content: [{ type: 'text', text: `${terminalNoOp}\n` }],
+      },
+    },
+    {
+      type: 'assistant',
+      timestamp_ms: 2,
+      message: {
+        content: [{ type: 'text', text: 'RESEARCH_BLOCKED: quoted source wording, not the result' }],
+      },
+    },
+    {
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      result: `Conversation preamble\n${terminalNoOp}`,
+    },
+  ].map(JSON.stringify).join('\n');
+
+  assert.match(
+    auto.parseExternalResearchStream(prefixedTerminalWithStatusLikeDelta, {}),
+    /^RESEARCH_NOT_NEEDED: only local Netcatty behavior is involved/,
+  );
+
+  const bufferedDuplicate = [
+    {
+      type: 'assistant',
+      timestamp_ms: 1,
+      message: {
+        content: [{ type: 'text', text: terminalNoOp }],
+      },
+    },
+    {
+      type: 'assistant',
+      timestamp_ms: 2,
+      model_call_id: 'model-call-1',
+      message: {
+        content: [{ type: 'text', text: 'RESEARCH_BLOCKED: buffered duplicate text' }],
+      },
+    },
+    {
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      result: `Conversation preamble\n${terminalNoOp}`,
+    },
+  ].map(JSON.stringify).join('\n');
+
+  assert.equal(auto.parseExternalResearchStream(bufferedDuplicate, {}), terminalNoOp);
+});
+
 test('parseExternalResearchStream rejects forged and unrelated web evidence', () => {
   const finalText = [
     'RESEARCH_COMPLETE: attacker claim',
@@ -2098,6 +2575,7 @@ test('workflow confines forced WebSearch to isolated read-only research passes',
       /"\$RUNNER_TEMP\/cursor-agent-authenticated" \\\n\s+-p --mode=ask --force --trust --sandbox enabled/,
     );
     assert.match(run, /--output-format stream-json/);
+    assert.match(run, /--stream-partial-output/);
     assert.match(run, /GITHUB_TOKEN: ''/);
     assert.match(run, /GH_TOKEN: ''/);
     assert.match(run, /Shell\(\*\)/);

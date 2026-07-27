@@ -206,6 +206,13 @@ Netcatty 会自动识别并在主机列表中展示对应的系统图标：
 
 或在 [GitHub Releases](https://github.com/binaricat/Netcatty/releases) 浏览所有版本。
 
+### 代码签名与隐私
+
+Netcatty 正在申请 SignPath Foundation 开源项目计划。申请通过后，适用的
+Windows 发布文件将使用 **Free code signing provided by SignPath.io, certificate by SignPath Foundation**。
+详情见[代码签名政策](CODE_SIGNING_POLICY.md)和[隐私政策](PRIVACY.md)。申请和接入完成前，
+Windows 发布文件可能仍未签名。
+
 > **Windows 便携数据：** 退出 Netcatty，在 `Netcatty.exe`（zip 版）或便携版启动文件旁创建名为 `data` 的文件夹。下次启动后，Netcatty 会把数据保存在这里。已保存的密码和私钥仍受创建它们的 Windows 用户保护；将该文件夹移到其他电脑或 Windows 用户后，需要重新输入这些敏感信息。
 
 > **macOS 用户注意：** 当前发布版本应已完成代码签名和公证。如果 Gatekeeper 仍然提示风险，请确认您下载的是 GitHub Releases 中的最新官方构建。

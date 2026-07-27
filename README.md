@@ -207,6 +207,14 @@ Download the latest release for your platform from [GitHub Releases](https://git
 
 Or browse all releases at [GitHub Releases](https://github.com/binaricat/Netcatty/releases).
 
+### Code signing and privacy
+
+Netcatty is applying to the SignPath Foundation open-source program. Once
+approved, covered Windows release artifacts will use **Free code signing provided by SignPath.io, certificate by SignPath Foundation**.
+See the [code signing policy](CODE_SIGNING_POLICY.md) and
+[privacy policy](PRIVACY.md). Windows releases may remain unsigned until the
+application and integration are complete.
+
 > **Windows portable data:** Exit Netcatty, then create a folder named `data` beside `Netcatty.exe` (zip build) or beside the portable launcher. Netcatty will store its profile there on the next launch. Saved passwords and private keys remain protected by the Windows user account that created them, so they must be re-entered after moving the folder to another computer or Windows account.
 
 > **macOS Users:** Current releases are expected to be code-signed and notarized. If Gatekeeper still warns, make sure you downloaded the latest official build from GitHub Releases.

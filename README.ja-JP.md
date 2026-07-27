@@ -206,6 +206,14 @@ Netcatty は接続したホストの OS を検出し、ホスト一覧でアイ�
 
 または [GitHub Releases](https://github.com/binaricat/Netcatty/releases) ですべてのリリースを参照してください。
 
+### コード署名とプライバシー
+
+Netcatty は SignPath Foundation のオープンソースプログラムに申請中です。
+承認後、対象となる Windows リリース成果物には **Free code signing provided by SignPath.io, certificate by SignPath Foundation** が使用されます。詳細は
+[コード署名ポリシー](CODE_SIGNING_POLICY.md)と
+[プライバシーポリシー](PRIVACY.md)をご覧ください。申請と導入が完了するまで、
+Windows リリースは未署名の場合があります。
+
 > **Windows のポータブルデータ：** Netcatty を終了し、`Netcatty.exe`（zip 版）またはポータブル版ランチャーと同じ場所に `data` フォルダーを作成してください。次回起動時から、Netcatty はデータをこのフォルダーに保存します。保存済みのパスワードと秘密鍵は、作成した Windows ユーザーによって引き続き保護されます。別のコンピューターまたは Windows ユーザーへ移動した場合は、これらの機密情報を再入力する必要があります。
 
 > **macOS ユーザーへ：** 現在のリリースはコード署名と notarization が行われている想定です。Gatekeeper の警告が出る場合は、GitHub Releases から最新版の公式ビルドを取得しているか確認してください。

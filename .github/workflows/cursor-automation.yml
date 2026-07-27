@@ -673,7 +673,7 @@ jobs:
           prompt="$(cat "$RUNNER_TEMP/cursor-prompts/research.md")"
           sudo --preserve-env=HOME,RUNNER_TEMP,GITHUB_WORKSPACE \
             "$RUNNER_TEMP/cursor-agent-authenticated" \
-            -p --mode=ask --force --trust --sandbox enabled --model auto --output-format stream-json \
+            -p --mode=ask --force --trust --sandbox enabled --model auto --output-format stream-json --stream-partial-output \
             --workspace "$research_dir" "$prompt" \
             > .cursor-runtime/external-research-raw.txt
           cat .cursor-runtime/external-research-raw.txt
@@ -1410,7 +1410,7 @@ jobs:
           prompt="$(cat "$RUNNER_TEMP/research.md")"
           sudo --preserve-env=HOME,RUNNER_TEMP,GITHUB_WORKSPACE \
             "$RUNNER_TEMP/cursor-agent-authenticated" \
-            -p --mode=ask --force --trust --sandbox enabled --model auto --output-format stream-json \
+            -p --mode=ask --force --trust --sandbox enabled --model auto --output-format stream-json --stream-partial-output \
             --workspace "$research_dir" "$prompt" \
             > .cursor-runtime/followup-research-raw.txt
           cat .cursor-runtime/followup-research-raw.txt

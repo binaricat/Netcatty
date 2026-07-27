@@ -33,4 +33,13 @@ test("release notes include Arch pacman downloads for x64 and arm64", (t) => {
     notes,
     /https:\/\/github\.com\/binaricat\/Netcatty\/releases\/download\/v1\.2\.3\/Netcatty-1\.2\.3-linux-aarch64\.pacman/,
   );
+  assert.match(notes, /Code signing policy/);
+  assert.match(
+    notes,
+    /Free code signing provided by SignPath\.io, certificate by SignPath Foundation/,
+  );
+  assert.match(
+    notes,
+    /https:\/\/github\.com\/binaricat\/Netcatty\/blob\/v1\.2\.3\/CODE_SIGNING_POLICY\.md/,
+  );
 });
