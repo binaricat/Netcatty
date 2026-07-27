@@ -181,6 +181,8 @@ test("disconnected connection dialog keeps an Enter-reconnect focus sink", () =>
   assert.match(source, /canEnterReconnectFromDialog/);
   assert.match(source, /data-terminal-disconnected-dialog/);
   assert.match(source, /shouldReconnectDisconnectedDialogOnEnterKey/);
+  assert.match(source, /shouldClaimDisconnectedDialogFocus/);
+  assert.match(source, /restoreTerminalFocusFromDisconnectedDialog/);
   assert.match(source, /dialogFocusRef\.current\?\.focus/);
 });
 

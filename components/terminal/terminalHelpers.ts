@@ -304,6 +304,67 @@ export function shouldReconnectDisconnectedDialogOnEnterKey({
   return !target.closest("button, a, input, textarea, select, [contenteditable='true'], [role='button'], [role='menuitem'], [role='textbox']");
 }
 
+const DIALOG_INTERACTIVE_FOCUS_SELECTOR =
+  "button, a, input, textarea, select, [contenteditable='true'], [role='button'], [role='menuitem'], [role='textbox']";
+
+/**
+ * Only park focus on the disconnected overlay when it is safe:
+ * - focus is already lost (body / null), or
+ * - focus still belongs to this terminal/session tree.
+ * Never steal from another pane, side panel, or app chrome.
+ */
+export function shouldClaimDisconnectedDialogFocus({
+  activeElement,
+  dialogNode,
+  sessionRoot,
+  documentBody,
+  documentElement,
+}: {
+  activeElement: Element | null;
+  dialogNode: HTMLElement;
+  sessionRoot: Element | null;
+  documentBody?: Element | null;
+  documentElement?: Element | null;
+}): boolean {
+  if (!activeElement || activeElement === documentBody || activeElement === documentElement) {
+    return true;
+  }
+  if (typeof HTMLElement !== "undefined" && !(activeElement instanceof HTMLElement)) {
+    return true;
+  }
+  const active = activeElement as HTMLElement;
+  if (dialogNode.contains(active)) {
+    // Already on the sink or a dialog control — do not yank off buttons.
+    if (active !== dialogNode && active.closest(DIALOG_INTERACTIVE_FOCUS_SELECTOR)) {
+      return false;
+    }
+    // Sink already focused.
+    return active !== dialogNode;
+  }
+  if (sessionRoot?.contains(active)) {
+    return true;
+  }
+  return false;
+}
+
+/** After the overlay unmounts, return focus to this session's xterm if we still own it. */
+export function restoreTerminalFocusFromDisconnectedDialog({
+  activeElement,
+  dialogNode,
+  sessionRoot,
+}: {
+  activeElement: Element | null;
+  dialogNode: HTMLElement | null;
+  sessionRoot: Element | null;
+}): boolean {
+  if (!dialogNode || !sessionRoot || !activeElement) return false;
+  if (!dialogNode.contains(activeElement) && activeElement !== dialogNode) return false;
+  const textarea = sessionRoot.querySelector("textarea.xterm-helper-textarea");
+  if (!(textarea instanceof HTMLElement)) return false;
+  textarea.focus({ preventScroll: true });
+  return true;
+}
+
 export function shouldDelayAutoRunSnippetInput(
   data: string,
   opts: { noAutoRun?: boolean; multiLineRunMode?: Snippet["multiLineRunMode"] },

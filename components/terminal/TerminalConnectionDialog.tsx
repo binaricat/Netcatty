@@ -15,7 +15,11 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 import { TerminalAuthDialog, TerminalAuthDialogProps } from './TerminalAuthDialog';
 import { TerminalConnectionProgress, TerminalConnectionProgressProps } from './TerminalConnectionProgress';
 import { HostKeyInfo, TerminalHostKeyVerification } from './TerminalHostKeyVerification';
-import { shouldReconnectDisconnectedDialogOnEnterKey } from './terminalHelpers';
+import {
+    restoreTerminalFocusFromDisconnectedDialog,
+    shouldClaimDisconnectedDialogFocus,
+    shouldReconnectDisconnectedDialogOnEnterKey,
+} from './terminalHelpers';
 
 export interface ChainProgress {
     currentHop: number;
@@ -125,26 +129,35 @@ export const TerminalConnectionDialog: React.FC<TerminalConnectionDialogProps> =
         if (!canEnterReconnectFromDialog) return;
         const node = dialogFocusRef.current;
         if (!node) return;
+        const sessionRoot = node.closest("[data-session-id]");
         const focusOverlay = () => {
-            if (typeof document === 'undefined') return;
-            const active = document.activeElement;
-            // Don't yank focus out of a real control the user just clicked
-            // (Retry / Close / Show logs / dismiss).
-            if (
-                active instanceof HTMLElement
-                && node.contains(active)
-                && active !== node
-                && active.closest("button, a, input, textarea, select, [contenteditable='true'], [role='button'], [role='menuitem'], [role='textbox']")
-            ) {
+            if (typeof document === "undefined") return;
+            if (!shouldClaimDisconnectedDialogFocus({
+                activeElement: document.activeElement,
+                dialogNode: node,
+                sessionRoot,
+                documentBody: document.body,
+                documentElement: document.documentElement,
+            })) {
                 return;
             }
             node.focus({ preventScroll: true });
         };
         focusOverlay();
-        // Re-assert after paint/microtasks so late blur from xterm teardown or
-        // button click handlers cannot leave focus on document.body.
+        // Re-assert after paint/microtasks so late blur from xterm teardown
+        // cannot leave focus on document.body — still never steals other panes.
         const timer = window.setTimeout(focusOverlay, 0);
-        return () => window.clearTimeout(timer);
+        return () => {
+            window.clearTimeout(timer);
+            // Overlay is leaving (reconnect / dismiss). If we still own focus,
+            // hand it back to this session's xterm so the user can type.
+            if (typeof document === "undefined") return;
+            restoreTerminalFocusFromDisconnectedDialog({
+                activeElement: document.activeElement,
+                dialogNode: node,
+                sessionRoot,
+            });
+        };
     }, [canEnterReconnectFromDialog, status, error, showLogs]);
 
     const handleDialogKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {

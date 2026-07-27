@@ -4,6 +4,8 @@ import assert from "node:assert/strict";
 import type { Host } from "../domain/models";
 import {
   AUTO_RUN_SNIPPET_LINE_DELAY_MS,
+  restoreTerminalFocusFromDisconnectedDialog,
+  shouldClaimDisconnectedDialogFocus,
   shouldHideConnectingDialogForConnectionReuse,
   shouldDelayAutoRunSnippetInput,
   shouldReconnectDisconnectedDialogOnEnterKey,
@@ -81,6 +83,132 @@ test("disconnected dialog leaves Enter to focused buttons and inputs", () => {
       }),
       true,
     );
+  } finally {
+    globalThis.HTMLElement = previousHTMLElement;
+  }
+});
+
+test("disconnected dialog focus claim never steals from other panes", () => {
+  class FakeNode {
+    constructor(
+      private readonly opts: {
+        id: string;
+        parent?: FakeNode | null;
+        interactive?: boolean;
+        children?: FakeNode[];
+      },
+    ) {
+      for (const child of opts.children ?? []) {
+        child.opts.parent = this;
+      }
+    }
+    contains(other: FakeNode | null) {
+      if (!other) return false;
+      let cur: FakeNode | null | undefined = other;
+      while (cur) {
+        if (cur === this) return true;
+        cur = cur.opts.parent;
+      }
+      return false;
+    }
+    closest(selector: string) {
+      if (selector.includes("button") && this.opts.interactive) return this;
+      return null;
+    }
+    querySelector(selector: string) {
+      if (!selector.includes("xterm-helper-textarea")) return null;
+      return (this.opts.children ?? []).find((c) => c.opts.id === "textarea") ?? null;
+    }
+    focusCalls = 0;
+    focus() {
+      this.focusCalls += 1;
+    }
+  }
+
+  const previousHTMLElement = globalThis.HTMLElement;
+  // @ts-expect-error test double for DOM instanceof checks
+  globalThis.HTMLElement = FakeNode;
+  try {
+    const body = new FakeNode({ id: "body" });
+    const otherPane = new FakeNode({ id: "other" });
+    const textarea = new FakeNode({ id: "textarea" });
+    const dialogButton = new FakeNode({ id: "btn", interactive: true });
+    const dialog = new FakeNode({ id: "dialog", children: [dialogButton] });
+    const session = new FakeNode({ id: "session", children: [textarea, dialog] });
+
+    assert.equal(
+      shouldClaimDisconnectedDialogFocus({
+        activeElement: null,
+        dialogNode: dialog as unknown as HTMLElement,
+        sessionRoot: session as unknown as Element,
+        documentBody: body as unknown as Element,
+      }),
+      true,
+    );
+    assert.equal(
+      shouldClaimDisconnectedDialogFocus({
+        activeElement: body as unknown as Element,
+        dialogNode: dialog as unknown as HTMLElement,
+        sessionRoot: session as unknown as Element,
+        documentBody: body as unknown as Element,
+      }),
+      true,
+    );
+    assert.equal(
+      shouldClaimDisconnectedDialogFocus({
+        activeElement: textarea as unknown as Element,
+        dialogNode: dialog as unknown as HTMLElement,
+        sessionRoot: session as unknown as Element,
+        documentBody: body as unknown as Element,
+      }),
+      true,
+    );
+    assert.equal(
+      shouldClaimDisconnectedDialogFocus({
+        activeElement: otherPane as unknown as Element,
+        dialogNode: dialog as unknown as HTMLElement,
+        sessionRoot: session as unknown as Element,
+        documentBody: body as unknown as Element,
+      }),
+      false,
+    );
+    assert.equal(
+      shouldClaimDisconnectedDialogFocus({
+        activeElement: dialogButton as unknown as Element,
+        dialogNode: dialog as unknown as HTMLElement,
+        sessionRoot: session as unknown as Element,
+        documentBody: body as unknown as Element,
+      }),
+      false,
+    );
+    assert.equal(
+      shouldClaimDisconnectedDialogFocus({
+        activeElement: dialog as unknown as Element,
+        dialogNode: dialog as unknown as HTMLElement,
+        sessionRoot: session as unknown as Element,
+        documentBody: body as unknown as Element,
+      }),
+      false,
+    );
+
+    assert.equal(
+      restoreTerminalFocusFromDisconnectedDialog({
+        activeElement: dialog as unknown as Element,
+        dialogNode: dialog as unknown as HTMLElement,
+        sessionRoot: session as unknown as Element,
+      }),
+      true,
+    );
+    assert.equal(textarea.focusCalls, 1);
+    assert.equal(
+      restoreTerminalFocusFromDisconnectedDialog({
+        activeElement: otherPane as unknown as Element,
+        dialogNode: dialog as unknown as HTMLElement,
+        sessionRoot: session as unknown as Element,
+      }),
+      false,
+    );
+    assert.equal(textarea.focusCalls, 1);
   } finally {
     globalThis.HTMLElement = previousHTMLElement;
   }
