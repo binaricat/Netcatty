@@ -28,6 +28,7 @@ export function persistVaultImportMetadata(
   storage: VaultImportMetadataStorage,
   updateGroups: (current: string[]) => string[],
   updateSources: (current: ManagedSource[]) => ManagedSource[],
+  additionalWrites: ReadonlyArray<readonly [key: string, value: unknown]> = [],
 ): { persisted: boolean; groups: string[]; sources: ManagedSource[] } {
   const groups = updateGroups(readStoredArray<string>(
     STORAGE_KEY_GROUPS,
@@ -38,6 +39,7 @@ export function persistVaultImportMetadata(
     storage.readString(STORAGE_KEY_MANAGED_SOURCES),
   ));
   commitPluginImporterTransaction(storage, [
+    ...additionalWrites,
     [STORAGE_KEY_GROUPS, groups],
     [STORAGE_KEY_MANAGED_SOURCES, sources],
   ]);

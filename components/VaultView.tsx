@@ -251,10 +251,14 @@ interface VaultViewProps {
     managedSources: ManagedSource[] | ((current: ManagedSource[]) => ManagedSource[]),
   ) => void;
   onReadPersistedManagedSources: () => ManagedSource[];
-  onCommitVaultImportMetadata: (
+  onCommitVaultImportTransaction: (
+    hosts: Host[],
     updateGroups: (current: string[]) => string[],
     updateSources: (current: ManagedSource[]) => ManagedSource[],
-  ) => { persisted: boolean; groups: string[]; sources: ManagedSource[] };
+  ) => Promise<
+    | { status: "persisted"; groups: string[]; sources: ManagedSource[] }
+    | { status: "superseded" }
+  >;
   onClearAndRemoveManagedSource?: (source: ManagedSource) => Promise<boolean>;
   onClearAndRemoveManagedSources?: (sources: ManagedSource[]) => Promise<void>;
   onUnmanageSource?: (sourceId: string) => void;
@@ -327,7 +331,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
   onUpdateKnownHosts,
   onUpdateManagedSources,
   onReadPersistedManagedSources,
-  onCommitVaultImportMetadata,
+  onCommitVaultImportTransaction,
   onClearAndRemoveManagedSource,
   onClearAndRemoveManagedSources,
   onUnmanageSource,
@@ -882,7 +886,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
       onUpdateHosts,
       onUpdateKeys,
       onReadPersistedManagedSources,
-      onCommitVaultImportMetadata,
+      onCommitVaultImportTransaction,
       setIsImportOpen,
       t,
     });
@@ -1677,7 +1681,7 @@ export const vaultViewAreEqual = (
     prev.groupConfigs === next.groupConfigs &&
     prev.onReadPersistedHosts === next.onReadPersistedHosts &&
     prev.onReadPersistedManagedSources === next.onReadPersistedManagedSources &&
-    prev.onCommitVaultImportMetadata === next.onCommitVaultImportMetadata &&
+    prev.onCommitVaultImportTransaction === next.onCommitVaultImportTransaction &&
     prev.onCommitPluginImporterData === next.onCommitPluginImporterData &&
     prev.showRecentHosts === next.showRecentHosts &&
     prev.hostClickBehavior === next.hostClickBehavior &&

@@ -524,20 +524,35 @@ export const useVaultState = () => {
     )
   ), []);
 
-  const commitVaultImportMetadata = useCallback((
+  const commitVaultImportTransaction = useCallback(async (
+    nextHosts: Host[],
     updateGroups: (current: string[]) => string[],
     updateSources: (current: ManagedSource[]) => ManagedSource[],
-  ): { persisted: boolean; groups: string[]; sources: ManagedSource[] } => {
+  ): Promise<
+    | { status: "persisted"; groups: string[]; sources: ManagedSource[] }
+    | { status: "superseded" }
+  > => {
+    const cleanedHosts = normalizeVaultOrder(nextHosts.map((host) => sanitizeHost(host)));
+    const baselineRawHosts = localStorageAdapter.readString(STORAGE_KEY_HOSTS);
+    const version = hostsWriteVersion.current;
+    const encryptedHosts = await encryptHosts(cleanedHosts);
+    if (
+      version !== hostsWriteVersion.current
+      || localStorageAdapter.readString(STORAGE_KEY_HOSTS) !== baselineRawHosts
+    ) {
+      return { status: "superseded" };
+    }
     const result = persistVaultImportMetadata(
       localStorageAdapter,
       updateGroups,
       updateSources,
+      [[STORAGE_KEY_HOSTS, encryptedHosts]],
     );
-    if (result.persisted) {
-      updateCustomGroups(result.groups);
-      updateManagedSources(result.sources);
-    }
-    return result;
+    ++hostsWriteVersion.current;
+    setHosts(cleanedHosts);
+    updateCustomGroups(result.groups);
+    updateManagedSources(result.sources);
+    return { status: "persisted", groups: result.groups, sources: result.sources };
   }, [updateCustomGroups, updateManagedSources]);
 
   const updateGroupConfigs = useCallback((data: GroupConfig[]) => {
@@ -1327,7 +1342,7 @@ export const useVaultState = () => {
     updateKnownHosts,
     updateManagedSources,
     readPersistedManagedSources,
-    commitVaultImportMetadata,
+    commitVaultImportTransaction,
     updateGroupConfigs,
     addShellHistoryEntry,
     clearShellHistory,

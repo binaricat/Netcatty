@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   STORAGE_KEY_GROUPS,
+  STORAGE_KEY_HOSTS,
   STORAGE_KEY_MANAGED_SOURCES,
 } from "../../infrastructure/config/storageKeys.ts";
 import {
@@ -65,15 +66,18 @@ test("Vault import metadata transaction restores groups when sources cannot be s
   const originalGroups = JSON.stringify(["Existing"]);
   const storage = createStorage({
     [STORAGE_KEY_GROUPS]: originalGroups,
+    [STORAGE_KEY_HOSTS]: JSON.stringify(["old-host"]),
     [STORAGE_KEY_MANAGED_SOURCES]: JSON.stringify([]),
   }, STORAGE_KEY_MANAGED_SOURCES);
   assert.throws(() => persistVaultImportMetadata(
     storage,
     (groups) => [...groups, "Imported"],
     (sources) => sources,
+    [[STORAGE_KEY_HOSTS, ["new-host"]]],
   ), /rejected importer transaction/);
 
   assert.equal(storage.readString(STORAGE_KEY_GROUPS), originalGroups);
+  assert.deepEqual(storage.read(STORAGE_KEY_HOSTS), ["old-host"]);
 });
 
 test("Vault import metadata reports when its rollback cannot be saved", () => {

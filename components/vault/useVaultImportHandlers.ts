@@ -40,10 +40,14 @@ interface UseVaultImportHandlersOptions {
   onUpdateHosts: (hosts: Host[]) => VaultHostPersistenceResult | Promise<VaultHostPersistenceResult>;
   onUpdateKeys: (keys: SSHKey[]) => void;
   onReadPersistedManagedSources: () => ManagedSource[];
-  onCommitVaultImportMetadata: (
+  onCommitVaultImportTransaction: (
+    hosts: Host[],
     updateGroups: (current: string[]) => string[],
     updateSources: (current: ManagedSource[]) => ManagedSource[],
-  ) => { persisted: boolean; groups: string[]; sources: ManagedSource[] };
+  ) => Promise<
+    | { status: "persisted"; groups: string[]; sources: ManagedSource[] }
+    | { status: "superseded" }
+  >;
   setIsImportOpen: (open: boolean) => void;
   t: (key: string, values?: Record<string, unknown>) => string;
 }
@@ -57,7 +61,7 @@ export function useVaultImportHandlers({
   onUpdateHosts,
   onUpdateKeys,
   onReadPersistedManagedSources,
-  onCommitVaultImportMetadata,
+  onCommitVaultImportTransaction,
   setIsImportOpen,
   t,
 }: UseVaultImportHandlersOptions) {
@@ -177,9 +181,8 @@ export function useVaultImportHandlers({
             nextHosts: Host[],
             options?: {
               baselineHosts?: Host[];
+              persistAttempt?: (hosts: Host[]) => Promise<VaultHostPersistenceResult>;
               prepareAttempt?: (attempt: { baselineHosts: Host[]; appliedHosts: Host[] }) => Host[];
-              retainRollbackAfterPersist?: boolean;
-              shouldRetryAfterPersist?: () => boolean;
             },
           ) => {
             throwIfCancelled();
@@ -189,29 +192,25 @@ export function useVaultImportHandlers({
             while (true) {
               appliedHosts = options?.prepareAttempt?.({ baselineHosts, appliedHosts }) ?? appliedHosts;
               rollbackSnapshot = { baselineHosts, appliedHosts };
-              let hostUpdate: VaultHostPersistenceResult | Promise<VaultHostPersistenceResult>;
-              startTransition(() => {
-                hostUpdate = onUpdateHosts(appliedHosts);
-              });
-              const persisted = await hostUpdate!;
+              let persisted: VaultHostPersistenceResult;
+              if (options?.persistAttempt) {
+                persisted = await options.persistAttempt(appliedHosts);
+              } else {
+                let hostUpdate: VaultHostPersistenceResult | Promise<VaultHostPersistenceResult>;
+                startTransition(() => {
+                  hostUpdate = onUpdateHosts(appliedHosts);
+                });
+                persisted = await hostUpdate!;
+              }
               if (persisted !== "superseded") {
-                if (persisted !== false && options?.shouldRetryAfterPersist?.()) {
-                  const latestHosts = hostsRef.current;
-                  appliedHosts = rebaseVaultImportedHosts({
-                    currentHosts: latestHosts,
-                    baselineHosts,
-                    appliedHosts,
-                  });
-                  baselineHosts = latestHosts;
-                  continue;
-                }
-                if (persisted !== false && !options?.retainRollbackAfterPersist) {
-                  rollbackSnapshot = null;
-                }
+                if (persisted !== false) rollbackSnapshot = null;
                 return persisted;
               }
 
-              const latestHosts = hostsRef.current;
+              const latestHosts = options?.persistAttempt
+                ? await onReadPersistedHosts()
+                : hostsRef.current;
+              hostsRef.current = latestHosts;
               appliedHosts = rebaseVaultImportedHosts({
                 currentHosts: latestHosts,
                 baselineHosts,
@@ -389,49 +388,45 @@ export function useVaultImportHandlers({
                   : host
               ));
             };
-            const managedGroupNameStillAvailable = () => {
-              ensureManagedSourceStillAvailable();
-              return resolveUniqueManagedImportGroupName({
-                baseName: fileBaseName,
-                customGroups: customGroupsRef.current,
-                hosts: hostsRef.current,
-                managedSources: managedSourcesRef.current,
-                ownerSourceId: sourceId,
-              }) === managedGroupName;
-            };
-
             const hostPersisted = await persistHosts(
               [...updatedHosts, ...newHosts].map((host: Host) => sanitizeHost(host)),
               {
                 baselineHosts: managedBaselineHosts,
                 prepareAttempt: prepareManagedAttempt,
-                retainRollbackAfterPersist: true,
-                shouldRetryAfterPersist: () => !managedGroupNameStillAvailable(),
+                persistAttempt: async (hostsToCommit) => {
+                  const transaction = await onCommitVaultImportTransaction(
+                    hostsToCommit,
+                    (latestPersistedGroups) => mergeVaultImportedGroups({
+                      currentGroups: latestPersistedGroups,
+                      baselineGroups: currentCustomGroups,
+                      appliedGroups: nextGroups,
+                    }),
+                    (latestPersistedSources) => {
+                      const conflictingSource = latestPersistedSources.find((source) => (
+                        source.id !== sourceId && source.filePath === filePath
+                      ));
+                      if (conflictingSource) {
+                        throw new Error(t("vault.import.sshConfig.alreadyManagedDesc", {
+                          group: conflictingSource.groupName,
+                        }));
+                      }
+                      return [
+                        ...latestPersistedSources.filter((source) => source.id !== newSource.id),
+                        newSource,
+                      ];
+                    },
+                  );
+                  if (transaction.status === "superseded") return "superseded";
+                  customGroupsRef.current = transaction.groups;
+                  managedSourcesRef.current = transaction.sources;
+                  return true;
+                },
               },
             );
             await ensureVaultImportPersisted(
               hostPersisted,
               t("vault.import.progress.persistFailed"),
-              async () => {
-                const metadata = onCommitVaultImportMetadata(
-                  (latestPersistedGroups) => mergeVaultImportedGroups({
-                    currentGroups: latestPersistedGroups,
-                    baselineGroups: currentCustomGroups,
-                    appliedGroups: nextGroups,
-                  }),
-                  (latestPersistedSources) => [
-                    ...latestPersistedSources.filter((source) => source.id !== newSource.id),
-                    newSource,
-                  ],
-                );
-                if (!metadata.persisted) {
-                  await rollbackPendingImport();
-                  throw new Error(t("vault.import.progress.persistFailed"));
-                }
-                customGroupsRef.current = metadata.groups;
-                managedSourcesRef.current = metadata.sources;
-                rollbackSnapshot = null;
-              },
+              undefined,
               rollbackPendingImport,
             );
             });
@@ -457,13 +452,9 @@ export function useVaultImportHandlers({
             if (newHosts.length === 0) return;
             const hostPersisted = await persistHosts(merged.hosts, {
               baselineHosts: importBaselineHosts,
-              retainRollbackAfterPersist: true,
-            });
-            await ensureVaultImportPersisted(
-              hostPersisted,
-              t("vault.import.progress.persistFailed"),
-              async () => {
-                const metadata = onCommitVaultImportMetadata(
+              persistAttempt: async (hostsToCommit) => {
+                const transaction = await onCommitVaultImportTransaction(
+                  hostsToCommit,
                   (latestPersistedGroups) => mergeVaultImportedGroups({
                     currentGroups: latestPersistedGroups,
                     baselineGroups: importBaselineGroups,
@@ -471,14 +462,16 @@ export function useVaultImportHandlers({
                   }),
                   (latestPersistedSources) => latestPersistedSources,
                 );
-                if (!metadata.persisted) {
-                  await rollbackPendingImport();
-                  throw new Error(t("vault.import.progress.persistFailed"));
-                }
-                customGroupsRef.current = metadata.groups;
-                managedSourcesRef.current = metadata.sources;
-                rollbackSnapshot = null;
+                if (transaction.status === "superseded") return "superseded";
+                customGroupsRef.current = transaction.groups;
+                managedSourcesRef.current = transaction.sources;
+                return true;
               },
+            });
+            await ensureVaultImportPersisted(
+              hostPersisted,
+              t("vault.import.progress.persistFailed"),
+              undefined,
               rollbackPendingImport,
             );
             });
@@ -649,7 +642,7 @@ export function useVaultImportHandlers({
       },
       [
         onReadPersistedHosts,
-        onCommitVaultImportMetadata,
+        onCommitVaultImportTransaction,
         onReadPersistedManagedSources,
         onUpdateHosts,
         onUpdateKeys,
