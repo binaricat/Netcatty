@@ -221,11 +221,21 @@ export function VaultImportProgressView({
   const isRunning = progress.status === "running";
   const isComplete = progress.status === "complete";
   const stageText = t(PROGRESS_STAGE_KEYS[progress.stage]);
+  const completionSummary = isComplete
+    ? t("vault.import.progress.summary", {
+      count: progress.imported ?? 0,
+      skipped: progress.skipped ?? 0,
+      duplicates: progress.duplicates ?? 0,
+    })
+    : null;
+  const announcement = isRunning
+    ? stageText
+    : [stageText, completionSummary ?? progress.error].filter(Boolean).join(". ");
 
   return (
     <div className="flex flex-col items-center gap-5 py-2 text-center">
       <span className="sr-only" role="status" aria-live="polite" aria-atomic="true">
-        {stageText}
+        {announcement}
       </span>
       <div
         className={cn(
@@ -306,11 +316,7 @@ export function VaultImportProgressView({
         </p>
       ) : isComplete ? (
         <p className="text-sm text-muted-foreground">
-          {t("vault.import.progress.summary", {
-            count: progress.imported ?? 0,
-            skipped: progress.skipped ?? 0,
-            duplicates: progress.duplicates ?? 0,
-          })}
+          {completionSummary}
         </p>
       ) : (
         <p className="text-sm text-destructive">{progress.error}</p>

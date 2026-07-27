@@ -256,6 +256,7 @@ interface VaultViewProps {
     updateGroups: (current: string[]) => string[],
     updateSources: (current: ManagedSource[]) => ManagedSource[],
     updateGroupConfigs?: (current: GroupConfig[]) => GroupConfig[],
+    expectedHosts?: Host[],
   ) => Promise<
     | {
       status: "persisted";

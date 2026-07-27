@@ -80,8 +80,34 @@ test("vault import progress keeps the final result visible until the user closes
 
   assert.match(html, /Import complete/);
   assert.match(html, /Imported 8000 hosts; skipped 3; duplicates 2\./);
+  assert.match(
+    html,
+    /<span[^>]*role="status"[^>]*>Import complete\. Imported 8000 hosts; skipped 3; duplicates 2\.<\/span>/,
+  );
   assert.match(html, /aria-valuenow="100"/);
   assert.match(html, />Close</);
+});
+
+test("vault import progress announces the failure reason", () => {
+  const html = renderToStaticMarkup(
+    <VaultImportProgressView
+      progress={{
+        status: "error",
+        stage: "failed",
+        percent: 85,
+        formatLabel: "CSV",
+        fileName: "hosts.csv",
+        error: "Saved Vault data is unreadable",
+      }}
+      onClose={() => {}}
+      t={t}
+    />,
+  );
+
+  assert.match(
+    html,
+    /<span[^>]*role="status"[^>]*>Import failed\. Saved Vault data is unreadable<\/span>/,
+  );
 });
 
 test("vault import progress shows SecureCRT batch file progress", () => {

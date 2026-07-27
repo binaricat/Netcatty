@@ -139,3 +139,92 @@ test("group deletion restores managed files when the persisted Vault cannot be r
   assert.equal(restoreCount, 1);
   assert.equal(commitCount, 0);
 });
+
+test("group deletion retries file clearing when another managed source enters the group", async () => {
+  const actEnvironment = globalThis as typeof globalThis & {
+    IS_REACT_ACT_ENVIRONMENT?: boolean;
+  };
+  const previousActEnvironment = actEnvironment.IS_REACT_ACT_ENVIRONMENT;
+  actEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
+
+  const firstSource: ManagedSource = {
+    id: "managed-first",
+    type: "ssh_config",
+    filePath: "/tmp/managed-first.conf",
+    groupName: "Production",
+    lastSyncedAt: 1,
+  };
+  const concurrentSource: ManagedSource = {
+    id: "managed-concurrent",
+    type: "ssh_config",
+    filePath: "/tmp/managed-concurrent.conf",
+    groupName: "Production",
+    lastSyncedAt: 2,
+  };
+  let deleteGroups: ((paths: Iterable<string>) => Promise<void>) | undefined;
+  let renderer: ReactTestRenderer | null = null;
+  let sourceReadCount = 0;
+  let restoreCount = 0;
+  let commitCount = 0;
+  const clearedSourceIds: string[][] = [];
+
+  const Probe = () => {
+    deleteGroups = useVaultGroupDeletion({
+      customGroups: ["Production"],
+      hosts: [],
+      groupConfigs: [],
+      managedSources: [firstSource],
+      onReadPersistedHosts: async () => [],
+      onReadPersistedManagedSources: () => {
+        sourceReadCount += 1;
+        return sourceReadCount === 1
+          ? [firstSource]
+          : [firstSource, concurrentSource];
+      },
+      onClearAndRemoveManagedSources: async (sources) => {
+        clearedSourceIds.push(sources.map((source) => source.id).sort());
+        return async () => {
+          restoreCount += 1;
+        };
+      },
+      onCommitVaultImportTransaction: async (
+        _hosts,
+        updateGroups,
+        updateSources,
+        updateGroupConfigs,
+        expectedHosts,
+      ) => {
+        commitCount += 1;
+        assert.deepEqual(expectedHosts, []);
+        return {
+          status: "persisted",
+          groups: updateGroups(["Production"]),
+          sources: updateSources([firstSource, concurrentSource]),
+          groupConfigs: updateGroupConfigs?.([]) ?? [],
+        };
+      },
+    });
+    return null;
+  };
+
+  try {
+    await act(async () => {
+      renderer = create(React.createElement(Probe));
+    });
+    await act(async () => {
+      await deleteGroups?.(["Production"]);
+    });
+  } finally {
+    await act(async () => {
+      renderer?.unmount();
+    });
+    actEnvironment.IS_REACT_ACT_ENVIRONMENT = previousActEnvironment;
+  }
+
+  assert.deepEqual(clearedSourceIds, [
+    ["managed-first"],
+    ["managed-concurrent", "managed-first"],
+  ]);
+  assert.equal(restoreCount, 1);
+  assert.equal(commitCount, 1);
+});

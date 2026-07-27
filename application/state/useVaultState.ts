@@ -567,6 +567,7 @@ export const useVaultState = () => {
     updateGroups: (current: string[]) => string[],
     updateSources: (current: ManagedSource[]) => ManagedSource[],
     updateGroupConfigs?: (current: GroupConfig[]) => GroupConfig[],
+    expectedHosts?: Host[],
   ): Promise<
     | {
       status: "persisted";
@@ -602,7 +603,24 @@ export const useVaultState = () => {
       STORAGE_KEY_GROUP_CONFIGS,
       baselineRaw.get(STORAGE_KEY_GROUP_CONFIGS) ?? null,
     );
-    const latestGroupConfigs = await decryptGroupConfigs(storedGroupConfigs);
+    const storedHosts = readStoredArray<Host>(
+      STORAGE_KEY_HOSTS,
+      baselineRaw.get(STORAGE_KEY_HOSTS) ?? null,
+    );
+    const [latestPersistedHosts, latestGroupConfigs] = await Promise.all([
+      decryptHosts(storedHosts).then((decrypted) => (
+        normalizeVaultOrder(decrypted.map((host) => sanitizeHost(host)))
+      )),
+      decryptGroupConfigs(storedGroupConfigs),
+    ]);
+    if (expectedHosts) {
+      const normalizedExpectedHosts = normalizeVaultOrder(
+        expectedHosts.map((host) => sanitizeHost(host)),
+      );
+      if (JSON.stringify(latestPersistedHosts) !== JSON.stringify(normalizedExpectedHosts)) {
+        return { status: "superseded" };
+      }
+    }
     const nextGroupConfigs = buildGroupConfigsForGroups(
       groups,
       updateGroupConfigs?.(latestGroupConfigs) ?? latestGroupConfigs,

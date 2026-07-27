@@ -45,6 +45,7 @@ interface UseVaultImportHandlersOptions {
     updateGroups: (current: string[]) => string[],
     updateSources: (current: ManagedSource[]) => ManagedSource[],
     updateGroupConfigs?: (current: GroupConfig[]) => GroupConfig[],
+    expectedHosts?: Host[],
   ) => Promise<
     | {
       status: "persisted";
@@ -187,7 +188,10 @@ export function useVaultImportHandlers({
             nextHosts: Host[],
             options?: {
               baselineHosts?: Host[];
-              persistAttempt?: (hosts: Host[]) => Promise<VaultHostPersistenceResult>;
+              persistAttempt?: (
+                hosts: Host[],
+                baselineHosts: Host[],
+              ) => Promise<VaultHostPersistenceResult>;
               prepareAttempt?: (attempt: { baselineHosts: Host[]; appliedHosts: Host[] }) => Host[];
             },
           ) => {
@@ -200,7 +204,7 @@ export function useVaultImportHandlers({
               rollbackSnapshot = { baselineHosts, appliedHosts };
               let persisted: VaultHostPersistenceResult;
               if (options?.persistAttempt) {
-                persisted = await options.persistAttempt(appliedHosts);
+                persisted = await options.persistAttempt(appliedHosts, baselineHosts);
               } else {
                 let hostUpdate: VaultHostPersistenceResult | Promise<VaultHostPersistenceResult>;
                 startTransition(() => {
@@ -401,7 +405,7 @@ export function useVaultImportHandlers({
               {
                 baselineHosts: managedBaselineHosts,
                 prepareAttempt: prepareManagedAttempt,
-                persistAttempt: async (hostsToCommit) => {
+                persistAttempt: async (hostsToCommit, baselineHosts) => {
                   const transaction = await onCommitVaultImportTransaction(
                     hostsToCommit,
                     (latestPersistedGroups) => mergeVaultImportedGroups({
@@ -423,6 +427,8 @@ export function useVaultImportHandlers({
                         newSource,
                       ];
                     },
+                    undefined,
+                    baselineHosts,
                   );
                   if (transaction.status === "superseded") return "superseded";
                   customGroupsRef.current = transaction.groups;
@@ -460,7 +466,7 @@ export function useVaultImportHandlers({
             if (newHosts.length === 0) return;
             const hostPersisted = await persistHosts(merged.hosts, {
               baselineHosts: importBaselineHosts,
-              persistAttempt: async (hostsToCommit) => {
+              persistAttempt: async (hostsToCommit, baselineHosts) => {
                 const transaction = await onCommitVaultImportTransaction(
                   hostsToCommit,
                   (latestPersistedGroups) => mergeVaultImportedGroups({
@@ -469,6 +475,8 @@ export function useVaultImportHandlers({
                     appliedGroups: merged.customGroups,
                   }),
                   (latestPersistedSources) => latestPersistedSources,
+                  undefined,
+                  baselineHosts,
                 );
                 if (transaction.status === "superseded") return "superseded";
                 customGroupsRef.current = transaction.groups;
