@@ -1054,10 +1054,17 @@ export const ImportVaultDialog: React.FC<ImportVaultDialogProps> = ({
                       type="button"
                       data-import-destination-settings="true"
                       onClick={() => setStep("destination")}
-                      className="min-w-0 max-w-[55%] truncate text-left text-xs text-muted-foreground hover:text-foreground hover:underline"
-                      title={destinationSummary}
+                      className="inline-flex min-w-0 max-w-[60%] items-center gap-1.5 text-left text-xs text-muted-foreground transition-colors hover:text-foreground"
+                      title={`${t("vault.import.destination.settings")}: ${destinationSummary}`}
                     >
-                      {destinationSummary}
+                      <FolderTree className="h-3.5 w-3.5 shrink-0 opacity-80" />
+                      <span className="min-w-0 truncate">
+                        <span className="text-muted-foreground/80">
+                          {t("vault.import.destination.settings")}
+                        </span>
+                        <span className="mx-1 text-muted-foreground/50">·</span>
+                        <span className="text-foreground/90">{destinationSummary}</span>
+                      </span>
                     </button>
                     <button
                       type="button"
