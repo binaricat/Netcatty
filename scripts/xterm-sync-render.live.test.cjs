@@ -82,10 +82,34 @@ if (!process.versions.electron && process.env[LIVE_ENV] !== "1") {
       { name: "cjs", expression: `require(${JSON.stringify(cjsPath)})` },
       { name: "esm", expression: `await import(${JSON.stringify(pathToFileURL(esmPath).href)})` },
     ];
+    const scenarios = [
+      {
+        name: "split-input",
+        chunks: [
+          "\\x1b[?2026h\\x1b[1;1HAAAAAAAAAA",
+          "\\x1b[2;1HBBBBBBBBBB\\x1b[?2026l",
+          "\\x1b[?2026h\\x1b[1;1HCC",
+        ],
+      },
+      {
+        name: "close-and-next-open-together",
+        chunks: [
+          "\\x1b[?2026h\\x1b[1;1HAAAAAAAAAA",
+          "\\x1b[2;1HBBBBBBBBBB\\x1b[?2026l\\x1b[?2026h\\x1b[1;1HCC",
+        ],
+      },
+      {
+        name: "complete-and-next-frame-together",
+        chunks: [
+          "\\x1b[?2026h\\x1b[1;1HAAAAAAAAAA\\x1b[2;1HBBBBBBBBBB\\x1b[?2026l\\x1b[?2026h\\x1b[1;1HCC",
+        ],
+      },
+    ];
     const results = [];
 
     for (const loader of loaders) {
-      const result = await window.webContents.executeJavaScript(`(async () => {
+      for (const scenario of scenarios) {
+        const result = await window.webContents.executeJavaScript(`(async () => {
         const { Terminal } = ${loader.expression};
         const target = document.getElementById("terminal");
         target.replaceChildren();
@@ -99,9 +123,7 @@ if (!process.versions.electron && process.env[LIVE_ENV] !== "1") {
         const renders = [];
         const renderSubscription = term.onRender(event => renders.push(event));
         const write = data => new Promise(resolve => term.write(data, resolve));
-        await write("\\x1b[?2026h\\x1b[1;1HAAAAAAAAAA");
-        await write("\\x1b[2;1HBBBBBBBBBB\\x1b[?2026l");
-        await write("\\x1b[?2026h\\x1b[1;1HCC");
+        for (const chunk of ${JSON.stringify(scenario.chunks)}) await write(chunk);
         await nextFrame();
         await nextFrame();
         const rendersBeforeSecondFrameClose = renders.length;
@@ -111,12 +133,13 @@ if (!process.versions.electron && process.env[LIVE_ENV] !== "1") {
         renderSubscription.dispose();
         term.dispose();
         return { rendersBeforeSecondFrameClose };
-      })()`);
-      assert.ok(
-        result.rendersBeforeSecondFrameClose > 0,
-        `${loader.name} did not render the completed first frame before the second opened: ${JSON.stringify(result)}`,
-      );
-      results.push({ build: loader.name, ...result });
+        })()`);
+        assert.ok(
+          result.rendersBeforeSecondFrameClose > 0,
+          `${loader.name}/${scenario.name} did not render the completed first frame before the second opened: ${JSON.stringify(result)}`,
+        );
+        results.push({ build: loader.name, scenario: scenario.name, ...result });
+      }
     }
 
     process.stdout.write(`XTERM_SYNC_RENDER_OK ${JSON.stringify(results)}\n`);
