@@ -55,6 +55,12 @@ const importFieldMatches = (left: unknown, right: unknown): boolean => (
   JSON.stringify(left) === JSON.stringify(right)
 );
 
+const hostMatchesAppliedImport = (currentHost: Host, appliedHost: Host): boolean => {
+  const { order: _currentOrder, ...currentComparable } = currentHost;
+  const { order: _appliedOrder, ...appliedComparable } = appliedHost;
+  return importFieldMatches(currentComparable, appliedComparable);
+};
+
 export function rollbackVaultImportedHosts({
   currentHosts,
   baselineHosts,
@@ -71,7 +77,12 @@ export function rollbackVaultImportedHosts({
   );
 
   return currentHosts.flatMap((currentHost) => {
-    if (addedHostIds.has(currentHost.id)) return [];
+    if (addedHostIds.has(currentHost.id)) {
+      const appliedHost = appliedById.get(currentHost.id);
+      return appliedHost && hostMatchesAppliedImport(currentHost, appliedHost)
+        ? []
+        : [currentHost];
+    }
     const baselineHost = baselineById.get(currentHost.id);
     const appliedHost = appliedById.get(currentHost.id);
     if (!baselineHost || !appliedHost) return [currentHost];

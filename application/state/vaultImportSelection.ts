@@ -40,12 +40,19 @@ export function buildVaultImportDestination({
   mode,
   existingGroup,
   newGroup,
+  availableGroups,
 }: {
   mode: VaultImportDestinationMode;
   existingGroup?: string;
   newGroup?: string;
+  availableGroups?: string[];
 }): VaultImportDestination | null {
   if (mode === "preserve") return { mode: "preserve" };
   const group = normalizeGroup(mode === "existing" ? existingGroup : newGroup);
+  if (
+    mode === "existing"
+    && availableGroups
+    && (!group || !availableGroups.includes(group))
+  ) return null;
   return group ? { mode: "group", group } : null;
 }

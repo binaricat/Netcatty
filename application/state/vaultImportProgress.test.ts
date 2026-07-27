@@ -27,6 +27,12 @@ test("vault import rollback preserves unrelated concurrent host changes", () => 
       label: "Imported",
       hostname: "imported.test",
     },
+    {
+      ...baseline[0],
+      id: "edited-import",
+      label: "Edited import",
+      hostname: "edited-import.test",
+    },
   ];
   const concurrent = {
     ...baseline[0],
@@ -41,12 +47,14 @@ test("vault import rollback preserves unrelated concurrent host changes", () => 
     currentHosts: [
       { ...applied[0], notes: "changed while importing" },
       applied[1],
+      { ...applied[2], notes: "edited after import started" },
       concurrent,
     ],
   });
 
   assert.deepEqual(rolledBack, [
     { ...baseline[0], notes: "changed while importing" },
+    { ...applied[2], notes: "edited after import started" },
     concurrent,
   ]);
 });

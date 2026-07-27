@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
   CheckCircle2,
@@ -351,7 +351,13 @@ export const ImportVaultDialog: React.FC<ImportVaultDialogProps> = ({
     mode: destinationMode,
     existingGroup,
     newGroup,
+    availableGroups: groups,
   });
+  useEffect(() => {
+    if (destinationMode === "existing" && !groups.includes(existingGroup)) {
+      setExistingGroup(groups[0] ?? "");
+    }
+  }, [destinationMode, existingGroup, groups]);
   const pluginImporter = usePluginVaultImporter({
     open,
     onOpenChange,

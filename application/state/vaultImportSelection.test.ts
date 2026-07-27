@@ -45,3 +45,11 @@ test("vault import destination supports preserve, existing, and new groups", () 
   });
   assert.equal(buildVaultImportDestination({ mode: "new", newGroup: "  " }), null);
 });
+
+test("vault import destination rejects an existing group that was deleted", () => {
+  assert.equal(buildVaultImportDestination({
+    mode: "existing",
+    existingGroup: "Deleted",
+    availableGroups: ["Production"],
+  }), null);
+});
