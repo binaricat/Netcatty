@@ -186,6 +186,7 @@ test("HostTreeView shows selected groups in multi-select mode", () => {
   assert.match(markup, /data-group-path="production"/);
   assert.match(markup, /role="checkbox"/);
   assert.match(markup, /aria-checked="true"/);
+  assert.match(markup, /tabindex="0"/);
   assert.doesNotMatch(markup, /aria-expanded=/);
   assert.doesNotMatch(markup, /data-host-tree-group-edit-button="production"/);
 });

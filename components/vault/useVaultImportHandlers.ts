@@ -211,10 +211,22 @@ export function useVaultImportHandlers({
             const snapshot = rollbackSnapshot;
             rollbackSnapshot = null;
             if (!snapshot) return;
-            await onUpdateHosts(rollbackVaultImportedHosts({
-              currentHosts: hostsRef.current,
-              ...snapshot,
-            }));
+            while (true) {
+              const rollbackHosts = rollbackVaultImportedHosts({
+                currentHosts: hostsRef.current,
+                ...snapshot,
+              });
+              let rollbackUpdate: VaultHostPersistenceResult | Promise<VaultHostPersistenceResult>;
+              startTransition(() => {
+                rollbackUpdate = onUpdateHosts(rollbackHosts);
+              });
+              const persisted = await rollbackUpdate!;
+              if (persisted === "superseded") continue;
+              if (persisted === false) {
+                throw new Error(t("vault.import.progress.persistFailed"));
+              }
+              return;
+            }
           };
 
           const fileBaseName = file.name.replace(/\.[^/.]+$/, "");
