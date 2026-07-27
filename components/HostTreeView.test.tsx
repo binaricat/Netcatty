@@ -342,13 +342,14 @@ test("HostTreeView search expansion is temporary and remains collapsible", async
   actEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
   let persistentMutationCount = 0;
   let autoExpandGroupsKey: string | undefined = "router";
+  let allGroupPaths = ["production"];
   let expandedPaths = new Set<string>();
   let collapseAll = () => undefined;
   let renderer: ReactTestRenderer | null = null;
   const Probe = () => {
     const state = useHostTreeExpandedPaths({
       persistentExpandedPaths: new Set(),
-      allGroupPaths: ["production"],
+      allGroupPaths,
       autoExpandGroupsKey,
       onTogglePath: () => { persistentMutationCount++; },
       onExpandAll: () => { persistentMutationCount++; },
@@ -369,6 +370,14 @@ test("HostTreeView search expansion is temporary and remains collapsible", async
       collapseAll();
     });
     assert.equal(expandedPaths.has("production"), false);
+    assert.equal(persistentMutationCount, 0);
+
+    await act(async () => {
+      allGroupPaths = ["production", "staging"];
+      renderer!.update(React.createElement(Probe));
+    });
+    assert.equal(expandedPaths.has("production"), false);
+    assert.equal(expandedPaths.has("staging"), true);
     assert.equal(persistentMutationCount, 0);
 
     await act(async () => {

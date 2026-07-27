@@ -6,10 +6,25 @@ import { renderToStaticMarkup } from "react-dom/server";
 import {
   getNextRaggedRowPosition,
   getNextVirtualHostIndex,
+  resolveVirtualFocusRequest,
   VirtualizedGroupedHostCollection,
   VirtualizedHostCollection,
 } from "./VirtualizedHostCollection.tsx";
 import { getVaultHostGridColumnCount } from "./vaultHostGridLayout.ts";
+
+test("virtual focus retries when an active item enters a collection", () => {
+  assert.deepEqual(resolveVirtualFocusRequest({
+    activeItemKey: "host-1",
+    lastRequestedKey: "host-1",
+    itemIndexByKey: new Map(),
+  }), { status: "missing" });
+
+  assert.deepEqual(resolveVirtualFocusRequest({
+    activeItemKey: "host-1",
+    lastRequestedKey: null,
+    itemIndexByKey: new Map([["host-1", 3]]),
+  }), { status: "request", key: "host-1", index: 3 });
+});
 
 test("host grids use the same fixed card-width column calculation", () => {
   assert.equal(getVaultHostGridColumnCount(219), 1);

@@ -129,16 +129,31 @@ export function useHostTreeExpandedPaths({
 }) {
   const [temporaryExpandedPaths, setTemporaryExpandedPaths] = useState<Set<string> | null>(null);
   const lastAutoExpandGroupsKeyRef = useRef<string | undefined>(undefined);
+  const lastAutoExpandGroupPathsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     if (!autoExpandGroupsKey) {
       lastAutoExpandGroupsKeyRef.current = undefined;
+      lastAutoExpandGroupPathsRef.current = new Set();
       setTemporaryExpandedPaths(null);
       return;
     }
-    if (lastAutoExpandGroupsKeyRef.current === autoExpandGroupsKey) return;
-    lastAutoExpandGroupsKeyRef.current = autoExpandGroupsKey;
-    setTemporaryExpandedPaths(new Set(allGroupPaths));
+    const nextGroupPaths = new Set(allGroupPaths);
+    if (lastAutoExpandGroupsKeyRef.current !== autoExpandGroupsKey) {
+      lastAutoExpandGroupsKeyRef.current = autoExpandGroupsKey;
+      lastAutoExpandGroupPathsRef.current = nextGroupPaths;
+      setTemporaryExpandedPaths(nextGroupPaths);
+      return;
+    }
+    const newlyVisiblePaths = allGroupPaths.filter(
+      (path) => !lastAutoExpandGroupPathsRef.current.has(path),
+    );
+    lastAutoExpandGroupPathsRef.current = nextGroupPaths;
+    if (newlyVisiblePaths.length === 0) return;
+    setTemporaryExpandedPaths((current) => new Set([
+      ...(current ?? []),
+      ...newlyVisiblePaths,
+    ]));
   }, [allGroupPaths, autoExpandGroupsKey]);
 
   const togglePath = useCallback((path: string) => {

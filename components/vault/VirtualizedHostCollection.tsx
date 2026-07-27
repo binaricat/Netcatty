@@ -63,6 +63,25 @@ export function getNextRaggedRowPosition({
   };
 }
 
+export function resolveVirtualFocusRequest({
+  activeItemKey,
+  lastRequestedKey,
+  itemIndexByKey,
+}: {
+  activeItemKey: React.Key | null | undefined;
+  lastRequestedKey: string | null;
+  itemIndexByKey: ReadonlyMap<string, number>;
+}):
+  | { status: "inactive" | "missing" | "unchanged" }
+  | { status: "request"; key: string; index: number } {
+  if (activeItemKey === null || activeItemKey === undefined) return { status: "inactive" };
+  const key = String(activeItemKey);
+  const index = itemIndexByKey.get(key);
+  if (index === undefined) return { status: "missing" };
+  if (lastRequestedKey === key) return { status: "unchanged" };
+  return { status: "request", key, index };
+}
+
 export function VirtualizedHostCollection<T>({
   items,
   itemKey,
@@ -168,19 +187,21 @@ export function VirtualizedHostCollection<T>({
   });
 
   React.useLayoutEffect(() => {
-    if (activeItemKey === null || activeItemKey === undefined) {
+    const request = resolveVirtualFocusRequest({
+      activeItemKey,
+      lastRequestedKey: lastRequestedActiveKeyRef.current,
+      itemIndexByKey,
+    });
+    if (request.status === "inactive" || request.status === "missing") {
       lastRequestedActiveKeyRef.current = null;
       return;
     }
-    const key = String(activeItemKey);
-    if (lastRequestedActiveKeyRef.current === key) return;
-    lastRequestedActiveKeyRef.current = key;
-    const index = itemIndexByKey.get(key);
-    if (index === undefined) return;
-    pendingFocusKeyRef.current = key;
-    virtualizer.scrollToIndex(Math.floor(index / columns), { align: "auto" });
+    if (request.status === "unchanged") return;
+    lastRequestedActiveKeyRef.current = request.key;
+    pendingFocusKeyRef.current = request.key;
+    virtualizer.scrollToIndex(Math.floor(request.index / columns), { align: "auto" });
     queueMicrotask(() => {
-      if (focusRenderedItem(key)) pendingFocusKeyRef.current = null;
+      if (focusRenderedItem(request.key)) pendingFocusKeyRef.current = null;
     });
   }, [activeItemKey, columns, focusRenderedItem, itemIndexByKey, virtualizer]);
 
@@ -444,20 +465,22 @@ export function VirtualizedGroupedHostCollection<T>({
   });
 
   React.useLayoutEffect(() => {
-    if (activeItemKey === null || activeItemKey === undefined) {
+    const request = resolveVirtualFocusRequest({
+      activeItemKey,
+      lastRequestedKey: lastRequestedActiveKeyRef.current,
+      itemIndexByKey,
+    });
+    if (request.status === "inactive" || request.status === "missing") {
       lastRequestedActiveKeyRef.current = null;
       return;
     }
-    const key = String(activeItemKey);
-    if (lastRequestedActiveKeyRef.current === key) return;
-    lastRequestedActiveKeyRef.current = key;
-    const index = itemIndexByKey.get(key);
-    if (index === undefined) return;
-    const rowIndex = virtualRowIndexByItemIndex.get(index) ?? -1;
-    pendingFocusKeyRef.current = key;
+    if (request.status === "unchanged") return;
+    lastRequestedActiveKeyRef.current = request.key;
+    const rowIndex = virtualRowIndexByItemIndex.get(request.index) ?? -1;
+    pendingFocusKeyRef.current = request.key;
     if (rowIndex >= 0) virtualizer.scrollToIndex(rowIndex, { align: "auto" });
     queueMicrotask(() => {
-      if (focusRenderedItem(key)) pendingFocusKeyRef.current = null;
+      if (focusRenderedItem(request.key)) pendingFocusKeyRef.current = null;
     });
   }, [activeItemKey, focusRenderedItem, itemIndexByKey, virtualizer, virtualRowIndexByItemIndex]);
 

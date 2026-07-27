@@ -67,29 +67,29 @@ export function useVaultGroupDeletion({
       if (deletion.selectedRoots.length === 0) return;
 
       let restoreManagedFiles: (() => Promise<void>) | undefined;
-      if (deletion.sourcesToRemove.length > 0) {
-        if (onClearAndRemoveManagedSources) {
-          restoreManagedFiles = await onClearAndRemoveManagedSources(deletion.sourcesToRemove);
-        } else if (onClearAndRemoveManagedSource) {
-          const restores = await Promise.all(
-            deletion.sourcesToRemove.map((source) => onClearAndRemoveManagedSource(source)),
-          );
-          restoreManagedFiles = async () => {
-            await Promise.all(restores.map((restore) => restore()));
-          };
-        }
-      }
-
-      latestRef.current = {
-        ...latestRef.current,
-        hosts: await onReadPersistedHosts(),
-        managedSources: onReadPersistedManagedSources(),
-      };
-
-      // Rebuild after the file operations so edits made while they were running
-      // are preserved, then publish one coherent in-memory baseline for any
-      // deletion already queued behind this one.
       try {
+        if (deletion.sourcesToRemove.length > 0) {
+          if (onClearAndRemoveManagedSources) {
+            restoreManagedFiles = await onClearAndRemoveManagedSources(deletion.sourcesToRemove);
+          } else if (onClearAndRemoveManagedSource) {
+            const restores = await Promise.all(
+              deletion.sourcesToRemove.map((source) => onClearAndRemoveManagedSource(source)),
+            );
+            restoreManagedFiles = async () => {
+              await Promise.all(restores.map((restore) => restore()));
+            };
+          }
+        }
+
+        latestRef.current = {
+          ...latestRef.current,
+          hosts: await onReadPersistedHosts(),
+          managedSources: onReadPersistedManagedSources(),
+        };
+
+        // Rebuild after the file operations so edits made while they were running
+        // are preserved, then publish one coherent in-memory baseline for any
+        // deletion already queued behind this one.
         while (true) {
           deletion = buildVaultGroupDeletion({
             selectedPaths,

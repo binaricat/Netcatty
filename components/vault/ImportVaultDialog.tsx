@@ -223,12 +223,10 @@ export function VaultImportProgressView({
   const stageText = t(PROGRESS_STAGE_KEYS[progress.stage]);
 
   return (
-    <div
-      className="flex flex-col items-center gap-5 py-2 text-center"
-      role="status"
-      aria-live="polite"
-      aria-atomic="true"
-    >
+    <div className="flex flex-col items-center gap-5 py-2 text-center">
+      <span className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+        {stageText}
+      </span>
       <div
         className={cn(
           "flex h-14 w-14 items-center justify-center rounded-2xl border",

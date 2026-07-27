@@ -55,6 +55,7 @@ test("vault import progress renders the current background stage and percent", (
   assert.match(html, /aria-valuenow="55"/);
   assert.match(html, /role="status"/);
   assert.match(html, /aria-live="polite"/);
+  assert.match(html, /<span[^>]*role="status"[^>]*>Parsing hosts<\/span>/);
   assert.match(html, />Cancel</);
   assert.doesNotMatch(html, />Close</);
 });
