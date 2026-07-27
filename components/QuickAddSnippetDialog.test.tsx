@@ -35,6 +35,11 @@ test("quick add snippet form binds shortkeys and uses a centered Dialog modal", 
   // Escape while recording a shortkey cancels capture instead of closing
   assert.match(source, /onEscapeKeyDown/);
   assert.match(source, /isRecordingShortkey/);
+  // Pointer dismissals must close even while recording (no stale-recording gate)
+  assert.doesNotMatch(
+    source,
+    /if\s*\(\s*isRecordingShortkey\s*\)\s*\{\s*setIsRecordingShortkey\(false\);\s*setShortkeyError\(null\);\s*return;/,
+  );
 });
 
 test("shared Dialog exposes data-dialog-close for Cmd+W / hasOpenAppDialog", () => {

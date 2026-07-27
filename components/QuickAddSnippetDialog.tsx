@@ -316,17 +316,12 @@ export const QuickAddSnippetDialog: React.FC<QuickAddSnippetDialogProps> = ({
 
   const handleOpenChange = useCallback((nextOpen: boolean) => {
     if (!nextOpen) {
-      // Keep the dialog open while capturing a shortkey (Escape cancels capture only).
-      if (isRecordingShortkey) {
-        setIsRecordingShortkey(false);
-        setShortkeyError(null);
-        return;
-      }
+      // Escape while recording is gated by onEscapeKeyDown; X/backdrop always close.
       handleClose();
       return;
     }
     setOpen(true);
-  }, [handleClose, isRecordingShortkey]);
+  }, [handleClose]);
 
   const handleSave = useCallback(() => {
     if (!canSave) return;
