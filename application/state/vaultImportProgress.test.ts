@@ -24,11 +24,21 @@ test("vault import duplicate count includes hosts that already exist", () => {
 });
 
 test("vault import treats an explicit persistence failure as an import failure", () => {
-  assert.doesNotThrow(() => ensureVaultImportPersisted(undefined, "not saved"));
+  let committed = 0;
+  assert.doesNotThrow(() => ensureVaultImportPersisted(
+    undefined,
+    "not saved",
+    () => { committed++; },
+  ));
   assert.throws(
-    () => ensureVaultImportPersisted(false, "not saved"),
+    () => ensureVaultImportPersisted(
+      false,
+      "not saved",
+      () => { committed++; },
+    ),
     /not saved/,
   );
+  assert.equal(committed, 1);
 });
 
 test("vault import keeps moving when animation frames are paused in a background window", async () => {

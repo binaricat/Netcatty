@@ -17,6 +17,23 @@ export function collectVisibleVaultGroupPaths(
   return paths;
 }
 
+export function collectVaultGroupPathsForSelectAll({
+  hasActiveFilters,
+  viewMode,
+  displayedGroupPaths,
+  visibleTreeGroupPaths,
+}: {
+  hasActiveFilters: boolean;
+  viewMode: "grid" | "list" | "tree";
+  displayedGroupPaths: readonly string[];
+  visibleTreeGroupPaths: readonly string[];
+}): string[] {
+  if (hasActiveFilters) return [];
+  return viewMode === "tree"
+    ? [...visibleTreeGroupPaths]
+    : [...displayedGroupPaths];
+}
+
 export function collectVisibleVaultHostIds<T extends { id: string }>({
   viewMode,
   displayedHosts,

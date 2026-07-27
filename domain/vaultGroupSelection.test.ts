@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  collectVaultGroupPathsForSelectAll,
   collectVisibleVaultGroupPaths,
   collectVisibleVaultHostIds,
 } from "./vaultGroupSelection.ts";
@@ -32,4 +33,19 @@ test("tree select-all uses tree hosts while grid and list use displayed hosts", 
     displayedHosts,
     treeHosts,
   }), ["group-only"]);
+});
+
+test("filtered select-all never selects whole groups with hidden hosts", () => {
+  assert.deepEqual(collectVaultGroupPathsForSelectAll({
+    hasActiveFilters: true,
+    viewMode: "grid",
+    displayedGroupPaths: ["Production", "Staging"],
+    visibleTreeGroupPaths: ["Production"],
+  }), []);
+  assert.deepEqual(collectVaultGroupPathsForSelectAll({
+    hasActiveFilters: false,
+    viewMode: "tree",
+    displayedGroupPaths: ["Production", "Staging"],
+    visibleTreeGroupPaths: ["Production"],
+  }), ["Production"]);
 });

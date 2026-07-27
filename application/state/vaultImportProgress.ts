@@ -41,8 +41,10 @@ export function countVaultImportDuplicates({
 export function ensureVaultImportPersisted(
   persisted: boolean | void,
   errorMessage: string,
+  onPersisted?: () => void,
 ): void {
   if (persisted === false) throw new Error(errorMessage);
+  onPersisted?.();
 }
 
 interface VaultImportPaintWaitOptions {

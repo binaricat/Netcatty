@@ -4,6 +4,7 @@ import { deleteVaultKey } from "../../application/defaultKeyPassphrases";
 import { usePluginImporterCommit } from "../../application/state/usePluginImporterCommit";
 import { preserveConcurrentHostLineTimestampUpdate } from "../../domain/host";
 import {
+  collectVaultGroupPathsForSelectAll,
   collectVisibleVaultGroupPaths,
   collectVisibleVaultHostIds,
 } from "../../domain/vaultGroupSelection";
@@ -307,6 +308,7 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
     () => collectVisibleVaultGroupPaths(treeViewGroupTree),
     [treeViewGroupTree],
   );
+  const hasActiveHostFilters = search.trim().length > 0 || selectedTags.length > 0;
   const vaultHostPanelResizeProps = {
     resizable: true as const,
     persistWidthStorageKey: STORAGE_KEY_VAULT_HOST_PANEL_WIDTH,
@@ -960,9 +962,12 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
                     setSelectedHostIds(allIds);
                     setSelectedGroupPaths(
                       new Set(
-                        viewMode === "tree"
-                          ? visibleTreeGroupPaths
-                          : displayedGroups.map((group) => group.path),
+                        collectVaultGroupPathsForSelectAll({
+                          hasActiveFilters: hasActiveHostFilters,
+                          viewMode,
+                          displayedGroupPaths: displayedGroups.map((group) => group.path),
+                          visibleTreeGroupPaths,
+                        }),
                       ),
                     );
                   }}

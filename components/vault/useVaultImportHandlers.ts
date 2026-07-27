@@ -237,17 +237,21 @@ export function useVaultImportHandlers({
               ]),
             ) as string[];
 
-            onUpdateManagedSources([...currentManagedSources, newSource]);
             let hostUpdate: boolean | void | Promise<boolean | void>;
             startTransition(() => {
 	              hostUpdate = onUpdateHosts(
 	                [...updatedHosts, ...newHosts].map((host: Host) => sanitizeHost(host)),
 	              );
-              onUpdateCustomGroups(nextGroups);
             });
             ensureVaultImportPersisted(
               await hostUpdate!,
               t("vault.import.progress.persistFailed"),
+              () => {
+                startTransition(() => {
+                  onUpdateManagedSources([...currentManagedSources, newSource]);
+                  onUpdateCustomGroups(nextGroups);
+                });
+              },
             );
           } else if (newHosts.length > 0) {
             const merged = applyVaultHostImport(currentHosts, currentCustomGroups, result, { skipDuplicates: true });
@@ -259,11 +263,13 @@ export function useVaultImportHandlers({
             let hostUpdate: boolean | void | Promise<boolean | void>;
             startTransition(() => {
               hostUpdate = onUpdateHosts(merged.hosts);
-              onUpdateCustomGroups(merged.customGroups);
             });
             ensureVaultImportPersisted(
               await hostUpdate!,
               t("vault.import.progress.persistFailed"),
+              () => {
+                startTransition(() => onUpdateCustomGroups(merged.customGroups));
+              },
             );
             const resolved = await resolveVaultImportKeyPassphraseConflicts(
               result.keyPassphraseCandidates ?? result.keyPassphrases ?? [],
