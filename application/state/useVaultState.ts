@@ -251,6 +251,9 @@ export const useVaultState = () => {
   const snippetsWriteVersion = useRef(0);
   const customGroupsWriteVersion = useRef(0);
   const groupConfigsWriteVersion = useRef(0);
+  const hostsWritePendingRef = useRef<Promise<unknown>>(Promise.resolve());
+  const keysWritePendingRef = useRef<Promise<unknown>>(Promise.resolve());
+  const identitiesWritePendingRef = useRef<Promise<unknown>>(Promise.resolve());
 
   // Read-sequence counters for cross-window storage events.  Each incoming
   // event bumps the counter; the async decrypt callback only applies state if
@@ -348,13 +351,16 @@ export const useVaultState = () => {
     const cleaned = normalizeVaultOrder(data.map((host) => sanitizeHost(host)));
     setHosts(cleaned);
     const ver = ++hostsWriteVersion.current;
-    return encryptHosts(cleaned).then((enc) => {
+    const pending = encryptHosts(cleaned).then((enc) => {
       if (ver !== hostsWriteVersion.current) return "superseded" as const;
       return localStorageAdapter.write(STORAGE_KEY_HOSTS, enc);
     });
+    hostsWritePendingRef.current = pending;
+    return pending;
   }, []);
 
   const readPersistedHosts = useCallback(async (): Promise<Host[]> => {
+    await hostsWritePendingRef.current;
     while (true) {
       const rawHosts = localStorageAdapter.readString(STORAGE_KEY_HOSTS);
       const storedHosts = readStoredArray<Host>(STORAGE_KEY_HOSTS, rawHosts);
@@ -368,10 +374,12 @@ export const useVaultState = () => {
     const cleaned = normalizeVaultOrder(data);
     setKeys(cleaned);
     const ver = ++keysWriteVersion.current;
-    return encryptKeys(cleaned).then((enc) => {
+    const pending = encryptKeys(cleaned).then((enc) => {
       if (ver === keysWriteVersion.current)
         localStorageAdapter.write(STORAGE_KEY_KEYS, enc);
     });
+    keysWritePendingRef.current = pending;
+    return pending;
   }, []);
 
   const importOrReuseKey = useCallback((draft: Partial<SSHKey>): SSHKey => {
@@ -404,10 +412,11 @@ export const useVaultState = () => {
     const updated = normalizeVaultOrder([...keys, newKey]);
     setKeys(updated);
     const ver = ++keysWriteVersion.current;
-    void encryptKeys(updated).then((enc) => {
+    const pending = encryptKeys(updated).then((enc) => {
       if (ver === keysWriteVersion.current)
         localStorageAdapter.write(STORAGE_KEY_KEYS, enc);
     });
+    keysWritePendingRef.current = pending;
     return newKey;
   }, [keys]);
 
@@ -415,10 +424,12 @@ export const useVaultState = () => {
     const cleaned = normalizeVaultOrder(data);
     setIdentities(cleaned);
     const ver = ++identitiesWriteVersion.current;
-    return encryptIdentities(cleaned).then((enc) => {
+    const pending = encryptIdentities(cleaned).then((enc) => {
       if (ver === identitiesWriteVersion.current)
         localStorageAdapter.write(STORAGE_KEY_IDENTITIES, enc);
     });
+    identitiesWritePendingRef.current = pending;
+    return pending;
   }, []);
 
   const updateProxyProfiles = useCallback((data: ProxyProfile[]) => {
@@ -709,10 +720,11 @@ export const useVaultState = () => {
     setHosts((prevHosts) => {
       const updated = normalizeVaultOrder([...prevHosts, sanitizeHost(newHost)]);
       const ver = ++hostsWriteVersion.current;
-      encryptHosts(updated).then((enc) => {
+      const pending = encryptHosts(updated).then((enc) => {
         if (ver === hostsWriteVersion.current)
           localStorageAdapter.write(STORAGE_KEY_HOSTS, enc);
       });
+      hostsWritePendingRef.current = pending;
       return updated;
     });
 
@@ -1125,10 +1137,11 @@ export const useVaultState = () => {
         h.id === hostId ? { ...h, lastConnectedAt: Date.now() } : h,
       );
       const ver = ++hostsWriteVersion.current;
-      encryptHosts(next).then((enc) => {
+      const pending = encryptHosts(next).then((enc) => {
         if (ver === hostsWriteVersion.current)
           localStorageAdapter.write(STORAGE_KEY_HOSTS, enc);
       });
+      hostsWritePendingRef.current = pending;
       return next;
     });
   }, []);
@@ -1140,10 +1153,11 @@ export const useVaultState = () => {
         h.id === hostId ? { ...h, distro: normalized } : h,
       );
       const ver = ++hostsWriteVersion.current;
-      encryptHosts(next).then((enc) => {
+      const pending = encryptHosts(next).then((enc) => {
         if (ver === hostsWriteVersion.current)
           localStorageAdapter.write(STORAGE_KEY_HOSTS, enc);
       });
+      hostsWritePendingRef.current = pending;
       return next;
     });
   }, []);
@@ -1200,6 +1214,11 @@ export const useVaultState = () => {
     drafts,
     destination,
   }: PluginImporterCommitRequest): Promise<number> => withVaultImportLock("vault", async () => {
+    await Promise.all([
+      hostsWritePendingRef.current,
+      keysWritePendingRef.current,
+      identitiesWritePendingRef.current,
+    ]);
     while (true) {
       const raw = new Map(
         [...PLUGIN_IMPORT_TRANSACTION_KEYS].map((key) => [key, localStorageAdapter.readString(key)]),

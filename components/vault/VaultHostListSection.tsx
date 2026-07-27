@@ -91,6 +91,18 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
     handleHostConnect(host);
   }, [focusedHostId, handleHostConnect, hostClickBehavior, isMultiSelectMode, toggleHostSelection]);
 
+  const focusHost = React.useCallback((host: Host) => {
+    setFocusedHostId(host.id);
+    setFocusedGroupPath(null);
+  }, []);
+  const initialKeyboardHostId = pinnedHosts[0]?.id
+    ?? (showRecentHosts ? recentHosts[0]?.id : undefined)
+    ?? groupedDisplayHosts?.[0]?.hosts[0]?.id
+    ?? visibleDisplayedHosts[0]?.id;
+  const getHostTabIndex = (hostId: string) => (
+    focusedHostId === hostId || (!focusedHostId && initialKeyboardHostId === hostId) ? 0 : -1
+  );
+
   const activateGroup = React.useCallback((groupPath: string) => {
     if (isMultiSelectMode) {
       toggleGroupSelection(groupPath);
@@ -354,6 +366,7 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
                         viewMode={viewMode}
                         layoutKey={`pinned:${hostCollectionLayoutKey}`}
                         ariaLabel={t("vault.hosts.pinned")}
+                        onActiveItemChange={focusHost}
                         renderItem={(host) => {
                           const safeHost = sanitizeHost(host);
                           const effectiveDistro = getEffectiveHostDistro(safeHost);
@@ -386,7 +399,7 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
                                   aria-checked={isMultiSelectMode
                                     ? selectedHostIds.has(host.id)
                                     : undefined}
-                                  tabIndex={0}
+                                  tabIndex={getHostTabIndex(host.id)}
                                   style={lastPinnedId === host.id ? { animation: "pop-in 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) both" } : undefined}
                                   onAnimationEnd={() => { if (lastPinnedId === host.id) setLastPinnedId(null); }}
                                   draggable={!isMultiSelectMode}
@@ -503,7 +516,7 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
                                   aria-checked={isMultiSelectMode
                                     ? selectedHostIds.has(host.id)
                                     : undefined}
-                                  tabIndex={0}
+                                  tabIndex={getHostTabIndex(host.id)}
                                   draggable={!isMultiSelectMode}
                                   onDragStart={(e) => handleHostDragStart(e, host.id)}
                                   onClick={() => {
@@ -814,6 +827,7 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
 	                              viewMode={viewMode}
 	                              layoutKey={hostCollectionLayoutKey}
 	                              ariaLabel={t("vault.nav.hosts")}
+	                              onActiveItemChange={focusHost}
 	                              renderGroupHeader={(group) => (
 	                                <div className="flex w-full items-center gap-2 border-b border-border/40 pb-2">
 	                                  <FolderTree size={14} className="text-muted-foreground" />
@@ -857,7 +871,7 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
                                         aria-checked={isMultiSelectMode
                                           ? selectedHostIds.has(host.id)
                                           : undefined}
-                                        tabIndex={0}
+	                                        tabIndex={getHostTabIndex(host.id)}
                                         draggable={!isMultiSelectMode}
                                         onDragStart={(e) => handleHostDragStart(e, host.id)}
                                         onClick={() => {
@@ -966,6 +980,7 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
                         viewMode={viewMode}
                         layoutKey={hostCollectionLayoutKey}
                         ariaLabel={t("vault.nav.hosts")}
+                        onActiveItemChange={focusHost}
                         renderItem={(host: Host) => {
                           const safeHost = sanitizeHost(host);
                           const effectiveDistro = getEffectiveHostDistro(safeHost);
@@ -998,7 +1013,7 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
                                   aria-checked={isMultiSelectMode
                                     ? selectedHostIds.has(host.id)
                                     : undefined}
-                                  tabIndex={0}
+                                  tabIndex={getHostTabIndex(host.id)}
                                   draggable={!isMultiSelectMode}
                                   onDragStart={(e) => handleHostDragStart(e, host.id)}
                                   onClick={() => {

@@ -617,8 +617,11 @@ export function useVaultImportHandlers({
             }
           }
           if (
-            signal.aborted
-            || (err instanceof DOMException && err.name === "AbortError")
+            !rollbackFailure
+            && (
+              signal.aborted
+              || (err instanceof DOMException && err.name === "AbortError")
+            )
           ) return;
           const originalMessage =
             err instanceof Error ? err.message : t("common.unknownError");

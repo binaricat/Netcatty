@@ -4,6 +4,7 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import {
+  getNextVirtualHostIndex,
   VirtualizedGroupedHostCollection,
   VirtualizedHostCollection,
 } from "./VirtualizedHostCollection.tsx";
@@ -15,6 +16,37 @@ test("host grids use the same fixed card-width column calculation", () => {
   assert.equal(getVaultHostGridColumnCount(684), 3);
   assert.equal(getVaultHostGridColumnCount(916), 4);
   assert.equal(getVaultHostGridColumnCount(1600), 4);
+});
+
+test("virtualized host keyboard navigation crosses rows and collection edges", () => {
+  assert.equal(getNextVirtualHostIndex({
+    currentIndex: 1,
+    itemCount: 20,
+    columns: 4,
+    viewMode: "grid",
+    key: "ArrowDown",
+  }), 5);
+  assert.equal(getNextVirtualHostIndex({
+    currentIndex: 5,
+    itemCount: 20,
+    columns: 4,
+    viewMode: "grid",
+    key: "ArrowLeft",
+  }), 4);
+  assert.equal(getNextVirtualHostIndex({
+    currentIndex: 18,
+    itemCount: 20,
+    columns: 4,
+    viewMode: "list",
+    key: "End",
+  }), 19);
+  assert.equal(getNextVirtualHostIndex({
+    currentIndex: 0,
+    itemCount: 20,
+    columns: 1,
+    viewMode: "list",
+    key: "ArrowUp",
+  }), 0);
 });
 
 test("virtualized host grid renders only the viewport window for a large collection", () => {

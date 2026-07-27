@@ -20,6 +20,30 @@ export function getVaultHostColumnCount(
   return getVaultHostGridColumnCount(width);
 }
 
+export function getNextVirtualHostIndex({
+  currentIndex,
+  itemCount,
+  columns,
+  viewMode,
+  key,
+}: {
+  currentIndex: number;
+  itemCount: number;
+  columns: number;
+  viewMode: VirtualizedHostViewMode;
+  key: string;
+}): number | null {
+  let nextIndex = currentIndex;
+  if (key === "Home") nextIndex = 0;
+  else if (key === "End") nextIndex = itemCount - 1;
+  else if (key === "ArrowLeft" && viewMode === "grid") nextIndex -= 1;
+  else if (key === "ArrowRight" && viewMode === "grid") nextIndex += 1;
+  else if (key === "ArrowUp") nextIndex -= viewMode === "grid" ? columns : 1;
+  else if (key === "ArrowDown") nextIndex += viewMode === "grid" ? columns : 1;
+  else return null;
+  return Math.max(0, Math.min(itemCount - 1, nextIndex));
+}
+
 export function VirtualizedHostCollection<T>({
   items,
   itemKey,
@@ -28,6 +52,7 @@ export function VirtualizedHostCollection<T>({
   viewMode,
   layoutKey,
   ariaLabel,
+  onActiveItemChange,
 }: {
   items: T[];
   itemKey: (item: T) => React.Key;
@@ -36,8 +61,10 @@ export function VirtualizedHostCollection<T>({
   viewMode: VirtualizedHostViewMode;
   layoutKey?: React.Key;
   ariaLabel?: string;
+  onActiveItemChange?: (item: T) => void;
 }) {
   const rootRef = React.useRef<HTMLDivElement>(null);
+  const pendingFocusKeyRef = React.useRef<string | null>(null);
   const [containerWidth, setContainerWidth] = React.useState(
     viewMode === "grid" ? 1280 : 0,
   );
@@ -46,6 +73,9 @@ export function VirtualizedHostCollection<T>({
   const rowCount = Math.ceil(items.length / columns);
   const rowHeight = viewMode === "grid" ? GRID_CARD_HEIGHT : LIST_ROW_HEIGHT;
   const rowGap = viewMode === "grid" ? VAULT_HOST_GRID_GAP : 0;
+  const itemIndexByKey = React.useMemo(() => new Map(
+    items.map((item, index) => [String(itemKey(item)), index]),
+  ), [itemKey, items]);
 
   const getRowKey = React.useCallback((rowIndex: number) => {
     const firstItem = items[rowIndex * columns];
@@ -90,6 +120,50 @@ export function VirtualizedHostCollection<T>({
     virtualizer.measure();
   }, [columns, items.length, virtualizer, viewMode]);
 
+  const focusRenderedItem = React.useCallback((key: string) => {
+    const root = rootRef.current;
+    if (!root) return false;
+    const wrapper = [...root.querySelectorAll<HTMLElement>("[data-vault-item-key]")]
+      .find((element) => element.dataset.vaultItemKey === key);
+    const focusTarget = wrapper?.querySelector<HTMLElement>("[data-host-id]");
+    if (!focusTarget) return false;
+    focusTarget.focus();
+    return true;
+  }, []);
+
+  React.useLayoutEffect(() => {
+    const key = pendingFocusKeyRef.current;
+    if (!key || !focusRenderedItem(key)) return;
+    pendingFocusKeyRef.current = null;
+  });
+
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement;
+    const wrapper = target.closest<HTMLElement>("[data-vault-item-key]");
+    const currentIndex = wrapper
+      ? itemIndexByKey.get(wrapper.dataset.vaultItemKey ?? "")
+      : undefined;
+    if (currentIndex === undefined) return;
+    const nextIndex = getNextVirtualHostIndex({
+      currentIndex,
+      itemCount: items.length,
+      columns,
+      viewMode,
+      key: event.key,
+    });
+    if (nextIndex === null) return;
+    if (nextIndex === currentIndex) return;
+    event.preventDefault();
+    const nextItem = items[nextIndex];
+    const nextKey = String(itemKey(nextItem));
+    pendingFocusKeyRef.current = nextKey;
+    onActiveItemChange?.(nextItem);
+    virtualizer.scrollToIndex(Math.floor(nextIndex / columns), { align: "auto" });
+    queueMicrotask(() => {
+      if (focusRenderedItem(nextKey)) pendingFocusKeyRef.current = null;
+    });
+  };
+
   return (
     <div
       ref={rootRef}
@@ -100,6 +174,14 @@ export function VirtualizedHostCollection<T>({
       aria-rowcount={viewMode === "grid" ? rowCount : undefined}
       aria-colcount={viewMode === "grid" ? columns : undefined}
       aria-label={ariaLabel}
+      onKeyDownCapture={handleKeyDown}
+      onFocusCapture={(event) => {
+        const wrapper = (event.target as HTMLElement).closest<HTMLElement>("[data-vault-item-key]");
+        const index = wrapper
+          ? itemIndexByKey.get(wrapper.dataset.vaultItemKey ?? "")
+          : undefined;
+        if (index !== undefined) onActiveItemChange?.(items[index]);
+      }}
     >
       {virtualizer.getVirtualItems().map((virtualRow) => {
         const rowStart = virtualRow.index * columns;
@@ -122,6 +204,7 @@ export function VirtualizedHostCollection<T>({
               <div
                 key={itemKey(item)}
                 className="contents"
+                data-vault-item-key={String(itemKey(item))}
                 role={viewMode === "grid" ? "gridcell" : "listitem"}
                 aria-colindex={viewMode === "grid" ? columnIndex + 1 : undefined}
                 aria-posinset={viewMode === "list" ? rowStart + columnIndex + 1 : undefined}
@@ -160,6 +243,7 @@ export function VirtualizedGroupedHostCollection<T>({
   viewMode,
   layoutKey,
   ariaLabel,
+  onActiveItemChange,
 }: {
   groups: Array<VirtualizedHostGroup<T>>;
   itemKey: (item: T) => React.Key;
@@ -169,8 +253,10 @@ export function VirtualizedGroupedHostCollection<T>({
   viewMode: VirtualizedHostViewMode;
   layoutKey?: React.Key;
   ariaLabel?: string;
+  onActiveItemChange?: (item: T) => void;
 }) {
   const rootRef = React.useRef<HTMLDivElement>(null);
+  const pendingFocusKeyRef = React.useRef<string | null>(null);
   const [containerWidth, setContainerWidth] = React.useState(
     viewMode === "grid" ? 1280 : 0,
   );
@@ -197,6 +283,10 @@ export function VirtualizedGroupedHostCollection<T>({
     () => groups.reduce((count, group) => count + group.hosts.length, 0),
     [groups],
   );
+  const flatItems = React.useMemo(() => groups.flatMap((group) => group.hosts), [groups]);
+  const itemIndexByKey = React.useMemo(() => new Map(
+    flatItems.map((item, index) => [String(itemKey(item)), index]),
+  ), [flatItems, itemKey]);
   const hostRowHeight = viewMode === "grid" ? GRID_CARD_HEIGHT + VAULT_HOST_GRID_GAP : LIST_ROW_HEIGHT;
   const headerRowHeight = viewMode === "grid" ? 56 : 44;
 
@@ -246,6 +336,55 @@ export function VirtualizedGroupedHostCollection<T>({
     virtualizer.measure();
   }, [columns, rows.length, virtualizer, viewMode]);
 
+  const focusRenderedItem = React.useCallback((key: string) => {
+    const root = rootRef.current;
+    if (!root) return false;
+    const wrapper = [...root.querySelectorAll<HTMLElement>("[data-vault-item-key]")]
+      .find((element) => element.dataset.vaultItemKey === key);
+    const focusTarget = wrapper?.querySelector<HTMLElement>("[data-host-id]");
+    if (!focusTarget) return false;
+    focusTarget.focus();
+    return true;
+  }, []);
+
+  React.useLayoutEffect(() => {
+    const key = pendingFocusKeyRef.current;
+    if (!key || !focusRenderedItem(key)) return;
+    pendingFocusKeyRef.current = null;
+  });
+
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement;
+    const wrapper = target.closest<HTMLElement>("[data-vault-item-key]");
+    const currentIndex = wrapper
+      ? itemIndexByKey.get(wrapper.dataset.vaultItemKey ?? "")
+      : undefined;
+    if (currentIndex === undefined) return;
+    const nextIndex = getNextVirtualHostIndex({
+      currentIndex,
+      itemCount: flatItems.length,
+      columns,
+      viewMode,
+      key: event.key,
+    });
+    if (nextIndex === null) return;
+    if (nextIndex === currentIndex) return;
+    event.preventDefault();
+    const nextItem = flatItems[nextIndex];
+    const nextKey = String(itemKey(nextItem));
+    const rowIndex = rows.findIndex((row) => (
+      row.kind === "hosts"
+      && nextIndex >= row.hostStartIndex
+      && nextIndex < row.hostStartIndex + row.hosts.length
+    ));
+    pendingFocusKeyRef.current = nextKey;
+    onActiveItemChange?.(nextItem);
+    if (rowIndex >= 0) virtualizer.scrollToIndex(rowIndex, { align: "auto" });
+    queueMicrotask(() => {
+      if (focusRenderedItem(nextKey)) pendingFocusKeyRef.current = null;
+    });
+  };
+
   return (
     <div
       ref={rootRef}
@@ -256,6 +395,14 @@ export function VirtualizedGroupedHostCollection<T>({
       aria-rowcount={viewMode === "grid" ? rows.length : undefined}
       aria-colcount={viewMode === "grid" ? columns : undefined}
       aria-label={ariaLabel}
+      onKeyDownCapture={handleKeyDown}
+      onFocusCapture={(event) => {
+        const wrapper = (event.target as HTMLElement).closest<HTMLElement>("[data-vault-item-key]");
+        const index = wrapper
+          ? itemIndexByKey.get(wrapper.dataset.vaultItemKey ?? "")
+          : undefined;
+        if (index !== undefined) onActiveItemChange?.(flatItems[index]);
+      }}
     >
       {virtualizer.getVirtualItems().map((virtualRow) => {
         const row = rows[virtualRow.index];
@@ -294,6 +441,7 @@ export function VirtualizedGroupedHostCollection<T>({
                   <div
                     key={itemKey(item)}
                     className="contents"
+                    data-vault-item-key={String(itemKey(item))}
                     role={viewMode === "grid" ? "gridcell" : "listitem"}
                     aria-colindex={viewMode === "grid" ? columnIndex + 1 : undefined}
                     aria-posinset={viewMode === "list" ? row.hostStartIndex + columnIndex + 1 : undefined}
