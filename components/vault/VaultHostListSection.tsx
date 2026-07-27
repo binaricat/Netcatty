@@ -25,7 +25,7 @@ import {
   shouldClearHostFocusOnBackgroundClick,
   type HostClickBehavior,
 } from "../../domain/hostClickBehavior";
-import type { Host } from "../../domain/models";
+import type { GroupNode, Host } from "../../domain/models";
 
 type VaultHostListSectionContext = Record<string, any>;
 
@@ -100,11 +100,6 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
   const mainKeyboardHosts = groupedDisplayHosts
     ? groupedDisplayHosts.flatMap((group) => group.hosts)
     : visibleDisplayedHosts;
-  const keyboardHostSections = [
-    { key: "pinned", hosts: pinnedHosts },
-    { key: "recent", hosts: showRecentHosts ? recentHosts : [] },
-    { key: "main", hosts: mainKeyboardHosts },
-  ];
   const focusHostAndElement = (host: Host) => {
     focusHost(host);
     queueMicrotask(() => {
@@ -114,8 +109,48 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
       element?.focus();
     });
   };
+  const focusGroupAndElement = (group: GroupNode) => {
+    setFocusedGroupPath(group.path);
+    setFocusedHostId(null);
+    queueMicrotask(() => {
+      const scrollElement = hostListScrollRef.current as HTMLElement | null;
+      const element = [...(scrollElement?.querySelectorAll<HTMLElement>("[data-group-path]") ?? [])]
+        .find((candidate) => candidate.dataset.groupPath === group.path);
+      element?.focus();
+    });
+  };
+  const keyboardHostSections = [
+    {
+      key: "pinned",
+      hasItems: pinnedHosts.length > 0,
+      focusEdge: (direction: "previous" | "next") => focusHostAndElement(
+        direction === "next" ? pinnedHosts[0] : pinnedHosts.at(-1)!,
+      ),
+    },
+    {
+      key: "recent",
+      hasItems: showRecentHosts && recentHosts.length > 0,
+      focusEdge: (direction: "previous" | "next") => focusHostAndElement(
+        direction === "next" ? recentHosts[0] : recentHosts.at(-1)!,
+      ),
+    },
+    {
+      key: "groups",
+      hasItems: displayedGroups.length > 0,
+      focusEdge: (direction: "previous" | "next") => focusGroupAndElement(
+        direction === "next" ? displayedGroups[0] : displayedGroups.at(-1)!,
+      ),
+    },
+    {
+      key: "main",
+      hasItems: mainKeyboardHosts.length > 0,
+      focusEdge: (direction: "previous" | "next") => focusHostAndElement(
+        direction === "next" ? mainKeyboardHosts[0] : mainKeyboardHosts.at(-1)!,
+      ),
+    },
+  ];
   const navigateHostSection = (
-    sectionKey: "pinned" | "recent" | "main",
+    sectionKey: "pinned" | "recent" | "groups" | "main",
     direction: "previous" | "next",
   ) => {
     const currentSectionIndex = keyboardHostSections.findIndex((section) => section.key === sectionKey);
@@ -123,8 +158,8 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
     let sectionIndex = currentSectionIndex + step;
     while (sectionIndex >= 0 && sectionIndex < keyboardHostSections.length) {
       const section = keyboardHostSections[sectionIndex];
-      if (section.hosts.length > 0) {
-        focusHostAndElement(direction === "next" ? section.hosts[0] : section.hosts.at(-1)!);
+      if (section.hasItems) {
+        section.focusEdge(direction);
         return;
       }
       sectionIndex += step;
@@ -134,8 +169,25 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
     ?? (showRecentHosts ? recentHosts[0]?.id : undefined)
     ?? groupedDisplayHosts?.[0]?.hosts[0]?.id
     ?? visibleDisplayedHosts[0]?.id;
+  const focusedHostIsVisible = Boolean(
+    focusedHostId
+    && [
+      ...pinnedHosts,
+      ...(showRecentHosts ? recentHosts : []),
+      ...mainKeyboardHosts,
+    ].some((host) => host.id === focusedHostId),
+  );
   const getHostTabIndex = (hostId: string) => (
-    focusedHostId === hostId || (!focusedHostId && initialKeyboardHostId === hostId) ? 0 : -1
+    (focusedHostIsVisible ? focusedHostId === hostId : initialKeyboardHostId === hostId) ? 0 : -1
+  );
+  const initialKeyboardGroupPath = displayedGroups[0]?.path;
+  const focusedGroupIsVisible = Boolean(
+    focusedGroupPath && displayedGroups.some((group) => group.path === focusedGroupPath),
+  );
+  const getGroupTabIndex = (groupPath: string) => (
+    (focusedGroupIsVisible ? focusedGroupPath === groupPath : initialKeyboardGroupPath === groupPath)
+      ? 0
+      : -1
   );
 
   const activateGroup = React.useCallback((groupPath: string) => {
@@ -655,16 +707,19 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
                     </div>
                   )}
                   {viewMode !== "tree" && (
-                    <div
-                      className={cn(
-                        displayedGroups.length === 0 ? "hidden" : "",
-                        viewMode === "grid"
-                          ? cn(
-                            "grid gap-3",
-                          )
-                          : "flex flex-col gap-0",
-                      )}
-                      style={viewMode === "grid" ? splitViewGridStyle : undefined}
+                    <VirtualizedHostCollection<GroupNode>
+                      items={displayedGroups}
+                      itemKey={(node) => node.path}
+                      scrollRef={hostListScrollRef}
+                      viewMode={viewMode}
+                      layoutKey={`groups:${hostCollectionLayoutKey}`}
+                      ariaLabel={t("vault.groups.title")}
+                      activeItemKey={focusedGroupIsVisible ? focusedGroupPath : initialKeyboardGroupPath}
+                      onActiveItemChange={(node) => {
+                        setFocusedGroupPath(node.path);
+                        setFocusedHostId(null);
+                      }}
+                      onBoundaryNavigation={(direction) => navigateHostSection("groups", direction)}
                       onDragOver={(e) => {
                         e.preventDefault();
                       }}
@@ -681,8 +736,7 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
                         if (groupPath && selectedGroupPath !== null)
                           moveGroup(groupPath, selectedGroupPath);
                       }}
-                    >
-                      {displayedGroups.map((node) => (
+                      renderItem={(node) => (
                         <ContextMenu key={node.path}>
                           <ContextMenuTrigger asChild>
                             <div
@@ -706,11 +760,12 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
                               )}
                               data-group-path={node.path}
                               data-vault-grid-item={`group:${node.path}`}
-                              role={isMultiSelectMode ? "checkbox" : undefined}
+                              data-vault-focus-target
+                              role={isMultiSelectMode ? "checkbox" : "button"}
                               aria-checked={isMultiSelectMode
                                 ? multiSelectedGroupPaths.has(node.path)
                                 : undefined}
-                              tabIndex={isMultiSelectMode ? 0 : undefined}
+                              tabIndex={getGroupTabIndex(node.path)}
                               draggable={!isMultiSelectMode}
                               onDragStart={(e) =>
                                 e.dataTransfer.setData("group-path", node.path)
@@ -720,7 +775,6 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
                               }}
                               onClick={() => activateGroup(node.path)}
                               onKeyDown={(event) => {
-                                if (!isMultiSelectMode) return;
                                 if (event.key !== "Enter" && event.key !== " ") return;
                                 event.preventDefault();
                                 activateGroup(node.path);
@@ -820,8 +874,8 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
                             </ContextMenuItem>
                           </ContextMenuContent>
                         </ContextMenu>
-                        ))}
-                    </div>
+                      )}
+                    />
                   )}
 
                 {!shouldHideEmptyRootHostsSection && (

@@ -310,7 +310,9 @@ export function useVaultHostCollections({
           currentLevel = currentLevel[part].children;
         });
       };
-      orderedCustomGroups.forEach((path) => insertPath(path));
+      if (!searchTerm && selectedTags.length === 0) {
+        orderedCustomGroups.forEach((path) => insertPath(path));
+      }
       // Use filtered hosts (treeViewHosts) instead of all hosts to respect search/tag filters
       treeViewHosts.forEach((host) => {
         if (host.group && host.group.trim() !== "") {
@@ -321,7 +323,7 @@ export function useVaultHostCollections({
       Object.values(root).forEach(countAllHostsInNode);
       
       return root;
-    }, [treeViewHosts, orderedCustomGroups, countAllHostsInNode]);
+    }, [treeViewHosts, orderedCustomGroups, countAllHostsInNode, searchTerm, selectedTags.length]);
   
   // Create tree view specific group tree that excludes ungrouped hosts
   const treeViewGroupTree = useMemo<GroupNode[]>(() => {

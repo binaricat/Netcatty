@@ -243,8 +243,10 @@ export function useVaultImportHandlers({
           };
 
           const fileBaseName = file.name.replace(/\.[^/.]+$/, "");
-  
-          let managedGroupName = `${fileBaseName} - Managed`;
+          const requestedManagedGroup = options?.destination?.mode === "preserve"
+            ? null
+            : options?.destination?.group ?? null;
+          let managedGroupName = requestedManagedGroup ?? `${fileBaseName} - Managed`;
   
           // Check if this file is already managed
           const bridge = (window as unknown as { netcatty?: { getPathForFile?: (file: File) => string | undefined } }).netcatty;
@@ -369,17 +371,17 @@ export function useVaultImportHandlers({
               appliedHosts: Host[];
             }) => {
               ensureManagedSourceStillAvailable();
-              managedGroupName = resolveUniqueManagedImportGroupName({
-                baseName: fileBaseName,
-                customGroups: customGroupsRef.current,
-                hosts: baselineHosts,
-                managedSources: managedSourcesRef.current,
-                ownerSourceId: sourceId,
-              });
+              managedGroupName = requestedManagedGroup ?? resolveUniqueManagedImportGroupName({
+                  baseName: fileBaseName,
+                  customGroups: customGroupsRef.current,
+                  hosts: baselineHosts,
+                  managedSources: managedSourcesRef.current,
+                  ownerSourceId: sourceId,
+                });
               newSource = { ...newSource, groupName: managedGroupName };
               nextGroups = Array.from(new Set([
                 ...currentCustomGroups,
-                ...result.groups,
+                ...(requestedManagedGroup ? [] : result.groups),
                 managedGroupName,
               ]));
               return appliedHosts.map((host) => (

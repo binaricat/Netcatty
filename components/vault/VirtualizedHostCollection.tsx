@@ -74,6 +74,8 @@ export function VirtualizedHostCollection<T>({
   onActiveItemChange,
   activeItemKey,
   onBoundaryNavigation,
+  onDragOver,
+  onDrop,
 }: {
   items: T[];
   itemKey: (item: T) => React.Key;
@@ -85,6 +87,8 @@ export function VirtualizedHostCollection<T>({
   onActiveItemChange?: (item: T) => void;
   activeItemKey?: React.Key | null;
   onBoundaryNavigation?: (direction: "previous" | "next") => void;
+  onDragOver?: React.DragEventHandler<HTMLDivElement>;
+  onDrop?: React.DragEventHandler<HTMLDivElement>;
 }) {
   const rootRef = React.useRef<HTMLDivElement>(null);
   const pendingFocusKeyRef = React.useRef<string | null>(null);
@@ -148,7 +152,9 @@ export function VirtualizedHostCollection<T>({
     if (!root) return false;
     const wrapper = [...root.querySelectorAll<HTMLElement>("[data-vault-item-key]")]
       .find((element) => element.dataset.vaultItemKey === key);
-    const focusTarget = wrapper?.querySelector<HTMLElement>("[data-host-id]");
+    const focusTarget = wrapper?.querySelector<HTMLElement>(
+      "[data-host-id], [data-vault-focus-target]",
+    );
     if (!focusTarget) return false;
     focusTarget.focus();
     return true;
@@ -220,6 +226,8 @@ export function VirtualizedHostCollection<T>({
       aria-rowcount={viewMode === "grid" ? rowCount : undefined}
       aria-colcount={viewMode === "grid" ? columns : undefined}
       aria-label={ariaLabel}
+      onDragOver={onDragOver}
+      onDrop={onDrop}
       onKeyDownCapture={handleKeyDown}
       onFocusCapture={(event) => {
         const wrapper = (event.target as HTMLElement).closest<HTMLElement>("[data-vault-item-key]");

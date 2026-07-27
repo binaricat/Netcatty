@@ -22,8 +22,8 @@ export function useVaultGroupDeletion({
   groupConfigs: GroupConfig[];
   managedSources: ManagedSource[];
   onUpdateCustomGroups: (groups: string[]) => void;
-  onUpdateHosts: (hosts: Host[]) => void;
-  onUpdateGroupConfigs: (configs: GroupConfig[]) => void;
+  onUpdateHosts: (hosts: Host[]) => unknown | Promise<unknown>;
+  onUpdateGroupConfigs: (configs: GroupConfig[]) => unknown | Promise<unknown>;
   onUpdateManagedSources: (sources: ManagedSource[]) => void;
   onClearAndRemoveManagedSource?: (source: ManagedSource) => Promise<boolean>;
   onClearAndRemoveManagedSources?: (sources: ManagedSource[]) => Promise<void>;
@@ -78,8 +78,13 @@ export function useVaultGroupDeletion({
 
       onUpdateManagedSources(nextManagedSources);
       onUpdateCustomGroups(deletion.customGroups);
-      onUpdateHosts(nextHosts);
-      onUpdateGroupConfigs(deletion.groupConfigs);
+      const [hostsPersisted, groupConfigsPersisted] = await Promise.all([
+        onUpdateHosts(nextHosts),
+        onUpdateGroupConfigs(deletion.groupConfigs),
+      ]);
+      if (hostsPersisted === false || groupConfigsPersisted === false) {
+        throw new Error("Vault group deletion could not be saved");
+      }
       onDeletedPaths?.(deletion.selectedRoots);
     });
   }, [

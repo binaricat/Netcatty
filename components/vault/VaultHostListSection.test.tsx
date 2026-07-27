@@ -333,6 +333,18 @@ test("VaultHostListSection exposes selectable groups to keyboard and assistive t
   assert.match(markup, /data-group-path="production"[^>]*tabindex="0"/);
 });
 
+test("VaultHostListSection exposes normal group cards to keyboard", () => {
+  const markup = renderHostList({
+    viewMode: "list",
+    displayedGroups: [group],
+    displayedHosts: [],
+    visibleDisplayedHosts: [],
+  });
+
+  assert.match(markup, /data-group-path="production"[^>]*role="button"/);
+  assert.match(markup, /data-group-path="production"[^>]*tabindex="0"/);
+});
+
 test("VaultHostListSection exposes ungrouped hosts to keyboard and assistive technology", () => {
   const markup = renderHostList({
     viewMode: "list",
@@ -397,6 +409,27 @@ test("VaultHostListSection virtualizes large pinned collections", () => {
   const renderedHosts = (markup.match(/data-vault-grid-item="pinned:/g) ?? []).length;
   assert.ok(renderedHosts > 0);
   assert.ok(renderedHosts < 100);
+  assert.match(markup, /data-vault-virtual-collection="grid"/);
+});
+
+test("VaultHostListSection virtualizes large group collections", () => {
+  const groups = Array.from({ length: 300 }, (_, index): GroupNode => ({
+    name: `Group ${index}`,
+    path: `group-${index}`,
+    children: {},
+    hosts: [],
+    totalHostCount: 0,
+  }));
+  const markup = renderHostList({
+    viewMode: "grid",
+    displayedGroups: groups,
+    displayedHosts: [],
+    visibleDisplayedHosts: [],
+  });
+
+  const renderedGroups = (markup.match(/data-vault-grid-item="group:/g) ?? []).length;
+  assert.ok(renderedGroups > 0);
+  assert.ok(renderedGroups < 100);
   assert.match(markup, /data-vault-virtual-collection="grid"/);
 });
 
