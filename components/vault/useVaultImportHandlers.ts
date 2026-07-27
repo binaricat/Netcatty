@@ -221,9 +221,23 @@ export function useVaultImportHandlers({
                 return persisted;
               }
 
-              const latestHosts = options?.persistAttempt
+              // Prefer in-memory hosts when they diverged (local edit while an
+              // import holds the write lock). Fall back to disk for cross-window
+              // changes that already landed in storage.
+              const diskHosts = options?.persistAttempt
                 ? await onReadPersistedHosts()
                 : hostsRef.current;
+              const memoryHosts = hostsRef.current;
+              const memoryDivergedFromDisk = memoryHosts.length !== diskHosts.length
+                || memoryHosts.some((host, index) => {
+                  const diskHost = diskHosts[index];
+                  return !diskHost
+                    || diskHost.id !== host.id
+                    || diskHost.label !== host.label
+                    || diskHost.hostname !== host.hostname
+                    || diskHost.group !== host.group;
+                });
+              const latestHosts = memoryDivergedFromDisk ? memoryHosts : diskHosts;
               hostsRef.current = latestHosts;
               appliedHosts = rebaseVaultImportedHosts({
                 currentHosts: latestHosts,
