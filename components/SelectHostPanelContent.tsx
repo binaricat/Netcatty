@@ -394,7 +394,7 @@ export const SelectHostPanelContent: React.FC<SelectHostPanelContentProps> = ({
         <div
           id={optionDomId(row.key)}
           role="option"
-          aria-selected={isActive}
+          aria-selected={multiSelect ? groupState === 'all' : false}
           data-active={isActive ? 'true' : undefined}
           className={cn(
             'flex h-full min-h-0 items-center gap-2.5 overflow-hidden px-2.5 rounded-lg transition-colors',
@@ -451,7 +451,7 @@ export const SelectHostPanelContent: React.FC<SelectHostPanelContentProps> = ({
       <div
         id={optionDomId(row.key)}
         role="option"
-        aria-selected={isSelected || isActive}
+        aria-selected={isSelected}
         data-host-id={host.id}
         data-active={isActive ? 'true' : undefined}
         aria-label={t('selectHost.toggleHost', { name: host.label })}
