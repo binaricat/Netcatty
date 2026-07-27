@@ -52,6 +52,7 @@ const TARGETS = [
 
 let patched = 0;
 let already = 0;
+let upstream = 0;
 let missing = 0;
 
 for (const { file, from, to } of TARGETS) {
@@ -65,13 +66,20 @@ for (const { file, from, to } of TARGETS) {
     continue;
   }
   const withMarker = to + MARKER;
-  if (src.includes(withMarker)) {
+  const markerMatches = src.split(MARKER).length - 1;
+  const targetMatches = src.split(from).length - 1;
+  const upstreamMatches = src.split(to).length - 1;
+  if (markerMatches === 1 && src.includes(withMarker)) {
     already++;
     continue;
   }
-  if (src.split(from).length - 1 === 1) {
+  if (markerMatches === 0 && targetMatches === 1 && upstreamMatches === 0) {
     fs.writeFileSync(abs, src.replace(from, withMarker), "utf8");
     patched++;
+  } else if (markerMatches === 0 && targetMatches === 0 && upstreamMatches === 1) {
+    // The exact upstream fixed form is already present without Netcatty's
+    // marker. Leave it untouched so an xterm upgrade can retire this patch.
+    upstream++;
   } else {
     console.warn(
       `[patch-xterm-sync-render] ERROR: sync-render ternary not found (or ambiguous) in ${file}. ` +
@@ -82,7 +90,7 @@ for (const { file, from, to } of TARGETS) {
 }
 
 console.log(
-  `[patch-xterm-sync-render] patched=${patched} already=${already} missing=${missing}`,
+  `[patch-xterm-sync-render] patched=${patched} already=${already} upstream=${upstream} missing=${missing}`,
 );
 
 if (missing > 0) process.exitCode = 1;
