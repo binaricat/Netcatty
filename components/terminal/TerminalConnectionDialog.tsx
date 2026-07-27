@@ -20,6 +20,7 @@ import {
     restoreTerminalFocusFromDisconnectedDialog,
     shouldClaimDisconnectedDialogFocus,
     shouldReconnectDisconnectedDialogOnEnterKey,
+    shouldRestoreDisconnectedDialogTerminalFocus,
 } from './terminalHelpers';
 
 export interface ChainProgress {
@@ -153,10 +154,11 @@ export const TerminalConnectionDialog: React.FC<TerminalConnectionDialogProps> =
         return () => window.clearTimeout(timer);
     }, [canEnterReconnectFromDialog]);
 
-    // Restore xterm focus only when Enter-reconnect mode actually ends
-    // (reconnect / dismiss / unmount), not when dialog internals re-render.
+    // Restore xterm focus only when this overlay unmounts (connected / dismiss).
+    // Do not key on Enter-reconnect mode: reconnect may keep the dialog mounted
+    // for connecting / auth / host-key, and restoring then routes keyboard behind
+    // the blocking overlay.
     useEffect(() => {
-        if (!canEnterReconnectFromDialog) return;
         const node = dialogFocusRef.current;
         if (!node) return;
         // Capture the terminal root while the dialog is still mounted — after
@@ -167,6 +169,7 @@ export const TerminalConnectionDialog: React.FC<TerminalConnectionDialogProps> =
         );
         return () => {
             if (typeof document === "undefined") return;
+            if (!shouldRestoreDisconnectedDialogTerminalFocus(node)) return;
             restoreTerminalFocusFromDisconnectedDialog({
                 activeElement: document.activeElement,
                 dialogNode: node,
@@ -175,7 +178,7 @@ export const TerminalConnectionDialog: React.FC<TerminalConnectionDialogProps> =
                 documentElement: document.documentElement,
             });
         };
-    }, [canEnterReconnectFromDialog]);
+    }, []);
 
     const handleDialogKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
         if (!shouldReconnectDisconnectedDialogOnEnterKey({

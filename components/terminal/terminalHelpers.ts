@@ -367,6 +367,18 @@ export function shouldClaimDisconnectedDialogFocus({
   return false;
 }
 
+/**
+ * Whether cleanup should hand focus back to xterm.
+ * Skip while the overlay node is still in the document — Enter-reconnect may
+ * have ended into connecting / auth / host-key without unmounting the dialog.
+ */
+export function shouldRestoreDisconnectedDialogTerminalFocus(
+  dialogNode: HTMLElement | null,
+): boolean {
+  if (!dialogNode) return false;
+  return !dialogNode.isConnected;
+}
+
 /** After the overlay unmounts, return focus to this session's xterm if we still own it. */
 export function restoreTerminalFocusFromDisconnectedDialog({
   activeElement,

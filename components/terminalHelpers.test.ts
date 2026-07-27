@@ -10,6 +10,7 @@ import {
   shouldHideConnectingDialogForConnectionReuse,
   shouldDelayAutoRunSnippetInput,
   shouldReconnectDisconnectedDialogOnEnterKey,
+  shouldRestoreDisconnectedDialogTerminalFocus,
   shouldShowTerminalConnectionDialog,
 } from "./terminal/terminalHelpers";
 
@@ -270,6 +271,18 @@ test("disconnected dialog focus claim never steals from other panes", () => {
   } finally {
     globalThis.HTMLElement = previousHTMLElement;
   }
+});
+
+test("xterm focus restore is skipped while the connection overlay stays mounted", () => {
+  assert.equal(
+    shouldRestoreDisconnectedDialogTerminalFocus({ isConnected: true } as HTMLElement),
+    false,
+  );
+  assert.equal(
+    shouldRestoreDisconnectedDialogTerminalFocus({ isConnected: false } as HTMLElement),
+    true,
+  );
+  assert.equal(shouldRestoreDisconnectedDialogTerminalFocus(null), false);
 });
 
 test("connection dialog is hidden while a reused SSH channel is opening", () => {
