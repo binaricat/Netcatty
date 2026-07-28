@@ -225,10 +225,21 @@ export const shouldSuggestNetworkDeviceMode = (opts: {
   host?: Pick<Host, 'deviceType'> | null;
   detectedDistro?: string;
   alreadyHandled?: boolean;
+  /**
+   * Effective session protocol (mosh/et folded in). The suggestion — and its
+   * host-level `deviceType: 'network'` write — must match the Host Details
+   * "Network Device Mode" toggle, which is only exposed for plain SSH sessions
+   * (not Mosh/ET/serial/telnet/local). Offering it elsewhere would let the user
+   * persist a hidden host-level mode that surprises later SSH reconnects (#2367).
+   */
+  effectiveProtocol?: string;
 }): boolean => {
   if (!opts.host) return false;
   if (opts.host.deviceType === 'network') return false;
   if (opts.alreadyHandled) return false;
+  if (opts.effectiveProtocol !== undefined && opts.effectiveProtocol !== 'ssh') {
+    return false;
+  }
   return classifyDistroId(opts.detectedDistro) === 'network-device';
 };
 

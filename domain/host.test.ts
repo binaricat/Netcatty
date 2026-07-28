@@ -79,6 +79,33 @@ test("shouldSuggestNetworkDeviceMode does not fire on a substring-only vendor ke
   );
 });
 
+test("shouldSuggestNetworkDeviceMode still fires for a plain SSH session", () => {
+  assert.equal(
+    shouldSuggestNetworkDeviceMode({
+      host: makeHost(),
+      detectedDistro: "cisco",
+      alreadyHandled: false,
+      effectiveProtocol: "ssh",
+    }),
+    true,
+  );
+});
+
+test("shouldSuggestNetworkDeviceMode stays silent for non-SSH sessions (mosh/et/serial/telnet)", () => {
+  for (const effectiveProtocol of ["mosh", "et", "serial", "telnet", "local"]) {
+    assert.equal(
+      shouldSuggestNetworkDeviceMode({
+        host: makeHost(),
+        detectedDistro: "cisco",
+        alreadyHandled: false,
+        effectiveProtocol,
+      }),
+      false,
+      `expected no suggestion for ${effectiveProtocol}`,
+    );
+  }
+});
+
 test("upsertHostById appends a duplicated host with a fresh id", () => {
   const existing = makeHost({
     id: "serial-original",

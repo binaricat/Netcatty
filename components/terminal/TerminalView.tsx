@@ -263,6 +263,8 @@ function TerminalViewInner({ ctx }: { ctx: TerminalViewContext }) {
       host,
       detectedDistro: getEffectiveHostDistro(host),
       alreadyHandled: networkTipHandled,
+      // Match the Host Details toggle: only plain SSH (not Mosh/ET/serial/etc.).
+      effectiveProtocol: effectiveTerminalProtocol,
     });
   const dismissNetworkDeviceTip = useCallback(() => {
     markNetworkDeviceSuggestionHandled(host.id);
