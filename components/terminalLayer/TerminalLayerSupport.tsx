@@ -8,6 +8,9 @@ import { getTopTabInsertionTarget, isPointInsideRect, WORKSPACE_SESSION_DRAG_TYP
 import { useAIState } from '../../application/state/useAIState';
 import { useStoredBoolean } from '../../application/state/useStoredBoolean';
 import { isSavedVaultHost } from '../../domain/ephemeralHosts';
+import { buildAITerminalSessionInfo, type AITerminalSessionInfo } from './buildAITerminalSessionInfo';
+export { buildAITerminalSessionInfo };
+export type { AITerminalSessionInfo };
 import { collectSessionIds, SplitDirection } from '../../domain/workspace';
 import { resolveSessionTabTitle } from '../../domain/sessionTabTitle';
 import {
@@ -262,42 +265,6 @@ export const hasNotifiableTerminalOutput = (filter: ChunkedEscapeFilter, chunk: 
   return filter.feed(chunk).trim().length > 0;
 };
 
-export type AITerminalSessionInfo = {
-  sessionId: string;
-  hostId: string;
-  hostname: string;
-  label: string;
-  os?: string;
-  username?: string;
-  protocol?: string;
-  shellType?: string;
-  deviceType?: string;
-  connected: boolean;
-  hostChain?: Array<{ hostId: string; label?: string; hostname?: string }>;
-  activePortForwards?: Array<{
-    ruleId: string;
-    label?: string;
-    type?: string;
-    localPort?: number;
-    status?: string;
-  }>;
-};
-
-function summarizeHostChain(
-  host: Host | undefined,
-  allHosts: Host[],
-): AITerminalSessionInfo['hostChain'] | undefined {
-  if (!host?.hostChain?.hostIds?.length) return undefined;
-  return host.hostChain.hostIds.map((hostId) => {
-    const jumpHost = allHosts.find((entry) => entry.id === hostId);
-    return {
-      hostId,
-      label: jumpHost?.label,
-      hostname: jumpHost?.hostname,
-    };
-  });
-}
-
 export type AIPanelContext = {
   scopeType: 'terminal' | 'workspace';
   scopeTargetId?: string;
@@ -309,48 +276,6 @@ export type AIPanelContext = {
 type AIStateValue = ReturnType<typeof useAIState>;
 
 const AIStateContext = createContext<AIStateValue | null>(null);
-
-export const buildAITerminalSessionInfo = (
-  session: TerminalSession | undefined,
-  host: Host | undefined,
-  localOs: 'linux' | 'macos' | 'windows',
-  options?: {
-    allHosts?: Host[];
-    portForwardingRules?: import('../../domain/models').PortForwardingRule[];
-  },
-): AITerminalSessionInfo => {
-  const protocol = session?.protocol || host?.protocol;
-  const isLocalSession = protocol === 'local' || session?.hostId?.startsWith('local-');
-  const allHosts = options?.allHosts ?? (host ? [host] : []);
-  const hostChain = summarizeHostChain(host, allHosts);
-  const activePortForwards = host?.id && options?.portForwardingRules
-    ? options.portForwardingRules
-      .filter((rule) => rule.hostId === host.id && (rule.status === 'active' || rule.status === 'connecting'))
-      .map((rule) => ({
-        ruleId: rule.id,
-        label: rule.label,
-        type: rule.type,
-        localPort: rule.localPort,
-        status: rule.status,
-      }))
-    : undefined;
-  return {
-    sessionId: session?.id || '',
-    hostId: session?.hostId || '',
-    hostname: host?.hostname || session?.hostname || '',
-    label: host?.label || session?.hostLabel || '',
-    os: host?.os || (isLocalSession ? localOs : undefined),
-    username: host?.username || session?.username,
-    protocol,
-    shellType: session?.shellType && session.shellType !== 'unknown' ? session.shellType : undefined,
-    // Suppress deviceType for Mosh / ET sessions — both require a shell-backed
-    // PTY and cannot connect to vendor CLIs, so network device mode doesn't apply.
-    deviceType: (session?.moshEnabled || host?.moshEnabled || session?.etEnabled || host?.etEnabled) ? undefined : host?.deviceType,
-    connected: session?.status === 'connected',
-    ...(hostChain?.length ? { hostChain } : {}),
-    ...(activePortForwards?.length ? { activePortForwards } : {}),
-  };
-};
 
 interface AIChatPanelsHostProps {
   mountedTabIds: string[];
