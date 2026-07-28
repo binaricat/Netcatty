@@ -726,6 +726,14 @@ export function useTerminalAutocomplete(
 
     if (disposedRef.current || version !== fetchVersionRef.current) return;
 
+    // Recheck after the async lookup: the terminal may have entered the alternate
+    // screen while completions were pending (e.g. launching codex/vim). Drop any
+    // result that would paint popup/ghost over a TUI. Same unconditional policy. #2530
+    if (isTerminalAlternateScreenActive(term)) {
+      clearState();
+      return;
+    }
+
     // Discard stale results: if the user kept typing while getCompletions was running,
     // the current prompt input will have changed. Re-detect and compare.
     const { prompt: currentPrompt } = getAlignedPrompt(term, typedInputBufferRef.current, typedBufferReliableRef.current);
