@@ -68,7 +68,7 @@ export const buildAITerminalSessionInfo = (
     session?.moshEnabled || host?.moshEnabled || session?.etEnabled || host?.etEnabled,
   );
   // Report 'network' when the host is explicitly a network device OR when the
-  // detected distro/vendor classifies as one (Huawei VRP, Cisco IOS, …). This
+  // detected distro/vendor classifies as one (Huawei VRP, Cisco IOS, ...). This
   // mirrors the terminal's own gating (Terminal.tsx / systemTarget.ts) so AI
   // exec skips shell wrapping (routing to the raw-PTY path) and the system
   // prompt gets vendor-CLI guidance even before the user manually flips

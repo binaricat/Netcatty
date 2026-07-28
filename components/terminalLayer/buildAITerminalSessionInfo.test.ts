@@ -52,6 +52,21 @@ test("does not force network for a normal linux distro", () => {
   assert.notEqual(info.deviceType, "network");
 });
 
+test("does not misclassify a distro that merely contains a vendor keyword as a substring", () => {
+  // Classification is exact-match against the vendor id list, not a substring
+  // scan: a custom distro string that merely embeds "cisco"/"huawei" must NOT
+  // be treated as a network device (guards against a false positive that would
+  // send raw, shell-unwrapped commands to a real POSIX host).
+  for (const distro of ["cisco-lab-server", "my-huawei-cloud", "cisco linux", "fortinet-vm"]) {
+    const info = buildAITerminalSessionInfo(
+      baseSession(),
+      baseHost({ distro }),
+      "linux",
+    );
+    assert.notEqual(info.deviceType, "network", `distro "${distro}" should not be network`);
+  }
+});
+
 test("suppresses network deviceType for Mosh sessions", () => {
   const info = buildAITerminalSessionInfo(
     baseSession({ moshEnabled: true }),
