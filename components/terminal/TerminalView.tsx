@@ -311,6 +311,12 @@ function TerminalViewInner({ ctx }: { ctx: TerminalViewContext }) {
     markNetworkDeviceSuggestionShown(host.id);
     setShowNetworkDeviceTip(true);
   }, [showNetworkDeviceTip, status, canUpdateHost, host]);
+  useEffect(() => {
+    // The mode may be enabled from another surface (Host Details, a synced
+    // pane) while the tip is latched open; drop it as soon as the host is
+    // already classified so we don't keep offering an enabled action.
+    if (host.deviceType === 'network') setShowNetworkDeviceTip(false);
+  }, [host.deviceType]);
   const dismissNetworkDeviceTip = useCallback(() => {
     resolveNetworkDeviceSuggestion(host.id);
     setShowNetworkDeviceTip(false);
