@@ -324,11 +324,15 @@ function TerminalViewInner({ ctx }: { ctx: TerminalViewContext }) {
   const enableNetworkDeviceMode = useCallback(() => {
     resolveNetworkDeviceSuggestion(host.id);
     setShowNetworkDeviceTip(false);
-    onUpdateHost({ ...host, deviceType: 'network' });
+    // `host` here is the *effective* session object (group defaults / proxy
+    // profile already materialized). Send a sparse update so only the
+    // device-type override is persisted and inherited fields keep tracking
+    // their group/profile source instead of being frozen as host overrides.
+    onUpdateHost({ id: host.id, deviceType: 'network' });
     toast.success(t('terminal.networkDevice.tip.enabled', {
       host: host.label || host.hostname || host.id,
     }));
-  }, [host, onUpdateHost, t, toast]);
+  }, [host.id, host.label, host.hostname, onUpdateHost, t, toast]);
 
   const [compactActionsOpen, setCompactActionsOpen] = useState(false);
   const compactActionsRef = useRef<HTMLDivElement | null>(null);
