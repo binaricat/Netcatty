@@ -4,6 +4,11 @@ export const zhCNTerminalMessages: Messages = {
   'terminal.sudoHint.pressEnter': '按 Enter 粘贴已保存的密码',
   'terminal.passwordPicker.title': '已保存的密码',
   'terminal.passwordPicker.empty': '没有已保存的密码',
+  // Network Device Mode auto-detection tip (session header)
+  'terminal.networkDevice.tip.message': '此主机疑似为网络设备。启用网络设备模式后，命令将原样发送（不做 Shell 包装）。',
+  'terminal.networkDevice.tip.action': '启用',
+  'terminal.networkDevice.tip.dismiss': '忽略',
+  'terminal.networkDevice.tip.enabled': '已为 {host} 启用网络设备模式',
   'terminal.menu.rename': '重命名',
   'terminal.menu.uploadClipboardImage': '上传剪贴板图片',
   'terminal.clipboardImageUpload.noImage': '剪贴板中没有图片',

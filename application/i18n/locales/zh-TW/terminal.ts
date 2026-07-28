@@ -4,6 +4,11 @@ export const zhTWTerminalMessages: Messages = {
   'terminal.sudoHint.pressEnter': '按 Enter 貼上已儲存的密碼',
   'terminal.passwordPicker.title': '已儲存的密碼',
   'terminal.passwordPicker.empty': '沒有已儲存的密碼',
+  // Network Device Mode auto-detection tip (session header)
+  'terminal.networkDevice.tip.message': '此主機疑似為網路裝置。啟用網路裝置模式後，指令將原樣傳送（不做 Shell 包裝）。',
+  'terminal.networkDevice.tip.action': '啟用',
+  'terminal.networkDevice.tip.dismiss': '忽略',
+  'terminal.networkDevice.tip.enabled': '已為 {host} 啟用網路裝置模式',
   'terminal.menu.rename': '重新命名',
   'terminal.menu.uploadClipboardImage': '上傳剪貼簿圖片',
   'terminal.clipboardImageUpload.noImage': '剪貼簿中沒有圖片',

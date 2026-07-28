@@ -217,6 +217,19 @@ test("terminal search keeps enough space when host information is hidden", () =>
   );
 });
 
+test("network device tip reserves extra top space below the toolbar", () => {
+  // Tip stacks below the toolbar: content shifts down by the tip height, but
+  // the toolbar offset itself is unchanged.
+  assert.deepEqual(
+    resolveTerminalTopOffsets({ showHostInfoBar: true, isSearchOpen: false, networkDeviceTipHeight: 28 }),
+    { toolbarOffset: 30, contentTop: "62px" },
+  );
+  assert.deepEqual(
+    resolveTerminalTopOffsets({ showHostInfoBar: false, isSearchOpen: false, networkDeviceTipHeight: 28 }),
+    { toolbarOffset: 0, contentTop: "32px" },
+  );
+});
+
 test("hidden host information does not reserve a side gutter for its floating action button", () => {
   // Speed-dial overlays the terminal; scrollbar stays at the pane edge.
   assert.equal(resolveTerminalRightInset({ showHostInfoBar: false, isSearchOpen: false }), 4);

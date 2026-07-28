@@ -218,6 +218,9 @@ export const STORAGE_KEY_SHELL_ONLY_TAB_NUMBER_SHORTCUTS = 'netcatty_shell_only_
 // Shortcuts: disable terminal font zoom shortcuts
 export const STORAGE_KEY_DISABLE_TERMINAL_FONT_ZOOM = 'netcatty_disable_terminal_font_zoom_v1';
 
+/** Host IDs for which the "enable Network Device Mode" suggestion has already been shown/handled (suggest once per host). */
+export const STORAGE_KEY_NETWORK_DEVICE_SUGGEST_HANDLED = 'netcatty_network_device_suggest_handled_v1';
+
 // Group Configurations (default settings inherited by hosts)
 export const STORAGE_KEY_GROUP_CONFIGS = 'netcatty_group_configs_v1';
 /** Crash-recovery journal for the plugin importer multi-key Vault commit. */

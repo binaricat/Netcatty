@@ -4,6 +4,11 @@ export const enTerminalMessages: Messages = {
   'terminal.sudoHint.pressEnter': 'Press Enter to paste saved password',
   'terminal.passwordPicker.title': 'Saved passwords',
   'terminal.passwordPicker.empty': 'No saved passwords',
+  // Network Device Mode auto-detection tip (session header)
+  'terminal.networkDevice.tip.message': 'This looks like a network device. Enable Network Device Mode to send commands as-is (no shell wrapping).',
+  'terminal.networkDevice.tip.action': 'Enable',
+  'terminal.networkDevice.tip.dismiss': 'Dismiss',
+  'terminal.networkDevice.tip.enabled': 'Network Device Mode enabled for {host}',
   // Terminal toolbar / search / context menu / auth
   'terminal.toolbar.openSftp': 'Open SFTP',
   'terminal.toolbar.availableAfterConnect': 'Available after connect',

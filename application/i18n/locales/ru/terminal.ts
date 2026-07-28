@@ -4,6 +4,11 @@ export const ruTerminalMessages: Messages = {
   'terminal.sudoHint.pressEnter': 'Нажмите Enter, чтобы вставить сохранённый пароль',
   'terminal.passwordPicker.title': 'Сохранённые пароли',
   'terminal.passwordPicker.empty': 'Нет сохранённых паролей',
+  // Network Device Mode auto-detection tip (session header)
+  'terminal.networkDevice.tip.message': 'Похоже на сетевое устройство. Включите режим сетевого устройства, чтобы команды отправлялись как есть (без обёртки оболочки).',
+  'terminal.networkDevice.tip.action': 'Включить',
+  'terminal.networkDevice.tip.dismiss': 'Скрыть',
+  'terminal.networkDevice.tip.enabled': 'Режим сетевого устройства включён для {host}',
   // Connection logs
   'logs.table.date': 'Дата',
   'logs.table.user': 'Пользователь',

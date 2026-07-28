@@ -1,10 +1,14 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
-import { ChevronsLeft, GripVertical, X as XIcon } from 'lucide-react';
+import { ChevronsLeft, GripVertical, Network, X as XIcon } from 'lucide-react';
 
 import { shouldKeepTerminalBackgroundWorkActive } from '../../domain/terminalHibernate';
 import { resolveEffectiveTerminalProtocol } from '../../domain/terminalProtocol';
-import { classifyDistroId } from '../../domain/host';
+import { classifyDistroId, getEffectiveHostDistro, shouldSuggestNetworkDeviceMode } from '../../domain/host';
+import {
+  isNetworkDeviceSuggestionHandled,
+  markNetworkDeviceSuggestionHandled,
+} from '../../application/state/networkDeviceModeSuggestion';
 import { isPluginHostProtocol } from '../../domain/pluginConnection';
 import { OSC7_SETUP_TARGETS } from './osc7Setup';
 import PasswordCredentialPicker from './PasswordCredentialPicker';
@@ -166,19 +170,26 @@ export function formatTerminalTitleConnectionAddress(host?: TerminalTitleAddress
   return `${username}${host.hostname}${port}`;
 }
 
+/** Height (px) of the one-line "enable Network Device Mode" tip strip. */
+export const NETWORK_DEVICE_TIP_HEIGHT = 28;
+
 export function resolveTerminalTopOffsets({
   showHostInfoBar,
   isSearchOpen,
   terminalBodyInset = 4,
+  networkDeviceTipHeight = 0,
 }: {
   showHostInfoBar: boolean;
   isSearchOpen: boolean;
   terminalBodyInset?: number;
+  networkDeviceTipHeight?: number;
 }): { toolbarOffset: number; contentTop: string } {
   const toolbarOffset = isSearchOpen ? 64 : showHostInfoBar ? 30 : 0;
   return {
     toolbarOffset,
-    contentTop: `${toolbarOffset + terminalBodyInset}px`,
+    // The tip strip stacks directly below the toolbar, so the terminal
+    // content must start below both.
+    contentTop: `${toolbarOffset + networkDeviceTipHeight + terminalBodyInset}px`,
   };
 }
 
@@ -235,6 +246,37 @@ function TerminalViewInner({ ctx }: { ctx: TerminalViewContext }) {
   });
   const terminalBodyInset = 4;
   const showHostInfoBar = terminalSettings?.showHostInfoBar !== false;
+
+  // One-line "enable Network Device Mode" tip. Driven by the host's *effective*
+  // distro (detected banner/os-release, or a manual icon override), so it shows
+  // both for auto-detected switches and when the user manually classifies a
+  // host as a network vendor — the latter makes it easy to preview without real
+  // hardware. Suggest once per host: dismissing or enabling stops it (#2367).
+  const [networkTipHandled, setNetworkTipHandled] = useState(() =>
+    isNetworkDeviceSuggestionHandled(host.id),
+  );
+  useEffect(() => {
+    setNetworkTipHandled(isNetworkDeviceSuggestionHandled(host.id));
+  }, [host.id]);
+  const showNetworkDeviceTip = status === 'connected'
+    && shouldSuggestNetworkDeviceMode({
+      host,
+      detectedDistro: getEffectiveHostDistro(host),
+      alreadyHandled: networkTipHandled,
+    });
+  const dismissNetworkDeviceTip = useCallback(() => {
+    markNetworkDeviceSuggestionHandled(host.id);
+    setNetworkTipHandled(true);
+  }, [host.id]);
+  const enableNetworkDeviceMode = useCallback(() => {
+    markNetworkDeviceSuggestionHandled(host.id);
+    setNetworkTipHandled(true);
+    onUpdateHost({ ...host, deviceType: 'network' });
+    toast.success(t('terminal.networkDevice.tip.enabled', {
+      host: host.label || host.hostname || host.id,
+    }));
+  }, [host, onUpdateHost, t, toast]);
+
   const [compactActionsOpen, setCompactActionsOpen] = useState(false);
   const compactActionsRef = useRef<HTMLDivElement | null>(null);
   const compactActionsButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -266,6 +308,7 @@ function TerminalViewInner({ ctx }: { ctx: TerminalViewContext }) {
     showHostInfoBar,
     isSearchOpen,
     terminalBodyInset,
+    networkDeviceTipHeight: showNetworkDeviceTip ? NETWORK_DEVICE_TIP_HEIGHT : 0,
   });
   const terminalRightInset = resolveTerminalRightInset({
     showHostInfoBar,
@@ -708,6 +751,32 @@ function TerminalViewInner({ ctx }: { ctx: TerminalViewContext }) {
           )}
           style={{ backgroundColor: 'var(--terminal-ui-bg)' }}
         >
+          {showNetworkDeviceTip && (
+            <div
+              className="absolute left-0 right-0 z-20 flex items-center gap-2 px-3 border-b border-border/60 bg-card/95 backdrop-blur-sm text-[11px]"
+              style={{ top: terminalToolbarOffset, height: NETWORK_DEVICE_TIP_HEIGHT }}
+            >
+              <Network size={13} className="shrink-0 text-blue-500" aria-hidden="true" />
+              <span className="min-w-0 flex-1 truncate text-foreground/90">
+                {t('terminal.networkDevice.tip.message')}
+              </span>
+              <button
+                type="button"
+                onClick={enableNetworkDeviceMode}
+                className="shrink-0 rounded px-2 py-0.5 font-medium text-primary hover:bg-primary/10 transition-colors"
+              >
+                {t('terminal.networkDevice.tip.action')}
+              </button>
+              <button
+                type="button"
+                onClick={dismissNetworkDeviceTip}
+                className="shrink-0 rounded p-1 text-muted-foreground hover:bg-secondary/80 transition-colors"
+                aria-label={t('terminal.networkDevice.tip.dismiss')}
+              >
+                <XIcon size={12} />
+              </button>
+            </div>
+          )}
           <div
             ref={containerRef}
             className="xterm-container absolute"

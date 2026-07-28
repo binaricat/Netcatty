@@ -15,6 +15,7 @@ import {
   resolveTelnetUsername,
   sanitizeHost,
   shouldProbeSessionCwd,
+  shouldSuggestNetworkDeviceMode,
   upsertHostById,
 } from "./host.ts";
 
@@ -37,6 +38,45 @@ test("upsertHostById updates an existing host in place", () => {
   const updated = makeHost({ label: "Updated Host" });
 
   assert.deepEqual(upsertHostById([existing], updated), [updated]);
+});
+
+test("shouldSuggestNetworkDeviceMode offers the switch for an auto-detected vendor", () => {
+  assert.equal(
+    shouldSuggestNetworkDeviceMode({ host: makeHost(), detectedDistro: "huawei", alreadyHandled: false }),
+    true,
+  );
+});
+
+test("shouldSuggestNetworkDeviceMode stays silent once already enabled", () => {
+  assert.equal(
+    shouldSuggestNetworkDeviceMode({
+      host: makeHost({ deviceType: "network" }),
+      detectedDistro: "cisco",
+      alreadyHandled: false,
+    }),
+    false,
+  );
+});
+
+test("shouldSuggestNetworkDeviceMode stays silent after it was already handled", () => {
+  assert.equal(
+    shouldSuggestNetworkDeviceMode({ host: makeHost(), detectedDistro: "cisco", alreadyHandled: true }),
+    false,
+  );
+});
+
+test("shouldSuggestNetworkDeviceMode ignores ordinary linux distros", () => {
+  assert.equal(
+    shouldSuggestNetworkDeviceMode({ host: makeHost(), detectedDistro: "ubuntu", alreadyHandled: false }),
+    false,
+  );
+});
+
+test("shouldSuggestNetworkDeviceMode does not fire on a substring-only vendor keyword", () => {
+  assert.equal(
+    shouldSuggestNetworkDeviceMode({ host: makeHost(), detectedDistro: "cisco-lab-server", alreadyHandled: false }),
+    false,
+  );
 });
 
 test("upsertHostById appends a duplicated host with a fresh id", () => {
