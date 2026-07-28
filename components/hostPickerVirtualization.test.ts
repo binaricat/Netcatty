@@ -54,6 +54,8 @@ test('SelectHostPanelContent virtualizes with listbox keyboard model', () => {
     source,
     /setActiveNavIndex\(\(prev\) => clampListIndex\(prev, navigable\.length\)\);\s*\}, \[navigable\.length\]/,
   );
+  // Multi-select listbox must advertise multi-selection to AT.
+  assert.match(source, /aria-multiselectable=\{multiSelect \|\| undefined\}/);
 });
 
 test('QuickSwitcher virtualizes categorized rows and clamps empty-list keyboard', () => {
@@ -67,6 +69,8 @@ test('QuickSwitcher virtualizes categorized rows and clamps empty-list keyboard'
   // Fixed-height slots must clip/truncate so long titles never overlap the next row.
   assert.match(source, /overflow-hidden/);
   assert.match(source, /max-w-\[12rem\] shrink-0 truncate/);
+  // List scroller needs a definite max height under max-h-only popup chrome.
+  assert.match(source, /max-h-\[min\(360px,calc\(100vh-14rem\)\)\]/);
   assert.doesNotMatch(source, /results\.map\(\(host\) =>/);
   // Must not use bare length-1 which yields -1 on empty lists.
   assert.doesNotMatch(
@@ -84,6 +88,7 @@ test('AddToWorkspaceDialog virtualizes and clamps selection on shrink', () => {
   assert.match(source, /onClick=\{\(\) => handleTargetClick\(idx, host\.id\)\}/);
   // Long group paths must not wrap out of the fixed virtual row.
   assert.match(source, /max-w-\[12rem\] truncate text-\[11px\] text-muted-foreground/);
+  assert.match(source, /max-h-\[min\(360px,calc\(100vh-14rem\)\)\]/);
   assert.doesNotMatch(source, /filteredHosts\.map\(\(host, i\) =>/);
 });
 

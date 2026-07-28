@@ -613,6 +613,7 @@ export const SelectHostPanelContent: React.FC<SelectHostPanelContentProps> = ({
               data-host-picker-virtual="select-host"
               role="listbox"
               aria-label={t('selectHost.title')}
+              aria-multiselectable={multiSelect || undefined}
               aria-activedescendant={activeDescendantId}
               tabIndex={0}
               onKeyDown={handleListKeyDown}

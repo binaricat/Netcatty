@@ -496,12 +496,17 @@ const QuickSwitcherInner: React.FC<QuickSwitcherProps> = ({
           )}
         </div>
 
-        <div className="min-h-0 flex-1" data-host-picker-virtual="quick-switcher">
+        {/*
+          max-h on the list is required: the popup only has max-h-[520px], so a bare
+          h-full child can expand with the virtual spacer and get clipped with no scroll.
+          Cap the scroller so large inventories remain reachable.
+        */}
+        <div className="min-h-0 flex-1 overflow-hidden" data-host-picker-virtual="quick-switcher">
           <VariableSizeVirtualList<QuickSwitcherVisualRow>
             ref={listRef}
             items={visualRows}
             getItemHeight={getRowHeight}
-            className="h-full"
+            className="h-full max-h-[min(360px,calc(100vh-14rem))]"
             overscan={8}
             getItemKey={(row) => row.key}
             renderItem={(row) => {

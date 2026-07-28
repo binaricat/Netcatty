@@ -315,7 +315,11 @@ export const AddToWorkspaceDialog: React.FC<AddToWorkspaceDialogProps> = ({
           )}
         </div>
 
-        <div className="min-h-0 flex-1" data-host-picker-virtual="add-workspace">
+        {/*
+          Same max-h flex trap as Quick Switcher: list must not grow with the virtual
+          spacer or hosts below the first screen become unreachable.
+        */}
+        <div className="min-h-0 flex-1 overflow-hidden" data-host-picker-virtual="add-workspace">
           {items.length === 0 ? (
             <div className="px-4 py-8 text-center text-xs text-muted-foreground">
               No matches
@@ -325,7 +329,7 @@ export const AddToWorkspaceDialog: React.FC<AddToWorkspaceDialogProps> = ({
               ref={listRef}
               items={visualRows}
               getItemHeight={getRowHeight}
-              className="h-full"
+              className="h-full max-h-[min(360px,calc(100vh-14rem))]"
               overscan={8}
               getItemKey={(row) => row.key}
               renderItem={renderRow}

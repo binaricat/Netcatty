@@ -137,12 +137,16 @@ const SftpHostPickerInner: React.FC<SftpHostPickerProps> = ({
             }
         }
 
-        pushHeader('header:hosts', t('vault.nav.hosts'));
+        // Only show the Hosts section when there are saved hosts to list, or when
+        // nothing matched at all (no connected + no saved). Avoid a dangling
+        // "Hosts" header after connected-only results hide the saved inventory.
         if (filteredHosts.length > 0) {
+            pushHeader('header:hosts', t('vault.nav.hosts'));
             for (const host of filteredHosts) {
                 pushItem({ type: 'host', id: host.id, host });
             }
         } else if (filteredConnectedHosts.length === 0) {
+            pushHeader('header:hosts', t('vault.nav.hosts'));
             nextVisual.push({
                 kind: 'empty',
                 key: 'empty:hosts',
@@ -230,6 +234,14 @@ const SftpHostPickerInner: React.FC<SftpHostPickerProps> = ({
         return SFTP_PICKER_ROW_HEIGHT;
     }, []);
 
+    // Cap at 360px for large inventories, but shrink to content for short lists
+    // (Local-only / few hosts) so the dialog does not leave a large blank region.
+    const listViewportHeight = useMemo(() => {
+        let total = 0;
+        for (const row of visualRows) total += getRowHeight(row);
+        return Math.min(360, Math.max(total, 1));
+    }, [getRowHeight, visualRows]);
+
     const renderRow = useCallback((row: VisualRow) => {
         if (row.kind === 'header') {
             return (
@@ -315,7 +327,11 @@ const SftpHostPickerInner: React.FC<SftpHostPickerProps> = ({
                     </span>
                 </div>
 
-                <div className="h-[360px]" data-host-picker-virtual="sftp">
+                <div
+                    className="max-h-[360px]"
+                    style={{ height: listViewportHeight }}
+                    data-host-picker-virtual="sftp"
+                >
                     <VariableSizeVirtualList<VisualRow>
                         ref={listRef}
                         items={visualRows}
