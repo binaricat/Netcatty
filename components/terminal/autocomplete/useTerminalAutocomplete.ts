@@ -37,6 +37,7 @@ import {
 } from "./terminalAutocompleteLayout";
 import { handleTerminalAutocompleteInput } from "./terminalAutocompleteInput";
 import { handleTerminalAutocompleteKeyEvent } from "./terminalAutocompleteKeyEvent";
+import { isTerminalAlternateScreenActive } from "../terminalHibernateRuntime";
 
 export interface AutocompleteSettings {
   enabled: boolean;
@@ -640,6 +641,18 @@ export function useTerminalAutocomplete(
   const fetchSuggestions = useCallback(async () => {
     const term = termRef.current;
     if (!term || disposedRef.current || !settingsRef.current.enabled) {
+      return;
+    }
+
+    // Suppress autocomplete while a full-screen TUI owns the alternate screen
+    // buffer (codex CLI, vim, htop, less, …). These apps render their own input
+    // UI on the alternate buffer; Netcatty's popup/ghost text would clash with
+    // it — e.g. codex's "/" slash-command menu gets covered by our path/command
+    // popup because codex's composer line also matches the shell-prompt
+    // heuristic. Bail before prompt detection so neither popup nor ghost text
+    // is produced. #2530
+    if (isTerminalAlternateScreenActive(term)) {
+      clearState();
       return;
     }
 
