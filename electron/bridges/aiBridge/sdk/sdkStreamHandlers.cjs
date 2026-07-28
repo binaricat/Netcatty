@@ -603,6 +603,7 @@ function registerSdkStreamHandlers(ctx) {
             binPath,
             cursorAuthMode: backendKey === "cursor" ? cursorAuthMode : undefined,
             cursorCliBinPath: backendKey === "cursor" ? cursorCliBinPath : undefined,
+            getTempDir: () => tempDirBridge.getTempDir(),
             injectedMcpServers,
             claudeSettings,
             toolIntegrationMode: effectiveMode,

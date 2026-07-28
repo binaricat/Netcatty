@@ -92,6 +92,8 @@ const DRIVER_REGISTRY = {
           prompt: ctx.prompt,
           binPath: ctx.cursorCliBinPath || ctx.binPath,
           cwd: ctx.cwd,
+          chatSessionId: ctx.chatSessionId,
+          getTempDir: ctx.getTempDir,
           model: ctx.model,
           env: ctx.env,
           permissionMode: ctx.permissionMode,

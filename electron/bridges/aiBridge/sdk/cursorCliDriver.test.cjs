@@ -1,6 +1,9 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { EventEmitter } = require("node:events");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
 const {
   buildCursorCliArgs,
   formatCursorCliErrorForUser,
@@ -9,6 +12,7 @@ const {
   resetMcpMergeRefcountsForTests,
   resolveCursorCliExecMode,
   resolveCursorCliModel,
+  resolveCursorCliWorkspaceCwd,
   runCursorCliTurn,
   stripCursorApiKeyFromEnv,
   translateCursorCliEvent,
@@ -499,4 +503,112 @@ test("listCursorCliModels parses agent models output and prefers auto", async ()
       { id: "gpt-5.2", name: "GPT-5.2" },
     ],
   });
+});
+
+test("resolveCursorCliWorkspaceCwd prefers Netcatty temp over unwritable preferred cwd", () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-cli-ws-"));
+  const resolved = resolveCursorCliWorkspaceCwd({
+    preferredCwd: "/",
+    chatSessionId: "ai_chat_1",
+    getTempDir: () => tempRoot,
+  });
+  assert.equal(resolved, path.join(tempRoot, "cursor-cli-mcp", "ai_chat_1"));
+  assert.ok(fs.statSync(resolved).isDirectory());
+  fs.rmSync(tempRoot, { recursive: true, force: true });
+});
+
+test("runCursorCliTurn uses temp workspace for MCP merge and --workspace when cwd is /", async () => {
+  const emitter = makeEmitter();
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-cli-ws-"));
+  const observed = { spawnCwd: null, args: null, mergeCwd: null };
+  const fakeChild = new EventEmitter();
+  fakeChild.stdout = new EventEmitter();
+  fakeChild.stderr = new EventEmitter();
+  fakeChild.killed = false;
+  fakeChild.kill = () => { fakeChild.killed = true; };
+
+  await runCursorCliTurn({
+    prompt: "hi",
+    binPath: "/bin/agent",
+    cwd: "/",
+    chatSessionId: "chat-packaged",
+    getTempDir: () => tempRoot,
+    model: "auto",
+    env: {},
+    permissionMode: "confirm",
+    injectedMcpServers: [{
+      name: "netcatty-remote-hosts",
+      command: "node",
+      args: ["server.cjs"],
+      env: [{ name: "NETCATTY_MCP_PORT", value: "1" }],
+    }],
+    emitter,
+    spawnImpl: (_cmd, args, opts) => {
+      observed.spawnCwd = opts.cwd;
+      observed.args = args;
+      queueMicrotask(() => {
+        fakeChild.stdout.emit("data", `${JSON.stringify({
+          type: "assistant", timestamp_ms: 1, message: { content: [{ type: "text", text: "ok" }] },
+        })}\n`);
+        fakeChild.stdout.emit("data", `${JSON.stringify({
+          type: "result", subtype: "success", result: "ok",
+        })}\n`);
+        fakeChild.emit("close", 0);
+      });
+      return fakeChild;
+    },
+    mergeMcp: (mergeCwd) => {
+      observed.mergeCwd = mergeCwd;
+      return { restore() {} };
+    },
+  });
+
+  const expected = path.join(tempRoot, "cursor-cli-mcp", "chat-packaged");
+  assert.equal(observed.mergeCwd, expected);
+  assert.equal(observed.spawnCwd, expected);
+  assert.ok(observed.args.includes("--workspace"));
+  assert.equal(observed.args[observed.args.indexOf("--workspace") + 1], expected);
+  assert.ok(!emitter.calls.some((c) => c[0] === "error"));
+  fs.rmSync(tempRoot, { recursive: true, force: true });
+});
+
+test("runCursorCliTurn surfaces MCP merge failure instead of continuing without tools", async () => {
+  const emitter = makeEmitter();
+  let spawned = false;
+
+  await runCursorCliTurn({
+    prompt: "hi",
+    binPath: "/bin/agent",
+    cwd: "/",
+    chatSessionId: "chat-fail",
+    getTempDir: () => "/definitely-not-writable-root-only",
+    model: "auto",
+    env: {},
+    permissionMode: "confirm",
+    injectedMcpServers: [{
+      name: "netcatty-remote-hosts",
+      command: "node",
+      args: ["server.cjs"],
+    }],
+    emitter,
+    spawnImpl: () => {
+      spawned = true;
+      const fakeChild = new EventEmitter();
+      fakeChild.stdout = new EventEmitter();
+      fakeChild.stderr = new EventEmitter();
+      fakeChild.killed = false;
+      fakeChild.kill = () => {};
+      return fakeChild;
+    },
+    mergeMcp: () => {
+      const err = new Error("ENOENT: mkdir '/.cursor'");
+      err.code = "ENOENT";
+      throw err;
+    },
+  });
+
+  assert.equal(spawned, false);
+  assert.equal(emitter.calls.length, 1);
+  assert.equal(emitter.calls[0][0], "error");
+  assert.match(emitter.calls[0][1], /Failed to prepare Netcatty MCP for Cursor CLI/i);
 });

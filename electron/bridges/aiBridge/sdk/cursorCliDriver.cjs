@@ -82,6 +82,47 @@ function mcpConfigToCursorMcpJsonEntry(cfg) {
   return { name: cfg.name, entry };
 }
 
+/**
+ * Cursor CLI discovers MCP via `{cwd}/.cursor/mcp.json`. Packaged Netcatty
+ * launched from Finder/Dock often has `process.cwd() === "/"`, which cannot
+ * host that file. Always prefer a writable Netcatty temp workspace.
+ */
+function resolveCursorCliWorkspaceCwd({
+  preferredCwd,
+  chatSessionId,
+  getTempDir,
+  mkdirSync,
+} = {}) {
+  const mkdir = mkdirSync || fs.mkdirSync;
+  const resolveTempRoot = typeof getTempDir === "function"
+    ? getTempDir
+    : () => {
+      try {
+        return require("../../tempDirBridge.cjs").getTempDir();
+      } catch {
+        return null;
+      }
+    };
+
+  const tempRoot = String(resolveTempRoot?.() || "").trim();
+  if (tempRoot) {
+    const safeId = String(chatSessionId || "default")
+      .replace(/[^a-zA-Z0-9._-]/g, "_")
+      .slice(0, 80) || "default";
+    const dir = path.join(tempRoot, "cursor-cli-mcp", safeId);
+    mkdir(dir, { recursive: true });
+    return dir;
+  }
+
+  const fallback = String(preferredCwd || process.cwd() || "").trim() || process.cwd();
+  try {
+    mkdir(path.join(fallback, ".cursor"), { recursive: true });
+  } catch {
+    /* caller / merge may still fail loudly */
+  }
+  return fallback;
+}
+
 // Per-path refcount so concurrent CLI turns share one original snapshot and only
 // the last restorer writes the pre-merge file back (avoids last-writer-wins races).
 const mcpMergeRefcounts = new Map();
@@ -357,6 +398,8 @@ async function runCursorCliTurn({
   prompt,
   binPath,
   cwd,
+  chatSessionId,
+  getTempDir,
   model,
   env,
   permissionMode,
@@ -366,10 +409,27 @@ async function runCursorCliTurn({
   signal,
   spawnImpl,
   mergeMcp,
+  workspaceCwd,
 }) {
   const cliPath = String(binPath || "").trim();
   if (!cliPath) {
     emitter.emitError("Cursor Agent CLI not found. Install the Cursor CLI (`cursor-agent`) and ensure it is on PATH.");
+    return { sessionId: resumeSessionId || null };
+  }
+
+  let effectiveCwd;
+  try {
+    effectiveCwd = workspaceCwd || resolveCursorCliWorkspaceCwd({
+      preferredCwd: cwd,
+      chatSessionId,
+      getTempDir,
+    });
+  } catch (err) {
+    emitter.emitError(
+      "Failed to prepare Netcatty MCP for Cursor CLI "
+      + `(cannot create workspace: ${err?.message || err}). `
+      + "Terminal tools will be unavailable.",
+    );
     return { sessionId: resumeSessionId || null };
   }
 
@@ -378,7 +438,7 @@ async function runCursorCliTurn({
     model,
     resumeSessionId,
     permissionMode,
-    cwd: cwd || process.cwd(),
+    cwd: effectiveCwd,
     prompt,
   });
 
@@ -386,9 +446,14 @@ async function runCursorCliTurn({
   let mcpHandle = null;
   if (Array.isArray(injectedMcpServers) && injectedMcpServers.length > 0) {
     try {
-      mcpHandle = doMerge(cwd || process.cwd(), injectedMcpServers);
+      mcpHandle = doMerge(effectiveCwd, injectedMcpServers);
     } catch (err) {
-      console.warn("[Cursor CLI] Failed to merge workspace MCP config:", err?.message || err);
+      emitter.emitError(
+        "Failed to prepare Netcatty MCP for Cursor CLI "
+        + `(cannot write workspace MCP config: ${err?.message || err}). `
+        + "Terminal tools will be unavailable.",
+      );
+      return { sessionId: resumeSessionId || null };
     }
   }
 
@@ -409,7 +474,7 @@ async function runCursorCliTurn({
 
   try {
     child = spawnFn(cliPath, args, {
-      cwd: cwd || process.cwd(),
+      cwd: effectiveCwd,
       env: childEnv,
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
@@ -563,6 +628,7 @@ module.exports = {
   resetMcpMergeRefcountsForTests,
   resolveCursorCliExecMode,
   resolveCursorCliModel,
+  resolveCursorCliWorkspaceCwd,
   runCursorCliTurn,
   stripCursorApiKeyFromEnv,
   translateCursorCliEvent,
