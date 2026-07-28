@@ -644,13 +644,14 @@ export function useTerminalAutocomplete(
       return;
     }
 
-    // Suppress autocomplete while a full-screen TUI owns the alternate screen
-    // buffer (codex CLI, vim, htop, less, …). These apps render their own input
-    // UI on the alternate buffer; Netcatty's popup/ghost text would clash with
-    // it — e.g. codex's "/" slash-command menu gets covered by our path/command
-    // popup because codex's composer line also matches the shell-prompt
-    // heuristic. Bail before prompt detection so neither popup nor ghost text
-    // is produced. #2530
+    // Suppress autocomplete for the entire alternate screen buffer (codex CLI,
+    // vim, htop, less, …). Full-screen apps own their own input UI there;
+    // Netcatty's popup/ghost text would clash — e.g. codex's "/" slash-command
+    // menu gets covered because the composer line also matches the shell-prompt
+    // heuristic. This is intentionally unconditional: multiplexers (tmux/screen)
+    // also keep the outer xterm on the alternate buffer for the whole session,
+    // so Netcatty autocomplete is off while attached — same simple tradeoff as
+    // other terminal hosts, rather than chasing TUI-vs-shell heuristics. #2530
     if (isTerminalAlternateScreenActive(term)) {
       clearState();
       return;
