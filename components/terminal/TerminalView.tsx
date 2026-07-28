@@ -4,14 +4,8 @@ import { ChevronsLeft, GripVertical, Network, X as XIcon } from 'lucide-react';
 
 import { shouldKeepTerminalBackgroundWorkActive } from '../../domain/terminalHibernate';
 import { resolveEffectiveTerminalProtocol } from '../../domain/terminalProtocol';
-import { classifyDistroId, getEffectiveHostDistro, shouldSuggestNetworkDeviceMode } from '../../domain/host';
-import {
-  isNetworkDeviceSuggestionHandled,
-  markNetworkDeviceSuggestionShown,
-  resolveNetworkDeviceSuggestion,
-  subscribeNetworkDeviceSuggestionHandled,
-} from '../../application/state/networkDeviceModeSuggestion';
-import { isSavedVaultHost } from '../../domain/ephemeralHosts';
+import { classifyDistroId } from '../../domain/host';
+import { useNetworkDeviceModeSuggestion } from '../../application/state/useNetworkDeviceModeSuggestion';
 import { isPluginHostProtocol } from '../../domain/pluginConnection';
 import { OSC7_SETUP_TARGETS } from './osc7Setup';
 import PasswordCredentialPicker from './PasswordCredentialPicker';
@@ -270,69 +264,29 @@ function TerminalViewInner({ ctx }: { ctx: TerminalViewContext }) {
   const terminalBodyInset = 4;
   const showHostInfoBar = terminalSettings?.showHostInfoBar !== false;
 
-  // One-line "enable Network Device Mode" tip. Driven by the host's *effective*
-  // distro (detected banner/os-release, or a manual icon override), so it shows
-  // both for auto-detected switches and when the user manually classifies a
-  // host as a network vendor — the latter makes it easy to preview without real
-  // hardware. Suggested at most once per host (#2367).
-  //
-  // `showNetworkDeviceTip` is a per-instance latch rather than a live predicate:
-  // once we decide to show the tip we record the display and keep it visible
-  // until the user acts, so persisting "shown" (which also suppresses reconnects
-  // and other panes) does not immediately hide the instance doing the showing.
-  const [showNetworkDeviceTip, setShowNetworkDeviceTip] = useState(false);
-  // Reset on host change and hide when the suggestion is resolved elsewhere
-  // (another pane or window) for this host. Declared before the eligibility
-  // effect so, on mount, the reset (a no-op false→false) runs first and cannot
-  // clobber the latch the eligibility effect sets below.
-  useEffect(() => {
-    setShowNetworkDeviceTip(false);
-    return subscribeNetworkDeviceSuggestionHandled((changedHostId) => {
-      if (changedHostId === host.id) setShowNetworkDeviceTip(false);
-    });
-  }, [host.id]);
-  useEffect(() => {
-    if (showNetworkDeviceTip) return;
-    // Enabling the mode writes back through onUpdateHost, which only persists
-    // vault hosts. Skip the tip when updates can't land: the detached popup
-    // (no onUpdateHost) and ephemeral deep-link hosts (not in the vault array).
-    if (status !== 'connected' || !canUpdateHost || !isSavedVaultHost(host)) return;
-    const eligible = shouldSuggestNetworkDeviceMode({
-      host,
-      detectedDistro: getEffectiveHostDistro(host),
-      alreadyHandled: isNetworkDeviceSuggestionHandled(host.id),
-      // Match the Host Details toggle: only plain SSH (not Mosh/ET/serial/etc.).
-      // Derive from `host` directly — ctx does not carry effectiveTerminalProtocol.
-      effectiveProtocol: resolveEffectiveTerminalProtocol(host),
-    });
-    if (!eligible) return;
-    // Record the display silently so reconnects and later-mounting panes stay
-    // quiet, but this instance keeps the tip until the user acts.
-    markNetworkDeviceSuggestionShown(host.id);
-    setShowNetworkDeviceTip(true);
-  }, [showNetworkDeviceTip, status, canUpdateHost, host]);
-  useEffect(() => {
-    // The mode may be enabled from another surface (Host Details, a synced
-    // pane) while the tip is latched open; drop it as soon as the host is
-    // already classified so we don't keep offering an enabled action.
-    if (host.deviceType === 'network') setShowNetworkDeviceTip(false);
-  }, [host.deviceType]);
-  const dismissNetworkDeviceTip = useCallback(() => {
-    resolveNetworkDeviceSuggestion(host.id);
-    setShowNetworkDeviceTip(false);
-  }, [host.id]);
-  const enableNetworkDeviceMode = useCallback(() => {
-    resolveNetworkDeviceSuggestion(host.id);
-    setShowNetworkDeviceTip(false);
-    // `host` here is the *effective* session object (group defaults / proxy
-    // profile already materialized). Send a sparse update so only the
-    // device-type override is persisted and inherited fields keep tracking
-    // their group/profile source instead of being frozen as host overrides.
+  // One-line "enable Network Device Mode" tip. The persisted once-per-host
+  // lifecycle, eligibility, and cross-pane/window sync live in the application
+  // hook; here we only wire the enable side effects (persist a sparse host
+  // update + toast) and render. `host` is the *effective* session object
+  // (group defaults / proxy profile already materialized), so send a sparse
+  // update so inherited fields keep tracking their source instead of being
+  // frozen as host overrides (#2367).
+  const onEnableNetworkDeviceMode = useCallback(() => {
     onUpdateHost({ id: host.id, deviceType: 'network' });
     toast.success(t('terminal.networkDevice.tip.enabled', {
       host: host.label || host.hostname || host.id,
     }));
   }, [host.id, host.label, host.hostname, onUpdateHost, t, toast]);
+  const {
+    visible: showNetworkDeviceTip,
+    enable: enableNetworkDeviceMode,
+    dismiss: dismissNetworkDeviceTip,
+  } = useNetworkDeviceModeSuggestion({
+    host,
+    connected: status === 'connected',
+    canUpdateHost,
+    onEnable: onEnableNetworkDeviceMode,
+  });
 
   const [compactActionsOpen, setCompactActionsOpen] = useState(false);
   const compactActionsRef = useRef<HTMLDivElement | null>(null);
