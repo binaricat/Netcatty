@@ -39,7 +39,10 @@ export const subscribeNetworkDeviceSuggestionHandled = (
 
 // Mirror of the persisted ids so the cross-window `storage` handler can tell
 // which host ids were newly added and notify listeners with a precise id.
-let knownHandledIds = readHandledIds();
+// Initialized lazily inside the browser-only block below — never at module
+// import, so evaluating this file in the Node test environment (where
+// `localStorage` is undefined) does not throw.
+let knownHandledIds: string[] = [];
 
 const persist = (hostId: string): void => {
   const ids = readHandledIds();
@@ -76,6 +79,7 @@ export const resolveNetworkDeviceSuggestion = (hostId: string): void => {
 // changes there. localStorageAdapter writes the key verbatim, so we can diff the
 // newly added ids and notify listeners for each.
 if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+  knownHandledIds = readHandledIds();
   window.addEventListener('storage', (event) => {
     if (event.key !== null && event.key !== STORAGE_KEY_NETWORK_DEVICE_SUGGEST_HANDLED) return;
     const next = readHandledIds();

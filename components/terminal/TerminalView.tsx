@@ -176,6 +176,26 @@ export function formatTerminalTitleConnectionAddress(host?: TerminalTitleAddress
 /** Height (px) of the one-line "enable Network Device Mode" tip strip. */
 export const NETWORK_DEVICE_TIP_HEIGHT = 28;
 
+/**
+ * Right inset (px) the tip strip must keep clear so it does not paint over — and
+ * swallow clicks meant for — the compact speed-dial action toggle. The toggle is
+ * only rendered in `isCompactActionsMode` (host info hidden, search closed) at
+ * `right-1` with a `w-7` (28px) button, so ~40px clears it plus a small gap.
+ */
+export const NETWORK_DEVICE_TIP_SPEED_DIAL_CLEARANCE = 40;
+
+export function resolveNetworkDeviceTipRightInset({
+  showHostInfoBar,
+  isSearchOpen,
+}: {
+  showHostInfoBar: boolean;
+  isSearchOpen: boolean;
+}): number {
+  // The speed dial only appears when the host info bar is hidden and search is
+  // closed (isCompactActionsMode); otherwise nothing sits in the top-right.
+  return !showHostInfoBar && !isSearchOpen ? NETWORK_DEVICE_TIP_SPEED_DIAL_CLEARANCE : 0;
+}
+
 export function resolveTerminalTopOffsets({
   showHostInfoBar,
   isSearchOpen,
@@ -780,8 +800,12 @@ function TerminalViewInner({ ctx }: { ctx: TerminalViewContext }) {
         >
           {showNetworkDeviceTip && (
             <div
-              className="absolute left-0 right-0 z-20 flex items-center gap-2 px-3 border-b border-border/60 bg-card/95 backdrop-blur-sm text-[11px]"
-              style={{ top: terminalToolbarOffset, height: NETWORK_DEVICE_TIP_HEIGHT }}
+              className="absolute left-0 z-20 flex items-center gap-2 px-3 border-b border-border/60 bg-card/95 backdrop-blur-sm text-[11px]"
+              style={{
+                top: terminalToolbarOffset,
+                right: resolveNetworkDeviceTipRightInset({ showHostInfoBar, isSearchOpen }),
+                height: NETWORK_DEVICE_TIP_HEIGHT,
+              }}
             >
               <Network size={13} className="shrink-0 text-blue-500" aria-hidden="true" />
               <span className="min-w-0 flex-1 truncate text-foreground/90">

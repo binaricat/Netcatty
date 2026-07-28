@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 import {
   formatTerminalTitleConnectionAddress,
   getLineTimestampToggleHostUpdate,
+  resolveNetworkDeviceTipRightInset,
   resolveTerminalRightInset,
   resolveTerminalTopOffsets,
   shouldBlockTerminalReconnectForTarget,
@@ -228,6 +229,14 @@ test("network device tip reserves extra top space below the toolbar", () => {
     resolveTerminalTopOffsets({ showHostInfoBar: false, isSearchOpen: false, networkDeviceTipHeight: 28 }),
     { toolbarOffset: 0, contentTop: "32px" },
   );
+});
+
+test("network device tip clears the compact speed-dial toggle only when it is present", () => {
+  // Speed dial only renders when host info is hidden and search is closed;
+  // reserve right-side room there so the tip cannot cover its click target.
+  assert.equal(resolveNetworkDeviceTipRightInset({ showHostInfoBar: false, isSearchOpen: false }), 40);
+  assert.equal(resolveNetworkDeviceTipRightInset({ showHostInfoBar: true, isSearchOpen: false }), 0);
+  assert.equal(resolveNetworkDeviceTipRightInset({ showHostInfoBar: false, isSearchOpen: true }), 0);
 });
 
 test("hidden host information does not reserve a side gutter for its floating action button", () => {
