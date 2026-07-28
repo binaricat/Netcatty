@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  buildCursorListModelsAgentEnv,
   buildSdkRuntimeModelCacheKey,
   createSdkRuntimeModelCache,
   modelPresetsContainId,
@@ -11,6 +12,59 @@ import {
   shouldUseStoredAgentModel,
 } from './AIChatSidePanelHelpers';
 import type { AgentModelPreset, ExternalAgentConfig } from '../infrastructure/ai/types';
+
+test('buildCursorListModelsAgentEnv injects cli-login auth mode for list-models', () => {
+  assert.deepEqual(
+    buildCursorListModelsAgentEnv({
+      command: '/Users/me/.local/bin/cursor-agent',
+      cursorAuthMode: 'cli-login',
+      env: { HOME: '/Users/me' },
+    }),
+    {
+      HOME: '/Users/me',
+      NETCATTY_CURSOR_AUTH_MODE: 'cli-login',
+      NETCATTY_CURSOR_CLI_BIN: '/Users/me/.local/bin/cursor-agent',
+    },
+  );
+});
+
+test('buildCursorListModelsAgentEnv defaults to api-key without injecting CLI bin', () => {
+  assert.deepEqual(
+    buildCursorListModelsAgentEnv({
+      command: 'cursor',
+      env: {},
+    }),
+    {
+      NETCATTY_CURSOR_AUTH_MODE: 'api-key',
+    },
+  );
+  assert.deepEqual(
+    buildCursorListModelsAgentEnv({
+      command: 'cursor',
+      cursorAuthMode: 'api-key',
+    }),
+    {
+      NETCATTY_CURSOR_AUTH_MODE: 'api-key',
+    },
+  );
+});
+
+test('Cursor auth mode changes invalidate the SDK model cache key', () => {
+  const base = {
+    id: 'managed_cursor',
+    command: '/Users/me/.local/bin/cursor-agent',
+    sdkBackend: 'cursor',
+  };
+  const apiKey = buildSdkRuntimeModelCacheKey({
+    ...base,
+    cursorAuthMode: 'api-key',
+  });
+  const cliLogin = buildSdkRuntimeModelCacheKey({
+    ...base,
+    cursorAuthMode: 'cli-login',
+  });
+  assert.notEqual(apiKey, cliLogin);
+});
 
 test('modelPresetsContainId matches plain and thinking-level model ids', () => {
   const presets: AgentModelPreset[] = [

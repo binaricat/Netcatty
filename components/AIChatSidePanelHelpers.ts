@@ -53,6 +53,27 @@ function normalizeSdkRuntimeModelCatalog(catalog: SdkRuntimeModelCatalog): SdkRu
   };
 }
 
+/**
+ * Inject Cursor auth-mode env for list-models IPC.
+ * Mirrors run-turn `buildAgentEnvWithStoredApiKey` (without decrypting API keys):
+ * persisted `agent.env` strips NETCATTY_CURSOR_* via sanitization, so list-models
+ * must re-inject from `cursorAuthMode` / `command` or main defaults to api-key.
+ */
+export function buildCursorListModelsAgentEnv(agent: {
+  env?: Record<string, string>;
+  cursorAuthMode?: 'cli-login' | 'api-key';
+  command?: string;
+}): Record<string, string> | undefined {
+  const env = { ...(agent.env ?? {}) };
+  const authMode = agent.cursorAuthMode === 'cli-login' ? 'cli-login' : 'api-key';
+  env.NETCATTY_CURSOR_AUTH_MODE = authMode;
+  const cliBin = String(agent.command || '').trim();
+  if (authMode === 'cli-login' && cliBin && cliBin !== 'cursor') {
+    env.NETCATTY_CURSOR_CLI_BIN = cliBin;
+  }
+  return Object.keys(env).length > 0 ? env : undefined;
+}
+
 export function buildSdkRuntimeModelCacheKey(agent: {
   id: string;
   command?: string;
@@ -60,10 +81,16 @@ export function buildSdkRuntimeModelCacheKey(agent: {
   acpCommand?: string;
   env?: Record<string, string>;
   codexRuntime?: 'sdk' | 'app-server';
+  cursorAuthMode?: 'cli-login' | 'api-key';
 }): string {
   const sdkBackend = agent.sdkBackend || agent.acpCommand || '';
   const envHints = MODEL_CACHE_ENV_HINTS.map((key) => `${key}=${agent.env?.[key] ?? ''}`);
-  return [agent.id, sdkBackend, agent.command ?? '', agent.codexRuntime ?? 'sdk', ...envHints].join('\u0000');
+  // cursorAuthMode is the source of truth when NETCATTY_CURSOR_AUTH_MODE was
+  // stripped from persisted env; include it so toggling auth mode busts cache.
+  const cursorAuth = sdkBackend === 'cursor'
+    ? (agent.cursorAuthMode === 'cli-login' ? 'cli-login' : 'api-key')
+    : '';
+  return [agent.id, sdkBackend, agent.command ?? '', agent.codexRuntime ?? 'sdk', cursorAuth, ...envHints].join('\u0000');
 }
 
 export function createSdkRuntimeModelCache(options: SdkRuntimeModelCacheOptions = {}) {

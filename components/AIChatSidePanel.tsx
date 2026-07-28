@@ -61,6 +61,7 @@ import { useAIPermissionGrantsState } from '../application/state/useAIPermission
 import { useConversationExport } from './ai/hooks/useConversationExport';
 import type { AIChatSidePanelProps } from './AIChatSidePanel.types';
 import {
+  buildCursorListModelsAgentEnv,
   buildSdkRuntimeModelCacheKey,
   sdkRuntimeModelCache,
   generateId,
@@ -688,11 +689,17 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     if (!agent) return null;
     const sdkBackend = getExternalAgentSdkBackend(agent);
     if (!sdkBackend) return null;
+    // Cursor: re-inject auth mode for list-models (same as run-turn). Persisted
+    // agent.env strips NETCATTY_CURSOR_*; without this, main defaults to api-key
+    // and the UI falls back to curated CURSOR_MODEL_PRESETS (#2562).
+    const agentEnv = sdkBackend === 'cursor'
+      ? buildCursorListModelsAgentEnv(agent)
+      : agent.env;
     return {
       agentId: agent.id,
-      cacheKey: buildSdkRuntimeModelCacheKey(agent),
+      cacheKey: buildSdkRuntimeModelCacheKey({ ...agent, env: agentEnv }),
       sdkBackend,
-      agentEnv: agent.env,
+      agentEnv,
       agentCommand: getManualAgentCommand(agent),
       codexRuntime: sdkBackend === 'codex' ? (agent.codexRuntime ?? 'sdk') : undefined,
     };
