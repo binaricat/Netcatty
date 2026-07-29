@@ -52,8 +52,9 @@ test('script code editor restores Electron clipboard paste for Cmd/Ctrl+V and ri
   assert.match(codeEditorSource, /buildMonacoPasteEdits/);
   assert.match(codeEditorSource, /KeyMod\.CtrlCmd \| monacoInstance\.KeyCode\.KeyV/);
   assert.match(codeEditorSource, /contextmenu:\s*true/);
-  assert.match(codeEditorSource, /contextMenuGroupId:\s*'9_cutcopypaste'/);
-  assert.match(codeEditorSource, /editor\.action\.clipboardPasteAction/);
+  assert.match(codeEditorSource, /registerBridgePasteForEditor/);
+  assert.match(codeEditorSource, /execCommand\('paste'\)/);
+  assert.doesNotMatch(codeEditorSource, /contextMenuGroupId:\s*'9_cutcopypaste'/);
 });
 
 test('script paste binding is editor-scoped, disposable, and skips find-widget text focus', () => {
