@@ -55,6 +55,7 @@ import { buildExternalAgentHistoryMessagesForBridge } from './ai/externalAgentHi
 import { canSendWithAgent, findEnabledExternalAgent } from './ai/agentSendEligibility';
 import { registerGrantPersister } from '../infrastructure/ai/shared/approvalGate';
 import { setupCodexAppServerInteractionBridge } from '../infrastructure/ai/shared/codexAppServerInteractions';
+import { setupOpenCodeQuestionInteractionBridge } from '../infrastructure/ai/shared/openCodeQuestionInteractions';
 import { stopAgentTurn } from '../infrastructure/ai/harness/agentStop';
 import { getAgentRuntime } from '../infrastructure/ai/harness/globalAgentRuntime';
 import { useAIPermissionGrantsState } from '../application/state/useAIPermissionGrantsState';
@@ -1207,7 +1208,14 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     return registerGrantPersister((rule) => { addGrant(rule); });
   }, [addGrant]);
 
-  useEffect(() => setupCodexAppServerInteractionBridge(), []);
+  useEffect(() => {
+    const teardownCodex = setupCodexAppServerInteractionBridge();
+    const teardownOpenCode = setupOpenCodeQuestionInteractionBridge();
+    return () => {
+      teardownCodex();
+      teardownOpenCode();
+    };
+  }, []);
 
   const handleStop = useCallback(() => {
     if (!activeSessionId) return;

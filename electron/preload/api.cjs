@@ -1597,6 +1597,19 @@ function createPreloadApi(ctx) {
   respondCodexAppServerInteraction: async (payload) => {
     return ipcRenderer.invoke("netcatty:ai:codex-app-server:interaction-response", payload);
   },
+  onOpenCodeQuestionRequest: (cb) => {
+    const handler = (_event, payload) => cb(payload);
+    ipcRenderer.on("netcatty:ai:opencode:question-request", handler);
+    return () => ipcRenderer.removeListener("netcatty:ai:opencode:question-request", handler);
+  },
+  onOpenCodeQuestionCleared: (cb) => {
+    const handler = (_event, payload) => cb(payload);
+    ipcRenderer.on("netcatty:ai:opencode:question-cleared", handler);
+    return () => ipcRenderer.removeListener("netcatty:ai:opencode:question-cleared", handler);
+  },
+  respondOpenCodeQuestion: async (payload) => {
+    return ipcRenderer.invoke("netcatty:ai:opencode:question-response", payload);
+  },
   aiSdkAgentCancel: async (requestId, chatSessionId) => {
     return ipcRenderer.invoke("netcatty:ai:sdk-agent:cancel", { requestId, chatSessionId });
   },

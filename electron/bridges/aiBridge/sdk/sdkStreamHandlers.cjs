@@ -5,6 +5,12 @@ const { buildSdkAgentEnv } = require("./env.cjs");
 const { buildInjectedMcpServers } = require("./injectMcp.cjs");
 const { createStreamEmitter } = require("./emit.cjs");
 const { buildNetcattySkillsOpenCodePathAllowlist } = require("./netcattySkillsOpenCodePermissions.cjs");
+const {
+  answersRecordToOpenCodeAnswers,
+  normalizeOpenCodeQuestions,
+  rejectOpenCodeQuestionHttp,
+  replyOpenCodeQuestionHttp,
+} = require("./opencodeDriver.cjs");
 const { getToolCliStateDir } = require("../../../cli/discoveryPath.cjs");
 const tempDirBridge = require("../../tempDirBridge.cjs");
 const { realpathSync } = require("node:fs");
@@ -403,11 +409,35 @@ function buildSdkTurnPrompt({
 
 function registerSdkStreamHandlers(ctx) {
   with (ctx) {
-    // chatSessionId -> { sessionId } for resume; controller per requestId.
     const sdkActiveStreams = new Map(); // requestId -> AbortController
     const sdkRequestSessions = new Map(); // requestId -> chatSessionId
     const sdkRequestRuntimes = new Map(); // requestId -> { backendKey, codexRuntime }
     const sdkSessionIds = new Map(); // chatSessionId -> last sessionId
+    // OpenCode mid-turn question handshake (issue #2585).
+    const openCodeQuestions = new Map(); // interactionId -> pending question
+    const openCodeQuestionsByRequestId = new Map(); // requestId -> interactionId
+
+    const clearOpenCodeQuestion = (interactionId, sender) => {
+      const pending = openCodeQuestions.get(interactionId);
+      if (!pending) return;
+      openCodeQuestions.delete(interactionId);
+      openCodeQuestionsByRequestId.delete(pending.requestId);
+      const target = sender || pending.sender;
+      if (target && !target.isDestroyed?.()) {
+        safeSend(target, "netcatty:ai:opencode:question-cleared", {
+          interactionIds: [interactionId],
+          chatSessionId: pending.chatSessionId,
+        });
+      }
+    };
+
+    const clearOpenCodeQuestionsForChat = (chatSessionId) => {
+      for (const [interactionId, pending] of Array.from(openCodeQuestions.entries())) {
+        if (pending.chatSessionId !== chatSessionId) continue;
+        clearOpenCodeQuestion(interactionId);
+      }
+    };
+
     const codexAppServerRuntime = new CodexAppServerRuntime({
       appVersion: electronModule?.app?.getVersion?.() || "0.0.0",
       sendInteractionRequest(payload, context) {
@@ -650,6 +680,41 @@ function registerSdkStreamHandlers(ctx) {
             resumeThreadId: resumeSessionId,
             attachments: stagedAttachments,
             sender: event.sender,
+            onOpenCodeQuestionAsk: backendKey === "opencode"
+              ? (ask) => {
+                const questionRequestId = String(ask?.requestId || "");
+                if (!questionRequestId || !ask?.baseUrl) return;
+                const existingId = openCodeQuestionsByRequestId.get(questionRequestId);
+                if (existingId) clearOpenCodeQuestion(existingId, event.sender);
+                const interactionId = `opencode_question_${questionRequestId}`;
+                const questions = normalizeOpenCodeQuestions(ask.questions);
+                openCodeQuestions.set(interactionId, {
+                  interactionId,
+                  requestId: questionRequestId,
+                  chatSessionId,
+                  baseUrl: ask.baseUrl,
+                  directory: ask.directory,
+                  questions,
+                  sender: event.sender,
+                });
+                openCodeQuestionsByRequestId.set(questionRequestId, interactionId);
+                safeSend(event.sender, "netcatty:ai:opencode:question-request", {
+                  interactionId,
+                  source: "opencode",
+                  kind: "user-input",
+                  requestId: questionRequestId,
+                  chatSessionId,
+                  questions,
+                });
+              }
+              : undefined,
+            onOpenCodeQuestionSettled: backendKey === "opencode"
+              ? (payload) => {
+                const questionRequestId = String(payload?.requestId || "");
+                const interactionId = openCodeQuestionsByRequestId.get(questionRequestId);
+                if (interactionId) clearOpenCodeQuestion(interactionId, event.sender);
+              }
+              : undefined,
           };
           const result = codexRuntime === "app-server"
             ? await codexAppServerRuntime.runTurn(commonTurnContext)
@@ -664,6 +729,7 @@ function registerSdkStreamHandlers(ctx) {
           emitter.emitError(err?.message || String(err));
           return { ok: false, error: err?.message || String(err) };
         } finally {
+          clearOpenCodeQuestionsForChat(chatSessionId);
           sdkActiveStreams.delete(requestId);
           sdkRequestSessions.delete(requestId);
           sdkRequestRuntimes.delete(requestId);
@@ -855,6 +921,7 @@ function registerSdkStreamHandlers(ctx) {
       mcpServerBridge.cancelWorkerBackgroundJobsForSession?.(effectiveChatSessionId);
       mcpServerBridge.clearPendingApprovals(effectiveChatSessionId);
       void mcpServerBridge.cancelSftpOpsForSession?.(effectiveChatSessionId);
+      if (effectiveChatSessionId) clearOpenCodeQuestionsForChat(effectiveChatSessionId);
       await codexAppServerRuntime.cancelTurn(requestId);
       const controller = sdkActiveStreams.get(requestId);
       if (controller) {
@@ -870,6 +937,7 @@ function registerSdkStreamHandlers(ctx) {
       mcpServerBridge.cancelPtyExecsForSession(chatSessionId);
       mcpServerBridge.cancelWorkerBackgroundJobsForSession?.(chatSessionId);
       deleteSdkSessionKeysForChat(sdkSessionIds, chatSessionId);
+      clearOpenCodeQuestionsForChat(chatSessionId);
       await codexAppServerRuntime.cleanupChatSession(chatSessionId);
       await mcpServerBridge.cleanupScopedMetadata(chatSessionId);
       return { ok: true };
@@ -879,6 +947,36 @@ function registerSdkStreamHandlers(ctx) {
       if (!validateSender(event)) return { ok: false, error: "Unauthorized IPC sender" };
       const ok = codexAppServerRuntime.respondInteraction(payload?.interactionId, payload, event.sender);
       return ok ? { ok: true } : { ok: false, error: "Interaction not found" };
+    });
+
+    ipcMain.handle("netcatty:ai:opencode:question-response", async (event, payload) => {
+      if (!validateSender(event)) return { ok: false, error: "Unauthorized IPC sender" };
+      const interactionId = String(payload?.interactionId || "");
+      const pending = openCodeQuestions.get(interactionId);
+      if (!pending) return { ok: false, error: "OpenCode question not found" };
+      try {
+        const reject = payload?.reject === true
+          || !payload?.answers
+          || (typeof payload.answers === "object" && Object.keys(payload.answers).length === 0);
+        if (reject) {
+          await rejectOpenCodeQuestionHttp({
+            baseUrl: pending.baseUrl,
+            requestId: pending.requestId,
+            directory: pending.directory,
+          });
+        } else {
+          await replyOpenCodeQuestionHttp({
+            baseUrl: pending.baseUrl,
+            requestId: pending.requestId,
+            directory: pending.directory,
+            answers: answersRecordToOpenCodeAnswers(pending.questions, payload.answers),
+          });
+        }
+        clearOpenCodeQuestion(interactionId, event.sender);
+        return { ok: true };
+      } catch (error) {
+        return { ok: false, error: error?.message || String(error) };
+      }
     });
 
     ipcMain.handle("netcatty:ai:codex-app-server:status", async (event, payload) => {

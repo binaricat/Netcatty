@@ -4,12 +4,15 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const {
+  answersRecordToOpenCodeAnswers,
   buildOpenCodeConfig,
   buildOpenCodePromptParts,
+  buildOpenCodeQuestionReplyUrl,
   classifyOpenCodeSpawnError,
   createOpenCodeProcessEnv,
   listOpenCodeModels,
   mapOpenCodeModels,
+  normalizeOpenCodeQuestions,
   OPENCODE_LIST_SERVER_IDLE_MS,
   parseOpenCodeModel,
   resetOpenCodeListServerPool,
@@ -26,6 +29,8 @@ function collector() {
     reasoning: (d) => events.push({ k: "reasoning", d }),
     toolCall: (name, args, id) => events.push({ k: "toolCall", name, args, id }),
     toolResult: (id, out, name) => events.push({ k: "toolResult", id, out, name }),
+    questionAsk: (payload) => events.push({ k: "questionAsk", payload }),
+    questionSettled: (payload) => events.push({ k: "questionSettled", payload }),
     status: (m) => events.push({ k: "status", m }),
     sessionId: (s) => events.push({ k: "sessionId", s }),
     emitDone: () => events.push({ k: "done" }),
@@ -56,7 +61,7 @@ test("buildOpenCodeConfig isolates local tools and injects Netcatty MCP", () => 
   assert.equal(cfg.permission.edit, "deny");
   assert.equal(cfg.permission.bash, "deny");
   assert.equal(cfg.permission.webfetch, "deny");
-  assert.equal(cfg.permission.question, "deny");
+  assert.equal(cfg.permission.question, "allow");
   assert.equal(cfg.permission.skill, "allow");
   assert.equal(cfg.permission.external_directory["*"], "deny");
   // Native OpenCode skill directories stay readable in MCP mode (issue #1939).
@@ -916,4 +921,157 @@ test("listOpenCodeModels does not share a pooled server across different catalog
 test("classifyOpenCodeSpawnError recognizes missing opencode CLI", () => {
   assert.equal(classifyOpenCodeSpawnError(Object.assign(new Error("spawn opencode ENOENT"), { code: "ENOENT" })).isSpawnEnoent, true);
   assert.equal(classifyOpenCodeSpawnError(new Error("other")).isSpawnEnoent, false);
+});
+
+test("normalizeOpenCodeQuestions maps options and custom answers into UI shape", () => {
+  assert.deepEqual(normalizeOpenCodeQuestions([
+    {
+      header: "Mode",
+      question: "Which mode?",
+      custom: true,
+      options: [{ label: "Safe", description: "Read-only" }],
+    },
+    {
+      id: "keep-me",
+      question: "Free text?",
+      options: [],
+    },
+  ]), [
+    {
+      id: "q0",
+      header: "Mode",
+      question: "Which mode?",
+      isOther: true,
+      isSecret: false,
+      options: [{ label: "Safe", description: "Read-only" }],
+    },
+    {
+      id: "keep-me",
+      header: "",
+      question: "Free text?",
+      isOther: false,
+      isSecret: false,
+      options: null,
+    },
+  ]);
+});
+
+test("answersRecordToOpenCodeAnswers preserves question order for the reply API", () => {
+  assert.deepEqual(answersRecordToOpenCodeAnswers(
+    [{ id: "q0" }, { id: "q1" }],
+    { q1: { answers: ["second"] }, q0: { answers: ["first", "also"] } },
+  ), [["first", "also"], ["second"]]);
+  assert.deepEqual(answersRecordToOpenCodeAnswers([{ id: "q0" }], {}), [[]]);
+});
+
+test("buildOpenCodeQuestionReplyUrl targets the session-local reply endpoint", () => {
+  assert.equal(
+    buildOpenCodeQuestionReplyUrl({
+      baseUrl: "http://127.0.0.1:4096/",
+      requestId: "req/1",
+      directory: "/tmp/proj",
+      action: "reply",
+    }),
+    "http://127.0.0.1:4096/question/req%2F1/reply?directory=%2Ftmp%2Fproj",
+  );
+  assert.equal(
+    buildOpenCodeQuestionReplyUrl({
+      baseUrl: "http://127.0.0.1:4096",
+      requestId: "req-2",
+      action: "reject",
+    }),
+    "http://127.0.0.1:4096/question/req-2/reject",
+  );
+});
+
+test("translateOpenCodeEvent surfaces question.asked and question.v2.asked for the UI bridge", () => {
+  const { events, emitter } = collector();
+  const state = {};
+  const asked = translateOpenCodeEvent(
+    {
+      payload: {
+        type: "question.asked",
+        properties: {
+          id: "req-1",
+          sessionID: "sess-1",
+          questions: [{ header: "Pick", question: "Continue?", options: [{ label: "Yes", description: "" }] }],
+          tool: { messageID: "m1", callID: "c1" },
+        },
+      },
+    },
+    emitter,
+    state,
+  );
+  const askedV2 = translateOpenCodeEvent(
+    {
+      type: "question.v2.asked",
+      properties: {
+        id: "req-2",
+        sessionID: "sess-1",
+        questions: [{ header: "V2", question: "Ready?", options: [] }],
+      },
+    },
+    emitter,
+    state,
+  );
+  translateOpenCodeEvent(
+    { payload: { type: "question.replied", properties: { sessionID: "sess-1", requestID: "req-1", answers: [["Yes"]] } } },
+    emitter,
+    state,
+  );
+  translateOpenCodeEvent(
+    { payload: { type: "question.v2.rejected", properties: { sessionID: "sess-1", requestID: "req-2" } } },
+    emitter,
+    state,
+  );
+
+  assert.equal(asked.content, true);
+  assert.equal(askedV2.content, true);
+  assert.deepEqual(events, [
+    {
+      k: "questionAsk",
+      payload: {
+        requestId: "req-1",
+        sessionId: "sess-1",
+        questions: [{ header: "Pick", question: "Continue?", options: [{ label: "Yes", description: "" }] }],
+        tool: { messageID: "m1", callID: "c1" },
+      },
+    },
+    {
+      k: "questionAsk",
+      payload: {
+        requestId: "req-2",
+        sessionId: "sess-1",
+        questions: [{ header: "V2", question: "Ready?", options: [] }],
+        tool: undefined,
+      },
+    },
+    { k: "questionSettled", payload: { requestId: "req-1", sessionId: "sess-1", status: "replied" } },
+    { k: "questionSettled", payload: { requestId: "req-2", sessionId: "sess-1", status: "rejected" } },
+  ]);
+});
+
+test("translateOpenCodeEvent does not emit a stuck spinner tool-call for question tools", () => {
+  const { events, emitter } = collector();
+  translateOpenCodeEvent(
+    {
+      payload: {
+        type: "message.part.updated",
+        properties: {
+          part: {
+            type: "tool",
+            callID: "q-call",
+            tool: "question",
+            state: {
+              status: "running",
+              input: { questions: [{ question: "Choose", header: "A", options: [] }] },
+            },
+          },
+        },
+      },
+    },
+    emitter,
+    {},
+  );
+  assert.deepEqual(events, []);
 });

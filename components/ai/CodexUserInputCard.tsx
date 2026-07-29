@@ -3,8 +3,11 @@ import { MessageCircleQuestion } from 'lucide-react';
 import { useI18n } from '../../application/i18n/I18nProvider';
 import { Button } from '../ui/button';
 import type { CodexAppServerInteraction } from '../../infrastructure/ai/shared/codexAppServerInteractions';
+import type { OpenCodeQuestionInteraction } from '../../infrastructure/ai/shared/openCodeQuestionInteractions';
 
-type UserInputInteraction = Extract<CodexAppServerInteraction, { kind: 'user-input' }>;
+type UserInputInteraction =
+  | Extract<CodexAppServerInteraction, { kind: 'user-input' }>
+  | OpenCodeQuestionInteraction;
 
 export const CodexUserInputCard: React.FC<{
   interaction: UserInputInteraction;
@@ -18,6 +21,22 @@ export const CodexUserInputCard: React.FC<{
     () => questions.every((question) => String(values[question.id] || '').trim().length > 0),
     [questions, values],
   );
+  const isOpenCode = interaction.source === 'opencode';
+  const title = isOpenCode
+    ? t('ai.opencode.question.title')
+    : t('ai.codex.appServer.userInput.title');
+  const description = isOpenCode
+    ? t('ai.opencode.question.description')
+    : t('ai.codex.appServer.userInput.description');
+  const otherPlaceholder = isOpenCode
+    ? t('ai.opencode.question.other')
+    : t('ai.codex.appServer.userInput.other');
+  const skipLabel = isOpenCode
+    ? t('ai.opencode.question.skip')
+    : t('ai.codex.appServer.userInput.skip');
+  const submitLabel = isOpenCode
+    ? t('ai.opencode.question.submit')
+    : t('ai.codex.appServer.userInput.submit');
 
   const submit = () => {
     if (!complete) return;
@@ -34,9 +53,9 @@ export const CodexUserInputCard: React.FC<{
       <div className="flex items-start gap-2">
         <MessageCircleQuestion size={16} className="mt-0.5 shrink-0 text-blue-500" />
         <div className="min-w-0">
-          <div className="text-sm font-medium">{t('ai.codex.appServer.userInput.title')}</div>
+          <div className="text-sm font-medium">{title}</div>
           <div className="text-xs text-muted-foreground leading-5">
-            {t('ai.codex.appServer.userInput.description')}
+            {description}
           </div>
         </div>
       </div>
@@ -74,7 +93,7 @@ export const CodexUserInputCard: React.FC<{
                   type={question.isSecret ? 'password' : 'text'}
                   value={question.options.some((option) => option.label === values[question.id]) ? '' : (values[question.id] || '')}
                   onChange={(event) => setValues((current) => ({ ...current, [question.id]: event.target.value }))}
-                  placeholder={t('ai.codex.appServer.userInput.other')}
+                  placeholder={otherPlaceholder}
                   className="h-8 w-full rounded-md border border-input bg-background px-2.5 text-xs outline-none focus-visible:ring-1 focus-visible:ring-ring"
                 />
               ) : null}
@@ -98,10 +117,10 @@ export const CodexUserInputCard: React.FC<{
 
       <div className="flex justify-end gap-2">
         <Button variant="ghost" size="sm" onClick={onSkip}>
-          {t('ai.codex.appServer.userInput.skip')}
+          {skipLabel}
         </Button>
         <Button size="sm" disabled={!complete} onClick={submit}>
-          {t('ai.codex.appServer.userInput.submit')}
+          {submitLabel}
         </Button>
       </div>
     </div>

@@ -189,6 +189,8 @@ const DRIVER_REGISTRY = {
         resumeSessionId: ctx.resumeSessionId,
         emitter: ctx.emitter,
         abortController: ctx.abortController,
+        onQuestionAsk: ctx.onOpenCodeQuestionAsk,
+        onQuestionSettled: ctx.onOpenCodeQuestionSettled,
       });
     },
     async listModels(ctx) {

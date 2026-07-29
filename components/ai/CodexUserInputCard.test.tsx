@@ -38,3 +38,35 @@ test('CodexUserInputCard renders options, free-form input, and auto-resolution g
   assert.match(markup, /Enter another answer/);
   assert.match(markup, /continue automatically/);
 });
+
+test('CodexUserInputCard uses OpenCode copy for opencode question interactions', () => {
+  const markup = renderToStaticMarkup(
+    React.createElement(
+      I18nProvider,
+      { locale: 'en' },
+      React.createElement(CodexUserInputCard, {
+        interaction: {
+          interactionId: 'opencode_question_req-1',
+          source: 'opencode',
+          kind: 'user-input',
+          requestId: 'req-1',
+          chatSessionId: 'chat-1',
+          questions: [{
+            id: 'q0',
+            header: 'Pick',
+            question: 'Continue?',
+            isOther: false,
+            isSecret: false,
+            options: [{ label: 'Yes', description: 'Keep going' }],
+          }],
+        },
+        onSubmit: () => {},
+        onSkip: () => {},
+      }),
+    ),
+  );
+  assert.match(markup, /OpenCode needs your input/);
+  assert.match(markup, /Continue\?/);
+  assert.match(markup, /Keep going/);
+  assert.doesNotMatch(markup, /Codex needs your input/);
+});

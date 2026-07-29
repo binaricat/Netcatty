@@ -59,15 +59,85 @@ function toOpenCodeMcpConfig(injectedMcpServers) {
   return mcp;
 }
 
+function normalizeOpenCodeQuestions(rawQuestions) {
+  return (Array.isArray(rawQuestions) ? rawQuestions : []).map((question, index) => {
+    const options = Array.isArray(question?.options)
+      ? question.options
+        .map((option) => ({
+          label: String(option?.label || ""),
+          description: String(option?.description || ""),
+        }))
+        .filter((option) => option.label)
+      : [];
+    return {
+      id: String(question?.id || `q${index}`),
+      header: String(question?.header || ""),
+      question: String(question?.question || ""),
+      isOther: Boolean(question?.custom),
+      isSecret: false,
+      options: options.length > 0 ? options : null,
+    };
+  });
+}
+
+function answersRecordToOpenCodeAnswers(questions, answersRecord) {
+  return (Array.isArray(questions) ? questions : []).map((question) => {
+    const entry = answersRecord?.[question?.id];
+    const answers = entry?.answers;
+    return Array.isArray(answers) ? answers.map((value) => String(value)) : [];
+  });
+}
+
+function buildOpenCodeQuestionReplyUrl({ baseUrl, requestId, directory, action }) {
+  const url = new URL(`question/${encodeURIComponent(String(requestId || ""))}/${action}`, String(baseUrl || "").replace(/\/?$/, "/"));
+  if (directory) url.searchParams.set("directory", String(directory));
+  return url.toString();
+}
+
+async function replyOpenCodeQuestionHttp({ baseUrl, requestId, answers, directory, fetchImpl } = {}) {
+  const fetchFn = fetchImpl || fetch;
+  const response = await fetchFn(buildOpenCodeQuestionReplyUrl({
+    baseUrl,
+    requestId,
+    directory,
+    action: "reply",
+  }), {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ answers: Array.isArray(answers) ? answers : [] }),
+  });
+  if (!response?.ok) {
+    const text = typeof response?.text === "function" ? await response.text().catch(() => "") : "";
+    throw new Error(text || `OpenCode question reply failed (${response?.status || "unknown"})`);
+  }
+  return true;
+}
+
+async function rejectOpenCodeQuestionHttp({ baseUrl, requestId, directory, fetchImpl } = {}) {
+  const fetchFn = fetchImpl || fetch;
+  const response = await fetchFn(buildOpenCodeQuestionReplyUrl({
+    baseUrl,
+    requestId,
+    directory,
+    action: "reject",
+  }), {
+    method: "POST",
+  });
+  if (!response?.ok) {
+    const text = typeof response?.text === "function" ? await response.text().catch(() => "") : "";
+    throw new Error(text || `OpenCode question reject failed (${response?.status || "unknown"})`);
+  }
+  return true;
+}
+
 function buildOpenCodeConfig({ model, injectedMcpServers, toolIntegrationMode, skillsPathAllowlist } = {}) {
   const allowBash = toolIntegrationMode === "skills";
   const permission = {
     edit: "deny",
     bash: allowBash ? "allow" : "deny",
     webfetch: "deny",
-    // Netcatty does not yet bridge OpenCode's question reply API to the UI.
-    // Leaving it enabled creates a tool call that can never be completed.
-    question: "deny",
+    // Host UI answers via question.asked → /question/{id}/reply (issue #2585).
+    question: "allow",
     // Keep external access locked down, but let OpenCode's native skills
     // (e.g. ~/.opencode/skills, ~/.config/opencode/skills) read their own
     // reference files in every mode (issue #1939).
@@ -268,6 +338,11 @@ function translateOpenCodeEvent(event, emitter, state = {}) {
       }
       const callId = part.callID || part.id || "";
       const toolName = part.tool || "tool";
+      // question is completed through question.asked + the reply API; emitting a
+      // tool-call row leaves a non-interactive spinner (issue #2585).
+      if (toolName === "question") {
+        return { idle: false, error: false, content: false };
+      }
       const input = part.state?.input || {};
       if (part.state?.status === "running" || part.state?.status === "pending") {
         state.toolCalls = state.toolCalls || new Set();
@@ -292,6 +367,38 @@ function translateOpenCodeEvent(event, emitter, state = {}) {
       }
     }
     return { idle: false, error: false, content: part.type === "tool" };
+  }
+
+  if (payload.type === "question.asked" || payload.type === "question.v2.asked") {
+    const properties = payload.properties || {};
+    const requestId = properties.id || properties.requestID || properties.requestId || null;
+    if (requestId) {
+      emitter.questionAsk?.({
+        requestId: String(requestId),
+        sessionId: properties.sessionID || properties.sessionId || null,
+        questions: Array.isArray(properties.questions) ? properties.questions : [],
+        tool: properties.tool,
+      });
+    }
+    return { idle: false, error: false, content: Boolean(requestId) };
+  }
+
+  if (
+    payload.type === "question.replied"
+    || payload.type === "question.v2.replied"
+    || payload.type === "question.rejected"
+    || payload.type === "question.v2.rejected"
+  ) {
+    const properties = payload.properties || {};
+    const requestId = properties.requestID || properties.requestId || properties.id || null;
+    if (requestId) {
+      emitter.questionSettled?.({
+        requestId: String(requestId),
+        sessionId: properties.sessionID || properties.sessionId || null,
+        status: String(payload.type).includes("reject") ? "rejected" : "replied",
+      });
+    }
+    return { idle: false, error: false, content: false };
   }
 
   if (payload.type === "message.part.delta") {
@@ -536,6 +643,7 @@ function createStopWait() {
 async function runOpenCodeTurn({
   prompt, systemPrompt, attachments, cwd, model, injectedMcpServers, toolIntegrationMode,
   skillsPathAllowlist, resumeSessionId, env, binPath, emitter, abortController, openCodeFactory,
+  onQuestionAsk, onQuestionSettled, fetchImpl,
 }) {
   const config = buildOpenCodeConfig({ model, injectedMcpServers, toolIntegrationMode, skillsPathAllowlist });
   let opencode = null;
@@ -544,16 +652,57 @@ async function runOpenCodeTurn({
   let failed = false;
   let abortSent = false;
   let removeAbortListener = null;
-  const state = { reasoningOpen: false };
+  let serverUrl = null;
   const directoryQuery = cwd ? { directory: cwd } : undefined;
+  const pendingQuestionIds = new Set();
+  const state = { reasoningOpen: false };
+  const turnEmitter = {
+    ...emitter,
+    questionAsk(payload) {
+      if (!payload?.requestId) return;
+      pendingQuestionIds.add(String(payload.requestId));
+      onQuestionAsk?.({
+        ...payload,
+        baseUrl: serverUrl,
+        directory: cwd || undefined,
+      });
+      emitter.questionAsk?.(payload);
+    },
+    questionSettled(payload) {
+      if (payload?.requestId) pendingQuestionIds.delete(String(payload.requestId));
+      onQuestionSettled?.(payload);
+      emitter.questionSettled?.(payload);
+    },
+  };
+
+  const rejectPendingQuestions = async () => {
+    if (!serverUrl || pendingQuestionIds.size === 0) return;
+    const ids = Array.from(pendingQuestionIds);
+    pendingQuestionIds.clear();
+    await Promise.all(ids.map(async (requestId) => {
+      try {
+        await rejectOpenCodeQuestionHttp({
+          baseUrl: serverUrl,
+          requestId,
+          directory: cwd || undefined,
+          fetchImpl,
+        });
+      } catch { /* best-effort cleanup */ }
+      try {
+        onQuestionSettled?.({ requestId, sessionId, status: "rejected" });
+      } catch { /* ignore */ }
+    }));
+  };
 
   try {
     const factory = openCodeFactory || ((options) => createDefaultOpenCode(options, env, binPath));
     opencode = await factory(await withOpenCodeServerPort({ config, signal: abortController?.signal }));
+    serverUrl = opencode?.server?.url || null;
     const { client } = opencode;
     const abortOpenCode = async () => {
       if (abortSent) return;
       abortSent = true;
+      await rejectPendingQuestions();
       if (sessionId) {
         try { await client.session.abort({ path: { id: sessionId }, query: directoryQuery }); } catch {}
       }
@@ -574,7 +723,7 @@ async function runOpenCodeTurn({
       sessionId = created?.data?.id || created?.id || null;
     }
     if (!sessionId) throw new Error("OpenCode did not create a session");
-    emitter.sessionId(sessionId);
+    turnEmitter.sessionId(sessionId);
 
     const stopEventLoopWait = createStopWait();
     const eventLoop = (async () => {
@@ -600,7 +749,7 @@ async function runOpenCodeTurn({
           if (abortController?.signal?.aborted) break;
           const eventSessionId = getOpenCodeSessionIdFromEvent(event);
           if (eventSessionId && eventSessionId !== sessionId) continue;
-          const result = translateOpenCodeEvent(event, emitter, state);
+          const result = translateOpenCodeEvent(event, turnEmitter, state);
           if (result.content) hasContent = true;
           if (result.error) {
             failed = true;
@@ -660,21 +809,22 @@ async function runOpenCodeTurn({
     }
 
     if (!hasContent && !failed && !abortController?.signal?.aborted) {
-      emitter.emitError("OpenCode returned an empty response. Run `opencode` in a terminal to configure authentication and models.");
+      turnEmitter.emitError("OpenCode returned an empty response. Run `opencode` in a terminal to configure authentication and models.");
       return { sessionId };
     }
-    if (!failed && !abortController?.signal?.aborted) emitter.emitDone();
+    if (!failed && !abortController?.signal?.aborted) turnEmitter.emitDone();
     return { sessionId };
   } catch (error) {
     const classified = classifyOpenCodeSpawnError(error);
     if (classified.isSpawnEnoent) {
-      emitter.emitError("OpenCode CLI not found or not runnable. Install OpenCode and ensure `opencode` is on PATH, or set a custom path in Settings.");
+      turnEmitter.emitError("OpenCode CLI not found or not runnable. Install OpenCode and ensure `opencode` is on PATH, or set a custom path in Settings.");
     } else {
-      emitter.emitError(extractOpenCodeErrorMessage(error) || classified.message || "OpenCode turn failed");
+      turnEmitter.emitError(extractOpenCodeErrorMessage(error) || classified.message || "OpenCode turn failed");
     }
     return { sessionId };
   } finally {
     removeAbortListener?.();
+    await rejectPendingQuestions();
     closeOpenCodeInstance(opencode);
   }
 }
@@ -910,15 +1060,20 @@ async function listOpenCodeModels({ env, binPath, openCodeFactory, abortControll
 }
 
 module.exports = {
+  answersRecordToOpenCodeAnswers,
   buildOpenCodeConfig,
   buildOpenCodePromptParts,
+  buildOpenCodeQuestionReplyUrl,
   classifyOpenCodeSpawnError,
   closeOpenCodeInstance,
   createOpenCodeProcessEnv,
   withOpenCodeProcessEnv,
   listOpenCodeModels,
   mapOpenCodeModels,
+  normalizeOpenCodeQuestions,
   parseOpenCodeModel,
+  rejectOpenCodeQuestionHttp,
+  replyOpenCodeQuestionHttp,
   resolveUsableOpenCodeBinPath,
   resetOpenCodeListServerPool,
   runOpenCodeTurn,

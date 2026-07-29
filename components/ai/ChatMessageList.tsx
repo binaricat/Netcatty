@@ -50,6 +50,13 @@ import {
   type CodexAppServerInteraction,
 } from '../../infrastructure/ai/shared/codexAppServerInteractions';
 import {
+  onOpenCodeQuestionInteraction,
+  onOpenCodeQuestionInteractionCleared,
+  replayPendingOpenCodeQuestionInteractions,
+  respondOpenCodeQuestion,
+  type OpenCodeQuestionInteraction,
+} from '../../infrastructure/ai/shared/openCodeQuestionInteractions';
+import {
   buildGrantsFromApproval,
   resolveCapabilityId,
 } from '../../infrastructure/ai/harness/permissionGrants';
@@ -160,6 +167,7 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({
   const [pendingApprovals, setPendingApprovals] = useState<Map<string, ApprovalRequest>>(new Map());
   const [resolvedApprovals, setResolvedApprovals] = useState<Map<string, boolean>>(new Map());
   const [pendingCodexInteractions, setPendingCodexInteractions] = useState<Map<string, CodexAppServerInteraction>>(new Map());
+  const [pendingOpenCodeQuestions, setPendingOpenCodeQuestions] = useState<Map<string, OpenCodeQuestionInteraction>>(new Map());
 
   useEffect(() => {
     setResolvedApprovals((previous) => pruneResolvedApprovals(previous, messages));
@@ -204,6 +212,23 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({
     });
   }), []);
 
+  useEffect(() => {
+    const handler = (interaction: OpenCodeQuestionInteraction) => {
+      setPendingOpenCodeQuestions((current) => new Map(current).set(interaction.interactionId, interaction));
+    };
+    const unsubscribe = onOpenCodeQuestionInteraction(handler);
+    replayPendingOpenCodeQuestionInteractions(handler);
+    return unsubscribe;
+  }, []);
+
+  useEffect(() => onOpenCodeQuestionInteractionCleared((interactionIds) => {
+    setPendingOpenCodeQuestions((current) => {
+      const next = new Map(current);
+      for (const interactionId of interactionIds) next.delete(interactionId);
+      return next;
+    });
+  }), []);
+
   const handleApproveOnce = useCallback((toolCallId: string) => {
     const request = pendingApprovals.get(toolCallId);
     resolveApproval(toolCallId, request?.source === 'codex-app-server'
@@ -240,6 +265,15 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({
   ) => {
     void respondCodexUserInput(interactionId, answers).catch((error) => {
       console.error('[Codex App Server] Failed to answer request_user_input:', error);
+    });
+  }, []);
+
+  const handleOpenCodeQuestion = useCallback((
+    interactionId: string,
+    answers: Record<string, { answers: string[] }> | null,
+  ) => {
+    void respondOpenCodeQuestion(interactionId, answers).catch((error) => {
+      console.error('[OpenCode] Failed to answer question:', error);
     });
   }, []);
   const [preview, setPreview] = useState<{ src: string; name: string } | null>(null);
@@ -750,6 +784,17 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({
               interaction={interaction}
               onSubmit={(answers) => handleCodexUserInput(interaction.interactionId, answers)}
               onSkip={() => handleCodexUserInput(interaction.interactionId, {})}
+            />
+          ))}
+
+        {Array.from(pendingOpenCodeQuestions.values())
+          .filter((interaction) => !activeSessionId || interaction.chatSessionId === activeSessionId)
+          .map((interaction) => (
+            <CodexUserInputCard
+              key={interaction.interactionId}
+              interaction={interaction}
+              onSubmit={(answers) => handleOpenCodeQuestion(interaction.interactionId, answers)}
+              onSkip={() => handleOpenCodeQuestion(interaction.interactionId, null)}
             />
           ))}
         {/* Transient compaction status — inline, no banner */}

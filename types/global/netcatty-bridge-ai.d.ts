@@ -178,6 +178,9 @@ declare global {
     onCodexAppServerInteractionRequest?(cb: (payload: Record<string, unknown>) => void): () => void;
     onCodexAppServerInteractionCleared?(cb: (payload: { interactionIds: string[]; chatSessionId?: string }) => void): () => void;
     respondCodexAppServerInteraction?(payload: Record<string, unknown>): Promise<{ ok: boolean; error?: string }>;
+    onOpenCodeQuestionRequest?(cb: (payload: Record<string, unknown>) => void): () => void;
+    onOpenCodeQuestionCleared?(cb: (payload: { interactionIds: string[]; chatSessionId?: string }) => void): () => void;
+    respondOpenCodeQuestion?(payload: Record<string, unknown>): Promise<{ ok: boolean; error?: string }>;
     aiCattyCancelExec?(chatSessionId: string): Promise<unknown>;
     aiSetChatSessionCancelled?(chatSessionId: string, cancelled?: boolean): Promise<{ ok: boolean; error?: string }>;
     aiMcpSyncPermissionGrants?(grants: Array<Record<string, unknown>>): Promise<{ ok: boolean; count?: number; error?: string }>;
