@@ -70,3 +70,38 @@ test('CodexUserInputCard uses OpenCode copy for opencode question interactions',
   assert.match(markup, /Keep going/);
   assert.doesNotMatch(markup, /Codex needs your input/);
 });
+
+test('CodexUserInputCard renders checkboxes for OpenCode multi-select questions', () => {
+  const markup = renderToStaticMarkup(
+    React.createElement(
+      I18nProvider,
+      { locale: 'en' },
+      React.createElement(CodexUserInputCard, {
+        interaction: {
+          interactionId: 'opencode_question_req-multi',
+          source: 'opencode',
+          kind: 'user-input',
+          requestId: 'req-multi',
+          chatSessionId: 'chat-1',
+          questions: [{
+            id: 'tags',
+            header: 'Tags',
+            question: 'Select all that apply',
+            isOther: false,
+            isSecret: false,
+            multiple: true,
+            options: [
+              { label: 'Alpha', description: 'First' },
+              { label: 'Beta', description: 'Second' },
+            ],
+          }],
+        },
+        onSubmit: () => {},
+        onSkip: () => {},
+      }),
+    ),
+  );
+  assert.match(markup, /type="checkbox"/);
+  assert.doesNotMatch(markup, /type="radio"/);
+  assert.match(markup, /Select all that apply/);
+});

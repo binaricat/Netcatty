@@ -694,6 +694,8 @@ function registerSdkStreamHandlers(ctx) {
                   chatSessionId,
                   baseUrl: ask.baseUrl,
                   directory: ask.directory,
+                  sessionId: ask.sessionId || null,
+                  version: ask.version === "v2" ? "v2" : "v1",
                   questions,
                   sender: event.sender,
                 });
@@ -963,12 +965,16 @@ function registerSdkStreamHandlers(ctx) {
             baseUrl: pending.baseUrl,
             requestId: pending.requestId,
             directory: pending.directory,
+            sessionId: pending.sessionId,
+            version: pending.version,
           });
         } else {
           await replyOpenCodeQuestionHttp({
             baseUrl: pending.baseUrl,
             requestId: pending.requestId,
             directory: pending.directory,
+            sessionId: pending.sessionId,
+            version: pending.version,
             answers: answersRecordToOpenCodeAnswers(pending.questions, payload.answers),
           });
         }

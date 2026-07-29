@@ -17,6 +17,8 @@ export interface CodexUserInputQuestion {
   question: string;
   isOther: boolean;
   isSecret: boolean;
+  /** When true, the UI collects multiple option labels for one question. */
+  multiple?: boolean;
   options: Array<{ label: string; description: string }> | null;
 }
 

@@ -936,6 +936,12 @@ test("normalizeOpenCodeQuestions maps options and custom answers into UI shape",
       question: "Free text?",
       options: [],
     },
+    {
+      id: "multi",
+      question: "Pick many?",
+      multiple: true,
+      options: [{ label: "A", description: "" }, { label: "B", description: "" }],
+    },
   ]), [
     {
       id: "q0",
@@ -943,6 +949,7 @@ test("normalizeOpenCodeQuestions maps options and custom answers into UI shape",
       question: "Which mode?",
       isOther: true,
       isSecret: false,
+      multiple: false,
       options: [{ label: "Safe", description: "Read-only" }],
     },
     {
@@ -951,7 +958,17 @@ test("normalizeOpenCodeQuestions maps options and custom answers into UI shape",
       question: "Free text?",
       isOther: false,
       isSecret: false,
+      multiple: false,
       options: null,
+    },
+    {
+      id: "multi",
+      header: "",
+      question: "Pick many?",
+      isOther: false,
+      isSecret: false,
+      multiple: true,
+      options: [{ label: "A", description: "" }, { label: "B", description: "" }],
     },
   ]);
 });
@@ -981,6 +998,27 @@ test("buildOpenCodeQuestionReplyUrl targets the session-local reply endpoint", (
       action: "reject",
     }),
     "http://127.0.0.1:4096/question/req-2/reject",
+  );
+  assert.equal(
+    buildOpenCodeQuestionReplyUrl({
+      baseUrl: "http://127.0.0.1:4096/",
+      requestId: "req/3",
+      sessionId: "sess-1",
+      version: "v2",
+      directory: "/tmp/proj",
+      action: "reply",
+    }),
+    "http://127.0.0.1:4096/api/session/sess-1/question/req%2F3/reply?directory=%2Ftmp%2Fproj",
+  );
+  assert.equal(
+    buildOpenCodeQuestionReplyUrl({
+      baseUrl: "http://127.0.0.1:4096",
+      requestId: "req-4",
+      sessionId: "sess-2",
+      version: "v2",
+      action: "reject",
+    }),
+    "http://127.0.0.1:4096/api/session/sess-2/question/req-4/reject",
   );
 });
 
@@ -1033,6 +1071,7 @@ test("translateOpenCodeEvent surfaces question.asked and question.v2.asked for t
       payload: {
         requestId: "req-1",
         sessionId: "sess-1",
+        version: "v1",
         questions: [{ header: "Pick", question: "Continue?", options: [{ label: "Yes", description: "" }] }],
         tool: { messageID: "m1", callID: "c1" },
       },
@@ -1042,6 +1081,7 @@ test("translateOpenCodeEvent surfaces question.asked and question.v2.asked for t
       payload: {
         requestId: "req-2",
         sessionId: "sess-1",
+        version: "v2",
         questions: [{ header: "V2", question: "Ready?", options: [] }],
         tool: undefined,
       },

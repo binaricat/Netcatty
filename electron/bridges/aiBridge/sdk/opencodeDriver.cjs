@@ -75,6 +75,7 @@ function normalizeOpenCodeQuestions(rawQuestions) {
       question: String(question?.question || ""),
       isOther: Boolean(question?.custom),
       isSecret: false,
+      multiple: Boolean(question?.multiple),
       options: options.length > 0 ? options : null,
     };
   });
@@ -88,18 +89,33 @@ function answersRecordToOpenCodeAnswers(questions, answersRecord) {
   });
 }
 
-function buildOpenCodeQuestionReplyUrl({ baseUrl, requestId, directory, action }) {
-  const url = new URL(`question/${encodeURIComponent(String(requestId || ""))}/${action}`, String(baseUrl || "").replace(/\/?$/, "/"));
+function normalizeOpenCodeQuestionVersion(version, eventType) {
+  if (version === "v2" || version === "v1") return version;
+  if (String(eventType || "").includes(".v2.")) return "v2";
+  return "v1";
+}
+
+function buildOpenCodeQuestionReplyUrl({ baseUrl, requestId, directory, action, sessionId, version } = {}) {
+  const root = String(baseUrl || "").replace(/\/?$/, "/");
+  const encodedRequestId = encodeURIComponent(String(requestId || ""));
+  const path = normalizeOpenCodeQuestionVersion(version) === "v2"
+    ? `api/session/${encodeURIComponent(String(sessionId || ""))}/question/${encodedRequestId}/${action}`
+    : `question/${encodedRequestId}/${action}`;
+  const url = new URL(path, root);
   if (directory) url.searchParams.set("directory", String(directory));
   return url.toString();
 }
 
-async function replyOpenCodeQuestionHttp({ baseUrl, requestId, answers, directory, fetchImpl } = {}) {
+async function replyOpenCodeQuestionHttp({
+  baseUrl, requestId, answers, directory, sessionId, version, fetchImpl,
+} = {}) {
   const fetchFn = fetchImpl || fetch;
   const response = await fetchFn(buildOpenCodeQuestionReplyUrl({
     baseUrl,
     requestId,
     directory,
+    sessionId,
+    version,
     action: "reply",
   }), {
     method: "POST",
@@ -113,12 +129,16 @@ async function replyOpenCodeQuestionHttp({ baseUrl, requestId, answers, director
   return true;
 }
 
-async function rejectOpenCodeQuestionHttp({ baseUrl, requestId, directory, fetchImpl } = {}) {
+async function rejectOpenCodeQuestionHttp({
+  baseUrl, requestId, directory, sessionId, version, fetchImpl,
+} = {}) {
   const fetchFn = fetchImpl || fetch;
   const response = await fetchFn(buildOpenCodeQuestionReplyUrl({
     baseUrl,
     requestId,
     directory,
+    sessionId,
+    version,
     action: "reject",
   }), {
     method: "POST",
@@ -376,6 +396,7 @@ function translateOpenCodeEvent(event, emitter, state = {}) {
       emitter.questionAsk?.({
         requestId: String(requestId),
         sessionId: properties.sessionID || properties.sessionId || null,
+        version: normalizeOpenCodeQuestionVersion(null, payload.type),
         questions: Array.isArray(properties.questions) ? properties.questions : [],
         tool: properties.tool,
       });
@@ -654,42 +675,49 @@ async function runOpenCodeTurn({
   let removeAbortListener = null;
   let serverUrl = null;
   const directoryQuery = cwd ? { directory: cwd } : undefined;
-  const pendingQuestionIds = new Set();
+  const pendingQuestions = new Map(); // requestId -> { sessionId, version }
   const state = { reasoningOpen: false };
   const turnEmitter = {
     ...emitter,
     questionAsk(payload) {
       if (!payload?.requestId) return;
-      pendingQuestionIds.add(String(payload.requestId));
+      const requestId = String(payload.requestId);
+      const questionSessionId = payload.sessionId || sessionId || null;
+      const version = normalizeOpenCodeQuestionVersion(payload.version);
+      pendingQuestions.set(requestId, { sessionId: questionSessionId, version });
       onQuestionAsk?.({
         ...payload,
+        sessionId: questionSessionId,
+        version,
         baseUrl: serverUrl,
         directory: cwd || undefined,
       });
       emitter.questionAsk?.(payload);
     },
     questionSettled(payload) {
-      if (payload?.requestId) pendingQuestionIds.delete(String(payload.requestId));
+      if (payload?.requestId) pendingQuestions.delete(String(payload.requestId));
       onQuestionSettled?.(payload);
       emitter.questionSettled?.(payload);
     },
   };
 
   const rejectPendingQuestions = async () => {
-    if (!serverUrl || pendingQuestionIds.size === 0) return;
-    const ids = Array.from(pendingQuestionIds);
-    pendingQuestionIds.clear();
-    await Promise.all(ids.map(async (requestId) => {
+    if (!serverUrl || pendingQuestions.size === 0) return;
+    const pending = Array.from(pendingQuestions.entries());
+    pendingQuestions.clear();
+    await Promise.all(pending.map(async ([requestId, meta]) => {
       try {
         await rejectOpenCodeQuestionHttp({
           baseUrl: serverUrl,
           requestId,
+          sessionId: meta?.sessionId || sessionId || undefined,
+          version: meta?.version,
           directory: cwd || undefined,
           fetchImpl,
         });
       } catch { /* best-effort cleanup */ }
       try {
-        onQuestionSettled?.({ requestId, sessionId, status: "rejected" });
+        onQuestionSettled?.({ requestId, sessionId: meta?.sessionId || sessionId, status: "rejected" });
       } catch { /* ignore */ }
     }));
   };
