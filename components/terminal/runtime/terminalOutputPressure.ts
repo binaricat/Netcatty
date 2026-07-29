@@ -125,14 +125,6 @@ const noteRecentOutputRate = (
   return state.recentSampleBytes;
 };
 
-const countNewlines = (data: string): number => {
-  let count = 0;
-  for (let index = 0; index < data.length; index += 1) {
-    if (data[index] === "\n") count += 1;
-  }
-  return count;
-};
-
 const noteRecentLineRate = (
   state: TerminalOutputPressureState,
   now: number,
@@ -165,23 +157,35 @@ const isSustainedLineStream = (
 
 const LINE_BREAK_SCAN = /[\n\r]/g;
 
+type UnbrokenRunMeasure = {
+  maxRunBytes: number;
+  trailingRunBytes: number;
+  newlineCount: number;
+  hasLineBreak: boolean;
+};
+
 const measureUnbrokenRuns = (
   data: string,
   initialRunBytes: number,
-): { maxRunBytes: number; trailingRunBytes: number } => {
+): UnbrokenRunMeasure => {
   // Hot path for every output batch: hop between line breaks with a native
-  // regex scan instead of visiting each character in JS. A run only counts
+  // regex scan instead of visiting each character in JS. Counts newlines in
+  // the same pass so flood chunks are not scanned twice. A run only counts
   // toward the max when this chunk actually appended characters to it,
   // matching the original per-char accounting.
   let maxRunBytes = 0;
   let runStart = 0;
   let carriedRunBytes = initialRunBytes;
+  let newlineCount = 0;
+  let hasLineBreak = false;
   LINE_BREAK_SCAN.lastIndex = 0;
   for (
     let match = LINE_BREAK_SCAN.exec(data);
     match !== null;
     match = LINE_BREAK_SCAN.exec(data)
   ) {
+    hasLineBreak = true;
+    if (match[0] === "\n") newlineCount += 1;
     const appendedBytes = match.index - runStart;
     if (appendedBytes > 0) {
       const runBytes = carriedRunBytes + appendedBytes;
@@ -197,7 +201,7 @@ const measureUnbrokenRuns = (
   if (trailingAppendedBytes > 0 && trailingRunBytes > maxRunBytes) {
     maxRunBytes = trailingRunBytes;
   }
-  return { maxRunBytes, trailingRunBytes };
+  return { maxRunBytes, trailingRunBytes, newlineCount, hasLineBreak };
 };
 
 const resolveConfiguredScrollback = (term: XTerm): number => {
@@ -263,28 +267,40 @@ export const noteTerminalOutputPressureData = (
   const quietMs = resolveLargeOutputQuietMs(scrollbackSaturated);
 
   const recentBytes = noteRecentOutputRate(state, now, data.length);
-  const newlineCount = countNewlines(data);
-  const recentLines = noteRecentLineRate(state, now, newlineCount);
-  const hasLineBreak = newlineCount > 0 || data.includes("\r");
-  // Full scrollback + multi-line (seq/logs) or a modest plain chunk → bulk.
-  // Tiny single-key echoes without newlines stay on the normal path.
-  const saturatedBulkChunk = scrollbackSaturated
-    && (
-      hasLineBreak
-      || data.length >= SATURATED_SCROLLBACK_BULK_MIN_BYTES
-    );
-  // Continuous log follow: enough newlines spanning real time, even when each chunk is tiny.
-  const sustainedLineStream = isSustainedLineStream(state, now, recentLines);
+  // Byte gates alone already classify this chunk as bulk; skip sustained-line
+  // bookkeeping (line-rate window) — unbroken-run scan below still runs once
+  // and folds newline counting so we never pay a second per-character pass.
+  const byteGateLargeOutput = data.length >= TERMINAL_LONG_LINE_PRESSURE_BYTES
+    || recentBytes >= LARGE_OUTPUT_RATE_BYTES;
+
+  const {
+    maxRunBytes,
+    trailingRunBytes,
+    newlineCount,
+    hasLineBreak,
+  } = measureUnbrokenRuns(data, state.consecutiveUnbrokenBytes);
+  state.consecutiveUnbrokenBytes = trailingRunBytes;
+  state.longLine = maxRunBytes >= TERMINAL_LONG_LINE_PRESSURE_BYTES;
+
+  let sustainedLineStream = false;
+  let saturatedBulkChunk = false;
+  if (!byteGateLargeOutput) {
+    const recentLines = noteRecentLineRate(state, now, newlineCount);
+    // Continuous log follow: enough newlines spanning real time, even when each chunk is tiny.
+    sustainedLineStream = isSustainedLineStream(state, now, recentLines);
+    // Full scrollback + multi-line (seq/logs) or a modest plain chunk → bulk.
+    // Tiny single-key echoes without newlines stay on the normal path.
+    saturatedBulkChunk = scrollbackSaturated
+      && (
+        hasLineBreak
+        || data.length >= SATURATED_SCROLLBACK_BULK_MIN_BYTES
+      );
+  }
 
   const trueFlood = data.length >= TERMINAL_LONG_LINE_PRESSURE_BYTES
     || recentBytes >= TIMESTAMP_SKIP_RATE_BYTES;
 
-  if (
-    data.length >= TERMINAL_LONG_LINE_PRESSURE_BYTES
-    || recentBytes >= LARGE_OUTPUT_RATE_BYTES
-    || saturatedBulkChunk
-    || sustainedLineStream
-  ) {
+  if (byteGateLargeOutput || saturatedBulkChunk || sustainedLineStream) {
     markLargeOutput(state, now, quietMs);
   } else if (now >= state.largeOutputUntil) {
     state.largeOutput = false;
@@ -295,13 +311,6 @@ export const noteTerminalOutputPressureData = (
   if (trueFlood) {
     state.timestampFloodUntil = now + quietMs;
   }
-
-  const { maxRunBytes, trailingRunBytes } = measureUnbrokenRuns(
-    data,
-    state.consecutiveUnbrokenBytes,
-  );
-  state.consecutiveUnbrokenBytes = trailingRunBytes;
-  state.longLine = maxRunBytes >= TERMINAL_LONG_LINE_PRESSURE_BYTES;
   if (state.longLine) {
     state.timestampFloodUntil = Math.max(state.timestampFloodUntil, now + quietMs);
   }
