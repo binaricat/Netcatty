@@ -36,6 +36,8 @@ const createFakeTerm = (options: {
    * keeps the growing-baseY model used by older tests.
    */
   circularTrim?: boolean;
+  /** Mirror xterm windowOptions.setWinLines (DECCOLM buffer reset gate). */
+  setWinLines?: boolean;
 } = {}) => {
   const writes: string[] = [];
   const markerLines: number[] = [];
@@ -90,7 +92,8 @@ const createFakeTerm = (options: {
   };
   const applyCsiSequence = (sequence: string): void => {
     const final = sequence.at(-1);
-    const firstParam = Number.parseInt(sequence.slice(2, -1).split(";")[0] || "1", 10);
+    const params = sequence.slice(2, -1);
+    const firstParam = Number.parseInt(params.split(";")[0] || "1", 10);
     const count = Number.isFinite(firstParam) && firstParam > 0 ? firstParam : 1;
     if (sequence === "\x1b[?7h") {
       wraparoundMode = true;
@@ -100,6 +103,39 @@ const createFakeTerm = (options: {
       cursorLine = Math.max(0, cursorLine - count);
     } else if (final === "B") {
       cursorLine += count;
+    } else if ((final === "L" || final === "M") && !params.startsWith("?")) {
+      // IL / DL: shift or dispose markers at/below the cursor row (normal only).
+      if (screen !== "normal") return;
+      const state = normalState;
+      const editAt = state.absoluteCursorLine;
+      if (final === "L") {
+        const nextText = new Map<number, string>();
+        for (const [key, value] of state.lineText) {
+          nextText.set(key >= editAt ? key + count : key, value);
+        }
+        state.lineText = nextText;
+        for (const marker of liveMarkers) {
+          if (marker.isDisposed || marker.attachedScreen !== "normal") continue;
+          if (marker.line >= editAt) marker.line += count;
+        }
+        state.absoluteCursorLine += count;
+        cursorLine = state.absoluteCursorLine;
+      } else {
+        const nextText = new Map<number, string>();
+        for (const [key, value] of state.lineText) {
+          if (key >= editAt && key < editAt + count) continue;
+          nextText.set(key > editAt ? key - count : key, value);
+        }
+        state.lineText = nextText;
+        for (const marker of liveMarkers) {
+          if (marker.isDisposed || marker.attachedScreen !== "normal") continue;
+          if (marker.line >= editAt && marker.line < editAt + count) {
+            marker.dispose();
+            continue;
+          }
+          if (marker.line >= editAt + count) marker.line -= count;
+        }
+      }
     }
   };
   const unicodeService = {
@@ -144,16 +180,25 @@ const createFakeTerm = (options: {
   // circularTrim uses growing absolute line ids (like the default fake) but
   // reports an unclamped length so rebase does not discard cursor-adjacent
   // bare stamps the way real xterm's 0..length-1 indices would not.
+  // Cursor movement must not shrink length below retained content — real xterm
+  // keeps buffer extent when the cursor moves up inside the viewport.
+  const contentExtent = (state: BufferState): number => {
+    let maxLine = state.absoluteCursorLine;
+    for (const key of state.lineText.keys()) {
+      if (key > maxLine) maxLine = key;
+    }
+    return maxLine + 1;
+  };
   const resolveLength = (state: BufferState): number => {
     if (!Number.isFinite(maxBufferLines)) {
-      return Math.max(rows, state.absoluteCursorLine + 1);
+      return Math.max(rows, contentExtent(state));
     }
     if (circularTrim) {
-      return Math.max(rows, state.absoluteCursorLine + 1);
+      return Math.max(rows, contentExtent(state));
     }
     return Math.min(
       maxBufferLines,
-      Math.max(rows, state.absoluteCursorLine - state.baseY + 1),
+      Math.max(rows, contentExtent(state) - state.baseY),
     );
   };
 
@@ -315,25 +360,72 @@ const createFakeTerm = (options: {
     viewportYOverride = null;
   };
 
+  const createMarkerAt = (
+    line: number,
+    attachedScreen: "normal" | "alternate",
+  ) => {
+    markerLines.push(line);
+    const marker = {
+      line,
+      isDisposed: false,
+      attachedScreen,
+      dispose() {
+        if (marker.isDisposed) return;
+        marker.isDisposed = true;
+        disposedMarkerLines.push(line);
+      },
+    };
+    liveMarkers.push(marker);
+    return marker;
+  };
+
   const term = {
     _core: {
       unicodeService,
       // Real xterm: public Terminal.reset and RIS→onRequestReset both call here.
       reset: resetBuffer,
+      buffers: {
+        normal: {
+          addMarker(y: number) {
+            return createMarkerAt(Math.max(0, y), "normal");
+          },
+        },
+      },
     },
     buffer: {
       active: activeBuffer,
       normal: normalBuffer,
     },
     cols,
-    options: Number.isFinite(scrollback) ? { scrollback } : {},
+    options: {
+      ...(Number.isFinite(scrollback) ? { scrollback } : {}),
+      ...(options.setWinLines ? { windowOptions: { setWinLines: true } } : {}),
+    },
     get modes() {
       return { wraparoundMode };
     },
     rows,
     resize(nextCols: number, nextRows: number) {
+      const prevCols = (term as { cols: number }).cols;
       (term as { cols: number }).cols = Math.max(1, nextCols);
       (term as { rows: number }).rows = Math.max(1, nextRows);
+      // Crude column-reflow: shift normal-buffer content/markers so deferred
+      // rematerialize-after-leave with stale bare lines would misalign.
+      if (nextCols !== prevCols) {
+        const nextText = new Map<number, string>();
+        for (const [key, value] of normalState.lineText) {
+          nextText.set(key + 1, value);
+        }
+        normalState.lineText = nextText;
+        normalState.absoluteCursorLine += 1;
+        for (const marker of liveMarkers) {
+          if (marker.isDisposed || marker.attachedScreen !== "normal") continue;
+          marker.line += 1;
+        }
+        if (screen === "normal") {
+          cursorLine = normalState.absoluteCursorLine;
+        }
+      }
     },
     reset() {
       // Mirror public Terminal.reset → _core.reset (RIS skips this wrapper).
@@ -368,10 +460,10 @@ const createFakeTerm = (options: {
             index = sequence.endIndex;
             continue;
           }
-          // DECCOLM (CSI ? 3 h/l) triggers a full buffer reset in xterm.
+          // DECCOLM only resets when setWinLines is enabled (xterm behavior).
           if (
-            sequence.sequence === "\x1b[?3h"
-            || sequence.sequence === "\x1b[?3l"
+            (sequence.sequence === "\x1b[?3h" || sequence.sequence === "\x1b[?3l")
+            && options.setWinLines
           ) {
             term._core.reset();
             index = sequence.endIndex;
@@ -435,20 +527,7 @@ const createFakeTerm = (options: {
       // Markers attach to the active buffer (normal or alt), matching xterm.
       const state = currentState();
       const line = state.absoluteCursorLine + offset;
-      const attachedScreen = screen;
-      markerLines.push(line);
-      const marker = {
-        line,
-        isDisposed: false,
-        attachedScreen,
-        dispose() {
-          if (marker.isDisposed) return;
-          marker.isDisposed = true;
-          disposedMarkerLines.push(line);
-        },
-      };
-      liveMarkers.push(marker);
-      return marker;
+      return createMarkerAt(line, screen);
     },
   };
 
@@ -1561,6 +1640,7 @@ test("column resize on alternate screen preserves saturated normal-buffer histor
   // Saturated mode releases ledger anchors. Rematerializing while a TUI holds
   // the alternate screen would rebase against the short alt buffer and pin
   // survivors there — those markers die on leave and wipe gutter history.
+  // Instead, pin onto buffer.normal before reflow so anchors ride the resize.
   const fake = createFakeTerm({ rows: 4, scrollback: 4, circularTrim: true, cols: 80 });
   const { term } = fake;
 
@@ -1594,7 +1674,8 @@ test("column resize on alternate screen preserves saturated normal-buffer histor
     `alt-screen column resize must not drop normal history (${ledgerBefore} before, now ${getTerminalLineTimestampLedgerCount(term as never)})`,
   );
 
-  // Leave alt: alt-anchored markers dispose. History must still paint.
+  // Leave alt: alt-anchored markers dispose. History must still paint on the
+  // post-reflow rows (fake resize shifts normal lines by +1).
   writeTerminalDataWithLineTimestamps(term as never, "\x1b[?1049l", () => {});
   assert.equal((term.buffer.active as { type: string }).type, "normal");
   fake.setViewportY(Math.max(0, fake.getNormalAbsoluteLine() - (term.rows - 1)));
@@ -1604,6 +1685,148 @@ test("column resize on alternate screen preserves saturated normal-buffer histor
     "normal-buffer stamps must survive alt resize + leave",
   );
   assert.ok(painted.length > 0, `expected gutter rows after alt resize, got ${JSON.stringify(painted)}`);
+
+  const viewportY = (term.buffer.active as { viewportY: number }).viewportY;
+  let alignedSeed = false;
+  for (const row of painted) {
+    const text = (
+      term.buffer.active.getLine(viewportY + row.row) as {
+        translateToString: (trimRight?: boolean) => string;
+      }
+    ).translateToString(true);
+    const match = /^seed-(\d+)$/.exec(text);
+    if (!match) continue;
+    const second = Number(match[1]) % 60;
+    const expected = `12:00:${String(second).padStart(2, "0")}`;
+    assert.equal(
+      row.label,
+      expected,
+      `seed stamp must stay on its post-reflow row after alt resize, got ${JSON.stringify({ text, row, painted })}`,
+    );
+    alignedSeed = true;
+  }
+  assert.ok(
+    alignedSeed,
+    `expected at least one aligned seed row after alt resize, got ${JSON.stringify(painted)}`,
+  );
+});
+
+test("DECCOLM without setWinLines keeps gutter history", async () => {
+  // xterm only full-resets on DECCOLM when windowOptions.setWinLines is true.
+  // Netcatty does not enable that option, so CSI ? 3 h/l must not wipe stamps.
+  const fake = createFakeTerm({ rows: 8, cols: 80 });
+  const { term } = fake;
+
+  writeTerminalDataWithLineTimestamps(
+    term as never,
+    "keep-me\r\n",
+    () => {},
+    { timestampDate: new Date(2026, 5, 6, 12, 0, 0) },
+  );
+  assert.equal(getTerminalLineTimestampLedgerCount(term as never), 1);
+
+  writeTerminalDataWithLineTimestamps(
+    term as never,
+    "\x1b[?3hstill-here\r\n",
+    () => {},
+    { timestampDate: new Date(2026, 5, 6, 12, 0, 1) },
+  );
+
+  assert.ok(
+    getTerminalLineTimestampLedgerCount(term as never) >= 1,
+    "DECCOLM without setWinLines must not clear the timestamp ledger",
+  );
+  const painted = getVisibleTerminalLineTimestampRows(term as never);
+  assert.ok(
+    painted.some((row) => row.label === "12:00:00"),
+    `pre-DECCOLM stamp must survive, got ${JSON.stringify(painted)}`,
+  );
+});
+
+test("DECCOLM with setWinLines clears gutter history like RIS", async () => {
+  const fake = createFakeTerm({ rows: 8, cols: 80, setWinLines: true });
+  const { term } = fake;
+
+  writeTerminalDataWithLineTimestamps(
+    term as never,
+    "before\r\n",
+    () => {},
+    { timestampDate: new Date(2026, 5, 6, 12, 0, 0) },
+  );
+  assert.equal(getTerminalLineTimestampLedgerCount(term as never), 1);
+
+  writeTerminalDataWithLineTimestamps(
+    term as never,
+    "\x1b[?3hafter-deccolm\r\n",
+    () => {},
+    { timestampDate: new Date(2026, 5, 6, 12, 0, 1) },
+  );
+
+  assert.equal(
+    getTerminalLineTimestampLedgerCount(term as never),
+    1,
+    "enabled DECCOLM clears pre-reset stamps; post-reset text keeps one stamp",
+  );
+  const painted = getVisibleTerminalLineTimestampRows(term as never);
+  assert.deepEqual(
+    painted,
+    [{ row: 0, label: "12:00:01" }],
+    `post-DECCOLM row must keep its gutter stamp, got ${JSON.stringify(painted)}`,
+  );
+});
+
+test("saturated CSI M rematerializes anchors so stamps follow deleted lines", async () => {
+  // Once saturated, bare ledger lines cannot track IL/DL. Rematerialize before
+  // the write so xterm (and the fake) can move markers with the edit.
+  const fake = createFakeTerm({ rows: 4, scrollback: 4, circularTrim: true, cols: 80 });
+  const { term } = fake;
+
+  for (let second = 0; second < 20; second += 1) {
+    writeTerminalDataWithLineTimestamps(
+      term as never,
+      `seed-${second}\r\n`,
+      () => {},
+      { timestampDate: new Date(2026, 5, 6, 12, 0, second % 60) },
+    );
+  }
+  assert.equal(isTerminalScrollbackSaturated(term as never), true);
+  await new Promise((resolve) => { setTimeout(resolve, 0); });
+
+  // Move cursor to an early seed row, then delete one line (CSI M).
+  const targetLine = Math.max(0, fake.getAbsoluteCursorLine() - 3);
+  (term.buffer.active as { cursorY: number }).cursorY = Math.max(
+    0,
+    targetLine - (term.buffer.active as { baseY: number }).baseY,
+  );
+  const deletedText = (
+    term.buffer.active.getLine(targetLine) as {
+      translateToString: (trimRight?: boolean) => string;
+    }
+  ).translateToString(true);
+
+  writeTerminalDataWithLineTimestamps(term as never, "\x1b[1M", () => {});
+
+  fake.setViewportY(Math.max(0, fake.getAbsoluteCursorLine() - (term.rows - 1)));
+  const painted = getVisibleTerminalLineTimestampRows(term as never);
+  const viewportY = (term.buffer.active as { viewportY: number }).viewportY;
+
+  for (const row of painted) {
+    const text = (
+      term.buffer.active.getLine(viewportY + row.row) as {
+        translateToString: (trimRight?: boolean) => string;
+      }
+    ).translateToString(true);
+    if (!text || text === deletedText) continue;
+    const match = /^seed-(\d+)$/.exec(text);
+    if (!match) continue;
+    const second = Number(match[1]) % 60;
+    const expected = `12:00:${String(second).padStart(2, "0")}`;
+    assert.equal(
+      row.label,
+      expected,
+      `stamp must follow content after CSI M, got ${JSON.stringify({ text, row, painted, deletedText, viewportY })}`,
+    );
+  }
 });
 
 test("inline RIS followed by text keeps a gutter stamp for post-reset output", async () => {

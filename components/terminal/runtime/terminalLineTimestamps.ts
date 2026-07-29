@@ -18,6 +18,12 @@ type TerminalLineTimestampSegmenterOptions = {
   now?: () => Date;
   /** Optional label factory (used to intern same-second strings). */
   formatLabel?: (date: Date) => string;
+  /**
+   * Classify RIS / DECCOLM (and similar) as buffer-resetting. Defaults to the
+   * term-agnostic heuristic; prefer passing a term-aware predicate so DECCOLM
+   * only clears state when xterm's setWinLines option is enabled.
+   */
+  isBufferResettingSequence?: (sequence: string) => boolean;
 };
 
 type TimestampMarker = {
@@ -94,11 +100,6 @@ type TimestampStore = {
   reflowHookInstalled?: boolean;
   /** True after term.reset is wrapped to clear bare ledger stamps with the buffer. */
   resetHookInstalled?: boolean;
-  /**
-   * Column reflow happened while the alternate screen was active. Rematerialize
-   * against the normal buffer once it is active again — never pin anchors to alt.
-   */
-  deferredColumnReflowRematerialize?: boolean;
   /**
    * Nested writeTerminalDataWithSecondLedger depth. Parser-driven resets during
    * term.write use this to restore post-reset stamps recorded before the write.
@@ -350,8 +351,27 @@ const getWraparoundAction = (sequence: string): boolean | null => {
   return modes.includes(7) ? final === "h" : null;
 };
 
-/** RIS (ESC c) or DECCOLM (CSI ? 3 h/l) — xterm full-resets the buffer. */
-const isBufferResettingSequence = (sequence: string): boolean => {
+/**
+ * True when xterm will full-reset its buffer for DECCOLM (CSI ? 3 h/l).
+ * Without windowOptions.setWinLines, xterm ignores DECCOLM and leaves the
+ * buffer intact — clearing the ledger would drop gutter history incorrectly.
+ */
+const isDeccolmBufferResetEnabled = (term: XTerm): boolean => {
+  try {
+    const options = (term as XTerm & {
+      options?: { windowOptions?: { setWinLines?: boolean } };
+    }).options;
+    return options?.windowOptions?.setWinLines === true;
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * RIS (ESC c) always resets. DECCOLM (CSI ? 3 h/l) resets only when xterm's
+ * setWinLines window option is enabled.
+ */
+const isBufferResettingSequence = (sequence: string, term?: XTerm): boolean => {
   if (sequence === "\x1bc") return true;
   const final = getCsiFinal(sequence);
   if (final !== "h" && final !== "l") return false;
@@ -362,7 +382,37 @@ const isBufferResettingSequence = (sequence: string): boolean => {
     .split(";")
     .map((part) => Number.parseInt(part, 10))
     .filter(Number.isFinite);
-  return modes.includes(3);
+  if (!modes.includes(3)) return false;
+  // Term-agnostic callers (standalone segmenter) treat DECCOLM conservatively
+  // as non-resetting unless they pass an explicit predicate / term.
+  if (!term) return false;
+  return isDeccolmBufferResetEnabled(term);
+};
+
+/** CSI Ps L / CSI Ps M — insert/delete lines within the scroll region. */
+const isLocalLineEditSequence = (sequence: string): boolean => {
+  const final = getCsiFinal(sequence);
+  if (final !== "L" && final !== "M") return false;
+  const params = sequence.slice(2, -1);
+  // Private-mode CSI (? …) never uses L/M as IL/DL.
+  return !params.startsWith("?");
+};
+
+const dataContainsLocalLineEditSequence = (data: string): boolean => {
+  for (let index = 0; index < data.length;) {
+    if (data[index] !== "\x1b") {
+      index += 1;
+      continue;
+    }
+    const sequence = readEscapeSequence(data, index);
+    if (!sequence || !sequence.complete) {
+      index += 1;
+      continue;
+    }
+    if (isLocalLineEditSequence(sequence.sequence)) return true;
+    index = sequence.endIndex + 1;
+  }
+  return false;
 };
 
 const isAlternateBufferActive = (term: XTerm): boolean => (
@@ -425,6 +475,8 @@ export const createTerminalLineTimestampSegmenter = (
 ): TerminalLineTimestampSegmenter => {
   const now = options.now ?? (() => new Date());
   const formatLabel = options.formatLabel ?? formatTerminalLineTimestamp;
+  const sequenceResetsBuffer = options.isBufferResettingSequence
+    ?? ((sequence: string) => isBufferResettingSequence(sequence));
   let atLineStart = true;
   let currentLineStamped = false;
   let pendingEscapeSequence = "";
@@ -478,9 +530,9 @@ export const createTerminalLineTimestampSegmenter = (
             } else if (alternateScreenAction === "leave") {
               suspendedForAlternateScreen = false;
               resetLineState();
-            } else if (isBufferResettingSequence(sequence.sequence)) {
-              // RIS / DECCOLM return to a blank normal screen; post-reset text
-              // starts a fresh line that needs its own gutter stamp.
+            } else if (sequenceResetsBuffer(sequence.sequence)) {
+              // RIS / (enabled) DECCOLM return to a blank normal screen; post-reset
+              // text starts a fresh line that needs its own gutter stamp.
               suspendedForAlternateScreen = false;
               resetLineState();
             }
@@ -575,6 +627,7 @@ const getTimestampStore = (term: XTerm): TimestampStore => {
     };
     created.segmenter = createTerminalLineTimestampSegmenter({
       formatLabel: (date) => internTerminalLineTimestampLabel(created, date),
+      isBufferResettingSequence: (sequence) => isBufferResettingSequence(sequence, term),
     });
     stores.set(term, created);
     installReflowMaterializeHook(term, created);
@@ -590,9 +643,9 @@ const getTimestampStore = (term: XTerm): TimestampStore => {
  * perf; without this, xterm reflows with bare line numbers and the next
  * colsChanged rebase drops the entire gutter history.
  *
- * While the alternate screen is active, defer: rebase/materialize against
- * buffer.active would discard normal-history lines (short alt length) and pin
- * survivors in the alt buffer whose markers die on leave.
+ * While the alternate screen is active, pin anchors onto buffer.normal (via
+ * the internal addMarker API) so both buffers can reflow with live markers.
+ * registerMarker would pin to alt and die on leave.
  */
 const installReflowMaterializeHook = (term: XTerm, store: TimestampStore): void => {
   if (store.reflowHookInstalled) return;
@@ -614,17 +667,24 @@ const installReflowMaterializeHook = (term: XTerm, store: TimestampStore): void 
       && Number.isFinite(prevCols)
       && cols !== prevCols
     ) {
-      if (isAlternateBufferActive(term)) {
-        store.deferredColumnReflowRematerialize = true;
-      } else {
-        // True-flood writes can move the trim sentinel without syncing bare
-        // ledger offsets. Rebase first so rematerialized anchors land on the
-        // current rows; otherwise colsChanged keeps those mis-pinned markers.
-        rebaseLedgerForScrollback(term, store);
-        materializeTimestampLedgerToMarkers(term);
-      }
+      // True-flood writes can move the trim sentinel without syncing bare
+      // ledger offsets. Rebase first so rematerialized anchors land on the
+      // current rows; otherwise colsChanged keeps those mis-pinned markers.
+      // On alt, rebase uses normal-buffer metrics and materialize pins via
+      // buffers.normal.addMarker so reflow can move normal-history anchors.
+      rebaseLedgerForScrollback(term, store);
+      materializeTimestampLedgerToMarkers(term);
     }
     originalResize.call(this, cols, rows);
+    // Sync marker.line after reflow and consume colsChanged while anchors live.
+    if (
+      store.ledger.length > 0
+      && typeof prevCols === "number"
+      && Number.isFinite(prevCols)
+      && cols !== prevCols
+    ) {
+      rebaseLedgerForScrollback(term, store);
+    }
   };
 };
 
@@ -1313,17 +1373,64 @@ export const getTerminalLineTimestampLedgerCount = (term: XTerm): number =>
   getTimestampStore(term).ledger.length;
 
 /**
+ * Pin a ledger stamp onto the normal buffer while the alternate screen may be
+ * active. Public registerMarker always targets buffer.active; xterm's internal
+ * buffers.normal.addMarker keeps anchors on primary history across alt reflow.
+ */
+const tryAddMarkerOnNormalBuffer = (
+  term: XTerm,
+  absoluteLine: number,
+): TimestampMarker | undefined => {
+  const core = (term as XTerm & {
+    _core?: {
+      buffers?: {
+        normal?: {
+          addMarker?: (y: number) => TimestampMarker | undefined;
+        };
+      };
+    };
+  })._core;
+  const normal = core?.buffers?.normal;
+  const addMarker = normal?.addMarker;
+  if (typeof addMarker !== "function") return undefined;
+  let marker: TimestampMarker | undefined;
+  try {
+    marker = addMarker.call(normal, absoluteLine);
+  } catch {
+    marker = undefined;
+  }
+  if (!marker || marker.isDisposed) return undefined;
+  return marker;
+};
+
+/**
  * Re-attach sparse xterm markers for bare ledger stamps so an upcoming column
  * reflow can move them. Used by the term.resize hook before cols change;
  * saturated steady-state still releases markers again after the next write.
  *
- * No-ops while the alternate screen is active: registerMarker pins to the alt
- * buffer, and those markers are disposed when the TUI exits.
+ * While the alternate screen is active, pins onto buffer.normal via the
+ * internal addMarker API — registerMarker would attach to alt and die on leave.
  */
 export const materializeTimestampLedgerToMarkers = (term: XTerm): number => {
   const store = getTimestampStore(term);
   if (store.ledger.length === 0) return 0;
-  if (isAlternateBufferActive(term)) return 0;
+
+  if (isAlternateBufferActive(term)) {
+    let attached = 0;
+    for (const entry of store.ledger) {
+      if (entry.marker && !entry.marker.isDisposed) continue;
+      if (entry.line < 0) continue;
+      const marker = tryAddMarkerOnNormalBuffer(term, entry.line);
+      if (!marker) continue;
+      entry.marker = marker;
+      if (typeof marker.line === "number" && Number.isFinite(marker.line)) {
+        entry.line = Math.max(0, marker.line);
+      }
+      attached += 1;
+    }
+    return attached;
+  }
+
   const registerMarker = (
     term as XTerm & { registerMarker?: (offset: number) => TimestampMarker | undefined }
   ).registerMarker;
@@ -1348,20 +1455,6 @@ export const materializeTimestampLedgerToMarkers = (term: XTerm): number => {
     attached += 1;
   }
   return attached;
-};
-
-/**
- * Finish a column-reflow rematerialize that was deferred while alt was active.
- * Must run on the normal buffer before rebase sees colsChanged.
- */
-const rematerializeDeferredColumnReflowIfNeeded = (
-  term: XTerm,
-  store: TimestampStore,
-): void => {
-  if (!store.deferredColumnReflowRematerialize) return;
-  if (isAlternateBufferActive(term)) return;
-  materializeTimestampLedgerToMarkers(term);
-  store.deferredColumnReflowRematerialize = false;
 };
 
 const internTerminalLineTimestampLabel = (
@@ -1547,7 +1640,6 @@ const resetTimestampStore = (store: TimestampStore) => {
   store.lastSeenBufferLength = null;
   store.lastSeenCols = null;
   store.ledgerMaterialized = false;
-  store.deferredColumnReflowRematerialize = false;
   store.orphanedMarkers = [];
   store.segmenter.reset();
   store.timestampOnlyPrefix = "";
@@ -2045,7 +2137,6 @@ export const getVisibleTerminalLineTimestampRows = (
     return [];
   }
   const store = getTimestampStore(term);
-  rematerializeDeferredColumnReflowIfNeeded(term, store);
   rebaseLedgerForScrollback(term, store);
   let bufferLength = 0;
   try {
@@ -2120,9 +2211,20 @@ const writeTerminalDataWithSecondLedger = (
     isTerminalScrollbackSaturated(term)
     && (store.trimSentinelLine === null || isTrimSentinelStale(store))
   ) {
-    rematerializeDeferredColumnReflowIfNeeded(term, store);
     rebaseLedgerForScrollback(term, store);
     maintainTrimSentinel(term, store);
+  }
+  // Saturated mode releases live anchors for trim perf. CSI L/M move/dispose
+  // buffer rows without a global circular-trim delta — rematerialize first so
+  // xterm can shift those markers, then release copies the updated lines.
+  if (
+    isTerminalScrollbackSaturated(term)
+    && !isAlternateBufferActive(term)
+    && store.ledger.length > 0
+    && dataContainsLocalLineEditSequence(data)
+  ) {
+    rebaseLedgerForScrollback(term, store);
+    materializeTimestampLedgerToMarkers(term);
   }
   let ledgerChanged = false;
   const pendingAnchors: TimestampLedgerEntry[] = [];
@@ -2181,7 +2283,7 @@ const writeTerminalDataWithSecondLedger = (
         );
         break;
       }
-      if (isBufferResettingSequence(sequence.sequence)) {
+      if (isBufferResettingSequence(sequence.sequence, term)) {
         clearLedgerForInBandReset();
         index = sequence.endIndex + 1;
         continue;
@@ -2226,7 +2328,6 @@ const writeTerminalDataWithSecondLedger = (
     // Full scrollback: drop live anchors (amortized) and skip new ones so
     // continuous log tails are not O(markers) per trimmed line. Rebase first so
     // the trim sentinel can shift bare lines for this write's circular recycle.
-    rematerializeDeferredColumnReflowIfNeeded(term, store);
     rebaseLedgerForScrollback(term, store);
     releaseLedgerMarkersWhileSaturated(term, store);
     attachLedgerAnchors(term, store, pendingAnchors);
