@@ -277,10 +277,50 @@ const readStringTerminatedSequence = (
   };
 };
 
+/** 8-bit C1 CSI (U+009B); xterm accepts this as equivalent to ESC [. */
+const C1_CSI = "\x9b";
+
+const readCsiBody = (
+  data: string,
+  bodyStart: number,
+): { endIndex: number; complete: boolean; body: string } => {
+  for (let index = bodyStart; index < data.length; index += 1) {
+    if (isCsiFinalByte(data[index])) {
+      return {
+        body: data.slice(bodyStart, index + 1),
+        endIndex: index,
+        complete: true,
+      };
+    }
+  }
+  return {
+    body: data.slice(bodyStart),
+    endIndex: data.length - 1,
+    complete: false,
+  };
+};
+
 const readEscapeSequence = (
   data: string,
   startIndex: number,
 ): { sequence: string; endIndex: number; complete: boolean } | null => {
+  // Normalize complete 8-bit CSI to ESC[… so getCsiFinal / param helpers work.
+  // Incomplete C1 CSI keeps the raw introducer so split writes can resume.
+  if (data[startIndex] === C1_CSI) {
+    const body = readCsiBody(data, startIndex + 1);
+    if (!body.complete) {
+      return {
+        sequence: data.slice(startIndex),
+        endIndex: body.endIndex,
+        complete: false,
+      };
+    }
+    return {
+      sequence: `\x1b[${body.body}`,
+      endIndex: body.endIndex,
+      complete: true,
+    };
+  }
   if (data[startIndex] !== "\x1b") return null;
   const next = data[startIndex + 1];
   if (!next) {
@@ -288,19 +328,18 @@ const readEscapeSequence = (
   }
 
   if (next === "[") {
-    for (let index = startIndex + 2; index < data.length; index += 1) {
-      if (isCsiFinalByte(data[index])) {
-        return {
-          sequence: data.slice(startIndex, index + 1),
-          endIndex: index,
-          complete: true,
-        };
-      }
+    const body = readCsiBody(data, startIndex + 2);
+    if (!body.complete) {
+      return {
+        sequence: data.slice(startIndex),
+        endIndex: body.endIndex,
+        complete: false,
+      };
     }
     return {
-      sequence: data.slice(startIndex),
-      endIndex: data.length - 1,
-      complete: false,
+      sequence: `\x1b[${body.body}`,
+      endIndex: body.endIndex,
+      complete: true,
     };
   }
 
@@ -511,7 +550,8 @@ const dataRequiresSaturatedAnchorRematerialize = (
     if (char === C1_RI) {
       return true;
     }
-    if (char !== "\x1b") {
+    // 7-bit ESC[… and 8-bit C1 CSI (U+009B) both drive IL/DL/SU/SD/ED/DECSTBM.
+    if (char !== "\x1b" && char !== C1_CSI) {
       index += 1;
       continue;
     }
@@ -578,7 +618,7 @@ const pushDataSegment = (
 
 /** Characters that can change segmenter state outside alternate screen. */
 // eslint-disable-next-line no-control-regex
-const SEGMENTER_BOUNDARY_SCAN = /[\u001b\n\r]/g;
+const SEGMENTER_BOUNDARY_SCAN = /[\u001b\u009b\n\r]/g;
 
 /** Index of the next ESC/LF/CR at or after `from`, or `input.length`. */
 const nextSegmenterBoundary = (input: string, from: number): number => {
@@ -626,7 +666,7 @@ export const createTerminalLineTimestampSegmenter = (
       for (let index = 0; index < input.length;) {
         const char = input[index];
 
-        if (char === "\x1b") {
+        if (char === "\x1b" || char === C1_CSI) {
           const sequence = readEscapeSequence(input, index);
           if (sequence) {
             if (!sequence.complete) {
@@ -660,10 +700,12 @@ export const createTerminalLineTimestampSegmenter = (
         }
 
         if (suspendedForAlternateScreen) {
-          // Nothing but an ESC sequence can change state while suspended;
-          // hop to the next ESC and append the span in one slice.
+          // Nothing but ESC / C1 CSI can change state while suspended;
+          // hop to the next introducer and append the span in one slice.
           const nextEsc = input.indexOf("\x1b", index + 1);
-          const end = nextEsc === -1 ? input.length : nextEsc;
+          const nextC1 = input.indexOf(C1_CSI, index + 1);
+          const candidates = [nextEsc, nextC1].filter((value) => value !== -1);
+          const end = candidates.length === 0 ? input.length : Math.min(...candidates);
           pushDataSegment(segments, input.slice(index, end));
           index = end;
           continue;
@@ -2305,8 +2347,9 @@ const writeTerminalDataWithSecondLedger = (
   const segments = store.segmenter.append(dataForTimestamps, stampDate);
 
   // Retain any incomplete ESC/CSI/OSC across writes — not only alt-screen
-  // candidates. Split RIS (`ESC` | `c`) and CSI L/M/S/T (`ESC [` | `1S`) must still
-  // drive in-band reset / rematerialize once the sequence completes.
+  // candidates. Split RIS (`ESC` | `c`), CSI L/M/S/T (`ESC [` | `1S`), and
+  // 8-bit C1 CSI (`U+009B` | `1M`) must still drive in-band reset /
+  // rematerialize once the sequence completes.
   const pendingEscapeSequence = store.segmenter.flushPendingEscapeSequence();
   if (
     pendingEscapeSequence
@@ -2345,13 +2388,13 @@ const writeTerminalDataWithSecondLedger = (
     rebaseLedgerForScrollback(term, store);
     maintainTrimSentinel(term, store);
   }
-  // Saturated mode releases live anchors for trim perf. CSI L/M/S/T, erase-display
-  // (CSI J), reverse-index (ESC M / C1 RI), and LF/IND/NEL inside a DECSTBM
-  // region move/dispose buffer rows without a global circular-trim delta —
-  // rematerialize first so xterm can shift or dispose those markers, then
-  // release copies the updated lines. Scan the prefix-joined stream so
-  // IL/DL/SU/SD/ED/RI and same-chunk DECSTBM+LF/IND still hit even when the
-  // terminal's pre-write region is still full-screen.
+  // Saturated mode releases live anchors for trim perf. CSI L/M/S/T (7-bit ESC[
+  // or 8-bit C1 CSI), erase-display (CSI J), reverse-index (ESC M / C1 RI), and
+  // LF/IND/NEL inside a DECSTBM region move/dispose buffer rows without a
+  // global circular-trim delta — rematerialize first so xterm can shift or
+  // dispose those markers, then release copies the updated lines. Scan the
+  // prefix-joined stream so IL/DL/SU/SD/ED/RI and same-chunk DECSTBM+LF/IND
+  // still hit even when the terminal's pre-write region is still full-screen.
   if (
     isTerminalScrollbackSaturated(term)
     && !isAlternateBufferActive(term)

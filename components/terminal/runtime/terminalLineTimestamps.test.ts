@@ -86,6 +86,19 @@ const createFakeTerm = (options: {
     return 1;
   };
   const readCsiSequence = (data: string, startIndex: number): { sequence: string; endIndex: number } | null => {
+    // 8-bit C1 CSI (U+009B) ≡ ESC [ — normalize so applyCsiSequence stays 7-bit.
+    if (data[startIndex] === "\x9b") {
+      for (let index = startIndex + 1; index < data.length; index += 1) {
+        const char = data[index];
+        if (char >= "@" && char <= "~") {
+          return {
+            sequence: `\x1b[${data.slice(startIndex + 1, index + 1)}`,
+            endIndex: index,
+          };
+        }
+      }
+      return null;
+    }
     if (data[startIndex] !== "\x1b" || data[startIndex + 1] !== "[") return null;
     for (let index = startIndex + 2; index < data.length; index += 1) {
       const char = data[index];
@@ -635,6 +648,44 @@ const createFakeTerm = (options: {
       const input = writeParserPrefix ? `${writeParserPrefix}${data}` : data;
       writeParserPrefix = "";
       for (let index = 0; index < input.length; index += 1) {
+        // 8-bit C1 CSI (U+009B) ≡ ESC [ — retain incomplete bodies across writes.
+        if (input[index] === "\x9b") {
+          const sequence = readCsiSequence(input, index);
+          if (!sequence) {
+            writeParserPrefix = input.slice(index);
+            break;
+          }
+          if (
+            sequence.sequence === "\x1b[?1049h"
+            || sequence.sequence === "\x1b[?47h"
+            || sequence.sequence === "\x1b[?1047h"
+          ) {
+            enterAlternate();
+            index = sequence.endIndex;
+            continue;
+          }
+          if (
+            sequence.sequence === "\x1b[?1049l"
+            || sequence.sequence === "\x1b[?47l"
+            || sequence.sequence === "\x1b[?1047l"
+          ) {
+            leaveAlternate();
+            index = sequence.endIndex;
+            continue;
+          }
+          if (
+            (sequence.sequence === "\x1b[?3h" || sequence.sequence === "\x1b[?3l")
+            && options.setWinLines
+          ) {
+            term._core.reset();
+            index = sequence.endIndex;
+            continue;
+          }
+          applyCsiSequence(sequence.sequence);
+          currentState().absoluteCursorLine = cursorLine;
+          index = sequence.endIndex;
+          continue;
+        }
         if (input[index] === "\x1b") {
           if (index === input.length - 1) {
             writeParserPrefix = "\x1b";
@@ -2214,6 +2265,111 @@ test("saturated CSI M rematerializes when the sequence is split across writes", 
       row.label,
       expected,
       `split CSI M must still rematerialize; got ${JSON.stringify({ text, row, painted, deletedText })}`,
+    );
+  }
+});
+
+test("saturated C1 CSI M rematerializes anchors so stamps follow deleted lines", async () => {
+  // 8-bit CSI (\x9b1M) must rematerialize like ESC[1M while saturated.
+  const fake = createFakeTerm({ rows: 4, scrollback: 4, circularTrim: true, cols: 80 });
+  const { term } = fake;
+
+  for (let second = 0; second < 20; second += 1) {
+    writeTerminalDataWithLineTimestamps(
+      term as never,
+      `seed-${second}\r\n`,
+      () => {},
+      { timestampDate: new Date(2026, 5, 6, 12, 0, second % 60) },
+    );
+  }
+  assert.equal(isTerminalScrollbackSaturated(term as never), true);
+  await new Promise((resolve) => { setTimeout(resolve, 0); });
+
+  const targetLine = Math.max(0, fake.getAbsoluteCursorLine() - 3);
+  (term.buffer.active as { cursorY: number }).cursorY = Math.max(
+    0,
+    targetLine - (term.buffer.active as { baseY: number }).baseY,
+  );
+  const deletedText = (
+    term.buffer.active.getLine(targetLine) as {
+      translateToString: (trimRight?: boolean) => string;
+    }
+  ).translateToString(true);
+
+  writeTerminalDataWithLineTimestamps(term as never, "\x9b1M", () => {});
+
+  fake.setViewportY(Math.max(0, fake.getAbsoluteCursorLine() - (term.rows - 1)));
+  const painted = getVisibleTerminalLineTimestampRows(term as never);
+  const viewportY = (term.buffer.active as { viewportY: number }).viewportY;
+
+  for (const row of painted) {
+    const text = (
+      term.buffer.active.getLine(viewportY + row.row) as {
+        translateToString: (trimRight?: boolean) => string;
+      }
+    ).translateToString(true);
+    if (!text || text === deletedText) continue;
+    const match = /^seed-(\d+)$/.exec(text);
+    if (!match) continue;
+    const second = Number(match[1]) % 60;
+    const expected = `12:00:${String(second).padStart(2, "0")}`;
+    assert.equal(
+      row.label,
+      expected,
+      `stamp must follow content after C1 CSI M, got ${JSON.stringify({ text, row, painted, deletedText, viewportY })}`,
+    );
+  }
+});
+
+test("saturated C1 CSI M rematerializes when the sequence is split across writes", async () => {
+  const fake = createFakeTerm({ rows: 4, scrollback: 4, circularTrim: true, cols: 80 });
+  const { term } = fake;
+
+  for (let second = 0; second < 20; second += 1) {
+    writeTerminalDataWithLineTimestamps(
+      term as never,
+      `seed-${second}\r\n`,
+      () => {},
+      { timestampDate: new Date(2026, 5, 6, 12, 0, second % 60) },
+    );
+  }
+  assert.equal(isTerminalScrollbackSaturated(term as never), true);
+  await new Promise((resolve) => { setTimeout(resolve, 0); });
+
+  const targetLine = Math.max(0, fake.getAbsoluteCursorLine() - 3);
+  (term.buffer.active as { cursorY: number }).cursorY = Math.max(
+    0,
+    targetLine - (term.buffer.active as { baseY: number }).baseY,
+  );
+  const deletedText = (
+    term.buffer.active.getLine(targetLine) as {
+      translateToString: (trimRight?: boolean) => string;
+    }
+  ).translateToString(true);
+
+  // Split 8-bit CSI M: C1 introducer then 1M.
+  writeTerminalDataWithLineTimestamps(term as never, "\x9b", () => {});
+  writeTerminalDataWithLineTimestamps(term as never, "1M", () => {});
+
+  fake.setViewportY(Math.max(0, fake.getAbsoluteCursorLine() - (term.rows - 1)));
+  const painted = getVisibleTerminalLineTimestampRows(term as never);
+  const viewportY = (term.buffer.active as { viewportY: number }).viewportY;
+
+  for (const row of painted) {
+    const text = (
+      term.buffer.active.getLine(viewportY + row.row) as {
+        translateToString: (trimRight?: boolean) => string;
+      }
+    ).translateToString(true);
+    if (!text || text === deletedText) continue;
+    const match = /^seed-(\d+)$/.exec(text);
+    if (!match) continue;
+    const second = Number(match[1]) % 60;
+    const expected = `12:00:${String(second).padStart(2, "0")}`;
+    assert.equal(
+      row.label,
+      expected,
+      `split C1 CSI M must still rematerialize; got ${JSON.stringify({ text, row, painted, deletedText })}`,
     );
   }
 });
