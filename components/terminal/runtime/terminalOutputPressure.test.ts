@@ -219,6 +219,45 @@ test("arms large-output for sustained moderate log streams below the byte flood 
   }
 });
 
+test("arms large-output for batched sustained log streams with ~500ms gaps", () => {
+  // journalctl/IPC often delivers follow output in periodic batches >350ms apart.
+  // Those must still arm large-output once the rolling line threshold is met.
+  const term = createFakeTerm({
+    rows: 24,
+    options: { scrollback: 10000 },
+    buffer: { active: { length: 200, baseY: 0 } },
+  });
+  const originalNow = performance.now.bind(performance);
+  let now = 35_000;
+
+  Object.defineProperty(performance, "now", {
+    configurable: true,
+    value: () => now,
+  });
+
+  try {
+    for (let batch = 0; batch < 4; batch += 1) {
+      if (batch > 0) now += 500;
+      noteTerminalOutputPressureData(
+        term,
+        Array.from(
+          { length: 4 },
+          (_, index) => `2026-07-29 INFO batch-${batch}-line-${index}`,
+        ).join("\n") + "\n",
+      );
+    }
+    assert.equal(getTerminalOutputPressure(term).largeOutput, true);
+    assert.equal(shouldDegradeTerminalSideWork(term), true);
+    assert.equal(shouldSkipTerminalLineTimestamps(term), false);
+  } finally {
+    Object.defineProperty(performance, "now", {
+      configurable: true,
+      value: originalNow,
+    });
+    resetTerminalOutputPressure(term);
+  }
+});
+
 test("does not arm large-output for sparse interactive newlines", () => {
   const term = createFakeTerm();
   const originalNow = performance.now.bind(performance);
@@ -287,6 +326,42 @@ test("does not arm large-output for a burst plus a later interactive newline", (
       Array.from({ length: 12 }, (_, index) => `row-${index}`).join("\n") + "\n",
     );
     now += 500;
+    noteTerminalOutputPressureData(term, "user@host:~$ \n");
+    assert.equal(getTerminalOutputPressure(term).largeOutput, false);
+    assert.equal(shouldDegradeTerminalSideWork(term), false);
+  } finally {
+    Object.defineProperty(performance, "now", {
+      configurable: true,
+      value: originalNow,
+    });
+    resetTerminalOutputPressure(term);
+  }
+});
+
+test("does not arm large-output for a burst plus two tiny trailing echoes", () => {
+  // Three samples can meet the min-batch count without being a follow stream
+  // when almost all lines sit in the first command dump.
+  const term = createFakeTerm({
+    rows: 24,
+    options: { scrollback: 10000 },
+    buffer: { active: { length: 200, baseY: 0 } },
+  });
+  const originalNow = performance.now.bind(performance);
+  let now = 55_000;
+
+  Object.defineProperty(performance, "now", {
+    configurable: true,
+    value: () => now,
+  });
+
+  try {
+    noteTerminalOutputPressureData(
+      term,
+      Array.from({ length: 12 }, (_, index) => `row-${index}`).join("\n") + "\n",
+    );
+    now += 300;
+    noteTerminalOutputPressureData(term, "\n");
+    now += 300;
     noteTerminalOutputPressureData(term, "user@host:~$ \n");
     assert.equal(getTerminalOutputPressure(term).largeOutput, false);
     assert.equal(shouldDegradeTerminalSideWork(term), false);

@@ -68,19 +68,30 @@ const LARGE_OUTPUT_RATE_BYTES = 16 * 1024;
  * Enter/echo as bulk output.
  *
  * Line count alone is not enough: one unsaturated `ls` / `git status` /
- * `docker ps` chunk can carry ≥8 newlines at a single timestamp. Require the
- * rolling samples to span real time *and* keep inter-sample gaps short so a
- * burst plus a later prompt echo is not treated as a follow stream.
+ * `docker ps` chunk can carry ≥8 newlines at a single timestamp. Require
+ * repeated batches spanning real time (not one dump + a later prompt echo).
+ * Gaps may exceed a few hundred ms because IPC/journal batching often
+ * delivers follow output every ~500ms; still reject long interactive quiet.
  */
 const SUSTAINED_LINE_WINDOW_MS = 1500;
 const SUSTAINED_LINE_RATE = 8;
 /** Minimum age of the oldest in-window line sample before classifying sustained. */
 const SUSTAINED_LINE_MIN_SPAN_MS = 400;
 /**
- * Max quiet gap between consecutive line samples. Larger gaps mean interactive
- * command/prompt spacing, not continuous `tail -f` / journalctl follow output.
+ * Repeated batches, not a single write plus one later echo. Two samples is
+ * exactly the burst-then-prompt shape we must keep on the normal path.
  */
-const SUSTAINED_LINE_MAX_GAP_MS = 350;
+const SUSTAINED_LINE_MIN_SAMPLES = 3;
+/**
+ * Max quiet gap between consecutive line samples. Allows periodic batch
+ * delivery (~500ms) while still rejecting sparse interactive spacing.
+ */
+const SUSTAINED_LINE_MAX_GAP_MS = 750;
+/**
+ * Lines outside the largest sample — one multi-line dump plus tiny echoes
+ * must not look like a follow stream even when sample count reaches the min.
+ */
+const SUSTAINED_LINE_MIN_SPREAD_LINES = 3;
 /**
  * Only skip line-timestamp markers at true flood rates. Early large-output
  * (16KB) and saturated multi-line still degrade highlight/prep, but keep the
@@ -155,16 +166,21 @@ const isSustainedLineStream = (
   recentLines: number,
 ): boolean => {
   if (recentLines < SUSTAINED_LINE_RATE) return false;
-  // One write (or several at the same timestamp) is a burst, not a follow stream.
-  if (state.recentLineSamples.length < 2) return false;
+  // One write (or a dump plus one later echo) is not a follow stream.
+  if (state.recentLineSamples.length < SUSTAINED_LINE_MIN_SAMPLES) return false;
   const oldestAt = state.recentLineSamples[0]!.at;
   if (now - oldestAt < SUSTAINED_LINE_MIN_SPAN_MS) return false;
-  // Reject burst-then-echo: e.g. docker ps (≥8 lines) then a prompt newline
-  // 400–1500ms later still spans the window but is not continuous activity.
-  for (let index = 1; index < state.recentLineSamples.length; index += 1) {
-    const gap = state.recentLineSamples[index]!.at - state.recentLineSamples[index - 1]!.at;
+  let maxSampleLines = 0;
+  for (let index = 0; index < state.recentLineSamples.length; index += 1) {
+    const sample = state.recentLineSamples[index]!;
+    if (sample.lines > maxSampleLines) maxSampleLines = sample.lines;
+    if (index === 0) continue;
+    const gap = sample.at - state.recentLineSamples[index - 1]!.at;
     if (gap > SUSTAINED_LINE_MAX_GAP_MS) return false;
   }
+  // Reject one large burst with trailing prompt/blank echoes that only pad
+  // the sample count without real multi-batch activity.
+  if (recentLines - maxSampleLines < SUSTAINED_LINE_MIN_SPREAD_LINES) return false;
   return true;
 };
 
