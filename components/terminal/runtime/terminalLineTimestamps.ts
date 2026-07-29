@@ -94,6 +94,21 @@ type TimestampStore = {
   reflowHookInstalled?: boolean;
   /** True after term.reset is wrapped to clear bare ledger stamps with the buffer. */
   resetHookInstalled?: boolean;
+  /**
+   * Column reflow happened while the alternate screen was active. Rematerialize
+   * against the normal buffer once it is active again — never pin anchors to alt.
+   */
+  deferredColumnReflowRematerialize?: boolean;
+  /**
+   * Nested writeTerminalDataWithSecondLedger depth. Parser-driven resets during
+   * term.write use this to restore post-reset stamps recorded before the write.
+   */
+  inBandWriteDepth?: number;
+  /**
+   * Stamps for printable text that follows an in-band RIS/DECCOLM in the current
+   * write. Survives the mid-write store clear so the post-reset row keeps a gutter.
+   */
+  inBandPostResetLedger?: TimestampLedgerEntry[] | null;
   /** @deprecated materialize path removed; always false. */
   ledgerMaterialized: boolean;
   /**
@@ -335,6 +350,25 @@ const getWraparoundAction = (sequence: string): boolean | null => {
   return modes.includes(7) ? final === "h" : null;
 };
 
+/** RIS (ESC c) or DECCOLM (CSI ? 3 h/l) — xterm full-resets the buffer. */
+const isBufferResettingSequence = (sequence: string): boolean => {
+  if (sequence === "\x1bc") return true;
+  const final = getCsiFinal(sequence);
+  if (final !== "h" && final !== "l") return false;
+  const params = sequence.slice(2, -1);
+  if (!params.startsWith("?")) return false;
+  const modes = params
+    .slice(1)
+    .split(";")
+    .map((part) => Number.parseInt(part, 10))
+    .filter(Number.isFinite);
+  return modes.includes(3);
+};
+
+const isAlternateBufferActive = (term: XTerm): boolean => (
+  ((term.buffer?.active as { type?: string } | undefined)?.type) === "alternate"
+);
+
 const isSgrSequence = (sequence: string): boolean =>
   getCsiFinal(sequence) === "m";
 
@@ -444,6 +478,11 @@ export const createTerminalLineTimestampSegmenter = (
             } else if (alternateScreenAction === "leave") {
               suspendedForAlternateScreen = false;
               resetLineState();
+            } else if (isBufferResettingSequence(sequence.sequence)) {
+              // RIS / DECCOLM return to a blank normal screen; post-reset text
+              // starts a fresh line that needs its own gutter stamp.
+              suspendedForAlternateScreen = false;
+              resetLineState();
             }
             pushDataSegment(segments, sequence.sequence);
             index = sequence.endIndex + 1;
@@ -550,6 +589,10 @@ const getTimestampStore = (term: XTerm): TimestampStore => {
  * column count is about to change. Saturated mode releases anchors for trim
  * perf; without this, xterm reflows with bare line numbers and the next
  * colsChanged rebase drops the entire gutter history.
+ *
+ * While the alternate screen is active, defer: rebase/materialize against
+ * buffer.active would discard normal-history lines (short alt length) and pin
+ * survivors in the alt buffer whose markers die on leave.
  */
 const installReflowMaterializeHook = (term: XTerm, store: TimestampStore): void => {
   if (store.reflowHookInstalled) return;
@@ -571,11 +614,15 @@ const installReflowMaterializeHook = (term: XTerm, store: TimestampStore): void 
       && Number.isFinite(prevCols)
       && cols !== prevCols
     ) {
-      // True-flood writes can move the trim sentinel without syncing bare
-      // ledger offsets. Rebase first so rematerialized anchors land on the
-      // current rows; otherwise colsChanged keeps those mis-pinned markers.
-      rebaseLedgerForScrollback(term, store);
-      materializeTimestampLedgerToMarkers(term);
+      if (isAlternateBufferActive(term)) {
+        store.deferredColumnReflowRematerialize = true;
+      } else {
+        // True-flood writes can move the trim sentinel without syncing bare
+        // ledger offsets. Rebase first so rematerialized anchors land on the
+        // current rows; otherwise colsChanged keeps those mis-pinned markers.
+        rebaseLedgerForScrollback(term, store);
+        materializeTimestampLedgerToMarkers(term);
+      }
     }
     originalResize.call(this, cols, rows);
   };
@@ -592,6 +639,10 @@ const installReflowMaterializeHook = (term: XTerm, store: TimestampStore): void 
  * CoreBrowserTerminal handles that via its own reset() — not the public
  * Terminal.reset wrapper — so wrapping only term.reset misses parser-driven
  * buffer clears. Hook _core.reset (shared by both paths) when present.
+ *
+ * When RIS/DECCOLM arrives mid-chunk with trailing printable text, the write
+ * path pre-records post-reset stamps in inBandPostResetLedger; restore them
+ * after the clear so that text still gets a gutter label.
  */
 const installBufferResetHook = (term: XTerm, store: TimestampStore): void => {
   if (store.resetHookInstalled) return;
@@ -599,7 +650,19 @@ const installBufferResetHook = (term: XTerm, store: TimestampStore): void => {
 
   const clearAfter = (invokeOriginal: () => void): void => {
     invokeOriginal();
+    const preserve = (store.inBandWriteDepth ?? 0) > 0
+      ? store.inBandPostResetLedger
+      : null;
     resetTimestampStore(store);
+    if (preserve && preserve.length > 0) {
+      for (const entry of preserve) {
+        entry.marker = undefined;
+        store.ledger.push(entry);
+        store.lastStampSecondKey = entry.secondKey;
+      }
+      // Keep the same list so the in-flight write can still attach anchors.
+      store.inBandPostResetLedger = preserve;
+    }
   };
 
   // Parser-driven RIS / DECCOLM and public Terminal.reset both end here.
@@ -1087,6 +1150,31 @@ const maintainTrimSentinel = (term: XTerm, store: TimestampStore): void => {
 };
 
 /**
+ * Buffer metrics for ledger rebase. Stamps live on normal-buffer history; when
+ * the alternate screen is active, prefer buffer.normal so a short alt length
+ * cannot discard retained scrollback stamps.
+ */
+const readLedgerBufferMetrics = (
+  term: XTerm,
+): { baseY: number; bufferLength: number } => {
+  try {
+    const buffers = term.buffer as {
+      normal?: { baseY?: number; length?: number };
+      active?: { type?: string; baseY?: number; length?: number };
+    } | undefined;
+    const active = buffers?.active;
+    const useNormal = active?.type === "alternate" && buffers.normal;
+    const source = useNormal ? buffers.normal : active;
+    return {
+      baseY: typeof source?.baseY === "number" ? source.baseY : 0,
+      bufferLength: typeof source?.length === "number" ? source.length : 0,
+    };
+  } catch {
+    return { baseY: 0, bufferLength: 0 };
+  }
+};
+
+/**
  * Rebase / refresh ledger anchors after write, paint, or resize.
  *
  * - Sparse markers: xterm already moved them for scrollback trim + reflow;
@@ -1100,17 +1188,7 @@ const maintainTrimSentinel = (term: XTerm, store: TimestampStore): void => {
  *   never paint wrong times on reshuffled history (anchored stamps survive).
  */
 const rebaseLedgerForScrollback = (term: XTerm, store: TimestampStore): void => {
-  let baseY = 0;
-  let bufferLength = 0;
-  try {
-    const active = term.buffer?.active as
-      | { baseY?: number; length?: number }
-      | undefined;
-    baseY = typeof active?.baseY === "number" ? active.baseY : 0;
-    bufferLength = typeof active?.length === "number" ? active.length : 0;
-  } catch {
-    return;
-  }
+  const { baseY, bufferLength } = readLedgerBufferMetrics(term);
 
   const cols = _getTerminalColumnCount(term);
   const colsChanged = store.lastSeenCols !== null
@@ -1238,10 +1316,14 @@ export const getTerminalLineTimestampLedgerCount = (term: XTerm): number =>
  * Re-attach sparse xterm markers for bare ledger stamps so an upcoming column
  * reflow can move them. Used by the term.resize hook before cols change;
  * saturated steady-state still releases markers again after the next write.
+ *
+ * No-ops while the alternate screen is active: registerMarker pins to the alt
+ * buffer, and those markers are disposed when the TUI exits.
  */
 export const materializeTimestampLedgerToMarkers = (term: XTerm): number => {
   const store = getTimestampStore(term);
   if (store.ledger.length === 0) return 0;
+  if (isAlternateBufferActive(term)) return 0;
   const registerMarker = (
     term as XTerm & { registerMarker?: (offset: number) => TimestampMarker | undefined }
   ).registerMarker;
@@ -1266,6 +1348,20 @@ export const materializeTimestampLedgerToMarkers = (term: XTerm): number => {
     attached += 1;
   }
   return attached;
+};
+
+/**
+ * Finish a column-reflow rematerialize that was deferred while alt was active.
+ * Must run on the normal buffer before rebase sees colsChanged.
+ */
+const rematerializeDeferredColumnReflowIfNeeded = (
+  term: XTerm,
+  store: TimestampStore,
+): void => {
+  if (!store.deferredColumnReflowRematerialize) return;
+  if (isAlternateBufferActive(term)) return;
+  materializeTimestampLedgerToMarkers(term);
+  store.deferredColumnReflowRematerialize = false;
 };
 
 const internTerminalLineTimestampLabel = (
@@ -1451,6 +1547,7 @@ const resetTimestampStore = (store: TimestampStore) => {
   store.lastSeenBufferLength = null;
   store.lastSeenCols = null;
   store.ledgerMaterialized = false;
+  store.deferredColumnReflowRematerialize = false;
   store.orphanedMarkers = [];
   store.segmenter.reset();
   store.timestampOnlyPrefix = "";
@@ -1948,6 +2045,7 @@ export const getVisibleTerminalLineTimestampRows = (
     return [];
   }
   const store = getTimestampStore(term);
+  rematerializeDeferredColumnReflowIfNeeded(term, store);
   rebaseLedgerForScrollback(term, store);
   let bufferLength = 0;
   try {
@@ -2022,11 +2120,82 @@ const writeTerminalDataWithSecondLedger = (
     isTerminalScrollbackSaturated(term)
     && (store.trimSentinelLine === null || isTrimSentinelStale(store))
   ) {
+    rematerializeDeferredColumnReflowIfNeeded(term, store);
     rebaseLedgerForScrollback(term, store);
     maintainTrimSentinel(term, store);
   }
   let ledgerChanged = false;
   const pendingAnchors: TimestampLedgerEntry[] = [];
+  let recordingPostReset = false;
+  store.inBandWriteDepth = (store.inBandWriteDepth ?? 0) + 1;
+  store.inBandPostResetLedger = null;
+
+  const clearLedgerForInBandReset = (): void => {
+    for (const entry of store.ledger) {
+      disposeLedgerMarker(entry);
+    }
+    store.ledger = [];
+    store.lastStampSecondKey = null;
+    clearTrimSentinel(store);
+    pendingAnchors.length = 0;
+    recordingPostReset = true;
+    store.inBandPostResetLedger = [];
+    ledgerChanged = true;
+    stampCursor = {
+      absoluteLine: 0,
+      column: 0,
+      wraparoundMode: true,
+      altActive: false,
+    };
+  };
+
+  const notePendingStamp = (entry: TimestampLedgerEntry): void => {
+    pendingAnchors.push(entry);
+    if (recordingPostReset && store.inBandPostResetLedger) {
+      store.inBandPostResetLedger.push(entry);
+    }
+  };
+
+  const advanceDataHandlingResets = (segmentData: string): void => {
+    let index = 0;
+    while (index < segmentData.length) {
+      if (segmentData[index] !== "\x1b") {
+        const nextEsc = segmentData.indexOf("\x1b", index);
+        const end = nextEsc === -1 ? segmentData.length : nextEsc;
+        stampCursor = advanceStampCursorThroughData(
+          term,
+          stampCursor,
+          segmentData.slice(index, end),
+          columns,
+        );
+        index = end;
+        continue;
+      }
+      const sequence = readEscapeSequence(segmentData, index);
+      if (!sequence || !sequence.complete) {
+        stampCursor = advanceStampCursorThroughData(
+          term,
+          stampCursor,
+          segmentData.slice(index),
+          columns,
+        );
+        break;
+      }
+      if (isBufferResettingSequence(sequence.sequence)) {
+        clearLedgerForInBandReset();
+        index = sequence.endIndex + 1;
+        continue;
+      }
+      stampCursor = advanceStampCursorThroughData(
+        term,
+        stampCursor,
+        sequence.sequence,
+        columns,
+      );
+      index = sequence.endIndex + 1;
+    }
+  };
+
   for (const segment of segments) {
     if (segment.kind === "timestamp") {
       // Segmenter only emits timestamps off the alt screen; still guard line.
@@ -2040,24 +2209,24 @@ const writeTerminalDataWithSecondLedger = (
           stampCursor.absoluteLine,
           capacity,
         );
-        pendingAnchors.push(entry);
+        notePendingStamp(entry);
         ledgerChanged = true;
       }
       continue;
     }
-    stampCursor = advanceStampCursorThroughData(
-      term,
-      stampCursor,
-      segment.data,
-      columns,
-    );
+    advanceDataHandlingResets(segment.data);
   }
 
   const writeStartedAt = shouldMeasureDiagnostics ? performance.now() : 0;
   term.write(data, () => {
+    store.inBandWriteDepth = Math.max(0, (store.inBandWriteDepth ?? 1) - 1);
+    if ((store.inBandWriteDepth ?? 0) === 0) {
+      store.inBandPostResetLedger = null;
+    }
     // Full scrollback: drop live anchors (amortized) and skip new ones so
     // continuous log tails are not O(markers) per trimmed line. Rebase first so
     // the trim sentinel can shift bare lines for this write's circular recycle.
+    rematerializeDeferredColumnReflowIfNeeded(term, store);
     rebaseLedgerForScrollback(term, store);
     releaseLedgerMarkersWhileSaturated(term, store);
     attachLedgerAnchors(term, store, pendingAnchors);

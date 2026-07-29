@@ -40,7 +40,12 @@ const createFakeTerm = (options: {
   const writes: string[] = [];
   const markerLines: number[] = [];
   const disposedMarkerLines: number[] = [];
-  const liveMarkers: Array<{ line: number; isDisposed: boolean; dispose: () => void }> = [];
+  const liveMarkers: Array<{
+    line: number;
+    isDisposed: boolean;
+    dispose: () => void;
+    attachedScreen: "normal" | "alternate";
+  }> = [];
   let cursorLine = 0;
   const cols = options.cols ?? Number.POSITIVE_INFINITY
   let wraparoundMode = options.wraparoundMode ?? true;
@@ -280,6 +285,12 @@ const createFakeTerm = (options: {
 
   const leaveAlternate = () => {
     if (screen !== "alternate") return;
+    // Real xterm clears the alt buffer on leave; its markers are disposed.
+    for (const marker of liveMarkers) {
+      if (!marker.isDisposed && marker.attachedScreen === "alternate") {
+        marker.dispose();
+      }
+    }
     screen = "normal";
     cursorLine = normalState.absoluteCursorLine;
   };
@@ -331,6 +342,12 @@ const createFakeTerm = (options: {
     write(data: string, callback?: () => void) {
       writes.push(data);
       for (let index = 0; index < data.length; index += 1) {
+        // RIS (ESC c): mirror InputHandler → onRequestReset → _core.reset mid-chunk.
+        if (data[index] === "\x1b" && data[index + 1] === "c") {
+          term._core.reset();
+          index += 1;
+          continue;
+        }
         const sequence = readCsiSequence(data, index);
         if (sequence) {
           if (
@@ -348,6 +365,15 @@ const createFakeTerm = (options: {
             || sequence.sequence === "\x1b[?1047l"
           ) {
             leaveAlternate();
+            index = sequence.endIndex;
+            continue;
+          }
+          // DECCOLM (CSI ? 3 h/l) triggers a full buffer reset in xterm.
+          if (
+            sequence.sequence === "\x1b[?3h"
+            || sequence.sequence === "\x1b[?3l"
+          ) {
+            term._core.reset();
             index = sequence.endIndex;
             continue;
           }
@@ -406,14 +432,15 @@ const createFakeTerm = (options: {
       callback?.();
     },
     registerMarker(offset: number) {
-      // Markers attach to the normal buffer in production for our ledger path
-      // after leave; while on alt, offset is still relative to active cursor.
+      // Markers attach to the active buffer (normal or alt), matching xterm.
       const state = currentState();
       const line = state.absoluteCursorLine + offset;
+      const attachedScreen = screen;
       markerLines.push(line);
       const marker = {
         line,
         isDisposed: false,
+        attachedScreen,
         dispose() {
           if (marker.isDisposed) return;
           marker.isDisposed = true;
@@ -1528,6 +1555,89 @@ test("term.resize hook rematerializes saturated ledger before column reflow", as
     `resize hook must preserve saturated ledger (${ledgerBefore} before)`,
   );
   assert.ok(painted.length > 0, `expected gutter rows after term.resize, got ${JSON.stringify(painted)}`);
+});
+
+test("column resize on alternate screen preserves saturated normal-buffer history", async () => {
+  // Saturated mode releases ledger anchors. Rematerializing while a TUI holds
+  // the alternate screen would rebase against the short alt buffer and pin
+  // survivors there — those markers die on leave and wipe gutter history.
+  const fake = createFakeTerm({ rows: 4, scrollback: 4, circularTrim: true, cols: 80 });
+  const { term } = fake;
+
+  for (let second = 0; second < 20; second += 1) {
+    writeTerminalDataWithLineTimestamps(
+      term as never,
+      `seed-${second}\r\n`,
+      () => {},
+      { timestampDate: new Date(2026, 5, 6, 12, 0, second % 60) },
+    );
+  }
+  await new Promise((resolve) => { setTimeout(resolve, 0); });
+  const ledgerBefore = getTerminalLineTimestampLedgerCount(term as never);
+  assert.ok(ledgerBefore > 1, "expected a populated saturated ledger");
+  assert.equal(isTerminalScrollbackSaturated(term as never), true);
+
+  getVisibleTerminalLineTimestampRows(term as never);
+  // Short alt viewport (length ≈ rows): rebase-vs-active would drop normal history.
+  writeTerminalDataWithLineTimestamps(term as never, "\x1b[?1049h", () => {});
+  assert.equal((term.buffer.active as { type: string }).type, "alternate");
+  assert.ok(
+    (term.buffer.active as { length: number }).length <= term.rows,
+    "expected a short alternate buffer relative to normal history",
+  );
+
+  assert.equal(typeof (term as { resize?: unknown }).resize, "function");
+  (term as { resize: (cols: number, rows: number) => void }).resize(40, term.rows);
+
+  assert.ok(
+    getTerminalLineTimestampLedgerCount(term as never) >= ledgerBefore - 2,
+    `alt-screen column resize must not drop normal history (${ledgerBefore} before, now ${getTerminalLineTimestampLedgerCount(term as never)})`,
+  );
+
+  // Leave alt: alt-anchored markers dispose. History must still paint.
+  writeTerminalDataWithLineTimestamps(term as never, "\x1b[?1049l", () => {});
+  assert.equal((term.buffer.active as { type: string }).type, "normal");
+  fake.setViewportY(Math.max(0, fake.getNormalAbsoluteLine() - (term.rows - 1)));
+  const painted = getVisibleTerminalLineTimestampRows(term as never);
+  assert.ok(
+    getTerminalLineTimestampLedgerCount(term as never) > 0,
+    "normal-buffer stamps must survive alt resize + leave",
+  );
+  assert.ok(painted.length > 0, `expected gutter rows after alt resize, got ${JSON.stringify(painted)}`);
+});
+
+test("inline RIS followed by text keeps a gutter stamp for post-reset output", async () => {
+  // Segmentation + ledger insert run before term.write. Parser-driven RIS
+  // clears the store mid-chunk; post-reset printable text must keep its stamp.
+  const fake = createFakeTerm({ rows: 8, cols: 80 });
+  const { term } = fake;
+
+  writeTerminalDataWithLineTimestamps(
+    term as never,
+    "before\r\n",
+    () => {},
+    { timestampDate: new Date(2026, 5, 6, 12, 0, 0) },
+  );
+  assert.ok(getTerminalLineTimestampLedgerCount(term as never) > 0);
+
+  writeTerminalDataWithLineTimestamps(
+    term as never,
+    "\x1bcafter-ris\r\n",
+    () => {},
+    { timestampDate: new Date(2026, 5, 6, 12, 0, 1) },
+  );
+
+  assert.equal(
+    getTerminalLineTimestampLedgerCount(term as never),
+    1,
+    "pre-RIS stamps clear; post-RIS text must keep exactly one stamp",
+  );
+  const painted = getVisibleTerminalLineTimestampRows(term as never);
+  assert.deepEqual(
+    painted,
+    [{ row: 0, label: "12:00:01" }],
+    `post-RIS row must keep its gutter stamp, got ${JSON.stringify(painted)}`,
+  );
 });
 
 test("simple ASCII control text gate matches seq-style floods", () => {
