@@ -73,6 +73,15 @@ type TimestampStore = {
    */
   lastSeenBaseY: number | null;
   lastSeenBufferLength: number | null;
+  /**
+   * Single live marker kept while scrollback is saturated. Real xterm recycles
+   * its circular buffer with constant baseY/length and only moves markers via
+   * onTrim; after ledger anchors are released for perf, this sentinel is how
+   * bare ledger lines learn the trim delta.
+   */
+  trimSentinel?: TimestampMarker;
+  /** Last observed trimSentinel.line; null when no sentinel is armed. */
+  trimSentinelLine: number | null;
   /** Last seen cols; when cols change, reflow may have shifted bare line numbers. */
   lastSeenCols: number | null;
   /** @deprecated materialize path removed; always false. */
@@ -504,6 +513,7 @@ const getTimestampStore = (term: XTerm): TimestampStore => {
       lastStampSecondKey: null,
       lastSeenBaseY: null,
       lastSeenBufferLength: null,
+      trimSentinelLine: null,
       lastSeenCols: null,
       ledgerMaterialized: false,
       orphanedMarkers: [],
@@ -836,6 +846,81 @@ const resolveBufferMaxLines = (term: XTerm): number => {
 };
 
 /**
+ * Shift bare ledger lines using the saturated-mode trim sentinel.
+ * Real xterm keeps baseY/length fixed while recycling; only marker.onTrim
+ * observes those drops once ledger anchors have been released.
+ */
+const applyCircularTrimDeltaFromSentinel = (store: TimestampStore): void => {
+  if (store.trimSentinelLine === null) return;
+  const sentinel = store.trimSentinel;
+  let delta = 0;
+  if (
+    sentinel
+    && !sentinel.isDisposed
+    && typeof sentinel.line === "number"
+    && Number.isFinite(sentinel.line)
+  ) {
+    delta = store.trimSentinelLine - sentinel.line;
+    store.trimSentinelLine = sentinel.line;
+  } else {
+    // Sentinel was trimmed off the top: at least its prior line + 1 fell away.
+    delta = store.trimSentinelLine + 1;
+    store.trimSentinel = undefined;
+    store.trimSentinelLine = null;
+  }
+  if (delta <= 0) return;
+  for (const entry of store.ledger) {
+    if (entry.marker && !entry.marker.isDisposed) continue;
+    entry.line -= delta;
+  }
+};
+
+const clearTrimSentinel = (store: TimestampStore): void => {
+  const sentinel = store.trimSentinel;
+  store.trimSentinel = undefined;
+  store.trimSentinelLine = null;
+  if (!sentinel || sentinel.isDisposed) return;
+  enqueueOrphanedMarker(store, sentinel);
+};
+
+/**
+ * Keep one cursor-pinned marker while saturated so the next circular recycle
+ * remains observable after ledger anchors are retired.
+ */
+const maintainTrimSentinel = (term: XTerm, store: TimestampStore): void => {
+  if (!isTerminalScrollbackSaturated(term)) {
+    if (store.trimSentinel || store.trimSentinelLine !== null) {
+      clearTrimSentinel(store);
+      drainOrphanedMarkers(store);
+    }
+    return;
+  }
+  clearTrimSentinel(store);
+  const registerMarker = (
+    term as XTerm & { registerMarker?: (offset: number) => TimestampMarker | undefined }
+  ).registerMarker;
+  if (typeof registerMarker !== "function") {
+    if (store.orphanedMarkers.length > 0) drainOrphanedMarkers(store);
+    return;
+  }
+  let marker: TimestampMarker | undefined;
+  try {
+    marker = registerMarker.call(term, 0);
+  } catch {
+    marker = undefined;
+  }
+  // Retire the previous sentinel immediately so re-pins do not accumulate.
+  if (store.orphanedMarkers.length > 0) {
+    drainOrphanedMarkers(store);
+  }
+  if (!marker || marker.isDisposed) return;
+  store.trimSentinel = marker;
+  store.trimSentinelLine = typeof marker.line === "number" && Number.isFinite(marker.line)
+    ? marker.line
+    : null;
+};
+
+/**
  * Rebase / refresh ledger anchors after write, paint, or resize.
  *
  * - Sparse markers: xterm already moved them for scrollback trim + reflow;
@@ -843,6 +928,8 @@ const resolveBufferMaxLines = (term: XTerm): number => {
  * - Bare line numbers (marker attach failed): only subtract baseY when the
  *   buffer is actually full and trimming — never while still growing (MOTD
  *   vanishing on scroll).
+ * - Saturated circular recycle: baseY/length stay fixed; the trim sentinel
+ *   supplies the delta after ledger markers were released for performance.
  * - Cols change: reflow invalidates bare numbers; drop unanchored stamps so we
  *   never paint wrong times on reshuffled history (anchored stamps survive).
  */
@@ -882,6 +969,11 @@ const rebaseLedgerForScrollback = (term: XTerm, store: TimestampStore): void => 
       if (entry.marker && !entry.marker.isDisposed) continue;
       entry.line -= delta;
     }
+  }
+
+  // Real xterm circular trim: length/baseY unchanged; sentinel.line fell.
+  if (bufferIsFull) {
+    applyCircularTrimDeltaFromSentinel(store);
   }
 
   if (colsChanged) {
@@ -1004,8 +1096,9 @@ const enqueueOrphanedMarker = (
 
 /**
  * Retire live ledger markers while scrollback is saturated so continuous log
- * tails do not pay O(markers) on every trim. Keep bare line numbers; rebase
- * already handles full-buffer baseY growth.
+ * tails do not pay O(markers) on every trim. Copy marker.line onto bare ledger
+ * entries first; circular trim deltas then come from the trim sentinel (real
+ * xterm keeps baseY/length fixed while recycling).
  */
 const releaseLedgerMarkersWhileSaturated = (
   term: XTerm,
@@ -1016,8 +1109,16 @@ const releaseLedgerMarkersWhileSaturated = (
   for (const entry of store.ledger) {
     const marker = entry.marker;
     if (!marker) continue;
+    if (marker.isDisposed) {
+      // Trimmed away with its scrollback row — drop on the next rebase filter.
+      entry.marker = undefined;
+      entry.line = -1;
+      continue;
+    }
+    if (typeof marker.line === "number" && Number.isFinite(marker.line)) {
+      entry.line = Math.max(0, marker.line);
+    }
     entry.marker = undefined;
-    if (marker.isDisposed) continue;
     enqueueOrphanedMarker(store, marker);
     released = true;
   }
@@ -1139,11 +1240,12 @@ const resetTimestampStore = (store: TimestampStore) => {
     entry.disposeListener?.dispose();
     entry.marker.dispose?.();
   }
-  for (const marker of store.orphanedMarkers) {
-    if (!marker.isDisposed) marker.dispose?.();
-  }
+  clearTrimSentinel(store);
   for (const entry of store.ledger) {
     disposeLedgerMarker(entry);
+  }
+  for (const marker of store.orphanedMarkers) {
+    if (!marker.isDisposed) marker.dispose?.();
   }
   store.entries = [];
   store.ledger = [];
@@ -1745,10 +1847,13 @@ const writeTerminalDataWithSecondLedger = (
   const writeStartedAt = shouldMeasureDiagnostics ? performance.now() : 0;
   term.write(data, () => {
     // Full scrollback: drop live anchors (amortized) and skip new ones so
-    // continuous log tails are not O(markers) per trimmed line.
+    // continuous log tails are not O(markers) per trimmed line. Rebase first so
+    // the trim sentinel can shift bare lines for this write's circular recycle.
+    rebaseLedgerForScrollback(term, store);
     releaseLedgerMarkersWhileSaturated(term, store);
     attachLedgerAnchors(term, store, pendingAnchors);
     rebaseLedgerForScrollback(term, store);
+    maintainTrimSentinel(term, store);
     if (ledgerChanged) {
       notifyTimestampStore(store);
     }

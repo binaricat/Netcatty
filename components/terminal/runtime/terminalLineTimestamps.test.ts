@@ -25,6 +25,12 @@ const createFakeTerm = (options: {
   wraparoundMode?: boolean;
   scrollback?: number;
   rows?: number;
+  /**
+   * When true, a full buffer recycles like real xterm: length/baseY stay fixed
+   * and live markers shift down via onTrim-style line decrements. Default false
+   * keeps the growing-baseY model used by older tests.
+   */
+  circularTrim?: boolean;
 } = {}) => {
   const writes: string[] = [];
   const markerLines: number[] = [];
@@ -35,6 +41,7 @@ const createFakeTerm = (options: {
   let wraparoundMode = options.wraparoundMode ?? true;
   const scrollback = options.scrollback;
   const rows = options.rows ?? 24;
+  const circularTrim = options.circularTrim === true;
   const isCombiningMark = (char: string): boolean => {
     const code = char.codePointAt(0);
     return code !== undefined && /\p{Mark}/u.test(String.fromCodePoint(code));
@@ -124,8 +131,14 @@ const createFakeTerm = (options: {
 
   // When not yet full, length grows with content but never below viewport.
   // When full, length stays at maxBufferLines and baseY tracks the trim offset.
+  // circularTrim uses growing absolute line ids (like the default fake) but
+  // reports an unclamped length so rebase does not discard cursor-adjacent
+  // bare stamps the way real xterm's 0..length-1 indices would not.
   const resolveLength = (state: BufferState): number => {
     if (!Number.isFinite(maxBufferLines)) {
+      return Math.max(rows, state.absoluteCursorLine + 1);
+    }
+    if (circularTrim) {
       return Math.max(rows, state.absoluteCursorLine + 1);
     }
     return Math.min(
@@ -137,17 +150,38 @@ const createFakeTerm = (options: {
   const trimScrollbackIfNeeded = (state: BufferState) => {
     if (!Number.isFinite(maxBufferLines)) return;
     while (state.absoluteCursorLine - state.baseY + 1 > maxBufferLines) {
-      state.baseY += 1;
-    }
-    if (screen !== "normal") return;
-    const keepFromAbsolute = state.baseY;
-    for (const marker of liveMarkers) {
-      if (!marker.isDisposed && marker.line < keepFromAbsolute) {
-        marker.dispose();
+      const maxBaseY = Math.max(0, maxBufferLines - rows);
+      // Real xterm: grow ybase until the buffer is full, then recycle in place
+      // (constant baseY) and shift markers down.
+      if (circularTrim && state.baseY >= maxBaseY) {
+        state.absoluteCursorLine -= 1;
+        if (screen === "normal") {
+          for (const marker of liveMarkers) {
+            if (marker.isDisposed) continue;
+            marker.line -= 1;
+            if (marker.line < 0) marker.dispose();
+          }
+          const nextText = new Map<number, string>();
+          for (const [key, value] of state.lineText) {
+            const nextKey = key - 1;
+            if (nextKey < 0) continue;
+            nextText.set(nextKey, value);
+          }
+          state.lineText = nextText;
+        }
+        continue;
       }
-    }
-    for (const key of [...state.lineText.keys()]) {
-      if (key < keepFromAbsolute) state.lineText.delete(key);
+      state.baseY += 1;
+      if (screen !== "normal") continue;
+      const keepFromAbsolute = state.baseY;
+      for (const marker of liveMarkers) {
+        if (!marker.isDisposed && marker.line < keepFromAbsolute) {
+          marker.dispose();
+        }
+      }
+      for (const key of [...state.lineText.keys()]) {
+        if (key < keepFromAbsolute) state.lineText.delete(key);
+      }
     }
   };
 
@@ -976,15 +1010,20 @@ test("saturated scrollback keeps ledger stamps without attaching new live marker
     () => {},
     { timestampDate: new Date(2026, 5, 6, 12, 1, 0) },
   );
-  assert.equal(liveMarkers.length, markersBefore, "must not registerMarker while saturated");
+  assert.equal(
+    liveMarkers.length,
+    markersBefore + 1,
+    "saturated writes may re-pin one trim sentinel, not per-stamp markers",
+  );
   assert.ok(getTerminalLineTimestampLedgerCount(term as never) >= ledgerBefore);
 
   // Existing anchors are retired on an amortized drain so trim stays cheap.
+  // One cursor-pinned trim sentinel remains so circular recycles stay visible.
   await new Promise((resolve) => { setTimeout(resolve, 0); });
   assert.equal(
     liveMarkers.filter((marker) => !marker.isDisposed).length,
-    0,
-    "saturated writes should release live ledger markers",
+    1,
+    "saturated writes should release ledger markers but keep one trim sentinel",
   );
 
   // Fake term keeps viewport at baseY=0 until trim; pin to the bottom so paint
@@ -994,6 +1033,56 @@ test("saturated scrollback keeps ledger stamps without attaching new live marker
   assert.ok(
     painted.some((row) => row.label === "12:01:00"),
     `expected saturated bare-line stamp in gutter, got ${JSON.stringify(painted)}`,
+  );
+});
+
+test("circular saturated trim shifts bare ledger lines while baseY stays fixed", async () => {
+  // Real xterm recycles with constant baseY/length; releasing ledger markers
+  // must not freeze gutter stamps on overwritten rows (#2600 Codex P1).
+  const fake = createFakeTerm({ rows: 4, scrollback: 4, circularTrim: true });
+  const { term } = fake;
+  const maxBaseY = 4; // maxBufferLines(8) - rows(4)
+
+  // Fill until ybase has reached its circular ceiling (real xterm steady state).
+  for (let second = 0; second < 20; second += 1) {
+    writeTerminalDataWithLineTimestamps(
+      term as never,
+      `seed-${second}\r\n`,
+      () => {},
+      { timestampDate: new Date(2026, 5, 6, 12, 0, second % 60) },
+    );
+  }
+  assert.equal(isTerminalScrollbackSaturated(term as never), true);
+  assert.equal(fake.getBaseY(), maxBaseY);
+  const baseYWhileFull = fake.getBaseY();
+
+  for (let second = 0; second < 8; second += 1) {
+    writeTerminalDataWithLineTimestamps(
+      term as never,
+      `recycle-${second}\r\n`,
+      () => {},
+      { timestampDate: new Date(2026, 5, 6, 12, 1, second) },
+    );
+  }
+  assert.equal(
+    fake.getBaseY(),
+    baseYWhileFull,
+    "circular recycle must not bump baseY once the buffer is full",
+  );
+
+  await new Promise((resolve) => { setTimeout(resolve, 0); });
+  fake.setViewportY(Math.max(0, fake.getAbsoluteCursorLine() - (term.rows - 1)));
+  const painted = getVisibleTerminalLineTimestampRows(term as never);
+  assert.ok(painted.length > 0, "expected gutter rows after circular recycle");
+  // Early seed stamps must have scrolled away with the recycled top lines.
+  assert.equal(
+    painted.some((row) => row.label === "12:00:00"),
+    false,
+    `stale top-of-buffer stamp should be gone, got ${JSON.stringify(painted)}`,
+  );
+  assert.ok(
+    painted.some((row) => row.label.startsWith("12:01:")),
+    `expected post-recycle stamps in gutter, got ${JSON.stringify(painted)}`,
   );
 });
 
