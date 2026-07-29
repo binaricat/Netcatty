@@ -163,6 +163,14 @@ export const isTerminalScrollbackSaturated = (term: XTerm): boolean => {
     const maxLines = rows + scrollback;
     const length = typeof active.length === "number" ? active.length : 0;
     if (length <= 0) return false;
+    const baseY = typeof active.baseY === "number" && Number.isFinite(active.baseY)
+      ? Math.max(0, Math.floor(active.baseY))
+      : 0;
+    // xterm seeds `length` to `rows` (blank viewport) with baseY=0 before any
+    // scrollback exists. When scrollback <= rows, maxLines-slack === rows, so a
+    // length-only check would look "full" from session start and arm the long
+    // saturated quiet window / sentinel churn on ordinary newlines.
+    if (baseY <= 0 && length <= rows) return false;
     // Treat "within one viewport of full" as saturated — cheap, stable, and
     // matches when xterm starts trimming aggressively on multi-line floods.
     // Never let slack exceed the scrollback itself (tiny histories would

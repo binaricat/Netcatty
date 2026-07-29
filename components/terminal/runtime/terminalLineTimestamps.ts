@@ -7,11 +7,20 @@ export type TerminalLineTimestampSegment =
   | { kind: "data"; data: string }
   | { kind: "timestamp"; label: string };
 
+export type TerminalLineTimestampSegmenterLineState = {
+  atLineStart: boolean;
+  currentLineStamped: boolean;
+  suspendedForAlternateScreen: boolean;
+};
+
 export type TerminalLineTimestampSegmenter = {
   append: (data: string, timestampDate?: Date) => TerminalLineTimestampSegment[];
   reset: () => void;
   flushPendingEscapeSequence: () => string;
   setAlternateScreenActive: (active: boolean) => void;
+  /** Snapshot line/alt state (not pending escape — that uses timestampOnlyPrefix). */
+  getLineState: () => TerminalLineTimestampSegmenterLineState;
+  setLineState: (state: TerminalLineTimestampSegmenterLineState) => void;
 };
 
 type TerminalLineTimestampSegmenterOptions = {
@@ -426,17 +435,6 @@ const isBulkMeasurableEscapeSequence = (sequence: string): boolean =>
   getAlternateScreenAction(sequence) === null
   && (getWraparoundAction(sequence) !== null || isSgrSequence(sequence));
 
-const isPotentialAlternateScreenSequence = (sequence: string): boolean => {
-  if (!sequence.startsWith("\x1b[?")) return false;
-
-  const params = sequence.slice(3).split(";");
-  const alternateScreenModes = ["47", "1047", "1049"];
-  return params.some((part) => (
-    part === ""
-    || alternateScreenModes.some((mode) => mode.startsWith(part) || part.startsWith(mode))
-  ));
-};
-
 const isPrintableOutput = (char: string): boolean => {
   if (char === "\t") return true;
   const code = char.codePointAt(0);
@@ -593,6 +591,18 @@ export const createTerminalLineTimestampSegmenter = (
         resetLineState();
       }
     },
+    getLineState() {
+      return {
+        atLineStart,
+        currentLineStamped,
+        suspendedForAlternateScreen,
+      };
+    },
+    setLineState(state: TerminalLineTimestampSegmenterLineState) {
+      atLineStart = state.atLineStart;
+      currentLineStamped = state.currentLineStamped;
+      suspendedForAlternateScreen = state.suspendedForAlternateScreen;
+    },
   };
 };
 
@@ -710,10 +720,18 @@ const installBufferResetHook = (term: XTerm, store: TimestampStore): void => {
 
   const clearAfter = (invokeOriginal: () => void): void => {
     invokeOriginal();
-    const preserve = (store.inBandWriteDepth ?? 0) > 0
-      ? store.inBandPostResetLedger
-      : null;
+    const inBand = (store.inBandWriteDepth ?? 0) > 0;
+    const preserve = inBand ? store.inBandPostResetLedger : null;
+    // Pre-write segmentation already advanced past RIS/DECCOLM + trailing text.
+    // Keep that line state (and any incomplete control prefix) across the store
+    // clear so a later chunk continuing the same physical row does not stamp twice.
+    const preservedLineState = inBand ? store.segmenter.getLineState() : null;
+    const preservedPrefix = inBand ? store.timestampOnlyPrefix : "";
     resetTimestampStore(store);
+    if (preservedLineState) {
+      store.segmenter.setLineState(preservedLineState);
+      store.timestampOnlyPrefix = preservedPrefix;
+    }
     if (preserve && preserve.length > 0) {
       for (const entry of preserve) {
         entry.marker = undefined;
@@ -2179,8 +2197,14 @@ const writeTerminalDataWithSecondLedger = (
   const stampDate = options?.timestampDate ?? new Date();
   const segments = store.segmenter.append(dataForTimestamps, stampDate);
 
+  // Retain any incomplete ESC/CSI/OSC across writes — not only alt-screen
+  // candidates. Split RIS (`ESC` | `c`) and CSI L/M (`ESC [` | `1M`) must still
+  // drive in-band reset / rematerialize once the sequence completes.
   const pendingEscapeSequence = store.segmenter.flushPendingEscapeSequence();
-  if (isPotentialAlternateScreenSequence(pendingEscapeSequence)) {
+  if (
+    pendingEscapeSequence
+    && canRetainIncompleteTerminalControlSequence(pendingEscapeSequence)
+  ) {
     store.timestampOnlyPrefix = pendingEscapeSequence;
   }
 
@@ -2217,11 +2241,12 @@ const writeTerminalDataWithSecondLedger = (
   // Saturated mode releases live anchors for trim perf. CSI L/M move/dispose
   // buffer rows without a global circular-trim delta — rematerialize first so
   // xterm can shift those markers, then release copies the updated lines.
+  // Scan the prefix-joined stream so IL/DL split across IPC chunks still hit.
   if (
     isTerminalScrollbackSaturated(term)
     && !isAlternateBufferActive(term)
     && store.ledger.length > 0
-    && dataContainsLocalLineEditSequence(data)
+    && dataContainsLocalLineEditSequence(dataForTimestamps)
   ) {
     rebaseLedgerForScrollback(term, store);
     materializeTimestampLedgerToMarkers(term);

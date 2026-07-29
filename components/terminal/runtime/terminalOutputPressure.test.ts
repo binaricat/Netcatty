@@ -225,6 +225,29 @@ test("does not treat an empty buffer as scrollback-saturated", () => {
   resetTerminalOutputPressure(term);
 });
 
+test("does not treat viewport-sized length as saturated when scrollback is tiny", () => {
+  // scrollback <= rows → maxLines-slack === rows; xterm seeds length to rows
+  // with baseY=0 before any history. Must not arm saturated degrade immediately.
+  const term = createFakeTerm({
+    rows: 24,
+    options: { scrollback: 8 },
+    buffer: { active: { length: 24, baseY: 0 } },
+  });
+  assert.equal(isTerminalScrollbackSaturated(term), false);
+  noteTerminalOutputPressureData(term, "hello\n");
+  assert.equal(getTerminalOutputPressure(term).scrollbackSaturated, false);
+  assert.equal(getTerminalOutputPressure(term).largeOutput, false);
+  resetTerminalOutputPressure(term);
+
+  const full = createFakeTerm({
+    rows: 24,
+    options: { scrollback: 8 },
+    buffer: { active: { length: 32, baseY: 8 } },
+  });
+  assert.equal(isTerminalScrollbackSaturated(full), true);
+  resetTerminalOutputPressure(full);
+});
+
 test("saturated multi-line degrades side work but keeps line timestamps", () => {
   const term = createFakeTerm({
     rows: 24,

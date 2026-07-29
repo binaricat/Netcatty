@@ -51,6 +51,8 @@ const createFakeTerm = (options: {
   let cursorLine = 0;
   const cols = options.cols ?? Number.POSITIVE_INFINITY
   let wraparoundMode = options.wraparoundMode ?? true;
+  /** Incomplete ESC/CSI retained across write() calls (xterm parser behavior). */
+  let writeParserPrefix = "";
   const scrollback = options.scrollback;
   const rows = options.rows ?? 24;
   const circularTrim = options.circularTrim === true;
@@ -358,6 +360,7 @@ const createFakeTerm = (options: {
     screen = "normal";
     cursorLine = 0;
     viewportYOverride = null;
+    writeParserPrefix = "";
   };
 
   const createMarkerAt = (
@@ -433,49 +436,63 @@ const createFakeTerm = (options: {
     },
     write(data: string, callback?: () => void) {
       writes.push(data);
-      for (let index = 0; index < data.length; index += 1) {
-        // RIS (ESC c): mirror InputHandler → onRequestReset → _core.reset mid-chunk.
-        if (data[index] === "\x1b" && data[index + 1] === "c") {
-          term._core.reset();
-          index += 1;
-          continue;
-        }
-        const sequence = readCsiSequence(data, index);
-        if (sequence) {
-          if (
-            sequence.sequence === "\x1b[?1049h"
-            || sequence.sequence === "\x1b[?47h"
-            || sequence.sequence === "\x1b[?1047h"
-          ) {
-            enterAlternate();
-            index = sequence.endIndex;
-            continue;
+      // Mirror xterm: retain an incomplete ESC/CSI across backend chunks so
+      // split RIS / CSI L/M still execute when the final byte arrives.
+      const input = writeParserPrefix ? `${writeParserPrefix}${data}` : data;
+      writeParserPrefix = "";
+      for (let index = 0; index < input.length; index += 1) {
+        if (input[index] === "\x1b") {
+          if (index === input.length - 1) {
+            writeParserPrefix = "\x1b";
+            break;
           }
-          if (
-            sequence.sequence === "\x1b[?1049l"
-            || sequence.sequence === "\x1b[?47l"
-            || sequence.sequence === "\x1b[?1047l"
-          ) {
-            leaveAlternate();
-            index = sequence.endIndex;
-            continue;
-          }
-          // DECCOLM only resets when setWinLines is enabled (xterm behavior).
-          if (
-            (sequence.sequence === "\x1b[?3h" || sequence.sequence === "\x1b[?3l")
-            && options.setWinLines
-          ) {
+          // RIS (ESC c): mirror InputHandler → onRequestReset → _core.reset mid-chunk.
+          if (input[index + 1] === "c") {
             term._core.reset();
+            index += 1;
+            continue;
+          }
+          if (input[index + 1] === "[") {
+            const sequence = readCsiSequence(input, index);
+            if (!sequence) {
+              writeParserPrefix = input.slice(index);
+              break;
+            }
+            if (
+              sequence.sequence === "\x1b[?1049h"
+              || sequence.sequence === "\x1b[?47h"
+              || sequence.sequence === "\x1b[?1047h"
+            ) {
+              enterAlternate();
+              index = sequence.endIndex;
+              continue;
+            }
+            if (
+              sequence.sequence === "\x1b[?1049l"
+              || sequence.sequence === "\x1b[?47l"
+              || sequence.sequence === "\x1b[?1047l"
+            ) {
+              leaveAlternate();
+              index = sequence.endIndex;
+              continue;
+            }
+            // DECCOLM only resets when setWinLines is enabled (xterm behavior).
+            if (
+              (sequence.sequence === "\x1b[?3h" || sequence.sequence === "\x1b[?3l")
+              && options.setWinLines
+            ) {
+              term._core.reset();
+              index = sequence.endIndex;
+              continue;
+            }
+            applyCsiSequence(sequence.sequence);
+            currentState().absoluteCursorLine = cursorLine;
             index = sequence.endIndex;
             continue;
           }
-          applyCsiSequence(sequence.sequence);
-          currentState().absoluteCursorLine = cursorLine;
-          index = sequence.endIndex;
-          continue;
         }
         const state = currentState();
-        const char = data[index];
+        const char = input[index];
         if (char === "\n") {
           state.absoluteCursorLine += 1;
           cursorLine = state.absoluteCursorLine;
@@ -497,8 +514,8 @@ const createFakeTerm = (options: {
         } else if (char < " " || char === "\u007f") {
           continue;
         } else {
-          const code = data.codePointAt(index);
-          const isEmojiVariationSequence = code === 0x2764 && data.codePointAt(index + 1) === 0xfe0f;
+          const code = input.codePointAt(index);
+          const isEmojiVariationSequence = code === 0x2764 && input.codePointAt(index + 1) === 0xfe0f;
           const width = isEmojiVariationSequence ? 2 : cellWidth(char);
           if (isEmojiVariationSequence) {
             index += 1;
@@ -1861,6 +1878,123 @@ test("inline RIS followed by text keeps a gutter stamp for post-reset output", a
     [{ row: 0, label: "12:00:01" }],
     `post-RIS row must keep its gutter stamp, got ${JSON.stringify(painted)}`,
   );
+});
+
+test("RIS split across writes still stamps post-reset output", async () => {
+  // Backend chunk ends on ESC; next chunk completes RIS. xterm retains ESC and
+  // resets while processing the second write — timestamp scan must too.
+  const fake = createFakeTerm({ rows: 8, cols: 80 });
+  const { term } = fake;
+
+  writeTerminalDataWithLineTimestamps(
+    term as never,
+    "before\r\n",
+    () => {},
+    { timestampDate: new Date(2026, 5, 6, 12, 0, 0) },
+  );
+
+  writeTerminalDataWithLineTimestamps(term as never, "\x1b", () => {});
+  writeTerminalDataWithLineTimestamps(
+    term as never,
+    "cafter-ris\r\n",
+    () => {},
+    { timestampDate: new Date(2026, 5, 6, 12, 0, 1) },
+  );
+
+  assert.equal(
+    getTerminalLineTimestampLedgerCount(term as never),
+    1,
+    "split RIS must clear pre-reset stamps and keep post-reset text",
+  );
+  assert.deepEqual(
+    getVisibleTerminalLineTimestampRows(term as never),
+    [{ row: 0, label: "12:00:01" }],
+  );
+});
+
+test("post-reset continued line does not stamp twice across seconds", async () => {
+  // In-band RIS + printable text (no newline) stamps once. A later chunk that
+  // continues the same physical row in a new second must not replace the label.
+  const fake = createFakeTerm({ rows: 8, cols: 80 });
+  const { term } = fake;
+
+  writeTerminalDataWithLineTimestamps(
+    term as never,
+    "\x1bcpartial",
+    () => {},
+    { timestampDate: new Date(2026, 5, 6, 12, 0, 0) },
+  );
+  assert.equal(getTerminalLineTimestampLedgerCount(term as never), 1);
+
+  writeTerminalDataWithLineTimestamps(
+    term as never,
+    "-continued\r\n",
+    () => {},
+    { timestampDate: new Date(2026, 5, 6, 12, 0, 1) },
+  );
+
+  assert.equal(
+    getTerminalLineTimestampLedgerCount(term as never),
+    1,
+    "continued post-reset line must keep the original line-start stamp",
+  );
+  assert.deepEqual(
+    getVisibleTerminalLineTimestampRows(term as never),
+    [{ row: 0, label: "12:00:00" }],
+  );
+});
+
+test("saturated CSI M rematerializes when the sequence is split across writes", async () => {
+  const fake = createFakeTerm({ rows: 4, scrollback: 4, circularTrim: true, cols: 80 });
+  const { term } = fake;
+
+  for (let second = 0; second < 20; second += 1) {
+    writeTerminalDataWithLineTimestamps(
+      term as never,
+      `seed-${second}\r\n`,
+      () => {},
+      { timestampDate: new Date(2026, 5, 6, 12, 0, second % 60) },
+    );
+  }
+  assert.equal(isTerminalScrollbackSaturated(term as never), true);
+  await new Promise((resolve) => { setTimeout(resolve, 0); });
+
+  const targetLine = Math.max(0, fake.getAbsoluteCursorLine() - 3);
+  (term.buffer.active as { cursorY: number }).cursorY = Math.max(
+    0,
+    targetLine - (term.buffer.active as { baseY: number }).baseY,
+  );
+  const deletedText = (
+    term.buffer.active.getLine(targetLine) as {
+      translateToString: (trimRight?: boolean) => string;
+    }
+  ).translateToString(true);
+
+  // Split CSI M across chunks: ESC [ then 1M.
+  writeTerminalDataWithLineTimestamps(term as never, "\x1b[", () => {});
+  writeTerminalDataWithLineTimestamps(term as never, "1M", () => {});
+
+  fake.setViewportY(Math.max(0, fake.getAbsoluteCursorLine() - (term.rows - 1)));
+  const painted = getVisibleTerminalLineTimestampRows(term as never);
+  const viewportY = (term.buffer.active as { viewportY: number }).viewportY;
+
+  for (const row of painted) {
+    const text = (
+      term.buffer.active.getLine(viewportY + row.row) as {
+        translateToString: (trimRight?: boolean) => string;
+      }
+    ).translateToString(true);
+    if (!text || text === deletedText) continue;
+    const match = /^seed-(\d+)$/.exec(text);
+    if (!match) continue;
+    const second = Number(match[1]) % 60;
+    const expected = `12:00:${String(second).padStart(2, "0")}`;
+    assert.equal(
+      row.label,
+      expected,
+      `split CSI M must still rematerialize; got ${JSON.stringify({ text, row, painted, deletedText })}`,
+    );
+  }
 });
 
 test("simple ASCII control text gate matches seq-style floods", () => {
