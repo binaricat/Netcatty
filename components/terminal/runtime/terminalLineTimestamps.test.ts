@@ -17,7 +17,11 @@ import {
   writeTerminalDataWithLineTimestamps,
   type StampCursorEstimate,
 } from "./terminalLineTimestamps.ts";
-import { isTerminalScrollbackSaturated } from "./terminalOutputPressure.ts";
+import {
+  isTerminalScrollbackSaturated,
+  resetTerminalOutputPressure,
+  setTerminalOutputPressureLargeOutput,
+} from "./terminalOutputPressure.ts";
 import { MAX_INCOMPLETE_TERMINAL_CONTROL_SEQUENCE_CHARS } from "./terminalControlSequenceLimits.ts";
 
 const createFakeTerm = (options: {
@@ -1084,6 +1088,49 @@ test("circular saturated trim shifts bare ledger lines while baseY stays fixed",
     painted.some((row) => row.label.startsWith("12:01:")),
     `expected post-recycle stamps in gutter, got ${JSON.stringify(painted)}`,
   );
+});
+
+test("flood fill then first saturated stamp keeps gutter aligned after circular trim", async () => {
+  // True-flood writes never arm the trim sentinel. The first later timestamped
+  // line must pin a sentinel before write so circular recycle shifts the bare
+  // stamp with the row — otherwise the gutter labels the row below.
+  const fake = createFakeTerm({ rows: 4, scrollback: 4, circularTrim: true });
+  const { term } = fake;
+
+  setTerminalOutputPressureLargeOutput(term as never, true);
+  for (let index = 0; index < 24; index += 1) {
+    writeTerminalDataWithLineTimestamps(term as never, `flood-${index}\r\n`, () => {});
+  }
+  assert.equal(isTerminalScrollbackSaturated(term as never), true);
+  assert.equal(getTerminalLineTimestampLedgerCount(term as never), 0);
+  setTerminalOutputPressureLargeOutput(term as never, false);
+
+  writeTerminalDataWithLineTimestamps(
+    term as never,
+    "target-line\r\n",
+    () => {},
+    { timestampDate: new Date(2026, 5, 6, 12, 2, 0) },
+  );
+
+  await new Promise((resolve) => { setTimeout(resolve, 0); });
+  fake.setViewportY(Math.max(0, fake.getAbsoluteCursorLine() - (term.rows - 1)));
+  const painted = getVisibleTerminalLineTimestampRows(term as never);
+  const stamp = painted.find((row) => row.label === "12:02:00");
+  assert.ok(stamp, `expected post-flood stamp in gutter, got ${JSON.stringify(painted)}`);
+
+  const viewportY = (term.buffer.active as { viewportY: number }).viewportY;
+  const stampedText = (
+    term.buffer.active.getLine(viewportY + stamp.row) as {
+      translateToString: (trimRight?: boolean) => string;
+    }
+  ).translateToString(true);
+  assert.equal(
+    stampedText,
+    "target-line",
+    `gutter stamp must sit on target-line after circular trim, got ${JSON.stringify({ stampedText, painted })}`,
+  );
+
+  resetTerminalOutputPressure(term as never);
 });
 
 

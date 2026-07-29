@@ -1844,6 +1844,15 @@ const writeTerminalDataWithSecondLedger = (
     );
   }
 
+  // When already saturated with no trim sentinel (e.g. after a true-flood fill),
+  // rebase and arm *before* write so this write's circular recycle can shift
+  // bare pending stamps. Waiting until the post-write callback leaves the first
+  // later stamp one line too low.
+  if (isTerminalScrollbackSaturated(term) && store.trimSentinelLine === null) {
+    rebaseLedgerForScrollback(term, store);
+    maintainTrimSentinel(term, store);
+  }
+
   const writeStartedAt = shouldMeasureDiagnostics ? performance.now() : 0;
   term.write(data, () => {
     // Full scrollback: drop live anchors (amortized) and skip new ones so

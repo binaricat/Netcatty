@@ -267,6 +267,46 @@ test("true flood rate skips line timestamps", () => {
   }
 });
 
+test("saturated quiet window does not keep timestamp flood armed", () => {
+  // Highlight/prep stay degraded for largeOutputQuietMsSaturated, but gutter
+  // timestamps must resume after the normal largeOutputQuietMs so ordinary
+  // post-flood lines are not missing ledger stamps for seconds.
+  const term = createFakeTerm({
+    rows: 24,
+    options: { scrollback: 1000 },
+    buffer: { active: { length: 1020, baseY: 996 } },
+  });
+  const originalNow = performance.now.bind(performance);
+  let now = 40_000;
+
+  Object.defineProperty(performance, "now", {
+    configurable: true,
+    value: () => now,
+  });
+
+  try {
+    assert.equal(isTerminalScrollbackSaturated(term), true);
+    for (let index = 0; index < 64; index += 1) {
+      noteTerminalOutputPressureData(term, `${"z".repeat(1023)}\n`);
+    }
+    assert.equal(shouldSkipTerminalLineTimestamps(term), true);
+    assert.equal(shouldDegradeTerminalSideWork(term), true);
+
+    now += XTERM_PERFORMANCE_CONFIG.highlighting.largeOutputQuietMs + 1;
+    assert.equal(shouldSkipTerminalLineTimestamps(term), false);
+    assert.equal(shouldDegradeTerminalSideWork(term), true);
+
+    now += XTERM_PERFORMANCE_CONFIG.highlighting.largeOutputQuietMsSaturated;
+    assert.equal(shouldDegradeTerminalSideWork(term), false);
+  } finally {
+    Object.defineProperty(performance, "now", {
+      configurable: true,
+      value: originalNow,
+    });
+    resetTerminalOutputPressure(term);
+  }
+});
+
 test("rate detector uses a true rolling window across early tiny samples", () => {
   const term = createFakeTerm();
   const originalNow = performance.now.bind(performance);

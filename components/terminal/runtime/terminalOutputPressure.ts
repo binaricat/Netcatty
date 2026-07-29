@@ -194,6 +194,14 @@ const resolveLargeOutputQuietMs = (scrollbackSaturated: boolean): number => {
   return Math.max(base, Number.isFinite(saturated) ? saturated : base * 8);
 };
 
+/**
+ * Timestamp flood suppression must use the short quiet window — never the
+ * saturated highlight timeout. Otherwise ordinary lines after a dump miss
+ * gutter stamps for several seconds while side-work degrade stays armed.
+ */
+const resolveTimestampFloodQuietMs = (): number =>
+  XTERM_PERFORMANCE_CONFIG.highlighting.largeOutputQuietMs;
+
 export const noteTerminalOutputPressureData = (
   term: XTerm,
   data: string,
@@ -203,6 +211,7 @@ export const noteTerminalOutputPressureData = (
   const now = performance.now();
   const scrollbackSaturated = isTerminalScrollbackSaturated(term);
   const quietMs = resolveLargeOutputQuietMs(scrollbackSaturated);
+  const timestampQuietMs = resolveTimestampFloodQuietMs();
 
   const recentBytes = noteRecentOutputRate(state, now, data.length);
   const hasLineBreak = data.includes("\n") || data.includes("\r");
@@ -230,7 +239,7 @@ export const noteTerminalOutputPressureData = (
   // Timestamp markers: only suppress under true flood / long lines — never for
   // "scrollback full + docker ps" style multi-line output.
   if (trueFlood) {
-    state.timestampFloodUntil = now + quietMs;
+    state.timestampFloodUntil = now + timestampQuietMs;
   }
 
   const { maxRunBytes, trailingRunBytes } = measureUnbrokenRuns(
@@ -240,7 +249,10 @@ export const noteTerminalOutputPressureData = (
   state.consecutiveUnbrokenBytes = trailingRunBytes;
   state.longLine = maxRunBytes >= TERMINAL_LONG_LINE_PRESSURE_BYTES;
   if (state.longLine) {
-    state.timestampFloodUntil = Math.max(state.timestampFloodUntil, now + quietMs);
+    state.timestampFloodUntil = Math.max(
+      state.timestampFloodUntil,
+      now + timestampQuietMs,
+    );
   }
 };
 
@@ -257,14 +269,14 @@ export const setTerminalOutputPressureLargeOutput = (
 ): void => {
   const state = getOrCreateState(term);
   state.largeOutput = largeOutput;
+  const now = performance.now();
   const quietMs = resolveLargeOutputQuietMs(isTerminalScrollbackSaturated(term));
-  state.largeOutputUntil = largeOutput
-    ? performance.now() + quietMs
-    : 0;
+  state.largeOutputUntil = largeOutput ? now + quietMs : 0;
   // Explicit large-output flag is used by tests/flood paths that also suppress
-  // timestamp storms; clear both gates when turning off.
+  // timestamp storms; clear both gates when turning off. Timestamp suppression
+  // still uses the short quiet window so saturated highlight lag stays separate.
   if (largeOutput) {
-    state.timestampFloodUntil = state.largeOutputUntil;
+    state.timestampFloodUntil = now + resolveTimestampFloodQuietMs();
   } else {
     state.timestampFloodUntil = 0;
   }
