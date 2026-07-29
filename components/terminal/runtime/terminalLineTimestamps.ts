@@ -398,13 +398,16 @@ const isBufferResettingSequence = (sequence: string, term?: XTerm): boolean => {
   return isDeccolmBufferResetEnabled(term);
 };
 
-/** CSI Ps L / CSI Ps M — insert/delete lines within the scroll region. */
+/** CSI Ps L/M/S/T — insert/delete/scroll lines within the scroll region. */
 const isLocalLineEditSequence = (sequence: string): boolean => {
   const final = getCsiFinal(sequence);
-  if (final !== "L" && final !== "M") return false;
+  if (final !== "L" && final !== "M" && final !== "S" && final !== "T") return false;
   const params = sequence.slice(2, -1);
-  // Private-mode CSI (? …) never uses L/M as IL/DL.
-  return !params.startsWith("?");
+  // Private-mode CSI (? …) never uses L/M/S/T as IL/DL/SU/SD.
+  if (params.startsWith("?")) return false;
+  // CSI Pc;Pf;Pr;Pc;Pp T is highlight mouse tracking, not Scroll Down.
+  if (final === "T" && params.split(";").length >= 5) return false;
+  return true;
 };
 
 const dataContainsLocalLineEditSequence = (data: string): boolean => {
@@ -2198,7 +2201,7 @@ const writeTerminalDataWithSecondLedger = (
   const segments = store.segmenter.append(dataForTimestamps, stampDate);
 
   // Retain any incomplete ESC/CSI/OSC across writes — not only alt-screen
-  // candidates. Split RIS (`ESC` | `c`) and CSI L/M (`ESC [` | `1M`) must still
+  // candidates. Split RIS (`ESC` | `c`) and CSI L/M/S/T (`ESC [` | `1S`) must still
   // drive in-band reset / rematerialize once the sequence completes.
   const pendingEscapeSequence = store.segmenter.flushPendingEscapeSequence();
   if (
@@ -2238,15 +2241,22 @@ const writeTerminalDataWithSecondLedger = (
     rebaseLedgerForScrollback(term, store);
     maintainTrimSentinel(term, store);
   }
-  // Saturated mode releases live anchors for trim perf. CSI L/M move/dispose
-  // buffer rows without a global circular-trim delta — rematerialize first so
-  // xterm can shift those markers, then release copies the updated lines.
-  // Scan the prefix-joined stream so IL/DL split across IPC chunks still hit.
+  // Saturated mode releases live anchors for trim perf. CSI L/M/S/T and
+  // linefeeds inside a DECSTBM region move/dispose buffer rows without a
+  // global circular-trim delta — rematerialize first so xterm can shift those
+  // markers, then release copies the updated lines.
+  // Scan the prefix-joined stream so IL/DL/SU/SD split across IPC chunks still hit.
   if (
     isTerminalScrollbackSaturated(term)
     && !isAlternateBufferActive(term)
     && store.ledger.length > 0
-    && dataContainsLocalLineEditSequence(dataForTimestamps)
+    && (
+      dataContainsLocalLineEditSequence(dataForTimestamps)
+      || (
+        hasPartialScrollingRegion(term)
+        && dataForTimestamps.includes("\n")
+      )
+    )
   ) {
     rebaseLedgerForScrollback(term, store);
     materializeTimestampLedgerToMarkers(term);

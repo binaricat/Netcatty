@@ -56,6 +56,9 @@ const createFakeTerm = (options: {
   const scrollback = options.scrollback;
   const rows = options.rows ?? 24;
   const circularTrim = options.circularTrim === true;
+  // DECSTBM scrolling region (0-based, inclusive), matching xterm _core.buffer.
+  let scrollTop = 0;
+  let scrollBottom = rows - 1;
   const isCombiningMark = (char: string): boolean => {
     const code = char.codePointAt(0);
     return code !== undefined && /\p{Mark}/u.test(String.fromCodePoint(code));
@@ -105,6 +108,23 @@ const createFakeTerm = (options: {
       cursorLine = Math.max(0, cursorLine - count);
     } else if (final === "B") {
       cursorLine += count;
+    } else if (final === "r" && !params.startsWith("?")) {
+      // DECSTBM: CSI Pt ; Pb r — set scrolling region (1-based → 0-based).
+      const parts = params.split(";");
+      const top = Number.parseInt(parts[0] || "1", 10);
+      const bottom = Number.parseInt(parts[1] || String(rows), 10);
+      const nextTop = Math.max(0, (Number.isFinite(top) && top > 0 ? top : 1) - 1);
+      const nextBottom = Math.min(
+        rows - 1,
+        (Number.isFinite(bottom) && bottom > 0 ? bottom : rows) - 1,
+      );
+      if (nextTop <= nextBottom) {
+        scrollTop = nextTop;
+        scrollBottom = nextBottom;
+      } else {
+        scrollTop = 0;
+        scrollBottom = rows - 1;
+      }
     } else if ((final === "L" || final === "M") && !params.startsWith("?")) {
       // IL / DL: shift or dispose markers at/below the cursor row (normal only).
       if (screen !== "normal") return;
@@ -136,6 +156,58 @@ const createFakeTerm = (options: {
             continue;
           }
           if (marker.line >= editAt + count) marker.line -= count;
+        }
+      }
+    } else if ((final === "S" || final === "T") && !params.startsWith("?")) {
+      // SU / SD: splice lines inside the DECSTBM region (normal only).
+      // CSI Pc;Pf;Pr;Pc;Pp T is highlight mouse tracking, not SD.
+      if (final === "T" && params.split(";").length >= 5) return;
+      if (screen !== "normal") return;
+      const state = normalState;
+      const regionTop = state.baseY + scrollTop;
+      const regionBottom = state.baseY + scrollBottom;
+      if (regionBottom < regionTop) return;
+      if (final === "S") {
+        const nextText = new Map<number, string>();
+        for (const [key, value] of state.lineText) {
+          if (key >= regionTop && key < regionTop + count) continue;
+          if (key >= regionTop + count && key <= regionBottom) {
+            nextText.set(key - count, value);
+            continue;
+          }
+          if (key < regionTop || key > regionBottom) nextText.set(key, value);
+        }
+        state.lineText = nextText;
+        for (const marker of liveMarkers) {
+          if (marker.isDisposed || marker.attachedScreen !== "normal") continue;
+          if (marker.line >= regionTop && marker.line < regionTop + count) {
+            marker.dispose();
+            continue;
+          }
+          if (marker.line >= regionTop + count && marker.line <= regionBottom) {
+            marker.line -= count;
+          }
+        }
+      } else {
+        const nextText = new Map<number, string>();
+        for (const [key, value] of state.lineText) {
+          if (key > regionBottom - count && key <= regionBottom) continue;
+          if (key >= regionTop && key <= regionBottom - count) {
+            nextText.set(key + count, value);
+            continue;
+          }
+          if (key < regionTop || key > regionBottom) nextText.set(key, value);
+        }
+        state.lineText = nextText;
+        for (const marker of liveMarkers) {
+          if (marker.isDisposed || marker.attachedScreen !== "normal") continue;
+          if (marker.line > regionBottom - count && marker.line <= regionBottom) {
+            marker.dispose();
+            continue;
+          }
+          if (marker.line >= regionTop && marker.line <= regionBottom - count) {
+            marker.line += count;
+          }
         }
       }
     }
@@ -174,6 +246,31 @@ const createFakeTerm = (options: {
   };
   let screen: "normal" | "alternate" = "normal";
   const currentState = (): BufferState => (screen === "alternate" ? altState : normalState);
+  const scrollRegionUp = (state: BufferState, count: number): void => {
+    const regionTop = state.baseY + scrollTop;
+    const regionBottom = state.baseY + scrollBottom;
+    if (regionBottom < regionTop || count <= 0) return;
+    const nextText = new Map<number, string>();
+    for (const [key, value] of state.lineText) {
+      if (key >= regionTop && key < regionTop + count) continue;
+      if (key >= regionTop + count && key <= regionBottom) {
+        nextText.set(key - count, value);
+        continue;
+      }
+      if (key < regionTop || key > regionBottom) nextText.set(key, value);
+    }
+    state.lineText = nextText;
+    for (const marker of liveMarkers) {
+      if (marker.isDisposed || marker.attachedScreen !== "normal") continue;
+      if (marker.line >= regionTop && marker.line < regionTop + count) {
+        marker.dispose();
+        continue;
+      }
+      if (marker.line >= regionTop + count && marker.line <= regionBottom) {
+        marker.line -= count;
+      }
+    }
+  };
   /** When null, viewport follows bottom (baseY). Tests may pin a scroll-up offset. */
   let viewportYOverride: number | null = null;
 
@@ -361,6 +458,8 @@ const createFakeTerm = (options: {
     cursorLine = 0;
     viewportYOverride = null;
     writeParserPrefix = "";
+    scrollTop = 0;
+    scrollBottom = rows - 1;
   };
 
   const createMarkerAt = (
@@ -387,6 +486,14 @@ const createFakeTerm = (options: {
       unicodeService,
       // Real xterm: public Terminal.reset and RIS→onRequestReset both call here.
       reset: resetBuffer,
+      buffer: {
+        get scrollTop() {
+          return scrollTop;
+        },
+        get scrollBottom() {
+          return scrollBottom;
+        },
+      },
       buffers: {
         normal: {
           addMarker(y: number) {
@@ -494,12 +601,27 @@ const createFakeTerm = (options: {
         const state = currentState();
         const char = input[index];
         if (char === "\n") {
-          state.absoluteCursorLine += 1;
-          cursorLine = state.absoluteCursorLine;
-          state.column = Number.isFinite(cols) && state.column >= cols
-            ? cols - 1
-            : 0;
-          trimScrollbackIfNeeded(state);
+          const relativeY = state.absoluteCursorLine - state.baseY;
+          const partialRegion = scrollTop > 0 || scrollBottom < rows - 1;
+          // Inside a DECSTBM region, LF at the bottom splices rows in-place
+          // (like CSI S) instead of advancing into scrollback history.
+          if (
+            screen === "normal"
+            && partialRegion
+            && relativeY >= scrollBottom
+          ) {
+            scrollRegionUp(state, 1);
+            state.column = Number.isFinite(cols) && state.column >= cols
+              ? cols - 1
+              : 0;
+          } else {
+            state.absoluteCursorLine += 1;
+            cursorLine = state.absoluteCursorLine;
+            state.column = Number.isFinite(cols) && state.column >= cols
+              ? cols - 1
+              : 0;
+            trimScrollbackIfNeeded(state);
+          }
         } else if (char === "\r") {
           state.column = 0;
         } else if (char === "\b") {
@@ -1993,6 +2115,112 @@ test("saturated CSI M rematerializes when the sequence is split across writes", 
       row.label,
       expected,
       `split CSI M must still rematerialize; got ${JSON.stringify({ text, row, painted, deletedText })}`,
+    );
+  }
+});
+
+test("saturated CSI S rematerializes anchors so stamps follow scrolled lines", async () => {
+  // CSI S splices the scroll region without circular top-trim. Saturated bare
+  // ledger lines must rematerialize first or gutter times stick to wrong rows.
+  const fake = createFakeTerm({ rows: 4, scrollback: 4, circularTrim: true, cols: 80 });
+  const { term } = fake;
+
+  for (let second = 0; second < 20; second += 1) {
+    writeTerminalDataWithLineTimestamps(
+      term as never,
+      `seed-${second}\r\n`,
+      () => {},
+      { timestampDate: new Date(2026, 5, 6, 12, 0, second % 60) },
+    );
+  }
+  assert.equal(isTerminalScrollbackSaturated(term as never), true);
+  await new Promise((resolve) => { setTimeout(resolve, 0); });
+
+  const viewportTop = (term.buffer.active as { baseY: number }).baseY;
+  const scrolledAway = (
+    term.buffer.active.getLine(viewportTop) as {
+      translateToString: (trimRight?: boolean) => string;
+    }
+  ).translateToString(true);
+
+  writeTerminalDataWithLineTimestamps(term as never, "\x1b[1S", () => {});
+
+  fake.setViewportY(viewportTop);
+  const painted = getVisibleTerminalLineTimestampRows(term as never);
+  const viewportY = (term.buffer.active as { viewportY: number }).viewportY;
+
+  for (const row of painted) {
+    const text = (
+      term.buffer.active.getLine(viewportY + row.row) as {
+        translateToString: (trimRight?: boolean) => string;
+      }
+    ).translateToString(true);
+    if (!text || text === scrolledAway) continue;
+    const match = /^seed-(\d+)$/.exec(text);
+    if (!match) continue;
+    const second = Number(match[1]) % 60;
+    const expected = `12:00:${String(second).padStart(2, "0")}`;
+    assert.equal(
+      row.label,
+      expected,
+      `stamp must follow content after CSI S, got ${JSON.stringify({ text, row, painted, scrolledAway, viewportY })}`,
+    );
+  }
+});
+
+test("saturated DECSTBM linefeed rematerializes anchors inside the scroll region", async () => {
+  // LF at the bottom of a partial DECSTBM region splices rows without trimming
+  // buffer origin — same rematerialize requirement as CSI S/T.
+  const fake = createFakeTerm({ rows: 4, scrollback: 4, circularTrim: true, cols: 80 });
+  const { term } = fake;
+
+  for (let second = 0; second < 20; second += 1) {
+    writeTerminalDataWithLineTimestamps(
+      term as never,
+      `seed-${second}\r\n`,
+      () => {},
+      { timestampDate: new Date(2026, 5, 6, 12, 0, second % 60) },
+    );
+  }
+  assert.equal(isTerminalScrollbackSaturated(term as never), true);
+  await new Promise((resolve) => { setTimeout(resolve, 0); });
+
+  // Restrict scrolling to rows 2-4 (1-based); leave row 1 pinned.
+  writeTerminalDataWithLineTimestamps(term as never, "\x1b[2;4r", () => {});
+  const baseY = (term.buffer.active as { baseY: number }).baseY;
+  (term.buffer.active as { cursorY: number }).cursorY = 3;
+  const regionTopText = (
+    term.buffer.active.getLine(baseY + 1) as {
+      translateToString: (trimRight?: boolean) => string;
+    }
+  ).translateToString(true);
+
+  writeTerminalDataWithLineTimestamps(
+    term as never,
+    "\nregion-tail\r",
+    () => {},
+    { timestampDate: new Date(2026, 5, 6, 12, 0, 40) },
+  );
+
+  fake.setViewportY(baseY);
+  const painted = getVisibleTerminalLineTimestampRows(term as never);
+  const viewportY = (term.buffer.active as { viewportY: number }).viewportY;
+
+  for (const row of painted) {
+    const text = (
+      term.buffer.active.getLine(viewportY + row.row) as {
+        translateToString: (trimRight?: boolean) => string;
+      }
+    ).translateToString(true);
+    if (!text || text === regionTopText || text === "region-tail") continue;
+    const match = /^seed-(\d+)$/.exec(text);
+    if (!match) continue;
+    const second = Number(match[1]) % 60;
+    const expected = `12:00:${String(second).padStart(2, "0")}`;
+    assert.equal(
+      row.label,
+      expected,
+      `stamp must follow content after DECSTBM LF, got ${JSON.stringify({ text, row, painted, regionTopText, viewportY })}`,
     );
   }
 });
