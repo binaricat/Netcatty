@@ -1326,7 +1326,10 @@ const isTrimTopProbeAtOrigin = (store: TimestampStore): boolean => {
  * Real xterm keeps baseY/length fixed while recycling; only marker.onTrim
  * observes those drops once ledger anchors have been released.
  */
-const applyCircularTrimDeltaFromSentinel = (store: TimestampStore): void => {
+const applyCircularTrimDeltaFromSentinel = (
+  store: TimestampStore,
+  skipEntries?: ReadonlySet<TimestampLedgerEntry>,
+): void => {
   if (store.trimSentinelLine === null) return;
   const sentinel = store.trimSentinel;
   let delta = 0;
@@ -1368,8 +1371,36 @@ const applyCircularTrimDeltaFromSentinel = (store: TimestampStore): void => {
   }
   if (delta <= 0) return;
   for (const entry of store.ledger) {
+    if (skipEntries?.has(entry)) continue;
     if (entry.marker && !entry.marker.isDisposed) continue;
     entry.line -= delta;
+  }
+};
+
+/**
+ * Pending stamps use pre-write line estimates that see LF/wrap advances but not
+ * CSI local row edits. A saturated write that both circular-trims and runs
+ * CSI S/L/M/T moves the trim sentinel by (circular + local); the line-0 probe
+ * is often already gone after the trim, so applyCircularTrimDeltaFromSentinel
+ * cannot strip the local portion. Re-apply estimate minus circular-only
+ * compensation (estimated end cursor − live cursor) so new gutter labels stay
+ * on the row where the output was written.
+ */
+const realignPendingStampsAfterLocalEditWrite = (
+  term: XTerm,
+  store: TimestampStore,
+  pending: readonly TimestampLedgerEntry[],
+  estimatedLines: ReadonlyMap<TimestampLedgerEntry, number>,
+  estimatedEndLine: number,
+): void => {
+  if (pending.length === 0) return;
+  const circularOnly = Math.max(0, estimatedEndLine - getAbsoluteCursorLine(term));
+  const stillInLedger = new Set(store.ledger);
+  for (const entry of pending) {
+    if (!stillInLedger.has(entry)) continue;
+    const estimated = estimatedLines.get(entry);
+    if (estimated === undefined) continue;
+    entry.line = Math.max(0, estimated - circularOnly);
   }
 };
 
@@ -1526,7 +1557,11 @@ const readLedgerBufferMetrics = (
  * - Cols change: reflow invalidates bare numbers; drop unanchored stamps so we
  *   never paint wrong times on reshuffled history (anchored stamps survive).
  */
-const rebaseLedgerForScrollback = (term: XTerm, store: TimestampStore): void => {
+const rebaseLedgerForScrollback = (
+  term: XTerm,
+  store: TimestampStore,
+  options?: { skipCircularTrimEntries?: ReadonlySet<TimestampLedgerEntry> },
+): void => {
   const { baseY, bufferLength } = readLedgerBufferMetrics(term);
 
   const cols = _getTerminalColumnCount(term);
@@ -1549,6 +1584,7 @@ const rebaseLedgerForScrollback = (term: XTerm, store: TimestampStore): void => 
   ) {
     const delta = baseY - store.lastSeenBaseY;
     for (const entry of store.ledger) {
+      if (options?.skipCircularTrimEntries?.has(entry)) continue;
       if (entry.marker && !entry.marker.isDisposed) continue;
       entry.line -= delta;
     }
@@ -1556,7 +1592,7 @@ const rebaseLedgerForScrollback = (term: XTerm, store: TimestampStore): void => 
 
   // Real xterm circular trim: length/baseY unchanged; sentinel.line fell.
   if (bufferIsFull) {
-    applyCircularTrimDeltaFromSentinel(store);
+    applyCircularTrimDeltaFromSentinel(store, options?.skipCircularTrimEntries);
   }
 
   if (colsChanged) {
@@ -2555,17 +2591,18 @@ const writeTerminalDataWithSecondLedger = (
   const scrollbackSaturatedForRematerialize = leavingAltInChunk
     ? isNormalBufferScrollbackSaturated(term)
     : isTerminalScrollbackSaturated(term);
-  if (
+  const rematerializedForLocalEdit =
     scrollbackSaturatedForRematerialize
     && (leavingAltInChunk || !isAlternateBufferActive(term))
     && store.ledger.length > 0
-    && dataRequiresSaturatedAnchorRematerialize(term, dataForTimestamps)
-  ) {
+    && dataRequiresSaturatedAnchorRematerialize(term, dataForTimestamps);
+  if (rematerializedForLocalEdit) {
     rebaseLedgerForScrollback(term, store);
     materializeTimestampLedgerToMarkers(term);
   }
   let ledgerChanged = false;
   const pendingAnchors: TimestampLedgerEntry[] = [];
+  const pendingEstimatedLines = new Map<TimestampLedgerEntry, number>();
   let recordingPostReset = false;
   store.inBandWriteDepth = (store.inBandWriteDepth ?? 0) + 1;
   store.inBandPostResetLedger = null;
@@ -2578,6 +2615,7 @@ const writeTerminalDataWithSecondLedger = (
     store.lastStampSecondKey = null;
     clearTrimSentinel(store);
     pendingAnchors.length = 0;
+    pendingEstimatedLines.clear();
     recordingPostReset = true;
     store.inBandPostResetLedger = [];
     ledgerChanged = true;
@@ -2591,6 +2629,7 @@ const writeTerminalDataWithSecondLedger = (
 
   const notePendingStamp = (entry: TimestampLedgerEntry): void => {
     pendingAnchors.push(entry);
+    pendingEstimatedLines.set(entry, entry.line);
     if (recordingPostReset && store.inBandPostResetLedger) {
       store.inBandPostResetLedger.push(entry);
     }
@@ -2668,7 +2707,24 @@ const writeTerminalDataWithSecondLedger = (
     // Full scrollback: drop live anchors (amortized) and skip new ones so
     // continuous log tails are not O(markers) per trimmed line. Rebase first so
     // the trim sentinel can shift bare lines for this write's circular recycle.
-    rebaseLedgerForScrollback(term, store);
+    // When this write also rematerialized for local CSI edits, realign pending
+    // stamps to circular-only compensation *before* rebase filters them: the
+    // pre-write estimate can sit at bufferLength until circular recycle is
+    // applied, and the disposed line-0 probe can no longer separate circular
+    // trim from the local splice (e.g. CR LF + CSI S).
+    const skipPendingForMixedTrim = rematerializedForLocalEdit && pendingAnchors.length > 0
+      ? new Set(pendingAnchors)
+      : undefined;
+    if (skipPendingForMixedTrim) {
+      realignPendingStampsAfterLocalEditWrite(
+        term,
+        store,
+        pendingAnchors,
+        pendingEstimatedLines,
+        stampCursor.absoluteLine,
+      );
+    }
+    rebaseLedgerForScrollback(term, store, { skipCircularTrimEntries: skipPendingForMixedTrim });
     releaseLedgerMarkersWhileSaturated(term, store);
     attachLedgerAnchors(term, store, pendingAnchors);
     rebaseLedgerForScrollback(term, store);

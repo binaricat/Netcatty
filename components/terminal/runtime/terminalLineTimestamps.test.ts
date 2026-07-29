@@ -1812,6 +1812,53 @@ test("local CSI-style sentinel move does not shift saturated bare ledger", async
   );
 });
 
+test("saturated CR LF + CSI S keeps new stamp on the written row", async () => {
+  // Same write: circular trim from LF disposes the line-0 probe, then CSI S
+  // moves the cursor sentinel locally. The combined sentinel delta must not
+  // slide the new bare stamp onto the row above "text".
+  const fake = createFakeTerm({ rows: 4, scrollback: 4, circularTrim: true, cols: 80 });
+  const { term } = fake;
+
+  for (let second = 0; second < 20; second += 1) {
+    writeTerminalDataWithLineTimestamps(
+      term as never,
+      `seed-${second}\r\n`,
+      () => {},
+      { timestampDate: new Date(2026, 5, 6, 12, 0, second % 60) },
+    );
+  }
+  assert.equal(isTerminalScrollbackSaturated(term as never), true);
+  await new Promise((resolve) => { setTimeout(resolve, 0); });
+
+  const stampedText = "mixed-trim-text";
+  writeTerminalDataWithLineTimestamps(
+    term as never,
+    `\r\n\x1b[1S${stampedText}`,
+    () => {},
+    { timestampDate: new Date(2026, 5, 6, 12, 1, 0) },
+  );
+
+  fake.setViewportY(Math.max(0, fake.getAbsoluteCursorLine() - (term.rows - 1)));
+  const painted = getVisibleTerminalLineTimestampRows(term as never);
+  const viewportY = (term.buffer.active as { viewportY: number }).viewportY;
+  let matched = false;
+  for (const row of painted) {
+    const text = (
+      term.buffer.active.getLine(viewportY + row.row) as {
+        translateToString: (trimRight?: boolean) => string;
+      }
+    ).translateToString(true);
+    if (text !== stampedText) continue;
+    matched = true;
+    assert.equal(
+      row.label,
+      "12:01:00",
+      `gutter stamp must sit on ${stampedText} after CR LF + CSI S, got ${JSON.stringify({ row, painted, viewportY })}`,
+    );
+  }
+  assert.ok(matched, `expected to find ${stampedText} with a gutter stamp, painted=${JSON.stringify(painted)}`);
+});
+
 test("resize after flood rebases stale sentinel before rematerialize", async () => {
   // Flood moves the armed sentinel without syncing bare ledger offsets. The
   // term.resize hook must rebase from that sentinel before rematerializing,
