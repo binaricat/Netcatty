@@ -594,6 +594,59 @@ const isAlternateBufferActive = (term: XTerm): boolean => (
   ((term.buffer?.active as { type?: string } | undefined)?.type) === "alternate"
 );
 
+/**
+ * True when the normal (primary) buffer is near scrollback capacity. Prefer this
+ * while the alternate screen is still active — `isTerminalScrollbackSaturated`
+ * reads the short alt buffer and would look unsaturated.
+ */
+const isNormalBufferScrollbackSaturated = (term: XTerm): boolean => {
+  try {
+    const buffers = term.buffer as {
+      normal?: { length?: number; baseY?: number };
+      active?: { type?: string; length?: number; baseY?: number };
+    } | undefined;
+    const source = buffers?.normal
+      ?? (buffers?.active?.type !== "alternate" ? buffers?.active : undefined);
+    if (!source) return false;
+    const rows = Math.max(1, term.rows || 0);
+    const options = (term as XTerm & { options?: { scrollback?: number } }).options;
+    const scrollback = options?.scrollback;
+    if (typeof scrollback !== "number" || !Number.isFinite(scrollback) || scrollback <= 0) {
+      return false;
+    }
+    const maxLines = rows + Math.floor(scrollback);
+    const length = typeof source.length === "number" ? source.length : 0;
+    if (length <= 0) return false;
+    const baseY = typeof source.baseY === "number" && Number.isFinite(source.baseY)
+      ? Math.max(0, Math.floor(source.baseY))
+      : 0;
+    if (baseY <= 0 && length <= rows) return false;
+    const slack = Math.min(Math.max(rows, 8), Math.floor(scrollback));
+    return length >= maxLines - slack;
+  } catch {
+    return false;
+  }
+};
+
+/** True when `data` contains a complete alternate-screen leave CSI (7-bit or C1). */
+const dataLeavesAlternateScreen = (data: string): boolean => {
+  for (let index = 0; index < data.length;) {
+    const char = data[index];
+    if (char !== "\x1b" && char !== C1_CSI) {
+      index += 1;
+      continue;
+    }
+    const sequence = readEscapeSequence(data, index);
+    if (!sequence || !sequence.complete) {
+      index += 1;
+      continue;
+    }
+    if (getAlternateScreenAction(sequence.sequence) === "leave") return true;
+    index = sequence.endIndex + 1;
+  }
+  return false;
+};
+
 const isSgrSequence = (sequence: string): boolean =>
   getCsiFinal(sequence) === "m";
 
@@ -1372,9 +1425,20 @@ const tryRegisterMarkerAtAbsoluteLine = (
  * Keep one cursor-pinned marker and one line-0 probe while saturated so the
  * next circular recycle remains observable after ledger anchors are retired,
  * and local CSI line edits can be distinguished from top-of-buffer trims.
+ *
+ * When `onNormalBuffer` is set (still on alt but about to leave in this chunk),
+ * pin via buffer.normal.addMarker — registerMarker would attach to alt and die.
  */
-const maintainTrimSentinel = (term: XTerm, store: TimestampStore): void => {
-  if (!isTerminalScrollbackSaturated(term)) {
+const maintainTrimSentinel = (
+  term: XTerm,
+  store: TimestampStore,
+  options: { onNormalBuffer?: boolean } = {},
+): void => {
+  const pinOnNormal = options.onNormalBuffer === true;
+  const saturated = pinOnNormal
+    ? isNormalBufferScrollbackSaturated(term)
+    : isTerminalScrollbackSaturated(term);
+  if (!saturated) {
     if (store.trimSentinel || store.trimSentinelLine !== null || store.trimTopProbe) {
       clearTrimSentinel(store);
       drainOrphanedMarkers(store);
@@ -1382,6 +1446,24 @@ const maintainTrimSentinel = (term: XTerm, store: TimestampStore): void => {
     return;
   }
   clearTrimSentinel(store);
+  if (pinOnNormal) {
+    const normalCursor = getNormalBufferCursorState(term);
+    const marker = tryAddMarkerOnNormalBuffer(term, normalCursor.absoluteLine);
+    const topProbe = tryAddMarkerOnNormalBuffer(term, 0);
+    if (store.orphanedMarkers.length > 0) {
+      drainOrphanedMarkers(store);
+    }
+    if (marker) {
+      store.trimSentinel = marker;
+      store.trimSentinelLine = typeof marker.line === "number" && Number.isFinite(marker.line)
+        ? marker.line
+        : null;
+    }
+    if (topProbe) {
+      store.trimTopProbe = topProbe;
+    }
+    return;
+  }
   const registerMarker = (
     term as XTerm & { registerMarker?: (offset: number) => TimestampMarker | undefined }
   ).registerMarker;
@@ -2172,6 +2254,50 @@ export const resetTerminalLineTimestamps = (term: XTerm) => {
   resetTimestampStore(getTimestampStore(term));
 };
 
+/**
+ * Clear Buffer (`clearTerminalViewport`) writes CSI J / CSI 3 J via raw
+ * `term.write`, bypassing the timestamp scanner and buffer-reset hook. Saturated
+ * mode has already released markers to bare line numbers; after a wipe those
+ * low lines still pass the bounds check and paint old times on the fresh view.
+ *
+ * - wipeScrollback: drop the whole ledger (history is gone).
+ * - otherwise: rematerialize before the clear so scroll/erase can move or
+ *   dispose markers, then rebase + release after the write callback.
+ */
+export const syncTerminalLineTimestampsForDirectClear = (
+  term: XTerm,
+  options: {
+    wipeScrollback?: boolean;
+    phase?: "before" | "after";
+  } = {},
+): void => {
+  const store = stores.get(term);
+  if (!store) return;
+
+  const wipeScrollback = options.wipeScrollback === true;
+  const phase = options.phase ?? "before";
+
+  if (wipeScrollback) {
+    if (phase === "after") return;
+    resetTimestampStore(store);
+    return;
+  }
+
+  if (phase === "before") {
+    if (store.ledger.length === 0) return;
+    if (isTerminalScrollbackSaturated(term) || store.ledger.some((entry) => !entry.marker)) {
+      rebaseLedgerForScrollback(term, store);
+      materializeTimestampLedgerToMarkers(term);
+    }
+    return;
+  }
+
+  rebaseLedgerForScrollback(term, store);
+  releaseLedgerMarkersWhileSaturated(term, store);
+  maintainTrimSentinel(term, store);
+  notifyTimestampStore(store);
+};
+
 export const onTerminalLineTimestampsChange = (
   term: XTerm,
   listener: () => void,
@@ -2399,12 +2525,20 @@ const writeTerminalDataWithSecondLedger = (
   // sentinel without updating trimSentinelLine; stamping first lets the
   // post-write rebase apply the whole flood-era delta to the new entry.
   // Also covers the no-sentinel case (flood fill with no prior sentinel).
+  //
+  // In-chunk alt leave: saturated maintenance cleared the sentinel while alt
+  // was active (alt length looks unsaturated). Pre-arm against buffer.normal
+  // before the write so the first post-leave circular recycle is observable.
+  const leavingAltInChunk = startedOnAlt && dataLeavesAlternateScreen(dataForTimestamps);
+  const scrollbackSaturatedForSentinel = leavingAltInChunk
+    ? isNormalBufferScrollbackSaturated(term)
+    : isTerminalScrollbackSaturated(term);
   if (
-    isTerminalScrollbackSaturated(term)
+    scrollbackSaturatedForSentinel
     && (store.trimSentinelLine === null || isTrimSentinelStale(store))
   ) {
     rebaseLedgerForScrollback(term, store);
-    maintainTrimSentinel(term, store);
+    maintainTrimSentinel(term, store, { onNormalBuffer: leavingAltInChunk });
   }
   // Saturated mode releases live anchors for trim perf. CSI L/M/S/T (7-bit ESC[
   // or 8-bit C1 CSI), erase-display (CSI J), reverse-index (ESC M / C1 RI), and

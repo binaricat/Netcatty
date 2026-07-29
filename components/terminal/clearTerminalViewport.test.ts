@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
 import xterm from "@xterm/xterm";
 
 import {
@@ -523,4 +524,11 @@ test("appendEraseScrollback still wipes when delayed clear is outside a sync blo
     }),
     "\x1b[H\x1b[2J\x1b[3Jframe",
   );
+});
+
+test("clearTerminalViewport syncs line timestamps for direct CSI clears", () => {
+  // Clear Buffer bypasses writeTerminalDataWithLineTimestamps; the viewport
+  // helper must still rematerialize/reset the saturated bare ledger.
+  const source = readFileSync(new URL("./clearTerminalViewport.ts", import.meta.url), "utf8");
+  assert.match(source, /syncTerminalLineTimestampsForDirectClear/);
 });

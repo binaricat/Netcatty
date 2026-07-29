@@ -1,5 +1,7 @@
 import type { IDisposable, IParser, Terminal as XTerm } from "@xterm/xterm";
 
+import { syncTerminalLineTimestampsForDirectClear } from "./runtime/terminalLineTimestamps";
+
 type CsiParam = number | number[];
 type EraseInDisplayTerminal = XTerm & {
   parser: Pick<IParser, "registerCsiHandler">;
@@ -147,6 +149,14 @@ export const clearTerminalViewport = (
 
   if (typeof scroll !== "function" || eraseAttr === undefined) return false;
 
+  const wipeScrollback = options.wipeScrollback === true;
+  // Raw CSI write below bypasses writeTerminalDataWithLineTimestamps; sync the
+  // saturated bare ledger so Clear Buffer does not leave stale gutter times.
+  syncTerminalLineTimestampsForDirectClear(term, {
+    wipeScrollback,
+    phase: "before",
+  });
+
   // Push lines above cursor into scrollback so they are preserved.
   // After cursorY scrolls the prompt line shifts to active-screen row 0.
   for (let i = 0; i < cursorY; i++) {
@@ -156,8 +166,12 @@ export const clearTerminalViewport = (
   // Clear everything below the prompt and reposition the cursor on it.
   // CSI coordinates are 1-indexed.
   const col = cursorX + 1;
-  const eraseScrollback = options.wipeScrollback ? "\x1b[3J" : "";
+  const eraseScrollback = wipeScrollback ? "\x1b[3J" : "";
   term.write(`\x1b[2;1H\x1b[J${eraseScrollback}\x1b[1;${col}H`, () => {
+    syncTerminalLineTimestampsForDirectClear(term, {
+      wipeScrollback,
+      phase: "after",
+    });
     term.scrollToBottom();
   });
   return true;

@@ -14,6 +14,7 @@ import {
   resolveTerminalLineTimestampCapacity,
   resolveTerminalTimestampGutterRows,
   resolveTerminalTimestampGutterRowsFromLedger,
+  syncTerminalLineTimestampsForDirectClear,
   tryMeasureVisualRows,
   writeTerminalDataWithLineTimestamps,
   type StampCursorEstimate,
@@ -2820,6 +2821,113 @@ test("saturated DECSTBM RI rematerializes anchors inside the scroll region", asy
       `stamp must follow content after DECSTBM RI, got ${JSON.stringify({ text, row, painted, regionBottomText, viewportY })}`,
     );
   }
+});
+
+test("direct Clear Buffer wipe resets saturated bare ledger stamps", async () => {
+  // Clear Buffer writes CSI J / CSI 3 J via term.write in clearTerminalViewport,
+  // bypassing the timestamp scanner and reset hook. Saturated mode has already
+  // released markers to bare line numbers; after the buffer shrinks, those low
+  // lines still pass the bounds check and paint old times on the cleared view.
+  const fake = createFakeTerm({ rows: 4, scrollback: 4, circularTrim: true, cols: 80 });
+  const { term } = fake;
+
+  for (let second = 0; second < 20; second += 1) {
+    writeTerminalDataWithLineTimestamps(
+      term as never,
+      `seed-${second}\r\n`,
+      () => {},
+      { timestampDate: new Date(2026, 5, 6, 12, 0, second % 60) },
+    );
+  }
+  assert.equal(isTerminalScrollbackSaturated(term as never), true);
+  await new Promise((resolve) => { setTimeout(resolve, 0); });
+  assert.ok(getTerminalLineTimestampLedgerCount(term as never) > 1);
+
+  // Simulate the post-clear blank viewport without term.reset / timestamp write
+  // (matches Clear Buffer's raw CSI path). Bare ledger lines 0..rows-1 remain
+  // in-bounds for the fresh viewport until the direct-clear sync runs.
+  (term.buffer.active as { baseY: number }).baseY = 0;
+  (term.buffer.active as { cursorY: number }).cursorY = 0;
+  (term.buffer.active as { cursorX: number }).cursorX = 0;
+  fake.setViewportY(0);
+
+  const staleBeforeSync = getVisibleTerminalLineTimestampRows(term as never);
+  assert.ok(
+    staleBeforeSync.length > 0,
+    `expected stale bare stamps on the wiped viewport before sync, got ${JSON.stringify(staleBeforeSync)}`,
+  );
+
+  syncTerminalLineTimestampsForDirectClear(term as never, { wipeScrollback: true });
+
+  assert.equal(
+    getTerminalLineTimestampLedgerCount(term as never),
+    0,
+    "Clear Buffer wipe must drop saturated bare ledger stamps with the history",
+  );
+  assert.deepEqual(
+    getVisibleTerminalLineTimestampRows(term as never),
+    [],
+    "gutter must not paint pre-clear labels onto the wiped viewport",
+  );
+});
+
+test("in-chunk alt-screen leave pre-arms normal sentinel before circular trim", async () => {
+  // Saturated maintenance clears the trim sentinel while the alternate buffer is
+  // active (alt length looks unsaturated). A later write that starts on alt but
+  // contains CSI ? 1049 l + normal output must re-arm against buffer.normal
+  // before term.write, or the first post-leave circular recycle is unobservable
+  // and gutter labels land one row behind.
+  const fake = createFakeTerm({ rows: 4, scrollback: 4, circularTrim: true, cols: 80 });
+  const { term } = fake;
+
+  for (let second = 0; second < 20; second += 1) {
+    writeTerminalDataWithLineTimestamps(
+      term as never,
+      `seed-${second}\r\n`,
+      () => {},
+      { timestampDate: new Date(2026, 5, 6, 12, 0, second % 60) },
+    );
+  }
+  assert.equal(isTerminalScrollbackSaturated(term as never), true);
+  await new Promise((resolve) => { setTimeout(resolve, 0); });
+
+  writeTerminalDataWithLineTimestamps(term as never, "\x1b[?1049hframe\r\n", () => {});
+  assert.equal((term.buffer.active as { type: string }).type, "alternate");
+
+  // Leave + stamp + same-second pads in ONE write so circular recycle happens
+  // before post-write sentinel maintenance can re-arm on the normal buffer.
+  // Two pads keep target-line on-screen above the trailing empty cursor row.
+  writeTerminalDataWithLineTimestamps(
+    term as never,
+    `\x1b[?1049ltarget-line\r\n${"pad\r\n".repeat(2)}`,
+    () => {},
+    { timestampDate: new Date(2026, 5, 6, 12, 4, 0) },
+  );
+
+  await new Promise((resolve) => { setTimeout(resolve, 0); });
+  fake.setViewportY(Math.max(0, fake.getAbsoluteCursorLine() - (term.rows - 1)));
+  const painted = getVisibleTerminalLineTimestampRows(term as never);
+  const viewportY = (term.buffer.active as { viewportY: number }).viewportY;
+  const rows: Array<{ row: number; text: string; label?: string }> = [];
+  for (let row = 0; row < term.rows; row += 1) {
+    const text = (
+      term.buffer.active.getLine(viewportY + row) as {
+        translateToString: (trimRight?: boolean) => string;
+      }
+    ).translateToString(true);
+    const label = painted.find((entry) => entry.row === row)?.label;
+    rows.push({ row, text, label });
+  }
+  const target = rows.find((entry) => entry.text === "target-line");
+  assert.ok(
+    target,
+    `expected target-line still visible after in-chunk pads, got ${JSON.stringify(rows)}`,
+  );
+  assert.equal(
+    target.label,
+    "12:04:00",
+    `gutter stamp must sit on target-line after in-chunk alt leave, got ${JSON.stringify(rows)}`,
+  );
 });
 
 test("saturated CSI 2 J rematerializes anchors so erased viewport stamps drop", async () => {
