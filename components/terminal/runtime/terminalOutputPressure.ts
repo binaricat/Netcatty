@@ -335,7 +335,13 @@ export const noteTerminalOutputPressureData = (
     || recentBytes >= TIMESTAMP_SKIP_RATE_BYTES;
 
   if (byteGateLargeOutput || saturatedBulkChunk || sustainedLineStream) {
-    markLargeOutput(state, now, quietMs);
+    // Follow streams may arrive every ~500ms (see SUSTAINED_LINE_MAX_GAP_MS).
+    // Hold pressure across that accepted gap so keyword catch-up does not resume
+    // between batches while the stream is still active (#2599 / Codex review).
+    const holdMs = sustainedLineStream
+      ? Math.max(quietMs, SUSTAINED_LINE_MAX_GAP_MS)
+      : quietMs;
+    markLargeOutput(state, now, holdMs);
   } else if (now >= state.largeOutputUntil) {
     state.largeOutput = false;
   }

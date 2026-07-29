@@ -249,6 +249,13 @@ test("arms large-output for batched sustained log streams with ~500ms gaps", () 
     assert.equal(getTerminalOutputPressure(term).largeOutput, true);
     assert.equal(shouldDegradeTerminalSideWork(term), true);
     assert.equal(shouldSkipTerminalLineTimestamps(term), false);
+
+    // Default largeOutputQuietMs (480) is shorter than the accepted ~500ms batch
+    // gap. Pressure must stay armed across that gap so keyword catch-up does not
+    // resume between batches while the follow stream is still active.
+    now += XTERM_PERFORMANCE_CONFIG.highlighting.largeOutputQuietMs + 1;
+    assert.equal(getTerminalOutputPressure(term).largeOutput, true);
+    assert.equal(shouldDegradeTerminalSideWork(term), true);
   } finally {
     Object.defineProperty(performance, "now", {
       configurable: true,
@@ -309,7 +316,9 @@ test("does not rearm large-output from character echoes after a sustained stream
     }
     assert.equal(getTerminalOutputPressure(term).largeOutput, true);
 
-    now += XTERM_PERFORMANCE_CONFIG.highlighting.largeOutputQuietMs + 1;
+    // Sustained-line hold is at least the accepted inter-batch gap (750ms), not
+    // only the generic largeOutputQuietMs (480).
+    now += Math.max(XTERM_PERFORMANCE_CONFIG.highlighting.largeOutputQuietMs, 750) + 1;
     assert.equal(getTerminalOutputPressure(term).largeOutput, false);
 
     noteTerminalOutputPressureData(term, "a");
