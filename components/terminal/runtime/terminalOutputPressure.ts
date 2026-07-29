@@ -66,9 +66,15 @@ const LARGE_OUTPUT_RATE_BYTES = 16 * 1024;
  * driving keyword/timestamp work on every write (#2599). A longer, lower
  * line-rate window catches that path without treating sparse interactive
  * Enter/echo as bulk output.
+ *
+ * Line count alone is not enough: one unsaturated `ls` / `git status` /
+ * `docker ps` chunk can carry ≥8 newlines at a single timestamp. Require the
+ * rolling samples to span real time so only continuous follow streams arm.
  */
 const SUSTAINED_LINE_WINDOW_MS = 1500;
 const SUSTAINED_LINE_RATE = 8;
+/** Minimum age of the oldest in-window line sample before classifying sustained. */
+const SUSTAINED_LINE_MIN_SPAN_MS = 400;
 /**
  * Only skip line-timestamp markers at true flood rates. Early large-output
  * (16KB) and saturated multi-line still degrade highlight/prep, but keep the
@@ -143,6 +149,18 @@ const noteRecentLineRate = (
   }
   if (state.recentLineCount < 0) state.recentLineCount = 0;
   return state.recentLineCount;
+};
+
+const isSustainedLineStream = (
+  state: TerminalOutputPressureState,
+  now: number,
+  recentLines: number,
+): boolean => {
+  if (recentLines < SUSTAINED_LINE_RATE) return false;
+  // One write (or several at the same timestamp) is a burst, not a follow stream.
+  if (state.recentLineSamples.length < 2) return false;
+  const oldestAt = state.recentLineSamples[0]!.at;
+  return now - oldestAt >= SUSTAINED_LINE_MIN_SPAN_MS;
 };
 
 const LINE_BREAK_SCAN = /[\n\r]/g;
@@ -255,8 +273,8 @@ export const noteTerminalOutputPressureData = (
       hasLineBreak
       || data.length >= SATURATED_SCROLLBACK_BULK_MIN_BYTES
     );
-  // Continuous log follow: enough newlines over ~1.5s, even when each chunk is tiny.
-  const sustainedLineStream = recentLines >= SUSTAINED_LINE_RATE;
+  // Continuous log follow: enough newlines spanning real time, even when each chunk is tiny.
+  const sustainedLineStream = isSustainedLineStream(state, now, recentLines);
 
   const trueFlood = data.length >= TERMINAL_LONG_LINE_PRESSURE_BYTES
     || recentBytes >= TIMESTAMP_SKIP_RATE_BYTES;

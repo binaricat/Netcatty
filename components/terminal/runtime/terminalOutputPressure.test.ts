@@ -246,6 +246,25 @@ test("does not arm large-output for sparse interactive newlines", () => {
   }
 });
 
+test("does not arm large-output for a single multi-line command burst", () => {
+  // Unsaturated ls/git status/docker ps: ≥8 newlines in one chunk must not
+  // look like a sustained tail -f stream (same timestamp, no duration).
+  const term = createFakeTerm({
+    rows: 24,
+    options: { scrollback: 10000 },
+    buffer: { active: { length: 200, baseY: 0 } },
+  });
+
+  noteTerminalOutputPressureData(
+    term,
+    Array.from({ length: 12 }, (_, index) => `row-${index}`).join("\n") + "\n",
+  );
+  assert.equal(getTerminalOutputPressure(term).largeOutput, false);
+  assert.equal(shouldDegradeTerminalSideWork(term), false);
+
+  resetTerminalOutputPressure(term);
+});
+
 test("saturated multi-line degrades side work but keeps line timestamps", () => {
   const term = createFakeTerm({
     rows: 24,
