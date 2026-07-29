@@ -568,6 +568,10 @@ const installReflowMaterializeHook = (term: XTerm, store: TimestampStore): void 
       && Number.isFinite(prevCols)
       && cols !== prevCols
     ) {
+      // True-flood writes can move the trim sentinel without syncing bare
+      // ledger offsets. Rebase first so rematerialized anchors land on the
+      // current rows; otherwise colsChanged keeps those mis-pinned markers.
+      rebaseLedgerForScrollback(term, store);
       materializeTimestampLedgerToMarkers(term);
     }
     originalResize.call(this, cols, rows);
@@ -887,6 +891,21 @@ const resolveBufferMaxLines = (term: XTerm): number => {
 };
 
 /**
+ * True when the absolute line-0 probe is still pinned at the buffer origin.
+ * Circular top-trim disposes or moves it; local CSI L/M above the cursor does not.
+ */
+const isTrimTopProbeAtOrigin = (store: TimestampStore): boolean => {
+  const topProbe = store.trimTopProbe;
+  return Boolean(
+    topProbe
+    && !topProbe.isDisposed
+    && typeof topProbe.line === "number"
+    && Number.isFinite(topProbe.line)
+    && topProbe.line === 0,
+  );
+};
+
+/**
  * Shift bare ledger lines using the saturated-mode trim sentinel.
  * Real xterm keeps baseY/length fixed while recycling; only marker.onTrim
  * observes those drops once ledger anchors have been released.
@@ -902,19 +921,20 @@ const applyCircularTrimDeltaFromSentinel = (store: TimestampStore): void => {
     && Number.isFinite(sentinel.line)
   ) {
     delta = store.trimSentinelLine - sentinel.line;
+    // CSI M/L above the cursor decreases the cursor-pinned sentinel without
+    // disposing it and without touching line 0. That is not circular trim —
+    // applying the movement globally would slide every bare stamp onto the
+    // preceding row. Acknowledge the new sentinel line but skip the shift.
+    if (delta > 0 && isTrimTopProbeAtOrigin(store)) {
+      delta = 0;
+    }
     store.trimSentinelLine = sentinel.line;
   } else {
     // Sentinel disposed. Circular top-trim also disposes the line-0 probe;
     // CSI L/M (and similar viewport edits) dispose only the cursor-pinned
     // sentinel while the top probe stays at 0 — do not invent a huge delta.
     const topProbe = store.trimTopProbe;
-    const topProbeStillAtOrigin = Boolean(
-      topProbe
-      && !topProbe.isDisposed
-      && typeof topProbe.line === "number"
-      && Number.isFinite(topProbe.line)
-      && topProbe.line === 0,
-    );
+    const topProbeStillAtOrigin = isTrimTopProbeAtOrigin(store);
     if (topProbeStillAtOrigin) {
       delta = 0;
     } else {

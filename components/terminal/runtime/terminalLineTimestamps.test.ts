@@ -1233,6 +1233,114 @@ test("local CSI-style sentinel disposal does not wipe saturated ledger", async (
   );
 });
 
+test("local CSI-style sentinel move does not shift saturated bare ledger", async () => {
+  // CSI M above the cursor decreases the cursor-pinned sentinel without
+  // disposing it. A surviving line-0 probe means local edit — do not apply
+  // that movement as a circular-trim delta to every bare ledger entry.
+  const fake = createFakeTerm({ rows: 4, scrollback: 4, circularTrim: true });
+  const { term, liveMarkers } = fake;
+
+  for (let second = 0; second < 20; second += 1) {
+    writeTerminalDataWithLineTimestamps(
+      term as never,
+      `seed-${second}\r\n`,
+      () => {},
+      { timestampDate: new Date(2026, 5, 6, 12, 0, second % 60) },
+    );
+  }
+  assert.equal(isTerminalScrollbackSaturated(term as never), true);
+  await new Promise((resolve) => { setTimeout(resolve, 0); });
+
+  fake.setViewportY(Math.max(0, fake.getAbsoluteCursorLine() - (term.rows - 1)));
+  const paintedBefore = getVisibleTerminalLineTimestampRows(term as never);
+  const ledgerBefore = getTerminalLineTimestampLedgerCount(term as never);
+  assert.ok(paintedBefore.length > 0, "expected gutter rows before local edit");
+  assert.ok(ledgerBefore > 1, "expected a populated saturated ledger");
+
+  const live = liveMarkers.filter((marker) => !marker.isDisposed);
+  const topProbe = live.find((marker) => marker.line === 0);
+  const cursorSentinel = live.find((marker) => marker.line > 0);
+  assert.ok(topProbe, "expected absolute line-0 trim probe");
+  assert.ok(cursorSentinel, "expected cursor-pinned trim sentinel");
+
+  const sentinelBefore = cursorSentinel!.line;
+  // Simulate CSI M above the cursor: sentinel moves up; top probe stays at 0.
+  cursorSentinel!.line = Math.max(1, sentinelBefore - 2);
+  assert.equal(topProbe!.isDisposed, false);
+  assert.equal(topProbe!.line, 0);
+  assert.ok(cursorSentinel!.line < sentinelBefore, "expected sentinel to move up");
+
+  const paintedAfter = getVisibleTerminalLineTimestampRows(term as never);
+  assert.equal(
+    getTerminalLineTimestampLedgerCount(term as never),
+    ledgerBefore,
+    "local sentinel move must not erase or invent ledger entries",
+  );
+  assert.deepEqual(
+    paintedAfter,
+    paintedBefore,
+    `local sentinel move must not slide gutter labels onto preceding rows, before=${JSON.stringify(paintedBefore)} after=${JSON.stringify(paintedAfter)}`,
+  );
+});
+
+test("resize after flood rebases stale sentinel before rematerialize", async () => {
+  // Flood moves the armed sentinel without syncing bare ledger offsets. The
+  // term.resize hook must rebase from that sentinel before rematerializing,
+  // or anchors pin to stale lines and survive column reflow on the wrong rows.
+  const fake = createFakeTerm({ rows: 4, scrollback: 4, circularTrim: true, cols: 80 });
+  const { term } = fake;
+
+  for (let second = 0; second < 20; second += 1) {
+    writeTerminalDataWithLineTimestamps(
+      term as never,
+      `seed-${second}\r\n`,
+      () => {},
+      { timestampDate: new Date(2026, 5, 6, 12, 0, second % 60) },
+    );
+  }
+  assert.equal(isTerminalScrollbackSaturated(term as never), true);
+  assert.ok(getTerminalLineTimestampLedgerCount(term as never) > 0);
+
+  // Install resize hook via paint, then flood without another paint/write sync.
+  getVisibleTerminalLineTimestampRows(term as never);
+  setTerminalOutputPressureLargeOutput(term as never, true);
+  for (let index = 0; index < 4; index += 1) {
+    writeTerminalDataWithLineTimestamps(term as never, `flood-${index}\r\n`, () => {});
+  }
+  setTerminalOutputPressureLargeOutput(term as never, false);
+
+  assert.equal(typeof (term as { resize?: unknown }).resize, "function");
+  (term as { resize: (cols: number, rows: number) => void }).resize(40, term.rows);
+
+  // Flood recycled the bottom; scroll to the top where seed rows remain.
+  fake.setViewportY(0);
+  const painted = getVisibleTerminalLineTimestampRows(term as never);
+  assert.ok(painted.length > 0, `expected gutter rows after flood+resize, got ${JSON.stringify(painted)}`);
+
+  const viewportY = (term.buffer.active as { viewportY: number }).viewportY;
+  let alignedSeed = false;
+  for (const row of painted) {
+    const text = (
+      term.buffer.active.getLine(viewportY + row.row) as {
+        translateToString: (trimRight?: boolean) => string;
+      }
+    ).translateToString(true);
+    const match = /^seed-(\d+)$/.exec(text);
+    if (!match) continue;
+    const second = Number(match[1]) % 60;
+    const expected = `12:00:${String(second).padStart(2, "0")}`;
+    assert.equal(
+      row.label,
+      expected,
+      `seed stamp must stay on its row after flood+resize, got ${JSON.stringify({ text, row, painted })}`,
+    );
+    alignedSeed = true;
+  }
+  assert.ok(alignedSeed, `expected at least one surviving seed row after flood+resize, got ${JSON.stringify(painted)}`);
+
+  resetTerminalOutputPressure(term as never);
+});
+
 test("column resize after saturation keeps rematerialized gutter history", async () => {
   // Saturated mode releases ledger markers. Rematerialize before cols change so
   // reflow can move anchors; otherwise colsChanged drops every bare stamp.
