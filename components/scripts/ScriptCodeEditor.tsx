@@ -129,12 +129,17 @@ export const ScriptCodeEditor = React.forwardRef<ScriptCodeEditorHandle, ScriptC
     // Fallback paste for Electron. Prefer addAction over addCommand so the
     // keybinding is editorId-scoped and disposable (shared standalone service).
     // precondition editorTextFocus skips find/replace inputs so native paste works.
+    // contextMenuGroupId exposes bridge-backed Paste in Monaco's menu (Electron has
+    // no default webContents context-menu handler, so contextmenu:false left none).
     pasteBindingDisposableRef.current?.dispose();
     pasteBindingDisposableRef.current = editor.addAction({
       id: 'netcatty.scriptCodeEditor.clipboardPaste',
       label: 'Paste',
       keybindings: [monacoInstance.KeyMod.CtrlCmd | monacoInstance.KeyCode.KeyV],
       precondition: 'editorTextFocus',
+      contextMenuGroupId: '9_cutcopypaste',
+      // Before Monaco's built-in Paste (order 4), which often cannot read OS clipboard.
+      contextMenuOrder: 3.5,
       run: () => {
         void handlePasteRef.current();
       },
@@ -160,8 +165,8 @@ export const ScriptCodeEditor = React.forwardRef<ScriptCodeEditorHandle, ScriptC
           </div>
         )}
         options={{
-          // Prefer native context menu in Electron so right-click Paste uses OS clipboard path.
-          contextmenu: false,
+          // Keep Monaco's menu; bridge-backed Paste is registered via addAction above.
+          contextmenu: true,
           minimap: { enabled: minimap },
           fontSize: 13,
           lineNumbers: 'on',

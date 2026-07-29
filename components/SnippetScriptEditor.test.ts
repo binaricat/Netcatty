@@ -46,12 +46,13 @@ test('visual placeholder is hidden from assistive technology', () => {
   assert.match(codeEditorSource, /<span\s+aria-hidden/);
 });
 
-test('script code editor restores Electron clipboard paste for Cmd/Ctrl+V and native right-click', () => {
+test('script code editor restores Electron clipboard paste for Cmd/Ctrl+V and right-click', () => {
   assert.match(codeEditorSource, /useClipboardBackend/);
   assert.match(codeEditorSource, /readClipboardTextWithFallbacks/);
   assert.match(codeEditorSource, /buildMonacoPasteEdits/);
   assert.match(codeEditorSource, /KeyMod\.CtrlCmd \| monacoInstance\.KeyCode\.KeyV/);
-  assert.match(codeEditorSource, /contextmenu:\s*false/);
+  assert.match(codeEditorSource, /contextmenu:\s*true/);
+  assert.match(codeEditorSource, /contextMenuGroupId:\s*'9_cutcopypaste'/);
   assert.match(codeEditorSource, /editor\.action\.clipboardPasteAction/);
 });
 
