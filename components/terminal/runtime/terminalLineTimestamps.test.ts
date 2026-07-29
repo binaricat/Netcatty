@@ -2930,6 +2930,79 @@ test("in-chunk alt-screen leave pre-arms normal sentinel before circular trim", 
   );
 });
 
+test("in-chunk alt leave + CSI 2 J rematerializes normal anchors", async () => {
+  // Pre-write active is still alternate when the chunk starts with ?1049l then
+  // CSI 2 J. Saturated gates that only inspect the short alt buffer skip
+  // rematerialize; xterm then erases the normal viewport while ledger entries
+  // are bare, leaving gutter times on blank rows.
+  const fake = createFakeTerm({ rows: 4, scrollback: 4, circularTrim: true, cols: 80 });
+  const { term } = fake;
+
+  for (let second = 0; second < 20; second += 1) {
+    writeTerminalDataWithLineTimestamps(
+      term as never,
+      `seed-${second}\r\n`,
+      () => {},
+      { timestampDate: new Date(2026, 5, 6, 12, 0, second % 60) },
+    );
+  }
+  assert.equal(isTerminalScrollbackSaturated(term as never), true);
+  await new Promise((resolve) => { setTimeout(resolve, 0); });
+
+  const normalBaseY = (term.buffer.normal as { baseY: number }).baseY;
+  const viewportSeedLine = normalBaseY + 1;
+  const viewportSeedText = (
+    term.buffer.normal.getLine(viewportSeedLine) as {
+      translateToString: (trimRight?: boolean) => string;
+    }
+  ).translateToString(true);
+  assert.match(viewportSeedText, /^seed-\d+$/);
+  const ledgerBefore = getTerminalLineTimestampLedgerCount(term as never);
+  const disposedBefore = fake.disposedMarkerLines.length;
+
+  writeTerminalDataWithLineTimestamps(term as never, "\x1b[?1049hframe\r\n", () => {});
+  assert.equal((term.buffer.active as { type: string }).type, "alternate");
+
+  writeTerminalDataWithLineTimestamps(term as never, "\x1b[?1049l\x1b[2J", () => {});
+
+  assert.equal((term.buffer.active as { type: string }).type, "normal");
+  assert.ok(
+    fake.disposedMarkerLines.length > disposedBefore,
+    "post-leave CSI 2 J must dispose rematerialized normal-buffer markers",
+  );
+  assert.ok(
+    getTerminalLineTimestampLedgerCount(term as never) < ledgerBefore,
+    "erased viewport stamps must drop after in-chunk alt leave + CSI 2 J",
+  );
+
+  const cleared = (
+    term.buffer.active.getLine(viewportSeedLine) as {
+      translateToString: (trimRight?: boolean) => string;
+    }
+  ).translateToString(true);
+  assert.equal(cleared, "", "post-leave CSI 2 J must clear normal viewport cells");
+
+  fake.setViewportY(normalBaseY);
+  const painted = getVisibleTerminalLineTimestampRows(term as never);
+  const viewportY = (term.buffer.active as { viewportY: number }).viewportY;
+  for (const row of painted) {
+    const text = (
+      term.buffer.active.getLine(viewportY + row.row) as {
+        translateToString: (trimRight?: boolean) => string;
+      }
+    ).translateToString(true);
+    if (!text && viewportY + row.row >= normalBaseY) {
+      const seedSecond = Number(/^seed-(\d+)$/.exec(viewportSeedText)?.[1] ?? -1) % 60;
+      const stale = `12:00:${String(seedSecond).padStart(2, "0")}`;
+      assert.notEqual(
+        row.label,
+        stale,
+        `blank viewport must not keep erased stamp after in-chunk leave+ED, got ${JSON.stringify({ row, painted, viewportSeedText })}`,
+      );
+    }
+  }
+});
+
 test("saturated CSI 2 J rematerializes anchors so erased viewport stamps drop", async () => {
   // With clearWipesScrollback disabled, CSI 2 J clears viewport rows and
   // disposes markers on those rows. Saturated bare ledger must rematerialize

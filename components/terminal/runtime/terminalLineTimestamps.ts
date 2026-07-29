@@ -2547,9 +2547,17 @@ const writeTerminalDataWithSecondLedger = (
   // dispose those markers, then release copies the updated lines. Scan the
   // prefix-joined stream so IL/DL/SU/SD/ED/RI and same-chunk DECSTBM+LF/IND
   // still hit even when the terminal's pre-write region is still full-screen.
+  //
+  // In-chunk alt leave + post-leave edit: pre-write active is still alt, so
+  // isTerminalScrollbackSaturated sees the short alt buffer and
+  // isAlternateBufferActive stays true. Use normal-buffer saturation; materialize
+  // pins via buffers.normal.addMarker while alt is still active.
+  const scrollbackSaturatedForRematerialize = leavingAltInChunk
+    ? isNormalBufferScrollbackSaturated(term)
+    : isTerminalScrollbackSaturated(term);
   if (
-    isTerminalScrollbackSaturated(term)
-    && !isAlternateBufferActive(term)
+    scrollbackSaturatedForRematerialize
+    && (leavingAltInChunk || !isAlternateBufferActive(term))
     && store.ledger.length > 0
     && dataRequiresSaturatedAnchorRematerialize(term, dataForTimestamps)
   ) {
