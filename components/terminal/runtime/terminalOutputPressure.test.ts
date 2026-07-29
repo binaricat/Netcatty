@@ -265,6 +265,40 @@ test("does not arm large-output for a single multi-line command burst", () => {
   resetTerminalOutputPressure(term);
 });
 
+test("does not arm large-output for a burst plus a later interactive newline", () => {
+  // A multi-line command chunk plus one prompt/echo newline 400–1500ms later
+  // still spans the min window, but is not a continuous follow stream.
+  const term = createFakeTerm({
+    rows: 24,
+    options: { scrollback: 10000 },
+    buffer: { active: { length: 200, baseY: 0 } },
+  });
+  const originalNow = performance.now.bind(performance);
+  let now = 50_000;
+
+  Object.defineProperty(performance, "now", {
+    configurable: true,
+    value: () => now,
+  });
+
+  try {
+    noteTerminalOutputPressureData(
+      term,
+      Array.from({ length: 12 }, (_, index) => `row-${index}`).join("\n") + "\n",
+    );
+    now += 500;
+    noteTerminalOutputPressureData(term, "user@host:~$ \n");
+    assert.equal(getTerminalOutputPressure(term).largeOutput, false);
+    assert.equal(shouldDegradeTerminalSideWork(term), false);
+  } finally {
+    Object.defineProperty(performance, "now", {
+      configurable: true,
+      value: originalNow,
+    });
+    resetTerminalOutputPressure(term);
+  }
+});
+
 test("saturated multi-line degrades side work but keeps line timestamps", () => {
   const term = createFakeTerm({
     rows: 24,
