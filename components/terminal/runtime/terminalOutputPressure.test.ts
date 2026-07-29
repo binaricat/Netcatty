@@ -285,6 +285,45 @@ test("does not arm large-output for sparse interactive newlines", () => {
   }
 });
 
+test("does not rearm large-output from character echoes after a sustained stream quietens", () => {
+  // After tail -f stops, line samples can linger in the 1.5s window. A typed
+  // character (no newline) must not extend the span via wall-clock `now` and
+  // re-enter the degraded path once the quiet window has already expired.
+  const term = createFakeTerm({
+    rows: 24,
+    options: { scrollback: 10000 },
+    buffer: { active: { length: 200, baseY: 0 } },
+  });
+  const originalNow = performance.now.bind(performance);
+  let now = 60_000;
+
+  Object.defineProperty(performance, "now", {
+    configurable: true,
+    value: () => now,
+  });
+
+  try {
+    for (let index = 0; index < 12; index += 1) {
+      noteTerminalOutputPressureData(term, `2026-07-29 INFO event-${index}\n`);
+      now += 100;
+    }
+    assert.equal(getTerminalOutputPressure(term).largeOutput, true);
+
+    now += XTERM_PERFORMANCE_CONFIG.highlighting.largeOutputQuietMs + 1;
+    assert.equal(getTerminalOutputPressure(term).largeOutput, false);
+
+    noteTerminalOutputPressureData(term, "a");
+    assert.equal(getTerminalOutputPressure(term).largeOutput, false);
+    assert.equal(shouldDegradeTerminalSideWork(term), false);
+  } finally {
+    Object.defineProperty(performance, "now", {
+      configurable: true,
+      value: originalNow,
+    });
+    resetTerminalOutputPressure(term);
+  }
+});
+
 test("does not arm large-output for a single multi-line command burst", () => {
   // Unsaturated ls/git status/docker ps: ≥8 newlines in one chunk must not
   // look like a sustained tail -f stream (same timestamp, no duration).

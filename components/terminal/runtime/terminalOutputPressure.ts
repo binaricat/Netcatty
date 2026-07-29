@@ -75,7 +75,7 @@ const LARGE_OUTPUT_RATE_BYTES = 16 * 1024;
  */
 const SUSTAINED_LINE_WINDOW_MS = 1500;
 const SUSTAINED_LINE_RATE = 8;
-/** Minimum age of the oldest in-window line sample before classifying sustained. */
+/** Minimum age between oldest and newest in-window line samples before classifying sustained. */
 const SUSTAINED_LINE_MIN_SPAN_MS = 400;
 /**
  * Repeated batches, not a single write plus one later echo. Two samples is
@@ -162,14 +162,16 @@ const noteRecentLineRate = (
 
 const isSustainedLineStream = (
   state: TerminalOutputPressureState,
-  now: number,
   recentLines: number,
 ): boolean => {
   if (recentLines < SUSTAINED_LINE_RATE) return false;
   // One write (or a dump plus one later echo) is not a follow stream.
   if (state.recentLineSamples.length < SUSTAINED_LINE_MIN_SAMPLES) return false;
+  // Span through the newest *line* sample only — character echoes must not
+  // stretch the window via wall-clock `now` and rearm after a quiet stream.
   const oldestAt = state.recentLineSamples[0]!.at;
-  if (now - oldestAt < SUSTAINED_LINE_MIN_SPAN_MS) return false;
+  const newestAt = state.recentLineSamples[state.recentLineSamples.length - 1]!.at;
+  if (newestAt - oldestAt < SUSTAINED_LINE_MIN_SPAN_MS) return false;
   let maxSampleLines = 0;
   for (let index = 0; index < state.recentLineSamples.length; index += 1) {
     const sample = state.recentLineSamples[index]!;
@@ -315,8 +317,11 @@ export const noteTerminalOutputPressureData = (
   let saturatedBulkChunk = false;
   if (!byteGateLargeOutput) {
     const recentLines = noteRecentLineRate(state, now, newlineCount);
-    // Continuous log follow: enough newlines spanning real time, even when each chunk is tiny.
-    sustainedLineStream = isSustainedLineStream(state, now, recentLines);
+    // Only classify on chunks that contribute a line. Zero-newline echoes still
+    // age the rolling window above, but must not rearm large-output after a
+    // follow stream has gone quiet while old samples linger.
+    sustainedLineStream = newlineCount > 0
+      && isSustainedLineStream(state, recentLines);
     // Full scrollback + multi-line (seq/logs) or a modest plain chunk → bulk.
     // Tiny single-key echoes without newlines stay on the normal path.
     saturatedBulkChunk = scrollbackSaturated
