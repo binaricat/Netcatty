@@ -563,6 +563,24 @@ const createFakeTerm = (options: {
     scrollBottom = rows - 1;
   };
 
+  const clearBuffer = () => {
+    // Mirror CoreBrowserTerminal.clear: dispose markers, keep the prompt line
+    // as absolute line 0, and shrink scrollback. No-op when already at origin.
+    const state = currentState();
+    const cursorY = Math.max(0, state.absoluteCursorLine - state.baseY);
+    if (state.baseY === 0 && cursorY === 0) return;
+    for (const marker of [...liveMarkers]) {
+      if (!marker.isDisposed) marker.dispose();
+    }
+    const promptText = state.lineText.get(state.absoluteCursorLine) ?? "";
+    state.lineText.clear();
+    if (promptText) state.lineText.set(0, promptText);
+    state.baseY = 0;
+    state.absoluteCursorLine = 0;
+    cursorLine = 0;
+    viewportYOverride = null;
+  };
+
   const createMarkerAt = (
     line: number,
     attachedScreen: "normal" | "alternate",
@@ -587,6 +605,8 @@ const createFakeTerm = (options: {
       unicodeService,
       // Real xterm: public Terminal.reset and RIS→onRequestReset both call here.
       reset: resetBuffer,
+      // Real xterm: public Terminal.clear → _core.clear (auth retry path).
+      clear: clearBuffer,
       buffer: {
         get scrollTop() {
           return scrollTop;
@@ -641,6 +661,10 @@ const createFakeTerm = (options: {
     reset() {
       // Mirror public Terminal.reset → _core.reset (RIS skips this wrapper).
       term._core.reset();
+    },
+    clear() {
+      // Mirror public Terminal.clear → _core.clear (auth retry skips CSI wipe).
+      term._core.clear();
     },
     write(data: string, callback?: () => void) {
       writes.push(data);
@@ -1509,6 +1533,50 @@ test("parser-driven _core.reset clears saturated bare ledger stamps", async () =
   assert.deepEqual(
     getVisibleTerminalLineTimestampRows(term as never),
     [{ row: 0, label: "14:00:00" }],
+  );
+});
+
+test("term.clear clears saturated bare ledger stamps", async () => {
+  // Auth retry calls term.clear() (→ _core.clear). That disposes markers and
+  // shrinks scrollback but does not reset(); saturated bare line numbers would
+  // otherwise still fit the fresh viewport and paint stale gutter times.
+  const fake = createFakeTerm({ rows: 4, scrollback: 4, circularTrim: true });
+  const { term } = fake;
+
+  for (let second = 0; second < 20; second += 1) {
+    writeTerminalDataWithLineTimestamps(
+      term as never,
+      `seed-${second}\r\n`,
+      () => {},
+      { timestampDate: new Date(2026, 5, 6, 12, 0, second % 60) },
+    );
+  }
+  assert.equal(isTerminalScrollbackSaturated(term as never), true);
+  await new Promise((resolve) => { setTimeout(resolve, 0); });
+  assert.ok(getTerminalLineTimestampLedgerCount(term as never) > 1);
+
+  (term as { clear: () => void }).clear();
+
+  assert.equal(
+    getTerminalLineTimestampLedgerCount(term as never),
+    0,
+    "term.clear must wipe bare ledger stamps with the disposed markers",
+  );
+  assert.deepEqual(
+    getVisibleTerminalLineTimestampRows(term as never),
+    [],
+    "gutter must not paint pre-clear labels onto the shrunk buffer",
+  );
+
+  writeTerminalDataWithLineTimestamps(
+    term as never,
+    "after-clear\r\n",
+    () => {},
+    { timestampDate: new Date(2026, 5, 6, 15, 0, 0) },
+  );
+  assert.deepEqual(
+    getVisibleTerminalLineTimestampRows(term as never),
+    [{ row: 0, label: "15:00:00" }],
   );
 });
 

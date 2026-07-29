@@ -107,7 +107,7 @@ type TimestampStore = {
   lastSeenCols: number | null;
   /** True after term.resize is wrapped to rematerialize anchors before reflow. */
   reflowHookInstalled?: boolean;
-  /** True after term.reset is wrapped to clear bare ledger stamps with the buffer. */
+  /** True after term.reset/clear are wrapped to clear bare ledger stamps with the buffer. */
   resetHookInstalled?: boolean;
   /**
    * Nested writeTerminalDataWithSecondLedger depth. Parser-driven resets during
@@ -920,26 +920,30 @@ const installReflowMaterializeHook = (term: XTerm, store: TimestampStore): void 
 };
 
 /**
- * Clear the timestamp store when xterm replaces its buffer. Saturated mode
- * releases live markers and keeps bare line numbers; after term.reset() (or
- * RIS → onRequestReset) xterm only disposes markers, so rebase would keep
- * bare entries whose lines still fit the fresh viewport and paint old times
- * onto snapshot / post-reset rows.
+ * Clear the timestamp store when xterm replaces or shrinks its buffer. Saturated
+ * mode releases live markers and keeps bare line numbers; after term.reset() /
+ * term.clear() (or RIS → onRequestReset) xterm disposes markers without
+ * touching this store, so rebase would keep bare entries whose lines still fit
+ * the fresh viewport and paint old times onto snapshot / post-reset rows.
  *
  * RIS is important: InputHandler.fullReset fires onRequestReset, and
  * CoreBrowserTerminal handles that via its own reset() — not the public
  * Terminal.reset wrapper — so wrapping only term.reset misses parser-driven
  * buffer clears. Hook _core.reset (shared by both paths) when present.
  *
+ * Auth retry calls term.clear() (→ _core.clear): that keeps the prompt line but
+ * clears markers and scrollback. Hook clear the same way; skip the ledger wipe
+ * when clear is already a no-op (ybase === 0 && y === 0).
+ *
  * When RIS/DECCOLM arrives mid-chunk with trailing printable text, the write
  * path pre-records post-reset stamps in inBandPostResetLedger; restore them
- * after the clear so that text still gets a gutter label.
+ * after the reset so that text still gets a gutter label.
  */
 const installBufferResetHook = (term: XTerm, store: TimestampStore): void => {
   if (store.resetHookInstalled) return;
   store.resetHookInstalled = true;
 
-  const clearAfter = (invokeOriginal: () => void): void => {
+  const clearAfterReset = (invokeOriginal: () => void): void => {
     invokeOriginal();
     const inBand = (store.inBandWriteDepth ?? 0) > 0;
     const preserve = inBand ? store.inBandPostResetLedger : null;
@@ -964,23 +968,52 @@ const installBufferResetHook = (term: XTerm, store: TimestampStore): void => {
     }
   };
 
+  const clearAfterViewportClear = (invokeOriginal: () => void): void => {
+    const buffer = term.buffer?.active;
+    const alreadyClear =
+      (typeof buffer?.baseY === "number" ? buffer.baseY : 0) === 0
+      && (typeof buffer?.cursorY === "number" ? buffer.cursorY : 0) === 0;
+    invokeOriginal();
+    // No-op clear leaves markers and scrollback intact; keep gutter stamps.
+    if (alreadyClear) return;
+    resetTimestampStore(store);
+  };
+
   // Parser-driven RIS / DECCOLM and public Terminal.reset both end here.
-  const core = (term as XTerm & { _core?: { reset?: () => void } })._core;
+  const core = (term as XTerm & {
+    _core?: { reset?: () => void; clear?: () => void };
+  })._core;
   if (core && typeof core.reset === "function") {
     const originalCoreReset = core.reset;
     core.reset = function resetCoreWithTimestampClear(this: unknown): void {
-      clearAfter(() => originalCoreReset.call(this));
+      clearAfterReset(() => originalCoreReset.call(this));
     };
-    return;
+  } else {
+    // Fakes / stubs without a core reset still expose the public API.
+    const termWithReset = term as XTerm & { reset?: () => void };
+    const originalReset = termWithReset.reset;
+    if (typeof originalReset === "function") {
+      termWithReset.reset = function resetWithTimestampClear(this: XTerm): void {
+        clearAfterReset(() => originalReset.call(this));
+      };
+    }
   }
 
-  // Fakes / stubs without a core reset still expose the public API.
-  const termWithReset = term as XTerm & { reset?: () => void };
-  const originalReset = termWithReset.reset;
-  if (typeof originalReset !== "function") return;
-  termWithReset.reset = function resetWithTimestampClear(this: XTerm): void {
-    clearAfter(() => originalReset.call(this));
-  };
+  // Public Terminal.clear → _core.clear (auth retry and similar).
+  if (core && typeof core.clear === "function") {
+    const originalCoreClear = core.clear;
+    core.clear = function clearCoreWithTimestampClear(this: unknown): void {
+      clearAfterViewportClear(() => originalCoreClear.call(this));
+    };
+  } else {
+    const termWithClear = term as XTerm & { clear?: () => void };
+    const originalClear = termWithClear.clear;
+    if (typeof originalClear === "function") {
+      termWithClear.clear = function clearWithTimestampClear(this: XTerm): void {
+        clearAfterViewportClear(() => originalClear.call(this));
+      };
+    }
+  }
 };
 
 const secondKeyFromDate = (date: Date): number => Math.floor(date.getTime() / 1000);
