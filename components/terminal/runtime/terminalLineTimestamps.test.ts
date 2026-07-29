@@ -306,6 +306,58 @@ const createFakeTerm = (options: {
       }
     }
   };
+  const scrollRegionDown = (state: BufferState, count: number): void => {
+    const regionTop = state.baseY + scrollTop;
+    const regionBottom = state.baseY + scrollBottom;
+    if (regionBottom < regionTop || count <= 0) return;
+    const nextText = new Map<number, string>();
+    for (const [key, value] of state.lineText) {
+      if (key > regionBottom - count && key <= regionBottom) continue;
+      if (key >= regionTop && key <= regionBottom - count) {
+        nextText.set(key + count, value);
+        continue;
+      }
+      if (key < regionTop || key > regionBottom) nextText.set(key, value);
+    }
+    state.lineText = nextText;
+    for (const marker of liveMarkers) {
+      if (marker.isDisposed || marker.attachedScreen !== "normal") continue;
+      if (marker.line > regionBottom - count && marker.line <= regionBottom) {
+        marker.dispose();
+        continue;
+      }
+      if (marker.line >= regionTop && marker.line <= regionBottom - count) {
+        marker.line += count;
+      }
+    }
+  };
+  /** IND / NEL / RI — mirror xterm index / nextLine / reverseIndex. */
+  const applyIndexControl = (kind: "ind" | "nel" | "ri"): void => {
+    const state = currentState();
+    if (kind === "nel") state.column = 0;
+    const relativeY = state.absoluteCursorLine - state.baseY;
+    if (kind === "ri") {
+      if (relativeY <= scrollTop) {
+        if (screen === "normal") scrollRegionDown(state, 1);
+      } else {
+        state.absoluteCursorLine -= 1;
+        cursorLine = state.absoluteCursorLine;
+      }
+      return;
+    }
+    const partialRegion = scrollTop > 0 || scrollBottom < rows - 1;
+    // Partial DECSTBM at bottom: in-place splice (like LF), no circular trim.
+    if (screen === "normal" && partialRegion && relativeY >= scrollBottom) {
+      scrollRegionUp(state, 1);
+      return;
+    }
+    // Full-region bottom (or mid-viewport): advance; trim handles circular scroll.
+    if (relativeY >= scrollBottom || relativeY < rows - 1) {
+      state.absoluteCursorLine += 1;
+      cursorLine = state.absoluteCursorLine;
+      trimScrollbackIfNeeded(state);
+    }
+  };
   /** When null, viewport follows bottom (baseY). Tests may pin a scroll-up offset. */
   let viewportYOverride: number | null = null;
 
@@ -632,9 +684,21 @@ const createFakeTerm = (options: {
             index = sequence.endIndex;
             continue;
           }
+          // ESC D / E / M — Index / Next Line / Reverse Index.
+          const escFinal = input[index + 1];
+          if (escFinal === "D" || escFinal === "E" || escFinal === "M") {
+            applyIndexControl(escFinal === "D" ? "ind" : escFinal === "E" ? "nel" : "ri");
+            index += 1;
+            continue;
+          }
         }
         const state = currentState();
         const char = input[index];
+        // C1 IND / NEL / RI (same actions as ESC D / E / M).
+        if (char === "\x84" || char === "\x85" || char === "\x8d") {
+          applyIndexControl(char === "\x84" ? "ind" : char === "\x85" ? "nel" : "ri");
+          continue;
+        }
         if (char === "\n") {
           const relativeY = state.absoluteCursorLine - state.baseY;
           const partialRegion = scrollTop > 0 || scrollBottom < rows - 1;
@@ -2311,6 +2375,165 @@ test("saturated DECSTBM+LF in one write rematerializes using in-chunk region", a
       row.label,
       expected,
       `stamp must follow content after same-write DECSTBM+LF, got ${JSON.stringify({ text, row, painted, regionTopText, viewportY })}`,
+    );
+  }
+});
+
+test("saturated DECSTBM IND rematerializes anchors inside the scroll region", async () => {
+  // ESC D at the bottom of a partial DECSTBM region splices like LF / CSI S.
+  const fake = createFakeTerm({ rows: 4, scrollback: 4, circularTrim: true, cols: 80 });
+  const { term } = fake;
+
+  for (let second = 0; second < 20; second += 1) {
+    writeTerminalDataWithLineTimestamps(
+      term as never,
+      `seed-${second}\r\n`,
+      () => {},
+      { timestampDate: new Date(2026, 5, 6, 12, 0, second % 60) },
+    );
+  }
+  assert.equal(isTerminalScrollbackSaturated(term as never), true);
+  await new Promise((resolve) => { setTimeout(resolve, 0); });
+
+  writeTerminalDataWithLineTimestamps(term as never, "\x1b[2;4r", () => {});
+  const baseY = (term.buffer.active as { baseY: number }).baseY;
+  (term.buffer.active as { cursorY: number }).cursorY = 3;
+  const regionTopText = (
+    term.buffer.active.getLine(baseY + 1) as {
+      translateToString: (trimRight?: boolean) => string;
+    }
+  ).translateToString(true);
+
+  writeTerminalDataWithLineTimestamps(
+    term as never,
+    "\x1bDregion-tail\r",
+    () => {},
+    { timestampDate: new Date(2026, 5, 6, 12, 0, 40) },
+  );
+
+  fake.setViewportY(baseY);
+  const painted = getVisibleTerminalLineTimestampRows(term as never);
+  const viewportY = (term.buffer.active as { viewportY: number }).viewportY;
+
+  for (const row of painted) {
+    const text = (
+      term.buffer.active.getLine(viewportY + row.row) as {
+        translateToString: (trimRight?: boolean) => string;
+      }
+    ).translateToString(true);
+    if (!text || text === regionTopText || text === "region-tail") continue;
+    const match = /^seed-(\d+)$/.exec(text);
+    if (!match) continue;
+    const second = Number(match[1]) % 60;
+    const expected = `12:00:${String(second).padStart(2, "0")}`;
+    assert.equal(
+      row.label,
+      expected,
+      `stamp must follow content after DECSTBM IND, got ${JSON.stringify({ text, row, painted, regionTopText, viewportY })}`,
+    );
+  }
+});
+
+test("saturated DECSTBM+C1 IND in one write rematerializes using in-chunk region", async () => {
+  // Same-chunk DECSTBM + C1 IND (\x84) must rematerialize like DECSTBM+LF.
+  const fake = createFakeTerm({ rows: 4, scrollback: 4, circularTrim: true, cols: 80 });
+  const { term } = fake;
+
+  for (let second = 0; second < 20; second += 1) {
+    writeTerminalDataWithLineTimestamps(
+      term as never,
+      `seed-${second}\r\n`,
+      () => {},
+      { timestampDate: new Date(2026, 5, 6, 12, 0, second % 60) },
+    );
+  }
+  assert.equal(isTerminalScrollbackSaturated(term as never), true);
+  await new Promise((resolve) => { setTimeout(resolve, 0); });
+
+  const baseY = (term.buffer.active as { baseY: number }).baseY;
+  (term.buffer.active as { cursorY: number }).cursorY = 3;
+  const regionTopText = (
+    term.buffer.active.getLine(baseY + 1) as {
+      translateToString: (trimRight?: boolean) => string;
+    }
+  ).translateToString(true);
+
+  writeTerminalDataWithLineTimestamps(
+    term as never,
+    "\x1b[2;4r\x84region-tail\r",
+    () => {},
+    { timestampDate: new Date(2026, 5, 6, 12, 0, 40) },
+  );
+
+  fake.setViewportY(baseY);
+  const painted = getVisibleTerminalLineTimestampRows(term as never);
+  const viewportY = (term.buffer.active as { viewportY: number }).viewportY;
+
+  for (const row of painted) {
+    const text = (
+      term.buffer.active.getLine(viewportY + row.row) as {
+        translateToString: (trimRight?: boolean) => string;
+      }
+    ).translateToString(true);
+    if (!text || text === regionTopText || text === "region-tail") continue;
+    const match = /^seed-(\d+)$/.exec(text);
+    if (!match) continue;
+    const second = Number(match[1]) % 60;
+    const expected = `12:00:${String(second).padStart(2, "0")}`;
+    assert.equal(
+      row.label,
+      expected,
+      `stamp must follow content after same-write DECSTBM+C1 IND, got ${JSON.stringify({ text, row, painted, regionTopText, viewportY })}`,
+    );
+  }
+});
+
+test("saturated DECSTBM RI rematerializes anchors inside the scroll region", async () => {
+  // ESC M at the top of a DECSTBM region splices down like CSI T — no circular trim.
+  const fake = createFakeTerm({ rows: 4, scrollback: 4, circularTrim: true, cols: 80 });
+  const { term } = fake;
+
+  for (let second = 0; second < 20; second += 1) {
+    writeTerminalDataWithLineTimestamps(
+      term as never,
+      `seed-${second}\r\n`,
+      () => {},
+      { timestampDate: new Date(2026, 5, 6, 12, 0, second % 60) },
+    );
+  }
+  assert.equal(isTerminalScrollbackSaturated(term as never), true);
+  await new Promise((resolve) => { setTimeout(resolve, 0); });
+
+  writeTerminalDataWithLineTimestamps(term as never, "\x1b[2;4r", () => {});
+  const baseY = (term.buffer.active as { baseY: number }).baseY;
+  (term.buffer.active as { cursorY: number }).cursorY = 1;
+  const regionBottomText = (
+    term.buffer.active.getLine(baseY + 3) as {
+      translateToString: (trimRight?: boolean) => string;
+    }
+  ).translateToString(true);
+
+  writeTerminalDataWithLineTimestamps(term as never, "\x1bM", () => {});
+
+  fake.setViewportY(baseY);
+  const painted = getVisibleTerminalLineTimestampRows(term as never);
+  const viewportY = (term.buffer.active as { viewportY: number }).viewportY;
+
+  for (const row of painted) {
+    const text = (
+      term.buffer.active.getLine(viewportY + row.row) as {
+        translateToString: (trimRight?: boolean) => string;
+      }
+    ).translateToString(true);
+    if (!text || text === regionBottomText) continue;
+    const match = /^seed-(\d+)$/.exec(text);
+    if (!match) continue;
+    const second = Number(match[1]) % 60;
+    const expected = `12:00:${String(second).padStart(2, "0")}`;
+    assert.equal(
+      row.label,
+      expected,
+      `stamp must follow content after DECSTBM RI, got ${JSON.stringify({ text, row, painted, regionBottomText, viewportY })}`,
     );
   }
 });

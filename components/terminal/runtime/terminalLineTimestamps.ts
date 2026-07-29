@@ -413,6 +413,21 @@ const isLocalLineEditSequence = (sequence: string): boolean => {
 /** CSI Ps J — erase in display (incl. selective CSI ? J); clears cells / disposes row markers. */
 const isEraseDisplaySequence = (sequence: string): boolean => getCsiFinal(sequence) === "J";
 
+/** ESC D / ESC E — Index / Next Line (scroll at DECSTBM bottom, like LF). */
+const isIndexOrNextLineSequence = (sequence: string): boolean =>
+  sequence === "\x1bD" || sequence === "\x1bE";
+
+/**
+ * ESC M — Reverse Index. Always splices in-place at the scroll top (like CSI T),
+ * even for a full-screen region — never a circular scrollback trim.
+ */
+const isReverseIndexSequence = (sequence: string): boolean => sequence === "\x1bM";
+
+/** C1 single-byte IND / NEL / RI (same actions as ESC D / E / M). */
+const C1_IND = "\x84";
+const C1_NEL = "\x85";
+const C1_RI = "\x8d";
+
 /**
  * DECSTBM (CSI Pt ; Pb r). Returns null for non-DECSTBM CSI. Empty params reset
  * to the full viewport (xterm default).
@@ -470,9 +485,10 @@ const isPartialScrollingRegionBounds = (
 
 /**
  * Saturated bare ledger must rematerialize before local row edits, erase-display,
- * or linefeeds that will scroll inside a (possibly just-established) DECSTBM region.
- * Walks `data` so DECSTBM in the same write as a following LF is detected — the
- * terminal's pre-write region alone would miss that case.
+ * linefeeds / IND / NEL that will scroll inside a (possibly just-established)
+ * DECSTBM region, or reverse-index (always an in-place splice like CSI T).
+ * Walks `data` so DECSTBM in the same write as a following scroll control is
+ * detected — the terminal's pre-write region alone would miss that case.
  */
 const dataRequiresSaturatedAnchorRematerialize = (
   term: XTerm,
@@ -482,14 +498,20 @@ const dataRequiresSaturatedAnchorRematerialize = (
   let scrollTop = initialTop;
   let scrollBottom = initialBottom;
   for (let index = 0; index < data.length;) {
-    if (data[index] === "\n") {
+    const char = data[index];
+    // LF and C1 IND/NEL scroll a partial DECSTBM region in-place (no circular trim).
+    if (char === "\n" || char === C1_IND || char === C1_NEL) {
       if (isPartialScrollingRegionBounds(scrollTop, scrollBottom, rows)) {
         return true;
       }
       index += 1;
       continue;
     }
-    if (data[index] !== "\x1b") {
+    // C1 RI always splices at the scroll top like CSI T.
+    if (char === C1_RI) {
+      return true;
+    }
+    if (char !== "\x1b") {
       index += 1;
       continue;
     }
@@ -501,6 +523,13 @@ const dataRequiresSaturatedAnchorRematerialize = (
     if (
       isLocalLineEditSequence(sequence.sequence)
       || isEraseDisplaySequence(sequence.sequence)
+      || isReverseIndexSequence(sequence.sequence)
+    ) {
+      return true;
+    }
+    if (
+      isIndexOrNextLineSequence(sequence.sequence)
+      && isPartialScrollingRegionBounds(scrollTop, scrollBottom, rows)
     ) {
       return true;
     }
@@ -2317,11 +2346,12 @@ const writeTerminalDataWithSecondLedger = (
     maintainTrimSentinel(term, store);
   }
   // Saturated mode releases live anchors for trim perf. CSI L/M/S/T, erase-display
-  // (CSI J), and linefeeds inside a DECSTBM region move/dispose buffer rows
-  // without a global circular-trim delta — rematerialize first so xterm can
-  // shift or dispose those markers, then release copies the updated lines.
-  // Scan the prefix-joined stream so IL/DL/SU/SD/ED and same-chunk DECSTBM+LF
-  // still hit even when the terminal's pre-write region is still full-screen.
+  // (CSI J), reverse-index (ESC M / C1 RI), and LF/IND/NEL inside a DECSTBM
+  // region move/dispose buffer rows without a global circular-trim delta —
+  // rematerialize first so xterm can shift or dispose those markers, then
+  // release copies the updated lines. Scan the prefix-joined stream so
+  // IL/DL/SU/SD/ED/RI and same-chunk DECSTBM+LF/IND still hit even when the
+  // terminal's pre-write region is still full-screen.
   if (
     isTerminalScrollbackSaturated(term)
     && !isAlternateBufferActive(term)
