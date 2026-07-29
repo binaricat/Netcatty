@@ -61,6 +61,7 @@ export const ScriptCodeEditor = React.forwardRef<ScriptCodeEditorHandle, ScriptC
   const { readClipboardText: readClipboardTextFromBridge } = useClipboardBackend();
   const editorRef = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null);
   const completionDisposableRef = useRef<{ dispose: () => void } | null>(null);
+  const pasteBindingDisposableRef = useRef<{ dispose: () => void } | null>(null);
   const onSubmitShortcutRef = useRef(onSubmitShortcut);
   onSubmitShortcutRef.current = onSubmitShortcut;
   const handlePasteRef = useRef<() => Promise<void>>(() => Promise.resolve());
@@ -72,6 +73,8 @@ export const ScriptCodeEditor = React.forwardRef<ScriptCodeEditorHandle, ScriptC
   useEffect(() => () => {
     completionDisposableRef.current?.dispose();
     completionDisposableRef.current = null;
+    pasteBindingDisposableRef.current?.dispose();
+    pasteBindingDisposableRef.current = null;
   }, []);
 
   useEffect(() => {
@@ -123,13 +126,19 @@ export const ScriptCodeEditor = React.forwardRef<ScriptCodeEditorHandle, ScriptC
         () => onSubmitShortcutRef.current?.(),
       );
     }
-    // Fallback paste path for Electron where Monaco clipboardPasteAction can fail.
-    editor.addCommand(
-      monacoInstance.KeyMod.CtrlCmd | monacoInstance.KeyCode.KeyV,
-      () => {
+    // Fallback paste for Electron. Prefer addAction over addCommand so the
+    // keybinding is editorId-scoped and disposable (shared standalone service).
+    // precondition editorTextFocus skips find/replace inputs so native paste works.
+    pasteBindingDisposableRef.current?.dispose();
+    pasteBindingDisposableRef.current = editor.addAction({
+      id: 'netcatty.scriptCodeEditor.clipboardPaste',
+      label: 'Paste',
+      keybindings: [monacoInstance.KeyMod.CtrlCmd | monacoInstance.KeyCode.KeyV],
+      precondition: 'editorTextFocus',
+      run: () => {
         void handlePasteRef.current();
       },
-    );
+    });
     requestAnimationFrame(() => editor.layout());
     if (autoFocus) editor.focus();
   }, [autoFocus, language, onSubmitShortcut]);

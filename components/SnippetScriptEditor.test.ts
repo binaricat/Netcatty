@@ -54,3 +54,15 @@ test('script code editor restores Electron clipboard paste for Cmd/Ctrl+V and na
   assert.match(codeEditorSource, /contextmenu:\s*false/);
   assert.match(codeEditorSource, /editor\.action\.clipboardPasteAction/);
 });
+
+test('script paste binding is editor-scoped, disposable, and skips find-widget text focus', () => {
+  assert.match(codeEditorSource, /editor\.addAction\(/);
+  assert.match(codeEditorSource, /netcatty\.scriptCodeEditor\.clipboardPaste/);
+  assert.match(codeEditorSource, /precondition:\s*'editorTextFocus'/);
+  assert.match(codeEditorSource, /pasteBindingDisposableRef/);
+  assert.match(codeEditorSource, /pasteBindingDisposableRef\.current\?\.dispose\(\)/);
+  assert.doesNotMatch(
+    codeEditorSource,
+    /addCommand\(\s*monacoInstance\.KeyMod\.CtrlCmd \| monacoInstance\.KeyCode\.KeyV/,
+  );
+});
