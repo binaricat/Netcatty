@@ -9,6 +9,7 @@ import {
   getTerminalLineTimestampLedgerCount,
   getVisibleTerminalLineTimestampRows,
   isSimpleAsciiControlText,
+  materializeTimestampLedgerToMarkers,
   onTerminalLineTimestampsChange,
   resolveTerminalLineTimestampCapacity,
   resolveTerminalTimestampGutterRows,
@@ -297,6 +298,10 @@ const createFakeTerm = (options: {
       return { wraparoundMode };
     },
     rows,
+    resize(nextCols: number, nextRows: number) {
+      (term as { cols: number }).cols = Math.max(1, nextCols);
+      (term as { rows: number }).rows = Math.max(1, nextRows);
+    },
     write(data: string, callback?: () => void) {
       writes.push(data);
       for (let index = 0; index < data.length; index += 1) {
@@ -1016,18 +1021,19 @@ test("saturated scrollback keeps ledger stamps without attaching new live marker
   );
   assert.equal(
     liveMarkers.length,
-    markersBefore + 1,
-    "saturated writes may re-pin one trim sentinel, not per-stamp markers",
+    markersBefore + 2,
+    "saturated writes may re-pin trim sentinel + top probe, not per-stamp markers",
   );
   assert.ok(getTerminalLineTimestampLedgerCount(term as never) >= ledgerBefore);
 
   // Existing anchors are retired on an amortized drain so trim stays cheap.
-  // One cursor-pinned trim sentinel remains so circular recycles stay visible.
+  // Cursor sentinel + line-0 probe remain so circular recycles stay visible and
+  // local CSI L/M disposal can be distinguished from top-of-buffer trim.
   await new Promise((resolve) => { setTimeout(resolve, 0); });
   assert.equal(
     liveMarkers.filter((marker) => !marker.isDisposed).length,
-    1,
-    "saturated writes should release ledger markers but keep one trim sentinel",
+    2,
+    "saturated writes should release ledger markers but keep trim sentinel + top probe",
   );
 
   // Fake term keeps viewport at baseY=0 until trim; pin to the bottom so paint
@@ -1185,6 +1191,121 @@ test("armed sentinel then flood keeps first later stamp on its row", async () =>
   resetTerminalOutputPressure(term as never);
 });
 
+test("local CSI-style sentinel disposal does not wipe saturated ledger", async () => {
+  // Cursor-pinned sentinel disposal from CSI M/L must not be treated as a
+  // circular top-trim of trimSentinelLine+1 rows (that zeroes the ledger).
+  const fake = createFakeTerm({ rows: 4, scrollback: 4, circularTrim: true });
+  const { term, liveMarkers } = fake;
+
+  for (let second = 0; second < 20; second += 1) {
+    writeTerminalDataWithLineTimestamps(
+      term as never,
+      `seed-${second}\r\n`,
+      () => {},
+      { timestampDate: new Date(2026, 5, 6, 12, 0, second % 60) },
+    );
+  }
+  assert.equal(isTerminalScrollbackSaturated(term as never), true);
+  await new Promise((resolve) => { setTimeout(resolve, 0); });
+
+  const ledgerBefore = getTerminalLineTimestampLedgerCount(term as never);
+  assert.ok(ledgerBefore > 1, "expected a populated saturated ledger");
+
+  const live = liveMarkers.filter((marker) => !marker.isDisposed);
+  assert.equal(live.length, 2, "expected cursor sentinel and top probe");
+  const topProbe = live.find((marker) => marker.line === 0);
+  const cursorSentinel = live.find((marker) => marker.line > 0);
+  assert.ok(topProbe, "expected absolute line-0 trim probe");
+  assert.ok(cursorSentinel, "expected cursor-pinned trim sentinel");
+
+  // Simulate CSI M at the bottom: dispose only the cursor-pinned sentinel.
+  cursorSentinel!.dispose();
+  assert.equal(topProbe!.isDisposed, false);
+  assert.equal(topProbe!.line, 0);
+
+  fake.setViewportY(Math.max(0, fake.getAbsoluteCursorLine() - (term.rows - 1)));
+  getVisibleTerminalLineTimestampRows(term as never);
+
+  const ledgerAfter = getTerminalLineTimestampLedgerCount(term as never);
+  assert.ok(
+    ledgerAfter >= ledgerBefore - 1,
+    `local sentinel disposal must not erase timestamp history (${ledgerBefore} → ${ledgerAfter})`,
+  );
+});
+
+test("column resize after saturation keeps rematerialized gutter history", async () => {
+  // Saturated mode releases ledger markers. Rematerialize before cols change so
+  // reflow can move anchors; otherwise colsChanged drops every bare stamp.
+  const fake = createFakeTerm({ rows: 4, scrollback: 4, circularTrim: true, cols: 80 });
+  const { term, liveMarkers } = fake;
+
+  for (let second = 0; second < 20; second += 1) {
+    writeTerminalDataWithLineTimestamps(
+      term as never,
+      `seed-${second}\r\n`,
+      () => {},
+      { timestampDate: new Date(2026, 5, 6, 12, 0, second % 60) },
+    );
+  }
+  assert.equal(isTerminalScrollbackSaturated(term as never), true);
+  await new Promise((resolve) => { setTimeout(resolve, 0); });
+
+  const ledgerBefore = getTerminalLineTimestampLedgerCount(term as never);
+  assert.ok(ledgerBefore > 1, "expected a populated saturated ledger");
+  assert.equal(
+    liveMarkers.filter((marker) => !marker.isDisposed).length,
+    2,
+    "expected only trim sentinel + top probe while saturated",
+  );
+
+  // Resize rematerializes bare ledger anchors, then simulates reflow moves.
+  const attached = materializeTimestampLedgerToMarkers(term as never);
+  assert.ok(attached >= ledgerBefore - 2, `expected rematerialized anchors, got ${attached}`);
+  (term as { cols: number }).cols = 40;
+  for (const marker of liveMarkers) {
+    if (marker.isDisposed) continue;
+    // Soft-wrap reflow typically shifts absolute lines; keep them in range.
+    marker.line = Math.max(0, marker.line);
+  }
+
+  fake.setViewportY(Math.max(0, fake.getAbsoluteCursorLine() - (term.rows - 1)));
+  const painted = getVisibleTerminalLineTimestampRows(term as never);
+  assert.ok(
+    getTerminalLineTimestampLedgerCount(term as never) > 0,
+    "column reflow must not drop the entire saturated ledger",
+  );
+  assert.ok(painted.length > 0, `expected gutter rows after column resize, got ${JSON.stringify(painted)}`);
+});
+
+test("term.resize hook rematerializes saturated ledger before column reflow", async () => {
+  const fake = createFakeTerm({ rows: 4, scrollback: 4, circularTrim: true, cols: 80 });
+  const { term } = fake;
+
+  for (let second = 0; second < 20; second += 1) {
+    writeTerminalDataWithLineTimestamps(
+      term as never,
+      `seed-${second}\r\n`,
+      () => {},
+      { timestampDate: new Date(2026, 5, 6, 12, 0, second % 60) },
+    );
+  }
+  await new Promise((resolve) => { setTimeout(resolve, 0); });
+  const ledgerBefore = getTerminalLineTimestampLedgerCount(term as never);
+  assert.ok(ledgerBefore > 1);
+
+  // Force store creation + resize hook via a paint, then resize columns.
+  getVisibleTerminalLineTimestampRows(term as never);
+  assert.equal(typeof (term as { resize?: unknown }).resize, "function");
+  (term as { resize: (cols: number, rows: number) => void }).resize(40, term.rows);
+
+  fake.setViewportY(Math.max(0, fake.getAbsoluteCursorLine() - (term.rows - 1)));
+  const painted = getVisibleTerminalLineTimestampRows(term as never);
+  assert.ok(
+    getTerminalLineTimestampLedgerCount(term as never) > 0,
+    `resize hook must preserve saturated ledger (${ledgerBefore} before)`,
+  );
+  assert.ok(painted.length > 0, `expected gutter rows after term.resize, got ${JSON.stringify(painted)}`);
+});
 
 test("simple ASCII control text gate matches seq-style floods", () => {
   assert.equal(isSimpleAsciiControlText("1\n2\n3\n"), true);

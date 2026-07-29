@@ -74,16 +74,24 @@ type TimestampStore = {
   lastSeenBaseY: number | null;
   lastSeenBufferLength: number | null;
   /**
-   * Single live marker kept while scrollback is saturated. Real xterm recycles
-   * its circular buffer with constant baseY/length and only moves markers via
-   * onTrim; after ledger anchors are released for perf, this sentinel is how
-   * bare ledger lines learn the trim delta.
+   * Cursor-pinned live marker kept while scrollback is saturated. Real xterm
+   * recycles its circular buffer with constant baseY/length and only moves
+   * markers via onTrim; after ledger anchors are released for perf, this
+   * sentinel is how bare ledger lines learn the trim delta.
    */
   trimSentinel?: TimestampMarker;
   /** Last observed trimSentinel.line; null when no sentinel is armed. */
   trimSentinelLine: number | null;
+  /**
+   * Absolute line-0 probe kept alongside the cursor sentinel. Circular top
+   * trim disposes it; CSI L/M (and similar) at the cursor dispose only the
+   * cursor sentinel — so a surviving top probe means "local edit, not trim".
+   */
+  trimTopProbe?: TimestampMarker;
   /** Last seen cols; when cols change, reflow may have shifted bare line numbers. */
   lastSeenCols: number | null;
+  /** True after term.resize is wrapped to rematerialize anchors before reflow. */
+  reflowHookInstalled?: boolean;
   /** @deprecated materialize path removed; always false. */
   ledgerMaterialized: boolean;
   /**
@@ -528,9 +536,42 @@ const getTimestampStore = (term: XTerm): TimestampStore => {
       formatLabel: (date) => internTerminalLineTimestampLabel(created, date),
     });
     stores.set(term, created);
+    installReflowMaterializeHook(term, created);
     store = created;
   }
   return store;
+};
+
+/**
+ * Rematerialize sparse ledger markers immediately before term.resize when the
+ * column count is about to change. Saturated mode releases anchors for trim
+ * perf; without this, xterm reflows with bare line numbers and the next
+ * colsChanged rebase drops the entire gutter history.
+ */
+const installReflowMaterializeHook = (term: XTerm, store: TimestampStore): void => {
+  if (store.reflowHookInstalled) return;
+  store.reflowHookInstalled = true;
+  const termWithResize = term as XTerm & {
+    resize?: (cols: number, rows: number) => void;
+  };
+  const originalResize = termWithResize.resize;
+  if (typeof originalResize !== "function") return;
+  termWithResize.resize = function resizeWithTimestampRematerialize(
+    this: XTerm,
+    cols: number,
+    rows: number,
+  ): void {
+    const prevCols = Number.isFinite(term.cols) ? term.cols : store.lastSeenCols;
+    if (
+      store.ledger.length > 0
+      && typeof prevCols === "number"
+      && Number.isFinite(prevCols)
+      && cols !== prevCols
+    ) {
+      materializeTimestampLedgerToMarkers(term);
+    }
+    originalResize.call(this, cols, rows);
+  };
 };
 
 const secondKeyFromDate = (date: Date): number => Math.floor(date.getTime() / 1000);
@@ -863,10 +904,31 @@ const applyCircularTrimDeltaFromSentinel = (store: TimestampStore): void => {
     delta = store.trimSentinelLine - sentinel.line;
     store.trimSentinelLine = sentinel.line;
   } else {
-    // Sentinel was trimmed off the top: at least its prior line + 1 fell away.
-    delta = store.trimSentinelLine + 1;
+    // Sentinel disposed. Circular top-trim also disposes the line-0 probe;
+    // CSI L/M (and similar viewport edits) dispose only the cursor-pinned
+    // sentinel while the top probe stays at 0 — do not invent a huge delta.
+    const topProbe = store.trimTopProbe;
+    const topProbeStillAtOrigin = Boolean(
+      topProbe
+      && !topProbe.isDisposed
+      && typeof topProbe.line === "number"
+      && Number.isFinite(topProbe.line)
+      && topProbe.line === 0,
+    );
+    if (topProbeStillAtOrigin) {
+      delta = 0;
+    } else {
+      // Sentinel was trimmed off the top: at least its prior line + 1 fell away.
+      delta = store.trimSentinelLine + 1;
+    }
     store.trimSentinel = undefined;
     store.trimSentinelLine = null;
+    if (topProbe && (topProbe.isDisposed || !topProbeStillAtOrigin)) {
+      store.trimTopProbe = undefined;
+      if (topProbe && !topProbe.isDisposed) {
+        enqueueOrphanedMarker(store, topProbe);
+      }
+    }
   }
   if (delta <= 0) return;
   for (const entry of store.ledger) {
@@ -877,10 +939,16 @@ const applyCircularTrimDeltaFromSentinel = (store: TimestampStore): void => {
 
 const clearTrimSentinel = (store: TimestampStore): void => {
   const sentinel = store.trimSentinel;
+  const topProbe = store.trimTopProbe;
   store.trimSentinel = undefined;
   store.trimSentinelLine = null;
-  if (!sentinel || sentinel.isDisposed) return;
-  enqueueOrphanedMarker(store, sentinel);
+  store.trimTopProbe = undefined;
+  if (sentinel && !sentinel.isDisposed) {
+    enqueueOrphanedMarker(store, sentinel);
+  }
+  if (topProbe && !topProbe.isDisposed) {
+    enqueueOrphanedMarker(store, topProbe);
+  }
 };
 
 /**
@@ -898,13 +966,33 @@ const isTrimSentinelStale = (store: TimestampStore): boolean => {
   return sentinel.line !== store.trimSentinelLine;
 };
 
+const tryRegisterMarkerAtAbsoluteLine = (
+  term: XTerm,
+  absoluteLine: number,
+): TimestampMarker | undefined => {
+  const registerMarker = (
+    term as XTerm & { registerMarker?: (offset: number) => TimestampMarker | undefined }
+  ).registerMarker;
+  if (typeof registerMarker !== "function") return undefined;
+  const cursorLine = getAbsoluteCursorLine(term);
+  let marker: TimestampMarker | undefined;
+  try {
+    marker = registerMarker.call(term, absoluteLine - cursorLine);
+  } catch {
+    marker = undefined;
+  }
+  if (!marker || marker.isDisposed) return undefined;
+  return marker;
+};
+
 /**
- * Keep one cursor-pinned marker while saturated so the next circular recycle
- * remains observable after ledger anchors are retired.
+ * Keep one cursor-pinned marker and one line-0 probe while saturated so the
+ * next circular recycle remains observable after ledger anchors are retired,
+ * and local CSI line edits can be distinguished from top-of-buffer trims.
  */
 const maintainTrimSentinel = (term: XTerm, store: TimestampStore): void => {
   if (!isTerminalScrollbackSaturated(term)) {
-    if (store.trimSentinel || store.trimSentinelLine !== null) {
+    if (store.trimSentinel || store.trimSentinelLine !== null || store.trimTopProbe) {
       clearTrimSentinel(store);
       drainOrphanedMarkers(store);
     }
@@ -918,21 +1006,21 @@ const maintainTrimSentinel = (term: XTerm, store: TimestampStore): void => {
     if (store.orphanedMarkers.length > 0) drainOrphanedMarkers(store);
     return;
   }
-  let marker: TimestampMarker | undefined;
-  try {
-    marker = registerMarker.call(term, 0);
-  } catch {
-    marker = undefined;
-  }
+  const marker = tryRegisterMarkerAtAbsoluteLine(term, getAbsoluteCursorLine(term));
+  const topProbe = tryRegisterMarkerAtAbsoluteLine(term, 0);
   // Retire the previous sentinel immediately so re-pins do not accumulate.
   if (store.orphanedMarkers.length > 0) {
     drainOrphanedMarkers(store);
   }
-  if (!marker || marker.isDisposed) return;
-  store.trimSentinel = marker;
-  store.trimSentinelLine = typeof marker.line === "number" && Number.isFinite(marker.line)
-    ? marker.line
-    : null;
+  if (marker) {
+    store.trimSentinel = marker;
+    store.trimSentinelLine = typeof marker.line === "number" && Number.isFinite(marker.line)
+      ? marker.line
+      : null;
+  }
+  if (topProbe) {
+    store.trimTopProbe = topProbe;
+  }
 };
 
 /**
@@ -1083,8 +1171,39 @@ const resolveLastPaintBufferLine = (
 export const getTerminalLineTimestampLedgerCount = (term: XTerm): number =>
   getTimestampStore(term).ledger.length;
 
-/** @deprecated No-op; paint reads the ledger directly. */
-export const materializeTimestampLedgerToMarkers = (_term: XTerm): number => 0;
+/**
+ * Re-attach sparse xterm markers for bare ledger stamps so an upcoming column
+ * reflow can move them. Used by the term.resize hook before cols change;
+ * saturated steady-state still releases markers again after the next write.
+ */
+export const materializeTimestampLedgerToMarkers = (term: XTerm): number => {
+  const store = getTimestampStore(term);
+  if (store.ledger.length === 0) return 0;
+  const registerMarker = (
+    term as XTerm & { registerMarker?: (offset: number) => TimestampMarker | undefined }
+  ).registerMarker;
+  if (typeof registerMarker !== "function") return 0;
+
+  const cursorLine = getAbsoluteCursorLine(term);
+  let attached = 0;
+  for (const entry of store.ledger) {
+    if (entry.marker && !entry.marker.isDisposed) continue;
+    if (entry.line < 0) continue;
+    let marker: TimestampMarker | undefined;
+    try {
+      marker = registerMarker.call(term, entry.line - cursorLine);
+    } catch {
+      marker = undefined;
+    }
+    if (!marker || marker.isDisposed) continue;
+    entry.marker = marker;
+    if (typeof marker.line === "number" && Number.isFinite(marker.line)) {
+      entry.line = Math.max(0, marker.line);
+    }
+    attached += 1;
+  }
+  return attached;
+};
 
 const internTerminalLineTimestampLabel = (
   store: TimestampStore,
